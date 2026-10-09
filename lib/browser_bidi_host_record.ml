@@ -369,6 +369,8 @@ let lock_held base_path =
          let* () = closed descriptor in
          held))
 
+let lock_is_held ~base_path = lock_held base_path
+
 let observe ~base_path =
   match Result.map_error read_failure_detail (read_entry base_path) with
   (* A record with its ending is final regardless of the lock. A missing

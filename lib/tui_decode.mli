@@ -2153,6 +2153,14 @@ type file_change_snapshot = {
   fcs_malformed : int;
 }
 
+type repository_activity_snapshot = {
+  ras_repo_id : string;
+  ras_window_hours : float;
+  ras_changes : file_change list;
+  ras_incomplete : int;
+  ras_unattributed : int;
+}
+
 type file_activity_snapshot = {
   fas_codebase : string;
   fas_repo_id : string;
@@ -2190,6 +2198,12 @@ val decode_file_change_snapshot :
 (** Decode one Keeper-stamped snapshot. Every inner change must carry the same
     Keeper identity; a mixed response is rejected rather than indexed under
     the top-level name. *)
+
+val decode_repository_activity_snapshot :
+  Yojson.Safe.t -> (repository_activity_snapshot, string) result
+(** One fleet read filtered by repository address. [ras_incomplete] counts
+    unreadable rows addressed to this repository; [ras_unattributed] counts
+    fleet rows whose address is unavailable, not presumed repository writes. *)
 
 val decode_file_activity_snapshot :
   Yojson.Safe.t -> (file_activity_snapshot, string) result

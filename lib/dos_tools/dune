@@ -1,0 +1,7 @@
+(include_subdirs no)
+(library
+ (name dos_machine_tools)
+ (public_name masc.dos_tools)
+ (libraries masc.machine_controller_contract masc.dos_lane masc.masc_core masc.tool_types masc.time_codec
+  masc.machine_checkpoint masc.masc_compression fs_compat masc_log
+  llm_provider eio yojson base64 unix))

@@ -1481,9 +1481,9 @@ let () =
         ] )
     ; ( "model"
       , [ test_case "Opus model roundtrip" `Quick (fun () ->
-            let cp = make_checkpoint ~model:"claude-opus-5" () in
+            let cp = make_checkpoint ~model:"claude-opus-5-5" () in
             let cp2 = Result.get_ok (Checkpoint.of_json (Checkpoint.to_json cp)) in
-            check string "model" "claude-opus-5" cp2.model)
+            check string "model" "claude-opus-5-5" cp2.model)
         ; test_case "Custom model roundtrip" `Quick (fun () ->
             let cp = make_checkpoint ~model:"my-model-v1" () in
             let cp2 = Result.get_ok (Checkpoint.of_json (Checkpoint.to_json cp)) in
@@ -1611,7 +1611,7 @@ let () =
             let cp =
               make_checkpoint
                 ~agent_name:"resume-agent"
-                ~model:"claude-opus-5"
+                ~model:"claude-opus-5-5"
                 ~system_prompt:(Some "Be precise.")
                 ~turn_count:3
                 ~context:ctx

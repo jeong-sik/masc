@@ -14,7 +14,6 @@ General availability, limited rollout and preview are also distinct.
 ## Seed evidence checked on 2026-09-10
 
 - Claude Sonnet 5: 2026-06-30, [official announcement](https://www.anthropic.com/news/claude-sonnet-5), which names `claude-sonnet-5` and availability that day.
-- Claude Opus 5: 2026-07-24, [official announcement](https://www.anthropic.com/news/claude-opus-5).
 - GPT-5.6 Sol, Terra and Luna: general availability 2026-07-09, [official launch](https://openai.com/index/gpt-5-6/). This is distinct from the earlier limited preview.
 - GPT-6 Astra: initial limited rollout 2026-09-03, [official release notes](https://openai.com/products/release-notes/). A release does not establish access for the current account.
 - GLM-5.3: unknown in this seed. The official blog could not be read reliably during this check; third-party dates are not substituted for primary evidence.

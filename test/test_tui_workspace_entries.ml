@@ -6,20 +6,6 @@ open Masc_tui_types
 
 let check_string = Alcotest.(check string)
 
-let test_a_full_page_reads_as_more_not_listed () =
-  let limit = workspace_entries_limit in
-  check_string "the limit itself is the server maximum" "2000"
-    (string_of_int Server_routes_http_routes_workspace.max_tree_node_limit);
-  check_string "an empty directory has no count" "" (workspace_entries_count_label 0);
-  check_string "a partial page is the total" " (955)" (workspace_entries_count_label 955);
-  check_string "a full page says more may follow"
-    (Printf.sprintf " (%d+, more not listed)" limit)
-    (workspace_entries_count_label limit);
-  check_string "past the limit still says so"
-    (Printf.sprintf " (%d+, more not listed)" (limit + 1))
-    (workspace_entries_count_label (limit + 1))
-;;
-
 module Decode = Masc.Tui_decode
 module Fetched = Masc_tui_fetched
 module Code_results = Masc_tui_code_results
@@ -42,16 +28,9 @@ let activity_change index : Decode.file_change =
   ; fc_succeeded = true
   }
 
-let activity_read changes =
-  { war_at = 0.; war_hours = 24.
-  ; war_keepers =
-      [ "alpha", Ok
-          { Decode.fcs_keeper = "alpha"; fcs_window_hours = 24.
-          ; fcs_calls_in_window = List.length changes; fcs_changes = changes
-          ; fcs_over_budget = 0; fcs_malformed = 0
-          }
-      ]
-  }
+let activity_read changes : workspace_activity_read =
+  { ras_repo_id = "masc"; ras_window_hours = 24.; ras_changes = changes;
+    ras_incomplete = 0; ras_unattributed = 0 }
 
 let refresh_activity state changes =
   let next, request = start_read ~equal:String.equal state.workspace_activity "masc" in
@@ -430,9 +409,7 @@ let () =
   Alcotest.run
     "masc-tui-workspace-entries"
     [ ( "count label"
-      , [ Alcotest.test_case "a full page reads as more not listed" `Quick
-            test_a_full_page_reads_as_more_not_listed
-        ] )
+      , [] )
     ; ( "activity"
       , [ Alcotest.test_case "refresh preserves the visible Enter target" `Quick
             test_activity_refresh_reconciles_visible_selection

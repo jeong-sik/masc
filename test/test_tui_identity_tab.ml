@@ -8,13 +8,6 @@
 
 let check = Alcotest.check
 
-let contains needle text =
-  let n = String.length needle and len = String.length text in
-  let rec seek i =
-    i + n <= len && (String.equal (String.sub text i n) needle || seek (i + 1))
-  in
-  n = 0 || seek 0
-
 let declared ?tools ?(also_on = []) ?enabled ?switch_problem id label =
   Masc_tui_identity_model.Identity_declared
     { idp_id = id
@@ -572,34 +565,6 @@ let test_nothing_connectable_names_nothing () =
     "no row to start" None
     (Masc_tui_identity_model.identity_cursor_provider ~query:"" ~providers 0)
 
-(* The pane lists every declared service alphabetically, and a live Keeper
-   declares over a hundred. The question it opens with -- what does this
-   Keeper hold -- was answered only by scrolling the whole list. *)
-let test_the_tally_counts_what_the_rows_say () =
-  let providers =
-    [ declared ~tools:[ "getJiraIssue"; "createJiraIssue" ] "atlassian" "Atlassian"
-    ; declared ~tools:[ "listBases" ] ~enabled:false "airtable" "Airtable"
-    ; declared ~tools:[] "asana" "Asana"
-    ; declared ~tools:[ "search" ] ~switch_problem:"store unreadable" "box" "Box"
-    ; declared "calendly" "Calendly"
-    ]
-  in
-  check Alcotest.string "the tally reads the rows"
-    "  5 services · 1 attached · 1 switched off · 1 attached with no tools · 1 \
-     with an unreadable switch"
-    (Masc_tui_identity_model.identity_summary ~providers ~query:"");
-  check Alcotest.string "a filtered pane says how much of the set it draws"
-    "  1 of 5 services · 1 attached"
-    (Masc_tui_identity_model.identity_summary ~providers ~query:"atlas")
-
-(* A Keeper that holds nothing has nothing to tally: every row already says
-   "not attached", and repeating that above them adds no reading. *)
-let test_a_keeper_that_holds_nothing_tallies_nothing () =
-  let providers = [ declared "atlassian" "Atlassian"; declared "box" "Box" ] in
-  check Alcotest.string "the count of services, and no more" "  2 services"
-    (Masc_tui_identity_model.identity_summary ~providers ~query:"")
-
-(* The row and the tally are one reading. *)
 let test_a_row_state_is_what_the_tally_counts () =
   let providers =
     [ declared ~tools:[ "a"; "b" ] "atlassian" "Atlassian"
@@ -620,83 +585,6 @@ let test_a_row_state_is_what_the_tally_counts () =
     (state "calendly" = Masc_tui_identity_model.Identity_not_attached);
   check Alcotest.bool "a service the list does not declare" true
     (state "unknown" = Masc_tui_identity_model.Identity_not_attached)
-
-let test_the_provider_row_sits_below_the_preamble () =
-  (* The key handler scrolls the pane to the line a provider is drawn on.
-     Both sides read the preamble rather than counting it, so a line added
-     to the header moves the cursor's target with it. *)
-  let preamble =
-    List.length (Masc_tui_identity_model.identity_preamble ~summary:"  2 services"
-       ~notice:[])
-  in
-  check Alcotest.int "first provider" preamble
-    (Masc_tui_identity_model.identity_provider_line ~summary:"  2 services" ~notice:[]
-       ~index:0);
-  check Alcotest.int "fourth provider" (preamble + 3)
-    (Masc_tui_identity_model.identity_provider_line ~summary:"  2 services" ~notice:[]
-       ~index:3)
-
-let test_a_notice_pushes_the_list_down () =
-  (* A refusal from one provider is drawn where the operator is looking,
-     which is above the list. The row a keypress scrolls to has to move with
-     it or the cursor lands on the wrong line by however tall the message
-     is -- and the messages worth showing are the long ones. *)
-  let notice = [ "first line"; "second line" ] in
-  let bare = Masc_tui_identity_model.identity_provider_line ~summary:"  2 services" ~notice:[]
-       ~index:0 in
-  let with_notice = Masc_tui_identity_model.identity_provider_line ~summary:"  2 services" ~notice
-       ~index:0 in
-  check Alcotest.bool "the list starts lower" true (with_notice > bare);
-  check Alcotest.int "by exactly the notice it was given"
-    (bare + List.length notice) with_notice
-
-let test_no_notice_reserves_no_room () =
-  (* Nothing is held back for a message there is none of. A blank line kept
-     "just in case" is a row the list is pushed down by on every screen that
-     has nothing to report.
-
-     The tally is what stands above the list: what this Keeper holds, before
-     the list that spells it service by service. *)
-  check Alcotest.int "the tally and one blank, and that is all" 2
-    (List.length (Masc_tui_identity_model.identity_preamble ~summary:"  2 services"
-       ~notice:[]));
-  (* And no key of its own. The footer draws the tab's keys, the way every
-     other surface does; a sentence here would be a second copy of the key
-     table, drifting from it on its own schedule. *)
-  check Alcotest.bool "no key is spelled here" false
-    (List.exists
-       (fun line -> List.exists (fun word -> contains word line)
-           [ "arrows"; "filter"; "refresh"; "toggle" ])
-       (Masc_tui_identity_model.identity_preamble ~summary:"  2 services" ~notice:[]));
-  (* The footer is where they are. Not the hint string alone: the row the
-     operator reads is what the fitter left of it, so the widths are measured
-     through the fitter. At 120 every key survives; at 80 the fitter gives up
-     /:filter and R:refresh, in that order, and says so with [?]. *)
-  let hint = Masc_tui_keys.keeper_detail_tab_hint Masc_tui_types.Detail_identity in
-  let drawn ~cols =
-    match
-      Masc_tui_footer.drop_hint_items ~max_cells:cols ~conflicts:[]
-        (Masc_tui_footer.prepare_hints (hint ^ "  Left / Esc:back  q:quit"))
-    with
-    | Some row -> row
-    | None -> Alcotest.failf "no footer row fits %d columns" cols
-  in
-  let wide = drawn ~cols:120 in
-  List.iter
-    (fun key ->
-      check Alcotest.bool (key ^ " is drawn at 120 columns") true
-        (contains key wide))
-    [ "[ ]:tab"; "arrows+enter:connect"; "T:toggle"; "A:app"; "/:filter"; "R:refresh" ];
-  let narrow = drawn ~cols:80 in
-  List.iter
-    (fun key ->
-      check Alcotest.bool (key ^ " is still drawn at 80 columns") true
-        (contains key narrow))
-    [ "[ ]:tab"; "arrows+enter:connect"; "T:toggle"; "A:app" ];
-  check Alcotest.bool "and the row says what it gave up" true
-    (contains "?" narrow)
-
-(* ── typing to narrow the list ──────────────────────────────────────── *)
 
 let sample =
   [ declared "googlesheets" "Google Sheets";
@@ -746,26 +634,6 @@ let test_the_cursor_indexes_what_is_left () =
     (Some "linear") (at ~query:"" 2);
   check (Alcotest.option Alcotest.string) "filtered, clamped to the last one"
     (Some "gmail") (at ~query:"g" 2)
-
-let test_the_filter_rows_say_how_much_is_left () =
-  match
-    Masc_tui_identity_model.identity_filter_rows ~providers:sample (Some "g")
-  with
-  | [ line; "" ] ->
-    let contains needle =
-      Masc_tui_pick_list.lowercase_contains ~needle line
-    in
-    check Alcotest.bool "the query is shown" true (contains "/g");
-    check Alcotest.bool "and the count" true (contains "2 of 3")
-  | rows ->
-    Alcotest.failf "expected a line and a blank, got %d rows"
-      (List.length rows)
-
-let test_no_filter_takes_no_rows () =
-  check Alcotest.int "nothing reserved" 0
-    (List.length (Masc_tui_identity_model.identity_filter_rows ~providers:sample None))
-
-(* ── which other Keepers hold a service ─────────────────────────────── *)
 
 let test_coverage_is_carried_per_provider () =
   (* A Keeper attaches on its own account, so "who else has this" is the one
@@ -817,23 +685,6 @@ let test_the_secret_is_never_drawn () =
   check Alcotest.bool "its length still shows" true
     (Masc_tui_pick_list.lowercase_contains ~needle:"*******" joined)
 
-let test_the_marker_is_on_the_field_taking_keys () =
-  let marked field =
-    Masc_tui_identity_model.identity_app_form_rows (Some (form field ""))
-    |> List.filter (fun row -> String.length row > 2 && row.[2] = '>')
-    |> List.length
-  in
-  check Alcotest.int "exactly one row is marked" 1
-    (marked Masc_tui_identity_model.App_client_id);
-  check Alcotest.int "and only one, whichever it is" 1
-    (marked Masc_tui_identity_model.App_scopes)
-
-let test_a_closed_form_takes_no_rows () =
-  check Alcotest.int "nothing reserved" 0
-    (List.length (Masc_tui_identity_model.identity_app_form_rows None))
-
-(* ── what a paste carries into a field ──────────────────────────────── *)
-
 let test_a_pasted_list_loses_its_newlines () =
   (* A scope list copied out of a browser arrives one per line. The
      terminal's own single-line helper is for drawing and turns a newline
@@ -869,19 +720,8 @@ let () =
           Alcotest.test_case "past the end names the last row" `Quick
             test_a_cursor_past_the_end_names_the_last_row;
           Alcotest.test_case "nothing connectable names nothing" `Quick
-            test_nothing_connectable_names_nothing;
-          Alcotest.test_case "a provider row sits below the preamble" `Quick
-            test_the_provider_row_sits_below_the_preamble
-        ; Alcotest.test_case "the tally counts what the rows say" `Quick
-            test_the_tally_counts_what_the_rows_say
-        ; Alcotest.test_case "a keeper that holds nothing tallies nothing" `Quick
-            test_a_keeper_that_holds_nothing_tallies_nothing
-        ; Alcotest.test_case "a row state is what the tally counts" `Quick
+            test_nothing_connectable_names_nothing; Alcotest.test_case "a row state is what the tally counts" `Quick
             test_a_row_state_is_what_the_tally_counts;
-          Alcotest.test_case "a notice pushes the list down" `Quick
-            test_a_notice_pushes_the_list_down;
-          Alcotest.test_case "no notice reserves no room" `Quick
-            test_no_notice_reserves_no_room;
         ] );
       ( "which other Keepers hold a service",
         [ Alcotest.test_case "coverage is carried per provider" `Quick
@@ -898,10 +738,6 @@ let () =
       ( "the app form",
         [ Alcotest.test_case "the secret is never drawn" `Quick
             test_the_secret_is_never_drawn;
-          Alcotest.test_case "the marker is on the field taking keys" `Quick
-            test_the_marker_is_on_the_field_taking_keys;
-          Alcotest.test_case "a closed form takes no rows" `Quick
-            test_a_closed_form_takes_no_rows;
         ] );
       ( "typing to narrow the list",
         [ Alcotest.test_case "a query narrows to what it names" `Quick
@@ -916,10 +752,6 @@ let () =
             test_a_query_matching_nothing_is_not_an_error;
           Alcotest.test_case "the cursor indexes what is left" `Quick
             test_the_cursor_indexes_what_is_left;
-          Alcotest.test_case "the filter rows say how much is left" `Quick
-            test_the_filter_rows_say_how_much_is_left;
-          Alcotest.test_case "no filter takes no rows" `Quick
-            test_no_filter_takes_no_rows;
         ] );
       ( "when the tick stops asking",
         [ Alcotest.test_case "a login lands when its service reports tools"

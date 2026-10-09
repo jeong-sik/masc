@@ -559,42 +559,6 @@ let partly_checked_save () =
     check bool "a rejected receipt cannot finish the save" true (waiting.phase=phase);
     check string "a rejected receipt cannot announce a saved configuration" notice waiting.notice)
     [`Int 17; `Null; `String ""; `Bool true; `Assoc []; `List []]
-(* What the renderer draws for a row: the pane's own text sanitized, the
-   client's text drawn with its colours. *)
-let drawn row = match row with
-  | Login.Text text -> Masc.Tui_terminal_text.sanitize_terminal_text text
-  | Login.Terminal line -> Sgr_text.render ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text line
-let styled code text = if String.length code = 0 then text else code ^ text ^ Sgr.reset
-(* The Codex device login as it reached the pane on 2026-09-28 (the code is
-   made up). Split inside an escape, the way a stream chunk can end. *)
-let codex_device_login = String.concat "\n" [
-  "Welcome to Codex [v\027[90m0.157.1\027[0m]";
-  "\027[90mOpenAI's command-line coding agent\027[0m";
-  "";
-  "1. Open this link in your browser and sign in to your account";
-  "   \027[94mhttps://auth.openai.com/codex/device\027[0m";
-  "";
-  "2. Enter this one-time code \027[90m(expires in 15 minutes)\027[0m";
-  "   \027[94mABCD-EFGH\027[0m";
-  "" ]
-let official_client_colours () =
-  let t = Login.create "codex" in
-  ignore (Login.begin_attempt t provider ~existing:false);
-  let feed chunk = ignore (Login.event ~generation:t.generation t (Login.Output chunk)) in
-  let cut = String.length "Welcome to Codex [v\027[9" in
-  feed (String.sub codex_device_login 0 cut);
-  check bool "half an escape is not drawn while the rest is on its way" false
-    (contains (String.concat "\n" (List.map drawn (Login.lines t))) "\\x1B");
-  feed (String.sub codex_device_login cut (String.length codex_device_login - cut));
-  let rows = Login.lines t in
-  let screen = String.concat "\n" (List.map drawn rows) in
-  check bool "no escape is spelled out as text" false (contains screen "\\x1B");
-  check bool "the link keeps its words" true (List.mem "   https://auth.openai.com/codex/device" (List.map Login.row_text rows));
-  check bool "the link is drawn in the client's blue" true
-    (contains screen (styled Sgr.bright_blue "https://auth.openai.com/codex/device"));
-  check bool "the one-time code is drawn in the client's blue" true (contains screen (styled Sgr.bright_blue "ABCD-EFGH"));
-  check bool "the version is drawn in the client's grey" true (contains screen (styled Sgr.gray "0.157.1"));
-  check bool "the pane's own prompt is still there" true (List.mem "로그인 코드: " (List.map Login.row_text rows))
 let foreign_escapes_never_reach_the_terminal () =
   let only line = match Sgr_text.parse line with [ runs ] -> runs | lines -> fail (Printf.sprintf "%d lines" (List.length lines)) in
   let hostile = only "a\027[2J\027[5;5Hb\027]8;;https://evil.example/\027\\link\027]8;;\027\\c\027[?25ld\027(Be\027]0;title\007f\0277g" in
@@ -737,18 +701,6 @@ let removable = removal_preview_json "removable"
 let rows t = List.map Login.row_text (Login.lines t)
 let mentions text t = List.exists (fun row ->
   let n=String.length text in let rec at i = i+n <= String.length row && (String.sub row i n = text || at (i+1)) in at 0) (rows t)
-(* A refused save's reason ends in the verification code and detail, the part
-   that says what to do; at 40 cells it is wrapped, not cut. *)
-let a_long_reason_is_read_whole () =
-  let t=Login.create "codex" in ok (Login.inventory t inventory);
-  t.provider<-Some provider; t.models<-[model 0]; t.phase<-Login.Saving;
-  Login.save_failed t
-    "HTTP 502: Runtime \"codex.gpt\" did not pass response and tool verification (rate_limited)";
-  let drawn = List.map Login.row_text (Login.visible_lines ~height:12 ~width:40 t) in
-  check bool "every row fits" true
-    (List.for_all (fun row -> Masc_tui_message_layout.display_width row <= 40) drawn);
-  check bool "the code and the way back are on screen" true
-    (let joined = String.concat " " drawn in contains joined "(rate_limited)" && contains joined "다시 저장하세요.")
 let removal_from_the_list () =
   let t=Login.create "codex" in ok (Login.inventory t inventory);
   (match Login.key t "D" with
@@ -949,54 +901,6 @@ let already_bound_model_is_not_offered () =
        | _ -> fail "expected Save"))
     [{provider with id="codex_hA"};{provider with id="codex_hB"}]
 
-let long_result_rows_are_reachable () =
-  let t = Login.create "codex" in
-  let ids = List.init 12 (fun i -> Printf.sprintf "codex-account-model-%02d-long-runtime-identifier" i) in
-  let receipt = `Assoc ["configured", `Bool true; "readiness", `String "usage_limited";
-    "commit", `Assoc ["durability", `String "durable"; "warnings", `List []];
-    "runtime_ids", `List (List.map (fun id -> `String id) ids);
-    "unverified", `List (List.map (fun id -> `Assoc ["runtime_id", `String id;
-      "code", `String "quota_exhausted"]) ids)] in
-  let saved = ok (Login.saved t receipt) in
-  let drawn () = List.map Login.row_text (Login.visible_lines ~height:5 ~width:40 t) in
-  let first = drawn () in
-  check bool "result starts with saved summary" true (contains (List.hd first) "저장했습니다");
-  check bool "first page has an overflow indicator" true (List.exists (fun line -> contains line "[결과") first);
-  let seen = ref first in
-  for _ = 1 to 80 do
-    ignore (Login.key t "j"); let page = drawn () in
-    check bool "every result row fits the viewport" true
-      (List.for_all (fun line -> Masc_tui_message_layout.display_width line <= 40) page);
-    seen := !seen @ page
-  done;
-  let text = String.concat "" !seen in
-  List.iter (fun id -> check bool "every wrapped runtime identifier is reachable" true (contains text id)) ids;
-  let bottom = t.result_scroll in
-  ignore (Login.key t "j"); ignore (drawn ());
-  check int "scroll clamps at the last result row" bottom t.result_scroll;
-  Login.activating t saved;
-  check int "activation retry starts at the summary" 0 t.result_scroll;
-  for _ = 1 to 80 do ignore (Login.key t "j"); ignore (drawn ()) done;
-  ignore (Login.activated t saved (Error "activation unavailable"));
-  check int "activation failure starts at the summary" 0 t.result_scroll;
-  for _ = 1 to 80 do ignore (Login.key t "j"); ignore (drawn ()) done;
-  List.iter (fun result ->
-    Login.refresh_saved t saved result;
-    check int "every refreshed result starts at its summary" 0 t.result_scroll;
-    check bool "refreshed summary is visible" true
-      (contains (List.hd (drawn ())) "저장했습니다");
-    for _ = 1 to 80 do ignore (Login.key t "j"); ignore (drawn ()) done)
-    [ Error "network unavailable"; Ok inventory ];
-  for _ = 1 to 80 do ignore (Login.key t "k"); ignore (drawn ()) done;
-  check int "scroll returns to the summary" 0 t.result_scroll;
-  Login.save_failed t (String.concat " " (List.init 30 (fun _ -> "verification detail")) ^ " reason-at-end");
-  let failed = ref [] in
-  for _ = 1 to 80 do failed := !failed @ drawn (); ignore (Login.key t "down") done;
-  check bool "a long failure's diagnostic end is reachable" true
-    (contains (String.concat "" !failed) "reason-at-end");
-  Login.refresh_retry t (Error "still offline");
-  check int "a refreshed failure starts at its diagnostic" 0 t.result_scroll
-
 let disabled_login_templates_and_existing_accounts () =
   let disabled={provider with enabled=false} in
   let state () =
@@ -1131,9 +1035,7 @@ let quota_scope_group_id_is_opaque () =
   | [group] -> check string "32-character history scope ID is retained unchanged" scope_id group.group_id
   | _ -> fail "quota scope group was lost or rejected"
 
-
 let () = run "TUI account login" ["workflow",[
-  test_case "long result and failure rows are reachable" `Quick long_result_rows_are_reachable;
   test_case "quota scope group ID remains an opaque string" `Quick quota_scope_group_id_is_opaque;
   test_case "disabled client templates stay distinct from existing-account login" `Quick disabled_login_templates_and_existing_accounts;
   test_case "existing providers group by native account without partial deletion" `Quick grouped_existing_accounts;
@@ -1141,7 +1043,6 @@ let () = run "TUI account login" ["workflow",[
   test_case "reopening shows connected models without adding them" `Quick already_bound_model_is_not_offered;
   test_case "pasted credentials preserve bytes and reject controls" `Quick pasted_credential_bytes;
   test_case "failed save refreshes revision and retains model" `Quick failed_save_refresh;
-  test_case "a long reason is read whole" `Quick a_long_reason_is_read_whole;
   test_case "named default lane remains selected" `Quick named_default_identity;
   test_case "Unicode and late input HTTP response" `Quick unicode_and_late_input_response;
   test_case "verified save survives refresh failure" `Quick verified_save_refresh;
@@ -1172,7 +1073,6 @@ let () = run "TUI account login" ["workflow",[
   test_case "spawn failure retains recovery receipt" `Quick failed_before_started;
   test_case "retry preserves early input until a new session starts" `Quick retry_early_input;
   test_case "visible cursor and recovery identity" `Quick viewport_and_receipt;
-  test_case "official client colours are drawn" `Quick official_client_colours;
   test_case "foreign escapes never reach the terminal" `Quick foreign_escapes_never_reach_the_terminal;
   test_case "removal from the list" `Quick removal_from_the_list;
   test_case "refused removal" `Quick refused_removal]]

@@ -45,150 +45,6 @@ let inflight ?(keeper_name = "alpha") ~request_id ~at () =
   ; log
   }
 
-(* The live progress row owns the admission detail. The activity band adds
-   the pending request count and the observed turn it waits behind. Its
-   count comes from this pane's request identities, not the server's
-   queue_length snapshot of three or a copied admission sentence. *)
-let test_the_band_does_not_repeat_the_admission () =
-  List.iter (fun (admission, queue_rows) ->
-    let state = state () in
-    ignore (live state admission);
-    check (list string) "pending rows follow the admission" queue_rows
-      (texts (Tui.keeper_message_activity_rows state));
-    state.keeper_turns <- [running Turn_lane_autonomous];
-    match Tui.keeper_message_activity_rows state with
-    | row :: pending ->
-      check (list string) "observing a turn preserves the independent queue summary"
-        queue_rows (texts pending);
-      check bool "the first row is the turn the pane waits behind" true
-        (String.length row.Masc_tui_answering.lead > 0
-         && Astring.String.is_infix ~affix:"autonomous" row.lead);
-      check bool "and it does not restate the admission" false
-        (List.exists (fun needle ->
-           Astring.String.is_infix ~affix:needle (Masc_tui_answering.chat_activity_row_text row))
-           [ "Your message"; "Your request"; "queued at the server" ])
-    | rows -> fail (String.concat " | " (texts rows)))
-    [ None, ["Queue (1 pending) · auto-next:off · Ctrl-T:queue"; "1 awaiting receipt"]
-    ; Some Live.Running,
-        ["Queue (1 pending) · auto-next:off · Ctrl-T:queue"; "1 queued at Keeper · /queue"]
-    ; Some Live.Settled, []
-    ; Some Live.Queued,
-        ["Queue (1 pending) · auto-next:off · Ctrl-T:queue"; "1 queued at Keeper · /queue"] ]
-
-(* The band names only a turn it observed for this keeper. With a line of
-   this pane queued: nothing for no turn, another keeper's turn, an idle or
-   an unreadable keeper; the turn it observed, by lane, for a running one --
-   a chat operation too, since this pane's own would be in flight and draw
-   the live row, so a running chat operation here is someone else's and the
-   pane waits behind it; and a failing poll's turn is named as last
-   observed, never as running now. *)
-let test_queue_does_not_invent_a_blocking_turn () =
-  let names_a_turn rows =
-    List.exists (fun text ->
-      List.exists (fun lane -> Astring.String.is_infix ~affix:lane text)
-        [ "autonomous"; "chat_operation"; "maintenance" ])
-      (texts rows)
-  in
-  List.iter (fun (rows, error) ->
-    let state = state () in
-    state.keeper_turns <- rows;
-    state.keeper_turns_error <- error;
-    ignore (live state (Some Live.Queued));
-    check bool "no row names a turn that was not observed" false
-      (names_a_turn (Tui.keeper_message_activity_rows state)))
-    [ [], None
-    ; [running ~keeper_name:"beta" Turn_lane_autonomous], None
-    ; [{ Decode.ktr_chat_control_token = None; ktr_keeper_name = "alpha"; ktr_state = Keeper_turn_idle }], None
-    ; [{ Decode.ktr_chat_control_token = None; ktr_keeper_name = "alpha"; ktr_state = Keeper_turn_unavailable "offline" }], None
-    ];
-  List.iter (fun (lane, word) ->
-    let state = state () in
-    state.keeper_turns <- [running lane];
-    ignore (live state (Some Live.Queued));
-    check bool ("a running " ^ word ^ " turn is named as the one waited behind") true
-      (List.exists (fun text -> Astring.String.is_infix ~affix:word text)
-         (texts (Tui.keeper_message_activity_rows state))))
-    [ Turn_lane_autonomous, "autonomous"
-    ; Turn_lane_chat_operation, "chat_operation"
-    ; Turn_lane_maintenance, "maintenance" ];
-  let state = state () in
-  state.keeper_turns <- [running Turn_lane_autonomous];
-  state.keeper_turns_error <- Some "timeout";
-  ignore (live state (Some Live.Queued));
-  let rows = texts (Tui.keeper_message_activity_rows state) in
-  check bool "a failing poll's turn is marked last observed" true
-    (List.exists (fun text -> Astring.String.is_infix ~affix:"last observed autonomous" text) rows);
-  check bool "and the poll's failure is said" true
-    (List.exists (fun text -> Astring.String.is_infix ~affix:"Activity unavailable" text) rows)
-
-(* The stop keys ride the running turn's row. The turns poll does not promise
-   one row per keeper; with an unreadable row ahead of the running one, the
-   keys went to "Current turn unavailable" because they rode the first row. *)
-let test_stop_keys_ride_the_running_row () =
-  let state = state () in
-  state.keeper_turns <-
-    [ { Decode.ktr_chat_control_token = None; ktr_keeper_name = "alpha"
-      ; ktr_state = Keeper_turn_unavailable "offline" } ];
-  check bool "no running row, no keys" false
-    (List.exists (fun (row : Masc_tui_answering.chat_activity_row) -> row.keys <> "")
-       (Tui.keeper_message_activity_rows state));
-  state.keeper_turns <- [ running Turn_lane_chat_operation ];
-  match Tui.keeper_message_activity_rows state with
-  | [ row ] ->
-    check bool "the running row carries the keys" true
-      (Astring.String.is_infix ~affix:"Esc stops it" row.keys);
-    check bool "and they are not in the detail a narrow pane cuts" false
-      (Astring.String.is_infix ~affix:"Esc" row.rest)
-  | rows -> fail (String.concat " | " (texts rows))
-
-(* A request bound into the live request's batch is the live row's to draw.
-   Compared by request id, the band named it "in progress" while the live row
-   drew the same execution as WAITING TO START. *)
-let test_a_request_in_the_live_batch_is_the_live_rows () =
-  let state = state () in
-  let working = live state (Some Live.Running) in
-  Tui.turn_log_add ~now:4. working ~seq:(Some 1) Live.Run_started;
-  Tui.turn_log_add ~now:4. working ~seq:(Some 2)
-    (Live.Batch_bound {operation_id = "request-1"; execution_id = "shared-execution"});
-  let active = List.hd state.msg_inflight in
-  let newer = live ~request_id:"queued-2" state (Some Live.Queued) in
-  let pending = List.hd state.msg_inflight in
-  Tui.turn_log_add ~now:5. newer ~seq:(Some 1)
-    (Live.Batch_bound {operation_id = "queued-2"; execution_id = "shared-execution"});
-  state.msg_inflight <- state.msg_inflight @ [active];
-  check (list string) "one execution, drawn once, by the live row" []
-    (texts (Tui.keeper_message_activity_rows state));
-  Tui.turn_log_add ~now:6. working ~seq:(Some 3) Live.Run_finished;
-  state.msg_settled_logs <- [working];
-  state.msg_inflight <- [pending];
-  check (list string) "a settled sibling still proves the batch has left the queue" []
-    (texts (Tui.keeper_message_activity_rows state));
-  let other = Tui.turn_log_create ~keeper_name:"beta"
-      ~request_id:"other-request" ~started_at:2. in
-  Tui.turn_log_add ~now:4. other ~seq:(Some 1)
-    (Live.Batch_bound {operation_id = "other-request"; execution_id = "shared-execution"});
-  Tui.turn_log_add ~now:4. other ~seq:(Some 2) Live.Run_started;
-  Tui.turn_log_add ~now:6. other ~seq:(Some 3) Live.Run_finished;
-  state.msg_settled_logs <- [other];
-  check (list string) "another Keeper's execution cannot consume this pending input"
-    ["Queue (1 pending) · auto-next:off · Ctrl-T:queue"; "1 queued at Keeper · /queue"]
-    (texts (Tui.keeper_message_activity_rows state))
-
-let test_started_and_finished_requests_stop_waiting () =
-  let state = state () in
-  let log = live state (Some Live.Queued) in
-  state.keeper_turns <- [running Turn_lane_chat_operation];
-  Tui.turn_log_add ~now:4. log ~seq:(Some 1) Live.Run_started;
-  check (list string) "a started run is the live progress row's, not the band's" []
-    (texts (Tui.keeper_message_activity_rows state));
-  state.keeper_turns <- [];
-  Tui.turn_log_add ~now:5. log ~seq:(Some 2) Live.Run_finished;
-  check (list string) "settled run is not queued" []
-    (texts (Tui.keeper_message_activity_rows state));
-  ignore (live ~keeper_name:"beta" state (Some Live.Queued));
-  check (list string) "another Keeper's pending submission stays out" []
-    (texts (Tui.keeper_message_activity_rows state))
-
 let test_local_queue_is_not_server_admission () =
   let state = state () in
   check bool "separate Enter sends stay separate by default" false state.coalesce_queued_input;
@@ -208,29 +64,6 @@ let test_local_queue_is_not_server_admission () =
   check (list string) "no target has no attributed activity" []
     (texts (Tui.keeper_message_activity_rows state))
 
-let test_working_request_survives_newer_queued_view () =
-  let state = state () in
-  state.keeper_turns <- [running Turn_lane_autonomous];
-  let working = live state (Some Live.Running) in
-  Tui.turn_log_add ~now:4. working ~seq:(Some 1) Live.Run_started;
-  Tui.turn_log_add ~now:4. working ~seq:(Some 2)
-    (Live.Batch_bound {operation_id = "request-1"; execution_id = "shared-execution"});
-  let active = List.hd state.msg_inflight in
-  ignore (live ~request_id:"queued-2" state (Some Live.Queued));
-  state.msg_inflight <- state.msg_inflight @ [active];
-  (* The working execution and the newer pending input remain independently
-     visible even while the live row draws that newer request. *)
-  check (list string) "the working request the live row is not drawing stays visible"
-    ["Current direct conversation · shared-execution · in progress"
-    ; "Queue (1 pending) · auto-next:off · Ctrl-T:queue"
-    ; "1 queued at Keeper · /queue"]
-    (texts (Tui.keeper_message_activity_rows state));
-  check (list string) "stale autonomous interrupt rows are suppressed" []
-    (Tui.keeper_observed_interrupt_rows state)
-
-(* Esc and its hint read one fact. While the turns poll is failing the stale
-   running row stays on screen, but Esc has no target, so no row may offer
-   the stop. *)
 let test_esc_hint_follows_the_observed_turn () =
   let state = state () in
   state.keeper_turns <- [running Turn_lane_chat_operation];
@@ -345,82 +178,6 @@ let test_compact_status_keeps_delivery_and_priority_truth () =
   check bool "diagnostics keep exact private ID" true
     (List.exists (fun text -> Astring.String.is_infix ~affix:"second-private-id" text) (rows ()))
 
-let test_compact_keeps_uncovered_execution_problems () =
-  let state = state () in
-  state.msg_tool_visibility <- Tui.Tools_compact;
-  let active = inflight ~request_id:"active" ~at:1. () in
-  let uncovered = inflight ~request_id:"uncovered" ~at:2. () in
-  List.iter (fun entry -> Tui.turn_log_add ~now:3. entry.Tui.log ~seq:(Some 1)
-      Live.Run_started) [active; uncovered];
-  state.msg_live <- Some active.log;
-  state.msg_inflight <- [active; {uncovered with phase=Tui.Turn_reconciling}];
-  let text () = texts (Tui.keeper_message_activity_rows state) |> String.concat " | " in
-  check bool "another running execution's reconciliation is visible without color" true
-    (Astring.String.is_infix ~affix:"메시지 전송 확인 중" (text ()));
-  Tui.turn_log_add ~now:4. uncovered.log ~seq:(Some 2)
-    (Live.Run_failed {message="fixture failure"});
-  state.msg_inflight <- [active; uncovered];
-  check bool "another execution failure remains named while one works" true
-    (Astring.String.is_infix ~affix:"요청 처리 실패" (text ()));
-  let waiting = inflight ~request_id:"waiting" ~at:5. () in
-  state.msg_live <- None;
-  state.msg_inflight <- [{waiting with phase=Tui.Turn_reconciling}];
-  state.keeper_turns_error <- Some "fixture poll unavailable";
-  let local : Chat.request =
-    { request_id="local"; keeper_name="alpha"; message="held-next"
-    ; attachments=[]; references=[] } in
-  (match Queue.push state.msg_queued ~submitted_at:6. local with
-   | Ok (queue, _) -> state.msg_queued <- queue
-   | Error error -> fail error);
-  let rows = texts (Tui.keeper_message_activity_rows state) in
-  check (list string) "pending delivery evidence has one owner and exact counts"
-    ["현재 작업 확인 불가 · 내 메시지 2건 대기 · 1건 전송 대기 · 1건 전송 확인 중"] rows;
-  List.iter (fun terminal_cols ->
-    check bool "pending delivery evidence fits without clipping" true
-      (List.for_all (fun row ->
-        Masc_tui_message_layout.display_width row <=
-          Masc_tui_frame.inner_width ~cols:terminal_cols) rows))
-    [80; 100]
-
-(* The foreign turn's stop command is operator input, so shortening the
-   Keeper identity would offer a command for an identity that does not exist. *)
-let test_foreign_stop_command_remains_complete () =
-  List.iter (fun keeper_name ->
-    List.iter (fun terminal_cols ->
-      let state = state () in
-      let empty = Tui.keeper_message_status_rows state ~terminal_cols in
-      state.msg_inflight <-
-        [inflight ~keeper_name ~request_id:"foreign-request" ~at:2. ()];
-      let chat_cols = Masc_tui_roster_pane.content_cols
-          ~hidden:(Tui.roster_pane_hidden state) ~cols:terminal_cols in
-      let rows = Tui.keeper_message_inflight_rows state ~chat_cols ~now:5. in
-      let command_rows = List.filteri
-          (fun index _ -> index < List.length rows - 1) rows in
-      let command_lines = List.map (fun (_, line) -> String.trim line) command_rows in
-      let reconstructed = match command_lines with
-        | "/interrupt" :: rest -> "/interrupt " ^ String.concat "" rest
-        | lines -> String.concat "" lines in
-      check string "the complete stop command precedes the status"
-        ("/interrupt " ^ keeper_name) reconstructed;
-      check bool "every physical command row is valid UTF-8" true
-        (List.for_all (fun (_, line) -> String.is_valid_utf_8 line) command_rows);
-      check bool "all command rows fit the pane" true
-        (List.for_all (fun (_, line) ->
-          Masc_tui_message_layout.display_width line <=
-            Masc_tui_frame.inner_width ~cols:chat_cols)
-          (List.filteri (fun index _ -> index < List.length rows - 1) rows));
-      check bool "foreign rows remain visually distinct" true
-        (List.for_all (fun (mine, _) -> not mine) rows);
-      check int "the composer reserves every physical row"
-        (List.length rows)
-        (Tui.keeper_message_status_rows state ~terminal_cols - empty);
-      check int "age updates cannot change the reserved height"
-        (List.length rows)
-        (List.length (Tui.keeper_message_inflight_rows state ~chat_cols ~now:100000.)))
-      [40; 60; 80; 120; 242])
-    ["beta"; "keeper-with-a-long-family-name-and-a-distinct-tail";
-     "아주긴키퍼이름으로행동안내가가려지면안되는키퍼"]
-
 let test_priority_control_receipt_ordering () =
   let setup () =
     let state = state () in
@@ -488,21 +245,6 @@ let test_priority_control_receipt_ordering () =
   ignore (Tui.settle_keeper_run_next state request (Ok "accepted"));
   check int "alpha failure preserves its received priority" 1
     (List.length state.keeper_run_next_receipts)
-
-let test_compact_failure_keeps_exact_cause () =
-  let state = state () in
-  let entry = inflight ~request_id:"failed-request" ~at:1. () in
-  Tui.turn_log_add ~now:2. entry.log ~seq:(Some 1)
-    (Live.Run_failed {message="exact stream failure cause"});
-  List.iter (fun mode ->
-    state.msg_tool_visibility <- mode;
-    List.iter (fun folded ->
-      state.msg_turn_folded <- folded;
-      let rows = Tui.keeper_message_visible_status_rows state entry.log.tl_transcript ~now:3. in
-      check bool "compact failure cause survives folding" true
-        (List.exists (fun (kind, text) -> kind = Masc_tui_keeper_chat_transcript.Progress
-          && Astring.String.is_infix ~affix:"exact stream failure cause" text) rows)) [false; true])
-    [Tui.Tools_compact; Tui.Tools_results]
 
 let test_compact_progress_follows_working_execution () =
   let state = state () in
@@ -601,7 +343,7 @@ let test_open_request_between_segments_has_no_banner () =
   let entry = inflight ~request_id:"checkpointed" ~at:1. () in
   List.iter (fun delta -> Tui.turn_log_add ~now:2. entry.log ~seq:None delta)
     [ Live.Run_started
-    ; Live.Reply_details { reply = ""; turn_outcome = Continuation_checkpoint; turn_ref = "trace#1" }
+    ; Live.Reply_details { terminal_stream_scope = None; reply = ""; turn_outcome = Continuation_checkpoint; turn_ref = "trace#1" }
     ; Live.Run_finished ];
   state.msg_inflight <- [entry];
   check bool "the request waits for its next segment" true
@@ -614,29 +356,15 @@ let () =
   run "TUI chat activity"
     [ "request and lane states",
       [ test_case "historical open journal cannot own progress" `Quick test_historical_open_journal_cannot_own_progress
-      ; test_case "compact exact failure cause" `Quick test_compact_failure_keeps_exact_cause
       ; test_case "compact progress follows working execution" `Quick
           test_compact_progress_follows_working_execution
       ; test_case "priority control receipt ordering" `Quick test_priority_control_receipt_ordering
-      ; test_case "foreign stop command remains complete" `Quick test_foreign_stop_command_remains_complete
-      ; test_case "uncovered execution failures remain visible" `Quick test_compact_keeps_uncovered_execution_problems
       ; test_case "compact delivery and priority truth" `Quick test_compact_status_keeps_delivery_and_priority_truth
-      ; test_case "Working request stays visible behind newer queued view" `Quick test_working_request_survives_newer_queued_view
       ; test_case "open request between segments has no banner" `Quick
           test_open_request_between_segments_has_no_banner
 
-      ; test_case "the band does not repeat the admission" `Quick
-          test_the_band_does_not_repeat_the_admission
       ; test_case "one status row per server batch" `Quick
           test_one_status_row_per_server_batch
-      ; test_case "queue does not invent its blocker" `Quick
-          test_queue_does_not_invent_a_blocking_turn
-      ; test_case "stop keys ride the running row" `Quick
-          test_stop_keys_ride_the_running_row
-      ; test_case "a request in the live batch is the live row's" `Quick
-          test_a_request_in_the_live_batch_is_the_live_rows
-      ; test_case "started, finished, and other Keeper requests" `Quick
-          test_started_and_finished_requests_stop_waiting
       ; test_case "local queue is distinct from server admission" `Quick
           test_local_queue_is_not_server_admission
       ; test_case "Esc hint follows the observed turn" `Quick

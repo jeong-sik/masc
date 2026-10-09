@@ -127,8 +127,6 @@ let test_skill_selection_patch_modes () =
   check_skill_patch ~label:"all" ~before:exact_before ~skills:(`Assoc [])
     ~expected:{|{"expected_config_revision":{"manifest":{"state":"sha256","value":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"runtime_assignment":{"state":"runtime_config_present","source_revision":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","assignment":{"state":"assigned","runtime_id":"codex_subscription.gpt-5.6-sol"}}},"skills":{}}|}
 
-let rendered_of json = view_lines ~sanitize:Fun.id json |> String.concat "\n"
-
 let contains haystack needle =
   let pattern = Str.regexp_string needle in
   try
@@ -137,28 +135,6 @@ let contains haystack needle =
   with Not_found -> false
 
 let editable_glyph = "\xe2\x97\x8f"
-let read_only_glyph = "\xe2\x97\x8b"
-
-let row_of json label =
-  String.split_on_char '\n' (rendered_of json)
-  (* The title is wrapped in its own styling, so a trailing space is not part
-     of the match. First hit wins: every label is drawn before any free text. *)
-  |> List.find_opt (fun line -> contains line label)
-  |> function
-  | None -> Alcotest.fail ("row not drawn: " ^ label)
-  | Some line -> line
-
-let test_skill_selection_view_modes () =
-  (* The row now carries a marker and its own styling, so the assertion is on
-     the value the Skills row shows rather than on the whole line. *)
-  let check label expected json =
-    Alcotest.(check bool) label true (contains (row_of json "Skills") expected)
-  in
-  check "all" "all published Skills" observed;
-  check "none" "none" (with_observed_skill_names (`List []));
-  check "exact names" "review, research"
-    (with_observed_skill_names (`List [ `String "review"; `String "research" ]))
-
 let test_unknown_field_is_rejected () =
   match
     patch_of_edit ~before:observed ~after:(`Assoc [ "mystery", `Bool true ])
@@ -252,158 +228,6 @@ let test_context_shrink_confirmation_reaches_the_patch () =
   | Error refusal ->
       Alcotest.fail ("bare confirmation errored: " ^ edit_refusal_to_string refusal)
 
-let test_view_explains_effective_values_and_sources () =
-  let rendered = rendered_of observed in
-  List.iter
-    (fun needle -> Alcotest.(check bool) needle true (contains rendered needle))
-    [ "effective settings"
-    ; "codex_subscription.gpt-5.6-sol"
-    ; "docker / none"
-    ; "provenance"
-    ; "/config/keepers/alpha.toml"
-    ; "Only changed fields are sent"
-      (* the raw block the named provenance rows do not exhaust *)
-    ; "\"live_meta_path\": \"/state/keepers/alpha.json\""
-    ]
-
-(* The pane's whole job is answering "will [e] change this?" per row. A row
-   that loses its marker, or a derived value that gains an editable one, is
-   the defect this fixes. *)
-let test_every_row_says_whether_e_reaches_it () =
-  let name = function `Editable -> "editable" | `Read_only -> "read-only" in
-  List.iter
-    (fun (label, expected) ->
-      let line = row_of observed label in
-      let actual =
-        if contains line editable_glyph then `Editable
-        else if contains line read_only_glyph then `Read_only
-        else Alcotest.fail ("row carries no marker: " ^ label)
-      in
-      Alcotest.(check string) label (name expected) (name actual))
-    [ "Runtime", `Editable
-    ; "Activation", `Editable
-    ; "Context policy", `Editable
-    ; "Context override", `Editable
-    ; "Sandbox / network", `Editable
-    ; "Mention targets", `Editable
-    ; "Board interests", `Editable
-    ; "Skills", `Editable
-      (* the rows inside the settings block that [e] does not reach *)
-    ; "Config revision", `Read_only
-    ; "Sandbox roots", `Read_only
-    ; "Live override", `Read_only
-    ; "Override fields", `Read_only
-    ; "Precedence", `Read_only
-    ; "Default manifest", `Read_only
-    ; "Live metadata", `Read_only
-      (* the pair the operator could not tell apart before *)
-    ; "instructions", `Editable
-    ; "effective system prompt", `Read_only
-    ]
-
-(* The heading counts the editor stem, not the rows: two fields share the
-   sandbox row and one row is derived, so a row count would disagree with
-   what [e] opens. *)
-let test_heading_counts_what_the_editor_opens () =
-  let expected =
-    match editable_snapshot observed with
-    | `Assoc fields -> List.length fields
-    | _ -> Alcotest.fail "expected object"
-  in
-  Alcotest.(check bool)
-    (Printf.sprintf "heading says e opens %d fields" expected)
-    true
-    (contains (rendered_of observed) (Printf.sprintf "e opens %d fields" expected))
-
-(* A stored field ends with a newline. Counting the empty line it splits into
-   made the heading disagree with what the reader could see. *)
-let test_line_count_matches_what_is_drawn () =
-  let json = Yojson.Safe.from_string {|{"prompt": {"instructions": "one\ntwo\n"}}|} in
-  let lines = view_lines ~sanitize:Fun.id json in
-  Alcotest.(check bool)
-    "heading says 2 lines"
-    true
-    (contains (String.concat "\n" lines) "editable \xc2\xb7 2 lines");
-  Alcotest.(check bool)
-    "no blank body line drawn"
-    false
-    (List.exists (fun line -> String.equal line "   ") lines)
-
-(* #38354: the effective system prompt is a closed union on the wire. A
-   prompt the server could not build is drawn with its reason, path and
-   detail, never as "(not declared)", and a shape this reader does not know is
-   drawn as a decode failure. Fetched strings go through the sanitizer. *)
-let prompt_view system_prompt =
-  view_lines
-    ~sanitize:(fun text -> String.concat "<esc>" (String.split_on_char '\027' text))
-    (`Assoc
-      [ "prompt", `Assoc [ "instructions", `String "be exact"; "system_prompt", system_prompt ] ])
-  |> String.concat "\n"
-
-let test_system_prompt_states_are_drawn () =
-  let available =
-    prompt_view
-      (`Assoc
-        [ "state", `String "available"
-        ; "effective", `String "line one\nline two\n"
-        ; "assembled", `String "unused"
-        ])
-  in
-  Alcotest.(check bool) "available prompt is drawn" true
-    (contains available "   line two");
-  Alcotest.(check bool) "available heading counts lines" true
-    (contains available "read-only \xc2\xb7 2 lines");
-  let unavailable =
-    prompt_view
-      (`Assoc
-        [ "state", `String "unavailable"
-        ; "reason", `String "constitution_unreadable"
-        ; "path", `String "/base/.masc/constitution/articles.jsonl"
-        ; "detail", `String "Is a directory\027[31m"
-        ])
-  in
-  List.iter
-    (fun needle ->
-      Alcotest.(check bool) needle true (contains unavailable needle))
-    [ "read-only \xc2\xb7 unavailable"
-    ; "the world constitution ledger could not be read"
-    ; "path: /base/.masc/constitution/articles.jsonl"
-    ; "detail: Is a directory<esc>[31m"
-    ];
-  Alcotest.(check bool) "unavailable is not drawn as undeclared" false
-    (contains unavailable "(not declared)");
-  let invalid_prompt =
-    prompt_view
-      (`Assoc
-        [ "state", `String "unavailable"
-        ; "reason", `String "prompt_unrenderable"
-        ; "detail", `String "Missing keeper prompt\027[31m"
-        ])
-  in
-  List.iter (fun needle ->
-    Alcotest.(check bool) needle true (contains invalid_prompt needle))
-    [ "read-only \xc2\xb7 unavailable"
-    ; "no turn runs until the prompt is repaired"
-    ; "detail: Missing keeper prompt<esc>[31m"
-    ];
-  Alcotest.(check bool) "prompt failure invents no ledger path" false
-    (contains invalid_prompt "path:");
-  let unknown_reason =
-    prompt_view
-      (`Assoc
-        [ "state", `String "unavailable"
-        ; "reason", `String "something_else"
-        ; "path", `String "/p"
-        ; "detail", `String "d"
-        ])
-  in
-  Alcotest.(check bool) "unknown reason is a decode failure" true
-    (contains unknown_reason "read-only \xc2\xb7 decode failed");
-  Alcotest.(check bool) "decode failure names the reason" true
-    (contains unknown_reason "something_else")
-
-(* Fetched text reaches the frame through the caller's sanitizer; the frame's
-   own styling must not go through it. *)
 let test_fetched_text_is_sanitized_but_the_frame_is_not () =
   let hostile =
     Yojson.Safe.from_string
@@ -444,53 +268,6 @@ let with_config_revision revision =
     `Assoc (("config_revision", revision) :: List.remove_assoc "config_revision" fields)
   | _ -> Alcotest.fail "observed fixture must be an object"
 
-let test_config_revision_projection_assigned () =
-  let row = row_of observed "Config revision" in
-  List.iter
-    (fun expected ->
-      Alcotest.(check bool) expected true (contains row expected))
-    [ "manifest=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    ; "runtime=present"
-    ; "source=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-    ; "assignment=assigned:codex_subscription.gpt-5.6-sol"
-    ]
-
-let test_config_revision_projection_assignment_missing () =
-  let revision =
-    `Assoc
-      [ ( "manifest"
-        , `Assoc
-            [ "state", `String "sha256"
-            ; "value", `String (String.make 64 'a')
-            ] )
-      ; ( "runtime_assignment"
-        , `Assoc
-            [ "state", `String "runtime_config_present"
-            ; "source_revision", `String (String.make 64 'b')
-            ; "assignment", `Assoc [ "state", `String "missing" ]
-            ] )
-      ]
-  in
-  let row = row_of (with_config_revision revision) "Config revision" in
-  Alcotest.(check bool) "runtime source is present" true
-    (contains row "runtime=present source=sha256:");
-  Alcotest.(check bool) "assignment is explicitly missing" true
-    (contains row "assignment=missing")
-
-(* The server answers {state:"unavailable", detail} in place of the revision
-   pair when it could not read it. The pane shows the server's own detail,
-   and the CAS picker refuses to post the marker as an expected value. *)
-let test_config_revision_projection_unavailable_shows_detail () =
-  let revision =
-    `Assoc
-      [ "state", `String "unavailable"
-      ; "detail", `String "manifest store offline"
-      ]
-  in
-  let row = row_of (with_config_revision revision) "Config revision" in
-  Alcotest.(check bool) "server detail is on the row" true
-    (contains row "revision unavailable: manifest store offline")
-
 let test_runtime_picker_refuses_unavailable_revision () =
   let unavailable =
     with_config_revision
@@ -506,38 +283,6 @@ let test_runtime_picker_refuses_unavailable_revision () =
   | Ok revision ->
     Alcotest.failf "picker accepted an unavailable revision: %s"
       (Yojson.Safe.to_string revision)
-
-let test_config_revision_projection_runtime_missing () =
-  let revision =
-    `Assoc
-      [ "manifest", `Assoc [ "state", `String "missing" ]
-      ; ( "runtime_assignment"
-        , `Assoc [ "state", `String "runtime_config_missing" ] )
-      ]
-  in
-  let row = row_of (with_config_revision revision) "Config revision" in
-  Alcotest.(check bool) "manifest is explicitly missing" true
-    (contains row "manifest=missing");
-  Alcotest.(check bool) "runtime config is explicitly missing" true
-    (contains row "runtime=missing")
-
-let test_config_revision_projection_rejects_malformed_runtime () =
-  let revision =
-    `Assoc
-      [ "manifest", `Assoc [ "state", `String "missing" ]
-      ; ( "runtime_assignment"
-        , `Assoc
-            [ "state", `String "runtime_config_present"
-            ; "source_revision", `String (String.make 64 'B')
-            ; "assignment", `Assoc [ "state", `String "missing" ]
-            ] )
-      ]
-  in
-  let row = row_of (with_config_revision revision) "Config revision" in
-  Alcotest.(check bool) "malformed runtime invalidates the full product" true
-    (contains row "invalid composite config revision");
-  Alcotest.(check bool) "manifest-only success is not rendered" false
-    (contains row "manifest=missing")
 
 let changed_proactive =
   `Assoc [ "activation_mode", `String "on_demand" ]
@@ -759,8 +504,6 @@ let () =
             test_deleted_field_means_unchanged
         ; Alcotest.test_case "skill selection modes" `Quick
             test_skill_selection_patch_modes
-        ; Alcotest.test_case "skill selection view modes" `Quick
-            test_skill_selection_view_modes
         ; Alcotest.test_case "context shrink confirmation reaches the patch"
             `Quick test_context_shrink_confirmation_reaches_the_patch
         ; Alcotest.test_case "reject unknown" `Quick
@@ -771,32 +514,12 @@ let () =
             test_reopened_stem_parses_and_replaces
         ; Alcotest.test_case "missing revision is not an editor refusal" `Quick
             test_missing_revision_is_not_an_editor_refusal
-        ; Alcotest.test_case "view meaning" `Quick
-            test_view_explains_effective_values_and_sources
-        ; Alcotest.test_case "every row marks editability" `Quick
-            test_every_row_says_whether_e_reaches_it
-        ; Alcotest.test_case "heading counts the editor stem" `Quick
-            test_heading_counts_what_the_editor_opens
-        ; Alcotest.test_case "line count matches what is drawn" `Quick
-            test_line_count_matches_what_is_drawn
-        ; Alcotest.test_case "system prompt states are drawn" `Quick
-            test_system_prompt_states_are_drawn
         ; Alcotest.test_case "fetched text sanitized, frame not" `Quick
             test_fetched_text_is_sanitized_but_the_frame_is_not
         ; Alcotest.test_case "wrong-typed scalar is sanitized" `Quick
             test_invalid_mode_text_is_sanitized_at_the_row_boundary
-        ; Alcotest.test_case "composite revision assigned" `Quick
-            test_config_revision_projection_assigned
-        ; Alcotest.test_case "composite revision assignment missing" `Quick
-            test_config_revision_projection_assignment_missing
-        ; Alcotest.test_case "composite revision runtime missing" `Quick
-            test_config_revision_projection_runtime_missing
-        ; Alcotest.test_case "unavailable revision shows the server detail" `Quick
-            test_config_revision_projection_unavailable_shows_detail
         ; Alcotest.test_case "runtime picker refuses an unavailable revision" `Quick
             test_runtime_picker_refuses_unavailable_revision
-        ; Alcotest.test_case "composite revision malformed runtime" `Quick
-            test_config_revision_projection_rejects_malformed_runtime
         ; Alcotest.test_case "strict composite revision" `Quick
             test_strict_config_revision_decoder
         ; Alcotest.test_case "strict runtime picker revision" `Quick

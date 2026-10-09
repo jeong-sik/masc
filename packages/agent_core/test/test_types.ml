@@ -78,8 +78,8 @@ let test_empty_stop_reason () =
 let test_model_to_string () =
   Alcotest.(check string)
     "exact opus"
-    "claude-opus-5"
-    (Types.model_to_string "claude-opus-5");
+    "claude-opus-5-5"
+    (Types.model_to_string "claude-opus-5-5");
   Alcotest.(check string)
     "exact sonnet"
     "claude-sonnet-5"
@@ -222,7 +222,7 @@ let test_default_config () =
 
 let test_model_yojson_roundtrip () =
   let variants =
-    [ "claude-opus-5"
+    [ "claude-opus-5-5"
     ; "claude-sonnet-5"
     ; "claude-fable-5"
     ; "claude-fable-5-1"

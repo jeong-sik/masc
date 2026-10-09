@@ -19,6 +19,7 @@ import {
 } from './primitives'
 import { _resetChatStoreForTests, readKeeperDraft } from '../../keeper-chat-store'
 import { chatHistoryEntriesFromRest } from '../../keeper-state'
+import { parseTextToChatBlocks } from '../../lib/chat-blocks'
 import { collectAttachments } from './attachments'
 import { lookupToolCallOutput, recordToolCallOutputs, resetToolCallOutputs } from '../../tool-call-output-store'
 import { fetchBoardPost } from '../../api/board'
@@ -878,6 +879,79 @@ describe('ChatTranscript', () => {
     await flushUi()
     expect(failure.querySelector('[data-chat-failure-detail]')?.textContent).toContain('Timeout after 630.0s')
   })
+
+  it('keeps completed media visible when failed history is reloaded', async () => {
+    const imageSrc = '/api/v1/media/retained-image';
+    const audioSrc = '/api/v1/voice/audio/retained-audio';
+    const entries = chatHistoryEntriesFromRest('sangsu', [{
+      id: 'failed-with-output',
+      role: 'assistant',
+      content: 'Keeper request failed: provider disconnected after media',
+      ts: 1_780_000_001,
+      kind: 'transport_failure',
+      turn_ref: 'trace-retained-media#1',
+      delivery_provenance_status: 'valid',
+      delivery_provenance: {
+        delivery_key: { kind: 'operation', operation_id: 'retained-media-operation' },
+        transcript_slot: { kind: 'terminal_assistant' },
+      },
+      blocks: [
+        { t: 'image', src: imageSrc, cap: 'completed image' },
+        { t: 'voice', src: audioSrc, transcript: 'completed audio', secs: 2 },
+      ],
+    }]);
+
+    render(html`<${ChatTranscript} entries=${entries} variant="messenger" />`, container);
+    await flushUi();
+    const failure = container.querySelector('[data-chat-entry-id="failed-with-output"]')!;
+    expect(failure.getAttribute('data-chat-delivery-state')).toBe('transport_failure');
+    expect(failure.querySelector('[data-chat-failure-card]')).not.toBeNull();
+    expect(failure.querySelector('[data-chat-block="image"] img')?.getAttribute('src')).toBe(imageSrc);
+    expect(failure.querySelector('[data-chat-block="voice"] audio')?.getAttribute('src')).toBe(audioSrc);
+    expect(failure.textContent).toContain('completed image');
+    expect(failure.textContent).toContain('completed audio');
+    expect(failure.textContent).toContain('처리 완료로 간주되지 않으며');
+    expect(failure.textContent).not.toContain('provider disconnected after media');
+    fireEvent.click(failure.querySelector('[data-chat-failure-detail-toggle]')!);
+    await flushUi();
+    expect(failure.querySelector('[data-chat-failure-detail]')?.textContent)
+      .toContain('provider disconnected after media');
+  });
+
+  it('renders a legacy diagnostic-derived block projection as the failure detail, not completed output', async () => {
+    // The old writer stored parse_text_to_blocks(diagnostic) when a
+    // transport_failure row arrived without blocks, so a reload can hand the
+    // dashboard a persisted projection of the diagnostic itself.
+    const diagnostic = 'Keeper request failed: provider disconnected before any media';
+    const entries = chatHistoryEntriesFromRest('sangsu', [{
+      id: 'failed-legacy-diagnostic',
+      role: 'assistant',
+      content: diagnostic,
+      ts: 1_780_000_002,
+      kind: 'transport_failure',
+      turn_ref: 'trace-legacy-diagnostic#1',
+      delivery_provenance_status: 'valid',
+      delivery_provenance: {
+        delivery_key: { kind: 'operation', operation_id: 'legacy-diagnostic-operation' },
+        transcript_slot: { kind: 'terminal_assistant' },
+      },
+      blocks: parseTextToChatBlocks(diagnostic),
+    }]);
+
+    render(html`<${ChatTranscript} entries=${entries} variant="messenger" />`, container);
+    await flushUi();
+    const failure = container.querySelector('[data-chat-entry-id="failed-legacy-diagnostic"]')!;
+    expect(failure.getAttribute('data-chat-delivery-state')).toBe('transport_failure');
+    expect(failure.querySelector('[data-chat-failure-card]')).not.toBeNull();
+    // The persisted blocks are the diagnostic again, so no completed output
+    // is claimed and none renders above the folded detail.
+    expect(failure.querySelector('[data-chat-retained-output]')).toBeNull();
+    expect(failure.textContent).toContain('처리 완료로 간주되지 않으며');
+    fireEvent.click(failure.querySelector('[data-chat-failure-detail-toggle]')!);
+    await flushUi();
+    expect(failure.querySelector('[data-chat-failure-detail]')?.textContent)
+      .toContain('provider disconnected before any media');
+  });
 
   it('exposes tool-call transcript provenance as rendered attributes', () => {
     render(

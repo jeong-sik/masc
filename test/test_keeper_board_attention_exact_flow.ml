@@ -1924,6 +1924,361 @@ let test_jev_choice_outside_the_question_is_judged_again () =
 (* The adapter alone, against the same stand-in: the request offers the two
    decisions under their labels, and a not-relevant answer decodes to
    [Not_relevant] rather than an error. *)
+let with_board_admission_workspace f =
+  with_temp_base "board-normal-admission" (fun base_path ->
+    let config = Workspace.default_config base_path in
+    Fun.protect ~finally:(fun () ->
+      Keeper_registry.For_testing.clear ();
+      Board_dispatch.reset_for_test ();
+      Board.reset_global_for_test ()) (fun () ->
+      ignore (Workspace.init config ~agent_name:None : string);
+      Board_dispatch.reset_for_test ();
+      Board.reset_global_for_test ();
+      f config))
+;;
+
+let admission_meta ?(paused = false) config name =
+  let meta = Masc_test_deps.meta_of_json_fixture
+      (`Assoc ["name", `String name; "trace_id", `String ("trace-" ^ name)])
+    |> Result.get_ok in
+  let meta = { meta with Keeper_meta_contract.paused } in
+  let dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path in
+  Fs_compat.mkdir_p dir;
+  Out_channel.with_open_text (Filename.concat dir (name ^ ".toml")) (fun oc ->
+    output_string oc "[keeper]\ninstructions = \"Review Board evidence.\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\nboard_interests = [\"research\"]\n");
+  Keeper_meta_store.replace_snapshot config meta |> Result.get_ok;
+  let resolved = Keeper_meta_store.read_effective_meta config name |> Result.get_ok |> Option.get in
+  ignore (Keeper_registry.For_testing.register ~base_path:config.base_path name resolved);
+  resolved
+;;
+
+let admission_post ~author ~title =
+  match Board_dispatch.create_post ~author ~title ~content:"new research evidence"
+      ~post_kind:Board.Human_post ~visibility:Board.Internal () with
+  | Ok post -> post
+  | Error error -> Alcotest.fail (Board.show_board_error error)
+;;
+
+let admission_candidate config meta signal =
+  let id = Candidate.candidate_id_of_signal ~keeper_name:meta.Keeper_meta_contract.name signal in
+  match Candidate.load_candidates ~base_path:config.Workspace.base_path ~keeper_name:meta.name with
+  | Error detail -> Alcotest.fail detail
+  | Ok candidates ->
+      match List.find_opt (fun c -> String.equal c.Candidate.candidate_id id) candidates with
+      | Some candidate -> candidate
+      | None -> Alcotest.fail "normal producer candidate missing"
+;;
+
+let test_normal_discoverable_producer_batches_owner_cursor_catchup () =
+  run_eio_with_http_pool (fun ~sw ~net ~clock ->
+    with_board_admission_workspace (fun config ->
+      let first = admission_meta config "normal-first" in
+      let second = admission_meta config "normal-second" in
+      let paused_initial = admission_meta ~paused:true config "paused-initial" in
+      let paused_established = admission_meta ~paused:true config "paused-established" in
+      let judged_meta = admission_meta config "prior-judgment" in
+      ignore (admission_post ~author:"baseline-author" ~title:"baseline");
+      List.iter (fun meta -> ignore (Keeper_world_observation.collect_board_events
+        ~base_path:config.base_path ~meta)) [first; second; paused_established; judged_meta];
+      let previous_cursor = (Option.get (Keeper_registry.get ~base_path:config.base_path paused_established.name)).board_cursor_ts in
+      let request_signal = ref None in
+      let release, resolver = Eio.Promise.create () in
+      let answer _ body =
+        let questions = Yojson.Safe.Util.(Yojson.Safe.from_string body |> member "questions" |> to_assoc) in
+        let answers = List.map (fun (id, _) -> id, `Assoc
+          ["type", `String "choice"; "choice", `String "not_relevant";
+           "confidence", `Float 1.; "probabilities", `Assoc
+             ["relevant", `Float 0.; "not_relevant", `Float 1.; "uncertain", `Float 0.]]) questions in
+        `OK, Yojson.Safe.to_string (`Assoc ["model", `String "jev-latest"; "answers", `Assoc answers]) in
+      let jev = Fixture.start_server ~sw ~net ~clock
+          ~on_request_before_reply:(fun () -> Eio.Promise.await release)
+          (Fixture.Reply_with answer) in
+      with_jev ~endpoint:jev.base_url (fun () ->
+        Eio.Switch.run (fun batch_sw ->
+          Board_dispatch.set_board_signal_hook (fun addressed ->
+            let signal = addressed.Board_dispatch.signal in
+            request_signal := Some signal;
+            (* A recovered prior judgment with a Ready root must stay with
+               ordinary delivery; stable-id duplicates are not fresh work. *)
+            let candidate = Candidate.of_board_signal ~meta:judged_meta ~recorded_at:1. signal in
+            ignore (Candidate.record ~base_path:config.base_path candidate);
+            let judgment : Candidate.judgment =
+              { verdict = { Judgment.decision = Judgment.Not_relevant; rationale = "already judged" }
+              ; slot_id = "prior-cli"; source = Candidate.Cli_lane_slot; judged_at = 2. } in
+            ignore (Candidate.record_judgment ~base_path:config.base_path candidate judgment |> Result.get_ok);
+            ignore (Partition.ensure_roots ~base_path:config.base_path ~keeper_name:judged_meta.name [candidate] |> Result.get_ok);
+            let deliver () = Keeper_keepalive_signal.wakeup_relevant_keeper_for_board_signal ~config
+              ~dispatch_discoverable_post:(Keeper_board_attention_fanout.enqueue_discoverable_post ~sw:batch_sw ~clock ~config)
+              addressed in
+            deliver ();
+            deliver ());
+          Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve resolver ())) (fun () ->
+            ignore (admission_post ~author:"external-author" ~title:"normal research");
+            let signal = Option.get !request_signal in
+            (* Established fleet I/O must not run on the receipt fiber. *)
+            let id = Candidate.candidate_id_of_signal ~keeper_name:first.name signal in
+            Alcotest.(check bool) "reserved before asynchronous admission" true
+              (Keeper_board_attention_admission.blocked ~base_path:config.base_path ~candidate_id:id);
+            Eio.Promise.await jev.first_request_arrived;
+            List.iter (fun meta ->
+              (match (admission_candidate config meta signal).status with
+               | Candidate.Pending _ -> ()
+               | _ -> Alcotest.fail "vendor was called before durable pending evidence");
+              let _, post_count, _ = Keeper_world_observation.collect_board_events ~base_path:config.base_path ~meta in
+              Alcotest.(check int) "owner independently acknowledges one new post" 1 post_count;
+              let _, repeated, _ = Keeper_world_observation.collect_board_events ~base_path:config.base_path ~meta in
+              Alcotest.(check int) "owner catchup is idempotent" 0 repeated) [first; second];
+            (match (admission_candidate config paused_initial signal).status with
+             | Candidate.Pending _ -> () | _ -> Alcotest.fail "paused first cursor lost fallback");
+            (match (admission_candidate config judged_meta signal).status with
+             | Candidate.Judged _ -> () | _ -> Alcotest.fail "prior judgment was replaced");
+            Alcotest.(check (float 0.)) "paused established cursor stays unadvanced" previous_cursor
+              (Option.get (Keeper_registry.get ~base_path:config.base_path paused_established.name)).board_cursor_ts));
+        let signal = Option.get !request_signal in
+        List.iter (fun meta ->
+          (match (admission_candidate config meta signal).status with
+           | Candidate.Consumed { delivery = Candidate.Not_relevant; _ } -> ()
+           | _ -> Alcotest.fail "normal batch did not settle");
+          Alcotest.(check bool) "lease released after batch" false
+            (Keeper_board_attention_admission.blocked ~base_path:config.base_path
+               ~candidate_id:(Candidate.candidate_id_of_signal ~keeper_name:meta.name signal))) [first; second];
+        let resumed = { paused_established with Keeper_meta_contract.paused = false } in
+        Keeper_meta_store.replace_snapshot config resumed |> Result.get_ok;
+        ignore (Keeper_world_observation.collect_board_events ~base_path:config.base_path ~meta:resumed);
+        ignore (admission_candidate config resumed signal);
+        match Fixture.request_bodies jev with
+        | [body] ->
+            let questions = Yojson.Safe.Util.(Yojson.Safe.from_string body |> member "questions" |> to_assoc) in
+            Alcotest.(check int) "one normal request serves two owners" 2 (List.length questions);
+            List.iter (fun meta -> Alcotest.(check bool) "owner question present" true
+              (List.mem_assoc (Candidate.candidate_id_of_signal ~keeper_name:meta.Keeper_meta_contract.name signal) questions)) [first; second]
+        | _ -> Alcotest.fail "normal producer split or retried vendor requests")))
+;;
+
+let test_off_switch_releases_discoverable_admission () =
+  run_eio (fun ~sw:_ ~net:_ ~clock ->
+    with_board_admission_workspace (fun config ->
+      let meta = admission_meta config "off-switch-owner" in
+      let finished = Eio.Switch.run (fun sw -> sw) in
+      let signal = signal "off-switch-event" in
+      (try Keeper_board_attention_fanout.enqueue_discoverable_post ~sw:finished ~clock ~config signal
+       with Invalid_argument _ -> ());
+      let id = Candidate.candidate_id_of_signal ~keeper_name:meta.name signal in
+      Alcotest.(check bool) "finished switch cannot strand ownership" false
+        (Keeper_board_attention_admission.blocked ~base_path:config.base_path ~candidate_id:id);
+      (* A cancelled-but-not-released switch must refuse immediately, without
+         waiting for unrelated switch fibers to join. *)
+      (try Eio.Switch.run (fun sw ->
+        Eio.Switch.fail sw Exit;
+        Eio.Cancel.protect (fun () ->
+          (try Keeper_board_attention_fanout.enqueue_discoverable_post ~sw ~clock ~config signal
+           with Eio.Cancel.Cancelled _ -> ());
+          Alcotest.(check bool) "off switch refuses before teardown" false
+            (Keeper_board_attention_admission.blocked ~base_path:config.base_path ~candidate_id:id)))
+       with Exit -> ());
+      Alcotest.(check bool) "cancelled switch releases the skipped child" false
+        (Keeper_board_attention_admission.blocked ~base_path:config.base_path ~candidate_id:id)))
+;;
+
+let test_admission_uses_canonical_workspace_scope () =
+  with_temp_base "board-admission-alias" (fun base_path ->
+    with_temp_base "board-admission-other" (fun other ->
+      let token = Keeper_board_attention_admission.reserve_batch ~base_path ~candidate_ids:["same-event"] in
+      Fun.protect ~finally:(fun () -> Keeper_board_attention_admission.release token) (fun () ->
+        Alcotest.(check bool) "workspace alias shares admission" true
+          (Keeper_board_attention_admission.blocked ~base_path:(Filename.concat base_path ".") ~candidate_id:"same-event");
+        Alcotest.(check bool) "other workspace is independent" false
+          (Keeper_board_attention_admission.blocked ~base_path:other ~candidate_id:"same-event"))))
+;;
+
+let test_worker_rechecks_admission_after_prepare () =
+  run_eio (fun ~sw:_ ~net:_ ~clock:_ ->
+    with_temp_base "board-worker-admission-race" (fun base_path ->
+      let candidate = candidate "prepare-admission-race" in
+      ignore (Candidate.record ~base_path candidate);
+      ignore (Partition.ensure_roots ~base_path ~keeper_name:candidate.keeper_name [candidate] |> Result.get_ok);
+      let token = ref None in
+      Fun.protect ~finally:(fun () -> Option.iter Keeper_board_attention_admission.release !token) (fun () ->
+        let result = Worker.For_testing.process_next_with_claim_ready_exact
+          ~now:(fun () -> 3.) ~worker_epoch:(Partition.Worker_epoch.generate ()) ~base_path
+          ~keeper_name:candidate.keeper_name
+          ~prepare:(fun _ ->
+            token := Some (Keeper_board_attention_admission.reserve_batch ~base_path ~candidate_ids:[candidate.candidate_id]); Ok ())
+          ~claim_ready_exact:(fun ~now:_ ~worker_epoch:_ ~base_path:_ ~keeper_name:_ ~partition_id:_ ~generation:_ ->
+            Alcotest.fail "singleton claim bypassed newly acquired batch lease")
+          ~execute:(fun ~before_dispatch:_ ~before_advance:_ () -> Alcotest.fail "singleton execution bypassed batch lease") in
+        match result with
+        | Ok (Worker.Rescan_later _) -> ()
+        | _ -> Alcotest.fail "prepare-to-claim race did not preserve batch ownership")))
+;;
+
+let test_cancelled_normal_batch_retains_owner_recovery () =
+  run_eio_with_http_pool (fun ~sw ~net ~clock ->
+    with_board_admission_workspace (fun config ->
+      let meta = admission_meta config "cancelled-normal" in
+      ignore (admission_post ~author:"baseline" ~title:"baseline");
+      ignore (Keeper_world_observation.collect_board_events ~base_path:config.base_path ~meta);
+      let held, resolve = Eio.Promise.create () in
+      let jev = Fixture.start_server ~sw ~net ~clock
+          ~on_request_before_reply:(fun () -> Eio.Promise.await held) (Fixture.Reply "{}") in
+      let signal = ref None in
+      let replacement_worker = ref None in
+      with_jev ~endpoint:jev.base_url (fun () ->
+        Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve resolve ())) (fun () ->
+          (try Eio.Switch.run (fun batch_sw ->
+            Board_dispatch.set_board_signal_hook (fun addressed ->
+              signal := Some addressed.Board_dispatch.signal;
+              Keeper_keepalive_signal.wakeup_relevant_keeper_for_board_signal ~config
+                ~dispatch_discoverable_post:(Keeper_board_attention_fanout.enqueue_discoverable_post ~sw:batch_sw ~clock ~config) addressed);
+            ignore (admission_post ~author:"external" ~title:"cancelled research");
+            Eio.Promise.await jev.first_request_arrived;
+            let entry = Option.get (Keeper_registry.get ~base_path:config.base_path meta.name) in
+            Keeper_registry.For_testing.unsafe_put_entry ~base_path:config.base_path meta.name
+              { entry with Keeper_registry.lane = Keeper_lane.create () };
+            replacement_worker := Some (Keeper_board_attention_worker_wake.register ~sw
+              ~base_path:config.base_path ~keeper_name:meta.name |> Result.get_ok);
+            (match Worker.For_testing.process_next ~now:(fun () -> 4.)
+              ~worker_epoch:(Partition.Worker_epoch.generate ()) ~base_path:config.base_path ~keeper_name:meta.name
+              ~prepare:(fun _ -> Alcotest.fail "replacement singleton bypassed batch ownership")
+              ~execute:(fun ~before_dispatch:_ ~before_advance:_ _ -> Alcotest.fail "replacement singleton reached vendor") with
+             | Ok Worker.Idle -> () | _ -> Alcotest.fail "replacement startup did not defer held batch");
+            Eio.Switch.fail batch_sw Exit)
+           with Exit -> ());
+          (match Keeper_board_attention_worker_wake.request ~base_path:config.base_path ~keeper_name:meta.name with
+           | Ok Keeper_board_attention_worker_wake.Coalesced -> ()
+           | _ -> Alcotest.fail "replacement worker did not receive post-release fallback wake");
+          (match Keeper_board_attention_worker_wake.await (Option.get !replacement_worker) with
+           | Keeper_board_attention_worker_wake.Wake -> ()
+           | Keeper_board_attention_worker_wake.Registration_closed -> Alcotest.fail "replacement registration was closed");
+          let signal = Option.get !signal in
+          let candidate = admission_candidate config meta signal in
+          (match candidate.status with Candidate.Pending _ -> () | _ -> Alcotest.fail "cancel lost pending candidate");
+          (match Partition.load ~base_path:config.base_path ~keeper_name:meta.name with
+           | Ok [{ state = Partition.Ready; _ }] -> ()
+           | _ -> Alcotest.fail "cancel did not return partition to ordinary recovery");
+          Alcotest.(check bool) "cancel releases candidate admission" false
+            (Keeper_board_attention_admission.blocked ~base_path:config.base_path ~candidate_id:candidate.candidate_id);
+          let _, caught_up, _ = Keeper_world_observation.collect_board_events ~base_path:config.base_path ~meta in
+          Alcotest.(check int) "owner cursor still catches up after cancellation" 1 caught_up;
+          let recovered = admission_candidate config meta signal in
+          Alcotest.(check string) "catchup preserves durable identity" candidate.candidate_id recovered.candidate_id))))
+;;
+
+let test_worker_skips_reserved_root_for_other_ready_work () =
+  run_eio (fun ~sw:_ ~net:_ ~clock:_ ->
+    with_temp_base "board-worker-reserved-oldest" (fun base_path ->
+      let old = candidate "reserved-oldest" in
+      let next = { (candidate "unreserved-next") with Candidate.recorded_at = 2. } in
+      List.iter (fun candidate -> ignore (Candidate.record ~base_path candidate)) [old; next];
+      let judgment : Candidate.judgment =
+        { verdict = { Judgment.decision = Judgment.Not_relevant; rationale = "existing ordinary work" }
+        ; slot_id = "prior-cli"; source = Candidate.Cli_lane_slot; judged_at = 3. } in
+      ignore (Candidate.record_judgment ~base_path next judgment |> Result.get_ok);
+      ignore (Partition.ensure_roots ~base_path ~keeper_name:old.keeper_name [old; next] |> Result.get_ok);
+      let token = Keeper_board_attention_admission.reserve_batch ~base_path ~candidate_ids:[old.candidate_id] in
+      Fun.protect ~finally:(fun () -> Keeper_board_attention_admission.release token) (fun () ->
+        (match Worker.For_testing.process_next ~now:(fun () -> 4.)
+          ~worker_epoch:(Partition.Worker_epoch.generate ()) ~base_path ~keeper_name:old.keeper_name
+          ~prepare:(fun _ -> Alcotest.fail "reserved pending root entered preparation")
+          ~execute:(fun ~before_dispatch:_ ~before_advance:_ _ -> Alcotest.fail "reserved pending root entered model") with
+         | Ok _ -> () | Error detail -> Alcotest.fail detail);
+        match Partition.load ~base_path ~keeper_name:old.keeper_name with
+        | Error detail -> Alcotest.fail detail
+        | Ok partitions ->
+            let selected = List.find (fun (p : Partition.t) -> String.equal p.candidate_id next.candidate_id) partitions in
+            (match selected.state with Partition.Completed _ | Partition.Settled _ -> ()
+             | _ -> Alcotest.fail "reserved oldest blocked other Ready work"))))
+;;
+
+let test_normal_duplicate_payloads_use_persisted_signal_groups () =
+  run_eio_with_http_pool (fun ~sw ~net ~clock ->
+    with_board_admission_workspace (fun config ->
+      let first = admission_meta config "persisted-first" in
+      let second = admission_meta config "persisted-second" in
+      ignore (admission_post ~author:"baseline" ~title:"baseline");
+      List.iter (fun meta -> ignore (Keeper_world_observation.collect_board_events ~base_path:config.base_path ~meta)) [first; second];
+      let answer _ body =
+        let questions = Yojson.Safe.Util.(Yojson.Safe.from_string body |> member "questions" |> to_assoc) in
+        let answers = List.map (fun (id, _) -> id, `Assoc
+          ["type", `String "choice"; "choice", `String "not_relevant";
+           "confidence", `Float 1.; "probabilities", `Assoc
+             ["relevant", `Float 0.; "not_relevant", `Float 1.; "uncertain", `Float 0.]]) questions in
+        `OK, Yojson.Safe.to_string (`Assoc ["model", `String "jev-latest"; "answers", `Assoc answers]) in
+      let jev = Fixture.start_server ~sw ~net ~clock (Fixture.Reply_with answer) in
+      let current = ref None in
+      with_jev ~endpoint:jev.base_url (fun () ->
+        Eio.Switch.run (fun batch_sw ->
+          Board_dispatch.set_board_signal_hook (fun addressed ->
+            let signal = addressed.Board_dispatch.signal in
+            current := Some signal;
+            let persisted_signal = { signal with Board_dispatch.content = "older durable source evidence" } in
+            ignore (Candidate.record ~base_path:config.base_path
+              (Candidate.of_board_signal ~meta:first ~recorded_at:1. persisted_signal));
+            Keeper_keepalive_signal.wakeup_relevant_keeper_for_board_signal ~config
+              ~dispatch_discoverable_post:(Keeper_board_attention_fanout.enqueue_discoverable_post ~sw:batch_sw ~clock ~config) addressed);
+          ignore (admission_post ~author:"external" ~title:"payload research"));
+        let signal = Option.get !current in
+        let first_candidate = admission_candidate config first signal in
+        let second_candidate = admission_candidate config second signal in
+        Alcotest.(check string) "duplicate keeps complete old signal" "older durable source evidence" first_candidate.signal.content;
+        List.iter (fun candidate -> match candidate.Candidate.status with
+          | Candidate.Consumed _ -> () | _ -> Alcotest.fail "persisted-signal batch failed") [first_candidate; second_candidate];
+        let requests = Fixture.request_bodies jev in
+        Alcotest.(check int) "different persisted signals get separate requests" 2 (List.length requests);
+        List.iter (fun body ->
+          let json = Yojson.Safe.from_string body in
+          let questions = Yojson.Safe.Util.(json |> member "questions" |> to_assoc) in
+          Alcotest.(check int) "each exact source group has one question" 1 (List.length questions);
+          let candidate = if List.mem_assoc first_candidate.candidate_id questions then first_candidate else second_candidate in
+          Alcotest.(check bool) "request uses returned persisted signal" true
+            (Yojson.Safe.Util.member "state" json = `Assoc ["signal", Candidate.signal_to_yojson candidate.signal])) requests)))
+;;
+
+let test_detached_normal_admission_revalidates_owner () =
+  run_eio_with_http_pool (fun ~sw ~net ~clock ->
+    with_board_admission_workspace (fun config ->
+      let active = admission_meta config "still-active" in
+      let removed = admission_meta config "withdrawn-removed" in
+      let stopped = admission_meta config "withdrawn-stopped" in
+      let paused = admission_meta config "withdrawn-paused" in
+      let replaced = admission_meta config "withdrawn-replaced" in
+      let metas = [active; removed; stopped; paused; replaced] in
+      ignore (admission_post ~author:"baseline" ~title:"baseline");
+      List.iter (fun meta -> ignore (Keeper_world_observation.collect_board_events ~base_path:config.base_path ~meta)) metas;
+      let jev = Fixture.start_server ~sw ~net ~clock (Fixture.Reply "{}") in
+      let signal = ref None in
+      with_jev ~endpoint:jev.base_url (fun () ->
+        Eio.Switch.run (fun batch_sw ->
+          Board_dispatch.set_board_signal_hook (fun addressed ->
+            signal := Some addressed.Board_dispatch.signal;
+            Keeper_keepalive_signal.wakeup_relevant_keeper_for_board_signal ~config
+              ~dispatch_discoverable_post:(Keeper_board_attention_fanout.enqueue_discoverable_post ~sw:batch_sw ~clock ~config) addressed;
+            (* These registry mutations are synchronous, while the real child
+               is at its first yield. Metadata remains present and unpaused. *)
+            Keeper_registry.For_testing.unregister ~base_path:config.base_path removed.name;
+            let change name f =
+              let entry = Option.get (Keeper_registry.get ~base_path:config.base_path name) in
+              Keeper_registry.For_testing.unsafe_put_entry ~base_path:config.base_path name (f entry) in
+            change stopped.name (fun entry -> { entry with Keeper_registry.phase = Keeper_state_machine.Stopped });
+            change paused.name (fun entry -> { entry with Keeper_registry.phase = Keeper_state_machine.Paused });
+            change replaced.name (fun entry -> { entry with Keeper_registry.lane = Keeper_lane.create () }));
+          ignore (admission_post ~author:"external" ~title:"withdrawn owner research"));
+        let signal = Option.get !signal in
+        List.iter (fun meta ->
+          let candidates = Candidate.load_candidates ~base_path:config.base_path ~keeper_name:meta.Keeper_meta_contract.name |> Result.get_ok in
+          Alcotest.(check int) "withdrawn owner has no newly admitted candidate" 0 (List.length candidates);
+          Alcotest.(check bool) "withdrawn reservation released" false
+            (Keeper_board_attention_admission.blocked ~base_path:config.base_path
+               ~candidate_id:(Candidate.candidate_id_of_signal ~keeper_name:meta.name signal))) [removed; stopped; paused; replaced];
+        match Fixture.request_bodies jev with
+        | [body] ->
+            let questions = Yojson.Safe.Util.(Yojson.Safe.from_string body |> member "questions" |> to_assoc) in
+            Alcotest.(check int) "only current active owner is judged" 1 (List.length questions);
+            Alcotest.(check bool) "current owner question present" true
+              (List.mem_assoc (Candidate.candidate_id_of_signal ~keeper_name:active.name signal) questions)
+        | _ -> Alcotest.fail "withdrawn owners changed vendor request count")))
+;;
+
 let test_jev_event_fanout_settles_and_defers () =
   run_eio_with_http_pool (fun ~sw ~net ~clock ->
     with_temp_base "board-event-fanout" @@ fun base_path ->
@@ -2505,7 +2860,23 @@ let () =
             test_flow_bookkeeping_failures_are_not_provider_exhaustion
         ] )
     ; ( "jev first"
-      , [ Alcotest.test_case "event fanout settles confident answers and defers review" `Quick
+      , [ Alcotest.test_case "normal producer batches owner cursor catchup" `Quick
+            test_normal_discoverable_producer_batches_owner_cursor_catchup
+        ; Alcotest.test_case "detached normal admission revalidates current owner" `Quick
+            test_detached_normal_admission_revalidates_owner
+        ; Alcotest.test_case "normal duplicate payloads use exact persisted signal groups" `Quick
+            test_normal_duplicate_payloads_use_persisted_signal_groups
+        ; Alcotest.test_case "cancelled normal batch retains owner recovery" `Quick
+            test_cancelled_normal_batch_retains_owner_recovery
+        ; Alcotest.test_case "worker skips reserved oldest for other Ready work" `Quick
+            test_worker_skips_reserved_root_for_other_ready_work
+        ; Alcotest.test_case "off switch releases skipped discoverable admission" `Quick
+            test_off_switch_releases_discoverable_admission
+        ; Alcotest.test_case "admission uses canonical workspace scope" `Quick
+            test_admission_uses_canonical_workspace_scope
+        ; Alcotest.test_case "worker rechecks admission after preparation" `Quick
+            test_worker_rechecks_admission_after_prepare
+        ; Alcotest.test_case "event fanout settles confident answers and defers review" `Quick
             test_jev_event_fanout_settles_and_defers
         ; Alcotest.test_case "failed event fanout releases the claim" `Quick
             test_jev_event_fanout_failure_releases_claim

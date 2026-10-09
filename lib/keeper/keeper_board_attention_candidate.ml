@@ -1839,6 +1839,18 @@ let update_ledger ~base_path ~keeper_name decide =
     | Ok (Some candidate, result) -> Ok (Some [ candidate ], result))
 ;;
 
+let purge ~base_path ~keeper_name =
+  let path = candidate_path ~base_path ~keeper_name in
+  let entry = ledger_entry path in
+  Cross_context_mutex.with_durable_lock entry.ledger_mutex (fun () ->
+    (* Keep the registry entry: a queued writer must not acquire a different
+       mutex after purge. Invalidate even on failure, which may follow unlink. *)
+    entry.ledger_cache <- None;
+    Fs_compat.purge_private_jsonl_durable_locked_result path
+    |> cursor_result ~path
+    |> Result.map (fun _cursor -> ()))
+;;
+
 let find_candidate candidates candidate_id =
   List.find_opt
     (fun candidate -> String.equal candidate.candidate_id candidate_id)

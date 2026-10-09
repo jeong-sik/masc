@@ -110,9 +110,8 @@ checking one native occurrence and one observed end for either done or error.
 These cases require execution in the normal
 verification environment; syntax parsing alone does not establish their behavior.
 Response-boundary and usage coverage also includes the server's SSE projection
-and journal replay in `test_tui_keeper_chat_log.ml`, boundary/origin fixtures in
-`test_tui_keeper_chat_transcript.ml`, and hidden/folded/full reasoning rendering in
-`test_tui_chat_response_origins.ml`.
+and journal replay in `test_tui_keeper_chat_log.ml` and boundary/origin fixtures in
+`test_tui_keeper_chat_transcript.ml`.
 
 Provider-internal subturns are not fabricated as completed Keeper turns. Native
 progress payloads, native success/failure outcomes, and Antigravity reasoning remain

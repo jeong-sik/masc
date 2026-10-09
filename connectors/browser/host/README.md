@@ -89,7 +89,10 @@ rejected before the token is read or sent.
 
 The same executable attaches to a Firefox started with
 `--remote-debugging-port` when it is run with `--bidi-url`. Firefox does not
-start it in that mode; the operator does. A BiDi connection serves the trusted
+start it in that mode: the operator does, or the MASC server for a workspace
+whose `runtime.toml` has `[browser.live.bidi]`. Given `--firefox-profile PATH`
+as well, as the server gives it, the host keeps a session only with a Firefox
+that reports running that profile and ends any other. A BiDi connection serves the trusted
 pointer work the extension cannot (`hover_at`, `drag`). The steps, what the
 port exposes, when the host ends and what attaching again takes are in
 [Attached Firefox BiDi peer](../../../docs/design/browser-bidi-live-host.md#attaching-a-connection).

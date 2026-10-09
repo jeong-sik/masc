@@ -473,7 +473,7 @@ let check_stored_image_reader_is_callable_with_read_authority ~agent_core =
     (Keeper_tool_descriptor_resolution.readonly_for_tool_call ~tool_name:name ~input);
   check bool "catalog requires read-state permission only" true
     ((Tool_catalog.metadata name).required_permission = Masc_domain.CanReadState);
-  match Policy.verdict_for ~composition_plan_index:None ~tool_name:name ~input with
+  match Policy.verdict_for ~identity_tool_index:Masc.Keeper_identity_tool_index.empty ~composition_plan_index:None ~tool_name:name ~input with
   | Policy.Run _ -> ()
   | Policy.Ask { because } -> failf "stored-image reading asks for approval: %s" because
 ;;
@@ -819,12 +819,18 @@ let test_a_revisionless_ask_is_taught_the_exact_reference () =
 ;;
 
 let test_every_bundle_tool_is_classifiable () =
+  (* The run classifies attached-service tools through the index built from
+     the tools it offered (Keeper_run_tools_setup); the bundle here offers
+     identity_tools (), so the same index is built from them. *)
+  let identity_tool_index =
+    Masc.Keeper_identity_tool_index.of_tools (identity_tools ())
+  in
   with_bundle (fun composition_plan_index names ->
     let unclassifiable =
       List.filter
         (fun tool_name ->
            not
-             (Policy.classifies
+             (Policy.classifies ~identity_tool_index
                 ~composition_plan_index:(Some composition_plan_index) ~tool_name))
         names
     in

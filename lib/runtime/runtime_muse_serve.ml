@@ -1306,12 +1306,10 @@ let run_protocol
     | Error (Process_exited exited) -> Error (Process_exited { exited with turn_accepted = true })
     | outcome -> outcome
   in
-  (* Preserve message presence through the adapter: transport silence is not
-     a model-selected empty final answer. Streaming itself has no payload
-     when there was no text, but the result retains [None]. *)
   let text = state.final_text in
-  emit_stream_event on_stream_event
-    (Turn_finished { text = Option.value text ~default:"" });
+  (* The stream terminal closes presentation; durable consumers retain the
+     separate completed-message evidence below. *)
+  emit_stream_event on_stream_event (Turn_finished { text = Option.value text ~default:"" });
   Ok
     { session_id
     ; turn_id

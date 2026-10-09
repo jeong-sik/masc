@@ -30,7 +30,11 @@ def queue_identity_journey(executable):
                                             fixture.first_post_received, timeout=5)
             h.send_and_wait(process, fd, output, b"identity-held-next",
                             h.composer_showing(b"identity-held-next"))
-            h.send_and_wait(process, fd, output, b"\r", b"Enter:send (1 local)")
+            # The pending band marks an input this client holds as not yet sent.
+            h.send_and_wait(process, fd, output, b"\r",
+                            "전송 대기 · 아직 보내지 않음".encode())
+            assert b"identity-held-next" in h.screen_text(bytes(output))
+            assert len(fixture.received) == 1, "the second Enter bypassed the local queue"
 
             def inspect_local(*, capture_id=False):
                 h.send_and_wait(process, fd, output, b"/queue",

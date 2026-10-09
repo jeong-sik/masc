@@ -1044,6 +1044,128 @@ let load_owned_regular_file ~ownership_root path =
   |> Result.map (Option.map (fun contents -> contents.content))
 ;;
 
+external open_owned_directory_root : string -> Unix.file_descr
+  = "caml_masc_owned_directory_root"
+external open_owned_directory_child : Unix.file_descr -> string -> Unix.file_descr
+  = "caml_masc_owned_directory_open"
+external owned_directory_names : Unix.file_descr -> string list
+  = "caml_masc_owned_directory_names"
+
+type owned_inventory_root =
+  { inventory_path : string
+  ; requested_path : string
+  ; inventory_fd : Unix.file_descr
+  ; inventory_stat : Unix.stats
+  }
+
+let owned_inventory_root_path root = root.inventory_path
+
+let inventory_root_current root =
+  try
+    String.equal (Unix.realpath root.requested_path) root.inventory_path
+    && same_file_identity (Unix.lstat root.inventory_path) root.inventory_stat
+  with Unix.Unix_error _ -> false
+;;
+
+let with_owned_inventory_root path fn =
+  try
+    let initial = Unix.stat path in
+    let canonical = Unix.realpath path in
+    let fd = open_owned_directory_root canonical in
+    Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
+      let observed = Unix.fstat fd in
+      let root = { inventory_path=canonical; requested_path=path;
+        inventory_fd=fd; inventory_stat=observed } in
+      if initial.Unix.st_kind <> Unix.S_DIR
+         || not (same_file_identity initial observed)
+         || not (inventory_root_current root)
+      then owned_file_error (Filesystem_identity_changed {path})
+      else
+        let result = fn root in
+        if inventory_root_current root then result
+        else owned_file_error (Filesystem_identity_changed {path}))
+  with
+  | Eio.Cancel.Cancelled _ as cancellation -> reraise_current cancellation
+  | cause -> owned_file_operation_error ~path Read_contents cause
+;;
+
+let read_owned_directory_blocking ?inventory_root ~before_read ~after_read ~ownership_root path =
+  match owned_directory_paths ~ownership_root path with
+  | Error rejection ->
+    owned_file_error (Ownership_boundary_rejected { path; rejection })
+  | Ok descendants ->
+    let opened = ref [] in
+    let descriptors = ref [] in
+    let close_all () =
+      let close_failure = ref None in
+      List.iter (fun fd ->
+        try Unix.close fd with
+        | Unix.Unix_error _ as ex ->
+          if !close_failure = None then close_failure := Some ex) !descriptors;
+      !close_failure
+    in
+    let result =
+      try
+        let bind directory open_fd =
+          let before = Unix.lstat directory in
+          let fd = open_fd () in
+          descriptors := fd :: !descriptors;
+          let stat = Unix.fstat fd in
+          opened := (directory, fd, stat) :: !opened;
+          if before.Unix.st_kind <> Unix.S_DIR || not (same_file_identity before stat)
+          then raise (Unix.Unix_error (Unix.EAGAIN, "directory identity", directory));
+          fd
+        in
+        let root_fd = match inventory_root with
+          | None -> bind ownership_root (fun () -> open_owned_directory_root ownership_root)
+          | Some root ->
+            if not (String.equal root.inventory_path ownership_root)
+               || not (inventory_root_current root)
+            then raise (Unix.Unix_error (Unix.EAGAIN, "inventory root identity", path));
+            opened := (ownership_root, root.inventory_fd, root.inventory_stat) :: !opened;
+            root.inventory_fd
+        in
+        let fd = List.fold_left (fun parent directory ->
+          bind directory (fun () ->
+            open_owned_directory_child parent (Filename.basename directory))) root_fd descendants in
+        let current () =
+          List.for_all (fun (directory, _, descriptor) ->
+            let observed = Unix.lstat directory in
+            observed.Unix.st_kind = Unix.S_DIR
+            && same_file_identity observed descriptor) !opened
+        in
+        if not (current ()) then owned_file_error (Filesystem_identity_changed { path })
+        else begin
+          before_read path;
+          let names = owned_directory_names fd in
+          after_read path;
+          if current () then
+            Ok (List.sort String.compare
+              (List.filter (fun name -> name <> "." && name <> "..") names))
+          else owned_file_error (Filesystem_identity_changed { path })
+        end
+      with
+      | Eio.Cancel.Cancelled _ as cancellation ->
+        ignore (close_all ()); reraise_current cancellation
+      | cause -> owned_file_operation_error ~path Read_contents cause
+    in
+    match close_all (), result with
+    | None, result -> result
+    | Some cause, Ok _ -> owned_file_operation_error ~path Close_descriptor cause
+    | Some cause, Error error -> Error { error with close_failure = Some cause }
+;;
+
+let read_owned_directory ?inventory_root ?(before_read = fun _ -> ()) ?(after_read = fun _ -> ()) ~ownership_root path =
+  with_fs_or_fallback ~path
+    ~fallback:(fun () -> read_owned_directory_blocking ?inventory_root ~before_read ~after_read ~ownership_root path)
+    (fun _fs ->
+      let result = Eio_unix.run_in_systhread
+        ~label:(labelled "fs-compat-read-owned-directory" path)
+        (fun () -> read_owned_directory_blocking ?inventory_root ~before_read ~after_read ~ownership_root path) in
+      Eio.Fiber.check ();
+      result)
+;;
+
 type owned_regular_file_prefix =
   { content : string
   ; file_size : int
@@ -1159,18 +1281,7 @@ type owned_regular_file_range_digest =
   ; snapshot : owned_regular_file_snapshot
   }
 
-let load_owned_regular_file_range_with_sha256_blocking
-    ~ownership_root ~offset ~max_bytes path =
-  if offset < 0 || max_bytes < 0
-  then
-    owned_file_operation_error
-      ~path
-      Read_contents
-      (Invalid_argument "offset and max_bytes must be non-negative")
-  else
-    load_owned_regular_file_blocking_with
-      ~ownership_root
-      ~read_descriptor:(fun ~path fd descriptor ->
+let read_owned_range_digest_descriptor ~offset ~max_bytes ~path fd descriptor =
         let size = descriptor.Unix.st_size in
         let window_start = min offset size in
         let window_stop = window_start + min max_bytes (size - window_start) in
@@ -1211,8 +1322,78 @@ let load_owned_regular_file_range_with_sha256_blocking
         with
         | Eio.Cancel.Cancelled _ as cancellation ->
           reraise_current cancellation
-        | cause -> owned_file_operation_error ~path Read_contents cause)
+        | cause -> owned_file_operation_error ~path Read_contents cause
+;;
+
+let load_owned_regular_file_range_with_sha256_blocking
+    ~ownership_root ~offset ~max_bytes path =
+  if offset < 0 || max_bytes < 0
+  then
+    owned_file_operation_error
+      ~path
+      Read_contents
+      (Invalid_argument "offset and max_bytes must be non-negative")
+  else
+    load_owned_regular_file_blocking_with
+      ~ownership_root
+      ~read_descriptor:(read_owned_range_digest_descriptor ~offset ~max_bytes)
       path
+;;
+
+external open_owned_inventory_entry : Unix.file_descr -> string -> Unix.file_descr
+  = "caml_masc_owned_entry_open"
+
+let with_owned_inventory_entry root path fn =
+  let ownership_root = root.inventory_path in
+  match owned_directory_paths ~ownership_root (Filename.dirname path) with
+  | Error rejection -> owned_file_error (Ownership_boundary_rejected {path; rejection})
+  | Ok descendants ->
+    let descriptors = ref [] in
+    let opened = ref [] in
+    let close_all () =
+      let failure = ref None in
+      List.iter (fun fd ->
+        try Unix.close fd with Unix.Unix_error _ as ex ->
+          if !failure = None then failure := Some ex) !descriptors;
+      match !failure with None -> () | Some ex -> raise ex
+    in
+    try
+      Fun.protect ~finally:close_all (fun () ->
+        if not (inventory_root_current root)
+        then owned_file_error (Filesystem_identity_changed {path})
+        else begin
+          let parent = List.fold_left (fun parent directory ->
+            let fd = open_owned_directory_child parent (Filename.basename directory) in
+            descriptors := fd :: !descriptors;
+            opened := (directory, Unix.fstat fd) :: !opened;
+            fd) root.inventory_fd descendants in
+          let fd = open_owned_inventory_entry parent (Filename.basename path) in
+          descriptors := fd :: !descriptors;
+          let stat = Unix.fstat fd in
+          let current () = inventory_root_current root
+            && List.for_all (fun (directory, stat) ->
+                 same_file_identity (Unix.lstat directory) stat) !opened
+            && same_file_identity (Unix.lstat path) stat in
+          if not (current ()) then owned_file_error (Filesystem_identity_changed {path})
+          else
+            let result = fn fd stat in
+            if current () && same_file_snapshot stat (Unix.fstat fd) then result
+            else owned_file_error (Filesystem_identity_changed {path})
+        end)
+    with
+    | Eio.Cancel.Cancelled _ as cancellation -> reraise_current cancellation
+    | cause -> owned_file_operation_error ~path Read_contents cause
+;;
+
+let owned_inventory_entry_kind root path =
+  with_owned_inventory_entry root path (fun _fd stat -> Ok stat.Unix.st_kind)
+;;
+
+let owned_inventory_entry_digest root path =
+  with_owned_inventory_entry root path (fun fd stat ->
+    if stat.Unix.st_kind <> Unix.S_REG
+    then owned_file_error (Path_is_not_regular_file {path; kind=stat.st_kind})
+    else read_owned_range_digest_descriptor ~offset:0 ~max_bytes:0 ~path fd stat)
 ;;
 
 let load_owned_regular_file_range_with_sha256
@@ -1311,6 +1492,7 @@ let file_mtime (path : string) : float option =
 ;;
 
 external publish_paths_raw : bool -> string -> string -> unit = "caml_masc_publish_paths"
+
 let publish_paths exchange left right =
   if String.contains left '\000' || String.contains right '\000' then
     invalid_arg "filesystem publication paths cannot contain NUL";

@@ -406,7 +406,7 @@ let test_scoped_boundary_spans_official_attempts () =
         ~on_tool_boundary:(fun () ->
           incr boundary_calls;
           Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
-            ~repetition_execution:(Some execution) ~tool_calls:!calls ())
+            ~repetition_execution:(Some execution) ~tool_calls:!calls ~input_tool_calls:!calls ())
         (fun _ -> incr executions;
           Ok { Agent_core.Types.content = "same-output"; content_blocks = None; _meta = None })
       in
@@ -451,7 +451,7 @@ let test_moving_output_input_loop_aborts_at_input_threshold () =
           calls := observation :: !calls)
         ~on_tool_boundary:(fun () ->
           Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
-            ~repetition_execution:(Some execution) ~tool_calls:!calls ())
+            ~repetition_execution:(Some execution) ~tool_calls:!calls ~input_tool_calls:!calls ())
         (fun _input ->
           Ok { Agent_core.Types.content =
                  Printf.sprintf "appended line %d" (!appended + 1)
@@ -522,7 +522,7 @@ let test_autonomous_official_boundary_stops_execute_loop_without_scope () =
             ~on_tool_boundary:(fun () ->
               incr boundary_calls;
               Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
-                ~repetition_execution:None ~tool_calls:!calls ())
+                ~repetition_execution:None ~tool_calls:!calls ~input_tool_calls:!calls ())
             (fun _input ->
               incr executions;
               Ok { Agent_core.Types.content = output_text !executions; content_blocks = None; _meta = None })
@@ -575,7 +575,7 @@ let test_scoped_boundary_error_stops_immediately () =
             { scoped_observation with input_fingerprint = Some "invalid-hash" })
         ~on_tool_boundary:(fun () ->
           Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
-            ~repetition_execution:(Some execution) ~tool_calls:[] ())
+            ~repetition_execution:(Some execution) ~tool_calls:[] ~input_tool_calls:[] ())
         (fun _ -> Ok { Agent_core.Types.content = "effect returned"; content_blocks = None; _meta = None })
       in
       let result = tool.call ~call_id:"invalid-scope-observation" (`Assoc []) in
@@ -780,7 +780,7 @@ let test_settled_official_tool_keeps_turn_running () =
           incr boundary_calls;
           check bool "tool result handed off before boundary decision" true !handed_off;
           Keeper_agent_run.For_testing.official_client_tool_boundary
-            ~repetition_execution:None ~tool_calls:[] ())
+            ~repetition_execution:None ~tool_calls:[] ~input_tool_calls:[] ())
         (fun _ ->
           Ok { Agent_core.Types.content = "settled result"; content_blocks = None; _meta = None })
     in

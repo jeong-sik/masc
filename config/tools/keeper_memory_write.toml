@@ -6,6 +6,8 @@ memory_id identifies exact claim bytes: identical writes reuse its ID, even afte
 
 Memory is for thoughts, decisions and state worth remembering. When a new claim replaces your own earlier claim of the same kind (e.g. a progress or position snapshot), pass that claim's memory_id as supersedes instead of writing another copy. Do not write the same kind of snapshot again without superseding the previous one.
 
+Before recording a recurring lesson, search for the existing memory. A paraphrase or another successful run with a new PR number or date is not new knowledge. Keep the existing claim if its conditions and exceptions have not changed. When correcting your own claim, use supersedes. Store durable decisions and lessons separately from transient run receipts and task/PR progress that their authoritative stores can reconstruct.
+
 Keep task sequencing and operating constraints in typed stores, not memory prose. Writes carry typed provenance and report failures. source_path binds recall to unchanged source bytes. For a derived conclusion, pass rule_id and premise_ids; one complete support set must remain current. For Board evidence, pass board_post_id and optional board_comment_id. Board evidence cannot combine with source_path or derivation."""
 additional_properties = false
 

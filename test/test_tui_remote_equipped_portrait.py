@@ -172,9 +172,21 @@ def remote_portrait(binary: str, evidence: Path) -> None:
     boot_path = f"/api/v1/keepers/{keeper}/boot"
     held_boot = _keyboard_harness.GatedHttpResponse((409, {"error": "paused owner"}), hold_seconds=30.0)
     boot_armed = threading.Event()
-    fixtures[boot_path] = lambda: held_boot() if boot_armed.is_set() else (200, {"ok": True})
     directive_path = f"/api/v1/keepers/{keeper}/directive"
-    fixtures[directive_path] = (200, {"ok": True})
+    # Counted where the request is answered: the request log is filled by
+    # another thread and can trail the screen this scenario reads.
+    lifecycle_started: list[str] = []
+
+    def boot_response():
+        lifecycle_started.append(boot_path)
+        return held_boot() if boot_armed.is_set() else (200, {"ok": True})
+
+    def directive_response():
+        lifecycle_started.append(directive_path)
+        return 200, {"ok": True}
+
+    fixtures[boot_path] = boot_response
+    fixtures[directive_path] = directive_response
     # Raw health answers deliberately bypass both harness identity fillers.
     # No native state exists here; this distinct path identifies the remote
     # server whose recorded wire is being replayed.
@@ -297,7 +309,10 @@ def remote_portrait(binary: str, evidence: Path) -> None:
             # original workspace, even though C names the same Keeper.
             # Keep the exact authority path in the footer for this boundary
             # proof; the earlier 99-column portrait pixel checks stay intact.
-            _keyboard_harness.resize_and_wait(process, fd, output, rows=70, columns=300, needle=b"Identity")
+            # The footer drops its status tail before any key. It carries
+            # "Base: <path>" only when the path fits beside the keys.
+            authority_columns = max(600, len(str(evidence)) + len(local_base) + 360)
+            _keyboard_harness.resize_and_wait(process, fd, output, rows=70, columns=authority_columns, needle=b"Identity")
             boot_armed.set()
             os.write(fd, b"p")
             assert _keyboard_harness.wait_for_fixture_event(process, fd, output, held_boot.requested,
@@ -318,7 +333,7 @@ def remote_portrait(binary: str, evidence: Path) -> None:
             _keyboard_harness.send_and_wait(process, fd, output, b"\r", INFO_TAB)
             screen_is(lambda text: b"authority-c-current-roster" in text,
                       "C roster was not applied while B Boot was held")
-            lifecycle_offset = len(requests)
+            lifecycle_offset = len(lifecycle_started)
             held_boot.release.set()
             c_payload["keepers"][0]["runtime_blocker_summary"] = "authority-c-settled-roster"
             with roster.lock:
@@ -326,8 +341,8 @@ def remote_portrait(binary: str, evidence: Path) -> None:
             roster.publish("c-settled")
             screen_is(lambda text: b"authority-c-settled-roster" in text,
                       "fresh C roster after release was not applied")
-            assert not [path for path, _ in requests[lifecycle_offset:]
-                if path in (boot_path, directive_path)],                 "a superseded B lifecycle plan sent a successor request to C"
+            assert not lifecycle_started[lifecycle_offset:], \
+                "a superseded B lifecycle plan sent a successor request to C"
             boot_armed.clear()
 
             # The automatic refresh (no cancelling input) changes authority
@@ -375,7 +390,7 @@ def remote_portrait(binary: str, evidence: Path) -> None:
     _keyboard_harness.run_terminal_scenario(binary,
         description="remote Keeper equipment changes actual terminal PNG pixels",
         interact=interact, http_fixtures=fixtures, http_requests=requests,
-        refresh=0.5, preload_input=KITTY_REPLIES)
+        refresh=0.5, preload_input=KITTY_REPLIES, terminal_cols=160)
 
 
 def main() -> None:

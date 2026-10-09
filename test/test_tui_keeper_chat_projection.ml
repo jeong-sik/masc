@@ -482,6 +482,14 @@ let test_current_nonterminal_event_set () =
           ; "toolCallId", `String "tool-1"
           ; "executionId", `String "exec-1"
           ]
+      else if String.equal name "KEEPER_NATIVE_TOOL_START"
+              || String.equal name "KEEPER_NATIVE_TOOL_END" then
+        `Assoc
+          [ "toolStreamScope", `Int 0
+          ; "toolCallBlockIndex", `Int 0
+          ; "toolCallId", `String "tool-1"
+          ; "toolCallName", `String "read"
+          ]
       else if String.equal name "KEEPER_CHAT_BATCH_BOUND" then
         `Assoc ["operation_id", `String request.request_id; "execution_id", `String "shared-execution"]
       else if String.equal name "KEEPER_STREAM_PROTOCOL_ERROR" then

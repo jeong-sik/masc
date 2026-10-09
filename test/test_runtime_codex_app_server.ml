@@ -7511,6 +7511,33 @@ let test_production_dynamic_context_reaches_codex_instruction_wire ~project () =
          |> member "text"
          |> to_string
        in
+       let config = Workspace.default_config base_path in
+       let capture = match Keeper_prompt_capture.read ~config ~keeper:"codex-production-fixture" with
+         | Ok capture -> capture
+         | Error error -> fail (Keeper_prompt_capture.read_error_to_string error) in
+       check (option string) "production capture and actual carrier agree" (Some wire_text) capture.assembled;
+       let issued = Keeper_run_prompt.assemble_extra_system_context ~existing_extra_system_context:None
+         ~blocks:(List.map (fun (block : Keeper_prompt_capture.block) -> block.id,block.text) capture.blocks) in
+       check (option string) "issuer reproduces the production hook assembly" (Some wire_text)
+         issued.extra_system_context;
+       let expected_partition = match issued.receipt with
+         | Some receipt -> Keeper_context_assembly.receipt_to_json receipt
+         | None -> fail "production context receipt absent" in
+       let manifest_path = Keeper_runtime_manifest.path_for_trace config
+         ~keeper_name:"codex-production-fixture" ~trace_id:"codex-production-context-1" in
+       let partitions = In_channel.with_open_bin manifest_path In_channel.input_lines
+         |> List.map Yojson.Safe.from_string
+         |> List.filter_map (fun row ->
+           match row |> member "decision" |> member "extra_system_context_partition" with
+           | `Null -> None | partition -> Some partition) in
+       check int "real production hook durably emits one assembly receipt" 1 (List.length partitions);
+       check bool "private manifest contains the exact issuer partition" true
+         (List.hd partitions = expected_partition);
+       Printf.printf "MEMORY_CONTEXT_ASSEMBLY_JSON %s\n%!"
+         (Yojson.Safe.to_string (`Assoc ["evidence",`String "production_hook_manifest_and_fake_cli_carrier";
+           "partition",List.hd partitions;
+           "captured_carrier_raw_bytes",`Int (String.length wire_text);
+           "captured_carrier_raw_sha256",`String Digestif.SHA256.(digest_string wire_text |> to_hex)]));
        (* Stable memory availability precedes dynamic instructions. Assert the
           complete instruction section survives exactly once, without assuming
           it is the first section of the assembled carrier. *)

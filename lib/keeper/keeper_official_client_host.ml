@@ -26,10 +26,7 @@ type image_block = Keeper_official_client_context_projection.image_block =
   ; base64_data : string
   }
 
-type composed_context = Keeper_official_client_context_projection.composed_context =
-  { carrier_sha256 : string
-  ; blocks : (Prompt_block_id.t * string) list
-  }
+type composed_context = Keeper_official_client_context_projection.composed_context
 
 type resume_delivery = Keeper_official_client_context_projection.resume_delivery =
   { prompt : string

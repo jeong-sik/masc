@@ -141,9 +141,7 @@ default = "codex.context"
         (* Production records the block witness in this hook. Reading it before
            preparation would observe None and silently resend the carrier. *)
         composed_context := Option.map (fun blocks ->
-          { Keeper_official_client_host.carrier_sha256 =
-              Digestif.SHA256.(digest_string world |> to_hex)
-          ; blocks }) prompt_blocks;
+          (Keeper_context_assembly.assemble ~existing_extra_system_context:None ~blocks)) prompt_blocks;
         Agent_core.Hooks.AdjustParams {current_params with extra_system_context=Some world}
       | _ -> Agent_core.Hooks.Continue) } in
     Keeper_codex_runtime.run

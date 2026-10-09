@@ -127,10 +127,7 @@ let is_carried_on_resume message =
 
 module Session_store = Keeper_official_client_session_store
 
-type composed_context =
-  { carrier_sha256 : string
-  ; blocks : (Prompt_block_id.t * string) list
-  }
+type composed_context = Keeper_context_assembly.t
 
 type resume_delivery =
   { prompt : string
@@ -156,8 +153,8 @@ let carried_message context message =
 ;;
 
 (* The context carrier splits into its typed blocks only when it is the exact
-   assembly [composed_context] names: the digest of its text equals the one
-   the assembly recorded. Otherwise the whole carrier is one carried context.
+   renderer-issued assembly [composed_context] names, without an existing
+   prefix. Otherwise the whole carrier is one carried context.
    A block's digest is the one its turn record keeps, the sha256 of its raw
    text. *)
 let carried_of_message ~composed_context (message : Agent_core.Types.message) =
@@ -167,9 +164,14 @@ let carried_of_message ~composed_context (message : Agent_core.Types.message) =
   then [ carried_message Session_store.Librarian_working_state message ]
   else if is_composed_system_context message
   then (
-    match composed_context, message.content with
-    | Some { carrier_sha256; blocks }, [ Agent_core.Types.Text text ]
-      when String.equal (sha256_hex text) carrier_sha256 ->
+    let blocks =
+      match composed_context, message.content with
+      | Some assembly, [ Agent_core.Types.Text text ] ->
+        Keeper_context_assembly.blocks_for_carrier assembly text
+      | Some _, _ | None, _ -> None
+    in
+    match blocks with
+    | Some blocks ->
       List.map
         (fun (block, text) ->
            { held =
@@ -180,7 +182,7 @@ let carried_of_message ~composed_context (message : Agent_core.Types.message) =
            ; message = extra_system_context_message text
            })
         blocks
-    | Some _, _ | None, _ -> [ carried_message Session_store.Context_carrier message ])
+    | None -> [ carried_message Session_store.Context_carrier message ])
   else []
 ;;
 

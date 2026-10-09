@@ -1270,14 +1270,7 @@ let assemble_hooks
                        recorded_blocks_for_receipt;
                 acc.extra_system_context_digest <- Option.map sha256_hex ctx;
                 acc.extra_system_context_size <- Option.map String.length ctx;
-                (* The carrier is these blocks alone only when no earlier hook
-                   put text in front of them. An official-client resume splits
-                   the carrier into them to send only what its vendor session
-                   does not already hold. *)
-                acc.extra_system_context_blocks
-                <- (match current_params.extra_system_context, ctx with
-                    | None, Some _ -> Some recorded_blocks_for_receipt
-                    | Some _, _ | None, None -> None);
+                acc.extra_system_context_assembly <- Some extra_system_context_assembly;
                 (match runtime_manifest_context, runtime_manifest_append with
                  | Some manifest_context, Some append_manifest ->
                    let post_tool_context = post_tool_round in
@@ -1308,6 +1301,10 @@ let assemble_hooks
                                ; ( "extra_system_context_computed_size",
                                    Json_util.int_opt_to_json
                                      acc.extra_system_context_size )
+                               ; ( "extra_system_context_partition",
+                                   match extra_system_context_assembly.receipt with
+                                   | None -> `Null
+                                   | Some receipt -> Keeper_context_assembly.receipt_to_json receipt )
                                ]))
                         ())
                  | _ -> ());

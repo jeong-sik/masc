@@ -70,6 +70,9 @@ type stream_protocol_error = {
 
 type reply_details =
   { reply : string
+        (** Canonical terminal body after finalization. This flat string does
+            not identify provider content blocks or authorize distributing
+            its bytes over separate observed text stretches. *)
   ; turn_outcome : Keeper_turn_outcome.t
   ; turn_ref : Ids.Turn_ref.t
   ; terminal_stream_scope : int option

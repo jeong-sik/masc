@@ -3440,3 +3440,9 @@ let post_setup_login_streaming ~clock ~host ~port ~body ~on_chunk =
   | Error _ -> Error "Login stream unavailable; recheck the login status."
   | Ok (Masc_http_client.Pool.Buffered _) -> Error "Login request was refused."
   | Ok (Masc_http_client.Pool.Streamed _) -> Ok ()
+
+let fetch_identity_login_status ~host ~port ~keeper_name ~provider_id ~attempt_id =
+  get_json ~host ~port ~path:(Printf.sprintf
+    "/api/v1/keepers/oauth/attempt-status?keeper=%s&provider=%s&attempt_id=%s"
+    (percent_encode_path_segment keeper_name) (percent_encode_path_segment provider_id)
+    (percent_encode_path_segment attempt_id))

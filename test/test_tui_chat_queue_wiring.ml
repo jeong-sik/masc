@@ -2627,6 +2627,200 @@ let test_held_tool_results_follow_async_snapshot_changes () =
        && Astring.String.is_infix ~affix:"results stale" stale))
 ;;
 
+let test_thinking_fold_tracks_origin_body_budget () =
+  let module Layout = Masc_tui_message_layout in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let thought = String.make 70 'x' in
+  state.msg_reasoning_visibility <- Tui_types.Reasoning_folded;
+  state.msg_history <- [chat_entry ~request_id:"boundary-thought" ~role:Tui_types.Message_thinking
+      ~text:thought ~at:1. ()];
+  let body origin =
+    state.msg_origin_display <- origin;
+    match Masc_tui_render_chat.keeper_message_layout_entries state ~keeper_name:"alpha" ~chat_cols:80 with
+    | [entry] -> entry.Layout.body
+    | _ -> fail "expected one thinking entry" in
+  check string "one body row needs no fold" thought (body Layout.Origin_row);
+  check bool "inline gutter leaves less room so the same thought folds" false
+    (String.equal thought (body Layout.Origin_inline));
+  check string "returning to row origin invalidates the compact cached body" thought
+    (body Layout.Origin_row)
+;;
+
+let test_formatting_does_not_fold_a_fitting_thought () =
+  let module Layout = Masc_tui_message_layout in
+  List.iter (fun origin ->
+    List.iter (fun decorate ->
+      let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+      state.msg_origin_display <- origin;
+      state.msg_reasoning_visibility <- Tui_types.Reasoning_full;
+      let set text = state.msg_history <- [chat_entry ~request_id:"formatted-thought"
+        ~role:Tui_types.Message_thinking ~text ~at:1. ()] in
+      let entry () = match Masc_tui_render_chat.keeper_message_layout_entries
+          state ~keeper_name:"alpha" ~chat_cols:80 with
+        | [entry] -> entry | _ -> fail "expected one thought" in
+      set "x";
+      let width = Layout.entry_body_cells ~origin ~inner_width:(Masc_tui_ansi.framed_inner_width 80) (entry ()) in
+      let text = decorate (String.make width 'x') in
+      set text;
+      state.msg_reasoning_visibility <- Tui_types.Reasoning_folded;
+      check string "visible one-row Markdown remains readable" text (entry ()).Layout.body)
+      [(fun s -> "**" ^ s ^ "**"); (fun s -> "*" ^ s ^ "*"); (fun s -> "`" ^ s ^ "`")])
+    [Layout.Origin_inline; Origin_row; Origin_bare]
+;;
+
+let test_thinking_previews_do_not_trigger_folding () =
+  let module Layout = Masc_tui_message_layout in
+  let module Render = Masc_tui_render_chat in
+  let module Preview = Masc_tui_link_preview in
+  let url = "https://github.com/jeong-sik/masc/pull/41722" in
+  let preview = Preview.get_preview url in
+  Preview.cache_store { preview with title = Some "A fitting thought's link" };
+  List.iter (fun origin ->
+    List.iter (fun mode ->
+      let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+      state.msg_origin_display <- origin;
+      state.link_previews_mode <- mode;
+      state.msg_reasoning_visibility <- Tui_types.Reasoning_folded;
+      state.msg_history <- [chat_entry ~request_id:"preview-thought"
+        ~role:Tui_types.Message_thinking ~text:url ~at:1. ()];
+      let entry = match Render.keeper_message_layout_entries state
+          ~keeper_name:"alpha" ~chat_cols:140 with
+        | [entry] -> entry | _ -> fail "expected one thought" in
+      check string "fitting source keeps its URL in folded mode" url entry.Layout.body;
+      let width = Layout.entry_body_cells ~origin
+        ~inner_width:(Masc_tui_ansi.framed_inner_width 140) entry in
+      let theme = Masc_tui_ansi.Chat_theme.snapshot () in
+      let rows mode = Render.cached_chat_markdown ~link_previews_mode:mode
+        ~theme ~entry ~width in
+      check bool "the preview still draws beside the retained thought" true
+        (List.length (rows mode) > List.length (rows `Off)))
+      [`Rich; `Compact])
+    [Layout.Origin_inline; Origin_row; Origin_bare]
+;;
+
+let test_thinking_folds_only_when_it_saves_rows () =
+  let module Layout = Masc_tui_message_layout in
+  let module Render = Masc_tui_render_chat in
+  List.iter (fun columns ->
+    List.iter (fun origin ->
+      let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+      state.msg_origin_display <- origin;
+      state.msg_reasoning_visibility <- Tui_types.Reasoning_full;
+      state.msg_history <- [chat_entry ~request_id:"height-thought"
+        ~role:Tui_types.Message_thinking ~text:"x" ~at:1. ()];
+      let initial = match Render.keeper_message_layout_entries state
+          ~keeper_name:"alpha" ~chat_cols:columns with
+        | [entry] -> entry | _ -> fail "expected one thought" in
+      let width = Layout.entry_body_cells ~origin
+        ~inner_width:(Masc_tui_ansi.framed_inner_width columns) initial in
+      let context = Masc_tui_ansi.Chat_theme.body_context
+        (Masc_tui_ansi.Chat_theme.snapshot ()) Layout.Thinking in
+      let height body =
+        Layout.rows_of_entry
+          ~markdown:(fun ~(entry : Layout.entry) ~width ->
+            Render.For_testing.chat_markdown ~context ~width entry.body)
+          ~origin ~inner_width:(Masc_tui_ansi.framed_inner_width columns)
+          ~previous:None {initial with Layout.body}
+        |> List.length in
+      state.msg_reasoning_visibility <- Tui_types.Reasoning_folded;
+      List.iter (fun body ->
+        let original = { initial with Layout.body } in
+        let folded = Render.For_testing.fold_thinking_entry state ~chat_cols:columns original in
+        check bool "folded mode never adds terminal rows" true
+          (height folded.body <= height body);
+        if not (String.equal folded.body body) then
+          check bool "a replaced thought saves at least one terminal row" true
+            (height folded.body < height body);
+        if List.mem body ["short\n"; "short\n\n"] then
+          check string "trailing blank rows do not hide a visible one-row thought" body folded.body)
+        [String.make (width + 1) 'x'; "one\ntwo"; "short\n"; "short\n\n";
+         String.make (width * 10) 'x'];
+      if width < 20 then
+        let body = String.make (width + 1) 'x' in
+        check string "two short wrapped rows are not replaced by a taller summary" body
+          (Render.For_testing.fold_thinking_entry state ~chat_cols:columns {initial with Layout.body}).body)
+      [Layout.Origin_inline; Origin_row; Origin_bare])
+    [40; 80; 140]
+;;
+
+let test_thinking_measurement_keeps_the_growing_draw_cache () =
+  let module Layout = Masc_tui_message_layout in
+  let module Render = Masc_tui_render_chat in
+  let module Cache = Masc_tui_markdown_render_cache in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  state.msg_reasoning_visibility <- Tui_types.Reasoning_full;
+  state.msg_history <- [chat_entry ~request_id:"growing-fold-cache"
+    ~role:Tui_types.Message_thinking ~text:(String.make 300 'x') ~at:1. ()];
+  let initial = match Render.keeper_message_layout_entries state
+      ~keeper_name:"alpha" ~chat_cols:80 with
+    | [entry] -> entry | _ -> fail "expected one thought" in
+  let source = Layout.Markdown_growing
+    {keeper_name="alpha"; request_id="growing-fold-cache"; entry_index=0} in
+  let initial = {initial with Layout.markdown_source=source} in
+  let width = Layout.entry_body_cells ~origin:state.msg_origin_display
+    ~inner_width:(Masc_tui_ansi.framed_inner_width 80) initial in
+  let theme = Masc_tui_ansi.Chat_theme.snapshot () in
+  let context = Masc_tui_ansi.Chat_theme.body_context theme Layout.Thinking in
+  state.msg_reasoning_visibility <- Tui_types.Reasoning_folded;
+  let first = Render.For_testing.fold_thinking_entry state ~chat_cols:80 initial in
+  let drawn = Render.cached_chat_markdown ~link_previews_mode:`Off ~theme ~entry:first ~width in
+  let next = Render.For_testing.fold_thinking_entry state ~chat_cols:80
+    {initial with Layout.body=initial.body ^ " more"} in
+  check string "a growing thought retains the same compact summary" first.body next.body;
+  (* The same production cache key must still own the summary. A renderer
+     call here means measurement replaced it with the growing raw thought. *)
+  let identity : Render.For_testing.chat_markdown_identity =
+    {cmi_style=Layout.Thinking; cmi_keeper_name="alpha";
+     cmi_request_id="growing-fold-cache"; cmi_observed_at=None; cmi_entry_index=0} in
+  let retained = Cache.render_growing Render.For_testing.chat_markdown_cache
+    ~theme_revision:Render.For_testing.chat_markdown_theme_revision
+    ~palette_generation:context.palette_generation ~width ~identity ~text:next.body
+    ~renderer:(fun ~width:_ _ -> fail "fold measurement evicted the drawn summary") in
+  check (list string) "the next draw reuses the retained summary" drawn retained
+;;
+
+let test_fold_measurement_retains_raw_source_height () =
+  let module Layout = Masc_tui_message_layout in
+  let module Render = Masc_tui_render_chat in
+  let module Cache = Masc_tui_markdown_render_cache in
+  let module Markdown = Masc_tui_markdown in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  state.msg_reasoning_visibility <- Tui_types.Reasoning_full;
+  state.msg_history <- [chat_entry ~request_id:"raw-height-owner"
+    ~role:Tui_types.Message_thinking ~text:"alpha\nbeta\ngamma" ~at:1. ()];
+  let initial = match Render.keeper_message_layout_entries state
+      ~keeper_name:"alpha" ~chat_cols:80 with
+    | [entry] -> entry | _ -> fail "expected one thought" in
+  let initial = {initial with Layout.markdown_source=Layout.Markdown_growing
+    {keeper_name="alpha"; request_id="raw-height-owner"; entry_index=0}} in
+  state.msg_reasoning_visibility <- Tui_types.Reasoning_folded;
+  let folded = Render.For_testing.fold_thinking_entry state ~chat_cols:80 initial in
+  let width = Layout.entry_body_cells ~origin:state.msg_origin_display
+    ~inner_width:(Masc_tui_ansi.framed_inner_width 80) initial in
+  let theme = Masc_tui_ansi.Chat_theme.snapshot () in
+  ignore (Render.cached_chat_markdown ~link_previews_mode:`Off ~theme ~entry:folded ~width);
+  let context = Masc_tui_ansi.Chat_theme.body_context theme Layout.Thinking in
+  let identity : Render.For_testing.chat_markdown_identity =
+    {cmi_style=Layout.Thinking; cmi_keeper_name="alpha"; cmi_request_id="raw-height-owner";
+     cmi_observed_at=None; cmi_entry_index=0} in
+  let parsed = ref [] in
+  let text = initial.body ^ " delta" in
+  ignore (Cache.measure_growing Render.For_testing.thinking_height_cache
+    ~theme_revision:Render.For_testing.chat_markdown_theme_revision
+    ~palette_generation:context.palette_generation ~width ~identity ~text
+    ~renderer:(fun ~width text ->
+      parsed := text :: !parsed;
+      Markdown.render_streaming ~palette:Markdown.plain_palette ~width text));
+  check (list string) "a drawn fold leaves the raw-source mutable boundary intact"
+    ["gamma delta"] (List.rev !parsed);
+  let next = Render.For_testing.fold_thinking_entry state ~chat_cols:80
+    {initial with Layout.body=text} in
+  check string "the incremental source still chooses the same physical fold" folded.body next.body;
+  state.msg_reasoning_visibility <- Tui_types.Reasoning_full;
+  check string "unfolding preserves every source byte" text
+    (Render.For_testing.fold_thinking_entry state ~chat_cols:80 {initial with Layout.body=text}).body
+;;
+
 let test_an_observed_running_turn_is_drawn_from_its_journal () =
   let cache = Masc_tui_ansi.terminal_size_cache in
   let previous_size = Masc_tui_ansi.get_terminal_size () in
@@ -4889,6 +5083,18 @@ let () =
             `Quick test_hold_settled_log_orders_by_start_and_replaces_only_partial_logs
         ; test_case "a journal-built log holds its turn in the timeline" `Quick
             test_a_journal_built_log_holds_its_turn_in_the_timeline
+        ; test_case "formatting does not fold fitting thoughts" `Quick
+            test_formatting_does_not_fold_a_fitting_thought
+        ; test_case "thinking fold follows origin body budget" `Quick
+            test_thinking_fold_tracks_origin_body_budget
+        ; test_case "previews do not make a fitting thought fold" `Quick
+            test_thinking_previews_do_not_trigger_folding
+        ; test_case "folding only reduces rendered thought height" `Quick
+            test_thinking_folds_only_when_it_saves_rows
+        ; test_case "fold measurement retains raw height separately from the summary" `Quick
+            test_fold_measurement_retains_raw_source_height
+        ; test_case "fold measurement preserves the growing draw cache" `Quick
+            test_thinking_measurement_keeps_the_growing_draw_cache
         ; test_case "an execute call leads with its exit and output" `Quick
             test_an_execute_call_leads_with_its_exit_and_output
         ; test_case "mismatched rows make results incomplete" `Quick

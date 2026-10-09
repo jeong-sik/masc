@@ -13,9 +13,11 @@ let holds text needle =
   n = 0 || seek 0
 
 let entry ?(timestamp = "12:34:56") ?timeline_bucket ?speaker
+    ?(heading_boundary = Layout.Inherit_heading)
     ?(markdown_source = Layout.Markdown_streaming) style role request_label body :
     Layout.entry =
   { delivery_state = None; style
+  ; heading_boundary
   ; body_presentation = Layout.Source_body
   ; timestamp
   ; timeline_bucket
@@ -99,6 +101,7 @@ let test_word_delete_removes_blanks_then_word () =
 let transcript count =
   List.init count (fun index ->
       { Layout.delivery_state = None; Layout.style = Layout.Keeper;
+        heading_boundary = Layout.Inherit_heading;
         body_presentation = Layout.Source_body;
         timestamp = Printf.sprintf "12:%02d:00" (index mod 60);
         timeline_bucket = None;

@@ -1763,8 +1763,11 @@ type drawn_origin =
   | Reply_of_segment of int
   | Error_of_segment of int
 
+type response_part = Observed_response | Final_response
+
 type drawn_item =
   { origin : drawn_origin
+  ; response_part : response_part option
   ; at : float option
   ; segment : int
   ; superseded : int option
@@ -1858,7 +1861,7 @@ type drawn_projection =
 let drawn t =
   let item ?(stream_scope=None) ~segment ~origin ~at drawn =
     [Projected_item
-       ({ origin; at = Some at; segment; superseded = None; superseded_runtime_id = None; drawn }, stream_scope)] in
+       ({ origin; response_part = None; at = Some at; segment; superseded = None; superseded_runtime_id = None; drawn }, stream_scope)] in
   let projected =
     project_trail ~response_boundary:(fun acc -> [Projected_response_boundary] :: acc) t
       ~thinking:(fun ~segment ~origin ~at lines -> item ~segment ~origin:(Thinking_stretch origin) ~at (Drawn_thinking lines))
@@ -1885,6 +1888,7 @@ let drawn t =
     | Text_stretch id, None, Drawn_text _ -> id >= t.response_first_stretch
     | _ -> false
   in
+  let text_count = List.length (List.filter current_text items) in
   (* The flat canonical reply can stand for the last text stretch only. A
      provider message start or tool round ends the preceding response even
      when no later text arrives. Earlier observed stretches keep their places;
@@ -1919,8 +1923,10 @@ let drawn t =
     | [] -> items, last_text
     | skills ->
         let unseen_item =
-          { origin = Unstreamed_skills; at = None; segment = t.segment; superseded = None; superseded_runtime_id = None; drawn = Drawn_skill skills }
+          { origin = Unstreamed_skills; response_part = None; at = None; segment = t.segment; superseded = None; superseded_runtime_id = None; drawn = Drawn_skill skills }
         in
+        if text_count > 1 then items @ [unseen_item], last_text
+        else
         (* An identified model response that reports its own terminal ending identifies
            its final stretch even if the Skill call itself was omitted. The
            projected response boundary resets the candidate even when that
@@ -1944,7 +1950,7 @@ let drawn t =
   in
   let items = match t.reply with
   | None -> items
-  | Some { reply_text; reply_outcome = Masc.Keeper_turn_outcome.Visible_reply; _ }
+  | Some { reply_text; reply_at; reply_outcome = Masc.Keeper_turn_outcome.Visible_reply; _ }
     when String.trim reply_text <> "" -> (
       (* Which turn this reply belongs to was decided before it got here, by
          the log this transcript projects: a log is one operation's
@@ -1953,32 +1959,43 @@ let drawn t =
          request's identity, not its words), and a journal is read per
          operation into the log created with that id. So a reply on this
          transcript is this operation's, and the operation records one reply:
-         the terminal response. The
-         record is the store's text for it and stands where its last stretch
-         was, typed as the record -- whatever the stream's copy read. *)
+         the terminal response. One observed text stretch can retain the
+         established in-place presentation. Multiple stretches carry no
+         canonical block mapping, so the final record follows separately. *)
       let reply_item =
         { origin = Reply_of_segment t.segment
-        ; at = t.settled_at
+        ; response_part = None
+        ; at = Some reply_at
         ; segment = t.segment
         ; superseded = None
         ; superseded_runtime_id = None
         ; drawn = Drawn_reply (safe_block reply_text)
         }
       in
-      match last_text with
-      | None ->
-          (* Nothing streamed for the reply: the record is all there is. *)
-          items @ [ reply_item ]
-      | Some last ->
-          List.mapi (fun index item ->
-            if index = last then { reply_item with origin = item.origin; at = item.at }
-            else item) items)
+      if text_count > 1 then
+        (* A flat recorded reply cannot identify which canonical bytes belong
+           at each observed position. Keep the evidence in its original
+           order, and present final authority separately. In particular,
+           A/thinking/B must not become thinking/AB or A/thinking/AB. *)
+        List.map (fun item ->
+          if current_text item then { item with response_part = Some Observed_response }
+          else item) items
+        @ [ { reply_item with response_part = Some Final_response } ]
+      else match last_text with
+        | None ->
+            (* Nothing streamed for the reply: the record is all there is. *)
+            items @ [ reply_item ]
+        | Some last ->
+            List.mapi (fun index item ->
+              if index = last then { reply_item with origin = item.origin; at = item.at }
+              else item) items)
   | Some { reply_text; reply_at; reply_outcome; reply_turn_ref; _ } ->
       (* Nothing is chunked for a control outcome, and a visible reply with
          no text has nothing to chunk: the one row that says how the turn
          ended comes from the recorded reply. *)
       items
       @ [ { origin = Reply_of_segment t.segment
+          ; response_part = None
           ; at = Some reply_at
           ; segment = t.segment
           ; superseded = None
@@ -1995,6 +2012,7 @@ let drawn t =
   | Stream_failed message ->
       items
       @ [ { origin = Error_of_segment t.segment
+          ; response_part = None
           ; at = t.ended_at
           ; segment = t.segment
           ; superseded = None

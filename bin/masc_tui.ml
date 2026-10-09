@@ -11967,9 +11967,10 @@ let launch_tick_side_reads state ~mailbox ~(needs : Masc_tui_types.surface_needs
      somebody is waiting for it. Same shape as the chat reload above, and for
      the same reason: a pane that read once on open showed a fact that had
      since changed. *)
-  Masc_tui_types.identity_login_pending_keepers state
+  let login_now = Unix.gettimeofday () in
+  Masc_tui_types.identity_login_pending_keepers state ~now:login_now
   |> List.iter (fun keeper_name ->
-       if identity_login_recovery_poll_ready state keeper_name then
+       if identity_login_recovery_poll_ready state ~now:login_now keeper_name then
          Masc_tui_identity_requests.launch_view state ~host:server_peer_host
            ~deliver:(workspace_enqueue state mailbox) keeper_name);
   (* The "answering now" badge rides every tick for the same reason as the
@@ -16208,10 +16209,10 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         ~report:(report_action state) ~notice:(present_identity_notice state)
         ~refresh:(fun keeper -> Masc_tui_identity_requests.launch_view state
           ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper) result
-  | Identity_providers_loaded (request, result) ->
-      Masc_tui_identity_updates.providers_loaded state request result
+  | Identity_providers_loaded (request, result, attempts) ->
+      Masc_tui_identity_updates.providers_loaded state request ~attempts result
   | Identity_login_started (request, result) ->
-      Masc_tui_identity_updates.login_started state request
+      Masc_tui_identity_updates.login_started state request ~now:(Unix.gettimeofday ())
         ~report:(report_action state) ~notice:(present_identity_notice state) result
   | Identity_app_saved (keeper_name, provider_id, result) ->
       Masc_tui_identity_updates.app_saved ~keeper_name ~provider_id
@@ -28699,6 +28700,10 @@ and is loaded on demand through keeper_skill.
       if
         Int64.compare (Int64.sub now_ns !last_check_ns) refresh_interval_ns >= 0
       then begin
+        (* Consent expires even while authority is unread or a refresh is
+           still in flight. The server's deadline owns this local wait. *)
+        if expire_identity_logins state ~now:(Unix.gettimeofday ()) then
+          Render_schedule.request render_schedule Render_schedule.Background;
         (* The armed approval survives the tick: the snapshot apply already
            disarms it when its token leaves the list, so clearing here only
            made the second press race a two-second clock. *)

@@ -168,6 +168,12 @@ type memory_pass =
           read, a neutral system row sharing the Memory lane, and every row
           outside it. *)
 
+type heading_boundary = Inherit_heading | Start_heading
+(** [Inherit_heading] keeps ordinary per-turn heading grouping. [Start_heading]
+    explicitly opens an origin heading for this entry, even inside the same
+    request and with the same speaker label. This is presentation metadata,
+    not a new turn or a change to the authored body. *)
+
 type projected_body = Projected_summary | Projected_results | Projected_full
 (** Which projection of typed producer data wrote a body: a tool block's
     calls, a turn's skill activity, a Gate step's folded argument, or a Memory
@@ -182,6 +188,7 @@ type body_presentation = Source_body | Thinking_summary | Projected_body of proj
 
 type entry = {
   style : style;
+  heading_boundary : heading_boundary;
   body_presentation : body_presentation;
   timestamp : string;
   timeline_bucket : timeline_bucket option;
@@ -632,6 +639,10 @@ val chat_title_row :
 (** Fit a chat navigation title while reserving the complete projection-mode
     suffix first. The opaque title yields width before semantic display state. *)
 
+val entry_body_cells : origin:origin_display -> inner_width:int -> entry -> int
+(** Available body cells after the entry's rail, origin and indentation. A
+    continued origin occupies the same padded width as its opening origin. *)
+
 val chat_role_label_width : pane_cells:int -> int
 (** The badge budget for a pane this wide. It does not read the labels: body
     width is taken from what the badge leaves, so measuring the loaded
@@ -905,6 +916,3 @@ val age_text : now:float -> since:float -> string option
     rather than one read here, so a test can state the instant and two rows in
     one frame can share a single read. A clock that moved backwards says
     nothing rather than a negative age. *)
-
-val entry_body_cells : origin:origin_display -> inner_width:int -> entry -> int
-(** Available body cells after the entry rail, origin and indentation. *)

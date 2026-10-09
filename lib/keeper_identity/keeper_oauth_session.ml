@@ -13,6 +13,7 @@ type start_error =
   | Registration_failed of Registration.error
   | No_pkce_s256 of string
   | No_registration of string
+  | Superseded_by_newer_start
 
 let start_error_to_string = function
   | Discovery_failed err ->
@@ -31,10 +32,14 @@ let start_error_to_string = function
     Printf.sprintf
       "no client is configured and %s offers no registration endpoint; in TUI press 'A' (내 앱 쓰기) to set your Client ID and Secret (or POST /api/v1/keepers/oauth/client)"
       issuer
+  | Superseded_by_newer_start ->
+    "a newer login for this Keeper and service started while this one was \
+     still being prepared; finish that one instead"
 
 type started = {
   authorize_url : string;
   state : string;
+  attempt_id : string;
   credentials : Keeper_oauth_client_store.credentials;
   registered_now : bool;
 }
@@ -54,6 +59,9 @@ let start
       ~ttl_sec
       ()
   =
+  (* Admitted before any network call, so a restart's order is the order the
+     operator asked in rather than the order discovery happened to answer. *)
+  let admission = Pending.admit pending in
   let* discovered =
     Result.map_error
       (fun err -> Discovery_failed err)
@@ -103,14 +111,19 @@ let start
         ~scopes:credentials.Store.scopes ~redirect_uri
         ~keeper
     in
-    Pending.remember pending ~now ~ttl_sec
-      { Pending.pending = flow_pending
-      ; discovered
-      ; client_id
-      ; client_secret = credentials.Store.client_secret
-      };
+    let* attempt_id =
+      Result.map_error
+        (fun Pending.Newer_start_admitted -> Superseded_by_newer_start)
+        (Pending.remember pending admission ~now ~ttl_sec
+           { Pending.pending = flow_pending
+           ; discovered
+           ; client_id
+           ; client_secret = credentials.Store.client_secret
+           })
+    in
     Ok
       { authorize_url = flow_pending.Flow.authorize_url
+      ; attempt_id
       ; state = flow_pending.Flow.state
       ; credentials
       ; registered_now
@@ -162,12 +175,13 @@ let finish ~post ~pending ~state ~code ~now () =
     let flow_pending = in_flight.Pending.pending in
     let* tokens =
       Result.map_error
-        (fun err -> Exchange_failed err)
-        (Flow.complete ~post ~discovered:in_flight.Pending.discovered
+        (fun err -> Pending.finish pending ~state (Error ()); Exchange_failed err)
+        (match Flow.complete ~post ~discovered:in_flight.Pending.discovered
            ~client_id:in_flight.Pending.client_id
            ?client_secret:in_flight.Pending.client_secret ~pending:flow_pending
-           ~code
-           ~state ~now ())
+           ~code ~state ~now () with
+         | result -> result
+         | exception exn -> Pending.finish pending ~state (Error ()); raise exn)
     in
     (* The four pairings the answer can carry, read into the three that mean
        something different to whoever stores them. A token with no expiry

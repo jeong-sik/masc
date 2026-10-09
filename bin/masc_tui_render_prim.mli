@@ -630,3 +630,10 @@ val answering_preview_rows : int
 val pane_surface_header : Buffer.t -> int -> Masc_tui_types.state ->
   name:string -> split:bool -> unit
 val pane_surface_content_height : rows:int -> int
+
+val models_account_reading : provider:string -> overview_account_emails_reading -> string option * string list
+(** Account identity and visible evidence notes for the Models pane. Failed and
+    partially decoded reads remain distinct from a read with no email. *)
+
+val models_source_account_reading : provider:string -> runtime_config_reading option -> string option * string list
+(** Models labels come only from the account reading published with its source. *)

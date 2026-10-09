@@ -1,7 +1,7 @@
 open Alcotest
 (* Real SDK stdio worker under an attached Runtime installation. Only container
    creation is substituted; seat calls still cross discovery and lane_call. *)
-let with_worker ~machine ~create ~clock ~sw ~base_path f =
+let with_worker ?other_backend ~machine ~create ~clock ~sw ~base_path f =
   let module R = Masc.Lane_addon_runtime in
   let module Transport = Mcp_protocol_eio.Stdio_transport in
   let module Client = Mcp_protocol_eio.Generic_client.Make (Transport) in
@@ -59,6 +59,14 @@ let with_worker ~machine ~create ~clock ~sw ~base_path f =
           } in
           on_created connection; Ok connection)
       } in
+      let backend = match other_backend with
+        | None -> backend
+        | Some (other : R.For_testing.backend) ->
+            { other with start=(fun ~sw ~state_owner ~instance_id ~package ~binding ~on_created ->
+                let selected = if package.Masc.Lane_addon_types.id = machine ^ "-fixture"
+                  then backend else other in
+                selected.start ~sw ~state_owner ~instance_id ~package ~binding ~on_created) }
+      in
       R.For_testing.with_backend backend (fun () ->
         let manifest = Filename.concat base_path (machine ^ "-fixture.toml") in
         Out_channel.with_open_bin manifest (fun channel -> output_string channel (Printf.sprintf {|id = "%s-fixture"
@@ -97,7 +105,7 @@ max_reply_bytes = %d
 let with_dos ~clock ~sw ~base_path f =
   with_worker ~machine:"dos" ~create:Dos_addon_worker.create ~clock ~sw ~base_path f
 
-let with_msx ~clock ~sw ~base_path f =
-  with_worker ~machine:"msx" ~create:Msx_addon_worker.create ~clock ~sw ~base_path
+let with_msx ?other_backend ~clock ~sw ~base_path f =
+  with_worker ?other_backend ~machine:"msx" ~create:Msx_addon_worker.create ~clock ~sw ~base_path
     (fun ~invoke ~detach ->
       f ~invoke:(fun ~principal ~name ~arguments -> invoke ~principal ~controller:None ~name ~arguments) ~detach)

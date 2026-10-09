@@ -8,7 +8,10 @@ val with_dos : clock:_ Eio.Time.clock -> sw:Eio.Switch.t -> base_path:string ->
      (Mcp_protocol.Mcp_types.tool_result, string) result) ->
    detach:(unit -> unit) -> unit) -> unit
 
-val with_msx : clock:_ Eio.Time.clock -> sw:Eio.Switch.t -> base_path:string ->
+(** [other_backend] supplies non-machine packages when a test also attaches
+    an observer. The MSX package still uses the actual SDK worker connection. *)
+val with_msx : ?other_backend:Masc.Lane_addon_runtime.For_testing.backend ->
+  clock:_ Eio.Time.clock -> sw:Eio.Switch.t -> base_path:string ->
   (invoke:(principal:Lane_addon_call_context.principal -> name:string -> arguments:Yojson.Safe.t ->
      (Mcp_protocol.Mcp_types.tool_result, string) result) ->
    detach:(unit -> unit) -> unit) -> unit

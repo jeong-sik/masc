@@ -401,13 +401,15 @@ let test_machine_package_skills_follow_attachment () =
       List.iter (fun name ->
         let entry = List.find (fun (entry : Catalog.skill) -> entry.name=name) (Catalog.skills catalog) in
         check bool "image instructions do not require a static composition" true
-          (match entry.surface with Catalog.Instruction -> true | Catalog.Composition _ -> false)) names;
+          (match entry.surface with
+           | Catalog.Instruction -> not (List.mem name ["sangokushi-2-end-command"; "sangokushi-3-end-month"])
+           | Catalog.Composition _ -> List.mem name ["sangokushi-2-end-command"; "sangokushi-3-end-month"])) names;
       detach clock fixture;
       List.iter (fun name -> check bool "detachment withdraws machine instructions" true
         (absent (snapshot fixture) name)) names;
       check bool "ordinary instructions survive machine detachment" false
         (absent (snapshot fixture) "ordinary-guide")))
-    ["msx-machine", ["msx-observe";"msx-play"]; "dos-machine", ["dos-play"]]
+    ["msx-machine", ["msx-observe";"msx-play";"sangokushi-2";"sangokushi-2-end-command"]; "dos-machine", ["dos-play";"sangokushi-3";"sangokushi-3-end-month"]]
 
 let () = run "Lane package Skill workflow"
   ["declaration to existing reader", [

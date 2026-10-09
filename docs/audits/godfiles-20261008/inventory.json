@@ -336,7 +336,12 @@
       "path": "lib/keeper/keeper_reaction_ledger.ml",
       "baseline_lines": 2171,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: private canonical current-row kinds, schema/identity and strict decoder separated; public interface and storage/outbox/cache effect boundaries preserved; storage/cache/operator projection responsibilities pending semantic review",
+      "current_lines": 1646,
+      "prs": [
+        42060
+      ],
+      "validation_artifact": "reaction-ledger-wire/README.md"
     },
     {
       "path": "lib/keeper/keeper_sandbox_microvm.ml",

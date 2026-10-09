@@ -2779,8 +2779,11 @@ and surface_needs_of_surface : surface -> surface_needs = function
         ; needs_provider_history = true
         ; needs_account_emails = true
       }
+  (* The Models pane names the account behind a provider id, so Config reads
+     account emails as Usage does. *)
+  | Config -> { nothing with needs_account_emails = true }
   | Memory | Lanes | Clients | Schedules | Verification | Harness | Fusion
-  | Repositories | Code | Changes | Connectors | Runtime | Config | Resources
+  | Repositories | Code | Changes | Connectors | Runtime | Resources
   | Tools ->
       nothing
 
@@ -3150,6 +3153,8 @@ type code_history_entry =
 
 type code_history_listing = {
   chl_entries: code_history_entry list;
+  chl_git_error: string option;
+      (** None means the Git read succeeded, including an empty result. *)
   chl_activity_note: string;
       (** Coverage or failure of the durable Keeper-change read. Git commits
           remain visible when this says unavailable. *)
@@ -5154,6 +5159,7 @@ type runtime_config_reading = {
   rcv_source_text : string;
   rcv_rows : (string * string) list list;
   rcv_metadata : Masc_tui_runtime_config_view.metadata;
+  rcv_account_emails : (Masc_tui_account_login.account_emails, string) result;
 }
 
 type runtime_config_edit_view = Config_edit_draft | Config_edit_current of (string * string) list list
@@ -6423,6 +6429,7 @@ type state = {
   mutable runtime_lane_replacement_selection:
     (slot_editor_target * slot_editor_identity * slot_editor_identity) option;
   mutable runtime_lane_write: runtime_lane_write;
+  mutable runtime_dim_refusals: bool;
   mutable runtime_cursor: int;
   mutable runtime_surface_generation: int;
   mutable runtime_surface_inflight: int option;
@@ -9350,6 +9357,7 @@ let create_state
   runtime_lane_cursor_after_write = None;
   runtime_lane_replacement_selection = None;
   runtime_lane_write = Lane_write_idle;
+  runtime_dim_refusals = true;
   runtime_cursor = 0;
   runtime_surface_generation = 0;
   runtime_surface_inflight = None;
@@ -11908,6 +11916,19 @@ let runtime_spent_usage (resolved : Tui_decode.runtime_resolved_snapshot)
 
 let runtime_option_refusing (option : Tui_decode.runtime_option) =
   option.Tui_decode.ro_quota_exhausted || option.Tui_decode.ro_rate_limited
+
+let runtime_row_deemphasized state (option : Tui_decode.runtime_option) =
+  state.runtime_dim_refusals
+  && (runtime_option_refusing option
+      || match state.runtime_surface with
+         | None -> false
+         | Some snapshot ->
+             (match runtime_spent_usage snapshot.Tui_decode.rss_resolved option with
+              | Ok (_ :: _) -> true
+              | Ok [] | Error _ -> false))
+
+let toggle_runtime_dim_refusals state =
+  state.runtime_dim_refusals <- not state.runtime_dim_refusals
 
 let runtime_quota_label (runtime : Tui_decode.runtime_option) =
   if not runtime.ro_quota_exhausted then None

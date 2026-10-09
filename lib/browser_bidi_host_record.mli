@@ -97,8 +97,11 @@ type entry =
       (** When Firefox gave the host its session. [None] while the host is
           still connecting, and for good when it never got one. *)
   ; unacknowledged : unacknowledged list
-      (** Oldest first. Nothing is taken off it while the host runs, and each
-          addition writes the whole record again. *)
+      (** Oldest first. [note_unacknowledged] keeps the newest
+          {!unacknowledged_limit} of them; when one more arrives, the oldest
+          leave only after their metadata is durably appended to
+          {!unacknowledged_archive_path}. Archive failure keeps the longer
+          list and reports an error. Each addition writes the whole record. *)
   ; ended : ending option
   }
 
@@ -192,6 +195,17 @@ val attached : held -> now:float -> (unit, write_failure) result
 
 (** The host polls under another client ID from here on. *)
 val client_changed : held -> client_id:Browser_lane.client_id -> (unit, write_failure) result
+
+(** Path of the private append-only JSONL archive. Each schema-1 row contains
+    [pid], [started_at], the client ID at archival time in [client_id], and [result] in the snapshot's existing
+    unacknowledged-result shape. Rows can repeat after an uncertain append or
+    a snapshot write failure; this is evidence, not an execution queue.
+    Ordinary diagnostic logs are not a durable substitute for this archive. *)
+val unacknowledged_archive_path : base_path:string -> string
+
+(** The snapshot window after successful archival. On archive failure the
+    snapshot retains the unarchived entries even when this limit is exceeded. *)
+val unacknowledged_limit : int
 
 val note_unacknowledged : held -> unacknowledged -> (unit, write_failure) result
 

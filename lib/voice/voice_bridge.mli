@@ -14,11 +14,16 @@ include module type of Voice_bridge_core
 (** One voice as an endpoint names it. [voice_id] is what a configuration
     stores. For [say] that id is the whole printed label, parentheses included:
     say adds them to names that exist in several languages, and the bare name
-    then selects a different language without saying so. *)
+    then selects a different language without saying so. For espeak-ng the id
+    is the printed name with its spaces back: [--voices] shows underscores,
+    and [-v] wants spaces. [voice_aliases] holds the other selections that
+    reach the voice -- espeak-ng's parenthesised aliases -- and is empty for
+    the kinds that publish none. *)
 type catalogue_voice =
   { voice_id : string
   ; voice_name : string option
   ; voice_language : string option
+  ; voice_aliases : string list
   }
 
 val catalogue_voice_json : catalogue_voice -> Yojson.Safe.t
@@ -48,11 +53,31 @@ val say_voice_in_catalogue : catalogue_voice list -> voice:string -> say_voice
     be the one asked for, or why the catalogue could not be read. *)
 val check_say_voice : Voice_config.endpoint -> voice:string -> (unit, string) result
 
+(** Parse what [espeak-ng --voices] prints. Separate from the asking so a
+    recorded answer can be replayed on a machine that has no espeak-ng. *)
+val espeak_catalogue_of_output : string -> catalogue_voice list
+
+(** Whether an espeak-ng catalogue answers to [voice]. espeak-ng's [-v]
+    accepts the voice name with its spaces, the Language column, the
+    parenthesised aliases, and any of these followed by a [+<variant>] suffix
+    (or [+<variant>] alone for the default voice), so a match on any of them,
+    ignoring ASCII case, is installed. Unlike say, espeak-ng refuses an unknown
+    voice itself; this check still runs first so the refusal names the voice
+    asked for and points at the list it can be picked from. *)
+val espeak_voice_in_catalogue : catalogue_voice list -> voice:string -> bool
+
+(** Ask an espeak-ng endpoint for its catalogue and look [voice] up in it. A
+    blank voice is [Ok]: espeak-ng then uses its default. [Error] says why the
+    voice will not be the one asked for, or why the catalogue could not be
+    read. *)
+val check_espeak_voice : Voice_config.endpoint -> voice:string -> (unit, string) result
+
 val clip_format_for_kind : Voice_config.endpoint_kind -> Voice_bridge_core.clip_format
 (** The container a kind's clips are written in. [say] encodes WAVE and has no
-    MP3 encoder at all; everything reached over a wire answers MP3. The clip
-    filename carries this, and every reader resolves a token by it, so the two
-    sides cannot disagree about what the bytes are. *)
+    MP3 encoder at all, and espeak-ng writes WAVE through [-w]; everything
+    reached over a wire answers MP3. The clip filename carries this, and every
+    reader resolves a token by it, so the two sides cannot disagree about what
+    the bytes are. *)
 
 type mcp_call_error =
   | Timed_out of float

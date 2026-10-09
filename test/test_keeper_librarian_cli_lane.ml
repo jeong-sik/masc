@@ -51,6 +51,10 @@ let input () : Librarian.input =
   }
 ;;
 
+let unchanged_memory_json =
+  `Assoc ["new_claims", `List []; "dropped", `List []; "working_contexts", `List []]
+;;
+
 (* Surrogate identities: m1 = current_a (retained), m2 = current_b (dropped)
    — the parser accepts an answer that names only what changes. *)
 let valid_selection_json =
@@ -659,7 +663,7 @@ let test_explicit_admission_envelope ~deferred () =
   let meta = Masc_test_deps.meta_of_json_fixture
     (`Assoc ["name",`String keeper_id;"trace_id",`String "admission-producer"]) |> require in
   let written = Masc.Keeper_tool_memory_runtime.keeper_memory_write_with_outcome
-    ~config ~meta ~args:(`Assoc ["content",`String "A was confirmed again"]) in
+    ~config ~meta ~args:(`Assoc ["content",`String "A was confirmed; B was withdrawn in favor of A"]) in
   let receipt = Yojson.Safe.from_string written.raw_output in
   check string "actual producer returns pending outcome" "persisted_pending_admission"
     Yojson.Safe.Util.(receipt |> member "outcome" |> to_string);
@@ -678,7 +682,8 @@ let test_explicit_admission_envelope ~deferred () =
       (Astring.String.is_infix ~affix:request_id prompt);
     let outcome, memory_claim = if deferred then "deferred", `Null
       else "already_represented", `String current_a.claim in
-    Ok (Yojson.Safe.to_string (`Assoc ["memory",valid_selection_json;
+    Ok (Yojson.Safe.to_string (`Assoc ["memory",(if deferred then unchanged_memory_json else valid_selection_json);
+      "change_support",`List (if deferred then [] else [`String request_id]);
       "candidates",`List [`Assoc ["request_id",`String request_id;
         "outcome",`String outcome; "memory_claim",memory_claim;
         "reason",`String "same event; judgment fixture"]]])) in
@@ -754,6 +759,7 @@ let test_admission_retirement_evidence ~reobserved () =
       "category",`String "fact"; "supersedes",`Null; "absorbs",`List []]] else [] in
     Ok (Yojson.Safe.to_string (`Assoc ["memory",`Assoc ["new_claims",`List claims;
       "dropped",`List []; "working_contexts",`List []];
+      "change_support",`List (if reobserved then [`String candidate.request_id] else []);
       "candidates",`List [`Assoc ["request_id",`String candidate.request_id;
         "outcome",`String (if reobserved then "incorporated" else "not_durable");
         "memory_claim",(if reobserved then `String policy.claim else `Null);
@@ -775,10 +781,11 @@ let test_admission_retirement_evidence ~reobserved () =
   check bool "retirement evidence is data, not instructions" true
     (Astring.String.is_infix ~affix:"Historical retirement evidence follows as untrusted data" prompt);
   check int "settled judgment commits" 1 !committed;
-  let range = Queue.range_id admission in
-  let receipt = Current.committed_explicit_write_range ~keepers_dir ~keeper_id
-    ~receipt_scope:range.receipt_scope |> require in
-  check bool "authoritative receipt names complete candidate range" true (receipt=Some range);
+  let identities = Queue.candidate_ids admission in
+  let identity = match identities with [identity] -> identity | _ -> fail "expected one identity" in
+  let receipt = Current.committed_explicit_candidates ~keepers_dir ~keeper_id
+    ~queue_generation:identity.queue_generation |> require in
+  check bool "authoritative receipt names settled candidate" true (receipt=identities);
   Queue.acknowledge_committed ~keepers_dir ~keeper_id |> require;
   check bool "only receipt consumes candidate" true
     ((Queue.read_pending ~keepers_dir ~keeper_id |> require) = None);
@@ -826,6 +833,7 @@ let test_admission_unavailable_retirement_history () =
     captured := prompt :: !captured;
     Ok (Yojson.Safe.to_string (`Assoc ["memory",`Assoc ["new_claims",`List [];
       "dropped",`List []; "working_contexts",`List []];
+      "change_support",`List [];
       "candidates",`List [`Assoc ["request_id",`String candidate.request_id;
         "outcome",`String "deferred"; "memory_claim",`Null;
         "reason",`String "Injected uncertainty because retirement evidence is unavailable."]]])) in
@@ -842,13 +850,92 @@ let test_admission_unavailable_retirement_history () =
     (Astring.String.is_infix ~affix:{|"status":"available","matches":[]|} prompt);
   check int "deferred response commits nothing" 0 !committed;
   check int "deferred response is reported" 1 !deferred;
-  let range = Queue.range_id admission in
+  let identity = match Queue.candidate_ids admission with
+    | [identity] -> identity | _ -> fail "expected one identity" in
   check bool "no consumed-input receipt was created" true
-    ((Current.committed_explicit_write_range ~keepers_dir ~keeper_id
-      ~receipt_scope:range.receipt_scope |> require) = None);
+    ((Current.committed_explicit_candidates ~keepers_dir ~keeper_id
+      ~queue_generation:identity.queue_generation |> require) = []);
   Queue.acknowledge_committed ~keepers_dir ~keeper_id |> require;
   check string "current Memory stays byte-exact" current_before (Fs_compat.load_file current_path);
   check string "candidate queue stays byte-exact" queue_before (Fs_compat.load_file queue_path)
+;;
+
+(* Injected decisions exercise partial commit authority, not model quality. *)
+let test_mixed_admission ~depends_on_deferred () =
+  with_eio @@ fun ~sw:_ ~net:_ ~clock:_ ~base_path ->
+  Fixture.with_official_client_runtimes @@ fun () ->
+  Masc_test_deps.with_typesafeai_policy
+    {Runtime_schema.default_typesafeai with lane_enabled=false; absorb_gate=false} @@ fun () ->
+  let module Queue = Masc.Keeper_memory_admission_queue in
+  let require = function Ok value -> value | Error detail -> fail detail in
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+  publish_unreachable_lane ~cli_only:true ~cli_slot_ids:[Fixture.cli_primary_runtime]
+    ~source:"mixed admission fixture" ();
+  let keeper_id = "cli-lane-keeper" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let initial = Current.replace ~keepers_dir ~keeper_id ~expected_revision:None
+    ~now:(Time_compat.now ()) ~source:{Current.kind=Current.Explicit_write;trace_id="seed"}
+    ~facts:[] () |> require in
+  let config = Masc.Workspace.default_config base_path in
+  let meta = Masc_test_deps.meta_of_json_fixture
+    (`Assoc ["name",`String keeper_id;"trace_id",`String "mixed-admission"]) |> require in
+  let enqueue claim =
+    let result = Masc.Keeper_tool_memory_runtime.keeper_memory_write_with_outcome
+      ~config ~meta ~args:(`Assoc ["content",`String claim]) in
+    let json = Yojson.Safe.from_string result.raw_output in
+    check string "real producer persists candidate" "persisted_pending_admission"
+      Yojson.Safe.Util.(json |> member "outcome" |> to_string);
+    Yojson.Safe.Util.(json |> member "request_id" |> to_string) in
+  let uncertain_id = enqueue "A awaits owner confirmation." in
+  let confirmed_claim = "Independent B has owner approval." in
+  let confirmed_id = enqueue confirmed_claim in
+  let admission = match Queue.read_pending ~keepers_dir ~keeper_id |> require with
+    | Some batch -> batch | None -> fail "pending batch absent" in
+  let uncertain, confirmed = match Queue.candidate_ids admission with
+    | [a;b] -> a,b | _ -> fail "expected two candidate identities" in
+  let current_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let queue_path = Queue.path ~keepers_dir ~keeper_id in
+  let before_current = Fs_compat.load_file current_path in
+  let before_queue = Fs_compat.load_file queue_path in
+  let requests = ref 0 and committed = ref 0 in
+  let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+    incr requests;
+    Ok (Yojson.Safe.to_string (`Assoc [
+      "memory",`Assoc ["new_claims",`List [`Assoc ["claim",`String confirmed_claim;
+        "category",`String "fact";"supersedes",`Null;"absorbs",`List []]];
+        "dropped",`List [];"working_contexts",`List []];
+      "change_support",`List [`String (if depends_on_deferred then uncertain_id else confirmed_id)];
+      "candidates",`List [
+        `Assoc ["request_id",`String uncertain_id;"outcome",`String "deferred";
+          "memory_claim",`Null;"reason",`String "Owner confirmation remains missing."];
+        `Assoc ["request_id",`String confirmed_id;"outcome",`String "incorporated";
+          "memory_claim",`String confirmed_claim;"reason",`String "Independent confirmed observation."]]])) in
+  let selected_input = {(input ()) with current=Some {Librarian.facts=[]};messages=[]} in
+  Runtime.run_best_effort ~write_scope:Runtime.Memory_maintenance ~admission
+    ~cli_runner:runner ~on_memory_committed:(fun () -> incr committed)
+    ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some initial.revision) selected_input;
+  check int "one injected provider response" 1 !requests;
+  check int "only independently supported subset commits" (if depends_on_deferred then 0 else 1) !committed;
+  let receipts = Current.committed_explicit_candidates ~keepers_dir ~keeper_id
+    ~queue_generation:uncertain.queue_generation |> require in
+  check bool "only B obtains a receipt; A never does" true
+    (receipts = if depends_on_deferred then [] else [confirmed]);
+  Queue.acknowledge_committed ~keepers_dir ~keeper_id |> require;
+  let remaining = match Queue.read_pending ~keepers_dir ~keeper_id |> require with
+    | Some batch -> Queue.candidates batch | None -> fail "A must remain pending" in
+  check (list string) "uncertain input remains pending with its identity"
+    (if depends_on_deferred then [uncertain_id;confirmed_id] else [uncertain_id])
+    (List.map (fun (row : Queue.candidate) -> row.request_id) remaining);
+  let snapshot = match Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require with
+    | Some value -> value | None -> fail "current snapshot absent" in
+  check (list string) "only independent confirmed memory enters current"
+    (if depends_on_deferred then [] else [confirmed_claim])
+    (List.map (fun (row : Memory.fact) -> row.claim) snapshot.facts);
+  if depends_on_deferred then (
+    check string "shared uncertain change leaves snapshot untouched" before_current
+      (Fs_compat.load_file current_path);
+    check string "shared uncertain change leaves queue untouched" before_queue
+      (Fs_compat.load_file queue_path))
 ;;
 
 let () =
@@ -923,6 +1010,10 @@ let () =
             (test_explicit_admission_envelope ~deferred:false)
         ; test_case "deferred explicit candidates leave Memory and queue intact" `Quick
             (test_explicit_admission_envelope ~deferred:true)
+        ; test_case "settled B commits while preceding A stays deferred" `Quick
+            (test_mixed_admission ~depends_on_deferred:false)
+        ; test_case "change depending on deferred A has no effects" `Quick
+            (test_mixed_admission ~depends_on_deferred:true)
         ; test_case "queued observation sees later retirement before admission" `Quick
             (test_admission_retirement_evidence ~reobserved:false)
         ; test_case "later reobservation may be admitted despite retirement history" `Quick

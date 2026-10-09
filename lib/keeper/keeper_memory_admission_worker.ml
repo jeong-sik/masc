@@ -33,9 +33,19 @@ let run_with ~keepers_dir ~keeper_name ~judge =
              | Error detail -> Unavailable detail
              | Ok None -> Settled {has_more=false}
              | Ok (Some remaining) ->
-               if (Queue.range_id remaining).after_sequence >= (Queue.range_id batch).through_sequence
-               then Settled {has_more=true}
-               else Unavailable "admission commit has no matching consumed-input receipt") in
+               let evaluated = Queue.candidates batch in
+               let pending = Queue.candidates remaining in
+               let pending_ids = List.fold_left (fun ids (row : Queue.candidate) ->
+                 Set_util.StringSet.add row.request_id ids) Set_util.StringSet.empty pending in
+               let consumed = List.exists (fun (row : Queue.candidate) ->
+                 not (Set_util.StringSet.mem row.request_id pending_ids)) evaluated in
+               if not consumed then
+                 Unavailable "admission commit has no matching consumed-input receipt"
+               else
+                 let evaluated_through = List.fold_left (fun sequence (row : Queue.candidate) ->
+                   max sequence row.sequence) 0 evaluated in
+                 Settled {has_more=List.exists (fun (row : Queue.candidate) ->
+                   row.sequence > evaluated_through) pending}) in
       evaluate batch
 
 let run ~base_path ~keeper_name =

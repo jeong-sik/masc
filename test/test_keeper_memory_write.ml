@@ -198,7 +198,7 @@ let admit_pending ~keepers_dir ~keeper_id =
   let batch = match Queue.read_pending ~keepers_dir ~keeper_id |> require with
     | Some batch -> batch | None -> Alcotest.fail "pending input missing" in
   let facts = Queue.candidates batch |> List.map (fun (row : Queue.candidate) -> row.fact) in
-  ignore (Current.apply_disposition ~explicit_write_range_id:(Queue.range_id batch)
+  ignore (Current.apply_disposition ~explicit_candidate_ids:(Queue.candidate_ids batch)
     ~keepers_dir ~keeper_id ~now:(Time_compat.now ())
     ~source:{Current.kind=Current.Librarian;trace_id="fixture-admission"}
     ~absorbed:[] ~revisions:[] ~new_claims:facts () |> require);

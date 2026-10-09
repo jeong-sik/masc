@@ -2,9 +2,9 @@
 
 ## Failure being addressed
 
-The admission worker currently keeps the complete batch pending when any candidate
-is deferred. Its queue accepts only a contiguous consumed prefix. A candidate
-whose evidence remains inconclusive therefore prevents an independent, supported
+The original admission worker kept the complete batch pending when any candidate
+is deferred. Its queue accepted only a contiguous consumed prefix. A candidate
+whose evidence remains inconclusive therefore prevented an independent, supported
 candidate later in the same batch from reaching current Memory.
 
 The semantic question and storage question must change together. Simply allowing
@@ -15,9 +15,9 @@ the same event. Neither is the intended fix.
 
 ## Candidate receipt foundation
 
-This first change adds candidate-specific receipts to the existing Memory
-transaction mechanism. It does not yet switch the producer, queue or worker to
-partial admission. Their existing contiguous-range contract remains active.
+Candidate-specific receipts support one Memory transaction for a settled subset.
+The sparse queue and runtime now consume those receipts. This is an unmerged
+implementation; the execution status belongs to its recorded CI head.
 
 A candidate receipt binds a queue generation, request ID, original sequence and
 input digest. A set of candidate receipts is prepared and committed with one
@@ -34,18 +34,19 @@ independent immutable ledger across a store reset. Retaining every consumed
 candidate also grows the receipt file; no automatic expiry is introduced.
 
 Unrelated generations have independent identities. Existing atom, official-turn
-and explicit-range receipts retain their active contracts.
+receipts retain their active contracts. Candidate receipts replace the explicit
+contiguous-range path.
 
-## Subsequent integration
+## Connected judgment and queue
 
-The next change must connect these receipts to one model judgment over the whole
+The runtime connects these receipts to one model judgment over the whole
 pending set and one disposition supported by its settled subset. The response
-must name the candidate dependencies of proposed changes; unknown references or
+names the candidate dependencies of proposed changes; unknown references or
 dependencies on deferred candidates cannot authorize the disposition. This is
 reference validation, not proof of semantic independence.
 
-The queue must retain deferred candidates while acknowledging only exact
-committed candidate receipts. It needs a persisted last-assigned sequence so
+The queue retains deferred candidates while acknowledging only exact
+committed candidate receipts. It uses a persisted last-assigned sequence so
 consuming later candidates does not cause sequence reuse. A concurrently appended
 tail must survive. Recovery after snapshot commit and before acknowledgement
 must consume exactly the committed subset, even after its output is retired.
@@ -68,5 +69,13 @@ wall-clock age alone does not expire a candidate.
 | A and B jointly explain one incident | Model sees both inputs and can retain their joint supported knowledge |
 | A settled but proposed change declares deferred B as support | Host refuses that declared dependency; undeclared semantic dependence still needs model-quality measurement |
 
-The first PR verifies store-side rows only. Queue scheduling, model dependency
-judgment, live retention quality and deployment remain separate work.
+Injected runtime tests cover partial settlement and refusal when declared support
+names a deferred candidate. Queue tests cover sparse acknowledgement and wake
+behavior. These tests do not establish real-model semantic independence.
+
+Remaining: when an actual capacity refusal forces a smaller prefix and that
+prefix is entirely deferred, an unjudged suffix may still be postponed. Existing
+captured model responses are replayed only if their request hashes match the
+current contract; otherwise the harness records capture_not_current without
+injecting the response. Schema evolution is not a new semantic success. Live
+model quality and deployment remain unverified.

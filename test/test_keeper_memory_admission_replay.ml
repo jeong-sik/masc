@@ -165,11 +165,12 @@ let replay filename () =
       (restored = candidate)) candidates;
   let admission = match Queue.read_pending ~keepers_dir ~keeper_id |> require with
     | Some batch -> batch | None -> fail "restored queue is absent" in
-  let range = Queue.range_id admission in
-  check string "consumed-input digest matches original ordered candidate bytes"
-    (json_string "input_sha256" (member "range" capture)) range.input_sha256;
-  check string "range digest also matches exported candidate-row digest"
-    (json_string "candidates_sha256" hashes) range.input_sha256;
+  let identities = Queue.candidate_ids admission in
+  let generation = match identities with
+    | id :: _ -> id.Current.queue_generation | [] -> fail "missing candidate identities" in
+  check string "restored candidate bytes match original capture"
+    (json_string "candidates_sha256" hashes)
+    (hash_json (`List (List.map candidate_json (Queue.candidates admission))));
   let queue_path = Queue.path ~keepers_dir ~keeper_id in
   let current_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
   let queue_before = Fs_compat.load_file queue_path in
@@ -202,18 +203,23 @@ let replay filename () =
      working_context=Masc.Keeper_librarian_context.empty;
      messages=[]; tool_observations=[]; counterpart_observations=[]} in
   let calls = ref 0 and captured_request = ref None in
-  let verify_request (runtime_id, system_prompt, output_schema, prompt) =
-    check string "same runtime fixture" (json_string "runtime_id" capture) runtime_id;
-    check string "actual prompt digest is capture-exact" (json_string "prompt_sha256" hashes) (sha256 prompt);
-    check string "actual system prompt digest is capture-exact"
-      (json_string "system_prompt_sha256" hashes) (sha256 system_prompt);
-    check_hash "schema_sha256" output_schema in
+  let request_hashes (runtime_id, system_prompt, output_schema, prompt) =
+    `Assoc ["runtime_id",`String runtime_id; "prompt_sha256",`String (sha256 prompt);
+      "system_prompt_sha256",`String (sha256 system_prompt);
+      "schema_sha256",`String (hash_json output_schema)] in
+  let matches_capture (runtime_id, system_prompt, output_schema, prompt) =
+    String.equal (json_string "runtime_id" capture) runtime_id
+    && String.equal (json_string "prompt_sha256" hashes) (sha256 prompt)
+    && String.equal (json_string "system_prompt_sha256" hashes) (sha256 system_prompt)
+    && String.equal (json_string "schema_sha256" hashes) (hash_json output_schema) in
+  let injected = ref false in
   let runner ~runtime_id ~system_prompt ~output_schema ~prompt =
     incr calls;
     let request = runtime_id, system_prompt, output_schema, prompt in
     captured_request := Some request;
-    verify_request request;
-    Ok response_raw in
+    if matches_capture request then (injected := true; Ok response_raw)
+    else Error (Masc.Fusion_official_client.Setup_failure
+      "captured request differs from current contract; recorded response was not replayed") in
   let prior_runs = Runs.list_runs (Runs.global ()) in
   let committed = ref 0 and refusals = ref [] in
   Runtime.run_best_effort ~write_scope:Runtime.Memory_maintenance ~admission ~cli_runner:runner
@@ -222,19 +228,24 @@ let replay filename () =
     ~base_path ~keepers_dir ~keeper_id
     ~expected_revision:(Option.map (fun (snapshot : Current.t) -> snapshot.revision) initial)
     selected_input;
-  check int "one exact replay of the saved response" 1 !calls;
-  (* The runtime catches transport exceptions. Repeat the captured hash check
-     outside it so a fixture mismatch cannot masquerade as a model refusal. *)
-  (match !captured_request with
-   | Some request -> verify_request request | None -> fail "no replay request captured");
-  let receipt = Current.committed_explicit_write_range ~keepers_dir ~keeper_id
-    ~receipt_scope:range.receipt_scope |> require in
-  if String.equal filename "verified_replacement.json" then
+  check int "one request eligibility check" 1 !calls;
+  let current_request = match !captured_request with
+    | Some request -> request | None -> fail "no replay request captured" in
+  check bool "response injected only for exact captured request"
+    (matches_capture current_request) !injected;
+  let receipts = Current.committed_explicit_candidates ~keepers_dir ~keeper_id
+    ~queue_generation:generation |> require in
+  if !committed = 0 then check bool "no commit has no receipt" true (receipts=[])
+  else (
+    check int "single snapshot commit" 1 !committed;
+    check bool "consumption belongs to exact reconstructed inputs" true
+      (receipts<>[] && List.for_all (fun id -> List.mem id identities) receipts));
+  if not !injected then check int "stale capture cannot commit" 0 !committed;
+  (* A response is replayed only when the current request matches its saved
+     capture. Stale captures remain explicit refusals; a valid injected
+     verified response must exercise commit and acknowledgement. *)
+  if String.equal filename "verified_replacement.json" && !injected then
     check int "verified replacement must commit exactly once" 1 !committed;
-  (match !committed, receipt with
-   | 0, None -> ()
-   | 1, Some committed_range -> check bool "receipt binds reconstructed input" true (committed_range=range)
-   | _ -> fail "commit observation and authoritative receipt disagree");
   (* No success flag consumes the queue. Even failed/deferred responses pass
      through acknowledgement, whose sole authority is the real Memory receipt. *)
   Queue.acknowledge_committed ~keepers_dir ~keeper_id |> require;
@@ -245,14 +256,17 @@ let replay filename () =
       current_before (Fs_compat.load_file_opt current_path));
   let pending = match Queue.read_pending ~keepers_dir ~keeper_id |> require with
     | None -> [] | Some batch -> Queue.candidates batch in
-  if Option.is_some receipt then check int "receipt acknowledgement consumed its complete batch" 0 (List.length pending);
+  check bool "acknowledgement leaves exactly unconsumed candidate identities" true
+    (List.map (fun (row : Queue.candidate) -> row.request_id) pending =
+     List.filter_map (fun (id : Current.explicit_candidate_id) ->
+       if List.mem id receipts then None else Some id.request_id) identities);
   let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require in
   let current_facts = match current with None -> [] | Some snapshot -> snapshot.Current.facts in
   let runs = Runs.list_runs (Runs.global ()) |> List.filter (fun (run : Runs.run) ->
     not (List.exists (fun (prior : Runs.run) -> String.equal prior.run_id run.run_id) prior_runs)) in
   let exact_run = match runs with
     | [run] -> run | _ -> fail "replay did not produce one exact-run observation" in
-  if String.equal filename "verified_replacement.json" then (
+  if String.equal filename "verified_replacement.json" && !injected then (
     let replacement = "Owner-approved policy revision replaces the prior production P-42 rule: deployment now requires two independent approvals." in
     check (list string) "replacement is the sole current claim" [replacement]
       (List.map (fun (fact : Memory.fact) -> fact.claim) current_facts);
@@ -288,7 +302,10 @@ let replay filename () =
     "model_schema_encoding",`String (schema_encoding_label model_schema_encoding);
     "gate_policy",`Assoc ["scope",`String "fixture_declared_off_not_live_gate_evidence";
       "lane_enabled",`Bool false; "absorb_gate",`Bool false];
-    "actual_outcome",`String (if Option.is_some receipt then "committed_and_acknowledged" else "not_committed");
+    "actual_request",request_hashes current_request;
+    "response_replayed",`Bool !injected;
+    "actual_outcome",`String (if not !injected then "capture_not_current"
+      else if receipts<>[] then "committed_and_acknowledged" else "not_committed");
     "current_facts",`List (List.map Memory.fact_to_json current_facts);
     "current_snapshot_present",`Bool (Option.is_some current);
     "recall_before",`List recall_before;

@@ -4763,7 +4763,7 @@ let test_memory_calls_in_a_mixed_batch_answer_the_model_whatever_they_committed 
          | Ok (Some batch) -> batch | _ -> fail "successful write omitted pending input" in
        check string "batch reports pending admission" "persisted_pending_admission"
          Yojson.Safe.Util.((parse_json (first "write-kept").content) |> member "outcome" |> to_string);
-       (match Current.apply_disposition ~explicit_write_range_id:(Admission.range_id pending)
+       (match Current.apply_disposition ~explicit_candidate_ids:(Admission.candidate_ids pending)
           ~keepers_dir ~keeper_id:meta.name ~now:(Unix.gettimeofday ())
           ~source:{Current.kind=Current.Librarian;trace_id="fixture-admission"}
           ~absorbed:[] ~revisions:[]

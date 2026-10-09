@@ -13,7 +13,9 @@ type outcome =
 val run : base_path:string -> keeper_name:string -> outcome
 (** Runs on the existing serialized Memory lane, independently of current fact
     counts. Restores consumed input before considering candidates. A successful
-    prefix may leave a tail for the caller to schedule. No private retry loop
+    subset may leave deferred rows. [Settled.has_more] only names remaining rows
+    beyond the highest sequence evaluated in this batch (including an unevaluated
+    suffix after a size refusal), never already-evaluated deferred gaps. No private retry loop
     is started for uncertainty or outages. *)
 
 module For_testing : sig

@@ -545,14 +545,14 @@ let test_preflight_reads_admission_queue_without_consuming () =
    | Ok {D.rows = 1; refused = 0; _} -> ()
    | Ok _ -> fail "pending queue was not decoded" | Error detail -> fail detail);
   check string "preflight never acknowledges pending input" before (Fs_compat.load_file path);
-  write_bytes path {|{"generation":"queue","acknowledged":0,"pending":{}}|};
+  write_bytes path {|{"generation":"queue","last_sequence":0,"pending":{}}|};
   let malformed = Fs_compat.load_file path in
   (match D.run scan ~base_path with
    | Ok {D.rows = 1; refused = 1; first_refusal = Some detail} ->
      check bool "refusal identifies the keeper" true (String.starts_with ~prefix:"pending: " detail)
    | Ok _ -> fail "malformed queue silently passed" | Error detail -> fail detail);
   check string "refused input remains intact" malformed (Fs_compat.load_file path);
-  write_bytes path {|{"generation":"queue","acknowledged":0,"pending":[]}|};
+  write_bytes path {|{"generation":"queue","last_sequence":0,"pending":[]}|};
   (match D.run scan ~base_path with
    | Ok {D.rows = 1; refused = 0; _} -> ()
    | Ok _ -> fail "empty existing queue was not decoded" | Error detail -> fail detail)

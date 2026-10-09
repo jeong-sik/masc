@@ -58,13 +58,6 @@ type official_range_id =
   ; turns : (int * Ids.Turn_ref.t) list
   }
 
-type explicit_write_range_id =
-  { receipt_scope : string
-  ; after_sequence : int
-  ; through_sequence : int
-  ; input_sha256 : string
-  }
-
 type explicit_candidate_id =
   { queue_generation : string
   ; request_id : string
@@ -75,7 +68,6 @@ type explicit_candidate_id =
 type consumed_range =
   | Atom_range of durable_range_id
   | Official_range of official_range_id
-  | Explicit_write_range of explicit_write_range_id
   | Explicit_candidate of explicit_candidate_id
 
 type durable_range_receipt =
@@ -235,37 +227,6 @@ let official_range_id_of_json = function
   | _ -> wire_here Expected_object
 ;;
 
-let explicit_write_range_id_to_json (range : explicit_write_range_id) =
-  `Assoc [ "receipt_scope", `String range.receipt_scope
-         ; "after_sequence", `Int range.after_sequence
-         ; "through_sequence", `Int range.through_sequence
-         ; "input_sha256", `String range.input_sha256 ]
-;;
-
-let explicit_write_range_id_of_json = function
-  | `Assoc fields ->
-    let* () = exact_field_names_result
-      ["receipt_scope"; "after_sequence"; "through_sequence"; "input_sha256"] fields in
-    let* receipt_scope = wire_string_field "receipt_scope" fields in
-    let* after_sequence = wire_int_field "after_sequence" fields in
-    let* through_sequence = wire_int_field "through_sequence" fields in
-    let* input_sha256 = wire_string_field "input_sha256" fields in
-    let* () =
-      if String.trim receipt_scope = "" then wire_fail [Wire_field "receipt_scope"] Blank_string
-      else if receipt_scope <> String.trim receipt_scope then
-        wire_fail [Wire_field "receipt_scope"] (Unknown_token receipt_scope)
-      else Ok () in
-    let* () = if after_sequence < 0 then wire_fail [Wire_field "after_sequence"] Negative
-      else Ok () in
-    let* () = if through_sequence <= after_sequence then
-        wire_fail [Wire_field "through_sequence"] Not_ascending
-      else Ok () in
-    let+ () = if String_util.is_lowercase_sha256_hex input_sha256 then Ok ()
-      else wire_fail [Wire_field "input_sha256"] (Unknown_token input_sha256) in
-    {receipt_scope; after_sequence; through_sequence; input_sha256}
-  | _ -> wire_here Expected_object
-;;
-
 let explicit_candidate_id_to_json (candidate : explicit_candidate_id) =
   `Assoc ["queue_generation", `String candidate.queue_generation;
           "request_id", `String candidate.request_id;
@@ -314,7 +275,6 @@ let validate_unique_explicit_candidates candidates =
 let consumed_range_field = function
   | Atom_range range -> "range_id", durable_range_id_to_json range
   | Official_range range -> "official_range_id", official_range_id_to_json range
-  | Explicit_write_range range -> "explicit_write_range_id", explicit_write_range_id_to_json range
   | Explicit_candidate candidate -> "explicit_candidate_id", explicit_candidate_id_to_json candidate
 ;;
 
@@ -344,12 +304,10 @@ let durable_range_receipt_of_json = function
         let* json = wire_json_field key fields in
         Result.map wrap (wire_at (Wire_field key) (parse json))
       in
-      let keys = ["range_id"; "official_range_id"; "explicit_write_range_id"; "explicit_candidate_id"] in
+      let keys = ["range_id"; "official_range_id"; "explicit_candidate_id"] in
       match List.filter (fun key -> List.mem_assoc key fields) keys with
       | ["range_id"] -> decode "range_id" durable_range_id_of_json (fun range -> Atom_range range)
       | ["official_range_id"] -> decode "official_range_id" official_range_id_of_json (fun range -> Official_range range)
-      | ["explicit_write_range_id"] -> decode "explicit_write_range_id" explicit_write_range_id_of_json
-          (fun range -> Explicit_write_range range)
       | ["explicit_candidate_id"] -> decode "explicit_candidate_id" explicit_candidate_id_of_json
           (fun candidate -> Explicit_candidate candidate)
       | [] -> wire_here (Field_set_mismatch {missing=keys; unexpected=[]})
@@ -468,7 +426,6 @@ let receipt_range_id = function
 let range_key = function
   | Atom_range range -> range.receipt_scope, `Atom
   | Official_range range -> range.receipt_scope, `Official
-  | Explicit_write_range range -> range.receipt_scope, `Explicit_write
   | Explicit_candidate candidate -> candidate.queue_generation, `Explicit_candidate candidate.request_id
 ;;
 
@@ -1908,7 +1865,6 @@ let update_locked_with_output
       ?before_replace
       ?durable_range_id
       ?official_range_id
-      ?explicit_write_range_id
       ?(explicit_candidate_ids = [])
       ~equal_facts
       ~store_error
@@ -1927,14 +1883,6 @@ let update_locked_with_output
     | None -> Ok ()
     | Some range ->
       official_range_id_of_json (official_range_id_to_json range)
-      |> Result.map (fun _ -> ())
-      |> Result.map_error (fun error -> store_error (wire_error_to_string error))
-  in
-  let* () =
-    match explicit_write_range_id with
-    | None -> Ok ()
-    | Some range ->
-      explicit_write_range_id_of_json (explicit_write_range_id_to_json range)
       |> Result.map (fun _ -> ())
       |> Result.map_error (fun error -> store_error (wire_error_to_string error))
   in
@@ -2033,24 +1981,6 @@ let update_locked_with_output
            |> Result.map_error store_error
          in
          let* () =
-           match explicit_write_range_id with
-           | None -> Ok ()
-           | Some range ->
-             let previous = List.find_map (function
-               | Committed {range_id=Explicit_write_range prior; _}
-                 when String.equal prior.receipt_scope range.receipt_scope -> Some prior
-               | Committed _ | Prepared _ -> None) durable_range_receipts in
-             let expected_after = match previous with
-               | None -> 0
-               | Some prior -> prior.through_sequence in
-             if range.after_sequence = expected_after
-                && range.through_sequence > expected_after
-             then Ok ()
-             else Error (store_error (Printf.sprintf
-               "explicit-write range frontier conflict scope=%s expected_after_sequence=%d actual_after_sequence=%d through_sequence=%d"
-               range.receipt_scope expected_after range.after_sequence range.through_sequence))
-         in
-         let* () =
            let consumed = List.filter_map (function
              | Committed {range_id=Explicit_candidate candidate; _} -> Some candidate
              | Committed _ | Prepared _ -> None) durable_range_receipts in
@@ -2096,7 +2026,6 @@ let update_locked_with_output
          let ranges =
            Option.to_list (Option.map (fun range -> Atom_range range) durable_range_id)
            @ Option.to_list (Option.map (fun range -> Official_range range) official_range_id)
-           @ Option.to_list (Option.map (fun range -> Explicit_write_range range) explicit_write_range_id)
            @ List.map (fun candidate -> Explicit_candidate candidate) explicit_candidate_ids
          in
          let receipts_for make =
@@ -2419,19 +2348,13 @@ let committed_explicit_candidates ~keepers_dir ~keeper_id ~queue_generation =
 let committed_durable_range ~keepers_dir ~keeper_id ~receipt_scope =
   committed_range ~keepers_dir ~keeper_id (function
     | Atom_range range when String.equal range.receipt_scope receipt_scope -> Some range
-    | Atom_range _ | Official_range _ | Explicit_write_range _ | Explicit_candidate _ -> None)
+    | Atom_range _ | Official_range _ | Explicit_candidate _ -> None)
 ;;
 
 let committed_official_range ~keepers_dir ~keeper_id ~receipt_scope =
   committed_range ~keepers_dir ~keeper_id (function
     | Official_range range when String.equal range.receipt_scope receipt_scope -> Some range
-    | Atom_range _ | Official_range _ | Explicit_write_range _ | Explicit_candidate _ -> None)
-;;
-
-let committed_explicit_write_range ~keepers_dir ~keeper_id ~receipt_scope =
-  committed_range ~keepers_dir ~keeper_id (function
-    | Explicit_write_range range when String.equal range.receipt_scope receipt_scope -> Some range
-    | Atom_range _ | Official_range _ | Explicit_write_range _ | Explicit_candidate _ -> None)
+    | Atom_range _ | Official_range _ | Explicit_candidate _ -> None)
 ;;
 
 (* Apply a librarian's disposition to whatever the snapshot holds when the
@@ -2476,7 +2399,6 @@ let apply_disposition
       ?dropped_statements
       ?durable_range_id
       ?official_range_id
-      ?explicit_write_range_id
       ?(explicit_candidate_ids = [])
       ?(required_memory_ids = [])
       ~absorbed
@@ -2650,7 +2572,6 @@ let apply_disposition
     ?dropped_statements
     ?durable_range_id
     ?official_range_id
-    ?explicit_write_range_id
     ~explicit_candidate_ids
     ~before_replace:write_absorbed_rows
     ~equal_facts:Keep_stored

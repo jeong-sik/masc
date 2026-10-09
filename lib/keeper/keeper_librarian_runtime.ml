@@ -733,6 +733,8 @@ type accepted =
   { selection : Keeper_librarian.selection
   ; continuity_answer : continuity_answer
   ; required_memory_ids : string list
+  ; explicit_candidate_ids : Keeper_memory_os_current.explicit_candidate_id list
+  ; admission_support : string list
   }
 
 (* A continuity pass must produce both Memory disposition and its saved
@@ -744,10 +746,10 @@ let validate_selection ?continuity selected_input output =
   let open Result.Syntax in
   let* selection = Keeper_librarian.selection_of_json_result selected_input output in
   match continuity with
-  | None -> Ok { selection; continuity_answer = Memory_only; required_memory_ids = [] }
+  | None -> Ok { selection; continuity_answer = Memory_only; required_memory_ids = []; explicit_candidate_ids = []; admission_support = [] }
   | Some prepared ->
     let+ working_state = Keeper_librarian.continuity_working_state_of_json_result output in
-    { selection; continuity_answer = Continuity { prepared; working_state }; required_memory_ids = [] }
+    { selection; continuity_answer = Continuity { prepared; working_state }; required_memory_ids = []; explicit_candidate_ids = []; admission_support = [] }
 ;;
 
 (* The accepted answer of each pass. A context-only answer carries no
@@ -779,10 +781,16 @@ let validate_admission_answer batch selected_input output =
   let open Result.Syntax in
   let module Judgment = Keeper_memory_admission_judgment in
   let invalid detail = Keeper_librarian.Admission_invalid detail in
-  let* memory, judgments = Judgment.unwrap ~batch output |> Result.map_error invalid in
+  let* memory, judgments, change_support = Judgment.unwrap ~batch output |> Result.map_error invalid in
   let* accepted = validate_selection selected_input memory in
   let* () = Judgment.verify ~facts:accepted.selection.facts judgments |> Result.map_error invalid in
-  if not (Judgment.settled judgments) then Ok Admission_deferred_answer
+  let selection = accepted.selection in
+  let has_changes = selection.new_claims <> [] || selection.dropped <> []
+    || selection.absorbed <> [] || selection.revisions <> [] in
+  let* () = Judgment.verify_support ~new_claims:selection.new_claims ~has_changes
+    ~change_support judgments |> Result.map_error invalid in
+  let settled = Judgment.settled_requests judgments in
+  if settled = [] then Ok Admission_deferred_answer
   else
     let claims = List.filter_map (fun (judgment : Judgment.judgment) ->
       match judgment.outcome with
@@ -791,7 +799,10 @@ let validate_admission_answer batch selected_input output =
     let required_memory_ids = List.filter_map (fun (fact : Keeper_memory_os_types.fact) ->
       if List.mem fact.claim claims then Some (Keeper_memory_os_types.memory_id fact) else None)
       accepted.selection.facts in
-    Ok (Memory_answer {accepted with required_memory_ids})
+    let explicit_candidate_ids = Keeper_memory_admission_queue.candidate_ids batch
+      |> List.filter (fun (candidate : Keeper_memory_os_current.explicit_candidate_id) ->
+        List.mem candidate.request_id settled) in
+    Ok (Memory_answer {accepted with required_memory_ids; explicit_candidate_ids; admission_support = change_support})
 ;;
 
 let try_cli_slots
@@ -1597,7 +1608,7 @@ let run_best_effort
              in
              match answer with
              | Admission_deferred_answer ->
-               let detail = "explicit admission remains pending: Librarian deferred at least one candidate" in
+               let detail = "explicit admission remains pending: Librarian deferred every candidate" in
                on_not_committed {detail; walk_shows_size = false};
                Ok (`Admission_deferred (exact_output, selected_slot))
              | Working_context_answer proposed ->
@@ -1609,7 +1620,7 @@ let run_best_effort
                   Ok (`Context_organized (exact_output, selected_slot))
                 | Continuity_not_committed reason ->
                   Ok (`Continuity_not_committed (reason, exact_output, selected_slot)))
-             | Memory_answer { selection; continuity_answer; required_memory_ids } ->
+             | Memory_answer { selection; continuity_answer; required_memory_ids; explicit_candidate_ids; admission_support } ->
              (* A continuity range owns no pending input; only a Memory pass
                 without one organizes the working context. An organization the
                 answer left out or got wrong is skipped for this pass and
@@ -1673,7 +1684,9 @@ let run_best_effort
                           `Assoc ["observation_kind", `String "pending_explicit_memory_candidate";
                                   "request_id", `String row.request_id; "sequence", `Int row.sequence;
                                   "proposal", Keeper_memory_os_types.fact_to_json row.fact])
-                          (Keeper_memory_admission_queue.candidates batch)))
+                          (Keeper_memory_admission_queue.candidates batch
+                            |> List.filter (fun (row : Keeper_memory_admission_queue.candidate) ->
+                              List.mem row.request_id admission_support))))
                  ~observe:(fun observation -> observed_absorb_gate := Some observation)
                  ~before_evaluate:register_absorb_evaluation
                  ~after_evaluate:complete_absorb_evaluation
@@ -1714,7 +1727,7 @@ let run_best_effort
                  ~dropped_statements:selection.dropped
                  ?durable_range_id
                  ?official_range_id
-                 ?explicit_write_range_id:(Option.map Keeper_memory_admission_queue.range_id admission)
+                 ~explicit_candidate_ids
                  ~required_memory_ids
                  ~absorbed:applied_absorbed
                  ~revisions:selection.revisions

@@ -61,7 +61,9 @@ type http_refresh_outcome =
   | Refresh_surfaces of http_surface_results
   | Refresh_workspace_unconfirmed of
       { refresh_ticket : Http_refresh_order.ticket; detail : string; unreachable : bool;
-        approval_ticket : Masc_tui_operator_projection.Listing_order.ticket option }
+        approval_ticket : Masc_tui_operator_projection.Listing_order.ticket option;
+        latest_identity : (Masc.Tui_decode.server_identity, string) result
+        (* The identity read after the surfaces; it may name a workspace. *) }
   | Refresh_server_booting of
       { refresh_ticket : Http_refresh_order.ticket
       ; identity : (Masc.Tui_decode.server_identity, string) result
@@ -82,7 +84,7 @@ type preset_sink =
 (* The UI domain owns these refs. A posted tick is a mutation: closing its
    view invalidates presentation, never cancels or retries the request. Keep
    the pending request until its terminal mailbox result, even across reopen. *)
-type msx_poll_request = { poll_view : unit ref; poll_port : int; poll_authority : Masc_tui_types.workspace_authority }
+type msx_poll_request = { poll_view : unit ref; poll_port : int; poll_authority : Masc_tui_types.workspace_authority; poll_reading : unit ref }
 
 (* A DOS read changes nothing on the server. The current view owns one read;
    reopening may start another without waiting for an old view's HTTP timeout.
@@ -121,10 +123,13 @@ type resume_confirmation =
   | Owner_already_active
 
 type async_msg =
-  | Workspace_scoped of workspace_authority * async_msg
+  | Workspace_scoped of workspace_authority * unit ref option * async_msg
+  | Workspace_operation of async_msg
+  | Chat_command_read_completed of unit ref * async_msg
   | Workspace_identity_unconfirmed of
       { detail : string
-      ; reading : (Masc.Tui_decode.server_identity, string) result
+      ; latest : (Masc.Tui_decode.server_identity, string) result
+        (* The identity the refusing probe read; it may name a workspace. *)
       ; prior_contact : Masc_tui_server_lifecycle.contact
       ; refresh_ticket : Http_refresh_order.ticket }
   | Schedule_form_authority_refused of
@@ -134,7 +139,7 @@ type async_msg =
   | Lane_package_catalog_loaded of int * string option * (Yojson.Safe.t, string) result
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
   | Keeper_queue_resume_confirmed of string * int * resume_confirmation
-  | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list, string) result
+  | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list * (string list, string) result, string) result
   | Lane_addons_loaded of int * (string * string) option * (lane_addons_reply, lane_addons_failure) result
   | Lane_application_loaded of Masc_tui_lane_application.ticket
       * (Masc_tui_lane_addons.configuration, string) result
@@ -143,6 +148,7 @@ type async_msg =
       * (Masc_tui_lane_declaration.response, string) result
   | Keeper_deletions_loaded of int * (Masc_tui_keeper_control.deletion_inventory, string) result
   | Msx_tick_withdrawn of msx_poll_request * string
+  | Keeper_deletion_retry_done of string * (unit, string) result
   | Msx_frame_loaded of msx_poll_request
       * (Masc_tui_msx_tick.response, string) result
   | Msx_activity_loaded of msx_poll_request
@@ -190,6 +196,8 @@ type async_msg =
   | Http_scoped_refresh_done of workspace_authority * currency_authority_request * http_scoped_surface_results
   | Http_scoped_refresh_failed of
       workspace_authority * string * Masc_tui_operator_projection.Listing_order.ticket option * Http_refresh_order.ticket
+      * (Masc.Tui_decode.server_identity, string) result option
+        (* The last identity its probes read, if any. *)
   | Board_post_refresh_done of
       Masc_tui_board_detail.request * (board_post * board_comment list * string option, string) result
   | Approval_decision_done of
@@ -314,7 +322,7 @@ type async_msg =
   | Git_diff_loaded of string * (Masc.Tui_decode.git_diff, string) result
   | Browser_history_list_loaded of int * (Masc.Tui_decode.keeper_calls_snapshot, string) result
   | Browser_history_page_loaded of int * (Masc.Browser_observation.t, string) result
-  | Browser_lane_clients_loaded of int * (Browser_lane_view.client list, string) result
+  | Browser_lane_clients_loaded of int * (Browser_lane_view.discovered, string) result
   | Browser_lane_loaded of
       int * (Browser_lane_view.reading, string) result
   | Browser_lane_action_done of int * (unit, string) result
@@ -337,6 +345,7 @@ type async_msg =
       int * (Masc_tui_loader.runtime_surface_load, string) result
   | Tools_loaded of int * string option * (Masc.Tui_decode_tools.tool_snapshot, string) result
   | Skills_catalog_loaded of int * (Masc.Tui_decode_tools.skills_catalog, string) result
+  | Skill_evidence_loaded of unit ref * string * (Yojson.Safe.t, string) result
   | Tools_async_observation_loaded of int * (Masc.Tui_decode.async_request_observation, string) result
   | Runtime_lane_slots_written of
       Masc_tui_types.runtime_lane_list
@@ -537,7 +546,7 @@ type async_msg =
   | Code_entries_loaded of
       (code_workspace_scope * string) Masc_tui_fetched.request
       * (Masc.Tui_decode.workspace_tree_node list, string) result
-  | Code_file_loaded of string Masc_tui_fetched.request * (string, string) result
+  | Code_file_loaded of code_file_load_intent * string Masc_tui_fetched.request * (string, string) result
   | Code_history_loaded of
       (code_workspace_scope * string) Masc_tui_fetched.request
       * (Masc_tui_types.code_history_listing, string) result
@@ -610,3 +619,25 @@ type 'a mailed = {
   ready_at_ns : int64;
   message : 'a;
 }
+
+val workspace_message_is_read : async_msg -> bool
+val workspace_message_admitted :
+  state -> authority:workspace_authority -> reading:unit ref option -> async_msg -> bool
+(** A stale read never re-enters a reconfirmed workspace. Admitted operation
+    and chat receipts keep their original workspace authority. *)
+
+val account_login_action_is_read : Masc_tui_account_login.action -> bool
+
+val retired_operation_observation
+  : state
+  -> authority:workspace_authority
+  -> reading:unit ref option
+  -> async_msg
+  -> Masc_tui_types.retired_operation_observation option
+(** Capture a matching admitted effect's retired read before its receipt settles
+    the operation owner. The caller applies the receipt before retaining or
+    dispatching this observation; the effect itself is never repeated. *)
+
+val project_workspace_operation_reply : state -> authority:workspace_authority -> reading:unit ref option -> async_msg -> async_msg
+(** Preserve operation receipts while rejecting any separately fetched
+    observation whose read epoch has retired, including queued completions. *)

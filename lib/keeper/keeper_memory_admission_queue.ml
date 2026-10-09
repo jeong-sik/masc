@@ -132,7 +132,7 @@ let acknowledge_committed ~keepers_dir ~keeper_id =
     match receipt with
     | None when initial.acknowledged > 0 ->
       Error (Printf.sprintf
-        "admission receipt recovery required: generation=%s acknowledged=%d; restore the exact snapshot and committed receipt with the offline operator procedure docs/guides/MEMORY-ADMISSION-RECOVERY.md before retrying; pending input is unchanged"
+        "admission receipt recovery required: generation=%s acknowledged=%d; recovery needs an independently attested exact backup that this product does not create — without one this state is unrecoverable and the queue stays blocked (docs/guides/MEMORY-ADMISSION-RECOVERY.md); pending input is unchanged"
         initial.generation initial.acknowledged)
     | None -> Ok ()
     | Some receipt -> locked ~keepers_dir ~keeper_id (fun () ->

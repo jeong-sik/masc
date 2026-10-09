@@ -12,6 +12,15 @@ snapshot, committed range receipts, admission queue and journal. The operator mu
 establish that this is the last committed snapshot before damage, using the stopped
 writer interval and an independently retained snapshot SHA-256/backup inventory.
 A hash recomputed only from the candidate backup is not that independent evidence.
+
+**The product does not create or retain that backup.** It is an operational
+prerequisite operators must establish beforehand (for example a periodic frozen
+copy of the keepers directory with an independent hash inventory). Without an
+attested backup this incident state is a product limitation, not a recoverable
+one: report the affected Keeper and frontier as unrecoverable from available
+evidence and keep the accepted input, as the last section describes. The queue
+error names the same condition — an attested backup is required, and no retry
+changes that.
 If newer commits may have occurred without preserved evidence, stop: this tool
 cannot prove absence of lost writes and must not be used to authorize rollback.
 

@@ -625,9 +625,8 @@ let run_runtime_evidence () =
       (match scenario with
        | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run
        | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run
-       | Memory_write_failure -> "failed"
-       | Judged_run | Gate_disabled_run | Excluded_run | Lane_disabled_run
-       | Missing_key_run -> "succeeded")
+       | Memory_write_failure | Lane_disabled_run | Missing_key_run -> "failed"
+       | Judged_run | Gate_disabled_run | Excluded_run -> "succeeded")
       (Runs.status_label run.status);
     let original = Runs.run_to_yojson run in
     let encoded = Yojson.Safe.to_string ~std:true original in
@@ -786,8 +785,8 @@ let run_runtime_evidence () =
     let expected_facts = match scenario with
       | Judged_run -> b :: untouched :: selection.new_claims
       | Gate_disabled_run | Excluded_run -> untouched :: selection.new_claims
-      (* Declared on and unaskable: nothing is absorbed, the new claims still apply. *)
-      | Lane_disabled_run | Missing_key_run -> seeded.facts @ selection.new_claims
+      (* An enabled judgment must finish before any candidate commits. *)
+      | Lane_disabled_run | Missing_key_run -> seeded.facts
       | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run
       | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> seeded.facts
       | Memory_write_failure -> seeded.facts in
@@ -1459,9 +1458,7 @@ let test_an_excluded_keeper_is_applied_as_answered_without_a_request () =
   | Gate.Evaluated _ -> Alcotest.fail "an excluded keeper's memories were sent"
 ;;
 
-(* The operator switched the gate on, so every absorption was meant to be
-   judged; with the lane off none can be, and none is applied. The new claim
-   still goes through: the sources stay beside it rather than under it. *)
+(* A declared-on gate without a lane cannot authorize candidate admission. *)
 let test_a_gate_declared_on_without_a_lane_keeps_the_sources_current () =
   let facts = List.map fact sources in
   let absorbed = absorbed_into merged facts in
@@ -1724,7 +1721,7 @@ let ends_with ~suffix text =
   String.length text >= n && String.sub text (String.length text - n) n = suffix
 ;;
 
-let test_a_claim_the_judge_cannot_answer_for_is_applied () =
+let test_a_failed_reverse_request_defers_admission () =
   let claim_statements = Gate.statements copy_claim.claim in
   let forward, _, _ = table ~noul_of:(fun _ -> 0.1) in
   (* The forward question is answered; the reverse one is refused. *)
@@ -1746,11 +1743,13 @@ let test_a_claim_the_judge_cannot_answer_for_is_applied () =
        | Gate.No_source_fits_the_state | Gate.Statement_too_large | Gate.No_statement )
    | Gate.Copy _ | Gate.Carries_new_statement _ ->
      Alcotest.fail "expected the failed reverse request");
-  Alcotest.(check (list string)) "the claim is applied as today" [ id copy_claim ]
+  Alcotest.(check bool) "reverse failure prevents runtime admission" true
+    (Option.is_some (Gate.failure_detail ~absorbed:(absorbed_into copy_claim copy_sources) run));
+  Alcotest.(check (list string)) "the unjudged proposal is not classified as a copy" [ id copy_claim ]
     (List.map id (Gate.without_copies run [ copy_claim ]))
 ;;
 
-let test_a_gate_without_a_lane_applies_every_claim () =
+let test_an_enabled_gate_without_a_lane_defers_admission () =
   let absorbed = absorbed_into copy_claim copy_sources in
   Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-jev-key") @@ fun () ->
   Masc_test_deps.with_typesafeai_policy
@@ -1766,7 +1765,9 @@ let test_a_gate_without_a_lane_applies_every_claim () =
       ~new_claims:[ copy_claim ] ~absorbed ()
   in
   Alcotest.(check int) "nothing is absorbed" 0 (List.length (Gate.absorbed_of_run run));
-  Alcotest.(check (list string)) "the claim that absorbed nothing is still applied"
+  Alcotest.(check bool) "missing lane prevents runtime admission" true
+    (Option.is_some (Gate.failure_detail ~absorbed run));
+  Alcotest.(check (list string)) "the unjudged proposal remains available for retry"
     [ id copy_claim ]
     (List.map id (Gate.without_copies run [ copy_claim ]))
 ;;
@@ -2077,7 +2078,7 @@ let test_a_statement_never_asked_is_told_apart_from_one_not_conveyed () =
    no memory statement forward and every claim statement back. The claim
    is not saved, and the memories it named stay current. Without the
    runtime's [without_copies], the claim would be saved beside them. *)
-let test_the_runtime_does_not_save_a_copy () =
+let test_the_runtime_does_not_save_a_copy ~fail_reverse () =
   let module Librarian = Masc.Keeper_librarian in
   let module Current = Masc.Keeper_memory_os_current in
   let module Absorbed = Masc.Keeper_memory_absorbed in
@@ -2129,6 +2130,8 @@ let test_the_runtime_does_not_save_a_copy () =
   (* Forward questions ([s..]) are answered "not conveyed", so nothing is
      absorbed; reverse ones ([c..]) "conveyed", so the claim is a copy. *)
   let jev_requests = ref [] in
+  let reverse_unavailable = ref fail_reverse in
+  let committed = ref 0 in
   let handler _conn _request body =
     let raw = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
     let qids =
@@ -2144,7 +2147,9 @@ let test_the_runtime_does_not_save_a_copy () =
              else choice_json "loses_knowledge"))
         qids
     in
-    Cohttp_eio.Server.respond_string ~status:`OK
+    if !reverse_unavailable && List.mem "c0" qids then
+      Cohttp_eio.Server.respond_string ~status:`Service_unavailable ~body:"reverse fixture unavailable" ()
+    else Cohttp_eio.Server.respond_string ~status:`OK
       ~body:(Yojson.Safe.to_string (`Assoc [ "model", `String "jev-fixture"; "answers", `Assoc answers ]))
       ()
   in
@@ -2179,10 +2184,23 @@ let test_the_runtime_does_not_save_a_copy () =
       ; absorb_gate = true
       }
       (fun () ->
-        Masc.Keeper_librarian_runtime.run_best_effort
-          ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some seeded.revision) input));
-  Alcotest.(check int) "real Librarian request" 1 (Fixture.post_count librarian);
-  (match List.rev !jev_requests with
+        let run () = Masc.Keeper_librarian_runtime.run_best_effort
+          ~on_memory_committed:(fun () -> incr committed)
+          ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some seeded.revision) input in
+        run ();
+        if fail_reverse then (
+          let held = Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require |> Option.get in
+          Alcotest.(check int) "reverse failure leaves revision unchanged" seeded.revision held.revision;
+          Alcotest.(check int) "failed check cannot acknowledge the durable range" 0 !committed;
+          Alcotest.(check (list string)) "no candidate saved during reverse outage"
+            (List.map id seeded.facts) (List.map id held.facts);
+          reverse_unavailable := false;
+          run ());
+        Alcotest.(check int) "successful no-op judgment acknowledges the range once" 1 !committed));
+  Alcotest.(check int) "real Librarian requests" (if fail_reverse then 2 else 1) (Fixture.post_count librarian);
+  Alcotest.(check int) "every pass performed its forward and reverse requests"
+    (if fail_reverse then 6 else 3) (List.length !jev_requests);
+  (match List.take 3 (List.rev !jev_requests) with
    | [ first_forward; second_forward; reverse ] ->
      Alcotest.(check bool) "the forward request asks the memories" true
        (List.for_all (fun qid -> qid.[0] = 's') (first_forward @ second_forward));
@@ -2191,6 +2209,7 @@ let test_the_runtime_does_not_save_a_copy () =
   let stored = match Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require with
     | Some snapshot -> snapshot
     | None -> Alcotest.fail "current snapshot is missing" in
+  Alcotest.(check int) "acknowledged no-op preserves the stored revision" seeded.revision stored.revision;
   Alcotest.(check (list string)) "the memories stay current and the copy is not saved"
     (List.sort String.compare (List.map id seeded.facts))
     (List.sort String.compare (List.map id stored.facts));
@@ -2506,10 +2525,10 @@ let () =
             test_a_claim_its_sources_convey_is_not_applied
         ; Alcotest.test_case "a claim with a new statement is applied" `Quick
             test_a_claim_with_a_new_statement_is_applied
-        ; Alcotest.test_case "a claim the judge cannot answer for is applied" `Quick
-            test_a_claim_the_judge_cannot_answer_for_is_applied
-        ; Alcotest.test_case "a gate without a lane applies every claim" `Quick
-            test_a_gate_without_a_lane_applies_every_claim
+        ; Alcotest.test_case "a failed reverse request defers admission" `Quick
+            test_a_failed_reverse_request_defers_admission
+        ; Alcotest.test_case "an enabled gate without a lane defers admission" `Quick
+            test_an_enabled_gate_without_a_lane_defers_admission
         ; Alcotest.test_case "a claim with an absorption applied is not asked back" `Quick
             test_a_claim_with_an_absorption_applied_is_not_asked_back
         ; Alcotest.test_case "a claim that continues a dropped memory is not asked back" `Quick
@@ -2531,7 +2550,9 @@ let () =
         ; Alcotest.test_case "a statement never asked is told apart from one not conveyed" `Quick
             test_a_statement_never_asked_is_told_apart_from_one_not_conveyed
         ; Alcotest.test_case "the runtime does not save a copy" `Quick
-            test_the_runtime_does_not_save_a_copy
+            (test_the_runtime_does_not_save_a_copy ~fail_reverse:false)
+        ; Alcotest.test_case "reverse outage holds the snapshot and recovery commits once" `Quick
+            (test_the_runtime_does_not_save_a_copy ~fail_reverse:true)
         ] )
     ]
 ;;

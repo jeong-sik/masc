@@ -1,6 +1,6 @@
 # Codex child environment projection
 
-Base: 5c841660551036cbe6070f094e22046163b67e78.
+PR #42121. Base: 5c841660551036cbe6070f094e22046163b67e78.
 
 The app-server runtime combined environment/config/path acquisition with child credential filtering. Private runtime_codex_environment_projection now owns environment-key parsing, allowed keys, explicit-account override filtering and the final CODEX_HOME projection (51 lines). The root retains current environment/cwd reads, TOML acquisition, account-home resolution, spawn and protocol execution (2730 lines, previously 2778). Public runtime MLI is unchanged.
 

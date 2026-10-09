@@ -529,7 +529,11 @@
       "path": "lib/runtime/runtime_codex_app_server.ml",
       "baseline_lines": 2778,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; protocol, subprocess and configuration semantic review pending",
+      "current_lines": 2730,
+      "prs": [
+        42121
+      ]
     },
     {
       "path": "lib/runtime/runtime_toml.ml",

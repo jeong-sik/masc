@@ -2523,6 +2523,7 @@ let native_task_entries (state : state) ~keeper_name ~role_label_column =
          diagnostics;request_label="";
          body=Keeper_chat.terminal_safe_text ~preserve_newlines:true body;
          journal=[];markdown_source=Message_layout.Markdown_streaming;
+         body_presentation=Message_layout.Source_body;
          turn_rail=Message_layout.Rail_none;action=Message_layout.Action_none} in
       let tasks=Native.tasks native and errors=Native.errors native in
       let diagnostics=Native.diagnostics native in

@@ -2113,6 +2113,16 @@ let collapse_repeated_body_rows ~inner_width rows =
   loop [] None 0 rows
 ;;
 
+(* The rows before an entry's first [Body] row, and that row with the rest. *)
+let split_before_first_body rows =
+  let rec loop prefix = function
+    | ({ kind = Body; _ } as opening) :: rest -> List.rev prefix, Some (opening, rest)
+    | row :: rest -> loop (row :: prefix) rest
+    | [] -> List.rev prefix, None
+  in
+  loop [] rows
+;;
+
 (* At the live edge, keep enough of an oversized newest entry to identify it,
    see its opening when space permits, and see its latest output. The typed gap
    makes the missing middle explicit; without it, inline mode looked like one
@@ -2159,7 +2169,18 @@ let newest_entry_window ~inner_width ~height rows =
       let start, output =
         match first.kind, output with
         | _, _ when height = 3 && diagnostics <> [] -> [], first :: output
-        | Metadata _, body :: output when budget >= 3 -> [ first; body ], output
+        | Metadata _, _ when budget >= 3 -> (
+            (* A long sender name wraps to several metadata rows, so the
+               opening is the first [Body] row after the whole prefix, not the
+               row after [first]. The prefix stays when it fits beside the
+               opening and one row of the latest output; otherwise its
+               continuation rows join the hidden count. *)
+            match split_before_first_body output with
+            | prefix, Some (opening, output) ->
+                let whole = (first :: prefix) @ [ opening ] in
+                if List.length whole < budget then whole, output
+                else [ first; opening ], output
+            | _, None -> [ first ], output)
         | (Metadata _ | Body | Spacing | Viewport_gap _), _ -> [ first ], output
       in
       let physical_tail = take_last (budget - List.length start) output in

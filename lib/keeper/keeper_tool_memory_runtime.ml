@@ -308,6 +308,14 @@ let search_durable_facts
            ])) )
 ;;
 
+let successor_candidates_for_query ~query candidates =
+  if query="" then [] else
+  let whole,fragments = answering ~query
+    ~claim_of:(fun (candidate : Keeper_memory_os_current.successor_recall_candidate) ->
+      candidate.binding.source_fact.claim) candidates in
+  whole @ fragments
+;;
+
 let search_current_with_successors ~clock ~config ~keepers_dir ~(meta : keeper_meta) ~query ~limit =
   let module Current = Keeper_memory_os_current in
   let module Selector = Keeper_memory_successor_selection in
@@ -317,8 +325,7 @@ let search_current_with_successors ~clock ~config ~keepers_dir ~(meta : keeper_m
   | Ok state ->
     let relevant claim_of rows = if query="" then [] else
       let whole,fragments = answering ~claim_of ~query rows in whole @ fragments in
-    let candidates = relevant (fun (candidate : Current.successor_recall_candidate) ->
-      candidate.binding.source_fact.claim) state.successor_candidates in
+    let candidates = successor_candidates_for_query ~query state.successor_candidates in
     let judged = Selector.run ~clock ~config ~keepers_dir ~keeper_id:meta.name ~query
       ~snapshot:state.snapshot candidates in
     let fresh = if candidates=[] then Ok state else
@@ -2060,6 +2067,7 @@ let keeper_memory_retract_with_outcome
 ;;
 
 module For_testing = struct
+  let successor_candidates_for_query = successor_candidates_for_query
   let read_current_facts ~keepers_dir ~keeper_id =
     Result.map_error
       durable_search_error_detail

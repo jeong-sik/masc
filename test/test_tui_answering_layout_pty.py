@@ -49,7 +49,7 @@ def run(executable):
                 "lane": "chat_operation", "started_at_unix": started,
                 "interrupt_token": "answering-fixture-token",
                 "preview": {"status_text": "PREVIEW " + name,
-                            "text_tail": "visible output", "updated_at_unix": started,
+                            "text_position": {"generation": 0, "start_byte": 0}, "text_tail": "visible output", "updated_at_unix": started,
                             "last_tool": None},
             }} for name in ["alpha", "beta"] + [f"runner-{i:02d}" for i in range(2, 40)]],
         })

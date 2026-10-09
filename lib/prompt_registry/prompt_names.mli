@@ -426,6 +426,11 @@ val agent_core_handoff_description : string
 val agent_core_handoff_prompt_param_description : string
 val agent_core_agent_tool_prompt_param_description : string
 val keeper_context_workspace_memory_available : string
+val keeper_context_workspace_memory_retrieval_direct : string
+val keeper_context_workspace_memory_retrieval_discoverable : string
+val keeper_context_workspace_memory_retrieval_unavailable : string
+val keeper_context_workspace_memory_retrieval_preview : string
+val keeper_context_workspace_memory_host_selected : string
 val keeper_context_workspace_memory_unavailable : string
 val keeper_context_workspace_memory_briefing_current : string
 val keeper_context_workspace_memory_briefing_stale : string

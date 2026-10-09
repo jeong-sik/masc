@@ -14,7 +14,7 @@ Inspected Claude Code 2.1.292 binary: `/Users/dancer/.local/share/claude/version
 - Around 193301590, heartbeat producer reports floored elapsed seconds; wrappers around 193328511/216564073 select the actual parent ID. Around 193347325/216563914, the heartbeat producer is gated to the root invocation.
 - Around 198843055, root serialization emits heartbeat true and those IDs, UUID and elapsed value. Around 184490875, user-result envelopes require nullable parent scope.
 
-Child/subagent progress, shell progress without heartbeat and retry metadata remain unsupported. No provider ID collision is claimed as a witnessed incident; ambiguous ownership is refused defensively.
+Root Agent retry metadata has a separate [typed retry observation contract](claude-agent-retry.md). Detached child progress and shell progress without heartbeat remain unsupported. No provider ID collision is claimed as a witnessed incident; ambiguous ownership is refused defensively.
 
 ## Consumers and validation boundary
 

@@ -1506,7 +1506,7 @@ def chat_reconcile_interaction(
             send_and_wait(process, master_fd, output, b"\r", "내 메시지 2건 대기".encode())
             completed = output.rfind(FRAME_END) + len(FRAME_END)
             pending_screen = screen_text(bytes(output[:completed]))
-            if "1건 전달 재확인 중".encode() not in pending_screen or "접수됨".encode() in pending_screen:
+            if "1건 전송 확인 중".encode() not in pending_screen or "처리 대기".encode() in pending_screen:
                 raise AssertionError("unknown admission was presented as confirmed queued: " + repr(pending_screen))
             before_release = [
                 json.loads(body).get("message")
@@ -1853,39 +1853,60 @@ def chat_visibility_modes_interaction(
             )
         if b"2 reasoning steps" not in initial or b"THINKING" not in initial:
             raise AssertionError(f"folded reasoning was not identifiable: {initial!r}")
-        # The diagnostic header owns the turn identity; the compact Skill
-        # body follows on the next row. Read the completed screen so an older
-        # reading-mode frame cannot supply the Skill mark or name separately.
-        turn_row = screen_row_of(
-            observed_rows, "TURN #54 · 요청 trace-..531-00020#54".encode()
-        )
+        # The skill row and its bold name must belong to one turn on the
+        # completed screen, not separate turns or historical frames. The
+        # conversation draws no TURN heading; a turn is one rail block that
+        # opens on ╭ and closes on ╰, and a one-row turn stands alone on ╶.
+        styled_rows = screen_rows(completed, preserve_styles=True)
+        turn_blocks: list[list[int]] = []
+        open_block: list[int] = []
+        for row in sorted(
+            row for row in observed_rows if title_row < row < composer_row
+        ):
+            text = observed_rows[row]
+            if "╭".encode() in text or "╶".encode() in text:
+                open_block = [row]
+            elif open_block:
+                open_block.append(row)
+            if open_block and ("╰".encode() in text or "╶".encode() in text):
+                turn_blocks.append(open_block)
+                open_block = []
+        skill_in_turn = False
+        for block in turn_blocks:
+            skill_rows = [
+                row for row in block
+                if re.search("◆\\s+SKILL".encode(), observed_rows[row])
+            ]
+            if skill_rows and any(
+                b"\x1b[1mci-red-attribution" in styled_rows.get(row, b"")
+                for row in block
+                if row >= skill_rows[0]
+            ):
+                skill_in_turn = True
+                break
         skill_row = screen_row_of(observed_rows, b"ci-red-attribution")
         reasoning_row = screen_row_of(observed_rows, b"2 reasoning steps")
         tool_row = screen_row_of(observed_rows, b"masc_fusion")
-        if not (
-            title_row < turn_row
-            and skill_row == turn_row + 1
-            and skill_row < reasoning_row < tool_row < composer_row
-        ):
+        if not (skill_in_turn and title_row < skill_row < reasoning_row < tool_row < composer_row):
             raise AssertionError(
                 "the Skill body, reasoning and tool did not belong to their turn: "
                 f"{observed_rows!r}"
             )
-        turn = observed_rows[turn_row].decode("utf-8")
+        # Without generated TURN headings, the Skill's own row opens its
+        # rail block. Keep the completed-screen geometry check on real rows.
         skill = observed_rows[skill_row].decode("utf-8")
-        rail_column = turn.find("╭")
-        quote_column = turn.find("│")
+        rail_column = skill.find("╭")
+        quote_column = skill.find("│")
         if (
             rail_column < 0
             or quote_column <= rail_column
             or re.fullmatch(r"\s*\d\d:\d\d\s+◆\s+SKILL\s*",
-                            turn[rail_column + 1:quote_column]) is None
-            or skill[quote_column:quote_column + 1] != "│"
+                            skill[rail_column + 1:quote_column]) is None
             or not skill[quote_column + 1:].lstrip().startswith("ci-red-attribution")
         ):
-            raise AssertionError(f"the Skill header lost ownership of its body: {observed_rows!r}")
+            raise AssertionError(f"the Skill row lost its label or body: {observed_rows!r}")
         for row, mark in (
-            (skill_row, "│"), (reasoning_row, "├"), (tool_row, "╰")
+            (skill_row, "╭"), (reasoning_row, "├"), (tool_row, "╰")
         ):
             text = observed_rows[row].decode("utf-8")
             if text[rail_column:rail_column + 1] != mark:

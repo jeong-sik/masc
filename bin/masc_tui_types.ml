@@ -4029,14 +4029,27 @@ module Browser_lane_view = struct
      | Launcher_installed ->
          { lead; said = Filename.quote attach.launcher; breaks = At_slashes }
          :: (match address with
-             | Some address -> [host_said under ("--bidi-url " ^ Filename.quote address)]
+             | Some address ->
+                 [host_said under (Masc.Browser_bidi_host_status.bidi_url_flag ^ " " ^ Filename.quote address)]
              | None ->
                  [host_said under attach.arguments;
-                  host_said under "PORT: the --remote-debugging-port Firefox was started with"])
+                  host_said under
+                    ("PORT: the " ^ Masc.Browser_bidi_host_status.firefox_flag ^ " Firefox was started with")])
      | Launcher_not_installed -> [host_said lead "install the browser lane in this workspace first"]
      | Launcher_needs_reinstall ->
          [host_said lead "install the browser lane again first (launcher not as installed)"])
     @ [host_line (transport_setup_row [Browser_lane.Webdriver_bidi])]
+  (* The listed connection can outlive its host, or belong to another
+     host. Keep that distinction visible beside a report that says none ran
+     here or that this host ended. *)
+  let host_connection_note t =
+    let bidi_listed =
+      List.exists (fun (client : client) -> client.transport = Browser_lane.Webdriver_bidi)
+        (listed_clients t) in
+    match t.bidi_host with
+    | Host_reported { state = (Never_started | Ended _ | Died _); _ } when bidi_listed ->
+        [host_line "A listed BiDi connection may be stale or belong to another host"]
+    | Host_not_reported | Host_report_unreadable _ | Host_reported _ -> []
   (* Everything the picker says of the BiDi host: whether one runs, what
      stands in the way of the next one, and how one is started. A host that
      is running is not told how to start one. *)
@@ -4054,7 +4067,8 @@ module Browser_lane_view = struct
         let attach ~address = host_attach_lines ~address report.attach in
         (match report.state with
          | Never_started ->
-             host_line "BiDi host: none has run for this workspace" :: attach ~address:None
+             [host_line "BiDi host: none has run for this workspace"]
+             @ host_connection_note t @ attach ~address:None
          | Running entry ->
              (* The first row is the one a short screen keeps, so it says
                 where the host stands beside the list, not only that it runs. *)
@@ -4080,15 +4094,16 @@ module Browser_lane_view = struct
          | Ended (entry, ending) ->
              (* What to do comes before why: on a screen that holds two of
                 these rows, the step is the one that has to be there. *)
-             (host_line (Printf.sprintf "BiDi host: ended %s · pid %d" (host_time ending.at) entry.pid)
-              :: host_session_lines entry ending)
+             [host_line (Printf.sprintf "BiDi host: ended %s · pid %d" (host_time ending.at) entry.pid)]
+             @ host_session_lines entry ending
+             @ host_connection_note t
              @ [host_said "Reason: " ending.reason]
              @ host_unacknowledged_lines entry
              @ attach ~address:(Some entry.bidi_url)
          | Died entry ->
-             List.map host_line
-               [Printf.sprintf "BiDi host: pid %d is gone · no reason recorded" entry.pid;
-                "Its session may be left in Firefox · restart Firefox if a host is refused"]
+             [host_line (Printf.sprintf "BiDi host: pid %d is gone · no reason recorded" entry.pid)]
+             @ [host_line "Its session may be left in Firefox · restart Firefox if a host is refused"]
+             @ host_connection_note t
              @ host_unacknowledged_lines entry
              @ attach ~address:(Some entry.bidi_url)
          | Unreadable { detail; held = Some true } ->
@@ -4382,7 +4397,12 @@ module Browser_lane_view = struct
     let* listed = decode_clients json in
     (* The same [data] the connections were read from. A server from before
        the report has no such field. *)
-    let reported = Result.to_option (Result.bind (field "data" json) (field "bidiHost")) in
+    let* data = field "data" json in
+    let* reported =
+      match data with
+      | `Assoc fields -> Ok (List.assoc_opt "bidiHost" fields)
+      | _ -> Error "expected object"
+    in
     Ok { listed; bidi_host = decode_bidi_host reported }
   let parse_client_id source json =
     let* value = field "clientId" json in
@@ -10369,13 +10389,6 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
       (fun entry -> String.equal entry.me_keeper_name keeper_name)
       state.msg_history
   in
-  let session = List.map (fun (row : msg_entry) ->
-      if is_user_row row
-         && Option.is_some (Option.bind
-              (settled_log_for_request state ~keeper_name row.me_request_id)
-              (fun log -> Masc_tui_keeper_chat_transcript.rejection log.tl_transcript))
-      then { row with me_text = "전송 거절됨\n" ^ row.me_text }
-      else row) session in
   let held =
     selected_source_logs_for_keeper state keeper_name
     |> List.filter turn_log_holds_the_turn
@@ -13511,7 +13524,7 @@ let keeper_message_activity_rows (state : state) =
                   && Masc_tui_keeper_chat_projection.same_request_identity
                     request entry.sent_request) waiting)
           | Turn_preflight _ | Turn_streaming -> false) own then
-        attention "메시지 전달 재확인 중";
+        attention "메시지 전송 확인 중";
       let has_working = any_phase (fun transcript ->
         Masc_tui_keeper_chat_transcript.phase transcript = Working) in
       if has_working && not has_progress then add "기존 작업 처리 중";
@@ -13524,7 +13537,7 @@ let keeper_message_activity_rows (state : state) =
               && not (Masc_tui_keeper_chat_transcript.awaiting_continuation entry.log.tl_transcript)
               && Option.map fst (Masc_tui_keeper_chat_transcript.admission entry.log.tl_transcript) = admission) own
           then add text)
-        [None, "메시지 접수 확인 중";
+        [None, "메시지 전송 확인 중";
          Some Masc_tui_keeper_chat_live.Running, "응답 시작 중";
          Some Settled, "완료된 응답을 다시 읽는 중"];
       if not has_working then
@@ -13542,8 +13555,8 @@ let keeper_message_activity_rows (state : state) =
         let count delivery = List.length (List.filter (fun (_, kind) -> kind = delivery) waiting) in
         List.iter (fun (delivery, text) -> let n = count delivery in
           if n > 0 then add (Printf.sprintf "%d건 %s" n text))
-          [Local_pending, "전송 전"; Awaiting_receipt, "접수 확인 중";
-           Rechecking_delivery, "전달 재확인 중"];
+          [Local_pending, "전송 대기"; Awaiting_receipt, "전송 중";
+           Rechecking_delivery, "전송 확인 중"];
         let requests = List.map fst waiting in
         let holds request = List.exists
           (Masc_tui_keeper_chat_projection.same_request_identity request) requests in
@@ -13559,9 +13572,9 @@ let keeper_message_activity_rows (state : state) =
         else if List.for_all (fun request -> List.exists (fun (received, result) ->
             Masc_tui_keeper_chat_projection.same_request_identity request received
             && Result.is_ok result) receipts) requests then
-          add "다음 순서로 접수됨"
-        else if receipts <> [] then add "일부 메시지 다음 순서로 접수됨"
-        else if count Keeper_queued > 0 then add "접수됨"
+          add "다음 순서로 전달 대기"
+        else if receipts <> [] then add "일부 메시지 다음 순서로 전달 대기"
+        else if count Keeper_queued > 0 then add "처리 대기"
       end;
       if List.exists (fun (name, _, intervention) ->
           String.equal name keeper_name && intervention = Retained_after_stop)

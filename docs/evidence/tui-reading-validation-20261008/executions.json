@@ -236,37 +236,37 @@
     {
       "file": "scripts/capture-tui-ci-frames.py",
       "sha256": "a7d67cb6f763ff2b2e07bc285a65f4a737420e7c51ba60902922c12f738f85c5",
-      "syntax": "PASS"
+      "syntax": "HISTORICAL_PASS"
     },
     {
       "file": "test/test_tui_chat_command_menu_pty.py",
       "sha256": "6491c224bf9a851f7e2b8267d42f04c5530dcbcde309eec1ca0d11988e88db55",
-      "syntax": "PASS"
+      "syntax": "HISTORICAL_PASS"
     },
     {
       "file": "test/test_tui_region_baseline_pty.py",
       "sha256": "ef5f1f602f4bc8edccbabc331c833267731191af2ffff2bc4c2365e3051b96f3",
-      "syntax": "PASS"
+      "syntax": "HISTORICAL_PASS"
     },
     {
       "file": "test/test_tui_remote_workspace_history_pty.py",
       "sha256": "82fdd59e5e555bb19f0c737edda48edb578fe3fa28413f91c406495b5dd0a7b8",
-      "syntax": "PASS"
+      "syntax": "HISTORICAL_PASS"
     },
     {
       "file": "test/tui_keyboard_chat.py",
       "sha256": "8487c866b172fb6e488e34c9cc499d9af0f6a6d185def3aa49c8b60fb9e80331",
-      "syntax": "PASS"
+      "syntax": "HISTORICAL_PASS"
     },
     {
       "file": "test/tui_region_harness.py",
       "sha256": "07cd95eb1813b0e34ad728942d43eba72c6f7d52258cbb3cbb203f04ff97651a",
-      "syntax": "PASS"
+      "syntax": "HISTORICAL_PASS"
     },
     {
       "file": "docs/evidence/tui-reading-validation-20261008/capture-chat.py",
       "sha256": "4ed8625573271d639c3d4ebf42fba669dfdae374f2a9192a5bc182960ecdb933",
-      "syntax": "PASS"
+      "syntax": "HISTORICAL_PASS"
     }
   ],
   "not_claimed": [
@@ -278,6 +278,6 @@
     "current chat visibility fixture execution",
     "current rail-boundary fixture execution"
   ],
-  "fixture_syntax_scope": "Fresh ast.parse checks on exactly the recorded hashes; historical execution records above were not rerun.",
+  "fixture_syntax_scope": "Historical ast.parse checks for the recorded hashes only; later integration changed fixtures. No current-head syntax or PTY result is claimed by this receipt.",
   "scope": "Historical execution reports only; no current-source PTY execution verified by this manifest."
 }

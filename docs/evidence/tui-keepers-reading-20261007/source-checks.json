@@ -1,5 +1,5 @@
 {
-  "scope": "Exact current source parser checks only; native regressions, prior geometry and PTY are not rerun.",
+  "scope": "Historical parser checks for the recorded source hashes only. Later integration changed source; this receipt does not validate the current head. Native regressions, geometry and PTY were not rerun.",
   "checks": {
     "bin/masc_tui.ml": {
       "sha256": "fcf00c05666cadf8258d2888b5f7bc25d722d50687ecd0c5c66a3b04478f2726",

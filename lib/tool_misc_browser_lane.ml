@@ -210,10 +210,11 @@ let selection_error ~base_path ~tool_name ~start_time error =
        one ended. The operator acts on it, not the Keeper. A connection that
        serves the work makes that beside the point: the Keeper retries
        there. The state and the paragraph sit with the fields that decide.
-       The paragraph does not grow with what a host has done: its length is
-       bound by the workspace path and the reason for ending, which a host
-       writes in at most 515 bytes. The record itself is not sent: its list
-       of results grows while a host runs. *)
+       The paragraph does not grow with what a host has done. Its length
+       follows the workspace path, the address the last host was given and
+       the reason for ending, which a host writes in at most 515 bytes; the
+       address has no limit of its own. The record itself is not sent: its
+       list of results grows while a host runs. *)
     let bidi_host =
       match serving_clients, host with
       | [], Some host -> ["bidiHost", Browser_bidi_host_status.summary_to_json host]

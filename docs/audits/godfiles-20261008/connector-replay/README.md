@@ -1,6 +1,6 @@
 # Connector durable request owner
 
-Base: 2ab88c31f68e1f339261a3a400d540e07eff4e25.
+PR #42114. Base: 2ab88c31f68e1f339261a3a400d540e07eff4e25.
 
 The 2636-line in-process runtime mixed durable connector request parsing with Gate consumption and actual connector transmission. Private keeper_connector_post_replay owns the canonical closed request type, exact gate-input construction, strict decoding, target recovery and call summary (209 lines). The runtime retains Gate authorization, one-shot consumption, transmission and outcome settlement (2446 lines).
 

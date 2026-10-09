@@ -66,13 +66,32 @@ type fixture = {
   observation_available : bool ref;
 }
 
+(* The machine workers publish each export from the embedded
+   tools/<name>.toml as name, description and input schema
+   (msx_addon_worker / dos_addon_worker [definition]). The fixture publishes
+   the same definitions, so a Keeper's composition check sees the tools an
+   attached worker would offer. *)
+let worker_tool_definition name =
+  match Embedded_config.read ("tools/" ^ name ^ ".toml") with
+  | None -> failf "no embedded definition for exported tool %s" name
+  | Some contents ->
+    match Tool_definition_toml.load ~name ~contents with
+    | Error message -> fail message
+    | Ok definition ->
+      let schema = definition.Tool_definition_toml.schema in
+      match Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc ["name", `String schema.name;
+          "description", `String schema.description; "inputSchema", schema.input_schema]) with
+      | Ok tool -> tool
+      | Error message -> fail message
+
 let backend fixture : Lane.For_testing.backend = {
-  start = (fun ~sw:_ ~state_owner:_ ~instance_id ~package:_ ~binding:_ ~on_created ->
+  start = (fun ~sw:_ ~state_owner:_ ~instance_id ~(package : Lane_addon_types.package) ~binding:_ ~on_created ->
     incr fixture.starts;
     let stopped = ref false in
+    let exported = List.map worker_tool_definition package.exported_tools in
     let connection : Lane.For_testing.connection = {
       container_id = digest instance_id;
-        exported_tools = (fun () -> []);
+        exported_tools = (fun () -> exported);
         call_exported_tool = (fun ~on_result:_ ~authorize:_ ~principal:_ ~name:_ ~arguments:_ -> Error (Lane_addon_call_context.Transport_error "no exported tools"));
         action_schema = (fun () -> None);
         act = (fun ~arguments:_ -> Error "read-only fixture");
@@ -370,7 +389,14 @@ let test_machine_package_skills_follow_attachment () =
         let entry = skill published name in
         checked_read reader ("read-" ^ name)
           (Skill_reference.to_yojson (Snapshot.entry_reference entry)) entry.document.body) names;
-      let catalog, diagnostics = Catalog.of_snapshot published in
+      (* A Keeper turn validates compositions against the host descriptors and
+         the tools its attached workers export (keeper_run_tools_setup); the
+         machine packages' compositions call those worker exports. *)
+      let exports = (Keeper_lane_addon_runtime.snapshot ~config:fixture.config
+        ~keeper_name:"fixture-keeper").exports in
+      let descriptors = Keeper_tool_descriptor.all_descriptors ()
+        @ List.map Keeper_lane_addon_descriptor.create exports in
+      let catalog, diagnostics = Catalog.of_snapshot ~descriptors published in
       check int "package instructions parse without diagnostics" 0 (List.length diagnostics);
       List.iter (fun name ->
         let entry = List.find (fun (entry : Catalog.skill) -> entry.name=name) (Catalog.skills catalog) in

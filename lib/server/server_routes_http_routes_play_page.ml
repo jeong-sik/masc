@@ -1027,6 +1027,16 @@ function refreshFrameSeat(revision, signal, activityKey) {
   });
 }
 
+// Seat authority must recover even when the frame transport never resolves.
+// Reuse the same coalesced owner as frame-triggered refreshes.
+function tickSeat() {
+  if (ended) return;
+  if (!authRejected && !disconnecting && frameAbort !== null
+      && performance.now() >= nextSeatPollAt)
+    refreshFrameSeat(viewRevision, frameAbort.signal, pendingSeatActivity);
+  setTimeout(tickSeat, SEAT_POLL_MS);
+}
+
 async function tick(revision, abort) {
   try {
     await poll(revision, abort.signal);
@@ -1277,6 +1287,7 @@ if (token === '') {
   end('링크에 초대 토큰이 없어요. 받은 링크를 그대로 열어 주세요.');
 } else {
   tickRoom();
+  setTimeout(tickSeat, SEAT_POLL_MS);
   refreshSeat().catch(() => setStatus('seat', '자리 정보를 읽지 못했어요. 다시 시도하고 있어요.'));
   // Frame observation does not depend on controller authority being readable.
   restartFrames();

@@ -27,6 +27,7 @@ type error =
   | Activity_unobserved
   | No_machine
   | Invalid_request of string
+  | Effect_unknown of string
   | Unreadable of string
 
 let error_to_string = function
@@ -34,7 +35,7 @@ let error_to_string = function
   | Activity_unobserved -> "Machine activity configuration is unavailable"
   | No_machine -> "no MSX machine is loaded: call masc_msx_load first"
   | Invalid_request message -> message
-  | Unreadable message -> message
+  | Unreadable message | Effect_unknown message -> message
 ;;
 
 let ( let* ) = Result.bind
@@ -809,17 +810,26 @@ let rec mkdir_checkpoint_directory dir =
   end
 
 let atomic_write path contents =
-  mkdir_checkpoint_directory (Filename.dirname path);
-  let tmp, oc = Filename.open_temp_file ~temp_dir:(Filename.dirname path) ".msx-" ".tmp" in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc; if Sys.file_exists tmp then Sys.remove tmp)
-    (fun () ->
-      output_string oc contents;
-      flush oc;
-      Unix.fsync (Unix.descr_of_out_channel oc);
-      close_out oc;
-      Sys.rename tmp path;
-      sync_checkpoint_directory (Filename.dirname path))
+  let replaced = ref false in
+  let failure message = Error (if !replaced then Effect_unknown message else Unreadable message) in
+  try
+    mkdir_checkpoint_directory (Filename.dirname path);
+    let tmp, oc = Filename.open_temp_file ~temp_dir:(Filename.dirname path) ".msx-" ".tmp" in
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr oc; if Sys.file_exists tmp then Sys.remove tmp)
+      (fun () ->
+        output_string oc contents;
+        flush oc;
+        Unix.fsync (Unix.descr_of_out_channel oc);
+        close_out oc;
+        Sys.rename tmp path;
+        replaced := true;
+        sync_checkpoint_directory (Filename.dirname path);
+        Ok ())
+  with
+  | Sys_error message -> failure message
+  | Unix.Unix_error (error, operation, path) ->
+      failure (operation ^ " " ^ path ^ ": " ^ Unix.error_message error)
 ;;
 
 let checkpoint_json (st : machine) =
@@ -850,7 +860,7 @@ let save ~path =
       try
         let contents = Yojson.Safe.to_string (checkpoint_json st) in
         let checkpoint_sha256 = Digestif.SHA256.(to_hex (digest_string contents)) in
-        atomic_write path contents;
+        let* () = atomic_write path contents in
         Ok { observation = observe st;
              mark = { count = !change_count; incarnation = st.incarnation };
              checkpoint_sha256 }
@@ -937,7 +947,7 @@ let restore ~path ~ledger_dir =
       let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
       try
         let ledger_bytes = String.concat "" (List.map (fun e -> Yojson.Safe.to_string (entry_json e) ^ "\n") entries) in
-        atomic_write ledger_path ledger_bytes;
+        let* () = atomic_write ledger_path ledger_bytes in
         let st = {m; incarnation = fresh_incarnation (); pixels = None; frame;
                   cart; disk; disk_id; media; ledger_path; entries = List.rev entries;
                   input_count = List.length entries} in
@@ -969,7 +979,7 @@ let change_disk ~path ~backup_path =
           match Msx.change_disk m target_bytes with
           | Error message -> Error (Invalid_request message)
           | Ok () ->
-            atomic_write backup_path (Yojson.Safe.to_string (checkpoint_json st));
+            let* () = atomic_write backup_path (Yojson.Safe.to_string (checkpoint_json st)) in
             let next = {st with m; pixels = None; disk = Some (Filename.basename path); disk_id = Some target_id; media = List.remove_assoc target_id media} in
             state := Some next;
             mark_change ();

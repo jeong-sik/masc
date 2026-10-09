@@ -2361,6 +2361,57 @@ for (const watched of ['dos', 'msx']) for (const initiallyConnected of [true, fa
   });
 }
 
+for (const status of [401, 403]) {
+  test(`terminal ${status} retires an initialized page after storage access is revoked`, async () => {
+    let blocked = false;
+    let rejected = false;
+    const backing = new Map();
+    const storage = {
+      get(key) { if (blocked) throw new Error('storage revoked'); return backing.get(key); },
+      set(key, value) { if (blocked) throw new Error('storage revoked'); backing.set(key, value); },
+      delete(key) { if (blocked) throw new Error('storage revoked'); return backing.delete(key); },
+    };
+    const page = fixture(({url}) => {
+      if (rejected) return response({}, status);
+      if (url === '/api/v1/play/seat') return response(seat);
+      if (url === '/api/v1/play/pad') return response(layout);
+      return response(frame);
+    }, {storage});
+    await page.settle();
+    blocked = true; rejected = true;
+    await page.poll();
+    await page.settle();
+    assert.equal(page.evaluate('authRejected'), true, 'rejected bearer is retired independently of storage cleanup');
+    const count = page.requests.length;
+    await page.seatTick();
+    assert.equal(page.requests.length, count, 'invalid bearer does not keep polling');
+    assert.equal(page.get('send-text').disabled, true);
+    assert.ok(backing.size > 0, 'inaccessible persisted evidence remains intact');
+  });
+}
+
+test('seat recovery cadence replaces a stalled authority request without machine activity', async () => {
+  let stalled;
+  let hold = false;
+  const page = fixture((request, signal) => {
+    if (request.url === '/api/v1/play/seat') {
+      if (hold && !stalled) { stalled = signal; return new Promise(() => {}); }
+      return response(seat);
+    }
+    if (request.url === '/api/v1/play/pad') return response(layout);
+    return response(frame);
+  });
+  await page.settle();
+  hold = true;
+  await page.seatTick();
+  const reads = page.requests.filter(r => r.url === '/api/v1/play/seat').length;
+  await page.seatTick();
+  await page.settle();
+  assert.equal(stalled.aborted, true);
+  assert.equal(page.requests.filter(r => r.url === '/api/v1/play/seat').length, reads + 1);
+  assert.equal(page.get('send-text').disabled, false);
+});
+
 test('storage-blocked observers read public room history without presence writes', async () => {
   const storage = new Map();
   storage.set = () => { throw new Error('storage blocked'); };
@@ -2438,6 +2489,7 @@ test('terminal say receipt persistence can recover locally without retrying the 
   page.get('chat-send').handlers.click();
   await page.settle();
   assert.equal(JSON.parse(storage.get('masc.play.room.draft')).pending.text, 'known rejected receipt');
+  assert.equal(page.get('leave').disabled, false, 'local receipt recovery must remain reachable by a real click');
   denySettlement = false;
   await page.get('leave').handlers.click();
   assert.equal(storage.size, 0, 'local cleanup first retries terminal receipt persistence');
@@ -2452,14 +2504,19 @@ test('explicit reconnect retries departure-marker cleanup after storage recovers
     if (key === 'masc.play.departure' && failRemoval) throw new Error('departure cleanup unavailable');
     return Map.prototype.delete.call(storage, key);
   };
-  const page = fixture(gameReply, { storage });
+  let holdFrame = false;
+  const page = fixture(request => holdFrame && request.url.includes('/live?')
+    ? new Promise(() => {}) : gameReply(request), { storage });
   await page.settle();
   assert.equal(storage.get('masc.play.departure'), 'pending');
   assert.equal(page.get('chat-text').disabled, true);
   assert.equal(page.padButton.disabled, true);
   failRemoval = false;
-  await page.poll(5000);
-  assert.equal(storage.has('masc.play.departure'), false, 'retained reopen intent retries cleanup on ordinary seat poll');
+  holdFrame = true;
+  void page.poll(300);
+  await page.settle();
+  await page.seatTick();
+  assert.equal(storage.has('masc.play.departure'), false, 'retained reopen intent retries cleanup on independent seat timer while live is stalled');
   assert.equal(page.get('chat-text').disabled, false);
   assert.equal(page.padButton.disabled, false);
   page.get('chat-text').value = 'rejoined room';

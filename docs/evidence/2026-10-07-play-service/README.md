@@ -29,3 +29,5 @@ Final TUI response execution passed: Collab request ownership 3 cases, card/over
 The public-address probe used an isolated candidate with `MASC_HTTP_BASE_URL=https://masc.crying.pictures`: configured Host accepted, unrelated Host rejected, expected link origin, Player administration refused with exact403, and revoked credentials refused with exact401. The selected origin is saved in the operator's ignored launch `.env`; the shared process has not adopted it yet.
 
 Fresh review response (2026-10-09): Chromium receipt/screenshots regenerated from this exact page source (26 controlled-browser checks), with a new 155/155 Node log. Added regressions cover superseded direct-seat authentication failures, MSX departure wording and stale-program pad responses. These remain client-fixture evidence, not deployed/native execution.
+
+After parent integration: Node158 cases pass. The room page source remains byte-identical to its previous Chromium receipt (26 checks); the lower-only terminalAuth/frame-seat fixes are already supplied here by authRejected and the independent replaceable seat timer.

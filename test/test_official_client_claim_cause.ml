@@ -69,7 +69,6 @@ let run_adapter client_kind ~base_path ~keeper_name ~runtime_id ~cli_path =
       ; model = Some "synthetic-model"
       ; admission_timeout_s = 1.; timeout_s = Some 1. } in
     let outcome = Keeper_muse_runtime.run
-        ~prompt_capacity:(Error Runtime_muse_prompt_capacity.No_window_declared)
         ~configured_reasoning_effort:None ~turn_timeout_s:None
         ~quota_scope:(Runtime_quota_window.scope_of_muse_home
           (Filename.concat base_path "absent-synthetic-account"))

@@ -2184,6 +2184,7 @@ let enter_text_response_scope t scope =
     t.observed_model <- None;
     t.observed_usage <- None;
     t.observed_stop_reason <- None;
+    t.model_signal <- None;
     t.stop_scope <- None
   end
 

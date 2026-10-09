@@ -1021,7 +1021,7 @@ class AtomicChatFixture:
             "turn": None if self.release.is_set() else {
                 "lane": "autonomous", "started_at_unix": self.started_at,
                 "interrupt_token": self.turn_token,
-                "preview": {"text_tail": "Atomic fixture ready", "last_tool": None,
+                "preview": {"text_position": {"generation": 0, "start_byte": 0}, "text_tail": "Atomic fixture ready", "last_tool": None,
                             "status_text": "waiting for cooperative settlement", "updated_at_unix": self.started_at},
             },
         }]}

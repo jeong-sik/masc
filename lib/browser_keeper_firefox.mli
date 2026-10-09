@@ -25,10 +25,11 @@ val firefox_ready_timeout_s : float
 type firefox_failure =
   | Spawn_failed of string
   | Exited_before_listening of Unix.process_status option
-      (** Firefox 157.0.1 exits with status 0, before opening the port, when
-          another Firefox has the profile open; its message is in the
-          system's language only (measured 2026-10-09), so neither tells
-          that case apart. [None]: the status was not known here. *)
+      (** Firefox and every process it left in its group ended before the
+          port answered. Firefox 157.0.1 exits with status 0 this way when
+          another Firefox has the profile open, and says so only in the
+          system's language (measured 2026-10-09); the message names that
+          case for status 0 alone. [None]: the status was not known here. *)
   | Not_listening of float  (** The port did not answer within these seconds. *)
 
 val firefox_failure_message : Browser_configuration.live_bidi -> firefox_failure -> string

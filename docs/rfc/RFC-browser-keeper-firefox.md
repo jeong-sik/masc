@@ -41,9 +41,11 @@ Keeper 가 Slack 에 리액션을 달려면 hover 가 필요하고, hover 는 Bi
   Firefox 프로필은 `--profile-root` 아래에 세션마다 새로 생긴다. 로그인이 남지 않아서 Slack 일에는 못 쓴다.
 - `[browser.stagehand]`: `profile` 에 운영자가 가진 프로필 디렉터리를 적으면 세션 사이에 그 프로필을 쓴다.
   로그인이 남는 프로필을 설정으로 받는 선례다.
-- `Process_eio.spawn_detached` 와 `spawn_detached_devnull`: 자기 process group 으로 띄우고,
-  띄운 쪽의 Eio switch 가 끝나도 죽지 않는다. 서버 안에서는 `spawn_detached_devnull` 을 이미 쓴다
-  (`server_routes_http_routes_sidecar.ml`).
+- `Process_eio.spawn_detached` 와 `spawn_detached_devnull`: 자기 session 으로 띄우고, 띄운 쪽의 Eio switch 가 끝나도
+  죽지 않는다. 그런데 `Unix.fork` 로 띄운다. OCaml 5 는 domain 이 여럿 도는 프로세스에서 fork 를 거절하고,
+  서버가 geckodriver 를 posix_spawn 관리자(`Posix_spawn_process_mgr`)로 띄우는 것도 그 까닭이다.
+  그래서 서버에서는 posix_spawn 으로 자기 process group 에 띄우고 switch 가 끝나도 멈추지 않는 길이 따로 필요하다
+  (구현: `Posix_spawn_detached`).
 
 ### 2.3 설정
 
@@ -87,22 +89,26 @@ port = 9222
 서버는 빠진 것만 켠다. 이미 떠 있는 것은 그대로 쓴다.
 
 1. 그 포트에 무언가 듣고 있으면 Firefox 를 띄우지 않는다.
-   듣는 것이 없으면 `firefox --no-remote --profile <profile> --remote-debugging-port <port>` 를 `spawn_detached` 로 띄운다.
+   듣는 것이 없으면 `firefox --no-remote --profile <profile> --remote-debugging-port <port>` 를 떨어진 프로세스로 띄운다(§2.2).
    포트가 열릴 때까지 기다린다. 열리지 않거나 Firefox 가 먼저 끝나면 띄우지 않은 까닭을 기록한다(§3.4).
    같은 프로필로 이미 떠 있는 Firefox(플래그 없이 운영자가 띄운 것)가 있으면 Firefox 는 그 프로필을 두 번 열지 않는다.
    2026-10-09 Firefox 157.0.1 을 임시 프로필로 재 보니(headless), 두 번째 Firefox 는 약 5초 뒤 **종료 코드 0** 으로 끝났고
    포트는 열리지 않았다. stderr 에는 시스템 언어로 된 "이미 실행 중" 안내만 나왔다.
    그래서 종료 코드로도, 출력 글자로도 가르지 않는다. "포트가 열리기 전에 Firefox 가 끝났다"를 하나의 까닭으로 기록하고,
    문장은 그 프로필을 다른 Firefox 가 열고 있을 수 있다고 말한다.
+   처음 프로세스가 끝나도 그 process group 에 남은 프로세스가 있으면 마감 시간까지 계속 기다린다.
+   받아 둔 업데이트를 적용하는 Firefox 는 updater 를 띄우고, updater 가 Firefox 를 다시 띄운다.
+   둘 다 따로 group 을 떠나지 않으면 처음 group 에 남는다고 보았다(재지는 않았다).
+   포트에 연결이 거절되면 "듣는 것 없음"이다. 그 밖의 오류로 알 수 없으면 Firefox 도 host 도 띄우지 않고 그 까닭을 남긴다.
 2. host 기록이 `Running` 이고 잠금이 잡혀 있으면 host 를 띄우지 않는다.
-   아니면 `<base>/.masc/browser-lane/host/launch --bidi-url ws://127.0.0.1:<port>/session` 을 `spawn_detached` 로 띄운다.
+   아니면 `<base>/.masc/browser-lane/host/launch --bidi-url ws://127.0.0.1:<port>/session` 을 떨어진 프로세스로 띄운다.
    launcher 가 설치되어 있지 않으면 띄우지 않고 그렇게 기록한다
    (연결 목록이 이미 `bidiHost.attach.launcher_state` 로 말하는 그 상태다).
 3. 이 일은 서버 시작을 막지 않는다. geckodriver 처럼 별도 fiber 에서 한다.
 
 ### 3.3 서버가 멈출 때와 다시 뜰 때
 
-- 서버가 멈춰도 Firefox 와 host 는 멈추지 않는다(`spawn_detached`).
+- 서버가 멈춰도 Firefox 와 host 는 멈추지 않는다(§2.2 의 떨어진 프로세스).
   배포할 때마다 서버가 다시 뜨는데, 그때마다 Keeper 창이 닫혔다 열리지 않게 하려는 것이다.
 - 다시 뜬 서버는 §3.2 를 다시 한다. 둘 다 떠 있으면 아무것도 하지 않는다.
   host 는 #41898 대로 새 서버에 다시 등록한다.
@@ -115,7 +121,7 @@ port = 9222
   띄우지 못했으면 그 까닭(포트를 다른 프로세스가 씀, 실행 파일 없음, 포트가 안 열림, 먼저 끝남).
   host 기록과 같은 방식으로 통째로 다시 쓴다.
 - host 의 출력은 `<base>/.masc/browser-lane/bidi-host.log` 에 이어 쓴다. 지금은 운영자 터미널에 나온다.
-  `spawn_detached_devnull` 은 출력을 버리므로, 파일로 보내는 갈래가 필요하다(구현 때 정한다).
+  떨어진 프로세스는 처음부터 그 파일을 stdout·stderr 로 받는다.
 - 연결 목록의 `bidiHost` 에 이 상태를 더한다. 문장도 바꾼다.
   - 설정이 있으면 "MASC 가 켠다"고 말하고, 실패했으면 그 까닭과 고칠 것을 말한다.
   - 설정이 없으면 지금 문장에 "`[browser.live.bidi]` 를 적으면 MASC 가 켠다"를 더한다.

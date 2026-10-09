@@ -3,9 +3,9 @@ rfc: "browser-live-one-connection"
 title: "Let one live connection do a whole browser task"
 status: Accepted
 created: 2026-10-08
-updated: 2026-10-08
+updated: 2026-10-09
 author: vincent + claude
-related: ["browser-lane-stagehand", "setup-web-search-and-browser-lane"]
+related: ["browser-lane-stagehand", "setup-web-search-and-browser-lane", "browser-keeper-firefox"]
 ---
 
 # RFC — live 브라우저 일 하나를 한 연결로 끝낸다
@@ -398,6 +398,9 @@ B 의 순서:
   TUI 의 표시는 #41973 에서 했다: 브라우저 고르기 목록 아래의 BiDi host 줄들과,
   보내지 않은 drag 아래의 host 상태 줄 하나(TUI 가 보내는 포인터 동작 가운데 BiDi 가 맡는 것은 drag 다). 서버가 연결 목록과 함께 주는 `bidiHost` 를 읽는다.
   남은 것은 설정 명령의 확인 단계다.
+
+누가 Firefox 와 host 를 켜는가는 RFC-browser-keeper-firefox 가 정한다(2026-10-09).
+§2.4 의 "손으로 붙인다"는 이 RFC 를 쓴 때의 사실이다.
   설정 명령의 단계는 RFC `setup-web-search-and-browser-lane` 의 명령(`masc browser-lane-setup`)에 더하는 것인데,
   그 RFC 는 Draft 이고 명령이 아직 없다. 명령이 생긴 뒤에 더한다. 그 단계가 말할 내용 가운데
   host 기록의 상태와 붙이는 명령은 `masc doctor` 가 이미 말한다.

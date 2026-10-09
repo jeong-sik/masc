@@ -40,11 +40,13 @@ let status_text = function
 
 let firefox_failure_message (config : Browser_configuration.live_bidi) = function
   | Spawn_failed detail -> Printf.sprintf "%s could not be started: %s" config.firefox detail
-  | Exited_before_listening status ->
+  | Exited_before_listening (Some (Unix.WEXITED 0) as status) ->
     Printf.sprintf
       "Firefox exited (%s) before port %d answered. Another Firefox may have %s open; \
        quit it and the next server start opens this one."
       (status_text status) config.port config.profile
+  | Exited_before_listening status ->
+    Printf.sprintf "Firefox exited (%s) before port %d answered." (status_text status) config.port
   | Not_listening seconds ->
     Printf.sprintf "Firefox did not open port %d within %.0f s." config.port seconds
 

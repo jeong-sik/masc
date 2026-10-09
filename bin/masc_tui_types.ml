@@ -8562,6 +8562,16 @@ let rows_the_logs_do_not_draw ~held rows =
    about those calls and reads. A skill evidence gap on a loaded row
    (missing, unreadable) names no read and is not carried over. Run where
    loaded rows arrive and where a journal log is held. *)
+let same_skill_invocation
+    (left : Masc_tui_keeper_chat_transcript.skill_activity)
+    (right : Masc_tui_keeper_chat_transcript.skill_activity) =
+  Option.is_some left.turn_ref && Option.is_some left.skill_tool_use_id
+  && left.turn_ref = right.turn_ref
+  && left.skill_tool_use_id = right.skill_tool_use_id
+  && (match left.runtime_id, right.runtime_id with
+      | Some left, Some right -> String.equal left right
+      | None, _ | _, None -> true)
+
 let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
   List.iter
     (fun turn_log ->
@@ -8596,8 +8606,7 @@ let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
                   match item.drawn with
                   | Drawn_skill skills -> List.exists
                       (fun (shown : Masc_tui_keeper_chat_transcript.skill_activity) ->
-                        shown.turn_ref = skill.turn_ref
-                        && shown.skill_tool_use_id = skill.skill_tool_use_id) skills
+                        same_skill_invocation shown skill) skills
                   | Drawn_tools _ | Drawn_thinking _ | Drawn_text _ | Drawn_reply _
                   | Drawn_status _ | Drawn_error _ -> false)
                     (Masc_tui_keeper_chat_transcript.drawn turn_log.tl_transcript) in
@@ -10627,15 +10636,11 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
     | Message_skill _ when row.me_skill_block <> [] ->
         let observed = List.concat_map (fun (item : Transcript.drawn_item) ->
           match item.drawn with Drawn_skill skills -> skills | _ -> []) drawn in
-        (* Runtime identity is proof metadata, not the receipt identity. A
-           journal replay may know the runtime while the stream-side skill
-           row does not; the exact turn reference and tool-use id still bind
-           those two observations to one invocation. *)
+        (* A missing runtime can be completed by the other observation, but
+           two known runtimes belong to distinct invocations. *)
         let skills = List.filter (fun (skill : Transcript.skill_activity) ->
           not (List.exists (fun (shown : Transcript.skill_activity) ->
-            Option.is_some skill.skill_tool_use_id
-            && skill.skill_tool_use_id = shown.skill_tool_use_id
-            && skill.turn_ref = shown.turn_ref) observed)) row.me_skill_block in
+            same_skill_invocation skill shown) observed)) row.me_skill_block in
         if skills = [] then None
         else Some {row with me_skill_block=skills;
           me_role=Message_skill (Transcript.skill_block_state skills)}

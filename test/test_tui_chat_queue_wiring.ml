@@ -3797,6 +3797,57 @@ let test_checkpoint_activities_have_exact_row_authority () =
     (List.exists (fun (row : Tui_types.msg_entry) -> row.me_text = "FINAL") rows)
 ;;
 
+let test_skill_projection_keeps_distinct_runtime_evidence () =
+  List.iter (fun partial ->
+    List.iter (fun (observed_runtime, durable_runtime, distinct) ->
+      let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+      state.msg_loaded_keeper <- Some "alpha";
+      let request_id = "runtime-skill-evidence" in
+      let occurrence : Live.tool_occurrence = {stream_scope=0;block_index=1;
+        provider_message_id=None;tool_call_id=Some "same-id"} in
+      let log = settled_log ~request_id
+        [Live.Run_started;Live.Tool_started {occurrence;tool_name="keeper_skill"};
+         Live.Tool_ended {occurrence};Live.Tool_result {occurrence;execution_id="skill-exec"};
+         Live.Reply_details {reply=(if partial then "" else "FINAL");
+           turn_outcome=(if partial then Continuation_checkpoint else Visible_reply);
+           turn_ref="same-turn#1"};Live.Run_finished] in
+      let terminal = Keeper_chat_operation.Succeeded {completed_at=150.;outcome_ref="final"} in
+      Log.observe_operation_state log.tl_log (Some terminal);
+      Keeper_chat_transcript.reconcile_operation log.tl_transcript terminal;
+      Tui_types.hold_settled_log state log;
+      let evidence runtime action = Keeper_chat_transcript.make_skill_activity
+        ~skill_tool_use_id:"same-id" ~turn_ref:"same-turn#1" ?runtime_id:runtime
+        ~skill_name:"exact-skill" ~state:Skill_used ~actions:[action] () in
+      Keeper_chat_transcript.note_skill_activity log.tl_transcript
+        (evidence observed_runtime "OBSERVED_ACTION");
+      let durable = { (chat_entry ~request_id ~operation_seq:1 ~at:140.
+        ~role:(Tui_types.Message_skill Skill_used) ~text:"durable evidence" ()) with
+        me_skill_block=[evidence durable_runtime "DURABLE_ACTION"] } in
+      state.msg_loaded <- [durable];
+      Tui_types.enrich_held_logs_from_rows state ~keeper_name:"alpha" state.msg_loaded;
+      let remaining = Tui_types.chat_rows_for state "alpha"
+        |> List.concat_map (fun (row : Tui_types.msg_entry) -> row.me_skill_block) in
+      let drawn = drawn_skills_of log in
+      check int "partial known runtime mismatch remains durable" (if partial && distinct then 1 else 0)
+        (List.length remaining);
+      check int "known invocation evidence survives without an arbitrary unknown assignment"
+        (if distinct then (if partial then 2 else 3) else 1)
+        (List.length drawn + List.length remaining);
+      if distinct then
+        check (list string) "both known runtime authorities stay visible"
+          ["runtime-a";"runtime-b"]
+          (List.filter_map (fun (skill : Keeper_chat_transcript.skill_activity) -> skill.runtime_id)
+            (drawn @ remaining))
+      else
+        check (list (option string)) "unknown metadata is completed with the known runtime"
+          [Some "runtime-a"]
+          (List.map (fun (skill : Keeper_chat_transcript.skill_activity) -> skill.runtime_id) drawn))
+      [Some "runtime-a",Some "runtime-b",true;
+       Some "runtime-a",Some "runtime-a",false;
+       None,Some "runtime-a",false;
+       Some "runtime-a",None,false]) [false;true]
+;;
+
 let test_checkpoint_skill_receipts_stay_in_their_exact_turn () =
   let cache = Masc_tui_ansi.terminal_size_cache in
   let previous_size = Masc_tui_ansi.get_terminal_size () in
@@ -6327,6 +6378,8 @@ let () =
             test_observed_history_handoff_keeps_progress_and_one_final_reply
         ; test_case "checkpoint activity rows retain exact source authority" `Quick
             test_checkpoint_activities_have_exact_row_authority
+        ; test_case "Skill projection retains distinct invocation runtimes" `Quick
+            test_skill_projection_keeps_distinct_runtime_evidence
         ; test_case "checkpoint Skill receipts retain exact turn scope when ids repeat" `Quick
             test_checkpoint_skill_receipts_stay_in_their_exact_turn
         ; test_case "checkpoint remaining Skill uses its own state" `Quick

@@ -77,9 +77,10 @@ let stop_message = function
     "It was not signalled: its process group number no longer names it."
 
 (* The record tells the process started here from a later one given its
-   number by when it started (RFC-browser-keeper-firefox §3.4). *)
+   number by when it started (RFC-browser-keeper-firefox §3.4), read before
+   this server could reap it. *)
 let running_leader (firefox : Posix_spawn_detached.t) =
-  match Server_startup_takeover.process_started firefox.pid with
+  match firefox.started with
   | Some started -> Firefox_record.Started_at started
   | None -> Firefox_record.Start_unreadable
 
@@ -94,7 +95,7 @@ let no_process pid =
    given the number of a group that still exists (POSIX fork(2)), so members
    left without their leader are still that group's. *)
 let same_group ~(leader : Firefox_record.leader) group () =
-  match leader, Server_startup_takeover.process_started group with
+  match leader, Posix_spawn_detached.process_start group with
   | Firefox_record.Started_at recorded, Some now -> String.equal recorded now
   | Firefox_record.Start_unreadable, Some _ -> false
   | (Firefox_record.Started_at _ | Firefox_record.Start_unreadable), None -> no_process group
@@ -125,7 +126,7 @@ let forget_once_empty ~base_path group =
 
 let recorded_firefox (entry : Firefox_record.entry) =
   Keeper_firefox.recorded_firefox entry
-    ~leader_started:(Server_startup_takeover.process_started entry.group)
+    ~leader_started:(Posix_spawn_detached.process_start entry.group)
     ~leader_group:(Posix_spawn_detached.group_of_pid entry.group)
     ~group_has_members:(Posix_spawn_detached.group_id_has_members entry.group)
 

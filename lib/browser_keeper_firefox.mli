@@ -91,7 +91,7 @@ type recorded_firefox =
           Firefox started there; this says why. It is not stopped. *)
 
 (** [leader_started]: when the process numbered as the group started, read
-    now ({!Server_startup_takeover.process_started}); [None] when no such
+    now ({!Posix_spawn_detached.process_start}); [None] when no such
     process runs or when it started cannot be read. [leader_group]: the
     group that process is in now. [group_has_members]: whether a process is
     left in the recorded group. *)

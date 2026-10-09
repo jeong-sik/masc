@@ -11,7 +11,7 @@
     number. *)
 type leader =
   | Started_at of string
-      (** When it started ({!Server_startup_takeover.process_started}). A
+      (** When it started ({!Posix_spawn_detached.process_start}). A
           Firefox that goes on in another process of its group, as one
           applying an update does, leaves this naming a process that ended,
           so that group is not told from a later one with its number. *)

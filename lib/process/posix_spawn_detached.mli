@@ -12,6 +12,9 @@
 
 type t = {
   pid : int;  (** Also the child's process group. *)
+  started : string option;
+      (** When the child started ({!process_start}), read before anything
+          here could reap it, so the number was still the child's. *)
   exited : Unix.process_status option Eio.Promise.t;
       (** Resolved when the child is reaped while [sw] is still on; never
           resolved after [sw] is released. [None] when another waiter in this
@@ -59,6 +62,13 @@ type stopped =
     that group is signalled, and only while it has members. *)
 val stop_group :
   clock:_ Eio.Time.clock -> grace_s:float -> same_group:(unit -> bool) -> int -> stopped
+
+(** When the process numbered [pid] started, as a token no later process
+    given that number shares: Darwin's p_starttime to the microsecond, from
+    the kernel's process table; Linux's boot id and /proc starttime. A child
+    not yet reaped still reads. [None] when no such process is there, or
+    the platform gives neither. It starts no process, so it never yields. *)
+val process_start : int -> string option
 
 (** The process group [pid] is in now (getpgid(2)). [Error] when it cannot be
     told, a process that no longer runs among them. *)

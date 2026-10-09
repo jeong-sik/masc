@@ -241,6 +241,30 @@ let the_group_of_a_process () =
       check bool "1 is no group: kill(2) reads -1 as every process" false
         (Posix_spawn_detached.group_id_has_members 1)))
 
+(* A child's start is read before anything here could reap it: one that
+   exits at once has it too, and no later process shares it. *)
+let the_start_of_a_child () =
+  with_workspace (fun base ->
+    let output = output_file (Filename.concat base "out") in
+    let quick, sleeping =
+      Eio_main.run (fun _env -> Eio.Switch.run (fun sw ->
+        let spawned argv =
+          match Posix_spawn_detached.spawn ~sw ~argv ~env:(Unix.environment ()) ~output with
+          | Error detail -> fail detail
+          | Ok child -> child in
+        let quick = spawned [ "/bin/sh"; "-c"; "exit 0" ] in
+        ignore (Eio.Promise.await quick.exited);
+        quick, spawned [ "/bin/sleep"; "30" ])) in
+    Unix.close output;
+    Fun.protect ~finally:(fun () -> stop sleeping.pid) (fun () ->
+      check bool "a child that exited at once has its start" true (Option.is_some quick.started);
+      check bool "and once reaped, its number reads none" true
+        (Posix_spawn_detached.process_start quick.pid = None);
+      check bool "a running child reads the start it was given" true
+        (Option.is_some sleeping.started && Posix_spawn_detached.process_start sleeping.pid = sleeping.started);
+      check bool "another process reads another" true
+        (Posix_spawn_detached.process_start (Unix.getpid ()) <> sleeping.started)))
+
 let spawn_of_a_missing_executable_is_an_error () =
   Eio_main.run (fun _env -> Eio.Switch.run (fun sw ->
     match Posix_spawn_detached.spawn ~sw ~argv:[ "/nonexistent/firefox" ] ~env:[||] ~output:Unix.stdout with
@@ -789,8 +813,9 @@ let a_started_firefox_is_recorded () =
         check int "the group it leads" pid entry.group;
         check int "its port" port entry.port;
         check string "its profile" (Filename.concat base "profile") entry.profile;
+        check bool "written at the wall clock's time" true (Float.abs (entry.started_at -. Unix.gettimeofday ()) < 600.);
         check bool "when it started" true
-          (Option.map (fun started -> Firefox_record.Started_at started) (Server_startup_takeover.process_started pid)
+          (Option.map (fun started -> Firefox_record.Started_at started) (Posix_spawn_detached.process_start pid)
            = Some entry.leader)))
 
 (* A server that ends while it waits for the port leaves that Firefox
@@ -917,7 +942,7 @@ let firefox_is_not_started_over_a_record_that_may_still_run () =
                   = Some earlier)))))
     [ ( "shown to be ours"
       , fun pid ->
-          match Server_startup_takeover.process_started pid with
+          match Posix_spawn_detached.process_start pid with
           | Some started -> Firefox_record.Started_at started
           | None -> fail "when the earlier one started cannot be read" )
     ; "not told apart", fun _ -> Firefox_record.Start_unreadable ]
@@ -967,6 +992,7 @@ let () =
         ; test_case "outlives its switch in its own group" `Quick spawn_outlives_its_switch_in_its_own_group
         ; test_case "a missing executable" `Quick spawn_of_a_missing_executable_is_an_error
         ; test_case "the group of a process" `Quick the_group_of_a_process
+        ; test_case "the start of a child" `Quick the_start_of_a_child
         ; test_case "a stop escalates only past the grace" `Quick stop_group_escalates_only_past_the_grace
         ; test_case "a number that names another group" `Quick a_stop_leaves_a_group_its_number_no_longer_names
         ; test_case "a group this account cannot signal" `Quick a_group_this_account_cannot_signal_is_there ] )

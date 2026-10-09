@@ -215,6 +215,18 @@ let find_optional_lines ~needle ~before (group : searchable) consider =
     current := next
   done
 
+(* If the query cannot consume an optional separator, every separator has
+   exactly one transition: skip. Compact only those marked presentation bytes
+   while retaining each copied byte's source position and actual visible row. *)
+let skip_optional_boundaries (group : searchable) =
+  let retained = Array.to_list (Array.mapi (fun index boundary ->
+    if boundary then None else Some index) group.boundaries)
+    |> List.filter_map Fun.id |> Array.of_list in
+  {text=String.init (Array.length retained) (fun index -> group.text.[retained.(index)]);
+   positions=Array.map (Array.get group.positions) retained;
+   rows=Array.map (Array.get group.rows) retained;
+   boundaries=Array.make (Array.length retained) false}
+
 let find ~needle ~before ~body_rows runs =
   let needle = String.lowercase_ascii needle in
   if String.length needle = 0 then None else
@@ -230,7 +242,8 @@ let find ~needle ~before ~body_rows runs =
       | Some current when compare_position current.position found.position >= 0 -> ()
       | _ -> newest := Some found in
   List.iter (fun group ->
-    if Array.exists Fun.id group.boundaries then
-      find_optional_lines ~needle ~before group consider
-    else find_plain ~needle group consider) groups;
+    if not (Array.exists Fun.id group.boundaries) then find_plain ~needle group consider
+    else if not (String.exists (function ' ' | '\n' -> true | _ -> false) needle) then
+      find_plain ~needle (skip_optional_boundaries group) consider
+    else find_optional_lines ~needle ~before group consider) groups;
   !newest

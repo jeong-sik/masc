@@ -35,6 +35,7 @@ val find : needle:string -> before:position option -> body_rows:int -> run list 
     occurrence has become clipped or absent. [body_rows] is the actual layout's
     surviving body prefix after trailing empty-row removal. Ordinary semantic
     groups use linear substring matching, including overlapping occurrences.
-    Groups with optional logical-line boundaries retain a query-prefix frontier
+    Queries without spaces/newlines also use that path after exact skipping
+    of marked optional boundaries. Other optional logical-line groups retain a query-prefix frontier
     in O(text * query) time and O(query) memory; neither path imposes a length
     limit or replays recursive branches. *)

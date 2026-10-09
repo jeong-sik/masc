@@ -651,7 +651,18 @@ let test_semantic_search_repetitive_prefix_and_boundaries () =
     (search "foobar" [run ~offset:0 "foo bar"] = None);
   let text=String.make 50000 'a' and needle=String.make 5000 'a' ^ "b" in
   check bool "a long repetitive near-match terminates without candidate replay" true
-    (search needle [run ~offset:0 text] = None)
+    (search needle [run ~offset:0 text] = None);
+  let lines = List.init 50 (fun line -> run ~joins_previous:(line > 0)
+    ~offset:(line * 1001) (String.make 1000 'a')) in
+  check bool "multiline repetitive near-match skips only marked boundaries" true
+    (search needle lines = None);
+  let complete = lines @ [run ~joins_previous:true ~offset:50050 "b"] in
+  let found = search needle complete in
+  check int "multiline KMP retains newest original source occurrence" 45045 (position found);
+  check bool "multiline match owns its actual endpoint source" true
+    (match found with
+     | Some {Search.ending_position=Body_byte {offset=50050;_};_} -> true
+     | Some _ | None -> false)
 
 let test_search_pin_retains_query_endpoint_through_reflow () = at_sizes (fun origin ->
   let set_cols columns = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh

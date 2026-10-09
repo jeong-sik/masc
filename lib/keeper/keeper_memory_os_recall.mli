@@ -1,6 +1,6 @@
 (** Demand recall separates stored knowledge from per-turn context.
 
-    Search-capable surfaces receive only store availability and counts plus a
+    Search-capable surfaces receive only store availability, revisions and counts plus a
     current-lookup requirement: no claim bodies, source-file revalidation,
     artifact rendering, blob writes or retention writes. The Keeper selects
     relevant facts through [keeper_memory_search], whose read boundary
@@ -15,7 +15,9 @@
 
     Empty/absent, unreadable and disabled states remain distinct and stable.
     [now] drives source revalidation and artifact retention only, never notice
-    identity. A notice is not verification of any previous retrieved claim;
+    identity. Revisions identify stored snapshots; they neither verify contents nor
+    order real-world events. Same-count replacements change the demand notice.
+    A notice is not verification of any previous retrieved claim;
     current facts must be looked up again when used. Caller capabilities are
     those of the actual selected runtime surface. *)
 

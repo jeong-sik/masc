@@ -25,7 +25,7 @@ CHAT_PATH = "/api/v1/keepers/chat/stream"
 DEFERRED = b"Confirmation accepted; action deferred:"
 
 
-def accepted_but_pending(executable, *, followed_by_held=False):
+def accepted_but_pending(executable, *, followed_by_held=False, identity_lost=False):
     fixtures, items, _new = h.approval_selection_http_fixtures()
     item = dict(items[0], confirm_token=TOKEN, trace_id=f"trace-{TOKEN}",
                 payload={"reason": "home-receipt-exact-reason"})
@@ -34,8 +34,17 @@ def accepted_but_pending(executable, *, followed_by_held=False):
     current = [item]
     observations = []
     confirmed = threading.Event()
+    followup_started = threading.Event()
+    release_followup = threading.Event()
+    outage = threading.Event()
+    foreign = dict(item, confirm_token="foreign-workspace-B", trace_id="foreign-B",
+                   payload={"reason": "FOREIGN_FOLLOWUP_APPROVAL"})
 
     def listing():
+        if identity_lost and confirmed.is_set():
+            followup_started.set()
+            assert release_followup.wait(timeout=30), "approval follow-up was not released"
+            return h.approval_selection_snapshot([foreign])
         with lock:
             rows = copy.deepcopy(current)
             observations.append((confirmed.is_set(), rows))
@@ -54,6 +63,13 @@ def accepted_but_pending(executable, *, followed_by_held=False):
 
     fixtures[cards.OPERATOR_PATH] = listing
     fixtures[CONFIRM_PATH] = h.RequestHttpResponse(confirm)
+    if identity_lost:
+        def health():
+            if outage.is_set():
+                return h.RawHttpResponse(503, b'{"error":"identity unavailable"}',
+                                         content_type="application/json")
+            return 200, {}
+        fixtures["/health"] = health
     held_path = "/api/v1/keepers/tool-approval"
     held_rows = []
     expected_workspace = None
@@ -87,6 +103,26 @@ def accepted_but_pending(executable, *, followed_by_held=False):
         home.assert_no_decision_posts(requests)
         h.send_and_wait(process, fd, output, b"y", b"Press y again: namespace_pause")
         home.assert_no_decision_posts(requests)
+        if identity_lost:
+            try:
+                os.write(fd, b"y")
+                assert h.wait_for_fixture_event(process, fd, output, followup_started, timeout=10)
+                outage.set()
+                os.write(fd, b"r")
+                h.wait_for_output(process, fd, output, b"[workspace unconfirmed]",
+                                  start=0, timeout=10)
+                released_at = len(output)
+                release_followup.set()
+                h.wait_for_output(process, fd, output, DEFERRED, start=released_at, timeout=10)
+                h.drain_until_quiet(process, fd, output)
+                assert b"FOREIGN_FOLLOWUP_APPROVAL" not in bytes(output[released_at:]), output
+                assert b"foreign-workspace-B" not in bytes(output[released_at:]), output
+                os.write(fd, b"\x1b")
+                h.drain_until_quiet(process, fd, output)
+                os.write(fd, b"q")
+                return
+            finally:
+                release_followup.set()
         accepted = h.send_and_wait(process, fd, output, b"y", DEFERRED)
         assert confirmed.is_set(), "second y did not confirm the exact request"
 
@@ -154,7 +190,9 @@ def accepted_but_pending(executable, *, followed_by_held=False):
         os.write(fd, b"q")
 
     h.run_terminal_scenario(
-        executable, description="Home accepted confirmation stays pending until source removal",
+        executable, description=("Home approval receipt rejects a retired follow-up snapshot"
+                                 if identity_lost else
+                                 "Home accepted confirmation stays pending until source removal"),
         interact=interact, http_fixtures=fixtures, http_requests=requests,
         prepare_workspace=home.seed_goals, refresh=60.0,
     )
@@ -237,5 +275,6 @@ if __name__ == "__main__":
     exe = os.path.abspath(sys.argv[1])
     accepted_but_pending(exe)
     accepted_but_pending(exe, followed_by_held=True)
+    accepted_but_pending(exe, identity_lost=True)
     background_ask_keeps_beta_draft(exe)
-    print("Home decision receipt PTY: PASS (3 scenarios)")
+    print("Home decision receipt PTY: PASS (4 scenarios)")

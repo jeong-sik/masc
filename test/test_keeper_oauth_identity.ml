@@ -271,7 +271,7 @@ let test_authorize_url_proves_the_verifier () =
     (param query "resource");
   check str "the server's own parameter rides along" "api.atlassian.com"
     (param query "audience");
-  Alcotest.(check bool)
+  Alcotest.(check Alcotest.bool)
     "offline_access is asked for" true
     (List.mem "offline_access"
        (String.split_on_char ' ' (param query "scope")))
@@ -293,7 +293,7 @@ let test_a_server_that_names_no_scopes_is_asked_for_none () =
       ~keeper:"oauth-fixture"
   in
   let query = query_of pending.Keeper_oauth_flow.authorize_url in
-  Alcotest.(check bool)
+  Alcotest.(check Alcotest.bool)
     "no scope parameter at all" false
     (List.mem_assoc "scope" query);
   (* Everything else still rides along, so this is an omission rather than a
@@ -321,10 +321,10 @@ let test_recorded_scopes_replace_the_published_ones () =
 let test_two_exchanges_do_not_share_a_verifier () =
   let provider = load_or_fail atlassian_toml in
   let one = begin_for provider and two = begin_for provider in
-  Alcotest.(check bool)
+  Alcotest.(check Alcotest.bool)
     "verifiers differ" false
     (String.equal one.Keeper_oauth_flow.verifier two.Keeper_oauth_flow.verifier);
-  Alcotest.(check bool)
+  Alcotest.(check Alcotest.bool)
     "states differ" false
     (String.equal one.Keeper_oauth_flow.state two.Keeper_oauth_flow.state)
 
@@ -379,7 +379,7 @@ let exchange_body ?client_secret provider =
 let test_a_secret_rides_along_on_the_redemption () =
   let provider = load_or_fail atlassian_toml in
   let body = exchange_body ~client_secret:"s3cret" provider in
-  Alcotest.(check bool)
+  Alcotest.(check Alcotest.bool)
     "client_secret is in the form body" true
     (List.mem_assoc "client_secret" (query_of ("?" ^ body)));
   check str "and it is the one given" "s3cret"
@@ -390,7 +390,7 @@ let test_no_secret_means_no_parameter () =
      that carries client_secret= with nothing after it. *)
   let provider = load_or_fail atlassian_toml in
   let body = exchange_body provider in
-  Alcotest.(check bool)
+  Alcotest.(check Alcotest.bool)
     "no client_secret at all" false
     (List.mem_assoc "client_secret" (query_of ("?" ^ body)))
 
@@ -420,7 +420,7 @@ let test_completion_sends_the_verifier_and_dates_the_expiry () =
   | None -> Alcotest.fail "the exchange sent nothing"
   | Some (url, _, body) ->
       check str "token endpoint" "https://auth.atlassian.com/oauth/token" url;
-      Alcotest.(check bool)
+      Alcotest.(check Alcotest.bool)
         "the verifier is redeemed with the code" true
         (Str.string_match
            (Str.regexp (".*code_verifier=" ^ pending.Keeper_oauth_flow.verifier))
@@ -445,7 +445,7 @@ let test_a_foreign_state_is_refused_before_anything_is_sent () =
   let result, seen =
     complete_with provider pending ~state:"someone-elses-state" ~answer:ok_answer
   in
-  Alcotest.(check bool) "nothing was sent" true (!seen = None);
+  Alcotest.(check Alcotest.bool) "nothing was sent" true (!seen = None);
   match result with
   | Error Keeper_oauth_flow.State_mismatch -> ()
   | Error other ->
@@ -507,7 +507,7 @@ let test_a_refusal_keeps_the_providers_reason () =
   match result with
   | Error (Keeper_oauth_flow.Provider_rejected { status; body }) ->
       Alcotest.(check int) "status" 400 status;
-      Alcotest.(check bool) "the reason survives" true
+      Alcotest.(check Alcotest.bool) "the reason survives" true
         (Str.string_match (Str.regexp ".*invalid_grant") body 0)
   | Error other ->
       Alcotest.failf "wrong refusal: %s"
@@ -529,7 +529,7 @@ let test_a_refusal_inside_a_200_is_still_a_refusal () =
   match result with
   | Error (Keeper_oauth_flow.Provider_rejected { status; body }) ->
       Alcotest.(check int) "the status it actually sent" 200 status;
-      Alcotest.(check bool) "the reason survives" true
+      Alcotest.(check Alcotest.bool) "the reason survives" true
         (Str.string_match (Str.regexp ".*invalid_code") body 0)
   | Error other ->
       Alcotest.failf "wrong refusal: %s"
@@ -587,10 +587,10 @@ let test_refresh_asks_for_a_refresh_grant () =
   (match !seen with
   | None -> Alcotest.fail "the refresh sent nothing"
   | Some (_, _, body) ->
-      Alcotest.(check bool)
+      Alcotest.(check Alcotest.bool)
         "grant type" true
         (Str.string_match (Str.regexp ".*grant_type=refresh_token") body 0);
-      Alcotest.(check bool)
+      Alcotest.(check Alcotest.bool)
         "the spent token is presented" true
         (Str.string_match (Str.regexp ".*refresh_token=rt-0") body 0));
   match result with
@@ -606,13 +606,13 @@ let test_refresh_asks_for_a_refresh_grant () =
 let test_renewal_window_opens_before_expiry () =
   let provider = load_or_fail atlassian_toml in
   (* renew_before_sec = 600 *)
-  Alcotest.(check bool)
+  Alcotest.(check Alcotest.bool)
     "outside the window" false
     (Keeper_oauth_flow.needs_renewal ~provider ~expires_at:2000.0 ~now:1000.0);
-  Alcotest.(check bool)
+  Alcotest.(check Alcotest.bool)
     "exactly at the window" true
     (Keeper_oauth_flow.needs_renewal ~provider ~expires_at:1600.0 ~now:1000.0);
-  Alcotest.(check bool)
+  Alcotest.(check Alcotest.bool)
     "already expired" true
     (Keeper_oauth_flow.needs_renewal ~provider ~expires_at:900.0 ~now:1000.0)
 
@@ -662,7 +662,7 @@ let test_a_state_is_redeemed_once () =
         held.Keeper_oauth_pending.discovered.Keeper_oauth_discovery.token_url
         found.Keeper_oauth_pending.discovered.Keeper_oauth_discovery.token_url);
   (* A replayed callback finds nothing, which is what it should find. *)
-  Alcotest.(check bool)
+  Alcotest.(check Alcotest.bool)
     "a second callback finds nothing" true
     (Keeper_oauth_pending.take table ~now:2.0 ~state = None)
 
@@ -676,7 +676,7 @@ let test_an_abandoned_login_expires () =
     (Keeper_oauth_pending.waiting table ~now:599.0);
   Alcotest.(check int) "gone once past it" 0
     (Keeper_oauth_pending.waiting table ~now:601.0);
-  Alcotest.(check bool)
+  Alcotest.(check Alcotest.bool)
     "and a late callback finds nothing" true
     (Keeper_oauth_pending.take table ~now:601.0 ~state = None)
 
@@ -864,15 +864,15 @@ let test_discovery_reads_both_hops () =
         found.Keeper_oauth_discovery.authorize_url;
       check str "token" "https://auth.atlassian.com/oauth/token"
         found.Keeper_oauth_discovery.token_url;
-      Alcotest.(check bool)
+      Alcotest.(check Alcotest.bool)
         "S256 is offered" true found.Keeper_oauth_discovery.supports_pkce_s256;
       (* What makes an operator-registered app unnecessary. Whether the
          client may be public is deliberately not read here: the metadata
          says one thing and registration answers another. *)
-      Alcotest.(check bool)
+      Alcotest.(check Alcotest.bool)
         "dynamic registration is offered" true
         (found.Keeper_oauth_discovery.registration_url <> None);
-      Alcotest.(check bool)
+      Alcotest.(check Alcotest.bool)
         "Jira scopes are published" true
         (List.mem "write:jira-work" found.Keeper_oauth_discovery.scopes_supported)
 
@@ -1212,12 +1212,12 @@ let test_a_terminating_slash_in_the_issuer_is_removed () =
     Keeper_oauth_discovery.discover ~get ~ask:no_header
       ~mcp_url:"https://mcp.example.com/mcp" ()
   in
-  Alcotest.(check bool)
+  Alcotest.(check Alcotest.bool)
     "asked without the terminating slash" true
     (List.mem
        "https://as.example.com/.well-known/oauth-authorization-server"
        !asked);
-  Alcotest.(check bool)
+  Alcotest.(check Alcotest.bool)
     "and not with it" false
     (List.mem
        "https://as.example.com/.well-known/oauth-authorization-server/"
@@ -1314,11 +1314,11 @@ let test_registration_asks_as_a_public_client () =
         "https://auth.example.com/dcr/register" url;
       (* "none" is what makes this a public client, and what lets PKCE be the
          proof instead of a secret with nowhere to live. *)
-      Alcotest.(check bool)
+      Alcotest.(check Alcotest.bool)
         "asks for a public client" true
         (Str.string_match
            (Str.regexp ".*\"token_endpoint_auth_method\":\"none\"") body 0);
-      Alcotest.(check bool)
+      Alcotest.(check Alcotest.bool)
         "asks for a refresh grant" true
         (Str.string_match (Str.regexp ".*refresh_token") body 0));
   match result with
@@ -1355,7 +1355,7 @@ let test_registration_keeps_the_servers_reason () =
   with
   | Error (Keeper_oauth_registration.Refused { status; body }) ->
       Alcotest.(check int) "status" 400 status;
-      Alcotest.(check bool)
+      Alcotest.(check Alcotest.bool)
         "the reason an operator can act on survives" true
         (Str.string_match (Str.regexp ".*invalid_redirect_uri") body 0)
   | Error other ->
@@ -1444,7 +1444,7 @@ let test_start_uses_a_configured_client_rather_than_registering () =
       check str "the operator's client id is used" "operators-own-app"
         started.Keeper_oauth_session.credentials
           .Keeper_oauth_client_store.client_id;
-      Alcotest.(check bool)
+      Alcotest.(check Alcotest.bool)
         "and nothing was registered" false
         started.Keeper_oauth_session.registered_now;
       Alcotest.(check int) "the login is waiting" 1
@@ -1474,7 +1474,7 @@ let test_start_registers_when_nobody_configured_one () =
           .Keeper_oauth_client_store.client_id;
       (* The caller has to persist it, or the next login registers again and
          leaves another client record behind. *)
-      Alcotest.(check bool)
+      Alcotest.(check Alcotest.bool)
         "and says it is new" true started.Keeper_oauth_session.registered_now
 
 let test_start_refuses_a_server_without_pkce () =
@@ -1588,7 +1588,7 @@ let test_a_lapsed_registration_is_replaced () =
   in
   let got = start_login ~configured ~now:101.0 ~discover:(stub_discover ()) ~register provider table in
   check str "the login carries the new id" "replacement" (started_client_id got);
-  Alcotest.(check bool) "a deadline behind us registers again" true !fired
+  Alcotest.(check Alcotest.bool) "a deadline behind us registers again" true !fired
 
 let test_a_registration_that_never_expires_is_kept () =
   (* Zero is the server saying the secret does not lapse. Reading it as a
@@ -1614,7 +1614,7 @@ let test_a_secret_with_no_recorded_deadline_is_replaced () =
   let configured = Some (credentials ~secret:"s3cret" "undated") in
   let got = start_login ~configured ~now:1.7e9 ~discover:(stub_discover ()) ~register provider table in
   check str "the login carries the new id" "replacement" (started_client_id got);
-  Alcotest.(check bool) "an unknown deadline registers again" true !fired
+  Alcotest.(check Alcotest.bool) "an unknown deadline registers again" true !fired
 
 let test_a_public_client_outlives_any_deadline () =
   (* No secret, nothing to lapse. This is why an install that registered a
@@ -1745,7 +1745,7 @@ let test_an_expiry_with_no_way_to_renew_is_warned_about () =
             "dated from the moment it was read" 3601.0 expires_at;
           (* The one shape that ends in a Keeper losing a provider with
              nothing on disk to say why, so the page has to say it. *)
-          Alcotest.(check bool)
+          Alcotest.(check Alcotest.bool)
             "the operator is told before they close the tab" true
             (Keeper_oauth_session.expiry_warning finished.Keeper_oauth_session.expiry
             <> None)

@@ -4039,7 +4039,7 @@ let launch_keeper_message_search (state : state) plan ~deliver =
                Ok (Some (work, Domain_pool.submit_cpu pool
                  (fun () -> run_keeper_message_search ~live work)))))
 
-let keeper_message_find_scroll ?preview_lookup state ~keeper_name ~needle ~older_than =
+let keeper_message_find_scroll ?preview_lookup state ~keeper_name ~needle ~(older_than : Masc_tui_types.chat_search_cursor option) =
   if String.equal needle "" then {match_result=None;unavailable_entries=0} else
   let work=prepare_keeper_message_search ?preview_lookup state ~keeper_name ~needle ~older_than in
   complete_keeper_message_search work (run_keeper_message_search work)

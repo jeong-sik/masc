@@ -72,11 +72,19 @@ type write_scope = Context_only | Context_and_memory | Memory_maintenance
 (* [Memory_maintenance] curates the current Memory snapshot without publishing
    a working-context or continuity snapshot or advancing history cursors. *)
 
+type input_capacity_evidence = No_input_capacity_refusal | Input_capacity_refused
+(** Admission partitioning evidence, distinct from the historical range-window
+    policy. Only a typed input/context-capacity refusal establishes it; output,
+    schema, domain, timeout and ordinary transport failures do not. *)
+
 type not_committed =
-  { detail : string
-        (** The typed cause, for the caller's log. *)
+  { input_capacity_evidence : input_capacity_evidence
+  ; detail : string
+        (** Diagnostic text for the caller's log, not a classification input. *)
   ; walk_shows_size : bool
-        (** Something this pass met says the range's size is what stopped it:
+        (** Historical range-window adaptation hint, not authoritative evidence
+            that the input exceeded capacity. Admission partitioning must use
+            [input_capacity_evidence] instead. This policy can include:
             a provider that judged the request too large, one that refused it
             for a reason it did not name, a refused output, or a candidate
             whose projection did not fit a slot's declared window.

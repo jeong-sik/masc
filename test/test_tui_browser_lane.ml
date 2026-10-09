@@ -630,9 +630,13 @@ let test_bidi_host_rows () =
   let at = "At: ws://127.0.0.1:9222/session" in
   let running state = [Printf.sprintf "BiDi host: %s · pid 4242" state; at] in
   let ended = ["BiDi host: ended 2026-10-03T04:01:00Z · pid 4242"] in
+  let listed_note = "A listed BiDi connection may be stale or belong to another host" in
   says "nothing reported draws nothing" Host_not_reported [];
   says "a host that never ran says so and how one is started" (host Record.Never_started)
     ("BiDi host: none has run for this workspace" :: attach);
+  says ~clients:[firefox; bidi] "a listed connection beside a never-started host is distinguished"
+    (host Record.Never_started)
+    (["BiDi host: none has run for this workspace"; listed_note] @ attach);
   says "a host still connecting" (host (Record.Running { host_entry with attached_at = None }))
     (running "connecting");
   (* A host serves on the server that lists it. *)
@@ -665,6 +669,19 @@ let test_bidi_host_rows () =
   says "a host that ended in order says when, why, and that Firefox takes the next"
     (host_ended Record.No_session_left)
     (ended @ ["That Firefox takes the next host if it still runs"; "Reason: stopped by SIGINT"]
+     @ attach_again);
+  says ~clients:[firefox; bidi] "a listed connection beside an ended host is distinguished"
+    (host_ended Record.No_session_left)
+    (ended @ ["That Firefox takes the next host if it still runs"; listed_note;
+              "Reason: stopped by SIGINT"] @ attach_again);
+  says ~clients:[firefox; bidi] "a stale listed connection cannot displace the restart instruction"
+    (host_ended Record.Session_left)
+    (ended @ ["Session end not confirmed · restart that Firefox before attaching";
+              listed_note; "Reason: stopped by SIGINT"] @ attach_again);
+  says ~clients:[firefox; bidi] "a listed connection beside a dead host is distinguished"
+    (host (Record.Died host_entry))
+    (["BiDi host: pid 4242 is gone · no reason recorded";
+      "Its session may be left in Firefox · restart Firefox if a host is refused"; listed_note]
      @ attach_again);
   says "a session left in Firefox is the step before attaching" (host_ended Record.Session_left)
     (ended @ ["Session end not confirmed · restart that Firefox before attaching";
@@ -755,6 +772,7 @@ let test_bidi_host_rows () =
         "Reason: stopped without learning whether Firefox still holds its BiDi";
         "        session"] @ attach_again);
   let long_launcher = "/Users/someone/me/workspace/yousleepwhen/masc/.masc/browser-lane/host/launch" in
+  let wide_launcher = "/Users/상수/文書/画面/masc/.masc/browser-lane/host/launch" in
   let launched_from launcher =
     Host_reported { (host_report Record.Never_started) with attach = { host_attach with launcher } } in
   says "a launcher path longer than the row breaks before a slash, with every name whole"
@@ -787,7 +805,8 @@ let test_bidi_host_rows () =
     (* The name is two cells longer than the 66 a row has beside the lead,
        and the space is the first of the two. *)
     ; "a space where a row would end is kept", "/work/" ^ String.make 65 'y' ^ " z/host/launch"
-    ; "a path with spaces all through", "/my work/a b/c  d/host/launch" ];
+    ; "a path with spaces all through", "/my work/a b/c  d/host/launch"
+    ; "wide characters in path components keep their display cells", wide_launcher ];
   (* Every row fits the width it was asked for, at 80 columns and narrower,
      whatever the record holds. *)
   let widest = unacknowledged ~cause:Record.Not_sent ~outcome:Record.Unknown
@@ -809,7 +828,8 @@ let test_bidi_host_rows () =
          host (Record.Unreadable { detail = String.make 200 'd'; held = Some false });
          Host_report_unreadable { detail = String.make 200 'd'; message = Some (String.make 900 'm') };
          host_ended Record.Session_refused;
-         launched_from long_launcher; launched_from one_long_name])
+         launched_from long_launcher; launched_from one_long_name;
+         launched_from wide_launcher])
     [width; 56; 36; 14; 9];
   (* On a screen narrower than a lead leaves room beside it, the lead has a
      row of its own and what it opens is read on the rows under it. *)

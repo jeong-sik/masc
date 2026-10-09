@@ -1,8 +1,8 @@
 {
   "base": "039971337f3355e7750dda051f9759d9db8a3139",
   "checks": {
-    "ocaml_parsing": "PASS",
-    "python_syntax": "PASS",
+    "ocaml_parsing": "HISTORICAL_PASS",
+    "python_syntax": "HISTORICAL_PASS",
     "native_regressions": "NOT_RUN",
     "PTY": "NOT_RUN"
   },
@@ -43,5 +43,5 @@
       "test_clamping_a_scroll_reads_only_as_far_as_it_must"
     ]
   },
-  "scope": "Exact current source parser checks only; native regressions, prior geometry and PTY are not rerun."
+  "scope": "Historical parser checks for the recorded source hashes only. Later integration changed source; this receipt does not validate the current head. Native regressions, geometry and PTY were not rerun."
 }

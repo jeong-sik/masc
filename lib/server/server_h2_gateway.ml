@@ -974,6 +974,20 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
             h2_respond_json_value h2_reqd json
               ~status:`Gone ~extra_headers:cors)
 
+      | `GET, p when Option.is_some (Server_dashboard_http_keeper_child_content.route p) ->
+          (match Server_dashboard_http_keeper_child_content.route p with
+           | None -> h2_respond_json_value h2_reqd
+               (`Assoc ["error", `String "invalid_child_content_route"])
+               ~status:`Bad_request ~extra_headers:cors
+           | Some route ->
+               with_h2_token_permission_auth h2_reqd
+                 ~permission:Server_dashboard_http_keeper_child_content.permission
+                 (fun state _agent_name ->
+                   let status, json = Server_dashboard_http_keeper_child_content.response
+                     state httpun_request route in
+                   h2_respond_json_value h2_reqd json
+                     ~status:(status :> H2.Status.t) ~extra_headers:cors))
+
       | `GET, p when Option.is_some (Server_dashboard_http_keeper_native_tasks.route p) ->
           (match Server_dashboard_http_keeper_native_tasks.route p with
            | None -> h2_respond_json_value h2_reqd

@@ -269,6 +269,59 @@ let test_unchecked_hint_codec () =
   check bool "route parses exact hints endpoint" true
     (Api.route "/api/v1/keepers/alpha/native-tasks/hints"=Some (Api.Hints "alpha"))
 
+let test_child_authenticated_routes () =
+  let module Child_api = Server_dashboard_http_keeper_child_content in
+  let module Child_read = Keeper_child_content_read in
+  with_fixture (fun ~base_path ~state:_ ~admin ~worker protocols ->
+    let prefix = "/api/v1/keepers/alpha/child-content/" in
+    let records = prefix ^ "records?receiver_generation=receiver&session_id=session&client_uuid=client" in
+    List.iter (fun (name, send) ->
+      List.iter (fun path ->
+        List.iter (fun (headers, expected) ->
+          let status, _ = send headers path in
+          check int (name ^ " Child token permission") expected status)
+          [[],401; ["authorization","Bearer invalid"],401;
+           ["authorization","Bearer " ^ worker],403])
+        [prefix ^ "receivers"; prefix ^ "hints"; records];
+      let headers = ["authorization","Bearer " ^ admin] in
+      let status, body = send headers records in
+      check int (name ^ " missing Child store is a refusal") 404 status;
+      let decoded = require_ok Child_read.decode_error_to_string (Child_read.of_json body) in
+      (match decoded with
+       | Child_read.Failure {error=Child_read.Store_missing;coverage=Child_read.Unavailable} -> ()
+       | _ -> fail "Child missing store fabricated retained health or empty records");
+      check bool "Child missing response codec roundtrip" true (Child_read.to_json decoded=body);
+      List.iter (fun query ->
+        let status, _ = send headers (records ^ query) in
+        check int (name ^ " Child strict query") 400 status)
+        ["&unknown=x"; "&client_uuid=other"; "&store_id=x";
+         "&after_sequence=0"; "&store_id=x&after_sequence=-1";
+         "&store_id=x&after_sequence=01"; "&store_id=x&after_sequence=9007199254740992";
+         "&base_path=/other"; "&keeper_name=other"];
+      let status, _ = send headers
+        (prefix ^ "records?receiver_generation=receiver&session_id=session") in
+      check int (name ^ " Child client UUID is mandatory") 400 status;
+      let status, _ = send headers (records ^ "&client_uuid=") in
+      check int (name ^ " Child empty/duplicate client UUID is refused") 400 status;
+      List.iter (fun endpoint ->
+        let status, body = send headers (prefix ^ endpoint) in
+        check int (name ^ " cold Child " ^ endpoint) 200 status;
+        let decoded = require_ok Child_read.decode_error_to_string (Child_read.of_json body) in
+        (match decoded with
+         | Child_read.Receivers page when endpoint="receivers" ->
+             check int "no Child receiver invented" 0 (List.length page.receivers)
+         | Child_read.Hints page when endpoint="hints" ->
+             check int "no Child hint invented" 0 (List.length page.hints)
+         | _ -> fail "Child endpoint returned a different read contract");
+        let status, _ = send headers (prefix ^ endpoint ^ "?extra=1") in
+        check int (name ^ " Child discovery query refused") 400 status)
+        ["receivers"; "hints"];
+      check bool (name ^ " read-only Child cold paths do not create storage") false
+        (Sys.file_exists (Filename.concat (Common.masc_dir_from_base_path ~base_path) "child-content-journals"));
+      check bool "exact Child records route" true
+        (Child_api.route (prefix ^ "records")=Some (Child_api.Records "alpha"))) protocols)
+
 let () = run "native task authenticated read" ["registered routes",[
   test_case "H1/H2 auth, strict scope and failed storage" `Quick test_authenticated_routes;
+  test_case "H1/H2 Child auth, ticket3, unknown coverage and read-only cold paths" `Quick test_child_authenticated_routes;
   test_case "unchecked hints cannot become audited reads" `Quick test_unchecked_hint_codec]]

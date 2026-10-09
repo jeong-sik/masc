@@ -4058,6 +4058,103 @@ let test_native_task_journal_atomicity_recovery_and_failure () =
       (In_channel.with_open_bin blocked In_channel.input_all))
 ;;
 
+let test_child_http_reads_actual_driver_observations () =
+  with_child_journal_observations (fun ~base_path observations ->
+    let module Api = Server_dashboard_http_keeper_child_content in
+    let module Read = Keeper_child_content_read in
+    let keeper_name = "claude-fixture" in
+    let sink = Child_journal.create ~base_path ~keeper_name
+      ~source:(task_journal_operation "child-http") ~redact_text:Fun.id in
+    let publications = List.map (fun (attempt, observation) ->
+      Result.get_ok (Child_journal.prepare sink ~attempt observation)) observations in
+    List.iter (fun publication -> ignore (child_journal_ok (Child_journal.append publication))) publications;
+    let reader = Child_journal.reader_of_publication (List.hd publications) in
+    let original = child_journal_ok (Child_journal.read reader) in
+    let invocation = (List.hd original.records).observation.origin.invocation in
+    let receiver : Read.receiver = {receiver_generation=invocation.receiver_generation;
+      session_id=invocation.session_id;client_uuid=invocation.client_uuid} in
+    let scope : Read.scope = {keeper_name;receiver} in
+    (* The actual store predates this secret policy; HTTP must apply current
+       redaction without changing original correlations or typed attribution. *)
+    let secret = "CHILD_SECRET_BODY" in
+    let token_file = Keeper_secret_redaction.ssh_remote_token_file ~base_path ~keeper_name in
+    Fs_compat.mkdir_p (Filename.dirname token_file);
+    Out_channel.with_open_bin token_file (fun out -> output_string out secret);
+    let state = Mcp_server.For_testing.create_state ~base_path in
+    let prefix = "/api/v1/keepers/" ^ keeper_name ^ "/child-content/" in
+    let receiver_query = ["receiver_generation",receiver.receiver_generation;
+      "session_id",receiver.session_id;"client_uuid",receiver.client_uuid] in
+    let get endpoint query =
+      let target = Uri.to_string (Uri.with_query' (Uri.of_string (prefix ^ endpoint)) query) in
+      let request = Httpun.Request.create `GET target in
+      let route = match Api.route (Uri.path (Uri.of_string target)) with
+        | Some route -> route | None -> fail "Child read route not recognized" in
+      let status, body = Api.response state request route in
+      Httpun.Status.to_code status, body in
+    let decode body = require_ok Read.decode_error_to_string
+      (Read.of_json (Yojson.Safe.from_string (Yojson.Safe.to_string body))) in
+    let status, body = get "records" receiver_query in
+    check int "actual Child store HTTP read" 200 status;
+    check bool "newly learned secret is redacted on HTTP read" false
+      (Astring.String.is_infix ~affix:secret (Yojson.Safe.to_string body));
+    let page = require_ok Read.decode_error_to_string
+      (Read.records_of_response ~request:{scope;after=None} (decode body)) in
+    check (list int) "actual four captured channel snapshots survive HTTP" [1;2;3;4]
+      (List.map (fun (row:Read.record) -> row.seq) page.records);
+    List.iter2 (fun (stored:Child_journal.record) (row:Read.record) ->
+      check bool "HTTP keeps exact complete-frame correlations and refusal" true
+        (stored.observation.origin=row.observation.origin
+         && stored.observation.observation_id=row.observation.observation_id
+         && stored.observation.envelope_uuid=row.observation.envelope_uuid
+         && stored.observation.ordinal=row.observation.ordinal
+         && stored.observation.channel=row.observation.channel
+         && stored.observation.message_id=row.observation.message_id
+         && stored.observation.attribution=row.observation.attribution)) original.records page.records;
+    let after = page.next_cursor in
+    let cursor_query = receiver_query @ ["store_id",after.store_id;
+      "after_sequence",string_of_int after.after_sequence] in
+    let status, suffix = get "records" cursor_query in
+    check int "actual caught-up Child suffix" 200 status;
+    let suffix = require_ok Read.decode_error_to_string
+      (Read.records_of_response ~request:{scope;after=Some after} (decode suffix)) in
+    check int "caught-up suffix is empty only with matching receipt" 0 (List.length suffix.records);
+    let status, foreign = get "records" (receiver_query @
+      ["store_id","foreign-incarnation";"after_sequence","0"]) in
+    check int "foreign Child incarnation refuses" 409 status;
+    (match decode foreign with Read.Failure {error=Read.Cursor_store_mismatch;_} -> ()
+     | _ -> fail "foreign cursor lost typed refusal");
+    let foreign_query = List.map (fun (key,value) ->
+      key,(if key="client_uuid" then value ^ "+&/%foreign" else value)) receiver_query in
+    let status, foreign = get "records" foreign_query in
+    check int "opaque different client UUID cannot select original store" 404 status;
+    (match decode foreign with Read.Failure {error=Read.Store_missing;_} -> ()
+     | _ -> fail "foreign invocation lost missing-store refusal");
+    let status, hints = get "hints" [] in
+    check int "Child HTTP unchecked hints" 200 status;
+    let decoded_hints = decode hints in
+    let hints = require_ok Read.decode_error_to_string
+      (Read.hints_of_response ~keeper_name decoded_hints) in
+    (match hints.hints with
+     | [{receiver=held;hint=Read.Unchecked cursor}] ->
+         check bool "actual hint retains full invocation and tail" true
+           (held=receiver && cursor=page.next_cursor)
+     | _ -> fail "actual store hint missing or falsely audited");
+    check bool "hint cannot become audited discovery" true
+      (Read.receivers_of_response ~keeper_name decoded_hints=Error Read.Unexpected_response);
+    let status, receivers = get "receivers" [] in
+    check int "Child HTTP audited discovery" 200 status;
+    let receivers = require_ok Read.decode_error_to_string
+      (Read.receivers_of_response ~keeper_name (decode receivers)) in
+    (match receivers.receivers with
+     | [{receiver=held;storage=Read.Audited cursor}] ->
+         check bool "audited discovery retains same actual ticket and tail" true
+           (held=receiver && cursor=page.next_cursor)
+     | _ -> fail "actual Child audited discovery missing");
+    check bool "Child read does not invent persistence failure history" true
+      (page.coverage=Read.Unavailable && hints.coverage=Read.Unavailable
+       && receivers.coverage=Read.Unavailable))
+;;
+
 let test_native_task_http_reads_actual_bound_observations () =
   with_task_journal_bindings (fun ~base_path observations ->
     let module Api = Server_dashboard_http_keeper_native_tasks in
@@ -5940,6 +6037,8 @@ let () =
             test_native_task_journal_atomicity_recovery_and_failure
         ; test_case "native task production read consumes actual bound observations" `Quick
             test_native_task_http_reads_actual_bound_observations
+        ; test_case "Child HTTP reads actual Driver snapshots with current redaction and ticket3" `Quick
+            test_child_http_reads_actual_driver_observations
         ; test_case "task persistence callback failure preserves root answer" `Quick
             test_native_task_journal_callback_failure_preserves_root_answer
         ; test_case "autonomous task journal outlives its closed root stream" `Quick

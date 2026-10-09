@@ -20,10 +20,10 @@ reason and existing closed public variants.
 The root retains clock acquisition, writer JSON construction, append/observer
 ordering, schedule occurrence receipts, authoritative queue outbox read and
 retirement, cache invalidation and operator projection. The extracted bodies
-are byte-identical. Retained root bodies differ only in one explicit
+are byte-identical apart from the final file blank line. Retained root bodies differ only in one explicit
 `transition_source` parameter annotation, needed because the extracted metadata
 record's labels now enter scope earlier. Root size changes from 2,171 to 1,646
-lines; the private wire owner is 530 lines with a 119-line interface. Falling
+lines; the private wire owner is 529 lines with a 119-line interface. Falling
 below 2,000 lines does not finish the remaining responsibility audit.
 
 ## Consumer checks
@@ -43,7 +43,9 @@ implementation or extraction layout.
 The first compile failed on record-label inference. Its terminal receipt, log
 and inputs are retained separately in [initial-checks.json](initial-checks.json)
 and [initial-source-sha256.json](initial-source-sha256.json). The focused compile
-and all 33 executed cases succeeded after the annotation repair.
+and all 33 executed cases succeeded after the annotation repair. A subsequent
+EOF blank-line cleanup was compiled against both targets; both executable hashes
+were identical to the tested binaries, so those cases were not rerun.
 
 ## Scope
 

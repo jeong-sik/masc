@@ -527,4 +527,3 @@ let decode_current_row ~keeper_name row =
     decode_reaction_row ~event_id metadata reaction
   | _ -> Error Unknown_record_kind
 ;;
-

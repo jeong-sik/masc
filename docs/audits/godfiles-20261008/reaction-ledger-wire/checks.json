@@ -34,5 +34,9 @@
     "_build/default/test/test_keeper_event_queue_state_v2.exe": "a68daca029e8a24bfd44857c989a2ef364cfd136cbe2719a2506e1fa7b373f19"
   },
   "initial_validation": "initial-checks.json",
-  "scope": "Focused macOS compilation and existing isolated real ledger/evidence/cache/ACK projection scenarios. No provider/live Keeper/UI/full CI/installation/deployment or whole-stack proof."
+  "scope": "Focused macOS compilation and existing isolated real ledger/evidence/cache/ACK projection scenarios. No provider/live Keeper/UI/full CI/installation/deployment or whole-stack proof.",
+  "final_blank_line_cleanup": {
+    "build_exit_code": 0,
+    "executables_identical_to_tested": true
+  }
 }

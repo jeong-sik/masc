@@ -32,15 +32,17 @@ type delta =
       }
   | Stream_model_started of
       { message_id : string option
+      ; stream_scope : int option
       ; model : string
       ; usage : stream_usage option
       }
   | Stream_model_stopped
   | Stream_details of
-      { usage : stream_usage option
-      ; stop_reason : string option
+      { stream_scope : int option
+      ; usage : stream_usage option
+      ; stop_reason : Agent_core.Types.stop_reason option
       }
-  | Text of string
+  | Text of {text : string; stream_scope : int option}
   | Thinking of string
   | Native_tool_started of
       { occurrence : tool_occurrence; tool_name : string option }
@@ -266,6 +268,7 @@ let custom_deltas_unvalidated fields =
           [ Stream_model_started
               { message_id = Option.bind (string_field value "provider_message_id")
                   (fun id -> if String.trim id = "" then None else Some id)
+              ; stream_scope = nonnegative_int_field value "stream_scope"
               ; model = String.trim model
               ; usage = Option.bind (List.assoc_opt "usage" value) stream_usage_of_usage_json
               } ]
@@ -293,12 +296,12 @@ let custom_deltas_unvalidated fields =
        let stop_reason =
          match List.assoc_opt "stop_reason" value with
          | Some (`String reason) when String.trim reason <> "" ->
-           Some (String.trim reason)
+           Some (Agent_core.Types.stop_reason_of_string (String.trim reason))
          | Some _ | None -> None
        in
        if usage = None && stop_reason = None
        then []
-       else [ Stream_details { usage; stop_reason } ]
+       else [ Stream_details { usage; stop_reason; stream_scope = nonnegative_int_field value "stream_scope" } ]
      | None -> [])
   | Some "KEEPER_TOOL_RESULT_READY" -> (
       match object_field fields "value" with
@@ -451,8 +454,13 @@ let event_deltas (event : Yojson.Safe.t) =
               }
           ]
       | Some "TEXT_MESSAGE_CONTENT" ->
-          required ~event:"TEXT_MESSAGE_CONTENT" ~field:"delta" fields
-            (fun delta -> Text delta)
+          (match List.filter (fun (key, _) -> key = "textStreamScope") fields with
+           | [] -> required ~event:"TEXT_MESSAGE_CONTENT" ~field:"delta" fields
+               (fun text -> Text {text; stream_scope=None})
+           | [_, `Int scope] when scope >= 0 ->
+               required ~event:"TEXT_MESSAGE_CONTENT" ~field:"delta" fields
+                 (fun text -> Text {text; stream_scope=Some scope})
+           | _ -> [Undecodable "TEXT_MESSAGE_CONTENT.textStreamScope must be one nonnegative integer"])
       | Some "TOOL_CALL_START" -> tool_start_deltas fields
       | Some "TOOL_CALL_ARGS" -> tool_args_deltas fields
       | Some "TOOL_CALL_END" ->

@@ -2808,7 +2808,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
           ~status:(Request_stream Stream_reconciliation_required)
           ~message
           ();
-        Keeper_chat_events.publish events (Text_delta message);
+        Keeper_chat_events.publish events (Text_delta {text=message; stream_scope=None});
         Keeper_chat_events.publish events Text_message_end;
         Keeper_chat_events.publish events (Run_finished { run_id });
         queued_outcome
@@ -2850,7 +2850,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
           then
             split_keeper_reply_chunks visible_reply
             |> List.iter (fun chunk ->
-                   Keeper_chat_events.publish events (Text_delta chunk));
+                   Keeper_chat_events.publish events (Text_delta {text=chunk; stream_scope=None}));
           Keeper_chat_events.publish events
             (Reply_details
                { reply = visible_reply

@@ -3,12 +3,28 @@ open Alcotest
 module WO = Masc.Keeper_world_observation
 module UM = Masc.Keeper_unified_metrics
 
-(* The keeper.world frame and event-row prose this suite asserts moved out
-   of the .ml sources into config/prompts/keeper.md as world.* keys,
-   rendered through the prompt registry at observation/assembly time.
-   Loading them into the registry is what [Prompt_defaults.init] does below;
-   the registry locates config/prompts itself under Dune. *)
+(* Use the same embedded prompt assets as runtime bootstrap, in an isolated
+   directory. [Prompt_defaults.init] scans an already registered directory;
+   it does not discover or install one. *)
 let () =
+  let prompts_dir = Filename.temp_dir "verification_surface_prompts_" "" in
+  at_exit (fun () -> Fs_compat.remove_tree prompts_dir);
+  let sync =
+    Masc.Managed_asset_sync.sync
+      ~domain:Masc.Managed_asset_sync.Prompts
+      ~edit_layer:Masc.Managed_asset_sync.No_edit_layer
+      ~read:Embedded_config.read
+      ~files:Embedded_config.file_list
+      ~dest_dir:prompts_dir
+      ()
+  in
+  (match sync.Masc.Managed_asset_sync.failed with
+   | [] -> ()
+   | failures ->
+     failf "embedded prompt fixture could not be installed: %s"
+       (String.concat "; "
+          (List.map (fun (path, detail) -> path ^ ": " ^ detail) failures)));
+  Prompt_registry.set_markdown_dir prompts_dir;
   Masc.Prompt_defaults.init ()
 ;;
 

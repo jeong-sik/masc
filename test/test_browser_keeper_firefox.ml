@@ -142,7 +142,8 @@ let host_is_started_only_with_an_installed_launcher_and_no_host () =
     install_lane base ~marker:"/unused";
     (match host_step base with
      | Keeper_firefox.Start_host path -> check string "the workspace launcher" (launcher base) path
-     | Keeper_firefox.Host_running | Keeper_firefox.Host_on_another_port _ | Keeper_firefox.Launcher_not_ready _ ->
+     | Keeper_firefox.Host_running | Keeper_firefox.Host_on_another_port _ | Keeper_firefox.Host_address_unknown
+     | Keeper_firefox.Launcher_not_ready _ ->
        fail "not started");
     let held = take base in
     Fun.protect ~finally:(fun () -> released held) (fun () ->
@@ -155,8 +156,8 @@ let host_is_started_only_with_an_installed_launcher_and_no_host () =
       (match Record.observe ~base_path:base with
        | Record.Unreadable { held = Some true; _ } -> ()
        | _ -> fail "expected an unreadable record beside a held lock");
-      check bool "an unreadable record beside a held lock" true
-        (host_step base = Keeper_firefox.Host_running)));
+      check bool "an unreadable record beside a held lock: a host, on a port not known" true
+        (host_step base = Keeper_firefox.Host_address_unknown)));
   with_workspace (fun base ->
     check bool "no lane" true
       (host_step base = Keeper_firefox.Launcher_not_ready Keeper_firefox.Not_installed));
@@ -348,7 +349,7 @@ let an_answering_port_starts_only_the_host () =
       await_file host_marker;
       check bool "no second Firefox" false (firefox_started base)))
 
-let a_running_host_is_not_started_again () =
+let a_running_host_with_no_firefox_starts_nothing () =
   with_workspace (fun base ->
     let firefox_marker, host_marker = markers base in
     install_lane base ~marker:host_marker;
@@ -358,7 +359,20 @@ let a_running_host_is_not_started_again () =
     Fun.protect ~finally:(fun () -> released held) (fun () ->
       with_children ~base [ firefox_marker; host_marker ] (fun () ->
         started ~base ~configuration:(configured ~firefox ~port base) ();
-        check bool "firefox started" true (firefox_started base);
+        check bool "no Firefox that host would not attach to" false (firefox_started base);
+        check bool "no second host" false (host_started base))))
+
+let a_host_whose_address_cannot_be_read_starts_nothing () =
+  with_workspace (fun base ->
+    let firefox_marker, host_marker = markers base in
+    install_lane base ~marker:host_marker;
+    let firefox = fake_firefox base ~marker:firefox_marker Listens in
+    let held = take base in
+    Fun.protect ~finally:(fun () -> released held) (fun () ->
+      write (Record.record_path ~base_path:base) "{";
+      with_children ~base [ firefox_marker; host_marker ] (fun () ->
+        started ~base ~configuration:(configured ~firefox ~port:(free_port ()) base) ();
+        check bool "no Firefox" false (firefox_started base);
         check bool "no second host" false (host_started base))))
 
 let a_host_on_another_port_starts_nothing () =
@@ -430,10 +444,15 @@ let without_a_launcher_nothing_starts () =
       check bool "no Firefox no host can use" false (firefox_started base);
       check bool "no host without a launcher" false (host_started base)))
 
-(* Set for one case: the server's environment is what a child inherits. *)
+(* Set for one case: the server's environment is what a child inherits.
+   Each variable is put back as it was, or removed when it was not set. *)
 let with_variables variables f =
+  let before = List.map (fun (key, _) -> key, Sys.getenv_opt key) variables in
   List.iter (fun (key, value) -> Unix.putenv key value) variables;
-  Fun.protect ~finally:(fun () -> List.iter (fun (key, _) -> Unix.putenv key "") variables) f
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter (function key, Some value -> Unix.putenv key value | key, None -> Unix.unsetenv key) before)
+    f
 
 let the_host_is_not_given_the_servers_address () =
   with_workspace (fun base ->
@@ -477,7 +496,8 @@ let () =
     ; ( "server start"
       , [ test_case "a free port: Firefox, then the host" `Quick a_free_port_starts_firefox_then_the_host
         ; test_case "an answering port: the host only" `Quick an_answering_port_starts_only_the_host
-        ; test_case "a running host" `Quick a_running_host_is_not_started_again
+        ; test_case "a running host and no Firefox" `Quick a_running_host_with_no_firefox_starts_nothing
+        ; test_case "a host whose address cannot be read" `Quick a_host_whose_address_cannot_be_read_starts_nothing
         ; test_case "a Firefox that exits first" `Quick a_firefox_that_exits_first_starts_no_host
         ; test_case "a Firefox that goes on in another process" `Quick
             a_firefox_that_goes_on_in_another_process_gets_its_host

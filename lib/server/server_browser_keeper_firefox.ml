@@ -57,9 +57,10 @@ let host_environment () =
   Array.of_list
     (List.filter (fun entry -> not (List.mem (key entry) fixed)) (Array.to_list (Unix.environment ())))
 
-(* Who opened the port: the process started here, or, once that one has
-   ended, one it left in its process group. *)
-type started = First_process of int | Its_group of int
+(* Who opened the port: the process started here; once that one has ended,
+   one it left in its process group; or, with that group empty, a process
+   this server did not start. *)
+type started = First_process of int | Its_group of int | Not_started_here
 
 (* A Firefox may end its first process and go on in another. Applying a
    staged update, it starts the updater, which starts Firefox again; whether
@@ -79,7 +80,8 @@ let start_firefox ~sw ~net ~clock ~ready_timeout_s ~base_path (config : Browser_
       | Answers ->
         (match Eio.Promise.peek firefox.exited with
          | None -> Ok (First_process firefox.pid)
-         | Some _ -> Ok (Its_group firefox.pid))
+         | Some _ when Posix_spawn_detached.group_has_members firefox -> Ok (Its_group firefox.pid)
+         | Some _ -> Ok Not_started_here)
       | Nothing_listens -> not_yet ~timed_out:(Keeper_firefox.Not_listening ready_timeout_s)
       | Unknown detail ->
         not_yet ~timed_out:(Keeper_firefox.Port_unknown { seconds = ready_timeout_s; detail })
@@ -96,55 +98,55 @@ let start_firefox ~sw ~net ~clock ~ready_timeout_s ~base_path (config : Browser_
 let host_step ~base_path (config : Browser_configuration.live_bidi) =
   Keeper_firefox.host_step ~port:config.port (Host_status.report (Host_status.observe ~base_path))
 
-(* Asked again once Firefox answers: a host may have started meanwhile. *)
-let start_host ~sw ~base_path (config : Browser_configuration.live_bidi) =
-  match host_step ~base_path config with
-  | Keeper_firefox.Host_running ->
-    Log.Server.info "browser-lane: a BiDi host is already running for this workspace"
-  | Keeper_firefox.Host_on_another_port address ->
-    Log.Server.error "browser-lane: the BiDi host is not started: %s"
-      (Keeper_firefox.host_on_another_port_message ~port:config.port address)
-  | Keeper_firefox.Launcher_not_ready missing ->
-    Log.Server.error "browser-lane: the BiDi host is not started: %s"
-      (Keeper_firefox.launcher_missing_message missing)
-  | Keeper_firefox.Start_host launcher ->
-    let log_path = Keeper_firefox.host_log_path ~base_path in
-    (match
-       spawn_logged ~sw ~argv:(Keeper_firefox.host_argv ~launcher config)
-         ~env:(host_environment ()) ~log_path
-     with
-     | Error detail -> Log.Server.error "browser-lane: the BiDi host did not start: %s" detail
-     | Ok host ->
-       Log.Server.info "browser-lane: started the BiDi host (pid %d) for %s; its output is in %s"
-         host.pid (Keeper_firefox.bidi_url ~port:config.port) log_path)
+(* Decided once, before Firefox: a host that started meanwhile holds the lock,
+   and the one started here is refused there and says so in its own log. *)
+let start_host ~sw ~base_path ~launcher (config : Browser_configuration.live_bidi) =
+  let log_path = Keeper_firefox.host_log_path ~base_path in
+  match
+    spawn_logged ~sw ~argv:(Keeper_firefox.host_argv ~launcher config)
+      ~env:(host_environment ()) ~log_path
+  with
+  | Error detail -> Log.Server.error "browser-lane: the BiDi host did not start: %s" detail
+  | Ok host ->
+    Log.Server.info "browser-lane: started the BiDi host (pid %d) for %s; its output is in %s"
+      host.pid (Keeper_firefox.bidi_url ~port:config.port) log_path
+
+let answering_port_line =
+  "if that is not this profile's Firefox, the host's record says why it could not attach"
 
 type firefox = Ready | Undetermined of string | Failed of Keeper_firefox.firefox_failure
 
-let start_both ~sw ~env ~ready_timeout_s ~base_path (config : Browser_configuration.live_bidi) =
+let start_both ~sw ~env ~ready_timeout_s ~base_path ~launcher (config : Browser_configuration.live_bidi) =
   let net = Eio.Stdenv.net env and clock = Eio.Stdenv.clock env in
   let firefox =
     match port_state ~net ~clock ~port:config.port with
     | Answers ->
-      Log.Server.info
-        "browser-lane: port %d already answers, so no Keeper Firefox is started; if that is not \
-         this profile's Firefox, the host's record says why it could not attach"
-        config.port;
+      Log.Server.info "browser-lane: port %d already answers, so no Keeper Firefox is started; %s"
+        config.port answering_port_line;
       Ready
     | Unknown detail -> Undetermined detail
     | Nothing_listens ->
       (match start_firefox ~sw ~net ~clock ~ready_timeout_s ~base_path config with
-       | Ok started ->
-         Log.Server.info "browser-lane: started the Keeper Firefox (%s) on %s with profile %s"
-           (match started with
-            | First_process pid -> Printf.sprintf "pid %d" pid
-            | Its_group pgid ->
-              Printf.sprintf "process group %d; its first process ended before the port answered" pgid)
+       | Ok (First_process pid) ->
+         Log.Server.info "browser-lane: started the Keeper Firefox (pid %d) on %s with profile %s" pid
            (Keeper_firefox.bidi_url ~port:config.port) config.profile;
+         Ready
+       | Ok (Its_group pgid) ->
+         Log.Server.info
+           "browser-lane: started the Keeper Firefox (process group %d; its first process ended before \
+            the port answered) on %s with profile %s"
+           pgid (Keeper_firefox.bidi_url ~port:config.port) config.profile;
+         Ready
+       | Ok Not_started_here ->
+         Log.Server.info
+           "browser-lane: the Keeper Firefox started here ended with nothing left in its process \
+            group, and port %d answers from another process; %s"
+           config.port answering_port_line;
          Ready
        | Error failure -> Failed failure)
   in
   match firefox with
-  | Ready -> start_host ~sw ~base_path config
+  | Ready -> start_host ~sw ~base_path ~launcher config
   | Undetermined detail ->
     Log.Server.error
       "browser-lane: cannot tell whether port %d answers (%s); neither the Keeper Firefox nor \
@@ -155,16 +157,38 @@ let start_both ~sw ~env ~ready_timeout_s ~base_path (config : Browser_configurat
       (Keeper_firefox.firefox_failure_message config failure)
       (Keeper_firefox.firefox_log_path ~base_path)
 
+(* The host holding the lock attached to its Firefox when it started and
+   does not attach again, so a Firefox started now would have no host. *)
+let leave_running ~env (config : Browser_configuration.live_bidi) =
+  let net = Eio.Stdenv.net env and clock = Eio.Stdenv.clock env in
+  match port_state ~net ~clock ~port:config.port with
+  | Answers ->
+    Log.Server.info "browser-lane: a BiDi host for port %d is running and the port answers; nothing \
+                     is started"
+      config.port
+  | Nothing_listens ->
+    Log.Server.error
+      "browser-lane: a BiDi host for port %d holds this workspace while nothing answers on that \
+       port; nothing is started. That host ends with its Firefox gone, and the next server start \
+       opens both."
+      config.port
+  | Unknown detail ->
+    Log.Server.error
+      "browser-lane: a BiDi host for port %d is running, and whether the port answers cannot be \
+       told (%s); nothing is started"
+      config.port detail
+
 (* Firefox opens a port any local process may drive (RFC-browser-keeper-firefox
-   §5), so it is started only when a host can be attached to it. *)
+   §5), so it is started only when a host is started with it. *)
 let bring_up ~sw ~env ~ready_timeout_s ~base_path (config : Browser_configuration.live_bidi) =
   let neither why = Log.Server.error "browser-lane: neither the Keeper Firefox nor its BiDi host is started: %s" why in
   match host_step ~base_path config with
   | Keeper_firefox.Launcher_not_ready missing -> neither (Keeper_firefox.launcher_missing_message missing)
   | Keeper_firefox.Host_on_another_port address ->
     neither (Keeper_firefox.host_on_another_port_message ~port:config.port address)
-  | Keeper_firefox.Host_running | Keeper_firefox.Start_host _ ->
-    start_both ~sw ~env ~ready_timeout_s ~base_path config
+  | Keeper_firefox.Host_address_unknown -> neither (Keeper_firefox.host_address_unknown_message ~port:config.port)
+  | Keeper_firefox.Host_running -> leave_running ~env config
+  | Keeper_firefox.Start_host launcher -> start_both ~sw ~env ~ready_timeout_s ~base_path ~launcher config
 
 let work ~sw ~env ~ready_timeout_s ~base_path ~configuration () =
   match configuration with

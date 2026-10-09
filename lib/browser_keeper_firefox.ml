@@ -67,6 +67,7 @@ type launcher_missing = Not_installed | Needs_reinstall
 type host_step =
   | Host_running
   | Host_on_another_port of string
+  | Host_address_unknown
   | Start_host of string
   | Launcher_not_ready of launcher_missing
 
@@ -82,19 +83,24 @@ let host_on_another_port_message ~port address =
      next server start attaches one to port %d"
     address port
 
-(* The record keeps the address as the host was given it, which take checked
-   is a loopback ws URL with a port. *)
-let runs_on ~port bidi_url =
+let host_address_unknown_message ~port =
+  Printf.sprintf
+    "a BiDi host holds this workspace's lock and which Firefox it serves cannot be read from its \
+     record; stop it so the next server start attaches one to port %d"
+    port
+
+(* The record keeps the address as the host was given it. *)
+let running_host ~port bidi_url =
   match Browser_bidi_downloads.endpoint bidi_url with
-  | Ok (_host, recorded_port, _resource) -> recorded_port = port
-  | Error _ -> false
+  | Ok (_host, recorded_port, _resource) when recorded_port = port -> Host_running
+  | Ok _ -> Host_on_another_port bidi_url
+  | Error _ -> Host_address_unknown
 
 let host_step ~port (report : Browser_bidi_host_status.report) =
   let running =
     match report.state with
-    | Browser_bidi_host_record.Running entry when runs_on ~port entry.bidi_url -> Some Host_running
-    | Browser_bidi_host_record.Running entry -> Some (Host_on_another_port entry.bidi_url)
-    | Browser_bidi_host_record.Unreadable { held = Some true; _ } -> Some Host_running
+    | Browser_bidi_host_record.Running entry -> Some (running_host ~port entry.bidi_url)
+    | Browser_bidi_host_record.Unreadable { held = Some true; _ } -> Some Host_address_unknown
     | Browser_bidi_host_record.Unreadable { held = Some false | None; _ }
     | Browser_bidi_host_record.Never_started
     | Browser_bidi_host_record.Ended _

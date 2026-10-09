@@ -88,9 +88,13 @@ port = 9222
 
 서버는 빠진 것만 켠다. 이미 떠 있는 것은 그대로 쓴다.
 
-0. host 를 붙일 수 없으면 Firefox 도 띄우지 않는다. 그 포트는 이 장비의 어떤 프로세스든 붙어서 조종할 수 있다(§5).
-   launcher 가 설치되지 않았거나 설치된 그대로가 아닐 때, 그리고 잠금을 잡은 host 의 주소가 다른 포트일 때다.
-   워크스페이스에는 host 가 하나뿐이라, 다른 포트의 host 를 먼저 멈춰야 한다. 서버는 그 까닭을 로그에 남긴다.
+0. host 를 같이 띄우지 않을 때는 Firefox 도 띄우지 않는다. 그 포트는 이 장비의 어떤 프로세스든 붙어서 조종할 수 있다(§5).
+   - launcher 가 설치되지 않았거나 설치된 그대로가 아닐 때.
+   - 잠금을 잡은 host 의 주소가 다른 포트이거나, 기록을 읽을 수 없어 주소를 모를 때.
+     워크스페이스에는 host 가 하나뿐이라, 그 host 를 먼저 멈춰야 한다.
+   - 잠금을 잡은 host 가 이 포트에 있을 때. host 는 시작할 때 한 번만 Firefox 에 붙으니,
+     지금 띄우는 Firefox 에는 붙지 않는다. 포트가 비어 있으면 그 host 는 Firefox 가 사라져 곧 끝나고, 다음 서버 시작이 둘을 띄운다.
+   서버는 그 까닭을 로그에 남긴다. host 를 띄울지는 이 한 번으로 정한다.
 1. 그 포트에 무언가 듣고 있으면 Firefox 를 띄우지 않는다.
    듣는 것이 없으면 `firefox --no-remote --profile <profile> --remote-debugging-port <port>` 를 떨어진 프로세스로 띄운다(§2.2).
    포트가 열릴 때까지 기다린다. 열리지 않거나 Firefox 가 먼저 끝나면 띄우지 않은 까닭을 기록한다(§3.4).
@@ -105,9 +109,9 @@ port = 9222
    포트에 연결이 거절되면 "듣는 것 없음"이다. 그 밖의 오류로 알 수 없으면 Firefox 도 host 도 띄우지 않고 그 까닭을 남긴다.
    기다리는 동안 확인이 계속 그렇게 끝나면, 마감 때 마지막 확인의 까닭을 남긴다.
    이미 듣는 것이 이 프로필의 Firefox 인지는 host 가 세션을 받은 뒤에 확인한다(4).
-2. host 기록이 `Running` 이고 잠금이 잡혀 있고 그 주소가 이 포트면 host 를 띄우지 않는다.
-   아니면 `<base>/.masc/browser-lane/host/launch --bidi-url ws://127.0.0.1:<port>/session` 을 떨어진 프로세스로 띄운다.
+2. 0 에서 띄우기로 했으면 `<base>/.masc/browser-lane/host/launch --bidi-url ws://127.0.0.1:<port>/session` 을 떨어진 프로세스로 띄운다.
    launcher 상태는 0 에서 본 그대로다(연결 목록이 `bidiHost.attach.launcher_state` 로 말하는 상태).
+   그 사이 다른 host 가 잠금을 잡았으면 여기서 띄운 host 는 잠금에서 거절되고, 자기 로그에 그렇게 남긴다.
    host 에는 서버의 `MASC_HTTP_BASE_URL`·`MASC_HTTP_PORT` 를 넘기지 않는다.
    host 는 이 둘을 `connection.toml` 보다 먼저 고정 주소로 쓰기 때문이다(`connectors/browser/host/README.md`).
    새 host 는 지난 host 기록의 확인 못 한 결과를 archive 에 옮긴 뒤에 기록을 바꾼다(#42150).

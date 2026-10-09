@@ -52,16 +52,21 @@ type launcher_missing = Not_installed | Needs_reinstall
     workspace's host report says. A workspace has one host at a time. *)
 type host_step =
   | Host_running
-      (** A host holds the lock and was given [port], or holds it with a
-          record no reader can load: a second one would only be refused. *)
+      (** A host holds the lock and was given [port]: a second one would
+          only be refused. It attaches to Firefox once, when it starts, so
+          it does not attach to a Firefox started after it. *)
   | Host_on_another_port of string
       (** A host holds the lock and was given this address, whose port is
           not [port]. It stays on that Firefox until it is stopped. *)
+  | Host_address_unknown
+      (** A host holds the lock, and its record cannot be read or names no
+          address with a port, so which Firefox it serves is not known. *)
   | Start_host of string  (** The installed launcher to run. *)
   | Launcher_not_ready of launcher_missing
 
 val host_step : port:int -> Browser_bidi_host_status.report -> host_step
 
 val host_on_another_port_message : port:int -> string -> string
+val host_address_unknown_message : port:int -> string
 
 val launcher_missing_message : launcher_missing -> string

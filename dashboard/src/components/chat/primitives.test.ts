@@ -931,7 +931,7 @@ describe('ChatTranscript', () => {
       delivery_provenance_status: 'valid',
       delivery_provenance: {
         delivery_key: { kind: 'operation', operation_id: 'legacy-diagnostic-operation' },
-        transcript_slot: { kind: 'terminal_assistant' },
+        transcript_slot: { kind: 'terminal_result' },
       },
       blocks: parseTextToChatBlocks(diagnostic),
     }]);

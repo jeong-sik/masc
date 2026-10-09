@@ -229,3 +229,36 @@ screen appeared and a key exited.
 `0` players starts a game with no human ruler: 표시군주 `n`, and the months run
 on `space`. Every AI war is shown on the battle map, and each `<장수>의 전술`
 line waits for a key.
+
+## Battle information and input device
+
+At the visible human battle command menu, `5` opens information and offers
+`1.아군장수 2.적장수`. In keyboard mode, choose friendly `1`; with the cursor
+on the acting unit, `0` opened Liu Bei's information panel in an observed
+battle. The panel showed troops 1614, morale 94 and training 50. Space closed
+it to unit selection; Enter returned to the friendly/enemy choice and another
+Enter returned to the command menu. This is a positive control for one friendly
+unit, not evidence that an arbitrary selected cell contains an enemy.
+
+The enemy selector's cursor moved with numeric directions in that replay:
+`1` moved down-left, `3` down-right and `2` down. Inspect the marker after each
+input. Selecting the examined blue structure cells with `0` did not reveal
+an enemy officer. Do not identify buildings, blinking markers or changes in
+total army strength as individual enemies or manual damage.
+
+Battle command `9` offers `1.표시시간 2.입력장치`. Input-device option `2` then
+offers mouse `1` or keyboard `2`. To enable the mouse in the observed keyboard
+mode, send `1`, Enter, and answer `y` only when the mouse-change confirmation
+is visible. These settings prompts need Enter even though ordinary battle
+commands open with a digit alone.
+
+After switching, `masc_dos_click` with `buttons: 1` selected information, the
+friendly side and the acting unit, opening the same Liu Bei panel. Select
+coordinates from the current PNG; the replay's coordinates are not a layout
+contract. The panel asked for a mouse click; a left click dismissed it.
+A right click (`buttons: 2`) backed out of unit selection, and a second right
+click backed out of the side menu. The resulting checkpoint remains in mouse
+mode. A click that does nothing in keyboard mode is not evidence of a broken
+mouse emulator. This replay used worker source
+`b19d338c19f5db83705e4999f6111f6e10f60ac5`; it does not prove battle victory or
+a completed campaign.

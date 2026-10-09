@@ -1238,7 +1238,43 @@ let quarantined_outcome = "quarantined"
    empty ([dropped_by_commit]). Statements live on the journal line and its
    pending removal receipt; the snapshot's [change.removed] preserves the
    originals until finalization. *)
-let journal_entry_to_json ~commit_effect ~dropped_statements snapshot =
+let revision_links_to_json links = `List (List.map (fun (link : revision) ->
+  `Assoc ["superseded", `String link.superseded; "superseded_by", `String link.superseded_by]) links)
+;;
+
+let revision_links_of_json = function
+  | `List rows ->
+    let rec decode seen = function
+      | [] -> Ok []
+      | `Assoc fields :: rest ->
+        let* () = exact_field_names_result ["superseded"; "superseded_by"] fields
+          |> Result.map_error wire_error_to_string in
+        let* superseded = wire_string_field "superseded" fields |> Result.map_error wire_error_to_string in
+        let* superseded_by = wire_string_field "superseded_by" fields |> Result.map_error wire_error_to_string in
+        if not (is_memory_id superseded && is_memory_id superseded_by)
+          || superseded = superseded_by || List.mem (superseded, superseded_by) seen
+        then Error "invalid or duplicate revision link identity"
+        else let+ rest = decode ((superseded, superseded_by) :: seen) rest in
+          {superseded; superseded_by} :: rest
+      | _ :: _ -> Error "revision link is not an object" in
+    decode [] rows
+  | _ -> Error "revision links are not an array"
+;;
+
+let journal_revision_links fields =
+  match List.assoc_opt "revision_links" fields with
+  | None -> Ok None
+  | Some json -> Result.map Option.some (revision_links_of_json json)
+;;
+
+let links_applied_to_snapshot (snapshot : t) links =
+  List.for_all (fun (link : revision) ->
+    List.exists (fun fact -> memory_id fact = link.superseded) snapshot.change.removed
+    && not (List.exists (fun fact -> memory_id fact = link.superseded) snapshot.facts)
+    && List.exists (fun fact -> memory_id fact = link.superseded_by) snapshot.facts) links
+;;
+
+let journal_entry_to_json ~commit_effect ~revision_links ~dropped_statements snapshot =
   `Assoc
     ([ "outcome", `String committed_outcome
      ; "commit_effect", `String (match commit_effect with Rewritten -> "rewritten" | Unchanged -> "unchanged")
@@ -1247,6 +1283,9 @@ let journal_entry_to_json ~commit_effect ~dropped_statements snapshot =
      ; "source", source_to_json snapshot.source
      ; "change", change_to_json snapshot.change
      ]
+     @ (match commit_effect with
+        | Rewritten -> ["revision_links", revision_links_to_json revision_links]
+        | Unchanged -> [])
      @
      match dropped_statements with
      | None -> []
@@ -1276,10 +1315,16 @@ let journal_commit_effect fields =
 ;;
 
 let committed_entry_of_fields fields =
-  let* _effect = journal_commit_effect fields in
+  let* transition = journal_commit_effect fields in
+  let* links = journal_revision_links fields in
+  let* () = match links, transition with
+    | Some (_ :: _), Some Rewritten -> Ok ()
+    | Some (_ :: _), (Some Unchanged | None) -> Error "revision links lack a snapshot transition"
+    | (Some [] | None), _ -> Ok () in
   let expected = ["outcome"; "recorded_at"; "revision"; "source"; "change"]
     @ (if List.mem_assoc "dropped" fields then ["dropped"] else [])
-    @ (if List.mem_assoc "commit_effect" fields then ["commit_effect"] else []) in
+    @ (if List.mem_assoc "commit_effect" fields then ["commit_effect"] else [])
+    @ (if List.mem_assoc "revision_links" fields then ["revision_links"] else []) in
   let fields_are_exact = exact_object_fields expected fields in
   let dropped_of_json = function
     | `List items ->
@@ -1526,11 +1571,11 @@ let append_journal_line ~keepers_dir ~keeper_id json =
       (Printexc.to_string exn)
 ;;
 
-let append_journal_entry ~keepers_dir ~keeper_id ~commit_effect ~dropped_statements snapshot =
+let append_journal_entry ~keepers_dir ~keeper_id ~commit_effect ~revision_links ~dropped_statements snapshot =
   append_journal_line
     ~keepers_dir
     ~keeper_id
-    (journal_entry_to_json ~commit_effect ~dropped_statements snapshot)
+    (journal_entry_to_json ~commit_effect ~revision_links ~dropped_statements snapshot)
 ;;
 
 (* A committed line's [dropped] lists what this commit removed: a memory the
@@ -1622,6 +1667,7 @@ type retraction_plan_receipt =
   ; target_revision : int
   ; target_snapshot_sha256 : string
   ; dropped_statements : Keeper_memory_os_types.dropped_statement list
+  ; revision_links : revision list
   }
 
 let retraction_plan_receipt_to_json receipt =
@@ -1632,6 +1678,7 @@ let retraction_plan_receipt_to_json receipt =
     ; "prior_snapshot_sha256", `String receipt.prior_snapshot_sha256
     ; "target_revision", `Int receipt.target_revision
     ; "target_snapshot_sha256", `String receipt.target_snapshot_sha256
+    ; "revision_links", revision_links_to_json receipt.revision_links
     ; ( "dropped"
       , `List
           (List.map
@@ -1649,9 +1696,26 @@ let retraction_plan_receipt_of_json = function
            ; "prior_snapshot_sha256"
            ; "target_revision"
            ; "target_snapshot_sha256"
+           ; "revision_links"
            ; "dropped"
            ]
-           fields ->
+           fields
+         (* Receipts prepared before [revision_links] existed carry the
+            older seven-field shape. Read them with no lineage rather than
+            refusing, so a leftover prepared receipt cannot block the next
+            writer's recovery; the lineage is left empty instead of guessed,
+            because an inferred link would fabricate history the old writer
+            never recorded. *)
+         || exact_object_fields
+              [ "plan_id"
+              ; "state"
+              ; "prior_revision"
+              ; "prior_snapshot_sha256"
+              ; "target_revision"
+              ; "target_snapshot_sha256"
+              ; "dropped"
+              ]
+              fields ->
     (match
        ( List.assoc_opt "plan_id" fields
        , List.assoc_opt "state" fields
@@ -1672,6 +1736,9 @@ let retraction_plan_receipt_of_json = function
             && target_revision = prior_revision + 1
             && String_util.is_lowercase_sha256_hex prior_snapshot_sha256
             && String_util.is_lowercase_sha256_hex target_snapshot_sha256 ->
+       let* revision_links = match List.assoc_opt "revision_links" fields with
+         | Some json -> revision_links_of_json json
+         | None -> Ok [] in
        let* plan_id =
          match plan_id_json with
          | `Null -> Ok None
@@ -1705,7 +1772,7 @@ let retraction_plan_receipt_of_json = function
                    (Keeper_memory_os_types.wire_error_to_string error)))
        in
        (match decode_dropped 0 Set_util.StringSet.empty [] dropped_json with
-        | Ok (_ :: _ as dropped_statements) ->
+        | Ok dropped_statements when dropped_statements <> [] || revision_links <> [] ->
           Ok
             { plan_id
             ; prior_revision
@@ -1713,8 +1780,9 @@ let retraction_plan_receipt_of_json = function
             ; target_revision
             ; target_snapshot_sha256
             ; dropped_statements
+            ; revision_links
             }
-        | Ok [] -> Error "retraction plan dropped reasons are empty"
+        | Ok _ -> Error "prepared removal has neither reasons nor revision links"
         | Error _ as error -> error)
      | _ -> Error "retraction plan receipt fields are invalid")
   | _ ->
@@ -1773,19 +1841,33 @@ let remove_retraction_plan_receipt ~keepers_dir ~keeper_id =
 let append_removal_journal_and_clear_receipt
       ~keepers_dir ~keeper_id ~snapshot receipt
   =
+  let* () = if links_applied_to_snapshot snapshot receipt.revision_links then Ok ()
+    else Error "prepared revision links do not match the committed snapshot" in
   let* () =
     append_journal_line_strict
       ~keepers_dir
       ~keeper_id
       (journal_entry_to_json
          ~commit_effect:Rewritten
+         ~revision_links:receipt.revision_links
          ~dropped_statements:(Some receipt.dropped_statements)
          snapshot)
   in
   remove_retraction_plan_receipt ~keepers_dir ~keeper_id
 ;;
 
-let journal_contains_entry ~keepers_dir ~keeper_id expected =
+(* Whether a committed line equal to a receipt's entry is that receipt's
+   rewrite. A writer before [revision_links] recorded no links, and one before
+   [commit_effect] recorded neither key; their receipts decode with no links.
+   Reading such a line as absent would append the same revision twice. *)
+let journal_line_records_rewrite fields ~revision_links =
+  match journal_commit_effect fields, journal_revision_links fields with
+  | Ok (Some Rewritten | None), Ok (Some links) -> links = revision_links
+  | Ok (Some Rewritten | None), Ok None -> revision_links = []
+  | Ok (Some Unchanged), _ | Error _, _ | Ok _, Error _ -> false
+;;
+
+let journal_contains_entry ~keepers_dir ~keeper_id ~revision_links expected =
   let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
   (* Only receipt reconciliation calls this, after proving the exact committed
      snapshot. A process interrupted during its append may leave a partial
@@ -1802,7 +1884,10 @@ let journal_contains_entry ~keepers_dir ~keeper_id expected =
         (match Yojson.Safe.from_string line with
          | json ->
            (match journal_entry_of_json json with
-            | Ok observed when observed = expected -> Ok true
+            | Ok observed when observed = expected ->
+              (match json with
+               | `Assoc fields when journal_line_records_rewrite fields ~revision_links -> Ok true
+               | _ -> scan (line_number + 1) rest)
             | Ok _ -> scan (line_number + 1) rest
             | Error detail ->
               Error
@@ -1867,6 +1952,7 @@ let reconcile_retraction_plan_receipt ~keepers_dir ~keeper_id ~snapshot =
         journal_contains_entry
           ~keepers_dir
           ~keeper_id
+          ~revision_links:receipt.revision_links
           journal_entry
       in
       if present
@@ -2209,6 +2295,7 @@ let update_locked_with_output
       ?clock
       ?dropped_statements
       ?before_replace
+      ?(declared_revisions = [])
       ?durable_range_id
       ?official_range_id
       ?(explicit_candidate_ids = [])
@@ -2251,6 +2338,8 @@ let update_locked_with_output
   let* () = validate_unique_explicit_candidates
     (List.map (fun binding -> binding.candidate_id) admission_recall_bindings)
     |> Result.map_error store_error in
+  let* () = revision_links_of_json (revision_links_to_json declared_revisions)
+    |> Result.map ignore |> Result.map_error store_error in
   let dropped_statements_are_valid =
     match dropped_statements with
     | None -> true
@@ -2347,6 +2436,11 @@ let update_locked_with_output
            |> Result.map_error store_error
          in
          let* next, output = build ~snapshot_content previous in
+         let applied_revision_links = List.filter (fun link ->
+           links_applied_to_snapshot next [link]
+           && Option.fold ~none:false ~some:(fun (prior : t) ->
+             List.exists (fun fact -> memory_id fact = link.superseded) prior.facts) previous)
+           declared_revisions in
          let* () = List.fold_left (fun result binding ->
            let* () = result in
            if not (List.mem binding.candidate_id explicit_candidate_ids) then
@@ -2495,6 +2589,7 @@ let update_locked_with_output
                 names the revision that stays current. *)
              append_journal_entry
                ~commit_effect:Unchanged
+               ~revision_links:[]
                ~keepers_dir
                ~keeper_id
                ~dropped_statements:
@@ -2539,7 +2634,9 @@ let update_locked_with_output
          in
          let* retraction_receipt =
            match snapshot, committed_dropped with
-           | Some (prior, prior_content), Some ((_ :: _) as reasons) ->
+           | Some (prior, prior_content), reasons
+             when applied_revision_links <> [] || Option.fold ~none:false ~some:((<>) []) reasons ->
+             let reasons = Option.value ~default:[] reasons in
              let receipt =
                { plan_id = Option.map fst retraction_plan
                ; prior_revision = prior.revision
@@ -2547,6 +2644,7 @@ let update_locked_with_output
                ; target_revision = next.revision
                ; target_snapshot_sha256 = snapshot_sha256
                ; dropped_statements = reasons
+               ; revision_links = applied_revision_links
                }
              in
              let+ () =
@@ -2557,7 +2655,7 @@ let update_locked_with_output
                |> Result.map_error store_error
              in
              Some receipt
-           | None, _ | _, None | _, Some [] ->
+           | None, _ | Some _, _ ->
              (match retraction_plan with
               | None -> Ok None
               | Some _ ->
@@ -2589,6 +2687,7 @@ let update_locked_with_output
                | None, _ ->
                  append_journal_entry
                    ~commit_effect:Rewritten
+                   ~revision_links:applied_revision_links
                    ~keepers_dir
                    ~keeper_id
                    ~dropped_statements:committed_dropped
@@ -2727,6 +2826,51 @@ let with_committed_receipts ?(strict_snapshot=false) ~keepers_dir ~keeper_id sel
   with_receipt_status ~strict_snapshot ~keepers_dir ~keeper_id (fun snapshot receipts ->
     let* receipts = receipts in
     select snapshot receipts)
+;;
+
+type revision_evidence =
+  { snapshot_revision : int
+  ; recorded_at : float
+  ; source : source
+  ; commit_effect : commit_effect option
+  ; revision_links : revision list option
+  ; removed_memory_ids : string list
+  ; added_memory_ids : string list
+  }
+
+let read_with_revision_evidence_for_keepers_dir ~keepers_dir ~keeper_id ~after_revision =
+  if after_revision < 0 then Error "revision evidence starting revision must be nonnegative"
+  else with_committed_receipts ~strict_snapshot:true ~keepers_dir ~keeper_id
+    (fun snapshot _receipts ->
+      let* pending = read_retraction_plan_receipt ~keepers_dir ~keeper_id in
+      match pending with
+      | Some _ -> Error "revision evidence journal finalization is pending"
+      | None ->
+        let rows = ref [] in
+        let visit = function
+          | Dated_jsonl.Malformed_json {detail; _} -> Some (Error detail)
+          | Dated_jsonl.Parsed json ->
+            match journal_entry_of_json json with
+            | Error detail -> Some (Error detail)
+            | Ok (Journal_failed _ | Journal_quarantined _) -> None
+            | Ok (Journal_committed {revision; recorded_at; source; change; _}) ->
+              if revision <= after_revision then Some (Ok ())
+              else match snapshot, json with
+                | Some current, `Assoc fields when revision <= current.revision ->
+                  (match journal_commit_effect fields, journal_revision_links fields with
+                   | Ok commit_effect, Ok revision_links ->
+                     rows := {snapshot_revision=revision; recorded_at; source; commit_effect;
+                       revision_links; removed_memory_ids=List.map memory_id change.removed;
+                       added_memory_ids=List.map memory_id change.added} :: !rows;
+                     None
+                   | Error detail, _ | _, Error detail -> Some (Error detail))
+                | _ -> Some (Error "revision evidence exceeds the current snapshot") in
+        let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+        let* result = Domain_pool_ref.submit_io_or_inline (fun () ->
+          Dated_jsonl.find_latest_entry_in_file_result path visit)
+          |> Result.map_error Dated_jsonl.read_error_to_string in
+        let+ () = match result with None -> Ok () | Some result -> result in
+        snapshot, !rows)
 ;;
 
 let committed_range ~keepers_dir ~keeper_id select =
@@ -3047,6 +3191,7 @@ let apply_disposition
     ?official_range_id
     ~explicit_candidate_ids
     ?admission_recall
+    ~declared_revisions:revisions
     ~before_replace:write_absorbed_rows
     ~equal_facts:Keep_stored
     ~store_error:Fun.id
@@ -3234,6 +3379,7 @@ let supersede_fact
   else
     update_locked_with_output
       ?clock
+      ~declared_revisions:[{superseded=superseded_memory_id; superseded_by=incoming_identity}]
       ~dropped_statements:
         [ { Keeper_memory_os_types.memory_id = superseded_memory_id
           ; reason = "superseded_by " ^ incoming_identity

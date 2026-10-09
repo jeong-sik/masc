@@ -176,6 +176,26 @@ archive row whose successor is not current. Working context has a separate
 revision and does not roll back a memory commit. No threshold, priority score,
 recency rule, or capacity heuristic decides which memories survive.
 
+## Committed revision lineage
+
+A declared revision relates a removed memory identity to a target present in
+the committed snapshot. Applied Librarian revisions and explicit supersedes
+writes record these links in the same recoverable removal transaction as the
+snapshot change. The journal records explicit links on actual rewrites; a
+no-change observation cannot create a revision transition. An unfinished
+journal receipt is an unavailable evidence state until a writer recovers it.
+
+A coherent read exposes the current snapshot and revision evidence after a
+requested revision. Missing link metadata is unrecorded, not an inferred
+relationship. The separate `Revised` events sidecar remains an observation
+surface; its presence alone is not commit proof.
+
+These links establish declared structural succession. They do not establish
+that every historical input remains applicable to every successor. Demand
+retrieval still needs a scope judgment before using a past observation to
+select a revised current claim. Existing candidate consumption receipts stay
+unchanged; a revision does not consume those candidates again.
+
 ## Admission lookup provenance
 
 Deferred explicit writes judged `incorporated` or `already_represented` retain

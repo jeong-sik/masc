@@ -339,6 +339,21 @@ let replay filename () =
        if List.mem id receipts then None else Some id.request_id) identities);
   let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require in
   let current_facts = match current with None -> [] | Some snapshot -> snapshot.Current.facts in
+  let evidence_snapshot, revision_evidence =
+    Current.read_with_revision_evidence_for_keepers_dir ~keepers_dir ~keeper_id
+      ~after_revision:(match initial with None -> 0 | Some snapshot -> snapshot.Current.revision)
+    |> require in
+  check bool "revision evidence shares the current snapshot read" true (evidence_snapshot = current);
+  let revision_evidence_json = List.map (fun (entry : Current.revision_evidence) ->
+    `Assoc ["snapshot_revision",`Int entry.snapshot_revision;
+      "recorded_at",`Float entry.recorded_at;"source_trace_id",`String entry.source.trace_id;
+      "commit_effect",(match entry.commit_effect with None -> `Null
+        | Some Current.Rewritten -> `String "rewritten" | Some Current.Unchanged -> `String "unchanged");
+      "revision_links",(match entry.revision_links with None -> `Null | Some links ->
+        `List (List.map (fun (link : Memory.revision) ->
+          `Assoc ["superseded",`String link.superseded;"superseded_by",`String link.superseded_by]) links));
+      "removed_memory_ids",`List (List.map (fun id -> `String id) entry.removed_memory_ids);
+      "added_memory_ids",`List (List.map (fun id -> `String id) entry.added_memory_ids)]) revision_evidence in
   let file_bytes path = match Fs_compat.load_file_opt path with
     | None -> 0 | Some bytes -> String.length bytes in
   let storage_after = `Assoc ["current_snapshot_bytes",`Int (file_bytes current_path);
@@ -547,6 +562,7 @@ let replay filename () =
     "current_facts",`List (List.map Memory.fact_to_json current_facts);
     "current_snapshot_present",`Bool (Option.is_some current);
     "restored_state",restored_state;
+    "committed_revision_evidence",`List revision_evidence_json;
     "recall_before",`List recall_before;
     "recall_all_before",`List recall_all_before;
     "recall_after",`List recall_after;

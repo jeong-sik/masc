@@ -374,6 +374,64 @@ let test_tail_boundary_keeps_complete_row () =
   Alcotest.(check string) "read-only decision preserves log" source (Fs_compat.load_file path)
 ;;
 
+let test_counterpart_cursor_survives_clock_rollback () =
+  with_temp_base "keeper-external-rollback" @@ fun base_path ->
+  let first = item ~dedupe_key:"first" ~received_at:50.0 () in
+  let second = item ~dedupe_key:"second" ~received_at:10.0 () in
+  let third = item ~dedupe_key:"third" ~received_at:10.0 () in
+  let append incoming = match record ~base_path incoming with
+    | `Recorded -> () | `Duplicate _ -> Alcotest.fail "unexpected duplicate"
+    | `Error detail -> Alcotest.fail detail in
+  let snapshot cursor after before =
+    match Masc.Keeper_librarian_input_sources.counterpart_observations_from
+      ~external_after:cursor ~base_dir:base_path ~keeper_name:first.keeper_name
+      ~after:(Some after) ~before with
+    | Ok answer -> answer
+    | Error error -> Alcotest.fail (Masc.Keeper_librarian_input_sources.read_error_to_string error) in
+  append first;
+  let observed, boundary = snapshot 0 0.0 50.0 in
+  Alcotest.(check int) "initial snapshot reads first row" 1 (List.length observed);
+  append second;
+  append third;
+  let later, through = snapshot boundary 50.0 10.0 in
+  Alcotest.(check int) "rollback and same-time admissions remain visible" 2 (List.length later);
+  let retried, _ = snapshot boundary 50.0 10.0 in
+  Alcotest.(check int) "unacknowledged failure replays the same rows" 2 (List.length retried);
+  let consumed, _ = snapshot through 50.0 10.0 in
+  Alcotest.(check int) "acknowledged admission cursor excludes old rows" 0 (List.length consumed)
+;;
+
+let test_external_cursor_recovers_memory_receipt () =
+  with_temp_base "keeper-external-cursor-recovery" @@ fun base_path ->
+  let module Cursor = Masc.Keeper_external_read_cursor in
+  let module Current = Masc.Keeper_memory_os_current in
+  let get = function Ok value -> value | Error detail -> Alcotest.fail detail in
+  let runtime_keepers_dir = Filename.concat base_path "runtime" in
+  let memory_keepers_dir = Filename.concat base_path "memory" in
+  let keeper_name = "cursor-owner" in
+  let read () = Cursor.read ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name |> get in
+  let initial = read () in
+  Alcotest.(check int) "missing cursor replays rather than skips" 0 (Cursor.offset initial);
+  let range : Current.durable_range_id =
+    {receipt_scope=Filename.concat runtime_keepers_dir "continuity";
+     trace_id="cursor-trace";history_start_boundary_line=1;start_atom=0;end_atom=1;
+     last_atom_digest=String.make 64 'a';end_boundary_line=2;boundary_lines_seen=2} in
+  Cursor.prepare ~runtime_keepers_dir ~keeper_name initial ~through:2
+    ~atom:(Some range) ~official:None |> get;
+  Alcotest.(check int) "preparation without Memory commit does not consume" 0 (Cursor.offset (read ()));
+  ignore (Current.apply_disposition ~revisions:[] ~durable_range_id:range
+    ~absorbed:[] ~keepers_dir:memory_keepers_dir ~keeper_id:keeper_name ~now:1.
+    ~source:{kind=Current.Librarian;trace_id="cursor-trace"} ~new_claims:[] () |> get);
+  (* No acknowledge call: simulate interruption after the real Memory WAL
+     committed but before the external cursor and ordinary progress wrote. *)
+  Alcotest.(check int) "continuity-scoped Memory receipt recovers exact cursor" 2
+    (Cursor.offset (read ()));
+  let next = {range with end_atom=2;end_boundary_line=3;boundary_lines_seen=3} in
+  Cursor.prepare ~runtime_keepers_dir ~keeper_name (read ()) ~through:3
+    ~atom:(Some next) ~official:None |> get;
+  Alcotest.(check int) "older receipt cannot acknowledge newer source" 2 (Cursor.offset (read ()))
+;;
+
 let () =
   Alcotest.run "keeper_external_attention"
     [
@@ -382,6 +440,10 @@ let () =
       );
       ( "store",
         [
+          Alcotest.test_case "external cursor recovers only its committed Memory receipt" `Quick
+            test_external_cursor_recovers_memory_receipt;
+          Alcotest.test_case "counterpart cursor survives clock rollback and equal timestamps" `Quick
+            test_counterpart_cursor_survives_clock_rollback;
           Alcotest.test_case "tail boundary preserves a complete first row" `Quick
             test_tail_boundary_keeps_complete_row;
           Alcotest.test_case "strict reader waits for timestamped admission" `Quick

@@ -164,6 +164,11 @@ type official_range_id =
   ; turns : (int * Ids.Turn_ref.t) list
   }
 
+val durable_range_id_to_json : durable_range_id -> Yojson.Safe.t
+val official_range_id_to_json : official_range_id -> Yojson.Safe.t
+(** Canonical receipt identities, also used to recover the external read cursor
+    from the same committed Memory transaction. *)
+
 (** Why a librarian pass produced no snapshot. The journal is the only place
     this reaches disk, so the set is closed here rather than at the call site:
     a new failure mode has to name itself before it can be recorded, and

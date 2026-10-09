@@ -540,9 +540,9 @@ let load_recent_evidence_events ~base_path ~keeper_name =
   load_tail_events ~window_bytes:evidence_window_bytes ~base_path ~keeper_name
 ;;
 
-(* Strict snapshots use the same path mutex and descriptor lock. Sampling the
-   admission time inside it means a snapshot either sees this item or ends
-   before its admission; ingress time cannot fall behind an advanced cursor. *)
+(* Strict snapshots use the same path mutex and descriptor lock. The timestamp
+   describes admission, but is not an ordering key: the Librarian consumes
+   external evidence by its durable admission-row cursor even after rollback. *)
 let record_with_clock ~now ~base_path (item : item) =
   try
     ensure_attention_dir ~base_path;

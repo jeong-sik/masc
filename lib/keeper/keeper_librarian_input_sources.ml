@@ -1,15 +1,17 @@
 type read_error =
   | Chat_store_unreadable of string
   | External_attention_unreadable of Keeper_external_attention.read_error
+  | External_cursor_failed of string
 
 let read_error_to_string = function
+  | External_cursor_failed detail -> "external admission cursor: " ^ detail
   | Chat_store_unreadable detail -> "keeper chat store is unreadable: " ^ detail
   | External_attention_unreadable error ->
     "external attention store is unreadable: "
     ^ Keeper_external_attention.read_error_to_string error
 ;;
 
-let counterpart_observations_between ~base_dir ~keeper_name ~after ~before =
+let counterpart_observations_read ?external_after ~base_dir ~keeper_name ~after ~before () =
   let ( let* ) = Result.bind in
   let in_range ts =
     ts <= before
@@ -40,10 +42,12 @@ let counterpart_observations_between ~base_dir ~keeper_name ~after ~before =
     |> Result.map (List.filter_map (function
       | Keeper_external_attention.Recorded item -> Some item))
   in
-  let external_items =
-    List.filter
-      (fun (item : Keeper_external_attention.item) -> in_range item.received_at)
-      all_external_items
+  let* external_items = match external_after with
+    | None -> Ok (List.filter
+        (fun (item : Keeper_external_attention.item) -> in_range item.received_at) all_external_items)
+    | Some cursor when cursor < 0 || cursor > List.length all_external_items ->
+      Error (External_cursor_failed "external log shrank behind its admission cursor")
+    | Some cursor -> Ok (List.drop cursor all_external_items)
   in
   (* This key answers whether a chat row came from an external delivery, not
      whether that delivery happened inside this Memory range. The external
@@ -83,7 +87,15 @@ let counterpart_observations_between ~base_dir ~keeper_name ~after ~before =
   external_observations @ chat_observations
   |> List.stable_sort (fun (left_ts, _) (right_ts, _) -> Float.compare left_ts right_ts)
   |> List.map snd
-  |> Result.ok
+  |> fun observations -> Ok (observations, List.length all_external_items)
+;;
+
+let counterpart_observations_between ~base_dir ~keeper_name ~after ~before =
+  counterpart_observations_read ~base_dir ~keeper_name ~after ~before () |> Result.map fst
+;;
+
+let counterpart_observations_from ~external_after ~base_dir ~keeper_name ~after ~before =
+  counterpart_observations_read ~external_after ~base_dir ~keeper_name ~after ~before ()
 ;;
 
 let counterpart_observations_between_offloaded ~base_dir ~keeper_name ~after ~before =

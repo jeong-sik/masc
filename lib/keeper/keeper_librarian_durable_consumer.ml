@@ -814,6 +814,11 @@ let consume_one_with_extent
     =
     read_positions ~config ~keeper_name
   in
+  let cursor_error detail = Counterpart_observations_unreadable
+    (Keeper_librarian_input_sources.External_cursor_failed detail) in
+  let* external_cursor = Domain_pool_ref.submit_io_or_inline (fun () ->
+    Keeper_external_read_cursor.read ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name)
+    |> Result.map_error cursor_error in
   let* recovered =
     recover_official_progress ~write:write_official_progress_store
       ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name ~lines ~cursor:official_cursor
@@ -1294,8 +1299,10 @@ let consume_one_with_extent
          later moves the official cursor and lifts it; while an official stop
          holds those lines (RFC §4.10) none is read, so only a range that ends
          after that stamp, or a purge of the keeper, lifts it. Within one trace
-         the inversion says the position and its boundary disagree, and stops
-         the pass as before. *)
+         the inversion says the position and its boundary disagree. Without
+         new external admissions it stops as before. Newly appended external
+         evidence is independently ordered and can be consumed even when this
+         chat-time interval is empty. *)
       let carried_from_another_trace =
         match counterpart_progress with
         | None -> false
@@ -1307,23 +1314,23 @@ let consume_one_with_extent
             | None -> true
             | Some official_bound -> official_bound <= ended_at)
       in
+      let* counterpart_observations, external_through =
+        Domain_pool_ref.submit_io_or_inline (fun () ->
+          Keeper_librarian_input_sources.counterpart_observations_from
+            ~external_after:(Keeper_external_read_cursor.offset external_cursor)
+            ~base_dir:config.Workspace.base_path ~keeper_name ~after ~before:ended_at)
+        |> Result.map_error (fun error -> Counterpart_observations_unreadable error) in
       let* () =
         match after with
-        | Some after when after > ended_at && not inverted_by_the_carried_bound_alone ->
+        | Some after when after > ended_at && not inverted_by_the_carried_bound_alone
+            && external_through = Keeper_external_read_cursor.offset external_cursor ->
           Error (Counterpart_interval_non_monotone { after; before = ended_at })
         | None | Some _ -> Ok ()
       in
-      let* counterpart_observations =
-        match after with
-        | Some after when after >= ended_at -> Ok []
-        | None | Some _ ->
-          Keeper_librarian_input_sources.counterpart_observations_between_offloaded
-            ~base_dir:config.Workspace.base_path
-            ~keeper_name
-            ~after
-            ~before:ended_at
-          |> Result.map_error (fun error -> Counterpart_observations_unreadable error)
-      in
+      let* () = Domain_pool_ref.submit_io_or_inline (fun () ->
+        Keeper_external_read_cursor.prepare ~runtime_keepers_dir ~keeper_name external_cursor
+          ~through:external_through ~atom:atom_next ~official:official_range_id)
+        |> Result.map_error cursor_error in
       let input : Keeper_librarian.input =
         { turn_ref
         ; keeper_id
@@ -1346,7 +1353,11 @@ let consume_one_with_extent
       in
       if not (commit ~expected_revision ~range_id:atom_next ~official_range_id input)
       then Ok Memory_not_committed
-      else advance ())
+      else
+        let* () = Domain_pool_ref.submit_io_or_inline (fun () ->
+          Keeper_external_read_cursor.acknowledge ~runtime_keepers_dir ~keeper_name)
+          |> Result.map_error cursor_error in
+        advance ())
 ;;
 
 let consume_one_with_progress_writer

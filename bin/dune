@@ -652,7 +652,8 @@
 (library
  (name masc_tui_keeper_chat_transcript)
  (wrapped false)
- (modules masc_tui_keeper_chat_transcript)
+ (modules masc_tui_keeper_chat_transcript masc_tui_keeper_chat_activity_projection)
+ (private_modules masc_tui_keeper_chat_activity_projection)
  (libraries masc.keeper_chat_operations
   masc
   masc.agent_core

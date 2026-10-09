@@ -109,12 +109,10 @@ let test_absent_and_malformed_metadata () =
     | Some event -> Live.feed (Live.create ()) (Ag_ui.event_to_sse ~id:1 event)
         |> List.map (fun (observed : Live.observed_delta) -> observed.delta) in
   let old = `Assoc (List.remove_assoc "completion" fields) in
-  check bool "end without result metadata remains unknown" true
-    (Journal.keeper_chat_event_of_json old = Ok ended);
-  check bool "older SSE end remains unknown" true
-    (match decode_wire None with
-     | [Live.Native_tool_ended {completion; _}] -> completion=Native.end_observed
-     | _ -> false);
+  check bool "end without result metadata is rejected" true
+    (Result.is_error (Journal.keeper_chat_event_of_json old));
+  check bool "older SSE end without completion is undecodable" true
+    (match decode_wire None with [Live.Undecodable _] -> true | _ -> false);
   List.iter (fun malformed ->
     check bool "present malformed journal metadata is not unknown/success" true
       (Result.is_error (Journal.keeper_chat_event_of_json

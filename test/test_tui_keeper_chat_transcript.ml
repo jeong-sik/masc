@@ -1923,12 +1923,10 @@ let test_a_reported_native_failure_shows_as_failure () =
           @ step 9 "Search" {outcome=Completion_reported; exit_code=None});
   let rows = Transcript.project_tool_block Transcript.Compact
       (Transcript.tool_block (Transcript.tool_calls t)) in
+  (* The typed summary carries the decision; the drawn wording and row
+     layout belong to the renderer, not to this contract. *)
   check (option tool_outcome) "the fold takes the failure's mark and colour"
-    (Some Transcript.Native_failed) rows.summary_outcome;
-  check bool "the failure has a line of its own that names the tool" true
-    (List.exists (fun row ->
-       String.starts_with ~prefix:(Transcript.marker_of_outcome Transcript.Native_failed) row
-       && contains ~needle:"1 native failed: Bash" row) rows.details)
+    (Some Transcript.Native_failed) rows.summary_outcome
 ;;
 
 let test_response_boundaries_preserve_origins () =

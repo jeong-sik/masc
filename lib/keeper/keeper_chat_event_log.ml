@@ -514,8 +514,15 @@ let keeper_chat_event_of_json json =
            truncated or malformed, not an older generic end. *)
         let* completion =
           match json with
-          | `Assoc fields when List.mem_assoc "completion" fields ->
-              Runtime_native_tools.completion_of_json (json |> member "completion")
+          | `Assoc fields ->
+              (* A duplicate top-level completion member is malformed:
+                 selecting one would silently discard the other's
+                 contradictory report. *)
+              let completions =
+                List.length (List.filter (fun (key, _) -> String.equal key "completion") fields) in
+              if completions <> 1
+              then Error (Printf.sprintf "native_tool_end has %d completion members" completions)
+              else Runtime_native_tools.completion_of_json (json |> member "completion")
           | _ -> Error "native_tool_end has no completion"
         in
         Ok (Native_tool_end (tool, completion))

@@ -61,6 +61,7 @@ def run(executable, columns):
         h.send_and_wait(process, fd, output, b"H", b"Keeper:")
         document = read_document(process, fd, output)
         assert "Githistoryunavailable" in document, document
+        assert "KEEPERTAIL" in document, document
         assert "TASKTAIL" in document and "EXECTAIL" in document, document
         assert mode["activity_reads"] == 1, mode
 
@@ -98,7 +99,77 @@ def run(executable, columns):
         interact=interact, http_fixtures=fixtures)
 
 
+def run_unconfirmed_first_overlay(executable, key):
+    """Opening an overlay without an earlier fetch retains the selected file."""
+    import threading
+    from urllib.parse import parse_qs, urlsplit
+
+    requests = []
+    fixtures = history.fixtures(False, requests)
+    lock = threading.Lock()
+    state = {"unconfirmed": False}
+    reads = []
+    full_health = fixtures["/health?full=1"]
+
+    def health(path):
+        with lock:
+            unread = state["unconfirmed"]
+        if unread:
+            return h.RawHttpResponse(503, b'{"error":"identity unread"}',
+                                     content_type="application/json")
+        return full_health if "full=1" in path else (200, {"status": "ok"})
+
+    for path in ("/health", "/health?full=1"):
+        fixtures[path] = h.PathHttpResponse(health)
+    diff = (200, {"has_changes": True, "unified": [
+        {"kind": "delete", "oldLine": 1, "newLine": None,
+         "text": "previous-overlay-recovery-proof"}]})
+    for endpoint in ("/api/v1/git/log", "/api/v1/ide/file-activity", "/api/v1/git/diff"):
+        original = diff if endpoint == "/api/v1/git/diff" else fixtures[endpoint]
+        def capture(path, original=original):
+            with lock:
+                reads.append((state["unconfirmed"], path))
+            return original.resolve(path) if isinstance(original, h.PathHttpResponse) else original
+        fixtures[endpoint] = h.PathHttpResponse(capture)
+
+    def snapshot():
+        with lock:
+            return list(reads)
+
+    def interact(process, fd, _slave, output, _base):
+        h.palette_go(process, fd, output, b"go code", b"[draft]")
+        h.send_and_wait(process, fd, output, b"\r", b"local lock = 1")
+        h.resize_and_wait(process, fd, output, rows=40, columns=200,
+                          needle=b"local lock = 1", controls=(h.FULL_REDRAW,))
+        assert not snapshot(), ("fixture must open an overlay with no previous read", snapshot())
+        with lock:
+            state["unconfirmed"] = True
+        h.send_and_wait(process, fd, output, b"r", b"[workspace unconfirmed]")
+        title = b"history: " if key == b"H" else b"diff col 1 vs HEAD: "
+        h.send_and_wait(process, fd, output, key, title)
+        assert not snapshot(), ("unconfirmed first-open dispatched an overlay read", snapshot())
+        with lock:
+            state["unconfirmed"] = False
+        # Only recovery is requested; H/d is not repeated to manufacture intent.
+        expected = b"Commit: abc1234" if key == b"H" else b"previous-overlay-recovery-proof"
+        h.send_and_wait(process, fd, output, b"r", expected)
+        endpoint = "/api/v1/git/log" if key == b"H" else "/api/v1/git/diff"
+        target_reads = [path for unread, path in snapshot()
+                        if not unread and urlsplit(path).path == endpoint]
+        assert target_reads, snapshot()
+        assert all(parse_qs(urlsplit(path).query).get("path") == [history.FILE]
+                   for path in target_reads), target_reads
+        assert not any(unread for unread, _path in snapshot()), snapshot()
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(executable,
+        description=f"Code {key.decode()} first-open intent resumes after workspace confirmation",
+        interact=interact, http_fixtures=fixtures, refresh=60.0)
+
+
 if __name__ == "__main__":
     for width in (60, 120):
         run(os.path.abspath(sys.argv[1]), width)
-    print("Code history independent sources and retry: PASS")
+    for key in (b"H", b"d"):
+        run_unconfirmed_first_overlay(os.path.abspath(sys.argv[1]), key)
+    print("Code history independent sources, retry and first-open recovery: PASS")

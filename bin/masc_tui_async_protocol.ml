@@ -571,6 +571,7 @@ type async_msg =
   | Github_identity_view_loaded of Masc_tui_types.detail_read_request * (string list, string) result
   | Identity_providers_loaded of
       Masc_tui_types.detail_read_request * (Masc_tui_identity_model.identity_provider list, string) result
+      * (identity_login_expectation * (Masc_tui_identity_model.identity_login_status, string) result) list
   | Identity_switch_set of
       string * string * bool * (unit, string) result
       (** keeper, provider, the state the operator asked for, and whether

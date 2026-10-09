@@ -2728,14 +2728,14 @@ type identity_login_request = {
 (* Login-completion expectation, held across a transient authority loss.
    Where [identity_login_started] is the consent the pane presents, this is
    only what the tick polls on: the workspace that admitted the login and
-   which Keeper/provider is still waiting. No URL is carried, so an old
+   which Keeper/provider/attempt is still waiting. No URL is carried, so an old
    consent is never resurrected, and the expectation alone cannot attach
    anyone to anything. *)
 type identity_login_expectation = {
   ile_origin: Tui_decode.server_identity;
   ile_keeper: string;
   ile_provider: string;
-  ile_expires_at: float;
+  ile_attempt_id: string;
 }
 
 (** Where [Esc] returns after the chat pane was opened. Keeping only the legal
@@ -7528,11 +7528,10 @@ let identity_logins_for_keeper (state : state) keeper_name =
 
 (* A recovered provider read may still be pending browser consent. Continue
    the existing cadence without resurrecting the withdrawn consent URL. *)
-let identity_login_pending_for_keeper (state : state) ~now keeper_name =
+let identity_login_pending_for_keeper (state : state) ~now:_ keeper_name =
   server_authority_ready state
   && List.exists (fun expectation ->
        String.equal expectation.ile_keeper keeper_name
-       && expectation.ile_expires_at > now
        && identity_expectation_workspace_matches ~origin:expectation.ile_origin state)
        state.identity_login_expectations
 
@@ -7605,7 +7604,7 @@ let remember_identity_login (state : state) login =
    | Some origin when server_authority_ready state ->
        remember_identity_login_expectation state
          { ile_origin=origin; ile_keeper=login.ils_keeper; ile_provider=login.ils_provider;
-           ile_expires_at=login.ils_expires_at }
+           ile_attempt_id=login.ils_attempt_id }
    | _ -> ())
 
 (* A terminal observation retires both the browser URL and its background
@@ -7635,8 +7634,8 @@ let retire_identity_login_state (state : state) retirement =
        | Login_deadline now -> expires_at > now)
   in
   state.identity_login_expectations <- List.filter
-    (fun held -> keep ~keeper:held.ile_keeper ~provider:held.ile_provider
-       ~expires_at:held.ile_expires_at) state.identity_login_expectations;
+    (fun held -> not (disappeared ~keeper:held.ile_keeper ~provider:held.ile_provider))
+    state.identity_login_expectations;
   state.identity_logins <- List.filter
     (fun login -> keep ~keeper:login.ils_keeper ~provider:login.ils_provider
        ~expires_at:login.ils_expires_at) state.identity_logins;

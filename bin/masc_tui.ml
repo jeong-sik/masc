@@ -26028,7 +26028,7 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_message ->
                 (match state.msg_target_keeper_name with
                  | Some keeper_name ->
-                     launch_keeper_history_load ~load_file_changes:false state
+                     launch_keeper_history_load ~force:true ~load_file_changes:false state
                        ~mailbox:async_messages ~keeper_name;
                      launch_keeper_chat_tool_details_load ~force:true state
                        ~mailbox:async_messages ~keeper_name

@@ -101,6 +101,7 @@ export interface DashboardRuntimeDeclaredModelCapabilities {
   supports_response_format_json?: boolean
   supports_structured_output?: boolean
   supports_system_prompt?: boolean
+  supports_assistant_prefill?: boolean
   supports_prompt_caching?: boolean
   supports_top_k?: boolean
   supports_min_p?: boolean
@@ -176,6 +177,7 @@ export interface DashboardRuntimeEffectiveCapabilities {
   task?: string | null
   supports_native_streaming?: boolean
   supports_system_prompt?: boolean
+  supports_assistant_prefill?: boolean
   supports_prompt_caching?: boolean
   supports_top_k?: boolean
   supports_min_p?: boolean
@@ -226,6 +228,7 @@ export interface DashboardRuntimeProviderSnapshot {
   supports_response_format_json?: boolean
   supports_structured_output?: boolean
   supports_system_prompt?: boolean
+  supports_assistant_prefill?: boolean
   supports_prompt_caching?: boolean
   supports_top_k?: boolean
   supports_min_p?: boolean
@@ -558,6 +561,7 @@ function decodeRuntimeDeclaredModelCapabilities(
     supports_response_format_json: asBoolean(raw.supports_response_format_json),
     supports_structured_output: asBoolean(raw.supports_structured_output),
     supports_system_prompt: asBoolean(raw.supports_system_prompt),
+    supports_assistant_prefill: asBoolean(raw.supports_assistant_prefill),
     supports_prompt_caching: asBoolean(raw.supports_prompt_caching),
     supports_top_k: asBoolean(raw.supports_top_k),
     supports_min_p: asBoolean(raw.supports_min_p),
@@ -657,6 +661,7 @@ function decodeRuntimeEffectiveCapabilities(raw: unknown): DashboardRuntimeEffec
     task: asNullableString(raw.task),
     supports_native_streaming: asBoolean(raw.supports_native_streaming),
     supports_system_prompt: asBoolean(raw.supports_system_prompt),
+    supports_assistant_prefill: asBoolean(raw.supports_assistant_prefill),
     supports_prompt_caching: asBoolean(raw.supports_prompt_caching),
     supports_top_k: asBoolean(raw.supports_top_k),
     supports_min_p: asBoolean(raw.supports_min_p),
@@ -709,6 +714,7 @@ function decodeRuntimeProviderSnapshot(raw: unknown): DashboardRuntimeProviderSn
     supports_response_format_json: asBoolean(raw.supports_response_format_json),
     supports_structured_output: asBoolean(raw.supports_structured_output),
     supports_system_prompt: asBoolean(raw.supports_system_prompt),
+    supports_assistant_prefill: asBoolean(raw.supports_assistant_prefill),
     supports_prompt_caching: asBoolean(raw.supports_prompt_caching),
     supports_top_k: asBoolean(raw.supports_top_k),
     supports_min_p: asBoolean(raw.supports_min_p),

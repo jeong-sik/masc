@@ -358,7 +358,7 @@ let classify_official_client_turn ~model_facing_name ~seen ~elapsed_s ~text
   | [] ->
     (match text with
      | Some text -> Replied_no_tool { reply_bytes = String.length text; elapsed_s }
-     | None -> Provider_rejected {detail="completed turn has no assistant message"})
+     | None -> Provider_rejected {detail = "completed turn has no assistant message"})
   | invoked -> Other_tool_invoked { requested = model_facing_name; invoked; elapsed_s }
 ;;
 
@@ -500,7 +500,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
                      ~model_facing_name
                      ~seen
                      ~elapsed_s:(now () -. started)
-                     ~text:turn.text
+                     ~text:(Some turn.text)
                      ~dynamic_tool_calls:turn.dynamic_tool_calls)))))
 ;;
 

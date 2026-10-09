@@ -78,8 +78,8 @@ type tagged_row
 
 type chat_projection = private {
   tagged_entries : (tagged_row * Message_layout.entry) list;
-      (** Merged history and observed conversation, including live/held
-          execution. The prefix searched by the pane. *)
+      (** Merged history and observed conversation, including request admission
+          notices and live/held execution. The prefix searched by the pane. *)
   transient_anchors : Masc_tui_types.chat_scroll_anchor option list;
       (** One per entry after that prefix: the scroll anchor of a pending
           input or polled excerpt, when it has one. *)

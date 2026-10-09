@@ -2506,6 +2506,7 @@ type settled_block_memo = {
   sbm_failure_in_live_status : bool;
   sbm_revision : int;
   sbm_member_ids : string list;
+  sbm_admission_preludes : Keeper_chat_transcript.drawn_item list;
   sbm_timeline : (Masc_tui_types.msg_entry * float option) list;
   sbm_messages : Masc_tui_types.msg_entry list;
   sbm_reasoning : reasoning_visibility;
@@ -2682,7 +2683,25 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
     Option.exists (fun live -> live == turn_log)
       (Masc_tui_types.keeper_message_status_log state)
   in
-  let log_projection ~committed:_ (turn_log : Masc_tui_types.turn_log) =
+  (* Every request keeps its own receipt even when a sibling's journal is
+     selected to draw their shared execution. Receipt timestamps need not
+     precede buffered execution timestamps; these are causal preludes. *)
+  let admission_preludes turn_log =
+    let source = Masc_tui_types.turn_log_execution_source turn_log in
+    (state.msg_settled_logs
+     @ List.map (fun (entry : Masc_tui_types.inflight) -> entry.log) (List.rev state.msg_inflight)
+     @ Option.to_list state.msg_live)
+    |> List.filter (fun log ->
+         String.equal (Masc_tui_types.turn_log_keeper_name log) keeper_name
+         && Masc_tui_types.turn_log_execution_source log = source)
+    |> List.stable_sort (fun left right -> Float.compare
+         (Masc_tui_types.turn_log_started_at left) (Masc_tui_types.turn_log_started_at right))
+    |> List.filter_map (fun log -> Keeper_chat_transcript.admission_prelude log.tl_transcript)
+    |> List.fold_left (fun items (item : Keeper_chat_transcript.drawn_item) ->
+         if List.exists (fun (held : Keeper_chat_transcript.drawn_item) -> held.origin = item.origin) items
+         then items else items @ [item]) []
+  in
+  let log_projection ~committed:_ ~preludes (turn_log : Masc_tui_types.turn_log) =
     let transcript = turn_log.tl_transcript in
     let request_id = Masc_tui_types.turn_log_execution_id turn_log in
     let member_ids = Masc_tui_types.chat_execution_member_ids state
@@ -2824,8 +2843,10 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                      journal = [];
                      markdown_source;
                      turn_rail =
-                       turn_rail_of ~siding:None
-                         ~edge:Masc_tui_types.Turn_continues ~style;
+                       (match item.origin with
+                        | Keeper_chat_transcript.Admission_of_request _ -> Message_layout.Rail_none
+                        | _ -> turn_rail_of ~siding:None
+                            ~edge:Masc_tui_types.Turn_continues ~style);
                      (* A live turn draws its Gate steps as status text the
                         transcript composed, not as the store's argument, so
                         there is no argument here to unfold. *)
@@ -2876,7 +2897,16 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                   entry ~speaker:(label speaker) ~heading_boundary Message_layout.Keeper
                     (label role) text
               | Keeper_chat_transcript.Drawn_status text ->
-                  entry Message_layout.Status (label "STATUS") text
+                  (match item.origin with
+                   | Keeper_chat_transcript.Admission_of_request _ ->
+                       (* This is the receipt's snapshot, retained even after
+                          execution starts. It does not report the current
+                          queue or control state. Keep that distinction in
+                          the body too, where narrow gutters cannot hide it. *)
+                       entry Message_layout.Status "RECEIPT" ("접수 당시: " ^ text)
+                   | Text_stretch _ | Thinking_stretch _ | Tool_stretch _
+                   | Unstreamed_skills | Reply_of_segment _ | Error_of_segment _ ->
+                       entry Message_layout.Status (label "STATUS") text)
               | Keeper_chat_transcript.Drawn_error _
                 when failure_in_live_status turn_log || committed_error ->
                   (* Only the focused live log has the footer's status;
@@ -2884,7 +2914,9 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                   None
               | Keeper_chat_transcript.Drawn_error text ->
                   entry Message_layout.Error (label "ERROR") text)
-           (Keeper_chat_transcript.drawn transcript)
+           (preludes @ List.filter (fun (item : Keeper_chat_transcript.drawn_item) ->
+                match item.origin with Admission_of_request _ -> false | _ -> true)
+              (Keeper_chat_transcript.drawn transcript))
     in
     { lb_log = turn_log; lb_request_id = request_id; lb_member_ids = member_ids; lb_insertion = insertion; lb_timeline_at = timeline_at;
       lb_entries = entries }
@@ -2902,6 +2934,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
     let member_ids = Masc_tui_types.chat_execution_member_ids state
         ~keeper_name ~execution_id:(Masc_tui_types.turn_log_execution_id turn_log) in
     let revision = Keeper_chat_transcript.revision turn_log.tl_transcript in
+    let preludes = admission_preludes turn_log in
     let palette_generation =
       Masc_tui_terminal_palette.snapshot_generation
         (Masc_tui_terminal_palette.snapshot ())
@@ -2913,6 +2946,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
            && memo.sbm_failure_in_live_status = failure_in_live_status turn_log
            && memo.sbm_revision = revision
            && memo.sbm_member_ids = member_ids
+           && memo.sbm_admission_preludes = preludes
            && memo.sbm_timeline == committed_visible_timeline
            && memo.sbm_messages == committed_timeline_messages
            && memo.sbm_reasoning = state.msg_reasoning_visibility
@@ -2928,13 +2962,14 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
            && memo.sbm_chat_cols = chat_cols ->
         memo.sbm_block
     | Some _ | None ->
-        let block = log_projection ~committed turn_log in
+        let block = log_projection ~committed ~preludes turn_log in
         Hashtbl.replace settled_block_memo key
           { sbm_log = turn_log;
             sbm_committed = committed;
             sbm_failure_in_live_status = failure_in_live_status turn_log;
             sbm_revision = revision;
             sbm_member_ids = member_ids;
+            sbm_admission_preludes = preludes;
             sbm_timeline = committed_visible_timeline;
             sbm_messages = committed_timeline_messages;
             sbm_reasoning = state.msg_reasoning_visibility;
@@ -3094,11 +3129,13 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
     in
     let request_of = function
       | Tagged_row (message : Masc_tui_types.msg_entry) ->
-          (match List.find_opt (fun block ->
+          let request_id = match List.find_opt (fun block ->
               List.mem message.me_request_id block.lb_member_ids) blocks with
            | Some block -> block.lb_request_id
-           | None -> message.me_request_id)
-      | Tagged_block (log, _, _) -> Masc_tui_types.turn_log_execution_id log
+           | None -> message.me_request_id in
+          if request_id = "" then None else Some request_id
+      | Tagged_block (_, Some (Keeper_chat_transcript.Admission_of_request _), _) -> None
+      | Tagged_block (log, _, _) -> Some (Masc_tui_types.turn_log_execution_id log)
     in
     let edges = Hashtbl.create 16 in
     let close_run ~at_tail request_id indices =
@@ -3114,21 +3151,20 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
     in
     let current = ref None and indices = ref [] in
     List.iteri (fun index (tag, _) ->
-      let request_id = request_of tag in
-      if request_id <> "" then begin
+      match request_of tag with
+      | None -> ()
+      | Some request_id ->
         if !current <> Some request_id then begin
           Option.iter (fun id -> close_run ~at_tail:false id !indices) !current;
           current := Some request_id;
           indices := []
         end;
-        indices := index :: !indices
-      end) merged;
+        indices := index :: !indices) merged;
     Option.iter (fun id -> close_run ~at_tail:true id !indices) !current;
     List.mapi
       (fun index ((tag, (entry : Message_layout.entry)) as item) ->
-        let request_id = request_of tag in
-        match Hashtbl.find_opt edges index with
-        | Some edge when List.mem request_id block_requests ->
+        match request_of tag, Hashtbl.find_opt edges index with
+        | Some request_id, Some edge when List.mem request_id block_requests ->
             let siding =
               match tag with
               | Tagged_row message -> siding_of_message message
@@ -3141,7 +3177,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                   turn_rail_of ~siding ~edge
                     ~style:entry.Message_layout.style
               } )
-        | Some _ | None -> item)
+        | _ -> item)
       merged
   in
   let tagged_layout_entries, layout_entries =
@@ -3231,6 +3267,8 @@ let search_reply_source (message : msg_entry) =
 let search_anchor_of_tag = function
   | Tagged_row message -> Some (Search_history {
       row_anchor = msg_anchor message; reply_source = search_reply_source message })
+  | Tagged_block (_, Some (Keeper_chat_transcript.Admission_of_request request_id), _) ->
+      Some (Search_admission request_id)
   | Tagged_block (log, Some origin, canonical_reply) ->
       Some (Search_journal {
         source = Masc_tui_types.turn_log_execution_source log; origin; canonical_reply })
@@ -3242,6 +3280,8 @@ type search_index_key =
   | History_reply of Masc_tui_keeper_chat_log.journal_source
   | Journal_origin of Masc_tui_keeper_chat_log.journal_source * Masc_tui_keeper_chat_transcript.drawn_origin
   | Journal_reply of Masc_tui_keeper_chat_log.journal_source
+  | Admission_request of string
+      (** A request's admission row, whichever journal draws it. *)
 
 let search_index_memo = ref None
 
@@ -3262,11 +3302,16 @@ let projection_index_of_anchor projection =
           | Tagged_block (log, origin, canonical) ->
               let source = Masc_tui_types.turn_log_execution_source log in
               Option.iter (fun origin -> add (Journal_origin (source, origin)) at) origin;
+              (match origin with
+               | Some (Keeper_chat_transcript.Admission_of_request request_id) ->
+                   add (Admission_request request_id) at
+               | Some _ | None -> ());
               if canonical then add (Journal_reply source) at) projection.tagged_entries;
         search_index_memo := Some (projection.tagged_entries, index);
         index in
   fun anchor ->
     let keys = match anchor with
+      | Search_admission request_id -> [Admission_request request_id]
       | Search_history {row_anchor; reply_source} ->
           History_identity row_anchor.ma_identity
           :: (match row_anchor.ma_session_user_slot with None -> []

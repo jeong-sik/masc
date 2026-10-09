@@ -1657,10 +1657,8 @@ let test_journal_fetch_targets_choose_the_newest_unheld_turns () =
     (List.sort compare (List.map fst targets))
 ;;
 
-(* The acceptance is the server taking the POST, not a fact about the turn:
-   the transcript reads it, the log does not keep it, so a re-POST after a
-   cut adds no entry and a log that heard only acceptances has nothing to
-   draw. *)
+(* Acceptance is HTTP metadata, not an execution journal entry. Re-POSTs
+   refresh the snapshot without advancing the journal or starting the turn. *)
 let test_the_acceptance_is_read_but_not_logged () =
   let log =
     Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id:"req-1" ~started_at:1.
@@ -1669,11 +1667,207 @@ let test_the_acceptance_is_read_but_not_logged () =
   Tui_types.turn_log_add ~now:1. log ~seq:None accepted;
   Tui_types.turn_log_add ~now:2. log ~seq:None accepted;
   check int "no entries" 0 (List.length (Log.entries log.Tui_types.tl_log));
+  check (option (float 0.)) "first acceptance retains source time" (Some 1.)
+    (Option.bind (Log.first_acceptance log.tl_log) (fun entry -> entry.Log.at));
+  check (option (float 0.)) "latest acceptance is a separate snapshot" (Some 2.)
+    (Option.bind (Log.latest_acceptance log.tl_log) (fun entry -> entry.Log.at));
   check bool "the transcript is still waiting for the run" true
     (Keeper_chat_transcript.phase log.Tui_types.tl_transcript
      = Keeper_chat_transcript.Waiting);
   Tui_types.turn_log_add ~now:3. log ~seq:(Some 0) Live.Run_started;
   check int "a wire frame is an entry" 1 (List.length (Log.entries log.Tui_types.tl_log))
+;;
+
+(* The HTTP route writes this seq-less prelude before replay/live handoff.
+   Its timestamp may be newer than execution events buffered by the owner. *)
+let acceptance_wire ~request_id ~at ?(state = "Queued") outcome =
+  Ag_ui.of_custom ~timestamp:at ~name:"KEEPER_CHAT_OPERATION_ACCEPTED"
+    (`Assoc ["operation_id", `String request_id; "state", `String state;
+      "queued_count", `Int 1;
+      "interactive", `Assoc ["outcome", `String outcome;
+        "chat_control_token", `String "control-after-admission";
+        "signalled", `Bool false; "resumed", `Bool false;
+        "interrupt_error", `Null]])
+  |> Ag_ui.event_to_sse
+;;
+
+let execution_wire lines =
+  let _, frames = List.fold_left (fun (projection, frames) (line : Journal.journaled_event) ->
+    let projection, event = Server_keeper_chat_agui_projection.project
+        ~timestamp:line.ts ~redact_text:Fun.id projection line.event in
+    projection, frames @ Option.to_list
+      (Option.map (Ag_ui.event_to_sse ~id:line.seq) event))
+    (Server_keeper_chat_agui_projection.initial, []) lines in
+  String.concat "" frames
+;;
+
+let receive_chat_wire log wire =
+  Live.feed (Live.create ()) wire
+  |> List.iter (fun (item : Live.observed_delta) ->
+      Tui_types.turn_log_add ~now:(Option.value item.at ~default:9999.)
+        log ~seq:item.seq item.delta)
+;;
+
+(* Exact rendered receipt bodies; the transcript retains the original notice. *)
+let stale_admission_notice =
+  "접수 당시: Message queued: chat controls changed after this input; the newer stop or resume remains in effect"
+let paused_admission_notice = "접수 당시: Message queued: Keeper remains paused; inspect with /queue"
+
+let test_admission_notice_precedes_earlier_buffered_reply () =
+  let module Layout = Masc_tui_message_layout in
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous = Masc_tui_ansi.get_terminal_size () in
+  let set_size size = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+      cache ~probe:(fun () -> Some size)) in
+  Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
+    List.iter (fun columns -> List.iter (fun origin ->
+      set_size (60, columns);
+      let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+      state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+      state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+      state.msg_target_keeper_name <- Some "alpha";
+      state.msg_origin_display <- origin;
+      let entry = inflight_with_log ~keeper_name:"alpha" ~started_at:100. [] in
+      let request = {entry.sent_request with Keeper_chat.message="아니야 진행해"} in
+      let entry = {entry with Tui_types.sent_request=request} in
+      let input = chat_entry ~request_id:request.request_id
+          ~role:(Tui_types.Message_user (Sent_by_operator {surface=None}))
+          ~text:request.message ~at:100. () in
+      state.msg_history <- [{input with Tui_types.me_identity=Session_row
+        {request_id=request.request_id; turn_phase=Turn_input; operation_seq=0}};
+        chat_entry ~request_id:"foreign-status" ~role:Tui_types.Message_status
+          ~text:"UNRELATED_STATUS" ~at:150. ()];
+      state.msg_inflight <- [entry]; state.msg_live <- Some entry.log;
+      receive_chat_wire entry.log
+        (acceptance_wire ~request_id:request.request_id ~at:200. "stale_control");
+      let projection () = Masc_tui_render_chat.keeper_message_projection state
+          ~keeper_name:"alpha" ~chat_cols:columns in
+      let entries () = List.map snd (projection ()).tagged_entries in
+      let bodies () = List.map (fun (row : Layout.entry) -> row.body) (entries ()) in
+      check (list string) "receipt alone draws no USER speech"
+        ["UNRELATED_STATUS"; stale_admission_notice] (bodies ());
+      check bool "receipt alone does not start execution" true
+        (Keeper_chat_transcript.phase entry.log.tl_transcript = Waiting);
+      check (list string) "original input remains in the separate pending area" [request.message]
+        ((projection ()).layout_entries
+         |> List.filter_map (fun (row : Layout.entry) -> if row.style=Local then Some row.body else None));
+      check position "receipt cannot advance journal cursor" Journal.Whole_turn
+        (Log.resume_position entry.log.tl_log);
+      let lines = [line 0 110. (E.Run_started {run_id="receipt-run"; thread_id="keeper:alpha"});
+        line 1 111. (E.Text_message_start {message_id="receipt-message"; role=E.Assistant});
+        line 2 112. (E.Text_delta {text="계속할게요."; stream_scope=None});
+        line 3 113. (journal_reply "계속할게요.");
+        line 4 114. (E.Run_finished {run_id="receipt-run"})] in
+      receive_chat_wire entry.log (execution_wire lines);
+      let expected = [request.message; "UNRELATED_STATUS"; stale_admission_notice; "계속할게요."] in
+      check (list string) "causal admission precedes earlier-clock execution, exact speech preserved"
+        expected (bodies ());
+      check bool "admission status does not claim an execution rail" true
+        ((List.nth (entries ()) 2).turn_rail = Layout.Rail_none);
+      let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+      let plain = List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines in
+      let row_of needle = List.find_index (Astring.String.is_infix ~affix:needle) plain in
+      check bool "actual frame keeps receipt above reply" true
+        (match row_of "Message queued:", row_of "계속할게요." with
+         | Some receipt, Some reply -> receipt < reply | _ -> false);
+      check int "original user body occurs once in actual frame" 1
+        (List.length (List.filter (Astring.String.is_infix ~affix:request.message) plain));
+      receive_chat_wire entry.log
+        (acceptance_wire ~request_id:request.request_id ~at:400. ~state:"Succeeded" "replayed"
+         ^ execution_wire lines);
+      check (list string) "reconnect replay neither duplicates nor moves the first notice" expected (bodies ());
+      let rebuilt = Keeper_chat_transcript.of_log ~now:9999. entry.log.tl_log in
+      check bool "scalar receipt and execution rebuild exactly" true
+        (Keeper_chat_transcript.drawn rebuilt = Keeper_chat_transcript.drawn entry.log.tl_transcript);
+      check bool "latest receipt remains the current admission snapshot" true
+        (Keeper_chat_transcript.admission rebuilt = Some (Live.Settled, 1));
+      check (option (float 0.)) "notice retains source time, not reconnect or client time" (Some 200.)
+        (Option.bind (Keeper_chat_transcript.admission_prelude rebuilt) (fun item -> item.at));
+      (* A complete journal may win selection before the direct stream settles. *)
+      let journal = Tui_types.turn_log_create ~keeper_name:"alpha"
+          ~request_id:request.request_id ~started_at:100. in
+      ignore (Tui_types.turn_log_add_journaled journal lines);
+      Log.commit journal.tl_log; Tui_types.hold_settled_log state journal;
+      Tui_types.settle_turn_log state entry;
+      state.msg_inflight <- [];
+      check (list string) "journal takeover keeps direct receipt without a session copy" expected (bodies ());
+      check int "history contains no copied receipt row" 2 (List.length state.msg_history))
+      [Layout.Origin_inline; Origin_bare; Origin_row]) [80; 140])
+;;
+
+let test_batch_receipts_survive_source_selection_and_continuation () =
+  let module Layout = Masc_tui_message_layout in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let first = inflight_with_log ~keeper_name:"alpha" ~started_at:1. [] in
+  let second = inflight_with_log ~keeper_name:"alpha" ~started_at:2. [] in
+  let execution_id = first.sent_request.request_id in
+  List.iter (fun (entry : Tui_types.inflight) ->
+    Tui_types.turn_log_add ~now:10. entry.log ~seq:(Some 0)
+      (Live.Batch_bound {operation_id=entry.sent_request.request_id; execution_id});
+    Tui_types.turn_log_add ~now:11. entry.log ~seq:(Some 1) Live.Run_started) [first; second];
+  receive_chat_wire second.log
+    (acceptance_wire ~request_id:second.sent_request.request_id ~at:200. "stale_control");
+  Tui_types.turn_log_add ~now:12. second.log ~seq:(Some 20) (Live.Text {text="BATCH_REPLY"; stream_scope=None});
+  state.msg_inflight <- [second; first]; state.msg_live <- Some first.log;
+  let bodies () =
+    let projection = Masc_tui_render_chat.keeper_message_projection state
+        ~keeper_name:"alpha" ~chat_cols:140 in
+    List.map (fun (_, (row : Layout.entry)) -> row.body) projection.tagged_entries in
+  check (list string) "richer sibling owns execution" [stale_admission_notice; "BATCH_REPLY"] (bodies ());
+  receive_chat_wire first.log
+    (acceptance_wire ~request_id:execution_id ~at:300. "paused");
+  let expected = [paused_admission_notice; stale_admission_notice; "BATCH_REPLY"] in
+  check (list string) "hidden sibling receipt invalidates projection memo and stays request-owned"
+    expected (bodies ());
+  Tui_types.turn_log_add ~now:13. first.log ~seq:(Some 30) (Live.Text {text="BATCH_REPLY"; stream_scope=None});
+  check (list string) "source swap preserves both request receipts once" expected (bodies ());
+  Tui_types.turn_log_add ~now:14. first.log ~seq:(Some 31) Live.Checkpoint;
+  Tui_types.turn_log_add ~now:15. first.log ~seq:(Some 32) Live.Run_started;
+  receive_chat_wire first.log
+    (acceptance_wire ~request_id:execution_id ~at:400. ~state:"Running" "replayed");
+  check int "continuation never re-emits the initial receipt" 1
+    (List.length (List.filter (String.equal paused_admission_notice) (bodies ())));
+  (* Opposite takeover direction: replacing a partial settled stream with a
+     new journal source also transfers its non-journal receipt. *)
+  Tui_types.settle_turn_log state first;
+  let replacement = Tui_types.turn_log_create ~keeper_name:"alpha"
+      ~request_id:execution_id ~started_at:1. in
+  ignore (Tui_types.turn_log_add_journaled replacement
+    [line 0 10. (E.Run_started {run_id="replacement"; thread_id="keeper:alpha"});
+     line 1 11. (journal_reply "JOURNAL_REPLY");
+     line 2 12. (E.Run_finished {run_id="replacement"})]);
+  Log.commit replacement.tl_log; Tui_types.hold_settled_log state replacement;
+  state.msg_inflight <- [second];
+  check (list string) "replacement preserves first and sibling receipts ahead of its reply"
+    [paused_admission_notice; stale_admission_notice; "JOURNAL_REPLY"] (bodies ())
+;;
+
+let test_priority_feedback_is_receipt_metadata () =
+  let log = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id:"steer" ~started_at:1. in
+  Tui_types.turn_log_note_priority_unavailable log;
+  check bool "local intent alone cannot claim a control outcome" false
+    (Log.priority_unavailable log.tl_log);
+  let receipt = Ag_ui.of_custom ~timestamp:20. ~name:"KEEPER_CHAT_OPERATION_ACCEPTED"
+      (`Assoc ["operation_id", `String "steer"; "state", `String "Running";
+        "queued_count", `Int 0]) |> Ag_ui.event_to_sse in
+  receive_chat_wire log (receipt ^ execution_wire
+    [line 0 10. (E.Run_started {run_id="steer-run"; thread_id="keeper:alpha"});
+     line 1 11. (journal_reply "ALREADY_RUNNING_REPLY");
+     line 2 12. (E.Run_finished {run_id="steer-run"})]);
+  Tui_types.turn_log_note_priority_unavailable log;
+  Tui_types.turn_log_note_priority_unavailable log;
+  let expected = "Submitted message already started or settled; no other turn was interrupted" in
+  let check_projection transcript =
+    match Keeper_chat_transcript.drawn transcript with
+    | {origin=Admission_of_request "steer"; at=Some at; drawn=Drawn_status notice; _}
+      :: [{drawn=Drawn_reply reply; _}] ->
+        check (float 0.) "priority feedback uses receipt source time" 20. at;
+        check string "priority feedback is kept" expected notice;
+        check string "reply body unchanged" "ALREADY_RUNNING_REPLY" reply
+    | _ -> fail "priority feedback must be one prelude before the original reply" in
+  check_projection log.tl_transcript;
+  check_projection (Keeper_chat_transcript.of_log ~now:9999. log.tl_log);
+  check int "priority feedback adds no journal event" 3 (List.length (Log.entries log.tl_log))
 ;;
 
 (* A journal page fills a turn log the way the wire does, at the lines' own
@@ -5296,6 +5490,11 @@ let () =
             test_journal_fetch_targets_choose_the_newest_unheld_turns
         ; test_case "the acceptance is read but not logged" `Quick
             test_the_acceptance_is_read_but_not_logged
+        ; test_case "admission notice precedes earlier buffered reply" `Quick
+            test_admission_notice_precedes_earlier_buffered_reply
+        ; test_case "batch receipts survive source selection and continuation" `Quick
+            test_batch_receipts_survive_source_selection_and_continuation
+        ; test_case "priority feedback is receipt metadata" `Quick test_priority_feedback_is_receipt_metadata
         ; test_case "a journal read resumes after a partial log" `Quick
             test_a_journal_read_resumes_after_a_partial_log
         ; test_case "a journal fills a turn log at the lines' own times" `Quick

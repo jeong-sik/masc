@@ -1633,6 +1633,17 @@ let ensure_current_roots ~base_path ~keeper_name candidates =
     else Error "Board attention candidates changed before root restoration")
 ;;
 
+type settled_receipt_gate =
+  | Keep_all_settled
+  | Drop_unless_open of Id_set.t (* candidate ids still non-terminal *)
+
+let settled_receipt_droppable gate (partition : t) =
+  match gate with
+  | Keep_all_settled -> false
+  | Drop_unless_open open_candidates ->
+    not (Id_set.mem partition.candidate_id open_candidates)
+;;
+
 let recover_for_process_start ~now ~base_path ~keeper_name =
   let* () = valid_time "partition process-start recovery time" now in
   let ledger_path = path ~base_path ~keeper_name in
@@ -1666,21 +1677,25 @@ let recover_for_process_start ~now ~base_path ~keeper_name =
                match partition.state with Settled _ -> true | _ -> false)
             view
         in
-        let non_terminal_candidates =
+        let settled_receipt_gate =
           if not has_settled
-          then Id_set.empty
+          then Drop_unless_open Id_set.empty
           else
-            match Candidate.load_candidates ~base_path ~keeper_name with
-            | Error _ -> Id_set.empty
-            | Ok candidates ->
-              Id_set.of_list
-                (List.filter_map
-                   (fun (candidate : Candidate.candidate) ->
-                      match candidate.status with
-                      | Candidate.Consumed _ -> None
-                      | Candidate.Pending _ | Candidate.Judged _
-                      | Candidate.Quarantine _ -> Some candidate.candidate_id)
-                   candidates)
+            match Candidate.load_candidates_with_rejections ~base_path ~keeper_name with
+            | Error _ | Ok (_, _ :: _) ->
+              (* Unreadable ledger, or rows the decoder refused: the hidden
+                 candidate may be non-terminal, so every receipt stays. *)
+              Keep_all_settled
+            | Ok (candidates, []) ->
+              Drop_unless_open
+                (Id_set.of_list
+                   (List.filter_map
+                      (fun (candidate : Candidate.candidate) ->
+                         match candidate.status with
+                         | Candidate.Consumed _ -> None
+                         | Candidate.Pending _ | Candidate.Judged _
+                         | Candidate.Quarantine _ -> Some candidate.candidate_id)
+                      candidates))
         in
         let* recovered, latest =
           view
@@ -1698,8 +1713,7 @@ let recover_for_process_start ~now ~base_path ~keeper_name =
                        for an operator requeue before this returned them. *)
                     let* released = advance_state partition Ready in
                     Ok (recovered + 1, released :: latest)
-                  | Settled _
-                    when not (Id_set.mem partition.candidate_id non_terminal_candidates) ->
+                  | Settled _ when settled_receipt_droppable settled_receipt_gate partition ->
                     (* The candidate ledger holds the terminal judgment or
                        no candidate at all, so the receipt adds nothing
                        durable. Keeping every settled receipt made the

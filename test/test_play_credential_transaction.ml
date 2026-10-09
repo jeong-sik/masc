@@ -817,9 +817,15 @@ let test_preparation_allows_disconnect_before_final_admission () =
         let ctx : Tool_misc.context =
           {config; agent_name="player"; help_schemas=Config.raw_all_tool_schemas} in
         Tool_misc.dispatch ?dos_admission ctx ~name ~args) in
+    (* A caller that departed is refused as a client error it can correct by
+       reconnecting; the seat authority itself was readable. *)
     (match result with
-     | Error (Keeper_dos_controller.Seats_unknown _) -> ()
-     | Error (Refused detail) -> fail detail
+     | Error (Keeper_dos_controller.Refused detail) ->
+         let needle = "after disconnect" in
+         let rec seek i = i + String.length needle <= String.length detail
+           && (String.sub detail i (String.length needle) = needle || seek (i + 1)) in
+         check bool "the refusal names the disconnect" true (seek 0)
+     | Error (Seats_unknown detail) -> fail detail
      | Ok _ -> fail "prepared operation bypassed final participation admission");
     check (option string) "disconnect remains effective" None (controller ());
     check (option string) "refused commit did not replace the machine" before

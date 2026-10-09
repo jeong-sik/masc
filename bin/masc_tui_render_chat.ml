@@ -2491,6 +2491,77 @@ type chat_projection = {
 (* Drawing, search and row measurement consume this same chronological
    projection. History suppression and held journals must never be separate
    definitions of which messages the conversation contains. *)
+(* Separate observation lane: these are not root-turn tool receipts or speech.
+   No timestamp, request rail, activity spinner or model usage is synthesized.
+   skip_transcript suppresses inline task entries, but not read diagnostics. *)
+let native_task_entries (state : state) ~keeper_name ~role_label_column =
+  match List.assoc_opt keeper_name state.msg_native_tasks with
+  | None -> []
+  | Some native ->
+      let module Native = Masc_tui_native_tasks in
+      let module Task = Runtime_native_tasks in
+      let entry ?(diagnostics=[]) style label body : Message_layout.entry =
+        let label=Keeper_chat.terminal_safe_text label in
+        let diagnostics=List.map Keeper_chat.terminal_safe_text diagnostics in
+        {style;heading_boundary=Message_layout.Start_heading;timestamp="";timeline_bucket=None;
+         speaker=label;role_label=Message_layout.align_role_label ~column:role_label_column ~style label;
+         role_label_mark_cells=Message_layout.role_label_mark_cells ~column:role_label_column ~style ();
+         diagnostics;request_label="";
+         body=Keeper_chat.terminal_safe_text ~preserve_newlines:true body;
+         journal=[];markdown_source=Message_layout.Markdown_streaming;
+         turn_rail=Message_layout.Rail_none;action=Message_layout.Action_none} in
+      let tasks=Native.tasks native and errors=Native.errors native in
+      let diagnostics=Native.diagnostics native in
+      if tasks=[] && errors=[] && diagnostics=[] then []
+      else
+        let header=entry Message_layout.Status "NATIVE TASKS"
+          (Printf.sprintf "%d observed · provider completeness unknown · liveness unknown" (List.length tasks)) in
+        let task_entries=List.filter_map (fun (task:Native.task) ->
+          if task.skip_transcript=Some true then None else
+          let status=match task.terminal,task.status with
+            | Some Task.Task_completed_notice,_ -> "completed notice"
+            | Some Task_failed_notice,_ -> "failed notice"
+            | Some Task_stopped_notice,_ -> "stopped notice"
+            | None,Some Task.Task_pending -> "pending reported"
+            | None,Some Task_running -> "running reported"
+            | None,Some Task_completed -> "completed reported"
+            | None,Some Task_failed -> "failed reported"
+            | None,Some Task_killed -> "killed reported"
+            | None,Some Task_paused -> "paused reported"
+            | None,None -> "status unreported" in
+          let boundary=match task.boundary with
+            | Task.Task_terminal_unobserved -> "terminal unobserved"
+            | Task_terminal_observed -> "terminal observed" in
+          let usage=match task.usage with None -> [] | Some usage ->
+            [Printf.sprintf "%d tokens · %d tools · %d ms reported"
+              usage.total_tokens usage.tool_uses usage.duration_ms] in
+          let metadata=Option.to_list task.subagent_type @ [status;boundary]
+            @ (match task.ambient with Some true -> ["ambient"] | Some false | None -> [])
+            @ (match task.is_backgrounded with Some true -> ["backgrounded"] | Some false | None -> [])
+            @ usage @ Option.to_list task.last_tool_name in
+          let details=match state.msg_tool_visibility with
+            | Tools_compact | Tools_results -> []
+            | Tools_full ->
+                ["store " ^ task.store_id;
+                 "receiver " ^ task.origin.invocation.receiver_generation;
+                 "session " ^ task.origin.invocation.session_id;
+                 "input " ^ task.origin.invocation.client_uuid;
+                 "run " ^ task.origin.run_id;
+                 "call " ^ task.origin.native_call.call_id;
+                 "call envelope " ^ task.origin.native_call.call_envelope_uuid;
+                 "call ordinal " ^ string_of_int task.origin.native_call.call_ordinal;
+                 "routing run " ^ task.origin.attempt.routing_run_id;
+                 "runtime " ^ task.origin.attempt.runtime_id;
+                 "attempt index " ^ string_of_int task.origin.attempt.lane_attempt_index;
+                 (match task.origin.source with
+                  | Task.Operation {operation_id} -> "operation " ^ operation_id
+                  | Autonomous_turn {turn_ref} -> "turn " ^ turn_ref)] in
+          Some (entry ~diagnostics:details Message_layout.Tool
+            ("TASK " ^ task.origin.task_id) (String.concat " · " metadata))) tasks in
+        header :: task_entries
+        @ List.map (fun error -> entry Message_layout.Error "NATIVE READ" (Native.error_text error)) errors
+        @ List.map (entry Message_layout.Status "NATIVE HEALTH") diagnostics
+
 let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
   (* The same pure derivation the committed rows used, asked again for the
      live ones: one call to one function with one argument, so the badge the
@@ -3035,11 +3106,13 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
       not (List.exists (fun excerpt -> excerpt.held_anchor = anchor) held)) polled
     @ List.map (fun excerpt -> excerpt.held_anchor, excerpt.held_entry) held in
   let pending = chat_tail_entries state ~keeper_name ~role_label_column in
+  let native = native_task_entries state ~keeper_name ~role_label_column in
   let transient_anchors = List.map (fun (anchor, _) -> Some anchor) polled
+    @ List.map (fun _ -> None) native
     @ List.map (fun (entry : Message_layout.entry) ->
         if entry.request_label = "" then None else Some (Scroll_pending entry.request_label)) pending in
   let layout_entries =
-    with_transient_tail layout_entries ~transient:(List.map snd polled @ pending)
+    with_transient_tail layout_entries ~transient:(List.map snd polled @ native @ pending)
   in
   { tagged_entries = tagged_layout_entries; transient_anchors; layout_entries }
 

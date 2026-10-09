@@ -9974,6 +9974,12 @@
   masc_tui_keeper_chat_live masc_tui_keeper_chat_log masc_tui_keeper_chat_transcript))
 
 (test
+ (name test_tui_native_tasks)
+ (modules test_tui_native_tasks)
+ (libraries alcotest yojson uri masc masc.runtime masc_tui_native_tasks
+  masc_tui_types masc_tui_render_chat masc_tui_message_layout))
+
+(test
  (name test_runtime_native_tasks)
  (modules test_runtime_native_tasks)
  (libraries alcotest yojson masc.runtime))

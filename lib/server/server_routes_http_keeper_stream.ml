@@ -1780,6 +1780,10 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
     Keeper_secret_redaction.snapshot ~base_path ~keeper_name:payload.name
   in
   let redact_text = Keeper_secret_redaction.redact_text redaction in
+  let task_source = match submission with
+    | Owner_operation {operation_id; _} -> Keeper_native_task_journal.Operation operation_id in
+  let task_journal = Keeper_native_task_journal.create ~base_path
+      ~keeper_name:payload.name ~source:task_source ~redact_text in
   let content_generation = Keeper_chat_events.publish_with_sequence events
     (Run_started { run_id; thread_id }) in
   Option.iter (fun (operation_id, execution_id) ->
@@ -2039,6 +2043,12 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
       | Keeper_hooks_agent_core.Turn_collected { turn; tool_source_map } ->
         Keeper_stream_tool_accum.seal_turn worker_tool_accum ~turn
           ~tool_source_map
+      | Keeper_hooks_agent_core.Native_task_observed {attempt; bound} ->
+          (* Independent receiver journal, including after root stream closure.
+             Persistence failure is not a tool occurrence mapping failure. *)
+          Keeper_native_task_journal.observe task_journal ~attempt bound
+          |> Keeper_native_task_journal.report ~keeper_name:payload.name;
+          Ok ()
       | Keeper_hooks_agent_core.Native_tool_progress {block_index; tool_call_id; progress} ->
         push_worker_event (Stream_native_tool_progress
           (Keeper_stream_tool_accum.current_stream_scope worker_tool_accum, block_index, tool_call_id, progress));
@@ -2820,7 +2830,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
           ~status:(Request_stream Stream_reconciliation_required)
           ~message
           ();
-        Keeper_chat_events.publish events (Text_delta message);
+        Keeper_chat_events.publish events (Text_delta {text=message; stream_scope=None});
         Keeper_chat_events.publish events Text_message_end;
         Keeper_chat_events.publish events (Run_finished { run_id });
         queued_outcome
@@ -2862,7 +2872,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
           then
             split_keeper_reply_chunks visible_reply
             |> List.iter (fun chunk ->
-                   Keeper_chat_events.publish events (Text_delta chunk));
+                   Keeper_chat_events.publish events (Text_delta {text=chunk; stream_scope=None}));
           Keeper_chat_events.publish events
             (Reply_details
                { reply = visible_reply

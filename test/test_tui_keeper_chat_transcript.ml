@@ -541,9 +541,9 @@ let test_missing_skill_boundary_reconciles_the_identified_terminal_round () =
   List.iter (fun terminal_text ->
     let deltas =
       [ Live.Run_started
-      ; Live.Stream_model_started {model="model";stream_scope=Some 0}
+      ; Live.Stream_model_started {model="model"; stream_scope=Some 0; message_id=None; usage=None}
       ; Live.Text {text="Let me check."; stream_scope=Some 0}
-      ; Live.Stream_model_started {model="model";stream_scope=Some 1}
+      ; Live.Stream_model_started {model="model"; stream_scope=Some 1; message_id=None; usage=None}
       ] @ (if terminal_text then [Live.Text {text="Done."; stream_scope=Some 1}] else []) @
       [ Live.Reply_details {reply="Done.";turn_outcome=Masc.Keeper_turn_outcome.Visible_reply;
           turn_ref="trace-1#3";terminal_stream_scope=Some 1} ] in
@@ -560,13 +560,23 @@ let test_terminal_scope_survives_a_missing_start () =
     feed t [Live.Run_started;
       Live.Text {text="Let me check."; stream_scope=Some 0};
       Live.Text {text="Do"; stream_scope=Some 1}];
+    let text_origins () = Transcript.drawn t |> List.filter_map
+      (fun (item : Transcript.drawn_item) -> match item.origin, item.drawn with
+       | Transcript.Text_stretch id, (Transcript.Drawn_text _ | Transcript.Drawn_reply _) -> Some id
+       | _ -> None) in
+    let before = text_origins () in
+    check int "distinct scoped text has distinct stable stretches" 2 (List.length before);
+    check bool "each scoped stretch keeps its own identity" true
+      (List.sort_uniq Int.compare before = before);
     if repeated_start then
-      feed t [Live.Stream_model_started {model="model"; stream_scope=Some 1}];
+      feed t [Live.Stream_model_started {model="model"; stream_scope=Some 1; message_id=None; usage=None}];
     feed t [Live.Text {text="ne"; stream_scope=Some 1};
       Live.Reply_details {reply="Done.";
         turn_outcome=Masc.Keeper_turn_outcome.Visible_reply;
         turn_ref="trace-1#3"; terminal_stream_scope=Some 1}];
     Transcript.note_skill_activity t (missing_skill_activity ());
+    check (list int) "late start and canonical reply retain both source origins"
+      before (text_origins ());
     check (list string) "text identity reconciles the terminal reply without its first start"
       ["text:Let me check."; "skill:source-review"; "reply:Done."] (drawn t))
     [false; true]

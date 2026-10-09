@@ -2616,11 +2616,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                      action = Message_layout.Action_none;
                    }
                     : Message_layout.entry)
-                    |> fold_thinking_entry state ~chat_cols
-                    |> fun entry ->
-                      if entry.style = Message_layout.Thinking then
-                        { entry with body = annotate_body entry.body }
-                      else entry }
+                    |> fold_thinking_entry state ~chat_cols }
               in
               match item.drawn with
               | Keeper_chat_transcript.Drawn_thinking _
@@ -3015,31 +3011,14 @@ let search_anchor_of_tag = function
         source = Masc_tui_types.turn_log_execution_source log; origin; canonical_reply })
   | Tagged_block (_, None, _) -> None
 
-let search_anchor_matches anchor tag =
-  match anchor, tag with
-  | Search_admission request_id,
-      Tagged_block (_, Some (Keeper_chat_transcript.Admission_of_request origin_request_id), _) ->
-      String.equal request_id origin_request_id
-  | Search_admission _, (Tagged_row _ | Tagged_block _) -> false
-  | Search_history anchor, Tagged_row message -> same_msg_anchor anchor.row_anchor message
-  | Search_history {reply_source=Some source; _}, Tagged_block (log, _, true) ->
-      source = Masc_tui_types.turn_log_execution_source log
-  | Search_journal anchor, Tagged_block (log, Some origin, _) ->
-      anchor.source = Masc_tui_types.turn_log_execution_source log
-      && anchor.origin = origin
-  | Search_journal anchor, Tagged_row message ->
-      (* A refreshed history may become the selected source after the held
-         journal is discarded. Only the canonical reply slot is equivalent. *)
-      anchor.canonical_reply && search_reply_source message = Some anchor.source
-  | Search_history _, Tagged_block _
-  | Search_journal _, Tagged_block (_, None, _) -> false
-
 type search_index_key =
   | History_identity of msg_identity
   | History_user_slot of string * chat_turn_phase * int
   | History_reply of Masc_tui_keeper_chat_log.journal_source
   | Journal_origin of Masc_tui_keeper_chat_log.journal_source * Masc_tui_keeper_chat_transcript.drawn_origin
   | Journal_reply of Masc_tui_keeper_chat_log.journal_source
+  | Admission_request of string
+      (** A request's admission row, whichever journal draws it. *)
 
 let search_index_memo = ref None
 
@@ -3059,11 +3038,16 @@ let projection_index_of_anchor projection =
           | Tagged_block (log, origin, canonical) ->
               let source = Masc_tui_types.turn_log_execution_source log in
               Option.iter (fun origin -> add (Journal_origin (source, origin)) at) origin;
+              (match origin with
+               | Some (Keeper_chat_transcript.Admission_of_request request_id) ->
+                   add (Admission_request request_id) at
+               | Some _ | None -> ());
               if canonical then add (Journal_reply source) at) projection.tagged_entries;
         search_index_memo := Some (projection.tagged_entries, index);
         index in
   fun anchor ->
     let keys = match anchor with
+      | Search_admission request_id -> [Admission_request request_id]
       | Search_history {row_anchor; reply_source} ->
           History_identity row_anchor.ma_identity
           :: (match row_anchor.ma_session_user_slot with None -> []

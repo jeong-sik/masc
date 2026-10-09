@@ -840,6 +840,7 @@ let test_checkpoint_history_is_not_current_tool_execution () =
   in
   let acc =
     Acc.create ~meta ~historical_tool_calls:[ prior; prior ]
+      ~historical_order:Acc.Ordered
       ~history_pairs_at_setup:(Some 2)
       ~tool_surface:
         { turn_lane = Masc.Keeper_agent_tool_surface.Lane_text_only
@@ -859,6 +860,71 @@ let test_checkpoint_history_is_not_current_tool_execution () =
        (Acc.tool_calls_for_repetition acc));
   check int "historical evidence remains immutable" 2
     (List.length acc.historical_tool_calls)
+;;
+
+(* HTTP A1..A4, then an official-client B5, then HTTP A6 are not five
+   consecutive A inputs. Outputs differ, so this exercises the input axis
+   rather than the order-independent exact fingerprint count. *)
+let test_mixed_provider_history_does_not_invent_adjacency () =
+  let module Acc = Masc.Keeper_run_tools_hook_accumulator in
+  let module Run = Masc.Keeper_agent_run.For_testing in
+  let meta = Masc_test_deps.meta_of_json_fixture
+    (`Assoc [ "name", `String "mixed-provider-repetition" ]) |> Result.get_ok in
+  let call input output =
+    { (tool_call "read") with
+      input_fingerprint = Some input; output_fingerprint = Some output } in
+  let a n = call "A" (string_of_int n) in
+  let make ~history ~ledger =
+    let historical_tool_calls, historical_order =
+      Masc.Keeper_run_tools_setup.combine_repetition_seeds ~history ~ledger in
+    Acc.create ~meta ~historical_tool_calls ~historical_order
+      ~history_pairs_at_setup:(Some (List.length history))
+      ~tool_surface:
+        { turn_lane = Masc.Keeper_agent_tool_surface.Lane_text_only
+        ; config_root = "fixture"; runtime_config_path = None } in
+  let official acc =
+    Run.official_client_tool_boundary ~repetition_execution:None
+      ~tool_calls:(Acc.tool_calls_for_repetition acc)
+      ~input_tool_calls:(Acc.tool_calls_for_input_repetition acc) () in
+  let native acc =
+    Run.native_tool_boundary ~keeper_name:meta.name ~repetition_execution:None
+      ~terminal_effect_state:Masc.Keeper_tools_agent_core.Terminal_effect_open
+      ~tool_calls:(Acc.tool_calls_for_repetition acc)
+      ~input_tool_calls:(Acc.tool_calls_for_input_repetition acc)
+      ~assistant_turn_texts:[] ~yield_requested:None in
+  let acc = make ~history:[a 4; a 3; a 2; a 1] ~ledger:[call "B" "5"] in
+  acc.tool_calls <- [a 6];
+  check (option (pair string int)) "the unqualified join would falsely stop"
+    (Some ("read", 5))
+    (Run.repeated_tool_call_input ~threshold:5 (Acc.tool_calls_for_repetition acc));
+  (match official acc, native acc with
+   | Ok None, Ok Runtime_agent.Continue -> ()
+   | _ -> fail "provider transition invented a consecutive-input streak");
+  (* Real new observations remain ordered even when their seed is not. *)
+  acc.tool_calls <- [a 10; a 9; a 8; a 7; a 6];
+  (match official acc, native acc with
+   | Ok (Some (Masc.Keeper_official_client_host.Repeated_tool_call
+       { repeated_count = 5; _ })),
+     Ok (Runtime_agent.Yield (Runtime_agent.Repeated_tool_call
+       { repeated_count = 5; _ })) -> ()
+   | _ -> fail "the unordered seed disabled a real current-run input streak");
+  let exact = call "A" "same" in
+  let exact_acc = make ~history:[exact] ~ledger:[exact] in
+  exact_acc.tool_calls <- [exact];
+  (match official exact_acc, native exact_acc with
+   | Ok (Some (Masc.Keeper_official_client_host.Repeated_tool_call
+       { repeated_count = 3; _ })),
+     Ok (Runtime_agent.Yield (Runtime_agent.Repeated_tool_call
+       { repeated_count = 3; _ })) -> ()
+   | _ -> fail "disjoint streams lost the exact-repeat count");
+  List.iter (fun (history, ledger) ->
+    let ordered = make ~history ~ledger in
+    ordered.tool_calls <- [a 6];
+    match official ordered with
+    | Ok (Some (Masc.Keeper_official_client_host.Repeated_tool_call
+        { repeated_count = 5; _ })) -> ()
+    | _ -> fail "single-source history lost its known adjacency")
+    [([a 4; a 3; a 2; a 1], []); ([], [a 4; a 3; a 2; a 1])]
 ;;
 
 (* 턴마다 같은 Keeper 의 history memo 로 히스토리를 다시 걷는다. 두 번째 걷기는
@@ -1029,7 +1095,7 @@ let test_repeated_exact_tool_call_seeded_from_checkpoint_history () =
       ~keeper_name:"native-autonomous-repetition-fixture"
       ~repetition_execution:None
       ~terminal_effect_state:Masc.Keeper_tools_agent_core.Terminal_effect_open
-      ~tool_calls:calls
+      ~tool_calls:calls ~input_tool_calls:calls
       ~assistant_turn_texts:[]
       ~yield_requested:(Some requested)
   in
@@ -1057,7 +1123,7 @@ let test_repeated_exact_tool_call_seeded_from_checkpoint_history () =
   let official calls =
     Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
       ~repetition_execution:None
-      ~tool_calls:calls
+      ~tool_calls:calls ~input_tool_calls:calls
       ()
   in
   (match official (live_call () :: run_2_starts_from) with
@@ -1151,10 +1217,71 @@ let test_ledger_seed_drops_rows_the_history_already_represents () =
            ()
        in
        check int "only the ledger-only calls seed" 2 (List.length seeded);
-       check string "the newest seeded call is the ledger-only one" "in-u2"
+       check string "the newest seeded call is the last ledger-only call" "in-none"
          (match seeded with
           | detail :: _ -> Option.value ~default:"" detail.input_fingerprint
           | [] -> fail "unexpected seed shape"))
+;;
+
+let test_first_activation_excludes_retained_repetition () =
+  let module Setup = Masc.Keeper_run_tools_setup in
+  let module Judged = Masc.Keeper_repetition_judged in
+  let module Ledger = Masc.Keeper_tool_call_log in
+  let context = Agent_core.Context.create_sync () in
+  let store = Filename.temp_file "repetition-activation-" "" in
+  Sys.remove store;
+  Unix.mkdir store 0o755;
+  Fun.protect ~finally:Ledger.reset_for_testing (fun () ->
+    let masc = Filename.concat store ".masc" in
+    Unix.mkdir masc 0o755;
+    Unix.mkdir (Filename.concat masc "config") 0o755;
+    Ledger.init ~base_path:store ();
+    let keeper_name = "activation-fixture" in
+    let append () = Ledger.log_call ~keeper_name ~tool_name:"keeper_tasks_list"
+      ~input:(`Assoc []) ~output_text:"same" ~wire_outcome:Tool_result.Ok
+      ~duration_ms:1.0 ~input_fingerprint:"same-input" ~output_fingerprint:"same-output" () in
+    append (); append ();
+    let history = [tool_call "keeper_tasks_list"; tool_call "keeper_tasks_list"] in
+    let activate context =
+      match Setup.activate_repetition_boundary ~context ~keeper_name ~history_pairs:(List.length history) with
+      | Ok boundary -> boundary | Error detail -> fail detail in
+    let boundary = activate context in
+    check int "history remains intact" 2 (List.length history);
+    check int "pre-policy history is outside comparison" 0
+      (List.length (Judged.seed_beyond ~judged:boundary.history_pairs history));
+    let seed context =
+      let boundary = activate context in
+      Setup.seed_tool_calls_from_ledger ~judged:boundary.ledger_frontier
+        ~history_tool_use_ids:[] ~keeper_name () in
+    check int "old ledger remains but is not seeded" 0 (List.length (seed context));
+    append ();
+    let cold = Agent_core.Context.create_sync () in
+    (match Judged.restore ~source:(Agent_core.Context.copy context) ~target:cold with
+     | Ok _ -> () | Error error -> fail (Judged.error_to_string error));
+    let first = seed cold in
+    check int "activation does not move on resume" 1 (List.length first);
+    let detect = Masc.Keeper_agent_run.For_testing.repeated_exact_tool_call ~threshold:3 in
+    check (option (pair string int)) "two old plus one new is not a repetition" None (detect first);
+    append (); append ();
+    check (option (pair string int)) "three post-activation exact calls still yield"
+      (Some ("keeper_tasks_list", 3)) (detect (seed cold));
+    let retained = match Ledger.read_recent ~keeper_name ~n:10 () with
+      | Ok rows -> rows
+      | Error (Ledger.Index_unavailable detail) -> fail detail in
+    check int "ledger history is preserved" 5 (List.length retained);
+    let fresh = Agent_core.Context.create_sync () in
+    (match Judged.reset_history fresh with
+     | Error error -> fail (Judged.error_to_string error)
+     | Ok reset -> check bool "pre-activation purge does not invent activation" true
+         (Judged.read_opt reset = Ok None));
+    let empty = Agent_core.Context.create_sync () in
+    Judged.record empty {Judged.history_generation=Initial; history_pairs=0;
+      ledger_frontier=Keeper_tool_call_index.empty_frontier};
+    let restored = Agent_core.Context.create_sync () in
+    (match Judged.restore ~source:empty ~target:restored with
+     | Error error -> fail (Judged.error_to_string error)
+     | Ok boundary -> check bool "explicit empty activation survives restore" true
+         (Judged.read_opt restored = Ok (Some boundary))))
 ;;
 
 let test_seed_stops_where_a_yield_already_judged () =
@@ -1175,44 +1302,25 @@ let test_seed_stops_where_a_yield_already_judged () =
     (names (Masc.Keeper_repetition_judged.seed_beyond ~judged:9 pairs))
 ;;
 
-(* What a yield records is what the next setup will count for this run:
-   the pairs it was set up over, plus its own calls that carry both
-   fingerprints -- a call the digest refused has no pair the seeder can
-   match either. *)
-let test_a_yield_records_the_pairs_it_judged () =
-  let judged = Masc.Keeper_repetition_judged.pairs_judged_by in
-  let live = [ tool_call "Read"; tool_call "Grep"; tool_call "Read" ] in
-  check int "setup pairs plus the run's fingerprinted calls" 44
-    (judged ~history_pairs_at_setup:41 live);
-  check int "a call without an output fingerprint is not a pair" 44
-    (judged ~history_pairs_at_setup:41 (tool_call ~output:None "Execute" :: live));
-  check int "a run with no calls records what it was set up over" 41
-    (judged ~history_pairs_at_setup:41 []);
-  (* Then the next setup seeds only the pairs past that boundary: the
-     forty-four are gone, and a pair a later turn appended stays. *)
-  let history = List.init 45 (fun i -> tool_call ~input:(Some (string_of_int i)) "Read") in
-  check (list string) "one pair past the boundary seeds" [ "0" ]
-    (List.map
-       (fun (c : Masc.Keeper_agent_result.tool_call_detail) ->
-         Option.value ~default:"" c.input_fingerprint)
-       (Masc.Keeper_repetition_judged.seed_beyond ~judged:44 history))
-;;
-
 let test_judged_boundary_rides_the_context () =
   let module Judged = Masc.Keeper_repetition_judged in
   let module Context = Agent_core.Context in
   let held context =
     Context.get_scoped context Context.Session Judged.context_key
   in
+  let record context history_pairs =
+    Judged.record context { history_generation = Judged.Initial; history_pairs; ledger_frontier = Keeper_tool_call_index.empty_frontier } in
+  let restore ~source ~target =
+    Judged.restore ~source ~target |> Result.map (fun boundary -> boundary.Judged.history_pairs) in
   let source = Context.create_sync () in
   let target = Context.create_sync () in
-  (match Judged.restore ~source ~target with
+  (match restore ~source ~target with
    | Ok 0 -> ()
    | Ok n -> failf "a context holding no record read as %d judged" n
    | Error error -> fail (Judged.error_to_string error));
   check bool "no record leaves the target without one" true (Option.is_none (held target));
-  Judged.record source 5;
-  (match Judged.restore ~source ~target with
+  record source 5;
+  (match restore ~source ~target with
    | Ok 5 -> ()
    | Ok n -> failf "the recorded boundary read as %d" n
    | Error error -> fail (Judged.error_to_string error));
@@ -1221,17 +1329,17 @@ let test_judged_boundary_rides_the_context () =
   (* A yield on a lane that persists no checkpoint records into the live
      context only. The durable count behind it must not pull the boundary
      back down: restore keeps the larger. *)
-  Judged.record target 7;
-  (match Judged.restore ~source ~target with
+  record target 7;
+  (match restore ~source ~target with
    | Ok 7 -> ()
    | Ok n -> failf "the live boundary was pulled back to %d" n
    | Error error -> fail (Judged.error_to_string error));
   check bool "and the live context keeps its own" true
-    (Option.equal ( = ) (Some (`Assoc [ ("history_pairs", `Int 7) ])) (held target));
+    (Option.equal ( = ) (Some (`Assoc [ ("history_generation", `Null); ("history_pairs", `Int 7); ("ledger_frontier", `List []) ])) (held target));
   (* When the durable count is the larger, it is what the run's context
      ends up holding. *)
-  Judged.record source 9;
-  (match Judged.restore ~source ~target with
+  record source 9;
+  (match restore ~source ~target with
    | Ok 9 -> ()
    | Ok n -> failf "the durable boundary read as %d" n
    | Error error -> fail (Judged.error_to_string error));
@@ -1240,7 +1348,7 @@ let test_judged_boundary_rides_the_context () =
   let malformed = Context.create_sync () in
   Context.set_scoped malformed Context.Session Judged.context_key
     (`Assoc [ ("history_pairs", `String "five") ]);
-  match Judged.restore ~source:malformed ~target:(Context.create_sync ()) with
+  match restore ~source:malformed ~target:(Context.create_sync ()) with
   | Error (Judged.Invalid_record _) -> ()
   | Ok n -> failf "a record that does not decode read as %d rather than an error" n
 ;;
@@ -1859,10 +1967,14 @@ let () =
             test_repeated_exact_tool_call_boundary;
           test_case "repeated exact tool call reset across checkpoint restart" `Quick
             test_repeated_exact_tool_call_reset_across_checkpoint_restart;
+          test_case "mixed provider history preserves adjacency boundaries" `Quick
+            test_mixed_provider_history_does_not_invent_adjacency;
           test_case "checkpoint history is not current execution" `Quick
             test_checkpoint_history_is_not_current_tool_execution;
           test_case "repeated exact tool call seeded from checkpoint history" `Quick
             test_repeated_exact_tool_call_seeded_from_checkpoint_history;
+          test_case "first activation excludes retained repetition" `Quick
+            test_first_activation_excludes_retained_repetition;
           test_case "ledger seed drops rows the history already represents" `Quick
             test_ledger_seed_drops_rows_the_history_already_represents;
           test_case "history memo answers a purged body from its new bytes" `Quick
@@ -1881,8 +1993,6 @@ let () =
             test_repeated_tool_call_input_boundary;
           test_case "the seed stops where a yield already judged" `Quick
             test_seed_stops_where_a_yield_already_judged;
-          test_case "a yield records the pairs it judged" `Quick
-            test_a_yield_records_the_pairs_it_judged;
           test_case "the judged boundary rides the context" `Quick
             test_judged_boundary_rides_the_context;
           test_case "repeated assistant text boundary" `Quick

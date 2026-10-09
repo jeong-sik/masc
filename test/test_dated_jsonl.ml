@@ -42,6 +42,26 @@ let test_append_creates_dated_file () =
     |> List.filter (fun l -> String.trim l <> "") in
   check int "two lines" 2 (List.length lines)
 
+(* ── append_notifying_commit reports the commit point ─── *)
+
+exception After_commit
+
+let test_notifying_commit_reports_durable_row () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "dated_jsonl_commit" in
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  let committed = ref false in
+  (match
+     Dated_jsonl.append_notifying_commit store (make_json 1)
+       ~on_committed:(fun () -> committed := true; raise After_commit)
+   with
+   | () -> fail "an exception after the commit must propagate"
+   | exception After_commit -> ());
+  check bool "commit was reported before the failure" true !committed;
+  check (list int) "the row is durable" [1]
+    (List.map json_i (Dated_jsonl.read_recent store 10))
+
 (* ── read_recent returns newest N in chronological order ─ *)
 
 let test_read_recent () =
@@ -1424,6 +1444,8 @@ let () =
       ( "append",
         [
           test_case "creates dated file" `Quick test_append_creates_dated_file;
+          test_case "append reports its commit point" `Quick
+            test_notifying_commit_reports_durable_row;
         ] );
       ( "append_rotating",
         [

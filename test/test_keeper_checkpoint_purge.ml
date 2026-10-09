@@ -1305,10 +1305,52 @@ let test_recovery_protects_the_tail_of_what_it_returns () =
       report.Purge.reasoning_blocks_stripped
 ;;
 
+let test_purge_rebases_repetition_history_on_resume () =
+  let module Judged = Masc.Keeper_repetition_judged in
+  let checkpoint = checkpoint_fixture () in
+  let checkpoint = { checkpoint with
+    messages = [text_message Types.User "first"] @ cycle "kept"
+      @ [text_message Types.User "broken"] @ overlapping_cycles () } in
+  let original : Judged.t =
+    { history_generation = Judged.Initial; history_pairs = 3
+    ; ledger_frontier = Keeper_tool_call_index.empty_frontier } in
+  Judged.record checkpoint.context original;
+  let live = Agent_core.Context.copy checkpoint.context in
+  let purged = match purge_checkpoint ~config:no_tail_config checkpoint with
+    | Ok (purged, report) ->
+      Alcotest.(check bool) "recovery actually shortened history" true
+        (report.messages_dropped_at_structural_break > 0);
+      purged
+    | Error error -> Alcotest.fail (Purge.purge_error_to_string error) in
+  let restored = match Agent_core.Checkpoint.of_string (Agent_core.Checkpoint.to_string purged) with
+    | Ok checkpoint -> checkpoint
+    | Error error -> Alcotest.fail (Agent_core.Error.to_string error) in
+  let boundary = match Judged.restore ~source:restored.context ~target:live with
+    | Ok boundary -> boundary
+    | Error error -> Alcotest.fail (Judged.error_to_string error) in
+  Alcotest.(check int) "old live count cannot hide rewritten pairs" 0 boundary.history_pairs;
+  Alcotest.(check bool) "rewrite generation survives serialization" true
+    (match boundary.history_generation with Judged.Rewritten _ -> true | Initial -> false);
+  Alcotest.(check bool) "preview never changed the source context" true
+    (Judged.read checkpoint.context = Ok original);
+  let pairs = Masc.Keeper_run_tools_setup.initial_tool_calls
+      ~history_memo:(Masc.Keeper_tool_progress_identity.History_memo.create ())
+      ~history_messages:(restored.messages @ cycle "new") in
+  let seeded = Judged.seed_beyond ~judged:boundary.history_pairs pairs in
+  Alcotest.(check int) "both retained and new pairs reach repetition after resume" 2 (List.length seeded);
+  Judged.record live { boundary with history_pairs = List.length pairs };
+  let next = match Judged.restore ~source:restored.context ~target:live with
+    | Ok boundary -> boundary
+    | Error error -> Alcotest.fail (Judged.error_to_string error) in
+  Alcotest.(check int) "same generation preserves live judged progress" 2 next.history_pairs
+;;
+
 let () =
   Alcotest.run
     "keeper checkpoint purge"
-    [ ( "atoms"
+    [ ( "repetition resume", [ Alcotest.test_case "purge carries the new history generation"
+          `Quick test_purge_rebases_repetition_history_on_resume ] )
+    ; ( "atoms"
       , [ Alcotest.test_case
             "repeated messages all survive"
             `Quick

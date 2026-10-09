@@ -144,7 +144,7 @@ def run_unconfirmed_first_overlay(executable, key):
         assert not snapshot(), ("fixture must open an overlay with no previous read", snapshot())
         with lock:
             state["unconfirmed"] = True
-        h.send_and_wait(process, fd, output, b"r", b"workspace identity unconfirmed")
+        h.send_and_wait(process, fd, output, b"r", b"[workspace unconfirmed]")
         title = b"history: " if key == b"H" else b"diff col 1 vs HEAD: "
         h.send_and_wait(process, fd, output, key, title)
         assert not snapshot(), ("unconfirmed first-open dispatched an overlay read", snapshot())

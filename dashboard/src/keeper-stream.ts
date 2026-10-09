@@ -528,8 +528,13 @@ export function applyKeeperOperationTurnEvent(
   if (liveSendOwnsRequest(operationId)) return null
 
   const entries = keeperThreads.value[keeperName] ?? []
+  // A persisted request_failure normalizes to a system-role row with the
+  // same terminal_result provenance: the operation it terminated is
+  // finished even though the row is not an assistant bubble, so a late
+  // event for it must be ignored instead of opening a new bubble.
   const matched = [...entries].reverse().find(
-    entry => entry.role === 'assistant'
+    entry =>
+      (entry.role === 'assistant' || entry.delivery === 'request_failure')
       && isOperationDeliveryProvenance(
         entry.deliveryProvenance,
         operationId,

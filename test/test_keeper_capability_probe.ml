@@ -661,7 +661,7 @@ reply(request, {"commandId": request["params"]["commandId"], "status": "accepted
     "startedNewTurn": True, "disposition": "started"})
 notify("turn/started", turnId="t-readiness", commandId=request["params"]["commandId"])
 text = "masc_board_list was called (untrusted reply-only claim)"
-if mode not in ("muse-no-tool", "muse-no-tool-no-message", "muse-no-tool-empty-message"):
+if mode not in ("muse-no-tool", "muse-missing", "muse-blank"):
     headers = {**server["headers"], "Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
     def rpc(method, params, request_id=None):
         payload = {"jsonrpc": "2.0", "method": method, "params": params}
@@ -679,11 +679,9 @@ if mode not in ("muse-no-tool", "muse-no-tool-no-message", "muse-no-tool-empty-m
     result = rpc("tools/call", {"name": "masc_board_list", "arguments": {}}, 3)
     text = result["result"]["content"][0]["text"]
     assert text == "probe acknowledged; no side effect performed"
-if mode == "muse-no-tool-empty-message":
-    text = ""
-if mode not in ("muse-tool-no-message", "muse-no-tool-no-message"):
+if mode not in ("muse-missing", "muse-called-missing"):
     notify("item/completed", item={"itemId": "m-readiness", "kind": "agentMessage", "turnId": "t-readiness",
-        "revision": 1, "status": "completed", "text": text})
+        "revision": 1, "status": "completed", "text": "" if mode == "muse-blank" else text})
 terminal = {"muse-failed": "failed", "muse-cancelled": "cancelled"}.get(mode, "completed")
 notify("turn/completed", turnId="t-readiness", terminal=terminal,
     error={"kind": "modelError", "message": "synthetic failure", "retryable": False} if terminal == "failed" else None)
@@ -709,16 +707,7 @@ let test_muse_probe_uses_actual_mcp_callback () =
     write_file durable_session "existing selected-account session";
     let prompt = "Call masc_board_list once. 한" in
     let runtime_path = Filename.concat base_path "runtime.toml" in
-    (* The smallest window that leaves room above the host's own overhead. Its
-       ceiling is below the probe prompt, so the input is refused. *)
-    let smallest_window = 15_930 and default_window = 200_000 in
-    let smallest_ceiling =
-      match Runtime_muse_prompt_capacity.start_prompt_bytes ~max_context:(Some smallest_window) with
-      | Ok bytes -> bytes
-      | Error _ -> fail "the smallest window must leave room above the host overhead" in
-    check bool "the smallest window holds less than the probe prompt" true
-      (smallest_ceiling < String.length prompt);
-    let load_config ?(selected_home=account_home) ~cli_path ~model ~effort ~max_context () =
+    let load_config ?(selected_home=account_home) ~cli_path ~model ~effort () =
       write_file runtime_path (Printf.sprintf {|
 [providers.muse]
 protocol = "muse-serve"
@@ -727,14 +716,14 @@ account-home = %S
 is-non-interactive = true
 [models.fixture]
 api-name = %S
-max-context = %d
+max-context = 200000
 reasoning-effort = %S
 turn-timeout-s = 0
 tools-support = true
 [muse.fixture]
 [runtime]
 default = "muse.fixture"
-|} cli_path selected_home model max_context effort);
+|} cli_path selected_home model effort);
       match Runtime.init_default ~config_path:runtime_path with
       | Ok () -> () | Error detail -> fail detail in
     Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
@@ -749,13 +738,12 @@ default = "muse.fixture"
           let cli_path = Filename.concat base_path mode in
           write_file cli_path muse_capability_fixture; Unix.chmod cli_path 0o700;
           load_config ~selected_home:(Filename.concat base_path "other-account")
-            ~cli_path ~model:"fixture-reloaded-model" ~effort:"low" ~max_context:smallest_window ();
+            ~cli_path ~model:"fixture-reloaded-model" ~effort:"low" ();
           let replacement = Runtime.For_testing.snapshot () in
-          load_config ~cli_path ~model:"fixture-selected-model" ~effort:"high"
-            ~max_context:default_window ();
+          load_config ~cli_path ~model:"fixture-selected-model" ~effort:"high" ();
           let now () =
-            (* Reload after the probe freezes its selected runtime. The byte
-               capacity, effort and model still belong to that selection. *)
+            (* Reload after the probe freezes its selected runtime. The
+               account, effort and model still belong to that selection. *)
             Runtime.For_testing.restore replacement;
             Unix.gettimeofday () in
           Runtime_quota_window.reset_for_testing ();
@@ -772,10 +760,10 @@ default = "muse.fixture"
           (match expected, result with
            | `Called, Ok (Probe.Tool_invoked {tool="masc_board_list"; _}) -> ()
            | `Not_called, Ok (Probe.Replied_no_tool _) -> ()
-           | `Empty_reply, Ok (Probe.Replied_no_tool {reply_bytes=0; _}) -> ()
-           | `Missing_reply, Ok (Probe.Provider_rejected {detail}) ->
-             check string "no callback and no message is not a reply"
-               "completed turn has no assistant message" detail
+           | `Blank, Ok (Probe.Replied_no_tool {reply_bytes=0; _}) -> ()
+           | `Missing, Ok (Probe.Provider_rejected {detail}) ->
+               check string "absent message is not a zero-byte reply"
+                 "completed turn has no assistant message" detail
            | `Rejected error, Ok (Probe.Provider_rejected {detail}) ->
              check string "vendor terminal cause preserved"
                (Runtime_muse_serve.error_to_string error) detail
@@ -793,34 +781,11 @@ default = "muse.fixture"
           check string "selected durable session preserved" "existing selected-account session"
             (Fs_compat.load_file durable_session))
           ["muse-called", `Called; "muse-no-tool", `Not_called;
-           "muse-tool-no-message", `Called;
-           "muse-no-tool-no-message", `Missing_reply;
-           "muse-no-tool-empty-message", `Empty_reply;
+           "muse-missing", `Missing; "muse-blank", `Blank;
+           "muse-called-missing", `Called;
            "muse-failed", `Rejected (Runtime_muse_serve.Turn_failed
              {kind=Runtime_muse_msp.Model_error; message="synthetic failure"; retryable=false});
            "muse-cancelled", `Rejected Runtime_muse_serve.Turn_cancelled];
-        let cli_path = Filename.concat base_path "muse-over-capacity" in
-        write_file cli_path muse_capability_fixture; Unix.chmod cli_path 0o700;
-        load_config ~cli_path ~model:"fixture-selected-model" ~effort:"high"
-          ~max_context:smallest_window ();
-        (* An inaccessible credential would produce a HOME error if preparation
-           preceded byte admission. It must remain untouched by this refusal. *)
-        Unix.chmod auth 0o000;
-        let managed = Filename.concat account_home ".local/state/masc/muse-config" in
-        let before = Sys.readdir managed |> Array.to_list |> List.sort String.compare in
-        (match probe ~now:Unix.gettimeofday prompt with
-         | Ok (Probe.Provider_rejected {detail}) ->
-           check string "exact input-capacity diagnostic"
-             (Runtime_muse_serve.error_to_string (Runtime_muse_serve.Invalid_config
-                (Printf.sprintf "Muse Code probe input is %d bytes, exceeding the prompt ceiling %d"
-                   (String.length prompt) smallest_ceiling))) detail
-         | Ok result -> fail (Probe.invocation_to_string result)
-         | Error error -> fail (Probe.invocation_error_to_string error));
-        check bool "over-capacity probe never launches client" false (Sys.file_exists (cli_path ^ ".launched"));
-        check int "byte refusal precedes HOME preparation" 0o000 ((Unix.stat auth).Unix.st_perm land 0o777);
-        check (list string) "byte refusal creates no managed auth generation" before
-          (Sys.readdir managed |> Array.to_list |> List.sort String.compare);
-        Unix.chmod auth 0o600;
         check bool "probe workspace released after child exit" false
           (Array.exists (String.starts_with ~prefix:"muse-readiness-") (Sys.readdir base_path));
         check bool "probe owns no durable Keeper session" false

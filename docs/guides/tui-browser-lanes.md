@@ -58,12 +58,114 @@ TUI reads that table in four places:
   sent. The screenshot closes and a row under the status says so:
   `Not sent · WebExtension: no drag · BiDi serves it · b:choose browser` when a
   BiDi connection is listed. When none is, the row ends `no BiDi connection is
-  listed` and the next row names where attaching one is written
-  (`Setup: docs/design/browser-bidi-live-host.md`). The read badge does not
-  change, because nothing was requested. The rows stay through the lane's own
-  refreshes and go with the next key or click.
+  listed` and one more row follows. For a drag, which a BiDi connection
+  serves, it says where the BiDi host stood and points at the picker, for
+  example `BiDi host: ended 2026-10-03T04:01:00Z · b:why and what next`. From
+  a server that does not report the host it names where attaching a BiDi host
+  is written (`Setup: docs/design/browser-bidi-live-host.md`). The
+  read badge does not change, because nothing was requested. The rows stay
+  through the lane's own refreshes and go with the next key or click. What
+  they say of the host is what the connection list said when it was last
+  read before the gesture.
 
-These rows fit an 80-column terminal up to the `b:choose browser` key.
+These rows fit an 80-column terminal up to the `b:choose browser` key, and a
+refused gesture never takes more than two.
+
+The picker also says where the BiDi host stands, under its choices. A BiDi
+connection is there only while its host runs, and the host is a process the
+operator starts ([how](../design/browser-bidi-live-host.md)). The server
+reads the host's own record and sends it with the connection list, so these
+rows change when the list is read again (`r`).
+
+| The host | First row |
+|---|---|
+| never ran for this workspace | `BiDi host: none has run for this workspace` |
+| is starting | `BiDi host: connecting · pid 4242` |
+| is attached | `BiDi host: attached · pid 4242` |
+| is attached, and the server lists no BiDi connection | `BiDi host: attached, not listed by this server · pid 4242` |
+| is attached, and the server lists a BiDi connection under another ID | `BiDi host: attached, not listed under its recorded ID · pid 4242` |
+| left in order | `BiDi host: ended 2026-10-03T04:01:00Z · pid 4242` |
+| left no reason | `BiDi host: pid 4242 is gone · no reason recorded` |
+| runs, and its record cannot be read | `BiDi host: one runs, and its record cannot be read` |
+| does not run, and the record cannot be read | `BiDi host: none runs, and the last record cannot be read` |
+| cannot be checked | `BiDi host: could not check whether one runs` |
+| is reported in a layout this TUI does not read | `BiDi host: this TUI cannot read the server's report` |
+
+The rows under it:
+
+- A running host: `At:` and the address it was given.
+  - Attached, with no BiDi connection listed: hover and drag stay refused on
+    this server. Two rows say what may be behind it and what to do:
+    `With MASC_HTTP_BASE_URL or MASC_HTTP_PORT set, it polls another server`,
+    then `If none appears, stop it and start it from a shell without them`.
+    A host is also missing for a moment after this server starts, and after
+    120 seconds without a poll. Its next poll lists it again.
+  - Attached, with a BiDi connection listed under another ID: that
+    connection is this host's if it registered again under an ID it could
+    not write to its record, and another host's otherwise. Hover and drag
+    are sent to it either way, so nothing is said to be refused.
+- A host that ended: what comes before the next host, then `Reason:` and the
+  reason it gave. The step comes first so that a short screen keeps it.
+  - Its session was ended: `That Firefox takes the next host if it still
+    runs`.
+  - It ended before Firefox gave it a session: `It got no session · check
+    that Firefox answers at that address first`.
+  - Firefox did not confirm the end: `Session end not confirmed · restart
+    that Firefox before attaching`.
+  - The connection was gone before the host could ask: `Could not ask
+    Firefox to end the session · restart it if it still runs`.
+  - Firefox refused the host a session: `Firefox refused this host a session
+    · it held one then`, then `Stop a host still attached there · restart
+    that Firefox if refused again`. The record says Firefox held a session
+    when the host asked, not that it holds one now.
+- A host that left no reason: `Its session may be left in Firefox · restart
+  Firefox if a host is refused`.
+- A record that cannot be read: `Detail:` and why. While a host still runs
+  the row before it says to stop that host first.
+- A report this TUI cannot read: `masc doctor reads the host's record and
+  says where the host stands`, then `Detail:` and why, then the paragraph the
+  server wrote for the operator, as `Server:`. The paragraph is longer than
+  most screens have rows for, and `masc doctor` prints the host's state in
+  full.
+- Results the host holds no acknowledgement for add two rows: how many, and
+  the last one's verb and what became of the command, then its time and
+  request ID. `, refused` or `, not sent` follows when the server does not
+  have the result; with neither, it may have arrived.
+- The command that starts a host:
+  `Attach: '<workspace>/.masc/browser-lane/host/launch'`, then `--bidi-url`
+  and the address. After a host that is the address it was given. Before any
+  host it is `ws://127.0.0.1:PORT/session`, with a row saying PORT is the
+  `--remote-debugging-port` Firefox was started with. The path and a recorded
+  address are written as one shell word each, in single quotes. When the
+  workspace has no launcher, or one that is not as an installation wrote it,
+  the row says to install the browser lane first. The last row names where
+  the steps are written. Four states show no command, because there is
+  none to run or none to trust: a running host, an unreadable record a host
+  still holds, a lock that could not be asked, and a report this TUI cannot
+  read.
+- A server that does not report the host draws none of these rows.
+
+The first row of each state is this TUI's own words and fits 80 columns.
+What another program wrote, a reason, an address, a path, is on rows of its
+own and goes on to the next row where it is longer than the screen, so none
+of it is cut.
+
+The host's rows cannot be scrolled to. On a terminal too short for
+everything, rows are cut from the end and the frame says how many are not
+shown. What keeps its place depends on whether the rows report a host:
+
+- A host that runs or ran, or a record or report that cannot be read: the
+  first two rows and the row that counts the rest keep their place while at
+  least three choices fit beside them, or every choice when there are fewer
+  than three. Where that does not fit, the first row and the count keep
+  theirs. With no live connection listed, the three rows on the extension
+  are drawn too. On a screen that holds everything they follow the host's
+  rows. On a shorter one they follow the host's first two rows, and the rest
+  of the host's rows are what is cut: from 20 rows up all three are there.
+- No host yet: the rows only say how one is started. They take no row from
+  the choices or from the rows on the extension, and are drawn where the
+  screen has rows left. A workspace that has not run a BiDi host sees every
+  row it saw before these existed.
 
 In a Keeper's chat, the tool results view shows a refused browser call as its
 case, what the connection leaves out and how many connected browsers serve it,

@@ -83,6 +83,7 @@ describe('RuntimeMonitor', () => {
           supports_response_format_json: true,
           supports_structured_output: true,
           supports_system_prompt: true,
+          supports_assistant_prefill: false,
           supports_prompt_caching: true,
           supports_top_k: true,
           supports_min_p: true,
@@ -162,6 +163,7 @@ describe('RuntimeMonitor', () => {
             task: 'transcription',
             supports_native_streaming: true,
             supports_system_prompt: true,
+            supports_assistant_prefill: false,
             supports_prompt_caching: true,
             supports_top_k: true,
             supports_min_p: true,
@@ -217,6 +219,7 @@ describe('RuntimeMonitor', () => {
                 supports_response_format_json: true,
                 supports_structured_output: true,
                 supports_system_prompt: true,
+                supports_assistant_prefill: false,
                 supports_prompt_caching: true,
                 supports_top_k: true,
                 supports_min_p: true,
@@ -376,6 +379,7 @@ describe('RuntimeMonitor', () => {
       'request · kind:openai_compat · source:agent-core-provider-config · path:/chat/completions',
     )
     expect(container.textContent).toContain('system-prompt')
+    expect(container.textContent).toContain('assistant-prefill off')
     expect(container.textContent).toContain('preserve:off')
     expect(container.textContent).toContain('glm:replay')
     expect(container.textContent).toContain('tool-stream:on')
@@ -397,12 +401,12 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('multimodal:on · image:on · audio:on · video:off')
     expect(container.textContent).toContain('thinking-control:reasoning-effort')
     expect(container.textContent).toContain(
-      'controls:tool-choice,required,named,parallel,system-prompt,prompt-cache,usage',
+      'controls:tool-choice,required,named,parallel,system-prompt,assistant-prefill off,prompt-cache,usage',
     )
     expect(container.textContent).toContain('note:verified by runtime discovery')
     expect(container.textContent).toContain('behavior:inline-tools,argv-preflight,anthropic-cache')
     expect(container.textContent).toContain(
-      'controls:tool-choice,required,named,parallel,system-prompt,prompt-cache,usage',
+      'controls:tool-choice,required,named,parallel,system-prompt,assistant-prefill off,prompt-cache,usage',
     )
     expect(container.textContent).toContain('price-in:0.1')
     expect(container.textContent).toContain('effective · source:agent-core-provider-config-model · ctx:131072 · out:65536')

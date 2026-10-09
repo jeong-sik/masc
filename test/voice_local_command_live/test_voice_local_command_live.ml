@@ -6,15 +6,20 @@
    practice -- a flag that moved, a command that writes to stdout instead of
    the file -- is only visible here.
 
-   Skipped where [say] is not installed, which is every machine that is not a
-   mac, including CI. The skip prints its reason before the runner starts,
-   because alcotest captures per-case output and a reason printed inside a case
-   is not shown for a case that passed. *)
+   Each command's cases run only where that command is installed: the say
+   cases on a mac, the espeak-ng cases where espeak-ng is. A machine with
+   neither -- CI included -- runs nothing. The skip prints its reason before
+   the runner starts, because alcotest captures per-case output and a reason
+   printed inside a case is not shown for a case that passed. *)
 
-let say_is_installed () =
-  match Unix.system "command -v say > /dev/null 2>&1" with
+let command_is_installed command =
+  match Unix.system (Printf.sprintf "command -v %s > /dev/null 2>&1" command) with
   | Unix.WEXITED 0 -> true
   | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false
+
+let say_is_installed () = command_is_installed "say"
+
+let espeak_is_installed () = command_is_installed "espeak-ng"
 
 let endpoint =
   { Voice_config.id = "macos-say"
@@ -124,22 +129,186 @@ let test_the_installed_voices_can_be_listed () =
            voice.Masc.Voice_bridge.voice_language = Some "ko_KR")
          voices)
 
+let espeak_endpoint =
+  { Voice_config.id = "espeak-local"
+  ; kind = Voice_config.Espeak_ng
+  ; base_url = None
+  ; mcp_url = None
+  ; health_url = None
+  ; api_key_env = None
+  ; enabled = true
+  ; timeout_seconds = None
+  ; default_voice = None
+  ; command = None
+  ; model = None
+  }
+
+(* espeak-ng through masc's own transport, for real. Korean on purpose, like
+   the say case: it has to reach the Korean voice, not just any voice. *)
+let test_espeak_writes_audio_that_can_be_played () =
+  let output_file = Filename.temp_file "masc_espeak_live_" ".wav" in
+  Fun.protect
+    ~finally:(fun () ->
+      try Sys.remove output_file with
+      | Sys_error _ -> ())
+    (fun () ->
+      match
+        Voice_bridge_transport.speak_via_command_to_file
+          espeak_endpoint
+          ~message:sentence
+          ~voice:"ko"
+          ~output_file
+      with
+      | Error message -> Alcotest.fail message
+      | Ok file_size ->
+        Alcotest.(check bool)
+          (Printf.sprintf "espeak-ng wrote %d bytes of audio" file_size)
+          true (file_size > 1024);
+        Alcotest.(check bool) "and the file is where it was asked for" true
+          (Sys.file_exists output_file))
+
+(* A message that looks like an option must be spoken, not obeyed. Without the
+   end-of-options marker espeak-ng reads "-w<path>" as a second -w and writes
+   the clip there; measured 2026-10-07, espeak-ng 1.52.0. The case asserts the
+   clip lands in the asked-for file and the path named inside the message is
+   never created. *)
+let test_an_espeak_message_that_looks_like_an_option_writes_nothing_else () =
+  let output_file = Filename.temp_file "masc_espeak_live_" ".wav" in
+  let decoy = Filename.temp_file "masc_espeak_decoy_" ".wav" in
+  Sys.remove decoy;
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter
+        (fun file ->
+          try Sys.remove file with
+          | Sys_error _ -> ())
+        [ output_file; decoy ])
+    (fun () ->
+      match
+        Voice_bridge_transport.speak_via_command_to_file
+          espeak_endpoint
+          ~message:("-w" ^ decoy)
+          ~voice:"en"
+          ~output_file
+      with
+      | Error message -> Alcotest.fail message
+      | Ok file_size ->
+        Alcotest.(check bool) "the asked-for file holds the audio" true (file_size > 1024);
+        Alcotest.(check bool) "the path inside the message was not written" false
+          (Sys.file_exists decoy))
+
+(* The mirror of the say case above. Measured 2026-10-07 with espeak-ng
+   1.52.0: an unknown voice exits 1 with "Error: The specified espeak-ng
+   voice does not exist." and writes no file. Loud, where say is silent --
+   which is why the catalogue check for this kind fails fast with the name
+   rather than catching a silent fallback. *)
+let test_an_unknown_espeak_voice_fails_loudly () =
+  let output_file = Filename.temp_file "masc_espeak_live_" ".wav" in
+  Fun.protect
+    ~finally:(fun () ->
+      try Sys.remove output_file with
+      | Sys_error _ -> ())
+    (fun () ->
+      match
+        Voice_bridge_transport.speak_via_command_to_file
+          espeak_endpoint
+          ~message:sentence
+          ~voice:"NoSuchVoiceExists"
+          ~output_file
+      with
+      | Error message ->
+        Alcotest.(check bool) "espeak-ng's own refusal reaches the caller" true
+          (Astring.String.is_infix ~affix:"does not exist" message)
+      | Ok size ->
+        Alcotest.failf "espeak-ng spoke %d bytes for a voice it does not have" size)
+
+(* The catalogue off this machine: 142 lines -- a header and 141 voices -- on
+   the one that measured it. Each row needs an id, at least one voice is
+   Korean, and at least one row carries an alias -- the (en 3) after
+   English_(America) -- without which a bare -v en would fail the catalogue
+   check while the command itself answers to it. *)
+let test_the_installed_espeak_voices_can_be_listed () =
+  match Masc.Voice_bridge.list_voices espeak_endpoint with
+  | Error message -> Alcotest.fail message
+  | Ok voices ->
+    Alcotest.(check bool)
+      (Printf.sprintf "espeak-ng listed %d voices" (List.length voices))
+      true
+      (List.length voices > 10);
+    List.iter
+      (fun (voice : Masc.Voice_bridge.catalogue_voice) ->
+        if String.trim voice.Masc.Voice_bridge.voice_id = ""
+        then Alcotest.fail "a listed voice has no id to choose")
+      voices;
+    Alcotest.(check bool) "and at least one of them is Korean" true
+      (List.exists
+         (fun (voice : Masc.Voice_bridge.catalogue_voice) ->
+           voice.Masc.Voice_bridge.voice_language = Some "ko")
+         voices);
+    Alcotest.(check bool) "and at least one carries an alias" true
+      (List.exists
+         (fun (voice : Masc.Voice_bridge.catalogue_voice) ->
+           voice.Masc.Voice_bridge.voice_aliases <> [])
+         voices);
+    (* --voices shows spaces as underscores and -v wants them back, so the
+       stored id is the restored name. If no id carries a space, the
+       restoration stopped running and multi-word voices fail when chosen. *)
+    Alcotest.(check bool) "and a stored name has its spaces back" true
+      (List.exists
+         (fun (voice : Masc.Voice_bridge.catalogue_voice) ->
+           String.contains voice.Masc.Voice_bridge.voice_id ' ')
+         voices)
+
 let () =
-  if not (say_is_installed ())
+  let say_here = say_is_installed () in
+  let espeak_here = espeak_is_installed () in
+  if not say_here && not espeak_here
   then
     print_endline
-      "voice_local_command_live: skipped, say is not installed (this suite runs on macOS)"
-  else
+      "voice_local_command_live: skipped, neither say nor espeak-ng is installed"
+  else (
+    if not say_here
+    then print_endline "voice_local_command_live: say cases skipped, say is not installed";
+    if not espeak_here
+    then
+      print_endline
+        "voice_local_command_live: espeak-ng cases skipped, espeak-ng is not installed";
+    let speaking =
+      (if say_here
+       then
+         [ Alcotest.test_case "say writes audio that can be played" `Quick
+             test_say_writes_audio_that_can_be_played
+         ; Alcotest.test_case "an unknown voice does not fail" `Quick
+             test_an_unknown_voice_does_not_fail
+         ]
+       else [])
+      @
+      if espeak_here
+      then
+        [ Alcotest.test_case "espeak-ng writes audio that can be played" `Quick
+            test_espeak_writes_audio_that_can_be_played
+        ; Alcotest.test_case "an option-looking message writes nothing else" `Quick
+            test_an_espeak_message_that_looks_like_an_option_writes_nothing_else
+        ; Alcotest.test_case "an unknown espeak-ng voice fails loudly" `Quick
+            test_an_unknown_espeak_voice_fails_loudly
+        ]
+      else []
+    in
+    let listing =
+      (if say_here
+       then
+         [ Alcotest.test_case "the installed voices can be listed" `Quick
+             test_the_installed_voices_can_be_listed
+         ]
+       else [])
+      @
+      if espeak_here
+      then
+        [ Alcotest.test_case "the installed espeak-ng voices can be listed" `Quick
+            test_the_installed_espeak_voices_can_be_listed
+        ]
+      else []
+    in
     Alcotest.run
       "voice_local_command_live"
-      [ ( "speaking for real"
-        , [ Alcotest.test_case "say writes audio that can be played" `Quick
-              test_say_writes_audio_that_can_be_played
-          ; Alcotest.test_case "an unknown voice does not fail" `Quick
-              test_an_unknown_voice_does_not_fail
-          ] )
-        ; ( "listing for real"
-          , [ Alcotest.test_case "the installed voices can be listed" `Quick
-                test_the_installed_voices_can_be_listed
-            ] )
-      ]
+      [ "speaking for real", speaking; "listing for real", listing ])

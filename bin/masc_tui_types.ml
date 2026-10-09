@@ -7641,9 +7641,12 @@ let retire_identity_login_state (state : state) retirement =
   let keep ~keeper ~provider ~expires_at =
     not (disappeared ~keeper ~provider)
     && (match retirement with
-       | Login_provider_inventory (name, providers) ->
-           not (String.equal keeper name
-                && identity_provider_attached ~providers ~provider_id:provider)
+       (* The catalog only says the provider is attached, not which attempt
+          attached it: on a re-login the previous credentials still report
+          attached and would drop the fresh consent URL before its attempt
+          ended. An inventory retire therefore keeps consent URLs; the
+          attempt's own terminal status or its deadline ends them. *)
+       | Login_provider_inventory _ -> true
        | Login_keeper_inventory _ -> true
        | Login_deadline now -> expires_at > now)
   in

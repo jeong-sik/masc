@@ -707,12 +707,16 @@ let test_switching_keepers_retains_each_consent_url () =
     ["https://auth/A"] (pending_urls state "A");
   check (Alcotest.list Alcotest.string) "B has its own consent URL"
     ["https://auth/B"] (pending_urls state "B");
+  (* An attached inventory does not end a login attempt: the previous
+     credentials still report attached during a re-login, so the consent
+     URL stays until its attempt reports terminal or its deadline passes. *)
   Masc_tui_types.retire_identity_logins state ~keeper_name:"B"
-    ~providers:[declared ~tools:[] "atlassian" "Atlassian"];
-  check (Alcotest.list Alcotest.string) "B's completion preserves A's URL"
+    ~providers:[declared ~tools:["sendMessage"] "atlassian" "Atlassian"];
+  check (Alcotest.list Alcotest.string) "an attached report preserves A's URL"
     ["https://auth/A"] (pending_urls state "A");
-  check (Alcotest.list Alcotest.string) "B's completed login stops polling"
-    [] (pending_urls state "B")
+  check (Alcotest.list Alcotest.string)
+    "an attached report keeps B's re-login consent URL open"
+    ["https://auth/B"] (pending_urls state "B")
 
 let test_multiple_providers_complete_independently () =
   let state = identity_state () in
@@ -725,8 +729,11 @@ let test_multiple_providers_complete_independently () =
   Masc_tui_types.retire_identity_logins state ~keeper_name:"A"
     ~providers:[declared ~tools:["sendMessage"] "slack" "Slack";
                 declared "atlassian" "Atlassian"];
-  check (Alcotest.list Alcotest.string) "unfinished provider stays pending"
-    ["https://auth/A/atlas"] (pending_urls state "A");
+  (* Tools on the row may belong to the previous credentials of a re-login;
+     only the attempt's own terminal status retires the consent URL. *)
+  check (Alcotest.list Alcotest.string)
+    "an attached provider's pending consent URL stays open"
+    ["https://auth/A/atlas"; "https://auth/A/slack"] (pending_urls state "A");
   check (Alcotest.list Alcotest.string) "another keeper's Slack stays pending"
     ["https://auth/B/slack"] (pending_urls state "B")
 

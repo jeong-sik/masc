@@ -114,6 +114,12 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # context_review = false       # source Context + proposed summary preservation review
 # skill_applicability = false  # current request + authorized Skill body advice
 # librarian_preflight = false # Memory-only no-change judgment; generates no text
+# workspace_memory_selection_enabled = false
+# Set true separately to send current input/task context, shared interpretations
+# and source details for host-side shared-memory selection. Board/absorb opt-in
+# does not enable this gate. Lane credentials and excluded_keepers still apply.
+# Capacity-driven host-memory retries support Agent Core, Codex and Claude Code.
+# Muse/Antigravity lack that retry path when their memory reader is suppressed.
 # excluded_keepers = []
 
 # max_output_tokens is the output budget a lane's requests send as max_tokens.
@@ -1372,10 +1378,6 @@ path = "~/.gemini/antigravity-cli/antigravity-oauth-token"
 [models.antigravity-gemini-3-7-flash-high]
 api-name = "gemini-3.7-flash-high"
 max-context = 1048576
-# Last prompt size proven end to end with agy 1.2.6 on 2026-09-18. Long-lived
-# Keepers later reached 21-48 MB and failed before their first turn (#37123).
-# This conservative ceiling is a measured success point, not the CLI maximum
-# or a tokenizer estimate; raise it only after a larger end-to-end probe.
 tools-support = true
 streaming = true
 
@@ -1386,7 +1388,6 @@ wizard-default = true
 # The rest of `agy models` (2026-09-22); the level is part of each name.
 # Gemini windows are the agent_core catalog's; the two Claude 4.6 models
 # carry Anthropic's published 1M (OpenRouter /models) and gpt-oss-120b 131072.
-# The prompt ceiling is the same measured agy 1.2.6 point as the row above.
 # Called that day: claude-sonnet-4-6 and claude-opus-4-6-thinking answered in
 # 8-10s; every gemini model, the one above included, gave no answer in 80s;
 # gpt-oss-120b-medium answered 503 "No capacity available".

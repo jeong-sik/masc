@@ -98,25 +98,13 @@ let system_instructions_label () =
 let current_goal_label () = required_label (Antigravity_input_frame.current_goal_label ())
 let prompt_section_separator = Antigravity_input_frame.section_separator
 
-let measure_model_input_message_bytes (message : Agent_core.Types.message) =
-  String.length (Host.history_role_label message.role)
-  + String.length (Host.encode_history_message message)
-  + String.length prompt_section_separator
-;;
-
-let prompt_section_framing_reserved_bytes () =
-  String.length (system_instructions_label ())
-  + String.length (current_goal_label ())
-  + (2 * String.length prompt_section_separator)
-;;
-
 (* The carried front is a position in durable checkpoint history, so admit it
    before the source projection appends its bounded Gate replay reference.
-   The byte window still runs last and therefore charges every message that
-   can reach the CLI. Its observation is mapped back to the durable history:
-   a source-only atom is transmitted context, but cannot become a front that
-   a later checkpoint history is expected to open. *)
-let bounded_history_projection ~capacity_bytes ~reserved_bytes
+   The range goes out as composed, as on Claude Code's first attempt, and
+   the CLI compacts its own conversation. The observation is mapped back to
+   the durable history: a source-only atom is transmitted context, but cannot
+   become a front that a later checkpoint history is expected to open. *)
+let carried_history_projection
     ?on_model_input_window_observation ?carried_front_seed ?librarian_front ?on_carried_front
     ~turn_start ~keeper_name ~runtime_id source_projection
   : Agent_core.Agent.model_input_projection
@@ -124,18 +112,9 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
   fun history_messages ->
   let* librarian_front = Host.read_librarian_front librarian_front history_messages in
   let carried_front_seed = Host.read_seed_once carried_front_seed in
-  (* The window drops atoms, never a pinned message, so a request whose
-     pinned messages -- the hooks' system context and the preamble -- exceed
-     what the fixed sections leave is refused for every front. A working
-     state is pinned too, and whether it goes is decided before anything is
-     sent ([Host.compose_librarian_range], RFC-0460): it is carried only
-     where it displaces none of the range's atoms, and otherwise the
-     Librarian position goes alone. The empty history stays open to every
-     composition, because that decision is what keeps a working state from
-     going out with no turn to answer; a range with none is the ceiling
-     saying it cannot hold one atom of this conversation, and the goal and
-     system prompt still go out, as the Claude Code lane's shrink floor
-     composes on purpose. *)
+  (* Nothing cuts the range, so a working state a Librarian snapshot names
+     displaces none of its atoms and goes in front of it
+     ([Host.compose_librarian_range], RFC-0460). *)
   let compose librarian_front =
     let carried =
       Host.carried_start_range
@@ -147,12 +126,12 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
         ~turn_start
         history_messages
     in
-    Host.window_carried_range
-      ~measure_message_bytes:measure_model_input_message_bytes
-      ~capacity_bytes
-      ~reserved_bytes
-      ?source_projection
-      carried
+    let* sent =
+      match source_projection with
+      | None -> Ok carried.Host.messages
+      | Some project -> project carried.Host.messages
+    in
+    Ok { Host.carried; sent; atoms_kept = Host.carried_atoms carried }
   in
   let* windowed =
     Host.compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front
@@ -173,47 +152,6 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
             (Host.windowed_projection windowed)))
     on_model_input_window_observation;
   Ok windowed.Host.sent
-;;
-
-let capacity_bounded_model_input_projection ~prompt_ceiling_bytes
-    ~system_prompt ~goal ?on_model_input_window_observation ?carried_front_seed
-    ?librarian_front ?on_carried_front ~turn_start ~keeper_name ~runtime_id source_projection
-  =
-  match prompt_ceiling_bytes with
-  | None ->
-    Error
-      (config_error
-         ~field:"prompt_ceiling_bytes"
-         "Antigravity requires a resolvable max-context because the CLI has no typed oversized-input refusal")
-  | Some capacity_bytes ->
-    let reserved_bytes =
-      String.length system_prompt
-      + String.length goal
-      + prompt_section_framing_reserved_bytes ()
-    in
-    if reserved_bytes >= capacity_bytes
-    then
-      Error
-        (config_error
-           ~field:"prompt_ceiling_bytes"
-           (Printf.sprintf
-              "Antigravity fixed prompt sections measure %d bytes, at or above the %d-byte prompt ceiling"
-              reserved_bytes
-              capacity_bytes))
-    else
-      Ok
-        (Some
-           (bounded_history_projection
-              ~capacity_bytes
-              ~reserved_bytes
-              ?on_model_input_window_observation
-              ?carried_front_seed
-              ?librarian_front
-              ?on_carried_front
-              ~turn_start
-              ~keeper_name
-              ~runtime_id
-              source_projection))
 ;;
 
 let prompt_for_turn ?composed_context ~held ~is_resume ~goal (prepared : Host.prepared_turn) =
@@ -621,18 +559,6 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       | None -> Ok goal
       | Some blocks -> Host.text_of_blocks ~runtime_label ~field:"goal_blocks" blocks
     in
-    let prompt_ceiling_bytes =
-      Runtime_inference.resolve_prompt_capacity_bytes ~runtime_id
-    in
-    let* capacity_bytes =
-      match prompt_ceiling_bytes with
-      | Some capacity_bytes -> Ok capacity_bytes
-      | None ->
-        Error
-          (config_error
-             ~field:"prompt_ceiling_bytes"
-             "Antigravity requires a resolvable max-context because the CLI has no typed oversized-input refusal")
-    in
     let* () = match official_task_reference with
       | None -> Ok ()
       | Some _ -> Error (config_error ~field:"official_client_session.context_admission"
@@ -723,11 +649,8 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
                  (runtime_label ^ " runtime model input projection raised: " ^ Printexc.to_string exn)) in
            Ok {prepared with messages})
       else
-        let* capacity_projection =
-          capacity_bounded_model_input_projection
-            ~prompt_ceiling_bytes
-            ~system_prompt:prepared.system_prompt
-            ~goal
+        let project =
+          carried_history_projection
             ?on_model_input_window_observation
             ?carried_front_seed
             ?librarian_front
@@ -738,17 +661,14 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
             model_input_projection
         in
         let* messages =
-          match capacity_projection with
-          | None -> Ok prepared.messages
-          | Some project ->
-            (try project prepared.messages with
-             | Eio.Cancel.Cancelled _ as exn -> raise exn
-             | exn ->
-               Error
-                 (Host.internal_error
-                    (runtime_label
-                     ^ " runtime model input projection raised: "
-                     ^ Printexc.to_string exn)))
+          try project prepared.messages with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn ->
+            Error
+              (Host.internal_error
+                 (runtime_label
+                  ^ " runtime model input projection raised: "
+                  ^ Printexc.to_string exn))
         in
         Ok { prepared with messages }
     in
@@ -768,31 +688,18 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
        delivery cannot prove these blocks remain in its current model input,
        so keep the frontier's held set empty and resend on every resume. *)
     let* prompt = prompt_for_turn ?composed_context ~held:[] ~is_resume ~goal prepared in
-    let* () =
-      if String.length prompt <= capacity_bytes
-      then Ok ()
-      else
-        Error
-          (config_error
-             ~field:"prompt_ceiling_bytes"
-             (Printf.sprintf
-                "Antigravity final prompt measures %d bytes, above the %d-byte prompt ceiling"
-                (String.length prompt)
-                capacity_bytes))
-    in
     (* Recording the half this process controls, mirroring the Codex and
        Claude Code composition lines: an oversized prompt was invisible until
        the client's own log showed promptLength=11,386,764 (2026-08-14). *)
     Log.Keeper.info
       ~keeper_name
       "%s turn composition: mode=%s prompt_bytes=%d system_prompt_bytes=%d \
-       goal_bytes=%d prompt_ceiling_bytes=%s"
+       goal_bytes=%d"
       runtime_label
       (if is_resume then "resume" else "start")
       (String.length prompt)
       (String.length prepared.system_prompt)
-      (String.length goal)
-      (string_of_int capacity_bytes);
+      (String.length goal);
     (* Measurement for the held-set decision: the same blocks with the same
        digest on consecutive resumes are what a held set would skip. *)
     if is_resume
@@ -1508,22 +1415,5 @@ module For_testing = struct
     List.rev !emitted
   ;;
 
-  let capacity_bounded_model_input_projection =
-    capacity_bounded_model_input_projection
-  ;;
-
-  let start_prompt_bytes ~system_prompt ~goal messages =
-    let prepared : Host.prepared_turn =
-      { messages; system_prompt; tools = []; reasoning_effort = None }
-    in
-    Result.map String.length (prompt_for_turn ~held:[] ~is_resume:false ~goal prepared)
-  ;;
-
-  let reserved_prompt_bytes ~system_prompt ~goal =
-    String.length system_prompt
-    + String.length goal
-    + prompt_section_framing_reserved_bytes ()
-  ;;
-
-  let measure_model_input_message_bytes = measure_model_input_message_bytes
+  let carried_history_projection = carried_history_projection
 end

@@ -34,6 +34,12 @@
 # operator does.
 
 # Anthropic Models
+# Assistant-prefill exclusions verified 2026-10-09 against primary guides:
+# Fable 5 and Mythos 5/Preview: https://platform.claude.com/docs/en/models/fable-5/migration-guide
+# Fable 5.1: https://platform.claude.com/docs/en/models/fable-5-1/migration-guide
+# Opus 5/5.5: https://platform.claude.com/docs/en/models/opus-5-5/migration-guide
+# Sonnet 5/5.5: https://platform.claude.com/docs/en/models/sonnet-5-5/migration-guide
+# These are explicit catalog facts; unknown models keep the base default.
 # Current Claude model limits and thinking modes are sourced from the official
 # Claude Platform model overview / adaptive-thinking docs (checked 2026-07-10).
 # Static pricing rows use standard rates; time-limited promotional pricing is
@@ -48,6 +54,7 @@ id_prefix = "claude-fable-5"
 base = "anthropic"
 supports_top_k = false
 ignored_sampling_parameters = ["temperature", "top_p", "top_k"]
+supports_assistant_prefill = false
 anthropic_thinking_control = "always_adaptive"
 accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
 max_context_tokens = 1000000
@@ -70,6 +77,7 @@ id_prefix = "claude-fable-5-1"
 base = "anthropic"
 supports_top_k = false
 ignored_sampling_parameters = ["temperature", "top_p", "top_k"]
+supports_assistant_prefill = false
 anthropic_thinking_control = "always_adaptive"
 accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
 max_context_tokens = 1000000
@@ -172,6 +180,7 @@ cache_read_multiplier = 0.0333
 [[models]]
 id_prefix = "claude-mythos-5"
 base = "anthropic"
+supports_assistant_prefill = false
 anthropic_thinking_control = "always_adaptive"
 accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
 max_context_tokens = 1000000
@@ -182,6 +191,7 @@ output_per_million = 50.0
 [[models]]
 id_prefix = "claude-mythos-preview"
 base = "anthropic"
+supports_assistant_prefill = false
 anthropic_thinking_control = "always_adaptive"
 accepted_reasoning_efforts = ["low", "medium", "high", "max"]
 max_context_tokens = 1000000
@@ -199,6 +209,7 @@ id_prefix = "claude-opus-5-5"
 base = "anthropic"
 supports_top_k = false
 ignored_sampling_parameters = ["temperature", "top_p", "top_k"]
+supports_assistant_prefill = false
 anthropic_thinking_control = "always_adaptive"
 accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
 max_context_tokens = 1000000
@@ -227,6 +238,7 @@ id_prefix = "claude-sonnet-5-5"
 base = "anthropic"
 supports_top_k = false
 ignored_sampling_parameters = ["temperature", "top_p", "top_k"]
+supports_assistant_prefill = false
 anthropic_thinking_control = "adaptive_between_tools"
 accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
 max_context_tokens = 1000000
@@ -243,6 +255,7 @@ id_prefix = "claude-sonnet-5"
 base = "anthropic"
 supports_top_k = false
 ignored_sampling_parameters = ["temperature", "top_p", "top_k"]
+supports_assistant_prefill = false
 anthropic_thinking_control = "adaptive_default"
 accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
 max_context_tokens = 1000000

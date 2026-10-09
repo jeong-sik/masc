@@ -20,6 +20,7 @@ type unavailable_reason =
   | Context_review_disabled
   | Skill_applicability_disabled
   | Librarian_preflight_disabled
+  | Workspace_memory_selection_disabled
   | Keeper_excluded
       (** the keeper is named in [\[typesafeai\] excluded_keepers]: nothing of
           it reaches the vendor, whichever gate asks *)
@@ -53,6 +54,13 @@ val absorb_gate_destinations : keeper_id:string -> (destinations, unavailable_re
 val librarian_preflight_destinations : keeper_id:string -> (destinations, unavailable_reason) result
 (** Explicit opt-in for no-change judgment. Keeper exclusions and lane
     credentials still apply; disabled by default. *)
+
+val workspace_memory_selection_destinations :
+  keeper_id:string -> (destinations, unavailable_reason) result
+(** Independent opt-in for host selection of shared memory. Disabled by default;
+    may send current input, task context, shared interpretations and source
+    details to the configured destinations. Lane, keys and Keeper exclusions
+    still apply. Board or absorption opt-in does not enable this gate. *)
 
 val board_attention_destinations : keeper_id:string -> (destinations, unavailable_reason) result
 (** The same for the Board attention judgment

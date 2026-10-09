@@ -5525,7 +5525,7 @@ let test_main_eio_rejects_same_base_path_on_second_server () =
             Alcotest.skip ()
           end;
           let lease_path =
-            Server_startup_takeover.base_path_lock_path
+            Server_startup_takeover.For_testing.lease_path
               ~run_dir:(Unix.realpath (Host_config.from_env ()).base_path_lease_dir)
               ~canonical_base_path
           in

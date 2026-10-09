@@ -3041,6 +3041,37 @@ let test_empty_new_response_does_not_replace_prior_message () =
     ((List.hd (List.rev items)).origin = Transcript.Reply_of_segment 0)
 ;;
 
+let test_scoped_details_retire_prior_model_activity () =
+  List.iter (fun activity ->
+    let t = fresh () in
+    feed t [Live.Run_started;
+      Live.Stream_model_started {stream_scope=Some 1;message_id=Some "first";
+        model="first-model";usage=None};
+      Live.Text {text="earlier response";stream_scope=Some 1};activity];
+    let body = Transcript.drawn t in
+    let observed = progress_text ~now:(origin +. 40.) t in
+    check bool "prior response has observed quiet activity" true
+      (contains ~needle:"nothing back for" observed);
+    feed ~now:(origin +. 20.) t
+      [Live.Stream_details {stream_scope=Some 1;usage=None;
+        stop_reason=Some Agent_core.Types.StopToolUse}];
+    check string "same-scope details preserve model activity and its observation age"
+      observed (progress_text ~now:(origin +. 40.) t);
+    feed ~now:(origin +. 30.) t
+      [Live.Stream_details {stream_scope=Some 2;usage=None;
+        stop_reason=Some Agent_core.Types.StopToolUse}];
+    let incoming = progress_text ~now:(origin +. 40.) t in
+    check bool "details-only response cannot inherit prior streaming or thinking" false
+      (contains ~needle:"STREAMING" incoming || contains ~needle:"THINKING" incoming);
+    check bool "details-only response cannot inherit prior model quiet age" false
+      (contains ~needle:"nothing back for" incoming);
+    check phase "new response metadata keeps Keeper turn running" Transcript.Working
+      (Transcript.phase t);
+    check bool "retiring model activity preserves prior authored stretches" true
+      (body=Transcript.drawn t))
+    [Live.Text {text=" continued";stream_scope=Some 1};Live.Thinking "observed reasoning"]
+;;
+
 let test_scoped_details_retire_prior_response_usage () =
   let t = fresh () in
   let initial : Live.stream_usage =
@@ -3093,7 +3124,8 @@ let test_late_scoped_start_fills_only_unobserved_usage () =
 
 let () =
   run "tui_keeper_chat_transcript"
-    [ ( "response boundaries", [test_case "scoped details retire prior response usage" `Quick test_scoped_details_retire_prior_response_usage;
+    [ ( "response boundaries", [test_case "scoped details retire prior model activity" `Quick test_scoped_details_retire_prior_model_activity;
+      test_case "scoped details retire prior response usage" `Quick test_scoped_details_retire_prior_response_usage;
       test_case "late scoped start fills only unobserved usage" `Quick test_late_scoped_start_fills_only_unobserved_usage;
       test_case "boundaries and stable origins" `Quick test_response_boundaries_preserve_origins; test_case "usage reset boundaries" `Quick test_usage_resets_only_at_response_boundaries; test_case "new response without text" `Quick test_empty_new_response_does_not_replace_prior_message])
     ; ( "event timeline"

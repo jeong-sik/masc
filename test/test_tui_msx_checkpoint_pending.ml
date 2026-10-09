@@ -19,22 +19,30 @@ let test_restart_and_exact_retirement () = with_root (fun root ->
   let save = binding ~root "save-before-restart" false in
   check int "reader initialized before another writer" 0 (List.length (require (Pending.load ~masc_root:root)));
   require (Pending.remember ~masc_root:root restore);
+  require (Pending.remember ~masc_root:root restore);
+  check bool "replaying the same operation is idempotent" true
+    (List.length (require (Pending.load ~masc_root:root)) = 1);
   check bool "next inventory read observes the other writer" true
     (List.mem restore (require (Pending.load ~masc_root:root)));
-  require (Pending.remember ~masc_root:root save);
-  (* The reader shares no process-local pending map with the writer. Both
-     bindings remain inspectable after reconstructing all client state. *)
+  check bool "a different operation cannot enter while the workspace has a pending intent" true
+    (Result.is_error (Pending.remember ~masc_root:root save));
+  (* The reader shares no process-local pending map with the writer. The
+     unresolved binding remains inspectable after reconstructing client state. *)
   let recovered = require (Pending.load ~masc_root:root) in
-  check int "all unresolved operations survive restart" 2 (List.length recovered);
+  check int "the unresolved operation survives restart" 1 (List.length recovered);
   check bool "the original restore identity is recovered" true (List.mem restore recovered);
   let other_base = {save with base_path=Filename.concat root "different-base"} in
   check bool "same root does not authorize rewriting the captured base" true
     (Result.is_error (Pending.remember ~masc_root:root other_base));
   check bool "captured workspace survives a caller with another base" true
-    (List.mem save (require (Pending.load ~masc_root:root)));
+    (List.mem restore (require (Pending.load ~masc_root:root)));
   require (Pending.forget ~masc_root:root restore);
-  check bool "verifying one operation cannot clear another" true
+  require (Pending.remember ~masc_root:root save);
+  check bool "retiring the exact operation admits the next one" true
     (require (Pending.load ~masc_root:root) = [save]);
+  require (Pending.forget ~masc_root:root save);
+  check int "retiring the last operation empties the workspace gate" 0
+    (List.length (require (Pending.load ~masc_root:root)));
   with_root (fun other -> check int "another workspace has no inherited gate" 0
     (List.length (require (Pending.load ~masc_root:other)))))
 let test_corruption_is_not_an_empty_gate () = with_root (fun root ->

@@ -571,24 +571,25 @@ let checkpoint_operation_response ~(config : Workspace.config) ~restore ~body =
         | Ok (Ok (Existing receipt)) -> `OK, `Assoc (receipt_json ~config receipt)
         | Ok (Ok Accepted) ->
             let run () =
-              let settled =
-                try match Tool_misc_msx_lane.run_checkpoint ~restore ~base_path:config.base_path ~slot:binding.slot with
-                | Ok completed -> Checkpoint_receipt.Committed {
-                    mark=completed.mark;checkpoint_sha256=completed.checkpoint_sha256}
-                | Error (Msx_lane.Effect_unknown detail) -> Unknown detail
-                | Error error -> Refused (Msx_lane.error_to_string error)
-                with
-                | Eio.Cancel.Cancelled _ as exn -> raise exn
-                | exn -> Checkpoint_receipt.Unknown (Printexc.to_string exn) in
-              (* Publish from the worker, even when its HTTP caller stopped
-                 waiting. A failed store write must never manufacture success. *)
-              match settle_checkpoint_effect ~restore
-                ~persist:(fun state ->
-                  Checkpoint_receipt.settle ~path ~epoch:checkpoint_epoch binding state
-                  |> Result.map_error Checkpoint_receipt.error_to_string)
-                ~notify:(fun () -> machine_changed ~config) settled with
-              | Error message -> Error message
-              | Ok () -> Ok {Checkpoint_receipt.binding;epoch=checkpoint_epoch;state=settled} in
+              Eio.Cancel.protect (fun () ->
+                let settled =
+                  try match Tool_misc_msx_lane.run_checkpoint ~restore ~base_path:config.base_path ~slot:binding.slot with
+                  | Ok completed -> Checkpoint_receipt.Committed {
+                      mark=completed.mark;checkpoint_sha256=completed.checkpoint_sha256}
+                  | Error (Msx_lane.Effect_unknown detail) -> Unknown detail
+                  | Error error -> Refused (Msx_lane.error_to_string error)
+                  with
+                  | Eio.Cancel.Cancelled _ as exn -> Checkpoint_receipt.Unknown (Printexc.to_string exn)
+                  | exn -> Checkpoint_receipt.Unknown (Printexc.to_string exn) in
+                (* Publish from the worker, even when its HTTP caller stopped
+                   waiting. A failed store write must never manufacture success. *)
+                match settle_checkpoint_effect ~restore
+                  ~persist:(fun state ->
+                    Checkpoint_receipt.settle ~path ~epoch:checkpoint_epoch binding state
+                    |> Result.map_error Checkpoint_receipt.error_to_string)
+                  ~notify:(fun () -> machine_changed ~config) settled with
+                | Error message -> Error message
+                | Ok () -> Ok {Checkpoint_receipt.binding;epoch=checkpoint_epoch;state=settled}) in
             (match Executor_pool_ref.submit_strict run with
              | Ok (Ok receipt) ->
                  `OK, `Assoc (receipt_json ~config receipt)

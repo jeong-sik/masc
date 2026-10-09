@@ -1752,7 +1752,7 @@
  (name masc_tui_msx_checkpoint_pending)
  (wrapped false)
  (modules masc_tui_msx_checkpoint_pending)
- (libraries masc.keeper_operation_identity masc.machine_checkpoint yojson unix))
+ (libraries masc.keeper_operation_identity masc.machine_checkpoint masc.masc_process yojson unix))
 
 (library
  (name masc_tui_msx_tick)

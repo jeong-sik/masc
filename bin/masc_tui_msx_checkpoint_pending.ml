@@ -45,41 +45,50 @@ let load ~masc_root = protect (fun () ->
           if binding.masc_root <> masc_root then Error "checkpoint intent workspace root differs"
           else if file <> name binding then Error "checkpoint intent filename differs from binding"
           else Ok (binding :: held)) (Ok []) (Sys.readdir dir))
+let with_workspace_lock ~masc_root f =
+  let path = Filename.concat (Filename.concat masc_root "tui") "checkpoint-pending.lock" in
+  match File_lock_eio.with_durable_lock ~lock_path:path f with
+  | Ok result -> result
+  | Error error -> Error (File_lock_eio.durable_lock_error_to_string error)
 let remember ~masc_root binding = protect (fun () ->
   let* () = if binding.masc_root = masc_root && not (Filename.is_relative binding.base_path)
     && not (Filename.is_relative masc_root) then Ok () else Error "checkpoint intent workspace differs" in
   let* _ = Machine_checkpoint.slot_of_string binding.slot in
   let parent = Filename.concat masc_root "tui" in
   ensure_directory parent;
-  let dir = directory ~masc_root in
-  ensure_directory dir;
-  let path = Filename.concat dir (name binding) in
-  let* () =
-    if Sys.file_exists path then
-      let* existing = decode (Yojson.Safe.from_file path) in
-      if existing = binding then Ok () else Error "checkpoint intent binding conflict"
-    else Ok () in
-  let tmp, channel = Filename.open_temp_file ~temp_dir:dir ".pending-" ".tmp" in
-  Fun.protect ~finally:(fun () ->
-    close_out_noerr channel;
-    try Unix.unlink tmp with Unix.Unix_error (Unix.ENOENT, _, _) -> ()) (fun () ->
-      Yojson.Safe.to_channel channel (json binding);
-      flush channel;
-      Unix.fsync (Unix.descr_of_out_channel channel);
-      close_out channel;
-      Unix.rename tmp path;
-      fsync_directory dir;
-      Ok ()))
+  with_workspace_lock ~masc_root (fun () ->
+    let dir = directory ~masc_root in
+    ensure_directory dir;
+    let* pending = load ~masc_root in
+    match List.find_opt (fun held -> held.operation_id = binding.operation_id) pending with
+    | Some existing when existing = binding -> Ok ()
+    | Some _ -> Error "checkpoint intent binding conflict"
+    | None when pending <> [] -> Error "another checkpoint intent is unresolved"
+    | None ->
+        let path = Filename.concat dir (name binding) in
+        let tmp, channel = Filename.open_temp_file ~temp_dir:dir ".pending-" ".tmp" in
+        Fun.protect ~finally:(fun () ->
+          close_out_noerr channel;
+          try Unix.unlink tmp with Unix.Unix_error (Unix.ENOENT, _, _) -> ()) (fun () ->
+            Yojson.Safe.to_channel channel (json binding);
+            flush channel;
+            Unix.fsync (Unix.descr_of_out_channel channel);
+            close_out channel;
+            Unix.rename tmp path;
+            fsync_directory dir;
+            Ok ())))
 let forget ~masc_root binding = protect (fun () ->
   let* () = if binding.masc_root = masc_root then Ok () else Error "checkpoint intent workspace differs" in
-  let dir = directory ~masc_root in
-  let path = Filename.concat dir (name binding) in
-  let* () =
-    match Unix.stat path with
-    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ()
-    | _ ->
-        let* existing = decode (Yojson.Safe.from_file path) in
-        if existing <> binding then Error "checkpoint intent binding conflict"
-        else (Unix.unlink path; Ok ()) in
-  fsync_directory dir;
-  Ok ())
+  ensure_directory (Filename.concat masc_root "tui");
+  with_workspace_lock ~masc_root (fun () ->
+    let dir = directory ~masc_root in
+    let path = Filename.concat dir (name binding) in
+    let* () =
+      match Unix.stat path with
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ()
+      | _ ->
+          let* existing = decode (Yojson.Safe.from_file path) in
+          if existing <> binding then Error "checkpoint intent binding conflict"
+          else (Unix.unlink path; Ok ()) in
+    fsync_directory dir;
+    Ok ()))

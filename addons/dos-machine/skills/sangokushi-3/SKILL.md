@@ -72,13 +72,18 @@ whether a digit needs `enter` or what an empty `enter` will do.
   officer carrying food, and the save-slot number. Follow their named steps.
 - Empty `enter` closed the 군사 submenu and gold prompt in the observed run.
   In the war officer list it returned to the command prompt while nobody was
-  sent yet; once an officer has a `*`, it ends the list and advances to gold.
+  sent yet; once an officer has a `*`, it ends the list, and the next prompt
+  is the commander selection (`누구를 총대장으로`) when the run asks for one
+  or the gold amount — do not type a resource amount into the commander
+  prompt.
   At `어떻게 하겠습니까(1-3)` in the save menu, it returns to the command
   prompt.
 - Battle-menu digits act immediately; a following `enter` backs out of the
   menu just opened. During officer placement, `enter` does nothing and `0`
   places the officer. Read those sections before sending another key.
-- `backspace` deletes the last typed digit (`55` became `5`).
+- `backspace` deletes the last typed digit where that was observed (`55`
+  became `5` at a resource prompt). At the commander prompt it had not
+  visibly cleared the field: read the field before `enter` there.
 - `esc` does nothing. At eight prompts — command, submenu, officer list, gold,
   battle menu, move direction, attack type, attack target — the screen stayed
   the same.

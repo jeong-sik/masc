@@ -4021,7 +4021,7 @@ let test_journal_endpoints_preserve_terminal_and_failure_boundaries () =
     (Tui_types.turn_log_holds_the_turn failed);
   check bool "failed execution is not polled again" true (follow state = Tui_types.Follow_nothing);
   let state = fresh () in
-  let checkpoint = E.Reply_details {reply=""; turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint;
+  let checkpoint = E.Reply_details {terminal_stream_scope = None; reply=""; turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint;
       turn_ref=Ids.Turn_ref.make ~trace_id:"boundary" ~absolute_turn:1} in
   ignore (receive state (Ok [start; line 1 2. checkpoint; line 2 3. (E.Run_finished {run_id="boundary"})]));
   (match follow state with

@@ -951,7 +951,7 @@ let test_response_boundaries_and_usage_survive_wire_and_replay () =
       sparse 9;start next_model next_initial;
       ContentBlockDelta {index=2;delta=TextDelta "SUFFIX"};MessageStop];
     let turn_ref = Ids.Turn_ref.make ~trace_id:"trace" ~absolute_turn:1 in
-    publish (E.Reply_details {reply="SUFFIX";turn_outcome=Outcome.Visible_reply;turn_ref});
+    publish (E.Reply_details {terminal_stream_scope = None; reply="SUFFIX";turn_outcome=Outcome.Visible_reply;turn_ref});
     publish (E.Run_finished {run_id="run"});
     check int "each new sealed scope publishes one start, even with a reused or absent id" 2
       (List.length (List.filter (function E.Agent_core_stream_message_start _ -> true | _ -> false) !reversed));

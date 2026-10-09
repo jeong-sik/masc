@@ -11,7 +11,7 @@
  (modules masc_browser_host)
  (public_name masc-browser-host)
  (package masc)
- (libraries masc.browser_host masc.masc_log eio eio_main unix))
+ (libraries masc masc.browser_host masc.masc_log eio eio_main unix))
 
 (executable
  (name masc_reliable_change_g1_check)
@@ -1444,6 +1444,9 @@
   masc.masc_tool_blob_store
   masc_tui_lane_application
   masc_tui_lane_addons
+  masc_tui_lane_installer
+  ;; [tools_evidence_reference] is a [Skill_reference.t].
+  masc_skill_reference
   masc_tui_lane_broadcast_pending
   masc_tui_fusion_launch
   masc_tui_queue_inspection

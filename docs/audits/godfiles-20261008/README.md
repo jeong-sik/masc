@@ -107,6 +107,10 @@ execution protocol; no selection receipt or approval is fabricated here.
 
 ## Next work
 
+The follow-up removes ignored summary helper inputs while retaining the actual
+storage read limit: [#42087](https://github.com/jeong-sik/masc/pull/42087),
+[reaction-summary-inputs/README.md](reaction-summary-inputs/README.md).
+
 Reaction-ledger strict current-row ownership and isolated evidence/cache/ACK checks
 are recorded in [reaction-ledger-wire/README.md](reaction-ledger-wire/README.md).
 

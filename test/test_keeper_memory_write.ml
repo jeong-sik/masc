@@ -845,6 +845,42 @@ let test_demand_recall_does_not_materialize_or_verify_all_memory () =
     (String.equal before (Fs_compat.load_file source_file))
 ;;
 
+let test_same_count_replacement_updates_notice_and_demand_search () =
+  with_temp_dir @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "revision-demand-recall" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let old = fact "Deployment A17 remains under investigation." in
+  let current = fact "Deployment A17 was investigated and is now resolved." in
+  replace_current_facts ~keepers_dir ~keeper_id:meta.name [old];
+  let read () = match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:meta.name with
+    | Ok (Some value) -> value
+    | Ok None -> Alcotest.fail "current snapshot missing"
+    | Error detail -> Alcotest.fail detail in
+  let render now = Masc.Keeper_memory_os_recall.render_if_enabled
+    ~config ~meta ~keepers_dir ~keeper_id:meta.name ~now () |> Option.get in
+  let before = read () in
+  let first_notice = render 100. in
+  Alcotest.(check string) "unchanged store does not change with time" first_notice (render 200.);
+  (match Current.replace ~keepers_dir ~keeper_id:meta.name
+    ~expected_revision:(Some before.revision) ~now:300.
+    ~source:{Current.kind=Current.Librarian; trace_id="transition"} ~facts:[current] () with
+   | Ok _ -> () | Error detail -> Alcotest.fail detail);
+  let after = read () in
+  let next_notice = render 400. in
+  Alcotest.(check int) "replacement preserves count" (List.length before.facts) (List.length after.facts);
+  Alcotest.(check bool) "same-count transition changes notice" true (first_notice <> next_notice);
+  Alcotest.(check bool) "notice identifies actual stored revision" true
+    (contains ~needle:(Printf.sprintf "revision=%d" after.revision) next_notice);
+  List.iter (fun claim -> Alcotest.(check bool) "notice includes no historical or current body" false
+    (contains ~needle:claim next_notice)) [old.claim; current.claim];
+  let search = Runtime.keeper_memory_search_json ~config ~meta
+    ~ctx_work:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
+    ~args:(`Assoc ["query", `String "deployment"]) |> Yojson.Safe.from_string in
+  Alcotest.(check (list string)) "demand lookup returns only the successor" [current.claim]
+    (match_texts search)
+;;
+
 let test_search_revalidates_query_sources_only () =
   let module Source = Masc.Keeper_memory_source_current in
   with_temp_dir @@ fun base_path ->
@@ -3748,6 +3784,8 @@ let () =
             test_recall_artifacts_follow_history_retention
         ; Alcotest.test_case "demand recall avoids bulk artifact and source work" `Quick
             test_demand_recall_does_not_materialize_or_verify_all_memory
+        ; Alcotest.test_case "same-count replacement updates notice and selective recall" `Quick
+            test_same_count_replacement_updates_notice_and_demand_search
         ; Alcotest.test_case "source search validates query candidates only" `Quick
             test_search_revalidates_query_sources_only
         ; Alcotest.test_case "selected source replacement is not verified by an old query" `Quick

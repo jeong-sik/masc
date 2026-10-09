@@ -514,10 +514,15 @@ let record_unavailable_coverage_gap ~keeper_name ~tool_name ?trace_id () =
          (Printexc.to_string gap_exn))
 ;;
 
-let append_to_store_result (entry : append_entry) =
+(* [committed] turns true once the row is in the ledger file. A failure after
+   that point (retention pruning, the revision advance) leaves the row durable,
+   so a caller that retries must read it and not append the row again. *)
+let append_to_store_result ~committed (entry : append_entry) =
   try
-    Dated_jsonl.append entry.store entry.json;
-    advance_committed_revision ~keeper_name:entry.keeper_name;
+    Dated_jsonl.append_notifying_commit entry.store entry.json
+      ~on_committed:(fun () ->
+        committed := true;
+        advance_committed_revision ~keeper_name:entry.keeper_name);
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -540,7 +545,7 @@ let append_to_store_result (entry : append_entry) =
 ;;
 
 let append_to_store entry =
-  match append_to_store_result entry with
+  match append_to_store_result ~committed:(ref false) entry with
   | Ok () | Error _ -> ()
 ;;
 
@@ -581,23 +586,50 @@ let requeue_append_front entry =
     Stdlib.Queue.transfer rest append_queue)
 ;;
 
-let drain_queued_appends () =
+type flush_completion =
+  | All_committed
+  | All_committed_with_post_commit_failures of exn * exn list
+
+let drain_queued_appends_unlocked () =
   let count = ref 0 in
+  let post_commit_failures = ref [] in
   let rec loop () =
     match take_queued_append () with
-    | None -> !count
+    | None ->
+      let completion = match List.rev !post_commit_failures with
+        | [] -> All_committed
+        | first :: rest -> All_committed_with_post_commit_failures (first, rest) in
+      !count, completion
     | Some entry ->
-      (match append_to_store entry with
-       | () -> ()
+      let committed = ref false in
+      (match append_to_store_result ~committed entry with
+       | Ok () -> ()
+       | Error exn ->
+         if !committed then post_commit_failures := exn :: !post_commit_failures
+         else (requeue_append_front entry; raise exn)
        | exception exn ->
          let backtrace = Printexc.get_raw_backtrace () in
-         requeue_append_front entry;
+         if not !committed then requeue_append_front entry;
          Printexc.raise_with_backtrace exn backtrace);
       incr count;
       loop ()
   in
   loop ()
 ;;
+
+(* The foreground flush waits for a background drain's in-flight append,
+   not merely for the queue to look empty. Reuse the shared fiber/thread lock. *)
+let append_drain_mutex = Cross_context_mutex.create ()
+let drain_receipt () =
+  Cross_context_mutex.with_lock append_drain_mutex drain_queued_appends_unlocked
+
+let flush_committed () = snd (drain_receipt ())
+
+let drain_queued_appends () =
+  let count, completion = drain_receipt () in
+  match completion with
+  | All_committed -> count
+  | All_committed_with_post_commit_failures (exn, _) -> raise exn
 
 let flush_now () = ignore (drain_queued_appends () : int)
 
@@ -1138,7 +1170,7 @@ let log_call
       let safe_json = Inference_utils.sanitize_json_utf8 json in
       let entry = { store; keeper_name; tool_name; trace_id; json = safe_json } in
       if requires_commit then
-        (match append_to_store_result entry with
+        (match append_to_store_result ~committed:(ref false) entry with
          | Ok () -> Option.iter (fun notify -> notify ()) on_committed
          | Error exn -> raise exn)
       else append_or_enqueue entry
@@ -1198,6 +1230,20 @@ let index_rows ?keeper_name ~n () : (Yojson.Safe.t list, index_error) result =
         (fun detail -> Index_unavailable detail)
         (Keeper_tool_call_index.recent_rows ~store ?keeper_name ~n ()))
 ;;
+
+let read_after ~keeper_name ~after ~project =
+  match (Atomic.get store_state).store with
+  | None -> Error (Index_unavailable "tool-call ledger is not initialized")
+  | Some store ->
+    Keeper_tool_call_index.rows_after ~store ~keeper_name ~after ~project
+    |> Result.map_error (fun detail -> Index_unavailable detail)
+
+let current_frontier ~keeper_name =
+  match (Atomic.get store_state).store with
+  | None -> Error (Index_unavailable "tool-call ledger is not initialized")
+  | Some store ->
+    Keeper_tool_call_index.current_frontier ~store ~keeper_name
+    |> Result.map_error (fun detail -> Index_unavailable detail)
 
 let read_recent_rows ~n () = index_rows ~n ()
 

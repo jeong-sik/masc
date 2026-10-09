@@ -304,8 +304,24 @@ let live_guidance () =
   shows "Server session status and close remain available" (loaded (doc source));
   shows "Server session status and close remain available" (loaded ~lane:Browser_lane.Lane_name.Stagehand (doc source))
 
+(* RFC-browser-keeper-firefox: the Keeper Firefox table sits under
+   [browser.live]. Turning the live lane off keeps it, whether or not
+   [browser.live] has a header of its own. *)
+let live_toggle_keeps_the_keeper_firefox_table () =
+  let bidi = "[browser.live.bidi]\nfirefox = \"/fixture/firefox\"\nprofile = \"/fixture/profile\"\n" in
+  List.iter (fun (label, source) ->
+    let _,_,write=A.start_save ~generation:2
+        (A.toggle (loaded ~lane:Browser_lane.Lane_name.Live (doc source))) |> ok in
+    let config=Otoml.Parser.from_string_result write.source_text |> ok |> Browser_configuration.parse |> ok in
+    Alcotest.(check bool) (label ^ ": live turned off") false config.live_enabled;
+    Alcotest.(check bool) (label ^ ": the Keeper Firefox table kept") true
+      (config.live_bidi = Some {Browser_configuration.firefox="/fixture/firefox";profile="/fixture/profile";port=9222}))
+    ["with a [browser.live] header", "[browser.live]\nenabled = true\n\n" ^ bidi;
+     "without one", bidi]
+
 let () = Alcotest.run "Browser activity draft and save" ["operator flow",List.map (fun (name,f)->Alcotest.test_case name `Quick f)
   ["Live guidance respects client-owned sessions",live_guidance;
+   "the live toggle keeps the Keeper Firefox table",live_toggle_keeps_the_keeper_firefox_table;
    "explicit save preserves paths, other backend and source",draft_and_save;
    "conflict reapplies activity only",conflict_reapply;
    "fresh read retains and discard resets",fresh_read_keeps_draft;

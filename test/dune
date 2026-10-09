@@ -8537,6 +8537,7 @@
 
 (include stanzas/test_browser_bidi_peer.inc)
 (include stanzas/test_browser_bidi_host_record.inc)
+(include stanzas/test_browser_keeper_firefox.inc)
 
 ; An attempt that published its answer must not publish a failure over it:
 ; the light body refresh, and the window around the attempt, run after it.

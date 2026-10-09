@@ -62,8 +62,9 @@ let commands_run () =
     [ "/Apps/firefox"; "--no-remote"; "--profile"; "/keeper/profile"; "--remote-debugging-port"; "9333" ]
     (Keeper_firefox.firefox_argv config);
   check (list string) "host"
-    [ "/ws/.masc/browser-lane/host/launch"; "--bidi-url"; "ws://127.0.0.1:9333/session" ]
-    (Keeper_firefox.host_argv ~launcher:"/ws/.masc/browser-lane/host/launch" ~port:9333);
+    [ "/ws/.masc/browser-lane/host/launch"; "--bidi-url"; "ws://127.0.0.1:9333/session"
+    ; "--firefox-profile"; "/keeper/profile" ]
+    (Keeper_firefox.host_argv ~launcher:"/ws/.masc/browser-lane/host/launch" config);
   check string "firefox log" "/ws/.masc/browser-lane/keeper-firefox.log"
     (Keeper_firefox.firefox_log_path ~base_path:"/ws");
   check string "host log" "/ws/.masc/browser-lane/bidi-host.log" (Keeper_firefox.host_log_path ~base_path:"/ws");
@@ -365,8 +366,9 @@ let a_free_port_starts_firefox_then_the_host () =
         [ "--no-remote"; "--profile"; Filename.concat base "profile"; "--remote-debugging-port"; string_of_int port ]
         (List.tl (lines firefox_marker));
       await_file host_marker;
-      check (list string) "the host was given that Firefox's address"
-        [ "--bidi-url"; Printf.sprintf "ws://127.0.0.1:%d/session" port ]
+      check (list string) "the host was given that Firefox's address and profile"
+        [ "--bidi-url"; Printf.sprintf "ws://127.0.0.1:%d/session" port
+        ; "--firefox-profile"; Filename.concat base "profile" ]
         (List.tl (lines host_marker));
       check bool "both write under the lane" true (firefox_started base && host_started base)))
 

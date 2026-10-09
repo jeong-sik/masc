@@ -10,6 +10,44 @@ let ended_session peer =
 (* A peer for a case that asks for no session. *)
 let peer_of command =
   Peer.create ~command ~session_end:(fun () -> fail "this case has no session to end")
+(* A host started for the Keeper's Firefox keeps a session only with a
+   Firefox that reports running that profile. Firefox 157.0.1 reports the
+   path as it was given, so a link and its directory are the same profile. *)
+let test_a_session_runs_the_expected_profile () =
+  let profile = Filename.temp_dir "masc-peer-profile-" "" in
+  let link = profile ^ "-link" in
+  Unix.symlink profile link;
+  Fun.protect ~finally:(fun () -> Sys.remove link; Unix.rmdir profile) (fun () ->
+    let session reported =
+      let caps =
+        obj ([ "browserName", `String "firefox"; "browserVersion", `String "157.0.1" ]
+             @ match reported with Some path -> [ "moz:profile", `String path ] | None -> [])
+      in
+      let peer =
+        Peer.create ~session_end:(fun () -> Ok ()) ~command:(fun method_ _ ->
+          match method_ with
+          | "session.new" -> Ok (obj [ "sessionId", `String "s"; "capabilities", caps ])
+          | other -> failf "unexpected command %s" other)
+      in
+      (match metadata peer with Ok _ -> () | Error detail -> fail detail);
+      peer
+    in
+    check (option string) "none before a session" None
+      (Peer.profile (peer_of (fun _ _ -> fail "nothing is asked")));
+    check (option string) "as Firefox reported it" (Some link) (Peer.profile (session (Some link)));
+    List.iter
+      (fun (name, reported, expected) ->
+        check (result unit string) name (Ok ()) (Peer.runs_profile (session (Some reported)) ~expected))
+      [ "the same directory", profile, profile; "reported through a link", link, profile
+      ; "expected through a link", profile, link ];
+    let refused name reported ~mentions =
+      match Peer.runs_profile (session reported) ~expected:profile with
+      | Error detail -> check bool (name ^ ": " ^ detail) true (String_util.contains_substring detail mentions)
+      | Ok () -> fail (name ^ " was taken")
+    in
+    refused "another profile" (Some "/Users/someone/Firefox/Profiles/x.default") ~mentions:"x.default";
+    refused "a Firefox that did not say" None ~mentions:"moz:profile")
+
 let script_value json = obj ["type",`String "success";"result",obj ["type",`String "string";"value",`String (Yojson.Safe.to_string json)]]
 let test_context_identity () =
   let contexts=ref ["a";"b"] in
@@ -629,7 +667,8 @@ let test_an_error_code_is_read_once_and_written_back () =
       check string ("written back: " ^ code) code (Peer.error_code_to_wire (Peer.error_code_of_wire code)))
     [ "session not created"; "invalid session id"; "no such frame"; "" ]
 let () = run "BiDi live peer" ["identity",[test_case "opaque contexts" `Quick test_context_identity;
-    test_case "an error code is read once and written back" `Quick test_an_error_code_is_read_once_and_written_back];
+    test_case "an error code is read once and written back" `Quick test_an_error_code_is_read_once_and_written_back;
+    test_case "a session runs the expected profile" `Quick test_a_session_runs_the_expected_profile];
   "lifetime",[test_case "normal callback closes held socket" `Quick (test_held_open_completion (Ok ()) );
     test_case "error callback closes held socket" `Quick (test_held_open_completion (Error "owned failure"));
     test_case "a refused upgrade is the connection's error" `Quick test_refused_upgrade_is_the_connections_error;

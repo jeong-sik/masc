@@ -129,7 +129,7 @@ port = 9222
    2026-10-09 Firefox 157.0.1 을 임시 프로필로 재 보니, `session.new` 의 capabilities 에 `moz:profile`(받은 경로 그대로,
    링크를 풀지 않음)과 `moz:processID` 가 있었다.
    그래서 그 포트에 평소 쓰는 Firefox 의 Remote Agent 가 떠 있어도 Keeper 가 그 프로필로 일하지 않는다.
-   그 Firefox 에 세션이 잠깐 열렸다가 바로 끝난다. 이 확인은 2단계 다음 PR 에서 한다.
+   그 Firefox 에 세션이 잠깐 열렸다가 바로 끝난다.
 
 ### 3.3 서버가 멈출 때와 다시 뜰 때
 

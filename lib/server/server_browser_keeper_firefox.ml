@@ -138,7 +138,7 @@ let await_free_lock ~clock ~wait_s ~base_path =
 let start_host ~sw ~base_path ~launcher (config : Browser_configuration.live_bidi) =
   let log_path = Keeper_firefox.host_log_path ~base_path in
   match
-    spawn_logged ~sw ~argv:(Keeper_firefox.host_argv ~launcher ~port:config.port)
+    spawn_logged ~sw ~argv:(Keeper_firefox.host_argv ~launcher config)
       ~env:(host_environment ()) ~log_path
   with
   | Error detail -> Error detail

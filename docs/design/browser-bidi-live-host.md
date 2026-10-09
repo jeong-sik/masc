@@ -50,6 +50,13 @@ profile = "/Users/you/masc-keeper-firefox-profile"
   lane is installed first (step 2 below). It is not given the server's
   `MASC_HTTP_BASE_URL` or `MASC_HTTP_PORT`, which would fix its server
   address over `connection.toml`.
+- The host is also given the profile (`--firefox-profile`). Firefox reports
+  the profile it runs with the session (`moz:profile`; Firefox 157.0.1 gives
+  the path as it was given, so both paths are resolved first). A host whose
+  Firefox runs another profile ends that session and stops, and its record
+  says which profile it found. So a port that answers because the everyday
+  Firefox was started with `--remote-debugging-port` does not give a Keeper
+  that profile; it gets a session that is ended at once.
 - `[browser.live] enabled = false` starts nothing.
 - The operator still logs in once, in that Firefox, to the sites a Keeper
   works on; the profile keeps the login.
@@ -108,6 +115,9 @@ Without the table the operator does both steps.
    executable, and the `launch` script used here. The launcher runs that copy
    with this workspace's `--base-path` and token file and passes on what
    follows it, so it does not depend on the `PATH`.
+
+   Adding `--firefox-profile <profile>` makes the host end a session with a
+   Firefox on any other profile, as the server-started host does.
 
    `masc-browser-host --base-path "$BASE_PATH" --bidi-url ...` is the same
    host when the executable is on the `PATH`. Set `BASE_PATH` before it: an

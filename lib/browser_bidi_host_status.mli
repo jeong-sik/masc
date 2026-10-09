@@ -76,6 +76,10 @@ type launcher_standing =
     with it. *)
 val bidi_url_flag : string
 
+(** The host's option that names the profile its Firefox must run. A host
+    given it ends a session on any other profile. *)
+val firefox_profile_flag : string
+
 (** Firefox's option that opens its BiDi address on a port. *)
 val firefox_flag : string
 

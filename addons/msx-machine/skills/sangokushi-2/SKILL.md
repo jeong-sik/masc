@@ -103,8 +103,9 @@ The following sequence was observed in February 220, Cao Pi province 10;
 choose from the current lists rather than reusing these officer numbers.
 
 - Recruitment: `1`, Return asks who recruits. Sima Yi was available as 2.
-  Selecting him opened `何百人徴兵しますか(1-95)?`. Entering 50, Return
-  opened allocation with a pool of 50; it did not finish the action.
+  Selecting him opened `何百人徴兵しますか(1-95)?`, in hundreds of people.
+  Entering 50, Return opened allocation with a pool of 50 in the displayed
+  units; it did not finish the action.
 - Allocation asks `だれを変更しますか(0-11)?`. Sima Yi's existing troops
   were 10. Selecting him asked for the new total `(0-60)?`; entering 60
   assigned the pool and showed Sima Yi 60 with remaining pool 0.

@@ -6,6 +6,19 @@
 open Alcotest
 module Record = Masc.Browser_bidi_host_record
 module Peer = Masc.Browser_bidi_peer
+module Status = Masc.Browser_bidi_host_status
+
+(* What masc doctor says of the BiDi host for this workspace, and how it
+   rates it. The doctor is another process than the host, as this one is. *)
+let doctor base =
+  let observed = Onboarding_status.inspect ~base_path:(Some base) in
+  match
+    List.find_opt
+      (fun (c : Onboarding_status.check) -> c.id = Onboarding_status.Browser_bidi_host)
+      observed.Onboarding_status.checks
+  with
+  | Some found -> found.condition, found.message
+  | None -> fail "the doctor says nothing of the BiDi host"
 
 (* This executable is also the second process of the lock case: started with
    this argument it takes the record as a host does, says so, and holds it
@@ -326,6 +339,10 @@ let test_a_reader_follows_a_host_from_start_to_death () =
         check int "the record names the host" pid running.pid;
         check bool "which has no session yet" true (running.attached_at = None)
       | other -> failf "a host that holds its lock is %s" (said other));
+     (let condition, message = doctor base in
+      check bool "the doctor waits on a host that is connecting" true
+        (condition = Onboarding_status.Needs_verification);
+      check bool "and says so" true (String_util.contains_substring message "is connecting to"));
      (* A second host for the workspace, which this process stands in for. *)
      (match take ~pid:(Unix.getpid ()) ~bidi_url:"ws://127.0.0.1:9333/session" base with
       | Error (Record.Another_host named) -> check (option int) "it is told who holds it" (Some pid) named
@@ -337,6 +354,19 @@ let test_a_reader_follows_a_host_from_start_to_death () =
      (match Record.observe ~base_path:base with
       | Record.Running running -> check bool "the record says so" true (running.attached_at <> None)
       | other -> failf "an attached host is %s" (said other));
+     (* With no server in this process, as for masc doctor. A host serves
+        on the server that lists it, and none is observed here. *)
+     (let condition, message = doctor base in
+      check bool "outside a server the doctor does not vouch for an attached host" true
+        (condition = Onboarding_status.Needs_verification);
+      check bool "and names it" true
+        (String_util.contains_substring message (Printf.sprintf "(pid %d) is attached to" pid));
+      check bool "without a server it does not claim the host polls one" true
+        (String_util.contains_substring message "not observed here"));
+     check bool "the observation every reader answers from carries the same state" true
+       (match (Status.observe ~base_path:base).record with
+        | Record.Running _ -> true
+        | Record.Never_started | Record.Ended _ | Record.Died _ | Record.Unreadable _ -> false);
      (* Asking needs no leave to write the lock file. *)
      let lock = Filename.concat lane "bidi-host.lock" in
      Unix.chmod lock 0o400;
@@ -349,9 +379,17 @@ let test_a_reader_follows_a_host_from_start_to_death () =
    | () -> finish ()
    | exception exn -> finish (); raise exn);
   (* The holder exited without an ending, as a killed host does. *)
-  match Record.observe ~base_path:base with
-  | Record.Died dead -> check int "the host that died" pid dead.pid
-  | other -> failf "a host that exited without an ending is %s" (said other)
+  (match Record.observe ~base_path:base with
+   | Record.Died dead -> check int "the host that died" pid dead.pid
+   | other -> failf "a host that exited without an ending is %s" (said other));
+  let condition, message = doctor base in
+  check bool "the doctor asks for a host again" true (condition = Onboarding_status.Needs_setup);
+  check bool "and says the last one died" true (String_util.contains_substring message "killed or crashed");
+  (* This workspace has a record and no launcher, as after a host started
+     from an executable on the PATH. *)
+  check bool "and does not say to run a launcher that is not there" true
+    (String_util.contains_substring message
+       "No browser lane is installed in this workspace, so that launcher is not there yet")
 
 (* What a process other than this one finds: it tries to take the workspace,
    as a second host would. Only another process sees the kernel's lock; this
@@ -561,6 +599,81 @@ let test_a_host_that_cannot_write_its_record_leaves_the_last_one () =
     check int "and the workspace is free for the next host" 300 (on_disk lane).pid;
     released next
 
+(* A command the server times out adds one result each time it is sent, so a
+   long-lived host meets the limit through no fault of its own. The newest
+   stay whole and the oldest leave, and the trimmed record is still one this
+   build reads, which a taller layout would not be. *)
+let test_the_kept_results_stop_at_the_limit () =
+  with_workspace @@ fun ~base ~lane ->
+  let held = taken ~pid:100 base in
+  let past =
+    List.init (Record.unacknowledged_limit + 8) (fun n -> { noted with at = 1_791_000_030. +. float_of_int n })
+  in
+  List.iter (fun one -> written (Record.note_unacknowledged held one)) past;
+  let record = on_disk lane in
+  check int "the record counts no more than the limit" Record.unacknowledged_limit
+    (List.length record.unacknowledged);
+  check bool "the newest stayed whole" true
+    (record.unacknowledged = List.drop (List.length past - Record.unacknowledged_limit) past);
+  let oldest = (List.hd record.unacknowledged).at in
+  let newest = (List.nth record.unacknowledged (Record.unacknowledged_limit - 1)).at in
+  check bool "the order is still oldest first" true (oldest <= newest);
+  (* One more comes, and the oldest of the kept ones leaves for it. *)
+  written (Record.note_unacknowledged held noted);
+  let record = on_disk lane in
+  check int "still at the limit" Record.unacknowledged_limit (List.length record.unacknowledged);
+  check bool "the oldest of the kept left first" true (List.hd record.unacknowledged = List.nth past 9);
+  (* What the host writes past the limit is what a reader takes, all the
+     same: a field added for what was dropped would turn every reader built
+     for this layout away from the whole record. *)
+  check bool "the trimmed record reads back as it was written" true
+    (Record.entry_of_json (Record.entry_to_json record) = Ok record);
+  released held
+
+let archived_results base =
+  In_channel.with_open_bin (Record.unacknowledged_archive_path ~base_path:base)
+    In_channel.input_lines
+  |> List.map (fun line ->
+       let json = Yojson.Safe.from_string line in
+       let open Yojson.Safe.Util in
+       check int "archive row schema" 1 (json |> member "schema" |> to_int);
+       check int "archive keeps host identity" 100 (json |> member "pid" |> to_int);
+       json |> member "result")
+
+let result_json noted =
+  let open Yojson.Safe.Util in
+  Record.entry_to_json { entry with unacknowledged = [noted] }
+  |> member "unacknowledged" |> to_list |> List.hd
+
+let test_archival_precedes_eviction_and_failure_retains_evidence () =
+  with_workspace @@ fun ~base ~lane ->
+  let held = taken ~pid:100 base in
+  let rows = List.init (Record.unacknowledged_limit + 2)
+      (fun n -> { noted with at = noted.at +. float_of_int n }) in
+  let initial = List.take Record.unacknowledged_limit rows in
+  List.iter (fun row -> written (Record.note_unacknowledged held row)) initial;
+  let archive = Record.unacknowledged_archive_path ~base_path:base in
+  Unix.mkdir archive 0o700;
+  let next = List.nth rows Record.unacknowledged_limit in
+  (match Record.note_unacknowledged held next with
+   | Error _ -> () | Ok () -> fail "unwritable archive authorized eviction");
+  check bool "archive failure preserves all evidence on disk" true
+    ((on_disk lane).unacknowledged = initial @ [next]);
+  Unix.rmdir archive;
+  written (Record.note_unacknowledged held (List.nth rows (Record.unacknowledged_limit + 1)));
+  let archived = archived_results base in
+  check bool "exact evicted metadata is durable" true
+    (archived = List.map result_json (List.take 2 rows));
+  check bool "archive plus snapshot retains the complete history" true
+    (archived @ List.map result_json (on_disk lane).unacknowledged
+     = List.map result_json rows);
+  check int "successful retry restores bounded snapshot" Record.unacknowledged_limit
+    (List.length (on_disk lane).unacknowledged);
+  released held;
+  (match Record.note_unacknowledged held noted with
+   | Error _ -> () | Ok () -> fail "released host appended a result");
+  check bool "released host leaves archive unchanged" true (archived_results base = archived)
+
 let () =
   match Array.to_list Sys.argv with
   | [ _; argument; base ] when String.equal argument holder_argument -> hold base
@@ -592,4 +705,8 @@ let () =
           ; test_case "the address is kept without what it could carry" `Quick
               test_the_address_is_kept_without_what_it_could_carry
           ; test_case "a host that cannot write its record leaves the last one" `Quick
-              test_a_host_that_cannot_write_its_record_leaves_the_last_one ] ) ]
+              test_a_host_that_cannot_write_its_record_leaves_the_last_one
+          ; test_case "the kept results stop at the limit" `Quick
+              test_the_kept_results_stop_at_the_limit
+          ; test_case "archival precedes eviction and failure retains evidence" `Quick
+              test_archival_precedes_eviction_and_failure_retains_evidence ] ) ]

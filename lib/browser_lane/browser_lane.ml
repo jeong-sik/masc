@@ -364,7 +364,7 @@ let live_transport_setup transport =
     | Web_extension ->
       "the operator loads the browser-lane extension and its native host in that browser"
     | Webdriver_bidi ->
-      "the operator attaches that browser's Remote Agent with masc-browser-host --bidi-url" in
+      "the operator attaches that browser's Remote Agent with a BiDi browser host" in
   Printf.sprintf "%s (%s)" steps (live_transport_setup_doc transport)
 ;;
 

@@ -7,7 +7,7 @@ type position =
   | Body_label of { block_start : int; field : Markdown.generated_field; byte : int }
   | Thinking_summary_byte of int
   | Thinking_summary_label of { field : Masc_tui_markdown.generated_field; byte : int }
-  | Preview_byte of { url : string; index : int; field : Preview.card_field; byte : int; expansion : int }
+  | Preview_byte of { url : string; index : int; field : Preview.card_field; order : Preview.card_order; byte : int; expansion : int }
   | Journal_byte of { line : int; field : Layout.journal_field; byte : int }
 
 let compare_position a b =
@@ -24,7 +24,7 @@ let compare_position a b =
   | Thinking_summary_label _, Thinking_summary_byte _ -> 1
   | (Thinking_summary_byte _ | Thinking_summary_label _), _ -> -1
   | _, (Thinking_summary_byte _ | Thinking_summary_label _) -> 1
-  | Preview_byte a, Preview_byte b -> compare (a.index,a.url,a.field,a.byte,a.expansion) (b.index,b.url,b.field,b.byte,b.expansion)
+  | Preview_byte a, Preview_byte b -> compare (a.index,a.url,a.order,a.field,a.byte,a.expansion) (b.index,b.url,b.order,b.field,b.byte,b.expansion)
   | Preview_byte _, Journal_byte _ -> -1
   | Journal_byte _, Preview_byte _ -> 1
   | Journal_byte a, Journal_byte b -> compare (a.line,a.field,a.byte) (b.line,b.field,b.byte)

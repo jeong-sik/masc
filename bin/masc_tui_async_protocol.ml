@@ -826,6 +826,28 @@ let workspace_message_admitted state ~authority ~reading message =
     ~kind:(if workspace_message_is_read message
       then Workspace_observation else Workspace_operation_outcome)
 
+(* Capture the read intent while the exact effect owner is still Loading.
+   The UI applies the receipt first, then retains or dispatches this read. *)
+let retired_operation_observation state ~authority ~reading message =
+  let rec inspect = function
+    | Workspace_operation inner -> inspect inner
+    | Browser_lane_scene_loaded (generation, Ok _) ->
+        (match state.browser_lane with
+         | Some ({load=Browser_lane_view.Loading (current, operation); _} as view)
+           when current = generation && state.browser_lane_generation = generation ->
+             Option.map (fun read -> Browser_scene_observation (generation, view, read))
+               (Browser_lane_view.observation_after_effect operation)
+         | _ -> None)
+    | Lane_subscriptions_loaded (generation, Ok _) ->
+        (match state.lane_addons with
+         | Some view when view.generation = generation
+             && Option.is_some view.subscription_panel ->
+               Some (Lane_subscriptions_observation generation)
+         | _ -> None)
+    | _ -> None in
+  if workspace_reply_admitted state ~authority ~reading ~kind:Workspace_observation
+  then None else inspect message
+
 let rec project_workspace_operation_reply state ~authority ~reading message =
   let project receipt observation = workspace_operation_reply state ~authority ~reading
       (receipt, observation) in

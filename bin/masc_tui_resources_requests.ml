@@ -32,18 +32,8 @@ let launch_list state ~host ~launch ~check =
 ;;
 
 let launch_read state ~host ~launch ~check ~uri =
+  retain_resource_read state ~uri;
   if server_authority_ready state then begin
-  let same_resource =
-    match state.resource_content with
-    | Some (current, _) -> String.equal current uri
-    | None -> false
-  in
-  state.resource_pending_uri <- Some uri;
-  if not same_resource
-  then (
-    state.resource_content <- None;
-    state.resource_content_error <- None;
-    state.resource_scroll <- 0);
   let port = state.port in
   let request_id = Printf.sprintf "tui-res-%.6f" (Unix.gettimeofday ()) in
   let session = state.mcp_session in

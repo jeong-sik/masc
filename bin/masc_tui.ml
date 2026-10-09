@@ -3964,12 +3964,11 @@ let launch_keeper_sandbox_view state ~mailbox keeper_name =
     (fun () -> Masc_tui_loader.load_keeper_sandbox_view ~host ~port ~keeper_name)
 
 let launch_keeper_sandbox_logs state ~mailbox keeper_name =
+  retain_sandbox_log_read state ~keeper_name;
   if server_authority_ready state then
   let enqueue_async = workspace_enqueue state in
   let host = server_peer_host in
   let port = state.port in
-  state.keeper_sandbox_logs_requested <- Some keeper_name;
-  state.keeper_sandbox_logs_origin <- state.server_identity;
   state.keeper_sandbox_logs_generation <- state.keeper_sandbox_logs_generation + 1;
   let generation = state.keeper_sandbox_logs_generation in
   state.keeper_sandbox_logs_inflight <-
@@ -14558,11 +14557,23 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
     ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
   function
   | Workspace_scoped (authority, reading, message) ->
-      if workspace_message_admitted state ~authority ~reading message then
+      if workspace_message_admitted state ~authority ~reading message then begin
+        let retry = retired_operation_observation state ~authority ~reading message in
         let message = project_workspace_operation_reply state ~authority ~reading message in
         apply_async_message state ~base_path ~http_refresh_inflight
-          ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox message
-      else (match message with
+          ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox message;
+        (match retry with
+         | Some retry when retain_operation_observation state retry
+             && server_authority_ready state ->
+             (match retry with
+              | Browser_scene_observation (_, _, operation) ->
+                  state.browser_lane_read_resume <- None;
+                  launch_browser_lane state ~mailbox operation
+              | Lane_subscriptions_observation _ ->
+                  state.lane_nested_read_resume <- None;
+                  launch_lane_subscriptions state ~mailbox Masc_tui_lane_subscriptions.Inspect)
+         | Some _ | None -> ())
+      end else (match message with
         | Gate_snapshot_loaded (request, _, _) ->
           Log.Transport.debug "discarded Gate snapshot request=%d: workspace authority superseded"
             (Snapshot_read.request_id request)

@@ -3698,6 +3698,18 @@ module Browser_lane_view = struct
     | Open_session | Close_session | Goto _ | Scene_scroll _ | Scene_click _
     | Scene_follow _ | Viewport_pointer _ -> false
 
+  (* A committed gesture is never retried. Only its discarded observation
+     can be resumed after workspace identity is reconfirmed. *)
+  let observation_after_effect = function
+    | Scene_scroll {tab_id; scene_view; scope; _} ->
+        Some (Scene_refresh {tab_id; scene_view; scope})
+    | Scene_click {tab_id; scope; _} ->
+        Some (Scene_refresh {tab_id; scene_view=Browser_lane.Content; scope})
+    | Discover _ | Read | Open_session | Close_session | Goto _ | Screenshot _
+    | Read_refresh | Scene_read _ | Scene_regions _ | Scene_refresh _
+    | Scene_focus _ | Scene_follow _ | Scene_follow_refresh _
+    | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> None
+
   type load = Idle | No_browser | Loading of int * operation | Failed of string
   type read_continuation = No_read_continuation | Deferred_read
   type read_view = Text_view | Scene_view of {
@@ -6762,6 +6774,43 @@ let workspace_operation_reply state ~authority ~reading (receipt, observation) =
     | Ok _ -> Error "Action outcome retained; follow-up reading was retired while workspace identity was unconfirmed. Refresh before acting again."
   in
   receipt, observation
+
+let retain_resource_read state ~uri =
+  let same_resource = match state.resource_content with
+    | Some (current, _) -> String.equal current uri
+    | None -> false in
+  state.resource_pending_uri <- Some uri;
+  if not same_resource then begin
+    state.resource_content <- None;
+    state.resource_content_error <- None;
+    state.resource_scroll <- 0
+  end
+
+let retain_sandbox_log_read state ~keeper_name =
+  state.keeper_sandbox_logs_requested <- Some keeper_name;
+  state.keeper_sandbox_logs_origin <- state.server_identity
+
+type retired_operation_observation =
+  | Browser_scene_observation of int * Browser_lane_view.t * Browser_lane_view.operation
+  | Lane_subscriptions_observation of int
+
+let retain_operation_observation state = function
+  | Browser_scene_observation (generation, prior, operation) ->
+      (match state.browser_lane with
+       | Some current when generation = state.browser_lane_generation
+           && prior.source = current.source
+           && prior.selected_client = current.selected_client
+           && prior.selected_tab = current.selected_tab ->
+             state.browser_lane_read_resume <- Some (generation, current, operation);
+             true
+       | _ -> false)
+  | Lane_subscriptions_observation generation ->
+      (match state.lane_addons with
+       | Some view when view.generation = generation
+           && Option.is_some view.subscription_panel ->
+             state.lane_nested_read_resume <- Some (generation, Lane_subscriptions_read);
+             true
+       | _ -> false)
 
 (* The deletion overlay keeps its confirmed inventory while identity is
    unavailable. Invalidate the read generation as well: reconfirming A must

@@ -744,10 +744,83 @@ let test_account_read_intents_survive_repeated_suspension () =
     [Login.Inventory; Discover; Recover;
      Preview_removal {provider; refused=Some "retained refusal"}]
 
+let test_unsent_resource_and_log_intents_survive_reconfirmation () =
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
+      ~port:0 ~refresh_interval:0. () in
+  state.server_identity <- Some (identity "/workspace/a");
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "health failed";
+  state.resource_content <- Some ("masc://old", []);
+  state.resource_scroll <- 12;
+  retain_resource_read state ~uri:"masc://new";
+  retain_sandbox_log_read state ~keeper_name:"selected-keeper";
+  Alcotest.(check bool) "intent does not authorize network reads" false
+    (server_authority_ready state);
+  Alcotest.(check bool) "new selection cannot display old resource" true
+    (state.resource_content = None && state.resource_scroll = 0);
+  suspend_workspace_readings state;
+  state.workspace_identity <- Workspace_identity_match;
+  Alcotest.(check (option string)) "resource recovery selects the unsent URI"
+    (Some "masc://new") state.resource_pending_uri;
+  Alcotest.(check (option string)) "first log open survives without a previous result"
+    (Some "selected-keeper") state.keeper_sandbox_logs_requested;
+  Alcotest.(check bool) "unsent logs retain their originating workspace" true
+    (state.keeper_sandbox_logs_origin = Some (identity "/workspace/a"));
+  reconcile_detail_intent_origins state (Ok (identity "/workspace/b"));
+  Alcotest.(check (option string)) "foreign workspace cannot inherit unsent logs"
+    None state.keeper_sandbox_logs_requested
+
+let test_effect_observations_resume_without_repeating_effects () =
+  let open Masc_tui_types in
+  let module Browser = Browser_lane_view in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
+      ~port:0 ~refresh_interval:0. () in
+  state.server_identity <- Some (identity "/workspace/a");
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "health failed";
+  let initial = Browser.create () in
+  let prior = {initial with selected_tab=Some 7} in
+  state.browser_lane_generation <- 3;
+  state.browser_lane <- Some {prior with load=Browser.Failed "observation retired"};
+  let gestures = [Browser.Scene_scroll {tab_id=7; document_id="doc";
+      expected_url="https://example.test"; scene_view=Browser_lane.Content; scope=None; delta_y=100};
+    Browser.Scene_click {tab_id=7; document_id="doc"; node_id="node";
+      expected_url="https://example.test"; scope=None}] in
+  List.iter (fun gesture ->
+    let read = match Browser.observation_after_effect gesture with
+      | Some read -> read | None -> Alcotest.fail "effect lost its observation intent" in
+    Alcotest.(check bool) "the retry is a read, never the gesture" true
+      (Browser.operation_is_read read);
+    Alcotest.(check bool) "settled matching effect retains its observation" true
+      (retain_operation_observation state (Browser_scene_observation (3, prior, read)));
+    suspend_workspace_readings state;
+    Alcotest.(check bool) "repeated uncertainty preserves selected scene read" true
+      (match state.browser_lane_read_resume with
+       | Some (3, _, Browser.Scene_refresh {tab_id=7; _}) -> true | _ -> false)) gestures;
+  state.browser_lane_generation <- 4;
+  Alcotest.(check bool) "late receipt cannot replace a newer selection" false
+    (retain_operation_observation state (Browser_scene_observation (3, prior, Browser.Scene_read 7)));
+  let panel = Masc_tui_lane_subscriptions.initial ~keepers:[] ~targets:[] in
+  let saved = {Masc_tui_lane_addons.initial with generation=9; loading=false;
+    subscription_panel=Some panel} in
+  state.lane_addons <- Some saved;
+  Alcotest.(check bool) "settled save retains only subscription inspection" true
+    (retain_operation_observation state (Lane_subscriptions_observation 9));
+  suspend_workspace_readings state;
+  state.workspace_identity <- Workspace_identity_match;
+  Alcotest.(check bool) "late save recovery targets open subscriptions panel" true
+    (state.lane_nested_read_resume = Some (9, Lane_subscriptions_read));
+  state.lane_addons <- Some {saved with generation=10};
+  Alcotest.(check bool) "old save cannot replace newer panel read" false
+    (retain_operation_observation state (Lane_subscriptions_observation 9))
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "account read intents survive repeated suspension" `Quick
+      , [ Alcotest.test_case "unsent resource and log intents survive reconfirmation" `Quick
+            test_unsent_resource_and_log_intents_survive_reconfirmation
+        ; Alcotest.test_case "effect observations resume without repeating effects" `Quick
+            test_effect_observations_resume_without_repeating_effects
+        ; Alcotest.test_case "account read intents survive repeated suspension" `Quick
             test_account_read_intents_survive_repeated_suspension
         ; Alcotest.test_case "nested reader intents survive repeated suspension" `Quick
             test_pending_nested_reader_intents_survive_repeated_suspension

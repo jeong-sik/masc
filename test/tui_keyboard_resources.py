@@ -312,7 +312,7 @@ def run_resources_unconfirmed_selection(executable: str) -> None:
                                    # The title is the stable frame boundary;
                                    # the body marker is checked after stripping
                                    # terminal styling below.
-                                   needle=b"operator-handbook.md", controls=(FULL_REDRAW,),
+                                   needle=b"Resource", controls=(FULL_REDRAW,),
                                    final_cursor=b"\x1b[?25l")
         visible = h.screen_text(pending)
         assert b"reading resource" in visible, visible

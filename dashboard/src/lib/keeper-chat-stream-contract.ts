@@ -132,6 +132,10 @@ export type KeeperNativeToolProgress =
   | { kind: 'message_reported'; message: string }
   // Provider-reported elapsed seconds, independent of local arrival timers.
   | { kind: 'heartbeat_reported'; elapsed_seconds: number }
+  | { kind: 'retry_reported'; agent_id: string; subagent_type: string;
+      attempt: number; max_retries: number; retry_delay_ms: number;
+      error_status: number | null; error_category: string }
+  | { kind: 'retry_cleared'; agent_id: string; subagent_type: string }
 
 type KeeperQuarantinedToolOccurrence = {
   toolStreamScope: number
@@ -198,6 +202,7 @@ type KeeperChatCustomEvent =
       type: 'CUSTOM'
       name: 'KEEPER_STREAM_MESSAGE_START'
       value: {
+        stream_scope: number
         provider_message_id?: string
         model?: string
         usage?: KeeperStreamUsage
@@ -206,7 +211,7 @@ type KeeperChatCustomEvent =
   | {
       type: 'CUSTOM'
       name: 'KEEPER_STREAM_MESSAGE_DELTA'
-      value: { stop_reason?: string; usage?: KeeperStreamDeltaUsage }
+      value: { stream_scope: number; stop_reason?: string; usage?: KeeperStreamDeltaUsage }
     }
   | { type: 'CUSTOM'; name: 'KEEPER_STREAM_MESSAGE_STOP'; value: null }
   | { type: 'CUSTOM'; name: 'KEEPER_STREAM_PING'; value: null }
@@ -306,7 +311,7 @@ export type KeeperChatStreamEvent = KeeperChatStreamEventBase & (
   | { type: 'RUN_STARTED' | 'RUN_FINISHED' }
   | { type: 'RUN_ERROR'; message?: string; code?: string }
   | { type: 'TEXT_MESSAGE_START'; messageId?: string; role?: 'assistant' | 'user' }
-  | { type: 'TEXT_MESSAGE_CONTENT'; messageId?: string; delta?: string }
+  | { type: 'TEXT_MESSAGE_CONTENT'; messageId?: string; delta?: string; textStreamScope?: number }
   | { type: 'TEXT_MESSAGE_END'; messageId?: string }
   | (KeeperToolStreamOccurrence & { type: 'TOOL_CALL_START'; toolCallName?: string })
   | (KeeperToolStreamOccurrence & { type: 'TOOL_CALL_ARGS'; delta?: string; snapshot?: string })

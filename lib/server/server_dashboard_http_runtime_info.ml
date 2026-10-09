@@ -1755,6 +1755,7 @@ let runtime_declared_model_capabilities_json
       ; "supports_response_format_json", Json_util.bool_opt_to_json caps.supports_response_format_json
       ; "supports_structured_output", Json_util.bool_opt_to_json caps.supports_structured_output
       ; "supports_system_prompt", Json_util.bool_opt_to_json caps.supports_system_prompt
+      ; "supports_assistant_prefill", Json_util.bool_opt_to_json caps.supports_assistant_prefill
       ; "supports_prompt_caching", Json_util.bool_opt_to_json caps.supports_prompt_caching
       ; "supports_top_k", Json_util.bool_opt_to_json caps.supports_top_k
       ; "supports_min_p", Json_util.bool_opt_to_json caps.supports_min_p
@@ -1893,6 +1894,7 @@ let effective_capabilities_json (rt : Runtime_instance.t) =
       ; "task", task_json caps.task
       ; "supports_native_streaming", `Bool caps.supports_native_streaming
       ; "supports_system_prompt", `Bool caps.supports_system_prompt
+      ; "supports_assistant_prefill", `Bool caps.supports_assistant_prefill
       ; "supports_prompt_caching", `Bool caps.supports_prompt_caching
       ; "supports_top_k", `Bool caps.supports_top_k
       ; "supports_min_p", `Bool caps.supports_min_p
@@ -2058,6 +2060,7 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime_instance.t) =
     ; "supports_response_format_json", Json_util.bool_opt_to_json caps.supports_response_format_json
     ; "supports_structured_output", Json_util.bool_opt_to_json caps.supports_structured_output
     ; "supports_system_prompt", Json_util.bool_opt_to_json caps.supports_system_prompt
+    ; "supports_assistant_prefill", Json_util.bool_opt_to_json caps.supports_assistant_prefill
     ; "supports_prompt_caching", Json_util.bool_opt_to_json caps.supports_prompt_caching
     ; "supports_top_k", Json_util.bool_opt_to_json caps.supports_top_k
     ; "supports_min_p", Json_util.bool_opt_to_json caps.supports_min_p

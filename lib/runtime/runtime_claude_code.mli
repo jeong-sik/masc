@@ -206,6 +206,59 @@ type content_block =
 
 type content_channel = Text_content | Thinking_content
 
+type native_task_status = Runtime_native_tasks.status =
+  | Task_pending | Task_running | Task_completed | Task_failed | Task_killed | Task_paused
+
+type native_task_terminal = Runtime_native_tasks.terminal = Task_completed_notice | Task_failed_notice | Task_stopped_notice
+type native_task_reason = Runtime_native_tasks.reason = Worker_restart
+type native_task_boundary = Runtime_native_tasks.boundary = Task_terminal_unobserved | Task_terminal_observed
+(** Whether this run has supplied terminal evidence, not whether it is running.
+    A resumed run needs a fresh registration and a newer provider run_id. *)
+
+type native_task_usage = Runtime_native_tasks.usage =
+  { total_tokens : int; tool_uses : int; duration_ms : int }
+(** Provider task observations, never the root model's usage. [duration_ms]
+    preserves the signed safe integer reported by the provider's wall-clock
+    subtraction; a negative value neither fails nor terminates the task. *)
+
+type native_task_event = Runtime_native_tasks.event =
+  | Task_registered of
+      { subagent_type : string option; is_backgrounded : bool option
+      ; skip_transcript : bool option; ambient : bool option }
+      (** Registration declares no task status. [None] means not reported. *)
+  | Task_patched of
+      { status : native_task_status option; is_backgrounded : bool option
+      ; end_time : int option; total_paused_ms : int option }
+      (** [total_paused_ms] retains signed safe integers; absence is
+          unreported, not zero. [end_time] admission retains the separate
+          nonnegative timestamp check. *)
+  | Task_progress_reported of
+      { usage : native_task_usage; last_tool_name : string option }
+  | Task_terminal_reported of
+      { outcome : native_task_terminal; reason : native_task_reason option
+      ; usage : native_task_usage option; skip_transcript : bool option
+      ; ambient : bool option }
+
+type native_task_owner = private
+  { session_id : string; task_id : string; run_id : string; call_id : string
+  ; call_envelope_uuid : string; call_ordinal : int }
+(** Exact root Agent occurrence that registered this task run. The call may
+    already have returned an async launch result. [run_id] is opaque except
+    for the provider-declared lexical ordering of runs of the same task. *)
+
+type native_task_observation = private
+  { owner : native_task_owner; uuid : string; event : native_task_event
+  ; boundary : native_task_boundary }
+(** Invocation-local observations: explicit session/run identity, Native_full,
+    unambiguous Root_response/Built_in Agent and provider root spawn depth.
+    No ownership is inferred for run-less, unknown or child task frames.
+    Raw prompt, summary, description, error and output-file bodies are excluded.
+    [boundary] is the registry's post-event fact. Later terminal notices and
+    metadata-only patches preserve it; they cannot reopen a sealed run.
+    Task termination does not terminate the native call, model response or turn.
+    This client still returns on the first root result; post-result receiving
+    requires a separate process/session lifetime implementation. *)
+
 type stream_event =
   | Turn_started of
       { turn_id : string
@@ -246,9 +299,12 @@ type stream_event =
       { identity : Runtime_native_tools.action_identity
       ; progress : Runtime_native_tools.progress
       }
-      (** A UUID-deduplicated root heartbeat matched to the literal parent call
+      (** A UUID-deduplicated root heartbeat or Agent retry notice matched to the literal parent call
           in this invocation. Invalid/unowned observations neither publish a
-          tool row nor fail a healthy turn. No progress-id prefix is parsed. *)
+          tool row nor fail a healthy turn. Agent retry requires Native_full;
+          clear matches an earlier notice's opaque progress id and agent type.
+          No progress-id prefix is parsed. *)
+  | Native_task_observed of native_task_observation
   | Usage_windows_reported of Runtime_provider_usage_window.report
       (** The windows a [rate_limit_event] reported, for the operator
           projection only; nothing that routes or retries reads it. *)
@@ -400,6 +456,9 @@ val run_turn :
   ?on_turn_starting:(session_id:string -> (unit, string) result) ->
   ?on_turn_started:(session_id:string -> turn_id:string -> (unit, string) result) ->
   ?on_stream_event:(stream_event -> unit) ->
+  ?on_input_observation:(Runtime_claude_input_attribution.observation -> unit) ->
+  (* Optional invocation-local ticket/write/response metadata, separate from
+     authored content and native tasks. It does not extend receiver lifetime. *)
   config ->
   prompt:string ->
   images:image_input list ->

@@ -91,9 +91,9 @@ module L = Keeper_chat_event_log
 let journal : L.journaled_event list =
   [ E.Run_started { run_id = "run-events"; thread_id = "keeper:alpha" }
   ; E.Text_message_start { message_id = "msg-events"; role = E.Assistant }
-  ; E.Text_delta "one "
+  ; E.Text_delta {text="one "; stream_scope=None}
   ; E.Agent_core_thinking_delta { index = 0; delta = "private reasoning" }
-  ; E.Text_delta "two"
+  ; E.Text_delta {text="two"; stream_scope=None}
   ; E.Text_message_end
   ; E.Run_finished { run_id = "run-events" }
   ]
@@ -244,7 +244,7 @@ let test_a_held_seq_near_the_end_of_a_long_journal_decodes_a_handful_of_rows () 
   let rows =
     rows_of
       (List.init length (fun seq ->
-         { L.seq; ts = 1_762_300_000.0 +. float_of_int seq; event = E.Text_delta "x" }))
+         { L.seq; ts = 1_762_300_000.0 +. float_of_int seq; event = E.Text_delta {text="x"; stream_scope=None} }))
   in
   let held = length - 5 in
   let before = Gc.allocated_bytes () in
@@ -490,7 +490,7 @@ let test_an_empty_page_hands_back_a_pair_it_accepts () =
   let appended =
     { L.seq = held + 1
     ; ts = 1_762_400_000.0
-    ; event = E.Text_delta "after the empty page"
+    ; event = E.Text_delta {text="after the empty page"; stream_scope=None}
     }
   in
   let grown = rows ^ L.journaled_event_to_string appended ^ "\n" in
@@ -732,7 +732,7 @@ let test_http_journal_redacts_content_without_rewriting_native_identity () =
        tool_call_id=Some call_id;tool_call_name=Some "Read"} in
     let entries = [E.Native_tool_start native;
       E.Native_tool_progress (native,Runtime_native_tools.Heartbeat_reported {elapsed_seconds=30});
-      E.Text_delta body;
+      E.Text_delta {text=body; stream_scope=None};
       E.Agent_core_thinking_delta {index=0;delta=body};
       E.Native_tool_progress (native,Runtime_native_tools.Message_reported {message=body});
       E.Native_tool_end (native,Runtime_native_tools.end_observed)]
@@ -754,7 +754,7 @@ let test_http_journal_redacts_content_without_rewriting_native_identity () =
       (match List.map (fun (entry:L.journaled_event) -> entry.event) served with
        | [E.Native_tool_start start;
           E.Native_tool_progress (progress,Runtime_native_tools.Heartbeat_reported {elapsed_seconds});
-          E.Text_delta text; E.Agent_core_thinking_delta {index=0;delta=thinking};
+          E.Text_delta {text=text; stream_scope=None}; E.Agent_core_thinking_delta {index=0;delta=thinking};
           E.Native_tool_progress (message,Runtime_native_tools.Message_reported {message=reported});
           E.Native_tool_end (ended,completion)] ->
            List.iter check_native [start;progress;message;ended];

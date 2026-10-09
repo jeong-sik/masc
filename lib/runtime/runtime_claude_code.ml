@@ -256,6 +256,55 @@ type content_block =
 
 type content_channel = Text_content | Thinking_content
 
+type native_task_status = Runtime_native_tasks.status =
+  | Task_pending | Task_running | Task_completed | Task_failed | Task_killed | Task_paused
+
+type native_task_terminal = Runtime_native_tasks.terminal = Task_completed_notice | Task_failed_notice | Task_stopped_notice
+type native_task_reason = Runtime_native_tasks.reason = Worker_restart
+type native_task_boundary = Runtime_native_tasks.boundary = Task_terminal_unobserved | Task_terminal_observed
+
+type native_task_usage = Runtime_native_tasks.usage =
+  { total_tokens : int; tool_uses : int; duration_ms : int }
+(** Provider task observations, never the root model's usage. [duration_ms]
+    preserves the signed safe integer reported by the provider's wall-clock
+    subtraction; a negative value neither fails nor terminates the task. *)
+
+type native_task_event = Runtime_native_tasks.event =
+  | Task_registered of
+      { subagent_type : string option; is_backgrounded : bool option
+      ; skip_transcript : bool option; ambient : bool option }
+      (** Registration declares no task status. [None] means not reported. *)
+  | Task_patched of
+      { status : native_task_status option; is_backgrounded : bool option
+      ; end_time : int option; total_paused_ms : int option }
+      (** [total_paused_ms] retains signed safe integers; absence is
+          unreported, not zero. [end_time] admission retains the separate
+          nonnegative timestamp check. *)
+  | Task_progress_reported of
+      { usage : native_task_usage; last_tool_name : string option }
+  | Task_terminal_reported of
+      { outcome : native_task_terminal; reason : native_task_reason option
+      ; usage : native_task_usage option; skip_transcript : bool option
+      ; ambient : bool option }
+
+type native_task_owner =
+  { session_id : string; task_id : string; run_id : string; call_id : string
+  ; call_envelope_uuid : string; call_ordinal : int }
+(** Exact root Agent occurrence that registered this task run. The call may
+    already have returned an async launch result. [run_id] is opaque except
+    for the provider-declared lexical ordering of runs of the same task. *)
+
+type native_task_observation =
+  { owner : native_task_owner; uuid : string; event : native_task_event
+  ; boundary : native_task_boundary }
+(** Invocation-local observations: explicit session/run identity, Native_full,
+    unambiguous Root_response/Built_in Agent and provider root spawn depth.
+    No ownership is inferred for run-less, unknown or child task frames.
+    Raw prompt, summary, description, error and output-file bodies are excluded.
+    Task termination does not terminate the native call, model response or turn.
+    This client still returns on the first root result; post-result receiving
+    requires a separate process/session lifetime implementation. *)
+
 type stream_event =
   | Turn_started of
       { turn_id : string
@@ -284,6 +333,7 @@ type stream_event =
       { identity : Runtime_native_tools.action_identity
       ; progress : Runtime_native_tools.progress
       }
+  | Native_task_observed of native_task_observation
   | Usage_windows_reported of Runtime_provider_usage_window.report
   | Conversation_compacted
   | Usage_reported of
@@ -855,16 +905,53 @@ let handle_control_request
     Error (Unsupported_control_request unsupported)
 ;;
 
+(* The candidate boundary and strict decoder share the producer's field set. *)
+let agent_retry_fields =
+  [ "type"; "tool_use_id"; "tool_name"; "parent_tool_use_id"
+  ; "elapsed_time_seconds"; "uuid"; "session_id"; "subagent_type"; "subagent_retry"
+  ]
+;;
+
+type task_frame_kind = Task_start | Task_update | Task_progress | Task_notification
+
+let task_kind = function
+  | "task_started" -> Some Task_start | "task_updated" -> Some Task_update
+  | "task_progress" -> Some Task_progress | "task_notification" -> Some Task_notification
+  | _ -> None
+;;
+
+let task_fields kind =
+  ["type"; "subtype"; "task_id"; "run_id"; "uuid"; "session_id"]
+  @ match kind with
+    | Task_start -> ["tool_use_id"; "description"; "subagent_type"; "is_backgrounded";
+        "spawn_depth"; "parent_task_id"; "task_type"; "workflow_name"; "prompt";
+        "skip_transcript"; "ambient"; "owned_by_subagent"; "awaited"]
+    | Task_update -> ["patch"]
+    | Task_progress -> ["tool_use_id"; "description"; "subagent_type"; "usage";
+        "last_tool_name"; "summary"; "workflow_progress"]
+    | Task_notification -> ["tool_use_id"; "status"; "reason"; "output_file"; "summary";
+        "usage"; "resource_links"; "handback"; "handback_report"; "skip_transcript"; "ambient"]
+;;
+
+let task_observation_candidate fields =
+  let subtypes = List.filter_map
+    (fun (key,value) -> if key="subtype" then Some value else None) fields in
+  (* Duplicate task discriminators are malformed telemetry too. Every value
+     must identify task telemetry; mixed root/system frames still fail closed. *)
+  let kinds = List.filter_map (function
+    | `String subtype -> task_kind subtype | _ -> None) subtypes in
+  kinds <> [] && List.length kinds = List.length subtypes
+  && List.for_all (fun (key,_) ->
+    List.exists (fun kind -> List.mem key (task_fields kind)) kinds) fields
+;;
+
 let parse_wire_line line =
   let stage = "stream-json message" in
   let* json = parse_json_value ~stage line in
-  (* A Claude heartbeat is an observation that must be typed and ignored when
-     malformed. Its decoder performs field-by-field duplicate checks, so let
-     only an unambiguous top-level [type = tool_progress] frame carrying at
-     least one [heartbeat = true] reach it. Every other frame keeps the strict
-     whole-object duplicate-key contract. The discriminant is parsed data,
-     never a substring or a provider-specific identifier convention. *)
-  let heartbeat_observation =
+  (* Only positively identified provider observations reach their own strict
+     decoder when malformed. Agent retry/clear has its own exact discriminant;
+     this does not admit arbitrary non-heartbeat progress or relax auth JSON. *)
+  let progress_observation =
     match json with
     | `Assoc fields ->
       let type_values =
@@ -880,10 +967,15 @@ let parse_wire_line line =
       (match type_values with
        | [ `String "tool_progress" ] ->
          List.exists (function `Bool true -> true | _ -> false) heartbeat_values
+         || (heartbeat_values = []
+             && List.exists (function "tool_name", `String "Agent" -> true | _ -> false) fields
+             && List.mem_assoc "subagent_type" fields
+             && List.for_all (fun (key,_) -> List.mem key agent_retry_fields) fields)
+       | [ `String "system" ] -> task_observation_candidate fields
        | _ -> false)
     | _ -> false
   in
-  if heartbeat_observation
+  if progress_observation
   then Ok json
   else
     let* () = validate_unique_object_keys ~stage ~path:"$" json in
@@ -988,18 +1080,6 @@ let image_block (image : image_input) =
     ]
 ;;
 
-let user_message ~images prompt =
-  let blocks =
-    List.map image_block images @ [ `Assoc [ "type", `String "text"; "text", `String prompt ] ]
-  in
-  `Assoc
-    [ "type", `String "user"
-    ; "message", `Assoc [ "role", `String "user"; "content", `List blocks ]
-    ; "parent_tool_use_id", `Null
-    ; "session_id", `String "default"
-    ]
-;;
-
 let parse_rate_limit ~expected_session_id fields =
   let stage = "rate_limit_event" in
   let* session_id = required_string stage "session_id" fields in
@@ -1095,9 +1175,41 @@ type heartbeat =
   ; elapsed_seconds : int
   }
 
+type agent_retry_frame =
+  { retry_uuid : string
+  ; progress_id : string
+  ; parent_id : string
+  ; subagent_type : string
+  ; note : Runtime_native_tools.retry_note option
+  }
+
+type task_frame =
+  { task_uuid : string; task_id : string; run_id : string option
+  ; tool_use_id : string option; root_registration : bool
+  ; task_event : native_task_event }
+
+type observed_progress =
+  | Heartbeat_frame of heartbeat
+  | Agent_retry_frame of agent_retry_frame
+  | Task_frame of task_frame
+
+type task_binding =
+  | Task_unowned
+  | Task_owned of
+      { owner : native_task_owner; registration : native_task_event
+      ; mutable boundary : native_task_boundary }
+
+type task_run = { run_id : string; mutable binding : task_binding }
+
+type retry_binding =
+  { progress_id : string; agent : Runtime_native_tools.retry_agent; mutable pending : bool }
+
 type native_call_registry =
   { calls : (string, native_call_state) Hashtbl.t
-  ; heartbeat_uuids : (string, heartbeat) Hashtbl.t
+  ; progress_uuids : (string, observed_progress) Hashtbl.t
+  ; retry_bindings : (string, retry_binding) Hashtbl.t
+  ; task_runs : (string, task_run) Hashtbl.t
+  ; native_posture : Runtime_native_tools.posture
   }
 
 type native_start =
@@ -1188,11 +1300,11 @@ let project_native_heartbeat registry ~expected_session_id fields =
   match parse_native_heartbeat ~expected_session_id fields with
   | Error reason -> Heartbeat_ignored reason
   | Ok heartbeat ->
-    match Hashtbl.find_opt registry.heartbeat_uuids heartbeat.uuid with
-    | Some previous when same_heartbeat previous heartbeat -> Heartbeat_ignored Replayed_heartbeat
+    match Hashtbl.find_opt registry.progress_uuids heartbeat.uuid with
+    | Some (Heartbeat_frame previous) when same_heartbeat previous heartbeat -> Heartbeat_ignored Replayed_heartbeat
     | Some _ -> Heartbeat_ignored Conflicting_heartbeat
     | None ->
-      Hashtbl.add registry.heartbeat_uuids heartbeat.uuid heartbeat;
+      Hashtbl.add registry.progress_uuids heartbeat.uuid (Heartbeat_frame heartbeat);
       match Hashtbl.find_opt registry.calls heartbeat.parent_id with
       | Some (Native_open {scope=Root_response;
           observation={origin=Runtime_native_tools.Built_in; tool_name=Some name; _}; _})
@@ -1200,6 +1312,249 @@ let project_native_heartbeat registry ~expected_session_id fields =
           Heartbeat_observed (Runtime_native_tools.Call_id heartbeat.parent_id, heartbeat.elapsed_seconds)
       | Some (Native_open _ | Native_closed _ | Native_ambiguous) | None ->
           Heartbeat_ignored No_active_root_call
+;;
+
+type retry_projection =
+  | Retry_observed of Runtime_native_tools.action_identity * Runtime_native_tools.retry_observation
+  | Retry_ignored
+
+let parse_agent_retry ~expected_session_id fields =
+  let ( let* ) = Option.bind in
+  let unique key = match List.filter (fun (name,_) -> name=key) fields with
+    | [_,value] -> Some value | [] | _::_ -> None in
+  let string key = let* value = unique key in
+    match value with `String value when String.trim value <> "" -> Some value | _ -> None in
+  let* name = string "tool_name" in
+  let* session = string "session_id" in
+  if name <> "Agent" || session <> expected_session_id || List.mem_assoc "heartbeat" fields
+     || not (List.for_all (fun (key,_) -> List.mem key agent_retry_fields) fields) then None
+  else
+    let* elapsed = unique "elapsed_time_seconds" in
+    let* () = match Runtime_json_integer.of_json elapsed with Ok 0 -> Some () | Ok _ | Error _ -> None in
+    let* retry_uuid = string "uuid" in
+    let* progress_id = string "tool_use_id" in
+    let* parent_id = string "parent_tool_use_id" in
+    let* subagent_type = string "subagent_type" in
+    let* note = match List.filter (fun (key,_) -> key="subagent_retry") fields with
+      | [] -> Some None
+      | [_,`Assoc note_fields] ->
+          (match Runtime_native_tools.progress_of_json
+            (`Assoc (("kind",`String "retry_reported")::("subagent_type",`String subagent_type)::note_fields)) with
+           | Ok (Runtime_native_tools.Retry_observed (Retry_reported note)) -> Some (Some note)
+           | Ok _ | Error _ -> None)
+      | [_] | _::_ -> None in
+    Some {retry_uuid;progress_id;parent_id;subagent_type;note}
+;;
+
+let project_agent_retry registry ~expected_session_id fields =
+  match parse_agent_retry ~expected_session_id fields with
+  | None -> Retry_ignored
+  | Some frame ->
+      (* Like heartbeat, valid but unowned UUIDs stay observed so later call
+         starts cannot adopt their replay. Malformed/foreign frames claim none. *)
+      if Hashtbl.mem registry.progress_uuids frame.retry_uuid then Retry_ignored
+      else begin
+        Hashtbl.add registry.progress_uuids frame.retry_uuid (Agent_retry_frame frame);
+        match registry.native_posture, Hashtbl.find_opt registry.calls frame.parent_id with
+        | Runtime_native_tools.Native_full, Some (Native_open
+            {scope=Root_response;observation={origin=Built_in;tool_name=Some "Agent";_};_}) ->
+            let binding = Hashtbl.find_opt registry.retry_bindings frame.parent_id in
+            let matches (binding : retry_binding) = binding.progress_id=frame.progress_id
+              && binding.agent.subagent_type=frame.subagent_type in
+            let report observation = Retry_observed (Runtime_native_tools.Call_id frame.parent_id, observation) in
+            (match frame.note, binding with
+             | Some note, None ->
+                 Hashtbl.add registry.retry_bindings frame.parent_id
+                   {progress_id=frame.progress_id;agent=note.agent;pending=true};
+                 report (Runtime_native_tools.Retry_reported note)
+             | Some note, Some binding when binding.agent=note.agent ->
+                 Hashtbl.replace registry.retry_bindings frame.parent_id
+                   {progress_id=frame.progress_id;agent=note.agent;pending=true};
+                 report (Runtime_native_tools.Retry_reported note)
+             | None, Some binding when matches binding && binding.pending ->
+                 binding.pending <- false; report (Runtime_native_tools.Retry_cleared binding.agent)
+             | Some _, Some _ | None, (Some _ | None) -> Retry_ignored)
+        | (Native_full | Native_read | Native_none), _ -> Retry_ignored
+      end
+;;
+
+let parse_task_frame ~expected_session_id fields =
+  let ( let* ) = Option.bind in
+  (* The narrowly admitted observation still receives the shared recursive
+     duplicate-key check. Malformed telemetry is dropped, not a turn error. *)
+  let* () = Result.to_option (validate_unique_object_keys
+      ~stage:"task observation" ~path:"$" (`Assoc fields)) in
+  let string = function `String value -> Some value | _ -> None in
+  let identity = function
+    | `String value when String.trim value <> "" -> Some value
+    | _ -> None in
+  let bool = function `Bool value -> Some value | _ -> None in
+  let int value = Result.to_option (Runtime_json_integer.of_json value) in
+  let nonnegative_int value =
+    Option.bind (int value) (fun value -> if value >= 0 then Some value else None) in
+  let required parse key fields = Option.bind (List.assoc_opt key fields) parse in
+  let optional parse key fields = match List.assoc_opt key fields with
+    | None -> Some None | Some value -> Option.map Option.some (parse value) in
+  let string_field key = required string key fields in
+  let* subtype = string_field "subtype" in
+  let* kind = task_kind subtype in
+  let* () = if List.for_all (fun (key,_) -> List.mem key (task_fields kind)) fields
+    then Some () else None in
+  let* session_id = required identity "session_id" fields in
+  let* () = if session_id=expected_session_id then Some () else None in
+  let* task_uuid = required identity "uuid" fields in
+  let* task_id = required identity "task_id" fields in
+  let* run_id = optional identity "run_id" fields in
+  let* tool_use_id = optional identity "tool_use_id" fields in
+  let usage = function
+    | `Assoc counts when List.for_all (fun (key,_) ->
+        List.mem key ["total_tokens";"tool_uses";"duration_ms"]) counts ->
+        let* total_tokens = required nonnegative_int "total_tokens" counts in
+        let* tool_uses = required nonnegative_int "tool_uses" counts in
+        let* duration_ms = required int "duration_ms" counts in
+        Some {total_tokens;tool_uses;duration_ms}
+    | _ -> None in
+  let status = function
+    | `String "pending" -> Some Task_pending | `String "running" -> Some Task_running
+    | `String "completed" -> Some Task_completed | `String "failed" -> Some Task_failed
+    | `String "killed" -> Some Task_killed | `String "paused" -> Some Task_paused
+    | _ -> None in
+  let* task_event, root_registration = match kind with
+    | Task_start ->
+        let* _description = string_field "description" in
+        let* _prompt = optional string "prompt" fields in
+        let* _workflow = optional string "workflow_name" fields in
+        let* subagent_type = optional string "subagent_type" fields in
+        let* is_backgrounded = optional bool "is_backgrounded" fields in
+        (* Claude 2.1.294 marks resumed tasks awaited by their caller.
+           This scheduling observation does not prove spawning ownership. *)
+        let* _awaited = optional bool "awaited" fields in
+        let* skip_transcript = optional bool "skip_transcript" fields in
+        let* ambient = optional bool "ambient" fields in
+        let* task_type = optional string "task_type" fields in
+        let* spawn_depth = optional int "spawn_depth" fields in
+        let* parent_task_id = optional identity "parent_task_id" fields in
+        let* owned_by_subagent = optional bool "owned_by_subagent" fields in
+        (* SDK 2.1.292 defines depth 1 as top-level. An absent parent alone
+           cannot prove root origin: untracked/workflow launchers lack it too. *)
+        let root = task_type=Some "local_agent" && spawn_depth=Some 1
+          && parent_task_id=None && owned_by_subagent<>Some true in
+        Some (Task_registered {subagent_type;is_backgrounded;skip_transcript;ambient}, root)
+    | Task_update ->
+        let* patch = match List.assoc_opt "patch" fields with
+          | Some (`Assoc patch) when List.for_all (fun (key,_) -> List.mem key
+              ["status";"description";"end_time";"total_paused_ms";"error";"is_backgrounded"]) patch -> Some patch
+          | _ -> None in
+        let* _description = optional string "description" patch in
+        let* _error = optional string "error" patch in
+        let* status = optional status "status" patch in
+        let* is_backgrounded = optional bool "is_backgrounded" patch in
+        let* end_time = optional nonnegative_int "end_time" patch in
+        let* total_paused_ms = optional int "total_paused_ms" patch in
+        Some (Task_patched {status;is_backgrounded;end_time;total_paused_ms}, false)
+    | Task_progress ->
+        let* _description = string_field "description" in
+        let* _summary = optional string "summary" fields in
+        let* _subagent_type = optional string "subagent_type" fields in
+        let* usage = required usage "usage" fields in
+        let* last_tool_name = optional string "last_tool_name" fields in
+        Some (Task_progress_reported {usage;last_tool_name}, false)
+    | Task_notification ->
+        let* _summary = string_field "summary" in
+        let* _output_file = string_field "output_file" in
+        let* outcome = match List.assoc_opt "status" fields with
+          | Some (`String "completed") -> Some Task_completed_notice
+          | Some (`String "failed") -> Some Task_failed_notice
+          | Some (`String "stopped") -> Some Task_stopped_notice
+          | _ -> None in
+        let* reason = optional (function `String "worker_restart" -> Some Worker_restart
+          | _ -> None) "reason" fields in
+        let* () = match reason,outcome with
+          | Some Worker_restart,(Task_completed_notice|Task_failed_notice) -> None
+          | None,_ | Some Worker_restart,Task_stopped_notice -> Some () in
+        let* usage = optional usage "usage" fields in
+        let* skip_transcript = optional bool "skip_transcript" fields in
+        let* ambient = optional bool "ambient" fields in
+        Some (Task_terminal_reported {outcome;reason;usage;skip_transcript;ambient}, false) in
+  Some {task_uuid;task_id;run_id;tool_use_id;root_registration;task_event}
+;;
+
+let project_native_task registry ~expected_session_id fields =
+  let ( let* ) = Option.bind in
+  let* frame = parse_task_frame ~expected_session_id fields in
+  if Hashtbl.mem registry.progress_uuids frame.task_uuid then None else begin
+    (* Valid unowned identities stay seen across all metadata kinds. A replay
+       cannot acquire a native owner that happened to appear later. *)
+    Hashtbl.add registry.progress_uuids frame.task_uuid (Task_frame frame);
+    let* run_id = frame.run_id in
+    let emit owner boundary = Some {owner;uuid=frame.task_uuid;event=frame.task_event;boundary} in
+    let register () =
+      let binding =
+        match registry.native_posture, frame.root_registration, frame.tool_use_id with
+        | Runtime_native_tools.Native_full, true, Some call_id ->
+            (match Hashtbl.find_opt registry.calls call_id with
+             | Some (Native_open {scope=Root_response;envelope_uuid;ordinal;
+                   observation={origin=Built_in;tool_name=Some "Agent";_}}
+                 | Native_closed {scope=Root_response;envelope_uuid;ordinal;
+                   observation={origin=Built_in;tool_name=Some "Agent";_}}) ->
+                 Task_owned {owner={session_id=expected_session_id;task_id=frame.task_id;
+                     run_id;call_id;call_envelope_uuid=envelope_uuid;call_ordinal=ordinal};
+                   registration=frame.task_event;boundary=Task_terminal_unobserved}
+             | Some (Native_open _ | Native_closed _ | Native_ambiguous) | None -> Task_unowned)
+        | (Native_full | Native_read | Native_none), _, _ -> Task_unowned in
+      Hashtbl.replace registry.task_runs frame.task_id {run_id;binding};
+      match binding with Task_owned {owner;boundary;_} -> emit owner boundary | Task_unowned -> None in
+    match frame.task_event, Hashtbl.find_opt registry.task_runs frame.task_id with
+    | Task_registered _, None -> register ()
+    | Task_registered _, Some previous when String.compare run_id previous.run_id > 0 ->
+        (* This ordering is the provider's declared per-task run contract.
+           The opaque run string is never parsed as a timestamp or prefix. *)
+        register ()
+    | Task_registered _, Some previous when run_id=previous.run_id ->
+        (match previous.binding with
+         | Task_owned held when frame.root_registration
+             && frame.tool_use_id=Some held.owner.call_id
+             && frame.task_event=held.registration -> ()
+         | Task_owned _ -> previous.binding <- Task_unowned
+         | Task_unowned -> ());
+        None
+    | Task_registered _, Some _ -> None
+    | (Task_patched _ | Task_progress_reported _ | Task_terminal_reported _), Some current
+        when run_id=current.run_id ->
+        (match current.binding with
+         | Task_unowned -> None
+         | Task_owned held ->
+             if Option.exists (fun call_id -> call_id<>held.owner.call_id) frame.tool_use_id
+             then None else
+             match frame.task_event, held.boundary with
+             | Task_patched {status;_}, Task_terminal_unobserved ->
+                 (match status with
+                  | Some (Task_completed | Task_failed | Task_killed) -> held.boundary <- Task_terminal_observed
+                  | Some (Task_pending | Task_running | Task_paused) | None -> ());
+                 emit held.owner held.boundary
+             | Task_patched {status=(None | Some (Task_completed | Task_failed | Task_killed));_},
+                 Task_terminal_observed ->
+                 (* End-time/background metadata can change after a terminal
+                    observation. Retain the patch without reopening the run. *)
+                 emit held.owner held.boundary
+             | Task_progress_reported _, Task_terminal_unobserved -> emit held.owner held.boundary
+             | Task_terminal_reported _, (Task_terminal_unobserved | Task_terminal_observed) ->
+                 (* The SDK allows a later notification to replace the task's
+                    report. Its fresh UUID is another observation, not a reopen. *)
+                 held.boundary <- Task_terminal_observed; emit held.owner held.boundary
+             | (Task_patched {status=Some (Task_pending | Task_running | Task_paused);_}
+                 | Task_progress_reported _), Task_terminal_observed
+             | Task_registered _, (Task_terminal_unobserved | Task_terminal_observed) -> None)
+    | (Task_patched _ | Task_progress_reported _ | Task_terminal_reported _), previous ->
+        (* Losing a registration cannot make a later call with the same ID
+           own the preceding task edge. Retain its exact run as unowned. *)
+        (match previous with
+         | None -> Hashtbl.add registry.task_runs frame.task_id {run_id;binding=Task_unowned}
+         | Some old when String.compare run_id old.run_id > 0 ->
+             Hashtbl.replace registry.task_runs frame.task_id {run_id;binding=Task_unowned}
+         | Some _ -> ());
+        None
+  end
 ;;
 
 let allowed_tool_name (tool : dynamic_tool) =
@@ -1716,11 +2071,72 @@ let complete_partial_text (partial : partial_stream) ~on_stream_event ~response_
       Ok ()
 ;;
 
+module Input_attribution = Runtime_claude_input_attribution
+
+type input_observer =
+  { input_state : Input_attribution.t
+  ; on_input_observation : (Input_attribution.observation -> unit) option
+  }
+
+let emit_input_observation observer observation =
+  match observer.on_input_observation with
+  | None -> ()
+  | Some emit ->
+      (try emit observation with
+       | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn -> Log.Runtime_agent.warn "Claude Code input observation callback raised (error=%s)"
+           (Printexc.to_string exn))
+;;
+
+let observe_input observer ~session_id ~frame fields =
+  match observer.on_input_observation with
+  | None -> ()
+  | Some _ ->
+      Option.iter (emit_input_observation observer)
+        (Input_attribution.observe observer.input_state ~session_id ~frame fields)
+;;
+
+let input_frame_uuid fields =
+  match List.assoc_opt "uuid" fields with Some (`String value) -> Some value | _ -> None
+;;
+
+let observe_partial_input observer ~session_id fields =
+  match observer.on_input_observation with
+  | None -> ()
+  | Some _ ->
+  let uuid = input_frame_uuid fields in
+  let frame = match List.assoc_opt "event" fields with
+    | Some (`Assoc event) ->
+        (match List.assoc_opt "type" event with
+         | Some (`String "message_start") ->
+             (match List.assoc_opt "message" event with
+              | Some (`Assoc message) ->
+                  (match List.assoc_opt "id" message with
+                   | Some (`String message_id) -> Some (Input_attribution.Partial_start {uuid;message_id})
+                   | _ -> None)
+              | _ -> None)
+         | Some (`String "message_stop") -> Some (Input_attribution.Partial_stop {uuid})
+         | Some (`String "ping") -> None
+         | Some (`String _) -> Some (Input_attribution.Partial_fragment {uuid})
+         | _ -> None)
+    | _ -> None in
+  (* Root ownership is explicit in the SDK envelope. The older content parser
+     accepts unscoped partial starts; those cannot leave an old root cursor
+     alive for the next unstamped fragment. No authored bytes are changed. *)
+  match assistant_scope ~stage:"input attribution scope" fields, frame with
+  | Ok Root_response, Some frame -> observe_input observer ~session_id ~frame fields
+  | (Ok (Child_response _) | Error _), Some (Input_attribution.Partial_start {message_id;_}) ->
+      Input_attribution.unowned_response_start observer.input_state ~message_id
+  | (Ok (Child_response _) | Error _), Some (Partial_fragment _ | Partial_stop _ | Assistant _ | Result _)
+  | (Ok Root_response | Ok (Child_response _) | Error _), None -> ()
+;;
+
 let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     ~expected_session_id
     ~subscription ~resumed ~rate_limit ~assistant_model ~assistant_texts
     ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
-    ~partial_stream ~stream_started ~response_emitted =
+    ~input_observer ~partial_stream ~stream_started ~response_emitted =
   let* json = io.receive () in
   let* type_, fields = wire_fields json in
   match type_ with
@@ -1740,21 +2156,26 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
-      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~partial_stream ~stream_started
+      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
   | "control_response" ->
     protocol_error "turn" "received an unsolicited control response"
   | "stream_event" ->
     let* () = partial_stream_event ~expected_session_id ~stream_started ~response_emitted
         ~on_stream_event partial_stream fields in
+    observe_partial_input input_observer ~session_id:expected_session_id fields;
     await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~expected_session_id ~subscription ~resumed ~rate_limit ~assistant_model
       ~assistant_texts ~native_tool_calls ~native_tool_attempted ~on_turn_started
-      ~on_stream_event ~partial_stream ~stream_started ~response_emitted
+      ~on_stream_event ~input_observer ~partial_stream ~stream_started ~response_emitted
   | "assistant" ->
     let* scope, origin, uuid, model, blocks, message_id, usage =
       parse_assistant ~expected_session_id ~tools fields
     in
+    (match scope with
+     | Root_response -> observe_input input_observer ~session_id:expected_session_id
+         ~frame:(Input_attribution.Assistant {uuid=Some uuid;message_id}) fields
+     | Child_response _ -> ());
     let assistant_model =
       match scope, origin with
       | (Root_response | Child_response _), Api_error_diagnostic
@@ -1799,7 +2220,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~rate_limit ~assistant_model
       ~assistant_texts:(assistant_texts @ texts)
       ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
-      ~partial_stream ~stream_started ~response_emitted
+      ~input_observer ~partial_stream ~stream_started ~response_emitted
   | "rate_limit_event" ->
     let* rate_limit = parse_rate_limit ~expected_session_id fields in
     (* The usage windows ride the same event. They are an observation for
@@ -1817,7 +2238,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~subscription ~resumed
       ~rate_limit:(Some rate_limit) ~assistant_model ~assistant_texts
       ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
-      ~partial_stream ~stream_started ~response_emitted
+      ~input_observer ~partial_stream ~stream_started ~response_emitted
   | "result" ->
     (* The result frame is the only place the turn's spend is reported, and
        it arrives on failures too (a quota refusal, a provider error after
@@ -1850,6 +2271,13 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
         ~usage
         fields
     in
+    let outcome = match parsed_result with
+      | Ok _ -> Some Input_attribution.Provider_success
+      | Error (Quota_blocked _ | Context_window_exceeded _
+          | Turn_failed _ | Turn_failed_with_observation _) -> Some Input_attribution.Provider_error
+      | Error _ -> None in
+    observe_input input_observer ~session_id:expected_session_id
+      ~frame:(Input_attribution.Result {uuid=Some turn_id;outcome}) fields;
     let* turn_id, result, usage =
       match parsed_result with
       | Error
@@ -1917,21 +2345,26 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~native_tool_calls
-      ~native_tool_attempted ~on_turn_started ~on_stream_event ~partial_stream ~stream_started
+      ~native_tool_attempted ~on_turn_started ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
   | "system" ->
     (* [compact_boundary] is the client's own record that it summarised the
        conversation: what the session held as sent before it is now a
-       summary. Other system frames are informational. *)
+       summary. Exact task edge kinds have their own observation registry;
+       other system frames remain informational. *)
     let* subtype = optional_string "system message" "subtype" fields in
     (match subtype with
      | Some "compact_boundary" -> emit_stream_event on_stream_event Conversation_compacted
+     | Some value when Option.is_some (task_kind value) ->
+         Option.iter (fun observation ->
+           emit_stream_event on_stream_event (Native_task_observed observation))
+           (project_native_task native_tool_calls ~expected_session_id fields)
      | Some _ | None -> ());
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
-      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~partial_stream ~stream_started
+      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
   | "tool_progress" ->
     (* An observation cannot fail a healthy turn. Only the exact open root
@@ -1942,11 +2375,16 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
          {identity; progress=Runtime_native_tools.Heartbeat_reported {elapsed_seconds}})
      | Heartbeat_ignored (Not_heartbeat | Malformed_heartbeat | Other_session
          | Replayed_heartbeat | Conflicting_heartbeat | No_active_root_call) -> ());
+    (match project_agent_retry native_tool_calls ~expected_session_id fields with
+     | Retry_observed (identity, retry) ->
+         emit_stream_event on_stream_event (Native_tool_progress
+           {identity;progress=Runtime_native_tools.Retry_observed retry})
+     | Retry_ignored -> ());
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
-      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~partial_stream ~stream_started
+      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
   | other ->
     protocol_error
@@ -2118,9 +2556,9 @@ let terminate_spawned_process ~clock proc stdin_w =
           (Printexc.to_string exn))
 ;;
 
-let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
+let run_protocol io ~native_posture ~dynamic_tools ~subscription ~session_mode ~session_id
     ~prompt ~images ~on_session_ready ~on_turn_starting ~on_turn_started ~on_prompt_sent
-    ~on_stream_event ~turn_admitted =
+    ~on_stream_event ~on_input_observation ~turn_admitted =
   let tool_call_count = ref 0 in
   let assistant_usage = new_assistant_usage () in
   let mcp_session = Runtime_official_client_mcp.create_session () in
@@ -2144,9 +2582,25 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
     invoke_state_callback ~stage:"turn starting callback" (fun () ->
       on_turn_starting ~session_id)
   in
+  let input_observer =
+    { input_state = Input_attribution.create
+        ~receiver_generation:(Random_id.uuid_v7 ()) ~session_id
+        ~client_uuid:(Random_id.uuid_v7 ())
+    ; on_input_observation } in
+  emit_input_observation input_observer (Input_attribution.prepared input_observer.input_state);
+  let failed_write exn =
+    (* No rejection or claim that the child read zero bytes, even on cancel. *)
+    emit_input_observation input_observer (Input_attribution.write_unknown input_observer.input_state);
+    raise exn in
   let* () =
     try
-      io.send (user_message ~images prompt);
+      (try io.send (Input_attribution.user_message input_observer.input_state
+          ~content:(List.map image_block images @
+            [`Assoc ["type", `String "text"; "text", `String prompt]]))
+       with
+       | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> failed_write exn
+       | Eio.Cancel.Cancelled _ as exn -> failed_write exn
+       | exn -> failed_write exn);
       turn_admitted := true;
       Ok ()
     with
@@ -2162,6 +2616,7 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
            ; detail = Printexc.to_string exn
            })
   in
+  emit_input_observation input_observer (Input_attribution.written input_observer.input_state);
   let* () = invoke_state_callback ~stage:"prompt sent callback" (fun () ->
     on_prompt_sent (); Ok ()) in
   await_terminal
@@ -2179,10 +2634,12 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
     ~rate_limit:None
     ~assistant_model:None
     ~assistant_texts:[]
-    ~native_tool_calls:{calls=Hashtbl.create 8; heartbeat_uuids=Hashtbl.create 8}
+    ~native_tool_calls:{calls=Hashtbl.create 8;progress_uuids=Hashtbl.create 8;
+      retry_bindings=Hashtbl.create 8;task_runs=Hashtbl.create 8;native_posture}
     ~native_tool_attempted:(ref false)
     ~on_turn_started
     ~on_stream_event
+    ~input_observer
     ~partial_stream:{message_id=None; blocks=[]; completed_envelopes=Hashtbl.create 8}
     ~stream_started:(ref false)
     ~response_emitted:(ref false)
@@ -2210,7 +2667,8 @@ let with_system_prompt_file prompt use = match prompt with
 
 let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
     ~reasoning_effort ~session_mode ~session_id ~subscription ~prompt ~images
-    ~on_session_ready ~on_turn_starting ~on_turn_started ~on_prompt_sent ~on_stream_event =
+    ~on_session_ready ~on_turn_starting ~on_turn_started ~on_prompt_sent ~on_stream_event
+    ~on_input_observation =
   let turn_admitted = ref false in
   try
     with_system_prompt_file config.system_prompt (fun system_prompt_file ->
@@ -2290,6 +2748,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
         in
         run_protocol
           { send; receive }
+          ~native_posture:config.native
           ~dynamic_tools
           ~subscription
           ~session_mode
@@ -2304,6 +2763,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
             with_admission_timeout (fun () -> on_turn_started ~session_id ~turn_id))
           ~on_prompt_sent
           ~on_stream_event
+          ~on_input_observation
           ~turn_admitted)))
   with
   | Idle_timeout seconds -> Error (Timeout seconds)
@@ -2434,7 +2894,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
     ?admitted_subscription ?on_spawned ?(on_prompt_sent = fun () -> ()) ~mgr ~clock ~cwd
     ?(on_session_ready = fun ~session_id:_ -> Ok ())
     ?(on_turn_starting = fun ~session_id:_ -> Ok ())
-    ?(on_turn_started = fun ~session_id:_ ~turn_id:_ -> Ok ()) ?on_stream_event config
+    ?(on_turn_started = fun ~session_id:_ ~turn_id:_ -> Ok ()) ?on_stream_event ?on_input_observation config
     ~prompt ~images =
   let result =
     let* () = validate_turn ~dynamic_tools ~session_mode config ~prompt ~images in
@@ -2477,6 +2937,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
         ~on_turn_started
         ~on_prompt_sent
         ~on_stream_event
+        ~on_input_observation
     with
     | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
     | Eio.Cancel.Cancelled _ as exn -> raise exn

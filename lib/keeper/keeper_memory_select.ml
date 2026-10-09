@@ -34,18 +34,24 @@ let collect ~config ~meta ~keepers_dir =
   let ordinary_rows,ordinary_errors=match ordinary with
     | Error detail -> [],[issue "current_store_unavailable" detail]
     | Ok view ->
+      let receipt_fields,receipt_errors=match view.receipt_verification with
+        | Ok () -> [],[]
+        | Error detail ->
+          ["receipt_verification",`Assoc ["status",`String "unavailable";"detail",`String detail;
+            "guidance",`String "Admission and successor provenance could not be verified. Empty witness lists do not establish absence of related history."]],
+          [issue "receipt_verification_unavailable" detail] in
       let facts=match view.snapshot with None -> [] | Some snapshot -> snapshot.Current.facts in
       List.map (fun fact ->
         let id=Memory.memory_id fact in
         let direct=List.filter (fun (binding : Current.admission_recall_binding) -> binding.target_memory_id=id) view.direct_bindings in
         let successors=List.filter (fun (candidate : Current.successor_recall_candidate) -> Memory.memory_id candidate.target=id) view.successor_candidates in
         {choice={Select.id;summary=fact.claim};identity=Ordinary fact;
-         detail=`Assoc ["store",`String "current_memory_snapshot";"memory_id",`String id;
+         detail=`Assoc (["store",`String "current_memory_snapshot";"memory_id",`String id;
            "current_fact",Memory.fact_to_json fact;
            "direct_admission_witnesses",`List (List.map binding_json direct);
            "successor_witnesses",`List (List.map Keeper_memory_successor_selection.candidate_to_json successors);
-           "provenance_guidance",`String "Historical observations and lineage are lookup provenance, not additional current claims."]}) facts,
-      List.filter_map (fun (row : Current.recall_unresolved) -> match row.reason with
+           "provenance_guidance",`String "Historical observations and lineage are lookup provenance, not additional current claims."] @ receipt_fields)}) facts,
+      receipt_errors @ List.filter_map (fun (row : Current.recall_unresolved) -> match row.reason with
         | Current.Retired_without_successor _ -> None
         | History_unavailable _ | Missing_transition _ | Invalid_transition _ | Unrecorded_lineage _ ->
           Some (issue "lineage_unresolved" (Current.recall_unresolved_reason_to_string row.reason))) view.unresolved in

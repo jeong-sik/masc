@@ -1,5 +1,8 @@
 (** Explicit purpose-based retrieval of this Keeper's current memory. Selection
-    roles never authorize mutation or establish the truth of a source. *)
+    roles never authorize mutation or establish the truth of a source.
+    A failed receipt-verification result preserves current claims but marks
+    provenance unavailable for the evaluator and retrieval incomplete for the
+    Keeper. Valid provenance keeps the existing evaluator input unchanged. *)
 val handle :
   ?turn_ref:Ids.Turn_ref.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t option ->

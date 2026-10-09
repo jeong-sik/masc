@@ -82,6 +82,17 @@ if [ -n "$last_tag" ]; then
     # still tags directly on main, which is what describe used to do.
     base_ref="$last_tag"
   fi
+  if [ -z "$base_ref" ]; then
+    # Between tagging and folding the branch back onto main the reflection
+    # commit does not exist yet and the tag is not an ancestor of HEAD, so
+    # no base can be found. Say so instead of silently skipping the report
+    # ("A broken report announces itself" — an empty report must not look
+    # like one).
+    echo "warning: cannot determine missing-fragment base for $last_tag:" \
+      "no 'chore(release): merge $last_tag back into main' commit on main" \
+      "first-parent and $last_tag is not an ancestor of HEAD;" \
+      "skipping the missing-fragment report" >&2
+  fi
 fi
 if [ -n "$base_ref" ]; then
   missing_err="$(mktemp)"

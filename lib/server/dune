@@ -24,6 +24,8 @@
   ;; variants; this library is not re-exported through masc_candle_runtime.
   masc.masc_candle_config
   masc.masc_candle_runtime
+  masc.keeper_operation_identity
+  masc.machine_checkpoint
   masc.keeper_tool_name
   masc.owner_process_identity
   masc

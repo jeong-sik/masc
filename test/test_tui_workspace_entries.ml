@@ -114,7 +114,7 @@ let test_activity_file_starts_without_old_overlays () =
   state.code_file <- file;
   Code_results.apply_file state request (Error "unreadable");
   Code_results.apply_history state old_history
-    (Ok {chl_entries = []; chl_activity_note = "old file"});
+    (Ok {chl_entries = []; chl_git_error = None; chl_activity_note = "old file"});
   Code_results.apply_diff state old_diff (Error "old diff");
   Code_results.apply_blame state old_blame (Ok []);
   Alcotest.(check bool) "late history discarded" true (Option.is_none (Fetched.current state.code_history));
@@ -165,7 +165,7 @@ let test_a_reply_from_the_scope_just_left_is_dropped () =
   in
   state.code_history <- switched;
   Code_results.apply_history state from_alpha
-      (Ok { chl_entries = []; chl_activity_note = "alpha" });
+      (Ok { chl_entries = []; chl_git_error = None; chl_activity_note = "alpha" });
   Alcotest.(check bool) "the pane is still waiting on beta" true
     (match Fetched.current state.code_history with
      | Some ((Code_scope_keeper "beta", "lib/x.ml"), Fetched.Loading) -> true

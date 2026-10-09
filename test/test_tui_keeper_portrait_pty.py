@@ -733,23 +733,19 @@ def item_account_follows_workspace_authority(binary: str) -> None:
             assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                 lambda: held.calls > calls_before_refresh, timeout=10.0)
             phase[0] = "unread"
-            # #40696 keeps the detail navigation across an unread authority, so
-            # the screen stays on the keeper detail (whose keepers the boundary
-            # has cleared) rather than returning to the roster. Wait for the
-            # Item account to withdraw instead of for the roster heading.
-            assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
-                lambda: not any(b"Balance " in row or b"1.000 owned" in row
-                                for row in last_frame_rows(output).values()), timeout=10.0), \
-                f"unread health retained account authority: {last_frame_rows(output)!r}"
-            assert not any(b"Balance 13.000" in row or b"1.000 owned" in row
-                           for row in last_frame_rows(output).values()), "unread health retained account authority"
-            calls_after_withdrawal = held.calls
+            # A failed identity read keeps the last match unconfirmed: the
+            # account that match authorized stays on screen, and no new Item
+            # request goes out until a read matches again.
+            await_frame(process, fd, output, b"server workspace unconfirmed")
+            assert any(b"Balance 13.000" in row for row in last_frame_rows(output).values()), \
+                f"an unread health dropped the confirmed account: {last_frame_rows(output)!r}"
+            calls_while_unconfirmed = held.calls
             unread_probes = len(health_reads)
             os.write(fd, b"r")
             assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                 lambda: len(health_reads) >= unread_probes + 2, timeout=10.0)
             _keyboard_harness.drain_until_quiet(process, fd, output)
-            assert held.calls == calls_after_withdrawal, "unconfirmed workspace launched an Item request"
+            assert held.calls == calls_while_unconfirmed, "unconfirmed workspace launched an Item request"
             reads = len(health_reads)
             phase[0] = "a"
             assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
@@ -872,7 +868,7 @@ def item_account_refreshes_without_public_currency(binary: str) -> None:
         refresh=0.5, terminal_cols=200)
 
 
-def item_account_withdraws_unread_authority(binary: str, boundary="identity") -> None:
+def item_account_under_unread_authority(binary: str, boundary="identity") -> None:
     fixtures = item_roster_fixtures()
     identity = {"base": "", "unread": False, "probes": 0}
     held, release, served = threading.Event(), threading.Event(), threading.Event()
@@ -935,12 +931,10 @@ def item_account_withdraws_unread_authority(binary: str, boundary="identity") ->
             _keyboard_harness.send_and_wait(process, fd, output, b"]", b"Balance 12.500 Candle")
             identity["unread"] = True
             if boundary == "identity":
-                # #40696 keeps the detail navigation across an unread
-                # authority, so the surface stays on the keeper detail (its
-                # keepers cleared) rather than returning to the roster. Wait
-                # for the Item account to withdraw instead of the roster.
+                # A failed identity read keeps the last match unconfirmed: the
+                # balance that match authorized stays on screen.
                 frame(process, fd, output, lambda text:
-                      b"No keeper selected." in text and b"Balance 12.500 Candle" not in text)
+                      b"server workspace unconfirmed" in text and b"Balance 12.500 Candle" in text)
             else:
                 frame(process, fd, output, lambda text: b"Account unavailable:" in text)
             balance[0] = "13000"
@@ -949,12 +943,16 @@ def item_account_withdraws_unread_authority(binary: str, boundary="identity") ->
                 reopen_alpha_items(process, fd, output, b"Balance 13.000 Candle")
             else:
                 frame(process, fd, output, lambda text: b"Balance 13.000 Candle" in text)
+            # The held read answers a balance the screen has never shown, so a
+            # late answer that got published would be visible.
+            balance[0] = "13500"
             arm[0] = True
             os.write(fd, b"r")
             assert _keyboard_harness.wait_for_fixture_state(process, fd, output, held.is_set, timeout=3)
             identity["unread"] = True
             if boundary == "identity":
-                frame(process, fd, output, lambda text: b"No keeper selected." in text and b"Balance " not in text)
+                # The reread already replaced the balance with its loading row.
+                frame(process, fd, output, lambda text: b"server workspace unconfirmed" in text)
             else:
                 frame(process, fd, output, lambda text: b"Account unavailable:" in text)
             # Keep authority unread until the late response has settled.
@@ -968,11 +966,11 @@ def item_account_withdraws_unread_authority(binary: str, boundary="identity") ->
             assert _keyboard_harness.drain_until_quiet(process, fd, output), "late response did not settle"
             text = b"\n".join(last_frame_rows(output).values())
             if boundary == "identity":
-                assert b"No keeper selected." in text
+                assert b"server workspace unconfirmed" in text, text
             else:
                 assert b"Account unavailable:" in text
-            assert b"Balance 13.000 Candle" not in text
-            assert b"Balance 13.000 Candle" not in output[start:]
+                assert b"Balance 13.000 Candle" not in text
+            assert b"Balance 13.500 Candle" not in output[start:], "a late Item answer was published"
             balance[0] = "14000"
             recover(process, fd, output)
             if boundary == "identity":
@@ -983,7 +981,7 @@ def item_account_withdraws_unread_authority(binary: str, boundary="identity") ->
         finally:
             release.set()
 
-    _keyboard_harness.run_terminal_scenario(binary, description=f"Item balances and pending reads lose unread {boundary} authority",
+    _keyboard_harness.run_terminal_scenario(binary, description=f"Item reads pending across an unread {boundary} are refused",
                             interact=interact, http_fixtures=fixtures, terminal_cols=COLUMNS,
                             prepare_workspace=lambda base: identity.update(base=str(Path(base).resolve())),
                             refresh=0.2)
@@ -1047,9 +1045,10 @@ def instructions_read_recovers_workspace_authority(binary: str, *, sandbox_logs:
             assert _keyboard_harness.wait_for_fixture_event(process, fd, output, held, timeout=3)
             identity["unread"] = True
             wait_refreshes(process, fd, output)
-            # Health requests can overlap; wait until the TUI applies revocation.
+            # Health requests can overlap; wait until the TUI applies the
+            # unconfirmed identity. The detail stays on screen.
             assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
-                lambda: b"No keeper selected" in frame(output), timeout=10), \
+                lambda: b"server workspace unconfirmed" in frame(output), timeout=10), \
                 "unread authority was not applied"
             # A manual read during revocation must not create a new token
             # that would admit an answering but unverified endpoint.
@@ -1059,8 +1058,9 @@ def instructions_read_recovers_workspace_authority(binary: str, *, sandbox_logs:
             assert old not in frame(output)
             if leave or fallback_exit:
                 if fallback_exit:
-                    # Failed roster recovery retains suspended detail focus.
-                    # Leave that detail before leaving the Keeper list.
+                    # A local roster reload that fails after the match returns
+                    # keeps the rows that match confirmed, as any failed reload
+                    # under a match does, and the open detail reads again.
                     metadata = Path(_base) / ".masc" / "keepers" / "alpha.json"
                     original_metadata = metadata.read_bytes()
                     metadata.write_text("{invalid fixture metadata")
@@ -1074,8 +1074,9 @@ def instructions_read_recovers_workspace_authority(binary: str, *, sandbox_logs:
                             timeout=10,
                         ), "failed roster decode was not observed"
                         assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
-                            lambda: b"No keeper selected" in frame(output), timeout=10)
-                        assert reads == [True], "failed roster resumed detail"
+                            lambda: b"keeper list unread" in frame(output)
+                            and current in frame(output), timeout=10), "recovery did not reread the open detail"
+                        assert len(reads) == 2, "recovery duplicated its detail read"
                         _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
                         _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Dashboard")
                     finally:
@@ -1088,7 +1089,7 @@ def instructions_read_recovers_workspace_authority(binary: str, *, sandbox_logs:
                 wait_refreshes(process, fd, output)
                 _keyboard_harness.drain_until_quiet(process, fd, output)
                 assert b"MASC Dashboard" in frame(output), "recovery stole navigation"
-                assert reads == [True], "left detail restarted its suspended read"
+                assert len(reads) == (2 if fallback_exit else 1), "left detail restarted its suspended read"
                 assert old not in frame(output) and current not in frame(output)
                 os.write(fd, b"q")
                 return
@@ -1139,8 +1140,8 @@ if __name__ == "__main__":
     item_account_follows_private_changes(binary)
     item_account_follows_workspace_authority(binary)
     item_account_refuses_an_unobserved_server_workspace(binary)
-    item_account_withdraws_unread_authority(binary)
-    item_account_withdraws_unread_authority(binary, boundary="roster")
+    item_account_under_unread_authority(binary)
+    item_account_under_unread_authority(binary, boundary="roster")
     item_account_is_withdrawn_at_workspace_boundary(binary)
     instructions_read_recovers_workspace_authority(binary)
     instructions_read_recovers_workspace_authority(binary, sandbox_logs=True)

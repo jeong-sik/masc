@@ -962,7 +962,7 @@ let run_post_append_pruning_unlocked t ~(dated : Jsonl_writer.dated_path) =
     (* See byte-budget pruning is best-effort cleanup after append. *)
     ignore (prune_to_max_bytes_unlocked t ~max_bytes ~keep_path:dated.path : int)
 
-let append_unlocked t json =
+let append_unlocked ~on_committed t json =
   let mutex = Atomic.get t.mutex in
   (* [use_ro] serializes file appends without poisoning the shared mutex on
      IO failure, so retry paths can keep using the same registry entry.
@@ -975,12 +975,23 @@ let append_unlocked t json =
   Eio.Mutex.use_ro mutex (fun () ->
     let dated = Jsonl_writer.dated_path_now ~base_dir:t.base_dir in
     Jsonl_writer.append_jsonl ~path:dated.path json;
+    on_committed ();
     run_post_append_pruning_unlocked t ~dated)
 
-let append_inner t json = append_unlocked t json
+let append_inner t json = append_unlocked ~on_committed:ignore t json
 
 let append t json =
   (Atomic.get append_guard) (fun () -> append_inner t json)
+
+exception Append_guard_skipped
+
+let append_notifying_commit t json ~on_committed =
+  let committed = ref false in
+  (Atomic.get append_guard) (fun () ->
+    append_unlocked t json ~on_committed:(fun () ->
+      committed := true;
+      on_committed ()));
+  if not !committed then raise Append_guard_skipped
 
 let rotated_segment_name ~day_prefix ~sequence =
   Printf.sprintf "%s.%0*d.jsonl" day_prefix rotation_sequence_digits sequence

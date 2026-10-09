@@ -1204,8 +1204,23 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       Printexc.raise_with_backtrace exn backtrace
     in
     let turn_result =
+      (* This scope owns one actual CLI invocation, not the routed candidate or
+         its capacity retries. Input observations precede native registration. *)
+      let task_binding = Option.map (fun _ -> Keeper_claude_task_binding.create ())
+          on_native_task_observation in
+      let on_input_observation = Option.map
+          Keeper_claude_task_binding.observe_input task_binding in
+      let on_bound_task = match task_binding, on_native_task_observation with
+        | Some binding, Some observe -> Some (fun observation ->
+            match Keeper_claude_task_binding.bind_task binding observation with
+            | Ok bound -> observe bound
+            | Error reason -> Log.Runtime_agent.debug
+                "Claude native task input binding unavailable: %s"
+                (Keeper_claude_task_binding.rejection_to_string reason))
+        | None, _ | _, None -> None in
       let on_stream_event =
-        claude_stream_callback ?receipts ?on_native_tool_progress ?on_native_tool_completion ?on_native_task_observation
+        claude_stream_callback ?receipts ?on_native_tool_progress ?on_native_tool_completion
+          ?on_native_task_observation:on_bound_task
           ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
           ~on_usage_report
           ~position:
@@ -1256,7 +1271,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
                    ~turn_id
                    ~turn_count
                    ~updated_at:(Time_compat.now ())))
-             ?on_stream_event
+             ?on_stream_event ?on_input_observation
              client_config
              ~prompt
              ~images

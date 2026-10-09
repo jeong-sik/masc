@@ -11,10 +11,13 @@ let suffix = ".memory-admission.json"
 let path ~keepers_dir ~keeper_id = Filename.concat keepers_dir (keeper_id ^ suffix)
 let candidates batch = batch.rows
 
-let smaller_prefix batch =
+let split batch =
   match batch.rows with
   | [] | [_] -> None
-  | _ -> Some {batch with rows = List.take (List.length batch.rows / 2) batch.rows}
+  | _ ->
+    let half = List.length batch.rows / 2 in
+    Some ({batch with rows = List.take half batch.rows},
+          {batch with rows = List.drop half batch.rows})
 
 let candidate_to_json row =
   `Assoc ["sequence", `Int row.sequence; "request_id", `String row.request_id;

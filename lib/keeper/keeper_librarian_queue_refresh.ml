@@ -90,6 +90,9 @@ let merge_not_committed earlier (outcome : Keeper_librarian_runtime.not_committe
       Keeper_librarian_runtime.walk_shows_size =
         earlier.Keeper_librarian_runtime.walk_shows_size
         || outcome.Keeper_librarian_runtime.walk_shows_size
+    ; smaller_range_meets_same_failure =
+        earlier.Keeper_librarian_runtime.smaller_range_meets_same_failure
+        || outcome.Keeper_librarian_runtime.smaller_range_meets_same_failure
     }
 ;;
 
@@ -616,6 +619,9 @@ let run_memory_cleanup ~base_path ~keeper_name =
 let run_explicit_admission ~base_path ~keeper_name =
   match Keeper_memory_admission_worker.run ~base_path ~keeper_name with
   | Disabled | Idle -> ()
+  | Recheck_new_input ->
+    Log.Keeper.info ~keeper_name "Librarian explicit admission remains pending; new input arrived during judgment";
+    Keeper_librarian_queue_signal.changed ~base_path ~keeper_name
   | Settled {has_more} ->
     Log.Keeper.info ~keeper_name "Librarian explicit admission committed and acknowledged";
     if has_more then Keeper_librarian_queue_signal.changed ~base_path ~keeper_name

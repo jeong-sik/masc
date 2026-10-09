@@ -81,6 +81,9 @@ type not_committed =
             for a reason it did not name, a refused output, or a candidate
             whose projection did not fit a slot's declared window.
 
+            Invalid JSON or domain output stops partition traversal, including
+            a walk that also encountered a capacity refusal.
+
             False covers everything else, and a caller reading less only when
             this is true is what keeps an outage from shrinking its reads. An
             HTTP refusal from a provider that took the request and could not
@@ -101,6 +104,18 @@ type not_committed =
             The verdict covers every failed visit of the walk, not the last
             one, so the same set of causes answers the same way whatever order
             the slots were tried in. *)
+  ; smaller_range_meets_same_failure : bool
+        (** Some visit of the walk also failed for a reason a smaller range
+            meets the same way: an execution failure whose cause answers false
+            above and is not invalid output, or a CLI slot that ran and failed
+            without naming its input capacity. A candidate turned away before
+            dispatch and a slot this process could not run do not count.
+
+            [walk_shows_size] keeps its own answer; this field adds to it. A
+            caller that reads one smaller range once can ignore it. A caller
+            that splits recursively on [walk_shows_size] reads it as a veto:
+            each part would send the failing slot another request, up to
+            2N-1 of them during a quota or an outage. *)
   }
 
 val fit_continuity :
@@ -130,6 +145,10 @@ val run_best_effort
            most permissive observed boundary lets at least one measured CLI
            take the fitted input. An API slot's refusal reports none. *)
   -> ?on_not_committed:(not_committed -> unit)
+  -> ?on_admission_deferred:(unit -> unit)
+       (** Observes a completed, validated admission answer deferring every
+           candidate. Not fired for provider, schema, store or dispatch failure.
+           This grants no consumption authority. Callback must not raise. *)
   -> ?on_continuity_committed:(served_by:served_slot -> Librarian_continuity_snapshot.t -> unit)
        (** [served_by] is the slot whose answer committed. *)
   -> ?on_context_committed:(Keeper_librarian_context.version -> unit)

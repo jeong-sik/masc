@@ -115,11 +115,15 @@ CLI subprocess.
 
 The worker acknowledges committed candidates before judging input and runs even below
 the current-Memory count targets. Only the runtime's typed range-sizing signal
-permits retrying a smaller prefix of whole candidates; uncertainty retains the
-batch. Successful consumption schedules only input beyond the evaluated candidate
-sequence, not already-evaluated deferred gaps. An actual size refusal still
-permits a smaller prefix; an all-deferred prefix can postpone an unjudged suffix.
-Partition scheduling for this capacity case remains follow-up work. Startup
+permits splitting into smaller whole-candidate parts. Successful consumption
+schedules only newly appended input, not already-evaluated deferred gaps.
+An actual size refusal permits disjoint whole-candidate halves. A completed
+semantic deferral or indivisible size refusal preserves that slice and continues
+its unjudged sibling. Provider, schema, dispatch and store failures stop traversal.
+The worker never retries the same deferred slice within a pass. If new input
+arrives while no candidate commits, a separate recheck outcome schedules it
+without claiming a commit. Each sibling judgment reads fresh current Memory;
+capacity partitioning itself does not prove semantic independence. Startup
 also discovers candidate-only files, retaining them if Keeper metadata is absent.
 Whole-Keeper purge owns the queue; checkpoint purge does not discard it.
 

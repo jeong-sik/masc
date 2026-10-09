@@ -1290,7 +1290,8 @@ let test_a_quota_then_a_refused_answer_reads_less () =
 let test_reports_in_one_pass_keep_any_size_verdict () =
   let module R = Masc.Keeper_librarian_runtime in
   let merge = Masc.Keeper_librarian_queue_refresh.For_testing.merge_not_committed in
-  let report detail walk_shows_size = { R.detail; walk_shows_size } in
+  let report ?(same = false) detail walk_shows_size =
+    { R.detail; walk_shows_size; smaller_range_meets_same_failure = same } in
   List.iter
     (fun (name, earlier, (latest : R.not_committed), expected) ->
        let merged = merge earlier latest in
@@ -1300,7 +1301,13 @@ let test_reports_in_one_pass_keep_any_size_verdict () =
     ; "size, then a raise", Some (report "walk" true), report "raise" false, true
     ; "a raise, then size", Some (report "raise" false), report "walk" true, true
     ; "no size in either", Some (report "walk" false), report "raise" false, false
-    ]
+    ];
+  (* The recursive splitter's veto is evidence too: it stands across reports. *)
+  let merged = merge (Some (report ~same:true "walk" true)) (report "raise" false) in
+  check bool "a quota seen by the walk survives a later raise" true
+    merged.R.smaller_range_meets_same_failure;
+  check bool "no report saw one" false
+    (merge (Some (report "walk" true)) (report "raise" false)).R.smaller_range_meets_same_failure
 
 let () = run "production continuity pair"
   ["cycle",[test_case "completed turns are work units" `Quick test_completed_turn_work_units;

@@ -68,12 +68,15 @@ type finished = { observation : observation; completion : completion }
 type progress =
   | Output_observed of { byte_count : int }
   | Message_reported of { message : string }
+  | Heartbeat_reported of { elapsed_seconds : int }
 
 val progress_to_json : progress -> Yojson.Safe.t
 val progress_of_json : Yojson.Safe.t -> (progress, string) result
 val redact_progress : (string -> string) -> progress -> progress
 (** Progress is provider observation, not output content or a completion.
-    Output bytes count each received delta; equal deltas are separate observations. *)
+    Output bytes count each received delta; equal deltas are separate observations.
+    Heartbeat seconds are a nonnegative provider report, independent of local
+    elapsed time. A later report may be smaller without being rejected. *)
 
 val end_observed : completion
 val completion_to_json : completion -> Yojson.Safe.t

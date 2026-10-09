@@ -242,6 +242,13 @@ type stream_event =
   | Dynamic_tool_finished of { call_id : string }
   | Native_tool_started of Runtime_native_tools.observation
   | Native_tool_finished of Runtime_native_tools.finished
+  | Native_tool_progress of
+      { identity : Runtime_native_tools.action_identity
+      ; progress : Runtime_native_tools.progress
+      }
+      (** A UUID-deduplicated root heartbeat matched to the literal parent call
+          in this invocation. Invalid/unowned observations neither publish a
+          tool row nor fail a healthy turn. No progress-id prefix is parsed. *)
   | Usage_windows_reported of Runtime_provider_usage_window.report
       (** The windows a [rate_limit_event] reported, for the operator
           projection only; nothing that routes or retries reads it. *)

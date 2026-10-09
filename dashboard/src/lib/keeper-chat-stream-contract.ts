@@ -130,6 +130,8 @@ export type KeeperNativeToolCompletion = { exit_code: number | null } & (
 export type KeeperNativeToolProgress =
   | { kind: 'output_observed'; byte_count: number }
   | { kind: 'message_reported'; message: string }
+  // Provider-reported elapsed seconds, independent of local arrival timers.
+  | { kind: 'heartbeat_reported'; elapsed_seconds: number }
 
 type KeeperQuarantinedToolOccurrence = {
   toolStreamScope: number

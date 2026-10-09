@@ -55,7 +55,38 @@ let test_replayed_sequence_and_model_signal () =
       ((List.hd before).native_progress=(List.hd (T.tool_calls t)).native_progress))
     [Live.Text {text="Answer"; stream_scope=None},"STREAMING";Live.Thinking "Reason","THINKING"]
 
+let test_heartbeat_reported_time_is_not_local_elapsed () =
+  let t = T.create ~keeper_name:"fixture" ~request_id:"heartbeat-time" ~started_at:0. in
+  let control = T.create ~keeper_name:"fixture" ~request_id:"heartbeat-time" ~started_at:0. in
+  let occurrence : Live.tool_occurrence = {stream_scope=0;block_index=1;provider_message_id=None;tool_call_id=Some "native"} in
+  let both ~now delta = List.iter (fun t -> T.apply ~now t delta) [t;control] in
+  both ~now:1. Live.Run_started;
+  both ~now:10. (Live.Native_tool_started {occurrence;tool_name=Some "Read"});
+  both ~now:11. (Live.Text {text="answer"; stream_scope=None});
+  List.iter (fun (now,elapsed_seconds) ->
+    T.apply ~now t (Live.Native_tool_progress {occurrence;progress=Native.Heartbeat_reported {elapsed_seconds}}))
+    [50.,30;51.,3];
+  (match T.tool_calls t with
+   | [call] ->
+       check bool "heartbeat leaves the native call running" true (call.outcome=T.Native_running);
+       check (option string) "heartbeat supplies no execution identity" None call.execution_id;
+       (match call.native_progress with
+        | Some p ->
+            check (option int) "latest provider seconds may decrease" (Some 3) p.provider_elapsed_seconds;
+            check (option (float 0.)) "local observation elapsed stays separate" (Some 41.) p.elapsed;
+            check (float 0.) "event time remains local metadata" 51. p.updated_at
+        | None -> fail "heartbeat vanished");
+       let details = T.project_tool_block T.Full (T.tool_block [call]) in
+       check bool "tool detail labels provider elapsed explicitly" true
+         (Astring.String.is_infix ~affix:"provider elapsed 3s" (String.concat "\n" details.details))
+   | _ -> fail "native occurrence missing");
+  both ~now:52. (Live.Native_tool_ended {occurrence;completion=Native.end_observed});
+  check bool "model signal and original silence age are unaffected" true
+    (T.status_rows ~now:60. t=T.status_rows ~now:60. control);
+  check string "authored bytes remain unchanged" "answer" (T.text t)
+
 let test_exact_active_scope_only () =
+  List.iter (fun progress ->
   let translate scope state event = Bridge.translate ~redact_text:Fun.id ~base_dir:"/unused-no-media" ~stream_scope:scope state event in
   let first = translate 0 (Bridge.empty_state ()) (start_message "first") in
   let first = translate 0 first.bridge_state (tool_start ~native:true 1 "same-id") in
@@ -63,7 +94,7 @@ let test_exact_active_scope_only () =
     ~block_index:1 ~tool_call_id:(Some "same-id") Native.end_observed first.bridge_state in
   let assert_rejected ~scope ~index ~id state =
     let result = Bridge.progress_native_tool ~redact_text:Fun.id ~stream_scope:scope
-      ~block_index:index ~tool_call_id:(Some id) (output 3) state in
+      ~block_index:index ~tool_call_id:(Some id) progress state in
     check bool "non-owner progress cannot update tools" false
       (List.exists (function E.Native_tool_progress _ -> true | _ -> false) result.chat_events);
     check bool "mapping error is visible" true
@@ -78,13 +109,13 @@ let test_exact_active_scope_only () =
   let mascot = translate 1 state (tool_start ~native:false 2 "masc") in
   let state = assert_rejected ~scope:1 ~index:2 ~id:"masc" mascot.bridge_state in
   let accepted = Bridge.progress_native_tool ~redact_text:Fun.id ~stream_scope:1
-    ~block_index:1 ~tool_call_id:(Some "same-id") (output 2) state in
+    ~block_index:1 ~tool_call_id:(Some "same-id") progress state in
   check bool "same id/index belongs to its current scope only" true
     (List.exists (function E.Native_tool_progress (native,_) -> native.occurrence.stream_scope=1 | _ -> false) accepted.chat_events);
   let failed = Bridge.fail_stream accepted.bridge_state ~reason:"cancelled" in
   ignore (assert_rejected ~scope:1 ~index:1 ~id:"same-id" failed.bridge_state);
   let stopped = translate 1 accepted.bridge_state Agent_core.Types.MessageStop in
-  ignore (assert_rejected ~scope:1 ~index:1 ~id:"same-id" stopped.bridge_state)
+  ignore (assert_rejected ~scope:1 ~index:1 ~id:"same-id" stopped.bridge_state)) [output 3;Native.Heartbeat_reported {elapsed_seconds=30}]
 
 let test_strict_nested_wire_and_journal () =
   let native : E.native_tool = {occurrence={stream_scope=0;provider_message_id=None;block_index=1};tool_call_id=Some "native";tool_call_name=None} in
@@ -109,7 +140,11 @@ let test_strict_nested_wire_and_journal () =
      `Assoc ["kind",`String "output_observed";"byte_count",`Int 1;"byte_count",`Int 9];
      `Assoc ["kind",`String "output_observed";"byte_count",`Int 1;"message",`String "conflict"];
      `Assoc ["kind",`String "message_reported";"message",`String "one";"message",`String "two"];
-     `Assoc ["kind",`String "message_reported";"message",`Bool false]]
+     `Assoc ["kind",`String "message_reported";"message",`Bool false];
+     `Assoc ["kind",`String "heartbeat_reported";"elapsed_seconds",`Int (-1)];
+     `Assoc ["kind",`String "heartbeat_reported";"elapsed_seconds",`Float 1.5];
+     `Assoc ["kind",`String "heartbeat_reported";"elapsed_seconds",`Int 1;"elapsed_seconds",`Int 1];
+     `Assoc ["kind",`String "heartbeat_reported";"elapsed_seconds",`Int 1;"message",`String "wrong variant"]]
 
 let rec remove_tree path =
   if Sys.is_directory path then begin
@@ -236,7 +271,8 @@ let test_split_secret_held_across_native_side_events () =
               (Astring.String.is_infix ~affix:secret visible)) [live;replay];
           Stream.finish stream (Stream.Completed
             {reply="Safe final response";turn_outcome=Masc.Keeper_turn_outcome.Visible_reply}))))
-      [Progress (output 3); Progress (Native.Message_reported {message="still working"}); Completion]) [false;true]
+      [Progress (output 3); Progress (Native.Message_reported {message="still working"});
+       Progress (Native.Heartbeat_reported {elapsed_seconds=30}); Completion]) [false;true]
 
 let test_held_content_reserves_its_index_before_native_headers () =
   let module Stream = Masc.Keeper_autonomous_stream in
@@ -285,6 +321,7 @@ let test_blank_message_keeps_the_last_message () =
 let () = run "native tool progress" ["contract",[
   test_case "same deltas count twice, same journal seq once" `Quick test_replayed_sequence_and_model_signal;
   test_case "exact current active native scope" `Quick test_exact_active_scope_only;
+     test_case "heartbeat provider time and model noninterference" `Quick test_heartbeat_reported_time_is_not_local_elapsed;
   test_case "split secrets stay held across native lifecycle and progress" `Quick test_split_secret_held_across_native_side_events;
   test_case "held model content reserves its index" `Quick test_held_content_reserves_its_index_before_native_headers;
   test_case "strict nested progress payload" `Quick test_strict_nested_wire_and_journal;

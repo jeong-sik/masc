@@ -283,7 +283,7 @@ let retryable_cli_failure = function
   | Keeper_lane_cli_oneshot.Invalid_domain_output _ -> false
   | Keeper_lane_cli_oneshot.Execution_failed {cause;_} ->
     (match cause with
-     | Fusion_official_client.Setup_failure _ -> false
+     | Fusion_official_client.Missing_reply | Fusion_official_client.Setup_failure _ -> false
      | Fusion_official_client.Codex_failure error -> retryable_codex_error error
      | Fusion_official_client.Claude_failure error
      | Fusion_official_client.Claude_admission_failure error -> retryable_claude_error error
@@ -293,6 +293,7 @@ let cli_error failures =
   let detail = String.concat "; " (List.map Keeper_lane_cli_oneshot.failure_to_string failures) in
   if List.exists retryable_cli_failure failures then A.Transport_unavailable detail
   else if List.exists (function
+      | Keeper_lane_cli_oneshot.Execution_failed {cause = Fusion_official_client.Missing_reply; _}
       | Keeper_lane_cli_oneshot.Invalid_json_output _ | Keeper_lane_cli_oneshot.Invalid_domain_output _ -> true
       | Keeper_lane_cli_oneshot.Unknown_runtime _ | Keeper_lane_cli_oneshot.Not_an_official_client _
       | Keeper_lane_cli_oneshot.Execution_failed _ -> false) failures

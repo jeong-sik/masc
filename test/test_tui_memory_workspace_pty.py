@@ -125,12 +125,14 @@ def run(binary: str, *, held_kind: str, baseline: bool = False) -> None:
                 fd,
                 output,
                 b"go System / runtime.toml",
-                b"server identity unread",
+                b"server identity unconfirmed",
             )
             h.palette_go(process, fd, output, b"go Memory", b"MASC Memory")
             if not baseline:
-                assert b"avg 111" not in screen(), (
-                    "cached A input survived identity withdrawal"
+                # An unread identity keeps the last match unconfirmed: what A
+                # authorized stays until a read names another workspace.
+                assert b"avg 111" in screen(), (
+                    "an unconfirmed identity dropped the confirmed A input"
                 )
             phase = "b"
             until(lambda: b"[workspace mismatch]" in screen(), "B identity missing")

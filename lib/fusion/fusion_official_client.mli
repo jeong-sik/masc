@@ -130,6 +130,8 @@ val run_panelist
 type image_input = { media_type : string; base64_data : string }
 type response = { text : string; model : string; usage : Fusion_types.usage }
 type failure =
+  | Missing_reply
+      (** The provider turn completed without an assistant message required by this consumer. *)
   | Setup_failure of string
       (** A setup cause without runtime attribution. The renderer adds the
           runtime ID supplied by the caller exactly once. *)

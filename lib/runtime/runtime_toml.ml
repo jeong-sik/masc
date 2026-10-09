@@ -3150,6 +3150,7 @@ let typesafeai_keys =
   ; "context_review"
   ; "skill_applicability"
   ; "librarian_preflight"
+  ; "workspace_memory_selection_enabled"
   ; "excluded_keepers"
   ]
 ;;
@@ -3330,6 +3331,10 @@ let parse_typesafeai (toml : Otoml.t)
       typed_find_or "a boolean" path tbl "librarian_preflight" Otoml.get_boolean
         ~default:d.librarian_preflight
     in
+    let workspace_memory_selection_enabled =
+      typed_find_or "a boolean" path tbl "workspace_memory_selection_enabled" Otoml.get_boolean
+        ~default:d.workspace_memory_selection_enabled
+    in
     (match
        ( unknown
        , enabled
@@ -3340,6 +3345,7 @@ let parse_typesafeai (toml : Otoml.t)
        , context_review
        , skill_applicability
        , librarian_preflight
+       , workspace_memory_selection_enabled
        , excluded_keepers )
      with
      | ( []
@@ -3351,6 +3357,7 @@ let parse_typesafeai (toml : Otoml.t)
        , Ok context_review
        , Ok skill_applicability
        , Ok librarian_preflight
+       , Ok workspace_memory_selection_enabled
        , Ok excluded_keepers ) ->
        Ok
          { Runtime_schema.lane_enabled
@@ -3361,6 +3368,7 @@ let parse_typesafeai (toml : Otoml.t)
          ; context_review
          ; skill_applicability
          ; librarian_preflight
+         ; workspace_memory_selection_enabled
          ; excluded_keepers
          }
      | _ ->
@@ -3374,6 +3382,7 @@ let parse_typesafeai (toml : Otoml.t)
           @ result_errors context_review
           @ result_errors skill_applicability
           @ result_errors librarian_preflight
+          @ result_errors workspace_memory_selection_enabled
           @ result_errors excluded_keepers))
   | Some _ -> Error (error path "[typesafeai] must be a TOML table")
 ;;

@@ -2595,11 +2595,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                      action = Message_layout.Action_none;
                    }
                     : Message_layout.entry)
-                    |> fold_thinking_entry state ~chat_cols
-                    |> fun entry ->
-                      if entry.style = Message_layout.Thinking then
-                        { entry with body = annotate_body entry.body }
-                      else entry }
+                    |> fold_thinking_entry state ~chat_cols }
               in
               match item.drawn with
               | Keeper_chat_transcript.Drawn_thinking _
@@ -2976,21 +2972,6 @@ let search_anchor_of_tag = function
       Some (Search_journal {
         source = Masc_tui_types.turn_log_execution_source log; origin; canonical_reply })
   | Tagged_block (_, None, _) -> None
-
-let search_anchor_matches anchor tag =
-  match anchor, tag with
-  | Search_history anchor, Tagged_row message -> same_msg_anchor anchor.row_anchor message
-  | Search_history {reply_source=Some source; _}, Tagged_block (log, _, true) ->
-      source = Masc_tui_types.turn_log_execution_source log
-  | Search_journal anchor, Tagged_block (log, Some origin, _) ->
-      anchor.source = Masc_tui_types.turn_log_execution_source log
-      && anchor.origin = origin
-  | Search_journal anchor, Tagged_row message ->
-      (* A refreshed history may become the selected source after the held
-         journal is discarded. Only the canonical reply slot is equivalent. *)
-      anchor.canonical_reply && search_reply_source message = Some anchor.source
-  | Search_history _, Tagged_block _
-  | Search_journal _, Tagged_block (_, None, _) -> false
 
 type search_index_key =
   | History_identity of msg_identity

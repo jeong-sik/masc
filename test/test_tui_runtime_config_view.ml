@@ -64,8 +64,41 @@ let test_restart_projection_consistency () =
       fixture () |> overlay (fun value -> value
         |> replace "requires_restart" (`Bool true)
         |> replace "pending_keys" (`List [`String "keeper.pending"])) ]
+let test_account_groups () =
+  let group ids = `Assoc ["integration_ids", `List (List.map (fun id -> `String id) ids)] in
+  let read groups = fixture () |> replace "account_groups" groups |> decode |> success in
+  expect "server grouping retained with source"
+    ((read (`List [group ["codex_a"; "codex_b"]; group ["claude"]])).account_groups
+      = Ok [["codex_a"; "codex_b"]; ["claude"]]);
+  List.iter (fun groups -> expect "bad membership remains unavailable"
+    (Result.is_error (read groups).account_groups))
+    [`Null; `List [group ["a"]; group ["a"]]; `List [group []]; `List [group [""]]];
+  expect "absent evidence is not an empty successful read"
+    (Result.is_error (success (decode (fixture ()))).account_groups)
+let test_source_account_emails () =
+  let email = `Assoc ["integration_id", `String "codex_a";
+    "state", `String "read"; "email", `String "source-b@example.org"] in
+  let read rows = fixture () |> replace "account_emails" rows |> decode |> success in
+  expect "email belongs to the source response"
+    ((read (`List [email])).account_emails = Ok (Masc_tui_account_login.Email_rows {rows=["codex_a", Email "source-b@example.org"]; unattributed=0}));
+  expect "missing email evidence stays failed"
+    (Result.is_error (success (decode (fixture ()))).account_emails);
+  List.iter (fun rows -> expect "unavailable email evidence stays unrecognized"
+    ((read rows).account_emails = Ok Masc_tui_account_login.Email_list_unrecognized)) [`Null; `String "bad"];
+  expect "malformed rows preserve partial evidence"
+    ((read (`List [email; `Null])).account_emails = Ok (Masc_tui_account_login.Email_rows {rows=["codex_a", Email "source-b@example.org"]; unattributed=1}));
+  let unavailable = `Assoc ["integration_id", `String "codex_b";
+    "state", `String "not_read"; "cause", `String "source_unavailable"] in
+  expect "source decoder retains typed provider failure beside successful email"
+    ((read (`List [email; unavailable])).account_emails =
+      Ok (Masc_tui_account_login.Email_rows {
+        rows=["codex_a", Email "source-b@example.org";
+              "codex_b", Not_read Login_file_unreadable]; unattributed=0}))
+
 let () = List.iter (fun (name, test) -> test (); Printf.printf "PASS %s\n%!" name)
-  ["atomic GET source and metadata", test_atomic_read;
+  ["source-owned account email evidence", test_source_account_emails;
+   "server-owned account group evidence", test_account_groups;
+   "atomic GET source and metadata", test_atomic_read;
    "pending and preempted settings", test_pending_and_preempted;
    "invalid source remains readable", test_invalid_source_is_readable;
    "TOML parse failure projection", test_parse_failure_shape;

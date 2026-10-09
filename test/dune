@@ -3369,7 +3369,7 @@
 (test
  (name test_tui_text_input_target)
  (modules test_tui_text_input_target)
- (libraries masc_tui_message_input masc_tui_identity_model masc_tui_surface_navigation
+ (libraries masc_tui_account_login masc_tui_message_input masc_tui_identity_model masc_tui_surface_navigation
   alcotest
   fmt
   masc
@@ -4033,7 +4033,7 @@
 (test
  (name test_tui_model_runtime_table)
  (modules test_tui_model_runtime_table)
- (libraries alcotest masc_tui_model_runtime_table masc_tui_message_layout))
+ (libraries alcotest yojson masc.runtime masc_tui_model_runtime_table masc_tui_message_layout))
 
 (test
  (name test_tui_context_bars)
@@ -7117,7 +7117,7 @@
 (test
  (name test_tui_runtime_config_view)
  (modules test_tui_runtime_config_view)
- (libraries masc_tui_runtime_config_view))
+ (libraries masc_tui_runtime_config_view masc_tui_account_login))
 
 (test
  (name test_tui_runtime_listing)
@@ -9811,5 +9811,11 @@
  (name test_h3_working_state_meaning)
  (modules test_h3_working_state_meaning)
  (libraries masc_test_deps))
+
+(test
+ (name test_tui_models_account_reading)
+ (modules test_tui_models_account_reading)
+ (libraries alcotest masc_tui_types masc_tui_render_prim
+  masc_tui_runtime_config_view masc_tui_account_login))
 
 (include stanzas/test_tui_code_history_sources_pty.inc)

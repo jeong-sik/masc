@@ -99,6 +99,135 @@ val render_streaming :
     offsets let a caller keep closed blocks and render the current block again
     after more source arrives. *)
 
+type source_range = {
+  start_byte : int;
+  end_byte : int;
+}
+(** Half-open byte interval in an inline render's [semantic_text]. These are
+    UTF-8 byte positions, not terminal columns or indices in styled rows. *)
+
+type mapped_row = {
+  text : string;
+  source_ranges : source_range list;
+}
+
+type inline_render = {
+  semantic_text : string;
+  source_positions : int option array;
+    (** For each semantic byte, its original input byte. Generated inline
+        separators are [None]. Code-line positions refer to concatenated lexer
+        pieces. This map composes with the caller's source field/block range. *)
+  mapped_rows : mapped_row list;
+}
+
+val render_inline_with_spans :
+  palette:palette -> width:int -> prefix:string -> continuation:string ->
+  string -> inline_render
+(** Render one inline body through the same token wrapper as ordinary Markdown
+    rendering. [semantic_text] is the parsed inline text before physical
+    wrapping; styling markers are interpreted by the existing inline parser.
+    Each row identifies the exact semantic byte ranges it displays. A space
+    omitted at a wrap remains in the canonical semantic stream. ANSI styling
+    and generated prefix/continuation text have no source range.
+
+    This is an inline primitive, not a complete document or chat-search map.
+    Callers must retain a typed source-block identity outside these ranges. *)
+
+type block_render = {
+  block_rows : string list;
+  inline_source : inline_render option;
+}
+
+val render_block_with_spans : palette:palette -> width:int -> string -> block_render
+(** Render one non-fenced, non-table source line through the ordinary block
+    dispatcher, retaining its inline source map. Heading, quote and list
+    syntax use that dispatcher's existing grammar. Generated rules and empty
+    rows have no inline source. [block_rows] includes outer block styling;
+    source ranges refer to canonical inline semantic bytes, while
+    [inline_source.source_positions] indexes the original line, including the
+    offsets removed by heading/list/quote syntax and trimming. A document
+    caller supplies the line's stable source identity. *)
+
+type table_cell_source = {
+  table_row : int;
+  table_column : int;
+  rendered_row : int;
+  cell_text : string;
+  source_positions : int option array;
+  rendered_start_cell : int;
+  visible_range : source_range;
+}
+(** Zero-based semantic cell identity (header row is zero) and its exact
+    physical row, starting display cell and visible byte prefix. Each semantic
+    byte maps through [source_positions] to the complete input table's byte
+    offset. Inline delimiters and trimmed cell margins are excluded; spaces
+    inserted when overflow columns join have [None]. Borders, padding and cut
+    marks have no source range. The caller retains the table's document base.
+    [rendered_start_cell] counts terminal cells, not ANSI or UTF-8 bytes. *)
+
+type table_render = {
+  table_rows : string list;
+  cell_sources : table_cell_source list;
+}
+
+val render_table_with_spans : palette:palette -> width:int -> string -> table_render option
+(** Render one complete table through the existing table grammar and geometry.
+    Return [None] if the text is not exactly one table (apart from a synthetic
+    trailing newline). Cell identity and canonical inline text survive width
+    changes; a narrower pane may expose only a prefix of a cell. Palette style
+    spans must contain only zero-width terminal controls (or be empty), as in
+    production; visible debugging tags change cell geometry and are not a
+    semantic-to-styled fit map. *)
+
+val render_lexed_line_with_spans :
+  palette:palette -> width:int -> (string * string) list -> inline_render
+(** Render one lexer-owned code line, retaining exact byte ranges through hard
+    wrapping, diff bands and repeated gutters. Input pieces are unstyled text
+    paired with lexer kinds, as in the existing fenced-code renderer. Generated
+    gutters, styling and band padding have no semantic range. The document
+    caller retains the source fence and logical-line identity. *)
+
+type generated_field = Fence_language | Mermaid_diagnostic
+
+type semantic_origin =
+  | Original of source_range
+  | Generated of { block_start : int; field : generated_field; byte : int }
+
+type semantic_run = {
+  joins_previous : bool;
+  semantic_text : string;
+  origins : semantic_origin option array;
+  visible_rows : (int * source_range list) list;
+}
+(** Width-independent semantic text with an origin per byte and the exact
+    semantic ranges surviving on each zero-based output row. A wrap may omit
+    whitespace; truncation and canvas overwrites may hide other bytes. Search
+    must check visible coverage rather than treating hidden bytes as displayed.
+    [None] origins are generated inline/overflow separators; searchable generated
+    labels have typed field identities. Runs are not promised in source order:
+    diagram layout and parser-owned label order can differ. [joins_previous]
+    marks adjacent logical prose/code lines whose source newline remains an
+    optional search boundary; independent cells and fields do not join. *)
+
+type document_mapping =
+  | Complete_document
+  | Incomplete_document of (int * Masc_tui_mermaid.missing_label list) list
+
+type document_render = {
+  document_rows : string list;
+  semantic_runs : semantic_run list;
+  mapping : document_mapping;
+}
+
+val render_document_with_spans : palette:palette -> width:int -> string -> document_render
+(** Observe semantic text and visibility through the same streaming block,
+    table and fence dispatcher used by {!render}. Original ranges index the
+    complete input document, including fence/line offsets. Mermaid drawings
+    compose parser label ranges into the same original bytes shown by their
+    narrow-pane source fallback. [Incomplete_document] requires an explicit
+    consumer policy; missing provenance must not be treated as decoration.
+    Generated borders, gutters and styling have no semantic run. *)
+
 val render : palette:palette -> width:int -> string -> string list
 (** Wrap and style one message body into rows of at most [width] cells.
 

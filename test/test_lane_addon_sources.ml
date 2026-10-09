@@ -27,7 +27,7 @@ let with_store f =
 let package dir max_bytes : Types.package = {
   id="source-test";revision="1";title="Source capture fixture";
   contributions=[Types.Observe];image="unused";command=["unused"];
-  directory=dir;skills_directory=None;action_tool=None;outputs=[];refresh_policy=Types.Every_hint;
+  directory=dir;skills_directory=None;action_tool=None;state_storage=Types.Ephemeral;tool_invocation=Types.Direct;exported_tools=[];outputs=[];refresh_policy=Types.Every_hint;
   model_access=Types.Model_disabled;
   binding_schema=None;presentation=Masc.Lane_addon_presentation.empty;
   resources={cpus=0.5;memory_bytes=134217728L;pids=16;max_reply_bytes=max_bytes}}

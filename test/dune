@@ -5223,7 +5223,7 @@
 (test
  (name test_lane_addon_worker)
  (modules test_lane_addon_worker)
- (libraries masc masc_random_id mcp_protocol alcotest eio eio_main yojson unix digestif masc.fs_compat))
+ (libraries masc.lane_addon_call_context masc masc_random_id mcp_protocol alcotest eio eio_main yojson unix digestif masc.fs_compat))
 
 (include stanzas/test_bedrock_sdk.inc)
 (test
@@ -5733,6 +5733,11 @@
  (libraries masc.tool_types masc.lane_addon_tool_result masc.lane_addon_call_context masc.machine_controller_contract
   masc.dos_worker masc.dos_lane masc.machine_pad_layout masc.masc_core masc.machine_configuration
   mcp_protocol mcp_protocol.eio eio eio_main eio.unix alcotest yojson base64 digestif unix))
+
+(test
+ (name test_machine_input_history)
+ (modules test_machine_input_history)
+ (libraries masc_test_deps masc.machine_input_history mcp_protocol eio_main yojson alcotest unix))
 
 (test
  (name test_tui_models_account_reading)

@@ -398,6 +398,24 @@ let test_background_work_stays_outside_composer () =
     check int "request is still tracked" 1 (List.length state.msg_inflight))
     [Tui.Tools_compact; Tools_results; Tools_full]
 
+let test_checkpoint_details_hint_is_counted () =
+  let state = state () in
+  state.msg_turn_folded <- true;
+  let log = live state None in
+  List.iter (fun delta -> Tui.turn_log_add ~now:4. log ~seq:None delta)
+    [Live.Run_started;
+     Live.Approval_requested {call_id="approval"; tool_name="Execute";
+       args="{}"; question="Allow?"; because="writes"};
+     Live.Approval_settled {call_id="approval"; outcome="approved"};
+     Live.Reply_details {reply="";
+       turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint; turn_ref="trace#1"};
+     Live.Run_finished];
+  check bool "checkpoint without Progress draws a standalone details hint" true
+    (Tui.keeper_message_standalone_details_hint state log.tl_transcript ~now:5.);
+  check int "the standalone line has a reserved row"
+    (1 + List.length (Tui.keeper_message_visible_status_rows state log.tl_transcript ~now:5.))
+    (Tui.keeper_message_counted_status_rows state log.tl_transcript ~now:5.)
+
 let test_minimal_chat_keeps_unconfirmed_control_visible () =
   let state = state () in
   state.msg_tool_visibility <- Tui.Tools_compact;
@@ -596,6 +614,7 @@ let () =
           test_compact_progress_follows_working_execution
       ; test_case "priority control receipt ordering" `Quick test_priority_control_receipt_ordering
       ; test_case "background work stays outside composer" `Quick test_background_work_stays_outside_composer
+      ; test_case "checkpoint details hint is counted" `Quick test_checkpoint_details_hint_is_counted
       ; test_case "minimal chat keeps unconfirmed control visible" `Quick test_minimal_chat_keeps_unconfirmed_control_visible
       ; test_case "uncovered execution failures remain visible" `Quick test_compact_keeps_uncovered_execution_problems
       ; test_case "compact delivery and priority truth" `Quick test_compact_status_keeps_delivery_and_priority_truth

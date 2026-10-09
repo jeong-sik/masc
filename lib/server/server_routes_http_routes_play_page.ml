@@ -531,33 +531,38 @@ let serve_page _request reqd =
       ]
     (page ~nonce) reqd
 
-(* Read under the machine's lock, off the Eio domain. No machine: nobody holds
-   it. The screen read fails in no other way the lane documents, but each is
-   named, so a new one is not read as "free". *)
-let controller_json () =
-  match Tool_misc_dos_lane.off_domain Dos_lane.screen with
-  | Ok { Dos_lane.controller; saves_name; _ } ->
-    [ ("machine", `Bool true)
-    ; ("controller", Json_util.string_opt_to_json controller)
-    ; ("saves_name", Json_util.string_opt_to_json saves_name)
-    ]
-  | Error Dos_lane.No_machine -> [ ("machine", `Bool false); ("controller", `Null); ("saves_name", `Null) ]
-  | Error
-      (( Dos_lane.Activity_disabled | Dos_lane.Activity_unobserved | Dos_lane.Invalid_request _ | Dos_lane.Unreadable _ | Dos_lane.Held_by _
-       | Dos_lane.Guest_fault _ | Dos_lane.Unsaveable _ | Dos_lane.Checkpoint_refused _
-       | Dos_lane.Other_program _ ) as err) ->
-    [ ("machine", `Bool true); ("controller", `Null); ("saves_name", `Null)
-    ; ("controller_error", `String (Dos_lane.error_to_string err)) ]
+(* Seat state comes from the same attached worker that accepts player input. *)
+let controller_json ~config =
+  let empty = ["machine", `Bool false; "controller", `Null; "saves_name", `Null] in
+  match Machine_addon_host.call_shared ~config ~principal:Lane_addon_call_context.Anonymous
+      ~name:"masc_dos_screen" ~arguments:(`Assoc []) with
+  | Error (Lane_addon_runtime.Unavailable message | Lane_addon_runtime.Outcome_unknown message
+      | Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Rejected message | Unavailable message | Activity_disabled message | Activity_unobserved message)) ->
+      Error message
+  | Ok result when result.Mcp_protocol.Mcp_types.is_error = Some true ->
+      (match result._meta with
+       | Some (`Assoc fields) when List.assoc_opt
+           "io.github.jeong-sik/masc.machine.screenError" fields = Some (`String "no_machine") -> Ok empty
+       | _ -> Error (Agent_core.Mcp.text_of_tool_result result))
+  | Ok result ->
+      (match result.structured_content with
+       | Some (`Assoc fields) ->
+           (match List.assoc_opt "controller" fields, List.assoc_opt "saves_name" fields with
+            | Some ((`Null | `String _) as controller), Some ((`Null | `String _) as saves_name) ->
+                Ok ["machine", `Bool true; "controller", controller; "saves_name", saves_name]
+            | _ -> Error "DOS worker returned invalid seat information")
+       | _ -> Error "DOS worker returned no seat information")
 
 let seat_response ~config ~name =
   match Play_seat.hand_to config ~now:(Time_compat.now ()) with
   | Error detail ->
     `Service_unavailable, Server_refusal.json ~code:"keepers_unreadable" detail
   | Ok participants ->
-    ( `OK
-    , `Assoc
-        ((("name", `String name) :: controller_json ())
-         @ [ ("participants", `List (List.map (fun p -> `String p) participants)) ]) )
+      (match controller_json ~config with
+       | Error detail -> `Service_unavailable, Server_refusal.json ~code:"machine_unavailable" detail
+       | Ok controller ->
+           `OK, `Assoc (("name", `String name) :: controller
+             @ ["participants", `List (List.map (fun p -> `String p) participants)]))
 
 let add_routes router =
   router

@@ -7,6 +7,10 @@ open Alcotest
 module Lane = Msx_lane
 module Route = Server_routes_http_routes_msx
 
+let unwatched_config =
+  lazy (Masc.Workspace.default_config (Filename.temp_dir "msx-press-route-" ""))
+;;
+
 let member name = function
   | `Assoc fields -> List.assoc_opt name fields
   | _ -> None
@@ -36,6 +40,39 @@ let with_tick_machine f =
        | Ok _ -> ()
        | Error e -> fail (Lane.error_to_string e));
       f ())
+;;
+
+let with_attached_worker f =
+  let base_path = Filename.temp_dir "msx-worker-routes-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
+    Eio_main.run (fun env ->
+      let previous_runtime = Runtime.For_testing.snapshot () in
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Fun.protect ~finally:(fun () ->
+        Runtime.For_testing.restore previous_runtime;
+        Fs_compat.clear_fs ()) (fun () ->
+        Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 30. (fun () ->
+          Eio.Switch.run (fun sw ->
+            Eio_context.with_test_env ~sw ~net:(Eio.Stdenv.net env)
+              ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
+              let runtime_path = Filename.concat base_path "runtime.toml" in
+              Out_channel.with_open_bin runtime_path (fun channel -> output_string channel {|[providers.local]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+[models.sample]
+api-name = "sample"
+max-context = 1024
+[local.sample]
+[runtime]
+default = "local.sample"
+|});
+              (match Runtime.init_default ~config_path:runtime_path with
+               | Ok () -> () | Error detail -> fail detail);
+              Masc.Lane_addon_runtime.For_testing.reset ();
+              Machine_worker_fixture.with_msx ~clock:(Eio.Stdenv.clock env) ~sw ~base_path
+                (fun ~invoke:_ ~detach ->
+                  let value = f ~config:(Masc.Workspace.default_config base_path) ~env ~sw in
+                  detach (); value)))))))
 ;;
 
 let current_frame_number () =
@@ -83,8 +120,7 @@ let assert_pixels_kind expected json =
 
 let test_retained_tick () =
   with_tick_machine (fun () ->
-    Eio_main.run (fun env ->
-      Eio.Switch.run (fun sw ->
+    with_attached_worker (fun ~config ~env ~sw ->
         let pool =
           Eio.Executor_pool.create
             ~sw
@@ -93,7 +129,7 @@ let test_retained_tick () =
         in
         Executor_pool_ref.For_testing.with_pool pool (fun () ->
           let first_status, first =
-            Route.tick_response
+            Route.tick_response ~config
               ~body:{|{"frames":1,"pixel_response":"retained"}|}
           in
           check bool "first tick succeeds" true (first_status = `OK);
@@ -115,7 +151,7 @@ let test_retained_tick () =
           assert_pixels_kind "inline" first;
           let before = frame_number first in
           let status, next =
-            Route.tick_response ~body:(retained_request first)
+            Route.tick_response ~config ~body:(retained_request first)
           in
           check bool "retained tick succeeds" true (status = `OK);
           assert_pixels_kind "retained" next;
@@ -147,7 +183,7 @@ let test_retained_tick () =
                ~step_frames:1
                ~sequence:false);
           let _, after_press =
-            Route.tick_response ~body:(retained_request next)
+            Route.tick_response ~config ~body:(retained_request next)
           in
           assert_pixels_kind "retained" after_press;
           check
@@ -162,7 +198,7 @@ let test_retained_tick () =
              | _ -> false);
           ignore (Lane.eject ());
           let status, empty =
-            Route.tick_response ~body:(retained_request next)
+            Route.tick_response ~config ~body:(retained_request next)
           in
           check
             bool
@@ -173,7 +209,7 @@ let test_retained_tick () =
             bool
             "empty machine never advertises stale pixels"
             true
-            (member "pixels" empty = None)))))
+            (member "pixels" empty = None))))
 ;;
 
 let test_tick_validation_precedes_mutation () =
@@ -182,7 +218,7 @@ let test_tick_validation_precedes_mutation () =
     Executor_pool_ref.For_testing.with_pool_option None (fun () ->
       List.iter
         (fun body ->
-          let status, response = Route.tick_response ~body in
+          let status, response = Route.tick_response ~config:(Lazy.force unwatched_config) ~body in
           check bool "invalid tick is a bad request" true (status = `Bad_request);
           check
             bool
@@ -213,23 +249,22 @@ let test_tick_validation_precedes_mutation () =
         ; {|{"pixel_response":"retained","pixel_response":"retained"}|}
         ; {|{"pixel_response":"retained","known_pixels":{"revision":"bad","width":1,"height":1}}|}
         ];
-      let status, _ = Route.tick_response ~body:"{}" in
+      let status, _ = Route.tick_response ~config:(Lazy.force unwatched_config) ~body:"{}" in
       check
         bool
-        "missing executor cannot fall back to inline mutation"
+        "missing attached worker cannot fall back to host mutation"
         true
         (status = `Service_unavailable);
       check
         int
-        "missing executor preserves machine"
+        "missing attached worker preserves the local machine"
         before
         (current_frame_number ())))
 ;;
 
 let test_tick_worker_advances_and_returns_frame () =
   with_tick_machine (fun () ->
-    Eio_main.run (fun env ->
-      Eio.Switch.run (fun sw ->
+    with_attached_worker (fun ~config ~env ~sw ->
         let pool =
           Eio.Executor_pool.create
             ~sw
@@ -240,10 +275,10 @@ let test_tick_worker_advances_and_returns_frame () =
           List.iter
             (fun (body, frames) ->
               let before = current_frame_number () in
-              let status, response = Route.tick_response ~body in
+              let status, response = Route.tick_response ~config ~body in
               check
                 bool
-                "accepted tick succeeds through executor"
+                "accepted tick succeeds through attached worker"
                 true
                 (status = `OK);
               check
@@ -259,16 +294,12 @@ let test_tick_worker_advances_and_returns_frame () =
             [ "{}", Route.msx_tick_default_frames
             ; {|{"frames":0}|}, 1
             ; {|{"frames":999999}|}, Lane.max_frames_per_call
-            ]))))
+            ])))
 ;;
 
 let test_checkpoint_route () =
   with_tick_machine (fun () ->
-    let (config : Masc.Workspace.config) =
-      Masc.Workspace.default_config
-        (Filename.temp_dir "msx-checkpoint-route-" "")
-    in
-    let base_path = config.base_path in
+    let config = Lazy.force unwatched_config in
     let before = current_frame_number () in
     Executor_pool_ref.For_testing.with_pool_option None (fun () ->
       List.iter
@@ -283,7 +314,6 @@ let test_checkpoint_route () =
             (status = `Bad_request))
         [ "[]"
         ; {|{"slot":3}|}
-        ; {|{"slot":"../escape"}|}
         ; {|{"slot":"x","slot":"y"}|}
         ; {|{"extra":true}|}
         ];
@@ -293,8 +323,8 @@ let test_checkpoint_route () =
         "checkpoint never runs inline without a worker"
         true
         (status = `Service_unavailable));
-    Eio_main.run (fun env ->
-      Eio.Switch.run (fun sw ->
+    with_attached_worker (fun ~config ~env ~sw ->
+        let base_path = config.Masc.Workspace.base_path in
         let pool =
           Eio.Executor_pool.create
             ~sw
@@ -302,15 +332,20 @@ let test_checkpoint_route () =
             (Eio.Stdenv.domain_mgr env)
         in
         Executor_pool_ref.For_testing.with_pool pool (fun () ->
+          let invalid_status, _ = Route.checkpoint_response ~config ~restore:false
+            ~body:{|{"slot":"../escape"}|} in
+          check bool "worker refuses a checkpoint path outside named slots" true
+            (invalid_status = `Bad_request);
+          check int "invalid slot leaves the machine unchanged" before (current_frame_number ());
           let status, _ =
             Route.checkpoint_response ~config ~restore:false ~body:"{}"
           in
-          check bool "save through executor succeeds" true (status = `OK);
+          check bool "save through attached worker succeeds" true (status = `OK);
           ignore (Lane.step ~frames:12 : (Lane.observation, Lane.error) result);
           let status, _ =
             Route.checkpoint_response ~config ~restore:true ~body:"{}"
           in
-          check bool "restore through executor succeeds" true (status = `OK);
+          check bool "restore through attached worker succeeds" true (status = `OK);
           check int "saved clock restored" before (current_frame_number ());
           let destination =
             Filename.concat base_path ".masc/msx/saves/quick.json"
@@ -334,11 +369,7 @@ let test_checkpoint_route () =
             int
             "storage failure preserves machine"
             before
-            (current_frame_number ())))))
-;;
-
-let unwatched_config =
-  lazy (Masc.Workspace.default_config (Filename.temp_dir "msx-press-route-" ""))
+            (current_frame_number ()))))
 ;;
 
 let ledger_whos () = List.map (fun (e : Lane.entry) -> e.who) (Lane.ledger ())
@@ -359,39 +390,41 @@ let test_press_rejects_wrong_types () =
           ("wrong type is a bad request: " ^ body)
           true
           (status = `Bad_request);
-        check
-          (option string)
-          ("the refusal names the field: " ^ body)
-          (Some expected)
+        check bool ("the refusal names the invalid field: " ^ body) true
           (match member "message" response with
-           | Some (`String m) -> Some m
-           | _ -> None);
+           | Some (`String message) ->
+               let length = String.length expected in
+               let rec contains offset =
+                 offset + length <= String.length message
+                 && (String.sub message offset length = expected || contains (offset + 1)) in
+               contains 0
+           | _ -> false);
         check
           int
           ("nothing is pressed: " ^ body)
           before
           (current_frame_number ());
         check bool ("nothing reaches the ledger: " ^ body) true (ledger_whos () = []))
-      [ {|{"keys":["space"],"hold_frames":"5"}|}, "hold_frames must be a positive integer"
-      ; {|{"keys":["space"],"hold_frames":0}|}, "hold_frames must be a positive integer"
-      ; {|{"keys":["space"],"frames":1.5}|}, "frames must be a positive integer"
-      ; {|{"keys":["space"],"frames":null}|}, "frames must be a positive integer"
-      ; {|{"keys":["space"],"sequence":1}|}, "sequence must be a boolean"
-      ; {|{"keys":["space"],"sequence":"true"}|}, "sequence must be a boolean"
-      ; {|{"keys":["space",1]}|}, "keys must be an array of strings"
-      ; {|{"keys":"space"}|}, "keys must be an array of strings"
-      ; {|{}|}, "keys must name at least one key"
-      ; {|{"keys":[]}|}, "keys must name at least one key"
+      [ {|{"keys":["space"],"hold_frames":"5"}|}, "hold_frames"
+      ; {|{"keys":["space"],"hold_frames":0}|}, "hold_frames"
+      ; {|{"keys":["space"],"frames":1.5}|}, "frames"
+      ; {|{"keys":["space"],"frames":null}|}, "frames"
+      ; {|{"keys":["space"],"sequence":1}|}, "sequence"
+      ; {|{"keys":["space"],"sequence":"true"}|}, "sequence"
+      ; {|{"keys":["space",1]}|}, "keys"
+      ; {|{"keys":"space"}|}, "keys"
+      ; {|{}|}, "keys"
+      ; {|{"keys":[]}|}, "keys"
       ])
 ;;
 
 let test_press_defaults_and_identity () =
   with_tick_machine (fun () ->
-    Eio_main.run @@ fun _env ->
+    with_attached_worker (fun ~config ~env:_ ~sw:_ ->
     let before = current_frame_number () in
     let status, response =
       Route.press_response
-        ~config:(Lazy.force unwatched_config)
+        ~config
         ~who:"unit-presser"
         ~body:{|{"keys":["space"]}|}
     in
@@ -416,7 +449,7 @@ let test_press_defaults_and_identity () =
     let before = current_frame_number () in
     let status, _ =
       Route.press_response
-        ~config:(Lazy.force unwatched_config)
+        ~config
         ~who:"unit-presser"
         ~body:
           {|{"keys":["space","space"],"sequence":true,"hold_frames":1,"frames":2}|}
@@ -429,11 +462,11 @@ let test_press_defaults_and_identity () =
       (current_frame_number () - before);
     let status, _ =
       Route.press_response
-        ~config:(Lazy.force unwatched_config)
+        ~config
         ~who:"unit-presser"
         ~body:{|{"keys":["space"],"hold_frames":20}|}
     in
-    check bool "the lane's own bounds still answer 400" true (status = `Bad_request))
+    check bool "the lane's own bounds still answer 400" true (status = `Bad_request)))
 ;;
 
 let remove_tree path =
@@ -519,63 +552,81 @@ let status_of_response response =
 ;;
 
 let test_activity_read_and_route_refusals () =
-  with_tick_machine (fun () -> Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
-    let pool = Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
-    Executor_pool_ref.For_testing.with_pool pool (fun () ->
+  let unavailable = Runtime.For_testing.snapshot () in
+  check bool "fixture begins without published host activity" true
+    (Runtime.machine_configuration () = None);
+  with_tick_machine (fun () ->
+    with_attached_worker (fun ~config ~env:_ ~sw:_ ->
+      let enabled = Runtime.For_testing.snapshot () in
+      let runtime_path = Filename.concat config.Masc.Workspace.base_path "runtime.toml" in
+      let original = In_channel.with_open_bin runtime_path In_channel.input_all in
+      Out_channel.with_open_bin runtime_path (fun channel ->
+        output_string channel (original ^ "\n[machines.msx]\nenabled = false\n"));
+      (match Runtime.init_default ~config_path:runtime_path with
+       | Ok () -> () | Error detail -> fail detail);
+      let disabled = Runtime.For_testing.snapshot () in
       let before = current_frame_number () in
-      List.iter (fun (activity,wire,code) ->
-        Msx_lane.install_activity_observer (Some (fun () -> activity));
-        check (option string) "read reports activity independently of the loaded frame" (Some wire)
-          (match member "activity" (Route.activity_json ()) with Some (`String value) -> Some value | _ -> None);
-        let status,body = Route.tick_response ~body:"{}" in
+      List.iter (fun (snapshot, wire, code) ->
+        Runtime.For_testing.restore snapshot;
+        check (option string) "read reports host activity independently of the loaded frame" (Some wire)
+          (match member "activity" (Route.activity_json ~config) with Some (`String value) -> Some value | _ -> None);
+        let status,body = Route.tick_response ~config ~body:"{}" in
         check bool "known activity refusal is HTTP 409" true (status=`Conflict);
-        check bool "closed refusal code" true (body=`Assoc ["ok",`Bool false;"code",`String code]);
-        let press_status,press_body =
-          Route.press_response
-            ~config:(Lazy.force unwatched_config)
-            ~who:"unit-presser"
-            ~body:{|{"keys":["space"]}|}
-        in
+        check bool "closed refusal code" true
+          (member "ok" body = Some (`Bool false) && member "code" body = Some (`String code));
+        let press_status,press_body = Route.press_response ~config ~who:"unit-presser"
+          ~body:{|{"keys":["space"]}|} in
         check bool "press answers the same activity refusal as tick" true
-          (press_status = `Conflict && press_body = body);
-        check int "refusal never advances" before (current_frame_number ()))
-        [Machine_configuration.Disabled,"off","activity_disabled";
-         Machine_configuration.Unobserved,"unobserved","activity_unobserved"];
-      Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
-      let status,body = Route.tick_response ~body:{|{"frames":1}|} in
-      check bool "reactivation admits a new tick" true (status=`OK);
-      check int "new tick advances exactly once" (before+1) (frame_number body)))))
+          (press_status = `Conflict && member "ok" press_body = Some (`Bool false)
+           && member "code" press_body = Some (`String code));
+        check int "refusal never advances" before (current_frame_number ());
+        check (list string) "refusal sends no input" [] (ledger_whos ()))
+        [disabled,"off","activity_disabled"; unavailable,"unobserved","activity_unobserved"];
+      Runtime.For_testing.restore enabled;
+      let status,body = Route.tick_response ~config ~body:{|{"frames":1}|} in
+      check bool "reactivation admits a new tick on the same worker" true (status=`OK);
+      check int "new tick advances exactly once" (before+1) (frame_number body)))
 
 let test_activity_route_read_authority () =
   with_tick_machine (fun () ->
-    let base_path = Filename.temp_dir "msx-activity-auth-" "" in
     let previous = Sys.getenv_opt "MASC_HTTP_AUTH_STRICT" in
     Fun.protect ~finally:(fun () ->
       Masc.Server_startup_state.reset ();
-      (match previous with Some value -> Unix.putenv "MASC_HTTP_AUTH_STRICT" value | None -> Unix.unsetenv "MASC_HTTP_AUTH_STRICT");
-      remove_tree base_path) (fun () ->
+      Server_auth.clear_server_state ();
+      match previous with Some value -> Unix.putenv "MASC_HTTP_AUTH_STRICT" value
+        | None -> Unix.unsetenv "MASC_HTTP_AUTH_STRICT") (fun () ->
       Unix.putenv "MASC_HTTP_AUTH_STRICT" "true";
-      Auth.save_auth_config base_path {Masc_domain.default_auth_config with enabled=true;require_token=true};
-      let token = match Auth.create_token base_path ~agent_name:"machine-reader" ~role:Masc_domain.Worker with
-        | Ok (token,_) -> token | Error error -> fail (Masc_domain.masc_error_to_string error) in
-      let state = Masc.Mcp_server.For_testing.create_state ~base_path in
-      Masc.Server_startup_state.mark_state_ready () |> Result.get_ok;
-      Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Disabled));
-      Eio_main.run (fun _env ->
+      with_attached_worker (fun ~config ~env:_ ~sw:_ ->
+        let base_path = config.Masc.Workspace.base_path in
+        let runtime_path = Filename.concat base_path "runtime.toml" in
+        let original = In_channel.with_open_bin runtime_path In_channel.input_all in
+        Out_channel.with_open_bin runtime_path (fun channel ->
+          output_string channel (original ^ "\n[machines.msx]\nenabled = false\n"));
+        (match Runtime.init_default ~config_path:runtime_path with
+         | Ok () -> () | Error detail -> fail detail);
+        Auth.save_auth_config base_path {Masc_domain.default_auth_config with enabled=true;require_token=true};
+        let token = match Auth.create_token base_path ~agent_name:"machine-reader" ~role:Masc_domain.Worker with
+          | Ok (token,_) -> token | Error error -> fail (Masc_domain.masc_error_to_string error) in
+        let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+        Masc.Server_startup_state.mark_state_ready () |> Result.get_ok;
         let before = current_frame_number () in
         let get authorization = dispatch_request ~method_:"GET" ~path:"/api/v1/msx/activity" ~state ~authorization ~body:"" in
         check int "strict read requires credentials" 401 (status_of_response (get None));
-        check int "reader can observe off activity" 200 (status_of_response (get (Some token)));
+        let response = get (Some token) in
+        check int "reader can observe off activity" 200 (status_of_response response);
+        let body = match Astring.String.cut ~sep:"\r\n\r\n" response with
+          | Some (_, body) -> Yojson.Safe.from_string body
+          | None -> fail "HTTP response omitted body" in
+        check bool "authorized read returns host Off configuration" true
+          (member "activity" body = Some (`String "off"));
         check int "activity GET does not advance machine" before (current_frame_number ());
         check int "activity endpoint has no write handler" 405
           (status_of_response (dispatch_request ~method_:"POST" ~path:"/api/v1/msx/activity" ~state ~authorization:(Some token) ~body:"{}")))))
 
 let test_press_route_names_the_resolved_actor () =
   with_tick_machine (fun () ->
-    let base_path = Filename.temp_dir "msx-press-actor-" "" in
-    Fun.protect
-      ~finally:(fun () -> remove_tree base_path)
-      (fun () ->
+    with_attached_worker (fun ~config ~env:_ ~sw:_ ->
+      let base_path = config.Masc.Workspace.base_path in
         Auth.save_auth_config
           base_path
           { Masc_domain.default_auth_config with enabled = true; require_token = true };
@@ -591,7 +642,6 @@ let test_press_route_names_the_resolved_actor () =
             failf "create_token failed: %s" (Masc_domain.masc_error_to_string err)
         in
         let state = Masc.Mcp_server.For_testing.create_state ~base_path in
-        Eio_main.run (fun _env ->
           let before = current_frame_number () in
           let refused =
             dispatch_press
@@ -626,7 +676,7 @@ let test_press_route_names_the_resolved_actor () =
             bool
             "no edge is attributed to \"operator\""
             false
-            (List.mem "operator" (ledger_whos ())))))
+            (List.mem "operator" (ledger_whos ()))))
 ;;
 
 let test_encoded_pixel_snapshot () =
@@ -693,8 +743,7 @@ let test_encoded_pixel_snapshot () =
       let save_path = Filename.concat base_path "before.json" in
       ignore (require (Lane.save ~path:save_path));
       let first_number = current_frame_number () in
-      Eio_main.run (fun env ->
-        Eio.Switch.run (fun sw ->
+      with_attached_worker (fun ~config ~env ~sw ->
           let pool =
             Eio.Executor_pool.create
               ~sw
@@ -703,17 +752,17 @@ let test_encoded_pixel_snapshot () =
           in
           Executor_pool_ref.For_testing.with_pool pool (fun () ->
             let status, first_tick =
-              Route.tick_response
+              Route.tick_response ~config
                 ~body:{|{"frames":2,"pixel_response":"retained"}|}
             in
             check bool "real guest tick succeeds" true (status = `OK);
             assert_pixels_kind "inline" first_tick;
             let _, same_pixels =
-              Route.tick_response ~body:(retained_request ~frames:2 first_tick)
+              Route.tick_response ~config ~body:(retained_request ~frames:2 first_tick)
             in
             assert_pixels_kind "retained" same_pixels;
             let _, changed_pixels =
-              Route.tick_response ~body:(retained_request same_pixels)
+              Route.tick_response ~config ~body:(retained_request same_pixels)
             in
             assert_pixels_kind "inline" changed_pixels;
             let pixel_fields = pixels_object changed_pixels in
@@ -732,7 +781,7 @@ let test_encoded_pixel_snapshot () =
               true
               (List.assoc "revision" pixel_fields
               = `String Digestif.SHA256.(to_hex (digest_string rgb)));
-            let status, full_tick = Route.tick_response ~body:"{}" in
+            let status, full_tick = Route.tick_response ~config ~body:"{}" in
             check bool "full frame tick succeeds" true (status = `OK);
             (match Lane.frame () with
              | Some frame ->
@@ -741,7 +790,7 @@ let test_encoded_pixel_snapshot () =
                  "encoding agrees with current RGB"
                  frame.rgb
                  (Base64.decode_exn (pixels full_tick))
-             | None -> fail "machine disappeared"))));
+             | None -> fail "machine disappeared")));
       ignore (require (Lane.restore ~path:save_path ~ledger_dir));
       ignore (require (Lane.step ~frames:1));
       check int "clock remains live" (first_number + 1) (current_frame_number ());
@@ -780,7 +829,8 @@ let () =
                  ~sequence:false
              with
              | Ok obs ->
-               let j = Route.press_result_json ~ok:true (Some obs) in
+               let j = Route.press_result_json ~ok:true
+                 (Some (`Assoc (Msx_machine_tools.observation_fields obs))) in
                check
                  (option bool)
                  "ok true"
@@ -825,7 +875,8 @@ let () =
             `Quick
             (fun () ->
               ignore (Lane.eject () : (unit, Lane.error) result);
-              let base = Filename.temp_dir "msx-carts-route-" "" in
+              with_attached_worker (fun ~config ~env:_ ~sw:_ ->
+              let base = config.Masc.Workspace.base_path in
               let mk d = if not (Sys.file_exists d) then Sys.mkdir d 0o755 in
               let masc = Filename.concat base ".masc" in
               let msx = Filename.concat masc "msx" in
@@ -840,7 +891,8 @@ let () =
               in
               touch "dig-dug.rom";
               touch "pac-man.rom";
-              let j = Route.carts_json ~base_path:base in
+              let status, j = Route.carts_response ~config in
+              check bool "attached worker provides inventory" true (status = `OK);
               let names =
                 match member "carts" j with
                 | Some (`List items) ->
@@ -862,7 +914,7 @@ let () =
                 (Some false)
                 (match member "loaded" j with
                  | Some (`Bool b) -> Some b
-                 | _ -> None))
+                 | _ -> None)))
         ] )
     ; ( "load_result_json"
       , [ test_case

@@ -225,10 +225,6 @@ let marked_json source state ~count ~incarnation =
 let no_machine_json source =
   `Assoc [ "source_kind", `String (screen_source_kind source); "state", `String "no_machine" ]
 
-let screen_json ~width ~height ~rgb =
-  "screen", `Assoc [ "format", `String "rgb8"; "width", `Int width; "height", `Int height
-                   ; "rgb_base64", `String (Base64.encode_string rgb) ]
-
 type live_answer = Answered of Yojson.Safe.t | Needs_locked_read
 
 (* Both lanes publish the same three states. A running machine cannot answer
@@ -244,82 +240,70 @@ let answer_from_publication source ~since = function
        | Some _ | None -> Needs_locked_read)
   | Machine_live_publication.Running _ -> Needs_locked_read
 
-let live_from_published_mark source ~since =
-  let publication =
-    match source with
-    | Machine_lane.Msx ->
-        Machine_live_publication.map
-          (fun { Msx_lane.count; incarnation } -> { count; incarnation })
-          (Msx_lane.current_publication ())
-    | Machine_lane.Dos ->
-        Machine_live_publication.map
-          (fun { Dos_lane.count; incarnation } -> { count; incarnation })
-          (Dos_lane.current_publication ())
-  in
-  answer_from_publication source ~since publication
-
-(* The locked half: the lane compares again and copies under one hold, so a
-   Changed mark always names its pixels. It writes nothing. *)
-let msx_live source ~since () : Yojson.Safe.t =
-  let since = Option.map (fun { count; incarnation } -> { Msx_lane.count; incarnation }) since in
-  match Msx_lane.live ~since with
-  | Msx_lane.Nothing_loaded -> no_machine_json source
-  | Msx_lane.Unchanged { count; incarnation } ->
-      `Assoc (marked_json source "unchanged" ~count ~incarnation)
-  | Msx_lane.Changed ({ count; incarnation }, frame) ->
-      `Assoc (marked_json source "changed" ~count ~incarnation @
-        [ "frame_number", `Int frame.Msx_lane.number
-        ; screen_json ~width:frame.Msx_lane.width ~height:frame.Msx_lane.height
-            ~rgb:frame.Msx_lane.rgb ])
-
-let dos_live source ~since () : Yojson.Safe.t =
-  let since = Option.map (fun { count; incarnation } -> { Dos_lane.count; incarnation }) since in
-  match Dos_lane.live ~since with
-  | Dos_lane.Nothing_loaded -> no_machine_json source
-  | Dos_lane.Unchanged { count; incarnation } ->
-      `Assoc (marked_json source "unchanged" ~count ~incarnation)
-  | Dos_lane.Changed ({ count; incarnation }, frame) ->
-      `Assoc (marked_json source "changed" ~count ~incarnation @
-        [ screen_json ~width:frame.Dos_lane.width ~height:frame.Dos_lane.height
-            ~rgb:frame.Dos_lane.rgb ])
-
-(* Every DOS answer -- including the fast "unchanged" one below, and
-   "no machine", where a spectator most wants to know who ejected it --
-   carries the Lane's own activity feed. [Dos_lane.recent_activity] is
-   lock-free for exactly this: the fast path answers without a locked read of
-   the machine at all, and a [pass] or [save] can add a line here without
-   ever moving the picture's own mark, so the feed cannot ride on the
-   "unchanged" branch's own staleness check. MSX has no such feed yet
-   (several of its Lane calls take no [~who] to attribute one to), so this is
-   spliced in per-source here rather than in [marked_json]/[no_machine_json],
-   which both machines share. *)
-let with_activity source json =
-  match source with
-  | Machine_lane.Msx -> json
-  | Machine_lane.Dos ->
-      (match json with
-       | `Assoc fields ->
-           `Assoc (fields @ [ "activity", Machine_action_feed.to_json_list (Dos_lane.recent_activity ()) ])
-       | other -> other)
-
-let live_json source ~since : Yojson.Safe.t =
-  with_activity source
-    (match live_from_published_mark source ~since with
-     | Answered json -> json
-     | Needs_locked_read ->
-         (match source with
-          | Machine_lane.Msx -> Eio_unix.run_in_systhread (msx_live source ~since)
-          | Machine_lane.Dos -> Eio_unix.run_in_systhread (dos_live source ~since)))
+let live_json ~config source ~since =
+  let name = match source with Machine_lane.Msx -> "masc_msx_screen" | Dos -> "masc_dos_screen" in
+  let* snapshot = Lane_addon_runtime.observation_for_export ~config
+    ~access:Lane_addon_sources.Unauthenticated ~name in
+  match snapshot with
+  | None -> Error "No attached shared machine worker is available"
+  | Some snapshot ->
+      let references = List.filter_map (fun (row : Lane_addon_types.row) ->
+        Option.map (fun value -> row.evidence,value) (List.assoc_opt "machine_live" row.fields)) snapshot.output.rows in
+      let* matches = match references with
+        | [evidence,value] ->
+            let* reference = Lane_addon_types.evidence_of_json value in
+            let* () = if List.mem reference evidence then Ok () else Error "machine screen is not declared as row evidence" in
+            let store = Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+            let* bytes = Eio_unix.run_in_systhread (fun () -> Lane_addon_store.read_blob ~max_bytes:snapshot.max_bytes store reference) in
+            (try Ok [Yojson.Safe.from_string bytes] with Yojson.Json_error detail -> Error detail)
+        | _ -> Error "worker observation does not provide one machine screen reference" in
+      (* Blob I/O yields: an installation can detach or publish a newer frame
+         before these bytes return. Only publish the still-current observation. *)
+      let* current = Lane_addon_runtime.observation_for_export ~config
+        ~access:Lane_addon_sources.Unauthenticated ~name in
+      let* refreshing = match current with
+        | Some current when current.instance_id = snapshot.instance_id
+            && current.observation_seq = snapshot.observation_seq ->
+            Ok (snapshot.refreshing || current.refreshing)
+        | _ -> Error "machine observation changed while reading its screen" in
+      (match matches with
+       | [`Assoc fields] when List.assoc_opt "source_kind" fields = Some (`String (screen_source_kind source)) ->
+           let status = List.assoc_opt "state" fields in
+           let* result = match status with
+             | Some (`String "no_machine") -> Ok (`Assoc fields)
+             | Some (`String "changed") ->
+                 (match List.assoc_opt "change_count" fields, List.assoc_opt "incarnation" fields,
+                        List.assoc_opt "screen" fields with
+                  | Some (`Int count), Some (`String incarnation), Some (`Assoc _)
+                    when count >= 0 && incarnation <> "" ->
+                      let publication = if refreshing then
+                        Machine_live_publication.Running {count;incarnation}
+                        else Machine_live_publication.Stable {count;incarnation} in
+                      (match answer_from_publication source ~since publication with
+                       | Needs_locked_read -> Ok (`Assoc fields)
+                       | Answered (`Assoc unchanged) ->
+                           Ok (`Assoc (unchanged @ (match List.assoc_opt "activity" fields with
+                             | None -> [] | Some activity -> ["activity",activity])))
+                       | Answered json -> Ok json)
+                  | _ -> Error "invalid worker machine screen snapshot")
+             | _ -> Error "worker observation must contain a complete machine screen" in
+           (match result with `Assoc fields -> Ok (`Assoc (fields @ [
+             "observation_seq", `Int snapshot.observation_seq; "refreshing", `Bool refreshing]))
+            | _ -> Ok result)
+       | _ -> Error "worker observation does not provide one matching machine screen")
 
 (* An invited Player holds CanPlayMachine and no CanReadState: it watches
    the machine here and reads nothing else. Workers and Admins hold both. *)
 let get_live request reqd =
-  with_permission_auth ~permission:Masc_domain.CanPlayMachine (fun _state _request reqd ->
+  with_permission_auth ~permission:Masc_domain.CanPlayMachine (fun state _request reqd ->
     match decode_live_query (query_fields request) with
     | Error detail -> respond request reqd (Error detail)
     | Ok (source, since) ->
-        Http.Response.json_value_on_cpu ~compress:true ~request
-          ~extra_headers:(cors_headers (get_origin request)) (live_json source ~since) reqd)
+        (match live_json ~config:(Mcp_server.workspace_config state) source ~since with
+         | Ok json -> Http.Response.json_value_on_cpu ~compress:true ~request
+             ~extra_headers:(cors_headers (get_origin request)) json reqd
+         | Error detail -> respond_json_value_with_cors ~status:`Service_unavailable request reqd
+             (Server_refusal.json ~code:"machine_observation_unavailable" detail)))
     request reqd
 
 let post ~operation ~tool_name request reqd =

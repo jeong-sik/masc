@@ -171,6 +171,24 @@ let operator_route () = with_fixture (fun env sw config root _directory ->
   check bool "admin GET does not construct the package manager" false (Addon.inventory ~config).owner_present;
   check bool "HTTP inventory leaves workspace bytes unchanged" true (before=files root))
 
+let machine_publication_reads_worker_observation () =
+  let row : Lane_addon_types.row = {id="worker/screen";lane_id="worker/dos/screen";
+    kind=Value;title="DOS";observed_at=1.;subject_id="load-1";clock=None;actor=None;
+    fields=["machine_loaded",`Bool true];evidence=[];related_ids=[]} in
+  let snapshot : Addon.export_observation = {instance_id="worker";observation_seq=1;
+    max_bytes=4096;refreshing=false;output={rows=[row];coverage=[]}} in
+  let project = Inventory.For_testing.machine_publication in
+  check bool "worker frame is visible without a host machine" true (project (Ok (Some snapshot)) = Inventory.Stable);
+  check bool "worker refresh is visible" true
+    (project (Ok (Some {snapshot with refreshing=true})) = Inventory.Running);
+  check bool "worker failure is not an empty machine" true
+    (project (Error "worker failed") = Inventory.Publication_unavailable);
+  check bool "missing installation has no current screen" true (project (Ok None) = Inventory.No_screen);
+  let unloaded = {snapshot with output={rows=[{row with fields=["machine_loaded",`Bool false]}];coverage=[]}} in
+  check bool "unloaded worker reports no screen" true (project (Ok (Some unloaded)) = Inventory.No_screen);
+  check bool "missing loaded status cannot claim no screen" true
+    (project (Ok (Some {snapshot with output={rows=[];coverage=[]}})) = Inventory.Publication_unavailable)
+
 let machine_wire_preserves_both_readings () =
   List.iter (fun machine ->
     List.iter (fun (activity,wire) -> List.iter (fun (publication,published) ->
@@ -179,7 +197,7 @@ let machine_wire_preserves_both_readings () =
       let state = member "state" (Inventory.For_testing.row_to_json row) in
       check string "activity" wire (text "activity" state);
       check string "publication retained" published (text "publication" state))
-      [Inventory.No_screen,"no_screen";Stable,"stable";Running,"running"])
+      [Inventory.No_screen,"no_screen";Stable,"stable";Running,"running";Publication_unavailable,"unavailable"])
       [Machine_configuration.Enabled,"on";Disabled,"off";Unobserved,"unobserved"])
     [Machine_lane.Msx;Dos]
 
@@ -329,6 +347,7 @@ enabled=%b
     ["off";"off";"off"] (activities (Inventory.snapshot ~config |> Inventory.to_json)))
 
 let () = run "operator lane inventory" ["read boundaries",[
+  test_case "machine publication reads worker observations" `Quick machine_publication_reads_worker_observation;
   test_case "machine activity and publication serialize independently" `Quick machine_wire_preserves_both_readings;
   test_case "Browser activity captures one configuration" `Quick browser_activity_snapshot;
   test_case "invalid explicit root remains unobserved" `Quick invalid_config_root;

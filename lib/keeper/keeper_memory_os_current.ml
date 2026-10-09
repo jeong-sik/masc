@@ -1746,6 +1746,31 @@ let read_dropped ~keepers_dir ~keeper_id ~current_facts =
       Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)))
 ;;
 
+type retirement_context =
+  | Retirement_source_changed
+  | Retirement_source_unavailable of string
+  | Retirement_archive of (archived_fact list, string) result
+
+let read_retirement_context ~keepers_dir ~keeper_id ~expected_revision ~current_facts =
+  try
+    let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
+    Keeper_memory_os_aggregate_lock.with_lock ~keepers_dir ~keeper_id (fun () ->
+      File_lock_eio.with_lock path (fun () ->
+        match read_classified ~keepers_dir ~keeper_id with
+        | Readable snapshot when Some snapshot.revision = expected_revision
+            && snapshot.facts = current_facts ->
+            Retirement_archive (read_dropped ~keepers_dir ~keeper_id ~current_facts)
+        | No_snapshot when expected_revision = None && current_facts = [] ->
+            Retirement_archive (read_dropped ~keepers_dir ~keeper_id ~current_facts)
+        | Undecodable {rejection} when expected_revision = None && current_facts = [] ->
+            Retirement_archive (Error rejection)
+        | Readable _ | No_snapshot | Undecodable _ -> Retirement_source_changed
+        | Io_unreadable {detail} -> Retirement_source_unavailable detail))
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Retirement_source_unavailable (Printexc.to_string exn)
+;;
+
 (* An exact retraction batch: its plan id and the error that reports pending
    journal evidence for the snapshot it wrote. *)
 type 'error retraction_plan =

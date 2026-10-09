@@ -700,6 +700,28 @@ let check_batch_retraction_recovers_exact_reason_evidence ~torn_tail () =
     (List.length (read_journal_lines ~keepers_dir))
 ;;
 
+let test_retirement_context_rejects_stale_current () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let target = fact ~claim:"retired policy" () in
+  let original = replace ~keepers_dir ~facts:[target] () |> require_ok in
+  (match Current.retract_fact ~keepers_dir ~keeper_id:"keeper" ~now:300.
+      ~source:(source Current.Explicit_retract) ~memory_id:(Types.memory_id target)
+      ~reason:"operator retired this policy before prompt construction" () with
+   | Ok _ -> () | Error _ -> fail "fixture retraction failed");
+  (match Current.read_retirement_context ~keepers_dir ~keeper_id:"keeper"
+      ~expected_revision:(Some original.revision) ~current_facts:original.facts with
+   | Current.Retirement_source_changed -> ()
+   | _ -> fail "stale current facts suppressed committed retirement evidence");
+  let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" |> require_ok
+    |> Option.get in
+  (match Current.read_retirement_context ~keepers_dir ~keeper_id:"keeper"
+      ~expected_revision:(Some current.revision) ~current_facts:current.facts with
+   | Current.Retirement_archive (Ok [archived]) ->
+       check bool "fresh coherent archive retains the retired identity" true
+         (archived.original = target)
+   | _ -> fail "fresh current and retirement evidence are not coherent")
+;;
+
 let test_batch_retraction_recovers_exact_reason_evidence () =
   check_batch_retraction_recovers_exact_reason_evidence ~torn_tail:false ()
 ;;
@@ -3188,6 +3210,8 @@ let () =
             "batch retraction recovers exact reason evidence"
             `Quick
             test_batch_retraction_recovers_exact_reason_evidence
+        ; test_case "retirement context refuses stale current selection" `Quick
+            test_retirement_context_rejects_stale_current
         ; test_case
             "batch retraction recovers torn journal tail"
             `Quick

@@ -337,6 +337,19 @@ val read_dropped :
     drop reasons remain best-effort, so absence is not proof that a fact was
     never stored or removed. *)
 
+type retirement_context =
+  | Retirement_source_changed
+  | Retirement_source_unavailable of string
+  | Retirement_archive of (archived_fact list, string) result
+
+val read_retirement_context :
+  keepers_dir:string -> keeper_id:string -> expected_revision:int option ->
+  current_facts:Keeper_memory_os_types.fact list -> retirement_context
+(** Validate the prompt's current snapshot and read retirement evidence while
+    holding the aggregate and snapshot locks. A changed source must be retried
+    before provider dispatch. An undecodable store with no prior selected
+    snapshot remains ordinary recovery work with unavailable archive evidence. *)
+
 val source_kind_to_string : source_kind -> string
 
 (** Dashboard projection of the last [limit] lines. Every row carries a

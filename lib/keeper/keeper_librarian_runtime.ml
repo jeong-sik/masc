@@ -1266,9 +1266,21 @@ let run_best_effort
         in
         let prompt_material = match admission with
           | None -> prompt_material
-          | Some batch -> Result.map (fun (material : librarian_prompt_material) ->
-              {material with rendered = material.rendered ^ "\n\n" ^
-                Keeper_memory_admission_judgment.prompt_suffix ~batch}) prompt_material in
+          | Some batch -> Result.bind prompt_material (fun (material : librarian_prompt_material) ->
+              let module Judgment = Keeper_memory_admission_judgment in
+              match Keeper_memory_os_current.read_retirement_context ~keepers_dir ~keeper_id
+                  ~expected_revision ~current_facts:(match prompt_input.current with
+                    | None -> [] | Some current -> current.facts) with
+              | Retirement_source_changed ->
+                  Error "Memory changed before admission retirement evidence was read; retry pending input"
+              | Retirement_source_unavailable detail -> Error detail
+              | Retirement_archive archive ->
+                  let retirement_evidence = match archive with
+                    | Ok archive -> Judgment.Available archive
+                    | Error detail -> Judgment.Unavailable detail in
+                  Ok {material with rendered = material.rendered ^ "\n\n" ^
+                    Judgment.prompt_suffix ~batch ^
+                    Judgment.retirement_prompt_suffix ~batch retirement_evidence}) in
         let validate = match admission with
           | None -> validate_answer pass prompt_input
           | Some batch -> validate_admission_answer batch prompt_input in

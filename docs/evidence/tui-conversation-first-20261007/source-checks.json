@@ -3,6 +3,29 @@
   "checks": {
     "ocaml_parsing": "PASS",
     "python_syntax": "PASS",
+    "native_regressions": "NOT_RUN",
+    "PTY": "NOT_RUN"
+  },
+  "source_sha256": {
+    "bin/masc_tui_keeper_chat_transcript.ml": "6946bf2cbaaf07ebc5bf3cdba81777fe390ed751cea327a831aadfe10a5a8b79",
+    "bin/masc_tui_keeper_chat_transcript.mli": "28b859ae5a98349a5dbc09cf69e9e3b3de469e53020a47f8c4d29c0ee0d81b25",
+    "bin/masc_tui_message_layout.ml": "b3e5dfd70d8b4bacdb69c87cecc47c7910acd41da412215618804e541a44c898",
+    "bin/masc_tui_message_layout.mli": "2e2ec985c3c3d74d6476ee361bbdef45d4a9ec1d64ea80bc0e416a23a0d3a196",
+    "bin/masc_tui_render_chat.ml": "3d98769808c67af8393d9102ff56dfdc185c5b62f8e1cb83a23bfcf4b0f03e4a",
+    "bin/masc_tui_types.ml": "bc31d7e0cc1354c477dee5c2951fd78e84c3793e0f69aee0e17adf530ecd3dfb",
+    "docs/evidence/tui-conversation-first-20261007/layout-preview.ml": "0eb27a7060fd97256d7fad22ada5e7007cf1661c2cbe29203e9ab609f09c102f",
+    "test/test_tui_chat_activity.ml": "89f937f9e1aad1c60662e7b64d00823bc6e449e75a3bd2d235735a6d5aebb301",
+    "test/test_tui_chat_queue_wiring.ml": "6cfb129e3c6389a047801d445b852d29f4216e48654a100e6fedf78f10b5ba66",
+    "test/test_tui_message_layout.ml": "96298fea24da1bdf4f0a6981bd3496472271473f7cc82fbd741d82a0498fc914",
+    "test/test_tui_shade_layers.ml": "217dbee7bcb84d2bfea562b5f7c09877a50275288fe055511276d33882dcf9a7",
+    "test/tui_keyboard_chat.py": "8487c866b172fb6e488e34c9cc499d9af0f6a6d185def3aa49c8b60fb9e80331",
+    "test/tui_keyboard_memory.py": "c638fc6434a635bd4a7ed84ef56d3b0f5044c7bee73d613e98212e57a7e672a8",
+    "bin/masc_tui_footer.ml": "a1504602439c3f99c99558f85b82116e54917f399c018b16cfe24b68fce05b9d",
+    "test/test_tui_footer_status_items.ml": "382a14ba857c1ed3a858a4e1ac6817b6b0c295ea48bedd72dca2ec8d771d5d83"
+  },
+  "historical_checks": {
+    "ocaml_parsing": "PASS",
+    "python_syntax": "PASS",
     "layout_interface": "PASS",
     "geometry_tests": [
       "test_ascii_columns_keep_unicode_boundaries",
@@ -19,19 +42,5 @@
       "test_clamping_a_scroll_reads_only_as_far_as_it_must"
     ]
   },
-  "source_sha256": {
-    "bin/masc_tui_keeper_chat_transcript.ml": "f70f75160a741fea6f0e5e04bfff803cbe9eb46e5f2639917abf1460e3141239",
-    "bin/masc_tui_keeper_chat_transcript.mli": "69f5d759071a5629d8546d68dbb1c5bdc477bc4c54af5456fa07eaec984f9acb",
-    "bin/masc_tui_message_layout.ml": "b3e5dfd70d8b4bacdb69c87cecc47c7910acd41da412215618804e541a44c898",
-    "bin/masc_tui_message_layout.mli": "2e2ec985c3c3d74d6476ee361bbdef45d4a9ec1d64ea80bc0e416a23a0d3a196",
-    "bin/masc_tui_render_chat.ml": "77e42f53df21e173e5248f687dc18f7fd21a436abe99653f0424c05a6a192cd9",
-    "bin/masc_tui_types.ml": "4e1e4fed844e38b43c3fc96f2c0336f756e72b5f9d6f1d4d512da277161ffa88",
-    "docs/evidence/tui-conversation-first-20261007/layout-preview.ml": "0eb27a7060fd97256d7fad22ada5e7007cf1661c2cbe29203e9ab609f09c102f",
-    "test/test_tui_chat_activity.ml": "cea2480c18f4417e79e6c0f072622dae3d1e79af34bf14dbceb372a65c074b52",
-    "test/test_tui_chat_queue_wiring.ml": "4f6f68c49c013fc01cd7752e13c2009fdc02d37b62e5eef27a6486c9e2b4c707",
-    "test/test_tui_message_layout.ml": "8d9a48d8ae1b1d822ea45315e7538a7ceac8ad433d37fa2165a83c3bc0c5a472",
-    "test/test_tui_shade_layers.ml": "217dbee7bcb84d2bfea562b5f7c09877a50275288fe055511276d33882dcf9a7",
-    "test/tui_keyboard_chat.py": "78a38bf39dfffa496998575d50b18b62ba4885eeb124b8191a9eb7d634870d84",
-    "test/tui_keyboard_memory.py": "c638fc6434a635bd4a7ed84ef56d3b0f5044c7bee73d613e98212e57a7e672a8"
-  }
+  "scope": "Current source hashes attest only parser checks rerun after stack integration. Prior native/PTY evidence is historical and not rerun."
 }

@@ -1,5 +1,5 @@
 {
-  "scope": "Current committed source syntax only, refreshed after main integration. Historical runtime/footer/PTY results are not re-executed or certified by this receipt.",
+  "scope": "Current source hashes attest only parser checks rerun after stack integration. Prior native/PTY evidence is historical and not rerun.",
   "checks": {
     "bin/masc_tui.ml": {
       "sha256": "2dffbdd251957d57580090f42e28ad78105b9d9dd258df3ca91569ddce2aa3d2",

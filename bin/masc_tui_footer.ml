@@ -739,3 +739,12 @@ let compact_chat_hints ~enter_hint ~scroll_hint ~escape_hint =
     "%s  Ctrl-J:NL  /:commands  %s  %s  Ctrl-R:reasoning  Ctrl-D:tools  \
      Ctrl-N:journal  Ctrl-F:metadata"
     enter_hint escape_hint scroll_hint
+
+(* Keep discoverability whole before optional editing hints. This projection
+   fits the framed inner row, so box_line never cuts a key label in half. *)
+let minimal_chat_hints ~max_cells ~enter_hint ~escape_hint =
+  List.fold_left (fun shown hint ->
+    let candidate = if shown = "" then hint else shown ^ "  " ^ hint in
+    if Masc_tui_message_layout.display_width candidate <= max_cells
+    then candidate else shown)
+    "" ["/:commands"; "?:help"; enter_hint; escape_hint; "Ctrl-J:newline"]

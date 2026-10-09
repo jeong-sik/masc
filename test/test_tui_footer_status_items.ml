@@ -1481,5 +1481,16 @@ let tests =
 
 
 
+let test_minimal_footer_preserves_discovery () =
+  List.iter (fun width ->
+    let shown = Masc_tui_footer.minimal_chat_hints ~max_cells:(width - 4)
+      ~enter_hint:"Enter:send" ~escape_hint:"Esc:detail" in
+    Alcotest.(check bool) "commands remain whole" true
+      (contains ~needle:"/:commands" shown);
+    Alcotest.(check bool) "help remains whole" true
+      (contains ~needle:"?:help" shown);
+    Alcotest.(check bool) "fits framed row" true
+      (Masc_tui_message_layout.display_width shown <= width - 4)) [24; 32; 41; 59; 80]
+
 let () = Alcotest.run "tui_footer_status_items"
-  (("inflight navigation", [Alcotest.test_case "global action survives navigation" `Quick test_inflight_action_survives_navigation]) :: tests)
+  (("minimal chat", [Alcotest.test_case "discovery survives narrow rows" `Quick test_minimal_footer_preserves_discovery]) :: ("inflight navigation", [Alcotest.test_case "global action survives navigation" `Quick test_inflight_action_survives_navigation]) :: tests)

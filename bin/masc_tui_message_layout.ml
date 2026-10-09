@@ -113,9 +113,14 @@ type memory_pass =
 
 type heading_boundary = Inherit_heading | Start_heading
 
+type body_presentation = Source_body | Thinking_summary
+(** Source content and the generated folded-thinking label have distinct
+    semantic identities even when their visible words happen to coincide. *)
+
 type entry = {
   style : style;
   heading_boundary : heading_boundary;
+  body_presentation : body_presentation;
   timestamp : string;
   timeline_bucket : timeline_bucket option;
   speaker : string;
@@ -756,6 +761,11 @@ let compact_count n =
 let cut_mark = "…"
 let cut_mark_cells = display_width cut_mark
 
+let fitted_source_bytes text width =
+  if width <= 0 then 0
+  else if display_width text <= width then String.length text
+  else String.length (take_cells text (Int.max 0 (width - cut_mark_cells)))
+
 let fit_width text width =
   if width <= 0 then ""
   else
@@ -1304,14 +1314,18 @@ let split_styled_cells ~max_cells text =
    (pinned in the layout tests). A row carrying an escape therefore measures
    itself whole, the way this used to for every word of every row -- which
    made a row cost grow with the square of the words in it. *)
-let wrap_words ~max_cells text =
+let wrap_words_internal ?on_row ~max_cells text =
   let max_cells = Int.max 1 max_cells in
   let current = Buffer.create 128 in
   let current_cells = ref 0 in
   let current_holds_escape = ref false in
+  let source_byte=ref 0 and ranges=ref [] in
+  let record start length = if length>0 then Option.iter (fun _ -> ranges:=(start,start+length):: !ranges) on_row in
   let holds_escape word = String.contains word '\x1B' in
   let take_row () =
     let row = Buffer.contents current in
+    Option.iter (fun emit -> emit row (List.rev !ranges)) on_row;
+    ranges:=[];
     Buffer.clear current;
     current_cells := 0;
     current_holds_escape := false;
@@ -1331,6 +1345,9 @@ let wrap_words ~max_cells text =
           else !current_cells + display_width addition
         in
         if candidate_cells <= max_cells then begin
+          if Buffer.length current>0 then record (!source_byte-1) 1;
+          record !source_byte (String.length word);
+          source_byte:= !source_byte + String.length word + 1;
           Buffer.add_string current addition;
           current_cells := candidate_cells;
           if holds_escape word then current_holds_escape := true;
@@ -1340,18 +1357,26 @@ let wrap_words ~max_cells text =
         else
           let chunks = split_cells ~max_cells word in
           (match List.rev chunks with
-           | [] -> loop rows rest
+           | [] -> source_byte:= !source_byte + String.length word + 1; loop rows rest
            | last :: reversed_completed ->
                let completed = List.rev reversed_completed in
                let rows =
-                 List.fold_left (fun rows chunk -> chunk :: rows) rows completed
+                 List.fold_left (fun rows chunk ->
+                   let ending= !source_byte+String.length chunk in
+                   Option.iter (fun emit -> emit chunk [!source_byte,ending]) on_row;
+                   source_byte:=ending;
+                   chunk :: rows) rows completed
                in
+               record !source_byte (String.length last);
+               source_byte:= !source_byte + String.length last + 1;
                Buffer.add_string current last;
                current_cells := display_width last;
                current_holds_escape := holds_escape last;
                loop rows rest)
   in
   loop [] (String.split_on_char ' ' text)
+
+let wrap_words ~max_cells text = wrap_words_internal ~max_cells text
 
 (* The rows a box body spends on [content] at inner width [inner]: one row per
    server line, plus the rows a line longer than the body wraps to. The box
@@ -1452,7 +1477,24 @@ let journal_sign_text = function
    itself. A blank row between lines, since each one is a paragraph read on
    its own. Where the claim's column would be narrower than the lead beside
    it, the claim wraps at the full width under its lead instead. *)
-let journal_rows ~width lines =
+type journal_field =
+  | Journal_sign_field | Journal_category_field | Journal_claim_field
+  | Journal_drop_label_field | Journal_memory_id_field | Journal_reason_field
+
+type journal_source_span = {
+  line_index : int;
+  field : journal_field;
+  value : string;
+  row : int;
+  source_ranges : (int * int) list;
+}
+
+type journal_render = {
+  journal_rows : (string * journal_piece) list list;
+  journal_fields : journal_source_span list;
+}
+
+let journal_rows_internal ?on_field ~width lines =
   let width = Int.max 1 width in
   let label = function
     | Journal_fact { category; _ } -> category
@@ -1465,7 +1507,8 @@ let journal_rows ~width lines =
   let lead_cells = sign_cells + 1 + label_cells + journal_column_gap in
   let claim_cells = width - lead_cells in
   let hangs = claim_cells >= lead_cells in
-  let rows_of_line line =
+  let first_row=ref 0 in
+  let rows_of_line line_index line =
     let sign, label_piece, text, text_piece =
       match line with
       | Journal_fact { sign; tone; claim; category = _ } ->
@@ -1487,22 +1530,50 @@ let journal_rows ~width lines =
       [ sign; (" ", Journal_piece_space); (label_text, label_piece);
         (pad, Journal_piece_space) ]
     in
-    if hangs then
+    let text_fields, lead_fields = match line with
+      | Journal_fact {sign; category; claim; _} ->
+          [Journal_claim_field,claim,0],
+          [Journal_sign_field,journal_sign_text sign; Journal_category_field,category]
+      | Journal_drop {memory_id; reason} ->
+          [Journal_memory_id_field,memory_id,0; Journal_reason_field,reason,String.length memory_id+String.length " \xe2\x80\x94 "],
+          [Journal_drop_label_field,journal_drop_label] in
+    Option.iter (fun emit -> List.iter (fun (field,value) ->
+      emit {line_index;field;value;row= !first_row;source_ranges=[0,String.length value]}) lead_fields) on_field;
+    let body_row=ref (!first_row + if hangs then 0 else 1) in
+    let on_row=Option.map (fun emit _ ranges ->
+      List.iter (fun (field,value,start) ->
+        let ending=start+String.length value in
+        let source_ranges=List.filter_map (fun (first,last) ->
+          let a=max first start and b=min last ending in
+          if a<b then Some(a-start,b-start) else None) ranges in
+        if source_ranges<>[] then emit {line_index;field;value;row= !body_row;source_ranges}) text_fields;
+      incr body_row) on_field in
+    let rows = if hangs then
       let indent = (String.make lead_cells ' ', Journal_piece_space) in
-      match wrap_words ~max_cells:claim_cells text with
+      match wrap_words_internal ?on_row ~max_cells:claim_cells text with
       | [] -> [ lead ]
       | first :: rest ->
           (lead @ [ (first, text_piece) ])
           :: List.map (fun chunk -> [ indent; (chunk, text_piece) ]) rest
     else
-      lead :: List.map (fun chunk -> [ (chunk, text_piece) ]) (wrap_words ~max_cells:width text)
+      lead :: List.map (fun chunk -> [ (chunk, text_piece) ]) (wrap_words_internal ?on_row ~max_cells:width text)
+    in
+    first_row:= !first_row + List.length rows + 1;
+    rows
   in
   let rec join = function
     | [] -> []
     | [ rows ] -> rows
     | rows :: rest -> rows @ ([] :: join rest)
   in
-  join (List.map rows_of_line lines)
+  join (List.mapi rows_of_line lines)
+
+let journal_rows ~width lines = journal_rows_internal ~width lines
+
+let journal_rows_with_spans ~width lines =
+  let fields=ref [] in
+  let journal_rows=journal_rows_internal ~on_field:(fun field -> fields:=field :: !fields) ~width lines in
+  {journal_rows; journal_fields=List.rev !fields}
 
 (* [HH:MM:SS] cut to the minute for the inline margin. Seconds earn their
    width on a row of their own; in a margin they are paid for once per message.

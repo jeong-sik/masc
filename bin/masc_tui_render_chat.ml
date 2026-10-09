@@ -2349,14 +2349,20 @@ let keeper_message_find_scroll (state : state) ~keeper_name ~needle ~older_than 
       Masc_tui_roster_pane.content_cols ~hidden:(roster_pane_hidden state) ~cols
     in
     let messages = keeper_message_visible_messages state ~keeper_name in
-    let entries =
+    let tagged =
       keeper_message_layout_entries state ~keeper_name ~chat_cols
       |> List.combine messages
       |> List.map (fun (message, entry) -> Tagged_row message, entry)
-      |> identify_chat_entries ~details:(state.msg_origin_display <> Message_layout.Origin_bare)
-           ~source_logs:(identity_source_logs state ~keeper_name)
+    in
+    let identify ~details =
+      identify_chat_entries ~details
+        ~source_logs:(identity_source_logs state ~keeper_name) tagged
       |> List.map snd
     in
+    (* Search identity survives presentation choices; scrolling still measures
+       precisely the entries the current reading draws. *)
+    let entries = identify ~details:(state.msg_origin_display <> Message_layout.Origin_bare) in
+    let searchable = identify ~details:true in
     let count = List.length entries in
     let ceiling =
       match older_than with
@@ -2366,15 +2372,17 @@ let keeper_message_find_scroll (state : state) ~keeper_name ~needle ~older_than 
             (msg_index_of_anchor messages anchor)
     in
     let matched =
-      List.filteri (fun index _ -> index < ceiling) entries
-      |> List.mapi (fun index (entry : Message_layout.entry) -> (index, entry))
+      List.combine entries searchable
+      |> List.filteri (fun index _ -> index < ceiling)
+      |> List.mapi (fun index (entry, searchable) -> (index, entry, searchable))
       |> List.rev
-      |> List.find_opt (fun (_, (entry : Message_layout.entry)) ->
-             Masc_tui_pick_list.lowercase_contains ~needle entry.body)
+      |> List.find_opt (fun (_, _, (entry : Message_layout.entry)) ->
+             Masc_tui_pick_list.lowercase_contains ~needle entry.body
+             || Masc_tui_pick_list.lowercase_contains ~needle entry.request_label)
     in
     match matched with
     | None -> None
-    | Some (at, matched_entry) ->
+    | Some (at, matched_entry, _) ->
         (* Everything newer than the match, which is exactly what a scroll
            position counts back over. *)
         let newer = List.filteri (fun index _ -> index > at) entries in
@@ -3556,6 +3564,11 @@ let render_keeper_message (state : state) =
                " · " ^ String.concat " · " parts ^ " · "
                ^ Masc_tui_keys.expand_turn_label
          in
+         let status_rows = Masc_tui_types.keeper_message_visible_status_rows state live ~now in
+         if folded_away > 0
+            && not (List.exists (fun (kind, _) -> kind = Keeper_chat_transcript.Progress) status_rows)
+         then box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
+           (Printf.sprintf "  +%d · %s:details" folded_away Masc_tui_keys.expand_turn_label);
          List.iter
            (fun (kind, text) ->
              (match kind with
@@ -3594,7 +3607,7 @@ let render_keeper_message (state : state) =
                     | Keeper_chat_transcript.Approval_other _ -> Theme.warn ()
                   in
                   box_line_styled chat_buf chat_cols ~style ("  " ^ text)))
-           (Masc_tui_types.keeper_message_visible_status_rows state live ~now)
+           status_rows
      | Some _ | None -> ());
     (* Effects this Keeper is not waiting on. A deferral returns successfully
        and the Keeper carries on, so the tool row reads as a plain return and

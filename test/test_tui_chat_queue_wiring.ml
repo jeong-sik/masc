@@ -5118,7 +5118,18 @@ let test_status_details_and_fold_counts_reach_the_frame () =
       check bool "unfolded status does not retain hidden count" false
         (List.exists (Astring.String.is_infix ~affix:"+2") (lines ()));
       state.msg_turn_folded <- true)
-      [Tui_types.Tools_compact; Tui_types.Tools_results])
+      [Tui_types.Tools_compact; Tui_types.Tools_results];
+    Tui_types.turn_log_add ~now:4. entry.log ~seq:(Some 4)
+      (Live.Reply_details {reply=""; turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint;
+        turn_ref="trace-fold#1"});
+    List.iter (fun origin ->
+      state.msg_origin_display <- origin;
+      check bool "checkpoint has no progress row" false
+        (List.exists (fun (kind, _) -> kind = Keeper_chat_transcript.Progress)
+          (Tui_types.keeper_message_visible_status_rows state entry.log.tl_transcript ~now:5.));
+      check bool "folded checkpoint retains a discoverable details key" true
+        (has_detail "+2" (Masc_tui_keys.expand_turn_label ^ ":details")))
+      [Masc_tui_message_layout.Origin_bare; Origin_inline])
 
 let test_verified_rejection_is_visible_without_mutating_original_input () =
   let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
@@ -5232,6 +5243,26 @@ let test_search_counts_visible_request_annotations () =
           ~at:(100.5 +. float_of_int index) () in
       [{row with Tui_types.me_identity=Persisted_row id};
        {reply with Tui_types.me_identity=Persisted_row (id ^ "-reply")}]) |> List.concat;
+    let find needle = Masc_tui_render_chat.keeper_message_find_scroll state
+      ~keeper_name:"alpha" ~needle ~older_than:None in
+    let identities = ["search-0"; "TURN #24"; "입력 반영됨"] in
+    let visible = List.map (fun needle -> needle, find needle) identities in
+    state.msg_origin_display <- Masc_tui_message_layout.Origin_bare;
+    List.iter (fun (needle, expected) ->
+      match expected, find needle with
+      | Some (_, expected_anchor), Some (_, actual_anchor) ->
+          check bool "bare search retains annotation identity" true (expected_anchor = actual_anchor)
+      | _ -> fail ("annotation identity disappeared: " ^ needle)) visible;
+    (match find "SEARCH_TARGET" with
+     | None -> fail "bare search lost input"
+     | Some (scroll, _) ->
+       state.msg_scroll <- scroll;
+       let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+       check bool "bare search measures bare rows" true
+         (List.exists (fun line -> Astring.String.is_infix ~affix:"SEARCH_TARGET"
+           (Masc_tui_theme.strip_sgr line)) frame.Masc_tui_frame_presenter.lines));
+    state.msg_scroll <- 0;
+    state.msg_origin_display <- Masc_tui_message_layout.Origin_inline;
     let newest, _ = Masc_tui_render_chat.render_keeper_message state in
     check bool "turn number arriving after its input is visible" true
       (List.exists (fun line -> Astring.String.is_infix ~affix:"TURN #24"

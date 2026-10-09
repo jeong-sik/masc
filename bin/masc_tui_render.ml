@@ -266,12 +266,9 @@ let task_line ~cols ~ordinal ~task_ids ~use_ordinals (task : task) =
    Usage. A missing reading is never projected as a zero. *)
 (* The Dashboard keeps its working layout through loading and failure. *)
 let overview_header (state : state) =
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  Printf.sprintf "%s  %s[%s]%s  %02d:%02d:%02d  %s"
-    (screen_title " MASC Dashboard")
-    (Masc_tui_theme.tone Masc_tui_theme.Accent)
+  Printf.sprintf "%s  %s[%s]%s  %s"
+    (screen_title " MASC Dashboard") Ansi.dim
     (Terminal_text.single_line state.workspace) Ansi.reset
-    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec
     (connection_badge state)
 
 let render_overview (state : state) =
@@ -312,11 +309,6 @@ let render_overview (state : state) =
                | 0 -> ""
                | count -> Printf.sprintf " · %d Keeper states unreadable" count)
   in
-  let health =
-    match Masc_tui_candle.compact_status state.candle_observation with
-    | None -> health
-    | Some status -> health ^ " · " ^ status
-  in
   let work =
     match state.task_flow, state.tasks_error with
     | _, Some _ -> " Work: reading unavailable · open Work for the source"
@@ -336,7 +328,7 @@ let render_overview (state : state) =
     ~body:(fun ~budget c ->
       c.push
         (" " ^ pressable (Press_surface Approvals)
-           (Ansi.bold ^ Theme.info () ^ "p:Approvals / Questions" ^ Ansi.reset));
+           (Ansi.dim ^ "p:Approvals / Questions" ^ Ansi.reset));
       let budget = max 0 (budget - 1) in
       let draw_row (action, label) =
         let line = "  " ^ label in
@@ -349,6 +341,10 @@ let render_overview (state : state) =
       (* Keep continuation and new work visible while the request window
          follows the selected identity. All rows remain reachable with j/k. *)
       let first, capacity = Masc_tui_home.home_decision_window state ~budget in
+      let notices = Masc_tui_home.home_notice_lines state
+        |> List.take (max 0 (budget - warning_rows)) in
+      List.iter c.push notices;
+      let budget = max 0 (budget - List.length notices) in
       let decisions = List.drop first all_decisions |> List.take capacity in
       let actions = decisions @ continuation in
       (* Headers and action destinations take precedence over health/history
@@ -357,43 +353,26 @@ let render_overview (state : state) =
       let essential_rows = List.length actions + 2 + warning_rows in
       if budget >= essential_rows && (all_decisions = [] || capacity > 0) then begin
         let spare = budget - essential_rows in
-        let context =
-          let candle = Masc_tui_candle.summary_lines state.candle_observation
-            |> List.concat_map (fun line ->
-              Message_layout.wrap_words ~max_cells:(max 1 (cols - 4))
-                (Terminal_text.single_line line))
-            |> List.map (fun line -> None, " " ^ line) in
-          let notice_rows =
-            (if Option.is_some state.opening_notice then 1 else 0)
-            + (if Option.is_some state.home_decision_receipt then 1 else 0) in
-          let candle_fits = spare >= 2 + notice_rows + List.length candle in
-          let health = if candle_fits then health else
-            match Masc_tui_candle.compact_status state.candle_observation with
-            | None -> health
-            | Some status -> " " ^ status ^ " · " ^ health in
-          let readings =
-            (match state.home_decision_receipt with
-             | None -> []
-             | Some (_, receipt) ->
-                 [None, " Last decision receipt · " ^ Terminal_text.single_line receipt])
-            @ [ (None, health); (Some (Theme.recede ()), work) ]
-            @ (if candle_fits then candle else [])
-          in
-          match state.opening_notice with
-          | None -> readings
-          | Some notice ->
-              let notice = (None, " " ^ Terminal_text.single_line notice) in
-              if spare < List.length readings + 1 then notice :: readings
-              else readings @ [notice]
-        in
-        let shown_context = List.take (min spare (List.length context)) context in
-        List.iter
-          (function
-            | None, text -> c.push text
-            | Some style, text -> c.push_styled ~style text)
-          shown_context;
-        let gaps = spare - List.length shown_context in
-        if gaps > 0 then c.push_empty ();
+        (* Action outcomes stay above the destinations they affect. Passive
+           health/history context follows the destinations, using only spare
+           rows, so opening Home starts with a decision or a place to resume. *)
+        let candle = Masc_tui_candle.summary_lines state.candle_observation
+          |> List.concat_map (fun line ->
+            Message_layout.wrap_words ~max_cells:(max 1 (cols - 4))
+              (Terminal_text.single_line line))
+          |> List.map (fun line -> None, " " ^ line) in
+        let candle_fits = spare >= 2 + List.length candle in
+        let health = if candle_fits then health else
+          match Masc_tui_candle.compact_status state.candle_observation with
+          | None -> health
+          | Some status -> " " ^ status ^ " · " ^ health in
+        let readings = [None, health; Some (Theme.recede ()), work]
+          @ (if candle_fits then candle else []) in
+        let shown_readings = List.take spare readings in
+        let draw_context = List.iter (function
+          | None, text -> c.push text
+          | Some style, text -> c.push_styled ~style text) in
+        let gaps = spare - List.length shown_readings in
         (match decisions with
          | [] -> c.push_styled ~style:(Theme.recede ())
              (if all_decisions = [] then " No decision is waiting on you."
@@ -404,9 +383,11 @@ let render_overview (state : state) =
                 else Printf.sprintf " Needs your decision · rows %d-%d/%d · j/k for more"
                   (first + 1) (first + List.length decisions) (List.length all_decisions));
              List.iter draw_row decisions);
-        if gaps > 1 then c.push_empty ();
+        if gaps > 0 then c.push_empty ();
         c.push_styled ~style:Ansi.bold " Continue";
-        List.iter draw_row continuation
+        List.iter draw_row continuation;
+        if gaps > 1 && shown_readings <> [] then c.push_empty ();
+        draw_context shown_readings
       end else begin
         (* Extremely short terminals show destinations around the selected
            identity. j/k reaches every destination; this is a viewport limit,
@@ -577,11 +558,10 @@ let task_detail_viewport (state : state) =
   count, task_detail_height ~rows ~count
 
 let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp = Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let header = Printf.sprintf "%s  %s%s%s  %s  %s"
-    (screen_title " MASC Task") (Masc_tui_theme.tone Masc_tui_theme.Accent)
-    (bracketed ~max_cells:20 (Terminal_text.single_line task.id)) Ansi.reset timestamp (connection_badge state) in
+  let header = Printf.sprintf "%s  %s%s%s  %s"
+    (screen_title " MASC Task") Ansi.dim
+    (bracketed ~max_cells:20 (Terminal_text.single_line task.id)) Ansi.reset
+    (connection_badge state) in
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
@@ -876,17 +856,6 @@ let studio_panel ~width ~title ~lines =
       ^ Theme.recede () ^ " │" ^ Ansi.reset) lines
   @ [ border "└" "┘" ]
 
-let studio_pair ~width left right =
-  let gutter = 2 in
-  let left_width = (width - gutter) / 2 in
-  let right_width = width - gutter - left_width in
-  let left = left left_width and right = right right_width in
-  let count = max (List.length left) (List.length right) in
-  List.init count (fun index ->
-    fit_width (Option.value (List.nth_opt left index) ~default:"") left_width
-    ^ String.make gutter ' '
-    ^ fit_width (Option.value (List.nth_opt right index) ~default:"") right_width)
-
 let render_planning_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
@@ -901,23 +870,12 @@ let render_planning_list (state : state) =
   let tail_rows = count_frame_lines tail in
 
   let now_unix = Unix.gettimeofday () in
-  let now = Unix.localtime now_unix in
-  let timestamp = Printf.sprintf "%02d:%02d:%02d"
-    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
   let modes = Printf.sprintf "sort:%s  filter:%s"
     (planning_sort_label state.planning_sort)
     (planning_filter_label state.planning_filter) in
-  (* The clock and the badge always ride this row; the modes ride it when the
-     row can hold them, and take one of their own when it cannot. *)
-  let chrome = Printf.sprintf "  %s  %s" timestamp (connection_badge state) in
-  (* The whole tail, measured as the row draws it. [planning_workspace_title]
-     sizes its strip against what follows, so modes inserted after that
-     measurement spend the cells the badge was holding: at a hundred columns
-     the row ran to 112 of the 96 it had, and the reading lost "HTTP
-     [connected]" and the seconds off its clock -- the two facts that say
-     whether what is on the screen is live. Asking the question of
-     [title ^ "  " ^ modes] alone could only ever answer it for a row with no
-     chrome on it, which this row has never been. *)
+  (* Connection identity keeps its place. Modes share the title only when
+     every navigation tab retains the width it has without them. *)
+  let chrome = "  " ^ connection_badge state in
   let riding = "  " ^ modes ^ chrome in
   let title_alone =
     planning_workspace_title state ~cols ~tab:Planning_goals ~window:""
@@ -1059,31 +1017,17 @@ let render_planning_list (state : state) =
          Message_layout.wrap_styled_words ~max_cells:(max 1 summary_width) text
          |> List.iter (box_line_styled summary cols ~style)
        in
-       let summary_cards =
-         studio_pair ~width:summary_width
-           (fun width -> studio_panel ~width ~title:"Goals · measured outcomes"
-              ~lines:(Message_layout.wrap_words ~max_cells:(max 1 (width - 4))
-                (planning_rollup_row ~cols:width p.pl_rollup)))
-           (fun width -> studio_panel ~width ~title:"Tasks · Backlog:"
-              ~lines:(Message_layout.wrap_words ~max_cells:(max 1 (width - 4)) backlog))
-       in
-       let summary_card_rows = List.length summary_cards in
-       let cards_fit =
-         summary_width >= Message_layout.display_width "Goals · measured outcomes  Tasks · current backlog" * 2
-         && count_frame_lines buf + summary_card_rows + reserved_rows <= rows
-       in
-       if cards_fit then List.iter (box_line buf cols) summary_cards
-       else begin
-         let rollup_summary = Buffer.create 256 in
-         wrap_summary rollup_summary ~style:"" rollup;
-         ignore (add_summary_if_fits rollup_summary)
-       end;
+       (* Counts are supporting text at every width. A wide terminal gives
+          goal titles room; it does not turn the same readings into cards. *)
+       let rollup_summary = Buffer.create 256 in
+       wrap_summary rollup_summary ~style:"" rollup;
+       ignore (add_summary_if_fits rollup_summary);
        let backlog_summary = Buffer.create 256 in
        wrap_summary backlog_summary ~style:""
          (Printf.sprintf "  %sBacklog:%s %s" Ansi.dim Ansi.reset backlog);
        (* Preserve the current counts before spending optional rows on change
           since the baseline. Wrapped physical rows share the list budget. *)
-       let backlog_visible = cards_fit || add_summary_if_fits backlog_summary in
+       let backlog_visible = add_summary_if_fits backlog_summary in
        let trend = Buffer.create 256 in
        (match state.planning_baseline with
         | None ->

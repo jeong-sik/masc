@@ -254,20 +254,13 @@ def planning_resize_budget_interaction(
     )
     if mode_prefix is None:
         raise AssertionError(f"Planning wide header omitted its modes: {frame!r}")
-    # Four cells belong to the frame margins. At this width the title and
-    # modes exactly fill the content area, before the timestamp is appended.
+    # Four cells belong to the margins. The connection badge is the tail
+    # whose space the title must reserve before deciding where modes go.
     boundary_cols = fixture_cell_width(mode_prefix.group().decode("utf-8")) + 4
-    # A boundary that stops at the modes describes a row Planning has never
-    # drawn: the clock and the badge follow them on the same row. The widths
-    # between the two boundaries are where the row overflowed -- at a hundred
-    # columns it ran to 112 cells of the 96 it had, and the frame cut off
-    # "HTTP [connected]" and the seconds of the clock. Both sides of the real
-    # boundary are exercised below.
-    chrome_re = re.compile(rb"\d\d:\d\d:\d\d  HTTP \[[^\]\r\n]+\]")
+    chrome_re = re.compile(rb"HTTP \[[^\]\r\n]+\]")
     chrome = chrome_re.search(CSI_RE.sub(b"", frame))
     if chrome is None:
         raise AssertionError(f"Planning wide header omitted its badge: {frame!r}")
-    # Two more cells for the gap the row puts in front of the clock.
     riding_cols = (
         boundary_cols + fixture_cell_width(chrome.group().decode("utf-8")) + 2
     )
@@ -285,10 +278,8 @@ def planning_resize_budget_interaction(
         plain_narrow = CSI_RE.sub(b"", narrow)
         if b"filter:active" not in plain_narrow or b"sort:" not in plain_narrow:
             raise AssertionError(f"Planning hid its modes behind the title: {narrow!r}")
-        # Whichever row the modes took, the title row keeps what has nowhere
-        # else to go. On Planning the clock and the badge are the only things
-        # that say whether the screen is a live reading, and the modes have a
-        # row of their own to fall to.
+        # Whichever row the modes took, the connection reading stays in the
+        # title; modes have a separate row when the tabs need the width.
         title_row = next(
             (
                 text
@@ -301,7 +292,7 @@ def planning_resize_budget_interaction(
             raise AssertionError(f"Planning drew no title row: {narrow!r}")
         if chrome_re.search(title_row) is None:
             raise AssertionError(
-                f"Planning title row lost its clock and badge at {columns} "
+                f"Planning title row lost its connection badge at {columns} "
                 f"columns: {title_row!r}"
             )
     terminal_rows = 24

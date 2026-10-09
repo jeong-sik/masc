@@ -4,7 +4,6 @@
  (flags :standard)
  (public_name masc)
  (private_modules
-  server_dashboard_runtime_declaration_projection
   keeper_microvm_build_plan
   keeper_connector_post_replay
   keeper_tool_composition_projection

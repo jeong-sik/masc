@@ -5,6 +5,7 @@
  (public_name masc.server)
  (wrapped false)
  (private_modules
+  server_dashboard_runtime_declaration_projection
   keeper_grpc_heartbeat
   server_grpc_tool_dispatch
   server_dashboard_fusion_run_projection

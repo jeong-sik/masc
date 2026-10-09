@@ -8562,7 +8562,7 @@ let rows_the_logs_do_not_draw ~held rows =
    about those calls and reads. A skill evidence gap on a loaded row
    (missing, unreadable) names no read and is not carried over. Run where
    loaded rows arrive and where a journal log is held. *)
-let same_skill_invocation
+let same_skill_invocation ~inventory
     (left : Masc_tui_keeper_chat_transcript.skill_activity)
     (right : Masc_tui_keeper_chat_transcript.skill_activity) =
   Option.is_some left.turn_ref && Option.is_some left.skill_tool_use_id
@@ -8570,7 +8570,22 @@ let same_skill_invocation
   && left.skill_tool_use_id = right.skill_tool_use_id
   && (match left.runtime_id, right.runtime_id with
       | Some left, Some right -> String.equal left right
-      | None, _ | _, None -> true)
+      | None, _ | _, None ->
+          let runtimes = left :: right :: inventory
+            |> List.filter_map (fun (candidate : Masc_tui_keeper_chat_transcript.skill_activity) ->
+              if candidate.turn_ref=left.turn_ref && candidate.skill_tool_use_id=left.skill_tool_use_id
+              then candidate.runtime_id else None)
+            |> List.sort_uniq String.compare in
+          match runtimes with [] | [_] -> true | _ :: _ :: _ -> false)
+
+let skills_drawn_by_items items =
+  List.concat_map (fun (item : Masc_tui_keeper_chat_transcript.drawn_item) ->
+    match item.drawn with Drawn_skill skills -> skills | _ -> []) items
+
+let skills_in_source_rows ~keeper_name source rows =
+  List.concat_map (fun (row : msg_entry) ->
+    if String.equal row.me_keeper_name keeper_name && row.me_execution_source=source
+    then row.me_skill_block else []) rows
 
 let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
   List.iter
@@ -8596,22 +8611,22 @@ let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
       (* The stream has no event for a delivery, so without this the log's
          skill row stays at what the read call alone says while the loaded
          row that knew better is left out of the timeline (#36882). *)
+      (* Freeze candidates before any row is enriched, so nullable runtime
+         completion cannot depend on which durable record arrives first. *)
+      let observed_skills = skills_drawn_by_items
+        (Masc_tui_keeper_chat_transcript.drawn turn_log.tl_transcript) in
+      let inventory = observed_skills @ skills_in_source_rows ~keeper_name (Some execution_source)
+        (rows @ state.msg_loaded @ state.msg_history) in
       List.iter
         (fun (row : msg_entry) ->
-          if row.me_execution_source = Some execution_source then
+          if String.equal row.me_keeper_name keeper_name
+             && row.me_execution_source = Some execution_source then
             List.iter (fun (skill : Masc_tui_keeper_chat_transcript.skill_activity) ->
-              let observed =
-                Option.is_some skill.turn_ref && Option.is_some skill.skill_tool_use_id
-                && List.exists (fun (item : Masc_tui_keeper_chat_transcript.drawn_item) ->
-                  match item.drawn with
-                  | Drawn_skill skills -> List.exists
-                      (fun (shown : Masc_tui_keeper_chat_transcript.skill_activity) ->
-                        same_skill_invocation shown skill) skills
-                  | Drawn_tools _ | Drawn_thinking _ | Drawn_text _ | Drawn_reply _
-                  | Drawn_status _ | Drawn_error _ -> false)
-                    (Masc_tui_keeper_chat_transcript.drawn turn_log.tl_transcript) in
+              let observed = List.exists (fun shown ->
+                same_skill_invocation ~inventory shown skill) observed_skills in
               if turn_log_holds_the_turn turn_log || observed then
-                Masc_tui_keeper_chat_transcript.note_skill_activity turn_log.tl_transcript skill)
+                Masc_tui_keeper_chat_transcript.note_skill_activity ~runtime_inventory:inventory
+                  turn_log.tl_transcript skill)
               row.me_skill_block)
         rows)
     (selected_source_logs_for_keeper state keeper_name)
@@ -10634,13 +10649,13 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
              else Some {row with me_tool_block=Some (Transcript.tool_block
                ~omitted_steps:block.omitted_steps activities)})
     | Message_skill _ when row.me_skill_block <> [] ->
-        let observed = List.concat_map (fun (item : Transcript.drawn_item) ->
-          match item.drawn with Drawn_skill skills -> skills | _ -> []) drawn in
+        let observed = skills_drawn_by_items drawn in
+        let inventory = observed @ skills_in_source_rows ~keeper_name row.me_execution_source (loaded @ session) in
         (* A missing runtime can be completed by the other observation, but
            two known runtimes belong to distinct invocations. *)
         let skills = List.filter (fun (skill : Transcript.skill_activity) ->
           not (List.exists (fun (shown : Transcript.skill_activity) ->
-            same_skill_invocation skill shown) observed)) row.me_skill_block in
+            same_skill_invocation ~inventory skill shown) observed)) row.me_skill_block in
         if skills = [] then None
         else Some {row with me_skill_block=skills;
           me_role=Message_skill (Transcript.skill_block_state skills)}

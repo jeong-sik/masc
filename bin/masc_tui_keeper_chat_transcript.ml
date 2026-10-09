@@ -2583,20 +2583,30 @@ let compatible_skill_identity (left_turn, left_use, left_runtime)
 
 (* Complete an absent runtime only with one compatible observation. Known
    runtime A and B never match, and an unknown record cannot elect between them. *)
-let matching_skill_note key notes =
+let matching_skill_note ?(runtime_inventory=[]) key notes =
   match List.find_opt (fun (noted_key, _) -> noted_key = key) notes with
   | Some _ as exact -> exact
   | None ->
-      match List.filter (fun (noted_key, _) -> compatible_skill_identity noted_key key) notes with
-      | [note] -> Some note
-      | [] | _ :: _ :: _ -> None
+      let turn_ref, use_id, runtime = key in
+      let identities = key :: List.map fst notes
+        @ List.filter_map skill_identity runtime_inventory in
+      let runtimes = List.filter_map (fun (turn, use, runtime) ->
+        if turn=turn_ref && use=use_id then runtime else None) identities
+        |> List.sort_uniq String.compare in
+      match runtimes with
+      | _ :: _ :: _ -> None
+      | [] | [_] ->
+          match List.filter (fun (noted_key, _) -> compatible_skill_identity noted_key
+              (turn_ref,use_id,runtime)) notes with
+          | [note] -> Some note
+          | [] | _ :: _ :: _ -> None
 
 let complete_skill_runtime (known : skill_activity) (incoming : skill_activity) =
   match incoming.runtime_id with
   | Some _ -> incoming
   | None -> {incoming with runtime_id=known.runtime_id}
 
-let note_skill_activity t (evidence : skill_activity) =
+let note_skill_activity ?(runtime_inventory=[]) t (evidence : skill_activity) =
   match evidence.state with
   | Skill_calling | Skill_served_pending | Skill_failed | Skill_evidence_missing
   | Skill_evidence_unavailable ->
@@ -2605,7 +2615,7 @@ let note_skill_activity t (evidence : skill_activity) =
       match skill_identity evidence with
       | None -> ()
       | Some key ->
-          t.noted_skills <- (match matching_skill_note key t.noted_skills with
+          t.noted_skills <- (match matching_skill_note ~runtime_inventory key t.noted_skills with
             | None -> t.noted_skills @ [key,evidence]
             | Some (previous_key, previous) ->
                 let evidence = complete_skill_runtime previous evidence in

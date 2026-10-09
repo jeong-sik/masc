@@ -132,6 +132,8 @@ Observed 2026-09-29 in scenario 6 as 조예, from 17 하비 against 33 건업.
    `*`. Several officers can go; an empty `enter` ends the list.
 4. If `누구를 총대장으로 하겠습니까(1-N)?` appears after ending the list,
    choose a commander from the displayed expedition officers, then `enter`.
+   Inspect the following commander confirmation and answer `y` if correct;
+   the observed Xiahou Dun selection required this before the gold prompt.
    In the February 189 Chenliu-to-city-9 preparation with Xiahou Yuan and
    Xiahou Dun, this prompt appeared before any resource amount. Do not type
    gold into it. An observed out-of-range `5` followed by Enter abandoned

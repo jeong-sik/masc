@@ -5728,6 +5728,13 @@
   mcp_protocol mcp_protocol.eio eio eio_main eio.unix alcotest yojson base64 digestif unix))
 
 (test
+ (name test_dos_addon_worker)
+ (modules test_dos_addon_worker)
+ (libraries masc.tool_types masc.lane_addon_tool_result masc.lane_addon_call_context masc.machine_controller_contract
+  masc.dos_worker masc.dos_lane masc.machine_pad_layout masc.masc_core masc.machine_configuration
+  mcp_protocol mcp_protocol.eio eio eio_main eio.unix alcotest yojson base64 digestif unix))
+
+(test
  (name test_tui_models_account_reading)
  (modules test_tui_models_account_reading)
  (libraries alcotest masc_tui_types masc_tui_render_prim

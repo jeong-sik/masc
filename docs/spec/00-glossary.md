@@ -3308,10 +3308,10 @@ status: reference
 **Shared Briefing (공유 요약 / 브리핑 글)**
 : World Curator가 작업공간 기억 원장(`ledger.json`)에 기록된 모든 주장과 충돌 텍스트(`Ledger.briefing_sources`)를 모델로 종합 요약한 자연어 글.
   - **저장 위치**: `.masc/workspace-memory/briefing.json` (스키마 `workspace.memory.briefing.v1`).
-  - **프롬프트 주입 형태**: 매 턴 Keeper의 시스템 프롬프트에 `## Shared workspace memory ledger` 헤더 아래 원장 메타데이터(`Current ledger SHA-256`, `Classified facts`, `Shared claims`, `Conflicts`)와 함께 요약문 본문(`{{briefing}}`) 형태로 전달된다.
+  - **전달과 조회**: 기본 턴 문맥의 `## Shared workspace memory ledger` 구획에는 원장 메타데이터(`Current ledger SHA-256`, `Classified facts`, `Shared claims`, `Conflicts`), 브리핑의 현재·갱신 대기 상태, 조회 경로를 전달한다. 브리핑 본문은 미리 주입하지 않으며, 넓은 작업공간 요약이 필요할 때 `keeper_workspace_memory_read`의 `{"view":"briefing"}`으로 읽는다. 조회 경로는 실제 요청에서 바로 호출 가능, 도구 검색으로 로드 가능, 사용 불가를 구분한다.
   - **원장과의 구별 및 명칭 주의**:
-    - 프롬프트 섹션의 제목에 'ledger(원장)'라는 단어가 포함되어 있어 많은 이들이 이 섹션을 원장 데이터 그 자체로 오해하기 쉽다.
-    - 그러나 본문에 실리는 내용은 구조화된 원장(JSON 장부)이 아니라, 모델이 주장과 충돌을 자연어로 압축 요약한 '브리핑 글'이다.
+    - 프롬프트 섹션 제목의 'ledger(원장)'는 공유 기억의 메타데이터와 조회 안내를 가리키며, 원장 전체나 브리핑 본문이 실렸다는 뜻이 아니다.
+    - `view=briefing`으로 조회하는 브리핑은 구조화된 원장(JSON 장부)이 아니라, 모델이 주장과 충돌을 종합한 자연어 글이다. 목적에 맞는 항목은 `query`로 찾고 `id`로 현재 소속 사실을 확인하며, 전체 목록은 `view=index`로 명시적으로 요청한다. 선택자를 생략하면 개수와 갱신 상태만 읽는다.
     - 브리핑 글의 합성 프롬프트(`workspace_memory_briefing`)는 임의의 바이트 목표를 맞추려고 문장을 자르거나 사실을 빼지 말라고 하므로 글이 상한 없이 커질 수 있다. 원장의 실제 분류 세부사항(각 키퍼 사실의 주장·충돌 배정 내역)을 보려면 요약 글이 아닌 `keeper_workspace_memory_read` 도구를 통해 원장을 직접 조회해야 한다.
   - **합성 및 캐시 불변식**: 완성본과 자료 식별자를 함께 보존한다. 새 합성이 진행되거나 실패한 동안에는 이전 완성본을 갱신 대기(`Stale`)로 표시하고, 첫 완성본이 없으면 준비 중임을 알린다. 자료와 합성 계약이 같으면 모델을 다시 부르지 않는다.
   → [workspace_memory_briefing](../../lib/workspace_memory/workspace_memory_briefing.mli) · [server_workspace_memory_curator](../../lib/server/server_workspace_memory_curator.ml) · [keeper_unified_prompt](../../lib/keeper/keeper_unified_prompt.ml)
@@ -3320,7 +3320,7 @@ status: reference
 : 작업공간에서 자주 혼동되는 세 가지 기억·맥락 계층의 책임과 경계를 구분하는 불변식.
   - **키퍼 자기 기억 (Memory OS)**: 키퍼 개인의 독립적인 사적 사실 스토어(`.masc/config/keepers/<name>.memory-current.json`). 카테고리 30개×30개는 일반 current 사실에만 적용하는 정리 기준이며 소스 결속·보관 사실은 이 집계에서 제외한다. 기준을 넘어도 정리 후 초과가 남을 수 있고, 용량 기본값은 512KiB. 키퍼 본인만 쓰고 읽으며 다른 키퍼가 직접 접근할 수 없다.
   - **작업공간 기억 원장 (Workspace Memory Ledger)**: 모든 키퍼의 변경된 사실만 모아 분류한 공용 분류 장부(`.masc/workspace-memory/ledger.json`). `claims`·`conflicts`·`facts`(배치)로 구성된 구조화된 JSON 데이터이며 `keeper_workspace_memory_read`로 조회한다. 키퍼의 자기 기억을 수정하지 않는다.
-  - **브리핑 글 (Shared Briefing)**: 원장의 주장·충돌을 모델이 읽고 종합 요약한 자연어 글(`.masc/workspace-memory/briefing.json`). 매 턴 키퍼 시스템 프롬프트의 `## Shared workspace memory ledger` 헤더 아래 주입된다. 제목에 '원장'이 표기되어 있으나 실체는 요약문이므로, 원시 분류 내역은 원장 도구로 직접 확인해야 한다.
+  - **브리핑 글 (Shared Briefing)**: 원장의 주장·충돌을 모델이 읽고 종합 요약한 자연어 글(`.masc/workspace-memory/briefing.json`). 기본 턴 문맥에는 메타데이터·갱신 상태·조회 경로를 전달하고 본문은 보류한다. 넓은 요약은 `keeper_workspace_memory_read`의 `view=briefing`으로, 목적에 맞는 원장 항목과 현재 근거는 `query`·`id`로 따로 읽는다.
   → [Keeper_memory_os_current](../../lib/keeper/keeper_memory_os_current.mli) · [workspace_memory_ledger](../../lib/workspace_memory/workspace_memory_ledger.mli) · [workspace_memory_briefing](../../lib/workspace_memory/workspace_memory_briefing.mli)
 
 **Continuity Snapshot (하던 일 저장본)**

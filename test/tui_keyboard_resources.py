@@ -289,30 +289,38 @@ def run_resources_unconfirmed_selection(executable: str) -> None:
         with lock:
             return list(calls)
 
+    # The JSON renderer colors key, colon and string separately. Match the
+    # complete field while accepting those styling escapes between tokens.
+    status_ready = re.compile(
+        rb'"status"(?:\x1b\[[0-9;]*m|[ \t])*:(?:\x1b\[[0-9;]*m|[ \t])*"ok"'
+    )
+
     def interact(process, fd, _slave, output, _base):
         tab_until(process, fd, output, b"MASC System")
         send_and_wait(process, fd, output, b"s", b"Event Log (JSON)")
-        send_and_wait(process, fd, output, b"\r", b'"status": "ok"')
+        send_and_wait(process, fd, output, b"\r", status_ready)
         resize_and_wait(process, fd, output, rows=40, columns=200,
-                        needle=b'"status": "ok"', controls=(FULL_REDRAW,),
+                        needle=status_ready, controls=(FULL_REDRAW,),
                         final_cursor=b"\x1b[?25l")
         with lock:
             state["unconfirmed"] = True
-        send_and_wait(process, fd, output, b"r", b"workspace identity unconfirmed")
+        send_and_wait(process, fd, output, b"r", b"[workspace unconfirmed]")
         # The URI appears in the detail, not the name-only list. A fresh
         # frame showing B and its pending state proves the selection applied.
-        send_and_wait(process, fd, output, b"]", b"masc://operator-handbook.md")
-        pending = resize_and_wait(process, fd, output, rows=40, columns=200,
-                                   needle=b"(reading resource", controls=(FULL_REDRAW,),
-                                   final_cursor=b"\x1b[?25l")
+        # Selection already redraws this detail pane. Capture that frame
+        # directly; a second resize is not guaranteed to emit a full redraw.
+        pending = send_and_wait(process, fd, output, b"]",
+                                b"masc://operator-handbook.md")
         visible = h.screen_text(pending)
+        assert b"reading resource" in visible, visible
         assert b'"status": "ok"' not in visible, visible
         assert b"slots = 4" not in visible, visible
         assert not any(unconfirmed for unconfirmed, _method, _uri in snapshot()), snapshot()
         with lock:
             state["unconfirmed"] = False
         # Recovery alone must read B: no second selection or Enter is sent.
-        send_and_wait(process, fd, output, b"r", b"slots = 4")
+        recovered = send_and_wait(process, fd, output, b"r", b"Operator handbook")
+        assert b"slots = 4" in CSI_RE.sub(b"", recovered), recovered
         readings = snapshot()
         assert any(method == "resources/read" and uri == "masc://operator-handbook.md"
                    for _unconfirmed, method, uri in readings), readings

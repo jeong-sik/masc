@@ -189,6 +189,14 @@ val ensure_roots :
     while unavailable detail is not fabricated. Existing live membership must
     remain one-to-one. *)
 
+(** Restore only candidates still present with exactly the observed value.
+    The durable candidate read and root append share the partition mutation
+    lock, so candidate-then-partition purge cannot be undone by an earlier
+    recovery request's snapshot. *)
+val ensure_current_roots :
+  base_path:string -> keeper_name:string -> Candidate.candidate list ->
+  (int, string) result
+
 val recover_for_process_start :
   now:float -> base_path:string -> keeper_name:string -> (int, string) result
 (** Canonically compact the append ledger. Every [Running] root returns to
@@ -325,6 +333,10 @@ val abandon :
     [Abandoned] is returned unchanged. *)
 
 val ledger_path : base_path:string -> keeper_name:string -> string
+
+(** Purge the ledger and its cached view under the existing mutation and
+    stable-file locks. Lock identities remain available to queued writers. *)
+val purge : base_path:string -> keeper_name:string -> (unit, string) result
 (** The Keeper's partition ledger file. A Keeper purge removes it with the
     Keeper, so a later Keeper of the same name starts without its roots. *)
 

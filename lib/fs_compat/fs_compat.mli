@@ -1063,6 +1063,8 @@ type private_jsonl_transaction_operation =
   | Remove_rewrite_stage
   | Truncate_transaction_data
   | Sync_transaction_data
+  | Remove_transaction_data
+  | Sync_removal_parent
 
 type private_jsonl_operation_failure =
   { operation : private_jsonl_transaction_operation
@@ -1250,6 +1252,14 @@ val private_jsonl_transaction_error_to_string :
     store may be in use. *)
 val private_jsonl_lock_path : string -> string
 
+(** Remove a store under its stable sibling lock and fsync its parent. Success
+    returns [Missing], including an already absent store. The stable lock is
+    retained so existing waiters and a successor store share one lock identity.
+    Non-regular or aliased data and lock contention fail closed. A parent-sync
+    failure may follow unlink and must not be treated as completed removal. *)
+val purge_private_jsonl_durable_locked_result :
+  string -> (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
+
 (** Read a private JSONL store under its stable sibling lock. [after = None]
     returns the full store. [after = Some cursor] returns only bytes appended
     after that exact file identity and offset. A replacement, truncation, or
@@ -1279,6 +1289,10 @@ type private_jsonl_transaction_io_for_testing =
   { before_sync_parent : string -> unit
   ; close_fd : Unix.file_descr -> unit
   }
+
+val purge_private_jsonl_durable_locked_with_io_for_testing :
+  io:private_jsonl_transaction_io_for_testing ->
+  string -> (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
 
 (** Same non-creating shared-lock read with injected descriptor settlement. *)
 val read_private_jsonl_rows_locked_with_io_for_testing :

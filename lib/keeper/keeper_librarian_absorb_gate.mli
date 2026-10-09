@@ -128,7 +128,9 @@ val judge
     absorbed memories; [new_claims] the claims the answer adds; [absorbed] the
     absorptions it states. An absorption whose [into] is a current memory the
     answer restated is judged against that memory's text. Each complete source
-    and proposed claim are sent with [new_observations] in one judgment request.
+    and proposed claim are sent with nonempty [new_observations] in one judgment
+    request. Empty observations retain the original pair-only instruction and
+    two-field state; both paths budget the question actually dispatched.
     The observations are source data from the selected pass, not the proposed
     claim. Their serialized bytes count toward the provider request boundary;
     an oversized request with new observations fails the pass before dispatch,

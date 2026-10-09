@@ -105,6 +105,12 @@ that outcome alone does not prove domain success. Counterpart content retains it
 existing host-provenance rendering and remains untrusted. Hidden reasoning and
 raw tool payloads remain excluded by the existing Librarian projection.
 
+When the selected pass has no observations (including memory cleanup), the gate
+retains the original pair-only question and state. It does not use the
+instruction-only arm that regressed in the synthetic experiment. Both paths
+count the exact selected question in their request capacity check. This preserves
+the empty-input behavior; it does not prove semantic model quality.
+
 Serialized observations count toward the existing provider request boundary. If
 an evidence-bearing pair cannot fit, the pass fails before dispatch and the entire
 Memory range stays pending, including new claims. A typed input-capacity failure

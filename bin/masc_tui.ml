@@ -11555,7 +11555,6 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.sent_image_read <- None;
   state.msg_copy_pending <- None;
   state.chat_command_reads <- [];
-  state.play_invite_inflight <- false;
   reset_verification_rows state;
   state.verification <- None;
   state.verification_error <- None;

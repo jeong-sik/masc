@@ -73,7 +73,9 @@ profile = "/Users/you/masc-keeper-firefox-profile"
   runs, started when the recorded one started, in that group. Anything else
   is left running and the server log says why; the operator closes it. The
   host ends with its Firefox. A server that could not load `runtime.toml`
-  stops nothing.
+  stops nothing. Before each signal the server checks again that the
+  number still names that group, and a group whose processes it may not
+  signal is never taken for gone.
 - The operator still logs in once, in that Firefox, to the sites a Keeper
   works on; the profile keeps the login.
 - A Firefox that exits before its port answers, leaving nothing in its process

@@ -7,8 +7,8 @@
     and writes [output] on both stdout and stderr. Nothing stops it on its
     own: when [sw] is released this process only stops waiting for it, and
     once this process has exited the child is reaped by whoever adopts it.
-    A caller that no longer wants it runs {!stop_group}; once this process
-    has exited, only {!stop_group_id} can reach it. *)
+    A caller that no longer wants it runs {!stop_group}, also once this
+    process has exited and another holds only its number. *)
 
 type t = {
   pid : int;  (** Also the child's process group. *)
@@ -35,33 +35,30 @@ val spawn :
     as none left (see {!Process_group_members}). *)
 val group_has_members : t -> bool
 
-(** Sends [signal] to every process in [t]'s group while one is left; a
-    group with none left is not signalled, since its id may then name
-    another group. *)
-val signal_group : t -> int -> unit
+(** Whether a process is left in the group numbered [group]. [false] for 0
+    and 1, which kill(2) reads as this process's own group and as every
+    process: so neither is ever signalled here. A group whose processes
+    another account owns is there, whether or not this process may signal
+    it. *)
+val group_id_has_members : int -> bool
 
 type stopped =
   | Ended_on_term  (** The group emptied within the grace after SIGTERM. *)
   | Killed_after_grace
       (** Members were left after the grace and got SIGKILL. The stop waits up
           to a second more for them to end; whether they did is
-          {!group_has_members}' to say. *)
+          {!group_id_has_members}' to say. *)
+  | Left_alone
+      (** [same_group] said the number no longer names the group meant, so
+          the signal due then was not sent. *)
 
-(** Ends [t]'s group: SIGTERM, then SIGKILL for whatever is left after
-    [grace_s] seconds. Only that group is signalled, and only while it has
-    members. *)
-val stop_group : clock:_ Eio.Time.clock -> grace_s:float -> t -> stopped
-
-(** {!group_has_members} for a group known only by its number. [false] for
-    0 and 1, which kill(2) reads as this process's own group and as every
-    process: so neither is ever signalled here. *)
-val group_id_has_members : int -> bool
-
-(** {!stop_group} for a group known only by its number: one started by a
-    process that has since exited, such as a server before its restart.
-    Whether the number still names that group is the caller's to establish
-    first; a group that emptied may give its number to another. *)
-val stop_group_id : clock:_ Eio.Time.clock -> grace_s:float -> int -> stopped
+(** Ends the group numbered [group]: SIGTERM, then SIGKILL for whatever is
+    left after [grace_s] seconds. Before each signal [same_group ()] says
+    whether the number still names the group meant: a group that empties
+    gives its number up, and a later process may lead a group with it. Only
+    that group is signalled, and only while it has members. *)
+val stop_group :
+  clock:_ Eio.Time.clock -> grace_s:float -> same_group:(unit -> bool) -> int -> stopped
 
 (** The process group [pid] is in now (getpgid(2)). [Error] when it cannot be
     told, a process that no longer runs among them. *)

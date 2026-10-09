@@ -275,12 +275,15 @@ let stop_group_escalates_only_past_the_grace () =
             | Error detail -> fail detail
             | Ok child -> await_file ready; child
           in
+          let same_group () = true in
           let ends = spawned "ends-on-term" "" in
           check bool "ends on SIGTERM" true
-            (Posix_spawn_detached.stop_group ~clock ~grace_s:5. ends = Posix_spawn_detached.Ended_on_term);
+            (Posix_spawn_detached.stop_group ~clock ~grace_s:5. ~same_group ends.pid
+             = Posix_spawn_detached.Ended_on_term);
           let stays = spawned "ignores-term" "trap '' TERM;" in
           check bool "killed past the grace" true
-            (Posix_spawn_detached.stop_group ~clock ~grace_s:0.5 stays = Posix_spawn_detached.Killed_after_grace);
+            (Posix_spawn_detached.stop_group ~clock ~grace_s:0.5 ~same_group stays.pid
+             = Posix_spawn_detached.Killed_after_grace);
           check bool "and its group is emptied by the time the stop returns" false
             (Posix_spawn_detached.group_has_members stays)))))
 
@@ -378,6 +381,60 @@ let a_recorded_group_is_ours_only_when_shown () =
       check bool "and forgotten once it is empty" true
         (found ~leader ~started:None ~group:(Error "No such process") ~members:false () = Keeper_firefox.Gone))
     [ Firefox_record.Start_unreadable ]
+
+(* A number that no longer names the group meant is not signalled: neither
+   at the start, nor when SIGKILL would be due. *)
+let a_stop_leaves_a_group_its_number_no_longer_names () =
+  with_workspace (fun base ->
+    Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+      let clock = Eio.Stdenv.clock env in
+      let output = Unix.openfile "/dev/null" [ Unix.O_WRONLY; Unix.O_CLOEXEC ] 0 in
+      Fun.protect
+        ~finally:(fun () -> Unix.close output)
+        (fun () ->
+          let ready = Filename.concat base "ignores-term" in
+          let script = Printf.sprintf "trap '' TERM; echo up > %s; exec %s" (Filename.quote ready) (sleeper_command ready) in
+          match Posix_spawn_detached.spawn ~sw ~argv:[ "/bin/sh"; "-c"; script ] ~env:(Unix.environment ()) ~output with
+          | Error detail -> fail detail
+          | Ok child ->
+            await_file ready;
+            Fun.protect ~finally:(fun () -> stop child.pid) (fun () ->
+              check bool "named another from the start: nothing sent" true
+                (Posix_spawn_detached.stop_group ~clock ~grace_s:0.5 ~same_group:(fun () -> false) child.pid
+                 = Posix_spawn_detached.Left_alone);
+              let asked = ref 0 in
+              let first_time_only () = incr asked; !asked = 1 in
+              check bool "named another once SIGKILL was due: not sent" true
+                (Posix_spawn_detached.stop_group ~clock ~grace_s:0.5 ~same_group:first_time_only child.pid
+                 = Posix_spawn_detached.Left_alone);
+              check bool "so the group runs on" true (Posix_spawn_detached.group_has_members child))))))
+
+(* A group of another account's processes is there, though this process may
+   not signal it: kill(2) answers EPERM. *)
+let a_group_this_account_cannot_signal_is_there () =
+  if Unix.getuid () = 0 then ()
+  else
+    let ps = Unix.open_process_args_in "/bin/ps" [| "ps"; "-axo"; "pgid=,uid=" |] in
+    let rows = In_channel.input_lines ps in
+    ignore (Unix.close_process_in ps);
+    let others =
+      List.filter_map
+        (fun row ->
+          match List.filter (fun field -> field <> "") (String.split_on_char ' ' row) with
+          | [ pgid; uid ] ->
+            (match int_of_string_opt pgid, int_of_string_opt uid with
+             | Some pgid, Some uid when pgid > 1 && uid <> Unix.getuid () -> Some pgid
+             | (Some _ | None), (Some _ | None) -> None)
+          | [] | [ _ ] | _ :: _ :: _ :: _ -> None)
+        rows in
+    let refused pgid =
+      match Unix.kill (-pgid) 0 with
+      | () -> false
+      | exception Unix.Unix_error (Unix.EPERM, _, _) -> true
+      | exception Unix.Unix_error (_, _, _) -> false in
+    match List.find_opt refused others with
+    | None -> ()
+    | Some pgid -> check bool (Printf.sprintf "group %d" pgid) true (Posix_spawn_detached.group_id_has_members pgid)
 
 (* --- what the server starts ------------------------------------------------ *)
 
@@ -910,7 +967,9 @@ let () =
         ; test_case "outlives its switch in its own group" `Quick spawn_outlives_its_switch_in_its_own_group
         ; test_case "a missing executable" `Quick spawn_of_a_missing_executable_is_an_error
         ; test_case "the group of a process" `Quick the_group_of_a_process
-        ; test_case "a stop escalates only past the grace" `Quick stop_group_escalates_only_past_the_grace ] )
+        ; test_case "a stop escalates only past the grace" `Quick stop_group_escalates_only_past_the_grace
+        ; test_case "a number that names another group" `Quick a_stop_leaves_a_group_its_number_no_longer_names
+        ; test_case "a group this account cannot signal" `Quick a_group_this_account_cannot_signal_is_there ] )
     ; ( "the record"
       , [ test_case "read back as written" `Quick a_record_reads_back_as_written
         ; test_case "another writer's record" `Quick a_record_from_another_writer_is_not_read

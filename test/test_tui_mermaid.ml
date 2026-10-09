@@ -989,10 +989,159 @@ let test_state_diagram_reads_lines_as_mermaid_does () =
       [ (Named "Quoted", Named "B"); (Named "B", Named "C"); (Named "linkStyle", Named "C") ]
     (List.map (fun (e : Mermaid.edge) -> (e.from_id, e.to_id)) graph.edges)
 
+let test_label_source_ranges () =
+  let source = "  \"foo<br/>bar\"  " in
+  let mapped = Mermaid.label_with_source_ranges source in
+  Alcotest.(check string) "same parser normalization" "foo bar" mapped.label_text;
+  Alcotest.(check (array (pair int int))) "each semantic byte retains original range"
+    [|3,4;4,5;5,6;6,11;11,12;12,13;13,14|]
+    (Array.map (fun (span : Mermaid.label_source_range) -> span.start_byte, span.end_byte)
+      mapped.source_ranges);
+  Alcotest.(check string) "String.trim keeps vertical tab as source text"
+    "\011foo" (Mermaid.label_with_source_ranges "\t\011foo\012\r").label_text;
+  List.iter (fun source ->
+    let mapped = Mermaid.label_with_source_ranges source in
+    Alcotest.(check int) "one range per resulting byte"
+      (String.length mapped.label_text) (Array.length mapped.source_ranges);
+    Array.iteri (fun byte (span : Mermaid.label_source_range) ->
+      if span.end_byte - span.start_byte = 1 then
+        Alcotest.(check char) "literal byte came from exact source"
+          source.[span.start_byte] mapped.label_text.[byte]
+      else Alcotest.(check char) "only normalized breaks collapse a source range"
+          ' ' mapped.label_text.[byte]) mapped.source_ranges)
+    ["  가나다  "; "\"quoted\""; "foo<br>bar<br />tail"; "unclosed<br"; ""; " "; "\t\011foo\012\r"]
+
+let test_parser_source_label_identity () =
+  let source = "  flowchart LR; A[\"foo<br>bar\"] -->|edge| B[끝]\r\n %% ignored\n A --> B" in
+  let report = match Mermaid.parse_with_source_labels source with
+    | Ok report -> report | Error _ -> Alcotest.fail "flowchart must parse" in
+  Alcotest.(check bool) "source tracing preserves the parsed diagram" true
+    (Mermaid.parse source = Ok report.diagram);
+  (match report.source_mapping with
+   | Mermaid.Incomplete _ -> Alcotest.fail "flowchart node/arrow labels must all map"
+   | Complete labels ->
+       Alcotest.(check int) "three semantic source labels" 3 (List.length labels);
+       List.iter (fun (label : Mermaid.sourced_label) ->
+         Alcotest.(check int) "one source range per semantic byte"
+           (String.length label.text) (Array.length label.ranges);
+         Array.iteri (fun byte (span : Mermaid.label_source_range) ->
+           if span.end_byte - span.start_byte = 1 then
+             Alcotest.(check char) "range refers to original complete input"
+               source.[span.start_byte] label.text.[byte]
+           else Alcotest.(check char) "normalized break retains full source span" ' ' label.text.[byte]) label.ranges) labels;
+       let edge = List.find (fun (label : Mermaid.sourced_label) -> label.identity=Mermaid.Edge_label 0) labels in
+       Alcotest.(check string) "arrow occurrence identity" "edge" edge.text);
+  (match Mermaid.parse_with_source_labels "flowchart LR\nA[first]\nA[second] --> B" with
+   | Ok {source_mapping=Complete labels; _} ->
+       let node = List.find (fun (label : Mermaid.sourced_label) -> label.identity=Mermaid.Node_label (Named "A")) labels in
+       Alcotest.(check string) "explicit redeclaration owns final source identity" "second" node.text
+   | _ -> Alcotest.fail "redeclared flow node must map");
+  (match Mermaid.parse_with_source_labels "stateDiagram-v2\n[*] --> Active\nActive: label" with
+   | Ok {source_mapping=Complete _; _} -> ()
+   | _ -> Alcotest.fail "state labels must now carry source maps")
+
+
+let test_group_and_sequence_source_identity () =
+  let group_source = "flowchart TD\nsubgraph g[First]\nA\nend\nsubgraph g[Second]\nB\nend" in
+  let sequence_source = "  sequenceDiagram\r\n participant A as \"Alice\"\n A->> B: hello<br>world\n Note over A, B: message\n alt first\n B-->>A: next\n and second\n A->>A: done\n end" in
+  let complete source = match Mermaid.parse_with_source_labels source with
+    | Ok {source_mapping=Complete labels; diagram} ->
+        Alcotest.(check bool) "trace keeps parser output" true (Mermaid.parse source=Ok diagram);
+        labels
+    | _ -> Alcotest.fail "all group/sequence labels must carry source ranges" in
+  let groups = complete group_source in
+  let title index = (List.find (fun (label : Mermaid.sourced_label) ->
+    label.identity=Mermaid.Group_label index) groups).text in
+  Alcotest.(check string) "first duplicate group ID has its own parsed occurrence" "First" (title 0);
+  Alcotest.(check string) "second duplicate group ID stays distinct" "Second" (title 1);
+  List.iter (fun source -> List.iter (fun (label : Mermaid.sourced_label) ->
+    Alcotest.(check int) "source map covers semantic bytes" (String.length label.text) (Array.length label.ranges);
+    Array.iteri (fun byte (span : Mermaid.label_source_range) ->
+      Alcotest.(check bool) "range stays inside original document" true
+        (span.start_byte >= 0 && span.end_byte <= String.length source && span.start_byte < span.end_byte);
+      match label.identity with
+      | Mermaid.Event_kind _ -> () (* canonical else may be written and/option *)
+      | _ when span.end_byte - span.start_byte = 1 ->
+          Alcotest.(check char) "label byte retains exact source byte" source.[span.start_byte] label.text.[byte]
+      | _ -> Alcotest.(check char) "normalized line break covers original tag" ' ' label.text.[byte]) label.ranges)
+    (complete source)) [group_source; sequence_source];
+  let labels = complete sequence_source in
+  let alias = List.find (fun (label : Mermaid.sourced_label) ->
+    label.identity=Mermaid.Participant_label "A") labels in
+  Alcotest.(check string) "implicit later mentions retain explicit alias source" "Alice" alias.text
+
+let test_state_source_label_identity () =
+  let samples = [
+    "stateDiagram-v2\nstate \"Left --> Right\" as A\nA --> B --> C: \"move<br>next\"\nstate Choice <<choice>>\nstate Fork <<fork>>\nChoice --> Fork";
+    "stateDiagram-v2\nstate \"Title\" as Outer {\n[*] --> A\nA: inner\nstate Nested {\nB --> C: edge\n}\n}\nOuter: fallback";
+    "stateDiagram-v2\nOuter: Description\nstate Outer {\nA --> B\n}";
+    "stateDiagram-v2\nstate Outer {\nA\n}";
+    "stateDiagram-v2\nstate \"First\" as Outer {\nA\n}\nstate \"Second\" as Outer {\nB\n}";
+    "stateDiagram-v2\nnote right of A\nignored note text\nend note\nA --> B: finish";
+    "stateDiagram-v2\nstate A: explicit description\n \"A\" --> \"B\"" ] in
+  List.iter (fun source -> match Mermaid.parse_with_source_labels source with
+    | Error _ -> Alcotest.fail "state source fixture must parse"
+    | Ok {source_mapping=Incomplete _; _} -> Alcotest.fail "state fixture must be completely source mapped"
+    | Ok {source_mapping=Complete labels; diagram} ->
+        Alcotest.(check bool) "tracing leaves state AST unchanged" true (Mermaid.parse source=Ok diagram);
+        List.iter (fun (label : Mermaid.sourced_label) ->
+          Alcotest.(check int) "each state semantic byte mapped" (String.length label.text) (Array.length label.ranges);
+          Array.iteri (fun byte (span : Mermaid.label_source_range) ->
+            if span.end_byte - span.start_byte = 1 then
+              Alcotest.(check char) "state label byte comes from exact source" source.[span.start_byte] label.text.[byte]
+            else Alcotest.(check char) "state edge break retains original tag range" ' ' label.text.[byte]) label.ranges) labels)
+    samples
+
+let test_canvas_source_positions () =
+  let fixtures = [
+    "flowchart TD\nA[repeat] -->|repeat| B[repeat]\nB -->|back| A";
+    "flowchart TD\nsubgraph outer[Outer]\nsubgraph inner[Inner]\nA[repeat] -->|inside| B[repeat]\nend\nend\nC[Other]\nouter -->|outside| C";
+    "sequenceDiagram\nparticipant A as Alice\nparticipant B as Bob\nalt chosen\nA->>B: repeat\nelse other\nB->>B: repeat\nNote over A,B: note\nend";
+    "stateDiagram-v2\nstate \"Outer\" as O {\nstate \"Inner\" as I {\nA: Alpha\nA --> B: next\n}\n}\nO --> C: leave";
+    "flowchart LR\nA[한글] -->|café| B[é]";
+  ] in
+  List.iter (fun source -> List.iter (fun cols ->
+    match Mermaid.render_with_source_labels ~cols source, Mermaid.render ~cols source with
+    | Error traced, Error plain ->
+        Alcotest.(check bool) "same refusal and turn suggestion" true (traced=plain)
+    | Ok traced, Ok plain ->
+        Alcotest.(check (list string)) "same drawing bytes" plain traced.rendered_rows;
+        let labels = match traced.labels with
+          | Complete labels -> labels
+          | Incomplete _ -> Alcotest.fail "fixture mapping must be complete" in
+        Alcotest.(check int) "one position row per rendered row"
+          (List.length plain) (Array.length traced.rendered_positions);
+        List.iteri (fun row text ->
+          let positions=traced.rendered_positions.(row) in
+          Alcotest.(check int) "one position per surviving byte" (String.length text) (Array.length positions);
+          Array.iteri (fun byte -> function
+            | None -> ()
+            | Some (position : Mermaid.semantic_position) ->
+                let label=List.find (fun (label : Mermaid.sourced_label) -> label.identity=position.identity) labels in
+                Alcotest.(check char) "glyph matches its semantic label byte" text.[byte] label.text.[position.byte];
+                let range=label.ranges.(position.byte) in
+                Alcotest.(check bool) "source composition is within original input" true
+                  (range.start_byte>=0 && range.end_byte<=String.length source && range.start_byte<range.end_byte)) positions) plain
+    | _ -> Alcotest.fail "tracing must not change renderer success") [8;40;200]) fixtures;
+  let source="flowchart TD\nA[repeat] -->|repeat| B[repeat]" in
+  match Mermaid.render_with_source_labels ~cols:200 source with
+  | Error _ -> Alcotest.fail "duplicate-label diagram must fit"
+  | Ok traced ->
+      let identities=Array.to_list traced.rendered_positions |> List.concat_map Array.to_list
+        |> List.filter_map (Option.map (fun (position : Mermaid.semantic_position) -> position.identity))
+        |> List.sort_uniq compare in
+      List.iter (fun identity -> Alcotest.(check bool) "equal labels keep distinct origins" true
+        (List.mem identity identities)) [Node_label (Named "A"); Node_label (Named "B"); Edge_label 0]
+
 let () =
   Alcotest.run "tui mermaid"
     [ ( "goldens"
-      , [ Alcotest.test_case "top down" `Quick test_top_down
+      , [ Alcotest.test_case "canvas semantic byte positions" `Quick test_canvas_source_positions
+        ; Alcotest.test_case "state semantic source identities" `Quick test_state_source_label_identity
+        ; Alcotest.test_case "group/sequence semantic source identities" `Quick test_group_and_sequence_source_identity
+        ; Alcotest.test_case "parser-owned label identity and source ranges" `Quick test_parser_source_label_identity
+        ; Alcotest.test_case "label source byte ranges" `Quick test_label_source_ranges
+        ; Alcotest.test_case "top down" `Quick test_top_down
         ; Alcotest.test_case "left right" `Quick test_left_right
         ; Alcotest.test_case "fan out jogs on its own bus rows" `Quick
             test_fan_out_jogs_on_its_own_bus_rows

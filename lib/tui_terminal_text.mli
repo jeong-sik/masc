@@ -34,6 +34,22 @@ val sanitize_terminal_lines : string -> string
     visible escape rather than sent to the terminal or folded into a space.
     For a text read whole, where a reader must see what the bytes are. *)
 
+type mapped_text
+(** Immutable sanitized text with provenance for each emitted byte. *)
+
+val sanitize_terminal_lines_with_source : string -> mapped_text
+(** The same two-pass policy as {!sanitize_terminal_lines}. Copied bytes keep
+    exact original byte offsets; every byte in a visible escape maps to the
+    original byte/scalar start. LF keeps its original offset. *)
+
+val mapped_text : mapped_text -> string
+val source_byte_at : mapped_text -> int -> int option
+(** Original byte for an emitted byte. Out-of-range positions are absent. *)
+val output_byte_at_source : mapped_text -> int -> int option
+(** First emitted byte for this exact original position, or absent when the
+    position has no separate output byte (for example an escaped scalar's
+    continuation). No text matching or guessed neighbouring position. *)
+
 val preview_line : string -> string
 (** One row of a multi-line text for a list cell: each line break (LF, CR LF,
     or a lone CR) becomes the one-cell return mark U+23CE, a tab becomes a

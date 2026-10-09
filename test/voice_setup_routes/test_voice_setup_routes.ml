@@ -368,6 +368,25 @@ let test_a_command_kind_round_trips () =
          Alcotest.(check bool) "and comes back out of the observation" true
            (List.mem "macos_say" kinds)))
 
+(* espeak-ng round-trips through the same route: what the API hands out it
+   must take back. *)
+let test_an_espeak_endpoint_round_trips () =
+  with_workspace (fun ~base_path ~path ->
+    let changes =
+      tts_section_changes
+        [ `Assoc
+            [ "change", `String "put_endpoint"
+            ; "section", `String "tts"
+            ; "endpoint", `Assoc [ "id", `String "espeak"; "kind", `String "espeak_ng" ]
+            ]
+        ]
+    in
+    match Actions.apply ~base_path (request (revision ~base_path) changes) with
+    | Error error -> Alcotest.fail (Actions.error_message error)
+    | Ok _ ->
+      Alcotest.(check bool) "the kind reached the file" true
+        (Astring.String.is_infix ~affix:"espeak_ng" (read path)))
+
 (* say has no transcription at all, so installing it as an STT endpoint would
    report success over something that never runs. *)
 let test_a_kind_that_cannot_serve_the_section_is_refused () =
@@ -376,6 +395,12 @@ let test_a_kind_that_cannot_serve_the_section_is_refused () =
        [ "change", `String "put_endpoint"
        ; "section", `String "stt"
        ; "endpoint", `Assoc [ "id", `String "say"; "kind", `String "macos_say" ]
+       ]);
+  refused ~what:"espeak-ng in the STT section"
+    (`Assoc
+       [ "change", `String "put_endpoint"
+       ; "section", `String "stt"
+       ; "endpoint", `Assoc [ "id", `String "espeak"; "kind", `String "espeak_ng" ]
        ])
 
 (* "false" is not false. Substituting the default committed the opposite of
@@ -922,6 +947,8 @@ let () =
     ; ( "a kind is taken or refused for what it can do"
       , [ Alcotest.test_case "a command kind round-trips" `Quick
             test_a_command_kind_round_trips
+        ; Alcotest.test_case "an espeak-ng endpoint round-trips" `Quick
+            test_an_espeak_endpoint_round_trips
         ; Alcotest.test_case "a kind that cannot serve the section" `Quick
             test_a_kind_that_cannot_serve_the_section_is_refused
         ] )

@@ -283,8 +283,9 @@ is local observation timing. `Heartbeat_reported.elapsed_seconds` retains the
 separate provider measurement without replacing either timestamp or local elapsed
 duration. A heartbeat-only row says `heartbeat · provider elapsed Ns`; output and
 message observations retain their own labels. Compact Tools rows
-say `output arriving` while active and `output observed` after the step ends, with
-the last update's elapsed time; byte counts belong to Full/Results detail. MCP
+say `output arriving` while active and `output observed` after the step ends, without
+generated elapsed time; local observation elapsed belongs to Full and byte counts
+belong to Full/Results detail. MCP
 messages use terminal-safe display. Progress updates do not touch authored speech,
 Thinking/Streaming phase, native completion, or MASC execution identity/outcome.
 

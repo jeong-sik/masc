@@ -79,7 +79,15 @@ def accepted_but_pending(executable, *, followed_by_held=False):
         # The initial workspace identity withdraws the operator ticket sent
         # before it. Request the receipt's source under that applied authority.
         h.wait_for_output(process, fd, output, b"Health: ok", start=0, timeout=10)
-        h.send_and_wait(process, fd, output, b"r", b"[home-a]")
+        with lock:
+            before_refresh = len(observations)
+        os.write(fd, b"r")
+        def refreshed_pending():
+            with lock:
+                return any(rows == [item] for _, rows in observations[before_refresh:])
+        assert h.wait_for_fixture_state(process, fd, output, refreshed_pending, timeout=3)
+        assert h.wait_for_fixture_state(process, fd, output,
+            lambda: b"[home-a]" in h.screen_text(bytes(output)), timeout=3), h.screen_text(bytes(output))
         cards.select_home(process, fd, output, b"[home-a]", destinations=3)
         opened = h.send_and_wait(process, fd, output, b"\r",
                                  b"home-receipt-exact-reason")

@@ -1194,6 +1194,19 @@ let load ~base_path ~keeper_name =
   Ok (view_partitions view)
 ;;
 
+let purge ~base_path ~keeper_name =
+  let ledger_path = path ~base_path ~keeper_name in
+  run_blocking "board-attention-partition-purge" (fun () ->
+    let entry = cache_entry ledger_path in
+    Stdlib.Mutex.protect entry.mutation_mutex (fun () ->
+      (* Never replace this entry while another transaction can be waiting on
+         its mutex. A failed purge can already have unlinked the old inode. *)
+      Atomic.set entry.cached None;
+      Fs_compat.purge_private_jsonl_durable_locked_result ledger_path
+      |> cursor_result ~ledger_path
+      |> Result.map (fun _cursor -> ())))
+;;
+
 let update ~base_path ~keeper_name decide =
   let ledger_path = path ~base_path ~keeper_name in
   run_blocking "board-attention-partition-update" (fun () ->
@@ -1462,8 +1475,9 @@ let advance_state partition state =
     Ok { partition with generation; state }
 ;;
 
-let ensure_roots ~base_path ~keeper_name candidates =
+let ensure_roots_with_reader ~base_path ~keeper_name read_candidates =
   update ~base_path ~keeper_name (fun view ->
+    let* candidates = read_candidates () in
     let* roots =
       candidates
       |> List.sort compare_candidate
@@ -1601,6 +1615,22 @@ let ensure_roots ~base_path ~keeper_name candidates =
       |> Result.map List.rev
     in
     Ok (roots, List.length roots))
+;;
+
+let ensure_roots ~base_path ~keeper_name candidates =
+  ensure_roots_with_reader ~base_path ~keeper_name (fun () -> Ok candidates)
+;;
+
+let ensure_current_roots ~base_path ~keeper_name candidates =
+  ensure_roots_with_reader ~base_path ~keeper_name (fun () ->
+    (* The partition mutation lock encloses this candidate read and the root
+       append. Purge removes candidates before partitions: a stale request
+       either finishes before partition purge or sees the missing candidate.
+       Re-reading before taking the partition lock would leave that race open. *)
+    let* current = Candidate.load_candidates ~base_path ~keeper_name in
+    if List.for_all (fun candidate -> List.mem candidate current) candidates
+    then Ok candidates
+    else Error "Board attention candidates changed before root restoration")
 ;;
 
 let recover_for_process_start ~now ~base_path ~keeper_name =

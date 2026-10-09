@@ -523,7 +523,7 @@ let test_peer_close_frame_ends_a_pending_command () =
       send_server_frame flow 0x8 "";
       try ignore (Eio.Flow.single_read flow (Cstruct.create 1) : int) with End_of_file -> ())
     (fun ~ended peer ->
-      (match Peer.metadata peer with Ok _ -> () | Error detail -> fail detail);
+      (match metadata peer with Ok _ -> () | Error detail -> fail detail);
       let result=Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) in
       check bool "the close callback ends the holder" true (Eio.Promise.peek ended <> None);
       match result with
@@ -539,7 +539,7 @@ let test_malformed_json_ends_a_pending_command () =
       send_server_frame flow 0x1 "not-json";
       try ignore (Eio.Flow.single_read flow (Cstruct.create 1) : int) with End_of_file -> ())
     (fun ~ended peer ->
-      (match Peer.metadata peer with Ok _ -> () | Error detail -> fail detail);
+      (match metadata peer with Ok _ -> () | Error detail -> fail detail);
       let result=Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) in
       check bool "invalid text disconnects the holder" true (Eio.Promise.peek ended <> None);
       match result with
@@ -556,7 +556,7 @@ let test_invalid_websocket_frame_ends_a_pending_command () =
       send_server_frame flow 0x3 "";
       try ignore (Eio.Flow.single_read flow (Cstruct.create 1) : int) with End_of_file -> ())
     (fun ~ended peer ->
-      (match Peer.metadata peer with Ok _ -> () | Error detail -> fail detail);
+      (match metadata peer with Ok _ -> () | Error detail -> fail detail);
       let result=Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) in
       check bool "the protocol error reaches the closed callback" true (Eio.Promise.peek ended <> None);
       match result with

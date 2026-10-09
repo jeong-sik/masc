@@ -2189,6 +2189,133 @@ let test_explicit_write_receipt_rejects_invalid_or_ambiguous_identity () =
     ; map_field "explicit_write_range_id" (map_field "input_sha256" (fun _ -> `String "invalid")) ]
 ;;
 
+let candidate_receipt sequence request_id payload : Current.explicit_candidate_id =
+  {queue_generation="candidate-generation"; request_id; sequence;
+   input_sha256=Digestif.SHA256.(digest_string payload |> to_hex)}
+;;
+
+let commit_candidates ~keepers_dir ids claims =
+  Current.apply_disposition ~explicit_candidate_ids:ids ~absorbed:[] ~revisions:[]
+    ~keepers_dir ~keeper_id:"keeper" ~now:200. ~source:(source Current.Librarian)
+    ~new_claims:claims ()
+;;
+
+let read_candidates ~keepers_dir generation =
+  Current.committed_explicit_candidates ~keepers_dir ~keeper_id:"keeper"
+    ~queue_generation:generation |> require_ok
+;;
+
+let test_sparse_candidate_receipts_survive_retirement () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let a = candidate_receipt 1 "pending-a" "unresolved A" in
+  let b = candidate_receipt 2 "settled-b" "B" in
+  let c = candidate_receipt 3 "settled-c" "C" in
+  let target = fact ~claim:"B and C establish one durable policy" () in
+  let first = commit_candidates ~keepers_dir [b;c] [target] |> require_ok in
+  check bool "sparse set rewrites one snapshot" true (first.commit=Current.Rewritten);
+  let found = read_candidates ~keepers_dir b.queue_generation in
+  check bool "only B and C have authoritative receipts" true
+    (List.length found=2 && List.mem b found && List.mem c found && not (List.mem a found));
+  let snapshot_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let before = Fs_compat.load_file snapshot_path in
+  let settled_a = commit_candidates ~keepers_dir [a] [] |> require_ok in
+  check bool "later A settlement can keep the snapshot unchanged" true
+    (settled_a.commit=Current.Unchanged);
+  check string "unchanged commit preserves snapshot bytes" before (Fs_compat.load_file snapshot_path);
+  let all = read_candidates ~keepers_dir b.queue_generation in
+  check bool "no-change A receipt preserves B and C" true
+    (List.length all=3 && List.for_all (fun id -> List.mem id all) [a;b;c]);
+  (match Current.retract_fact ~keepers_dir ~keeper_id:"keeper" ~now:300.
+      ~source:(source Current.Explicit_retract) ~memory_id:(Types.memory_id target)
+      ~reason:"policy retired after consumption" () with
+   | Ok _ -> () | Error _ -> fail "target retirement failed");
+  let retired = Fs_compat.load_file snapshot_path in
+  let receipt_path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+  let receipts = Fs_compat.load_file receipt_path in
+  List.iter (fun ids ->
+    (match commit_candidates ~keepers_dir ids [target] with
+     | Error _ -> () | Ok _ -> fail "consumed input resurrected retired knowledge");
+    check string "replay refusal preserves retired snapshot" retired (Fs_compat.load_file snapshot_path);
+    check string "replay refusal preserves receipt ledger" receipts (Fs_compat.load_file receipt_path))
+    [[b]; [b;c]; [candidate_receipt 5 "fresh-during-replay" "new";b]; [{b with input_sha256=(candidate_receipt 2 "settled-b" "changed payload").input_sha256}];
+     [{b with request_id="different-request-same-sequence"}]; [{b with sequence=4}]];
+  check int "retirement does not forget consumed candidates" 3
+    (List.length (read_candidates ~keepers_dir b.queue_generation));
+  let other = {b with queue_generation="another-generation"} in
+  ignore (commit_candidates ~keepers_dir [other] [] |> require_ok);
+  check bool "another generation has an independent receipt" true
+    (read_candidates ~keepers_dir other.queue_generation = [other]);
+  check int "other generation leaves original receipts intact" 3
+    (List.length (read_candidates ~keepers_dir b.queue_generation))
+;;
+
+let test_candidate_receipt_reconciliation_preserves_first_order () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let a = candidate_receipt 1 "first" "A" in
+  let b = candidate_receipt 2 "second" "B" in
+  ignore (commit_candidates ~keepers_dir [a;b] [fact ~claim:"policy" ()] |> require_ok);
+  ignore (apply_disposition ~keepers_dir ~durable_range_id () |> require_ok);
+  let expected = read_candidates ~keepers_dir a.queue_generation in
+  let path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+  let canonical = Fs_compat.load_file path in
+  rewrite_receipts ~keepers_dir (map_field "receipts" (function
+    | `List receipts ->
+        let atom = List.find (fun receipt ->
+          Yojson.Safe.Util.member "range_id" receipt <> `Null) receipts in
+        `List (receipts @ [atom])
+    | _ -> fail "expected candidate and atom receipts"));
+  check bool "dedup preserves the first occurrence order" true
+    (read_candidates ~keepers_dir a.queue_generation = expected);
+  let reconciled = Fs_compat.load_file path in
+  check string "on-disk first-occurrence order is preserved" canonical reconciled;
+  check int "duplicate atom removed without dropping candidates" 3
+    Yojson.Safe.Util.(Yojson.Safe.from_string reconciled |> member "receipts" |> to_list |> List.length);
+  check bool "reconciled reads are idempotent" true
+    (read_candidates ~keepers_dir a.queue_generation = expected);
+  check string "an unchanged receipt set is not rewritten" reconciled
+    (Fs_compat.load_file path)
+;;
+
+let test_candidate_set_conflict_is_atomic () =
+  List.iter (fun colliding ->
+    with_temp_keepers @@ fun keepers_dir ->
+    let b = candidate_receipt 2 "request-b" "B" in
+    let c = candidate_receipt 3 "request-c" "C" in
+    ignore (replace ~keepers_dir ~facts:[fact ~claim:"prior" ()] () |> require_ok);
+    let snapshot_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+    let before = Fs_compat.load_file snapshot_path in
+    (match commit_candidates ~keepers_dir [c;b;colliding b] [fact ~claim:"must not commit" ()] with
+     | Error _ -> () | Ok _ -> fail "conflicting candidate set committed");
+    check string "whole conflicting set leaves snapshot unchanged" before (Fs_compat.load_file snapshot_path);
+    check (list string) "no innocent member acquired a receipt" []
+      (List.map (fun (id : Current.explicit_candidate_id) -> id.request_id)
+        (read_candidates ~keepers_dir b.queue_generation)))
+    [Fun.id; (fun (b : Current.explicit_candidate_id) -> {b with sequence=4});
+     (fun (b : Current.explicit_candidate_id) -> {b with request_id="different-request"});
+     (fun (b : Current.explicit_candidate_id) -> {b with input_sha256=String.make 64 'f'})]
+;;
+
+let test_candidate_prepared_set_recovers_exact_snapshot () =
+  List.iter (fun exact ->
+    with_temp_keepers @@ fun keepers_dir ->
+    let b = candidate_receipt 2 "request-b" "B" in
+    let c = candidate_receipt 3 "request-c" "C" in
+    ignore (commit_candidates ~keepers_dir [b;c] [fact ~claim:"settled policy" ()] |> require_ok);
+    rewrite_receipts ~keepers_dir (map_receipts (fun receipt ->
+      let receipt = map_field "state" (fun _ -> `String "prepared") receipt in
+      if exact then receipt
+      else map_field "snapshot_sha256" (fun _ -> `String (String.make 64 'f')) receipt));
+    let found = read_candidates ~keepers_dir b.queue_generation in
+    check bool "whole set recovers only for the exact committed snapshot" true
+      (if exact then List.length found=2 && List.mem b found && List.mem c found else found=[]);
+    if exact then (
+      let json = Yojson.Safe.from_file
+        (Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper") in
+      check (list string) "recovery persists both committed states" ["committed";"committed"]
+        Yojson.Safe.Util.(json |> member "receipts" |> to_list
+          |> List.map (fun receipt -> receipt |> member "state" |> to_string)))) [true;false]
+;;
+
 let test_stale_replace_rejects_concurrent_explicit_write () =
   with_temp_keepers @@ fun keepers_dir ->
   let initial = fact ~claim:"initial" () in
@@ -3378,6 +3505,14 @@ let () =
             test_explicit_write_receipt_commits_no_change_and_survives_retirement
         ; test_case "explicit-write prepared receipt requires exact snapshot" `Quick
             test_explicit_write_prepared_receipt_requires_exact_snapshot
+        ; test_case "sparse candidate receipts survive no-change and retirement" `Quick
+            test_sparse_candidate_receipts_survive_retirement
+        ; test_case "candidate reconciliation preserves first order" `Quick
+            test_candidate_receipt_reconciliation_preserves_first_order
+        ; test_case "candidate receipt set conflicts refuse the whole transaction" `Quick
+            test_candidate_set_conflict_is_atomic
+        ; test_case "prepared candidate receipt set recovers exact snapshot only" `Quick
+            test_candidate_prepared_set_recovers_exact_snapshot
         ; test_case "explicit-write receipt rejects invalid or ambiguous identity" `Quick
             test_explicit_write_receipt_rejects_invalid_or_ambiguous_identity
         ; test_case

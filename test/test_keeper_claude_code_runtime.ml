@@ -3195,6 +3195,509 @@ let test_task_binding_freezes_exact_envelope_and_dispatch () =
    | _ -> fail "two actual driver calls required")
 ;;
 
+module Task_journal = Keeper_native_task_journal
+
+let task_journal_ok (outcome : 'a Task_journal.outcome) =
+  match outcome.result, outcome.cleanup_failure with
+  | Ok value, [] -> value
+  | Error error, _ -> fail (Task_journal.error_to_string error)
+  | Ok _, failure :: _ -> fail (Task_journal.cleanup_failure_to_string failure)
+;;
+
+let task_journal_rows reader = (task_journal_ok (Task_journal.read reader)).records
+;;
+
+let task_journal_operation name =
+  match Keeper_chat_operation.Operation_id.of_string name with
+  | Ok id -> Task_journal.Operation id | Error detail -> fail detail
+;;
+
+(* The store tests cannot manufacture a privileged binding with JSON. Obtain
+   one through the real fake-CLI -> runtime -> adapter -> driver callback. *)
+let with_task_journal_bindings ?on_bound f =
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    let envelope = Yojson.Safe.to_string (`Assoc ["type",`String "assistant";
+      "parent_tool_use_id",`Null;"session_id",`String "__SESSION__";
+      "uuid",`String "task-parent-envelope";"message",`Assoc ["id",`String "task-parent-response";
+      "role",`String "assistant";"model",`String "claude-fixture";"content",`List [
+        `Assoc ["type",`String "tool_use";"id",`String "task-parent-call";
+          "name",`String "Agent";"input",`Assoc ["prompt",`String "Complete the delegated fixture task.";
+          "description",`String "background task persistence";"subagent_type",`String "general-purpose"]]]]]) in
+    let frame ~uuid subtype fields = task_binding_frame ~uuid ~task_id:"task/id"
+        ~call_id:"task-parent-call" subtype fields in
+    let observed = ref [] in
+    with_fixture [Emit_with_input envelope;
+      Emit (task_binding_native_result ~uuid:"task-parent-return" ~call_id:"task-parent-call");
+      Emit (frame ~uuid:"task-journal-start" "task_started"
+        ["task_type",`String "local_agent";"spawn_depth",`Int 1;
+         "description",`String "EXCLUDED_DESCRIPTION";"subagent_type",`String "general-purpose";
+         "is_backgrounded",`Bool true]);
+      Emit (frame ~uuid:"task-journal-progress" "task_progress"
+        ["description",`String "EXCLUDED_PROGRESS";"usage",`Assoc
+          ["total_tokens",`Int 12;"tool_uses",`Int 1;"duration_ms",`Int (-3)];
+         "last_tool_name",`String "Read"]);
+      Emit (frame ~uuid:"task-journal-end" "task_notification"
+        ["status",`String "completed";"summary",`String "EXCLUDED_SUMMARY";
+         "output_file",`String "/EXCLUDED_PATH"]);
+      Emit (response_text ~turn_id:"answer" ~message_id:"answer" "Unchanged answer");
+      Emit (result_text ~turn_id:"final" "Unchanged answer")]
+      (fun cli_path ->
+        let result = with_fixture_yolo ~keeper_name:"claude-fixture" (fun () ->
+          run_keeper_turn ~base_path ~cli_path ~goal:"TASK_JOURNAL"
+            ~required_native_posture:Runtime_native_tools.Native_full
+            ~on_native_task_observation:(fun ~attempt bound ->
+              observed := (attempt,bound) :: !observed;
+              Option.iter (fun observe -> observe ~base_path ~attempt bound) on_bound) ()) in
+        (match result with Error error -> fail (Agent_core.Error.to_string error)
+         | Ok result -> check string "root answer is unchanged" "Unchanged answer" (keeper_response_text result));
+        let observations = List.rev !observed in
+        check int "actual driver yielded all owned task edges" 3 (List.length observations);
+        f ~base_path observations))
+;;
+
+let test_native_task_journal_commit_replay_and_scope () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    let secret = "general-purpose" and keeper_name = "claude-fixture" in
+    let token_file = Keeper_secret_redaction.ssh_remote_token_file ~base_path ~keeper_name in
+    Fs_compat.mkdir_p (Filename.dirname token_file);
+    Out_channel.with_open_bin token_file (fun out -> output_string out secret);
+    let redact_text = Keeper_secret_redaction.redact_text
+        (Keeper_secret_redaction.snapshot ~base_path ~keeper_name) in
+    let source = task_journal_operation "execution-operation" in
+    let sink = Task_journal.create ~base_path ~keeper_name ~source ~redact_text in
+    let publications = List.map (fun (attempt,bound) ->
+      match Task_journal.prepare sink ~attempt bound with Ok p -> p
+      | Error e -> fail (Task_journal.error_to_string e)) observations in
+    let committed = List.map (fun publication -> task_journal_ok (Task_journal.append publication)) publications in
+    let reader = Task_journal.reader_of_publication (List.hd publications) in
+    let rows = task_journal_rows reader in
+    check (list int) "one durable contiguous receiver sequence" [1;2;3]
+      (List.map (fun (r:Task_journal.record) -> r.seq) rows);
+    List.iter2 (fun publication expected ->
+      match expected, task_journal_ok (Task_journal.append publication) with
+      | Task_journal.Appended old, Task_journal.Replayed replay ->
+          check bool "replay retains exact original receipt and recorded time" true (old=replay)
+      | _ -> fail "expected append then exact replay") publications committed;
+    List.iter (fun (r:Task_journal.record) ->
+      match r.observation.origin.source with
+      | Runtime_native_tasks.Operation {operation_id} ->
+          check string "canonical execution operation is retained" "execution-operation" operation_id
+      | Autonomous_turn _ -> fail "operation changed to autonomous source") rows;
+    (match List.map (fun (r:Task_journal.record) -> r.observation.event) rows with
+     | [Runtime_native_tasks.Task_registered {subagent_type=Some value;_};
+        Task_progress_reported {usage;_};Task_terminal_reported _] ->
+          check string "only supplied metadata leaf is redacted" (redact_text secret) value;
+          check int "signed provider duration survives journal" (-3) usage.duration_ms
+     | _ -> fail "wrong typed disk events");
+    let bytes = In_channel.with_open_bin (Task_journal.path reader) In_channel.input_all in
+    List.iter (fun value -> check bool "private source strings never reach journal" false
+      (Astring.String.is_infix ~affix:value bytes))
+      [secret;"EXCLUDED_DESCRIPTION";"EXCLUDED_PROGRESS";"EXCLUDED_SUMMARY";"EXCLUDED_PATH"];
+    let attempt,bound = List.hd observations in
+    let foreign_source = Task_journal.create ~base_path ~keeper_name
+        ~source:(task_journal_operation "member-request-alias") ~redact_text in
+    (match (Task_journal.observe foreign_source ~attempt bound).result with
+     | Error (Task_journal.Conflicting_uuid "task-journal-start") -> ()
+     | _ -> fail "same UUID with different source was acknowledged");
+    check int "conflict is retained as task persistence health" 1
+      (List.length (Task_journal.health foreign_source));
+    check int "conflict cannot append a row" 3 (List.length (task_journal_rows reader));
+    let alias = Task_journal.create ~base_path:(Filename.concat base_path ".")
+        ~keeper_name ~source ~redact_text in
+    (match (Task_journal.observe alias ~attempt bound).result with
+     | Ok (Task_journal.Replayed _) -> () | _ -> fail "canonical root alias split the receiver journal");
+    let separate_root = temp_workspace () in
+    Fun.protect ~finally:(fun () -> cleanup_tree separate_root) (fun () ->
+      let other = Task_journal.create ~base_path:separate_root ~keeper_name ~source ~redact_text in
+      (match task_journal_ok (Task_journal.observe other ~attempt bound) with
+       | Task_journal.Appended r -> check int "other canonical root has its own sequence" 1 r.seq
+       | Replayed _ -> fail "other workspace inherited a receipt"));
+    let other_keeper = Task_journal.create ~base_path ~keeper_name:"claude/fixture" ~source ~redact_text in
+    let other = match Task_journal.prepare other_keeper ~attempt bound with
+      | Ok p -> p | Error e -> fail (Task_journal.error_to_string e) in
+    let other_reader = Task_journal.reader_of_publication other in
+    check bool "slash is encoded, never a path segment" false
+      (String.equal (Task_journal.path reader) (Task_journal.path other_reader));
+    ignore (task_journal_ok (Task_journal.append other));
+    (* Copying a valid row from another authority cannot establish that scope. *)
+    Out_channel.with_open_bin (Task_journal.path other_reader) (fun out -> output_string out bytes);
+    (match (Task_journal.append other).result with
+     | Error (Task_journal.Corrupt _) -> () | _ -> fail "foreign-scope copied journal was accepted"))
+;;
+
+let test_native_task_journal_atomicity_recovery_and_failure () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    let sink = Task_journal.create ~base_path ~keeper_name:"claude-fixture"
+        ~source:(task_journal_operation "operation") ~redact_text:Fun.id in
+    let publications = List.map (fun (attempt,bound) ->
+      Result.get_ok (Task_journal.prepare sink ~attempt bound)) observations in
+    let first = List.hd publications and second = List.nth publications 1 and third = List.nth publications 2 in
+    let reader = Task_journal.reader_of_publication first in
+    let workers = List.init 4 (fun _ -> Domain.spawn (fun () ->
+      Eio_main.run (fun _ -> Task_journal.append first))) in
+    let outcomes = List.map Domain.join workers |> List.map (fun outcome ->
+      match outcome.Task_journal.result with
+      | Error (Task_journal.Store_unavailable _) ->
+          (* SQLITE_BUSY is an immediate explicit refusal. Reconcile after the
+             concurrent workers have completed, with the identical UUID. *)
+          task_journal_ok (Task_journal.append first)
+      | Ok _ | Error _ -> task_journal_ok outcome) in
+    check int "concurrent duplicate writers commit exactly once" 1
+      (List.length (List.filter (function Task_journal.Appended _ -> true | Replayed _ -> false) outcomes));
+    let db = Sqlite3.db_open (Task_journal.path reader) in
+    Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db)) (fun () ->
+      let sql statement = match Sqlite3.exec db statement with
+        | Sqlite3.Rc.OK -> () | rc -> fail (Sqlite3.Rc.to_string rc) in
+      sql "BEGIN IMMEDIATE";
+      sql "UPDATE metadata SET next_sequence=99";
+      sql "ROLLBACK");
+    check int "rolled-back transaction changes no committed rows" 1
+      (List.length (task_journal_rows reader));
+    (match task_journal_ok (Task_journal.append second) with
+     | Task_journal.Appended r -> check int "rollback preserves next committed sequence" 2 r.seq
+     | Replayed _ -> fail "new event became replay");
+    let db = Sqlite3.db_open (Task_journal.path reader) in
+    Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db)) (fun () ->
+      match Sqlite3.exec db "UPDATE metadata SET next_sequence=99" with
+      | Sqlite3.Rc.OK -> () | rc -> fail (Sqlite3.Rc.to_string rc));
+    (match (Task_journal.append third).result with
+     | Error (Task_journal.Corrupt _) -> () | _ -> fail "inconsistent sequence metadata was accepted");
+    let blocked = Filename.concat base_path "file-instead-of-directory" in
+    Out_channel.with_open_bin blocked (fun out -> output_string out "unchanged");
+    let unavailable = Task_journal.create ~base_path:blocked ~keeper_name:"claude-fixture"
+        ~source:(task_journal_operation "operation") ~redact_text:Fun.id in
+    let attempt,bound = List.hd observations in
+    (match (Task_journal.observe unavailable ~attempt bound).result with
+     | Error _ -> () | Ok _ -> fail "I/O failure produced a committed receipt");
+    check int "failed observation remains explicitly unhealthy" 1
+      (List.length (Task_journal.health unavailable));
+    check string "filesystem failure cannot overwrite unrelated file" "unchanged"
+      (In_channel.with_open_bin blocked In_channel.input_all))
+;;
+
+let test_native_task_http_reads_actual_bound_observations () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    let module Api = Server_dashboard_http_keeper_native_tasks in
+    let keeper_name = "claude-fixture" in
+    let sink = Task_journal.create ~base_path ~keeper_name
+      ~source:(task_journal_operation "http-observation") ~redact_text:Fun.id in
+    List.iter (fun (attempt,bound) ->
+      ignore (task_journal_ok (Task_journal.observe sink ~attempt bound))) observations;
+    let attempt,(bound : Keeper_claude_task_binding.bound) = List.hd observations in
+    (* The secret is learned after persistence: reads must use current policy. *)
+    let secret = "general-purpose" in
+    let token_file = Keeper_secret_redaction.ssh_remote_token_file ~base_path ~keeper_name in
+    Fs_compat.mkdir_p (Filename.dirname token_file);
+    Out_channel.with_open_bin token_file (fun out -> output_string out secret);
+    let state = Mcp_server.For_testing.create_state ~base_path in
+    let prefix = "/api/v1/keepers/" ^ keeper_name ^ "/native-tasks/" in
+    let query = "?receiver_generation=" ^ Uri.pct_encode bound.ticket.receiver_generation
+      ^ "&session_id=" ^ Uri.pct_encode bound.ticket.session_id in
+    let get suffix =
+      let target = prefix ^ suffix in
+      let request = Httpun.Request.create `GET target in
+      let route = match Api.route (Uri.path (Uri.of_string target)) with
+        | Some route -> route | None -> fail "native task route not recognized" in
+      let status, body = Api.response state request route in
+      Httpun.Status.to_code status, body in
+    let member = Yojson.Safe.Util.member in
+    let status, body = get ("records" ^ query) in
+    check int "production handler reads real bound journal" 200 status;
+    check bool "read applies current redaction to previously stored metadata" false
+      (Astring.String.is_infix ~affix:secret (Yojson.Safe.to_string body));
+    let rows = body |> member "records" |> Yojson.Safe.Util.to_list in
+    check (list int) "actual committed sequence returned" [1;2;3]
+      (List.map (fun row -> row |> member "seq" |> Yojson.Safe.Util.to_int) rows);
+    check string "read does not certify provider completeness" "unknown"
+      (body |> member "provider_completeness" |> Yojson.Safe.Util.to_string);
+    check string "absent terminal is never inferred complete" "unknown"
+      (body |> member "terminal_without_observation" |> Yojson.Safe.Util.to_string);
+    let cursor = body |> member "next_cursor" in
+    let cursor_query = "&store_id=" ^ Uri.pct_encode
+      (cursor |> member "store_id" |> Yojson.Safe.Util.to_string)
+      ^ "&after_sequence=3" in
+    let status, replay = get ("records" ^ query ^ cursor_query) in
+    check int "exact cursor accepted" 200 status;
+    check int "no repeated committed rows" 0
+      (List.length (replay |> member "records" |> Yojson.Safe.Util.to_list));
+    let status,_ = get ("records" ^ query ^ "&store_id=foreign&after_sequence=3") in
+    check int "foreign store cursor refused" 409 status;
+    let status, discovery = get "receivers" in
+    check int "production discovery" 200 status;
+    check int "actual receiver discoverable" 1
+      (List.length (discovery |> member "receivers" |> Yojson.Safe.Util.to_list));
+    let conflict = Task_journal.create ~base_path ~keeper_name
+      ~source:(task_journal_operation "other-source") ~redact_text:Fun.id in
+    (match (Task_journal.observe conflict ~attempt bound).result with
+     | Error (Task_journal.Conflicting_uuid _) -> ()
+     | _ -> fail "fixture failed to produce real persistence conflict");
+    let _, discovery = get "receivers" in
+    let health = discovery |> member "observed_persistence_health" in
+    check string "health explicitly process scoped" "issues_observed_in_this_process_only"
+      (health |> member "coverage" |> Yojson.Safe.Util.to_string);
+    check bool "actual failed observation exposed" true
+      (List.exists (fun issue -> issue |> member "error" |> member "error" = `String "conflicting_uuid")
+        (health |> member "issues" |> Yojson.Safe.Util.to_list));
+    let reader = Task_journal.reader_of_publication
+      (Result.get_ok (Task_journal.prepare sink ~attempt bound)) in
+    let db = Sqlite3.db_open (Task_journal.path reader) in
+    Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db)) (fun () ->
+      let stmt = Sqlite3.prepare db "SELECT sql FROM sqlite_master WHERE name='immutable_observations'" in
+      let trigger = Fun.protect ~finally:(fun () -> ignore (Sqlite3.finalize stmt)) (fun () ->
+        match Sqlite3.step stmt with
+        | Sqlite3.Rc.ROW -> Sqlite3.column_text stmt 0 | _ -> fail "missing immutable trigger") in
+      let sql value = match Sqlite3.exec db value with
+        | Sqlite3.Rc.OK -> () | rc -> fail (Sqlite3.Rc.to_string rc) in
+      sql "BEGIN IMMEDIATE"; sql "DROP TRIGGER immutable_observations";
+      sql "UPDATE observations SET payload='{}' WHERE seq=1";
+      sql trigger; sql "COMMIT");
+    let status,_ = get ("records" ^ query ^ cursor_query) in
+    check int "cursor cannot hide corrupt historical row" 503 status)
+;;
+
+let test_native_task_journal_callback_failure_preserves_root_answer () =
+  let outcomes = ref [] in
+  with_task_journal_bindings
+    ~on_bound:(fun ~base_path ~attempt bound ->
+      let blocker = Filename.concat base_path "task-store-blocker" in
+      Out_channel.with_open_bin blocker (fun out -> output_string out "fixture");
+      let sink = Task_journal.create ~base_path:blocker ~keeper_name:"claude-fixture"
+          ~source:(task_journal_operation "callback-operation") ~redact_text:Fun.id in
+      outcomes := Task_journal.observe sink ~attempt bound :: !outcomes)
+    (fun ~base_path:_ _ ->
+      check int "all actual driver callbacks returned typed persistence failures" 3 (List.length !outcomes);
+      List.iter (fun (outcome:Task_journal.commit Task_journal.outcome) ->
+        match outcome.result with Error _ -> ()
+        | Ok _ -> fail "blocked task store reported a receipt") !outcomes)
+;;
+
+let test_native_task_journal_autonomous_closed_root () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    Eio_main.run (fun _ ->
+      let turn_ref = Ids.Turn_ref.make ~trace_id:"task-journal-autonomous" ~absolute_turn:1 in
+      let stream = Keeper_autonomous_stream.create ~base_path ~keeper_name:"claude-fixture" ~turn_ref in
+      Keeper_autonomous_stream.finish stream Keeper_autonomous_stream.Cancelled;
+      let root_path = Keeper_chat_event_log.turn_journal_path ~base_dir:base_path
+          ~keeper_name:"claude-fixture" ~turn_ref in
+      let root_before = In_channel.with_open_bin root_path In_channel.input_all in
+      List.iter (fun (attempt,bound) ->
+        Keeper_autonomous_stream.on_tool_stream_observation stream
+          (Keeper_hooks_agent_core.Native_task_observed {attempt;bound})) observations;
+      check string "late tasks append no root events or fabricated lifecycle"
+        root_before (In_channel.with_open_bin root_path In_channel.input_all);
+      check int "task writes remain healthy after root journal closure" 0
+        (List.length (Keeper_autonomous_stream.task_journal_health stream));
+      let _,(bound:Keeper_claude_task_binding.bound) = List.hd observations in
+      let reader = Result.get_ok (Task_journal.open_reader ~base_path ~keeper_name:"claude-fixture"
+        ~receiver_generation:bound.ticket.receiver_generation ~session_id:bound.ticket.session_id) in
+      let rows = task_journal_rows reader in
+      check int "all late bound observations persisted without reopening root" 3 (List.length rows);
+      List.iter (fun (r:Task_journal.record) -> match r.observation.origin.source with
+        | Runtime_native_tasks.Autonomous_turn {turn_ref=actual} ->
+            check string "actual autonomous reference retained" (Ids.Turn_ref.to_string turn_ref) actual
+        | Operation _ -> fail "invented operation for autonomous task") rows;
+      check bool "task writes never restore the closed root current identity" true
+        (Keeper_autonomous_stream.current ~base_path ~keeper_name:"claude-fixture" = None)))
+;;
+
+let test_native_task_journal_wait_does_not_hold_root_stream () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    Eio_main.run (fun env ->
+      Eio.Switch.run (fun sw ->
+        let keeper_name = "claude-fixture" in
+        let turn_ref = Ids.Turn_ref.make ~trace_id:"task-journal-lock" ~absolute_turn:1 in
+        let stream = Keeper_autonomous_stream.create ~base_path ~keeper_name ~turn_ref in
+        let attempt, (bound : Keeper_claude_task_binding.bound) = List.hd observations in
+        let reader = Result.get_ok (Task_journal.open_reader ~base_path ~keeper_name
+          ~receiver_generation:bound.ticket.receiver_generation ~session_id:bound.ticket.session_id) in
+        let entered, signal_entered = Eio.Promise.create () in
+        let release, signal_release = Eio.Promise.create () in
+        let callback_entered, signal_callback = Eio.Promise.create () in
+        let task_done, signal_done = Eio.Promise.create () in
+        let root_done, signal_root = Eio.Promise.create () in
+        Eio.Fiber.fork ~sw (fun () ->
+          match Keeper_fs_durable_directory.ensure ~ownership_root:base_path
+            ~before_prepare:(fun () ->
+              Eio.Promise.resolve signal_entered ();
+              Eio.Promise.await release)
+            ~before_directory_fsync:(fun _ -> ())
+            (Filename.dirname (Task_journal.path reader)) with
+          | Ok _ -> ()
+          | Error _ -> fail "fixture directory preparation failed");
+        Eio.Promise.await entered;
+        Fun.protect ~finally:(fun () -> Eio.Promise.resolve signal_release ()) (fun () ->
+          Eio.Fiber.fork ~sw (fun () ->
+            (* No yielding operation separates this signal from entry into the
+               real callback. Its first filesystem wait retains the old root
+               mutex on the regression path. *)
+            Eio.Promise.resolve signal_callback ();
+            Keeper_autonomous_stream.on_tool_stream_observation stream
+              (Keeper_hooks_agent_core.Native_task_observed {attempt;bound});
+            Eio.Promise.resolve signal_done ());
+          Eio.Promise.await callback_entered;
+          Eio.Fiber.fork ~sw (fun () ->
+            Keeper_autonomous_stream.finish stream Keeper_autonomous_stream.Cancelled;
+            Eio.Promise.resolve signal_root ());
+          (* Timeout only the waiter: finish itself masks cancellation. The
+             finally releases task preparation before the switch joins either
+             protected callback, including on the old implementation. *)
+          Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5. (fun () ->
+            Eio.Promise.await root_done);
+          check bool "root closes while task directory preparation is held" true
+            (Keeper_autonomous_stream.current ~base_path ~keeper_name = None);
+          check bool "blocked task has not committed a receiver file" false
+            (Sys.file_exists (Task_journal.path reader)));
+        Eio.Promise.await task_done;
+        let rows = task_journal_rows reader in
+        check (list string) "released callback persists its original task UUID"
+          [bound.observation.uuid]
+          (List.map (fun (row : Task_journal.record) -> row.observation.uuid) rows);
+        check bool "task completion cannot reopen the closed root" true
+          (Keeper_autonomous_stream.current ~base_path ~keeper_name = None))))
+;;
+
+let test_native_task_sqlite_validation_scope_and_cursor () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    let keeper_name = "claude-fixture" in
+    let sink () = Task_journal.create ~base_path ~keeper_name
+      ~source:(task_journal_operation "sqlite-validation") ~redact_text:Fun.id in
+    let collector = sink () in
+    let publications = List.map (fun (attempt,bound) ->
+      Result.get_ok (Task_journal.prepare collector ~attempt bound)) observations in
+    let first = List.hd publications and second = List.nth publications 1
+    and third = List.nth publications 2 in
+    let reader = Task_journal.reader_of_publication first in
+    (match (Task_journal.read reader).result with
+     | Error Task_journal.Missing_store -> () | _ -> fail "missing read must not create a database");
+    check bool "read leaves missing database absent" false (Sys.file_exists (Task_journal.path reader));
+    ignore (task_journal_ok (Task_journal.append first));
+    let snapshot = task_journal_ok (Task_journal.read reader) in
+    let cursor = Task_journal.next_cursor snapshot in
+    ignore (task_journal_ok (Task_journal.append second));
+    let suffix = task_journal_ok (Task_journal.read ~after:cursor reader) in
+    check (list int) "incarnation cursor returns only later committed rows" [2]
+      (List.map (fun (r:Task_journal.record) -> r.seq) suffix.records);
+    check int "full audit still names entire snapshot boundary" 2 suffix.validation.through_sequence;
+    let foreign = Result.get_ok (Task_journal.cursor ~store_id:"another-store" ~after_sequence:0) in
+    (match (Task_journal.read ~after:foreign reader).result with
+     | Error Task_journal.Cursor_store_mismatch -> () | _ -> fail "foreign cursor accepted");
+    let ahead = Result.get_ok (Task_journal.cursor ~store_id:cursor.store_id ~after_sequence:3) in
+    (match (Task_journal.read ~after:ahead reader).result with
+     | Error Task_journal.Cursor_ahead -> () | _ -> fail "future cursor accepted");
+    (* Deliberate bypass of the application immutability trigger. Restore its
+       exact schema so this isolates changed OLD payload detection timing. *)
+    let db = Sqlite3.db_open (Task_journal.path reader) in
+    Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db)) (fun () ->
+      let stmt = Sqlite3.prepare db "SELECT sql FROM sqlite_master WHERE name='immutable_observations'" in
+      let trigger = Fun.protect ~finally:(fun () -> ignore (Sqlite3.finalize stmt)) (fun () ->
+        match Sqlite3.step stmt with
+        | Sqlite3.Rc.ROW -> Sqlite3.column_text stmt 0 | _ -> fail "missing immutable trigger") in
+      let sql value = match Sqlite3.exec db value with
+        | Sqlite3.Rc.OK -> () | rc -> fail (Sqlite3.Rc.to_string rc) in
+      sql "BEGIN IMMEDIATE"; sql "DROP TRIGGER immutable_observations";
+      sql "UPDATE observations SET payload='!' || substr(payload,2) WHERE seq=1";
+      sql trigger; sql "COMMIT");
+    (match task_journal_ok (Task_journal.append third) with
+     | Task_journal.Appended row -> check int "warm append does not audit unrelated historical payload" 3 row.seq
+     | Replayed _ -> fail "third event was not new");
+    (match (Task_journal.read reader).result with
+     | Error (Task_journal.Corrupt {line=1;_}) -> () | _ -> fail "full read failed to detect old corruption");
+    (match (Task_journal.append first).result with
+     | Error (Task_journal.Corrupt {line=1;_}) -> () | _ -> fail "addressed UUID corruption was acknowledged");
+    let attempt,bound = List.nth observations 2 in
+    (match (Task_journal.observe (sink ()) ~attempt bound).result with
+     | Error (Task_journal.Corrupt {line=1;_}) -> () | _ -> fail "fresh writer skipped complete startup audit");
+    let inventory = task_journal_ok (Task_journal.discover ~base_path ~keeper_name) in
+    check int "corrupt canonical receiver remains discoverable" 1 (List.length inventory);
+    match (List.hd inventory).state with
+    | Error (Task_journal.Corrupt _) -> () | _ -> fail "discovery advertised corrupt history as validated")
+;;
+
+let test_native_task_sqlite_commit_cleanup_and_known_issues () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    let keeper_name = "claude-fixture" in
+    let make () = Task_journal.create ~base_path ~keeper_name
+      ~source:(task_journal_operation "sqlite-outcomes") ~redact_text:Fun.id in
+    let collector = make () in
+    let first_attempt,first_bound = List.hd observations in
+    let publication = Result.get_ok (Task_journal.prepare collector ~attempt:first_attempt first_bound) in
+    let reader = Task_journal.reader_of_publication publication in
+    let commit db = Sqlite3.exec db "COMMIT" in
+    let warning = Task_journal.For_testing.append_with_io ~commit
+      ~close:(fun db -> ignore (Sqlite3.db_close db);false) publication in
+    (match warning.result,warning.cleanup_failure with
+     | Ok (Task_journal.Appended row),[_] -> check int "cleanup warning retains committed sequence" 1 row.seq
+     | _ -> fail "close warning rewrote known commit");
+    let warning_exception = Task_journal.For_testing.append_with_io ~commit
+      ~close:(fun db -> ignore (Sqlite3.db_close db);raise (Sqlite3.SqliteError "injected close")) publication in
+    (match warning_exception.result,warning_exception.cleanup_failure with
+     | Ok (Task_journal.Replayed row),[_] -> check int "close exception retains replay receipt" 1 row.seq
+     | _ -> fail "close exception replaced primary receipt");
+    let attempt,bound = List.nth observations 1 in
+    let second = Result.get_ok (Task_journal.prepare collector ~attempt bound) in
+    let uncertain = Task_journal.For_testing.append_with_io
+      ~commit:(fun db -> ignore (Sqlite3.exec db "COMMIT");Sqlite3.Rc.IOERR)
+      ~close:Sqlite3.db_close second in
+    (match uncertain.result with
+     | Error (Task_journal.Commit_unconfirmed _) -> () | _ -> fail "ambiguous commit reported definite failure or success");
+    (match task_journal_ok (Task_journal.append second) with
+     | Task_journal.Replayed row -> check int "same UUID reconciles an uncertain committed write" 2 row.seq
+     | Appended _ -> fail "uncertain commit was duplicated");
+    let uncertain_exception = Task_journal.For_testing.append_with_io
+      ~commit:(fun db -> ignore (Sqlite3.exec db "COMMIT");raise (Sqlite3.SqliteError "injected commit"))
+      ~close:Sqlite3.db_close second in
+    (match uncertain_exception.result with
+     | Error (Task_journal.Commit_unconfirmed _) -> ()
+     | Error _ | Ok _ -> fail "commit exception lost unknown-outcome classification");
+    (* Block only this receiver file after binding. The process registry must
+       expose a failed first append even though no authority DB exists. *)
+    let failure_keeper = "failed-first-append" in
+    let sink = Task_journal.create ~base_path ~keeper_name:failure_keeper
+      ~source:(task_journal_operation "failed") ~redact_text:Fun.id in
+    let publication = Result.get_ok (Task_journal.prepare sink ~attempt:first_attempt first_bound) in
+    let failed_reader = Task_journal.reader_of_publication publication in
+    Fs_compat.mkdir_p (Filename.dirname (Task_journal.path failed_reader));
+    Unix.mkdir (Task_journal.path failed_reader) 0o700;
+    (match (Task_journal.observe sink ~attempt:first_attempt first_bound).result with
+     | Error _ -> () | Ok _ -> fail "directory masquerading as authority store accepted");
+    Unix.rmdir (Task_journal.path failed_reader);
+    let known = Result.get_ok (Task_journal.issue_snapshot ~base_path ~keeper_name:failure_keeper) in
+    check int "failed first append is registered without a database" 1 (List.length known.issues);
+    let inventory = task_journal_ok (Task_journal.discover ~base_path ~keeper_name:failure_keeper) in
+    check int "discovery preserves failed receiver identity without a file" 1 (List.length inventory);
+    (match (List.hd inventory).state with Error Task_journal.Missing_store -> ()
+     | _ -> fail "failed receiver advertised committed history");
+    ignore (task_journal_ok (Task_journal.observe sink ~attempt:first_attempt first_bound));
+    let after = Result.get_ok (Task_journal.issue_snapshot ~base_path ~keeper_name:failure_keeper) in
+    check string "issue epoch stays process scoped" known.process_epoch after.process_epoch;
+    check int "later success cannot erase prior failure" 1 (List.length after.issues);
+    check int "original receiver remains separately readable" 2 (List.length (task_journal_rows reader)))
+;;
+
+let test_native_task_invalid_database_remains_typed () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    let keeper_name = "claude-fixture" in
+    let sink = Task_journal.create ~base_path ~keeper_name
+      ~source:(task_journal_operation "invalid-database") ~redact_text:Fun.id in
+    let attempt,bound = List.hd observations in
+    let publication = Result.get_ok (Task_journal.prepare sink ~attempt bound) in
+    let reader = Task_journal.reader_of_publication publication in
+    Fs_compat.mkdir_p (Filename.dirname (Task_journal.path reader));
+    Out_channel.with_open_bin (Task_journal.path reader) (fun out ->
+      output_string out "not a SQLite database");
+    (match (Task_journal.read reader).result with
+     | Error (Task_journal.Store_unavailable _) -> ()
+     | Error _ | Ok _ -> fail "non-SQLite read did not retain typed SQLite failure");
+    (match (Task_journal.observe sink ~attempt bound).result with
+     | Error (Task_journal.Store_unavailable _) -> ()
+     | Error _ | Ok _ -> fail "non-SQLite append did not retain typed SQLite failure");
+    check int "observe records failed prepare/statement as process issue" 1
+      (List.length (Result.get_ok (Task_journal.issue_snapshot ~base_path ~keeper_name)).issues);
+    check string "failed append never rewrites unrelated bytes" "not a SQLite database"
+      (In_channel.with_open_bin (Task_journal.path reader) In_channel.input_all))
+;;
+
 let test_task_binding_does_not_adopt_an_earlier_unattributed_call () =
   let base_path = temp_workspace () in
   Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
@@ -4442,6 +4945,24 @@ let () =
             test_every_posture_names_the_schema_lookup
         ; test_case "task input and routed dispatch retain exact native envelope" `Quick
             test_task_binding_freezes_exact_envelope_and_dispatch
+        ; test_case "native task journal retains authority and exact replay" `Quick
+            test_native_task_journal_commit_replay_and_scope
+        ; test_case "native task journal serializes writers and distinguishes corruption" `Quick
+            test_native_task_journal_atomicity_recovery_and_failure
+        ; test_case "native task production read consumes actual bound observations" `Quick
+            test_native_task_http_reads_actual_bound_observations
+        ; test_case "task persistence callback failure preserves root answer" `Quick
+            test_native_task_journal_callback_failure_preserves_root_answer
+        ; test_case "autonomous task journal outlives its closed root stream" `Quick
+            test_native_task_journal_autonomous_closed_root
+        ; test_case "task journal wait does not hold root stream" `Quick
+            test_native_task_journal_wait_does_not_hold_root_stream
+        ; test_case "SQLite validation scope and incarnation cursor" `Quick
+            test_native_task_sqlite_validation_scope_and_cursor
+        ; test_case "SQLite commit cleanup and known process issues" `Quick
+            test_native_task_sqlite_commit_cleanup_and_known_issues
+        ; test_case "non-SQLite read and observe remain typed failures" `Quick
+            test_native_task_invalid_database_remains_typed
         ; test_case "later command witness cannot adopt an unattributed task owner" `Quick
             test_task_binding_does_not_adopt_an_earlier_unattributed_call
         ; test_case "task metadata retains closed native owner without flushing model content" `Quick

@@ -20,6 +20,10 @@ val firefox_log_path : base_path:string -> string
 val host_log_path : base_path:string -> string
 
 (** How long a started Firefox has to open its port. *)
+(** Where a log is moved when the process that writes it is started again,
+    replacing the run before. *)
+val previous_log_path : string -> string
+
 val firefox_ready_timeout_s : float
 
 type firefox_failure =
@@ -43,13 +47,20 @@ val firefox_failure_message : Browser_configuration.live_bidi -> firefox_failure
     first, as {!Browser_bidi_host_status.launcher_standing} says. *)
 type launcher_missing = Not_installed | Needs_reinstall
 
-(** Whether a host is started, from what the workspace's host report says. *)
+(** Whether a host is started for the Firefox on [port], from what the
+    workspace's host report says. A workspace has one host at a time. *)
 type host_step =
   | Host_running
-      (** A host holds the lock: a second one would only be refused. *)
+      (** A host holds the lock and was given [port], or holds it with a
+          record no reader can load: a second one would only be refused. *)
+  | Host_on_another_port of string
+      (** A host holds the lock and was given this address, whose port is
+          not [port]. It stays on that Firefox until it is stopped. *)
   | Start_host of string  (** The installed launcher to run. *)
   | Launcher_not_ready of launcher_missing
 
-val host_step : Browser_bidi_host_status.report -> host_step
+val host_step : port:int -> Browser_bidi_host_status.report -> host_step
+
+val host_on_another_port_message : port:int -> string -> string
 
 val launcher_missing_message : launcher_missing -> string

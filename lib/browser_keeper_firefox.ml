@@ -20,6 +20,7 @@ let lane_path ~base_path name =
 
 let firefox_log_path ~base_path = lane_path ~base_path "keeper-firefox.log"
 let host_log_path ~base_path = lane_path ~base_path "bidi-host.log"
+let previous_log_path path = path ^ ".1"
 
 (* A fresh profile opened its port in 0.67-0.85 s (headless Firefox 157.0.1,
    M3 Max, 2026-10-09). A profile with history, a visible window and a cold
@@ -59,6 +60,7 @@ type launcher_missing = Not_installed | Needs_reinstall
 
 type host_step =
   | Host_running
+  | Host_on_another_port of string
   | Start_host of string
   | Launcher_not_ready of launcher_missing
 
@@ -68,18 +70,33 @@ let launcher_missing_message missing =
      | Not_installed -> "not installed"
      | Needs_reinstall -> "not as its installation wrote it")
 
-let host_step (report : Browser_bidi_host_status.report) =
-  let holds_lock =
+let host_on_another_port_message ~port address =
+  Printf.sprintf
+    "a BiDi host given %s runs for this workspace, which has one host at a time; stop it so the \
+     next server start attaches one to port %d"
+    address port
+
+(* The record keeps the address as the host was given it, which take checked
+   is a loopback ws URL with a port. *)
+let runs_on ~port bidi_url =
+  match Browser_bidi_downloads.endpoint bidi_url with
+  | Ok (_host, recorded_port, _resource) -> recorded_port = port
+  | Error _ -> false
+
+let host_step ~port (report : Browser_bidi_host_status.report) =
+  let running =
     match report.state with
-    | Browser_bidi_host_record.Running _ -> true
-    | Browser_bidi_host_record.Unreadable { held = Some true; _ } -> true
+    | Browser_bidi_host_record.Running entry when runs_on ~port entry.bidi_url -> Some Host_running
+    | Browser_bidi_host_record.Running entry -> Some (Host_on_another_port entry.bidi_url)
+    | Browser_bidi_host_record.Unreadable { held = Some true; _ } -> Some Host_running
     | Browser_bidi_host_record.Unreadable { held = Some false | None; _ }
     | Browser_bidi_host_record.Never_started
     | Browser_bidi_host_record.Ended _
-    | Browser_bidi_host_record.Died _ -> false
+    | Browser_bidi_host_record.Died _ -> None
   in
-  if holds_lock then Host_running
-  else
+  match running with
+  | Some step -> step
+  | None ->
     match report.attach.standing with
     | Browser_bidi_host_status.Launcher_installed -> Start_host report.attach.launcher
     | Browser_bidi_host_status.Launcher_not_installed -> Launcher_not_ready Not_installed

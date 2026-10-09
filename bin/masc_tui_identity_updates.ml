@@ -48,7 +48,27 @@ let switch_set
       , Printf.sprintf "switch %s: %s" provider_id detail )
 ;;
 
-let providers_loaded (state : state) request result =
+let apply_login_status (state : state) ~catalog_available expectation result =
+  let current = server_authority_ready state
+    && identity_expectation_workspace_matches ~origin:expectation.ile_origin state
+    && List.exists ((=) expectation) state.identity_login_expectations in
+  if current then match result with
+  | Error _ -> ()
+  | Ok (Masc_tui_identity_model.Consent_waiting _ | Callback_in_progress) -> ()
+  | Ok (Credentials_published _) when not catalog_available -> ()
+  | Ok terminal ->
+      forget_identity_login state ~keeper_name:expectation.ile_keeper ~provider_id:expectation.ile_provider;
+      if keeper_detail_target_matches state expectation.ile_keeper then
+        state.identity_attempt_error <- (match terminal with
+          | Credentials_published (Ok _) -> None
+          | Credentials_published (Error ()) -> Some "credentials attached; tool discovery failed, refresh tools to retry"
+          | Login_exchange_failed -> Some "login failed; start a new login"
+          | Consent_expired -> Some "consent expired; start a new login"
+          | Consent_superseded -> Some "login superseded by a newer attempt"
+          | Attempt_unavailable -> Some "login status unavailable on this server; start a new login"
+          | Consent_waiting _ | Callback_in_progress -> None)
+
+let providers_loaded (state : state) request ~attempts result =
   let keeper_name = request.drr_keeper in
   let current =
     Masc_tui_types.finish_detail_read state request
@@ -65,7 +85,10 @@ let providers_loaded (state : state) request result =
     | Ok providers ->
       state.identity_view <- Some (keeper_name, providers);
       state.identity_view_error <- None
-    | Error detail -> state.identity_view_error <- Some detail)
+    | Error detail -> state.identity_view_error <- Some detail);
+  if current then List.iter (fun (expectation, status) ->
+    if String.equal expectation.ile_keeper keeper_name then
+      apply_login_status state ~catalog_available:(Result.is_ok result) expectation status) attempts
 ;;
 
 let login_started (state : state) request ~now ~report ~notice result =
@@ -78,7 +101,7 @@ let login_started (state : state) request ~now ~report ~notice result =
     | Masc_tui_identity_model.Login_started { expires_at; _ } when expires_at <= now ->
       notice ~keeper_name:(Some keeper_name)
         (Masc_tui_identity_model.Notice_bad, "login expired; start a new login")
-    | Masc_tui_identity_model.Login_started { provider_id; label; url; expires_at } ->
+    | Masc_tui_identity_model.Login_started { provider_id; label; url; expires_at; attempt_id } ->
       remember_identity_login
         state
         { ils_keeper = keeper_name
@@ -86,6 +109,7 @@ let login_started (state : state) request ~now ~report ~notice result =
         ; ils_label = label
         ; ils_url = url
         ; ils_expires_at = expires_at
+        ; ils_attempt_id = attempt_id
         };
       (* The POST was admitted by this origin, even if its receipt arrives
          during a temporary health outage. Polling itself still waits for
@@ -93,7 +117,7 @@ let login_started (state : state) request ~now ~report ~notice result =
       Option.iter (fun origin ->
         remember_identity_login_expectation state
           { ile_origin = origin; ile_keeper = keeper_name; ile_provider = provider_id
-          ; ile_expires_at = expires_at })
+          ; ile_attempt_id = attempt_id })
         request.ilr_origin;
       if keeper_detail_target_matches state keeper_name
       then state.identity_attempt_error <- None;

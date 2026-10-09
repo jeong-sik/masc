@@ -1,10 +1,10 @@
 Testing `private setup credentials'.
-This run has ID `0HY8H4LE'.
+This run has ID `OVCFG3M6'.
 
   [OK]          storage          0   applied provider retains its file.
   [OK]          storage          1   private pending and retained files.
   [OK]          storage          2   credential document rejected.
   [OK]          storage          3   stale provider configuration rejected.
 
-Full test results in `~/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/_build/_tests/private setup credentials'.
-Test Successful in 0.040s. 4 tests run.
+Full test results in `/private/tmp/masc-godfile-top/_build/_tests/private setup credentials'.
+Test Successful in 0.056s. 4 tests run.

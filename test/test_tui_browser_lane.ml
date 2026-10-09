@@ -672,12 +672,16 @@ let test_bidi_host_rows () =
      @ attach_again);
   says ~clients:[firefox; bidi] "a listed connection beside an ended host is distinguished"
     (host_ended Record.No_session_left)
-    (ended @ [listed_note; "That Firefox takes the next host if it still runs";
+    (ended @ ["That Firefox takes the next host if it still runs"; listed_note;
               "Reason: stopped by SIGINT"] @ attach_again);
+  says ~clients:[firefox; bidi] "a stale listed connection cannot displace the restart instruction"
+    (host_ended Record.Session_left)
+    (ended @ ["Session end not confirmed · restart that Firefox before attaching";
+              listed_note; "Reason: stopped by SIGINT"] @ attach_again);
   says ~clients:[firefox; bidi] "a listed connection beside a dead host is distinguished"
     (host (Record.Died host_entry))
-    (["BiDi host: pid 4242 is gone · no reason recorded"; listed_note;
-      "Its session may be left in Firefox · restart Firefox if a host is refused"]
+    (["BiDi host: pid 4242 is gone · no reason recorded";
+      "Its session may be left in Firefox · restart Firefox if a host is refused"; listed_note]
      @ attach_again);
   says "a session left in Firefox is the step before attaching" (host_ended Record.Session_left)
     (ended @ ["Session end not confirmed · restart that Firefox before attaching";

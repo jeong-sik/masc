@@ -4026,15 +4026,15 @@ module Browser_lane_view = struct
              (* What to do comes before why: on a screen that holds two of
                 these rows, the step is the one that has to be there. *)
              [host_line (Printf.sprintf "BiDi host: ended %s · pid %d" (host_time ending.at) entry.pid)]
-             @ host_connection_note t
              @ host_session_lines entry ending
+             @ host_connection_note t
              @ [host_said "Reason: " ending.reason]
              @ host_unacknowledged_lines entry
              @ attach ~address:(Some entry.bidi_url)
          | Died entry ->
              [host_line (Printf.sprintf "BiDi host: pid %d is gone · no reason recorded" entry.pid)]
-             @ host_connection_note t
              @ [host_line "Its session may be left in Firefox · restart Firefox if a host is refused"]
+             @ host_connection_note t
              @ host_unacknowledged_lines entry
              @ attach ~address:(Some entry.bidi_url)
          | Unreadable { detail; held = Some true } ->

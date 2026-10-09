@@ -280,7 +280,10 @@ def run_browser_bidi_host_short_terminal_regression(executable: str) -> None:
     rows = [{"clientId": client, "browser": "firefox", "transport": "web_extension"}
             for client in connected]
     listings = {
-        "ended": {"clients": rows,
+        # Keep four choices, but actually exercise the listed-BiDi note.
+        # On this short screen it must not replace the required restart row.
+        "ended": {"clients": rows[:3] + [
+                      {"clientId": bidi, "browser": "firefox", "transport": "webdriver_bidi"}],
                   "bidiHost": bidi_host_report("ended", bidi_host_record(client=bidi,
                                                                          ended=BIDI_HOST_STOPPED))},
         "unlisted": {"clients": rows,

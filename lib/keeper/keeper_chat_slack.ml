@@ -594,7 +594,7 @@ let adapter_loop_with_transport
        still name the work. See keeper_chat_tool_trail.mli. *)
     Keeper_chat_tool_trail.on_event !tool_trail event;
     match event with
-    | Text_delta text ->
+    | Text_delta {text; _} ->
         let acc_text = acc_text ^ text in
         let patch_content = stream_content acc_text in
         (match streaming_transport, message_id with

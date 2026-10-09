@@ -43,3 +43,7 @@ val provider_model_rows : string -> (Yojson.Safe.t, string) result
     wire kind. Rows without a positive declared context are omitted — the
     wizard cannot pin a runtime entry for them. An unknown provider id is an
     [Error] naming the installed providers. *)
+
+val account_groups_json : Runtime_schema.config -> Yojson.Safe.t
+(** Groups resolved in the server environment from this exact parsed configuration,
+    using the runtime credential-location scope. No credential paths are exposed. *)

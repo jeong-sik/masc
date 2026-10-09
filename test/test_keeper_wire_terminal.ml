@@ -394,7 +394,7 @@ let test_record_terminal_error_cuts_a_torn_tail () =
     | Ok () -> ()
     | Error detail -> fail detail in
   append 0 (Events.Run_started { run_id = "run-torn"; thread_id = "keeper:terminal-torn" });
-  append 1 (Events.Text_delta "partial");
+  append 1 (Events.Text_delta {text="partial"; stream_scope=None});
   let path = Journal.journal_path ~base_dir:base_path ~keeper_name ~operation_id in
   let oc = open_out_gen [ Open_append; Open_wronly; Open_binary ] 0o600 path in
   output_string oc "{\"v\":1,\"seq\":2,\"ts\":1.5,\"event\":{\"type\":\"text_del";
@@ -471,7 +471,7 @@ let test_restart_settlement_retries_and_replays_past_a_live_cursor () =
       check bool "malformed restart provenance is refused" true (Result.is_error (Journal.journaled_event_of_json envelope)))
       [ Events.Event_error {message}, ["restart_settlement",`String "unknown"]
       ; Events.Event_error {message}, ["restart_settlement",metadata;"restart_settlement",metadata]
-      ; Events.Text_delta "not terminal", ["restart_settlement",metadata] ])
+      ; Events.Text_delta {text="not terminal"; stream_scope=None}, ["restart_settlement",metadata] ])
 
 let () =
   Alcotest.run "keeper_wire_terminal"

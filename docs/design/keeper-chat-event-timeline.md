@@ -207,3 +207,12 @@ log and transcript projection to compare reports and display. Additional cases i
 cover unknown ends, duplicate stops, wrong scope/ID/authority, absent versus malformed
 metadata, and unchanged HTTP execution receipts. These tests are authored, not
 locally executed; syntax parsing is not type checking or runtime proof.
+
+## Provider response and Keeper turn status
+
+The TUI retains `KEEPER_STREAM_MESSAGE_STOP` in both live and journal projections.
+It ends the model activity label (`STREAMING` or `THINKING`) while the Keeper turn
+can remain in progress, including pending tool work or final-response persistence.
+A new provider response, retry, or continuation establishes its own activity.
+Empty text/thinking chunks do not resume activity. Provider stop does not erase
+speech, settle tool receipts, or complete the Keeper turn.

@@ -3428,6 +3428,7 @@
  ; masc.
  (libraries
   alcotest
+  masc.string_util
   fmt
   masc
   masc.agent_core
@@ -5745,6 +5746,7 @@
  (modules test_tui_native_tool_outcomes)
  (libraries alcotest yojson masc masc.runtime masc.agent_core masc.server masc.ag_ui native_tool_outcome_fixture
   masc_tui_keeper_chat_live masc_tui_keeper_chat_log masc_tui_keeper_chat_transcript))
+
 
 ; H2 crash-resume harness: scenario subcommands need orchestrated env
 ; (H2_ROOT, H2_ASYNC_*), so it is an executable, not a (test) — a (test)

@@ -40,6 +40,7 @@ let delta_to_string : Live.delta -> string = function
         (Option.value ~default:"none" runtime_id)
         (match attempt_index with Some i -> string_of_int i | None -> "none")
   | Live.Stream_model_started { model; _ } -> Printf.sprintf "stream_model_started(%s)" model
+  | Live.Stream_model_stopped -> "stream_model_stopped"
   | Live.Stream_details { usage; stop_reason; _ } ->
       Printf.sprintf "stream_details(%s,stop=%s)"
         (match usage with
@@ -933,6 +934,21 @@ let test_response_boundaries_and_usage_survive_wire_and_replay () =
         (tokens log)) [wire;replay];
     List.iter send Agent_core.Types.[
       MessageDelta {stop_reason=Some StopToolUse;usage=None};MessageStop];
+    let wire,replay,journal = snapshots () in
+    List.iter (fun log ->
+      let t = T.of_log ~now:2000. log in
+      check bool "response stop does not finish the Keeper turn" true (T.phase t = T.Working);
+      check bool "provider stop ends the model response" true
+        (T.model_activity t = Some T.Activity_response_ended);
+      check bool "stopped provider is not still streaming or thinking" false
+        (match T.model_activity t with
+         | Some (T.Activity_answering | T.Activity_reasoning) -> true
+         | Some _ | None -> false);
+      check string "the completed response text stays authored text" "EARLIER_RESPONSE" (T.text t))
+      [wire; replay];
+    let revision = Log.revision replay in
+    ignore (Log.add_journaled replay journal);
+    check int "overlapping replay does not repeat the stop" revision (Log.revision replay);
     (match Accum.close_turn_without_sources accum ~turn:0 with
      | Ok () -> () | Error detail -> fail detail);
     send (start next_model next_initial);
@@ -944,7 +960,15 @@ let test_response_boundaries_and_usage_survive_wire_and_replay () =
         check string "only the absent model label is unavailable"
           "configured: configured-model"
           (T.runtime_identity_text ~keeper_name:"keeper.one"
-             ~configured_runtime:"configured-model" (Some (T.of_log ~now:2000. log)))) [wire;replay];
+             ~configured_runtime:"configured-model" (Some (T.of_log ~now:2000. log)));
+      let activity = T.model_activity (T.of_log ~now:2000. log) in
+      check bool "the next response clears its predecessor's stop" false
+        (activity = Some T.Activity_response_ended);
+      check bool "a response start does not invent reasoning or text" false
+        (match activity with
+         | Some (T.Activity_answering | T.Activity_reasoning) -> true
+         | Some _ | None -> false))
+      [wire; replay];
     List.iter send Agent_core.Types.[
       ContentBlockDelta {index=0;delta=TextDelta "PREFIX"};
       ContentBlockDelta {index=1;delta=ThinkingDelta "REASONING"};

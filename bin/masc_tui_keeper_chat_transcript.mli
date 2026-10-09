@@ -363,14 +363,16 @@ val note_tool_outcome :
     durable outcome that says less than the stream saw ([Never_returned],
     unrecorded) changes nothing. *)
 
-val note_skill_activity : t -> skill_activity -> unit
+val note_skill_activity : ?runtime_inventory:skill_activity list -> t -> skill_activity -> unit
 (** Folds in the exact delivery record of one skill read -- the states the
     wire has no event for ([Skill_served_only], [Skill_delivered],
     [Skill_used]), the calls the read led to, and the proof ids -- keyed by
-    [(turn_ref, skill_tool_use_id)]. A record in a state the stream speaks for
+    [(turn_ref, skill_tool_use_id, invocation runtime)]. A record in a state the stream speaks for
     itself (calling, pending, failed) or an evidence gap changes nothing,
     and neither does one without that complete identity. A second record for the
-    same identity replaces the first. {!drawn} lays the record over the skill item
+    same identity replaces the first. [runtime_inventory] supplies the frozen
+    source batch when records are reconciled together; nullable completion must
+    remain unique across that batch. {!drawn} lays the record over the skill item
     derived from the same call, and draws it on its own when the trail never
     saw that call. *)
 

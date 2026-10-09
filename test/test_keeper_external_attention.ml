@@ -416,7 +416,7 @@ let test_external_cursor_recovers_memory_receipt () =
     {receipt_scope=Filename.concat runtime_keepers_dir "continuity";
      trace_id="cursor-trace";history_start_boundary_line=1;start_atom=0;end_atom=1;
      last_atom_digest=String.make 64 'a';end_boundary_line=2;boundary_lines_seen=2} in
-  Cursor.prepare ~runtime_keepers_dir ~keeper_name initial ~through:2
+  Cursor.prepare ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name initial ~through:2
     ~atom:(Some range) ~official:None |> get;
   Alcotest.(check int) "preparation without Memory commit does not consume" 0 (Cursor.offset (read ()));
   ignore (Current.apply_disposition ~revisions:[] ~durable_range_id:range
@@ -426,10 +426,23 @@ let test_external_cursor_recovers_memory_receipt () =
      committed but before the external cursor and ordinary progress wrote. *)
   Alcotest.(check int) "continuity-scoped Memory receipt recovers exact cursor" 2
     (Cursor.offset (read ()));
+  (match Cursor.prepare ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name (read ())
+     ~through:3 ~atom:(Some range) ~official:None with
+   | Error _ -> ()
+   | Ok () -> Alcotest.fail "old committed range admitted a new external snapshot");
+  Alcotest.(check int) "reused receipt did not consume new rows" 2 (Cursor.offset (read ()));
   let next = {range with end_atom=2;end_boundary_line=3;boundary_lines_seen=3} in
-  Cursor.prepare ~runtime_keepers_dir ~keeper_name (read ()) ~through:3
+  Cursor.prepare ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name (read ()) ~through:3
     ~atom:(Some next) ~official:None |> get;
-  Alcotest.(check int) "older receipt cannot acknowledge newer source" 2 (Cursor.offset (read ()))
+  Alcotest.(check int) "older receipt cannot acknowledge newer source" 2 (Cursor.offset (read ()));
+  let path = Cursor.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name in
+  let before = Fs_compat.load_file path in
+  Alcotest.(check bool) "preflight observes prepared cursor without consuming it" true
+    (Cursor.inspect ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name |> get);
+  Alcotest.(check string) "preflight never writes or acknowledges pending evidence" before (Fs_compat.load_file path);
+  Fs_compat.save_file path {|{"after":0}|};
+  (match Cursor.inspect ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name with
+   | Error _ -> () | Ok _ -> Alcotest.fail "malformed cursor passed deployment preflight")
 ;;
 
 let () =

@@ -358,7 +358,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
         match !external_capture with
         | None -> Ok ()
         | Some (cursor,through) ->
-          Keeper_external_read_cursor.prepare ~runtime_keepers_dir ~keeper_name cursor
+          Keeper_external_read_cursor.prepare ~memory_keepers_dir:keepers_dir ~runtime_keepers_dir ~keeper_name cursor
             ~through ~atom:(Some range_id) ~official:None in
       Ok (current, memory_committed, range_id, selected, input)) in
     match inputs with

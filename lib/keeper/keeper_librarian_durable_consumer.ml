@@ -1328,7 +1328,7 @@ let consume_one_with_extent
         | None | Some _ -> Ok ()
       in
       let* () = Domain_pool_ref.submit_io_or_inline (fun () ->
-        Keeper_external_read_cursor.prepare ~runtime_keepers_dir ~keeper_name external_cursor
+        Keeper_external_read_cursor.prepare ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name external_cursor
           ~through:external_through ~atom:atom_next ~official:official_range_id)
         |> Result.map_error cursor_error in
       let input : Keeper_librarian.input =

@@ -7,7 +7,31 @@ external posix_spawn
   -> int
   = "masc_posix_spawn"
 
-type t = { pid : int; exited : Unix.process_status option Eio.Promise.t }
+type t = { pid : int; started : string option; exited : Unix.process_status option Eio.Promise.t }
+
+external darwin_start : int -> string option = "masc_process_start_time"
+
+(* /proc/<pid>/stat field 22, counted after the command in parentheses,
+   which may itself hold spaces and parentheses. starttime counts from boot,
+   so the boot names it too. *)
+let linux_start pid =
+  let read path = In_channel.with_open_bin path In_channel.input_all in
+  match read (Printf.sprintf "/proc/%d/stat" pid), read "/proc/sys/kernel/random/boot_id" with
+  | exception Sys_error _ -> None
+  | stat, boot ->
+    (match String.rindex_opt stat ')' with
+     | None -> None
+     | Some close ->
+       let after = String.sub stat (close + 1) (String.length stat - close - 1) in
+       (match List.filter (fun field -> field <> "") (String.split_on_char ' ' (String.trim after)) with
+        | fields when List.length fields > 19 ->
+          Some (Printf.sprintf "proc:%s:%s" (String.trim boot) (List.nth fields 19))
+        | _ :: _ | [] -> None))
+
+let process_start pid =
+  match darwin_start pid with
+  | Some _ as started -> started
+  | None -> linux_start pid
 
 let rec reaped pid =
   match Unix.waitpid [ Unix.WNOHANG ] pid with
@@ -64,40 +88,81 @@ let spawn ~sw ~argv ~env ~output =
     in
     Result.map
       (fun pid ->
+        (* Read before the reaper below can reap it: until then the number is
+           this child's, even if it has already exited. *)
+        let start = process_start pid in
         let exited, set_exited = Eio.Promise.create () in
         Eio.Fiber.fork_daemon ~sw (fun () ->
           Eio.Promise.resolve set_exited
             (Eio.Condition.loop_no_mutex Eio_unix.Process.sigchld (fun () -> reaped pid));
           `Stop_daemon);
-        { pid; exited })
+        { pid; started = start; exited })
       started
 
-let group_has_members t =
-  match Unix.kill (-t.pid) 0 with
+(* kill(2) reads 0 as the caller's own group and -1 as every process the
+   caller may signal, so neither is a group here. EPERM is either a group of
+   another account's processes or, on Darwin, one whose members are all
+   exiting or zombies (Process_group_members); the kernel's member snapshot
+   tells them apart, and without one the group is taken to be there. *)
+let group_id_has_members group =
+  group > 1
+  &&
+  match Unix.kill (-group) 0 with
   | () -> true
-  | exception Unix.Unix_error ((Unix.ESRCH | Unix.EPERM), _, _) -> false
+  | exception Unix.Unix_error (Unix.ESRCH, _, _) -> false
+  | exception Unix.Unix_error (Unix.EPERM, _, _) ->
+    Option.value ~default:true (Process_group_members.live_member_left group)
 
-let signal_group t signal =
-  if group_has_members t then
-    match Unix.kill (-t.pid) signal with
+let group_has_members t = group_id_has_members t.pid
+
+let signal_group_id group signal =
+  if group_id_has_members group then
+    match Unix.kill (-group) signal with
     | () -> ()
-    (* It emptied between the two calls. *)
+    (* It emptied between the two calls, or its processes are not this
+       account's to signal. *)
     | exception Unix.Unix_error ((Unix.ESRCH | Unix.EPERM), _, _) -> ()
 
-type stopped = Ended_on_term | Killed_after_grace
+type stopped = Ended_on_term | Killed_after_grace | Left_alone
 
 let group_poll_s = 0.1
 
-let stop_group ~clock ~grace_s t =
-  signal_group t Sys.sigterm;
-  let deadline = Monotonic_deadline.after ~seconds:grace_s in
+(* SIGKILL ends a process once it returns to user space; one in an
+   uninterruptible wait ends later. *)
+let kill_settle_s = 1.
+
+let await_empty ~clock ~seconds group =
+  let deadline = Monotonic_deadline.after ~seconds in
   let rec wait () =
-    if not (group_has_members t) then Ended_on_term
-    else if Monotonic_deadline.passed deadline then (
-      signal_group t Sys.sigkill;
-      Killed_after_grace)
-    else (
+    if group_id_has_members group && not (Monotonic_deadline.passed deadline) then (
       Eio.Time.sleep clock group_poll_s;
       wait ())
   in
   wait ()
+
+(* A group that empties gives its number up, and a later process may lead a
+   group with it, so the number is checked again before each signal. *)
+let stop_group ~clock ~grace_s ~same_group group =
+  if not (same_group ()) then Left_alone
+  else (
+    signal_group_id group Sys.sigterm;
+    let deadline = Monotonic_deadline.after ~seconds:grace_s in
+    let rec wait () =
+      if not (group_id_has_members group) then Ended_on_term
+      else if not (Monotonic_deadline.passed deadline) then (
+        Eio.Time.sleep clock group_poll_s;
+        wait ())
+      else if same_group () then (
+        signal_group_id group Sys.sigkill;
+        await_empty ~clock ~seconds:kill_settle_s group;
+        Killed_after_grace)
+      else Left_alone
+    in
+    wait ())
+
+external process_group_of : int -> int = "masc_process_group_of"
+
+let group_of_pid pid =
+  match process_group_of pid with
+  | group -> Ok group
+  | exception Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)

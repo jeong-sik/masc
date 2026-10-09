@@ -36,6 +36,7 @@ let firefox_ready_timeout_s = 30.
 
 type firefox_failure =
   | Spawn_failed of string
+  | Not_recorded of string
   | Exited_before_listening of Unix.process_status option
   | Not_listening of float
   | Port_unknown of { seconds : float; detail : string }
@@ -48,6 +49,8 @@ let status_text = function
 
 let firefox_failure_message (config : Browser_configuration.live_bidi) = function
   | Spawn_failed detail -> Printf.sprintf "%s could not be started: %s" config.firefox detail
+  | Not_recorded detail ->
+    Printf.sprintf "Firefox was started and could not be recorded, so it is not kept: %s." detail
   | Exited_before_listening (Some (Unix.WEXITED 0) as status) ->
     Printf.sprintf
       "Firefox exited (%s) before port %d answered. Another Firefox may have %s open; \
@@ -114,3 +117,43 @@ let host_step ~port (report : Browser_bidi_host_status.report) =
     | Browser_bidi_host_status.Launcher_installed -> Start_host report.attach.launcher
     | Browser_bidi_host_status.Launcher_not_installed -> Launcher_not_ready Not_installed
     | Browser_bidi_host_status.Launcher_needs_reinstall -> Launcher_not_ready Needs_reinstall
+
+type recorded_firefox = Started_here | Gone | Unproven of string
+
+(* A process number is given again once its process is gone; when that
+   process started is not. So a group is the one started here only while the
+   process it is numbered after runs, with the recorded start, in it. And a
+   new process is never given the number of a group that still exists
+   (POSIX fork(2): "The child process ID also shall not match any active
+   process group ID"), so another process under that number means the
+   recorded group has ended, whatever group that number names now. *)
+let recorded_firefox (entry : Browser_keeper_firefox_record.entry) ~leader_started ~leader_group
+    ~group_has_members =
+  let unproven why = if group_has_members then Unproven why else Gone in
+  match entry.leader with
+  | Browser_keeper_firefox_record.Start_unreadable ->
+    unproven
+      (Printf.sprintf
+         "when process %d started could not be read when it was started, so nothing tells it from \
+          a later process with that number"
+         entry.group)
+  | Browser_keeper_firefox_record.Started_at recorded ->
+    (match leader_started with
+     | None ->
+       unproven
+         (Printf.sprintf
+            "process %d no longer runs, or when it started cannot be read, and nothing tells what \
+             is left in its group from a later group with that number"
+            entry.group)
+     | Some now when not (String.equal now recorded) -> Gone
+     | Some _ ->
+       (match leader_group with
+        | Ok group when group = entry.group -> Started_here
+        | Ok group ->
+          unproven
+            (Printf.sprintf "process %d is in process group %d now, not %d" entry.group group
+               entry.group)
+        | Error detail ->
+          unproven
+            (Printf.sprintf "which process group process %d is in cannot be told: %s" entry.group
+               detail)))

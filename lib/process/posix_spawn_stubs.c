@@ -16,6 +16,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <spawn.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -302,6 +303,45 @@ CAMLprim value masc_process_group_members(value v_pgid)
       }
       free(members);
     }
+  }
+#endif
+  CAMLreturn(result);
+}
+
+/* Observe only: the process group [pid] is in now, from getpgid(2), which
+   POSIX defines on every platform this file is built for (OCaml's Unix has
+   no binding for it). */
+CAMLprim value masc_process_group_of(value v_pid)
+{
+  CAMLparam1(v_pid);
+  pid_t group = getpgid((pid_t)Int_val(v_pid));
+  if (group < 0) uerror("getpgid", Nothing);
+  CAMLreturn(Val_int(group));
+}
+
+/* Observe only: when process [pid] started, from the kernel's process
+   table, without starting another process (ps) and so without yielding to
+   a reaper. A zombie is still in the table, so a child not yet reaped
+   reads too. Some "darwin:<seconds>.<microseconds>" on Darwin; None when
+   no such process is there, and on every other platform. */
+CAMLprim value masc_process_start_time(value v_pid)
+{
+  CAMLparam1(v_pid);
+  CAMLlocal2(result, text);
+  result = Val_none;
+#if defined(__APPLE__)
+  pid_t pid = (pid_t)Int_val(v_pid);
+  struct kinfo_proc info;
+  size_t size = sizeof(info);
+  int mib[] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, pid };
+  memset(&info, 0, sizeof(info));
+  if (sysctl(mib, 4, &info, &size, NULL, 0) == 0 && size == sizeof(info) &&
+      info.kp_proc.p_pid == pid) {
+    char buffer[64];
+    snprintf(buffer, sizeof(buffer), "darwin:%ld.%06ld",
+             (long)info.kp_proc.p_starttime.tv_sec, (long)info.kp_proc.p_starttime.tv_usec);
+    text = caml_copy_string(buffer);
+    result = caml_alloc_some(text);
   }
 #endif
   CAMLreturn(result);

@@ -5394,6 +5394,11 @@ let launch_keeper_lanes_load state ~mailbox =
       (fun () -> Masc_tui_loader.load_keeper_lanes ~host ~port)
   end
 
+let launch_keeper_lanes_reread state ~mailbox =
+  if state.keeper_lanes_inflight
+  then state.keeper_lanes_reread_pending <- true
+  else launch_keeper_lanes_load state ~mailbox
+
 let launch_lanes_load state ~mailbox =
   if server_authority_ready state then begin
   if state.standalone_lanes_inflight then ()
@@ -6346,7 +6351,9 @@ let launch_surface_reads state ~mailbox (surface : surface) =
   match surface with
   | Lanes -> launch_lanes_load state ~mailbox
   | Clients -> launch_clients_load state ~mailbox
-  | Keepers Keeper_list -> launch_keeper_lanes_load state ~mailbox
+  (* The list draws nothing from the Keeper composite; Info and Secrets read
+     it on entry and on their own cadence. *)
+  | Keepers Keeper_list -> ()
   | Approvals ->
       launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox;
       launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox
@@ -11036,6 +11043,7 @@ let revoke_detail_readings state =
   state.keeper_sandbox_logs <- None;
   state.keeper_sandbox_logs_error <- None;
   state.keeper_lanes_inflight <- false;
+  state.keeper_lanes_reread_pending <- false;
   state.keeper_lanes_resume <- false;
   state.lanes <- None;
   state.keeper_secrets <- [];
@@ -11258,6 +11266,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.keeper_turns_observed_at <- None;
   state.keeper_observed_interrupts <- [];
   state.keeper_lanes_inflight <- false;
+  state.keeper_lanes_reread_pending <- false;
   state.keeper_lanes_resume <- false;
   state.lanes <- None;
   state.lanes_error <- None;
@@ -11831,7 +11840,12 @@ let load_keeper_logs_if_safe state base_path limit keeper =
    fetched nothing in all three. One table, called from all three. *)
 let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
   match state.detail_tab with
-  | Detail_info -> launch_keeper_board_quarantines state ~mailbox keeper.k_name
+  | Detail_info ->
+      (* Runtime Stats reads the composite snapshot. Entry and explicit [r]
+         both request a current reading, including after a failed refresh;
+         the shared launcher retains its single-flight and authority guards. *)
+      launch_keeper_lanes_reread state ~mailbox;
+      launch_keeper_board_quarantines state ~mailbox keeper.k_name
   | Detail_items ->
       launch_keeper_items state ~mailbox keeper.k_name
   | Detail_sandbox ->
@@ -11853,10 +11867,10 @@ let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
       launch_keeper_config_view state ~mailbox keeper.k_name
   | Detail_secrets ->
       (* The projection arrives with the composite body the Keeper lanes read
-         carries. Ask when no snapshot has answered, or an interrupted read
-         still needs replacement after workspace reconfirmation. *)
-      if Option.is_none state.lanes || state.keeper_lanes_resume then
-        launch_keeper_lanes_load state ~mailbox
+         carries. The list no longer refreshes that body, so a reading cached
+         before the operator went back to the list can be arbitrarily old:
+         entry and [r] ask for a current one, as Info does. *)
+      launch_keeper_lanes_reread state ~mailbox
   | Detail_github ->
       state.github_identity_view <- None;
       state.github_identity_view_error <- None;
@@ -13443,7 +13457,7 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
   state.keeper_action_serial <- serial;
   state.keeper_action_inflight <- Some (keeper_name, action);
   state.keeper_action_pending <- None;
-  report_action state "system"
+  report_action ~show_in_footer:false state "system"
     (Printf.sprintf "%s %s" (Keeper_control.action_gerund action) keeper_name);
   let host = server_peer_host in
   let port = state.port in
@@ -14056,7 +14070,7 @@ let handle_keeper_action state ~base_path ~mailbox action =
             report_action state "system" "A keeper action is already in progress"
         | Keeper_control.Gate_arm pending ->
             state.keeper_action_pending <- Some pending;
-            report_action state "system"
+            report_action ~show_in_footer:false state "system"
               (Printf.sprintf "Press %s again to %s %s"
                  (Keeper_control.action_key action)
                  (Keeper_control.action_label action) keeper.k_name);
@@ -17948,7 +17962,11 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
             (* Keep the previous rows visible. The error says that they are
                stale; clearing them would turn a failed refresh into an empty
                reading. *)
-            state.lanes_error <- Some detail)
+            state.lanes_error <- Some detail);
+        if state.keeper_lanes_reread_pending then begin
+          state.keeper_lanes_reread_pending <- false;
+          launch_keeper_lanes_load state ~mailbox
+        end
       end
   | Lane_inventory_loaded (generation, result) ->
       state.standalone_lanes_inflight <- false;
@@ -25897,8 +25915,7 @@ and is loaded on demand through keeper_skill.
                   Masc_tui_code_requests.launch_entries_load state
                     ~host:server_peer_host
                     ~deliver:(workspace_enqueue state async_messages)
-            | Keepers Keeper_list ->
-                launch_keeper_lanes_load state ~mailbox:async_messages
+            | Keepers Keeper_list -> ()
             | Keepers Keeper_logs ->
                 load_keeper_logs_if_safe state base_path 200
                   (List.nth_opt state.keepers state.keeper_cursor)
@@ -28699,17 +28716,22 @@ and is loaded on demand through keeper_skill.
         (match state.view with
          | Code -> ()
          | Keepers Keeper_runtime_pick -> ()
-         | Keepers Keeper_list ->
-             launch_keeper_lanes_load state ~mailbox:async_messages
+         (* Nothing on the list reads the composite; the detail arm below
+            keeps Info and Secrets current while they are on screen. *)
+         | Keepers Keeper_list -> ()
          | Keepers (Keeper_logs | Keeper_detail) ->
              load_keeper_logs_if_safe state base_path 200
                (List.nth_opt state.keepers state.keeper_cursor);
-             (* The Secrets tab reads through the Keeper lanes body, which
-                only the list refreshed; r on the tab had no way to retry a
-                failed read. *)
-             if state.view = Keepers Keeper_detail
-                && state.detail_tab = Detail_secrets
-             then launch_keeper_lanes_load state ~mailbox:async_messages
+             (* Info's execution facts and Secrets share the composite
+                reading. Keep a visible pane current without leaving it,
+                and let the next cadence retry a failed request. *)
+             if state.view = Keepers Keeper_detail then
+               (match state.detail_tab with
+                | Detail_info | Detail_secrets ->
+                    launch_keeper_lanes_load state ~mailbox:async_messages
+                | Detail_items | Detail_sandbox | Detail_instructions
+                | Detail_github | Detail_identity | Detail_channels
+                | Detail_automation | Detail_runs -> ())
          | Keepers Keeper_calls ->
              (match selected_keeper state with
               | Some keeper ->

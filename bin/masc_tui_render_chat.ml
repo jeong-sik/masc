@@ -496,13 +496,26 @@ let origin_heading buf cols ~plain ~styled ~clock =
   in
   box_line buf cols (lead ^ rule ^ tail)
 
-let render_chat_row ~theme ~tool_visibility buf cols (row : Message_layout.row) =
+let render_chat_row ~theme ~origin ~tool_visibility buf cols (row : Message_layout.row) =
   match row.kind with
+  | Message_layout.Spacing -> box_empty buf cols
   | Message_layout.Viewport_gap { hidden_rows = _ } ->
       (* The glyph survives NO_COLOR; the adaptive recede keeps the separator
          visible without competing with the message above and below it. *)
       box_line_styled buf cols ~style:(Theme.recede ()) row.text
-  | Message_layout.Body ->
+  | Message_layout.Body | Message_layout.Metadata Message_layout.Sender ->
+      (* A bare view's sender piece is drawn like a body row: the layout gave
+         it the body's gutter and one piece of the name as its text. Building
+         an origin heading from it instead repeated the mark and the whole
+         name on every wrapped piece. Only the name's colour differs. *)
+      let sender =
+        match row.kind with
+        | Message_layout.Metadata Message_layout.Sender -> true
+        | Message_layout.Body | Message_layout.Spacing | Message_layout.Viewport_gap _
+        | Message_layout.Metadata
+            ( Message_layout.Timeline_break _ | Message_layout.Origin _
+            | Message_layout.Diagnostic | Message_layout.Continued_at _ ) -> false
+      in
       (* The two cells reserved by the layout separate the activity column from
          its body. The semantic lead lives with the origin label, so wrapped
          prose starts at one stable column without drawing a rail on every row.
@@ -613,11 +626,18 @@ let render_chat_row ~theme ~tool_visibility buf cols (row : Message_layout.row) 
               Printf.sprintf "%s┊%s " (Chat_theme.origin row.style) Ansi.reset
           | Message_layout.Inbound, _ -> snd (arrival_bar row.style)
           | _, Message_layout.Shade_none -> "  "
+          | _, Message_layout.Shade_quoted when origin = Message_layout.Origin_bare -> "  "
           | _, Message_layout.Shade_quoted ->
               Printf.sprintf "%s\xe2\x94\x82%s " (Theme.recede ()) Ansi.reset
         in
-        let body_style = context.opening in
-        if context.ambient_background && not is_tool then
+        let body_style =
+          if sender then context.opening ^ Chat_theme.origin row.style ^ Ansi.bold
+          else context.opening
+        in
+        if context.ambient_background && origin = Message_layout.Origin_bare then
+          box_line buf cols
+            (margin ^ context.opening ^ "  " ^ dress rest ^ Ansi.reset)
+        else if context.ambient_background && not is_tool then
           box_line_styled buf cols ~style:context.opening
             (Printf.sprintf "%s  %s" margin (dress rest))
         else
@@ -803,7 +823,18 @@ let keeper_message_identity ~max_cells state keeper_name =
           ; stance
           ]
       in
-      (match runtime with
+      if state.msg_origin_display = Message_layout.Origin_bare then
+        let compact_status = match reading.Keeper_control.liveness with
+          | Keeper_control.Absent ->
+              (match keeper.k_origin with
+               | Tui_decode.Declared_keeper _ -> "아직 시작하지 않음"
+               (* [status] is the only place the bare header carries the
+                  Keeper's AUTO/YOLO mode and gate, so the absent label keeps
+                  that stance. *)
+               | Persisted_keeper | Remote_keeper -> "absent" ^ stance)
+          | Keeper_control.Unobserved | Keeper_control.Invalid _ | Keeper_control.Present _ -> status in
+        fit_identity (compact_status ^ Ansi.reset)
+      else (match runtime with
        | None ->
            let detail = match keeper.k_origin with
              | Tui_decode.Declared_keeper requirements ->
@@ -1730,7 +1761,9 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name ~request_
               | Masc_tui_types.Turn_continues | Masc_tui_types.Turn_closes
               | Masc_tui_types.Turn_outside ->
                   "")
-          | Message_user _ | Message_status | Message_local | Message_memory
+          | Message_user (Sent_by_other { speaker; surface }) ->
+              Message_layout.fit_speaker ~column:chat_cols ~speaker ~surface ()
+          | Message_user (Sent_by_operator _) | Message_status | Message_local | Message_memory
           | Message_error | Message_tool | Message_skill _ | Message_thinking ->
               grouped_role_label
         in
@@ -1800,7 +1833,7 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name ~request_
           | Message_status | Message_local | Message_error ->
               message.me_text
         in
-        ({ style;
+        ({ delivery_state = None; style;
              timestamp =
                Option.fold ~none:message.me_timestamp
                  ~some:keeper_message_clock timeline_at;
@@ -1884,7 +1917,7 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
     (* Pending input has not entered the conversation. It uses the composer's
        local mark, not the arrow that means a submitted conversation row. *)
     let style = Message_layout.Local in
-    ({ style
+    ({ delivery_state = Some label; style
      ; timestamp = keeper_message_clock at
      ; timeline_bucket = Some (keeper_message_timeline_bucket at)
      (* A pending input has no execution yet, so its request is its only
@@ -1928,7 +1961,7 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
   | first :: _ ->
       let style = Message_layout.Status in
       (* The heading is not the input it was copied from. *)
-      { first with style; timestamp = ""; timeline_bucket = None;
+      { first with delivery_state = None; style; timestamp = ""; timeline_bucket = None;
           diagnostics = [];
           speaker = "대기 입력";
           role_label = Message_layout.align_role_label
@@ -1991,7 +2024,7 @@ let polled_turn_output_entries (state : state) ~keeper_name ~role_label_column =
           | None -> "진행 중"
           | Some _ -> "마지막 관측, 갱신 실패"
         in
-        let speech = ({ style
+        let speech = ({ delivery_state = None; style
            ; timestamp = keeper_message_clock preview.ktp_updated_at_unix
            ; timeline_bucket = Some (keeper_message_timeline_bucket preview.ktp_updated_at_unix)
            ; diagnostics = []
@@ -2331,12 +2364,26 @@ let keeper_message_find_scroll (state : state) ~keeper_name ~needle ~older_than 
           Option.value ~default:count
             (msg_index_of_anchor messages anchor)
     in
+    (* [request_label] is the execution an aliased request was folded into,
+       so a batched update's own request id survives only on its message.
+       Entries and messages share positions; the result below reads
+       [List.nth messages at] on the same assumption. *)
+    let request_ids =
+      Array.of_list
+        (List.map (fun (message : msg_entry) -> message.me_request_id) messages)
+    in
+    let request_id_matches index =
+      index < Array.length request_ids
+      && Masc_tui_pick_list.lowercase_contains ~needle request_ids.(index)
+    in
     let matched =
       List.filteri (fun index _ -> index < ceiling) entries
       |> List.mapi (fun index (entry : Message_layout.entry) -> (index, entry))
       |> List.rev
-      |> List.find_opt (fun (_, (entry : Message_layout.entry)) ->
-             Masc_tui_pick_list.lowercase_contains ~needle entry.body)
+      |> List.find_opt (fun (index, (entry : Message_layout.entry)) ->
+             Masc_tui_pick_list.lowercase_contains ~needle entry.body
+             || Masc_tui_pick_list.lowercase_contains ~needle entry.request_label
+             || request_id_matches index)
     in
     match matched with
     | None -> None
@@ -2534,7 +2581,8 @@ let render_keeper_message (state : state) =
        the width needed to identify the runtime the composer will address. *)
     let telemetry_cells = max 0 (cols - 1) in
     let telemetry_keeper =
-      Masc_tui_theme.tone Masc_tui_theme.Accent
+      if state.msg_origin_display = Message_layout.Origin_bare then ""
+      else Masc_tui_theme.tone Masc_tui_theme.Accent
       ^ fit_runtime_id (telemetry_cells / 3) display_keeper_name ^ Ansi.reset ^ " · "
     in
     let telemetry_identity_cells =
@@ -2552,7 +2600,9 @@ let render_keeper_message (state : state) =
         with
         | Some { observation = Some observation; error = None } ->
             Observation_layout.context_header_item
-              ~max_cells:(min 48 (telemetry_identity_cells / 2))
+              ~max_cells:(min
+                (if state.msg_origin_display = Message_layout.Origin_bare then 24 else 48)
+                (telemetry_identity_cells / 2))
               ~inspect_key:Masc_tui_keys.context_inspector_label observation
         | Some {error = Some _; _} -> Some "Context unavailable"
         | Some _ | None -> Some "Context —"
@@ -2785,7 +2835,7 @@ let render_keeper_message (state : state) =
                     request @ attempt
                   in
                   Some
-                    { le_at = timeline_at; le_entry = ({ style;
+                    { le_at = timeline_at; le_entry = ({ delivery_state = None; style;
                        timestamp = keeper_message_clock (Option.value timeline_at ~default:started_at);
                        timeline_bucket;
                        diagnostics;
@@ -2956,7 +3006,7 @@ let render_keeper_message (state : state) =
                 entries @
                 (* The status row is not the entry it was copied from, so it
                    names none of that entry's request or attempt. *)
-                [{ last with le_entry = { last.le_entry with style; speaker = "STATUS";
+                [{ last with le_entry = { last.le_entry with delivery_state = None; style; speaker = "STATUS";
                    diagnostics = [];
                    role_label = Message_layout.align_role_label
                      ~column:role_label_column ~style "STATUS";
@@ -3274,7 +3324,8 @@ let render_keeper_message (state : state) =
       done
     end else begin
       List.iter
-        (render_chat_row ~theme:chat_theme ~tool_visibility:state.msg_tool_visibility
+        (render_chat_row ~theme:chat_theme ~origin:state.msg_origin_display
+           ~tool_visibility:state.msg_tool_visibility
            chat_buf chat_cols)
         visible_rows;
       (* Fill remaining space *)
@@ -3342,14 +3393,12 @@ let render_keeper_message (state : state) =
          (Printf.sprintf
             "  %d saved row(s) could not be read and are not shown"
             state.msg_loaded_dropped));
-    (match state.msg_memory_visibility, state.msg_memory_error with
-     | Memory_hidden, _ -> ()
-     | (Memory_summary | Memory_full), None -> ()
-     | (Memory_summary | Memory_full), Some _ ->
+    (match state.msg_memory_error with
+     | None -> ()
+     | Some _ ->
          box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
            "  Memory load failed · /errors");
-    (if state.msg_memory_visibility <> Memory_hidden
-        && state.msg_memory_dropped > 0 then
+    (if state.msg_memory_dropped > 0 then
        box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
          (Printf.sprintf
             "  %d memory journal row(s) could not be read and are not shown"
@@ -3494,14 +3543,28 @@ let render_keeper_message (state : state) =
                " · " ^ String.concat " · " parts ^ " · "
                ^ Masc_tui_keys.expand_turn_label
          in
+         let status_rows = Masc_tui_types.keeper_message_visible_status_rows state live ~now in
+         if Masc_tui_types.keeper_message_standalone_details_hint state live ~now
+         then box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
+           (Printf.sprintf "  +%d · %s:details" folded_away Masc_tui_keys.expand_turn_label);
          List.iter
            (fun (kind, text) ->
              (match kind with
               | Keeper_chat_transcript.Progress ->
-                  box_line_styled chat_buf chat_cols ~style:(Masc_tui_theme.tone Masc_tui_theme.Accent)
-                    ("  " ^ running_mark ^ " " ^ Ansi.bold ^ progress_heading
-                     ^ Ansi.reset ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)
-                     ^ " · " ^ text ^ queue_hint ^ fold_suffix)
+                  if state.msg_origin_display = Message_layout.Origin_bare then
+                    box_line_styled chat_buf chat_cols
+                      ~style:(match Keeper_chat_transcript.phase live with
+                        | Stream_failed _ -> Theme.bad ()
+                        | Waiting | Working | Stream_ended -> Theme.recede ())
+                      ("  " ^ running_mark ^ " " ^ text
+                       ^ (if folded_away > 0 then
+                            " · " ^ Masc_tui_keys.expand_turn_label ^ ":details"
+                          else ""))
+                  else
+                    box_line_styled chat_buf chat_cols ~style:(Masc_tui_theme.tone Masc_tui_theme.Accent)
+                      ("  " ^ running_mark ^ " " ^ Ansi.bold ^ progress_heading
+                       ^ Ansi.reset ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                       ^ " · " ^ text ^ queue_hint ^ fold_suffix)
               (* The gate and this row describe the same held call, so the
                  note rides the row that asks -- which is this one by its
                  kind now, rather than by being first among the Attention
@@ -3522,7 +3585,7 @@ let render_keeper_message (state : state) =
                     | Keeper_chat_transcript.Approval_other _ -> Theme.warn ()
                   in
                   box_line_styled chat_buf chat_cols ~style ("  " ^ text)))
-           (Masc_tui_types.keeper_message_visible_status_rows state live ~now)
+           status_rows
      | Some _ | None -> ());
     (* Effects this Keeper is not waiting on. A deferral returns successfully
        and the Keeper carries on, so the tool row reads as a plain return and
@@ -3802,6 +3865,18 @@ let render_keeper_message (state : state) =
       | None ->
       if state.keeper_message_focus = Left_pane then
         "Up/Down:move  Enter:open  Right/Esc:chat"
+      else if state.msg_origin_display = Message_layout.Origin_bare then
+        let context_hints = match disposition, state.msg_recall_replaces with
+          | Updates _, Some _ -> ["Enter:replace"; "^U:leave queued"]
+          | Updates _, None when pending_count > 0 ->
+              ["Enter:update"; "^T:queue"; "^K:cancel"; "^P:edit"]
+          | Updates _, None -> ["Enter:update"]
+          | Sends, _ -> [] in
+        (match context_hints with
+         | [] -> Masc_tui_footer.minimal_chat_hints ~max_cells:(max 0 (chat_cols - 4))
+             ~enter_hint ~escape_hint
+         | _ :: _ -> Masc_tui_footer.minimal_context_chat_hints ~max_cells:(max 0 (chat_cols - 4))
+             ~context_hints ~escape_hint)
       else if chat_cols < 120 then
         let compact_enter_hint =
           match disposition with

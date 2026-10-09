@@ -18,7 +18,7 @@ open Alcotest
 module Layout = Masc_tui_message_layout
 
 let entry style body : Layout.entry =
-  { style
+  { delivery_state = None; style
   ; timestamp = "01:41:00"
   ; timeline_bucket = None
   ; diagnostics = []
@@ -42,7 +42,7 @@ let shades_of style =
   |> List.filter_map (fun (row : Layout.row) ->
        match row.kind with
        | Layout.Body -> Some row.shade
-       | Layout.Metadata _ | Layout.Viewport_gap _ -> None)
+       | Layout.Metadata _ | Layout.Spacing | Layout.Viewport_gap _ -> None)
 ;;
 
 let is_quoted = function Layout.Shade_quoted -> true | Layout.Shade_none -> false
@@ -88,7 +88,7 @@ let test_metadata_rows_are_never_quoted () =
       (fun (row : Layout.row) ->
          match row.kind with
          | Layout.Metadata _ -> Some row.shade
-         | Layout.Body | Layout.Viewport_gap _ -> None)
+         | Layout.Body | Layout.Spacing | Layout.Viewport_gap _ -> None)
       rows
   in
   check bool "there is a metadata row to check" true (metadata_shades <> []);

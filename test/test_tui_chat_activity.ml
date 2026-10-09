@@ -98,7 +98,7 @@ let test_only_the_uncovered_in_flight_rows_are_drawn () =
   state.msg_inflight
     <- state.msg_inflight
        @ [ inflight ~keeper_name:"beta" ~request_id:"request-3" ~at:4. () ];
-  check int "another keeper's request keeps its row too" 2
+  check int "another keeper does not add a row here" 1
     (List.length (Tui.keeper_message_inflight_drawn state))
 
 (* Without a live turn on this pane nothing is covered, so every entry draws.
@@ -154,26 +154,26 @@ let test_compact_status_keeps_delivery_and_priority_truth () =
   let rows () = List.map (fun row -> row.Masc_tui_answering.lead ^ row.rest)
       (Tui.keeper_message_activity_rows state) in
   check (list string) "one quiet status preserves exact current queue count"
-    ["기존 작업 처리 중 · 내 메시지 2건 대기 · 처리 대기"] (rows ());
+    ["내 메시지 2건 대기 · 처리 대기"] (rows ());
   state.keeper_run_next_inflight <- [second.sent_request];
   state.keeper_run_next_receipts <- [first.sent_request, Ok "confirmed first"];
   check (list string) "in-flight priority cannot claim confirmation"
-    ["기존 작업 처리 중 · 내 메시지 2건 대기 · 다음 순서 확인 중"] (rows ());
+    ["내 메시지 2건 대기 · 다음 순서 확인 중"] (rows ());
   state.keeper_run_next_inflight <- [];
   check (list string) "one receipt does not confirm both inputs"
-    ["기존 작업 처리 중 · 내 메시지 2건 대기 · 일부 메시지 다음 순서로 전달 대기"] (rows ());
+    ["내 메시지 2건 대기 · 일부 메시지 다음 순서로 전달 대기"] (rows ());
   state.keeper_run_next_receipts <- [first.sent_request, Ok "first"; second.sent_request, Ok "second"];
   check (list string) "both exact receipts confirm priority"
-    ["기존 작업 처리 중 · 내 메시지 2건 대기 · 다음 순서로 전달 대기"] (rows ());
+    ["내 메시지 2건 대기 · 다음 순서로 전달 대기"] (rows ());
   state.keeper_run_next_receipts <- [second.sent_request, Error "offline"];
   check bool "actual refusal retains attention" true (Tui.keeper_message_activity_needs_attention state);
   check (list string) "failure does not claim priority"
-    ["다음 순서 확인 불가 · 기존 작업 처리 중 · 내 메시지 2건 대기"] (rows ());
+    ["다음 순서 확인 불가 · 내 메시지 2건 대기"] (rows ());
   let foreign = inflight ~keeper_name:"beta" ~request_id:"foreign-private-id" ~at:1. () in
   state.msg_inflight <- foreign :: state.msg_inflight;
   (match Tui.keeper_message_inflight_drawn state with
-   | [group] -> check string "foreign stop target survives folding" "beta" group.representative.sent_request.keeper_name
-   | groups -> failf "expected foreign-only row, got %d" (List.length groups));
+   | [] -> ()
+   | groups -> failf "foreign work added %d composer rows" (List.length groups));
   state.msg_tool_visibility <- Tui.Tools_full;
   check bool "diagnostics keep exact private ID" true
     (List.exists (fun text -> Astring.String.is_infix ~affix:"second-private-id" text) (rows ()))

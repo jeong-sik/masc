@@ -179,6 +179,11 @@ type entry = {
       (** The label {!role_label} was aligned from, whole. The gutter cuts a
           long name to its column; the origin heading under {!Origin_row}
           has the pane's width and draws this instead. *)
+  delivery_state : string option;
+      (** [Some state] only on an operator input that is still pending
+          delivery (전송 대기, 전송 중, 처리 대기, 전송 확인 중). The bare
+          gutter, which otherwise draws only a mark, keeps this state beside
+          the input so several pending inputs can be told apart. *)
   role_label : string;
   role_label_mark_cells : int;
       (** Cells the speaker mark occupies at the head of {!role_label}, from
@@ -246,6 +251,11 @@ type metadata =
   | Continued_at of { clock : string }
       (** Only emitted where the entry has a trustworthy time: a continuation
           that cannot say when it moved has nothing to draw. *)
+  | Sender
+      (** One wrapped piece of an inbound sender's name above its body in the
+          {!Origin_bare} view. The row's [text] is that piece and its [gutter]
+          is the body's, so the renderer draws the piece once, like a body
+          row, instead of building a heading from the whole name. *)
 (** A new origin carries every field the renderer needs for its heading. A
     later row from the same origin carries only its new clock, so callers
     never have to parse display text to decide what should be highlighted. *)
@@ -273,6 +283,7 @@ type shade =
 type row_kind =
   | Metadata of metadata
   | Body
+  | Spacing  (** Decorative message separation, omitted at the live edge. *)
   | Viewport_gap of { hidden_rows : int }
       (** A synthetic row marking content omitted from an oversized newest
           entry at the live edge, including an explicitly collapsed run of
@@ -283,13 +294,12 @@ type origin_display =
   | Origin_row  (** The origin keeps a row of its own, above the body. *)
   | Origin_inline
       (** The origin folds into the body's left margin, clock included. *)
-  | Origin_bare  (** The same margin without clocks, spans or time separators. *)
-(** Where a message's origin is drawn. [Origin_bare] is the chat default
-    (see [Masc_tui_types.create_state]). [Origin_inline] draws a short clock
-    only where the minute moved. [Origin_row] gives each turn a heading row
-    with the speaker and the full timestamp. Folding headings into the
-    gutter hands their rows back to the conversation: eight speakers taking
-    turns otherwise spend eight rows of a forty-row pane on headings.
+  | Origin_bare
+      (** Conversation: a small speaker mark, no clock or turn rail.
+          Other senders keep a name above their message. *)
+(** [Origin_bare] is the chat default. Prose uses a bounded reading width and
+    messages are separated by whitespace. [Origin_inline] exposes the aligned
+    clock, speaker and turn rail; [Origin_row] gives origins their own heading.
 
     Every layout and scroll function takes this, and passing it to one but not
     another would measure the pane against a height it does not draw. *)

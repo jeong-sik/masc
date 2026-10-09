@@ -587,17 +587,16 @@ footer for twelve seconds and stays in the event log.
 Every keeper under `.masc/keepers/`, sorted by name.
 
 ```
- MASC Keepers (10)  10:55:25
-    HEALTH       KEEPER             A P S   TURN LIFECYCLE / RUNTIME             TASK
- >  ● healthy    adm-race-cf-001    A P D  4m12s running anthropic.claude-opus-5 task-471
-    ● idle       analyst            A - M  2h08m paused kimi.kimi-k2.5           task-464
-   OPERATIONS  lifecycle running · turn executing · idle 7m · last done · deepseek-v4 · running_fiber_alive
-  j/k move  p pause  w wake  s shutdown  x delete  g yolo  c chat  right/enter detail
+ MASC Keepers (10)
+    KEEPER             HEALTH       Mode S   TURN LIFECYCLE / RUNTIME             TASK
 ```
 
-`A` is autoboot, `P` is autonomous turns, and `S` is the sandbox profile as a
-letter — `D` docker, `M` microvm, `L` local — because a sandbox is a name, not
-an on/off. `TURN` is the time since the keeper's last turn (the lifetime turn
+`Mode` is how the keeper is started — `M` manual, `D` on demand, `A`
+autonomous — and `S` is the sandbox profile as a letter — `D` docker, `M`
+microvm, `L` local — because a sandbox is a name, not an on/off. `Mode S` and
+`LIFECYCLE / RUNTIME` are shown only when the pane has room for them. A keeper
+whose tool gate is YOLO draws its name in red; the stance has no column of its
+own. `TURN` is the time since the keeper's last turn (the lifetime turn
 count moved to the detail pane; a keeper that never turned shows a dash). The
 metadata list needs no server, so names, last-turn times, and tasks stay
 readable while the runtime is down. `HEALTH`, `LIFECYCLE / RUNTIME`, and lifecycle
@@ -625,12 +624,13 @@ malformed or mismatched identities before applying any directive. Clients may
 omit the precondition entirely; the TUI always sends both components. On 409,
 refresh identity before issuing a new command; retained input stays local.
 
-The fixed `OPERATIONS` line follows the selected Keeper. It comes from
-`GET /api/v1/keepers/composite` and keeps the current lifecycle, turn step,
-idle age, last runtime/model outcome, and producer diagnosis together on the
-surface that owns Keeper operations. A failed refresh preserves the previous
-typed reading and marks it unavailable rather than replacing it with guessed
-zeros.
+Execution facts are not on the list. Open the selected Keeper's detail
+(`right`/`enter`); its Info tab shows `Lifecycle`, `Turn`, `Idle` and
+`Last outcome`, read from
+`GET /api/v1/keepers/composite`. When a refresh fails after an earlier
+reading, Info keeps that reading and puts `stale · refresh failed: <reason>`
+above it; when there was no earlier reading it says `unavailable` with the
+reason instead of guessing zeros.
 
 `g` toggles the selected Keeper's tool gate. The footer names the action that
 will happen next: `g yolo` from the approval policy and `g auto` while YOLO is
@@ -957,36 +957,31 @@ switched away or left and returned is discarded instead of replacing the
 newer transcript. The shortcut is withdrawn while a turn is in flight or the
 roster cannot be read.
 
-The speaker is a reverse-video badge for conversation sources: operator
-sources are cyan, Keepers blue, status yellow, and errors red. Tool and
-reasoning stretches are subordinate activity, so they use a quiet gray section
-label instead of competing with the people speaking. Ordinary operator and
-Keeper prose uses the terminal's default foreground so Markdown, code, links,
-and emphasis keep their own hierarchy. Connector and agent origins remain in
-the badge label (`vincent · slack`, `taskmaster · agent`) instead of being
-inferred from row position.
+Chat opens in a conversation layout: a small `›` marks your message, `●`
+marks the Keeper, and `◀` marks another sender. Other senders keep their name
+and origin above their message. Prose starts at one column, wraps within a
+100-cell reading width, and has a blank line between messages. Tool calls keep
+their own name and result mark without a second TOOLS label. Operator and Keeper
+prose uses the terminal foreground; tools and reasoning remain subdued.
 
-A line someone else wrote -- another keeper, another person, a connector --
-steps in two cells and reads behind a solid bar in the sender's colour, where
-the journal's rows carry a dotted one. The operator's lines, the keeper's
-replies and its work rows stay at the conversation's edge.
+`Ctrl-F` cycles conversation → inline metadata → full origin headings →
+conversation. Inline metadata includes the minute clock, aligned speaker labels
+and turn rails; full headings give origins a row of their own. Technical request identity is available in expanded diagnostics after the body;
+metadata modes never insert turn numbers or receipt claims into speech.
+The header labels only expanded modes (`metadata:inline`, `metadata:full`).
+Font size, letter spacing and line height come from your terminal settings.
 
-Chat opens without timestamps, hourly separators or generated
-progress timers (request age, call age and model silence).
-`Ctrl-F` adds a short clock (`metadata:inline`), then full timestamp headings
-(`metadata:full`), then returns to the default. The short clock appears only
-where the minute moved. An open request between continuation segments has no
-progress banner or growing wait timer; progress returns when its next run starts.
-Approval prompts and diagnostics remain available. In compact and
-results modes, one quiet status below the history summarizes current work,
-your waiting messages, and their observed delivery or priority receipts.
-Waiting for confirmation and confirmed acceptance remain distinct. If a priority
-reply is unavailable, the status says confirmation is unavailable and retains
-the diagnostic detail; it does not claim the priority change was refused. Full mode
-(`Ctrl-D` twice from compact, or `/tools full`) shows execution IDs, elapsed
-time and priority receipt details. Each pending input already shows its own
-delivery state in the default view. Failures, approval
-requests, and explicit stop targets remain visible in the concise modes.
+The input area shows progress for the current conversation. Other Keepers' running
+requests remain in Keepers and Activity, without extra interrupt commands beside
+the composer. The default progress row shows the current activity without generated
+progress timers (request age, call age and model silence); those timers,
+runtime identity and cumulative tool details are available in the metadata views.
+An open request between continuation segments has no progress row or growing
+wait timer; progress returns when its next run starts.
+Pending inputs retain their delivery state. Failures, unconfirmed delivery,
+interrupt outcomes and approval requests stay visible. `Ctrl-S:details` opens
+folded approval records. `Ctrl-D` expands tool details independently of metadata.
+
 Auto-next requests priority for your message; current work continues until it
 finishes or yields. Use the explicit interrupt controls to stop current work.
 When
@@ -1051,12 +1046,11 @@ how long the turn has run and which tool it last touched; the `Latest
 output:` tail it used to carry is left out while the pane draws that text.
 A turn whose stream the TUI opened and lost is followed the same way.
 
-Memory journal rows open in summary mode, using producer-owned compact text
-instead of reconstructing a summary from rendered prose. The footer's
-`Ctrl-N:journal` or `/memory`
-cycles those rows through summary, full, and hidden; the header names the two
-non-default states as `journal:full` and `journal:off`. Neutral system rows that
-share the journal lane have no summary projection and therefore remain whole.
+Memory journal rows start hidden. `Ctrl-N` or `/memory` cycles hidden → summary
+→ full → hidden. The header names the expanded modes as `journal:summary` and
+`journal:full`; the default needs no badge. Summary uses producer-owned compact
+text. Neutral system rows with no summary projection remain whole when the
+journal is shown. The help sheet lists the journal and metadata shortcuts.
 
 A failed Librarian pass is not a row in summary mode. While the passes after
 the last commit keep failing, the header's second row names the run once, in

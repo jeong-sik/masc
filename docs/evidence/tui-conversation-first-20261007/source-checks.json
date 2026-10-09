@@ -1,28 +1,26 @@
 {
-  "base": "039971337f3355e7750dda051f9759d9db8a3139",
+  "base": "98feb91590d651a4d8063fb45e1ec94e93d8f03f",
   "checks": {
-    "ocaml_parsing": "HISTORICAL_PASS",
-    "python_syntax": "HISTORICAL_PASS",
+    "ocaml_parsing": "PASS",
+    "python_syntax": "NOT_APPLICABLE",
     "native_regressions": "NOT_RUN",
     "PTY": "NOT_RUN"
   },
   "source_sha256": {
-    "bin/masc_tui_keeper_chat_transcript.ml": "9bbf089c9b14237404fd38ed1246a5a8ee1755ff0eb85ff502e0f0711ca189ca",
-    "bin/masc_tui_keeper_chat_transcript.mli": "28b859ae5a98349a5dbc09cf69e9e3b3de469e53020a47f8c4d29c0ee0d81b25",
-    "bin/masc_tui_message_layout.ml": "bf73609b5844262aaddd7a180c12efc5ad1c650d23dd672d05b868672a464f3b",
-    "bin/masc_tui_message_layout.mli": "2e2ec985c3c3d74d6476ee361bbdef45d4a9ec1d64ea80bc0e416a23a0d3a196",
-    "bin/masc_tui_render_chat.ml": "c131be81bf0026d5975fd27894dcf4c81fd72d6bd60a22e694fd5a732d121d55",
-    "bin/masc_tui_types.ml": "1d635f92e884c4731f7e62e3ab1e9cad8548902fff54db9b606bd92663661a56",
+    "bin/masc_tui_keeper_chat_transcript.ml": "b6b9c8aa1a5007c23e78b0ce32672e1544f568f4fa1c2119d13d55fe734916a2",
+    "bin/masc_tui_keeper_chat_transcript.mli": "f5fe6297fe9ba91b8025ebe954278160af39fece846ed7bc20f06d8db3646e06",
+    "bin/masc_tui_message_layout.ml": "8c86718b7097c493e9f06bbbe2d3659f3064bf6dcf3d1eabd74b47096b5a4a1c",
+    "bin/masc_tui_message_layout.mli": "0686495041b81cd6364e3174bf0a70ca8be52d15c3d44aca905ef7cb9ceefa69",
+    "bin/masc_tui_render_chat.ml": "55938be0e94854cbd737f03486bee41715134c5a1e57a75b240b38b1fe7d1408",
+    "bin/masc_tui_types.ml": "bcb4dc3dcb90e26b9eb2c00319b5759779fcf563c37b5f9cc9e83e2f2f3c7fa0",
     "docs/evidence/tui-conversation-first-20261007/layout-preview.ml": "0eb27a7060fd97256d7fad22ada5e7007cf1661c2cbe29203e9ab609f09c102f",
-    "test/test_tui_chat_activity.ml": "10935d5a1b621e79899c3f0cc12e53859241345675459d689bdb5fd03ec0a2a2",
-    "test/test_tui_chat_queue_wiring.ml": "6cfb129e3c6389a047801d445b852d29f4216e48654a100e6fedf78f10b5ba66",
-    "test/test_tui_message_layout.ml": "9d47be71a121e424b939d2b79d63b42805bd3f5f81f69f5516b95155020baee4",
-    "test/test_tui_shade_layers.ml": "217dbee7bcb84d2bfea562b5f7c09877a50275288fe055511276d33882dcf9a7",
-    "test/tui_keyboard_chat.py": "d51059b1f8f889e044bbc08bc413be4e5e773833a2a7c14dc6d97349856c0a60",
-    "test/tui_keyboard_memory.py": "c638fc6434a635bd4a7ed84ef56d3b0f5044c7bee73d613e98212e57a7e672a8",
+    "test/test_tui_chat_activity.ml": "662e1b929787815415b70348eeb921f1aa42139f07fb912df171cd2fb05eaf09",
+    "test/test_tui_chat_queue_wiring.ml": "be1a5337f6b58df540e27d61aa436b0fb24b9ffe4d85037c34959b2c5a68db6e",
+    "test/test_tui_message_layout.ml": "54897f564dfd86c459a189b723c552d29d2f989f46f1b401dd0521e4e17bf073",
+    "test/test_tui_shade_layers.ml": "842d2d3569f9ad50f941fb81c33da89e9bad09f81742dfd66cfdc395f89db7d0",
     "bin/masc_tui_footer.ml": "735b677c6116fb9c19a1840dc9071bb5e556facfb4b45b6267ff816899c177dd",
-    "test/test_tui_footer_status_items.ml": "7aba2bb5bf6afc574b60ae623d100005148598ef6f8ddd6512b743c20c5cc529",
-    "test/test_tui_keeper_chat_transcript.ml": "c5b1c1c8a6e841a80ef0845f281139f68f7882ab02be114b094311678ed1346d"
+    "test/test_tui_footer_status_items.ml": "bb34add7379695cecbefede4b60c434e5778720c2a7c6637a0531ab8bb6b2420",
+    "test/test_tui_keeper_chat_transcript.ml": "6b045bd468366c9982e2f4f35574a8b40255a9be65c018f4f5ef8411df8a091d"
   },
   "historical_checks": {
     "ocaml_parsing": "PASS",
@@ -43,5 +41,5 @@
       "test_clamping_a_scroll_reads_only_as_far_as_it_must"
     ]
   },
-  "scope": "Historical parser checks for the recorded source hashes only. Later integration changed source; this receipt does not validate the current head. Native regressions, geometry and PTY were not rerun."
+  "scope": "Parser checks rerun on 2026-10-10 against this layer's files for the recorded source hashes only; a file whose current hash differs from its entry is not covered. The Python helpers test/tui_keyboard_chat.py, test/tui_keyboard_memory.py were deleted by main (#42155) and are no longer listed. historical_checks keeps the earlier results as history. Native regressions, geometry and PTY were not rerun."
 }

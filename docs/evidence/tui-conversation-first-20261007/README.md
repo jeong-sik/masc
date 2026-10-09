@@ -50,8 +50,9 @@ acceptance or release readiness.
 
 ## Current syntax receipt refresh
 
-The refreshed source-checks manifest hashes the integrated files after the
-standalone details-row budget and narrow footer fixes. All listed OCaml/Python
-files were parsed again. Earlier layout/interface executions and previews above
+The source-checks manifest was refreshed again on 2026-10-10 against this
+layer's files on main `98feb91590`. All listed OCaml files were parsed again and
+their hashes match this layer. The Python helpers `tui_keyboard_chat.py` and
+`tui_keyboard_memory.py` were deleted by main (#42155) and are no longer listed. Earlier layout/interface executions and previews above
 are historical; they were not rerun for this source and do not certify these
 new native regression cases. Native and PTY checks remain NOT_RUN.

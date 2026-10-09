@@ -92,7 +92,8 @@ let login_started (state : state) request ~now ~report ~notice result =
          confirmed identity and checks that origin before requesting. *)
       Option.iter (fun origin ->
         remember_identity_login_expectation state
-          { ile_origin = origin; ile_keeper = keeper_name; ile_provider = provider_id })
+          { ile_origin = origin; ile_keeper = keeper_name; ile_provider = provider_id
+          ; ile_expires_at = expires_at })
         request.ilr_origin;
       if keeper_detail_target_matches state keeper_name
       then state.identity_attempt_error <- None;

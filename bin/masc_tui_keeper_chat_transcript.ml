@@ -706,15 +706,20 @@ let native_progress_summary (activity : tool_activity) =
       | None, Some _ when activity.outcome=Native_running -> "output arriving"
       | None, Some _ -> "output observed"
       | None, None -> "native activity observed" in
-    match progress.elapsed with
-    | None -> observation
-    | Some elapsed -> observation ^ " · updated +" ^ Masc_tui_message_layout.span_text elapsed)
+    observation)
     activity.native_progress
 
-let native_progress_details (activity : tool_activity) =
+let native_progress_details ?(include_elapsed=false) (activity : tool_activity) =
   match native_progress_summary activity, activity.native_progress with
-  | Some summary, Some {output_bytes=Some count; _} -> Some (Printf.sprintf "%s · %d bytes observed" summary count)
-  | summary, _ -> summary
+  | Some summary, Some progress ->
+      let summary = match include_elapsed, progress.elapsed with
+        | true, Some elapsed -> summary ^ " · updated +" ^ Masc_tui_message_layout.span_text elapsed
+        | false, _ | true, None -> summary in
+      Some (match progress.output_bytes with
+        | Some count -> Printf.sprintf "%s · %d bytes observed" summary count
+        | None -> summary)
+  | Some summary, None -> Some summary
+  | None, _ -> None
 
 let render_activity_rows ~expanded (activities : tool_activity list) =
   let name_width =
@@ -734,7 +739,7 @@ let render_activity_rows ~expanded (activities : tool_activity list) =
   List.map
     (fun (activity : tool_activity) ->
       let marker = marker_of_outcome activity.outcome in
-      let progress = if expanded then native_progress_details activity else native_progress_summary activity in
+      let progress = if expanded then native_progress_details ~include_elapsed:true activity else native_progress_summary activity in
       let observation = match native_activity_summary activity, progress with
         | None, progress -> progress
         | Some completion, None -> Some completion

@@ -81,7 +81,7 @@ let of_lane ?(extra = []) ?sprites ?metadata ~tool_name ~start_time
     |> Tool_result.with_metadata (`Assoc ["io.github.jeong-sik/masc.machine.errorCode", `String code])
   | Error ((Msx_lane.No_machine | Msx_lane.Invalid_request _) as e) ->
     reject ~tool_name ~start_time (Msx_lane.error_to_string e)
-  | Error (Msx_lane.Unreadable _ as e) ->
+  | Error ((Msx_lane.Unreadable _ | Msx_lane.Effect_unknown _) as e) ->
     refuse ~class_:Tool_result.Runtime_failure ~tool_name ~start_time
       (Msx_lane.error_to_string e)
 ;;
@@ -386,7 +386,8 @@ let handle_checkpoint ~restore ~tool_name ~start_time ~base_path args =
     let ledger_dir = msx_dir ~base_path in
     let path = Filename.concat (Filename.concat ledger_dir "saves") (slot ^ ".json") in
     let result = if restore then Msx_lane.restore ~path ~ledger_dir else Msx_lane.save ~path in
-    of_lane ~tool_name ~start_time ~extra:["slot", `String slot] result
+    of_lane ~tool_name ~start_time ~extra:["slot", `String slot]
+      (Result.map (fun (completed : Msx_lane.checkpoint_effect) -> completed.observation) result)
 ;;
 
 (* masc_msx_meta — which core this server linked, as [Msx_lane.core] reports
@@ -442,7 +443,7 @@ let handle_checkpoint_info ~tool_name ~start_time ~base_path args =
         ()
     | Error ((Msx_lane.Invalid_request _ | Msx_lane.No_machine | Msx_lane.Activity_disabled | Msx_lane.Activity_unobserved) as e) ->
       reject ~tool_name ~start_time (Msx_lane.error_to_string e)
-    | Error (Msx_lane.Unreadable _ as e) ->
+    | Error ((Msx_lane.Unreadable _ | Msx_lane.Effect_unknown _) as e) ->
       refuse ~class_:Tool_result.Runtime_failure ~tool_name ~start_time
         (Msx_lane.error_to_string e)
 ;;

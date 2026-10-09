@@ -5049,35 +5049,16 @@ let launch_workspace_activity state ~mailbox ~repo_id =
   | Masc_tui_fetched.Already_loading -> ()
   | Masc_tui_fetched.Started (next, request) ->
       state.workspace_activity <- next;
-      let assigned_keepers =
-        match state.repositories with
-        | None -> []
-        | Some snap ->
-            match List.find_opt (fun (r : Tui_decode.repository) -> String.equal r.rp_id repo_id) snap.rs_repositories with
-            | None -> []
-            | Some r -> r.rp_keepers
-      in
-      let fleet_keepers =
-        List.map (fun (k : Tui_decode.keeper) -> k.k_name) state.keepers
-        |> List.sort_uniq String.compare
-      in
-      let keepers =
-        match assigned_keepers with
-        | [] -> fleet_keepers
-        | ks ->
-            let active = List.filter (fun name -> List.mem name fleet_keepers) ks in
-            if active = [] then fleet_keepers
-            else List.sort_uniq String.compare active
-      in
+      let host = server_peer_host and port = state.port in
       let run () =
-        let reads = Eio.Fiber.List.map ~max_fibers:4 (fun keeper_name ->
-          let result = try Masc_tui_loader.load_keeper_file_changes
-              ~host:server_peer_host ~port:state.port ~keeper_name ~window_hours:changes_window_hours
-            with Eio.Cancel.Cancelled _ as exn -> raise exn
-               | exn -> Error (Printexc.to_string exn) in
-          (keeper_name, result)) keepers in
-        enqueue_async mailbox (Workspace_activity_loaded (request,
-          Ok {war_at = Unix.gettimeofday (); war_hours = changes_window_hours; war_keepers = reads}))
+        let result = try Masc_tui_http.fetch_repository_activity ~host ~port
+            ~repo_id ~window_hours:changes_window_hours
+          with Eio.Cancel.Cancelled _ as exn -> raise exn
+             | exn -> Error (Printexc.to_string exn) in
+        let result = Result.bind result (fun snapshot ->
+          if String.equal snapshot.Tui_decode.ras_repo_id repo_id then Ok snapshot
+          else Error "repository activity response names another repository") in
+        enqueue_async mailbox (Workspace_activity_loaded (request, result))
       in
       match Eio_context.get_switch_opt () with
       | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)

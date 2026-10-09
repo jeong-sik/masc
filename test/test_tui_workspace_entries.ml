@@ -28,16 +28,9 @@ let activity_change index : Decode.file_change =
   ; fc_succeeded = true
   }
 
-let activity_read changes =
-  { war_at = 0.; war_hours = 24.
-  ; war_keepers =
-      [ "alpha", Ok
-          { Decode.fcs_keeper = "alpha"; fcs_window_hours = 24.
-          ; fcs_calls_in_window = List.length changes; fcs_changes = changes
-          ; fcs_over_budget = 0; fcs_malformed = 0
-          }
-      ]
-  }
+let activity_read changes : workspace_activity_read =
+  { ras_repo_id = "masc"; ras_window_hours = 24.; ras_changes = changes;
+    ras_incomplete = 0; ras_unattributed = 0 }
 
 let refresh_activity state changes =
   let next, request = start_read ~equal:String.equal state.workspace_activity "masc" in

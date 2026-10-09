@@ -1857,6 +1857,7 @@ module Terminal_size_cache = struct
   type t = {
     fallback : int * int;
     mutable cached : (int * int) option;
+    mutable raw_cached : (int * int) option;
     mutable invalidated : bool;
   }
 
@@ -1869,13 +1870,14 @@ module Terminal_size_cache = struct
 
   let create ~fallback =
     if not (valid fallback) then invalid_arg "terminal fallback must be positive";
-    { fallback = normalize fallback; cached = None; invalidated = true }
+    { fallback = normalize fallback; cached = None; raw_cached = None; invalidated = true }
 
   let invalidate cache = cache.invalidated <- true
 
   let probe_or_last cache ~probe =
     match probe () with
     | Some size when valid size ->
+        cache.raw_cached <- Some size;
         let size = normalize size in
         cache.cached <- Some size;
         size
@@ -1895,12 +1897,12 @@ module Terminal_size_cache = struct
         probe_or_last cache ~probe
 
   let refresh cache ~probe =
-    let previous = cache.cached in
+    let previous = cache.cached, cache.raw_cached in
     cache.invalidated <- false;
     let current = probe_or_last cache ~probe in
     match previous with
-    | Some size when size = current -> Unchanged current
-    | Some _ | None -> Changed current
+    | Some size, raw when size = current && raw = cache.raw_cached -> Unchanged current
+    | (Some _ | None), _ -> Changed current
 end
 
 (* The Planning strip and the per-Keeper schedule page, as plain text. Both

@@ -204,6 +204,16 @@ let test_terminal_size_cache_refreshes_without_losing_last_valid () =
     (Schedule.Terminal_size_cache.refresh unavailable ~probe
     = Schedule.Terminal_size_cache.Unchanged (24, 80))
 
+let test_terminal_size_retains_raw_resize_signal () =
+  let cache = Schedule.Terminal_size_cache.create ~fallback:(24,80) in
+  List.iter (fun cols ->
+    check bool "tiny raw width change repaints even with same safe layout width" true
+      (Schedule.Terminal_size_cache.refresh cache ~probe:(fun () -> Some (24,cols))
+       = Schedule.Terminal_size_cache.Changed (24,4));
+    check bool "same raw width stays idle" true
+      (Schedule.Terminal_size_cache.refresh cache ~probe:(fun () -> Some (24,cols))
+       = Schedule.Terminal_size_cache.Unchanged (24,4))) [1;2;3;4;2;1]
+
 let test_render_widths_are_total () =
   check int "negative width clamps to zero" 0 (Layout.nonnegative_width (-1));
   check int "tiny keeper panel has an empty context bar" 0
@@ -2934,6 +2944,7 @@ let test_a_board_post_without_a_time_has_no_age () =
     (Schedule.board_age_text ~now:7200. None)
 
 let () =
+  test_terminal_size_retains_raw_resize_signal ();
   run "tui_render_schedule"
     [ ( "render scheduling"
       , [ test_case "idle performs no render work" `Quick

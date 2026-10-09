@@ -1,9 +1,9 @@
 {
   "scope": "Actual shipped page in Chromium with fixture API responses; no deployed binary or DOS emulator validation.",
-  "source_sha256": "2a8e8daa08fb583345ce67a0dacc22b97b6a51f74d4c24f403aac9d82716e528",
+  "source_sha256": "45ded1034876bc51e73b18fea20f60df7fd8e477d263a4a093f40756efb69851",
   "browser_version": "149.0.7827.55",
   "seat_reads": 32,
-  "frame_reads": 94,
+  "frame_reads": 95,
   "checks": [
     "seat recovers without machine activity",
     "failed frame is fetched again",
@@ -160,6 +160,11 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/play/pad",
+      "query": ""
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/play/seat",
       "query": ""
     },
@@ -217,6 +222,11 @@
       "method": "GET",
       "path": "/api/v1/play/seat",
       "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
     },
     {
       "method": "POST",
@@ -254,6 +264,11 @@
       "query": ""
     },
     {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture"
+    },
+    {
       "method": "POST",
       "path": "/api/v1/play/session",
       "query": ""
@@ -265,17 +280,12 @@
     },
     {
       "method": "GET",
-      "path": "/api/v1/lane-addons/live",
-      "query": "?source_kind=dos_capture"
-    },
-    {
-      "method": "GET",
-      "path": "/api/v1/play/seat",
+      "path": "/api/v1/play/pad",
       "query": ""
     },
     {
       "method": "GET",
-      "path": "/api/v1/play/pad",
+      "path": "/api/v1/play/seat",
       "query": ""
     },
     {
@@ -310,6 +320,11 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/play/pad",
+      "query": ""
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/play/seat",
       "query": ""
     },
@@ -334,14 +349,14 @@
       "query": ""
     },
     {
-      "method": "POST",
-      "path": "/api/v1/play/session",
-      "query": ""
-    },
-    {
       "method": "GET",
       "path": "/api/v1/lane-addons/live",
       "query": "?source_kind=dos_capture"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/session",
+      "query": ""
     },
     {
       "method": "GET",
@@ -567,6 +582,11 @@
       "method": "GET",
       "path": "/api/v1/lane-addons/live",
       "query": "?source_kind=dos_capture"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/play/pad",
+      "query": ""
     },
     {
       "method": "GET",

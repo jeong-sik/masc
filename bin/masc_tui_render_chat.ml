@@ -1431,12 +1431,15 @@ let tool_result_rows state ~keeper_name ~max_cells projection =
                          (Keeper_chat_transcript.native_progress_details activity))
                | Keeper_chat_transcript.Native_running -> Keeper_chat_transcript.native_progress_details activity
                | Keeper_chat_transcript.Started
-               | Keeper_chat_transcript.Awaiting_result -> None
+               | Keeper_chat_transcript.Awaiting_result ->
+                   Keeper_chat_transcript.native_progress_details activity
                | Keeper_chat_transcript.Returned
                | Keeper_chat_transcript.Failed
                | Keeper_chat_transcript.Never_returned
                | Keeper_chat_transcript.Outcome_unrecorded ->
-                   Some unavailable)
+                   Some (Option.value
+                     (Keeper_chat_transcript.native_progress_details activity)
+                     ~default:unavailable))
         in
         (* Only generated status text is dressed. Payload stays terminal-safe
            plain text, including words or glyphs that resemble a failure. *)

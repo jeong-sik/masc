@@ -399,10 +399,12 @@ let draw_rows ~now ~width rows =
     let label_cells = min 20 (max 6 (inner / 3)) in
     let utilization = window.Masc.Tui_decode_usage.puw_utilization in
     let share = share_of_full utilization in
-    let value = match share with
-      | Some share -> "Used " ^ Printf.sprintf "%4s" (utilization_text
+    let value = match utilization, share with
+      | Masc.Tui_decode_usage.Utilization_usd _, _ ->
+          "Used " ^ utilization_text utilization
+      | _, Some share -> "Used " ^ Printf.sprintf "%4s" (utilization_text
           (Masc.Tui_decode_usage.Utilization_fraction share))
-      | None -> "Used " ^ utilization_text utilization
+      | _, None -> "Used " ^ utilization_text utilization
     in
     let value_cells = Text.display_width value in
     let room = inner - label_cells - value_cells - 4 in

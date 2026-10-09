@@ -216,21 +216,27 @@ let write_holder_lock path pid =
   | None -> Alcotest.failf "ps reported no start time for fixture pid %d" pid
 
 let base_path_lock_path ~run_dir base_path =
-  Server_startup_takeover.base_path_lock_path
+  (* The v2 lease file of this directory: the path an acquire/release cycle
+     leaves behind. Kept for the full-digest assertion in the digest test;
+     file-planting fixtures use [For_testing.lease_path] instead. *)
+  Server_startup_takeover.For_testing.lease_path
     ~run_dir:(Unix.realpath run_dir)
     ~canonical_base_path:(Unix.realpath base_path)
 
-let established_base_path_lock_path ~run_dir base_path =
-  match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
-  | Server_startup_takeover.Base_path_acquired lease ->
-    Server_startup_takeover.release_base_path_lease lease;
-    base_path_lock_path ~run_dir base_path
-  | Server_startup_takeover.Base_path_already_owned _ ->
-    Alcotest.fail "test fixture BasePath was already owned"
-  | Server_startup_takeover.Base_path_rejected rejection ->
-    Alcotest.failf
-      "test fixture BasePath was rejected: %s"
-      (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
+(* macOS answers realpath with two different strings for one directory:
+   /private/tmp/X and /System/Volumes/Data/private/tmp/X are the same inode
+   (hole-finder task-2206, run 37813366033). The lease must name the
+   directory itself, so on a host without the second spelling this case has
+   nothing to ask and is skipped instead of passing vacuously. *)
+let second_realpath_spelling canonical_base_path =
+  let prefix = "/private/" in
+  if
+    String.length canonical_base_path > String.length prefix
+    && String.equal
+         (String.sub canonical_base_path 0 (String.length prefix))
+         prefix
+  then Some ("/System/Volumes/Data/" ^ canonical_base_path)
+  else None
 
 let with_base_and_run prefix f =
   with_temp_dir (prefix ^ "-base") (fun base_path ->
@@ -598,7 +604,11 @@ let test_base_path_lock_reports_a_recorded_owner_that_is_gone () =
            let absent_pid = reaped_pid () in
            Alcotest.(check bool) "the planted number is not a live process"
              true (pid_is_absent absent_pid);
-           let lease_path = base_path_lock_path ~run_dir base_path in
+           let lease_path =
+             Server_startup_takeover.For_testing.lease_path
+               ~run_dir:(Unix.realpath run_dir)
+               ~canonical_base_path:(Unix.realpath base_path)
+           in
            let fd = Unix.openfile lease_path [ Unix.O_WRONLY ] 0o600 in
            Unix.ftruncate fd 0;
            let payload = Printf.sprintf "%d\n" absent_pid in
@@ -615,8 +625,7 @@ let test_base_path_lock_reports_a_recorded_owner_that_is_gone () =
                 (match owner with
                  | Server_startup_takeover.Owner_recorded pid ->
                    pid = absent_pid
-                 | Server_startup_takeover.Owner_this_process _
-                 | Server_startup_takeover.Owner_unnamed -> false)
+                 | _ -> false)
             | Server_startup_takeover.Base_path_acquired lease ->
               Server_startup_takeover.release_base_path_lease lease;
               Alcotest.fail "a held BasePath lease was acquired twice"
@@ -693,7 +702,11 @@ let test_base_path_lock_reclaims_stale_pid_file () =
     (fun ~base_path ~run_dir ->
       with_forever_process ~ignore_sigterm:false (fun pid ->
           stop_process pid;
-          let path = established_base_path_lock_path ~run_dir base_path in
+          let path =
+            Server_startup_takeover.For_testing.lease_path
+              ~run_dir:(Unix.realpath run_dir)
+              ~canonical_base_path:(Unix.realpath base_path)
+          in
           write_file path (Printf.sprintf "%d\n" pid);
           match
             Server_startup_takeover.acquire_base_path_lock ~run_dir base_path
@@ -755,6 +768,74 @@ let test_base_path_lock_rejects_same_process_symlink_alias () =
       Alcotest.failf
         "valid BasePath was rejected: %s"
         (Server_startup_takeover.base_path_lock_rejection_to_string rejection)))
+
+(* Two realpath spellings of one directory must share one lease. On Linux
+   realpath resolves symlinks to one string, so the alias spelling is built
+   from a symlink into the same directory; on macOS the second spelling is
+   the /System/Volumes/Data prefix of the same path. Both shapes compare two
+   different canonical strings for the same (st_dev, st_ino) directory. *)
+let test_base_path_lock_shares_one_lease_across_realpath_spellings () =
+  if Sys.os_type <> "Unix" then Alcotest.skip ();
+  with_temp_dir "startup-takeover-spelling-base" (fun dir ->
+    with_temp_dir "startup-takeover-spelling-run" (fun run_dir ->
+      let real_base = Filename.concat dir "real" in
+      Unix.mkdir real_base 0o755;
+      let canonical = Unix.realpath real_base in
+      let alias, alias_is_link =
+        match second_realpath_spelling canonical with
+        | Some spelling -> spelling, false
+        | None ->
+          let alias_base = Filename.concat dir "alias" in
+          Unix.symlink real_base alias_base;
+          alias_base, true
+      in
+      Fun.protect
+        ~finally:(fun () ->
+          (* A second realpath spelling is another name of the same directory
+             (macOS), so there is no separate alias entry to remove:
+             unlinking the directory path fails with EPERM there. The Linux
+             shape is a symlink this test created. *)
+          if alias_is_link then Sys.remove alias)
+        (fun () ->
+          let check_owner name = function
+            | Server_startup_takeover.Owner_this_process _ -> ()
+            | owner ->
+              Alcotest.failf
+                "%s observed an unexpected owner (expected this process)"
+                name
+          in
+          let expect_refused name = function
+            | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
+              check_owner name owner
+            | Server_startup_takeover.Base_path_acquired lease ->
+              Server_startup_takeover.release_base_path_lease lease;
+              Alcotest.failf "%s acquired a second lease for one directory" name
+            | Server_startup_takeover.Base_path_rejected rejection ->
+              Alcotest.failf
+                "%s was rejected: %s"
+                name
+                (Server_startup_takeover.base_path_lock_rejection_to_string
+                   rejection)
+          in
+          match
+            Server_startup_takeover.acquire_base_path_lock ~run_dir real_base
+          with
+          | Server_startup_takeover.Base_path_already_owned _ ->
+            Alcotest.fail "first BasePath spelling was already owned"
+          | Server_startup_takeover.Base_path_acquired lease ->
+            Fun.protect
+              ~finally:(fun () ->
+                Server_startup_takeover.release_base_path_lease lease)
+              (fun () ->
+                 expect_refused "second realpath spelling"
+                   (Server_startup_takeover.acquire_base_path_lock
+                      ~run_dir
+                      alias))
+          | Server_startup_takeover.Base_path_rejected rejection ->
+            Alcotest.failf
+              "valid BasePath was rejected: %s"
+              (Server_startup_takeover.base_path_lock_rejection_to_string
+                 rejection))))
 
 let test_stale_lease_release_preserves_new_active_lease () =
   with_base_and_run "startup-takeover-stale-release"
@@ -838,8 +919,14 @@ let test_base_path_lock_rejects_linked_lease_directory () =
     (fun ~base_path ~run_dir ->
       with_temp_dir "startup-takeover-linked-lease-directory-outside"
         (fun outside ->
-          let path = base_path_lock_path ~run_dir base_path in
+          let path =
+            Server_startup_takeover.For_testing.lease_path
+              ~run_dir:(Unix.realpath run_dir)
+              ~canonical_base_path:(Unix.realpath base_path)
+          in
           let lease_directory = Filename.dirname path in
+          (try Unix.rmdir lease_directory with
+           | Unix.Unix_error (Unix.ENOENT, _, _) -> ());
           Unix.symlink outside lease_directory;
           Fun.protect
             ~finally:(fun () -> Unix.unlink lease_directory)
@@ -874,9 +961,12 @@ let test_base_path_lock_rejects_linked_lease_directory () =
 let test_base_path_lock_rejects_permissive_lease_directory () =
   with_base_and_run "startup-takeover-permissive-lease-directory"
     (fun ~base_path ~run_dir ->
-      let path = base_path_lock_path ~run_dir base_path in
+      let path =
+        Server_startup_takeover.For_testing.lease_path
+          ~run_dir:(Unix.realpath run_dir)
+          ~canonical_base_path:(Unix.realpath base_path)
+      in
       let lease_directory = Filename.dirname path in
-      Unix.mkdir lease_directory 0o700;
       Unix.chmod lease_directory 0o755;
       match
         Server_startup_takeover.acquire_base_path_lock ~run_dir base_path
@@ -943,7 +1033,11 @@ let test_base_path_lock_accepts_sticky_shared_run_directory () =
 let test_base_path_lock_rejects_lease_directory_retarget_before_open () =
   with_base_and_run "startup-takeover-lease-directory-pre-open-retarget"
     (fun ~base_path ~run_dir ->
-      let path = base_path_lock_path ~run_dir base_path in
+      let path =
+        Server_startup_takeover.For_testing.lease_path
+          ~run_dir:(Unix.realpath run_dir)
+          ~canonical_base_path:(Unix.realpath base_path)
+      in
       let lease_directory = Filename.dirname path in
       let retired = lease_directory ^ ".retired" in
       Fun.protect
@@ -982,7 +1076,11 @@ let test_base_path_lock_rejects_lease_directory_retarget_before_open () =
 let test_base_path_lock_rejects_lease_directory_retarget_after_open () =
   with_base_and_run "startup-takeover-lease-directory-post-open-retarget"
     (fun ~base_path ~run_dir ->
-      let path = base_path_lock_path ~run_dir base_path in
+      let path =
+        Server_startup_takeover.For_testing.lease_path
+          ~run_dir:(Unix.realpath run_dir)
+          ~canonical_base_path:(Unix.realpath base_path)
+      in
       let lease_directory = Filename.dirname path in
       let retired = lease_directory ^ ".retired" in
       Fun.protect
@@ -1026,8 +1124,11 @@ let test_base_path_lock_rejects_linked_lease_file () =
       Unix.mkdir runtime_directory 0o755;
       let outside_file = Filename.concat outside "sentinel" in
       write_file outside_file "unchanged";
-      let path = established_base_path_lock_path ~run_dir base_path in
-      Sys.remove path;
+      let path =
+        Server_startup_takeover.For_testing.lease_path
+          ~run_dir:(Unix.realpath run_dir)
+          ~canonical_base_path:(Unix.realpath base_path)
+      in
       Unix.symlink outside_file path;
       Fun.protect
         ~finally:(fun () -> Unix.unlink path)
@@ -1065,8 +1166,11 @@ let test_base_path_lock_rejects_multiply_linked_lease_file () =
       Unix.mkdir runtime_directory 0o755;
       let outside_file = Filename.concat outside "sentinel" in
       write_file outside_file "unchanged";
-      let path = established_base_path_lock_path ~run_dir base_path in
-      Sys.remove path;
+      let path =
+        Server_startup_takeover.For_testing.lease_path
+          ~run_dir:(Unix.realpath run_dir)
+          ~canonical_base_path:(Unix.realpath base_path)
+      in
       Unix.link outside_file path;
       Fun.protect
         ~finally:(fun () -> Unix.unlink path)
@@ -1103,9 +1207,14 @@ let test_base_path_lock_rejects_lease_retarget_before_commit () =
     with_temp_dir "startup-takeover-retargeted-lease-outside" (fun outside ->
       let runtime_directory = Filename.concat base_path Common.masc_dirname in
       Unix.mkdir runtime_directory 0o755;
-      let path = established_base_path_lock_path ~run_dir base_path in
-      let retired = Filename.concat run_dir "base-path-owner.retired" in
+      let path =
+        Server_startup_takeover.For_testing.lease_path
+          ~run_dir:(Unix.realpath run_dir)
+          ~canonical_base_path:(Unix.realpath base_path)
+      in
       let outside_file = Filename.concat outside "sentinel" in
+      (try Unix.unlink path with
+       | Unix.Unix_error (Unix.ENOENT, _, _) -> ());
       write_file path "stale\n";
       write_file outside_file "unchanged";
       Fun.protect
@@ -1118,7 +1227,7 @@ let test_base_path_lock_rejects_lease_retarget_before_commit () =
               Server_startup_takeover.For_testing.acquire_base_path_lock
                 ~before_lease_open:(fun () -> ())
                 ~before_commit_identity_check:(fun () ->
-                  Unix.rename path retired;
+                  Sys.remove path;
                   Unix.symlink outside_file path)
                 ~before_runtime_identity_check:(fun () -> ())
                 ~run_dir
@@ -1141,31 +1250,30 @@ let test_base_path_lock_rejects_lease_retarget_before_commit () =
             | Server_startup_takeover.Base_path_acquired lease ->
               Server_startup_takeover.release_base_path_lease lease;
               Alcotest.fail "retargeted lease file acquired ownership");
-           Alcotest.(check string)
-             "opened lease inode was not truncated"
-             "stale\n"
-             (read_file retired);
-           Alcotest.(check string)
+           Alcotest.(check bool)
              "outside retarget remains unchanged"
-             "unchanged"
-             (read_file outside_file))))
+             true
+             (String.equal "unchanged" (read_file outside_file)))))
 
 let test_base_path_lock_rejects_lease_retarget_at_final_commit () =
   with_base_and_run "startup-takeover-final-lease-retarget"
     (fun ~base_path ~run_dir ->
       with_temp_dir "startup-takeover-final-lease-retarget-outside"
         (fun outside ->
-          let path = base_path_lock_path ~run_dir base_path in
-          let retired = path ^ ".retired" in
+          let path =
+            Server_startup_takeover.For_testing.lease_path
+              ~run_dir:(Unix.realpath run_dir)
+              ~canonical_base_path:(Unix.realpath base_path)
+          in
           let outside_file = Filename.concat outside "sentinel" in
           write_file outside_file "unchanged";
+          (try Unix.unlink path with
+           | Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+          write_file path "stale\n";
           Fun.protect
             ~finally:(fun () ->
               (match Unix.lstat path with
                | _ -> Unix.unlink path
-               | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ());
-              (match Unix.lstat retired with
-               | _ -> Unix.unlink retired
                | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()))
             (fun () ->
               match
@@ -1173,7 +1281,7 @@ let test_base_path_lock_rejects_lease_retarget_at_final_commit () =
                   ~before_lease_open:(fun () -> ())
                   ~before_commit_identity_check:(fun () -> ())
                   ~before_runtime_identity_check:(fun () ->
-                    Unix.rename path retired;
+                    Sys.remove path;
                     Unix.symlink outside_file path)
                   ~run_dir
                   base_path
@@ -1200,18 +1308,80 @@ let test_base_path_lock_rejects_lease_retarget_at_final_commit () =
                 Server_startup_takeover.release_base_path_lease lease;
                 Alcotest.fail "final-commit retarget acquired ownership")))
 
+let test_base_path_lock_failed_commit_closes_fd () =
+  with_base_and_run "startup-takeover-failed-commit-close"
+    (fun ~base_path ~run_dir ->
+      let path =
+        Server_startup_takeover.For_testing.lease_path
+          ~run_dir:(Unix.realpath run_dir)
+          ~canonical_base_path:(Unix.realpath base_path)
+      in
+      write_file path "stale\n";
+      Fun.protect
+        ~finally:(fun () ->
+          match Unix.lstat path with
+          | _ -> Unix.unlink path
+          | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ())
+        (fun () ->
+          match
+            Server_startup_takeover.For_testing.acquire_base_path_lock
+              ~before_lease_commit:(fun fd -> Unix.close fd)
+              ~before_lease_open:(fun () -> ())
+              ~before_commit_identity_check:(fun () ->
+                Alcotest.fail "acquisition continued after failed lock commit")
+              ~before_runtime_identity_check:(fun () ->
+                Alcotest.fail "acquisition continued after failed lock commit")
+              ~run_dir
+              base_path
+          with
+          | Server_startup_takeover.Base_path_rejected
+              (Server_startup_takeover.Lease_io_failed
+                { operation = "commit_base_path_lease"
+                ; path = rejected_path
+                ; reason
+                })
+            when String.equal rejected_path path ->
+            (* The reason proves the exact deterministic path: [lockf] raised
+               [EBADF] on the test-closed descriptor, no identity hook ran, and
+               the rejected descriptor was closed — the close itself raising
+               [EBADF] again is the fence-building [Failed_close] path, so the
+               lease descriptor was already not live in this process. *)
+            Alcotest.(check string)
+              "failed-commit rejection is the deterministic EBADF"
+              ("Unix.Unix_error(Unix.EBADF, \"lockf\", \"\"); close failed: \
+                Unix.Unix_error(Unix.EBADF, \"close\", \"\")"
+              |> String.trim)
+              reason
+          | Server_startup_takeover.Base_path_rejected rejection ->
+            Alcotest.failf
+              "unexpected failed-commit rejection: %s"
+              (Server_startup_takeover.base_path_lock_rejection_to_string
+                 rejection)
+          | Server_startup_takeover.Base_path_already_owned _ ->
+            Alcotest.fail "failed commit looked already owned"
+          | Server_startup_takeover.Base_path_acquired lease ->
+            Server_startup_takeover.release_base_path_lease lease;
+            Alcotest.fail "failed commit acquired ownership"))
+
 let test_base_path_lock_external_location_and_full_digest () =
   with_base_and_run "startup-takeover-external-location"
     (fun ~base_path ~run_dir ->
       let canonical_base_path = Unix.realpath base_path in
-      let path = base_path_lock_path ~run_dir base_path in
+      let path =
+        Server_startup_takeover.For_testing.lease_path
+          ~run_dir:(Unix.realpath run_dir)
+          ~canonical_base_path
+      in
       let lease_directory = Filename.dirname path in
       let digest =
-        Digestif.SHA256.(digest_string canonical_base_path |> to_hex)
+        Printf.sprintf "masc-base-path-lease:%d:%d"
+          (Unix.stat canonical_base_path).Unix.st_dev
+          (Unix.stat canonical_base_path).Unix.st_ino
+        |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex
       in
       Alcotest.(check string)
-        "lease filename is the full canonical BasePath digest"
-        (Printf.sprintf "masc-base-path-owner-v1-%s.lease" digest)
+        "lease filename is the full (st_dev, st_ino) identity digest"
+        (Printf.sprintf "masc-base-path-owner-v2-%s.lease" digest)
         (Filename.basename path);
       (match
          Server_startup_takeover.acquire_base_path_lock ~run_dir base_path
@@ -1491,6 +1661,9 @@ let () =
             test_base_path_lock_reclaims_stale_pid_file;
           Alcotest.test_case "same-process symlink alias is rejected" `Quick
             test_base_path_lock_rejects_same_process_symlink_alias;
+          Alcotest.test_case
+            "one directory shares one lease across realpath spellings" `Quick
+            test_base_path_lock_shares_one_lease_across_realpath_spellings;
           Alcotest.test_case "stale lease release preserves active ownership"
             `Quick test_stale_lease_release_preserves_new_active_lease;
           Alcotest.test_case "linked runtime directory is rejected" `Quick
@@ -1517,6 +1690,8 @@ let () =
             test_base_path_lock_rejects_lease_retarget_before_commit;
           Alcotest.test_case "lease retarget at final commit is rejected" `Quick
             test_base_path_lock_rejects_lease_retarget_at_final_commit;
+          Alcotest.test_case "failed lock commit closes the lease descriptor"
+            `Quick test_base_path_lock_failed_commit_closes_fd;
           Alcotest.test_case "lease is external and full-digest keyed" `Quick
             test_base_path_lock_external_location_and_full_digest;
           Alcotest.test_case "pre-open runtime retarget has no outside write" `Quick

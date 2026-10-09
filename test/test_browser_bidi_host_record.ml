@@ -204,7 +204,9 @@ let test_a_layout_this_reader_does_not_know_is_refused () =
     ; "a reason with a bare backslash", {|could not read C:\temp|}
     ; "a reason that ends in a backslash", {|stopped \|}
     ; "a reason with a lower-case mark", {|stopped \x5c|}
+    ; "a reason with a lower-case first digit", {|stopped \xaF|}
     ; "a reason with a mark cut short", {|stopped \x5|}
+    ; "a reason with a mark whose first digit is not hex", {|stopped \xgA|}
     ; "a reason with a mark whose second digit is not hex", {|stopped \x0Z|}
     ; "a reason with a mark for a byte a host writes as it is", {|stopped \x41|}
     ; "a reason with a mark cut by the length mark", String.make 509 'a' ^ {|\x5...|}

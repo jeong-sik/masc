@@ -7,8 +7,8 @@ This campaign covers tracked code files with at least 2,000 lines. The initial
 inventory contains 171 candidates: 75 production source/style/interface files,
 90 tests, 3 tooling files and 3 evidence scripts. `inventory.json` records each
 baseline path and its current audit state. A line count selects candidates; it
-is not a defect verdict or a new build gate. Thirty-two production candidates received
-bounded changes; their other responsibilities remain pending. The other 43
+is not a defect verdict or a new build gate. Thirty-four production candidates received
+bounded changes; their other responsibilities remain pending. The other 41
 production candidates still require semantic review. All 171 candidates remain
 in the campaign until their responsibilities and necessary repairs are assessed.
 
@@ -180,3 +180,5 @@ changes have the appropriate verification evidence.
 Composition result and failure projection are separated from runtime effects in [#42113](https://github.com/jeong-sik/masc/pull/42113). See [composition-projection/README.md](composition-projection/README.md). Remaining execution and settlement policies are still pending audit.
 
 Connector durable-request construction, strict replay and target projection are separated from Gate/transmission effects in [#42114](https://github.com/jeong-sik/masc/pull/42114). See [connector-replay/README.md](connector-replay/README.md). Remaining handler policies require semantic audit.
+
+MicroVM build-link invalid paths retain their actual refusal reason in [#42118](https://github.com/jeong-sik/masc/pull/42118), including the direct sandbox-runtime diagnostic consumer. See [microvm-link-refusal/README.md](microvm-link-refusal/README.md). Both candidates retain their remaining lifecycle and execution audit scope.

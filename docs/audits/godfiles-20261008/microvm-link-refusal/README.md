@@ -1,6 +1,6 @@
 # Build-link refusal preserves its actual cause
 
-Base: 734d28851ccab83a3f45baeace8be21b0888c944.
+PR #42118. Base: 734d28851ccab83a3f45baeace8be21b0888c944.
 
 When a scanned checkout path contained an ambiguous separator or an empty segment, build_link_target rejected it. build_link_rows_of_scan then replaced the reason with Link_refused_real_directory. The runtime consequently warned that real build output existed and would be removed at the next boot, even for an absent build directory.
 

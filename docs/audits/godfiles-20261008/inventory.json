@@ -360,7 +360,11 @@
       "path": "lib/keeper/keeper_sandbox_microvm.ml",
       "baseline_lines": 2597,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; remaining semantic review pending",
+      "current_lines": 2596,
+      "prs": [
+        42118
+      ]
     },
     {
       "path": "lib/keeper/keeper_skill_activation_ledger.ml",
@@ -442,7 +446,11 @@
       "path": "lib/keeper/keeper_turn_sandbox_runtime.ml",
       "baseline_lines": 3012,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; remaining semantic review pending",
+      "current_lines": 3015,
+      "prs": [
+        42118
+      ]
     },
     {
       "path": "lib/keeper/keeper_unified_prompt.ml",

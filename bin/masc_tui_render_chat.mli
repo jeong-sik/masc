@@ -13,6 +13,26 @@ type chat_search_result = {
   unavailable_entries : int;
 }
 
+type chat_search_work
+type chat_search_match
+val prepare_keeper_message_search :
+  ?preview_lookup:(string -> Masc_tui_link_preview.og_preview) ->
+  Masc_tui_types.state -> keeper_name:string -> needle:string ->
+  older_than:Masc_tui_types.chat_search_cursor option -> chat_search_work
+val run_keeper_message_search : chat_search_work -> chat_search_match
+(** Pure matching over frozen producer runs; safe on a CPU executor domain. *)
+val complete_keeper_message_search : chat_search_work -> chat_search_match -> chat_search_result
+(** UI-domain scroll geometry and result construction; call only after admission. *)
+val admit_keeper_message_search : Masc_tui_types.state -> chat_search_work ->
+  chat_search_match -> chat_search_result option
+(** Revalidate the matched source and reproject its exact endpoint on the UI domain. *)
+val keeper_message_search_identity : chat_search_work ->
+  Masc_tui_types.workspace_authority * string * string
+val keeper_message_search_owned : Masc_tui_types.state -> chat_search_work -> bool
+val keeper_message_search_is_current :
+  ?preview_lookup:(string -> Masc_tui_link_preview.og_preview) ->
+  Masc_tui_types.state -> chat_search_work -> bool
+
 val keeper_message_find_scroll :
   ?preview_lookup:(string -> Masc_tui_link_preview.og_preview) ->
   Masc_tui_types.state ->

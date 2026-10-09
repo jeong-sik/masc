@@ -140,8 +140,7 @@ let released_text entry events =
     let replace, text = match event with
       | ContentBlockDelta {delta=TextDelta text; _} -> false, Some text
       | ContentBlockDelta {delta=TextSnapshot text; _} ->
-          let text = String.trim text in
-          true, (if text = "" then None else Some text)
+          true, Some (String.trim text)
       | _ -> false, None in
     match text with
     | None -> entry, changed

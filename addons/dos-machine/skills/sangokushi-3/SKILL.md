@@ -130,7 +130,16 @@ Observed 2026-09-29 in scenario 6 as 조예, from 17 하비 against 33 건업.
    then the unit type `1.보병 2.기마 3.노궁 4.강노`, number, `enter`. A type
    the city cannot field answers `그 부대는 안됩니다`. A sent officer gets a
    `*`. Several officers can go; an empty `enter` ends the list.
-4. Gold, then food: the amount, `enter`. Then `처들어가겠습니까(Y/N)?`, `y`.
+4. If `누구를 총대장으로 하겠습니까(1-N)?` appears after ending the list,
+   choose a commander from the displayed expedition officers, then `enter`.
+   In the February 189 Chenliu-to-city-9 preparation with Xiahou Yuan and
+   Xiahou Dun, this prompt appeared before any resource amount. Do not type
+   gold into it. An observed out-of-range `5` followed by Enter abandoned
+   that preparation and returned to the campaign menu; it did not launch a
+   battle. Backspace had not visibly cleared that field.
+5. Only when the resource prompts are visible, enter gold and then food,
+   each amount followed by `enter`. Then answer the visible
+   `처들어가겠습니까(Y/N)?` confirmation with `y`.
 
 ## Placing officers for a battle
 

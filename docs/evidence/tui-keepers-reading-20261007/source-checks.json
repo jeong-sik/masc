@@ -1,0 +1,45 @@
+{
+  "scope": "Historical parser checks for the recorded source hashes only. Later integration changed source; this receipt does not validate the current head. Native regressions, geometry and PTY were not rerun.",
+  "checks": {
+    "bin/masc_tui.ml": {
+      "sha256": "fcf00c05666cadf8258d2888b5f7bc25d722d50687ecd0c5c66a3b04478f2726",
+      "check": "ocaml parsing",
+      "result": "PASS"
+    },
+    "bin/masc_tui_render.ml": {
+      "sha256": "bb34b70fae1e7a23463ed2a4c361a337186c358153211a46b474a13cf0e62776",
+      "check": "ocaml parsing",
+      "result": "PASS"
+    },
+    "docs/evidence/tui-keepers-reading-20261007/project-fields.py": {
+      "sha256": "36294380519e9c6035b952250c1acd70caf008e9295cbc2fc80f1c7a41ca89d6",
+      "check": "python ast.parse",
+      "result": "PASS"
+    },
+    "test/test_tui_board_heading_width.py": {
+      "sha256": "c4a05db3513406d0b3461b8588d4ec101c3c407a369475d11753609082a57346",
+      "check": "python ast.parse",
+      "result": "PASS"
+    },
+    "test/test_tui_keeper_info_refresh_pty.py": {
+      "sha256": "66d058ed675d31b4fc82d6caedaaa15691c12cb101253b0e135ac322ceb884a1",
+      "check": "python ast.parse",
+      "result": "PASS"
+    },
+    "test/test_tui_keeper_roster_window.py": {
+      "sha256": "1a4c78f790004b6cf2c6c15a969d6885aac7065fd9ee3ad1fe3bc8f307bc7713",
+      "check": "python ast.parse",
+      "result": "PASS"
+    },
+    "test/test_tui_region_baseline_pty.py": {
+      "sha256": "5cf17e5bde1b88c83c9da247265e65487b2775a10f3bf71b29688cd85e52333c",
+      "check": "python ast.parse",
+      "result": "PASS"
+    },
+    "test/tui_keyboard_keepers.py": {
+      "sha256": "3bf208416c42e2caaf3ee3458f395a31c641c0f3b7b1d31fe5ff61b910a0dda2",
+      "check": "python ast.parse",
+      "result": "PASS"
+    }
+  }
+}

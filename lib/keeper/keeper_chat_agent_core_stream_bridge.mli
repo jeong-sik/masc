@@ -10,6 +10,12 @@
     [TextDelta] values always append. This adapter projects each accepted delta
     exactly once and never reinterprets it.
 
+    A published [Agent_core_stream_message_start] opens a new provider response.
+    The bridge suppresses an exact prelude replay within the current open
+    stream scope, and emits only protocol errors for conflicting starts.
+    Provider ids may be reused in a subsequent sealed scope; identity equality
+    is not a response-boundary test for downstream consumers.
+
     Exact tool quarantine is write-once per stream occurrence. The bridge keeps
     the first typed quarantine kind for freeze checks; later content events at
     that scope/index are suppressed and cannot overwrite the first failure. *)

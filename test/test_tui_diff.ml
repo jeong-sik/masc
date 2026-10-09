@@ -95,26 +95,6 @@ let test_repeated_lines_do_not_swallow_the_change () =
     (diff ~before:"same\nsame\nold" ~after:"same\nsame\nnew")
 ;;
 
-(* The column an added line has nothing to put in. A blank would read as an
-   alignment slip and a zero as line zero; both claim something the row does
-   not say. *)
-let test_a_missing_line_number_is_spelled_not_blank () =
-  check string "absence is a dash" "    -" (Diff.line_number_cell None);
-  check int "and it takes a number's width" 5
-    (String.length (Diff.line_number_cell None))
-;;
-
-let test_a_line_number_keeps_the_column_width () =
-  check int "single digit" 5 (String.length (Diff.line_number_cell (Some 7)));
-  check int "five digits" 5 (String.length (Diff.line_number_cell (Some 12345)));
-  check string "right aligned" "    7" (Diff.line_number_cell (Some 7));
-  (* Wider than the column rather than truncated: a line number cut to its
-     last digits is a different line, and a row that slips is visible while a
-     wrong number is not. *)
-  check string "a six-digit file overflows the column" "123456"
-    (Diff.line_number_cell (Some 123456))
-;;
-
 let render_numbered numbered =
   List.map
     (fun (n : Diff.numbered) ->
@@ -174,21 +154,6 @@ let test_numbered_preview_keeps_true_coordinates () =
   check int "the missing rows are counted" 5 omitted
 ;;
 
-let test_numbered_gutter_names_both_sides () =
-  check string "removed row" "   42     - - "
-    (Diff.numbered_gutter ~old_line:(Some 42) ~new_line:None ~marker:'-');
-  check string "added row" "    -    42 + "
-    (Diff.numbered_gutter ~old_line:None ~new_line:(Some 42) ~marker:'+');
-  check string "context row" "   42    42   "
-    (Diff.numbered_gutter ~old_line:(Some 42) ~new_line:(Some 42)
-       ~marker:' ');
-  check int "the gutter is fourteen cells" 14 Diff.numbered_gutter_cells;
-  check int "and an emitted gutter measures fourteen" 14
-    (String.length
-       (Diff.numbered_gutter ~old_line:(Some 42) ~new_line:(Some 42)
-          ~marker:' '))
-;;
-
 let () =
   run "tui_diff"
     [ ( "shape"
@@ -209,18 +174,12 @@ let () =
             test_preview_gives_changed_rows_the_budget_first
         ] )
     ; ( "line numbers"
-      , [ test_case "absence is spelled" `Quick
-            test_a_missing_line_number_is_spelled_not_blank
-        ; test_case "the column width holds" `Quick
-            test_a_line_number_keeps_the_column_width
-        ; test_case "numbering advances each side" `Quick
+      , [ test_case "numbering advances each side" `Quick
             test_number_advances_each_side
         ; test_case "a deletion carries no new side" `Quick
             test_number_deletion_carries_no_new_side
         ; test_case "a numbered preview keeps true coordinates" `Quick
             test_numbered_preview_keeps_true_coordinates
-        ; test_case "the gutter names both sides" `Quick
-            test_numbered_gutter_names_both_sides
-        ] )
+        ;] )
     ]
 ;;

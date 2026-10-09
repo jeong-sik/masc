@@ -11,7 +11,7 @@
  (modules masc_browser_host)
  (public_name masc-browser-host)
  (package masc)
- (libraries masc.browser_host masc.masc_log eio eio_main unix))
+ (libraries masc masc.browser_host masc.masc_log eio eio_main unix))
 
 (executable
  (name masc_reliable_change_g1_check)
@@ -622,6 +622,7 @@
  (wrapped false)
  (modules masc_tui_keeper_chat_history)
  (libraries
+  masc_tui_keeper_chat_log
   masc_tui_message_layout
   masc_tui_image_preview
   masc

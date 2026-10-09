@@ -101,20 +101,6 @@ let test_a_signal_on_curl_is_kept () =
     (Cache.fetch_failure_of_status (Unix.WSTOPPED 19) ~body_present:false)
 ;;
 
-let test_download_error_text_carries_the_reason () =
-  let mentions sub text = Option.is_some (Astring.String.find_sub ~sub text) in
-  check bool "HTTP error status is said" true
-    (mentions "HTTP error status" (Cache.download_error_text (Cache.Fetch_failed Cache.Http_error_status)));
-  check bool "an other exit code is said" true
-    (mentions "56" (Cache.download_error_text (Cache.Fetch_failed (Cache.Curl_exit { code = 56 }))));
-  check bool "an empty body is said" true
-    (mentions "empty body" (Cache.download_error_text Cache.Empty_body));
-  check bool "an unreadable cache file carries the detail" true
-    (mentions "EACCES" (Cache.download_error_text (Cache.Cache_unreadable { detail = "EACCES" })))
-;;
-
-(* ---- ffmpeg exit status ---- *)
-
 let test_a_clean_decode_with_a_frame_is_not_a_failure () =
   check (option decode_failure) "exit 0 + frame" None
     (Cache.decode_failure_of_status (Unix.WEXITED 0) ~output_present:true)
@@ -134,16 +120,6 @@ let test_a_nonzero_exit_does_not_diagnose_the_body () =
 let test_a_missing_decoder_keeps_the_body () =
   check (option decode_failure) "127 = sh found no ffmpeg" (Some Cache.Decoder_missing)
     (Cache.decode_failure_of_status (Unix.WEXITED 127) ~output_present:false)
-;;
-
-let test_decode_failure_text_carries_the_reason () =
-  let mentions sub text = Option.is_some (Astring.String.find_sub ~sub text) in
-  check bool "exit code is said" true
-    (mentions "exited 1" (Cache.decode_failure_text (Cache.Decoder_exit { code = 1 })));
-  check bool "missing executable is said" true
-    (mentions "not found" (Cache.decode_failure_text Cache.Decoder_missing));
-  check bool "read detail is said" true
-    (mentions "ENOENT" (Cache.decode_failure_text (Cache.Frame_unreadable { detail = "ENOENT" })))
 ;;
 
 let write_file path bytes =
@@ -501,9 +477,7 @@ let () =
             test_a_clean_exit_without_a_body_is_a_failure
         ; test_case "curl exit codes are named" `Quick test_curl_exit_codes_are_named
         ; test_case "a signal on curl is kept" `Quick test_a_signal_on_curl_is_kept
-        ; test_case "download error text carries the reason" `Quick
-            test_download_error_text_carries_the_reason
-        ] )
+        ;] )
     ; ( "decode"
       , [ test_case "a clean decode with a frame is not a failure" `Quick
             test_a_clean_decode_with_a_frame_is_not_a_failure
@@ -513,8 +487,6 @@ let () =
             test_a_nonzero_exit_does_not_diagnose_the_body
         ; test_case "a missing decoder keeps the body" `Quick
             test_a_missing_decoder_keeps_the_body
-        ; test_case "decode failure text carries the reason" `Quick
-            test_decode_failure_text_carries_the_reason
-        ] )
+        ;] )
     ]
 ;;

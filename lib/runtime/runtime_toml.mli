@@ -28,20 +28,20 @@ type parse_error =
   }
 [@@deriving show]
 
-type editor_transport =
+type editor_transport = Runtime_protocol.editor_transport =
   | Endpoint
   | Command
 
-type editor_semantics =
+type editor_semantics = Runtime_protocol.editor_semantics =
   | Http_provider
   | Official_client
 
-type editor_credential_policy =
+type editor_credential_policy = Runtime_protocol.editor_credential_policy =
   | Credentials_optional
   | Credentials_forbidden
   | Credentials_file_required
 
-type editor_protocol =
+type editor_protocol = Runtime_protocol.editor_protocol =
   { protocol : string
   ; transport : editor_transport
   ; semantics : editor_semantics
@@ -73,8 +73,5 @@ val parse_file : string -> (Runtime_schema.config, parse_error list) result
 (** {1 Internal: protocol resolution} *)
 
 val api_format_of_protocol : string -> (Runtime_schema.api_format, string) result
-(** Map a TOML protocol string to a {!Runtime_schema.api_format} variant. Only
-    the canonical labels are accepted: [messages-cli], [messages-http],
-    [openai-compatible-cli], [openai-compatible-http], [ollama-http],
-    [codex-app-server], and [claude-code]. Every other label is rejected as an
-    unknown protocol. *)
+(** Map a declared TOML protocol to its API format. The parser and structured
+    editor share {!Runtime_protocol}; unknown labels are rejected. *)

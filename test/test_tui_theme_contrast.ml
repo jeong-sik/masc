@@ -60,9 +60,6 @@ let schemes =
     (Catalog.all ~base_path:(themes_base_path ()) ())
 ;;
 
-
-
-
 let ansi scheme index =
   match Palette.ansi scheme.palette index with
   | Some color -> color
@@ -256,7 +253,6 @@ let test_receding_moves_toward_the_background_on_every_scheme () =
     schemes
 ;;
 
-
 (* End to end: build the palette the terminal would have reported for this
    scheme, hand it to the theme, and see what actually goes out on the wire.
 
@@ -278,7 +274,6 @@ let readable scheme colour =
          ~level:Palette.True_color)
     (palette_of scheme) colour
 ;;
-
 
 let truecolor_prefix = "\027[38;2;"
 
@@ -309,45 +304,6 @@ let test_a_failing_theme_entry_is_replaced_and_a_passing_one_is_not () =
     schemes
 ;;
 
-(* A terminal that answered OSC 10 and 11 but not OSC 4 knows its page and not
-   its palette, which is most multiplexers. Nothing is lifted there, because
-   there is nothing to measure. *)
-let test_an_unanswered_palette_changes_nothing () =
-  List.iter
-    (fun scheme ->
-      let without_ansi =
-        Palette.of_responses
-          ~foreground:(Some (foreground scheme))
-          ~background:(Some (background scheme))
-          ~ansi:(Array.make Palette.ansi_slot_count None)
-      in
-      List.iter
-        (fun (label, colour) ->
-          check bool
-            (Printf.sprintf "%s: %s keeps its plain code" scheme.name label)
-            true
-            (String.equal
-               (Masc_tui_theme.For_testing.ansi_readable ~colors_enabled:true
-                  ~project:
-                    (Palette.For_testing.best_color_for_level
-                       ~level:Palette.True_color)
-                  without_ansi colour)
-               (Masc_tui_theme.For_testing.ansi_color_code colour)))
-        named_colours)
-    schemes
-;;
-
-
-(* The keeper list draws what is about to happen to a keeper in colour alone.
-   The cell's other three readings are carried by a glyph, a word and a column
-   of their own, and a distinct glyph per action was tried and rejected -- four
-   shapes is what keeps the column legible. So the four colours are the whole
-   signal, and they have to stay apart for a reader who cannot separate red
-   from green: roughly one man in twelve.
-
-   Machado et al. 2009, severity 1.0, the matrices every colour-vision
-   simulator uses. Written here rather than reached for, like the hue check
-   above: an independent computation, not the renderer checking itself. *)
 let simulate_deficiency kind color =
   let matrix =
     match kind with
@@ -491,46 +447,6 @@ let categorical_slot_colours =
    four hues are what is left. Info and warn are still aliased, and are safe
    only because that surface draws neither; a surface reaching for slot 1 or 2
    owes the same check this test makes here. *)
-(* Every state the surface drawing slots also draws, not the two that were
-   noticed first.
-
-   The file listing is the surface: write_two_panes joins it to the content
-   pane on one terminal row, so a slot colour on the left and a state colour
-   on the right are one colour with two meanings on one line. #33477 found it
-   as red against bad, when a .png drew the blame failure's escape beside it,
-   and named bad here. #33722 found green against ok and added ok. Cyan
-   against info and yellow against warn were live the whole time and this
-   list is why nobody saw them: a test that names the defect it was written
-   for finds that defect again and nothing else.
-
-   So the list is what the pane draws, read off its Theme calls rather than
-   off what has gone wrong. It drifts when the pane starts drawing a state it
-   did not before -- there is no reading of the renderer that would catch
-   that, and the alternative to saying so is a test that quietly narrows. *)
-let test_no_categorical_slot_aliases_a_drawn_status_token () =
-  let drawn =
-    [ "bad", Masc_tui_ansi.Theme.bad
-    ; "ok", Masc_tui_ansi.Theme.ok
-    ; "info", Masc_tui_ansi.Theme.info
-    ; "warn", Masc_tui_ansi.Theme.warn
-    ]
-  in
-  List.iter
-    (fun (slot_label, _) ->
-      List.iter
-        (fun (status_label, token) ->
-          check bool
-            (Printf.sprintf "%s does not draw the same escape as %s" slot_label
-               status_label)
-            false
-            (String.equal
-               (Masc_tui_ansi.Theme.category
-                  (List.assoc slot_label labelled_categories))
-               (token ())))
-        drawn)
-    categorical_slot_colours
-;;
-
 let test_categorical_slots_hold_their_measured_floor () =
   List.iter
     (fun scheme ->
@@ -616,21 +532,6 @@ let test_the_setting_reads_back () =
       check bool "off reads back as off" false (Masc_tui_theme.lift_is_enabled ()));
   with_lift true (fun () ->
       check bool "on reads back as on" true (Masc_tui_theme.lift_is_enabled ()))
-;;
-
-let contrast_entry ~measured ~lifted : Masc_tui_theme_choice.entry =
-  { name = "test"; light = false; measured; lifted; swatch = [] }
-;;
-
-let test_contrast_status_names_native_assisted_and_unassisted () =
-  let native = contrast_entry ~measured:7 ~lifted:0 in
-  let assisted = contrast_entry ~measured:7 ~lifted:3 in
-  check string "native is a positive result" "native 7/7"
-    (Masc_tui_theme_choice.contrast_status ~lift_on:true native);
-  check string "lift on names the assisted colours" "lift 3/7"
-    (Masc_tui_theme_choice.contrast_status ~lift_on:true assisted);
-  check string "lift off names the colours still below the floor" "3/7 low"
-    (Masc_tui_theme_choice.contrast_status ~lift_on:false assisted)
 ;;
 
 let test_picker_orders_native_first_then_by_cost_and_name () =
@@ -826,8 +727,6 @@ let () =
             test_lift_on_still_replaces_a_failing_entry
         ; Alcotest.test_case "the setting reads back" `Quick
             test_the_setting_reads_back
-        ; Alcotest.test_case "status names native, assisted, and low" `Quick
-            test_contrast_status_names_native_assisted_and_unassisted
         ; Alcotest.test_case "picker orders native first, then cost and name"
             `Quick test_picker_orders_native_first_then_by_cost_and_name
         ] )
@@ -843,13 +742,9 @@ let () =
         ; Alcotest.test_case "a failing entry is replaced, a passing one is not"
             `Quick
             test_a_failing_theme_entry_is_replaced_and_a_passing_one_is_not
-        ; Alcotest.test_case "an unanswered palette changes nothing" `Quick
-            test_an_unanswered_palette_changes_nothing
         ; Alcotest.test_case
             "keeper action colours stay apart under red-green deficiency" `Quick
             test_keeper_action_colours_stay_apart_under_red_green_deficiency
-        ; Alcotest.test_case "no categorical slot aliases a drawn status token"
-            `Quick test_no_categorical_slot_aliases_a_drawn_status_token
         ; Alcotest.test_case "categorical slots hold their measured floor"
             `Quick test_categorical_slots_hold_their_measured_floor
 

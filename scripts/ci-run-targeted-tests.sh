@@ -72,15 +72,6 @@ for suite in ${requested[@]+"${requested[@]}"}; do
     exes+=("${suite_path}.exe")
   fi
 done
-# Evidence follows the aliases this runner actually resolved, not a second
-# interpretation of the CSV. Publish before the failure/execution branches so
-# partial or failed targeted runs retain their selected scope.
-if [ -n "${GITHUB_OUTPUT:-}" ]; then
-  python3 - ${aliases[@]+"${aliases[@]}"} >> "${GITHUB_OUTPUT}" <<'PYALIASES'
-import json, sys
-print("resolved_aliases=" + json.dumps(sys.argv[1:], separators=(",", ":")))
-PYALIASES
-fi
 # A name that resolves to nothing used to end the dispatch right
 # here, before a single suite was built, and it named only the first
 # one it reached: a ten-suite batch with one misspelling returned no

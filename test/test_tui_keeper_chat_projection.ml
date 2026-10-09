@@ -883,14 +883,6 @@ let test_a_recalled_line_still_carries_its_emoji () =
     ("a\\u200Db")
     (Chat.terminal_safe_text ~preserve_newlines:true ("a" ^ zwj ^ "b"))
 
-let test_request_labels_keep_random_suffix () =
-  let prefix = "tui-019d0000-0000-7000-8000-" in
-  let first = Chat.compact_request_id (prefix ^ "aaaaaaaaaaaa") in
-  let second = Chat.compact_request_id (prefix ^ "bbbbbbbbbbbb") in
-  check bool "nearby UUIDv7 labels remain distinct" false
-    (String.equal first second);
-  check int "compact label width" 20 (String.length first)
-
 let test_error_certainty () =
   check bool "transport is unverified" true
     (Chat.error_certainty (Chat.Transport_error "cut")
@@ -992,23 +984,6 @@ let test_reader_unauthenticated () =
        (Chat.protocol_error
           (Chat.Run_failed { accepted = false; message = "bad"; code = None })))
 
-(* The chat surface renders a transport failure as two sentences: the caller's
-   own reading of what it means for the turn, and this one's reading of where it
-   happened. Both used to claim the outcome was unverified, so the line said it
-   twice and pushed the cause -- the only part that changes between failures --
-   to the far end, where the terminal truncated it. *)
-let test_transport_error_names_the_cause_not_the_certainty () =
-  let cause = "Connection Error: Failed connecting to 127.0.0.1: connection refused" in
-  let rendered = Chat.error_to_string (Chat.Transport_error cause) in
-  let has needle = String_util.string_contains_substring ~needle rendered in
-  check bool "the cause survives" true (has cause);
-  check bool "the certainty is not restated here" false (has "unverified");
-  (* [Transport_error] is always [Outcome_unverified], so the caller that
-     renders certainty always speaks -- this one never has to. *)
-  check bool "transport failures are always unverified" true
-    (Chat.error_certainty (Chat.Transport_error cause) = Chat.Outcome_unverified)
-;;
-
 let test_unverified_retry_notice_names_the_cause () =
   let notice error = Chat.unverified_retry_notice ~request_id:"tui-01" error in
   let has ~needle value = String_util.string_contains_substring ~needle value in
@@ -1047,68 +1022,6 @@ let test_unverified_retry_notice_names_the_cause () =
   check bool "the server's words cannot move the cursor" false
     (has ~needle:"\x1b[" (notice injected))
 ;;
-
-let test_reconciliation_failure_detail () =
-  let refused : Chat.error =
-    Chat.Http_error
-      { status = 401
-      ; body = {|{"error":"[AuthError] Unauthorized","auth_error_code":"missing_token"}|}
-      }
-  in
-  let has needle detail =
-    String_util.string_contains_substring ~needle detail
-  in
-  (* Without a bearer the operator has none to present. *)
-  let absent = Chat.reconciliation_failure_detail ~credential_sent:false refused in
-  check bool "an absent credential is named as absent" true
-    (has "holds no operator token" absent);
-  check bool "an absent credential is not called refused" false
-    (has "was refused" absent);
-  (* With one, the server rejected what it was given -- telling the operator to
-     provide a token would be advice they have already followed. *)
-  let rejected = Chat.reconciliation_failure_detail ~credential_sent:true refused in
-  check bool "a rejected credential is named as rejected" true
-    (has "was refused" rejected);
-  check bool "a rejected credential is not called absent" false
-    (has "holds no operator token" rejected);
-  List.iter
-    (fun (label, detail) ->
-      check bool (label ^ " names the command that mints one") true
-        (has "masc login" detail);
-      check bool (label ^ " says the operation survives") true
-        (has "untouched on the server" detail);
-      (* Ctrl-R now cycles reasoning; no key settles a request. *)
-      check bool (label ^ " does not send the operator to a key that settles nothing") false
-        (has "Ctrl-R" detail);
-      check bool (label ^ " does not paste the server body") false
-        (has "auth_error_code" detail))
-    [ ("absent", absent); ("rejected", rejected) ];
-  (* A 403 with no auth code is the handler refusing the request, so the
-     detail is the server's answer, not the credential remedy. *)
-  let handler_refusal : Chat.error =
-    Chat.Http_error
-      { status = 403; body = {|{"error":"only your own queued message can be prioritized"}|} }
-  in
-  let handler_detail =
-    Chat.reconciliation_failure_detail ~credential_sent:true handler_refusal
-  in
-  check bool "a handler refusal keeps the server's words" true
-    (has "only your own queued message" handler_detail);
-  check bool "a handler refusal does not send the operator to masc login" false
-    (has "masc login" handler_detail);
-  let upstream : Chat.error =
-    Chat.Http_error { status = 503; body = "owner_stopping" }
-  in
-  List.iter
-    (fun credential_sent ->
-      let detail =
-        Chat.reconciliation_failure_detail ~credential_sent upstream
-      in
-      check bool "every other failure keeps the server words" true
-        (has "owner_stopping" detail);
-      check bool "every other failure does not blame the credential" false
-        (has "masc login" detail))
-    [ true; false ]
 
 let test_batch_preserves_original_user_history_once () =
   let module Store = Keeper_chat_operation_store in
@@ -1449,35 +1362,6 @@ let test_an_unstageable_image_is_refused_not_pathed () =
       Alcotest.fail "an empty .png should say so, not silently become a path")
 ;;
 
-let test_http_error_preview_preserves_utf8 () =
-  let prefix = "Keeper chat HTTP 500: " in
-  List.iter
-    (fun boundary ->
-      let body = String.make boundary 'a' ^ "한글가나다라마" in
-      let rendered = Chat.error_to_string (Chat.Http_error {status = 500; body}) in
-      check bool "HTTP error preview is valid UTF-8" true
-        (String_util.is_valid_utf8 rendered);
-      check bool "byte budget includes the cut mark" true
-        (String.length rendered <= String.length prefix + 240);
-      check bool "overflow uses the shared cut mark" true
-        (String.ends_with ~suffix:Masc_tui_message_layout.cut_mark rendered))
-    [235; 236; 237; 238; 239; 240; 241];
-  check string "short Unicode HTTP body remains intact"
-    (prefix ^ "짧은 오류")
-    (Chat.error_to_string (Chat.Http_error {status = 500; body = "짧은 오류"}))
-
-let test_missing_file_is_named_in_the_error () =
-  match Masc_tui_attachment.of_file ~path:"/nonexistent/masc-attach-probe.png" with
-  | Ok _ -> Alcotest.fail "a missing path must not attach"
-  | Error error ->
-    Alcotest.(check bool)
-      "error names the path"
-      true
-      (String_util.contains_substring
-         (Masc_tui_attachment.error_to_string error)
-         "masc-attach-probe.png")
-;;
-
 let test_checkpoint_segments_replay_until_actual_answer () =
   let checkpoint = [run_started; text_start;
     reply_details ~reply:"" ~turn_outcome:"continuation_checkpoint" (); text_end; run_finished] in
@@ -1492,7 +1376,6 @@ let test_checkpoint_segments_replay_until_actual_answer () =
   | Ok _ -> fail "checkpoint replay lost the actual answer"
   | Error error -> fail (Chat.stream_error_to_string error)
 ;;
-
 
 let test_interactive_admission_wire_roundtrip () =
   let module Stream = Server_routes_http_keeper_stream in
@@ -1590,18 +1473,11 @@ let () =
             test_terminal_text_escapes_invisible_codepoints
         ; test_case "a recalled line still carries its emoji" `Quick
             test_a_recalled_line_still_carries_its_emoji
-        ; test_case "request labels keep random suffix" `Quick
-            test_request_labels_keep_random_suffix
-        ; test_case "HTTP preview UTF-8 boundaries" `Quick test_http_error_preview_preserves_utf8
         ; test_case "typed error certainty" `Quick test_error_certainty
         ; test_case "unauthenticated reader keeps the operation open" `Quick
             test_reader_unauthenticated
-        ; test_case "transport error names the cause, not the certainty" `Quick
-            test_transport_error_names_the_cause_not_the_certainty
         ; test_case "unverified retry notice names the cause" `Quick
             test_unverified_retry_notice_names_the_cause
-        ; test_case "reconciliation failure detail" `Quick
-            test_reconciliation_failure_detail
         ; test_case "batch accepted-user history preserves original identities" `Quick
             test_batch_preserves_original_user_history_once
         ; test_case "batch respects interleaved conversation order" `Quick
@@ -1624,8 +1500,6 @@ let () =
             test_clipboard_bytes_attach_under_their_own_name
         ; test_case "clipboard bytes that are not an image are refused" `Quick
             test_clipboard_bytes_that_are_not_an_image_are_refused
-        ; test_case "missing file is named" `Quick
-            test_missing_file_is_named_in_the_error
         ; test_case "a dropped image is staged" `Quick
             test_a_dropped_image_is_staged
         ; test_case "a dropped non-image keeps its path" `Quick

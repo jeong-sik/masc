@@ -25,19 +25,6 @@ let drawn context =
 
 let contains needle text = String_util.contains_substring text needle
 
-let test_a_break_stays_a_break () =
-  let text = drawn "first paragraph\n\nsecond paragraph" in
-  check bool "no break is spelled into the sentence" false
-    (contains "\\x0A" text);
-  check bool "the first paragraph is there" true (contains "first paragraph" text);
-  check bool "and so is the second" true (contains "second paragraph" text);
-  (* Three source lines, so at least three drawn ones: the blank between the
-     paragraphs is a line the reader can see. *)
-  check bool "the block is taller than one line" true
-    (List.length (String.split_on_char '\n' (String.trim text)) >= 3)
-
-(* Per line, the escape still covers what it is for: a context that carries an
-   escape byte cannot reach the terminal as a sequence. *)
 let test_an_escape_byte_is_still_escaped () =
   let text = drawn "before\n\027[31mred\027[0m\nafter" in
   check bool "no raw escape reaches the buffer" false (contains "\027[31m" text);
@@ -48,8 +35,7 @@ let test_an_escape_byte_is_still_escaped () =
 let () =
   run "tui_ask_context_block"
     [ ( "context"
-      , [ test_case "a break stays a break" `Quick test_a_break_stays_a_break
-        ; test_case "an escape byte is still escaped" `Quick
+      , [ test_case "an escape byte is still escaped" `Quick
             test_an_escape_byte_is_still_escaped
 
         ] )

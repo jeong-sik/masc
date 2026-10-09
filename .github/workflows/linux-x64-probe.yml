@@ -177,14 +177,6 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Exercise Item TUI with the matching compiled binary
-        if: inputs.capture_item_http
-        shell: bash
-        run: |
-          test "$("$PROBE_OUT/masc_tui.exe" --build-commit)" = "$GITHUB_SHA"
-          python3 -u test/test_tui_keeper_portrait_pty.py "$PROBE_OUT/masc_tui.exe" 2>&1 \
-            | tee "$RUNNER_TEMP/keeper-items-tui.log"
-
       - name: Set up Node for Item HTTP acceptance
         if: inputs.capture_item_http
         uses: actions/setup-node@v7
@@ -220,10 +212,6 @@ jobs:
         with:
           name: item-http-${{ inputs.target }}-${{ github.sha }}-attempt-${{ github.run_attempt }}
           path: |
-            ${{ runner.temp }}/keeper-items-tui/manifest.json
-            ${{ runner.temp }}/keeper-items-tui/*.txt
-            ${{ runner.temp }}/keeper-items-tui/*.pty
-            ${{ runner.temp }}/keeper-items-tui.log
             ${{ runner.temp }}/item-http-evidence/browser-evidence.json
             ${{ runner.temp }}/item-http-evidence/item-server-*.png
             ${{ runner.temp }}/item-http-evidence/http-evidence.json

@@ -125,7 +125,10 @@ rejection carries the refused `clientId`, its `transport`, the `capability`,
 the `servingTransports`, the connected `servingClients` and a `retry`
 sentence. With a serving browser connected, the Keeper lists that
 connection's tabs, observes the page again and retries there. With none, the
-`retry` says what the operator attaches. The extension and the BiDi peer keep
+`retry` says what the operator attaches, and when BiDi serves the work the
+answer also carries `bidiHost` (`state` and `message`): what the BiDi host's
+own record says, for the Keeper to pass on
+([Live BiDi browser host](browser-bidi-live-host.md)). The extension and the BiDi peer keep
 their own refusals for work outside their vocabulary; the server does not
 send it to them.
 
@@ -177,8 +180,9 @@ version separately. Browser identity is observed, not guessed from a manifest
 location or a configured label.
 
 `GET /api/v1/dashboard/browser-lane/clients` (read-state permission) returns
-`{ok:true,data:{clients:[{clientId,browser,version,engineVersion,transport}]}}` for live
-connections whose poll lease is current. Browser reads, screenshots, and
+`{ok:true,data:{clients:[{clientId,browser,version,engineVersion,transport}],bidiHost:{state,record,lock_held,detail,attach,message}}}`.
+`clients` are the live connections whose poll lease is current, and `bidiHost` is what the
+BiDi host's record says ([Live BiDi browser host](browser-bidi-live-host.md)). Browser reads, screenshots, and
 interactions accept `clientId`. With no ID, only one connected live client can
 be selected; multiple connections return `ambiguous_browser_clients`, and none
 returns `no_live_client`. An explicit missing/retired ID returns

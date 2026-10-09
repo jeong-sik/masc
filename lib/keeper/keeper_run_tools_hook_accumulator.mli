@@ -1,9 +1,14 @@
 (** Hook accumulator + immutable outputs for Agent_core.Agent.run callbacks. *)
 
+(** Whether the historical calls form one observed sequence. Independent
+    checkpoint and ledger streams cannot prove adjacency to one another. *)
+type historical_order = Ordered | Unordered
+
 type hook_accumulator =
   { mutable meta : Keeper_meta_contract.keeper_meta
   ; mutable tool_calls : Keeper_agent_result.tool_call_detail list
   ; historical_tool_calls : Keeper_agent_result.tool_call_detail list
+  ; historical_order : historical_order
   ; history_pairs_at_setup : int option
   ; mutable current_turn : int
   ; mutable tool_surface : Keeper_agent_tool_surface.tool_surface_metrics
@@ -42,6 +47,7 @@ val create :
   meta:Keeper_meta_contract.keeper_meta ->
   tool_surface:Keeper_agent_tool_surface.tool_surface_metrics ->
   historical_tool_calls:Keeper_agent_result.tool_call_detail list ->
+  historical_order:historical_order ->
   history_pairs_at_setup:int option ->
   hook_accumulator
 (** Begin a new invocation, retaining checkpoint calls only for repetition.
@@ -52,9 +58,14 @@ val create :
     evidence for a new invocation. *)
 val freeze : hook_accumulator -> hook_outputs
 
-(** Current calls followed by checkpoint history, newest first, exclusively
-    for repeated-call detection across a resume boundary. *)
+(** Current calls followed by historical evidence for exact input/output
+    repetition counts. Historical evidence may contain disjoint streams. *)
 val tool_calls_for_repetition :
+  hook_accumulator -> Keeper_agent_result.tool_call_detail list
+
+(** Consecutive-input detection requires observed adjacency. With disjoint
+    historical streams only this invocation's observations prove a streak. *)
+val tool_calls_for_input_repetition :
   hook_accumulator -> Keeper_agent_result.tool_call_detail list
 
 val record_requested_tool_names :

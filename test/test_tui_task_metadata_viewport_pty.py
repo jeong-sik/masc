@@ -40,19 +40,17 @@ def compact(text):
 def detail_screen(output):
     """The Task detail's own cells. From the split width on, the Task list
     stands beside the detail (render_task_detail), and a whole row puts that
-    list's titles between the lines of a wrapped field. The list is a framed
-    pane, so the detail starts after the border that closes it on the row
-    holding the detail's header."""
+    list's titles between the lines of a wrapped field. The detail header
+    follows two margin cells and one title-indent cell, whether the list
+    stands beside it or the detail occupies the terminal width."""
     end = output.rfind(h.FRAME_END)
     rows = h.screen_rows(bytes(output[:end + len(h.FRAME_END)]) if end >= 0 else bytes(output))
     header = next((rows[key] for key in sorted(rows) if b"MASC Task" in rows[key]), None)
     if header is None:
         raise AssertionError(f"Task detail header missing: {screen(output)!r}")
-    left = 0
     text = header.decode("utf-8", "replace")
-    if text.startswith("│"):
-        closing = text.index("│", 1)
-        left = sum(region.cell_width(character) for character in text[:closing + 1])
+    left = sum(region.cell_width(character) for character in text[:text.index("MASC Task")]) - 3
+    assert left >= 0, header
     columns = max(sum(region.cell_width(character) for character in row.decode("utf-8", "replace"))
                   for row in rows.values())
     return b"\n".join(region.cells(rows[key], left, columns).encode() for key in sorted(rows))

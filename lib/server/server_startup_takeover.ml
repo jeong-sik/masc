@@ -229,20 +229,15 @@ let base_path_lease_directory ~run_dir ~owner_uid =
     (Printf.sprintf "%s-%d" private_lease_directory_prefix owner_uid)
 ;;
 
-let base_path_lock_path_for_owner ~run_dir ~canonical_base_path ~owner_uid =
-  let digest =
-    Digestif.SHA256.(digest_string canonical_base_path |> to_hex)
-  in
-  Filename.concat
-    (base_path_lease_directory ~run_dir ~owner_uid)
-    (Printf.sprintf "masc-base-path-owner-v1-%s.lease" digest)
-;;
-
-let base_path_lock_path ~run_dir ~canonical_base_path =
-  base_path_lock_path_for_owner
-    ~run_dir
-    ~canonical_base_path
-    ~owner_uid:(Unix.geteuid ())
+(* The lease used to be named by the digest of the canonical BasePath
+   string. macOS answers [Unix.realpath] with two different strings for one
+   directory (/private/tmp/X and /System/Volumes/Data/private/tmp/X), so two
+   servers could hold two leases for the same directory. The lease is now
+   named by the digest of the directory's own (st_dev, st_ino) identity, so
+   one directory has exactly one lease name on every supported platform. *)
+let base_path_lock_digest_of_stats (stat : Unix.stats) =
+  Printf.sprintf "masc-base-path-lease:%d:%d" stat.st_dev stat.st_ino
+  |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex
 ;;
 
 let close_quietly fd =
@@ -1175,10 +1170,11 @@ let prepare_base_path_lock ~run_dir base_path =
     ; runtime_directory =
         Filename.concat canonical_base_path Common.masc_dirname
     ; path =
-        base_path_lock_path_for_owner
-          ~run_dir:run_directory
-          ~canonical_base_path
-          ~owner_uid
+        Filename.concat
+          lease_directory
+          (Printf.sprintf
+             "masc-base-path-owner-v2-%s.lease"
+             (base_path_lock_digest_of_stats base_path_stat))
     ; owner_uid
     }
 ;;
@@ -1255,11 +1251,14 @@ let verify_open_lease_file prepared fd expected_file_stat =
     let descriptor_stat = Unix.fstat fd in
     if descriptor_stat.Unix.st_kind <> Unix.S_REG
     then reject (Lease_file_non_regular { path = prepared.path; kind = descriptor_stat.st_kind })
-    else if descriptor_stat.st_nlink <> 1
+    else if descriptor_stat.st_nlink > 1
     then
       reject
         (Lease_file_multiply_linked
            { path = prepared.path; links = descriptor_stat.st_nlink })
+    (* st_nlink = 0 is not "multiply linked": the descriptor is the only
+       remaining reference, so the name was replaced after the open. The
+       lstat below reports what the path became instead. *)
     else if descriptor_stat.st_uid <> prepared.owner_uid
     then
       reject
@@ -1285,12 +1284,12 @@ let verify_open_lease_file prepared fd expected_file_stat =
          with
          | Error rejection -> reject rejection
          | Ok () ->
-           (match Unix.lstat prepared.path with
+         (match Unix.lstat prepared.path with
          | path_stat when path_stat.Unix.st_kind <> Unix.S_REG ->
            reject
              (Lease_file_non_regular
                 { path = prepared.path; kind = path_stat.st_kind })
-         | path_stat when path_stat.st_nlink <> 1 ->
+         | path_stat when path_stat.st_nlink > 1 ->
            reject
              (Lease_file_multiply_linked
                 { path = prepared.path; links = path_stat.st_nlink })
@@ -1437,6 +1436,7 @@ let parsed_pid_fd fd =
 ;;
 
 let acquire_base_path_lock_with
+      ?(before_lease_commit = ignore)
       ~before_lease_open
       ~before_commit_identity_check
       ~before_runtime_identity_check
@@ -1449,9 +1449,10 @@ let acquire_base_path_lock_with
     before_lease_open ();
     (* [lockf] locks are process-associated on POSIX, so a second descriptor in
        this process may successfully acquire the same kernel lock. The key is
-       a full SHA-256 projection of the canonical BasePath into the validated,
-       current-UID private lease directory. A digest collision remains
-       fail-closed because both identities contend on the same lease file. *)
+       a full SHA-256 projection of the directory's (st_dev, st_ino) identity
+       into the validated, current-UID private lease directory. A digest
+       collision remains fail-closed because both identities contend on the
+       same lease file. *)
     Mutex.protect base_path_lease_mu (fun () ->
       match Hashtbl.find_opt base_path_leases prepared.path with
       | Some (Active_lease _) ->
@@ -1460,43 +1461,76 @@ let acquire_base_path_lock_with
           { owner = Owner_this_process (Unix.getpid ()); lock_path = prepared.path }
       | Some (Failed_close (_, rejection)) -> Base_path_rejected rejection
       | None ->
+        (* Cross-version exclusion with a server that predates the (st_dev,
+           st_ino) keying is a documented operator step, not a technical
+           fence: legacy_residue forbids keeping a legacy lease format alive,
+           and a one-directional fence could not keep a v1-only server from
+           starting a second lease for the same directory anyway. Stop the
+           old server before starting this one across an upgrade. *)
         (match open_lease_file prepared with
          | Error rejection -> Base_path_rejected rejection
          | Ok fd ->
-           (try
-              Unix.lockf fd Unix.F_TLOCK 0;
-              before_commit_identity_check ();
-              (* Establish [.masc] only after the external lifetime lease is
-                 held. OCaml's portable Unix surface has no directory-relative
-                 no-follow open. The private lease directory blocks other-UID
-                 path replacement; same-UID mutation remains an explicit
-                 composition-root invariant tracked by #24344. *)
-              (match verify_open_lease_file prepared fd None with
-               | Error rejection -> Base_path_rejected rejection
-               | Ok fd ->
-                 (match establish_runtime_directory prepared with
-                  | Error rejection ->
-                    (match
-                       close_acquisition_fd
-                         ~operation:"close_failed_runtime_establishment"
-                         ~path:prepared.path
-                         ~context:
-                           (base_path_lock_rejection_to_string rejection)
-                         fd
-                     with
-                     | Ok () -> Base_path_rejected rejection
-                     | Error close_rejection -> Base_path_rejected close_rejection)
-                  | Ok runtime_directory_stat ->
-                    before_runtime_identity_check ();
-                    (match
-                       verify_directory_identity
-                         ~path:prepared.runtime_directory
-                         ~expected:runtime_directory_stat
-                     with
+              let commit_outcome =
+                try
+                  before_lease_commit fd;
+                  Unix.lockf fd Unix.F_TLOCK 0;
+                  Ok ()
+                with
+                | Unix.Unix_error ((Unix.EACCES | Unix.EAGAIN), _, _) ->
+                  let pid = parsed_pid_fd fd in
+                  let v2_locked_by_other =
+                    Base_path_already_owned
+                      { owner = base_path_owner_of_recorded pid
+                      ; lock_path = prepared.path
+                      }
+                  in
+                  (match
+                     close_acquisition_fd
+                       ~operation:"close_contended_lease_file"
+                       ~path:prepared.path
+                       ~context:"kernel lease is owned by another process"
+                       fd
+                   with
+                   | Ok () -> Error v2_locked_by_other
+                   | Error rejection ->
+                     Error (Base_path_rejected rejection))
+                | exn ->
+                  (* cancel-guard-ok: Unix.lockf performs no Eio operation. *)
+                  (match
+                     close_acquisition_fd
+                       ~operation:"commit_base_path_lease"
+                       ~path:prepared.path
+                       ~context:(Printexc.to_string exn)
+                       fd
+                   with
+                   | Error close_rejection ->
+                     Error (Base_path_rejected close_rejection)
+                   | Ok () ->
+                     Error
+                       (Base_path_rejected
+                          (Lease_io_failed
+                             { operation = "commit_base_path_lease"
+                             ; path = prepared.path
+                             ; reason = Printexc.to_string exn
+                             })))
+              in
+              match commit_outcome with
+              | Error result -> result
+              | Ok () ->
+                before_commit_identity_check ();
+                (* Establish [.masc] only after the external lifetime lease is
+                   held. OCaml's portable Unix surface has no directory-relative
+                   no-follow open. The private lease directory blocks other-UID
+                   path replacement; same-UID mutation remains an explicit
+                   composition-root invariant tracked by #24344. *)
+                (match verify_open_lease_file prepared fd None with
+                  | Error rejection -> Base_path_rejected rejection
+                  | Ok fd ->
+                    (match establish_runtime_directory prepared with
                      | Error rejection ->
                        (match
                           close_acquisition_fd
-                            ~operation:"close_retargeted_runtime_directory"
+                            ~operation:"close_failed_runtime_establishment"
                             ~path:prepared.path
                             ~context:
                               (base_path_lock_rejection_to_string rejection)
@@ -1505,69 +1539,106 @@ let acquire_base_path_lock_with
                         | Ok () -> Base_path_rejected rejection
                         | Error close_rejection ->
                           Base_path_rejected close_rejection)
-                     | Ok () ->
-                       (match verify_open_lease_file prepared fd None with
-                        | Error rejection -> Base_path_rejected rejection
-                        | Ok fd ->
-                          (* NDT-OK: persist the OS lease holder identity for operator observation. *)
-                          let pid = Unix.getpid () in
-                          let payload = Printf.sprintf "%d\n" pid in
-                          Unix.ftruncate fd 0;
-                          let (_ : int) = Unix.lseek fd 0 Unix.SEEK_SET in
-                          write_all fd payload;
-                          Unix.fsync fd;
-                          let lease = { fd; path = prepared.path } in
-                          Hashtbl.add
-                            base_path_leases
-                            prepared.path
-                            (Active_lease lease);
-                          Base_path_acquired lease))))
-            with
-            | Unix.Unix_error ((Unix.EACCES | Unix.EAGAIN), _, _) ->
-              let pid = parsed_pid_fd fd in
-              (match
-                 close_acquisition_fd
-                   ~operation:"close_contended_lease_file"
-                   ~path:prepared.path
-                   ~context:"kernel lease is owned by another process"
-                   fd
-               with
-               | Ok () ->
-                 Base_path_already_owned
-                   { owner = base_path_owner_of_recorded pid
-                   ; lock_path = prepared.path
-                   }
-               | Error rejection -> Base_path_rejected rejection)
-            | exn ->
-              let commit_rejection =
-                Lease_io_failed
-                  { operation = "commit_base_path_lease"
-                  ; path = prepared.path
-                  ; reason = Printexc.to_string exn
-                  }
-              in
-              (match
-                 close_acquisition_fd
-                   ~operation:"close_failed_lease_commit"
-                   ~path:prepared.path
-                   ~context:
-                     (base_path_lock_rejection_to_string commit_rejection)
-                   fd
-               with
-               | Ok () -> Base_path_rejected commit_rejection
-               | Error rejection -> Base_path_rejected rejection))))
+                     | Ok runtime_directory_stat ->
+                       before_runtime_identity_check ();
+                       (match
+                          verify_directory_identity
+                            ~path:prepared.runtime_directory
+                            ~expected:runtime_directory_stat
+                        with
+                        | Error rejection ->
+                          (match
+                             close_acquisition_fd
+                               ~operation:"close_retargeted_runtime_directory"
+                               ~path:prepared.path
+                               ~context:
+                                 (base_path_lock_rejection_to_string rejection)
+                               fd
+                           with
+                           | Ok () -> Base_path_rejected rejection
+                           | Error close_rejection ->
+                             Base_path_rejected close_rejection)
+                        | Ok () ->
+                          (* verify_open_lease_file closes the descriptor on
+                             rejection itself; an outer close would race it
+                             for EBADF. *)
+                          (match verify_open_lease_file prepared fd None with
+                           | Error rejection -> Base_path_rejected rejection
+                           | Ok fd ->
+                             (* NDT-OK: persist the OS lease holder identity
+                                for operator observation. A write failure must
+                                surface as a typed rejection with the descriptor
+                                closed, not as an exception with the lease
+                                locked and unregistered. *)
+                             let commit_pid payload =
+                               Unix.ftruncate fd 0;
+                               let (_ : int) =
+                                 Unix.lseek fd 0 Unix.SEEK_SET
+                               in
+                               write_all fd payload;
+                               Unix.fsync fd
+                             in
+                             (match
+                                try
+                                  Ok (commit_pid (Printf.sprintf "%d\n" (Unix.getpid ())))
+                                with
+                                | exn ->
+                                  (* cancel-guard-ok: Unix.ftruncate, Unix.lseek
+                                     and Unix.fsync perform no Eio operation. *)
+                                  Error (Printexc.to_string exn)
+                              with
+                              | Error reason ->
+                                (match
+                                   close_acquisition_fd
+                                     ~operation:"close_failed_lease_commit"
+                                     ~path:prepared.path
+                                     ~context:reason
+                                     fd
+                                 with
+                                 | Ok () ->
+                                   Base_path_rejected
+                                     (Lease_io_failed
+                                        { operation = "commit_base_path_lease"
+                                        ; path = prepared.path
+                                        ; reason
+                                        })
+                                 | Error rejection ->
+                                   Base_path_rejected rejection)
+                              | Ok () ->
+                                let lease = { fd; path = prepared.path } in
+                                Hashtbl.add
+                                  base_path_leases
+                                  prepared.path
+                                  (Active_lease lease);
+                                Base_path_acquired lease)))))))
 ;;
 
-let acquire_base_path_lock =
+let acquire_base_path_lock ~run_dir base_path =
   acquire_base_path_lock_with
     ~before_lease_open:(fun () -> ())
     ~before_commit_identity_check:(fun () -> ())
     ~before_runtime_identity_check:(fun () -> ())
+    ~run_dir base_path
 ;;
 
 module For_testing = struct
   let acquire_pid_lock_with_start_reader = acquire_pid_lock_with_start_reader
   let acquire_base_path_lock = acquire_base_path_lock_with
+
+  (* The v2 lease file of an already-canonical BasePath, name-only: nothing is
+     opened or locked. *)
+  let lease_path ~run_dir ~canonical_base_path =
+    let owner_uid = Unix.geteuid () in
+    let lease_directory =
+      base_path_lease_directory ~run_dir ~owner_uid
+    in
+    (try Unix.mkdir lease_directory 0o700 with
+     | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+    Filename.concat
+      lease_directory
+      (Printf.sprintf
+         "masc-base-path-owner-v2-%s.lease"
+         (base_path_lock_digest_of_stats (Unix.stat canonical_base_path)))
 end
 
 type owner_capture_error =
@@ -1580,9 +1651,11 @@ let capture_existing_owner ~run_dir ~base_path =
   | Ok prepared ->
     Mutex.protect base_path_lease_mu (fun () ->
       if Hashtbl.mem base_path_leases prepared.path then Error Current_process_owner
-      else match open_lease_file prepared with
+      else
+        match open_lease_file prepared with
         | Error rejection -> Error (Owner_lease_rejected rejection)
         | Ok fd ->
           Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
-            Owner_process_identity.capture ~lease_fd:fd
-            |> Result.map_error (fun error -> Owner_identity_unavailable error)))
+            match Owner_process_identity.capture ~lease_fd:fd with
+            | Ok owner -> Ok owner
+            | Error other -> Error (Owner_identity_unavailable other)))

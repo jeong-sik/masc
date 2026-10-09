@@ -87,6 +87,7 @@ module For_testing : sig
     repetition_execution:Keeper_repetition_scope.Execution.t option ->
     terminal_effect_state:Keeper_tools_agent_core.terminal_effect_state ->
     tool_calls:Keeper_agent_result.tool_call_detail list ->
+    input_tool_calls:Keeper_agent_result.tool_call_detail list ->
     assistant_turn_texts:string list ->
     yield_requested:(unit -> (yield_request option, string) result) option ->
     (Runtime_agent.cooperative_yield_decision, Agent_core.Error.t) result
@@ -97,6 +98,7 @@ module For_testing : sig
   val official_client_tool_boundary :
     repetition_execution:Keeper_repetition_scope.Execution.t option ->
     tool_calls:Keeper_agent_result.tool_call_detail list ->
+    input_tool_calls:Keeper_agent_result.tool_call_detail list ->
     unit ->
     (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result
   val registry_progress_on_event
@@ -110,21 +112,13 @@ module For_testing : sig
     -> string list
 
   val normalize_response_text_for_finalization
-    :  ?response_policy:Keeper_tooling.Response.completion_policy
-    -> runtime_id:string
+    :  runtime_id:string
     -> initial_messages:Agent_core.Types.message list
     -> run_result:Runtime_agent.run_result
     -> text:string
     -> tool_names:string list
     -> unit
     -> (string, Agent_core.Error.t) result
-
-  val response_policy_for_turn
-    : turn_kind:Turn_record.turn_kind
-    -> input_speaker:Keeper_input_speaker.t
-    -> world_observation:Keeper_world_observation.world_observation option
-    -> hitl_resolution:Keeper_event_queue.hitl_resolution option
-    -> Keeper_tooling.Response.completion_policy
 
   (** AGENT_CORE raw-trace sink for keeper turns: a fresh per-turn file under
       [Keeper_types_support.keeper_raw_trace_dir]. The dispatch section passes

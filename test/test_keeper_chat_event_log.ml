@@ -366,7 +366,8 @@ let test_journal_skips_non_finite_floats () =
          [ Float.nan; Float.infinity; Float.neg_infinity ];
        List.iter (fun charge ->
            let event = E.Agent_core_stream_message_delta
-               { stop_reason = None
+               { stream_scope = 0
+               ; stop_reason = None
                ; usage = Some { delta_usage_partial with cost_usd = Some charge } } in
            let _, projected = Projection.project ~timestamp:1_762_300_001.0
                ~redact_text:Fun.id ~redact_json:Fun.id Projection.initial event in

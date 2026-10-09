@@ -2225,26 +2225,44 @@ let newest_entry_window ~inner_width ~height rows =
       in
       start @ (gap :: tail)
 
-let visible_rows ?markdown ?origin ~inner_width ~height entries =
+type body_row_position = {
+  entry_index : int;
+  body_row : int;
+  rows_below : int;
+}
+
+(* Positions belong to the actual immutable rows selected by this producer.
+   Generated gaps and rows synthesized by repeat collapse have no original
+   row owner and cannot acquire a body position by matching their text. *)
+let visible_rows_with_positions ?markdown ?origin ~inner_width ~height entries =
   let inner_width = Int.max 1 inner_width in
   let height = Int.max 0 height in
-  let rec collect remaining selected = function
-    | [] -> selected
-    | _ when remaining = 0 -> selected
+  let rec collect entry_index remaining selected positions = function
+    | [] -> selected, positions
+    | _ when remaining = 0 -> selected, positions
     | entry :: older ->
-        let rows =
-          rows_of_entry ?markdown ?origin ~inner_width
-            ~previous:(List.nth_opt older 0) entry
-        in
+        let rows = rows_of_entry ?markdown ?origin ~inner_width
+          ~previous:(List.nth_opt older 0) entry in
         let chosen =
           if List.length rows <= remaining then rows
-          else if selected = [] then
-            newest_entry_window ~inner_width ~height:remaining rows
-          else take_last remaining rows
-        in
-        collect (remaining - List.length chosen) (chosen @ selected) older
+          else if selected = [] then newest_entry_window ~inner_width ~height:remaining rows
+          else take_last remaining rows in
+        let _, owners = List.fold_left (fun (body_row, owners) row ->
+          match row.kind with
+          | Body -> body_row+1, (row,body_row)::owners
+          | Metadata _ | Viewport_gap _ -> body_row,owners) (0,[]) rows in
+        let below = List.length selected in
+        let count = List.length chosen in
+        let owned = List.mapi (fun index row ->
+          Option.map (fun body_row -> {entry_index;body_row;
+            rows_below=below+count-index-1}) (List.assq_opt row owners)) chosen
+          |> List.filter_map Fun.id in
+        collect (entry_index-1) (remaining-count) (chosen @ selected) (owned @ positions) older
   in
-  collect height [] (List.rev entries)
+  collect (List.length entries-1) height [] [] (List.rev entries)
+
+let visible_rows ?markdown ?origin ~inner_width ~height entries =
+  fst (visible_rows_with_positions ?markdown ?origin ~inner_width ~height entries)
 
 let total_rows ?markdown ?origin ?previous ~inner_width entries =
   let inner_width = Int.max 1 inner_width in
@@ -2392,11 +2410,6 @@ let count_rows_until held ?markdown ~wanted () =
    the numbering the window is expressed in. Entry [index] -- counting from
    the newest -- holds the rows [total - before - count] up to
    [total - before], where [before] is what the entries newer than it take. *)
-type body_row_position = {
-  entry_index : int;
-  body_row : int;
-  rows_below : int;
-}
 
 type scroll_window = {
   scroll : int;
@@ -2406,9 +2419,8 @@ type scroll_window = {
 
 let clamped_scrolled_rows ?markdown ?origin ~inner_width ~height ~requested entries =
   if requested <= 0 then
-    { scroll = requested;
-      rows = visible_rows ?markdown ?origin ~inner_width ~height entries;
-      body_positions = [] }
+    let rows, body_positions = visible_rows_with_positions ?markdown ?origin ~inner_width ~height entries in
+    { scroll = requested; rows; body_positions }
   else begin
     let inner_width = Int.max 1 inner_width in
     let origin = Option.value origin ~default:Origin_row in

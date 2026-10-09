@@ -451,7 +451,11 @@
       "path": "lib/keeper_runtime/keeper_event_queue_state.ml",
       "baseline_lines": 2280,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; state transition and strict codec semantic audit remain pending",
+      "current_lines": 155,
+      "prs": [
+        42095
+      ]
     },
     {
       "path": "lib/lane_addon/lane_addon_runtime.ml",

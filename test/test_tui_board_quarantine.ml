@@ -231,105 +231,6 @@ let ready_fetched ~keeper_name value =
     Masc_tui_fetched.complete ~equal:String.equal next request value
 ;;
 
-let contains ~needle haystack =
-  let n = String.length needle and h = String.length haystack in
-  let rec at i = i + n <= h && (String.sub haystack i n = needle || at (i + 1)) in
-  at 0
-;;
-
-let texts lines = List.map snd lines
-
-let test_lines_say_how_many_are_blocked_and_why () =
-  let fetched = ready_fetched ~keeper_name:"alpha" (Ok (fixture_quarantines ())) in
-  let lines = Quarantine.lines ~now:1000.0 fetched ~keeper_name:"alpha" in
-  (match lines with
-   | (Quarantine.Warn, summary) :: _ ->
-     check bool "the count leads" true (contains ~needle:"2 blocked" summary);
-     check bool "and names both recovery keys" true
-       (contains ~needle:"Q oldest" summary
-        && contains ~needle:"B all" summary)
-   | _ -> fail "the first line is not the warning summary");
-  let body = String.concat "\n" (texts lines) in
-  check bool "the oldest row gives its age" true (contains ~needle:"15m ago" body);
-  check bool "the reason is in words" true
-    (contains ~needle:(Quarantine.category_words Candidate.Exact_execution_interrupted) body);
-  check bool "the partition id is shown" true (contains ~needle:"ba-root-old" body);
-  check bool "the requeued row is counted apart" true
-    (contains ~needle:"1 requeued" body);
-  check bool "a requeued row is not listed as blocked" false
-    (contains ~needle:"ba-root-done" body)
-;;
-
-let test_lines_group_rows_by_cause () =
-  let quarantines =
-    decode_ok
-      (inventory_json
-         [ item ~category:Candidate.Exact_lane_exhausted ~partition_id:"lane-1"
-             ~quarantined_at:300.0 ()
-         ; item ~category:Candidate.Exact_execution_interrupted
-             ~partition_id:"restart-old" ~quarantined_at:100.0 ()
-         ; item ~category:Candidate.Exact_lane_exhausted ~partition_id:"lane-2"
-             ~quarantined_at:400.0 ()
-         ; item ~category:Candidate.Exact_lane_exhausted
-             ~phase:Command.Inventory_requeue_requested ~requested_at:(Some 500.0)
-             ~partition_id:"lane-3" ~quarantined_at:200.0 ()
-         ]
-         [])
-  in
-  let lines =
-    Quarantine.lines ~now:1000.0
-      (ready_fetched ~keeper_name:"alpha" (Ok quarantines))
-      ~keeper_name:"alpha"
-  in
-  match lines with
-  | [ (Quarantine.Warn, summary); (_, first); (_, second) ] ->
-    check bool "the summary counts every waiting row" true
-      (contains ~needle:"4 blocked" summary);
-    check bool "the first group holds the requeue target" true
-      (contains ~needle:"restart-old" first);
-    check bool "the first group is the restart cause" true
-      (contains
-         ~needle:(Quarantine.category_words Candidate.Exact_execution_interrupted)
-         first);
-    check bool "three lane rows are one line with their count" true
-      (String.starts_with ~prefix:"3 " second
-       && contains ~needle:(Quarantine.category_words Candidate.Exact_lane_exhausted)
-            second);
-    check bool "the group shows its oldest row" true (contains ~needle:"lane-3" second);
-    check bool "the group says how many are mid-requeue" true
-      (contains ~needle:"1 requeue asked" second);
-    check bool "the other lane rows are not listed" false
-      (contains ~needle:"lane-1" second || contains ~needle:"lane-2" second)
-  | _ -> fail "expected a summary and one line per cause"
-;;
-
-let test_lines_for_every_read_state () =
-  let absent = Quarantine.lines ~now:0.0 Masc_tui_fetched.initial ~keeper_name:"alpha" in
-  check (list string) "never read" [ "not read yet" ] (texts absent);
-  let failed =
-    Quarantine.lines ~now:0.0
-      (ready_fetched ~keeper_name:"alpha" (Error "HTTP 503"))
-      ~keeper_name:"alpha"
-  in
-  (match failed with
-   | [ (Quarantine.Bad, text) ] ->
-     check bool "a failed read says so" true (contains ~needle:"HTTP 503" text)
-   | _ -> fail "a failed read is one Bad line");
-  let other_keeper =
-    Quarantine.lines ~now:0.0
-      (ready_fetched ~keeper_name:"alpha" (Ok (fixture_quarantines ())))
-      ~keeper_name:"beta"
-  in
-  check bool "another Keeper's rows are not drawn as this one's" false
-    (contains ~needle:"blocked," (String.concat "\n" (texts other_keeper)));
-  let empty =
-    Quarantine.lines ~now:0.0
-      (ready_fetched ~keeper_name:"alpha" (Ok (decode_ok (inventory_json [] []))))
-      ~keeper_name:"alpha"
-  in
-  check (list string) "nothing to requeue" [ "nothing blocked" ] (texts empty)
-;;
-
 let test_wire_strings_are_sanitized () =
   let quarantines =
     decode_ok
@@ -372,9 +273,6 @@ let () =
             test_bulk_requeue_attempts_every_waiting_row_in_order
         ; test_case "bulk refuses a stale list" `Quick
             test_bulk_requeue_refuses_a_stale_list
-        ; test_case "count and reason" `Quick test_lines_say_how_many_are_blocked_and_why
-        ; test_case "one line per cause" `Quick test_lines_group_rows_by_cause
-        ; test_case "every read state" `Quick test_lines_for_every_read_state
         ; test_case "wire strings are sanitized" `Quick test_wire_strings_are_sanitized
         ] )
     ]

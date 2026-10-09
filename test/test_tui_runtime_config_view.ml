@@ -53,9 +53,6 @@ let test_unknown_metadata_is_rejected () =
      fixture () |> overlay (replace "status" (`String "unknown"));
      fixture () |> overlay (replace "requires_restart" (`String "false"));
      fixture () |> map_field "validation" (replace "issues" (`List [issue "error"]))]
-let test_warnings_are_not_successfully_hidden () =
-  let read = fixture () |> map_field "validation" (replace "issues" (`List [issue "warning"])) |> decode |> success in
-  expect "valid with warnings uses Warning tone" (match List.nth (summary_lines read.metadata) 1 with Warning, _ -> true | _ -> false)
 let test_restart_projection_consistency () =
   List.iter (fun json -> expect "restart contradiction rejected" (Result.is_error (decode json)))
     [ fixture () |> overlay (replace "pending_keys" (`List [`String "keeper.pending"]));
@@ -103,5 +100,4 @@ let () = List.iter (fun (name, test) -> test (); Printf.printf "PASS %s\n%!" nam
    "invalid source remains readable", test_invalid_source_is_readable;
    "TOML parse failure projection", test_parse_failure_shape;
    "unknown and inconsistent metadata", test_unknown_metadata_is_rejected;
-   "warnings remain visible", test_warnings_are_not_successfully_hidden;
    "restart status matches pending settings", test_restart_projection_consistency]

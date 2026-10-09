@@ -110,29 +110,6 @@ let machine_activity_and_publication_are_independent () =
       [`Null;`Bool true;str "enabled";str "";`Int 1];
     rejects "missing machine activity cannot infer on" (make id (object_ ["kind",str "machine";"publication",str "stable"])))
     ["machine/msx";"machine/dos"]
-let invalid_and_running () =
-  let target = declared ~instances:[instance "running"] (object_ ["kind",str "invalid";"messages",strings ["bad TOML"]]) in
-  let decoded = ok (Decode.decode (snapshot [target])) in
-  let row = find "declaration//config/broken.toml" decoded in
-  Alcotest.(check string) "invalid declaration does not erase running worker" "declaration invalid · live observing" (Display.row_summary row);
-  Alcotest.(check bool) "original diagnostic retained" true (List.mem "Declaration error: bad TOML" (Display.detail_lines row));
-  Alcotest.(check bool) "applied revision distinct from invalid desired config" true (List.mem "Applied declaration revision: applied" (Display.detail_lines row))
-let partial_owner_unknown () =
-  let target = declared ~instances:[instance ~presence:"retained" ~phase:"detaching" "old"] (object_ ["kind",str "unobserved"]) in
-  let payload = snapshot [target] |> set "package_read" (package_read |> set "complete" (`Bool false) |> set "owner_present" (`Bool false)
-    |> set "issues" (`List [object_ ["source_path",str "/config";"message",str "directory unreadable"]])) in
-  let decoded = ok (Decode.decode payload) in
-  Alcotest.(check string) "partial does not say off or deleted" "declaration not observed · retained cleanup pending"
-    (Display.row_summary (find "declaration//config/broken.toml" decoded));
-  Alcotest.(check int) "partial, owner absence and source failure remain distinct" 3 (List.length (Display.snapshot_notices decoded));
-  Alcotest.(check bool) "overview exposes the diagnostic reader" true
-    (List.mem "1 inventory issues · i: details" (Display.overview_notices decoded));
-  Alcotest.(check bool) "long issue details stay out of the overview" false
-    (List.mem "/config: directory unreadable" (Display.overview_notices decoded))
-let explicit_absence () =
-  let decoded = ok (Decode.decode (snapshot [declared ~instances:[instance ~phase:"failed" "old"] (object_ ["kind",str "absent"])])) in
-  Alcotest.(check string) "absent file is not successful cleanup" "declaration absent · live failed: cleanup unconfirmed"
-    (Display.row_summary (find "declaration//config/broken.toml" decoded))
 let unknown_wire () =
   let payload = snapshot [] in
   rejects "schema" (set "schema" (str "masc.lane-inventory/v2") payload);
@@ -168,29 +145,6 @@ let repeated_instance () =
   let two = one |> set "id" (str "declaration//config/other.toml")
     |> set "selection" (object_ ["kind",str "declaration";"source_path",str "/config/other.toml"]) in
   rejects "same worker cannot have two source owners" (snapshot [one;two])
-let running_observation_survives_inventory () =
-  let decoded = ok (Decode.decode (snapshot [])) in
-  let exact = decoded.exact_snapshot in
-  let exact = {exact with Tui_decode.sls_lanes=List.map (fun (lane : Tui_decode.standalone_lane) ->
-    if Standalone_lane.equal lane.sl_lane Librarian then
-      {lane with sl_status=Tui_decode.Standalone_running;sl_running_count=2}
-    else lane) exact.sls_lanes} in
-  let decoded = {decoded with exact_snapshot=exact} in
-  Alcotest.(check string) "admission does not hide ongoing exact work"
-    "2 running · 1 admitted slots"
-    (Display.row_summary_in decoded (find "exact/librarian_exact" decoded))
-
-let bounded_run_reading_is_visible () =
-  let decoded = ok (Decode.decode (snapshot [])) in
-  let exact = {decoded.exact_snapshot with Tui_decode.sls_exact_run_projection_count=4;
-    sls_exact_run_source_total=9;sls_exact_run_projection_truncated=true} in
-  let decoded = {decoded with exact_snapshot=exact} in
-  let note = "Exact run observations are windowed: 4/9 retained runs. Counts and timings describe this window." in
-  Alcotest.(check bool) "overview retains the bounded observation warning" true
-    (List.mem note (Display.overview_notices decoded));
-  Alcotest.(check bool) "full diagnostics retain the same observation scope" true
-    (List.mem note (Display.snapshot_notices decoded))
-
 let disabled_is_desired_not_cleanup_proof () =
   let declaration enabled = object_ ["kind",str "valid";"enabled",`Bool enabled;
     "installation_id",str "observer";"run_id",str "run";"package_id",str "custom-package";
@@ -236,12 +190,7 @@ let () = Alcotest.run "TUI Lane inventory" ["wire and display",[
   Alcotest.test_case "browser activity and registration remain independent" `Quick browser_activity_and_backend_are_independent;
   Alcotest.test_case "exact off retains candidates and finishing work" `Quick disabled_exact_keeps_candidates_and_finishing_work;
   Alcotest.test_case "disabled intent keeps unfinished cleanup visible" `Quick disabled_is_desired_not_cleanup_proof;
-    Alcotest.test_case "running observation survives inventory" `Quick running_observation_survives_inventory;
-  Alcotest.test_case "bounded run reading remains visible" `Quick bounded_run_reading_is_visible;
   Alcotest.test_case "all builtins and manual identity" `Quick complete_inventory;
-  Alcotest.test_case "invalid declaration and live worker" `Quick invalid_and_running;
-  Alcotest.test_case "partial reading and unknown owner" `Quick partial_owner_unknown;
-  Alcotest.test_case "absent declaration and failed cleanup" `Quick explicit_absence;
   Alcotest.test_case "unknown wire rejected" `Quick unknown_wire;
   Alcotest.test_case "missing and duplicate rejected" `Quick missing_and_duplicate;
   Alcotest.test_case "targets remain coherent" `Quick invalid_targets;

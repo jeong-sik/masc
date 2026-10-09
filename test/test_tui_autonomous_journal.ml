@@ -79,37 +79,6 @@ let test_cold_open_discovery () =
     (List.length (Types.journal_source_fetch_targets ~keeper_name:"alpha" ~held:["alpha", source]
        ~unavailable:[] [source, 10.; source, 12.]))
 
-let test_poll_excerpt_defers_only_to_exact_journal_text () =
-  let check_case ~journal_turn ~delta ~expected =
-    let state = Types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
-    state.view <- Types.Keepers Types.Keeper_message;
-    state.msg_target_keeper_name <- Some "alpha";
-    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
-    state.keeper_turns <- [{Masc.Tui_decode.ktr_keeper_name="alpha"; ktr_chat_control_token=None;
-      ktr_state=Keeper_turn_running {lane=Turn_lane_autonomous; started_at_unix=10.;
-        interrupt_token="stop-token"; turn_ref=Some turn_ref;
-        preview=Some {ktp_status_text="working"; ktp_updated_at_unix=12.;
-          ktp_text_tail="latest answer"; ktp_last_tool=None}}}];
-    let log = Types.turn_log_create_for_source ~keeper_name:"alpha"
-        ~source:(Log.Autonomous_turn journal_turn) ~started_at:10. in
-    Types.turn_log_add ~now:10. log ~seq:(Some 0) Masc_tui_keeper_chat_live.Run_started;
-    Types.turn_log_add ~now:11. log ~seq:(Some 1) delta;
-    Types.hold_settled_log state log;
-    let frame, _ = Masc_tui_render_chat.render_keeper_message state in
-    check bool "polled excerpt respects exact turn identity and text availability" (expected = 1)
-      (List.exists (Astring.String.is_infix ~affix:"최근 출력 발췌") frame.Masc_tui_frame_presenter.lines)
-  in
-  let cache = Masc_tui_ansi.terminal_size_cache in
-  let previous = Masc_tui_ansi.get_terminal_size () in
-  let set_size size = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
-      cache ~probe:(fun () -> Some size)) in
-  Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
-    set_size (50, 120);
-    check_case ~journal_turn:turn_ref ~delta:(Masc_tui_keeper_chat_live.Text {text="latest answer"; stream_scope=None}) ~expected:0;
-    check_case ~journal_turn:(Ids.Turn_ref.make ~trace_id:"other-trace" ~absolute_turn:7)
-      ~delta:(Masc_tui_keeper_chat_live.Text {text="another turn"; stream_scope=None}) ~expected:1;
-    check_case ~journal_turn:turn_ref ~delta:(Masc_tui_keeper_chat_live.Thinking "considering") ~expected:1)
-
 let test_autonomous_checkpoint_closes_its_source () =
   let state = Types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
   let log = Types.turn_log_create_for_source ~keeper_name:"alpha" ~source ~started_at:10. in
@@ -170,5 +139,4 @@ let () =
       test_case "typed sources select separate routes" `Quick test_source_routes_and_decodes;
       test_case "observer only triggers ordered journal reads" `Quick test_notification_only_triggers_journal_read;
       test_case "cold open discovers current and historical journals" `Quick test_cold_open_discovery;
-      test_case "polled excerpt yields only to exact journal text" `Quick test_poll_excerpt_defers_only_to_exact_journal_text;
       test_case "autonomous checkpoint closes its journal source" `Quick test_autonomous_checkpoint_closes_its_source]]

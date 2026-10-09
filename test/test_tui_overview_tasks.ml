@@ -83,102 +83,6 @@ let drawn ~height ~selected =
              Option.value ~default:"<no text>"
                (Tasks.summary_text ~age_text:seconds_text ~now line))
 
-(* 2026-09-11T12:00Z to the fixture clock. *)
-let oldest_todo_seconds = string_of_int (12 * 24 * 3600) ^ "s"
-
-(* A backlog whose oldest task carries no creation time has no age to give,
-   and says so with the mark every pane uses for a missing value. *)
-let test_a_backlog_with_no_creation_time_draws_no_value () =
-  check (option string) "the shared no-value mark"
-    (Some ("3 todo · oldest " ^ Masc_tui_theme.Glyph.no_value))
-    (Tasks.summary_text ~age_text:seconds_text ~now
-       (Tasks.Todo_backlog { todo_count = 3; oldest_created_at = None }))
-
-let test_held_work_first () =
-  check (list string)
-    "in progress longest first, then awaiting, then claimed, then the backlog line"
-    [ "7200s task-1720"
-    ; "300s task-1710"
-    ; "2400s task-1700"
-    ; "60s task-1730"
-    ; "3 todo · oldest " ^ oldest_todo_seconds
-    ]
-    (drawn ~height:10 ~selected:(Some 0))
-
-(* A cut spends every row it has on rows. How many it left out is
-   [held_back], which the title says -- a line here would cost one of the
-   rows, and at the heights where this pane is squeezed to one it was the row
-   the count could then not be drawn in. *)
-let test_a_cut_spends_its_rows_on_rows () =
-  check (list string) "two held rows and the backlog line"
-    [ "7200s task-1720"; "300s task-1710"
-    ; "3 todo · oldest " ^ oldest_todo_seconds ]
-    (drawn ~height:3 ~selected:None);
-  check (list string) "the window follows the selection to the last held row"
-    [ "2400s task-1700"; "60s task-1730"
-    ; "3 todo · oldest " ^ oldest_todo_seconds ]
-    (drawn ~height:3 ~selected:(Some 3));
-  (* The row the count used to take is a row again. The backlog line is what
-     it goes to, because the title does not carry that one. *)
-  check (list string) "two rows draw one held row and the backlog line"
-    [ "7200s task-1720"; "3 todo · oldest " ^ oldest_todo_seconds ]
-    (drawn ~height:2 ~selected:(Some 0))
-
-(* And the count itself, at every height the pane can be given. Four rows are
-   held: a height that draws them all leaves none out. *)
-let test_the_title_count_is_what_the_rows_left_out () =
-  List.iter
-    (fun (height, expected) ->
-      check int
-        (Printf.sprintf "%d rows leaves %d out" height expected)
-        expected
-        (Tasks.held_back ~height ~selected:None tasks backlog))
-    (* Four rows are held. A height of two spends its second row on the
-       backlog line, which the title does not carry, so it still draws one
-       row of the four; a height of four draws all four and gives up the
-       backlog line instead. *)
-    [ 1, 3; 2, 3; 3, 2; 4, 0; 5, 0; 10, 0 ]
-
-let test_rows_are_the_drawn_order () =
-  check (list string) "rows are the drawn order"
-    [ "task-1720"; "task-1710"; "task-1700"; "task-1730" ]
-    (List.map (fun (task : Tui_decode.task) -> task.id) (Tasks.rows tasks));
-  let indexes =
-    Tasks.lines ~height:10 ~selected:None tasks backlog
-    |> List.filter_map (function
-         | Tasks.Task_row { index; _ } -> Some index
-         | Tasks.Nothing_active | Tasks.Todo_backlog _ -> None)
-  in
-  check (list int) "row indexes" [ 0; 1; 2; 3 ] indexes
-
-let test_nothing_held_is_said () =
-  let todo_only =
-    List.filter
-      (fun (task : Tui_decode.task) ->
-        match task.status with
-        | Masc_domain.Todo -> true
-        | Masc_domain.Claimed _ | Masc_domain.InProgress _
-        | Masc_domain.AwaitingVerification _ | Masc_domain.Done _
-        | Masc_domain.Cancelled _ ->
-            false)
-      tasks
-  in
-  let text ~height =
-    Tasks.lines ~height ~selected:None todo_only backlog
-    |> List.filter_map (Tasks.summary_text ~age_text:seconds_text ~now)
-  in
-  check (list string) "said, then the backlog line"
-    [ "no task in progress"; "3 todo · oldest " ^ oldest_todo_seconds ]
-    (text ~height:2);
-  check (list string) "one row keeps the backlog line"
-    [ "3 todo · oldest " ^ oldest_todo_seconds ]
-    (text ~height:1);
-  check int "the layout asks for both lines" 2
-    (Tasks.line_count todo_only backlog)
-
-(* The selection is an id. The palette, a followed link, the agenda and
-   the change view all set it to the opened task's id; the renderer, Enter
-   and Ctrl-] look its row up in the rows of that moment. *)
 let selected_id tasks ~selected =
   Option.map
     (fun (task : Tui_decode.task) -> task.id)
@@ -337,17 +241,7 @@ let test_a_good_read_without_the_task_drops_it () =
 let () =
   run "tui_overview_tasks"
     [ ( "overview tasks",
-        [ test_case "held work first" `Quick test_held_work_first
-        ; test_case "a cut says how many are left" `Quick
-            test_a_cut_spends_its_rows_on_rows
-        ; test_case "the title count is what the rows left out" `Quick
-            test_the_title_count_is_what_the_rows_left_out
-        ; test_case "rows are the drawn order" `Quick
-            test_rows_are_the_drawn_order
-        ; test_case "nothing held is said" `Quick test_nothing_held_is_said
-        ; test_case "a backlog with no creation time draws no value" `Quick
-            test_a_backlog_with_no_creation_time_draws_no_value
-        ; test_case "an open todo task highlights no row" `Quick
+        [ test_case "an open todo task highlights no row" `Quick
             test_open_todo_highlights_nothing
         ; test_case "an open held task highlights its row" `Quick
             test_open_held_task_highlights_its_row

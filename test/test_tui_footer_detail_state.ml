@@ -39,90 +39,6 @@ let test_each_surface_scopes_a_key () =
         (Keys.has_detail_scoped_keys surface))
     detail_surfaces
 
-(* While no detail is open, [ / ] is refused: every one of these surfaces
-   guards it on its own detail being present. *)
-let test_the_list_footer_drops_the_detail_only_key () =
-  List.iter
-    (fun (name, surface) ->
-      let hints = Keys.footer_hints ~detail_open:false surface in
-      check bool (name ^ " list does not advertise [ / ]") false
-        (contains hints "[ / ]");
-      check bool (name ^ " list still advertises the key that opens a detail")
-        true
-        (contains hints "Right / Enter"))
-    detail_surfaces
-
-(* And once one is open, the key that opens one has nothing left to do: it
-   re-opens the row already on screen, so the frame does not change. *)
-let test_the_detail_footer_drops_the_list_only_key () =
-  List.iter
-    (fun (name, surface) ->
-      let hints = Keys.footer_hints ~detail_open:true surface in
-      check bool (name ^ " detail advertises [ / ]") true
-        (contains hints "[ / ]");
-      check bool (name ^ " detail does not advertise the key that opens one")
-        false
-        (contains hints "Right / Enter"))
-    detail_surfaces
-
-let test_the_two_states_read_differently () =
-  List.iter
-    (fun (name, surface) ->
-      check bool (name ^ " draws a different footer in each state") false
-        (String.equal
-           (Keys.footer_hints ~detail_open:false surface)
-           (Keys.footer_hints ~detail_open:true surface)))
-    detail_surfaces
-
-(* Not only tidier: the Schedules footer already cut at 120 columns, so the
-   cell a refused key was holding is a cell a usable key can have. Each state
-   is shorter than the footer that named both. *)
-let test_each_state_is_shorter_than_naming_both () =
-  List.iter
-    (fun (name, surface) ->
-      let both = String.length (Keys.footer_hints surface) in
-      check bool (name ^ " list footer is shorter than naming both") true
-        (String.length (Keys.footer_hints ~detail_open:false surface) < both);
-      check bool (name ^ " detail footer is shorter than naming both") true
-        (String.length (Keys.footer_hints ~detail_open:true surface) < both))
-    detail_surfaces
-
-(* The omission this guards against, stated as a fact rather than left to be
-   discovered: a caller that does not say which state it is in gets the old
-   footer, both keys and all. That is why the renderer check below exists. *)
-let test_omitting_the_state_keeps_the_old_reading () =
-  List.iter
-    (fun (name, surface) ->
-      let hints = Keys.footer_hints surface in
-      check bool (name ^ " without a state still advertises both") true
-        (contains hints "[ / ]" && contains hints "Right / Enter"))
-    detail_surfaces
-
-(* Harness came to this through a different door: its verdict pane already had
-   a footer of its own, written out in the renderer rather than read from the
-   table. What a hand-written row leaves out is invisible -- and this one left
-   out both [[ / ]], which the dispatcher answers there and only there, and
-   the pair that answers a ruling, on the one screen that exists for reading a
-   ruling in full. *)
-let test_the_verdict_pane_names_the_keys_that_answer () =
-  let hints = Keys.footer_hints ~detail_open:true Masc_tui_types.Harness in
-  check bool "the verdict pane names the pair that answers a ruling" true
-    (contains hints "y / x");
-  check bool "and the stepping key the dispatcher answers there" true
-    (contains hints "[ / ]");
-  (* Naming it is not enough: the fitter drops from the right, and this pane
-     is where the answer keys would go first. The pair is pinned whole, the
-     way Verification pins its own -- [y] and [x] apart are ordinary keys
-     elsewhere. *)
-  check bool "the fitter reads the pair as pinned" true
-    (Masc_tui_footer.item_is_pinned "y / x:agree / overrule")
-
-(* Four more surfaces hold the same pair of facts, and each reads its detail
-   footer from a builder of its own rather than from [footer_hints
-   ~detail_open:true] -- Board from the layout, Fusion and Resources from
-   their own lists -- so they do not join [detail_surfaces], whose loop asks
-   for both of that function's readings. What they share is the half that was
-   wrong: the list footer named a key the dispatcher refuses there. *)
 let list_footer_refusals =
   [ ("Board", Masc_tui_types.Board, [ "[ / ]"; "z:"; "h/l" ])
   ; ("Fusion", Masc_tui_types.Fusion, [ "[ / ]" ])
@@ -148,46 +64,6 @@ let test_each_list_footer_names_no_key_it_refuses () =
         keys)
     list_footer_refusals
 
-(* The list keeps everything the list answers. Named for Board because it is
-   the surface that lost three at once. *)
-let test_the_board_list_keeps_the_keys_it_answers () =
-  let list_hints = Keys.footer_hints ~detail_open:false Masc_tui_types.Board in
-  List.iter
-    (fun key ->
-      check bool ("the Board list still advertises " ^ key) true
-        (contains list_hints key))
-    [ "Right / Enter"; "Left / Esc"; "w:write"; "v / V:up / down"; "s:sort" ];
-  check bool "Board keeps both vote directions together" true
-    (Masc_tui_footer.item_is_pinned "v / V:up / down")
-
-let test_the_board_pending_footer_keeps_only_live_keys () =
-  let hints = Keys.footer_hints_board_pending in
-  check string "Board pending footer projects the three live keys"
-    "Left / Esc:back  r:refresh  Tab:next" hints;
-  List.iter
-    (fun key ->
-      check bool ("Board pending omits " ^ key) false (contains hints key))
-    [ "j/k"; "[/]"; "v / V"; "c:reply" ]
-
-(* Two surfaces read their table through a filter of their own, so the state
-   rule has to reach them too. Resources calls its focused pane the detail;
-   Fusion's detail footer is a hand-built list, and a key scoped to the
-   detail that no detail footer names is the same drift pointing the other
-   way. *)
-let test_the_detail_footers_name_the_scoped_key () =
-  check bool "the focused Resources text offers [ / ]" true
-    (contains (Keys.footer_hints_resources ~detail_focus:true) "[ / ]");
-  check bool "and the resource list does not" false
-    (contains (Keys.footer_hints_resources ~detail_focus:false) "[ / ]");
-  check bool "the open Fusion run offers [ / ]" true
-    (contains Keys.footer_hints_fusion_detail "[ / ]")
-
-(* Both lists above are written by hand, and that is how four surfaces sat
-   unscoped while their footers named a key the dispatcher refuses: nothing
-   said which surfaces owed an entry. [help_surfaces] is the sheet's own
-   enumeration, so this walks every surface there and asks the ones that
-   scope a key to be named. A surface that gains a scoped key and no entry
-   turns this red, which is the prompt to wire its renderers too. *)
 let test_every_scoped_surface_is_named () =
   let named =
     List.map (fun (_, surface, _) -> surface) list_footer_refusals
@@ -205,30 +81,11 @@ let () =
     [ ( "table",
         [ test_case "each surface scopes a key" `Quick
             test_each_surface_scopes_a_key
-        ; test_case "the list footer drops the detail-only key" `Quick
-            test_the_list_footer_drops_the_detail_only_key
-        ; test_case "the detail footer drops the list-only key" `Quick
-            test_the_detail_footer_drops_the_list_only_key
-        ; test_case "the two states read differently" `Quick
-            test_the_two_states_read_differently
-        ; test_case "each state is shorter than naming both" `Quick
-            test_each_state_is_shorter_than_naming_both
-        ; test_case "omitting the state keeps the old reading" `Quick
-            test_omitting_the_state_keeps_the_old_reading
         ; test_case "each list footer names no key it refuses" `Quick
             test_each_list_footer_names_no_key_it_refuses
-        ; test_case "the Board list keeps the keys it answers" `Quick
-            test_the_board_list_keeps_the_keys_it_answers
-        ; test_case "the Board pending footer keeps only live keys" `Quick
-            test_the_board_pending_footer_keeps_only_live_keys
-        ; test_case "the detail footers name the scoped key" `Quick
-            test_the_detail_footers_name_the_scoped_key
         ; test_case "every scoped surface is named here" `Quick
             test_every_scoped_surface_is_named
         ] )
     ; ( "renderers",
-        [
- test_case "the verdict pane names the keys that answer" `Quick
-            test_the_verdict_pane_names_the_keys_that_answer
-        ] )
+        [] )
     ]

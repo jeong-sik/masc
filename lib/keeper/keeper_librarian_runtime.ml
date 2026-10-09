@@ -73,7 +73,7 @@ type extraction_error =
       }
   | No_transport_declared
   | Domain_output_invalid of string
-  | Absorb_judgment_failed of { reason : string; selected_slot : string }
+  | Absorb_judgment_failed of { reason : string; selected_slot : string; walk_shows_size : bool }
   | Memory_snapshot_write_failed of
       { detail : string
       ; selected_slot : string
@@ -158,7 +158,7 @@ let rec extraction_error_to_string = function
     "lane declares no API or official-client slots"
   | Domain_output_invalid detail ->
     "domain output invalid: " ^ detail
-  | Absorb_judgment_failed { reason; selected_slot = _ } ->
+  | Absorb_judgment_failed { reason; selected_slot = _; walk_shows_size = _ } ->
     "absorb judgment failed; current memory unchanged: " ^ reason
   | Memory_snapshot_write_failed { detail; selected_slot = _ } ->
     "current snapshot write failed: " ^ detail
@@ -610,7 +610,8 @@ let rec extraction_shows_size = function
   | Cli_prompt_unavailable { prior_error = Some error } -> extraction_shows_size error
   | Cli_prompt_unavailable { prior_error = None } -> false
   | Prompt_render_failed _ | Exact_setup_failed _
-  | No_transport_declared | Absorb_judgment_failed _ | Memory_snapshot_write_failed _ -> false
+  | No_transport_declared | Memory_snapshot_write_failed _ -> false
+  | Absorb_judgment_failed { walk_shows_size; _ } -> walk_shows_size
 ;;
 
 (* Only a CLI slot reports a limit this process can fit against: its refusal
@@ -1606,6 +1607,7 @@ let run_best_effort
                 applied (RFC-0463 section 2.8). *)
              let absorb_gate =
                Keeper_librarian_absorb_gate.run
+                 ~new_observations:(Keeper_librarian.observations_for_absorption prompt_input)
                  ~observe:(fun observation -> observed_absorb_gate := Some observation)
                  ~before_evaluate:register_absorb_evaluation
                  ~after_evaluate:complete_absorb_evaluation
@@ -1632,7 +1634,8 @@ let run_best_effort
                    ~absorbed:selection.absorbed
                    absorb_gate
                with
-               | Some reason -> Error (Absorb_judgment_failed { reason; selected_slot })
+               | Some reason -> Error (Absorb_judgment_failed { reason; selected_slot;
+                   walk_shows_size = Keeper_librarian_absorb_gate.failure_shows_size absorb_gate })
                | None -> Ok ()
              in
              let applied_absorbed = Keeper_librarian_absorb_gate.absorbed_of_run absorb_gate in

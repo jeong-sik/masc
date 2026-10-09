@@ -61,7 +61,7 @@ def captures(log: str, suite: str | None = None) -> list[dict]:
     return result
 
 
-def binary_hashes(log: str) -> set[str]:
+def binary_hashes(log: str, expected: str | None = None) -> set[str]:
     result = set()
     marker = "STUDIO_BINARY_SHA256="
     for line in log.splitlines():
@@ -72,6 +72,11 @@ def binary_hashes(log: str) -> set[str]:
         if len(value) != 64 or any(char not in string.hexdigits for char in value):
             raise ValueError("malformed STUDIO_BINARY_SHA256 record")
         result.add(value.lower())
+    if expected is not None:
+        if len(expected) != 64 or any(char not in string.hexdigits for char in expected):
+            raise ValueError("expected TUI binary SHA256 is malformed")
+        if result != {expected.lower()}:
+            raise ValueError("recorded PTY binary does not match the verified TUI executable")
     return result
 
 
@@ -186,6 +191,7 @@ def main() -> None:
     parser.add_argument("--origin", choices=("ci", "local"), default="ci",
                         help="Where the fixture PTY was executed (default: ci)")
     parser.add_argument("--expected-head")
+    parser.add_argument("--expected-binary-sha256", help="SHA256 of the source-verified TUI executable")
     parser.add_argument("--out", type=Path)
     parser.add_argument("--suite-pass-marker")
     parser.add_argument("--suite", help="Select records explicitly tagged with this producing suite")
@@ -219,7 +225,7 @@ def main() -> None:
     ttyd = shutil.which("ttyd")
     if ttyd is None:
         raise SystemExit("ttyd is required to replay the recorded terminal frames")
-    binaries = binary_hashes(log)
+    binaries = binary_hashes(log, expected=args.expected_binary_sha256)
     args.out.mkdir(parents=True, exist_ok=True)
     evidence = {
         "provenance": f"xterm replay of {'CI' if origin == 'ci' else 'local'} fixture PTY frames",

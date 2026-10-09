@@ -127,6 +127,7 @@ let apply_file ?(intent = Open_code_file) (state : state) request result = (
       state.code_lsp_query <- Masc_tui_fetched.clear state.code_lsp_query;
       state.code_history <- Masc_tui_fetched.clear state.code_history;
       state.code_history_open <- false;
+      state.code_history_expanded <- None;
       state.code_history_scroll <- 0;
       state.code_diff <- Masc_tui_fetched.clear state.code_diff;
       state.code_diff_open <- false;
@@ -276,6 +277,9 @@ let apply_history (state : state) request result =
   state.code_history <-
     Masc_tui_fetched.complete ~equal:code_scope_path_equal state.code_history
       request result;
-  if landed then state.code_history_scroll <- 0
+  if landed then begin
+    state.code_history_scroll <- 0;
+    state.code_history_expanded <- None
+  end
 
 ;;

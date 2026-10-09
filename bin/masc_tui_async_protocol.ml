@@ -125,7 +125,8 @@ type async_msg =
       { detail : string
       ; latest : (Masc.Tui_decode.server_identity, string) result
         (* The identity the refusing probe read; it may name a workspace. *)
-      }
+      ; prior_contact : Masc_tui_server_lifecycle.contact
+      ; refresh_ticket : Http_refresh_order.ticket }
   | Schedule_form_authority_refused of
       { action : string; detail : string; workspace : workspace_input_identity option }
   | Lane_package_catalog_loaded of int * string option * (Yojson.Safe.t, string) result

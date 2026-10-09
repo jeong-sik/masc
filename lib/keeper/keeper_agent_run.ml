@@ -344,7 +344,7 @@ let repeated_tool_call_input ~threshold tool_calls =
    scope contributes only its latched observation failure; it is not what
    makes the boundary exist (#34083). *)
 let official_client_tool_boundary
-      ~repetition_execution ~tool_calls () =
+      ~repetition_execution ~tool_calls ~input_tool_calls () =
   match Option.bind repetition_execution Keeper_repetition_scope.Execution.failure with
   | Some error ->
     Error (Agent_core.Error.Internal (Keeper_repetition_snapshot.error_to_string error))
@@ -356,7 +356,7 @@ let official_client_tool_boundary
         | Some _ as repeated -> repeated
         | None ->
           repeated_tool_call_input
-            ~threshold:repeated_tool_call_input_yield_threshold tool_calls
+            ~threshold:repeated_tool_call_input_yield_threshold input_tool_calls
       in
       Ok (Option.map (fun (tool_name, repeated_count) ->
         Keeper_official_client_host.Repeated_tool_call { tool_name; repeated_count }) repeated)
@@ -641,6 +641,7 @@ let native_tool_boundary
       ~repetition_execution
       ~terminal_effect_state
       ~tool_calls
+      ~input_tool_calls
       ~assistant_turn_texts
       ~yield_requested
   =
@@ -678,7 +679,7 @@ let native_tool_boundary
                  repeated_tool_call_input
                    ~threshold:
                      repeated_tool_call_input_yield_threshold
-                   tool_calls
+                   input_tool_calls
                with
                | Some (tool_name, repeated_count) ->
                  Log.Keeper.warn
@@ -1582,23 +1583,56 @@ let run_turn
           how the error path below knows the turn ran on an official client. *)
        let last_dispatched_checkpoint_owner = ref None in
        let turn_result =
-         (* A repetition yield is the judgment on the calls it saw. On the
-            lane seeded from the checkpoint history, record where those
-            calls end so the next seed starts past them; the checkpoint
-            AGENT_CORE takes after this probe carries the record. A
-            scope-bound lane has no history count and records nothing. *)
+         (* A repetition yield advances the two source positions independently.
+            The current Agent Core checkpoint owns the history coordinate;
+            committed ledger appends own the other. Direct scopes record their
+            own observations and do not move this autonomous boundary. *)
          let record_repetition_judged () =
            match s.acc.history_pairs_at_setup with
-           | Some history_pairs_at_setup ->
-             Keeper_repetition_judged.record shared_context
-               (Keeper_repetition_judged.pairs_judged_by ~history_pairs_at_setup
-                  s.acc.tool_calls)
            | None -> ()
+           | Some history_pairs_at_setup ->
+             (match Keeper_repetition_judged.read shared_context with
+              | Error error -> Log.Keeper.warn ~keeper_name:meta.name "%s"
+                  (Keeper_repetition_judged.error_to_string error)
+              | Ok previous ->
+                let history_pairs = match !agent_ref, !last_dispatched_checkpoint_owner with
+                  | Some agent, _ ->
+                    (* The Agent Core checkpoint is the persisted history, and
+                       an Agent Core attempt that ran tools before failing over
+                       to an official client still left its pairs there. The
+                       run accumulator also holds the official-client attempts,
+                       so only the checkpoint's own pairs move the boundary. *)
+                    let checkpoint = Agent_core.Agent.checkpoint agent in
+                    Keeper_run_tools_setup.initial_tool_calls
+                      ~history_memo:(Keeper_tool_progress_identity.history_memo
+                        ~base_path:config.base_path ~keeper_name:meta.name)
+                      ~history_messages:checkpoint.messages
+                    |> List.length
+                  | None, Some Runtime_execution.Masc_agent_core ->
+                    Log.Keeper.warn ~keeper_name:meta.name
+                      "repetition history judgment retained: dispatched agent is unavailable";
+                    history_pairs_at_setup
+                  | None, (Some Runtime_execution.Official_client | None) ->
+                    history_pairs_at_setup in
+                let frontier =
+                  match Keeper_run_tools_setup.flush_ledger () with
+                  | Error detail -> Error detail
+                  | Ok () -> Keeper_tool_call_log.current_frontier ~keeper_name:meta.name
+                      |> Result.map_error (function Keeper_tool_call_log.Index_unavailable detail -> detail) in
+                let ledger_frontier = match frontier with
+                  | Ok frontier -> frontier
+                  | Error detail ->
+                    Log.Keeper.warn ~keeper_name:meta.name
+                      "repetition ledger judgment was not advanced: %s" detail;
+                    previous.ledger_frontier in
+                Keeper_repetition_judged.record shared_context
+                  { previous with history_pairs = max previous.history_pairs history_pairs; ledger_frontier })
          in
          let on_official_client_tool_boundary () =
            match
              official_client_tool_boundary ~repetition_execution
                ~tool_calls:(Keeper_run_tools_hook_accumulator.tool_calls_for_repetition s.acc)
+               ~input_tool_calls:(Keeper_run_tools_hook_accumulator.tool_calls_for_input_repetition s.acc)
                ()
            with
            | Ok (Some (Keeper_official_client_host.Repeated_tool_call _)) as stop ->
@@ -1620,6 +1654,7 @@ let run_turn
                        ~repetition_execution
                        ~terminal_effect_state:(s.terminal_effect_state ())
                        ~tool_calls:(Keeper_run_tools_hook_accumulator.tool_calls_for_repetition s.acc)
+                       ~input_tool_calls:(Keeper_run_tools_hook_accumulator.tool_calls_for_input_repetition s.acc)
                        ~assistant_turn_texts:s.acc.assistant_turn_texts
                        ~yield_requested
                    with

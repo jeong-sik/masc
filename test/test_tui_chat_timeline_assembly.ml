@@ -131,16 +131,47 @@ let test_rows_of_one_phase_keep_their_sequence () =
 ;;
 
 let test_the_same_user_line_appears_once () =
-  let rows =
-    [ user ~request_id:"a" "ask" 1.0
-    ; user ~request_id:"a" "ask" 2.0
-    ; keeper ~request_id:"a" "answer" 3.0
-    ]
-  in
-  Alcotest.(check (list string))
-    "the session copy and the persisted copy are one line"
-    [ "ask"; "answer" ]
-    (List.map (fun (r : Tui_types.msg_entry) -> r.me_text) (sole_turn rows).ct_rows)
+  let persisted = user ~request_id:"a" "server input" 2. in
+  let session = {(user ~request_id:"a" "local input" 1.) with
+    me_identity=Tui_types.Session_row {request_id="a";turn_phase=Turn_input;operation_seq=0}} in
+  let result = Tui_types.chat_timeline ~loaded:[persisted;keeper ~request_id:"a" "answer" 3.]
+      ~session:[session] ~queued_request_ids:[] in
+  Alcotest.(check (list string)) "exact input slot uses persisted authority, independently of text"
+    ["server input";"answer"] (List.concat_map turn_texts result.ctl_items)
+;;
+
+let test_identical_user_text_keeps_distinct_origins () =
+  let first = user ~request_id:"a" ~operation_seq:0 "same input" 1. in
+  let different_id = {(user ~request_id:"a" ~operation_seq:0 "same input" 2.) with
+    me_identity=Tui_types.Persisted_row "different-row"} in
+  let next_position = user ~request_id:"a" ~operation_seq:1 "same input" 3. in
+  let turn = sole_turn [first; different_id; next_position] in
+  Alcotest.(check int) "same words do not join distinct persisted origins" 3 (List.length turn.ct_rows);
+  Alcotest.(check int) "replayed stable identity appears once" 1
+    (List.length (sole_turn [first;first]).ct_rows);
+  let session position keeper = {(user ~request_id:"a" ~operation_seq:position "same input" 4.) with
+    me_keeper_name=keeper;
+    me_identity=Tui_types.Session_row {request_id="a";turn_phase=Turn_input;operation_seq=position}} in
+  let result = Tui_types.chat_timeline ~loaded:[first] ~session:[session 1 "alpha"; session 0 "beta"]
+      ~queued_request_ids:[] in
+  Alcotest.(check int) "different input positions and Keepers do not alias" 3
+    (List.length (List.concat_map turn_texts result.ctl_items))
+;;
+
+let test_legacy_page_ordinals_do_not_identify_user_rows () =
+  let legacy text at = {(user ~request_id:"a" text at) with
+    me_identity=Tui_types.Persisted_legacy_row {request_id="a";operation_seq=0}} in
+  List.iter (fun texts ->
+    let rows = List.mapi (fun index text -> legacy text (float_of_int index)) texts in
+    Alcotest.(check (list string)) "separate pages with the same local ordinal preserve all inputs"
+      texts (List.map (fun (row:Tui_types.msg_entry) -> row.me_text) (sole_turn rows).ct_rows))
+    [["first page";"second page"];["same words";"same words"]];
+  let session = {(user ~request_id:"a" "local input" 3.) with
+    me_identity=Tui_types.Session_row {request_id="a";turn_phase=Turn_input;operation_seq=0}} in
+  let result = Tui_types.chat_timeline ~loaded:[legacy "first page" 1.]
+      ~session:[session] ~queued_request_ids:[] in
+  Alcotest.(check int) "a page-local ordinal cannot suppress a local input" 2
+    (List.length (List.concat_map turn_texts result.ctl_items))
 ;;
 
 let test_two_tool_rows_with_one_text_are_two_calls () =
@@ -177,18 +208,23 @@ let test_a_turn_stops_claiming_a_number_when_its_rows_disagree () =
     (sole_turn disagreed).ct_turn_sequence
 ;;
 
+let test_turn_sequence_conflict_cannot_be_forgotten () =
+  List.iter (fun sequences ->
+    let rows = List.mapi (fun position turn_sequence ->
+      keeper ?turn_sequence ~operation_seq:position ~request_id:"a" "answer" (float_of_int position)) sequences in
+    Alcotest.(check (option int)) "later repetition cannot erase an earlier disagreement"
+      None (sole_turn rows).ct_turn_sequence)
+    [[Some 7;Some 8;Some 7]; [Some 7;Some 8;Some 8];
+     [Some 7;Some 8;None;Some 7]; [None;Some 7;Some 8;Some 7]]
+;;
+
 let test_a_folded_row_still_carries_its_number () =
-  let rows =
-    [ user ~request_id:"a" "ask" 1.0
-    ; user ~request_id:"a" ~turn_sequence:4 "ask" 2.0
-    ]
-  in
-  let turn = sole_turn rows in
-  Alcotest.(check int) "one line" 1 (List.length turn.ct_rows);
-  Alcotest.(check (option int))
-    "and the number the duplicate knew"
-    (Some 4)
-    turn.ct_turn_sequence
+  let original = user ~request_id:"a" "ask" 1. in
+  let repeated = {original with me_turn_sequence=Some 4} in
+  let turn = sole_turn [original;repeated] in
+  Alcotest.(check int) "one stable identity" 1 (List.length turn.ct_rows);
+  Alcotest.(check (option int)) "duplicate retains its typed turn number"
+    (Some 4) turn.ct_turn_sequence
 ;;
 
 let test_journal_and_unowned_lines_keep_their_places () =
@@ -421,10 +457,16 @@ let () =
             test_rows_of_one_phase_keep_their_sequence;
           Alcotest.test_case "the same user line appears once" `Quick
             test_the_same_user_line_appears_once;
+          Alcotest.test_case "identical input bytes keep distinct origins" `Quick
+            test_identical_user_text_keeps_distinct_origins;
+          Alcotest.test_case "legacy page positions do not identify inputs" `Quick
+            test_legacy_page_ordinals_do_not_identify_user_rows;
           Alcotest.test_case "two tool rows with one text are two calls" `Quick
             test_two_tool_rows_with_one_text_are_two_calls;
           Alcotest.test_case "a turn stops claiming a number when its rows disagree"
             `Quick test_a_turn_stops_claiming_a_number_when_its_rows_disagree;
+          Alcotest.test_case "sequence conflict remains observed" `Quick
+            test_turn_sequence_conflict_cannot_be_forgotten;
           Alcotest.test_case "a folded row still carries its number" `Quick
             test_a_folded_row_still_carries_its_number;
           Alcotest.test_case "journal and unowned lines keep their places" `Quick

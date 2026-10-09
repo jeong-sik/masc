@@ -1,54 +1,45 @@
 {
-  "scope": "Changed source syntax only; no app build or PTY execution",
-  "checks": [
-    {
-      "path": "bin/masc_tui.ml",
-      "sha256": "f7c282e0e98d859be66a6f95ac57256b156d1695dccdff26b4abe29b77d4a1fe",
-      "check": "ocamlc -stop-after parsing",
+  "scope": "Current source syntax only. Historical runtime/footer/PTY results are not re-executed or certified by this receipt.",
+  "checks": {
+    "bin/masc_tui.ml": {
+      "sha256": "47214fd75ffed6459301812094f782d71e2d1b618a4423a3ab488cc1c5d9f8e5",
+      "check": "ocaml parsing",
       "result": "PASS"
     },
-    {
-      "path": "bin/masc_tui_render.ml",
-      "sha256": "4b60c87e4265947a13385fd47f06e371a63d5ac1bee842cd9addf29f600b8ff6",
-      "check": "ocamlc -stop-after parsing",
+    "bin/masc_tui_render.ml": {
+      "sha256": "d81da1899d7add35c6c1cfa962f9807a0b611c4ad270ed4cca4c300ec448f70b",
+      "check": "ocaml parsing",
       "result": "PASS"
     },
-    {
-      "path": "docs/evidence/tui-keepers-reading-20261007/project-fields.py",
+    "docs/evidence/tui-keepers-reading-20261007/project-fields.py": {
       "sha256": "36294380519e9c6035b952250c1acd70caf008e9295cbc2fc80f1c7a41ca89d6",
-      "check": "Python ast.parse",
+      "check": "python ast.parse",
       "result": "PASS"
     },
-    {
-      "path": "test/test_tui_board_heading_width.py",
+    "test/test_tui_board_heading_width.py": {
       "sha256": "c4a05db3513406d0b3461b8588d4ec101c3c407a369475d11753609082a57346",
-      "check": "Python ast.parse",
+      "check": "python ast.parse",
       "result": "PASS"
     },
-    {
-      "path": "test/test_tui_keeper_info_refresh_pty.py",
+    "test/test_tui_keeper_info_refresh_pty.py": {
       "sha256": "66d058ed675d31b4fc82d6caedaaa15691c12cb101253b0e135ac322ceb884a1",
-      "check": "Python ast.parse",
+      "check": "python ast.parse",
       "result": "PASS"
     },
-    {
-      "path": "test/test_tui_keeper_roster_window.py",
+    "test/test_tui_keeper_roster_window.py": {
       "sha256": "1a4c78f790004b6cf2c6c15a969d6885aac7065fd9ee3ad1fe3bc8f307bc7713",
-      "check": "Python ast.parse",
+      "check": "python ast.parse",
       "result": "PASS"
     },
-    {
-      "path": "test/test_tui_region_baseline_pty.py",
+    "test/test_tui_region_baseline_pty.py": {
       "sha256": "5cf17e5bde1b88c83c9da247265e65487b2775a10f3bf71b29688cd85e52333c",
-      "check": "Python ast.parse",
+      "check": "python ast.parse",
       "result": "PASS"
     },
-    {
-      "path": "test/tui_keyboard_keepers.py",
+    "test/tui_keyboard_keepers.py": {
       "sha256": "3bf208416c42e2caaf3ee3458f395a31c641c0f3b7b1d31fe5ff61b910a0dda2",
-      "check": "Python ast.parse",
+      "check": "python ast.parse",
       "result": "PASS"
     }
-  ],
-  "whitespace": "git diff --check PASS"
+  }
 }

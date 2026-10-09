@@ -5093,6 +5093,11 @@ let launch_keeper_lanes_load state ~mailbox =
       (fun () -> Masc_tui_loader.load_keeper_lanes ~host ~port)
   end
 
+let launch_keeper_lanes_reread state ~mailbox =
+  if state.keeper_lanes_inflight
+  then state.keeper_lanes_reread_pending <- true
+  else launch_keeper_lanes_load state ~mailbox
+
 let launch_lanes_load state ~mailbox =
   if state.standalone_lanes_inflight then ()
   else begin
@@ -10604,6 +10609,7 @@ let revoke_detail_readings state =
   state.keeper_sandbox_logs <- None;
   state.keeper_sandbox_logs_error <- None;
   state.keeper_lanes_inflight <- false;
+  state.keeper_lanes_reread_pending <- false;
   state.lanes <- None;
   state.keeper_secrets <- [];
   state.lanes_error <- None;
@@ -10818,6 +10824,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.keeper_turns_observed_at <- None;
   state.keeper_observed_interrupts <- [];
   state.keeper_lanes_inflight <- false;
+  state.keeper_lanes_reread_pending <- false;
   state.lanes <- None;
   state.lanes_error <- None;
   state.keeper_secrets <- [];
@@ -11334,7 +11341,7 @@ let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
       (* Runtime Stats reads the composite snapshot. Entry and explicit [r]
          both request a current reading, including after a failed refresh;
          the shared launcher retains its single-flight and authority guards. *)
-      launch_keeper_lanes_load state ~mailbox;
+      launch_keeper_lanes_reread state ~mailbox;
       launch_keeper_board_quarantines state ~mailbox keeper.k_name
   | Detail_items ->
       launch_keeper_items state ~mailbox keeper.k_name
@@ -17113,7 +17120,11 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
             (* Keep the previous rows visible. The error says that they are
                stale; clearing them would turn a failed refresh into an empty
                reading. *)
-            state.lanes_error <- Some detail)
+            state.lanes_error <- Some detail);
+        if state.keeper_lanes_reread_pending then begin
+          state.keeper_lanes_reread_pending <- false;
+          launch_keeper_lanes_load state ~mailbox
+        end
       end
   | Lane_inventory_loaded (generation, result) ->
       state.standalone_lanes_inflight <- false;

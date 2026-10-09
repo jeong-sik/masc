@@ -7,7 +7,7 @@
       "result": "PASS"
     },
     "bin/masc_tui_render.ml": {
-      "sha256": "ff42d74a1ec7072e4695a43672b06fc52d2919612bf15d0dfa16a8a44ea31bde",
+      "sha256": "d81da1899d7add35c6c1cfa962f9807a0b611c4ad270ed4cca4c300ec448f70b",
       "check": "ocaml parsing",
       "result": "PASS"
     },

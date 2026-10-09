@@ -5936,6 +5936,7 @@ type state = {
   mutable schedule_form_refusal: schedule_form_refusal option;
   mutable lanes: Tui_decode.keeper_lanes_snapshot option;
   mutable keeper_lanes_inflight: bool;
+  mutable keeper_lanes_reread_pending: bool;
   mutable lane_inventory: Masc.Tui_decode_lane_inventory.snapshot option;
   mutable standalone_lanes: Tui_decode.standalone_lanes_snapshot option;
   mutable standalone_lanes_error: string option;
@@ -8912,6 +8913,7 @@ let create_state
   schedule_form_refusal = None;
   lanes = None;
   keeper_lanes_inflight = false;
+  keeper_lanes_reread_pending = false;
   lane_inventory = None;
   standalone_lanes = None;
   standalone_lanes_error = None;

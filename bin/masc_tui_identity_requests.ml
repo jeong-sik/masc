@@ -19,9 +19,21 @@ let launch_view state ~host ~deliver keeper_name =
   let request = mark_detail_read_started state ~tab:Detail_identity ~keeper:keeper_name
     ~now_ns:(Mtime_clock.elapsed_ns ()) in
   let port = state.port in
+  let expectations = identity_expectations_for_keeper state keeper_name in
   Masc_tui_async_read.launch
-    ~deliver:(fun result -> deliver (Identity_providers_loaded (request, result)))
-    (fun () -> Masc_tui_loader.load_identity_providers ~host ~port ~keeper_name)
+    ~deliver:(function
+      | Ok (providers, attempts) -> deliver (Identity_providers_loaded (request, providers, attempts))
+      | Error detail -> deliver (Identity_providers_loaded (request, Error detail, [])))
+    (fun () ->
+      (* Read completion first: a completed publication must precede the
+         catalog snapshot that is installed before this attempt retires. *)
+      let attempts = List.map (fun expectation ->
+        let result = Masc_tui_http.fetch_identity_login_status ~host ~port
+          ~keeper_name ~provider_id:expectation.ile_provider ~attempt_id:expectation.ile_attempt_id
+          |> fun result -> Result.bind result Masc_tui_identity_model.decode_identity_login_status in
+        expectation,result) expectations in
+      let providers = Masc_tui_loader.load_identity_providers ~host ~port ~keeper_name in
+      Ok (providers, attempts))
 ;;
 
 (* Throw or clear one attached service's switch. Off keeps the token and

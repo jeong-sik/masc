@@ -1,6 +1,6 @@
 # Declared runtime configuration projection
 
-Base: c7f12d726d89729a02ac2d38c68fb467db214263.
+PR #42122. Base: c7f12d726d89729a02ac2d38c68fb467db214263.
 
 The dashboard runtime-info surface mixed declared configuration JSON with live admission snapshots, effective capability lookup, runtime inventory acquisition and cached network/git probes. Private server_dashboard_runtime_declaration_projection owns canonical wire labels and pure request/provider/model/binding declaration projection (299 lines). The root retains all acquisition, admission snapshot and effective capability lookup responsibilities (2406 lines, previously 2703).
 

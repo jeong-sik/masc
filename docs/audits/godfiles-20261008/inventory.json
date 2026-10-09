@@ -561,7 +561,11 @@
       "path": "lib/server/server_dashboard_http_runtime_info.ml",
       "baseline_lines": 2700,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; probes, cache and runtime resolution semantic review pending",
+      "current_lines": 2406,
+      "prs": [
+        42122
+      ]
     },
     {
       "path": "lib/server/server_routes_http_keeper_stream.ml",

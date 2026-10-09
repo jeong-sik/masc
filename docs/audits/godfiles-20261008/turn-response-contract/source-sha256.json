@@ -1,13 +1,10 @@
 {
-  "lib/keeper/keeper_agent_run.ml": "4590749edf99d33c0cff6b0e99e2ff44a24226c7818e501560b1e84deb4dd1d2",
-  "lib/keeper/keeper_agent_run.mli": "3b324fce3ca0c0f717deb5f127625f3ac053ebfd510ffe482a7c9598af48e055",
-  "lib/keeper/keeper_turn_response_contract.ml": "91c65df54a4556015d394a60426716cd5660ed20960ce945b047fa23ff8e41ff",
-  "lib/keeper/keeper_turn_response_contract.mli": "52db61e576afe8c4bcaf24278986444cb484cc61a43e9328471d6e18729016df",
-  "test/test_keeper_turn_driver_accept.ml": "598525af1c97daa6af37e2f283cdf982b88042a798f52649ed11a103a27c8d9e",
-  "test/test_keeper_wake_turn_context.ml": "d4646626f66db8382327d8a601f78cb20fd60598a8ef7cb31b194c38d97ee75e",
-  "test/test_keeper_claude_code_runtime.ml": "e977b0b26be3354757f06e8c11f2da9d966b30ad93ce4bf1c44e78f8d4127c01",
-  "test/test_keeper_muse_runtime.ml": "cec7f20957505ab62e4821499dad7fb12e7498b096cf68be7abb6da2bf05bc48",
-  "lib/keeper_tooling/response.ml": "1272868e10653e1174c3a3a6ba54a80924b353dad5961ac2b38e364d98e4ae77",
+  "lib/keeper/keeper_agent_run.ml": "7098c2ea1ef8282dfcb89a8a71ed5d99042b731f6fe3b9969a682367fe2a61e8",
+  "lib/keeper/keeper_agent_run.mli": "f07a7449274d5da6e87d291ffd2cab5b11abdf13b0aa4e991ef83ceb70225323",
+  "lib/keeper/keeper_turn_response_contract.ml": "18fa243b71c3bd4a62f52b349e525cf23982e76aa90178a5ad88805b40e5f68a",
+  "lib/keeper/keeper_turn_response_contract.mli": "9d2b3744cbc5c0da1f0301fbbf5ffa367c6afc97a305600fe8cc3f9b3f73ec93",
+  "test/test_keeper_turn_driver_accept.ml": "dacf5b557d4c56494bb5f90729afaafb011f89062b8176ebcc3e845d7801c70c",
+  "test/test_keeper_muse_runtime.ml": "67750fd701d6e031536ec81db2e55553cc71817690e79fc5be59dd253f29d282",
   "lib/keeper/keeper_agent_run_response_text.ml": "0066d019df26b1b21157611e9ac1bfff2e694060b57fdd98556dbec7032ff9c7",
-  "lib/keeper/keeper_turn_driver_try_provider.ml": "1a86f563b7916945bdbb7cc17b6199629115b22b965c82d722a75fe952c90e74"
+  "lib/keeper/keeper_turn_driver_try_provider.ml": "83de47728f0c24d6c684cda8127d6a8a47f749891f97cbba3383b4697c7a81cc"
 }

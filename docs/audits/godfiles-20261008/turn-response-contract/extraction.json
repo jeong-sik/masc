@@ -1,11 +1,10 @@
 {
-  "base": "8b1aee00d581a78de5764c36e27d9dcea6a441fd",
+  "base": "ae4af3e52e5965fc5e32629c4cb7dac699fe8627",
   "source": "lib/keeper/keeper_agent_run.ml",
   "new_owner": "lib/keeper/keeper_turn_response_contract.ml",
   "declared_edits": [
-    "remove ignored initial_messages label",
-    "normalize trailing whitespace at extracted unit boundary"
+    "remove ignored initial_messages label"
   ],
-  "extracted_sha256": "91c65df54a4556015d394a60426716cd5660ed20960ce945b047fa23ff8e41ff",
+  "extracted_sha256": "18fa243b71c3bd4a62f52b349e525cf23982e76aa90178a5ad88805b40e5f68a",
   "body_matches": true
 }

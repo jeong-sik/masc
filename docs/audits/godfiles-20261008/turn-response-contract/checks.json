@@ -1,53 +1,24 @@
 {
   "date": "2026-10-09",
-  "base": "8b1aee00d581a78de5764c36e27d9dcea6a441fd",
+  "base": "ae4af3e52e5965fc5e32629c4cb7dac699fe8627",
   "build": {
-    "command": "opam exec -- dune build --root . -j 4 test/test_keeper_turn_driver_accept.exe test/test_keeper_wake_turn_context.exe test/test_keeper_claude_code_runtime.exe test/test_keeper_muse_runtime.exe",
-    "exit_code": 0,
-    "log": "build.log"
-  },
-  "repair_build": {
-    "command": "opam exec -- dune build --root . -j 4 test/test_keeper_muse_runtime.exe",
-    "exit_code": 0,
-    "log": "muse-rebuild.log"
+    "command": "dune build --root . @check ./test/test_keeper_turn_driver_accept.exe ./test/test_keeper_muse_runtime.exe -j 8",
+    "exit_code": 0
   },
   "tests": [
     {
-      "command": "_build/default/test/test_keeper_turn_driver_accept.exe test accept 11-13",
+      "command": "cd test && DUNE_SOURCEROOT=<worktree> ../_build/default/test/test_keeper_turn_driver_accept.exe",
       "exit_code": 0,
-      "executed_cases": 3,
+      "executed_cases": 43,
+      "executable_sha256": "4713428a9d3801084b942a3ede0b03646de4ee7d2a94c4dc7d9ab69678211fe2",
       "log": "accept.log"
     },
     {
-      "command": "_build/default/test/test_keeper_wake_turn_context.exe test 'current task layer' 0",
+      "command": "cd test && DUNE_SOURCEROOT=<worktree> ../_build/default/test/test_keeper_muse_runtime.exe",
       "exit_code": 0,
-      "executed_cases": 1,
-      "log": "wake.log"
-    },
-    {
-      "command": "_build/default/test/test_keeper_claude_code_runtime.exe test 'quiet completion' 0",
-      "exit_code": 0,
-      "executed_cases": 1,
-      "log": "claude.log"
-    },
-    {
-      "command": "_build/default/test/test_keeper_muse_runtime.exe test 'quiet completion' 0",
-      "exit_code": 0,
-      "executed_cases": 1,
-      "log": "muse-after.log"
+      "executed_cases": 59,
+      "executable_sha256": "019d0847977e24755fee571f8cd6cc0c584040a752d6007fe9b9d4f931cc55a7",
+      "log": "muse.log"
     }
-  ],
-  "initial_failure": {
-    "command": "_build/default/test/test_keeper_muse_runtime.exe test 'quiet completion' 0",
-    "exit_code": 1,
-    "executed_cases": 1,
-    "log": "muse-before.log",
-    "reason": "required Antigravity framing prompt was not registered before selected Muse scenario"
-  },
-  "executable_sha256": {
-    "test_keeper_turn_driver_accept": "061dd3fa854e1f5e8f2e247f066568dfc53e7e51ba08bb0a9e86b6fe52defe4b",
-    "test_keeper_wake_turn_context": "24101024d5e9f66298cdd253112f315e08390bb7b1cbbafa3ed2c656d8ea4596",
-    "test_keeper_claude_code_runtime": "43ad45127f633d56d08c1812a346472011a4bb686b6710619340293e2f7c1faf",
-    "test_keeper_muse_runtime": "5e574014f607aa61dc89ea3ee61a195afb9eb8194d1db58fc78927a9bcf375ef"
-  }
+  ]
 }

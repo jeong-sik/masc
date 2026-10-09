@@ -98,8 +98,8 @@ execution protocol; no selection receipt or approval is fabricated here.
 
 ## Next work
 
-Pure Keeper completion policy and response normalization, removal of the ignored
-history argument, and direct adapter-consumer checks are recorded in
+Pure Keeper response normalization, removal of the ignored history argument,
+and direct consumer checks are recorded in
 [turn-response-contract/README.md](turn-response-contract/README.md).
 
 Continue semantic review of every pending production candidate in

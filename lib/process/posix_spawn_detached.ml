@@ -72,7 +72,11 @@ let spawn ~sw ~argv ~env ~output =
         { pid; exited })
       started
 
+(* kill(2) reads 0 as the caller's own group and -1 as every process the
+   caller may signal, so neither is a group here. *)
 let group_id_has_members group =
+  group > 1
+  &&
   match Unix.kill (-group) 0 with
   | () -> true
   | exception Unix.Unix_error ((Unix.ESRCH | Unix.EPERM), _, _) -> false
@@ -92,6 +96,19 @@ type stopped = Ended_on_term | Killed_after_grace
 
 let group_poll_s = 0.1
 
+(* SIGKILL ends a process once it returns to user space; one in an
+   uninterruptible wait ends later. *)
+let kill_settle_s = 1.
+
+let await_empty ~clock ~seconds group =
+  let deadline = Monotonic_deadline.after ~seconds in
+  let rec wait () =
+    if group_id_has_members group && not (Monotonic_deadline.passed deadline) then (
+      Eio.Time.sleep clock group_poll_s;
+      wait ())
+  in
+  wait ()
+
 let stop_group_id ~clock ~grace_s group =
   signal_group_id group Sys.sigterm;
   let deadline = Monotonic_deadline.after ~seconds:grace_s in
@@ -99,6 +116,7 @@ let stop_group_id ~clock ~grace_s group =
     if not (group_id_has_members group) then Ended_on_term
     else if Monotonic_deadline.passed deadline then (
       signal_group_id group Sys.sigkill;
+      await_empty ~clock ~seconds:kill_settle_s group;
       Killed_after_grace)
     else (
       Eio.Time.sleep clock group_poll_s;

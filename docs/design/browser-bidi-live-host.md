@@ -57,10 +57,16 @@ profile = "/Users/you/masc-keeper-firefox-profile"
   says which profile it found. So a port that answers because the everyday
   Firefox was started with `--remote-debugging-port` does not give a Keeper
   that profile; it gets a session that is ended at once.
-- The server records the Firefox it started in
-  `.masc/browser-lane/keeper-firefox.json`: its process group, when its
-  first process started, the profile and the port. A Firefox it cannot
-  record is stopped, and no host is started for it.
+- The server records the Firefox it starts in
+  `.masc/browser-lane/keeper-firefox.json` right away, before waiting for
+  its port: its process group, when its first process started, the profile
+  and the port. A Firefox it cannot record is stopped, and no host is
+  started for it. The record is removed when that Firefox is stopped or
+  ends before its port answers. A server starts no Firefox over a record
+  whose group may still run, or over a record it cannot read: a server
+  that ended while its Firefox was opening the port leaves one, and a
+  second Firefox on the same profile would end at once and take that
+  record with it.
 - `[browser.live] enabled = false`, or a `runtime.toml` without the table,
   starts nothing, and stops the Firefox that record names when it is shown
   to be the one MASC started: the process its group is numbered after still

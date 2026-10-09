@@ -234,7 +234,12 @@ let the_group_of_a_process () =
       check bool "a detached child leads its own group" true (Posix_spawn_detached.group_of_pid pid = Ok pid);
       check bool "this process's group" true
         (Posix_spawn_detached.group_of_pid (Unix.getpid ()) = Ok (process_group (Unix.getpid ())));
-      check bool "a process that is gone" true (Result.is_error (Posix_spawn_detached.group_of_pid gone))))
+      check bool "a process that is gone" true (Result.is_error (Posix_spawn_detached.group_of_pid gone));
+      (* Signal 0 tells whether the guard holds without signalling anyone. *)
+      check bool "0 is no group: kill(2) reads it as this process's own" false
+        (Posix_spawn_detached.group_id_has_members 0);
+      check bool "1 is no group: kill(2) reads -1 as every process" false
+        (Posix_spawn_detached.group_id_has_members 1)))
 
 let spawn_of_a_missing_executable_is_an_error () =
   Eio_main.run (fun _env -> Eio.Switch.run (fun sw ->
@@ -276,9 +281,8 @@ let stop_group_escalates_only_past_the_grace () =
           let stays = spawned "ignores-term" "trap '' TERM;" in
           check bool "killed past the grace" true
             (Posix_spawn_detached.stop_group ~clock ~grace_s:0.5 stays = Posix_spawn_detached.Killed_after_grace);
-          let deadline = Unix.gettimeofday () +. 5. in
-          while Posix_spawn_detached.group_has_members stays && Unix.gettimeofday () < deadline do Unix.sleepf 0.05 done;
-          check bool "and its group is emptied" false (Posix_spawn_detached.group_has_members stays)))))
+          check bool "and its group is emptied by the time the stop returns" false
+            (Posix_spawn_detached.group_has_members stays)))))
 
 (* --- the record of the Firefox MASC started ---------------------------------- *)
 
@@ -312,6 +316,8 @@ let a_record_from_another_writer_is_not_read () =
     ; ( "a leader with a field its kind has not"
       , replaced "leader" (`Assoc [ "kind", `String "start_unreadable"; "started", `String "proc:boot:1" ]) )
     ; "a group that is no process", replaced "group" (`Int 0)
+    ; "the group kill(2) reads as every process", replaced "group" (`Int 1)
+    ; "a group past pid_t", replaced "group" (`Int (Int32.to_int Int32.max_int + 1))
     ; "a port that is no port", replaced "port" (`String "9222") ]
 
 let recorded base =
@@ -329,6 +335,16 @@ let a_record_that_is_not_there_or_not_json () =
     | Firefox_record.Unreadable _ -> ()
     | Firefox_record.Recorded _ | Firefox_record.Absent -> fail "read as a record")
 
+(* The lane directory is a file, so nothing can be written under it. *)
+let a_record_that_cannot_be_written_says_so () =
+  with_workspace (fun base ->
+    Unix.mkdir (Filename.concat base ".masc") 0o700;
+    write (lane base) "";
+    match Firefox_record.write ~base_path:base (entry ()) with
+    | Error (Firefox_record.Not_written _) -> ()
+    | Error (Firefox_record.Not_synced detail) -> fail ("written: " ^ detail)
+    | Ok () -> fail "written")
+
 (* A group is the Firefox started there only while the process it is
    numbered after runs, with the recorded start, in it. *)
 let a_recorded_group_is_ours_only_when_shown () =
@@ -341,8 +357,10 @@ let a_recorded_group_is_ours_only_when_shown () =
     | Keeper_firefox.Started_here | Keeper_firefox.Gone -> false in
   check bool "its process, started then, in its group" true
     (found ~started:(Some recorded_start) ~group:(Ok 4242) ~members:true () = Keeper_firefox.Started_here);
+  (* No process is given the number of a group that still exists, so the
+     recorded group has ended, whatever group that number names now. *)
   check bool "another process with its number" true
-    (unproven (found ~started:(Some "proc:boot:200") ~group:(Ok 4242) ~members:true ()));
+    (found ~started:(Some "proc:boot:200") ~group:(Ok 4242) ~members:true () = Keeper_firefox.Gone);
   check bool "another process with its number, and its group empty" true
     (found ~started:(Some "proc:boot:200") ~group:(Ok 4242) ~members:false () = Keeper_firefox.Gone);
   check bool "its process, in another group" true
@@ -742,19 +760,6 @@ let the_record_is_written_before_the_port_answers () =
         (Option.map (fun (entry : Firefox_record.entry) -> entry.group) !during_the_wait
          = first_pid firefox_marker)))
 
-let a_firefox_that_cannot_be_recorded_is_stopped () =
-  with_workspace (fun base ->
-    let firefox_marker, host_marker = markers base in
-    install_lane base ~marker:host_marker;
-    (* A directory where the record goes: the record cannot replace it. *)
-    Unix.mkdir (Firefox_record.record_path ~base_path:base) 0o700;
-    let firefox = fake_firefox base ~marker:firefox_marker Listens in
-    with_children ~base [ firefox_marker; host_marker ] (fun () ->
-      started ~base ~configuration:(configured ~firefox ~port:(free_port ()) base) ();
-      check bool "firefox was started" true (firefox_started base);
-      check bool "and stopped" true (not_running ~base firefox_marker);
-      check bool "no host" false (host_started base)))
-
 (* --- a workspace that no longer asks for a Keeper Firefox ------------------- *)
 
 let no_longer_asked =
@@ -798,11 +803,22 @@ let write_record base entry =
   | Ok () -> ()
   | Error failure -> fail (Firefox_record.write_failure_message failure)
 
-let a_group_not_shown_to_be_ours_is_not_stopped () =
+let runs_under base pid = String_util.contains_substring (command_line pid) base
+
+let another_process_under_the_number_is_not_stopped () =
   with_workspace (fun base ->
     let pid = detached_sleeper base "other" in
     Fun.protect ~finally:(fun () -> stop pid) (fun () ->
       write_record base (entry ~group:pid ~leader:(Firefox_record.Started_at "proc:another:1") ());
+      started ~base ~configuration:(Some Browser_configuration.none) ();
+      check bool "the other process runs on" true (runs_under base pid);
+      check bool "the record of a group that ended is forgotten" true (recorded base = None)))
+
+let a_group_not_shown_to_be_ours_is_not_stopped () =
+  with_workspace (fun base ->
+    let pid = detached_sleeper base "other" in
+    Fun.protect ~finally:(fun () -> stop pid) (fun () ->
+      write_record base (entry ~group:pid ~leader:Firefox_record.Start_unreadable ());
       started ~base ~configuration:(Some Browser_configuration.none) ();
       (* Not [alive]: nothing reaps this process, so one that was stopped
          stays a zombie, and a zombie takes signal 0. *)
@@ -820,6 +836,56 @@ let a_record_that_names_nothing_is_forgotten () =
     write_record base (entry ~group:pid ());
     started ~base ~configuration:(Some Browser_configuration.none) ();
     check bool "forgotten" true (recorded base = None))
+
+(* Either the earlier one is shown to be the Firefox MASC started, or what
+   is left in its group cannot be told from it. *)
+let firefox_is_not_started_over_a_record_that_may_still_run () =
+  List.iter
+    (fun (what, leader_of) ->
+      with_workspace (fun base ->
+        let firefox_marker, host_marker = markers base in
+        install_lane base ~marker:host_marker;
+        let firefox = fake_firefox base ~marker:firefox_marker Listens in
+        let port = free_port () in
+        let earlier = detached_sleeper base "earlier" in
+        Fun.protect ~finally:(fun () -> stop earlier) (fun () ->
+          with_children ~base [ firefox_marker; host_marker ] (fun () ->
+            write_record base { (entry ~group:earlier ~leader:(leader_of earlier) ()) with port };
+            started ~base ~configuration:(configured ~firefox ~port base) ();
+            check bool (what ^ ": no second Firefox") false (firefox_started base);
+            check bool (what ^ ": no host") false (host_started base);
+            check bool (what ^ ": the earlier one runs on, still recorded") true
+              (runs_under base earlier
+               && Option.map (fun (entry : Firefox_record.entry) -> entry.group) (recorded base)
+                  = Some earlier)))))
+    [ ( "shown to be ours"
+      , fun pid ->
+          match Server_startup_takeover.process_started pid with
+          | Some started -> Firefox_record.Started_at started
+          | None -> fail "when the earlier one started cannot be read" )
+    ; "not told apart", fun _ -> Firefox_record.Start_unreadable ]
+
+let firefox_is_not_started_over_a_record_that_cannot_be_read () =
+  with_workspace (fun base ->
+    let firefox_marker, host_marker = markers base in
+    install_lane base ~marker:host_marker;
+    let firefox = fake_firefox base ~marker:firefox_marker Listens in
+    write (Firefox_record.record_path ~base_path:base) "{";
+    with_children ~base [ firefox_marker; host_marker ] (fun () ->
+      started ~base ~configuration:(configured ~firefox ~port:(free_port ()) base) ();
+      check bool "no Firefox" false (firefox_started base);
+      check string "the record is left as it was" "{" (read (Firefox_record.record_path ~base_path:base))))
+
+let a_record_of_a_firefox_that_ended_is_replaced () =
+  with_workspace (fun base ->
+    let firefox_marker, host_marker = markers base in
+    install_lane base ~marker:host_marker;
+    let firefox = fake_firefox base ~marker:firefox_marker Listens in
+    write_record base (entry ~group:(Int32.to_int Int32.max_int) ());
+    with_children ~base [ firefox_marker; host_marker ] (fun () ->
+      started ~base ~configuration:(configured ~firefox ~port:(free_port ()) base) ();
+      check bool "the new one is recorded" true
+        (Option.map (fun (entry : Firefox_record.entry) -> entry.group) (recorded base) = first_pid firefox_marker)))
 
 let a_record_that_cannot_be_read_is_kept () =
   with_workspace (fun base ->
@@ -849,6 +915,7 @@ let () =
       , [ test_case "read back as written" `Quick a_record_reads_back_as_written
         ; test_case "another writer's record" `Quick a_record_from_another_writer_is_not_read
         ; test_case "not there, or not JSON" `Quick a_record_that_is_not_there_or_not_json
+        ; test_case "a record that cannot be written" `Quick a_record_that_cannot_be_written_says_so
         ; test_case "a group is ours only when shown" `Quick a_recorded_group_is_ours_only_when_shown ] )
     ; ( "server start"
       , [ test_case "a free port: Firefox, then the host" `Quick a_free_port_starts_firefox_then_the_host
@@ -869,10 +936,14 @@ let () =
         ; test_case "no launcher" `Quick without_a_launcher_nothing_starts
         ; test_case "a started Firefox is recorded" `Quick a_started_firefox_is_recorded
         ; test_case "recorded before its port answers" `Quick the_record_is_written_before_the_port_answers
-        ; test_case "a Firefox that cannot be recorded" `Quick a_firefox_that_cannot_be_recorded_is_stopped ] )
+        ; test_case "not over a record that may still run" `Quick firefox_is_not_started_over_a_record_that_may_still_run
+        ; test_case "not over a record that cannot be read" `Quick
+            firefox_is_not_started_over_a_record_that_cannot_be_read
+        ; test_case "over the record of one that ended" `Quick a_record_of_a_firefox_that_ended_is_replaced ] )
     ; ( "no longer asked for"
       , [ test_case "the Firefox MASC started is stopped" `Quick
             the_firefox_masc_started_is_stopped_when_no_longer_asked
         ; test_case "a group not shown to be ours" `Quick a_group_not_shown_to_be_ours_is_not_stopped
+        ; test_case "another process under the number" `Quick another_process_under_the_number_is_not_stopped
         ; test_case "a record that names nothing" `Quick a_record_that_names_nothing_is_forgotten
         ; test_case "a record that cannot be read" `Quick a_record_that_cannot_be_read_is_kept ] ) ]

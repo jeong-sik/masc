@@ -122,7 +122,11 @@ type recorded_firefox = Started_here | Gone | Unproven of string
 
 (* A process number is given again once its process is gone; when that
    process started is not. So a group is the one started here only while the
-   process it is numbered after runs, with the recorded start, in it. *)
+   process it is numbered after runs, with the recorded start, in it. And a
+   new process is never given the number of a group that still exists
+   (POSIX fork(2): "The child process ID also shall not match any active
+   process group ID"), so another process under that number means the
+   recorded group has ended, whatever group that number names now. *)
 let recorded_firefox (entry : Browser_keeper_firefox_record.entry) ~leader_started ~leader_group
     ~group_has_members =
   let unproven why = if group_has_members then Unproven why else Gone in
@@ -141,10 +145,7 @@ let recorded_firefox (entry : Browser_keeper_firefox_record.entry) ~leader_start
             "process %d no longer runs, or when it started cannot be read, and nothing tells what \
              is left in its group from a later group with that number"
             entry.group)
-     | Some now when not (String.equal now recorded) ->
-       unproven
-         (Printf.sprintf "process %d is another process now: it started %s, the one recorded %s"
-            entry.group now recorded)
+     | Some now when not (String.equal now recorded) -> Gone
      | Some _ ->
        (match leader_group with
         | Ok group when group = entry.group -> Started_here

@@ -83,7 +83,9 @@ type recorded_firefox =
       (** The process numbered as the group runs, started when the recorded
           one started, and is in that group: the group is the Firefox MASC
           started. *)
-  | Gone  (** Nothing is left in the recorded group: the record names nothing. *)
+  | Gone
+      (** The recorded group has ended: nothing is left in it, or another
+          process runs under the number it was named after. *)
   | Unproven of string
       (** Something is left in the recorded group and is not shown to be the
           Firefox started there; this says why. It is not stopped. *)

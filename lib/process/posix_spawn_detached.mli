@@ -42,14 +42,19 @@ val signal_group : t -> int -> unit
 
 type stopped =
   | Ended_on_term  (** The group emptied within the grace after SIGTERM. *)
-  | Killed_after_grace  (** Members were left after the grace and got SIGKILL. *)
+  | Killed_after_grace
+      (** Members were left after the grace and got SIGKILL. The stop waits up
+          to a second more for them to end; whether they did is
+          {!group_has_members}' to say. *)
 
 (** Ends [t]'s group: SIGTERM, then SIGKILL for whatever is left after
     [grace_s] seconds. Only that group is signalled, and only while it has
     members. *)
 val stop_group : clock:_ Eio.Time.clock -> grace_s:float -> t -> stopped
 
-(** {!group_has_members} for a group known only by its number. *)
+(** {!group_has_members} for a group known only by its number. [false] for
+    0 and 1, which kill(2) reads as this process's own group and as every
+    process: so neither is ever signalled here. *)
 val group_id_has_members : int -> bool
 
 (** {!stop_group} for a group known only by its number: one started by a

@@ -51,6 +51,12 @@ let positive name = function
   | `Int value when value > 0 -> Ok value
   | _ -> Error (name ^ " is not a positive integer")
 
+(* A pid_t above 1: kill(2) reads -1 as every process, and a number past
+   pid_t would be cut to another one. *)
+let process_group = function
+  | `Int value when value > 1 && value <= Int32.to_int Int32.max_int -> Ok value
+  | _ -> Error "group is not a process group number"
+
 let text name = function
   | `String value when not (String.equal value "") -> Ok value
   | _ -> Error (name ^ " is not a non-empty string")
@@ -80,7 +86,7 @@ let entry_of_json json =
       Error (Printf.sprintf "written as layout %d; this reader knows %d" version schema)
     | Some _ | None -> Error "schema is not an integer"
   in
-  let* group = Result.bind (field fields "group") (positive "group") in
+  let* group = Result.bind (field fields "group") process_group in
   let* leader = Result.bind (field fields "leader") leader_of_json in
   let* profile = Result.bind (field fields "profile") (text "profile") in
   let* port = Result.bind (field fields "port") (positive "port") in

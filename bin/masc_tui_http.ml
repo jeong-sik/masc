@@ -547,6 +547,14 @@ let get_json ~(host : string) ~(port : int) ~(path : string) : (Yojson.Safe.t, s
 
    The same decode validates the spectator's activity feed: a malformed
    feed is a failed read, not a successful empty activity list. *)
+(* The query fields that bind a read to the workspace this terminal
+   confirmed. The server compares both canonical paths with its own and
+   answers 409 when another workspace answers on the same port. *)
+let expected_workspace_query (expected : Masc.Tui_decode.server_identity) =
+  let canonical value = Uri.pct_encode ~component:`Query_value (Masc_tui_types.canonical_path value) in
+  Printf.sprintf "expected_base_path=%s&expected_masc_root=%s"
+    (canonical expected.sid_base_path) (canonical expected.sid_masc_root)
+
 let fetch_machine_live ?expected_workspace ~(host : string) ~(port : int)
     (source : Masc.Machine_lane.t) ~(since : Masc_tui_machine_live.mark option) :
     (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity, string) result =
@@ -556,10 +564,7 @@ let fetch_machine_live ?expected_workspace ~(host : string) ~(port : int)
     let path = Masc_tui_machine_live.path source ~since in
     match expected_workspace with
     | None -> path
-    | Some (expected : Masc.Tui_decode.server_identity) ->
-        let canonical value = Uri.pct_encode ~component:`Query_value (Masc_tui_types.canonical_path value) in
-        Printf.sprintf "%s&expected_base_path=%s&expected_masc_root=%s" path
-          (canonical expected.sid_base_path) (canonical expected.sid_masc_root)
+    | Some expected -> path ^ "&" ^ expected_workspace_query expected
   in
   let result =
     match http_get ~host ~port ~path:bound_path with
@@ -618,8 +623,14 @@ let http_delete ~(host : string) ~(port : int) ~(path : string) =
   | Error detail ->
       Error (Masc.Tui_decode.http_transport_error ~verb:"DELETE" ~url ~detail)
 
-let list_play_invites ~host ~port =
-  get_json ~host ~port ~path:"/api/v1/play/invites"
+(* An inventory read is bound like the issue and revoke beside it: after the
+   identity preflight, a server swapped onto the same port answers 409 rather
+   than listing its invites under this terminal's workspace. *)
+let list_play_invites ~(expected_workspace : Masc.Tui_decode.server_identity option) ~host ~port =
+  let path = match expected_workspace with
+    | None -> "/api/v1/play/invites"
+    | Some expected -> "/api/v1/play/invites?" ^ expected_workspace_query expected in
+  get_json ~host ~port ~path
 
 (* The play routes add [missing] and [taken_by] to the refusal sentence; the
    shared refusal shows only the sentence. The credential's own 401 and 403,

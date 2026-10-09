@@ -8555,7 +8555,9 @@ let refresh_collab state ~mailbox owner =
   | Some view when Masc_tui_collab.owner view == owner ->
       let view, read = Masc_tui_collab.loading view in
       state.collab <- Some view;
-      launch_preset_call state ~mailbox ~call:Masc_tui_http.list_play_invites
+      let expected_workspace = state.server_identity in
+      launch_preset_call state ~mailbox
+        ~call:(Masc_tui_http.list_play_invites ~expected_workspace)
         ~wrap:(fun result -> Play_invites_listed (Play_collab_list read,
           Result.bind result Tui_decode.decode_play_invites))
   | Some _ | None -> ()
@@ -10605,8 +10607,9 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       notice ~kind:Notice_failure reason
   | Masc_tui_command.Play_invites ->
       Masc_tui_message_input.clear state.msg_input;
+      let expected_workspace = state.server_identity in
       launch_chat_command_read state ~mailbox ~label:"/play invites"
-        ~call:Masc_tui_http.list_play_invites
+        ~call:(Masc_tui_http.list_play_invites ~expected_workspace)
         ~wrap:(fun result ->
           Play_invites_listed (Play_chat_list target, Result.bind result Tui_decode.decode_play_invites))
   | Masc_tui_command.Play_link requested_name ->

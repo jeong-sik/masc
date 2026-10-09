@@ -99,7 +99,8 @@ let issue_response ~config ~body =
      | Error (Play_invite.Credential_not_saved err) ->
        `Internal_server_error, Server_refusal.json ~code:"not_saved" (Masc_domain.masc_error_to_string err))
 
-let revoke_workspace_precondition ~config request =
+(* Listing and revoking name the workspace in query fields: both or neither. *)
+let query_workspace_precondition ~config request =
   let fields = Uri.query (Uri.of_string request.Httpun.Request.target) in
   let expected = List.filter (fun (key, _) ->
       key = "expected_base_path" || key = "expected_masc_root") fields in
@@ -239,7 +240,10 @@ let add_routes router =
   |> Http.Router.get invites_path (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state _by request reqd ->
-           let status, json = list_json ~config:(Mcp_server.workspace_config state) in
+           let config = Mcp_server.workspace_config state in
+           let status, json = match query_workspace_precondition ~config request with
+             | Error refusal -> refusal
+             | Ok _ -> list_json ~config in
            respond_json_value_with_cors ~status request reqd json)
          request reqd)
   |> Http.Router.prefix_delete invite_prefix (fun request reqd ->
@@ -251,7 +255,7 @@ let add_routes router =
              | Some raw_name ->
                one_at_a_time (fun () ->
                  let config = Mcp_server.workspace_config state in
-                 match revoke_workspace_precondition ~config request with
+                 match query_workspace_precondition ~config request with
                  | Error refusal -> refusal
                  | Ok _ -> revoke_response ~config ~by ~raw_name)
            in

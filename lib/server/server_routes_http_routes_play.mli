@@ -32,8 +32,9 @@
     answers [404 {code: "no_such_invite"}]. *)
 
 (** TUI issue requests carry [expected_workspace] in their JSON body;
-    revoke requests carry [expected_base_path] and [expected_masc_root] query
-    fields. A mismatch returns 409 before any credential/controller mutation. *)
+    list and revoke requests carry [expected_base_path] and
+    [expected_masc_root] query fields, both or neither. A mismatch returns 409
+    before any credential is listed or any credential/controller mutation. *)
 val invites_path : string
 
 val add_routes : Http_server_eio.Router.t -> Http_server_eio.Router.t

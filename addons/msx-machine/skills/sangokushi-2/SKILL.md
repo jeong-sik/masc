@@ -96,6 +96,30 @@ complete prompt, send the digit, verify it in the field, then send Return.
 The later alliance-break list was inspected and canceled with an empty Return
 without choosing a ruler; opening that list did not itself break the alliance.
 
+## Recruitment and training
+
+At a province command prompt, `4`, Return opens `1.徴兵 2.再編成 3.訓練`.
+The following sequence was observed in February 220, Cao Pi province 10;
+choose from the current lists rather than reusing these officer numbers.
+
+- Recruitment: `1`, Return asks who recruits. Sima Yi was available as 2.
+  Selecting him opened `何百人徴兵しますか(1-95)?`. Entering 50, Return
+  opened allocation with a pool of 50; it did not finish the action.
+- Allocation asks `だれを変更しますか(0-11)?`. Sima Yi's existing troops
+  were 10. Selecting him asked for the new total `(0-60)?`; entering 60
+  assigned the pool and showed Sima Yi 60 with remaining pool 0.
+  `0`, Return showed the next officer page (9–11), rather than canceling.
+  An empty Return opened `よろしいですか(Y/N)?`; `y` confirmed it.
+- The resulting province prompt showed soldiers 200 → 250, gold 950 → 450,
+  food 400 → 350, population 8000 → 7950, and loyalty 45 → 44. These are
+  that action's before/after values, not a guaranteed exchange rate.
+- Training: `3`, Return in the military menu asks which officer trains.
+  The observed list showed martial skill and red unavailable officers.
+  Selecting the available officer 6 opened the advisor's
+  `訓練を始めますか(Y/N)?`. `y` returned to province commands. Reopening
+  the trainer list showed officer 6 unavailable; no before/after training
+  statistic was measured, so this does not establish a training increase.
+
 ## Going to war
 
 Observed 220年1月 as 曹丕, from 20 against 31 (劉備).

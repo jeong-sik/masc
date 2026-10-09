@@ -307,13 +307,10 @@ def run_resources_unconfirmed_selection(executable: str) -> None:
         send_and_wait(process, fd, output, b"r", b"[workspace unconfirmed]")
         # The URI appears in the detail, not the name-only list. A fresh
         # frame showing B and its pending state proves the selection applied.
-        send_and_wait(process, fd, output, b"]", b"masc://operator-handbook.md")
-        pending = resize_and_wait(process, fd, output, rows=40, columns=200,
-                                   # The title is the stable frame boundary;
-                                   # the body marker is checked after stripping
-                                   # terminal styling below.
-                                   needle=b"Resource", controls=(FULL_REDRAW,),
-                                   final_cursor=b"\x1b[?25l")
+        # Selection already redraws this detail pane. Capture that frame
+        # directly; a second resize is not guaranteed to emit a full redraw.
+        pending = send_and_wait(process, fd, output, b"]",
+                                b"masc://operator-handbook.md")
         visible = h.screen_text(pending)
         assert b"reading resource" in visible, visible
         assert b'"status": "ok"' not in visible, visible

@@ -309,9 +309,13 @@ def run_resources_unconfirmed_selection(executable: str) -> None:
         # frame showing B and its pending state proves the selection applied.
         send_and_wait(process, fd, output, b"]", b"masc://operator-handbook.md")
         pending = resize_and_wait(process, fd, output, rows=40, columns=200,
-                                   needle=b"(reading resource", controls=(FULL_REDRAW,),
+                                   # The title is the stable frame boundary;
+                                   # the body marker is checked after stripping
+                                   # terminal styling below.
+                                   needle=b"operator-handbook.md", controls=(FULL_REDRAW,),
                                    final_cursor=b"\x1b[?25l")
         visible = h.screen_text(pending)
+        assert b"reading resource" in visible, visible
         assert b'"status": "ok"' not in visible, visible
         assert b"slots = 4" not in visible, visible
         assert not any(unconfirmed for unconfirmed, _method, _uri in snapshot()), snapshot()

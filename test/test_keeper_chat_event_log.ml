@@ -175,7 +175,8 @@ let test_codec_round_trip_all_constructors () =
     all_events;
   List.iter (fun charge ->
     let event = E.Agent_core_stream_message_delta
-      { stop_reason = None;
+      { stream_scope = 0;
+        stop_reason = None;
         usage = Some { delta_usage_partial with cost_usd = Some charge } } in
     let encoded = L.keeper_chat_event_to_json event in
     let amount = Yojson.Safe.Util.(encoded |> member "usage" |> member "cost_usd" |> to_float) in

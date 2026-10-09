@@ -10,7 +10,7 @@ are unsent. Read the screen before another input. Names: \
 up down left right home end pgup pgdn insert delete enter return esc space \
 tab backtab backspace f1-f10, or one character; an unknown name is refused \
 before anything is pressed. Recorded in the ledger. A call stops at 4000000 \
-instructions; keys_pressed says how many landed."""
+machine steps; keys_pressed says how many landed."""
 additional_properties = false
 
 defer_loading = true

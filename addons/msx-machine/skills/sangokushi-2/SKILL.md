@@ -158,7 +158,7 @@ and confirm the next officer or battle prompt before continuing.
 - `2` opens `1.通常 2.一斉 3.火計 4.突撃`. In the observed province-27
   battle, `1` then asked `どの方向ですか?`. Choosing direction `9` returned
   a partly drawn command menu; a later Return exposed the next officer's command
-  prompt appeared. The displayed troop totals did not change, so this does
+  prompt. The displayed troop totals did not change, so this does
   not establish an enemy hit or a universally valid attack direction.
 - `4` asks `誰の様子を見ますか? (0:見る RET:やめる)`. `0` displayed an officer
   panel including soldiers, training and armament. From the officer-choice

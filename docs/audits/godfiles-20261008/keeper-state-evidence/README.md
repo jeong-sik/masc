@@ -1,6 +1,6 @@
 # Keeper state-diagram evidence boundary
 
-Base: d576c545ee70441f3f79b36abb8bd02c087ef095.
+PR #42124. Base: d576c545ee70441f3f79b36abb8bd02c087ef095.
 
 The keeper API state-diagram function combined runtime lookup with redacted display calculation. Private server_dashboard_keeper_state_projection owns canonical display data, closed missing/present evidence, pure redaction/JSON/Mermaid projection (74 lines). Root retains metadata inspection, runtime-model lookup, unavailable diagnostics and cancellation propagation (2189 lines, previously 2230).
 

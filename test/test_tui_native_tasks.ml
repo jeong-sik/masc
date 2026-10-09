@@ -73,6 +73,7 @@ let test_independent_suffix_and_identity () =
   let third,_=load second ~store ~through:3 ~rows:[3,terminal] ~after:(Some 2) in
   let fourth,reads=load third ~store ~through:3 ~rows:[] ~after:(Some 3) in
   check int "audited unchanged boundary avoids redundant records HTTP" 0 reads;
+  check bool "unchanged audited refresh preserves immutable view identity" true (fourth == third);
   check int "no duplicate task on repeated suffix" 1 (List.length (Native.tasks fourth));
   check bool "explicit terminal remains visible" true
     ((List.hd (Native.tasks fourth)).terminal=Some Task.Task_completed_notice);
@@ -133,7 +134,10 @@ let test_real_chat_projection_preserves_flags_and_terminal_safety () =
     (List.hd (Native.tasks native)).origin.task_id;
   let projection=Masc_tui_render_chat.keeper_message_projection state ~keeper_name:keeper ~chat_cols:100 in
   check int "independent entries participate in actual chat layout" 3 (List.length projection.layout_entries);
-  check int "one scroll placeholder per independent entry" 3 (List.length projection.transient_anchors)
+  check int "one scroll placeholder per independent entry" 3 (List.length projection.transient_anchors);
+  let idle=Masc_tui_render_chat.keeper_message_projection state ~keeper_name:keeper ~chat_cols:100 in
+  check bool "retained task lane preserves idle physical layout cache identity" true
+    (projection.layout_entries == idle.layout_entries)
 
 let () = run "native task TUI consumer" ["observations",[
   test_case "suffix, original identity and store incarnation" `Quick test_independent_suffix_and_identity;

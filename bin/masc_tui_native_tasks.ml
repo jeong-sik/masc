@@ -186,4 +186,6 @@ let read ~keeper_name ~fetch ~previous =
         | None -> stores @ [store]
         | Some _ -> List.map (fun old -> if same old then store else old) stores)
       previous.stores inventory.receivers in
-  Ok {keeper_name=Some keeper_name;inventory=Some inventory;stores;error=None}
+  if previous.error=None && stores == previous.stores && previous.inventory=Some inventory
+  then Ok previous
+  else Ok {keeper_name=Some keeper_name;inventory=Some inventory;stores;error=None}

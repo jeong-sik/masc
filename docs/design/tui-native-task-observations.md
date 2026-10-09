@@ -48,6 +48,12 @@ the display edge. Failures and process-only persistence/cleanup diagnostics
 remain visible. These transient snapshots are not searchable durable chat
 messages; scroll-index placeholders preserve projection alignment.
 
+Unchanged audited reads retain the immutable native-state identity. Native
+entries and their join with settled history are memoized by actual input and
+display-setting identity, preserving existing row-count and scroll-anchor
+caches on idle paints. Changed observations, tools visibility or label width
+invalidate the relevant projection.
+
 ## Evidence limits
 
 Authored fixtures route public HTTP-shaped JSON through the actual shared

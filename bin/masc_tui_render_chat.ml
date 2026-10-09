@@ -2477,10 +2477,18 @@ let merged_blocks_memo : merged_blocks_memo option ref = ref None
    that list by identity. A settled conversation has no transient tail, and
    appending an empty one would still copy the list, so every repaint would
    measure the whole scroll depth again. *)
+let transient_tail_memo :
+    (Message_layout.entry list * Message_layout.entry list * Message_layout.entry list) option ref = ref None
 let with_transient_tail settled ~transient =
   match transient with
   | [] -> settled
-  | _ :: _ -> settled @ transient
+  | _ :: _ ->
+      match !transient_tail_memo with
+      | Some (before,tail,joined) when before == settled && tail == transient -> joined
+      | Some _ | None ->
+          let joined=settled @ transient in
+          transient_tail_memo := Some (settled,transient,joined);
+          joined
 
 type chat_projection = {
   tagged_entries : (tagged_row * Message_layout.entry) list;
@@ -2494,10 +2502,16 @@ type chat_projection = {
 (* Separate observation lane: these are not root-turn tool receipts or speech.
    No timestamp, request rail, activity spinner or model usage is synthesized.
    skip_transcript suppresses inline task entries, but not read diagnostics. *)
+let native_entries_memo :
+    (Masc_tui_native_tasks.t * tool_visibility * int * Message_layout.entry list) option ref = ref None
 let native_task_entries (state : state) ~keeper_name ~role_label_column =
   match List.assoc_opt keeper_name state.msg_native_tasks with
   | None -> []
   | Some native ->
+      match !native_entries_memo with
+      | Some (previous,tools,column,entries)
+        when previous == native && tools=state.msg_tool_visibility && column=role_label_column -> entries
+      | Some _ | None ->
       let module Native = Masc_tui_native_tasks in
       let module Task = Runtime_native_tasks in
       let entry ?(diagnostics=[]) style label body : Message_layout.entry =
@@ -2512,7 +2526,7 @@ let native_task_entries (state : state) ~keeper_name ~role_label_column =
          turn_rail=Message_layout.Rail_none;action=Message_layout.Action_none} in
       let tasks=Native.tasks native and errors=Native.errors native in
       let diagnostics=Native.diagnostics native in
-      if tasks=[] && errors=[] && diagnostics=[] then []
+      let entries = if tasks=[] && errors=[] && diagnostics=[] then []
       else
         let header=entry Message_layout.Status "NATIVE TASKS"
           (Printf.sprintf "%d observed · provider completeness unknown · liveness unknown" (List.length tasks)) in
@@ -2560,7 +2574,9 @@ let native_task_entries (state : state) ~keeper_name ~role_label_column =
             ("TASK " ^ task.origin.task_id) (String.concat " · " metadata))) tasks in
         header :: task_entries
         @ List.map (fun error -> entry Message_layout.Error "NATIVE READ" (Native.error_text error)) errors
-        @ List.map (entry Message_layout.Status "NATIVE HEALTH") diagnostics
+        @ List.map (entry Message_layout.Status "NATIVE HEALTH") diagnostics in
+      native_entries_memo := Some (native,state.msg_tool_visibility,role_label_column,entries);
+      entries
 
 let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
   (* The same pure derivation the committed rows used, asked again for the
@@ -3112,7 +3128,9 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
     @ List.map (fun (entry : Message_layout.entry) ->
         if entry.request_label = "" then None else Some (Scroll_pending entry.request_label)) pending in
   let layout_entries =
-    with_transient_tail layout_entries ~transient:(List.map snd polled @ native @ pending)
+    let observed = match polled with [] -> native | _ :: _ -> List.map snd polled @ native in
+    let transient = match pending with [] -> observed | _ :: _ -> observed @ pending in
+    with_transient_tail layout_entries ~transient
   in
   { tagged_entries = tagged_layout_entries; transient_anchors; layout_entries }
 

@@ -144,7 +144,12 @@ The host wrapper connects the private complete-child producer through a
 separate optional `on_child_content_observation` callback. Runtime
 `complete_child_content` binds the accepted complete envelope's literal parent,
 body, original block identity, reported model, current registry witness (if any)
-and actual immutable invocation ticket in one private value. It cannot be
+and actual immutable invocation ticket in one private value. It also carries
+one host-minted `observation_id` per accepted complete Child model envelope,
+shared by its blocks. An earlier unknown and later known reception of the same
+provider envelope therefore remain distinct observed facts. The provider UUID,
+original ordinal and channel are retained exactly; observation ID is not a
+commit/delivery receipt, clock or inference from body content. It cannot be
 constructed by recombining a captured witness with arbitrary public text. The
 binder's private `bound_child {parent_input; content}` factory receives that
 value alone, checks actual invocation and literal parent, and reuses the same
@@ -161,6 +166,28 @@ Complete API-error diagnostic child envelopes do not publish child body. The
 callback emits no root Agent Core text/thinking/lifecycle, usage, native
 completion, receipt or content index. It does not flush root redaction state;
 a separate child sink must redact before display or persistence.
+
+`child_observation` is a private closed bound/rejected decision made only by
+`observe_child` from the actual private content and existing shared binder.
+A caller cannot replace its typed refusal reason around a captured body.
+`Keeper_child_content.prepare` alone creates an abstract publication from that
+sealed decision and the caller's captured Keeper/source/attempt. It retains only
+validated redacted body/model view, never raw body or private input member list.
+The view preserves actual invocation, accepted observation and original child
+block identities, optional provider message ID (including an actual empty
+string), original parent occurrence if observed, and historical original-parent
+input evidence kind/command stamp or exact typed refusal. These are not claims
+that Child consumed an input group or owns a Task/run.
+
+The shared closed codec decodes an unprivileged public view, not a private
+publication or runtime/input witness. Read serialization can redact the body
+and model leaves again while preserving every protocol identity and evidence
+fact. This is per complete field/body snapshot; it provides no streaming-secret
+guarantee across Child blocks or repeated snapshots. Durable sink, authenticated
+read/wire transport and TUI integration remain pending. Existing live worker
+cutoff discards ordinary queued events after disconnect; a durable Child sink
+must receive already observed content independently of that cutoff, with actual
+atomic sequence/commit ownership rather than concurrent chat-bus appends.
 
 The witness is a fact at observation time. A later call-ID collision makes
 subsequent child observations unknown; earlier witness values remain historical

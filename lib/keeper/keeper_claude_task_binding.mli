@@ -42,7 +42,7 @@ type rejection =
   | Input_not_in_group
   | Conflicting_assistant_evidence
 
-type child_observation =
+type child_observation = private
   | Child_bound of bound_child
   | Child_rejected of
       { content : Runtime_claude_code.complete_child_content
@@ -89,4 +89,7 @@ val bind_child : t -> Runtime_claude_code.complete_child_content ->
     occurrence, then uses [bind_parent]'s exact shared failed-first authority.
     [Unknown_parent] retains uncertainty without fabricating an owner. No body
     matching, current-input inference, or retroactive parent upgrade occurs. *)
+val observe_child : t -> Runtime_claude_code.complete_child_content -> child_observation
+(** Seals the actual [bind_child] decision together with its actual private
+    content. Callers cannot substitute a different refusal reason or body. *)
 val rejection_to_string : rejection -> string

@@ -315,6 +315,7 @@ type native_agent_parent_witness =
 
 type complete_child_content =
   { invocation : Runtime_claude_input_attribution.ticket
+  ; observation_id : string
   ; parent_tool_use_id : string
   ; parent_occurrence : native_agent_parent_witness option
   ; message_id : string option
@@ -323,6 +324,11 @@ type complete_child_content =
   ; channel : content_channel
   ; text : string
   }
+
+type complete_content_scope =
+  | Root_model_content
+  | Child_model_content of { parent_tool_use_id : string; observation_id : string }
+  | Diagnostic_content
 
 type stream_event =
   | Turn_started of
@@ -2247,35 +2253,40 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
           emit_stream_event on_stream_event (Turn_started { turn_id = uuid; model }));
         Some model
     in
+    let content_scope = match scope, origin with
+      | (Root_response | Child_response _), Api_error_diagnostic -> Diagnostic_content
+      | Root_response, Model_response -> Root_model_content
+      | Child_response parent_tool_use_id, Model_response ->
+          Child_model_content {parent_tool_use_id; observation_id=Random_id.hex ~bytes:16} in
     let texts_rev = ref [] in
     let* () = List.fold_left (fun result (ordinal, block) ->
       let* () = result in
       match block with
       | Assistant_text text ->
-          (match scope, origin with
-           | (Root_response | Child_response _), Api_error_diagnostic -> Ok ()
-           | Root_response, Model_response ->
+          (match content_scope with
+           | Diagnostic_content -> Ok ()
+           | Root_model_content ->
                texts_rev := text :: !texts_rev;
                complete_partial_text partial_stream ~on_stream_event ~response_emitted
                  ~channel:Text_content ~message_id ~uuid ~ordinal text
-           | Child_response parent_tool_use_id, Model_response ->
+           | Child_model_content {parent_tool_use_id; observation_id} ->
                let parent_occurrence = root_native_agent_parent native_tool_calls
                  ~call_id:parent_tool_use_id in
                emit_stream_event on_stream_event
-                 (Child_content_observed {invocation=native_tool_calls.invocation; parent_tool_use_id; parent_occurrence; message_id; model;
+                 (Child_content_observed {invocation=native_tool_calls.invocation; observation_id; parent_tool_use_id; parent_occurrence; message_id; model;
                    block=Assistant_block {uuid; ordinal}; channel=Text_content; text});
                Ok ())
       | Assistant_thinking text ->
-          (match scope, origin with
-           | (Root_response | Child_response _), Api_error_diagnostic -> Ok ()
-           | Root_response, Model_response ->
+          (match content_scope with
+           | Diagnostic_content -> Ok ()
+           | Root_model_content ->
                complete_partial_text partial_stream ~on_stream_event ~response_emitted
                  ~channel:Thinking_content ~message_id ~uuid ~ordinal text
-           | Child_response parent_tool_use_id, Model_response ->
+           | Child_model_content {parent_tool_use_id; observation_id} ->
                let parent_occurrence = root_native_agent_parent native_tool_calls
                  ~call_id:parent_tool_use_id in
                emit_stream_event on_stream_event
-                 (Child_content_observed {invocation=native_tool_calls.invocation; parent_tool_use_id; parent_occurrence; message_id; model;
+                 (Child_content_observed {invocation=native_tool_calls.invocation; observation_id; parent_tool_use_id; parent_occurrence; message_id; model;
                    block=Assistant_block {uuid; ordinal}; channel=Thinking_content; text});
                Ok ())
       | Assistant_native_tool observation ->

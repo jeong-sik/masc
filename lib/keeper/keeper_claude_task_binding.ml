@@ -163,6 +163,11 @@ let bind_child t (content : Runtime_claude_code.complete_child_content) =
   let* parent_input = bind_parent t parent in
   Ok {parent_input; content}
 
+let observe_child t content =
+  match bind_child t content with
+  | Ok bound -> Child_bound bound
+  | Error reason -> Child_rejected {content; reason}
+
 let rejection_to_string = function
   | Missing_ticket -> "no invocation input ticket"
   | Conflicting_invocation -> "conflicting invocation input ticket"

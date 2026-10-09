@@ -853,7 +853,7 @@ let test_child_body_cannot_supply_root_reply () =
            | Error error -> fail (Runtime_claude_code.error_to_string error));
           let child_bodies = List.filter_map (function
             | Runtime_claude_code.Child_content_observed
-                {invocation=_; parent_tool_use_id; parent_occurrence; message_id; model; block; channel; text} ->
+                {invocation=_; observation_id=_; parent_tool_use_id; parent_occurrence; message_id; model; block; channel; text} ->
                 check bool "no parent witness outside Native_full" true (Option.is_none parent_occurrence);
                 check string "reported child model preserved" "child-model" model;
                 Some (parent_tool_use_id, message_id, block, channel, text)
@@ -2982,7 +2982,7 @@ let test_child_parent_witness_uses_original_native_occurrence () =
     events := event :: !events;
     match event with
     | Runtime_claude_code.Child_content_observed
-        {invocation=_;parent_tool_use_id;parent_occurrence;message_id;model;block;channel;text} ->
+        {invocation=_;observation_id=_;parent_tool_use_id;parent_occurrence;message_id;model;block;channel;text} ->
         bodies := (parent_tool_use_id,message_id,model,block,channel,text,parent_occurrence,
           List.length (task_observations !events)) :: !bodies
     | _ -> () in
@@ -3619,12 +3619,20 @@ let test_parent_binding_refuses_foreign_and_conflicting_evidence () =
 
 let test_complete_child_binding_preserves_actual_invocation_provenance () =
   let module Binding = Keeper_claude_task_binding in
-  let capture ?(session_id="66666666-6666-4666-8666-666666666666") ?(unknown_before_parent=false) known =
+  let capture ?(session_id="66666666-6666-4666-8666-666666666666") ?(unknown_before_parent=false) ?(message_id=Some "child-body-message") known =
     let inputs=ref [] and contents=ref [] in
+    let child=match Yojson.Safe.from_string child_body_assistant with
+      | `Assoc fields ->
+          let message=match List.assoc "message" fields with `Assoc fields -> fields
+            | _ -> fail "actual child fixture message object" in
+          let message=List.remove_assoc "id" message @
+            Option.to_list (Option.map (fun value -> "id",`String value) message_id) in
+          replace_wire_field "message" (`Assoc message) child_body_assistant
+      | _ -> fail "actual child fixture object" in
     let parent=if known then [Emit (with_input_fields parent_tool_assistant input_own_stamp)] else [] in
     with_fixture ([Bind_input_uuid] @
-      (if unknown_before_parent then [Emit child_body_assistant] else []) @ parent @
-      [Emit child_body_assistant;Emit assistant;Emit result]) (fun path ->
+      (if unknown_before_parent then [Emit child] else []) @ parent @
+      [Emit child;Emit assistant;Emit result]) (fun path ->
         match run_fixture ~native:Runtime_native_tools.Native_full
           ~session_mode:(Runtime_claude_code.Resume
             {session_id})
@@ -3641,6 +3649,18 @@ let test_complete_child_binding_preserves_actual_invocation_provenance () =
       (if unknown_before_parent then 6 else 3) (List.length contents);
     List.iter (fun (content:Runtime_claude_code.complete_child_content) ->
       check bool "all bodies retain actual Prepared ticket" true (content.invocation==prepared.ticket)) contents;
+    let first_id=(List.hd contents).observation_id in
+    check bool "accepted complete frame has actual observation identity" true (String.length first_id>0);
+    List.iter (fun (content:Runtime_claude_code.complete_child_content) ->
+      check string "all original frame blocks share one observation ID" first_id content.observation_id)
+      (List.take 3 contents);
+    if unknown_before_parent then begin
+      let later_id=(List.nth contents 3).observation_id in
+      check bool "same provider replay before/after parent remains distinct observations" false (first_id=later_id);
+      List.iter (fun (content:Runtime_claude_code.complete_child_content) ->
+        check string "later complete frame blocks share its new observation ID" later_id content.observation_id)
+        (List.drop 3 contents)
+    end;
     inputs,contents in
   let _,old_contents=capture true in
   let old_content=List.hd old_contents in
@@ -3671,6 +3691,97 @@ let test_complete_child_binding_preserves_actual_invocation_provenance () =
        check bool "original parent input is same actual runtime invocation" true
          (bound.parent_input.ticket==content.invocation);
        check string "private producer preserves actual child body" "CHILD_ONLY" bound.content.text);
+  let module Child = Keeper_child_content in
+  let source=Keeper_native_task_journal.Autonomous_turn
+    (Ids.Turn_ref.make ~trace_id:"child+&/view" ~absolute_turn:1) in
+  let attempt : Runtime_native_tasks.attempt =
+    {routing_run_id="route+&/scope";runtime_id="claude";lane_attempt_index=2} in
+  let prepare ?(redact_text=fun _ -> "MASK") observation=match Child.prepare ~keeper_name:"fixture-child" ~source ~attempt
+      ~redact_text observation with
+    | Ok publication -> Child.view publication
+    | Error error -> fail (Child.error_to_string error) in
+  let known_decision=Binding.observe_child binding content in
+  let unknown_decision=Binding.observe_child binding before_parent in
+  let known=prepare known_decision and prior_unknown=prepare unknown_decision in
+  check string "publication body is redacted" "MASK" known.text;
+  check string "publication model is redacted" "MASK" known.model;
+  check string "identity is actual accepted observation, not provider spelling" content.observation_id known.observation_id;
+  check string "opaque attempt identity is preserved" attempt.routing_run_id known.origin.attempt.routing_run_id;
+  (match known.attribution,prior_unknown.attribution with
+   | Child.Original_parent_input Child.Explicit_parent_input,
+     Parent_input_refused Binding.Unknown_parent -> ()
+   | _ -> fail "sealed actual decision was changed during publication");
+  check bool "prior unknown observation retains its distinct ID" false (known.observation_id=prior_unknown.observation_id);
+  let reread=Child.redact (fun _ -> "PUBLIC_MASK") prior_unknown in
+  check string "read boundary re-redacts body" "PUBLIC_MASK" reread.text;
+  check string "read boundary re-redacts reported model" "PUBLIC_MASK" reread.model;
+  check bool "read redaction preserves all provenance and refusal" true
+    (reread.origin=prior_unknown.origin && reread.observation_id=prior_unknown.observation_id
+     && reread.envelope_uuid=prior_unknown.envelope_uuid && reread.ordinal=prior_unknown.ordinal
+     && reread.channel=prior_unknown.channel && reread.parent_tool_use_id=prior_unknown.parent_tool_use_id
+     && reread.parent_occurrence=prior_unknown.parent_occurrence && reread.message_id=prior_unknown.message_id
+     && reread.attribution=prior_unknown.attribution);
+  let wire value=Child.to_json value |> Yojson.Safe.to_string |> Yojson.Safe.from_string in
+  List.iter (fun value -> match Child.of_json (wire value) with
+    | Ok decoded -> check bool "actual sealed publication roundtrips as unprivileged public view" true (decoded=value)
+    | Error error -> fail (Child.error_to_string error)) [known;prior_unknown;reread];
+  List.iter (fun message_id ->
+    let captured_inputs,captured_contents=capture ~message_id true in
+    let captured_binding=Binding.create () in
+    List.iter (Binding.observe_input captured_binding) captured_inputs;
+    let captured=List.hd captured_contents in
+    let actual=prepare (Binding.observe_child captured_binding captured) in
+    check (option string) "accepted empty/absent provider correlation is preserved" message_id actual.message_id;
+    match Child.of_json (wire actual) with
+    | Ok decoded -> check (option string) "empty and absent message IDs stay distinct through actual public roundtrip"
+        message_id decoded.message_id
+    | Error error -> fail (Child.error_to_string error)) [Some "";None];
+  List.iter (fun (captured:Runtime_claude_code.complete_child_content) ->
+    let actual=prepare ~redact_text:Fun.id (Binding.observe_child binding captured) in
+    check bool "actual captured Text/Thinking channel is preserved" true (actual.channel=captured.channel);
+    check string "actual complete empty/nonempty snapshot is preserved with identity redactor" captured.text actual.text;
+    match Child.of_json (wire actual) with
+    | Ok decoded -> check bool "actual Thinking/empty body public roundtrip" true (decoded=actual)
+    | Error error -> fail (Child.error_to_string error)) (List.drop 3 contents);
+  let early=Binding.create () in
+  let early_decision=Binding.observe_child early content in
+  List.iter (Binding.observe_input early) inputs;
+  List.iter (fun decision -> match decision with
+    | Binding.Child_rejected {content=retained;reason=Binding.Missing_ticket} ->
+        check bool "sealed failure retains exact actual content" true (retained==content)
+    | Child_rejected _ | Child_bound _ -> fail "shared failed-first decision was changed")
+    [early_decision;Binding.observe_child early content];
+  let early_view=prepare early_decision in
+  (match early_view.attribution with Child.Parent_input_refused Binding.Missing_ticket -> ()
+   | _ -> fail "publication fabricated original input evidence");
+  let replace key value = function
+    | `Assoc fields -> `Assoc ((key,value)::List.remove_assoc key fields)
+    | _ -> fail "wire object required" in
+  let remove key = function `Assoc fields -> `Assoc (List.remove_assoc key fields)
+    | _ -> fail "wire object required" in
+  let known_wire=wire known and unknown_wire=wire prior_unknown in
+  let malformed=[
+    replace "schema" (`String "unknown-schema") known_wire;
+    replace "unknown" (`Bool true) known_wire;
+    (match known_wire with `Assoc fields -> `Assoc (("text",`String "duplicate")::fields) | _ -> fail "object");
+    replace "ordinal" (`Int (-1)) known_wire;
+    replace "ordinal" (`Intlit "9007199254740992") known_wire;
+    replace "ordinal" (`Float 1.5) known_wire;
+    replace "observation_id" `Null known_wire;
+    replace "message_id" `Null known_wire;
+    replace "parent_occurrence" `Null unknown_wire;
+    replace "parent_tool_use_id" (`String "foreign-parent") known_wire;
+    replace "attribution" (`Assoc ["kind",`String "parent_input_refused";
+      "reason",`Assoc ["kind",`String "unknown_parent";
+        "input_rejection",`String "invalid_group"]]) unknown_wire;
+    replace "attribution" (`Assoc ["kind",`String "original_parent_input";
+      "evidence",`Assoc ["kind",`String "command_inherited";"stamp_uuid",`Null]]) known_wire;
+    remove "observation_id" known_wire] in
+  List.iter (fun json -> match Child.of_json json with
+    | Error _ -> () | Ok _ -> fail "malformed child transport was accepted") malformed;
+  (match Child.of_json (remove "message_id" known_wire) with
+   | Ok decoded -> check (option string) "absent optional message remains absent" None decoded.message_id
+   | Error error -> fail (Child.error_to_string error));
   let unknown_binding=Binding.create () in
   List.iter (Binding.observe_input unknown_binding) unknown_inputs;
   (match Binding.bind_child unknown_binding unknown with

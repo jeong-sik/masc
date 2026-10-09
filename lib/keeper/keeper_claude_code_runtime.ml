@@ -1224,10 +1224,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
         | None, _ | _, None -> None in
       let on_bound_child = match task_binding, on_child_content_observation with
         | Some binding, Some observe -> Some (fun content ->
-            let observation = match Keeper_claude_task_binding.bind_child binding content with
-              | Ok bound -> Keeper_claude_task_binding.Child_bound bound
-              | Error reason -> Keeper_claude_task_binding.Child_rejected {content; reason} in
-            observe observation)
+            observe (Keeper_claude_task_binding.observe_child binding content))
         | None, _ | _, None -> None in
       let on_stream_event =
         claude_stream_callback ?receipts ?on_native_tool_progress ?on_native_tool_completion

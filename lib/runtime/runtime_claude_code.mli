@@ -289,6 +289,7 @@ type native_agent_parent_witness = private
 
 type complete_child_content = private
   { invocation : Runtime_claude_input_attribution.ticket
+  ; observation_id : string
   ; parent_tool_use_id : string
   ; parent_occurrence : native_agent_parent_witness option
   ; message_id : string option
@@ -301,7 +302,12 @@ type complete_child_content = private
     invocation. Only the producer can construct this record; capturing a genuine
     parent witness cannot attach a different body or literal parent to it.
     [invocation] is the native registry's actual immutable Prepared ticket,
-    even when the parent is unknown. This proves observed provider provenance,
+    even when the parent is unknown. [observation_id] is minted once per actual
+    accepted complete child model envelope and shared by its body blocks. It is
+    distinct across repeated accepted provider envelopes, including an unknown
+    observation before its parent and a later known snapshot. It is an opaque
+    observation identity, not a delivery/commit receipt or ordering clock.
+    This proves observed provider provenance,
     not child consumption of a parent input group or Task/run ownership. *)
 
 type stream_event =
@@ -339,9 +345,10 @@ type stream_event =
           UUID/content ordinal. [None] means the envelope has no message id.
           [model] is the child envelope's reported model, never a root model.
           Each accepted envelope reports a body snapshot, including empty
-          text. Repeated observations with the same occurrence identity,
-          channel and text can be applied idempotently by downstream consumers;
-          this event does not certify agreement of changed replay bodies. The
+          text. The host observation ID distinguishes actual accepted frames,
+          including repeated provider UUIDs; its original ordinal/channel owns
+          each body. Redelivery of that observation can be applied idempotently;
+          a separate accepted replay is not agreement of changed replay bodies. The
           parent call is provenance, not an inferred task owner.
           [parent_occurrence] is the registry's fact when this body is observed,
           even before task registration or after native return. [None] means

@@ -269,8 +269,7 @@ the automation response does not report the browser brand.
 
 Validation: the production pure Browser state module was interpreted against 14
 fixtures, including equal tab IDs across clients, stale discovery, disconnected pins,
-and screenshot ownership. PTY scenarios cover two-client choice and explicit recovery;
-they run in the existing browser-screenshot CI test alias. No local Dune build was run.
+and screenshot ownership. No local Dune build was run.
 
 
 ## Gecko scene view

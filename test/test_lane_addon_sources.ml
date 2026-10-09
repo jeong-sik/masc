@@ -361,7 +361,7 @@ let test_dos_capture_retains_the_machines_history () = with_store (fun dir store
         ~binding:(binding [`Assoc ["kind",`String "dos_capture";"source_id",`String "dos"]]))
       |> list |> List.hd |> member "observations" |> list |> List.hd in
     let reference observation = member "input_ledger" observation |> member "evidence" |> own_reference in
-    ignore (dos (Dos_lane.press ~who:"keeper-A" ~keys:["x"] ~steps:100_000));
+    ignore (dos (Dos_lane.press ~until_ready:true ~who:"keeper-A" ~keys:["x"] ~steps:100_000));
     let before = dos (Dos_lane.capture_with_identity ()) in
     let observed = capture () in
     let after = dos (Dos_lane.capture_with_identity ()) in

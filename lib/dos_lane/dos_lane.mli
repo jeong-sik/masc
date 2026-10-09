@@ -1,23 +1,17 @@
 (** Dos_lane — the one DOS machine the workspace plays on.
 
-    Follows RFC-0439 (the MSX machine lives in the server) for a second
-    machine: the DOS core lives here, in the server process, so every keeper
-    tool puts keys into the same {!Dos_machine.t}. The core is turn-based —
-    only {!step}, {!press} and {!type_text} move time — and each call is
-    capped at {!max_steps_per_call}.
+    The attached worker owns the DOS core, so its callers put keys into the
+    same {!Dos_machine.t}. Time advances through explicit execution calls;
+    each call is capped at {!max_steps_per_call}.
 
     {b Time is instructions, not frames.} A DOS program has no frame clock;
-    it runs until it asks for something. The unit here is one 8086
-    instruction, and the useful stopping point is {e ready}: the guest asked
-    the BIOS for a key and found none, {e and} the screen memory stopped
-    changing.
-
-    Both halves are needed. Asking alone is not reacting: a program in its
-    own loop takes a key and asks for the next one 631 instructions later
-    (measured on ZZT) while the repaint it started is still half-written.
-    Stopping there hands back the picture from before the key, and the press
-    looks like it did nothing. A menu that is genuinely blocked matches on
-    the first chunk, so the screen half costs it nothing.
+    the unit here is one 8086 instruction. The default stopping observation
+    combines an empty keyboard poll with unchanged screen memory between
+    samples. It avoids some mid-repaint returns, but can also occur during a
+    timed transition. Neither this observation nor an instruction count
+    proves a game's final prompt. [until_ready=false] executes an explicit
+    instruction allowance; callers inspect the resulting screen before
+    choosing another input.
 
     {b Keys are a queue, not a matrix.} DOS reads the keyboard through a
     BIOS ring buffer, so there is no hold or release — a key is put in the
@@ -43,8 +37,9 @@ type observation = {
   exit_code : int;
   halted : bool;  (** HLT — waiting for an interrupt, not finished *)
   waiting_for_key : bool;
-      (** the guest asked for a key and the ring was empty. On real hardware
-          it would be blocked here. This is the signal to press something. *)
+      (** Latched observation that a keyboard read or poll found the ring
+          empty. Nonblocking polls and direct BIOS ring reads also set it;
+          this does not mean the guest is blocked or ready for another key. *)
   ticks : int;  (** BIOS timer ticks, 18.2/s by default *)
   screen_text : string;
       (** the 80x25 (or 40x25) text page as UTF-8, code page 437 kept — box
@@ -152,18 +147,21 @@ type autosave =
 type ran = {
   steps_run : int;  (** instructions actually advanced *)
   settled : bool;
-      (** stopped because the machine is ready: it asked for a key and the
-          screen stopped moving. False means the budget ran out or the
-          program exited — the observation is then mid-repaint. *)
+      (** An empty keyboard poll occurred in the last sampling interval and
+          its two screen-memory digests matched. This does not prove that a
+          game finished a transition or reached its next prompt. Always false
+          with [until_ready=false]; otherwise false means no such observation
+          was reached before the instruction allowance or program exit. *)
   input_requests : int;
-      (** empty-ring reads during this call. Zero with [settled] false is a
-          program busy with something that is not input. *)
+      (** Empty-ring reads during this call, including nonblocking polls and
+          direct BIOS ring reads. This count does not prove input readiness. *)
   keys_pressed : int;
       (** keys this call delivered. {!step} and {!load} press nothing, so it
           is zero there. Below the number {!press} or {!type_text} was given,
-          a key left the program busy (not settled) or the call reached its
-          step ceiling: the rest were not recorded and never reached the
-          ring. Wait for [settled] with {!step}, then send them again. *)
+          the sequence stopped without a settling observation, ran in
+          [until_ready=false] mode, or reached its step ceiling. The remaining
+          suffix was not recorded and never entered the ring. Read the screen
+          before deciding whether to send it; delivery is not guest acceptance. *)
   unsaved : string list;
       (** files the program wrote during this call that did not reach the
           saves directory, one line each with the reason. Empty when every
@@ -324,23 +322,27 @@ val pass :
 val step :
   who:string -> steps:int -> until_ready:bool -> (observation * ran, error) result
 (** Advances up to [steps] (1..{!max_steps_per_call}) with no key pressed.
-    With [until_ready], stops as soon as the machine is ready for input —
-    the normal way to hand a turn back. Without it, runs the whole budget,
-    which is what a program that is computing rather than asking needs. *)
+    With [until_ready], stops at the empty-poll/unchanged-screen observation
+    described by {!ran.settled}. Without it, runs the instruction allowance
+    unless the program exits. Neither mode proves a game's next prompt. *)
 
 val press :
-  who:string -> keys:string list -> steps:int -> (observation * ran, error) result
-(** Puts each key in the BIOS ring in turn and runs until the machine is
-    ready again, or [steps] runs out for that key. A key that leaves the
-    machine busy ends the sequence: the next key goes in only once the
-    program is waiting for it. Key names
+  who:string -> keys:string list -> steps:int -> until_ready:bool ->
+  (observation * ran, error) result
+(** With [until_ready=true], puts keys in the BIOS ring in turn and advances
+    after each until {!ran.settled} or [steps] is spent. Only a settling
+    observation admits the next key; it does not guarantee the game's prompt.
+    With [until_ready=false], injects only the first key and runs [steps]
+    unless the program exits. Remaining keys are unsent, even if keyboard
+    polling and a stable screen are observed. Key names
     are {!Dos_machine.key_of_string}'s: the arrows, home and page keys,
     insert, delete, enter, esc, space, tab, backspace, F1-F10, or one
     character. A name the machine has no key for is refused before anything
     is pressed. *)
 
 val press_into :
-  saves_name:string -> who:string -> keys:string list -> steps:int -> (observation * ran, error) result
+  saves_name:string -> who:string -> keys:string list -> steps:int -> until_ready:bool ->
+  (observation * ran, error) result
 (** {!press}, only while the loaded program is the one kept under
     [saves_name] ({!observation.saves_name}); another is [Other_program] and
     nothing is pressed. The check is made under the machine's lock, where
@@ -363,9 +365,11 @@ val click :
     key, so a replay reproduces it. *)
 
 val type_text :
-  who:string -> text:string -> steps:int -> (observation * ran, error) result
+  who:string -> text:string -> steps:int -> until_ready:bool ->
+  (observation * ran, error) result
 (** Types the characters of [text] in turn, as {!press} does with one-character
-    keys. For a name a program is asking for, not for menu navigation. *)
+    keys. With [until_ready=false], only its first character is injected.
+    For a name a program is asking for, not for menu navigation. *)
 
 val peek : address:int -> length:int -> (string, error) result
 (** Reads [length] (1..{!peek_max_bytes}) bytes at a physical address

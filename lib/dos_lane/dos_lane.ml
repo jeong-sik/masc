@@ -428,19 +428,20 @@ let advance_blind st ~budget =
   }
 ;;
 
-(* Runs until the machine is ready for input, in chunks.
-   Ready is two facts overlapped, and neither is a guess about the picture:
+(* Runs until an empty keyboard poll overlaps unchanged screen memory.
+   This observation is not proof that a game reached its next prompt:
 
    - the guest asked the BIOS for a key inside this chunk and the ring was
      empty, and
    - the screen memory is the same as it was one chunk ago.
 
-   The first alone is not enough. A program in its own loop takes a key and
+   The first alone can stop mid-repaint. A program in its own loop takes a key and
    asks for the next one 631 instructions later (measured on ZZT) while the
    repaint it started is still half-written; stopping there hands the caller
    the picture from before their key, and the press looks like it did
-   nothing. A menu that is genuinely blocked matches on the first chunk, so
-   waiting costs it nothing. *)
+   nothing. Both facts can also hold during a transition: 삼국지3 returned
+   settled before its command menu appeared with no additional key. Callers
+   can instead run an explicit instruction allowance with [until_ready=false]. *)
 let advance_until_ready st ~budget =
   let m = st.m in
   let requests_before = Dos_machine.input_requests m in
@@ -884,24 +885,20 @@ let resolve_keys names =
    back with [keys_pressed] below what was asked, and the caller sends the
    rest; the keys not pressed are not in the ledger and never reached the
    ring. *)
-let press_resolved st ~who ~keys ~budget =
+let press_resolved st ~who ~keys ~budget ~until_ready =
   let total = ref 0 and requests = ref 0 and pressed = ref 0 in
   let last_settled = ref false in
   List.iter
     (fun (name, word) ->
       let left = max_steps_per_call - !total in
-      (* A key goes in only when the machine is ready for it. If the previous
-         key left the program busy -- a fade, a load, an AI turn -- the next
-         one would land in whatever loop is running, and a "press any key"
-         wait or a skip check eats it. On 삼국지3 that turned a copy-protection
-         code typed during the fade into a wrong code, and the game exited.
-         The rest of the sequence is not sent; keys_pressed says where it
-         stopped. *)
-      let ready = !pressed = 0 || !last_settled in
+      (* The default mode continues only after its settling observation.
+         Full-allowance mode deliberately sends one key: it does not infer
+         permission to inject the remaining suffix from keyboard polling. *)
+      let ready = !pressed = 0 || (until_ready && !last_settled) in
       if left > 0 && ready then begin
         append_entry st { at_step = st.steps; who; key_name = name };
         Dos_machine.push_key st.m word;
-        let ran = advance_until_ready st ~budget:(min budget left) in
+        let ran = advance st ~budget:(min budget left) ~until_ready in
         total := !total + ran.steps_run;
         requests := !requests + ran.input_requests;
         last_settled := ran.settled;
@@ -917,7 +914,7 @@ let press_resolved st ~who ~keys ~budget =
   }
 ;;
 
-let press_on st ~who ~keys ~steps =
+let press_on st ~who ~keys ~steps ~until_ready =
   if keys = [] then Error (Invalid_request "keys must name at least one key")
   else if List.length keys > max_keys_per_call then
     Error
@@ -933,17 +930,19 @@ let press_on st ~who ~keys ~steps =
       (match resolve_keys keys with
        | Error e -> Error e
        | Ok resolved ->
-         let ran = press_resolved st ~who ~keys:resolved ~budget in
-         note_activity ~who ("press " ^ String.concat "," (List.map fst resolved));
+         let ran = press_resolved st ~who ~keys:resolved ~budget ~until_ready in
+         note_activity ~who ("press " ^ String.concat ","
+           (List.map fst (List.take ran.keys_pressed resolved)));
          ran_then_kept st ~who ran)
 ;;
 
-let press ~who ~keys ~steps = with_control ~who (fun st -> press_on st ~who ~keys ~steps)
+let press ~who ~keys ~steps ~until_ready =
+  with_control ~who (fun st -> press_on st ~who ~keys ~steps ~until_ready)
 
-let press_into ~saves_name ~who ~keys ~steps =
+let press_into ~saves_name ~who ~keys ~steps ~until_ready =
   with_control ~who (fun st ->
     let loaded = saves_name_of st in
-    if String.equal loaded saves_name then press_on st ~who ~keys ~steps
+    if String.equal loaded saves_name then press_on st ~who ~keys ~steps ~until_ready
     else Error (Other_program { expected = saves_name; loaded }))
 ;;
 
@@ -994,7 +993,7 @@ let click ~who ~x ~y ~buttons ~steps =
         end)
 ;;
 
-let type_text ~who ~text ~steps =
+let type_text ~who ~text ~steps ~until_ready =
   with_control ~who (fun st ->
     if String.length text = 0 then Error (Invalid_request "text must not be empty")
     else if String.length text > max_text_length then
@@ -1010,8 +1009,8 @@ let type_text ~who ~text ~steps =
         (match resolve_keys names with
          | Error e -> Error e
          | Ok resolved ->
-           let ran = press_resolved st ~who ~keys:resolved ~budget in
-           note_activity ~who (Printf.sprintf "type %d chars" (String.length text));
+           let ran = press_resolved st ~who ~keys:resolved ~budget ~until_ready in
+           note_activity ~who (Printf.sprintf "type %d chars" ran.keys_pressed);
            ran_then_kept st ~who ran))
 ;;
 

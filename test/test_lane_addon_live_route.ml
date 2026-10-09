@@ -311,17 +311,17 @@ let test_dos_counter_moves_on_every_run () =
     dos_ok "pass" (Dos_lane.pass ~who ~to_:(Some who) ~announce:ignore);
     dos_stays "reads and a pass" c;
     check bool "an empty press is refused" true
-      (Result.is_error (Dos_lane.press ~who ~keys:[] ~steps:1000));
+      (Result.is_error (Dos_lane.press ~until_ready:true ~who ~keys:[] ~steps:1000));
     check bool "an unknown key is refused" true
-      (Result.is_error (Dos_lane.press ~who ~keys:["hyperspace"] ~steps:1000));
+      (Result.is_error (Dos_lane.press ~until_ready:true ~who ~keys:["hyperspace"] ~steps:1000));
     check bool "another caller is refused" true
       (Result.is_error (Dos_lane.step ~who:"someone-else" ~steps:1000 ~until_ready:true));
     dos_stays "a refusal" c;
-    dos_ok "press" (Dos_lane.press ~who ~keys:["x"] ~steps:100_000);
+    dos_ok "press" (Dos_lane.press ~until_ready:true ~who ~keys:["x"] ~steps:100_000);
     let c = dos_rises "press" c in
     (* The program took its key and exited; typing still runs the core (for
        no instructions) and still counts as an attempt. *)
-    dos_ok "type_text" (Dos_lane.type_text ~who ~text:"y" ~steps:100_000);
+    dos_ok "type_text" (Dos_lane.type_text ~until_ready:true ~who ~text:"y" ~steps:100_000);
     let c = dos_rises "type_text" c in
     dos_ok "eject" (Dos_lane.eject ~who ~announce:ignore ());
     check bool "an ejected DOS machine publishes no mark" true
@@ -697,7 +697,7 @@ let test_live_route () =
           check bool "and names it" true
             (let action = string_member "action" unchanged_activity in
              String.length action >= 4 && String.sub action 0 4 = "pass");
-          dos_ok "press" (Dos_lane.press ~who ~keys:["x"] ~steps:100_000);
+          dos_ok "press" (Dos_lane.press ~until_ready:true ~who ~keys:["x"] ~steps:100_000);
           check bool "a moved DOS mark needs the locked read" true
             (match published_dos_answer ~since:dos_since with
              | Routes.Needs_locked_read -> true

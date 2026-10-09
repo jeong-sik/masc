@@ -4,7 +4,7 @@ Read the DOS screen without advancing time.
 
 Returns the text page as UTF-8 (code page 437 kept), the video mode, CS:IP, \
 timer ticks and waiting_for_key -- the program found the keyboard empty, not \
-that it is done; masc_dos_step's settled means your turn. frame_ascii maps \
+that it is done; settled also does not prove a game's final prompt. frame_ascii maps \
 the whole frame's luminance in 8x16 cells: where a graphics mode drew, not \
 what it says. frame_nonblack counts lit cells. The frame comes as a PNG: \
 inline image content over MCP, and a Keeper gets an artifact instead -- read \

@@ -295,6 +295,7 @@ class FirefoxState:
         self.refuses_the_session_with = None
         self.browser_name = "firefox"
         self.answers_session_end = True
+        self.refuses_session_end_with = None
         self.answers_the_upgrade = True
         # Bytes something that is no Firefox says in place of the upgrade.
         self.says_instead = None
@@ -380,6 +381,11 @@ class Firefox(socketserver.BaseRequestHandler):
                     continue
                 if message["method"] == "session.end":
                     if not state.answers_session_end:
+                        continue
+                    if state.refuses_session_end_with is not None:
+                        self.send_message({"type": "error", "id": message["id"],
+                                           "error": state.refuses_session_end_with,
+                                           "message": "scripted session end refusal"})
                         continue
                     # Firefox answers, then closes the socket itself.
                     self.send_message({"type": "success", "id": message["id"], "result": {}})
@@ -1140,6 +1146,17 @@ class BidiHostLink(unittest.TestCase):
         self.assertIn("result not delivered: the host was stopped before the server acknowledged the result",
                       self.host_log())
         self.assert_session_ended_last()
+
+    def test_session_end_refusal_cannot_write_control_bytes_to_the_log(self):
+        self.firefox.state.refuses_session_end_with = "session-end-\x1b[31m\x00\nrefused"
+        self.attach(fixed=True)
+        self.process.send_signal(signal.SIGTERM)
+        self.assert_ends("stopped with its BiDi session left in Firefox", code=1)
+        self.assert_session_ended_last()
+        logged = (self.base / "host.log").read_bytes()
+        self.assertIn(b"session-end-\\x1B[31m\\x00\\x0Arefused", logged)
+        self.assertTrue(all(byte == 10 or 32 <= byte <= 126 for byte in logged), logged)
+        self.assertEqual(self.record()["ended"]["session_in_firefox"], "left")
 
     def test_a_stop_that_leaves_its_session_is_an_error(self):
         self.firefox.state.answers_session_end = False

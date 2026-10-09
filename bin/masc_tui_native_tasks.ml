@@ -182,7 +182,7 @@ let read ~mode ~keeper_name ~fetch ~previous =
   let stores = List.fold_left (fun stores (receiver,storage) ->
     match storage with
     | Error _ -> stores
-    | Ok advertised ->
+    | Ok (advertised:Read.cursor) ->
         let same (store:store) = store.receiver=receiver
           && store.store_id=advertised.store_id in
         let old=List.find_opt same stores in

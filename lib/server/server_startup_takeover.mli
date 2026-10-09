@@ -230,9 +230,14 @@ module For_testing : sig
 
   (** Immutable synchronization boundaries around the external lease open and
       the final identity checks. Production acquisition closes over no-op
-      functions; no mutable test hook is reachable from production callers. *)
+      functions; no mutable test hook is reachable from production callers.
+      [before_lease_commit] runs immediately before [lockf] with the freshly
+      opened lease descriptor and defaults to a no-op: it exists so tests can
+      deterministically fail the lock commit (for example by closing the
+      descriptor) and exercise the rejection's descriptor cleanup. *)
   val acquire_base_path_lock
-    :  before_lease_open:(unit -> unit)
+    :  ?before_lease_commit:(Unix.file_descr -> unit)
+    -> before_lease_open:(unit -> unit)
     -> before_commit_identity_check:(unit -> unit)
     -> before_runtime_identity_check:(unit -> unit)
     -> run_dir:string

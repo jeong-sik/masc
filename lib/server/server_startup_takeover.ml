@@ -1436,6 +1436,7 @@ let parsed_pid_fd fd =
 ;;
 
 let acquire_base_path_lock_with
+      ?(before_lease_commit = ignore)
       ~before_lease_open
       ~before_commit_identity_check
       ~before_runtime_identity_check
@@ -1471,6 +1472,7 @@ let acquire_base_path_lock_with
          | Ok fd ->
               let commit_outcome =
                 try
+                  before_lease_commit fd;
                   Unix.lockf fd Unix.F_TLOCK 0;
                   Ok ()
                 with
@@ -1494,13 +1496,23 @@ let acquire_base_path_lock_with
                      Error (Base_path_rejected rejection))
                 | exn ->
                   (* cancel-guard-ok: Unix.lockf performs no Eio operation. *)
-                  Error
-                    (Base_path_rejected
-                       (Lease_io_failed
-                          { operation = "commit_base_path_lease"
-                          ; path = prepared.path
-                          ; reason = Printexc.to_string exn
-                          }))
+                  (match
+                     close_acquisition_fd
+                       ~operation:"commit_base_path_lease"
+                       ~path:prepared.path
+                       ~context:(Printexc.to_string exn)
+                       fd
+                   with
+                   | Error close_rejection ->
+                     Error (Base_path_rejected close_rejection)
+                   | Ok () ->
+                     Error
+                       (Base_path_rejected
+                          (Lease_io_failed
+                             { operation = "commit_base_path_lease"
+                             ; path = prepared.path
+                             ; reason = Printexc.to_string exn
+                             })))
               in
               match commit_outcome with
               | Error result -> result
@@ -1601,11 +1613,12 @@ let acquire_base_path_lock_with
                                 Base_path_acquired lease)))))))
 ;;
 
-let acquire_base_path_lock =
+let acquire_base_path_lock ~run_dir base_path =
   acquire_base_path_lock_with
     ~before_lease_open:(fun () -> ())
     ~before_commit_identity_check:(fun () -> ())
     ~before_runtime_identity_check:(fun () -> ())
+    ~run_dir base_path
 ;;
 
 module For_testing = struct

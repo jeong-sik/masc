@@ -1308,6 +1308,61 @@ let test_base_path_lock_rejects_lease_retarget_at_final_commit () =
                 Server_startup_takeover.release_base_path_lease lease;
                 Alcotest.fail "final-commit retarget acquired ownership")))
 
+let test_base_path_lock_failed_commit_closes_fd () =
+  with_base_and_run "startup-takeover-failed-commit-close"
+    (fun ~base_path ~run_dir ->
+      let path =
+        Server_startup_takeover.For_testing.lease_path
+          ~run_dir:(Unix.realpath run_dir)
+          ~canonical_base_path:(Unix.realpath base_path)
+      in
+      write_file path "stale\n";
+      Fun.protect
+        ~finally:(fun () ->
+          match Unix.lstat path with
+          | _ -> Unix.unlink path
+          | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ())
+        (fun () ->
+          match
+            Server_startup_takeover.For_testing.acquire_base_path_lock
+              ~before_lease_commit:(fun fd -> Unix.close fd)
+              ~before_lease_open:(fun () -> ())
+              ~before_commit_identity_check:(fun () ->
+                Alcotest.fail "acquisition continued after failed lock commit")
+              ~before_runtime_identity_check:(fun () ->
+                Alcotest.fail "acquisition continued after failed lock commit")
+              ~run_dir
+              base_path
+          with
+          | Server_startup_takeover.Base_path_rejected
+              (Server_startup_takeover.Lease_io_failed
+                { operation = "commit_base_path_lease"
+                ; path = rejected_path
+                ; reason
+                })
+            when String.equal rejected_path path ->
+            (* The reason proves the exact deterministic path: [lockf] raised
+               [EBADF] on the test-closed descriptor, no identity hook ran, and
+               the rejected descriptor was closed — the close itself raising
+               [EBADF] again is the fence-building [Failed_close] path, so the
+               lease descriptor was already not live in this process. *)
+            Alcotest.(check string)
+              "failed-commit rejection is the deterministic EBADF"
+              ("Unix.Unix_error(Unix.EBADF, \"lockf\", \"\"); close failed: \
+                Unix.Unix_error(Unix.EBADF, \"close\", \"\")"
+              |> String.trim)
+              reason
+          | Server_startup_takeover.Base_path_rejected rejection ->
+            Alcotest.failf
+              "unexpected failed-commit rejection: %s"
+              (Server_startup_takeover.base_path_lock_rejection_to_string
+                 rejection)
+          | Server_startup_takeover.Base_path_already_owned _ ->
+            Alcotest.fail "failed commit looked already owned"
+          | Server_startup_takeover.Base_path_acquired lease ->
+            Server_startup_takeover.release_base_path_lease lease;
+            Alcotest.fail "failed commit acquired ownership"))
+
 let test_base_path_lock_external_location_and_full_digest () =
   with_base_and_run "startup-takeover-external-location"
     (fun ~base_path ~run_dir ->
@@ -1635,6 +1690,8 @@ let () =
             test_base_path_lock_rejects_lease_retarget_before_commit;
           Alcotest.test_case "lease retarget at final commit is rejected" `Quick
             test_base_path_lock_rejects_lease_retarget_at_final_commit;
+          Alcotest.test_case "failed lock commit closes the lease descriptor"
+            `Quick test_base_path_lock_failed_commit_closes_fd;
           Alcotest.test_case "lease is external and full-digest keyed" `Quick
             test_base_path_lock_external_location_and_full_digest;
           Alcotest.test_case "pre-open runtime retarget has no outside write" `Quick

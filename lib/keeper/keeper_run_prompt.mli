@@ -10,7 +10,7 @@
 type turn_prompt_context =
   { turn_system_prompt : string
   ; dynamic_context : string
-  ; dynamic_context_for_tools : (Agent_core.Tool.t list -> string) option
+  ; dynamic_context_for_tools : (Keeper_request_tool_access.t -> string) option
   ; temporal_context : string
   ; prompt_metrics : Keeper_agent_prompt_metrics.prompt_metrics
   ; history_messages : Agent_core.Types.message list

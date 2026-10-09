@@ -155,11 +155,7 @@ let config_bindings =
 type runtime_key =
   | Every_reading of binding
   | Keeper_lanes_only of binding
-  | All_runtimes_only of binding
-  (* One key that does a different thing on each reading. The footer draws the
-     binding of the reading on screen; the sheet draws one row naming both, so
-     the key is listed once per surface. *)
-  | Per_reading of { all_runtimes : binding; keeper_lanes : binding }
+  | Reading_edit
   | Reading_walk
 
 let runtime_reading_walk_help =
@@ -172,20 +168,16 @@ let runtime_keys =
       (b Act "Right / Enter" "detail"
          ~help:"show the full runtime, lane, dispatch, and probe fields")
   ; Every_reading
+      (b Act "h" "dim refusals"
+         ~help:"toggle de-emphasis for exhausted, rate-limited, and spent runtimes")
+  ; Every_reading
       (b Act "v" "routes / status"
          ~help:"read complete default and media routes, boot admission and probe diagnostics")
   ; Reading_walk
   ; Every_reading
       (b Navigate "c" "clients"
          ~help:"everyone attached to this workspace, off the ring under Runtime")
-  ; Per_reading
-      { all_runtimes =
-          b Act "e" "model settings"
-            ~help:"open the selected binding in Config Models; Esc then c copies a variant"
-      ; keeper_lanes =
-          b Act "e" "add candidate"
-            ~help:"append a candidate to the candidate order of the lane under the cursor (keeper lanes only)"
-      }
+  ; Reading_edit
   ; Keeper_lanes_only
       (b Act "a" "new lane"
          ~help:"name a new lane, then pick its first runtime; e adds the rest")
@@ -219,13 +211,11 @@ let runtime_keys =
   ]
 
 let runtime_sheet_binding = function
-  | Every_reading binding | Keeper_lanes_only binding | All_runtimes_only binding -> binding
-  | Per_reading { all_runtimes; keeper_lanes } ->
-    b Act all_runtimes.key
-      (all_runtimes.label ^ " / " ^ keeper_lanes.label)
-      ~help:
-        (String.concat "; "
-           (List.filter_map Fun.id [ all_runtimes.help; keeper_lanes.help ]))
+  | Every_reading binding | Keeper_lanes_only binding -> binding
+  | Reading_edit ->
+    b Act "e" "model settings / add candidate"
+      ~help:"on all runtimes, open the selected binding in Config Models; \
+             on keeper lanes, append a candidate to the lane under the cursor"
   | Reading_walk ->
     b Navigate "p" "keeper lanes / all runtimes / service lanes"
       ~help:runtime_reading_walk_help
@@ -236,12 +226,15 @@ let runtime_footer_binding ~(mode : runtime_mode) = function
     (match mode with
      | Runtime_lanes -> Some binding
      | Runtime_all -> None)
-  | All_runtimes_only binding ->
-    (match mode with Runtime_all -> Some binding | Runtime_lanes -> None)
-  | Per_reading { all_runtimes; keeper_lanes } ->
-    (match mode with
-     | Runtime_all -> Some all_runtimes
-     | Runtime_lanes -> Some keeper_lanes)
+  | Reading_edit ->
+    Some
+      (match mode with
+       | Runtime_all ->
+         b Act "e" "model settings"
+           ~help:"open the selected binding in Config Models; Esc then c copies a variant"
+       | Runtime_lanes ->
+         b Act "e" "add candidate"
+           ~help:"append a candidate to the candidate order of the lane under the cursor")
   | Reading_walk ->
     Some
       (b Navigate "p"
@@ -1354,7 +1347,8 @@ let code_notes_bindings =
   ]
 
 let code_history_bindings =
-  [ b Navigate "j/k" "scroll"
+  [ b Meta "r" "refresh"
+  ; b Navigate "j/k" "scroll"
   ; b Navigate "PgUp/PgDn" "page"
   ; b Navigate "H" "close"
   ; b Navigate "Home/End" "edges"
@@ -1409,8 +1403,8 @@ let footer_hints_code ~pane =
       | Code_tree | Code_file | Code_diff -> hints
 
 (* The Runtime footer is the table's, with the two keys that depend on the
-   reading on screen: [p] names where it goes from here, and [e] exists only on
-   the keeper-lane reading, where a row names a lane to append to. The renderer
+   reading on screen: [p] names where it goes from here, and [e] names the edit
+   owned by the selected runtime or keeper lane. The renderer
    used to spell its own line -- "j/k:scroll  Enter:detail  p:%s  Tab:next
    q:quit  r:live refresh" -- which never named [c], the one key to Clients,
    or [Esc], the way back to Config, and called the global refresh a live

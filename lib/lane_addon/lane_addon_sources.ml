@@ -198,9 +198,10 @@ let activity_of_misc_operation : Tool_schemas_misc.misc_operation -> activity = 
   (* BrowserInstruct acts only on the stagehand lane, which no lane addon
      observes, so no browser source it could move exists. *)
   | Misc_browser_instruct
-  | Misc_msx_save | Misc_msx_screen | Misc_msx_peek | Misc_msx_ram_diff
+  | Misc_msx_save | Misc_msx_screen | Misc_msx_meta | Misc_msx_checkpoint_info
+  | Misc_msx_peek | Misc_msx_ram_diff
   | Misc_browser_tabs | Misc_browser_read
-  | Misc_dos_screen | Misc_dos_peek | Misc_dos_save
+  | Misc_dos_meta | Misc_dos_inventory | Misc_dos_screen | Misc_dos_peek | Misc_dos_save
   | Misc_lane_declaration_read | Misc_lane_declaration_save | Misc_lane_attach
   | Misc_lane_inspect | Misc_lane_observe | Misc_lane_slice | Misc_lane_detach
   | Misc_lane_evidence | Misc_lane_act | Misc_lane_action_status | Misc_lane_updates

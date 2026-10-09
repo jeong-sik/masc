@@ -42,14 +42,14 @@ def run(executable: str) -> None:
             _keyboard_harness.send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
             _keyboard_harness.select_keeper_row(process, master_fd, output, b"alpha")
             _keyboard_harness.palette_go(process, master_fd, output, b"keeper alpha", b"GATE_CLICK")
+            # Chat opens with its roster hidden. This scenario tests the
+            # boundary between roster and Gate clicks, so open it explicitly.
+            _keyboard_harness.send_and_wait(process, master_fd, output, b"\x02", b"KEEPERS")
             _keyboard_harness.send_and_wait(process, master_fd, output, b"\x04", b"tools:results")
             _keyboard_harness.drain_until_quiet(process, master_fd, output)
             before = _keyboard_harness.screen_text(bytes(output))
             if b"GATE_TAIL" in before or changes.calls:
                 raise AssertionError(f"results mode prematurely expanded details: {before!r}")
-            # The roster stays closed in chat until Ctrl-B opens it.
-            _keyboard_harness.send_and_wait(process, master_fd, output, b"\x02", b"KEEPERS")
-            _keyboard_harness.drain_until_quiet(process, master_fd, output)
             row = _keyboard_harness.screen_row_of(_keyboard_harness.screen_rows(bytes(output)), b"GATE_CLICK")
             if row < 0:
                 raise AssertionError(f"folded Gate row missing: {before!r}")

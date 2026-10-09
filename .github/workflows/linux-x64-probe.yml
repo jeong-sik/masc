@@ -233,6 +233,7 @@ jobs:
             ${{ runner.temp }}/item-http-evidence/ledger-*.jsonl
             ${{ runner.temp }}/item-http-evidence/account.json
             ${{ runner.temp }}/item-http-evidence/account-after.json
+            ${{ runner.temp }}/item-http-evidence/account-before-restart.json
             ${{ runner.temp }}/item-http-evidence/account-restarted.json
             ${{ runner.temp }}/item-http-evidence/portrait.png
             ${{ runner.temp }}/item-http-evidence/portrait-equipped.png

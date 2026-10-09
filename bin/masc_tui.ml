@@ -13470,7 +13470,7 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
   state.keeper_action_serial <- serial;
   state.keeper_action_inflight <- Some (keeper_name, action);
   state.keeper_action_pending <- None;
-  report_action state "system"
+  report_action ~show_in_footer:false state "system"
     (Printf.sprintf "%s %s" (Keeper_control.action_gerund action) keeper_name);
   let host = server_peer_host in
   let port = state.port in
@@ -14083,7 +14083,7 @@ let handle_keeper_action state ~base_path ~mailbox action =
             report_action state "system" "A keeper action is already in progress"
         | Keeper_control.Gate_arm pending ->
             state.keeper_action_pending <- Some pending;
-            report_action state "system"
+            report_action ~show_in_footer:false state "system"
               (Printf.sprintf "Press %s again to %s %s"
                  (Keeper_control.action_key action)
                  (Keeper_control.action_label action) keeper.k_name);

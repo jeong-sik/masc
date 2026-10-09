@@ -328,6 +328,10 @@ val run_named :
     (unit -> Keeper_official_client_host.composed_context option) ->
   ?on_official_client_tool_boundary:
     (unit -> (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result) ->
+  ?on_native_task_observation:
+    (attempt:Runtime_native_tasks.attempt -> Keeper_claude_task_binding.bound -> unit) ->
+  (* Frozen materialized dispatch and original input/native ownership. This
+     callback is independent of active tool blocks and root stream scopes. *)
   ?on_native_tool_progress:
     (block_index:int -> tool_call_id:string option -> Runtime_native_tools.progress -> unit) ->
   ?on_native_tool_completion:
@@ -354,6 +358,7 @@ val run_named :
   ?runtime_manifest_context:Keeper_runtime_manifest.turn_context ->
   ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit) ->
   ?deferred_runtime_lane:deferred_runtime_lane ->
+  ?on_memory_capacity_refusal:Keeper_memory_delivery_reprojection.t ->
   ?on_runtime_attempt:(runtime_attempt -> unit) ->
   ?runtime_retry_deferral:runtime_retry_deferral ->
   ?checkpoint_progress:

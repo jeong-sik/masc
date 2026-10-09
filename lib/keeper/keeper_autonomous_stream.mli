@@ -19,3 +19,7 @@ type ending =
 val finish : t -> ending -> unit
 (** Flush held redacted text, publish the real terminal boundary, close the
     journal producer, and remove only this turn's current identity. Idempotent. *)
+
+val task_journal_health : t -> Keeper_native_task_journal.issue list
+(** Persistence/cleanup issues retained independently of the root event bus.
+    A closed root stream does not disable bound task observation persistence. *)

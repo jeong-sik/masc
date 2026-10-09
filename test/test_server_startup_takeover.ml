@@ -1363,6 +1363,77 @@ let test_base_path_lock_failed_commit_closes_fd () =
             Server_startup_takeover.release_base_path_lease lease;
             Alcotest.fail "failed commit acquired ownership"))
 
+(* [Unix.lockf] fails while the [close] in the production path succeeds: the
+   descriptor is swapped for a read-only stub with [dup2] before the lease
+   commit, so [lockf F_TLOCK] raises [EBADF] but the same descriptor number is
+   still open and closable. This walks the remaining branch of the commit
+   failure handling — the close success branch that leaves no fence — and the
+   fresh re-acquisition proves no kernel lock survives the failed commit. *)
+let test_base_path_lock_failed_commit_close_succeeds_releases_lock () =
+  with_base_and_run "startup-takeover-failed-commit-close-succeeds"
+    (fun ~base_path ~run_dir ->
+      let path =
+        Server_startup_takeover.For_testing.lease_path
+          ~run_dir:(Unix.realpath run_dir)
+          ~canonical_base_path:(Unix.realpath base_path)
+      in
+      write_file path "stale\n";
+      let stub_fd = Unix.openfile "/dev/null" [ Unix.O_RDONLY ] 0 in
+      Fun.protect
+        ~finally:(fun () ->
+          (try Unix.close stub_fd with
+          | Unix.Unix_error (Unix.EBADF, _, _) -> ());
+          match Unix.lstat path with
+          | _ -> Unix.unlink path
+          | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ())
+        (fun () ->
+          match
+            Server_startup_takeover.For_testing.acquire_base_path_lock
+              ~before_lease_commit:(fun fd ->
+                (* The stub is not a regular file, so even a successful
+                   [lockf F_TLOCK] could not persist; [dup2] makes [lockf]
+                   raise [EBADF] deterministically while the descriptor number
+                   stays open and its later [close] succeeds. *)
+                Unix.dup2 stub_fd fd)
+              ~before_lease_open:(fun () -> ())
+              ~before_commit_identity_check:(fun () ->
+                Alcotest.fail "acquisition continued after failed lock commit")
+              ~before_runtime_identity_check:(fun () ->
+                Alcotest.fail "acquisition continued after failed lock commit")
+              ~run_dir
+              base_path
+          with
+          | Server_startup_takeover.Base_path_rejected
+              (Server_startup_takeover.Lease_io_failed
+                {
+                  operation = "commit_base_path_lease";
+                  path = rejected_path;
+                  reason;
+                })
+            when String.equal rejected_path path ->
+            Alcotest.(check string)
+              "failed-commit rejection reports only the lockf failure"
+              "Unix.Unix_error(Unix.EBADF, \"lockf\", \"\")"
+              (String.trim reason);
+            (* The close succeeded, so no [Failed_close] fence is recorded and
+               a fresh acquisition must take the lock back. *)
+            (match
+               Server_startup_takeover.acquire_base_path_lock ~run_dir base_path
+             with
+            | Server_startup_takeover.Base_path_acquired fresh ->
+              Server_startup_takeover.release_base_path_lease fresh
+            | _ -> Alcotest.fail "lock survived the failed commit")
+          | Server_startup_takeover.Base_path_rejected rejection ->
+            Alcotest.failf
+              "unexpected failed-commit rejection: %s"
+              (Server_startup_takeover.base_path_lock_rejection_to_string
+                 rejection)
+          | Server_startup_takeover.Base_path_already_owned _ ->
+            Alcotest.fail "failed commit looked already owned"
+          | Server_startup_takeover.Base_path_acquired lease ->
+            Server_startup_takeover.release_base_path_lease lease;
+            Alcotest.fail "failed commit acquired ownership"))
+
 let test_base_path_lock_external_location_and_full_digest () =
   with_base_and_run "startup-takeover-external-location"
     (fun ~base_path ~run_dir ->
@@ -1692,6 +1763,9 @@ let () =
             test_base_path_lock_rejects_lease_retarget_at_final_commit;
           Alcotest.test_case "failed lock commit closes the lease descriptor"
             `Quick test_base_path_lock_failed_commit_closes_fd;
+          Alcotest.test_case
+            "failed lock commit with close success releases the lock" `Quick
+            test_base_path_lock_failed_commit_close_succeeds_releases_lock;
           Alcotest.test_case "lease is external and full-digest keyed" `Quick
             test_base_path_lock_external_location_and_full_digest;
           Alcotest.test_case "pre-open runtime retarget has no outside write" `Quick

@@ -71,6 +71,14 @@ let start state ~post_id =
 
 let clear state = { state with status = Status_absent }
 
+let suspend state =
+  let status = match state.status with
+    | Status_loading _ -> Status_absent
+    | Status_refreshing (request, value) -> Status_ready (request, value)
+    | (Status_absent | Status_ready _ | Status_failed _) as status -> status
+  in
+  { state with status }
+
 let is_ready state ~post_id =
   match state.status with
   | Status_ready (request, _) -> String.equal request.post_id post_id

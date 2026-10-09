@@ -3173,14 +3173,14 @@ let test_task_callback_keeps_closed_native_owner_and_model_content () =
             check bool "task completion cannot stop the model response" false
               (List.exists (function Agent_core.Types.MessageStop -> true | _ -> false) sse);
             check (list string) "task metadata never flushes the held secret prefix" []
-              (List.filter_map (function Keeper_chat_events.Text_delta text
+              (List.filter_map (function Keeper_chat_events.Text_delta {text; _}
                 | Agent_core_thinking_delta {delta=text;_} -> Some text | _ -> None) chat)) observations;
           (match observations with
            | [(_,first,_);(_,second,_);(_,third,_)] ->
                check bool "no task edge emits an Agent Core content/lifecycle event" true
                  (first=second && second=third)
            | _ -> fail "three actual task edges required");
-          let body = F.events projection |> List.filter_map (function Keeper_chat_events.Text_delta text
+          let body = F.events projection |> List.filter_map (function Keeper_chat_events.Text_delta {text; _}
             | Agent_core_thinking_delta {delta=text;_} -> Some text | _ -> None) |> String.concat "" in
           check bool "task observations never publish the configured secret" false
             (Astring.String.is_infix ~affix:secret body);

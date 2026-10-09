@@ -405,7 +405,6 @@ def run_tick_probe_view_withdrawal(executable):
 def run_machine_post_workspace_swap(executable, operation, *, alias_identity=False):
     """Health admits A; the actual POST reaches B and must carry A's binding."""
     current, observed, prepare, health = workspace_fixture()
-    requests = []
     first_tick = threading.Event()
     release_tick = threading.Event()
     refused = threading.Event()
@@ -413,6 +412,15 @@ def run_machine_post_workspace_swap(executable, operation, *, alias_identity=Fal
     foreign_reads = []
     rgb = base64.b64encode(b'\xff\x00\x00').decode()
     endpoint = '/api/v1/msx/' + operation
+    post_recorded = threading.Event()
+
+    class RecordedRequests(list):
+        def append(self, request):
+            super().append(request)
+            if request[0] == endpoint:
+                post_recorded.set()
+
+    requests = RecordedRequests()
 
     def bound_health():
         if alias_identity and current['phase'] == 'a':
@@ -469,7 +477,7 @@ def run_machine_post_workspace_swap(executable, operation, *, alias_identity=Fal
                 key(b'jjjj', b'game.rom')
             else:
                 key(b'm', b'frame 1 ')
-                key(b'\x1b[15~', b'Controlling')
+                control_from = key(b'\x1b[15~', b'Controlling')
                 if operation != 'tick':
                     assert h.wait_for_fixture_event(process, master, output, first_tick, timeout=8)
                     if operation in ('save', 'restore'):
@@ -483,6 +491,7 @@ def run_machine_post_workspace_swap(executable, operation, *, alias_identity=Fal
                 key({'press': b'1', 'save': b'\x1b[17~', 'restore': b'\x1b[18~',
                      'load': b'\r', 'disk': b'\r'}[operation], b'workspace precondition failed')
             assert h.wait_for_fixture_event(process, master, output, refused, timeout=8)
+            assert h.wait_for_fixture_event(process, master, output, post_recorded, timeout=8)
             assert effects == [], effects
             assert sum(path == endpoint for path, _ in requests) == 1, requests
             # In particular, a refused F6/F7 must not read B's frame and replace
@@ -493,7 +502,8 @@ def run_machine_post_workspace_swap(executable, operation, *, alias_identity=Fal
                 assert b'frame 1 ' in retained, retained
             if operation == 'tick':
                 assert h.wait_for_fixture_event(process, master, output, observed['b'], timeout=8)
-                h.wait_for_output(process, master, output, b'MASC Dashboard', start=0, timeout=8)
+                h.wait_for_output(process, master, output, b'MASC Dashboard', start=control_from, timeout=8)
+                assert b'MASC Dashboard' in h.screen_text(bytes(output))
                 assert sum(path == endpoint for path, _ in requests) == 1, requests
             else:
                 if operation == 'disk':
@@ -571,7 +581,13 @@ def run_checkpoint_certainty(executable, outcome):
     def inspect(body):
         request = json.loads(body)
         inspections.append(request)
-        assert request['operation_id'] == operation['operation_id']
+        assert request == {
+            'operation_id': operation['operation_id'],
+            'checkpoint': 'restore' if restore else 'save',
+            'slot': operation['slot'],
+            'expected_workspace': {'base_path': current['base'],
+                                   'masc_root': str(Path(current['base'], '.masc'))},
+        }, request
         inspected.set()
         if outcome == 'failed':
             return 503, {'error': 'inspection unavailable'}
@@ -591,10 +607,15 @@ def run_checkpoint_certainty(executable, outcome):
             return press(process, master, output, value, needle)
         checkpoint_key = b'\x1b[18~' if restore else b'\x1b[17~'
         def reinspect(value):
+            assert h.drain_until_quiet(process, master, output)
             before = len(inspections)
+            start = len(output)
             os.write(master, value)
             assert h.wait_for_fixture_state(process, master, output,
                 lambda: len(inspections) > before, timeout=8)
+            marker = (b'Checkpoint inspection failed' if outcome in ('failed', 'read_swap')
+                      else b'Checkpoint is still pending')
+            h.wait_for_output(process, master, output, marker, start=start, timeout=8)
         try:
             key(b':go Collab\r', '› guest'.encode())
             key(b'm', b'frame 1 ')
@@ -696,8 +717,8 @@ def run_workspace_control_rearm(executable):
         # not permission to read a replacement server.
         assert b'frame 1 ' in h.screen_text(bytes(output))
         assert ticks == ['tick'], ticks
-        key(b'\x1b[15~', b'Watching only')
-        h.wait_for_output(process, master, output, b'frame 3 ', start=0, timeout=8)
+        rearm_from = key(b'\x1b[15~', b'Watching only')
+        h.wait_for_output(process, master, output, b'frame 3 ', start=rearm_from, timeout=8)
         key(b'\x1b[15~', b'Controlling')
         assert h.wait_for_fixture_event(process, master, output, resumed, timeout=8)
         os.write(master, b'\x1b\x1bq')

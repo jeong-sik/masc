@@ -454,6 +454,27 @@ let test_valid_body_composition () =
      Alcotest.failf "unexpected validation error: %s" (error_label error_kind))
 ;;
 
+(* Nobody drains the admission queue while the Librarian switch is off, so a
+   plain observation must not enter it there: the write takes the direct
+   current-snapshot path and is recallable immediately. *)
+let test_an_ordinary_write_bypasses_the_queue_when_the_librarian_is_off () =
+  with_env "MASC_KEEPER_MEMORY_OS_LIBRARIAN" "0" (fun () ->
+    with_temp_dir
+    @@ fun base_path ->
+    let config = Masc.Workspace.default_config base_path in
+    let meta = make_meta "librarian-off" in
+    let args = make_args ~title:"t" ~content:"the standby region is eu-west-2" in
+    let receipt =
+      (Runtime.keeper_memory_write_with_outcome ~config ~meta ~args)
+        .Masc.Keeper_tool_execution.raw_output
+    in
+    let json = Yojson.Safe.from_string receipt in
+    Alcotest.(check string) "a switch-off write lands in current Memory"
+      "persisted_current_snapshot" (string_field "outcome" json);
+    let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+    Alcotest.(check int) "the fact is recallable immediately" 1
+      (List.length (current_facts ~keepers_dir ~keeper_id:meta.name)))
+
 (* Pending receipt identity changes for each observation, but must not make
    repeated identical writes look like useful progress to the repeat guard. *)
 let test_a_rewrite_receipt_has_the_same_answer () =
@@ -3704,6 +3725,12 @@ let () =
             "a rewrite receipt has the same answer"
             `Quick
             test_a_rewrite_receipt_has_the_same_answer
+        ] )
+    ; ( "librarian switch"
+      , [ Alcotest.test_case
+            "an ordinary write bypasses the queue when the Librarian is off"
+            `Quick
+            test_an_ordinary_write_bypasses_the_queue_when_the_librarian_is_off
         ] )
     ; ( "validation"
       , [ Alcotest.test_case "typed validation failures" `Quick test_validation_taxonomy

@@ -1951,7 +1951,13 @@ let keeper_memory_write_with_outcome
         ~base_path:config.Workspace.base_path
     in
     (match source_path, basis, supersedes with
-     | None, Keeper_memory_os_types.Observed _, None ->
+     (* The Librarian admission queue only moves while the Librarian runs;
+        with the switch off (or invalid) nobody drains it, and a plain
+        observation would sit pending forever behind an ok:true receipt.
+        Those writes take the direct current-snapshot path below instead. *)
+     | None, Keeper_memory_os_types.Observed _, None
+       when Env_config.KeeperMemoryOs.librarian_config_state ()
+            = Env_config.KeeperMemoryOs.Enabled ->
        let request_id = Random_id.prefixed ~prefix:"memory-admission-" ~bytes:16 in
        let now = Time_compat.now () in
        let fact : Keeper_memory_os_types.fact =
@@ -2068,7 +2074,8 @@ let keeper_memory_write_with_outcome
             meta.name
             detail;
           respond ~ok:false ~error_kind:(Persistence_failed Source_bound_current) [ Write_receipt_key.detail, `String detail ])
-     | None, _, Some _ | None, Keeper_memory_os_types.Derived _, None ->
+     | None, _, Some _ | None, Keeper_memory_os_types.Derived _, None
+     | None, Keeper_memory_os_types.Observed _, None ->
     (match upsert_explicit_fact ~keepers_dir ~meta ~body ~basis ~supersedes with
      | Ok (snapshot, supersession) ->
        let written_fact =

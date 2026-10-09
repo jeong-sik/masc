@@ -141,8 +141,7 @@ val transition_error_to_string : transition_error -> string
 (** Derive phase from conditions. Pure, priority-ordered.
     This is the SOLE function that determines keeper phase.
 
-    Priority (first match wins) — mirrors the [DerivePhase] action in
-    [specs/keeper-state-machine/KeeperStateMachine.tla]:
+    Priority (first match wins):
     2.  Stopped (stop_requested + drain_complete)
         -- Checked first because a clean drain wins even if the fiber
         subsequently exits.
@@ -151,12 +150,8 @@ val transition_error_to_string : transition_error -> string
     5.  Crashed (~fiber_alive)
     6.  Draining (stop_requested) -- in-progress stop
     7.  Paused (operator_paused)
-    9.  Failing (latest health failure or structural failure observation)
-    10. Running (fiber_alive)
-    11. Offline (default fallback for inconsistent zero-state)
-
-    The order above is the ground truth enforced by
-    [keeper_state_machine.ml] and TLC. *)
+    9.  Failing (~heartbeat_healthy or ~turn_healthy)
+    10. Running -- fiber_alive holds here because 4 and 5 took a dead fiber *)
 val derive_phase : conditions -> phase
 
 (** Pure condition updater: given current conditions and an event,

@@ -1,10 +1,10 @@
 {
   "scope": "Actual shipped page in Chromium with fixture API responses; no deployed binary or DOS emulator validation.",
-  "source_sha256": "06cf62d7a76eee1685e9cbe95e992ada94e1fe1d7d4718fef69091b2d60898d0",
+  "source_sha256": "1728669cf4fd3f744f18ca742001f3738a1fdf1aa5558312fbc7a588bef4f2d3",
   "browser_version": "149.0.7827.55",
   "seat_reads": 25,
-  "frame_reads": 77,
-  "room_reads": 13,
+  "frame_reads": 76,
+  "room_reads": 14,
   "pad_reads": 5,
   "checks": [
     "external departure closes chat while MSX is selected",
@@ -201,14 +201,14 @@
       "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
     },
     {
-      "method": "GET",
-      "path": "/api/v1/lane-addons/live",
-      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
-    },
-    {
       "method": "POST",
       "path": "/api/v1/play/room",
       "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
     },
     {
       "method": "GET",
@@ -264,6 +264,11 @@
       "method": "GET",
       "path": "/api/v1/play/pad",
       "query": ""
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/lane-addons/live",
+      "query": "?source_kind=dos_capture&since=3&incarnation=machine-1"
     },
     {
       "method": "POST",
@@ -516,16 +521,16 @@
       "query": ""
     },
     {
+      "method": "POST",
+      "path": "/api/v1/play/room",
+      "query": ""
+    },
+    {
       "method": "GET",
       "path": "/api/v1/lane-addons/live",
       "query": "?source_kind=msx_capture"
     },
     {
-      "method": "POST",
-      "path": "/api/v1/play/room",
-      "query": ""
-    },
-    {
       "method": "GET",
       "path": "/api/v1/lane-addons/live",
       "query": "?source_kind=msx_capture&since=7&incarnation=msx-fixture"
@@ -589,11 +594,6 @@
       "method": "POST",
       "path": "/api/v1/play/room",
       "query": ""
-    },
-    {
-      "method": "GET",
-      "path": "/api/v1/lane-addons/live",
-      "query": "?source_kind=msx_capture&since=7&incarnation=msx-fixture"
     },
     {
       "method": "GET",
@@ -614,11 +614,6 @@
       "method": "GET",
       "path": "/api/v1/play/seat",
       "query": ""
-    },
-    {
-      "method": "GET",
-      "path": "/api/v1/lane-addons/live",
-      "query": "?source_kind=msx_capture&since=7&incarnation=msx-fixture"
     },
     {
       "method": "GET",
@@ -718,6 +713,11 @@
     {
       "method": "GET",
       "path": "/api/v1/play/seat",
+      "query": ""
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/play/room",
       "query": ""
     },
     {

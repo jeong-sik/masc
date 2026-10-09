@@ -390,7 +390,7 @@ function end(text, { terminalAuth = false } = {}) {
   el('turn').textContent = text;
 }
 
-async function api(method, path, body, signal) {
+async function api(method, path, body, signal, current = () => true) {
   if (authRejected) return { status:401, json:null };
   const init = { method, headers: { Authorization: 'Bearer ' + token }, cache: 'no-store', credentials: 'omit' };
   if (signal) init.signal = signal;
@@ -402,6 +402,7 @@ async function api(method, path, body, signal) {
   let json = null;
   try { json = await response.json(); } catch (_) { json = null; }
   if (signal?.aborted) throw signal.reason;
+  if (!current()) return { status:0, json:null };
   // Authentication/read failures do not settle an earlier admitted write.
   if (response.status === 401 || response.status === 403) {
     authRejected = true;
@@ -730,12 +731,12 @@ function renderTurn() {
   if (departureConfirmed) {
     turn.className = '';
     turn.textContent = '조종 연결을 끊었어요. 다시 참여하려면 초대 링크를 새로 열어 주세요.';
-  } else if (viewMachine === 'msx') {
-    turn.className = '';
-    turn.textContent = 'MSX · 관전 중이에요. 공용 대화에 함께 참여할 수 있어요.';
   } else if (!connected) {
     turn.className = '';
     turn.textContent = connected === false ? '조종 연결이 끊겨 있어요.' : '조종 연결을 확인하고 있어요.';
+  } else if (viewMachine === 'msx') {
+    turn.className = '';
+    turn.textContent = 'MSX · 관전 중이에요. 공용 대화에 함께 참여할 수 있어요.';
   } else if (!machine) {
     turn.className = '';
     turn.textContent = '지금 켜진 게임이 없어요.';
@@ -784,7 +785,7 @@ async function refreshSeat(signal) {
   nextSeatPollAt = performance.now() + SEAT_POLL_MS;
   let r;
   try {
-    r = await api('GET', SEAT_PATH, undefined, signal);
+    r = await api('GET', SEAT_PATH, undefined, signal, () => latestSeatRequest === request);
   } catch (_) {
     if (ended || signal?.aborted || latestSeatRequest !== request) return null;
     controllerError = '자리 정보를 읽지 못했어요. 다시 시도하고 있어요.';
@@ -886,7 +887,12 @@ async function syncPad(signal) {
   showPad(undefined, []);
   const r = await api('GET', PAD_PATH, undefined, signal);
   if (ended || signal?.aborted || seatSavesName === null) return;
-  const named = r.json !== null && typeof r.json.saves_name === 'string';
+  const named = r.json !== null && typeof r.json.saves_name === 'string' && r.json.saves_name === seatSavesName;
+  if (r.json && typeof r.json.saves_name === 'string' && r.json.saves_name !== seatSavesName) {
+    el('keys').hidden = true;
+    setStatus('pad', '게임이 바뀌어 패드 배치를 다시 읽고 있어요.');
+    return;
+  }
   if (r.status === 200 && named && Array.isArray(r.json.buttons)) showPad(r.json.saves_name, r.json.buttons);
   else if (r.status === 404 && named) showPad(r.json.saves_name, []);
   else setStatus('pad', '패드 배치를 읽지 못했어요 (' + r.status + '). 다시 읽고 있어요.');

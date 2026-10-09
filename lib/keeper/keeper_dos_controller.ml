@@ -177,7 +177,10 @@ type call_refusal =
    [Dos_lane.with_control]. *)
 let with_move_admission ~config ~who ~run =
   let recover_error error =
-    Seats_unknown ("cannot recover the DOS controller: " ^ Masc_domain.masc_error_to_string error) in
+    match error with
+    | Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _) ->
+        Refused (Masc_domain.masc_error_to_string error)
+    | _ -> Seats_unknown ("cannot recover the DOS controller: " ^ Masc_domain.masc_error_to_string error) in
   let result = Tool_misc_dos_lane.with_deferred_announcements (fun announce ->
     Auth.with_credential_transaction config.Workspace.base_path (fun transaction ->
       let ( let* ) = Result.bind in
@@ -235,7 +238,10 @@ let refusal_result ~tool_name = function
 let execute ~config ~who ~name ~args
     ~(run : ?dos_admission:((unit -> Tool_result.result) -> Tool_result.result) -> unit -> Tool_result.result option) =
   let recover_error error =
-    Seats_unknown ("cannot recover the DOS controller: " ^ Masc_domain.masc_error_to_string error) in
+    match error with
+    | Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _) ->
+        Refused (Masc_domain.masc_error_to_string error)
+    | _ -> Seats_unknown ("cannot recover the DOS controller: " ^ Masc_domain.masc_error_to_string error) in
   let operation = Tool_schemas_misc.misc_operation_of_tool_name name in
   match operation with
   | Some (Tool_schemas_misc.Misc_dos_load | Tool_schemas_misc.Misc_dos_restore) ->

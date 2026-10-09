@@ -2837,10 +2837,11 @@ let launch_msx_live_read (state : Masc_tui_types.state) ~mailbox =
   | Some _ | None ->
     let request = { live_view = !msx_poll_view; live_port = state.port } in
     let since = Masc_tui_machine_live.since state.msx_live in
+    let expected_workspace = state.server_identity in
     state.msx_live_in_flight <- Some request;
     launch_workspace_request state ~mailbox ~boundary_error:Fun.id
       ~deliver:(fun result -> Msx_live_loaded (request, result))
-      (fun () -> Masc_tui_http.fetch_machine_live ~host:server_peer_host
+      (fun () -> Masc_tui_http.fetch_machine_live ?expected_workspace ~host:server_peer_host
         ~port:request.live_port Masc.Machine_lane.Msx ~since)
 ;;
 
@@ -2860,6 +2861,10 @@ let rec launch_msx_poll (state : Masc_tui_types.state) ~mailbox =
       msx_pending_poll := Poll_ready (Observing refusal);
       launch_msx_poll state ~mailbox
   | Poll_pending _ | Poll_observing _ | Poll_ready Outcome_unknown -> ()
+  | Poll_ready (Observing Workspace_changed) ->
+      (* The typed refusal already proved this endpoint is another workspace.
+         Do not read its screen while a health refresh is still in flight. *)
+      state.msx_notice <- Some (Masc_tui_msx_tick.refusal_notice Workspace_changed)
   | Poll_ready (Observing refusal) ->
       let request = { poll_view = !msx_poll_view; poll_port = state.port; poll_authority = state.workspace_authority; poll_reading = state.workspace_read_authority } in
       let since = Masc_tui_machine_live.since state.msx_live in

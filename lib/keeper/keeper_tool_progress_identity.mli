@@ -30,7 +30,24 @@ type history_pair =
 
 (** The fingerprints of one keeper's previous history walk. *)
 module History_memo : sig
+  type ledger_call =
+    { position : Keeper_tool_call_index.position
+    ; tool_use_id : string option
+    ; tool_name : string
+    ; fingerprints : io_fingerprints
+    }
+  type ledger_seed =
+    { ledger_dir : string
+    ; judged : Keeper_tool_call_index.frontier
+    ; through : Keeper_tool_call_index.frontier
+    ; calls : ledger_call list
+    }
   type t
+  val ledger_seed : t -> ledger_seed option
+  val hold_ledger_seed : t -> ledger_seed -> unit
+  (** Parsed fingerprint evidence shares the history memo's keeper/base owner.
+      Setup replaces it at a yield and removes rows from retired ledger files.
+      No tool input/output bodies are retained. *)
 
   val create : unit -> t
 end

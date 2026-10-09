@@ -11,6 +11,7 @@ type check_id =
   | Sandbox
   | Keeper_persistence
   | Browser_lane
+  | Browser_bidi_host
 
 type role = Required_to_open | Advisory
 
@@ -52,6 +53,7 @@ let check_id_name = function
   | Sandbox -> "sandbox"
   | Keeper_persistence -> "keeper_persistence"
   | Browser_lane -> "browser_lane"
+  | Browser_bidi_host -> "browser_bidi_host"
 
 (* Existing history opens on what every Keeper in the workspace shares: the
    workspace, a runtime.toml the server can load, and Keeper metadata its boot
@@ -65,7 +67,7 @@ let check_id_name = function
    is a separate surface; its drift is reported the same way. *)
 let role = function
   | Workspace | Runtime_configuration | Keeper_persistence -> Required_to_open
-  | Model_connection | Keeper_declaration | Sandbox | Browser_lane -> Advisory
+  | Model_connection | Keeper_declaration | Sandbox | Browser_lane | Browser_bidi_host -> Advisory
 
 let role_name = function
   | Required_to_open -> "required_to_open"
@@ -180,19 +182,38 @@ let keeper_checks base_path =
        "Check the selected sandbox service and prepare imp's isolated workspace."
        [Configure_sandbox; Start_imp]]
 
+(* The BiDi host is read from its own record on disk, so this answers with
+   no server running. A workspace with no browser lane installed and no host
+   record has nothing to say about one. A running host is satisfied only
+   where the observed server lists its client: that is where hover and drag
+   are served. *)
+let browser_bidi_host_check host =
+  let report condition =
+    [check Browser_bidi_host condition (Browser_bidi_host_status.message host)
+       [Inspect_configuration]]
+  in
+  match Browser_bidi_host_status.verdict host with
+  | Browser_bidi_host_status.Host_absent -> []
+  | Browser_bidi_host_status.Host_serving -> report Satisfied
+  | Browser_bidi_host_status.Host_unverified -> report Needs_verification
+  | Browser_bidi_host_status.Host_not_running -> report Needs_setup
+  | Browser_bidi_host_status.Host_unreadable -> report Invalid
+
 (* The browser tools read the same observation when no browser answers, so an
-   operator and a Keeper are told the same cause. *)
+   operator and a Keeper are told the same cause. One observation answers both
+   checks, so they say of one launcher and one list of connections. *)
 let browser_lane_check base_path =
-  let observation =
-    Browser_lane_launcher.observe ~base_path ~server:(Browser_lane_launcher.current_server ()) in
+  let host = Browser_bidi_host_status.observe ~base_path in
+  let observation = host.lane in
   let message = Browser_lane_launcher.message observation in
-  match Browser_lane_launcher.verdict observation with
-  | Browser_lane_launcher.Absent -> []
-  | Browser_lane_launcher.Connected | Browser_lane_launcher.Aligned ->
-    [check Browser_lane Satisfied message [Inspect_configuration]]
-  | Browser_lane_launcher.Unverified ->
-    [check Browser_lane Needs_verification message [Inspect_configuration]]
-  | Browser_lane_launcher.Misconfigured -> [check Browser_lane Invalid message [Inspect_configuration]]
+  (match Browser_lane_launcher.verdict observation with
+   | Browser_lane_launcher.Absent -> []
+   | Browser_lane_launcher.Connected | Browser_lane_launcher.Aligned ->
+     [check Browser_lane Satisfied message [Inspect_configuration]]
+   | Browser_lane_launcher.Unverified ->
+     [check Browser_lane Needs_verification message [Inspect_configuration]]
+   | Browser_lane_launcher.Misconfigured -> [check Browser_lane Invalid message [Inspect_configuration]])
+  @ browser_bidi_host_check host
 
 let inspect ~base_path =
   match base_path with

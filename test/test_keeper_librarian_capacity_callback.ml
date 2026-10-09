@@ -101,6 +101,71 @@ let test_callback ?(cli_errors = []) ?expected_limit ?shows_size ~base_path ~reg
       (Runs.status_label run.status)
   | _ -> Alcotest.fail "expected one recorded Librarian run"
 
+let test_absorb_evidence_capacity_recovers ~base_path () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = env#net and clock = env#clock in
+  Eio_context.with_test_env ~net ~clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
+  Masc_http_client.with_scoped_pool ~sw ~env @@ fun () ->
+  let keeper_id = "absorb-evidence-capacity" in
+  let module Current = Keeper_memory_os_current in
+  let module L = Keeper_librarian in
+  let module M = Keeper_memory_os_types in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let fact = M.observed ~claim:"A17 is under investigation." ~category:M.Fact
+    ~now:100. ~origin:{kind=M.Authored; trace_id=keeper_id} in
+  let seeded = Current.replace ~keepers_dir ~keeper_id ~expected_revision:None
+    ~now:100. ~source:{kind=Current.Librarian; trace_id=keeper_id} ~facts:[fact] ()
+    |> function Ok state -> state | Error detail -> Alcotest.fail detail in
+  let path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let before = Fs_compat.load_file path in
+  let output = `Assoc ["new_claims", `List [`Assoc [
+      "claim", `String "A17 was investigated and then resolved.";
+      "category", `String "fact"; "absorbs", `List [`String "m1"]]];
+      "dropped", `List []; "working_contexts", `List []] in
+  let librarian = Fixture.start_server ~sw ~net ~clock
+    (Fixture.Reply (Fixture.openai_response output)) in
+  let jev = Fixture.start_server ~sw ~net ~clock (Fixture.Reply
+    {|{"model":"fixture","answers":{"s0_0":{"type":"choice","choice":"mergeable","confidence":1.0,"probabilities":{"mergeable":1.0,"different_context":0.0,"loses_knowledge":0.0,"uncertain":0.0}}}}|}) in
+  let resolver = Fixture.resolver_snapshot ~source:"absorb-capacity"
+    [{Fixture.id="absorb-capacity-librarian"; base_url=librarian.base_url}] in
+  (match Runtime_exact_output_registry.publish
+    ~lanes:[{Runtime_schema.id="librarian_exact"; enabled=true;
+      slot_ids=["absorb-capacity-librarian"]; cli_slot_ids=[];
+      max_output_tokens=Some 4096; thinking=None}] resolver with
+   | Ok _ -> () | Error error ->
+     Alcotest.fail (Runtime_exact_output_registry.publication_error_to_string error));
+  Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-capacity-key") @@ fun () ->
+  Masc_test_deps.with_typesafeai_policy
+    {Runtime_schema.default_typesafeai with absorb_gate=true;
+     destinations=({Runtime_schema.endpoint=jev.base_url; model="fixture";
+                    api_key_env="TYPESAFEAI_API_KEY"},[])} @@ fun () ->
+  let observation = Agent_core.Types.user_msg "A17 recovery was verified after the investigation." in
+  let input : L.input =
+    {turn_ref=Ids.Turn_ref.make ~trace_id:keeper_id ~absolute_turn:1000;
+     historical_task_contexts=[]; goal_context=L.No_task;
+     keeper_id=Masc_test_deps.keeper_id_fixture keeper_id;
+     keeper_instructions="Preserve the event history.";
+     current=Some {facts=seeded.facts}; working_context=Keeper_librarian_context.empty;
+     messages=List.init 1000 (fun _ -> observation);
+     tool_observations=[]; counterpart_observations=[]} in
+  let size = ref None and commits = ref 0 in
+  let run input = Runtime.run_best_effort
+    ~on_not_committed:(fun outcome -> size := Some outcome.Runtime.walk_shows_size)
+    ~on_memory_committed:(fun () -> incr commits)
+    ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some seeded.revision) input in
+  run input;
+  Alcotest.(check (option bool)) "real runtime reports capacity to source narrowing" (Some true) !size;
+  Alcotest.(check int) "capacity failure cannot commit candidate" 0 !commits;
+  Alcotest.(check string) "source snapshot unchanged" before (Fs_compat.load_file path);
+  Alcotest.(check int) "oversized evidence never dispatched" 0 (Fixture.post_count jev);
+  (* The caller can retry a smaller selected range against the unchanged snapshot. *)
+  run {input with messages=[observation]};
+  Alcotest.(check int) "smaller range commits once" 1 !commits;
+  Alcotest.(check int) "smaller evidence reaches the judge" 1 (Fixture.post_count jev);
+  Alcotest.(check bool) "actual memory snapshot advances" true (before <> Fs_compat.load_file path)
+;;
+
 let test_prefit_real_continuity ~base_path () =
   let module P = Keeper_librarian_continuity in
   let module B = Keeper_turn_boundaries in
@@ -616,6 +681,8 @@ let () =
        Alcotest.test_case "a continuity-only run whose snapshot is refused is failed" `Quick
          (test_continuity_only_run_fails_when_the_snapshot_is_refused ~base_path ~registry)];
      "actual HTTP outcomes", [
+      Alcotest.test_case "absorb evidence capacity preserves and recovers memory" `Quick
+        (test_absorb_evidence_capacity_recovers ~base_path);
       (* An API slot states its limit in provider prose, which this process
          cannot read back into a number, so it reports none. The pass does
          not need one: a size refusal is evidence enough to read less. *)

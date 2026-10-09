@@ -597,6 +597,8 @@ let footer_line ?(status = []) ?position (state : state) ~max_cells ~hints =
         [ Masc_tui_footer.Workspace_mismatch
             (Terminal_text.single_line local_base_path)
         ]
+    | Masc_tui_types.Workspace_identity_match_unconfirmed _ ->
+        [ Masc_tui_footer.Workspace_unconfirmed ]
     | Masc_tui_types.Workspace_identity_unread
     | Masc_tui_types.Workspace_identity_match -> []
   in
@@ -1474,6 +1476,8 @@ let connection_badge (state : state) =
   match state.workspace_identity with
   | Masc_tui_types.Workspace_identity_mismatch _ ->
       connection ^ " " ^ (Theme.bad ()) ^ "[workspace mismatch]" ^ Ansi.reset
+  | Masc_tui_types.Workspace_identity_match_unconfirmed _ ->
+      connection ^ " " ^ (Theme.warn ()) ^ "[workspace unconfirmed]" ^ Ansi.reset
   | Masc_tui_types.Workspace_identity_unread
   | Masc_tui_types.Workspace_identity_match -> connection
 
@@ -5037,6 +5041,8 @@ let context_split_pane_height ~content_height ~common_len =
 ;;
 
 let keeper_deletions_lines (state : state) ~cols =
+  let receipt = Option.fold ~none:[] ~some:(fun (_, message) -> [message])
+      state.keeper_deletions_retry_receipt in
   let lines = match state.keeper_deletions with
     | None -> ["삭제 기록을 불러오는 중입니다."]
     | Some (Error detail) -> ["삭제 기록 조회 실패: " ^ detail]
@@ -5073,7 +5079,7 @@ let keeper_deletions_lines (state : state) ~cols =
   in
   List.concat_map (fun line ->
     Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols))
-      (Terminal_text.single_line line)) lines
+      (Terminal_text.single_line line)) (receipt @ lines)
 
 (* The deletion overlay's keys for what it shows. [j/k] steps between records
    and [t] retries the selected record only when it can be retried
@@ -5094,7 +5100,8 @@ let keeper_deletions_hints (state : state) ~scrollable =
     ((if operations > 1 then [ "j/k:작업" ] else [])
      @ (if scrollable then [ "J/K/PgUp/PgDn:원문" ] else [])
      @ [ "r:조회" ]
-     @ (if can_retry then [ "t:정리 재시도" ] else [])
+     @ (if can_retry && Option.is_none state.keeper_deletions_retry_receipt
+        then [ "t:정리 재시도" ] else [])
      @ [ "Esc:닫기" ])
 
 ;;
@@ -5151,3 +5158,45 @@ let pane_surface_header buf cols (state : state) ~name ~split =
 
 let pane_surface_content_height ~rows =
   max 1 (framed_content_height ~rows - pane_surface_title_rows)
+
+let models_account_reading ~provider = function
+  | Account_emails_unread -> None, ["Account emails: not yet read"]
+  | Account_emails_failed reason ->
+      None, ["Account emails unread: " ^ Masc.Tui_terminal_text.sanitize_terminal_text reason]
+  | Account_emails_read { emails; unreadable_rows } ->
+      let email = List.assoc_opt provider emails
+        |> Option.map Masc.Tui_terminal_text.sanitize_terminal_text in
+      let notes = if unreadable_rows > 0 then
+          [Printf.sprintf "Account emails: %d rows this build cannot read" unreadable_rows]
+        else [] in
+      email, notes
+
+(* Read from the same published source observation as Models rows. Usage's
+   loaded-runtime observation is deliberately not an input to this join. *)
+let models_source_account_reading ~provider reading =
+  let open Masc_tui_account_login in
+  match reading with
+  | None -> models_account_reading ~provider Account_emails_unread
+  | Some reading ->
+    match reading.rcv_account_emails with
+    | Error detail -> models_account_reading ~provider (Account_emails_failed detail)
+    | Ok Email_list_unrecognized ->
+        models_account_reading ~provider
+          (Account_emails_failed "the response carries no readable account email list")
+    | Ok (Email_rows {rows; unattributed}) ->
+        let unreadable_rows = unattributed + List.length (List.filter (function
+          | _, Unrecognized -> true
+          | _, (Email _ | Not_read _) -> false) rows) in
+        let emails = List.filter_map (function
+          | id, Email email -> Some (id, email)
+          | _, (Not_read _ | Unrecognized) -> None) rows in
+        let email, notes = models_account_reading ~provider
+          (Account_emails_read {emails; unreadable_rows}) in
+        let gap = match List.assoc_opt provider rows with
+          | Some (Not_read Login_file_unreadable) -> Some "Account email unread: login file unavailable"
+          | Some (Not_read Login_file_unrecognized) -> Some "Account email unread: unrecognized login file"
+          | Some (Not_read Email_not_displayable) -> Some "Account email unread: invalid email"
+          | Some (Not_read Email_not_reported) -> Some "Account email: not reported by the client"
+          | Some (Not_read Environment_credential) -> Some "Account email: environment credential"
+          | Some (Email _ | Unrecognized) | None -> None in
+        email, (match gap with Some note -> note :: notes | None -> notes)

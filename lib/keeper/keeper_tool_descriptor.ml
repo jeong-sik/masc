@@ -107,6 +107,7 @@ type runtime_handler =
   | Tool_skill_publish
   | Tool_workspace_memory_read
   | Tool_memory_search
+  | Tool_memory_select
   | Tool_memory_retract
   | Tool_memory_write
   | Tool_constitution_write
@@ -240,6 +241,7 @@ let runtime_handler_to_string = function
   | Tool_skill_publish -> "tool_skill_publish"
   | Tool_workspace_memory_read -> "tool_workspace_memory_read"
   | Tool_memory_search -> "tool_memory_search"
+  | Tool_memory_select -> "tool_memory_select"
   | Tool_memory_retract -> "tool_memory_retract"
   | Tool_memory_write -> "tool_memory_write"
   | Tool_constitution_write -> "tool_constitution_write"
@@ -500,6 +502,7 @@ let descriptor
       | Tool_skill_publish
       | Tool_workspace_memory_read
       | Tool_memory_search
+      | Tool_memory_select
       | Tool_library_search
       | Tool_library_read
       | Tool_surface_read
@@ -1338,6 +1341,10 @@ let person_note_set_schema = shard_surface_schema "keeper_person_note_set"
 
 let workspace_memory_schema_source, workspace_memory_schema =
   base_schema_declared "keeper_workspace_memory_read"
+;;
+
+let memory_select_schema_source, memory_select_schema =
+  base_schema_declared "keeper_memory_select"
 ;;
 
 let memory_search_schema_source, memory_search_schema =
@@ -2588,6 +2595,18 @@ let internal_descriptors : t list =
       ~ordinary_execution_mode:Concurrent
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_memory_search
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:memory_select_schema_source
+      ~id:"keeper.memory.select"
+      ~name:"keeper_memory_select"
+      ~description:memory_select_schema.description
+      ~input_schema:memory_select_schema.input_schema
+      ~ordinary_execution_mode:Concurrent
+      ~policy:(read_only_in_process_policy ())
+      ~handler:Tool_memory_select
       ()
   ; in_process_descriptor_with_schema_source
       ~capability_identity:Internal_name_identity

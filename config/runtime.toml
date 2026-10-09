@@ -115,9 +115,11 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # skill_applicability = false  # current request + authorized Skill body advice
 # librarian_preflight = false # Memory-only no-change judgment; generates no text
 # workspace_memory_selection_enabled = false
-# Set true separately to send current input/task context, shared interpretations
-# and source details for host-side shared-memory selection. Board/absorb opt-in
-# does not enable this gate. Lane credentials and excluded_keepers still apply.
+# Set true separately for host-side shared-memory selection and the explicit
+# keeper_memory_select tool. Selection may send current input/task context,
+# Keeper instructions, shared interpretations, current claims and verified file
+# evidence to the configured destinations. Board/absorb opt-in does not enable
+# this gate. Lane credentials and excluded_keepers still apply.
 # Capacity-driven host-memory retries support Agent Core, Codex and Claude Code.
 # Muse/Antigravity lack that retry path when their memory reader is suppressed.
 # excluded_keepers = []

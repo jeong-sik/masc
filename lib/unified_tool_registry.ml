@@ -104,6 +104,7 @@ let tag_of_runtime_handler
   | Tool_skill_publish
   | Tool_workspace_memory_read
   | Tool_memory_search
+  | Tool_memory_select
   | Tool_memory_retract
   | Tool_memory_write
   | Tool_constitution_write

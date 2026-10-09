@@ -3054,16 +3054,8 @@ let test_a_nameless_heading_is_the_mark_and_the_rule () =
           with Tui_types.me_keeper_name = "alpha" } ];
     let frame, _ = Masc_tui_render_chat.render_keeper_message state in
     let lines = frame.Masc_tui_frame_presenter.lines in
-    (* The request id is drawn once, on the first line of the request group
-       (docs/TUI-GUIDE.md); the heading row below must not spell it. *)
-    let spelling = List.filter (Astring.String.is_infix ~affix:request) lines in
-    check int "the request id is spelled by one row" 1 (List.length spelling);
-    check bool "that row is the request line, not a heading" true
-      (List.for_all
-         (fun line ->
-           Astring.String.is_infix ~affix:"\xec\x9a\x94\xec\xb2\xad "
-             (Masc_tui_theme.strip_sgr line))
-         spelling);
+    check bool "no row spells the request id" false
+      (List.exists (Astring.String.is_infix ~affix:request) lines);
     let mark = "\xe2\x97\x8f" in
     match
       List.find_opt

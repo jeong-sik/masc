@@ -2187,6 +2187,8 @@ let apply_delta ~now t (delta : Live.delta) =
   | Live.Run_started -> (
       if awaiting_continuation t then begin
         t.segment <- t.segment + 1;
+        t.attempt <- 0;
+        t.current_runtime_id <- None;
         t.reversed_trail <- Node_segment_boundary :: t.reversed_trail;
         Buffer.clear t.text_buffer;
         Buffer.clear t.thinking_buffer;
@@ -2218,12 +2220,24 @@ let apply_delta ~now t (delta : Live.delta) =
          only answers "why has it not started yet". *)
       t.admission <- Some (admission, queue_length)
   | Live.Runtime_attempt_started { runtime_id; attempt_index } ->
-      (* The per-attempt totals start over; the trail does not. What the
-         earlier attempt produced -- finished stretches and the one still
-         growing -- is folded into one superseded node so the reader keeps
-         what they were reading and can see which attempt it belonged to
-         (RFC-0412 §3.3). Tool evidence stays where it was: the calls remain
-         in [reversed_tool_calls] and the superseded node still names them. *)
+      (match t.phase with
+       | Stream_ended | Stream_failed _ -> ()
+       | Waiting | Working ->
+      let next_attempt = Option.value attempt_index ~default:(t.attempt + 1) in
+      if next_attempt < t.attempt then ()
+      else if next_attempt = t.attempt then begin
+        (* This is a metadata report for the current attempt. It has no
+           authority to supersede bytes, end content, or dismiss approval. *)
+        match t.current_runtime_id, runtime_id with
+        | Some current, Some reported when not (String.equal current reported) ->
+            note_unreadable t "runtime identity conflicts within the current attempt"
+        | None, Some reported ->
+            t.current_runtime_id <- Some reported;
+            if t.runtime_named_at = None then t.runtime_named_at <- Some now
+        | Some _, (None | Some _) | None, None -> ()
+      end else begin
+        (* Only an advancing attempt folds the prior attempt's observed work.
+           Earlier attempts remain visible with their original runtime. *)
       Buffer.clear t.text_buffer;
       Buffer.clear t.thinking_buffer;
       t.response_first_stretch <- t.next_stretch_id;
@@ -2250,30 +2264,21 @@ let apply_delta ~now t (delta : Live.delta) =
                ; nodes
                }
              :: older);
-      let next_attempt = Option.value attempt_index ~default:(t.attempt + 1) in
-      let new_attempt = next_attempt <> t.attempt in
-      t.attempt <- next_attempt;
-      (* Unknown identity belongs to the new attempt. Keeping the previous
-         runtime here also prevents STREAM_MODEL_STARTED from naming the new
-         one. A repeated event for this same attempt adds no missing fact. *)
-      if new_attempt || Option.is_some runtime_id then
+        t.attempt <- next_attempt;
         t.current_runtime_id <- runtime_id;
-      (* The model the stream named belongs to the attempt it was named in;
-         a repeated event for the same attempt keeps it. *)
-      if new_attempt then t.observed_model <- None;
-      if new_attempt then t.observed_usage <- None;
-      if new_attempt then begin
+        t.observed_model <- None;
+        t.observed_usage <- None;
         t.observed_stop_reason <- None;
         t.response_scope <- None;
-        t.stop_scope <- None
-      end;
-      retire_model_content t;
-      t.model_signal <- None;
-      t.runtime_named_at <- Some now;
-      t.awaiting <- None;
-      (match t.phase with
-       | Waiting | Working -> t.phase <- Working
-       | Stream_ended | Stream_failed _ -> ())
+        t.stop_scope <- None;
+        retire_model_content t;
+        t.model_signal <- None;
+        t.runtime_named_at <- Some now;
+        t.awaiting <- None;
+        (match t.phase with
+         | Waiting | Working -> t.phase <- Working
+         | Stream_ended | Stream_failed _ -> ())
+      end)
   | Live.Stream_model_started { model; stream_scope; usage; _ } ->
       (* The bridge can repeat the same MessageStart without opening another
          response. Its allocated stream scope, unlike model names or text,

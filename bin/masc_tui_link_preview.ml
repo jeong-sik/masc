@@ -471,8 +471,13 @@ type card_field =
   | Banner_brand | Banner_repository | Banner_paper_id | Banner_image_format
   | Banner_service_label | Banner_content_label | Banner_action
 
+type card_band = Header_band | Title_band | Description_band | Address_band | Actions_band
+type card_column = Primary_column | Banner_column
+type card_order = { band : card_band; column : card_column }
+
 type card_source_span = {
   field : card_field;
+  order : card_order;
   value : string;
   row : int;
   row_start_byte : int;
@@ -489,21 +494,23 @@ let render_compact_badge_internal ?on_field p =
     let prefix = "\xe2\x95\xb0\xe2\x94\x80 " ^ icon ^ " [" in
     let title_prefix = prefix ^ site ^ "] " in
     Option.iter (fun emit ->
-      List.iter (fun (field,value,row_start_byte) ->
-        emit {field;value;row=0;row_start_byte;source_start_byte=0;source_end_byte=String.length value})
-        [Card_site,site,String.length prefix; Card_title,title,String.length title_prefix]) on_field;
+      List.iter (fun (field,band,value,row_start_byte) ->
+        emit {field;order={band;
+          column=Primary_column};value;row=0;row_start_byte;source_start_byte=0;source_end_byte=String.length value})
+        [Card_site,Header_band,site,String.length prefix;
+         Card_title,Title_band,title,String.length title_prefix]) on_field;
     Some (title_prefix ^ title)
 
 let render_compact_badge p = render_compact_badge_internal p
 
 (* The formatter owns each field's placement. Clipping is computed before
    styling; source bytes are never recovered by finding text in a rendered row. *)
-let report_card_fields on_field ~row ~width ~row_prefix ~opening ~plain fields =
+let report_card_fields on_field ~band ~column ~row ~width ~row_prefix ~opening ~plain fields =
   Option.iter (fun emit ->
     let visible = Masc_tui_message_layout.fitted_source_bytes plain width in
     List.iter (fun (field, value, start) ->
       let length = min (String.length value) (max 0 (visible - start)) in
-      if length > 0 then emit {field; value; row;
+      if length > 0 then emit {field; order={band;column}; value; row;
         row_start_byte=String.length row_prefix + String.length opening + start;
         source_start_byte=0; source_end_byte=length}) fields) on_field
 
@@ -529,18 +536,18 @@ let pad_banner_cell ~width ~bg ~fg text =
   bg ^ fg ^ centered ^ Masc_tui_theme.Sgr.reset
 
 let render_og_banner ?on_field ~width p =
-  let field_cell ~row ~field ~value ~start ?source_limit ~bg ~fg text =
+  let field_cell ~band ~row ~field ~value ~start ?source_limit ~bg ~fg text =
     let left_pad = max 0 ((width - Masc_tui_message_layout.display_width text) / 2) in
     let plain = String.make left_pad ' ' ^ text in
     let emit = Option.map (fun emit span ->
       let limit = Option.value source_limit ~default:(String.length value) in
       emit {span with source_end_byte=min span.source_end_byte limit}) on_field in
-    report_card_fields emit ~row ~width ~row_prefix:"" ~opening:(bg ^ fg)
+    report_card_fields emit ~band ~column:Banner_column ~row ~width ~row_prefix:"" ~opening:(bg ^ fg)
       ~plain [field,value,left_pad + start];
     pad_banner_cell ~width ~bg ~fg text
   in
-  let inset_cell ~row ~field ~value ?source_limit ~prefix ~suffix ~bg ~fg shown =
-    field_cell ~row ~field ~value ~start:(String.length prefix) ?source_limit ~bg ~fg
+  let inset_cell ~band ~row ~field ~value ?source_limit ~prefix ~suffix ~bg ~fg shown =
+    field_cell ~band ~row ~field ~value ~start:(String.length prefix) ?source_limit ~bg ~fg
       (prefix ^ shown ^ suffix)
   in
   match p.kind with
@@ -553,21 +560,21 @@ let render_og_banner ?on_field ~width p =
           String.sub repo 0 (max 0 (width - 6)) ^ ".."
         else repo
       in
-      [ field_cell ~row:0 ~field:Banner_brand ~value:"GITHUB" ~start:0 ~bg ~fg:fg_hi "GITHUB"
+      [ field_cell ~band:Header_band ~row:0 ~field:Banner_brand ~value:"GITHUB" ~start:0 ~bg ~fg:fg_hi "GITHUB"
       ; pad_banner_cell ~width ~bg ~fg:fg_sub "/\\___/\\"
       ; pad_banner_cell ~width ~bg ~fg:fg_sub "(  o o  )"
       ; pad_banner_cell ~width ~bg ~fg:fg_sub "(  =^=  )"
-      ; field_cell ~row:4 ~field:Banner_repository ~value:repo ~start:0
+      ; field_cell ~band:Actions_band ~row:4 ~field:Banner_repository ~value:repo ~start:0
           ~source_limit:(if String.length repo > width - 4 then max 0 (width - 6) else String.length repo)
           ~bg ~fg:fg_hi short_repo
       ]
   | YouTube { video_id = _ } ->
       let bg = truecolor_bg 180 20 20 in
       let fg = truecolor_fg 255 255 255 in
-      [ field_cell ~row:0 ~field:Banner_brand ~value:"YOUTUBE" ~start:0 ~bg ~fg "YOUTUBE"
+      [ field_cell ~band:Header_band ~row:0 ~field:Banner_brand ~value:"YOUTUBE" ~start:0 ~bg ~fg "YOUTUBE"
       ; pad_banner_cell ~width ~bg ~fg "\xe2\x95\xad\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x95\xae"
       ; pad_banner_cell ~width ~bg ~fg "\xe2\x94\x82   \xe2\x96\xb6     \xe2\x94\x82"
-      ; inset_cell ~row:3 ~field:Banner_content_label ~value:"VIDEO" ~prefix:"│  " ~suffix:"  │" ~bg ~fg "VIDEO"
+      ; inset_cell ~band:Address_band ~row:3 ~field:Banner_content_label ~value:"VIDEO" ~prefix:"│  " ~suffix:"  │" ~bg ~fg "VIDEO"
       ; pad_banner_cell ~width ~bg ~fg "\xe2\x95\xb0\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x95\xaf"
       ]
   | Arxiv { id } ->
@@ -576,20 +583,20 @@ let render_og_banner ?on_field ~width p =
       let short_id =
         if String.length id > 7 then String.sub id 0 7 else id
       in
-      [ field_cell ~row:0 ~field:Banner_brand ~value:"ARXIV" ~start:0 ~bg ~fg "ARXIV"
+      [ field_cell ~band:Header_band ~row:0 ~field:Banner_brand ~value:"ARXIV" ~start:0 ~bg ~fg "ARXIV"
       ; pad_banner_cell ~width ~bg ~fg "\xe2\x95\xad\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x95\xae"
-      ; inset_cell ~row:2 ~field:Banner_content_label ~value:"e-Print" ~prefix:"│ " ~suffix:" │" ~bg ~fg "e-Print"
-      ; inset_cell ~row:3 ~field:Banner_paper_id ~value:id ~source_limit:(String.length short_id)
+      ; inset_cell ~band:Description_band ~row:2 ~field:Banner_content_label ~value:"e-Print" ~prefix:"│ " ~suffix:" │" ~bg ~fg "e-Print"
+      ; inset_cell ~band:Address_band ~row:3 ~field:Banner_paper_id ~value:id ~source_limit:(String.length short_id)
           ~prefix:"│ " ~suffix:" │" ~bg ~fg (Printf.sprintf "%-7s" short_id)
       ; pad_banner_cell ~width ~bg ~fg "\xe2\x95\xb0\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x95\xaf"
       ]
   | HackerNews { item_id = _ } ->
       let bg = truecolor_bg 255 102 0 in
       let fg = truecolor_fg 20 20 20 in
-      [ field_cell ~row:0 ~field:Banner_brand ~value:"HACKER NEWS" ~start:0 ~bg ~fg "HACKER NEWS"
+      [ field_cell ~band:Header_band ~row:0 ~field:Banner_brand ~value:"HACKER NEWS" ~start:0 ~bg ~fg "HACKER NEWS"
       ; pad_banner_cell ~width ~bg ~fg "\xe2\x95\xad\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x95\xae"
       ; pad_banner_cell ~width ~bg ~fg "\xe2\x94\x82    Y    \xe2\x94\x82"
-      ; inset_cell ~row:3 ~field:Banner_service_label ~value:"YC:HN" ~prefix:"│  " ~suffix:"  │" ~bg ~fg "YC:HN"
+      ; inset_cell ~band:Address_band ~row:3 ~field:Banner_service_label ~value:"YC:HN" ~prefix:"│  " ~suffix:"  │" ~bg ~fg "YC:HN"
       ; pad_banner_cell ~width ~bg ~fg "\xe2\x95\xb0\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x95\xaf"
       ]
   | Image_direct { ext } ->
@@ -599,20 +606,20 @@ let render_og_banner ?on_field ~width p =
       let ext_padded =
         if String.length ext_str > 5 then String.sub ext_str 0 5 else ext_str
       in
-      [ field_cell ~row:0 ~field:Banner_brand ~value:"IMAGE EMBED" ~start:0 ~bg ~fg "IMAGE EMBED"
+      [ field_cell ~band:Header_band ~row:0 ~field:Banner_brand ~value:"IMAGE EMBED" ~start:0 ~bg ~fg "IMAGE EMBED"
       ; pad_banner_cell ~width ~bg ~fg "\xe2\x95\xad\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x95\xae"
-      ; inset_cell ~row:2 ~field:Banner_image_format ~value:ext_str ~source_limit:(String.length ext_padded)
+      ; inset_cell ~band:Description_band ~row:2 ~field:Banner_image_format ~value:ext_str ~source_limit:(String.length ext_padded)
           ~prefix:"│  " ~suffix:"  │" ~bg ~fg (Printf.sprintf "%-5s" ext_padded)
-      ; inset_cell ~row:3 ~field:Banner_action ~value:"[v:View]" ~prefix:"│ " ~suffix:"│" ~bg ~fg "[v:View]"
+      ; inset_cell ~band:Address_band ~row:3 ~field:Banner_action ~value:"[v:View]" ~prefix:"│ " ~suffix:"│" ~bg ~fg "[v:View]"
       ; pad_banner_cell ~width ~bg ~fg "\xe2\x95\xb0\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x95\xaf"
       ]
   | Web_page ->
       let bg = truecolor_bg 33 37 43 in
       let fg = truecolor_fg 215 220 228 in
-      [ field_cell ~row:0 ~field:Banner_brand ~value:"WEB LINK" ~start:0 ~bg ~fg "WEB LINK"
+      [ field_cell ~band:Header_band ~row:0 ~field:Banner_brand ~value:"WEB LINK" ~start:0 ~bg ~fg "WEB LINK"
       ; pad_banner_cell ~width ~bg ~fg "\xe2\x95\xad\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x95\xae"
-      ; inset_cell ~row:2 ~field:Banner_service_label ~value:"WWW" ~prefix:"│   " ~suffix:"   │" ~bg ~fg "WWW"
-      ; inset_cell ~row:3 ~field:Banner_content_label ~value:"BOOKMARK" ~prefix:"│ " ~suffix:"│" ~bg ~fg "BOOKMARK"
+      ; inset_cell ~band:Description_band ~row:2 ~field:Banner_service_label ~value:"WWW" ~prefix:"│   " ~suffix:"   │" ~bg ~fg "WWW"
+      ; inset_cell ~band:Address_band ~row:3 ~field:Banner_content_label ~value:"BOOKMARK" ~prefix:"│ " ~suffix:"│" ~bg ~fg "BOOKMARK"
       ; pad_banner_cell ~width ~bg ~fg "\xe2\x95\xb0\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x95\xaf"
       ]
 
@@ -625,22 +632,22 @@ let render_narrow_card ?on_field ~width p =
   let title = Option.value ~default:p.url p.title in
   let top_border = Printf.sprintf "\xe2\x95\xad%s\xe2\x95\xae" (make_hline (card_w - 2)) in
   let bot_border = Printf.sprintf "\xe2\x95\xb0%s\xe2\x95\xaf" (make_hline (card_w - 2)) in
-  let pad_row ~row ~fields text =
-    report_card_fields on_field ~row ~width:content_w ~row_prefix:"│ " ~opening:"" ~plain:text fields;
+  let pad_row ~band ~row ~fields text =
+    report_card_fields on_field ~band ~column:Primary_column ~row ~width:content_w ~row_prefix:"│ " ~opening:"" ~plain:text fields;
     let fitted = Masc_tui_message_layout.fit_width text content_w in
     Printf.sprintf "\xe2\x94\x82 %s \xe2\x94\x82" fitted
   in
-  let r0 = pad_row ~row:1 ~fields:[Card_site,site,String.length icon + 1] header in
+  let r0 = pad_row ~band:Header_band ~row:1 ~fields:[Card_site,site,String.length icon + 1] header in
   let title_prefix = "\xe2\xaf\x88 " in
-  let r1 = pad_row ~row:2 ~fields:[Card_title,title,String.length title_prefix] (title_prefix ^ title) in
+  let r1 = pad_row ~band:Title_band ~row:2 ~fields:[Card_title,title,String.length title_prefix] (title_prefix ^ title) in
   let r2 =
     match p.description with
-    | Some d when String.trim d <> "" -> [ pad_row ~row:3 ~fields:[Card_description,d,0] d ]
+    | Some d when String.trim d <> "" -> [ pad_row ~band:Description_band ~row:3 ~fields:[Card_description,d,0] d ]
     | _ -> []
   in
   let r3 =
     let pills, fields = card_actions ~gap:" " p in
-    pad_row ~row:(3 + List.length r2) ~fields pills
+    pad_row ~band:Actions_band ~row:(3 + List.length r2) ~fields pills
   in
   [ top_border; r0; r1 ] @ r2 @ [ r3; bot_border ]
 
@@ -659,8 +666,8 @@ let render_notion_card_internal ?on_field ~width p =
         (make_hline left_w) (make_hline banner_w)
     in
     let left_inner_w = max 10 (left_w - 2) in
-    let pad_left ~row ~fields ?(opening="") ?(closing="") plain =
-      report_card_fields on_field ~row ~width:left_inner_w ~row_prefix:"│ " ~opening ~plain fields;
+    let pad_left ~band ~row ~fields ?(opening="") ?(closing="") plain =
+      report_card_fields on_field ~band ~column:Primary_column ~row ~width:left_inner_w ~row_prefix:"│ " ~opening ~plain fields;
       let text = opening ^ plain ^ closing in
       let fitted = Masc_tui_message_layout.fit_width text left_inner_w in
       Printf.sprintf " %s " fitted
@@ -685,14 +692,14 @@ let render_notion_card_internal ?on_field ~width p =
           [Card_domain,host,String.length icon + 1 + String.length site + String.length " · "]) in
     let title_prefix = "⯈ " and address_prefix = "↗ " in
     let left_rows =
-      [| pad_left ~row:1 ~fields:header_fields header
-       ; pad_left ~row:2 ~fields:[Card_title,title,String.length title_prefix]
+      [| pad_left ~band:Header_band ~row:1 ~fields:header_fields header
+       ; pad_left ~band:Title_band ~row:2 ~fields:[Card_title,title,String.length title_prefix]
            ~opening:Masc_tui_theme.Sgr.bold ~closing:Masc_tui_theme.Sgr.reset (title_prefix ^ title)
-       ; pad_left ~row:3 ~fields:[Card_description,desc,0]
+       ; pad_left ~band:Description_band ~row:3 ~fields:[Card_description,desc,0]
            ~opening:Masc_tui_theme.Sgr.dim ~closing:Masc_tui_theme.Sgr.reset desc
-       ; pad_left ~row:4 ~fields:[Card_address,p.url,String.length address_prefix]
+       ; pad_left ~band:Address_band ~row:4 ~fields:[Card_address,p.url,String.length address_prefix]
            ~opening:Masc_tui_theme.Sgr.dim ~closing:Masc_tui_theme.Sgr.reset (address_prefix ^ p.url)
-       ; pad_left ~row:5 ~fields:action_fields
+       ; pad_left ~band:Actions_band ~row:5 ~fields:action_fields
            ~opening:Masc_tui_theme.Sgr.dim ~closing:Masc_tui_theme.Sgr.reset pills
       |]
     in

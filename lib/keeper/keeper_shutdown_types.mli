@@ -45,6 +45,7 @@ type dashboard_purge_artifact =
   | Keeper_memory_events_artifact
   | Keeper_turn_boundaries_artifact
   | Keeper_librarian_progress_artifact
+  | Keeper_external_read_cursor_artifact
   | Keeper_librarian_official_progress_artifact
   | Keeper_playground_bundles_artifact
   | Keeper_runtime_configuration_artifact

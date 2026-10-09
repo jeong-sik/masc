@@ -1,5 +1,6 @@
 import { KeeperToolOutputScope, ToolOutputLookupNotice, useToolOutputLookup } from './tool-output-lookup'
 import { ChatEditEvidence } from './edit-evidence'
+import { ChatFailureCard } from './failure-message'
 import { html } from 'htm/preact'
 import type { ComponentChildren, VNode } from 'preact'
 import { JsonViewerCard } from '../common/json-viewer'
@@ -29,6 +30,7 @@ import { formatTimeHms } from '../../lib/format-time'
 import { formatCost, formatMsCompact } from '../../lib/format-number'
 import { isSubmitEnter } from '../../lib/keyboard'
 import { isFailedDelivery } from '../../lib/keeper-delivery'
+import { parseTextToChatBlocks } from '../../lib/chat-blocks'
 import { createPortal, memo } from 'preact/compat'
 import { readKeeperDraft, writeKeeperDraft } from '../../keeper-chat-store'
 import type { ChatBlock, ChatBroadcastBlock, ChatCalloutBlock, ChatChartBlock, ChatIssueBlock, ChatLinkBlock, ChatMermaidBlock, ChatShellBlock, ChatSuggestionsBlock, ChatTableBlock, ChatTraceStep, ChatTraceToolStep, ChatVoiceBlock, KeeperUserInputBlock } from '../../types'
@@ -2190,6 +2192,42 @@ const blockBodyWeight = (blocks: ChatBlock[]): number =>
     .filter(block => block.t !== 'thinking')
     .reduce((total, block) => total + JSON.stringify(block).length, 0)
 
+// Key-order-independent block shape for equality: REST rows deserialize with
+// the writer's key order while the local parser builds its own.
+const canonicalBlock = (value: unknown): string => {
+  if (Array.isArray(value)) return `[${value.map(canonicalBlock).join(',')}]`
+  if (value !== null && typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    return `{${Object.entries(record)
+      .filter(([, v]) => v !== undefined && v !== null)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([k, v]) => `${JSON.stringify(k)}:${canonicalBlock(v)}`)
+      .join(',')}}`
+  }
+  return JSON.stringify(value)
+}
+
+// A failed request's history row can carry blocks the old writer derived from
+// the diagnostic itself: keeper_chat_store parsed the failure text when the
+// row was stored without blocks (kind=transport_failure rows reached that
+// fallback). Re-parsing the diagnostic with the same line-based rules
+// reproduces exactly that projection, so an exact match is the diagnostic
+// again — not producer output — and renders only inside the failure card's
+// detail. Anything a producer actually supplied (media completed before the
+// failure) does not match the re-parse and is retained.
+function completedOutputFromFailureHistory(
+  blocks: ChatBlock[] | undefined,
+  diagnostic: string | undefined,
+): ChatBlock[] {
+  const persisted = blocks ?? []
+  if (persisted.length === 0 || !diagnostic?.trim()) return persisted
+  const derived = parseTextToChatBlocks(diagnostic)
+  const isLegacyDiagnosticProjection =
+    derived.length === persisted.length
+    && derived.every((candidate, index) => canonicalBlock(candidate) === canonicalBlock(persisted[index]))
+  return isLegacyDiagnosticProjection ? [] : persisted
+}
+
 function ChatBlocks({ blocks, fallbackText }: { blocks: ChatBlock[]; fallbackText?: string }) {
   return html`
     <div class="flex flex-col gap-3" data-chat-blocks>
@@ -2210,70 +2248,6 @@ function LiveMessagePlaceholder({ label }: { label: string }) {
         <span class="h-1.5 w-1.5 rounded-full bg-[var(--color-fg-muted)] animate-pulse"></span>
         <span class="h-1.5 w-1.5 rounded-full bg-[var(--color-fg-muted)] animate-pulse"></span>
       </span>
-    </div>
-  `
-}
-
-function renderStructuredFailureText(text: string): Array<string | VNode> {
-  return text.split(/(\s+)/).map((part, index) => {
-    if (!part || /^\s+$/.test(part)) return part
-    return html`<span class="chat-error-token" key=${index}>${part}</span>`
-  })
-}
-
-/** Typed failure card for kind=transport_failure rows.
- *
- * The discriminator is the writer-declared row kind (normalized to the closed
- * delivery='transport_failure' variant), never a string match on the content.
- * The raw error text is diagnostic payload, shown collapsed. The reassurance line states
- * what the backend guarantees: a Transport_failure row is watermark-neutral
- * (keeper_chat_store), so the user message it failed to answer stays pending
- * for the keeper's next turn. */
-function ChatFailureCard({ diagnostic }: { diagnostic: string }) {
-  const [detailOpen, setDetailOpen] = useState(false)
-  return html`
-    <div
-      class="flex flex-col gap-2 rounded-[var(--r-1)] border border-[var(--color-status-error)]/40 bg-[var(--color-bg-surface)] p-3"
-      data-chat-structured-error
-      data-chat-failure-card
-    >
-      <div class="flex flex-wrap items-center gap-2">
-        <span
-          class="inline-flex items-center rounded-[var(--r-0)] bg-[var(--color-status-error)]/15 px-2 py-0.5 text-2xs font-bold uppercase tracking-[var(--track-caps)] text-[var(--color-status-error)]"
-        >
-          응답 실패
-        </span>
-        <span class="text-sm font-semibold text-[var(--color-fg-primary)]">
-          이 턴은 응답을 만들지 못했습니다
-        </span>
-      </div>
-      <p class="m-0 text-sm leading-airy text-[var(--color-fg-secondary)]" data-chat-failure-reassurance>
-        보낸 메시지는 사라지지 않았습니다. 이 실패 기록은 처리 완료로 간주되지 않으며, keeper가 이후 정상 응답하기 전까지 다시 처리 대상에 남습니다.
-      </p>
-      <div class="flex items-center gap-2">
-        <button
-          type="button"
-          class="self-start rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-1 text-xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] ${CHAT_FOCUS_RING}"
-          aria-expanded=${detailOpen}
-          data-chat-failure-detail-toggle
-          onClick=${() => { setDetailOpen(open => !open) }}
-        >
-          ${detailOpen ? '상세 접기' : '오류 상세 보기'}
-        </button>
-        <button
-          type="button"
-          class="self-start rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-1 text-xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] ${CHAT_FOCUS_RING}"
-          data-chat-failure-copy
-          onClick=${() => { void copyWithToast(diagnostic, '오류 내용을 복사했습니다') }}
-        >
-          오류 복사
-        </button>
-      </div>
-      ${detailOpen
-        ? html`
-            <pre class="chat-error-text" data-chat-failure-detail>${renderStructuredFailureText(diagnostic)}</pre>
-          `
-        : null}
     </div>
   `
 }
@@ -2858,7 +2832,14 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   const renderedServerBlocks = parsedBlocks !== null
     ? [...persistedThinkingBlocks, ...parsedBlocks]
     : (entry.blocks ?? [])
-  const effectiveBlocks = isFailureMessage ? [] : renderedServerBlocks
+  // Failed settlement can follow completed output. Retain the persisted
+  // blocks, while never reparsing the diagnostic as Keeper prose — except
+  // the persisted projection an old writer derived from the diagnostic
+  // itself, which completedOutputFromFailureHistory separates below.
+  const diagnosticText = entry.error?.trim() ? entry.error : messageText
+  const effectiveBlocks = isFailureMessage
+    ? completedOutputFromFailureHistory(entry.blocks, diagnosticText)
+    : renderedServerBlocks
   const hasEffectiveBlocks = effectiveBlocks.length > 0
   const hasNonThinkingBlocks = effectiveBlocks.some(block => block.t !== 'thinking')
   const collapseThreshold = hasNonThinkingBlocks ? 2400 : 1200
@@ -3081,7 +3062,17 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
               : isFailureMessage
               ? html`<${ChatFailureCard}
                   diagnostic=${entry.error?.trim() ? entry.error : messageText}
-                />`
+                  onCopy=${() => copyWithToast(entry.error?.trim() ? entry.error : messageText, '오류 내용을 복사했습니다')}
+                >
+                  ${hasEffectiveBlocks ? html`
+                    <section data-chat-retained-output aria-label="실패 전에 생성된 결과">
+                      <p class="m-0 pb-2 text-sm text-[var(--color-fg-secondary)]">실패 전에 생성된 결과</p>
+                      <div class=${isCollapsible && messageCollapsed ? 'max-h-96 overflow-hidden' : ''}>
+                        <${ChatBlocks} blocks=${effectiveBlocks} />
+                      </div>
+                    </section>
+                  ` : null}
+                </${ChatFailureCard}>`
               : hasEffectiveBlocks
               ? html`
                   <div class=${isCollapsible && messageCollapsed ? 'max-h-96 overflow-hidden' : ''}>

@@ -34,7 +34,11 @@ val keeper_memory_search_with_outcome
   -> args:Yojson.Safe.t
   -> unit
   -> Keeper_tool_execution.t
-(** [turn_ref] names the Keeper turn that searched, for the decision log;
+(** [source=current] returns bounded pages. Pass [next_cursor] with the same
+    query to continue; the cursor binds the Keeper, workspace and current corpus
+    and answer ordering. A changed corpus/query is refused as stale. Historical
+    scopes do not accept cursors. Only facts emitted on a page get Retrieved events.
+    [turn_ref] names the Keeper turn that searched, for the decision log;
     a call outside a Keeper turn leaves it out. *)
 
 val keeper_context_status_json

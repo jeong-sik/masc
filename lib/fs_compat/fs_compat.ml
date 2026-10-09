@@ -2512,6 +2512,8 @@ type private_jsonl_transaction_operation =
   | Remove_rewrite_stage
   | Truncate_transaction_data
   | Sync_transaction_data
+  | Remove_transaction_data
+  | Sync_removal_parent
 
 type private_jsonl_operation_failure =
   { operation : private_jsonl_transaction_operation
@@ -2655,6 +2657,8 @@ let private_jsonl_operation_to_string = function
   | Remove_rewrite_stage -> "remove rewrite stage"
   | Truncate_transaction_data -> "truncate transaction data"
   | Sync_transaction_data -> "sync transaction data"
+  | Remove_transaction_data -> "remove transaction data"
+  | Sync_removal_parent -> "sync removal parent"
 ;;
 
 let private_jsonl_operation_failure_to_string failure =
@@ -3125,6 +3129,43 @@ let private_jsonl_open_existing ~close_fd path flags =
     Error
       (Private_jsonl_operation_failed
          (private_jsonl_failure Open_transaction_data exception_))
+;;
+
+let purge_private_jsonl_durable_locked_with_io ~io path =
+  let success cursor = Cursor_succeeded cursor in
+  with_private_jsonl_stable_lock ~io ~success path @@ fun ~dir ~path ->
+  let ( let* ) = Result.bind in
+  let sync_removed () =
+    let* () =
+      private_jsonl_capture Sync_removal_parent (fun () ->
+        io.before_sync_parent dir;
+        fsync_parent_directory dir)
+      |> Result.map_error (fun failure -> Private_jsonl_operation_failed failure)
+    in
+    Ok Private_jsonl_cursor.Missing
+  in
+  let* opened =
+    private_jsonl_open_existing ~close_fd:io.close_fd path
+      [ Unix.O_RDONLY; Unix.O_NONBLOCK ]
+  in
+  match opened with
+  | None -> sync_removed ()
+  | Some fd ->
+    private_jsonl_with_fd ~close_operation:Close_transaction_data
+      ~close_fd:io.close_fd ~success fd (fun () ->
+        let* () =
+          private_jsonl_capture Remove_transaction_data (fun () -> Unix.unlink path)
+          |> Result.map_error (fun failure -> Private_jsonl_operation_failed failure)
+        in
+        sync_removed ())
+;;
+
+let purge_private_jsonl_durable_locked_result path =
+  purge_private_jsonl_durable_locked_with_io ~io:private_jsonl_transaction_unix_io path
+;;
+
+let purge_private_jsonl_durable_locked_with_io_for_testing =
+  purge_private_jsonl_durable_locked_with_io
 ;;
 
 let rec private_jsonl_read_byte fd byte offset =
@@ -3844,7 +3885,7 @@ let read_private_jsonl_tail_locked_result path ~max_bytes =
       Private_file_failed_with_cleanup_failure { error = Read_error error; cleanup_failure }
 ;;
 
-let update_private_file_durable_locked_with_io ?(create=true) ?(recover_incomplete_tail=false) ~io path decide =
+let update_private_file_durable_locked_with_io ?(create=true) ?(recover_incomplete_tail=false) ?tail_bytes ~io path decide =
   test_exec_home_guard ~op:"update_private_file_durable_locked" path;
   let dir = Filename.dirname path in
   if create then mkdir_p_memoized dir;
@@ -3871,7 +3912,25 @@ let update_private_file_durable_locked_with_io ?(create=true) ?(recover_incomple
            lock_whole_file fd;
            (* See Unix.lseek: only the file-position side effect is required. *)
            ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
+           let from =
+             match tail_bytes with
+             | None -> 0
+             | Some max_bytes ->
+               Int.max 0 ((Unix.fstat fd).Unix.st_size - max_bytes)
+           in
+           let starts_at_row =
+             from = 0
+             || Char.equal (private_jsonl_read_byte fd (Bytes.create 1) (from - 1)) '\n'
+           in
+           ignore (Unix.lseek fd from Unix.SEEK_SET : int);
            let existing = read_fd_chunks fd (Buffer.create 4096) in
+           let existing =
+             if starts_at_row then existing
+             else match String.index_opt existing '\n' with
+             | None -> existing
+             | Some newline ->
+               String.sub existing (newline + 1) (String.length existing - newline - 1)
+           in
            let recovered =
              if not recover_incomplete_tail || existing = ""
                 || existing.[String.length existing - 1] = '\n' then Ok existing
@@ -3904,6 +3963,12 @@ let update_private_file_durable_locked_result ?(create=true) path decide =
     ~io:private_jsonl_transaction_unix_io
     path
     decide
+;;
+
+let update_private_file_tail_durable_locked_result path ~max_bytes decide =
+  if max_bytes <= 0 then invalid_arg "update_private_file_tail_durable_locked_result";
+  update_private_file_durable_locked_with_io ~tail_bytes:max_bytes
+    ~io:private_jsonl_transaction_unix_io path decide
 ;;
 
 let recover_and_update_private_jsonl_durable_locked_result path decide =

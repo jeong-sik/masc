@@ -1059,7 +1059,7 @@ let test_model_without_reasoning_uncontrolled_stays_silent () =
    entirely (claude-code, codex-app-server, both fixed at 300s in the adapter).
    A max-effort binding could therefore not be given more wall clock than a
    low-effort one sharing its provider. Live evidence, 2026-08-10: keeper
-   delta on claude_code.claude-opus-5-max failed every turn with "timed out
+   delta on a max-effort claude_code binding failed every turn with "timed out
    after 300.000s" at 5,884 bytes of system+user input.
 
    The rejection case is the load-bearing one, but only for values that state
@@ -1182,7 +1182,7 @@ let test_exact_output_lane_cli_slots_parse_in_order () =
   let config =
     "[runtime.exact_output_lanes.hitl_auto_judge]\n\
      slots = [\"slot-a\"]\n\
-     cli_slots = [\"antigravity_subscription.gemini-3-7-flash-high\", \"claude_subscription.claude-opus-5\"]\n"
+     cli_slots = [\"antigravity_subscription.gemini-3-7-flash-high\", \"claude_subscription.claude-opus-5-5\"]\n"
   in
   (match Runtime_toml.parse_string config with
    | Error _ -> fail "cli_slots must parse"
@@ -1191,7 +1191,7 @@ let test_exact_output_lane_cli_slots_parse_in_order () =
       | [ lane ] ->
         check (list string) "cli declaration order is preserved"
           [ "antigravity_subscription.gemini-3-7-flash-high"
-          ; "claude_subscription.claude-opus-5"
+          ; "claude_subscription.claude-opus-5-5"
           ]
           lane.cli_slot_ids
       | _ -> fail "exactly one exact-output lane must parse"));
@@ -1546,7 +1546,7 @@ let test_official_client_declarations_load () =
          if not (List.exists (String.equal expected) ids)
          then failf "the official-client declarations did not produce %s" expected)
       [ "claude_code.claude-code-sonnet"
-      ; "claude_code.claude-code-opus-high"
+      ; "claude_code.claude-code-opus-5-5-high"
       ; "codex_subscription.codex-gpt-5-6"
       ; "antigravity_subscription.antigravity-gemini-3-7-flash-high"
       ]

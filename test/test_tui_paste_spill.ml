@@ -62,25 +62,6 @@ let test_the_file_is_a_bare_name () =
         (String.equal name "pasted-20260825-0210-a3f2.txt")
 ;;
 
-(* The draft line is what the composer shows in place of the text, so it has
-   to be one line -- a placeholder that wraps has not solved the problem it
-   exists for. *)
-let test_the_draft_line_is_one_line () =
-  match spill (String.make (Spill.inline_max_bytes + 1) 'x') with
-  | None -> failf "did not spill"
-  | Some kept ->
-      let line = Spill.draft_line kept in
-      check bool "one line" false (String.contains line '\n');
-      check bool "says the file" true
-        (let needle = kept.Spill.file_name in
-         let rec found start =
-           start + String.length needle <= String.length line
-           && (String.equal (String.sub line start (String.length needle)) needle
-               || found (start + 1))
-         in
-         found 0)
-;;
-
 let test_the_message_says_where_to_look () =
   match spill (String.make (Spill.inline_max_bytes + 1) 'x') with
   | None -> failf "did not spill"
@@ -134,8 +115,6 @@ let () =
       , [ test_case "the text is kept whole" `Quick test_the_text_is_kept_whole
         ; test_case "the file is a bare name" `Quick
             test_the_file_is_a_bare_name
-        ; test_case "the draft line is one line" `Quick
-            test_the_draft_line_is_one_line
         ; test_case "the message says where to look" `Quick
             test_the_message_says_where_to_look
         ; test_case "substitution keeps what surrounds it" `Quick

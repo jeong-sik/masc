@@ -467,37 +467,6 @@ let load_events ~base_path ~keeper_name =
         (read_error_to_string error);
       []
 
-let append_event ~base_path ~keeper_name event =
-  try
-    ensure_attention_dir ~base_path;
-    let path = attention_path ~base_path ~keeper_name in
-    let line = Yojson.Safe.to_string (event_to_json event) ^ "\n" in
-    (match Fs_compat.append_private_jsonl_durable_locked_result path line with
-     | Fs_compat.Private_file_succeeded () -> Ok ()
-     | Fs_compat.Private_file_succeeded_with_cleanup_failure
-         { value = (); cleanup_failure } ->
-       Log.Keeper.warn
-         "keeper_external_attention: append committed with transaction settlement failure path=%s: %s"
-         path
-         (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
-       Ok ()
-     | Fs_compat.Private_file_failed error ->
-       Error (Fs_compat.private_jsonl_append_error_to_string error)
-     | Fs_compat.Private_file_failed_with_cleanup_failure
-         { error; cleanup_failure } ->
-       Error
-         (Printf.sprintf
-            "%s; transaction settlement also failed: %s"
-            (Fs_compat.private_jsonl_append_error_to_string error)
-            (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)))
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-      let detail = Printexc.to_string exn in
-      Log.Keeper.warn "keeper_external_attention: append failed for %s: %s"
-        (sanitize_name keeper_name) detail;
-      Error detail
-
 let recorded_item_by_event_id events event_id =
   List.find_map
     (function
@@ -560,12 +529,6 @@ let load_tail_events ~window_bytes ~base_path ~keeper_name =
               parse. *)
            [])
 
-(* Redelivery is always recent, so duplicate admission keeps its small O(1)
-   tail. This must not be reused as a conversation-history policy. *)
-let load_recent_events ~base_path ~keeper_name =
-  load_tail_events ~window_bytes:dedup_window_bytes ~base_path ~keeper_name
-;;
-
 (* Connector content defaults to a 4 KiB gate. A separate 4 MiB evidence tail
    therefore leaves ample room for the Librarian's default 72-message window
    plus lifecycle rows, while remaining O(1) in the append-only file. An
@@ -577,14 +540,54 @@ let load_recent_evidence_events ~base_path ~keeper_name =
   load_tail_events ~window_bytes:evidence_window_bytes ~base_path ~keeper_name
 ;;
 
-let record ~base_path (item : item) =
-  let events = load_recent_events ~base_path ~keeper_name:item.keeper_name in
-  match recorded_item_by_event_id events item.event_id with
-  | Some existing -> `Duplicate existing
-  | None -> (
-      match append_event ~base_path ~keeper_name:item.keeper_name (Recorded item) with
-      | Ok () -> `Recorded
-      | Error detail -> `Error detail)
+(* Strict snapshots use the same path mutex and descriptor lock. The timestamp
+   describes admission, but is not an ordering key: the Librarian consumes
+   external evidence by its durable admission-row cursor even after rollback. *)
+let record_with_clock ~now ~base_path (item : item) =
+  try
+    ensure_attention_dir ~base_path;
+    let path = attention_path ~base_path ~keeper_name:item.keeper_name in
+    let decide tail =
+      if tail <> "" && not (Char.equal tail.[String.length tail - 1] '\n')
+      then None, `Error "external admission log has an incomplete final row"
+      else
+      let events =
+        tail |> String.split_on_char '\n'
+        |> List.filter_map (fun line ->
+          if String.trim line = "" then None else parse_line ~file_path:path line)
+      in
+      match recorded_item_by_event_id events item.event_id with
+      | Some existing -> None, `Duplicate existing
+      | None ->
+        let item = { item with received_at = now () } in
+        Some (Yojson.Safe.to_string (event_to_json (Recorded item)) ^ "\n"), `Recorded
+    in
+    match Fs_compat.update_private_file_tail_durable_locked_result path
+            ~max_bytes:dedup_window_bytes decide with
+    | Fs_compat.Private_file_succeeded result -> result
+    | Fs_compat.Private_file_succeeded_with_cleanup_failure { value; cleanup_failure } ->
+      Log.Keeper.warn
+        "keeper_external_attention: admission committed with transaction settlement failure path=%s: %s"
+        path (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+      value
+    | Fs_compat.Private_file_failed error ->
+      `Error (Fs_compat.durable_append_error_to_string error)
+    | Fs_compat.Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+      `Error (Printf.sprintf "%s; transaction settlement also failed: %s"
+                (Fs_compat.durable_append_error_to_string error)
+                (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
+  with
+  | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
+  | exception_ -> `Error (Printexc.to_string exception_)
+;;
+
+let record ~base_path item =
+  record_with_clock ~now:Time_compat.now ~base_path item
+;;
+
+module For_testing = struct
+  let record_with_clock = record_with_clock
+end
 
 let store_read_error ~base_path ~keeper_name =
   match load_events_result ~base_path ~keeper_name with

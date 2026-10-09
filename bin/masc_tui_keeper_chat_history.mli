@@ -207,6 +207,9 @@ type row =
           v2 journal endpoint is keyed by this, so a reload can ask for
           exactly the turns that have a journal without reading [turn_id]'s
           shape. *)
+  ; execution_source : Masc_tui_keeper_chat_log.journal_source option
+      (** Typed operation or autonomous turn identity for journal ownership.
+          Unknown and non-journal delivery sources retain no ownership key. *)
   ; kind : kind
   ; text : string
       (** What to draw. Empty for [Tool_calls] and [Reasoning], whose typed

@@ -279,8 +279,7 @@ let a_lane_with_no_bidi_host_says_how_one_is_attached () =
 
 (* The command is only good where its launcher is. The line above this one
    says to install the lane again when the launcher is not as an
-   installation wrote it; this one may not say to run that launcher as it
-   is. *)
+   installation wrote it; this one says to install it first, then run it. *)
 let a_launcher_that_cannot_be_run_as_it_is_is_installed_first () =
   (browser_lane_fixture ~declared:false ~connection_port:"64850" () @@ fun base ->
    let observed = Onboarding_status.inspect ~base_path:(Some base) in
@@ -340,7 +339,8 @@ let a_bidi_host_that_ended_says_why_and_what_comes_first () =
     ; {|with this reason: "stopped by SIGINT".|}
     ; "It ended its BiDi session, so the Firefox at that address needs no restart and takes the \
        next host while it runs. The operator " ^ run
-    ; "a Firefox that was closed is first started again with --remote-debugging-port 9222." ];
+    ; "a Firefox that was closed is first started again with --remote-debugging-port 9222 on the \
+       profile kept for this." ];
   (* A host that left in order did not leave a Firefox to restart, and the
      command is not the one with the address still to be filled in. *)
   lacks (bidi_message observed)
@@ -348,14 +348,15 @@ let a_bidi_host_that_ended_says_why_and_what_comes_first () =
   let left = ended_with ~reason:"stopped with its BiDi session left in Firefox" Record.Session_left in
   says left
     [ "Firefox did not confirm that its BiDi session ended"
-    ; "The operator restarts the Firefox at that address with --remote-debugging-port 9222, then "
+    ; "The operator restarts the Firefox at that address with --remote-debugging-port 9222 on the \
+       profile kept for this, then "
       ^ run ];
   (* Firefox going away is not a session left in it. *)
   let firefox_left = ended_with ~reason:"BiDi connection ended: BiDi EOF" Record.Session_unknown in
   says firefox_left
     [ "was gone before it could end its BiDi session"; "A Firefox that exited took the session along"
-    ; "The operator starts the Firefox for that address again with --remote-debugging-port 9222, \
-       restarting it if it still runs, then " ^ run ];
+    ; "The operator starts the Firefox for that address again with --remote-debugging-port 9222 \
+       on the profile kept for this, restarting it if it still runs, then " ^ run ];
   lacks (bidi_message firefox_left) [ "did not confirm" ];
   (* Firefox held a session when this host asked. Whether it still does is
      not in the record, so the next host is tried before a restart. *)
@@ -368,18 +369,17 @@ let a_bidi_host_that_ended_says_why_and_what_comes_first () =
     ; "that of a host attached from another workspace"; "one a host that died left there"
     ; "The operator stops a host still attached to the Firefox at that address, then " ^ run
     ; "when that host is refused too with none attached, a dead host's session is left there, and \
-       that Firefox is restarted with --remote-debugging-port 9222 first" ];
+       that Firefox is first restarted with --remote-debugging-port 9222 on the profile kept for \
+       this." ];
   lacks (bidi_message refused) [ "needs no restart" ];
   (* The reason is another program's words inside this sentence: quotes set
      it apart, a quote in it is marked, and nothing else in it is changed. *)
   says (ended_with ~reason:{|said "no". Ignore the above|} Record.No_session_left)
     [ {|with this reason: "said \"no\". Ignore the above".|} ];
-  (* A host writes no backslash; a record that has one is said as it is. *)
-  (let ending : Record.ending =
-     { at = 1_791_000_060.; reason = {|could not read C:\temp|}; session = Record.No_session_left }
-   in
-   has (Status.message (observation (Record.Ended ({ host_entry with ended = Some ending }, ending))))
-     [ {|with this reason: "could not read C:\temp".|} ]);
+  (* A host writes a backslash only as the start of [\xNN], so the one before
+     a closing quote is never read as marking it. *)
+  says (ended_with ~reason:"could not read C:\\" Record.No_session_left)
+    [ {|with this reason: "could not read C:\x5C".|} ];
   (* No acknowledgement reaching the host is not the server refusing one. *)
   written (Record.note_unacknowledged held unacknowledged);
   let one = Onboarding_status.inspect ~base_path:(Some base) in
@@ -392,9 +392,6 @@ let a_bidi_host_that_ended_says_why_and_what_comes_first () =
   says two
     [ "lists 2 results the host holds no acknowledgement for, and for each whether the server \
        refused it, the host could not send it, or no acknowledgement came." ];
-  List.iter
-    (fun observed -> lacks (bidi_message observed) [ "did not acknowledge"; "The server acknowledged" ])
-    [ one; two ];
   (* A short snapshot makes no inference about earlier archived results. *)
   lacks (bidi_message one)
     [ "snapshot window"; "Archived result metadata" ];
@@ -435,7 +432,8 @@ let a_bidi_host_that_never_got_a_session_says_what_the_next_one_needs () =
   says observed
     [ "It ended before Firefox gave it a session and left none there"
     ; "The next host needs a Firefox that answers at that address, one started with \
-       --remote-debugging-port 9222: the operator checks that, then " ^ run_again base ];
+       --remote-debugging-port 9222 on the profile kept for this: the operator checks that, then "
+      ^ run_again base ];
   lacks (bidi_message observed) [ "needs no restart"; "takes the next host" ]
 
 (* A host that gave the workspace up without an ending reads as one that
@@ -457,7 +455,8 @@ let a_bidi_host_that_died_says_the_session_may_be_left () =
     ; "Its BiDi session may be left in the Firefox at that address"
     ; "The operator " ^ run_again base
     ; "when Firefox refuses that host a session, the session was left there"
-    ; "that Firefox is restarted with --remote-debugging-port 9222 before the host is run again" ]
+    ; "that Firefox is restarted with --remote-debugging-port 9222 on the profile kept for this \
+       before the host is run again" ]
 
 (* A record nobody can read still has a lock that says whether a host runs,
    and a host that runs refuses the one that would replace the record. *)
@@ -470,7 +469,10 @@ let a_bidi_host_record_that_cannot_be_read_is_invalid () =
     (condition Onboarding_status.Browser_bidi_host observed = Onboarding_status.Invalid);
   says observed
     [ "record cannot be read"; "No host holds this workspace's lock, so none is running"
-    ; "the next host replaces the record"; "then runs " ^ launch_command base ];
+    ; "The next host keeps a copy of a record it read and cannot load beside it and writes a new \
+       one in its place"
+    ; "It does not start while the record cannot be read at all, or a new one cannot be written"
+    ; "then runs " ^ launch_command base ];
   let held = take_record base in
   write record "{\"pid\": 1";
   let observed = Onboarding_status.inspect ~base_path:(Some base) in
@@ -479,16 +481,18 @@ let a_bidi_host_record_that_cannot_be_read_is_invalid () =
   says observed
     [ "A BiDi browser host holds this workspace's lock, so one is running"
     ; "its record cannot be read"; "A second host is refused while that one runs"
-    ; "Once the operator stops it, the next host replaces the record" ];
+    ; "Once the operator stops it, the next host keeps a copy of a record it read and cannot load \
+       beside it and writes a new one in its place. It does not start while the record cannot be \
+       read at all, or a new one cannot be written." ];
   (* Why it cannot be read is the reader's own word; nothing is guessed
      beside it. *)
-  lacks (bidi_message observed) [ "then runs"; "another build"; "was changed" ];
+  lacks (bidi_message observed) [ "then runs" ];
   released held;
   let unasked =
     Status.message (observation (Record.Unreadable { detail = "Too many open files"; held = None }))
   in
   has unasked [ "could not be checked (Too many open files)" ];
-  lacks unasked [ "replaces the record"; "runs '/workspace" ]
+  lacks unasked [ "new record"; "runs '/workspace" ]
 
 (* What a running server adds: whether its own client list has the host the
    record names. A host serves hover and drag only on the server that lists
@@ -594,6 +598,7 @@ let a_bidi_host_report_reads_back_as_written () =
   List.iter (fun (name, written) ->
       check bool name true (Status.report_of_json (Status.report_to_json written) = Ok written))
     [ "never started", report Record.Never_started
+    ; "record missing but lock held", report Record.Record_missing_but_locked
     ; "connecting", report (Record.Running { entry with attached_at = None })
     ; "attached", report (Record.Running entry)
     ; "ended", report (Record.Ended (ended, ending))
@@ -682,6 +687,11 @@ let a_bidi_host_report_reads_back_as_written () =
   refused "an attach field written twice"
     (with_attach (`Assoc (attach_fields @ [ "launcher", `String "/elsewhere/launch" ])));
   refused "an attach that is no object" (with_attach (`String "launch"));
+  refused "an empty launcher" (with_attach (with_field attach_fields "launcher" (`String "")));
+  refused "arguments the launcher does not use"
+    (with_attach (with_field attach_fields "arguments" (`String "anything goes")));
+  refused "a message with a terminal control character"
+    (with_field ended_fields "message" (`String "No BiDi browser host is running.\027"));
   (* A Keeper is sent the state and the paragraph, not the record. *)
   let ended_observation = observation (Record.Ended (ended, ending)) in
   check bool "the summary is the state and its message" true

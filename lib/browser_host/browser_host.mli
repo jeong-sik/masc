@@ -117,6 +117,13 @@ val run : Eio_unix.Stdenv.base -> config -> (unit, string) result
     for a host that died. The workspace is given up when this returns or
     raises.
 
+    With [firefox_profile] [Some path], the host keeps a session only with a
+    Firefox that reports running that profile
+    ({!Masc.Browser_bidi_peer.runs_profile}); with any other it ends the
+    session and returns the error, which its record keeps as why it ended.
+    A port the operator's everyday Firefox listens on would otherwise give a
+    Keeper that profile and its logins.
+
     [stop] blocks until the operator asked the host to stop and answers what
     asked. From then on the host takes no further command: one in flight is
     finished and its answer offered once, the server is told, and the host
@@ -138,6 +145,7 @@ val run_bidi
   :  Eio_unix.Stdenv.base
   -> config
   -> string
+  -> firefox_profile:string option
   -> stop:(unit -> string)
   -> (unit, string) result
 

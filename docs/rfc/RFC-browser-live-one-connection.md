@@ -3,9 +3,9 @@ rfc: "browser-live-one-connection"
 title: "Let one live connection do a whole browser task"
 status: Accepted
 created: 2026-10-08
-updated: 2026-10-08
+updated: 2026-10-09
 author: vincent + claude
-related: ["browser-lane-stagehand", "setup-web-search-and-browser-lane"]
+related: ["browser-lane-stagehand", "setup-web-search-and-browser-lane", "browser-keeper-firefox"]
 ---
 
 # RFC — live 브라우저 일 하나를 한 연결로 끝낸다
@@ -81,7 +81,7 @@ BiDi 연결의 `hover_at` 과 `drag` 는 실제 Firefox 157.0.1 에서 확인했
   설계 문서는 "확장 ID 나 URL 과 잇지 않는다"고 적었다 (`docs/design/browser-bidi-live-host.md`).
 - WebExtension API 가 BiDi context ID 를 알려 주는지는 확인하지 못했다. 확인 필요.
 
-### 2.4 BiDi 연결은 운영자가 손으로 붙인다
+### 2.4 BiDi 연결을 붙이는 길
 
 - Firefox 를 `--remote-debugging-port` 로 띄워야 한다. 주소는 `ws://127.0.0.1:PORT/session` 이다.
   ([MDN](https://developer.mozilla.org/en-US/docs/Web/WebDriver/How_to/Create_BiDi_connection), 2026-10-08 확인)
@@ -90,23 +90,21 @@ BiDi 연결의 `hover_at` 과 `drag` 는 실제 Firefox 157.0.1 에서 확인했
   loopback 에서만 받는다.
   ([Mozilla Remote Agent Security](https://firefox-source-docs.mozilla.org/remote/Security.html), 2026-10-08 확인)
 - host 는 `masc-browser-host --bidi-url ws://127.0.0.1:PORT/session` 으로 띄운다.
-  이 명령을 대신 실행해 주는 것이 없다.
-  `connectors/browser/install-host.sh` 와 `scripts/install-local-build.sh` 에 BiDi 가 나오지 않는다.
-  손으로 붙이는 절차는 #41817 이 `docs/design/browser-bidi-live-host.md` 와 host README 에 적었다.
-- BiDi host 는 세 경우에 끝난다 (`run_bidi`): 명령의 결과를 모르게 됐을 때, 서버에 묻는 요청(poll)이 실패했을 때,
-  결과를 서버에 보내지 못했을 때. 확장 host 는 실패하면 잠시 뒤 다시 묻지만 BiDi host 는 다시 묻지 않는다.
-  그래서 MASC 서버를 재시작하면 BiDi host 가 끝난다. 다시 띄우는 것도 손으로 한다.
-  #41851 이 이것을 바꿨다. poll 과 결과 전송이 실패해도 끝나지 않고 다시 한다(§3.B 의 4).
-- 끝난 이유는 host 자기 로그에만 남는다 (`bin/masc_browser_host.ml`). 서버는 연결이 끊겼다는 것만 안다.
-- BiDi 소켓이 끊겨도 host 는 끝나지 않는다. `Browser_bidi_peer.with_connection` 은 끊긴 것을 적어 두기만 하고,
-  `run_bidi` 의 poll 은 peer 를 보지 않고 계속 돈다. 그 뒤에 온 읽기 요청은 실패로 답하고 다시 poll 한다.
-  그래서 Firefox 를 꺼도 서버의 연결 목록에는 그 BiDi 연결이 남는다.
-  #41851 뒤로는 host 가 끝나고 서버에 disconnect 를 보낸다. 실제 Firefox 157.0.1 을 꺼서 확인했다.
+  `runtime.toml` 에 `[browser.live.bidi]` 를 적은 워크스페이스는 MASC 서버가 뜰 때 Firefox 와 host 를 같이 띄운다
+  (RFC-browser-keeper-firefox). 표가 없으면 운영자가 `docs/design/browser-bidi-live-host.md` 와
+  host README 의 절차대로 손으로 붙인다.
+- BiDi host 는 넷 가운데 하나로 끝난다(`browser_host.ml` 의 `run_bidi`): BiDi 연결이 끝났을 때(일을 기다리는 동안도),
+  명령의 결과를 모르게 됐을 때, 다시 물어도 바뀌지 않을 까닭으로 서버가 등록을 거절했을 때, 운영자가 멈추라고 했을 때.
+  서버가 답하지 않으면 확장 host 처럼 workspace 가 적은 주소로 다시 묻는다(§3.B 의 4). 그래서 MASC 서버를 재시작해도 끝나지 않는다.
+- 끝난 이유는 host 기록(`.masc/browser-lane/bidi-host.json`)에 남는다. 연결 목록·doctor·Keeper 답이 그 기록을 읽는다.
+- Firefox 를 끄면 BiDi 연결이 끝나서 host 도 끝나고, 서버에 disconnect 를 보낸다. 실제 Firefox 157.0.1 을 꺼서 확인했다.
 - 서버가 연결의 등록을 끝내는 경우가 있다. poll 이 120초 넘게 없으면 서버가 그 `client_id` 를 끝내고
   (`Browser_lane.lane_connected_window_sec`, `retired_clients`), 그 뒤의 poll 에는 HTTP 400 으로 답한다.
   같은 ID 로는 서버가 다시 뜰 때까지 못 붙는다.
   확장 host 는 이때 끝나고, 확장이 5초 뒤 새 host 를 띄워 새 ID 로 붙는다 (`background.js`).
-  BiDi host 는 다시 띄워 주는 것이 없다.
+  BiDi host 는 끝나지 않고 새 ID 로 다시 등록한다.
+- 끝난 BiDi host 는 `[browser.live.bidi]` 를 적은 워크스페이스에서 다음 서버 시작이 다시 띄운다(RFC-browser-keeper-firefox).
+  표가 없으면 운영자가 다시 띄운다.
 - BiDi 세션은 소켓보다 오래 남는다. Firefox 157.0.1 을 임시 프로필로 띄워 쟀다(2026-10-08, headless).
   - 세션을 끝내지 않고 소켓만 닫으면 같은 Firefox 에 다시 붙지 못한다. 프로세스를 죽여서 닫힌 경우도 같다.
     다음 `session.new` 가 `session not created`("Maximum number of active sessions")로 거절된다.

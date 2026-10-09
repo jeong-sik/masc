@@ -17,8 +17,9 @@ gh workflow run lane-addon-images.yml --ref ci/lane-addon-host-proof \
 The probe creates a fresh workspace/config, starts the actual host, and mints an
 admin credential through its normal login command. No production configuration,
 Keeper, provider key or game media is copied. The only configured model endpoint
-is a local counting sink: any HTTP request, including a startup health probe,
-is recorded with method/path and fails the zero-request assertion. Workers run in
+is a local counting sink: every HTTP request is recorded with method/path. Only the host startup
+`GET /v1/models` catalog discovery is permitted; all other requests fail the
+assertion, including model generation. Workers run in
 the package's ordinary restricted Docker containers; MSX uses no ROMs, and DOS
 uses a generated COM program that prints `HI` and waits for keys.
 

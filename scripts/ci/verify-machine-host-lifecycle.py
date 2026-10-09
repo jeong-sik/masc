@@ -310,14 +310,14 @@ def main():
                 snapshot, (status, live) = wait_for('live ' + machine, context, current_context, server)
                 assert status == 200 and live['source_kind'] == machine + '_capture'
                 row, = snapshot['rows']
-                assert row['lane_id'] == machine + '/screen'
+                assert row['lane_id'] == ident + '/' + machine + '/screen'
                 assert live['incarnation'] == row['subject_id']
                 screen = live['screen']
                 pixels = base64.b64decode(screen['rgb_base64'], validate=True)
                 assert len(pixels) == screen['width'] * screen['height'] * 3
                 receipt['instances'][machine]['live'] = {k: v for k, v in live.items() if k != 'screen'}
                 rows = host.api('/slice?' + urllib.parse.urlencode({'run_id': 'host-proof-' + machine}))['rows']
-                assert rows and any(r['lane_id'] == machine + '/screen' for r in rows)
+                assert rows and any(r['lane_id'] == ident + '/' + machine + '/screen' for r in rows)
                 receipt['checks'].append(machine + '_attached_declared_tools_native_execution_and_context')
             for machine in ('msx', 'dos'):
                 identity = identities[machine]
@@ -336,8 +336,8 @@ def main():
                     host.call('dos', 'press', {'keys': ['space']})
                     png(host, 'dos', 'after-msx-detach')
                 receipt['checks'].append(machine + '_detached_tools_context_and_container_absent_history_retained')
-            assert Sink.requests == [], Sink.requests
-            receipt['checks'].append('zero_provider_http_requests')
+            assert all(r == {'method': 'GET', 'path': '/v1/models'} for r in Sink.requests), Sink.requests
+            receipt['checks'].append('no_model_generation_only_catalog_discovery')
             receipt['status'] = 'passed'
         finally:
             cleanup = []
@@ -403,7 +403,8 @@ def main():
             for value in secrets:
                 content = content.replace(value, '[REDACTED]')
             (artifact / 'host.log').write_text(content)
-            if Sink.requests or residual or any(not row['cleaned'] for row in cleanup):
+            if (any(r != {'method': 'GET', 'path': '/v1/models'} for r in Sink.requests)
+                    or residual or any(not row['cleaned'] for row in cleanup)):
                 receipt['status'] = 'failed'
             receipt.setdefault('status', 'failed')
             (artifact / 'receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')

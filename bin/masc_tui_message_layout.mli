@@ -168,8 +168,13 @@ type memory_pass =
           read, a neutral system row sharing the Memory lane, and every row
           outside it. *)
 
+type body_presentation = Source_body | Thinking_summary
+(** Source content and the generated folded-thinking label have distinct
+    semantic identities even when their visible words happen to coincide. *)
+
 type entry = {
   style : style;
+  body_presentation : body_presentation;
   timestamp : string;
   timeline_bucket : timeline_bucket option;
       (** The civil-hour rail this entry belongs under. [None] is reserved for
@@ -229,6 +234,31 @@ type journal_piece =
     claim's column would be narrower than the lead beside it, the claim wraps
     at the full width under its lead. Each row is its pieces in order. *)
 val journal_rows : width:int -> journal_line list -> (string * journal_piece) list list
+
+type journal_field =
+  | Journal_sign_field | Journal_category_field | Journal_claim_field
+  | Journal_drop_label_field | Journal_memory_id_field | Journal_reason_field
+
+type journal_source_span = {
+  line_index : int;
+  field : journal_field;
+  value : string;
+  row : int;
+  source_ranges : (int * int) list;
+}
+(** Original field bytes retained on a zero-based journal output row. Each
+    pair is a half-open byte range in [value]. Generated column padding and
+    the drop separator have no field; sign/category/drop labels remain typed. *)
+
+type journal_render = {
+  journal_rows : (string * journal_piece) list list;
+  journal_fields : journal_source_span list;
+}
+
+val journal_rows_with_spans : width:int -> journal_line list -> journal_render
+(** Observe the same journal formatter and word-wrap decisions as
+    {!journal_rows}. A caller keeps the entry identity alongside each stable
+    line/field identity; physical row positions may change with width. *)
 
 type metadata =
   | Timeline_break of timeline_bucket
@@ -467,6 +497,12 @@ val cut_mark_cells : int
 (** Cells {!cut_mark} spends, so a caller budgeting around one mark -- or, in
     the marquee's case, around two -- takes the number from the mark rather
     than writing it. *)
+
+val fitted_source_bytes : string -> int -> int
+(** Length in bytes of the unstyled semantic prefix retained by [fit_width],
+    excluding generated padding and the truncation mark. Input must be unstyled
+    semantic text: this does not translate offsets from an ANSI-styled string.
+    Graphemes are kept whole. *)
 
 val fit_width : string -> int -> string
 (** [fit_width text width] pads [text] to [width] cells, or cuts its tail to
@@ -850,3 +886,6 @@ val age_text : now:float -> since:float -> string option
     rather than one read here, so a test can state the instant and two rows in
     one frame can share a single read. A clock that moved backwards says
     nothing rather than a negative age. *)
+
+val entry_body_cells : origin:origin_display -> inner_width:int -> entry -> int
+(** Available body cells after the entry rail, origin and indentation. *)

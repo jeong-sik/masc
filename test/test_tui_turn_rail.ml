@@ -15,6 +15,7 @@ module Layout = Masc_tui_message_layout
 let entry ?(turn_rail = Layout.Rail_none) ?(style = Layout.Keeper)
     ?(role = "keeper.one") body : Layout.entry =
   { style
+  ; body_presentation = Layout.Source_body
   ; timestamp = "01:41:00"
   ; timeline_bucket = None
   ; diagnostics = []

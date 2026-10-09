@@ -8,12 +8,18 @@ val chat_row_action_at : row:int -> Message_layout.row_action
 val keeper_health_word :
   Masc_tui_types.Tui_decode.keeper_health option -> string
 
+type chat_search_result = {
+  match_result : (Masc_tui_types.chat_scroll_position * Masc_tui_types.chat_search_cursor) option;
+  unavailable_entries : int;
+}
+
 val keeper_message_find_scroll :
+  ?preview_lookup:(string -> Masc_tui_link_preview.og_preview) ->
   Masc_tui_types.state ->
   keeper_name:String.t ->
   needle:String.t ->
   older_than:Masc_tui_types.chat_search_cursor option ->
-  (Masc_tui_types.chat_scroll_position * Masc_tui_types.chat_search_cursor) option
+  chat_search_result
 
 val render_keeper_message :
   Masc_tui_types.state ->
@@ -109,3 +115,8 @@ val cached_chat_markdown :
 val keeper_message_clock : float -> string
 (** The wall-clock stamp the live heading prints, so a test can locate the
     stamp between bodies without reading it back off a rendered frame. *)
+
+module For_testing : sig
+  val source_index_build_count : unit -> int
+  val source_url_discovery_count : unit -> int
+end

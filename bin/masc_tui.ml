@@ -9390,17 +9390,20 @@ let seek_in_chat state ~target ~restart =
       (* Normalised here, at the door the operator's text comes through.
          [msg_find] keeps what they typed, because that is what the pane
          echoes back to them. *)
-      match
-        keeper_message_find_scroll state ~keeper_name
+      let result=keeper_message_find_scroll state ~keeper_name
           ~needle:(String.trim state.msg_find)
-          ~older_than
-      with
+          ~older_than in
+      let partial=if result.unavailable_entries=0 then "" else
+        Printf.sprintf " — search unavailable for %d entry(s); results may be incomplete" result.unavailable_entries in
+      match result.match_result with
       | Some (position, anchor) ->
           state.msg_find_at <- Some anchor;
           apply_clamped_scroll state (Message_scroll position);
           notice ~kind:Notice_reply
             (Printf.sprintf "/find %s \xe2\x80\x94 %d row(s) back (/find repeats)"
-               state.msg_find position.scroll)
+               state.msg_find position.scroll ^ partial)
+      | None when result.unavailable_entries>0 ->
+          notice ~kind:Notice_failure ("/find" ^ partial)
       | None ->
           if restart then
             notice ~kind:Notice_reply

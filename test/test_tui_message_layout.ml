@@ -24,6 +24,7 @@ let entry ?(timestamp = "12:34:56") ?timeline_bucket ?speaker
     ?(markdown_source = Layout.Markdown_streaming) style role request_label body :
     Layout.entry =
   { style
+  ; body_presentation = Layout.Source_body
   ; timestamp
   ; timeline_bucket
   ; diagnostics = []
@@ -908,6 +909,7 @@ let test_a_row_carrying_an_escape_wraps_by_its_real_width () =
 let transcript count =
   List.init count (fun index ->
       { Layout.style = Layout.Keeper;
+        body_presentation = Layout.Source_body;
         timestamp = Printf.sprintf "12:%02d:00" (index mod 60);
         timeline_bucket = None;
         diagnostics = [];
@@ -3013,6 +3015,29 @@ let test_diagnostics_keep_the_message_opening () =
     [Layout.Origin_inline; Origin_bare; Origin_row]
 ;;
 
+let test_journal_source_spans () =
+  let lines = [
+    Layout.Journal_fact {sign=Journal_added;category="fact";tone=Tone_fact;claim="  foo bar foobar  longwordlongword"};
+    Layout.Journal_drop {memory_id="memory-id";reason="same reason 한글 words"};
+    Layout.Journal_fact {sign=Journal_removed;category="learning";tone=Tone_learning;claim=""}
+  ] in
+  let stable=ref [] in
+  List.iter (fun width ->
+    let mapped=Layout.journal_rows_with_spans ~width lines in
+    check bool "journal mapping preserves exact existing rows" true
+      (mapped.journal_rows=Layout.journal_rows ~width lines);
+    let identities=List.map (fun (span : Layout.journal_source_span) -> span.line_index,span.field,span.value)
+      mapped.journal_fields |> List.sort_uniq compare in
+    if !stable=[] then stable:=identities else
+      check bool "field identities survive hanging-column switch" true (!stable=identities);
+    List.iter (fun (span : Layout.journal_source_span) ->
+      let row=List.nth mapped.journal_rows span.row |> List.map fst |> String.concat "" in
+      List.iter (fun (a,b) ->
+        check bool "source range lies in original field" true (a>=0 && a<b && b<=String.length span.value);
+        check bool "mapped source occurs on actual formatter row" true
+          (holds row (String.sub span.value a (b-a)))) span.source_ranges) mapped.journal_fields
+  ) [5;16;38;100]
+
 let () =
   run "tui_message_layout"
     [
@@ -3160,6 +3185,7 @@ let () =
     ; ( "scrollback"
       , [ test_case "an arrival steps in from the conversation" `Quick
             test_an_arrival_steps_in_from_the_conversation
+        ; test_case "journal source spans" `Quick test_journal_source_spans
         ; test_case "journal rows hang the claim under itself" `Quick
             test_journal_rows_hang_the_claim_under_itself
         ; test_case "one speaker keeps one heading" `Quick

@@ -50,7 +50,7 @@ let count text needle = List.length (Astring.String.cuts ~sep:needle text) - 1
 
 let find ?older state needle =
   match Render.keeper_message_find_scroll state ~keeper_name:"alpha"
-      ~needle ~older_than:older with
+      ~needle ~older_than:older |> fun result -> result.match_result with
   | None -> fail ("visible conversation match missing: " ^ needle)
   | Some (position, cursor) -> T.apply_clamped_scroll state (T.Message_scroll position); cursor
 
@@ -105,25 +105,150 @@ let test_repeated_matches_within_entry () = at_sizes (fun origin ->
     | _ -> Printf.sprintf "plain line %d" line) |> String.concat "\n" in
   state.msg_loaded <- [row ~id:"repeated" ~request_id:"repeated" ~role:user ~text:body 1.];
   let newest = find state "MATCH_" in
-  check int "newest occurrence first" 2 newest.matched_occurrence;
+  check bool "newest occurrence has an original source position" true
+    (match newest.matched_position with Masc_tui_chat_search.Body_byte _ -> true | _ -> false);
   check int "newest physical match is visible" 1 (count (screen state) "MATCH_NEWEST");
   let middle = find ~older:newest state "MATCH_" in
   check bool "repeat remains within the same durable entry" true
     (newest.matched_anchor = middle.matched_anchor);
-  check int "middle occurrence next" 1 middle.matched_occurrence;
+  check bool "middle occurrence precedes newest source" true
+    (Masc_tui_chat_search.compare_position middle.matched_position newest.matched_position<0);
   check int "middle physical match is visible" 1 (count (screen state) "MATCH_MIDDLE");
   let oldest = find ~older:middle state "MATCH_" in
-  check int "oldest occurrence last" 0 oldest.matched_occurrence;
+  check bool "oldest occurrence precedes middle source" true
+    (Masc_tui_chat_search.compare_position oldest.matched_position middle.matched_position<0);
   check int "oldest physical match is visible" 1 (count (screen state) "MATCH_OLDER");
   check bool "all occurrences exhausted" true
-    (Option.is_none (Render.keeper_message_find_scroll state ~keeper_name:"alpha"
-      ~needle:"MATCH_" ~older_than:(Some oldest)));
+    (Option.is_none ((Render.keeper_message_find_scroll state ~keeper_name:"alpha"
+      ~needle:"MATCH_" ~older_than:(Some oldest)).match_result));
   state.msg_loaded <- [row ~id:"same-row" ~request_id:"same-row" ~role:user
     ~text:"SAME SAME" 2.];
   let newest = find state "SAME" in
   let older = find ~older:newest state "SAME" in
-  check (pair int int) "two occurrences on one physical row remain separate"
-    (1, 0) (newest.matched_occurrence, older.matched_occurrence))
+  check bool "two occurrences on one physical row remain separate" true
+    (Masc_tui_chat_search.compare_position older.matched_position newest.matched_position<0))
+
+let test_repeat_cursor_across_reflow () = at_sizes (fun origin ->
+  let set_cols columns=ignore(Masc_tui_render_schedule.Terminal_size_cache.refresh
+    Masc_tui_ansi.terminal_size_cache ~probe:(fun () -> Some(26,columns))) in
+  let state=state origin in
+  state.msg_loaded <- [row ~id:"reflow" ~request_id:"reflow" ~role:user
+    ~text:"foobar\nfoo bar foobar" 1.];
+  set_cols 42;
+  let newest=find state "FOOBAR" in
+  set_cols 160;
+  let older=find ~older:newest state "FOOBAR" in
+  check bool "reflow advances to distinct older original literal" true
+    (Masc_tui_chat_search.compare_position older.matched_position newest.matched_position<0);
+  check bool "two original literals exhaust after resize" true
+    ((Render.keeper_message_find_scroll state ~keeper_name:"alpha" ~needle:"foobar" ~older_than:(Some older)).match_result=None);
+  state.msg_loaded <- [row ~id:"table" ~request_id:"table" ~role:user
+    ~text:"OLDER_TARGET\n| Header |\n| --- |\n| long padding before TARGET |" 2.];
+  set_cols 160;
+  let cell=find state "TARGET" in
+  set_cols 42;
+  let earlier=find ~older:cell state "TARGET" in
+  check bool "clipped current table match still advances" true
+    (Masc_tui_chat_search.compare_position earlier.matched_position cell.matched_position<0);
+  set_cols 160;
+  check bool "widening cannot restart after older original match" true
+    ((Render.keeper_message_find_scroll state ~keeper_name:"alpha" ~needle:"TARGET" ~older_than:(Some earlier)).match_result=None);
+  state.msg_loaded <- [row ~id:"diagram" ~request_id:"diagram" ~role:user
+    ~text:"repeat\n```mermaid\nflowchart LR\nA[repeat] --> B[repeat]\n```" 3.];
+  let diagram=find state "repeat" in
+  set_cols 42;
+  let fallback=find ~older:diagram state "repeat" in
+  check bool "diagram to source fallback keeps original occurrence order" true
+    (Masc_tui_chat_search.compare_position fallback.matched_position diagram.matched_position<0);
+  set_cols 160;
+  let oldest=find ~older:fallback state "repeat" in
+  check bool "source fallback to diagram advances to older prose" true
+    (Masc_tui_chat_search.compare_position oldest.matched_position fallback.matched_position<0);
+  check bool "diagram/source switching does not repeat any literal" true
+    ((Render.keeper_message_find_scroll state ~keeper_name:"alpha" ~needle:"repeat" ~older_than:(Some oldest)).match_result=None))
+
+let test_preview_and_journal_search_reflow () = at_sizes (fun origin ->
+  let set_cols columns=ignore(Masc_tui_render_schedule.Terminal_size_cache.refresh
+    Masc_tui_ansi.terminal_size_cache ~probe:(fun () -> Some(26,columns))) in
+  let state=state origin in
+  let url="https://example.test/reflow-search" in
+  let preview=Masc_tui_link_preview.synthesize_preview url in
+  Masc_tui_link_preview.cache_store {preview with has_metadata=true;site_name=Some "Fixture";
+    title=Some "**titlehit** titlehit";description=Some "plain description"};
+  List.iter (fun mode ->
+    state.link_previews_mode <- mode;
+    state.msg_loaded <- [row ~id:"preview" ~request_id:"preview" ~role:user
+      ~text:("titlehit\n" ^ url) 1.];
+    set_cols 180;
+    let newest=find state "titlehit" in
+    check bool "preview title has formatter-owned source identity" true
+      (match newest.matched_position with Masc_tui_chat_search.Preview_byte _ -> true | _ -> false);
+    set_cols 60;
+    let older=find ~older:newest state "titlehit" in
+    check bool "second Markdown pass retains earlier field identity after reflow" true
+      (Masc_tui_chat_search.compare_position older.matched_position newest.matched_position<0);
+    set_cols 180;
+    let remaining=Render.keeper_message_find_scroll state ~keeper_name:"alpha"
+      ~needle:"titlehit" ~older_than:(Some older) in
+    check int "complete preview provenance is available" 0 remaining.unavailable_entries;
+    Option.iter (fun (_,cursor) -> check bool "further search never repeats the widened later title" true
+      (Masc_tui_chat_search.compare_position cursor.T.matched_position older.matched_position<0)) remaining.match_result)
+    [`Compact;`Rich];
+  state.link_previews_mode <- `Off;
+  state.msg_memory_visibility <- T.Memory_full;
+  let memory=row ~id:"memory" ~request_id:"memory" ~role:T.Message_memory ~text:"memory revision" 2. in
+  state.msg_loaded <- [{memory with me_journal=[Layout.Journal_fact {
+    sign=Journal_added;category="fact";tone=Tone_fact;claim="journalhit middle journalhit"}]}];
+  set_cols 180;
+  let newest=find state "journalhit" in
+  set_cols 45;
+  let older=find ~older:newest state "journalhit" in
+  check bool "journal hanging columns preserve source occurrence order" true
+    (Masc_tui_chat_search.compare_position older.matched_position newest.matched_position<0);
+  check bool "journal search exhausts without repeating a field" true
+    ((Render.keeper_message_find_scroll state ~keeper_name:"alpha" ~needle:"journalhit" ~older_than:(Some older)).match_result=None))
+
+let test_search_freezes_preview_lookup () = at_sizes (fun origin ->
+  let state=state origin in
+  state.link_previews_mode <- `Rich;
+  let url="https://example.test/frozen-search" in
+  let base=Masc_tui_link_preview.synthesize_preview url in
+  let calls=ref 0 in
+  let preview_lookup requested =
+    check string "lookup receives the visible URL" url requested;
+    incr calls;
+    {base with has_metadata=true;site_name=Some "Fixture";
+      title=Some (if !calls=1 then "FROZEN_NEEDLE" else "changed metadata");
+      description=(if !calls=1 then None else Some "extra metadata changes card height")} in
+  state.msg_loaded <- [row ~id:"frozen" ~request_id:"frozen" ~role:user ~text:url 1.];
+  let found=Render.keeper_message_find_scroll ~preview_lookup state ~keeper_name:"alpha"
+    ~needle:"FROZEN_NEEDLE" ~older_than:None in
+  check bool "first metadata snapshot supplies a search result" true (Option.is_some found.match_result);
+  check int "mapping and suffix measurement share one preview read" 1 !calls)
+
+let test_folded_thinking_search_identity () = at_sizes (fun origin ->
+  let set_cols columns=ignore(Masc_tui_render_schedule.Terminal_size_cache.refresh
+    Masc_tui_ansi.terminal_size_cache ~probe:(fun () -> Some(26,columns))) in
+  let state=state origin in
+  state.msg_reasoning_visibility <- T.Reasoning_folded;
+  state.msg_loaded <- [row ~id:"thinking-identity" ~request_id:"thinking-identity"
+    ~role:T.Message_thinking ~text:("Reasoning " ^ String.make 100 'x') 1.];
+  set_cols 45;
+  let summary=find state "Reasoning" in
+  check bool "fold producer marks generated summary identity" true
+    (match summary.matched_position with Masc_tui_chat_search.Thinking_summary_byte _ -> true | _ -> false);
+  set_cols 180;
+  let source=find ~older:summary state "Reasoning" in
+  check bool "unfolded original is a distinct source occurrence" true
+    (match source.matched_position with Masc_tui_chat_search.Body_byte _ -> true | _ -> false);
+  set_cols 45;
+  check bool "returning to summary cannot cycle to its prior match" true
+    ((Render.keeper_message_find_scroll state ~keeper_name:"alpha" ~needle:"Reasoning" ~older_than:(Some source)).match_result=None);
+  set_cols 180;
+  let source=find state "Reasoning" in
+  set_cols 45;
+  check bool "source-to-summary transition respects the same fixed order" true
+    ((Render.keeper_message_find_scroll state ~keeper_name:"alpha" ~needle:"Reasoning" ~older_than:(Some source)).match_result=None))
 
 let test_indexed_scroll_anchors () = at_sizes (fun origin ->
   let state = state origin in
@@ -169,8 +294,8 @@ let test_repeat_survives_reasoning_visibility_and_backfill () = at_sizes (fun or
    | T.Search_history _ -> ()
    | T.Search_journal _ -> fail "search repeated a newer journal item");
   check bool "no older match ends the walk" true
-    (Option.is_none (Render.keeper_message_find_scroll state ~keeper_name:"alpha"
-       ~needle:"MATCH_" ~older_than:(Some history)));
+    (Option.is_none ((Render.keeper_message_find_scroll state ~keeper_name:"alpha"
+       ~needle:"MATCH_" ~older_than:(Some history)).match_result));
   T.turn_log_add ~now:20. held ~seq:(Some 4) (reply "MATCH_REPLY canonical");
   T.turn_log_add ~now:21. held ~seq:(Some 5) Live.Run_finished;
   Log.commit held.tl_log;
@@ -189,8 +314,8 @@ let test_repeat_survives_reasoning_visibility_and_backfill () = at_sizes (fun or
           && observed.source = latest.source)
    | _ -> fail "observed response lost its source anchor");
   check bool "hidden reasoning cannot be found as visible speech" true
-    (Option.is_none (Render.keeper_message_find_scroll state ~keeper_name:"alpha"
-       ~needle:"MATCH_REASONING" ~older_than:None)))
+    (Option.is_none ((Render.keeper_message_find_scroll state ~keeper_name:"alpha"
+       ~needle:"MATCH_REASONING" ~older_than:None).match_result)))
 
 let test_repeat_across_history_journal_replacement () = at_sizes (fun origin ->
   let state = state origin in
@@ -483,8 +608,106 @@ let test_a_settled_conversation_keeps_its_measured_list () =
     (List.length settled + List.length tail) (List.length joined);
   check bool "and keeps their order" true (List.for_all2 ( == ) (settled @ tail) joined)
 
+let test_empty_projection_does_not_hold_future_arrivals () = at_sizes (fun origin ->
+  List.iter (fun requested ->
+    let state = state origin in
+    ignore (frame_lines state);
+    check bool "empty frame records an explicit live-follow snapshot" true
+      (match state.msg_scroll_pin with
+       | Some {T.pin_mode=Follow_live;pin_points=[];_} -> true
+       | Some _ | None -> false);
+    T.set_msg_scroll state requested;
+    check int "empty scroll request cannot defer onto future speech" 0 state.msg_scroll;
+    state.msg_loaded <- [row ~id:"first-arrival" ~request_id:"first-arrival" ~role:user
+      ~text:(long_answer "FIRST_ARRIVAL_") 1.];
+    let lines = frame_lines state in
+    check bool "first arrival remains at the live tail" true
+      (List.exists (Astring.String.is_infix ~affix:"FIRST_ARRIVAL_099") lines);
+    check int "future arrival did not inherit a stale scroll count" 0 state.msg_scroll)
+    [1; 40; max_int])
+
+let test_semantic_search_repetitive_prefix_and_boundaries () =
+  let module Search = Masc_tui_chat_search in
+  let run ?(joins_previous=false) ~offset text : Search.run =
+    {text;joins_previous;
+     positions=Array.init (String.length text) (fun byte ->
+       Some (Search.Body_byte {offset=offset+byte;expansion=0}));
+     visible_rows=[0,[{Masc_tui_markdown.start_byte=0;end_byte=String.length text}]]} in
+  let search ?before needle runs = Search.find ~needle ~before ~body_rows:1 runs in
+  let position = function
+    | Some {Search.position=Body_byte {offset;_};_} -> offset
+    | Some _ | None -> fail "expected an original source-byte match" in
+  let overlapping=[run ~offset:0 "aaaaa"] in
+  let newest=search "aaa" overlapping in
+  check int "newest overlapping prefix" 2 (position newest);
+  let middle=search ~before:(Search.Body_byte {offset=2;expansion=0}) "aaa" overlapping in
+  check int "repeat retains middle overlapping prefix" 1 (position middle);
+  check int "repeat retains oldest overlapping prefix" 0
+    (position (search ~before:(Search.Body_byte {offset=1;expansion=0}) "aaa" overlapping));
+  let lines=[run ~offset:0 "VISIBLE";run ~joins_previous:true ~offset:8 "BOUNDARY"] in
+  List.iter (fun needle -> check int "optional logical boundary preserves source occurrence" 0
+    (position (search needle lines))) ["VISIBLEBOUNDARY";"VISIBLE BOUNDARY";"VISIBLE\nBOUNDARY"];
+  check bool "ordinary authored spaces cannot disappear" true
+    (search "foobar" [run ~offset:0 "foo bar"] = None);
+  let text=String.make 50000 'a' and needle=String.make 5000 'a' ^ "b" in
+  check bool "a long repetitive near-match terminates without candidate replay" true
+    (search needle [run ~offset:0 text] = None)
+
+let test_search_pin_retains_query_endpoint_through_reflow () = at_sizes (fun origin ->
+  let set_cols columns = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+    Masc_tui_ansi.terminal_size_cache ~probe:(fun () -> Some (26, columns))) in
+  let state = state origin in
+  let words = List.init 300 (fun i -> Printf.sprintf "token%03d" i) in
+  state.msg_loaded <- [row ~id:"endpoint-reflow" ~request_id:"endpoint-reflow"
+    ~role:user ~text:(String.concat " " words) 1.];
+  set_cols 160;
+  ignore (find state "token148 token149 token150");
+  let original = Option.bind state.msg_scroll_pin (fun pin ->
+    List.find_map (fun point -> point.T.source_position) pin.pin_points) in
+  check bool "search pin owns an exact semantic endpoint" true (Option.is_some original);
+  ignore (frame_lines state);
+  List.iter (fun columns ->
+    set_cols columns;
+    List.iter (fun display ->
+      state.msg_origin_display <- display;
+      (* No second /find: rendering and feedback must resolve the original byte. *)
+      List.iter (fun _ ->
+        ignore (visible_line (frame_lines state) "token150");
+        let held = Option.bind state.msg_scroll_pin (fun pin ->
+          List.find_map (fun point -> point.T.source_position) pin.pin_points) in
+        check bool "frame feedback retains the actual searched endpoint" true (held = original))
+        [(); (); ()]) [Layout.Origin_inline; Origin_bare; Origin_row]) [42; 160; 60])
+
+let test_idle_search_pin_reuses_semantic_index () = at_sizes (fun origin ->
+  let state = state origin in
+  state.link_previews_mode <- `Rich;
+  let url = "https://example.test/idle-source-index" in
+  let preview = Masc_tui_link_preview.synthesize_preview url in
+  Masc_tui_link_preview.cache_store {preview with has_metadata=true;title=Some "cached preview"};
+  let body = long_answer "CACHE_LINE_" ^ "\n" ^ url in
+  state.msg_loaded <- [row ~id:"idle-source-index" ~request_id:"idle-source-index"
+    ~role:user ~text:body 1.];
+  ignore (find state "CACHE_LINE_050");
+  ignore (frame_lines state);
+  let builds = Render.For_testing.source_index_build_count () in
+  let discoveries = Render.For_testing.source_url_discovery_count () in
+  List.iter (fun _ ->
+    ignore (visible_line (frame_lines state) "CACHE_LINE_050");
+    check int "idle paints reuse source visibility index" builds
+      (Render.For_testing.source_index_build_count ());
+    check int "idle paints poll known URLs without rediscovering source" discoveries
+      (Render.For_testing.source_url_discovery_count ())) [(); (); ()];
+  Masc_tui_link_preview.cache_store {preview with has_metadata=true;title=Some "changed preview"};
+  ignore (frame_lines state);
+  check bool "changed actual preview metadata rebuilds the source map" true
+    (Render.For_testing.source_index_build_count () > builds))
+
 let () = run "chat search projection" [
   "rendered conversation", [
+    test_case "empty projection follows future arrivals" `Quick test_empty_projection_does_not_hold_future_arrivals;
+    test_case "idle search pin reuses semantic and URL indexes" `Quick test_idle_search_pin_reuses_semantic_index;
+    test_case "search pin preserves query endpoint through width and gutters" `Quick test_search_pin_retains_query_endpoint_through_reflow;
+    test_case "semantic search repetitive prefixes and optional boundaries" `Quick test_semantic_search_repetitive_prefix_and_boundaries;
     test_case "scroll anchors reuse typed indexed lookup" `Quick test_indexed_scroll_anchors;
     test_case "a settled conversation keeps its measured list" `Quick
       test_a_settled_conversation_keeps_its_measured_list;
@@ -499,6 +722,10 @@ let () = run "chat search projection" [
       test_frame_feedback_consumes_arrival_compensation;
     test_case "long history and journal matches land on their physical row" `Quick
       test_long_answer_match_location;
+    test_case "folded thinking has a distinct search identity" `Quick test_folded_thinking_search_identity;
+    test_case "search freezes preview lookup across measurement" `Quick test_search_freezes_preview_lookup;
+    test_case "preview and journal search survive reflow" `Quick test_preview_and_journal_search_reflow;
+    test_case "source cursor survives actual layout reflow" `Quick test_repeat_cursor_across_reflow;
     test_case "word wrapped matches include the whole phrase" `Quick
       test_word_wrapped_match_location;
     test_case "search matches rendered markup and presentation line boundaries" `Quick

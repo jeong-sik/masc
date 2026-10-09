@@ -5560,7 +5560,7 @@ let test_search_measures_original_message_rows () =
       (List.exists (fun line -> Astring.String.is_infix ~affix:"TURN #24"
           (Masc_tui_theme.strip_sgr line)) newest.Masc_tui_frame_presenter.lines);
     match Masc_tui_render_chat.keeper_message_find_scroll state ~keeper_name:"alpha"
-        ~needle:"SEARCH_TARGET" ~older_than:None with
+        ~needle:"SEARCH_TARGET" ~older_than:None |> fun result -> result.match_result with
     | None -> fail "search lost the original input"
     | Some (position, _) ->
         Tui_types.apply_clamped_scroll state (Tui_types.Message_scroll position);
@@ -5648,7 +5648,7 @@ let test_scroll_pins_follow_live_and_hold_transient_rows () =
     let searched = fresh () in
     searched.msg_history <- history 1;
     (match Masc_tui_render_chat.keeper_message_find_scroll searched ~keeper_name:"alpha"
-        ~needle:"line-00" ~older_than:None with
+        ~needle:"line-00" ~older_than:None |> fun result -> result.match_result with
      | None -> fail "short search target missing"
      | Some (position, _) -> Tui_types.apply_clamped_scroll searched (Message_scroll position));
     ignore (draw searched);

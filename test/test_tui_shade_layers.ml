@@ -19,6 +19,7 @@ module Layout = Masc_tui_message_layout
 
 let entry style body : Layout.entry =
   { style
+  ; body_presentation = Layout.Source_body
   ; timestamp = "01:41:00"
   ; timeline_bucket = None
   ; diagnostics = []

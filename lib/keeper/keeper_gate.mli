@@ -326,6 +326,44 @@ val retry_blocked_auto_judge :
     mode, authenticated workspace, non-blank operator identity, and exact
     approval row identity must all match. No cadence or restart hook calls it. *)
 
+(** One typed failure per distinct cause of an operator retry. {!retry_blocked_auto_judge}
+    renders these through {!auto_judge_retry_error_to_string}; HTTP surfaces consume the
+    variants directly and map failure to status without matching on rendered text. *)
+type auto_judge_retry_error =
+  | Retry_mode_unreadable of string
+      (** The workspace or owner mode store could not be read. *)
+  | Retry_row_missing of string
+      (** No pending approval carries this id in the workspace. *)
+  | Retry_row_lookup_failed of Keeper_approval_queue_result.storage_error
+      (** The pending row could not be read. *)
+  | Retry_not_auto_judge of string
+      (** The owner's effective mode is not auto_judge. *)
+  | Retry_not_blocked of string
+      (** The CAS predicate did not hold: the row is not a blocked summary. *)
+  | Retry_cas_rejected of Keeper_approval_queue_result.exact_attempt_error
+      (** The exact-attempt CAS refused the write (identity or state). *)
+  | Retry_drain_failed of string
+      (** The reservation landed but the drain could not start the summary;
+          the row was re-blocked durably with this operator detail. *)
+
+val auto_judge_retry_error_to_string : auto_judge_retry_error -> string
+(** The exact strings {!retry_blocked_auto_judge} has always returned, one
+    render per constructor. *)
+
+val retry_blocked_auto_judge_typed :
+  base_path:string ->
+  requested_by:string ->
+  expected_input_hash:string ->
+  expected_sequence:int ->
+  expected_exact_attempt:Keeper_approval_queue_rules_types.exact_attempt_state ->
+  expected_disposition:Keeper_approval_queue_rules_types.summary_attempt_disposition ->
+  string ->
+  (unit, auto_judge_retry_error) result
+(** {!retry_blocked_auto_judge} without the string render: the same mode
+    inspection, row lookup, exact CAS, drain, and durable re-block on failure,
+    returning the typed failure instead. HTTP surfaces that translate failure
+    into a status code call this one. *)
+
 (** Why one owner's Auto Judge drain stopped without starting more work. *)
 type auto_judge_drain_blocker =
   | Drain_owner_at_capacity of string list

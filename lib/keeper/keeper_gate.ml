@@ -606,6 +606,43 @@ type auto_judge_retry_outcome =
   | Retry_started
   | Retry_skipped
 
+(* One typed failure per distinct cause of an operator retry, so HTTP
+   surfaces can map failure to status without matching on rendered text.
+   [retry_blocked_auto_judge] keeps its string contract by mapping these
+   through [auto_judge_retry_error_to_string]. *)
+type auto_judge_retry_error =
+  | Retry_mode_unreadable of string
+      (** The workspace or owner mode store could not be read. *)
+  | Retry_row_missing of string
+      (** No pending approval carries this id in the workspace. *)
+  | Retry_row_lookup_failed of Keeper_approval_queue_result.storage_error
+      (** The pending row could not be read. *)
+  | Retry_not_auto_judge of string
+      (** The owner's effective mode is not auto_judge. *)
+  | Retry_not_blocked of string
+      (** The CAS predicate did not hold: the row is not a blocked summary. *)
+  | Retry_cas_rejected of Keeper_approval_queue_result.exact_attempt_error
+      (** The exact-attempt CAS refused the write (identity or state). *)
+  | Retry_drain_failed of string
+      (** The reservation landed but the drain could not start the summary;
+          the row was re-blocked durably with this operator detail. *)
+
+let auto_judge_retry_error_to_string = function
+  | Retry_mode_unreadable detail -> detail
+  | Retry_row_missing approval_id ->
+    "pending approval not found: " ^ approval_id
+  | Retry_row_lookup_failed detail ->
+    Keeper_approval_queue_result.storage_error_to_string detail
+  | Retry_not_auto_judge keeper_name ->
+    Printf.sprintf
+      "Auto Judge retry requires auto_judge mode for keeper %s"
+      keeper_name
+  | Retry_not_blocked approval_id ->
+    "approval summary is not blocked or is already active: " ^ approval_id
+  | Retry_cas_rejected error ->
+    Keeper_approval_queue_result.exact_attempt_error_to_string error
+  | Retry_drain_failed reason -> reason
+
 module Auto_judge_owner = struct
   type t = string * string
 
@@ -1184,8 +1221,7 @@ and retry_auto_judge_entry
       ~expected_disposition
       ~requested_by
   with
-  | Error error ->
-    Error (Keeper_approval_queue_result.exact_attempt_error_to_string error)
+  | Error error -> Error (Retry_cas_rejected error)
   | Ok false -> Ok Retry_skipped
   | Ok true ->
     let reblock reason =
@@ -1204,7 +1240,7 @@ and retry_auto_judge_entry
            ~keeper_name:entry.keeper_name
            ()
        with
-       | Error reason -> Error (reblock reason)
+       | Error reason -> Error (Retry_drain_failed (reblock reason))
        | Ok (outcome : auto_judge_drain_outcome) ->
          (match
             List.assoc_opt entry.id outcome.failures,
@@ -1212,20 +1248,25 @@ and retry_auto_judge_entry
             outcome.started_ids,
             outcome.blocker
           with
-          | Some reason, _, _, _ -> Error (reblock reason)
+          | Some reason, _, _, _ ->
+            Error (Retry_drain_failed (reblock reason))
           | None, true, _, _ -> Ok Retry_started
           | None, false, started_id :: _, _ ->
             Error
-              (reblock
-                 (Printf.sprintf
-                    "Auto Judge retry could not start because earlier approval %s acquired the owner"
-                    started_id))
+              (Retry_drain_failed
+                 (reblock
+                    (Printf.sprintf
+                       "Auto Judge retry could not start because earlier approval %s acquired the owner"
+                       started_id)))
           | None, false, [], Some blocker ->
-            Error (reblock (auto_judge_drain_blocker_to_string blocker))
+            Error
+              (Retry_drain_failed
+                 (reblock (auto_judge_drain_blocker_to_string blocker)))
           | None, false, [], None ->
             Error
-              (reblock
-                 "Auto Judge retry drain completed without a start or blocker"))
+              (Retry_drain_failed
+                 (reblock
+                    "Auto Judge retry drain completed without a start or blocker")))
      with
      | Eio.Cancel.Cancelled _ as exn ->
        let backtrace = Printexc.get_raw_backtrace () in
@@ -1242,7 +1283,7 @@ and retry_auto_judge_entry
          "Auto Judge retry failed before exact attempt binding: "
          ^ Printexc.to_string exn
        in
-       Error (reblock reason))
+       Error (Retry_drain_failed (reblock reason)))
 
 and start_auto_judge (entry : Keeper_approval_queue_rules_types.pending_approval) =
   if not (claim_auto_judge entry)
@@ -1638,7 +1679,27 @@ let observe_recovered_work kind (entry : Keeper_approval_queue_rules_types.pendi
        ())
 ;;
 
-let retry_blocked_auto_judge
+let rec retry_blocked_auto_judge
+      ~base_path
+      ~requested_by
+      ~expected_input_hash
+      ~expected_sequence
+      ~expected_exact_attempt
+      ~expected_disposition
+      approval_id
+  =
+  Result.map_error
+    auto_judge_retry_error_to_string
+    (retry_blocked_auto_judge_typed
+       ~base_path
+       ~requested_by
+       ~expected_input_hash
+       ~expected_sequence
+       ~expected_exact_attempt
+       ~expected_disposition
+       approval_id)
+
+and retry_blocked_auto_judge_typed
       ~base_path
       ~requested_by
       ~expected_input_hash
@@ -1655,27 +1716,23 @@ let retry_blocked_auto_judge
      workspace read stays first so an unreadable mode store remains a loud
      error. *)
   match Keeper_gate_mode.read ~base_path with
-  | Error detail -> Error detail
+  | Error detail -> Error (Retry_mode_unreadable detail)
   | Ok _workspace_mode ->
     (match
        Keeper_approval_queue.get_pending_entry_for_workspace
          ~base_path
          ~id:approval_id
      with
-     | Error error ->
-       Error (Keeper_approval_queue_result.storage_error_to_string error)
-     | Ok None -> Error ("pending approval not found: " ^ approval_id)
+     | Error error -> Error (Retry_row_lookup_failed error)
+     | Ok None -> Error (Retry_row_missing approval_id)
      | Ok (Some entry) ->
        (match
           let owner_base_path, keeper_name = auto_judge_owner entry in
           Keeper_gate_mode.resolve ~base_path:owner_base_path ~keeper_name
         with
-        | Error detail -> Error detail
+        | Error detail -> Error (Retry_mode_unreadable detail)
         | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow) ->
-          Error
-            (Printf.sprintf
-               "Auto Judge retry requires auto_judge mode for keeper %s"
-               entry.keeper_name)
+          Error (Retry_not_auto_judge entry.keeper_name)
         | Ok Keeper_gate_mode.Auto_judge ->
        (match
           retry_auto_judge_entry
@@ -1688,9 +1745,7 @@ let retry_blocked_auto_judge
         with
         | Error reason -> Error reason
         | Ok Retry_skipped ->
-          Error
-            ("approval summary is not blocked or is already active: "
-             ^ approval_id)
+          Error (Retry_not_blocked approval_id)
         | Ok Retry_started ->
           Log.Keeper.info
             ~keeper_name:entry.keeper_name

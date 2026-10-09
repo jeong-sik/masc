@@ -234,7 +234,8 @@ val take :
     gone by the time {!take} returns, so the stamp is visible only through
     the module's own log lines and for as long as the memory stands. *)
 
-module For_testing : sig
-  val fail_next_deliver : t -> unit
-  (** Refuse exactly the next deliver append before I/O; consume uses real durable append. *)
-end
+(* No [For_testing] seam here. The operator review of task-1665 removed the
+   only one ([fail_next_deliver]): a store-internal mutable flag that a
+   production append branch checked on every call is test-only state living
+   in the shipped type. Tests now write consume-only tails straight to the
+   journal file and restore, which is the real crash shape anyway. *)

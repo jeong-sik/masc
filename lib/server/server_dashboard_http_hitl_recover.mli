@@ -24,11 +24,15 @@ type rearm_request =
 
 val parse_rearm_fields :
   (string * Yojson.Safe.t) list -> (rearm_request, string) result
-(** The typed admission gate for [action:"rearm"]: only a restart-latched
-    exact attempt ([Exact_restart_quarantined] or
-    [Exact_released_recovery_required]) with an [in_flight] or
-    [persistence_uncertain] disposition parses. Everything else is a typed
-    refusal before any queue lookup. *)
+(** The typed admission gate for [action:"rearm"]: only
+    [Summary_attempt_persistence_uncertain] over an
+    [Exact_released_recovery_required] binding whose identity fields repeat
+    the request's top-level identity parses. That is the single combination
+    the queue's CAS unlatches. [Exact_restart_quarantined] is refused here
+    even though the types allow it: it is the install-only terminal
+    projection for dispatch-uncertain work, and no restart — automatic or
+    operator-commanded — may re-run that dispatch. Everything else is a
+    typed refusal before any queue lookup. *)
 
 val handle_post :
   Mcp_server.server_state ->
@@ -38,14 +42,17 @@ val handle_post :
   Httpun.Reqd.t ->
   string ->
   unit
-(** One recover POST: [action:"rearm"] clears an install-only restart latch
-    through the queue's typed CAS ([Exact_restart_quarantined] or
-    [Exact_released_recovery_required] with disposition [in_flight] or
-    [persistence_uncertain] back to a fresh unbound flow — summary creation
-    resumes, an external tool is never re-dispatched), and
-    [action:"ack_uncertain"] acknowledges a consume-only late-approval tail
-    (a warning acknowledgement, never a re-authorization). The workspace is
-    the authenticated caller's. *)
+(** One recover POST: [action:"rearm"] delegates to
+    [Keeper_gate.retry_blocked_auto_judge_typed] — mode inspection, row
+    lookup, the queue's exact CAS
+    ([Summary_attempt_persistence_uncertain] over
+    [Exact_released_recovery_required] back to a fresh unbound flow —
+    summary creation resumes, an external tool is never re-dispatched), and
+    the durable re-block when the summary drain cannot start. The HTTP layer
+    never calls the CAS itself, so it cannot reserve a summary attempt no
+    worker will pick up. [action:"ack_uncertain"] acknowledges a
+    consume-only late-approval tail (a warning acknowledgement, never a
+    re-authorization). The workspace is the authenticated caller's. *)
 
 val uncertain_path : string
 val uncertain_response : Mcp_server.server_state -> Httpun.Status.t * Yojson.Safe.t

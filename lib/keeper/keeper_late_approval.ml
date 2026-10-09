@@ -70,7 +70,6 @@ type t =
   ; mutable remembered : remembered list
   ; mutable uncertain : uncertain_attempt list
   ; mutable journal_error : journal_error option
-  ; mutable fail_deliver : bool
   ; mutable journal_path : string option
   ; mutex : Stdlib.Mutex.t
   }
@@ -80,7 +79,6 @@ let create () =
   ; remembered = []
   ; uncertain = []
   ; journal_error = None
-  ; fail_deliver = false
   ; journal_path = None
   ; mutex = Stdlib.Mutex.create ()
   }
@@ -393,8 +391,6 @@ let uncertain_attempts t ~base_path = with_store t (fun () ->
 
 let append_record_locked t record =
   if Option.is_some t.journal_error then Error ()
-  else if t.fail_deliver && List.assoc_opt "op" record = Some (`String "deliver") then
-    (t.fail_deliver <- false; Error ())
   else match t.journal_path with
   (* An unbound store keeps the pre-journal behavior (the same contract
      [bind_to_journal] documents): there is no crash boundary to
@@ -666,7 +662,3 @@ let ack_uncertain t ?(now = Unix.gettimeofday ()) ~base_path ~keeper_name
         | Ok () ->
             t.uncertain <- List.filter (fun attempt -> not (matches attempt)) t.uncertain;
             Acked)
-
-module For_testing = struct
-  let fail_next_deliver t = with_store t (fun () -> t.fail_deliver <- true)
-end

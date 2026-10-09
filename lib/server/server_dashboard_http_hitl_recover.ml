@@ -123,18 +123,39 @@ let parse_rearm_fields fields =
   in
   let* () =
     match expected_exact_attempt with
-    | Keeper_approval_queue_rules_types.Exact_bound
-        { status =
-            ( Keeper_approval_queue_rules_types.Exact_restart_quarantined
-            | Keeper_approval_queue_rules_types.Exact_released_recovery_required )
-        ; _
-        } ->
-      Ok ()
+    | Keeper_approval_queue_rules_types.Exact_bound binding
+      when binding.status
+           = Keeper_approval_queue_rules_types.Exact_released_recovery_required ->
+      if
+        String.equal binding.approval_id id
+        && String.equal binding.input_hash input_hash
+        && Int.equal binding.sequence sequence
+        && String.equal binding.slot_id slot_id
+        && String.equal binding.call_id call_id
+        && String.equal binding.plan_fingerprint plan_fingerprint
+        && String.equal binding.request_body_sha256 request_body_sha256
+      then Ok ()
+      else
+        Error
+          "recover request.exact_attempt must repeat the request's \
+           approval identity (id, input_hash, sequence, slot_id, call_id, \
+           plan_fingerprint, request_body_sha256)"
     | _ ->
       Error
-        "recover rearm targets restart-latched exact attempts \
-         (Exact_restart_quarantined or Exact_released_recovery_required)"
+        "recover rearm targets a released-recovery-required exact attempt \
+         (the only restart latch the queue's CAS admits)"
   in
+  (* [Exact_restart_quarantined] stays out of this admission on purpose: it
+     is the install-only terminal projection for dispatch-uncertain work,
+     whose whole point is that no restart — automatic or operator-commanded
+     — may re-run the dispatch (design D4). The CAS below would refuse it
+     anyway; refusing here keeps the HTTP answer a typed admission shape
+     instead of a queue-side changed=false guess. Together with the
+     disposition check above this admits exactly
+     [Summary_attempt_persistence_uncertain] over
+     [Exact_released_recovery_required] — the single combination the
+     queue's CAS unlatches
+     ([reserve_summary_attempt_retry] in keeper_approval_queue.ml). *)
   let* disposition_json = required "summary_attempt_disposition" in
   let* expected_disposition =
     Keeper_approval_queue_rules_types.summary_attempt_disposition_of_yojson_with_error
@@ -142,12 +163,11 @@ let parse_rearm_fields fields =
   in
   let* () =
     match expected_disposition with
-    | Keeper_approval_queue_rules_types.Summary_attempt_in_flight
     | Keeper_approval_queue_rules_types.Summary_attempt_persistence_uncertain ->
       Ok ()
     | _ ->
       Error
-        "recover rearm requires summary_attempt_disposition in_flight or \
+        "recover rearm requires summary_attempt_disposition \
          persistence_uncertain"
   in
   Ok
@@ -216,17 +236,21 @@ let object_fields what = function
 let rearm_json ~base_path ~requested_by ~approval_id ~input_hash ~sequence
     ~slot_id ~call_id ~plan_fingerprint ~request_body_sha256
     ~expected_exact_attempt ~expected_disposition =
+  (* Delegation, not a direct CAS: the Gate owns the admission rule (mode
+     inspection #31321, row lookup, exact CAS, drain, and the durable
+     re-block when the drain cannot start), so an HTTP rearm can never
+     reserve a summary attempt that no worker will ever pick up. *)
   match
-    Keeper_approval_queue.reserve_summary_attempt_retry
+    Keeper_gate.retry_blocked_auto_judge_typed
       ~base_path
-      ~id:approval_id
-      ~input_hash
-      ~sequence
+      ~requested_by
+      ~expected_input_hash:input_hash
+      ~expected_sequence:sequence
       ~expected_exact_attempt
       ~expected_disposition
-      ~requested_by
+      approval_id
   with
-  | Ok true ->
+  | Ok () ->
     Log.Keeper.info
       ~keeper_name:"server"
       "operator recovered restart-latched approval=%s actor=%s (rearm resumes summary creation, never re-dispatches the tool)"
@@ -239,24 +263,38 @@ let rearm_json ~base_path ~requested_by ~approval_id ~input_hash ~sequence
          ; "action", `String "rearm"
          ; "rearmed", `Bool true
          ])
-  | Ok false ->
+  | Error (Retry_not_blocked _) ->
     (* The typed precondition did not hold at write time — the row is not
-       restart-latched anymore (already rearmed, settled, or terminal). The
-       queue's CAS returns changed=false instead of guessing why. *)
+       blocked anymore (already rearmed, active, or terminal). The queue's
+       CAS reports changed=false instead of guessing why. *)
     Error
       (`Status_conflict, "approval is not in a restart-latched recovery state")
-  | Error
-      (Keeper_approval_queue_result.Exact_attempt_rejected
-         (Keeper_approval_queue_result.Exact_attempt_not_found _)) ->
+  | Error Retry_not_auto_judge _ ->
+    (* D4 keeps the 163h-polisher shape out of the auto path: a manual-mode
+       owner is handled by a mode change or plain retry, never by this
+       rearm (design D4, #31321). *)
+    Error
+      ( `Status_conflict
+      , "recover rearm requires the owner's effective mode to be auto_judge" )
+  | Error (Retry_cas_rejected
+             (Keeper_approval_queue_result.Exact_attempt_rejected
+                (Keeper_approval_queue_result.Exact_attempt_not_found _))) ->
     Error (`Not_found, "pending approval not found: " ^ approval_id)
-  | Error
-      (Keeper_approval_queue_result.Exact_attempt_rejected
-         (Keeper_approval_queue_result.Exact_attempt_key_mismatch _)) ->
+  | Error (Retry_cas_rejected
+             (Keeper_approval_queue_result.Exact_attempt_rejected
+                (Keeper_approval_queue_result.Exact_attempt_key_mismatch _))) ->
     Error (`Status_conflict, "approval identity mismatch (row moved)")
-  | Error error ->
+  | Error (Retry_row_missing _) ->
+    Error (`Not_found, "pending approval not found: " ^ approval_id)
+  | Error (Retry_row_lookup_failed _) ->
+    Error (`Unavailable, "approval queue is unavailable")
+  | Error
+      (( Retry_mode_unreadable _
+       | Retry_cas_rejected _
+       | Retry_drain_failed _ ) as error) ->
     Error
       ( `Unavailable
-      , Keeper_approval_queue_result.exact_attempt_error_to_string error )
+      , Keeper_gate.auto_judge_retry_error_to_string error )
 ;;
 
 let ack_json ~base_path ~approval_id ~keeper_name ~consume_id =

@@ -165,11 +165,18 @@ durable `pending_approval` entry 뿐이고, 그 entry 를 다시 건져 올릴 �
   (`Exact_restart_quarantined` 투영, `keeper_approval_queue_exact_transition.ml:44~46`)을 거친다 —
   이를 건드리지 않는다(안전 latch 유지).
 - 대신 operator 전용 복구 엔드포인트를 dashboard 에 하나 둔다:
-  `POST /api/v1/keepers/hitl/approvals/:id/recover` — 본문 `{ action: "rearm", expected_revision }`.
-  전제조건을 typed 로 강제한다: `exact_attempt.status ∈ { Exact_restart_quarantined,
-  Exact_released_recovery_required }` 이고 `summary_attempt_disposition ∈ { in_flight,
-  persistence_uncertain }` 일 때만 `Exact_unbound + Summary_attempt_ready` 로 되돌린다.
+  `POST /api/v1/keepers/hitl/approvals/:id/recover`. 전제조건을 typed 로 강제한다
+  (2026-10-09 운영자 P2 반영으로 축소): `Exact_restart_quarantined` 은 재시작이 절대
+  dispatch 를 다시 실행하지 않게 하는 install-only terminal projection 이므로 operator
+  rearm 도 받지 않고, CAS 가 실제로 수용하는 유일 조합 — `summary_attempt_disposition
+  = persistence_uncertain` × `exact_attempt.status = Exact_released_recovery_required`
+  → `Exact_unbound` — 만 HTTP 입구에서도 받는다. 그 조합 하나뿐임의 근거는
+  `reserve_summary_attempt_retry` 서술어의 `_ -> None` (keeper_approval_queue.ml)다.
   rules_types.mli 주석("Only explicit operator recovery")이 가정한 바로 그 경로다.
+  rearm 은 queue CAS 를 직접 부르지 않고 `Keeper_gate.retry_blocked_auto_judge_typed`
+  (모드 검사 #31321 → row 조회 → exact CAS → drain → 실패 시 durable re-block)에
+  위임한다 — HTTP rearm 이 어떤 worker 도 받지 않을 summary reservation 을 만들 수
+  없다.
 - (reviewer 경계 3 반영) 복구 계약을 더 좁힌다:
   - **CAS**: recover 는 `expected_revision` 을 요구하고 row revision 과 attempt identity 에 대해
     compare-and-swap 한다. 두 요청이 같은 revision 을 겨냥하면 정확히 하나만 적용되고 나머지는
@@ -269,3 +276,6 @@ durable `pending_approval` entry 뿐이고, 그 entry 를 다시 건져 올릴 �
   저널과 효과가 공존 가능), 무효과 단정을 consume 내구화 후 caller 반환 전 창으로 한정, ack 를
   경고 확인으로 확정(재인가 아님, 원장 증거 없는 재인가 금지), 쓰기 레코드 예시에 base_path 정렬,
   테스트 계획을 중단 지점 4케이스+ack 재인가 부정으로 보강.
+- 2026-10-09 개정(task-1665 운영자 P2 3건 반영): §D4 rearm 전제를 CAS 가 수용하는 유일 조합으로
+  축소(`Exact_restart_quarantined` 제외, 이유 문서화), rearm 을 `Keeper_gate` 위임으로(직접 CAS
+  금지), late approval 테스트의 `For_testing.fail_next_deliver` seam 제거(저널 직접 기록으로 대체).

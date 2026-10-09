@@ -362,7 +362,17 @@ let test_hitl_recover_route_and_preconditions () =
             ; "status", `String status
             ; "quarantine_cause", `Null
             ] )
-      ; "summary_attempt_disposition", `Assoc [ "code", `String disposition ]
+      ; ( "summary_attempt_disposition"
+        , match disposition with
+          | "persistence_uncertain" ->
+            `Assoc
+              [ "code", `String disposition
+              ; ( "operator_detail"
+                , `String
+                    "Exact-output terminalization durability is not confirmed." )
+              ]
+          | other -> `Assoc [ "code", `String other ]
+        )
       ]
   in
   let parse fields =
@@ -374,21 +384,73 @@ let test_hitl_recover_route_and_preconditions () =
     | _ -> "recover request must be an object"
   in
   check string
-    "a restart-quarantined in_flight rearm passes the typed preconditions"
+    "the unlatchable pair persistence_uncertain over released_recovery_required \
+     passes the typed preconditions"
     "admitted"
     (parse
-       (rearm_body ~status:"restart_quarantined" ~disposition:"in_flight"));
+       (rearm_body
+          ~status:"released_recovery_required"
+          ~disposition:"persistence_uncertain"));
+  check string
+    "the only CAS-admitted pair is the only admitted pair"
+    "recover rearm requires summary_attempt_disposition \
+     persistence_uncertain"
+    (parse
+       (rearm_body
+          ~status:"released_recovery_required"
+          ~disposition:"in_flight"));
+  check string
+    "a restart-quarantined attempt is refused before the queue (terminal \
+     projection for dispatch-uncertain work)"
+    "recover rearm targets a released-recovery-required exact attempt \
+     (the only restart latch the queue's CAS admits)"
+    (parse
+       (rearm_body
+          ~status:"restart_quarantined"
+          ~disposition:"persistence_uncertain"));
   check string
     "a completed attempt is not recoverable"
-    "recover rearm targets restart-latched exact attempts \
-     (Exact_restart_quarantined or Exact_released_recovery_required)"
+    "recover rearm targets a released-recovery-required exact attempt \
+     (the only restart latch the queue's CAS admits)"
     (parse (rearm_body ~status:"completed" ~disposition:"in_flight"));
   check string
     "a settled disposition is not recoverable"
-    "recover rearm requires summary_attempt_disposition in_flight or \
+    "recover rearm requires summary_attempt_disposition \
      persistence_uncertain"
     (parse
-       (rearm_body ~status:"restart_quarantined" ~disposition:"settled"))
+       (rearm_body
+          ~status:"released_recovery_required"
+          ~disposition:"settled"));
+  (* The admitted binding must repeat the request's top-level identity, so
+     an inconsistent body fails typed admission instead of surfacing later
+     as a CAS key mismatch. *)
+  let mismatched =
+    match
+      rearm_body
+        ~status:"released_recovery_required"
+        ~disposition:"persistence_uncertain"
+    with
+    | `Assoc fields ->
+      let rewrite = function
+        | "exact_attempt", `Assoc binding ->
+          ( "exact_attempt"
+          , `Assoc
+              (List.map
+                 (function
+                   | "call_id", _ -> ("call_id", `String "call-OTHER")
+                   | field -> field)
+                 binding) )
+        | field -> field
+      in
+      `Assoc (List.map rewrite fields)
+    | other -> other
+  in
+  check string
+    "a binding that disagrees with the request identity is refused"
+    "recover request.exact_attempt must repeat the request's approval \
+     identity (id, input_hash, sequence, slot_id, call_id, \
+     plan_fingerprint, request_body_sha256)"
+    (parse mismatched)
 
 let test_gate_retry_workspace_precondition () =  let dir = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->

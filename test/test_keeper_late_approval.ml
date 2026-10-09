@@ -498,35 +498,60 @@ let test_a_consume_without_deliver_reads_as_uncertain () =
         true)
 
 let test_later_delivery_preserves_earlier_attempt () =
-  with_journal (fun ~clock:_ ~journal:_ ~make ~remove:_ ->
+  with_journal (fun ~clock:_ ~journal ~make ~remove:_ ->
     let store = make () in
     let args = edit_input "lib/a.ml" in
     let now = Unix.gettimeofday () -. Late.ttl_sec -. 100. in
-    let consume call_id fail =
+    let consume call_id =
       Late.note_timed_out store ~now ~base_path:workspace ~keeper_name:keeper
         ~tool_call_id:call_id ~tool_name:"Edit" ~args ();
       ignore (Late.remember_late store ~now ~base_path:workspace ~keeper_name:keeper
         ~tool_call_id:call_id ~actor:"operator" Registry.Approve ());
-      if fail then Late.For_testing.fail_next_deliver store;
       check bool "actual consume still returns decision" true
         (Late.take store ~now ~base_path:workspace ~keeper_name:keeper ~tool_name:"Edit" ~args () = Some Registry.Approve) in
-    consume "first" true;
-    let first = List.hd (Result.get_ok (Late.uncertain_attempts store ~base_path:workspace)) in
-    consume "second" false;
-    check int "later success retains live first uncertainty" 1 (Late.journal_uncertain store);
+    (* The interrupted-attempt shape is planted in the journal itself, the
+       way the crash leaves it: a consume row whose closing deliver row
+       never landed. The store keeps no test-only fail seam (the
+       task-1665 review removed [For_testing.fail_next_deliver]); a real
+       append failure would fence the store, so the file is the seam. *)
+    let plant_consume_only_tail consume_id =
+      let oc = open_out_gen [ Open_append ] 0o644 journal in
+      output_string oc
+        (Yojson.Safe.to_string
+           (`Assoc
+             [ ("schema", `String "masc.late_approval.v2")
+             ; ("consume_id", `String consume_id)
+             ; ("op", `String "consume")
+             ; ("base_path", `String workspace)
+             ; ("keeper", `String keeper)
+             ; ("tool", `String "Edit")
+             ; ( "fingerprint"
+               , `String
+                   (Masc.Keeper_approval_request_fingerprint.request_fingerprint
+                      args) )
+             ; ("at", `Float now)
+             ])
+        ^ "\n");
+      close_out oc
+    in
+    consume "first";
+    plant_consume_only_tail "fixture-interrupted-first";
+    let first = "fixture-interrupted-first" in
+    consume "second";
     let restarted = make () in
     let restored = Result.get_ok (Late.uncertain_attempts restarted ~base_path:workspace) in
-    check int "later deliver closes only its own consume on replay" 1 (List.length restored);
-    check string "same first attempt remains" first.consume_id (List.hd restored).consume_id;
-    consume "third" true;
+    check int "later success leaves only the interrupted first tail" 1 (List.length restored);
+    check string "same first attempt remains" first (List.hd restored).consume_id;
+    consume "third";
+    plant_consume_only_tail "fixture-interrupted-third";
     let restarted = make () in
     check int "both failed attempts remain" 2 (Late.journal_uncertain restarted);
     check bool "wrong workspace cannot ack attempt" true
       (Late.ack_uncertain restarted ~base_path:"/other" ~keeper_name:keeper
-        ~consume_id:first.consume_id () = Late.Not_uncertain);
+        ~consume_id:first () = Late.Not_uncertain);
     check bool "ack exactly first attempt" true
       (Late.ack_uncertain restarted ~base_path:workspace ~keeper_name:keeper
-        ~consume_id:first.consume_id () = Late.Acked);
+        ~consume_id:first () = Late.Acked);
     check int "ack leaves other attempt" 1 (Late.journal_uncertain restarted);
     let final = make () in
     check int "exact ack survives restart" 1 (Late.journal_uncertain final);

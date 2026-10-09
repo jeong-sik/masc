@@ -1,0 +1,9 @@
+{
+  "head": "2801c8de19811664add67f68ecad1ec396c116c3",
+  "method": "same source-AST analyzer as frozen audit; no CFG or executed coverage claim",
+  "files": [
+    "bin/masc_tui_render_chat.ml",
+    "bin/masc_tui_message_layout.ml",
+    "bin/masc_tui_keeper_chat_transcript.ml"
+  ]
+}

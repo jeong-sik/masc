@@ -1029,10 +1029,9 @@ let test_superseded_recall_pin_releases_only_after_history_retention () =
     let meta = make_meta "pin-retirement" in
     let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
     let store = Tool_blob_store.create ~base_path in
-    let execution = Runtime.keeper_memory_write_with_outcome ~config ~meta
-        ~args:(make_args ~title:"" ~content:"Memory later becomes historical.") in
-    let response = Yojson.Safe.from_string execution.Masc.Keeper_tool_execution.raw_output in
-    Alcotest.(check bool) "fact persisted" true (json_field "ok" response = `Bool true);
+    (* An ordinary write now waits for Librarian admission, so the fixture
+       seeds the current fact the pin is rendered from. *)
+    let memory_id = seed_current ~config ~meta "Memory later becomes historical." in
     let render search = Masc.Keeper_memory_os_recall.render_if_enabled
         ~memory_search_available:search ~config ~meta ~keepers_dir ~keeper_id:meta.name ~now:1. ()
         |> Option.get in
@@ -1046,7 +1045,7 @@ let test_superseded_recall_pin_releases_only_after_history_retention () =
     let prior_pin = Fs_compat.load_file pin in
     if not demand then begin
       let retracted = Runtime.keeper_memory_retract_with_outcome ~config ~meta
-          ~args:(make_retract_args ~memory_id:(string_field "memory_id" response)
+          ~args:(make_retract_args ~memory_id
             ~reason:"The last current fact was retracted.") in
       Alcotest.(check bool) "last fact retracts" true
         (json_field "ok" (Yojson.Safe.from_string retracted.Masc.Keeper_tool_execution.raw_output) = `Bool true)

@@ -18,17 +18,6 @@ done
 [ -z "$run" ] || [[ "$run" =~ ^[1-9][0-9]*$ ]] || exit 2
 [ "$scope_json" -eq 0 ] || [ "$check" -eq 1 ] || { echo "merge-guard: --scope-json requires --check" >&2; exit 2; }
 source "$here/ci-checks.sh"
-source "$here/review-verdict.sh"
-check_verdict() {
-  local value state cited by
-  value=$(verdict_for "$pr" "$head") || return 1
-  read -r state cited by <<<"$value"
-  if [ "$state" != PASS ] || { [ "$review_policy" = source ] && [ "$cited" != - ]; } ||
-     { [ "$review_policy" = release ] && [ "$cited" != "$release_run" ]; }; then
-    echo "REFUSED #$pr: latest decision is not PASS for this head and review policy" >&2
-    return 2
-  fi
-}
 selected_pr="$pr"; selected_head="$head"; selected_run="$run"
 snapshot_scope() {
   GUARD_GH="$GH" python3 "$here/stack-scope.py" "$repo" "$selected_pr" "$selected_head"
@@ -48,7 +37,8 @@ admit_scope() {
     review_identity=""; run=""
     [ "$pr" != "$selected_pr" ] || run="$selected_run"
     check_current_ci || return $?
-    check_verdict || return $?
+    # approve-guard owns review/verdict admission and emits the actionable
+    # failure detail. Do not preempt it with a generic verdict-only refusal.
     GUARD_GH="$GH" bash "$here/approve-guard.sh" --merge-check --repo "$repo" --pr "$pr" --head "$head" || return $?
   done <<<"$members"
 }

@@ -828,7 +828,10 @@ let keeper_message_identity ~max_cells state keeper_name =
           | Keeper_control.Absent ->
               (match keeper.k_origin with
                | Tui_decode.Declared_keeper _ -> "아직 시작하지 않음"
-               | Persisted_keeper | Remote_keeper -> "absent")
+               (* [status] is the only place the bare header carries the
+                  Keeper's AUTO/YOLO mode and gate, so the absent label keeps
+                  that stance. *)
+               | Persisted_keeper | Remote_keeper -> "absent" ^ stance)
           | Keeper_control.Unobserved | Keeper_control.Invalid _ | Keeper_control.Present _ -> status in
         fit_identity (compact_status ^ Ansi.reset)
       else (match runtime with

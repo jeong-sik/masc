@@ -13574,7 +13574,17 @@ let keeper_message_activity_rows (state : state) =
   | (Tools_compact | Tools_results), None -> []
   | (Tools_compact | Tools_results), Some keeper_name ->
       let waiting = keeper_message_waiting_requests state ~keeper_name in
-      let has_progress = Option.is_some (keeper_message_status_log state) in
+      (* The progress row speaks for one execution. Only that execution's
+         phase is a duplicate here; another request of this Keeper -- one that
+         is still finalising while a newer one leads the progress row -- keeps
+         its own clause. *)
+      let progress_execution =
+        Option.map turn_log_execution_id (keeper_message_status_log state) in
+      let shown_by_progress entry =
+        progress_execution = Some (turn_log_execution_id entry.log) in
+      (* A running turn the server reports but no request here owns is named
+         only when no progress row is drawn at all. *)
+      let has_progress = Option.is_some progress_execution in
       let clauses = ref [] and urgent = ref [] in
       let add text = clauses := text :: !clauses in
       let attention text = urgent := text :: !urgent in
@@ -13595,12 +13605,18 @@ let keeper_message_activity_rows (state : state) =
         attention "메시지 전송 확인 중";
       let has_working = any_phase (fun transcript ->
         Masc_tui_keeper_chat_transcript.phase transcript = Working) in
-      if has_working && not has_progress then add "기존 작업 처리 중";
-      if not has_progress && any_phase (fun transcript -> Masc_tui_keeper_chat_transcript.phase transcript = Stream_ended) then
+      let unshown_phase phase = List.exists (fun entry ->
+          not (shown_by_progress entry) && phase entry.log.tl_transcript) own in
+      if unshown_phase (fun transcript ->
+          Masc_tui_keeper_chat_transcript.phase transcript = Working) then
+        add "기존 작업 처리 중";
+      if unshown_phase (fun transcript ->
+          Masc_tui_keeper_chat_transcript.phase transcript = Stream_ended) then
         add "응답 마무리 중";
       List.iter (fun (admission, text) ->
-          if not has_progress && List.exists (fun entry ->
-              entry.phase = Turn_streaming
+          if List.exists (fun entry ->
+              not (shown_by_progress entry)
+              && entry.phase = Turn_streaming
               && Masc_tui_keeper_chat_transcript.phase entry.log.tl_transcript = Waiting
               && not (Masc_tui_keeper_chat_transcript.awaiting_continuation entry.log.tl_transcript)
               && Option.map fst (Masc_tui_keeper_chat_transcript.admission entry.log.tl_transcript) = admission) own

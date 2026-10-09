@@ -1753,6 +1753,11 @@ let origin_gutter ~origin ~previous ~inner_width entry =
         else match entry.style with
           | Tool -> " "
           | User -> "›"
+          (* A pending input's [speaker] is its delivery state (전송 대기,
+             전송 중, 처리 대기, 전송 확인 중). With several inputs in
+             different states, the mark alone cannot say which one is still
+             unsent, so the state stays beside the body. *)
+          | Local when entry.speaker <> "" -> speaker_mark Local ^ " " ^ entry.speaker
           | style -> speaker_mark style
       in
       Some (mark, 0, display_width mark, 0)

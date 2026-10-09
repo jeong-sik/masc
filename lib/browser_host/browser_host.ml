@@ -875,7 +875,8 @@ let run_bidi env config url ~stop =
                     Log.Transport.warn
                       "browser-host: the BiDi session was not ended (%s); if that Firefox is still \
                        running, restart it before attaching again"
-                      (Masc.Browser_bidi_peer.session_end_failure_message failure));
+                      (Masc.Tui_terminal_text.sanitize_terminal_text
+                         (Masc.Browser_bidi_peer.session_end_failure_message failure)));
               let* version =
                 match within ~clock extension_timeout_sec (fun () -> Masc.Browser_bidi_peer.metadata peer) with
                 | Some (Ok version) -> Ok version

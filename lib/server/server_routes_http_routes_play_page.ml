@@ -218,6 +218,12 @@ let since = null;
 let observedActivityKey = '';
 let nextReconnectAt = 0;
 let latestSeatRequest = null;
+let frameSeatRead = null;
+let frameSeatNeedsRefresh = false;
+let framePadRead = null;
+let latestPadRequest = null;
+let observedIncarnation = null;
+let observedMachineState = 'unobserved';
 let nextSeatPollAt = 0;
 let handoffRead = null;
 let ended = false;
@@ -229,6 +235,8 @@ let departureConfirmed = false;
 let initialConnectIntent = invitation !== '' && !invitationConflict;
 let connecting = Promise.resolve();
 let sending = Promise.resolve();
+let queuedInputs = 0;
+let seatRefreshAfterInputs = false;
 let textSending = false;
 // The saves name the seat last reported (null: nothing loaded), and the one
 // the pad on screen was read for (undefined: not read yet, or the last read
@@ -250,9 +258,9 @@ function setStatus(source, text) {
   el('status').textContent = [...statusMessages.values()].join(' ');
 }
 
-function setControlsEnabled(enabled) {
+function setControlsEnabled(enabled, { targetSelection = enabled } = {}) {
   for (const node of document.querySelectorAll('button, input, select')) {
-    if (node.id !== 'leave') node.disabled = !enabled;
+    if (node.id !== 'leave') node.disabled = node.id === 'pass-to' ? !targetSelection : !enabled;
   }
   el('leave').disabled = ended || disconnecting;
 }
@@ -297,6 +305,8 @@ function end(text, { terminalAuth = false } = {}) {
     }
   }
   ended = true;
+  retireSeatRead();
+  retirePadRead();
   if (!observationOnly) {
     try { sessionStorage.removeItem(DOCUMENT_KEY); } catch (_) { /* No bearer remains in storage. */ }
   }
@@ -309,15 +319,17 @@ function end(text, { terminalAuth = false } = {}) {
   el('turn').textContent = text;
 }
 
-async function api(method, path, body) {
+async function api(method, path, body, signal) {
   const init = { method, headers: { Authorization: 'Bearer ' + token }, cache: 'no-store', credentials: 'omit' };
   if (body !== undefined) {
     init.headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(body);
   }
+  if (signal !== undefined) init.signal = signal;
   const response = await fetch(path, init);
   let json = null;
   try { json = await response.json(); } catch (_) { json = null; }
+  signal?.throwIfAborted();
   // Authentication/read failures do not settle an earlier admitted write.
   if (!unsettled && (response.status === 401 || response.status === 403)) end('초대가 끝났거나 회수됐어요. 운영자에게 새 링크를 받아 주세요.', { terminalAuth:true });
   return { status: response.status, json };
@@ -368,7 +380,11 @@ function canMove() {
 
 function renderTurn() {
   const turn = el('turn');
-  setControlsEnabled(canMove());
+  // Choosing a target has no effect. Never transiently disable the native
+  // picker when its refresh disables the actual handoff mutation button.
+  const targetSelection = documentId !== null && connected && !departureConfirmed
+    && machine && !ended && !disconnecting && !unsettled;
+  setControlsEnabled(canMove(), { targetSelection });
   if (!connected || departureConfirmed) {
     turn.className = '';
     turn.textContent = '조종 연결을 끊었어요. 다시 참여하려면 초대 링크를 새로 열어 주세요.';
@@ -411,22 +427,36 @@ function renderPassTargets(participants) {
   if ([...select.options].some((o) => o.value === chosen)) select.value = chosen;
 }
 
+function retireSeatRead() {
+  const request = latestSeatRequest;
+  latestSeatRequest = null;
+  frameSeatRead = null;
+  frameSeatNeedsRefresh = false;
+  request?.abort.abort();
+}
+
 async function refreshSeat() {
   if (ended || disconnecting) return null;
-  const request = {};
+  // A direct read supersedes an older frame-owned request as well as its
+  // authority. That obsolete pending promise must not block future polls.
+  retireSeatRead();
+  const request = { abort: new AbortController(), invalidated: false };
   latestSeatRequest = request;
   nextSeatPollAt = performance.now() + SEAT_POLL_MS;
+  // Pending authority cannot authorize a move, even while live frames continue.
+  controllerError = '자리 정보를 확인하고 있어요.';
+  renderTurn();
   let r;
   try {
-    r = await api('GET', SEAT_PATH);
+    r = await api('GET', SEAT_PATH, undefined, request.abort.signal);
   } catch (_) {
-    if (ended || latestSeatRequest !== request) return null;
+    if (ended || latestSeatRequest !== request || request.invalidated) return null;
     controllerError = '자리 정보를 읽지 못했어요. 다시 시도하고 있어요.';
     renderTurn();
     setStatus('seat', controllerError);
     return null;
   }
-  if (ended || latestSeatRequest !== request) return null;
+  if (ended || latestSeatRequest !== request || request.invalidated) return null;
   if (r.status !== 200 || !r.json || typeof r.json.machine !== 'boolean'
       || typeof r.json.connected !== 'boolean'
       || typeof r.json.name !== 'string'
@@ -449,6 +479,7 @@ async function refreshSeat() {
   machine = r.json.machine;
   renderTurn();
   renderPassTargets(r.json.participants);
+  if (seatSavesName !== r.json.saves_name) retirePadRead();
   seatSavesName = r.json.saves_name;
   setStatus('seat', controllerError ?? '');
   // Keep explicit connect intent through transient reads and refused writes.
@@ -470,6 +501,37 @@ async function refreshSeat() {
   return controllerError === null
     ? { name: r.json.name, machine: r.json.machine, controller: r.json.controller, connected: r.json.connected }
     : null;
+}
+
+// The live clock never waits for this authority request. Keep only one of
+// its reads on the wire; direct action/handoff reads retain their own identity.
+function refreshFrameSeat(authorityChanged = false) {
+  if (ended || disconnecting) return;
+  if (frameSeatRead !== null) {
+    if (authorityChanged) {
+      frameSeatNeedsRefresh = true;
+      if (latestSeatRequest !== null) {
+        latestSeatRequest.invalidated = true;
+        latestSeatRequest.abort.abort();
+      }
+      controllerError = '새 활동의 자리 정보를 다시 확인하고 있어요.';
+      renderTurn();
+    }
+    return;
+  }
+  const read = refreshSeat();
+  frameSeatRead = read;
+  read.then(() => { refreshFramePad(); }).catch(() => {
+    if (!ended && !disconnecting)
+      setStatus('seat', '자리 정보를 읽지 못했어요. 다시 시도하고 있어요.');
+  }).finally(() => {
+    if (frameSeatRead !== read) return;
+    frameSeatRead = null;
+    if (frameSeatNeedsRefresh) {
+      frameSeatNeedsRefresh = false;
+      refreshFrameSeat();
+    }
+  });
 }
 
 // A pointer opening also focuses the select. Those events share one read;
@@ -499,16 +561,41 @@ function showPad(savesName, buttons) {
 // has none (404) -- and it settles on the saves name that answer carries.
 // Any other answer, or a read that throws, leaves it unsettled with the keys
 // row showing, and the next poll reads it again.
+function retirePadRead() {
+  const request = latestPadRequest;
+  latestPadRequest = null;
+  framePadRead = null;
+  request?.abort.abort();
+}
+
 async function syncPad() {
   if (seatSavesName === padFor) return;
   if (seatSavesName === null) { showPad(null, []); return; }
+  const savesName = seatSavesName;
+  const incarnation = observedIncarnation;
+  retirePadRead();
+  const request = { abort: new AbortController() };
+  latestPadRequest = request;
   showPad(undefined, []);
-  const r = await api('GET', PAD_PATH);
-  if (ended) return;
-  const named = r.json !== null && typeof r.json.saves_name === 'string';
+  const r = await api('GET', PAD_PATH, undefined, request.abort.signal);
+  if (ended || latestPadRequest !== request || seatSavesName !== savesName
+      || observedIncarnation !== incarnation) return;
+  const named = r.json !== null && r.json.saves_name === savesName;
   if (r.status === 200 && named && Array.isArray(r.json.buttons)) showPad(r.json.saves_name, r.json.buttons);
   else if (r.status === 404 && named) showPad(r.json.saves_name, []);
   else setStatus('pad', '패드 배치를 읽지 못했어요 (' + r.status + '). 다시 읽고 있어요.');
+}
+
+// Layout reads also stay off the frame clock. The next seat completion or
+// live tick retries an unsettled layout without overlapping an older read.
+function refreshFramePad() {
+  if (framePadRead !== null || ended || disconnecting) return;
+  const read = syncPad();
+  framePadRead = read;
+  read.catch(() => {
+    if (!ended && !disconnecting && framePadRead === read)
+      setStatus('pad', '패드 배치를 읽지 못했어요. 다시 읽고 있어요.');
+  }).finally(() => { if (framePadRead === read) framePadRead = null; });
 }
 
 // The saves name goes with the button: a program loaded since the pad was
@@ -596,9 +683,16 @@ async function poll() {
   } else {
     setStatus('connection', '');
     const live = r.json;
+    let seatAuthorityChanged = false;
     if (live.state === 'no_machine') {
+      if (observedMachineState !== 'absent' || observedIncarnation !== null || machine) {
+        retireSeatRead();
+        seatAuthorityChanged = true;
+      }
       since = null;
-      latestSeatRequest = null;
+      observedIncarnation = null;
+      observedMachineState = 'absent';
+      retirePadRead();
       machine = false;
       controller = null;
       controllerRecoverable = false;
@@ -608,6 +702,16 @@ async function poll() {
       renderTurn();
       showPad(null, []);
     } else if (live.state === 'changed') {
+      observedMachineState = 'present';
+      if (observedIncarnation !== live.incarnation) {
+        retireSeatRead();
+        seatAuthorityChanged = true;
+        controllerError = '게임이 바뀌어 자리 정보를 다시 확인하고 있어요.';
+        renderTurn();
+        observedIncarnation = live.incarnation;
+        retirePadRead();
+        showPad(undefined, []);
+      }
       if (draw(live.screen)) {
         since = { count: live.change_count, incarnation: live.incarnation };
         setStatus('frame', '');
@@ -623,12 +727,13 @@ async function poll() {
     const activityChanged = key !== observedActivityKey;
     observedActivityKey = key;
     const recoveryDue = performance.now() >= nextSeatPollAt;
-    if (activityChanged || recoveryDue) await refreshSeat();
-    await syncPad();
+    if (activityChanged || recoveryDue || seatAuthorityChanged) refreshFrameSeat(activityChanged || seatAuthorityChanged);
+    refreshFramePad();
   }
 }
 
 function send(path, body) {
+  queuedInputs += 1;
   sending = sending.then(async () => {
     if (!canMove()) return null;
     const r = await mutate(path, body);
@@ -636,16 +741,22 @@ function send(path, body) {
     const applied = r.status >= 200 && r.status < 300 && r.json && r.json.ok === true;
     if (!applied) setStatus('action', (r.json && (r.json.message || r.json.error)) || ('요청이 거절됐어요 (' + r.status + ')'));
     else setStatus('action', '');
-    // The response settles the write. A projection read cannot hold its
-    // receipt, the input queue, or disconnect hostage if that read stalls.
-    if (!disconnecting) refreshSeat().catch(() => {
-      if (!ended && !disconnecting)
-        setStatus('seat', '요청 뒤 자리 정보를 읽지 못했어요. 다시 읽고 있어요.');
-    });
+    // Defer our projection refresh until serialized input drains. Otherwise
+    // its pending-authority state would silently discard the next queued key.
+    seatRefreshAfterInputs = true;
     return applied ? r.json : null;
   }).catch(() => {
     setStatus('action', '요청 뒤 화면을 갱신하지 못했어요. 다시 읽고 있어요.');
     return null;
+  }).finally(() => {
+    queuedInputs -= 1;
+    if (queuedInputs !== 0 || !seatRefreshAfterInputs) return;
+    seatRefreshAfterInputs = false;
+    // A projection read never holds receipts or disconnect hostage.
+    if (!ended && !disconnecting) refreshSeat().catch(() => {
+      if (!ended && !disconnecting)
+        setStatus('seat', '요청 뒤 자리 정보를 읽지 못했어요. 다시 읽고 있어요.');
+    });
   });
   return sending;
 }
@@ -654,7 +765,7 @@ async function disconnect() {
   if (ended || disconnecting) return;
   disconnecting = true;
   initialConnectIntent = false;
-  latestSeatRequest = null;
+  retireSeatRead();
   setControlsEnabled(false);
   setStatus('disconnect', '조종권을 확인하고 연결을 끊고 있어요.');
   try {
@@ -768,7 +879,10 @@ setControlsEnabled(false);
 if (token === '') {
   end('링크에 초대 토큰이 없어요. 받은 링크를 그대로 열어 주세요.');
 } else {
-  refreshSeat().catch(() => setStatus('seat', '자리 정보를 읽지 못했어요. 다시 시도하고 있어요.')).finally(tick);
+  // Observation starts even when the first authority request never settles.
+  // Unread seat authority still disables every game input path.
+  refreshFrameSeat();
+  void tick();
 }
 </script>
 </body>

@@ -45,8 +45,23 @@ let decode_issue body =
   in
   Ok (name, hours)
 
+let workspace_precondition ~config json =
+  match Workspace.validate_expected_workspace ~config json with
+  | Ok args -> Ok args
+  | Error Workspace.Invalid_workspace_precondition ->
+    Error (`Bad_request, Server_refusal.json ~code:"invalid_workspace_precondition"
+      "invalid expected_workspace precondition")
+  | Error Workspace.Workspace_precondition_failed ->
+    Error (`Conflict, Server_refusal.json ~code:"workspace_precondition_failed"
+      "workspace precondition failed")
+
 let issue_response ~config ~body =
-  match decode_issue body with
+  match Yojson.Safe.from_string body with
+  | exception Yojson.Json_error detail ->
+    `Bad_request, Server_refusal.json ~code:"invalid_request" detail
+  | json -> match workspace_precondition ~config json with
+  | Error refusal -> refusal
+  | Ok args -> match decode_issue (Yojson.Safe.to_string args) with
   | Error message -> `Bad_request, Server_refusal.json ~code:"invalid_request" message
   | Ok (name, hours) ->
     (match
@@ -83,6 +98,20 @@ let issue_response ~config ~body =
               Masc_domain.min_token_expiry_hours Masc_domain.max_token_expiry_hours hours) )
      | Error (Play_invite.Credential_not_saved err) ->
        `Internal_server_error, Server_refusal.json ~code:"not_saved" (Masc_domain.masc_error_to_string err))
+
+let revoke_workspace_precondition ~config request =
+  let fields = Uri.query (Uri.of_string request.Httpun.Request.target) in
+  let expected = List.filter (fun (key, _) ->
+      key = "expected_base_path" || key = "expected_masc_root") fields in
+  match expected with
+  | [] -> workspace_precondition ~config (`Assoc [])
+  | _ ->
+    match List.assoc_opt "expected_base_path" expected, List.assoc_opt "expected_masc_root" expected with
+    | Some [base], Some [root] when List.length expected = 2 ->
+      workspace_precondition ~config (`Assoc ["expected_workspace",
+        `Assoc ["base_path", `String base; "masc_root", `String root]])
+    | _ -> Error (`Bad_request, Server_refusal.json ~code:"invalid_workspace_precondition"
+        "expected_base_path and expected_masc_root must each occur once")
 
 let current_controller () =
   match Tool_misc_dos_lane.off_domain Dos_lane.screen with
@@ -221,7 +250,10 @@ let add_routes router =
              | None -> `Bad_request, Server_refusal.json ~code:"invalid_request" "an invite name is required"
              | Some raw_name ->
                one_at_a_time (fun () ->
-                 revoke_response ~config:(Mcp_server.workspace_config state) ~by ~raw_name)
+                 let config = Mcp_server.workspace_config state in
+                 match revoke_workspace_precondition ~config request with
+                 | Error refusal -> refusal
+                 | Ok _ -> revoke_response ~config ~by ~raw_name)
            in
            respond_json_value_with_cors ~status request reqd json)
          request reqd)

@@ -320,10 +320,21 @@ let test_local_link_explains_device_scope () =
      "play.example.test", false]
 ;;
 
+let test_wildcard_link_requires_reachable_address () =
+  List.iter (fun host ->
+    let card = match make ~link:("http://" ^ host ^ "/play#fixture") () with
+      | Ok card -> card | Error error -> fail error in
+    let notes = Card.draw card ~width:140 ~rows:100 |> List.filter_map (function
+      | Card.Note text -> Some text | _ -> None) |> String.concat " " in
+    check bool "wildcard is not advertised as a guest destination" true
+      (contains ~sub:"wildcard bind address" notes)) ["0.0.0.0:8935"; "[::]:8935"]
+;;
+
 let () =
   run "Masc_tui_play_card"
     [ ( "card"
-      , [ test_case "local links explain which device can open them" `Quick test_local_link_explains_device_scope
+      , [ test_case "wildcard links require reachable address" `Quick test_wildcard_link_requires_reachable_address
+        ; test_case "local links explain which device can open them" `Quick test_local_link_explains_device_scope
         ; test_case "a link the card cannot draw is refused" `Quick
             test_a_link_the_card_cannot_draw_is_refused
         ; test_case "the QR is the library's QR with its quiet zone" `Quick

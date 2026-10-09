@@ -1975,8 +1975,8 @@ let test_runtime_footer_is_the_tables () =
   in
   Alcotest.(check (list string)) "the sheet names the p walk once"
     [ "keeper lanes / all runtimes / service lanes" ] (labels "p");
-  Alcotest.(check (list string)) "and names both mode-specific actions"
-    [ "model settings"; "add candidate" ] (labels "e");
+  Alcotest.(check (list string)) "the sheet names both e actions in one binding"
+    [ "model settings / add candidate" ] (labels "e");
   Alcotest.(check (list string)) "the sheet names the dim toggle" [ "dim refusals" ] (labels "h")
 
 let test_system_logs_owns_only_its_real_filter_keys () =

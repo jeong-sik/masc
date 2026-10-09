@@ -4,6 +4,7 @@ open Masc_tui_types
 open Masc_tui_async_protocol
 
 let launch_list state ~host ~launch ~check =
+  if server_authority_ready state then begin
   let port = state.port in
   let request_id = Printf.sprintf "tui-res-%.6f" (Unix.gettimeofday ()) in
   let session = state.mcp_session in
@@ -26,20 +27,13 @@ let launch_list state ~host ~launch ~check =
           | Error detail -> Error detail
           | Ok () ->
             Masc_tui_http.call_mcp_resources_list ~host ~port ~session_id ~request_id))
+  end
+
 ;;
 
 let launch_read state ~host ~launch ~check ~uri =
-  let same_resource =
-    match state.resource_content with
-    | Some (current, _) -> String.equal current uri
-    | None -> false
-  in
-  state.resource_pending_uri <- Some uri;
-  if not same_resource
-  then (
-    state.resource_content <- None;
-    state.resource_content_error <- None;
-    state.resource_scroll <- 0);
+  retain_resource_read state ~uri;
+  if server_authority_ready state then begin
   let port = state.port in
   let request_id = Printf.sprintf "tui-res-%.6f" (Unix.gettimeofday ()) in
   let session = state.mcp_session in
@@ -64,4 +58,6 @@ let launch_read state ~host ~launch ~check ~uri =
           | Error detail -> Error detail
           | Ok () ->
             Masc_tui_http.call_mcp_resources_read ~host ~port ~session_id ~request_id ~uri))
+  end
+
 ;;

@@ -344,7 +344,11 @@
       "path": "lib/keeper/keeper_official_client_host.ml",
       "baseline_lines": 2365,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; host, librarian, window, session and effect orchestration semantic review pending",
+      "current_lines": 2068,
+      "prs": [
+        42136
+      ]
     },
     {
       "path": "lib/keeper/keeper_owner.ml",

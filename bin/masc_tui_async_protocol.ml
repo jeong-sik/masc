@@ -122,7 +122,11 @@ type resume_confirmation =
 
 type async_msg =
   | Workspace_scoped of workspace_authority * async_msg
-  | Workspace_identity_unconfirmed of string
+  | Workspace_identity_unconfirmed of
+      { detail : string
+      ; reading : (Masc.Tui_decode.server_identity, string) result
+      ; prior_contact : Masc_tui_server_lifecycle.contact
+      ; refresh_ticket : Http_refresh_order.ticket }
   | Schedule_form_authority_refused of
       { action : string; detail : string; workspace : workspace_input_identity option }
   | Lane_package_catalog_loaded of int * string option * (Yojson.Safe.t, string) result

@@ -19,6 +19,36 @@ let json_field name = function
   | `Assoc fields -> List.assoc_opt name fields
   | _ -> None
 
+(* The body of a refused MSX write: [{ok:false, message}], with [code] first
+   when the caller names one. The caller names it, not the HTTP status: 409 is
+   also the activity gate's answer, under its own codes. *)
+let write_error_json ?code message : Yojson.Safe.t =
+  let fields = ["ok", `Bool false; "message", `String message] in
+  `Assoc (match code with
+    | Some code -> ("code", `String code) :: fields
+    | None -> fields)
+;;
+
+(* Request-owned workspace admission precedes every MSX effect. The shared
+   validator strips the binding so strict operation decoders retain their
+   existing field contracts. The handler uses this same captured config. A
+   refusal is the finished answer; only the failed precondition carries the
+   [code] the terminal reads to tell a changed workspace from the activity
+   refusals. *)
+let decode_write_body ~config ~body =
+  match Yojson.Safe.from_string body with
+  | exception Yojson.Json_error message ->
+      Error (`Bad_request, write_error_json ("invalid JSON: " ^ message))
+  | args -> match Workspace.validate_expected_workspace ~config args with
+      | Ok args -> Ok args
+      | Error Workspace.Invalid_workspace_precondition ->
+          Error (`Bad_request, write_error_json "invalid expected_workspace precondition")
+      | Error Workspace.Workspace_precondition_failed ->
+          Error (`Conflict,
+                 write_error_json ~code:"workspace_precondition_failed"
+                   "workspace precondition failed")
+;;
+
 (* Frames a press holds its keys down, and the frames the call advances in
    all, when the body names neither (RFC-0439 §3.3): a tap. *)
 let press_default_hold_frames = 5
@@ -114,28 +144,13 @@ let parse_keys names =
         | Error message -> Error message))
     (Ok []) names
 
-(* A change from the terminal names the workspace it read. A server swapped
-   onto the same port after that read answers 409 and applies nothing; a body
-   without the field (a keeper's tool, a script) is not bound to one. The field
-   is removed before the body reaches the strict per-route decoders. *)
-let admit_expected_workspace ~(config : Workspace.config) args =
-  match Workspace.validate_expected_workspace ~config args with
-  | Ok args -> Ok args
-  | Error Workspace.Invalid_workspace_precondition ->
-    Error (`Bad_request, "invalid expected_workspace precondition")
-  | Error Workspace.Workspace_precondition_failed ->
-    Error (`Conflict, "workspace precondition failed")
-
 (* The press body decoded and applied under [who], the identity the route's
    actor auth resolved. The route test drives it with its own workspace. *)
 let press_response ~config ~who ~body =
-  let error status message = status, press_result_json ~ok:false ~message None in
-  match Yojson.Safe.from_string body with
-  | exception Yojson.Json_error message -> error `Bad_request ("invalid JSON: " ^ message)
-  | json -> (
-    match admit_expected_workspace ~config json with
-    | Error (status, message) -> error status message
-    | Ok json ->
+  let error status message = status, write_error_json message in
+  match decode_write_body ~config ~body with
+  | Error refusal -> refusal
+  | Ok json -> (
     let ( let* ) = Result.bind in
     let decoded =
       let* names = string_list_field "keys" json in
@@ -168,8 +183,9 @@ let press_response ~config ~who ~body =
         error `Internal_server_error (Msx_lane.error_to_string e)))
 ;;
 
-let handle_press ~config ~who request reqd =
+let handle_press ~state ~who request reqd =
   Http.Request.read_body_async reqd (fun body ->
+      let config = Mcp_server.workspace_config state in
       let status, json = press_response ~config ~who ~body in
       respond_json_value_with_cors ~status request reqd json)
 ;;
@@ -208,13 +224,9 @@ let load_result_json ~ok ~message : Yojson.Safe.t =
    route only turns its tool result into an HTTP answer; the TUI re-fetches the
    frame to start spectating. Body: {cart:"name"}. *)
 let load_response ~(config : Workspace.config) ~agent_name ~body =
-  match Yojson.Safe.from_string body with
-  | exception Yojson.Json_error message ->
-    `Bad_request, load_result_json ~ok:false ~message:("invalid JSON: " ^ message)
-  | args ->
-    match admit_expected_workspace ~config args with
-    | Error (status, message) -> status, load_result_json ~ok:false ~message
-    | Ok args ->
+  match decode_write_body ~config ~body with
+  | Error refusal -> refusal
+  | Ok args ->
     let result =
       (* Tool_timing.start is the one tool-start stamp Tool_misc.dispatch
          also uses; it reads Time_compat.now, the clock accessor the
@@ -228,8 +240,9 @@ let load_response ~(config : Workspace.config) ~agent_name ~body =
     status, load_result_json ~ok ~message:(Tool_result.message result)
 ;;
 
-let handle_load ~(config : Workspace.config) ~agent_name request reqd =
+let handle_load ~state ~agent_name request reqd =
   Http.Request.read_body_async reqd (fun body ->
+      let config = Mcp_server.workspace_config state in
       let status, json = load_response ~config ~agent_name ~body in
       respond_json_value_with_cors ~status request reqd json)
 ;;
@@ -295,9 +308,8 @@ let decode_pixel_reference = function
        | _ -> Error "known_pixels requires a SHA256 revision and positive width/height")
   | _ -> Error "known_pixels requires exactly revision, width and height"
 
-let decode_tick body =
-  match Yojson.Safe.from_string body with
-  | exception Yojson.Json_error _ -> Error "tick body must be valid JSON"
+let decode_tick json =
+  match json with
   | `Assoc fields ->
       let ( let* ) = Result.bind in
       let names = List.map fst fields in
@@ -365,26 +377,23 @@ let tick_frame_json pixel_response (frame : Msx_lane.frame) entries
           (recent_players_of ~now:frame.number entries))] @ pixel_fields)
 
 (* With [config] the body may name the workspace the terminal read, and a
-   different one is a 409 before the tick decoder or the machine runs. The
-   field is removed before the strict tick decoder sees the body. *)
-let admit_tick_workspace ~config body =
-  match config with
-  | None -> Ok body
-  | Some config ->
-    (match Yojson.Safe.from_string body with
-     | exception Yojson.Json_error _ -> Ok body
-     | json ->
-       Result.map Yojson.Safe.to_string (admit_expected_workspace ~config json))
-
+   different one is refused before the tick decoder or the machine runs, with
+   the answer every MSX write gives. Without [config] the body is not bound to
+   a workspace. Either way the tick decoder sees the body without the field. *)
 let tick_response_in (config : Workspace.config option) body =
   let error status message =
-    status, `Assoc [ "ok", `Bool false; "message", `String message ]
+    status, write_error_json message
   in
-  match admit_tick_workspace ~config body with
-  | Error (status, message) -> error status message
-  | Ok body ->
-  match decode_tick body with
-  | Error detail -> error `Bad_request detail
+  let args = match config with
+    | Some config -> decode_write_body ~config ~body
+    | None ->
+      (match Yojson.Safe.from_string body with
+       | exception Yojson.Json_error _ -> Error (error `Bad_request "tick body must be valid JSON")
+       | json -> Ok json) in
+  let decoded = Result.bind args (fun args ->
+    Result.map_error (error `Bad_request) (decode_tick args)) in
+  match decoded with
+  | Error refusal -> refusal
   | Ok (frames, pixel_response) ->
     (* This is a mutation: the best-effort executor adapter can replay failed
        work inline. Strict submission never retries or falls back to the HTTP
@@ -421,8 +430,9 @@ let tick_response_bound ~config ~body = tick_response_in (Some config) body
    flows even when no keeper is pressing a key. Body: {frames:N}, clamped to
    1..max_frames_per_call; the answer is the advanced frame, so one call both
    steps and reads. A write, gated like press. *)
-let handle_tick ~config request reqd =
+let handle_tick ~state request reqd =
   Http.Request.read_body_async reqd (fun body ->
+      let config = Mcp_server.workspace_config state in
       let status, json = tick_response_bound ~config ~body in
       Http.Response.json_value_on_cpu ~status ~request
         ~extra_headers:(Server_auth.cors_headers (Server_auth.get_origin request)) json reqd)
@@ -431,18 +441,21 @@ let handle_tick ~config request reqd =
 let activity_json () = `Assoc ["schema",`String "masc.msx-activity/v1";
   "activity",`String (Machine_configuration.activity_to_wire (Msx_lane.activity ()))]
 
-let checkpoint_response ~(config : Workspace.config) ~restore ~body =
+let checkpoint_legacy_response ~(config : Workspace.config) ~restore ~body =
   let base_path = config.base_path in
-  let error status message = status, load_result_json ~ok:false ~message in
-  match Yojson.Safe.from_string body with
-  | exception Yojson.Json_error message -> error `Bad_request message
-  | args ->
-    match admit_expected_workspace ~config args with
-    | Error (status, message) -> error status message
-    | Ok args ->
+  let error status message = status, write_error_json message in
+  match decode_write_body ~config ~body with
+  | Error refusal -> refusal
+  | Ok args ->
     (match Tool_misc_msx_lane.checkpoint_slot args with
      | Error message -> error `Bad_request message
-     | Ok _ ->
+     | Ok slot ->
+       let pre_effect message =
+         `Assoc ["ok", `Bool false; "message", `String message;
+           "checkpoint", `String (if restore then "restore" else "save");
+           "slot", `String slot;
+           "effect_disposition", `String
+             (Tool_result.failure_effect_disposition_to_string Tool_result.Proven_pre_effect)] in
        match Executor_pool_ref.submit_strict (fun () ->
          let tool_name = if restore then "masc_msx_restore" else "masc_msx_save" in
          let result = Tool_misc_msx_lane.handle_checkpoint ~restore ~tool_name
@@ -452,12 +465,16 @@ let checkpoint_response ~(config : Workspace.config) ~restore ~body =
            | None -> `OK
            | Some Tool_result.Workflow_rejection -> `Bad_request
            | Some _ -> `Internal_server_error in
-         ok, (status, load_result_json ~ok ~message:(Tool_result.message result))) with
+         let response = match result with
+           | Tool_result.Failed {effect_disposition=Tool_result.Proven_pre_effect;message;_} ->
+               pre_effect message
+           | _ -> load_result_json ~ok ~message:(Tool_result.message result) in
+         ok, (status, response)) with
        | Ok (ok, response) ->
          if ok && restore then machine_changed ~config;
          response
        | Error (Executor_pool_ref.Pool_unavailable | Executor_pool_ref.Caller_not_in_eio) ->
-         error `Service_unavailable "MSX checkpoint worker is unavailable"
+         `Service_unavailable, pre_effect "MSX checkpoint worker is unavailable"
        | Error (Executor_pool_ref.Work_failed _ as failure) ->
          (* The worker ran and raised; a restore may have replaced the machine. *)
          if restore then machine_changed ~config;
@@ -468,15 +485,166 @@ let checkpoint_response ~(config : Workspace.config) ~restore ~body =
          error `Internal_server_error "MSX checkpoint failed; inspect the current state before retrying")
 ;;
 
-let handle_change_disk ~(config : Workspace.config) request reqd =
-  Http.Request.read_body_async reqd (fun body ->
-    let error status message = status, load_result_json ~ok:false ~message in
-    let status, json = match Yojson.Safe.from_string body with
-      | exception Yojson.Json_error message -> error `Bad_request message
-      | args -> (
-        match admit_expected_workspace ~config args with
-        | Error (status, message) -> error status message
-        | Ok args ->
+module Checkpoint_receipt = Server_msx_checkpoint_receipt
+let checkpoint_epoch = Random_id.uuid_v7 ()
+let checkpoint_receipt_path (config : Workspace.config) =
+  Filename.concat (Tool_misc_msx_lane.msx_dir ~base_path:config.base_path) "checkpoint-operations.sqlite3"
+
+let checkpoint_binding ~restore args =
+  match args with
+  | `Assoc fields ->
+      (match List.filter (fun (key,_) -> key="operation_id") fields with
+       | [_, `String raw] ->
+           (match Keeper_operation_id.of_string raw,
+                  Tool_misc_msx_lane.checkpoint_slot (`Assoc (List.remove_assoc "operation_id" fields)) with
+            | Ok operation_id, Ok slot -> Ok {Checkpoint_receipt.operation_id;
+                action=(if restore then Restore else Save);slot}
+            | Error message, _ | _, Error message -> Error message)
+       | _ -> Error "checkpoint operation_id must be one canonical string")
+  | _ -> Error "checkpoint request must be an object"
+
+let receipt_json ~(config : Workspace.config) (receipt : Checkpoint_receipt.receipt) =
+  let binding = receipt.binding in
+  let status, extra = match receipt.state with
+    | Pending when receipt.epoch=checkpoint_epoch -> "pending", []
+    | Pending -> "unknown", ["message",`String "checkpoint belongs to an earlier server instance"]
+    | Unknown detail -> "unknown", ["message",`String detail]
+    | Refused detail -> "refused", ["message",`String detail;
+        "effect_disposition",`String "proven_pre_effect"]
+    | Committed completed -> "committed", ["effect",`Assoc [
+        "change_count",`Int completed.mark.count; "incarnation",`String completed.mark.incarnation;
+        "checkpoint_sha256",`String completed.checkpoint_sha256]] in
+  ["ok",`Bool (status="committed");
+   "workspace",`Assoc ["base_path",`String (Unix.realpath config.base_path);
+                         "masc_root",`String (Unix.realpath (Workspace.masc_root_dir config))];
+   "operation_id",`String (Keeper_operation_id.to_string binding.operation_id);
+   "checkpoint",`String (match binding.action with Save -> "save" | Restore -> "restore");
+   "slot",`String binding.slot;"epoch",`String receipt.epoch;"status",`String status] @ extra
+
+let checkpoint_request_with_workspace ~config ~body =
+  match Yojson.Safe.from_string body with
+  | exception Yojson.Json_error message -> Error (`Bad_request,write_error_json message)
+  | `Assoc fields when List.mem_assoc "expected_workspace" fields -> decode_write_body ~config ~body
+  | _ -> Error (`Bad_request,write_error_json "checkpoint operation requires expected_workspace")
+
+let settle_checkpoint_effect ~restore ~persist ~notify settled =
+  let persisted = persist settled in
+  let notify_needed = match settled with
+    | Checkpoint_receipt.Committed _ | Unknown _ -> restore
+    | Pending | Refused _ -> false in
+  if not notify_needed then persisted else
+  match notify () with
+  | () -> persisted
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception exn ->
+      let message = "MSX restore observer notification failed: " ^ Printexc.to_string exn in
+      Error (match persisted with Ok () -> message | Error cause -> cause ^ "; " ^ message)
+
+let checkpoint_operation_response ~(config : Workspace.config) ~restore ~body =
+  let refused binding message =
+    `Service_unavailable, `Assoc (receipt_json ~config
+      {Checkpoint_receipt.binding;epoch=checkpoint_epoch;state=Refused message}) in
+  match checkpoint_request_with_workspace ~config ~body with
+  | Error response -> response
+  | Ok args -> match checkpoint_binding ~restore args with
+    | Error message -> `Bad_request,write_error_json message
+    | Ok binding ->
+        let path = checkpoint_receipt_path config in
+        (* Admission is durably committed before the effect job is submitted.
+           A cancelled HTTP waiter cannot turn a pending record into permission
+           to dispatch the same operation again. *)
+        match Executor_pool_ref.submit_strict (fun () ->
+          Workspace.mkdir_p (Filename.dirname path);
+          Checkpoint_receipt.admit ~path ~epoch:checkpoint_epoch binding) with
+        | Error failure ->
+            `Service_unavailable, `Assoc (receipt_json ~config
+              {Checkpoint_receipt.binding;epoch=checkpoint_epoch;
+               state=Unknown (Executor_pool_ref.strict_submit_error_to_string failure)})
+        | Ok (Error Checkpoint_receipt.Binding_conflict) ->
+            `Conflict,write_error_json "checkpoint operation identity is bound to another action or slot"
+        | Ok (Error error) ->
+            (* A failed lookup may hide an already-running duplicate. Failure
+               to acquire admission is not proof this operation had no effect. *)
+            `Service_unavailable, `Assoc (receipt_json ~config
+              {Checkpoint_receipt.binding;epoch=checkpoint_epoch;
+               state=Unknown (Checkpoint_receipt.error_to_string error)})
+        | Ok (Ok (Existing receipt)) -> `OK, `Assoc (receipt_json ~config receipt)
+        | Ok (Ok Accepted) ->
+            let run () =
+              let settled =
+                try match Tool_misc_msx_lane.run_checkpoint ~restore ~base_path:config.base_path ~slot:binding.slot with
+                | Ok completed -> Checkpoint_receipt.Committed {
+                    mark=completed.mark;checkpoint_sha256=completed.checkpoint_sha256}
+                | Error error -> Refused (Msx_lane.error_to_string error)
+                with
+                | Eio.Cancel.Cancelled _ as exn -> raise exn
+                | exn -> Checkpoint_receipt.Unknown (Printexc.to_string exn) in
+              (* Publish from the worker, even when its HTTP caller stopped
+                 waiting. A failed store write must never manufacture success. *)
+              match settle_checkpoint_effect ~restore
+                ~persist:(fun state ->
+                  Checkpoint_receipt.settle ~path ~epoch:checkpoint_epoch binding state
+                  |> Result.map_error Checkpoint_receipt.error_to_string)
+                ~notify:(fun () -> machine_changed ~config) settled with
+              | Error message -> Error message
+              | Ok () -> Ok {Checkpoint_receipt.binding;epoch=checkpoint_epoch;state=settled} in
+            (match Executor_pool_ref.submit_strict run with
+             | Ok (Ok receipt) ->
+                 `OK, `Assoc (receipt_json ~config receipt)
+             | Ok (Error message) -> `Internal_server_error,write_error_json message
+             | Error (Executor_pool_ref.Pool_unavailable | Caller_not_in_eio) ->
+                 (* The admitted job never started. A receipt-store failure here
+                    leaves pending evidence; the direct answer still proves this
+                    request did not dispatch its effect. *)
+                 refused binding "MSX checkpoint worker is unavailable"
+             | Error failure ->
+                 `Internal_server_error,write_error_json (Executor_pool_ref.strict_submit_error_to_string failure))
+
+let checkpoint_status_response ~(config : Workspace.config) ~body =
+  match checkpoint_request_with_workspace ~config ~body with
+  | Error response -> response
+  | Ok (`Assoc fields) ->
+      (match List.filter (fun (key,_) -> key="checkpoint") fields with
+       | [_, `String ("save" | "restore" as action)] ->
+           (match checkpoint_binding ~restore:(action="restore") (`Assoc (List.remove_assoc "checkpoint" fields)) with
+            | Error message -> `Bad_request,write_error_json message
+            | Ok binding ->
+                (match Executor_pool_ref.submit_strict (fun () ->
+                  let path = checkpoint_receipt_path config in
+                  let recovered = Checkpoint_receipt.retry_settlement ~path ~epoch:checkpoint_epoch binding in
+                  match Result.bind recovered (fun () -> Checkpoint_receipt.inspect ~path binding) with
+                  | Error error -> Error (Checkpoint_receipt.error_to_string error)
+                  | Ok receipt ->
+                      let receipt = Option.value receipt ~default:{Checkpoint_receipt.binding;
+                        epoch=checkpoint_epoch;state=Unknown "checkpoint operation has not been observed"} in
+                      let fields = receipt_json ~config receipt in
+                      let fields = match receipt.state with
+                        | Committed _ when binding.action=Restore ->
+                            (* Completion is read first; pixels are copied under
+                               the lane lock afterwards in this same workspace
+                               request. They may include subsequent mutations. *)
+                            let live = Server_routes_http_routes_lane_addons.msx_live
+                              Machine_lane.Msx ~since:None () in
+                            ("live",live)::("live_relation",`String "observed_after_completion")::fields
+                        | Committed _ | Pending | Refused _ | Unknown _ -> fields in
+                      Ok (`Assoc fields)) with
+                 | Ok (Ok json) -> `OK,json
+                 | Ok (Error message) -> `Internal_server_error,write_error_json message
+                 | Error failure -> `Service_unavailable,write_error_json (Executor_pool_ref.strict_submit_error_to_string failure)))
+       | _ -> `Bad_request,write_error_json "checkpoint must name save or restore")
+  | Ok _ -> `Bad_request,write_error_json "checkpoint status request must be an object"
+
+let checkpoint_response ~config ~restore ~body =
+  match Yojson.Safe.from_string body with
+  | `Assoc fields when List.mem_assoc "operation_id" fields -> checkpoint_operation_response ~config ~restore ~body
+  | _ | exception Yojson.Json_error _ -> checkpoint_legacy_response ~config ~restore ~body
+;;
+
+let change_disk_response ~(config : Workspace.config) ~body =
+    let error status message = status, write_error_json message in
+    match decode_write_body ~config ~body with
+      | Error refusal -> refusal
+      | Ok args -> (
         match Executor_pool_ref.submit_strict (fun () ->
           let result = Tool_misc_msx_lane.handle_change_disk ~tool_name:"masc_msx_change_disk"
               ~start_time:(Tool_timing.start ()) ~base_path:config.base_path args in
@@ -497,12 +665,19 @@ let handle_change_disk ~(config : Workspace.config) request reqd =
           error `Internal_server_error "MSX disk change failed; inspect the current state before retrying"
         | Error (Executor_pool_ref.Submission_failed _ as failure) ->
           Log.Http.error "MSX disk change: %s" (Executor_pool_ref.strict_submit_error_to_string failure);
-          error `Internal_server_error "MSX disk change failed; inspect the current state before retrying") in
+          error `Internal_server_error "MSX disk change failed; inspect the current state before retrying")
+;;
+
+let handle_change_disk ~state request reqd =
+  Http.Request.read_body_async reqd (fun body ->
+    let config = Mcp_server.workspace_config state in
+    let status, json = change_disk_response ~config ~body in
     respond_json_value_with_cors ~status request reqd json)
 ;;
 
-let handle_checkpoint ~config ~restore request reqd =
+let handle_checkpoint ~state ~restore request reqd =
   Http.Request.read_body_async reqd (fun body ->
+    let config = Mcp_server.workspace_config state in
     let status, json = checkpoint_response ~config ~restore ~body in
     respond_json_value_with_cors ~status request reqd json)
 ;;
@@ -520,36 +695,41 @@ let add_routes router =
            Http.Response.json_value ~compress:true ~request:req
              (carts_json ~base_path) reqd)
          request reqd)
+  |> Http.Router.post "/api/v1/msx/checkpoint-operation" (fun request reqd ->
+       with_read_auth (fun state request reqd ->
+         Http.Request.read_body_async reqd (fun body ->
+           let config = Mcp_server.workspace_config state in
+           let status,json = checkpoint_status_response ~config ~body in
+           respond_json_value_with_cors ~status request reqd json)) request reqd)
   |> Http.Router.post "/api/v1/msx/press" (fun request reqd ->
        with_tool_actor_auth ~tool_name:"masc_msx_press"
          (fun state who _req reqd ->
-           handle_press ~config:(Mcp_server.workspace_config state) ~who request reqd)
+           handle_press ~state ~who request reqd)
          request reqd)
   |> Http.Router.post "/api/v1/msx/load" (fun request reqd ->
        with_tool_actor_auth ~tool_name:"masc_msx_load"
          (fun state agent_name _req reqd ->
-           handle_load ~config:(Mcp_server.workspace_config state) ~agent_name request reqd)
+           handle_load ~state ~agent_name request reqd)
          request reqd)
   |> Http.Router.post "/api/v1/msx/save" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_msx_save"
          (fun state _req reqd ->
-           handle_checkpoint ~config:(Mcp_server.workspace_config state) ~restore:false
+           handle_checkpoint ~state ~restore:false
              request reqd)
          request reqd)
   |> Http.Router.post "/api/v1/msx/restore" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_msx_restore"
          (fun state _req reqd ->
-           handle_checkpoint ~config:(Mcp_server.workspace_config state) ~restore:true
+           handle_checkpoint ~state ~restore:true
              request reqd)
          request reqd)
   |> Http.Router.post "/api/v1/msx/disk" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_msx_change_disk"
          (fun state _req reqd ->
-           handle_change_disk ~config:(Mcp_server.workspace_config state) request reqd)
+           handle_change_disk ~state request reqd)
          request reqd)
   |> Http.Router.post "/api/v1/msx/tick" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_msx_step"
-         (fun state _req reqd ->
-           handle_tick ~config:(Mcp_server.workspace_config state) request reqd)
+         (fun state _req reqd -> handle_tick ~state request reqd)
          request reqd)
 ;;

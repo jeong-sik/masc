@@ -361,9 +361,10 @@
       "baseline_lines": 2597,
       "kind": "production",
       "status": "partially improved; remaining semantic review pending",
-      "current_lines": 2596,
+      "current_lines": 2497,
       "prs": [
-        42118
+        42118,
+        42120
       ]
     },
     {

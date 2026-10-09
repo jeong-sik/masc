@@ -1,6 +1,6 @@
 # Pure microVM build-link planning owner
 
-Base: 558f2fa37df2e9b60e0e319aa3826187b728e7b2.
+PR #42120. Base: 558f2fa37df2e9b60e0e319aa3826187b728e7b2.
 Code head: cf0fa37f5332ffba0b0ab7ab008e13c55bb4a0ff.
 
 Private keeper_microvm_build_plan owns the guest build mount constant, path flattening, closed link states/plans, scan-result parsing, per-checkout decisions and action/target selection (120 lines). The root retains volume/image operations, command generation, execution probes, refusal display and lifecycle/inventory handling (2497 lines). The public microVM MLI is unchanged.

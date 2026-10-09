@@ -182,3 +182,5 @@ Composition result and failure projection are separated from runtime effects in 
 Connector durable-request construction, strict replay and target projection are separated from Gate/transmission effects in [#42114](https://github.com/jeong-sik/masc/pull/42114). See [connector-replay/README.md](connector-replay/README.md). Remaining handler policies require semantic audit.
 
 MicroVM build-link invalid paths retain their actual refusal reason in [#42118](https://github.com/jeong-sik/masc/pull/42118), including the direct sandbox-runtime diagnostic consumer. See [microvm-link-refusal/README.md](microvm-link-refusal/README.md). Both candidates retain their remaining lifecycle and execution audit scope.
+
+Pure microVM build-link paths, scan decisions and action/target selection have a canonical owner in [#42120](https://github.com/jeong-sik/masc/pull/42120). See [microvm-build-plan/README.md](microvm-build-plan/README.md). The same candidate remains partially improved.

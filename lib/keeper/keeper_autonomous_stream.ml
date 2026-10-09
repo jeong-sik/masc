@@ -127,9 +127,9 @@ let on_tool_stream_observation t observation = with_stream t (fun () -> match ob
           ~stream_scope:(Accum.current_stream_scope t.accum) ~block_index ~tool_call_id progress t.bridge)
       end
   | Keeper_hooks_agent_core.Native_tool_completion {block_index; tool_call_id; completion} ->
-      flush t;
-      apply t (Bridge.finish_native_tool ~redact_text:t.redact_text
-        ~stream_scope:(Accum.current_stream_scope t.accum) ~block_index ~tool_call_id completion t.bridge)
+      if not t.closed then
+        apply t (Bridge.finish_native_tool ~redact_text:t.redact_text
+          ~stream_scope:(Accum.current_stream_scope t.accum) ~block_index ~tool_call_id completion t.bridge)
   | Keeper_hooks_agent_core.Official_tool_result {block_index; tool_call_id; execution_id} ->
       result_ready t ~tool_call_id:(Some tool_call_id) ~execution_id
         (Accum.record_official_execution_id t.accum ~block_index ~tool_call_id ~execution_id))

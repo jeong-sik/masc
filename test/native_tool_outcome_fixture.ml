@@ -38,7 +38,6 @@ let on_event t event =
   forward t (Redactor.on_event t.text ~stream_scope:(Accum.current_stream_scope t.accum) event)
 
 let on_completion t ~block_index ~tool_call_id completion =
-  forward t (Redactor.flush t.text);
   apply t (Bridge.finish_native_tool ~redact_text:t.redact_text
     ~stream_scope:(Accum.current_stream_scope t.accum) ~block_index ~tool_call_id
     completion t.bridge)

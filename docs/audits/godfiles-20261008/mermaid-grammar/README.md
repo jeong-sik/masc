@@ -1,6 +1,6 @@
 # Mermaid grammar and rendering responsibility boundary
 
-Base: c472b890c5134ffe9af43534650c273dbf296f46.
+PR #42137. Base: c472b890c5134ffe9af43534650c273dbf296f46.
 
 Private masc_tui_mermaid_grammar owns canonical diagram/failure data and flowchart, sequence and state-diagram parsing (1156 lines). The root owns canvas, layout and drawing (1118 lines, previously 2134). Parser mutations are confined to per-call cursors, tables and accumulators; no terminal, filesystem or global runtime acquisition enters the grammar.
 

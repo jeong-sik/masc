@@ -5,7 +5,8 @@
       while other writer exceptions propagate after observer notification
     - enqueue mode: write returns without touching the fd writer
     - bounded queue: overflow drops incoming mirror lines and counts them
-    - drain writes queued lines in order and reports drops once *)
+    - drain writes queued lines in order and reports drops once
+    - a written line holds no terminal control and no broken UTF-8 *)
 
 open Alcotest
 
@@ -143,6 +144,24 @@ let test_synchronous_control_exception_propagates () =
       (Console_sink.For_testing.queued_count ()))
 ;;
 
+(* A line is text from anywhere, a Firefox's error among it: what reaches the
+   console and the file behind it holds no terminal control. *)
+let test_a_line_holds_no_terminal_control () =
+  with_clean_sink (fun () ->
+    let written = ref [] in
+    Console_sink.For_testing.set_writer (Some (fun l -> written := l :: !written));
+    Console_sink.write "said \027[31mno\000 \255\254 \194\155 \127 \r";
+    Console_sink.write "Raised at f\n\tcalled from g \237\149\156\234\184\128 \226\130";
+    Console_sink.For_testing.set_enqueue_active true;
+    Console_sink.write "queued \027]0;title\007";
+    ignore (Console_sink.For_testing.drain_now () : int);
+    check (list string) "controls and broken UTF-8 are their escapes"
+      [ {|said \x1B[31mno\x00 \xFF\xFE \u009B \x7F \x0D|}
+      ; "Raised at f\\x0A\\x09called from g \237\149\156\234\184\128 \\xE2\\x82"
+      ; {|queued \x1B]0;title\x07|} ]
+      (List.rev !written))
+;;
+
 let () =
   run "console_sink"
     [ ( "mirror_contract"
@@ -156,6 +175,8 @@ let () =
             test_writer_and_observer_failure_isolation
         ; test_case "synchronous control exception propagates" `Quick
             test_synchronous_control_exception_propagates
+        ; test_case "a line holds no terminal control" `Quick
+            test_a_line_holds_no_terminal_control
         ] )
     ]
 ;;

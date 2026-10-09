@@ -49,10 +49,16 @@ let clear
   =
   let existing = Keeper_context_core.messages_of_context ctx in
   let kept = kept_messages ~preserve_system existing in
+  match Keeper_repetition_judged.reset_history
+          (Keeper_context_core.agent_core_context_of_context ctx) with
+  | Error error ->
+    Save_unconfirmed { detail = Keeper_repetition_judged.error_to_string error }
+  | Ok context ->
   let emptied : Keeper_context_core.working_context =
     { Keeper_types.checkpoint =
         { (Keeper_context_core.checkpoint_of_context ctx) with
           Agent_core.Checkpoint.messages = kept
+        ; context
         }
     }
   in

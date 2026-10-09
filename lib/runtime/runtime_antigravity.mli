@@ -48,6 +48,13 @@ type config =
         turn's text when the field is present. *)
   }
 
+val structured_output_instruction : schema:Yojson.Safe.t -> string
+(** The sentence that tells the model how a turn run with
+    [config.output_schema] takes its answer: as the arguments of the CLI's
+    [finish] tool, in the first response, with no other tool. A value written
+    as text is refused by the CLI with a re-prompt that sends the whole prompt
+    again. [schema] is serialized the way the [--json-schema] flag carries it. *)
+
 val official_client_environment : ?home_dir:string -> unit -> string array
 (** Provider-owned account environment with an optional isolated HOME. This
     excludes API-key/provider-routing variables and user tool configuration. *)

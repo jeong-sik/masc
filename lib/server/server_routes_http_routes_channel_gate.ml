@@ -383,10 +383,12 @@ let handle_gate_connector_status _state request reqd =
           respond_public_read_json_value ~status:`OK request reqd
             (C.status_json ~audit_limit ()))
 
-let gate_keeper_ctx ~sw ~clock state =
-  let workspace_scope = Mcp_server.workspace_scope state in
+let gate_keeper_ctx ?config ~sw ~clock state =
+  let config = match config with
+    | Some config -> config
+    | None -> Mcp_server.workspace_config state in
   {
-    Keeper_tool_surface.config = workspace_scope.config;
+    Keeper_tool_surface.config = config;
     agent_name = "gate:connector";
     sw;
     clock;
@@ -407,9 +409,9 @@ let keeper_exists state keeper_name =
     ~config:(Mcp_server.workspace_config state)
     keeper_name
 
-let respond_keeper_tool_json ?(project = Fun.id) ~sw ~clock state request reqd ~tool_name ~args =
+let respond_keeper_tool_json ?config ?(project = Fun.id) ~sw ~clock state request reqd ~tool_name ~args =
   match
-    Keeper_tool_surface.dispatch (gate_keeper_ctx ~sw ~clock state) ~name:tool_name ~args
+    Keeper_tool_surface.dispatch (gate_keeper_ctx ?config ~sw ~clock state) ~name:tool_name ~args
   with
   | Some result when Tool_result.is_success result -> (
       let body = Tool_result.message result in
@@ -451,17 +453,29 @@ let keeper_list_max_limit = 200
     bound. *)
 let handle_gate_keepers ~sw ~clock state request reqd =
   let config = Mcp_server.workspace_config state in
-  let paths = Server_base_path_diagnostics.detect
-    ~effective_base_path:config.Workspace.base_path
-    ~effective_masc_root:(Workspace.masc_dir config) () in
-  match query_param request "expected_workspace" with
-  | Some expected when String.trim expected = "" ->
+  let expected_fields =
+    Uri.query (Uri.of_string request.Httpun.Request.target)
+    |> List.concat_map (fun (key, values) ->
+      let field = match key with
+        | "expected_workspace" -> Some "base_path"
+        | "expected_masc_root" -> Some "masc_root"
+        | _ -> None in
+      match field, values with
+      | None, _ -> []
+      | Some field, [] -> [field, `Null]
+      | Some field, values -> List.map (fun value -> field, `String value) values)
+  in
+  let expected_workspace = match expected_fields with
+    | [] -> `Assoc []
+    | fields -> `Assoc ["expected_workspace", `Assoc fields] in
+  match Workspace.validate_expected_workspace ~config expected_workspace with
+  | Error Workspace.Invalid_workspace_precondition ->
       respond_json_value_with_cors ~status:`Bad_request request reqd
-        (Channel_gate.error_json "expected workspace must not be blank")
-  | Some expected when not (String.equal expected paths.effective_base_path) ->
+        (Channel_gate.error_json "invalid expected_workspace precondition; base_path and masc_root are required together")
+  | Error Workspace.Workspace_precondition_failed ->
       respond_json_value_with_cors ~status:`Conflict request reqd
         (Channel_gate.error_json "Server workspace changed; refresh its identity before reading Keepers")
-  | Some _ | None ->
+  | Ok _ ->
   let limit =
     int_query_param request "limit" ~default:keeper_list_max_limit
     |> fun value -> max 1 (min keeper_list_max_limit value)
@@ -476,7 +490,7 @@ let handle_gate_keepers ~sw ~clock state request reqd =
     | Ok _ -> Dashboard_projection_cache.with_current_gate_keeper_observations ~config
     | Error _ -> Fun.id
   in
-  respond_keeper_tool_json ~project
+  respond_keeper_tool_json ~config ~project
     ~sw ~clock state request reqd
     ~tool_name:"masc_keeper_list" ~args
 

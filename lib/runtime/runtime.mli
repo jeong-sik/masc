@@ -759,10 +759,6 @@ val quota_scope_of_runtime_id : string -> Runtime_quota_window.scope option
     the runtime id is unknown. Consumed by
     {!Runtime_quota_window.demote_order} and the matching note site. *)
 
-val prompt_capacity_bytes_of_runtime_id : string -> int option
-(** {!Runtime_instance.prompt_capacity_bytes} of the runtime with this id, or [None] when the
-    id is unknown or no ceiling applies. *)
-
 val context_marks_of_runtime_id : string -> Runtime_schema.context_marks option
 (** The binding's eviction marks, or [None] when the binding declares none
     (the keeper then evicts carried history only on a provider refusal). *)

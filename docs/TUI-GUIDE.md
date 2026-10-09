@@ -612,6 +612,19 @@ it keeps both the shared head and distinguishing tail around a middle ellipsis.
 Phase and runtime identity stay neutral so an ordinary row does not turn into a
 strip of competing colours.
 
+Roster reads and pause/resume/wakeup requests bind to the complete workspace
+identity observed in `/health`: `paths.effective_base_path` and
+`paths.effective_masc_root`. API clients bind `GET /api/v1/gate/keepers` with
+both URL-encoded query parameters `expected_workspace=<base_path>` and
+`expected_masc_root=<masc_root>`. Supplying only one, a blank value, or a
+duplicate component returns 400. A different canonical path returns 409.
+Individual `POST /api/v1/keepers/:name/directive` and bulk
+`POST /api/v1/keepers_bulk/directive` accept the JSON field
+`"expected_workspace": {"base_path": "...", "masc_root": "..."}` and reject
+malformed or mismatched identities before applying any directive. Clients may
+omit the precondition entirely; the TUI always sends both components. On 409,
+refresh identity before issuing a new command; retained input stays local.
+
 The fixed `OPERATIONS` line follows the selected Keeper. It comes from
 `GET /api/v1/keepers/composite` and keeps the current lifecycle, turn step,
 idle age, last runtime/model outcome, and producer diagnosis together on the
@@ -1820,7 +1833,20 @@ in place:
   exact match count, exact-address rows whose truncated/malformed body could
   not be rendered, and fleet rows that lost even their address. `Enter` on a commit answers with its pull
   request link (the subject's `(#N)` against the registered remote). `Enter`
-  on a Keeper change returns to the file at its producer-recorded line. A
+  on a Keeper change returns to the file at its producer-recorded line.
+  On a Keeper record, `d` expands its recorded edit/write text in the timeline;
+  press `d` on any of that record's rows to collapse it. Failed calls are
+  labelled as attempts. Writes have no recorded previous contents, and blob
+  materialization has no text diff. This reads the captured call, without
+  asking for the current working tree's Git diff.
+  `t` opens the selected Keeper record's Task detail, including its recorded
+  status, handoff, completion/evidence contract and transition history. `Esc`
+  returns to the same file-history position and expanded record. A missing Task
+  link, unavailable task read or Task absent from the current backlog leaves
+  the file history open and explains why there is no destination.
+  Git and Keeper reads are independent: if either fails, the other remains
+  visible with the failed source named. `r` in History retries both sources;
+  reopening `H` alone keeps the existing reading. A
   project tree is joined automatically only when the server base path exactly
   matches one registered repository's resolved path; otherwise it keeps Git
   history and explicitly says why Keeper activity cannot be joined.
@@ -1828,17 +1854,16 @@ in place:
   renderer the Changes surface uses. A clean file says it matches its last
   commit.
 
-- `m` swaps it for the notes anchored to the file — who left each one, its
-  kind, the line span, and the task it rides with. Notes are keyed by the
-  server-minted codebase slug, which only a Workspace row carries, so
-  `m` answers in repository scope and says why not in the others. Inside
-  the notes view `w` adds one through the `$EDITOR` form (kind: Comment /
-  Decision / Question / Bookmark); the acting identity is the bearer's.
-- Once notes or history have been read (`m` or `H`), their exact producer
-  ranges mark the gutter: an accent dot for a note, a dim dot for a durable
-  Keeper change. Historical changes without line evidence remain in the
-  timeline as `L?` and do not invent a range. The pane decorates only what is
-  already loaded; it does not fetch to decorate.
+- `m` lists memos written as standalone comments in the opened file, such as
+  `-- masc(alpha) decision: keep the lock` in Lua. It works in project,
+  Keeper and repository scopes. It shows the line, author, optional kind and
+  text; malformed memos show their parse error. To add or edit one, edit the
+  source file through the external editor. There is no separate note-store
+  write form on this surface.
+- File memos mark their own gutter lines. Once history has been read (`H`),
+  exact producer-recorded Keeper ranges also mark the gutter. Historical
+  changes without line evidence remain `L?`; the pane does not invent a range
+  or fetch history solely to decorate the file.
 - `K` asks the language server what a name on the cursor line is, and `D`
   where it is defined. The line's own names are the candidates (the pane
   has no character cursor): one name is asked about at once, several open

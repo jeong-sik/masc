@@ -243,8 +243,10 @@ val gate_transition :
 
 (** {1 Wire bodies} *)
 
-val directive_body : operator_operation_id:string -> string -> string
-(** JSON body for a directive step. [resume] carries the operation id so a
+val directive_body :
+  expected_workspace:Masc.Tui_decode.server_identity ->
+  operator_operation_id:string -> string -> string
+(** JSON body binding every directive to the full observed workspace. [resume] carries the operation id so a
     retry names the same operation; the other directives ignore it. *)
 
 val lifecycle_body : string

@@ -1854,7 +1854,6 @@ let process_next_with_claim_ready_exact_current
       ~prepare
       ~execute
   =
-  let* candidates = Candidate.load_candidates ~base_path ~keeper_name in
   (* #41422: drop consumed rows the replay gate can never re-mint before
      roots are ensured, so a long-lived keeper's candidate ledger stays
      bounded by its unresolved attention instead of its board history. The
@@ -1897,6 +1896,15 @@ let process_next_with_claim_ready_exact_current
        "board_attention_settled_receipt_prune_failed keeper=%s detail=%s"
        keeper_name
        detail);
+  (* The candidate list is read only after both prunes. A list read before
+     them can still hold a candidate that an owner settlement (which runs
+     without this lock) consumed meanwhile; once the prune dropped that
+     candidate's settled receipt, [ensure_roots] would mint a fresh [Ready]
+     root that no candidate row backs, and the worker would block on
+     "candidate ledger lacks partition member" forever because only [Settled]
+     receipts are pruned. Receipts are dropped only above this read, so a
+     candidate consumed after it still has its [Settled] receipt. *)
+  let* candidates = Candidate.load_candidates ~base_path ~keeper_name in
   let* (_ : int) = Partition.ensure_roots ~base_path ~keeper_name candidates in
   let selected_generation_is_ready ~partition_id ~generation =
     let* partitions = Partition.load ~base_path ~keeper_name in

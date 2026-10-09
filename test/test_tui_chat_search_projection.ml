@@ -352,6 +352,51 @@ let test_journal_only_pin_survives_all_arrivals () = at_sizes (fun origin ->
   state.msg_live <- None;
   assert_still_reading state "READ_A_035")
 
+let test_pending_pin_survives_run_start () = at_sizes (fun origin ->
+  let state = state origin in
+  let text = long_answer "PROMOTED_INPUT_" in
+  let request = Chat.create_request ~keeper_name:"alpha" ~message:text () in
+  let live = T.turn_log_create ~keeper_name:"alpha" ~request_id:request.request_id ~started_at:1. in
+  let inflight : T.inflight = {sent_request=request;submitted_at=1.;sent_at=1.;
+    control_generation=0;phase=T.Turn_streaming;log=live} in
+  state.msg_inflight <- [inflight];
+  let input = row ~id:"session-input" ~request_id:request.request_id ~role:user ~text 1. in
+  state.msg_history <- [{input with me_identity=T.Session_row {request_id=request.request_id;
+    turn_phase=T.Turn_input;operation_seq=0}}];
+  T.set_msg_scroll state 40;
+  let before = frame_lines state in
+  let needle = List.init 100 (Printf.sprintf "PROMOTED_INPUT_%03d")
+    |> List.find (fun needle -> List.exists (Astring.String.is_infix ~affix:needle) before) in
+  let position = visible_line before needle in
+  check bool "the waiting input owns the physical reading pin" true
+    (Option.exists (fun pin -> List.exists (fun point ->
+       point.T.scroll_anchor = T.Scroll_pending request.request_id) pin.T.pin_points)
+       state.msg_scroll_pin);
+  T.turn_log_add ~now:2. live ~seq:(Some 0) Live.Run_started;
+  T.turn_log_add ~now:3. live ~seq:(Some 1)
+    (Live.Text {text=long_answer "NEW_EXECUTION_";stream_scope=None});
+  check int "promotion and new output keep the pending input row in place" position
+    (visible_line (frame_lines state) needle);
+  assert_still_reading state needle)
+
+let test_reply_alias_uses_recorded_execution_source () = at_sizes (fun origin ->
+  let state = state origin in
+  let text = long_answer "BATCH_REPLY_" in
+  let history = row ~id:"batch-reply" ~request_id:"delivery-request"
+      ~role:T.Message_keeper ~text 1. in
+  state.msg_loaded <- [{history with me_execution_source=Some (Log.Operation "execution-owner")}];
+  let cursor = find state "BATCH_REPLY_040" in
+  (match cursor.T.matched_anchor with
+   | T.Search_history {reply_source=Some (Log.Operation "execution-owner");_} -> ()
+   | _ -> fail "history reply inferred the delivery request instead of recorded execution");
+  ignore (frame_lines state);
+  ignore (log state ~id:"execution-owner" ~at:1.
+    [Live.Run_started;Live.Text {text;stream_scope=None};reply text;Live.Run_finished]);
+  ignore (log state ~id:"later" ~at:200.
+    [Live.Run_started;Live.Text {text=long_answer "NEW_AFTER_ALIAS_";stream_scope=None};
+     reply (long_answer "NEW_AFTER_ALIAS_");Live.Run_finished]);
+  assert_still_reading state "BATCH_REPLY_040")
+
 let test_pin_aliases_history_and_canonical_reply () = at_sizes (fun origin ->
   let state = state origin in
   let text = long_answer "ALIASED_" in
@@ -460,6 +505,8 @@ let () = run "chat search projection" [
       test_search_matches_rendered_words;
     test_case "journal-only pin survives settled, broadcast, input and live arrivals" `Quick
       test_journal_only_pin_survives_all_arrivals;
+    test_case "pending pin survives run start" `Quick test_pending_pin_survives_run_start;
+    test_case "reply alias uses recorded execution source" `Quick test_reply_alias_uses_recorded_execution_source;
     test_case "scroll pin follows history and canonical reply aliases" `Quick
       test_pin_aliases_history_and_canonical_reply;
     test_case "search pins before the first frame and releases at the live edge" `Quick

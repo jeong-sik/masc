@@ -389,13 +389,23 @@ let test_card_source_spans () =
         let row = List.nth mapped.rows span.row in
         check string "mapped field bytes occur exactly at formatter-owned placement"
           (String.sub span.value span.source_start_byte length)
-          (String.sub row span.row_start_byte length)) mapped.fields
+          (String.sub row span.row_start_byte length)) mapped.fields;
+      let physical = List.sort (fun (left : card_source_span) right ->
+        compare (left.row,left.row_start_byte) (right.row,right.row_start_byte)) mapped.fields in
+      let rec check_order = function
+        | left :: (right :: _ as rest) ->
+            check bool "typed source sequence follows actual interleaved fields" true
+              (compare (left.order,left.field) (right.order,right.field) < 0);
+            check_order rest
+        | [] | [_] -> () in
+      check_order physical
     ) [12;40;54;55;80;140];
     let title width =
       let mapped = render_inline_card_with_spans ~width preview in
       List.find (fun (span : card_source_span) -> span.field=Card_title) mapped.fields in
     let narrow = title 40 and wide = title 80 in
     check string "title has the same original source across layout switch" narrow.value wide.value;
+    check bool "title logical order survives narrow/wide reflow" true (narrow.order=wide.order);
     check int "title's original start does not depend on clipping" 0 narrow.source_start_byte;
     check int "wide title keeps original start too" 0 wide.source_start_byte) samples
 

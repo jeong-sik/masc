@@ -136,7 +136,10 @@ let test_indexed_scroll_anchors () = at_sizes (fun origin ->
   List.iteri (fun i (tag, _) ->
     check bool "indexed anchor equals typed source" true
       (Render.scroll_anchor_at projection i =
-       Option.map (fun anchor -> T.Scroll_durable anchor) (Render.search_anchor_of_tag tag)))
+       Option.map (fun anchor -> T.Scroll_durable anchor) (Render.search_anchor_of_tag tag));
+    Option.iter (fun anchor ->
+      check (option int) "reverse lookup agrees with typed matching" (Some i)
+        (Render.projection_index_of_anchor projection anchor)) (Render.search_anchor_of_tag tag))
     projection.tagged_entries;
   check bool "out of range has no anchor" true
     (Option.is_none (Render.scroll_anchor_at projection 500));

@@ -116,9 +116,9 @@ let all_events : E.keeper_chat_event list =
       { occurrence; tool_call_id = None; snapshot = "{\"path\":\"/tmp\"}" }
   ; E.Tool_call_end { occurrence; tool_call_id = Some "tc-1" }
   ; E.Native_tool_start { occurrence; tool_call_id = Some "native-1"; tool_call_name = Some "Read" }
-  ; E.Native_tool_end { occurrence; tool_call_id = Some "native-1"; tool_call_name = Some "Read" }
+  ; E.Native_tool_end ({ occurrence; tool_call_id = Some "native-1"; tool_call_name = Some "Read" }, Runtime_native_tools.end_observed)
   ; E.Native_tool_start { occurrence = occurrence_anon; tool_call_id = None; tool_call_name = None }
-  ; E.Native_tool_end { occurrence = occurrence_anon; tool_call_id = None; tool_call_name = None }
+  ; E.Native_tool_end ({ occurrence = occurrence_anon; tool_call_id = None; tool_call_name = None }, Runtime_native_tools.end_observed)
   ; E.Tool_approval_requested
       { tool_call_id = "tc-2"
       ; tool_call_name = "bash"
@@ -186,6 +186,18 @@ let test_codec_round_trip_all_constructors () =
         Alcotest.(check (option (float 1e-9))) "delta charge and authoritative zero round-trip"
           (Some charge) usage.cost_usd
     | Ok _ | Error _ -> Alcotest.fail "charged delta must decode") [0.001; 0.0]
+
+(* The writer always records a native end's completion. A record without one
+   is refused instead of being read as a generic end. *)
+let test_native_tool_end_requires_completion () =
+  let encoded = L.keeper_chat_event_to_json
+    (E.Native_tool_end ({ occurrence; tool_call_id = Some "native-1"; tool_call_name = Some "Read" },
+       Runtime_native_tools.end_observed)) in
+  let stripped = match encoded with
+    | `Assoc fields -> `Assoc (List.remove_assoc "completion" fields)
+    | other -> other in
+  Alcotest.(check bool) "a native end without completion is refused" true
+    (Result.is_error (L.keeper_chat_event_of_json stripped))
 
 let test_envelope_round_trip () =
   let entry : L.journaled_event =
@@ -1129,7 +1141,7 @@ let test_native_activity_survives_bridge_journal_and_projection () =
     let native = List.filter_map (fun (entry : L.journaled_event) ->
       match entry.event with
       | E.Native_tool_start tool -> Some (true, tool)
-      | E.Native_tool_end tool -> Some (false, tool)
+      | E.Native_tool_end (tool, _) -> Some (false, tool)
       | _ -> None) entries in
     Alcotest.(check (list (pair bool int))) "one ordered observation per actual boundary"
       [true, 1; false, 1; true, 2; false, 2; true, 3]
@@ -1256,6 +1268,7 @@ let () =
             `Quick
             test_codec_round_trip_all_constructors
         ; Alcotest.test_case "envelope round trip" `Quick test_envelope_round_trip
+        ; Alcotest.test_case "native end requires completion" `Quick test_native_tool_end_requires_completion
         ; Alcotest.test_case
             "envelope rejects unknown version"
             `Quick

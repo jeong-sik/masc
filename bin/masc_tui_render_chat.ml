@@ -1140,7 +1140,7 @@ let tool_outcome_tone : Keeper_chat_transcript.tool_outcome -> string = function
       Theme.info ()
   | Keeper_chat_transcript.Returned -> Theme.ok ()
   | Keeper_chat_transcript.Native_ended -> Theme.recede ()
-  | Keeper_chat_transcript.Failed -> Theme.bad ()
+  | Keeper_chat_transcript.Native_failed | Keeper_chat_transcript.Failed -> Theme.bad ()
   | Keeper_chat_transcript.Never_returned
   | Keeper_chat_transcript.Outcome_unrecorded -> Theme.warn ()
 
@@ -1150,7 +1150,8 @@ let tool_outcome_label : Keeper_chat_transcript.tool_outcome -> string = functio
   | Keeper_chat_transcript.Awaiting_result -> "WAITING FOR RESULT"
   | Keeper_chat_transcript.Returned -> "RETURNED"
   | Keeper_chat_transcript.Native_running -> "NATIVE STEP RUNNING"
-  | Keeper_chat_transcript.Native_ended -> "NATIVE STEP ENDED · OUTCOME NOT REPORTED"
+  | Keeper_chat_transcript.Native_ended -> "NATIVE STEP ENDED · PROVIDER OBSERVATION"
+  | Keeper_chat_transcript.Native_failed -> "NATIVE STEP FAILED · PROVIDER OBSERVATION"
   | Keeper_chat_transcript.Failed -> "FAILED"
   | Keeper_chat_transcript.Never_returned -> "RESULT NOT SEEN HERE"
   | Keeper_chat_transcript.Outcome_unrecorded -> "OUTCOME UNRECORDED"
@@ -1440,6 +1441,7 @@ let tool_result_rows state ~keeper_name ~max_cells projection =
                  | Keeper_chat_transcript.Outcome_unrecorded -> "unknown"
                  | Keeper_chat_transcript.Native_running -> "native running"
                  | Keeper_chat_transcript.Native_ended -> "native ended"
+                 | Keeper_chat_transcript.Native_failed -> "native failed"
                  | Keeper_chat_transcript.Returned -> "received")
         in
         let fixed_cells = Message_layout.display_width (marker ^ "  · " ^ status) in
@@ -1473,7 +1475,10 @@ let tool_result_rows state ~keeper_name ~max_cells projection =
           | Some _ -> Some "(empty result)"
           | None ->
               (match activity.outcome with
-               | Keeper_chat_transcript.Native_ended -> Some "provider step ended; outcome not reported"
+               | Keeper_chat_transcript.Native_ended
+               | Keeper_chat_transcript.Native_failed ->
+                   Some (Keeper_chat_transcript.native_completion_summary
+                     (Option.value activity.native_completion ~default:Runtime_native_tools.end_observed))
                | Keeper_chat_transcript.Native_running -> None
                | Keeper_chat_transcript.Started
                | Keeper_chat_transcript.Awaiting_result -> None

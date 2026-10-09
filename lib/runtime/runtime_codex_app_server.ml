@@ -242,7 +242,7 @@ type stream_event =
       }
   | Dynamic_tool_finished of { call_id : string }
   | Native_tool_started of Runtime_native_tools.observation
-  | Native_tool_finished of Runtime_native_tools.observation
+  | Native_tool_finished of Runtime_native_tools.finished
   | Compaction_observed
   | Elicitation_cancelled of
       { server_name : string
@@ -1083,6 +1083,35 @@ let active_turn_item ~stage ~thread_id ~turn_id params =
   else required_member stage "item" fields
 ;;
 
+let native_completion_of_item ~stage ~kind item =
+  let* fields = assoc_at stage item in
+  let* outcome = match kind with
+    (* [tool_item_of_item] projects an unclassified item as a native tool, so
+       the status the provider reports for it is read like a modelled one. *)
+    | Command_execution | File_change | Mcp_tool_call | Unclassified_item _ ->
+        (match List.assoc_opt "status" fields with
+         | None | Some `Null -> Ok Runtime_native_tools.End_observed
+         | Some (`String "completed") -> Ok Runtime_native_tools.Completion_reported
+         | Some (`String "failed") -> Ok Runtime_native_tools.Error_reported
+         | Some (`String "declined") -> Ok Runtime_native_tools.Decline_reported
+         (* Codex reports an interrupted collaboration as a terminal status;
+            it did not complete, so it is a failure, not a neutral end. *)
+         | Some (`String "interrupted") -> Ok Runtime_native_tools.Error_reported
+         | Some (`String status) -> Ok (Runtime_native_tools.Unrecognized_status status)
+         | Some _ -> protocol_error stage "native item status must be a string")
+    | Sleep | Model_item | Reasoning_item | Compaction_item | Dynamic_tool_item ->
+        Ok Runtime_native_tools.End_observed
+  in
+  let* exit_code = match kind, List.assoc_opt "exitCode" fields with
+    | Command_execution, Some (`Int code) -> Ok (Some code)
+    | Command_execution, (None | Some `Null) -> Ok None
+    | Command_execution, Some _ -> protocol_error stage "command exitCode must be an integer or null"
+    | (File_change | Mcp_tool_call | Sleep | Model_item | Reasoning_item
+      | Compaction_item | Dynamic_tool_item | Unclassified_item _), _ -> Ok None
+  in
+  Ok ({outcome; exit_code} : Runtime_native_tools.completion)
+;;
+
 let messages_of_items ~stage = function
   | `List items ->
     let rec loop final fallback completed = function
@@ -1699,6 +1728,7 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
      | Command_execution | File_change | Mcp_tool_call | Sleep | Model_item
      | Dynamic_tool_item | Unclassified_item _ -> Ok () in
     let* tool_item = tool_item_of_item ~stage item in
+    let* completion = native_completion_of_item ~stage ~kind item in
     let open_tool_call_ids =
       match tool_item with
       | None ->
@@ -1708,7 +1738,7 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
         Option.iter
           (fun observation ->
              tool_effect_attempted := true;
-             emit_stream_event on_stream_event (Native_tool_finished observation))
+             emit_stream_event on_stream_event (Native_tool_finished {observation; completion}))
           observation;
         let still_open =
           List.filter (fun open_id -> not (String.equal open_id call_id)) open_tool_call_ids

@@ -3286,7 +3286,7 @@
 (test
  (name test_tui_chat_queue_wiring)
  (modules test_tui_chat_queue_wiring)
- (libraries masc_tui_chat_media masc.keeper_chat_delivery_identity masc.keeper_chat_operations masc_tui_message_input masc_tui_link_preview masc_tui_image_preview
+ (libraries masc_tui_chat_media masc.keeper_chat_delivery_identity masc.runtime masc.keeper_chat_operations masc_tui_message_input masc_tui_link_preview masc_tui_image_preview
   masc_tui_answering
   masc_tui_keys
   masc_tui_fusion_model
@@ -3399,7 +3399,7 @@
 (test
  (name test_tui_keeper_chat_transcript)
  (modules test_tui_keeper_chat_transcript)
- (libraries
+ (libraries masc.runtime
   alcotest
   agent_core
   fmt
@@ -5732,6 +5732,19 @@
  (name test_goal_suspension_projection)
  (modules test_goal_suspension_projection)
  (libraries masc_dashboard masc_goal alcotest yojson))
+
+(library
+ (name native_tool_outcome_fixture)
+ (wrapped false)
+ (modules native_tool_outcome_fixture)
+ (libraries alcotest astring yojson masc masc.runtime masc.agent_core masc.server masc.ag_ui
+  masc_tui_keeper_chat_live masc_tui_keeper_chat_log masc_tui_keeper_chat_transcript))
+
+(test
+ (name test_tui_native_tool_outcomes)
+ (modules test_tui_native_tool_outcomes)
+ (libraries alcotest yojson masc masc.runtime masc.agent_core masc.server masc.ag_ui native_tool_outcome_fixture
+  masc_tui_keeper_chat_live masc_tui_keeper_chat_log masc_tui_keeper_chat_transcript))
 
 ; H2 crash-resume harness: scenario subcommands need orchestrated env
 ; (H2_ROOT, H2_ASYNC_*), so it is an executable, not a (test) — a (test)

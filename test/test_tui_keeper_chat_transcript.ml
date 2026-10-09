@@ -79,6 +79,7 @@ let outcome_to_string : Transcript.tool_outcome -> string = function
   | Transcript.Awaiting_result -> "awaiting_result"
   | Transcript.Returned -> "returned"
   | Transcript.Native_ended -> "native_ended"
+  | Transcript.Native_failed -> "native_failed"
   | Transcript.Failed -> "failed"
   | Transcript.Never_returned -> "never_returned"
   | Transcript.Outcome_unrecorded -> "outcome_unrecorded"
@@ -1862,7 +1863,7 @@ let test_native_tools_are_observations_without_execution_receipts () =
     | [call] -> call | calls -> failf "expected one native step, got %d" (List.length calls) in
   check tool_outcome "provider step runs; arguments are not inferred" Transcript.Native_running (call ()).outcome;
   feed t [Live.Native_tool_started {occurrence;tool_name=Some "Read"};
-          Live.Native_tool_ended {occurrence}; Live.Native_tool_ended {occurrence}];
+          Live.Native_tool_ended {occurrence; completion=Runtime_native_tools.end_observed}; Live.Native_tool_ended {occurrence; completion=Runtime_native_tools.end_observed}];
   check tool_outcome "provider end is not a result receipt" Transcript.Native_ended (call ()).outcome;
   check (option string) "no invented physical execution" None (call ()).execution_id;
   feed t [Live.Tool_result {occurrence; execution_id="wrong-authority"}];
@@ -1872,11 +1873,62 @@ let test_native_tools_are_observations_without_execution_receipts () =
      exercises the compact group's summary without inventing a MASC receipt. *)
   let second = {occurrence with block_index=8; tool_call_id=Some "native-8"} in
   feed t [Live.Native_tool_started {occurrence=second;tool_name=Some "Search"};
-          Live.Native_tool_ended {occurrence=second}];
+          Live.Native_tool_ended {occurrence=second; completion=Runtime_native_tools.end_observed}];
   let rows = Transcript.project_tool_block Transcript.Compact
       (Transcript.tool_block (Transcript.tool_calls t)) in
   check (option tool_outcome) "two native steps fold to a native end, not a MASC receipt"
     (Some Transcript.Native_ended) rows.summary_outcome
+;;
+
+(* The provider's own report decides which native ending a step shows. Only a
+   reported error, a reported decline or a nonzero exit is a failure; a
+   missing or unknown status is not. The failure keeps its native wording and
+   never becomes a MASC result. *)
+let test_a_reported_native_failure_shows_as_failure () =
+  let open Runtime_native_tools in
+  let step index name completion =
+    let occurrence = occurrence ~block_index:index (Printf.sprintf "native-%d" index) in
+    [Live.Native_tool_started {occurrence; tool_name=Some name};
+     Live.Native_tool_ended {occurrence; completion}] in
+  List.iter (fun (label, completion, expected) ->
+    let t = fresh () in
+    feed t (Live.Run_started :: step 7 "Read" completion);
+    match Transcript.tool_calls t with
+    | [call] ->
+      check tool_outcome label expected call.outcome;
+      check (option string) (label ^ ": no execution receipt") None call.execution_id
+    | calls -> failf "%s: expected one native step, got %d" label (List.length calls))
+    [ "error", {outcome=Error_reported; exit_code=None}, Transcript.Native_failed
+    ; "decline", {outcome=Decline_reported; exit_code=None}, Transcript.Native_failed
+    ; "result flagged as an error", {outcome=Result_received {is_error=Some true}; exit_code=None},
+      Transcript.Native_failed
+    ; "nonzero exit", {outcome=Completion_reported; exit_code=Some 17}, Transcript.Native_failed
+    ; "completion", {outcome=Completion_reported; exit_code=Some 0}, Transcript.Native_ended
+    ; "result without an error", {outcome=Result_received {is_error=Some false}; exit_code=None},
+      Transcript.Native_ended
+    ; "result without an error flag", {outcome=Result_received {is_error=None}; exit_code=None},
+      Transcript.Native_ended
+    ; "unrecognized status", {outcome=Unrecognized_status "future"; exit_code=None},
+      Transcript.Native_ended
+    ; "no status", end_observed, Transcript.Native_ended ];
+  check string "a reported native failure draws the failure mark"
+    (Transcript.marker_of_outcome Transcript.Failed)
+    (Transcript.marker_of_outcome Transcript.Native_failed);
+  check bool "a quiet native ending keeps its own mark" true
+    (Transcript.marker_of_outcome Transcript.Native_ended
+     <> Transcript.marker_of_outcome Transcript.Native_failed);
+  let t = fresh () in
+  feed t (Live.Run_started :: step 7 "Read" end_observed
+          @ step 8 "Bash" {outcome=Error_reported; exit_code=Some 2}
+          @ step 9 "Search" {outcome=Completion_reported; exit_code=None});
+  let rows = Transcript.project_tool_block Transcript.Compact
+      (Transcript.tool_block (Transcript.tool_calls t)) in
+  check (option tool_outcome) "the fold takes the failure's mark and colour"
+    (Some Transcript.Native_failed) rows.summary_outcome;
+  check bool "the failure has a line of its own that names the tool" true
+    (List.exists (fun row ->
+       String.starts_with ~prefix:(Transcript.marker_of_outcome Transcript.Native_failed) row
+       && contains ~needle:"1 native failed: Bash" row) rows.details)
 ;;
 
 let test_response_boundaries_preserve_origins () =
@@ -1886,9 +1938,9 @@ let test_response_boundaries_preserve_origins () =
     "tool round", [Live.Text {text="COMMENTARY"; stream_scope=None}] @ read_file_call;
     "native tool round", [Live.Text {text="COMMENTARY"; stream_scope=None};
       Live.Native_tool_started {occurrence=occurrence "native";tool_name=Some "Read"};
-      Live.Native_tool_ended {occurrence=occurrence "native"}];
+      Live.Native_tool_ended {occurrence=occurrence "native"; completion=Runtime_native_tools.end_observed}];
     "provider response", [Live.Text {text="COMMENTARY"; stream_scope=None};
-      Live.Stream_model_started {stream_scope = None; message_id=Some "new";model="glm";usage=None}];
+      Live.Stream_model_started {stream_scope=None; message_id=Some "new";model="glm";usage=None}];
     "retry", [Live.Text {text="COMMENTARY"; stream_scope=None};
       Live.Runtime_attempt_started {runtime_id=Some "retry";attempt_index=Some 1}];
     "continuation", [Live.Text {text="COMMENTARY"; stream_scope=None};
@@ -2092,7 +2144,9 @@ let () =
       test_case "boundaries and stable origins" `Quick test_response_boundaries_preserve_origins; test_case "interleaved final authority" `Quick test_interleaved_final_keeps_observed_times_and_bytes; test_case "usage reset boundaries" `Quick test_usage_resets_only_at_response_boundaries; test_case "new response without text" `Quick test_empty_new_response_does_not_replace_prior_message])
     ; ( "event timeline"
       , [test_case "replay preserves continuation event times" `Quick test_event_times_survive_log_replay_and_continuation;
-         test_case "native tools have no MASC receipt" `Quick test_native_tools_are_observations_without_execution_receipts] )
+         test_case "native tools have no MASC receipt" `Quick test_native_tools_are_observations_without_execution_receipts;
+         test_case "a reported native failure shows as failure" `Quick
+           test_a_reported_native_failure_shows_as_failure] )
     ; ( "content"
       , [ test_case "the legend names every mark and phrase the rows draw" `Quick
             test_the_legend_names_every_mark_and_phrase_the_rows_draw

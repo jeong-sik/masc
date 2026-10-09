@@ -250,7 +250,7 @@ type mcp_blocks =
           streamed. *)
   | Streaming
 
-let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action ~on_usage_report
+let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~turn_count ~on_native_action ~on_usage_report
     ~position ~receipts on_event =
     let emit event = Option.iter (fun callback -> callback event) on_event in
     let next_tool_index = ref 1 in
@@ -334,7 +334,7 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
                  ; tool_id = Runtime_native_tools.call_id observation
                  ; tool_name = observation.tool_name
                  })
-          | Runtime_antigravity.Native_tool_finished observation ->
+          | Runtime_antigravity.Native_tool_finished {observation; completion} ->
             Host.record_raw_native_tool
               ~keeper_name
               ~raw_trace_run
@@ -344,6 +344,9 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
               (fun identity ->
                  Option.iter
                    (fun index ->
+                      Option.iter (fun finish -> finish ~block_index:index
+                        ~tool_call_id:(Runtime_native_tools.call_id observation) completion)
+                        on_native_tool_completion;
                       Hashtbl.remove native_tool_indexes identity;
                       emit (Agent_core.Types.ContentBlockStop { index }))
                    (Hashtbl.find_opt native_tool_indexes identity))
@@ -423,7 +426,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted
-    ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
+    ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_completion
     ~on_usage_report ~on_tool_execution ~(config : Runtime_execution.antigravity_cli) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -914,7 +917,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     let process_cwd = Eio.Path.(Eio.Stdenv.fs env / native_cwd) in
     let started_at = Time_compat.now () in
       let stream =
-        stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action
+        stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~turn_count ~on_native_action
           ~on_usage_report
           ~receipts
           ~position:
@@ -1296,6 +1299,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
     ~turn_start
     ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
+    ?on_native_tool_completion
     ?on_native_action
     ?on_usage_report
     ?on_tool_execution
@@ -1333,7 +1337,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
         ~context_injector
         ~context
         ~terminal_effect_state
-        ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
+        ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_completion
         ~on_usage_report
         ~on_tool_execution
         ~event_bus
@@ -1362,10 +1366,10 @@ module For_testing = struct
       event
   ;;
 
-  let project_stream events =
+  let project_stream ?on_event ?on_native_tool_completion events =
     let emitted = ref [] in
     let projection =
-      stream_projection
+      stream_projection ?on_native_tool_completion
         ~keeper_name:"test"
         ~raw_trace_run:None
         ~turn_count:1
@@ -1373,7 +1377,7 @@ module For_testing = struct
         ~on_usage_report:None
         ~position:Keeper_usage_resolution.Fresh
         ~receipts:None
-        (Some (fun event -> emitted := event :: !emitted))
+        (Some (fun event -> emitted := event :: !emitted; Option.iter (fun observe -> observe event) on_event))
     in
     List.iter projection.on_runtime_event events;
     List.rev !emitted

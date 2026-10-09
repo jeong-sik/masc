@@ -99,7 +99,8 @@ type delta =
   | Thinking of string  (** Reasoning text to append. *)
   | Native_tool_started of
       { occurrence : tool_occurrence; tool_name : string option }
-  | Native_tool_ended of { occurrence : tool_occurrence }
+  | Native_tool_ended of
+      { occurrence : tool_occurrence; completion : Runtime_native_tools.completion }
   | Tool_started of
       { occurrence : tool_occurrence
       ; tool_name : string

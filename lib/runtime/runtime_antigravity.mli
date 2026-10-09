@@ -127,7 +127,7 @@ type stream_event =
           named no usable index, and for the result event's response, which
           is forwarded only when no step carried text. *)
   | Native_tool_started of Runtime_native_tools.observation
-  | Native_tool_finished of Runtime_native_tools.observation
+  | Native_tool_finished of Runtime_native_tools.finished
   | Usage_reported of
       { conversation_id : string
       ; model : string

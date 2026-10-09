@@ -276,9 +276,10 @@ let keeper_chat_event_to_json event =
       ([ "occurrence", occurrence_to_json tool.occurrence ]
        @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool.tool_call_id)
        @ json_opt "tool_call_name" (Option.map (fun value -> `String value) tool.tool_call_name))
-  | Native_tool_end tool ->
+  | Native_tool_end (tool, completion) ->
     type_tag "native_tool_end"
-      ([ "occurrence", occurrence_to_json tool.occurrence ]
+      ([ "occurrence", occurrence_to_json tool.occurrence;
+         "completion", Runtime_native_tools.completion_to_json completion ]
        @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool.tool_call_id)
        @ json_opt "tool_call_name" (Option.map (fun value -> `String value) tool.tool_call_name))
   | Tool_approval_requested { tool_call_id; tool_call_name; args; question; because } ->
@@ -507,7 +508,17 @@ let keeper_chat_event_of_json json =
         ; tool_call_name = json |> member "tool_call_name" |> to_string_option
         }
       in
-      Ok (if String.equal tag "native_tool_start" then Native_tool_start tool else Native_tool_end tool)
+      if String.equal tag "native_tool_start" then Ok (Native_tool_start tool)
+      else
+        (* The writer always records the completion; a record without one is
+           truncated or malformed, not an older generic end. *)
+        let* completion =
+          match json with
+          | `Assoc fields when List.mem_assoc "completion" fields ->
+              Runtime_native_tools.completion_of_json (json |> member "completion")
+          | _ -> Error "native_tool_end has no completion"
+        in
+        Ok (Native_tool_end (tool, completion))
     | "tool_approval_requested" ->
       Ok
         (Tool_approval_requested

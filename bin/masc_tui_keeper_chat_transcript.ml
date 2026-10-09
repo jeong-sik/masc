@@ -31,8 +31,12 @@ type tool_outcome = Masc_tui_keeper_chat_activity_projection.tool_outcome =
   | Returned
   | Native_running
   | Native_ended
-      (** The provider ended its native tool step; no MASC result or success
-          receipt was reported. *)
+      (** The provider ended its native tool step; optional native completion
+          metadata is separate from a MASC execution receipt. *)
+  | Native_failed
+      (** The provider's own report says its native tool step did not
+          succeed: an error, a decline or a nonzero exit. A provider
+          observation, not a MASC execution receipt. *)
   | Failed
   | Never_returned
   | Outcome_unrecorded
@@ -44,6 +48,7 @@ type tool_activity = Masc_tui_keeper_chat_activity_projection.tool_activity =
   ; args : string
   ; subject : string option
   ; outcome : tool_outcome
+  ; native_completion : Runtime_native_tools.completion option
   ; duration : string option
   }
 
@@ -128,6 +133,7 @@ type live_tool_call =
   ; tool_name : string
   ; args : string
   ; ended : bool
+  ; native_completion : Runtime_native_tools.completion option
   ; result_ready : bool
   ; failed : bool
   ; duration : string option
@@ -551,12 +557,14 @@ let activity_of_live_call (t : t) (call : live_tool_call) =
         | Waiting | Working -> false
         | Stream_ended | Stream_failed _ -> true)
   in
-  make_tool_activity ?execution_id:call.execution_id
+  make_tool_activity ?native_completion:call.native_completion ?execution_id:call.execution_id
     ~call_id:call.call_id ~tool_name:call.tool_name
     ~args:call.args
     ~outcome:
       (if call.failed then Failed
-       else if call.authority = Provider_native && call.ended then Native_ended
+       else if call.authority = Provider_native && call.ended then
+         if native_report_says_failed call.native_completion then Native_failed
+         else Native_ended
        else if call.result_ready then Returned
        else if attempt_ended then Never_returned
        else if call.authority = Provider_native then Native_running
@@ -820,7 +828,8 @@ let phase_text ~show_timing ~now t =
                  Option.exists (String.equal awaiting.call_id) call.call_id
                  && (match (activity_of_live_call t call).outcome with
                      | Started | Native_running | Awaiting_result -> true
-                     | Returned | Native_ended | Failed | Never_returned | Outcome_unrecorded -> false))
+                     | Returned | Native_ended | Native_failed | Failed | Never_returned
+                     | Outcome_unrecorded -> false))
                current_calls with
              | [call] -> Some call.local_id
              | _ -> None)
@@ -845,7 +854,8 @@ let phase_text ~show_timing ~now t =
       let has_pending_activity = List.exists
         (fun activity -> match activity.outcome with
           | Started | Native_running | Awaiting_result -> true
-          | Returned | Native_ended | Failed | Never_returned | Outcome_unrecorded -> false)
+          | Returned | Native_ended | Native_failed | Failed | Never_returned
+          | Outcome_unrecorded -> false)
         activities_now in
       let approval_pending = match t.awaiting, has_pending_activity with
         | Some awaiting, false -> "approval pending: " ^ awaiting.tool_name ^ " · "
@@ -859,7 +869,8 @@ let phase_text ~show_timing ~now t =
             Some call.local_id <> awaiting_call
             && (match (activity_of_live_call t call).outcome with
                 | Started | Native_running | Awaiting_result -> true
-                | Returned | Native_ended | Failed | Never_returned | Outcome_unrecorded -> false))
+                | Returned | Native_ended | Native_failed | Failed | Never_returned
+                | Outcome_unrecorded -> false))
           current_calls
           |> List.sort (fun (a : live_tool_call) b -> Float.compare a.started_at b.started_at)
         with
@@ -1015,7 +1026,8 @@ let compact_progress_text ~show_timing ~now t =
                 Option.exists (String.equal awaiting.call_id) call.call_id
                 && match (activity_of_live_call t call).outcome with
                    | Started | Awaiting_result | Native_running -> true
-                   | Returned | Native_ended | Failed | Never_returned | Outcome_unrecorded -> false)
+                   | Returned | Native_ended | Native_failed | Failed | Never_returned
+                   | Outcome_unrecorded -> false)
                 current_calls with
                | [call] -> Some call.local_id | _ -> None) in
         let pending = current_calls
@@ -1027,7 +1039,7 @@ let compact_progress_text ~show_timing ~now t =
                | Started -> Some ("preparing " ^ activity.tool_name)
                | Awaiting_result -> Some ("awaiting result: " ^ activity.tool_name)
                | Native_running -> Some ("running " ^ activity.tool_name)
-               | Returned | Native_ended | Failed | Never_returned
+               | Returned | Native_ended | Native_failed | Failed | Never_returned
                | Outcome_unrecorded -> None)
         in
         match t.awaiting, pending with
@@ -1267,6 +1279,7 @@ let start_tool ~now t ~authority ~occurrence ~tool_name =
            ; tool_name
            ; args = ""
            ; ended = false
+           ; native_completion = None
            ; result_ready = false
            ; failed = false
            ; duration = None
@@ -1452,9 +1465,10 @@ let apply_delta ~now t (delta : Live.delta) =
         | Some name when String.trim name <> "" -> name
         | Some _ | None -> "native tool" in
       start_tool ~now t ~authority:Provider_native ~occurrence ~tool_name
-  | Live.Native_tool_ended { occurrence } ->
+  | Live.Native_tool_ended { occurrence; completion } ->
       (match update_occurrence t occurrence (fun call ->
-          if call.authority = Provider_native then { call with ended = true }
+          if call.authority = Provider_native then
+            (if call.ended then call else { call with ended = true; native_completion = Some completion })
           else (note_unreadable t "native end names a MASC tool"; call)) with
        | Call_updated | Call_ambiguous -> ()
        | Call_missing | Call_conflicting ->
@@ -1680,7 +1694,8 @@ let note_tool_outcome t ~execution_id ~outcome ~duration =
         match outcome with
         | Returned -> { call with result_ready = true; ended = true }
         | Failed -> { call with failed = true; ended = true }
-        | Native_running | Native_ended | Started | Awaiting_result | Never_returned | Outcome_unrecorded -> call
+        | Native_running | Native_ended | Native_failed | Started | Awaiting_result
+        | Never_returned | Outcome_unrecorded -> call
       in
       let updated =
         match duration with

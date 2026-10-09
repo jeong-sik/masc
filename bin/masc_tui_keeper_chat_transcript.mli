@@ -51,8 +51,12 @@ type tool_outcome =
   | Returned
   | Native_running
   | Native_ended
-      (** The provider ended its native tool step; no MASC result or success
-          receipt was reported. *)
+      (** The provider ended its native tool step; optional native completion
+          metadata is separate from a MASC execution receipt. *)
+  | Native_failed
+      (** The provider's own report says its native tool step did not
+          succeed: an error, a decline or a nonzero exit. A provider
+          observation, not a MASC execution receipt. *)
   | Failed
   | Never_returned
       (** No result was observed here before the attempt ended. This does not
@@ -90,6 +94,7 @@ type tool_activity = private
           arguments are still arriving or carry no known key. Same naming as
           the connector trail and the dashboard. *)
   ; outcome : tool_outcome
+  ; native_completion : Runtime_native_tools.completion option
   ; duration : string option
       (** The source's duration label. Live events do not currently carry one,
           so they retain [None]. *)
@@ -234,6 +239,7 @@ type tool_projection = private
   }
 
 val make_tool_activity :
+  ?native_completion:Runtime_native_tools.completion ->
   ?execution_id:string ->
   call_id:string option ->
   tool_name:string ->
@@ -244,6 +250,15 @@ val make_tool_activity :
   tool_activity
 (** Build an activity and derive its [subject] through the shared tool-subject
     authority. History and live projection must not derive it independently. *)
+
+val native_completion_status : Runtime_native_tools.completion -> string
+(** Provider observation only; never implies a persisted MASC execution receipt.
+    Generated words only: an unrecognized status is named, not quoted, so the
+    compact and full rows that the phrase dresser colours carry no provider text. *)
+
+val native_completion_summary : Runtime_native_tools.completion -> string
+(** {!native_completion_status} plus the provider's own word for an
+    unrecognized status. For the results view, which draws it undressed. *)
 
 val descriptor_of_tool_name : string -> Masc.Keeper_tool_descriptor.t option
 (** The registry's descriptor for a tool name as a trace carries it: the

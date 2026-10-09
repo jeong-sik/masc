@@ -253,9 +253,9 @@ let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
     Some (Live.Native_tool_started
       { occurrence = occurrence native.occurrence ~tool_call_id:native.tool_call_id
       ; tool_name = native.tool_call_name })
-  | E.Native_tool_end native ->
+  | E.Native_tool_end (native, completion) ->
     Some (Live.Native_tool_ended
-      { occurrence = occurrence native.occurrence ~tool_call_id:native.tool_call_id })
+      { occurrence = occurrence native.occurrence ~tool_call_id:native.tool_call_id; completion })
   | E.Tool_call_start { occurrence = o; tool_call_id; tool_call_name } ->
     Some
       (Live.Tool_started

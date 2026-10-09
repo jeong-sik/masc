@@ -2960,12 +2960,16 @@ let test_keeper_stream_bridge_preserves_native_tool_origin () =
         }
     ; Native_tool_start native_start
     ; Agent_core_content_block_stop { index = 7 }
-    ; Native_tool_end native_end
+    ; Native_tool_end (native_end, completion)
     ] ->
     check string
       "typed native content origin"
       Runtime_native_tools.stream_content_type
       content_type;
+    check bool
+      "a block stop reports only that the end was observed"
+      true
+      (completion = Runtime_native_tools.end_observed);
     List.iter
       (fun (label, (tool : Keeper_chat_events.native_tool)) ->
         check int (label ^ " stream scope") 0 tool.occurrence.stream_scope;

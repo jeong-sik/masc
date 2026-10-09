@@ -302,7 +302,9 @@ let state_of ~lock_held = function
   | Ok (Some ({ ended = Some ending; _ } as entry)) -> Ended (entry, ending)
   | Ok (Some ({ ended = None; _ } as entry)) -> if lock_held then Running entry else Died entry
 
-let read_entry base_path =
+(* The entry, with the JSON it was read from: a writer built later may have
+   written what this reader loads without naming, such as a verb. *)
+let read_record base_path =
   match Fs_compat.load_file_opt (path base_path record_name) with
   | exception Sys_error detail -> Error (File_unreadable detail)
   | None -> Ok None
@@ -310,7 +312,9 @@ let read_entry base_path =
     let not_a_record detail = Not_a_record { detail; contents } in
     (match Yojson.Safe.from_string contents with
      | exception Yojson.Json_error _ -> Error (not_a_record (record_name ^ " is not JSON"))
-     | json -> Result.map_error not_a_record (Result.map Option.some (entry_of_json json)))
+     | json -> Result.map_error not_a_record (Result.map (fun entry -> Some (entry, json)) (entry_of_json json)))
+
+let read_entry base_path = Result.map (Option.map fst) (read_record base_path)
 
 (* [lockf] locks belong to the process, not to the descriptor. This process's
    own test of a lock it holds says "free", a second [take] here would be
@@ -476,13 +480,14 @@ let lock base_path =
                  Hashtbl.replace held_here identity ();
                  Locked (identity, descriptor)))))
 
-(* Archive rows for [results], under the host [entry] names. *)
+(* Archive rows for [results], each in the record's unacknowledged-result
+   shape, under the host [entry] names. *)
 let archive_rows (entry : entry) results =
   let row result =
     `Assoc [ "schema", `Int 1; "pid", `Int entry.pid
            ; "started_at", time entry.started_at
            ; "client_id", `String (Browser_lane.client_id_to_string entry.client_id)
-           ; "result", unacknowledged_to_json result ]
+           ; "result", result ]
   in
   results |> List.map (fun result -> Yojson.Safe.to_string (row result) ^ "\n") |> String.concat ""
 
@@ -496,16 +501,22 @@ let unloadable_copy_path ~base_path ~pid ~now =
   path base_path (Printf.sprintf "%s.unloadable-%d-%.0f" record_name pid now)
 
 (* The next host's record replaces the last one, and with it the results
-   that host holds no acknowledgement for. They are archived first. A record
+   that host holds no acknowledgement for. They are archived first, as they
+   were written: a verb this reader cannot name is kept by its name. A record
    this reader cannot load may list some in a layout it does not know, so
    its bytes are kept beside it; one that cannot be read at all is not
    replaced. *)
 let keep_predecessor_results ~base_path ~pid ~now =
-  match read_entry base_path with
-  | Ok (Some ({ unacknowledged = _ :: _; _ } as previous)) ->
+  match read_record base_path with
+  | Ok (Some (({ unacknowledged = _ :: _; _ } as previous), json)) ->
     Result.map_error (fun detail -> "the last host's results: " ^ detail)
-      (archive base_path (archive_rows previous previous.unacknowledged))
-  | Ok (Some { unacknowledged = []; _ }) | Ok None -> Ok ()
+      (match Yojson.Safe.Util.member "unacknowledged" json with
+       | `List written -> archive base_path (archive_rows previous written)
+       (* entry_of_json loaded a list from this JSON; anything else is not
+          taken for an empty one. *)
+       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ ->
+         Error "unacknowledged is not the list it was read as")
+  | Ok (Some ({ unacknowledged = []; _ }, _)) | Ok None -> Ok ()
   | Error (File_unreadable detail) ->
     Error ("the last host's record cannot be read, so the results it may list cannot be archived: "
            ^ detail)
@@ -582,7 +593,7 @@ let note_unacknowledged held noted =
   let excess = List.length kept - unacknowledged_limit in
   if excess <= 0 then replace held { held.entry with unacknowledged = kept }
   else
-  match archive held.base_path (archive_rows held.entry (List.take excess kept)) with
+  match archive held.base_path (archive_rows held.entry (List.map unacknowledged_to_json (List.take excess kept))) with
   | Ok () ->
       replace held { held.entry with unacknowledged = List.drop excess kept }
   | Error detail ->

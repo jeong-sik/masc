@@ -741,6 +741,37 @@ let test_a_host_that_cannot_archive_them_does_not_take_the_workspace () =
   check bool "the last host's result is archived once" true (archived_results base = [ result_json noted ]);
   released next
 
+(* A newer host may have named a verb this reader loads as unnamed. The
+   archive keeps the name it was written with: it says which action may
+   have taken effect. *)
+let test_an_archived_result_keeps_a_verb_this_reader_cannot_name () =
+  with_workspace @@ fun ~base ~lane ->
+  let first = taken ~pid:100 base in
+  written (Record.note_unacknowledged first noted);
+  released first;
+  let record = Filename.concat lane "bidi-host.json" in
+  let named_later = function
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (function
+             | "unacknowledged", `List [ `Assoc result ] ->
+               "unacknowledged", `List [ `Assoc (List.map (function "verb", _ -> "verb", `String "page.later" | field -> field) result) ]
+             | field -> field)
+           fields)
+    | _ -> fail "the record is an object"
+  in
+  Yojson.Safe.to_file record (named_later (Yojson.Safe.from_file record));
+  (match Record.observe ~base_path:base with
+   | Record.Died { unacknowledged = [ { verb = None; _ } ]; _ } -> ()
+   | other -> failf "a verb added later reads as unnamed, not as %s" (said other));
+  let next = taken ~pid:200 base in
+  (match archived_results base with
+   | [ result ] ->
+     check string "the verb as it was written" "page.later" Yojson.Safe.Util.(result |> member "verb" |> to_string)
+   | _ -> fail "one archived result");
+  released next
+
 (* A record this reader reads and cannot load may list results in a layout
    it does not know: its bytes are kept before it is replaced. *)
 let test_a_record_that_cannot_be_loaded_is_kept_beside_it () =
@@ -818,6 +849,8 @@ let () =
               test_the_next_host_archives_the_last_ones_results
           ; test_case "a host that cannot archive them does not take the workspace" `Quick
               test_a_host_that_cannot_archive_them_does_not_take_the_workspace
+          ; test_case "an archived result keeps a verb this reader cannot name" `Quick
+              test_an_archived_result_keeps_a_verb_this_reader_cannot_name
           ; test_case "a record that cannot be loaded is kept beside it" `Quick
               test_a_record_that_cannot_be_loaded_is_kept_beside_it
           ; test_case "a record that cannot be read is not replaced" `Quick

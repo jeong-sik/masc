@@ -2,6 +2,7 @@ open Alcotest
 open Masc
 module Http = Http_server_eio
 module Api = Server_dashboard_http_keeper_native_tasks
+module Read = Keeper_native_task_read
 let () = Mirage_crypto_rng_unix.use_default ()
 
 let rec remove_tree path =
@@ -145,6 +146,12 @@ let test_authenticated_routes () = with_fixture (fun ~base_path ~state:_ ~admin 
     let status,body = send headers records in
     check int (name ^ " missing is not empty success") 404 status;
     check string "missing code" "store_missing" Yojson.Safe.Util.(body |> member "error" |> to_string);
+    let decoded = require_ok Read.decode_error_to_string (Read.of_json body) in
+    (match decoded with
+     | Read.Failure {error=Read.Store_missing;health=Some (Read.Process_only _)} -> ()
+     | _ -> fail "missing store lost its typed error or process health");
+    check bool "shared error serializer and decoder round-trip actual HTTP body" true
+      (Read.to_json decoded=body);
     List.iter (fun query -> let status,_ = send headers (records ^ query) in
       check int (name ^ " strict query") 400 status)
       ["&unknown=x";"&receiver_generation=other";"&store_id=x";
@@ -153,7 +160,49 @@ let test_authenticated_routes () = with_fixture (fun ~base_path ~state:_ ~admin 
     let status,body = send headers (prefix ^ "receivers") in
     check int (name ^ " discovery") 200 status;
     check string "no completeness assertion" "unknown"
-      Yojson.Safe.Util.(body |> member "provider_completeness" |> to_string)) protocols;
+      Yojson.Safe.Util.(body |> member "provider_completeness" |> to_string);
+    let decoded = require_ok Read.decode_error_to_string (Read.of_json body) in
+    let inventory = require_ok Read.decode_error_to_string
+        (Read.receivers_of_response ~keeper_name:"alpha" decoded) in
+    check int "actual authenticated empty discovery decodes as empty success" 0
+      (List.length inventory.receivers);
+    check bool "shared discovery serializer and decoder round-trip HTTP body" true
+      (Read.to_json decoded=body);
+    (match Read.receivers_of_response ~keeper_name:"foreign" decoded with
+     | Error Read.Scope_mismatch -> ()
+     | _ -> fail "another Keeper's discovery was accepted");
+    let set name value = function
+      | `Assoc fields -> `Assoc ((name,value)::List.remove_assoc name fields)
+      | _ -> fail "fixture expected object" in
+    let health = Yojson.Safe.Util.member "observed_persistence_health" body in
+    let warning = `Assoc ["operation",`String "close";"status",`String "cleanup_failed"] in
+    let issue = `Assoc ["receiver",`Null;"event_uuid",`String "opaque issue";
+      "error",`Null;"cleanup_failures",`List [warning]] in
+    let with_issues issues = set "observed_persistence_health"
+        (set "issues" (`List issues) health) body in
+    let nullable = with_issues [issue] in
+    let decoded = require_ok Read.decode_error_to_string (Read.of_json nullable) in
+    (match decoded with
+     | Read.Receivers {health=Read.Process_only {issues=[issue];_};_} ->
+         check bool "required nullable health leaves remain absent facts" true
+           (issue.receiver=None && issue.error=None && issue.cleanup_failures=["close"])
+     | _ -> fail "nullable health diagnostics were flattened");
+    (* JSON object order is irrelevant; canonical round-trip retains all facts. *)
+    check bool "nullable diagnostics survive re-encoding" true
+      (Read.of_json (Read.to_json decoded)=Ok decoded);
+    let rejected value = match Read.of_json value with
+      | Error _ -> () | Ok _ -> fail "malformed closed native-task envelope decoded" in
+    rejected (set "schema" (`String "other") body);
+    rejected (set "provider_completeness" `Null body);
+    rejected (set "observed_persistence_health" `Null body);
+    rejected (set "unknown" (`Bool true) body);
+    (match body with `Assoc fields -> rejected (`Assoc (("schema",`String "masc.native_tasks.receivers.v1")::fields))
+     | _ -> fail "response was not an object");
+    rejected (with_issues [set "receiver" (`Assoc ["receiver_generation",`String "g";"session_id",`Null]) issue]);
+    rejected (with_issues [set "error" (`String "store_missing") issue]);
+    rejected (with_issues [set "cleanup_failures" (`List [set "status" (`String "ok") warning]) issue]);
+    rejected (with_issues [match issue with `Assoc fields -> `Assoc (List.remove_assoc "error" fields)
+      | _ -> fail "issue was not an object"])) protocols;
   let reader = require_ok Keeper_native_task_journal.error_to_string
     (Keeper_native_task_journal.open_reader ~base_path ~keeper_name:"alpha"
       ~receiver_generation:"receiver" ~session_id:"session") in
@@ -161,7 +210,21 @@ let test_authenticated_routes () = with_fixture (fun ~base_path ~state:_ ~admin 
   Fs_compat.mkdir_p (Filename.dirname path);
   Out_channel.with_open_bin path (fun out -> output_string out "not a database");
   List.iter (fun (name,send) -> let status,_ = send ["authorization","Bearer " ^ admin] records in
-    check int (name ^ " corrupt storage unavailable") 503 status) protocols)
+    check int (name ^ " corrupt storage unavailable") 503 status;
+    let _, body = send ["authorization","Bearer " ^ admin] (prefix ^ "receivers") in
+    let decoded = require_ok Read.decode_error_to_string (Read.of_json body) in
+    let inventory = require_ok Read.decode_error_to_string
+        (Read.receivers_of_response ~keeper_name:"alpha" decoded) in
+    (match inventory.receivers with
+     | [{storage=Read.Failed Read.Store_unavailable;_}] -> ()
+     | _ -> fail "failed receiver disappeared or became empty/audited success");
+    match body with
+    | `Assoc fields ->
+        let entries=Yojson.Safe.Util.(body |> member "receivers" |> to_list) in
+        let duplicate=`Assoc (("receivers",`List (entries @ entries))::List.remove_assoc "receivers" fields) in
+        (match Read.of_json duplicate with Error Read.Duplicate_receiver -> ()
+         | _ -> fail "duplicate receiver was accepted")
+    | _ -> fail "discovery was not an object") protocols)
 
 let () = run "native task authenticated read" ["registered routes",[
   test_case "H1/H2 auth, strict scope and failed storage" `Quick test_authenticated_routes]]

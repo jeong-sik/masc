@@ -3413,6 +3413,69 @@ let test_native_task_http_reads_actual_bound_observations () =
       (body |> member "provider_completeness" |> Yojson.Safe.Util.to_string);
     check string "absent terminal is never inferred complete" "unknown"
       (body |> member "terminal_without_observation" |> Yojson.Safe.Util.to_string);
+    let module Read = Keeper_native_task_read in
+    let wire_decode body =
+      body |> Yojson.Safe.to_string |> Yojson.Safe.from_string |> Read.of_json
+      |> Result.get_ok in
+    let scope : Read.scope = {keeper_name;receiver={
+      receiver_generation=bound.ticket.receiver_generation;session_id=bound.ticket.session_id}} in
+    let request : Read.records_request = {scope;after=None} in
+    let decoded = wire_decode body in
+    let page = match Read.records_of_response ~request decoded with
+      | Ok page -> page | Error e -> fail (Read.decode_error_to_string e) in
+    check (list int) "actual HTTP JSON to shared closed read view retains commit order" [1;2;3]
+      (List.map (fun (row:Read.record) -> row.seq) page.records);
+    (match List.map (fun (row:Read.record) -> row.observation.event) page.records with
+     | [Runtime_native_tasks.Task_registered _;
+        Task_progress_reported {usage;_};Task_terminal_reported _] ->
+         check int "public page retains signed provider duration" (-3) usage.duration_ms
+     | _ -> fail "closed public read changed observation kinds");
+    let set name value = function
+      | `Assoc fields -> `Assoc ((name,value)::List.remove_assoc name fields)
+      | _ -> fail "expected actual HTTP JSON object" in
+    let malformed value = match Read.of_json value with
+      | Error _ -> () | Ok _ -> fail "malformed actual record page was accepted" in
+    let original_rows = rows in
+    malformed (set "records" (`List (List.rev original_rows)) body);
+    malformed (set "records" (`List [List.hd original_rows;List.nth original_rows 2]) body);
+    let replace_first row = set "records" (`List (row::List.tl original_rows)) body in
+    malformed (replace_first (set "seq" (`Int 0) (List.hd original_rows)));
+    malformed (replace_first (set "seq" (`Intlit "9007199254740992") (List.hd original_rows)));
+    (match Read.of_json (replace_first (set "recorded_at" (`Float Float.infinity) (List.hd original_rows))) with
+     | Error (Read.Invalid_number _) -> () | _ -> fail "nonfinite timestamp was accepted");
+    let first_uuid=List.hd original_rows |> member "observation" |> member "uuid" in
+    let second=List.nth original_rows 1 in
+    let duplicate=set "observation" (set "uuid" first_uuid (member "observation" second)) second in
+    (match Read.of_json (set "records" (`List [List.hd original_rows;duplicate;List.nth original_rows 2]) body) with
+     | Error Read.Duplicate_event_uuid -> () | _ -> fail "duplicate event UUID with valid sequence was accepted");
+    let foreign_row = List.hd original_rows in
+    let foreign_observation=foreign_row |> member "observation" in
+    let foreign_origin=foreign_observation |> member "origin" in
+    (match Read.of_json (replace_first (set "observation"
+      (set "origin" (set "keeper_name" (`String "foreign") foreign_origin) foreign_observation) foreign_row)) with
+     | Error Read.Scope_mismatch -> () | _ -> fail "foreign row scope with valid sequence was accepted");
+    malformed (set "validation" (`Assoc ["kind",`String "full_committed_history";"through_sequence",`Int 4]) body);
+    malformed (set "next_cursor" (`Assoc ["store_id",`String "store";"after_sequence",`Int (-1)]) body);
+    let refusal request = match Read.records_of_response ~request decoded with
+      | Error _ -> () | Ok _ -> fail "foreign/malformed public request cursor accepted" in
+    refusal {request with scope={scope with keeper_name="foreign"}};
+    refusal {request with scope={scope with receiver={scope.receiver with session_id="foreign"}}};
+    refusal {scope;after=Some {page.next_cursor with store_id="foreign"}};
+    refusal {scope;after=Some {page.next_cursor with after_sequence=(-1)}};
+    refusal {scope;after=Some {page.next_cursor with after_sequence=9007199254740992}};
+    refusal {scope;after=Some {page.next_cursor with store_id=" "}};
+    (* A suffix is structurally legal, but only the matching request may accept
+       its first sequence. This prevents silent cursor skipping/reset. *)
+    let suffix_json = set "records" (`List (List.tl original_rows)) body in
+    let suffix = wire_decode suffix_json in
+    (match Read.records_of_response ~request suffix with
+     | Error Read.Sequence_mismatch -> ()
+     | _ -> fail "structural suffix was accepted for a Beginning request");
+    let after_one : Read.records_request =
+      {scope;after=Some {page.next_cursor with after_sequence=1}} in
+    (match Read.records_of_response ~request:after_one suffix with
+     | Ok suffix -> check int "correct request accepts complete two-row suffix" 2 (List.length suffix.records)
+     | Error e -> fail (Read.decode_error_to_string e));
     let cursor = body |> member "next_cursor" in
     let cursor_query = "&store_id=" ^ Uri.pct_encode
       (cursor |> member "store_id" |> Yojson.Safe.Util.to_string)
@@ -3421,12 +3484,27 @@ let test_native_task_http_reads_actual_bound_observations () =
     check int "exact cursor accepted" 200 status;
     check int "no repeated committed rows" 0
       (List.length (replay |> member "records" |> Yojson.Safe.Util.to_list));
-    let status,_ = get ("records" ^ query ^ "&store_id=foreign&after_sequence=3") in
+    let caught_up = wire_decode replay in
+    (match Read.records_of_response ~request:{scope;after=Some page.next_cursor} caught_up with
+     | Ok page -> check int "actual caught-up HTTP suffix remains existing empty success" 0 (List.length page.records)
+     | Error e -> fail (Read.decode_error_to_string e));
+    (match Read.records_of_response ~request caught_up with
+     | Error Read.Sequence_mismatch -> () | _ -> fail "empty suffix reset a Beginning cursor");
+    let status,foreign = get ("records" ^ query ^ "&store_id=foreign&after_sequence=3") in
     check int "foreign store cursor refused" 409 status;
+    (match wire_decode foreign with
+     | Read.Failure {error=Read.Cursor_store_mismatch;health=Some _} -> ()
+     | _ -> fail "HTTP cursor refusal lost its typed service error");
     let status, discovery = get "receivers" in
     check int "production discovery" 200 status;
     check int "actual receiver discoverable" 1
       (List.length (discovery |> member "receivers" |> Yojson.Safe.Util.to_list));
+    (match Read.receivers_of_response ~keeper_name (wire_decode discovery) with
+     | Ok {receivers=[{receiver;storage=Read.Audited cursor}];_} ->
+         check bool "actual HTTP discovery names the same cursor incarnation and receiver" true
+           (receiver=scope.receiver && cursor=page.next_cursor)
+     | Ok _ -> fail "actual receiver did not remain audited"
+     | Error e -> fail (Read.decode_error_to_string e));
     let conflict = Task_journal.create ~base_path ~keeper_name
       ~source:(task_journal_operation "other-source") ~redact_text:Fun.id in
     (match (Task_journal.observe conflict ~attempt bound).result with

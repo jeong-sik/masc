@@ -97,7 +97,10 @@ def run(executable):
             cells = h.screen_rows(frame)
             screen = b"\n".join(cells.get(row, b"") for row in range(1, 41))
             assert notice in screen, (stage, screen)
-            assert b"RECEIPT" in screen and b"Keeper remains paused" in screen, (stage, screen)
+            # The old pause belongs to the receipt snapshot, even while the
+            # current turn's footer reports streamed answer growth.
+            assert b"RECEIPT" in screen and "접수 당시: ".encode() in screen, (stage, screen)
+            assert b"Keeper remains paused" in screen, (stage, screen)
             if streaming:
                 # The answer is a single delta. STREAMING proves that the
                 # actual client fold includes all 100 lines, not just a server gate.

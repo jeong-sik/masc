@@ -415,16 +415,16 @@ let encode_line ~(role : Role.t) ~content ~ts ?message_id ?attachments ?tool_cal
     ("content", `String content);
     ("ts", `Float ts);
   ] in
-  (* Backend-driven chat blocks: assistant rows get a default parse unless
-     the caller already supplied blocks (e.g., a future rich-content path).
-     Tool and user rows carry no blocks. *)
+  (* Only Keeper speech has a default rich-text projection. The diagnostic
+     on a failed-request row is server-owned text; completed blocks supplied
+     by the producer are retained independently of that failure. *)
   let blocks =
-    match blocks with
-    | Some _ -> blocks
-    | None ->
-      if Role.equal role Role.Assistant && String.trim content <> ""
-      then Some (Keeper_chat_blocks.parse_text_to_blocks content)
-      else None
+    match blocks, role, kind with
+    | Some _, _, _ -> blocks
+    | None, Role.Assistant, Row_kind.Utterance when String.trim content <> "" ->
+      Some (Keeper_chat_blocks.parse_text_to_blocks content)
+    | None, (Role.User | Role.Assistant | Role.System | Role.Tool),
+      (Row_kind.Utterance | Row_kind.Transport_failure) -> None
   in
   (* Some [] records the writer's explicit no-mention decision. None is used
      only where this row has no mention metadata supplied by its writer. *)

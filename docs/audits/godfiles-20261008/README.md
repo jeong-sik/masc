@@ -8,7 +8,7 @@ inventory contains 171 candidates: 75 production source/style/interface files,
 90 tests, 3 tooling files and 3 evidence scripts. `inventory.json` records each
 baseline path and its current audit state. A line count selects candidates; it
 is not a defect verdict or a new build gate. Semantic review remains pending
-for 71 production candidates. Four production files received bounded changes;
+for 70 production candidates. Five production files received bounded changes;
 their other responsibilities have not been declared audited or complete.
 
 | PR | Concrete boundary or defect | Changed production file |
@@ -18,6 +18,7 @@ their other responsibilities have not been declared audited or complete.
 | [#41871](https://github.com/jeong-sik/masc/pull/41871) | Invalid persisted kinds cannot impersonate utterances or acknowledge pending input | `keeper_chat_store.ml` |
 | [#41872](https://github.com/jeong-sik/masc/pull/41872) | Pure calendar, segment grammar and ordering separated from storage effects | `dated_jsonl.ml` |
 | [#41879](https://github.com/jeong-sik/masc/pull/41879) | Pure line-window projection after backend acquisition | `keeper_tool_filesystem_runtime.ml` |
+| [#41890](https://github.com/jeong-sik/masc/pull/41890) | Failure card extracted; completed media retained on history reload; diagnostics remain separate from speech | `dashboard/src/components/chat/primitives.ts` |
 
 The declared branch dependencies follow that order, starting at `main`.
 GitHub may group a subset into a native stack; inspect live membership rather
@@ -44,7 +45,7 @@ operator-requested local check; see [local-validation.md](local-validation.md).
 Subsequent operator-authorized Core/dated JSONL compilation and the three
 row-kind tests passed on the combined source head; see
 [local-validation.md](local-validation.md) for scope, commands and logs.
-The other behavior targets below remain unexecuted.
+Dashboard failure/output scenarios and their store checks subsequently passed; see [failure-output/README.md](failure-output/README.md). The other behavior targets below remain unexecuted.
 
 `validation.log` records successful OCaml 5.5.1 parse-only checks on the changed
 source/interface files, combined diff whitespace checking, and validation of

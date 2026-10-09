@@ -2,7 +2,7 @@
    where a layout comes from. *)
 
 open Alcotest
-module Pad = Masc.Play_pad
+module Pad = Dos_pad
 
 let remove_tree path =
   let rec go path =

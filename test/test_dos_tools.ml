@@ -1130,10 +1130,10 @@ let test_a_removed_keeper_lets_its_controller_go () =
       check bool "the next move cannot see that a removed Keeper left" true
         (Option.is_none departure);
       check (result unit string) "removing a Keeper that holds nothing succeeds" (Ok ())
-        (Keeper_dos_controller.release_retired ~keeper_name:"liu-bei" ~by:"operator");
+        (Keeper_dos_controller.release_retired ~config ~keeper_name:"liu-bei" ~by:"operator");
       check (option string) "leaves the holder" (Some "cao-cao") (current_controller ());
       check (result unit string) "removing the holder succeeds" (Ok ())
-        (Keeper_dos_controller.release_retired ~keeper_name:"cao-cao" ~by:"operator");
+        (Keeper_dos_controller.release_retired ~config ~keeper_name:"cao-cao" ~by:"operator");
       check (option string) "frees the controller" None (current_controller ());
       check bool "and the next Keeper moves" true (keeper_press ~base_path "liu-bei" "a")))
 ;;

@@ -5,8 +5,8 @@
     same name under the actor [with_tool_actor_auth] resolves, after checking
     the body against that tool's schema. A body the schema refuses is a 400
     naming the field, and nothing runs. The answer is [{ok, message, data}],
-    200 when the tool succeeded and 400 when it refused. Every call that ran
-    wakes the Lane instances bound to the DOS machine once. *)
+    200 when the tool succeeded and 400 when it refused. Completed calls refresh the worker observation. Missing shared installations
+    return 503. *)
 
 val moves : (string * Masc_domain.tool_schema) list
 (** Every move route's path, with the schema of the tool whose arguments its
@@ -21,7 +21,7 @@ val press_into :
 (** [POST /api/v1/dos/press] for a caller that chose [keys] from the layout
     of the program kept under [saves_name]: the same release, answer and
     wake, and the keys go in only while that program is loaded
-    ({!Dos_lane.press_into}). Another program loaded by then is a 400 and
+    (checked by the worker). Another program loaded by then is a 400 and
     nothing is pressed. Credential transaction admission failure is a 503; no
     input is sent and no controller state is changed. *)
 

@@ -10,6 +10,12 @@ module Routes = Server_routes_http_routes_lane_addons
 module Sources = Masc.Lane_addon_sources
 module Tui_live = Masc_tui_machine_live
 
+let published_dos_answer ~since =
+  Routes.answer_from_publication Masc.Machine_lane.Dos ~since
+    (Machine_live_publication.map
+      (fun {Dos_lane.count;incarnation} -> {Routes.count;incarnation})
+      (Dos_lane.current_publication ()))
+
 let remove_tree path =
   let rec go path =
     if (Unix.lstat path).Unix.st_kind = Unix.S_DIR then begin
@@ -495,15 +501,45 @@ let test_live_route () =
     in
     let state = Masc.Mcp_server.For_testing.create_state ~base_path in
     Eio_main.run (fun env ->
+      Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 30. (fun () ->
       Eio.Switch.run (fun sw ->
+      Eio_context.with_test_env ~sw ~net:(Eio.Stdenv.net env)
+        ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
+        Masc.Lane_addon_runtime.For_testing.reset ();
+        let config = Masc.Workspace.default_config base_path in
         let clock = (Eio.Stdenv.clock env :> float Eio.Time.clock_ty Eio.Resource.t) in
         let get ?(authorization = Some token) target =
           dispatch_get ~sw ~clock ~state ~authorization ~target
+        in
+        let with_attached machine f =
+          let run ~detach =
+            let name = match machine with Masc.Machine_lane.Msx -> "masc_msx_screen" | Dos -> "masc_dos_screen" in
+            let snapshot () = Masc.Lane_addon_runtime.observation_for_export ~config
+              ~access:Sources.Unauthenticated ~name in
+            let refresh () =
+              let previous = match snapshot () with Ok (Some snapshot) -> snapshot.observation_seq | _ -> 0 in
+              let exports = match Masc.Lane_addon_runtime.tool_exports ~config ~access:Sources.Unauthenticated ~reserved:[] with
+                | Ok exports -> exports | Error detail -> fail detail in
+              let export = List.find (fun (export : Masc.Lane_addon_tool_export.t) -> export.tool.name=name) exports in
+              (match Masc.Lane_addon_runtime.dispatch ~config ~access:Sources.Operator_configuration
+                ~operation:Masc.Lane_addon_runtime.Observe (`Assoc ["instance_id",`String export.instance_id]) with
+               | Ok _ -> () | Error error -> fail (Masc.Lane_addon_runtime.error_to_string error));
+              let rec wait () = match snapshot () with
+                | Ok (Some snapshot) when snapshot.observation_seq > previous && not snapshot.refreshing -> ()
+                | _ -> Eio.Time.sleep clock 0.001; wait () in
+              wait () in
+            refresh ();
+            f ~refresh;
+            detach () in
+          match machine with
+          | Masc.Machine_lane.Msx -> Machine_worker_fixture.with_msx ~clock ~sw ~base_path (fun ~invoke:_ ~detach -> run ~detach)
+          | Dos -> Machine_worker_fixture.with_dos ~clock ~sw ~base_path (fun ~invoke:_ ~detach -> run ~detach)
         in
         let live = "/api/v1/lane-addons/live?source_kind=msx_capture" in
         eject_if_loaded ();
         let refused = get ~authorization:None live in
         check int "no credential is refused" 401 (status_of_response refused);
+        with_attached Masc.Machine_lane.Msx (fun ~refresh ->
         let nothing = get live in
         check int "no machine is still a 200" 200 (status_of_response nothing);
         check string "no machine is a typed answer" "no_machine"
@@ -511,6 +547,7 @@ let test_live_route () =
         check bool "TUI accepts MSX no-machine without an activity feed" true
           (tui_answer Masc.Machine_lane.Msx (body_json nothing) = Tui_live.No_machine);
         with_machine (fun ~dir:_ ~ledger_dir:_ ->
+          refresh ();
           let first = get live in
           check int "a loaded machine answers 200" 200 (status_of_response first);
           let json = body_json first in
@@ -541,10 +578,13 @@ let test_live_route () =
           check bool "unchanged sends no screen" true (member "screen" json = None);
           check bool "TUI accepts unchanged MSX without an activity feed" true
             (tui_answer Masc.Machine_lane.Msx json = Tui_live.Unchanged { count = n; incarnation });
+          check (list string) "unchanged live reads write no workspace files" files_before (tree base_path);
           ok "step" (Lane.step ~frames:1);
+          refresh ();
           let moved = body_json (get (live ^ since n)) in
           check string "a step makes the old since stale" "changed" (string_member "state" moved);
           check bool "the new count is larger" true (int_member "change_count" moved > n);
+          let files_before = tree base_path in
           List.iter
             (fun (target, what) ->
               check int what 400 (status_of_response (get target)))
@@ -555,7 +595,7 @@ let test_live_route () =
             ; live ^ "&since=soon&incarnation=" ^ incarnation, "a text since is a 400"
             ; live ^ "&since=" ^ string_of_int n, "a since without its incarnation is a 400" ];
           check (list string) "live reads write no file under the workspace" files_before
-            (tree base_path));
+            (tree base_path)));
         let dos_live = "/api/v1/lane-addons/live?source_kind=dos_capture" in
         dos_eject_if_loaded ();
         (* Activity is process-global and never reset (Dos_lane.dos_lane.ml),
@@ -567,6 +607,7 @@ let test_live_route () =
           | Some (`List l) -> l
           | _ -> fail "no activity list"
         in
+        with_attached Masc.Machine_lane.Dos (fun ~refresh ->
         let no_machine_json = body_json (get dos_live) in
         check string "no DOS machine is a typed answer" "no_machine"
           (string_member "state" no_machine_json);
@@ -577,6 +618,7 @@ let test_live_route () =
           (List.map (fun j -> string_member "who" j) (activity_list no_machine_json));
         with_dos (fun ~dir ->
           dos_ok "load" (dos_load ~dir hello_com);
+          refresh ();
           let json = body_json (get dos_live) in
           check string "no since gets the DOS frame" "changed" (string_member "state" json);
           check string "the answer names dos_capture" "dos_capture"
@@ -623,13 +665,14 @@ let test_live_route () =
           dos_ok "pass"
             (Dos_lane.pass ~who ~to_:(Some who)
                ~announce:(fun () ->
-                 held := Some (Routes.live_from_published_mark Masc.Machine_lane.Dos ~since:dos_since)));
+                 held := Some (published_dos_answer ~since:dos_since)));
           (match !held with
            | Some (Routes.Answered json) ->
                check string "unchanged is decided under a held lock" "unchanged"
                  (string_member "state" json)
            | Some Routes.Needs_locked_read -> fail "a current since asked for the locked read"
            | None -> fail "announce did not run");
+          refresh ();
           let same = body_json (get (dos_live ^ since)) in
           check string "since at the current DOS count is unchanged" "unchanged"
             (string_member "state" same);
@@ -646,12 +689,8 @@ let test_live_route () =
           check bool "a corrupted HTTP activity entry becomes a visible read failure" true
             (Tui_live.advance drawn (Result.map fst (Tui_live.decode Masc.Machine_lane.Dos malformed))
              = Some (Tui_live.Failed "live: activity[0] is not an object"));
-          (* The whole point of reading Dos_lane.recent_activity lock-free
-             rather than gating it on the published mark: [pass] above moved
-             no pixel, so the picture answers "unchanged" from the fast path
-             above [dos_live]/[Eio_unix.run_in_systhread] entirely -- yet the
-             activity feed still carries it, because [live_json] splices it
-             onto every branch, not just the locked-read one. *)
+          (* The refreshed worker observation retains the new activity even
+             though its pixels and machine mark did not change. *)
           let unchanged_activity = List.hd (activity_list same) in
           check string "an unchanged answer still carries the pass" who
             (string_member "who" unchanged_activity);
@@ -660,11 +699,12 @@ let test_live_route () =
              String.length action >= 4 && String.sub action 0 4 = "pass");
           dos_ok "press" (Dos_lane.press ~who ~keys:["x"] ~steps:100_000);
           check bool "a moved DOS mark needs the locked read" true
-            (match Routes.live_from_published_mark Masc.Machine_lane.Dos ~since:dos_since with
+            (match published_dos_answer ~since:dos_since with
              | Routes.Needs_locked_read -> true
              | Routes.Answered _ -> false);
+          refresh ();
           check string "a press makes the old DOS since stale" "changed"
-            (string_member "state" (body_json (get (dos_live ^ since))))))))
+            (string_member "state" (body_json (get (dos_live ^ since)))))))))))
 
 (* RFC play-link-for-the-shared-machine §2.3: live asks for CanPlayMachine,
    so an invited Player watches the machine through it while every
@@ -683,20 +723,48 @@ let test_player_watches_live_and_reads_nothing_else () =
     let worker = token_for ~agent_name:"hotseat-keeper" ~role:Masc_domain.Worker in
     let state = Masc.Mcp_server.For_testing.create_state ~base_path in
     Eio_main.run (fun env ->
-      Eio.Switch.run (fun sw ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Fun.protect ~finally:(fun () -> Fs_compat.clear_fs (); Server_auth.clear_server_state ()) (fun () ->
         let clock = (Eio.Stdenv.clock env :> float Eio.Time.clock_ty Eio.Resource.t) in
-        let status token target =
-          status_of_response (dispatch_get ~sw ~clock ~state ~authorization:(Some token) ~target)
-        in
-        List.iter
-          (fun source_kind ->
-            let live = "/api/v1/lane-addons/live?source_kind=" ^ source_kind in
-            check int ("a player watches " ^ source_kind) 200 (status player live);
-            check int ("a worker still watches " ^ source_kind) 200 (status worker live))
-          [ "dos_capture"; "msx_capture" ];
-        List.iter
-          (fun target -> check int ("a player is refused " ^ target) 403 (status player target))
-          [ "/api/v1/lane-addons"; "/api/v1/lane-addons/slice"; "/api/v1/lane-addons/actions" ])))
+        Eio.Time.with_timeout_exn clock 30. (fun () ->
+          Eio.Switch.run (fun sw ->
+            Eio_context.with_test_env ~sw ~net:(Eio.Stdenv.net env) ~clock
+              ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
+              Masc.Lane_addon_runtime.For_testing.reset ();
+              let config = Masc.Workspace.default_config base_path in
+              let get token target = dispatch_get ~sw ~clock ~state ~authorization:(Some token) ~target in
+              let status token target = status_of_response (get token target) in
+              let exercise machine ~detach =
+                let source_kind, tool_name = match machine with
+                  | Masc.Machine_lane.Msx -> "msx_capture", "masc_msx_screen"
+                  | Dos -> "dos_capture", "masc_dos_screen" in
+                let live = "/api/v1/lane-addons/live?source_kind=" ^ source_kind in
+                let rec await_observation () =
+                  match Masc.Lane_addon_runtime.observation_for_export ~config
+                    ~access:Sources.Unauthenticated ~name:tool_name with
+                  | Ok (Some observation) when not observation.refreshing -> ()
+                  | _ -> Eio.Time.sleep clock 0.001; await_observation () in
+                await_observation ();
+                let answer = get player live in
+                check int ("a player watches attached " ^ source_kind) 200 (status_of_response answer);
+                check bool "the TUI accepts the attached empty worker" true
+                  (tui_answer machine (body_json answer) = Tui_live.No_machine);
+                check int ("a worker still watches " ^ source_kind) 200 (status worker live);
+                detach ();
+                check int "detached machine is unavailable to a permitted reader" 503 (status player live)
+              in
+              eject_if_loaded ();
+              dos_eject_if_loaded ();
+              List.iter (fun source_kind ->
+                check int "missing worker is unavailable, not an empty machine" 503
+                  (status player ("/api/v1/lane-addons/live?source_kind=" ^ source_kind)))
+                ["msx_capture"; "dos_capture"];
+              Machine_worker_fixture.with_msx ~clock ~sw ~base_path
+                (fun ~invoke:_ ~detach -> exercise Masc.Machine_lane.Msx ~detach);
+              Machine_worker_fixture.with_dos ~clock ~sw ~base_path
+                (fun ~invoke:_ ~detach -> exercise Masc.Machine_lane.Dos ~detach);
+              List.iter (fun target -> check int ("a player is refused " ^ target) 403 (status player target))
+                ["/api/v1/lane-addons"; "/api/v1/lane-addons/slice"; "/api/v1/lane-addons/actions"]))))))
 
 let () =
   run "lane addon live route"

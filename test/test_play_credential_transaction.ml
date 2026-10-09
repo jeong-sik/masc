@@ -2,6 +2,7 @@
    transaction. No sleeps: the durable lock's admission hook fixes the order. *)
 open Alcotest
 open Masc
+module S = Mcp_protocol.Mcp_types
 
 let () = Mirage_crypto_rng_unix.use_default ()
 
@@ -21,10 +22,11 @@ let lock_path base_path =
 let with_machine f =
   let base_path = Filename.temp_dir "play-credential-transaction-" "" in
   Eio_main.run @@ fun env ->
-  Masc_test_deps.init_eio_clock env;
+  let previous_runtime = Runtime.For_testing.snapshot () in
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Fun.protect
     ~finally:(fun () ->
+      Runtime.For_testing.restore previous_runtime;
       Dos_lane.install_activity_observer None;
       (match Dos_lane.screen () with
        | Ok { controller = Some who; _ } ->
@@ -35,6 +37,10 @@ let with_machine f =
       Fs_compat.remove_tree base_path;
       Fs_compat.clear_fs ())
     (fun () ->
+      Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 30. @@ fun () ->
+      Eio.Switch.run @@ fun sw ->
+      Eio_context.with_test_env ~sw ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env)
+        ~mono_clock:(Eio.Stdenv.mono_clock env) @@ fun () ->
       Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
       Auth.save_auth_config base_path
         { Masc_domain.default_auth_config with enabled = true; require_token = true };
@@ -47,17 +53,36 @@ let with_machine f =
         ~saves_dir:(Filename.concat base_path "saves")
         ~checkpoint_dir:(Filename.concat base_path "checkpoints")
         ~program_name:"spin.com" ~program_bytes:"\xeb\xfe" ~files:[] ~announce:ignore));
-      f (Workspace.default_config base_path) token expired)
+      let runtime_path = Filename.concat base_path "runtime.toml" in
+      Out_channel.with_open_bin runtime_path (fun channel -> output_string channel {|[providers.local]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+[models.sample]
+api-name = "sample"
+max-context = 1024
+[local.sample]
+[runtime]
+default = "local.sample"
+|});
+      (match Runtime.init_default ~config_path:runtime_path with Ok () -> () | Error detail -> fail detail);
+      Lane_addon_runtime.For_testing.reset ();
+      Machine_worker_fixture.with_dos ~clock:(Eio.Stdenv.clock env) ~sw ~base_path
+        (fun ~invoke:_ ~detach ->
+          let result = f (Workspace.default_config base_path) token expired in
+          detach (); result))
+
+let call_failure = function
+  | Lane_addon_runtime.Unavailable detail | Outcome_unknown detail -> detail
+  | Host_refusal (Lane_addon_call_context.Rejected detail | Unavailable detail
+      | Activity_disabled detail | Activity_unobserved detail) -> detail
 
 let recover config =
-  Keeper_dos_controller.execute ~config ~who:"operator" ~name:"masc_dos_step"
-    ~args:(`Assoc [ "steps", `Int 1; "until_ready", `Bool false ])
-    ~run:(fun () -> None)
+  Machine_addon_host.call_shared ~config ~principal:(Lane_addon_call_context.Host_actor "operator")
+    ~name:"masc_dos_pass" ~arguments:(`Assoc ["to",`String ""])
 
-let recovered = function
-  | Ok None -> ()
-  | Ok (Some _) -> fail "the recovery-only callback returned a tool result"
-  | Error (Keeper_dos_controller.Refused detail | Keeper_dos_controller.Seats_unknown detail) -> fail detail
+let recovered ~released = function
+  | Ok result -> check bool "worker return request reflects current holder authority" released (result.S.is_error <> Some true)
+  | Error error -> fail (call_failure error)
 
 let renew config = auth_ok
     (Auth.create_token_expiring_in config.Workspace.base_path
@@ -106,7 +131,7 @@ let test_completed_renewal_preserves_the_controller () =
     (Result.is_error (Auth.find_static_credential_by_token config.base_path ~token:old_token));
   let (new_token, _), recovery = interleave config
       (fun () -> renew config) (fun () -> recover config) in
-  recovered recovery;
+  recovered ~released:false recovery;
   check string "renewal publishes a usable bearer" "player"
     (auth_ok (Auth.find_static_credential_by_token config.base_path ~token:new_token)).agent_name;
   check bool "the cached old bearer is not revived" true
@@ -117,7 +142,7 @@ let test_completed_renewal_preserves_the_controller () =
    | Error error -> fail (Dos_lane.error_to_string error)
    | Ok _ -> fail "another caller moved after the holder renewed");
   Auth.save_credential config.base_path expired;
-  recovered (recover config);
+  recovered ~released:true (recover config);
   ignore (dos_ok (Dos_lane.step ~who:"operator" ~steps:1 ~until_ready:false));
   check (option string) "an actually expired holder is still recoverable" (Some "operator") (controller ())
 
@@ -125,7 +150,7 @@ let test_recovery_before_renewal_has_one_order () =
   with_machine @@ fun config _ _ ->
   let recovery, (new_token, _) = interleave config
       (fun () -> recover config) (fun () -> renew config) in
-  recovered recovery;
+  recovered ~released:true recovery;
   check (option string) "the earlier expiry decision released the old turn" None (controller ());
   ignore (auth_ok (Auth.find_static_credential_by_token config.base_path ~token:new_token));
   ignore (dos_ok (Dos_lane.step ~who:"player" ~steps:1 ~until_ready:false));
@@ -153,11 +178,11 @@ let test_cancelled_delete_leaves_credential_and_releases_admission () =
   check bool "cancellation before admission deletes nothing" true
     (Option.is_some (Auth.load_credential config.base_path "player"));
   ignore (renew config);
-  recovered (recover config);
+  recovered ~released:false (recover config);
   check (option string) "subsequent publication and recovery can acquire the lock"
     (Some "player") (controller ());
   Auth.delete_credential config.base_path "player";
-  recovered (recover config);
+  recovered ~released:true (recover config);
   check (option string) "a completed deletion still frees an absent holder" None (controller ())
 
 let revoke config =
@@ -240,7 +265,7 @@ let test_unreadable_recovery_preserves_controller () =
     with_machine @@ fun config _ _ ->
     let path = Auth.credential_file config.base_path "player" in
     corrupt path;
-    recovered (recover config);
+    recovered ~released:false (recover config);
     check (option string) (label ^ ": recovery keeps the ambiguous holder")
       (Some "player") (controller ());
     (match Dos_lane.step ~who:"operator" ~steps:1 ~until_ready:false with
@@ -314,7 +339,9 @@ let test_revoke_callback_holds_credential_admission () =
     | Ok name -> name | Error detail -> fail detail in
   Eio.Switch.run (fun sw ->
     Eio.Fiber.fork ~sw (fun () ->
-      let result = Play_invite.revoke ~base_path:config.base_path ~name
+      let events = Machine_addon_host.dos_event_batch ~author:"operator" in
+      let result = Fun.protect ~finally:(fun () -> Machine_addon_events.ready events) (fun () ->
+        Play_invite.revoke ~base_path:config.base_path ~name
           ~after_revoke:(fun status ->
             check bool "deletion precedes the controller effect" true (status = Play_invite.Deleted);
             check bool "old credential already removed" true
@@ -323,7 +350,13 @@ let test_revoke_callback_holds_credential_admission () =
             await_waiter ~base_path:config.base_path writer_done;
             check bool "renewal cannot publish during the callback" true
               (Option.is_none (Eio.Promise.peek writer_done));
-            ignore (dos_ok (Dos_lane.release_left ~holder:"player" ~announce:ignore))) in
+            match Machine_addon_host.release_shared_controller ~events ~config
+                ~holder:"player" ~by:"operator" ~reason:Machine_controller_contract.No_credential with
+            | Ok (Some result) when result.S.is_error <> Some true -> ()
+            | Ok (Some result) -> fail (Agent_core.Mcp.text_of_tool_result result)
+            | Ok None -> fail "fixture lost its attached controller worker"
+            | Error error -> fail (call_failure error))) in
+      Machine_addon_events.drain ();
       Eio.Promise.resolve finish_revoke result);
     Eio.Promise.await callback_entered;
     Eio.Fiber.fork ~sw (fun () ->
@@ -421,8 +454,8 @@ let test_failed_admission_moves_nothing () =
   Unix.unlink path;
   Unix.mkdir path 0o700;
   (match recover config with
-   | Error (Keeper_dos_controller.Seats_unknown _) -> ()
-   | Error (Keeper_dos_controller.Refused detail) -> fail detail
+   | Error (Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Unavailable _)) -> ()
+   | Error error -> fail (call_failure error)
    | Ok _ -> fail "recovery ran without the credential transaction");
   check (option string) "an unavailable credential lock preserves the holder" (Some "player") (controller ());
   let status, _ = Server_routes_http_routes_dos.press_into ~config ~who:"operator"
@@ -440,19 +473,17 @@ let operator_holds config =
   ignore (dos_ok (Dos_lane.pass ~who:"player" ~to_:(Some "operator") ~announce:ignore))
 
 let hand_to config target =
-  Keeper_dos_controller.execute ~config ~who:"operator" ~name:"masc_dos_pass"
-    ~args:(`Assoc ["to",`String target])
-    ~run:(fun () -> fail "handoff must use its admitted lane effect, not the unguarded callback")
+  Machine_addon_host.call_shared ~config ~principal:(Lane_addon_call_context.Host_actor "operator")
+    ~name:"masc_dos_pass" ~arguments:(`Assoc ["to",`String target])
 
 let handed = function
-  | Ok (Some result) when Tool_result.is_success result -> result
-  | Ok (Some result) -> fail (Tool_result.message result)
-  | Ok None -> fail "handoff returned no actual lane result"
-  | Error (Keeper_dos_controller.Refused detail | Keeper_dos_controller.Seats_unknown detail) -> fail detail
+  | Ok result when result.S.is_error <> Some true -> result
+  | Ok result -> fail (Agent_core.Mcp.text_of_tool_result result)
+  | Error error -> fail (call_failure error)
 
 let refused_target label = function
-  | Error (Keeper_dos_controller.Refused _) -> ()
-  | Error (Keeper_dos_controller.Seats_unknown detail) -> fail (label ^ ": " ^ detail)
+  | Error (Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Rejected _)) -> ()
+  | Error error -> fail (label ^ ": " ^ call_failure error)
   | Ok _ -> fail (label ^ ": target was assigned despite its current standing")
 
 let test_target_revoke_before_handoff_refuses_without_moving () =
@@ -477,7 +508,7 @@ let test_handoff_before_target_revoke_completes_inside_admission () =
     (fun () -> revoke config) in
   let result = handed handoff in
   check (option string) "handoff result captures the target before revoke" (Some "player")
-    Yojson.Safe.Util.(member "controller" (Tool_result.data result) |> to_string_option);
+    Yojson.Safe.Util.(member "controller" (Option.value ~default:`Null result.S.structured_content) |> to_string_option);
   check_status `OK response;
   check bool "later revoke observed and released the already-handed target" true
     Yojson.Safe.Util.(member "released_controller" (snd response) |> to_bool);
@@ -533,8 +564,8 @@ let test_handoff_expired_target_and_unreadable_binding_preserve_holder () =
     corrupt path;
     let before = Unix.lstat path in
     (match hand_to config "player" with
-     | Error (Keeper_dos_controller.Seats_unknown _) -> ()
-     | Error (Keeper_dos_controller.Refused detail) -> fail (label ^ ": unreadable is not absent: " ^ detail)
+     | Error (Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Unavailable _)) -> ()
+     | Error error -> fail (label ^ ": unreadable is not absent: " ^ call_failure error)
      | Ok _ -> fail (label ^ ": unreadable named authority admitted a handoff"));
     check (option string) (label ^ ": uncertain target cannot change the holder") (Some "operator") (controller ());
     let after = Unix.lstat path in
@@ -565,16 +596,20 @@ let test_current_listing_follows_regular_symlink () =
 
 let test_deferred_notice_is_not_available_to_other_flushers () =
   with_machine @@ fun config _ _ ->
-  Tool_misc_dos_lane.flush_announcements ();
-  Tool_misc_dos_lane.with_deferred_announcements (fun announce ->
+  let delivered = ref [] in
+  let batch = Machine_addon_events.create ~author:"operator"
+    ~relay:(fun ~author content -> delivered := (author,content)::!delivered) in
+  let result : S.tool_result = {content=[];is_error=Some false;structured_content=None;
+    _meta=Some (`Assoc ["io.github.jeong-sik/masc.machine.events",`List [
+      `Assoc ["author",`String "worker-supplied-name";"content",`String "deferred handoff fixture"]]])} in
+  Fun.protect ~finally:(fun () -> Machine_addon_events.ready batch) (fun () ->
     auth_ok (Auth.with_credential_transaction config.base_path (fun _ ->
-      announce ~author:"operator" "deferred handoff fixture" ();
-      (* Another request's drain must leave this notice queued while Auth is held. *)
-      Tool_misc_dos_lane.flush_announcements ();
-      check int "flusher cannot remove a notice inside admission" 1
-        (Queue.length Tool_misc_dos_lane.announcements))));
-  let notice = Queue.take Tool_misc_dos_lane.announcements in
-  check bool "notice becomes publishable after admission" true (Atomic.get notice.ready)
+      Machine_addon_events.record batch result;
+      Machine_addon_events.drain ();
+      check int "another drain cannot publish inside credential admission" 0 (List.length !delivered))));
+  Machine_addon_events.drain ();
+  check (list (pair string string)) "notice publishes after credential admission ends"
+    ["operator","deferred handoff fixture"] !delivered
 
 let () =
   run "play_credential_transaction"

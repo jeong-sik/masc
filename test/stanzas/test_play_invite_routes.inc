@@ -5,4 +5,4 @@
  (name test_play_invite_routes)
  (modules test_play_invite_routes)
  (action (run %{test}))
- (libraries masc.machine_configuration masc_test_deps alcotest yojson bigstringaf unix eio eio_main masc.masc_core masc.dos_lane masc.server))
+ (libraries machine_worker_fixture masc.machine_configuration masc_test_deps alcotest yojson bigstringaf unix eio eio_main masc.masc_core masc.dos_lane masc.server))

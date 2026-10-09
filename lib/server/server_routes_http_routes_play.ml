@@ -84,10 +84,17 @@ let issue_response ~config ~body =
      | Error (Play_invite.Credential_not_saved err) ->
        `Internal_server_error, Server_refusal.json ~code:"not_saved" (Masc_domain.masc_error_to_string err))
 
-let current_controller () =
-  match Tool_misc_dos_lane.off_domain Dos_lane.screen with
-  | Ok { Dos_lane.controller; _ } -> controller
-  | Error _ -> None
+let current_controller ~config =
+  match Machine_addon_host.call_shared ~config ~principal:Lane_addon_call_context.Anonymous
+      ~name:"masc_dos_screen" ~arguments:(`Assoc []) with
+  | Ok result when result.Mcp_protocol.Mcp_types.is_error <> Some true ->
+      (match result.structured_content with
+       | Some (`Assoc fields) -> (match List.assoc_opt "controller" fields with
+           | Some (`String name) -> Ok (Some name)
+           | Some `Null -> Ok None
+           | _ -> Error "worker controller observation is malformed")
+       | _ -> Error "worker controller observation is unavailable")
+  | Ok _ | Error _ -> Error "worker controller observation failed"
 
 let list_json ~config =
   match Play_invite.list ~base_path:config.Workspace.base_path ~now:(Time_compat.now ()) with
@@ -96,7 +103,9 @@ let list_json ~config =
   | Error (Play_invite.Invalid_expiry (Masc_domain.Credential_expiry.Invalid_timestamp stamp)) ->
     `Service_unavailable, Server_refusal.json ~code:"invalid_credential_expiry" ("invalid credential expiry: " ^ stamp)
   | Ok invites ->
-    let controller = current_controller () in
+    match current_controller ~config with
+    | Error detail -> `Service_unavailable, Server_refusal.json ~code:"controller_unavailable" detail
+    | Ok controller ->
     `OK, `Assoc
     [ ( "invites"
       , `List
@@ -116,15 +125,20 @@ type release =
   | Not_held
   | Release_failed of string
 
-let release_controller ~holder ~by =
-  match Tool_misc_dos_lane.release_revoked_invite ~holder ~by with
-  | Ok true -> Released
-  | Ok false | Error Dos_lane.No_machine -> Not_held
-  | Error
-      (( Dos_lane.Activity_disabled | Dos_lane.Activity_unobserved | Dos_lane.Invalid_request _ | Dos_lane.Unreadable _ | Dos_lane.Held_by _
-       | Dos_lane.Guest_fault _ | Dos_lane.Unsaveable _ | Dos_lane.Checkpoint_refused _
-       | Dos_lane.Other_program _ ) as err) ->
-    Release_failed (Dos_lane.error_to_string err)
+let release_controller ~config ~events ~holder ~by =
+  match Machine_addon_host.release_shared_controller ~events ~config ~holder ~by
+      ~reason:Machine_controller_contract.No_credential with
+  | Error (Lane_addon_runtime.Unavailable message | Lane_addon_runtime.Outcome_unknown message
+      | Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Rejected message | Unavailable message | Activity_disabled message | Activity_unobserved message)) ->
+      Release_failed message
+  | Ok None -> Not_held
+  | Ok (Some result) ->
+      if result.Mcp_protocol.Mcp_types.is_error = Some true then
+        Release_failed (Agent_core.Mcp.text_of_tool_result result)
+      else match result.structured_content with
+        | Some (`Assoc [("released", `Bool true)]) -> Released
+        | Some (`Assoc [("released", `Bool false)]) -> Not_held
+        | _ -> Release_failed "invalid worker controller-release result"
 
 let release_fields = function
   | Released -> [ ("released_controller", `Bool true) ]
@@ -137,13 +151,14 @@ let revoke_response ~config ~by ~raw_name =
   | Error message -> `Bad_request, Server_refusal.json ~code:"invalid_request" message
   | Ok name ->
     let holder = Play_invite.Name.to_string name in
+    let events = Machine_addon_host.dos_event_batch ~author:by in
     let no_such_invite () = `Not_found, Server_refusal.json ~code:"no_such_invite" ("no invite is named " ^ raw_name) in
     let after_revoke = function
      | Play_invite.Deleted ->
        ( `OK
        , `Assoc
            (("name", `String holder) :: ("revoked", `Bool true)
-            :: release_fields (release_controller ~holder ~by)) )
+            :: release_fields (release_controller ~config ~events ~holder ~by)) )
      (* Revoked before, or never issued. A request the invitee sent before
         the delete can take the freed controller after it, and a release can
         fail; revoking again frees it then. A keeper's name is left alone:
@@ -154,7 +169,7 @@ let revoke_response ~config ~by ~raw_name =
         | Error detail -> `Service_unavailable, Server_refusal.json ~code:"keepers_unreadable" detail
         | Ok keepers when Play_invite.is_keeper_name ~keepers name -> no_such_invite ()
         | Ok _ ->
-          (match release_controller ~holder ~by with
+          (match release_controller ~config ~events ~holder ~by with
            | Released ->
              ( `OK
              , `Assoc
@@ -168,9 +183,10 @@ let revoke_response ~config ~by ~raw_name =
                     holder message) )))
     in
     let revoked =
-      Play_invite.revoke ~base_path:config.Workspace.base_path ~name ~after_revoke
-      |> Tool_misc_dos_lane.after_announcing
+      Fun.protect ~finally:(fun () -> Machine_addon_events.ready events) (fun () ->
+        Play_invite.revoke ~base_path:config.Workspace.base_path ~name ~after_revoke)
     in
+    Machine_addon_events.drain ();
     (match revoked with
      | Ok response -> response
      | Error (Play_invite.Not_an_invite role) ->

@@ -25,6 +25,37 @@ let rec mkdir_p path =
     Unix.mkdir path 0o755
   end
 
+(* Only process/container creation is replaced; HTTP effects use the attached
+   worker's SDK transport and host controller admission. *)
+let with_worker ~base_path f =
+  Eio_main.run (fun env ->
+    let previous_runtime = Runtime.For_testing.snapshot () in
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    Fun.protect ~finally:(fun () ->
+      Runtime.For_testing.restore previous_runtime;
+      Server_auth.clear_server_state ();
+      Fs_compat.clear_fs ()) (fun () ->
+      Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 30. (fun () ->
+        Eio.Switch.run (fun sw ->
+          Eio_context.with_test_env ~sw ~net:(Eio.Stdenv.net env)
+            ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
+            let runtime_path = Filename.concat base_path "runtime.toml" in
+            Out_channel.with_open_bin runtime_path (fun channel -> output_string channel {|[providers.local]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+[models.sample]
+api-name = "sample"
+max-context = 1024
+[local.sample]
+[runtime]
+default = "local.sample"
+|});
+            (match Runtime.init_default ~config_path:runtime_path with
+             | Ok () -> () | Error detail -> fail detail);
+            Masc.Lane_addon_runtime.For_testing.reset ();
+            Machine_worker_fixture.with_dos ~clock:(Eio.Stdenv.clock env) ~sw ~base_path
+              (fun ~invoke:_ ~detach -> f ~detach))))))
+
 let loopback_request_authority () =
   match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
   | Ok authority -> authority
@@ -136,8 +167,7 @@ let test_the_pad () =
     let operator = token_for base_path ~agent_name:"operator" ~role:Masc_domain.Admin in
     let player = token_for base_path ~agent_name:"minsu" ~role:Masc_domain.Player in
     let state = Masc.Mcp_server.For_testing.create_state ~base_path in
-    Eio_main.run (fun env ->
-      Masc_test_deps.init_eio_clock env;
+    with_worker ~base_path (fun ~detach ->
       let call ?(body = "") ~token meth = dispatch ~state ~meth ~token ~body in
       let press ?(saves_name = "samguk3") ~token button =
         call ~token "POST" ~body:(Printf.sprintf {|{"button":%S,"saves_name":%S}|} button saves_name)
@@ -176,11 +206,20 @@ let test_the_pad () =
         (* The same check under the machine's lock, where a load between the
            screen read and the press would land. *)
         check bool "the lane refuses keys meant for another program" true
-          (match Dos_lane.press_into ~saves_name:"zzt" ~who:"minsu" ~keys:[ "return" ] ~steps:100_000 with
-           | Error (Dos_lane.Other_program { expected = "zzt"; loaded = "samguk3" }) -> true
-           | Ok _ | Error _ -> false);
+          (match Masc.Machine_addon_host.call_shared
+             ~config:(Masc.Workspace.default_config base_path)
+             ~principal:(Lane_addon_call_context.Authenticated_agent "minsu")
+             ~name:"masc_dos_press" ~arguments:(`Assoc [
+               "expected_program", `String "zzt";
+               "keys", `List [`String "return"]; "steps", `Int 100_000]) with
+           | Ok result ->
+               check string "worker refusal identifies the stale program"
+                 (Dos_lane.error_to_string (Dos_lane.Other_program {expected="zzt";loaded="samguk3"}))
+                 (Agent_core.Mcp.text_of_tool_result result);
+               result.Mcp_protocol.Mcp_types.is_error = Some true
+           | Error _ -> fail "program guard did not reach the worker");
         check int "none of them moved the machine" before (change_count ());
-        let pads = Masc.Play_pad.pads_dir ~base_path in
+        let pads = Dos_pad.pads_dir ~base_path in
         mkdir_p pads;
         let override = Filename.concat pads "samguk3.toml" in
         let refuses_override what create remove =
@@ -232,7 +271,7 @@ let test_the_pad () =
         check bool "the machine moved" true (change_count () > before);
         (* The builtin 삼국지3 layout binds every button, so a workspace
            layout that binds one stands in for a layout that leaves one out. *)
-        let pads = Masc.Play_pad.pads_dir ~base_path in
+        let pads = Dos_pad.pads_dir ~base_path in
         mkdir_p pads;
         Out_channel.with_open_bin (Filename.concat pads "samguk3.toml") (fun oc ->
           output_string oc "[BTN_SOUTH]\nkeys = [\"return\"]\nlabel = \"결정\"\n");
@@ -248,7 +287,7 @@ let test_the_pad () =
         check int "a standalone DOS program without a layout is a 404" 404 (status_of none);
         check bool "the absence names the inventory file" true
           (member "saves_name" (body_of none) = Some (`String "hello.com"));
-        let pads = Masc.Play_pad.pads_dir ~base_path in
+        let pads = Dos_pad.pads_dir ~base_path in
         mkdir_p pads;
         Out_channel.with_open_bin (Filename.concat pads "hello.com.toml") (fun oc ->
           output_string oc "[BTN_SOUTH]\nkeys = [\"return\"]\nlabel = \"continue\"\n");
@@ -259,7 +298,10 @@ let test_the_pad () =
         let pressed = press ~saves_name:"hello.com" ~token:operator "BTN_SOUTH" in
         check int "the holder uses the standalone program's layout" 200 (status_of pressed);
         check (pair string string) "the layout presses the actual machine key"
-          ("operator", "press return") (newest_activity ()))))
+          ("operator", "press return") (newest_activity ()));
+      detach ();
+      check int "detached worker layout is unavailable" 503
+        (status_of (call ~token:player "GET"))))
 
 let () =
   run "play-pad-routes"

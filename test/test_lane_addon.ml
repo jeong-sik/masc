@@ -1696,6 +1696,19 @@ let test_machine_activity_applies_to_worker_calls () = with_fixture (fun env _sw
        | Error (Runtime.Host_refusal (Lane_addon_call_context.Activity_disabled _)) -> true | _ -> false);
     check Alcotest.int "off cannot reach worker mutation" before (List.length !(state.admissions)))
     ["masc_msx_step";"masc_dos_step"];
+  let module Route = Server_routes_http_routes_msx in
+  check bool "HTTP activity follows host Off configuration" true
+    (member "activity" (Route.activity_json ~config) = `String "off");
+  let before_http = List.length !(state.admissions) in
+  let tick_status,tick_body = Route.tick_response ~config ~body:"{}" in
+  check bool "HTTP tick preserves conflict and typed activity code" true
+    (tick_status=`Conflict && member "ok" tick_body=`Bool false
+     && member "code" tick_body=`String "activity_disabled");
+  let press_status,press_body = Route.press_response ~config ~who:"fixture" ~body:{|{"keys":["space"]}|} in
+  check bool "HTTP press preserves the same activity contract" true
+    (press_status=`Conflict && member "ok" press_body=`Bool false
+     && member "code" press_body=`String "activity_disabled");
+  check Alcotest.int "HTTP activity refusals never invoke a worker mutation" before_http (List.length !(state.admissions));
   List.iter (fun name -> check bool "off retains observation, save and eject" true
     (Result.is_ok (call name (`Assoc []))))
     ["masc_msx_screen";"masc_msx_save";"masc_msx_eject";

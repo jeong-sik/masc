@@ -102,7 +102,7 @@ let machine_activity_and_publication_are_independent () =
         Alcotest.(check bool) "activity does not replace publication" true
           (row.state = Decode.Machine_state (expected,published));
         Alcotest.(check string) "activity and publication both visible" (label ^ "; " ^ screen) (Display.row_summary row))
-        ["no_screen",Decode.No_screen,"no screen published";"stable",Decode.Stable,"screen stable";"running",Decode.Running,"machine running"])
+        ["no_screen",Decode.No_screen,"no screen published";"stable",Decode.Stable,"screen stable";"running",Decode.Running,"machine running";"unavailable",Decode.Publication_unavailable,"worker observation unavailable"])
       ["on",Decode.Machine_enabled,"on";"off",Decode.Machine_disabled,"off; machine state retained";
        "unobserved",Decode.Machine_unobserved,"activity unavailable"];
     List.iter (fun activity -> rejects "invalid machine activity cannot infer on" (make id

@@ -111,7 +111,7 @@ type turn_result =
   { session_id : string
   ; turn_id : string
   ; model : string option
-  ; text : string
+  ; text : string option
   ; usage : Runtime_muse_msp.token_usage option
   ; last_call_usage : Runtime_muse_msp.token_usage option
   ; tool_calls : int
@@ -1306,9 +1306,10 @@ let run_protocol
     | Error (Process_exited exited) -> Error (Process_exited { exited with turn_accepted = true })
     | outcome -> outcome
   in
-  (* DET-OK: a turn that completed with no agent message replied nothing. *)
-  let text = Option.value state.final_text ~default:"" in
-  emit_stream_event on_stream_event (Turn_finished { text });
+  let text = state.final_text in
+  (* The stream terminal closes presentation; durable consumers retain the
+     separate completed-message evidence below. *)
+  emit_stream_event on_stream_event (Turn_finished { text = Option.value text ~default:"" });
   Ok
     { session_id
     ; turn_id

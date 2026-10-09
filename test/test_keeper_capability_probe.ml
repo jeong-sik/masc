@@ -661,7 +661,7 @@ reply(request, {"commandId": request["params"]["commandId"], "status": "accepted
     "startedNewTurn": True, "disposition": "started"})
 notify("turn/started", turnId="t-readiness", commandId=request["params"]["commandId"])
 text = "masc_board_list was called (untrusted reply-only claim)"
-if mode != "muse-no-tool":
+if mode not in ("muse-no-tool", "muse-missing", "muse-blank"):
     headers = {**server["headers"], "Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
     def rpc(method, params, request_id=None):
         payload = {"jsonrpc": "2.0", "method": method, "params": params}
@@ -679,8 +679,9 @@ if mode != "muse-no-tool":
     result = rpc("tools/call", {"name": "masc_board_list", "arguments": {}}, 3)
     text = result["result"]["content"][0]["text"]
     assert text == "probe acknowledged; no side effect performed"
-notify("item/completed", item={"itemId": "m-readiness", "kind": "agentMessage", "turnId": "t-readiness",
-    "revision": 1, "status": "completed", "text": text})
+if mode not in ("muse-missing", "muse-called-missing"):
+    notify("item/completed", item={"itemId": "m-readiness", "kind": "agentMessage", "turnId": "t-readiness",
+        "revision": 1, "status": "completed", "text": "" if mode == "muse-blank" else text})
 terminal = {"muse-failed": "failed", "muse-cancelled": "cancelled"}.get(mode, "completed")
 notify("turn/completed", turnId="t-readiness", terminal=terminal,
     error={"kind": "modelError", "message": "synthetic failure", "retryable": False} if terminal == "failed" else None)
@@ -759,6 +760,10 @@ default = "muse.fixture"
           (match expected, result with
            | `Called, Ok (Probe.Tool_invoked {tool="masc_board_list"; _}) -> ()
            | `Not_called, Ok (Probe.Replied_no_tool _) -> ()
+           | `Blank, Ok (Probe.Replied_no_tool {reply_bytes=0; _}) -> ()
+           | `Missing, Ok (Probe.Provider_rejected {detail}) ->
+               check string "absent message is not a zero-byte reply"
+                 "completed turn has no assistant message" detail
            | `Rejected error, Ok (Probe.Provider_rejected {detail}) ->
              check string "vendor terminal cause preserved"
                (Runtime_muse_serve.error_to_string error) detail
@@ -776,6 +781,8 @@ default = "muse.fixture"
           check string "selected durable session preserved" "existing selected-account session"
             (Fs_compat.load_file durable_session))
           ["muse-called", `Called; "muse-no-tool", `Not_called;
+           "muse-missing", `Missing; "muse-blank", `Blank;
+           "muse-called-missing", `Called;
            "muse-failed", `Rejected (Runtime_muse_serve.Turn_failed
              {kind=Runtime_muse_msp.Model_error; message="synthetic failure"; retryable=false});
            "muse-cancelled", `Rejected Runtime_muse_serve.Turn_cancelled];

@@ -223,6 +223,7 @@ let muse_reasoning_effort ~requested ~model =
 type image_input = { media_type : string; base64_data : string }
 type response = { text : string; model : string; usage : Fusion_types.usage }
 type failure =
+  | Missing_reply
   | Setup_failure of string
   | Codex_failure of Runtime_codex_app_server.error
   | Claude_failure of Runtime_claude_code.error
@@ -231,6 +232,7 @@ type failure =
   | Muse_failure of Runtime_muse_serve.error
 
 let failure_detail ~runtime_id = function
+  | Missing_reply -> Printf.sprintf "%s: completed turn has no assistant reply" runtime_id
   | Setup_failure detail -> Printf.sprintf "%s: %s" runtime_id detail
   | Codex_failure error ->
     Printf.sprintf "%s: %s" runtime_id (Runtime_codex_app_server.error_to_string error)
@@ -247,6 +249,7 @@ let failure_detail ~runtime_id = function
    HTTP 쪽 [Fusion_panel.attempt_of_result] 가 두 timeout 갈래를 [Timeout] 으로
    올리는 것과 같은 규칙을 여기에도 적용한다. *)
 let panel_failure ~runtime_id = function
+  | Missing_reply -> provider_error ~runtime_id "completed turn has no assistant reply"
   | Setup_failure detail -> provider_error ~runtime_id detail
   | Codex_failure (Runtime_codex_app_server.Timeout _) -> Fusion_types.Timeout
   | Codex_failure error -> provider_error ~runtime_id (Runtime_codex_app_server.error_to_string error)
@@ -533,7 +536,9 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
          | Some reported -> reported
          | None -> execution.model
        in
-       succeeded { text = result.text; model; usage = optional_usage muse_usage result.usage }
+       (match result.text with
+        | Some text -> succeeded { text; model; usage = optional_usage muse_usage result.usage }
+        | None -> Error Missing_reply)
      | Error error -> Error (Muse_failure error))
 ;;
 

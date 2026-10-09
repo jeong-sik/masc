@@ -1,6 +1,5 @@
 (* See .mli. *)
 
-module Board_signal = Keeper_world_observation_board_signal
 module Partition_generation = Keeper_board_attention_partition_generation
 
 type delivery_failure_kind = Keeper_board_attention_candidate_wire.delivery_failure_kind =
@@ -190,7 +189,7 @@ include
        and type status := status
        and type status_view := status_view
        and type candidate := candidate
-)
+       and module Partition_generation := Partition_generation)
 
 let report_rejected_rows ~context rejected =
   match rejected with

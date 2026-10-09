@@ -177,6 +177,26 @@ let test_pre_dispatch_failure_releases_guard base =
       (T.play_change_access (fresh base) = C.Writable))
     [T.Issue_invite "same"; T.Revoke_invite "same"]
 
+let test_cross_process_settlement_keeps_the_live_response_owner base =
+  List.iter (fun kind ->
+    let original = fresh base in
+    let sent = admitted (T.begin_play_change original kind) in
+    check bool "the original mutation starts" true (T.dispatch_play_change original sent);
+    (* Another TUI verifies the request finished and settles it while this
+       process has not consumed the response yet. *)
+    let observer = fresh base in
+    check bool "the other TUI resolves the request" true
+      (Result.is_ok (T.resolve_play_change observer ~request_id:sent.change_id));
+    (* Any access refresh rereads the journal before the response is consumed. *)
+    check bool "the sender still waits for its own response" true
+      (match T.play_change_access original with C.Pending _ -> true | _ -> false);
+    check bool "the response is still owned by its sender" true
+      (T.finish_play_change original sent T.Change_confirmed);
+    check bool "the settled journal admits the next change" true
+      (T.play_change_access original = C.Writable);
+    check bool "nothing is left for a restarted TUI" true (T.play_change_access (fresh base) = C.Writable))
+    [T.Issue_invite "same"; T.Revoke_invite "same"]
+
 let () = run "Play workspace authority" ["lifecycle", [
   test_case "unknown issue and revoke survive withdrawal and inventory" `Quick (with_workspace test_unknown_survives_withdrawal);
   test_case "origins, explicit resolution and stale receipts" `Quick (with_workspace test_origin_and_explicit_resolution);
@@ -186,4 +206,5 @@ let () = run "Play workspace authority" ["lifecycle", [
   test_case "unreadable recovery refuses dispatch" `Quick (with_workspace test_unreadable_recovery_refuses_dispatch);
   test_case "confirmation cannot settle another process's replacement request" `Quick (with_workspace test_resolution_cannot_clear_another_process_request);
   test_case "pre-dispatch failures release durable mutation admission" `Quick (with_workspace test_pre_dispatch_failure_releases_guard);
+  test_case "cross-process settlement keeps the live response owner" `Quick (with_workspace test_cross_process_settlement_keeps_the_live_response_owner);
 ]]

@@ -5494,6 +5494,10 @@ type play_change_request = {
 }
 type play_change = Preparing_invite_change of play_change_request
   | Sending_invite_change of play_change_request | Unknown_invite_change of play_change_request
+  (* Sent by this process, then settled in the journal by another TUI that
+     verified it finished. It owns only its response: an issue response
+     carries the only copy of the invite link. *)
+  | Detached_invite_change of play_change_request
 type play_change_outcome = Change_confirmed | Change_unknown
 
 type keeper_priority_control = {
@@ -9308,7 +9312,8 @@ let withdraw_play_invite_workspace state
       state.play_invite_quarantine <- None
 
 let play_change_request = function
-  | Preparing_invite_change request | Sending_invite_change request | Unknown_invite_change request -> request
+  | Preparing_invite_change request | Sending_invite_change request | Unknown_invite_change request
+  | Detached_invite_change request -> request
 
 let workspace_change_origin state =
   match state.workspace_identity, workspace_input_identity_of_server state.server_identity with
@@ -9336,12 +9341,20 @@ let play_pending_entry request : Masc_tui_play_pending.entry =
 let read_play_changes state =
   if state.local_base_path = "" then Error "The local workspace for Play recovery is unavailable."
   else Result.map (fun pending ->
-    state.play_changes <- List.map (fun (entry : Masc_tui_play_pending.entry) ->
+    let journal = List.map (fun (entry : Masc_tui_play_pending.entry) ->
       match List.find_opt (fun held -> play_pending_entry (play_change_request held) = entry) state.play_changes with
       | Some held -> held
       | None -> Unknown_invite_change {change_ticket=ref (); change_id=entry.id;
           change_workspace={wi_base_path=entry.base_path; wi_masc_root=entry.masc_root};
-          change_kind=entry.kind}) pending)
+          change_kind=entry.kind}) pending in
+    (* Another TUI may settle a request this process sent before its response
+       is consumed. Keep that request as the owner of its response. *)
+    let detached = List.filter_map (function
+      | (Sending_invite_change request | Detached_invite_change request)
+        when not (List.mem (play_pending_entry request) pending) -> Some (Detached_invite_change request)
+      | Preparing_invite_change _ | Sending_invite_change _ | Unknown_invite_change _
+      | Detached_invite_change _ -> None) state.play_changes in
+    state.play_changes <- journal @ detached)
     (Masc_tui_play_pending.read ~path:(play_pending_path state))
 
 let play_change_pending_notice = "An invite change is still pending; wait for its result."
@@ -9359,7 +9372,8 @@ let play_change_access state =
       | Error detail -> Masc_tui_collab.Read_only ("Play recovery unavailable: " ^ detail)
       | Ok () -> match current_play_change state origin with
       | None -> Masc_tui_collab.Writable
-      | Some (Preparing_invite_change _ | Sending_invite_change _) -> Masc_tui_collab.Pending play_change_pending_notice
+      | Some (Preparing_invite_change _ | Sending_invite_change _ | Detached_invite_change _) ->
+          Masc_tui_collab.Pending play_change_pending_notice
       | Some (Unknown_invite_change request) -> Masc_tui_collab.Uncertain
           {request_id=request.change_id; notice=play_change_unknown_notice request}
 
@@ -9370,7 +9384,8 @@ let begin_play_change state kind =
       let ( let* ) = Result.bind in
       let* () = read_play_changes state in
       match current_play_change state origin with
-      | Some (Preparing_invite_change _ | Sending_invite_change _) -> Error play_change_pending_notice
+      | Some (Preparing_invite_change _ | Sending_invite_change _ | Detached_invite_change _) ->
+          Error play_change_pending_notice
       | Some (Unknown_invite_change request) -> Error (play_change_unknown_notice request)
       | None ->
           let request = {change_ticket = ref (); change_id=Random_id.uuid_v7 ();
@@ -9391,19 +9406,28 @@ let dispatch_play_change state request =
 
 let play_change_dispatched state request =
   List.exists (function
-    | Sending_invite_change held | Unknown_invite_change held -> held.change_ticket == request.change_ticket
+    | Sending_invite_change held | Unknown_invite_change held | Detached_invite_change held ->
+        held.change_ticket == request.change_ticket
     | Preparing_invite_change _ -> false) state.play_changes
 
 let finish_play_change state request outcome =
   let matches change = (play_change_request change).change_ticket == request.change_ticket in
   let owns = List.exists matches state.play_changes in
-  let settled = owns && (match outcome with
+  (* The journal already settled a detached request; its response only
+     leaves this process. *)
+  let detached = List.exists (function
+    | Detached_invite_change held -> held.change_ticket == request.change_ticket
+    | Preparing_invite_change _ | Sending_invite_change _ | Unknown_invite_change _ -> false)
+    state.play_changes in
+  let settled = owns && not detached && (match outcome with
     | Change_unknown -> false
     | Change_confirmed ->
         (match Masc_tui_play_pending.settle ~path:(play_pending_path state) (play_pending_entry request) with
          | Ok settled -> settled | Error _ -> false)) in
   if owns then state.play_changes <- List.filter_map (fun change ->
-    if not (matches change) then Some change else match outcome with
+    if not (matches change) then Some change
+    else if detached then None
+    else match outcome with
     | Change_confirmed when settled -> None
     | Change_confirmed | Change_unknown -> Some (Unknown_invite_change request)) state.play_changes;
   owns
@@ -9411,10 +9435,10 @@ let finish_play_change state request outcome =
 let withdraw_play_changes state =
   List.iter (function
     | Preparing_invite_change request -> ignore (finish_play_change state request Change_confirmed)
-    | Sending_invite_change _ | Unknown_invite_change _ -> ()) state.play_changes;
+    | Sending_invite_change _ | Unknown_invite_change _ | Detached_invite_change _ -> ()) state.play_changes;
   state.play_changes <- List.map (function
     | Preparing_invite_change request | Sending_invite_change request -> Unknown_invite_change request
-    | Unknown_invite_change _ as change -> change) state.play_changes
+    | (Unknown_invite_change _ | Detached_invite_change _) as change -> change) state.play_changes
 
 let resolve_play_change state ~request_id =
   match workspace_change_origin state with
@@ -9430,7 +9454,8 @@ let resolve_play_change state ~request_id =
           else Error "The invite request changed; inspect the current request before resolving it."
       | Some (Unknown_invite_change _) ->
           Error "The invite request changed; inspect the current request before resolving it."
-      | Some (Preparing_invite_change _ | Sending_invite_change _) -> Error play_change_pending_notice
+      | Some (Preparing_invite_change _ | Sending_invite_change _ | Detached_invite_change _) ->
+          Error play_change_pending_notice
       | None -> Error "There is no unknown invite change in this workspace."
 
 let withdraw_machine_control state =

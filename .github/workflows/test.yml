@@ -217,10 +217,100 @@ jobs:
           fi
           scripts/ci-run-targeted-tests.sh
 
-      - name: Capture Surface fixture PTY screenshots
-        if: ${{ !cancelled() && contains(inputs.suite, 'test_tui_surface_studio_pty') }}
+      - name: Verify captured TUI source and binary
+        id: captured_tui
+        if: ${{ !cancelled() && (contains(fromJSON(steps.tests.outputs.resolved_aliases || '[]'), 'test_tui_surface_studio_pty') || contains(fromJSON(steps.tests.outputs.resolved_aliases || '[]'), 'test_tui_usage_studio_pty') || contains(fromJSON(steps.tests.outputs.resolved_aliases || '[]'), 'test_tui_board_heading_width') || contains(fromJSON(steps.tests.outputs.resolved_aliases || '[]'), 'test_tui_lane_visual_pty') || contains(fromJSON(steps.tests.outputs.resolved_aliases || '[]'), 'test_tui_claude_agent_retry_pty')) }}
+        run: |
+          set -euo pipefail
+          source_sha="$(git rev-parse --verify HEAD)"
+          binary_commit="$(opam exec -- ./_build/default/bin/masc_tui.exe --build-commit)"
+          if [ "$binary_commit" != "$source_sha" ]; then
+            echo "Captured TUI binary does not match the checked-out source" >&2
+            exit 1
+          fi
+          binary_sha256="$(sha256sum ./_build/default/bin/masc_tui.exe | cut -d ' ' -f 1)"
+          printf 'source_sha=%s\nbinary_sha256=%s\n' "$source_sha" "$binary_sha256" >> "$GITHUB_OUTPUT"
+
+      # This is a controlled native Agent screen consumer, not a provider run.
+      # Replay partial frames after a failing suite too; the manifest retains
+      # its exact PASS-marker observation and the original runner log.
+      - name: Capture Claude Agent retry fixture PTY screenshots
+        if: ${{ !cancelled() && steps.captured_tui.outcome == 'success' && contains(fromJSON(steps.tests.outputs.resolved_aliases || '[]'), 'test_tui_claude_agent_retry_pty') }}
         env:
-          STUDIO_SOURCE_SHA: ${{ github.sha }}
+          STUDIO_SOURCE_SHA: ${{ steps.captured_tui.outputs.source_sha }}
+          STUDIO_BINARY_SHA256: ${{ steps.captured_tui.outputs.binary_sha256 }}
+          STUDIO_RUN_ID: ${{ github.run_id }}
+          STUDIO_TEST_OUTCOME: ${{ steps.tests.outcome }}
+          STUDIO_OUT: ${{ runner.temp }}/claude-agent-retry-studio
+          STUDIO_LOG: ${{ runner.temp }}/ci-run-tests.log
+        run: |
+          set -euo pipefail
+          python3 - <<'PYINFO'
+          import importlib.util, json, os
+          from pathlib import Path
+          spec = importlib.util.spec_from_file_location("tui_capture", "scripts/capture-tui-ci-frames.py")
+          capture = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(capture)
+          out = Path(os.environ["STUDIO_OUT"])
+          out.mkdir(parents=True, exist_ok=True)
+          info = {
+              "headSha": os.environ["STUDIO_SOURCE_SHA"],
+              "databaseId": os.environ["STUDIO_RUN_ID"],
+              "url": "https://github.com/jeong-sik/masc/actions/runs/" + os.environ["STUDIO_RUN_ID"],
+              "status": "in_progress_at_capture",
+              "test_step_outcome": os.environ["STUDIO_TEST_OUTCOME"],
+          }
+          (out / "run.json").write_text(json.dumps(info) + "\n")
+          log = Path(os.environ["STUDIO_LOG"]).read_text()
+          frames = capture.captures(log, suite="test_tui_claude_agent_retry_pty")
+          payloads = [capture.record_payload(line) for line in log.splitlines()]
+          marker = "STUDIO_BINARY_COMMIT="
+          commits = {line[len(marker):] for line in payloads if line is not None and line.startswith(marker)}
+          evidence = {
+              "input_status": "unverified", "suite": "test_tui_claude_agent_retry_pty",
+              "verified_checkout_sha": info["headSha"],
+              "recorded_binary_commits": sorted(commits),
+              "verified_binary_sha256": os.environ["STUDIO_BINARY_SHA256"],
+              "frames_available": len(frames),
+              "suite_pass_seen": "TUI Claude Agent retry PTY: PASS" in payloads,
+          }
+          evidence_path = out / "capture-input.json"
+          evidence_path.write_text(json.dumps(evidence, indent=2) + "\n")
+          if commits != {info["headSha"]}:
+              raise SystemExit("Recorded PTY build commit differs from the verified candidate checkout")
+          capture.binary_hashes(log, expected=os.environ["STUDIO_BINARY_SHA256"])
+          if not frames:
+              raise SystemExit("No Claude Agent retry PTY frames were produced; capture remains unproven")
+          evidence["input_status"] = "verified"
+          evidence_path.write_text(json.dumps(evidence, indent=2) + "\n")
+          PYINFO
+          sudo apt-get update -qq
+          sudo apt-get install -y ttyd fonts-noto-cjk python3-venv
+          python3 -m venv "$RUNNER_TEMP/studio-browser-venv"
+          "$RUNNER_TEMP/studio-browser-venv/bin/pip" install playwright
+          "$RUNNER_TEMP/studio-browser-venv/bin/playwright" install --with-deps chromium
+          "$RUNNER_TEMP/studio-browser-venv/bin/python" scripts/capture-tui-ci-frames.py \
+            --log "$STUDIO_LOG" --run-info "$STUDIO_OUT/run.json" \
+            --expected-head "$STUDIO_SOURCE_SHA" --expected-binary-sha256 "$STUDIO_BINARY_SHA256" \
+            --out "$STUDIO_OUT" --suite test_tui_claude_agent_retry_pty \
+            --suite-pass-marker "TUI Claude Agent retry PTY: PASS"
+
+      - name: Upload Claude Agent retry fixture PTY evidence
+        if: ${{ always() && contains(fromJSON(steps.tests.outputs.resolved_aliases || '[]'), 'test_tui_claude_agent_retry_pty') }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: claude-agent-retry-studio-${{ github.run_id }}-${{ steps.captured_tui.outputs.source_sha || 'unverified' }}
+          path: |
+            ${{ runner.temp }}/claude-agent-retry-studio/
+            ${{ runner.temp }}/ci-run-tests.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Capture Surface fixture PTY screenshots
+        if: ${{ !cancelled() && steps.captured_tui.outcome == 'success' && contains(fromJSON(steps.tests.outputs.resolved_aliases || '[]'), 'test_tui_surface_studio_pty') }}
+        env:
+          STUDIO_SOURCE_SHA: ${{ steps.captured_tui.outputs.source_sha }}
+          STUDIO_BINARY_SHA256: ${{ steps.captured_tui.outputs.binary_sha256 }}
           STUDIO_RUN_ID: ${{ github.run_id }}
           STUDIO_TEST_OUTCOME: ${{ steps.tests.outcome }}
           STUDIO_OUT: ${{ runner.temp }}/surface-studio
@@ -250,15 +340,16 @@ jobs:
           PYINFO
           "$RUNNER_TEMP/studio-browser-venv/bin/python" scripts/capture-tui-ci-frames.py \
             --log "$STUDIO_LOG" --run-info "$RUNNER_TEMP/studio-run.json" \
-            --expected-head "$STUDIO_SOURCE_SHA" --out "$STUDIO_OUT" \
+            --expected-head "$STUDIO_SOURCE_SHA" --expected-binary-sha256 "$STUDIO_BINARY_SHA256" \
+            --out "$STUDIO_OUT" \
             --suite test_tui_surface_studio_pty \
             --suite-pass-marker "tui surface studio PTY: PASS"
 
       - name: Upload Surface fixture PTY screenshots
-        if: ${{ always() && contains(inputs.suite, 'test_tui_surface_studio_pty') }}
+        if: ${{ always() && contains(fromJSON(steps.tests.outputs.resolved_aliases || '[]'), 'test_tui_surface_studio_pty') }}
         uses: actions/upload-artifact@v7
         with:
-          name: surface-studio-${{ github.sha }}
+          name: surface-studio-${{ steps.captured_tui.outputs.source_sha || inputs.candidate_sha || github.sha }}
           path: ${{ runner.temp }}/surface-studio/
           if-no-files-found: warn
           retention-days: 14
@@ -266,9 +357,10 @@ jobs:
       # Only an explicitly targeted Usage visual run installs browser
       # tooling. Other manually selected suites keep their existing path.
       - name: Capture Usage fixture PTY screenshots
-        if: ${{ !cancelled() && contains(inputs.suite, 'test_tui_usage_studio_pty') }}
+        if: ${{ !cancelled() && steps.captured_tui.outcome == 'success' && contains(fromJSON(steps.tests.outputs.resolved_aliases || '[]'), 'test_tui_usage_studio_pty') }}
         env:
-          STUDIO_SOURCE_SHA: ${{ github.sha }}
+          STUDIO_SOURCE_SHA: ${{ steps.captured_tui.outputs.source_sha }}
+          STUDIO_BINARY_SHA256: ${{ steps.captured_tui.outputs.binary_sha256 }}
           STUDIO_RUN_ID: ${{ github.run_id }}
           STUDIO_TEST_OUTCOME: ${{ steps.tests.outcome }}
           STUDIO_OUT: ${{ runner.temp }}/usage-studio
@@ -298,23 +390,25 @@ jobs:
           PYINFO
           "$RUNNER_TEMP/studio-browser-venv/bin/python" scripts/capture-tui-ci-frames.py \
             --log "$STUDIO_LOG" --run-info "$RUNNER_TEMP/studio-run.json" \
-            --expected-head "$STUDIO_SOURCE_SHA" --out "$STUDIO_OUT" \
+            --expected-head "$STUDIO_SOURCE_SHA" --expected-binary-sha256 "$STUDIO_BINARY_SHA256" \
+            --out "$STUDIO_OUT" \
             --suite test_tui_usage_studio_pty \
             --suite-pass-marker "tui usage studio PTY: PASS"
 
       - name: Upload Usage fixture PTY screenshots
-        if: ${{ always() && contains(inputs.suite, 'test_tui_usage_studio_pty') }}
+        if: ${{ always() && contains(fromJSON(steps.tests.outputs.resolved_aliases || '[]'), 'test_tui_usage_studio_pty') }}
         uses: actions/upload-artifact@v7
         with:
-          name: usage-studio-${{ github.sha }}
+          name: usage-studio-${{ steps.captured_tui.outputs.source_sha || inputs.candidate_sha || github.sha }}
           path: ${{ runner.temp }}/usage-studio/
           if-no-files-found: warn
           retention-days: 14
 
       - name: Capture Primary list fixture PTY screenshots
-        if: ${{ !cancelled() && contains(inputs.suite, 'test_tui_board_heading_width') }}
+        if: ${{ !cancelled() && steps.captured_tui.outcome == 'success' && contains(fromJSON(steps.tests.outputs.resolved_aliases || '[]'), 'test_tui_board_heading_width') }}
         env:
-          STUDIO_SOURCE_SHA: ${{ github.sha }}
+          STUDIO_SOURCE_SHA: ${{ steps.captured_tui.outputs.source_sha }}
+          STUDIO_BINARY_SHA256: ${{ steps.captured_tui.outputs.binary_sha256 }}
           STUDIO_RUN_ID: ${{ github.run_id }}
           STUDIO_TEST_OUTCOME: ${{ steps.tests.outcome }}
           STUDIO_OUT: ${{ runner.temp }}/primary-list-studio
@@ -344,15 +438,16 @@ jobs:
           PYINFO
           "$RUNNER_TEMP/studio-browser-venv/bin/python" scripts/capture-tui-ci-frames.py \
             --log "$STUDIO_LOG" --run-info "$RUNNER_TEMP/studio-run.json" \
-            --expected-head "$STUDIO_SOURCE_SHA" --out "$STUDIO_OUT" \
+            --expected-head "$STUDIO_SOURCE_SHA" --expected-binary-sha256 "$STUDIO_BINARY_SHA256" \
+            --out "$STUDIO_OUT" \
             --suite test_tui_board_heading_width \
             --suite-pass-marker "tui primary list studio PTY: PASS"
 
       - name: Upload Primary list fixture PTY screenshots
-        if: ${{ always() && contains(inputs.suite, 'test_tui_board_heading_width') }}
+        if: ${{ always() && contains(fromJSON(steps.tests.outputs.resolved_aliases || '[]'), 'test_tui_board_heading_width') }}
         uses: actions/upload-artifact@v7
         with:
-          name: primary-list-studio-${{ github.sha }}
+          name: primary-list-studio-${{ steps.captured_tui.outputs.source_sha || inputs.candidate_sha || github.sha }}
           path: ${{ runner.temp }}/primary-list-studio/
           if-no-files-found: warn
           retention-days: 14
@@ -385,9 +480,10 @@ jobs:
           retention-days: 14
 
       - name: Capture Navigation fixture PTY screenshots
-        if: ${{ !cancelled() && contains(inputs.suite, 'test_tui_lane_visual_pty') }}
+        if: ${{ !cancelled() && steps.captured_tui.outcome == 'success' && contains(fromJSON(steps.tests.outputs.resolved_aliases || '[]'), 'test_tui_lane_visual_pty') }}
         env:
-          STUDIO_SOURCE_SHA: ${{ github.sha }}
+          STUDIO_SOURCE_SHA: ${{ steps.captured_tui.outputs.source_sha }}
+          STUDIO_BINARY_SHA256: ${{ steps.captured_tui.outputs.binary_sha256 }}
           STUDIO_RUN_ID: ${{ github.run_id }}
           STUDIO_TEST_OUTCOME: ${{ steps.tests.outcome }}
           STUDIO_OUT: ${{ runner.temp }}/navigation-studio
@@ -417,15 +513,16 @@ jobs:
           PYINFO
           "$RUNNER_TEMP/studio-browser-venv/bin/python" scripts/capture-tui-ci-frames.py \
             --log "$STUDIO_LOG" --run-info "$RUNNER_TEMP/studio-run.json" \
-            --expected-head "$STUDIO_SOURCE_SHA" --out "$STUDIO_OUT" \
+            --expected-head "$STUDIO_SOURCE_SHA" --expected-binary-sha256 "$STUDIO_BINARY_SHA256" \
+            --out "$STUDIO_OUT" \
             --suite test_tui_lane_visual_pty \
             --suite-pass-marker "TUI navigation consistency: PASS"
 
       - name: Upload Navigation fixture PTY screenshots
-        if: ${{ always() && contains(inputs.suite, 'test_tui_lane_visual_pty') }}
+        if: ${{ always() && contains(fromJSON(steps.tests.outputs.resolved_aliases || '[]'), 'test_tui_lane_visual_pty') }}
         uses: actions/upload-artifact@v7
         with:
-          name: navigation-studio-${{ github.sha }}
+          name: navigation-studio-${{ steps.captured_tui.outputs.source_sha || inputs.candidate_sha || github.sha }}
           path: ${{ runner.temp }}/navigation-studio/
           if-no-files-found: warn
           retention-days: 14

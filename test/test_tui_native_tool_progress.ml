@@ -56,7 +56,7 @@ let test_replayed_sequence_and_model_signal () =
     T.apply ~now:12. t (Live.Native_tool_progress {occurrence;progress=output 1});
     check bool "turn terminal rejects new progress" true
       ((List.hd before).native_progress=(List.hd (T.tool_calls t)).native_progress))
-    [Live.Text "Answer","STREAMING";Live.Thinking "Reason","THINKING"]
+    [Live.Text {text="Answer"; stream_scope=None},"STREAMING";Live.Thinking "Reason","THINKING"]
 
 let test_exact_active_scope_only () =
   let translate scope state event = Bridge.translate ~redact_text:Fun.id ~base_dir:"/unused-no-media" ~stream_scope:scope state event in
@@ -190,7 +190,7 @@ let test_split_secret_held_across_native_side_events () =
           let delta value = Agent_core.Types.ContentBlockDelta {index=0;
             delta=(if thinking then ThinkingDelta value else TextDelta value)} in
           let fragments events = List.filter_map (function
-            | E.Text_delta value | E.Agent_core_thinking_delta {delta=value; _} -> Some value
+            | E.Text_delta {text=value; stream_scope=None} | E.Agent_core_thinking_delta {delta=value; _} -> Some value
             | _ -> None) events in
           let check_held events =
             check (list string) "native progress cannot release a secret prefix" [] (fragments events);

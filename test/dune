@@ -180,7 +180,7 @@
  (deps ../config/prompts/workspace_memory_curator.md
        ../config/prompts/workspace_memory_briefing.md
        ../config/prompts/keeper.md)
- (libraries alcotest masc masc.agent_core masc.agent_core.llm_provider masc.server masc.masc_core masc.runtime masc.fs_compat masc.config_dir_resolver masc.prompt_registry exact_output_fixture yojson eio eio_main unix))
+ (libraries alcotest masc masc.tool_types masc.agent_core masc.agent_core.llm_provider masc.server masc.masc_core masc.runtime masc.fs_compat masc.config_dir_resolver masc.prompt_registry exact_output_fixture yojson eio eio_main unix))
 
 (test
  (name test_msx_vision)
@@ -1923,6 +1923,9 @@
   ; test_goal_store and test_goal_tools freeze the creation clock
   ptime
   eio.mock
+  ; test_server_startup_takeover plants v2 lease files whose name is the
+  ; digest of the directory's own (st_dev, st_ino) identity.
+  digestif
   masc.tool_metrics_store)
  (deps ../bin/main_eio.exe))
 
@@ -2744,6 +2747,7 @@
 
 (include stanzas/test_keeper_fs_edit_containment.inc)
 
+(include stanzas/test_keeper_workspace_memory_selection.inc)
 (include stanzas/test_keeper_workspace_ops.inc)
 
 (include stanzas/test_keeper_identity_drift_counter.inc)
@@ -3378,7 +3382,7 @@
 (test
  (name test_tui_text_input_target)
  (modules test_tui_text_input_target)
- (libraries masc_tui_message_input masc_tui_identity_model masc_tui_surface_navigation
+ (libraries masc_tui_account_login masc_tui_message_input masc_tui_identity_model masc_tui_surface_navigation
   alcotest
   fmt
   masc
@@ -3420,6 +3424,7 @@
  (modules test_tui_keeper_chat_transcript)
  (libraries masc.runtime
   alcotest
+  agent_core
   fmt
   masc
   masc.string_util
@@ -3520,7 +3525,7 @@
 (test
  (name test_tui_keeper_chat_live)
  (modules test_tui_keeper_chat_live)
- (libraries alcotest fmt masc masc_tui_keeper_chat_live masc_tui_keeper_chat_projection yojson))
+ (libraries alcotest agent_core fmt masc masc_tui_keeper_chat_live masc_tui_keeper_chat_projection yojson))
 
 (test
  (name test_tui_measurement)
@@ -4051,7 +4056,7 @@
 (test
  (name test_tui_model_runtime_table)
  (modules test_tui_model_runtime_table)
- (libraries alcotest masc_tui_model_runtime_table masc_tui_message_layout))
+ (libraries alcotest yojson masc.runtime masc_tui_model_runtime_table masc_tui_message_layout))
 
 (test
  (name test_tui_context_bars)
@@ -7135,7 +7140,7 @@
 (test
  (name test_tui_runtime_config_view)
  (modules test_tui_runtime_config_view)
- (libraries masc_tui_runtime_config_view))
+ (libraries masc_tui_runtime_config_view masc_tui_account_login))
 
 (test
  (name test_tui_runtime_listing)
@@ -9840,6 +9845,22 @@
  (name runtest)
  (deps (alias runtest-test_tui_chat_progress_clock_pty)))
 
+; H2 crash-resume harness: scenario subcommands need orchestrated env
+; (H2_ROOT, H2_ASYNC_*), so it is an executable, not a (test) — a (test)
+; stanza would run it with no args under the default runtest alias and exit 2.
+; Run: ./test_h2_composition_resume.exe <scenario> with H2_ROOT set.
+(executable
+ (name test_h2_composition_resume)
+ (modules test_h2_composition_resume)
+ (libraries masc_test_deps))
+
+; H2 execution journal harness: no-args runs all scenarios (deterministic,
+; temp dirs only), so it is safe under the default runtest alias.
+(test
+ (name test_h2_journal)
+ (modules test_h2_journal)
+ (libraries masc_test_deps))
+
 (test
  (name test_h5_media_failover_continuity)
  (modules test_h5_media_failover_continuity)
@@ -9851,6 +9872,12 @@
  (libraries masc_test_deps))
 
 (test
+ (name test_tui_models_account_reading)
+ (modules test_tui_models_account_reading)
+ (libraries alcotest masc_tui_types masc_tui_render_prim
+  masc_tui_runtime_config_view masc_tui_account_login))
+
+(test
  (name test_tui_model_content_activity)
  (modules test_tui_model_content_activity)
  (libraries alcotest astring yojson masc masc.masc_types masc.agent_core masc.runtime masc.server masc.ag_ui
@@ -9858,3 +9885,7 @@
   masc_tui_keeper_chat_live masc_tui_keeper_chat_log masc_tui_keeper_chat_transcript))
 
 (include stanzas/test_tui_code_history_sources_pty.inc)
+
+(include stanzas/test_tui_code_history_diff_pty.inc)
+
+(include stanzas/test_tui_code_history_task_pty.inc)

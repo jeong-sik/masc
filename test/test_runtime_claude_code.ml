@@ -1154,7 +1154,7 @@ let test_usage_windows_are_reported_without_changing_the_turn () =
   let reports = ref [] in
   let on_stream_event = function
     | Runtime_claude_code.Usage_windows_reported report -> reports := report :: !reports
-    | Turn_started _ | Text_delta _ | Thinking_delta _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+    | Turn_started _ | Text_delta _ | Thinking_delta _ | Child_content_observed _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Native_task_observed _ | Conversation_compacted
     | Usage_reported _ | Turn_finished _ -> ()
   in
@@ -1228,7 +1228,7 @@ let test_quota_refusal_still_reports_the_turns_spend () =
       reported :=
         (turn_id, model, usage.input_tokens, usage.output_tokens, usage.cache_read_input_tokens)
         :: !reported
-    | Turn_started _ | Text_delta _ | Thinking_delta _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+    | Turn_started _ | Text_delta _ | Thinking_delta _ | Child_content_observed _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Native_task_observed _ | Usage_windows_reported _
     | Conversation_compacted | Turn_finished _ -> ()
   in
@@ -1257,7 +1257,7 @@ let test_quota_refusal_before_any_response_reports_no_spend () =
   let reported = ref 0 in
   let on_stream_event = function
     | Runtime_claude_code.Usage_reported _ -> incr reported
-    | Turn_started _ | Text_delta _ | Thinking_delta _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+    | Turn_started _ | Text_delta _ | Thinking_delta _ | Child_content_observed _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Native_task_observed _ | Usage_windows_reported _
     | Conversation_compacted | Turn_finished _ -> ()
   in
@@ -1275,7 +1275,7 @@ let test_result_of_another_session_reports_no_spend () =
   let reported = ref 0 in
   let on_stream_event = function
     | Runtime_claude_code.Usage_reported _ -> incr reported
-    | Turn_started _ | Text_delta _ | Thinking_delta _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+    | Turn_started _ | Text_delta _ | Thinking_delta _ | Child_content_observed _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Native_task_observed _ | Usage_windows_reported _
     | Conversation_compacted | Turn_finished _ -> ()
   in
@@ -1473,7 +1473,7 @@ let test_api_diagnostic_preserves_native_effects () =
                     true
                   | Turn_started _ | Usage_windows_reported _ | Conversation_compacted
                   | Native_tool_progress _ | Native_task_observed _ | Usage_reported _ -> false
-                  | Text_delta _ | Thinking_delta _ | Content_block_stopped _
+                  | Text_delta _ | Thinking_delta _ | Child_content_observed _ | Content_block_stopped _
                   | Dynamic_tool_started _
                   | Dynamic_tool_finished _
                   | Turn_finished _ -> fail "native-only turn emitted response content")

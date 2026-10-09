@@ -4,10 +4,10 @@ import os
 import sys
 
 from tui_keyboard_harness import ScenarioFamily, main
-from tui_keyboard_resources import run_resources_regression
+from tui_keyboard_resources import run_resources_regression, run_resources_unconfirmed_selection
 
 
 
 if __name__ == "__main__":
-    family = ScenarioFamily("resources", "MCP resource reading regression", (run_resources_regression,))
+    family = ScenarioFamily("resources", "MCP resource reading regression", (run_resources_regression, run_resources_unconfirmed_selection))
     main([os.path.abspath(sys.argv[1]), "resources"], (family,), family)

@@ -232,11 +232,13 @@ let with_fixture_sequence
     ?second_system_marker
     ?first_prompt_marker
     ?second_prompt_marker
+    ?(later_lines = [])
     first_lines
     second_lines
     f =
   let first_path = fixture_script ?system_marker:first_system_marker ?prompt_marker:first_prompt_marker first_lines in
   let second_path = fixture_script ?system_marker:second_system_marker ?prompt_marker:second_prompt_marker second_lines in
+  let paths = first_path :: second_path :: List.map (fun lines -> fixture_script lines) later_lines in
   let counter_path = Filename.temp_file "masc-keeper-claude-sequence-" ".txt" in
   Sys.remove counter_path;
   let path = Filename.temp_file "masc-keeper-claude-sequence-" ".sh" in
@@ -255,12 +257,12 @@ let with_fixture_sequence
   output_string output "count=$((count + 1))\n";
   output_string output
     ("printf '%s\\n' \"$count\" > " ^ shell_quote counter_path ^ "\n");
-  output_string output
-    ("if [ \"$count\" -eq 1 ]; then\n"
-     ^ "  exec " ^ shell_quote first_path ^ " \"$@\"\n"
-     ^ "else\n"
-     ^ "  exec " ^ shell_quote second_path ^ " \"$@\"\n"
-     ^ "fi\n");
+  output_string output "case \"$count\" in\n";
+  List.iteri (fun index target ->
+    output_string output (Printf.sprintf "  %d) exec %s \"$@\" ;;\n"
+      (index + 1) (shell_quote target))) paths;
+  let last_path = List.hd (List.rev paths) in
+  output_string output ("  *) exec " ^ shell_quote last_path ^ " \"$@\" ;;\nesac\n");
   close_out output;
   Unix.chmod path 0o700;
   Fun.protect
@@ -268,7 +270,7 @@ let with_fixture_sequence
       List.iter
         (fun candidate ->
            if Sys.file_exists candidate then Sys.remove candidate)
-        [ path; first_path; second_path; counter_path ])
+        (path :: counter_path :: paths))
     (fun () -> f path)
 ;;
 
@@ -354,12 +356,12 @@ let content_of_wire_message raw =
    newest atom alone ([Keeper_turn_driver.For_testing.official_client_turn_start]). *)
 let fixture_trace_with_no_completed_turn = "fixture-trace-no-completed-turn"
 
-let run_keeper_turn ?accept ?(tools = []) ?(tools_support = true) ?(initial_messages = []) ?event_bus
+let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = []) ?event_bus
     ?event_capture ?on_native_tool_progress ?on_native_tool_completion ?on_event ?agent_core_checkpoint ?runtime_manifest_context
     ?runtime_manifest_append ?raw_trace ?on_official_client_native_action
     ?on_official_client_usage_report
     ?(system_prompt = "pre-dispatch fixture system prompt")
-    ?on_request_attribution ?official_client_continuation ?session_id ~base_path ~cli_path ~goal () =
+    ?on_request_attribution ?official_client_continuation ?session_id ?accept ~base_path ~cli_path ~goal () =
   Masc_test_deps.declare_fixture_keeper
     ~base_path ~sandbox_profile:None "claude-fixture";
   let runtime_snapshot = Runtime.For_testing.snapshot () in
@@ -389,7 +391,7 @@ let run_keeper_turn ?accept ?(tools = []) ?(tools_support = true) ?(initial_mess
                     let run () =
                       Result.map
                         (fun selected -> selected.Keeper_turn_driver.run_result)
-                        (Keeper_turn_driver.run_named ?accept ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+                        (Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                            ~runtime_id:"claude.claude"
                            ~keeper_name:"claude-fixture"
                            ~base_path
@@ -410,6 +412,7 @@ let run_keeper_turn ?accept ?(tools = []) ?(tools_support = true) ?(initial_mess
                            ?on_request_attribution
                            ?official_client_continuation
                            ?session_id
+                           ?accept
                            ~sw
                            ~net:(Eio.Stdenv.net env)
                            ())
@@ -435,7 +438,7 @@ let run_keeper_turn ?accept ?(tools = []) ?(tools_support = true) ?(initial_mess
                        invalid_arg "event_capture requires event_bus"))))))
 ;;
 
-let run_unified_autonomous_cycle_pair ~base_path ~cli_path =
+let run_unified_autonomous_repeat_cycles ~base_path ~cli_path =
   let keeper_name = "claude-fixture" in
   let meta =
     match
@@ -448,7 +451,7 @@ let run_unified_autonomous_cycle_pair ~base_path ~cli_path =
     | Ok meta -> meta
     | Error detail -> fail ("keeper meta fixture failed: " ^ detail)
   in
-  let shared_context = Agent_core.Context.create () in
+  let shared_context = ref (Agent_core.Context.create ()) in
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
     ~finally:(fun () ->
@@ -476,6 +479,15 @@ let run_unified_autonomous_cycle_pair ~base_path ~cli_path =
                      cross-cycle ledger assertions below would have no rows to
                      read even after the repetition fix lands. *)
                   Keeper_tool_call_log.init ~base_path:config.base_path ();
+                  (* More than the former tail window, with distinct I/O so
+                     none of these unrelated reads can trigger a repeat. *)
+                  for index = 1 to 205 do
+                    let identity = string_of_int index in
+                    Keeper_tool_call_log.log_call ~keeper_name ~tool_name:"fixture_history"
+                      ~input:(`String identity) ~output_text:identity
+                      ~input_fingerprint:identity ~output_fingerprint:identity
+                      ~wire_outcome:Tool_result.Ok ~duration_ms:0. ()
+                  done;
                   Masc_test_deps.declare_fixture_keeper
                     ~base_path
                     ~sandbox_profile:(Some Masc.Keeper_types_profile.Docker)
@@ -564,7 +576,7 @@ let run_unified_autonomous_cycle_pair ~base_path ~cli_path =
                         ~observation
                         ~turn_input
                         ~turn_decision
-                        ~shared_context
+                        ~shared_context:!shared_context
                         ()
                     in
                     match run meta with
@@ -575,9 +587,8 @@ let run_unified_autonomous_cycle_pair ~base_path ~cli_path =
                         "normal official-client cycle writes no AGENT_CORE checkpoint"
                         false
                         (Sys.file_exists checkpoint_path);
-                      (* The repetition fix is not in yet, so cycle two below
-                         still completes; prove the ledger fixture independent
-                         of that open gap by reading cycle one's rows now. *)
+                      (* Inspect the durable rows before the next cycle consumes
+                         them as cross-cycle evidence. *)
                       (match
                          Keeper_tool_call_log.read_recent ~keeper_name ~n:100 ()
                        with
@@ -613,6 +624,7 @@ let run_unified_autonomous_cycle_pair ~base_path ~cli_path =
                              { checkpoint_reason =
                                  Keeper_unified_turn.Repeated_tool_call
                                    { tool_name; repeated_count }
+                             ; meta = after_yield
                              ; _
                              }) ->
                          check bool
@@ -697,7 +709,23 @@ let run_unified_autonomous_cycle_pair ~base_path ~cli_path =
                            (List.map
                               (fun row ->
                                  Yojson.Safe.Util.(member "wire_outcome" row |> to_string))
-                              task_calls)
+                              task_calls);
+                         (* Restore the Session record into a new loop context,
+                            just as a persisted context resumes. *)
+                         (match Agent_core.Context.of_json ~eio:true
+                           (Agent_core.Context.to_json !shared_context) with
+                          | Ok restored -> shared_context := restored
+                          | Error error -> fail (Agent_core.Context.decode_error_to_string error));
+                         let after_changed_query = match run after_yield with
+                           | Ok (Keeper_unified_turn.Turn_completed {meta; _}) -> meta
+                           | Error failure -> fail (Agent_core.Error.to_string failure.error)
+                           | Ok _ -> fail "a new query after the first yield was judged from old calls" in
+                         (match run after_changed_query with
+                          | Ok (Keeper_unified_turn.Turn_checkpointed
+                              {checkpoint_reason = Keeper_unified_turn.Repeated_tool_call
+                                {tool_name = "keeper_tasks_list"; repeated_count = 3}; _}) -> ()
+                          | Error failure -> fail (Agent_core.Error.to_string failure.error)
+                          | Ok _ -> fail "the second cross-cycle repeat streak did not rearm")
                        | Ok (Keeper_unified_turn.Turn_checkpointed _) ->
                          fail "cycle one unexpectedly checkpointed"
                        | Ok (Keeper_unified_turn.Turn_completed _) ->
@@ -1256,6 +1284,18 @@ let test_official_client_repetition_crosses_unified_autonomous_cycles () =
     ; Emit (result ~turn_id:"unified-turn-2" "POLL_TURN_TWO_COMPLETE")
     ]
   in
+  let changed_call request_id =
+    mcp_tool_call ~request_id ~tool_name:"keeper_tasks_list"
+      ~arguments:(`Assoc [ "status", `String "todo"; "limit", `Int 11;
+        "projection", `String "compact" ]) in
+  let later_turn ~turn_id calls =
+    [ Emit_and_read mcp_initialize; Emit mcp_initialized_notification; Emit_and_read mcp_list ]
+    @ List.map (fun id -> Emit_and_read (changed_call id)) calls
+    @ [ Emit (assistant ~turn_id "CHANGED_QUERY_COMPLETE");
+        Emit (result ~turn_id "CHANGED_QUERY_COMPLETE") ] in
+  let later_lines =
+    [ later_turn ~turn_id:"unified-turn-3" ["tasks-4"; "tasks-5"]
+    ; later_turn ~turn_id:"unified-turn-4" ["tasks-6"] ] in
   Masc_test_deps.with_process_env
     "MASC_KEEPER_AUTONOMOUS_ENABLED"
     (Some "true")
@@ -1263,8 +1303,8 @@ let test_official_client_repetition_crosses_unified_autonomous_cycles () =
        Fun.protect
          ~finally:(fun () -> cleanup_tree base_path)
          (fun () ->
-            with_fixture_sequence first_lines second_lines (fun cli_path ->
-              run_unified_autonomous_cycle_pair ~base_path ~cli_path)))
+            with_fixture_sequence ~later_lines first_lines second_lines (fun cli_path ->
+              run_unified_autonomous_repeat_cycles ~base_path ~cli_path)))
 ;;
 
 (* WP1 completion trigger (native tool provenance): each official-client
@@ -2273,6 +2313,58 @@ let test_keeper_does_not_retry_context_error_after_tool_effect () =
                  Keeper_official_client_session_store
                  .recovery_failure_to_string failure
                | _ -> "not-in-recovery")))
+;;
+
+let test_blank_completion_rejected_without_losing_session () =
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    with_fixture
+      [Emit (assistant ~turn_id:"blank" ""); Emit (result ~turn_id:"blank" "")]
+      (fun cli_path ->
+        (match run_keeper_turn ~base_path ~cli_path ~goal:"Reply to this request"
+            ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress () with
+         | Error error ->
+             (match Keeper_internal_error.classify_masc_internal_error error with
+              (* Claude's spawned process cannot prove absence of native
+                 effects. The driver fences automatic retry while preserving
+                 the exact typed acceptance cause and the settled session. *)
+              | Some (Keeper_internal_error.Provider_attempt_effect_fenced
+                  { runtime_id = "claude.claude"
+                  ; effect_disposition = Keeper_provider_attempt_effect.Observation_unavailable
+                  ; cause = Keeper_internal_error.Fenced_masc
+                      (Keeper_internal_error.Accept_rejected
+                        { reason_kind = Some Accept_no_usable_progress
+                        ; response_shape = Some Accept_response_blank_text_only
+                        ; stop_reason = Some Agent_core.Types.EndTurn
+                        ; _ }) }) -> ()
+              | _ -> fail ("blank completion was not a fenced blank-progress rejection: "
+                           ^ Agent_core.Error.to_string error))
+         | Ok _ -> fail "blank completion was accepted as progress");
+        let module Store = Keeper_official_client_session_store in
+        let binding = load_state base_path in
+        let settled_session = match binding.phase with
+          | Store.Settled {session_id; turn_id = "blank"} -> session_id
+          | _ -> fail "blank response was misclassified as protocol recovery" in
+        match Store.plan_claim ~expected:(Some binding) ~client_kind:Claude_code
+                ~runtime_id:"claude.claude" with
+        | Ok {previous_settlement = Some previous; _} ->
+            check string "next turn resumes the completed session"
+              settled_session previous.session_id
+        | _ -> fail "next turn would abandon the resumable session"));
+  List.iter (fun result_field ->
+    let base_path = temp_workspace () in
+    Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+      let fields = result ~turn_id:"missing" "" |> Yojson.Safe.from_string
+        |> Yojson.Safe.Util.to_assoc |> List.remove_assoc "result" in
+      let terminal = Yojson.Safe.to_string (`Assoc (fields @ result_field)) in
+      with_fixture [Emit (assistant ~turn_id:"missing" ""); Emit terminal]
+        (fun cli_path ->
+          check bool "missing or malformed result still fails" true
+            (Result.is_error (run_keeper_turn ~base_path ~cli_path ~goal:"Reply" ()));
+          match (load_state base_path).phase with
+          | Recovery_required {failure = Protocol_failed; _} -> ()
+          | _ -> fail "missing or malformed completion lost its protocol classification")))
+    [[]; ["result", `Null]; ["result", `Int 7]]
 ;;
 
 let test_keeper_settles_and_resumes () =
@@ -4041,32 +4133,6 @@ let test_a_working_state_that_displaces_nothing_goes () =
       (working_state_not_carried ~reason:"displaces_atoms")
 ;;
 
-let test_quiet_result_preserves_claude_output_presence () =
-  let absent = {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"quiet"}|} in
-  let null_result = {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"quiet","result":null}|} in
-  List.iter (fun (label, final, policy, quiet) ->
-    let base_path = temp_workspace () in
-    Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
-      with_fixture [Emit (assistant ~turn_id:"quiet" ""); Emit final] (fun cli_path ->
-        match run_keeper_turn ~accept:(Keeper_tooling.Response.accepts_response ~policy)
-            ~base_path ~cli_path ~goal:"Continue useful work or finish quietly if nothing changed." () with
-        | Error _ when not quiet -> ()
-        | Error error -> failf "%s: %s" label (Agent_core.Error.to_string error)
-        | Ok _ when not quiet -> failf "%s was incorrectly accepted as quiet" label
-        | Ok run_result ->
-          match Keeper_agent_run.For_testing.normalize_response_text_for_finalization
-              ~response_policy:policy ~runtime_id:"claude.claude" ~initial_messages:[]
-              ~run_result ~text:"" ~tool_names:[] () with
-          | Error error -> fail (Agent_core.Error.to_string error)
-          | Ok text -> check string label "" text)))
-    [ "explicit", result ~turn_id:"quiet" "", Keeper_tooling.Response.Allow_quiet_final, true
-    ; "absent", absent, Allow_quiet_final, false
-    ; "null", null_result, Allow_quiet_final, false
-    ; "direct", result ~turn_id:"quiet" "", Require_progress, false
-    ; "failure", generic_provider_rejection, Allow_quiet_final, false
-    ]
-;;
-
 let () =
   (* Pin the prompt directory explicitly. Under dune the registry falls back to
      [DUNE_SOURCEROOT], but a test executable run directly has neither that
@@ -4077,10 +4143,8 @@ let () =
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   run
     "keeper_claude_code_runtime"
-     [ ( "quiet completion", [test_case "explicit result survives adapter and caller acceptance" `Quick
-         test_quiet_result_preserves_claude_output_presence] )
-     ; ( "native action", [ test_case "partial content boundary identity" `Quick test_partial_content_boundaries_keep_message_and_channel_identity
-         ; test_case "exact provider identity" `Quick test_native_action_observer_keeps_exact_provider_identity ] )
+    [ ( "native action", [ test_case "partial content boundary identity" `Quick test_partial_content_boundaries_keep_message_and_channel_identity
+        ; test_case "exact provider identity" `Quick test_native_action_observer_keeps_exact_provider_identity ] )
     ; ( "usage scope"
       , [ test_case "result-only usage keeps client-turn scope" `Quick
             test_result_only_usage_keeps_client_turn_scope
@@ -4095,6 +4159,8 @@ let () =
         ] )
     ; ( "lifecycle"
       , [ test_case "settles and resumes" `Quick test_keeper_settles_and_resumes
+        ; test_case "blank completion rejects progress but preserves session" `Quick
+            test_blank_completion_rejected_without_losing_session
         ; test_case "resume prompt carries the task reference" `Quick
             test_resume_prompt_carries_the_task_reference
         ; test_case "resume prompt sends only changed blocks" `Quick

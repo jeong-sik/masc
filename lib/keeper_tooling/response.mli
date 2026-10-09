@@ -34,14 +34,3 @@ val accept_rejection_of_response :
     [Agent_core.Response_shape.has_deliverable_content]; no provider/model name
     or free-form response text participates in the decision. *)
 val response_has_text_or_tool_progress : Agent_core.Types.api_response -> bool
-
-type completion_policy = Require_progress | Allow_quiet_final
-
-val is_quiet_final : policy:completion_policy -> Agent_core.Types.api_response -> bool
-(** An explicitly present blank text final with [EndTurn] may close a host wake
-    without an update. Missing content, hidden reasoning, interrupted output
-    and provider failures are not this choice. No prose is interpreted. *)
-
-val accepts_response : policy:completion_policy -> Agent_core.Types.api_response -> bool
-(** The normal progress contract, plus {!is_quiet_final} when the caller's
-    input contract allows silence. Direct requests keep [Require_progress]. *)

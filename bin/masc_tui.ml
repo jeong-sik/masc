@@ -931,26 +931,6 @@ let clear_current_message_draft state =
   discard_recovered_paste_lock state;
   save_message_draft state
 
-let consume_dispatched_message_draft state request =
-  state.msg_drafts <-
-    List.filter
-      (fun ((workspace, keeper_name), draft) ->
-        not
-          (workspace = workspace_input_identity_of_server state.server_identity
-           && String.equal keeper_name request.Keeper_chat.keeper_name
-           && String.equal draft.kcd_text request.message
-           && draft.kcd_attachments = request.attachments
-           && draft.kcd_references = request.references))
-      state.msg_drafts;
-  match state.msg_target_keeper_name with
-  | Some keeper_name
-    when String.equal keeper_name request.Keeper_chat.keeper_name
-         && String.equal (Masc_tui_message_input.contents state.msg_input) request.message
-         && state.msg_attachments = [] && state.msg_references = []
-         && not (recovered_paste_send_locked state) ->
-      clear_current_message_draft state
-  | Some _ | None -> save_message_draft state
-
 (** Handle local editing keys for message mode. Network submission is injected
     so the input path never owns a blocking HTTP effect. *)
 (* One page of the transcript. Measured from the terminal rather than fixed,
@@ -16481,7 +16461,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
               entry.phase <- Turn_streaming;
               append_user_history_once ~submitted_at:entry.submitted_at state
                 request;
-              consume_dispatched_message_draft state request;
+              (* Staging already consumed this request's composer. A late
+                 dispatch owns only its promoted request, never a newer draft,
+                 even when the operator types the same words again. *)
               add_event state "message"
                 (Printf.sprintf "%s Keeper request: %s"
                    (if was_replay then "Replaying exact" else "Dispatching")
@@ -16563,19 +16545,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
            List.iter (fun (item : Keeper_chat_live.observed_delta) -> match item.delta with
              | Keeper_chat_live.Accepted {interactive=None;_} ->
                launch_keeper_turns_load state ~mailbox
-             | Keeper_chat_live.Accepted {interactive=Some receipt;_} ->
-               let notice = match receipt.outcome with
-                 | Keeper_chat.Applied ->
-                   (match receipt.interrupt_error with
-                    | Some detail -> Some ("Message accepted; interruption unavailable: " ^ detail)
-                    | None when receipt.signalled -> Some "Update accepted; stopping the observed turn before continuing"
-                    | None when receipt.resumed -> Some "Update accepted; chat interruption pause released"
-                    | None -> None)
-                 | Keeper_chat.Stale_control ->
-                   Some "Message queued: chat controls changed after this input; the newer stop or resume remains in effect"
-                 | Keeper_chat.Paused -> Some "Message queued: Keeper remains paused; inspect with /queue"
-                 | Keeper_chat.Replayed -> None in
-               Option.iter (append_chat_history state request Message_status) notice
+             | Keeper_chat_live.Accepted {interactive=Some _;_} -> ()
              | _ -> ()) deltas;
            if List.exists (Keeper_chat.same_request_identity request)
                 state.keeper_run_next_pending then begin
@@ -16625,7 +16595,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                      not (String.equal name request.keeper_name
                           && String.equal id request.request_id))
                    state.keeper_auto_priority_pending;
-                 append_chat_history state request Message_status "Submitted message already started or settled; no other turn was interrupted"
+                 turn_log_note_priority_unavailable entry.log
                | None -> ())
            end;
            if List.exists (fun (item : Keeper_chat_live.observed_delta) -> match item.delta with

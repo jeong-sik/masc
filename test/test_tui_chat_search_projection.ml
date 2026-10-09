@@ -290,7 +290,7 @@ let test_repeat_survives_reasoning_visibility_and_backfill () = at_sizes (fun or
   let history = find ~older:progress state "MATCH_" in
   (match history.matched_anchor with
    | T.Search_history _ -> ()
-   | T.Search_journal _ -> fail "search repeated a newer journal item");
+   | T.Search_journal _ | T.Search_admission _ -> fail "search repeated a newer journal item");
   check bool "no older match ends the walk" true
     (Option.is_none ((Render.keeper_message_find_scroll state ~keeper_name:"alpha"
        ~needle:"MATCH_" ~older_than:(Some history)).match_result));
@@ -630,6 +630,78 @@ let test_a_settled_conversation_keeps_its_measured_list () =
   check int "a transient tail follows every settled entry"
     (List.length settled + List.length tail) (List.length joined);
   check bool "and keeps their order" true (List.for_all2 ( == ) (settled @ tail) joined)
+
+let admission_log (state : T.state) ~id ~at =
+  let sent_request = { (Chat.create_request ~keeper_name:"alpha" ~message:"input" ()) with
+      Chat.request_id=id } in
+  let held = T.turn_log_create ~keeper_name:"alpha" ~request_id:id ~started_at:at in
+  T.turn_log_add ~now:at held ~seq:None (Live.Accepted {
+    admission=Live.Queued; queue_length=3;
+    interactive=Some {Chat.outcome=Chat.Paused; chat_control_token="paused-control";
+      signalled=false; resumed=false; interrupt_error=None} });
+  let entry : T.inflight = {sent_request; submitted_at=at; sent_at=at;
+    control_generation=0; phase=T.Turn_streaming; log=held} in
+  state.msg_inflight <- state.msg_inflight @ [entry];
+  held
+
+let bind_admission_batch logs =
+  List.iter (fun (log : T.turn_log) ->
+    T.turn_log_add ~now:30. log ~seq:(Some 0) Live.Run_started;
+    T.turn_log_add ~now:31. log ~seq:(Some 1)
+      (Live.Batch_bound {operation_id=Log.request_id log.tl_log; execution_id="canonical"})) logs
+
+let test_admission_repeat_survives_batch_binding () = at_sizes (fun origin ->
+  let state = state origin in
+  (* Identical display prefixes must not alias the full request identities. *)
+  let older_id="tui-request-identical-prefix-A" and newer_id="tui-request-identical-prefix-B" in
+  let older_log = admission_log state ~id:older_id ~at:10. in
+  let newer_log = admission_log state ~id:newer_id ~at:20. in
+  let query="Message queued:" in
+  let newer = find state query in
+  check bool "newest receipt has the full request anchor" true
+    (newer.matched_anchor = T.Search_admission newer_id);
+  bind_admission_batch [older_log; newer_log];
+  check bool "follower changed its execution source" true
+    (T.turn_log_execution_source newer_log = Log.Operation "canonical");
+  let older = find ~older:newer state query in
+  check bool "repeat finds the older receipt after both sources change" true
+    (older.matched_anchor = T.Search_admission older_id);
+  check bool "older receipt is present in the actual frame" true
+    (Astring.String.is_infix ~affix:query (screen state));
+  check bool "repeat stops after each receipt has been visited" true
+    (Option.is_none ((Render.keeper_message_find_scroll state ~keeper_name:"alpha"
+       ~needle:query ~older_than:(Some older)).match_result)))
+
+let test_admission_pin_survives_batch_reply_arrival () = at_sizes (fun origin ->
+  List.iter (fun paint_before_arrival ->
+    let state = state origin in
+    let held = admission_log state ~id:"follower" ~at:10. in
+    ignore (find state "Message queued:");
+    if paint_before_arrival then ignore (frame_lines state);
+    (* Run_started precedes binding on the actual wire. A long canonical
+       answer can arrive before the searched receipt's first paint. *)
+    bind_admission_batch [held];
+    let text = long_answer "BATCH_REPLY_" in
+    T.turn_log_add ~now:32. held ~seq:(Some 2) (Live.Text {text=text; stream_scope=None});
+    T.turn_log_add ~now:33. held ~seq:(Some 3) (reply text);
+    T.turn_log_add ~now:34. held ~seq:(Some 4) Live.Run_finished;
+    (* The terminal callback retains the source before removing its watcher. *)
+    let completed = List.find (fun (entry : T.inflight) -> entry.log == held)
+        state.msg_inflight in
+    T.settle_turn_log state completed;
+    state.msg_inflight <- List.filter (fun (entry : T.inflight) ->
+      not (Chat.same_request_identity entry.sent_request completed.sent_request))
+      state.msg_inflight;
+    check bool "request-owned receipt stays visible through binding and answer growth" true
+      (Astring.String.is_infix ~affix:"Message queued:" (screen state));
+    assert_still_reading state "Message queued:";
+    T.set_msg_scroll state 0;
+    (* Returning to the live edge stops holding. What may remain is the
+       passive live-edge snapshot that seeds the next scroll key. *)
+    check bool "explicit live-edge navigation releases the receipt pin" true
+      (match state.msg_scroll_pin with
+       | None | Some { T.pin_mode = T.Follow_live; _ } -> true
+       | Some { T.pin_mode = (T.Hold_scroll | T.Hold_search); _ } -> false)) [false; true])
 
 let test_empty_projection_does_not_hold_future_arrivals () = at_sizes (fun origin ->
   List.iter (fun requested ->
@@ -1462,4 +1534,8 @@ let () = run "chat search projection" [
     test_case "scroll pin follows history and canonical reply aliases" `Quick
       test_pin_aliases_history_and_canonical_reply;
     test_case "search pins before the first frame and releases at the live edge" `Quick
-      test_search_pin_before_first_frame_and_at_tail ] ]
+      test_search_pin_before_first_frame_and_at_tail;
+    test_case "receipt repeat preserves request identity through batch binding" `Quick
+      test_admission_repeat_survives_batch_binding;
+    test_case "receipt pin survives binding before paint and long reply arrival" `Quick
+      test_admission_pin_survives_batch_reply_arrival ] ]

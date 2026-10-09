@@ -633,36 +633,28 @@ def run(binary, captures):
             with wire.lock:
                 wire.returned_balance = "3250"
             wire.set_booting(True)
+            # A booting server cannot confirm the workspace, so the last match
+            # stays unconfirmed: the Item detail stays open and nothing reads.
             wait(
                 lambda text: (
                     booting_observed()
-                    and b"No keeper selected." in text
-                    and "▸Items".encode() not in text
+                    and b"server workspace unconfirmed" in text
+                    and "▸Items".encode() in text
                 ),
-                "booting server did not withdraw the Item detail",
+                "booting server did not mark the Item detail unconfirmed",
             )
-            assert b"Balance " not in visible() and b"owned" not in visible()
+            assert b"Balance 3.250" not in visible(), "a booting server's account was read"
             capture("a-booting")
             wire.set_booting(False)
-            # Item authority requires a fresh explicit detail read; unlike
-            # other detail tabs, it is not automatically restored on recovery.
-            wait(
-                lambda text: (
-                    b"MASC Keepers" in text
-                    and b"a.boot.ready" in text
-                    and "▸Items".encode() not in text
-                ),
-                "ready server did not publish its fresh roster after boot",
-            )
-            assert b"Balance " not in visible() and b"owned" not in visible()
-            open_items()
+            # The ready server names the same workspace, so the open Item
+            # account reads again on its own.
             wait(
                 lambda text: (
                     "▸ alpha".encode() in text
                     and "▸Items".encode() in text
                     and b"Balance 3.250 Candle" in text
                 ),
-                "explicit readmission did not reload the Keeper Item account",
+                "same-workspace recovery did not reload the Keeper Item account",
             )
             assert not [p for p, _ in posts if p.startswith("/api/v1/keepers/")], (
                 "read-only Item navigation submitted Keeper work"

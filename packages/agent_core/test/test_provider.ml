@@ -153,7 +153,7 @@ let test_provider_config_rebinds_model_specific_context () =
   let parent =
     Llm_provider.Provider_config.make
       ~kind:Anthropic
-      ~model_id:"claude-opus-5"
+      ~model_id:"claude-opus-5-5"
       ~base_url:"https://api.anthropic.com"
       ~max_context:12_345
       ~model_capabilities_override:parent_capabilities

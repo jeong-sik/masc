@@ -899,9 +899,9 @@ type chat_search_cursor = {
   search_workspace : workspace_authority;
   search_keeper : string;
   matched_anchor : chat_search_anchor;
-  matched_occurrence : int;
-    (** Zero-based match ordinal within the entry, oldest first. Unlike a
-        physical wrapped row, this survives a change in viewport width. *)
+  matched_position : Masc_tui_chat_search.position;
+    (** Original body/field position, independent of wrapping, clipping and
+        diagram/source representation. *)
   older_anchors : chat_search_anchor list;
     (** Nearest older first. If reconciliation removes the matched stretch,
         continue at a surviving older row instead of restarting at the tail. *)
@@ -912,18 +912,34 @@ type polled_scroll_part = Polled_status | Polled_speech
 type chat_scroll_anchor =
   | Scroll_durable of chat_search_anchor
   | Scroll_pending of string
-  | Scroll_polled of string * polled_scroll_part
+  | Scroll_polled of string * int * polled_scroll_part
 
 type chat_pin_mode = Follow_live | Hold_scroll | Hold_search
 (** [Follow_live] is the last frame's structural snapshot, activated by a
     scroll key before asynchronous arrivals. It never stops tail following. *)
 
+type chat_source_position =
+  | Durable_position of Masc_tui_chat_search.position
+  | Polled_body_byte of { offset : int; sanitizer_expansion : int; semantic_expansion : int }
+
+(* A polled absolute byte is owned by the generation in Scroll_polled.
+   Sanitizer escape and semantic normalization expansions retain separate
+   identities, so distinct emitted bytes cannot collide by scalar addition. *)
 type chat_scroll_point = {
   scroll_anchor : chat_scroll_anchor;
   body_row : int;
+  source_position : chat_source_position option;
+    (** Exact semantic byte retained across physical reflow. [None] is a
+        generated or transient row whose source has no stable byte map. *)
   rows_below : int;
     (** Physical body-row ordinal within the projected entry, and its distance
         from the viewport bottom. Neither field is a text/clock identity. *)
+}
+
+type held_polled_excerpt = {
+  held_anchor : chat_scroll_anchor;
+  held_preview : Tui_decode.keeper_turn_preview;
+  held_entry : Masc_tui_message_layout.entry;
 }
 
 type chat_scroll_pin = {
@@ -931,6 +947,7 @@ type chat_scroll_pin = {
   pin_keeper : string;
   pin_scroll : int;
   pin_mode : chat_pin_mode;
+  held_transients : held_polled_excerpt list;
   pin_points : chat_scroll_point list;
     (** Drawn origins, oldest first. If a folded or replaced stretch disappears,
         a surviving origin can still hold the reader's position. A viewport
@@ -10741,10 +10758,15 @@ let merge_paged_history ~(paged : msg_entry list) ~(fresh : msg_entry list) =
 
 let set_msg_scroll (state : state) rows =
   let rows = max 0 rows in
+  (* A painted empty projection has no speech position to hold. Do not let a
+     wheel/Home request become a deferred scroll against future arrivals. *)
+  let rows = match state.msg_scroll_pin with
+    | Some {pin_mode=Follow_live;pin_points=[];_} -> 0
+    | Some _ | None -> rows in
   state.msg_scroll <- rows;
   state.msg_scroll_pin <- Option.map (fun pin ->
     if rows = 0 then
-      {pin with pin_mode=Follow_live; pin_scroll=0;
+      {pin with pin_mode=Follow_live; pin_scroll=0; held_transients=[];
         pin_points=List.map (fun point ->
           {point with rows_below=point.rows_below + pin.pin_scroll}) pin.pin_points}
     else {pin with pin_mode=Hold_scroll}) state.msg_scroll_pin

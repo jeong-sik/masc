@@ -44,12 +44,22 @@ let goto = function
         | _ -> Error "url must be an absolute HTTP(S) URL")
      | Ok _, _ -> Error "url is required")
   | _ -> Error "body must be an object"
+(* What the connection list answers. The connected clients are this server's
+   own list. The BiDi host's state is that host's record on disk, which also
+   says why a host that is not in the list ended. *)
+let clients_listing ~base_path =
+  let host = Browser_bidi_host_status.observe ~base_path in
+  (* The list the report was made from, so the two say of one list. *)
+  `Assoc
+    [ "clients"
+    , `List (List.map Browser_lane.client_json (Browser_bidi_host_status.listed_clients host))
+    ; "bidiHost", Browser_bidi_host_status.to_json host ]
 let add_routes router =
   router
   |> Http.Router.get "/api/v1/dashboard/browser-lane/clients"
-      (with_permission_auth ~permission:Masc_domain.CanReadState (fun _state request reqd ->
-         reply request reqd (Ok (`Assoc ["clients", `List
-           (List.map Browser_lane.client_json (Browser_lane.active_clients ()))]))))
+      (with_permission_auth ~permission:Masc_domain.CanReadState (fun state request reqd ->
+         reply request reqd
+           (Ok (clients_listing ~base_path:(Mcp_server.workspace_config state).base_path))))
   |> Http.Router.post "/api/v1/dashboard/browser-lane/read"
       (with_permission_auth ~permission:Masc_domain.CanReadState (fun _state request reqd ->
          read_body request reqd (fun json ->

@@ -7296,6 +7296,9 @@ let retire_keeper_message_search state =
 let suspend_workspace_readings state =
   retire_keeper_message_search state;
   state.workspace_read_authority <- ref ();
+  (* Retired completions cannot release these slots. Keep observations and
+     explicit audit intent for a confirmed read in the successor epoch. *)
+  state.msg_native_tasks_inflight <- [];
   let cancellations = state.workspace_observation_cancellations in
   state.workspace_observation_cancellations <- [];
   List.iter (fun (_, cancel) -> cancel ()) cancellations;

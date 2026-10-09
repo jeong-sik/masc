@@ -813,10 +813,42 @@ let test_effect_observations_resume_without_repeating_effects () =
   Alcotest.(check bool) "old save cannot replace newer panel read" false
     (retain_operation_observation state (Lane_subscriptions_observation 9))
 
+let test_native_task_read_epoch_retirement () =
+  let open Masc_tui_types in
+  let module Protocol = Masc_tui_async_protocol in
+  let state=create_state ~workspace:"a" ~local_base_path:"/workspace/a"
+      ~port:0 ~refresh_interval:0. () in
+  state.server_identity <- Some (identity "/workspace/a");
+  state.workspace_identity <- Workspace_identity_match;
+  let authority=state.workspace_authority in
+  let reading=Some state.workspace_read_authority in
+  let completion=Protocol.Keeper_native_tasks_loaded ("alpha",Ok Masc_tui_native_tasks.empty) in
+  Alcotest.(check bool) "native completion is an observation" true
+    (Protocol.workspace_message_is_read completion);
+  Alcotest.(check bool) "current read completion is admitted" true
+    (Protocol.workspace_message_admitted state ~authority ~reading completion);
+  let cached=["alpha",Masc_tui_native_tasks.empty] in
+  state.msg_native_tasks <- cached;
+  state.msg_native_tasks_inflight <- ["alpha"];
+  state.msg_native_tasks_audit_pending <- ["alpha"];
+  suspend_workspace_readings state;
+  Alcotest.(check (list string)) "retired native slot releases" [] state.msg_native_tasks_inflight;
+  Alcotest.(check bool) "cached task evidence survives" true (state.msg_native_tasks==cached);
+  Alcotest.(check (list string)) "manual audit intent survives same workspace suspension"
+    ["alpha"] state.msg_native_tasks_audit_pending;
+  state.msg_native_tasks_inflight <- ["alpha"];
+  Alcotest.(check bool) "old completion cannot release successor slot" false
+    (Protocol.workspace_message_admitted state ~authority ~reading completion);
+  Alcotest.(check bool) "successor read is admitted" true
+    (Protocol.workspace_message_admitted state ~authority
+       ~reading:(Some state.workspace_read_authority) completion)
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "unsent resource and log intents survive reconfirmation" `Quick
+      , [ Alcotest.test_case "native observations retire without losing queued audit" `Quick
+            test_native_task_read_epoch_retirement
+        ; Alcotest.test_case "unsent resource and log intents survive reconfirmation" `Quick
             test_unsent_resource_and_log_intents_survive_reconfirmation
         ; Alcotest.test_case "effect observations resume without repeating effects" `Quick
             test_effect_observations_resume_without_repeating_effects

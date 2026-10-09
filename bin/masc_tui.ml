@@ -6557,7 +6557,8 @@ let launch_keeper_older_page state ~mailbox ~keeper_name ~before =
   end
 
 let launch_keeper_native_tasks_load ?(mode=Masc_tui_native_tasks.Poll) state ~mailbox ~keeper_name =
-  let eligible = state.workspace_identity = Workspace_identity_match
+  let eligible = server_authority_ready state
+     && state.workspace_identity = Workspace_identity_match
      && keeper_available_for_new_message state keeper_name in
   if eligible && mode=Masc_tui_native_tasks.Audit
      && List.mem keeper_name state.msg_native_tasks_inflight

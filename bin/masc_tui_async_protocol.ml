@@ -667,6 +667,7 @@ let rec workspace_message_is_read = function
   | Keeper_chat_history_loaded _
   | Keeper_native_tasks_loaded _
   | Keeper_chat_copy_loaded _
+  | Keeper_native_tasks_loaded _
   | Keeper_chat_journal_loaded _
   | Context_inspector_loaded _
   | Keeper_chat_older_loaded _

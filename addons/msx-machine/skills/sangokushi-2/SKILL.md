@@ -173,6 +173,27 @@ Bitmap modes (GRAPHIC6 openings and scenes) leave name-table residue:
 Add-on’s `msx-observe` Skill explains how to preserve the captured frame
 and report uncertain text.
 
+## Advancing the campaign month
+
+Ending one province's commands does not by itself advance the month. At the
+visible province `(0-19)?` prompt, send `0`, Return, then confirm `y` at
+`今月の命令を終えますか(Y/N)?`. Read the next screen before repeating: it may
+be another owned province, a report, or a different interactive prompt.
+
+In an observed scenario 6 campaign, January 220 command menus visited
+provinces 10, 18, 6, 14, 20, 2, 16, 17, 3, 19, 7, 9, 13, 12, 5, 11, 8 and 4.
+After the last command end, the date changed to February 220. Subsequent AI
+reports progressed with `masc_msx_step` alone, and Cao Pi's province 10 command
+menu returned with gold 950 and land 72. This order describes that saved
+campaign; choose each action from the current screen rather than replaying
+the province list on another campaign.
+
+During reports, advance without injecting an unrequested key and inspect the
+PNG. A date change plus the next human command menu verifies month progression;
+a province number change within January does not. This replay used native
+worker source `1632107405d574726b90f0ac918ceeaf98ddbbcb` and proves one campaign
+month, not victory or a normal winning ending.
+
 ## Watching an all-AI game
 
 `0` at `何人でプレイしますか` starts with no human ruler and goes straight to the

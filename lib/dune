@@ -4,6 +4,7 @@
  (flags :standard)
  (public_name masc)
  (private_modules
+  keeper_board_attention_worker_disposition
   keeper_board_attention_candidate_wire
   keeper_microvm_build_plan
   keeper_connector_post_replay

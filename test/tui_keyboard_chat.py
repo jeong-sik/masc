@@ -1853,43 +1853,53 @@ def chat_visibility_modes_interaction(
             )
         if b"2 reasoning steps" not in initial or b"THINKING" not in initial:
             raise AssertionError(f"folded reasoning was not identifiable: {initial!r}")
-        # The skill header and its bold name must belong to one TURN on
-        # the completed screen, not separate turns or historical frames.
-        styled_rows = screen_rows(completed, preserve_styles=True)
-        turn_rows = sorted(
-            row for row, text in observed_rows.items()
-            if title_row < row < composer_row
-            and re.search(rb"TURN #\d+", text)
+        # The diagnostic header owns the turn identity; the compact Skill
+        # body follows on the next row. Read the completed screen so an older
+        # reading-mode frame cannot supply the Skill mark or name separately.
+        turn_row = screen_row_of(
+            observed_rows, "TURN #54 · 요청 trace-..531-00020#54".encode()
         )
-        skill_in_turn = False
-        for index, row in enumerate(turn_rows):
-            if re.search(
-                "◆\\s+SKILL\\s+│\\s+TURN #\\d+".encode(),
-                observed_rows[row],
-            ) is None:
-                continue
-            end_row = (
-                turn_rows[index + 1]
-                if index + 1 < len(turn_rows) else composer_row
-            )
-            if any(
-                b"\x1b[1mci-red-attribution" in text
-                for body_row, text in styled_rows.items()
-                if row < body_row < end_row
-            ):
-                skill_in_turn = True
-                break
-        if not skill_in_turn:
+        skill_row = screen_row_of(observed_rows, b"ci-red-attribution")
+        reasoning_row = screen_row_of(observed_rows, b"2 reasoning steps")
+        tool_row = screen_row_of(observed_rows, b"masc_fusion")
+        if not (
+            title_row < turn_row
+            and skill_row == turn_row + 1
+            and skill_row < reasoning_row < tool_row < composer_row
+        ):
             raise AssertionError(
-                "the completed Skill TURN did not contain its bold skill name: "
-                f"{styled_rows!r}"
+                "the Skill body, reasoning and tool did not belong to their turn: "
+                f"{observed_rows!r}"
             )
+        turn = observed_rows[turn_row].decode("utf-8")
+        skill = observed_rows[skill_row].decode("utf-8")
+        rail_column = turn.find("╭")
+        quote_column = turn.find("│")
+        if (
+            rail_column < 0
+            or quote_column <= rail_column
+            or re.fullmatch(r"\s*\d\d:\d\d\s+◆\s+SKILL\s*",
+                            turn[rail_column + 1:quote_column]) is None
+            or skill[quote_column:quote_column + 1] != "│"
+            or not skill[quote_column + 1:].lstrip().startswith("ci-red-attribution")
+        ):
+            raise AssertionError(f"the Skill header lost ownership of its body: {observed_rows!r}")
+        for row, mark in (
+            (skill_row, "│"), (reasoning_row, "├"), (tool_row, "╰")
+        ):
+            text = observed_rows[row].decode("utf-8")
+            if text[rail_column:rail_column + 1] != mark:
+                raise AssertionError(
+                    f"the Skill turn bracket lost {mark!r} at row {row}: {observed_rows!r}"
+                )
         # How far one invocation got is not on the resting row any more:
         # the row stands for every trigger of that skill.
         if "전달됨".encode() in initial:
             raise AssertionError(
                 f"the compact skill row still spells a lifecycle: {initial!r}"
             )
+        if b"\x1b[1mci-red-attribution" not in initial:
+            raise AssertionError(f"the Skill name was not bold: {initial!r}")
         # The rest of the skill row rides the tool toggle now: the action
         # rows and the proof line exist only behind Ctrl-D, so the compact
         # frame must not carry them. Their presence is waited for below,

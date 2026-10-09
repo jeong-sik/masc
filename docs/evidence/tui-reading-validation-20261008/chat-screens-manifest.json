@@ -1,0 +1,92 @@
+{
+  "provenance": "xterm replay of local fixture PTY frames",
+  "source_sha": "22b0cf94cb588eca4ff1e169dcffd6a7b6d11f28",
+  "run": {
+    "headSha": "22b0cf94cb588eca4ff1e169dcffd6a7b6d11f28",
+    "origin": "operator-authorized local PTY",
+    "platform": "macOS",
+    "build_exit_code": 0,
+    "binary": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-home-work-reading-20261007/_build/default/bin/masc_tui.exe",
+    "binarySha256": "aee76021d8473f7b64416f2659d12df51f9c8a85ad5799229c770cf813ef8694"
+  },
+  "binary_sha256": [
+    "aee76021d8473f7b64416f2659d12df51f9c8a85ad5799229c770cf813ef8694"
+  ],
+  "suite": "conversation-first-local",
+  "suite_pass_seen": true,
+  "log_sha256": "154c19912883d9f6181c19d1ddc549423a23950e6f3d8cc2979d118d880858bd",
+  "frames": [
+    {
+      "name": "01-chat-80",
+      "columns": 80,
+      "rows": 30,
+      "frame_sha256": "522d0d22708698886eee707b2be20e3aef5139737759ecfa1755d212334257ba",
+      "screenshot_sha256": "93d875c99e83a75c0a1dad0270133b5d9ad9b1b36821b3bd966fc8ff600cbeb0",
+      "pty_screen": " Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System\n\n   Keepers ▸ alpha ▸ chat                                                       \n ────────────────────────────────────────────────────────────────────────────── \n  ◀ ▎vincent                                                                    \n    ▎채팅 화면에서 필요한 내용만 읽고 싶어요. 저널과 실행 정보는 상세 보기에서  \n    ▎확인할게요.                                                                \n                                                                                \n  ●  대화 본문을 먼저 읽을 수 있도록 정리했습니다.                              \n                                                                                \n     발신자와 답변은 작은 여백으로 구분하고, 긴 문장은 일정한 폭으로 줄을       \n     바꿉니다. 저널과 요청 식별자는 상세 보기에서 확인할 수 있습니다.           \n                                                                                \n     전송 실패나 승인 요청처럼 지금 확인해야 하는 정보는 계속 표시합니다.       \n                                                                                \n                                                                                \n                                                                                \n                                                                                \n                                                                                \n                                                                                \n                                                                                \n                                                                                \n                                                                                \n                                                                                \n ────────────────────────────────────────────────────────────────────────────── \n    현재 작업 확인 불가                                                         \n    >                                                                           \n                                                                                \n ● healthy AUTO · gate: not loaded  Context unavailable                         \n  Enter:send  Ctrl-J:newline  Esc:list  /:commands  ?:help",
+      "observed_xterm_screen": " Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System\n\n   Keepers ▸ alpha ▸ chat                                                       \n ────────────────────────────────────────────────────────────────────────────── \n  ◀ ▎vincent                                                                    \n    ▎채팅 화면에서 필요한 내용만 읽고 싶어요. 저널과 실행 정보는 상세 보기에서  \n    ▎확인할게요.                                                                \n                                                                                \n  ●  대화 본문을 먼저 읽을 수 있도록 정리했습니다.                              \n                                                                                \n     발신자와 답변은 작은 여백으로 구분하고, 긴 문장은 일정한 폭으로 줄을       \n     바꿉니다. 저널과 요청 식별자는 상세 보기에서 확인할 수 있습니다.           \n                                                                                \n     전송 실패나 승인 요청처럼 지금 확인해야 하는 정보는 계속 표시합니다.       \n                                                                                \n                                                                                \n                                                                                \n                                                                                \n                                                                                \n                                                                                \n                                                                                \n                                                                                \n                                                                                \n                                                                                \n ────────────────────────────────────────────────────────────────────────────── \n    현재 작업 확인 불가                                                         \n    >                                                                           \n                                                                                \n ● healthy AUTO · gate: not loaded  Context unavailable                         \n  Enter:send  Ctrl-J:newline  Esc:list  /:commands  ?:help",
+      "actual_columns": 80,
+      "actual_rows": 30,
+      "terminal_layout": {
+        "viewport": {
+          "width": 779,
+          "height": 551
+        },
+        "native_scrollbar_width": 0,
+        "screen": {
+          "left": 5,
+          "top": 5,
+          "right": 773,
+          "bottom": 545,
+          "width": 768,
+          "height": 540,
+          "scrollWidth": 768,
+          "scrollHeight": 540,
+          "clientWidth": 768,
+          "clientHeight": 540
+        },
+        "font": {
+          "family": "DejaVu Sans Mono, Liberation Mono, monospace",
+          "size": 16,
+          "status": "loaded"
+        },
+        "clippedBy": []
+      }
+    },
+    {
+      "name": "02-chat-120",
+      "columns": 120,
+      "rows": 30,
+      "frame_sha256": "7fa471b868e422c8ab6315a1cb424bd15bc963487ba4509d74ecf1b3e31366d5",
+      "screenshot_sha256": "c06727db35c2756bb1dc8cb81013ba2bd7bc8a7af218d4b50ef5f1e6d4a1ccc9",
+      "pty_screen": " Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System\n\n   Keepers ▸ alpha ▸ chat                                                                                               \n ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── \n  ◀ ▎vincent                                                                                                            \n    ▎채팅 화면에서 필요한 내용만 읽고 싶어요. 저널과 실행 정보는 상세 보기에서 확인할게요.                              \n                                                                                                                        \n  ●  대화 본문을 먼저 읽을 수 있도록 정리했습니다.                                                                      \n                                                                                                                        \n     발신자와 답변은 작은 여백으로 구분하고, 긴 문장은 일정한 폭으로 줄을 바꿉니다. 저널과 요청 식별자는                \n     상세 보기에서 확인할 수 있습니다.                                                                                  \n                                                                                                                        \n     전송 실패나 승인 요청처럼 지금 확인해야 하는 정보는 계속 표시합니다.                                               \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── \n    현재 작업 확인 불가                                                                                                 \n    >                                                                                                                   \n                                                                                                                        \n ● healthy AUTO · gate: not loaded  Context unavailable                                                                 \n  Enter:send  Ctrl-J:newline  Esc:list  /:commands  ?:help",
+      "observed_xterm_screen": " Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System\n\n   Keepers ▸ alpha ▸ chat                                                                                               \n ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── \n  ◀ ▎vincent                                                                                                            \n    ▎채팅 화면에서 필요한 내용만 읽고 싶어요. 저널과 실행 정보는 상세 보기에서 확인할게요.                              \n                                                                                                                        \n  ●  대화 본문을 먼저 읽을 수 있도록 정리했습니다.                                                                      \n                                                                                                                        \n     발신자와 답변은 작은 여백으로 구분하고, 긴 문장은 일정한 폭으로 줄을 바꿉니다. 저널과 요청 식별자는                \n     상세 보기에서 확인할 수 있습니다.                                                                                  \n                                                                                                                        \n     전송 실패나 승인 요청처럼 지금 확인해야 하는 정보는 계속 표시합니다.                                               \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n                                                                                                                        \n ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── \n    현재 작업 확인 불가                                                                                                 \n    >                                                                                                                   \n                                                                                                                        \n ● healthy AUTO · gate: not loaded  Context unavailable                                                                 \n  Enter:send  Ctrl-J:newline  Esc:list  /:commands  ?:help",
+      "actual_columns": 120,
+      "actual_rows": 30,
+      "terminal_layout": {
+        "viewport": {
+          "width": 1163,
+          "height": 551
+        },
+        "native_scrollbar_width": 0,
+        "screen": {
+          "left": 5,
+          "top": 5,
+          "right": 1157,
+          "bottom": 545,
+          "width": 1152,
+          "height": 540,
+          "scrollWidth": 1152,
+          "scrollHeight": 540,
+          "clientWidth": 1152,
+          "clientHeight": 540
+        },
+        "font": {
+          "family": "DejaVu Sans Mono, Liberation Mono, monospace",
+          "size": 16,
+          "status": "loaded"
+        },
+        "clippedBy": []
+      }
+    }
+  ]
+}

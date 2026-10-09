@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Render recorded CI fixture PTY frames using ttyd's xterm frontend.
+"""Render recorded fixture PTY frames using ttyd's xterm frontend.
 
 This replays original ANSI bytes; it does not run or build MASC. The manifest
 keeps the producing run, source SHA, binary hash and frame hashes separate
-from screenshot hashes. A screenshot is a replay of CI fixture PTY evidence,
+from screenshot hashes. A screenshot is a replay of fixture PTY evidence,
 never a claim about the installed or production terminal.
 """
 from __future__ import annotations
@@ -73,6 +73,25 @@ def binary_hashes(log: str) -> set[str]:
             raise ValueError("malformed STUDIO_BINARY_SHA256 record")
         result.add(value.lower())
     return result
+
+
+
+def capture_origin(frames: list[dict], run: dict, requested: str) -> str:
+    values = [frame.get("provenance") for frame in frames]
+    if any(not isinstance(value, str) for value in values):
+        raise ValueError("capture records must declare a fixture origin")
+    recorded = set(values)
+    origins = {"CI fixture PTY": "ci", "local fixture PTY": "local"}
+    if len(recorded) != 1 or next(iter(recorded), None) not in origins:
+        raise ValueError("capture records must declare one consistent CI or local fixture origin")
+    origin = origins[next(iter(recorded))]
+    if requested != origin:
+        raise ValueError("--origin differs from the captured fixture origin")
+    if "origin" in run:
+        run_origins = {"ci": "ci", "local": "local", "operator-authorized local PTY": "local"}
+        if not isinstance(run["origin"], str) or run_origins.get(run["origin"]) != origin:
+            raise ValueError("run metadata origin differs from the captured fixture origin")
+    return origin
 
 
 def expected_rows(record: dict) -> list[str]:
@@ -164,6 +183,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--log", type=Path)
     parser.add_argument("--run-info", type=Path)
+    parser.add_argument("--origin", choices=("ci", "local"), default="ci",
+                        help="Where the fixture PTY was executed (default: ci)")
     parser.add_argument("--expected-head")
     parser.add_argument("--out", type=Path)
     parser.add_argument("--suite-pass-marker")
@@ -182,11 +203,6 @@ def main() -> None:
         return
     if None in (args.log, args.run_info, args.expected_head, args.out):
         parser.error("--log, --run-info, --expected-head and --out are required")
-    from playwright.sync_api import ViewportSize, sync_playwright
-
-    ttyd = shutil.which("ttyd")
-    if ttyd is None:
-        raise SystemExit("ttyd is required to replay the recorded terminal frames")
     run = json.loads(args.run_info.read_text())
     if run["headSha"] != args.expected_head:
         raise SystemExit("run source SHA differs from --expected-head")
@@ -194,10 +210,20 @@ def main() -> None:
     frames = captures(log, suite=args.suite)
     if not frames:
         raise SystemExit("log contains no STUDIO_CAPTURE records")
+    try:
+        origin = capture_origin(frames, run, args.origin)
+    except ValueError as error:
+        raise SystemExit(f"capture origin rejected: {error}") from error
+    from playwright.sync_api import ViewportSize, sync_playwright
+
+    ttyd = shutil.which("ttyd")
+    if ttyd is None:
+        raise SystemExit("ttyd is required to replay the recorded terminal frames")
     binaries = binary_hashes(log)
     args.out.mkdir(parents=True, exist_ok=True)
     evidence = {
-        "provenance": "xterm replay of CI fixture PTY frames",
+        "provenance": f"xterm replay of {'CI' if origin == 'ci' else 'local'} fixture PTY frames",
+        "origin": origin, "origin_validated": True,
         "source_sha": run["headSha"], "run": run,
         "binary_sha256": sorted(binaries),
         "suite": args.suite,

@@ -22,7 +22,7 @@ as the control, a body the frame lays out without the count.
 """
 import os
 import sys
-import time
+import threading
 
 import tui_keyboard_approvals as _keyboard_approvals
 import tui_keyboard_board as _keyboard_board
@@ -76,9 +76,12 @@ COMPOSER_ROWS = {"keepers": 1, "board": 1, "config": 1, "keeper-detail": 1,
 # (Masc_tui_roster_pane.pane_cols).
 ROSTER_SCREENS = frozenset(("keeper-detail-roster", "keeper-chat-roster"))
 ROSTER_PANE_COLUMNS = 34
+# Detail ends in key hints plus the shared composer. Chat ends in one
+# roster padding row, the full-width identity row, then key hints.
+ROSTER_ROWS_BELOW = {"keeper-detail-roster": 2, "keeper-chat-roster": 3}
 
-# How often the observer stream says it is still open. A write to a TUI that
-# has gone fails, which is what ends the stream's handler.
+# How often the observer stream says it is still open. Each interaction
+# explicitly ends its stream before the fixture server joins its handlers.
 OBSERVER_KEEPALIVE_SECONDS = 1.0
 
 # The Config body's source: the harness's navigation fixture, whose first
@@ -144,13 +147,13 @@ FILE_CHANGE_READS = Counted((200, {
 }))
 
 
-def observer_stream():
-    while True:
+def observer_stream(stopped: threading.Event):
+    while not stopped.is_set():
         yield b": region baseline\n\n"
-        time.sleep(OBSERVER_KEEPALIVE_SECONDS)
+        stopped.wait(OBSERVER_KEEPALIVE_SECONDS)
 
 
-def fixtures(*, absent_live_roster=False) -> region.ServedFixtures:
+def fixtures(*, observer_stopped: threading.Event, absent_live_roster=False) -> region.ServedFixtures:
     """Every request the TUI makes on its way to these screens, answered.
 
     Where nothing is waiting -- no approvals, asks, schedules, pull requests,
@@ -211,7 +214,8 @@ def fixtures(*, absent_live_roster=False) -> region.ServedFixtures:
     # The MCP session the live feed opens: its handshake, and an observer
     # stream that stays open with nothing to say.
     served["/mcp"] = _keyboard_observer.observer_http_fixtures()["/mcp"]
-    served["/mcp?sse_kind=observer"] = _keyboard_harness.StreamingHttpResponse(observer_stream)
+    served["/mcp?sse_kind=observer"] = _keyboard_harness.StreamingHttpResponse(
+        lambda: observer_stream(observer_stopped))
     served["/api/v1/keepers/alpha/chat/history"] = (200, [{
         "id": "region-gate", "role": "system", "content": GATE_ARGUMENT,
         "ts": 1787348491.3,
@@ -227,7 +231,8 @@ def fixtures(*, absent_live_roster=False) -> region.ServedFixtures:
     return region.ServedFixtures(served)
 
 
-def interaction(served: region.ServedFixtures, *, absent_live_roster=False):
+def interaction(served: region.ServedFixtures, *, observer_stopped: threading.Event,
+                absent_live_roster=False):
     measured: dict[tuple[str, object], dict[str, object]] = {}
 
     def take(process, fd, output, screen: str, columns: int, *, selected_post="Retry") -> None:
@@ -250,8 +255,14 @@ def interaction(served: region.ServedFixtures, *, absent_live_roster=False):
             assert_board_contract(rows, left=left, right=right,
                 selected_title=selected_post, where=where)
         if left:
-            measured[(screen, columns)]["roster"] = region.measure_pane(
-                rows, left=0, right=left)
+            measured[(screen, columns)]["roster"] = region.measure_rail(
+                rows, left=0, right=left,
+                bottom=region.TERMINAL_ROWS - ROSTER_ROWS_BELOW[screen])
+            roster = measured[(screen, columns)]["roster"]
+            content = [region.cells(rows[row], 0, left - 1)
+                       for row in range(roster["top"], roster["bottom"] + 1)]
+            for name in ("alpha", "beta"):
+                assert any(name in text for text in content), (name, content)
         if screen == "keeper-detail-roster":
             measured[(screen, columns)]["body_pane"] = region.measure_pane(
                 rows, left=left, right=right)
@@ -414,22 +425,32 @@ def interaction(served: region.ServedFixtures, *, absent_live_roster=False):
         _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
         _keyboard_harness.send_and_wait(process, fd, output, b"q", b"q: press again to quit")
 
-    return interact
+    def run_with_cleanup(process, fd, slave, output, base):
+        try:
+            interact(process, fd, slave, output, base)
+        finally:
+            # The HTTP server joins stream handlers before outer PTY cleanup.
+            # Stop even when a layout assertion fails, preserving that error.
+            observer_stopped.set()
+
+    return run_with_cleanup
 
 
 if __name__ == "__main__":
-    served = fixtures()
+    observer_stopped = threading.Event()
+    served = fixtures(observer_stopped=observer_stopped)
     _keyboard_harness.run_terminal_scenario(
         os.path.abspath(sys.argv[1]),
         description="Region baseline: Board, Config, keeper detail and chat",
-        interact=interaction(served),
+        interact=interaction(served, observer_stopped=observer_stopped),
         http_fixtures=served,
     )
-    absent = fixtures(absent_live_roster=True)
+    observer_stopped = threading.Event()
+    absent = fixtures(observer_stopped=observer_stopped, absent_live_roster=True)
     _keyboard_harness.run_terminal_scenario(
         os.path.abspath(sys.argv[1]),
         description="Region baseline: Info refuses equipment absent from live roster",
-        interact=interaction(absent, absent_live_roster=True),
+        interact=interaction(absent, observer_stopped=observer_stopped, absent_live_roster=True),
         http_fixtures=absent,
     )
     print("region baseline: PASS")

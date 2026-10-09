@@ -76,16 +76,16 @@ def styled_screen(output):
     return h.screen_rows(bytes(output[:end + len(h.FRAME_END)]), preserve_styles=True)
 
 
-def assert_menu_selection(output, rows, *, selected_offset):
+def assert_menu_selection(output, rows, *, selected_offset, chat_start):
     menu = h.screen_row_of(rows, b"Commands")
     draft = h.screen_row_of(rows, b"> /")
     assert menu > 0 and draft > menu + 2, "menu has no visible candidates"
     styled = styled_screen(output)
-    # At 150 columns the automatic roster owns the first 34 cells.
+    # These fixtures open the roster explicitly or leave chat full-width.
     for number in range(menu + 1, draft - 1):
-        cells = styled_cells(styled[number])[34:150]
+        cells = styled_cells(styled[number])[chat_start:150]
         selected = number == menu + selected_offset
-        assert len(cells) == 116, "menu candidate did not fill the chat pane"
+        assert len(cells) == 150 - chat_start, "menu candidate did not fill the chat pane"
         assert ('›' in ''.join(cell[0] for cell in cells)) == selected, "selection marker disagrees with selected candidate"
         assert all(cell[1] == selected for cell in cells), "selection did not reverse the complete candidate row, or leaked to another"
 
@@ -105,11 +105,11 @@ def run(executable):
         keys = h.screen_row_of(rows, b"Tab/Enter:insert")
         if not (0 < title < menu < draft < context < keys):
             raise AssertionError(f"chat zones overlap or change order: {rows!r}")
-        assert_menu_selection(output, rows, selected_offset=1)
+        assert_menu_selection(output, rows, selected_offset=1, chat_start=34)
         print("CHAT_MENU_FRAME " + json.dumps({str(k): v.decode('utf-8', 'replace') for k, v in rows.items()}, ensure_ascii=False))
         h.send_and_wait(process, fd, output, b"\x1b[B", b"Commands  2/")
         rows = screen(process, fd, output)
-        assert_menu_selection(output, rows, selected_offset=2)
+        assert_menu_selection(output, rows, selected_offset=2, chat_start=34)
         if b"> /keeper" in b"\n".join(rows.values()):
             raise AssertionError("selection changed the draft before acceptance")
         start = len(output)
@@ -158,6 +158,9 @@ def run(executable):
 
     def telemetry(process, fd, _slave, output, _base):
         open_chat(process, fd, output)
+        # Detailed runtime attribution is opt-in; retain this mode while
+        # checking ownership across roster navigation and narrower panes.
+        h.send_and_wait(process, fd, output, b"\x06", b"metadata:inline")
         h.resize_and_wait(process, fd, output, rows=30, columns=120, needle=CHAT)
         h.wait_for_output(process, fd, output, b"KEEPERS", start=0, timeout=3.0)
         rows = screen(process, fd, output)
@@ -253,10 +256,10 @@ def run(executable):
         h.palette_go(process, fd, output, b"keeper alpha", CHAT)
         h.send_and_wait(process, fd, output, b"/", b"Commands  1/")
         rows = screen(process, fd, output)
-        assert_menu_selection(output, rows, selected_offset=1)
+        assert_menu_selection(output, rows, selected_offset=1, chat_start=0)
         h.send_and_wait(process, fd, output, b"\x1b[B", b"Commands  2/")
         rows = screen(process, fd, output)
-        assert_menu_selection(output, rows, selected_offset=2)
+        assert_menu_selection(output, rows, selected_offset=2, chat_start=0)
         assert h.screen_row_of(rows, b"> /") > 0, "NO_COLOR selection changed the draft"
         assert not any(cell[2] is not None for row in styled_screen(output).values() for cell in styled_cells(row)), "NO_COLOR still painted a background"
         h.write_all(fd, output, b"\x15")

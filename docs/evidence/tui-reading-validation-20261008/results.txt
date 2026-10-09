@@ -1,0 +1,16 @@
+Application build: PASS (22b0cf94cb, OCaml 5.5.1, macOS ARM64)
+info-refresh: Keeper Info composite entry, manual and automatic refresh: PASS
+config-paths: System identity rows preserve workspace and server facts: PASS
+keeper-window: the keeper roster says which keepers it draws: PASS
+home-layout: Home layout PTY: PASS (2 scenarios)
+work-resize: tui Planning Task Review regression: PASS (1 selected scenario runs)
+primary-lists: tui primary list studio PTY: PASS
+chat-origin: tui keyboard PTY regression: PASS (1 selected scenario runs)
+chat-viewport: tui keyboard PTY regression: PASS (1 selected scenario runs)
+candle: Candle currency TUI: PASS (10 real PTY scenarios)
+metadata-wrap: Keeper Info and Channels metadata wrap: PASS
+chat-visibility-fixed: HISTORICAL_PASS; committed visibility fixture NOT_RUN
+chat-menu-fixed: chat command menu and status hierarchy: PASS
+region-layout-fixed: HISTORICAL_PASS; corrected rail-boundary fixture NOT_RUN
+remote-history-fixed: remote workspace history: PASS (held response withdrawal and unsent draft retention)
+chat-capture: Conversation-first local review capture: PASS

@@ -1898,8 +1898,9 @@ def chat_visibility_modes_interaction(
             raise AssertionError(
                 f"the compact skill row still spells a lifecycle: {initial!r}"
             )
-        if b"\x1b[1mci-red-attribution" not in initial:
-            raise AssertionError(f"the Skill name was not bold: {initial!r}")
+        styled_rows = screen_rows(completed, preserve_styles=True)
+        if b"\x1b[1mci-red-attribution" not in styled_rows.get(skill_row, b""):
+            raise AssertionError(f"the settled Skill name was not bold: {styled_rows!r}")
         # The rest of the skill row rides the tool toggle now: the action
         # rows and the proof line exist only behind Ctrl-D, so the compact
         # frame must not carry them. Their presence is waited for below,

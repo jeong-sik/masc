@@ -17,7 +17,7 @@
       "result": "PASS"
     },
     "test/test_tui_board_heading_width.py": {
-      "sha256": "c4a05db3513406d0b3461b8588d4ec101c3c407a369475d11753609082a57346",
+      "sha256": "ed9ad93da3a7f6739baa7deb2bce3f77d763c2f75cac7c3478ce325d61848925",
       "check": "python ast.parse",
       "result": "PASS"
     },
@@ -32,7 +32,7 @@
       "result": "PASS"
     },
     "test/test_tui_region_baseline_pty.py": {
-      "sha256": "5cf17e5bde1b88c83c9da247265e65487b2775a10f3bf71b29688cd85e52333c",
+      "sha256": "ef5f1f602f4bc8edccbabc331c833267731191af2ffff2bc4c2365e3051b96f3",
       "check": "python ast.parse",
       "result": "PASS"
     },

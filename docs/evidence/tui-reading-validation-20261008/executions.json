@@ -11,156 +11,173 @@
     {
       "name": "info-refresh",
       "target": "test/test_tui_keeper_info_refresh_pty.py",
-      "result": "PASS",
+      "result": "UNVERIFIED_CURRENT_SOURCE",
       "exit_code": 0,
       "pass_marker": "Keeper Info composite entry, manual and automatic refresh: PASS",
       "log": "logs/info-refresh.log.gz",
       "log_sha256": "4f39a1826d95429303c5fb77cae0b043023933f1f0bf6413088a727a4a6c242a",
-      "compressed_log_sha256": "5e8cbea7cf6ee430f8ae8ac074ce795da592f4fd7862304034e0f2dc82386c23"
+      "compressed_log_sha256": "5e8cbea7cf6ee430f8ae8ac074ce795da592f4fd7862304034e0f2dc82386c23",
+      "historical_reported_result": "PASS"
     },
     {
       "name": "config-paths",
       "target": "test/test_tui_config_paths_row.py",
-      "result": "PASS",
+      "result": "UNVERIFIED_CURRENT_SOURCE",
       "exit_code": 0,
       "pass_marker": "System identity rows preserve workspace and server facts: PASS",
       "log": "logs/config-paths.log.gz",
       "log_sha256": "221998a2e639c44b72d87cb0b265d97616977b7f87581b469c7ede89a55620e4",
-      "compressed_log_sha256": "9974fee01f6853c62d6af1d5049a8e2cdcda1d30aaac54541e6294fa34478486"
+      "compressed_log_sha256": "9974fee01f6853c62d6af1d5049a8e2cdcda1d30aaac54541e6294fa34478486",
+      "historical_reported_result": "PASS"
     },
     {
       "name": "keeper-window",
       "target": "test/test_tui_keeper_roster_window.py",
-      "result": "PASS",
+      "result": "UNVERIFIED_CURRENT_SOURCE",
       "exit_code": 0,
       "pass_marker": "the keeper roster says which keepers it draws: PASS",
       "log": "logs/keeper-window.log.gz",
       "log_sha256": "3e4ae4d682e190086971b37977b33eba4130ed00ec8a6200daa09f19416bc6bb",
-      "compressed_log_sha256": "31669ba5ba5e37a6d9628c67f3f11745dc907ef28731d34ab995ff0b3510bab7"
+      "compressed_log_sha256": "31669ba5ba5e37a6d9628c67f3f11745dc907ef28731d34ab995ff0b3510bab7",
+      "historical_reported_result": "PASS"
     },
     {
       "name": "home-layout",
       "target": "test/test_tui_home_layout_pty.py",
-      "result": "PASS",
+      "result": "UNVERIFIED_CURRENT_SOURCE",
       "exit_code": 0,
       "pass_marker": "Home layout PTY: PASS (2 scenarios)",
       "log": "logs/home-layout.log.gz",
       "log_sha256": "34c2a90002642bc5ac27b1ce43a6684012f3197cb9b9d25cbfd744fe4b76147e",
-      "compressed_log_sha256": "56a905802f7c9fe02dad034222ad5969d21a69a293eb58a77a3d46a04362e71f"
+      "compressed_log_sha256": "56a905802f7c9fe02dad034222ad5969d21a69a293eb58a77a3d46a04362e71f",
+      "historical_reported_result": "PASS"
     },
     {
       "name": "work-resize",
       "target": "test/test_tui_keyboard_input.py planning-review --scenario Planning preserves selected goals and footer across resize",
-      "result": "PASS",
+      "result": "UNVERIFIED_CURRENT_SOURCE",
       "exit_code": 0,
       "pass_marker": "tui Planning Task Review regression: PASS (1 selected scenario runs)",
       "log": "logs/work-resize.log.gz",
       "log_sha256": "f3594a39c7e0c5fae03e9ba084baf2dce559a0e2193b4d09867216c3821bd23e",
-      "compressed_log_sha256": "67cdb429fdc49c90e4382da9b0c89ce4ece5eac6fe0b38a60683c48c709dc858"
+      "compressed_log_sha256": "67cdb429fdc49c90e4382da9b0c89ce4ece5eac6fe0b38a60683c48c709dc858",
+      "historical_reported_result": "PASS"
     },
     {
       "name": "primary-lists",
       "target": "test/test_tui_board_heading_width.py",
-      "result": "PASS",
+      "result": "UNVERIFIED_CURRENT_SOURCE",
       "exit_code": 0,
       "pass_marker": "tui primary list studio PTY: PASS",
       "log": "logs/primary-lists.log.gz",
       "log_sha256": "f3cbfb448c262b96533780cbb7aea297497ba9ec955bc5a4b4535cdc03db2d1b",
-      "compressed_log_sha256": "1b0a96ca9ba8a9539573cde1cf01b02218d9bc590f8d960ff0ea41e91a7419df"
+      "compressed_log_sha256": "1b0a96ca9ba8a9539573cde1cf01b02218d9bc590f8d960ff0ea41e91a7419df",
+      "historical_reported_result": "PASS"
     },
     {
       "name": "chat-origin",
       "target": "test/test_tui_keyboard_input.py --scenario Keeper message origin badges",
-      "result": "PASS",
+      "result": "UNVERIFIED_CURRENT_SOURCE",
       "exit_code": 0,
       "pass_marker": "tui keyboard PTY regression: PASS (1 selected scenario runs)",
       "log": "logs/chat-origin.log.gz",
       "log_sha256": "a1f3e4bded9578227987568a6d9dd330d317c6a3a611d9afd8877d1a2223163c",
-      "compressed_log_sha256": "63d76daae136e2a94f6004fcbbcb1961a6d09d2d671a3bb96c7b56ef9ce2371e"
+      "compressed_log_sha256": "63d76daae136e2a94f6004fcbbcb1961a6d09d2d671a3bb96c7b56ef9ce2371e",
+      "historical_reported_result": "PASS",
+      "provenance_gap": "Archived logs have no scenario identity; separate execution is unverified."
     },
     {
       "name": "chat-viewport",
       "target": "test/test_tui_keyboard_input.py --scenario Keeper oversized viewport gap under NO_COLOR",
-      "result": "PASS",
+      "result": "UNVERIFIED_CURRENT_SOURCE",
       "exit_code": 0,
       "pass_marker": "tui keyboard PTY regression: PASS (1 selected scenario runs)",
       "log": "logs/chat-viewport.log.gz",
       "log_sha256": "a1f3e4bded9578227987568a6d9dd330d317c6a3a611d9afd8877d1a2223163c",
-      "compressed_log_sha256": "63d76daae136e2a94f6004fcbbcb1961a6d09d2d671a3bb96c7b56ef9ce2371e"
+      "compressed_log_sha256": "63d76daae136e2a94f6004fcbbcb1961a6d09d2d671a3bb96c7b56ef9ce2371e",
+      "historical_reported_result": "PASS",
+      "provenance_gap": "Archived logs have no scenario identity; separate execution is unverified."
     },
     {
       "name": "candle",
       "target": "test/test_tui_candle_currency_pty.py",
-      "result": "PASS",
+      "result": "UNVERIFIED_CURRENT_SOURCE",
       "exit_code": 0,
       "pass_marker": "Candle currency TUI: PASS (10 real PTY scenarios)",
       "log": "logs/candle.log.gz",
       "log_sha256": "19f739ecdc9638b2485473893a730d55a3c5b0d52a8a16e99adf335eb0f5de50",
-      "compressed_log_sha256": "c95d89504c1344cfb2c3fac33856e85d895ad21b178766146abdcff8fffdaa5f"
+      "compressed_log_sha256": "c95d89504c1344cfb2c3fac33856e85d895ad21b178766146abdcff8fffdaa5f",
+      "historical_reported_result": "PASS"
     },
     {
       "name": "metadata-wrap",
       "target": "test/test_tui_keeper_metadata_wrap_pty.py",
-      "result": "PASS",
+      "result": "UNVERIFIED_CURRENT_SOURCE",
       "exit_code": 0,
       "pass_marker": "Keeper Info and Channels metadata wrap: PASS",
       "log": "logs/metadata-wrap.log.gz",
       "log_sha256": "2888aefca490fd110ef1631ab34c76f0a20b4f772badfdd50536436d7c41285d",
-      "compressed_log_sha256": "f3c2c028e02d1dc3cea95e4a5d660f3f140b809a54fd60d8159aeaae36bf9aa8"
+      "compressed_log_sha256": "f3c2c028e02d1dc3cea95e4a5d660f3f140b809a54fd60d8159aeaae36bf9aa8",
+      "historical_reported_result": "PASS"
     },
     {
       "name": "chat-visibility-fixed",
       "target": "test/test_tui_keyboard_input.py --scenario Keeper chat visibility modes",
-      "result": "HISTORICAL_PASS",
+      "result": "UNVERIFIED_CURRENT_SOURCE",
       "exit_code": 0,
       "pass_marker": "tui keyboard PTY regression: PASS (1 selected scenario runs)",
       "log": "logs/chat-visibility-fixed.log.gz",
       "log_sha256": "a1f3e4bded9578227987568a6d9dd330d317c6a3a611d9afd8877d1a2223163c",
       "compressed_log_sha256": "63d76daae136e2a94f6004fcbbcb1961a6d09d2d671a3bb96c7b56ef9ce2371e",
       "current_fixture_result": "NOT_RUN",
-      "scope": "Recorded execution predates the committed visibility scenario; it does not validate the current fixture."
+      "scope": "Recorded execution predates the committed visibility scenario; it does not validate the current fixture.",
+      "historical_reported_result": "HISTORICAL_PASS"
     },
     {
       "name": "chat-menu-fixed",
       "target": "test/test_tui_chat_command_menu_pty.py",
-      "result": "PASS",
+      "result": "UNVERIFIED_CURRENT_SOURCE",
       "exit_code": 0,
       "pass_marker": "chat command menu and status hierarchy: PASS",
       "log": "logs/chat-menu-fixed.log.gz",
       "log_sha256": "729ea13fe5befd76313114dadf1d5063b967060ec5388d6fc489caddcb770c50",
-      "compressed_log_sha256": "51b898f0357ed7508abfdae12008403deecae252590b183fbd539efeebf0f5ae"
+      "compressed_log_sha256": "51b898f0357ed7508abfdae12008403deecae252590b183fbd539efeebf0f5ae",
+      "historical_reported_result": "PASS"
     },
     {
       "name": "region-layout-fixed",
       "target": "test/test_tui_region_baseline_pty.py",
-      "result": "HISTORICAL_PASS",
+      "result": "UNVERIFIED_CURRENT_SOURCE",
       "exit_code": 0,
       "pass_marker": "region baseline: PASS",
       "log": "logs/region-layout-fixed.log.gz",
       "log_sha256": "c7446e429d33b100833661cc835d3b3b720e10d6aac2c8c51a6d06c2abff8c33",
       "compressed_log_sha256": "11e6e9e3df8d3cbf6014cfea0204306bb7ef5145fb3bcd3f9624f5d6fc060b23",
       "current_fixture_result": "NOT_RUN",
-      "scope": "Recorded execution predates the independent rail-bottom assertion; it does not validate the current fixture."
+      "scope": "Recorded execution predates the independent rail-bottom assertion; it does not validate the current fixture.",
+      "historical_reported_result": "HISTORICAL_PASS"
     },
     {
       "name": "remote-history-fixed",
       "target": "test/test_tui_remote_workspace_history_pty.py",
-      "result": "PASS",
+      "result": "UNVERIFIED_CURRENT_SOURCE",
       "exit_code": 0,
       "pass_marker": "remote workspace history: PASS (held response withdrawal and unsent draft retention)",
       "log": "logs/remote-history-fixed.log.gz",
       "log_sha256": "3da4e8ae5576683ed2da50c7557af71767e61e18f47acda905dfc8c72a8f0c46",
-      "compressed_log_sha256": "2d7f740b95049daf460f7cf2043f323102e13ccd433e2e6b52283c65b9cbb454"
+      "compressed_log_sha256": "2d7f740b95049daf460f7cf2043f323102e13ccd433e2e6b52283c65b9cbb454",
+      "historical_reported_result": "PASS"
     },
     {
       "name": "chat-capture",
       "target": "docs/evidence/tui-reading-validation-20261008/capture-chat.py",
-      "result": "PASS",
+      "result": "UNVERIFIED_CURRENT_SOURCE",
       "exit_code": 0,
       "pass_marker": "Conversation-first local review capture: PASS",
       "log": "logs/chat-capture.log.gz",
       "log_sha256": "154c19912883d9f6181c19d1ddc549423a23950e6f3d8cc2979d118d880858bd",
-      "compressed_log_sha256": "551d1fdd2d3ddd168f7983a689cbe8463744aa7e07ab47bd56d0b20dcc776217"
+      "compressed_log_sha256": "551d1fdd2d3ddd168f7983a689cbe8463744aa7e07ab47bd56d0b20dcc776217",
+      "historical_reported_result": "PASS"
     }
   ],
   "initial_failures": [
@@ -218,7 +235,7 @@
   "changed_fixture_syntax": [
     {
       "file": "scripts/capture-tui-ci-frames.py",
-      "sha256": "10b269d973c47341d41b7472622a51bf8d08c0f629afc77129bfe7e05f2d35cc",
+      "sha256": "d6e44528fdc05361cdd156fca6dbc480fdef74af9e64fba79b61fc8688e4f161",
       "syntax": "PASS"
     },
     {
@@ -233,12 +250,12 @@
     },
     {
       "file": "test/test_tui_remote_workspace_history_pty.py",
-      "sha256": "0da923192725b450cde857d2a06acfc3fcd983c43d1881818436255e251860ae",
+      "sha256": "d4e830a11b5b07e1e4f8e6365bd9ca726829d15d36ef6353e2b8ae417261f6ef",
       "syntax": "PASS"
     },
     {
       "file": "test/tui_keyboard_chat.py",
-      "sha256": "3b4e88f198f86707c7290c500452c936cb2769764b20c427212d6c4d3b72f578",
+      "sha256": "8487c866b172fb6e488e34c9cc499d9af0f6a6d185def3aa49c8b60fb9e80331",
       "syntax": "PASS"
     },
     {
@@ -261,5 +278,6 @@
     "current chat visibility fixture execution",
     "current rail-boundary fixture execution"
   ],
-  "fixture_syntax_scope": "Syntax parsed from the current files during review response; no corresponding PTY rerun."
+  "fixture_syntax_scope": "Fresh ast.parse checks on exactly the recorded hashes; historical execution records above were not rerun.",
+  "scope": "Historical execution reports only; no current-source PTY execution verified by this manifest."
 }

@@ -37,7 +37,7 @@
       "result": "PASS"
     },
     "test/test_tui_remote_workspace_history_pty.py": {
-      "sha256": "b984bec2df1d82f225aa1c26d10fd8288566e34a72234283ba180927b590e45e",
+      "sha256": "d4e830a11b5b07e1e4f8e6365bd9ca726829d15d36ef6353e2b8ae417261f6ef",
       "check": "python ast.parse",
       "result": "PASS"
     }

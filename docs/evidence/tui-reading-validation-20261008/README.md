@@ -1,3 +1,9 @@
+> Current-source execution is unverified. The retained logs are historical.
+> In particular, chat-origin and chat-viewport logs contain the same generic
+> PASS marker without scenario identity, so they do not prove separate runs.
+> Only the fresh syntax receipts and newly recorded provenance unit-test run
+> describe checks performed during this repair; no PTY was rerun.
+
 # Local execution verification of the reading stack
 
 The operator explicitly allowed this task's minimal local TUI build and related

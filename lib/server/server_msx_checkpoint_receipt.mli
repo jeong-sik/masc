@@ -29,3 +29,9 @@ val settle : path:string -> epoch:string -> binding -> state -> (unit, error) re
 (** Only this epoch's pending operation can settle. The caller publishes this
     inside the worker, after the effect, independently of HTTP response delivery.
     A persistence failure must remain unknown to the client. *)
+
+val retry_settlement : path:string -> epoch:string -> binding -> (unit, error) result
+(** Retry only a completed worker's retained terminal receipt write. This never
+    executes a checkpoint and never guesses the result of an in-flight worker.
+    Failed writes remain retryable in this process; after restart the existing
+    earlier-epoch unknown handling still applies. *)

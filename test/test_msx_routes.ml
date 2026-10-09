@@ -308,6 +308,39 @@ let test_checkpoint_receipt_lifecycle () =
        | Existing {state=Committed observed;epoch="server-a";_} -> observed=completed | _ -> false))
 ;;
 
+let test_checkpoint_terminal_store_failure_can_be_recovered () =
+  let module Receipt = Server_msx_checkpoint_receipt in
+  let directory = Filename.temp_dir "msx-receipt-recovery-" "" in
+  let path = Filename.concat directory "operations.sqlite3" in
+  let get = function Ok value -> value | Error error -> fail (Receipt.error_to_string error) in
+  let operation_id = match Keeper_operation_id.of_string "checkpoint-recovery-1" with
+    | Ok value -> value | Error detail -> fail detail in
+  let binding : Receipt.binding = {operation_id; action=Restore; slot="quick"} in
+  Fun.protect ~finally:(fun () ->
+    Array.iter (fun name -> Sys.remove (Filename.concat directory name)) (Sys.readdir directory);
+    Unix.rmdir directory) (fun () ->
+    ignore (get (Receipt.admit ~path ~epoch:"server-a" binding));
+    let completed : Receipt.completion =
+      {mark={Msx_lane.count=7;incarnation="restored-machine"}; checkpoint_sha256=String.make 64 'b'} in
+    let db = Sqlite3.db_open ~mode:`NO_CREATE path in
+    Fun.protect ~finally:(fun () ->
+      ignore (Sqlite3.exec db "ROLLBACK"); ignore (Sqlite3.db_close db)) (fun () ->
+      check bool "another writer holds the receipt database" true
+        (Sqlite3.Rc.is_success (Sqlite3.exec db "BEGIN IMMEDIATE"));
+      check bool "completed effect cannot yet persist its receipt" true
+        (Result.is_error (Receipt.settle ~path ~epoch:"server-a" binding (Committed completed))));
+    check bool "disk still has the admitted pending record" true
+      (match get (Receipt.inspect ~path binding) with Some {state=Pending;_} -> true | _ -> false);
+    get (Receipt.retry_settlement ~path ~epoch:"server-a" binding);
+    check bool "receipt-only recovery commits the exact completed observation" true
+      (match get (Receipt.inspect ~path binding) with
+       | Some {state=Committed actual;_} -> actual=completed | _ -> false);
+    get (Receipt.retry_settlement ~path ~epoch:"server-a" binding);
+    check bool "a duplicate still cannot dispatch a second machine effect" true
+      (match get (Receipt.admit ~path ~epoch:"server-a" binding) with
+       | Existing {state=Committed actual;_} -> actual=completed | _ -> false))
+;;
+
 let test_checkpoint_settlement_notifies_possible_restore () =
   let module Receipt = Server_msx_checkpoint_receipt in
   let committed = Receipt.Committed {
@@ -1117,6 +1150,7 @@ let () =
     [ ( "checkpoint"
       , [ test_case "correlated checkpoint route" `Quick test_correlated_checkpoint_route
         ; test_case "checkpoint settlement notifies possible restore" `Quick test_checkpoint_settlement_notifies_possible_restore
+        ; test_case "checkpoint terminal store failure recovers without replay" `Quick test_checkpoint_terminal_store_failure_can_be_recovered
         ; test_case "checkpoint receipt durable lifecycle" `Quick test_checkpoint_receipt_lifecycle
         ; test_case
             "validation, worker, restore and storage failure"

@@ -131,7 +131,7 @@ let inspect ~path binding =
   | Unix.Unix_error (Unix.ENOENT,_,_) -> Ok None
   | Unix.Unix_error (error,operation,path) ->
       Error (Store_unavailable (operation ^ " " ^ path ^ ": " ^ Unix.error_message error))
-let settle ~path ~epoch binding state =
+let settle_once ~path ~epoch binding state =
   let* () = valid binding in
   let* state_name,detail,incarnation,count,digest = match state with
     | Pending -> Error (Invalid_binding "cannot settle to pending")
@@ -149,3 +149,41 @@ let settle ~path ~epoch binding state =
           "UPDATE receipts SET state=?,detail=?,incarnation=?,change_count=?,checkpoint_sha256=? WHERE operation_id=?"
           [text state_name;detail;incarnation;count;digest;text (Keeper_operation_id.to_string binding.operation_id)] (done_ db)
     | Some _ | None -> Error (Store_unavailable "checkpoint receipt is not pending in this server epoch"))
+
+
+(* The effect worker has finished, but SQLite may temporarily refuse its
+   terminal receipt. Retain that exact observation until it can be committed;
+   status inspection retries only this write, never the machine operation. *)
+let failed_settlements_mu = Mutex.create ()
+let failed_settlements : ((string * string * string), binding * state) Hashtbl.t = Hashtbl.create 8
+let settlement_key ~path ~epoch binding = path, epoch, Keeper_operation_id.to_string binding.operation_id
+let settle ~path ~epoch binding state =
+  let key = settlement_key ~path ~epoch binding in
+  let result = settle_once ~path ~epoch binding state in
+  Mutex.protect failed_settlements_mu (fun () ->
+    match result with
+    | Ok () -> Hashtbl.remove failed_settlements key
+    | Error (Store_unavailable _) ->
+        (* The first completed observation owns this retry; a later attempted
+           terminal rewrite must not replace its evidence. *)
+        if not (Hashtbl.mem failed_settlements key) then
+          Hashtbl.add failed_settlements key (binding, state)
+    | Error (Invalid_binding _ | Binding_conflict) -> ());
+  result
+
+let retry_settlement ~path ~epoch binding =
+  let key = settlement_key ~path ~epoch binding in
+  let retained = Mutex.protect failed_settlements_mu (fun () -> Hashtbl.find_opt failed_settlements key) in
+  match retained with
+  | None -> Ok ()
+  | Some (original, _) when original.action <> binding.action || original.slot <> binding.slot ->
+      Error Binding_conflict
+  | Some (_, state) ->
+      let* receipt = inspect ~path binding in
+      match receipt with
+      | Some {epoch=owner; state=Pending; _} when owner=epoch -> settle ~path ~epoch binding state
+      | Some {state=(Committed _ | Refused _ | Unknown _); _} ->
+          Mutex.protect failed_settlements_mu (fun () -> Hashtbl.remove failed_settlements key);
+          Ok ()
+      | Some {state=Pending; _} | None ->
+          Error (Store_unavailable "checkpoint settlement recovery lost its admitted epoch")

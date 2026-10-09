@@ -3,6 +3,7 @@ type endpoint_kind =
   | Elevenlabs_direct
   | Voice_mcp
   | Macos_say
+  | Espeak_ng
   | Whisper_cli
 
 type endpoint = {
@@ -210,11 +211,12 @@ let endpoint_kind_of_string = function
   | "elevenlabs_direct" -> Ok Elevenlabs_direct
   | "voice_mcp" -> Ok Voice_mcp
   | "macos_say" -> Ok Macos_say
+  | "espeak_ng" -> Ok Espeak_ng
   | "whisper_cli" -> Ok Whisper_cli
   | value ->
       Error
         (Printf.sprintf
-           "endpoint.kind must be one of             openai_compat|elevenlabs_direct|voice_mcp|macos_say|whisper_cli (got %s)"
+           "endpoint.kind must be one of openai_compat|elevenlabs_direct|voice_mcp|macos_say|espeak_ng|whisper_cli (got %s)"
            value)
 
 (* Whether an endpoint of this kind is ever asked for the section's model by
@@ -227,7 +229,7 @@ let endpoint_kind_of_string = function
    setting that means nothing or let one be skipped that does. *)
 let kind_needs_default_model = function
   | Openai_compat | Elevenlabs_direct | Voice_mcp | Whisper_cli -> true
-  | Macos_say -> false
+  | Macos_say | Espeak_ng -> false
 
 let endpoint_kind_of_name name =
   match endpoint_kind_of_string name with
@@ -239,6 +241,7 @@ let string_of_endpoint_kind = function
   | Elevenlabs_direct -> "elevenlabs_direct"
   | Voice_mcp -> "voice_mcp"
   | Macos_say -> "macos_say"
+  | Espeak_ng -> "espeak_ng"
   | Whisper_cli -> "whisper_cli"
 
 let parse_endpoint ~ctx json =
@@ -332,7 +335,7 @@ let parse_endpoint ~ctx json =
     (* A command kind needs no address, and an address on one would be read by
        nothing. Refused rather than ignored: a field that is silently dropped
        reads as a setting that took. *)
-    | Macos_say | Whisper_cli ->
+    | Macos_say | Espeak_ng | Whisper_cli ->
         if Option.is_none base_url then Ok ()
         else
           Error
@@ -440,12 +443,12 @@ let parse_section_model ~ctx json (endpoints : endpoint list) =
   let reads_model_name (endpoint : endpoint) =
     match endpoint.kind with
     | Openai_compat | Elevenlabs_direct -> true
-    | Voice_mcp | Macos_say | Whisper_cli -> false
+    | Voice_mcp | Macos_say | Espeak_ng | Whisper_cli -> false
   in
   let reads_model_file (endpoint : endpoint) =
     match endpoint.kind with
     | Whisper_cli -> true
-    | Openai_compat | Elevenlabs_direct | Voice_mcp | Macos_say -> false
+    | Openai_compat | Elevenlabs_direct | Voice_mcp | Macos_say | Espeak_ng -> false
   in
   let mixed = List.exists reads_model_name unbound && List.exists reads_model_file unbound in
   let rec validate = function

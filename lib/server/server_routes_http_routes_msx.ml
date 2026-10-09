@@ -610,7 +610,9 @@ let checkpoint_status_response ~(config : Workspace.config) ~body =
             | Error message -> `Bad_request,write_error_json message
             | Ok binding ->
                 (match Executor_pool_ref.submit_strict (fun () ->
-                  match Checkpoint_receipt.inspect ~path:(checkpoint_receipt_path config) binding with
+                  let path = checkpoint_receipt_path config in
+                  let recovered = Checkpoint_receipt.retry_settlement ~path ~epoch:checkpoint_epoch binding in
+                  match Result.bind recovered (fun () -> Checkpoint_receipt.inspect ~path binding) with
                   | Error error -> Error (Checkpoint_receipt.error_to_string error)
                   | Ok receipt ->
                       let receipt = Option.value receipt ~default:{Checkpoint_receipt.binding;

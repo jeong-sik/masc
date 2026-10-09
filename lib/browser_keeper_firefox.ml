@@ -94,7 +94,8 @@ let host_step ~port (report : Browser_bidi_host_status.report) =
   let running =
     match report.state with
     | Browser_bidi_host_record.Running entry -> Some (running_host ~port entry.bidi_url)
-    | Browser_bidi_host_record.Unreadable { held = Some true; _ } -> Some Host_address_unknown
+    | Browser_bidi_host_record.Unreadable { held = Some true; _ }
+    | Browser_bidi_host_record.Record_missing_but_locked -> Some Host_address_unknown
     | Browser_bidi_host_record.Unreadable { held = Some false | None; _ }
     | Browser_bidi_host_record.Never_started
     | Browser_bidi_host_record.Ended _

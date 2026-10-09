@@ -1,0 +1,68 @@
+Testing `tui mermaid'.
+This run has ID `BEFUO2CP'.
+
+  [OK]          goldens            0   top down.
+  [OK]          goldens            1   left right.
+  [OK]          goldens            2   fan out jogs on its own bus rows.
+  [OK]          goldens            3   edge label sits beside the drop.
+  [OK]          goldens            4   bottom up points up.
+  [OK]          goldens            5   right left reads left to right.
+  [OK]          goldens            6   shapes, labels and a back edge.
+  [OK]          goldens            7   wide glyphs measure by cells.
+  [OK]          goldens            8   dotted and thick keep their strokes.
+  [OK]          sequence           0   messages run between lifelines.
+  [OK]          sequence           1   frames, notes and a self message.
+  [OK]          sequence           2   text widens the gap it crosses.
+  [OK]          sequence           3   reads declarations and skips styling.
+  [OK]          sequence           4   refuses a line that is not a message.
+  [OK]          shape              0   a long edge passes through the layer b...
+  [OK]          shape              1   every row fits the width asked.
+  [OK]          shape              2   same source, same bytes.
+  [OK]          refusals           0   another kind names itself.
+  [OK]          refusals           1   an unreadable line names its line.
+  [OK]          refusals           2   an unknown direction is refused on the...
+  [OK]          refusals           3   wider than the pane says how wide.
+  [OK]          refusals           4   too wide says which way would fit.
+  [OK]          refusals           5   turning is not offered when it does no...
+  [OK]          refusals           6   a self edge is refused.
+  [OK]          refusals           7   an edge that crosses a subgraph bounda...
+  [OK]          refusals           8   an end with no subgraph is refused.
+  [OK]          refusals           9   a subgraph with no end is refused.
+  [OK]          subgraphs          0   a subgraph draws a titled box around i...
+  [OK]          subgraphs          1   a nested subgraph is a box inside a box.
+  [OK]          subgraphs          2   an edge may name a subgraph.
+  [OK]          subgraphs          3   direction inside a subgraph turns that...
+  [OK]          subgraphs          4   an empty subgraph is a title and nothi...
+  [OK]          subgraphs          5   a subgraph too wide counts its border ...
+  [OK]          subgraphs          6   a quoted label may hold a bracket.
+  [OK]          reading            0   statements split on semicolons and ski...
+  [OK]          reading            1   both label spellings read the same.
+  [OK]          reading            2   strokes, heads and shapes are read.
+  [OK]          reading            3   styling statements change nothing.
+  [OK]          reading            4   node shapes database subroutine stadiu...
+  [OK]          reading            5   database cylinder renders.
+  [OK]          reading            6   subroutine double box renders.
+  [OK]          reading            7   stadium pill renders.
+  [OK]          reading            8   circle renders.
+  [OK]          state              0   top down state diagram.
+  [OK]          state              1   left right state diagram.
+  [OK]          state              2   labels and descriptions.
+  [OK]          state              3   keeper fsm parses.
+  [OK]          state              4   skips classdef and notes.
+  [OK]          state              5   composite state draws titled box.
+  [OK]          state              6   choice pseudo-state.
+  [OK]          state              7   fork and join are bars across the flow.
+  [OK]          state              8   a fork across a left-right flow stands...
+  [OK]          state              9   a composite state may open on a state ...
+  [OK]          state             10   a state named in a composite state is ...
+  [OK]          state             11   a composite state drawn inside itself ...
+  [OK]          state             12   nested composite states.
+  [OK]          state             13   composite state has its own start and ...
+  [OK]          state             14   unclosed composite state is refused.
+  [OK]          state             15   a note with no end note is refused.
+  [OK]          state             16   an arrow in text is text.
+  [OK]          state             17   a line that names no state is refused.
+  [OK]          state             18   reads lines as mermaid does.
+
+Full test results in `~/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/_build/_tests/tui mermaid'.
+Test Successful in 0.007s. 62 tests run.

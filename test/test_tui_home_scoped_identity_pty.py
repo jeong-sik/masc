@@ -322,12 +322,16 @@ def superseded_scoped_match_journey(executable):
         assert len(runtime_logs) == 1, ("expected one TUI child log", runtime_logs)
         runtime_log, = runtime_logs
 
+        def gate_log_lines():
+            return [line for line in runtime_log.read_text(encoding="utf-8").split("\n")[:-1]
+                    if "Gate snapshot request=" in line]
+
         def gate_refresh_tickets():
             # Read the explicit diagnostic fields. Startup Poll tickets must
             # never acknowledge the held explicit Refresh below.
             prefix = "started Gate snapshot request="
             tickets = []
-            for line in runtime_log.read_text(encoding="utf-8").split("\n")[:-1]:
+            for line in gate_log_lines():
                 if prefix in line:
                     ticket, intent = line.split(prefix, 1)[1].split(" intent=")
                     if intent == "refresh":
@@ -361,13 +365,22 @@ def superseded_scoped_match_journey(executable):
             )
             # An explicit Approvals refresh owns this independent Gate read.
             # A fresh cached startup reading may suppress a later Poll.
+            # Earlier surface recovery may have dispatched a Refresh too.
+            # The TUI writes each start diagnostic synchronously before its
+            # HTTP request; capture those tickets before this explicit action.
+            prior_gate_tickets = gate_refresh_tickets()
             h.send_and_wait(process, fd, output, b"p", b"Questions waiting on you")
             assert h.wait_for_fixture_event(process, fd, output, held_gate.requested, timeout=10), (
                 "independent Gate read never reached its response gate")
+            def new_gate_tickets():
+                return [ticket for ticket in gate_refresh_tickets()
+                        if ticket not in prior_gate_tickets]
+
             assert h.wait_for_fixture_state(process, fd, output,
-                lambda: len(gate_refresh_tickets()) == 1, timeout=10), (
-                "held Gate refresh has no unique dispatched ticket")
-            held_gate_ticket, = gate_refresh_tickets()
+                lambda: len(new_gate_tickets()) == 1, timeout=10), (
+                "held Gate refresh has no unique dispatched ticket",
+                prior_gate_tickets, gate_refresh_tickets(), gate_log_lines())
+            held_gate_ticket, = new_gate_tickets()
             keepers.press_label_on_screen(process, fd, output, b"Dashboard",
                                          row=1, needle=b"Enter:open")
             with lock:
@@ -469,7 +482,8 @@ def superseded_scoped_match_journey(executable):
                     for path, phase in calls
                 ), ("replacement decision read masked a late response", calls)
                 assert held_gate.calls == 1, "more than one independent Gate GET was gated"
-            assert gate_refresh_tickets() == [held_gate_ticket], "another Gate refresh obscured the held ticket"
+            assert gate_refresh_tickets() == prior_gate_tickets + [held_gate_ticket], (
+                "another Gate refresh obscured the held ticket", gate_log_lines())
             home.assert_no_decision_posts(requests)
             os.write(fd, b"q")
         finally:

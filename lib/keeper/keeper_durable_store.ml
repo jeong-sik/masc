@@ -572,6 +572,19 @@ let librarian_progress_store =
   }
 ;;
 
+let librarian_external_cursor_store =
+  { store = "keeper external admission read cursor"
+  ; on_refusal = "external evidence consumption stops until its cursor is readable; malformed state never means unread"
+  ; scan = (fun ~base_path ->
+      let keepers_dir = runtime_keepers_dir ~base_path in
+      scan_keeper_dirs ~base_path (fun report ~keeper_id ->
+        match Keeper_external_read_cursor.inspect ~keepers_dir ~keeper_id with
+        | Ok false -> report
+        | Ok true -> count_row report (Ok ())
+        | Error detail -> count_row report (Error (keeper_id ^ ": " ^ detail))))
+  }
+;;
+
 let librarian_official_progress_store =
   { store = "keeper official-client Librarian progress"
   ; on_refusal =
@@ -763,6 +776,7 @@ module Id = struct
     | Turn_records
     | Turn_boundaries
     | Librarian_progress
+    | Librarian_external_cursor
     | Librarian_official_progress
     | Turn_fragments
     | Memory_absorbed
@@ -809,6 +823,7 @@ let reader : Id.t -> reader = function
   | Id.Turn_records -> Preflight_only turn_record_store
   | Id.Turn_boundaries -> Preflight_only turn_boundary_store
   | Id.Librarian_progress -> Preflight_only librarian_progress_store
+  | Id.Librarian_external_cursor -> Preflight_only librarian_external_cursor_store
   | Id.Librarian_official_progress -> Preflight_only librarian_official_progress_store
   | Id.Turn_fragments -> Preflight_only turn_fragment_store
   | Id.Memory_absorbed -> Preflight_only memory_absorbed_store

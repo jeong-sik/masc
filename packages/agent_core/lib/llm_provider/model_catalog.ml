@@ -35,6 +35,7 @@ type model_entry =
   ; supported_models : string list option
   ; supports_native_streaming : bool option
   ; supports_system_prompt : bool option
+  ; supports_assistant_prefill : bool option
   ; supports_prompt_caching : bool option
   ; supports_top_k : bool option
   ; supports_min_p : bool option
@@ -376,6 +377,7 @@ let known_entry_keys =
   ; "supported_models"
   ; "supports_native_streaming"
   ; "supports_system_prompt"
+  ; "supports_assistant_prefill"
   ; "supports_prompt_caching"
   ; "supports_top_k"
   ; "supports_min_p"
@@ -524,6 +526,9 @@ let parse_entry entry_toml =
   let* supports_system_prompt =
     bool_field ~entry_id "supports_system_prompt" entry_toml
   in
+  let* supports_assistant_prefill =
+    bool_field ~entry_id "supports_assistant_prefill" entry_toml
+  in
   let* supports_prompt_caching =
     bool_field ~entry_id "supports_prompt_caching" entry_toml
   in
@@ -630,6 +635,7 @@ let parse_entry entry_toml =
     ; supported_models
     ; supports_native_streaming
     ; supports_system_prompt
+    ; supports_assistant_prefill
     ; supports_prompt_caching
     ; supports_top_k
     ; supports_min_p

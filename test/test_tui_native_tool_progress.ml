@@ -56,7 +56,7 @@ let test_replayed_sequence_and_model_signal () =
     T.apply ~now:12. t (Live.Native_tool_progress {occurrence;progress=output 1});
     check bool "turn terminal rejects new progress" true
       ((List.hd before).native_progress=(List.hd (T.tool_calls t)).native_progress))
-    [Live.Text "Answer","STREAMING";Live.Thinking "Reason","THINKING"]
+    [Live.Text {text="Answer"; stream_scope=None},"STREAMING";Live.Thinking "Reason","THINKING"]
 
 let test_heartbeat_reported_time_is_not_local_elapsed () =
   let t = T.create ~keeper_name:"fixture" ~request_id:"heartbeat-time" ~started_at:0. in
@@ -65,7 +65,7 @@ let test_heartbeat_reported_time_is_not_local_elapsed () =
   let both ~now delta = List.iter (fun t -> T.apply ~now t delta) [t;control] in
   both ~now:1. Live.Run_started;
   both ~now:10. (Live.Native_tool_started {occurrence;tool_name=Some "Read"});
-  both ~now:11. (Live.Text "answer");
+  both ~now:11. (Live.Text {text="answer"; stream_scope=None});
   List.iter (fun (now,elapsed_seconds) ->
     T.apply ~now t (Live.Native_tool_progress {occurrence;progress=Native.Heartbeat_reported {elapsed_seconds}}))
     [50.,30;51.,3];
@@ -225,7 +225,7 @@ let test_split_secret_held_across_native_side_events () =
           let delta value = Agent_core.Types.ContentBlockDelta {index=0;
             delta=(if thinking then ThinkingDelta value else TextDelta value)} in
           let fragments events = List.filter_map (function
-            | E.Text_delta value | E.Agent_core_thinking_delta {delta=value; _} -> Some value
+            | E.Text_delta {text=value; stream_scope=None} | E.Agent_core_thinking_delta {delta=value; _} -> Some value
             | _ -> None) events in
           let check_held events =
             check (list string) "native progress cannot release a secret prefix" [] (fragments events);

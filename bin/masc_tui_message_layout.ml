@@ -1925,7 +1925,10 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
           (* A wrapped body still belongs to the one row that is the turn, so
              the rows under it continue the line the stub started rather than
              each standing alone. *)
-          | Rail_stands -> if index = 0 then Rail_stands else Rail_says
+          | Rail_stands ->
+              if index = 0 then
+                (if entry.diagnostics = [] then Rail_stands else Rail_opens)
+              else Rail_says
           (* Diagnostics follow the body, so the corner moves down to the
              last of them. *)
           | Rail_closes -> if index = last && entry.diagnostics = [] then Rail_closes else Rail_says
@@ -1969,7 +1972,7 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
     List.mapi (fun index text ->
       let rail = match entry.turn_rail with
         | Rail_none | Rail_joins _ -> Rail_none
-        | Rail_closes when index = List.length chunks - 1 -> Rail_closes
+        | (Rail_closes | Rail_stands) when index = List.length chunks - 1 -> Rail_closes
         | Rail_opens | Rail_says | Rail_does | Rail_stands | Rail_closes -> Rail_says in
       { style = Status; kind = Metadata Diagnostic; shade = Shade_none;
         text = "  " ^ text;
@@ -2111,10 +2114,11 @@ let newest_entry_window ~inner_width ~height rows =
       let diagnostics, output = List.partition is_diagnostic rest in
       (* The first row, the gap and one row of the latest output come before
          any diagnostic: a pane too short for all of them keeps the last. *)
-      let diagnostics = take_last (height - 3) diagnostics in
+      let diagnostics = take_last (Int.max 1 (height - 3)) diagnostics in
       let budget = height - 1 - List.length diagnostics in
       let start, output =
         match first.kind, output with
+        | _, _ when height = 3 && diagnostics <> [] -> [], first :: output
         | Metadata _, body :: output when budget >= 3 -> [ first; body ], output
         | (Metadata _ | Body | Viewport_gap _), _ -> [ first ], output
       in

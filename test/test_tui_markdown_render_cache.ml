@@ -262,10 +262,28 @@ let test_height_measurement_reuses_closed_blocks_and_resets_owners () =
   check (list string) "width, theme, palette, owner and replacement each remeasure exact source"
     [source;source;source;source;"replacement"] (List.rev !calls)
 
+let test_logical_line_count_tracks_appends_and_replacement () =
+  let cache = Cache.create ~capacity:4 and calls = ref [] in
+  let measure text = Cache.measure_growing_details cache ~theme_revision:1
+    ~palette_generation:0 ~width:40 ~renderer:(growing_renderer calls)
+    ~identity:"thought" ~text in
+  List.iter (fun (text, expected) ->
+    let measured = measure text in
+    check int "nonblank logical lines survive split whitespace and newline chunks"
+      expected measured.nonblank_lines;
+    check int "count and physical height share the exact source"
+      (trimmed_height (full_markdown ~width:40 text)) measured.height)
+    ["",0; " \t",0; " \talpha",1; " \talpha beta",1;
+     " \talpha beta\n \r",1; " \talpha beta\n \rnext",2;
+     " \talpha beta\n \rnext\n\012\n",2;
+     "replacement",1; "replacement\nnew",2; "",0]
+
 let () =
   run "tui_markdown_render_cache"
     [ ( "cache"
-      , [ test_case "same complete source renders once" `Quick
+      , [ test_case "logical lines follow appended source and reset" `Quick
+            test_logical_line_count_tracks_appends_and_replacement
+        ; test_case "same complete source renders once" `Quick
             test_same_complete_source_renders_once
         ; test_case "all render inputs invalidate" `Quick
             test_every_render_input_invalidates

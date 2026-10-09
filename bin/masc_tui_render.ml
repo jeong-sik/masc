@@ -5324,9 +5324,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
          && Message_layout.display_width (prefix ^ value) <= width then
         [prefix ^ value]
       else
-        ("  " ^ label_style ^ label ^ Ansi.reset)
-        :: (Message_layout.wrap_styled_words ~max_cells:(max 1 (width - 4)) value
-            |> List.map (fun line -> "    " ^ line ^ Ansi.reset))
+        (Message_layout.wrap_styled_words ~max_cells:(max 1 (width - 2)) label
+         |> List.map (fun line -> "  " ^ label_style ^ line ^ Ansi.reset))
+        @ (Message_layout.wrap_styled_words ~max_cells:(max 1 (width - 4)) value
+           |> List.map (fun line -> "    " ^ line ^ Ansi.reset))
     in
 
     (* Each tab projects only when selected. Retained data for the other

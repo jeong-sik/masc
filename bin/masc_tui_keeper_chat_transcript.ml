@@ -2143,6 +2143,9 @@ let apply_delta ~now t (delta : Live.delta) =
         | _, None -> ()
       end
   | Live.Stream_details { usage; stop_reason; stream_scope } ->
+      (* A retained detail can be the first surviving event of a response.
+         Its scope retires prior counters before sparse fields are merged. *)
+      Option.iter (enter_text_response_scope t) stream_scope;
       (* What the provider reported, not that anything was written, so the
          model-side signal is left as whatever last moved the answer. A field
          the delta did not carry leaves the last report standing: the wire

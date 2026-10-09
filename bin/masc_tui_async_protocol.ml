@@ -665,6 +665,7 @@ let rec workspace_message_is_read = function
   | Voice_wizard_probed _
   | Board_post_refresh_done _
   | Keeper_chat_history_loaded _
+  | Keeper_native_tasks_loaded _
   | Keeper_chat_copy_loaded _
   | Keeper_chat_journal_loaded _
   | Context_inspector_loaded _

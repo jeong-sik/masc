@@ -26,7 +26,7 @@ let entry ?(timestamp = "12:34:56") ?timeline_bucket ?speaker
   { style
   ; timestamp
   ; timeline_bucket
-  ; span_clock = None
+  ; diagnostics = []
   ; speaker = Option.value speaker ~default:role
   ; role_label = role
   ; role_label_mark_cells =
@@ -954,7 +954,7 @@ let transcript count =
       { Layout.style = Layout.Keeper;
         timestamp = Printf.sprintf "12:%02d:00" (index mod 60);
         timeline_bucket = None;
-        span_clock = None;
+        diagnostics = [];
         speaker = "code-reviewer";
         role_label = "code-reviewer";
         request_label = Printf.sprintf "turn-%d" index;
@@ -1284,7 +1284,7 @@ let without_hour_rail rows =
     (fun (row : Layout.row) ->
       match row.kind with
       | Layout.Metadata (Layout.Timeline_break _) -> false
-      | Layout.Metadata (Layout.Origin _ | Layout.Continued_at _)
+      | Layout.Metadata (Layout.Diagnostic | Layout.Origin _ | Layout.Continued_at _)
       | Layout.Body | Layout.Spacing | Layout.Viewport_gap _ ->
           true)
     rows
@@ -1382,7 +1382,7 @@ let test_a_turn_keeps_one_heading_across_its_blocks () =
        (fun (row : Layout.row) ->
          match row.kind with
          | Layout.Metadata (Layout.Origin _) -> Some row.style
-         | Layout.Metadata (Layout.Continued_at _ | Layout.Timeline_break _)
+         | Layout.Metadata (Layout.Diagnostic | Layout.Continued_at _ | Layout.Timeline_break _)
          | Layout.Body | Layout.Spacing | Layout.Viewport_gap _ ->
              None)
        drawn
@@ -1518,7 +1518,7 @@ let test_timeline_breaks_follow_civil_hours () =
         match row.kind with
         | Layout.Metadata (Layout.Timeline_break bucket) ->
             Some (bucket.tb_hour, row.text)
-        | Layout.Metadata (Layout.Origin _ | Layout.Continued_at _)
+        | Layout.Metadata (Layout.Diagnostic | Layout.Origin _ | Layout.Continued_at _)
         | Layout.Body | Layout.Spacing
         (* The fold marker is not a timeline rail. Named rather than matched
            by a wildcard, so the next row kind fails here instead of being
@@ -1601,8 +1601,7 @@ let test_clock_modes_control_the_hour_rail () =
       | [ { Layout.kind = Layout.Metadata (Layout.Timeline_break _); _ } ] -> ()
       | _ -> fail (name ^ " made a cramped hour rail unreachable by scrolling"))
     [ "inline", Layout.Origin_inline ];
-  let newest = { newest with Layout.span_clock = Some "19:00→19:01";
-      turn_rail = Layout.Rail_opens } in
+  let newest = { newest with Layout.turn_rail = Layout.Rail_opens } in
   let bare = Layout.visible_rows ~origin:Layout.Origin_bare
       ~inner_width:60 ~height:10 [newest] in
   check (list string) "bare mode keeps only the message body"
@@ -1625,7 +1624,7 @@ let test_repeated_dst_hour_has_distinct_rails () =
     |> List.filter_map (fun (row : Layout.row) ->
          match row.kind with
          | Layout.Metadata (Layout.Timeline_break _) -> Some row.text
-         | Layout.Metadata (Layout.Origin _ | Layout.Continued_at _)
+         | Layout.Metadata (Layout.Diagnostic | Layout.Origin _ | Layout.Continued_at _)
          | Layout.Body | Layout.Spacing
          | Layout.Viewport_gap _ ->
              None)
@@ -2775,82 +2774,6 @@ let test_a_duration_does_not_step_back_at_a_rung () =
   reads "and the tenth below it is still seconds" (Some "59.9s")
     (Layout.elapsed_text 59.94)
 
-(* task-1516: a turn block's span clock rides in the body, folded in before
-   wrapping. It must consume body budget like any other word -- no row of the
-   block may exceed the budget every row around it obeys, the rows must keep
-   the block's wrap width whatever the span does, and a narrow pane must wrap
-   the span rather than cut it. *)
-let test_a_turn_span_wraps_inside_the_block_budget () =
-  let span = "16:38→16:41" in
-  let body = String.concat " " (List.init 40 (fun i -> Printf.sprintf "w%02d" i)) in
-  let opens =
-    { (entry Layout.Keeper "keeper.one" "tui-..cccccccc" body) with
-      Layout.span_clock = Some span
-    ; Layout.turn_rail = Layout.Rail_opens
-    }
-  in
-  let plain = entry Layout.Keeper "keeper.one" "tui-..cccccccc" body in
-  List.iter
-    (fun inner ->
-       let rows =
-         Layout.visible_rows ~origin:Layout.Origin_inline ~inner_width:inner
-           ~height:200 [ opens ]
-       in
-       (* Asserted first: a budget compared over no rows passes whatever the
-          span does. *)
-       check bool
-         (Printf.sprintf "%d columns draw the block" inner)
-         true (List.length rows > 1);
-       List.iter
-         (fun (row : Layout.row) ->
-            check bool
-              (Printf.sprintf "%d columns keep every row inside the budget" inner)
-              true
-              (Layout.display_width row.text <= inner))
-         rows)
-    [ 24; 40; 80 ];
-  let rows_at inner e =
-    Layout.visible_rows ~origin:Layout.Origin_inline ~inner_width:inner
-      ~height:200 [ e ]
-  in
-  (* Wide pane: the block's head row opens with the whole span. *)
-  check bool "the head row opens with the span" true
-    (List.exists
-       (fun (row : Layout.row) -> String.equal row.text ("  " ^ span))
-       (rows_at 80 opens));
-  (* Narrow pane: the span wraps rather than carries the cut mark, and its
-     bytes survive the wrap whole -- here the label column leaves a four-cell
-     body budget, so the span arrives as several rows. *)
-  let narrow = rows_at 24 opens in
-  let body_pieces =
-    narrow
-    |> List.filter_map (fun (row : Layout.row) ->
-           if String.starts_with ~prefix:"  " row.text then
-             Some (String.sub row.text 2 (String.length row.text - 2))
-           else None)
-  in
-  let rec join_upto acc = function
-    | _ when String.length acc >= String.length span -> acc
-    | piece :: rest -> join_upto (acc ^ piece) rest
-    | [] -> acc
-  in
-  check string "a narrow pane still says the whole span" span
-    (join_upto "" body_pieces);
-  List.iter
-    (fun (row : Layout.row) ->
-       check bool "a wrapped span is never cut" false (carries_cut_mark row.text))
-    narrow;
-  (* The span never widens the block: its widest row is no wider than the
-     widest row the body alone determines, which is the wrap width the rows
-     around the block already obey. *)
-  let widest rows =
-    List.fold_left
-      (fun widest (row : Layout.row) -> max widest (Layout.display_width row.text))
-      0 rows
-  in
-  check bool "the span does not widen the block"
-    true (widest (rows_at 80 opens) <= widest (rows_at 80 plain))
-
 (* A header row of counts is a list of clauses, and the clause is the unit that
    carries the qualifier. The Memory fleet header is the row these were written
    for: it needed 176 cells with every count a single digit, against a frame
@@ -3076,9 +2999,75 @@ let test_scrolled_styled_meter_rows () =
     check bool "each row closes before footer" true (String.ends_with ~suffix:reset row);
     check bool "meter and wide glyphs obey cells" true (Layout.display_width row <= 12)) rows
 
+let test_diagnostics_continue_the_turn_rail () =
+  List.iter (fun (rail, ends_with) ->
+    let source = { (entry Layout.Keeper "keeper" "request" "first\nlast") with
+      turn_rail=rail; diagnostics=["request exact-id"] } in
+    (* Only inline metadata exposes the turn rail: bare conversation hides
+       it, and Origin_row gives metadata its own row. *)
+    let rows = Layout.visible_rows ~origin:Layout.Origin_inline ~inner_width:80 ~height:100 [source] in
+    let kinds = List.map (fun (r : Layout.row) -> r.kind) rows in
+    check bool "the diagnostic follows the whole body" true
+      (kinds = [Layout.Body; Layout.Body; Layout.Metadata Layout.Diagnostic]);
+    let last_body = List.nth rows 1 and diagnostic = List.nth rows 2 in
+    (* The turn's line runs past the body into the diagnostic, and a closing
+       corner sits on the entry's last row, which is now the diagnostic. *)
+    check bool "the body's last row continues the rail" true
+      (holds last_body.gutter (Layout.turn_rail_glyph Layout.Rail_says));
+    check bool "the diagnostic carries the rail the entry ends with" true
+      (holds diagnostic.gutter (Layout.turn_rail_glyph ends_with));
+    check bool "expanded row includes its rail in width" true (diagnostic.gutter_rail_cells > 0))
+    [Layout.Rail_opens, Layout.Rail_says; Layout.Rail_closes, Layout.Rail_closes;
+     Layout.Rail_stands, Layout.Rail_closes]
+;;
+
+let test_diagnostics_keep_the_message_opening () =
+  let source = entry Layout.Keeper "keeper" "request-id"
+      (String.concat "\n" (List.init 20 (Printf.sprintf "body-%02d"))) in
+  let source = {source with diagnostics=["request exact-id"; "attempt 1: runtime"]} in
+  let body_shown name (rows : Layout.row list) =
+    List.exists (fun (row : Layout.row) -> row.kind = Layout.Body && holds row.text name) rows in
+  let diagnostics (rows : Layout.row list) =
+    List.filter_map (fun (row : Layout.row) ->
+      if row.kind = Layout.Metadata Layout.Diagnostic then Some row.text else None) rows in
+  let last_two (rows : Layout.row list) =
+    List.filteri (fun index _ -> index >= List.length rows - 2) rows
+    |> List.map (fun (row : Layout.row) -> row.text) in
+  List.iter (fun origin ->
+    let rows = Layout.visible_rows ~origin ~inner_width:80 ~height:6 [source] in
+    check bool "opening survives expanded diagnostics" true (body_shown "body-00" rows);
+    check bool "latest output survives expanded diagnostics" true (body_shown "body-19" rows);
+    (* Scrolling back never shows the physical last rows, so the live edge
+       has to. *)
+    check (list string) "diagnostics close the live edge, below the latest output"
+      ["  request exact-id"; "  attempt 1: runtime"] (last_two rows);
+    let tight = Layout.visible_rows ~origin ~inner_width:80 ~height:5 [source] in
+    check bool "a row shorter still shows the latest output" true (body_shown "body-19" tight);
+    check (list string) "and every diagnostic"
+      ["  request exact-id"; "  attempt 1: runtime"] (diagnostics tight);
+    let cramped = Layout.visible_rows ~origin ~inner_width:80 ~height:4 [source] in
+    check bool "a pane too short for both keeps the latest output" true
+      (body_shown "body-19" cramped);
+    check (list string) "and the last diagnostic" ["  attempt 1: runtime"] (diagnostics cramped);
+    let minimal = Layout.visible_rows ~origin ~inner_width:80 ~height:3 [source] in
+    check int "three-row viewport stays bounded" 3 (List.length minimal);
+    check bool "three rows keep latest output" true (body_shown "body-19" minimal);
+    check (list string) "three rows keep the last diagnostic"
+      ["  attempt 1: runtime"] (diagnostics minimal);
+    check bool "omission remains explicit" true
+      (List.exists (fun (r : Layout.row) -> match r.kind with Layout.Viewport_gap _ -> true | _ -> false) minimal))
+    [Layout.Origin_inline; Origin_bare; Origin_row]
+;;
+
 let () =
   run "tui_message_layout"
     [
+      ( "expanded diagnostics"
+      , [ test_case "the message opening stays ahead of diagnostics" `Quick
+            test_diagnostics_keep_the_message_opening
+        ; test_case "a diagnostic row continues the turn rail" `Quick
+            test_diagnostics_continue_the_turn_rail
+        ] );
       ( "scrolled styles", [test_case "styled quota cells keep blanks and close each row" `Quick test_scrolled_styled_meter_rows] );
       ( "layout across frames"
       , [ test_case "a text laid out again keeps its layout" `Quick
@@ -3203,8 +3192,6 @@ let () =
             test_trailing_newlines_do_not_hide_reply
         ; test_case "trailing whitespace lines keep reply visible" `Quick
             test_trailing_whitespace_lines_do_not_hide_reply
-        ; test_case "a turn span wraps inside the block budget" `Quick
-            test_a_turn_span_wraps_inside_the_block_budget
         ] )
     ; ( "composer"
       , [ test_case "splits on newlines only" `Quick

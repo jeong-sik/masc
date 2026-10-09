@@ -20768,8 +20768,8 @@ and is loaded on demand through keeper_skill.
             | Key "r" -> launch_browser_lane state ~mailbox:async_messages (Viewport_refresh {tab_id=shot.tab_id; expected_url=shot.url})
             | Key ("j" | "down") -> scroll_at {x=0.5;y=0.5} 120
             | Key ("k" | "up") -> scroll_at {x=0.5;y=0.5} (-120)
-            | Mouse_wheel (Masc.Tui_decode.Wheel_down,row,column) -> wheel row column 120
-            | Mouse_wheel (Masc.Tui_decode.Wheel_up,row,column) -> wheel row column (-120)
+            | Mouse_wheel (Masc.Tui_mouse_protocol.Wheel_down,row,column) -> wheel row column 120
+            | Mouse_wheel (Masc.Tui_mouse_protocol.Wheel_up,row,column) -> wheel row column (-120)
             | _ -> ())
        | _ -> ());
       let input = if viewport_owned_input then None else input in
@@ -20956,7 +20956,7 @@ and is loaded on demand through keeper_skill.
               | Pane_row _ -> None
               | Pane_miss ->
                   if Option.is_some wheel_reader then None
-                  else Some (Masc.Tui_decode.wheel_key direction))
+                  else Some (Masc.Tui_mouse_protocol.wheel_key direction))
           | Some (Pasted _) | Some (Graphics_reply _)
           | Some (Mouse_left_press _) | Some (Mouse_left_release _) | None -> None
       in
@@ -21208,8 +21208,8 @@ and is loaded on demand through keeper_skill.
            scroll_acting_pane state
              ~delta:
                (match direction with
-                | Masc.Tui_decode.Wheel_up -> -wheel_notch_rows
-                | Masc.Tui_decode.Wheel_down -> wheel_notch_rows)
+                | Masc.Tui_mouse_protocol.Wheel_up -> -wheel_notch_rows
+                | Masc.Tui_mouse_protocol.Wheel_down -> wheel_notch_rows)
        (* A left press on the Activity pane picks the keeper under it. Same
           modal guards as the Lanes press below, for the same reason. *)
        | Some (Mouse_left_press (row, column))

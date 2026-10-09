@@ -12,7 +12,12 @@
       "path": "bin/masc_tui.ml",
       "baseline_lines": 27845,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: terminal mouse grammar owner and direct consumers updated; remaining responsibilities pending semantic review",
+      "current_lines": 27845,
+      "validation_artifact": "mouse-protocol/README.md",
+      "prs": [
+        41915
+      ]
     },
     {
       "path": "bin/masc_tui_http.ml",
@@ -60,7 +65,12 @@
       "path": "bin/masc_tui_render_prim.ml",
       "baseline_lines": 5153,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: terminal mouse grammar owner and direct consumers updated; remaining responsibilities pending semantic review",
+      "current_lines": 5153,
+      "validation_artifact": "mouse-protocol/README.md",
+      "prs": [
+        41915
+      ]
     },
     {
       "path": "bin/masc_tui_render_schedule.ml",
@@ -455,13 +465,23 @@
       "path": "lib/tui_decode.ml",
       "baseline_lines": 7548,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: terminal mouse grammar owner and direct consumers updated; remaining responsibilities pending semantic review",
+      "current_lines": 7426,
+      "validation_artifact": "mouse-protocol/README.md",
+      "prs": [
+        41915
+      ]
     },
     {
       "path": "lib/tui_decode.mli",
       "baseline_lines": 2532,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: terminal mouse grammar owner and direct consumers updated; remaining responsibilities pending semantic review",
+      "current_lines": 2488,
+      "validation_artifact": "mouse-protocol/README.md",
+      "prs": [
+        41915
+      ]
     },
     {
       "path": "packages/agent_core/lib/execution_event_store.ml",
@@ -953,7 +973,12 @@
       "path": "test/test_tui_decode.ml",
       "baseline_lines": 13682,
       "kind": "test",
-      "status": "pending semantic review"
+      "status": "partial: terminal mouse grammar owner and direct consumers updated; remaining responsibilities pending semantic review",
+      "current_lines": 13682,
+      "validation_artifact": "mouse-protocol/README.md",
+      "prs": [
+        41915
+      ]
     },
     {
       "path": "test/test_tui_keeper_chat_history.ml",

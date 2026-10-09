@@ -1,0 +1,14 @@
+{
+  "command": [
+    "opam",
+    "exec",
+    "--",
+    "dune",
+    "build",
+    "-j4",
+    "bin/masc_tui.exe"
+  ],
+  "exit_code": 0,
+  "elapsed_seconds": 5.636,
+  "binary_sha256": "ab6fc57790119ec91c2212f835fabab5bed60d5e11160303d8f3dfb445d2ccc5"
+}

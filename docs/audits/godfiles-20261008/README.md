@@ -7,8 +7,8 @@ This campaign covers tracked code files with at least 2,000 lines. The initial
 inventory contains 171 candidates: 75 production source/style/interface files,
 90 tests, 3 tooling files and 3 evidence scripts. `inventory.json` records each
 baseline path and its current audit state. A line count selects candidates; it
-is not a defect verdict or a new build gate. Six production candidates received
-bounded changes; their other responsibilities remain pending. The other 69
+is not a defect verdict or a new build gate. Ten production candidates received
+bounded changes; their other responsibilities remain pending. The other 65
 production candidates still require semantic review. All 171 candidates remain
 in the campaign until their responsibilities and necessary repairs are assessed.
 
@@ -22,6 +22,8 @@ in the campaign until their responsibilities and necessary repairs are assessed.
 | [#41890](https://github.com/jeong-sik/masc/pull/41890) | Failure card extracted; completed media retained on history reload; diagnostics remain separate from speech | `dashboard/src/components/chat/primitives.ts` |
 | [#41899](https://github.com/jeong-sik/masc/pull/41899) | One closed row classification; server failure producer; shared terminal authority and all consumers updated | `keeper_chat_store.ml`, `server_routes_http_keeper_stream.ml`, chat primitives |
 
+| [#41915](https://github.com/jeong-sik/masc/pull/41915) | Pure terminal mouse protocol separated from domain JSON contracts; direct input/scroll consumers updated | `tui_decode.ml/.mli`, main TUI and render primitives |
+
 The declared branch dependencies follow that order, starting at `main`.
 GitHub may group a subset into a native stack; inspect live membership rather
 than inferring it from the direct branch bases.
@@ -31,23 +33,25 @@ any review or integration decision.
 
 ## Defect evidence
 
-The old `parse_line_decoded` mapped every unrecognized kind to `Utterance`.
-`Keeper_world_observation_message_scope.acknowledged_turn_refs` and
-`answered_delivery_keys` treat utterances as answers when their turn/delivery
-identity matches pending input. The repaired decoder rejects present unknown,
-blank and wrong-type values, retains read-drop evidence and causes the strict
-reader to return an error. Absence retains the writer's utterance semantics.
-The replaced scenario checks persisted malformed input through loading and
-pending classification, including strict rejection after permissive loading.
-Its source is reviewed. The row-kind group subsequently passed under an
-operator-requested local check; see [local-validation.md](local-validation.md).
+The current chat contract has one closed row role. A server request failure is
+persisted through `append_request_failure_once` as `Request_failure`, so it cannot
+impersonate Keeper speech, acknowledge pending input, or enter conversation
+memory. There is no independent chat `kind` field or writer argument. Completed
+media and exact live traces survive history reload, including the default
+workspace filter and grouped work rendering. See [failure-row/README.md](failure-row/README.md)
+for the current contract, store scenarios, browser interactions and TUI PTY proof.
 
 ## Evidence and pending checks
 
 Subsequent operator-authorized Core/dated JSONL compilation and the three
 row-kind tests passed on the combined source head; see
 [local-validation.md](local-validation.md) for scope, commands and logs.
-Dashboard failure/output scenarios and their store checks subsequently passed; see [failure-output/README.md](failure-output/README.md). The other behavior targets below remain unexecuted.
+Dashboard failure/output and current row-contract checks subsequently passed; see
+[failure-output/README.md](failure-output/README.md) and
+[failure-row/README.md](failure-row/README.md). Mouse grammar/input/reader checks,
+TUI compilation and SGR PTY interaction passed; see
+[mouse-protocol/README.md](mouse-protocol/README.md). Remaining targets are scoped
+in the individual evidence documents rather than inferred from adjacent checks.
 
 `validation.log` records successful OCaml 5.5.1 parse-only checks on the changed
 source/interface files, combined diff whitespace checking, and validation of

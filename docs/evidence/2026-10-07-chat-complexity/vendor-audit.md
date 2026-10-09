@@ -16,7 +16,7 @@ evidence for that finding, not an additional finding to count.
 The important challenge was whether draining `pending` can actually interleave
 with a producer. `keeper_stream_send_raw` takes an Eio mutex and calls
 `write_string` followed by callback-style `flush`; it does not await the flush
-([server_routes_http_keeper_stream.ml:1202-1210](../../../lib/server/server_routes_http_keeper_stream.ml)).
+([server_routes_http_keeper_stream.ml:1202-1210](https://github.com/jeong-sik/masc/blob/5a9d7aeac2e609a5dab261204cf89825155860b6/lib/server/server_routes_http_keeper_stream.ml#L1202-L1210)).
 It is therefore insufficient to assume each send yields on one domain.
 
 The supported domain topology supplies a separate producer:
@@ -107,7 +107,7 @@ acceptance of a constructed frame is not proof of that production condition.
 
 Native output/progress payloads, native success/failure, and Antigravity reasoning
 are explicitly listed as missing capabilities in
-[`docs/design/keeper-chat-event-timeline.md`](../../design/keeper-chat-event-timeline.md).
+[`docs/design/keeper-chat-event-timeline.md`](https://github.com/jeong-sik/masc/blob/5a9d7aeac2e609a5dab261204cf89825155860b6/docs/design/keeper-chat-event-timeline.md).
 Antigravity's nonempty step text is currently forwarded before classifying step
 type; the document already calls out the unknown meaning of Internal, Tool and
 Unrecognized text. This audit did not count those documented limits again as

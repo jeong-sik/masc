@@ -215,12 +215,17 @@ let custom_deltas_unvalidated fields =
                if event = "KEEPER_NATIVE_TOOL_START" then
                  [Native_tool_started {occurrence; tool_name = string_field value "toolCallName"}]
                else
+                 (* The wire contract permits an END without a completion:
+                    an older sender closes the occurrence without terminal
+                    metadata, which reads as end_observed. A present
+                    completion must be exactly one and well-formed. *)
                  (match List.filter (fun (key, _) -> String.equal key "completion") value with
+                  | [] -> [Native_tool_ended {occurrence; completion = Runtime_native_tools.end_observed}]
                   | [_, json] ->
                       (match Runtime_native_tools.completion_of_json json with
                        | Ok completion -> [Native_tool_ended {occurrence; completion}]
                        | Error detail -> [Undecodable (event ^ ": " ^ detail)])
-                  | _ -> [Undecodable (event ^ " must carry exactly one completion")]))
+                  | _ -> [Undecodable (event ^ " must carry at most one completion")]))
   | Some "KEEPER_THINKING_DELTA" -> (
       match object_field fields "value" with
       | None -> [ Undecodable "KEEPER_THINKING_DELTA value is not an object" ]

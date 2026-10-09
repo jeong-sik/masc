@@ -111,11 +111,10 @@ let test_absent_and_malformed_metadata () =
   let old = `Assoc (List.remove_assoc "completion" fields) in
   check bool "end without result metadata is rejected" true
     (Result.is_error (Journal.keeper_chat_event_of_json old));
-  (* This layer's live decoder still answers the omitted completion with
-     Undecodable; the layer that defaults it to end_observed also flips
-     this expectation. The strict projection above already accepts it. *)
-  check bool "older SSE end without completion is undecodable" true
-    (match decode_wire None with [Live.Undecodable _] -> true | _ -> false);
+  check bool "older SSE end without completion reads as observed" true
+    (match decode_wire None with
+     | [Live.Native_tool_ended {completion; _}] -> completion=Native.end_observed
+     | _ -> false);
   List.iter (fun malformed ->
     check bool "present malformed journal metadata is not unknown/success" true
       (Result.is_error (Journal.keeper_chat_event_of_json

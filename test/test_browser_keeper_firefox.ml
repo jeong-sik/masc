@@ -149,6 +149,13 @@ let host_is_started_only_with_an_installed_launcher_and_no_host () =
       check bool "a host holds the lock" true (host_step base = Keeper_firefox.Host_running);
       check bool "a host given another port" true
         (host_step ~port:9444 base = Keeper_firefox.Host_on_another_port "ws://127.0.0.1:9333/session");
+      (* A host that has just taken the lock has not written its record. *)
+      Sys.remove (Record.record_path ~base_path:base);
+      (match Record.observe ~base_path:base with
+       | Record.Record_missing_but_locked -> ()
+       | _ -> fail "expected a held lock with no record");
+      check bool "a held lock with no record: a host, on a port not known" true
+        (host_step base = Keeper_firefox.Host_address_unknown);
       (* A record no reader can load, beside a lock still held, is a host
          that runs: a second one would only be refused at the lock. *)
       write (Record.record_path ~base_path:base) "{";

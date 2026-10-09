@@ -749,6 +749,19 @@ let event_channel_conflicts state = function
      | _ -> false)
   | _ -> false
 
+(* Progress cannot reopen a native occurrence or set an execution outcome. *)
+let progress_native_tool ~redact_text ~stream_scope ~block_index ~tool_call_id progress state =
+  match state.current_stream_scope, state.scope_disposition, stream_block_for_index state block_index with
+  | Some current, Scope_live, Some (Active_native_tool tool)
+    when current=stream_scope && state.stream_phase <> Message_stopped
+         && Option.equal String.equal tool.tool_call_id tool_call_id ->
+      {bridge_state=state; chat_events=[Keeper_chat_events.Native_tool_progress
+        (tool, Runtime_native_tools.redact_progress redact_text progress)]}
+  | _ ->
+      {bridge_state=state; chat_events=[protocol_error ~index:block_index ?tool_call_id
+        ~reason:"native progress has no matching active provider occurrence"
+        Keeper_chat_events.Tool_occurrence_mapping_invalid]}
+
 (* The provider report arrives on the same callback path before its generic
    block stop. Only the exact open native occurrence may own it: this must not
    turn a MASC argument block or a superseded response into a native result. *)

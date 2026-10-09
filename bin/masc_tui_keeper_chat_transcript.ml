@@ -41,6 +41,13 @@ type tool_outcome = Masc_tui_keeper_chat_activity_projection.tool_outcome =
   | Never_returned
   | Outcome_unrecorded
 
+type native_progress = Masc_tui_keeper_chat_activity_projection.native_progress =
+  { output_bytes : int option
+  ; message : string option
+  ; updated_at : float
+  ; elapsed : float option
+  }
+
 type tool_activity = Masc_tui_keeper_chat_activity_projection.tool_activity =
   { call_id : string option
   ; execution_id : string option
@@ -49,6 +56,7 @@ type tool_activity = Masc_tui_keeper_chat_activity_projection.tool_activity =
   ; subject : string option
   ; outcome : tool_outcome
   ; native_completion : Runtime_native_tools.completion option
+  ; native_progress : native_progress option
   ; duration : string option
   }
 
@@ -98,6 +106,7 @@ type tool_projection = Masc_tui_keeper_chat_activity_projection.tool_projection 
 
 include (Masc_tui_keeper_chat_activity_projection : module type of Masc_tui_keeper_chat_activity_projection
   with type tool_outcome := tool_outcome
+   and type native_progress := native_progress
    and type tool_activity := tool_activity
    and type skill_state := skill_state
    and type skill_invocation := skill_invocation
@@ -134,6 +143,7 @@ type live_tool_call =
   ; args : string
   ; ended : bool
   ; native_completion : Runtime_native_tools.completion option
+  ; native_progress : native_progress option
   ; result_ready : bool
   ; failed : bool
   ; duration : string option
@@ -559,7 +569,7 @@ let activity_of_live_call (t : t) (call : live_tool_call) =
         | Waiting | Working -> false
         | Stream_ended | Stream_failed _ -> true)
   in
-  make_tool_activity ?native_completion:call.native_completion ?execution_id:call.execution_id
+  make_tool_activity ?native_progress:call.native_progress ?native_completion:call.native_completion ?execution_id:call.execution_id
     ~call_id:call.call_id ~tool_name:call.tool_name
     ~args:call.args
     ~outcome:
@@ -1281,6 +1291,7 @@ let start_tool ~now t ~authority ~occurrence ~tool_name =
            ; args = ""
            ; ended = false
            ; native_completion = None
+           ; native_progress = None
            ; result_ready = false
            ; failed = false
            ; duration = None
@@ -1475,6 +1486,27 @@ let apply_delta ~now t (delta : Live.delta) =
         | Some name when String.trim name <> "" -> name
         | Some _ | None -> "native tool" in
       start_tool ~now t ~authority:Provider_native ~occurrence ~tool_name
+  | Live.Native_tool_progress {occurrence; progress} ->
+      (match update_occurrence t occurrence (fun call ->
+        if call.authority <> Provider_native || call.ended || call.segment <> t.segment || call.attempt <> t.attempt
+           || (match t.phase with Stream_ended | Stream_failed _ -> true | Waiting | Working -> false) then
+          (note_unreadable t "native progress has no active provider occurrence"; call)
+        else
+          let previous_bytes = Option.bind call.native_progress (fun previous -> previous.output_bytes) in
+          let previous_message = Option.bind call.native_progress (fun previous -> previous.message) in
+          let updated = match progress with
+            | Runtime_native_tools.Output_observed {byte_count} ->
+                let previous = Option.value previous_bytes ~default:0 in
+                if byte_count <= 0 || byte_count > max_int - previous then None
+                else Some (Some (previous + byte_count), previous_message)
+            | Runtime_native_tools.Message_reported {message} -> Some (previous_bytes, Some message) in
+          match updated with
+          | None -> note_unreadable t "native progress byte count is invalid"; call
+          | Some (output_bytes, message) ->
+              {call with native_progress=Some {output_bytes; message; updated_at=now;
+                elapsed=(if now >= call.started_at then Some (now -. call.started_at) else None)}}) with
+       | Call_updated | Call_ambiguous -> ()
+       | Call_missing | Call_conflicting -> note_unreadable t "native progress has no matching provider occurrence")
   | Live.Native_tool_ended { occurrence; completion } ->
       (match update_occurrence t occurrence (fun call ->
           if call.authority = Provider_native then

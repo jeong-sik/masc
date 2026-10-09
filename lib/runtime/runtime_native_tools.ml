@@ -42,6 +42,36 @@ type completion_outcome =
 type completion = { outcome : completion_outcome; exit_code : int option }
 type finished = { observation : observation; completion : completion }
 
+type progress =
+  | Output_observed of { byte_count : int }
+  | Message_reported of { message : string }
+
+let progress_to_json = function
+  | Output_observed {byte_count} -> `Assoc ["kind", `String "output_observed"; "byte_count", `Int byte_count]
+  | Message_reported {message} -> `Assoc ["kind", `String "message_reported"; "message", `String message]
+
+let progress_of_json = function
+  | `Assoc fields ->
+      let keys = List.map fst fields in
+      let sorted = List.sort String.compare keys in
+      if List.length keys <> List.length (List.sort_uniq String.compare keys)
+      then Error "duplicate native progress field"
+      else (match List.assoc_opt "kind" fields with
+        | Some (`String "output_observed") when sorted = ["byte_count"; "kind"] ->
+            (match List.assoc_opt "byte_count" fields with
+             | Some (`Int byte_count) when byte_count > 0 -> Ok (Output_observed {byte_count})
+             | _ -> Error "native output byte_count must be a positive integer")
+        | Some (`String "message_reported") when sorted = ["kind"; "message"] ->
+            (match List.assoc_opt "message" fields with
+             | Some (`String message) -> Ok (Message_reported {message})
+             | _ -> Error "native progress message must be a string")
+        | _ -> Error "native progress kind or fields are invalid")
+  | _ -> Error "native progress must be an object"
+
+let redact_progress redact = function
+  | Output_observed _ as progress -> progress
+  | Message_reported {message} -> Message_reported {message=redact message}
+
 let end_observed = {outcome=End_observed; exit_code=None}
 
 let completion_to_json {outcome; exit_code} =

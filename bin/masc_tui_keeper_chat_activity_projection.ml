@@ -18,6 +18,13 @@ type tool_outcome =
   | Never_returned
   | Outcome_unrecorded
 
+type native_progress =
+  { output_bytes : int option
+  ; message : string option
+  ; updated_at : float
+  ; elapsed : float option
+  }
+
 type tool_activity =
   { call_id : string option
   ; execution_id : string option
@@ -26,6 +33,7 @@ type tool_activity =
   ; subject : string option
   ; outcome : tool_outcome
   ; native_completion : Runtime_native_tools.completion option
+  ; native_progress : native_progress option
   ; duration : string option
   }
 
@@ -81,7 +89,7 @@ let nonblank = function
   | Some value when String.trim value <> "" -> Some value
   | Some _ | None -> None
 
-let make_tool_activity ?native_completion ?execution_id ~call_id ~tool_name ~args ~outcome
+let make_tool_activity ?native_progress ?native_completion ?execution_id ~call_id ~tool_name ~args ~outcome
     ~duration () =
   let call_id = nonblank call_id in
   let execution_id = nonblank execution_id in
@@ -92,6 +100,7 @@ let make_tool_activity ?native_completion ?execution_id ~call_id ~tool_name ~arg
   ; subject = subject_of ~tool_name ~args
   ; outcome
   ; native_completion
+  ; native_progress
   ; duration
   }
 
@@ -190,7 +199,29 @@ let native_activity_summary (activity : tool_activity) =
   | Started | Awaiting_result | Returned | Native_running | Failed | Never_returned
   | Outcome_unrecorded -> None
 
-let render_activity_rows (activities : tool_activity list) =
+let native_progress_summary (activity : tool_activity) =
+  Option.map (fun progress ->
+    let observation = match progress.message, progress.output_bytes with
+      | Some message, _ -> safe_line message
+      | None, Some _ when activity.outcome=Native_running -> "output arriving"
+      | None, Some _ -> "output observed"
+      | None, None -> "native activity observed" in
+    observation)
+    activity.native_progress
+
+let native_progress_details ?(include_elapsed=false) (activity : tool_activity) =
+  match native_progress_summary activity, activity.native_progress with
+  | Some summary, Some progress ->
+      let summary = match include_elapsed, progress.elapsed with
+        | true, Some elapsed -> summary ^ " · updated +" ^ Masc_tui_message_layout.span_text elapsed
+        | false, _ | true, None -> summary in
+      Some (match progress.output_bytes with
+        | Some count -> Printf.sprintf "%s · %d bytes observed" summary count
+        | None -> summary)
+  | Some summary, None -> Some summary
+  | None, _ -> None
+
+let render_activity_rows ~expanded (activities : tool_activity list) =
   let name_width =
     List.fold_left
       (fun widest (activity : tool_activity) ->
@@ -204,7 +235,12 @@ let render_activity_rows (activities : tool_activity list) =
   List.map
     (fun (activity : tool_activity) ->
       let marker = marker_of_outcome activity.outcome in
-      let trailer = match native_activity_summary activity, activity.duration with
+      let progress = if expanded then native_progress_details ~include_elapsed:true activity else native_progress_summary activity in
+      let observation = match native_activity_summary activity, progress with
+        | None, progress -> progress
+        | Some completion, None -> Some completion
+        | Some completion, Some progress -> Some (completion ^ " · " ^ progress) in
+      let trailer = match observation, activity.duration with
         | None, duration -> duration
         | Some summary, None -> Some summary
         | Some summary, Some duration -> Some (summary ^ " · " ^ duration)
@@ -362,6 +398,9 @@ let compact_outcome_parts (activities : tool_activity list) =
   ordinary @ List.filter_map (fun (activity : tool_activity) ->
     Option.map (fun summary -> display_tool_name activity.tool_name ^ ": " ^ summary)
       (native_activity_summary activity)) activities
+  @ List.filter_map (fun (activity : tool_activity) ->
+      Option.map (fun summary -> display_tool_name activity.tool_name ^ ": " ^ summary)
+        (native_progress_summary activity)) activities
 ;;
 
 let compact_tool_parts (activities : tool_activity list) =
@@ -859,7 +898,7 @@ let inventory_row ~outcomes activities =
    calls away, [Full] keeps both. Neither draws a header over a single call --
    a summary of one call is that call, said twice. *)
 let project_tool_block mode (block : tool_block) =
-  let full_activity_rows = render_activity_rows block.activities in
+  let full_activity_rows = render_activity_rows ~expanded:(mode=Full) block.activities in
   let header, activity_rows, hidden_activity_rows, summary_outcome =
     match mode, block.activities with
     | (Full | Compact), ([] | [ _ ]) -> None, full_activity_rows, 0, None

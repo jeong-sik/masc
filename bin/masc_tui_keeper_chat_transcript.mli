@@ -75,6 +75,14 @@ val received_marker : string
 val all_outcomes : tool_outcome list
 (** Every outcome, in rollup order. *)
 
+(** Last provider progress observation projected onto its native tool row. *)
+type native_progress =
+  { output_bytes : int option (** Cumulative received output bytes; no raw output. *)
+  ; message : string option (** Latest redacted full MCP message; sanitized at render. *)
+  ; updated_at : float (** Consumer-supplied event time; normal live input uses SSE time or receipt fallback. *)
+  ; elapsed : float option (** Time between observed start and update, if ordered; not provider duration. *)
+  }
+
 (** One tool call as shared by the live turn and durable history decoders.
     This remains typed until {!project_tool_block}; consumers never recover
     identity or outcome by parsing a rendered row. *)
@@ -95,6 +103,7 @@ type tool_activity = private
           the connector trail and the dashboard. *)
   ; outcome : tool_outcome
   ; native_completion : Runtime_native_tools.completion option
+  ; native_progress : native_progress option
   ; duration : string option
       (** The source's duration label. Live events do not currently carry one,
           so they retain [None]. *)
@@ -239,6 +248,7 @@ type tool_projection = private
   }
 
 val make_tool_activity :
+  ?native_progress:native_progress ->
   ?native_completion:Runtime_native_tools.completion ->
   ?execution_id:string ->
   call_id:string option ->
@@ -255,6 +265,10 @@ val native_completion_status : Runtime_native_tools.completion -> string
 (** Provider observation only; never implies a persisted MASC execution receipt.
     Generated words only: an unrecognized status is named, not quoted, so the
     compact and full rows that the phrase dresser colours carry no provider text. *)
+
+val native_progress_details : ?include_elapsed:bool -> tool_activity -> string option
+(** Terminal-safe provider progress and byte metadata. Results omit elapsed
+    observation time; Full opts in with [include_elapsed=true]. *)
 
 val native_completion_summary : Runtime_native_tools.completion -> string
 (** {!native_completion_status} plus the provider's own word for an

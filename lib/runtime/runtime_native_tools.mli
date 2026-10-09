@@ -65,6 +65,16 @@ type completion_outcome =
 type completion = { outcome : completion_outcome; exit_code : int option }
 type finished = { observation : observation; completion : completion }
 
+type progress =
+  | Output_observed of { byte_count : int }
+  | Message_reported of { message : string }
+
+val progress_to_json : progress -> Yojson.Safe.t
+val progress_of_json : Yojson.Safe.t -> (progress, string) result
+val redact_progress : (string -> string) -> progress -> progress
+(** Progress is provider observation, not output content or a completion.
+    Output bytes count each received delta; equal deltas are separate observations. *)
+
 val end_observed : completion
 val completion_to_json : completion -> Yojson.Safe.t
 val completion_of_json : Yojson.Safe.t -> (completion, string) result

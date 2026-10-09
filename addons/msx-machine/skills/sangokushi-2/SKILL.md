@@ -155,6 +155,14 @@ and confirm the next officer or battle prompt before continuing.
 - `1` gives `1.通常移動 2.誘導移動`; `1` again asks `どの方向ですか?` with
   `機動力 N`. `2` moved the unit one hex down and spent the rest of its
   mobility, and the next unit's menu came up.
+- `2` opens `1.通常 2.一斉 3.火計 4.突撃`. In the observed province-27
+  battle, `1` then asked `どの方向ですか?`. Choosing direction `9` returned
+  a partly drawn command menu; after Return, the next officer's command
+  prompt appeared. The displayed troop totals did not change, so this does
+  not establish an enemy hit or a universally valid attack direction.
+- `4` asks `誰の様子を見ますか? (0:見る RET:やめる)`. `0` displayed an officer
+  panel including soldiers, training and morale; Return left information
+  mode. Inspect these values rather than assuming recruited troops are trained.
 - `6` asks `全軍退却しますか(Y/N)?`; after `y` each unit asks
   `<退却>:20 <武将>はどこに退却しますか?`. Type the province number shown and
   Return; an empty Return is not an answer. After the last unit the map comes

@@ -490,7 +490,7 @@ let test_a_rewrite_receipt_has_the_same_answer () =
   let fingerprint receipt =
     match
       Masc.Keeper_tool_progress_identity.digest_tool_io
-        ~tool_name:"keeper_memory_write" ~input:args ~output_text:receipt
+        ~tool_name:"keeper_memory_write" ~input:args ~output_text:receipt ()
     with
     | Some io -> io.Masc.Keeper_tool_progress_identity.output_fingerprint
     | None -> Alcotest.fail "no fingerprint for a memory write receipt"

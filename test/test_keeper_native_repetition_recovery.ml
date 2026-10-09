@@ -26,13 +26,13 @@ let settled ?(attempt_admitted=true) ?(outcome=T.Tool_succeeded) ~sequence conte
    result=T.ToolResult {tool_use_id=id; content; outcome; json=None; content_blocks=None};
    attempt_admitted; settlement_seq=sequence}
 
-let observation (call : Projection.settled_tool_invocation) =
+let observation ?base_path (call : Projection.settled_tool_invocation) =
   let output_text = match call.result with
     | T.ToolResult {content; _} -> content
     | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
     | ToolUse _ | Image _ | Document _ | Audio _ -> fail "fixture result must be a ToolResult" in
-  let io = match Keeper_tool_progress_identity.digest_tool_io
-      ~tool_name:call.tool_name ~input:call.input ~output_text with
+  let io = match Keeper_tool_progress_identity.digest_tool_io ?base_path
+      ~tool_name:call.tool_name ~input:call.input ~output_text () with
     | Some io -> io | None -> fail "fixture I/O has no fingerprint" in
   Snapshot.observation ~tool_name:call.tool_name
     ~input_fingerprint:(Some io.input_fingerprint)
@@ -41,7 +41,7 @@ let observation (call : Projection.settled_tool_invocation) =
 let record ?(scope=current_scope) state call =
   Snapshot.record state ~scope (observation call) |> frame
 let reconcile ~seed ~checkpoint settled =
-  Recovery.reconcile ~scope:current_scope ~seed ~checkpoint ~settled
+  Recovery.reconcile ~scope:current_scope ~seed ~checkpoint ~settled ()
 let observations state = Snapshot.observations state ~scope:current_scope |> frame
 let same label expected actual = check bool label true (Snapshot.equal expected actual)
 
@@ -111,9 +111,62 @@ let test_observer_failure_and_conflicts () =
   | Error Recovery.Scope_mismatch -> ()
   | Ok _ | Error _ -> fail "another execution scope was accepted"
 
+let test_stored_answer_recovery_requires_original_evidence () =
+  let base_path = Filename.temp_file "native-answer-recovery" "" in
+  Sys.remove base_path;
+  Unix.mkdir base_path 0o700;
+  let rec remove path =
+    if Sys.is_directory path then begin
+      Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path);
+      Unix.rmdir path
+    end else Unix.unlink path in
+  Fun.protect ~finally:(fun () -> remove base_path) @@ fun () ->
+  let module Memory = Keeper_memory_os_types in
+  let claim = String.make (Tool_output.inline_ceiling_bytes Tool_output.default_model_projection + 1) 'x' in
+  let fact = Memory.observed ~claim ~category:Memory.Fact ~now:100.
+      ~origin:{kind=Memory.Authored; trace_id="native-recovery-fixture"} in
+  let id = Memory.memory_id fact in
+  let value = `Assoc ["status",`String "completed";"purpose",`String "current release policy";
+      "selection_id",`String "retained-audit-receipt";
+      "selected",`List [`Assoc ["id",`String id;"use",`String "current_decision";
+        "current",`Assoc ["store",`String "current_memory_snapshot";"memory_id",`String id;
+          "current_fact",Memory.fact_to_json fact;"direct_admission_witness_count",`Int 1;
+          "successor_witness_count",`Int 0]]];
+      "deferred",`List [];"unavailable",`List [];"assessed_count",`Int 1;
+      "selected_count",`Int 1;"not_needed_count",`Int 0;"truncated_count",`Int 0;
+      "incomplete",`Bool false;"snapshot_revision",`Int 7;"guidance",`String "Current evidence"] in
+  let raw = Yojson.Safe.to_string value in
+  let tool_name = "keeper_memory_select" in
+  let result = Tool_result.make_ok ~tool_name ~start_time:(Tool_timing.start ()) ~data:value () in
+  let content = match Tool_bridge.to_agent_core_typed_result ~base_path
+      ~answer_reader:(fun output_text -> Keeper_tool_answer.answer ~tool_name ~output_text) result with
+    | Ok result -> result.T.content
+    | Error error -> fail error.T.message in
+  let reference = match Tool_output.decode_from_agent_core content with
+    | Tool_output.Decoded reference -> reference
+    | _ -> fail "oversized producer result must become a stored marker" in
+  let store = Tool_blob_store.create ~base_path in
+  check (option string) "exact audit receipt remains in owned store" (Some raw)
+    (Tool_blob_store.fetch store ~sha256:reference.sha256 |> require Tool_blob_store.fetch_error_to_string);
+  let call = { (settled ~sequence:1 content) with Projection.tool_name;
+      input=`Assoc ["purpose",`String "current release policy"] } in
+  let checkpoint = Snapshot.record empty ~scope:current_scope
+      (observation ~base_path call) |> frame in
+  let restore () = Recovery.reconcile ~base_path ~scope:current_scope
+      ~seed:empty ~checkpoint ~settled:[call] () in
+  same "verified original joins existing checkpoint without repeating occurrence"
+    checkpoint (restore () |> recover);
+  check bool "original evidence removed for recovery fault" true
+    (Tool_blob_store.delete store ~sha256:reference.sha256
+     |> require (fun (error : Tool_blob_store.delete_error) -> error.reason));
+  match restore () with
+  | Error Recovery.Checkpoint_observation_not_settled -> ()
+  | Ok _ | Error _ -> fail "lost original must refuse the previously verified checkpoint"
+
 let () = Alcotest.run "native repetition recovery"
   ["canonical observations",
    [test_case "seed and occurrence multiplicity" `Quick test_seed_and_occurrence_multiplicity;
     test_case "checkpoint order and unrelated scope" `Quick test_checkpoint_order_and_other_scopes;
     test_case "handler provenance" `Quick test_actual_handler_provenance;
-    test_case "observer failure and conflicts" `Quick test_observer_failure_and_conflicts]]
+    test_case "observer failure and conflicts" `Quick test_observer_failure_and_conflicts;
+    test_case "stored answer recovery requires original evidence" `Quick test_stored_answer_recovery_requires_original_evidence]]

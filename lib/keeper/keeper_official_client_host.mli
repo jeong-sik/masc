@@ -575,6 +575,7 @@ val prepare_turn :
     copy kept. *)
 
 val dynamic_tools :
+  ?base_path:string ->
   content_transport:Runtime_official_client_tool.content_transport ->
   accepts_image_input:bool ->
   tool_approval:Agent_core.Hooks.tool_approval_callback option ->

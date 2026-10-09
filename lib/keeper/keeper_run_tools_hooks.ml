@@ -704,10 +704,10 @@ let assemble_hooks
                   ~execution_evidence
               in
               let progress_io_fingerprints =
-                Keeper_tool_progress_identity.digest_tool_io
+                Keeper_tool_progress_identity.digest_tool_io ~base_path:config.base_path
                   ~tool_name
                   ~input
-                  ~output_text
+                  ~output_text ()
               in
               (match Keeper_registry.get ~base_path:config.base_path meta.name with
                | Some entry ->

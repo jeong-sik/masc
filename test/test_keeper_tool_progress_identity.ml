@@ -10,12 +10,13 @@
 open Alcotest
 module P = Masc.Keeper_tool_progress_identity
 module A = Masc.Keeper_tool_answer
+module O = Tool_output
 
 let fingerprints ~output =
   match
     P.digest_tool_io ~tool_name:"Execute"
       ~input:(`Assoc [ ("argv", `List [ `String "gh"; `String "auth" ]) ])
-      ~output_text:output
+      ~output_text:output ()
   with
   | Some io -> io
   | None -> fail "digest_tool_io returned no fingerprints"
@@ -63,7 +64,7 @@ let test_non_json_output_keeps_the_byte_hash () =
 let input_fingerprints ~input =
   match
     P.digest_tool_io ~tool_name:"Execute" ~input
-      ~output_text:"the same answer for both"
+      ~output_text:"the same answer for both" ()
   with
   | Some io -> io.P.input_fingerprint
   | None -> fail "digest_tool_io returned no fingerprints"
@@ -82,7 +83,7 @@ let test_the_input_reaches_the_answer_through_the_memo () =
   check string "the repeat answers the same" a a_again
 
 let output_fingerprint ~tool_name output =
-  match P.digest_tool_io ~tool_name ~input:(`Assoc [ ("title", `String "t") ]) ~output_text:output with
+  match P.digest_tool_io ~tool_name ~input:(`Assoc [ ("title", `String "t") ]) ~output_text:output () with
   | Some io -> io.P.output_fingerprint
   | None -> fail "digest_tool_io returned no fingerprints"
 
@@ -171,7 +172,7 @@ let test_a_third_memory_rewrite_stops_the_turn () =
         ~input:(`Assoc [ ("title", `String "t"); ("content", `String "c") ])
         ~output_text:
           (memory_receipt ~disposition:"reobserved" ~memory_id:"sha256:aa" ~revision
-             ~recorded_at:(Printf.sprintf "2026-10-05T21:%02d:00Z" revision))
+             ~recorded_at:(Printf.sprintf "2026-10-05T21:%02d:00Z" revision)) ()
     in
     { tool_name = "keeper_memory_write"
     ; provider = "test"
@@ -207,6 +208,7 @@ let test_memory_identity_survives_changing_inputs () =
         ~output_text:
           (memory_receipt ~disposition:"reobserved" ~memory_id ~revision
              ~recorded_at:content)
+        ()
     with
     | Some io -> io
     | None -> fail "digest_tool_io returned no fingerprints"
@@ -280,7 +282,7 @@ let test_selection_receipts_do_not_create_false_progress () =
     (selection_fingerprint first) (selection_fingerprint second);
   let call value : Masc.Keeper_agent_result.tool_call_detail =
     let io=P.digest_tool_io ~tool_name:"keeper_memory_select" ~input:(`Assoc ["purpose",`String "E17 production approval"])
-      ~output_text:(Yojson.Safe.to_string value) in
+      ~output_text:(Yojson.Safe.to_string value) () in
     {tool_name="keeper_memory_select";provider="fixture";execution_outcome=Tool_result.Ok;
      typed_outcome=None;latency_ms=1.;task_id=None;route_evidence=None;
      input_fingerprint=Option.map (fun (io : P.io_fingerprints) -> io.input_fingerprint) io;
@@ -310,6 +312,144 @@ let test_selection_malformed_output_keeps_whole_identity () =
   check bool "policy failures remain distinct" false
     (selection_fingerprint (unavailable "lane_disabled")=selection_fingerprint (unavailable "keeper_excluded"))
 
+let test_large_selection_projection_keeps_answer_identity () =
+  let path = Filename.temp_file "masc-selection-identity" "" in
+  Sys.remove path;
+  Unix.mkdir path 0o755;
+  let cleanup () =
+    let rec remove path =
+      if Sys.file_exists path then
+        if Sys.is_directory path then begin
+          Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path);
+          Unix.rmdir path
+        end else Unix.unlink path
+    in
+    remove path
+  in
+  Fun.protect ~finally:cleanup @@ fun () ->
+  let claim = String.concat "\n" (List.init
+      (O.inline_ceiling_bytes O.default_model_projection / 32 + 1)
+      (fun i -> Printf.sprintf "Release R%04d requires two independent approvals." i)) in
+  let receipt id claim use = selection_receipt id
+    |> replace_field "selected" (`List [selected_memory ~claim ~use]) in
+  let project value =
+    let raw = Yojson.Safe.to_string value in
+    check bool "actual selected claim exceeds bridge ceiling" true
+      (String.length raw > O.inline_ceiling_bytes O.default_model_projection);
+    let result = Tool_result.make_ok ~tool_name:"keeper_memory_select"
+        ~start_time:(Tool_timing.start ()) ~data:value () in
+    let content = match Masc.Tool_bridge.to_agent_core_typed_result ~base_path:path
+        ~answer_reader:(fun output_text -> A.answer ~tool_name:"keeper_memory_select" ~output_text) result with
+      | Ok result -> result.Agent_core.Types.content
+      | Error error -> fail error.Agent_core.Types.message in
+    match O.decode_from_agent_core content with
+    | O.Decoded reference ->
+      check (option string) "stored original preserves full receipt bytes" (Some raw)
+        (match Tool_blob_store.fetch (Tool_blob_store.create ~base_path:path)
+           ~sha256:reference.sha256 with Ok value -> value | Error _ -> fail "fetch failed");
+      content, reference
+    | _ -> fail "actual bridge must externalize this selected claim" in
+  let input = `Assoc ["purpose",`String "release policies"] in
+  let identity ?base_path ?(tool_name="keeper_memory_select") content =
+    match P.digest_tool_io ?base_path ~tool_name ~input ~output_text:content () with
+    | Some io -> io.P.output_fingerprint | None -> fail "identity missing" in
+  let first_value = receipt "selection-first" claim "current_decision" in
+  let first, first_ref = project first_value in
+  let second, second_ref = project (receipt "selection-second" claim "current_decision") in
+  check bool "audit receipts remain distinct raw blobs" false (first_ref.sha256=second_ref.sha256);
+  let expected = selection_fingerprint first_value in
+  check string "verified first blob has producer semantic identity" expected (identity ~base_path:path first);
+  check string "receipt-only change preserves semantic identity" expected (identity ~base_path:path second);
+  check bool "without owned store identity remains distinct" false (identity first=identity second);
+  let changed, changed_ref = project (receipt "selection-third" (claim ^ "\nR9999 requires owner approval.") "current_decision") in
+  let comparison, _ = project (receipt "selection-fourth" claim "comparison") in
+  List.iter (fun content -> check bool "claim and use remain semantic differences" false
+      (expected=identity ~base_path:path content)) [changed;comparison];
+  let forged = match O.with_answer_fingerprint changed_ref first_ref.answer_fingerprint with
+    | Ok reference -> O.encode_for_agent_core (O.Stored reference)
+    | Error _ -> fail "valid fingerprint required" in
+  check string "different blob cannot assert another answer" (identity forged) (identity ~base_path:path forged);
+  check string "Whole_output tool ignores declared answer" (identity ~tool_name:"keeper_artifact_read" first)
+    (identity ~base_path:path ~tool_name:"keeper_artifact_read" first);
+  let memo = P.History_memo.create () in
+  let pair : P.history_pair = {tool_name="keeper_memory_select"; input; output_text=first} in
+  let historical () = match P.digest_history_pairs ~base_path:path memo [pair] with
+    | [Some io] -> io.P.output_fingerprint | _ -> fail "history identity missing" in
+  check string "history initially verifies original bytes" expected (historical ());
+  let blob_path reference = Filename.concat (Tool_blob_store.root_dir (Tool_blob_store.create ~base_path:path))
+      (Filename.concat (String.sub reference.O.sha256 0 2) reference.sha256) in
+  Unix.unlink (blob_path first_ref);
+  check string "missing blob cannot reuse live memo" (identity first) (identity ~base_path:path first);
+  check string "missing blob cannot reuse history memo" (identity first) (historical ());
+  Fs_compat.save_file (blob_path first_ref) "corrupt replacement";
+  check string "corrupt blob cannot reuse live memo" (identity first) (identity ~base_path:path first);
+  check string "corrupt blob cannot reuse history memo" (identity first) (historical ());
+  Printf.printf "MEMORY_SELECTION_LARGE_IDENTITY %s\n%!"
+    (Yojson.Safe.to_string (`Assoc ["raw_blobs_distinct",`Bool (first_ref.sha256<>second_ref.sha256);
+      "verified_answers_equal",`Bool (expected=identity ~base_path:path second);
+      "first_bytes",`Int first_ref.bytes;"second_bytes",`Int second_ref.bytes]))
+
+
+let test_a_manifest_wrapped_execute_keeps_identity () =
+  let path = Filename.temp_file "masc-manifest-identity" "" in
+  Sys.remove path;
+  Unix.mkdir path 0o755;
+  let cleanup () =
+    let rec remove path =
+      if Sys.file_exists path then
+        if Sys.is_directory path then begin
+          Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path);
+          Unix.rmdir path
+        end else Unix.unlink path
+    in
+    remove path
+  in
+  Fun.protect ~finally:cleanup @@ fun () ->
+  let store = Tool_blob_store.create ~base_path:path in
+  let big = String.concat "" (List.init
+      (O.inline_ceiling_bytes O.default_model_projection / 32 + 1)
+      (fun i -> Printf.sprintf "line %06d of collected output" i)) in
+  (* The payload shape is the one composable_output_fields writes once the
+     output is externalized: the artifact fields replace the inline text. *)
+  let receipt ~elapsed_ms ~text =
+    let ref = Tool_blob_store.put_durable store ~bytes:text ~mime:"text/plain"
+      |> Tool_output.normalized_artifact_ref_to_json in
+    `Assoc [ "ok", `Bool true
+           ; "status", `Assoc [ "kind", `String "exit"; "code", `Int 0 ]
+           ; "output_artifact", ref
+           ; "typed", `Bool true
+           ; "execution_time_ms", `Int elapsed_ms ] in
+  let project value =
+    let result = Tool_result.make_ok ~tool_name:"Execute"
+        ~start_time:(Tool_timing.start ()) ~data:value () in
+    let wrapped = match Masc.Tool_bridge.attach_artifact_manifest ~base_path:path result with
+      | Ok result -> result
+      | Error error -> fail error.Masc.Tool_bridge.message in
+    let content = match Masc.Tool_bridge.to_agent_core_typed_result ~base_path:path
+        ~answer_reader:(fun output_text -> A.answer ~tool_name:"Execute" ~output_text) wrapped with
+      | Ok typed -> typed.Agent_core.Types.content
+      | Error error -> fail error.Agent_core.Types.message in
+    match O.decode_from_agent_core content with
+    | O.Decoded reference -> content, reference
+    | _ -> fail "the manifest branch must store this receipt" in
+  let input = `Assoc [ "argv", `List [ `String "collect"; `String "--all" ] ] in
+  let identity ?base_path content =
+    match P.digest_tool_io ?base_path ~tool_name:"Execute" ~input ~output_text:content () with
+    | Some io -> io.P.output_fingerprint | None -> fail "identity missing" in
+  let first, first_ref = project (receipt ~elapsed_ms:1170 ~text:big) in
+  let second, second_ref = project (receipt ~elapsed_ms:1180 ~text:big) in
+  let changed, _ = project (receipt ~elapsed_ms:1170 ~text:(big ^ "\nfinal line differs")) in
+  check bool "manifests differ between runs" false (first_ref.sha256 = second_ref.sha256);
+  check bool "the manifest declares the answer fingerprint" true
+    (Option.is_some first_ref.O.answer_fingerprint);
+  let inline = identity (Yojson.Safe.to_string (receipt ~elapsed_ms:1170 ~text:big)) in
+  check string "an externalized execute keeps its inline identity" inline
+    (identity ~base_path:path first);
+  check string "a repeated externalized execute keeps one identity"
+    (identity ~base_path:path first) (identity ~base_path:path second);
+  check bool "a changed externalized answer changes identity" false
+    (identity ~base_path:path first = identity ~base_path:path changed)
+
 let () =
   run "keeper_tool_progress_identity"
     [ ( "identity"
@@ -325,6 +465,10 @@ let () =
             test_a_source_bound_rewrite_is_named_by_its_hash
         ; test_case "selection receipt identity is not retrieval progress" `Quick test_selection_receipts_do_not_create_false_progress
         ; test_case "malformed selection preserves fallback identity" `Quick test_selection_malformed_output_keeps_whole_identity
+        ; test_case "large selection preserves answer identity" `Quick
+            test_large_selection_projection_keeps_answer_identity
+        ; test_case "a manifest-wrapped execute keeps identity" `Quick
+            test_a_manifest_wrapped_execute_keeps_identity
         ; test_case "a third memory rewrite stops the turn" `Quick
             test_a_third_memory_rewrite_stops_the_turn
         ; test_case "memory identity survives changing inputs" `Quick

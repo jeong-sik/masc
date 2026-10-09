@@ -2,14 +2,17 @@
 
     Tool outputs too large for inline transport are persisted in
     {!Tool_blob_store}; the AGENT_CORE [content] field then carries a marker
-    rendered by {!encode_for_agent_core}. The marker wire format is unchanged
+    rendered by {!encode_for_agent_core}. The marker wire format remains
+    backward-compatible
     ([[masc:blob sha256=… bytes=… mime=… preview=…]], consumed by durable
     keeper histories and the dashboard inspector), but the codec is now
     exact:
 
     - {!artifact_ref} is [private]: construction goes through
       {!make_artifact_ref}, so every reference in flight has a valid sha256,
-      a non-negative byte count, and a non-empty media type.
+      a non-negative byte count, and a non-empty media type. An optional
+      producer-owned answer fingerprint may accompany a model-facing marker;
+      durable artifact references omit it.
     - {!decode_from_agent_core} distinguishes [Not_marker], a valid {!Stored}, and
       [Invalid_marker] — a marker-shaped payload that fails to parse is a
       visible, typed outcome. *)
@@ -30,6 +33,7 @@ type artifact_ref = private
   ; bytes : int
   ; preview : string
   ; mime : string
+  ; answer_fingerprint : string option
   }
 
 type make_error =
@@ -37,6 +41,7 @@ type make_error =
   | Negative_bytes of int
   | Empty_mime
   | Unencodable_mime of string
+  | Invalid_answer_fingerprint of invalid_sha256
       (** The marker writes mime unquoted between spaces, so a media type with
           a parameter ("text/plain; charset=utf-8") cannot survive the round
           trip. *)
@@ -53,6 +58,11 @@ val make_error_to_string : make_error -> string
 val with_preview : artifact_ref -> string -> artifact_ref
 (** Replace the preview, keeping the validated identity fields. Total — the
     existing reference already passed validation. *)
+
+val with_answer_fingerprint : artifact_ref -> string option -> (artifact_ref, make_error) result
+(** Attach the producer's semantic answer fingerprint to a model-facing
+    reference. This field is transport evidence only; durable artifact
+    identity remains [sha256]. *)
 
 (** The exact structured representation used when a durable consumer stores a
     blob reference as JSON rather than its AGENT_CORE marker. The producer and every

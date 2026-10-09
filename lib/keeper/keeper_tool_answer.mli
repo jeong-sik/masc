@@ -36,3 +36,9 @@ val resolve : string -> resolution
     output is the answer: the handler reads [Whole_output], the name resolves
     to no handler, or the text is not in the tool's shape. *)
 val answer : tool_name:string -> output_text:string -> Yojson.Safe.t option
+
+(** Recompute a declared stored answer from integrity-checked original bytes
+    in the caller-owned blob store. Missing, corrupt, mismatched or unsupported
+    evidence returns [None]; marker paths and declarations are never authority. *)
+val verified_stored_answer :
+  base_path:string -> tool_name:string -> output_text:string -> Yojson.Safe.t option

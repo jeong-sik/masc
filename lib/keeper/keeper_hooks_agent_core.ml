@@ -760,10 +760,10 @@ let make_hooks
            here, at the same boundary the live accumulator computes them, so a
            row and a live call of the same call answer the same identity. *)
         let progress_io_fingerprints =
-          Keeper_tool_progress_identity.digest_tool_io
+          Keeper_tool_progress_identity.digest_tool_io ~base_path:config.base_path
             ~tool_name
             ~input
-            ~output_text
+            ~output_text ()
         in
         (* Full record read: log_call no longer falls back to ambient
            context (RFC-0225 §3.3), so every field this row should carry

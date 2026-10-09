@@ -1123,6 +1123,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     let* dynamic_tools =
       match
         Host.dynamic_tools
+        ~base_path
           ~content_transport:Runtime_official_client_tool.Mcp
           ~accepts_image_input
           (* The host has no place to show an operator prompt mid-turn, so a

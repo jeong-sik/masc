@@ -85,3 +85,41 @@ let answer ~tool_name ~output_text =
      | Whole_output -> None
      | Reads_answer read -> read output_text)
 ;;
+
+let verified_stored_answer ~base_path ~tool_name ~output_text =
+  let declared_reader = match resolve tool_name with
+    | Outside_keeper_descriptors -> None
+    | Keeper_handler handler ->
+      (match reader handler with Whole_output -> None | Reads_answer read -> Some read) in
+  match declared_reader with
+  | None -> None
+  | Some read -> Domain_pool_ref.submit_io_or_inline (fun () ->
+  match Tool_output.decode_from_agent_core output_text with
+  | Tool_output.Decoded {sha256; bytes; mime; answer_fingerprint = Some declared; _} ->
+    (match Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256 with
+     | Ok (Some original) when String.length original = bytes ->
+       (* A stored manifest carries the original result in its [content]
+          field. The reader answers from that content — the fingerprint
+          covers the answer, not the wrapper around it — and a manifest
+          that does not decode reads as itself, failing verification
+          rather than reading a wrapper as an answer. *)
+       let answer_source =
+         if String.equal mime Tool_output.artifact_manifest_mime then
+           match Yojson.Safe.from_string original with
+           | json ->
+             (match Tool_output.artifact_manifest_of_json json with
+              | Tool_output.Decoded_artifact_manifest { content; _ } -> content
+              | Tool_output.Not_artifact_manifest
+              | Tool_output.Invalid_artifact_manifest _ -> original)
+           | exception Yojson.Json_error _ -> original
+         else original
+       in
+       (match read answer_source with
+        | Some value ->
+          let actual = Digestif.SHA256.(digest_string
+              (value |> Yojson.Safe.sort |> Yojson.Safe.to_string) |> to_hex) in
+          if String.equal actual declared then Some value else None
+        | None -> None)
+     | Ok _ | Error _ -> None)
+  | Tool_output.Decoded _ | Tool_output.Not_marker | Tool_output.Invalid_marker _ -> None)
+;;

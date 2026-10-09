@@ -1569,9 +1569,10 @@ let run_turn
                        so only the checkpoint's own pairs move the boundary. *)
                     let checkpoint = Agent_core.Agent.checkpoint agent in
                     Keeper_run_tools_setup.initial_tool_calls
+                      ~base_path:config.base_path
                       ~history_memo:(Keeper_tool_progress_identity.history_memo
                         ~base_path:config.base_path ~keeper_name:meta.name)
-                      ~history_messages:checkpoint.messages
+                      ~history_messages:checkpoint.messages ()
                     |> List.length
                   | None, Some Runtime_execution.Masc_agent_core ->
                     Log.Keeper.warn ~keeper_name:meta.name

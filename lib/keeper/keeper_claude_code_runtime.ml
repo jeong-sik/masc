@@ -859,6 +859,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     let terminal_error = ref None in
     let* host_dynamic_tools =
       Host.dynamic_tools
+        ~base_path
         ~content_transport:Runtime_official_client_tool.Mcp
         ~accepts_image_input
         (* These lanes drive a provider CLI that has no place to show an
@@ -957,6 +958,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     in
     let* host_dynamic_tools =
       Host.dynamic_tools
+        ~base_path
         ~content_transport:Runtime_official_client_tool.Mcp
         ~accepts_image_input
         (* These lanes drive a provider CLI that has no place to show an

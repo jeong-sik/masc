@@ -1166,19 +1166,30 @@ let repeated_call_abort_threshold = 3
    a receipt that stamps a revision or a clock on every identical call
    ({!Keeper_tool_answer}). The shape tag keeps a text-only result, an answer
    and a block result from colliding on the same bytes. *)
-let dynamic_tool_fingerprint ~tool_name ~input result =
+let dynamic_tool_fingerprint ?base_path ~tool_name ~input result =
   let open Digestif.SHA256 in
   let context = feed_string empty tool_name in
   let context = feed_string context (input |> Yojson.Safe.sort |> Yojson.Safe.to_string) in
   let context = feed_string context (if result.success then "success" else "failure") in
   let context = match result.content_blocks with
     | None ->
-      (match Keeper_tool_answer.answer ~tool_name ~output_text:result.content with
+      (match Tool_output.decode_from_agent_core result.content with
+       | Tool_output.Decoded _ ->
+         (match Option.bind base_path (fun base_path ->
+            Keeper_tool_answer.verified_stored_answer ~base_path ~tool_name
+              ~output_text:result.content) with
+          | Some answer ->
+            feed_string
+              (feed_string context "answer")
+              (answer |> Yojson.Safe.sort |> Yojson.Safe.to_string |> digest_string |> to_hex)
+          | None -> feed_string (feed_string context "text-only") result.content)
+       | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
+        (match Keeper_tool_answer.answer ~tool_name ~output_text:result.content with
        | Some answer ->
          feed_string
            (feed_string context "answer")
-           (answer |> Yojson.Safe.sort |> Yojson.Safe.to_string)
-       | None -> feed_string (feed_string context "text-only") result.content)
+           (answer |> Yojson.Safe.sort |> Yojson.Safe.to_string |> digest_string |> to_hex)
+       | None -> feed_string (feed_string context "text-only") result.content))
     | Some blocks ->
       feed_string
         (feed_string context "content-blocks")
@@ -1466,7 +1477,7 @@ let boundary_observation_cause error =
     }
 ;;
 
-let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_approval
+let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_input ~tool_approval
     ~runtime_label ~keeper_name
     ~turn_count ~context ~tools ~loading_plan
     ~(hooks : Agent_core.Hooks.hooks) ~event_bus ~context_injector
@@ -1725,7 +1736,7 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
             | Some _, _ | None, Some _ -> result
             | None, None ->
               let fingerprint =
-                dynamic_tool_fingerprint ~tool_name:tool.schema.name ~input result
+                dynamic_tool_fingerprint ?base_path ~tool_name:tool.schema.name ~input result
               in
               let repeated_count = observe_repeated_call repeated_call_state fingerprint in
               if repeated_count < repeated_call_abort_threshold then result
@@ -1795,7 +1806,7 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
   }
 ;;
 
-let dynamic_tools ~content_transport ~accepts_image_input ~tool_approval ~runtime_label
+let dynamic_tools ?base_path ~content_transport ~accepts_image_input ~tool_approval ~runtime_label
     ~keeper_name ~turn_count ~tools ~loading_plan
     ~hooks ~event_bus ~context_injector ~context ~terminal_effect_state
     ~terminal_error ~pre_tool_rejects
@@ -1814,6 +1825,7 @@ let dynamic_tools ~content_transport ~accepts_image_input ~tool_approval ~runtim
     Ok
       (List.map
          (dynamic_tool_of_agent_core
+            ~base_path
             ~content_transport
             ~accepts_image_input
             ~tool_approval

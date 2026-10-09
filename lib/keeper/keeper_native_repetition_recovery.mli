@@ -11,11 +11,12 @@ type error =
 val error_to_string : error -> string
 
 val reconcile :
+  ?base_path:string ->
   scope:Keeper_execution_scope_id.t ->
   seed:Keeper_repetition_snapshot.t ->
   checkpoint:Keeper_repetition_snapshot.t ->
   settled:Agent_core.Agent.Execution_projection.settled_tool_invocation list ->
-  (Keeper_repetition_snapshot.t, error) result
+  unit -> (Keeper_repetition_snapshot.t, error) result
 (** The immutable native seed must remain the exact suffix of this scope's
     checkpoint observations. Each observation after that seed consumes one
     canonical executed occurrence, preserving duplicates and checkpoint order.

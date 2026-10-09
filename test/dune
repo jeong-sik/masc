@@ -5027,6 +5027,10 @@
 
 (include stanzas/test_keeper_kata_inventory.inc)
 
+(test
+ (name test_tui_collab)
+ (modules test_tui_collab)
+ (libraries alcotest masc masc_tui_collab))
 
 (rule
  (alias runtest-test_install_runtime_setup)

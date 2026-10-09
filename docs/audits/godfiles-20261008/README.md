@@ -36,16 +36,22 @@ blank and wrong-type values, retains read-drop evidence and causes the strict
 reader to return an error. Absence retains the writer's utterance semantics.
 The replaced scenario checks persisted malformed input through loading and
 pending classification, including strict rejection after permissive loading.
-Its source is reviewed; its execution is still pending.
+Its source is reviewed. The row-kind group subsequently passed under an
+operator-requested local check; see [local-validation.md](local-validation.md).
 
 ## Evidence and pending checks
+
+Subsequent operator-authorized Core/dated JSONL compilation and the three
+row-kind tests passed on the combined source head; see
+[local-validation.md](local-validation.md) for scope, commands and logs.
+The other behavior targets below remain unexecuted.
 
 `validation.log` records successful OCaml 5.5.1 parse-only checks on the changed
 source/interface files, combined diff whitespace checking, and validation of
 this stack's changelog fragments through the production fragment parser.
 These checks do not establish OCaml type correctness or runtime behavior.
 
-| Changed contract | Direct consumers | Existing behavior target, not executed |
+| Changed contract | Direct consumers | Behavior targets (row_kind subset subsequently executed) |
 | --- | --- | --- |
 | Chat types, resolved JSON projection and strict kind decode | History endpoints, pending-message classification, transcript selection | `test_keeper_chat_store`, `test_keeper_mention_scope`, `test_dashboard_http_core` |
 | Protocol resolution/editor declarations | Provider parsing and structured runtime editor | `test_runtime_provider_auth_headers`, `test_runtime_claude_code_config`, `test_runtime_muse_serve_config`, `test_runtime_antigravity` |
@@ -57,8 +63,10 @@ changelog PR citation was reported as P2, repaired across the affected fragments
 and checked through the fragment parser. EOF whitespace P3s are corrected in the
 kind slice. Reviews are source evidence only; current-head review receipts belong
 in the individual PR descriptions. There is no independent GitHub approval.
-Core compilation and the behavior targets above remain unverified. No local
-Dune build, full build, CI watch loop, live runtime probe or deployment was run.
+At the initial source-review boundary, Core compilation and behavior targets
+were unverified and no local Dune build was run. The later operator request
+authorized the narrow compilation and row-kind execution recorded separately.
+No full build, CI watch loop, live runtime probe or deployment was run.
 The Core check requires an approved leader-selected candidate under the current
 execution protocol; no selection receipt or approval is fabricated here.
 

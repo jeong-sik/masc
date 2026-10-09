@@ -23,8 +23,9 @@ omit the decorative wall clock; connection identity remains.
 
 Changed OCaml source is checked with `ocamlc -stop-after parsing`, Python with
 `ast.parse`, and whitespace with `git diff --check`. `source-checks.json` records
-file hashes and actual results. The recorded syntax checks were rerun after
-correcting crowded-window notice priority, including the updated receipt fixture.
+file hashes and actual results. The recorded syntax checks were rerun against the integrated source after
+main synchronization, including the renderer and all files listed in the three
+consistency, Keepers, and Home source-check manifests.
 Syntax checks are not type checking or runtime
 evidence. No application build, CI dispatch, PTY run or installed binary change
 was performed for this slice.

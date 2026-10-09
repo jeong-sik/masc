@@ -4829,7 +4829,7 @@ type runtime_config_reading = {
   rcv_source_text : string;
   rcv_rows : (string * string) list list;
   rcv_metadata : Masc_tui_runtime_config_view.metadata;
-  rcv_account_emails : ((string * string) list * int, string) result;
+  rcv_account_emails : (Masc_tui_account_login.account_emails, string) result;
 }
 
 type runtime_config_edit_view = Config_edit_draft | Config_edit_current of (string * string) list list

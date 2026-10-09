@@ -23,7 +23,7 @@ type metadata = {
 }
 type reading = { path : string; source_text : string; metadata : metadata;
   account_groups : (string list list, string) result;
-  account_emails : ((string * string) list * int, string) result }
+  account_emails : (Masc_tui_account_login.account_emails, string) result }
 type tone = Neutral | Good | Warning | Bad
 
 let ( let* ) = Result.bind
@@ -130,7 +130,7 @@ let decode json =
   in
   let account_emails =
     let* rows = field "account_emails" json in
-    Masc_tui_account_login.emails_of_document (`Assoc ["account_emails", rows])
+    Ok (Masc_tui_account_login.account_emails_of_document (`Assoc ["account_emails", rows]))
   in
   Ok { path; source_text; account_groups; account_emails; metadata = {
     source_revision; validation; routing; routing_requires_restart; keeper; keeper_requires_restart;

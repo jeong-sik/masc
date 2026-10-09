@@ -80,13 +80,20 @@ let test_source_account_emails () =
     "state", `String "read"; "email", `String "source-b@example.org"] in
   let read rows = fixture () |> replace "account_emails" rows |> decode |> success in
   expect "email belongs to the source response"
-    ((read (`List [email])).account_emails = Ok (["codex_a", "source-b@example.org"], 0));
+    ((read (`List [email])).account_emails = Ok (Masc_tui_account_login.Email_rows {rows=["codex_a", Email "source-b@example.org"]; unattributed=0}));
   expect "missing email evidence stays failed"
     (Result.is_error (success (decode (fixture ()))).account_emails);
-  List.iter (fun rows -> expect "unavailable email evidence stays failed"
-    (Result.is_error (read rows).account_emails)) [`Null; `String "bad"];
+  List.iter (fun rows -> expect "unavailable email evidence stays unrecognized"
+    ((read rows).account_emails = Ok Masc_tui_account_login.Email_list_unrecognized)) [`Null; `String "bad"];
   expect "malformed rows preserve partial evidence"
-    ((read (`List [email; `Null])).account_emails = Ok (["codex_a", "source-b@example.org"], 1))
+    ((read (`List [email; `Null])).account_emails = Ok (Masc_tui_account_login.Email_rows {rows=["codex_a", Email "source-b@example.org"]; unattributed=1}));
+  let unavailable = `Assoc ["integration_id", `String "codex_b";
+    "state", `String "not_read"; "cause", `String "source_unavailable"] in
+  expect "source decoder retains typed provider failure beside successful email"
+    ((read (`List [email; unavailable])).account_emails =
+      Ok (Masc_tui_account_login.Email_rows {
+        rows=["codex_a", Email "source-b@example.org";
+              "codex_b", Not_read Login_file_unreadable]; unattributed=0}))
 
 let () = List.iter (fun (name, test) -> test (); Printf.printf "PASS %s\n%!" name)
   ["source-owned account email evidence", test_source_account_emails;

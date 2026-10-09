@@ -5167,11 +5167,29 @@ let models_account_reading ~provider = function
 (* Read from the same published source observation as Models rows. Usage's
    loaded-runtime observation is deliberately not an input to this join. *)
 let models_source_account_reading ~provider reading =
-  let emails = match reading with
-    | None -> Account_emails_unread
-    | Some reading ->
-      match reading.rcv_account_emails with
-      | Ok (emails, unreadable_rows) -> Account_emails_read { emails; unreadable_rows }
-      | Error detail -> Account_emails_failed detail
-  in
-  models_account_reading ~provider emails
+  let open Masc_tui_account_login in
+  match reading with
+  | None -> models_account_reading ~provider Account_emails_unread
+  | Some reading ->
+    match reading.rcv_account_emails with
+    | Error detail -> models_account_reading ~provider (Account_emails_failed detail)
+    | Ok Email_list_unrecognized ->
+        models_account_reading ~provider
+          (Account_emails_failed "the response carries no readable account email list")
+    | Ok (Email_rows {rows; unattributed}) ->
+        let unreadable_rows = unattributed + List.length (List.filter (function
+          | _, Unrecognized -> true
+          | _, (Email _ | Not_read _) -> false) rows) in
+        let emails = List.filter_map (function
+          | id, Email email -> Some (id, email)
+          | _, (Not_read _ | Unrecognized) -> None) rows in
+        let email, notes = models_account_reading ~provider
+          (Account_emails_read {emails; unreadable_rows}) in
+        let gap = match List.assoc_opt provider rows with
+          | Some (Not_read Login_file_unreadable) -> Some "Account email unread: login file unavailable"
+          | Some (Not_read Login_file_unrecognized) -> Some "Account email unread: unrecognized login file"
+          | Some (Not_read Email_not_displayable) -> Some "Account email unread: invalid email"
+          | Some (Not_read Email_not_reported) -> Some "Account email: not reported by the client"
+          | Some (Not_read Environment_credential) -> Some "Account email: environment credential"
+          | Some (Email _ | Unrecognized) | None -> None in
+        email, (match gap with Some note -> note :: notes | None -> notes)

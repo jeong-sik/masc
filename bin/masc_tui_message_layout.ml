@@ -1740,7 +1740,10 @@ let origin_gutter ~origin ~previous ~inner_width entry =
   | Origin_row -> None
   | Origin_bare ->
       let mark =
-        if continues_previous ~previous entry then " "
+        if continues_previous ~previous entry then
+          (match entry.style with
+           | User | Inbound | Keeper | Tool -> " "
+           | Error | Status | Journal | Local | Skill _ | Thinking -> continued_mark entry.style)
         else match entry.style with
           | Tool -> " "
           | User -> "›"
@@ -1926,12 +1929,12 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
         wrap_words ~max_cells:body_width span @ body_chunks
     | _ -> body_chunks
   in
-  let body_chunks =
-    match origin, entry.style with
+  let sender_chunks = match origin, entry.style with
     | Origin_bare, Inbound when not (continues_previous ~previous entry) ->
-        wrap_words ~max_cells:body_width entry.speaker @ body_chunks
-    | _ -> body_chunks
-  in
+        wrap_words ~max_cells:body_width entry.speaker
+    | _ -> [] in
+  let sender_rows = List.length sender_chunks in
+  let body_chunks = sender_chunks @ body_chunks in
   let body_rows =
     let margin, rail_cells, label_at, clock_cells =
       Option.value gutter ~default:("", 0, 0, 0)
@@ -1970,7 +1973,9 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
     body_chunks
     |> List.mapi (fun index chunk ->
       { style = entry.style
-      ; kind = Body
+      ; kind = (if index < sender_rows then
+          Metadata (Origin {clock=None; speaker=entry.speaker; role_label=entry.role_label})
+          else Body)
       ; shade = shade_of_style entry.style
       ; text = "  " ^ chunk
       (* The indent sits after the rail: the rail's join belongs on the

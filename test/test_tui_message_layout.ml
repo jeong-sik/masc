@@ -347,6 +347,15 @@ let test_live_edge_collapses_repeated_wrapped_tail_rows () =
        scrolled)
 ;;
 
+let test_bare_alert_continuations_keep_marks () =
+  let first = entry Layout.Error "ERR" "same-request" "first error" in
+  let second = entry Layout.Error "ERR" "same-request" "second error" in
+  let rows = Layout.visible_rows ~origin:Layout.Origin_bare ~inner_width:40 ~height:20 [first;second] in
+  let first_row = List.find (fun (row : Layout.row) -> holds row.text "first error") rows in
+  let second_row = List.find (fun (row : Layout.row) -> holds row.text "second error") rows in
+  check string "continued error keeps its structural mark" first_row.gutter second_row.gutter
+;;
+
 let test_oversized_entry_small_height_policy () =
   let newest =
     entry Layout.Keeper "keeper.one" "tui-..cccccccc" (String.make 160 'x')
@@ -391,6 +400,9 @@ let test_oversized_entry_small_height_policy () =
               check string "bare clipping preserves message identity" mark first.gutter;
               check string "bare clipping preserves the opening or inbound sender"
                 opening first.text;
+              if style = Layout.Inbound && height = 4 then
+                check bool "four rows retain inbound body opening after sender" true
+                  (List.exists (fun (row : Layout.row) -> row.text = "  opening") visible);
               check string "bare clipping preserves the actual latest output"
                 "  latest" latest.text;
               check bool "bare clipping states the omitted middle" true
@@ -3103,7 +3115,7 @@ let () =
             test_row_mode_keeps_the_heading_opening_and_latest_output
         ; test_case "live edge collapses repeated wrapped tail rows" `Quick
             test_live_edge_collapses_repeated_wrapped_tail_rows
-        ; test_case "oversized entry has an explicit small-height policy" `Quick
+        ; test_case "bare alert continuations keep typed marks" `Quick test_bare_alert_continuations_keep_marks; test_case "oversized entry has an explicit small-height policy" `Quick
             test_oversized_entry_small_height_policy
         ; test_case "scrolling shows transcript rows without synthetic gaps" `Quick
             test_scrolling_into_an_oversized_entry_shows_transcript_rows_only

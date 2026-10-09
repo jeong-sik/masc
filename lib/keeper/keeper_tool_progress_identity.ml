@@ -280,9 +280,27 @@ type history_pair = Io_memo.key =
    of one keeper each read a finished table and the later publication wins,
    with the same answers. *)
 module History_memo = struct
-  type t = io_fingerprints option Io_memo.Table.t Atomic.t
+  type ledger_call =
+    { position : Keeper_tool_call_index.position
+    ; tool_use_id : string option
+    ; tool_name : string
+    ; fingerprints : io_fingerprints
+    }
+  type ledger_seed =
+    { ledger_dir : string
+    ; judged : Keeper_tool_call_index.frontier
+    ; through : Keeper_tool_call_index.frontier
+    ; calls : ledger_call list
+    }
+  type t =
+    { digests : io_fingerprints option Io_memo.Table.t Atomic.t
+    ; ledger : ledger_seed option Atomic.t
+    }
 
-  let create () : t = Atomic.make (Io_memo.Table.create 0)
+  let create () : t =
+    { digests = Atomic.make (Io_memo.Table.create 0); ledger = Atomic.make None }
+  let ledger_seed memo = Atomic.get memo.ledger
+  let hold_ledger_seed memo seed = Atomic.set memo.ledger (Some seed)
 end
 
 let history_memos : (string * string, History_memo.t) Hashtbl.t = Hashtbl.create 16
@@ -299,7 +317,7 @@ let history_memo ~base_path ~keeper_name =
 ;;
 
 let digest_history_pairs (memo : History_memo.t) pairs =
-  let previous = Atomic.get memo in
+  let previous = Atomic.get memo.History_memo.digests in
   let next = Io_memo.Table.create (List.length pairs) in
   let answers =
     List.map
@@ -317,7 +335,7 @@ let digest_history_pairs (memo : History_memo.t) pairs =
          answer)
       pairs
   in
-  Atomic.set memo next;
+  Atomic.set memo.History_memo.digests next;
   answers
 ;;
 

@@ -240,6 +240,10 @@ let host_entry : Record.entry =
   { pid = 4242; started_at = 1_791_000_000.; bidi_url = bidi_address; client_id = host_client
   ; attached_at = Some 1_791_000_002.; unacknowledged = []; ended = None }
 
+(* Notes [n] more results than the record keeps, so a test can land exactly on
+   the record's limit and then step one past it. *)
+let repeat_note held n = for _ = 1 to n do written (Record.note_unacknowledged held unacknowledged) done
+
 (* An observation as a caller holds it, for what no workspace on disk and no
    server in this process can be made to say. *)
 let observation ?(base_path = "/workspace") ?(launcher = Launcher.Follows_workspace)
@@ -388,6 +392,31 @@ let a_bidi_host_that_ended_says_why_and_what_comes_first () =
   says two
     [ "lists 2 results the host holds no acknowledgement for, and for each whether the server \
        refused it, the host could not send it, or no acknowledgement came." ];
+  (* A short snapshot makes no inference about earlier archived results. *)
+  lacks (bidi_message one)
+    [ "snapshot window"; "Archived result metadata" ];
+  lacks (bidi_message two) [ "snapshot window" ];
+  released held
+
+(* At the limit, earlier history is unknown. A valid longer record retains
+   all listed results; the reader must not pretend it was already trimmed. *)
+let a_record_at_the_limit_says_the_newest_are_kept () =
+  browser_lane_fixture ~connection_port:"64850" () @@ fun base ->
+  let held = take_record base in
+  written (Record.attached held ~now:1_791_000_002.);
+  repeat_note held Record.unacknowledged_limit;
+  let observed = Onboarding_status.inspect ~base_path:(Some base) in
+  says observed
+    [ "lists 64 results the host holds no acknowledgement for"
+    ; "at the 64-result snapshot window; it may omit older results"
+    ; "this count does not establish whether archival succeeded" ];
+  let longer = { host_entry with unacknowledged = List.init 65 (fun _ -> unacknowledged) } in
+  let json = Record.entry_to_json longer in
+  let decoded = match Record.entry_of_json json with
+    | Ok record -> record | Error detail -> fail detail in
+  let message = Status.message (observation (Record.Running decoded)) in
+  has message [ "lists 65 results"; "All 65 listed results remain in the record" ];
+  lacks message [ "keeps the newest 64"; "older than those has already left" ];
   released held
 
 (* A host that never reached Firefox left no session there, and what kept it
@@ -814,6 +843,8 @@ let () = run "Onboarding observations"
                    a_launcher_that_cannot_be_run_as_it_is_is_installed_first;
                  test_case "a BiDi host that ended says why and what comes first" `Quick
                    a_bidi_host_that_ended_says_why_and_what_comes_first;
+                 test_case "a record at the limit says the newest are kept" `Quick
+                   a_record_at_the_limit_says_the_newest_are_kept;
                  test_case "a BiDi host that never got a session says what the next one needs" `Quick
                    a_bidi_host_that_never_got_a_session_says_what_the_next_one_needs;
                  test_case "a BiDi host that died says the session may be left" `Quick

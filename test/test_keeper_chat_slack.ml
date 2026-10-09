@@ -282,8 +282,8 @@ let test_adapter_streams_one_edited_reply () =
         fail "successful streaming reply must not be deleted")
       [ Masc.Keeper_chat_events.Run_started
           { run_id = "run-stream"; thread_id = "thread-stream" }
-      ; Masc.Keeper_chat_events.Text_delta "hello "
-      ; Masc.Keeper_chat_events.Text_delta "world "
+      ; Masc.Keeper_chat_events.Text_delta {text="hello "; stream_scope=None}
+      ; Masc.Keeper_chat_events.Text_delta {text="world "; stream_scope=None}
       ; Masc.Keeper_chat_events.Text_message_end
       ; Masc.Keeper_chat_events.Run_finished { run_id = "run-stream" }
       ]
@@ -319,7 +319,7 @@ let test_adapter_stream_error_edits_accepted_reply () =
         fail "failed run must not delete its error reply")
       [ Masc.Keeper_chat_events.Run_started
           { run_id = "run-error"; thread_id = "thread-error" }
-      ; Masc.Keeper_chat_events.Text_delta "partial "
+      ; Masc.Keeper_chat_events.Text_delta {text="partial "; stream_scope=None}
       ; Masc.Keeper_chat_events.Event_error { message = "tool failed" }
       ]
       ~send_plain:(fun ~content:_ ->
@@ -339,7 +339,7 @@ let test_adapter_terminal_success_once () =
     run_adapter
       [ Masc.Keeper_chat_events.Run_started
           { run_id = "run-1"; thread_id = "thread-1" }
-      ; Masc.Keeper_chat_events.Text_delta "done"
+      ; Masc.Keeper_chat_events.Text_delta {text="done"; stream_scope=None}
       ; Masc.Keeper_chat_events.Run_finished { run_id = "run-1" }
       ]
       ~send_plain:(fun ~content ->
@@ -360,7 +360,7 @@ let test_runtime_attempt_discards_unfinished_text_and_keeps_tool_trail () =
     run_adapter
       [ Masc.Keeper_chat_events.Run_started
           { run_id = "run-retry"; thread_id = "thread-retry" }
-      ; Masc.Keeper_chat_events.Text_delta "stale"
+      ; Masc.Keeper_chat_events.Text_delta {text="stale"; stream_scope=None}
       ; Masc.Keeper_chat_events.Tool_call_start
           { occurrence =
               { stream_scope = 0; provider_message_id = None; block_index = 0 }
@@ -369,7 +369,7 @@ let test_runtime_attempt_discards_unfinished_text_and_keeps_tool_trail () =
           }
       ; Masc.Keeper_chat_events.Agent_core_runtime_attempt_started
           { runtime_id = Some "claude-3-7-sonnet"; attempt_index = Some 1 }
-      ; Masc.Keeper_chat_events.Text_delta "fresh"
+      ; Masc.Keeper_chat_events.Text_delta {text="fresh"; stream_scope=None}
       ; Masc.Keeper_chat_events.Run_finished { run_id = "run-retry" }
       ]
       ~send_plain:(fun ~content:_ -> fail "terminal reply uses block delivery")
@@ -399,7 +399,7 @@ let test_protocol_diagnostic_cannot_mask_final_failure () =
   let outcomes =
     run_adapter
       [ Masc.Keeper_chat_events.Agent_core_stream_protocol_error protocol_error
-      ; Masc.Keeper_chat_events.Text_delta "final"
+      ; Masc.Keeper_chat_events.Text_delta {text="final"; stream_scope=None}
       ; Masc.Keeper_chat_events.Run_finished { run_id = "run-2" }
       ]
       ~send_plain:(fun ~content:_ -> Ok ())
@@ -417,10 +417,10 @@ let test_a_settled_adapter_delivers_nothing_the_turn_publishes_after_it () =
     run_adapter
       [ Masc.Keeper_chat_events.Run_started
           { run_id = "run-late"; thread_id = "thread-late" }
-      ; Masc.Keeper_chat_events.Text_delta "final answer"
+      ; Masc.Keeper_chat_events.Text_delta {text="final answer"; stream_scope=None}
       ; Masc.Keeper_chat_events.Text_message_end
       ; Masc.Keeper_chat_events.Run_finished { run_id = "run-late" }
-      ; Masc.Keeper_chat_events.Text_delta "published after the terminal"
+      ; Masc.Keeper_chat_events.Text_delta {text="published after the terminal"; stream_scope=None}
       ; Masc.Keeper_chat_events.Event_error
           { message = "published after the terminal" }
       ]
@@ -451,13 +451,13 @@ let test_publisher_is_not_wedged_behind_the_settled_adapter () =
     List.iter (Masc.Keeper_chat_events.publish stream)
       [ Masc.Keeper_chat_events.Run_started
           { run_id = "run-wedge"; thread_id = "thread-wedge" }
-      ; Masc.Keeper_chat_events.Text_delta "final answer"
+      ; Masc.Keeper_chat_events.Text_delta {text="final answer"; stream_scope=None}
       ; Masc.Keeper_chat_events.Text_message_end
       ; Masc.Keeper_chat_events.Run_finished { run_id = "run-wedge" }
       ];
     for _ = 1 to events_past_the_terminal do
       Masc.Keeper_chat_events.publish stream
-        (Masc.Keeper_chat_events.Text_delta "published after the terminal")
+        (Masc.Keeper_chat_events.Text_delta {text="published after the terminal"; stream_scope=None})
     done;
     Masc.Keeper_chat_events.close stream;
     publisher_finished := true;
@@ -483,7 +483,7 @@ let test_adapter_settles_when_the_bus_closes_without_a_terminal () =
     run_adapter
       [ Masc.Keeper_chat_events.Run_started
           { run_id = "run-cut"; thread_id = "thread-cut" }
-      ; Masc.Keeper_chat_events.Text_delta "half an "
+      ; Masc.Keeper_chat_events.Text_delta {text="half an "; stream_scope=None}
       ]
       ~send_plain:(fun ~content:_ -> fail "no terminal event, no send")
       ~send_blocks:(fun ~content:_ ~blocks:_ -> fail "no terminal event, no send")
@@ -546,7 +546,7 @@ let test_completed_external_effect_deletes_streamed_draft () =
       ~delete_stream:(fun ~message_id ->
         deleted := message_id :: !deleted;
         Ok ())
-      [ Masc.Keeper_chat_events.Text_delta "partial "
+      [ Masc.Keeper_chat_events.Text_delta {text="partial "; stream_scope=None}
       ; Masc.Keeper_chat_events.External_effect_completed
           { target =
               Masc.Keeper_surface_post.Delivered_to_slack
@@ -582,8 +582,8 @@ let test_terminal_edit_waits_for_slack_interval () =
         Ok ())
       ~delete_stream:(fun ~message_id:_ ->
         fail "successful streaming reply must not be deleted")
-      [ Masc.Keeper_chat_events.Text_delta "hello "
-      ; Masc.Keeper_chat_events.Text_delta "world"
+      [ Masc.Keeper_chat_events.Text_delta {text="hello "; stream_scope=None}
+      ; Masc.Keeper_chat_events.Text_delta {text="world"; stream_scope=None}
       ; Masc.Keeper_chat_events.Text_message_end
       ; Masc.Keeper_chat_events.Run_finished { run_id = "run-paced" }
       ]
@@ -610,7 +610,7 @@ let test_adapter_external_effect_status_is_terminal_success () =
     run_adapter
       [ Masc.Keeper_chat_events.Run_started
           { run_id = "run-status"; thread_id = "thread-status" }
-      ; Masc.Keeper_chat_events.Text_delta "assistant preface that must not survive"
+      ; Masc.Keeper_chat_events.Text_delta {text="assistant preface that must not survive"; stream_scope=None}
       ; Masc.Keeper_chat_events.Status_block
           { kind = Masc.Keeper_chat_blocks.Awaiting_gate_approval }
       ; Masc.Keeper_chat_events.Run_finished { run_id = "run-status" }
@@ -682,7 +682,7 @@ let test_native_activity_failure_does_not_affect_delivery () =
               { stream_scope = 0; provider_message_id = None; block_index = 0 }
           ; tool_call_id = Some "call-activity"
           }
-      ; Masc.Keeper_chat_events.Text_delta "final"
+      ; Masc.Keeper_chat_events.Text_delta {text="final"; stream_scope=None}
       ; Masc.Keeper_chat_events.Run_finished { run_id = "run-activity" }
       ]
       ~send_plain:(fun ~content:_ -> fail "final reply uses blocks sender")
@@ -765,10 +765,10 @@ let test_failed_stream_edit_rearms_the_throttle () =
         fail "a rate-limited reply must not be deleted")
       [ Masc.Keeper_chat_events.Run_started
           { run_id = "run-throttle"; thread_id = "thread-throttle" }
-      ; Masc.Keeper_chat_events.Text_delta "a "
-      ; Masc.Keeper_chat_events.Text_delta "b "
-      ; Masc.Keeper_chat_events.Text_delta "c "
-      ; Masc.Keeper_chat_events.Text_delta "d "
+      ; Masc.Keeper_chat_events.Text_delta {text="a "; stream_scope=None}
+      ; Masc.Keeper_chat_events.Text_delta {text="b "; stream_scope=None}
+      ; Masc.Keeper_chat_events.Text_delta {text="c "; stream_scope=None}
+      ; Masc.Keeper_chat_events.Text_delta {text="d "; stream_scope=None}
       ; Masc.Keeper_chat_events.Run_finished { run_id = "run-throttle" }
       ]
       ~send_plain:(fun ~content:_ ->
@@ -799,10 +799,10 @@ let test_checkpoint_status_keeps_the_accumulated_stream_text () =
         fail "a checkpointed reply must not be deleted")
       [ Masc.Keeper_chat_events.Run_started
           { run_id = "run-ckpt"; thread_id = "thread-ckpt" }
-      ; Masc.Keeper_chat_events.Text_delta "hello "
+      ; Masc.Keeper_chat_events.Text_delta {text="hello "; stream_scope=None}
       ; Masc.Keeper_chat_events.Status_block
           { kind = Masc.Keeper_chat_blocks.Continuation_checkpoint }
-      ; Masc.Keeper_chat_events.Text_delta "world "
+      ; Masc.Keeper_chat_events.Text_delta {text="world "; stream_scope=None}
       ; Masc.Keeper_chat_events.Run_finished { run_id = "run-ckpt" }
       ]
       ~send_plain:(fun ~content:_ ->
@@ -841,9 +841,9 @@ let test_unknown_outcome_post_retries_once_then_degrades () =
         fail "without a message id there is nothing to delete")
       [ Masc.Keeper_chat_events.Run_started
           { run_id = "run-post"; thread_id = "thread-post" }
-      ; Masc.Keeper_chat_events.Text_delta "a "
-      ; Masc.Keeper_chat_events.Text_delta "b "
-      ; Masc.Keeper_chat_events.Text_delta "c "
+      ; Masc.Keeper_chat_events.Text_delta {text="a "; stream_scope=None}
+      ; Masc.Keeper_chat_events.Text_delta {text="b "; stream_scope=None}
+      ; Masc.Keeper_chat_events.Text_delta {text="c "; stream_scope=None}
       ; Masc.Keeper_chat_events.Run_finished { run_id = "run-post" }
       ]
       ~send_plain:(fun ~content:_ ->

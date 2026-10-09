@@ -77,7 +77,7 @@ let credential_departure ~transaction ~(config : Workspace.config) ~now holder =
      | Self_declared | Unreadable _ -> None)
 ;;
 
-let holder_left ~transaction ~(config : Workspace.config) ~now holder =
+let keeper_or_credential_left ~transaction ~(config : Workspace.config) ~now holder =
   match Keeper_registry.get_phase ~base_path:config.base_path holder with
   | Some (Paused | Stopped) -> Some Tool_misc_dos_lane.Keeper_stopped
   | Some (Running | Failing | Draining | Restarting | Crashed | Offline) -> None
@@ -88,18 +88,114 @@ let holder_left ~transaction ~(config : Workspace.config) ~now holder =
      | Error _ -> None)
 ;;
 
+let holder_left ~transaction ~(config : Workspace.config) ~now holder =
+  match keeper_or_credential_left ~transaction ~config ~now holder with
+  | Some _ as departure -> departure
+  | None ->
+    match auth_mode ~config with
+    | Self_declared | Unreadable _ -> None
+    | Enforced ->
+      (match Play_participation.current ~transaction ~base_path:config.base_path ~name:holder with
+       | Ok Departed -> Some Tool_misc_dos_lane.Participant_departed
+       | Ok Connected -> None
+       | Error detail ->
+         Log.Auth.warn "DOS controller participation cannot be read: %s" detail;
+         None)
+;;
+
+type participation_error = Credential_changed | Not_a_seat | Participation_unavailable of string
+
+let set_participation ~config ~who ~token participation =
+  let unavailable detail = Participation_unavailable detail in
+  let result = Tool_misc_dos_lane.with_deferred_announcements (fun announce ->
+    Auth.with_credential_transaction config.Workspace.base_path (fun transaction ->
+      let ( let* ) = Result.bind in
+      let* current = Auth.current_credential_in_transaction transaction who
+        |> Result.map_error (fun error -> unavailable (Masc_domain.masc_error_to_string error)) in
+      let* credential = match current with
+        | Some credential when String.equal credential.Masc_domain.token
+            Digestif.SHA256.(digest_string token |> to_hex)
+            && Masc_domain.has_permission credential.role Masc_domain.CanPlayMachine ->
+          (match Play_invite.expired ~now:(Time_compat.now ()) credential with
+           | Ok false -> Ok credential
+           | Ok true | Error _ -> Error Credential_changed)
+        | Some _ | None -> Error Credential_changed in
+      (* Only a seat has a play session. A Worker departure would release its
+         Keeper's controller while Play_participation.current never reads it. *)
+      let* () = match credential.role with
+        | Masc_domain.Worker -> Error Not_a_seat
+        | Masc_domain.Admin | Masc_domain.Player -> Ok () in
+      (* Do not overwrite an unreadable state with an apparently fresh session. *)
+      let* _ = Play_participation.read ~transaction ~base_path:config.base_path credential
+        |> Result.map_error unavailable in
+      let* () = Play_participation.write ~transaction ~base_path:config.base_path credential participation
+        |> Result.map_error unavailable in
+      match participation with
+      | Connected -> Ok ()
+      | Departed ->
+        (match Tool_misc_dos_lane.off_domain (fun () ->
+            Dos_lane.release_left ~holder:who ~announce:(announce ~author:who
+              (Tool_misc_dos_lane.departure_notice who Tool_misc_dos_lane.Participant_departed))) with
+         | Ok (true | false) | Error Dos_lane.No_machine -> Ok ()
+         | Error error -> Error (unavailable (Dos_lane.error_to_string error))))
+    |> Result.map_error (fun error -> unavailable (Masc_domain.masc_error_to_string error))
+    |> Result.join) in
+  Tool_misc_dos_lane.after_announcing result
+;;
+
 let recover_in_transaction ?announce ~transaction ~config ~who () =
   let now = Time_compat.now () in
   Tool_misc_dos_lane.free_left_controller ?announce ~holder_left:(holder_left ~transaction ~config ~now) ~who ()
 ;;
 
+let participation_admission ~transaction ~(config : Workspace.config) ~who =
+  match auth_mode ~config with
+  | Self_declared -> Ok ()
+  | Unreadable detail -> Error (Masc_domain.System (Masc_domain.System_error.IoError detail))
+  | Enforced ->
+    (match Play_participation.current ~transaction ~base_path:config.base_path ~name:who with
+     | Ok Connected -> Ok ()
+     | Ok Departed -> Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden
+         {agent = who; action = "DOS input after disconnect; reconnect the play session first"}))
+     | Error detail -> Error (Masc_domain.System (Masc_domain.System_error.IoError detail)))
+;;
+
 let before_move ~config ~who =
   let released = Tool_misc_dos_lane.with_deferred_announcements (fun announce ->
     Auth.with_credential_transaction config.Workspace.base_path (fun transaction ->
-      recover_in_transaction ~announce ~transaction ~config ~who ()))
+      let admission = participation_admission ~transaction ~config ~who in
+      Result.map (fun () -> recover_in_transaction ~announce ~transaction ~config ~who ()) admission))
+    |> Result.join
   in
   (* Board publication must never run while credential writers are excluded. *)
   Tool_misc_dos_lane.after_announcing released
+;;
+
+type call_refusal =
+  | Refused of string
+  | Seats_unknown of string
+
+(* Keep the credential admission through the machine effect itself.  A
+   separate [before_move] followed by a lane call leaves a window in which a
+   concurrent play-session disconnect can mark the generation departed and
+   release its controller before the already-admitted caller reaches
+   [Dos_lane.with_control]. *)
+let with_move_admission ~config ~who ~run =
+  let recover_error error =
+    match error with
+    | Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _) ->
+        Refused (Masc_domain.masc_error_to_string error)
+    | _ -> Seats_unknown ("cannot recover the DOS controller: " ^ Masc_domain.masc_error_to_string error) in
+  let result = Tool_misc_dos_lane.with_deferred_announcements (fun announce ->
+    Auth.with_credential_transaction config.Workspace.base_path (fun transaction ->
+      let ( let* ) = Result.bind in
+      let* () = participation_admission ~transaction ~config ~who
+        |> Result.map_error recover_error in
+      recover_in_transaction ~announce ~transaction ~config ~who ();
+      Ok (run ()))
+    |> Result.map_error recover_error
+    |> Result.join) in
+  Tool_misc_dos_lane.after_announcing result
 ;;
 
 let release_retired ~keeper_name ~by =
@@ -111,10 +207,6 @@ let release_retired ~keeper_name ~by =
        | Dos_lane.Other_program _ ) as err) ->
     Error (Dos_lane.error_to_string err)
 ;;
-
-type call_refusal =
-  | Refused of string
-  | Seats_unknown of string
 
 (* A pass to a name nobody sits under leaves the machine held by no one who
    can move it, so it is refused before anything happens. The name is read
@@ -148,14 +240,31 @@ let refusal_result ~tool_name = function
       ~start_time:(Tool_timing.start ()) message
 ;;
 
-let execute ~config ~who ~name ~args ~run =
+let execute ~config ~who ~name ~args
+    ~(run : ?dos_admission:((unit -> Tool_result.result) -> Tool_result.result) -> unit -> Tool_result.result option) =
   let recover_error error =
-    Seats_unknown ("cannot recover the DOS controller: " ^ Masc_domain.masc_error_to_string error) in
+    match error with
+    | Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _) ->
+        Refused (Masc_domain.masc_error_to_string error)
+    | _ -> Seats_unknown ("cannot recover the DOS controller: " ^ Masc_domain.masc_error_to_string error) in
   let operation = Tool_schemas_misc.misc_operation_of_tool_name name in
   match operation with
+  | Some (Tool_schemas_misc.Misc_dos_load | Tool_schemas_misc.Misc_dos_restore) ->
+    (* Dispatch still owns tool validation and preparation. Only its prepared
+       lane effect enters the credential transaction. Preserve typed refusal
+       at this outer service boundary as well as the tool answer. *)
+    let refusal = ref None in
+    let dos_admission perform =
+      match with_move_admission ~config ~who ~run:perform with
+      | Ok result -> result
+      | Error reason -> refusal := Some reason; refusal_result ~tool_name:name reason in
+    let result = run ~dos_admission () in
+    (match !refusal with None -> Ok result | Some reason -> Error reason)
   | Some Tool_schemas_misc.Misc_dos_pass ->
     let result = Tool_misc_dos_lane.with_deferred_announcements (fun announce ->
       Auth.with_credential_transaction config.Workspace.base_path (fun transaction ->
+      let ( let* ) = Result.bind in
+      let* () = participation_admission ~transaction ~config ~who |> Result.map_error recover_error in
       match pass_refusal ~transaction ~config args with
       | Some refusal -> Error refusal
       | None ->
@@ -165,9 +274,9 @@ let execute ~config ~who ~name ~args ~run =
       |> Result.map_error recover_error |> Result.join in
     Tool_misc_dos_lane.after_announcing result
   | Some _ | None ->
-    let recovered = match Option.map Tool_schemas_misc.dos_controller_need operation with
-      | Some Tool_schemas_misc.Takes_controller -> before_move ~config ~who |> Result.map_error recover_error
-      | Some Tool_schemas_misc.Hands_controller -> Error (Refused "unsupported DOS handoff operation")
-      | Some Tool_schemas_misc.No_controller | None -> Ok () in
-    Result.map (fun () -> run ()) recovered
+    (match Option.map Tool_schemas_misc.dos_controller_need operation with
+     | Some Tool_schemas_misc.Takes_controller ->
+       with_move_admission ~config ~who ~run:(fun () -> run ())
+     | Some Tool_schemas_misc.Hands_controller -> Error (Refused "unsupported DOS handoff operation")
+     | Some Tool_schemas_misc.No_controller | None -> Ok (run ()))
 ;;

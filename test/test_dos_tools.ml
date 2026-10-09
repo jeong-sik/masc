@@ -1119,6 +1119,7 @@ let test_a_holder_departs_with_its_credential () =
       | Some Tool_misc_dos_lane.Keeper_stopped -> "keeper stopped"
       | Some Tool_misc_dos_lane.Credential_expired -> "credential expired"
       | Some Tool_misc_dos_lane.No_credential -> "no credential"
+      | Some Tool_misc_dos_lane.Participant_departed -> "participant departed"
     in
     let token name role =
       match Auth.create_token base_path ~agent_name:name ~role with
@@ -1169,7 +1170,7 @@ let test_a_holder_departs_with_its_credential () =
     (match
        Keeper_dos_controller.execute ~config ~who:"minsu" ~name:"masc_dos_pass"
          ~args:(`Assoc [ ("to", `String "operator") ])
-         ~run:(fun () -> fail "unreadable auth must refuse before the supplied operation")
+         ~run:(fun ?dos_admission:_ () -> fail "unreadable auth must refuse before the supplied operation")
      with
      | Error (Keeper_dos_controller.Seats_unknown _) -> ()
      | Error (Keeper_dos_controller.Refused message) ->
@@ -1189,7 +1190,7 @@ let test_a_pass_is_refused_when_the_credentials_do_not_list () =
     match
       Keeper_dos_controller.execute ~config:(Workspace.default_config base_path)
         ~who:"operator" ~name:"masc_dos_pass" ~args:(`Assoc [ ("to", `String "minsu") ])
-        ~run:(fun () -> fail "unlisted credentials must refuse before the supplied operation")
+        ~run:(fun ?dos_admission:_ () -> fail "unlisted credentials must refuse before the supplied operation")
     with
     | Error (Keeper_dos_controller.Seats_unknown _) -> ()
     | Error (Keeper_dos_controller.Refused message) ->
@@ -1828,6 +1829,166 @@ let test_activity_refusal_is_proven_pre_effect () =
     [Machine_configuration.Disabled; Unobserved]
 ;;
 
+let test_prepared_load_rejects_changed_save_snapshot () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    let prepared = match Dos_lane.prepare_load
+        ~ledger_dir:(Tool_misc_dos_lane.dos_dir ~base_path)
+        ~saves_dir:(Tool_misc_dos_lane.saves_dir ~base_path "echo.com")
+        ~checkpoint_dir:(checkpoints_dir ~base_path)
+        ~program_name:"echo.com" ~program_bytes:echo_com ~files:[] with
+      | Ok value -> value | Error error -> fail (Dos_lane.error_to_string error) in
+    ignore (dispatch ~base_path "masc_dos_step" ["steps", `Int 1; "until_ready", `Bool false]);
+    let before = mark () in
+    (match Dos_lane.commit_load ~who:"dos-test" prepared ~announce:ignore with
+     | Error (Dos_lane.Invalid_request _) -> ()
+     | Error error -> fail (Dos_lane.error_to_string error)
+     | Ok _ -> fail "a changed save snapshot was installed");
+    check int "refused preparation leaves current screen unchanged" before.count (mark ()).count)
+;;
+
+let restore_stages ~base_path =
+  let dir = Tool_misc_dos_lane.dos_dir ~base_path in
+  Sys.readdir dir |> Array.to_list
+  |> List.filter (fun name -> String.starts_with ~prefix:".restore-ledger-" name)
+  |> List.map (Filename.concat dir)
+
+let prepare_restore_fixture ~base_path slot =
+  Dos_lane.prepare_restore ~dir:(checkpoints_dir ~base_path) ~slot
+    ~ledger_dir:(Tool_misc_dos_lane.dos_dir ~base_path)
+    ~saves_dir_of:(Tool_misc_dos_lane.saves_dir ~base_path)
+
+let test_restore_stages_before_admission_and_cleans_refusal () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    check bool "fixture writes a nonempty input ledger" true
+      (Tool_result.is_success (dispatch ~base_path "masc_dos_press" ["keys",`List [`String "a"]]));
+    ignore (save_as ~base_path "staged");
+    let ledger = Filename.concat (Tool_misc_dos_lane.dos_dir ~base_path) "ledger.jsonl" in
+    let original = In_channel.with_open_bin ledger In_channel.input_all in
+    check bool "staged fixture ledger has input bytes" true (String.length original > 0);
+    let before = mark () in
+    let admitted = ref false in
+    let result = Tool_misc_dos_lane.handle_restore
+      ~admit_effect:(fun _ ->
+        admitted := true;
+        (match restore_stages ~base_path with
+         | [path] -> check string "full ledger is already staged before credential admission"
+             original (In_channel.with_open_bin path In_channel.input_all)
+         | _ -> fail "expected one owned staging file");
+        Tool_result.make_err ~tool_name:"masc_dos_restore" ~start_time:(Tool_timing.start ())
+          ~class_:Tool_result.Workflow_rejection "fixture admission refused")
+      ~tool_name:"masc_dos_restore" ~start_time:(Tool_timing.start ())
+      ~base_path ~agent_name:"dos-test" (`Assoc ["slot",`String "staged"]) in
+    check bool "preparation reached admission" true !admitted;
+    check bool "refusal returned" false (Tool_result.is_success result);
+    check (list string) "refusal discards staged ledger" [] (restore_stages ~base_path);
+    check string "installed ledger retained" original (In_channel.with_open_bin ledger In_channel.input_all);
+    check int "refusal leaves machine untouched" before.count (mark ()).count)
+;;
+
+let test_restore_preparation_cancellation_cleans_stage () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    ignore (save_as ~base_path "cancelled");
+    let slot = match Machine_checkpoint.slot_of_string "cancelled" with Ok slot -> slot | Error detail -> fail detail in
+    let used = ref false in
+    Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
+      let staged,signal_staged = Eio.Promise.create () in
+      let context,signal_context = Eio.Promise.create () in
+      let mutex = Mutex.create () and condition = Condition.create () in
+      let released = ref false in
+      let release () = Mutex.protect mutex (fun () -> released := true; Condition.broadcast condition) in
+      Fun.protect ~finally:release (fun () ->
+        let finished = Eio.Fiber.fork_promise ~sw (fun () ->
+          try
+            Eio.Cancel.sub (fun cancellation ->
+              Eio.Promise.resolve signal_context cancellation;
+              Tool_misc_dos_lane.with_restore_preparation ~prepare:(fun () ->
+                let result = prepare_restore_fixture ~base_path slot in
+                Eio.Promise.resolve signal_staged ();
+                Mutex.protect mutex (fun () -> while not !released do Condition.wait condition mutex done);
+                result)
+                (fun _ -> used := true));
+            false
+          with Eio.Cancel.Cancelled _ -> true) in
+        let cancellation = Eio.Promise.await context in
+        Eio.Promise.await staged;
+        check int "worker owns staged file before result transfer" 1 (List.length (restore_stages ~base_path));
+        Eio.Cancel.cancel cancellation Exit;
+        release ();
+        check bool "cancellation propagates" true (Eio.Promise.await_exn finished);
+        check bool "cancelled preparation never enters admission" false !used;
+        check (list string) "cancelled worker/caller handoff leaves no stage" [] (restore_stages ~base_path)))))
+;;
+
+let test_prepared_restore_uses_snapshot_and_rechecks_controller () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    ignore (save_as ~base_path "prepared");
+    let slot = match Machine_checkpoint.slot_of_string "prepared" with
+      | Ok slot -> slot | Error detail -> fail detail in
+    let prepared = match Dos_lane.prepare_restore ~dir:(checkpoints_dir ~base_path) ~slot
+        ~ledger_dir:(Tool_misc_dos_lane.dos_dir ~base_path)
+        ~saves_dir_of:(Tool_misc_dos_lane.saves_dir ~base_path) with
+      | Ok value -> value | Error error -> fail (Dos_lane.error_to_string error) in
+    Fun.protect ~finally:(fun () -> Dos_lane.discard_prepared_restore prepared) (fun () ->
+    check int "preparation owns one unique staging file" 1 (List.length (restore_stages ~base_path));
+    write_file (Machine_checkpoint.path ~dir:(checkpoints_dir ~base_path) slot) "replaced after preparation";
+    (match Dos_lane.commit_restore ~who:"other" prepared ~announce:ignore with
+     | Error (Dos_lane.Held_by _) -> ()
+     | Error error -> fail (Dos_lane.error_to_string error)
+     | Ok _ -> fail "prepared restore ignored current controller");
+    (match Dos_lane.commit_restore ~who:"dos-test" prepared ~announce:ignore with
+     | Ok _ -> () | Error error -> fail (Dos_lane.error_to_string error));
+    let after = mark () in
+    (match Dos_lane.commit_restore ~who:"dos-test" prepared ~announce:ignore with
+     | Error (Dos_lane.Invalid_request _) -> ()
+     | Error error -> fail (Dos_lane.error_to_string error)
+     | Ok _ -> fail "prepared mutable guest was installed twice");
+    check int "consumed preparation cannot replace current screen" after.count (mark ()).count;
+    Dos_lane.discard_prepared_restore prepared;
+    Dos_lane.discard_prepared_restore prepared;
+    check (list string) "commit/discard never leaves or removes installed ledger" [] (restore_stages ~base_path);
+    check bool "installed ledger survives repeated cleanup" true
+      (Sys.file_exists (Filename.concat (Tool_misc_dos_lane.dos_dir ~base_path) "ledger.jsonl"))))
+;;
+
+let test_prepared_restore_refuses_a_slot_saved_again () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    ignore (save_as ~base_path "raced");
+    let slot = match Machine_checkpoint.slot_of_string "raced" with
+      | Ok slot -> slot | Error detail -> fail detail in
+    let prepare () = match prepare_restore_fixture ~base_path slot with
+      | Ok value -> value | Error error -> fail (Dos_lane.error_to_string error) in
+    let raced = prepare () in
+    Fun.protect ~finally:(fun () -> Dos_lane.discard_prepared_restore raced) (fun () ->
+      (* A lane save lands on the prepared slot between preparation and commit:
+         installing the older prepared bytes would fit neither serial order. *)
+      check bool "concurrent save of the same slot succeeds" true
+        (Tool_result.is_success (save_as ~base_path "raced"));
+      let before = mark () in
+      (match Dos_lane.commit_restore ~who:"dos-test" raced ~announce:ignore with
+       | Error (Dos_lane.Invalid_request _) -> ()
+       | Error error -> fail (Dos_lane.error_to_string error)
+       | Ok _ -> fail "a restore installed bytes older than its slot");
+      check int "refused restore leaves the current machine" before.count (mark ()).count;
+      check (list string) "refused restore leaves no stage" [] (restore_stages ~base_path));
+    let other = prepare () in
+    Fun.protect ~finally:(fun () -> Dos_lane.discard_prepared_restore other) (fun () ->
+      check bool "a save to another slot succeeds" true
+        (Tool_result.is_success (save_as ~base_path "elsewhere"));
+      match Dos_lane.commit_restore ~who:"dos-test" other ~announce:ignore with
+      | Ok _ -> ()
+      | Error error -> fail ("another slot's save refused the restore: " ^ Dos_lane.error_to_string error)))
+;;
+
 let () =
   run "dos-lane-tools"
     [ ( "tools"
@@ -1897,6 +2058,9 @@ let () =
         ; test_case "peek" `Quick test_peek_reads_the_text_page
         ; test_case "read-only" `Quick test_read_only_classification
         ; test_case "declared" `Quick test_every_tool_is_declared
+        ; test_case "prepared load detects concurrent guest changes" `Quick test_prepared_load_rejects_changed_save_snapshot
+        ; test_case "prepared restore snapshots bytes and rechecks ownership" `Quick test_prepared_restore_uses_snapshot_and_rechecks_controller
+        ; test_case "prepared restore refuses a slot saved again" `Quick test_prepared_restore_refuses_a_slot_saved_again
         ; test_case "checkpoint round trip" `Quick
             test_a_restored_machine_plays_on_as_if_never_stopped
         ; test_case "restore needs the controller" `Quick test_restore_needs_the_controller
@@ -1920,6 +2084,10 @@ let () =
         ; test_case "no machine names the autosave" `Quick
             test_no_machine_names_the_autosave_after_an_eject
         ; test_case "inventory names the autosave" `Quick test_inventory_names_the_autosave
+        ; test_case "restore stages before admission and cleans refusal" `Quick
+            test_restore_stages_before_admission_and_cleans_refusal
+        ; test_case "cancelled restore preparation cleans staged ledger" `Quick
+            test_restore_preparation_cancellation_cleans_stage
         ; test_case "activity refusal is proven pre-effect" `Quick test_activity_refusal_is_proven_pre_effect
         ; test_case "a damaged autosave is named" `Quick test_a_damaged_autosave_is_named_not_hidden
         ] )

@@ -267,7 +267,8 @@ let test_expired_credential_releases_controller_on_next_move role () =
           check bool "the holder has left once that second ends" true
             (match holder_left ~now:(expiry_second +. 1.) with
              | Some Masc.Tool_misc_dos_lane.Credential_expired -> true
-             | Some (Masc.Tool_misc_dos_lane.Keeper_stopped | Masc.Tool_misc_dos_lane.No_credential)
+             | Some (Masc.Tool_misc_dos_lane.Keeper_stopped | Masc.Tool_misc_dos_lane.No_credential
+                    | Masc.Tool_misc_dos_lane.Participant_departed)
              | None -> false);
           Auth.save_credential base_path
             { credential with expires_at = Some "2000-01-01T00:00:00Z" };

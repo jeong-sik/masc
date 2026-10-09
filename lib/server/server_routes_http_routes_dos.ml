@@ -75,7 +75,7 @@ let run_response ~config ~who ~route ~body =
        let ctx : Tool_misc.context =
          { config; agent_name = who; help_schemas = Config.raw_all_tool_schemas } in
        (match Keeper_dos_controller.execute ~config ~who ~name ~args
-           ~run:(fun () -> Tool_misc.dispatch ctx ~name ~args) with
+           ~run:(fun ?dos_admission () -> Tool_misc.dispatch ?dos_admission ctx ~name ~args) with
         | Error (Keeper_dos_controller.Refused message) -> rejected message
         | Error (Keeper_dos_controller.Seats_unknown message) ->
           `Service_unavailable, result_json ~ok:false ~message `Null
@@ -94,19 +94,18 @@ let run_response ~config ~who ~route ~body =
    name was checked when it was read, so there is no body to check against
    the tool's schema. *)
 let press_into ~config ~who ~saves_name ~keys =
-  match Keeper_dos_controller.before_move ~config ~who with
-  | Error error ->
-    `Service_unavailable,
-    result_json ~ok:false ~message:(Masc_domain.masc_error_to_string error) `Null
-  | Ok () ->
-  let result =
-    Tool_misc_dos_lane.press_into ~tool_name:(tool_name Press) ~start_time:(Tool_timing.start ())
-      ~base_path:config.Workspace.base_path ~who ~saves_name ~keys
-  in
-  machine_changed ~config;
-  let ok = Tool_result.is_success result in
-  ( (if ok then `OK else `Bad_request)
-  , result_json ~ok ~message:(Tool_result.message result) (Tool_result.data result) )
+  match Keeper_dos_controller.with_move_admission ~config ~who ~run:(fun () ->
+      Tool_misc_dos_lane.press_into ~tool_name:(tool_name Press) ~start_time:(Tool_timing.start ())
+        ~base_path:config.Workspace.base_path ~who ~saves_name ~keys) with
+  | Error (Keeper_dos_controller.Refused message) ->
+    `Bad_request, result_json ~ok:false ~message `Null
+  | Error (Keeper_dos_controller.Seats_unknown message) ->
+    `Service_unavailable, result_json ~ok:false ~message `Null
+  | Ok result ->
+    machine_changed ~config;
+    let ok = Tool_result.is_success result in
+    ( (if ok then `OK else `Bad_request)
+    , result_json ~ok ~message:(Tool_result.message result) (Tool_result.data result) )
 
 let add_route router route =
   Http.Router.post (path route)

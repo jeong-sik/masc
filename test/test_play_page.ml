@@ -25,7 +25,7 @@ let loopback_request_authority () =
   | Ok authority -> authority
   | Error `Malformed -> fail "failed to construct loopback request authority"
 
-let dispatch_get ~state ~target ~token =
+let dispatch ~body ~state ~target ~token =
   Server_request_authority.with_current (loopback_request_authority ()) (fun () ->
     let router = Guide.add_routes (Page.add_routes (Masc.Http_server_eio.Router.create ())) in
     Server_auth.publish_server_state state;
@@ -34,12 +34,15 @@ let dispatch_get ~state ~target ~token =
       Httpun.Server_connection.create (fun reqd ->
         Masc.Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd)
     in
+    let method_, content_headers, payload = match body with
+      | None -> "GET", "", ""
+      | Some body -> "POST", Printf.sprintf "Content-Type: application/json\r\nContent-Length: %d\r\n" (String.length body), body in
     let request_str =
-      Printf.sprintf "GET %s HTTP/1.1\r\nHost: 127.0.0.1:8935\r\nOrigin: http://127.0.0.1:8935\r\n%s\r\n"
-        target
+      Printf.sprintf "%s %s HTTP/1.1\r\nHost: 127.0.0.1:8935\r\nOrigin: http://127.0.0.1:8935\r\n%s%s\r\n%s"
+        method_ target content_headers
         (match token with
          | Some token -> Printf.sprintf "Authorization: Bearer %s\r\n" token
-         | None -> "")
+         | None -> "") payload
     in
     let bytes = Bigstringaf.of_string ~off:0 ~len:(String.length request_str) request_str in
     ignore (Httpun.Server_connection.read_eof conn bytes ~off:0 ~len:(Bigstringaf.length bytes));
@@ -61,6 +64,8 @@ let dispatch_get ~state ~target ~token =
     flush ();
     Server_auth.clear_server_state ();
     Buffer.contents response_buf)
+
+let dispatch_get ~state ~target ~token = dispatch ~body:None ~state ~target ~token
 
 type h2_reply = { h2_status : int; h2_headers : H2.Headers.t; h2_body : string }
 
@@ -399,6 +404,56 @@ let test_expired_credentials_are_not_seats () =
     check (list string) "live" [ "Alpha"; "minsu"; "operator"; "visiting-operator" ] (seats now);
     check (list string) "two hours on" [ "Alpha"; "operator" ] (seats (now +. (2. *. 3600.))))
 
+let test_explicit_departure_and_same_link_reconnect () =
+  with_dir "play-participation-http-" (fun base_path ->
+    Auth.save_auth_config base_path
+      { Masc_domain.default_auth_config with enabled = true; require_token = true };
+    let token = token_for base_path ~agent_name:"minsu" ~role:Masc_domain.Player in
+    let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+    Eio_main.run (fun env ->
+      Masc_test_deps.init_eio_clock env;
+      let change token body = dispatch ~body:(Some body) ~state ~target:Page.session_path ~token in
+      check int "anonymous departure is forbidden" 401 (status_of (change None {|{"connected":false}|}));
+      check int "unknown session fields are refused" 400
+        (status_of (change (Some token) {|{"connected":false,"who":"operator"}|}));
+      let read () = dispatch_get ~state ~target:Page.seat_path ~token:(Some token)
+        |> split_response |> snd |> Yojson.Safe.from_string in
+      check bool "a fresh invited agent remains connected" true (member "connected" (read ()) = Some (`Bool true));
+      check int "atomic departure" 200 (status_of (change (Some token) {|{"connected":false}|}));
+      let departed = read () in
+      check bool "the reusable bearer can read its departed seat" true (member "connected" departed = Some (`Bool false));
+      check bool "departed identities are not handoff targets" true (member "participants" departed = Some (`List []));
+      check int "the same invitation explicitly reconnects" 200 (status_of (change (Some token) {|{"connected":true}|}));
+      let connected = read () in
+      check bool "reconnect restores eligibility" true (member "participants" connected = Some (`List [`String "minsu"]));
+      check bool "reconnect does not take a controller" true (member "controller" connected = Some `Null)))
+
+let test_ineligible_participation_does_not_hide_active_seats () =
+  with_dir "play-ineligible-participation-" (fun base_path ->
+    Eio_main.run (fun env ->
+      Masc_test_deps.init_eio_clock env;
+      let auth_ok = function
+        | Ok value -> value
+        | Error error -> fail (Masc_domain.masc_error_to_string error) in
+      let _, expired = auth_ok (Auth.create_token_expiring_in base_path
+          ~agent_name:"expired" ~role:Masc_domain.Player ~hours:1) in
+      let expired = { expired with expires_at = Some "2000-01-01T00:00:00Z" } in
+      Auth.save_credential base_path expired;
+      let _, worker = auth_ok (Auth.create_token_without_expiry base_path
+          ~agent_name:"worker" ~role:Masc_domain.Worker) in
+      ignore (auth_ok (Auth.create_token_without_expiry base_path
+          ~agent_name:"active" ~role:Masc_domain.Player));
+      auth_ok (Auth.with_credential_transaction base_path (fun transaction ->
+        List.iter (fun credential ->
+          match Masc.Play_participation.write ~transaction ~base_path credential Connected with
+          | Ok () -> ()
+          | Error detail -> fail detail) [expired; worker]));
+      let directory = Filename.concat (Common.masc_dir_from_base_path ~base_path) "play" in
+      Array.iter (fun file -> Out_channel.with_open_bin (Filename.concat directory file)
+          (fun channel -> output_string channel "malformed")) (Sys.readdir directory);
+      let seats = auth_ok (Masc.Play_seat.participants ~base_path ~keepers:[] ~now:(Unix.gettimeofday ())) in
+      check (list string) "irrelevant damaged state does not block eligible seats" ["active"] seats))
+
 let () =
   run "play-page"
     [ ( "page"
@@ -407,5 +462,7 @@ let () =
         ; test_case "the guide over HTTP/2" `Quick test_the_guide_over_h2
         ; test_case "the seat names the bearer, the holder and the seats" `Quick test_the_seat
         ; test_case "expired invites and operators are not seats" `Quick test_expired_credentials_are_not_seats
+        ; test_case "explicit departure and same-link reconnect over HTTP" `Quick test_explicit_departure_and_same_link_reconnect
+        ; test_case "ineligible damaged participation cannot hide active seats" `Quick test_ineligible_participation_does_not_hide_active_seats
         ] )
     ]

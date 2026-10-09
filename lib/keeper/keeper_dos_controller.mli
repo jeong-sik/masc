@@ -11,12 +11,25 @@ val holder_left :
     its bearer is checked by ({!Play_invite.expired}), only where every request
     must carry a credential. This includes a Worker that took a free controller
     through a direct move, even though Workers are not handoff targets.
+    [Participant_departed]: the current credential generation explicitly left
+    through the play-session endpoint. Its bearer stays valid for reconnect.
     [No_credential]: a name
     that is not a Keeper and has no credential file, only where every request
     must carry a credential (auth enabled, [require_token]). A credential file
     that cannot be read, and a missing one where a request needs no token,
     keep the controller. [transaction] must be the current admission for
     [config]'s workspace; keep it through the resulting controller effect. *)
+
+type participation_error = Credential_changed | Not_a_seat | Participation_unavailable of string
+val set_participation : config:Workspace.config -> who:string -> token:string ->
+  Play_participation.t -> (unit, participation_error) result
+(** Revalidate the exact current credential and expiry under Auth admission.
+    Departure persists ineligibility and releases this holder while retaining
+    the same admission used by incoming handoffs. Reconnection restores
+    eligibility without taking control. Board publication occurs after release
+    of Auth. The bearer remains valid for explicit reconnect. A [Worker]
+    credential is not a seat and is refused with [Not_a_seat] before any
+    record is written or controller released. *)
 
 val before_move :
   config:Workspace.config -> who:string -> (unit, Masc_domain.masc_error) result
@@ -39,17 +52,29 @@ type call_refusal =
   | Refused of string  (** the call cannot run as asked; the caller can fix it *)
   | Seats_unknown of string  (** who sits at the machine could not be read *)
 
+val with_move_admission :
+  config:Workspace.config -> who:string -> run:(unit -> 'a) ->
+  ('a, call_refusal) result
+(** Admit [who] and hold the credential transaction through [run]. This is the
+    atomic boundary for a DOS operation that can acquire the shared
+    controller: a concurrent play-session departure either waits until the
+    operation completes or is committed first and prevents the operation. *)
+
 val execute :
   config:Workspace.config -> who:string -> name:string -> args:Yojson.Safe.t ->
-  run:(unit -> Tool_result.result option) ->
+  run:(?dos_admission:((unit -> Tool_result.result) -> Tool_result.result) ->
+    unit -> Tool_result.result option) ->
   (Tool_result.result option, call_refusal) result
 (** Execute an already authorized misc tool request. Handoff target discovery,
     departed-holder recovery and the actual DOS pass share one Auth admission,
     excluding credential publication and revocation until the effect completes.
     Handoff uses the same DOS implementation as the misc dispatcher; its Board
-    announcements are flushed after Auth release. For other tools, [run] is
-    invoked after any required holder recovery. [None] means no dispatcher
-    handled that other tool. The HTTP body must already have been read.
+    announcements are flushed after Auth release. For a controller-taking
+    operation, [run] is invoked while credential admission remains held through
+    the DOS lane effect. Load and restore instead receive [dos_admission],
+    which the dispatcher must apply only to the prepared lane commit; their
+    inventory and checkpoint preparation run outside the credential transaction. [None] means no dispatcher handled that other tool.
+    The HTTP body must already have been read.
     This does not authenticate [who] or cancel requests authorized earlier. *)
 
 val refusal_result : tool_name:string -> call_refusal -> Tool_result.result

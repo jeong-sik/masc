@@ -7,7 +7,7 @@ The original 2280-line module mixes immutable durable transitions, strict curren
 
 Both private modules belong to the separate masc.keeper_runtime library; they are not modules of the parent masc library. The core interface exposes the immutable state record internally to its wire owner. The unchanged public keeper_event_queue_state.mli keeps t abstract. These source/type-check results do not establish installation visibility; no installation was performed.
 
-Core source is byte-identical to the original prefix after moving the schema constant to wire and normalizing its final newline. Wire source is byte-identical to the original codec block after adding its core import, Result binding and moved schema constant. Schedule projection tail and public interface are byte-identical. No parser policy, field, state transition, storage effect or compatibility reader was added.
+Core source is byte-identical to the original prefix after moving the schema constant and its adjoining blank line to wire and normalizing its final newline. Wire source is byte-identical to the original codec block after adding its core import, Result binding and moved schema constant. Schedule projection tail and public interface are byte-identical. No parser policy, field, state transition, storage effect or compatibility reader was added.
 
 Focused build `opam exec -- dune build test/test_keeper_event_queue_state_v2.exe` completed exit 0. The first build failed because the private modules were registered in the parent library; they were moved to their owning library before successful compilation.
 

@@ -2217,10 +2217,29 @@ let test_a_fusion_block_without_a_post_id_makes_no_row () =
       failf "expected one row, got %d" (List.length other)
 ;;
 
+let test_operation_and_autonomous_sources_keep_typed_tool_blocks () =
+  let turn = Ids.Turn_ref.make ~trace_id:"collision" ~absolute_turn:7 in
+  let key = Ids.Turn_ref.to_string turn in
+  let operation_id = "collision-7" in
+  let decoded = decode (`List [
+    row ~role:"tool" ~tool_call_name:"Execute" ~execution_id:"op-call"
+      ~delivery_key:(operation_key operation_id)
+      ~transcript_slot:(tool_transcript_slot "op-call" 0) "{}";
+    row ~role:"tool" ~tool_call_name:"Execute" ~execution_id:"turn-call"
+      ~turn_ref:key "{}" ]) in
+  check int "different sources do not coalesce tool rows" 2 (List.length decoded.rows);
+  check bool "operation and autonomous keys survive decoding" true
+    (List.map (fun row -> row.History.execution_source) decoded.rows =
+     [Some (Masc_tui_keeper_chat_log.Operation operation_id);
+      Some (Masc_tui_keeper_chat_log.Autonomous_turn turn)])
+;;
+
 let () =
   run "tui_keeper_chat_history"
     [ ( "rows"
-      , [ test_case "roles map to what the pane draws" `Quick
+      , [ test_case "operation and autonomous sources keep typed tool blocks" `Quick
+            test_operation_and_autonomous_sources_keep_typed_tool_blocks
+        ; test_case "roles map to what the pane draws" `Quick
             test_roles_map_to_what_the_pane_draws
         ; test_case "a fusion block names the run ahead of the conclusion"
             `Quick test_a_fusion_block_names_the_run_ahead_of_the_conclusion

@@ -32,9 +32,9 @@ type verdict =
       (** A host runs and the observed server lists its client as a BiDi
           connection, so hover and drag are served there. *)
   | Host_unverified
-      (** A host runs and that is all that is known: it is still connecting,
-          no server is observed here, or the observed one does not list the
-          client its record names. *)
+      (** A host's status is unverified: its record is missing while its lock
+          is held, it is still connecting, no server is observed here, or the
+          observed one does not list the client its record names. *)
   | Host_not_running
       (** None runs: the last one ended or died, or none has run where a
           lane is installed. *)
@@ -99,11 +99,12 @@ type report =
 val report : observation -> report
 
 (** An object with exactly these fields. [state] ([never_started],
-    [running], [ended], [died], [unreadable]) and what it was read from:
+    [record_missing_but_locked], [running], [ended], [died], [unreadable])
+    and what it was read from:
     [record] (the host's own record, null when there is none or it cannot be
-    read), [lock_held] (true or false where the state turns on it, null
-    otherwise and for a lock that could not be asked) and [detail] (why the
-    record or the lock cannot be read, null otherwise). Then [attach], an
+    read), [lock_held] (true or false when there is no record or the state
+    turns on the lock, null otherwise and for a lock that could not be asked)
+    and [detail] (why the record or the lock cannot be read, null otherwise). Then [attach], an
     object with exactly [launcher], [arguments] and [launcher_state]
     ([installed], [not_installed] or [needs_reinstall]), and [message]. *)
 val report_to_json : report -> Yojson.Safe.t

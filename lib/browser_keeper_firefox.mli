@@ -59,8 +59,9 @@ type host_step =
       (** A host holds the lock and was given this address, whose port is
           not [port]. It stays on that Firefox until it is stopped. *)
   | Host_address_unknown
-      (** A host holds the lock, and its record cannot be read or names no
-          address with a port, so which Firefox it serves is not known. *)
+      (** A host holds the lock, and its record is missing (it has just
+          taken the lock), cannot be read, or names no address with a port,
+          so which Firefox it serves is not known. *)
   | Start_host of string  (** The installed launcher to run. *)
   | Launcher_not_ready of launcher_missing
 

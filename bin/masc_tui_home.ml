@@ -52,7 +52,15 @@ let home_decision_rows (state : state) =
         | List_not_read _ -> Some name)
   in
   let approvals =
-    let unread = match source_notes with
+    (* Rows a match read stay while the identity is unconfirmed; deciding on
+       them waits for a read that matches again. *)
+    let identity = match state.workspace_identity with
+      | Workspace_identity_match_unconfirmed _ ->
+          ["workspace identity unconfirmed · decisions wait"]
+      | Workspace_identity_unread | Workspace_identity_match
+      | Workspace_identity_mismatch _ -> []
+    in
+    let unread = identity @ match source_notes with
       | [] -> []
       | names -> ["not fully read · " ^ String.concat ", " names]
     in
@@ -205,9 +213,13 @@ let home_continue_rows (state : state) =
                     "Conversation history unavailable · choose a Keeper"
                 | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), Some (name, _) ->
                     "Last conversation " ^ Masc_tui_ansi.Terminal_text.single_line name
-                    ^ (if state.workspace_identity = Workspace_identity_unread
-                       then " unavailable · workspace identity not read · choose a Keeper"
-                       else " unavailable · choose a Keeper")
+                    ^ (match state.workspace_identity with
+                       | Workspace_identity_unread ->
+                           " unavailable · workspace identity not read · choose a Keeper"
+                       | Workspace_identity_match_unconfirmed _ ->
+                           " unavailable · workspace identity unconfirmed · choose a Keeper"
+                       | Workspace_identity_match | Workspace_identity_mismatch _ ->
+                           " unavailable · choose a Keeper")
                 | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), None ->
                     "Choose a Keeper  · start a conversation")
            | _ :: _ -> "New work  · choose a Keeper") ]

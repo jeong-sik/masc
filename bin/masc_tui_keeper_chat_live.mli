@@ -75,9 +75,15 @@ type delta =
       }
       (** New resolved-runtime attempt: discard unfinished text/thinking from
           the prior attempt while retaining tool evidence. *)
-  | Stream_model_started of { model : string; stream_scope : int option }
-      (** Bridge-allocated response identity; [None] when the observed frame
-          does not establish one. Repeated starts in one scope are one response. *)
+  | Stream_model_started of
+      { message_id : string option
+      ; stream_scope : int option
+      ; model : string
+      ; usage : stream_usage option
+      }
+      (** Provider response metadata. The bridge scope is retained across repeated
+          starts, including a surviving start following scoped text. The optional
+          provider id is correlation data, not response identity. *)
   | Stream_details of
       { stream_scope : int option
       ; usage : stream_usage option

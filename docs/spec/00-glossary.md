@@ -696,17 +696,6 @@ status: reference
   → [Keeper_chat_event_log](../../lib/keeper/keeper_chat_event_log.mli) ·
   [Server_routes_http_keeper_stream](../../lib/server/server_routes_http_keeper_stream.mli)
 
-**Keeper Quiet Final (키퍼 조용한 종료)**
-: 새 입력 없는 자율 wake(예정 깨움) 턴에서, 모델이 명시적으로 빈 텍스트 final(`EndTurn`)로
-  닫는 것을 완성으로 인정하는 응답 정책(#41747). `completion_policy`가 `Require_progress`
-  (직접 대화의 기본)일 때는 보이는 텍스트나 도구 진행이 필요하지만, 결과 전달이 예정되지
-  않은 Schedule_due 사건만 있거나 사건이 없고 대기 메시지가 비어 있으면 `Allow_quiet_final`
-  로 완성을 허용한다. 일반 Board 게시글·댓글 등 다른 모든 사건은 진행을 요구한다.
-  경계: 내용 결손, 숨은 추론만의 종료, 중단된 출력, 프로바이더 실패는 조용한 종료가
-  아니며 엄격히 오류로 남는다 — 문장을 해석해 침묵을 완성으로 읽지 않는다.
-  → [Keeper_tooling.Response](../../lib/keeper_tooling/response.mli) ·
-  [Keeper_agent_run](../../lib/keeper/keeper_agent_run.ml)
-
 **Chat Operation Reconciliation (채팅 오퍼레이션 정산)**
 : Keeper 채팅 오퍼레이션의 이벤트 스트림이 서버 재시작이나 연결 단절 등으로 종단 이벤트(`terminal event`) 없이 종료되었을 때, 듀러블 오퍼레이션 상태(`Keeper_chat_operation.state`)와 저널 엔드포인트(`read_whole_journal`)를 대조하여 화면 표시와 진행 행을 정합화하는 계약(#41680, #41705, #41730). 오퍼레이션이 이미 종료(`succeeded`·`failed`·`cancelled`)되었으나 스트림이 닫히지 않아 라이브 진행 행(`progress row`)에 과거 실행이 멈춘 채로 잔류하는 현상을 방지하며(`reconcile_operation`), 가짜 응답이나 합성 저널 이벤트를 임의로 조작하지 않고(`without fabricating journal events or a reply`) 스트림 도중 보존된 부분 텍스트(`partial text`), 도구 호출, 스킬 전달 영수증, 이전 연속 턴 이력을 그대로 보존한다. 저널 재조회 시 오퍼레이션 상태를 먼저 관측하고 저널을 읽은 뒤, 큐/실행 상태가 전진했는지 재확인(`read_with_operation_state`)하여 재조회 실패 시에도 첫 성공 저널을 유지하는 범위 내에서 최신 오퍼레이션 상태와의 정합성을 보장한다. 아울러 서버 재시작으로 중단된 세그먼트를 정산할 때(`record_restart_terminal`)는 세그먼트 오류 표식으로 `Restart_settlement settlement`(`Keeper_chat_event_log.Restart_settlement`)를 부여하여 이전 세그먼트의 과거 에러가 새 재시작 정산을 가로채지 못하게 방지하며, 재시작 종단 전달 재시도 시 재연결 커서가 저널보다 앞서더라도 중복 재생 없이 안정적으로 중단 종단을 완결한다(#41705, #41730).
   → [Masc_tui_keeper_chat_log](../../bin/masc_tui_keeper_chat_log.mli) ·

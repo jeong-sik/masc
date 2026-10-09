@@ -27,6 +27,8 @@ def scoped_identity_journey(executable, *, unread):
     lock = threading.Lock()
     calls = []
     state = {"changed": False}
+    boot_revalidated = threading.Event()
+    tool_mode_reads = 0
     label = b"scoped-unread-operator" if unread else b"scoped-foreign-question"
     ask = copy.deepcopy(approvals.keeper_asks_response())
     ask[1]["asks"][0].update(ask_id=label.decode(), context=label.decode())
@@ -61,6 +63,19 @@ def scoped_identity_journey(executable, *, unread):
         else h.approval_selection_snapshot([]),
     )
     fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
+
+    def tool_modes():
+        nonlocal tool_mode_reads
+        with lock:
+            tool_mode_reads += 1
+            # Cold-start identity recovery schedules a second full refresh.
+            # Each publication in chat launches this read only after applying
+            # its bundle; the second read proves revalidation has landed.
+            if tool_mode_reads == 2:
+                boot_revalidated.set()
+        return (200, {"overrides": []})
+
+    fixtures["/api/v1/keepers/tool-approval-mode"] = tool_modes
 
     def prepare(base):
         home.seed_goals(base)
@@ -131,6 +146,8 @@ def scoped_identity_journey(executable, *, unread):
         # The chat footer has no HTTP badge; assert the captured A health and
         # briefing readings below rather than waiting for an absent label.
         h.wait_for_output(process, fd, output, b"Esc:list", start=0, timeout=10)
+        assert h.wait_for_fixture_event(process, fd, output,
+            boot_revalidated, timeout=10), "startup identity revalidation did not publish"
         h.drain_until_quiet(process, fd, output)
         initial = snapshot()
         local_reads = [response for path, _, response in initial if path == "/health"]
@@ -149,14 +166,20 @@ def scoped_identity_journey(executable, *, unread):
             state["changed"] = True
         start = len(output)
         keepers.press_label_on_screen(process, fd, output, b"Dashboard", row=1, needle=b"Enter:open")
-        identity = b"workspace identity not read"
+        # A 503 keeps the last match unconfirmed; a read that names B is a
+        # mismatch and withdraws A's decisions. The mismatch badge sits past
+        # the default header width, so that case widens the frame first.
+        h.resize_and_wait(process, fd, output, rows=40, columns=160,
+                          needle=b"Enter:open", final_cursor=b"\x1b[?25l")
+        identity = b"workspace identity unconfirmed" if unread else b"[workspace mismatch]"
         h.wait_for_output(process, fd, output, identity, start=start, timeout=10)
         assert_scoped(baseline)
-        frame = h.resize_and_wait(process, fd, output, rows=40, columns=120,
-                                  needle=b"Enter:open", final_cursor=b"\x1b[?25l")
-        visible = h.screen_text(frame)
+        h.drain_until_quiet(process, fd, output)
+        visible = h.screen_text(bytes(output))
         assert label not in visible, ("unverified decision was cached", visible)
-        assert b"not fully read" in visible, visible
+        assert (b"decisions wait" if unread else b"not fully read") in visible, visible
+        if not unread:
+            assert b"[workspace mismatch]" in visible, visible
         home.assert_no_decision_posts(requests)
         assert_scoped(baseline)
         os.write(fd, b"q")
@@ -303,6 +326,30 @@ def superseded_scoped_match_journey(executable):
         fixtures["/health?full=1"] = lambda: health("/health?full=1")
 
     def interact(process, fd, _slave, output, _base):
+        # The harness PID belongs to its shell launcher, not the TUI child.
+        # Startup already rendered a frame after stderr redirection. This
+        # fresh workspace has one launch, hence exactly one TUI-owned log
+        # (the same discovery used by tui_keyboard_startup.exit_reason_log).
+        runtime_logs = list(Path(_base, ".masc", "logs").glob("masc-tui-*.log"))
+        assert len(runtime_logs) == 1, ("expected one TUI child log", runtime_logs)
+        runtime_log, = runtime_logs
+
+        def gate_log_lines():
+            return [line for line in runtime_log.read_text(encoding="utf-8").split("\n")[:-1]
+                    if "Gate snapshot request=" in line]
+
+        def gate_refresh_tickets(*, refresh_only=True):
+            # Read the explicit diagnostic fields. Startup Poll tickets must
+            # never acknowledge the held explicit Refresh below.
+            prefix = "started Gate snapshot request="
+            tickets = []
+            for line in gate_log_lines():
+                if prefix in line:
+                    ticket, intent = line.split(prefix, 1)[1].split(" intent=")
+                    if not refresh_only or intent == "refresh":
+                        tickets.append(int(ticket))
+            return tickets
+
         try:
             h.wait_for_output(process, fd, output, b"Esc:list", start=0, timeout=10)
             h.resize_and_wait(process, fd, output, rows=40, columns=159, needle=b"Esc:list")
@@ -330,9 +377,22 @@ def superseded_scoped_match_journey(executable):
             )
             # An explicit Approvals refresh owns this independent Gate read.
             # A fresh cached startup reading may suppress a later Poll.
+            # Earlier surface recovery may have dispatched a Refresh too.
+            # The TUI writes each start diagnostic synchronously before its
+            # HTTP request; capture those tickets before this explicit action.
+            prior_gate_tickets = gate_refresh_tickets()
             h.send_and_wait(process, fd, output, b"p", b"Questions waiting on you")
             assert h.wait_for_fixture_event(process, fd, output, held_gate.requested, timeout=10), (
                 "independent Gate read never reached its response gate")
+            def new_gate_tickets():
+                return [ticket for ticket in gate_refresh_tickets()
+                        if ticket not in prior_gate_tickets]
+
+            assert h.wait_for_fixture_state(process, fd, output,
+                lambda: len(new_gate_tickets()) == 1, timeout=10), (
+                "held Gate refresh has no unique dispatched ticket",
+                prior_gate_tickets, gate_refresh_tickets(), gate_log_lines())
+            held_gate_ticket, = new_gate_tickets()
             keepers.press_label_on_screen(process, fd, output, b"Dashboard",
                                          row=1, needle=b"Enter:open")
             with lock:
@@ -376,6 +436,19 @@ def superseded_scoped_match_journey(executable):
                     ("/health", "new-full")
                 ) < calls.index((h.KEEPER_ASKS_PATH, "new-full")), calls
                 state["phase"] = "released"
+            # The explicit full-B r key also dispatches a Gate Refresh before
+            # its identity probe. Its ticket belongs to the setup, even when
+            # the foreign probe prevents the decision GET. Freeze every issued
+            # ticket only after full B has published and before either release.
+            pre_release_gate_tickets = gate_refresh_tickets(refresh_only=False)
+            assert held_gate_ticket in pre_release_gate_tickets
+            log_start = runtime_log.stat().st_size
+
+            def discarded(message):
+                with runtime_log.open("rb") as log:
+                    log.seek(log_start)
+                    return message.encode() in log.read()
+
             gate.release.set()
             assert h.wait_for_fixture_event(process, fd, output, gate.completed, timeout=10), (
                 "old scoped GET never completed after release"
@@ -383,24 +456,23 @@ def superseded_scoped_match_journey(executable):
             assert h.wait_for_fixture_event(
                 process, fd, output, released_asks_read, timeout=10
             ), "old scoped reader never consumed its released operator response"
-            def scoped_probe_finished():
-                with lock:
-                    return calls.count(("/health", "released")) == 1
+            # A server-side callback fires before the client consumes its
+            # response. Wait for the runtime's actual stale-message discard,
+            # not a shared /health count or a period without terminal output.
             assert h.wait_for_fixture_state(process, fd, output,
-                scoped_probe_finished, timeout=10), "released scoped read did not recheck identity"
+                lambda: discarded("discarded scoped refresh completion: workspace authority superseded"),
+                timeout=10), "released scoped completion was not discarded by the runtime"
             with lock:
                 state["phase"] = "gate-released"
+            log_start = runtime_log.stat().st_size
             held_gate.release.set()
             assert h.wait_for_fixture_event(process, fd, output, held_gate.completed, timeout=10), (
                 "old Gate read never completed after workspace invalidation")
-            def gate_probe_finished():
-                with lock:
-                    return calls.count(("/health", "gate-released")) == 1
             assert h.wait_for_fixture_state(process, fd, output,
-                gate_probe_finished, timeout=10), "released Gate read did not recheck identity"
-            # Consume the returned response and mailbox, then force a fresh
-            # frame: accumulated pre-release mismatch bytes are not evidence.
-            h.drain_until_quiet(process, fd, output, cap=1)
+                lambda: discarded(f"discarded Gate snapshot request={held_gate_ticket}: workspace authority superseded"),
+                timeout=10), "released Gate completion was not discarded by the runtime"
+            # Both late messages have reached their authority guard. Force a
+            # fresh frame so pre-release mismatch bytes cannot satisfy this.
             drawn = h.resize_and_wait(
                 process, fd, output, rows=40, columns=161,
                 needle=b"Enter:open", controls=(h.FULL_REDRAW,),
@@ -413,12 +485,23 @@ def superseded_scoped_match_journey(executable):
                        (old_label, old_operator_label, new_label, new_operator_label)), (
                 "unverified full or superseded scoped decisions were restored", visible)
             with lock:
-                # The old read now performs one post-read identity probe;
-                # no extra full refresh can repair a wrongly admitted bundle.
+                # Concurrent workspace reads share /health, so its count is
+                # not a per-loader completion count. Keep the actual safety
+                # boundary: no new full bundle or decision listing may mask
+                # a wrongly admitted late response with replacement data.
                 assert sum(path == BRIEFING for path, _ in calls) == baseline + 1, calls
-                assert calls.count(("/health", "released")) == 1, calls
-                assert calls.count(("/health", "gate-released")) == 1, calls
+                assert calls.count(("/health", "released")) >= 1, calls
+                assert calls.count(("/health", "gate-released")) >= 1, calls
+                assert calls.count((h.KEEPER_ASKS_PATH, "released")) == 1, calls
+                assert not any(
+                    phase in ("released", "gate-released")
+                    and (path in (cards.OPERATOR_PATH, cards.GATE_PATH)
+                         or (path == h.KEEPER_ASKS_PATH and phase == "gate-released"))
+                    for path, phase in calls
+                ), ("replacement decision read masked a late response", calls)
                 assert held_gate.calls == 1, "more than one independent Gate GET was gated"
+            assert gate_refresh_tickets(refresh_only=False) == pre_release_gate_tickets, (
+                "another Gate request after release obscured the held ticket", gate_log_lines())
             home.assert_no_decision_posts(requests)
             os.write(fd, b"q")
         finally:
@@ -428,6 +511,7 @@ def superseded_scoped_match_journey(executable):
     h.run_terminal_scenario(
         executable, description="Home drops old scoped A after newer full B mismatch",
         interact=interact, http_fixtures=fixtures, http_requests=requests,
+        extra_env={"MASC_LOG_TRANSPORT_LEVEL": "debug"},
         prepare_workspace=prepare, refresh=60.0, starts_in_chat=True,
     )
     home.assert_no_decision_posts(requests)
@@ -726,6 +810,153 @@ def held_identity_boundary_journey(executable, *, boundary):
     home.assert_no_decision_posts(requests)
 
 
+def recovery_operator_boundary_journey(executable, *, foreign, failed_get=False):
+    """Hold the independent boot recovery across identity/regular publication.
+
+    The second full refresh owns an older listing ticket before it blocks on
+    briefing. Recovery therefore owns the newer ticket even when the ordinary
+    refresh publishes first. In the foreign case the held briefing prevents
+    ordinary identity revalidation from masking the recovery's final probe.
+    """
+    fixtures = cards.fixtures_with_held([])
+    requests = []
+    lock = threading.Lock()
+    state = {"briefings": 0, "operators": 0, "foreign": False}
+    _fixtures, items, _new = h.approval_selection_http_fixtures()
+    # Home shows request IDs in a 12-cell slot, not the payload's reason.
+    recovery_label = b"foreign-row" if foreign else b"recovery-new"
+    regular_label = b"regular-old"
+
+    def operator_snapshot(label):
+        return h.approval_selection_snapshot([
+            dict(items[0], confirm_token=label.decode(),
+                 payload={"reason": label.decode()})
+        ])
+
+    held_briefing = h.GatedHttpResponse(fixtures[BRIEFING], hold_seconds=30.0)
+    recovery_response = (503, {"error": "approval read failed during workspace switch"}) if failed_get else operator_snapshot(recovery_label)
+    held_recovery = h.GatedHttpResponse(recovery_response, hold_seconds=30.0)
+    regular_read = threading.Event()
+    regular_published = threading.Event()
+    recovery_probe = threading.Event()
+    briefing = fixtures[BRIEFING]
+    boot_held_label = b"boot-held"
+
+    def read_held():
+        # The full-refresh handler starts this read after applying its bundle.
+        # Await the first row below so that read has settled before releasing
+        # the older bundle; its next request then witnesses that publication.
+        if regular_read.is_set():
+            regular_published.set()
+        rows = [] if foreign else [cards.held("boot-held", "boot held call")]
+        return 200, {"pending": rows}
+
+    fixtures[cards.HELD_PATH] = read_held
+
+    def read_briefing():
+        with lock:
+            state["briefings"] += 1
+            count = state["briefings"]
+        return held_briefing() if count == 2 else briefing
+
+    def read_operator():
+        with lock:
+            state["operators"] += 1
+            count = state["operators"]
+        if count == 1:
+            return h.approval_selection_snapshot([])
+        if count == 2:
+            response = held_recovery()
+            if foreign:
+                with lock:
+                    state["foreign"] = True
+            return response
+        regular_read.set()
+        return operator_snapshot(regular_label)
+
+    fixtures[BRIEFING] = read_briefing
+    fixtures[cards.OPERATOR_PATH] = read_operator
+
+    def prepare(base):
+        home.seed_goals(base)
+        # The withdrawal row describes the last conversation. Keep Home open
+        # while giving that row a real destination whose authority can be lost.
+        config = Path(base, ".masc", "config")
+        config.mkdir(parents=True, exist_ok=True)
+        (config / "runtime.toml").write_text(
+            '[tui]\nopening = "overview"\nlast_chat_keeper = "alpha"\n',
+            encoding="utf-8",
+        )
+        local = Path(base).resolve()
+        replacement = local / "recovery-foreign-B"
+        (replacement / ".masc").mkdir(parents=True)
+
+        def health():
+            with lock:
+                switched = state["foreign"]
+                released = held_recovery.completed.is_set()
+            if released:
+                recovery_probe.set()
+            root = replacement if switched else local
+            return h.RawHttpResponse(200, json.dumps({
+                "status": "ok", "paths": {
+                    "cwd": str(root), "effective_base_path": str(root),
+                    "effective_masc_root": str(root / ".masc"),
+                    "effective_has_masc_dir": True,
+                },
+            }).encode(), content_type="application/json")
+
+        fixtures["/health"] = health
+        fixtures["/health?full=1"] = health
+
+    def interact(process, fd, _slave, output, _base):
+        try:
+            assert h.wait_for_fixture_event(process, fd, output,
+                held_briefing.requested, timeout=10), "revalidation did not reach briefing"
+            assert h.wait_for_fixture_event(process, fd, output,
+                held_recovery.requested, timeout=10), "independent recovery did not request operator"
+            if not foreign:
+                h.wait_for_output(process, fd, output, boot_held_label, start=0, timeout=10)
+                held_briefing.release.set()
+                assert h.wait_for_fixture_event(process, fd, output,
+                    regular_read, timeout=10), "regular refresh did not overtake recovery"
+                assert h.wait_for_fixture_event(process, fd, output,
+                    regular_published, timeout=10), "regular refresh did not publish before recovery"
+                # Home keeps the confirm queue unread while the newer recovery
+                # is pending, even though the older snapshot has been applied.
+                assert not held_recovery.completed.is_set(), "newer recovery completed too early"
+            held_recovery.release.set()
+            assert h.wait_for_fixture_event(process, fd, output,
+                held_recovery.completed, timeout=10), "recovery GET did not complete"
+            assert h.wait_for_fixture_event(process, fd, output,
+                recovery_probe, timeout=10), "recovery did not recheck identity after its GET"
+            h.drain_until_quiet(process, fd, output, cap=1)
+            shown = h.resize_and_wait(process, fd, output, rows=40, columns=161,
+                needle=b"MASC Dashboard", controls=(h.FULL_REDRAW,),
+                final_cursor=b"\x1b[?25l")
+            visible = h.screen_text(shown)
+            if foreign:
+                assert recovery_label not in visible, ("foreign recovery row was admitted", visible)
+                assert b"[workspace mismatch]" in visible, visible
+                assert b"not fully read" in visible, visible
+                assert not regular_read.is_set(), "ordinary refresh masked the identity regression"
+            else:
+                assert recovery_label in visible, ("older refresh retired newer recovery", visible)
+                assert regular_label not in visible, ("older refresh remained after recovery", visible)
+            home.assert_no_decision_posts(requests)
+            os.write(fd, b"q")
+        finally:
+            held_recovery.release.set()
+            held_briefing.release.set()
+
+    h.run_terminal_scenario(executable,
+        description=("recovery operator refuses B after GET" if foreign
+                     else "older regular publication preserves newer recovery"),
+        interact=interact, http_fixtures=fixtures, http_requests=requests,
+        prepare_workspace=prepare, refresh=60.0)
+    home.assert_no_decision_posts(requests)
+
+
 if __name__ == "__main__":
     executable = os.path.abspath(sys.argv[1])
     for unread in (False, True):
@@ -735,4 +966,7 @@ if __name__ == "__main__":
     goal_drop_arm_withdrawal_journey(executable)
     for boundary in ("before-read", "after-read", "decision"):
         held_identity_boundary_journey(executable, boundary=boundary)
-    print("Home scoped identity PTY: PASS (8 scenarios)")
+    for foreign in (True, False):
+        recovery_operator_boundary_journey(executable, foreign=foreign)
+    recovery_operator_boundary_journey(executable, foreign=True, failed_get=True)
+    print("Home scoped identity PTY: PASS (11 scenarios)")

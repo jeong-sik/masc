@@ -62,7 +62,7 @@ let test_projection_preserves_stream_identity () =
          { message_id = "message-1"; role = E.Assistant })
   in
   ignore (projected_exn (state, message_started));
-  let _, projected = project state (E.Text_delta "hello") in
+  let _, projected = project state (E.Text_delta {text="hello"; stream_scope=None}) in
   let json = Ag_ui.event_to_json (projected_exn (state, projected)) in
   Alcotest.(check (option string)) "run identity"
     (Some "run-1")

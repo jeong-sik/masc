@@ -195,7 +195,7 @@ let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
        execution_id = Keeper_chat_operation.Operation_id.to_string execution_id})
   | E.Run_started _ -> Some Live.Run_started
   | E.Text_message_start _ | E.Text_message_end -> None
-  | E.Text_delta text -> Some (Live.Text text)
+  | E.Text_delta {text; stream_scope} -> Some (Live.Text {text; stream_scope})
   | E.External_effect_completed _ -> Some Live.External_effect_completed
   | E.Run_finished _ -> Some Live.Run_finished
   | E.Event_error { message } -> Some (Live.Run_failed { message })
@@ -207,12 +207,12 @@ let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
   | E.Agent_core_stream_connected -> None
   | E.Agent_core_runtime_attempt_started { runtime_id; attempt_index } ->
     Some (Live.Runtime_attempt_started { runtime_id; attempt_index })
-  | E.Agent_core_stream_message_start { provider_message_id; model; usage } ->
+  | E.Agent_core_stream_message_start { provider_message_id; model; usage; stream_scope } ->
     Some (Live.Stream_model_started
-      { message_id = (if String.trim provider_message_id = "" then None else Some provider_message_id); model
+      { message_id = (if String.trim provider_message_id = "" then None else Some provider_message_id); model; stream_scope = Some stream_scope
       ; usage = Option.bind usage (fun usage ->
           Live.stream_usage_of_usage_json (E.api_usage_to_json usage)) })
-  | E.Agent_core_stream_message_delta { stop_reason; usage } ->
+  | E.Agent_core_stream_message_delta { stream_scope; stop_reason; usage } ->
     (* Through the same readers as the live arm, over the same bytes the
        producer writes ([E.delta_usage_to_json], [E.stop_reason_to_string]), so
        a reloaded turn and a watched one report this identically. A delta that
@@ -230,11 +230,11 @@ let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
       Option.bind stop_reason (fun reason ->
         match String.trim (E.stop_reason_to_string reason) with
         | "" -> None
-        | reason -> Some reason)
+        | _ -> Some reason)
     in
     if usage = None && stop_reason = None
     then None
-    else Some (Live.Stream_details { usage; stop_reason })
+    else Some (Live.Stream_details { usage; stop_reason; stream_scope = Some stream_scope })
   | E.Model_content_activity activity -> Some (Live.Model_content_activity activity)
   | E.Agent_core_stream_message_stop -> Some Live.Stream_model_stopped
   | E.Agent_core_stream_ping

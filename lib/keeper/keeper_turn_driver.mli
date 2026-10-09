@@ -358,6 +358,7 @@ val run_named :
   ?runtime_manifest_context:Keeper_runtime_manifest.turn_context ->
   ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit) ->
   ?deferred_runtime_lane:deferred_runtime_lane ->
+  ?on_memory_capacity_refusal:Keeper_memory_delivery_reprojection.t ->
   ?on_runtime_attempt:(runtime_attempt -> unit) ->
   ?runtime_retry_deferral:runtime_retry_deferral ->
   ?checkpoint_progress:

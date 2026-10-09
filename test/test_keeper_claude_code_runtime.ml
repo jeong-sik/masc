@@ -1669,7 +1669,7 @@ let test_root_heartbeat_reaches_scoped_journal_and_tui ?(retry = false) () =
       let read_journal () = match J.read_journal_path_result journal_path with
         | Ok lines -> lines | Error _ -> fail "heartbeat journal unreadable" in
       let fragments events = List.filter_map (function
-        | E.Text_delta value | E.Agent_core_thinking_delta {delta=value;_} -> Some value
+        | E.Text_delta {text=value; stream_scope=None} | E.Agent_core_thinking_delta {delta=value;_} -> Some value
         | _ -> None) events in
       let failures = ref [] and reports = ref 0 in
       let verify f = try f () with
@@ -2925,6 +2925,7 @@ let test_spawn_failure_fences_claim () =
 ;;
 
 let run_direct_attempt
+      ?on_memory_capacity_refusal
       ?required_native_posture ?on_native_task_observation ?on_event
       ?hooks
       ?(system_prompt = "pre-dispatch fixture system prompt")
@@ -2963,6 +2964,7 @@ let run_direct_attempt
                     | Some _ | None -> fail "Claude runtime fixture did not resolve"
                   in
                   Keeper_claude_code_runtime.run
+                    ?on_memory_capacity_refusal
                     ?required_native_posture ?on_native_task_observation
                     ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
                     ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
@@ -3979,6 +3981,64 @@ let repeated_tool () =
    so the attempt ends on the overflow. No answer or tool activity was
    observed, so the attempt must report no effect: that is what lets
    the lane move to its next runtime instead of fencing the turn. *)
+let test_memory_capacity_reprojection_reaches_cli_input () =
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    let module Host = Keeper_workspace_memory_host_recall in
+    let module IO = Keeper_workspace_memory_selection_io in
+    let config = Workspace.default_config base_path in
+    let destination : Typesafeai_client.destination =
+      {endpoint="https://fixture.invalid/evaluate";model="fixture";api_key="fixture"} in
+    let adapter = IO.create ~config ~keeper_id:"claude-pre-dispatch" ~destinations:(destination,[]) in
+    let row id = `Assoc ["id",`String id;"use",`String "comparison";
+      "sources",`String ("MEMORY-" ^ id ^ "-" ^ String.make 2000 'x')] in
+    let payload = `Assoc ["selection_id",`String (IO.selection_id adapter);
+      "status",`String "selected";"selected",`List (List.map row ["A";"B";"C";"D"])] in
+    let prepared = Host.For_testing.prepare_projection ~payload
+      ~validate:(fun _ -> Ok ()) ~retain:(IO.retain_projection adapter) in
+    let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (function
+      | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
+        AdjustParams {current_params with extra_system_context=Some (Host.render_prepared prepared)}
+      | _ -> Continue)} in
+    let first_system_marker = Filename.concat base_path "memory-first-system" in
+    let second_system_marker = Filename.concat base_path "memory-second-system" in
+    let first_prompt_marker = Filename.concat base_path "memory-first-input" in
+    let second_prompt_marker = Filename.concat base_path "memory-second-input" in
+    with_fixture_sequence ~first_system_marker ~second_system_marker
+      ~first_prompt_marker ~second_prompt_marker
+      [Emit blocking_limit_diagnostic;Emit blocking_limit_result]
+      [Emit (assistant ~turn_id:"memory-recovered" "RECOVERED");
+       Emit (result ~turn_id:"memory-recovered" "RECOVERED")]
+      (fun cli_path ->
+        let attempt = run_direct_attempt ~hooks
+            ~on_memory_capacity_refusal:(Host.defer_for_capacity prepared)
+            ~base_path ~cli_path ~goal:"MEMORY_CAPACITY_GOAL" ~tools:[] () in
+        match attempt.result with
+        | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+    let read path = In_channel.with_open_bin path In_channel.input_all in
+    (* Start transmits composed context through --system-prompt-file.
+       Stdin carries the current goal, which must stay unchanged. *)
+    let first = read first_system_marker and second = read second_system_marker in
+    let first_input = read first_prompt_marker and second_input = read second_prompt_marker in
+    check string "memory-only retry preserves the exact stdin input" first_input second_input;
+    check bool "the CLI received a strictly smaller system context" true (String.length second < String.length first);
+    List.iter (fun id -> check bool (id ^ " originally transmitted") true
+      (String_util.contains_substring first ("MEMORY-" ^ id ^ "-"))) ["A";"B";"C";"D"];
+    List.iter (fun id -> check bool (id ^ " retained whole on the wire") true
+      (String_util.contains_substring second ("MEMORY-" ^ id ^ "-" ^ String.make 2000 'x'))) ["A";"B"];
+    List.iter (fun id -> check bool (id ^ " deferred from the wire") false
+      (String_util.contains_substring second ("MEMORY-" ^ id ^ "-"))) ["C";"D"];
+    check bool "the retry tells the model evidence is incomplete" true
+      (String_util.contains_substring second "capacity_deferred_count");
+    check bool "the user's goal survives memory reduction" true
+      (String_util.contains_substring second_input "MEMORY_CAPACITY_GOAL");
+    let receipts = read (IO.journal_path adapter) |> String.split_on_char '\n'
+      |> List.filter (fun row -> row<>"") |> List.map Yojson.Safe.from_string in
+    check (list string) "one retained memory projection, no new Jev evaluation"
+      ["delivery_projection_prepared"]
+      (List.map (fun row -> Yojson.Safe.Util.(row |> member "status" |> to_string)) receipts))
+;;
+
 let test_unshrinkable_context_limit_reports_no_effect ~overflow_frames () =
   let base_path = temp_workspace () in
   Fun.protect
@@ -5065,6 +5125,8 @@ let () =
             "unbounded turn keeps subscription probe bounded"
             `Quick
             test_unbounded_turn_keeps_subscription_probe_bounded
+        ; test_case "memory reprojection reaches the real CLI fixture input" `Quick
+            test_memory_capacity_reprojection_reaches_cli_input
         ; test_case
             "unshrinkable blocking_limit reports no effect"
             `Quick

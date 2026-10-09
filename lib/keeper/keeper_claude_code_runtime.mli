@@ -73,6 +73,7 @@ module For_testing : sig
 end
 
 val run :
+  ?on_memory_capacity_refusal:Keeper_memory_delivery_reprojection.t ->
   ?official_task_reference:Keeper_official_task_reference.t ->
   ?composed_context:(unit -> Keeper_official_client_host.composed_context option) ->
   accepts_image_input:bool ->

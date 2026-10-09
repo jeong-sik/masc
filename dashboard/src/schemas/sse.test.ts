@@ -800,7 +800,7 @@ describe('SSEMessageSchema', () => {
         threadId: 'keeper-consumer:sangsu',
         runId: 'run-1',
         name: 'KEEPER_STREAM_MESSAGE_DELTA',
-        value: { stop_reason: 'end_turn', usage },
+        value: { stream_scope: 4, stop_reason: 'end_turn', usage },
         timestamp: 1_712_000_000,
       },
     })
@@ -831,6 +831,36 @@ describe('SSEMessageSchema', () => {
       expect(SSEMessageSchema.safeParse(event({ cost_usd })).success).toBe(false)
     }
   })
+
+  it.each(['KEEPER_STREAM_MESSAGE_START', 'KEEPER_STREAM_MESSAGE_DELTA'])(
+    'retains a response identity on %s frames and rejects invalid identities', name => {
+      const event = (stream_scope: unknown) => ({
+        type: 'keeper_chat_operation_event',
+        name: 'sangsu',
+        operation_id: 'kmsg-operation-1',
+        ag_ui_event: {
+          type: 'CUSTOM',
+          threadId: 'keeper-consumer:sangsu',
+          runId: 'run-1',
+          name,
+          value: name === 'KEEPER_STREAM_MESSAGE_START'
+            ? { stream_scope, provider_message_id: 'pm-1', model: 'observed-model' }
+            : { stream_scope, stop_reason: 'end_turn' },
+          timestamp: 1_712_000_000,
+        },
+      })
+      for (const scope of [0, 4]) {
+        const result = SSEMessageSchema.safeParse(event(scope))
+        expect(result.success).toBe(true)
+        if (result.success) {
+          expect(result.data).toMatchObject({ ag_ui_event: { value: { stream_scope: scope } } })
+        }
+      }
+      for (const scope of [undefined, null, -1, 0.5, '4']) {
+        expect(SSEMessageSchema.safeParse(event(scope)).success).toBe(false)
+      }
+    },
+  )
 
   it('accepts an operator-visible projection error for an operation', () => {
     const r = SSEMessageSchema.safeParse({

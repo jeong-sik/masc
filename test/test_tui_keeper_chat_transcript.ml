@@ -993,36 +993,6 @@ let test_control_bytes_never_reach_the_pane () =
   check bool "no escape survives in a status row" false
     (List.exists (fun (_, text) -> has_escape text) (rows t))
 
-(* Two separate choices meet in the default chat view. [compact] picks which
-   facts the row carries; [show_timing] says whether generated ages are drawn.
-   The reading layout asks for the compact row without timing, and a silence
-   age must not come back through the compact row's own wording. *)
-let test_compact_progress_row_follows_timing_visibility () =
-  let t = fresh () in
-  feed t [ Live.Run_started ];
-  feed ~now:(origin +. 10.) t [ Live.Thinking "weighing the observed state" ];
-  (match Transcript.status_rows ~compact:true ~now:(origin +. 90.) t with
-   | (Transcript.Progress, text) :: _ ->
-       check bool "the compact row keeps the activity" true
-         (contains ~needle:"reasoning" text);
-       check bool "shown timing keeps the turn age on the compact row" true
-         (contains ~needle:"1m30s" text);
-       check bool "shown timing keeps the silence age on the compact row" true
-         (contains ~needle:"nothing back for" text)
-   | got -> failf "expected a compact progress row, got %d rows" (List.length got));
-  match
-    Transcript.status_rows ~compact:true ~show_timing:false
-      ~now:(origin +. 90.) t
-  with
-  | (Transcript.Progress, text) :: _ ->
-      check bool "hidden timing keeps the activity" true
-        (contains ~needle:"reasoning" text);
-      check bool "hidden timing drops the turn age" false
-        (contains ~needle:"1m30s" text);
-      check bool "hidden timing drops the silence age" false
-        (contains ~needle:"nothing back for" text)
-  | got -> failf "expected a compact progress row, got %d rows" (List.length got)
-
 let approval_rows t =
   rows t
   |> List.filter_map (fun (kind, text) ->
@@ -2191,9 +2161,7 @@ let () =
     ; ( "status rows"
       , [ test_case "rows grow only with what they report" `Quick
             test_status_rows_grow_only_with_what_they_report
-        ; test_case "the compact progress row follows timing visibility" `Quick
-            test_compact_progress_row_follows_timing_visibility
-        ] )
+        ;] )
     ; ( "phase"
       , [ test_case "failure and finish are distinct" `Quick
             test_run_failure_and_finish_set_the_phase

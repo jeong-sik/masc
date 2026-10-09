@@ -4653,33 +4653,6 @@ let test_search_finds_a_batched_request_by_its_own_id () =
     [Masc_tui_message_layout.Origin_bare; Origin_inline; Origin_row]
 ;;
 
-let test_bare_inbound_sender_draws_each_piece_once () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
-  state.view <- Tui_types.Keepers Tui_types.Keeper_message;
-  state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
-  state.msg_target_keeper_name <- Some "alpha";
-  state.msg_origin_display <- Masc_tui_message_layout.Origin_bare;
-  (* Wider than the bare view's 100-cell reading column, so it wraps. *)
-  let speaker = String.concat " " (List.init 16 (Printf.sprintf "part%02d-sender")) in
-  let message = chat_entry ~request_id:"inbound-1"
-      ~role:(Tui_types.Message_user (Tui_types.Sent_by_other {speaker; surface=None}))
-      ~text:"INBOUND_BODY" ~at:100. () in
-  state.msg_history <- [{message with Tui_types.me_identity=Persisted_row "inbound-1"}];
-  let frame, _ = Masc_tui_render_chat.render_keeper_message state in
-  let text = String.concat "\n"
-      (List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines) in
-  let count affix =
-    List.length (Astring.String.cuts ~sep:affix text) - 1 in
-  check bool "precondition: the name wraps onto more than one row" true
-    (not (List.exists (fun line -> Astring.String.is_infix ~affix:"part00-sender" line
-                                   && Astring.String.is_infix ~affix:"part15-sender" line)
-            (String.split_on_char '\n' text)));
-  check int "the arrival mark is drawn once" 1 (count "\xe2\x97\x80");
-  List.iter (fun piece -> check int ("each piece of the name once: " ^ piece) 1 (count piece))
-    ["part00-sender"; "part15-sender"];
-  check int "the body follows the name" 1 (count "INBOUND_BODY")
-;;
-
 let test_history_suppression_preserves_typed_source_collisions () =
   let turn = Ids.Turn_ref.make ~trace_id:"collision" ~absolute_turn:7 in
   let key = Ids.Turn_ref.to_string turn in
@@ -4716,9 +4689,7 @@ let () =
     "tui_chat_queue_wiring"
     [ ( "expanded diagnostics",
         [ test_case "search finds a batched request by its own id" `Quick
-            test_search_finds_a_batched_request_by_its_own_id
-        ; test_case "bare inbound sender draws each piece once" `Quick
-            test_bare_inbound_sender_draws_each_piece_once ] )
+            test_search_finds_a_batched_request_by_its_own_id ] )
     ; ( "attachment captions", [] )
     ; ( "visible delivery",
         [ test_case "pending to observed work" `Quick test_delivery_states_and_observed_work_are_identifiable

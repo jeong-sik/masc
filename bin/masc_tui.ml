@@ -1557,21 +1557,69 @@ type pending_msx_checkpoint = {
   checkpoint_slot : string;
   checkpoint_workspace : Tui_decode.server_identity;
 }
+module Checkpoint_pending = Masc_tui_msx_checkpoint_pending
 let pending_msx_checkpoints : pending_msx_checkpoint list ref = ref []
+let loaded_checkpoint_workspaces : (string * string) list ref = ref []
+let checkpoint_storage_errors : (string, string) Hashtbl.t = Hashtbl.create 4
+let checkpoint_root workspace = Masc_tui_types.canonical_path workspace.Tui_decode.sid_masc_root
+let checkpoint_binding pending =
+  Result.map (fun operation_id ->
+    {Checkpoint_pending.operation_id; restore=pending.checkpoint_restore; slot=pending.checkpoint_slot;
+     base_path=Masc_tui_types.canonical_path pending.checkpoint_workspace.sid_base_path;
+     masc_root=checkpoint_root pending.checkpoint_workspace})
+    (Keeper_operation_id.of_string pending.checkpoint_operation_id)
+let recover_checkpoints state workspace =
+  let root = checkpoint_root workspace in
+  let base_path = Masc_tui_types.canonical_path workspace.Tui_decode.sid_base_path in
+  let key = base_path, root in
+  if not (List.mem key !loaded_checkpoint_workspaces)
+     && Result.is_ok (Masc_tui_types.workspace_change_origin state) then
+    match Checkpoint_pending.load ~masc_root:root with
+    | Error detail ->
+        Hashtbl.replace checkpoint_storage_errors root detail;
+        state.msx_notice <- Some ("Checkpoint intent storage unavailable; machine changes blocked: " ^ detail)
+    | Ok bindings ->
+        let recovered = List.map (fun (binding : Checkpoint_pending.binding) ->
+          {checkpoint_operation_id=Keeper_operation_id.to_string binding.operation_id;
+           checkpoint_restore=binding.restore; checkpoint_slot=binding.slot;
+           checkpoint_workspace={workspace with sid_base_path=binding.base_path; sid_masc_root=binding.masc_root}})
+          (List.filter (fun (binding : Checkpoint_pending.binding) -> binding.base_path=base_path) bindings) in
+        pending_msx_checkpoints := recovered @ !pending_msx_checkpoints;
+        loaded_checkpoint_workspaces := key :: !loaded_checkpoint_workspaces;
+        Hashtbl.remove checkpoint_storage_errors root;
+        if recovered <> [] then
+          state.msx_notice <- Some "Unresolved checkpoint recovered; F5 inspects its original receipt before machine control resumes."
 let checkpoint_for_workspace state =
   match state.server_identity with
   | None -> None
-  | Some workspace -> List.find_opt (fun pending ->
-      Masc_tui_types.canonical_path pending.checkpoint_workspace.sid_base_path =
-        Masc_tui_types.canonical_path workspace.sid_base_path
-      && Masc_tui_types.canonical_path pending.checkpoint_workspace.sid_masc_root =
-        Masc_tui_types.canonical_path workspace.sid_masc_root) !pending_msx_checkpoints
+  | Some workspace ->
+      recover_checkpoints state workspace;
+      List.find_opt (fun pending ->
+        Masc_tui_types.canonical_path pending.checkpoint_workspace.sid_base_path =
+          Masc_tui_types.canonical_path workspace.sid_base_path
+        && checkpoint_root pending.checkpoint_workspace = checkpoint_root workspace)
+        !pending_msx_checkpoints
+let remember_checkpoint pending =
+  let root = checkpoint_root pending.checkpoint_workspace in
+  match checkpoint_binding pending with
+  | Error detail -> Error detail
+  | Ok binding ->
+      (match Checkpoint_pending.remember ~masc_root:root binding with
+       | Error detail -> Error detail
+       | Ok () -> pending_msx_checkpoints := pending :: !pending_msx_checkpoints; Ok ())
 let forget_checkpoint pending =
-  pending_msx_checkpoints := List.filter (fun held ->
-    held.checkpoint_operation_id <> pending.checkpoint_operation_id) !pending_msx_checkpoints
+  let root = checkpoint_root pending.checkpoint_workspace in
+  match Result.bind (checkpoint_binding pending) (Checkpoint_pending.forget ~masc_root:root) with
+  | Error detail -> Hashtbl.replace checkpoint_storage_errors root detail
+  | Ok () ->
+      Hashtbl.remove checkpoint_storage_errors root;
+      pending_msx_checkpoints := List.filter (fun held ->
+        held.checkpoint_operation_id <> pending.checkpoint_operation_id
+        || checkpoint_root held.checkpoint_workspace <> root) !pending_msx_checkpoints
 let machine_changes_allowed state =
   Result.is_ok (Masc_tui_types.workspace_change_origin state)
   && Option.is_none (checkpoint_for_workspace state)
+  && not (Option.exists (fun workspace -> Hashtbl.mem checkpoint_storage_errors (checkpoint_root workspace)) state.server_identity)
 let machine_change_refusal = "MSX control requires a verified server matching this TUI's local workspace."
 type lane_addons_slice_source = Cached_snapshot | Fresh_inventory
 let decode_play_mutation decode = function
@@ -8176,7 +8224,9 @@ let launch_play_issue state ~mailbox ~sink ~name ~hours =
           match Masc_tui_types.workspace_change_origin state with
           | Ok origin when origin = request.change_workspace
               && Masc_tui_types.dispatch_play_change state request ->
-              Ok (Masc_tui_http.issue_play_invite ~host ~port ~name ~hours)
+              Ok (Masc_tui_http.issue_play_invite
+                ~expected_base_path:request.change_workspace.wi_base_path
+                ~expected_masc_root:request.change_workspace.wi_masc_root ~host ~port ~name ~hours)
           | Ok _ | Error _ -> Ok (Masc_tui_http.Post_refused "Local workspace authority changed before dispatch"))
         ~wrap:(fun result -> Play_invite_issued (request, sink,
           match result with
@@ -8197,7 +8247,9 @@ let launch_play_revoke state ~mailbox ~sink ~name =
           match Masc_tui_types.workspace_change_origin state with
           | Ok origin when origin = request.change_workspace
               && Masc_tui_types.dispatch_play_change state request ->
-              Ok (Masc_tui_http.revoke_play_invite ~host ~port ~name)
+              Ok (Masc_tui_http.revoke_play_invite
+                ~expected_base_path:request.change_workspace.wi_base_path
+                ~expected_masc_root:request.change_workspace.wi_masc_root ~host ~port ~name)
           | Ok _ | Error _ -> Ok (Masc_tui_http.Revoke_other
               (Masc_tui_http.Post_refused "Local workspace authority changed before dispatch")))
         ~wrap:(fun result -> Play_invite_revoked (request, sink, name,
@@ -20493,8 +20545,11 @@ and is loaded on demand through keeper_skill.
                    let pending = {checkpoint_operation_id=Random_id.uuid_v7 ();
                      checkpoint_restore=restore;checkpoint_slot="quick";
                      checkpoint_workspace=expected_workspace} in
+                   match remember_checkpoint pending with
+                   | Error detail -> Error (Masc_tui_http.Checkpoint_refused
+                       ("Cannot durably retain checkpoint intent: " ^ detail))
+                   | Ok () ->
                    requested := Some pending;
-                   pending_msx_checkpoints := pending :: !pending_msx_checkpoints;
                    let result = Masc_tui_http.post_msx_checkpoint ~expected_workspace
                      ~operation_id:pending.checkpoint_operation_id ~host:server_peer_host ~port ~restore ~slot:"quick" in
                    (* Knowledge of this operation survives a presentation scope

@@ -631,18 +631,22 @@ let play_mutation_outcome = function
      | None -> mutation_outcome answer)
   | answer -> mutation_outcome answer
 
-let issue_play_invite ~host ~port ~name ~hours =
+let issue_play_invite ~expected_base_path ~expected_masc_root ~host ~port ~name ~hours =
   http_post ~headers:(auth_headers ()) ~host ~port ~path:"/api/v1/play/invites"
     ~body:(Yojson.Safe.to_string
-      (`Assoc [ "name", `String name; "hours", `Int hours ]))
+      (`Assoc [ "name", `String name; "hours", `Int hours;
+        "expected_workspace", `Assoc ["base_path", `String expected_base_path;
+                                      "masc_root", `String expected_masc_root] ]))
   |> play_mutation_outcome
 
 type revoke_outcome = Revoke_absent | Revoke_other of post_outcome
 
-let revoke_play_invite ~host ~port ~name =
+let revoke_play_invite ~expected_base_path ~expected_masc_root ~host ~port ~name =
   let response =
     http_delete ~host ~port
-      ~path:("/api/v1/play/invites/" ^ percent_encode_path_segment name)
+      ~path:("/api/v1/play/invites/" ^ percent_encode_path_segment name
+        ^ "?expected_base_path=" ^ percent_encode_path_segment expected_base_path
+        ^ "&expected_masc_root=" ^ percent_encode_path_segment expected_masc_root)
   in
   match response with
   | Ok (404, body) when Masc.Tui_decode.play_invite_absent_body body ->

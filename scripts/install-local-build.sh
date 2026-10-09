@@ -238,6 +238,7 @@ def bidi_host(arguments):
 
 # -ww: the whole command, so the arguments after the host path are there to read.
 running = subprocess.run(["ps", "-ww", "-axo", "pid=,command="], capture_output=True, text=True, check=True).stdout
+stopped_pids = set()
 for name, base in registered:
     subprocess.run(["bash", installer, "--binary", binary, "--base-path", str(base),
                     "--host-name", name, "--manifest-dir", str(manifest_dir)],
@@ -246,13 +247,14 @@ for name, base in registered:
     stopped, kept = [], []
     for line in running.splitlines():
         pid, _, command = line.strip().partition(" ")
-        if command == host or command.startswith(host + " "):
+        if (command == host or command.startswith(host + " ")) and pid not in stopped_pids:
             if bidi_host(command[len(host):]):
                 kept.append(pid)
                 continue
             try:
                 os.kill(int(pid), signal.SIGTERM)
                 stopped.append(pid)
+                stopped_pids.add(pid)
             except ProcessLookupError:
                 pass
     said = []

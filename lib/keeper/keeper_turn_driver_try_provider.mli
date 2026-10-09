@@ -533,7 +533,8 @@ val context_overflow_shrink_sequence :
     seed history is cut against a declared prompt byte cap; the capacity is
     in bytes. The Agent Core lane answers the same refusal by moving its
     carried front ({!run_try_provider_with_carried_range_eviction}).
-    After a typed window refusal and same-run effect authorization, memory
+    After a typed window or request-body refusal and same-run effect
+    authorization, memory
     reprojection is offered first. [Reprojected] retries at the same history
     capacity after [on_memory_retry] resets caller recovery state. [Unchanged]
     uses history shrinking; a callback error preserves the original refusal

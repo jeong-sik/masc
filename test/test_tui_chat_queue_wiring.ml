@@ -17,6 +17,13 @@ module Tui_types = Masc_tui_types
 module Tui_decode = Masc.Tui_decode
 module Keeper_selection = Masc_tui_keeper_selection
 
+let operation_key id : Tui_types.journal_key = "alpha", Log.Operation id
+let journal_key_test = testable
+    (fun ppf (keeper, source) -> Format.fprintf ppf "%s/%s:%s" keeper
+      (match source with Log.Operation _ -> "operation" | Autonomous_turn _ -> "turn")
+      (Log.source_key source)) (=)
+let operation_targets rows = List.map (fun (id, at) -> operation_key id, at) rows
+
 let position =
   testable
     (fun formatter position ->
@@ -47,6 +54,7 @@ let entry_at ?(id = "") at : Tui_types.msg_entry =
   ; me_skill_block = []
   ; me_timestamp = ""
   ; me_request_id = ""
+  ; me_execution_source = None
   ; me_at = at
   }
 
@@ -74,6 +82,7 @@ let chat_entry ?turn_phase ?turn_sequence ?(operation_seq = 0) ?memory_summary
   ; me_skill_block = []
   ; me_timestamp = Printf.sprintf "%.0f" at
   ; me_request_id = request_id
+  ; me_execution_source = Some (Masc_tui_keeper_chat_log.Operation request_id)
   ; me_at = at
   }
 
@@ -1618,22 +1627,22 @@ let test_journal_fetch_targets_choose_the_newest_unheld_turns () =
     [ ("op-old", 10.); ("op-old", 12.); ("op-held", 20.); ("op-gone", 30.)
     ; ("op-new", 40.); ("op-new", 39.); ("op-mid", 25.) ]
   in
-  check (list (pair string (float 0.001))) "once each, newest first, by the earliest row"
-    [ ("op-new", 39.); ("op-mid", 25.); ("op-old", 10.) ]
-    (Tui_types.journal_fetch_targets ~held:[ "op-held" ] ~unavailable:[ "op-gone" ]
-       candidates);
-  check (list (pair string (float 0.001))) "nothing named, nothing asked" []
+  check (list (pair journal_key_test (float 0.001))) "once each, newest first, by the earliest row"
+    (operation_targets [ ("op-new", 39.); ("op-mid", 25.); ("op-old", 10.) ])
+    (Tui_types.journal_fetch_targets ~held:[ operation_key "op-held" ] ~unavailable:[ operation_key "op-gone" ]
+       (operation_targets candidates));
+  check (list (pair journal_key_test (float 0.001))) "nothing named, nothing asked" []
     (Tui_types.journal_fetch_targets ~held:[] ~unavailable:[] []);
   (* Same instant: the order is the id's. *)
-  check (list (pair string (float 0.001))) "a tie is broken by id"
-    [ ("op-a", 5.); ("op-b", 5.); ("op-c", 5.) ]
+  check (list (pair journal_key_test (float 0.001))) "a tie is broken by id"
+    (operation_targets [ ("op-a", 5.); ("op-b", 5.); ("op-c", 5.) ])
     (Tui_types.journal_fetch_targets ~held:[] ~unavailable:[]
-       [ ("op-c", 5.); ("op-a", 5.); ("op-b", 5.) ]);
+       (operation_targets [ ("op-c", 5.); ("op-a", 5.); ("op-b", 5.) ]));
   (* A page of many operations, each named by two rows, a third of them held
      and a third refused: one target per operation that is neither, none
      skipped. The expectation is derived from the same input, so it holds
      for any page the server chooses to send. *)
-  let named = List.init 64 (fun index -> Printf.sprintf "op-%03d" index) in
+  let named = List.init 64 (fun index -> operation_key (Printf.sprintf "op-%03d" index)) in
   let held = List.filteri (fun index _ -> index mod 3 = 0) named in
   let unavailable = List.filteri (fun index _ -> index mod 3 = 1) named in
   let rows = List.concat_map (fun id -> [ (id, 1.); (id, 2.) ]) named in
@@ -1641,9 +1650,9 @@ let test_journal_fetch_targets_choose_the_newest_unheld_turns () =
   let expected = List.filteri (fun index _ -> index mod 3 = 2) named in
   check int "one target per named operation not held and not refused"
     (List.length expected) (List.length targets);
-  check (list string) "and each of them"
-    (List.sort String.compare expected)
-    (List.sort String.compare (List.map fst targets))
+  check (list journal_key_test) "and each of them"
+    (List.sort compare expected)
+    (List.sort compare (List.map fst targets))
 ;;
 
 (* The acceptance is the server taking the POST, not a fact about the turn:
@@ -1749,22 +1758,22 @@ let test_a_journal_read_resumes_after_a_partial_log () =
     Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
   in
   check position "nothing held: the whole journal" Journal.Whole_turn
-    (Tui_types.journal_resume_position state ~keeper_name:"alpha" "op-1");
+    (Tui_types.journal_resume_position state ~keeper_name:"alpha" (Log.Operation "op-1"));
   let partial = journal_log ~request_id:"op-1" ~started_at:1. ~finished:false () in
   Tui_types.hold_settled_log state partial;
   check position "a partial log: after what it has" (Journal.After_seq 2)
-    (Tui_types.journal_resume_position state ~keeper_name:"alpha" "op-1");
+    (Tui_types.journal_resume_position state ~keeper_name:"alpha" (Log.Operation "op-1"));
   check position "another keeper's record does not count" Journal.Whole_turn
-    (Tui_types.journal_resume_position state ~keeper_name:"beta" "op-1");
+    (Tui_types.journal_resume_position state ~keeper_name:"beta" (Log.Operation "op-1"));
   Tui_types.hold_settled_log state (journal_log ~request_id:"op-1" ~started_at:1. ());
   check position "a whole log is not read again" Journal.Whole_turn
-    (Tui_types.journal_resume_position state ~keeper_name:"alpha" "op-1");
-  Tui_types.journal_read_started state "op-9";
-  Tui_types.journal_read_started state "op-9";
-  check (list string) "a read in flight is remembered once" [ "op-9" ]
+    (Tui_types.journal_resume_position state ~keeper_name:"alpha" (Log.Operation "op-1"));
+  Tui_types.journal_read_started state (operation_key "op-9");
+  Tui_types.journal_read_started state (operation_key "op-9");
+  check (list journal_key_test) "a read in flight is remembered once" [ operation_key "op-9" ]
     state.msg_journal_inflight;
-  Tui_types.journal_read_finished state "op-9";
-  check (list string) "and forgotten when it returns" [] state.msg_journal_inflight
+  Tui_types.journal_read_finished state (operation_key "op-9");
+  check (list journal_key_test) "and forgotten when it returns" [] state.msg_journal_inflight
 ;;
 
 (* A rebuilt turn takes its place by when it started; a turn the session
@@ -1789,9 +1798,9 @@ let test_hold_settled_log_orders_by_start_and_replaces_only_partial_logs () =
   check bool "and gives way to the whole one" false (List.memq partial state.msg_settled_logs);
   check (list string) "still one log per turn, in order"
     [ "op-10"; "op-15"; "op-20"; "op-30" ] (ids ());
-  Tui_types.remember_journal_unavailable state "op-x";
-  Tui_types.remember_journal_unavailable state "op-x";
-  check (list string) "an unavailable journal is remembered once" [ "op-x" ]
+  Tui_types.remember_journal_unavailable state (operation_key "op-x");
+  Tui_types.remember_journal_unavailable state (operation_key "op-x");
+  check (list journal_key_test) "an unavailable journal is remembered once" [ operation_key "op-x" ]
     state.msg_journal_unavailable
 ;;
 
@@ -1976,7 +1985,7 @@ let test_skill_evidence_stands_for_a_read_the_trail_missed () =
   in
   let log =
     settled_log ~request_id:"op-1"
-      [ Live.Run_started; Live.Stream_model_started { stream_scope = Some 1; model = "observed" }
+      [ Live.Run_started; Live.Stream_model_started {usage = None; message_id = None;  stream_scope = Some 1; model = "observed" }
       ; Live.Text {text="done"; stream_scope=None}
       ; Live.Stream_details { stream_scope = Some 1; usage = None; stop_reason = Some EndTurn }
       ; visible_reply "done"; Live.Run_finished ]
@@ -2145,11 +2154,50 @@ let test_exact_operation_ending_keeps_unjournaled_rows () =
          | Stream_ended | Stream_failed _ -> true | Waiting | Working -> false);
       check bool "missing journal entries are not claimed complete" false
         (Tui_types.turn_log_holds_the_turn log);
+      check bool "record closure keeps journal replay open" false (Tui_types.turn_log_has_ended log);
+      check bool "record closure ends visual progress" true
+        (Tui_types.observed_log_has_ended state log);
+      let cache = Masc_tui_ansi.terminal_size_cache in
+      let previous_size = Masc_tui_ansi.get_terminal_size () in
+      let set_size size = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+          cache ~probe:(fun () -> Some size)) in
+      Fun.protect ~finally:(fun () -> state.msg_loaded <- loaded_turn ~request_id:"cut";
+          set_size previous_size) (fun () ->
+        set_size (40, 100);
+        state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+        state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+        (* Inspect this partial journal's rail, independent of history rails. *)
+        state.msg_loaded <- [];
+        let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+        let screen = String.concat "\n"
+            (List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines) in
+        check bool "record-terminal partial journal keeps its text" true
+          (Astring.String.is_infix ~affix:"half" screen);
+        let has_rail edge = Astring.String.is_infix
+            ~affix:(Masc_tui_message_layout.turn_rail_glyph edge) screen in
+        check bool "record-terminal partial journal has no open-ended rail" true
+          (has_rail Masc_tui_message_layout.Rail_closes
+           || has_rail Masc_tui_message_layout.Rail_stands
+           || not (has_rail Masc_tui_message_layout.Rail_opens)));
+      let source = Log.source log.tl_log in
+      let key = "alpha", source in
+      check bool "history can still select record-closed source" false
+        (List.mem key (Tui_types.journal_held_keys state "alpha"));
+      (match Tui_types.journal_follow_for_source state ~keeper_name:"alpha" ~source ~seq:None ~at:151. with
+       | Tui_types.Follow_read _ -> ()
+       | Follow_nothing | Follow_read_after_inflight -> fail "record-only closure retired missing tail");
       check (list string) "durable keeper, tool and skill rows stay visible" expected
         (Tui_types.chat_rows_for state "alpha" |> List.map (fun (row : Tui_types.msg_entry) -> row.me_text))
     in
     verify log;
-    verify {log with tl_transcript=Keeper_chat_transcript.of_log ~now:200. log.tl_log})
+    verify {log with tl_transcript=Keeper_chat_transcript.of_log ~now:200. log.tl_log};
+    let _, journal, replay = Log.read_with_operation_state
+      ~read_operation:(fun () -> Ok (Some terminal)) ~read_journal:(fun () -> Ok []) in
+    (match journal with Ok _ -> Log.observe_terminal_replay log.tl_log replay | Error _ -> ());
+    check bool "successful post-terminal replay retires the source" true
+      (List.mem ("alpha", Log.source log.tl_log) (Tui_types.journal_held_keys state "alpha"));
+    check bool "retirement does not claim absent durable rows are journaled" false
+      (Tui_types.turn_log_holds_the_turn log))
     [ Keeper_chat_operation.Failed {completed_at=150.; failure={kind=Turn_cancelled;
         detail="owner stopped"; outcome_ref=None}}
     ; Cancelled {completed_at=150.}
@@ -3436,7 +3484,7 @@ let test_partial_observation_survives_history_ending_and_unavailable_journal () 
   in
   let state = fresh () in
   check (list string) "running: observed" [ "op-1" ] (observed state);
-  Tui_types.remember_journal_unavailable state "op-1";
+  Tui_types.remember_journal_unavailable state (operation_key "op-1");
   check (list string) "unavailable journal retains the observed content" ["op-1"]
     (observed state);
   let log = List.hd state.msg_settled_logs in
@@ -3449,14 +3497,14 @@ let test_partial_observation_survives_history_ending_and_unavailable_journal () 
     [ chat_entry ~request_id:"op-1" ~role:Tui_types.Message_error
         ~text:"provider failed at settle" ~at:130. () ];
   check (list string) "failure retains the earlier observed content" ["op-1"] (observed state);
-  check bool "the durable failure closes this observation" true
+  check bool "durable failure alone does not close journal observation" false
     (Tui_types.observed_log_has_ended state (List.hd state.msg_settled_logs));
   let state = fresh () in
   state.msg_loaded <-
     [ chat_entry ~request_id:"op-1" ~role:Tui_types.Message_keeper
         ~text:"the recorded reply" ~at:130. () ];
   check (list string) "reply retains the earlier observed content" ["op-1"] (observed state);
-  check bool "the durable reply closes this observation" true
+  check bool "durable reply alone does not close journal observation" false
     (Tui_types.observed_log_has_ended state (List.hd state.msg_settled_logs))
 ;;
 
@@ -3692,7 +3740,7 @@ let test_observed_history_handoff_keeps_progress_and_one_final_reply () =
         (Tui_types.observed_turn_text_drawn state "alpha")
     in
     assert_handoff "durable reply before ending journal";
-    Tui_types.remember_journal_unavailable state "handoff";
+    Tui_types.remember_journal_unavailable state (operation_key "handoff");
     assert_handoff "unavailable journal";
     (* The tool round separates earlier progress from the terminal stretch.
        Reply_details replaces only the latter, even before finish. *)
@@ -3840,7 +3888,7 @@ let test_a_stream_frame_asks_for_a_journal_read_from_where_the_record_ends () =
    | Follow_nothing | Follow_read_after_inflight ->
        fail "a frame with no seq (the settle-time terminal) is read");
   let inflight_state = held_state () in
-  Tui_types.journal_read_started inflight_state "op-1";
+  Tui_types.journal_read_started inflight_state (operation_key "op-1");
   (match follow inflight_state with
    | Tui_types.Follow_read_after_inflight -> ()
    | Follow_nothing | Follow_read _ -> fail "a read in flight is not doubled");
@@ -3851,7 +3899,7 @@ let test_a_stream_frame_asks_for_a_journal_read_from_where_the_record_ends () =
    | Tui_types.Follow_nothing -> ()
    | Follow_read _ | Follow_read_after_inflight -> fail "a turn that ended is over");
   let unavailable_state = fresh () in
-  Tui_types.remember_journal_unavailable unavailable_state "op-1";
+  Tui_types.remember_journal_unavailable unavailable_state (operation_key "op-1");
   (match follow unavailable_state with
    | Tui_types.Follow_nothing -> ()
    | Follow_read _ | Follow_read_after_inflight ->
@@ -3881,19 +3929,19 @@ let test_a_wanted_journal_read_is_remembered_once_and_taken_once () =
   let state =
     Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
   in
-  Tui_types.journal_read_wanted state "op-1" (Some 4);
-  Tui_types.journal_read_wanted state "op-1" (Some 9);
-  Tui_types.journal_read_wanted state "op-1" None;
-  Tui_types.journal_read_wanted state "op-2" None;
-  check (list string) "one entry per operation" [ "op-2"; "op-1" ]
+  Tui_types.journal_read_wanted state (operation_key "op-1") (Some 4);
+  Tui_types.journal_read_wanted state (operation_key "op-1") (Some 9);
+  Tui_types.journal_read_wanted state (operation_key "op-1") None;
+  Tui_types.journal_read_wanted state (operation_key "op-2") None;
+  check (list journal_key_test) "one entry per operation" [ operation_key "op-2"; operation_key "op-1" ]
     (List.map fst state.msg_journal_wanted);
-  (match Tui_types.take_journal_wanted state "op-1" with
+  (match Tui_types.take_journal_wanted state (operation_key "op-1") with
    | Tui_types.Wanted { highest_seq } ->
        check (option int) "the highest seq named" (Some 9) highest_seq
    | Not_wanted -> fail "op-1 was wanted");
   check bool "taken once" true
-    (Tui_types.take_journal_wanted state "op-1" = Tui_types.Not_wanted);
-  check (list string) "the other stays" [ "op-2" ] (List.map fst state.msg_journal_wanted);
+    (Tui_types.take_journal_wanted state (operation_key "op-1") = Tui_types.Not_wanted);
+  check (list journal_key_test) "the other stays" [ operation_key "op-2" ] (List.map fst state.msg_journal_wanted);
   (* The landed read reached the line the frames named: the pane holds
      seq 2 of op-1 and the frames named 2, so nothing more is read. *)
   let held = fresh_state_with_running_log () in
@@ -3904,6 +3952,156 @@ let test_a_wanted_journal_read_is_remembered_once_and_taken_once () =
    | Tui_types.Follow_nothing -> ()
    | Follow_read _ | Follow_read_after_inflight ->
        fail "a read that reached the named seq ends the chain")
+;;
+
+let test_history_cannot_retire_a_partial_journal () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let source = Log.Operation "reply-op" in
+  let key = "alpha", source in
+  state.msg_loaded_keeper <- Some "alpha";
+  state.msg_loaded <- [chat_entry ~request_id:"reply-op" ~role:Tui_types.Message_keeper
+      ~text:"final answer" ~at:110. ()];
+  let receive lines =
+    match Tui_types.receive_journal_result state ~keeper_name:"alpha" ~source
+        ~started_at:100. (Ok lines) with
+    | Ok (log, _) -> log
+    | Error error -> fail (Log.events_error_to_string error) in
+  let follow () = Tui_types.journal_follow_for_source state ~keeper_name:"alpha"
+      ~source ~seq:(Some 3) ~at:110. in
+  Tui_types.journal_read_started state key;
+  Tui_types.journal_read_wanted state key (Some 3);
+  let log = receive
+      [line 0 100. (E.Run_started {run_id="reply-run"; thread_id="keeper:alpha"});
+       line 1 101. (E.Text_delta {text="partial answer"; stream_scope=None})] in
+  check (list journal_key_test) "valid history-before-terminal read is not unavailable"
+    [] state.msg_journal_unavailable;
+  check bool "history alone cannot close journal observation" false
+    (Tui_types.observed_log_has_ended state log);
+  (match Tui_types.take_journal_wanted state key, follow () with
+   | Tui_types.Wanted {highest_seq=Some 3}, Follow_read {since_seq=Journal.After_seq 1; _} -> ()
+   | _ -> fail "terminal notification cannot resume after the partial page");
+  ignore (receive []);
+  (match follow () with
+   | Tui_types.Follow_read {since_seq=Journal.After_seq 1; _} -> ()
+   | _ -> fail "empty read retired the still-open journal");
+  ignore (receive [line 2 110. (journal_reply "final answer");
+                  line 3 111. (E.Run_finished {run_id="reply-run"})]);
+  check bool "terminal events complete the same held log" true
+    (Tui_types.turn_log_holds_the_turn log);
+  check bool "terminal event stops observer follow" true (follow () = Tui_types.Follow_nothing);
+  check (list journal_key_test) "completion is distinct from unavailable" [] state.msg_journal_unavailable;
+  check int "terminal journal now owns the stored reply" 0
+    (List.length (Tui_types.chat_rows_for state "alpha"))
+;;
+
+let test_journal_endpoints_preserve_terminal_and_failure_boundaries () =
+  let fresh () = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let source = Log.Operation "boundary" in
+  let follow state = Tui_types.journal_follow_for_source state ~keeper_name:"alpha"
+      ~source ~seq:None ~at:3. in
+  let receive state result = Tui_types.receive_journal_result state ~keeper_name:"alpha"
+      ~source ~started_at:1. result in
+  let start = line 0 1. (E.Run_started {run_id="boundary"; thread_id="keeper:alpha"}) in
+  let state = fresh () in
+  let cancelled = match receive state (Ok [start; line 1 2. (E.Run_finished {run_id="boundary"})]) with
+    | Ok (log, _) -> log | Error error -> fail (Log.events_error_to_string error) in
+  check bool "cancellation is terminal without a reply" true (Tui_types.turn_log_has_ended cancelled);
+  check bool "cancelled journal cannot replace durable conversation" false
+    (Tui_types.turn_log_holds_the_turn cancelled);
+  check bool "cancelled journal is not polled again" true (follow state = Tui_types.Follow_nothing);
+  check (list journal_key_test) "cancelled journal is not unavailable" [] state.msg_journal_unavailable;
+  check (list (pair journal_key_test (float 0.001))) "history also excludes terminal cancellation" []
+    (Tui_types.journal_fetch_targets ~held:(Tui_types.journal_held_keys state "alpha")
+       ~unavailable:[] [(("alpha", source), 1.)]);
+  let state = fresh () in
+  let failed = match receive state (Ok [start; line 1 2. (E.Event_error {message="provider failed"})]) with
+    | Ok (log, _) -> log | Error error -> fail (Log.events_error_to_string error) in
+  check bool "journal failure is terminal evidence" true (Tui_types.turn_log_has_ended failed);
+  check bool "failure remains available as the recorded outcome" true
+    (Tui_types.turn_log_holds_the_turn failed);
+  check bool "failed execution is not polled again" true (follow state = Tui_types.Follow_nothing);
+  let state = fresh () in
+  let checkpoint = E.Reply_details {reply=""; turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint;
+      turn_ref=Ids.Turn_ref.make ~trace_id:"boundary" ~absolute_turn:1} in
+  ignore (receive state (Ok [start; line 1 2. checkpoint; line 2 3. (E.Run_finished {run_id="boundary"})]));
+  (match follow state with
+   | Tui_types.Follow_read {since_seq=Journal.After_seq 2; _} -> ()
+   | _ -> fail "continuation checkpoint was treated as a terminal operation");
+  List.iter (fun (error, unavailable) ->
+    let state = fresh () in
+    let log = match receive state (Ok [start; line 1 2. (E.Text_delta {text="observed evidence"; stream_scope=None})]) with
+      | Ok (log, _) -> log | Error error -> fail (Log.events_error_to_string error) in
+    Tui_types.journal_read_started state ("alpha", source);
+    ignore (receive state (Error error));
+    check (list journal_key_test) "failed read releases only its read marker" [] state.msg_journal_inflight;
+    check string "endpoint failure preserves earlier journal text" "observed evidence"
+      (Keeper_chat_transcript.text log.tl_transcript);
+    check bool "endpoint evidence owns availability" unavailable
+      (Tui_types.observed_log_is_unavailable state log);
+    check bool "unavailability does not invent termination" false (Tui_types.turn_log_has_ended log);
+    check bool "transient failures remain followable" unavailable (follow state = Tui_types.Follow_nothing))
+    [Log.Journal_pruned, true; Journal_missing, true; Unknown_operation, true;
+     Journal_unavailable "read failed", true; Events_denied "denied", true;
+     Events_undecodable "invalid page", true; Events_transport "offline", false]
+;;
+
+let test_journal_tracking_keeps_keeper_and_source_identity () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let source = Log.Operation "daily-review" in
+  let alpha = "alpha", source and beta = "beta", source in
+  let follow keeper = Tui_types.journal_follow_for_source state ~keeper_name:keeper
+      ~source ~seq:(Some 9) ~at:10. in
+  Tui_types.journal_read_started state alpha;
+  Tui_types.journal_read_started state beta;
+  Tui_types.journal_read_wanted state alpha (Some 4);
+  Tui_types.journal_read_wanted state beta (Some 9);
+  ignore (Tui_types.receive_journal_result state ~keeper_name:"alpha" ~source ~started_at:1.
+      (Error Log.Journal_pruned));
+  check (list journal_key_test) "alpha result cannot release beta read" [beta] state.msg_journal_inflight;
+  check bool "beta still waits for its own in-flight read" true
+    (follow "beta" = Tui_types.Follow_read_after_inflight);
+  (match Tui_types.take_journal_wanted state alpha, Tui_types.take_journal_wanted state beta with
+   | Wanted {highest_seq=Some 4}, Wanted {highest_seq=Some 9} -> ()
+   | _ -> fail "same-named Keepers shared a wanted cursor");
+  Tui_types.journal_read_finished state beta;
+  (match follow "beta" with Follow_read _ -> () | _ -> fail "alpha unavailability blocked beta");
+  check (list (pair journal_key_test (float 0.001))) "history retains beta's same-named source"
+    [beta, 2.] (Tui_types.journal_fetch_targets ~held:[] ~unavailable:state.msg_journal_unavailable
+      [alpha, 1.; beta, 2.]);
+  let own = inflight_with_log ~keeper_name:"alpha" ~started_at:3. [Live.Run_started] in
+  let beta_source = Log.Operation own.sent_request.request_id in
+  state.msg_inflight <- [own];
+  let beta_log = match Tui_types.receive_journal_result state ~keeper_name:"beta" ~source:beta_source
+      ~started_at:3. (Ok [line 0 3. (E.Run_started {run_id="beta"; thread_id="keeper:beta"})]) with
+    | Ok (log, _) -> log | Error error -> fail (Log.events_error_to_string error) in
+  check bool "alpha's own stream does not hide beta's observed journal" true
+    (List.memq beta_log (Tui_types.observed_logs_for_keeper state "beta"));
+  (match Tui_types.journal_follow_for_source state ~keeper_name:"beta" ~source:beta_source
+      ~seq:(Some 1) ~at:4. with Follow_read _ -> () | _ -> fail "alpha's POST excluded beta's journal");
+  check bool "alpha's own stream does not exclude beta from history fetches" false
+    (List.mem ("beta", beta_source) (Tui_types.journal_held_keys state "beta"));
+  Tui_types.remember_journal_unavailable state ("beta", beta_source);
+  Tui_types.journal_read_started state ("alpha", beta_source);
+  check (list string) "alpha ownership and read cannot block beta operation recovery"
+    [own.sent_request.request_id] (Tui_types.unavailable_journal_operation_targets state "beta");
+  Tui_types.journal_read_started state ("beta", beta_source);
+  check (list string) "beta's exact read suppresses duplicate operation recovery" []
+    (Tui_types.unavailable_journal_operation_targets state "beta");
+  Tui_types.journal_read_finished state ("alpha", beta_source);
+  Tui_types.journal_read_finished state ("beta", beta_source);
+  let turn = Ids.Turn_ref.make ~trace_id:"same-key" ~absolute_turn:7 in
+  let autonomous = Log.Autonomous_turn turn in
+  let operation = Log.Operation (Log.source_key autonomous) in
+  Tui_types.remember_journal_unavailable state ("beta", operation);
+  List.iter (fun source -> ignore (Tui_types.receive_journal_result state ~keeper_name:"beta"
+    ~source ~started_at:5. (Ok [line 0 5. (E.Run_started {run_id="typed"; thread_id="keeper:beta"})])))
+    [operation; autonomous];
+  (match Tui_types.journal_follow_for_source state ~keeper_name:"beta" ~source:autonomous
+      ~seq:(Some 1) ~at:6. with Follow_read _ -> () | _ -> fail "operation display key blocked autonomous source");
+  check int "typed sources with equal display keys remain distinct held sources" 2
+    (Tui_types.selected_source_logs_for_keeper state "beta"
+     |> List.filter (fun log -> List.mem (Log.source log.Tui_types.tl_log) [operation; autonomous])
+     |> List.length)
 ;;
 
 (* A log built from a journal read stands at the journal head's own time,
@@ -4533,8 +4731,8 @@ let test_batch_watchers_render_one_shared_settled_turn () =
     ["batch-owner"; "different-request"] (List.map Tui_types.turn_log_request_id visible);
   check bool "follower watcher retains its own request lookup" true
     (Option.is_some (Tui_types.settled_log_for_request state ~keeper_name:"alpha" "batch-follower"));
-  check string "held transcript suppresses only the canonical owner's persisted reply"
-    "batch-owner" (Tui_types.held_turn_of_log follower).ht_request_id;
+  check bool "held transcript suppresses only the canonical owner's persisted reply" true
+    ((Tui_types.held_turn_of_log follower).ht_source = Log.Operation "batch-owner");
   let invalid = make "unrelated-request" "unrelated-request" in
   Tui_types.turn_log_add ~now:3. invalid ~seq:None
     (Live.Batch_bound {operation_id="other-request"; execution_id="batch-owner"});
@@ -4795,17 +4993,17 @@ let test_every_request_of_a_held_batch_is_held_for_journal_reads () =
   check (list string) "the batch draws once"
     [ "batch-owner" ]
     (List.map Tui_types.turn_log_request_id (Tui_types.settled_logs_for_keeper state "alpha"));
-  let held = Tui_types.journal_held_request_ids state "alpha" in
-  check (list string) "both requests are held"
-    [ "batch-follower"; "batch-owner" ] (List.sort String.compare held);
-  check (list (pair string (float 0.001))) "neither journal is asked for again" []
+  let held = Tui_types.journal_held_keys state "alpha" in
+  check (list journal_key_test) "both requests are held"
+    [ operation_key "batch-follower"; operation_key "batch-owner" ] (List.sort compare held);
+  check (list (pair journal_key_test (float 0.001))) "neither journal is asked for again" []
     (Tui_types.journal_fetch_targets ~held ~unavailable:[]
-       [ ("batch-owner", 1.); ("batch-follower", 1.) ]);
-  check (list string) "another keeper holds nothing" []
-    (Tui_types.journal_held_request_ids state "beta");
-  Tui_types.journal_read_started state "being-read";
+       (operation_targets [ ("batch-owner", 1.); ("batch-follower", 1.) ]));
+  check (list journal_key_test) "another keeper holds nothing" []
+    (Tui_types.journal_held_keys state "beta");
+  Tui_types.journal_read_started state (operation_key "being-read");
   check bool "a journal being read is held" true
-    (List.mem "being-read" (Tui_types.journal_held_request_ids state "alpha"))
+    (List.mem (operation_key "being-read") (Tui_types.journal_held_keys state "alpha"))
 ;;
 
 let test_link_cards_use_actual_message_body_width () =
@@ -5491,7 +5689,7 @@ let test_unavailable_journal_status_repeats_no_diagnostics () =
         { runtime_id = Some "next-runtime"; attempt_index = Some 1 }) ] in
   Log.commit log.Tui_types.tl_log;
   Tui_types.hold_settled_log state log;
-  Tui_types.remember_journal_unavailable state "op-1";
+  Tui_types.remember_journal_unavailable state (operation_key "op-1");
   let frame, _ = Masc_tui_render_chat.render_keeper_message state in
   let lines = List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines in
   let naming text = List.filter (Astring.String.is_infix ~affix:text) lines in
@@ -5540,6 +5738,56 @@ let test_attachment_caption_whitespace_reaches_chat_rows () =
     ; "first\n\nsecond\n\n", ["first"; ""; "second"; ""]
     ; " \n  ", []
     ]
+;;
+
+let test_empty_post_terminal_replay_is_retained () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let source = Log.Operation "empty-terminal" in
+  let terminal = Keeper_chat_operation.Cancelled {completed_at=3.} in
+  let _, journal, replay = Log.read_with_operation_state
+    ~read_operation:(fun () -> Ok (Some terminal)) ~read_journal:(fun () -> Ok []) in
+  let log = match Tui_types.receive_journal_result state ~keeper_name:"alpha" ~source
+      ~started_at:1. journal with
+    | Ok (log, _) -> log | Error _ -> fail "empty journal must decode" in
+  check int "empty page alone cannot claim a held source" 0 (List.length state.msg_settled_logs);
+  Log.observe_operation_state log.tl_log (Some terminal);
+  Keeper_chat_transcript.reconcile_operation log.tl_transcript terminal;
+  Tui_types.record_terminal_replay state log replay;
+  check bool "post-terminal empty source is excluded from subsequent reads" true
+    (List.mem ("alpha", source) (Tui_types.journal_held_keys state "alpha"));
+  check bool "empty log does not replace durable history" false
+    (Tui_types.turn_log_holds_the_turn log)
+;;
+
+let test_history_suppression_preserves_typed_source_collisions () =
+  let turn = Ids.Turn_ref.make ~trace_id:"collision" ~absolute_turn:7 in
+  let key = Ids.Turn_ref.to_string turn in
+  let operation = Log.Operation key and autonomous = Log.Autonomous_turn turn in
+  List.iter (fun (own, other) -> List.iter (fun complete ->
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    state.msg_loaded_keeper <- Some "alpha";
+    let log = Tui_types.turn_log_create_for_source ~keeper_name:"alpha" ~source:own ~started_at:100. in
+    let occurrence = { Live.stream_scope=0; block_index=0;
+      provider_message_id=None; tool_call_id=Some "call" } in
+    let deltas = [Live.Run_started; Live.Tool_started {occurrence;tool_name="Execute"};
+      Live.Tool_ended {occurrence}; Live.Tool_result {occurrence;execution_id="same-call"};
+      visible_reply "answer"] @ (if complete then [Live.Run_finished] else []) in
+    List.iteri (fun seq delta -> Tui_types.turn_log_add ~now:101. log ~seq:(Some seq) delta) deltas;
+    Log.commit log.tl_log;
+    state.msg_settled_logs <- [log];
+    let rows source prefix =
+      let reply = chat_entry ~request_id:key ~role:Tui_types.Message_keeper ~text:(prefix ^ "reply") ~at:104. () in
+      let tool = { (chat_entry ~request_id:key ~role:Tui_types.Message_tool ~text:(prefix ^ "tool") ~at:102. ()) with
+        me_tool_block=Some (Keeper_chat_transcript.tool_block [
+          Keeper_chat_transcript.make_tool_activity ~execution_id:"same-call" ~call_id:(Some "call")
+            ~tool_name:"Execute" ~args:"{}" ~outcome:Keeper_chat_transcript.Returned ~duration:None ()]) } in
+      List.mapi (fun index row -> {row with Tui_types.me_execution_source=Some source;
+        me_identity=Tui_types.Persisted_row (prefix ^ string_of_int index)}) [tool;reply] in
+    state.msg_loaded <- rows own "own-" @ rows other "other-";
+    let visible = Tui_types.chat_rows_for state "alpha" in
+    check (list string) "only the source drawn by the log is suppressed" ["other-tool";"other-reply"]
+      (List.map (fun row -> row.Tui_types.me_text) visible)) [false;true])
+    [operation,autonomous;autonomous,operation]
 ;;
 
 let () =
@@ -5613,6 +5861,10 @@ let () =
             test_replayed_frames_up_to_the_last_seq_are_not_added_twice
         ; test_case "the reply row defers to a log that holds the turn" `Quick
             test_the_reply_row_defers_to_a_log_that_holds_the_turn
+        ; test_case "empty post-terminal replay is retained" `Quick
+            test_empty_post_terminal_replay_is_retained
+        ; test_case "typed source collisions retain other history" `Quick
+            test_history_suppression_preserves_typed_source_collisions
         ; test_case "a settled log holds its turn in the timeline" `Quick
             test_a_settled_log_holds_its_turn_in_the_timeline
         ; test_case "a log without reasoning leaves the trace row" `Quick
@@ -5712,6 +5964,12 @@ let () =
             test_a_stream_frame_asks_for_a_journal_read_from_where_the_record_ends
         ; test_case "a wanted journal read is remembered once and taken once" `Quick
             test_a_wanted_journal_read_is_remembered_once_and_taken_once
+        ; test_case "history cannot retire a partial journal" `Quick
+            test_history_cannot_retire_a_partial_journal
+        ; test_case "journal endpoint and terminal boundaries" `Quick
+            test_journal_endpoints_preserve_terminal_and_failure_boundaries
+        ; test_case "journal tracking keeps keeper and source identity" `Quick
+            test_journal_tracking_keeps_keeper_and_source_identity
         ; test_case "a journal-built log starts at the journal head" `Quick
             test_a_journal_built_log_starts_at_the_journal_head
         ; test_case "pending input enters transcript on execution evidence" `Quick

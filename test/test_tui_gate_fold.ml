@@ -38,6 +38,7 @@ let entry ?gate role text =
   ; me_timestamp = ""
   ; me_keeper_name = "k"
   ; me_request_id = ""
+  ; me_execution_source = None
   ; me_at = 0.
   }
 

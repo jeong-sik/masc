@@ -82,7 +82,7 @@ an approved selection receipt, or release verification.
 
 ```sh
 gh workflow run targeted-test.yml --repo OWNER/REPO --ref DRAFT_BRANCH \
-  -f expected_sha=EXACT_40_CHARACTER_COMMIT -f suite=test_keeper_memory_admission_export
+  -f expected_sha=EXACT_40_CHARACTER_COMMIT -f suite=test_keeper_external_attention
 ```
 
 The ref must still resolve to `expected_sha`. The wrapper and its local reusable

@@ -1,13 +1,13 @@
 {
-  "scope": "Current source syntax only. Historical runtime/footer/PTY results are not re-executed or certified by this receipt.",
+  "scope": "Current source hashes attest only parser checks rerun after stack integration. Prior native/PTY evidence is historical and not rerun.",
   "checks": {
     "bin/masc_tui.ml": {
-      "sha256": "47214fd75ffed6459301812094f782d71e2d1b618a4423a3ab488cc1c5d9f8e5",
+      "sha256": "2dffbdd251957d57580090f42e28ad78105b9d9dd258df3ca91569ddce2aa3d2",
       "check": "ocaml parsing",
       "result": "PASS"
     },
     "bin/masc_tui_render.ml": {
-      "sha256": "d81da1899d7add35c6c1cfa962f9807a0b611c4ad270ed4cca4c300ec448f70b",
+      "sha256": "6c57fd8ff20fae8eafd94dbc20237e614e4238e730efe667a8feb3bbf0102203",
       "check": "ocaml parsing",
       "result": "PASS"
     },

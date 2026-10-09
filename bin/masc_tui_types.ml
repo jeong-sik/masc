@@ -921,6 +921,16 @@ let order_chat_turn_rows rows =
    text alone is the question, and the table answers it without walking the
    turn. Non-user rows never fold: two tool rows with the same text are two
    calls. *)
+type chat_turn_key =
+  | Typed_execution of Masc_tui_keeper_chat_log.journal_source
+  | Legacy_request of string
+
+let chat_turn_key (row : msg_entry) =
+  match row.me_execution_source with
+  | Some source -> Typed_execution source
+  | None -> Legacy_request row.me_request_id
+;;
+
 type chat_turn_builder = {
   ctb_request_id : string;
   mutable ctb_rows_rev : msg_entry list;
@@ -961,7 +971,7 @@ let merge_turn_sequence held arriving =
    slots keep the order the walk found. *)
 let chat_timeline_slots rows =
   let slots_rev = ref [] in
-  let builders : (string, chat_turn_builder) Hashtbl.t = Hashtbl.create 64 in
+  let builders : (chat_turn_key, chat_turn_builder) Hashtbl.t = Hashtbl.create 64 in
   List.iter
     (fun (row : msg_entry) ->
       if row.me_role = Message_memory
@@ -969,7 +979,7 @@ let chat_timeline_slots rows =
       else if String.equal row.me_request_id ""
       then slots_rev := Slot_unowned row :: !slots_rev
       else
-        match Hashtbl.find_opt builders row.me_request_id with
+        match Hashtbl.find_opt builders (chat_turn_key row) with
         | Some builder ->
             (* The sequence is merged even when the row itself folds into a
                line already held: a duplicate still carries what it knows
@@ -995,7 +1005,7 @@ let chat_timeline_slots rows =
               ; ctb_user_texts = user_texts
               }
             in
-            Hashtbl.replace builders row.me_request_id builder;
+            Hashtbl.replace builders (chat_turn_key row) builder;
             slots_rev := Slot_turn builder :: !slots_rev)
     rows;
   List.rev_map
@@ -1091,7 +1101,7 @@ let chat_timeline ~loaded ~session ~queued_request_ids =
    ({!chat_timeline_slots}); this is the same question asked of one row, so a
    renderer can draw the boundary without rebuilding the timeline. *)
 type chat_row_lane =
-  | Lane_turn of string
+  | Lane_turn of chat_turn_key
       (** Produced inside the turn with this request id. *)
   | Lane_unowned
       (** No request owns it: another agent's broadcast, a system line. It
@@ -1105,7 +1115,7 @@ type chat_row_lane =
 let chat_row_lane (row : msg_entry) =
   if row.me_role = Message_memory then Lane_memory
   else if String.equal row.me_request_id "" then Lane_unowned
-  else Lane_turn row.me_request_id
+  else Lane_turn (chat_turn_key row)
 
 (* Where a row sits in its turn, for a renderer drawing the turn's edges. *)
 type turn_edge =
@@ -1168,7 +1178,7 @@ let mark_turn_edges rows =
         | Lane_turn request_id ->
             if
               match running with
-              | Some current -> String.equal current request_id
+              | Some current -> current = request_id
               | None -> false
             then walk running (index :: run) tl
             else (
@@ -3100,12 +3110,7 @@ let journal_fetch_targets ~held ~unavailable
 ;;
 
 let journal_source_of_history (row : Masc_tui_keeper_chat_history.row) =
-  match row.operation_id, row.turn_sequence, row.turn_id with
-  | Some operation_id, _, _ -> Some (Masc_tui_keeper_chat_log.Operation operation_id)
-  | None, Some _, Some turn_id ->
-      Option.map (fun turn_ref -> Masc_tui_keeper_chat_log.Autonomous_turn turn_ref)
-        (Ids.Turn_ref.of_string turn_id)
-  | None, _, _ -> None
+  row.execution_source
 ;;
 
 let journal_source_fetch_targets ~keeper_name ~held ~unavailable candidates =
@@ -7598,11 +7603,11 @@ let journal_follow_for_source state ~keeper_name ~source ~seq ~at =
 
 (* A recorded output can replace the polled text preview. It does not prove
    the journal ended: persistence and terminal publication are separate. *)
-let loaded_turn_has_output state ~keeper_name request_id =
+let loaded_turn_has_output state ~keeper_name source =
   Option.exists (String.equal keeper_name) state.msg_loaded_keeper
   && List.exists
        (fun (row : msg_entry) ->
-         String.equal row.me_request_id request_id
+         row.me_execution_source = Some source
          &&
          match row.me_role with
          | Message_keeper | Message_autonomous | Message_error -> true
@@ -7641,10 +7646,16 @@ let loaded_turn_has_output state ~keeper_name request_id =
 (* Visual progress may close from an authoritative operation record while
    its partial journal remains eligible for replay. History rows and journal
    availability do not settle the transcript's phase. *)
-let observed_log_has_ended _state log =
+let observed_log_has_ended state log =
   match Masc_tui_keeper_chat_transcript.phase log.tl_transcript with
   | Stream_ended | Stream_failed _ -> true
-  | Waiting | Working -> false
+  | Waiting | Working ->
+      (* An autonomous final row has no operation record to poll. It closes
+         visual progress only; the transcript and replay cursor stay open. *)
+      match turn_log_execution_source log with
+      | Masc_tui_keeper_chat_log.Operation _ -> false
+      | Masc_tui_keeper_chat_log.Autonomous_turn _ as source ->
+          loaded_turn_has_output state ~keeper_name:(turn_log_keeper_name log) source
 ;;
 
 let observed_log_is_unavailable state log =
@@ -7699,7 +7710,7 @@ let observed_turn_text_drawn state keeper_name =
           not (observed_log_has_ended state log)
           && not (observed_log_is_unavailable state log)
           && not (loaded_turn_has_output state
-              ~keeper_name:(turn_log_keeper_name log) (turn_log_execution_id log))))
+              ~keeper_name:(turn_log_keeper_name log) (turn_log_execution_source log))))
 ;;
 
 (* Whether a reasoning row is drawn at all under this visibility. The

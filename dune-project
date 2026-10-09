@@ -12,6 +12,8 @@
 ; installed find both the vendored and the pinned package at the same
 ; findlib names, so nothing changes for CI; the vendored directory stays
 ; uncommitted.
+(package
+ (name ocaml-msx))
 
 ; Format OCaml, and only OCaml. Nothing enforces formatting today:
 ; ocamlformat is disabled repo-wide (.ocamlformat, RFC-0010) and the

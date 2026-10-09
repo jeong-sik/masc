@@ -107,6 +107,16 @@ val run : Eio_unix.Stdenv.base -> config -> (unit, string) result
     server calls an ID ended on the first poll that ID ever sent: such an ID
     did not fall silent, and a further new one would be told the same.
 
+    It keeps {!Masc.Browser_bidi_host_record} for its workspace: who it is
+    from the start, when Firefox gave it its session, each result it holds
+    no acknowledgement for, and, on every way out named here, why it ended
+    and whether its session is still in Firefox. A workspace has one BiDi
+    host; a second returns an error naming the first before it connects to
+    Firefox, and so does a host that cannot write its first record. An
+    exception leaves the record without an ending, which its readers take
+    for a host that died. The workspace is given up when this returns or
+    raises.
+
     [stop] blocks until the operator asked the host to stop and answers what
     asked. From then on the host takes no further command: one in flight is
     finished and its answer offered once, the server is told, and the host

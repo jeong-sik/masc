@@ -695,6 +695,33 @@ let test_live_edge_seed_owns_source_position () = at_sizes (fun origin ->
   check bool "live-edge snapshot has at least one mapped source point" true
     (pin.pin_points<>[] && List.for_all (fun point -> Option.is_some point.T.source_position) pin.pin_points))
 
+let test_live_edge_seed_survives_first_scroll_with_reflow () = at_sizes (fun origin ->
+  let set_cols columns=ignore(Masc_tui_render_schedule.Terminal_size_cache.refresh
+    Masc_tui_ansi.terminal_size_cache ~probe:(fun () -> Some(26,columns))) in
+  let state=state origin in
+  let body=String.concat "\n" (List.init 40 (fun n ->
+    Printf.sprintf "LIVE_%03d %s END%03d" n (String.make 80 'x') n)) ^ " TAIL_END" in
+  state.msg_loaded <- [row ~id:"live-seed-reflow" ~request_id:"live-seed-reflow"
+    ~role:user ~text:body 1.];
+  set_cols 160;
+  let initial=frame_lines state in
+  check bool "actual live-edge gap keeps latest output" true
+    (List.exists (Astring.String.is_infix ~affix:"TAIL_END") initial);
+  let pin=Option.get state.msg_scroll_pin in
+  (match pin.pin_points with
+   | [{T.source_position=Some(T.Durable_position(Masc_tui_chat_search.Body_byte {offset;_}));rows_below;_}] ->
+       check int "seed owns actual visible tail endpoint" (String.length body-1) offset;
+       check bool "seed distance is inside actual viewport" true (rows_below < List.length initial)
+   | _ -> fail "live edge must seed one actual mapped tail endpoint");
+  (* The input gesture precedes the next paint after resize. No narrow frame
+     replaces the wide seed; the actual source endpoint must own recovery. *)
+  set_cols 42;
+  T.set_msg_scroll state 1;
+  let shown=frame_lines state in
+  check int "first scroll remains one row after reflow" 1 state.msg_scroll;
+  check bool "scroll stays by the same latest output" true
+    (List.exists (Astring.String.is_infix ~affix:"END038") shown))
+
 let test_unmapped_blank_does_not_override_typed_pin () = at_sizes (fun origin ->
   let set_cols columns=ignore(Masc_tui_render_schedule.Terminal_size_cache.refresh
     Masc_tui_ansi.terminal_size_cache ~probe:(fun () -> Some(26,columns))) in
@@ -837,6 +864,7 @@ let () = run "chat search projection" [
   "rendered conversation", [
     test_case "empty projection follows future arrivals" `Quick test_empty_projection_does_not_hold_future_arrivals;
     test_case "polled absolute source survives rolling and journal takeover" `Quick test_polled_source_survives_tail_and_journal_takeover;
+    test_case "live-edge seed survives first scroll with reflow" `Quick test_live_edge_seed_survives_first_scroll_with_reflow;
     test_case "live-edge seed owns a source position" `Quick test_live_edge_seed_owns_source_position;
     test_case "unmapped blank cannot override typed pin after reflow" `Quick test_unmapped_blank_does_not_override_typed_pin;
     test_case "lost source points release stale numeric scroll" `Quick test_lost_source_points_release_numeric_scroll;

@@ -3058,7 +3058,6 @@ type scroll_anchor_index = {
   indexed_entries : Message_layout.entry array;
   indexed_anchors : chat_scroll_anchor option array;
   transient_indices : (chat_scroll_anchor, int) Hashtbl.t;
-  newest_anchors : (int * chat_scroll_anchor) list;
 }
 
 let scroll_anchor_index_memo :
@@ -3072,10 +3071,6 @@ let scroll_anchor_index projection =
         (List.map (fun (tag, _) ->
            Option.map (fun anchor -> Scroll_durable anchor) (search_anchor_of_tag tag))
            projection.tagged_entries @ projection.transient_anchors) in
-      let newest_anchors = Array.fold_left (fun (index, newest) anchor ->
-        index + 1, (match anchor with
-          | Some anchor -> (index, anchor) :: newest
-          | None -> newest)) (0, []) indexed_anchors |> snd in
       let transient_indices = Hashtbl.create 8 in
       let offset = List.length projection.tagged_entries in
       List.iteri (fun at -> function
@@ -3094,11 +3089,9 @@ let scroll_anchor_index projection =
              | _ -> ())
         | Tagged_block _ -> ()) projection.tagged_entries;
       let indexed_entries = Array.of_list projection.layout_entries in
-      let anchors = {indexed_entries; indexed_anchors; newest_anchors; transient_indices} in
+      let anchors = {indexed_entries; indexed_anchors; transient_indices} in
       scroll_anchor_index_memo := Some (projection.layout_entries, anchors);
       anchors
-
-let newest_scroll_anchors projection = (scroll_anchor_index projection).newest_anchors
 
 let scroll_anchor_at projection index =
   let anchors = (scroll_anchor_index projection).indexed_anchors in
@@ -3115,6 +3108,7 @@ let projection_index_of_scroll_anchor projection = function
 type source_body_index = {
   source_rows : (chat_source_position, int) Hashtbl.t;
   row_sources : (int, chat_source_position) Hashtbl.t;
+  row_end_sources : (int, chat_source_position) Hashtbl.t;
 }
 
 type source_body_key = {
@@ -3228,6 +3222,7 @@ let source_body_lookup state ~keeper_name projection ~inner_width ~theme ~previe
                  | Body_label _ | Thinking_summary_byte _ | Thinking_summary_label _
                  | Preview_byte _ | Journal_byte _ -> None) in
           let source_rows = Hashtbl.create 64 and row_sources = Hashtbl.create 16 in
+          let row_end_sources = Hashtbl.create 16 in
           let body_rows = List.length body.mapped_rows in
           List.iter (fun (run : Search.run) ->
             let _, copied = Masc_tui_theme.strip_sgr_with_positions run.text in
@@ -3242,10 +3237,11 @@ let source_body_lookup state ~keeper_name projection ~inner_width ~theme ~previe
                          first actually visible row, matching search's source
                          producer traversal, without electing by source words. *)
                       if not (Hashtbl.mem source_rows position) then Hashtbl.add source_rows position row;
-                      if not (Hashtbl.mem row_sources row) then Hashtbl.add row_sources row position)
+                      if not (Hashtbl.mem row_sources row) then Hashtbl.add row_sources row position;
+                      Hashtbl.replace row_end_sources row position)
                       (Option.bind run.positions.(byte) convert)
                   done) ranges) run.visible_rows) body.runs;
-          Some {source_rows;row_sources} in
+          Some {source_rows;row_sources;row_end_sources} in
           Entry_cache.replace source_body_indexes entry {key;index};
           index in
         Hashtbl.add mapped entry_index value;
@@ -3282,30 +3278,21 @@ let requested_scroll_from_pin state ~keeper_name projection ~markdown ~source_bo
 
 let scroll_position_for_window state ~keeper_name projection ~markdown ~source_body ~inner_width
     (window : Message_layout.scroll_window) =
+  let live_edge = window.scroll = 0 in
+  let positions = if live_edge then List.rev window.body_positions else window.body_positions in
   let points = List.filter_map (fun (position : Message_layout.body_row_position) ->
     Option.bind (scroll_anchor_at projection position.entry_index) (fun anchor ->
+      let source = if live_edge then
+          Option.bind (source_body position.entry_index) (fun body ->
+            Hashtbl.find_opt body.row_end_sources position.body_row)
+        else source_point_on_row ~source_body position.entry_index position.body_row in
       Option.map (fun source_position ->
         {scroll_anchor=anchor; body_row=position.body_row; source_position=Some source_position;
-         rows_below=position.rows_below})
-        (source_point_on_row ~source_body position.entry_index position.body_row))) window.body_positions in
-  (* The live-edge layout can elide middle rows and does not return body
-     positions. Its newest structural entry still records the current tail
-     distance, so the first scroll key can freeze it before an arrival. *)
-  let search_held = match state.msg_scroll_pin with
-    | Some {pin_mode=Hold_search; _} -> true | Some _ | None -> false in
-  let points = if points <> [] || window.scroll <> 0 || search_held then points else
-    newest_scroll_anchors projection |> List.find_map (fun (entry_index, anchor) ->
-      Option.bind (source_body entry_index) (fun body ->
-        let first=Hashtbl.fold (fun row source held -> match held with
-          | Some(earlier,_) when earlier <= row -> held
-          | Some _ | None -> Some(row,source)) body.row_sources None in
-        Option.bind first (fun (body_row,source_position) ->
-          Option.map (fun suffix ->
-            [{scroll_anchor=anchor; body_row; source_position=Some source_position; rows_below=suffix}])
-            (Message_layout.scroll_for_body_row ~markdown
-              ~origin:state.msg_origin_display ~inner_width ~entry_index
-              ~body_row projection.layout_entries))))
-    |> Option.value ~default:[] in
+         rows_below=position.rows_below}) source)) positions in
+  (* Live-edge seeds use the last actually displayed mapped byte. Opening
+     rows separated from the tail by a generated gap never elect an offset
+     measured through an old, elided physical middle. *)
+  let points = if live_edge then (match points with [] -> [] | point::_ -> [point]) else points in
   (* Frame feedback must retain a searched query endpoint, rather than replace
      it with the first byte of whichever physical row is now at the top. An
      explicit scroll gesture changes Hold_search to Hold_scroll at the edge. *)

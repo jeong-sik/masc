@@ -2531,6 +2531,23 @@ let test_the_margin_comes_out_of_the_body () =
 (* Every scroll function has to measure the mode the pane draws. Given one
    mode for the clamp and another for the slice, the pane comes out a row
    short of where it says it is. *)
+let test_live_edge_positions_belong_to_actual_selected_rows () =
+  let entries=[entry Layout.Keeper "keeper" "live-edge"
+    (String.concat "\n" (List.init 100 (fun n -> Printf.sprintf "ROW_%03d" n)))] in
+  let window=Layout.clamped_scrolled_rows ~origin:Layout.Origin_row
+    ~inner_width:60 ~height:6 ~requested:0 entries in
+  check bool "actual producer exposes hidden middle" true
+    (List.exists (fun (row : Layout.row) -> match row.kind with Layout.Viewport_gap _ -> true | _ -> false) window.rows);
+  (match List.rev window.body_positions with
+   | position::_ ->
+       check int "last visible owner is original final body row" 99 position.body_row;
+       check int "tail owner is at actual viewport bottom" 0 position.rows_below
+   | [] -> fail "visible live-edge tail has no body owner");
+  let heading_only=Layout.clamped_scrolled_rows ~origin:Layout.Origin_row
+    ~inner_width:60 ~height:1 ~requested:0 entries in
+  check int "a heading-only viewport has no invented source position" 0
+    (List.length heading_only.body_positions)
+
 let test_scrolling_measures_the_mode_it_draws () =
   let entries =
     List.init 12 (fun index ->
@@ -2561,10 +2578,13 @@ let test_scrolling_measures_the_mode_it_draws () =
           check bool "the window never exceeds the height" true
             (List.length rows <= height);
           List.iter (fun (position : Layout.body_row_position) ->
-            check (option int) "a physical body origin resolves to the row drawn"
-              (Some (clamped + position.rows_below))
-              (Layout.scroll_for_body_row ~origin ~inner_width:40
-                ~entry_index:position.entry_index ~body_row:position.body_row entries);
+            let suffix = Layout.scroll_for_body_row ~origin ~inner_width:40
+                ~entry_index:position.entry_index ~body_row:position.body_row entries in
+            if clamped > 0 then
+              check (option int) "a physical body origin resolves to the row drawn"
+                (Some (clamped + position.rows_below)) suffix
+            else check bool "live-edge compression never invents missing body distance" true
+                (Option.fold ~none:false ~some:(fun suffix -> suffix >= position.rows_below) suffix);
             let entry = List.nth entries position.entry_index in
             let previous = if position.entry_index=0 then None
               else List.nth_opt entries (position.entry_index-1) in
@@ -3264,6 +3284,8 @@ let () =
             test_the_margin_comes_out_of_the_body
         ; test_case "scrolling measures the mode it draws" `Quick
             test_scrolling_measures_the_mode_it_draws
+        ; test_case "live-edge positions own actual selected rows" `Quick
+            test_live_edge_positions_belong_to_actual_selected_rows
         ; test_case "scrolling past the top shows nothing" `Quick
             test_scrolling_past_the_top_yields_no_rows_rather_than_wrapping
         ; test_case "a count takes the number it counts" `Quick

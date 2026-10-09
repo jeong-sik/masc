@@ -111,7 +111,8 @@ It ends by itself in three cases, and says which in its own log output:
   client ID as another browser, or it calls a client ID ended on the first
   poll that ID ever sent.
 
-The reason is not reported to the server.
+The reason is not reported to the server. It is written to the host's
+record, described below.
 
 A server that has ended the host's connection for its silence does not end
 the host. The server ends a connection after two minutes without a poll,
@@ -124,6 +125,88 @@ ID would be told the same.
 A Keeper that held the old `clientId` reads the list of connections again
 and takes the new one; requests under the old one are refused as
 `selected_client_disconnected`.
+
+## What the host leaves on disk
+
+The host keeps two files under `<base-path>/.masc/browser-lane/`, so that
+whether a host is running, and why the last one ended, can be read without a
+server:
+
+- `bidi-host.lock`. The host holds a lock on it from start to exit. The
+  kernel drops the lock however the host dies, so nothing has to be kept
+  fresh. A workspace has one BiDi host: a second one finds the lock held,
+  does not connect to Firefox, names the first one's pid and exits.
+- `bidi-host.json`. The host's pid, when it started, the BiDi address
+  without its query, the `clientId` it polls as now, and when Firefox gave
+  it its session. Every change replaces the whole file.
+  - `unacknowledged` lists each result the host holds no acknowledgement
+    for: the request's UUID, the verb, and two answers.
+    - `outcome`: the command `succeeded`, was refused before any effect
+      (`not_started`), or is `unknown`.
+    - `cause`: the server answered with a status that refuses the result
+      (`refused`), the host never sent it (`not_sent`), or no
+      acknowledgement reached the host (`unconfirmed`). The server takes a
+      result before it answers, so an `unconfirmed` one may have arrived:
+      that is also what an answer the host could not read is, and a result
+      that went out once and could not be sent again.
+  - The list is not trimmed while the host runs, and each addition writes
+    the record again.
+  - A host that leaves in order adds `ended`: when, why, and
+    `session_in_firefox`. A host that could not attach leaves its reason the
+    same way.
+    - `none`: nothing of this host's is left. Firefox confirmed the end or
+      said the connection has no session (`invalid session id`), the host
+      never got as far as asking for one, or Firefox answered its request
+      for one with an error other than `session not created`.
+    - `refused`: Firefox refused the host a session with `session not
+      created`. It does that while it holds one: another host's that is
+      attached, or one a host that died left there. That session was there
+      when this host asked. It stays until its own host ends it or that
+      Firefox is restarted, and the record does not say whether it is there
+      now.
+    - `left`: Firefox was asked and did not confirm: it answered with
+      another error, or not in time. It is taken to keep the session, and
+      then refuses the next host until it is restarted.
+    - `unknown`: the connection was gone before the host could ask. A
+      Firefox that quit took the session along; one still running keeps it.
+
+Read together they say one of these:
+
+| Record | Lock | Meaning |
+|---|---|---|
+| none | | No BiDi host has run for this workspace. |
+| no ending | held | A host is running. It is attached once the record has its session time; a server that is down does not change this. |
+| an ending | | The host left in order and said why. |
+| no ending | free | The host was killed or crashed, or it left in order and could not write its ending. Its BiDi session may be left in Firefox. |
+| unreadable | | The record is not one the reader takes. The reader still says whether a host holds the lock: one that does refuses the next host, which then cannot replace the record. |
+| no ending | cannot be asked | Whether the host runs is not known. The reader says so, with why the lock could not be asked. A record with its ending, and no record, are read without the lock. |
+
+A reader looks at the record and then at the lock, so it can be wrong for
+as long as one write of the record takes: while a starting host has the
+lock and not yet its record, the reader still sees the host before it; and
+a host that wrote its ending and exited between the two looks reads as
+killed. The next read is right.
+
+A host that starts replaces the record. It carries no lane token, no
+request's arguments and nothing read from a page. A request is named only by
+the UUID the server issued and by a verb the host knows; for anything else
+the field is `null`. A reader built before a verb was added reads that verb
+as unnamed and the rest of the record as it is. The reason for ending is the
+one free sentence, and it is written as printable ASCII: other bytes appear
+as `\xNN`, and a reason longer than 512 bytes is cut.
+
+A reader takes these three only in the form a host writes them: a reason in
+printable ASCII that is within that length or cut there and marked, an
+address as a host records it, and a client ID the lane would take. Anything
+else makes the record unreadable to it. What a reader passes on to an
+operator, a terminal and a model is then one line of known bytes and length;
+what the line says is not judged. Times are written to the nearest
+millisecond, and one a host wrote is written back as the same text.
+
+The host does not start when it cannot take the lock or write its first
+record: a host that held the lock under its predecessor's record would be
+read as that predecessor. A record that could not be written later does not
+stop a serving host; the next write that succeeds carries it.
 
 Attaching again is the host command alone. A host that is stopped, or ends
 by itself, first ends the BiDi session it asked for; Firefox keeps running

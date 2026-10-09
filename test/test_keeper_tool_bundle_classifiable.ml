@@ -279,6 +279,7 @@ let assert_exact_activation snapshot expected
 let with_bundle_tools
       ?(record_activations = true)
       ?(agent_core = false)
+      ?(identity_offered = identity_tools ())
       f
   =
   ignore (Masc_test_deps.init_unified_tool_registry ());
@@ -368,7 +369,7 @@ let with_bundle_tools
            ~ctx_snapshot
            ~capability_surface
            ~identity_surface:
-             { Masc.Keeper_tools_agent_core.offered = identity_tools ()
+             { Masc.Keeper_tools_agent_core.offered = identity_offered
              ; agent_cell = ref None
              ; history = []
              ; load_receipts
@@ -389,8 +390,8 @@ let with_bundle_tools
            (if agent_core then bundle.agent_core_tools else bundle.tools)))
 ;;
 
-let with_bundle f =
-  with_bundle_tools
+let with_bundle ?identity_offered f =
+  with_bundle_tools ?identity_offered
   @@ fun _config _meta _skill_snapshot composition_plan_index _surface tools ->
   f composition_plan_index
     (List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) tools)
@@ -819,12 +820,31 @@ let test_a_revisionless_ask_is_taught_the_exact_reference () =
 ;;
 
 let test_every_bundle_tool_is_classifiable () =
-  with_bundle (fun composition_plan_index names ->
+  let identity_offered = identity_tools () in
+  let identity_tool_index =
+    Masc.Keeper_identity_tool_index.of_tools identity_offered
+  in
+  with_bundle ~identity_offered (fun composition_plan_index names ->
+    List.iter
+      (fun (name, hint) ->
+         check (option (option bool)) "admitted service hint is retained"
+           (Some hint)
+           (Masc.Keeper_identity_tool_index.read_only identity_tool_index
+              ~tool_name:name);
+         check bool "an unattached service is not classified by name alone" false
+           (Policy.classifies
+              ~identity_tool_index:Masc.Keeper_identity_tool_index.empty
+              ~composition_plan_index:(Some composition_plan_index)
+              ~tool_name:name))
+      [ "atlassian_readsOnly", Some true
+      ; "atlassian_mayWrite", Some false
+      ; "atlassian_saidNothing", None
+      ];
     let unclassifiable =
       List.filter
         (fun tool_name ->
            not
-             (Policy.classifies ~identity_tool_index:Masc.Keeper_identity_tool_index.empty
+             (Policy.classifies ~identity_tool_index
                 ~composition_plan_index:(Some composition_plan_index) ~tool_name))
         names
     in

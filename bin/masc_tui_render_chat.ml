@@ -2756,20 +2756,6 @@ let render_keeper_message (state : state) =
                       Printf.sprintf "%s \xe2\x86\xba%d" text (attempt + 1)
                   | None -> text
                 in
-                let annotate_body body =
-                  match item.superseded_runtime_id with
-                  | Some rid when String.trim rid <> "" ->
-                      let attempt_num =
-                        match item.superseded with
-                        | Some a -> a + 1
-                        | None -> 1
-                      in
-                      let prefix =
-                        Printf.sprintf "*(attempt %d: `%s`)*" attempt_num (String.trim rid)
-                      in
-                      if body = "" then prefix else prefix ^ "\n" ^ body
-                  | _ -> body
-                in
                 let markdown_source =
                   Message_layout.Markdown_growing
                     { keeper_name; request_id; entry_index }
@@ -2839,14 +2825,14 @@ let render_keeper_message (state : state) =
                       then folded_thinking_summary (String.concat "\n" lines)
                       else String.concat "\n" lines
                     in
-                    entry Message_layout.Thinking (label "THINKING") (annotate_body body)
+                    entry Message_layout.Thinking (label "THINKING") body
                 | Keeper_chat_transcript.Drawn_tools block ->
                     let projection =
                       Keeper_chat_transcript.project_tool_block
                         (tool_projection_mode state) block
                     in
                     let body = String.concat "\n" (projected_tool_rows projection) in
-                    entry (tool_block_style projection) (label "TOOLS") (annotate_body body)
+                    entry (tool_block_style projection) (label "TOOLS") body
                 | Keeper_chat_transcript.Drawn_skill skills ->
                     entry
                       (Message_layout.Skill

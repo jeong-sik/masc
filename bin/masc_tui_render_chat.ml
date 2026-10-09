@@ -2588,11 +2588,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                      action = Message_layout.Action_none;
                    }
                     : Message_layout.entry)
-                    |> fold_thinking_entry state ~chat_cols
-                    |> fun entry ->
-                      if entry.style = Message_layout.Thinking then
-                        { entry with body = annotate_body entry.body }
-                      else entry }
+                    |> fold_thinking_entry state ~chat_cols }
               in
               match item.drawn with
               | Keeper_chat_transcript.Drawn_thinking _

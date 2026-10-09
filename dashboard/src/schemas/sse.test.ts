@@ -537,6 +537,49 @@ describe('SSEMessageSchema', () => {
     expect(r.success).toBe(false)
   })
 
+  // terminal_stream_scope rides KEEPER_REPLY_DETAILS as an optional field the
+  // server omits entirely when None (json_opt -> []). lib/keeper/
+  // keeper_chat_event_log.ml optional_stream_scope accepts absence and a
+  // nonnegative integer and rejects everything else, including null.
+  const replyDetails = (value: Record<string, unknown>) =>
+    customEvent('KEEPER_REPLY_DETAILS', value)
+
+  const validReplyDetails = {
+    reply: 'Done.',
+    turn_outcome: 'visible_reply',
+    turn_ref: 'turn-7',
+  }
+
+  it('accepts a reply details event with a terminal stream scope', () => {
+    expect(
+      SSEMessageSchema.safeParse(
+        replyDetails({ ...validReplyDetails, terminal_stream_scope: 2 }),
+      ).success,
+    ).toBe(true)
+  })
+
+  it('accepts reply details without the terminal stream scope key', () => {
+    expect(SSEMessageSchema.safeParse(replyDetails(validReplyDetails)).success).toBe(true)
+  })
+
+  it.each([0, 1, 3, 7])('accepts a nonnegative terminal stream scope: %s', scope => {
+    expect(
+      SSEMessageSchema.safeParse(replyDetails({ ...validReplyDetails, terminal_stream_scope: scope }))
+        .success,
+    ).toBe(true)
+  })
+
+  it.each([-1, '1', null, 1.5, Number.MAX_SAFE_INTEGER + 1])(
+    'rejects a malformed terminal stream scope: %s',
+    scope => {
+      expect(
+        SSEMessageSchema.safeParse(
+          replyDetails({ ...validReplyDetails, terminal_stream_scope: scope }),
+        ).success,
+      ).toBe(false)
+    },
+  )
+
   it('accepts a settled tool approval', () => {
     const r = SSEMessageSchema.safeParse(
       customEvent('KEEPER_TOOL_APPROVAL_SETTLED', {
@@ -603,7 +646,7 @@ describe('SSEMessageSchema', () => {
     // output counter. The producer omits unreported fields entirely.
     expect(SSEMessageSchema.safeParse(event({ output_tokens: 42 })).success).toBe(true)
     // The server-tool shape: every counter repeated as a cumulative total —
-    // still no total_tokens or cost on a delta.
+    // still no total_tokens on a delta.
     expect(
       SSEMessageSchema.safeParse(
         event({
@@ -616,6 +659,15 @@ describe('SSEMessageSchema', () => {
     ).toBe(true)
     expect(SSEMessageSchema.safeParse(event({ output_tokens: 4.2 })).success).toBe(false)
     expect(SSEMessageSchema.safeParse(event({ total_tokens: 9 })).success).toBe(false)
+    for (const cost_usd of [0, 0.0123]) {
+      const parsed = SSEMessageSchema.safeParse(event({ output_tokens: 42, cost_usd }))
+      expect(parsed.success).toBe(true)
+      if (parsed.success) expect(parsed.data).toEqual(event({ output_tokens: 42, cost_usd }))
+      expect(SSEMessageSchema.safeParse(event({ cost_usd })).success).toBe(true)
+    }
+    for (const cost_usd of [null, '0.0123', -0.0123, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(SSEMessageSchema.safeParse(event({ cost_usd })).success).toBe(false)
+    }
   })
 
   it.each(['KEEPER_STREAM_MESSAGE_START', 'KEEPER_STREAM_MESSAGE_DELTA'])(

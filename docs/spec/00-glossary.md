@@ -967,7 +967,7 @@ status: reference
   (실행 경로 이름)와 이름이 겹치지만 다른 축이다.
   → [keeper_runtime_failure_route](../../lib/keeper_runtime/keeper_runtime_failure_route.mli)
 
-**Candidate Fault (후보 책임 판정)**
+**Candidate Fault (후보 귀속 판정)**
 : 한 후보(provider·모델·자격 증명·계정을 묶은 바인딩)가 실패했을 때, 그 실패가 이 후보 쪽 일인지 답하는 닫힌 판정(`Candidate_fault.t`). exact 후보 순회(Librarian·`verifier_exact`·HITL
   판정·Board attention)와 Keeper 후보 순회가 같은 오류에 같은 답을 하도록 둘 다 이 판정 하나를
   읽는다(#38913). 값은 셋이다.
@@ -1328,19 +1328,6 @@ status: reference
   [Runtime_exact_output_registry](../../lib/runtime/runtime_exact_output_registry.ml) ·
   [Runtime_route_exact_slot_replaced](../../lib/server/server_dashboard_runtime_request.mli) ·
   [Dashboard 슬롯 API](../../dashboard/src/api/dashboard-runtime.ts)
-
-**Client Start-prompt Ceiling (클라이언트 시작 프롬프트 상한)**
-: MASC 가 공식 클라이언트의 첫 턴에 심는 history(시작 프롬프트)의 바이트 상한.
-  넘친 입력을 typed 오류로 알리지 않는 클라이언트에만 있다.
-  Antigravity 는 끝까지 간 실측 2,078,915 바이트와 `2 × max-context` 중 작은
-  값이다. 토큰당 2바이트는 보장이 아니라 어림값이다. agy 는 공개하지 않은
-  저장 한도를 넘으면 세션을 지우고(agy 1.2.6 changelog), 그 아래에서도 스스로
-  대화를 압축한다. Muse Code 는 넘친 입력을 조용히 요약하므로 상한을
-  `4 × (⌊75% × max-context⌋ − 11,946)` 로 계산한다(`Runtime_muse_prompt_capacity`).
-  Claude Code·Codex 는 이 상한이 없다. 넘치면 provider 가 typed overflow 로
-  알리고, keeper 는 이어 보낼 범위를 줄여 다시 보낸다. 운영자가 바이트 수를
-  적는 설정은 없다. **닫힌 quota 창**(provider 가 매기는 사용량)과는 다른 층이다.
-  → [Runtime_client_prompt_ceiling](../../lib/runtime/runtime_client_prompt_ceiling.mli)
 
 **Attempt Dispatch (실제로 보냈는지 여부)**
 : Keeper turn 실행 중 후보 순서(`Runtime Candidate Order`)의 각 런타임 후보를 시도할 때,
@@ -3276,10 +3263,13 @@ status: reference
 : Keeper를 만들 때 한 번 정하는 실행 식별자. Checkpoint의 `session_id` 필드와
   `Turn_ref`의 trace id가 이 값이다.
 
-**Memory OS**
-: Keeper 하나가 오래 들고 가는 기억(Fact)을 저장하고 다시 꺼내 주는 곳.
-  operator config의 Keeper 이름에 묶인다. cluster 사이에서 무엇을 같이 쓰는지는
-  **Cluster** 항목에 적었다.
+**Memory OS (키퍼 자기 기억)**
+: 개별 Keeper가 장기적으로 유지하는 독립적인 사적 사실(`Fact`) 저장소.
+  - **저장 위치와 격리**: 작업공간의 `.masc/config/keepers/<keeper-id>.memory-current.json`(일반 사실) 및 `<keeper-id>.memory-source-current.json`(소스 파일 결속 사실)에 저장된다. 각 Keeper가 자신의 기억 파일을 독립적으로 소유하며, 다른 Keeper가 직접 읽거나 수정할 수 없다.
+  - **용량 및 상한 규격**: 다음 카테고리 집계와 Librarian 정리는 일반 current 사실에만 적용하며, 소스 결속·보관 사실은 제외한다. 카테고리 수 상한은 기본 30개(`MASC_KEEPER_MEMORY_CATEGORY_CAP`, 설정 `memory.category_cap`), 카테고리당 사실 수 상한은 기본 30개(`MASC_KEEPER_MEMORY_FACTS_PER_CATEGORY_CAP`, 설정 `memory.facts_per_category_cap`)를 넘으면 Librarian 정리 대상이 된다(`Keeper_memory_limits.exceeded`, `Keeper_memory_cleanup`). 정리 결과는 `Limits_reached`, `Progress_with_excess`, `Excess_retained`(초과를 그대로 둠)로 나뉘어 초과가 남을 수 있다. 쓰기를 곧바로 거절하는 상한이 아니다. 전체 기억 용량 기본값은 Keeper당 512KiB(`facts_max_bytes_default`)다.
+  - **조작 도구**: 키퍼 본인만이 `keeper_memory_write`(기록), `keeper_memory_search`(검색), `keeper_memory_retract`(철회) 도구를 통해 자기 기억을 관리한다.
+  - **원장과의 경계**: 키퍼의 자기 기억은 사적 상태로 보존된다. Workspace Memory Ledger에 수집되어 분류되더라도 키퍼의 원본 기억 파일이 직접 수정되거나 다른 키퍼의 메모리와 합쳐지지 않는다.
+  → [Keeper_memory_os_current](../../lib/keeper/keeper_memory_os_current.mli) · [Keeper_memory_limits](../../lib/keeper/keeper_memory_limits.mli) · [Keeper_memory_source_current](../../lib/keeper/keeper_memory_source_current.mli)
 
 **Memory OS Recall (기억 회상 / 전송 투영)**
 : Keeper Memory OS의 저장 사실을 턴별 모델 문맥으로 전달하는 투영 경계. 저장된 사실과 프롬프트에 들어가는 내용은 같은 범위가 아니다.
@@ -3305,6 +3295,20 @@ status: reference
   → [Keeper_memory_os_current](../../lib/keeper/keeper_memory_os_current.mli) ·
   [Keeper_memory_os_types](../../lib/keeper/keeper_memory_os_types.mli)
 
+**Workspace Memory Ledger (작업공간 기억 원장)**
+: 작업공간 내 모든 Keeper의 자기 기억에서 새로 추가되거나 변경된 사실만 뽑아 분류해 기록한 공용 분류 장부.
+  - **저장 위치**: `.masc/workspace-memory/ledger.json` (스키마 `workspace.memory.ledger.v1`).
+  - **수집 및 갱신 흐름 (`Workspace_curator` 단독 레인)**:
+    1. **수집 (`Context.collect`)**: `Workspace_curator` 레인이 주기적으로 각 키퍼의 기억 디렉터리(`keepers_dir`)를 순회하여 모든 Keeper의 기억 스냅샷(`.memory-current.json`, `.memory-source-current.json`)을 수집한다.
+    2. **대조 (`Ledger.reconcile`)**: 기존 원장의 사실 배치 표(`dispositions`)와 대조하여, 아직 원장에 없는 새로 추가된 사실(`new_facts`)과 스냅샷에서 사라진 사실(`vanished`)을 가려낸다. 읽기에 성공한 스토어에서 사라짐이 확인된 사실만 원장에서 제거하며, 읽지 못한 스토어의 기존 배치는 유지한다.
+    3. **모델 분류 (`Request.prepare`)**: 새로운 사실(`new_facts`)이 존재할 때만 모델 프롬프트(`workspace_memory_curator`)를 호출하여 다음 세 요소로 분류한다:
+       - **사실 배치 (`facts` / `dispositions`)**: 각 키퍼 사실(`fact_ref`: 일반 사실 `Ordinary` 또는 소스 결속 사실 `Source_bound`)을 기존 공유 주장 합류(`Claim_member`), 충돌 합류(`Conflict_member`), 또는 제외 사유(`Excluded`) 중 하나로 1:1 배정한다.
+       - **공유 주장 (`claims`)**: 둘 이상의 키퍼 사실이 일치하거나 작업공간 차원에서 의미를 공유하는 항목 목록(`(claim_id, claim)`).
+       - **충돌 (`conflicts`)**: 서로 상충하거나 불일치하는 사실들의 설명 목록(`(conflict_id, description)`).
+    4. **원자적 저장 (`Ledger.save`)**: 모델의 분류 결과를 엄격히 검증(`Ledger.apply`)한 뒤 원장에 원자적으로 교체 저장한다.
+  - **불변식**: 원장은 모델이 분류한 장부일 뿐 Keeper의 자기 기억을 수정하지 않으며, 의미 검증이나 권위 있는 사실 승격을 뜻하지 않는다. Keeper는 `keeper_workspace_memory_read` 도구로 원장의 주장·충돌 ID와 소속 사실 원문을 직접 조회할 수 있다.
+  → [workspace_memory_ledger](../../lib/workspace_memory/workspace_memory_ledger.mli) · [workspace_memory_context](../../lib/workspace_memory/workspace_memory_context.mli) · [workspace_memory_request](../../lib/workspace_memory/workspace_memory_request.mli) · [server_workspace_memory_curator](../../lib/server/server_workspace_memory_curator.ml)
+
 **Shared Fact (작업공간 기억 원장 행)**
 : Workspace Curator가 변경된 Keeper 사실을 기존 주장·충돌에 합류시키거나 새 항목을 만들고, 제외 이유를 기록한 원장의 행 하나(`workspace_memory_ledger`의 `claim_id`가 가리키는 것). 다른 Keeper의 가까운 사실은 판정 맥락이고 선택된 변경 사실만 분류한다. 원장은 Keeper Memory OS를 바꾸지 않으며, 모델 분류가 의미 검증이나 사실 승격을 뜻하지 않는다. Keeper는 주장·충돌 목록을 본 뒤 ID별로 현재 원문 상태를 읽는다. 스토어를 읽지 못한 사실은 사라진 사실로 단정하지 않는다. 행의 `claim_id`는 Fact의 문장 필드 `claim`(→ Fact)과 다른 것이다 — 원장 행의 식별자다.
   → [workspace_memory_ledger](../../lib/workspace_memory/workspace_memory_ledger.mli) · [workspace_memory_request](../../lib/workspace_memory/workspace_memory_request.mli) · [workspace_memory_ledger_view](../../lib/workspace_memory/workspace_memory_ledger_view.mli)
@@ -3312,9 +3316,23 @@ status: reference
 **World Curator / Workspace Curator (공유 맥락 합성)**
 : 여러 Keeper가 같은 원문을 반복해서 읽지 않도록 공유 맥락을 합성하는 단독 모델 레인. 코드의 `Workspace_curator`는 Keeper Memory의 변경 사실을 공유 주장·충돌로 분류한 뒤, 그 본문을 의미를 보존한 공유 요약으로 합성한다. 새 사실은 이전 요약에 합치고, 삭제·수정된 사실이나 합성 프롬프트 변경이 있으면 현재 자료로 다시 만든다. 동일한 자료의 완성본은 Keeper들이 재사용한다. 요약은 현재 작업공간의 모든 운영 상태나 검증된 사실을 뜻하지 않으며, 원본 Memory를 덮어쓰지 않는다.
 
-**Shared Briefing (공유 요약)**
-: World Curator가 만든 재사용 가능한 공유 맥락. 원장 ID 순서로 잘라낸 목록이 아니라 모델이 중복·관계·불확실성을 종합한 본문이다. 완성본과 그 자료의 식별자를 함께 보존한다. 새 합성이 진행되거나 실패한 동안에는 이전 완성본을 갱신 대기로 표시하고, 아직 첫 완성본이 없으면 준비 중임을 알린다. 제공자 입력 한도로 여러 회차가 필요하면 작성 중 상태를 저장하지만 Keeper에게는 완성본만 전달한다. 자료와 합성 계약이 같으면 모델을 다시 부르지 않는다. 중단된 추가 자료가 삭제되어 이전 완성본의 자료만 남으면, 모델 호출 없이 작성 중 상태의 원문과 부분 요약을 지우고 저장한다. 이 결속은 의미 보존을 자동 증명하지 않는다.
-  → [workspace_memory_briefing](../../lib/workspace_memory/workspace_memory_briefing.mli) · [server_workspace_memory_curator](../../lib/server/server_workspace_memory_curator.ml)
+**Shared Briefing (공유 요약 / 브리핑 글)**
+: World Curator가 작업공간 기억 원장(`ledger.json`)에 기록된 모든 주장과 충돌 텍스트(`Ledger.briefing_sources`)를 모델로 종합 요약한 자연어 글.
+  - **저장 위치**: `.masc/workspace-memory/briefing.json` (스키마 `workspace.memory.briefing.v1`).
+  - **전달과 조회**: 기본 턴 문맥의 `## Shared workspace memory ledger` 구획에는 원장 메타데이터(`Current ledger SHA-256`, `Classified facts`, `Shared claims`, `Conflicts`), 브리핑의 현재·갱신 대기 상태, 조회 경로를 전달한다. 브리핑 본문은 미리 주입하지 않으며, 넓은 작업공간 요약이 필요할 때 `keeper_workspace_memory_read`의 `{"view":"briefing"}`으로 읽는다. 조회 경로는 실제 요청에서 바로 호출 가능, 도구 검색으로 로드 가능, 사용 불가를 구분한다.
+  - **원장과의 구별 및 명칭 주의**:
+    - 프롬프트 섹션 제목의 'ledger(원장)'는 공유 기억의 메타데이터와 조회 안내를 가리키며, 원장 전체나 브리핑 본문이 실렸다는 뜻이 아니다.
+    - `view=briefing`으로 조회하는 브리핑은 구조화된 원장(JSON 장부)이 아니라, 모델이 주장과 충돌을 종합한 자연어 글이다. 목적에 맞는 항목은 `query`로 찾고 `id`로 현재 소속 사실을 확인하며, 전체 목록은 `view=index`로 명시적으로 요청한다. 선택자를 생략하면 개수와 갱신 상태만 읽는다.
+    - 브리핑 글의 합성 프롬프트(`workspace_memory_briefing`)는 임의의 바이트 목표를 맞추려고 문장을 자르거나 사실을 빼지 말라고 하므로 글이 상한 없이 커질 수 있다. 원장의 실제 분류 세부사항(각 키퍼 사실의 주장·충돌 배정 내역)을 보려면 요약 글이 아닌 `keeper_workspace_memory_read` 도구를 통해 원장을 직접 조회해야 한다.
+  - **합성 및 캐시 불변식**: 완성본과 자료 식별자를 함께 보존한다. 새 합성이 진행되거나 실패한 동안에는 이전 완성본을 갱신 대기(`Stale`)로 표시하고, 첫 완성본이 없으면 준비 중임을 알린다. 자료와 합성 계약이 같으면 모델을 다시 부르지 않는다.
+  → [workspace_memory_briefing](../../lib/workspace_memory/workspace_memory_briefing.mli) · [server_workspace_memory_curator](../../lib/server/server_workspace_memory_curator.ml) · [keeper_unified_prompt](../../lib/keeper/keeper_unified_prompt.ml)
+
+**Memory OS vs Workspace Memory Ledger vs Shared Briefing (기억 체계 삼자 경계)**
+: 작업공간에서 자주 혼동되는 세 가지 기억·맥락 계층의 책임과 경계를 구분하는 불변식.
+  - **키퍼 자기 기억 (Memory OS)**: 키퍼 개인의 독립적인 사적 사실 스토어(`.masc/config/keepers/<name>.memory-current.json`). 카테고리 30개×30개는 일반 current 사실에만 적용하는 정리 기준이며 소스 결속·보관 사실은 이 집계에서 제외한다. 기준을 넘어도 정리 후 초과가 남을 수 있고, 용량 기본값은 512KiB. 키퍼 본인만 쓰고 읽으며 다른 키퍼가 직접 접근할 수 없다.
+  - **작업공간 기억 원장 (Workspace Memory Ledger)**: 모든 키퍼의 변경된 사실만 모아 분류한 공용 분류 장부(`.masc/workspace-memory/ledger.json`). `claims`·`conflicts`·`facts`(배치)로 구성된 구조화된 JSON 데이터이며 `keeper_workspace_memory_read`로 조회한다. 키퍼의 자기 기억을 수정하지 않는다.
+  - **브리핑 글 (Shared Briefing)**: 원장의 주장·충돌을 모델이 읽고 종합 요약한 자연어 글(`.masc/workspace-memory/briefing.json`). 기본 턴 문맥에는 메타데이터·갱신 상태·조회 경로를 전달하고 본문은 보류한다. 넓은 요약은 `keeper_workspace_memory_read`의 `view=briefing`으로, 목적에 맞는 원장 항목과 현재 근거는 `query`·`id`로 따로 읽는다.
+  → [Keeper_memory_os_current](../../lib/keeper/keeper_memory_os_current.mli) · [workspace_memory_ledger](../../lib/workspace_memory/workspace_memory_ledger.mli) · [workspace_memory_briefing](../../lib/workspace_memory/workspace_memory_briefing.mli)
 
 **Continuity Snapshot (하던 일 저장본)**
 : 이어서 할 일의 설명과, 그 설명이 대신하는 완료된 History 범위를 함께 담은

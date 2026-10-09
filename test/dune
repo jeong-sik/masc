@@ -180,7 +180,7 @@
  (deps ../config/prompts/workspace_memory_curator.md
        ../config/prompts/workspace_memory_briefing.md
        ../config/prompts/keeper.md)
- (libraries alcotest masc masc.agent_core masc.agent_core.llm_provider masc.server masc.masc_core masc.runtime masc.fs_compat masc.config_dir_resolver masc.prompt_registry exact_output_fixture yojson eio eio_main unix))
+ (libraries alcotest masc masc.tool_types masc.agent_core masc.agent_core.llm_provider masc.server masc.masc_core masc.runtime masc.fs_compat masc.config_dir_resolver masc.prompt_registry exact_output_fixture yojson eio eio_main unix))
 
 (test
  (name test_msx_vision)
@@ -2744,6 +2744,7 @@
 
 (include stanzas/test_keeper_fs_edit_containment.inc)
 
+(include stanzas/test_keeper_workspace_memory_selection.inc)
 (include stanzas/test_keeper_workspace_ops.inc)
 
 (include stanzas/test_keeper_identity_drift_counter.inc)
@@ -2932,7 +2933,6 @@
 (include stanzas/test_runtime_antigravity_context.inc)
 (include stanzas/test_runtime_muse_msp.inc)
 (include stanzas/test_runtime_muse_serve.inc)
-(include stanzas/test_runtime_client_prompt_ceiling.inc)
 (include stanzas/test_runtime_muse_serve_config.inc)
 (include stanzas/test_runtime_muse_home.inc)
 (include stanzas/test_runtime_muse_model_discovery.inc)
@@ -9782,6 +9782,22 @@
  (name runtest)
  (deps (alias runtest-test_tui_chat_progress_clock_pty)))
 
+; H2 crash-resume harness: scenario subcommands need orchestrated env
+; (H2_ROOT, H2_ASYNC_*), so it is an executable, not a (test) — a (test)
+; stanza would run it with no args under the default runtest alias and exit 2.
+; Run: ./test_h2_composition_resume.exe <scenario> with H2_ROOT set.
+(executable
+ (name test_h2_composition_resume)
+ (modules test_h2_composition_resume)
+ (libraries masc_test_deps))
+
+; H2 execution journal harness: no-args runs all scenarios (deterministic,
+; temp dirs only), so it is safe under the default runtest alias.
+(test
+ (name test_h2_journal)
+ (modules test_h2_journal)
+ (libraries masc_test_deps))
+
 (test
  (name test_h5_media_failover_continuity)
  (modules test_h5_media_failover_continuity)
@@ -9791,3 +9807,5 @@
  (name test_h3_working_state_meaning)
  (modules test_h3_working_state_meaning)
  (libraries masc_test_deps))
+
+(include stanzas/test_tui_code_history_sources_pty.inc)

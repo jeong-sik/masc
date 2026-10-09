@@ -22516,6 +22516,13 @@ and is loaded on demand through keeper_skill.
            state.runtime_detail_scroll <-
              (if String.equal edge "home" then 0
               else Masc_tui_types.clamped_scroll_end)
+       | Some "h"
+         when state.view = Runtime
+              && Option.is_none state.runtime_detail_target
+              && Option.is_none state.runtime_lane_pick
+              && Option.is_none state.slot_editor
+              && Option.is_none (Masc_tui_types.runtime_lane_prompt state) ->
+           Masc_tui_types.toggle_runtime_dim_refusals state
        | Some "v"
          when state.view = Runtime
               && Option.is_none state.runtime_detail_target
@@ -24984,7 +24991,18 @@ and is loaded on demand through keeper_skill.
              refresh_repository_changes state ~mailbox:async_messages
            else
            (match state.view with
-            | Code -> Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages)
+            | Code ->
+                if state.code_history_open then
+                  (match Masc_tui_fetched.current_key state.code_file with
+                   | None -> ()
+                   | Some path ->
+                       Masc_tui_code_requests.launch_history_load state
+                         ~host:server_peer_host
+                         ~deliver:(workspace_enqueue state async_messages) ~path)
+                else
+                  Masc_tui_code_requests.launch_entries_load state
+                    ~host:server_peer_host
+                    ~deliver:(workspace_enqueue state async_messages)
             | Keepers Keeper_list ->
                 launch_keeper_lanes_load state ~mailbox:async_messages
             | Keepers Keeper_logs ->

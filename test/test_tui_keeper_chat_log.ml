@@ -436,6 +436,7 @@ let golden : E.keeper_chat_event list =
             ; output_tokens = Some 340
             ; cache_creation_input_tokens = None
             ; cache_read_input_tokens = Some 900
+            ; cost_usd = None
             }
       }
   ; E.Agent_core_stream_message_stop
@@ -867,6 +868,7 @@ let test_a_blank_reason_is_not_a_reason () =
          ; output_tokens = None
          ; cache_creation_input_tokens = None
          ; cache_read_input_tokens = None
+         ; cost_usd = None
          })
   with
   | Some (Live.Stream_details { usage = Some usage; stop_reason = None; _ }) ->

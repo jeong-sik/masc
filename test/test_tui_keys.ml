@@ -1955,8 +1955,9 @@ let test_runtime_footer_is_the_tables () =
     (fun piece ->
       Alcotest.(check bool) ("keeper lanes name " ^ piece) true (has lanes piece))
     [ "c:clients"; "Left / Esc:back"; "p:all runtimes"; "e:add candidate"; "r:refresh"
-    ; "a:new lane"; "x:drop candidate"; "J/K:move candidate"; "D:remove lane" ];
+    ; "h:dim refusals"; "a:new lane"; "x:drop candidate"; "J/K:move candidate"; "D:remove lane" ];
   Alcotest.(check bool) "all runtimes name where p goes" true (has all "p:service lanes");
+  Alcotest.(check bool) "all runtimes name the dim toggle" true (has all "h:dim refusals");
   Alcotest.(check bool) "and offer no failover to append" false (has all "e:add candidate");
   Alcotest.(check bool) "all runtimes offer the selected model settings" true (has all "e:model settings");
   Alcotest.(check bool) "keeper lanes keep their candidate action" false (has lanes "e:model settings");
@@ -1975,7 +1976,8 @@ let test_runtime_footer_is_the_tables () =
   Alcotest.(check (list string)) "the sheet names the p walk once"
     [ "keeper lanes / all runtimes / service lanes" ] (labels "p");
   Alcotest.(check (list string)) "and names both mode-specific actions"
-    [ "model settings"; "add candidate" ] (labels "e")
+    [ "model settings"; "add candidate" ] (labels "e");
+  Alcotest.(check (list string)) "the sheet names the dim toggle" [ "dim refusals" ] (labels "h")
 
 let test_system_logs_owns_only_its_real_filter_keys () =
   (* The newest/oldest ends and f still belong to Acting. Logs owns the server

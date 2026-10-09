@@ -367,6 +367,7 @@ let policy
       ?(context_review = false)
       ?(skill_applicability = false)
       ?(librarian_preflight = false)
+      ?(workspace_memory_selection_enabled = false)
       ?(excluded_keepers = [])
       ()
   : Runtime_schema.typesafeai
@@ -379,6 +380,7 @@ let policy
   ; context_review
   ; skill_applicability
   ; librarian_preflight
+  ; workspace_memory_selection_enabled
   ; excluded_keepers
   }
 ;;
@@ -592,6 +594,26 @@ let test_context_and_skill_reviews_require_their_own_opt_in () =
       check_reviews "both reviews require a key" ("no_armed_destination", "no_armed_destination")))
 ;;
 
+let test_workspace_memory_selection_requires_its_own_opt_in () =
+  let state () = match C.workspace_memory_selection_destinations ~keeper_id:"reader" with
+    | Ok _ -> "enabled"
+    | Error reason -> C.unavailable_reason_to_string reason in
+  with_key (Some "synthetic-jev-key") (fun () ->
+    with_policy (policy ~absorb_gate:true ~context_review:true ~skill_applicability:true
+        ~librarian_preflight:true ()) (fun () ->
+      Alcotest.(check string) "other gates cannot authorize shared-memory selection"
+        "workspace_memory_selection_disabled" (state ()));
+    with_policy (policy ~workspace_memory_selection_enabled:true ~board_attention:false ()) (fun () ->
+      Alcotest.(check string) "selection has an independent opt-in" "enabled" (state ()));
+    with_policy (policy ~workspace_memory_selection_enabled:true ~excluded_keepers:["reader"] ()) (fun () ->
+      Alcotest.(check string) "selection honors Keeper exclusion" "keeper_excluded" (state ()));
+    with_policy (policy ~workspace_memory_selection_enabled:true ~enabled:false ()) (fun () ->
+      Alcotest.(check string) "selection honors lane disable" "lane_disabled" (state ())));
+  with_key None (fun () ->
+    with_policy (policy ~workspace_memory_selection_enabled:true ()) (fun () ->
+      Alcotest.(check string) "selection requires an armed destination" "no_armed_destination" (state ())))
+;;
+
 (* Names are checked against the declared Keeper roster at boot. *)
 let test_unknown_excluded_keepers_are_named () =
   with_policy (policy ~excluded_keepers:[ "kidsnote-slack-context-collector"; "collecter" ] ()) (fun () ->
@@ -652,6 +674,8 @@ let () =
             test_an_excluded_keeper_keeps_its_content_home
         ; Alcotest.test_case "Context and Skill reviews require separate opt-in" `Quick
             test_context_and_skill_reviews_require_their_own_opt_in
+        ; Alcotest.test_case "Shared memory selection requires separate opt-in" `Quick
+            test_workspace_memory_selection_requires_its_own_opt_in
         ; Alcotest.test_case "unknown excluded keepers are named" `Quick
             test_unknown_excluded_keepers_are_named
         ; Alcotest.test_case "each gate has its own switch" `Quick

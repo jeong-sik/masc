@@ -603,7 +603,7 @@ describe('SSEMessageSchema', () => {
     // output counter. The producer omits unreported fields entirely.
     expect(SSEMessageSchema.safeParse(event({ output_tokens: 42 })).success).toBe(true)
     // The server-tool shape: every counter repeated as a cumulative total —
-    // still no total_tokens or cost on a delta.
+    // still no total_tokens on a delta.
     expect(
       SSEMessageSchema.safeParse(
         event({
@@ -616,6 +616,15 @@ describe('SSEMessageSchema', () => {
     ).toBe(true)
     expect(SSEMessageSchema.safeParse(event({ output_tokens: 4.2 })).success).toBe(false)
     expect(SSEMessageSchema.safeParse(event({ total_tokens: 9 })).success).toBe(false)
+    for (const cost_usd of [0, 0.0123]) {
+      const parsed = SSEMessageSchema.safeParse(event({ output_tokens: 42, cost_usd }))
+      expect(parsed.success).toBe(true)
+      if (parsed.success) expect(parsed.data).toEqual(event({ output_tokens: 42, cost_usd }))
+      expect(SSEMessageSchema.safeParse(event({ cost_usd })).success).toBe(true)
+    }
+    for (const cost_usd of [null, '0.0123', -0.0123, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(SSEMessageSchema.safeParse(event({ cost_usd })).success).toBe(false)
+    }
   })
 
   it.each(['KEEPER_STREAM_MESSAGE_START', 'KEEPER_STREAM_MESSAGE_DELTA'])(

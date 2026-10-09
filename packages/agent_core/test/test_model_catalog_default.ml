@@ -189,6 +189,41 @@ let test_haiku_prefill_admission () =
       (List.filter_map (function P.Types.Text text -> Some text | _ -> None) assistant.content))
 ;;
 
+let test_documented_claude_prefill_exclusions () =
+  let module P = Llm_provider in
+  let catalog = Model_catalog_test_support.load_repo_model_catalog ~suite:"Claude prefill exclusions" in
+  with_clean_model_catalog_override (fun () ->
+    Model_catalog.set_global catalog;
+    let user = P.Types.make_message ~role:User [Text "hello"] in
+    let assistant = P.Types.make_message ~role:Assistant [Text "Continue:"] in
+    let prefill = [user; assistant] in
+    let config model_id = P.Provider_config.make ~kind:Anthropic ~model_id
+      ~base_url:"https://api.anthropic.com" ~max_tokens:1024 () in
+    List.iter (fun model_id ->
+      let config = config model_id in
+      let expected = Printf.sprintf
+        "Backend_anthropic.build_request: model %S does not accept a final assistant prefill; end messages with a user turn"
+        model_id in
+      check (option bool) (model_id ^ " catalog excludes prefill") (Some false)
+        (Option.map (fun (caps : Capabilities.capabilities) -> caps.supports_assistant_prefill)
+           (Capabilities.for_model_id_catalog model_id));
+      List.iter (fun stream ->
+        check bool (model_id ^ " refuses final assistant before dispatch") true
+          (match P.Complete.inspect_serialized_request ~stream ~config ~messages:prefill () with
+           | Error (P.Http_client.AcceptRejected {reason}) -> String.equal reason expected
+           | Ok _ | Error _ -> false);
+        check bool (model_id ^ " retains accepted user-ending history") true
+          (Result.is_ok (P.Complete.inspect_serialized_request ~stream ~config
+            ~messages:(prefill @ [user]) ()))) [false; true])
+      ["claude-fable-5"; "claude-fable-5-1"; "claude-mythos-5"; "claude-mythos-preview";
+       "claude-opus-5"; "claude-opus-5-5"; "claude-sonnet-5"; "claude-sonnet-5-5"];
+    List.iter (fun model_id ->
+      check bool (model_id ^ " keeps existing default admission") true
+        (Result.is_ok (P.Complete.inspect_serialized_request ~stream:false
+          ~config:(config model_id) ~messages:prefill ())))
+      ["claude-haiku-4-5"; "unlisted-model"])
+;;
+
 let test_subscription_models_resolve_their_own_rows () =
   let catalog =
     Model_catalog_test_support.load_repo_model_catalog ~suite:"subscription model rows"
@@ -1112,6 +1147,8 @@ let () =
             `Quick
             test_haiku_5_5_row_reaches_the_wire
         ; test_case "Haiku final assistant admission" `Quick test_haiku_prefill_admission
+        ; test_case "Documented Claude prefill exclusions" `Quick
+            test_documented_claude_prefill_exclusions
         ; test_case
             "subscription models admit their reasoning efforts"
             `Quick

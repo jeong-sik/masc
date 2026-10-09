@@ -11867,10 +11867,10 @@ let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
       launch_keeper_config_view state ~mailbox keeper.k_name
   | Detail_secrets ->
       (* The projection arrives with the composite body the Keeper lanes read
-         carries. Ask when no snapshot has answered, or an interrupted read
-         still needs replacement after workspace reconfirmation. *)
-      if Option.is_none state.lanes || state.keeper_lanes_resume then
-        launch_keeper_lanes_load state ~mailbox
+         carries. The list no longer refreshes that body, so a reading cached
+         before the operator went back to the list can be arbitrarily old:
+         entry and [r] ask for a current one, as Info does. *)
+      launch_keeper_lanes_reread state ~mailbox
   | Detail_github ->
       state.github_identity_view <- None;
       state.github_identity_view_error <- None;

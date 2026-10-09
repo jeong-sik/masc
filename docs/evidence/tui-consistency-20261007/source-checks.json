@@ -1,5 +1,5 @@
 {
-  "scope": "Historical parser checks for the recorded source hashes only. Later integration changed source; this receipt does not validate the current head. Native regressions, geometry and PTY were not rerun.",
+  "scope": "Parser checks re-run against the current head sources where noted; entries without a note remain historical checks for their recorded hashes. Native regressions, geometry and PTY were not rerun.",
   "checks": {
     "bin/masc_tui_footer.ml": {
       "sha256": "1326d85817a34c481f2c57405ecce4ae65bfc5a26aa425dd8b3dfdb6f04468f0",
@@ -37,9 +37,10 @@
       "result": "PASS"
     },
     "test/test_tui_remote_workspace_history_pty.py": {
-      "sha256": "6dd90bf9a8a65dd1bedee2f57776e149d3c906ce93c82fe2d1440b60a57d8832",
+      "sha256": "82fdd59e5e555bb19f0c737edda48edb578fe3fa28413f91c406495b5dd0a7b8",
       "check": "python ast.parse",
-      "result": "PASS"
+      "result": "PASS",
+      "note": "re-run on the current source 82fdd59e replacing the stale 6dd90bf9 receipt"
     }
   }
 }

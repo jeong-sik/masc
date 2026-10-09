@@ -5,12 +5,12 @@ keeper-window: the keeper roster says which keepers it draws: PASS
 home-layout: Home layout PTY: PASS (2 scenarios)
 work-resize: tui Planning Task Review regression: PASS (1 selected scenario runs)
 primary-lists: tui primary list studio PTY: PASS
-chat-origin: tui keyboard PTY regression: PASS (1 selected scenario runs)
-chat-viewport: tui keyboard PTY regression: PASS (1 selected scenario runs)
+chat-origin: UNVERIFIED_CURRENT_SOURCE; byte-identical generic log carries no scenario identity
+chat-viewport: UNVERIFIED_CURRENT_SOURCE; byte-identical generic log carries no scenario identity
 candle: Candle currency TUI: PASS (10 real PTY scenarios)
 metadata-wrap: Keeper Info and Channels metadata wrap: PASS
 chat-visibility-fixed: HISTORICAL_PASS; committed visibility fixture NOT_RUN
 chat-menu-fixed: chat command menu and status hierarchy: PASS
 region-layout-fixed: HISTORICAL_PASS; corrected rail-boundary fixture NOT_RUN
-remote-history-fixed: remote workspace history: PASS (held response withdrawal and unsent draft retention)
+remote-history-fixed: UNVERIFIED_CURRENT_SOURCE; fixture changed after the recorded run
 chat-capture: Conversation-first local review capture: PASS

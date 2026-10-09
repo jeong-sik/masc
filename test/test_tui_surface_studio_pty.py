@@ -67,7 +67,7 @@ def run(executable, no_color=False):
             if selected_name is not None and not _keyboard_harness.keeper_row_selected(selected_name).search(frame):
                 raise AssertionError(f"selected repository {selected_name!r} vanished from its table")
             print("STUDIO_CAPTURE="+json.dumps({"suite":"test_tui_surface_studio_pty", "name":name+("-no-color" if no_color else ""),
-                "rows":rows,"columns":columns,"provenance":"CI fixture PTY",
+                "rows":rows,"columns":columns,"provenance":"CI fixture PTY" if os.environ.get("GITHUB_ACTIONS") == "true" else "local fixture PTY",
                 "frame_b64":base64.b64encode(frame).decode(),
                 "screen":b"\n".join(_keyboard_harness.screen_rows(frame).get(row, b"") for row in range(1, rows + 1)).decode(errors="replace")}),flush=True)
             return frame if raw else _keyboard_harness.screen_text(frame)

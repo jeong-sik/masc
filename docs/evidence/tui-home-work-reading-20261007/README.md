@@ -17,9 +17,9 @@ omit the decorative wall clock; connection identity remains.
 
 | Changed path | Direct consumer | Evidence |
 | --- | --- | --- |
-| `render_overview` row order | Home selection/window, notices, summaries and composer budget | Independent source review; focused Home layout/receipt/Candle PTY runs pending |
+| `render_overview` row order | Home selection/window, notices, summaries and composer budget | Source inspection only; focused Home layout/receipt/Candle PTY runs pending |
 | `render_planning_list` compact summaries and title | Goal list height, selection, filter and connection badge | Planning title boundary follows its connection badge; registered Studio PTY expects compact summaries at wide and narrow widths; PTY run pending |
-| `task_detail_pane` title | Task detail body/scroll geometry | Source review; executable rendering pending |
+| `task_detail_pane` title | Task detail body/scroll geometry | Source inspection only; executable rendering pending |
 
 Changed OCaml source is checked with `ocamlc -stop-after parsing`, Python with
 `ast.parse`, and whitespace with `git diff --check`. `source-checks.json` records

@@ -695,16 +695,15 @@ let post_setup_json ~host ~port ~path ~body =
   | Error e -> Error e
   | Ok (status_code, body) -> decode_json ~allow_empty:true ~status_code ~body
 
-(* A change from the terminal names the workspace it read; the server refuses
-   it when it has been swapped onto the same port since. The field is required
-   so a new MSX change cannot be sent unbound. *)
-let msx_body ~(expected_workspace : Masc.Tui_decode.server_identity) fields =
-  Yojson.Safe.to_string
-    (`Assoc
-       (("expected_workspace", `Assoc
-           [ ("base_path", `String (Masc_tui_types.canonical_path expected_workspace.sid_base_path))
-           ; ("masc_root", `String (Masc_tui_types.canonical_path expected_workspace.sid_masc_root)) ])
-        :: fields))
+(* Shared mutation envelope: the server compares canonical workspace paths. *)
+let expected_workspace_field (identity : Masc.Tui_decode.server_identity) =
+  "expected_workspace", `Assoc
+    [ "base_path", `String (Masc_tui_types.canonical_path identity.sid_base_path)
+    ; "masc_root", `String (Masc_tui_types.canonical_path identity.sid_masc_root) ]
+
+let msx_write_body ~expected_workspace fields =
+  Yojson.Safe.to_string (`Assoc (expected_workspace_field expected_workspace :: fields))
+;;
 
 (* Press one or more keys on the shared MSX machine (RFC-0439 §3.3). Returns
    the new frame number on success, or an error string; the caller re-fetches
@@ -712,7 +711,7 @@ let msx_body ~(expected_workspace : Masc.Tui_decode.server_identity) fields =
 let post_msx_press ~expected_workspace ~(host : string) ~(port : int) ~(keys : string list) :
     (int, string) result =
   let body =
-    msx_body ~expected_workspace [ ("keys", `List (List.map (fun k -> `String k) keys)) ]
+    msx_write_body ~expected_workspace ["keys", `List (List.map (fun k -> `String k) keys)]
   in
   match post_json ~host ~port ~path:msx_press_path ~body with
   | Error e -> Error e
@@ -742,7 +741,7 @@ let fetch_msx_carts ~(host : string) ~(port : int) : string list =
    operator bearer, like a press. *)
 let post_msx_load ~expected_workspace ~(host : string) ~(port : int) ~(cart : string) :
     (unit, string) result =
-  let body = msx_body ~expected_workspace [ ("cart", `String cart) ] in
+  let body = msx_write_body ~expected_workspace ["cart", `String cart] in
   match post_json ~host ~port ~path:msx_load_path ~body with
   | Error e -> Error e
   | Ok json -> (
@@ -754,7 +753,7 @@ let post_msx_load ~expected_workspace ~(host : string) ~(port : int) ~(cart : st
 ;;
 
 let post_msx_change_disk ~expected_workspace ~host ~port ~disk =
-  let body = msx_body ~expected_workspace ["disk", `String disk] in
+  let body = msx_write_body ~expected_workspace ["disk", `String disk] in
   match post_json ~host ~port ~path:"/api/v1/msx/disk" ~body with
   | Error e -> Error e
   | Ok json ->
@@ -765,17 +764,48 @@ let post_msx_change_disk ~expected_workspace ~host ~port ~disk =
       | `String message -> Error message | _ -> Error "disk change refused")
 ;;
 
-let post_msx_checkpoint ~expected_workspace ~host ~port ~restore ~slot =
+type checkpoint_error =
+  | Checkpoint_refused of string
+  | Checkpoint_outcome_unknown of string
+
+let decode_checkpoint_receipt ~expected_workspace ~operation_id ~restore ~slot json =
+  Masc.Tui_decode.decode_msx_checkpoint_receipt ~operation_id ~restore ~slot
+    ~base_path:(Masc_tui_types.canonical_path expected_workspace.Masc.Tui_decode.sid_base_path)
+    ~masc_root:(Masc_tui_types.canonical_path expected_workspace.sid_masc_root) json
+
+let post_msx_checkpoint ~expected_workspace ~operation_id ~host ~port ~restore ~slot =
   let path = if restore then "/api/v1/msx/restore" else "/api/v1/msx/save" in
-  let body = msx_body ~expected_workspace ["slot", `String slot] in
-  match post_json ~host ~port ~path ~body with
-  | Error e -> Error e
-  | Ok json ->
-    let open Yojson.Safe.Util in
-    match member "ok" json with
-    | `Bool true -> Ok ()
-    | _ -> (match member "message" json with
-      | `String message -> Error message | _ -> Error "checkpoint refused")
+  let body = msx_write_body ~expected_workspace ["slot", `String slot;"operation_id",`String operation_id] in
+  let result = http_post ~headers:(auth_headers ()) ~host ~port ~path ~body in
+  match result with
+  | Error detail -> Error (Checkpoint_outcome_unknown detail)
+  | Ok (status_code, _) when status_code >= 400 && status_code < 500 ->
+      (match mutation_outcome result with
+       | Post_refused detail -> Error (Checkpoint_refused detail)
+       | Post_answered _ | Post_unanswered _ ->
+           Error (Checkpoint_outcome_unknown "checkpoint admission response is unreadable"))
+  | Ok (status_code, body) ->
+      (* Even a 5xx needs this operation/workspace's typed receipt to prove a
+         pre-effect refusal. Legacy action/slot-only envelopes cannot settle it. *)
+      let decoded =
+        if (status_code >= 200 && status_code < 300) || (status_code >= 500 && status_code < 600) then
+          Result.bind (decode_json ~allow_empty:false ~status_code:200 ~body)
+            (decode_checkpoint_receipt ~expected_workspace ~operation_id ~restore ~slot)
+        else Error "checkpoint response status did not confirm its operation" in
+      (match decoded with
+       | Ok (Checkpoint_committed _) -> Ok ()
+       | Ok (Checkpoint_refused detail) -> Error (Checkpoint_refused detail)
+       | Ok Checkpoint_pending -> Error (Checkpoint_outcome_unknown "checkpoint operation is pending")
+       | Ok (Checkpoint_unknown detail) | Error detail -> Error (Checkpoint_outcome_unknown detail))
+
+let inspect_msx_checkpoint ~expected_workspace ~operation_id ~host ~port ~restore ~slot =
+  let body = msx_write_body ~expected_workspace
+    ["slot",`String slot;"operation_id",`String operation_id;
+     "checkpoint",`String (if restore then "restore" else "save")] in
+  let ( let* ) = Result.bind in
+  let* json = post_json ~host ~port ~path:"/api/v1/msx/checkpoint-operation" ~body in
+  decode_checkpoint_receipt ~expected_workspace ~operation_id ~restore ~slot json
+
 ;;
 
 (* Advance the shared machine one poll-cadence step and read back the frame it
@@ -795,10 +825,7 @@ let tick_msx ~(expected_workspace : Masc.Tui_decode.server_identity)
   let headers = auth_headers () in
   (* The tick names the workspace the terminal confirmed, so a server swapped
      onto the same port after the check refuses it before stepping. *)
-  let body_fields =
-    [ ("expected_workspace", `Assoc
-         [ ("base_path", `String (Masc_tui_types.canonical_path expected_workspace.sid_base_path))
-         ; ("masc_root", `String (Masc_tui_types.canonical_path expected_workspace.sid_masc_root)) ]) ] in
+  let body_fields = [ expected_workspace_field expected_workspace ] in
   let request ~body =
     match http_post_with_timeout ~timeout_sec:(request_timeout_sec ()) ~headers
         ~host ~port ~path:msx_tick_path ~body with
@@ -2287,11 +2314,6 @@ let fetch_board_hearths ~(host : string) ~(port : int) :
     stamps the author from the HTTP auth resolver, so the payload carries
     text only. The response is the tools envelope [{ok, message}]; interpreting
     it stays with the caller. *)
-let expected_workspace_field (identity : Masc.Tui_decode.server_identity) =
-  "expected_workspace", `Assoc
-    [ "base_path", `String (Masc_tui_types.canonical_path identity.sid_base_path)
-    ; "masc_root", `String (Masc_tui_types.canonical_path identity.sid_masc_root) ]
-
 let post_board_new ~expected_workspace ~(host : string) ~(port : int) ~(title : string)
     ~(body : string) ?hearth () : (Yojson.Safe.t, string) result =
   let hearth_field =

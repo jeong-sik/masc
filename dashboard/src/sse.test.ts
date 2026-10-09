@@ -7,6 +7,7 @@ import {
 } from './sse'
 import { appendThreadEntry, keeperThreads } from './keeper-state'
 import { operationDeliveryProvenance } from './keeper-delivery-provenance'
+import { parseSSEMessage } from './schemas/sse'
 
 describe('Keeper operation server push', () => {
   const operationId = 'kmsg-operation-1'
@@ -31,8 +32,8 @@ describe('Keeper operation server push', () => {
     })
   })
 
-  it('routes the nested AG-UI delta to the exact operation bubble', () => {
-    recordServerPushEvent({
+  it.each([undefined, 0, 2])('decodes text scope %s from wire into the exact operation bubble', (scope) => {
+    const decoded = parseSSEMessage(JSON.parse(JSON.stringify({
       type: 'keeper_chat_operation_event',
       name: 'sangsu',
       operation_id: operationId,
@@ -43,13 +44,33 @@ describe('Keeper operation server push', () => {
         messageId: 'message-1',
         delta: '실제 답변',
         timestamp: 1,
+        ...(scope === undefined ? {} : { textStreamScope: scope }),
       },
-    })
+    })))
+    expect(decoded?.ag_ui_event).toMatchObject({ type: 'TEXT_MESSAGE_CONTENT', delta: '실제 답변' })
+    if (!decoded) throw new Error('wire event was dropped')
+    recordServerPushEvent(decoded)
 
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'operation-reply')
     expect(entry?.text).toBe('실제 답변')
     expect(entry?.delivery).toBe('streaming')
   })
+  it.each([-1, 0.5, '2', null, {}, Number.MAX_SAFE_INTEGER + 1])(
+    'refuses malformed wire text scope %s before text delivery', (scope) => {
+      const decoded = parseSSEMessage(JSON.parse(JSON.stringify({
+        type: 'keeper_chat_operation_event', name: 'sangsu', operation_id: operationId,
+        ag_ui_event: { type: 'TEXT_MESSAGE_CONTENT', threadId: 'keeper-consumer:sangsu',
+          runId: 'run-1', messageId: 'message-1', delta: 'must not appear',
+          timestamp: 1, textStreamScope: scope },
+      })))
+      expect(decoded?.ag_ui_event).toMatchObject({ type: 'RUN_ERROR', code: 'invalid_event_payload' })
+      if (!decoded) throw new Error('expected an operation protocol error')
+      recordServerPushEvent(decoded)
+      const entry = keeperThreads.value.sangsu?.find(item => item.id === 'operation-reply')
+      expect(entry?.text).not.toContain('must not appear')
+      expect(entry?.delivery).toBe('error')
+    })
+
 })
 
 describe('normalizeSSEDispatchType', () => {

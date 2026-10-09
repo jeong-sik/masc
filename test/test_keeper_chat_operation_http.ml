@@ -91,9 +91,9 @@ module L = Keeper_chat_event_log
 let journal : L.journaled_event list =
   [ E.Run_started { run_id = "run-events"; thread_id = "keeper:alpha" }
   ; E.Text_message_start { message_id = "msg-events"; role = E.Assistant }
-  ; E.Text_delta "one "
+  ; E.Text_delta {text="one "; stream_scope=None}
   ; E.Agent_core_thinking_delta { index = 0; delta = "private reasoning" }
-  ; E.Text_delta "two"
+  ; E.Text_delta {text="two"; stream_scope=None}
   ; E.Text_message_end
   ; E.Run_finished { run_id = "run-events" }
   ]
@@ -244,7 +244,7 @@ let test_a_held_seq_near_the_end_of_a_long_journal_decodes_a_handful_of_rows () 
   let rows =
     rows_of
       (List.init length (fun seq ->
-         { L.seq; ts = 1_762_300_000.0 +. float_of_int seq; event = E.Text_delta "x" }))
+         { L.seq; ts = 1_762_300_000.0 +. float_of_int seq; event = E.Text_delta {text="x"; stream_scope=None} }))
   in
   let held = length - 5 in
   let before = Gc.allocated_bytes () in
@@ -490,7 +490,7 @@ let test_an_empty_page_hands_back_a_pair_it_accepts () =
   let appended =
     { L.seq = held + 1
     ; ts = 1_762_400_000.0
-    ; event = E.Text_delta "after the empty page"
+    ; event = E.Text_delta {text="after the empty page"; stream_scope=None}
     }
   in
   let grown = rows ^ L.journaled_event_to_string appended ^ "\n" in

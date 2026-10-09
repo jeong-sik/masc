@@ -6424,6 +6424,8 @@ type state = {
       (** What [/find] was last given on this pane, or [""] before it is used.
           Kept so the arg-less form continues the same search instead of
           asking for the text again. *)
+  mutable msg_search_generation: int;
+      (** Async search admission generation; shared target reset retires old jobs. *)
   mutable msg_find_at: chat_search_cursor option;
       (** Structural identity of the message [/find] last landed on. The next
           search resolves it in the current causal timeline and starts
@@ -7262,7 +7264,11 @@ let suspend_voice_wizard_read state =
 (* Observation receipts have a shorter lifetime than admitted operations.
    Retire their owners without cancelling a write or erasing its outcome,
    the rows already shown, navigation, or the operator's draft. *)
+let retire_keeper_message_search state =
+  state.msg_search_generation <- state.msg_search_generation + 1
+
 let suspend_workspace_readings state =
+  retire_keeper_message_search state;
   state.workspace_read_authority <- ref ();
   let cancellations = state.workspace_observation_cancellations in
   state.workspace_observation_cancellations <- [];
@@ -9830,6 +9836,7 @@ let create_state
   board_list_reading = Board_list_unread;
   board_cursor = 0;
   msg_find = "";
+  msg_search_generation = 0;
   msg_find_at = None;
   board_sort = Board_hot;
   board_hearth = None;
@@ -10417,6 +10424,7 @@ let restore_keeper_chat_page (state : state) keeper_name =
        in
        state.msg_loaded_pages <-
          (loaded_keeper, page) :: List.remove_assoc loaded_keeper state.msg_loaded_pages);
+  retire_keeper_message_search state;
   (* Requests that belonged to the outgoing page cannot publish into a page
      restored during A -> B -> A, even before the next GET starts. *)
   state.msg_history_load_generation <- state.msg_history_load_generation + 1;

@@ -864,9 +864,9 @@ status: reference
     큐 입력 단축키(`Ctrl-T:queue`)와 현재 작업 중단 안내를 보존한다.
   - 큐 제어와 입력 보존: 대화 대기열 제어 명령(`/queue`·`/queue resume` 및 `Ctrl-T`)을 제공하며,
     작성 도중 `Esc`로 다른 화면을 탐색하더라도 대기열 상태와 입력 드래프트는 파기되지 않고 유지된다.
-  - 검증과 증거: PTY 시나리오(`test/test_tui_queue_visibility_pty.py`) 및 OCaml 생애주기
-    테스트(`test/test_tui_chat_queue_wiring.ml`, `test/test_tui_chat_activity.ml`)가
-    80열 레이아웃·재연결 불확실성·Keeper 이동 후 복귀 계약을 다룬다. 실행 증거와 한계는
+  - 검증과 증거: OCaml 생애주기 테스트(`test/test_tui_chat_queue_wiring.ml`,
+    `test/test_tui_chat_activity.ml`)가 재연결 불확실성·Keeper 이동 후 복귀 계약을
+    다룬다. 실행 증거와 한계는
     아래 증거 문서에 기록한다.
   → [Masc_tui_types](../../bin/masc_tui_types.ml) ·
   [docs/evidence/2026-09-30-chat-queue-visibility/README.md](../evidence/2026-09-30-chat-queue-visibility/README.md) ·

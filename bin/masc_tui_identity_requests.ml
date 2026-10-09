@@ -33,9 +33,9 @@ let launch_switch state ~host ~deliver ~fork ~keeper_name ~provider_id ~enabled 
   let run () =
     let result =
       try
-        if authority <> state.workspace_authority
-        then Error "Workspace authority withdrawn"
-        else
+        match write_authority_refusal state authority with
+        | Some reason -> Error reason
+        | None ->
           Masc_tui_http.post_identity_switch
             ~host
             ~port
@@ -80,9 +80,9 @@ let launch_app_save
     let result =
       try
         match
-          if authority <> state.workspace_authority
-          then Error "Workspace authority withdrawn"
-          else
+          match write_authority_refusal state authority with
+          | Some reason -> Error reason
+          | None ->
             Masc_tui_http.post_keeper_oauth_client
               ~host
               ~port
@@ -123,10 +123,10 @@ let launch_login state ~host ~deliver ~fork ~keeper_name ~provider_id ~label =
     let result =
       try
         match
-          if authority <> state.workspace_authority
-          then Error "Workspace authority withdrawn"
-          else if not (request_current ()) then Error "login request retired"
-          else Masc_tui_http.post_keeper_oauth_login ~host ~port ~keeper_name ~provider_id
+          match write_authority_refusal state authority with
+          | Some reason -> Error reason
+          | None when not (request_current ()) -> Error "login request retired"
+          | None -> Masc_tui_http.post_keeper_oauth_login ~host ~port ~keeper_name ~provider_id
         with
         | Error err -> Login_failed err
         | Ok json ->
@@ -171,9 +171,9 @@ let launch_refresh state ~host ~deliver ~fork ~keeper_name ~provider_ids =
              | Error _ as err -> err
              | Ok () ->
                (match
-                  if authority <> state.workspace_authority
-                  then Error "Workspace authority withdrawn"
-                  else
+                  match write_authority_refusal state authority with
+                  | Some reason -> Error reason
+                  | None ->
                     Masc_tui_http.post_keeper_identity_refresh
                       ~host
                       ~port

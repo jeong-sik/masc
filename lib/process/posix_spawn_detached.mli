@@ -6,8 +6,8 @@
     process group of its own (not a session of its own), reads [/dev/null]
     and writes [output] on both stdout and stderr. Nothing stops it on its
     own: when [sw] is released this process only stops waiting for it, and
-    once this process has exited the child is reaped by whoever adopts it;
-    a caller that no longer wants it runs {!stop_group}. *)
+    once this process has exited the child is reaped by whoever adopts it.
+    A caller that no longer wants it runs {!stop_group}. *)
 
 type t = {
   pid : int;  (** Also the child's process group. *)
@@ -34,8 +34,16 @@ val spawn :
     as none left (see {!Process_group_members}). *)
 val group_has_members : t -> bool
 
-(** Asks [t]'s process group to end: SIGTERM first, SIGKILL once [grace_s]
-    has passed with members still there. Best effort — a group that already
-    ended, or a pid the OS gave to another process, reads as stopped, and
-    nothing outside the group is signalled. *)
-val stop_group : clock:'a Eio.Time.clock -> ?grace_s:float -> t -> unit
+(** Sends [signal] to every process in [t]'s group while one is left; a
+    group with none left is not signalled, since its id may then name
+    another group. *)
+val signal_group : t -> int -> unit
+
+type stopped =
+  | Ended_on_term  (** The group emptied within the grace after SIGTERM. *)
+  | Killed_after_grace  (** Members were left after the grace and got SIGKILL. *)
+
+(** Ends [t]'s group: SIGTERM, then SIGKILL for whatever is left after
+    [grace_s] seconds. Only that group is signalled, and only while it has
+    members. *)
+val stop_group : clock:_ Eio.Time.clock -> grace_s:float -> t -> stopped

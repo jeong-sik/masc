@@ -31,6 +31,15 @@ profile = "/Users/you/masc-keeper-firefox-profile"
   such a host is stopped first; one whose Firefox is gone ends by itself,
   and the next server start opens both. Firefox's port lets any local
   process drive it, so it is not opened for nothing.
+- A Firefox the server started and left with no host is stopped through its
+  process group: one whose port did not open within the 30 seconds, and one
+  whose host could not be started. It gets SIGTERM, then SIGKILL after 5
+  seconds. A Firefox whose port answered before the server looked is never
+  touched.
+- A host that leaves in order writes its ending before it gives up the
+  lock. A server that starts in between waits up to 5 seconds for the lock,
+  so the host it starts is not refused; a lock still held then starts
+  nothing.
 - Both run apart from the server, so a server restart leaves them running.
   Firefox writes to `.masc/browser-lane/keeper-firefox.log` and the host to
   `.masc/browser-lane/bidi-host.log`. Each start moves the last run's log to

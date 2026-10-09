@@ -13274,6 +13274,16 @@ let keeper_message_folded_status_count (state : state) live ~now =
     List.length (keeper_message_unfolded_status_rows state live ~now)
     - List.length (keeper_message_visible_status_rows state live ~now)
 
+let keeper_message_standalone_details_hint (state : state) live ~now =
+  keeper_message_folded_status_count state live ~now > 0
+  && not (List.exists
+    (fun (kind, _) -> kind = Masc_tui_keeper_chat_transcript.Progress)
+    (keeper_message_visible_status_rows state live ~now))
+
+let keeper_message_counted_status_rows state live ~now =
+  List.length (keeper_message_visible_status_rows state live ~now)
+  + if keeper_message_standalone_details_hint state live ~now then 1 else 0
+
 let keeper_observed_turn (state : state) keeper_name =
   if Option.is_some state.keeper_turns_error then None
   else List.find_map (fun (row : Tui_decode.keeper_turn_row) ->
@@ -13712,9 +13722,8 @@ let keeper_message_status_rows (state : state) ~terminal_cols =
             different number of rows than the pane draws. The age in the
             progress row changes the text, never the row count, so the
             two clock reads cannot disagree on the number. *)
-         List.length
-           (keeper_message_visible_status_rows state live.tl_transcript
-              ~now:(Unix.gettimeofday ())))
+         keeper_message_counted_status_rows state live.tl_transcript
+           ~now:(Unix.gettimeofday ()))
   (* The promoted line and the queued ones are entries in the history now --
      the chat pane appends them to the same stream it scrolls, so the
      conversation holds one time axis. Nothing is reserved for them here:

@@ -46,3 +46,11 @@ outcomes. No local Dune build, CI dispatch, deployment or installed-binary chang
 was performed. The repository execution protocol requires ordinary source review
 and separately selected execution checks; this evidence does not claim runtime
 acceptance or release readiness.
+
+## Current syntax receipt refresh
+
+The refreshed source-checks manifest hashes the integrated files after the
+standalone details-row budget and narrow footer fixes. All listed OCaml/Python
+files were parsed again. Earlier layout/interface executions and previews above
+are historical; they were not rerun for this source and do not certify these
+new native regression cases. Native and PTY checks remain NOT_RUN.

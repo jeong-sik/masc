@@ -18,6 +18,7 @@ let code_scope_axes_of = function
 let code_scope_axes state = code_scope_axes_of state.code_scope
 
 let launch_entries_load state ~host ~deliver =
+  if server_authority_ready state then begin
   (* Read here, not inside the daemon. The daemon runs later, and the scope it
      read then was whichever one was current by then -- so a request made in
      one scope could be sent under another. *)
@@ -41,19 +42,28 @@ let launch_entries_load state ~host ~deliver =
       (fun () ->
          let keeper, repo = code_scope_axes_of scope in
          Masc_tui_http.fetch_workspace_entries ?keeper ?repo ~host ~port ~path:dir ())
+  end
+
 ;;
 
-let launch_file_load state ~host ~deliver ~path =
+let launch_file_load ?(intent = Open_code_file) state ~host ~deliver ~path =
+  if not (server_authority_ready state) then
+    Masc_tui_loader.report_action state "error"
+      "Cannot open Code file while workspace identity is unconfirmed; retry after reconnecting"
+  else begin
   match Masc_tui_fetched.start ~equal:String.equal state.code_file ~key:path with
   | Masc_tui_fetched.Already_loading -> ()
   | Masc_tui_fetched.Started (next, request) ->
     state.code_file <- next;
+    state.code_file_resume_intent <- intent;
     let port = state.port in
     Masc_tui_async_read.launch
-      ~deliver:(fun result -> deliver (Code_file_loaded (request, result)))
+      ~deliver:(fun result -> deliver (Code_file_loaded (intent, request, result)))
       (fun () ->
          let keeper, repo = code_scope_axes state in
          Masc_tui_http.fetch_workspace_file ?keeper ?repo ~host ~port ~path ())
+  end
+
 ;;
 
 (* The 50-commit first page covers the pane; the route caps at 200 anyway. *)
@@ -78,6 +88,7 @@ let code_history_entry_at_ms = function
 ;;
 
 let launch_history_load state ~host ~deliver ~path =
+  if server_authority_ready state then begin
   let scope = state.code_scope in
   match
     Masc_tui_fetched.start
@@ -94,7 +105,7 @@ let launch_history_load state ~host ~deliver ~path =
       ~deliver:(fun result -> deliver (Code_history_loaded (request, result)))
       (fun () ->
          let keeper, repo = code_scope_axes_of scope in
-         match
+         let git =
            Masc_tui_http.fetch_git_log
              ?keeper
              ?repo
@@ -103,68 +114,73 @@ let launch_history_load state ~host ~deliver ~path =
              ~path
              ~limit:code_history_limit
              ()
-         with
-         | Error detail -> Error detail
-         | Ok commits ->
-           let changes, chl_activity_note =
-             match activity_address with
-             | Error detail -> [], "Keeper activity unavailable: " ^ detail
-             | Ok (repo_id, file_path) ->
-               (match
-                  Masc_tui_http.fetch_ide_file_activity ~host ~port ~repo_id ~file_path
-                with
-                | Error detail -> [], "Keeper activity unavailable: " ^ detail
-                | Ok snapshot ->
-                  let incomplete =
-                    snapshot.fas_incomplete_over_budget
-                    + snapshot.fas_incomplete_malformed
-                  in
-                  let unattributed =
-                    snapshot.fas_unattributed_over_budget
-                    + snapshot.fas_unattributed_malformed
-                  in
-                  let missing_note =
-                    [ (if incomplete = 0
-                       then None
-                       else
-                         Some
-                           (Printf.sprintf
-                              "%d exact-address row%s incomplete"
-                              incomplete
-                              (if incomplete = 1 then "" else "s")))
-                    ; (if unattributed = 0
-                       then None
-                       else
-                         Some
-                           (Printf.sprintf
-                              "%d fleet row%s had no readable address"
-                              unattributed
-                              (if unattributed = 1 then "" else "s")))
-                    ]
-                    |> List.filter_map Fun.id
-                    |> function
-                    | [] -> ""
-                    | notes -> "; " ^ String.concat "; " notes
-                  in
-                  ( snapshot.fas_changes
-                  , Printf.sprintf
-                      "Keeper activity: %.0fh durable window, %d exact change%s%s"
-                      snapshot.fas_window_hours
-                      (List.length snapshot.fas_changes)
-                      (if List.length snapshot.fas_changes = 1 then "" else "s")
-                      missing_note ))
-           in
-           let chl_entries =
-             List.stable_sort
-               (fun a b ->
-                  Float.compare (code_history_entry_at_ms b) (code_history_entry_at_ms a))
-               (List.map (fun c -> Hist_commit c) commits
-                @ List.map (fun change -> Hist_keeper_change change) changes)
-           in
-           Ok { chl_entries; chl_activity_note })
+         in
+         let commits, chl_git_error = match git with
+           | Ok commits -> commits, None
+           | Error detail -> [], Some detail
+         in
+         let changes, chl_activity_note =
+           match activity_address with
+           | Error detail -> [], "Keeper activity unavailable: " ^ detail
+           | Ok (repo_id, file_path) ->
+             (match
+                Masc_tui_http.fetch_ide_file_activity ~host ~port ~repo_id ~file_path
+              with
+              | Error detail -> [], "Keeper activity unavailable: " ^ detail
+              | Ok snapshot ->
+                let incomplete =
+                  snapshot.fas_incomplete_over_budget
+                  + snapshot.fas_incomplete_malformed
+                in
+                let unattributed =
+                  snapshot.fas_unattributed_over_budget
+                  + snapshot.fas_unattributed_malformed
+                in
+                let missing_note =
+                  [ (if incomplete = 0
+                     then None
+                     else
+                       Some
+                         (Printf.sprintf
+                            "%d exact-address row%s incomplete"
+                            incomplete
+                            (if incomplete = 1 then "" else "s")))
+                  ; (if unattributed = 0
+                     then None
+                     else
+                       Some
+                         (Printf.sprintf
+                            "%d fleet row%s had no readable address"
+                            unattributed
+                            (if unattributed = 1 then "" else "s")))
+                  ]
+                  |> List.filter_map Fun.id
+                  |> function
+                  | [] -> ""
+                  | notes -> "; " ^ String.concat "; " notes
+                in
+                ( snapshot.fas_changes
+                , Printf.sprintf
+                    "Keeper activity: %.0fh durable window, %d exact change%s%s"
+                    snapshot.fas_window_hours
+                    (List.length snapshot.fas_changes)
+                    (if List.length snapshot.fas_changes = 1 then "" else "s")
+                    missing_note ))
+         in
+         let chl_entries =
+           List.stable_sort
+             (fun a b ->
+                Float.compare (code_history_entry_at_ms b) (code_history_entry_at_ms a))
+             (List.map (fun c -> Hist_commit c) commits
+              @ List.map (fun change -> Hist_keeper_change change) changes)
+         in
+         Ok { chl_entries; chl_git_error; chl_activity_note })
+  end
+
 ;;
 
 let launch_diff_load state ~host ~deliver ~base_ref ~path =
+  if server_authority_ready state then begin
   match Masc_tui_fetched.start ~equal:String.equal state.code_diff ~key:path with
   | Masc_tui_fetched.Already_loading -> ()
   | Masc_tui_fetched.Started (next, request) ->
@@ -175,6 +191,8 @@ let launch_diff_load state ~host ~deliver ~base_ref ~path =
       (fun () ->
          let keeper, repo = code_scope_axes state in
          Masc_tui_loader.load_git_diff ?repo ~host ~port ~keeper ~path ~base_ref ())
+  end
+
 ;;
 
 (* Same fiber-and-mailbox shape as the notes read below. Scoped by the same
@@ -182,6 +200,7 @@ let launch_diff_load state ~host ~deliver ~base_ref ~path =
    describes the checkout on screen rather than whichever one the server
    would default to. *)
 let launch_blame_load state ~host ~deliver ~path =
+  if server_authority_ready state then begin
   match Masc_tui_fetched.start ~equal:String.equal state.code_blame ~key:path with
   | Masc_tui_fetched.Already_loading -> ()
   | Masc_tui_fetched.Started (next, request) ->
@@ -191,12 +210,15 @@ let launch_blame_load state ~host ~deliver ~path =
     Masc_tui_async_read.launch
       ~deliver:(fun result -> deliver (Code_blame_loaded (request, result)))
       (fun () -> Masc_tui_http.fetch_git_blame ?keeper ?repo ~host ~port ~path ())
+  end
+
 ;;
 
 (* Ask the language server about [symbol] on the pane's cursor line. The
    question rides the surface's workspace axes, so a keeper checkout and a
    repository ask about their own bytes. *)
 let start_lsp_question
+      ?line
       state
       ~host
       ~deliver
@@ -204,10 +226,11 @@ let start_lsp_question
       ~(question : string)
       ~(symbol : string)
   =
+  if server_authority_ready state then begin
   match Masc_tui_fetched.current_key state.code_file with
   | None -> report "error" "no file is open on the Code surface"
   | Some path ->
-    (match Masc_tui_code_results.start_lsp_question state ~question ~symbol with
+    (match Masc_tui_code_results.start_lsp_question ?line state ~question ~symbol with
      | None -> ()
      | Some request ->
        let query = Masc_tui_fetched.request_key request in
@@ -240,4 +263,6 @@ let start_lsp_question
             run ();
             `Stop_daemon)
         | None -> deliver (Code_lsp_answered (request, Error "Eio switch is unavailable"))))
+  end
+
 ;;

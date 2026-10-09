@@ -138,6 +138,7 @@ let refused_for_binding_rest = function
     antigravity_error_is_binding_rest error
   | Execution_failed { cause = Fusion_official_client.Muse_failure error; runtime_id = _ } ->
     muse_error_is_binding_rest error
+  | Execution_failed { cause = Fusion_official_client.Missing_reply; runtime_id = _ }
   | Execution_failed { cause = Fusion_official_client.Setup_failure _; runtime_id = _ }
   | Unknown_runtime _
   | Not_an_official_client _

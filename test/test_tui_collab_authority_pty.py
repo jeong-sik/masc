@@ -405,7 +405,6 @@ def run_tick_probe_view_withdrawal(executable):
 def run_machine_post_workspace_swap(executable, operation, *, alias_identity=False):
     """Health admits A; the actual POST reaches B and must carry A's binding."""
     current, observed, prepare, health = workspace_fixture()
-    requests = []
     first_tick = threading.Event()
     release_tick = threading.Event()
     refused = threading.Event()
@@ -413,6 +412,15 @@ def run_machine_post_workspace_swap(executable, operation, *, alias_identity=Fal
     foreign_reads = []
     rgb = base64.b64encode(b'\xff\x00\x00').decode()
     endpoint = '/api/v1/msx/' + operation
+    post_recorded = threading.Event()
+
+    class RecordedRequests(list):
+        def append(self, request):
+            super().append(request)
+            if request[0] == endpoint:
+                post_recorded.set()
+
+    requests = RecordedRequests()
 
     def bound_health():
         if alias_identity and current['phase'] == 'a':
@@ -469,7 +477,7 @@ def run_machine_post_workspace_swap(executable, operation, *, alias_identity=Fal
                 key(b'jjjj', b'game.rom')
             else:
                 key(b'm', b'frame 1 ')
-                key(b'\x1b[15~', b'Controlling')
+                control_from = key(b'\x1b[15~', b'Controlling')
                 if operation != 'tick':
                     assert h.wait_for_fixture_event(process, master, output, first_tick, timeout=8)
                     if operation in ('save', 'restore'):
@@ -483,6 +491,7 @@ def run_machine_post_workspace_swap(executable, operation, *, alias_identity=Fal
                 key({'press': b'1', 'save': b'\x1b[17~', 'restore': b'\x1b[18~',
                      'load': b'\r', 'disk': b'\r'}[operation], b'workspace precondition failed')
             assert h.wait_for_fixture_event(process, master, output, refused, timeout=8)
+            assert h.wait_for_fixture_event(process, master, output, post_recorded, timeout=8)
             assert effects == [], effects
             assert sum(path == endpoint for path, _ in requests) == 1, requests
             # In particular, a refused F6/F7 must not read B's frame and replace
@@ -493,7 +502,8 @@ def run_machine_post_workspace_swap(executable, operation, *, alias_identity=Fal
                 assert b'frame 1 ' in retained, retained
             if operation == 'tick':
                 assert h.wait_for_fixture_event(process, master, output, observed['b'], timeout=8)
-                h.wait_for_output(process, master, output, b'MASC Dashboard', start=0, timeout=8)
+                h.wait_for_output(process, master, output, b'MASC Dashboard', start=control_from, timeout=8)
+                assert b'MASC Dashboard' in h.screen_text(bytes(output))
                 assert sum(path == endpoint for path, _ in requests) == 1, requests
             else:
                 if operation == 'disk':

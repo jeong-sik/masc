@@ -102,7 +102,7 @@ let observation history () =
 
 let schemas () =
   ["masc_msx_load"; "masc_msx_eject"; "masc_msx_save"; "masc_msx_restore";
-   "masc_msx_change_disk"; "masc_msx_screen"; "masc_msx_meta";
+   "masc_msx_export_disk"; "masc_msx_change_disk"; "masc_msx_screen"; "masc_msx_meta";
    "masc_msx_checkpoint_info"; "masc_msx_press"; "masc_msx_step";
    "masc_msx_step_until_change"; "masc_msx_peek"; "masc_msx_ram_diff"]
   |> List.map (fun name ->

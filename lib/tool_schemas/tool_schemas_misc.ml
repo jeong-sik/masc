@@ -154,6 +154,7 @@ type misc_operation =
   | Misc_browser_instruct
   | Misc_msx_load
   | Misc_msx_eject
+  | Misc_msx_export_disk
   | Misc_msx_save
   | Misc_msx_restore
   | Misc_msx_change_disk
@@ -208,7 +209,7 @@ let dos_controller_need = function
   | Misc_gc | Misc_keeper_waiting_inventory | Misc_tool_help | Misc_web_fetch
   | Misc_web_search | Misc_browser_tabs | Misc_browser_read | Misc_browser_session
   | Misc_browser_goto | Misc_browser_act | Misc_browser_interact
-  | Misc_browser_instruct | Misc_msx_load | Misc_msx_eject | Misc_msx_save
+  | Misc_browser_instruct | Misc_msx_load | Misc_msx_eject | Misc_msx_export_disk | Misc_msx_save
   | Misc_msx_restore | Misc_msx_change_disk | Misc_msx_screen | Misc_msx_meta
   | Misc_msx_checkpoint_info | Misc_msx_press
   | Misc_msx_step | Misc_msx_step_until_change | Misc_msx_peek | Misc_msx_ram_diff
@@ -247,6 +248,7 @@ let misc_tool_name = function
   | Misc_browser_instruct -> "masc_browser_instruct"
   | Misc_msx_load -> "masc_msx_load"
   | Misc_msx_eject -> "masc_msx_eject"
+  | Misc_msx_export_disk -> "masc_msx_export_disk"
   | Misc_msx_save -> "masc_msx_save"
   | Misc_msx_restore -> "masc_msx_restore"
   | Misc_msx_change_disk -> "masc_msx_change_disk"
@@ -293,6 +295,7 @@ let misc_registered_schema operation : tool_schema option =
   match operation with
   | Misc_msx_load
   | Misc_msx_eject
+  | Misc_msx_export_disk
   | Misc_msx_save
   | Misc_msx_restore
   | Misc_msx_change_disk

@@ -28,6 +28,29 @@ in the printed `tools.json` path. Examples:
 {"operation":"save","arguments":{"slot":"local-before-choice"}}
 ```
 
+For MSX in-game saves, complete the game's save command on its data floppy.
+While that floppy is still mounted, export it to a new catalog name:
+
+```json
+{"operation":"export_disk","arguments":{"filename":"campaign-data-01.dsk"}}
+```
+
+The receipt identifies the exported bytes by filename, length and SHA-256.
+Existing names are refused, including symlinks; choose a fresh name each time.
+The original image and the running machine remain unchanged. After a fresh
+boot, follow the game's load-game/data-disk prompt and use `change_disk` with
+that exported filename. A data disk need not itself be bootable. Export is
+separate from `save`, which retains the complete emulator checkpoint. It exports
+only the currently mounted disk, so exporting the program disk after swapping
+away from the data disk does not save the data disk's changes.
+
+The catalog must already exist as `.masc/msx/carts/` under the isolated workspace.
+Its components must be real directories kept stable by the local operator;
+this path-based writer does not protect against a concurrent privileged host
+process replacing an ancestor during publication. Completed bytes are linked
+under the new name atomically; process restart preserves the image, but export
+does not promise directory-entry durability across power loss.
+
 For DOS, launch with `--machine dos` and its worker. Inspect `inventory`, then
 load the game directory with the selected executable from that inventory:
 

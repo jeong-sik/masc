@@ -396,3 +396,27 @@ val restore : path:string -> ledger_dir:string -> (observation, error) result
 val change_disk : path:string -> backup_path:string -> (observation, error) result
 (** Decode a replacement in a private machine copy, checkpoint the outgoing
     machine, then publish the swap. Never reboots or advances game time. *)
+
+
+type disk_export = {
+  filename : string;
+  byte_length : int;
+  sha256 : string;
+  source_disk : string option;
+  frame : int;
+}
+
+val export_disk : catalog_dir:string -> filename:string -> (disk_export, error) result
+(** Export the currently mounted floppy, including guest writes, to a new .dsk
+    in an existing catalog. The name is a simple ASCII stem (letters, digits,
+    underscore, hyphen; 1..64 characters) plus lowercase [.dsk].
+    Existing destinations, including symlinks, are refused. Machine state,
+    input ledger and original media files remain unchanged; no time advances.
+    The absolute [catalog_dir] and its ancestors must be real directories,
+    owned and kept stable by the process operator during publication. Resolve
+    the workspace base before appending its catalog components, not the catalog
+    itself: resolving the latter would hide symlinked components.
+    Completed bytes are published by an exclusive hard link, so no partial
+    destination is visible. This is process-restart persistence, not a promise
+    of directory-entry durability across power loss. Filesystem exceptions
+    after publication remain exceptions, never pre-effect [error] refusals. *)

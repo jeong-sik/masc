@@ -3820,9 +3820,11 @@ let test_child_read_closed_codec_and_exact_suffix () =
       | Error _ -> () | Ok _ -> fail "foreign/invalid request accepted" in
     refused {scope={scope with receiver={scope.receiver with client_uuid="foreign"}};after=None};
     let foreign_scope:Read.scope={scope with receiver={scope.receiver with client_uuid="foreign"}} in
-    let projected=Read.records_of_journal ~redact_text ~scope:foreign_scope ~snapshot ~cleanup_failures:[] in
-    (match Read.records_of_response ~request:{scope=foreign_scope;after=None} projected with
-     | Error Read.Scope_mismatch -> () | _ -> fail "in-memory projection bypassed actual row scope");
+    let mislabelled snapshot=match Read.records_of_journal ~redact_text ~scope:foreign_scope ~snapshot
+        ~cleanup_failures:[] with
+      | Read.Failure {error=Read.Invalid_scope;_} -> ()
+      | Records _ | Receivers _ | Hints _ | Failure _ -> fail "projection labelled a page with a foreign scope" in
+    mislabelled snapshot;
     refused {scope;after=Some {store_id=page.next_cursor.store_id;after_sequence=(-1)}};
     refused {scope;after=Some {store_id="";after_sequence=0}};
     refused {scope;after=Some {store_id="other";after_sequence=0}};
@@ -3834,6 +3836,8 @@ let test_child_read_closed_codec_and_exact_suffix () =
       (List.length (Result.get_ok (Read.records_of_response ~request:after_one suffix)).records);
     let after=Child_journal.next_cursor snapshot in
     let caught=child_journal_ok (Child_journal.read ~after reader) in
+    check int "caught-up suffix has no row to carry scope" 0 (List.length caught.records);
+    mislabelled caught;
     let caught=decoded (wire (Read.records_of_journal ~redact_text ~scope ~snapshot:caught ~cleanup_failures:[])) in
     check int "actual caught-up empty suffix accepted" 0 (List.length
       (Result.get_ok (Read.records_of_response ~request:{scope;after=Some page.next_cursor} caught)).records);

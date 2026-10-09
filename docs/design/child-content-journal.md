@@ -108,7 +108,10 @@ registry is added.
 `Keeper_child_content_read` is a closed public codec for records, audited receiver
 inventories, unchecked hints and typed failures. It reuses the Child observation
 codec and re-redacts only human body/model leaves during authoritative read
-projection. Scope retains Keeper plus all three invocation fields. Records have
+projection. Scope retains Keeper plus all three invocation fields. The journal
+snapshot carries the opened store's own scope, and the projection refuses a
+different requested scope with `invalid_scope` even when the suffix is empty,
+since an empty page has no row whose origin could expose the label. Records have
 unique `(observation_id, ordinal, channel)` keys and contiguous positive sequences;
 provider envelope UUID alone is deliberately not unique across received snapshots.
 The mandatory request matcher rechecks projected or decoded rows against actual

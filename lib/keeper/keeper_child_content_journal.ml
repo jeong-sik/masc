@@ -22,7 +22,9 @@ type t =
 type publication = { reader : reader; observation : Child.view; collector : t }
 type cursor = { store_id : string; after_sequence : int }
 type validation = { store_id : string; through_sequence : int }
-type snapshot = { validation : validation; records : record list }
+type receiver = { receiver_generation : string; session_id : string; client_uuid : string }
+type snapshot =
+  { validation : validation; records : record list; keeper_name : string; receiver : receiver }
 
 let error_to_string = function
   | Invalid_scope s -> "invalid child content scope: " ^ s
@@ -194,7 +196,7 @@ let metadata db cleanup expected = statement db cleanup "scope"
       else Ok (store_id,next)
   | Sqlite3.Rc.DONE -> corrupt "missing store metadata"
   | rc -> Error (sqlite_failure db "scope" rc))
-let decode_row scope stmt =
+let decode_row (scope : scope) stmt =
   let* seq64 = integer (Sqlite3.column stmt 0) in
   let* seq =
     let as_int = Int64.to_int seq64 in
@@ -336,7 +338,10 @@ let read ?after reader = with_database ~create:false reader (fun db cleanup ->
     let* all = full_audit db cleanup reader.scope next in
     let records = List.filter (fun record -> record.seq>boundary) all in
     let* () = exec db "end read snapshot" "COMMIT" in
-    Ok {validation={store_id;through_sequence};records} in
+    let scope = reader.scope in
+    Ok {validation={store_id;through_sequence};records;keeper_name=scope.keeper_name;
+      receiver={receiver_generation=scope.receiver_generation;session_id=scope.session_id;
+        client_uuid=scope.client_uuid}} in
   match body () with
   | Ok _ as result -> result
   | Error _ as result -> rollback db cleanup; result
@@ -368,7 +373,6 @@ let report ~keeper_name outcome =
   List.iter (fun failure -> Log.Keeper.warn ~keeper_name
     "child content cleanup failed (primary outcome retained): %s"
     (cleanup_failure_to_string failure)) outcome.cleanup_failure
-type receiver = { receiver_generation : string; session_id : string; client_uuid : string }
 type change_hint = { store_id : string; through_sequence : int }
 let read_hint reader = with_database ~create:false reader (fun db cleanup ->
   let* () = exec db "begin hint snapshot" "BEGIN" in

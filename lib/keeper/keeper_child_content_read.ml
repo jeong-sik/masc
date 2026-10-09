@@ -66,7 +66,11 @@ let cleanup_of_journal failures =
   List.map (fun (failure:Journal.cleanup_failure) -> failure.operation) failures
 let receiver_of_journal (receiver:Journal.receiver) : receiver =
   {receiver_generation=receiver.receiver_generation;session_id=receiver.session_id;client_uuid=receiver.client_uuid}
+(* The page label comes from the opened store, not from the caller: a caught-up
+   empty suffix has no row whose origin could expose a mislabelled scope. *)
 let records_of_journal ~redact_text ~scope ~(snapshot:Journal.snapshot) ~cleanup_failures =
+  let store_scope:scope={keeper_name=snapshot.keeper_name;receiver=receiver_of_journal snapshot.receiver} in
+  if scope<>store_scope then failure Invalid_scope else
   Records {scope;records=List.map (fun (row:Journal.record) ->
     {seq=row.seq;recorded_at=row.recorded_at;observation=Child.redact redact_text row.observation}) snapshot.records;
     next_cursor={store_id=snapshot.validation.store_id;after_sequence=snapshot.validation.through_sequence};

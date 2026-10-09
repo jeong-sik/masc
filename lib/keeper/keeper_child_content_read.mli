@@ -33,6 +33,8 @@ val failure : error_code -> response
 val records_of_journal : redact_text:(string -> string) -> scope:scope ->
   snapshot:Keeper_child_content_journal.snapshot ->
   cleanup_failures:Keeper_child_content_journal.cleanup_failure list -> response
+(** [Failure Invalid_scope] unless [scope] is the snapshot's own store scope,
+    including for an empty suffix. *)
 val receivers_of_journal : keeper_name:string ->
   entries:Keeper_child_content_journal.discovery_entry list ->
   cleanup_failures:Keeper_child_content_journal.cleanup_failure list -> response

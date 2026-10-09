@@ -22,7 +22,11 @@ type publication
 type reader
 type cursor = private { store_id : string; after_sequence : int }
 type validation = private { store_id : string; through_sequence : int }
-type snapshot = private { validation : validation; records : record list }
+type receiver = { receiver_generation : string; session_id : string; client_uuid : string }
+type snapshot = private
+  { validation : validation; records : record list; keeper_name : string; receiver : receiver }
+(** [keeper_name] and [receiver] are the opened store's own scope. An empty
+    suffix has no row to carry it, so a projection labels a page from here. *)
 val create : base_path:string -> keeper_name:string -> source:Keeper_native_task_journal.source ->
   redact_text:(string -> string) -> t
 val prepare : t -> attempt:Runtime_native_tasks.attempt ->
@@ -59,7 +63,6 @@ val read : ?after:cursor -> reader -> snapshot outcome
     from leaf checks and does not establish complete owned leaf-open continuity. *)
 val error_to_string : error -> string
 
-type receiver = { receiver_generation : string; session_id : string; client_uuid : string }
 type change_hint = private { store_id : string; through_sequence : int }
 (** Unchecked schema/full-ticket metadata/tail observation only, not a history
     payload/sequence audit, quick_check, validation or liveness/completeness proof.

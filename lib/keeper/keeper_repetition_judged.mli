@@ -21,9 +21,14 @@ val error_to_string : error -> string
 
 val context_key : string
 
+val read_opt : Agent_core.Context.t -> (t option, error) result
+(** Distinguish a missing activation boundary from an explicitly empty one.
+    Malformed records remain errors. *)
+
 val read : Agent_core.Context.t -> (t, error) result
-(** Missing record means neither source has been judged. Malformed records
-    are errors, not an empty boundary. *)
+(** Missing record reads as the unjudged coordinates for legacy callers.
+    Run setup uses [read_opt] to establish its first activation boundary.
+    Malformed records are errors, not an empty boundary. *)
 
 val restore
   : source:Agent_core.Context.t -> target:Agent_core.Context.t -> (t, error) result
@@ -36,7 +41,8 @@ val restore
 val reset_history : Agent_core.Context.t -> (Agent_core.Context.t, error) result
 (** Copy a checkpoint context and reset only its history coordinate with a
     fresh durable generation. Call alongside an authoritative history rewrite;
-    the source context remains unchanged until its checkpoint is installed. *)
+    the source context remains unchanged until its checkpoint is installed.
+    An absent boundary stays absent so first activation still snapshots the ledger. *)
 
 val record : Agent_core.Context.t -> t -> unit
 

@@ -354,6 +354,25 @@ let flush_ledger () =
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (Printexc.to_string exn)
 
+(* Capture policy activation before this run can issue a call. Existing
+   history and ledger rows stay intact, but are outside the new comparison
+   interval. An explicitly empty boundary is already active and must not be
+   advanced on every later turn. *)
+let activate_repetition_boundary ~context ~keeper_name ~history_pairs =
+  let ( let* ) = Result.bind in
+  let* existing = Keeper_repetition_judged.read_opt context
+    |> Result.map_error Keeper_repetition_judged.error_to_string in
+  match existing with
+  | Some boundary -> Ok boundary
+  | None ->
+    let* () = flush_ledger () in
+    let* ledger_frontier = Keeper_tool_call_log.current_frontier ~keeper_name
+      |> Result.map_error (function Keeper_tool_call_log.Index_unavailable detail -> detail) in
+    let boundary : Keeper_repetition_judged.t =
+      { history_generation = Initial; history_pairs; ledger_frontier } in
+    Keeper_repetition_judged.record context boundary;
+    Ok boundary
+
 (* The index hands each row here and drops its body, so a first read over a
    large ledger keeps only these few fields per row. *)
 let ledger_fields_of_row row =
@@ -635,7 +654,7 @@ let prepare_agent_setup
      on its own context and persists it whole, so a key only the
      autonomous lane carried would leave the checkpoint at the first
      operator message. *)
-  let* judged =
+  let* _judged =
     Keeper_repetition_judged.restore
       ~source:(Keeper_context_core.agent_core_context_of_context ctx_work)
       ~target:shared_context
@@ -656,6 +675,9 @@ let prepare_agent_setup
       let history_memo = Keeper_tool_progress_identity.history_memo
         ~base_path:config.base_path ~keeper_name:meta.name in
       let history_pairs = initial_tool_calls ~history_memo ~history_messages in
+      let* judged = activate_repetition_boundary ~context:shared_context
+        ~keeper_name:meta.name ~history_pairs:(List.length history_pairs)
+        |> Result.map_error (fun detail -> Agent_core.Error.Internal detail) in
       let ledger_pairs =
         seed_tool_calls_from_ledger ~history_memo
           ~judged:judged.ledger_frontier

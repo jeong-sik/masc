@@ -1223,6 +1223,65 @@ let test_ledger_seed_drops_rows_the_history_already_represents () =
           | [] -> fail "unexpected seed shape"))
 ;;
 
+let test_first_activation_excludes_retained_repetition () =
+  let module Setup = Masc.Keeper_run_tools_setup in
+  let module Judged = Masc.Keeper_repetition_judged in
+  let module Ledger = Masc.Keeper_tool_call_log in
+  let context = Agent_core.Context.create_sync () in
+  let store = Filename.temp_file "repetition-activation-" "" in
+  Sys.remove store;
+  Unix.mkdir store 0o755;
+  Fun.protect ~finally:Ledger.reset_for_testing (fun () ->
+    let masc = Filename.concat store ".masc" in
+    Unix.mkdir masc 0o755;
+    Unix.mkdir (Filename.concat masc "config") 0o755;
+    Ledger.init ~base_path:store ();
+    let keeper_name = "activation-fixture" in
+    let append () = Ledger.log_call ~keeper_name ~tool_name:"keeper_tasks_list"
+      ~input:(`Assoc []) ~output_text:"same" ~wire_outcome:Tool_result.Ok
+      ~duration_ms:1.0 ~input_fingerprint:"same-input" ~output_fingerprint:"same-output" () in
+    append (); append ();
+    let history = [tool_call "keeper_tasks_list"; tool_call "keeper_tasks_list"] in
+    let activate context =
+      match Setup.activate_repetition_boundary ~context ~keeper_name ~history_pairs:(List.length history) with
+      | Ok boundary -> boundary | Error detail -> fail detail in
+    let boundary = activate context in
+    check int "history remains intact" 2 (List.length history);
+    check int "pre-policy history is outside comparison" 0
+      (List.length (Judged.seed_beyond ~judged:boundary.history_pairs history));
+    let seed context =
+      let boundary = activate context in
+      Setup.seed_tool_calls_from_ledger ~judged:boundary.ledger_frontier
+        ~history_tool_use_ids:[] ~keeper_name () in
+    check int "old ledger remains but is not seeded" 0 (List.length (seed context));
+    append ();
+    let cold = Agent_core.Context.create_sync () in
+    (match Judged.restore ~source:(Agent_core.Context.copy context) ~target:cold with
+     | Ok _ -> () | Error error -> fail (Judged.error_to_string error));
+    let first = seed cold in
+    check int "activation does not move on resume" 1 (List.length first);
+    let detect = Masc.Keeper_agent_run.For_testing.repeated_exact_tool_call ~threshold:3 in
+    check (option (pair string int)) "two old plus one new is not a repetition" None (detect first);
+    append (); append ();
+    check (option (pair string int)) "three post-activation exact calls still yield"
+      (Some ("keeper_tasks_list", 3)) (detect (seed cold));
+    check int "ledger history is preserved" 5
+      (List.length (Ledger.read_recent ~keeper_name ~n:10 ()));
+    let fresh = Agent_core.Context.create_sync () in
+    (match Judged.reset_history fresh with
+     | Error error -> fail (Judged.error_to_string error)
+     | Ok reset -> check bool "pre-activation purge does not invent activation" true
+         (Judged.read_opt reset = Ok None));
+    let empty = Agent_core.Context.create_sync () in
+    Judged.record empty {Judged.history_generation=Initial; history_pairs=0;
+      ledger_frontier=Keeper_tool_call_index.empty_frontier};
+    let restored = Agent_core.Context.create_sync () in
+    (match Judged.restore ~source:empty ~target:restored with
+     | Error error -> fail (Judged.error_to_string error)
+     | Ok boundary -> check bool "explicit empty activation survives restore" true
+         (Judged.read_opt restored = Ok (Some boundary))))
+;;
+
 let test_seed_stops_where_a_yield_already_judged () =
   let pairs = List.init 5 (fun i -> tool_call ~input:(Some (string_of_int i)) "Read") in
   let names calls =
@@ -1912,6 +1971,8 @@ let () =
             test_checkpoint_history_is_not_current_tool_execution;
           test_case "repeated exact tool call seeded from checkpoint history" `Quick
             test_repeated_exact_tool_call_seeded_from_checkpoint_history;
+          test_case "first activation excludes retained repetition" `Quick
+            test_first_activation_excludes_retained_repetition;
           test_case "ledger seed drops rows the history already represents" `Quick
             test_ledger_seed_drops_rows_the_history_already_represents;
           test_case "history memo answers a purged body from its new bytes" `Quick

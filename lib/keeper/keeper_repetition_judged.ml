@@ -37,10 +37,12 @@ let encode boundary = `Assoc
   ; "history_pairs", `Int boundary.history_pairs
   ; "ledger_frontier", Index.frontier_to_json boundary.ledger_frontier ]
 
-let read context =
+let read_opt context =
   match Agent_core.Context.get_scoped context Agent_core.Context.Session context_key with
-  | None -> Ok empty
-  | Some json -> decode json
+  | None -> Ok None
+  | Some json -> Result.map Option.some (decode json)
+
+let read context = Result.map (Option.value ~default:empty) (read_opt context)
 
 let record context boundary =
   Agent_core.Context.set_scoped context Agent_core.Context.Session context_key (encode boundary)
@@ -48,9 +50,11 @@ let record context boundary =
 let reset_history context =
   Result.map (fun boundary ->
     let context = Agent_core.Context.copy context in
-    record context { boundary with
-      history_generation = Rewritten (Random_id.uuid_v7 ()); history_pairs = 0 };
-    context) (read context)
+    (match boundary with
+     | None -> ()
+     | Some boundary -> record context { boundary with
+         history_generation = Rewritten (Random_id.uuid_v7 ()); history_pairs = 0 });
+    context) (read_opt context)
 
 let restore ~source ~target =
   match read source, read target with
@@ -67,7 +71,9 @@ let restore ~source ~target =
     let boundary =
       { history with
         ledger_frontier = Index.merge_frontiers durable.ledger_frontier live.ledger_frontier } in
-    if boundary <> live then record target boundary;
+    if boundary <> live
+       || Option.is_some (Agent_core.Context.get_scoped source Agent_core.Context.Session context_key)
+    then record target boundary;
     Ok boundary
 ;;
 

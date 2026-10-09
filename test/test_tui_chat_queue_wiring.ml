@@ -1955,6 +1955,68 @@ let test_loaded_skill_evidence_is_folded_into_the_held_log () =
   | skills -> failf "expected one drawn skill, got %d" (List.length skills)
 ;;
 
+(* A failover reuses one turn reference and provider tool id across two
+   runtimes. When both observations name a runtime and the two differ, the
+   loaded row is a distinct invocation and must stay visible; the same
+   runtime, or one side without a runtime, still folds into the live
+   log's observation (#41737 review). *)
+let test_skill_dedup_keeps_a_distinct_runtime_visible () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  let occurrence =
+    { Live.stream_scope = 0; block_index = 1; provider_message_id = None; tool_call_id = Some "c1" }
+  in
+  (* No Run_finished: the log is committed but does not hold the turn, so
+     the loaded row reaches the partial-log dedup instead of being replaced
+     wholesale by the held-turn filter. *)
+  let log =
+    settled_log ~request_id:"op-1"
+      [ Live.Run_started
+      ; Live.Tool_started { occurrence; tool_name = "keeper_skill" }
+      ; Live.Tool_ended { occurrence }
+      ; visible_reply "done"
+      ]
+  in
+  Keeper_chat_transcript.note_skill_activity log.Tui_types.tl_transcript
+    (Keeper_chat_transcript.make_skill_activity
+       ~invocation:Keeper_chat_transcript.Instruction_read ~skill_tool_use_id:"c1"
+       ~turn_ref:"trace-1#1" ~runtime_id:"rt-live" ~skill_name:"ci-red-attribution"
+       ~state:Keeper_chat_transcript.Skill_used ~actions:[] ());
+  state.msg_settled_logs <- [ log ];
+  let loaded_row ?runtime_id () =
+    { (chat_entry ~request_id:"op-1"
+         ~role:(Tui_types.Message_skill Keeper_chat_transcript.Skill_used)
+         ~text:"**ci-red-attribution**" ~at:101. ())
+      with
+      me_skill_block =
+        [ Keeper_chat_transcript.make_skill_activity
+            ~invocation:Keeper_chat_transcript.Instruction_read
+            ~skill_tool_use_id:"c1" ~turn_ref:"trace-1#1" ?runtime_id
+            ~skill_name:"ci-red-attribution"
+            ~state:Keeper_chat_transcript.Skill_used ~actions:[] () ] }
+  in
+  let skill_row_count rows =
+    List.length
+      (List.filter
+         (fun (row : Tui_types.msg_entry) -> row.me_skill_block <> [])
+         rows)
+  in
+  state.msg_loaded_keeper <- Some "alpha";
+  state.msg_loaded <- [ loaded_row ~runtime_id:"rt-other" () ];
+  check int "a different runtime keeps the loaded skill row visible" 1
+    (skill_row_count
+       (Tui_types.compute_chat_rows_for state "alpha" ~queued_request_ids:[]));
+  state.msg_loaded <- [ loaded_row ~runtime_id:"rt-live" () ];
+  check int "the same runtime folds into the live observation" 0
+    (skill_row_count
+       (Tui_types.compute_chat_rows_for state "alpha" ~queued_request_ids:[]));
+  state.msg_loaded <- [ loaded_row () ];
+  check int "an unknown runtime completes the live observation" 0
+    (skill_row_count
+       (Tui_types.compute_chat_rows_for state "alpha" ~queued_request_ids:[]))
+;;
+
 (* A log whose trail never saw the read -- a cut stream, a gap in the journal
    -- still draws the skill once the exact record arrives, ahead of the reply:
    the loaded row the log leaves out cannot take the skill with it. *)
@@ -6258,6 +6320,8 @@ let () =
             test_loaded_tool_facts_are_folded_into_the_held_log
         ; test_case "loaded skill evidence is folded into the held log" `Quick
             test_loaded_skill_evidence_is_folded_into_the_held_log
+        ; test_case "skill dedup keeps a distinct runtime visible" `Quick
+            test_skill_dedup_keeps_a_distinct_runtime_visible
         ; test_case "skill evidence stands for a read the trail missed" `Quick
             test_skill_evidence_stands_for_a_read_the_trail_missed
         ; test_case "a failed skill call keeps its failure" `Quick

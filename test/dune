@@ -2812,6 +2812,7 @@
 
 (include stanzas/test_keeper_memory_admission_judgment.inc)
 (include stanzas/test_keeper_memory_admission_export.inc)
+(include stanzas/test_keeper_memory_admission_replay.inc)
 (include stanzas/test_keeper_memory_admission_queue.inc)
 (include stanzas/test_keeper_memory_write.inc)
 (include stanzas/test_keeper_memory_write_growth_probe.inc)

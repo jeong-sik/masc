@@ -21,16 +21,35 @@ type bound_parent = private
     evidence. This certifies neither a child body's authenticity/parent pairing,
     Task/run ownership, current call authority, nor publication/persistence. *)
 
+type bound_child = private
+  { parent_input : bound_parent
+  ; content : Runtime_claude_code.complete_child_content
+  }
+(** Actual complete-frame child provenance joined to the original native Agent
+    call's input evidence. This does not prove that child consumed that input
+    group, mint Task/run ownership, or authorize publication/persistence. *)
+
 type rejection =
   | Missing_ticket
   | Conflicting_invocation
   | Foreign_session
   | Foreign_invocation
+  | Unknown_parent
+  | Conflicting_parent_provenance
   | Missing_assistant_evidence
   | Unattributed_assistant
   | Rejected_assistant of Runtime_claude_input_attribution.rejection
   | Input_not_in_group
   | Conflicting_assistant_evidence
+
+type child_observation =
+  | Child_bound of bound_child
+  | Child_rejected of
+      { content : Runtime_claude_code.complete_child_content
+      ; reason : rejection
+      }
+(** A refusal retains the actual child content and its unknown/foreign
+    provenance; it must not be displayed as a root answer or a bound child. *)
 
 type t
 
@@ -61,6 +80,13 @@ val bind_parent : t -> Runtime_claude_code.native_agent_parent_witness ->
     frozen failed-first evidence cache as [bind_task]. Parent-before-task and
     task-before-parent therefore share the same original input decision.
     The witness may precede task registration or follow native return. A
-    publicly constructed child event must separately validate its literal
-    parent ID; this API receives no body and cannot bind or publish one. *)
+    separately supplied body must validate its literal parent ID; this API
+    receives no body and cannot bind or publish one. [bind_child] separately
+    requires the runtime's private complete-content provenance. *)
+val bind_child : t -> Runtime_claude_code.complete_child_content ->
+  (bound_child, rejection) result
+(** Checks the child's actual invocation and literal parent against its private
+    occurrence, then uses [bind_parent]'s exact shared failed-first authority.
+    [Unknown_parent] retains uncertainty without fabricating an owner. No body
+    matching, current-input inference, or retroactive parent upgrade occurs. *)
 val rejection_to_string : rejection -> string

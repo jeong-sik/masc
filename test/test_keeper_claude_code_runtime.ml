@@ -3018,7 +3018,7 @@ let test_spawn_failure_fences_claim () =
 
 let run_direct_attempt
       ?on_memory_capacity_refusal
-      ?required_native_posture ?on_native_task_observation ?on_event
+      ?required_native_posture ?on_native_task_observation ?on_child_content_observation ?on_event
       ?hooks
       ?(system_prompt = "pre-dispatch fixture system prompt")
       ~base_path
@@ -3057,7 +3057,7 @@ let run_direct_attempt
                   in
                   Keeper_claude_code_runtime.run
                     ?on_memory_capacity_refusal
-                    ?required_native_posture ?on_native_task_observation
+                    ?required_native_posture ?on_native_task_observation ?on_child_content_observation
                     ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
                     ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
                       ~runtime:(Runtime.get_runtime_by_id "claude.claude" |> Option.get))
@@ -3214,6 +3214,169 @@ let with_fixture_yolo ~keeper_name f =
   let previous = Keeper_tool_approval_mode.resolve modes ~keeper_name in
   Fun.protect ~finally:(fun () -> Keeper_tool_approval_mode.set modes ~keeper_name previous)
     (fun () -> Keeper_tool_approval_mode.set modes ~keeper_name Keeper_tool_approval_mode.Yolo; f ())
+;;
+
+let child_content_frame ?(diagnostic=false) ~uuid ~parent ~text () =
+  Yojson.Safe.to_string (`Assoc ["type",`String "assistant";
+    "parent_tool_use_id",`String parent;"session_id",`String "__SESSION__";
+    "uuid",`String uuid;"is_api_error_message",`Bool diagnostic;
+    "message",`Assoc ["id",`String ("child-message-" ^ uuid);"role",`String "assistant";
+      "model",`String "child-model";"usage",`Assoc ["input_tokens",`Int 999];
+      "content",`List [`Assoc ["type",`String "redacted_thinking";"data",`String "NOT_BODY"];
+        `Assoc ["type",`String "text";"text",`String text];
+        `Assoc ["type",`String "thinking";"thinking",`String "CHILD_THINKING"]]]])
+;;
+
+let test_child_callback_binds_original_input_without_root_events () =
+  let module Binding = Keeper_claude_task_binding in
+  let module F = Native_tool_outcome_fixture in
+  List.iter (fun task_subscribed ->
+    let base_path=temp_workspace () in
+    Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+      let keeper_name="claude-pre-dispatch" in
+      let secret="child-private-cobalt-value" in
+      let token_file=Keeper_secret_redaction.ssh_remote_token_file ~base_path ~keeper_name in
+      Fs_compat.mkdir_p (Filename.dirname token_file);
+      Out_channel.with_open_bin token_file (fun out -> output_string out secret);
+      let redaction=Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
+      let projection=F.create ~redaction () in
+      let events=ref [] and children=ref [] and tasks=ref [] in
+      let on_event event=events:=event :: !events; F.on_event projection event in
+      let on_child_content_observation observation=
+        children:=(observation,List.rev !events,F.events projection) :: !children in
+      let on_native_task_observation=if task_subscribed then
+        Some (fun bound -> tasks:=bound :: !tasks) else None in
+      let frame event=Yojson.Safe.to_string (`Assoc ["type",`String "stream_event";
+        "session_id",`String "__SESSION__";"parent_tool_use_id",`Null;"event",event]) in
+      let delta text=frame (`Assoc ["type",`String "content_block_delta";"index",`Int 0;
+        "delta",`Assoc ["type",`String "text_delta";"text",`String text]]) in
+      let later=match Yojson.Safe.from_string (response_text ~turn_id:"later" ~message_id:"later" "Answer") with
+        | `Assoc fields -> Yojson.Safe.to_string (`Assoc
+            (["user_message_uuid",`String "later-input";
+              "user_message_uuids",`List [`String "later-input"]] @ fields))
+        | _ -> fail "later root frame object" in
+      let child uuid parent=Emit (child_content_frame ~uuid ~parent ~text:("CHILD_" ^ secret) ()) in
+      with_fixture ([child "unknown" "parent-agent";
+        Emit (child_content_frame ~diagnostic:true ~uuid:"diagnostic" ~parent:"parent-agent" ~text:"NOT_CONTENT" ());
+        Emit_with_input (response_native_tool ~turn_id:"parent" ~message_id:"parent" ~call_id:"parent-agent" ~tool_name:"Agent");
+        Emit (task_binding_native_result ~uuid:"parent-return" ~call_id:"parent-agent");
+        Emit (frame (`Assoc ["type",`String "message_start";"message",`Assoc
+          ["id",`String "body";"model",`String "claude-fixture"]]));
+        Emit (frame (`Assoc ["type",`String "content_block_start";"index",`Int 0;
+          "content_block",`Assoc ["type",`String "text";"text",`String ""]]));
+        Emit (delta "child-private-"); child "before-task" "parent-agent"] @
+        (if task_subscribed then [Emit (task_binding_start ~uuid:"task-start" ~task_id:"one" ~call_id:"parent-agent")] else []) @
+        [child "after-task" "parent-agent";Emit (delta "cobalt-value");
+         Emit (frame (`Assoc ["type",`String "content_block_stop";"index",`Int 0]));
+         Emit (response_text ~turn_id:"body-complete" ~message_id:"body" secret);
+         Emit later;child "after-later-input" "parent-agent";
+         Emit (result_text ~turn_id:"final" "Answer")]) (fun cli_path ->
+          let attempt=with_fixture_yolo ~keeper_name (fun () ->
+            run_direct_attempt ~base_path ~cli_path ~goal:"CHILD_INPUT" ~tools:[]
+              ~required_native_posture:Runtime_native_tools.Native_full
+              ?on_native_task_observation ~on_child_content_observation
+              ?on_event:(if task_subscribed then Some on_event else None) ()) in
+          (match attempt.result with Error error -> fail (Agent_core.Error.to_string error) | Ok _ -> ());
+          let observations=List.rev !children in
+          check int "unknown and three known complete envelopes retain text/thinking; diagnostic excluded" 8
+            (List.length observations);
+          let bound=List.filter_map (fun (observation,sse,chat) -> match observation with
+            | Binding.Child_rejected {content;reason} ->
+                check bool "only unknown parent is refused" true (reason=Binding.Unknown_parent);
+                check bool "unknown still carries its actual receiving invocation" true
+                  (String.length content.invocation.receiver_generation>0);
+                check (option bool) "unknown has no invented parent" None
+                  (Option.map (fun _ -> true) content.parent_occurrence);
+                None
+            | Child_bound bound -> Some (bound,sse,chat)) observations in
+          check int "known child body binds before task and after native return/later input" 6 (List.length bound);
+          List.iter (fun ((b:Binding.bound_child),_,_) ->
+            check string "reported child model remains separate" "child-model" b.content.model;
+            check string "literal parent agrees with admitted occurrence" b.parent_input.parent.call_id b.content.parent_tool_use_id;
+            check bool "private child and original input refer to same actual invocation" true
+              (b.content.invocation==b.parent_input.ticket);
+            (match b.parent_input.evidence with
+             | Binding.Explicit_group group -> check string "original input survives later different stamp"
+                 b.parent_input.ticket.client_uuid group.primary
+             | Response_inherited _ | Command_inherited _ -> fail "original explicit parent group required");
+            (match b.content.block,b.content.channel with
+             | Runtime_claude_code.Assistant_block {ordinal=1;_},Text_content ->
+                 check string "side callback preserves provider body; separate sink redacts it" ("CHILD_" ^ secret) b.content.text
+             | Assistant_block {ordinal=2;_},Thinking_content -> check string "provider child thinking remains scoped" "CHILD_THINKING" b.content.text
+             | _ -> fail "complete child wire ordinal/channel changed")) bound;
+          if task_subscribed then begin
+            check int "same binding also admits one actual task" 1 (List.length !tasks);
+            let task=List.hd !tasks in
+            let first,_,_=List.hd bound in
+            check bool "task and child share original private evidence" true
+              (task.evidence=first.parent_input.evidence && task.ticket==first.parent_input.ticket);
+            (match bound with
+             | (_,one_sse,one_chat)::(_,two_sse,two_chat)::(_,three_sse,three_chat)::(_,four_sse,four_chat)::_ ->
+                 check bool "child/task side callbacks emit no root lifecycle/content and do not flush held prefix" true
+                   (one_sse=two_sse && two_sse=three_sse && three_sse=four_sse
+                    && one_chat=two_chat && two_chat=three_chat && three_chat=four_chat)
+             | _ -> fail "four consecutive known snapshots required");
+            check bool "child reported model never starts a root response" true
+              (List.for_all (function Agent_core.Types.MessageStart {model;_} -> model="claude-fixture" | _ -> true) !events);
+            let body=F.events projection |> List.filter_map (function
+              | Keeper_chat_events.Text_delta {text;_} | Agent_core_thinking_delta {delta=text;_} -> Some text
+              | _ -> None) |> String.concat "" in
+            check bool "child text/thinking never enters root transcript" false
+              (Astring.String.is_infix ~affix:"CHILD_" body);
+            check bool "configured secret remains redacted on independent root path" false
+              (Astring.String.is_infix ~affix:secret body);
+            check bool "root authored text survives independent redaction" true
+              (Astring.String.is_infix ~affix:(Keeper_secret_redaction.redact_text redaction secret) body)
+          end else check int "child-only subscription does not require root event observer" 0 (List.length !events))))
+    [false;true]
+;;
+
+let test_child_and_task_callbacks_share_failed_original_evidence () =
+  let module Binding = Keeper_claude_task_binding in
+  List.iter (fun task_first ->
+    let base_path=temp_workspace () in
+    Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+      let children=ref [] and tasks=ref [] in
+      let child uuid parent=Emit (child_content_frame ~uuid ~parent ~text:"SCOPED_CHILD" ()) in
+      let old_task=Emit (task_binding_start ~uuid:"old-task" ~task_id:"old" ~call_id:"old-call") in
+      let old_child=child "old-child" "old-call" in
+      let order=if task_first then [old_task;old_child] else [old_child;old_task] in
+      with_fixture ([Emit (native_tool_call_block ~turn_id:"unattributed-parent" ~call_id:"old-call" ~tool_name:"Agent")] @ order @
+        [Emit (task_binding_native_result ~uuid:"old-return" ~call_id:"old-call");
+         Emit_with_input (response_text ~turn_id:"input-stamp" ~message_id:"stamp" "Stamp");
+         child "old-after-input" "old-call";
+         Emit (task_binding_frame ~uuid:"old-progress" ~task_id:"old" ~call_id:"old-call" "task_progress"
+           ["description",`String "metadata";"usage",`Assoc ["total_tokens",`Int 1;"tool_uses",`Int 1;"duration_ms",`Int 1]]);
+         Emit (native_tool_call_block ~turn_id:"command-parent" ~call_id:"new-call" ~tool_name:"Agent");
+         Emit (task_binding_native_result ~uuid:"new-return" ~call_id:"new-call");
+         child "new-child" "new-call";
+         Emit (task_binding_start ~uuid:"new-task" ~task_id:"new" ~call_id:"new-call");
+         Emit (response_text ~turn_id:"answer" ~message_id:"answer" "Answer");
+         Emit_with_input (result_text ~turn_id:"final" "Answer")]) (fun cli_path ->
+          let attempt=with_fixture_yolo ~keeper_name:"claude-pre-dispatch" (fun () ->
+            run_direct_attempt ~base_path ~cli_path ~goal:"CHILD_FAILURE" ~tools:[]
+              ~required_native_posture:Runtime_native_tools.Native_full
+              ~on_child_content_observation:(fun observation -> children:=observation :: !children)
+              ~on_native_task_observation:(fun bound -> tasks:=bound :: !tasks) ()) in
+          (match attempt.result with Error error -> fail (Agent_core.Error.to_string error) | Ok _ -> ());
+          let rejected=List.filter_map (function
+            | Binding.Child_rejected {content;reason} -> Some (content,reason)
+            | Child_bound _ -> None) (List.rev !children) in
+          check int "both old snapshots retain text/thinking despite refusal" 4 (List.length rejected);
+          List.iter (fun ((content:Runtime_claude_code.complete_child_content),reason) ->
+            check bool "shared failed-first authority never adopts later input" true (reason=Binding.Unattributed_assistant);
+            check string "refused content retains literal parent" "old-call" content.parent_tool_use_id) rejected;
+          let bound=List.filter_map (function Binding.Child_bound bound -> Some bound | Child_rejected _ -> None) !children in
+          check int "only genuinely witnessed new parent binds child text/thinking" 2 (List.length bound);
+          check int "same shared binding admits only new task" 1 (List.length !tasks);
+          let task=List.hd !tasks in
+          List.iter (fun (child:Binding.bound_child) ->
+            check bool "new task/child preserve exact same canonical evidence" true
+              (child.parent_input.evidence=task.evidence && child.parent_input.ticket==task.ticket);
+            match child.parent_input.evidence with
+            | Binding.Command_inherited _ -> ()
+            | Explicit_group _ | Response_inherited _ -> fail "actual root stamp command evidence required") bound)))
+    [false;true]
 ;;
 
 let test_task_binding_freezes_exact_envelope_and_dispatch () =
@@ -5358,6 +5521,10 @@ let () =
             test_task_binding_does_not_adopt_an_earlier_unattributed_call
         ; test_case "task metadata retains closed native owner without flushing model content" `Quick
             test_task_callback_keeps_closed_native_owner_and_model_content
+        ; test_case "complete child callback keeps original input and separate root projection" `Quick
+            test_child_callback_binds_original_input_without_root_events
+        ; test_case "child/task callbacks share failed-first original evidence" `Quick
+            test_child_and_task_callbacks_share_failed_original_evidence
         ; test_case
             "a closed client connection is typed"
             `Quick

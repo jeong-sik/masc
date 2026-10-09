@@ -154,7 +154,7 @@ let api_usage_of_turn_usage (usage : Runtime_claude_code.turn_usage) =
 (* Always installed so usage-window and turn usage reports are recorded. A
    turn nobody streams, traces or observes gets only those; its other events
    are ignored as before. *)
-let claude_stream_callback ?on_native_task_observation ?on_native_tool_progress ?on_native_tool_completion ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~turn_count
+let claude_stream_callback ?on_child_content_observation ?on_native_task_observation ?on_native_tool_progress ?on_native_tool_completion ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~turn_count
     ~on_native_action ~on_usage_report ~position ~on_compacted on_event =
   (* The result frame's uuid is the response identity the completion hook
      also writes for a Claude Code turn; the session is the conversation. *)
@@ -173,8 +173,8 @@ let claude_stream_callback ?on_native_task_observation ?on_native_tool_progress 
            })
       on_usage_report
   in
-  match on_event, raw_trace_run, on_native_action, receipts, on_native_tool_completion, on_native_tool_progress, on_native_task_observation with
-  | None, None, None, None, None, None, None ->
+  match on_event, raw_trace_run, on_native_action, receipts, on_native_tool_completion, on_native_tool_progress, on_native_task_observation, on_child_content_observation with
+  | None, None, None, None, None, None, None, None ->
     Some
       (function
         | Runtime_claude_code.Usage_windows_reported report ->
@@ -234,11 +234,9 @@ let claude_stream_callback ?on_native_task_observation ?on_native_tool_progress 
           let index = content_index block Runtime_claude_code.Thinking_content in
           emit (Agent_core.Types.ContentBlockDelta
             { index; delta = Agent_core.Types.ThinkingDelta text })
-        | Runtime_claude_code.Child_content_observed _ ->
-          (* Child content has no root assistant authority. Its runtime event
-             retains the provider body and occurrence for a separate child
-             display/persistence consumer; that integration is still pending. *)
-          ()
+        | Runtime_claude_code.Child_content_observed content ->
+          (* Child content never enters root SSE, content indexes or usage. *)
+          Option.iter (fun observe -> observe content) on_child_content_observation
         | Runtime_claude_code.Content_block_stopped {block; channel} ->
           Option.iter stop_content (Hashtbl.find_opt content_indexes (block, channel))
         | Runtime_claude_code.Dynamic_tool_started
@@ -624,7 +622,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event ~effect_disposition
     ~context_overflow_retry_safe
-    ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_progress ~on_native_tool_completion ~on_native_task_observation
+    ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_progress ~on_native_tool_completion ~on_native_task_observation ~on_child_content_observation
     ~on_usage_report ~on_tool_execution ~(config : Runtime_execution.claude_code) =
   context_overflow_retry_safe := false;
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
@@ -1211,8 +1209,9 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     let turn_result =
       (* This scope owns one actual CLI invocation, not the routed candidate or
          its capacity retries. Input observations precede native registration. *)
-      let task_binding = Option.map (fun _ -> Keeper_claude_task_binding.create ())
-          on_native_task_observation in
+      let task_binding = match on_native_task_observation, on_child_content_observation with
+        | None, None -> None
+        | Some _, _ | _, Some _ -> Some (Keeper_claude_task_binding.create ()) in
       let on_input_observation = Option.map
           Keeper_claude_task_binding.observe_input task_binding in
       let on_bound_task = match task_binding, on_native_task_observation with
@@ -1223,9 +1222,17 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
                 "Claude native task input binding unavailable: %s"
                 (Keeper_claude_task_binding.rejection_to_string reason))
         | None, _ | _, None -> None in
+      let on_bound_child = match task_binding, on_child_content_observation with
+        | Some binding, Some observe -> Some (fun content ->
+            let observation = match Keeper_claude_task_binding.bind_child binding content with
+              | Ok bound -> Keeper_claude_task_binding.Child_bound bound
+              | Error reason -> Keeper_claude_task_binding.Child_rejected {content; reason} in
+            observe observation)
+        | None, _ | _, None -> None in
       let on_stream_event =
         claude_stream_callback ?receipts ?on_native_tool_progress ?on_native_tool_completion
           ?on_native_task_observation:on_bound_task
+          ?on_child_content_observation:on_bound_child
           ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
           ~on_usage_report
           ~position:
@@ -1487,7 +1494,7 @@ let run ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~
     ~turn_start
     ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
-    ?on_native_tool_progress ?on_native_tool_completion ?on_native_task_observation
+    ?on_native_tool_progress ?on_native_tool_completion ?on_native_task_observation ?on_child_content_observation
     ?on_native_action
     ?on_usage_report
     ?on_tool_execution
@@ -1594,7 +1601,7 @@ let run ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~
             ~on_event
             ~effect_disposition
             ~context_overflow_retry_safe
-        ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_progress ~on_native_tool_completion ~on_native_task_observation
+        ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_progress ~on_native_tool_completion ~on_native_task_observation ~on_child_content_observation
             ~on_usage_report
             ~on_tool_execution
             ~config)

@@ -853,7 +853,7 @@ let test_child_body_cannot_supply_root_reply () =
            | Error error -> fail (Runtime_claude_code.error_to_string error));
           let child_bodies = List.filter_map (function
             | Runtime_claude_code.Child_content_observed
-                {parent_tool_use_id; parent_occurrence; message_id; model; block; channel; text} ->
+                {invocation=_; parent_tool_use_id; parent_occurrence; message_id; model; block; channel; text} ->
                 check bool "no parent witness outside Native_full" true (Option.is_none parent_occurrence);
                 check string "reported child model preserved" "child-model" model;
                 Some (parent_tool_use_id, message_id, block, channel, text)
@@ -2982,7 +2982,7 @@ let test_child_parent_witness_uses_original_native_occurrence () =
     events := event :: !events;
     match event with
     | Runtime_claude_code.Child_content_observed
-        {parent_tool_use_id;parent_occurrence;message_id;model;block;channel;text} ->
+        {invocation=_;parent_tool_use_id;parent_occurrence;message_id;model;block;channel;text} ->
         bodies := (parent_tool_use_id,message_id,model,block,channel,text,parent_occurrence,
           List.length (task_observations !events)) :: !bodies
     | _ -> () in
@@ -3615,6 +3615,72 @@ let test_parent_binding_refuses_foreign_and_conflicting_evidence () =
   Binding.observe_input binding contradictory_prepared;
   expect Binding.Conflicting_invocation (Binding.bind_parent binding parent);
   expect Binding.Conflicting_invocation (Binding.bind_task binding progress)
+;;
+
+let test_complete_child_binding_preserves_actual_invocation_provenance () =
+  let module Binding = Keeper_claude_task_binding in
+  let capture ?(session_id="66666666-6666-4666-8666-666666666666") ?(unknown_before_parent=false) known =
+    let inputs=ref [] and contents=ref [] in
+    let parent=if known then [Emit (with_input_fields parent_tool_assistant input_own_stamp)] else [] in
+    with_fixture ([Bind_input_uuid] @
+      (if unknown_before_parent then [Emit child_body_assistant] else []) @ parent @
+      [Emit child_body_assistant;Emit assistant;Emit result]) (fun path ->
+        match run_fixture ~native:Runtime_native_tools.Native_full
+          ~session_mode:(Runtime_claude_code.Resume
+            {session_id})
+          ~on_input_observation:(fun value -> inputs:=value :: !inputs)
+          ~on_stream_event:(function
+            | Runtime_claude_code.Child_content_observed content -> contents:=content :: !contents
+            | _ -> ()) path with
+        | Error error -> fail (Runtime_claude_code.error_to_string error)
+        | Ok turn -> check string "actual child capture leaves root reply intact" "MASC_CLAUDE_OK" turn.text);
+    let inputs=List.rev !inputs and contents=List.rev !contents in
+    let prepared=List.find (fun (o:Input_evidence.observation) ->
+      o.frame=None && o.phase=Input_evidence.Prepared) inputs in
+    check int "complete text/thinking/empty body observations"
+      (if unknown_before_parent then 6 else 3) (List.length contents);
+    List.iter (fun (content:Runtime_claude_code.complete_child_content) ->
+      check bool "all bodies retain actual Prepared ticket" true (content.invocation==prepared.ticket)) contents;
+    inputs,contents in
+  let _,old_contents=capture true in
+  let old_content=List.hd old_contents in
+  let inputs,contents=capture ~unknown_before_parent:true true in
+  let before_parent=List.hd contents in
+  let content=List.nth contents 3 in
+  let unknown_inputs,unknown_contents=capture false in
+  let unknown=List.hd unknown_contents in
+  let _,foreign_contents=capture ~session_id:"77777777-7777-4777-8777-777777777777" true in
+  let binding=Binding.create () in
+  List.iter (Binding.observe_input binding) inputs;
+  (match Binding.bind_child binding old_content with
+   | Error Binding.Foreign_invocation -> ()
+   | Error reason -> fail (Binding.rejection_to_string reason)
+   | Ok _ -> fail "old genuine child bound to another actual invocation");
+  (match Binding.bind_child binding (List.hd foreign_contents) with
+   | Error Binding.Foreign_session -> ()
+   | Error reason -> fail (Binding.rejection_to_string reason)
+   | Ok _ -> fail "genuine child from another session was bound");
+  (match Binding.bind_child binding before_parent with
+   | Error Binding.Unknown_parent -> ()
+   | Error reason -> fail (Binding.rejection_to_string reason)
+   | Ok _ -> fail "body unknown at observation time was retroactively upgraded");
+  (match Binding.bind_child binding content with
+   | Error reason -> fail (Binding.rejection_to_string reason)
+   | Ok bound ->
+       check bool "bound preserves exact private child observation" true (bound.content==content);
+       check bool "original parent input is same actual runtime invocation" true
+         (bound.parent_input.ticket==content.invocation);
+       check string "private producer preserves actual child body" "CHILD_ONLY" bound.content.text);
+  let unknown_binding=Binding.create () in
+  List.iter (Binding.observe_input unknown_binding) unknown_inputs;
+  (match Binding.bind_child unknown_binding unknown with
+   | Error Binding.Unknown_parent -> ()
+   | Error reason -> fail (Binding.rejection_to_string reason)
+   | Ok _ -> fail "unknown child fabricated a parent input");
+  (match Binding.bind_child binding unknown with
+   | Error Binding.Foreign_invocation -> ()
+   | Error reason -> fail (Binding.rejection_to_string reason)
+   | Ok _ -> fail "unknown parent's old private content lost invocation provenance")
 ;;
 
 let test_input_uuid_is_serialized_and_fresh_on_resume () =
@@ -4431,6 +4497,8 @@ let () =
             test_parent_binding_shares_original_task_evidence
         ; test_case "parent binding rejects foreign or contradictory actual private evidence" `Quick
             test_parent_binding_refuses_foreign_and_conflicting_evidence
+        ; test_case "private complete child binding keeps actual invocation provenance" `Quick
+            test_complete_child_binding_preserves_actual_invocation_provenance
         ; test_case "native invocation proof refuses exact foreign SDK replays" `Quick
             test_native_invocation_proof_rejects_replayed_foreign_owners
         ; test_case "child witness retains original open/returned native parent" `Quick

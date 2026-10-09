@@ -17,16 +17,30 @@ type bound_parent =
   ; parent : Runtime_claude_code.native_agent_parent_witness
   }
 
+type bound_child =
+  { parent_input : bound_parent
+  ; content : Runtime_claude_code.complete_child_content
+  }
+
 type rejection =
   | Missing_ticket
   | Conflicting_invocation
   | Foreign_session
   | Foreign_invocation
+  | Unknown_parent
+  | Conflicting_parent_provenance
   | Missing_assistant_evidence
   | Unattributed_assistant
   | Rejected_assistant of Input.rejection
   | Input_not_in_group
   | Conflicting_assistant_evidence
+
+type child_observation =
+  | Child_bound of bound_child
+  | Child_rejected of
+      { content : Runtime_claude_code.complete_child_content
+      ; reason : rejection
+      }
 
 type invocation = Awaiting_ticket | Ticket of Input.ticket | Conflicted
 type owner_key = Input.ticket * string * int * string
@@ -86,15 +100,18 @@ let observe_input t (observation : Input.observation) =
       | Input.Partial_start _ | Input.Partial_fragment _ | Input.Partial_stop _
       | Input.Result _)) -> ()
 
+let check_invocation t (invocation : Input.ticket) =
+  match t.invocation with
+    | Ticket ticket when not (String.equal ticket.session_id invocation.session_id) ->
+        Error Foreign_session
+    | Ticket ticket when not (same_ticket ticket invocation) -> Error Foreign_invocation
+    | Awaiting_ticket | Conflicted | Ticket _ -> Ok ()
+
 let bind_owner t ~(invocation : Input.ticket) ~call_envelope_uuid ~call_ordinal ~call_id =
   let ( let* ) = Result.bind in
   (* Refuse captured observations from another runtime before touching the
      current owner's cache, even when all provider/session IDs were replayed. *)
-  let* () = match t.invocation with
-    | Ticket ticket when not (String.equal ticket.session_id invocation.session_id) ->
-        Error Foreign_session
-    | Ticket ticket when not (same_ticket ticket invocation) -> Error Foreign_invocation
-    | Awaiting_ticket | Conflicted | Ticket _ -> Ok () in
+  let* () = check_invocation t invocation in
   let key = invocation, call_envelope_uuid, call_ordinal, call_id in
   let current = match t.invocation with
     | Awaiting_ticket -> Error Missing_ticket
@@ -133,11 +150,26 @@ let bind_parent t (parent : Runtime_claude_code.native_agent_parent_witness) =
     ~call_id:parent.call_id in
   Ok {ticket; evidence; parent}
 
+let bind_child t (content : Runtime_claude_code.complete_child_content) =
+  let ( let* ) = Result.bind in
+  let* () = check_invocation t content.invocation in
+  let* parent = match content.parent_occurrence with
+    | None -> Error Unknown_parent
+    | Some parent ->
+        if String.equal content.parent_tool_use_id parent.call_id
+           && same_ticket content.invocation parent.invocation
+        then Ok parent
+        else Error Conflicting_parent_provenance in
+  let* parent_input = bind_parent t parent in
+  Ok {parent_input; content}
+
 let rejection_to_string = function
   | Missing_ticket -> "no invocation input ticket"
   | Conflicting_invocation -> "conflicting invocation input ticket"
   | Foreign_session -> "native occurrence belongs to another input session"
   | Foreign_invocation -> "native occurrence belongs to another input invocation"
+  | Unknown_parent -> "child has no admitted original native parent"
+  | Conflicting_parent_provenance -> "child provenance conflicts with its original native parent"
   | Missing_assistant_evidence -> "no input evidence for the native assistant envelope"
   | Unattributed_assistant -> "native assistant envelope has no input attribution"
   | Rejected_assistant _ -> "native assistant input attribution was rejected"

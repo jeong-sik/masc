@@ -313,6 +313,17 @@ type native_agent_parent_witness =
   ; call_ordinal : int
   }
 
+type complete_child_content =
+  { invocation : Runtime_claude_input_attribution.ticket
+  ; parent_tool_use_id : string
+  ; parent_occurrence : native_agent_parent_witness option
+  ; message_id : string option
+  ; model : string
+  ; block : content_block
+  ; channel : content_channel
+  ; text : string
+  }
+
 type stream_event =
   | Turn_started of
       { turn_id : string
@@ -328,15 +339,7 @@ type stream_event =
       ; block : content_block
       ; text : string
       }
-  | Child_content_observed of
-      { parent_tool_use_id : string
-      ; parent_occurrence : native_agent_parent_witness option
-      ; message_id : string option
-      ; model : string
-      ; block : content_block
-      ; channel : content_channel
-      ; text : string
-      }
+  | Child_content_observed of complete_child_content
   | Content_block_stopped of { block : content_block; channel : content_channel }
   | Dynamic_tool_started of
       { call_id : string
@@ -2259,7 +2262,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
                let parent_occurrence = root_native_agent_parent native_tool_calls
                  ~call_id:parent_tool_use_id in
                emit_stream_event on_stream_event
-                 (Child_content_observed {parent_tool_use_id; parent_occurrence; message_id; model;
+                 (Child_content_observed {invocation=native_tool_calls.invocation; parent_tool_use_id; parent_occurrence; message_id; model;
                    block=Assistant_block {uuid; ordinal}; channel=Text_content; text});
                Ok ())
       | Assistant_thinking text ->
@@ -2272,7 +2275,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
                let parent_occurrence = root_native_agent_parent native_tool_calls
                  ~call_id:parent_tool_use_id in
                emit_stream_event on_stream_event
-                 (Child_content_observed {parent_tool_use_id; parent_occurrence; message_id; model;
+                 (Child_content_observed {invocation=native_tool_calls.invocation; parent_tool_use_id; parent_occurrence; message_id; model;
                    block=Assistant_block {uuid; ordinal}; channel=Thinking_content; text});
                Ok ())
       | Assistant_native_tool observation ->

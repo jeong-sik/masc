@@ -283,9 +283,26 @@ type native_agent_parent_witness = private
     the registry ambiguous and subsequent child observations unknown; an
     earlier witness remains its immutable historical snapshot, not current
     authority or cancellation evidence. It certifies only the original
-    native call, not the authenticity or parent pairing of a publicly
-    constructed child event. A downstream join must also compare the event's
-    literal [parent_tool_use_id] with [call_id] before binding it. *)
+    native call, not a separately supplied body's authenticity or parent pairing.
+    [complete_child_content] retains the actual accepted body/parent together;
+    a downstream input join also compares its literal parent with [call_id]. *)
+
+type complete_child_content = private
+  { invocation : Runtime_claude_input_attribution.ticket
+  ; parent_tool_use_id : string
+  ; parent_occurrence : native_agent_parent_witness option
+  ; message_id : string option
+  ; model : string
+  ; block : content_block
+  ; channel : content_channel
+  ; text : string
+  }
+(** Validated complete-frame child model content from the actual runtime
+    invocation. Only the producer can construct this record; capturing a genuine
+    parent witness cannot attach a different body or literal parent to it.
+    [invocation] is the native registry's actual immutable Prepared ticket,
+    even when the parent is unknown. This proves observed provider provenance,
+    not child consumption of a parent input group or Task/run ownership. *)
 
 type stream_event =
   | Turn_started of
@@ -316,15 +333,7 @@ type stream_event =
           partial attribution relies on the SDK main-session-only contract
           described on [Text_delta]. Opaque signatures and redacted payloads
           are not text. *)
-  | Child_content_observed of
-      { parent_tool_use_id : string
-      ; parent_occurrence : native_agent_parent_witness option
-      ; message_id : string option
-      ; model : string
-      ; block : content_block
-      ; channel : content_channel
-      ; text : string
-      }
+  | Child_content_observed of complete_child_content
       (** Provider-exposed text or thinking from a complete child assistant
           envelope, retaining its literal parent call and [Assistant_block]
           UUID/content ordinal. [None] means the envelope has no message id.
@@ -342,7 +351,9 @@ type stream_event =
           A later observation is not certification of the earlier binding. Child
           content cannot supply the root reply, root response-emitted evidence,
           model or usage. This is separate from root partial reconciliation.
-          Keeper child-body display/persistence is not yet connected. *)
+          Keeper can deliver private content through its separate bound/rejected
+          observation callback. Driver sinks, child display and persistence are
+          not yet connected. *)
   | Content_block_stopped of { block : content_block; channel : content_channel }
       (** Published once after a partial block's stop and complete-envelope
           reconciliation, in either wire order. A late complete suffix precedes

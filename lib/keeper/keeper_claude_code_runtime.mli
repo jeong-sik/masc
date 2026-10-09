@@ -111,6 +111,12 @@ val run :
     (block_index:int -> tool_call_id:string option -> Runtime_native_tools.progress -> unit) ->
   ?on_native_tool_completion:
     (block_index:int -> tool_call_id:string option -> Runtime_native_tools.completion -> unit) ->
+  ?on_child_content_observation:(Keeper_claude_task_binding.child_observation -> unit) ->
+  (* Complete child content is delivered separately with original-parent input
+     binding or typed refusal preserving actual content. This callback shares
+     the invocation's task binding when both are subscribed and emits no root
+     Agent Core content/lifecycle, usage, native completion or receipt. Display,
+     redaction and persistence are responsibilities of its separate consumer. *)
   ?on_native_task_observation:(Keeper_claude_task_binding.bound -> unit) ->
   (* Task metadata carries exact private input evidence and keeps its registered
       native occurrence after the spawning

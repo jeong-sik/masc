@@ -138,15 +138,37 @@ original Agent call and its exact input evidence. It does not assert that child
 body consumed that input group, authenticate body/parent pairing, create Task/run
 ownership, or authorize public child transport/persistence. A downstream child
 join must separately compare the child's literal parent ID with the witness call
-ID. Public event construction does not certify that pairing or body authenticity.
-The host wrapper has not connected this API.
+ID. A captured parent witness alone does not certify separately supplied body
+provenance or pairing.
+The host wrapper connects the private complete-child producer through a
+separate optional `on_child_content_observation` callback. Runtime
+`complete_child_content` binds the accepted complete envelope's literal parent,
+body, original block identity, reported model, current registry witness (if any)
+and actual immutable invocation ticket in one private value. It cannot be
+constructed by recombining a captured witness with arbitrary public text. The
+binder's private `bound_child {parent_input; content}` factory receives that
+value alone, checks actual invocation and literal parent, and reuses the same
+parent/task owner evidence cache. It certifies observed child provenance and
+the original Agent call's input evidence; it does not infer that child consumed
+that group, mint Task/run ownership, or authorize publication/persistence.
+
+Task or Child subscription creates one binder per actual CLI invocation. Both
+subscriptions share it. Child-only subscription does not require a root event
+observer. `Child_rejected` retains actual private content and a typed reason,
+including an unknown parent, without input/Task/root authority. Replaying an old
+unknown observation into another invocation is refused by its retained ticket.
+Complete API-error diagnostic child envelopes do not publish child body. The
+callback emits no root Agent Core text/thinking/lifecycle, usage, native
+completion, receipt or content index. It does not flush root redaction state;
+a separate child sink must redact before display or persistence.
 
 The witness is a fact at observation time. A later call-ID collision makes
 subsequent child observations unknown; earlier witness values remain historical
 snapshots and prove neither current authority nor cancellation. Later witnesses
 cannot retroactively certify earlier unknown snapshots. Separate child display,
-persistence and the original-input binding API are not connected in the Keeper wrapper,
-which explicitly excludes child body from root projection. Native task metadata
+persistence and the public driver/agent-run sink are not connected. The Keeper
+adapter supplies the bound/rejected callback while excluding child body from
+root projection. Native task metadata
 journals do not receive child body or user input from this event. Public native
 task transport and SQLite journal shapes are unchanged. This new-capture proof
 does not reconstruct original invocation evidence for historical stored rows or

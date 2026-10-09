@@ -807,7 +807,13 @@ let keeper_message_identity ~max_cells state keeper_name =
           ]
       in
       if state.msg_origin_display = Message_layout.Origin_bare then
-        fit_identity (status ^ Ansi.reset)
+        let compact_status = match reading.Keeper_control.liveness with
+          | Keeper_control.Absent ->
+              (match keeper.k_origin with
+               | Tui_decode.Declared_keeper _ -> "아직 시작하지 않음"
+               | Persisted_keeper | Remote_keeper -> "absent")
+          | Keeper_control.Unobserved | Keeper_control.Invalid _ | Keeper_control.Present _ -> status in
+        fit_identity (compact_status ^ Ansi.reset)
       else (match runtime with
        | None ->
            let detail = match keeper.k_origin with
@@ -3412,14 +3418,12 @@ let render_keeper_message (state : state) =
          (Printf.sprintf
             "  %d saved row(s) could not be read and are not shown"
             state.msg_loaded_dropped));
-    (match state.msg_memory_visibility, state.msg_memory_error with
-     | Memory_hidden, _ -> ()
-     | (Memory_summary | Memory_full), None -> ()
-     | (Memory_summary | Memory_full), Some _ ->
+    (match state.msg_memory_error with
+     | None -> ()
+     | Some _ ->
          box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
            "  Memory load failed · /errors");
-    (if state.msg_memory_visibility <> Memory_hidden
-        && state.msg_memory_dropped > 0 then
+    (if state.msg_memory_dropped > 0 then
        box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
          (Printf.sprintf
             "  %d memory journal row(s) could not be read and are not shown"
@@ -3887,8 +3891,17 @@ let render_keeper_message (state : state) =
       if state.keeper_message_focus = Left_pane then
         "Up/Down:move  Enter:open  Right/Esc:chat"
       else if state.msg_origin_display = Message_layout.Origin_bare then
-        Masc_tui_footer.minimal_chat_hints ~max_cells:(max 0 (chat_cols - 4))
-          ~enter_hint ~escape_hint
+        let context_hints = match disposition, state.msg_recall_replaces with
+          | Updates _, Some _ -> ["Enter:replace"; "^U:leave queued"]
+          | Updates _, None when pending_count > 0 ->
+              ["Enter:update"; "^T:queue"; "^K:cancel"; "^P:edit"]
+          | Updates _, None -> ["Enter:update"]
+          | Sends, _ -> [] in
+        (match context_hints with
+         | [] -> Masc_tui_footer.minimal_chat_hints ~max_cells:(max 0 (chat_cols - 4))
+             ~enter_hint ~escape_hint
+         | _ :: _ -> Masc_tui_footer.minimal_context_chat_hints ~max_cells:(max 0 (chat_cols - 4))
+             ~context_hints ~escape_hint)
       else if chat_cols < 120 then
         let compact_enter_hint =
           match disposition with

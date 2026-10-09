@@ -7,21 +7,22 @@
     "PTY": "NOT_RUN"
   },
   "source_sha256": {
-    "bin/masc_tui_keeper_chat_transcript.ml": "6946bf2cbaaf07ebc5bf3cdba81777fe390ed751cea327a831aadfe10a5a8b79",
+    "bin/masc_tui_keeper_chat_transcript.ml": "9bbf089c9b14237404fd38ed1246a5a8ee1755ff0eb85ff502e0f0711ca189ca",
     "bin/masc_tui_keeper_chat_transcript.mli": "28b859ae5a98349a5dbc09cf69e9e3b3de469e53020a47f8c4d29c0ee0d81b25",
-    "bin/masc_tui_message_layout.ml": "b3e5dfd70d8b4bacdb69c87cecc47c7910acd41da412215618804e541a44c898",
+    "bin/masc_tui_message_layout.ml": "bf73609b5844262aaddd7a180c12efc5ad1c650d23dd672d05b868672a464f3b",
     "bin/masc_tui_message_layout.mli": "2e2ec985c3c3d74d6476ee361bbdef45d4a9ec1d64ea80bc0e416a23a0d3a196",
-    "bin/masc_tui_render_chat.ml": "3d98769808c67af8393d9102ff56dfdc185c5b62f8e1cb83a23bfcf4b0f03e4a",
-    "bin/masc_tui_types.ml": "148c96fd342f94a79d380be49086b4e2d157adac14f8641702b948b97bc03cfb",
+    "bin/masc_tui_render_chat.ml": "c131be81bf0026d5975fd27894dcf4c81fd72d6bd60a22e694fd5a732d121d55",
+    "bin/masc_tui_types.ml": "1d635f92e884c4731f7e62e3ab1e9cad8548902fff54db9b606bd92663661a56",
     "docs/evidence/tui-conversation-first-20261007/layout-preview.ml": "0eb27a7060fd97256d7fad22ada5e7007cf1661c2cbe29203e9ab609f09c102f",
-    "test/test_tui_chat_activity.ml": "89f937f9e1aad1c60662e7b64d00823bc6e449e75a3bd2d235735a6d5aebb301",
+    "test/test_tui_chat_activity.ml": "10935d5a1b621e79899c3f0cc12e53859241345675459d689bdb5fd03ec0a2a2",
     "test/test_tui_chat_queue_wiring.ml": "6cfb129e3c6389a047801d445b852d29f4216e48654a100e6fedf78f10b5ba66",
-    "test/test_tui_message_layout.ml": "96298fea24da1bdf4f0a6981bd3496472271473f7cc82fbd741d82a0498fc914",
+    "test/test_tui_message_layout.ml": "9d47be71a121e424b939d2b79d63b42805bd3f5f81f69f5516b95155020baee4",
     "test/test_tui_shade_layers.ml": "217dbee7bcb84d2bfea562b5f7c09877a50275288fe055511276d33882dcf9a7",
     "test/tui_keyboard_chat.py": "d51059b1f8f889e044bbc08bc413be4e5e773833a2a7c14dc6d97349856c0a60",
     "test/tui_keyboard_memory.py": "c638fc6434a635bd4a7ed84ef56d3b0f5044c7bee73d613e98212e57a7e672a8",
-    "bin/masc_tui_footer.ml": "d3c15bfa08c31a8e90ff228961e6900d2af5c9071a54a90c524788fed3554e89",
-    "test/test_tui_footer_status_items.ml": "a2b7e330e5a38a161b34af590e83807822a1fc5ac81775afe7d4b2f208e4b7cd"
+    "bin/masc_tui_footer.ml": "735b677c6116fb9c19a1840dc9071bb5e556facfb4b45b6267ff816899c177dd",
+    "test/test_tui_footer_status_items.ml": "7aba2bb5bf6afc574b60ae623d100005148598ef6f8ddd6512b743c20c5cc529",
+    "test/test_tui_keeper_chat_transcript.ml": "c5b1c1c8a6e841a80ef0845f281139f68f7882ab02be114b094311678ed1346d"
   },
   "historical_checks": {
     "ocaml_parsing": "PASS",
@@ -42,5 +43,5 @@
       "test_clamping_a_scroll_reads_only_as_far_as_it_must"
     ]
   },
-  "scope": "Current hashes attest only parser checks; earlier geometry/interface execution is historical and not rerun for these bytes."
+  "scope": "Exact current source parser checks only; native regressions, prior geometry and PTY are not rerun."
 }

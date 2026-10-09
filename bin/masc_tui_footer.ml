@@ -733,9 +733,16 @@ let compact_chat_hints ~enter_hint ~scroll_hint ~escape_hint =
 
 (* Keep discoverability whole before optional editing hints. This projection
    fits the framed inner row, so box_line never cuts a key label in half. *)
-let minimal_chat_hints ~max_cells ~enter_hint ~escape_hint =
+let fit_minimal_hints ~max_cells hints =
   List.fold_left (fun shown hint ->
     let candidate = if shown = "" then hint else shown ^ "  " ^ hint in
     if Masc_tui_message_layout.display_width candidate <= max_cells
-    then candidate else shown)
-    "" ["/:commands"; "?:help"; enter_hint; escape_hint; "Ctrl-J:newline"]
+    then candidate else shown) "" hints
+
+let minimal_chat_hints ~max_cells ~enter_hint ~escape_hint =
+  fit_minimal_hints ~max_cells
+    ["/:commands"; "?:help"; enter_hint; escape_hint; "Ctrl-J:newline"]
+
+let minimal_context_chat_hints ~max_cells ~context_hints ~escape_hint =
+  fit_minimal_hints ~max_cells
+    (context_hints @ ["/:commands"; "?:help"; escape_hint; "Ctrl-J:newline"])

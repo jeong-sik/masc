@@ -40,5 +40,7 @@ val goal_context_for_task
 
 val counterpart_observations_from : external_after:int -> base_dir:string -> keeper_name:string ->
   after:float option -> before:float -> (Keeper_counterpart_observation.t list * int, read_error) result
-(** External rows follow durable append order; chat rows retain their existing
-    turn-time interval. The returned count is the external snapshot boundary. *)
+(** External rows follow durable append order from [external_after] and stop
+    at the first row admitted after [before]; chat rows retain their existing
+    turn-time interval. Both are interleaved by time without reordering the
+    external rows. The returned count is the external snapshot boundary. *)

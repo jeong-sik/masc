@@ -401,6 +401,52 @@ let test_counterpart_cursor_survives_clock_rollback () =
   Alcotest.(check int) "acknowledged admission cursor excludes old rows" 0 (List.length consumed)
 ;;
 
+let external_previews observations =
+  List.map
+    (fun (observation : Masc.Keeper_counterpart_observation.t) -> observation.content)
+    observations
+
+let test_counterpart_cursor_keeps_admission_order () =
+  with_temp_base "keeper-external-admission-order" @@ fun base_path ->
+  let first = item ~dedupe_key:"first" ~preview:"first" ~received_at:40.0 () in
+  let second = item ~dedupe_key:"second" ~preview:"second" ~received_at:30.0 () in
+  List.iter (fun incoming -> match record ~base_path incoming with
+    | `Recorded -> () | `Duplicate _ -> Alcotest.fail "unexpected duplicate"
+    | `Error detail -> Alcotest.fail detail) [ first; second ];
+  match Masc.Keeper_librarian_input_sources.counterpart_observations_from
+    ~external_after:0 ~base_dir:base_path ~keeper_name:first.keeper_name
+    ~after:(Some 0.0) ~before:50.0 with
+  | Error error -> Alcotest.fail (Masc.Keeper_librarian_input_sources.read_error_to_string error)
+  | Ok (observed, through) ->
+    Alcotest.(check (list string)) "a clock rollback does not reorder admissions"
+      [ "first"; "second" ] (external_previews observed);
+    Alcotest.(check int) "both admissions are in the snapshot" 2 through
+;;
+
+let test_counterpart_cursor_stops_at_range_end () =
+  with_temp_base "keeper-external-range-end" @@ fun base_path ->
+  let earlier = item ~dedupe_key:"earlier" ~preview:"earlier" ~received_at:10.0 () in
+  let later = item ~dedupe_key:"later" ~preview:"later" ~received_at:30.0 () in
+  let rolled_back = item ~dedupe_key:"rolled-back" ~preview:"rolled-back" ~received_at:15.0 () in
+  List.iter (fun incoming -> match record ~base_path incoming with
+    | `Recorded -> () | `Duplicate _ -> Alcotest.fail "unexpected duplicate"
+    | `Error detail -> Alcotest.fail detail) [ earlier; later; rolled_back ];
+  let snapshot cursor after before =
+    match Masc.Keeper_librarian_input_sources.counterpart_observations_from
+      ~external_after:cursor ~base_dir:base_path ~keeper_name:earlier.keeper_name
+      ~after ~before with
+    | Ok (observed, through) -> external_previews observed, through
+    | Error error -> Alcotest.fail (Masc.Keeper_librarian_input_sources.read_error_to_string error) in
+  let first_range, first_through = snapshot 0 None 20.0 in
+  Alcotest.(check (list string)) "the first range keeps only its own admissions"
+    [ "earlier" ] first_range;
+  Alcotest.(check int) "the cursor stops before the later turn's admission" 1 first_through;
+  let second_range, second_through = snapshot first_through (Some 20.0) 40.0 in
+  Alcotest.(check (list string)) "the next range takes the held rows in admission order"
+    [ "later"; "rolled-back" ] second_range;
+  Alcotest.(check int) "the next range reaches the end of the log" 3 second_through
+;;
+
 let test_external_cursor_recovers_memory_receipt () =
   with_temp_base "keeper-external-cursor-recovery" @@ fun base_path ->
   let module Cursor = Masc.Keeper_external_read_cursor in
@@ -455,6 +501,10 @@ let () =
         [
           Alcotest.test_case "external cursor recovers only its committed Memory receipt" `Quick
             test_external_cursor_recovers_memory_receipt;
+          Alcotest.test_case "counterpart cursor keeps admission order" `Quick
+            test_counterpart_cursor_keeps_admission_order;
+          Alcotest.test_case "counterpart cursor stops at the range end" `Quick
+            test_counterpart_cursor_stops_at_range_end;
           Alcotest.test_case "counterpart cursor survives clock rollback and equal timestamps" `Quick
             test_counterpart_cursor_survives_clock_rollback;
           Alcotest.test_case "tail boundary preserves a complete first row" `Quick

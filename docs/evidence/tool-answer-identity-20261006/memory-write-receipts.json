@@ -1,0 +1,22 @@
+{
+ "atoms": [
+  2077,
+  4463
+ ],
+ "tool": "keeper_memory_write",
+ "calls": 2355,
+ "distinct_inputs": 494,
+ "inputs_called_more_than_once": 12,
+ "repeated_inputs_whose_outputs_all_differ": 12,
+ "max_calls_one_input": 157,
+ "keys_that_differ": [
+  [
+   "recorded_at",
+   12
+  ],
+  [
+   "revision",
+   12
+  ]
+ ]
+}

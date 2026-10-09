@@ -19,24 +19,12 @@ pending; neither decoder nor main TUI is declared fully refactored.
 | SGR/X10 report types and parsers | `masc_tui_input_decoder` | Four streaming input cases: split SGR/X10 bytes, idle truncation and overlapping button releases; [input-decoder.log](input-decoder.log) |
 | Wheel, press and release grammar | terminal reports in `test_tui_decode` | Thirteen existing SGR/X10 cases; [grammar.log](grammar.log) |
 | Closed wheel direction | input reader, main TUI and `masc_tui_render_prim` | Six reader scroll cases; [wheel-reader.log](wheel-reader.log), [tui-build.json](tui-build.json) |
-| Byte stream to rendered Keeper selection | real worktree TUI executable | Existing PTY scenario `wheel scrolls, clicks do not`; [pty.json](pty.json), [pty.log](pty.log) |
 
-The build and scenario were explicitly authorized by the operator's local-build
-request. Commands and actual successful test counts are in [checks.json](checks.json).
+The build was explicitly authorized by the operator's local-build request.
+Commands and actual successful test counts are in [checks.json](checks.json).
 The build targets only `bin/masc_tui.exe`; it is not a full repository build.
 [source-sha256.json](source-sha256.json) fingerprints the changed implementation,
-interfaces, direct consumers, test consumers and capture wrapper.
+interfaces, direct consumers and test consumers.
 
-[capture.py](capture.py) runs the existing scenario and intercepts its completed
-`send_and_wait` calls only to retain decoded terminal frames. It changes no input
-or assertions. [wheel-1.txt](wheel-1.txt) shows beta after wheel down,
-[wheel-2.txt](wheel-2.txt) alpha after wheel up, and [wheel-3.txt](wheel-3.txt)
-beta after a title click press/release and another wheel down. Trailing spaces
-are removed from the retained text. The scenario also checks composer isolation,
-compact-viewport input gating, navigation and terminal-mode restoration.
-
-The PTY uses an isolated temporary base path and fixture HTTP service. Its binary
-is identified by SHA256 in the build and PTY receipts. Actual X10 streaming is
-covered by the OCaml input decoder scenarios; this PTY sends SGR reports only.
 There is no installed/live-service, real terminal-emulator, Linux, full CI or
 release/deployment claim. No dashboard behavior changes in this unit.

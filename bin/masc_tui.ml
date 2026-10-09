@@ -7343,17 +7343,11 @@ let drop_inflight state request =
    cannot produce a second turn. The client used to hold its own five-phase
    fence to prevent exactly that, and the price was one un-acknowledged POST
    per workspace — talking to one keeper stopped every other. *)
-(* Staged images belong to the message being composed, so the send that consumes
-   the draft consumes them too. Returning and clearing in one step keeps a failed
-   send from silently re-attaching the same image to the next one. *)
-(* Staged references follow the same rule as staged images: the send that
-   consumes the draft consumes them. Returned together so every request
-   builder carries both or neither. *)
-let take_pending_attachments state =
-  let staged = state.msg_attachments in
-  let references = state.msg_references in
-  clear_staged_attachments state;
-  (staged, references)
+(* Request construction only borrows the composer payload. Transfer ownership
+   after queue admission succeeds: a full queue, duplicate steer, or refused
+   edit must leave text, attachment bytes, references, and staging time intact. *)
+let pending_attachments state =
+  (state.msg_attachments, state.msg_references)
 ;;
 
 let launch_keeper_request ~(promoted : Chat_queue.item) ?(admission_intent = Keeper_chat.Queue_only) state ~mailbox request =
@@ -7586,7 +7580,7 @@ let start_keeper_steer ?keeper_name state ~base_path ~mailbox text =
             place_spilled_paste state ~base_path ~keeper_name text
           in
           let request =
-            let attachments, references = take_pending_attachments state in
+            let attachments, references = pending_attachments state in
             Keeper_chat.create_request ~attachments ~references
               ~keeper_name ~message:text ()
           in
@@ -7653,7 +7647,7 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                target ->
           let original = editing.Chat_queue.request in
           let request =
-            let attachments, references = take_pending_attachments state in
+            let attachments, references = pending_attachments state in
             { original with
               message = text
             ; attachments
@@ -7666,6 +7660,7 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
            with
            | Error detail -> report_action state "error" detail
            | Ok queue ->
+               clear_staged_attachments state;
                state.msg_queued <- queue;
                state.msg_recall_replaces <- None;
                let safe_text =
@@ -7715,7 +7710,7 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
             "Queued edit belongs to another Keeper; switch back or press Ctrl-U"
       | None ->
         let request =
-          let attachments, references = take_pending_attachments state in
+          let attachments, references = pending_attachments state in
           Keeper_chat.create_request ~attachments ~references ~keeper_name:target
             ~message:text () in
         (* Enter admits the line in queue order and interrupts nothing: the
@@ -7735,6 +7730,7 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
         (match queue_keeper_message state request with
          | Error detail -> report_action state "error" detail
          | Ok _ ->
+           clear_staged_attachments state;
            let queued = match Chat_queue.find state.msg_queued ~request_id:request.request_id with
              | Some _ as item -> item
              | None -> Chat_queue.join_target state.msg_queued ~keeper_name:target in

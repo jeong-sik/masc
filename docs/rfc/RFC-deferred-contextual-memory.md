@@ -138,11 +138,20 @@ unjudgeable and its original remains current; with new observations this also
 fails the pass so the candidate is not committed. Large-pair decomposition is not
 implemented here.
 
-The reverse copy review is unchanged: it checks whether an unabsorbing new
-claim merely repeats its sources. Its Noul boundary is now explicitly labeled
+The reverse copy question checks whether an unabsorbing new claim merely repeats
+its sources. Its semantic criterion is unchanged. If its request fails, the
+runtime defers the complete Memory commit, including the proposed claims. An
+enabled absorb gate with a disabled lane or no armed destination likewise defers
+the commit. These conditions preserve the durable input for a later retry; they
+do not prove new knowledge and must not append unjudged proposals beside their
+originals. Deliberately disabling the gate or excluding a Keeper still applies
+the Librarian answer as configured. Pre-dispatch reverse size limitations and
+intentional supersession exemptions retain their existing behavior. A gate
+evaluation may be `skipped` or its forward outcome `judged` while the enclosing
+Memory pass fails; consumers must use the pass commit result. Its Noul boundary is now explicitly labeled
 `reverse_copy_boundary`; forward decisions are stored as categorical choices,
-with original typed probabilities retained for inspection. Existing reverse
-failure behavior is not a new guarantee of deferred candidate admission.
+with original typed probabilities retained for inspection. This protects the existing Librarian range; direct `keeper_memory_write` still
+needs its separate deferred candidate contract.
 
 ## Deferred read boundary
 

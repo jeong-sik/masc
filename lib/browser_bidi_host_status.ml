@@ -71,11 +71,15 @@ let steps (t : Launcher.t) =
   Printf.sprintf "%s The steps are in %s." launcher_first
     (Browser_lane.live_transport_setup_doc Browser_lane.Webdriver_bidi)
 
-(* What starts a Firefox that answers at an address a host was given. *)
+(* What starts a Firefox that answers at an address a host was given: on
+   the profile kept for it, which a Firefox started some other way is not. *)
 let firefox_at address =
-  match Browser_bidi_downloads.endpoint address with
-  | Ok (_, port, _) -> Printf.sprintf "%s %d" firefox_flag port
-  | Error _ -> Printf.sprintf "%s set to that address's port" firefox_flag
+  let flag =
+    match Browser_bidi_downloads.endpoint address with
+    | Ok (_, port, _) -> Printf.sprintf "%s %d" firefox_flag port
+    | Error _ -> Printf.sprintf "%s set to that address's port" firefox_flag
+  in
+  flag ^ " on the profile kept for this"
 
 let at seconds = Time_codec.rfc3339_of_unix seconds
 
@@ -229,7 +233,7 @@ let next_host t (entry : Record.entry) (ending : Record.ending) =
          attached from another workspace, or one a host that died left there. The operator \
          stops a host still attached to the Firefox at that address, then %s; when that host \
          is refused too with none attached, a dead host's session is left there, and that \
-         Firefox is restarted with %s first."
+         Firefox is first restarted with %s."
         run firefox
 
 (* A reason is another program's words inside this paragraph: it is set
@@ -255,7 +259,8 @@ let message { lane = t; record } =
        | None, Polls_here ->
            Printf.sprintf
              "A BiDi browser host (pid %d) is attached to %s and polls this server as client \
-              %s. Its record does not say since when: the host could not write that.%s"
+              %s. Its record does not say since when: it was read before the host wrote that, \
+              or the host could not write it.%s"
              entry.pid entry.bidi_url client (unacknowledged t entry)
        | None, (Poll_unobserved | Not_listed_here | Another_bidi_listed) ->
            Printf.sprintf "A BiDi browser host (pid %d) started at %s and is connecting to %s."
@@ -281,13 +286,15 @@ let message { lane = t; record } =
       Printf.sprintf
         "A BiDi browser host holds this workspace's lock, so one is running, and its record \
          cannot be read (%s). A second host is refused while that one runs. Once the operator \
-         stops it, the next host replaces the record."
+         stops it, the next host writes a new record in its place, and does not start when it \
+         cannot."
         detail
   | Record.Unreadable { detail; held = Some false } ->
       Printf.sprintf
         "The BiDi browser host's record cannot be read (%s). No host holds this workspace's \
-         lock, so none is running, and the next host replaces the record. The operator starts \
-         Firefox on a profile kept for this with %s PORT, unless it runs already, then %s.%s%s"
+         lock, so none is running. The next host writes a new record in its place, and does not \
+         start when it cannot. The operator starts Firefox on a profile kept for this with %s \
+         PORT, unless it runs already, then %s.%s%s"
         detail firefox_flag (run_host t ~address:None) (listed_beside t) (steps t)
   | Record.Unreadable { detail; held = None } ->
       Printf.sprintf

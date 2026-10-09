@@ -3206,9 +3206,9 @@ let source_body_lookup state ~keeper_name projection ~inner_width ~theme ~previe
                   expansions.(byte) <- !expansion
                 done;
                 (function
-                 | Search.Body_byte {offset;_} ->
+                 | Search.Body_byte {offset;expansion=semantic_expansion} ->
                      Option.map (fun source -> Polled_body_byte {offset=start_byte+source;
-                       expansion=expansions.(offset)})
+                       sanitizer_expansion=expansions.(offset); semantic_expansion})
                        (Masc.Tui_terminal_text.source_byte_at mapped offset)
                  | Body_label _ | Thinking_summary_byte _ | Thinking_summary_label _
                  | Preview_byte _ | Journal_byte _ -> None) in

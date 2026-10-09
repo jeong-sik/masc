@@ -920,10 +920,11 @@ type chat_pin_mode = Follow_live | Hold_scroll | Hold_search
 
 type chat_source_position =
   | Durable_position of Masc_tui_chat_search.position
-  | Polled_body_byte of { offset : int; expansion : int }
+  | Polled_body_byte of { offset : int; sanitizer_expansion : int; semantic_expansion : int }
 
-(* A polled absolute byte is owned by the generation in Scroll_polled. Escape
-   expansion names the exact displayed byte of an escaped source scalar. *)
+(* A polled absolute byte is owned by the generation in Scroll_polled.
+   Sanitizer escape and semantic normalization expansions retain separate
+   identities, so distinct emitted bytes cannot collide by scalar addition. *)
 type chat_scroll_point = {
   scroll_anchor : chat_scroll_anchor;
   body_row : int;

@@ -5979,6 +5979,153 @@ let test_keeper_assembly_binding_is_durable_in_same_attempt () =
     ~scenario:"start" ~binding:proof ~submission ~raw
 ;;
 
+let test_keeper_context_lifecycle_three_settled_turns () =
+  let module Assembly = Masc.Keeper_context_assembly in
+  let module Store = Masc.Keeper_official_client_session_store in
+  let open Yojson.Safe.Util in
+  let base_path = temp_workspace "keeper-context-lifecycle-" in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) @@ fun () ->
+  let keeper_name = "codex-lifecycle-fixture" in
+  let goal = "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools." in
+  let same = "한글 \"repeated\"\n\\source" in
+  let encoded_carrier text =
+    let message : Agent_core.Types.message =
+      { role = System; content = [Text text]; name = None; tool_call_id = None;
+        metadata = Agent_core.Types.Extra_system_context_provenance.metadata } in
+    Keeper_official_client_context_codec.encode message in
+  let assembly changed = Assembly.assemble ~existing_extra_system_context:None
+    ~blocks:[Prompt_block_id.Dynamic_context,same;
+      Prompt_block_id.Memory_os_recall,(if changed then same ^ " revised" else same)] in
+  let initial = assembly false and changed = assembly true in
+  let rec third_turn = function
+    | `String "turn-2" -> `String "turn-3"
+    | `Assoc fields -> `Assoc (List.map (fun (key,value) -> key,third_turn value) fields)
+    | `List values -> `List (List.map third_turn values)
+    | value -> value in
+  let frames ordinal =
+    if ordinal=1 then [init_result;account_chatgpt;thread_result;turn_result;item_completed;turn_completed]
+    else let rows=[init_result;account_chatgpt;thread_result;resumed_turn_result;resumed_item_completed;resumed_turn_completed] in
+      if ordinal=2 then rows else List.map (fun row -> Yojson.Safe.from_string row |> third_turn |> Yojson.Safe.to_string) rows in
+  let source_ids source =
+    let spans = source |> member "assembly" |> member "spans" |> to_list in
+    source |> member "source_span_indices" |> to_list |> List.filter_map (fun index ->
+      let span = List.nth spans (to_int index) |> member "source" in
+      if member "kind" span=`String "block" then Some (member "block" span |> to_string) else None) in
+  let attempts = ref [] in
+  List.iter (fun (ordinal,issued,expected_sent,expected_held) ->
+    let capture = Filename.concat base_path (Printf.sprintf "wire-%d.jsonl" ordinal) in
+    let trace = Filename.concat base_path (Printf.sprintf "trace-%d.jsonl" ordinal) in
+    let hooks : Agent_core.Hooks.hooks = {Agent_core.Hooks.empty with
+      before_turn_params=Some (function
+        | BeforeTurnParams {current_params;_} ->
+          AdjustParams {current_params with extra_system_context=issued.Assembly.extra_system_context}
+        | _ -> Continue)} in
+    with_fixture ~capture_path:capture (frames ordinal) (fun cli_path ->
+      match run_keeper_turn ~base_path ~keeper_name ~raw_trace_path:trace ~goal
+        ~session_id:fixture_trace_with_no_completed_turn ~hooks
+        ~official_client_composed_context:(fun () -> Some issued)
+        ~cli_path ~model:"gpt-fixture" () with
+      | Error error -> fail (Agent_core.Error.to_string error)
+      | Ok result -> check int "actual session advances through settled turns" ordinal result.turns);
+    let stored = match Store.load ~base_path ~keeper_name with
+      | Ok (Some stored) -> stored | Ok None -> fail "settled session missing"
+      | Error detail -> fail detail in
+    let expected_turn = Printf.sprintf "turn-%d" ordinal in
+    let settlement = match stored.phase with
+      | Store.Settled settlement -> settlement
+      | _ -> fail "actual run did not settle vendor session" in
+    check string "all turns settle the same vendor thread" "thread-1" settlement.session_id;
+    check string "exact completed turn is durable" expected_turn settlement.turn_id;
+    check int "persisted turn count advances" ordinal stored.turn_count;
+    let frontier = match stored.context_frontier with
+      | Some frontier -> frontier | None -> fail "settled context frontier missing" in
+    check bool "held context requires real completion acknowledgement" true
+      (frontier.acknowledged_turn=Some settlement);
+    check int "both issuer identities remain acknowledged" 2 (List.length frontier.held_context);
+    let acknowledged_blocks = List.map (fun (held : Store.held_context) ->
+      match held.context with
+      | Store.Context_block block -> Prompt_block_id.to_string block, held.sha256
+      | _ -> fail "this fixture should acknowledge only its two issuer blocks") frontier.held_context in
+    let expected_blocks = List.map (fun (block,text) ->
+      Prompt_block_id.to_string block, Digestif.SHA256.(digest_string text |> to_hex)) issued.blocks in
+    check (list (pair string string)) "settlement replaces changed block digest and preserves unchanged digest"
+      (List.sort compare expected_blocks) (List.sort compare acknowledged_blocks);
+    let records = match Agent_core.Raw_trace.read_all ~path:trace () with
+      | Ok rows -> rows | Error error -> fail (Agent_core.Error.to_string error) in
+    let started = List.find (fun (row:Agent_core.Raw_trace.record) -> row.record_type=Run_started) records in
+    check bool "each turn owns a distinct raw-trace attempt" false (List.mem started.worker_run_id !attempts);
+    attempts := started.worker_run_id :: !attempts;
+    let method_name = if ordinal=1 then "thread/start" else "turn/start" in
+    let row = List.find (fun (row:Agent_core.Raw_trace.record) ->
+      row.hook_name=Some "codex_context_submission" &&
+      (Yojson.Safe.from_string (Option.get row.hook_detail) |> member "submission" |> member "method")=`String method_name) records in
+    check string "submission is joined to this actual turn attempt" started.worker_run_id row.worker_run_id;
+    check (option string) "submission preserves admitted trace session" started.session_id row.session_id;
+    let detail = Yojson.Safe.from_string (Option.get row.hook_detail) in
+    let submission = member "submission" detail and binding = member "logical_context_bindings" detail in
+    check int "submission carries actual client turn ordinal" ordinal (member "client_turn_ordinal" detail |> to_int);
+    check string "durable binding matches completed slot" "matched_completed_slot" (member "status" binding |> to_string);
+    check string "actual settled turn retains verified issuer acquisition" "verified"
+      (binding |> member "issuer_attribution" |> member "status" |> to_string);
+    let sent = member "occurrences" binding |> to_list |> List.concat_map (fun row -> source_ids (member "source" row)) in
+    let held = member "omitted_held" binding |> to_list |> List.concat_map source_ids in
+    check (list string) "actual transmitted issuer identities" expected_sent sent;
+    check (list string) "actual local held omissions" expected_held held;
+    let written = In_channel.with_open_bin capture In_channel.input_lines in
+    let calls = List.map Yojson.Safe.from_string written in
+    let turn_request = List.find (fun call -> member "method" call = `String "turn/start") calls in
+    let actual_prompt = match turn_request |> member "params" |> member "input" |> to_list with
+      | [item] when member "type" item = `String "text" -> member "text" item |> to_string
+      | _ -> fail "this text-only lifecycle fixture must submit exactly one turn input" in
+    let expected_prompt =
+      if ordinal < 3 then goal
+      else "SYSTEM:\n" ^ encoded_carrier (same ^ " revised") ^ "\n\n" ^ goal in
+    check string "actual full turn text excludes every locally omitted block" expected_prompt actual_prompt;
+    (* Check every completed context RPC independently of the attribution helper,
+       not just the one slot chosen for this turn's lifecycle measurement. *)
+    records |> List.filter (fun (record:Agent_core.Raw_trace.record) ->
+      record.hook_name = Some "codex_context_submission") |> List.iter (fun record ->
+        let observed = Yojson.Safe.from_string (Option.get record.Agent_core.Raw_trace.hook_detail)
+          |> member "submission" in
+        let captured = List.find (fun line -> Yojson.Safe.from_string line |> member "id"
+          = member "request_id" observed) written in
+        check int "whole RPC byte count matches actual captured frame" (String.length captured)
+          (member "ipc_json_bytes" observed |> to_int);
+        check string "whole RPC SHA matches actual captured frame"
+          Digestif.SHA256.(digest_string captured |> to_hex)
+          (member "ipc_json_sha256" observed |> to_string));
+    let session_method = if ordinal=1 then "thread/start" else "thread/resume" in
+    check int "one actual Start or Resume per settled turn" 1
+      (List.length (List.filter (fun row -> member "method" row=`String session_method) calls));
+    check int "settled Resume never resends history" 0
+      (List.length (List.filter (fun row -> member "method" row=`String "thread/inject_items") calls));
+    let raw = List.find (fun line -> Yojson.Safe.from_string line |> member "id" = member "request_id" submission) written in
+    check_context_fragments raw submission;
+    if ordinal = 1 then (
+      let developer = Yojson.Safe.from_string raw |> member "params" |> member "developerInstructions" |> to_string in
+      let occurrence = match member "occurrences" binding |> to_list with
+        | [occurrence] -> occurrence | _ -> fail "Start must have one complete issuer carrier" in
+      let actual_codec = String.sub developer
+          (member "encoded_message_offset_in_decoded_slot" occurrence |> to_int)
+          (member "encoded_message_bytes" occurrence |> to_int) in
+      check string "actual Start developer carrier equals the independently planned A+B codec"
+        (encoded_carrier (same ^ "\n\n" ^ same)) actual_codec);
+    export_assembly_submission_measurement ~fixture_kind:"actual_keeper_three_settled_turns"
+      ~scenario:(Printf.sprintf "turn-%d" ordinal) ~binding ~submission ~raw;
+    Printf.printf "MEMORY_KEEPER_CONTEXT_LIFECYCLE %s\n%!" (Yojson.Safe.to_string (`Assoc
+      ["turn_ordinal",`Int ordinal;"worker_run_id",`String row.worker_run_id;
+       "trace_session_id",Option.fold ~none:`Null ~some:(fun id -> `String id) row.session_id;
+       "vendor_session_id",`String settlement.session_id;"settled_turn_id",`String settlement.turn_id;
+       "acknowledged",`Bool (frontier.acknowledged_turn=Some settlement);
+       "transmitted_source_ids",`List (List.map (fun id -> `String id) sent);
+       "locally_omitted_held_source_ids",`List (List.map (fun id -> `String id) held);
+       "binding",binding;"submission",submission;
+       "scope",`String "synthetic_client_lifecycle_not_semantic_coherence_or_remote_retention"])))
+    [1,initial,["dynamic_context";"memory_os_recall"],[];
+     2,initial,[],["dynamic_context";"memory_os_recall"];
+     3,changed,["memory_os_recall"],["dynamic_context"]]
+;;
+
 let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
   let base_path = temp_workspace "masc-codex-raw-trace-" in
   let raw_trace_path = Filename.concat base_path "official-codex-raw.jsonl" in
@@ -8398,6 +8545,7 @@ let () =
         ] )
     ; ( "subscription boundary"
       , [ test_case "ChatGPT turn completes" `Quick test_chatgpt_subscription_turn
+        ; test_case "Keeper context survives three actual settled turns" `Quick test_keeper_context_lifecycle_three_settled_turns
         ; test_case "Keeper persists assembly binding in same attempt" `Quick test_keeper_assembly_binding_is_durable_in_same_attempt
         ; test_case "issuer assembly joins completed slots" `Quick test_issuer_assembly_links_to_completed_slots
         ; test_case "content-free actual context submission" `Quick test_content_free_context_submission

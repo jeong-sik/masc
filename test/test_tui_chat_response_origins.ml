@@ -26,16 +26,16 @@ let test_response_order_in_every_reasoning_view () =
       let events = [Live.Run_started;
         Live.Runtime_attempt_started {runtime_id=Some "first";attempt_index=Some 0};
         Live.Thinking "EARLIER_ATTEMPT_THOUGHT";
-        Live.Text "EARLIER_ATTEMPT_SPEECH";
+        Live.Text {text="EARLIER_ATTEMPT_SPEECH"; stream_scope=None};
         Live.Runtime_attempt_started {runtime_id=Some "second";attempt_index=Some 1};
-        Live.Text "EARLIER_COMMENTARY";
+        Live.Text {text="EARLIER_COMMENTARY"; stream_scope=None};
         Live.Tool_started {occurrence;tool_name="read_file"};
         Live.Tool_ended {occurrence};
         Live.Tool_result {occurrence;execution_id="exec-read"};
-        Live.Stream_model_started {message_id=Some "final";model="observed";usage=None};
-        Live.Text "RESPONSE_PREFIX";
+        Live.Stream_model_started {stream_scope = None; message_id=Some "final";model="observed";usage=None};
+        Live.Text {text="RESPONSE_PREFIX"; stream_scope=None};
         Live.Thinking "RESPONSE_THOUGHT";
-        Live.Text "RESPONSE_SUFFIX";
+        Live.Text {text="RESPONSE_SUFFIX"; stream_scope=None};
         Live.Reply_details {reply="RESPONSE_PREFIX\nRESPONSE_SUFFIX";
           turn_outcome=Masc.Keeper_turn_outcome.Visible_reply;turn_ref="trace#1"};
         Live.Run_finished] in

@@ -2662,11 +2662,20 @@ let test_an_observed_running_turn_is_drawn_from_its_journal () =
         ; ktr_state = Tui_decode.Keeper_turn_idle } ];
     let settled_screen = screen () in
     check int "the reply is still drawn once" 1 (count "said" settled_screen);
-    check bool "and the turn's rail closes" true
-      (count (Masc_tui_message_layout.turn_rail_glyph Masc_tui_message_layout.Rail_closes)
-         settled_screen > 0
-       || count (Masc_tui_message_layout.turn_rail_glyph Masc_tui_message_layout.Rail_stands)
-            settled_screen > 0))
+    List.iter (fun rail ->
+      check int "the bare conversation omits turn rails" 0
+        (count (Masc_tui_message_layout.turn_rail_glyph rail) settled_screen))
+      Masc_tui_message_layout.[Rail_opens; Rail_closes; Rail_stands];
+    state.msg_origin_display <- Masc_tui_message_layout.Origin_inline;
+    let detailed_settled = screen () in
+    check int "explicit inline retains the completed reply once" 1 (count "said" detailed_settled);
+    (* A single speech row may stand without a rail; a multi-row turn closes.
+       Either way it must not keep the opening mark of a live turn. *)
+    let reply_row = List.find (Astring.String.is_infix ~affix:"said")
+      (String.split_on_char '\n' detailed_settled) in
+    check int "the completed inline reply is not left as a live opening" 0
+      (count (Masc_tui_message_layout.turn_rail_glyph Masc_tui_message_layout.Rail_opens)
+         reply_row))
 ;;
 
 (* The pane's own turn is the live block while its request is in flight, and
@@ -3393,63 +3402,46 @@ let test_approval_detail_scroll_accepts_the_rendered_clamp () =
 (* The header names what is unusual, not what is normal.
 
    Reasoning folded and tools compact are the defaults: observed work stays
-   identifiable while its details remain one shortcut away. Spelling those modes in every header
-   would spend width to describe the ordinary case.
-
-   Every combination is listed rather than described, because the rule is
-   about which of eight cases produce which string. *)
+   identifiable while its details remain one shortcut away. Spelling those modes
+   in every header would spend width to describe the ordinary case. *)
 let test_the_header_names_only_unusual_modes () =
   let summary ?(origin = Masc_tui_message_layout.Origin_bare) memory
       reasoning tools =
     Tui_types.chat_visibility_summary ~memory ~reasoning ~tools ~origin
   in
-  let memory_summary = Tui_types.Memory_summary in
   let memory_hidden = Tui_types.Memory_hidden in
-  let memory_full = Tui_types.Memory_full in
   let full = Tui_types.Reasoning_full and folded = Tui_types.Reasoning_folded in
   let hidden = Tui_types.Reasoning_hidden in
   let tools_full = Tui_types.Tools_full and compact = Tui_types.Tools_compact in
-  (* The header says nothing for the state the TUI actually starts in, so the
-     default has to be read rather than restated here. *)
   let started =
     Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
   in
-  check
-    bool
-    "the pane starts without clocks"
-    true
-    (started.Tui_types.msg_origin_display
-     = Masc_tui_message_layout.Origin_bare);
+  check bool "the pane starts with the reading layout" true
+    (started.Tui_types.msg_origin_display = Masc_tui_message_layout.Origin_bare);
   check string "everything at its default says nothing" ""
-    (summary ~origin:started.Tui_types.msg_origin_display memory_summary
-       started.msg_reasoning_visibility compact);
-  check string "the optional short clock is named" "metadata:inline"
-    (summary ~origin:Masc_tui_message_layout.Origin_inline memory_summary folded
-       compact);
+    (summary ~origin:started.Tui_types.msg_origin_display started.msg_memory_visibility
+       started.msg_reasoning_visibility started.msg_tool_visibility);
+  check string "inline diagnostics are named" "metadata:inline"
+    (summary ~origin:Masc_tui_message_layout.Origin_inline memory_hidden folded compact);
   check string "full metadata is named" "metadata:full"
-    (summary ~origin:Masc_tui_message_layout.Origin_row memory_summary folded
-       compact);
+    (summary ~origin:Masc_tui_message_layout.Origin_row memory_hidden folded compact);
   check string "full reasoning alone" "reasoning:full"
-    (summary memory_summary full compact);
+    (summary memory_hidden full compact);
   check string "hidden reasoning is explicit" "reasoning:hidden"
-    (summary memory_summary hidden compact);
+    (summary memory_hidden hidden compact);
   check string "full tools alone" "tools:full"
-    (summary memory_summary folded tools_full);
+    (summary memory_hidden folded tools_full);
   check string "short results mode is named" "tools:results"
-    (summary memory_summary folded Tui_types.Tools_results);
-  check string "journal off alone" "journal:off"
-    (summary memory_hidden folded compact);
+    (summary memory_hidden folded Tui_types.Tools_results);
+  check string "journal summary alone" "journal:summary"
+    (summary Tui_types.Memory_summary folded compact);
   check string "full journal alone" "journal:full"
-    (summary memory_full folded compact);
-  check string "two of them" "reasoning:full tools:full"
-    (summary memory_summary full tools_full);
-  check string "all three, in a fixed order"
-    "journal:off reasoning:full tools:full"
+    (summary Tui_types.Memory_full folded compact);
+  check string "two expanded modes" "reasoning:full tools:full"
     (summary memory_hidden full tools_full);
-  check int "at rest it now costs nothing" 0
-    (String.length (summary memory_summary folded compact));
-  check int "all three deviations still fit as one compact label" 37
-    (String.length (summary memory_hidden full tools_full))
+  check string "all three expanded modes retain their order"
+    "journal:summary reasoning:full tools:full"
+    (summary Tui_types.Memory_summary full tools_full)
 ;;
 
 let test_chat_header_resolves_the_effective_modes () =
@@ -3487,9 +3479,9 @@ let test_chat_visibility_defaults_and_cycles () =
     (Tui_types.reasoning_visibility_to_string default.msg_reasoning_visibility);
   check string "tool calls start as one activity summary" "compact"
     (Tui_types.tool_visibility_to_string default.msg_tool_visibility);
-  check string "Memory journal starts as one line per pass" "summary"
+  check string "Memory journal starts hidden" "hidden"
     (Tui_types.memory_visibility_to_string default.msg_memory_visibility);
-  check (list string) "the walk adds clocks and returns to reading"
+  check (list string) "the walk starts at reading mode and comes back"
     [ "off"; "inline"; "row"; "off" ]
     (let rec collect count mode =
        if count = 0
@@ -3523,7 +3515,7 @@ let test_chat_visibility_defaults_and_cycles () =
      in
      collect 3 Tui_types.Reasoning_hidden);
   check (list string) "Memory detail cycles through all three states"
-    [ "summary"; "full"; "hidden"; "summary" ]
+    [ "hidden"; "summary"; "full"; "hidden" ]
     (let rec collect count mode =
        if count = 0
        then [ Tui_types.memory_visibility_to_string mode ]
@@ -3531,7 +3523,7 @@ let test_chat_visibility_defaults_and_cycles () =
          Tui_types.memory_visibility_to_string mode
          :: collect (count - 1) (Tui_types.next_memory_visibility mode)
      in
-     collect 3 Tui_types.Memory_summary);
+     collect 3 default.msg_memory_visibility);
   check (list string) "Ctrl-D cycles summary, results, full, summary"
     [ "compact"; "results"; "full"; "compact" ]
     (let rec collect count mode =
@@ -3864,6 +3856,7 @@ let test_batch_reply_follows_all_original_inputs () =
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
     state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some "alpha";
+    state.msg_origin_display <- Masc_tui_message_layout.Origin_inline;
     state.msg_loaded_keeper <- Some "alpha";
     let member request_id at =
       let log = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id ~started_at:1. in
@@ -4277,6 +4270,7 @@ let test_status_details_and_fold_counts_reach_the_frame () =
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
     state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some "alpha";
+    state.msg_origin_display <- Masc_tui_message_layout.Origin_inline;
     let entry = inflight_with_log ~keeper_name:"alpha" ~started_at:1. [Live.Run_started] in
     state.msg_inflight <- [entry];
     state.msg_tool_visibility <- Tui_types.Tools_full;
@@ -4311,7 +4305,25 @@ let test_status_details_and_fold_counts_reach_the_frame () =
       check bool "unfolded status does not retain hidden count" false
         (List.exists (Astring.String.is_infix ~affix:"+2") (lines ()));
       state.msg_turn_folded <- true)
-      [Tui_types.Tools_compact; Tui_types.Tools_results])
+      [Tui_types.Tools_compact; Tui_types.Tools_results];
+    Tui_types.turn_log_add ~now:4. entry.log ~seq:(Some 4)
+      (Live.Reply_details {reply=""; turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint;
+        turn_ref="trace-fold#1"; terminal_stream_scope=None});
+    (* The run that carried the checkpoint ends; the operation then waits for
+       its continuation, which is the reading this check is about. *)
+    Tui_types.turn_log_add ~now:4. entry.log ~seq:(Some 5) Live.Run_finished;
+    (* The bare reading keeps Attention rows through the fold, so it hides one
+       row fewer than the inline reading. *)
+    List.iter (fun (origin, hidden) ->
+      state.msg_origin_display <- origin;
+      check bool "checkpoint has no progress row" false
+        (List.exists (fun (kind, _) -> kind = Keeper_chat_transcript.Progress)
+          (Tui_types.keeper_message_visible_status_rows state entry.log.tl_transcript ~now:5.));
+      check int "folded checkpoint counts the rows it hides" hidden
+        (Tui_types.keeper_message_folded_status_count state entry.log.tl_transcript ~now:5.);
+      check bool "folded checkpoint retains a discoverable details key" true
+        (has_detail (Printf.sprintf "+%d" hidden) (Masc_tui_keys.expand_turn_label ^ ":details")))
+      [Masc_tui_message_layout.Origin_bare, 1; Origin_inline, 2])
 
 let test_verified_rejection_is_visible_without_mutating_original_input () =
   let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
@@ -4423,7 +4435,7 @@ let test_delivery_states_and_observed_work_are_identifiable () =
       state.msg_origin_display <- Layout.Origin_inline;
       Tui_types.turn_log_add ~now:4. entry.log ~seq:(Some 1) (Live.Thinking "OBSERVED_THOUGHT");
       let thought = screen () in
-      check bool "default reasoning lane has its name" true (has thought "THINKING");
+      check bool "diagnostic reasoning lane has its name" true (has thought "THINKING");
       let occurrence : Live.tool_occurrence =
         {stream_scope=0; block_index=1; provider_message_id=None; tool_call_id=Some "native-read"} in
       Tui_types.turn_log_add ~now:5. entry.log ~seq:(Some 2)
@@ -4431,7 +4443,7 @@ let test_delivery_states_and_observed_work_are_identifiable () =
       Tui_types.turn_log_add ~now:6. entry.log ~seq:(Some 3) (Live.Native_tool_ended {occurrence});
       Tui_types.turn_log_add ~now:7. entry.log ~seq:(Some 4) (Live.Text {text="OBSERVED_ANSWER"; stream_scope=None});
       let streaming = screen () in
-      List.iter (fun marker -> check bool ("default work label: " ^ marker) true (has streaming marker))
+      List.iter (fun marker -> check bool ("diagnostic work label: " ^ marker) true (has streaming marker))
         ["THINKING"; "TOOLS"; "STREAMING"; "OBSERVED_ANSWER"];
       check string "display annotations do not alter recall" "아니야 진행해"
         (List.hd state.msg_history).me_text)
@@ -4555,6 +4567,28 @@ let test_search_measures_original_message_rows () =
           ~at:(100.5 +. float_of_int index) () in
       [{row with Tui_types.me_identity=Persisted_row id};
        {reply with Tui_types.me_identity=Persisted_row (id ^ "-reply")}]) |> List.concat;
+    let find needle = Masc_tui_render_chat.keeper_message_find_scroll state
+      ~keeper_name:"alpha" ~needle ~older_than:None in
+    let identities = ["search-0"] in
+    List.iter (fun needle -> check bool "generated annotations are not searchable message text" true
+      (find needle = None)) ["TURN #24"; "입력 반영됨"];
+    let visible = List.map (fun needle -> needle, find needle) identities in
+    state.msg_origin_display <- Masc_tui_message_layout.Origin_bare;
+    List.iter (fun (needle, expected) ->
+      match expected, find needle with
+      | Some (_, expected_anchor), Some (_, actual_anchor) ->
+          check bool "bare search retains request identity" true (expected_anchor = actual_anchor)
+      | _ -> fail ("request identity disappeared: " ^ needle)) visible;
+    (match find "SEARCH_TARGET" with
+     | None -> fail "bare search lost input"
+     | Some (scroll, _) ->
+       state.msg_scroll <- scroll;
+       let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+       check bool "bare search measures bare rows" true
+         (List.exists (fun line -> Astring.String.is_infix ~affix:"SEARCH_TARGET"
+           (Masc_tui_theme.strip_sgr line)) frame.Masc_tui_frame_presenter.lines));
+    state.msg_scroll <- 0;
+    state.msg_origin_display <- Masc_tui_message_layout.Origin_inline;
     let newest, _ = Masc_tui_render_chat.render_keeper_message state in
     check bool "turn metadata is not added to speech" false
       (List.exists (fun line -> Astring.String.is_infix ~affix:"TURN #24"
@@ -4589,6 +4623,61 @@ let test_empty_post_terminal_replay_is_retained () =
     (List.mem ("alpha", source) (Tui_types.journal_held_keys state "alpha"));
   check bool "empty log does not replace durable history" false
     (Tui_types.turn_log_holds_the_turn log)
+;;
+
+let test_search_finds_a_batched_request_by_its_own_id () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+  state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+  state.msg_target_keeper_name <- Some "alpha";
+  let request_id = "update-req-7" and execution_id = "shared-exec-1" in
+  let input = chat_entry ~request_id
+      ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator {surface=None}))
+      ~text:"follow-up words" ~at:100. () in
+  state.msg_history <- [{input with Tui_types.me_identity=Persisted_row request_id}];
+  (* The update was folded into an execution another request opened. *)
+  state.msg_settled_logs <-
+    [settled_log ~request_id
+       [Live.Run_started; Live.Batch_bound {operation_id=request_id; execution_id}]];
+  List.iter (fun origin ->
+    state.msg_origin_display <- origin;
+    let entries = Masc_tui_render_chat.keeper_message_layout_entries state
+        ~keeper_name:"alpha" ~chat_cols:120 in
+    check bool "precondition: the rows carry the execution, not the request" true
+      (entries <> [] && List.for_all (fun (entry : Masc_tui_message_layout.entry) ->
+           String.equal entry.request_label execution_id
+           && not (Astring.String.is_infix ~affix:request_id entry.body)) entries);
+    check bool "search finds the update by the id it was submitted with" true
+      (Option.is_some (Masc_tui_render_chat.keeper_message_find_scroll state
+         ~keeper_name:"alpha" ~needle:request_id ~older_than:None)))
+    [Masc_tui_message_layout.Origin_bare; Origin_inline; Origin_row]
+;;
+
+let test_bare_inbound_sender_draws_each_piece_once () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+  state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+  state.msg_target_keeper_name <- Some "alpha";
+  state.msg_origin_display <- Masc_tui_message_layout.Origin_bare;
+  (* Wider than the bare view's 100-cell reading column, so it wraps. *)
+  let speaker = String.concat " " (List.init 16 (Printf.sprintf "part%02d-sender")) in
+  let message = chat_entry ~request_id:"inbound-1"
+      ~role:(Tui_types.Message_user (Tui_types.Sent_by_other {speaker; surface=None}))
+      ~text:"INBOUND_BODY" ~at:100. () in
+  state.msg_history <- [{message with Tui_types.me_identity=Persisted_row "inbound-1"}];
+  let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+  let text = String.concat "\n"
+      (List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines) in
+  let count affix =
+    List.length (Astring.String.cuts ~sep:affix text) - 1 in
+  check bool "precondition: the name wraps onto more than one row" true
+    (not (List.exists (fun line -> Astring.String.is_infix ~affix:"part00-sender" line
+                                   && Astring.String.is_infix ~affix:"part15-sender" line)
+            (String.split_on_char '\n' text)));
+  check int "the arrival mark is drawn once" 1 (count "\xe2\x97\x80");
+  List.iter (fun piece -> check int ("each piece of the name once: " ^ piece) 1 (count piece))
+    ["part00-sender"; "part15-sender"];
+  check int "the body follows the name" 1 (count "INBOUND_BODY")
 ;;
 
 let test_history_suppression_preserves_typed_source_collisions () =
@@ -4626,7 +4715,10 @@ let () =
   run
     "tui_chat_queue_wiring"
     [ ( "expanded diagnostics",
-        [] )
+        [ test_case "search finds a batched request by its own id" `Quick
+            test_search_finds_a_batched_request_by_its_own_id
+        ; test_case "bare inbound sender draws each piece once" `Quick
+            test_bare_inbound_sender_draws_each_piece_once ] )
     ; ( "attachment captions", [] )
     ; ( "visible delivery",
         [ test_case "pending to observed work" `Quick test_delivery_states_and_observed_work_are_identifiable

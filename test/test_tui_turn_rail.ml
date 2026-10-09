@@ -31,7 +31,7 @@ let entry ?(turn_rail = Layout.Rail_none) ?(style = Layout.Keeper)
 ;;
 
 let body_rows ?(inner_width = 60) entry =
-  Layout.visible_rows ~origin:Layout.Origin_bare ~inner_width ~height:40
+  Layout.visible_rows ~origin:Layout.Origin_inline ~inner_width ~height:40
     [ entry ]
   |> List.filter (fun (row : Layout.row) -> row.kind = Layout.Body)
 ;;

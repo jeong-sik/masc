@@ -379,9 +379,7 @@ type tool_visibility =
   | Tools_results
   | Tools_full
 
-(* How much of the Librarian/Memory journal the chat pane draws. Summary is
-   the resting state: one header line per journal pass, so the conversation
-   keeps the pane and the change itself stays one keypress away. *)
+(* Journal activity is opt-in; it never interrupts the default conversation. *)
 type memory_visibility =
   | Memory_hidden
   | Memory_summary
@@ -405,9 +403,7 @@ let memory_visibility_to_string = function
   | Memory_full -> "full"
 ;;
 
-(* From the resting summary toward more, then none, then back: the first
-   press answers "what changed exactly", the second clears the lane, the
-   third restores the default. *)
+(* Hidden -> summary -> full -> hidden, through Ctrl-N. *)
 let next_memory_visibility = function
   | Memory_summary -> Memory_full
   | Memory_full -> Memory_hidden
@@ -420,30 +416,13 @@ let origin_display_to_string = function
   | Masc_tui_message_layout.Origin_bare -> "off"
 ;;
 
-(* The chat modes worth a place in the header.
-
-   Reasoning starts folded, tools compact, and the memory journal at its
-   one-line summary, so the answer remains the strongest level in the pane.
-   At rest those defaults say nothing unusual and therefore cost no header
-   width.
-
-   So only a mode away from its default appears. That is exactly when the
-   operator needs reminding: reasoning is missing from the pane because they
-   hid it, not because the keeper stopped thinking. At rest the header is what
-   it was before any of these modes existed.
-
-   Discovery lives in the footer and the help overlay, which name Ctrl-R,
-   Ctrl-D, Ctrl-N, and Ctrl-F whether or not a mode is on. *)
+(* Name only modes the operator expanded; the resting chat needs no badges. *)
 let chat_visibility_summary ~memory ~reasoning ~tools ~origin =
   let parts =
     List.filter_map Fun.id
       [ (match memory with
-         | Memory_summary -> None
-         (* Named for the rows it governs, which the pane labels JOURNAL and
-            the footer reaches with Ctrl-N:journal. It read "memory" here and
-            "journal" there, so pressing the key and looking for what moved
-            meant knowing the two words were one axis. *)
-         | Memory_hidden -> Some "journal:off"
+         | Memory_hidden -> None
+         | Memory_summary -> Some "journal:summary"
          | Memory_full -> Some "journal:full")
       ; (match origin with
          | Masc_tui_message_layout.Origin_bare -> None
@@ -468,8 +447,7 @@ let next_reasoning_visibility = function
   | Reasoning_full -> Reasoning_hidden
 ;;
 
-(* Start without clocks; Ctrl-F adds the short clock, then full headings,
-   then returns to the reading layout. *)
+(* Conversation -> inline metadata -> full origin heading -> conversation. *)
 let next_origin_display = function
   | Masc_tui_message_layout.Origin_bare -> Masc_tui_message_layout.Origin_inline
   | Masc_tui_message_layout.Origin_inline -> Masc_tui_message_layout.Origin_row
@@ -10093,7 +10071,7 @@ let create_state
   msg_file_changes_refresh_pending = false;
   msg_file_changes_error = None;
   msg_file_changes_generation = 0;
-  msg_memory_visibility = Memory_summary;
+  msg_memory_visibility = Memory_hidden;
   msg_memory_error = None;
   msg_memory_dropped = 0;
   msg_history_load_generation = 0;
@@ -13312,6 +13290,7 @@ let keeper_message_timing_visible (state : state) =
 
 let keeper_message_unfolded_status_rows (state : state) live ~now =
   Masc_tui_keeper_chat_transcript.status_rows
+    ~compact:(state.msg_origin_display = Masc_tui_message_layout.Origin_bare)
     ~show_timing:(keeper_message_timing_visible state) ~now live
 
 (* The most recently submitted input can be queued behind the execution that
@@ -13363,7 +13342,10 @@ let keeper_message_visible_status_rows (state : state) live ~now =
   if state.msg_turn_folded then
     List.filter
       (fun (kind, _) ->
-        Masc_tui_keeper_chat_transcript.status_row_survives_folding kind)
+        match kind with
+        | Masc_tui_keeper_chat_transcript.Attention
+          when state.msg_origin_display = Masc_tui_message_layout.Origin_bare -> true
+        | _ -> Masc_tui_keeper_chat_transcript.status_row_survives_folding kind)
       rows
   else rows
 
@@ -13374,6 +13356,16 @@ let keeper_message_folded_status_count (state : state) live ~now =
   else
     List.length (keeper_message_unfolded_status_rows state live ~now)
     - List.length (keeper_message_visible_status_rows state live ~now)
+
+let keeper_message_standalone_details_hint (state : state) live ~now =
+  keeper_message_folded_status_count state live ~now > 0
+  && not (List.exists
+    (fun (kind, _) -> kind = Masc_tui_keeper_chat_transcript.Progress)
+    (keeper_message_visible_status_rows state live ~now))
+
+let keeper_message_counted_status_rows state live ~now =
+  List.length (keeper_message_visible_status_rows state live ~now)
+  + if keeper_message_standalone_details_hint state live ~now then 1 else 0
 
 let keeper_observed_turn (state : state) keeper_name =
   if Option.is_some state.keeper_turns_error then None
@@ -13582,6 +13574,7 @@ let keeper_message_activity_rows (state : state) =
   | (Tools_compact | Tools_results), None -> []
   | (Tools_compact | Tools_results), Some keeper_name ->
       let waiting = keeper_message_waiting_requests state ~keeper_name in
+      let has_progress = Option.is_some (keeper_message_status_log state) in
       let clauses = ref [] and urgent = ref [] in
       let add text = clauses := text :: !clauses in
       let attention text = urgent := text :: !urgent in
@@ -13602,11 +13595,11 @@ let keeper_message_activity_rows (state : state) =
         attention "메시지 전송 확인 중";
       let has_working = any_phase (fun transcript ->
         Masc_tui_keeper_chat_transcript.phase transcript = Working) in
-      if has_working then add "기존 작업 처리 중";
-      if any_phase (fun transcript -> Masc_tui_keeper_chat_transcript.phase transcript = Stream_ended) then
+      if has_working && not has_progress then add "기존 작업 처리 중";
+      if not has_progress && any_phase (fun transcript -> Masc_tui_keeper_chat_transcript.phase transcript = Stream_ended) then
         add "응답 마무리 중";
       List.iter (fun (admission, text) ->
-          if List.exists (fun entry ->
+          if not has_progress && List.exists (fun entry ->
               entry.phase = Turn_streaming
               && Masc_tui_keeper_chat_transcript.phase entry.log.tl_transcript = Waiting
               && not (Masc_tui_keeper_chat_transcript.awaiting_continuation entry.log.tl_transcript)
@@ -13621,7 +13614,8 @@ let keeper_message_activity_rows (state : state) =
          | None -> List.iter (fun (row : Tui_decode.keeper_turn_row) ->
              if String.equal row.ktr_keeper_name keeper_name then
                match row.ktr_state with
-               | Keeper_turn_running _ -> add "기존 작업 처리 중"
+               | Keeper_turn_running _ ->
+                   if not has_progress then add "기존 작업 처리 중"
                | Keeper_turn_unavailable _ -> attention "현재 작업 확인 불가"
                | Keeper_turn_idle -> ()) state.keeper_turns);
       if waiting <> [] then begin
@@ -13656,15 +13650,10 @@ let keeper_message_activity_rows (state : state) =
       else if List.exists (fun (name, _, intervention) ->
           String.equal name keeper_name && intervention = Retained_before_dispatch)
           state.keeper_interactive_waiting then attention "전송 전 보관 중 · /queue resume";
-      let folded = match keeper_message_status_log state with
-        | Some live when String.equal (turn_log_keeper_name live) keeper_name ->
-            keeper_message_folded_status_count state live.tl_transcript ~now:(Unix.gettimeofday ())
-        | Some _ | None -> 0 in
       let keys =
-        (match keeper_observed_stop_hint state with None -> "" | Some _ -> " · Esc:중단")
-        ^ (if folded > 0 then Printf.sprintf " · +%d" folded else "") in
+        match keeper_observed_stop_hint state with None -> "" | Some _ -> " · Esc:중단" in
       match List.rev !urgent @ List.rev !clauses with
-      | [] when folded = 0 -> []
+      | [] -> []
       | parts -> [{ Masc_tui_answering.lead = String.concat " · " parts;
           rest = ""; keys }]
 ;;
@@ -13719,10 +13708,12 @@ let keeper_message_inflight_drawn (state : state) =
         state.msg_inflight
     | Some _ | None -> state.msg_inflight
   in
+  (* Background Keepers are visible in the roster and Activity pane. Only
+     this conversation's diagnostic requests belong beside its composer. *)
   let uncovered = match state.msg_tool_visibility with
-    | Tools_full -> uncovered
-    | Tools_compact | Tools_results -> List.filter (fun entry ->
-        state.msg_target_keeper_name <> Some entry.sent_request.keeper_name) uncovered in
+    | Tools_full -> List.filter (fun entry ->
+        state.msg_target_keeper_name = Some entry.sent_request.keeper_name) uncovered
+    | Tools_compact | Tools_results -> [] in
   List.fold_left
     (fun groups entry ->
       let execution_id = turn_log_execution_id entry.log in
@@ -13753,11 +13744,9 @@ let keeper_message_inflight_drawn (state : state) =
         @ [ { representative = entry; count = 1; reconciling_count = reconciling } ])
     [] uncovered
 
-(* Foreign turns keep the complete stop command ahead of their descriptive
-   status. Count these physical rows with the same pane width as rendering;
-   otherwise wrapping a long Keeper name would cover the composer below. *)
-let keeper_message_inflight_rows (state : state) ~chat_cols ~now =
-  let width = Masc_tui_frame.inner_width ~cols:chat_cols in
+(* The current conversation's extra request diagnostics, shared by the
+   renderer and its row budget. Background work stays on the Activity pane. *)
+let keeper_message_inflight_rows (state : state) ~chat_cols:_ ~now =
   let batch_label group =
     if group.count = 1 then ""
     else Printf.sprintf "%d messages in one turn · " group.count
@@ -13788,19 +13777,8 @@ let keeper_message_inflight_rows (state : state) ~chat_cols ~now =
       (Masc_tui_keeper_chat_projection.compact_request_id
          (turn_log_execution_id group.representative.log)) age
   in
-  let mine, others = List.partition
-      (fun group -> state.msg_target_keeper_name =
-          Some group.representative.sent_request.keeper_name)
-      (keeper_message_inflight_drawn state) in
-  List.map (fun group -> true, summary group) mine
-  @ List.concat_map (fun group ->
-      let name = Masc.Tui_terminal_text.sanitize_terminal_text
-          group.representative.sent_request.keeper_name in
-      let command_rows =
-        Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - 2))
-          ("/interrupt " ^ name)
-        |> List.map (fun line -> false, "  " ^ line) in
-      command_rows @ [false, summary group]) others
+  List.map (fun group -> true, summary group)
+    (keeper_message_inflight_drawn state)
 
 let keeper_message_status_rows (state : state) ~terminal_cols =
   let chat_cols = Masc_tui_roster_pane.content_cols
@@ -13827,9 +13805,8 @@ let keeper_message_status_rows (state : state) ~terminal_cols =
             different number of rows than the pane draws. The age in the
             progress row changes the text, never the row count, so the
             two clock reads cannot disagree on the number. *)
-         List.length
-           (keeper_message_visible_status_rows state live.tl_transcript
-              ~now:(Unix.gettimeofday ())))
+         keeper_message_counted_status_rows state live.tl_transcript
+           ~now:(Unix.gettimeofday ()))
   (* The promoted line and the queued ones are entries in the history now --
      the chat pane appends them to the same stream it scrolls, so the
      conversation holds one time axis. Nothing is reserved for them here:
@@ -13851,10 +13828,8 @@ let keeper_message_status_rows (state : state) ~terminal_cols =
          1
      | Some _ | None -> 0)
   + (if Option.is_some state.msg_loaded_error then 1 else 0)
-  + (if state.msg_memory_visibility <> Memory_hidden
-        && Option.is_some state.msg_memory_error then 1 else 0)
-  + (if state.msg_memory_visibility <> Memory_hidden
-        && state.msg_memory_dropped > 0 then 1 else 0)
+  + (if Option.is_some state.msg_memory_error then 1 else 0)
+  + (if state.msg_memory_dropped > 0 then 1 else 0)
   + (if state.msg_loaded_dropped > 0 then 1 else 0)
   + (if state.msg_older_loading || Option.is_some state.msg_older_error then 1
      else 0)

@@ -613,7 +613,8 @@ val awaiting_approval : t -> awaiting_approval option
 (** The call the turn is held at, if any. One at a time: the turn cannot reach
     a second call while it is waiting on this one. *)
 
-val status_rows : ?show_timing:bool -> now:float -> t -> (status_kind * string) list
+val status_rows :
+  ?compact:bool -> ?show_timing:bool -> now:float -> t -> (status_kind * string) list
 (** The status rows the chat pane draws for this turn.
 
     Returned as a list rather than drawn directly because the pane's row
@@ -622,12 +623,16 @@ val status_rows : ?show_timing:bool -> now:float -> t -> (status_kind * string) 
     once went missing while the send hint still read Enter:send
     (see [keeper_message_status_rows]). One list, counted and drawn.
 
+    [compact] keeps the current activity and age without the runtime identity
+    and cumulative tool inventory. Attention and approval rows are unchanged.
+
     Between continuation segments there is no progress row: the open
     request is retained, but no run is starting. Approval and diagnostic rows
     remain available. A subsequent [Run_started] restores progress.
 
     [show_timing] defaults to true. When false, generated request, call and
-    silence ages are omitted; activity, approvals and error text remain.
+    silence ages are omitted from the compact row as well; activity,
+    approvals and error text remain.
 
     The progress row carries the turn's age, measured against [now] rather
     than a clock read here so a test can state the instant. A [now] before

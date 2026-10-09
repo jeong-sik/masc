@@ -98,7 +98,7 @@ let test_only_the_uncovered_in_flight_rows_are_drawn () =
   state.msg_inflight
     <- state.msg_inflight
        @ [ inflight ~keeper_name:"beta" ~request_id:"request-3" ~at:4. () ];
-  check int "another keeper's request keeps its row too" 2
+  check int "another keeper does not add a row here" 1
     (List.length (Tui.keeper_message_inflight_drawn state))
 
 (* Without a live turn on this pane nothing is covered, so every entry draws.
@@ -154,29 +154,90 @@ let test_compact_status_keeps_delivery_and_priority_truth () =
   let rows () = List.map (fun row -> row.Masc_tui_answering.lead ^ row.rest)
       (Tui.keeper_message_activity_rows state) in
   check (list string) "one quiet status preserves exact current queue count"
-    ["기존 작업 처리 중 · 내 메시지 2건 대기 · 처리 대기"] (rows ());
+    ["내 메시지 2건 대기 · 처리 대기"] (rows ());
   state.keeper_run_next_inflight <- [second.sent_request];
   state.keeper_run_next_receipts <- [first.sent_request, Ok "confirmed first"];
   check (list string) "in-flight priority cannot claim confirmation"
-    ["기존 작업 처리 중 · 내 메시지 2건 대기 · 다음 순서 확인 중"] (rows ());
+    ["내 메시지 2건 대기 · 다음 순서 확인 중"] (rows ());
   state.keeper_run_next_inflight <- [];
   check (list string) "one receipt does not confirm both inputs"
-    ["기존 작업 처리 중 · 내 메시지 2건 대기 · 일부 메시지 다음 순서로 전달 대기"] (rows ());
+    ["내 메시지 2건 대기 · 일부 메시지 다음 순서로 전달 대기"] (rows ());
   state.keeper_run_next_receipts <- [first.sent_request, Ok "first"; second.sent_request, Ok "second"];
   check (list string) "both exact receipts confirm priority"
-    ["기존 작업 처리 중 · 내 메시지 2건 대기 · 다음 순서로 전달 대기"] (rows ());
+    ["내 메시지 2건 대기 · 다음 순서로 전달 대기"] (rows ());
   state.keeper_run_next_receipts <- [second.sent_request, Error "offline"];
   check bool "actual refusal retains attention" true (Tui.keeper_message_activity_needs_attention state);
   check (list string) "failure does not claim priority"
-    ["다음 순서 확인 불가 · 기존 작업 처리 중 · 내 메시지 2건 대기"] (rows ());
+    ["다음 순서 확인 불가 · 내 메시지 2건 대기"] (rows ());
   let foreign = inflight ~keeper_name:"beta" ~request_id:"foreign-private-id" ~at:1. () in
   state.msg_inflight <- foreign :: state.msg_inflight;
   (match Tui.keeper_message_inflight_drawn state with
-   | [group] -> check string "foreign stop target survives folding" "beta" group.representative.sent_request.keeper_name
-   | groups -> failf "expected foreign-only row, got %d" (List.length groups));
+   | [] -> ()
+   | groups -> failf "foreign work added %d composer rows" (List.length groups));
   state.msg_tool_visibility <- Tui.Tools_full;
   check bool "diagnostics keep exact private ID" true
     (List.exists (fun text -> Astring.String.is_infix ~affix:"second-private-id" text) (rows ()))
+
+(* Background work must not consume this conversation's input area, in
+   either the ordinary or diagnostic projection. Its request stays tracked. *)
+let test_background_work_stays_outside_composer () =
+  List.iter (fun mode ->
+    let state = state () in
+    state.msg_tool_visibility <- mode;
+    let before = Tui.keeper_message_status_rows state ~terminal_cols:80 in
+    let other = inflight ~keeper_name:"beta" ~request_id:"foreign-request" ~at:2. () in
+    state.msg_inflight <- [other];
+    check (list (pair bool string)) "no foreign request beside the input" []
+      (Tui.keeper_message_inflight_rows state ~chat_cols:80 ~now:5.);
+    check int "background work does not shrink conversation height" before
+      (Tui.keeper_message_status_rows state ~terminal_cols:80);
+    check int "request is still tracked" 1 (List.length state.msg_inflight))
+    [Tui.Tools_compact; Tools_results; Tools_full]
+
+let test_hidden_memory_failures_reserve_rows () =
+  let state = state () in
+  state.msg_memory_visibility <- Tui.Memory_hidden;
+  let before = Tui.keeper_message_status_rows state ~terminal_cols:80 in
+  state.msg_memory_error <- Some "fixture read failure";
+  state.msg_memory_dropped <- 2;
+  check int "hidden contents still reserve both failure diagnostics" (before+2)
+    (Tui.keeper_message_status_rows state ~terminal_cols:80)
+
+let test_checkpoint_details_hint_is_counted () =
+  let state = state () in
+  state.msg_turn_folded <- true;
+  let log = live state None in
+  List.iter (fun delta -> Tui.turn_log_add ~now:4. log ~seq:None delta)
+    [Live.Run_started;
+     Live.Approval_requested {call_id="approval"; tool_name="Execute";
+       args="{}"; question="Allow?"; because="writes"};
+     Live.Approval_settled {call_id="approval"; outcome="approved"};
+     Live.Reply_details {reply="";
+       turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint; turn_ref="trace#1";
+       terminal_stream_scope=None};
+     Live.Run_finished];
+  check bool "checkpoint without Progress draws a standalone details hint" true
+    (Tui.keeper_message_standalone_details_hint state log.tl_transcript ~now:5.);
+  check int "the standalone line has a reserved row"
+    (1 + List.length (Tui.keeper_message_visible_status_rows state log.tl_transcript ~now:5.))
+    (Tui.keeper_message_counted_status_rows state log.tl_transcript ~now:5.)
+
+let test_minimal_chat_keeps_unconfirmed_control_visible () =
+  let state = state () in
+  state.msg_tool_visibility <- Tui.Tools_compact;
+  state.msg_turn_folded <- true;
+  let log = live state (Some Live.Queued) in
+  state.keeper_turns_error <- Some "turn poll unavailable";
+  check bool "queued admission cannot hide an unavailable turn observation" true
+    (List.exists (Astring.String.is_infix ~affix:"현재 작업 확인 불가")
+       (texts (Tui.keeper_message_activity_rows state)));
+  Tui.turn_log_add ~now:4. log ~seq:(Some 1) Live.Run_started;
+  let module Transcript = Masc_tui_keeper_chat_transcript in
+  Transcript.note_interrupt log.tl_transcript (Transcript.Signal_error "interrupt failed");
+  let rows = Tui.keeper_message_visible_status_rows state log.tl_transcript ~now:5. in
+  check bool "failed stop remains visible when details are folded" true
+    (List.exists (fun (kind, text) -> kind = Transcript.Attention
+       && Astring.String.is_infix ~affix:"interrupt failed" text) rows)
 
 let test_priority_control_receipt_ordering () =
   let setup () =
@@ -359,6 +420,10 @@ let () =
       ; test_case "compact progress follows working execution" `Quick
           test_compact_progress_follows_working_execution
       ; test_case "priority control receipt ordering" `Quick test_priority_control_receipt_ordering
+      ; test_case "background work stays outside composer" `Quick test_background_work_stays_outside_composer
+      ; test_case "hidden memory errors remain counted" `Quick test_hidden_memory_failures_reserve_rows
+      ; test_case "checkpoint details hint is counted" `Quick test_checkpoint_details_hint_is_counted
+      ; test_case "minimal chat keeps unconfirmed control visible" `Quick test_minimal_chat_keeps_unconfirmed_control_visible
       ; test_case "compact delivery and priority truth" `Quick test_compact_status_keeps_delivery_and_priority_truth
       ; test_case "open request between segments has no banner" `Quick
           test_open_request_between_segments_has_no_banner

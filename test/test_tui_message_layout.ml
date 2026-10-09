@@ -23,6 +23,27 @@ let entry ?(timestamp = "12:34:56") ?timeline_bucket ?speaker
   ; action = Layout.Action_none
   }
 
+(* Does this text carry the renderer's cut mark? A scalar question, not a byte
+   one: [String.contains text '~'] used to answer it, and once the mark became
+   "…" that check could no longer fail -- the byte it looked for had left the
+   renderer, so an assertion meant to catch a regression passed for free. *)
+let holds text needle =
+  let n = String.length needle in
+  let rec seek i =
+    i + n <= String.length text
+    && (String.sub text i n = needle || seek (i + 1))
+  in
+  n = 0 || seek 0
+
+let test_bare_alert_continuations_keep_marks () =
+  let first = entry Layout.Error "ERR" "same-request" "first error" in
+  let second = entry Layout.Error "ERR" "same-request" "second error" in
+  let rows = Layout.visible_rows ~origin:Layout.Origin_bare ~inner_width:40 ~height:20 [first;second] in
+  let first_row = List.find (fun (row : Layout.row) -> holds row.text "first error") rows in
+  let second_row = List.find (fun (row : Layout.row) -> holds row.text "second error") rows in
+  check string "continued error keeps its structural mark" first_row.gutter second_row.gutter
+;;
+
 let test_utf8_scalar_input_contract () =
   List.iter
     (fun (lead, expected) ->
@@ -260,6 +281,41 @@ let timeline_bucket ?(is_dst = false) hour : Layout.timeline_bucket =
   }
 ;;
 
+(* The origin heading costs a row per message. Folding it into the margin is
+   what buys those rows back, so the count is the claim worth pinning. *)
+let origin_entries () =
+  [ entry Layout.User "you" "tui-..aaaaaaaa" "first"
+  ; entry ~timestamp:"12:35:00" Layout.Keeper "keeper.one" "tui-..bbbbbbbb"
+      "second"
+  ]
+
+let test_folding_preserves_message_bodies () =
+  let entries = origin_entries () in
+  let full = Layout.total_rows ~inner_width:40 entries in
+  let inline =
+    Layout.total_rows ~origin:Layout.Origin_inline ~inner_width:40 entries
+  in
+  check int "inline drops a row per message" (full - 2) inline;
+  let bare =
+    Layout.visible_rows ~origin:Layout.Origin_bare ~inner_width:40 ~height:20 entries
+  in
+  check (list string) "bare mode preserves both messages in order"
+    [ "  first"; "  second" ]
+    (List.filter_map
+       (fun (row : Layout.row) ->
+         match row.kind with
+         | Layout.Body -> Some row.text
+         | Layout.Metadata _ | Layout.Spacing | Layout.Viewport_gap _ -> None)
+       bare);
+  check bool "no metadata rows survive" true
+    (List.for_all
+       (fun (row : Layout.row) ->
+         match row.kind with
+         | Layout.Metadata _ | Layout.Spacing | Layout.Viewport_gap _ -> false
+         | Layout.Body -> true)
+       (Layout.visible_rows ~origin:Layout.Origin_inline ~inner_width:40
+          ~height:20 entries))
+
 let test_a_text_laid_out_again_keeps_its_layout () =
   let texts =
     [ ("\xea\xb0\x80a", 3)
@@ -354,7 +410,8 @@ let () =
       , [] );
       ( "bare links"
       , [] ); ( "message rows"
-      , [ test_case "UTF-8 scalar input contract" `Quick
+      , [ test_case "bare alert continuations keep typed marks" `Quick test_bare_alert_continuations_keep_marks
+        ; test_case "UTF-8 scalar input contract" `Quick
             test_utf8_scalar_input_contract
         ; test_case "backspace removes one UTF-8 scalar" `Quick
             test_backspace_removes_one_utf8_scalar
@@ -372,5 +429,7 @@ let () =
     ; ( "composer"
       , [] )
     ; ( "scrollback"
-      , [] )
+      , [ test_case "folding preserves message bodies" `Quick
+            test_folding_preserves_message_bodies
+        ] )
     ]

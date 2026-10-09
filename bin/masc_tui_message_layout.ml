@@ -144,10 +144,16 @@ type metadata =
     }
   | Diagnostic
   | Continued_at of { clock : string }
+  | Sender
+      (** One wrapped piece of an inbound sender's name above its body in the
+          {!Origin_bare} view. The row's [text] is that piece and its [gutter]
+          is the body's, so the renderer draws the piece once, like a body
+          row, instead of building a heading from the whole name. *)
 
 type row_kind =
   | Metadata of metadata
   | Body
+  | Spacing
   | Viewport_gap of { hidden_rows : int }
 
 type origin_display =
@@ -1735,7 +1741,19 @@ let shade_of_style : style -> shade = function
 let origin_gutter ~origin ~previous ~inner_width entry =
   match origin with
   | Origin_row -> None
-  | Origin_inline | Origin_bare ->
+  | Origin_bare ->
+      let mark =
+        if continues_previous ~previous entry then
+          (match entry.style with
+           | User | Inbound | Keeper | Tool -> " "
+           | Error | Status | Journal | Local | Skill _ | Thinking -> continued_mark entry.style)
+        else match entry.style with
+          | Tool -> " "
+          | User -> "›"
+          | style -> speaker_mark style
+      in
+      Some (mark, 0, display_width mark, 0)
+  | Origin_inline ->
       (* Drawn when it moved. A clock's job is to say when a thing happened,
          and a value identical to the one on the row above says nothing while
          taking the cells the eye lands on first -- two speakers a second
@@ -1861,7 +1879,7 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
   (* Everything after the indent is laid out in the column that is left, so
      the origin, the heading and the body fit the column rather than the
      pane. *)
-  let indent = inbound_indent entry in
+  let indent = if origin = Origin_bare then 0 else inbound_indent entry in
   let pane_width = inner_width in
   let inner_width = pane_width - indent in
   let gutter = origin_gutter ~origin ~previous ~inner_width entry in
@@ -1871,6 +1889,9 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
     | Some (text, rail_cells, _, _) -> rail_cells + display_width text
   in
   let body_width = Int.max min_body_cells (inner_width - 2 - gutter_width) in
+  (* A reading column, in terminal cells. Wide panes keep breathing room
+     instead of stretching prose across the whole display. *)
+  let body_width = if origin = Origin_bare then min 100 body_width else body_width in
   (* Keepers write markdown. Rendering it is the caller's to supply, so this
      module keeps no terminal vocabulary; without it the body is wrapped as the
      plain text it always was. *)
@@ -1899,6 +1920,12 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
     | [] -> [ "" ]
     | chunks -> chunks
   in
+  let sender_chunks = match origin, entry.style with
+    | Origin_bare, Inbound when not (continues_previous ~previous entry) ->
+        wrap_words ~max_cells:body_width entry.speaker
+    | _ -> [] in
+  let sender_rows = List.length sender_chunks in
+  let body_chunks = sender_chunks @ body_chunks in
   let body_rows =
     let margin, rail_cells, label_at, clock_cells =
       Option.value gutter ~default:("", 0, 0, 0)
@@ -1942,7 +1969,7 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
     body_chunks
     |> List.mapi (fun index chunk ->
       { style = entry.style
-      ; kind = Body
+      ; kind = (if index < sender_rows then Metadata Sender else Body)
       ; shade = shade_of_style entry.style
       ; text = "  " ^ chunk
       (* The indent sits after the rail: the rail's join belongs on the
@@ -1993,11 +2020,19 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
         | Some metadata -> metadata :: body_with_diagnostics))
   in
   match origin with
-  | Origin_bare -> message_rows
+  | Origin_bare ->
+      (* A separator belongs between entries, never after the transcript.
+         Counting and scrolling therefore see exactly the same final row. *)
+      (match previous, message_rows with
+       | Some {style = (User | Inbound | Keeper | Local); _}, _ :: _ ->
+           { kind = Spacing; text = ""; gutter = ""; shade = Shade_none;
+             style = Status; gutter_rail_cells = 0; gutter_clock_cells = 0;
+             gutter_label_at = 0; action = Action_none } :: message_rows
+       | _ -> message_rows)
   | Origin_inline | Origin_row ->
-      match timeline_break_row ~previous ~inner_width:pane_width entry with
-      | None -> message_rows
-      | Some timeline_break -> timeline_break :: message_rows
+      (match timeline_break_row ~previous ~inner_width:pane_width entry with
+       | None -> message_rows
+       | Some timeline_break -> timeline_break :: message_rows)
 
 let viewport_gap_text ~inner_width hidden_rows =
   let candidates =
@@ -2033,8 +2068,8 @@ let same_repeatable_body_row left right =
     && left.shade = right.shade
     && String.equal left.text right.text
     && String.equal left.gutter right.gutter
-  | (Metadata _ | Viewport_gap _), _
-  | Body, (Metadata _ | Viewport_gap _) ->
+  | (Metadata _ | Spacing | Viewport_gap _), _
+  | Body, (Metadata _ | Spacing | Viewport_gap _) ->
     false
 ;;
 
@@ -2083,6 +2118,11 @@ let collapse_repeated_body_rows ~inner_width rows =
    makes the missing middle explicit; without it, inline mode looked like one
    continuous message even though rows had disappeared. *)
 let newest_entry_window ~inner_width ~height rows =
+  (* The separator above an oversized entry must not replace its opening.
+     It remains an ordinary physical row when scrolling through the history. *)
+  let rows = List.drop_while (fun row -> row.kind = Spacing) rows in
+  if List.length rows <= height then rows
+  else
   (* A civil-hour rail is context, while the origin and latest body are the
      message. If all of them do not fit at the live edge, lay out the message
      first and count the rail among the explicitly hidden physical rows. The
@@ -2101,7 +2141,7 @@ let newest_entry_window ~inner_width ~height rows =
   let is_diagnostic row =
     match row.kind with
     | Metadata Diagnostic -> true
-    | Metadata (Timeline_break _ | Origin _ | Continued_at _) | Body | Viewport_gap _ -> false
+    | Metadata (Timeline_break _ | Origin _ | Continued_at _ | Sender) | Body | Spacing | Viewport_gap _ -> false
   in
   match height, rows with
   | 0, _ | _, [] -> []
@@ -2120,7 +2160,7 @@ let newest_entry_window ~inner_width ~height rows =
         match first.kind, output with
         | _, _ when height = 3 && diagnostics <> [] -> [], first :: output
         | Metadata _, body :: output when budget >= 3 -> [ first; body ], output
-        | (Metadata _ | Body | Viewport_gap _), _ -> [ first ], output
+        | (Metadata _ | Body | Spacing | Viewport_gap _), _ -> [ first ], output
       in
       let physical_tail = take_last (budget - List.length start) output in
       let tail = collapse_repeated_body_rows ~inner_width physical_tail @ diagnostics in

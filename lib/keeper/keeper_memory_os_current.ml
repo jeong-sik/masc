@@ -542,7 +542,11 @@ let range_key = function
 
 let upsert_durable_range_receipt receipts receipt =
   let key = range_key (receipt_range_id receipt) in
-  receipt :: List.filter (fun prior -> range_key (receipt_range_id prior) <> key) receipts
+  receipt :: List.filter (fun prior ->
+    range_key (receipt_range_id prior) <> key
+    || (match receipt, prior with
+        | Prepared _, Committed _ -> true
+        | Prepared _, Prepared _ | Committed _, _ -> false)) receipts
 ;;
 
 let reconcile_durable_range_receipts
@@ -571,6 +575,10 @@ let reconcile_durable_range_receipts
              Some (Committed committed)
            | None | Some _ -> None))
       receipts
+    |> List.fold_left (fun kept receipt ->
+         let key = range_key (receipt_range_id receipt) in
+         if List.exists (fun prior -> range_key (receipt_range_id prior) = key) kept
+         then kept else kept @ [receipt]) []
   in
   if receipts = reconciled
   then Ok reconciled

@@ -134,8 +134,57 @@ let test_worker_does_not_consume_uncertainty () = with_store (fun keepers_dir ->
    | Worker.Unavailable _ -> () | _ -> fail "callback without durable receipt consumed input");
   check int "callback cannot authorize consumption" 1 (List.length (Queue.candidates (batch keepers_dir))))
 
+let test_prepared_rollback_keeps_acknowledged_frontier () = with_store (fun keepers_dir ->
+  ignore (append keepers_dir "one" "first rule");
+  ignore (commit keepers_dir (Queue.range_id (batch keepers_dir)) [fact "first rule"]);
+  acknowledge keepers_dir;
+  ignore (append keepers_dir "two" "second rule");
+  let receipt_path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+  let ledger = Yojson.Safe.from_file receipt_path in
+  let committed = Yojson.Safe.Util.(member "receipts" ledger |> to_list) in
+  let prepared = match committed with
+    | [`Assoc fields] -> `Assoc (List.map (fun (key,value) -> key,
+        match key with "state" -> `String "prepared" | "snapshot_revision" -> `Int 2
+        | "snapshot_sha256" -> `String (String.make 64 '0') | _ -> value) fields)
+    | _ -> fail "expected one committed receipt" in
+  (* Crash after preparing a new snapshot, before replacing the old one. *)
+  Fs_compat.save_file receipt_path
+    (Yojson.Safe.to_string (`Assoc ["receipts",`List (prepared :: committed)]));
+  let outcome = Worker.For_testing.run_with ~keepers_dir ~keeper_name:"keeper"
+    ~judge:(fun part ->
+      check (list string) "only unacknowledged input is judged" ["two"]
+        (List.map (fun (row : Queue.candidate) -> row.request_id) (Queue.candidates part));
+      ignore (commit keepers_dir (Queue.range_id part) [fact "second rule"]);
+      Worker.Committed) in
+  check bool "prior frontier permits the next commit" true
+    (outcome = Worker.Settled {has_more=false});
+  check bool "second input acknowledged once" true (pending keepers_dir = None))
+
+let test_missing_receipt_requires_recovery_before_judging () = with_store (fun keepers_dir ->
+  ignore (append keepers_dir "one" "first rule");
+  ignore (commit keepers_dir (Queue.range_id (batch keepers_dir)) [fact "first rule"]);
+  acknowledge keepers_dir;
+  ignore (append keepers_dir "two" "second rule");
+  let receipt_path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+  let saved = Fs_compat.load_file receipt_path in
+  Sys.remove receipt_path;
+  let before = Queue.range_id (batch keepers_dir) in
+  (match Worker.For_testing.run_with ~keepers_dir ~keeper_name:"keeper"
+    ~judge:(fun _ -> fail "missing receipt dispatched a model") with
+   | Worker.Unavailable _ -> () | _ -> fail "missing receipt was not explicit recovery failure");
+  check bool "failed recovery neither resets nor consumes input" true
+    (before = Queue.range_id (batch keepers_dir));
+  Fs_compat.save_file receipt_path saved;
+  let outcome = Worker.For_testing.run_with ~keepers_dir ~keeper_name:"keeper"
+    ~judge:(fun part -> ignore (commit keepers_dir (Queue.range_id part) [fact "second rule"]);
+      Worker.Committed) in
+  check bool "restored receipt resumes without replaying acknowledged input" true
+    (outcome = Worker.Settled {has_more=false}))
+
 let () = run "durable explicit admission queue"
   ["storage boundaries", [
+    test_case "prepared rollback keeps committed frontier" `Quick test_prepared_rollback_keeps_acknowledged_frontier;
+    test_case "missing receipt refuses dispatch until restored" `Quick test_missing_receipt_requires_recovery_before_judging;
     test_case "pending is distinct from current Memory" `Quick test_pending_is_not_current;
     test_case "commit then retirement recovers without losing new tail" `Quick test_recovery_preserves_new_tail;
     test_case "input digest mismatch retains candidates" `Quick test_wrong_digest_keeps_candidates;

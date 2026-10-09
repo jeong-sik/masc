@@ -130,6 +130,10 @@ let acknowledge_committed ~keepers_dir ~keeper_id =
     let* receipt = Keeper_memory_os_current.committed_explicit_write_range
       ~keepers_dir ~keeper_id ~receipt_scope:initial.generation in
     match receipt with
+    | None when initial.acknowledged > 0 ->
+      Error (Printf.sprintf
+        "admission receipt recovery required: generation=%s acknowledged=%d; restore the matching snapshot and committed receipt before retrying; pending input is unchanged"
+        initial.generation initial.acknowledged)
     | None -> Ok ()
     | Some receipt -> locked ~keepers_dir ~keeper_id (fun () ->
       let* current = read ~keepers_dir ~keeper_id in

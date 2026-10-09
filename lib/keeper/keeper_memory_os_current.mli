@@ -474,7 +474,10 @@ val apply_disposition
     this disposition to its atom, official-client and explicit-write inputs.
     All supplied identities share the same snapshot revision and SHA-256. Each
     source kind retains its latest receipt per scope. The store writes a prepared transaction receipt
-    before replacing the snapshot and marks it committed afterwards. Recovery
+    before replacing the snapshot and marks it committed afterwards. Preparing
+    the next transaction retains the prior committed receipt until the new
+    snapshot is verified, so a failed snapshot write cannot erase its frontier.
+    Recovery
     compares a prepared receipt with the exact snapshot SHA-256, so neither
     side of a process interruption is guessed. An [Unchanged] commit replaces
     nothing, so its ranges are recorded committed at once, bound to the kept

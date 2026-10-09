@@ -32,7 +32,11 @@ val acknowledge_committed :
   keepers_dir:string -> keeper_id:string -> (unit, string) result
 (** Recover Memory's committed explicit range, verify its generation and exact
     pending prefix, then atomically remove only that prefix. A newer appended
-    tail survives. No caller-supplied success flag authorizes consumption. *)
+    tail survives. No caller-supplied success flag authorizes consumption.
+    A positive acknowledged frontier without its committed receipt returns a
+    recovery-required error before judging pending input. Restore the matching
+    snapshot and receipt; this function never resets a generation or frontier
+    to guess which inputs were consumed. *)
 
 val path : keepers_dir:string -> keeper_id:string -> string
 val list_keeper_ids : keepers_dir:string -> (string list, string) result

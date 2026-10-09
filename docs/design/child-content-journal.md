@@ -55,7 +55,11 @@ synchronization use the existing durable SQLite pattern. On an unconfirmed
 commit, reconciliation retries the **same** prepared private publication; it
 must not remint the observation or reprepare under another redactor/attempt.
 Cleanup warnings retain the primary receipt/failure separately. No automatic
-retry or fallback is installed. Busy refusal remains explicit.
+retry or fallback is installed. The actual interactive/autonomous `observe` →
+`report` sinks discard the prepared publication and retain typed uncertainty
+and collector-local health only; same-publication reconciliation is available
+to explicit `prepare` + `append` callers, with no recovery queue or retry handle
+installed in these sinks. Busy refusal remains explicit.
 
 ## Read and failure boundaries
 

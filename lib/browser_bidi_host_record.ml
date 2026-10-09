@@ -290,20 +290,32 @@ let entry_of_json json =
   let* ended = Result.bind (field fields "ended") (nullable ending_of_json) in
   Ok { pid; started_at; bidi_url; client_id; attached_at; unacknowledged; ended }
 
+(* Why a record was not read: the file itself could not be read, so what it
+   lists is not known; or it was read and is no record this reader loads,
+   from another layout or damaged. *)
+type read_failure = File_unreadable of string | Not_a_record of { detail : string; contents : string }
+
+let read_failure_detail = function File_unreadable detail | Not_a_record { detail; _ } -> detail
+
 let state_of ~lock_held = function
   | Error detail -> Unreadable { detail; held = Some lock_held }
   | Ok None -> if lock_held then Record_missing_but_locked else Never_started
   | Ok (Some ({ ended = Some ending; _ } as entry)) -> Ended (entry, ending)
   | Ok (Some ({ ended = None; _ } as entry)) -> if lock_held then Running entry else Died entry
 
-let read_entry base_path =
+(* The entry, with the JSON it was read from: a writer built later may have
+   written what this reader loads without naming, such as a verb. *)
+let read_record base_path =
   match Fs_compat.load_file_opt (path base_path record_name) with
-  | exception Sys_error detail -> Error detail
+  | exception Sys_error detail -> Error (File_unreadable detail)
   | None -> Ok None
   | Some contents ->
+    let not_a_record detail = Not_a_record { detail; contents } in
     (match Yojson.Safe.from_string contents with
-     | exception Yojson.Json_error _ -> Error (record_name ^ " is not JSON")
-     | json -> Result.map Option.some (entry_of_json json))
+     | exception Yojson.Json_error _ -> Error (not_a_record (record_name ^ " is not JSON"))
+     | json -> Result.map_error not_a_record (Result.map (fun entry -> Some (entry, json)) (entry_of_json json)))
+
+let read_entry base_path = Result.map (Option.map fst) (read_record base_path)
 
 (* [lockf] locks belong to the process, not to the descriptor. This process's
    own test of a lock it holds says "free", a second [take] here would be
@@ -358,7 +370,7 @@ let lock_held base_path =
          held))
 
 let observe ~base_path =
-  match read_entry base_path with
+  match Result.map_error read_failure_detail (read_entry base_path) with
   (* A record with its ending is final regardless of the lock. A missing
      record still needs the lock to distinguish no host from one that has
      taken the lock but has not written its record yet. *)
@@ -470,6 +482,59 @@ let lock base_path =
                  Hashtbl.replace held_here identity ();
                  Locked (identity, descriptor)))))
 
+(* Archive rows for [results], each in the record's unacknowledged-result
+   shape, under the host [entry] names. *)
+let archive_rows (entry : entry) results =
+  let row result =
+    `Assoc [ "schema", `Int 1; "pid", `Int entry.pid
+           ; "started_at", time entry.started_at
+           ; "client_id", `String (Browser_lane.client_id_to_string entry.client_id)
+           ; "result", result ]
+  in
+  results |> List.map (fun result -> Yojson.Safe.to_string (row result) ^ "\n") |> String.concat ""
+
+let archive base_path rows =
+  Result.map_error
+    (fun error -> "unacknowledged archive: " ^ Fs_compat.private_jsonl_transaction_error_to_string error)
+    (Result.map ignore
+       (Fs_compat.append_private_jsonl_durable_stable_result (unacknowledged_archive_path ~base_path) rows))
+
+let unloadable_copy_path ~base_path ~pid ~now =
+  path base_path (Printf.sprintf "%s.unloadable-%d-%.0f" record_name pid now)
+
+(* The next host's record replaces the last one, and with it the results
+   that host holds no acknowledgement for. They are archived first, as they
+   were written: a verb this reader cannot name is kept by its name. A record
+   this reader cannot load may list some in a layout it does not know, so
+   its bytes are kept beside it; one that cannot be read at all is not
+   replaced. *)
+let keep_predecessor_results ~base_path ~pid ~now =
+  match read_record base_path with
+  | Ok (Some (({ unacknowledged = _ :: _; _ } as previous), json)) ->
+    Result.map_error (fun detail -> "the last host's results: " ^ detail)
+      (match Yojson.Safe.Util.member "unacknowledged" json with
+       | `List written -> archive base_path (archive_rows previous written)
+       (* entry_of_json loaded a list from this JSON; anything else is not
+          taken for an empty one. *)
+       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ ->
+         Error "unacknowledged is not the list it was read as")
+  | Ok (Some ({ unacknowledged = []; _ }, _)) | Ok None -> Ok ()
+  | Error (File_unreadable detail) ->
+    Error ("the last host's record cannot be read, so the results it may list cannot be archived: "
+           ^ detail)
+  | Error (Not_a_record { detail; contents }) ->
+    let copy = unloadable_copy_path ~base_path ~pid ~now in
+    (match
+       Fs_compat.write_file_atomic_strict_staged copy ~write:(fun channel ->
+         Unix.fchmod (Unix.descr_of_out_channel channel) file_permissions;
+         output_string channel contents)
+     with
+     | Ok () -> Ok ()
+     | Error failure ->
+       Error
+         (Printf.sprintf "the last host's record (%s) could not be kept as %s: %s" detail copy
+            (Fs_compat.atomic_replace_failure_to_string failure)))
+
 let take ~base_path ~pid ~bidi_url ~client_id ~now =
   match recorded_address bidi_url with
   | Error detail -> Error (Bad_address detail)
@@ -494,7 +559,11 @@ let take ~base_path ~pid ~bidi_url ~client_id ~now =
              ; ended = None }
          }
        in
-       (match write held with
+       (match
+          match keep_predecessor_results ~base_path ~pid ~now with
+          | Error detail -> Error (Not_written detail)
+          | Ok () -> write held
+        with
         | Ok () -> Ok { held; not_synced = None }
         | Error (Not_synced detail) -> Ok { held; not_synced = Some detail }
         | Error (Not_written detail) ->
@@ -502,7 +571,7 @@ let take ~base_path ~pid ~bidi_url ~client_id ~now =
            | Ok () -> Error (Unavailable detail)
            | Error unreleased -> Error (Unavailable (detail ^ "; " ^ unreleased)))
         | exception exn ->
-          (* A cancelled write leaves through here. The workspace goes back
+          (* A cancelled archive or write leaves through here. The workspace goes back
              before it does; what the close said is not what is raised. *)
           let backtrace = Printexc.get_raw_backtrace () in
           ignore (release held : (unit, string) result);
@@ -526,22 +595,10 @@ let note_unacknowledged held noted =
   let excess = List.length kept - unacknowledged_limit in
   if excess <= 0 then replace held { held.entry with unacknowledged = kept }
   else
-  let archive_row result =
-    `Assoc [ "schema", `Int 1; "pid", `Int held.entry.pid
-           ; "started_at", time held.entry.started_at
-           ; "client_id", `String (Browser_lane.client_id_to_string held.entry.client_id)
-           ; "result", unacknowledged_to_json result ]
-  in
-  let suffix = List.take excess kept
-    |> List.map (fun result -> Yojson.Safe.to_string (archive_row result) ^ "\n")
-    |> String.concat "" in
-  match Fs_compat.append_private_jsonl_durable_stable_result
-      (unacknowledged_archive_path ~base_path:held.base_path) suffix with
-  | Ok _ ->
+  match archive held.base_path (archive_rows held.entry (List.map unacknowledged_to_json (List.take excess kept))) with
+  | Ok () ->
       replace held { held.entry with unacknowledged = List.drop excess kept }
-  | Error error ->
-      let detail = "unacknowledged archive: "
-        ^ Fs_compat.private_jsonl_transaction_error_to_string error in
+  | Error detail ->
       (* Preserve the new result as well as every unarchived predecessor.
          A later note retries archival; failure never authorizes eviction. *)
       (match replace held { held.entry with unacknowledged = kept } with

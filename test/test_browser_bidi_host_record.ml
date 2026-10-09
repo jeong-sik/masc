@@ -623,7 +623,18 @@ let test_a_host_that_cannot_write_its_record_leaves_the_last_one () =
     Unix.chmod lane 0o700;
     let next = taken ~pid:300 base in
     check int "and the workspace is free for the next host" 300 (on_disk lane).pid;
-    released next
+    released next;
+    (* That one lists no results, so nothing is archived and the record write
+       is what fails. *)
+    let left = on_disk lane in
+    Unix.chmod lane 0o500;
+    (match take ~pid:400 base with
+     | Error (Record.Unavailable _) -> ()
+     | Error (Record.Another_host _) -> fail "refused as a second host"
+     | Error (Record.Bad_address detail) -> fail detail
+     | Ok _ -> fail "a host took a workspace it cannot write to");
+    Unix.chmod lane 0o700;
+    check bool "the record without results stands too" true (on_disk lane = left)
 
 (* A command the server times out adds one result each time it is sent, so a
    long-lived host meets the limit through no fault of its own. The newest
@@ -700,6 +711,110 @@ let test_archival_precedes_eviction_and_failure_retains_evidence () =
    | Error _ -> () | Ok () -> fail "released host appended a result");
   check bool "released host leaves archive unchanged" true (archived_results base = archived)
 
+(* Without these, the next host's record would leave no trace of results
+   that may have taken effect, and a Keeper could repeat such an action. *)
+let test_the_next_host_archives_the_last_ones_results () =
+  with_workspace @@ fun ~base ~lane ->
+  let first = taken ~pid:100 base in
+  let left = [ noted; { noted with at = noted.at +. 1. } ] in
+  List.iter (fun one -> written (Record.note_unacknowledged first one)) left;
+  released first;
+  let next = taken ~pid:200 base in
+  check bool "the last host's results, under its pid" true
+    (archived_results base = List.map result_json left);
+  check int "the new record lists none of them" 0 (List.length (on_disk lane).unacknowledged);
+  released next
+
+let test_a_host_that_cannot_archive_them_does_not_take_the_workspace () =
+  with_workspace @@ fun ~base ~lane ->
+  let first = taken ~pid:100 base in
+  written (Record.note_unacknowledged first noted);
+  written (Record.ended first ~reason:"stopped by SIGINT" ~session:Record.No_session_left ~now:1_791_000_060.);
+  released first;
+  let left = on_disk lane in
+  let archive = Record.unacknowledged_archive_path ~base_path:base in
+  Unix.mkdir archive 0o700;
+  (match take ~pid:200 base with
+   | Error (Record.Unavailable detail) ->
+     check bool detail true (String_util.contains_substring detail "the last host's results")
+   | Error (Record.Another_host _) -> fail "refused as a second host"
+   | Error (Record.Bad_address detail) -> fail detail
+   | Ok _ -> fail "a host replaced results it could not archive");
+  check bool "the last host's record stands, with its results" true (on_disk lane = left);
+  Unix.rmdir archive;
+  let next = taken ~pid:300 base in
+  check int "and the workspace is free for the next host" 300 (on_disk lane).pid;
+  check bool "the last host's result is archived once" true (archived_results base = [ result_json noted ]);
+  released next
+
+(* A newer host may have named a verb this reader loads as unnamed. The
+   archive keeps the name it was written with: it says which action may
+   have taken effect. *)
+let test_an_archived_result_keeps_a_verb_this_reader_cannot_name () =
+  with_workspace @@ fun ~base ~lane ->
+  let first = taken ~pid:100 base in
+  written (Record.note_unacknowledged first noted);
+  released first;
+  let record = Filename.concat lane "bidi-host.json" in
+  let named_later = function
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (function
+             | "unacknowledged", `List [ `Assoc result ] ->
+               "unacknowledged", `List [ `Assoc (List.map (function "verb", _ -> "verb", `String "page.later" | field -> field) result) ]
+             | field -> field)
+           fields)
+    | _ -> fail "the record is an object"
+  in
+  Yojson.Safe.to_file record (named_later (Yojson.Safe.from_file record));
+  (match Record.observe ~base_path:base with
+   | Record.Died { unacknowledged = [ { verb = None; _ } ]; _ } -> ()
+   | other -> failf "a verb added later reads as unnamed, not as %s" (said other));
+  let next = taken ~pid:200 base in
+  (match archived_results base with
+   | [ result ] ->
+     check string "the verb as it was written" "page.later" Yojson.Safe.Util.(result |> member "verb" |> to_string)
+   | _ -> fail "one archived result");
+  released next
+
+(* A record this reader reads and cannot load may list results in a layout
+   it does not know: its bytes are kept before it is replaced. *)
+let test_a_record_that_cannot_be_loaded_is_kept_beside_it () =
+  with_workspace @@ fun ~base ~lane ->
+  released (taken ~pid:100 base);
+  let record = Filename.concat lane "bidi-host.json" in
+  let unknown = {|{"schema":99,"pid":100}|} in
+  Out_channel.with_open_bin record (fun output -> output_string output unknown);
+  let next = taken ~pid:200 base in
+  let copy = Record.unloadable_copy_path ~base_path:base ~pid:200 ~now:entry.started_at in
+  check string "its bytes, beside it" unknown (In_channel.with_open_bin copy In_channel.input_all);
+  check int "and the new record in its place" 200 (on_disk lane).pid;
+  released next
+
+(* A record that cannot be read at all may list results: it is not replaced. *)
+let test_a_record_that_cannot_be_read_is_not_replaced () =
+  if Unix.geteuid () = 0 then skip ()
+  else
+    with_workspace @@ fun ~base ~lane ->
+    let first = taken ~pid:100 base in
+    written (Record.note_unacknowledged first noted);
+    released first;
+    let record = Filename.concat lane "bidi-host.json" in
+    let left = on_disk lane in
+    Unix.chmod record 0o000;
+    (match Fun.protect ~finally:(fun () -> Unix.chmod record 0o600) (fun () -> take ~pid:200 base) with
+     | Error (Record.Unavailable detail) ->
+       check bool detail true (String_util.contains_substring detail "cannot be read")
+     | Error (Record.Another_host _) -> fail "refused as a second host"
+     | Error (Record.Bad_address detail) -> fail detail
+     | Ok _ -> fail "a host replaced a record it could not read");
+    check bool "the record stands, with its results" true (on_disk lane = left);
+    let next = taken ~pid:300 base in
+    check bool "once it can be read, its results are archived" true
+      (archived_results base = [ result_json noted ]);
+    released next
+
 let () =
   match Array.to_list Sys.argv with
   | [ _; argument; base ] when String.equal argument holder_argument -> hold base
@@ -735,4 +850,14 @@ let () =
           ; test_case "the kept results stop at the limit" `Quick
               test_the_kept_results_stop_at_the_limit
           ; test_case "archival precedes eviction and failure retains evidence" `Quick
-              test_archival_precedes_eviction_and_failure_retains_evidence ] ) ]
+              test_archival_precedes_eviction_and_failure_retains_evidence
+          ; test_case "the next host archives the last one's results" `Quick
+              test_the_next_host_archives_the_last_ones_results
+          ; test_case "a host that cannot archive them does not take the workspace" `Quick
+              test_a_host_that_cannot_archive_them_does_not_take_the_workspace
+          ; test_case "an archived result keeps a verb this reader cannot name" `Quick
+              test_an_archived_result_keeps_a_verb_this_reader_cannot_name
+          ; test_case "a record that cannot be loaded is kept beside it" `Quick
+              test_a_record_that_cannot_be_loaded_is_kept_beside_it
+          ; test_case "a record that cannot be read is not replaced" `Quick
+              test_a_record_that_cannot_be_read_is_not_replaced ] ) ]

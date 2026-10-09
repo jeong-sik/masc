@@ -798,7 +798,7 @@ def held_identity_boundary_journey(executable, *, boundary):
     home.assert_no_decision_posts(requests)
 
 
-def recovery_operator_boundary_journey(executable, *, foreign):
+def recovery_operator_boundary_journey(executable, *, foreign, failed_get=False):
     """Hold the independent boot recovery across identity/regular publication.
 
     The second full refresh owns an older listing ticket before it blocks on
@@ -822,7 +822,8 @@ def recovery_operator_boundary_journey(executable, *, foreign):
         ])
 
     held_briefing = h.GatedHttpResponse(fixtures[BRIEFING], hold_seconds=30.0)
-    held_recovery = h.GatedHttpResponse(operator_snapshot(recovery_label), hold_seconds=30.0)
+    recovery_response = (503, {"error": "approval read failed during workspace switch"}) if failed_get else operator_snapshot(recovery_label)
+    held_recovery = h.GatedHttpResponse(recovery_response, hold_seconds=30.0)
     regular_read = threading.Event()
     regular_published = threading.Event()
     recovery_probe = threading.Event()
@@ -955,4 +956,5 @@ if __name__ == "__main__":
         held_identity_boundary_journey(executable, boundary=boundary)
     for foreign in (True, False):
         recovery_operator_boundary_journey(executable, foreign=foreign)
-    print("Home scoped identity PTY: PASS (10 scenarios)")
+    recovery_operator_boundary_journey(executable, foreign=True, failed_get=True)
+    print("Home scoped identity PTY: PASS (11 scenarios)")

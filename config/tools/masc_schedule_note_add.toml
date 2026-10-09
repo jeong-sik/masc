@@ -1,11 +1,14 @@
 name = "masc_schedule_note_add"
 description = """Append a durable note to one scheduled request. Notes record why a
-schedule exists and what changed and when. A woken Keeper does not see them:
-its wake carries the message and the schedule identity only, so a Keeper that
-needs a note reads it with masc_schedule_notes_list. They are keyed by the
-stable schedule_id, so a definition replacement (masc_schedule_update) does
-not orphan them. Notes are append-only: there is no edit and no removal, and
-notes survive terminal schedule states. You are recorded as the author."""
+schedule exists and what changed and when. Wake metadata includes the message,
+schedule identity, timing and an optional title; it does not include notes.
+When execution depends on a note, ensure the schedule's message explicitly
+tells the Keeper to call masc_schedule_notes_list with its schedule ID before
+acting. Use masc_schedule_update while the schedule is editable to add that
+instruction. Adding a note alone neither changes the message nor signals that
+notes need reading. Notes are keyed by the stable schedule_id, so replacing a
+definition does not orphan them. Notes are append-only, with no edit or removal,
+and survive terminal schedule states. You are recorded as the author."""
 additional_properties = false
 defer_loading = true
 

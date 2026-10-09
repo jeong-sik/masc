@@ -10649,13 +10649,19 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
           match item.drawn with Drawn_skill skills -> skills | _ -> []) drawn in
         (* Runtime identity is proof metadata, not the receipt identity. A
            journal replay may know the runtime while the stream-side skill
-           row does not; the exact turn reference and tool-use id still bind
-           those two observations to one invocation. *)
+           row does not, so an unknown runtime on one side completes the
+           other's missing metadata. Two known-but-different runtimes never
+           merge: a failover reuses the same turn reference and provider
+           tool-use id across distinct invocations, and collapsing them
+           would hide one invocation's evidence. *)
         let skills = List.filter (fun (skill : Transcript.skill_activity) ->
           not (List.exists (fun (shown : Transcript.skill_activity) ->
             Option.is_some skill.skill_tool_use_id
             && skill.skill_tool_use_id = shown.skill_tool_use_id
-            && skill.turn_ref = shown.turn_ref) observed)) row.me_skill_block in
+            && skill.turn_ref = shown.turn_ref
+            && (match skill.runtime_id, shown.runtime_id with
+               | Some a, Some b -> String.equal a b
+               | Some _, None | None, Some _ | None, None -> true)) observed)) row.me_skill_block in
         if skills = [] then None
         else Some {row with me_skill_block=skills;
           me_role=Message_skill (Transcript.skill_block_state skills)}

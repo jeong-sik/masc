@@ -81,7 +81,9 @@ objective, not a newly enforced database invariant.
 
 ## Jev forward review
 
-Each proposed absorption is evaluated with the selected pass's source observations:
+Each proposed absorption is evaluated with a structured pair. The following is a
+request with selected source observations in `new_observations`; empty input omits
+that field and retains the pair-only instruction:
 
 ```json
 {
@@ -104,6 +106,12 @@ retain their actual turn attribution and unattributed gaps in a separate
 that outcome alone does not prove domain success. Counterpart content retains its
 existing host-provenance rendering and remains untrusted. Hidden reasoning and
 raw tool payloads remain excluded by the existing Librarian projection.
+
+When the selected pass has no observations (including memory cleanup), the gate
+retains the original pair-only question and state. It does not use the
+instruction-only arm that regressed in the synthetic experiment. Both paths
+count the exact selected question in their request capacity check. This preserves
+the empty-input behavior; it does not prove semantic model quality.
 
 Serialized observations count toward the existing provider request boundary. If
 an evidence-bearing pair cannot fit, the pass fails before dispatch and the entire
@@ -188,15 +196,34 @@ historical retrieval boundary and are not removed by the change.
 
 ## Validation and acceptance boundaries
 
-A synthetic event-lineage probe of the current question matched 10 of 12 intended
+A historical synthetic event-lineage probe of the pair-only question matched 10 of 12 intended
 admission decisions. Two same-event follow-up resolution cases were still refused,
 including a held-out restoration case. Thus the instructions express the intended
-policy but do not establish reliable temporal consolidation. That source/candidate-only
-experiment did not carry follow-up evidence. The subsequent controlled experiment
-in `experiments/memory-transition-evidence` motivates the source-observation path
-above: 15/18 pair-only, 12/18 instruction-only, 18/18 with evidence. These remain
-six development scenarios, not a deployed quality measurement. These refusals retain
+policy but do not establish reliable temporal consolidation. That historical source/candidate-only
+probe lacked independently identifiable follow-up evidence. Forward requests now
+include conversation, tool-outcome, counterpart and historical-range observations
+from the same selected Librarian input, retaining their distinct provenance. Empty
+input preserves the original pair-only request; oversized evidence leaves the
+whole range pending without truncation. This corrects the missing input path,
+not the semantic-quality measurement. The subsequent controlled experiment in
+`experiments/memory-transition-evidence` (PR #41922) motivates the source-observation
+path above: 15/18 pair-only, 12/18 instruction-only, 18/18 with evidence. These remain
+six development scenarios; they do not prove held-out or installed behavior.
+These refusals retain
 original memories, so no memory-reduction claim follows from this experiment.
+
+A [subsequent bounded validation package](../../experiments/memory-transition-evidence/validation-41910-84e348cd/README.md)
+retains 108 calls using the exact production question at source head
+`84e348cd3e321a667edeeeaa4d6ce54c08f0c63c`. It keeps the six development cases
+separate from six [new independently frozen synthetic held-out cases](../../experiments/memory-transition-evidence/validation-41910-84e348cd/heldout-new-protocol.md).
+With three repetitions per case, the source-observation arm matched 18/18 in each
+cohort; current pair-only matched 15/18 development and 18/18 new held-out.
+No arm falsely merged a negative case. The new held-out cohort therefore does
+not establish improvement over its pair-only baseline. Repetitions are not
+independent cases. The original historical 12-case cohort was not reproduced;
+these results establish neither general semantic quality nor installed behavior.
+The package includes raw request/response bytes and an offline verifier.
+
 
 
 Source/runtime tests cover full-source choice dispatch, only `mergeable`

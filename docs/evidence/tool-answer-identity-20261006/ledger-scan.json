@@ -1,0 +1,169 @@
+{
+ "rows": 16174,
+ "rows_with_fingerprints": 14763,
+ "groups_caught_by_exact_axis": {
+  "masc_board_post_get": 6,
+  "masc_board_list": 3,
+  "WebFetch": 3,
+  "Edit": 2,
+  "keeper_tasks_list": 1,
+  "Execute": 1,
+  "Read": 1,
+  "keeper_artifact_transfer": 1,
+  "masc_keeper_delegate_status": 1
+ },
+ "groups_every_output_different": {
+  "Execute": {
+   "groups": 2,
+   "calls": 9,
+   "max_in_one_turn": 6,
+   "keepers": 2,
+   "changed_keys": [
+    [
+     "execution_time_ms",
+     2
+    ],
+    [
+     "output",
+     2
+    ]
+   ]
+  },
+  "masc_dos_press": {
+   "groups": 2,
+   "calls": 9,
+   "max_in_one_turn": 6,
+   "keepers": 1,
+   "changed_keys": [
+    [
+     "cs_ip",
+     2
+    ],
+    [
+     "frame_nonblack",
+     2
+    ],
+    [
+     "steps",
+     2
+    ],
+    [
+     "ticks",
+     2
+    ],
+    [
+     "waiting_for_key",
+     1
+    ]
+   ]
+  },
+  "masc_dos_screen": {
+   "groups": 1,
+   "calls": 9,
+   "max_in_one_turn": 9,
+   "keepers": 1,
+   "changed_keys": [
+    [
+     "cs_ip",
+     1
+    ],
+    [
+     "frame_nonblack",
+     1
+    ],
+    [
+     "steps",
+     1
+    ],
+    [
+     "ticks",
+     1
+    ]
+   ]
+  },
+  "masc_board_list": {
+   "groups": 2,
+   "calls": 6,
+   "max_in_one_turn": 3,
+   "keepers": 2,
+   "changed_keys": [
+    [
+     "revision",
+     2
+    ],
+    [
+     "snapshot",
+     2
+    ]
+   ]
+  },
+  "masc_dos_step": {
+   "groups": 1,
+   "calls": 4,
+   "max_in_one_turn": 4,
+   "keepers": 1,
+   "changed_keys": [
+    [
+     "cs_ip",
+     1
+    ],
+    [
+     "steps",
+     1
+    ],
+    [
+     "ticks",
+     1
+    ],
+    [
+     "waiting_for_key",
+     1
+    ]
+   ]
+  },
+  "BrowserTabs": {
+   "groups": 1,
+   "calls": 3,
+   "max_in_one_turn": 3,
+   "keepers": 1,
+   "changed_keys": [
+    [
+     "<non-json>",
+     1
+    ]
+   ]
+  },
+  "Read": {
+   "groups": 1,
+   "calls": 3,
+   "max_in_one_turn": 3,
+   "keepers": 1,
+   "changed_keys": [
+    [
+     "bytes",
+     1
+    ],
+    [
+     "content",
+     1
+    ],
+    [
+     "returned_lines",
+     1
+    ]
+   ]
+  },
+  "masc_board_post_get": {
+   "groups": 1,
+   "calls": 3,
+   "max_in_one_turn": 3,
+   "keepers": 1,
+   "changed_keys": [
+    [
+     "<non-json>",
+     1
+    ]
+   ]
+  }
+ }
+}

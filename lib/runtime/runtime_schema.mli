@@ -217,6 +217,7 @@ type model_capabilities =
   ; supports_response_format_json : bool option
   ; supports_structured_output : bool option
   ; supports_system_prompt : bool option
+  ; supports_assistant_prefill : bool option
   ; supports_prompt_caching : bool option
   ; supports_top_k : bool option
   ; supports_min_p : bool option

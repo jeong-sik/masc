@@ -228,6 +228,7 @@ if not registered:
     sys.exit(0)
 
 running = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True, text=True, check=True).stdout
+stopped_pids = set()
 for name, base in registered:
     subprocess.run(["bash", installer, "--binary", binary, "--base-path", str(base),
                     "--host-name", name, "--manifest-dir", str(manifest_dir)],
@@ -236,10 +237,11 @@ for name, base in registered:
     stopped = []
     for line in running.splitlines():
         pid, _, command = line.strip().partition(" ")
-        if command == host or command.startswith(host + " "):
+        if (command == host or command.startswith(host + " ")) and pid not in stopped_pids:
             try:
                 os.kill(int(pid), signal.SIGTERM)
                 stopped.append(pid)
+                stopped_pids.add(pid)
             except ProcessLookupError:
                 pass
     restart = f"stopped host pid {', '.join(stopped)}; Firefox starts the new copy" if stopped else "no host running"

@@ -1,7 +1,7 @@
 ---
 rfc: "browser-keeper-firefox"
 title: "Start the Keeper Firefox and its BiDi host with the MASC server"
-status: Draft
+status: Active
 created: 2026-10-09
 updated: 2026-10-09
 author: vincent + claude
@@ -168,11 +168,12 @@ BiDi 가 아니어도 되는 요청(읽기, 클릭, 스크롤)은 BiDi 연결이
 
 1. 이 RFC (문서만).
 2. 설정과 서버 시작: `Browser_configuration` 이 `[browser.live.bidi]` 를 읽고, 서버가 뜰 때 Firefox 와 host 를 켠다
-   (§3.1~§3.4). `keeper-firefox.json`, `bidi-host.log`.
+   (§3.1~§3.3). 출력은 `keeper-firefox.log`, `bidi-host.log` 로 간다. 설계 문서의 붙이는 절차도 이 단계에서 고친다(§3.6).
+   `keeper-firefox.json` 은 그것을 읽는 3단계에서 더한다.
    읽기만 하는 PR 을 따로 두지 않는다. 읽는 곳이 없는 설정 필드가 main 에 남기 때문이다.
    이 PR 이 배포된 뒤에 운영자가 `runtime.toml` 에 표를 적는다(§2.3).
 3. Keeper 의 hover·drag 요청이 빠진 것을 다시 켜고 기다린다(§3.5). 남은 세션 때문에 MASC 가 띄운 Firefox 를 다시 띄우는 것도 여기서 한다.
-4. 연결 목록·doctor·Keeper 답의 문장과 TUI 의 host 줄이 "MASC 가 켠다"를 말한다. 설계 문서를 고친다(§3.6).
+4. 연결 목록·doctor·Keeper 답의 문장과 TUI 의 host 줄이 "MASC 가 켠다"를 말한다.
 
 ## 7. 확인 방법
 

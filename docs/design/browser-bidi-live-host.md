@@ -3,12 +3,44 @@
 `masc-browser-host --bidi-url ws://127.0.0.1:9222/session` opts into a
 Firefox Remote Agent that the operator explicitly enabled. Without this option
 the executable continues using WebExtension native messaging stdin/stdout.
-The endpoint must be loopback; MASC does not start Firefox, copy a profile,
-change preferences, or obtain application tokens.
+The endpoint must be loopback. MASC starts that Firefox only for a workspace
+whose `runtime.toml` names it (below); it does not copy a profile, change
+preferences, or obtain application tokens.
 
 ## Attaching a connection
 
-The operator does both steps. Nothing in MASC starts this Firefox or this host.
+### Let the MASC server start both
+
+With this table in the workspace's `runtime.toml`, the MASC server starts the
+Firefox and the host when it starts (RFC-browser-keeper-firefox):
+
+```toml
+[browser.live.bidi]
+firefox = "/Applications/Firefox.app/Contents/MacOS/firefox"
+profile = "/Users/you/masc-keeper-firefox-profile"
+# port = 9222
+```
+
+- It starts only what is missing. A port that already answers gets no second
+  Firefox, and a host holding the host lock gets no second host.
+- Both run apart from the server, so a server restart leaves them running.
+  Firefox writes to `.masc/browser-lane/keeper-firefox.log` and the host to
+  `.masc/browser-lane/bidi-host.log`; the server log says what it started and
+  why it did not.
+- The host is started with the workspace's installed `launch`, so the browser
+  lane is installed first (step 2 below).
+- `[browser.live] enabled = false` starts nothing.
+- The operator still logs in once, in that Firefox, to the sites a Keeper
+  works on; the profile keeps the login.
+- A Firefox that exits before its port answers is reported as such: Firefox
+  157.0.1 exits with status 0 when another Firefox has the profile open, so
+  quit that Firefox first.
+- Write the table only once a server that reads it is installed:
+  `runtime.toml` refuses a key it does not know.
+
+### By hand
+
+Without the table the operator does both steps.
 
 1. Start a Firefox with its Remote Agent on a loopback port, on a profile
    kept for this.

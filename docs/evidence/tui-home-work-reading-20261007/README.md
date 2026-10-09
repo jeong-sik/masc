@@ -1,7 +1,6 @@
 # Dashboard and Work reading surfaces
 
-Stack base: `b3dc00b0b2f57fab8f1b801fbdfea5bdf9ae7e6d` (#41712, including
-its subsequently added footer fixture dependency).
+Stack parent: #41712.
 
 Dashboard decisions and continuation destinations now precede passive context.
 Opening notices and decision receipts reserve their rows before the decision
@@ -17,21 +16,18 @@ omit the decorative wall clock; connection identity remains.
 
 | Changed path | Direct consumer | Evidence |
 | --- | --- | --- |
-| `render_overview` row order | Home selection/window, notices, summaries and composer budget | Source inspection only; focused Home layout/receipt/Candle PTY runs pending |
-| `render_planning_list` compact summaries and title | Goal list height, selection, filter and connection badge | Planning title boundary follows its connection badge; registered Studio PTY expects compact summaries at wide and narrow widths; PTY run pending |
-| `task_detail_pane` title | Task detail body/scroll geometry | Source inspection only; executable rendering pending |
+| `render_overview` row order | Home selection/window, notices, summaries and composer budget | Source review; manual check in a rebuilt TUI pending |
+| `render_planning_list` compact summaries and title | Goal list height, selection, filter and connection badge | Planning title boundary follows its connection badge; manual check at wide and narrow widths pending |
+| `task_detail_pane` title | Task detail body/scroll geometry | Source review; manual check pending |
 
-Changed OCaml source is checked with `ocamlc -stop-after parsing`, Python with
-`ast.parse`, and whitespace with `git diff --check`. `source-checks.json` records
-file hashes and actual results. The recorded syntax checks were rerun against the integrated source after
-main synchronization, including the renderer and all files listed in the Keepers
-and Home source-check manifests. The consistency manifest's footer entry is
-refreshed in its own layer (#41703).
-Syntax checks are not type checking or runtime
-evidence. No application build, CI dispatch, PTY run or installed binary change
-was performed for this slice.
+The stack is type-checked with `dune build --root . @check`; the PR comments
+name the run and the head it covered. `source-checks.json` records the parser
+check and SHA-256 of `bin/masc_tui_render.ml`, `bin/masc_tui_home.ml` and
+`bin/masc_tui_home.mli` in this layer's tree. Behavior suites were not run. Tests do
+not pin screen wording, widths or row order (`docs/constitution.xml` execution
+protocol), so layout is checked by hand.
 
-Earlier independent review predates subsequent notice-budget and PTY fixture
-repairs and does not certify their final diff. Current-head review evidence is
-recorded separately in the PR. Remaining surfaces and actual
-render validation stay open in the [consistency ledger](../../design/tui/CONSISTENCY-PROGRESS.md).
+Earlier independent review predates the notice-budget repair and does not
+certify its final diff. Current-head review evidence is recorded in the PR.
+Remaining surfaces and actual render validation stay open in the
+[consistency ledger](../../design/tui/CONSISTENCY-PROGRESS.md).

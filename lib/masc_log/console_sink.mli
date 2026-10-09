@@ -17,7 +17,10 @@ val start : unit -> unit
 
 (** Emit one console line (no trailing newline). Never blocks after
     {!start}; synchronous before. Before {!start}, [Sys_error] from the writer
-    is ignored; other writer exceptions propagate after observer notification. *)
+    is ignored; other writer exceptions propagate after observer notification.
+    The line is written with its secrets masked and with no terminal control
+    in it: a C0 control (newline and tab included), DEL, and a byte that does
+    not start valid UTF-8 become [\xNN], a C1 control becomes [\u00NN]. *)
 val write : string -> unit
 
 (** Replace the single process-wide callback invoked after every console writer

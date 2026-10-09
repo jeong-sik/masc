@@ -3442,7 +3442,7 @@ let fetch_keeper_asks ?keeper_name ~(host : string) ~(port : int) () :
 let fetch_browser_lane_clients ~host ~port =
   let open Masc_tui_types.Browser_lane_view in
   let* json = get_json ~host ~port ~path:"/api/v1/dashboard/browser-lane/clients" in
-  decode_clients json
+  decode_discovery json
 
 let fetch_browser_lane ~host ~port view =
   (* The server can spend 20s listing tabs and 20s reading the page. *)

@@ -2,7 +2,7 @@ type owner = { pid : int; driver : string }
 type leftover = Stop_recorded_driver of int | Not_the_recorded_driver
 
 let owner_record_path ~masc_root =
-  Filename.concat (Filename.concat masc_root "browser-lane") "geckodriver-owner.json"
+  Filename.concat (Filename.concat masc_root Common.browser_lane_dirname) "geckodriver-owner.json"
 
 let owner_to_string { pid; driver } =
   Yojson.Safe.to_string (`Assoc [ "pid", `Int pid; "driver", `String driver ])
@@ -23,7 +23,7 @@ let owner_of_string text =
    only this machine can reach it. Naming the constant keeps the two from
    drifting apart, which is what SSOT rule R2 is for. *)
 let profile_root ~masc_root =
-  Filename.concat (Filename.concat masc_root "browser-lane") "profiles"
+  Filename.concat (Filename.concat masc_root Common.browser_lane_dirname) "profiles"
 
 let argv ~driver ~port ~profile_root =
   [ driver

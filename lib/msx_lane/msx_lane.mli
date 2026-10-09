@@ -385,11 +385,24 @@ val checkpoint_info : path:string -> (checkpoint_info, error) result
     is disabled. A missing file is [Invalid_request] naming the path; a file
     that is there and will not read is [Unreadable]; bytes that do not
     parse as a checkpoint envelope are [Invalid_request]. *)
-val save : path:string -> (observation, error) result
+type checkpoint_effect = {
+  observation : observation;
+  mark : change_mark;
+  checkpoint_sha256 : string;
+}
+(** Evidence captured by the save/restore producer, with [observation] and
+    [mark] under the machine lock. The digest names the exact bytes saved or
+    decoded for restore, not a subsequent read of a possibly overwritten slot.
+    A later live frame may be from later effects (including another incarnation);
+    this mark describes this operation's completed effect, not current state.
+    This is process-lifetime completion evidence, not a power-loss durability
+    guarantee or an operation receipt by itself. *)
+
+val save : path:string -> (checkpoint_effect, error) result
 (** Atomically replace a named checkpoint with the complete machine and ledger.
     Does not advance or eject the machine. *)
 
-val restore : path:string -> ledger_dir:string -> (observation, error) result
+val restore : path:string -> ledger_dir:string -> (checkpoint_effect, error) result
 (** Restore an independently decoded checkpoint. Invalid files leave the current
     machine and ledger intact; ROM/media bytes come from the checkpoint. *)
 

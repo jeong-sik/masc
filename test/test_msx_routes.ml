@@ -266,6 +266,157 @@ let test_tick_worker_advances_and_returns_frame () =
             ]))))
 ;;
 
+let test_checkpoint_receipt_lifecycle () =
+  let module Receipt = Server_msx_checkpoint_receipt in
+  let directory = Filename.temp_dir "msx-receipt-" "" in
+  let path = Filename.concat directory "operations.sqlite3" in
+  let get = function Ok value -> value | Error error -> fail (Receipt.error_to_string error) in
+  let id = match Keeper_operation_id.of_string "checkpoint-test-1" with
+    | Ok value -> value | Error detail -> fail detail in
+  let binding : Receipt.binding = {operation_id=id;action=Save;slot="quick"} in
+  Fun.protect ~finally:(fun () ->
+    Array.iter (fun name -> Sys.remove (Filename.concat directory name)) (Sys.readdir directory);
+    Unix.rmdir directory) (fun () ->
+    check bool "missing does not create a store" true (get (Receipt.inspect ~path binding) = None);
+    check bool "missing remains missing" false (Sys.file_exists path);
+    check bool "first registration accepted" true
+      (get (Receipt.admit ~path ~epoch:"server-a" binding) = Receipt.Accepted);
+    let db = Sqlite3.db_open ~mode:`NO_CREATE path in
+    Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db)) (fun () ->
+      check bool "pending binding cannot be rewritten" false
+        (Sqlite3.Rc.is_success (Sqlite3.exec db "UPDATE receipts SET slot='other' WHERE operation_id='checkpoint-test-1'")));
+    check bool "repeated registration does not replay" true
+      (match get (Receipt.admit ~path ~epoch:"server-a" binding) with
+       | Existing {state=Pending;epoch="server-a";_} -> true | _ -> false);
+    check bool "different slot cannot reuse identity" true
+      (Receipt.admit ~path ~epoch:"server-a" {binding with slot="other"} = Error Receipt.Binding_conflict);
+    check bool "replacement process cannot settle prior request" true
+      (Result.is_error (Receipt.settle ~path ~epoch:"server-b" binding (Refused "not ours")));
+    check bool "prior pending remains unknown after restart" true
+      (match get (Receipt.inspect ~path binding) with Some {state=Pending;epoch="server-a";_} -> true | _ -> false);
+    let completed : Receipt.completion = {
+      mark={Msx_lane.count=3;incarnation="installed-history"};
+      checkpoint_sha256=String.make 64 'a'} in
+    get (Receipt.settle ~path ~epoch:"server-a" binding (Committed completed));
+    check bool "closed and reopened read retains completion evidence" true
+      (match get (Receipt.inspect ~path binding) with
+       | Some {state=Committed observed;_} -> observed=completed | _ -> false);
+    check bool "terminal cannot be rewritten" true
+      (Result.is_error (Receipt.settle ~path ~epoch:"server-a" binding (Unknown "late error")));
+    check bool "terminal replay returns existing receipt" true
+      (match get (Receipt.admit ~path ~epoch:"server-b" binding) with
+       | Existing {state=Committed observed;epoch="server-a";_} -> observed=completed | _ -> false))
+;;
+
+let test_checkpoint_terminal_store_failure_can_be_recovered () =
+  let module Receipt = Server_msx_checkpoint_receipt in
+  let directory = Filename.temp_dir "msx-receipt-recovery-" "" in
+  let path = Filename.concat directory "operations.sqlite3" in
+  let get = function Ok value -> value | Error error -> fail (Receipt.error_to_string error) in
+  let operation_id = match Keeper_operation_id.of_string "checkpoint-recovery-1" with
+    | Ok value -> value | Error detail -> fail detail in
+  let binding : Receipt.binding = {operation_id; action=Restore; slot="quick"} in
+  Fun.protect ~finally:(fun () ->
+    Array.iter (fun name -> Sys.remove (Filename.concat directory name)) (Sys.readdir directory);
+    Unix.rmdir directory) (fun () ->
+    ignore (get (Receipt.admit ~path ~epoch:"server-a" binding));
+    let completed : Receipt.completion =
+      {mark={Msx_lane.count=7;incarnation="restored-machine"}; checkpoint_sha256=String.make 64 'b'} in
+    let db = Sqlite3.db_open ~mode:`NO_CREATE path in
+    Fun.protect ~finally:(fun () ->
+      ignore (Sqlite3.exec db "ROLLBACK"); ignore (Sqlite3.db_close db)) (fun () ->
+      check bool "another writer holds the receipt database" true
+        (Sqlite3.Rc.is_success (Sqlite3.exec db "BEGIN IMMEDIATE"));
+      check bool "completed effect cannot yet persist its receipt" true
+        (Result.is_error (Receipt.settle ~path ~epoch:"server-a" binding (Committed completed))));
+    check bool "disk still has the admitted pending record" true
+      (match get (Receipt.inspect ~path binding) with Some {state=Pending;_} -> true | _ -> false);
+    get (Receipt.retry_settlement ~path ~epoch:"server-a" binding);
+    check bool "receipt-only recovery commits the exact completed observation" true
+      (match get (Receipt.inspect ~path binding) with
+       | Some {state=Committed actual;_} -> actual=completed | _ -> false);
+    get (Receipt.retry_settlement ~path ~epoch:"server-a" binding);
+    check bool "a duplicate still cannot dispatch a second machine effect" true
+      (match get (Receipt.admit ~path ~epoch:"server-a" binding) with
+       | Existing {state=Committed actual;_} -> actual=completed | _ -> false))
+;;
+
+let test_checkpoint_settlement_notifies_possible_restore () =
+  let module Receipt = Server_msx_checkpoint_receipt in
+  let committed = Receipt.Committed {
+    mark={Msx_lane.count=1;incarnation="restored-machine"}; checkpoint_sha256=String.make 64 'a'} in
+  List.iter (fun (label, restore, state, expected_notification) ->
+    List.iter (fun persisted ->
+      let calls = ref [] in
+      let result = Route.settle_checkpoint_effect ~restore
+        ~persist:(fun actual ->
+          check bool (label ^ " persists exact effect evidence") true (actual=state);
+          calls := "persist" :: !calls; persisted)
+        ~notify:(fun () -> calls := "notify" :: !calls) state in
+      check bool (label ^ " retains persistence result") true (result=persisted);
+      check (list string) (label ^ " effect notification is independent of persistence")
+        (if expected_notification then ["persist";"notify"] else ["persist"])
+        (List.rev !calls)) [Ok (); Error "receipt store locked"])
+    ["committed restore",true,committed,true;
+     "possibly applied restore",true,Receipt.Unknown "worker raised after dispatch",true;
+     "proven refused restore",true,Receipt.Refused "no machine",false;
+     "committed save",false,committed,false;
+     "unknown save",false,Receipt.Unknown "save worker failed",false];
+  let original = ref None in
+  let notification_result = Route.settle_checkpoint_effect ~restore:true
+    ~persist:(fun state -> original:=Some state; Error "receipt store locked")
+    ~notify:(fun () -> raise (Failure "observer unavailable")) committed in
+  check bool "notification failure never replaces recorded effect evidence" true (!original=Some committed);
+  check (result unit string) "both independent failures remain visible"
+    (Error "receipt store locked; MSX restore observer notification failed: Failure(\"observer unavailable\")") notification_result
+;;
+
+let test_correlated_checkpoint_route () =
+  with_tick_machine (fun () ->
+    let config = Masc.Workspace.default_config (Filename.temp_dir "msx-correlated-" "") in
+    Fs_compat.mkdir_p (Masc.Workspace.masc_root_dir config);
+    let expected = `Assoc ["base_path",`String (Unix.realpath config.base_path);
+      "masc_root",`String (Unix.realpath (Masc.Workspace.masc_root_dir config))] in
+    let fields id = ["operation_id",`String id;"slot",`String "quick";"expected_workspace",expected] in
+    let body fields = Yojson.Safe.to_string (`Assoc fields) in
+    Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+      let pool = Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+      Executor_pool_ref.For_testing.with_pool pool (fun () ->
+        let read id action = Route.checkpoint_status_response ~config
+          ~body:(body (("checkpoint",`String action)::fields id)) in
+        let _, missing = read "never-seen" "save" in
+        check bool "missing is unknown, never pre-effect proof" true (member "status" missing=Some (`String "unknown"));
+        let _, saved = Route.checkpoint_response ~config ~restore:false ~body:(body (fields "save-1")) in
+        check bool "save produces a committed receipt" true (member "status" saved=Some (`String "committed"));
+        let slot_path = Filename.concat config.base_path ".masc/msx/saves/quick.json" in
+        let info () = match Lane.checkpoint_info ~path:slot_path with Ok info -> info | Error error -> fail (Lane.error_to_string error) in
+        let saved_digest = (info ()).sha256 in
+        let receipt_db = Sqlite3.db_open ~mode:`NO_CREATE
+          (Filename.concat config.base_path ".masc/msx/checkpoint-operations.sqlite3") in
+        Fun.protect ~finally:(fun () ->
+          ignore (Sqlite3.exec receipt_db "ROLLBACK"); ignore (Sqlite3.db_close receipt_db)) (fun () ->
+          check bool "fixture holds receipt writer" true
+            (Sqlite3.Rc.is_success (Sqlite3.exec receipt_db "BEGIN IMMEDIATE"));
+          let _, unavailable = Route.checkpoint_response ~config ~restore:false ~body:(body (fields "save-1")) in
+          check bool "unavailable duplicate lookup cannot invent refusal" true
+            (member "status" unavailable=Some (`String "unknown")));
+        ignore (Lane.step ~frames:1);
+        let _, replay = Route.checkpoint_response ~config ~restore:false ~body:(body (fields "save-1")) in
+        check bool "duplicate returns original committed receipt" true (member "status" replay=Some (`String "committed"));
+        check string "duplicate never overwrites the slot" saved_digest (info ()).sha256;
+        let _, restored = Route.checkpoint_response ~config ~restore:true ~body:(body (fields "restore-1")) in
+        check bool "restore committed" true (member "status" restored=Some (`String "committed"));
+        ignore (Lane.step ~frames:1);
+        let _, current = read "restore-1" "restore" in
+        check bool "later snapshot explicitly follows completion" true
+          (member "live_relation" current=Some (`String "observed_after_completion"));
+        check bool "receipt and frame share request workspace" true (member "workspace" current=Some expected);
+        check bool "current frame accompanies known completion" true (Option.is_some (member "live" current));
+        let _, wrong = Route.checkpoint_status_response ~config
+          ~body:(body ["checkpoint",`String "restore";"operation_id",`String "restore-1";"slot",`String "quick"]) in
+        check bool "unbound inspection cannot provide pixels" true (member "live" wrong=None)))))
+;;
+
 let test_checkpoint_route () =
   with_tick_machine (fun () ->
     let (config : Masc.Workspace.config) =
@@ -291,7 +442,12 @@ let test_checkpoint_route () =
         ; {|{"slot":"x","slot":"y"}|}
         ; {|{"extra":true}|}
         ];
-      let status, _ = Route.checkpoint_response ~config ~restore:false ~body:"{}" in
+      let status, response = Route.checkpoint_response ~config ~restore:false ~body:"{}" in
+      check bool "unavailable worker proves pre-effect" true
+        (member "effect_disposition" response = Some (`String "proven_pre_effect"));
+      check bool "refusal names save and quick slot" true
+        (member "checkpoint" response = Some (`String "save")
+         && member "slot" response = Some (`String "quick"));
       check
         bool
         "checkpoint never runs inline without a worker"
@@ -334,6 +490,8 @@ let test_checkpoint_route () =
             "storage error carries failure"
             true
             (member "ok" response = Some (`Bool false));
+          check bool "typed lane failure retains its pre-effect proof" true
+            (member "effect_disposition" response = Some (`String "proven_pre_effect"));
           check
             int
             "storage failure preserves machine"
@@ -990,7 +1148,11 @@ let () =
   run
     "msx routes"
     [ ( "checkpoint"
-      , [ test_case
+      , [ test_case "correlated checkpoint route" `Quick test_correlated_checkpoint_route
+        ; test_case "checkpoint settlement notifies possible restore" `Quick test_checkpoint_settlement_notifies_possible_restore
+        ; test_case "checkpoint terminal store failure recovers without replay" `Quick test_checkpoint_terminal_store_failure_can_be_recovered
+        ; test_case "checkpoint receipt durable lifecycle" `Quick test_checkpoint_receipt_lifecycle
+        ; test_case
             "validation, worker, restore and storage failure"
             `Quick
             test_checkpoint_route

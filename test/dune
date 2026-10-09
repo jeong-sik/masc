@@ -1,5 +1,6 @@
 (include stanzas/test_tui_usage_studio_pty.inc)
 (include stanzas/test_play_room.inc)
+(include stanzas/test_h2_play_room.inc)
 (rule
  (alias runtest-test_tui_collab_authority_pty)
  (deps test_tui_collab_authority_pty.py tui_keyboard_harness.py ../bin/masc_tui.exe)
@@ -9822,5 +9823,3 @@
  (name test_h3_working_state_meaning)
  (modules test_h3_working_state_meaning)
  (libraries masc_test_deps))
-
-(include stanzas/test_h2_play_room.inc)

@@ -145,7 +145,7 @@ def run(binary: str, phase: str, captures: Path | None):
             (captures / f"{phase}-{name}.pty").write_bytes(output)
         print(f"TUI_CAPTURE candle-currency {phase} {name}\n" + visible.decode(errors="replace"), flush=True)
 
-    def interact(process, fd, _slave, output, _base):
+    def interact(process, fd, _slave, output, base):
         try:
             await_screen(process, fd, output,
                 lambda text: all(line in text for line in SUMMARY), "exact large currency summary")
@@ -199,7 +199,10 @@ def run(binary: str, phase: str, captures: Path | None):
                 assert h.wait_for_fixture_state(process, fd, output,
                     lambda: any(path == DIRECTIVE_PATH for path, _ in requests), timeout=WAIT_SECONDS)
                 directives = [json.loads(body) for path, body in requests if path == DIRECTIVE_PATH]
-                assert directives == [{"action": "pause"}], directives
+                # A control names the workspace it was aimed at, so a server
+                # that has since become another workspace refuses it.
+                assert directives == [{"action": "pause", "expected_workspace": {
+                    "base_path": base, "masc_root": str(Path(base, ".masc"))}}], directives
                 capture(output, "control-accepted")
                 roster.publish("ready")
                 os.write(fd, b"r")

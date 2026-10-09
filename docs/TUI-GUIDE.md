@@ -971,7 +971,7 @@ steps in two cells and reads behind a solid bar in the sender's colour, where
 the journal's rows carry a dotted one. The operator's lines, the keeper's
 replies and its work rows stay at the conversation's edge.
 
-Chat opens without timestamps, turn time ranges, hourly separators or generated
+Chat opens without timestamps, hourly separators or generated
 progress timers (request age, call age and model silence).
 `Ctrl-F` adds a short clock (`metadata:inline`), then full timestamp headings
 (`metadata:full`), then returns to the default. The short clock appears only
@@ -997,13 +997,21 @@ That separator is a viewport projection, not a transcript row, and remains
 readable under `NO_COLOR`.
 
 Inputs waiting to enter a turn appear under `대기 입력` with the local `›` mark.
-Each input distinguishes unsent (`대기`), sending (`전송 중`), accepted by the
-server (`접수됨`), and unconfirmed delivery (`미확인`). Acceptance alone does not
-mean the Keeper has processed it. The conversation marks `입력 반영됨` only when
-the input is persisted or its bound execution has reported `Run_started`.
-Request headings connect inputs and responses; a shared batch states its input
-count. `TURN #N` appears where a recorded turn number is available. The progress
-row says `THINKING` or `STREAMING` only after receiving the corresponding signal.
+The label beside each original input distinguishes unsent (`전송 대기`), sending
+(`전송 중`), accepted and waiting to be processed (`처리 대기`), and unconfirmed
+delivery (`전송 확인 중`). Acceptance alone does not mean the Keeper has processed
+it. A persisted input or one whose bound execution reports `Run_started` moves
+into the conversation once. Rejection details appear separately as an error.
+
+User and Keeper speech keeps the recorded text. Request IDs, turn numbers,
+delivery receipts and attempt details are never prepended to the body. Literal
+words such as `요청` or `입력 반영됨` in a message remain untouched.
+Full request IDs still group inputs and responses internally; technical identity
+stays in expanded diagnostics, and timestamps stay in the gutter or heading.
+Expanded diagnostics (`Ctrl-D` to full) follow the whole message, and a waiting
+input names its request there too.
+Working means the turn is in progress. The progress row says `THINKING` or
+`STREAMING` only after receiving the corresponding signal.
 
 The pane opens on the keeper's durable transcript. A turn the keeper ran on
 its own is drawn as what it did. Reasoning starts folded with a `THINKING`
@@ -1833,7 +1841,17 @@ in place:
   exact match count, exact-address rows whose truncated/malformed body could
   not be rendered, and fleet rows that lost even their address. `Enter` on a commit answers with its pull
   request link (the subject's `(#N)` against the registered remote). `Enter`
-  on a Keeper change returns to the file at its producer-recorded line. A
+  on a Keeper change returns to the file at its producer-recorded line.
+  On a Keeper record, `d` expands its recorded edit/write text in the timeline;
+  press `d` on any of that record's rows to collapse it. Failed calls are
+  labelled as attempts. Writes have no recorded previous contents, and blob
+  materialization has no text diff. This reads the captured call, without
+  asking for the current working tree's Git diff.
+  `t` opens the selected Keeper record's Task detail, including its recorded
+  status, handoff, completion/evidence contract and transition history. `Esc`
+  returns to the same file-history position and expanded record. A missing Task
+  link, unavailable task read or Task absent from the current backlog leaves
+  the file history open and explains why there is no destination.
   Git and Keeper reads are independent: if either fails, the other remains
   visible with the failed source named. `r` in History retries both sources;
   reopening `H` alone keeps the existing reading. A
@@ -1844,17 +1862,16 @@ in place:
   renderer the Changes surface uses. A clean file says it matches its last
   commit.
 
-- `m` swaps it for the notes anchored to the file — who left each one, its
-  kind, the line span, and the task it rides with. Notes are keyed by the
-  server-minted codebase slug, which only a Workspace row carries, so
-  `m` answers in repository scope and says why not in the others. Inside
-  the notes view `w` adds one through the `$EDITOR` form (kind: Comment /
-  Decision / Question / Bookmark); the acting identity is the bearer's.
-- Once notes or history have been read (`m` or `H`), their exact producer
-  ranges mark the gutter: an accent dot for a note, a dim dot for a durable
-  Keeper change. Historical changes without line evidence remain in the
-  timeline as `L?` and do not invent a range. The pane decorates only what is
-  already loaded; it does not fetch to decorate.
+- `m` lists memos written as standalone comments in the opened file, such as
+  `-- masc(alpha) decision: keep the lock` in Lua. It works in project,
+  Keeper and repository scopes. It shows the line, author, optional kind and
+  text; malformed memos show their parse error. To add or edit one, edit the
+  source file through the external editor. There is no separate note-store
+  write form on this surface.
+- File memos mark their own gutter lines. Once history has been read (`H`),
+  exact producer-recorded Keeper ranges also mark the gutter. Historical
+  changes without line evidence remain `L?`; the pane does not invent a range
+  or fetch history solely to decorate the file.
 - `K` asks the language server what a name on the cursor line is, and `D`
   where it is defined. The line's own names are the candidates (the pane
   has no character cursor): one name is asked about at once, several open

@@ -819,12 +819,18 @@ let test_a_revisionless_ask_is_taught_the_exact_reference () =
 ;;
 
 let test_every_bundle_tool_is_classifiable () =
+  (* The run classifies attached-service tools through the index built from
+     the tools it offered (Keeper_run_tools_setup); the bundle here offers
+     identity_tools (), so the same index is built from them. *)
+  let identity_tool_index =
+    Masc.Keeper_identity_tool_index.of_tools (identity_tools ())
+  in
   with_bundle (fun composition_plan_index names ->
     let unclassifiable =
       List.filter
         (fun tool_name ->
            not
-             (Policy.classifies ~identity_tool_index:Masc.Keeper_identity_tool_index.empty
+             (Policy.classifies ~identity_tool_index
                 ~composition_plan_index:(Some composition_plan_index) ~tool_name))
         names
     in

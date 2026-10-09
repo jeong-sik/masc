@@ -250,8 +250,8 @@ def interaction(served: region.ServedFixtures, *, absent_live_roster=False):
             assert_board_contract(rows, left=left, right=right,
                 selected_title=selected_post, where=where)
         if left:
-            measured[(screen, columns)]["roster"] = region.measure_pane(
-                rows, left=0, right=left)
+            measured[(screen, columns)]["roster"] = region.measure_rail(
+                rows, right=left, heading=ROSTER_HEADING.decode())
         if screen == "keeper-detail-roster":
             measured[(screen, columns)]["body_pane"] = region.measure_pane(
                 rows, left=left, right=right)

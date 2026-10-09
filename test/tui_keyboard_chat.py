@@ -1506,7 +1506,7 @@ def chat_reconcile_interaction(
             send_and_wait(process, master_fd, output, b"\r", "내 메시지 2건 대기".encode())
             completed = output.rfind(FRAME_END) + len(FRAME_END)
             pending_screen = screen_text(bytes(output[:completed]))
-            if "1건 전달 재확인 중".encode() not in pending_screen or "접수됨".encode() in pending_screen:
+            if "1건 전송 확인 중".encode() not in pending_screen or "처리 대기".encode() in pending_screen:
                 raise AssertionError("unknown admission was presented as confirmed queued: " + repr(pending_screen))
             before_release = [
                 json.loads(body).get("message")
@@ -1851,29 +1851,34 @@ def chat_visibility_modes_interaction(
             )
         if b"2 reasoning steps" not in initial or b"THINKING" not in initial:
             raise AssertionError(f"folded reasoning was not identifiable: {initial!r}")
-        # The skill header and its bold name must belong to one TURN on
-        # the completed screen, not separate turns or historical frames.
+        # The skill row and its bold name must belong to one turn on the
+        # completed screen, not separate turns or historical frames. The
+        # conversation draws no TURN heading; a turn is one rail block that
+        # opens on ╭ and closes on ╰, and a one-row turn stands alone on ╶.
         styled_rows = screen_rows(completed, preserve_styles=True)
-        turn_rows = sorted(
-            row for row, text in observed_rows.items()
-            if title_row < row < composer_row
-            and re.search(rb"TURN #\d+", text)
-        )
+        turn_blocks: list[list[int]] = []
+        open_block: list[int] = []
+        for row in sorted(
+            row for row in observed_rows if title_row < row < composer_row
+        ):
+            text = observed_rows[row]
+            if "╭".encode() in text or "╶".encode() in text:
+                open_block = [row]
+            elif open_block:
+                open_block.append(row)
+            if open_block and ("╰".encode() in text or "╶".encode() in text):
+                turn_blocks.append(open_block)
+                open_block = []
         skill_in_turn = False
-        for index, row in enumerate(turn_rows):
-            if re.search(
-                "◆\\s+SKILL\\s+│\\s+TURN #\\d+".encode(),
-                observed_rows[row],
-            ) is None:
-                continue
-            end_row = (
-                turn_rows[index + 1]
-                if index + 1 < len(turn_rows) else composer_row
-            )
-            if any(
-                b"\x1b[1mci-red-attribution" in text
-                for body_row, text in styled_rows.items()
-                if row < body_row < end_row
+        for block in turn_blocks:
+            skill_rows = [
+                row for row in block
+                if re.search("◆\\s+SKILL".encode(), observed_rows[row])
+            ]
+            if skill_rows and any(
+                b"\x1b[1mci-red-attribution" in styled_rows.get(row, b"")
+                for row in block
+                if row >= skill_rows[0]
             ):
                 skill_in_turn = True
                 break
@@ -2496,19 +2501,46 @@ def message_origin_badge_interaction(
     draft_frame = send_and_wait(
         process, master_fd, output, b"draft-neutral", b"draft-neutral"
     )
-    # The prompt recedes in its own span and the draft follows a bare reset:
-    # typed text keeps the terminal foreground. The renderer reopens the input
-    # surface's background after the reset (render_chat.ml), so an explicit
-    # default-background (49m) would be the regression -- it paints the surface
-    # flat instead of preserving it.
-    if b"\x1b[2m  > \x1b[0mdraft-neutral" not in draft_frame:
+    # The prompt recedes (dim without a known palette). Reset its foreground
+    # and weight before the draft, restoring the exact same input background
+    # when one was projected. A missing restore, tint or dim leak must fail.
+    def text_style(prefix):
+        foreground, background, weight = None, None, 0
+        for match in re.finditer(rb"\x1b\[([0-9;]*)m", prefix):
+            codes = [int(part or b"0") for part in match[1].split(b";")]
+            index = 0
+            while index < len(codes):
+                code = codes[index]
+                if code == 0:
+                    foreground, background, weight = None, None, 0
+                elif code in (1, 2, 22):
+                    weight = 0 if code == 22 else code
+                elif code == 39:
+                    foreground = None
+                elif code == 49:
+                    background = None
+                elif 30 <= code <= 37 or 90 <= code <= 97:
+                    foreground = (code,)
+                elif 40 <= code <= 47 or 100 <= code <= 107:
+                    background = (code,)
+                elif code in (38, 48):
+                    width = {2: 5, 5: 3}[codes[index + 1]]
+                    color = tuple(codes[index:index + width])
+                    if code == 38:
+                        foreground = color
+                    else:
+                        background = color
+                    index += width - 1
+                index += 1
+        return foreground, background, weight
+
+    row = next(row for row in screen_rows(draft_frame, preserve_styles=True).values()
+               if b"draft-neutral" in row)
+    prompt_style = text_style(row[:row.index(b"  > ")])
+    draft_style = text_style(row[:row.index(b"draft-neutral")])
+    if draft_style != (None, prompt_style[1], 0):
         raise AssertionError(
-            f"chat composer did not recede its prompt and hand the draft the "
-            f"terminal foreground: {draft_frame!r}"
-        )
-    if b"\x1b[49m" in draft_frame:
-        raise AssertionError(
-            f"chat composer cleared the input surface background: {draft_frame!r}"
+            f"chat composer did not restore neutral draft text and its background: {draft_frame!r}"
         )
     escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
     os.write(master_fd, b"q")

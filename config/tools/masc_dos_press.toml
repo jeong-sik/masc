@@ -27,7 +27,7 @@ description = "Keys in order, e.g. [\"down\", \"return\"] or [\"y\"]."
 [[params]]
 name = "steps"
 type = "integer"
-description = "Instruction budget per key. Default 4000000."
+description = "Machine-step budget per key. Default 4000000."
 minimum = 1
 maximum = 4000000
 default = 4000000

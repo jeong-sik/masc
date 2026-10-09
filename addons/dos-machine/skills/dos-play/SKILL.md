@@ -5,8 +5,9 @@ description: Play the shared DOS machine with other Keepers — controller hando
 
 # DOS play
 
-This attached Add-on provides a DOS machine shared with other Keepers. Time is 8086
-instructions and moves only when someone calls a tool. Game facts — menus,
+This attached Add-on provides a DOS machine shared with other Keepers. Time
+advances through machine execution steps, including idle wait clocks, only
+when someone calls a tool. Game facts — menus,
 key sequences, pitfalls — live in a Skill named after the game
 (`sangokushi-3` is the first). Where none exists, learn from the screens and
 report what repeated.
@@ -45,9 +46,10 @@ transition or repaint; this is not proof that its final prompt is ready.
 `waiting_for_key` also records an empty-ring observation, not guest acceptance.
 
 For one input followed by an explicit run, pass `until_ready: false` with the
-instruction allowance `steps`. Only the first key or character enters the BIOS
+machine-step allowance `steps`. Only the first key or character enters the BIOS
 ring; execution continues for `steps` unless the program exits. The response
-preserves the resulting observation, `steps_run` and `keys_pressed`, and always
+reports `steps_run` (budget consumed), `instructions_run` (guest instructions),
+`elapsed_cycles` (emulated clocks) and `keys_pressed`, and always
 reports `settled: false`. That false value does not itself mean the game is busy.
 Read `masc_dos_screen` for the PNG before choosing another input. If the visible
 transition still needs time, use `masc_dos_step` with `until_ready: false` without

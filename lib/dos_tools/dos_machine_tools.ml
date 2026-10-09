@@ -16,11 +16,9 @@ module Make (Host : HOST) = struct
 
     The observation is text: a DOS text page is characters, and this lane
     hands them over as UTF-8 with code page 437 kept, so a keeper with no
-    vision runtime reads the game directly (RFC-0414). What makes the lane
-    playable is [settled]: the guest asked for a key {e and} the screen
-    stopped moving. [waiting_for_key] alone is not that — a program in its
-    own loop asks again 631 instructions after taking a key, with its
-    repaint half-written. *)
+    vision runtime reads the game directly (RFC-0414). [settled] samples empty keyboard polls and unchanged screen memory;
+    it does not establish a final prompt. Machine-step budget consumption,
+    actual guest instructions, and emulated clocks are reported separately. *)
 
 open Tool_args
 
@@ -63,6 +61,8 @@ let autosave_fields = function
 
 let ran_fields (r : Dos_lane.ran) =
   [ ("steps_run", `Int r.Dos_lane.steps_run)
+  ; ("instructions_run", `Int r.Dos_lane.instructions_run)
+  ; ("elapsed_cycles", `Int r.Dos_lane.elapsed_cycles)
   ; ("settled", `Bool r.Dos_lane.settled)
   ; ("input_requests", `Int r.Dos_lane.input_requests)
   ; ("keys_pressed", `Int r.Dos_lane.keys_pressed)
@@ -71,7 +71,7 @@ let ran_fields (r : Dos_lane.ran) =
   @ autosave_fields r.Dos_lane.autosave
 ;;
 
-(* A call runs up to [Dos_lane.max_steps_per_call] instructions under the
+(* A call runs up to [Dos_lane.max_steps_per_call] machine steps under the
    lane's stdlib lock, a noticeable fraction of a second. On a system thread
    the server's other fibers keep running meanwhile; a fiber that reaches
    the lock waits on its own thread too, since every lane call goes through

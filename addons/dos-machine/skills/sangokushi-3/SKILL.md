@@ -13,10 +13,10 @@ rules — controller, passing, saves — are in the `dos-play` Skill.
 ## Timed transitions and explicit input execution
 
 A controlled battle replay on worker source `1632107405` returned
-`settled: true` after one Space and 350,000 instructions, with two empty keyboard
+`settled: true` after one Space and 350,000 execution steps, with two empty keyboard
 polls, while the command menu was absent. With no further key, running another
-4,000,000 instructions displayed “유비님, 명령을(1–9)?”. A control restored the
-same checkpoint and ran 350,000 plus 4,000,000 instructions without any key;
+4,000,000 execution steps displayed “유비님, 명령을(1–9)?”. A control restored the
+same checkpoint and ran 350,000 plus 4,000,000 execution steps without any key;
 the menu appeared there too. This demonstrates that an ordinary timed transition
 can outlast the settling observation. It does not establish that Space caused
 the transition or that every transition needs that instruction count.
@@ -39,7 +39,7 @@ The default batch mode is unchanged and still uses the settling observation
 between keys. `keys_pressed` identifies the delivered prefix; in explicit-run
 mode every later key or character is unsent. A still “어느 부대입니까?” selection
 screen after a digit or time advance can also mean that the selection needs a
-different input. Screen identity or elapsed instructions alone do not prove
+different input. Screen identity or elapsed execution steps alone do not prove
 that the game accepted a command.
 
 ## Boot

@@ -2606,10 +2606,6 @@ let run_named
                  run_result.Runtime_agent.stop_reason,
                  run_result.response.content
                with
-               | Runtime_agent.Completed, [] ->
-                 (* Factual successful tool evidence also admits a terminal
-                    with no assistant item; absence is not a quiet final. *)
-                 Ok run_result
                | Runtime_agent.Completed, [ Agent_core.Types.Text text ]
                  when String.trim text = "" ->
                  Ok run_result

@@ -14,6 +14,9 @@ type check_id =
   | Sandbox
   | Keeper_persistence
   | Browser_lane
+  | Browser_bidi_host
+      (** Whether a BiDi browser host runs for the workspace and why the last
+          one ended, from that host's record on disk. *)
 
 (** Whether an [Invalid] check keeps the workspace's existing history from opening.
     [Required_to_open]: the workspace, a loadable runtime.toml and Keeper

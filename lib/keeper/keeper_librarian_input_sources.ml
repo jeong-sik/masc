@@ -33,6 +33,7 @@ let counterpart_observations_read ?external_after ~base_dir ~keeper_name ~after 
       | Keeper_chat_store.Role.User, Some _ -> true
       | Keeper_chat_store.Role.User, None
       | Keeper_chat_store.Role.Assistant, _
+      | Keeper_chat_store.Role.Request_failure, _
       | Keeper_chat_store.Role.System, _
       | Keeper_chat_store.Role.Tool, _ -> false)
   in

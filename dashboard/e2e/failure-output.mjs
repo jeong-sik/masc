@@ -14,7 +14,16 @@ try {
   await page.goto(`${origin}/dashboard/e2e/failure-output.html`)
   const entry = page.locator('[data-chat-entry-id="failure-output-fixture"]')
   await entry.locator('[data-chat-retained-output]').waitFor({ state: 'visible' })
-  assert.equal(await entry.getAttribute('data-chat-delivery-state'), 'transport_failure')
+  assert.equal(await entry.getAttribute('data-chat-delivery-state'), 'request_failure')
+  assert.equal(await entry.getAttribute('data-chat-role'), 'system')
+  const bundle = page.locator('[data-chat-turn-bundle]')
+  const work = bundle.locator('[data-chat-trace-step="think"]')
+  assert.equal(await work.isVisible(), true)
+  assert.match(await work.innerText(), /Completed work trace retained after failure/)
+  assert.equal(await bundle.locator('[data-chat-trace-step="chat"]').count(), 0)
+  assert.equal((await page.locator('body').innerText()).includes('provider disconnected after media'), false)
+  await work.scrollIntoViewIfNeeded()
+  await page.screenshot({ path: `${evidence}/work.png`, fullPage: true })
   const img = entry.locator('[data-chat-block="image"] img')
   assert.equal(await img.isVisible(), true)
   assert.equal(await img.evaluate(image => image.complete && image.naturalWidth > 0), true)
@@ -38,7 +47,7 @@ try {
   assert.equal(await img.isVisible(), true)
   assert.equal(await audio.isVisible(), true)
   assert.deepEqual(errors, [])
-  const receipt = { scenario: 'persisted failure history after completed media', scope: 'local production ChatTranscript and REST normalization fixture', imageDecoded: true, audioPlayed: true, failureKept: true, diagnosticsToggleAndCopy: true, pageErrors: errors, browser: browser.version() }
+  const receipt = { scenario: 'persisted failure history after completed media', scope: 'local production ChatTranscript and REST normalization fixture', imageDecoded: true, audioPlayed: true, failureKept: true, retainedWorkVisible: true, failureQuotedAsChat: false, diagnosticsToggleAndCopy: true, pageErrors: errors, browser: browser.version() }
   await writeFile(`${evidence}/browser.json`, `${JSON.stringify(receipt, null, 2)}\n`)
   console.log(JSON.stringify(receipt))
 } finally { await browser.close() }

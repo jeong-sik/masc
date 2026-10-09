@@ -85,8 +85,9 @@ let blocks_with_trace_block ~trace_block (m : chat_message) =
     | None -> []
   in
   match m.role, trace_block with
-  | Role.Assistant, Some trace_block -> base @ [ trace_block ]
-  | _ -> base
+  | (Role.Assistant | Role.Request_failure), Some trace_block -> base @ [ trace_block ]
+  | (Role.User | Role.Assistant | Role.System | Role.Tool | Role.Request_failure), None
+  | (Role.User | Role.System | Role.Tool), Some _ -> base
 
 let blocks_fields_of_list = function
   | [] -> []
@@ -166,13 +167,6 @@ let message_to_json ~trace_lookup_available ~trace_block (m : chat_message) : Yo
        ("content", `String m.content);
        ("ts", `Float m.ts);
      ]
-       (* Dashboard history: surface the writer-declared kind for
-          non-utterance rows so a reload can tell a transport
-          failure apart from keeper speech. *)
-       @ (match m.kind with
-          | Row_kind.Utterance -> []
-          | Row_kind.Transport_failure ->
-              [ ("kind", `String (Row_kind.to_label m.kind)) ])
        @ Json_util.string_field_if_present "tool_call_id" m.tool_call_id
        @ Json_util.string_field_if_present "execution_id"
            (Option.map Ids.Execution_id.to_string m.execution_id)
@@ -240,18 +234,18 @@ let transcript_of_messages (messages : chat_message list) ~turn_ref :
     | Some tr -> Ids.Turn_ref.equal tr turn_ref
     | None -> false
   in
-  let assistant_delivery_keys =
+  let terminal_delivery_keys =
     List.filter_map
       (fun (m : chat_message) ->
          match m.role, m.delivery_provenance with
-         | ( Role.Assistant
+         | ( (Role.Assistant | Role.Request_failure)
            , Some
                { Keeper_chat_delivery_identity.delivery_key
-               ; transcript_slot = Keeper_chat_delivery_identity.Terminal_assistant
+               ; transcript_slot = Keeper_chat_delivery_identity.Terminal_result
                } )
            when matches_turn_ref m ->
            Some delivery_key
-         | (Role.Assistant | Role.System | Role.User | Role.Tool), _ -> None)
+         | (Role.Assistant | Role.System | Role.User | Role.Tool | Role.Request_failure), _ -> None)
       messages
   in
   let matches_accepted_user_delivery (m : chat_message) =
@@ -263,8 +257,8 @@ let transcript_of_messages (messages : chat_message list) ~turn_ref :
           } ) ->
       List.exists
         (Keeper_chat_delivery_identity.delivery_key_equal delivery_key)
-        assistant_delivery_keys
-    | (Role.Assistant | Role.System | Role.User | Role.Tool), _ -> false
+        terminal_delivery_keys
+    | (Role.Assistant | Role.System | Role.User | Role.Tool | Role.Request_failure), _ -> false
   in
   let user, assistant =
     List.fold_left
@@ -272,8 +266,8 @@ let transcript_of_messages (messages : chat_message list) ~turn_ref :
          match m.role with
          | Role.User when matches_turn_ref m || matches_accepted_user_delivery m ->
            m :: user, assistant
-         | Role.Assistant when matches_turn_ref m -> user, m :: assistant
-         | Role.User | Role.Assistant | Role.System | Role.Tool ->
+         | (Role.Assistant | Role.Request_failure) when matches_turn_ref m -> user, m :: assistant
+         | Role.User | Role.Assistant | Role.System | Role.Tool | Role.Request_failure ->
            (* Tool rows join via execution_id in the tool-call store, not
               via the transcript. *)
            user, assistant)
@@ -283,18 +277,10 @@ let transcript_of_messages (messages : chat_message list) ~turn_ref :
 
 let transcript_line_to_json (m : chat_message) : Yojson.Safe.t =
   `Assoc
-    ([ ("role", `String (Role.to_label m.role));
-       ("content", `String m.content);
-       ("ts", `Float m.ts);
-     ]
-      (* Surface the writer-declared kind so the inspector can tell a
-         transport failure apart from a real keeper utterance, exactly as
-         the chat history endpoint does — a failure marker is never quoted
-         back as the keeper's own words. *)
-    @ (match m.kind with
-       | Row_kind.Utterance -> []
-       | Row_kind.Transport_failure ->
-           [ ("kind", `String (Row_kind.to_label m.kind)) ]))
+    [ ("role", `String (Role.to_label m.role))
+    ; ("content", `String m.content)
+    ; ("ts", `Float m.ts)
+    ]
 
 let turn_transcript_to_json ~keeper ~turn_ref (t : turn_transcript) :
     Yojson.Safe.t =

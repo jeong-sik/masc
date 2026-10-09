@@ -1,0 +1,17 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/chat/primitives.test.ts -t 'renders reconciled failure work'
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/dashboard
+
+
+ Test Files  1 passed (1)
+      Tests  3 passed | 170 skipped (173)
+   Start at  20:27:01
+   Duration  6.21s (transform 38%, environment 33%, import 17%, setup 9%, tests 4%)
+
+  Transform  transforming modules took 2.25s · 38% of tracked time, re-done on every run
+             persist transforms across runs with fsModuleCache: true
+             learn more: https://vitest.dev/guide/improving-performance#caching-between-reruns
+

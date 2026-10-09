@@ -1969,14 +1969,12 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
   in
   let append_queued_assistant_once ~content ?(tool_calls = []) ?blocks ?turn_ref () =
     persist_operation_attempt
-      ~settlement:(Server_keeper_operation_transcript.Terminal
-        {content; kind=Keeper_chat_store.Row_kind.Utterance})
+      ~settlement:(Server_keeper_operation_transcript.Reply content)
       ~tool_calls ?blocks ?turn_ref ~stream_lifecycle:completed_stream_lifecycle ()
   in
-  let append_queued_transport_failure_once ?(tool_calls = []) ?blocks ?turn_ref content =
+  let append_queued_request_failure_once ?(tool_calls = []) ?blocks ?turn_ref content =
     persist_operation_attempt
-      ~settlement:(Server_keeper_operation_transcript.Terminal
-        {content; kind=Keeper_chat_store.Row_kind.Transport_failure})
+      ~settlement:(Server_keeper_operation_transcript.Request_failed content)
       ~tool_calls ?blocks ?turn_ref ~stream_lifecycle:errored_stream_lifecycle ()
   in
   let append_queued_tool_calls_once ?turn_ref tool_calls =
@@ -2139,7 +2137,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
       Keeper_stream_tool_accum.to_tool_calls_for_failure worker_tool_accum
     in
     let persisted =
-      append_queued_transport_failure_once ~tool_calls ?blocks ?turn_ref content
+      append_queued_request_failure_once ~tool_calls ?blocks ?turn_ref content
     in
     Result.iter
       (fun () ->

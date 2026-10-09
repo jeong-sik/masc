@@ -92,6 +92,20 @@ let make_meta name =
   | Ok meta -> meta
   | Error err -> failwith ("meta_of_json failed: " ^ err)
 
+let failure_key value =
+  match Keeper_chat_delivery_identity.Request_id.of_string value with
+  | Ok id -> Keeper_chat_delivery_identity.Operation id
+  | Error detail -> Alcotest.fail detail
+
+let append_failed_request ~base_dir ~keeper_name ~user_content ~user_attachments
+    ?surface ?turn_ref ~diagnostic () =
+  let delivery_key = failure_key "failure-test-operation" in
+  K.append_user_message_once ~base_dir ~keeper_name ~delivery_key
+    ~content:user_content ~attachments:user_attachments ?surface ()
+  |> Result.get_ok |> ignore;
+  K.append_request_failure_once ~base_dir ~keeper_name ~delivery_key
+    ~content:diagnostic ?surface ?turn_ref () |> Result.get_ok |> ignore
+
 let test_load_records_malformed_row_drops () =
   let base_dir = temp_base_path "keeper-chat-store-drops" in
   Fun.protect
@@ -674,12 +688,11 @@ let test_recent_direct_context_omits_transport_failure_as_self_reply () =
     ~finally:(fun () -> try remove_tree base_dir with _ -> ())
     (fun () ->
       let keeper_name = "keeper-chat-recent-failure" in
-      K.append_turn ~base_dir ~keeper_name
+      append_failed_request ~base_dir ~keeper_name
         ~user_content:"please answer this"
         ~user_attachments:[]
         ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
-        ~assistant_kind:K.Row_kind.Transport_failure
-        ~assistant_content:"Keeper request failed: timeout"
+        ~diagnostic:"Keeper request failed: timeout"
         ();
       let lines =
         K.load ~base_dir ~keeper_name
@@ -1289,7 +1302,8 @@ let test_leading_failure_tool_batch_is_retained () =
     (fun () ->
       let keeper_name = "keeper-chat-leading-failure-tools" in
       (match
-         K.append_assistant_message_result ~base_dir ~keeper_name
+         K.append_request_failure_once ~base_dir ~keeper_name
+           ~delivery_key:(failure_key "failed-tool-batch")
            ~content:"Keeper request failed: projection rejected"
            ~tool_calls:
              [ { K.call_id = "failure-call"
@@ -1297,10 +1311,9 @@ let test_leading_failure_tool_batch_is_retained () =
                ; args = {|{"path":"lib/a.ml"}|}
                }
              ]
-           ~assistant_kind:K.Row_kind.Transport_failure
-           ()
+              ()
        with
-       | Ok () -> ()
+       | Ok _ -> ()
        | Error detail -> Alcotest.fail detail);
       match K.load ~base_dir ~keeper_name with
       | [ tool; failure ] ->
@@ -1309,7 +1322,7 @@ let test_leading_failure_tool_batch_is_retained () =
         Alcotest.(check (option string)) "tool identity retained"
           (Some "failure-call") tool.tool_call_id;
         Alcotest.(check bool) "terminal row proves failure batch" true
-          (K.Row_kind.equal failure.kind K.Row_kind.Transport_failure)
+          (K.Role.equal failure.role K.Role.Request_failure)
       | messages ->
         Alcotest.failf "expected failure tool batch, got roles [%s]"
           (String.concat "; " (roles messages)))
@@ -1472,32 +1485,31 @@ let test_load_page_binary_search_large_file () =
         (content_no (List.hd (List.rev tail.K.messages)));
       Alcotest.(check bool) "tail has_more" true tail.K.has_more)
 
-(* ── Row_kind (typed transport-failure marker) ───────────── *)
+(* Closed server failure records and terminal result authority. *)
 
-let test_failure_turn_kind_roundtrip () =
+let test_request_failure_roundtrip () =
   let base_dir = temp_base_path "keeper-chat-store-kind" in
   Fun.protect
     ~finally:(fun () -> try remove_tree base_dir with _ -> ())
     (fun () ->
       let keeper_name = "keeper-chat-kind" in
-      K.append_turn ~base_dir ~keeper_name
+      append_failed_request ~base_dir ~keeper_name
         ~user_content:"ping"
         ~user_attachments:[]
         ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
-        ~assistant_kind:K.Row_kind.Transport_failure
-        ~assistant_content:"Keeper request failed: boom"
+        ~diagnostic:"Keeper request failed: boom"
         ();
       match K.load ~base_dir ~keeper_name with
       | [ user; asst ] ->
-          Alcotest.(check bool) "user row is an utterance" true
-            (K.Row_kind.equal user.kind K.Row_kind.Utterance);
-          Alcotest.(check bool) "assistant row is a transport failure" true
-            (K.Row_kind.equal asst.kind K.Row_kind.Transport_failure);
+          Alcotest.(check bool) "accepted input is a user row" true
+            (K.Role.equal user.role K.Role.User);
+          Alcotest.(check bool) "failed request is a server row" true
+            (K.Role.equal asst.role K.Role.Request_failure);
           Alcotest.(check bool) "server diagnostic has no generated speech blocks" true
             (asst.blocks = None);
           let raw = read_file (chat_path ~base_dir ~keeper_name) in
-          Alcotest.(check bool) "failure row persists the kind field" true
-            (String_util.contains_substring raw {|"kind":"transport_failure"|})
+          Alcotest.(check bool) "failure row persists its single classifier" true
+            (String_util.contains_substring raw {|"role":"request_failure"|})
       | messages ->
           Alcotest.failf "expected 2 rows, got %d" (List.length messages))
 
@@ -1522,13 +1534,21 @@ let test_failure_completed_output_roundtrip () =
           ~content:"make media"
           ~speaker:{ K.speaker_id = None; speaker_name = None; speaker_authority = K.Owner } () with
        | Ok _ -> () | Error error -> Alcotest.fail error);
-      let append_failure () = K.append_assistant_message_once ~base_dir ~keeper_name
+      let append_failure () = K.append_request_failure_once ~base_dir ~keeper_name
           ~delivery_key ~content:"provider disconnected after media"
-          ~assistant_kind:K.Row_kind.Transport_failure ~blocks () in
+          ~turn_ref:(Ids.Turn_ref.make ~trace_id:"failure-output" ~absolute_turn:1)
+          ~blocks () in
       (match append_failure () with Ok _ -> () | Error error -> Alcotest.fail error);
       let before = read_file (chat_path ~base_dir ~keeper_name) in
       (match append_failure () with Ok _ -> () | Error error -> Alcotest.fail error);
       Alcotest.(check string) "re-entry preserves one failure terminal" before
+        (read_file (chat_path ~base_dir ~keeper_name));
+      (match K.append_assistant_message_once ~base_dir ~keeper_name ~delivery_key
+          ~content:"must not create a contradictory terminal" () with
+       | Ok (K.Already_present _) -> ()
+       | Ok (K.Appended _) -> Alcotest.fail "failure and reply used different terminal authority"
+       | Error error -> Alcotest.fail error);
+      Alcotest.(check string) "success cannot append after the same failed terminal" before
         (read_file (chat_path ~base_dir ~keeper_name));
       let messages = K.load ~base_dir ~keeper_name in
       (match messages with
@@ -1536,37 +1556,42 @@ let test_failure_completed_output_roundtrip () =
          Alcotest.(check bool) "completed media survives failure reload" true
            (failure.blocks = Some blocks)
        | _ -> Alcotest.fail "expected accepted input and one failure terminal");
+      let trace = B.Trace { trace =
+          [B.Trace_reason { text = "completed reasoning"; detail = None; ts = None }]
+          ; omitted = 0 } in
+      let projected = K.to_json_array
+          ~trace_block_by_turn_ref:(fun _ -> Some trace) messages in
+      (match projected with
+       | `List [_user; `Assoc fields] ->
+         Alcotest.(check bool) "failure history preserves completed media and trace" true
+           (List.assoc_opt "blocks" fields = Some (B.blocks_to_yojson (blocks @ [trace])));
+         Alcotest.(check bool) "failure history has one row classifier" false
+           (List.mem_assoc "kind" fields)
+       | _ -> Alcotest.fail "failure history projection lost its terminal row");
       let pending = MS.pending_messages_of_messages ~targets:[keeper_name] messages in
       Alcotest.(check int) "completed output does not acknowledge failed input" 1
         (List.length pending))
 
-let test_kind_absent_reads_utterance () =
-  (* Every row written before the [kind] field existed is an utterance;
-     the writer also omits the field for utterances, so ordinary rows
-     stay byte-identical to the pre-[kind] format. *)
-  let base_dir = temp_base_path "keeper-chat-store-kind-absent" in
-  Fun.protect
-    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
-    (fun () ->
-      let keeper_name = "keeper-chat-kind-absent" in
-      K.append_turn ~base_dir ~keeper_name
-        ~user_content:"hello" ~user_attachments:[]
-        ~assistant_content:"world" ();
-      let raw = read_file (chat_path ~base_dir ~keeper_name) in
-      Alcotest.(check bool) "utterance rows carry no kind field" false
-        (String_util.contains_substring raw {|"kind"|});
-      match K.load ~base_dir ~keeper_name with
-      | [ user; asst ] ->
-          Alcotest.(check bool) "user reads as utterance" true
-            (K.Row_kind.equal user.kind K.Row_kind.Utterance);
-          Alcotest.(check bool) "assistant reads as utterance" true
-            (K.Row_kind.equal asst.kind K.Row_kind.Utterance)
-      | messages ->
-          Alcotest.failf "expected 2 rows, got %d" (List.length messages))
+let test_failure_after_reply_preserves_terminal_authority () =
+  let base_dir = temp_base_path "keeper-chat-terminal-authority" in
+  Fun.protect ~finally:(fun () -> remove_tree base_dir) (fun () ->
+    let keeper_name = "keeper-terminal-authority" in
+    let delivery_key = failure_key "terminal-authority-operation" in
+    let append = K.append_assistant_message_once ~base_dir ~keeper_name ~delivery_key
+        ~content:"completed reply" () in
+    (match append with Ok _ -> () | Error error -> Alcotest.fail error);
+    let before = read_file (chat_path ~base_dir ~keeper_name) in
+    (match K.append_request_failure_once ~base_dir ~keeper_name ~delivery_key
+        ~content:"later delivery failed" () with
+     | Ok (K.Already_present _) -> ()
+     | Ok (K.Appended _) -> Alcotest.fail "a later failure replaced or duplicated speech"
+     | Error error -> Alcotest.fail error);
+    Alcotest.(check string) "later delivery failure cannot erase persisted speech" before
+      (read_file (chat_path ~base_dir ~keeper_name)))
 
-let test_invalid_kind_cannot_acknowledge_input () =
+let test_unknown_row_contract_cannot_acknowledge_input () =
   List.iter
-    (fun kind ->
+    (fun unknown ->
        let base_dir = temp_base_path "keeper-chat-store-kind-invalid" in
        Fun.protect
          ~finally:(fun () -> try remove_tree base_dir with _ -> ())
@@ -1587,7 +1612,7 @@ let test_invalid_kind_cannot_acknowledge_input () =
                 [ "id", `String "invalid-kind"; "role", `String "assistant"
                 ; "content", `String "done"; "ts", `Float 2.0
                 ; "turn_ref", `String (Ids.Turn_ref.to_string turn_ref)
-                ; "kind", kind
+                ; "unexpected_metadata", unknown
                 ]
             in
             let invalid_payload = Read_drop_reason.to_wire Read_drop_reason.Invalid_payload in
@@ -2638,7 +2663,7 @@ let test_delivery_key_round_trip_to_json_array () =
               let expected_slot =
                 match row |> member "role" |> to_string with
                 | "user" -> "accepted_user"
-                | "assistant" -> "terminal_assistant"
+                | "assistant" -> "terminal_result"
                 | role -> Alcotest.failf "unexpected role %s" role
               in
               Alcotest.(check string) "transcript slot kind" expected_slot slot_kind)
@@ -3656,16 +3681,16 @@ let () =
           Alcotest.test_case "malformed stream lifecycle reads as None" `Quick
             test_malformed_stream_lifecycle_reads_none;
         ] );
-      ( "row_kind",
+      ( "failure_records",
         [
-          Alcotest.test_case "failure turn kind roundtrip" `Quick
-            test_failure_turn_kind_roundtrip;
+          Alcotest.test_case "server failure roundtrip" `Quick
+            test_request_failure_roundtrip;
           Alcotest.test_case "completed output survives failure reload" `Quick
             test_failure_completed_output_roundtrip;
-          Alcotest.test_case "absent kind reads utterance" `Quick
-            test_kind_absent_reads_utterance;
-          Alcotest.test_case "invalid kind cannot acknowledge input" `Quick
-            test_invalid_kind_cannot_acknowledge_input;
+          Alcotest.test_case "failure after reply preserves terminal authority" `Quick
+            test_failure_after_reply_preserves_terminal_authority;
+          Alcotest.test_case "unknown row contract cannot acknowledge input" `Quick
+            test_unknown_row_contract_cannot_acknowledge_input;
         ] );
       ( "approval_lifecycle",
         [ Alcotest.test_case

@@ -9,9 +9,7 @@
  *   seeing a clean transcript. We preserve that behaviour here with a
  *   per-item `safeParse` helper — no drift error class is needed since
  *   individual failures are non-fatal.
- * - `role` is left as open `string()` because the backend can introduce
- *   a new role (e.g. a new tool role) ahead of the dashboard; a strict
- *   enum would silently drop valid messages during the deploy window.
+ * - `role` is a closed row classification; server failure is its own row.
  *
  * Rolled out as part of #7441 (P2 rollout) following pilot #7439.
  */
@@ -276,7 +274,7 @@ export const KeeperChatHistoryMessageSchema = object({
   // Keeper_autonomous_turn_source) must mint one too — safeParse drops any
   // row without a non-blank id, with no error surface.
   id: string(),
-  role: string(),
+  role: union([literal('user'), literal('assistant'), literal('system'), literal('tool'), literal('request_failure')]),
   // Autonomous turns can complete through tools without terminal prose. The
   // backend keeps that distinct as null while still projecting the work trace.
   content: nullable(string()),
@@ -331,10 +329,6 @@ export const KeeperChatHistoryMessageSchema = object({
   // RFC-0235 P3: server-parsed rich chat blocks. Carried on history rows so
   // reloads preserve the structured render instead of re-parsing plain text.
   blocks: optional(array(KeeperChatBlockSchema)),
-  // Row kind (keeper_chat_store.ml :838-841). `transport_failure` is minted
-  // so a reload can tell a failed request apart from a real keeper reply;
-  // open string() per the same deploy-window rationale as `role`.
-  kind: optional(string()),
   // Durable typed Gate lifecycle projection. Kept unknown at this transport
   // edge and decoded by keeper-state so a malformed status cannot delete the
   // surrounding history row during a rolling deploy.

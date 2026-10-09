@@ -44,7 +44,7 @@ function assistantEntry(operationId?: string): void {
     delivery: 'sending',
     streamState: 'opening',
     ...(operationId
-      ? { deliveryProvenance: operationDeliveryProvenance(operationId, 'terminal_assistant') }
+      ? { deliveryProvenance: operationDeliveryProvenance(operationId, 'terminal_result') }
       : {}),
     details: null,
   })
@@ -342,7 +342,7 @@ describe('Keeper operation stream projection', () => {
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
     expect(entry?.delivery).toBe('queued')
     expect(entry?.deliveryProvenance).toEqual(
-      operationDeliveryProvenance('kmsg-operation-1', 'terminal_assistant'),
+      operationDeliveryProvenance('kmsg-operation-1', 'terminal_result'),
     )
   })
 
@@ -394,7 +394,7 @@ describe('Keeper operation stream projection', () => {
         timestamp: null,
         deliveryProvenance: operationDeliveryProvenance(
           operationId,
-          'terminal_assistant',
+          'terminal_result',
         ),
         delivery: 'queued',
         streamState: null,
@@ -411,12 +411,12 @@ describe('Keeper operation stream projection', () => {
     expect(entries.find(entry => isOperationDeliveryProvenance(
       entry.deliveryProvenance,
       'kmsg-operation-1',
-      'terminal_assistant',
+      'terminal_result',
     ))?.text).toBe('')
     expect(entries.find(entry => isOperationDeliveryProvenance(
       entry.deliveryProvenance,
       'kmsg-operation-2',
-      'terminal_assistant',
+      'terminal_result',
     ))?.text).toBe('second')
   })
 
@@ -438,7 +438,7 @@ describe('Keeper operation stream projection', () => {
       timestamp: null,
       deliveryProvenance: operationDeliveryProvenance(
         'kmsg-operation-1',
-        'terminal_assistant',
+        'terminal_result',
       ),
       delivery: 'streaming',
       streamState: 'streaming',
@@ -478,7 +478,7 @@ describe('Keeper operation stream projection', () => {
       timestamp: null,
       deliveryProvenance: operationDeliveryProvenance(
         'kmsg-opening',
-        'terminal_assistant',
+        'terminal_result',
       ),
       delivery: 'sending',
       streamState: 'opening',
@@ -511,7 +511,7 @@ describe('Keeper operation stream projection', () => {
       timestamp: null,
       deliveryProvenance: operationDeliveryProvenance(
         'kmsg-interrupted',
-        'terminal_assistant',
+        'terminal_result',
       ),
       delivery: 'interrupted',
       streamState: null,
@@ -612,7 +612,7 @@ describe('Keeper operation stream projection', () => {
       timestamp: null,
       deliveryProvenance: operationDeliveryProvenance(
         'kmsg-operation-1',
-        'terminal_assistant',
+        'terminal_result',
       ),
       delivery: 'streaming',
       streamState: 'streaming',
@@ -679,7 +679,7 @@ describe('Keeper operation stream projection', () => {
         timestamp: null,
         deliveryProvenance: operationDeliveryProvenance(
           operationId,
-          'terminal_assistant',
+          'terminal_result',
         ),
         delivery: 'streaming',
         streamState: 'thinking',
@@ -724,6 +724,70 @@ describe('Keeper operation stream projection', () => {
   })
 })
 
+
+  it('a persisted request failure terminal keeps a late operation event from reopening the operation', () => {
+    // keeper-state normalizes a persisted request_failure row to a
+    // system-role entry with terminal_result provenance. The operation it
+    // terminated is finished: a delayed broadcast for the same operation
+    // must be ignored, not appended as a fresh assistant bubble.
+    const operationId = 'late-event-after-failure'
+    appendThreadEntry('sangsu', {
+      id: 'persisted-failure',
+      role: 'system',
+      source: 'direct_assistant',
+      label: 'sangsu',
+      text: 'REQUEST_FAILURE_DIAGNOSTIC',
+      rawText: 'REQUEST_FAILURE_DIAGNOSTIC',
+      timestamp: new Date().toISOString(),
+      delivery: 'request_failure',
+      deliveryProvenance: operationDeliveryProvenance(operationId, 'terminal_result'),
+      details: null,
+    })
+    const before = [...(keeperThreads.value.sangsu ?? [])]
+    const applied = applyKeeperOperationTurnEvent('sangsu', {
+      operationId,
+      event: { type: 'TEXT_MESSAGE_CONTENT', delta: 'late fragment' },
+    })
+    const after = keeperThreads.value.sangsu ?? []
+    expect(applied).toBe(null)
+    expect(after.length).toBe(before.length)
+    expect(after.every(entry => entry.role !== 'assistant' || entry.delivery !== 'sending'))
+      .toBe(true)
+    expect(after.some(entry => entry.id === 'persisted-failure'
+      && entry.delivery === 'request_failure')).toBe(true)
+  })
+
+  it('a persisted request failure terminal keeps a late operation event from reopening the operation', () => {
+    // keeper-state normalizes a persisted request_failure row to a
+    // system-role entry with terminal_result provenance. The operation it
+    // terminated is finished: a delayed broadcast for the same operation
+    // must be ignored, not appended as a fresh assistant bubble.
+    const operationId = 'late-event-after-failure'
+    appendThreadEntry('sangsu', {
+      id: 'persisted-failure',
+      role: 'system',
+      source: 'direct_assistant',
+      label: 'sangsu',
+      text: 'REQUEST_FAILURE_DIAGNOSTIC',
+      rawText: 'REQUEST_FAILURE_DIAGNOSTIC',
+      timestamp: new Date().toISOString(),
+      delivery: 'request_failure',
+      deliveryProvenance: operationDeliveryProvenance(operationId, 'terminal_result'),
+      details: null,
+    })
+    const before = [...(keeperThreads.value.sangsu ?? [])]
+    const applied = applyKeeperOperationTurnEvent('sangsu', {
+      operationId,
+      event: { type: 'TEXT_MESSAGE_CONTENT', delta: 'late fragment' },
+    })
+    const after = keeperThreads.value.sangsu ?? []
+    expect(applied).toBe(null)
+    expect(after.length).toBe(before.length)
+    expect(after.every(entry => entry.role !== 'assistant' || entry.delivery !== 'sending'))
+      .toBe(true)
+    expect(after.some(entry => entry.id === 'persisted-failure'
+      && entry.delivery === 'request_failure')).toBe(true)
+  })
 
 describe('applyKeeperStreamEvent tool calls', () => {
   beforeEach(() => {

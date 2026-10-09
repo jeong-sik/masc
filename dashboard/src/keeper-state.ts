@@ -224,6 +224,7 @@ export function isDefaultVisibleConversationEntry(entry: KeeperConversationEntry
     || isToolConversationEntry(entry)
     || isAutonomousTurnEntry(entry)
     || entry.approvalLifecycle != null
+    || entry.delivery === 'request_failure'
 }
 
 const APPROVAL_LIFECYCLE_PHASES = new Set<KeeperApprovalLifecyclePhase>([
@@ -894,7 +895,7 @@ function normalizeHistoryEntry(
   if (!isRecord(raw)) return null
   const id = asString(raw.id)?.trim() ?? ''
   if (!id) return null
-  const role = normalizeRole(raw.role)
+  const role = raw.role === 'request_failure' ? 'system' : normalizeRole(raw.role)
   const rawText = asString(raw.content, asString(raw.preview, ''))
   const attachments = normalizeAttachments(raw.attachments)
   const audio = normalizeAudioClip(raw.audio) ?? null
@@ -926,15 +927,12 @@ function normalizeHistoryEntry(
   const turnRef = asString(raw.turn_ref) ?? null
   const executionId = asString(raw.execution_id)
   const deliveryProvenance = deliveryProvenanceFromRaw(raw)
-  // keeper_chat_store mints kind=transport_failure (row content is the
-  // "Keeper request failed: ..." text) so a reload can tell a failed request
-  // apart from a real reply. Preserve that writer-declared provenance as its
-  // own delivery variant: generic client/tool errors have different watermark
-  // semantics and must not inherit the durable-row reassurance.
+  // Failed requests are server records, never Keeper speech. UI delivery
+  // state is derived from that record type rather than a second row marker.
   const delivery: KeeperConversationDelivery =
-    asString(raw.kind) === 'transport_failure' ? 'transport_failure' : 'history'
+    raw.role === 'request_failure' ? 'request_failure' : 'history'
   const blocks = serverBlocks
-    ?? (delivery !== 'transport_failure' && (role === 'assistant' || role === 'system') && text
+    ?? (delivery !== 'request_failure' && (role === 'assistant' || role === 'system') && text
       ? parseTextToChatBlocks(text)
       : undefined)
   const streamContract = approvalLifecycle
@@ -959,7 +957,7 @@ function normalizeHistoryEntry(
     deliveryProvenance: deliveryProvenance.value,
     ...(executionId ? { executionId } : {}),
     delivery,
-    error: delivery === 'transport_failure' ? rawText : null,
+    error: delivery === 'request_failure' ? rawText : null,
     streamState: null,
     streamContract,
     details: null,
@@ -1470,7 +1468,7 @@ function mergeLocalAssistantTraceSteps(
   // (#21748).
   consumed: Set<string>,
 ): KeeperConversationEntry {
-  if (historyEntry.role !== 'assistant') return historyEntry
+  if (historyEntry.role !== 'assistant' && historyEntry.delivery !== 'request_failure') return historyEntry
   const historyProvenance = historyEntry.deliveryProvenance
   const localTraceSourceByProvenance = historyProvenance
     ? localEntries.find(
@@ -1617,8 +1615,6 @@ interface RestChatHistoryMessage {
     mime_type: string
     data: string
   }>
-  // Row kind; 'transport_failure' distinguishes a persisted failed request.
-  kind?: string
   // Typed durable Gate approval/replay status projected by keeper_chat_store.
   approval_lifecycle?: unknown
   // RFC-0235 P3: backend-parsed rich chat blocks. When present the dashboard
@@ -1687,7 +1683,7 @@ function toolHistoryEntry(message: RestChatHistoryMessage): KeeperConversationEn
       && (executionId === null || slot.execution_id !== executionId))
     || (slot?.kind === 'tool_delivery' && executionId !== null)
     || slot?.kind === 'accepted_user'
-    || slot?.kind === 'terminal_assistant'
+    || slot?.kind === 'terminal_result'
   ) return null
   return {
     id: message.id,
@@ -1759,7 +1755,6 @@ export function chatHistoryEntriesFromRest(
         speaker_authority: message.speaker_authority,
         audio: message.audio,
         attachments: message.attachments,
-        kind: message.kind,
         approval_lifecycle: message.approval_lifecycle,
         blocks: message.blocks,
         turn_ref: message.turn_ref,

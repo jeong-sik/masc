@@ -223,10 +223,10 @@ describe('thread history merge & persistence', () => {
   })
 
   it('does not duplicate a local message when server history arrives with a different timestamp', () => {
-    appendThreadEntry('echo', entry({ id: 'local-1', text: 'gg', rawText: 'gg', deliveryProvenance: operationDeliveryProvenance('kmsg-r1', 'terminal_assistant'), timestamp: '2026-06-10T00:00:01.000Z' }))
+    appendThreadEntry('echo', entry({ id: 'local-1', text: 'gg', rawText: 'gg', deliveryProvenance: operationDeliveryProvenance('kmsg-r1', 'terminal_result'), timestamp: '2026-06-10T00:00:01.000Z' }))
 
     mergeServerHistoryEntries('echo', [
-      entry({ id: 'hist-1', text: 'gg', rawText: 'gg', deliveryProvenance: operationDeliveryProvenance('kmsg-r1', 'terminal_assistant'), delivery: 'history', timestamp: '2026-06-10T00:00:05.000Z' }),
+      entry({ id: 'hist-1', text: 'gg', rawText: 'gg', deliveryProvenance: operationDeliveryProvenance('kmsg-r1', 'terminal_result'), delivery: 'history', timestamp: '2026-06-10T00:00:05.000Z' }),
     ])
 
     const matches = (keeperThreads.value.echo ?? []).filter(e => e.text === 'gg')
@@ -240,7 +240,7 @@ describe('thread history merge & persistence', () => {
       role: 'assistant',
       text: 'final answer',
       rawText: 'final answer',
-      deliveryProvenance: operationDeliveryProvenance('kmsg-r1', 'terminal_assistant'),
+      deliveryProvenance: operationDeliveryProvenance('kmsg-r1', 'terminal_result'),
       delivery: 'streaming',
       streamState: 'streaming',
     }))
@@ -257,7 +257,7 @@ describe('thread history merge & persistence', () => {
         role: 'assistant',
         text: 'final answer',
         rawText: 'final answer',
-        deliveryProvenance: operationDeliveryProvenance('kmsg-r1', 'terminal_assistant'),
+        deliveryProvenance: operationDeliveryProvenance('kmsg-r1', 'terminal_result'),
         delivery: 'history',
         timestamp: '2026-06-10T00:00:05.000Z',
       }),
@@ -272,8 +272,29 @@ describe('thread history merge & persistence', () => {
     ])
   })
 
+  it('reconciles a server failure visibly while retaining its exact live trace', () => {
+    const provenance = operationDeliveryProvenance('failed-trace-operation', 'terminal_result');
+    const traceSteps: ChatTraceStep[] = [{ kind: 'think', text: 'work before failure', ts: '2026-06-10T00:00:05.000Z' }];
+    appendThreadEntry('echo', entry({
+      id: 'live-failed-result', role: 'assistant', source: 'direct_assistant',
+      delivery: 'streaming', text: '', traceSteps, deliveryProvenance: provenance,
+    }));
+    const history = chatHistoryEntriesFromRest('echo', [{
+      id: 'server-failed-result', role: 'request_failure', content: 'request failed', ts: 1780000001,
+      delivery_provenance_status: 'valid', delivery_provenance: provenance,
+    }]);
+    mergeServerHistoryEntries('echo', history);
+    const result = keeperThreads.value.echo!;
+    expect(result).toHaveLength(1);
+    expect(result[0]?.role).toBe('system');
+    expect(result[0]?.delivery).toBe('request_failure');
+    expect(result[0]?.traceSteps).toEqual(traceSteps);
+    expect(isDefaultVisibleConversationEntry(result[0]!)).toBe(true);
+    expect(isVisibleDirectConversationEntry(result[0]!)).toBe(false);
+  });
+
   it('keeps canonical persisted trace over a stale local trace', () => {
-    const provenance = operationDeliveryProvenance('kmsg-canonical-trace', 'terminal_assistant')
+    const provenance = operationDeliveryProvenance('kmsg-canonical-trace', 'terminal_result')
     appendThreadEntry('echo', entry({
       id: 'assistant-local-stale',
       role: 'assistant',
@@ -322,7 +343,7 @@ describe('thread history merge & persistence', () => {
       role: 'assistant',
       text: 'done',
       rawText: 'done',
-      deliveryProvenance: operationDeliveryProvenance('kmsg-ra', 'terminal_assistant'),
+      deliveryProvenance: operationDeliveryProvenance('kmsg-ra', 'terminal_result'),
       delivery: 'delivered',
       streamState: null,
       timestamp: '2026-06-10T00:00:01.000Z',
@@ -332,7 +353,7 @@ describe('thread history merge & persistence', () => {
       role: 'assistant',
       text: 'done',
       rawText: 'done',
-      deliveryProvenance: operationDeliveryProvenance('kmsg-rb', 'terminal_assistant'),
+      deliveryProvenance: operationDeliveryProvenance('kmsg-rb', 'terminal_result'),
       delivery: 'delivered',
       streamState: null,
       timestamp: '2026-06-10T00:00:02.000Z',
@@ -341,8 +362,8 @@ describe('thread history merge & persistence', () => {
     appendAssistantThinkingDelta('echo', 'local-b', 'second turn reasoning')
 
     mergeServerHistoryEntries('echo', [
-      entry({ id: 'hist-a', role: 'assistant', text: 'done', rawText: 'done', deliveryProvenance: operationDeliveryProvenance('kmsg-ra', 'terminal_assistant'), delivery: 'history', timestamp: '2026-06-10T00:00:01.000Z' }),
-      entry({ id: 'hist-b', role: 'assistant', text: 'done', rawText: 'done', deliveryProvenance: operationDeliveryProvenance('kmsg-rb', 'terminal_assistant'), delivery: 'history', timestamp: '2026-06-10T00:00:02.000Z' }),
+      entry({ id: 'hist-a', role: 'assistant', text: 'done', rawText: 'done', deliveryProvenance: operationDeliveryProvenance('kmsg-ra', 'terminal_result'), delivery: 'history', timestamp: '2026-06-10T00:00:01.000Z' }),
+      entry({ id: 'hist-b', role: 'assistant', text: 'done', rawText: 'done', deliveryProvenance: operationDeliveryProvenance('kmsg-rb', 'terminal_result'), delivery: 'history', timestamp: '2026-06-10T00:00:02.000Z' }),
     ])
 
     const thread = keeperThreads.value.echo ?? []
@@ -454,7 +475,7 @@ describe('thread history merge & persistence', () => {
       rawText: '',
       delivery: 'error',
       timestamp: '2026-06-10T00:00:04.000Z',
-      deliveryProvenance: operationDeliveryProvenance(R, 'terminal_assistant'),
+      deliveryProvenance: operationDeliveryProvenance(R, 'terminal_result'),
       traceSteps,
     }))
 
@@ -462,7 +483,7 @@ describe('thread history merge & persistence', () => {
       { role: 'user', content: '질문', ts: 1_780_000_001, delivery_provenance: operationDeliveryProvenance(R, 'accepted_user'), delivery_provenance_status: 'valid' },
       { role: 'tool', content: '{"path":"a"}', ts: 1_780_000_002, tool_call_id: 'call-1', execution_id: 'exec-call-1', tool_call_name: 'read_file', delivery_provenance: { delivery_key: { kind: 'operation', operation_id: R }, transcript_slot: { kind: 'tool_call', execution_id: 'exec-call-1', ordinal: 0 } }, delivery_provenance_status: 'valid' },
       { role: 'tool', content: '{"path":"b"}', ts: 1_780_000_003, tool_call_id: 'call-2', execution_id: 'exec-call-2', tool_call_name: 'write_file', delivery_provenance: { delivery_key: { kind: 'operation', operation_id: R }, transcript_slot: { kind: 'tool_call', execution_id: 'exec-call-2', ordinal: 1 } }, delivery_provenance_status: 'valid' },
-      { role: 'assistant', content: '답변', ts: 1_780_000_004, turn_ref: 'trace-x#1', delivery_provenance: operationDeliveryProvenance(R, 'terminal_assistant'), delivery_provenance_status: 'valid' },
+      { role: 'assistant', content: '답변', ts: 1_780_000_004, turn_ref: 'trace-x#1', delivery_provenance: operationDeliveryProvenance(R, 'terminal_result'), delivery_provenance_status: 'valid' },
     ])
     mergeServerHistoryEntries('echo', history)
 
@@ -473,7 +494,7 @@ describe('thread history merge & persistence', () => {
     expect(assistants[0]?.text).toBe('답변')
     expect(assistants[0]?.delivery).toBe('history')
     expect(assistants[0]?.deliveryProvenance).toEqual(
-      operationDeliveryProvenance(R, 'terminal_assistant'),
+      operationDeliveryProvenance(R, 'terminal_result'),
     )
     // The interrupted placeholder's live tool trace is inherited.
     expect(assistants[0]?.traceSteps).toEqual(traceSteps)
@@ -554,7 +575,7 @@ describe('thread history merge & persistence', () => {
         text: 'hello',
         rawText: 'hello',
         delivery: 'history',
-        deliveryProvenance: operationDeliveryProvenance('kmsg-slot', 'terminal_assistant'),
+        deliveryProvenance: operationDeliveryProvenance('kmsg-slot', 'terminal_result'),
       }),
     ])
 
@@ -570,7 +591,7 @@ describe('thread history merge & persistence', () => {
       role: 'assistant',
       text: 'done',
       rawText: 'done',
-      deliveryProvenance: operationDeliveryProvenance('kmsg-repeat', 'terminal_assistant'),
+      deliveryProvenance: operationDeliveryProvenance('kmsg-repeat', 'terminal_result'),
     }))
     const history = [entry({
       id: 'history-assistant',
@@ -578,7 +599,7 @@ describe('thread history merge & persistence', () => {
       text: 'done',
       rawText: 'done',
       delivery: 'history',
-      deliveryProvenance: operationDeliveryProvenance('kmsg-repeat', 'terminal_assistant'),
+      deliveryProvenance: operationDeliveryProvenance('kmsg-repeat', 'terminal_result'),
     })]
 
     mergeServerHistoryEntries('echo', history)
@@ -598,12 +619,12 @@ describe('thread history merge & persistence', () => {
       rawText: 'done',
       delivery: 'delivered',
       timestamp: '2026-06-10T00:00:01.000Z',
-      deliveryProvenance: operationDeliveryProvenance('kmsg_1', 'terminal_assistant'),
+      deliveryProvenance: operationDeliveryProvenance('kmsg_1', 'terminal_result'),
       turnRef: 'trace-shared#1',
     }))
 
     mergeServerHistoryEntries('echo', [
-      entry({ id: 'hist-b', role: 'assistant', text: 'done', rawText: 'done', delivery: 'history', timestamp: '2026-06-10T00:00:02.000Z', deliveryProvenance: operationDeliveryProvenance('kmsg_2', 'terminal_assistant'), turnRef: 'trace-shared#1' }),
+      entry({ id: 'hist-b', role: 'assistant', text: 'done', rawText: 'done', delivery: 'history', timestamp: '2026-06-10T00:00:02.000Z', deliveryProvenance: operationDeliveryProvenance('kmsg_2', 'terminal_result'), turnRef: 'trace-shared#1' }),
     ])
 
     const ids = (keeperThreads.value.echo ?? []).map(e => e.id)
@@ -1063,9 +1084,9 @@ describe('thread history merge & persistence', () => {
   it('marks a transport_failure row as error delivery, not a saved reply', () => {
     const entries = chatHistoryEntriesFromRest('echo', [
       { role: 'user', content: 'do it', ts: 1_780_000_000 },
-      { role: 'assistant', content: 'Keeper request failed: timeout', ts: 1_780_000_000, kind: 'transport_failure' },
+      { role: 'request_failure', content: 'Keeper request failed: timeout', ts: 1_780_000_000 },
     ])
-    expect(entries[1]?.delivery).toBe('transport_failure')
+    expect(entries[1]?.delivery).toBe('request_failure')
     expect(entries[1]?.error).toBe('Keeper request failed: timeout')
     // A normal reply on the same role stays 'history'.
     const ok = chatHistoryEntriesFromRest('echo', [

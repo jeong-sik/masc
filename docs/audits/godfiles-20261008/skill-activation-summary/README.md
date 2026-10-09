@@ -51,7 +51,7 @@ revision fixture was looked up under `fixtures/` relative to the root. The same
 binary passed all 35 from the suite's `test/` directory. [ledger.log](ledger.log)
 retains that first failure; it was not a product-code fix. Successful cases are
 counted once, yielding 45 distinct existing cases. [source-sha256.json](source-sha256.json)
-records 12 source/context identities and [extraction-comparison.json](extraction-comparison.json)
+records 11 source/context identities and [extraction-comparison.json](extraction-comparison.json)
 checks the stated declaration/body boundaries. No tests are added to mirror module placement.
 Live Keeper/provider/UI, installation, deployment, full CI, whole-stack approval
 and completion of the original 171-candidate campaign remain unverified.

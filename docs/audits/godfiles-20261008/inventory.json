@@ -354,7 +354,10 @@
       "path": "lib/keeper/keeper_skill_activation_ledger.ml",
       "baseline_lines": 2609,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: canonical immutable evidence and pure total/scoped summaries separated; public private/abstract contracts and codec/replay/storage/revision effects preserved; remaining codec/replay/storage and repeated-scan performance audit pending",
+      "current_lines": 2253,
+      "prs": [42089],
+      "validation_artifact": "skill-activation-summary/README.md"
     },
     {
       "path": "lib/keeper/keeper_tool_composition_surface.ml",

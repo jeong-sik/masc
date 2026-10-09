@@ -822,8 +822,9 @@ val clamped_scrolled_rows :
     layout pass. Calling {!clamp_scroll} and then {!scrolled_rows} separately
     is still available to independent callers, but a frame that needs both
     should use this function so the same entry is not rendered twice.
-    [body_positions] describes the actual scrolled rows, oldest first. When
-    [requested <= 0] it is empty: the gap/compression view follows new output. *)
+    [body_positions] describes the actual selected rows, oldest first, including
+    the live-edge view. Generated gaps and synthesized repeat rows have no
+    original body owner and are omitted. *)
 
 val scroll_for_body_row :
   ?markdown:(entry:entry -> width:int -> string list) ->

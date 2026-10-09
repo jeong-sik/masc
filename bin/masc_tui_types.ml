@@ -14,6 +14,8 @@ module Snapshot_read : sig
   type intent = Poll | Refresh
 
   val idle : t
+  (** Stable per-source ticket for correlating runtime diagnostics. *)
+  val request_id : request -> int
   val start : intent:intent -> t -> t * request option
   val invalidate : t -> t
   (** Retire a pending owner without reusing its request number. *)
@@ -26,6 +28,7 @@ end = struct
   type intent = Poll | Refresh
 
   let idle = { next = 0; pending = None }
+  let request_id request = request
 
   let invalidate state = { state with pending = None }
 
@@ -6229,6 +6232,9 @@ type state = {
   mutable code_history:
     (code_workspace_scope * string, code_history_listing) Masc_tui_fetched.t;
   mutable code_history_open: bool;
+  mutable code_history_expanded: int option;
+      (** Listing occurrence whose recorded text is expanded. Reset when a new
+          listing lands; equal payloads remain distinct timeline records. *)
   mutable code_history_scroll: int;  (** Physical wrapped rows; Enter resolves the visible row owner. *)
   (* The file pane's diff view: d on an open file swaps the content for what
      the working tree holds against HEAD, keyed the same way. One overlay at
@@ -9100,6 +9106,7 @@ let create_state
   code_focus_file = Left_pane;
   code_history = Masc_tui_fetched.initial;
   code_history_open = false;
+  code_history_expanded = None;
   code_history_scroll = 0;
   code_diff = Masc_tui_fetched.initial;
   code_diff_open = false;

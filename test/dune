@@ -9823,3 +9823,7 @@
   masc_tui_runtime_config_view masc_tui_account_login))
 
 (include stanzas/test_tui_code_history_sources_pty.inc)
+
+(include stanzas/test_tui_code_history_diff_pty.inc)
+
+(include stanzas/test_tui_code_history_task_pty.inc)

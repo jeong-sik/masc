@@ -2897,8 +2897,7 @@ type runtime_config_save_error = Masc_tui_editor_wire.runtime_config_save_error 
 type skill_editor_loaded = Masc_tui_editor_wire.skill_editor_loaded =
   { sel_reference : Skill_reference.t
   ; sel_source_text : string
-  ; sel_access : string
-  ; sel_snapshot_revision : string
+  ; sel_access : Skill_source_config.access
   }
 
 type skill_editor_save_status = Masc_tui_editor_wire.skill_editor_save_status =

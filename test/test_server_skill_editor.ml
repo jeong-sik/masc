@@ -110,7 +110,14 @@ let test_load_preview_and_publish () =
    | Error error -> fail (Editor.error_to_string error)
    | Ok loaded ->
      check string "exact source" original loaded.source_text;
-     check string "write access" "read_write" (Editor.access_to_string loaded.access));
+     check string "write access" "read_write" (Editor.access_to_string loaded.access);
+     (match Masc_tui_editor_wire.decode_skill_editor_loaded (Editor.loaded_to_yojson loaded) with
+      | Ok client ->
+        check bool "client keeps writable source access" true
+          (client.sel_access = Skill_source_config.Read_write);
+        check bool "client keeps exact reference" true
+          (Skill_reference.equal reference client.sel_reference)
+      | Error detail -> fail detail));
   let edited = skill_text "Edited description." "# Edited" in
   (match Editor.preview ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ())) ~base_path reference ~source_text:edited with
    | Error error -> fail (Editor.error_to_string error)
@@ -303,6 +310,13 @@ let test_external_edit_causes_revision_conflict () =
 let test_read_only_source_rejects_save () =
   with_workspace @@ fun base_path ->
   let _, _, reference, refresh = setup base_path ~access:"read-only" in
+  (match Editor.load ~base_path reference with
+   | Error error -> fail (Editor.error_to_string error)
+   | Ok loaded ->
+     (match Masc_tui_editor_wire.decode_skill_editor_loaded (Editor.loaded_to_yojson loaded) with
+      | Ok client -> check bool "client keeps read-only source access" true
+          (client.sel_access = Skill_source_config.Read_only)
+      | Error detail -> fail detail));
   let candidate = skill_text "Edited." "# Edited" in
   match Editor.save ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ())) ~base_path ~reference ~source_text:candidate ~refresh with
   | Error Editor.Source_read_only -> ()
@@ -1222,6 +1236,34 @@ let test_server_skill_snapshot_runtime_refresh () =
        fail "unexpected workspace retired")
 ;;
 
+let test_client_read_contract () =
+  with_workspace @@ fun base_path ->
+  let _, original, reference, _ = setup base_path ~access:"read-write" in
+  let fields =
+    match Editor.load ~base_path reference with
+    | Error error -> fail (Editor.error_to_string error)
+    | Ok loaded ->
+      (match Editor.loaded_to_yojson loaded with
+       | `Assoc fields -> fields
+       | _ -> fail "server read response must be an object")
+  in
+  let without_snapshot = List.remove_assoc "snapshot_revision" fields in
+  (match Masc_tui_editor_wire.decode_skill_editor_loaded (`Assoc without_snapshot) with
+   | Ok client ->
+     check string "read text does not depend on unused snapshot metadata" original client.sel_source_text;
+     check bool "read reference remains exact without metadata" true
+       (Skill_reference.equal reference client.sel_reference)
+   | Error detail -> fail detail);
+  let rejects label field value =
+    let json = `Assoc ((field, value) :: List.remove_assoc field fields) in
+    check bool label true
+      (Result.is_error (Masc_tui_editor_wire.decode_skill_editor_loaded json))
+  in
+  rejects "unknown permission cannot become read-only" "access" (`String "future_access");
+  rejects "non-string permission is refused" "access" (`Bool true);
+  rejects "invalid exact reference is refused" "reference" `Null
+;;
+
 let () =
   Eio_main.run @@ fun _env ->
   run
@@ -1289,6 +1331,8 @@ let () =
             test_deleted_but_unpublished_is_explicit
         ; test_case "server skill snapshot runtime refresh from observation" `Quick
             test_server_skill_snapshot_runtime_refresh
+        ; test_case "client read contract rejects unknown authority" `Quick
+            test_client_read_contract
         ] )
     ]
 ;;

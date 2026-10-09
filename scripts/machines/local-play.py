@@ -64,7 +64,17 @@ class Session:
             if not line:
                 self.record({'event': 'outcome_unknown', 'request_id': ident})
                 raise RuntimeError('worker ended before replying; inspect journal and stderr, do not replay blindly')
-            reply = json.loads(line)
+            self.record({'event': 'response_raw', 'request_id': ident, 'line': line})
+            try:
+                reply = json.loads(line)
+            except json.JSONDecodeError as error:
+                self.record({'event': 'outcome_unknown', 'request_id': ident,
+                             'reason': 'invalid_json_response', 'detail': str(error)})
+                raise RuntimeError('worker response was not JSON; inspect journal before retrying') from error
+            if not isinstance(reply, dict):
+                self.record({'event': 'outcome_unknown', 'request_id': ident,
+                             'reason': 'invalid_response_shape'})
+                raise RuntimeError('worker response was not an object; inspect journal before retrying')
             self.record({'event': 'response', 'message': reply})
             if reply.get('id') != ident:
                 continue

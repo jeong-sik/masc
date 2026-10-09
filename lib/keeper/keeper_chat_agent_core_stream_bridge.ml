@@ -62,6 +62,7 @@ type state =
   ; scope_disposition : scope_disposition
   ; current_message_has_text : bool
   ; last_completed_message_has_text : bool
+  ; last_completed_stream_scope : int option
   ; message_open : bool
   ; current_provider_message_id : string option
   ; current_message_start :
@@ -93,6 +94,7 @@ let empty_state () =
   ; scope_disposition = Scope_live
   ; current_message_has_text = false
   ; last_completed_message_has_text = false
+  ; last_completed_stream_scope = None
   ; message_open = false
   ; current_provider_message_id = None
   ; current_message_start = None
@@ -110,6 +112,7 @@ let reset_runtime_attempt_state state =
   ; scope_disposition = Scope_live
   ; current_message_has_text = false
   ; last_completed_message_has_text = false
+  ; last_completed_stream_scope = None
   ; message_open = false
   ; current_provider_message_id = None
   ; current_message_start = None
@@ -137,6 +140,14 @@ let terminal_message_had_text state =
   if state.message_open
   then state.current_message_has_text
   else state.last_completed_message_has_text
+
+let terminal_text_scope state =
+  if state.message_open then
+    if state.current_message_has_text then state.current_stream_scope else None
+  else if state.last_completed_message_has_text
+          && state.last_completed_stream_scope = state.current_stream_scope then
+    state.last_completed_stream_scope
+  else None
 
 let stream_block_for_index bridge_state index =
   List.assoc_opt index bridge_state.blocks_by_index
@@ -774,7 +785,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
       in
       let message_start =
         Agent_core_stream_message_start
-          { provider_message_id = id; model; usage }
+          { stream_scope; provider_message_id = id; model; usage }
       in
       if bridge_state.stream_phase <> Accepting_content
       then
@@ -794,15 +805,18 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
       else if
         Option.equal message_start_equal
           (Some incoming_start) bridge_state.current_message_start
-      then { bridge_state; chat_events = [ message_start ] }
+      then
+        (* This is a replay in the same still-open producer scope, not a new
+           response. Normalize it here, where scope authority is available;
+           downstream readers must not guess from reusable provider ids. *)
+        { bridge_state; chat_events = [] }
       else
-        let poisoned =
-          poison_scope bridge_state ~kind:Tool_message_start_conflict
-            ~reason:"conflicting MessageStart invalidated the provider stream scope"
-        in
-        { poisoned with chat_events = message_start :: poisoned.chat_events }
+        (* A rejected prelude cannot announce a new response before its
+           protocol error. Retain the existing response and diagnose failure. *)
+        poison_scope bridge_state ~kind:Tool_message_start_conflict
+          ~reason:"conflicting MessageStart invalidated the provider stream scope"
   | MessageDelta { stop_reason; usage } ->
-      let message_delta = Agent_core_stream_message_delta { stop_reason; usage } in
+      let message_delta = Agent_core_stream_message_delta { stream_scope; stop_reason; usage } in
       (match bridge_state.stream_phase, stop_reason with
        | Accepting_content, None ->
          { bridge_state; chat_events = [ message_delta ] }
@@ -835,6 +849,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
              ; current_message_has_text = false
              ; last_completed_message_has_text =
                  bridge_state.current_message_has_text
+             ; last_completed_stream_scope = bridge_state.current_stream_scope
              ; message_open = false
              }
          ; chat_events = closed.chat_events @ [ Agent_core_stream_message_stop ]
@@ -872,7 +887,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
               current_message_has_text =
                 bridge_state.current_message_has_text || not (String.equal text "")
             }
-        ; chat_events = [ Text_delta (redact_text text) ]
+        ; chat_events = [ Text_delta {text=redact_text text; stream_scope=Some stream_scope} ]
         })
   | ContentBlockDelta { index; delta = ThinkingDelta text } ->
       (match

@@ -18,7 +18,7 @@ let health raw =
 
 let runtime ?(keepalive_running = true) ?(health = health "healthy") ?(paused = false)
     ?(next_action = None) ?(activation_mode = Decode.Activation_autonomous)
-    ?(runtime_id = "anthropic.claude-opus-5") ?(phase = phase "running")
+    ?(runtime_id = "anthropic.claude-opus-5-5") ?(phase = phase "running")
     ?(sandbox_profile = "docker") name :
     Decode.keeper_runtime =
   { kr_name = name
@@ -600,7 +600,7 @@ let gate_row ?(health = "healthy") ?(paused = false)
                "updated_at":"2026-08-23T06:53:43Z","sandbox_profile":%S},
        "health":%S,"paused":%b,"next_action":%s,"runtime_blocker_summary":null,
        "candle_balance_milli":null,"candle_account_revision":null,"portrait":{"state":"ready","equipment":{"face":"bare_face","neck":"bare_neck","head":"bare_head","hand":"empty_hand","base":"no_dish"}},
-       "phase":%S,"keepalive_running":true,"activation_mode":"autonomous","runtime_id":"anthropic.claude-opus-5",
+       "phase":%S,"keepalive_running":true,"activation_mode":"autonomous","runtime_id":"anthropic.claude-opus-5-5",
        "created_at":"2026-08-21T17:32:29Z","updated_at":"2026-08-23T06:53:43Z"}|}
     name name name sandbox_profile health paused next_action phase
 

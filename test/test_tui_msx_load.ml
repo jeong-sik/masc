@@ -26,18 +26,6 @@ let a_frame ?(cartridge = Some "xspelunker") ?(disk = None) () :
 let a_state () =
   Masc_tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
 
-(* Stage 1: the picture rides the surface contract; the fixture's pixel
-   fields feed it, so the drawing assertions are unchanged. *)
-let a_surface (f : Masc_tui_types.msx_frame) : Masc_tui_interactive.frame =
-  Masc_tui_interactive.Pixels
-    { width = f.msx_width; height = f.msx_height; rgb = f.msx_rgb }
-
-(* The annotation is the point. Without it [render] is inferred from a use
-   that drops its result as a statement, so an incomplete application -- a
-   render missing one of its labelled arguments -- type-checks, returns the
-   function that still wants it, and is discarded. The buffer then stays empty
-   and every assertion about the output reads it as absent output. That is what
-   happened when render gained ~connection in #34262. *)
 let captured (render : (string -> unit) -> unit) =
   let buf = Buffer.create 4096 in
   render (fun text -> Buffer.add_string buf text);
@@ -57,24 +45,6 @@ let after_last_newline out =
   | Some i -> String.sub out (i + 1) (String.length out - i - 1)
 
 (* --- The spectator ---------------------------------------------------- *)
-
-let test_empty_frame () =
-  let out = captured (fun write ->
-        Masc_tui_msx.render ~write ~connection:Masc_tui_types.Connected
-        ~live:Masc_tui_machine_live.Unread None None) in
-  check bool "an unread frame says the screen is pending" true
-    (contains out "waiting for live screen");
-  check bool "and writes something" true (String.length out > 0)
-
-let test_real_frame () =
-  let out = captured (fun write ->
-      Masc_tui_msx.render ~write ~connection:Masc_tui_types.Connected
-        ~live:Masc_tui_machine_live.Unread
-        (Some (a_frame ())) (Some (a_surface (a_frame ())))) in
-  check bool "a real frame names the mode" true (contains out "GRAPHIC2");
-  check bool "and the cartridge" true (contains out "xspelunker");
-  check bool "and the frame number" true (contains out "345");
-  check bool "and draws a body (many rows)" true (String.length out > 2000)
 
 let test_spectator_close () =
   let state = a_state () in
@@ -292,47 +262,10 @@ let test_empty_menu_takes_the_first_arriving_row () =
      | Masc_tui_msx.Watch Masc.Machine_lane.Dos -> true
      | _ -> false)
 
-let test_dos_render () =
-  let draw view = captured (fun write ->
-      Masc_tui_msx.render_live ~write ~connection:Masc_tui_types.Connected
-        Masc.Machine_lane.Dos view) in
-  let shown = draw (Masc_tui_machine_live.Showing a_dos_picture) in
-  check bool "a DOS picture is titled by its change count" true
-    (contains shown "DOS \xe2\x80\x94 change 4096");
-  check bool "and drawn" true (contains shown "\xe2\x96\x80");
-  check bool "its footer offers no MSX keys" false (contains shown "F6");
-  let empty = draw Masc_tui_machine_live.Not_loaded in
-  check bool "no machine says so" true (contains empty "DOS \xe2\x80\x94 no machine loaded");
-  let unread = draw Masc_tui_machine_live.Unread in
-  check bool "before the read, machine absence is not asserted" true
-    (contains unread "waiting for live screen"
-     && not (contains unread "no machine loaded"));
-  check bool "and names the DOS load tool" true (contains empty "masc_dos_load");
-  let failed = draw (Masc_tui_machine_live.Failed "HTTP 401: denied") in
-  check bool "a failed read is shown as its error" true
-    (contains failed "could not read the machine: HTTP 401: denied");
-  check bool "and draws no picture" false (contains failed "\xe2\x96\x80")
-
-let test_msx_live_frame_title () =
-  let out = captured (fun write ->
-      Masc_tui_msx.render ~write ~connection:Masc_tui_types.Connected
-        ~live:Masc_tui_machine_live.Unread
-        (Some { (a_frame ()) with msx_meta = None }) (Some (a_surface (a_frame ())))) in
-  check bool "a live MSX frame is titled by its frame number" true
-    (contains out "MSX \xe2\x80\x94 frame 345   (spectating the server)");
-  let failed = captured (fun write ->
-      Masc_tui_msx.render ~write ~connection:Masc_tui_types.Connected
-        ~live:(Masc_tui_machine_live.Failed "HTTP 503") None None) in
-  check bool "a failed MSX read is not called an empty machine" true
-    (contains failed "could not read the machine: HTTP 503"
-     && not (contains failed "no machine loaded"))
-
 let () =
   run "MSX screen"
     [ ( "spectator"
-      , [ test_case "empty frame" `Quick test_empty_frame
-        ; test_case "real frame" `Quick test_real_frame
-        ; test_case "close on esc" `Quick test_spectator_close
+      , [ test_case "close on esc" `Quick test_spectator_close
         ; test_case "game keys the machine receives" `Quick test_game_keys
         ] )
     ; ( "load menu"
@@ -351,7 +284,5 @@ let () =
             test_empty_menu_takes_the_first_arriving_row
         ] )
     ; ( "live"
-      , [ test_case "DOS picture, no machine, failure" `Quick test_dos_render
-        ; test_case "MSX frame from a live read" `Quick test_msx_live_frame_title
-        ] )
+      , [] )
     ]

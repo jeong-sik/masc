@@ -108,17 +108,6 @@ val base_path_contention_message :
 
 val pid_lock_path : int -> string
 
-(** Deterministic external lease path for an already-canonical BasePath and
-    host run root. The path is below the current effective UID's private lease
-    directory; the full SHA-256 digest is a filesystem-safe index. Collisions
-    fail closed by contending on the same lease file. This function derives a
-    path only; [acquire_base_path_lock] establishes and validates the private
-    directory. *)
-val base_path_lock_path :
-  run_dir:string ->
-  canonical_base_path:string ->
-  string
-
 val status_line_is_healthy : string -> bool
 
 (** When [pid] started, as a source-tagged token: ["proc:<boot_id>:<ticks>"]
@@ -241,14 +230,24 @@ module For_testing : sig
 
   (** Immutable synchronization boundaries around the external lease open and
       the final identity checks. Production acquisition closes over no-op
-      functions; no mutable test hook is reachable from production callers. *)
+      functions; no mutable test hook is reachable from production callers.
+      [before_lease_commit] runs immediately before [lockf] with the freshly
+      opened lease descriptor and defaults to a no-op: it exists so tests can
+      deterministically fail the lock commit (for example by closing the
+      descriptor) and exercise the rejection's descriptor cleanup. *)
   val acquire_base_path_lock
-    :  before_lease_open:(unit -> unit)
+    :  ?before_lease_commit:(Unix.file_descr -> unit)
+    -> before_lease_open:(unit -> unit)
     -> before_commit_identity_check:(unit -> unit)
     -> before_runtime_identity_check:(unit -> unit)
     -> run_dir:string
     -> string
     -> base_path_acquire_result
+
+  (** The v2 (st_dev, st_ino)-digest lease file name of an already-canonical
+      BasePath, creating its private parent directory if needed. Name-only:
+      nothing is opened or locked. *)
+  val lease_path : run_dir:string -> canonical_base_path:string -> string
 end
 
 type owner_capture_error =

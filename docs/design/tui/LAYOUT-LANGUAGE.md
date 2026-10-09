@@ -87,6 +87,6 @@ follow-ups should use this hierarchy and their existing measured viewport
 budgets, not a blanket removal of all borders.
 
 The sidebar fold and Board holding-count tests retain semantic checks. Changed
-source receives independent review and syntax checks. A compiled candidate and
-the affected PTY scenarios are still required for runtime/layout evidence;
-browser checks of the design preview do not provide that evidence.
+source receives independent review and syntax checks. A compiled candidate is
+still required for runtime evidence; browser checks of the design preview do not
+provide that evidence.

@@ -10,7 +10,7 @@ version's own section, followed by one compare link to the previous release.
 The page lists what a reader acts on and counts the rest. Upgrade notes, known
 issues and what was added, changed, deprecated, removed or made faster are
 printed entry by entry. The headings in COUNTED are named with their entry
-count and a link to CHANGELOG.md, which keeps every entry: a release folds
+count and a link to their complete source (CHANGELOG.md by default): a release folds
 several hundred pull requests, and 0.50.0's fixes alone (651 entries, 125,100
 characters) were longer than the page can hold.
 
@@ -56,20 +56,24 @@ def split_sections(body: list[str]) -> tuple[list[str], list[tuple[str, list[str
     return preamble, sections
 
 
-def release_page(heading: str, body: list[str], changelog_url: str | None) -> str:
+def release_page(heading: str, body: list[str], changelog_url: str | None,
+                 *, counted_body: list[str] | None = None,
+                 counted_url: str | None = None) -> str:
     preamble, sections = split_sections(body)
     listed = [heading, *preamble]
-    counted: list[tuple[str, int]] = []
     for name, lines in sections:
-        if name in COUNTED:
-            entries = sum(1 for line in lines if line.startswith("- "))
-            if entries:
-                counted.append((name, entries))
-        else:
+        if name not in COUNTED:
             listed += [f"### {name}", *lines]
     page = "\n".join(listed).strip()
+    count_sections = sections if counted_body is None else split_sections(counted_body)[1]
+    totals = {name: sum(line.startswith("- ") for title, lines in count_sections
+                        if title == name for line in lines) for name in COUNTED}
+    counted = [(name, count) for name, count in totals.items() if count]
     if counted:
-        where = f"[CHANGELOG.md]({changelog_url})" if changelog_url else "CHANGELOG.md"
+        if counted_body is not None:
+            where = f"[complete changelog]({counted_url})"
+        else:
+            where = f"[CHANGELOG.md]({changelog_url})" if changelog_url else "CHANGELOG.md"
         rows = "\n".join(
             f"- {name}: {entries} {'entry' if entries == 1 else 'entries'}"
             for name, entries in counted
@@ -79,6 +83,56 @@ def release_page(heading: str, body: list[str], changelog_url: str | None) -> st
             f"Every entry is in {where} under `{heading}`."
         )
     return page
+
+
+def read_section(changelog: pathlib.Path, version: str, expect_date: str | None):
+    lines = changelog.read_text(encoding="utf-8").splitlines()
+    header = f"## [{version}]"
+    starts = [i for i, line in enumerate(lines) if line.startswith(header)]
+    if not starts:
+        print(
+            f"{changelog} has no {header} section; refusing to publish a "
+            f"release body that does not describe {version}",
+            file=sys.stderr,
+        )
+        return None
+    if len(starts) > 1:
+        line_numbers = ", ".join(str(i + 1) for i in starts)
+        print(
+            f"{changelog} has {len(starts)} {header} sections at lines "
+            f"{line_numbers}; refusing to publish only the first",
+            file=sys.stderr,
+        )
+        return None
+    start = starts[0]
+    if expect_date is not None:
+        heading = lines[start]
+        dated = heading[len(header):]
+        date = dated[len(" - "):].strip() if dated.startswith(" - ") else ""
+        if date != expect_date:
+            named = f"names {date}" if date else "names no date"
+            print(
+                f"{changelog} heading {heading!r} {named}, but the commit the "
+                f"tag will name is dated {expect_date} in UTC. Write "
+                f"'{header} - {expect_date}' before tagging {version}.",
+                file=sys.stderr,
+            )
+            return None
+    end = next(
+        (i for i in range(start + 1, len(lines)) if lines[i].startswith("## [")),
+        len(lines),
+    )
+    # A heading with no entries under it is as empty as a missing one: the
+    # version bump adds a bare stub, and a release cut before its entries are
+    # moved in would publish a page that says nothing about the release.
+    if not any(line.startswith("- ") for line in lines[start + 1 : end]):
+        print(
+            f"{changelog} {header} has no '- ' entries; move the release's "
+            f"entries into it before tagging {version}",
+            file=sys.stderr,
+        )
+        return None
+    return lines[start], lines[start + 1:end]
 
 
 def main(argv=None) -> int:
@@ -108,56 +162,32 @@ def main(argv=None) -> int:
         help="refuse a section whose heading date is not this YYYY-MM-DD, "
         "the UTC date of the commit the tag will name",
     )
+    parser.add_argument("--counts-changelog", type=pathlib.Path,
+                        help="complete record providing Fixed/Documentation/Internal counts")
+    parser.add_argument("--counts-changelog-url", help="tagged link to that complete record")
     args = parser.parse_args(argv)
     version, changelog, out = args.version, args.changelog, args.out
 
-    lines = changelog.read_text(encoding="utf-8").splitlines()
+    if args.counts_changelog is not None and args.counts_changelog_url is None:
+        print("--counts-changelog requires --counts-changelog-url", file=sys.stderr)
+        return 1
+    try:
+        source = read_section(changelog, version, args.expect_date)
+        details = (read_section(args.counts_changelog, version, args.expect_date)
+                   if args.counts_changelog is not None else None)
+    except OSError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+    if source is None or (args.counts_changelog is not None and details is None):
+        return 1
+    heading, lines = source
+    if details is not None and details[0] != heading:
+        print("summary and complete changelog must name the same version and date", file=sys.stderr)
+        return 1
     header = f"## [{version}]"
-    starts = [i for i, line in enumerate(lines) if line.startswith(header)]
-    if not starts:
-        print(
-            f"{changelog} has no {header} section; refusing to publish a "
-            f"release body that does not describe {version}",
-            file=sys.stderr,
-        )
-        return 1
-    if len(starts) > 1:
-        line_numbers = ", ".join(str(i + 1) for i in starts)
-        print(
-            f"{changelog} has {len(starts)} {header} sections at lines "
-            f"{line_numbers}; refusing to publish only the first",
-            file=sys.stderr,
-        )
-        return 1
-    start = starts[0]
-    if args.expect_date is not None:
-        heading = lines[start]
-        dated = heading[len(header):]
-        date = dated[len(" - "):].strip() if dated.startswith(" - ") else ""
-        if date != args.expect_date:
-            named = f"names {date}" if date else "names no date"
-            print(
-                f"{changelog} heading {heading!r} {named}, but the commit the "
-                f"tag will name is dated {args.expect_date} in UTC. Write "
-                f"'{header} - {args.expect_date}' before tagging {version}.",
-                file=sys.stderr,
-            )
-            return 1
-    end = next(
-        (i for i in range(start + 1, len(lines)) if lines[i].startswith("## [")),
-        len(lines),
-    )
-    # A heading with no entries under it is as empty as a missing one: the
-    # version bump adds a bare stub, and a release cut before its entries are
-    # moved in would publish a page that says nothing about the release.
-    if not any(line.startswith("- ") for line in lines[start + 1 : end]):
-        print(
-            f"{changelog} {header} has no '- ' entries; move the release's "
-            f"entries into it before tagging {version}",
-            file=sys.stderr,
-        )
-        return 1
-    section = release_page(lines[start], lines[start + 1 : end], args.changelog_url)
+    section = release_page(heading, lines, args.changelog_url,
+                           counted_body=details[1] if details is not None else None,
+                           counted_url=args.counts_changelog_url)
     appended = (
         args.append.read_text(encoding="utf-8").strip() if args.append else ""
     )

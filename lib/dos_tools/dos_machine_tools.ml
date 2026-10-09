@@ -1,0 +1,1060 @@
+(** Machine operations and ordered event buffering. The embedding process
+    supplies publication and controller-identity validation. *)
+module type HOST = sig
+  val relay : author:string -> string -> unit
+  val parse_controller : string -> (string, string) result
+end
+
+module Make (Host : HOST) = struct
+(** DOS lane tools — the workspace DOS machine, reachable from a keeper.
+
+    Follows RFC-0439 (the MSX machine lives in the server) for a second
+    machine. [masc_dos_load] boots a program, [masc_dos_screen] reads it,
+    [masc_dos_press] and [masc_dos_step] move its time, [masc_dos_eject] ends
+    it. The machine is {!Dos_lane}'s: one per workspace, in this process,
+    shared by every caller.
+
+    The observation is text: a DOS text page is characters, and this lane
+    hands them over as UTF-8 with code page 437 kept, so a keeper with no
+    vision runtime reads the game directly (RFC-0414). What makes the lane
+    playable is [settled]: the guest asked for a key {e and} the screen
+    stopped moving. [waiting_for_key] alone is not that — a program in its
+    own loop asks again 631 instructions after taking a key, with its
+    repaint half-written. *)
+
+open Tool_args
+
+let ( let* ) = Result.bind
+
+let reject ?(data = `Null) ~tool_name ~start_time message =
+  Tool_result.make_err ~tool_name ~class_:Tool_result.Workflow_rejection ~start_time ~data message
+;;
+
+let observation_fields (o : Dos_lane.observation) =
+  [ ("steps", `Int o.steps)
+  ; ("video_mode", `String (Printf.sprintf "%02xh" o.video_mode))
+  ; ("frame", `String (Printf.sprintf "%dx%d" o.width o.height))
+  ; ("cs_ip", `String (Printf.sprintf "%04x:%04x" o.cs o.ip))
+  ; ("psp", `String (Printf.sprintf "%04x" o.psp))
+  ; ("exited", `Bool o.exited)
+  ; ("exit_code", `Int o.exit_code)
+  ; ("halted", `Bool o.halted)
+  ; ("waiting_for_key", `Bool o.waiting_for_key)
+  ; ("ticks", `Int o.ticks)
+  ; ("screen_text", `String o.screen_text)
+  ; ("frame_nonblack", `Int o.frame_nonblack)
+  ; ("frame_ascii", `String o.frame_ascii)
+  ; ("program", match o.program with Some p -> `String p | None -> `Null)
+  ; ("controller", match o.controller with Some c -> `String c | None -> `Null)
+  ; ("saves_name", match o.saves_name with Some name -> `String name | None -> `Null)
+  ; ("files", `List (List.map (fun f -> `String f) o.files))
+  ]
+;;
+
+(* What the autosave at the end of a call did. A program that has exited
+   wrote none, and the field says nothing rather than "false": the call did
+   not fail to save, there was nothing to save. *)
+let autosave_fields = function
+  | Dos_lane.Not_attempted -> []
+  | Dos_lane.Autosaved -> [ ("autosave", `Assoc [ ("saved", `Bool true) ]) ]
+  | Dos_lane.Autosave_failed reason ->
+    [ ("autosave", `Assoc [ ("saved", `Bool false); ("reason", `String reason) ]) ]
+;;
+
+let ran_fields (r : Dos_lane.ran) =
+  [ ("steps_run", `Int r.Dos_lane.steps_run)
+  ; ("settled", `Bool r.Dos_lane.settled)
+  ; ("input_requests", `Int r.Dos_lane.input_requests)
+  ; ("keys_pressed", `Int r.Dos_lane.keys_pressed)
+  ; ("unsaved", `List (List.map (fun u -> `String u) r.Dos_lane.unsaved))
+  ]
+  @ autosave_fields r.Dos_lane.autosave
+;;
+
+(* A call runs up to [Dos_lane.max_steps_per_call] instructions under the
+   lane's stdlib lock, a noticeable fraction of a second. On a system thread
+   the server's other fibers keep running meanwhile; a fiber that reaches
+   the lock waits on its own thread too, since every lane call goes through
+   here. Only the lane call moves: the announcements it queues are posted
+   afterwards, on the fiber, because posting takes an Eio lock. *)
+let off_domain f = Eio_guard.run_in_systhread ~label:"dos-lane" f
+
+(* Which DOS core this server was built with, on the two answers a caller
+   reads first: the load and the screen. A black screen from a core that
+   lacks a fix looks the same as a game bug until this says the core differs
+   from the CI pin. *)
+let core_field = ("core", Dos_lane.core_to_yojson Dos_lane.core)
+
+(* The lane's files live under <.masc>/dos: the ledger, and programs/ — the
+   inventory an operator fills by hand. A DOS game is rarely one file, so a
+   name in programs/ may be a directory: its executable boots and everything
+   beside it is mounted where the guest opens files. A keeper never needs a
+   host path. *)
+let dos_dir ~base_path = Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos"
+let programs_dir ~base_path = Filename.concat (dos_dir ~base_path) "programs"
+
+(* Named whole-machine checkpoints. Beside saves/, not inside it: saves/
+   holds one directory per inventory name, and a program may be called
+   anything. *)
+let checkpoints_dir ~base_path = Filename.concat (dos_dir ~base_path) "checkpoints"
+
+(* What the autosave slot holds, as the fields a caller reading a No_machine
+   refusal or the program-less inventory needs to decide whether to resume:
+   what it is, when, by whom, and the one line that does it. A file that is
+   there but does not read is said so, not left out. *)
+let autosave_status_json (s : Dos_lane.autosave_status) =
+  `Assoc
+    [ ("program", `String s.Dos_lane.program)
+    ; ("steps", `Int s.Dos_lane.steps)
+    ; ("saved_by", `String s.Dos_lane.saved_by)
+    ; ("saved_at", `String (Time_codec.rfc3339_of_unix s.Dos_lane.saved_at))
+    ; ( "resume"
+      , `String
+          (Printf.sprintf "masc_dos_restore slot=%s"
+             (Machine_checkpoint.slot_to_string Dos_lane.autosave_slot)) )
+    ]
+;;
+
+(* Reads the autosave slot on a system thread: the read decompresses and
+   checksums the whole machine body, work that does not belong on the event
+   loop. *)
+let lookup_autosave ~base_path =
+  let found =
+    off_domain (fun () -> Dos_lane.lookup_autosave ~dir:(checkpoints_dir ~base_path))
+  in
+  (match found with
+   | Dos_lane.Autosave_unreadable reason -> Log.DosLog.warn "masc_dos autosave: %s" reason
+   | Dos_lane.No_autosave | Dos_lane.Autosave _ -> ());
+  found
+;;
+
+let autosave_lookup_fields = function
+  | Dos_lane.No_autosave -> []
+  | Dos_lane.Autosave s -> [ ("autosave", autosave_status_json s) ]
+  | Dos_lane.Autosave_unreadable reason ->
+    [ ("autosave", `Assoc [ ("unreadable", `String reason) ]) ]
+;;
+
+(* [reject]'s [~data] defaults to [`Null], and Tool_bridge (tool_bridge.ml)
+   only drops a [`Null] one from the model-facing message; a [`Null] and an
+   [`Assoc []] are not the same to it. [No_autosave] must reach [reject] as
+   the same [`Null] a plain refusal always carried, not as an empty object
+   that turns every ordinary No_machine refusal into a JSON envelope. *)
+let reject_data_of_fields = function
+  | [] -> `Null
+  | fields -> `Assoc fields
+;;
+
+(* The answer to a call that needs a machine when none is loaded. It is the
+   answer a caller gets right after a restart, so it says what the autosave
+   slot holds and how to resume it. Every other refusal is unaffected. *)
+let no_machine ~base_path ~tool_name ~start_time =
+  let refusal = Dos_lane.error_to_string Dos_lane.No_machine in
+  let found = lookup_autosave ~base_path in
+  let message =
+    match found with
+    | Dos_lane.No_autosave -> refusal
+    | Dos_lane.Autosave s ->
+      Printf.sprintf
+        "%s (an autosave is waiting: %s, %d steps, saved by %s at %s -- resume with \
+         masc_dos_restore slot=%s)"
+        refusal s.Dos_lane.program s.Dos_lane.steps s.Dos_lane.saved_by
+        (Time_codec.rfc3339_of_unix s.Dos_lane.saved_at)
+        (Machine_checkpoint.slot_to_string Dos_lane.autosave_slot)
+    | Dos_lane.Autosave_unreadable reason ->
+      Printf.sprintf "%s (an autosave file is there but this server cannot read it: %s)" refusal
+        reason
+  in
+  Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection
+    ~effect_disposition:Tool_result.Proven_pre_effect
+    ~data:(reject_data_of_fields (autosave_lookup_fields found)) message
+;;
+
+(* [png] adds the frame for a model that reads images: the observation's text,
+   then the PNG. A caller that shows only text still has the whole observation
+   in [data]. *)
+let of_lane ?(extra = []) ?png ~base_path ~tool_name ~start_time
+    (result : (Dos_lane.observation, Dos_lane.error) result) =
+  match result with
+  | Ok o ->
+    let data = `Assoc (observation_fields o @ extra) in
+    let content_blocks =
+      Option.map
+        (fun png ->
+          [ Llm_provider.Types.Text (Yojson.Safe.to_string data)
+          ; Llm_provider.Types.image_block ~media_type:"image/png"
+              ~data:(Base64.encode_exn png) ()
+          ])
+        png
+    in
+    Tool_result.make_ok ~tool_name ~start_time ~data ?content_blocks ()
+  | Error Dos_lane.No_machine -> no_machine ~base_path ~tool_name ~start_time
+  | Error ((Dos_lane.Activity_disabled | Dos_lane.Activity_unobserved) as error) ->
+    Tool_result.make_err ~tool_name ~class_:Tool_result.Workflow_rejection
+      ~effect_disposition:Tool_result.Proven_pre_effect ~start_time
+      (Dos_lane.error_to_string error)
+  | Error
+      (( Dos_lane.Invalid_request _ | Dos_lane.Held_by _ | Dos_lane.Other_program _
+       | Dos_lane.Checkpoint_refused
+           ( Machine_checkpoint.No_slot _ | Machine_checkpoint.Other_machine _
+           | Machine_checkpoint.Other_format _ ) ) as e) ->
+    reject ~tool_name ~start_time (Dos_lane.error_to_string e)
+  | Error
+      (( Dos_lane.Unreadable _ | Dos_lane.Guest_fault _ | Dos_lane.Unsaveable _
+       | Dos_lane.Checkpoint_refused
+           (Machine_checkpoint.Corrupt _ | Machine_checkpoint.Unreadable _) ) as e) ->
+    Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time
+      (Dos_lane.error_to_string e)
+;;
+
+let of_lane_run ?(extra = []) ~base_path ~tool_name ~start_time
+    (result : (Dos_lane.observation * Dos_lane.ran, Dos_lane.error) result) =
+  match result with
+  | Ok (o, r) ->
+    (match r.Dos_lane.autosave with
+     | Dos_lane.Autosave_failed reason -> Log.DosLog.warn "masc_dos autosave: %s" reason
+     | Dos_lane.Not_attempted | Dos_lane.Autosaved -> ());
+    of_lane ~base_path ~tool_name ~start_time ~extra:(ran_fields r @ extra) (Ok o)
+  | Error e -> of_lane ~base_path ~tool_name ~start_time (Error e)
+;;
+
+(* What a program wrote on earlier machines, one directory per inventory
+   name. Keyed by the inventory name, not the executable: two games may both
+   boot a MAIN.EXE. *)
+let saves_dir ~base_path name = Filename.concat (Filename.concat (dos_dir ~base_path) "saves") name
+
+let entries_of dir =
+  if Sys.file_exists dir && Sys.is_directory dir then
+    Sys.readdir dir
+    |> Array.to_list
+    |> List.filter (fun f -> not (String.starts_with ~prefix:"." f))
+    |> List.sort String.compare
+  else []
+;;
+
+let programs_available ~base_path = entries_of (programs_dir ~base_path)
+
+let canonical_root path =
+  match Unix.realpath path with
+  | real -> real
+  | exception Unix.Unix_error _ -> path
+;;
+
+(* Names come from the opened owned directory, so a temporary pathname swap
+   cannot leak another directory's entries even when it is restored before
+   the final validation. *)
+let entries_of_stable ?inventory_root ?(before_read = fun _ -> ()) ?(after_read = fun _ -> ()) ~ownership_root dir =
+  let ownership_root = match inventory_root with
+    | None -> canonical_root ownership_root
+    | Some root -> Fs_compat.owned_inventory_root_path root in
+  match Fs_compat.read_owned_directory ?inventory_root ~before_read ~after_read ~ownership_root dir with
+  | Error _ -> Error ()
+  | Ok names ->
+    Ok (List.filter (fun name -> not (String.starts_with ~prefix:"." name)) names)
+;;
+
+(* A bad inventory entry must become a bounded result rather than a blocking
+   open (a FIFO with no writer) or an exception containing the host path.
+   Fs_compat binds containment and identity to the descriptor it reads: the
+   earlier realpath is only a name check, while lstat/open/fstat and the
+   parent-chain revalidation are the actual read boundary. *)
+let read_regular_file ~ownership_root path =
+  let ownership_root = canonical_root ownership_root in
+  match Fs_compat.load_owned_regular_file ~ownership_root path with
+  | Ok (Some contents) -> Ok contents
+  | Ok None | Error _ -> Error "entry is unavailable"
+;;
+
+(* Spelling the name safely is not the whole boundary. Sys.file_exists and
+   open both follow symbolic links, so an entry linked at a file outside
+   programs/ would be read into guest memory and handed back out 256 bytes at
+   a time by masc_dos_peek. The check is therefore on the resolved path, not
+   on the spelling: everything this lane opens has to really live under
+   programs/. A link inside the inventory still works; one that leaves it is
+   refused. *)
+let within ~root path =
+  match (Unix.realpath root, Unix.realpath path) with
+  | exception Unix.Unix_error _ -> None
+  | root_real, real ->
+    if String.equal real root_real
+       || String.starts_with ~prefix:(root_real ^ Filename.dir_sep) real
+    then Some real
+    else None
+;;
+
+type entry_kind = Directory | Regular | Other | Unavailable
+
+let entry_kind path =
+  try
+    match (Unix.stat path).Unix.st_kind with
+    | Unix.S_DIR -> Directory
+    | Unix.S_REG -> Regular
+    | _ -> Other
+  with
+  | Unix.Unix_error _ | Sys_error _ -> Unavailable
+;;
+
+let owned_entry_kind ~ownership_root path =
+  match within ~root:ownership_root path with
+  | Some real -> entry_kind real
+  | None -> Unavailable
+;;
+
+let is_program_name name =
+  let lower = String.lowercase_ascii name in
+  Filename.check_suffix lower ".exe" || Filename.check_suffix lower ".com"
+;;
+
+(* Inside a directory the executable is the one the caller named with
+   [boot], else the one named after the inventory entry, else the only
+   .exe/.com there. The same selector feeds inventory and load so a caller
+   sees the file that the loader will actually run. *)
+let select_executable ?boot ~identity_name ~dir_name files =
+  let beside one = List.filter (fun f -> not (String.equal f one)) files in
+  let folded = String.lowercase_ascii in
+  match boot with
+  | Some wanted ->
+    (match List.filter (fun f -> String.equal (folded f) (folded wanted)) files with
+     | one :: _ when is_program_name one -> Ok (one, beside one)
+     | one :: _ ->
+       Error (Printf.sprintf "%s is not a .exe or .com: boot names the program to run" one)
+     | [] -> Error (Printf.sprintf "%s holds no file named %s" dir_name wanted))
+  | None ->
+    let programs = List.filter is_program_name files in
+    let stem = folded (Filename.basename identity_name) in
+    let named =
+      List.filter (fun f -> String.equal (folded (Filename.remove_extension f)) stem) programs
+    in
+    (match (named, programs) with
+     | [ one ], _ | [], [ one ] -> Ok (one, beside one)
+     | [], [] -> Error (Printf.sprintf "%s holds no .exe or .com" dir_name)
+     | _, many ->
+       Error
+         (Printf.sprintf "%s holds several programs (%s); name the one to boot with boot"
+            dir_name (String.concat ", " many)))
+;;
+
+(* Returns the executable and the rest of the directory beside it, so its
+   caller reads each file exactly once. *)
+let executable_in ?boot ~identity_name ~ownership_root dir =
+  match entries_of_stable ~ownership_root dir with
+  | Error () -> Error "directory changed during inventory"
+  | Ok names ->
+    let rec validate = function
+      | [] -> Ok ()
+      | f :: rest ->
+        (match owned_entry_kind ~ownership_root (Filename.concat dir f) with
+         | Directory | Regular -> validate rest
+         | Other ->
+           Error
+             (Printf.sprintf
+                "%s is unavailable: inventory entries must be regular files or directories" f)
+         | Unavailable -> Error (Printf.sprintf "%s is unavailable" f))
+    in
+    let files () =
+      List.filter
+        (fun f -> owned_entry_kind ~ownership_root (Filename.concat dir f) = Regular)
+        names
+    in
+    let* () = validate names in
+    let files = files () in
+    select_executable ?boot ~identity_name ~dir_name:(Filename.basename identity_name) files
+;;
+
+(* A program is a name in programs/, never a host path. The machine reads the
+   file into guest memory and masc_dos_peek reads guest memory back out, so a
+   caller-supplied path would be an arbitrary host-file read. The inventory is
+   the whole filesystem this lane can see; an operator puts a game there.
+
+   The name may be a file (boots alone) or a directory (boots with its data
+   files mounted). It cannot climb out: a separator or a dot segment is
+   refused before it reaches the filesystem. *)
+let escapes = Dos_lane.escapes
+
+let left_inventory ~root shown =
+  let _ = root in
+  Printf.sprintf "%s leaves the DOS inventory" shown
+;;
+
+let resolve_program ?boot ~base_path name =
+  let root = programs_dir ~base_path in
+  let trimmed = String.trim name in
+  match boot with
+  | Some b when escapes b ->
+    Error (Printf.sprintf "boot %S is a file name inside the directory: no paths, drives, or leading dots" b)
+  | Some _ | None ->
+  if trimmed = "" then Error "name a program"
+  else if escapes trimmed then
+    Error
+      (Printf.sprintf "%S is not a name in the inventory: no paths, drives, or leading dots"
+         trimmed)
+  else if not (Sys.file_exists (Filename.concat root trimmed)) then
+    Error (Printf.sprintf "no program named %S: put it under the DOS inventory" trimmed)
+  else
+    match within ~root (Filename.concat root trimmed) with
+    | None -> Error (left_inventory ~root (Printf.sprintf "%S" trimmed))
+    | Some path ->
+      (match entry_kind path with
+       | Unavailable -> Error "program is unavailable"
+       | Other -> Error "program is unavailable: entry is not a regular file or directory"
+       | Directory ->
+        (* Each mounted file is read once, here. Reading the executable again
+           while building the mount list would let a replacement landing
+           between the two reads give the guest one image to run and a
+           different one to open. *)
+        let read_one f =
+          match within ~root (Filename.concat path f) with
+          | Some real ->
+            (match read_regular_file ~ownership_root:root real with
+             | Ok bytes -> Ok (f, bytes)
+             | Error reason -> Error (Printf.sprintf "%s is unavailable: %s" f reason))
+          | None -> Error (left_inventory ~root (trimmed ^ "/" ^ f))
+        in
+        let rec gather acc = function
+          | [] -> Ok (List.rev acc)
+          | f :: rest ->
+            (match read_one f with
+             | Error e -> Error e
+             | Ok pair -> gather (pair :: acc) rest)
+        in
+        (match executable_in ?boot ~identity_name:trimmed ~ownership_root:root path with
+         | Error e -> Error e
+         | Ok (exe, others) ->
+           (match read_one exe with
+            | Error e -> Error e
+            | Ok (_, exe_bytes) ->
+              Result.map
+                (fun mounted ->
+                  (* entries_of sorts, so the mount list keeps the order the
+                     inventory is listed in. *)
+                  ( exe
+                  , exe_bytes
+                  , List.sort
+                      (fun (a, _) (b, _) -> String.compare a b)
+                      ((exe, exe_bytes) :: mounted) ))
+                (gather [] others)))
+       | Regular when Option.is_some boot ->
+        Error
+          (Printf.sprintf "%s is one file, not a directory: boot names a file inside a game directory"
+             trimmed)
+       | Regular ->
+        (* One file boots alone, and is mounted under its own name too — a
+           program that opens itself (overlays, self-reading installers)
+           finds it. *)
+        (match read_regular_file ~ownership_root:root path with
+         | Ok bytes -> Ok (trimmed, bytes, [ (trimmed, bytes) ])
+         | Error reason -> Error (Printf.sprintf "%s is unavailable: %s" trimmed reason)))
+;;
+
+(* The board hears what happens on the shared machine, the way the MSX lane
+   announces its arcade. A refused post does not fail the tool — the machine
+   moved either way. *)
+(* Announcements leave in the order the machine changed, without posting
+   under the machine's lock. That lock is a stdlib Mutex and a board post can
+   suspend its fiber (Eio mutexes, streams); another fiber on the same thread
+   reaching Dos_lane then finds the lock held by its own thread, which raises.
+   So [announce] -- which Dos_lane runs under its lock, in machine order --
+   only queues the line, and [flush_announcements] posts the queue after the
+   call returns. One Eio mutex lets one fiber drain at a time, so the queue's
+   order is the board's order. A line left behind by a failed drain goes out
+   with the next one. *)
+type announcement = { author : string; content : string; ready : bool Atomic.t }
+let announcements : announcement Queue.t = Queue.create ()
+let announcements_lock = Mutex.create ()
+let posting = Eio.Mutex.create ()
+
+let enqueue ~ready ~author content () =
+  Mutex.protect announcements_lock (fun () -> Queue.push {author;content;ready} announcements)
+;;
+let announce ~author content () = enqueue ~ready:(Atomic.make true) ~author content ()
+;;
+
+(* Queue in machine order, but keep this transaction's notices invisible to
+   every flusher until its Auth admission has exited, including on exception. *)
+let with_deferred_announcements f =
+  let ready = Atomic.make false in
+  Fun.protect ~finally:(fun () -> Atomic.set ready true)
+    (fun () -> f (enqueue ~ready))
+;;
+
+let flush_announcements () =
+  let next () = Mutex.protect announcements_lock (fun () ->
+    match Queue.peek_opt announcements with
+    | Some notice when Atomic.get notice.ready -> Queue.take_opt announcements
+    | Some _ | None -> None) in
+  try
+    Eio.Mutex.use_rw ~protect:false posting (fun () ->
+      let rec drain () =
+        match next () with
+        | None -> ()
+        | Some {author;content;ready=_} ->
+          Host.relay ~author content;
+          drain ()
+      in
+      drain ())
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | e ->
+    Log.DosLog.warn "arcade relay: announcements wait for the next call: %s"
+      (Printexc.to_string e)
+;;
+
+let after_announcing result =
+  flush_announcements ();
+  result
+;;
+
+(* A game can run for hours, and the Keeper holding the controller can stop
+   in that time, or an invite holding it can run out or be revoked. Such a
+   holder will never pass, and every other caller would be refused until a
+   restart. [holder_left] says whether and why a holder can no longer act;
+   the Keeper boundary supplies it from Keeper and credential state, which this
+   tool surface does not read (RFC-0194). Called before a call that needs the
+   controller, it frees a departed holder's controller and tells the board.
+
+   The caller holds the credential transaction through this read and release,
+   and flushes the queued announcement after that transaction. Keeper registry
+   state can still change between the two lane calls: a resumed Keeper must
+   wait for a pass like any other player. The name is
+   the caller's own: an MCP client named like a stopped Keeper is let go as
+   that Keeper would be. *)
+(* A revoked invite can never pass the controller its name holds (RFC
+   play-link-for-the-shared-machine §2.4), so revoking lets it go and tells
+   the board. [by] is the operator who revoked. The credential is deleted
+   first: a request the invitee sent before that and that reaches the lane
+   after this can still take the freed controller. Where every request needs
+   a credential, the next move by anyone else lets it go again
+   ([No_credential]). The caller holds the Auth transaction until this release
+   completes, and flushes the Board announcement after leaving it. *)
+let release_revoked_invite ~holder ~by =
+  off_domain (fun () ->
+    Dos_lane.release_left ~holder
+      ~announce:
+        (announce ~author:by
+           (Printf.sprintf "%s 님의 초대가 회수되어 DOS 조종권이 풀렸어요" holder)))
+;;
+
+type holder_departure = Machine_controller_contract.holder_departure =
+  | Keeper_stopped
+  | Credential_expired
+  | No_credential
+
+let departure_notice holder = function
+  | Keeper_stopped ->
+    Printf.sprintf "%s 님의 Keeper 가 멈춰서 DOS 조종권이 풀렸어요" holder
+  | Credential_expired ->
+    Printf.sprintf "%s 님의 접속 권한이 만료되어 DOS 조종권이 풀렸어요" holder
+  | No_credential ->
+    Printf.sprintf "%s 님은 접속 권한이 없어서 DOS 조종권이 풀렸어요" holder
+;;
+
+let free_left_controller ?(announce = announce) ~holder_left ~who () =
+  match off_domain Dos_lane.screen with
+  | Ok { Dos_lane.controller = Some holder; _ }
+    when not (String.equal holder who) ->
+    (match holder_left holder with
+     | None -> ()
+     | Some reason ->
+    (match
+       off_domain (fun () ->
+         Dos_lane.release_left ~holder
+           ~announce:
+             (announce ~author:who
+                (departure_notice holder reason)))
+     with
+     (* The caller publishes the queued notice after its transaction, even
+        when the subsequent machine operation is refused. *)
+     | Ok true -> ()
+     (* A hand-off that landed after the read above: that pass stands. *)
+     | Ok false -> ()
+     (* The machine went away; the call that follows reports it. *)
+     | Error _ -> ()))
+  | Ok _ | Error _ -> ()
+;;
+
+(* A Keeper removed for good cannot pass either, but the next move cannot
+   always tell that it left: with its meta gone, its own credential, which
+   has no expiry, reads like an agent that is coming back. The shutdown that
+   removes it lets its controller go here and tells the board, with the notice
+   a stopped Keeper's controller gets. [by] is who asked for the removal. No
+   credential transaction is held here, so the notice is posted before this
+   returns. *)
+let release_retired_keeper ~holder ~by =
+  after_announcing
+    (off_domain (fun () ->
+       Dos_lane.release_left ~holder
+         ~announce:(announce ~author:by (departure_notice holder Keeper_stopped))))
+;;
+
+let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
+  match get_string_opt args "program" with
+  | None | Some "" ->
+    (* No name: the inventory, so the next call can name a program. Named
+       here too: this is the first call a caller makes after a restart, and
+       an autosave from before it is worth resuming rather than starting
+       over. *)
+    let autosave = autosave_lookup_fields (lookup_autosave ~base_path) in
+    Tool_result.make_ok ~tool_name ~start_time
+      ~data:
+        (`Assoc
+          ([ ( "programs_available"
+             , `List (List.map (fun n -> `String n) (programs_available ~base_path)) ) ]
+           @ autosave))
+      ()
+  | Some name ->
+    let boot =
+      match get_string_opt args "boot" with
+      | None -> None
+      | Some b when String.trim b = "" -> None
+      | Some b -> Some (String.trim b)
+    in
+    (match resolve_program ?boot ~base_path name with
+     | Error message -> reject ~tool_name ~start_time message
+     | Ok (program_name, program_bytes, files) ->
+       let loaded =
+         off_domain (fun () ->
+           Dos_lane.load ~who:agent_name ~ledger_dir:(dos_dir ~base_path)
+             ~saves_dir:(saves_dir ~base_path (String.trim name))
+             ~checkpoint_dir:(checkpoints_dir ~base_path) ~program_name ~program_bytes
+             ~files
+             ~announce:
+               (announce ~author:agent_name
+                  (Printf.sprintf "%s 님이 %s 을(를) 띄웠습니다" agent_name program_name)))
+       in
+       after_announcing
+         (of_lane_run ~base_path ~extra:[ core_field ] ~tool_name ~start_time loaded))
+;;
+
+(* masc_dos_meta — the linked core identity is a read-only lane fact. It does
+   not require a machine, activity admission, or a controller, so an operator
+   can verify the emulator before loading a game. *)
+let handle_meta ~tool_name ~start_time =
+  Tool_result.make_ok ~tool_name ~start_time
+    ~data:(`Assoc [ core_field ])
+    ()
+;;
+
+(* [masc_dos_inventory] inspects only the operator-owned program inventory.
+   It deliberately does not parse a game's executable or name any title: the
+   response labels these bytes as base assets. DOS load applies persisted
+   saves afterward, which can replace base contents or add mounted files.
+   This read-only view does not claim to describe that effective mount set. *)
+let unavailable_json name reason =
+  `Assoc
+    [ ("name", `String name)
+    ; ("kind", `String "unavailable")
+    ; ("reason", `String reason)
+    ]
+;;
+
+let within_inventory_root ~root path =
+  match Unix.realpath path with
+  | real when String.equal real root
+      || String.starts_with ~prefix:(root ^ Filename.dir_sep) real -> Some real
+  | _ -> None
+  | exception Unix.Unix_error _ -> None
+;;
+
+let inventory_entry_kind inventory_root path =
+  let root = Fs_compat.owned_inventory_root_path inventory_root in
+  match within_inventory_root ~root path with
+  | None -> Unavailable
+  | Some real ->
+    (match Fs_compat.owned_inventory_entry_kind inventory_root real with
+     | Ok Unix.S_DIR -> Directory
+     | Ok Unix.S_REG -> Regular
+     | Ok _ -> Other
+     | Error _ -> Unavailable)
+;;
+
+let inventory_digest_json ~inventory_root ~shown_name real =
+  match Fs_compat.owned_inventory_entry_digest inventory_root real with
+  | Ok inspected ->
+    `Assoc
+      [ ("name", `String shown_name)
+      ; ("kind", `String "file")
+      ; ("bytes", `Int inspected.snapshot.file_size)
+      ; ("sha256", `String inspected.sha256)
+      ]
+  | Error _ -> unavailable_json shown_name "entry is unavailable"
+;;
+
+let inventory_file_json ~inventory_root ~programs_root ~parent path name =
+  let shown_name = if parent = "" then name else parent ^ "/" ^ name in
+  match within_inventory_root ~root:programs_root path with
+  | None -> unavailable_json shown_name "entry leaves the DOS inventory"
+  | Some real ->
+    (match inventory_entry_kind inventory_root real with
+     | Directory -> unavailable_json shown_name "entry is not a mounted file"
+     | Other -> unavailable_json shown_name "entry is not a regular file"
+     | Unavailable -> unavailable_json shown_name "entry is unavailable"
+     | Regular -> inventory_digest_json ~inventory_root ~shown_name real)
+;;
+
+let inventory_program_json ?(before_read = fun _ -> ()) ?(after_read = fun _ -> ()) ~inventory_root ~programs_root name =
+  let path = Filename.concat programs_root name in
+  match within_inventory_root ~root:programs_root path with
+  | None -> unavailable_json name "entry leaves the DOS inventory"
+  | Some real ->
+    (match inventory_entry_kind inventory_root real with
+     | Unavailable -> unavailable_json name "entry is unavailable"
+     | Other -> unavailable_json name "entry is not a regular file or directory"
+     | Regular -> inventory_digest_json ~inventory_root ~shown_name:name real
+     | Directory ->
+       (match entries_of_stable ~inventory_root ~before_read ~after_read ~ownership_root:programs_root real with
+        | Error () -> unavailable_json name "directory changed during inventory"
+        | Ok names ->
+          let executables =
+            List.filter
+              (fun file ->
+                inventory_entry_kind inventory_root (Filename.concat real file) = Regular && is_program_name file)
+              names
+          in
+          let default_boot =
+            match select_executable ~identity_name:name ~dir_name:name executables with
+            | Ok (file, _) -> Some file
+            | Error _ -> None
+          in
+          let files =
+            names
+            |> List.filter (fun child -> inventory_entry_kind inventory_root (Filename.concat real child) <> Directory)
+            |> List.map (fun child ->
+                 inventory_file_json ~inventory_root ~programs_root ~parent:name (Filename.concat real child)
+                   child)
+          in
+          `Assoc
+            [ ("name", `String name)
+            ; ("kind", `String "directory")
+            ; ("asset_scope", `String "base_inventory")
+            ; ("saved_overlay", `String "applied_on_load")
+            ; ( "executable_candidates"
+              , `List (List.map (fun file -> `String file) executables) )
+            ; ( "default_boot"
+              , match default_boot with Some file -> `String file | None -> `Null )
+            ; ("files", `List files)
+            ]))
+;;
+
+let handle_inventory_with_read_hooks ~before_program ~before_read ~after_read ~tool_name ~start_time ~base_path =
+  let root = programs_dir ~base_path in
+  try
+    let result =
+      off_domain (fun () ->
+        if not (Sys.file_exists root) then Ok []
+        else
+          match Fs_compat.with_owned_inventory_root root (fun inventory_root ->
+            let canonical = Fs_compat.owned_inventory_root_path inventory_root in
+            match entries_of_stable ~inventory_root ~before_read ~after_read
+                    ~ownership_root:canonical canonical with
+            | Error () -> Error
+                { Fs_compat.failure = Fs_compat.Filesystem_identity_changed {path=root};
+                  close_failure = None }
+            | Ok names ->
+              before_program canonical;
+              Ok (List.map
+                (inventory_program_json ~before_read ~after_read ~inventory_root
+                  ~programs_root:canonical) names)) with
+          | Ok programs -> Ok programs
+          | Error _ -> Error ())
+    in
+    (match result with
+     | Ok programs ->
+       Tool_result.make_ok ~tool_name ~start_time
+         ~data:(`Assoc
+           [ ("programs", `List programs)
+           ; ("asset_scope", `String "base_inventory")
+           ; ("saved_overlay", `String "applied_on_load")
+           ])
+         ()
+     | Error () ->
+       Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time
+         "DOS inventory changed during enumeration")
+  with
+  | Sys_error _ ->
+    Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time
+      "DOS inventory is unavailable"
+;;
+
+let handle_inventory ~tool_name ~start_time ~base_path =
+  handle_inventory_with_read_hooks ~before_program:(fun _ -> ()) ~before_read:(fun _ -> ()) ~after_read:(fun _ -> ())
+    ~tool_name ~start_time ~base_path
+;;
+
+let handle_eject ~tool_name ~start_time ~agent_name _args =
+  after_announcing
+    (match
+       off_domain
+         (Dos_lane.eject ~who:agent_name
+            ~announce:
+              (announce ~author:agent_name (Printf.sprintf "%s 님이 기계를 껐습니다" agent_name)))
+     with
+     | Ok () ->
+       Tool_result.make_ok ~tool_name ~start_time
+         ~data:(`Assoc [ ("ejected", `Bool true) ]) ()
+     | Error e -> reject ~tool_name ~start_time (Dos_lane.error_to_string e))
+;;
+
+(* [to] is parsed with the board's own agent-id rule, so a name that could
+   never be mentioned -- "@liu-bei", "liu bei", "유비" -- is refused here. The
+   controller would otherwise go to a name no caller has, nobody could move or
+   eject the machine again, and the post meant to wake the next player would
+   address no one. Host admission and the worker use the same normalized
+   target, which the worker verifies before changing the controller. *)
+let pass_target args =
+  match get_string_opt args "to" with
+  | None -> Ok None
+  | Some t when String.trim t = "" -> Ok None
+  | Some t ->
+    (match Host.parse_controller (String.trim t) with
+     | Ok id -> Ok (Some id)
+     | Error _ ->
+       Error
+         (Printf.sprintf
+            "to %S is not a Keeper name: give the name alone, without @ or spaces" t))
+;;
+
+(* The hand-off is also the wake-up: the board post names the next holder
+   with @, which the board delivers to that Keeper as an explicit mention, so
+   the player whose turn it is does not have to poll the machine to find out.
+   A post is a message in their queue, not an obligation to answer. *)
+(* Only the machine operation: the Keeper handoff owner keeps Auth admission
+   until this returns, then flushes the queued Board announcements. *)
+let pass_without_announcing ?(announce = announce) ~tool_name ~start_time ~base_path ~agent_name args =
+  match pass_target args with
+  | Error message -> reject ~tool_name ~start_time message
+  | Ok to_ ->
+    let content =
+      match to_ with
+      | Some next -> Printf.sprintf "@%s 님 차례예요. %s 님이 DOS 조종권을 넘겼습니다" next agent_name
+      | None -> Printf.sprintf "%s 님이 DOS 조종권을 내려놓았습니다" agent_name
+    in
+    of_lane ~base_path ~tool_name ~start_time
+      (off_domain (fun () ->
+         Dos_lane.pass ~who:agent_name ~to_ ~announce:(announce ~author:agent_name content)))
+;;
+
+let handle_pass ~tool_name ~start_time ~base_path ~agent_name args =
+  after_announcing (pass_without_announcing ~tool_name ~start_time ~base_path ~agent_name args)
+;;
+
+(* The screen as an image. A VGA game draws its menus as pixels -- 삼국지3's
+   Korean menus are glyphs from its own font -- so frame_ascii shows where
+   something is drawn but not what it says. Every surface that shows the frame
+   as an image reads it here: the observation and the frame come from one
+   locked read, and the PNG is encoded off the Eio domain. *)
+type png_capture =
+  { observation : Dos_lane.observation
+  ; width : int
+  ; height : int
+  ; png : string
+  }
+
+type png_capture_error =
+  | Lane of Dos_lane.error
+  | Encode of string
+
+let capture_png () =
+  match off_domain Dos_lane.capture with
+  | Error e -> Error (Lane e)
+  | Ok (observation, { Dos_lane.width; height; rgb }) ->
+    (match
+       Eio_guard.run_in_systhread ~label:"dos-png" (fun () -> Rgb_png.encode ~width ~height ~rgb)
+     with
+     | Ok png -> Ok { observation; width; height; png }
+     | Error message -> Error (Encode message))
+;;
+
+let png_fields ~width ~height ~png =
+  [ ("media_type", `String "image/png")
+  ; ("width", `Int width)
+  ; ("height", `Int height)
+  ; ("bytes", `Int (String.length png))
+  ]
+;;
+
+let image_capture_failed ~tool_name ~start_time message =
+  Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time
+    ("DOS image capture failed: " ^ message)
+;;
+
+(* The worker returns PNG bytes beside the captured text observation. *)
+let handle_screen ~tool_name ~start_time ~base_path _args =
+  match capture_png () with
+  | Error (Lane e) -> of_lane ~base_path ~tool_name ~start_time (Error e)
+  | Error (Encode message) -> image_capture_failed ~tool_name ~start_time message
+  | Ok { observation; width; height; png } ->
+    of_lane ~base_path ~tool_name ~start_time
+      ~extra:(png_fields ~width ~height ~png @ [ core_field ])
+      ~png
+      (Ok observation)
+;;
+
+(* The whole per-call ceiling: a call that settles stops early, so a large
+   default costs a quick program nothing, while a game whose screen change
+   takes a few million instructions (삼국지3's transitions take 3-4 million)
+   settles in one call instead of coming back busy. *)
+let default_steps = Dos_lane.max_steps_per_call
+
+let handle_step ~tool_name ~start_time ~base_path ~who args =
+  after_announcing @@
+  of_lane_run ~base_path ~tool_name ~start_time
+    (off_domain @@ fun () -> Dos_lane.step ~who
+       ~steps:(get_int args "steps" default_steps)
+       ~until_ready:(get_bool args "until_ready" true))
+;;
+
+let handle_press ~tool_name ~start_time ~base_path ~who args =
+  after_announcing @@
+  of_lane_run ~base_path ~tool_name ~start_time
+    (off_domain @@ fun () ->
+      let keys = get_string_list args "keys" in
+      let steps = get_int args "steps" default_steps in
+      match get_string_opt args "expected_program" with
+      | None -> Dos_lane.press ~who ~keys ~steps
+      | Some saves_name -> Dos_lane.press_into ~saves_name ~who ~keys ~steps)
+
+;;
+
+(* [masc_dos_press] for a caller that chose the keys from what one program
+   means by them (the masc pad): they go in only while that program is still
+   the one loaded. *)
+let press_into ~tool_name ~start_time ~base_path ~who ~saves_name ~keys =
+  after_announcing @@
+  of_lane_run ~base_path ~tool_name ~start_time
+    (off_domain @@ fun () -> Dos_lane.press_into ~saves_name ~who ~keys ~steps:default_steps)
+;;
+
+let handle_click ~tool_name ~start_time ~base_path ~who args =
+  after_announcing @@
+  of_lane_run ~base_path ~tool_name ~start_time
+    (off_domain @@ fun () -> Dos_lane.click ~who
+       ~x:(get_int args "x" 0)
+       ~y:(get_int args "y" 0)
+       ~buttons:(get_int args "buttons" 1)
+       ~steps:(get_int args "steps" default_steps))
+;;
+
+let handle_type ~tool_name ~start_time ~base_path ~who args =
+  after_announcing @@
+  of_lane_run ~base_path ~tool_name ~start_time
+    (off_domain @@ fun () -> Dos_lane.type_text ~who ~text:(get_string args "text" "")
+       ~steps:(get_int args "steps" default_steps))
+;;
+
+(* Addresses arrive as hex strings ("b8000", "0xB8000") because that is how
+   memory is talked about; decimal parses too. *)
+let parse_address s =
+  let s = String.lowercase_ascii (String.trim s) in
+  let s =
+    if String.starts_with ~prefix:"0x" s then String.sub s 2 (String.length s - 2) else s
+  in
+  int_of_string_opt ("0x" ^ s)
+;;
+
+let handle_peek ~tool_name ~start_time ~base_path args =
+  let address =
+    match parse_address (get_string args "address" "") with
+    | Some a -> a
+    | None -> -1
+  in
+  match off_domain (fun () -> Dos_lane.peek ~address ~length:(get_int args "length" 16)) with
+  | Ok hex ->
+    Tool_result.make_ok ~tool_name ~start_time
+      ~data:
+        (`Assoc
+          [ ("address", `String (Printf.sprintf "%05x" address)); ("hex", `String hex) ])
+      ()
+  | Error Dos_lane.No_machine -> no_machine ~base_path ~tool_name ~start_time
+  | Error e -> reject ~tool_name ~start_time (Dos_lane.error_to_string e)
+;;
+
+(* ---------- checkpoints ---------- *)
+
+let default_slot = "quick"
+
+let slot_arg ?default args =
+  match get_string_opt args "slot", default with
+  | (None | Some ""), Some d -> Machine_checkpoint.slot_of_string d |> Result.map Option.some
+  | (None | Some ""), None -> Ok None
+  | Some s, _ -> Machine_checkpoint.slot_of_string s |> Result.map Option.some
+;;
+
+let slot_field slot = ("slot", `String (Machine_checkpoint.slot_to_string slot))
+
+let handle_save ~tool_name ~start_time ~base_path ~who args =
+  match slot_arg ~default:default_slot args with
+  | Error message -> reject ~tool_name ~start_time message
+  | Ok None -> reject ~tool_name ~start_time "slot must name a checkpoint"
+  | Ok (Some slot) ->
+    of_lane ~base_path ~extra:[ slot_field slot ] ~tool_name ~start_time
+      (off_domain (fun () -> Dos_lane.save ~who ~dir:(checkpoints_dir ~base_path) ~slot))
+;;
+
+let listed_json (l : Machine_checkpoint.listed) =
+  `Assoc
+    ([ slot_field l.slot
+     ; ("bytes", `Int l.size)
+     ; ("saved_at", `String (Time_codec.rfc3339_of_unix l.modified))
+     ]
+     @
+     match l.header with
+     | Ok h ->
+       [ ("machine", `String (Machine_checkpoint.machine_to_string h.machine))
+       ; ("format", `Int h.format)
+       ; ("core", `String h.core)
+       ]
+     | Error e -> [ ("unreadable", `String (Machine_checkpoint.error_to_string e)) ])
+;;
+
+(* No slot lists them, the way masc_dos_load with no program lists the
+   inventory: restoring a default name could replace a game in progress
+   with one nobody meant. *)
+let handle_restore ~tool_name ~start_time ~base_path ~agent_name args =
+  let dir = checkpoints_dir ~base_path in
+  match slot_arg args with
+  | Error message -> reject ~tool_name ~start_time message
+  | Ok None ->
+    (match off_domain (fun () -> Dos_lane.checkpoints ~dir) with
+     | Ok listed ->
+       Tool_result.make_ok ~tool_name ~start_time
+         ~data:
+           (`Assoc
+             [ ("checkpoints", `List (List.map listed_json listed))
+             ; ("checkpoint_format", `Int Dos_lane.checkpoint_format)
+             ])
+         ()
+     | Error e -> of_lane ~base_path ~tool_name ~start_time (Error e))
+  | Ok (Some slot) ->
+    let restored =
+      off_domain (fun () ->
+        Dos_lane.restore ~who:agent_name ~dir ~slot ~ledger_dir:(dos_dir ~base_path)
+          ~saves_dir_of:(saves_dir ~base_path)
+          ~announce:
+            (announce ~author:agent_name
+               (Printf.sprintf "%s 님이 DOS 기계를 %s 체크포인트로 되돌렸습니다" agent_name
+                  (Machine_checkpoint.slot_to_string slot))))
+    in
+    after_announcing
+      (of_lane ~base_path ~extra:[ slot_field slot; core_field ] ~tool_name ~start_time restored)
+;;
+
+let dispatch ~base_path ~agent ~name ~arguments =
+  let tool_name = name and start_time = Tool_timing.start () in
+  match name with
+  | "masc_dos_load" -> Some (handle_load ~tool_name ~start_time ~base_path ~agent_name:agent arguments)
+  | "masc_dos_eject" -> Some (handle_eject ~tool_name ~start_time ~agent_name:agent arguments)
+  | "masc_dos_pass" -> Some (handle_pass ~tool_name ~start_time ~base_path ~agent_name:agent arguments)
+  | "masc_dos_meta" -> Some (handle_meta ~tool_name ~start_time)
+  | "masc_dos_inventory" -> Some (handle_inventory ~tool_name ~start_time ~base_path)
+  | "masc_dos_step" -> Some (handle_step ~tool_name ~start_time ~base_path ~who:agent arguments)
+  | "masc_dos_press" -> Some (handle_press ~tool_name ~start_time ~base_path ~who:agent arguments)
+  | "masc_dos_click" -> Some (handle_click ~tool_name ~start_time ~base_path ~who:agent arguments)
+  | "masc_dos_type" -> Some (handle_type ~tool_name ~start_time ~base_path ~who:agent arguments)
+  | "masc_dos_peek" -> Some (handle_peek ~tool_name ~start_time ~base_path arguments)
+  | "masc_dos_save" -> Some (handle_save ~tool_name ~start_time ~base_path ~who:agent arguments)
+  | "masc_dos_restore" -> Some (handle_restore ~tool_name ~start_time ~base_path ~agent_name:agent arguments)
+  | "masc_dos_screen" -> Some (handle_screen ~tool_name ~start_time ~base_path arguments)
+  | _ -> None
+
+
+end

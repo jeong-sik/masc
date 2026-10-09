@@ -75,10 +75,19 @@ type delta =
       }
       (** New resolved-runtime attempt: discard unfinished text/thinking from
           the prior attempt while retaining tool evidence. *)
-  | Stream_model_started of { model : string }
+  | Stream_model_started of
+      { message_id : string option
+      ; stream_scope : int option
+      ; model : string
+      ; usage : stream_usage option
+      }
+      (** Provider response metadata. The bridge scope is retained across repeated
+          starts, including a surviving start following scoped text. The optional
+          provider id is correlation data, not response identity. *)
   | Stream_details of
-      { usage : stream_usage option
-      ; stop_reason : string option
+      { stream_scope : int option
+      ; usage : stream_usage option
+      ; stop_reason : Agent_core.Types.stop_reason option
       }
       (** What the provider said about the message in flight: the counters so
           far, and why it stopped writing ([end_turn], [max_tokens],
@@ -86,7 +95,7 @@ type delta =
           them as one record ([dashboard/src/keeper-stream.ts]
           KEEPER_STREAM_MESSAGE_DELTA), so they arrive together here too. At
           least one of the two is present. *)
-  | Text of string  (** Assistant text to append. *)
+  | Text of {text : string; stream_scope : int option}  (** Assistant text to append. *)
   | Thinking of string  (** Reasoning text to append. *)
   | Native_tool_started of
       { occurrence : tool_occurrence; tool_name : string option }
@@ -150,6 +159,7 @@ type delta =
       { reply : string
       ; turn_outcome : Masc.Keeper_turn_outcome.t
       ; turn_ref : string
+      ; terminal_stream_scope : int option
       }
       (** The terminal reply as the server recorded it (KEEPER_REPLY_DETAILS):
           the text the transcript keeps, the typed outcome, and the store join

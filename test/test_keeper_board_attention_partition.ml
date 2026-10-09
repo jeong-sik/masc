@@ -1464,6 +1464,45 @@ let test_invalid_or_mismatched_provenance_never_rewrites () =
   | _ -> Alcotest.fail "rejected completion mutated the durable binding"
 ;;
 
+let test_purge_invalidates_cached_partitions_and_retains_lock () =
+  with_temp_base "board-attention-partition-purge" @@ fun base_path ->
+  let pending = candidate ~id:"candidate-partition-purge" ~recorded_at:1.0 () in
+  ignore (roots ~base_path [ pending ] : P.t list);
+  let path = P.ledger_path ~base_path ~keeper_name:"alpha" in
+  let lock_path = Fs_compat.private_jsonl_lock_path path in
+  (match P.purge ~base_path ~keeper_name:"alpha" with
+   | Ok () -> ()
+   | Error detail -> Alcotest.failf "partition purge failed: %s" detail);
+  Alcotest.(check bool) "partition data is gone" false (Sys.file_exists path);
+  Alcotest.(check bool) "partition stable lock remains" true (Sys.file_exists lock_path);
+  Alcotest.(check (list string))
+    "partition cache is empty after purge"
+    []
+    (List.map (fun (partition : P.t) -> partition.partition_id)
+       (ok "load after partition purge" (P.load ~base_path ~keeper_name:"alpha")))
+;;
+
+let test_current_root_restore_rejects_a_purged_candidate () =
+  with_temp_base "board-attention-partition-current-roots" @@ fun base_path ->
+  let pending = candidate ~id:"candidate-current-roots" ~recorded_at:1.0 () in
+  ignore (A.record ~base_path pending);
+  (match A.purge ~base_path ~keeper_name:"alpha" with
+   | Ok () -> ()
+   | Error detail -> Alcotest.failf "candidate purge failed: %s" detail);
+  (match P.ensure_current_roots ~base_path ~keeper_name:"alpha" [ pending ] with
+   | Error detail ->
+     Alcotest.(check string)
+       "stale root restoration is rejected"
+       "Board attention candidates changed before root restoration"
+       detail
+   | Ok count -> Alcotest.failf "stale root restoration appended %d roots" count);
+  Alcotest.(check (list string))
+    "rejected restoration writes no partition"
+    []
+    (List.map (fun (partition : P.t) -> partition.partition_id)
+       (ok "load after rejected restoration" (P.load ~base_path ~keeper_name:"alpha")))
+;;
+
 let test_predispatch_rejection_chain_binds_agent_core_selected_third_slot () =
   with_temp_base "board-attention-partition-predispatch-chain" @@ fun base_path ->
   let pending = candidate ~id:"candidate-predispatch-chain" ~recorded_at:1.0 () in
@@ -1776,6 +1815,14 @@ let () =
             "invalid or mismatched provenance never rewrites"
             `Quick
             test_invalid_or_mismatched_provenance_never_rewrites
+        ; Alcotest.test_case
+            "partition purge invalidates cache and retains stable lock"
+            `Quick
+            test_purge_invalidates_cached_partitions_and_retains_lock
+        ; Alcotest.test_case
+            "current root restoration rejects a purged candidate"
+            `Quick
+            test_current_root_restore_rejects_a_purged_candidate
         ; Alcotest.test_case
             "abandon records a give-up, not a judgment"
             `Quick

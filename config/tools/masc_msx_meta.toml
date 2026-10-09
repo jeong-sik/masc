@@ -5,3 +5,9 @@ Report which ocaml-msx core this server was built with.
 Read-only. Returns the linked core's source digest and actual commit when available (null for dirty or archive builds), the digest and commit declared at the CI pin, and whether the source digests match."""
 additional_properties = false
 defer_loading = true
+
+[[params]]
+name = "include_inventory"
+type = "boolean"
+default = false
+description = "Include the worker-owned cartridge inventory and current loaded-media identity."

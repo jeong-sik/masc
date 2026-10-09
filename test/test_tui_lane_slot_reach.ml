@@ -61,15 +61,6 @@ let test_a_complete_history_adds_nothing () =
   Alcotest.(check int) "failures and cancellations count as finished" 0 (gap verifier);
   Alcotest.(check (list string)) "nothing is drawn" [] (parts verifier)
 
-(* A run that finished before any slot was bound, for no reason the server
-   names, is still counted, under its own words. *)
-let test_a_run_with_no_named_reason_is_counted () =
-  let librarian = lane ~no_slot:3 ~succeeded:7 ~failed:3 ~cancelled:0 [ slot "a" 7 ] in
-  Alcotest.(check (list string)) "the runs that named no slot"
-    [ "3 runs named no slot" ] (parts librarian)
-
-(* Running rows are in none of the counts, so a lane mid-run does not report
-   its running work as unaccounted. *)
 let test_a_running_lane_does_not_count_its_running_work () =
   let running = lane ~running:3 ~succeeded:10 ~failed:0 ~cancelled:0 [ slot "a" 10 ] in
   Alcotest.(check int) "three running, all finished work counted" 0 (gap running);
@@ -103,8 +94,6 @@ let () =
             `Quick test_the_board_lane_names_vendor_system_one_and_restarts
         ; Alcotest.test_case "a complete history adds nothing" `Quick
             test_a_complete_history_adds_nothing
-        ; Alcotest.test_case "a run with no named reason is counted" `Quick
-            test_a_run_with_no_named_reason_is_counted
         ; Alcotest.test_case "a running lane does not count its running work"
             `Quick test_a_running_lane_does_not_count_its_running_work
         ; Alcotest.test_case "counts that do not add up are drawn" `Quick

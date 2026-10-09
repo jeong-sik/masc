@@ -1493,11 +1493,52 @@ let test_failure_turn_kind_roundtrip () =
             (K.Row_kind.equal user.kind K.Row_kind.Utterance);
           Alcotest.(check bool) "assistant row is a transport failure" true
             (K.Row_kind.equal asst.kind K.Row_kind.Transport_failure);
+          Alcotest.(check bool) "server diagnostic has no generated speech blocks" true
+            (asst.blocks = None);
           let raw = read_file (chat_path ~base_dir ~keeper_name) in
           Alcotest.(check bool) "failure row persists the kind field" true
             (String_util.contains_substring raw {|"kind":"transport_failure"|})
       | messages ->
           Alcotest.failf "expected 2 rows, got %d" (List.length messages))
+
+let test_failure_completed_output_roundtrip () =
+  let base_dir = temp_base_path "keeper-chat-store-failure-output" in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+      let keeper_name = "keeper-failure-output" in
+      let operation_id = match Keeper_chat_delivery_identity.Request_id.of_string
+          "failure-output-operation" with
+        | Ok value -> value
+        | Error error -> Alcotest.fail error in
+      let delivery_key = Keeper_chat_delivery_identity.Operation operation_id in
+      let blocks =
+        [ Masc.Keeper_chat_blocks.Image { src = "/api/v1/media/completed"; cap = Some "completed" }
+        ; Masc.Keeper_chat_blocks.Voice
+            { secs = Some 1.; wave = None; via = None; size = None
+            ; transcript = Some "completed audio"; src = Some "/api/v1/voice/audio/completed" }
+        ] in
+      (match K.append_user_message_once ~base_dir ~keeper_name ~delivery_key
+          ~content:"make media"
+          ~speaker:{ K.speaker_id = None; speaker_name = None; speaker_authority = K.Owner } () with
+       | Ok _ -> () | Error error -> Alcotest.fail error);
+      let append_failure () = K.append_assistant_message_once ~base_dir ~keeper_name
+          ~delivery_key ~content:"provider disconnected after media"
+          ~assistant_kind:K.Row_kind.Transport_failure ~blocks () in
+      (match append_failure () with Ok _ -> () | Error error -> Alcotest.fail error);
+      let before = read_file (chat_path ~base_dir ~keeper_name) in
+      (match append_failure () with Ok _ -> () | Error error -> Alcotest.fail error);
+      Alcotest.(check string) "re-entry preserves one failure terminal" before
+        (read_file (chat_path ~base_dir ~keeper_name));
+      let messages = K.load ~base_dir ~keeper_name in
+      (match messages with
+       | [_user; failure] ->
+         Alcotest.(check bool) "completed media survives failure reload" true
+           (failure.blocks = Some blocks)
+       | _ -> Alcotest.fail "expected accepted input and one failure terminal");
+      let pending = MS.pending_messages_of_messages ~targets:[keeper_name] messages in
+      Alcotest.(check int) "completed output does not acknowledge failed input" 1
+        (List.length pending))
 
 let test_kind_absent_reads_utterance () =
   (* Every row written before the [kind] field existed is an utterance;
@@ -1523,27 +1564,48 @@ let test_kind_absent_reads_utterance () =
       | messages ->
           Alcotest.failf "expected 2 rows, got %d" (List.length messages))
 
-let test_unknown_kind_reported_reads_utterance () =
-  let base_dir = temp_base_path "keeper-chat-store-kind-unknown" in
-  Fun.protect
-    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
-    (fun () ->
-      let keeper_name = "keeper-chat-kind-unknown" in
-      let invalid_payload = Read_drop_reason.to_wire Read_drop_reason.Invalid_payload in
-      let before = drop_value invalid_payload in
-      let path = chat_path ~base_dir ~keeper_name in
-      write_file path
-        ({|{"id":"unknown-kind","role":"assistant","content":"hi","ts":1.0,"kind":"weird"}|}
-        ^ "\n");
-      match K.load ~base_dir ~keeper_name with
-      | [ asst ] ->
-          Alcotest.(check bool)
-            "unknown kind reads as utterance (conservative arm)" true
-            (K.Row_kind.equal asst.kind K.Row_kind.Utterance);
-          Alcotest.(check (float 0.001)) "unknown kind reported" 1.0
-            (drop_value invalid_payload -. before)
-      | messages ->
-          Alcotest.failf "expected 1 row, got %d" (List.length messages))
+let test_invalid_kind_cannot_acknowledge_input () =
+  List.iter
+    (fun kind ->
+       let base_dir = temp_base_path "keeper-chat-store-kind-invalid" in
+       Fun.protect
+         ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+         (fun () ->
+            let keeper_name = "keeper-chat-kind-invalid" in
+            let path = chat_path ~base_dir ~keeper_name in
+            let turn_ref = Ids.Turn_ref.make ~trace_id:"kind-authority" ~absolute_turn:1 in
+            let user =
+              `Assoc
+                [ "id", `String "pending-user"; "role", `String "user"
+                ; "content", `String "please check"; "ts", `Float 1.0
+                ; "speaker_authority", `String "owner"
+                ; "turn_ref", `String (Ids.Turn_ref.to_string turn_ref)
+                ]
+            in
+            let assistant =
+              `Assoc
+                [ "id", `String "invalid-kind"; "role", `String "assistant"
+                ; "content", `String "done"; "ts", `Float 2.0
+                ; "turn_ref", `String (Ids.Turn_ref.to_string turn_ref)
+                ; "kind", kind
+                ]
+            in
+            let invalid_payload = Read_drop_reason.to_wire Read_drop_reason.Invalid_payload in
+            let before = drop_value invalid_payload in
+            write_file path
+              (Yojson.Safe.to_string user ^ "\n"
+               ^ Yojson.Safe.to_string assistant ^ "\n");
+            let messages = K.load ~base_dir ~keeper_name in
+            Alcotest.(check (list string)) "invalid assistant is excluded"
+              [ "pending-user" ] (List.map (fun (m : K.chat_message) -> m.id) messages);
+            Alcotest.(check (float 0.001)) "invalid kind is reported" 1.0
+              (drop_value invalid_payload -. before);
+            let pending = MS.pending_messages_of_messages ~targets:[ keeper_name ] messages in
+            Alcotest.(check int) "input remains pending" 1 (List.length pending);
+            match K.load_all_result ~base_dir ~keeper_name with
+            | Error _ -> ()
+            | Ok _ -> Alcotest.fail "strict reader accepted an invalid kind"))
+    [ `String "weird"; `String ""; `String " "; `Int 1; `Null; `Bool false ]
 
 let audio_path ~base_dir token =
   Filename.concat
@@ -3598,10 +3660,12 @@ let () =
         [
           Alcotest.test_case "failure turn kind roundtrip" `Quick
             test_failure_turn_kind_roundtrip;
+          Alcotest.test_case "completed output survives failure reload" `Quick
+            test_failure_completed_output_roundtrip;
           Alcotest.test_case "absent kind reads utterance" `Quick
             test_kind_absent_reads_utterance;
-          Alcotest.test_case "unknown kind reported, reads utterance" `Quick
-            test_unknown_kind_reported_reads_utterance;
+          Alcotest.test_case "invalid kind cannot acknowledge input" `Quick
+            test_invalid_kind_cannot_acknowledge_input;
         ] );
       ( "approval_lifecycle",
         [ Alcotest.test_case

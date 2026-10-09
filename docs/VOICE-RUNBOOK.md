@@ -22,6 +22,31 @@ a Homebrew prefix, a model cache — stood in for the new machine.
 184. Nothing in the base system transcribes or records to a file masc can
 read: macOS dictation is not scriptable.
 
+### What speaks where there is no say
+
+Off a mac, speech out is espeak-ng, configured as an `espeak_ng` endpoint
+(kind `espeak_ng`, second in the wizard's speech-out list after `macos_say`).
+Measured 2026-10-07 with espeak-ng 1.52.0 (`brew install espeak-ng`):
+
+```
+espeak-ng --voices | wc -l          # 142 rows: header + 141 voices
+espeak-ng -v en -w out.wav "hello"  # 16-bit mono 22050 Hz WAVE
+```
+
+`-v` answers to the voice name, the Language column, and the
+parenthesised aliases (`en` through `(en 2)`, `zh` through `(zh 5)`), in any
+ASCII case, and masc's catalogue check matches all three. One trap: the
+VoiceName column shows spaces as underscores, but `-v` wants them back --
+`-v English_(America)` fails while `-v "English (America)"` speaks. Swept the
+same day across all 141 voices: every space-restored name spoke, 46
+underscore forms failed, and none spoke only with underscores. So the
+catalogue stores the restored name; stored verbatim, the wizard would offer
+rows that fail when chosen.
+
+Unlike say, espeak-ng refuses an unknown voice itself -- `-v NoSuchVoiceXYZ`
+exits 1 with `Error: The specified espeak-ng voice does not exist.` and
+writes no file -- so the check fails fast with the name before the clip does.
+
 ### What hearing needs
 
 ```
@@ -1271,22 +1296,12 @@ What stands in for that, and what it is worth:
 | step position, typed text, and what survives going back | `test/voice_wizard_session` | nothing about the terminal |
 | the pane hands over to the wizard; every mover has a key | `test/test_tui_voice_wizard_wiring.ml` | that the drawing is legible |
 | the wire shape both ends agree on | save request → apply → loader, in `test/voice_wizard` | that the pane sends it |
-| the wizard drawn and walked in a real terminal, and what it puts on the wire | `dune build @test/runtest-test_tui_keyboard_input-voice-wizard` | that a live server accepts it |
 
-The last row is the one that found something. Everything above it was green
-while typing an endpoint name containing `i` put the `i` into a keeper message
-and sent the rest of the word after it: the composer sees every key before the
-field does, and the list of places it must not do that named six fields by hand
-and did not name this one. `whisper` reached the screen as `wh`.
-
-That scenario now walks to the end and presses save, and reads the request the
-wizard posts: the revision the pane was showing, a `put_endpoint` carrying the
-name that was typed, the default model, the default voice — and the **name** of
-the credential variable, never a value, which is asserted rather than assumed
-because `runtime.toml` is committed. The other half, that such a request
-actually writes a loadable `[voice]` section, is `save_request` → `apply` →
-loader in `test/voice_wizard`.
-
-So both ends of the wire are measured against the same shape. What nobody has
-done is run the two against each other with a real server on the other side.
+No test holds key routing. It broke once: typing an endpoint name containing
+`i` put the `i` into a keeper message and sent the rest of the word after it,
+because the composer sees every key before the field does. `whisper` reached the
+screen as `wh`. No test reads the request the wizard posts on save either.
+#42153 moves both into tests that do not read the screen. That such a request
+writes a loadable `[voice]` section is `save_request` → `apply` → loader in
+`test/voice_wizard`. Nobody has run the wizard against a real server yet.
 

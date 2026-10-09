@@ -497,7 +497,7 @@ let board_event_kind_label = function
     "completion_authority_rejected"
   | Keeper_world_observation.Task_outcome _ -> "task_outcome"
   | Keeper_world_observation.Task_cancelled _ -> "task_cancelled"
-  | Keeper_world_observation.Delegate_completed -> "keeper_delegate_completed"
+  | Keeper_world_observation.Delegate_completed _ -> "keeper_delegate_completed"
   | Keeper_world_observation.Composition_completed ->
     "keeper_composition_completed"
   | Keeper_world_observation.Ask_answered_row _ -> "ask_answered"
@@ -702,8 +702,30 @@ let board_event_note_fields = function
   | Keeper_world_observation.Schedule_due _
   | Keeper_world_observation.Completion_authority_rejected _
   | Keeper_world_observation.Task_outcome _
-  | Keeper_world_observation.Task_cancelled _
+  | Keeper_world_observation.Task_cancelled _ ->
+    (* No side fact: the row is its own complete account. *)
+    []
+  (* [reply_full] restates the original reply exactly when the row's
+     preview cut at [delegate_reply_preview_max_len]: the tail is where
+     exact export objects and code fences live, and this note is the
+     row's only lossless copy. The cut test compares the trimmed bytes
+     the preview measured, so a padded short reply stays note-free and
+     an uncropped reply is never rendered twice. [Delegate_no_reply] and
+     [Delegate_failed] keep no note: their content is short by
+     construction and the row already carries it whole. *)
   | Keeper_world_observation.Delegate_completed
+      (Keeper_event_queue.Delegate_replied reply) ->
+    if
+      String.length (String.trim reply)
+      > Keeper_world_observation.delegate_reply_preview_max_len
+    then [ "reply_full", reply ]
+    else []
+  | Keeper_world_observation.Delegate_completed
+      (Keeper_event_queue.Delegate_no_reply
+      | Keeper_event_queue.Delegate_failed _) ->
+    (* No side fact: these payloads are short by construction and the
+       row already carries them whole; see the note above. *)
+    []
   (* The answer is the row's title and preview; there is no side fact to add. *)
   | Keeper_world_observation.Ask_answered_row _
   | Keeper_world_observation.Composition_completed -> []
@@ -901,7 +923,7 @@ let group_scheduled_wake_events events =
     | Keeper_world_observation.Completion_authority_rejected _
     | Keeper_world_observation.Task_outcome _
     | Keeper_world_observation.Task_cancelled _
-    | Keeper_world_observation.Delegate_completed
+    | Keeper_world_observation.Delegate_completed _
     | Keeper_world_observation.Ask_answered_row _
     | Keeper_world_observation.Composition_completed -> groups
   in
@@ -1041,7 +1063,7 @@ let format_completion_authority_rejection_observations
          | Keeper_world_observation.Schedule_due _
          | Keeper_world_observation.External_attention _
          | Keeper_world_observation.Task_cancelled _
-         | Keeper_world_observation.Delegate_completed
+         | Keeper_world_observation.Delegate_completed _
          | Keeper_world_observation.Ask_answered_row _
          | Keeper_world_observation.Composition_completed -> None)
       events
@@ -1091,7 +1113,7 @@ let format_task_outcome_observations
          | Keeper_world_observation.External_attention _
          | Keeper_world_observation.Completion_authority_rejected _
          | Keeper_world_observation.Task_cancelled _
-         | Keeper_world_observation.Delegate_completed
+         | Keeper_world_observation.Delegate_completed _
          | Keeper_world_observation.Ask_answered_row _
          | Keeper_world_observation.Composition_completed -> None)
       events
@@ -1145,7 +1167,7 @@ let format_task_cancellation_observations
          | Keeper_world_observation.External_attention _
          | Keeper_world_observation.Completion_authority_rejected _
          | Keeper_world_observation.Task_outcome _
-         | Keeper_world_observation.Delegate_completed
+         | Keeper_world_observation.Delegate_completed _
          | Keeper_world_observation.Ask_answered_row _
          | Keeper_world_observation.Composition_completed -> None)
       events
@@ -1443,26 +1465,33 @@ let previous_turn_stop_lines (stop : Keeper_turn_checkpoint_reason.t option) :
       ( Keeper_turn_checkpoint_reason.Operation_queued
       | Keeper_turn_checkpoint_reason.Durable_stimulus_arrived ) -> []
 
-let format_workspace_memory_observation = function
+let format_workspace_memory_observation ?access = function
   | Workspace_memory_ledger.Missing -> None
   | Workspace_memory_ledger.Unavailable _ ->
     Some (render_fragment Prompt_names.keeper_context_workspace_memory_unavailable [] ^ "\n\n")
   | Workspace_memory_ledger.Available descriptor ->
-    let briefing, briefing_status = match descriptor.briefing with
-      | Error _ -> "", render_fragment Prompt_names.keeper_context_workspace_memory_briefing_unavailable []
+    let briefing_status = match descriptor.briefing with
+      | Error _ -> render_fragment Prompt_names.keeper_context_workspace_memory_briefing_unavailable []
       | Ok Workspace_memory_briefing.Missing ->
-        "", render_fragment Prompt_names.keeper_context_workspace_memory_briefing_pending []
-      | Ok (Workspace_memory_briefing.Current summary) ->
-        summary.text, render_fragment Prompt_names.keeper_context_workspace_memory_briefing_current []
-      | Ok (Workspace_memory_briefing.Stale summary) ->
-        summary.text, render_fragment Prompt_names.keeper_context_workspace_memory_briefing_stale [] in
+        render_fragment Prompt_names.keeper_context_workspace_memory_briefing_pending []
+      | Ok (Workspace_memory_briefing.Current _) ->
+        render_fragment Prompt_names.keeper_context_workspace_memory_briefing_current []
+      | Ok (Workspace_memory_briefing.Stale _) ->
+        render_fragment Prompt_names.keeper_context_workspace_memory_briefing_stale [] in
+    let route = match access with
+      | None -> Prompt_names.keeper_context_workspace_memory_retrieval_preview
+      | Some access ->
+        match Keeper_request_tool_access.route access ~name:"keeper_workspace_memory_read" with
+        | Direct -> Prompt_names.keeper_context_workspace_memory_retrieval_direct
+        | Discoverable -> Prompt_names.keeper_context_workspace_memory_retrieval_discoverable
+        | Unavailable -> Prompt_names.keeper_context_workspace_memory_retrieval_unavailable in
     Some (render_fragment Prompt_names.keeper_context_workspace_memory_available
       [ "ledger_sha256", descriptor.ledger_sha256;
         "claim_count", string_of_int descriptor.claim_count;
         "conflict_count", string_of_int descriptor.conflict_count;
         "classified_count", string_of_int descriptor.classified_count;
-        "briefing", briefing;
-        "briefing_status", briefing_status ] ^ "\n\n")
+        "briefing_status", briefing_status;
+        "retrieval_route", render_fragment route [] ] ^ "\n\n")
 
 let format_recent_work = function
   | Keeper_recent_work.Absent -> None
@@ -1486,6 +1515,7 @@ let build_prompt_internal
     ?(active_goal_summaries : (goal_summary list, Goal_store.unavailable) result option)
     ?(lane_updates = Ok (`List []))
     ?(workspace_memory = Workspace_memory_ledger.Missing)
+    ?workspace_memory_access
     ?(repository_freshness : Keeper_sandbox_control.freshness_row list = [])
     ?(recent_work = Keeper_recent_work.Absent)
     ~(observation : Keeper_world_observation.world_observation)
@@ -1865,7 +1895,7 @@ let build_prompt_internal
        fetch/rebase; nothing here schedules or forces that work. *)
     | Keeper_context_layers.Lane_updates -> Lane_addon_subscription.render lane_updates
     | Keeper_context_layers.Workspace_memory ->
-      format_workspace_memory_observation workspace_memory
+      format_workspace_memory_observation ?access:workspace_memory_access workspace_memory
     | Keeper_context_layers.Repository_freshness ->
       (match repository_freshness with
        | [] -> None
@@ -2181,6 +2211,7 @@ let build_prompt
       ?task_skill_surfaces
       ?active_goal_summaries
       ?workspace_memory
+      ?workspace_memory_access
       ?lane_updates
       ?repository_freshness
       ?recent_work
@@ -2194,6 +2225,7 @@ let build_prompt
     ?task_skill_surfaces
     ?active_goal_summaries
     ?workspace_memory
+    ?workspace_memory_access
     ?lane_updates
     ?repository_freshness
     ?recent_work
@@ -2206,6 +2238,7 @@ let build_prompt_preview
       ?task_skill_surfaces
       ?active_goal_summaries
       ?workspace_memory
+      ?workspace_memory_access
       ?lane_updates
       ?repository_freshness
       ?recent_work
@@ -2218,6 +2251,7 @@ let build_prompt_preview
     ?task_skill_surfaces
     ?active_goal_summaries
     ?workspace_memory
+    ?workspace_memory_access
     ?lane_updates
     ?repository_freshness
     ?recent_work

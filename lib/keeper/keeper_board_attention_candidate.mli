@@ -317,6 +317,10 @@ val load_candidates_with_rejections
     only after an explicit repair leaves a fully readable ledger. *)
 
 val ledger_path : base_path:string -> keeper_name:string -> string
+
+(** Purge the ledger and its cached view under the existing mutation and
+    stable-file locks. Lock identities remain available to queued writers. *)
+val purge : base_path:string -> keeper_name:string -> (unit, string) result
 (** The Keeper's candidate ledger file. A Keeper purge removes it with the
     Keeper, so a later Keeper of the same name starts without its candidates
     or quarantines. *)

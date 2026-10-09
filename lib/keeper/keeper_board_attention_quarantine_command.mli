@@ -77,6 +77,10 @@ val execute :
   (report, execution_error) result
 
 module For_testing : sig
+  val execute_with_before_root_restore :
+    before_root_restore:(unit -> unit) -> now:float -> base_path:string -> t ->
+    (report, execution_error) result
+
   val execute_with_before_partition_commit :
     before_partition_commit:(Keeper_board_attention_partition.t -> unit) ->
     now:float ->

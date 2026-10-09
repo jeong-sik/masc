@@ -548,6 +548,32 @@ let test_purge_removes_both_board_attention_ledgers () =
     (Sys.file_exists (A.ledger_path ~base_path ~keeper_name:"alpha"))
 ;;
 
+let test_purge_invalidates_cached_candidates_and_retains_lock () =
+  with_temp_base "board-attention-candidate-purge" @@ fun base_path ->
+  let first = candidate (signal "purge-candidate-before") in
+  ignore (record ~base_path first);
+  ignore (ok "warm candidate cache" (A.load_candidates ~base_path ~keeper_name:"alpha"));
+  let path = A.ledger_path ~base_path ~keeper_name:"alpha" in
+  let lock_path = Fs_compat.private_jsonl_lock_path path in
+  (match A.purge ~base_path ~keeper_name:"alpha" with
+   | Ok () -> ()
+   | Error detail -> Alcotest.failf "candidate purge failed: %s" detail);
+  Alcotest.(check bool) "candidate data is gone" false (Sys.file_exists path);
+  Alcotest.(check bool) "candidate stable lock remains" true (Sys.file_exists lock_path);
+  Alcotest.(check (list string))
+    "candidate cache is empty after purge"
+    []
+    (List.map (fun (candidate : A.candidate) -> candidate.candidate_id)
+       (ok "load after candidate purge" (A.load_candidates ~base_path ~keeper_name:"alpha")));
+  let successor = candidate (signal "purge-candidate-after") in
+  ignore (record ~base_path successor);
+  Alcotest.(check (list string))
+    "same-name successor starts from an empty candidate ledger"
+    [ successor.candidate_id ]
+    (List.map (fun (candidate : A.candidate) -> candidate.candidate_id)
+       (ok "load successor candidate" (A.load_candidates ~base_path ~keeper_name:"alpha")))
+;;
+
 let test_edit_candidates_preserve_revision_identity () =
   with_temp_base "board-edit-candidates" @@ fun base_path ->
   let edited at =
@@ -1275,6 +1301,10 @@ let () =
             "a keeper purge removes both Board attention ledgers"
             `Quick
             test_purge_removes_both_board_attention_ledgers
+        ; Alcotest.test_case
+            "candidate purge invalidates cache and retains stable lock"
+            `Quick
+            test_purge_invalidates_cached_candidates_and_retains_lock
         ; Alcotest.test_case
             "codec and context identity are strict"
             `Quick

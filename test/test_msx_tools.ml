@@ -1080,7 +1080,7 @@ let test_core_identity_matches_pin () =
    40-hex commit or one of them is stale. The digest itself is bound to the
    commit by the core's own recomputation test at build time. *)
 let test_pin_table_names_the_same_core () =
-  let script = "scripts/opam-pin-external-deps.sh" in
+  let script = "../scripts/opam-pin-external-deps.sh" in
   let text = In_channel.with_open_text script In_channel.input_all in
   let marker = "OCAML_MSX_SHA=\"" in
   let script_sha =
@@ -1100,7 +1100,7 @@ let test_pin_table_names_the_same_core () =
   check string "runtime core commit matches the pin script"
     (match script_sha with Some sha -> sha | None -> "")
     Msx_lane.core.pinned_source_commit;
-  let lock = In_channel.with_open_text "masc.opam.locked" In_channel.input_all in
+  let lock = In_channel.with_open_text "../masc.opam.locked" In_channel.input_all in
   check bool "lock file names the same pin commit" true
     (match script_sha with
      | Some sha ->

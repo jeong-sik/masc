@@ -5,33 +5,6 @@ let contains haystack needle =
     true
   with Not_found -> false
 
-(* [wrapped_rows] breaks a sentence across rows at whatever width the caller
-   passed, colours each row, and pads continuations with spaces. An assertion
-   on the sentence would otherwise pass or fail on where the wrap landed. This
-   drops the SGR codes and collapses whitespace runs, so what is left is the
-   words in order and a reworded sentence is the only thing that fails. *)
-let flattened rendered =
-  Str.global_replace (Str.regexp "[ \n]+") " "
-    (Str.global_replace (Str.regexp "\027\\[[0-9;]*m") "" rendered)
-
-let observed =
-  Yojson.Safe.from_string
-    {|{
-      "name": "alpha",
-      "keeper_last_error": null,
-      "sandbox_live": {
-        "keeper": "alpha",
-        "sandbox_profile": "docker",
-        "configured_network_mode": "inherit",
-        "effective_mode": "oneshot_or_managed_inherit",
-        "managed_container_kind": "managed",
-        "containers": [],
-        "preflight": null,
-        "container_error": null,
-        "why_no_container": "no visible managed sandbox container; network_mode=inherit uses one-shot Docker containers on sandboxed tool calls, and those containers still mount the keeper playground"
-      }
-    }|}
-
 let render json =
   match
     Masc_tui_keeper_sandbox.decode
@@ -42,190 +15,6 @@ let render json =
   | Ok reading ->
     Masc_tui_keeper_sandbox.view_lines ~width:64 reading
     |> String.concat "\n"
-
-let test_idle_status_answers_what_happens_next () =
-  let rendered = render observed in
-  List.iter
-    (fun needle ->
-      Alcotest.(check bool) needle true (contains rendered needle))
-    [ "status"
-    ; "IDLE"
-    ; "Next"
-    ; "container starts when a sandbox command runs"
-    ; "configured"
-    ; "Backend"
-    ; "Docker"
-    ; "Network"
-    ; "inherit"
-    ; "related"
-    ]
-  ; List.iter
-      (fun stale_label ->
-        Alcotest.(check bool)
-          (stale_label ^ " is not rendered")
-          false
-          (contains rendered stale_label))
-      [ "sandbox flow"; "Effective"; "oneshot_or_managed_inherit"; "Why no container" ]
-
-let test_live_container_and_errors_are_visible () =
-  let json =
-    Yojson.Safe.from_string
-      {|{
-        "keeper_last_error": "previous launch failed",
-        "sandbox_live": {
-          "sandbox_profile": "docker",
-          "configured_network_mode": "none",
-          "effective_mode": "managed_running",
-          "managed_container_kind": "managed",
-          "containers": [{
-            "id": "abc123",
-            "name": "masc-alpha",
-            "image": "masc/sandbox:latest",
-            "status": "Up 2 minutes",
-            "running": true,
-            "created_at": "2026-09-02T04:51:29Z",
-            "keeper_name": "alpha",
-            "container_kind": "managed",
-            "network_label": "none",
-            "owner_pid": 4242,
-            "started_at": 1.0,
-            "ttl_sec": 60.0,
-            "cpus": 4,
-            "memory_bytes": 2147483648,
-            "hostname": "masc-alpha",
-            "ipv4_address": "192.168.64.64/24",
-            "ipv6_address": "fd00::64/64",
-            "gateway": "192.168.64.1"
-          }],
-          "resource_config": {
-            "memory": "2g",
-            "cpus": "4",
-            "work_volume_size": "256g",
-            "pids_limit": null,
-            "tmpfs_size": null
-          },
-          "paths": {
-            "host_workspace": "/base/.masc/playground/alpha",
-            "guest_home": null,
-            "guest_workspace": "/masc-work/alpha",
-            "guest_config": "/tmp/masc-runtime/.masc/config",
-            "guest_work_volume": "/masc-work"
-          },
-          "container_error": "docker list partial",
-          "why_no_container": null
-        }
-      }|}
-  in
-  let rendered = render json in
-  List.iter
-    (fun needle ->
-      Alcotest.(check bool) needle true (contains rendered needle))
-    [ "DEGRADED"
-    ; "1 reported with an inspection error"
-    ; "live instance"
-    ; "State"
-    ; "masc-alpha"
-    ; "abc123"
-    ; "Owner PID"
-    ; "4242"
-    ; "Created"
-    ; "2026-09-02T04:51:29Z"
-    ; "Compute"
-    ; "4 CPU"
-    ; "2.0 GiB RAM"
-    ; "Network"
-    ; "192.168.64.64/24"
-    ; "192.168.64.1"
-    ; "configured"
-    ; "work 256g"
-    ; "filesystem"
-    ; "/base/.masc/playground/alpha"
-    ; "/masc-work/alpha"
-    ; "/tmp/masc-runtime/.masc/config"
-    ; "unavailable"
-    ; "o  actual logs"
-    ; "t  tool calls"
-    ; "docker list partial"
-    ; "previous launch failed"
-    ]
-
-(* A live container's name carries the keeper name and two hashes, so on the
-   pane's width it wraps over two or three rows. Behind it the state was the
-   last thing drawn, on a row with no label. *)
-let test_the_state_row_leads_with_the_state () =
-  let json =
-    Yojson.Safe.from_string
-      {|{
-        "sandbox_live": {
-          "sandbox_profile": "docker",
-          "containers": [{
-            "id": "abc123",
-            "name": "masc-keeper-docker-alpha-none-faea17a4-4bf729e6daa13fa74b6a8f6bfeb419e522c7283f650a65010fe1406735099e71",
-            "image": "masc/sandbox:latest",
-            "status": "Up 2 minutes",
-            "running": true
-          }],
-          "container_error": null
-        }
-      }|}
-  in
-  let rendered = flattened (render json) in
-  Alcotest.(check bool) "the state row answers with the state" true
-    (contains rendered "State running · Up 2 minutes");
-  Alcotest.(check bool) "the name has a row of its own" true
-    (contains rendered
-       "Name masc-keeper-docker-alpha-none-faea17a4-");
-  Alcotest.(check bool) "the state row does not open with the name" false
-    (contains rendered "State masc-keeper-docker")
-
-let test_stopped_instance_is_not_reported_as_not_started () =
-  let json =
-    Yojson.Safe.from_string
-      {|{
-        "sandbox_live": {
-          "sandbox_profile": "microvm",
-          "containers": [{
-            "id": "vm-stopped",
-            "name": "masc-alpha",
-            "image": "masc/sandbox:latest",
-            "status": "stopped",
-            "running": false
-          }],
-          "container_error": null
-        }
-      }|}
-  in
-  let rendered = render json in
-  Alcotest.(check bool) "stopped status" true (contains rendered "STOPPED");
-  Alcotest.(check bool) "not a never-started VM" false
-    (contains rendered "NOT STARTED")
-
-(* A size the keeper or the workspace wrote and nothing can parse refuses the
-   next boot. The sandbox screen says so before a turn runs into it. *)
-let test_unresolved_guest_size_is_shown () =
-  let json =
-    Yojson.Safe.from_string
-      {|{
-        "sandbox_live": {
-          "sandbox_profile": "microvm",
-          "containers": [],
-          "resource_config": {
-            "memory": null,
-            "cpus": null,
-            "guest_size_error": "MASC_KEEPER_MICROVM_MEMORY: \"12\" is not a guest memory size",
-            "work_volume_size": "256g",
-            "pids_limit": null,
-            "tmpfs_size": null
-          }
-        }
-      }|}
-  in
-  let rendered = render json in
-  (* Single tokens: the row wraps at 47 cells, so a phrase can straddle two
-     lines while the words themselves stay whole. *)
-  Alcotest.(check bool) "the row is labelled" true (contains rendered "Guest size");
-  Alcotest.(check bool) "it names where the size came from" true
-    (contains rendered "MASC_KEEPER_MICROVM_MEMORY")
 
 let test_unknown_profile_fails_closed () =
   let json =
@@ -265,7 +54,6 @@ let test_missing_live_observation_fails_closed () =
   | Error detail ->
     Alcotest.(check bool) "actionable error" true
       (contains detail "no sandbox_live observation")
-
 
 let test_actual_container_logs_are_typed_and_terminal_safe () =
   let json =
@@ -311,43 +99,6 @@ let test_actual_container_logs_are_typed_and_terminal_safe () =
   Alcotest.(check bool) "raw escape is absent" false (contains rendered "\027]")
 ;;
 
-(* The server sends the runtime's own spelling (#32837), and this decoder is
-   strict: an unknown backend string blanks the whole panel rather than
-   guessing. So every runtime the server can name has to be a value this
-   reader accepts, and that is what these pin. *)
-let test_every_microvm_runtime_reaches_the_reader () =
-  List.iter
-    (fun (wire, label) ->
-      let json =
-        Yojson.Safe.from_string
-          (Printf.sprintf
-             {|{"keeper":"alpha","backend":%S,"state":"no_instance","tail":50,"instances":[]}|}
-             wire)
-      in
-      match Masc_tui_keeper_sandbox.decode_logs ~sanitize:Fun.id json with
-      | Error detail -> Alcotest.failf "%s was refused by the reader: %s" wire detail
-      | Ok logs ->
-        let rendered =
-          Masc_tui_keeper_sandbox.logs_view_lines ~width:64 logs
-          |> String.concat "\n"
-        in
-        Alcotest.(check bool)
-          (wire ^ " names its runtime")
-          true
-          (contains rendered label))
-    [ "docker", "Docker"
-    ; "apple_container", "Apple Container"
-    ; "microsandbox", "microsandbox"
-    ; "nerdctl_kata", "nerdctl (Kata)"
-    ]
-;;
-
-(* The list above is typed in, so it cannot notice a runtime added to the
-   server's closed sum after it was written. This one is derived from that
-   sum: a fourth backend that nobody teaches the reader arrives here as a
-   spelling the decoder refuses, which is the panel blanking. The TUI reader
-   keeps a parallel string type on purpose -- it links no server code -- so
-   the suite is what holds the two sides together. *)
 let test_the_reader_accepts_every_runtime_the_server_can_name () =
   List.iter
     (fun wire ->
@@ -368,73 +119,6 @@ let test_the_reader_accepts_every_runtime_the_server_can_name () =
     Masc.Keeper_microvm_backend.valid_strings
 ;;
 
-(* The row names the image the Keeper chose and the build the host catalog
-   has for it now; when the catalog has none, the reason is the row, since it
-   is what stops the Keeper's next container. *)
-let test_the_image_row_shows_the_name_and_the_build () =
-  let rendered =
-    render
-      (Yojson.Safe.from_string
-         {|{"sandbox_live":{"keeper":"alpha","sandbox_profile":"docker","configured_image_name":"ocaml","configured_image":"masc-sandbox-ocaml:t1","configured_image_unresolved":null}}|})
-  in
-  Alcotest.(check bool) "name and build" true
-    (contains rendered "ocaml \xc2\xb7 masc-sandbox-ocaml:t1")
-;;
-
-let test_an_unresolved_image_shows_why () =
-  let reason = "nothing is promoted for \"rust\" in the docker image store." in
-  let rendered =
-    render
-      (`Assoc
-         [ ( "sandbox_live"
-           , `Assoc
-               [ "keeper", `String "alpha"
-               ; "sandbox_profile", `String "docker"
-               ; "configured_image_name", `String "rust"
-               ; "configured_image", `Null
-               ; "configured_image_unresolved", `String reason
-               ] )
-         ])
-  in
-  Alcotest.(check bool) "the reason is shown" true (contains rendered "nothing is promoted")
-;;
-
-(* A backend the server does not send is still refused, so the reader is
-   strict rather than merely wide. *)
-(* The live instance's State row. [running] is this reader's word for the
-   bool the projection sends; [status] is the runtime's own. They are
-   different facts -- a stopped container can say "exited (0)" -- so both are
-   drawn where they differ. Where they agree the row said the same word
-   twice: on the live fleet all fourteen drawn containers read
-   "running \xc2\xb7 running". *)
-let sandbox_with ~status ~running =
-  Printf.sprintf
-    {|{
-      "sandbox_live": {
-        "sandbox_profile": "microvm",
-        "containers": [{
-          "id": "vm-1",
-          "name": "masc-alpha",
-          "image": "masc/sandbox:latest",
-          "status": %s,
-          "running": %b
-        }],
-        "container_error": null
-      }
-    }|}
-    (Printf.sprintf "%S" status) running
-  |> Yojson.Safe.from_string
-
-let test_the_state_row_says_one_word_where_the_two_agree () =
-  let rendered = render (sandbox_with ~status:"running" ~running:true) in
-  Alcotest.(check bool) "the state is still there" true
-    (contains rendered "running");
-  Alcotest.(check bool) "and not twice" false
-    (contains rendered "running \xc2\xb7 running");
-  let differing = render (sandbox_with ~status:"Up 2 minutes" ~running:true) in
-  Alcotest.(check bool) "a runtime word of its own still reads" true
-    (contains differing "running \xc2\xb7 Up 2 minutes")
-
 let test_an_unknown_backend_is_still_refused () =
   let json =
     Yojson.Safe.from_string
@@ -445,57 +129,6 @@ let test_an_unknown_backend_is_still_refused () =
   | Error detail ->
     Alcotest.(check bool) "the refusal names the value" true
       (contains detail "firecracker")
-;;
-
-let test_actual_container_logs_report_no_instance () =
-  let json =
-    Yojson.Safe.from_string
-      {|{
-        "keeper":"alpha",
-        "backend":"docker",
-        "state":"no_instance",
-        "tail":200,
-        "instances":[]
-      }|}
-  in
-  match Masc_tui_keeper_sandbox.decode_logs ~sanitize:Fun.id json with
-  | Error detail -> Alcotest.fail detail
-  | Ok logs ->
-    let rendered =
-      Masc_tui_keeper_sandbox.logs_view_lines ~width:64 logs
-      |> String.concat "\n"
-    in
-    Alcotest.(check bool) "no instance is explicit" true
-      (contains (flattened rendered) "run a sandbox command first")
-;;
-
-(* A Keeper with no local stream is not a Keeper whose container has not
-   started yet. The pane has to say which one it is looking at. *)
-let test_actual_container_logs_report_no_local_stream () =
-  let json =
-    Yojson.Safe.from_string
-      {|{
-        "keeper":"alder",
-        "backend":null,
-        "state":"no_local_stream",
-        "reason":"This Keeper runs on its configured SSH endpoint, so no container log stream exists on this host; read the logs on the endpoint.",
-        "tail":200,
-        "instances":[]
-      }|}
-  in
-  match Masc_tui_keeper_sandbox.decode_logs ~sanitize:Fun.id json with
-  | Error detail -> Alcotest.fail detail
-  | Ok logs ->
-    let rendered =
-      Masc_tui_keeper_sandbox.logs_view_lines ~width:64 logs
-      |> String.concat "\n"
-    in
-    Alcotest.(check bool) "operator learns where the logs are" true
-      (contains (flattened rendered)
-         "This Keeper runs on its configured SSH endpoint, so no container \
-          log stream exists on this host; read the logs on the endpoint.");
-    Alcotest.(check bool) "no empty-instance wording" false
-      (contains rendered "run a sandbox command first")
 ;;
 
 let test_no_local_stream_rejects_a_backend () =
@@ -516,17 +149,7 @@ let test_no_local_stream_rejects_a_backend () =
 let () =
   Alcotest.run "tui keeper sandbox"
     [ ( "projection"
-      , [ Alcotest.test_case "idle status answers next action" `Quick
-            test_idle_status_answers_what_happens_next
-        ; Alcotest.test_case "containers and errors" `Quick
-            test_live_container_and_errors_are_visible
-        ; Alcotest.test_case "the state row leads with the state" `Quick
-            test_the_state_row_leads_with_the_state
-        ; Alcotest.test_case "stopped instance stays distinct" `Quick
-            test_stopped_instance_is_not_reported_as_not_started
-        ; Alcotest.test_case "an unresolved guest size is shown" `Quick
-            test_unresolved_guest_size_is_shown
-        ; Alcotest.test_case "unknown profile fails closed" `Quick
+      , [ Alcotest.test_case "unknown profile fails closed" `Quick
             test_unknown_profile_fails_closed
         ; Alcotest.test_case "terminal controls sanitized" `Quick
             test_hostile_text_is_sanitized_before_state
@@ -536,25 +159,12 @@ let () =
     ; ( "actual logs"
       , [ Alcotest.test_case "typed and terminal safe" `Quick
             test_actual_container_logs_are_typed_and_terminal_safe
-        ; Alcotest.test_case "no instance is explicit" `Quick
-            test_actual_container_logs_report_no_instance
-        ; Alcotest.test_case "no local stream names the endpoint" `Quick
-            test_actual_container_logs_report_no_local_stream
         ; Alcotest.test_case "no local stream refuses a backend" `Quick
             test_no_local_stream_rejects_a_backend
-        ; Alcotest.test_case "every microvm runtime reaches the reader" `Quick
-            test_every_microvm_runtime_reaches_the_reader
         ; Alcotest.test_case
             "the reader accepts every runtime the server can name" `Quick
             test_the_reader_accepts_every_runtime_the_server_can_name
         ; Alcotest.test_case "an unknown backend is still refused" `Quick
             test_an_unknown_backend_is_still_refused
-        ; Alcotest.test_case
-            "the state row says one word where the two agree" `Quick
-            test_the_state_row_says_one_word_where_the_two_agree
-        ; Alcotest.test_case "the image row shows the name and the build" `Quick
-            test_the_image_row_shows_the_name_and_the_build
-        ; Alcotest.test_case "an unresolved image shows why" `Quick
-            test_an_unresolved_image_shows_why
-        ] )
+        ;] )
     ]

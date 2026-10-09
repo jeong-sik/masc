@@ -4,6 +4,8 @@
 (test
  (name test_msx_tools)
  (modules test_msx_tools)
+ ; lane 28 reads the pin script and the lock file from the source root.
+ (deps ../scripts/opam-pin-external-deps.sh ../masc.opam.locked)
  (libraries
   masc.machine_configuration
   alcotest yojson unix eio_main fs_compat base64 ocaml-msx.msx masc masc.msx_lane masc.board_handlers

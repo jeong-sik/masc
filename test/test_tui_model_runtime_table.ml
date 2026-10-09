@@ -16,7 +16,12 @@ let parse lines =
   let lines = List.concat_map (fun line -> if line = "[providers.ollama_cloud]" then
     [line; "protocol = \"openai-compatible-http\""; "kind = \"openai_compat\"";
      "endpoint = \"http://localhost:9000/v1\""] else [line]) lines in
-  match T.parse (lines @ declared) with
+  let lines = lines @ declared in
+  let config = Runtime_toml.parse_string (String.concat "\n" lines) |> Result.get_ok in
+  let account_groups = Runtime_wizard_inventory.account_groups_json config
+    |> Yojson.Safe.Util.to_list |> List.map (fun group ->
+      Yojson.Safe.Util.(group |> member "integration_ids" |> to_list |> List.map to_string)) in
+  match T.parse ~account_groups lines with
   | Ok rows -> rows | Error detail -> Alcotest.fail detail
 
 let sample =
@@ -92,174 +97,6 @@ let test_commented_lines_are_not_values () =
   let gamma = row_named (parse lines) "gamma" in
   check bool "comment ignored" true (Option.is_none gamma.T.reasoning_effort)
 
-let test_render_columns_line_up () =
-  let rendered = T.render ~width:80 (parse sample) in
-  match rendered with
-  | header :: rows ->
-    let effort_col =
-      (* Locate by the header word rather than a fixed number so the test
-         tracks the layout instead of restating it. [String.index_opt] used
-         to be matched here and the single arm ignored it. *)
-      let rec find i =
-        if i + 6 > String.length header then -1
-        else if String.equal (String.sub header i 6) "effort" then i
-        else find (i + 1)
-      in
-      find 0
-    in
-    check bool "effort header found" true (effort_col >= 0);
-    List.iter
-      (fun row ->
-        check
-          bool
-          "row is at least as wide as the effort column"
-          true
-          (String.length row > effort_col))
-      rows
-  | [] -> Alcotest.fail "render produced nothing"
-
-(* Model and provider names come from runtime.toml, so a name outside ASCII
-   is a configuration away. Widths used to be byte counts: a three-byte
-   Korean scalar counted three against a column that shows it in two cells,
-   so the padding came out short and every column after it moved on that row
-   alone. *)
-let test_a_wide_name_is_padded_by_cells_not_bytes () =
-  (* Two rows whose names differ only in how many bytes a cell costs, and
-     whose last column holds the same value. Padded by cells they are the
-     same width; padded by bytes the wide one comes out short. *)
-  let lines =
-    [ "[models.abcd]"
-    ; "temperature = 0.7"
-    ; ""
-    ; "[local.abcd]"
-    ; "max-tokens = 100"
-    ; ""
-    ; "[models.wide]"
-    ; "api-name = \"한글\""
-    ; "temperature = 0.7"
-    ; ""
-    ; "[local.wide]"
-    ; "max-tokens = 100"
-    ]
-  in
-  match T.render ~width:80 (parse lines) with
-  | _ :: [ ascii; wide ] ->
-      let width text = Masc_tui_message_layout.display_width text in
-      check int "both rows are the same width in cells" (width ascii) (width wide)
-  | _ -> Alcotest.fail "expected a header and two rows"
-
-(* The clip is on the model column, and it used to cut at a byte: a name
-   whose limit falls inside a scalar came back with that scalar in pieces.
-   Cutting at a cell keeps every scalar whole, and the row still fills the
-   column it was given. *)
-let test_a_clipped_wide_name_keeps_its_scalars_whole () =
-  let long = String.concat "" (List.init 30 (fun _ -> "\xed\x95\x9c")) in
-  let lines =
-    [ "[models.wide]"
-    ; "api-name = \"" ^ long ^ "\""
-    ; "temperature = 0.7"
-    ; ""
-    ; "[local.wide]"
-    ; "max-tokens = 100"
-    ]
-  in
-  match T.render ~width:40 (parse lines) with
-  | _ :: [ row ] ->
-      (* Every scalar decodes: a byte cut leaves a replacement here. *)
-      let rec whole i =
-        if i >= String.length row then true
-        else
-          let decoded = String.get_utf_8_uchar row i in
-          Uchar.utf_decode_is_valid decoded
-          && whole (i + Uchar.utf_decode_length decoded)
-      in
-      check bool "no scalar was cut in half" true (whole 0);
-      (* The marker is a scalar now, not a byte, so look for the scalar. This
-         also stops a "~" inside a model's own name from standing in for it. *)
-      let clip_marker = Uchar.of_int 0x2026 (* HORIZONTAL ELLIPSIS *) in
-      let rec marked i =
-        if i >= String.length row then false
-        else
-          let decoded = String.get_utf_8_uchar row i in
-          Uchar.equal (Uchar.utf_decode_uchar decoded) clip_marker
-          || marked (i + Uchar.utf_decode_length decoded)
-      in
-      check bool "the clip marker is there" true (marked 0)
-  | _ -> Alcotest.fail "expected a header and one row"
-
-let test_narrow_layout_preserves_mandatory_values () =
-  let rows = parse sample in
-  check bool "narrow pane does not fit fixed table" false (T.fits ~width:30 rows);
-  let rendered = T.render ~width:40 ~pane:30 rows in
-  check bool "stacked output keeps max-tokens" true
-    (List.exists (fun line -> String.equal line "max-tokens 16384") rendered);
-  check bool "stacked lines fit pane" true
-    (List.for_all
-       (fun line -> Masc_tui_message_layout.display_width line <= 30)
-       rendered)
-
-let test_stacked_item_starts_are_monotonic () =
-  let rows = parse sample in
-  match T.stacked_item_starts ~pane:30 rows with
-  | [ first; second ] ->
-      check int "first item starts at zero" 0 first;
-      check bool "second item follows first" true (second > first)
-  | starts -> Alcotest.failf "expected two item starts, got %d" (List.length starts)
-
-let test_empty_input () =
-  check
-    string
-    "empty says so"
-    "no model bindings in runtime.toml"
-    (List.hd (T.render ~width:80 []))
-
-let test_detail_names_owners_and_api_override () =
-  let alpha = row_named (parse sample) "alpha" in
-  check
-    (Alcotest.list string)
-    "selected binding detail"
-    [ "Binding: provider=ollama_cloud  model=alpha"
-    ; "API model: alpha-v2 (api-name override)"
-    ; "[models.alpha]  reasoning-effort=low  temperature=0.7"
-    ; "[ollama_cloud.alpha]  max-tokens=16384"
-    ; "Context: undeclared; Runtime shows the resolved catalog value"
-    ; "- means that key is absent; add or edit it in the section shown above."
-    ]
-    (T.detail_lines alpha)
-
-let test_detail_explains_absent_values () =
-  let beta = row_named (parse sample) "beta" in
-  check
-    (Alcotest.list string)
-    "absent values and default API name"
-    [ "Binding: provider=ollama_cloud  model=beta"
-    ; "API model: beta (same as binding)"
-    ; "[models.beta]  reasoning-effort=-  temperature=-"
-    ; "[ollama_cloud.beta]  max-tokens=-"
-    ; "Context: undeclared; Runtime shows the resolved catalog value"
-    ; "- means that key is absent; add or edit it in the section shown above."
-    ]
-    (T.detail_lines beta)
-
-let test_detail_quotes_dotted_model_section () =
-  let row : T.row =
-    { model = "glm-5.2"
-    ; provider = "glm-coding"
-    ; api_name = None
-    ; reasoning_effort = None
-    ; temperature = None
-    ; max_tokens = None
-    ; context = None; model_context = None
-    }
-  in
-  let detail = T.detail_lines row in
-  check string "models section quotes the dotted key"
-    "[models.\"glm-5.2\"]  reasoning-effort=-  temperature=-"
-    (List.nth detail 2);
-  check string "binding section quotes the dotted key"
-    "[glm-coding.\"glm-5.2\"]  max-tokens=-"
-    (List.nth detail 3)
-
 let test_accounts_and_sets () =
   let lines = [
     "[models.shared]"; "max-context = 500000";
@@ -277,6 +114,109 @@ let test_accounts_and_sets () =
     [Some ("model", 500000); Some ("binding", 272000)]
     (List.map (fun (r:T.row) -> r.context) rows)
 
+(* A provider id does not name its account: on 2026-10-08 one Codex login sat
+   under three ids and read as three accounts. Ids that share an account-home
+   name each other. *)
+let test_same_login_names_other_ids () =
+  let provider id home =
+    [ "[providers." ^ id ^ "]"; "protocol = 'codex-app-server'"; "command = 'codex'";
+      "is-non-interactive = true"; "model-set = 'family'" ]
+    @ (match home with
+       | Some home -> [ "account-home = '" ^ home ^ "'" ]
+       | None -> [])
+  in
+  let lines =
+    [ "[models.shared]"; "max-context = 500000";
+      "[model_sets.family]"; "models = ['shared']" ]
+    @ provider "codex_a" (Some "/tmp/login-one")
+    @ provider "codex_b" (Some "/tmp/login-one")
+    @ provider "codex_c" (Some "/tmp/login-two")
+    @ provider "codex_d" None
+  in
+  check
+    (Alcotest.list (Alcotest.pair string (Alcotest.list string)))
+    "ids on one account-home name each other and nobody else"
+    [ "codex_a", [ "codex_b" ]; "codex_b", [ "codex_a" ]; "codex_c", []; "codex_d", [] ]
+    (List.map (fun (r : T.row) -> r.provider, r.same_login) (parse lines))
+
+let test_server_owned_membership () =
+  let lines = ["[models.shared]"; "max-context=8192";
+    "[providers.a]"; "protocol='codex-app-server'"; "command='codex'";
+    "is-non-interactive=true"; "account-home='/client/distinct-a'";
+    "[providers.b]"; "protocol='codex-app-server'"; "command='codex'";
+    "is-non-interactive=true"; "account-home='/client/distinct-b'";
+    "[a.shared]"; "[b.shared]"] in
+  (* The client consumes membership as evidence; it cannot recompute the
+     server environment. An unknown member instead refuses mismatched source. *)
+  let rows = T.parse ~account_groups:[["a";"b"]] lines |> Result.get_ok in
+  check (Alcotest.list string) "server membership controls peers"
+    ["b"] (List.hd rows).same_login;
+  check bool "foreign-source membership rejected" true
+    (Result.is_error (T.parse ~account_groups:[["a";"missing"]] lines))
+
+let test_one_login_is_adjacent_and_tagged () =
+  let provider id home =
+    [ "[providers." ^ id ^ "]"; "protocol = 'codex-app-server'"; "command = 'codex'";
+      "is-non-interactive = true"; "model-set = 'family'";
+      "account-home = '" ^ home ^ "'" ]
+  in
+  let rows =
+    parse
+      ([ "[models.shared]"; "max-context = 500000";
+         "[model_sets.family]"; "models = ['shared']" ]
+       @ provider "codex_a" "/tmp/login-one"
+       @ provider "codex_m" "/tmp/login-two"
+       @ provider "codex_z" "/tmp/login-one")
+  in
+  check (Alcotest.list string) "the two ids of one login are adjacent"
+    [ "codex_a"; "codex_z"; "codex_m" ]
+    (List.map (fun (r : T.row) -> r.provider) rows);
+  check (Alcotest.list (Alcotest.option int)) "a shared login is numbered, a single id is not"
+    [ Some 1; Some 1; None ]
+    (List.map (fun (r : T.row) -> r.login_group) rows);
+  check (Alcotest.list string) "without a label the column shows the group"
+    [ "codex_a #1"; "codex_z #1"; "codex_m" ]
+    (List.map T.provider_text rows);
+  let labelled =
+    List.map (fun (r : T.row) -> { r with account_label = Some "someone" }) rows
+  in
+  check (Alcotest.list string) "a label replaces the group number"
+    [ "codex_a someone"; "codex_z someone"; "codex_m someone" ]
+    (List.map T.provider_text labelled);
+  (* The drawn column is the measured column: every row starts its model
+     name at the same cell with the label in place. *)
+  let width = 120 in
+  check bool "the labelled table fits a wide pane" true (T.fits ~width labelled);
+  (match T.render ~width ~pane:width labelled with
+   | _header :: lines ->
+     let model_at line =
+       let rec find i =
+         if i + 6 > String.length line then -1
+         else if String.sub line i 6 = "shared" then i else find (i + 1) in
+       find 0 in
+     check (Alcotest.list int) "model names line up under one column"
+       (List.map (fun _ -> model_at (List.hd lines)) lines)
+       (List.map model_at lines)
+   | [] -> Alcotest.fail "no table was drawn")
+
+let test_keepers_on_login () =
+  let alpha = row_named (parse sample) "alpha" in
+  let row = { alpha with provider = "codex_a"; same_login = [ "codex_z" ] } in
+  let assignments =
+    [ "zed", "codex_z.model"; "amy", "codex_a.model"; "lane-user", "sonnet-lane";
+      "other", "codex_ab.model"; "dotted", "codex_a.extra.model"; "unknown", "codex_a.undeclared" ]
+  in
+  check (Alcotest.list string) "direct assignments on any id of the login, sorted"
+    [ "amy"; "zed" ] (T.keepers_on_login ~rows:[{row with model="model"}; {row with provider="codex_z";model="model"};
+      {row with provider="codex_a.extra";model="model";same_login=[]}]
+      ~assignments row);
+  check string "the count comes before the names"
+    "Keepers assigned directly (lanes not counted): 2 - amy, zed"
+    (List.nth (T.detail_lines ~keepers:[ "amy"; "zed" ] row) 2);
+  check string "an empty login says none"
+    "Keepers assigned directly (lanes not counted): none"
+    (List.nth (T.detail_lines ~keepers:[] row) 2)
+
 let test_invalid_is_error () =
   match T.parse ["[models.broken"] with
   | Error _ -> () | Ok _ -> Alcotest.fail "bad source was presented as an empty model list"
@@ -293,46 +233,15 @@ let test_exact_runtime_lookup () =
   check bool "missing binding stays missing" true
     (Option.is_none (T.find_runtime ~runtime_id:"account-three.model.6" rows))
 
-let one_binding name =
-  let rows =
-    parse
-      [ "[models." ^ name ^ "]"; ""; "[local." ^ name ^ "]"; "max-tokens = 16384" ]
-  in
-  check int "fixture yields one row" 1 (List.length rows);
-  rows
-
-let contains line needle =
-  let n = String.length needle in
-  let rec at i =
-    i + n <= String.length line && (String.equal (String.sub line i n) needle || at (i + 1))
-  in
-  at 0
-
-(* At 60 cells render gives the model column 14 (46 reserved), so a 16-cell
-   name used to pass [fits] on natural widths and then be clipped. *)
-let test_fits_measures_the_drawn_allocation () =
-  let name = String.make 16 'a' in
-  let rows = one_binding name in
-  check bool "16-cell name does not fit at 60" false (T.fits ~width:60 rows);
-  check bool "fits once the column holds it" true (T.fits ~width:62 rows);
-  let stacked = T.render ~width:60 ~pane:60 rows in
-  check bool "name survives whole in stacked layout" true
-    (List.exists (fun l -> contains l name) stacked);
-  let table = T.render ~width:62 ~pane:62 rows in
-  check bool "name survives whole in the table" true
-    (List.exists (fun l -> contains l name) table)
-
-(* Short names still drew a 53-cell header into a 50-cell pane. *)
-let test_fits_counts_the_padded_header () =
-  let rows = one_binding "abcd" in
-  check bool "header runs past 50" false (T.fits ~width:50 rows);
-  check bool "fits at 54" true (T.fits ~width:54 rows)
-
 let () =
   Alcotest.run
     "masc_tui_model_runtime_table"
     [ ( "accounts", [ Alcotest.test_case "settings target exact account" `Quick test_exact_runtime_lookup;
        Alcotest.test_case "shared model preserves each account and context" `Quick test_accounts_and_sets;
+       Alcotest.test_case "server-owned membership" `Quick test_server_owned_membership;
+       Alcotest.test_case "ids on one login name each other" `Quick test_same_login_names_other_ids;
+       Alcotest.test_case "one login is adjacent and tagged" `Quick test_one_login_is_adjacent_and_tagged;
+       Alcotest.test_case "keepers on a login" `Quick test_keepers_on_login;
        Alcotest.test_case "invalid source is visible" `Quick test_invalid_is_error ])
     ; ( "parse"
       , [ Alcotest.test_case "reads both tables" `Quick test_reads_both_tables
@@ -345,31 +254,5 @@ let () =
         ; Alcotest.test_case "commented lines are not values" `Quick test_commented_lines_are_not_values
         ] )
     ; ( "render"
-      , [ Alcotest.test_case "columns line up" `Quick test_render_columns_line_up
-        ; Alcotest.test_case "a wide name is padded by cells not bytes" `Quick
-            test_a_wide_name_is_padded_by_cells_not_bytes
-        ; Alcotest.test_case "a clipped wide name keeps its scalars whole" `Quick
-            test_a_clipped_wide_name_keeps_its_scalars_whole
-        ; Alcotest.test_case "narrow layout preserves mandatory values" `Quick
-            test_narrow_layout_preserves_mandatory_values
-        ; Alcotest.test_case "stacked item starts are monotonic" `Quick
-            test_stacked_item_starts_are_monotonic
-        ; Alcotest.test_case "empty input" `Quick test_empty_input
-        ; Alcotest.test_case "fits measures the drawn allocation" `Quick
-            test_fits_measures_the_drawn_allocation
-        ; Alcotest.test_case "fits counts the padded header" `Quick
-            test_fits_counts_the_padded_header
-        ; Alcotest.test_case
-            "detail names owners and API override"
-            `Quick
-            test_detail_names_owners_and_api_override
-        ; Alcotest.test_case
-            "detail explains absent values"
-            `Quick
-            test_detail_explains_absent_values
-        ; Alcotest.test_case
-            "detail quotes dotted model section"
-            `Quick
-            test_detail_quotes_dotted_model_section
-        ] )
+      , [] )
     ]

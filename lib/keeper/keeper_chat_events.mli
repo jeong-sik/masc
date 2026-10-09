@@ -72,6 +72,9 @@ type reply_details =
   { reply : string
   ; turn_outcome : Keeper_turn_outcome.t
   ; turn_ref : Ids.Turn_ref.t
+  ; terminal_stream_scope : int option
+      (** Stream scope whose terminal message emitted the recorded text.
+          [None] means that provenance was not observed. *)
   }
 
 type continuation_checkpoint =
@@ -91,7 +94,9 @@ type keeper_chat_event =
   | Run_started of { run_id : string; thread_id : string }
   | Batch_bound of { operation_id : Keeper_chat_operation.Operation_id.t; execution_id : Keeper_chat_operation.Operation_id.t }
   | Text_message_start of { message_id : string; role : role }
-  | Text_delta of string
+  | Text_delta of { text : string; stream_scope : int option }
+      (** The producer stamps an allocated response scope when known. Synthetic
+          text and stored observations without that identity remain [None]. *)
   | Text_message_end
   | External_effect_completed of
       { target : Keeper_surface_post.delivery_target }
@@ -111,12 +116,16 @@ type keeper_chat_event =
           text/thinking from the prior attempt while retaining finalized and
           quarantined tool evidence. *)
   | Agent_core_stream_message_start of
-      { provider_message_id : string
+      { stream_scope : int
+      ; provider_message_id : string
       ; model : string
       ; usage : Agent_core.Types.api_usage option
       }
+      (** [stream_scope] is the bridge's producer-call identity, shared with
+          tool occurrences and retained by an exact repeated MessageStart. *)
   | Agent_core_stream_message_delta of
-      { stop_reason : Agent_core.Types.stop_reason option
+      { stream_scope : int
+      ; stop_reason : Agent_core.Types.stop_reason option
       ; usage : Agent_core.Types.delta_usage option
       }
   | Agent_core_stream_message_stop
@@ -320,8 +329,9 @@ val take_nonblocking : t -> keeper_chat_event option
 
 val api_usage_to_json : Agent_core.Types.api_usage -> Yojson.Safe.t
 
-(** JSON for cumulative mid-stream counters: only reported fields appear,
-    so "not reported" stays distinguishable from 0. *)
+(** JSON for cumulative mid-stream counters and provider-reported charge:
+    only reported fields appear, so "not reported" stays distinguishable from 0.
+    Non-finite charges are omitted to keep live projection JSON valid. *)
 val delta_usage_to_json : Agent_core.Types.delta_usage -> Yojson.Safe.t
 
 (** The wire spelling of why the provider stopped writing, as

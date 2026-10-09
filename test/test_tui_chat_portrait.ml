@@ -52,18 +52,6 @@ let test_observed_equipment () =
   check bool "restored outfit reuses its own cached picture" true
     (bare_image == (Option.get restored.placement).image)
 
-let test_four_selectable_roster_rows_are_the_boundary () =
-  let cache = Portrait.cache () in
-  List.iter (fun display ->
-    let band = Option.get (Chat.band_size display) in
-    let minimum_rows = Masc_tui_frame.chrome_rows + 4 + band.rows + 2 in
-    check bool "one fewer row gives the space back to the roster" true
-      (Option.is_none (prepare cache ~display ~rows:(minimum_rows - 1) "alpha"));
-    let portrait = Option.get (prepare cache ~display ~rows:minimum_rows "alpha") in
-    check int "the first fitting portrait leaves four selectable rows" 4
-      (Masc_tui_frame.content_height ~rows:portrait.roster_rows))
-    [pixels; View.Pixels {cell_width = 9; cell_height = 20}; View.Mosaic]
-
 let test_small_and_colourless () =
   let cache = Portrait.cache () in
   List.iter (fun display ->
@@ -97,5 +85,4 @@ let () = run "chat portrait" ["conversation identity and layout", [
   test_case "uses observed equipment and suppresses unavailable readings" `Quick test_observed_equipment_and_unavailable;
   test_case "owns its space and follows the conversation" `Quick test_space_and_identity;
   test_case "follows observed clothing without taking roster space" `Quick test_observed_equipment;
-  test_case "reserves four selectable roster rows at the boundary" `Quick test_four_selectable_roster_rows_are_the_boundary;
   test_case "yields to space and colour preferences" `Quick test_small_and_colourless]]

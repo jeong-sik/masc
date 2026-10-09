@@ -14,16 +14,21 @@ module Snapshot_read : sig
   type intent = Poll | Refresh
 
   val idle : t
+  (** Stable per-source ticket for correlating runtime diagnostics. *)
+  val request_id : request -> int
   val start : intent:intent -> t -> t * request option
   val invalidate : t -> t
   (** Retire a pending owner without reusing its request number. *)
   val settle : t -> request -> t option
+  (** Whether a request is on the wire for this source right now. *)
+  val in_flight : t -> bool
 end = struct
   type request = int
   type t = { next : int; pending : request option }
   type intent = Poll | Refresh
 
   let idle = { next = 0; pending = None }
+  let request_id request = request
 
   let invalidate state = { state with pending = None }
 
@@ -38,6 +43,8 @@ end = struct
     match state.pending with
     | Some pending when pending = request -> Some { state with pending = None }
     | Some _ | None -> None
+
+  let in_flight state = Option.is_some state.pending
 end
 
 (** TUI shared types — split from masc_tui.ml (#3808) *)
@@ -94,14 +101,35 @@ let server_is_booting
 ;;
 
 type workspace_authority = Workspace_authority of int
+type workspace_reply_kind = Workspace_observation | Workspace_operation_outcome
 
 type workspace_identity =
   | Workspace_identity_unread
   | Workspace_identity_match
+  | Workspace_identity_match_unconfirmed of string
+      (** The last read that could say served this workspace; the latest
+          could not say (it failed, the server was starting, or a path was
+          missing) and the string says why. The rows that read authorized stay
+          on screen. It is not [Workspace_identity_match], so nothing that needs
+          a fresh match -- a decision, a write, applying a new read -- runs until
+          a read says match again. *)
   | Workspace_identity_mismatch of
       { local_base_path : string
       ; server_base_path : string
       }
+
+(* A task POST has already succeeded. Only its dependent handoff/reading
+   waits for identity recovery; creating or cancelling the task is never
+   repeated. Authority also prevents A -> B -> A from reviving a handoff. *)
+type task_followup =
+  | Task_handoff of { keeper : string; task_id : string; title : string; body : string }
+  | Task_cancel_refresh of string
+
+type pending_task_followup =
+  { tf_workspace : Tui_decode.server_identity
+  ; tf_authority : workspace_authority
+  ; tf_action : task_followup
+  }
 
 type workspace_input_identity =
   { wi_base_path : string
@@ -138,28 +166,72 @@ let server_workspace_matches ~expected reading =
   | None, (Ok _ | Error _) | Some _, Error _ -> false
 ;;
 
+(* What the paths alone say, booting or not. *)
+let workspace_identity_of_paths ~local_base_path (identity : Tui_decode.server_identity) =
+  let local_base_path = canonical_path local_base_path in
+  let server_base_path = canonical_path identity.sid_base_path in
+  (* The server reports its cluster-aware masc root ([<base>/.masc] for the
+     default cluster, [<base>/.masc/clusters/<name>] otherwise). Compose
+     the local one with the same function from the same cluster selection:
+     a plain [<base>/.masc] calls every healthy non-default-cluster server
+     a mismatch, and every Keeper message is refused. *)
+  let local_masc_root = canonical_path
+    (Workspace_utils.masc_root_dir_from ~base_path:local_base_path
+       ~cluster_name:(Env_config_core.cluster_name ())) in
+  let server_masc_root = canonical_path identity.sid_masc_root in
+  if String.equal local_base_path ""
+  then Workspace_identity_unread
+  else if
+    (server_base_path <> "" && not (String.equal local_base_path server_base_path))
+    || (server_masc_root <> "" && not (String.equal local_masc_root server_masc_root))
+  then Workspace_identity_mismatch { local_base_path; server_base_path }
+  else if String.equal server_base_path "" || String.equal server_masc_root ""
+  then Workspace_identity_unread
+  else Workspace_identity_match
+;;
+
 let workspace_identity_of_refresh ~local_base_path reading =
   match reading with
   | Error _ -> Workspace_identity_unread
-  | Ok identity ->
-    let local_base_path = canonical_path local_base_path in
-    let server_base_path = canonical_path identity.Tui_decode.sid_base_path in
-    (* The server reports its cluster-aware masc root ([<base>/.masc] for the
-       default cluster, [<base>/.masc/clusters/<name>] otherwise). Compose
-       the local one with the same function from the same cluster selection:
-       a plain [<base>/.masc] calls every healthy non-default-cluster server
-       a mismatch, and every Keeper message is refused. *)
-    let local_masc_root = canonical_path
-      (Workspace_utils.masc_root_dir_from ~base_path:local_base_path
-         ~cluster_name:(Env_config_core.cluster_name ())) in
-    let server_masc_root = canonical_path identity.sid_masc_root in
-    if String.equal local_base_path "" || String.equal server_base_path ""
-       || String.equal server_masc_root "" || server_is_booting reading
-    then Workspace_identity_unread
-    else if String.equal local_base_path server_base_path
-         && String.equal local_masc_root server_masc_root
-    then Workspace_identity_match
-    else Workspace_identity_mismatch { local_base_path; server_base_path }
+  | Ok _ when server_is_booting reading -> Workspace_identity_unread
+  | Ok identity -> workspace_identity_of_paths ~local_base_path identity
+;;
+
+let unconfirmed_identity_reason reading =
+  match reading with
+  | Error detail -> detail
+  | Ok _ when server_is_booting reading -> "the server is starting"
+  | Ok _ -> "the server did not report a complete workspace path"
+;;
+
+(* A read that cannot say which workspace the server serves does not say it
+   serves another one. After a match it keeps that match, unconfirmed; only a
+   read that names a different workspace withdraws what the match authorized.
+   A booting server's paths do name its workspace: one that names another
+   workspace answers unread, so the match is withdrawn as before. *)
+let next_workspace_identity ~previous ~local_base_path reading =
+  let names_another_workspace =
+    match reading with
+    | Ok identity ->
+      (match workspace_identity_of_paths ~local_base_path identity with
+       | Workspace_identity_mismatch _ -> true
+       | Workspace_identity_unread | Workspace_identity_match
+       | Workspace_identity_match_unconfirmed _ -> false)
+    | Error _ -> false
+  in
+  match workspace_identity_of_refresh ~local_base_path reading, previous with
+  | Workspace_identity_unread
+  , (Workspace_identity_match | Workspace_identity_match_unconfirmed _)
+    when not names_another_workspace ->
+    Workspace_identity_match_unconfirmed (unconfirmed_identity_reason reading)
+  | Workspace_identity_unread
+  , ( Workspace_identity_unread | Workspace_identity_match
+    | Workspace_identity_match_unconfirmed _ | Workspace_identity_mismatch _ ) ->
+    Workspace_identity_unread
+  | ( (Workspace_identity_match
+      | Workspace_identity_match_unconfirmed _
+      | Workspace_identity_mismatch _) as next )
+  , _ -> next
 ;;
 
 (* A Broadcast retry belongs to the verified workspace store, not to the
@@ -542,6 +614,7 @@ type msg_entry = {
   me_timestamp: string;
   me_keeper_name: string;
   me_request_id: string;
+  me_execution_source: Masc_tui_keeper_chat_log.journal_source option;
   (* Producer observation time. Conversation and auxiliary rows share one
      chronological surface. Within a request, later phases clamp to the latest
      earlier-phase clock before the rows merge with parallel lanes. *)
@@ -850,6 +923,16 @@ let order_chat_turn_rows rows =
    text alone is the question, and the table answers it without walking the
    turn. Non-user rows never fold: two tool rows with the same text are two
    calls. *)
+type chat_turn_key =
+  | Typed_execution of Masc_tui_keeper_chat_log.journal_source
+  | Legacy_request of string
+
+let chat_turn_key (row : msg_entry) =
+  match row.me_execution_source with
+  | Some source -> Typed_execution source
+  | None -> Legacy_request row.me_request_id
+;;
+
 type chat_turn_builder = {
   ctb_request_id : string;
   mutable ctb_rows_rev : msg_entry list;
@@ -890,7 +973,7 @@ let merge_turn_sequence held arriving =
    slots keep the order the walk found. *)
 let chat_timeline_slots rows =
   let slots_rev = ref [] in
-  let builders : (string, chat_turn_builder) Hashtbl.t = Hashtbl.create 64 in
+  let builders : (chat_turn_key, chat_turn_builder) Hashtbl.t = Hashtbl.create 64 in
   List.iter
     (fun (row : msg_entry) ->
       if row.me_role = Message_memory
@@ -898,7 +981,7 @@ let chat_timeline_slots rows =
       else if String.equal row.me_request_id ""
       then slots_rev := Slot_unowned row :: !slots_rev
       else
-        match Hashtbl.find_opt builders row.me_request_id with
+        match Hashtbl.find_opt builders (chat_turn_key row) with
         | Some builder ->
             (* The sequence is merged even when the row itself folds into a
                line already held: a duplicate still carries what it knows
@@ -924,7 +1007,7 @@ let chat_timeline_slots rows =
               ; ctb_user_texts = user_texts
               }
             in
-            Hashtbl.replace builders row.me_request_id builder;
+            Hashtbl.replace builders (chat_turn_key row) builder;
             slots_rev := Slot_turn builder :: !slots_rev)
     rows;
   List.rev_map
@@ -1020,7 +1103,7 @@ let chat_timeline ~loaded ~session ~queued_request_ids =
    ({!chat_timeline_slots}); this is the same question asked of one row, so a
    renderer can draw the boundary without rebuilding the timeline. *)
 type chat_row_lane =
-  | Lane_turn of string
+  | Lane_turn of chat_turn_key
       (** Produced inside the turn with this request id. *)
   | Lane_unowned
       (** No request owns it: another agent's broadcast, a system line. It
@@ -1034,7 +1117,7 @@ type chat_row_lane =
 let chat_row_lane (row : msg_entry) =
   if row.me_role = Message_memory then Lane_memory
   else if String.equal row.me_request_id "" then Lane_unowned
-  else Lane_turn row.me_request_id
+  else Lane_turn (chat_turn_key row)
 
 (* Where a row sits in its turn, for a renderer drawing the turn's edges. *)
 type turn_edge =
@@ -1097,7 +1180,7 @@ let mark_turn_edges rows =
         | Lane_turn request_id ->
             if
               match running with
-              | Some current -> String.equal current request_id
+              | Some current -> current = request_id
               | None -> false
             then walk running (index :: run) tl
             else (
@@ -2559,6 +2642,7 @@ type identity_login_request = {
   ilr_keeper: string;
   ilr_provider: string;
   ilr_generation: int;
+  ilr_origin: Tui_decode.server_identity option;
 }
 
 (* Login-completion expectation, held across a transient authority loss.
@@ -2775,8 +2859,11 @@ and surface_needs_of_surface : surface -> surface_needs = function
         ; needs_provider_history = true
         ; needs_account_emails = true
       }
+  (* The Models pane names the account behind a provider id, so Config reads
+     account emails as Usage does. *)
+  | Config -> { nothing with needs_account_emails = true }
   | Memory | Lanes | Clients | Schedules | Verification | Harness | Fusion
-  | Repositories | Code | Changes | Connectors | Runtime | Config | Resources
+  | Repositories | Code | Changes | Connectors | Runtime | Resources
   | Tools ->
       nothing
 
@@ -2997,11 +3084,15 @@ let turn_log_request_id turn_log = Masc_tui_keeper_chat_log.request_id turn_log.
 let turn_log_execution_id turn_log = Masc_tui_keeper_chat_transcript.execution_id turn_log.tl_transcript
 let turn_log_started_at turn_log = Masc_tui_keeper_chat_log.started_at turn_log.tl_log
 
-(* Fetch each journal identity once, newest first by its earliest history row.
-   Held and unavailable sources are excluded; the source-aware caller keeps
-   operation and autonomous endpoint routing separate from these display keys. *)
+type journal_key = string * Masc_tui_keeper_chat_log.journal_source
+
+let turn_log_journal_key log : journal_key =
+  turn_log_keeper_name log, Masc_tui_keeper_chat_log.source log.tl_log
+
+(* Fetch each scoped journal once, newest first by its earliest history row.
+   Display strings never decide whether two sources are the same journal. *)
 let journal_fetch_targets ~held ~unavailable
-    (candidates : (string * float) list) =
+    (candidates : (journal_key * float) list) =
   let earliest = Hashtbl.create 16 in
   List.iter
     (fun (operation_id, at) ->
@@ -3012,29 +3103,21 @@ let journal_fetch_targets ~held ~unavailable
   Hashtbl.fold (fun operation_id at acc -> (operation_id, at) :: acc) earliest []
   |> List.filter (fun (operation_id, _) ->
          not
-           (List.exists (String.equal operation_id) held
-           || List.exists (String.equal operation_id) unavailable))
+           (List.mem operation_id held || List.mem operation_id unavailable))
   |> List.stable_sort (fun (id_a, at_a) (id_b, at_b) ->
          match Float.compare at_b at_a with
-         | 0 -> String.compare id_a id_b
+         | 0 -> compare id_a id_b
          | order -> order)
 ;;
 
 let journal_source_of_history (row : Masc_tui_keeper_chat_history.row) =
-  match row.operation_id, row.turn_sequence, row.turn_id with
-  | Some operation_id, _, _ -> Some (Masc_tui_keeper_chat_log.Operation operation_id)
-  | None, Some _, Some turn_id ->
-      Option.map (fun turn_ref -> Masc_tui_keeper_chat_log.Autonomous_turn turn_ref)
-        (Ids.Turn_ref.of_string turn_id)
-  | None, _, _ -> None
+  row.execution_source
 ;;
 
-let journal_source_fetch_targets ~held ~unavailable candidates =
-  let keyed = List.map (fun (source, at) -> Masc_tui_keeper_chat_log.source_key source, at) candidates in
+let journal_source_fetch_targets ~keeper_name ~held ~unavailable candidates =
+  let keyed = List.map (fun (source, at) -> (keeper_name, source), at) candidates in
   journal_fetch_targets ~held ~unavailable keyed
-  |> List.filter_map (fun (key, at) ->
-      List.find_map (fun (source, _) ->
-        if Masc_tui_keeper_chat_log.source_key source = key then Some (source, at) else None) candidates)
+  |> List.map (fun ((_, source), at) -> source, at)
 ;;
 
 let autonomous_journal_candidates ~keeper_name rows =
@@ -3082,6 +3165,18 @@ let turn_log_holds_the_turn turn_log =
       false
 ;;
 
+(* History or operation records may close progress before the journal tail.
+   A heard terminal event or a successful replay after a terminal operation
+   retires replay; a checkpoint's Run_finished leaves the fold Waiting. *)
+let turn_log_has_ended turn_log =
+  match Masc_tui_keeper_chat_transcript.ending_source turn_log.tl_transcript,
+        Masc_tui_keeper_chat_transcript.phase turn_log.tl_transcript with
+  | Ending_heard_in_stream, (Stream_ended | Stream_failed _) -> true
+  | Ending_heard_in_stream, (Waiting | Working) -> false
+  | Ending_read_from_record, (Waiting | Working | Stream_ended | Stream_failed _) ->
+      Masc_tui_keeper_chat_log.terminal_replay turn_log.tl_log = Masc_tui_keeper_chat_log.Replayed_after_terminal
+;;
+
 type inflight_phase =
   | Turn_preflight of Masc_tui_keeper_chat_queue.item
       (** Retained local input; no HTTP POST has been attempted. *)
@@ -3101,6 +3196,8 @@ type inflight =
    through its own query axis: a keeper's playground via [?keeper=] (where a
    Changes row's clone-relative path lives), a registered repository via
    [?repo_id=] (what a Repositories row names). *)
+type code_file_load_intent = Open_code_file | Refresh_code_file
+
 type code_workspace_scope =
   | Code_scope_project
   | Code_scope_keeper of string
@@ -3146,6 +3243,8 @@ type code_history_entry =
 
 type code_history_listing = {
   chl_entries: code_history_entry list;
+  chl_git_error: string option;
+      (** None means the Git read succeeded, including an empty result. *)
   chl_activity_note: string;
       (** Coverage or failure of the durable Keeper-change read. Git commits
           remain visible when this says unavailable. *)
@@ -3284,6 +3383,7 @@ type voice_agent_session =
             the way the wizard carries it. *)
   ; vas_status : string option
   ; vas_saving : bool
+  ; vas_lookup : (string * string option) option
   }
 
 let voice_agent_open ~agents ~revision =
@@ -3294,6 +3394,7 @@ let voice_agent_open ~agents ~revision =
   ; vas_revision = revision
   ; vas_status = None
   ; vas_saving = false
+  ; vas_lookup = None
   }
 
 (* The two axes move on their own keys -- the keeper under up and down, the
@@ -3609,18 +3710,51 @@ module Browser_lane_view = struct
     | Viewport_refresh of { tab_id : int; expected_url : string }
     | Viewport_cadence of int
     | Viewport_pointer of { tab_id : int; expected_url : string; action : Browser_lane.interaction }
+  let operation_is_read = function
+    | Discover _ | Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _
+    | Scene_refresh _ | Scene_focus _ | Scene_follow_refresh _
+    | Viewport_refresh _ | Viewport_cadence _ -> true
+    | Open_session | Close_session | Goto _ | Scene_scroll _ | Scene_click _
+    | Scene_follow _ | Viewport_pointer _ -> false
+
+  (* A committed gesture is never retried. Only its discarded observation
+     can be resumed after workspace identity is reconfirmed. *)
+  let observation_after_effect = function
+    | Scene_scroll {tab_id; scene_view; scope; _} ->
+        Some (Scene_refresh {tab_id; scene_view; scope})
+    | Scene_click {tab_id; scope; _} ->
+        Some (Scene_refresh {tab_id; scene_view=Browser_lane.Content; scope})
+    | Discover _ | Read | Open_session | Close_session | Goto _ | Screenshot _
+    | Read_refresh | Scene_read _ | Scene_regions _ | Scene_refresh _
+    | Scene_focus _ | Scene_follow _ | Scene_follow_refresh _
+    | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> None
+
   type load = Idle | No_browser | Loading of int * operation | Failed of string
   type read_continuation = No_read_continuation | Deferred_read
   type read_view = Text_view | Scene_view of {
     scene_view : Browser_lane.scene_view; scope : Browser_lane.node_ref option }
+  (* What the server said of the BiDi host when it listed the connections:
+     the host's own record, read by the server. Nothing is reported before a
+     discovery answers, after one that failed, and by a server from before
+     the report existed. A report this build cannot read keeps the paragraph
+     the server wrote for the operator, when it has one. *)
+  type bidi_host =
+    | Host_not_reported
+    | Host_reported of Masc.Browser_bidi_host_status.report
+    | Host_report_unreadable of { detail : string; message : string option }
   (* A pointer gesture that was not sent, because the connection the
      screenshot came from does not serve it. [serving_listed] is whether a
-     listed connection does. *)
+     listed connection does, and [host] what was known of the BiDi host then:
+     the rows say why it was not sent as of the moment it was not. *)
   type unserved_gesture = {
     asked : Browser_lane.live_transport;
     capability : Browser_lane.live_capability;
     serving_listed : bool;
+    host : bidi_host;
   }
+  (* One answer of the connection list: the connections and the BiDi host
+     are as of the same read. *)
+  type discovered = { listed : client list; bidi_host : bidi_host }
   (* [clients] is what the last discovery answered, and [None] until one has:
      a discovery that failed leaves no list rather than an empty one, so the
      picker cannot tell an operator there is no browser when it could not ask.
@@ -3639,6 +3773,7 @@ module Browser_lane_view = struct
     refresh_pending : int option;
     read_continuation : read_continuation;
     unserved_gesture : unserved_gesture option;
+    bidi_host : bidi_host;
   }
 
   let source_name = Browser_lane.Lane_name.to_wire
@@ -3659,7 +3794,8 @@ module Browser_lane_view = struct
       source = Live; selected_tab = None; scroll = 0;
       reading = None; load = Idle; url_draft = None; scene = None; scene_cursor = 0; scene_scope = None;
       scene_guard = None; scene_delta = None; read_view = Text_view; refresh_pending = None;
-      read_continuation = No_read_continuation; unserved_gesture = None }
+      read_continuation = No_read_continuation; unserved_gesture = None;
+      bidi_host = Host_not_reported }
   let switch_source source _t = { (create ()) with source }
   let refresh t = { t with selected_tab = None; scroll = 0; scene = None; scene_cursor = 0; scene_scope = None;
     scene_guard = None; scene_delta = None; read_view = Text_view }
@@ -3842,15 +3978,274 @@ module Browser_lane_view = struct
               List.exists (fun (other : client) ->
                 Browser_lane.live_transport_serves other.transport capability)
                 (listed_clients t) in
-            Pointer_unserved {asked = client.transport; capability; serving_listed}
+            Pointer_unserved {asked = client.transport; capability; serving_listed; host = t.bidi_host}
   let refuse_gesture unserved t = {t with unserved_gesture = Some unserved}
   let withdraw_unserved_gesture t = match t.unserved_gesture with
     | None -> t
     | Some _ -> {t with unserved_gesture = None}
+  (* The BiDi host in the operator's words, as lines: what a line opens
+     with, and what it says. A line this file writes whole fits 74 cells,
+     which is an 80-column surface behind its two-cell indent. What another
+     program wrote, a reason, an address, a path, is a line of its own. *)
+  type host_breaks = At_spaces | At_slashes
+  type host_line = { lead : string; said : string; breaks : host_breaks }
+  let host_line said = { lead = ""; said; breaks = At_spaces }
+  let host_said lead said = { lead; said; breaks = At_spaces }
+  let host_time seconds = Time_codec.rfc3339_of_unix seconds
+  (* Where a running host stands beside the connection list. A host serves
+     hover and drag on the server that lists the client its record names, as
+     a BiDi connection. Only a host that has its session polls, so a listed
+     client is an attached host whatever its record has caught up to. A BiDi
+     connection under another ID may be this host, registered again under an
+     ID it could not write down, so hover and drag are not said to be
+     refused beside one. *)
+  type host_standing =
+    | Host_serving
+    | Host_unlisted
+    | Host_beside_another_bidi
+    | Host_connecting
+  let host_standing (clients : client list) (entry : Masc.Browser_bidi_host_record.entry) =
+    let named = Browser_lane.client_id_to_string entry.client_id in
+    let bidi =
+      List.filter (fun (client : client) -> client.transport = Browser_lane.Webdriver_bidi) clients in
+    match
+      List.exists (fun (client : client) -> String.equal client.client_id named) bidi,
+      bidi, entry.attached_at
+    with
+    | true, _, (Some _ | None) -> Host_serving
+    | false, [], Some _ -> Host_unlisted
+    | false, _ :: _, Some _ -> Host_beside_another_bidi
+    | false, _, None -> Host_connecting
+  (* What comes before the next host, by what became of the last one's
+     session. A Firefox that holds a session refuses every host until it is
+     restarted; one that holds none takes the next host as it is. A host
+     that never got a session left none, and what kept it from one is still
+     there. A refusal says Firefox held a session then, not that it holds
+     one now, so the next host is tried before a restart. *)
+  let host_session_lines (entry : Masc.Browser_bidi_host_record.entry)
+      (ending : Masc.Browser_bidi_host_record.ending) =
+    List.map host_line
+      (match entry.attached_at, ending.session with
+       | Some _, No_session_left -> ["That Firefox takes the next host if it still runs"]
+       | None, No_session_left ->
+           ["It got no session · check that Firefox answers at that address first"]
+       | (Some _ | None), Session_left ->
+           ["Session end not confirmed · restart that Firefox before attaching"]
+       | (Some _ | None), Session_unknown ->
+           ["Could not ask Firefox to end the session · restart it if it still runs"]
+       | (Some _ | None), Session_refused ->
+           ["Firefox refused this host a session · it held one then";
+            "Stop a host still attached there · restart that Firefox if refused again"])
+  (* The results the host holds no acknowledgement for: how many, and the
+     last one. Without an acknowledgement the server may still have taken it,
+     so the cause is said only when it settles that. *)
+  let host_unacknowledged_lines (entry : Masc.Browser_bidi_host_record.entry) =
+    match List.rev entry.unacknowledged with
+    | [] -> []
+    | last :: earlier ->
+        let count = 1 + List.length earlier in
+        let verb = match last.verb with
+          | Some verb -> Masc.Browser_bidi_peer.verb_to_wire verb
+          | None -> "unknown verb" in
+        let outcome = match last.outcome with
+          | Succeeded -> "ran" | Not_started -> "not started" | Unknown -> "outcome unknown" in
+        let cause = match last.cause with
+          | Refused -> ", refused" | Not_sent -> ", not sent" | Unconfirmed -> "" in
+        let request = match last.request_id with
+          | Some id -> Masc.Browser_bidi_host_record.request_id_to_wire id
+          | None -> "not a UUID" in
+        [host_line (Printf.sprintf "%d result%s unacknowledged · last: %s, %s%s"
+           count (if count = 1 then "" else "s") verb outcome cause);
+         host_line (Printf.sprintf "at %s · request %s" (host_time last.at) request)]
+  (* How a host is started. [address] is the one the last host was given,
+     which is the one to give again while that Firefox runs; with none the
+     launcher's own words stand, and say PORT for the port. A launcher that
+     is not there, or not as an installation wrote it, is not one to run.
+     The path and the address come from files: each is written as one shell
+     word, so neither reads as more of the command than it is. *)
+  let host_attach_lines ~address (attach : Masc.Browser_bidi_host_status.attach) =
+    let lead = "Attach: " in
+    let under = String.make (String.length lead) ' ' in
+    (match attach.standing with
+     | Launcher_installed ->
+         { lead; said = Filename.quote attach.launcher; breaks = At_slashes }
+         :: (match address with
+             | Some address ->
+                 [host_said under (Masc.Browser_bidi_host_status.bidi_url_flag ^ " " ^ Filename.quote address)]
+             | None ->
+                 [host_said under attach.arguments;
+                  host_said under
+                    ("PORT: the " ^ Masc.Browser_bidi_host_status.firefox_flag ^ " Firefox was started with")])
+     | Launcher_not_installed -> [host_said lead "install the browser lane in this workspace first"]
+     | Launcher_needs_reinstall ->
+         [host_said lead "install the browser lane again first (launcher not as installed)"])
+    @ [host_line (transport_setup_row [Browser_lane.Webdriver_bidi])]
+  (* The listed connection can outlive its host, or belong to another
+     host. Keep that distinction visible beside a report that says none ran
+     here or that this host ended. *)
+  let host_connection_note t =
+    let bidi_listed =
+      List.exists (fun (client : client) -> client.transport = Browser_lane.Webdriver_bidi)
+        (listed_clients t) in
+    match t.bidi_host with
+    | Host_reported { state = (Never_started | Ended _ | Died _); _ } when bidi_listed ->
+        [host_line "A listed BiDi connection may be stale or belong to another host"]
+    | Host_not_reported | Host_report_unreadable _ | Host_reported _ -> []
+  (* Everything the picker says of the BiDi host: whether one runs, what
+     stands in the way of the next one, and how one is started. A host that
+     is running is not told how to start one. *)
+  let bidi_host_lines t =
+    match t.bidi_host with
+    | Host_not_reported -> []
+    | Host_report_unreadable { detail; message } ->
+        (* The server's paragraph is longer than most screens have rows for,
+           so where the host's state is said in full comes before it. *)
+        [host_line "BiDi host: this TUI cannot read the server's report";
+         host_line "masc doctor reads the host's record and says where the host stands";
+         host_said "Detail: " detail]
+        @ (match message with None -> [] | Some message -> [host_said "Server: " message])
+    | Host_reported report ->
+        let attach ~address = host_attach_lines ~address report.attach in
+        (match report.state with
+         | Never_started ->
+             [host_line "BiDi host: none has run for this workspace"]
+             @ host_connection_note t @ attach ~address:None
+         | Record_missing_but_locked ->
+             [host_line "BiDi host: one holds the workspace lock, but its record is missing";
+              host_line "Do not start another host · inspect the existing process"]
+         | Running entry ->
+             (* The first row is the one a short screen keeps, so it says
+                where the host stands beside the list, not only that it runs. *)
+             let state name = host_line (Printf.sprintf "BiDi host: %s · pid %d" name entry.pid) in
+             let at = host_said "At: " entry.bidi_url in
+             (match host_standing (listed_clients t) entry with
+              | Host_serving -> [state "attached"; at]
+              | Host_unlisted ->
+                  state "attached, not listed by this server"
+                  :: List.map host_line
+                       ["No BiDi connection is listed · hover and drag stay refused";
+                        "With MASC_HTTP_BASE_URL or MASC_HTTP_PORT set, it polls another server";
+                        "If none appears, stop it and start it from a shell without them"]
+                  @ [at]
+              | Host_beside_another_bidi ->
+                  state "attached, not listed under its recorded ID"
+                  :: List.map host_line
+                       ["Another BiDi connection is listed · this host's if it registered again";
+                        "Otherwise that is another host, and this one polls elsewhere or stopped"]
+                  @ [at]
+              | Host_connecting -> [state "connecting"; at])
+             @ host_unacknowledged_lines entry
+         | Ended (entry, ending) ->
+             (* What to do comes before why: on a screen that holds two of
+                these rows, the step is the one that has to be there. *)
+             [host_line (Printf.sprintf "BiDi host: ended %s · pid %d" (host_time ending.at) entry.pid)]
+             @ host_session_lines entry ending
+             @ host_connection_note t
+             @ [host_said "Reason: " ending.reason]
+             @ host_unacknowledged_lines entry
+             @ attach ~address:(Some entry.bidi_url)
+         | Died entry ->
+             [host_line (Printf.sprintf "BiDi host: pid %d is gone · no reason recorded" entry.pid)]
+             @ [host_line "Its session may be left in Firefox · restart Firefox if a host is refused"]
+             @ host_connection_note t
+             @ host_unacknowledged_lines entry
+             @ attach ~address:(Some entry.bidi_url)
+         | Unreadable { detail; held = Some true } ->
+             (* What to do comes before why, as for a host that ended. *)
+             [host_line "BiDi host: one runs, and its record cannot be read";
+              host_line "Stop that host before starting another · it refuses a second one";
+              host_said "Detail: " detail]
+         | Unreadable { detail; held = Some false } ->
+             [host_line "BiDi host: none runs, and the last record cannot be read";
+              host_said "Detail: " detail]
+             @ attach ~address:None
+         | Unreadable { detail; held = None } ->
+             [host_line "BiDi host: could not check whether one runs";
+              host_said "Detail: " detail])
+  (* A path on rows of [max_cells], broken before a slash so each name
+     stays whole. A single name longer than a row has nowhere better to
+     break and is cut where the row ends, with every cell of it kept: a
+     space in a name is part of the path. *)
+  let host_path_rows ~max_cells path =
+    let cells = Masc_tui_message_layout.display_width in
+    let pieces =
+      let length = String.length path in
+      let rec cut start index pieces =
+        if index >= length then
+          if index > start then String.sub path start (index - start) :: pieces else pieces
+        else if Char.equal path.[index] '/' && index > start then
+          cut index (index + 1) (String.sub path start (index - start) :: pieces)
+        else cut start (index + 1) pieces
+      in
+      List.rev (cut 0 0 [])
+    in
+    let close current rows = if String.equal current "" then rows else current :: rows in
+    let rows, current =
+      List.fold_left (fun (rows, current) piece ->
+          if cells (current ^ piece) <= max_cells then rows, current ^ piece
+          else if cells piece <= max_cells then close current rows, piece
+          else
+            match List.rev (Masc_tui_message_layout.split_cells ~max_cells piece) with
+            | [] -> close current rows, ""
+            | last :: earlier -> earlier @ close current rows, last)
+        ([], "") pieces
+    in
+    List.rev (close current rows)
+  (* A line on as many rows as it needs at [width] cells: the first behind
+     its lead, the rest under what the lead opened. Nothing is cut, so a
+     reason or a path longer than the screen is still read whole. What is
+     said is made printable first, so the rows are measured as they are
+     drawn. *)
+  let host_line_rows ~width { lead; said; breaks } =
+    let said = Masc.Tui_terminal_text.sanitize_terminal_text said in
+    let rows_of ~max_cells = match breaks with
+      | At_spaces -> Masc_tui_message_layout.wrap_words ~max_cells said
+      | At_slashes -> host_path_rows ~max_cells said in
+    let beside = width - String.length lead in
+    (* A screen so narrow that the lead takes more of a row than it leaves
+       gives the lead a row of its own and what is said the whole width. *)
+    if beside < String.length lead then
+      (match String.trim lead with "" -> [] | lead -> [lead]) @ rows_of ~max_cells:(Int.max 1 width)
+    else
+      let under = String.make (String.length lead) ' ' in
+      match rows_of ~max_cells:beside with
+      | [] -> [lead]
+      | first :: rest -> (lead ^ first) :: List.map (fun row -> under ^ row) rest
+  let bidi_host_rows ~width t = List.concat_map (host_line_rows ~width) (bidi_host_lines t)
+  (* The one row a refused gesture has for the BiDi host. It is this file's
+     words only, so it fits whatever the record holds; the picker says the
+     rest. *)
+  let bidi_host_brief = function
+    | Host_not_reported -> None
+    | Host_report_unreadable _ ->
+        Some "BiDi host: this TUI cannot read the server's report · b:details"
+    | Host_reported report ->
+        Some (match report.state with
+          | Never_started -> "BiDi host: none has run for this workspace · b:how to attach"
+          | Record_missing_but_locked ->
+              "BiDi host: lock held, record missing · b:inspect the existing process"
+          (* A gesture is refused for want of a listed BiDi connection, so a
+             host that runs is one this server does not list. *)
+          | Running { attached_at = Some _; pid; _ } ->
+              Printf.sprintf "BiDi host: pid %d attached, not listed by this server · b:details" pid
+          | Running { attached_at = None; pid; _ } ->
+              Printf.sprintf "BiDi host: pid %d is connecting · b:details" pid
+          | Ended (_, ending) ->
+              Printf.sprintf "BiDi host: ended %s · b:why and what next" (host_time ending.at)
+          | Died entry ->
+              Printf.sprintf "BiDi host: pid %d is gone, no reason recorded · b:what next" entry.pid
+          | Unreadable { held = Some true; _ } ->
+              "BiDi host: one runs, and its record cannot be read · b:details"
+          | Unreadable { held = Some false; _ } ->
+              "BiDi host: none runs, and the last record cannot be read · b:details"
+          | Unreadable { held = None; _ } -> "BiDi host: could not check whether one runs · b:details")
   (* The rows a refused gesture draws: what was not sent and why, then the
      operator's next step. With a serving connection listed the step is the
-     picker and fits the same row; with none listed it is where attaching one
-     is written, on a row of its own. Each row fits 80 columns. *)
+     picker and fits the same row. With none listed, a gesture a BiDi
+     connection serves says where the BiDi host stood and points at the
+     picker for the rest; without a report, and for other work, the second
+     row is where attaching a connection is written. Each row fits 80
+     columns, and there are never more than two. *)
   let unserved_gesture_rows (unserved : unserved_gesture) =
     let cause = "Not sent · " ^ lacking_clause unserved.asked [unserved.capability] in
     match Browser_lane.live_transports_serving unserved.capability with
@@ -3858,8 +4253,58 @@ module Browser_lane_view = struct
     | serving when unserved.serving_listed ->
         [cause ^ " · " ^ transport_names serving ^ " serves it · b:choose browser"]
     | serving ->
+        let host =
+          if List.mem Browser_lane.Webdriver_bidi serving then bidi_host_brief unserved.host else None
+        in
         [cause ^ " · no " ^ transport_names serving ^ " connection is listed";
-         transport_setup_row serving]
+         Option.value host ~default:(transport_setup_row serving)]
+  (* The rows of the gesture the view holds as refused. They are drawn from
+     what the gesture kept, so what is learned of the host afterwards does
+     not rewrite why it was not sent. *)
+  let unserved_rows t = match t.unserved_gesture with
+    | None -> []
+    | Some unserved -> unserved_gesture_rows unserved
+  (* Whether the BiDi host's rows report a host: one that runs or ran, or
+     a record or report that cannot be read. With no host yet they only say
+     how one is started. *)
+  let host_rows_report_a_host t = match t.bidi_host with
+    | Host_not_reported -> false
+    | Host_report_unreadable _ -> true
+    | Host_reported report ->
+        (match report.state with
+         | Never_started -> false
+         | Record_missing_but_locked -> true
+         | Running _ | Ended _ | Died _ | Unreadable _ -> true)
+  (* The rows of a host report a short screen reads first: where the host
+     stands, and what that asks of the operator. *)
+  let picker_host_head_rows = 2
+  let picker_host_head rows =
+    List.filteri (fun index _ -> index < picker_host_head_rows) rows,
+    List.filteri (fun index _ -> index >= picker_host_head_rows) rows
+  (* What the picker keeps for the rows under its choices, which the cursor
+     cannot reach, when there are more of them than this: the first two, and
+     the row that says how many more the screen could not hold. *)
+  let picker_rows_below_wanted = picker_host_head_rows + 1
+  (* What it keeps when the screen has no room for those beside the choices:
+     the first row and the row that counts the rest. *)
+  let picker_rows_below_least = 2
+  (* Choosing is what the picker is for. On a terminal that would be left
+     with fewer choices than this beside the rows below, or fewer than there
+     are when there are fewer than this, the choices keep the room. *)
+  let picker_least_choices = 3
+  (* How many of [rows] the picker gives its choices. [rows] is what the
+     screen has for the choices and all that is drawn after them, and
+     [below] how many rows that is. *)
+  let picker_choice_rows ~rows ~choices ~below =
+    let rows = Int.max 1 rows in
+    let least = Int.min picker_least_choices choices in
+    let kept_below kept = Int.min below kept in
+    match
+      List.find_opt (fun kept -> rows - kept_below kept >= least)
+        [picker_rows_below_wanted; picker_rows_below_least]
+    with
+    | Some kept -> rows - kept_below kept
+    | None -> rows
   let request_body t =
     `Assoc ([ "lane", `String (source_name t.source) ]
             @ (match client_id t with None -> [] | Some id -> ["clientId", `String id])
@@ -3910,16 +4355,20 @@ module Browser_lane_view = struct
       | Connected_browser client -> choose_client client t
       | Stagehand_browser -> switch_source Stagehand t
       | Automation_browser -> switch_source Automation t
+  (* The picker shows nothing of the read before the one it is waiting on:
+     the list and the BiDi host report go together, as they came. *)
+  let withdraw_discovery t = { t with clients = None; bidi_host = Host_not_reported }
   let accept_clients ~generation result t =
     match t.load with
     | Loading (current, Discover purpose) when current = generation ->
         (match result with
          | Error detail when t.source <> Live && purpose = Choose_client ->
-             { t with clients = None; client_picker = Some 0; load = Failed detail }, false
-         | Error detail -> { t with clients = None; selected_tab = None; reading = None; scene = None; scene_cursor = 0; scene_scope = None; scene_guard = None; scene_delta = None;
+             { t with clients = None; bidi_host = Host_not_reported; client_picker = Some 0;
+               load = Failed detail }, false
+         | Error detail -> { t with clients = None; bidi_host = Host_not_reported; selected_tab = None; reading = None; scene = None; scene_cursor = 0; scene_scope = None; scene_guard = None; scene_delta = None;
              scroll = 0; client_picker = Some 0; load = Failed detail }, false
-         | Ok clients ->
-             let next = { t with clients = Some clients; load = Idle } in
+         | Ok { listed = clients; bidi_host } ->
+             let next = { t with clients = Some clients; bidi_host; load = Idle } in
              if t.source <> Live && purpose = Choose_client then
                { next with client_picker = Some 0 }, false
              else
@@ -3975,6 +4424,33 @@ module Browser_lane_view = struct
                 else loop (client :: acc) rest
           in loop [] rows
       | _ -> Error "expected browser clients array"
+  (* The BiDi host's part of the same answer. A report this TUI cannot read
+     does not cost the operator the connection list, nor the paragraph the
+     server wrote for them. *)
+  let decode_bidi_host = function
+    | None | Some `Null -> Host_not_reported
+    | Some report ->
+        (match Masc.Browser_bidi_host_status.report_of_json report with
+         | Ok report -> Host_reported report
+         | Error detail ->
+             let message = match report with
+               | `Assoc fields ->
+                   (match List.assoc_opt "message" fields with
+                    | Some (`String message) -> Some message
+                    | Some _ | None -> None)
+               | _ -> None in
+             Host_report_unreadable { detail; message })
+  let decode_discovery json =
+    let* listed = decode_clients json in
+    (* The same [data] the connections were read from. A server from before
+       the report has no such field. *)
+    let* data = field "data" json in
+    let* reported =
+      match data with
+      | `Assoc fields -> Ok (List.assoc_opt "bidiHost" fields)
+      | _ -> Error "expected object"
+    in
+    Ok { listed; bidi_host = decode_bidi_host reported }
   let parse_client_id source json =
     let* value = field "clientId" json in
     match source, value with
@@ -4550,8 +5026,21 @@ module Browser_history = struct
     | Listing
     | List_failed of string
     | Entries of { entries : entry list; cursor : int; selection : selection }
-  type t = { keeper_name : string; content : content; scroll : int }
-  let create keeper_name = {keeper_name;content=Listing;scroll=0}
+  type resume = Reload_list | Reload_selection
+  type t = { keeper_name : string; content : content; scroll : int; resume : resume option }
+  let create keeper_name = {keeper_name;content=Listing;scroll=0;resume=None}
+  let start_read ~reload t =
+    let content = if reload then Listing else match t.content with
+      | Entries entries -> Entries {entries with selection=Loading}
+      | Listing | List_failed _ -> t.content in
+    {t with content; resume=None}
+  let suspend t =
+    let detail = "Workspace identity is unconfirmed; reading will resume after recovery" in
+    match t.content with
+    | Listing -> {t with content=List_failed detail; resume=Some Reload_list}
+    | Entries ({selection=Loading; _} as entries) ->
+        {t with content=Entries {entries with selection=Failed detail}; resume=Some Reload_selection}
+    | List_failed _ | Entries _ -> t
   let entries (snapshot : Tui_decode.keeper_calls_snapshot) =
     snapshot.kcs_entries |> List.rev |> List.concat_map (fun (call : Tui_decode.keeper_call) ->
       match call.kc_execution_id with
@@ -4563,7 +5052,7 @@ module Browser_history = struct
     | Entries {entries;cursor;_} -> List.nth_opt entries cursor
     | Listing | List_failed _ -> None
   let select cursor entries t =
-    {t with content=Entries {entries;cursor;selection=Loading};scroll=0}
+    {t with content=Entries {entries;cursor;selection=Loading};scroll=0;resume=None}
   let move delta t = match t.content with
     | Entries {entries;cursor;_} when entries <> [] ->
         let next = max 0 (min (List.length entries - 1) (cursor + delta)) in
@@ -4809,17 +5298,14 @@ let browser_lane_url_line ~cols draft =
   let safe = Masc_tui_keeper_chat_projection.terminal_safe_text draft in
   "  URL> " ^ Masc_tui_message_layout.input_viewport ~max_cells:(max 1 (cols - 12)) safe ^ "▏"
 
-type workspace_activity_read = {
-  war_at : float;
-  war_hours : float;
-  war_keepers : (string * (Tui_decode.file_change_snapshot, string) result) list;
-}
+type workspace_activity_read = Tui_decode.repository_activity_snapshot
 
 type runtime_config_reading = {
   rcv_path : string;
   rcv_source_text : string;
   rcv_rows : (string * string) list list;
   rcv_metadata : Masc_tui_runtime_config_view.metadata;
+  rcv_account_emails : (Masc_tui_account_login.account_emails, string) result;
 }
 
 type runtime_config_edit_view = Config_edit_draft | Config_edit_current of (string * string) list list
@@ -5085,6 +5571,18 @@ type schedule_form_refusal =
   ; sfr_workspace : workspace_input_identity option
   }
 
+type sent_image_read =
+  { sir_generation : int
+  ; sir_view : surface
+  ; sir_keeper : string option
+  ; sir_name : string
+  ; sir_authority : unit ref
+  }
+
+type lane_nested_read =
+  | Lane_subscriptions_read
+  | Lane_declaration_read of { path : string; edit : bool }
+
 type state = {
   mutable home_selected : home_action option;
   mutable home_decision_scroll : int;
@@ -5126,6 +5624,7 @@ type state = {
   mutable help_open: bool;
   mutable keeper_deletions_open: bool;
   mutable keeper_deletions_loading: bool;
+  mutable keeper_deletions_retry_receipt: (int * string) option;
   mutable keeper_deletions_generation: int;
   mutable keeper_deletions_cursor: int;
   mutable keeper_deletions_scroll: int;
@@ -5160,6 +5659,8 @@ type state = {
   mutable keeper_chat_control_pending : (string * int64) list;
   mutable keeper_interactive_waiting : (string * string * local_intervention) list;
   mutable keeper_queue_inflight : string list;
+  mutable keeper_queue_readings : string list;
+  mutable keeper_queue_inspections : (string * unit ref) list;
   (* Exact requests awaiting admission and accepted requests awaiting their
      ordered run-next call. No priority intent is inferred from queue text. *)
   mutable keeper_run_next_pending : Masc_tui_keeper_chat_projection.request list;
@@ -5205,6 +5706,9 @@ type state = {
   (* A saved activation may finish while its panel is closed. It belongs to
      this workspace and is cleared when workspace authority is withdrawn. *)
   mutable account_login_detached: Masc_tui_account_login.t list;
+  mutable account_login_readings: (Masc_tui_account_login.t * int * Masc_tui_account_login.action) list;
+  mutable account_login_activation_resume: (Masc_tui_account_login.t * int * Masc_tui_account_login.saved) list;
+  mutable account_login_read_resume: (Masc_tui_account_login.t * int * Masc_tui_account_login.action) list;
   mutable context_inspector_open: bool;
   mutable context_inspector_keeper: string option;
   mutable context_inspector_loading: bool;
@@ -5305,8 +5809,11 @@ type state = {
   local_base_path: string;
   mutable workspace_identity: workspace_identity;
   mutable workspace_authority: workspace_authority;
+  mutable workspace_read_authority: unit ref;
+  mutable pending_task_followups: pending_task_followup list;
   mutable suspended_keeper_inputs: (workspace_input_identity option * suspended_keeper_input) list;
   mutable workspace_cancellations: (unit ref * (unit -> unit)) list;
+  mutable workspace_observation_cancellations: (unit ref * (unit -> unit)) list;
   mutable help_scroll: int;
   (* An image the operator asked to see, drawn over the whole terminal rather
      than into a frame. A picture does not live in a row: the terminal keeps
@@ -5322,6 +5829,7 @@ type state = {
   mutable browser_viewport : (Browser_lane_view.screenshot * string) option;
   mutable image_request_generation: int;
   (* Any new input cancels an outstanding asynchronous image preview. *)
+  mutable sent_image_read: sent_image_read option;
   (* The MSX spectator screen, the image overlay's twin: while [msx_open] is
      set the loop draws no frames and every key belongs to the emulator. The
      machine is [Option] so it exists only once the screen has been opened,
@@ -5403,6 +5911,8 @@ type state = {
   (* The keeper-voice screen, drawn instead of the voice pane while it is
      open. Never both this and the wizard: each is a whole surface. *)
   mutable voice_agent_voices: voice_agent_session option;
+  mutable lane_nested_read_resume: (int * lane_nested_read) option;
+  mutable lane_installer_read_resume: (int * Masc_tui_lane_installer.read) option;
   (* The number the next wizard save is sent under. Never reused, so a reply
      for a save made by a session that has since closed cannot match the one
      open now. *)
@@ -5442,6 +5952,7 @@ type state = {
   mutable prompts_librarian_input: (string * string list) option;
   mutable prompts_librarian_input_error: string option;
   mutable prompts_librarian_input_loading: bool;
+  mutable prompts_librarian_input_requested: string option;
   (* Prompt presets (#32777). The pane holds the listing, the name being
      typed for a save, the preset armed for a restore or delete, and the last report —
      which stays on screen because it is the only place the skipped keys and
@@ -5734,6 +6245,10 @@ type state = {
   mutable transport_error: string option;
   mutable approval_snapshot: approval_snapshot option;
   mutable approvals_error: string option;
+  (* Ticket for the confirm-queue read outside the refresh bundle. The count
+     on Home draws from [approval_snapshot] alone, so a refused refresh answer
+     needs a read of its own to recover the count before the next cadence. *)
+  mutable approvals_summary_read: Snapshot_read.t;
   (* Questions Keepers put to a human, drawn beside the approvals. [None]
      means nothing has been read yet, which is not the same as a fleet with
      no open questions. *)
@@ -5792,6 +6307,7 @@ type state = {
   mutable gate_error: string option;
   mutable gate_snapshot_observed: bool;
   mutable gate_snapshot_read: Snapshot_read.t;
+  mutable gate_receipt_refresh_pending: bool;
   (* Keepers whose approval gate runs every call unasked. Names only: the
      wire carries (keeper, mode) pairs and [auto] is the absent default, so
      what the pane needs is exactly the yolo set. *)
@@ -5950,6 +6466,7 @@ type state = {
   mutable schedule_form_refusal: schedule_form_refusal option;
   mutable lanes: Tui_decode.keeper_lanes_snapshot option;
   mutable keeper_lanes_inflight: bool;
+  mutable keeper_lanes_resume: bool;
   mutable lane_inventory: Masc.Tui_decode_lane_inventory.snapshot option;
   mutable standalone_lanes: Tui_decode.standalone_lanes_snapshot option;
   mutable standalone_lanes_error: string option;
@@ -6014,16 +6531,20 @@ type state = {
   mutable tools_scroll: int;
   mutable tools_skill_cursor: int;
   mutable tools_skill_evidence: (string * Yojson.Safe.t) option;
+  mutable tools_evidence_request: unit ref option;
+  mutable tools_evidence_reference: Skill_reference.t option;
   mutable tools_async_observation: Tui_decode.async_request_observation option;
   mutable tools_async_observation_error: string option;
   mutable lane_addons: Masc_tui_lane_addons.t option;
   mutable lane_addons_cached: Masc_tui_lane_addons.t;
   mutable lane_addons_generation: int;
+  mutable lane_addons_reading: int option;
   mutable browser_lane: Browser_lane_view.t option;
   mutable browser_history: Browser_history.t option;
   mutable browser_history_generation: int;
   mutable browser_lane_visibility: browser_lane_visibility;
   mutable browser_lane_generation: int;
+  mutable browser_lane_read_resume: (int * Browser_lane_view.t * Browser_lane_view.operation) option;
   mutable connectors: Masc.Tui_decode_connectors.connector_snapshot option;
   mutable connectors_error: string option;
   mutable connectors_inflight: bool;
@@ -6085,6 +6606,7 @@ type state = {
   mutable runtime_lane_replacement_selection:
     (slot_editor_target * slot_editor_identity * slot_editor_identity) option;
   mutable runtime_lane_write: runtime_lane_write;
+  mutable runtime_dim_refusals: bool;
   mutable runtime_cursor: int;
   mutable runtime_surface_generation: int;
   mutable runtime_surface_inflight: int option;
@@ -6184,6 +6706,7 @@ type state = {
      that row's line number in the whole file, so the lookups are scattered
      rather than sequential and a list walked from the front on every one. *)
   mutable code_file: (string, (string * string) list array) Masc_tui_fetched.t;
+  mutable code_file_resume_intent: code_file_load_intent;
   mutable code_file_scroll: int;
   (* The line the pane's cursor is on (0-based), the anchor a language-server
      question is asked at. j/k move it; the scroll follows to keep it
@@ -6214,6 +6737,9 @@ type state = {
   mutable code_history:
     (code_workspace_scope * string, code_history_listing) Masc_tui_fetched.t;
   mutable code_history_open: bool;
+  mutable code_history_expanded: int option;
+      (** Listing occurrence whose recorded text is expanded. Reset when a new
+          listing lands; equal payloads remain distinct timeline records. *)
   mutable code_history_scroll: int;  (** Physical wrapped rows; Enter resolves the visible row owner. *)
   (* The file pane's diff view: d on an open file swaps the content for what
      the working tree holds against HEAD, keyed the same way. One overlay at
@@ -6459,6 +6985,8 @@ type state = {
   mutable msg_history_load_generation: int;
   mutable msg_history_inflight: (int * string) option;
   mutable msg_copy_generation: int;
+  mutable chat_command_reads: (unit ref * unit ref * string) list;
+  mutable msg_copy_pending: (int * string * unit ref) option;
   (* The newest row [msg_scroll] counts back from, by causal row identity, while the
      operator is reading back. Counting from whatever is newest right now made
      the count mean something different every time a reply landed: the new rows
@@ -6479,6 +7007,7 @@ type state = {
   mutable msg_older_cursor: float option;
   mutable msg_older_exist: bool;
   mutable msg_older_loading: bool;
+  mutable msg_older_resume: (string * float) option;
   mutable msg_older_error: string option;
   (* Presentation-only defaults come from the CLI and can be changed in the
      pane without mutating the transcript. *)
@@ -6523,16 +7052,16 @@ type state = {
      pruned, or unreadable -- so a refresh does not ask for them again this
      session. A request that never got an answer is not here: the next
      refresh asks again. *)
-  mutable msg_journal_unavailable: string list;
+  mutable msg_journal_unavailable: journal_key list;
   (* Journal sources a fiber is reading right now, so a load that
      arrives before the read returns does not start a second one. *)
-  mutable msg_journal_inflight: string list;
+  mutable msg_journal_inflight: journal_key list;
   (* Journal sources a stream frame named while their journal was being read,
      with the highest journal seq the frames named: the read in flight may
      have stopped short of that line, so when it lands another read starts
      from where it stopped -- unless it reached the line, which ends the
-     chain. One entry per operation, however many frames arrived. *)
-  mutable msg_journal_wanted: (string * int option) list;
+     chain. One entry per Keeper and typed source, however many frames arrived. *)
+  mutable msg_journal_wanted: (journal_key * int option) list;
   (* The server refused this client's credential for the journal endpoint.
      Said once; no journal is asked for again this session. *)
   mutable msg_journal_reads_refused: bool;
@@ -6550,12 +7079,312 @@ type state = {
    them. A successful health response with missing paths is still unread;
    only comparable paths can confirm that an origin has been replaced. *)
 let server_authority_ready state =
+  (* An unconfirmed match keeps the identity it last confirmed so its rows
+     stay on screen; that identity does not authorize a new read. *)
+  (match state.workspace_identity with
+   | Workspace_identity_match_unconfirmed _ -> false
+   | Workspace_identity_unread | Workspace_identity_match
+   | Workspace_identity_mismatch _ -> true)
+  &&
   match state.server_identity with
   | Some identity ->
       identity.Tui_decode.sid_state_ready <> Some false
       && not (String.equal identity.sid_base_path "")
       && not (String.equal identity.sid_masc_root "")
   | None -> false
+
+let remember_task_followup state ~expected_workspace action =
+  state.pending_task_followups <- state.pending_task_followups @
+    [{tf_workspace = expected_workspace; tf_authority = state.workspace_authority;
+      tf_action = action}]
+
+(* Consume each ready followup once, leaving unread identity/roster work
+   pending. A comparable foreign workspace retires it even if that workspace
+   has not finished booting. *)
+let take_task_followups state ~ready =
+  let foreign held =
+    held.tf_authority <> state.workspace_authority
+    || match state.server_identity with
+       | Some current when current.Tui_decode.sid_base_path <> ""
+                           && current.sid_masc_root <> "" ->
+           not (String.equal (canonical_path held.tf_workspace.sid_base_path)
+                  (canonical_path current.sid_base_path)
+                && String.equal (canonical_path held.tf_workspace.sid_masc_root)
+                     (canonical_path current.sid_masc_root))
+       | Some _ | None -> false
+  in
+  let run, withdrawn, waiting = List.fold_left (fun (run, withdrawn, waiting) held ->
+    if foreign held then run, held.tf_action :: withdrawn, waiting
+    else if state.workspace_identity = Workspace_identity_match
+            && server_workspace_matches ~expected:(Some held.tf_workspace)
+                 (match state.server_identity with Some id -> Ok id | None -> Error "unread")
+            && ready held.tf_action
+    then held.tf_action :: run, withdrawn, waiting
+    else run, withdrawn, held :: waiting)
+    ([], [], []) state.pending_task_followups in
+  state.pending_task_followups <- List.rev waiting;
+  List.rev run, List.rev withdrawn
+
+let workspace_reply_admitted state ~authority ~reading ~kind =
+  authority = state.workspace_authority
+  && match kind with
+     | Workspace_operation_outcome -> true
+     | Workspace_observation ->
+       server_authority_ready state
+       && match reading with
+          | Some admitted -> admitted == state.workspace_read_authority
+          | None -> false
+
+(* A POST receipt can outlive the GET started after it, including a result
+   already queued when identity is lost. Never promote that GET's authority
+   merely because it shares a completion with an admitted operation. *)
+let workspace_operation_reply state ~authority ~reading (receipt, observation) =
+  let observation = match observation with
+    | Error _ -> observation
+    | Ok _ when workspace_reply_admitted state ~authority ~reading ~kind:Workspace_observation -> observation
+    | Ok _ -> Error "Action outcome retained; follow-up reading was retired while workspace identity was unconfirmed. Refresh before acting again."
+  in
+  receipt, observation
+
+let retain_resource_read state ~uri =
+  let same_resource = match state.resource_content with
+    | Some (current, _) -> String.equal current uri
+    | None -> false in
+  state.resource_pending_uri <- Some uri;
+  if not same_resource then begin
+    state.resource_content <- None;
+    state.resource_content_error <- None;
+    state.resource_scroll <- 0
+  end
+
+let retain_sandbox_log_read state ~keeper_name =
+  state.keeper_sandbox_logs_requested <- Some keeper_name;
+  state.keeper_sandbox_logs_origin <- state.server_identity
+
+type retired_operation_observation =
+  | Browser_scene_observation of int * Browser_lane_view.t * Browser_lane_view.operation
+  | Lane_subscriptions_observation of int
+
+let retain_operation_observation state = function
+  | Browser_scene_observation (generation, prior, operation) ->
+      (match state.browser_lane with
+       | Some current when generation = state.browser_lane_generation
+           && prior.source = current.source
+           && prior.selected_client = current.selected_client
+           && prior.selected_tab = current.selected_tab ->
+             state.browser_lane_read_resume <- Some (generation, current, operation);
+             true
+       | _ -> false)
+  | Lane_subscriptions_observation generation ->
+      (match state.lane_addons with
+       | Some view when view.generation = generation
+           && Option.is_some view.subscription_panel ->
+             state.lane_nested_read_resume <- Some (generation, Lane_subscriptions_read);
+             true
+       | _ -> false)
+
+(* The deletion overlay keeps its confirmed inventory while identity is
+   unavailable. Invalidate the read generation as well: reconfirming A must
+   not admit a reply that was in flight during an uncertain A -> B -> A. *)
+let suspend_keeper_deletions_read state =
+  state.keeper_deletions_generation <- state.keeper_deletions_generation + 1;
+  state.keeper_deletions_loading <- false
+
+let suspend_account_login_read (view : Masc_tui_account_login.t) =
+  view.phase <- (match view.phase with
+    | Masc_tui_account_login.Finished outcome -> Finished {outcome with refresh_failed=true}
+    | Loading | Providers _ | Logging | Models | Documented_context _ | Saving
+    | Removing | Failed | Removal _ -> Failed);
+  view.notice <- "Workspace reading is unconfirmed; read again after identity returns."
+
+let suspend_voice_wizard_read state =
+  let module Wizard = Masc_tui_voice_wizard_session in
+  state.voice_wizard <- Option.map (fun (session : Wizard.voice_wizard_session) ->
+    match session.vws_save with
+    | Wizard.Save_unanswered {request; _} ->
+        Option.value ~default:session (Wizard.voice_wizard_after_reread session ~request
+          (Error "workspace identity is unconfirmed; the save outcome is still unknown"))
+    | Save_probing request ->
+        Option.value ~default:session (Wizard.voice_wizard_after_probe session ~request
+          (Error "Configuration saved; endpoint probe retired while workspace identity was unconfirmed."))
+    | Save_not_sent | Save_sending _ | Save_settled
+    | Save_needs_reopen _ -> session) state.voice_wizard
+
+(* Observation receipts have a shorter lifetime than admitted operations.
+   Retire their owners without cancelling a write or erasing its outcome,
+   the rows already shown, navigation, or the operator's draft. *)
+let suspend_workspace_readings state =
+  state.workspace_read_authority <- ref ();
+  let cancellations = state.workspace_observation_cancellations in
+  state.workspace_observation_cancellations <- [];
+  List.iter (fun (_, cancel) -> cancel ()) cancellations;
+  state.observer <- Observer_off;
+  state.detail_read_authority <- ref ();
+  state.detail_reads <- [];
+  suspend_keeper_deletions_read state;
+  suspend_voice_wizard_read state;
+  state.keeper_queue_inflight <- List.filter
+    (fun keeper -> not (List.mem keeper state.keeper_queue_readings)) state.keeper_queue_inflight;
+  state.keeper_queue_readings <- [];
+  List.iter (fun ((view : Masc_tui_account_login.t), generation, action) ->
+    if view.generation = generation then begin
+      state.account_login_read_resume <- (view, generation, action)
+        :: List.filter (fun (pending, _, _) -> pending != view) state.account_login_read_resume;
+      suspend_account_login_read view
+    end)
+    state.account_login_readings;
+  state.account_login_readings <- [];
+  state.tools_evidence_request <- None;
+  state.browser_history_generation <- state.browser_history_generation + 1;
+  state.browser_history <- Option.map Browser_history.suspend state.browser_history;
+  state.browser_lane <- Option.map (fun (view : Browser_lane_view.t) ->
+    match view.load with
+    | Browser_lane_view.Loading (generation, operation) when Browser_lane_view.operation_is_read operation ->
+        state.browser_lane_read_resume <- Some (generation, view, operation);
+        {view with load=Browser_lane_view.Idle; refresh_pending=None}
+    | _ -> view) state.browser_lane;
+  let suspend_lane (view : Masc_tui_lane_addons.t) =
+    if state.lane_addons_reading = Some view.generation then begin
+      Option.iter (fun read -> state.lane_installer_read_resume <- Some (view.generation, read))
+        (Option.bind view.installer Masc_tui_lane_installer.pending_read);
+      {view with loading=false; installer=Option.map Masc_tui_lane_installer.suspend_read view.installer}
+    end else view in
+  state.lane_addons <- Option.map suspend_lane state.lane_addons;
+  state.lane_addons_cached <- suspend_lane state.lane_addons_cached;
+  state.lane_addons_reading <- None;
+  state.board_detail <- Masc_tui_board_detail.suspend state.board_detail;
+  state.acting_pane_changes <- Masc_tui_fetched.suspend state.acting_pane_changes;
+  state.prompts <- Masc_tui_fetched.suspend state.prompts;
+  state.preset_detail <- Masc_tui_fetched.suspend state.preset_detail;
+  state.keeper_board_quarantines <- Masc_tui_fetched.suspend state.keeper_board_quarantines;
+  state.workspace_activity <- Masc_tui_fetched.suspend state.workspace_activity;
+  state.memory_input <- Masc_tui_fetched.suspend state.memory_input;
+  state.memory_facts <- Masc_tui_fetched.suspend state.memory_facts;
+  state.code_listing <- Masc_tui_fetched.suspend state.code_listing;
+  state.code_file <- Masc_tui_fetched.suspend state.code_file;
+  state.code_history <- Masc_tui_fetched.suspend state.code_history;
+  state.code_diff <- Masc_tui_fetched.suspend state.code_diff;
+  state.code_blame <- Masc_tui_fetched.suspend state.code_blame;
+  state.code_lsp_query <- Masc_tui_fetched.suspend state.code_lsp_query;
+  state.fusion_runs <- Masc_tui_fetched.suspend state.fusion_runs;
+  (match state.goal_confirmation with
+   | Masc_tui_planning_detail.Inspecting reading ->
+       state.goal_confirmation <- Masc_tui_planning_detail.Inspecting
+         (Masc_tui_fetched.suspend reading)
+   | Masc_tui_planning_detail.Submitting _ -> ());
+  state.exact_activity_sessions <- List.map Masc_tui_exact_activity.suspend_read state.exact_activity_sessions;
+  state.browser_activity_sessions <- List.map Masc_tui_browser_activity.suspend_read state.browser_activity_sessions;
+  state.machine_activity_sessions <- List.map Masc_tui_machine_activity.suspend_read state.machine_activity_sessions;
+  let suspend_application (view : Masc_tui_lane_addons.t) =
+    {view with application_reading = Masc_tui_lane_application.suspend view.application_reading} in
+  state.lane_addons <- Option.map suspend_application state.lane_addons;
+  state.lane_addons_cached <- suspend_application state.lane_addons_cached;
+  state.keeper_tool_approvals_read <- Snapshot_read.invalidate state.keeper_tool_approvals_read;
+  state.gate_snapshot_read <- Snapshot_read.invalidate state.gate_snapshot_read;
+  state.schedules_read <- Snapshot_read.invalidate state.schedules_read;
+  state.keeper_sandbox_logs_inflight <- None;
+  state.keeper_lanes_resume <- state.keeper_lanes_resume || state.keeper_lanes_inflight;
+  state.keeper_lanes_inflight <- false;
+  state.connectors_inflight <- false;
+  state.connectors_reload_after_inflight <- false;
+  state.memory_health_inflight <- false;
+  state.runtime_catalog_generation <- state.runtime_catalog_generation + 1;
+  (match state.runtime_catalog_reading with
+   | Runtime_catalog_loading -> state.runtime_catalog_reading <- Runtime_catalog_unread
+   | Runtime_catalog_unread | Runtime_catalog_failed _ | Runtime_catalog_read -> ());
+  state.runtime_config_read <- `Idle;
+  state.runtime_params_loading <- false;
+  state.standalone_lanes_inflight <- false;
+  state.standalone_lanes_reread_pending <- false;
+  state.runtime_surface_inflight <- None;
+  state.runtime_surface_force_pending <- false;
+  state.clients_surface_inflight <- false;
+  state.repositories_inflight <- false;
+  state.tools_read_inflight <- None;
+  state.harness_inflight <- false;
+  state.verification_inflight <- false;
+  state.verification_refresh_after_inflight <- false;
+  state.fusion_detail_inflight <- None;
+  state.fusion_historical_inflight <- None;
+  state.lane_runs_loading <- false;
+  state.schedule_wake_history_inflight <- None;
+  state.keeper_turns_inflight <- false;
+  state.keeper_calls_loading <- false;
+  state.keeper_calls_refresh_pending <- false;
+  state.msg_file_changes_loading <- false;
+  state.msg_file_changes_refresh_pending <- false;
+  state.msg_history_inflight <- None;
+  if state.msg_older_loading then
+    state.msg_older_resume <-
+      (match state.msg_target_keeper_name, state.msg_older_cursor with
+       | Some keeper, Some before -> Some (keeper, before)
+       | _ -> None);
+  state.msg_older_loading <- false;
+  state.msg_journal_inflight <- [];
+  state.context_inspector_loading <- false;
+  state.prompts_librarian_input_loading <- false;
+  state.msx_live_in_flight <- None;
+  state.dos_live_in_flight <- None
+
+(* A discarded bundle proves its observation interval was inconsistent,
+   even when its last probe sees the original workspace again. Retire that
+   interval before allowing the last identity to confirm a new reading. *)
+let retire_refused_workspace_readings state ~detail latest =
+  suspend_workspace_readings state;
+  match latest with
+  | Some (Ok _ as reading) -> reading
+  | Some (Error _) | None -> Error detail
+
+let begin_keeper_deletions_read state =
+  if not (server_authority_ready state) || state.keeper_deletions_loading then None
+  else (
+    state.keeper_deletions_loading <- true;
+    state.keeper_deletions_generation <- state.keeper_deletions_generation + 1;
+    Some state.keeper_deletions_generation)
+
+let apply_keeper_deletions_read state ~generation
+    (result : (Masc_tui_keeper_control.deletion_inventory, string) result) =
+  if generation = state.keeper_deletions_generation then (
+    state.keeper_deletions_loading <- false;
+    if server_authority_ready state then (
+      let selected = match state.keeper_deletions with
+        | Some (Ok inventory) -> List.nth_opt inventory.operations state.keeper_deletions_cursor
+        | Some (Error _) | None -> None in
+      state.keeper_deletions <- Some result;
+      match result with
+      | Error _ -> ()
+      | Ok inventory ->
+        (match state.keeper_deletions_retry_receipt with
+         | Some (received_at, _) when generation > received_at ->
+             state.keeper_deletions_retry_receipt <- None
+         | _ -> ());
+        let same_operation row = match selected with
+          | None -> false
+          | Some previous -> Masc.Keeper_shutdown_types.Operation_id.equal
+              (Masc_tui_keeper_control.deletion_operation_id row)
+              (Masc_tui_keeper_control.deletion_operation_id previous) in
+        let rec find index = function
+          | [] -> None
+          | row :: rest -> if same_operation row then Some index else find (index + 1) rest in
+        state.keeper_deletions_cursor <- (match find 0 inventory.operations with
+          | Some index -> index | None -> 0)))
+
+(* Why a write launched under [authority] must not go out now: the workspace
+   moved since launch, or the server identity is not confirmed (unread, or a
+   match kept unconfirmed). [None] means it may be sent. *)
+let write_authority_refusal state authority =
+  if authority <> state.workspace_authority then Some "Workspace authority withdrawn"
+  else if not (server_authority_ready state) then Some "Workspace identity is unconfirmed"
+  else None
+
+let begin_preset_detail_read state ~name =
+  if not (server_authority_ready state) then None
+  else
+    match Masc_tui_fetched.start ~equal:String.equal state.preset_detail ~key:name with
+    | Masc_tui_fetched.Already_loading -> None
+    | Masc_tui_fetched.Started (next, request) ->
+        state.preset_detail <- next;
+        Some request
 
 (* The one definition of "same workspace" used to admit a held expectation
    back into the poll after authority is restored. Same answer as the screen
@@ -6675,7 +7504,8 @@ let start_identity_login_request (state : state) ~keeper_name ~provider_id =
   let request =
     { ilr_keeper = keeper_name;
       ilr_provider = provider_id;
-      ilr_generation = state.identity_login_generation }
+      ilr_generation = state.identity_login_generation;
+      ilr_origin = state.server_identity }
   in
   state.identity_login_requests <-
     request :: List.filter
@@ -7138,12 +7968,22 @@ let live_for_keeper state keeper_name =
 (* Scoped by keeper like every other reading of the settled logs: a request
    id is minted per send, but the rule that one turn has one source is a
    rule per keeper's conversation. *)
-let settled_log_for_request state ~keeper_name request_id =
+let settled_log_for_source state ~keeper_name source =
   List.find_opt
     (fun turn_log ->
       String.equal (turn_log_keeper_name turn_log) keeper_name
-      && String.equal (turn_log_request_id turn_log) request_id)
+      && Masc_tui_keeper_chat_log.source turn_log.tl_log = source)
     state.msg_settled_logs
+;;
+
+let settled_log_for_request state ~keeper_name request_id =
+  settled_log_for_source state ~keeper_name (Masc_tui_keeper_chat_log.Operation request_id)
+;;
+
+let turn_log_execution_source log =
+  match Masc_tui_keeper_chat_log.source log.tl_log with
+  | Operation _ -> Masc_tui_keeper_chat_log.Operation (turn_log_execution_id log)
+  | Autonomous_turn _ as source -> source
 ;;
 
 (* Choose one execution source before classifying it as settled or observed.
@@ -7175,11 +8015,11 @@ let selected_source_logs_for_keeper state keeper_name =
    @ Option.to_list state.msg_live)
   |> List.filter (fun log -> String.equal (turn_log_keeper_name log) keeper_name)
   |> List.fold_left (fun selected log ->
-    let execution_id = turn_log_execution_id log in
-    match List.find_opt (fun prior -> turn_log_execution_id prior = execution_id) selected with
+    let execution = turn_log_execution_source log in
+    match List.find_opt (fun prior -> turn_log_execution_source prior = execution) selected with
     | None -> selected @ [log]
     | Some prior when turn_log_preferred ~candidate:log ~held:prior ->
-      List.map (fun prior -> if turn_log_execution_id prior = execution_id then log else prior) selected
+      List.map (fun prior -> if turn_log_execution_source prior = execution then log else prior) selected
     | Some _ -> selected) []
 ;;
 
@@ -7205,22 +8045,24 @@ let settled_logs_for_keeper state keeper_name =
   |> List.filter (fun log -> List.exists (( == ) log) state.msg_settled_logs)
 ;;
 
-(* The requests a history load for [keeper_name] reads no journal for: every
-   settled log that stands for its turn, every request still in flight, and
+(* The sources a history load for [keeper_name] reads no journal for: every
+   log with a terminal event, every request still in flight, and
    every journal already being read. The settled logs are not
    {!settled_logs_for_keeper}, which keeps one log per execution for drawing:
    the other requests of a batch are held too, and leaving them out asked for
    their journals again on every history load, so the server decoded each of
    those journals whole on every refresh. *)
-let journal_held_request_ids state keeper_name =
+let journal_held_keys state keeper_name =
   List.filter_map
     (fun log ->
-      if String.equal (turn_log_keeper_name log) keeper_name && turn_log_holds_the_turn log
-      then Some (turn_log_request_id log)
+      if String.equal (turn_log_keeper_name log) keeper_name && turn_log_has_ended log
+      then Some (turn_log_journal_key log)
       else None)
     state.msg_settled_logs
-  @ List.map (fun entry -> entry.sent_request.request_id) state.msg_inflight
-  @ state.msg_journal_inflight
+  @ List.filter_map (fun entry ->
+      if String.equal entry.sent_request.keeper_name keeper_name
+      then Some (turn_log_journal_key entry.log) else None) state.msg_inflight
+  @ List.filter (fun (keeper, _) -> String.equal keeper keeper_name) state.msg_journal_inflight
 ;;
 
 (* A journal's permanent failure says nothing about the exact operation
@@ -7232,12 +8074,12 @@ let journal_held_request_ids state keeper_name =
 let unavailable_journal_operation_targets state keeper_name =
   state.msg_settled_logs
   |> List.filter_map (fun log ->
-      let request_id = turn_log_request_id log in
+      let key = turn_log_journal_key log in
       let journal_unavailable = state.msg_journal_reads_refused
-        || List.mem request_id state.msg_journal_unavailable in
-      let read_inflight = List.mem request_id state.msg_journal_inflight in
+        || List.mem key state.msg_journal_unavailable in
+      let read_inflight = List.mem key state.msg_journal_inflight in
       let owned = List.exists (fun (entry : inflight) ->
-        String.equal entry.sent_request.request_id request_id) state.msg_inflight in
+        turn_log_journal_key entry.log = key) state.msg_inflight in
       let terminal = Option.exists Keeper_chat_operation.is_terminal
         (Masc_tui_keeper_chat_log.operation_state log.tl_log) in
       match Masc_tui_keeper_chat_log.source log.tl_log with
@@ -7262,10 +8104,10 @@ let unavailable_journal_operation_targets state keeper_name =
    value, or the memo keeps answering with the loaded rows the log now
    draws. *)
 let hold_settled_log state turn_log =
-  let request_id = turn_log_request_id turn_log in
+  let source = Masc_tui_keeper_chat_log.source turn_log.tl_log in
   let keeper_name = turn_log_keeper_name turn_log in
   let replaceable =
-    match settled_log_for_request state ~keeper_name request_id with
+    match settled_log_for_source state ~keeper_name source with
     | Some existing -> existing == turn_log || not (turn_log_holds_the_turn existing)
     | None -> true
   in
@@ -7283,40 +8125,40 @@ let hold_settled_log state turn_log =
            (fun held ->
              not
                (String.equal (turn_log_keeper_name held) keeper_name
-               && String.equal (turn_log_request_id held) request_id))
+               && Masc_tui_keeper_chat_log.source held.tl_log = source))
            state.msg_settled_logs)
   end
 ;;
 
-let remember_journal_unavailable state operation_id =
-  if not (List.exists (String.equal operation_id) state.msg_journal_unavailable)
-  then state.msg_journal_unavailable <- operation_id :: state.msg_journal_unavailable
+let remember_journal_unavailable state key =
+  if not (List.mem key state.msg_journal_unavailable)
+  then state.msg_journal_unavailable <- key :: state.msg_journal_unavailable
 ;;
 
-let journal_read_started state operation_id =
-  if not (List.exists (String.equal operation_id) state.msg_journal_inflight)
-  then state.msg_journal_inflight <- operation_id :: state.msg_journal_inflight
+let journal_read_started state key =
+  if not (List.mem key state.msg_journal_inflight)
+  then state.msg_journal_inflight <- key :: state.msg_journal_inflight
 ;;
 
-let journal_read_finished state operation_id =
+let journal_read_finished state key =
   state.msg_journal_inflight <-
     List.filter
-      (fun inflight -> not (String.equal inflight operation_id))
+      (fun inflight -> inflight <> key)
       state.msg_journal_inflight
 ;;
 
 (* The highest seq named wins; a frame with no seq (the settle terminal)
    never lowers what an earlier frame named. *)
-let journal_read_wanted state operation_id seq =
+let journal_read_wanted state key seq =
   let highest =
-    match List.assoc_opt operation_id state.msg_journal_wanted, seq with
+    match List.assoc_opt key state.msg_journal_wanted, seq with
     | Some (Some held), Some seq -> Some (max held seq)
     | Some (Some held), None -> Some held
     | Some None, seq | None, seq -> seq
   in
   state.msg_journal_wanted <-
-    (operation_id, highest)
-    :: List.remove_assoc operation_id state.msg_journal_wanted
+    (key, highest)
+    :: List.remove_assoc key state.msg_journal_wanted
 ;;
 
 type journal_wanted =
@@ -7326,11 +8168,11 @@ type journal_wanted =
 (* Whether a read was wanted for this operation while one was in flight, and
    the fact taken: the caller decides the read it stands for, against the
    seq the frames named. *)
-let take_journal_wanted state operation_id =
-  match List.assoc_opt operation_id state.msg_journal_wanted with
+let take_journal_wanted state key =
+  match List.assoc_opt key state.msg_journal_wanted with
   | Some highest_seq ->
       state.msg_journal_wanted <-
-        List.remove_assoc operation_id state.msg_journal_wanted;
+        List.remove_assoc key state.msg_journal_wanted;
       Wanted { highest_seq }
   | None -> Not_wanted
 ;;
@@ -7350,12 +8192,47 @@ let journal_log_started_at ~fallback
   | _ :: _ | [] -> fallback
 ;;
 
+(* The mailbox's journal-result transition. A valid partial read remains
+   followable even when a separate history GET already contains the answer.
+   Availability is evidence from the endpoint, never inferred from history. *)
+let record_terminal_replay state log replay =
+  Masc_tui_keeper_chat_log.observe_terminal_replay log.tl_log replay;
+  if Masc_tui_keeper_chat_log.terminal_replay log.tl_log =
+       Masc_tui_keeper_chat_log.Replayed_after_terminal then
+    hold_settled_log state log
+;;
 
-(* Where a journal read starts for this operation: after what a held log of
+let receive_journal_result state ~keeper_name ~source ~started_at journal =
+  let key = keeper_name, source in
+  journal_read_finished state key;
+  match journal with
+  | Ok lines ->
+      let log =
+        match settled_log_for_source state ~keeper_name source with
+        | Some held -> held
+        | None -> turn_log_create_for_source ~keeper_name ~source
+            ~started_at:(journal_log_started_at ~fallback:started_at lines)
+      in
+      let accepted = turn_log_add_journaled log lines in
+      Masc_tui_keeper_chat_log.commit log.tl_log;
+      if lines <> [] || Masc_tui_keeper_chat_log.entries log.tl_log <> []
+      then hold_settled_log state log;
+      Ok (log, accepted)
+  | Error error ->
+      (match error with
+       | Masc_tui_keeper_chat_log.Unknown_operation | Journal_pruned | Journal_missing
+       | Journal_unavailable _ | Events_denied _ | Events_undecodable _ ->
+           remember_journal_unavailable state key
+       | Cursor_refused _ | Events_refused _ | Events_transport _ -> ());
+      Error error
+;;
+
+
+(* Where a journal read starts for this source: after what a held log of
    it already has (a cut live stream's partial log, or an earlier read of a
    turn still running), or the whole journal. *)
-let journal_resume_position state ~keeper_name operation_id =
-  match settled_log_for_request state ~keeper_name operation_id with
+let journal_resume_position state ~keeper_name source =
+  match settled_log_for_source state ~keeper_name source with
   | Some held when not (turn_log_holds_the_turn held) ->
       Masc_tui_keeper_chat_log.resume_position held.tl_log
   | Some _ | None -> Masc.Keeper_chat_event_log.Whole_turn
@@ -7391,29 +8268,29 @@ type journal_follow =
           announced, so another starts when it lands. *)
 
 let journal_follow_for_source state ~keeper_name ~source ~seq ~at =
-  let request_id = Masc_tui_keeper_chat_log.source_key source in
+  let key = keeper_name, source in
   let own_request =
     List.exists
-      (fun entry -> String.equal entry.sent_request.request_id request_id)
+      (fun entry -> turn_log_journal_key entry.log = key)
       state.msg_inflight
   in
-  let held = settled_log_for_request state ~keeper_name request_id in
+  let held = settled_log_for_source state ~keeper_name source in
   if own_request
      || state.msg_journal_reads_refused
-     || List.exists (String.equal request_id) state.msg_journal_unavailable
+     || List.mem key state.msg_journal_unavailable
   then Follow_nothing
   else
     match held with
-    | Some held when turn_log_holds_the_turn held -> Follow_nothing
+    | Some held when turn_log_has_ended held -> Follow_nothing
     | held ->
-        let since_seq = journal_resume_position state ~keeper_name request_id in
+        let since_seq = journal_resume_position state ~keeper_name source in
         let already_held =
           match seq with
           | Some seq -> not (Masc.Keeper_chat_event_log.seq_is_after since_seq seq)
           | None -> false
         in
         if already_held then Follow_nothing
-        else if List.exists (String.equal request_id) state.msg_journal_inflight
+        else if List.mem key state.msg_journal_inflight
         then Follow_read_after_inflight
         else
           Follow_read
@@ -7425,15 +8302,13 @@ let journal_follow_for_source state ~keeper_name ~source ~seq ~at =
             }
 ;;
 
-(* Whether the loaded transcript says this turn is over: the keeper's reply,
-   or a failure, is on record. A journal that still cannot stand for such a
-   turn has nothing more coming -- the settle-time failure is never journaled
-   (#33108) -- so it is not worth asking for again. *)
-let loaded_turn_has_ended state ~keeper_name request_id =
+(* A recorded output can replace the polled text preview. It does not prove
+   the journal ended: persistence and terminal publication are separate. *)
+let loaded_turn_has_output state ~keeper_name source =
   Option.exists (String.equal keeper_name) state.msg_loaded_keeper
   && List.exists
        (fun (row : msg_entry) ->
-         String.equal row.me_request_id request_id
+         row.me_execution_source = Some source
          &&
          match row.me_role with
          | Message_keeper | Message_autonomous | Message_error -> true
@@ -7469,25 +8344,30 @@ let loaded_turn_has_ended state ~keeper_name request_id =
    ([hold_settled_log]), which is how a cut stream's turn is followed to its
    end. Answered per frame from the same list the settled blocks come from,
    so a log that comes to hold its turn leaves here the frame it does. *)
+(* Visual progress may close from an authoritative operation record while
+   its partial journal remains eligible for replay. History rows and journal
+   availability do not settle the transcript's phase. *)
 let observed_log_has_ended state log =
-  loaded_turn_has_ended state ~keeper_name:(turn_log_keeper_name log)
-    (turn_log_execution_id log)
-  || match Masc_tui_keeper_chat_transcript.phase log.tl_transcript with
-     | Masc_tui_keeper_chat_transcript.Stream_ended
-     | Masc_tui_keeper_chat_transcript.Stream_failed _ -> true
-     | Masc_tui_keeper_chat_transcript.Waiting
-     | Masc_tui_keeper_chat_transcript.Working -> false
+  match Masc_tui_keeper_chat_transcript.phase log.tl_transcript with
+  | Stream_ended | Stream_failed _ -> true
+  | Waiting | Working ->
+      (* An autonomous final row has no operation record to poll. It closes
+         visual progress only; the transcript and replay cursor stay open. *)
+      match turn_log_execution_source log with
+      | Masc_tui_keeper_chat_log.Operation _ -> false
+      | Masc_tui_keeper_chat_log.Autonomous_turn _ as source ->
+          loaded_turn_has_output state ~keeper_name:(turn_log_keeper_name log) source
 ;;
 
 let observed_log_is_unavailable state log =
-  List.exists (String.equal (turn_log_request_id log)) state.msg_journal_unavailable
+  List.mem (turn_log_journal_key log) state.msg_journal_unavailable
 ;;
 
 let observed_logs_for_keeper state keeper_name =
   let in_flight log =
     List.exists
       (fun entry ->
-        String.equal entry.sent_request.request_id (turn_log_request_id log))
+        turn_log_journal_key entry.log = turn_log_journal_key log)
       state.msg_inflight
   in
   settled_logs_for_keeper state keeper_name
@@ -7529,7 +8409,9 @@ let observed_turn_text_drawn state keeper_name =
     (observed_logs_for_keeper state keeper_name
      |> List.filter (fun log ->
           not (observed_log_has_ended state log)
-          && not (observed_log_is_unavailable state log)))
+          && not (observed_log_is_unavailable state log)
+          && not (loaded_turn_has_output state
+              ~keeper_name:(turn_log_keeper_name log) (turn_log_execution_source log))))
 ;;
 
 (* Whether a reasoning row is drawn at all under this visibility. The
@@ -7546,12 +8428,12 @@ let reasoning_drawn = function
    durable trace row -- "N reasoning steps, content withheld" -- as the only
    record that the keeper thought at all, and that row stays. *)
 type held_turn =
-  { ht_request_id : string
+  { ht_source : Masc_tui_keeper_chat_log.journal_source
   ; ht_reasoning : bool
   }
 
 let held_turn_of_log turn_log =
-  { ht_request_id = turn_log_execution_id turn_log
+  { ht_source = turn_log_execution_source turn_log
   ; ht_reasoning =
       Masc_tui_keeper_chat_transcript.thinking_lines turn_log.tl_transcript <> []
   }
@@ -7565,7 +8447,7 @@ let held_turn_of_log turn_log =
    pane said, and a failure stay in the committed rows. The renderer uses a
    log's failure only when no committed error row names that operation. *)
 let log_draws_row (held : held_turn) (row : msg_entry) =
-  String.equal row.me_request_id held.ht_request_id
+  row.me_execution_source = Some held.ht_source
   &&
   match row.me_role with
   | Message_keeper | Message_autonomous | Message_tool | Message_skill _ -> true
@@ -7599,11 +8481,11 @@ let rows_the_logs_do_not_draw ~held rows =
 let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
   List.iter
     (fun turn_log ->
-      let request_id = turn_log_execution_id turn_log in
+      let execution_source = turn_log_execution_source turn_log in
       List.iter
         (fun (row : msg_entry) ->
           match row.me_tool_block with
-          | Some block when String.equal row.me_request_id request_id ->
+          | Some block when row.me_execution_source = Some execution_source ->
               List.iter
                 (fun (activity : Masc_tui_keeper_chat_transcript.tool_activity) ->
                   match activity.execution_id with
@@ -7622,7 +8504,7 @@ let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
          row that knew better is left out of the timeline (#36882). *)
       List.iter
         (fun (row : msg_entry) ->
-          if String.equal row.me_request_id request_id then
+          if row.me_execution_source = Some execution_source then
             List.iter (fun (skill : Masc_tui_keeper_chat_transcript.skill_activity) ->
               let observed =
                 Option.is_some skill.turn_ref && Option.is_some skill.skill_tool_use_id
@@ -7785,6 +8667,8 @@ let withdraw_keeper_chat_requests (state : state) =
   state.keeper_chat_control_tokens <- [];
   state.keeper_chat_control_pending <- [];
   state.keeper_queue_inflight <- [];
+  state.keeper_queue_readings <- [];
+  state.keeper_queue_inspections <- [];
   state.keeper_run_next_pending <- [];
   state.keeper_run_next_ready <- [];
   state.keeper_run_next_inflight <- [];
@@ -8144,7 +9028,8 @@ let keeper_detail_target_matches state keeper_name =
    only to the currently selected Keeper and the newest request generation. *)
 let apply_keeper_schedules_read state request result =
   let current = finish_detail_read state request in
-  if current && keeper_detail_target_matches state request.drr_keeper then
+  if current && server_authority_ready state
+     && keeper_detail_target_matches state request.drr_keeper then
     match result with
     | Ok snapshot ->
         state.keeper_schedules <- Some (request.drr_keeper, snapshot);
@@ -8164,15 +9049,12 @@ let workspace_activity_rows (state : state) =
       match Masc_tui_fetched.value (Masc_tui_fetched.view_for ~equal:String.equal state.workspace_activity ~key:repo_id) with
       | None -> []
       | Some reading ->
-          List.concat_map (fun (_, result) -> match result with
-            | Error _ -> []
-            | Ok (snapshot : Tui_decode.file_change_snapshot) ->
-                List.filter_map (fun (change : Tui_decode.file_change) ->
-                  match change.fc_location with
-                  | Tui_decode.Fc_in_repo location when String.equal location.repo_id repo_id ->
-                      Some (change, location.relative_path)
-                  | Tui_decode.Fc_in_repo _ | Tui_decode.Fc_in_bundle _ | Tui_decode.Fc_at_absolute_path _ -> None)
-                  snapshot.fcs_changes) reading.war_keepers
+          List.filter_map (fun (change : Tui_decode.file_change) ->
+            match change.fc_location with
+            | Tui_decode.Fc_in_repo location when String.equal location.repo_id repo_id ->
+                Some (change, location.relative_path)
+            | Tui_decode.Fc_in_repo _ | Tui_decode.Fc_in_bundle _ | Tui_decode.Fc_at_absolute_path _ -> None)
+            reading.Tui_decode.ras_changes
           |> List.sort (fun ((a : Tui_decode.file_change), _) ((b : Tui_decode.file_change), _) ->
               Float.compare b.fc_at a.fc_at)
 
@@ -8237,6 +9119,7 @@ let set_code_scope state scope =
   if state.code_scope <> scope then begin
     state.code_lsp_query <- Masc_tui_fetched.clear state.code_lsp_query;
     state.code_file <- Masc_tui_fetched.clear state.code_file;
+    state.code_file_resume_intent <- Refresh_code_file;
     state.code_lsp_note <- None;
     state.code_target_line <- None
   end;
@@ -8250,6 +9133,7 @@ let enter_keeper_code_file state ~keeper ~path =
   state.code_cursor <- 0;
   state.code_listing <- Masc_tui_fetched.clear state.code_listing;
   state.code_file <- Masc_tui_fetched.clear state.code_file;
+  state.code_file_resume_intent <- Refresh_code_file;
   state.code_file_cursor <- 0;
   state.code_file_scroll <- 0;
   state.code_file_hscroll <- 0;
@@ -8548,6 +9432,7 @@ let create_state
   help_open = false;
   keeper_deletions_open = false;
   keeper_deletions_loading = false;
+  keeper_deletions_retry_receipt = None;
   keeper_deletions_generation = 0;
   keeper_deletions_cursor = 0;
   keeper_deletions_scroll = 0;
@@ -8564,6 +9449,8 @@ let create_state
   keeper_chat_control_pending = [];
   keeper_interactive_waiting = [];
   keeper_queue_inflight = [];
+  keeper_queue_readings = [];
+  keeper_queue_inspections = [];
   keeper_run_next_pending = [];
   keeper_run_next_ready = [];
   keeper_priority_controls = [];
@@ -8580,6 +9467,9 @@ let create_state
   keeper_turns_observed_at = None;
   account_login = None;
   account_login_detached = [];
+  account_login_readings = [];
+  account_login_read_resume = [];
+  account_login_activation_resume = [];
   context_inspector_open = false;
   context_inspector_keeper = None;
   context_inspector_loading = false;
@@ -8617,7 +9507,10 @@ let create_state
   server_identity = None;
   local_base_path;
   workspace_authority = Workspace_authority 0;
+  workspace_read_authority = ref ();
   workspace_cancellations = [];
+  workspace_observation_cancellations = [];
+  pending_task_followups = [];
   suspended_keeper_inputs = [];
   workspace_identity =
     (if String.equal local_base_path ""
@@ -8627,6 +9520,7 @@ let create_state
   image_open = false;
   browser_viewport = None;
   image_request_generation = 0;
+  sent_image_read = None;
   msx_open = false;
   msx_frame = None;
   msx_last_poll_ns = 0L;
@@ -8657,6 +9551,8 @@ let create_state
   voice_setup_error = None;
   voice_wizard = None;
   voice_agent_voices = None;
+  lane_nested_read_resume = None;
+  lane_installer_read_resume = None;
   voice_wizard_requests = 0;
   resources_list = None;
   resources_error = None;
@@ -8687,6 +9583,7 @@ let create_state
   prompts_librarian_input = None;
   prompts_librarian_input_error = None;
   prompts_librarian_input_loading = false;
+  prompts_librarian_input_requested = None;
   exact_activity_sessions = [];
   exact_activity_open = None;
   exact_activity_generation = 0;
@@ -8824,6 +9721,7 @@ let create_state
   transport_error = None;
   approval_snapshot = None;
   approvals_error = None;
+  approvals_summary_read = Snapshot_read.idle;
   asks_snapshot = None;
   asks_error = None;
   ask_answer_mode = Ask_browsing;
@@ -8852,6 +9750,7 @@ let create_state
   gate_error = None;
   gate_snapshot_observed = false;
   gate_snapshot_read = Snapshot_read.idle;
+  gate_receipt_refresh_pending = false;
   keeper_yolo_names = [];
   keeper_tool_modes_observed = false;
   keeper_tool_modes_error = None;
@@ -8925,6 +9824,7 @@ let create_state
   schedule_form_refusal = None;
   lanes = None;
   keeper_lanes_inflight = false;
+  keeper_lanes_resume = false;
   lane_inventory = None;
   standalone_lanes = None;
   standalone_lanes_error = None;
@@ -8972,16 +9872,20 @@ let create_state
   tools_scroll = 0;
   tools_skill_cursor = 0;
   tools_skill_evidence = None;
+  tools_evidence_request = None;
+  tools_evidence_reference = None;
   tools_async_observation = None;
   tools_async_observation_error = None;
   lane_addons = None;
   lane_addons_cached = Masc_tui_lane_addons.initial;
   lane_addons_generation = 0;
+  lane_addons_reading = None;
   browser_lane = None;
   browser_history = None;
   browser_history_generation = 0;
   browser_lane_visibility = Browser_lane_hidden;
   browser_lane_generation = 0;
+  browser_lane_read_resume = None;
   connectors = None;
   connectors_error = None;
   connectors_inflight = false;
@@ -9011,6 +9915,7 @@ let create_state
   runtime_lane_cursor_after_write = None;
   runtime_lane_replacement_selection = None;
   runtime_lane_write = Lane_write_idle;
+  runtime_dim_refusals = true;
   runtime_cursor = 0;
   runtime_surface_generation = 0;
   runtime_surface_inflight = None;
@@ -9072,6 +9977,7 @@ let create_state
   code_listing = Masc_tui_fetched.initial;
   code_cursor = 0;
   code_file = Masc_tui_fetched.initial;
+  code_file_resume_intent = Refresh_code_file;
   code_file_scroll = 0;
   code_file_cursor = 0;
   code_lsp_note = None;
@@ -9083,6 +9989,7 @@ let create_state
   code_focus_file = Left_pane;
   code_history = Masc_tui_fetched.initial;
   code_history_open = false;
+  code_history_expanded = None;
   code_history_scroll = 0;
   code_diff = Masc_tui_fetched.initial;
   code_diff_open = false;
@@ -9192,11 +10099,14 @@ let create_state
   msg_history_load_generation = 0;
   msg_history_inflight = None;
   msg_copy_generation = 0;
+  msg_copy_pending = None;
+  chat_command_reads = [];
   msg_scroll = 0;
   msg_scroll_pin = None;
   msg_older_cursor = None;
   msg_older_exist = false;
   msg_older_loading = false;
+  msg_older_resume = None;
   msg_older_error = None;
   msg_reasoning_visibility = reasoning_visibility;
   (* Chat opens on the answer, not its bookkeeping. The gutter still carries
@@ -9397,7 +10307,8 @@ let local_rows_page (state : state) ~error =
 (* A remote roster is its own observation, never evidence of a local read. *)
 let keeper_rows_page (state : state) ~error =
   match state.workspace_identity with
-  | Workspace_identity_match -> local_rows_page state ~error
+  | Workspace_identity_match | Workspace_identity_match_unconfirmed _ ->
+    local_rows_page state ~error
   | Workspace_identity_unread -> empty_page_of ~error ~snapshot:None
   | Workspace_identity_mismatch _ ->
     empty_page_of ~error ~snapshot:
@@ -9568,13 +10479,6 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
       (fun entry -> String.equal entry.me_keeper_name keeper_name)
       state.msg_history
   in
-  let session = List.map (fun (row : msg_entry) ->
-      if is_user_row row
-         && Option.is_some (Option.bind
-              (settled_log_for_request state ~keeper_name row.me_request_id)
-              (fun log -> Masc_tui_keeper_chat_transcript.rejection log.tl_transcript))
-      then { row with me_text = "전송 거절됨\n" ^ row.me_text }
-      else row) session in
   let held =
     selected_source_logs_for_keeper state keeper_name
     |> List.filter turn_log_holds_the_turn
@@ -9597,7 +10501,7 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
                | Masc_tui_keeper_chat_transcript.Drawn_reply _ -> true
                | _ -> false)
              (Masc_tui_keeper_chat_transcript.drawn log.tl_transcript)
-         then Some (turn_log_execution_id log)
+         then Some (turn_log_execution_source log)
          else None)
   in
   let without_partial_replies rows =
@@ -9605,7 +10509,7 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
       (fun (row : msg_entry) ->
         match row.me_role with
         | Message_keeper | Message_autonomous ->
-            not (List.exists (String.equal row.me_request_id) partial_replies)
+            not (List.exists (fun source -> row.me_execution_source = Some source) partial_replies)
         | _ -> true)
       rows
   in
@@ -9617,7 +10521,7 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
   let remaining_activity (row : msg_entry) =
     let module Transcript = Masc_tui_keeper_chat_transcript in
     let drawn = partial_logs
-      |> List.filter (fun log -> String.equal row.me_request_id (turn_log_execution_id log))
+      |> List.filter (fun log -> row.me_execution_source = Some (turn_log_execution_source log))
       |> List.concat_map (fun log -> Transcript.drawn log.tl_transcript) in
     if drawn = [] then Some row else match row.me_role with
     | Message_tool ->
@@ -11570,6 +12474,19 @@ let runtime_spent_usage (resolved : Tui_decode.runtime_resolved_snapshot)
 let runtime_option_refusing (option : Tui_decode.runtime_option) =
   option.Tui_decode.ro_quota_exhausted || option.Tui_decode.ro_rate_limited
 
+let runtime_row_deemphasized state (option : Tui_decode.runtime_option) =
+  state.runtime_dim_refusals
+  && (runtime_option_refusing option
+      || match state.runtime_surface with
+         | None -> false
+         | Some snapshot ->
+             (match runtime_spent_usage snapshot.Tui_decode.rss_resolved option with
+              | Ok (_ :: _) -> true
+              | Ok [] | Error _ -> false))
+
+let toggle_runtime_dim_refusals state =
+  state.runtime_dim_refusals <- not state.runtime_dim_refusals
+
 let runtime_quota_label (runtime : Tui_decode.runtime_option) =
   if not runtime.ro_quota_exhausted then None
   else Some (match runtime.ro_quota_resets_at with
@@ -12682,7 +13599,7 @@ let keeper_message_activity_rows (state : state) =
                   && Masc_tui_keeper_chat_projection.same_request_identity
                     request entry.sent_request) waiting)
           | Turn_preflight _ | Turn_streaming -> false) own then
-        attention "메시지 전달 재확인 중";
+        attention "메시지 전송 확인 중";
       let has_working = any_phase (fun transcript ->
         Masc_tui_keeper_chat_transcript.phase transcript = Working) in
       if has_working then add "기존 작업 처리 중";
@@ -12695,7 +13612,7 @@ let keeper_message_activity_rows (state : state) =
               && not (Masc_tui_keeper_chat_transcript.awaiting_continuation entry.log.tl_transcript)
               && Option.map fst (Masc_tui_keeper_chat_transcript.admission entry.log.tl_transcript) = admission) own
           then add text)
-        [None, "메시지 접수 확인 중";
+        [None, "메시지 전송 확인 중";
          Some Masc_tui_keeper_chat_live.Running, "응답 시작 중";
          Some Settled, "완료된 응답을 다시 읽는 중"];
       if not has_working then
@@ -12712,8 +13629,8 @@ let keeper_message_activity_rows (state : state) =
         let count delivery = List.length (List.filter (fun (_, kind) -> kind = delivery) waiting) in
         List.iter (fun (delivery, text) -> let n = count delivery in
           if n > 0 then add (Printf.sprintf "%d건 %s" n text))
-          [Local_pending, "전송 전"; Awaiting_receipt, "접수 확인 중";
-           Rechecking_delivery, "전달 재확인 중"];
+          [Local_pending, "전송 대기"; Awaiting_receipt, "전송 중";
+           Rechecking_delivery, "전송 확인 중"];
         let requests = List.map fst waiting in
         let holds request = List.exists
           (Masc_tui_keeper_chat_projection.same_request_identity request) requests in
@@ -12729,9 +13646,9 @@ let keeper_message_activity_rows (state : state) =
         else if List.for_all (fun request -> List.exists (fun (received, result) ->
             Masc_tui_keeper_chat_projection.same_request_identity request received
             && Result.is_ok result) receipts) requests then
-          add "다음 순서로 접수됨"
-        else if receipts <> [] then add "일부 메시지 다음 순서로 접수됨"
-        else if count Keeper_queued > 0 then add "접수됨"
+          add "다음 순서로 전달 대기"
+        else if receipts <> [] then add "일부 메시지 다음 순서로 전달 대기"
+        else if count Keeper_queued > 0 then add "처리 대기"
       end;
       if List.exists (fun (name, _, intervention) ->
           String.equal name keeper_name && intervention = Retained_after_stop)

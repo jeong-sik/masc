@@ -855,16 +855,20 @@ let handle_control_request
     Error (Unsupported_control_request unsupported)
 ;;
 
+(* The candidate boundary and strict decoder share the producer's field set. *)
+let agent_retry_fields =
+  [ "type"; "tool_use_id"; "tool_name"; "parent_tool_use_id"
+  ; "elapsed_time_seconds"; "uuid"; "session_id"; "subagent_type"; "subagent_retry"
+  ]
+;;
+
 let parse_wire_line line =
   let stage = "stream-json message" in
   let* json = parse_json_value ~stage line in
-  (* A Claude heartbeat is an observation that must be typed and ignored when
-     malformed. Its decoder performs field-by-field duplicate checks, so let
-     only an unambiguous top-level [type = tool_progress] frame carrying at
-     least one [heartbeat = true] reach it. Every other frame keeps the strict
-     whole-object duplicate-key contract. The discriminant is parsed data,
-     never a substring or a provider-specific identifier convention. *)
-  let heartbeat_observation =
+  (* Only positively identified provider observations reach their own strict
+     decoder when malformed. Agent retry/clear has its own exact discriminant;
+     this does not admit arbitrary non-heartbeat progress or relax auth JSON. *)
+  let progress_observation =
     match json with
     | `Assoc fields ->
       let type_values =
@@ -880,10 +884,14 @@ let parse_wire_line line =
       (match type_values with
        | [ `String "tool_progress" ] ->
          List.exists (function `Bool true -> true | _ -> false) heartbeat_values
+         || (heartbeat_values = []
+             && List.exists (function "tool_name", `String "Agent" -> true | _ -> false) fields
+             && List.mem_assoc "subagent_type" fields
+             && List.for_all (fun (key,_) -> List.mem key agent_retry_fields) fields)
        | _ -> false)
     | _ -> false
   in
-  if heartbeat_observation
+  if progress_observation
   then Ok json
   else
     let* () = validate_unique_object_keys ~stage ~path:"$" json in
@@ -1095,9 +1103,26 @@ type heartbeat =
   ; elapsed_seconds : int
   }
 
+type agent_retry_frame =
+  { retry_uuid : string
+  ; progress_id : string
+  ; parent_id : string
+  ; subagent_type : string
+  ; note : Runtime_native_tools.retry_note option
+  }
+
+type observed_progress =
+  | Heartbeat_frame of heartbeat
+  | Agent_retry_frame of agent_retry_frame
+
+type retry_binding =
+  { progress_id : string; agent : Runtime_native_tools.retry_agent; mutable pending : bool }
+
 type native_call_registry =
   { calls : (string, native_call_state) Hashtbl.t
-  ; heartbeat_uuids : (string, heartbeat) Hashtbl.t
+  ; progress_uuids : (string, observed_progress) Hashtbl.t
+  ; retry_bindings : (string, retry_binding) Hashtbl.t
+  ; native_posture : Runtime_native_tools.posture
   }
 
 type native_start =
@@ -1188,11 +1213,11 @@ let project_native_heartbeat registry ~expected_session_id fields =
   match parse_native_heartbeat ~expected_session_id fields with
   | Error reason -> Heartbeat_ignored reason
   | Ok heartbeat ->
-    match Hashtbl.find_opt registry.heartbeat_uuids heartbeat.uuid with
-    | Some previous when same_heartbeat previous heartbeat -> Heartbeat_ignored Replayed_heartbeat
+    match Hashtbl.find_opt registry.progress_uuids heartbeat.uuid with
+    | Some (Heartbeat_frame previous) when same_heartbeat previous heartbeat -> Heartbeat_ignored Replayed_heartbeat
     | Some _ -> Heartbeat_ignored Conflicting_heartbeat
     | None ->
-      Hashtbl.add registry.heartbeat_uuids heartbeat.uuid heartbeat;
+      Hashtbl.add registry.progress_uuids heartbeat.uuid (Heartbeat_frame heartbeat);
       match Hashtbl.find_opt registry.calls heartbeat.parent_id with
       | Some (Native_open {scope=Root_response;
           observation={origin=Runtime_native_tools.Built_in; tool_name=Some name; _}; _})
@@ -1200,6 +1225,70 @@ let project_native_heartbeat registry ~expected_session_id fields =
           Heartbeat_observed (Runtime_native_tools.Call_id heartbeat.parent_id, heartbeat.elapsed_seconds)
       | Some (Native_open _ | Native_closed _ | Native_ambiguous) | None ->
           Heartbeat_ignored No_active_root_call
+;;
+
+type retry_projection =
+  | Retry_observed of Runtime_native_tools.action_identity * Runtime_native_tools.retry_observation
+  | Retry_ignored
+
+let parse_agent_retry ~expected_session_id fields =
+  let ( let* ) = Option.bind in
+  let unique key = match List.filter (fun (name,_) -> name=key) fields with
+    | [_,value] -> Some value | [] | _::_ -> None in
+  let string key = let* value = unique key in
+    match value with `String value when String.trim value <> "" -> Some value | _ -> None in
+  let* name = string "tool_name" in
+  let* session = string "session_id" in
+  if name <> "Agent" || session <> expected_session_id || List.mem_assoc "heartbeat" fields
+     || not (List.for_all (fun (key,_) -> List.mem key agent_retry_fields) fields) then None
+  else
+    let* elapsed = unique "elapsed_time_seconds" in
+    let* () = match Runtime_json_integer.of_json elapsed with Ok 0 -> Some () | Ok _ | Error _ -> None in
+    let* retry_uuid = string "uuid" in
+    let* progress_id = string "tool_use_id" in
+    let* parent_id = string "parent_tool_use_id" in
+    let* subagent_type = string "subagent_type" in
+    let* note = match List.filter (fun (key,_) -> key="subagent_retry") fields with
+      | [] -> Some None
+      | [_,`Assoc note_fields] ->
+          (match Runtime_native_tools.progress_of_json
+            (`Assoc (("kind",`String "retry_reported")::("subagent_type",`String subagent_type)::note_fields)) with
+           | Ok (Runtime_native_tools.Retry_observed (Retry_reported note)) -> Some (Some note)
+           | Ok _ | Error _ -> None)
+      | [_] | _::_ -> None in
+    Some {retry_uuid;progress_id;parent_id;subagent_type;note}
+;;
+
+let project_agent_retry registry ~expected_session_id fields =
+  match parse_agent_retry ~expected_session_id fields with
+  | None -> Retry_ignored
+  | Some frame ->
+      (* Like heartbeat, valid but unowned UUIDs stay observed so later call
+         starts cannot adopt their replay. Malformed/foreign frames claim none. *)
+      if Hashtbl.mem registry.progress_uuids frame.retry_uuid then Retry_ignored
+      else begin
+        Hashtbl.add registry.progress_uuids frame.retry_uuid (Agent_retry_frame frame);
+        match registry.native_posture, Hashtbl.find_opt registry.calls frame.parent_id with
+        | Runtime_native_tools.Native_full, Some (Native_open
+            {scope=Root_response;observation={origin=Built_in;tool_name=Some "Agent";_};_}) ->
+            let binding = Hashtbl.find_opt registry.retry_bindings frame.parent_id in
+            let matches (binding : retry_binding) = binding.progress_id=frame.progress_id
+              && binding.agent.subagent_type=frame.subagent_type in
+            let report observation = Retry_observed (Runtime_native_tools.Call_id frame.parent_id, observation) in
+            (match frame.note, binding with
+             | Some note, None ->
+                 Hashtbl.add registry.retry_bindings frame.parent_id
+                   {progress_id=frame.progress_id;agent=note.agent;pending=true};
+                 report (Runtime_native_tools.Retry_reported note)
+             | Some note, Some binding when binding.agent=note.agent ->
+                 Hashtbl.replace registry.retry_bindings frame.parent_id
+                   {progress_id=frame.progress_id;agent=note.agent;pending=true};
+                 report (Runtime_native_tools.Retry_reported note)
+             | None, Some binding when matches binding && binding.pending ->
+                 binding.pending <- false; report (Runtime_native_tools.Retry_cleared binding.agent)
+             | Some _, Some _ | None, (Some _ | None) -> Retry_ignored)
+        | (Native_full | Native_read | Native_none), _ -> Retry_ignored
+      end
 ;;
 
 let allowed_tool_name (tool : dynamic_tool) =
@@ -1942,6 +2031,11 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
          {identity; progress=Runtime_native_tools.Heartbeat_reported {elapsed_seconds}})
      | Heartbeat_ignored (Not_heartbeat | Malformed_heartbeat | Other_session
          | Replayed_heartbeat | Conflicting_heartbeat | No_active_root_call) -> ());
+    (match project_agent_retry native_tool_calls ~expected_session_id fields with
+     | Retry_observed (identity, retry) ->
+         emit_stream_event on_stream_event (Native_tool_progress
+           {identity;progress=Runtime_native_tools.Retry_observed retry})
+     | Retry_ignored -> ());
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
@@ -2118,7 +2212,7 @@ let terminate_spawned_process ~clock proc stdin_w =
           (Printexc.to_string exn))
 ;;
 
-let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
+let run_protocol io ~native_posture ~dynamic_tools ~subscription ~session_mode ~session_id
     ~prompt ~images ~on_session_ready ~on_turn_starting ~on_turn_started ~on_prompt_sent
     ~on_stream_event ~turn_admitted =
   let tool_call_count = ref 0 in
@@ -2179,7 +2273,8 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
     ~rate_limit:None
     ~assistant_model:None
     ~assistant_texts:[]
-    ~native_tool_calls:{calls=Hashtbl.create 8; heartbeat_uuids=Hashtbl.create 8}
+    ~native_tool_calls:{calls=Hashtbl.create 8;progress_uuids=Hashtbl.create 8;
+      retry_bindings=Hashtbl.create 8;native_posture}
     ~native_tool_attempted:(ref false)
     ~on_turn_started
     ~on_stream_event
@@ -2290,6 +2385,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
         in
         run_protocol
           { send; receive }
+          ~native_posture:config.native
           ~dynamic_tools
           ~subscription
           ~session_mode

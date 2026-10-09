@@ -246,9 +246,11 @@ type stream_event =
       { identity : Runtime_native_tools.action_identity
       ; progress : Runtime_native_tools.progress
       }
-      (** A UUID-deduplicated root heartbeat matched to the literal parent call
+      (** A UUID-deduplicated root heartbeat or Agent retry notice matched to the literal parent call
           in this invocation. Invalid/unowned observations neither publish a
-          tool row nor fail a healthy turn. No progress-id prefix is parsed. *)
+          tool row nor fail a healthy turn. Agent retry requires Native_full;
+          clear matches an earlier notice's opaque progress id and agent type.
+          No progress-id prefix is parsed. *)
   | Usage_windows_reported of Runtime_provider_usage_window.report
       (** The windows a [rate_limit_event] reported, for the operator
           projection only; nothing that routes or retries reads it. *)

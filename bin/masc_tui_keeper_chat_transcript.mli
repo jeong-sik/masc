@@ -105,6 +105,8 @@ type tool_activity = private
   ; outcome : tool_outcome
   ; native_completion : Runtime_native_tools.completion option
   ; native_progress : native_progress option
+  ; native_retry : Runtime_native_tools.retry_observation option
+      (** Separate from heartbeat/output timing and model activity. *)
   ; duration : string option
       (** The source's duration label. Live events do not currently carry one,
           so they retain [None]. *)
@@ -250,6 +252,7 @@ type tool_projection = private
 
 val make_tool_activity :
   ?native_progress:native_progress ->
+  ?native_retry:Runtime_native_tools.retry_observation ->
   ?native_completion:Runtime_native_tools.completion ->
   ?execution_id:string ->
   call_id:string option ->

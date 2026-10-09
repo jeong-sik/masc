@@ -2962,7 +2962,7 @@ let test_native_details_retain_provider_elapsed_with_other_observations () =
       List.iter (function
         | Message_reported _ -> check bool (label ^ ": message retained") true (contains ~needle:"busy" text)
         | Output_observed _ -> check bool (label ^ ": bytes retained") true (contains ~needle:"13 bytes observed" text)
-        | Heartbeat_reported _ -> ()) observations;
+        | Heartbeat_reported _ | Retry_observed _ -> ()) observations;
       check string (label ^ ": metadata never becomes speech") "authored answer" (Transcript.text t);
       match Transcript.tool_calls t with
       | [call] -> check (option string) (label ^ ": no execution receipt") None call.execution_id

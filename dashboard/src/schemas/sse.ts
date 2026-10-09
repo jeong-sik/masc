@@ -469,10 +469,49 @@ function validateNativeToolCompletion(payload: unknown): SafeParseResult<true> {
     : fail(`${path}.exit_code`, 'Expected native exit code integer or null')
 }
 
+function isNonblankNativeRetryString(value: unknown): value is string {
+  if (typeof value !== 'string') return false
+  // Runtime_native_tools owns this predicate: OCaml String.trim removes these
+  // ASCII characters. ECMAScript trim removes additional Unicode content and
+  // would discard metadata already emitted by the canonical server codec.
+  for (const character of value) {
+    switch (character) {
+      case ' ': case '\t': case '\n': case '\r': case '\f': break
+      default: return true
+    }
+  }
+  return false
+}
+
 function validateNativeToolProgress(payload: unknown): SafeParseResult<true> {
   const path = 'ag_ui_event.value.progress'
   if (!isRecord(payload)) return fail(path, 'Expected native progress object')
   switch (payload.kind) {
+    case 'retry_reported':
+    case 'retry_cleared': {
+      const fields = ['kind', 'agent_id', 'subagent_type']
+      if (payload.kind === 'retry_reported') fields.push('attempt', 'max_retries', 'retry_delay_ms', 'error_status', 'error_category')
+      const object = exactCustomObject(payload, 'native retry observation', fields, path)
+      if (!object.success) return object
+      for (const field of ['agent_id', 'subagent_type']) {
+        const value = payload[field]
+        if (!isNonblankNativeRetryString(value))
+          return fail(`${path}.${field}`, 'Expected nonblank native retry identity')
+      }
+      if (payload.kind === 'retry_reported') {
+        for (const field of ['attempt', 'max_retries', 'retry_delay_ms']) {
+          const value = payload[field]
+          if (typeof value !== 'number' || !Number.isSafeInteger(value))
+            return fail(`${path}.${field}`, 'Expected native retry safe integer')
+        }
+        if (payload.error_status !== null
+          && (typeof payload.error_status !== 'number' || !Number.isSafeInteger(payload.error_status)))
+          return fail(`${path}.error_status`, 'Expected native retry status integer or null')
+        if (!isNonblankNativeRetryString(payload.error_category))
+          return fail(`${path}.error_category`, 'Expected native retry error category')
+      }
+      return ok(true)
+    }
     case 'output_observed': {
       const object = exactCustomObject(payload, 'native output observation', ['kind', 'byte_count'], path)
       if (!object.success) return object

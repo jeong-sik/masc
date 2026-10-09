@@ -1839,6 +1839,11 @@ in place:
   labelled as attempts. Writes have no recorded previous contents, and blob
   materialization has no text diff. This reads the captured call, without
   asking for the current working tree's Git diff.
+  `t` opens the selected Keeper record's Task detail, including its recorded
+  status, handoff, completion/evidence contract and transition history. `Esc`
+  returns to the same file-history position and expanded record. A missing Task
+  link, unavailable task read or Task absent from the current backlog leaves
+  the file history open and explains why there is no destination.
   Git and Keeper reads are independent: if either fails, the other remains
   visible with the failed source named. `r` in History retries both sources;
   reopening `H` alone keeps the existing reading. A

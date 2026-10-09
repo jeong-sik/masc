@@ -24263,6 +24263,43 @@ and is loaded on demand through keeper_skill.
               | "pageup" -> max 0 (current - page)
               | "pagedown" -> min maximum (current + page)
               | _ -> current)
+       | Some "t" when state.view = Code && state.code_focus_file = Right_pane
+                       && state.code_history_open && not state.repository_changes_open ->
+           (match Masc_tui_render_code.code_history_selected state with
+            | None | Some (Hist_commit _) ->
+                report_action state "system" "Select a Keeper record with a Task to inspect"
+            | Some (Hist_keeper_change change) ->
+                (match change.Masc.Tui_decode.fc_task_id with
+                 | None -> report_action state "system" "No Task link on this record"
+                 | Some task_id ->
+                     (* The current domain read owns the destination. An absent
+                        row must not turn into an unrelated Tasks list, and an
+                        unavailable read must not be called a missing Task. *)
+                     if state.workspace_identity <> Workspace_identity_match then
+                       report_action state "error" "Task workspace has not been confirmed"
+                     else
+                       match state.task_reading with
+                       | Masc_tui_overview_tasks.Rows_unread ->
+                           report_action state "system" "Tasks have not been read; refresh to retry"
+                       | Masc_tui_overview_tasks.Rows_unavailable detail ->
+                           report_action state "error" ("Tasks unavailable: " ^ detail)
+                       | Masc_tui_overview_tasks.Rows_read _ ->
+                           match Masc_tui_task_selection.detail_row
+                             ~detail_id:(Some task_id) ~tasks:state.tasks_domain with
+                           | None -> report_action state "system"
+                               ("Task not in backlog: " ^ task_id)
+                           | Some _ ->
+                               state.followed_from <- Some (Code, None);
+                               goto_surface ~from_reference:true state
+                                 ~mailbox:async_messages Planning;
+                               state.planning_mode <- Planning_list;
+                               state.task_detail_id <- Some task_id;
+                               state.task_detail_scroll <- 0;
+                               state.task_history <- None;
+                               state.task_focus <-
+                                 Masc_tui_overview_tasks.land_on state.tasks ~task_id;
+                               launch_task_history_load state
+                                 ~mailbox:async_messages task_id))
        | Some "m" when state.view = Code && state.code_focus_file = Right_pane
                        && Option.is_some (Masc_tui_fetched.current_key state.code_file) ->
            (* The memos in the open file: comments in the file's own syntax

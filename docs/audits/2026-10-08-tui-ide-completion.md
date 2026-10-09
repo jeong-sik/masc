@@ -38,7 +38,7 @@ interaction; it is not evidence of MASC runtime behavior.
 | What happened to this file? | Code `H`, `masc_tui_code_requests.ml:launch_history_load` | Confirmed defect: Git failure prevented the independent Keeper read. First repair keeps successful source rows and names the failed source. |
 | Can I recover after a history read fails? | Code `r` dispatch versus `H` cache reuse | Confirmed source gap: `r` refreshed only directory entries. First repair refreshes history sources while history is open. |
 | What exactly did that Keeper call change? | History had metadata and Enter-to-line; Changes had recorded text | Follow-through gap: History `d` opened today's Git diff instead of the selected recorded call. Second repair expands the call's captured text in the timeline. It distinguishes failed attempts, replace-all calls, writes without before bytes and blobs without text. |
-| Why did the Keeper change this file? | History Task/Turn/Execution metadata; Workspace activity context | Attribution exists, but History Enter handles only a commit PR link or a file-line jump. A direct Task/result journey from this record remains useful follow-up; do not infer task ownership from name or time proximity. |
+| Why did the Keeper change this file? | History Task/Turn/Execution metadata; Workspace activity context | Attribution exists, but History Enter handles only a commit PR link or a file-line jump. `t` now follows the exact recorded Task ID to its loaded detail and transition history, with Esc returning to the same file position. Missing/unread Tasks stay explicit. Deeper verifier-artifact navigation remains separate; no ownership is inferred from names or time proximity. |
 | What notes are attached to this code? | `masc_tui_memo.ml`, Code `m`, comments in the opened file | Useful source-owned annotations exist in all scopes. The guide incorrectly promised repository-only note-store CRUD and a `w` form. Correct documentation; do not recreate a second store merely to match stale prose. |
 | What context did the model receive? | `/context`, `masc_tui_context_inspector.ml`, recent request records | Already richer than a token counter: stack/request/proof views. Retain measured bytes, usage and provenance distinctions. No need for another generic context panel. |
 | Is memory actually usable? | Memory health → fact browser; source-bound and ordinary stores | Existing drill-down is useful. Changes here must be coordinated with active memory work; no duplicate implementation in this stack. |
@@ -64,10 +64,11 @@ are separate from formal GitHub approval and release verification.
   Keepers or all recorded writers; label that scope explicitly and exercise an
   unassigned writer and an unloaded/deleted Keeper. A zero-row result must not
   imply that nobody changed the repository.
-- Task/result follow-through: select an exact Task ID from a file record, open
-  that Task and its verification/evidence, then return to the same file/history
-  position. Missing or unavailable Tasks should preserve the record and explain
-  the missing link.
+- Task/result follow-through: the direct Task-detail and return path is now
+  implemented in the third source slice. It includes task status, completion
+  notes, handoff/contract evidence references and transition history. Actual
+  verifier artifact content remains on Task Review, not a claim of this link.
+  New-binary PTY verification remains pending.
 - Discoverability: measure the actual Dashboard → Keeper → changed file →
   recorded diff → Task/result path on a narrow and wide terminal. A help entry
   or hidden palette destination alone is not proof the information is findable.

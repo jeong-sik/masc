@@ -875,7 +875,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
       in
       let message_start =
         Agent_core_stream_message_start
-          { provider_message_id = id; model; usage }
+          { stream_scope; provider_message_id = id; model; usage }
       in
       if bridge_state.stream_phase <> Accepting_content
       then
@@ -906,7 +906,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
         poison_scope bridge_state ~kind:Tool_message_start_conflict
           ~reason:"conflicting MessageStart invalidated the provider stream scope"
   | MessageDelta { stop_reason; usage } ->
-      let message_delta = Agent_core_stream_message_delta { stop_reason; usage } in
+      let message_delta = Agent_core_stream_message_delta { stream_scope; stop_reason; usage } in
       (match bridge_state.stream_phase, stop_reason with
        | Accepting_content, None ->
          { bridge_state; chat_events = [ message_delta ] }
@@ -975,7 +975,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
           bridge_state.current_message_has_text || text <> ""} in
         let text = redact_text text in
         observe_model_content bridge_state ~stream_scope ~index ~channel:Public_text
-          text [Text_delta text])
+          text [Text_delta {text; stream_scope=Some stream_scope}])
   | ContentBlockDelta { index; delta = ThinkingDelta text } ->
       (match
          reject_non_input_tool_delta ~stream_scope ~index ~delta_kind:"thinking"

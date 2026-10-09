@@ -77,21 +77,22 @@ type delta =
           the prior attempt while retaining tool evidence. *)
   | Stream_model_started of
       { message_id : string option
+      ; stream_scope : int option
       ; model : string
       ; usage : stream_usage option
       }
-      (** A provider response start and its initial counter snapshot. The
-          producer suppresses exact replays within one open stream scope;
-          every published start opens a new response even when a later scope
-          reuses [message_id]. The id is optional correlation data. *)
+      (** Provider response metadata. The bridge scope is retained across repeated
+          starts, including a surviving start following scoped text. The optional
+          provider id is correlation data, not response identity. *)
   | Model_content_activity of Masc.Keeper_chat_events.model_content_activity
       (** Exact run generation/scope/index metadata, separate from body bytes.
           Ended closes only the named Text/Thinking occurrence. *)
   | Stream_model_stopped
       (** The provider response ended; the Keeper turn may still be running. *)
   | Stream_details of
-      { usage : stream_usage option
-      ; stop_reason : string option
+      { stream_scope : int option
+      ; usage : stream_usage option
+      ; stop_reason : Agent_core.Types.stop_reason option
       }
       (** What the provider said about the message in flight: the counters so
           far, and why it stopped writing ([end_turn], [max_tokens],
@@ -99,7 +100,7 @@ type delta =
           them as one record ([dashboard/src/keeper-stream.ts]
           KEEPER_STREAM_MESSAGE_DELTA), so they arrive together here too. At
           least one of the two is present. *)
-  | Text of string  (** Assistant text to append. *)
+  | Text of {text : string; stream_scope : int option}  (** Assistant text to append. *)
   | Thinking of string  (** Reasoning text to append. *)
   | Native_tool_started of
       { occurrence : tool_occurrence; tool_name : string option }

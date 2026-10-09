@@ -25,56 +25,39 @@ def run(executable, columns, failed):
     beta["keeper"] = "beta"
     beta["changes"][0].update(keeper="beta", at=1787600100)
     beta["changes"][0]["location"]["path"] = "beta-change.ml"
-    unrelated = deepcopy(beta["changes"][0])
-    unrelated["location"] = {"kind": "repo", "repo_id": "other", "path": "OTHER_REPO_LEAK.ml"}
-    beta["changes"].append(unrelated)
-    beta["calls_in_window"] = 2
     reads = []
-    def read_alpha(path):
+    route = "/api/v1/ide/repository-activity?repo_id=masc&window_hours=24"
+    def read_activity(path):
         reads.append(path)
-        return 200, alpha
-    def read_beta(path):
-        reads.append(path)
-        return (503, {"error": "beta record store unavailable"}) if failed else (200, beta)
-    fixtures[workspace.FILE_CHANGES_ALPHA_PATH] = h.PathHttpResponse(read_alpha)
-    fixtures[workspace.FILE_CHANGES_BETA_PATH] = h.PathHttpResponse(read_beta)
+        if failed and len(reads) > 1:
+            return 503, {"error": "repository record store unavailable"}
+        return 200, {"ok": True, "data": {
+            "repo_id": "masc", "window_hours": 24.0,
+            "changes": alpha["changes"] + beta["changes"],
+            "incomplete": 0, "unattributed": 0}}
+    fixtures[route] = h.PathHttpResponse(read_activity)
+    # Per-Keeper fanout is no longer an allowed read path for this surface.
+    fixtures[workspace.FILE_CHANGES_ALPHA_PATH] = (500, {"error": "unexpected keeper scan"})
+    fixtures[workspace.FILE_CHANGES_BETA_PATH] = (500, {"error": "unexpected keeper scan"})
 
     def interact(process, fd, _slave, output, _base):
         h.tab_until(process, fd, output, b"MASC Workspace")
         h.wait_for_output(process, fd, output, b"/srv/masc/workspace/masc", start=0, timeout=10)
         h.resize_and_wait(process, fd, output, rows=30, columns=columns,
             needle=b"masc", controls=(h.FULL_REDRAW,))
-        h.send_and_wait(process, fd, output, b"H", b"alpha-change.ml" if failed else b"beta-change.ml")
+        h.send_and_wait(process, fd, output, b"H", b"beta-change.ml")
         screen = visible(output)
-        assert b"OTHER_REPO_LEAK" not in screen, screen
-        assert (b"1 recorded changes" if failed else b"2 recorded changes") in screen, screen
+        assert b"2 recorded changes" in screen, screen
+        assert reads == [route], reads
         if failed:
-            assert b"alpha-change.ml" in screen, screen
-            # The coverage sentence folds in the narrow table, including
-            # when an Activity pane reserves space at 120 columns.
-            # resize_and_wait returns as soon as the sentence is drawn, which
-            # can be before its frame ends, and visible() reads completed
-            # frames only: wait for the end of the frame that holds it.
-            wide = len(output)
-            h.resize_and_wait(process, fd, output, rows=30, columns=180,
-                needle=b"1 Keeper reads failed", controls=(h.FULL_REDRAW,))
-            h.wait_for_output(process, fd, output, h.FRAME_END,
-                start=h.end_of_needle(output, b"1 Keeper reads failed", wide), timeout=3.0)
-            assert b"1 Keeper reads failed" in visible(output), visible(output)
-            h.resize_and_wait(process, fd, output, rows=30, columns=columns,
-                needle=b"alpha-change.ml", controls=(h.FULL_REDRAW,))
-        assert reads.count(workspace.FILE_CHANGES_ALPHA_PATH) == 1, reads
-        assert reads.count(workspace.FILE_CHANGES_BETA_PATH) == 1, reads
-        if not failed:
-            assert b"beta-change.ml" in screen, screen
-            # Newest beta row is selected; its context names the real writer.
-            h.send_and_wait(process, fd, output, b"v", b"Context [1-")
-            detail = visible(output)
-            assert b"beta" in detail and b"beta-change.ml" in detail, detail
-            h.send_and_wait(process, fd, output, b"\x1b", b"FILE")
-            # Unselected paths fold at 60 columns. Select alpha to read its
-            # full path in the footer, then inspect the owning writer.
-            h.send_and_wait(process, fd, output, b"j", b"alpha-change.ml")
+            h.send_and_wait(process, fd, output, b"r", b"repository record store unavailable")
+            assert b"beta-change.ml" in visible(output), visible(output)
+            assert reads == [route, route], reads
+        h.send_and_wait(process, fd, output, b"v", b"Context [1-")
+        detail = visible(output)
+        assert b"beta" in detail and b"beta-change.ml" in detail, detail
+        h.send_and_wait(process, fd, output, b"\x1b", b"FILE")
+        h.send_and_wait(process, fd, output, b"j", b"alpha-change.ml")
         h.send_and_wait(process, fd, output, b"v", b"Context [1-")
         detail = visible(output)
         assert b"alpha" in detail and b"alpha-change.ml" in detail, detail

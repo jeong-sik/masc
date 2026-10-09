@@ -5298,11 +5298,7 @@ let browser_lane_url_line ~cols draft =
   let safe = Masc_tui_keeper_chat_projection.terminal_safe_text draft in
   "  URL> " ^ Masc_tui_message_layout.input_viewport ~max_cells:(max 1 (cols - 12)) safe ^ "▏"
 
-type workspace_activity_read = {
-  war_at : float;
-  war_hours : float;
-  war_keepers : (string * (Tui_decode.file_change_snapshot, string) result) list;
-}
+type workspace_activity_read = Tui_decode.repository_activity_snapshot
 
 type runtime_config_reading = {
   rcv_path : string;
@@ -9053,15 +9049,12 @@ let workspace_activity_rows (state : state) =
       match Masc_tui_fetched.value (Masc_tui_fetched.view_for ~equal:String.equal state.workspace_activity ~key:repo_id) with
       | None -> []
       | Some reading ->
-          List.concat_map (fun (_, result) -> match result with
-            | Error _ -> []
-            | Ok (snapshot : Tui_decode.file_change_snapshot) ->
-                List.filter_map (fun (change : Tui_decode.file_change) ->
-                  match change.fc_location with
-                  | Tui_decode.Fc_in_repo location when String.equal location.repo_id repo_id ->
-                      Some (change, location.relative_path)
-                  | Tui_decode.Fc_in_repo _ | Tui_decode.Fc_in_bundle _ | Tui_decode.Fc_at_absolute_path _ -> None)
-                  snapshot.fcs_changes) reading.war_keepers
+          List.filter_map (fun (change : Tui_decode.file_change) ->
+            match change.fc_location with
+            | Tui_decode.Fc_in_repo location when String.equal location.repo_id repo_id ->
+                Some (change, location.relative_path)
+            | Tui_decode.Fc_in_repo _ | Tui_decode.Fc_in_bundle _ | Tui_decode.Fc_at_absolute_path _ -> None)
+            reading.Tui_decode.ras_changes
           |> List.sort (fun ((a : Tui_decode.file_change), _) ((b : Tui_decode.file_change), _) ->
               Float.compare b.fc_at a.fc_at)
 

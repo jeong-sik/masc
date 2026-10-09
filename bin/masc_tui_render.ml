@@ -8103,19 +8103,15 @@ let render_workspace_activity (state : state) repo_id =
       | Some _ -> "j/k:scroll  PgUp/PgDn:page  Home/End:edges  Enter:file  r:refresh  Esc:list")
     ~body:(fun ~budget c ->
       let listing ~budget reading =
-          let failures, omitted = List.fold_left (fun (failures, omitted) (_, result) ->
-              match result with
-              | Error _ -> (failures + 1, omitted)
-              | Ok (snapshot : Tui_decode.file_change_snapshot) ->
-                  (failures, omitted + snapshot.fcs_over_budget + snapshot.fcs_malformed)) (0,0) reading.war_keepers in
-          c.push (Printf.sprintf "  Last %.0fh · %d recorded changes · %d successful · %d Keeper reads failed · %d unparsed calls"
-            reading.war_hours (List.length rows)
-            (List.length (List.filter (fun ((change : Tui_decode.file_change), _) -> change.fc_succeeded) rows)) failures omitted);
+          c.push (Printf.sprintf "  Last %.0fh · %d recorded changes · %d successful · %d incomplete repo calls · %d unlocated fleet calls"
+            reading.Tui_decode.ras_window_hours (List.length rows)
+            (List.length (List.filter (fun ((change : Tui_decode.file_change), _) -> change.fc_succeeded) rows))
+            reading.ras_incomplete reading.ras_unattributed);
           let names = List.map (fun ((change : Tui_decode.file_change), _) -> change.fc_keeper) rows |> List.sort_uniq String.compare in
           c.push ("  Changes by Keeper: " ^ String.concat " · " (List.map (fun name ->
               Printf.sprintf "%s %d" (Terminal_text.single_line name)
                 (List.length (List.filter (fun ((change : Tui_decode.file_change), _) -> change.fc_keeper = name) rows))) names));
-          c.push_styled ~style:(Theme.recede ()) "  Recorded clone writes from loaded Keepers · Enter opens file; H history, m notes in Code";
+          c.push_styled ~style:(Theme.recede ()) "  Recorded clone writes from all Keepers · Enter opens file; H history, m notes in Code";
           let cells = workspace_activity_cells ~cols in
           c.push ("  " ^ Masc_tui_table.header_row (cells ~date:"" ~keeper:"" ~task:"" ~result:"" ~path:""));
           c.push_divider ();

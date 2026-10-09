@@ -3364,7 +3364,7 @@
 (test
  (name test_tui_chat_timeline_assembly)
  (modules test_tui_chat_timeline_assembly)
- (libraries masc_tui_image_preview alcotest masc_tui_keeper_chat_transcript
+ (libraries masc_tui_keeper_chat_log masc_tui_image_preview alcotest masc_tui_keeper_chat_transcript
   masc_tui_message_layout masc_tui_types))
 
 (test
@@ -3426,7 +3426,7 @@
  (modules test_tui_autonomous_journal)
  (libraries alcotest masc masc.masc_types masc_tui_types masc_tui_observer
   masc_tui_keeper_chat_live masc_tui_keeper_chat_log masc_tui_keeper_chat_transcript
-  masc_tui_keeper_chat_history masc_tui_render_chat
+  masc_tui_keeper_chat_history masc_tui_render_chat masc_tui_image_preview masc_tui_message_layout
   masc_tui_frame_presenter masc_tui_ansi masc_tui_render_schedule masc_tui_roster_pane astring yojson))
 
 (test
@@ -3456,6 +3456,8 @@
  (name test_tui_keeper_chat_history)
  (modules test_tui_keeper_chat_history)
  (libraries
+  masc_tui_keeper_chat_log
+  masc.masc_types
   masc_tui_image_preview
   ; The journal lines are the layout's typed values, matched by constructor.
   masc_tui_message_layout
@@ -8727,7 +8729,7 @@
 
 (rule
  (alias runtest-test_tui_stale_chat_progress_pty)
- (deps test_tui_stale_chat_progress_pty.py tui_keyboard_harness.py ../bin/masc_tui.exe)
+ (deps test_tui_stale_chat_progress_pty.py tui_keyboard_harness.py tui_keyboard_observer.py ../bin/masc_tui.exe)
  (action (run python3 %{dep:test_tui_stale_chat_progress_pty.py} %{dep:../bin/masc_tui.exe})))
 
 (alias

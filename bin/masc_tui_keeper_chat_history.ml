@@ -112,6 +112,7 @@ type row =
   ; turn_sequence : int option
   ; turn_id : string option
   ; operation_id : string option
+  ; execution_source : Masc_tui_keeper_chat_log.journal_source option
   ; kind : kind
   ; text : string
   ; attachments : attachment_note list
@@ -395,6 +396,7 @@ type parsed =
       ; turn_sequence : int option
       ; turn_id : string option
       ; operation_id : string option
+      ; execution_source : Masc_tui_keeper_chat_log.journal_source option
       ; call_id : string option
       ; execution_id : string option
       ; tool_name : string
@@ -476,6 +478,21 @@ let operation_id_of_fields fields =
          }) ->
       None
   | Ok None | Error _ -> None
+
+let execution_source_of_fields fields =
+  match operation_id_of_fields fields with
+  | Some operation_id -> Some (Masc_tui_keeper_chat_log.Operation operation_id)
+  | None ->
+      (match Delivery_identity.delivery_provenance_of_fields fields with
+       | Ok None ->
+           let raw = match string_field fields "turn_ref" with
+             | Some _ as reference -> reference
+             | None -> autonomous_turn_id_of_fields fields in
+           Option.bind raw (fun raw ->
+             Option.map (fun reference -> Masc_tui_keeper_chat_log.Autonomous_turn reference)
+               (Ids.Turn_ref.of_string raw))
+       | Ok (Some _) | Error _ -> None)
+;;
 
 let turn_sequence_of_fields fields =
   Option.bind (string_field fields "turn_ref") (fun raw ->
@@ -691,6 +708,7 @@ let memory_committed_row (fields : (string * Yojson.Safe.t) list) =
                   ; turn_sequence = None
                   ; turn_id = None
                   ; operation_id = None
+                  ; execution_source = None
                   ; kind =
                       Memory_activity
                         { summary = Some summary
@@ -728,6 +746,7 @@ let memory_failed_row (fields : (string * Yojson.Safe.t) list) =
         ; turn_sequence = None
         ; turn_id = None
         ; operation_id = None
+        ; execution_source = None
         ; kind =
             Memory_activity
               { summary = Some summary
@@ -760,6 +779,7 @@ let memory_row_of_json = function
                 ; turn_sequence = None
                 ; turn_id = None
                 ; operation_id = None
+                ; execution_source = None
                 ; kind =
                     Memory_activity
                       { summary = Some summary
@@ -1130,7 +1150,7 @@ let reconcile_skill_projection_with_trace summary projection =
 (* One row for the turn's skill work, as the trace's tool steps are one
    block: the pane counts the invocations on the row and unfolds them under
    the tool toggle. *)
-let rows_of_skill_projection ~source_id ~turn_sequence ~turn_id ~operation_id at
+let rows_of_skill_projection ~source_id ~turn_sequence ~turn_id ~operation_id ~execution_source at
     projection =
   match projection.activities with
   | [] -> []
@@ -1141,6 +1161,7 @@ let rows_of_skill_projection ~source_id ~turn_sequence ~turn_id ~operation_id at
           ; turn_sequence
           ; turn_id
           ; operation_id
+          ; execution_source
           ; kind = Skill_activity activities
           ; text = ""
           ; attachments = []
@@ -1154,7 +1175,7 @@ let rows_of_skill_projection ~source_id ~turn_sequence ~turn_id ~operation_id at
    rides the reasoning block and an omitted count the tool block -- omitted
    steps are steps the turn took, so a block that has nothing but that count
    is still a block of steps. *)
-let rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id at summary =
+let rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id ~execution_source at summary =
   let identity projection =
     Option.map (fun id -> id ^ ":" ^ projection) source_id
   in
@@ -1193,6 +1214,7 @@ let rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id at summary =
           ; turn_sequence
           ; turn_id
           ; operation_id
+          ; execution_source
           ; kind = Tool_calls tool_block
           ; text = ""
           ; attachments = []
@@ -1205,6 +1227,7 @@ let rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id at summary =
           ; turn_sequence
           ; turn_id
           ; operation_id
+          ; execution_source
           ; kind = Reasoning (reasoning @ omitted_note)
           ; text = ""
           ; attachments = []
@@ -1217,6 +1240,7 @@ let rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id at summary =
           ; turn_sequence
           ; turn_id
           ; operation_id
+          ; execution_source
           ; kind = Tool_calls tool_block
           ; text = ""
           ; attachments = []
@@ -1229,6 +1253,7 @@ let rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id at summary =
           ; turn_sequence
           ; turn_id
           ; operation_id
+          ; execution_source
           ; kind = Reasoning reasoning
           ; text = ""
           ; attachments = []
@@ -1239,6 +1264,7 @@ let rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id at summary =
           ; turn_sequence
           ; turn_id
           ; operation_id
+          ; execution_source
           ; kind = Tool_calls tool_block
           ; text = ""
           ; attachments = []
@@ -1262,6 +1288,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
       let content = Option.value ~default:"" (string_field fields "content") in
       let turn_id = turn_id_of_fields fields in
       let operation_id = operation_id_of_fields fields in
+      let execution_source = execution_source_of_fields fields in
       let turn_sequence = turn_sequence_of_fields fields in
       let source_id = string_field fields "id" in
       match string_field fields "role" with
@@ -1305,6 +1332,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
                 ; turn_sequence
                 ; turn_id
                 ; operation_id
+                ; execution_source
                 ; kind = Addressed_to_keeper { speaker; surface }
                 ; text = content
                 ; attachments = attachment_notes_of fields
@@ -1341,6 +1369,10 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
                       (match operation_id with
                        | Some _ -> operation_id
                        | None -> origin_request_id)
+                  ; execution_source =
+                      (match execution_source with
+                       | Some _ -> execution_source
+                       | None -> Option.map (fun id -> Masc_tui_keeper_chat_log.Operation id) origin_request_id)
                   ; kind = Delivery_failed { origin_request_id; recovered_at = None }
                   ; text = content
                   ; attachments = []
@@ -1377,6 +1409,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
                        ; turn_sequence
                        ; turn_id
                        ; operation_id
+                       ; execution_source
                        ; kind = Fusion_conclusion fusion
                        ; text = ""
                        ; attachments = []
@@ -1395,12 +1428,12 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
                     else summary
                   in
                   ( rows_of_skill_projection ~source_id ~turn_sequence ~turn_id
-                      ~operation_id at skill_projection
-                  , rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id at
+                      ~operation_id ~execution_source at skill_projection
+                  , rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id ~execution_source at
                       summary )
                 else
                   ( rows_of_skill_projection ~source_id ~turn_sequence ~turn_id
-                      ~operation_id at skill_projection
+                      ~operation_id ~execution_source at skill_projection
                   , [] )
               in
               let said =
@@ -1435,6 +1468,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
                       ; turn_sequence
                       ; turn_id
                       ; operation_id
+                      ; execution_source
                       ; kind = if autonomous then Autonomous_reply else Said_by_keeper
                       ; text = content
                       ; attachments = []
@@ -1503,6 +1537,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
                  ; turn_sequence
                  ; turn_id
                  ; operation_id
+                 ; execution_source
                  ; kind
                  ; text = content
                  ; attachments = []
@@ -1521,6 +1556,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
                   ; turn_sequence
                   ; turn_id
                   ; operation_id
+                  ; execution_source
                   ; call_id = string_field fields "tool_call_id"
                   ; execution_id = string_field fields "execution_id"
                   ; tool_name
@@ -1539,11 +1575,11 @@ let fold_tool_blocks parsed_rows =
   let flush pending acc =
     match List.rev pending with
     | [] -> acc
-    | (at, _, turn_sequence, turn_id, operation_id, _, _, _, _) :: _ as calls ->
+    | (at, _, turn_sequence, turn_id, operation_id, execution_source, _, _, _, _) :: _ as calls ->
         let structural_id =
           let ids =
             List.filter_map
-              (fun (_, structural_id, _, _, _, _, _, _, _) -> structural_id)
+              (fun (_, structural_id, _, _, _, _, _, _, _, _) -> structural_id)
               calls
           in
           match ids with
@@ -1552,7 +1588,7 @@ let fold_tool_blocks parsed_rows =
         in
         let activities =
           List.map
-            (fun (_, _, _, _, _, call_id, execution_id, tool_name, args) ->
+            (fun (_, _, _, _, _, _, call_id, execution_id, tool_name, args) ->
               let outcome =
                 match execution_id with
                 | Some _ -> Transcript.Returned
@@ -1567,6 +1603,7 @@ let fold_tool_blocks parsed_rows =
         ; turn_sequence
         ; turn_id
         ; operation_id
+        ; execution_source
         ; kind = Tool_calls (Transcript.tool_block activities)
         ; text = ""
         ; attachments = []
@@ -1581,6 +1618,7 @@ let fold_tool_blocks parsed_rows =
         ; turn_sequence
         ; turn_id
         ; operation_id
+        ; execution_source
         ; call_id
         ; execution_id
         ; tool_name
@@ -1593,13 +1631,15 @@ let fold_tool_blocks parsed_rows =
           , turn_sequence
           , turn_id
           , operation_id
+          , execution_source
           , call_id
           , execution_id
           , tool_name
           , args )
         in
         (match pending with
-         | (_, _, _, pending_turn, _, _, _, _, _) :: _ when pending_turn <> turn_id ->
+         | (_, _, _, pending_turn, _, pending_source, _, _, _, _) :: _
+           when pending_turn <> turn_id || pending_source <> execution_source ->
              loop [ next ] (flush pending acc) rest
          | _ -> loop (next :: pending) acc rest)
     | Utterance row :: rest -> loop [] (row :: flush pending acc) rest

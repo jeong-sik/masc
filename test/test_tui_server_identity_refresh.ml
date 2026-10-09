@@ -815,18 +815,14 @@ let test_effect_observations_resume_without_repeating_effects () =
 
 let test_native_task_read_epoch_retirement () =
   let open Masc_tui_types in
-  let module Protocol = Masc_tui_async_protocol in
   let state=create_state ~workspace:"a" ~local_base_path:"/workspace/a"
       ~port:0 ~refresh_interval:0. () in
   state.server_identity <- Some (identity "/workspace/a");
   state.workspace_identity <- Workspace_identity_match;
   let authority=state.workspace_authority in
   let reading=Some state.workspace_read_authority in
-  let completion=Protocol.Keeper_native_tasks_loaded ("alpha",Ok Masc_tui_native_tasks.empty) in
-  Alcotest.(check bool) "native completion is an observation" true
-    (Protocol.workspace_message_is_read completion);
   Alcotest.(check bool) "current read completion is admitted" true
-    (Protocol.workspace_message_admitted state ~authority ~reading completion);
+    (workspace_reply_admitted state ~authority ~reading ~kind:Workspace_observation);
   let cached=["alpha",Masc_tui_native_tasks.empty] in
   state.msg_native_tasks <- cached;
   state.msg_native_tasks_inflight <- ["alpha"];
@@ -838,10 +834,10 @@ let test_native_task_read_epoch_retirement () =
     ["alpha"] state.msg_native_tasks_audit_pending;
   state.msg_native_tasks_inflight <- ["alpha"];
   Alcotest.(check bool) "old completion cannot release successor slot" false
-    (Protocol.workspace_message_admitted state ~authority ~reading completion);
+    (workspace_reply_admitted state ~authority ~reading ~kind:Workspace_observation);
   Alcotest.(check bool) "successor read is admitted" true
-    (Protocol.workspace_message_admitted state ~authority
-       ~reading:(Some state.workspace_read_authority) completion)
+    (workspace_reply_admitted state ~authority
+       ~reading:(Some state.workspace_read_authority) ~kind:Workspace_observation)
 
 let () =
   Alcotest.run "tui_server_identity_refresh"

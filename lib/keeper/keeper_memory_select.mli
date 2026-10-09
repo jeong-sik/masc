@@ -10,3 +10,8 @@ val handle :
     timeout. Without one, an endpoint that accepts the request and never
     answers holds the call with no time limit. The selection contract itself
     owns no time. *)
+
+val answer_of_output : string -> Yojson.Safe.t option
+(** For a completed selection receipt, preserve every answer field except the
+    per-call [selection_id]. Invalid/unrecognized output falls back to whole
+    output identity. This never changes the content delivered to the Keeper. *)

@@ -7,6 +7,7 @@ let reader (handler : Keeper_tool_descriptor.runtime_handler) =
   match handler with
   | Tool_execute -> Reads_answer Keeper_tool_execute_runtime.answer_of_output
   | Tool_memory_write -> Reads_answer Keeper_tool_memory_runtime.memory_write_answer_of_output
+  | Tool_memory_select -> Reads_answer Keeper_memory_select.answer_of_output
   | Tool_lane_addon _
   | Tool_search_files
   | Tool_read_file
@@ -22,7 +23,6 @@ let reader (handler : Keeper_tool_descriptor.runtime_handler) =
   | Tool_skill_publish
   | Tool_workspace_memory_read
   | Tool_memory_search
-  | Tool_memory_select
   | Tool_memory_retract
   | Tool_constitution_write
   | Tool_constitution_read

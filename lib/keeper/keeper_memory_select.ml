@@ -155,3 +155,29 @@ let handle ?turn_ref ~clock ~config ~(meta : Keeper_meta_contract.keeper_meta) ~
           ~keepers_dir ~keeper_id:meta.name events) |> List.iter (fun error ->
             Log.Keeper.warn "memory select retrieval event unavailable: %s" (Keeper_memory_os_events.append_error_to_string error));
         Keeper_tool_execution.success_data output
+
+let answer_of_output text =
+  let rec unique_objects = function
+    | `Assoc fields ->
+      List.length fields=List.length (List.sort_uniq String.compare (List.map fst fields))
+      && List.for_all (fun (_,value) -> unique_objects value) fields
+    | `List rows -> List.for_all unique_objects rows
+    | _ -> true in
+  match Yojson.Safe.from_string text with
+  | `Assoc fields ->
+    let get key=List.assoc_opt key fields in
+    let unique=unique_objects (`Assoc fields) in
+    let text_field key=match get key with Some (`String _) -> true | _ -> false in
+    let rows_field key=match get key with Some (`List rows) ->
+      List.for_all (function `Assoc _ -> true | _ -> false) rows | _ -> false in
+    let count_field key=match get key with Some (`Int value) -> value>=0 | _ -> false in
+    let receipt=match get "selection_id" with Some (`String value) -> String.trim value<>"" | _ -> false in
+    let incomplete=match get "incomplete" with Some (`Bool _) -> true | _ -> false in
+    let revision=match get "snapshot_revision" with Some `Null | Some (`Int _) -> true | _ -> false in
+    if unique && get "status"=Some (`String "completed") && receipt && incomplete && revision
+       && List.for_all text_field ["purpose";"guidance"]
+       && List.for_all rows_field ["selected";"deferred";"unavailable"]
+       && List.for_all count_field ["assessed_count";"selected_count";"not_needed_count";"truncated_count"]
+    then Some (`Assoc (List.filter (fun (key,_) -> key<>"selection_id") fields)) else None
+  | _ -> None
+  | exception Yojson.Json_error _ -> None

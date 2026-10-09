@@ -254,6 +254,62 @@ let test_memory_identity_survives_changing_inputs () =
        (call ~tool_name:"keeper_memory_retract" ~memory_id:"sha256:aa"
           ~content:"10:02Z" ~revision:2).P.input_fingerprint)
 
+let selection_fact claim =
+  Masc.Keeper_memory_os_types.observed ~claim ~category:Masc.Keeper_memory_os_types.Fact
+    ~now:100. ~origin:{kind=Masc.Keeper_memory_os_types.Authored;trace_id="selection-fixture"}
+let selected_memory ~claim ~use =
+  let fact=selection_fact claim in
+  let id=Masc.Keeper_memory_os_types.memory_id fact in
+  `Assoc ["id",`String id;"use",`String use;"current",`Assoc
+    ["store",`String "current_memory_snapshot";"memory_id",`String id;
+     "current_fact",Masc.Keeper_memory_os_types.fact_to_json fact;
+     "direct_admission_witness_count",`Int 1;"successor_witness_count",`Int 0]]
+let selection_receipt receipt =
+  `Assoc ["status",`String "completed";"purpose",`String "E17 production approval";
+    "selection_id",`String receipt;"selected",`List [selected_memory ~claim:"Two approvals required" ~use:"current_decision"];
+    "deferred",`List [];"unavailable",`List [];"assessed_count",`Int 1;"selected_count",`Int 1;
+    "not_needed_count",`Int 0;"truncated_count",`Int 0;"incomplete",`Bool false;
+    "snapshot_revision",`Int 7;"guidance",`String "Comparison is not current-event authority."]
+let selection_fingerprint value = output_fingerprint ~tool_name:"keeper_memory_select" (Yojson.Safe.to_string value)
+let replace_field key value = function
+  | `Assoc fields -> `Assoc (List.map (fun (name,old) -> name,if name=key then value else old) fields)
+  | _ -> fail "fixture object required"
+let test_selection_receipts_do_not_create_false_progress () =
+  let first=selection_receipt "selection-first" and second=selection_receipt "selection-second" in
+  check string "different evaluation receipts are the same useful answer"
+    (selection_fingerprint first) (selection_fingerprint second);
+  let call value : Masc.Keeper_agent_result.tool_call_detail =
+    let io=P.digest_tool_io ~tool_name:"keeper_memory_select" ~input:(`Assoc ["purpose",`String "E17 production approval"])
+      ~output_text:(Yojson.Safe.to_string value) in
+    {tool_name="keeper_memory_select";provider="fixture";execution_outcome=Tool_result.Ok;
+     typed_outcome=None;latency_ms=1.;task_id=None;route_evidence=None;
+     input_fingerprint=Option.map (fun (io : P.io_fingerprints) -> io.input_fingerprint) io;
+     output_fingerprint=Option.map (fun (io : P.io_fingerprints) -> io.output_fingerprint) io} in
+  check (option (pair string int)) "receipt-only retries reach the existing repeated-call yield"
+    (Some ("keeper_memory_select",3))
+    (Masc.Keeper_agent_run.For_testing.repeated_exact_tool_call ~threshold:3
+       [call (selection_receipt "selection-third");call second;call first]);
+  List.iter (fun (name,changed) -> check bool (name ^ " still changes progress identity") false
+    (selection_fingerprint first=selection_fingerprint changed))
+    ["claim",replace_field "selected" (`List [selected_memory ~claim:"Owner approval required" ~use:"current_decision"]) second;
+     "role",replace_field "selected" (`List [selected_memory ~claim:"Two approvals required" ~use:"comparison"]) second;
+     "unresolved",replace_field "deferred" (`List [`Assoc
+       ["id",`String (Masc.Keeper_memory_os_types.memory_id (selection_fact "Other evidence"));
+        "kind",`String "evidence_changed";"detail",`String "Current evidence changed during selection."]]) second;
+     "snapshot",replace_field "snapshot_revision" (`Int 8) second;
+     "count",replace_field "truncated_count" (`Int 1) second;
+     "future answer field",(match second with `Assoc fields -> `Assoc (("future_meaning",`String "changed")::fields) | _ -> fail "fixture")]
+let test_selection_malformed_output_keeps_whole_identity () =
+  let answer text=Masc.Keeper_tool_answer.answer ~tool_name:"keeper_memory_select" ~output_text:text in
+  List.iter (fun text -> check bool "malformed or noncompleted output is not projected" true (answer text=None))
+    ["not json"; {|{"status":"completed","selection_id":"a"}|};
+     Yojson.Safe.to_string (replace_field "status" (`String "unknown") (selection_receipt "a"));
+     Yojson.Safe.to_string (match selection_receipt "a" with
+       | `Assoc fields -> `Assoc (("selection_id",`String "duplicate")::fields) | _ -> fail "fixture")];
+  let unavailable reason=`Assoc ["status",`String "unavailable";"reason",`String reason;"selected",`List [];"incomplete",`Bool true] in
+  check bool "policy failures remain distinct" false
+    (selection_fingerprint (unavailable "lane_disabled")=selection_fingerprint (unavailable "keeper_excluded"))
+
 let () =
   run "keeper_tool_progress_identity"
     [ ( "identity"
@@ -267,6 +323,8 @@ let () =
             test_a_memory_rewrite_is_the_same_answer
         ; test_case "a source-bound rewrite is named by its hash" `Quick
             test_a_source_bound_rewrite_is_named_by_its_hash
+        ; test_case "selection receipt identity is not retrieval progress" `Quick test_selection_receipts_do_not_create_false_progress
+        ; test_case "malformed selection preserves fallback identity" `Quick test_selection_malformed_output_keeps_whole_identity
         ; test_case "a third memory rewrite stops the turn" `Quick
             test_a_third_memory_rewrite_stops_the_turn
         ; test_case "memory identity survives changing inputs" `Quick

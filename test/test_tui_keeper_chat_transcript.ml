@@ -3195,6 +3195,70 @@ let test_empty_new_response_does_not_replace_prior_message () =
     ((List.hd (List.rev items)).origin = Transcript.Reply_of_segment 0)
 ;;
 
+let test_skill_evidence_retains_invocation_runtime_identity () =
+  let evidence ?runtime_id action = Transcript.make_skill_activity
+      ~skill_tool_use_id:"same-provider-id" ~turn_ref:"same-turn#1" ?runtime_id
+      ~skill_name:"exact-skill" ~state:Transcript.Skill_used ~actions:[action] () in
+  let skills t = Transcript.drawn t |> List.concat_map (fun (item : Transcript.drawn_item) ->
+    match item.drawn with Transcript.Drawn_skill skills -> skills | _ -> []) in
+  let t = fresh () in
+  feed t [Live.Run_started];
+  List.iter (Transcript.note_skill_activity t)
+    [evidence ~runtime_id:"runtime-a" "ACTION_A";
+     evidence ~runtime_id:"runtime-b" "ACTION_B";
+     evidence ~runtime_id:"runtime-a" "ACTION_A_UPDATED"];
+  check (list (option string)) "distinct known runtimes survive the same turn and provider id"
+    [Some "runtime-a";Some "runtime-b"]
+    (List.map (fun (skill : Transcript.skill_activity) -> skill.runtime_id) (skills t));
+  check (list (list string)) "same-runtime update cannot replace another runtime's facts"
+    [["ACTION_A_UPDATED"];["ACTION_B"]]
+    (List.map (fun (skill : Transcript.skill_activity) -> skill.actions) (skills t));
+  let a = evidence ~runtime_id:"runtime-a" "ACTION_A"
+  and b = evidence ~runtime_id:"runtime-b" "ACTION_B" in
+  List.iter (fun records ->
+    let streamed = fresh () in
+    feed streamed [Live.Run_started;tool_started "same-provider-id" "keeper_skill";
+      tool_ended "same-provider-id";tool_result "same-provider-id" "skill-exec";
+      Live.Reply_details {reply="";turn_outcome=Continuation_checkpoint;turn_ref="same-turn#1"};
+      Live.Run_finished];
+    List.iter (Transcript.note_skill_activity streamed) records;
+    check (list (option string)) "ambiguous stream preserves all runtime authorities in either receipt order"
+      (None :: List.map (fun (skill : Transcript.skill_activity) -> skill.runtime_id) records)
+      (List.map (fun (skill : Transcript.skill_activity) -> skill.runtime_id) (skills streamed)))
+    [[a;b];[b;a]];
+  List.iter (fun records ->
+    let failed = fresh () in
+    feed failed [Live.Run_started;tool_started "same-provider-id" "keeper_skill";
+      tool_ended "same-provider-id";tool_result "same-provider-id" "failed-skill-exec";
+      Live.Reply_details {reply="";turn_outcome=Continuation_checkpoint;turn_ref="same-turn#1"};
+      Live.Run_finished];
+    ignore (Transcript.note_tool_outcome failed ~execution_id:"failed-skill-exec"
+      ~outcome:Transcript.Failed ~duration:None);
+    List.iter (Transcript.note_skill_activity failed) records;
+    let observed = skills failed in
+    check int "unique failure consumes its receipt; ambiguous failure preserves independent receipts"
+      (if List.length records=1 then 1 else 3) (List.length observed);
+    check bool "receipt completion cannot replace observed Skill failure" true
+      ((List.hd observed).state=Transcript.Skill_failed);
+    check (option string) "only unique runtime authority completes failure provenance"
+      (if List.length records=1 then Some "runtime-a" else None)
+      (List.hd observed).runtime_id)
+    [[evidence ~runtime_id:"runtime-a" "ACTION_A"];
+     [evidence ~runtime_id:"runtime-a" "ACTION_A";
+      evidence ~runtime_id:"runtime-b" "ACTION_B"]];
+  Transcript.note_skill_activity t (evidence "UNATTRIBUTED");
+  check int "unknown runtime cannot choose between two known invocation records" 3
+    (List.length (skills t));
+  List.iter (fun records ->
+    let t = fresh () in
+    List.iter (Transcript.note_skill_activity t) records;
+    check (list (option string)) "one unknown runtime can be completed without losing known identity"
+      [Some "runtime-a"]
+      (List.map (fun (skill : Transcript.skill_activity) -> skill.runtime_id) (skills t)))
+    [[evidence "UNKNOWN";evidence ~runtime_id:"runtime-a" "KNOWN"];
+     [evidence ~runtime_id:"runtime-a" "KNOWN";evidence "UNKNOWN"]]
+;;
+
 let test_scoped_details_retire_prior_model_activity () =
   List.iter (fun activity ->
     let t = fresh () in
@@ -3278,7 +3342,8 @@ let test_late_scoped_start_fills_only_unobserved_usage () =
 
 let () =
   run "tui_keeper_chat_transcript"
-    [ ( "response boundaries", [test_case "scoped details retire prior model activity" `Quick test_scoped_details_retire_prior_model_activity;
+    [ ( "response boundaries", [test_case "Skill evidence retains runtime identity" `Quick test_skill_evidence_retains_invocation_runtime_identity;
+      test_case "scoped details retire prior model activity" `Quick test_scoped_details_retire_prior_model_activity;
       test_case "scoped details retire prior response usage" `Quick test_scoped_details_retire_prior_response_usage;
       test_case "late scoped start fills only unobserved usage" `Quick test_late_scoped_start_fills_only_unobserved_usage;
       test_case "boundaries and stable origins" `Quick test_response_boundaries_preserve_origins; test_case "interleaved final authority" `Quick test_interleaved_final_keeps_observed_times_and_bytes; test_case "usage reset boundaries" `Quick test_usage_resets_only_at_response_boundaries; test_case "response end retains turn and tool lifecycle" `Quick test_response_stop_preserves_pending_work; test_case "new response without text" `Quick test_empty_new_response_does_not_replace_prior_message])

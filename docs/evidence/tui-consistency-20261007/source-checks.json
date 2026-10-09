@@ -1,8 +1,8 @@
 {
-  "scope": "Current source hashes attest only parser checks rerun after stack integration. Prior native/PTY evidence is historical and not rerun.",
+  "scope": "Exact current source parser checks only; native regressions, prior geometry and PTY are not rerun.",
   "checks": {
     "bin/masc_tui_footer.ml": {
-      "sha256": "a1504602439c3f99c99558f85b82116e54917f399c018b16cfe24b68fce05b9d",
+      "sha256": "1326d85817a34c481f2c57405ecce4ae65bfc5a26aa425dd8b3dfdb6f04468f0",
       "check": "ocaml parsing",
       "result": "PASS"
     },
@@ -27,7 +27,7 @@
       "result": "PASS"
     },
     "test/test_tui_footer_status_items.ml": {
-      "sha256": "382a14ba857c1ed3a858a4e1ac6817b6b0c295ea48bedd72dca2ec8d771d5d83",
+      "sha256": "10fdb53a875ace5288803cd52d194573d2f0ba08c6d0b42773931508102d7f5c",
       "check": "ocaml parsing",
       "result": "PASS"
     },

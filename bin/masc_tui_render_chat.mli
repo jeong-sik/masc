@@ -50,6 +50,12 @@ val search_anchor_of_tag : tagged_row -> Masc_tui_types.chat_search_anchor optio
 (** The durable search identity of a row; [None] for a block row that has no
     drawn origin. *)
 
+val projection_index_of_anchor :
+  chat_projection -> Masc_tui_types.chat_search_anchor -> int option
+(** The first entry the anchor matches, by the same identity, user turn slot,
+    reply and journal-origin keys as typed matching; [None] when no entry
+    carries the anchor. *)
+
 type scroll_anchor_index
 (** Every entry's scroll anchor by position, built once per projection. *)
 

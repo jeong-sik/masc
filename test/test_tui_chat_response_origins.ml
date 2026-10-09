@@ -29,7 +29,7 @@ let test_response_order_in_every_reasoning_view () =
         Live.Text {text="RESPONSE_PREFIX"; stream_scope=None};
         Live.Thinking "RESPONSE_THOUGHT";
         Live.Text {text="RESPONSE_SUFFIX"; stream_scope=None};
-        Live.Reply_details {reply="RESPONSE_SUFFIX";
+        Live.Reply_details {terminal_stream_scope = None; reply="RESPONSE_SUFFIX";
           turn_outcome=Masc.Keeper_turn_outcome.Visible_reply;turn_ref="trace#1"};
         Live.Run_finished] in
       List.iteri (fun seq delta -> T.turn_log_add ~now:(1. +. float_of_int seq)

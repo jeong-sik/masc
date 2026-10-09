@@ -46,7 +46,8 @@ let replay_case envelope case =
   let query=List.find (fun query -> member "query_id" query=member "purpose_id" case) (rows "queries" original) in
   let baseline=List.hd (rows "requests" query) in
   let experimental=jstring "arm" case="experimental" in
-  let request=if experimental then List.hd (rows "experimental_requests" query) else baseline in
+  let adopted=List.hd (rows "experimental_requests" query) in
+  let request=if experimental then adopted else baseline in
   let request_body=jstring "request_body" request in
   let response=jstring "response_raw" case in
   check string "case points to its exact frozen request" (jstring "request_sha256" case) (sha request_body);
@@ -103,7 +104,7 @@ let replay_case envelope case =
     check bool "production results agree with frozen audited raw decoding" true
       (Yojson.Safe.sort (`Assoc states)=Yojson.Safe.sort (`Assoc expected));
     `Assoc states in
-  let measurement=if experimental then (
+  let measurement=if not experimental then (
     let state=member "state" baseline in
     let input=rows "candidates" state |> List.map (fun row ->
       let candidate=member "candidate" row in
@@ -111,8 +112,8 @@ let replay_case envelope case =
     let observed=ref [] in
     let evaluate ~state ~questions:generated =
       observed := (state,generated) :: !observed;
-      (* This is an explicit experimental adapter, not the production tool.
-         Its captured questions alone replace the baseline question contract. *)
+      (* Historical baseline adapter only. Production now generates the frozen
+         adopted questions; this arm explicitly replays the old question contract. *)
       let destinations=({Client.endpoint=server.base_url;model="jev-latest";
         api_key="synthetic-local-key"},[]) in
       match Client.evaluate ~clock ~destinations ~state
@@ -123,7 +124,7 @@ let replay_case envelope case =
     (match !observed with
      | [(actual_state,actual_questions)] ->
        check bool "core sees exact frozen source state" true (actual_state=state);
-       check bool "core first generates unchanged production questions" true (actual_questions=questions baseline)
+       check bool "core first generates unchanged production questions" true (actual_questions=questions adopted)
      | _ -> fail "core replay must evaluate exactly once");
     let selected,deferred,omitted=List.fold_left (fun (selected,deferred,omitted) -> function
       | Selection.Selected {candidate;use;_} ->
@@ -133,11 +134,11 @@ let replay_case envelope case =
       | Deferred {candidate;reason} ->
         let label=match reason with Applicability_unresolved -> "inspect_source" | _ -> "invalid" in
         selected,(candidate.id,label)::deferred,omitted) ([],[],[]) outcomes in
-    `Assoc ["boundary",`String "experimental_core_only";
+    `Assoc ["boundary",`String "historical_baseline_core_only";
       "states",state_table selected deferred omitted;
       "incomplete",`Bool (deferred<>[]);
       "tool_output_bytes",`Null;
-      "limitation",`String "No experimental tool publication, freshness revalidation or matched tool-byte comparison."])
+      "limitation",`String "No current baseline tool publication or fresh baseline byte measurement; historical actual-tool bytes require the prior CI artifact."])
   else (
     let execution=match Dispatch.handle context ~descriptor ~args:(member "tool_args" query) with
       | Some result -> result | None -> fail "actual descriptor dispatch unavailable" in
@@ -154,7 +155,7 @@ let replay_case envelope case =
       (member "not_needed_count" output |> Json.to_int);
     check bool "invalid or inspect replies remain incomplete" (deferred<>[])
       (member "incomplete" output |> Json.to_bool);
-    `Assoc ["boundary",`String "baseline_actual_tool";
+    `Assoc ["boundary",`String "adopted_actual_tool";
       "states",state_table selected deferred omitted;
       "tool_output_bytes",`Int (String.length execution.raw_output);"output",output]) in
   check (list string) "exact frozen wire, once, no retry" [request_body] (List.rev !bodies);
@@ -186,4 +187,4 @@ let replay () =
      "rubric_sha256",member "rubric_sha256" envelope;"results",`List results]))
 
 let () = run "event genealogy actual response replay"
-  ["recorded responses",[test_case "baseline tool and experimental core boundaries" `Quick replay]]
+  ["recorded responses",[test_case "adopted tool and historical baseline core boundaries" `Quick replay]]

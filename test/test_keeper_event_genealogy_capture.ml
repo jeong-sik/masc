@@ -24,7 +24,7 @@ let replace_once ~before ~after text =
   | Some i ->
     check bool "declared span occurs exactly once" true (find (i+n)=None);
     String.sub text 0 i ^ after ^ String.sub text (i+n) (String.length text-i-n)
-let experimental_request scenario request =
+let historical_baseline_request scenario request =
   let body=Yojson.Safe.from_string (jstring "request_body" request) in
   let spans=rows "experimental_spans" scenario in
   check int "only two declared prompt spans" 2 (List.length spans);
@@ -32,11 +32,11 @@ let experimental_request scenario request =
   let questions=member "questions" body |> Json.to_assoc |> List.map (fun (id,question) ->
     let criteria=member "criteria" question in
     let current=jstring "comparison" criteria in
-    check string "comparison description matches frozen baseline" (jstring "before" description) current;
+    check string "comparison description matches adopted production" (jstring "after" description) current;
     let question=replace_field "criteria"
-      (replace_field "comparison" (member "after" description) criteria) question in
+      (replace_field "comparison" (member "before" description) criteria) question in
     id,replace_field "instructions" (`String (replace_once
-      ~before:(jstring "before" instruction) ~after:(jstring "after" instruction)
+      ~before:(jstring "after" instruction) ~after:(jstring "before" instruction)
       (jstring "instructions" question))) question) |> fun fields -> `Assoc fields in
   let body=replace_field "questions" questions body in
   let raw=Yojson.Safe.to_string body in
@@ -213,13 +213,13 @@ let capture () =
     check int "one production full-detail request per purpose" 1 (List.length requests);
     List.iter (fun (name,path,bytes) -> check (option string) (name ^ " unchanged by unavailable tool capture")
       bytes (Fs_compat.load_file_opt path)) stores;
-    let experimental=List.map (experimental_request original) requests in
-    `Assoc ["experimental_requests",`List experimental;"query_id",member "query_id" query;"query",member "query" query;"tool_args",args;
+    let historical=List.map (historical_baseline_request original) requests in
+    `Assoc ["historical_baseline_requests",`List historical;"query_id",member "query_id" query;"query",member "query" query;"tool_args",args;
       "matched_candidate_count",member "assessed_count" result;
-      "requests",`List requests;"capture_tool_result",result]) source_queries in
+      "current_adopted_requests",`List requests;"capture_tool_result",result]) source_queries in
   check int "all purposes reached actual local HTTP" (List.length exports) (Fixture.post_count server);
   Printf.printf "MEMORY_EVENT_GENEALOGY_EXPORT %s\n%!" (Yojson.Safe.to_string (`Assoc
-    ["measurement",`String "production_event_genealogy_descriptor_dispatch_capture";
+    ["measurement",`String "production_adopted_genealogy_capture_with_historical_baseline_derivative";
      "semantic_judgment_performed",`Bool false;"network_scope",`String "local_http_503_capture_only";
      "captured_at",`Float (Time_compat.now ());"keeper_id",`String keeper_id;"trace_id",`String trace_id;
      "absolute_turn",member "absolute_turn" original;"keeper_instructions",`String meta.instructions;

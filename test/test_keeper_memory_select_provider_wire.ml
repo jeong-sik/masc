@@ -32,21 +32,31 @@ let restore ~keepers_dir ~keeper_id bundle =
   decoded
 
 let replay ~provider_wire () =
-  let fixture=Masc_test_deps.source_path "test/fixtures/memory_select_tool_replay/actual.json" in
+  let fixture=Masc_test_deps.source_path "test/fixtures/event_genealogy_replay/actual.json" in
   let fixture_bytes=Fs_compat.load_file fixture in
   let envelope=Yojson.Safe.from_string fixture_bytes in
   let original=member "capture" envelope in
-  let answers=Hashtbl.create 8 in
+  let source_queries=rows "queries" original |> List.map (function
+    | `Assoc fields -> `Assoc (("requests",List.assoc "experimental_requests" fields)::List.remove_assoc "requests" fields)
+    | _ -> fail "captured query object required") in
+  let recorded=List.filter (fun row -> member "arm" row=`String "experimental"
+    && member "repetition" row=`Int 1) (rows "cases" envelope) in
+  check int "exactly eleven adopted first-repetition responses" 11 (List.length recorded);
+  check (list string) "responses cover every captured purpose once"
+    (List.map (jstring "query_id") source_queries |> List.sort String.compare)
+    (List.map (jstring "purpose_id") recorded |> List.sort String.compare);
+  let answers=Hashtbl.create 11 in
   List.iter (fun row ->
-    let body=jstring "request_body" row and response=jstring "response_raw" row in
+    let query=List.find (fun query -> member "query_id" query=member "purpose_id" row) source_queries in
+    let request=match rows "requests" query with [request] -> request | _ -> fail "one adopted request required" in
+    let body=jstring "request_body" request and response=jstring "response_raw" row in
     check string "recorded actual request digest" (jstring "request_sha256" row) (sha body);
     check string "recorded actual response digest" (jstring "response_sha256" row) (sha response);
     check bool "actual response request identity is unique" false (Hashtbl.mem answers (sha body));
-    Hashtbl.add answers (sha body) (body,member "status" row |> Json.to_int,response)) (rows "model_responses" envelope);
-  check int "seven actual response identities are recorded" 7 (Hashtbl.length answers);
-  let source_queries=rows "queries" original in
-  check int "frozen experiment contains seven purposes" 7 (List.length source_queries);
-  check int "frozen purposes have seven distinct query identities" 7
+    Hashtbl.add answers (sha body) (body,member "status" row |> Json.to_int,response)) recorded;
+  check int "eleven actual response identities are recorded" 11 (Hashtbl.length answers);
+  check int "frozen experiment contains eleven purposes" 11 (List.length source_queries);
+  check int "frozen purposes have eleven distinct query identities" 11
     (List.length (List.sort_uniq String.compare (List.map (jstring "query_id") source_queries)));
   let bundle=member "state_bundle" original in
   check string "source bundle hash" (jstring "state_bundle_sha256" original) (sha (Yojson.Safe.to_string bundle));
@@ -191,9 +201,10 @@ let replay ~provider_wire () =
       (rows "selected" output);
     [`Assoc ["query_id",member "query_id" query;"provider_followup_request",second;"response",output]]) in
   Printf.printf "MEMORY_SELECT_TOOL_REPLAY %s\n%!" (Yojson.Safe.to_string (`Assoc
-    ["provider_wire",`Bool provider_wire;"network_scope",`String "local_recorded_http_only";
+    ["boundary",`String "adopted_genealogy_actual_tool_and_provider_wire";
+     "response_repetition",`Int 1;"provider_wire",`Bool provider_wire;"network_scope",`String "local_recorded_http_only";
      "results",`List measurements]))
 let () = run "memory selection tool and provider wire replay"
   ["actual recorded responses",[
-    test_case "seven captured purposes traverse real descriptor dispatch" `Quick (replay ~provider_wire:false);
+    test_case "eleven adopted purposes traverse real descriptor dispatch" `Quick (replay ~provider_wire:false);
     test_case "real Keeper bundle preserves compact roles in next provider request" `Quick (replay ~provider_wire:true)]]

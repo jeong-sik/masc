@@ -109,8 +109,11 @@ let sleeper_command name = Printf.sprintf "python3 -c 'import time; time.sleep(3
 let install_lane ?(declared = true) base ~marker =
   List.iter (fun dir -> Unix.mkdir dir 0o700)
     [ Filename.concat base ".masc"; lane base; Filename.concat (lane base) "host" ];
-  let script = Printf.sprintf "#!/bin/sh\nprintf '%%s\\n' \"$$\" \"$@\" > %s\nexec %s\n"
-      (Filename.quote marker) (sleeper_command marker) in
+  let script =
+    Printf.sprintf
+      "#!/bin/sh\nprintf '%%s\\n' \"${MASC_HTTP_PORT-unset} ${MASC_HTTP_BASE_URL-unset}\" > %s.env\n\
+       printf '%%s\\n' \"$$\" \"$@\" > %s\nexec %s\n"
+      (Filename.quote marker) (Filename.quote marker) (sleeper_command marker) in
   write ~mode:0o700 (launcher base) script;
   if declared then
     write (Filename.concat (lane base) "host/launch.json")
@@ -118,11 +121,11 @@ let install_lane ?(declared = true) base ~marker =
          (`Assoc [ "destination", `String "workspace_connection";
                    "launcher_sha256", `String Digestif.SHA256.(to_hex (digest_string script)) ]))
 
-let host_step base = Keeper_firefox.host_step (Status.report (Status.observe ~base_path:base))
+let host_step ?(port = 9333) base = Keeper_firefox.host_step ~port (Status.report (Status.observe ~base_path:base))
 
-let take base =
+let take ?(port = 9333) base =
   match
-    Record.take ~base_path:base ~pid:(Unix.getpid ()) ~bidi_url:"ws://127.0.0.1:9333/session"
+    Record.take ~base_path:base ~pid:(Unix.getpid ()) ~bidi_url:(Printf.sprintf "ws://127.0.0.1:%d/session" port)
       ~client_id:(match Browser_lane.client_id_of_string "0199c0de-0000-7000-8000-000000000001" with
         | Ok id -> id | Error detail -> fail detail)
       ~now:1_791_000_000.
@@ -138,10 +141,13 @@ let host_is_started_only_with_an_installed_launcher_and_no_host () =
     install_lane base ~marker:"/unused";
     (match host_step base with
      | Keeper_firefox.Start_host path -> check string "the workspace launcher" (launcher base) path
-     | Keeper_firefox.Host_running | Keeper_firefox.Launcher_not_ready _ -> fail "not started");
+     | Keeper_firefox.Host_running | Keeper_firefox.Host_on_another_port _ | Keeper_firefox.Launcher_not_ready _ ->
+       fail "not started");
     let held = take base in
     Fun.protect ~finally:(fun () -> released held) (fun () ->
       check bool "a host holds the lock" true (host_step base = Keeper_firefox.Host_running);
+      check bool "a host given another port" true
+        (host_step ~port:9444 base = Keeper_firefox.Host_on_another_port "ws://127.0.0.1:9333/session");
       (* A record no reader can load, beside a lock still held, is a host
          that runs: a second one would only be refused at the lock. *)
       write (Record.record_path ~base_path:base) "{";
@@ -345,11 +351,25 @@ let a_running_host_is_not_started_again () =
     let firefox_marker, host_marker = markers base in
     install_lane base ~marker:host_marker;
     let firefox = fake_firefox base ~marker:firefox_marker Listens in
-    let held = take base in
+    let port = free_port () in
+    let held = take ~port base in
     Fun.protect ~finally:(fun () -> released held) (fun () ->
       with_children ~base [ firefox_marker; host_marker ] (fun () ->
-        started ~base ~configuration:(configured ~firefox ~port:(free_port ()) base) ();
+        started ~base ~configuration:(configured ~firefox ~port base) ();
         check bool "firefox started" true (firefox_started base);
+        check bool "no second host" false (host_started base))))
+
+let a_host_on_another_port_starts_nothing () =
+  with_workspace (fun base ->
+    let firefox_marker, host_marker = markers base in
+    install_lane base ~marker:host_marker;
+    let firefox = fake_firefox base ~marker:firefox_marker Listens in
+    let port = free_port () in
+    let held = take ~port:(if port = 9333 then 9334 else 9333) base in
+    Fun.protect ~finally:(fun () -> released held) (fun () ->
+      with_children ~base [ firefox_marker; host_marker ] (fun () ->
+        started ~base ~configuration:(configured ~firefox ~port base) ();
+        check bool "no Firefox no host can use" false (firefox_started base);
         check bool "no second host" false (host_started base))))
 
 let a_firefox_that_exits_first_starts_no_host () =
@@ -399,14 +419,44 @@ let nothing_is_started_without_the_table_or_with_the_lane_off () =
       check bool "no Firefox" false (firefox_started base);
       check bool "no host" false (host_started base)))
 
-let without_a_launcher_firefox_starts_and_no_host () =
+let without_a_launcher_nothing_starts () =
   with_workspace (fun base ->
     let firefox_marker, _ = markers base in
     let firefox = fake_firefox base ~marker:firefox_marker Listens in
     with_children ~base [ firefox_marker ] (fun () ->
       started ~base ~configuration:(configured ~firefox ~port:(free_port ()) base) ();
-      check bool "firefox started" true (firefox_started base);
+      check bool "no Firefox no host can use" false (firefox_started base);
       check bool "no host without a launcher" false (host_started base)))
+
+(* Set for one case: the server's environment is what a child inherits. *)
+let with_variables variables f =
+  List.iter (fun (key, value) -> Unix.putenv key value) variables;
+  Fun.protect ~finally:(fun () -> List.iter (fun (key, _) -> Unix.putenv key "") variables) f
+
+let the_host_is_not_given_the_servers_address () =
+  with_workspace (fun base ->
+    let firefox_marker, host_marker = markers base in
+    install_lane base ~marker:host_marker;
+    let firefox = fake_firefox base ~marker:firefox_marker Listens in
+    with_children ~base [ firefox_marker; host_marker ] (fun () ->
+      with_variables [ "MASC_HTTP_PORT", "8935"; "MASC_HTTP_BASE_URL", "https://masc.example" ] (fun () ->
+        started ~base ~configuration:(configured ~firefox ~port:(free_port ()) base) ());
+      await_file (host_marker ^ ".env");
+      check string "neither address variable" "unset unset" (String.trim (read (host_marker ^ ".env")))))
+
+let each_start_keeps_the_last_runs_log () =
+  with_workspace (fun base ->
+    let firefox_marker, _ = markers base in
+    let firefox = fake_firefox base ~marker:firefox_marker Exits in
+    let configuration = configured ~firefox ~port:(free_port ()) base in
+    let log = Keeper_firefox.firefox_log_path ~base_path:base in
+    with_children ~base [ firefox_marker ] (fun () ->
+      install_lane base ~marker:(Filename.concat base "host-ran");
+      started ~base ~configuration ();
+      Out_channel.with_open_gen [ Open_append ] 0o600 log (fun output -> output_string output "first run\n");
+      started ~base ~configuration ();
+      check string "the last run moved aside" "first run\n" (read (Keeper_firefox.previous_log_path log));
+      check string "this run's log is new" "" (read log)))
 
 let () =
   run "browser_keeper_firefox"
@@ -431,4 +481,7 @@ let () =
             a_firefox_that_goes_on_in_another_process_gets_its_host
         ; test_case "a Firefox that never opens its port" `Quick a_firefox_that_never_opens_its_port_starts_no_host
         ; test_case "no table, or the lane off" `Quick nothing_is_started_without_the_table_or_with_the_lane_off
-        ; test_case "no launcher" `Quick without_a_launcher_firefox_starts_and_no_host ] ) ]
+        ; test_case "a host on another port" `Quick a_host_on_another_port_starts_nothing
+        ; test_case "the host's environment" `Quick the_host_is_not_given_the_servers_address
+        ; test_case "the last run's log" `Quick each_start_keeps_the_last_runs_log
+        ; test_case "no launcher" `Quick without_a_launcher_nothing_starts ] ) ]

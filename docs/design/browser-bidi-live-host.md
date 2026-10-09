@@ -23,12 +23,21 @@ profile = "/Users/you/masc-keeper-firefox-profile"
 
 - It starts only what is missing. A port that already answers gets no second
   Firefox, and a host holding the host lock gets no second host.
+- It starts neither while no host could be attached: the browser lane is not
+  installed, or not as its installation wrote it, or the running host was
+  given another port. A workspace has one host, so that host is stopped
+  first. Firefox's port lets any local process drive it, so it is not opened
+  for nothing.
 - Both run apart from the server, so a server restart leaves them running.
   Firefox writes to `.masc/browser-lane/keeper-firefox.log` and the host to
-  `.masc/browser-lane/bidi-host.log`; the server log says what it started and
-  why it did not.
+  `.masc/browser-lane/bidi-host.log`. Each start moves the last run's log to
+  `<name>.1`, over the one before; within one run a log keeps growing, by a
+  line every five seconds from a host whose server is away. The server log
+  says what it started and why it did not.
 - The host is started with the workspace's installed `launch`, so the browser
-  lane is installed first (step 2 below).
+  lane is installed first (step 2 below). It is not given the server's
+  `MASC_HTTP_BASE_URL` or `MASC_HTTP_PORT`, which would fix its server
+  address over `connection.toml`.
 - `[browser.live] enabled = false` starts nothing.
 - The operator still logs in once, in that Firefox, to the sites a Keeper
   works on; the profile keeps the login.

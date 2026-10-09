@@ -1623,6 +1623,7 @@ type strict_decode_error =
   | Invalid_surface of string
   | Unknown_speaker_authority of string
   | Missing_speaker_authority
+  | Invalid_row_kind of string
 
 type parsed_line =
   { message : chat_message option
@@ -1825,23 +1826,26 @@ let parse_line_decoded ~file_path (line : string) : parsed_line =
                 ~detail:"invalid blocks field";
               None)
     in
-    let kind =
-      (* Absent field = every row written before [kind] existed; all of
-         those are utterances. Unknown labels are surfaced and read as
-         [Utterance] — the conservative arm (renders and advances the
-         watermark like any reply) rather than silently resurrecting a
-         pending user line. *)
-      match opt_string "kind" with
-      | None -> Row_kind.Utterance
-      | Some label -> (
-          match Row_kind.of_label label with
-          | Some kind -> kind
-          | None ->
-              report_persistence_read_drop
-                ~reason:Read_drop_reason.Invalid_payload
-                ~path:file_path
-                ~detail:(Printf.sprintf "unknown chat row kind %S" label);
-              Row_kind.Utterance)
+    let kind_result =
+      match Json_util.assoc_member_opt "kind" json with
+      | None -> Ok Row_kind.Utterance
+      | Some (`String label) ->
+          (match Row_kind.of_label label with
+           | Some kind -> Ok kind
+           | None -> Error (Printf.sprintf "unknown chat row kind %S" label))
+      | Some _ -> Error "chat row kind must be a string"
+    in
+    let strict_decode_error =
+      match kind_result with
+      | Ok _ -> strict_decode_error
+      | Error detail ->
+          report_persistence_read_drop
+            ~reason:Read_drop_reason.Invalid_payload
+            ~path:file_path
+            ~detail;
+          (match strict_decode_error with
+           | Some _ -> strict_decode_error
+           | None -> Some (Invalid_row_kind detail))
     in
     let turn_ref =
       (* RFC-0233 §7: parse the join key; a malformed value is surfaced as
@@ -1958,8 +1962,9 @@ let parse_line_decoded ~file_path (line : string) : parsed_line =
           ~detail:"chat row missing role and readable text/structured payload";
         None)
       else
-        match Role.of_label role_label with
-        | None ->
+        match kind_result, Role.of_label role_label with
+        | Error _, _ -> None
+        | Ok _, None ->
             (* RFC-0232 P1: an unknown role cannot participate in any lane
                semantics (watermark, pending, rendering); surface it
                instead of carrying an untyped row. *)
@@ -1968,13 +1973,13 @@ let parse_line_decoded ~file_path (line : string) : parsed_line =
               ~path:file_path
               ~detail:(Printf.sprintf "unknown chat row role %S" role_label);
             None
-        | Some Role.Tool when tool_call_name = None ->
+        | Ok _, Some Role.Tool when tool_call_name = None ->
             report_persistence_read_drop
               ~reason:Read_drop_reason.Invalid_payload
               ~path:file_path
               ~detail:"tool chat row missing non-empty tool_call_name";
             None
-        | Some role ->
+        | Ok kind, Some role ->
             (match opt_string "id", ts with
              | None, _ ->
                  report_persistence_read_drop
@@ -2301,6 +2306,8 @@ let parse_transcript_row_strict ~path ~redaction ~line_no line =
            "%s:%d speaker_id/speaker_name without speaker_authority"
            path
            line_no)
+    | { strict_decode_error = Some (Invalid_row_kind detail); _ } ->
+      `Unreadable (Printf.sprintf "%s:%d %s" path line_no detail)
     | { message = Some message; strict_decode_error = None } ->
       `Message (redact_message redaction message)
     | { message = None; strict_decode_error = None } ->

@@ -7,7 +7,7 @@ description: "삼국지 III (Koei 1993, Korean) on the shared DOS machine: boot 
 
 Everything below is an observation from real runs on the DOS lane, not a rule
 of the game. Apply a step only when the screen shows the prompt it names, and
-read the screen (PNG artifact) after every decision. The general DOS lane
+read the screen (returned PNG image) after every decision. The general DOS lane
 rules — controller, passing, saves — are in the `dos-play` Skill.
 
 ## Boot

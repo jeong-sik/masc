@@ -5,11 +5,11 @@ description: Play the shared MSX machine through image observation, sequential k
 
 # MSX play
 
-The workspace has one machine shared with the TUI and other Keepers. Agree on a handoff with the current driver before changing it. Calls are serialized, but no enforced driver lease protects a sequence across calls. If another caller intervenes, discard the remaining planned inputs, capture the current screen and coordinate who continues. Watching is not exclusive ownership. Preserve an existing campaign before taking it over; do not restart at each wake.
+This attached Add-on provides the machine shared with the TUI and other Keepers. Agree on a handoff with the current driver before changing it. Calls are serialized, but no enforced driver lease protects a sequence across calls. If another caller intervenes, discard the remaining planned inputs, capture the current screen and coordinate who continues. Watching is not exclusive ownership. Preserve an existing campaign before taking it over; do not restart at each wake.
 
 ## Primitive tools
 
-- `masc_msx_screen` observes without advancing time. Keeper calls return a PNG `artifact`, dimensions and frame number together. Pass the artifact to `keeper_analyze_image`. Bitmap `screen_text` is name-table data, not OCR; `halted` or a constant PC alone does not identify an input prompt. The sprite attribute table rides only with `sprites=true` — pass it when you really need sprite positions, not by habit.
+- `masc_msx_screen` observes without advancing time. Calls return a PNG image block, dimensions and frame number together. Read that returned image; if the current model cannot interpret it, report the limitation. Bitmap `screen_text` is name-table data, not OCR; `halted` or a constant PC alone does not identify an input prompt. The sprite attribute table rides only with `sprites=true` — pass it when you really need sprite positions, not by habit.
 - `masc_msx_press` holds all `keys` together for `hold_frames` — a chord, like a direction plus fire — then releases them for the rest of `frames`. Set `sequence=true` to instead tap the keys one after another, each in its own frame window, so a menu path or a multi-digit command is one call; end a command entry with Return. Use short holds for a single press and observe at decision boundaries.
 - `masc_msx_step` advances time without held keys. Use it for an observed transition or animation. Respect the current schema's per-call frame limit; do not repeatedly step an unchanged menu.
 - `masc_msx_step_until_change` advances until the screen settles (two near-equal coarse views in a row; a blinking cursor alone is not movement) or the frame budget runs out. One call replaces repeated step+screen while a title, fade or level intro plays out. `changed=false` with `stable=true` means the screen did not move — the scene likely waits for a key, so read it and press; `stable=false` means the budget ran out mid-animation and another call continues it.
@@ -29,7 +29,7 @@ The screen is the expensive way to ask what changed; memory answers in bytes. To
 1. `masc_msx_peek` any address to take the snapshot.
 2. Make exactly one meaningful input — one menu choice, one command — with `sequence=true` where a path is involved.
 3. `masc_msx_ram_diff`: the changed runs are candidates for that action's state.
-4. Confirm meaning against the screen (artifact reading): the run whose before/after matches the visible change — a menu id, a cursor, gold — is that state's address.
+4. Confirm meaning against the screen (the returned PNG image): the run whose before/after matches the visible change — a menu id, a cursor, gold — is that state's address.
 5. Record confirmed addresses in keeper memory as the game's address table. A few peeked bytes then answer routine questions; image reads stay for evidence, unfamiliar screens and periodic confirmation.
 
 Re-verify a saved address after a reload or restore: the layout is usually the same, but confirm with one diff before trusting the table. If a diff after a clearly one-step action shows wholesale change, someone else drove the machine — treat the snapshot as lost and take a fresh peek.

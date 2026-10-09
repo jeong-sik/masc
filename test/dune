@@ -5413,8 +5413,12 @@
  (modules test_lane_addon_skills)
  (deps
   ../addons/msx-observer/lane.toml
-  (source_tree ../addons/msx-observer/skills))
- (libraries masc_test_deps masc_server masc.skill_reference masc.skill_config
+  (source_tree ../addons/msx-observer/skills)
+  ../addons/msx-machine/lane.toml
+  (source_tree ../addons/msx-machine/skills)
+  ../addons/dos-machine/lane.toml
+  (source_tree ../addons/dos-machine/skills))
+ (libraries masc.embedded_config masc.masc_tool_surface mcp_protocol masc_test_deps masc_server masc.skill_reference masc.skill_config
   masc.skill_snapshot masc.skill_snapshot_service))
 
 (include stanzas/test_browser_observation.inc)

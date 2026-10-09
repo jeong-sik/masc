@@ -137,9 +137,9 @@ when the game asks.
 ## Reading the screen
 
 Bitmap modes (GRAPHIC6 openings and scenes) leave name-table residue:
-`screen_text` there is not OCR of the visible scene. Read the actual image
-artifact with `keeper_analyze_image` — the `msx-observe` Skill does the
-capture and read in one call.
+`screen_text` there is not OCR of the visible scene. Read the PNG image returned by the attached `masc_msx_screen` tool. The
+Add-on’s `msx-observe` Skill explains how to preserve the captured frame
+and report uncertain text.
 
 ## Watching an all-AI game
 

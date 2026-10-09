@@ -3201,7 +3201,11 @@ let source_mapping_owner state ~keeper_name projection entry_index =
            Polled_source {start_byte=preview.ktp_text_position.kpp_start_byte;
              mapped=lazy (Masc.Tui_terminal_text.sanitize_terminal_lines_with_source preview.ktp_text_tail)},
            Some (generation,preview.ktp_text_position.kpp_start_byte,preview.ktp_text_tail))
-  | Some (Scroll_durable _ | Scroll_pending _ | Scroll_polled (_, _, Polled_status)) | None ->
+  | Some (Scroll_polled (_, _, Polled_status)) ->
+      (* Activity labels can change within one speech generation. They have
+         neither immutable held text nor a producer-owned source identity. *)
+      Unknown_polled_source, None
+  | Some (Scroll_durable _ | Scroll_pending _) | None ->
       Durable_source, None
 
 let source_body_key state ~width ~theme ~preview ~polled_input ~unavailable entry =
@@ -3289,7 +3293,7 @@ let source_body_lookup state ~keeper_name projection ~inner_width ~theme ~previe
 
 let body_row_of_point ~source_body entry_index (point : chat_scroll_point) =
   match point.source_position with
-  | None -> Some point.body_row
+  | None -> None
   | Some position -> Option.bind (source_body entry_index) (fun body ->
       Hashtbl.find_opt body.source_rows position)
 
@@ -3302,7 +3306,9 @@ let requested_scroll_from_pin state ~keeper_name projection ~markdown ~source_bo
   | Some pin when pin.pin_workspace = state.workspace_authority
       && String.equal pin.pin_keeper keeper_name
       && pin.pin_mode <> Follow_live ->
-      Option.value ~default:state.msg_scroll
+      (* Every saved byte may have been removed. A stale numeric distance
+         must not become a successful pin to newly arriving content. *)
+      Option.value ~default:0
         (List.find_map (fun point ->
           Option.bind (projection_index_of_scroll_anchor projection point.scroll_anchor)
             (fun entry_index ->
@@ -3317,15 +3323,11 @@ let requested_scroll_from_pin state ~keeper_name projection ~markdown ~source_bo
 let scroll_position_for_window state ~keeper_name projection ~markdown ~source_body ~inner_width
     (window : Message_layout.scroll_window) =
   let points = List.filter_map (fun (position : Message_layout.body_row_position) ->
-    Option.map (fun anchor ->
-      {scroll_anchor=anchor; body_row=position.body_row;
-       source_position=(match anchor with Scroll_durable _ | Scroll_pending _ ->
-         source_point_on_row ~source_body position.entry_index position.body_row
-         | Scroll_polled (_, _, Polled_speech) ->
-             source_point_on_row ~source_body position.entry_index position.body_row
-         | Scroll_polled (_, _, Polled_status) -> None);
-       rows_below=position.rows_below})
-      (scroll_anchor_at projection position.entry_index)) window.body_positions in
+    Option.bind (scroll_anchor_at projection position.entry_index) (fun anchor ->
+      Option.map (fun source_position ->
+        {scroll_anchor=anchor; body_row=position.body_row; source_position=Some source_position;
+         rows_below=position.rows_below})
+        (source_point_on_row ~source_body position.entry_index position.body_row))) window.body_positions in
   (* The live-edge layout can elide middle rows and does not return body
      positions. Its newest structural entry still records the current tail
      distance, so the first scroll key can freeze it before an arrival. *)
@@ -3333,35 +3335,34 @@ let scroll_position_for_window state ~keeper_name projection ~markdown ~source_b
     | Some {pin_mode=Hold_search; _} -> true | Some _ | None -> false in
   let points = if points <> [] || window.scroll <> 0 || search_held then points else
     newest_scroll_anchors projection |> List.find_map (fun (entry_index, anchor) ->
-      Option.map (fun suffix ->
-        [{scroll_anchor=anchor; body_row=0; source_position=None; rows_below=suffix}])
-        (Message_layout.scroll_for_body_row ~markdown
-          ~origin:state.msg_origin_display ~inner_width ~entry_index
-          ~body_row:0 projection.layout_entries))
+      Option.bind (source_body entry_index) (fun body ->
+        let first=Hashtbl.fold (fun row source held -> match held with
+          | Some(earlier,_) when earlier <= row -> held
+          | Some _ | None -> Some(row,source)) body.row_sources None in
+        Option.bind first (fun (body_row,source_position) ->
+          Option.map (fun suffix ->
+            [{scroll_anchor=anchor; body_row; source_position=Some source_position; rows_below=suffix}])
+            (Message_layout.scroll_for_body_row ~markdown
+              ~origin:state.msg_origin_display ~inner_width ~entry_index
+              ~body_row projection.layout_entries))))
     |> Option.value ~default:[] in
-  let pin_mode = match state.msg_scroll_pin with
-    | Some {pin_mode=Hold_search; _} -> Hold_search
-    | Some _ | None -> if window.scroll = 0 then Follow_live else Hold_scroll in
   (* Frame feedback must retain a searched query endpoint, rather than replace
      it with the first byte of whichever physical row is now at the top. An
      explicit scroll gesture changes Hold_search to Hold_scroll at the edge. *)
   let searched_points = match state.msg_scroll_pin with
     | Some pin when pin.pin_mode=Hold_search && pin.pin_workspace=state.workspace_authority
         && String.equal pin.pin_keeper keeper_name ->
-        Some (List.map (fun point ->
-          match projection_index_of_scroll_anchor projection point.scroll_anchor with
-          | None -> point
-          | Some entry_index ->
-              match body_row_of_point ~source_body entry_index point with
-              | None -> point
-              | Some body_row ->
-                  match Message_layout.scroll_for_body_row ~markdown
-                      ~origin:state.msg_origin_display ~inner_width ~entry_index
-                      ~body_row projection.layout_entries with
-                  | None -> point
-                  | Some suffix -> {point with body_row;rows_below=suffix-window.scroll}) pin.pin_points)
+        Some (List.filter_map (fun point ->
+          Option.bind (projection_index_of_scroll_anchor projection point.scroll_anchor) (fun entry_index ->
+            Option.bind (body_row_of_point ~source_body entry_index point) (fun body_row ->
+              Option.map (fun suffix -> {point with body_row;rows_below=suffix-window.scroll})
+                (Message_layout.scroll_for_body_row ~markdown
+                  ~origin:state.msg_origin_display ~inner_width ~entry_index
+                  ~body_row projection.layout_entries)))) pin.pin_points)
     | Some _ | None -> None in
-  let points = Option.value searched_points ~default:points in
+  let points,pin_mode = match searched_points with
+    | Some (_ :: _ as retained) -> retained,Hold_search
+    | Some [] | None -> points,(if window.scroll=0 then Follow_live else Hold_scroll) in
   let held_transients = if pin_mode = Follow_live then [] else
     let previous = held_polled_for_keeper state keeper_name in
     let entries = (scroll_anchor_index projection).indexed_entries in

@@ -1038,8 +1038,6 @@ let test_spawn_failure_is_pre_dispatch () =
       Unix.mkdir (Filename.concat base_path ".masc") 0o700;
       Masc_test_deps.declare_fixture_keeper
         ~base_path ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) "antigravity-pre-dispatch";
-      Masc_test_deps.declare_fixture_keeper
-        ~base_path ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) "antigravity-capacity-override";
       let oauth_source = Filename.concat base_path "operator-oauth-token" in
       write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "operator-oauth-fixture");
       let missing_cli = Filename.concat base_path "missing-antigravity" in
@@ -1073,61 +1071,6 @@ let test_spawn_failure_is_pre_dispatch () =
                     | Some _ | None -> fail "Antigravity runtime fixture did not resolve"
                   in
                   let reports = ref [] in
-                  let oversized_system_prompt = String.make 1_048_577 'x' in
-                  let hooks =
-                    { Agent_core.Hooks.empty with
-                      before_turn_params =
-                        Some
-                          (function
-                            | Agent_core.Hooks.BeforeTurnParams
-                                { current_params; _ } ->
-                              Agent_core.Hooks.AdjustParams
-                                { current_params with
-                                  system_prompt_override =
-                                    Some oversized_system_prompt
-                                }
-                            | _ -> Agent_core.Hooks.Continue)
-                    }
-                  in
-                  let oversized_attempt =
-                    Keeper_antigravity_runtime.run
-                      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
-                      ~accepts_image_input:
-                        (Runtime_agent.runtime_accepts_image_input
-                           ~runtime:
-                             (Runtime.get_runtime_by_id "antigravity.gemini"
-                              |> Option.get))
-                      ~pre_tool_rejects:(ref [])
-                      ~runtime_id:"antigravity.gemini"
-                      ~keeper_name:"antigravity-capacity-override"
-                      ~base_path
-                      ~goal:"override must be bounded"
-                      ~goal_blocks:None
-                      ~system_prompt:"small original prompt"
-                      ~tools:[]
-                      ~initial_messages:[]
-                      ~model_input_projection:None
-                      ~on_transmitted_model_input:
-                        (fun report -> reports := report :: !reports)
-                      ~hooks:(Some hooks)
-                      ~context_injector:None
-                      ~context:None
-                      ~event_bus:None
-                      ~raw_trace:None
-                      ~on_event:None
-                      ~config
-                      ()
-                  in
-                  (match oversized_attempt.result with
-                   | Error
-                       (Agent_core.Error.Config
-                          (Agent_core.Error.InvalidConfig { field; _ })) ->
-                     check string "override refused field" "prompt_ceiling_bytes" field
-                   | Error error ->
-                     fail
-                       ("oversized system prompt override produced the wrong error: "
-                        ^ Agent_core.Error.to_string error)
-                   | Ok _ -> fail "oversized system prompt override reached the CLI");
                   let attempt =
                     Keeper_antigravity_runtime.run
                     ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
@@ -1284,13 +1227,10 @@ let plain_user_message text : Agent_core.Types.message =
   }
 ;;
 
-let capacity_projection ?on_model_input_window_observation ?carried_front_seed ?librarian_front
+let carried_projection ?on_model_input_window_observation ?carried_front_seed ?librarian_front
     ?on_carried_front ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 })
-    ~prompt_ceiling_bytes ~system_prompt ~goal source =
-  Keeper_antigravity_runtime.For_testing.capacity_bounded_model_input_projection
-    ~prompt_ceiling_bytes
-    ~system_prompt
-    ~goal
+    source =
+  Keeper_antigravity_runtime.For_testing.carried_history_projection
     ?on_model_input_window_observation
     ?carried_front_seed
     ?librarian_front
@@ -1301,108 +1241,10 @@ let capacity_projection ?on_model_input_window_observation ?carried_front_seed ?
     source
 ;;
 
-let test_unresolved_window_is_refused () =
-  match
-    capacity_projection
-      ~prompt_ceiling_bytes:None
-      ~system_prompt:"system"
-      ~goal:"goal"
-      None
-  with
-  | Error
-      (Agent_core.Error.Config
-         (Agent_core.Error.InvalidConfig { field = "prompt_ceiling_bytes"; _ })) ->
-    ()
-  | Error error -> fail (Agent_core.Error.to_string error)
-  | Ok _ -> fail "Antigravity admitted history without a prompt ceiling"
-;;
-
-let test_ceiling_windows_history_and_reports_the_cut () =
-  let observed = ref None in
-  let assistant_tool_use : Agent_core.Types.message =
-    { role = Assistant
-    ; content = [ ToolUse { id = "call-latest"; name = "lookup"; input = `Null } ]
-    ; name = None
-    ; tool_call_id = None
-    ; metadata = []
-    }
-  in
-  let tool_result : Agent_core.Types.message =
-    { role = Tool
-    ; content =
-        [ ToolResult
-            { tool_use_id = "call-latest"
-            ; content = "latest result"
-            ; outcome = Tool_succeeded
-            ; json = None
-            ; content_blocks = None
-            }
-        ]
-    ; name = None
-    ; tool_call_id = None
-    ; metadata = []
-    }
-  in
-  let history =
-    List.init 10 (fun index ->
-      plain_user_message
-        (Printf.sprintf "history-%02d:%s" index (String.make 1024 'x')))
-    @ [ assistant_tool_use; tool_result ]
-  in
-  let _labelled, history_atoms = Runtime_model_input_tail_window.annotate history in
-  match
-    capacity_projection
-      ~prompt_ceiling_bytes:(Some 8192)
-      ~system_prompt:"system"
-      ~goal:"goal"
-      ~on_model_input_window_observation:(fun reading -> observed := Some reading)
-      None
-  with
-  | Error error -> fail (Agent_core.Error.to_string error)
-  | Ok None -> fail "declared capacity produced no projection"
-  | Ok (Some project) ->
-    (match project history with
-     | Error error -> fail (Agent_core.Error.to_string error)
-     | Ok projected ->
-       let _labelled, projected_atoms =
-         Runtime_model_input_tail_window.annotate projected
-       in
-       let prompt_bytes =
-         Keeper_antigravity_runtime.For_testing.start_prompt_bytes
-           ~system_prompt:"system"
-           ~goal:"goal"
-           projected
-         |> Result.get_ok
-       in
-       check bool "rendered prompt is bounded" true (prompt_bytes <= 8192);
-       check bool "old history was dropped" true (List.length projected < List.length history);
-       check bool "a recent suffix remains" true (List.length projected > 0);
-       (match List.rev projected with
-        | { Agent_core.Types.role = Tool; _ }
-          :: { Agent_core.Types.role = Assistant; _ }
-          :: _ ->
-          ()
-        | _ -> fail "the newest Assistant+Tool atom was split by the window");
-       (match !observed with
-        | None -> fail "the projection reported no window"
-        | Some reading ->
-          check
-            int
-            "all source atoms are counted"
-            history_atoms
-            reading.total_atoms;
-          check int "reported count is what ships" projected_atoms
-            reading.transmitted_atoms;
-          check
-            (option string)
-            "the reported front is the first retained atom"
-            (Runtime_model_input_tail_window.atom_opening_digest
-               history
-               (history_atoms - projected_atoms))
-            (Some (carried_digest reading.model_input_front))))
-;;
-
-let test_appended_gate_reference_is_inside_the_window () =
+(* The Gate replay reference the source projection appends goes out after the
+   carried range, and the reading counts only the durable history: the
+   reference is no atom a later seed could reopen. *)
+let test_appended_gate_reference_is_no_durable_atom () =
   let observed = ref None in
   let history =
     List.init 10 (fun index ->
@@ -1427,106 +1269,49 @@ let test_appended_gate_reference_is_inside_the_window () =
     ; boundary_error = None
     }
   in
-  match
-    capacity_projection
-      ~prompt_ceiling_bytes:(Some 8192)
-      ~system_prompt:"system"
-      ~goal:"goal"
+  let project =
+    carried_projection
       ~on_model_input_window_observation:(fun reading -> observed := Some reading)
       ~carried_front_seed:(fun () -> seed_read)
       source
-  with
+  in
+  match project history with
   | Error error -> fail (Agent_core.Error.to_string error)
-  | Ok None -> fail "declared capacity produced no projection"
-  | Ok (Some project) ->
-    (match project history with
-     | Error error -> fail (Agent_core.Error.to_string error)
-     | Ok projected ->
-       (match List.rev projected with
-        | last :: _ ->
-          check
-            bool
-            "the appended newest material survives the cut"
-             true
-             (last.Agent_core.Types.content = marker.content)
-        | [] -> fail "the declared window removed the appended Gate reference");
-       (match !observed with
-       | None -> fail "the projection reported no durable-history window"
-       | Some reading ->
-          check int "the Gate reference is not a durable-history atom" 10
-            reading.total_atoms;
-          check bool "capacity cuts deeper than the seed" true
-            (reading.transmitted_atoms < 10 - seed_first_atom);
-          check int "the final list adds only the Gate atom to the durable suffix"
-            (reading.transmitted_atoms + 1)
-            (snd (Runtime_model_input_tail_window.annotate projected));
-          let expected_front = reading.total_atoms - reading.transmitted_atoms in
-          check (option string) "the front digest uses the original history coordinate"
-            (Runtime_model_input_tail_window.atom_opening_digest history expected_front)
-            (Some (carried_digest reading.model_input_front));
-          let next_seed : Keeper_carried_front.seed =
-            { first_atom = expected_front
-            ; front = reading.model_input_front
-            ; source = Keeper_carried_front.Turn_record { turn = 41 }
-            }
-          in
-          (match
-             Keeper_carried_front.for_history
-               ~digest_at:(Runtime_model_input_tail_window.atom_opening_digest history)
-               next_seed
-           with
-           | Ok admitted ->
-             check int "the next seed reopens the same durable front" expected_front
-               admitted.first_atom
-           | Error _ -> fail "the projected observation did not seed the same history")))
-;;
-
-let test_gate_only_floor_observes_an_empty_durable_range () =
-  let observed = ref None in
-  let history =
-    List.init 3 (fun index ->
-      plain_user_message
-        (Printf.sprintf "oversized-%02d:%s" index (String.make 20_000 'x')))
-  in
-  let marker = plain_user_message "gate replay reference" in
-  let projected =
-    match
-      capacity_projection
-        ~prompt_ceiling_bytes:(Some 8192)
-        ~system_prompt:"system"
-        ~goal:"goal"
-        ~on_model_input_window_observation:(fun reading -> observed := Some reading)
-        (Some (fun messages -> Ok (messages @ [ marker ])))
-    with
-    | Error error -> fail (Agent_core.Error.to_string error)
-    | Ok None -> fail "declared capacity produced no projection"
-    | Ok (Some project) ->
-      (match project history with
-       | Error error -> fail (Agent_core.Error.to_string error)
-       | Ok projected -> projected)
-  in
-  (match List.rev projected with
-   | last :: _ ->
-     check bool "the Gate atom remains at the floor" true
-       (last.Agent_core.Types.content = marker.content)
-   | [] -> fail "the capacity floor removed the Gate atom");
-  (* The Gate reference is not a durable atom, so the attempt carried none of
-     the offered history: a typed zero observation witnessed by the last
-     offered atom. It is an attempted range only; it seeds a later turn only
-     once a successful response joins it to the TurnRecord
-     (test_keeper_carried_front "an unanswered empty attempt does not seed"). *)
-  match !observed with
-  | None -> fail "a Gate-only floor must still report its empty attempted range"
-  | Some reading ->
-    check int "no durable atom rides with the Gate reference" 0 reading.transmitted_atoms;
-    check int "the offered history is counted in its own coordinate"
-      (List.length history) reading.total_atoms;
-    check bool "the front witnesses the end of the offered history" true
-      (reading.model_input_front
-       = Model_input_front.After_history
-           (Option.get
-              (Runtime_model_input_tail_window.atom_opening_digest
-                 history (List.length history - 1))))
+  | Ok projected ->
+    (match List.rev projected with
+     | last :: _ ->
+       check bool "the appended Gate reference goes last" true
+         (last.Agent_core.Types.content = marker.content)
+     | [] -> fail "the projection removed the appended Gate reference");
+    (match !observed with
+     | None -> fail "the projection reported no durable-history window"
+     | Some reading ->
+       check int "the Gate reference is not a durable-history atom" 10
+         reading.total_atoms;
+       check int "the seeded range is carried whole" (10 - seed_first_atom)
+         reading.transmitted_atoms;
+       check int "the final list adds only the Gate atom to the durable suffix"
+         (reading.transmitted_atoms + 1)
+         (snd (Runtime_model_input_tail_window.annotate projected));
+       let expected_front = reading.total_atoms - reading.transmitted_atoms in
+       check (option string) "the front digest uses the original history coordinate"
+         (Runtime_model_input_tail_window.atom_opening_digest history expected_front)
+         (Some (carried_digest reading.model_input_front));
+       let next_seed : Keeper_carried_front.seed =
+         { first_atom = expected_front
+         ; front = reading.model_input_front
+         ; source = Keeper_carried_front.Turn_record { turn = 41 }
+         }
+       in
+       (match
+          Keeper_carried_front.for_history
+            ~digest_at:(Runtime_model_input_tail_window.atom_opening_digest history)
+            next_seed
+        with
+        | Ok admitted ->
+          check int "the next seed reopens the same durable front" expected_front
+            admitted.first_atom
+        | Error _ -> fail "the projected observation did not seed the same history"))
 ;;
 
 let carried_front_history () =
@@ -1568,26 +1353,20 @@ let agent_core_range ?(turn_start = Keeper_carried_front.Turn_boundary { end_ato
     .Runtime_model_input_tail_window.messages
 ;;
 
-let project_with_capacity ?on_model_input_window_observation ?carried_front_seed ?librarian_front
-    ?on_carried_front ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 }) ~capacity messages =
-  match
-    capacity_projection
+let project_range ?on_model_input_window_observation ?carried_front_seed ?librarian_front
+    ?on_carried_front ?turn_start messages =
+  let project =
+    carried_projection
       ?on_model_input_window_observation
       ?carried_front_seed
       ?librarian_front
       ?on_carried_front
-      ~turn_start
-      ~prompt_ceiling_bytes:(Some capacity)
-      ~system_prompt:"system"
-      ~goal:"goal"
+      ?turn_start
       None
-  with
+  in
+  match project messages with
   | Error error -> fail (Agent_core.Error.to_string error)
-  | Ok None -> fail "declared capacity produced no projection"
-  | Ok (Some project) ->
-    (match project messages with
-     | Error error -> fail (Agent_core.Error.to_string error)
-     | Ok projected -> projected)
+  | Ok projected -> projected
 ;;
 
 let test_seeded_start_matches_the_agent_core_range () =
@@ -1595,10 +1374,9 @@ let test_seeded_start_matches_the_agent_core_range () =
   let messages = carried_front_history () in
   let seed_read = seed_read_at ~messages 53 in
   let projected =
-    project_with_capacity
+    project_range
       ~on_model_input_window_observation:(fun reading -> observed := Some reading)
       ~carried_front_seed:(fun () -> seed_read)
-      ~capacity:1_000_000
       messages
   in
   check (list string) "the same durable range is carried"
@@ -1613,8 +1391,8 @@ let test_seeded_start_matches_the_agent_core_range () =
 
 let test_cold_start_with_no_completed_turn_carries_everything () =
   let messages = carried_front_history () in
-  let projected = project_with_capacity ~capacity:1_000_000 messages in
-  check (list string) "without a seed and with no completed turn, everything fitting is carried"
+  let projected = project_range messages in
+  check (list string) "without a seed and with no completed turn, everything is carried"
     (encoded_history messages)
     (encoded_history projected)
 ;;
@@ -1624,7 +1402,7 @@ let test_cold_start_with_no_completed_turn_carries_everything () =
    that turn start (RFC keeper-context-window-in-tokens §13.4). *)
 let test_cold_start_begins_at_the_turn_start () =
   let messages = carried_front_history () in
-  let projected = project_with_capacity ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 53 }) ~capacity:1_000_000 messages in
+  let projected = project_range ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 53 }) messages in
   check (list string) "without a seed the range starts at the turn start"
     (encoded_history (agent_core_range ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 53 }) ~front:None messages))
     (encoded_history projected);
@@ -1638,11 +1416,10 @@ let test_the_librarian_front_reaches_the_list_and_its_error_refuses () =
   let messages = carried_front_history () in
   let seen_front = ref None in
   let projected =
-    project_with_capacity
+    project_range
       ~librarian_front:(fun _ ->
         Ok (Keeper_turn_driver_try_provider.Librarian_progress { end_atom = 53 }))
       ~on_carried_front:(fun front ~transmitted_bytes -> seen_front := Some (front, transmitted_bytes))
-      ~capacity:1_000_000
       messages
   in
   check (list string) "the range starts at the read position"
@@ -1659,16 +1436,10 @@ let test_the_librarian_front_reaches_the_list_and_its_error_refuses () =
          (Agent_core.Error.InvalidConfig
             { field = "librarian.continuity"; detail = "Covered conversation changed during dispatch" }))
   in
-  match
-    capacity_projection ~librarian_front:refused ~prompt_ceiling_bytes:(Some 1_000_000)
-      ~system_prompt:"system" ~goal:"goal" None
-  with
-  | Error error -> fail (Agent_core.Error.to_string error)
-  | Ok None -> fail "declared capacity produced no projection"
-  | Ok (Some project) ->
-    (match project messages with
-     | Error _ -> ()
-     | Ok _ -> fail "a list the turn's choice no longer describes went out")
+  let project = carried_projection ~librarian_front:refused None in
+  match project messages with
+  | Error _ -> ()
+  | Ok _ -> fail "a list the turn's choice no longer describes went out"
 ;;
 
 let working_state_not_carried ~reason =
@@ -1706,118 +1477,20 @@ let snapshot_of ~messages ~end_atom ~working_state =
   | Error error -> fail (Librarian_continuity_snapshot.error_to_string error)
 ;;
 
-(* RFC-0460: a working state goes out only where it displaces none of the
-   range's atoms. Where it cannot, the Librarian's position goes alone --
-   the atoms from where it read, no summary -- and the turn is not refused.
-   The counter says the summary was left out and why. *)
-let assert_goes_alone ~reason ~capacity snapshot =
-  let messages = carried_front_history () in
-  let before = working_state_not_carried ~reason in
-  let working_state = Keeper_turn_driver_try_provider.working_state_text snapshot in
-  match
-    capacity_projection
-      ~librarian_front:(fun _ ->
-        Ok (Keeper_turn_driver_try_provider.Librarian_snapshot snapshot))
-      ~prompt_ceiling_bytes:(Some capacity) ~system_prompt:"system" ~goal:"goal"
-      None
-  with
-  | Error error -> fail (Agent_core.Error.to_string error)
-  | Ok None -> fail "declared capacity produced no projection"
-  | Ok (Some project) ->
-    (match project messages with
-     | Error error ->
-       fail
-         (Printf.sprintf "the position alone was refused: %s"
-            (Agent_core.Error.to_string error))
-     | Ok sent ->
-       let atoms =
-         List.filter
-           (fun (m : Agent_core.Types.message) ->
-              (not (Runtime_model_input_tail_window.is_synthetic_preamble m))
-              && m.role <> Agent_core.Types.System)
-           sent
-       in
-       check bool "the working state stays out" false
-         (List.exists
-            (fun (m : Agent_core.Types.message) ->
-               match m.content with
-               | [ Text text ] -> String.equal text working_state
-               | _ -> false)
-            sent);
-       check bool "the newest atoms go" true (atoms <> []);
-       check (list string) "and they are the newest of the range from the position"
-         (encoded_history
-            (List.filteri (fun index _ -> index >= 60 - List.length atoms) messages))
-         (encoded_history atoms);
-       check (float 0.) ("counted as " ^ reason) (before +. 1.)
-         (working_state_not_carried ~reason))
-;;
-
-(* A working state the fixed sections leave no room for at all. *)
-let test_a_working_state_the_window_cannot_fit_stays_out () =
-  let messages = carried_front_history () in
-  assert_goes_alone ~reason:"does_not_fit"
-    ~capacity:
-      (Keeper_antigravity_runtime.For_testing.reserved_prompt_bytes ~system_prompt:"system"
-         ~goal:"goal"
-       + 2_000)
-    (snapshot_of ~messages ~end_atom:53 ~working_state:(String.make 4_000 'w'))
-;;
-
-(* One band narrower: the working state fits inside the ceiling and the
-   newest atom no longer does. Carried, it would go out with no turn to
-   answer -- the range is clamped to carry the one it answers -- so it stays
-   out, and the position alone carries the atoms that the working state's
-   room now holds. *)
-let test_a_working_state_that_leaves_no_turn_stays_out () =
-  let messages = carried_front_history () in
-  let measure = Keeper_antigravity_runtime.For_testing.measure_model_input_message_bytes in
-  let snapshot = snapshot_of ~messages ~end_atom:53 ~working_state:(String.make 4_000 'w') in
-  (* The message the lane pins for this snapshot, rebuilt here so the floor
-     below is measured over the list the composition actually windows. *)
-  let pinned_working_state : Agent_core.Types.message =
-    { role = System
-    ; content = [ Text (Keeper_turn_driver_try_provider.working_state_text snapshot) ]
-    ; name = None
-    ; tool_call_id = None
-    ; metadata = Runtime_model_input_tail_window.working_state_metadata
-    }
-  in
-  let pinned_floor =
-    match
-      Runtime_model_input_tail_window.minimum_capacity_bytes
-        ~measure_message_bytes:measure
-        (pinned_working_state :: messages)
-    with
-    | Some bytes -> bytes
-    | None -> fail "the fixture history has no shrinkable atom"
-  in
-  (* Room for the fixed sections, the pinned working state and the omission
-     preamble, and one byte less than the atom the range has to carry. *)
-  assert_goes_alone ~reason:"leaves_no_turn"
-    ~capacity:
-      (Keeper_antigravity_runtime.For_testing.reserved_prompt_bytes ~system_prompt:"system"
-         ~goal:"goal"
-       + pinned_floor
-       + measure (List.nth messages 59)
-       - 1)
-    snapshot
-;;
-
-(* A window that holds the working state and the whole range it leads sends
-   both: the summary in front, then every atom from where the Librarian read. *)
-let test_a_working_state_the_window_holds_goes () =
+(* A Librarian snapshot sends its working state and the whole range it
+   leads: the summary in front, then every atom from where the Librarian
+   read. *)
+let test_a_librarian_snapshot_leads_with_its_working_state () =
   let messages = carried_front_history () in
   let snapshot = snapshot_of ~messages ~end_atom:53 ~working_state:"Fifty asks answered so far." in
   let working_state = Keeper_turn_driver_try_provider.working_state_text snapshot in
   let before = working_state_not_carried ~reason:"displaces_atoms" in
   let seen_front = ref None in
   let projected =
-    project_with_capacity
+    project_range
       ~librarian_front:(fun _ ->
         Ok (Keeper_turn_driver_try_provider.Librarian_snapshot snapshot))
       ~on_carried_front:(fun front ~transmitted_bytes:_ -> seen_front := Some front)
-      ~capacity:1_000_000
       messages
   in
   (match projected with
@@ -1835,85 +1508,11 @@ let test_a_working_state_the_window_holds_goes () =
     (working_state_not_carried ~reason:"displaces_atoms")
 ;;
 
-(* The ceiling cuts the range whether or not the working state is in front
-   of it, and here it cuts both the same: the working state fits in the room
-   the cut leaves. It displaced nothing, so it goes, beside the atoms the
-   position alone would have carried. *)
-let test_a_working_state_that_fits_the_cut_goes () =
-  let messages =
-    List.init 60 (fun index ->
-      plain_user_message (Printf.sprintf "history-%02d:%s" index (String.make 200 'h')))
-  in
-  let measure = Keeper_antigravity_runtime.For_testing.measure_model_input_message_bytes in
-  let snapshot = snapshot_of ~messages ~end_atom:53 ~working_state:"ok" in
-  let working_state = Keeper_turn_driver_try_provider.working_state_text snapshot in
-  let pinned_working_state : Agent_core.Types.message =
-    { role = System
-    ; content = [ Text working_state ]
-    ; name = None
-    ; tool_call_id = None
-    ; metadata = Runtime_model_input_tail_window.working_state_metadata
-    }
-  in
-  let preamble_bytes =
-    match
-      Runtime_model_input_tail_window.minimum_capacity_bytes
-        ~measure_message_bytes:measure
-        messages
-    with
-    | Some bytes -> bytes
-    | None -> fail "the fixture history has no shrinkable atom"
-  in
-  let bytes lo hi =
-    List.fold_left
-      (fun total message -> total + measure message)
-      0
-      (List.filteri (fun index _ -> index >= lo && index < hi) messages)
-  in
-  (* The working state is smaller than an atom, so room for it and the atoms
-     from 55 is not room for atom 54: both compositions keep 55..59. *)
-  check bool "the fixture's working state is smaller than an atom" true
-    (measure pinned_working_state < measure (List.nth messages 54));
-  let capacity =
-    Keeper_antigravity_runtime.For_testing.reserved_prompt_bytes ~system_prompt:"system"
-      ~goal:"goal"
-    + preamble_bytes
-    + measure pinned_working_state
-    + bytes 55 60
-  in
-  let before = working_state_not_carried ~reason:"displaces_atoms" in
-  let projected =
-    project_with_capacity
-      ~librarian_front:(fun _ ->
-        Ok (Keeper_turn_driver_try_provider.Librarian_snapshot snapshot))
-      ~capacity
-      messages
-  in
-  check int "the working state goes, once" 1
-    (List.length
-       (List.filter
-          (fun (m : Agent_core.Types.message) ->
-             match m.content with
-             | [ Text text ] -> String.equal text working_state
-             | _ -> false)
-          projected));
-  check (list string) "beside the atoms the cut keeps either way"
-    (encoded_history (List.filteri (fun index _ -> index >= 55) messages))
-    (encoded_history
-       (List.filter
-          (fun (m : Agent_core.Types.message) ->
-             (not (Runtime_model_input_tail_window.is_synthetic_preamble m))
-             && m.role <> Agent_core.Types.System)
-          projected));
-  check (float 0.) "and nothing is counted as left out" before
-    (working_state_not_carried ~reason:"displaces_atoms")
-;;
-
 (* A range that opens on an assistant turn is composed with the omission
    preamble in front, and the preamble is no durable atom. The reading must
    count only the history's atoms that went out, or its front names the atom
    after the one sent and the next request's seed starts one atom late. *)
-let test_a_dropped_preamble_is_not_a_durable_atom () =
+let test_a_preamble_is_not_a_durable_atom () =
   let history =
     List.init 40 (fun index ->
       if index mod 2 = 0
@@ -1927,42 +1526,25 @@ let test_a_dropped_preamble_is_not_a_durable_atom () =
          }
          : Agent_core.Types.message))
   in
-  let measure = Keeper_antigravity_runtime.For_testing.measure_model_input_message_bytes in
-  let preamble_bytes =
-    match
-      Runtime_model_input_tail_window.minimum_capacity_bytes
-        ~measure_message_bytes:measure
-        history
-    with
-    | Some bytes -> bytes
-    | None -> fail "the fixture history has no shrinkable atom"
-  in
-  (* The range opens at 21, an assistant turn, so it goes with a preamble.
-     The ceiling holds that preamble and the atoms from 30. *)
-  let capacity =
-    Keeper_antigravity_runtime.For_testing.reserved_prompt_bytes ~system_prompt:"system"
-      ~goal:"goal"
-    + preamble_bytes
-    + List.fold_left
-        (fun total message -> total + measure message)
-        0
-        (List.filteri (fun index _ -> index >= 30) history)
-  in
   let observed = ref None in
+  (* The range opens at 21, an assistant turn, so it goes with a preamble. *)
   let sent =
-    project_with_capacity
+    project_range
       ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 21 })
       ~on_model_input_window_observation:(fun reading -> observed := Some reading)
-      ~capacity
       history
   in
+  check bool "the range opens on the preamble" true
+    (match sent with
+     | first :: _ -> Runtime_model_input_tail_window.is_synthetic_preamble first
+     | [] -> false);
   let durable =
     List.filter
       (fun message -> not (Runtime_model_input_tail_window.is_synthetic_preamble message))
       sent
   in
-  check (list string) "the atoms from 30 go"
-    (encoded_history (List.filteri (fun index _ -> index >= 30) history))
+  check (list string) "the atoms from 21 go"
+    (encoded_history (List.filteri (fun index _ -> index >= 21) history))
     (encoded_history durable);
   match !observed with
   | None -> fail "the projection reported no window"
@@ -1970,7 +1552,7 @@ let test_a_dropped_preamble_is_not_a_durable_atom () =
     check int "the reading counts the atoms that went, not the preamble"
       (List.length durable) reading.transmitted_atoms;
     check (option string) "so its front is the first atom sent"
-      (Runtime_model_input_tail_window.atom_opening_digest history 30)
+      (Runtime_model_input_tail_window.atom_opening_digest history 21)
       (Some (carried_digest reading.model_input_front))
 ;;
 
@@ -1981,35 +1563,13 @@ let test_a_front_from_another_history_is_dropped () =
   in
   let seed_read = seed_read_at ~messages:other 53 in
   let projected =
-    project_with_capacity
+    project_range
       ~carried_front_seed:(fun () -> seed_read)
-      ~capacity:1_000_000
       messages
   in
-  check (list string) "a mismatched seed restarts from the whole fitting history"
+  check (list string) "a mismatched seed restarts from the whole history"
     (encoded_history messages)
     (encoded_history projected)
-;;
-
-let test_fixed_sections_at_capacity_are_refused () =
-  let capacity =
-    Keeper_antigravity_runtime.For_testing.reserved_prompt_bytes
-      ~system_prompt:"system"
-      ~goal:"goal"
-  in
-  match
-    capacity_projection
-      ~prompt_ceiling_bytes:(Some capacity)
-      ~system_prompt:"system"
-      ~goal:"goal"
-      None
-  with
-  | Error
-      (Agent_core.Error.Config
-         (Agent_core.Error.InvalidConfig { field = "prompt_ceiling_bytes"; _ })) ->
-    ()
-  | Error error -> fail (Agent_core.Error.to_string error)
-  | Ok _ -> fail "fixed sections filled the declared capacity"
 ;;
 
 (* The projection keys an Antigravity usage report as the completion hook
@@ -2276,21 +1836,9 @@ let () =
         ] )
     ; ( "model input window"
         , [ test_case
-              "an undeclared capacity is refused"
+              "the appended Gate reference is no durable atom"
               `Quick
-              test_unresolved_window_is_refused
-          ; test_case
-              "declared capacity windows history and reports the cut"
-              `Quick
-              test_ceiling_windows_history_and_reports_the_cut
-          ; test_case
-              "the appended Gate reference stays inside the window"
-              `Quick
-              test_appended_gate_reference_is_inside_the_window
-          ; test_case
-              "a Gate-only floor observes an empty durable range"
-              `Quick
-              test_gate_only_floor_observes_an_empty_durable_range
+              test_appended_gate_reference_is_no_durable_atom
           ; test_case
               "a seeded start matches the Agent Core carried range"
               `Quick
@@ -2307,34 +1855,18 @@ let () =
               "the Librarian front reaches the list and its error refuses"
               `Quick
               test_the_librarian_front_reaches_the_list_and_its_error_refuses
-          ; test_case
-              "a working state the window cannot fit stays out"
-              `Quick
-              test_a_working_state_the_window_cannot_fit_stays_out
         ; test_case
-            "a working state that leaves no turn stays out"
+            "a Librarian snapshot leads with its working state"
             `Quick
-            test_a_working_state_that_leaves_no_turn_stays_out
+            test_a_librarian_snapshot_leads_with_its_working_state
         ; test_case
-            "a working state the window holds goes"
+            "a preamble is not a durable atom"
             `Quick
-            test_a_working_state_the_window_holds_goes
-        ; test_case
-            "a working state that fits the cut goes"
-            `Quick
-            test_a_working_state_that_fits_the_cut_goes
-        ; test_case
-            "a dropped preamble is not a durable atom"
-            `Quick
-            test_a_dropped_preamble_is_not_a_durable_atom
+            test_a_preamble_is_not_a_durable_atom
           ; test_case
               "a front from another history is dropped"
               `Quick
               test_a_front_from_another_history_is_dropped
-          ; test_case
-              "fixed sections at capacity are refused"
-              `Quick
-              test_fixed_sections_at_capacity_are_refused
           ; test_case
               "stream usage is keyed by the CLI's turn"
               `Quick

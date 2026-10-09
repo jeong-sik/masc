@@ -4256,6 +4256,7 @@ for line in sys.stdin:
 let fixture_trace_with_no_completed_turn = "fixture-trace-no-completed-turn"
 
 let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projection
+    ?on_memory_capacity_refusal
     ?(initial_messages = []) ?base_path ?raw_trace_path ?session_id
     ?on_native_tool_progress ?on_native_tool_completion ?on_event ?on_request_attribution ?(keeper_name = "codex-fixture")
     ?(system_prompt = "pre-dispatch fixture system prompt")
@@ -4313,6 +4314,7 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                       ~agent_core_tools:tools
                       ~initial_messages
                       ?model_input_projection
+                      ?on_memory_capacity_refusal
                       ?accept
                       ?hooks
                       ?context_injector
@@ -4326,6 +4328,114 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                       ()
                     |> Result.map (fun selected ->
                       selected.Keeper_turn_driver.run_result))))))
+;;
+
+let test_keeper_reprojects_memory_after_actual_codex_capacity_refusal () =
+  let module Memory = Keeper_workspace_memory_host_recall in
+  let base_path = temp_workspace "codex-memory-capacity-" in
+  let capture_path = Filename.concat base_path "requests.jsonl" in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+    let module IO = Keeper_workspace_memory_selection_io in
+    let destination : Typesafeai_client.destination =
+      {endpoint="https://fixture.invalid/evaluate";model="fixture";api_key="fixture"} in
+    let adapter = IO.create ~config:(Workspace.default_config base_path)
+      ~keeper_id:"codex-memory-capacity" ~destinations:(destination,[]) in
+    let receipt_path = IO.journal_path adapter in
+    let row id = `Assoc
+      [ "id", `String id; "use", `String "comparison"
+      ; "shared_interpretation", `String ("Deployment evidence " ^ id)
+      ; "sources", `Assoc
+          [ "found", `Bool true; "id", `String id
+          ; "members", `List [ `Assoc
+              [ "keeper_id", `String "source-keeper"
+              ; "source_state", `String "present"
+              ; "current_claim", `String (id ^ String.make 2000 'x') ] ] ] ] in
+    let rows = List.map row ["alpha";"beta";"gamma";"delta"] in
+    let payload = `Assoc
+      [ "selection_id", `String (IO.selection_id adapter)
+      ; "status", `String "selected"; "selected", `List rows ] in
+    let receipts = ref 0 in
+    let prepared = Memory.For_testing.prepare_projection ~payload
+        ~validate:(fun payload ->
+          let selected = Yojson.Safe.Util.(member "selected" payload |> to_list) in
+          if List.for_all (fun record -> List.mem record rows) selected
+          then Ok () else Error "selected source record changed")
+        ~retain:(fun ~reason ~payload ->
+          match IO.retain_projection adapter ~reason ~payload with
+          | Error _ as failed -> failed
+          | Ok () -> incr receipts; Ok ()) in
+    let original = Memory.render_prepared prepared in
+    let refusals = ref [] in
+    let on_memory_capacity_refusal ~refusal =
+      refusals := refusal :: !refusals;
+      Memory.defer_for_capacity prepared ~refusal in
+    let hooks : Agent_core.Hooks.hooks =
+      { Agent_core.Hooks.empty with before_turn_params = Some (function
+          | BeforeTurnParams {current_params;_} ->
+            let rendered = Memory.render_prepared prepared in
+            if !receipts > 0 then
+              check bool "capacity receipt is on disk before retry preparation" true
+                (Sys.file_exists receipt_path);
+            AdjustParams {current_params with extra_system_context =
+              Some rendered}
+          | _ -> Continue) } in
+    let overflow =
+      {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"failed","error":{"message":"context is full","codexErrorInfo":"contextWindowExceeded"}}}}|} in
+    with_fixture_sequence ~capture_path
+      [init_result;account_chatgpt;thread_result;turn_result;overflow]
+      [init_result;account_chatgpt;thread_result;turn_result;item_completed;turn_completed]
+      (fun cli_path ->
+        match run_keeper_turn ~base_path ~initial_messages:[] ~hooks
+            ~on_memory_capacity_refusal ~keeper_name:"codex-memory-capacity"
+            ~cli_path ~model:"gpt-fixture" () with
+        | Error error -> fail (Agent_core.Error.to_string error)
+        | Ok result -> check string "actual retry settles the response"
+            "MASC_SUBSCRIPTION_OK" (keeper_response_text result));
+    (match !refusals with
+     | [Agent_core.Error.Api (ContextOverflow _)] -> ()
+     | _ -> fail "actual provider window refusal did not reach the memory callback once");
+    check int "one durable capacity projection receipt" 1 !receipts;
+    let receipt = Yojson.Safe.from_file receipt_path in
+    let saved = Yojson.Safe.Util.member "payload" receipt in
+    check bool "receipt preserves entire retained source records" true
+      (Yojson.Safe.Util.member "selected" saved = `List (List.take 2 rows));
+    check int "receipt names the withheld whole-record gap" 2
+      Yojson.Safe.Util.(member "capacity_deferred_count" saved |> to_int);
+    check string "receipt retains the original provider refusal"
+      (Agent_core.Error.to_string (List.hd !refusals))
+      Yojson.Safe.Util.(member "reason" receipt |> to_string);
+    let reduced = Memory.render_prepared prepared in
+    let encoded_context text =
+      { (Agent_core.Types.system_msg text) with
+        metadata = Agent_core.Types.Extra_system_context_provenance.metadata }
+      |> Keeper_official_client_host.encode_history_message in
+    let requests = In_channel.with_open_bin capture_path In_channel.input_lines
+      |> List.map Yojson.Safe.from_string in
+    let requests_for method_ = List.filter (fun request ->
+      Yojson.Safe.Util.member "method" request = `String method_) requests in
+    check int "history is already at its empty floor on both attempts" 0
+      (List.length (requests_for "thread/inject_items"));
+    check int "exactly two real turn requests reached the child" 2
+      (List.length (requests_for "turn/start"));
+    let instructions = requests_for "thread/start" |> List.map (fun request ->
+      Yojson.Safe.Util.(member "params" request |> member "developerInstructions" |> to_string)) in
+    (match instructions with
+     | [first;retry] ->
+       check bool "first actual wire carries the complete original memory" true
+         (String_util.contains_substring first (encoded_context original));
+       check bool "second actual wire carries the reduced projection with its gap" true
+         (String_util.contains_substring retry (encoded_context reduced));
+       check bool "actual developer-instruction bytes decrease" true
+         (String.length retry < String.length first);
+       check bool "withheld source body does not survive on retry" false
+         (String_util.contains_substring retry ("gamma" ^ String.make 2000 'x'))
+     | values -> failf "expected two fresh instruction wires, got %d" (List.length values));
+    let turn_inputs = requests_for "turn/start" |> List.map (fun request ->
+      Yojson.Safe.Util.(member "params" request |> member "input")) in
+    (match turn_inputs with
+     | [first;retry] -> check bool "memory-only retry preserves the user input" true (first = retry)
+     | _ -> fail "missing actual turn input"))
 ;;
 
 let test_keeper_maps_official_context_error_to_typed_core_error () =
@@ -6416,7 +6526,8 @@ let test_production_keeper_quiet_final_contract () =
   List.iter (fun (label, turn_kind, input_speaker, tail, expected_tool, expected_quiet) ->
     let base_path = temp_workspace "masc-codex-quiet-" in
     let capture_path = Filename.concat base_path "quiet-protocol.jsonl" in
-    let dynamic_context_for_tools = Some (fun tools ->
+    let dynamic_context_for_tools = Some (fun access ->
+      let tools = Masc.Keeper_request_tool_access.offered access in
       Option.iter (fun (name, _) ->
         check bool "fixture ordinary tool is actually offered" true
           (List.exists (fun (tool : Agent_core.Tool.t) -> tool.schema.name = name) tools)) expected_tool;
@@ -7703,7 +7814,8 @@ let () =
             test_completed_message_streams_without_delta
         ; test_case "structured refusal survives protocol decoding" `Quick test_rpc_input_capacity_data; test_case "prompt uses exact Unicode scalar count" `Quick test_prompt_char_count] )
     ; ( "last projection"
-      , [ test_case "keeper exact content boundaries" `Quick test_keeper_codex_content_boundaries
+      , [ test_case "actual capacity refusal reduces whole memory on Codex wire" `Quick test_keeper_reprojects_memory_after_actual_codex_capacity_refusal
+        ; test_case "keeper exact content boundaries" `Quick test_keeper_codex_content_boundaries
         ; test_case "late content delta is rejected" `Quick test_codex_content_delta_after_completion_is_rejected
         ; test_case "empty overflow retry survives the next production turn" `Quick
             test_production_empty_retry_boundary_survives_the_next_turn

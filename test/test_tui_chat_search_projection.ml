@@ -888,8 +888,87 @@ let test_rich_card_repeat_follows_interleaved_source_order () = at_sizes (fun or
     ((Render.keeper_message_find_scroll state ~keeper_name:"alpha" ~needle:"WEB LINK"
       ~older_than:(Some older)).match_result=None))
 
+let test_search_executor_owns_frozen_source () = at_sizes (fun origin ->
+  let state=state origin in
+  state.link_previews_mode <- `Off;
+  let original=row ~id:"executor-owned" ~request_id:"executor-owned" ~role:user
+    ~text:"OLDER_MATCH newest MATCH" 1. in
+  state.msg_loaded <- [original];
+  let work=Render.prepare_keeper_message_search state ~keeper_name:"alpha"
+    ~needle:"MATCH" ~older_than:None in
+  Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+    let pool=Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+    let started,started_resolver=Eio.Promise.create () in
+    let release,release_resolver=Eio.Promise.create () in
+    let completed,completed_resolver=Eio.Promise.create () in
+    let owner=Domain.self () in
+    Eio.Fiber.fork ~sw (fun () ->
+      let result=Domain_pool.submit_cpu pool (fun () ->
+        Eio.Promise.resolve started_resolver (Domain.self () <> owner);
+        Eio.Promise.await release;
+        Render.run_keeper_message_search work) in
+      Eio.Promise.resolve completed_resolver result);
+    check bool "matching is admitted on an actual different executor domain" true
+      (Eio.Promise.await started);
+    (* The UI domain resumes while its search waits independently. Arrivals
+       cannot mutate the already-owned producer runs in that worker. *)
+    state.link_previews_mode <- `Rich;
+    check bool "changed card presentation rejects the frozen job" false
+      (Render.keeper_message_search_is_current state work);
+    state.link_previews_mode <- `Off;
+    state.msg_loaded <- [{original with me_text="REPLACED_SOURCE"}];
+    check bool "source replacement rejects the frozen job's admission" false
+      (Render.keeper_message_search_is_current state work);
+    Eio.Promise.resolve release_resolver ();
+    let answer=Eio.Promise.await completed in
+    let result=Render.complete_keeper_message_search work answer in
+    let _,cursor=Option.get result.match_result in
+    check bool "worker searched the actual frozen original occurrence" true
+      (match cursor.T.matched_position with Masc_tui_chat_search.Body_byte {offset;_} ->
+        offset=19 | _ -> false);
+    state.msg_loaded <- [original];
+    let execution=T.turn_log_create ~keeper_name:"alpha" ~request_id:"metadata-only" ~started_at:2. in
+    let occurrence : Live.tool_occurrence = {stream_scope=0;block_index=1;
+      provider_message_id=None;tool_call_id=Some "metadata-only-native"} in
+    T.turn_log_add ~now:2. execution ~seq:(Some 0) Live.Run_started;
+    T.turn_log_add ~now:3. execution ~seq:(Some 1)
+      (Live.Native_tool_started {occurrence;tool_name=Some "Execute"});
+    T.turn_log_add ~now:4. execution ~seq:(Some 2)
+      (Live.Native_tool_progress {occurrence;progress=Runtime_native_tools.Output_observed {byte_count=9}});
+    state.msg_live <- Some execution;
+    let admitted=Render.admit_keeper_message_search state work answer in
+    check bool "unchanged settled speech survives new live tool metadata/suffix" true
+      (Option.is_some admitted);
+    let current=Option.get admitted in
+    check bool "reprojection preserves exact original occurrence" true
+      (match current.match_result with Some (_,held) -> held.T.matched_position=cursor.matched_position | None -> false);
+    T.apply_clamped_scroll state (T.Message_scroll (fst (Option.get current.match_result)));
+    check bool "reprojected current frame shows actual matched speech" true
+      (Astring.String.is_infix ~affix:"newest MATCH" (screen state));
+    let before_retarget=state.msg_search_generation in
+    state.msg_target_keeper_name <- Some "beta";
+    T.restore_keeper_chat_page state "beta";
+    state.msg_target_keeper_name <- Some "alpha";
+    T.restore_keeper_chat_page state "alpha";
+    state.msg_loaded <- [original];
+    check bool "actual page restore retires alpha/beta/alpha generation" true
+      (state.msg_search_generation > before_retarget);
+    check bool "returned alpha cannot admit the old owned search" true
+      (Option.is_none (Render.admit_keeper_message_search state work answer));
+    T.suspend_workspace_readings state;
+    check bool "retired workspace generation cannot admit old answer" true
+      (Option.is_none (Render.admit_keeper_message_search state work answer));
+    let older=Render.prepare_keeper_message_search state ~keeper_name:"alpha"
+      ~needle:"MATCH" ~older_than:(Some cursor) in
+    let repeated=Render.complete_keeper_message_search older
+      (Domain_pool.submit_cpu pool (fun () -> Render.run_keeper_message_search older)) in
+    let _,earlier=Option.get repeated.match_result in
+    check bool "executor result keeps repeat source ordering" true
+      (Masc_tui_chat_search.compare_position earlier.matched_position cursor.matched_position < 0))))
+
 let () = run "chat search projection" [
   "rendered conversation", [
+    test_case "search executor owns frozen source and keeps repeat cursor" `Quick test_search_executor_owns_frozen_source;
     test_case "rich card repeat follows interleaved source sequence" `Quick test_rich_card_repeat_follows_interleaved_source_order;
     test_case "empty projection follows future arrivals" `Quick test_empty_projection_does_not_hold_future_arrivals;
     test_case "polled absolute source survives rolling and journal takeover" `Quick test_polled_source_survives_tail_and_journal_takeover;

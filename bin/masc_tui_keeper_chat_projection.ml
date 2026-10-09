@@ -1036,7 +1036,7 @@ let decode_custom_event ~request state fields =
       let* _ = optional_string ~surface:native_surface "toolCallName" native_fields
           |> Result.map_error (fun detail -> Malformed_event detail) in
       let* () = match List.assoc_opt "completion" native_fields with
-        | None -> Ok ()
+        | None -> Error (Malformed_event (native_surface ^ ": completion is required"))
         | Some json ->
             Runtime_native_tools.completion_of_json json
             |> Result.map (fun _ -> ())

@@ -57,10 +57,13 @@ let host_environment () =
   Array.of_list
     (List.filter (fun entry -> not (List.mem (key entry) fixed)) (Array.to_list (Unix.environment ())))
 
-(* Who opened the port: the process started here; once that one has ended,
-   one it left in its process group; or, with that group empty, a process
-   this server did not start. *)
-type started = First_process of int | Its_group of int | Not_started_here
+(* Who opened the port: the process started here, with the handle a failure
+   path stops; once that one has ended, one it left in its process group;
+   or, with that group empty, a process this server did not start. *)
+type started =
+  | First_process of Posix_spawn_detached.t
+  | Its_group of Posix_spawn_detached.t
+  | Not_started_here
 
 (* A Firefox may end its first process and go on in another. Applying a
    staged update, it starts the updater, which starts Firefox again; whether
@@ -79,8 +82,8 @@ let start_firefox ~sw ~net ~clock ~ready_timeout_s ~base_path (config : Browser_
       match port_state ~net ~clock ~port:config.port with
       | Answers ->
         (match Eio.Promise.peek firefox.exited with
-         | None -> Ok (First_process firefox.pid)
-         | Some _ when Posix_spawn_detached.group_has_members firefox -> Ok (Its_group firefox.pid)
+         | None -> Ok (First_process firefox)
+         | Some _ when Posix_spawn_detached.group_has_members firefox -> Ok (Its_group firefox)
          | Some _ -> Ok Not_started_here)
       | Nothing_listens -> not_yet ~timed_out:(Keeper_firefox.Not_listening ready_timeout_s)
       | Unknown detail ->
@@ -90,7 +93,12 @@ let start_firefox ~sw ~net ~clock ~ready_timeout_s ~base_path (config : Browser_
       match Eio.Promise.peek firefox.exited with
       | Some status when not (Posix_spawn_detached.group_has_members firefox) ->
         Error (Keeper_firefox.Exited_before_listening status)
-      | Some _ | None when Monotonic_deadline.passed deadline -> Error timed_out
+      | Some _ | None when Monotonic_deadline.passed deadline ->
+        (* The Firefox started here holds the port unauthenticated (RFC
+           §5), so a readiness failure stops it rather than leaving it for
+           the next boot to find. *)
+        Posix_spawn_detached.stop_group ~clock firefox;
+        Error timed_out
       | Some _ | None -> Eio.Time.sleep clock firefox_ready_poll_s; await ()
     in
     await ()
@@ -106,15 +114,22 @@ let start_host ~sw ~base_path ~launcher (config : Browser_configuration.live_bid
     spawn_logged ~sw ~argv:(Keeper_firefox.host_argv ~launcher ~port:config.port)
       ~env:(host_environment ()) ~log_path
   with
-  | Error detail -> Log.Server.error "browser-lane: the BiDi host did not start: %s" detail
+  | Error detail -> Error detail
   | Ok host ->
     Log.Server.info "browser-lane: started the BiDi host (pid %d) for %s; its output is in %s"
-      host.pid (Keeper_firefox.bidi_url ~port:config.port) log_path
+      host.pid (Keeper_firefox.bidi_url ~port:config.port) log_path;
+    Ok ()
 
 let answering_port_line =
   "if that is not this profile's Firefox, the host's record says why it could not attach"
 
-type firefox = Ready | Undetermined of string | Failed of Keeper_firefox.firefox_failure
+(* [Ready] carries the Firefox this run started, when it did: one whose port
+   already answered, or that answered only after emptying its group, was not
+   started here and is not this server's to stop. *)
+type firefox =
+  | Ready of Posix_spawn_detached.t option
+  | Undetermined of string
+  | Failed of Keeper_firefox.firefox_failure
 
 let start_both ~sw ~env ~ready_timeout_s ~base_path ~launcher (config : Browser_configuration.live_bidi) =
   let net = Eio.Stdenv.net env and clock = Eio.Stdenv.clock env in
@@ -123,30 +138,37 @@ let start_both ~sw ~env ~ready_timeout_s ~base_path ~launcher (config : Browser_
     | Answers ->
       Log.Server.info "browser-lane: port %d already answers, so no Keeper Firefox is started; %s"
         config.port answering_port_line;
-      Ready
+      Ready None
     | Unknown detail -> Undetermined detail
     | Nothing_listens ->
       (match start_firefox ~sw ~net ~clock ~ready_timeout_s ~base_path config with
-       | Ok (First_process pid) ->
-         Log.Server.info "browser-lane: started the Keeper Firefox (pid %d) on %s with profile %s" pid
-           (Keeper_firefox.bidi_url ~port:config.port) config.profile;
-         Ready
-       | Ok (Its_group pgid) ->
+       | Ok (First_process handle) ->
+         Log.Server.info "browser-lane: started the Keeper Firefox (pid %d) on %s with profile %s"
+           handle.pid (Keeper_firefox.bidi_url ~port:config.port) config.profile;
+         Ready (Some handle)
+       | Ok (Its_group handle) ->
          Log.Server.info
            "browser-lane: started the Keeper Firefox (process group %d; its first process ended before \
             the port answered) on %s with profile %s"
-           pgid (Keeper_firefox.bidi_url ~port:config.port) config.profile;
-         Ready
+           handle.pid (Keeper_firefox.bidi_url ~port:config.port) config.profile;
+         Ready (Some handle)
        | Ok Not_started_here ->
          Log.Server.info
            "browser-lane: the Keeper Firefox started here ended with nothing left in its process \
             group, and port %d answers from another process; %s"
            config.port answering_port_line;
-         Ready
+         Ready None
        | Error failure -> Failed failure)
   in
   match firefox with
-  | Ready -> start_host ~sw ~base_path ~launcher config
+  | Ready owned -> (
+    match start_host ~sw ~base_path ~launcher config with
+    | Ok () -> ()
+    | Error detail ->
+      Log.Server.error "browser-lane: the BiDi host did not start: %s" detail;
+      (* The pairing is the point (RFC §5): the Firefox this run started is
+         stopped when no host serves its lane; one already running stays. *)
+      Option.iter (Posix_spawn_detached.stop_group ~clock) owned)
   | Undetermined detail ->
     Log.Server.error
       "browser-lane: cannot tell whether port %d answers (%s); neither the Keeper Firefox nor \

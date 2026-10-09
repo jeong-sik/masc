@@ -76,3 +76,21 @@ let group_has_members t =
   match Unix.kill (-t.pid) 0 with
   | () -> true
   | exception Unix.Unix_error ((Unix.ESRCH | Unix.EPERM), _, _) -> false
+
+let signal_group t signal = try Unix.kill (-t.pid) signal with Unix.Unix_error _ -> ()
+
+(* A graceful stop asks the whole group to end, then escalates once
+   [grace_s] has passed without the group emptying. Both signals go to the
+   group only, so a pre-existing process outside it is untouched; a group
+   that already ended, or a pid the OS gave to another process, answers
+   ESRCH or EPERM and counts as stopped. *)
+let stop_group ~clock ?(grace_s = 5.0) t =
+  signal_group t Sys.sigterm;
+  if group_has_members t then begin
+    let deadline = Monotonic_deadline.after ~seconds:grace_s in
+    while group_has_members t && not (Monotonic_deadline.passed deadline) do
+      Eio.Time.sleep clock 0.2
+    done;
+    if group_has_members t then signal_group t Sys.sigkill
+  end
+

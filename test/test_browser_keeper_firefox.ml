@@ -220,6 +220,26 @@ let spawn_of_a_missing_executable_is_an_error () =
     | Error detail ->
       check bool detail true (String_util.contains_substring detail "/nonexistent/firefox")))
 
+(* A group that keeps SIGTERM ignored (an ignored disposition survives
+   exec(2)) still ends within the grace window: the stop escalates. *)
+let stop_group_escalates_when_term_is_ignored () =
+  Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+    let output = Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0 in
+    Fun.protect
+      ~finally:(fun () -> try Unix.close output with Unix.Unix_error _ -> ())
+      (fun () ->
+        match
+          Posix_spawn_detached.spawn ~sw
+            ~argv:[ "/bin/sh"; "-c"; "trap '' TERM; " ^ sleeper_command "stopped-group" ]
+            ~env:(Unix.environment ()) ~output
+        with
+        | Error detail -> fail detail
+        | Ok child ->
+          check bool "members before the stop" true (Posix_spawn_detached.group_has_members child);
+          Posix_spawn_detached.stop_group ~clock:(Eio.Stdenv.clock env) ~grace_s:1.0 child;
+          check bool "a group ignoring TERM is emptied" false
+            (Posix_spawn_detached.group_has_members child))))
+
 (* --- what the server starts ------------------------------------------------ *)
 
 let free_port () =
@@ -263,6 +283,18 @@ let await_file path =
   let rec wait () =
     if Sys.file_exists path && String.trim (read path) <> "" then ()
     else if Unix.gettimeofday () > deadline then fail (path ^ " was not written")
+    else (Unix.sleepf 0.05; wait ()) in
+  wait ()
+
+(* [pid] may be reaped by the time it is checked, and the OS may have given
+   it to another process, so this asks only whether a live process answers
+   and fails with [why] once the deadline passes with one still there. *)
+let await_dead ?(deadline_s = 10.) pid why =
+  let alive pid = match Unix.kill pid 0 with () -> true | exception Unix.Unix_error _ -> false in
+  let deadline = Unix.gettimeofday () +. deadline_s in
+  let rec wait () =
+    if not (alive pid) then ()
+    else if Unix.gettimeofday () > deadline then fail why
     else (Unix.sleepf 0.05; wait ()) in
   wait ()
 
@@ -426,7 +458,31 @@ let a_firefox_that_never_opens_its_port_starts_no_host () =
       started ~ready_timeout_s:1. ~base ~configuration:(configured ~firefox ~port:(free_port ()) base) ();
       let waited = Unix.gettimeofday () -. began in
       check bool "waited until the timeout, and no longer" true (waited >= 1. && waited < 10.);
-      check bool "no host" false (host_started base)))
+      check bool "no host" false (host_started base);
+      (* The Firefox this start owns leaves no unauthenticated port behind. *)
+      match first_pid firefox_marker with
+      | None -> fail "the firefox marker was not written"
+      | Some pid -> await_dead pid "the timed-out Firefox was stopped"))
+
+(* A host that cannot even open its log leaves the Firefox this start owns
+   serving its port with no host, so that Firefox is stopped. A previous
+   log that cannot be moved aside (a directory in its place) makes the open
+   fail before anything is spawned. *)
+let a_host_that_cannot_start_stops_the_firefox_started_here () =
+  with_workspace (fun base ->
+    let firefox_marker, host_marker = markers base in
+    install_lane base ~marker:host_marker;
+    let log = Keeper_firefox.host_log_path ~base_path:base in
+    write log "";
+    Unix.mkdir (Keeper_firefox.previous_log_path log) 0o700;
+    let port = free_port () in
+    let firefox = fake_firefox base ~marker:firefox_marker Listens in
+    with_children ~base [ firefox_marker; host_marker ] (fun () ->
+      started ~base ~configuration:(configured ~firefox ~port base) ();
+      check bool "no host ran" false (Sys.file_exists host_marker);
+      match first_pid firefox_marker with
+      | None -> fail "the firefox marker was not written"
+      | Some pid -> await_dead pid "the Firefox was stopped when its host did not start"))
 
 let nothing_is_started_without_the_table_or_with_the_lane_off () =
   with_workspace (fun base ->
@@ -497,7 +553,8 @@ let () =
     ; ( "detached spawn"
       , [ test_case "exit status and output" `Quick spawn_reports_exit_and_writes_output
         ; test_case "outlives its switch in its own group" `Quick spawn_outlives_its_switch_in_its_own_group
-        ; test_case "a missing executable" `Quick spawn_of_a_missing_executable_is_an_error ] )
+        ; test_case "a missing executable" `Quick spawn_of_a_missing_executable_is_an_error
+        ; test_case "stop escalates when TERM is ignored" `Quick stop_group_escalates_when_term_is_ignored ] )
     ; ( "server start"
       , [ test_case "a free port: Firefox, then the host" `Quick a_free_port_starts_firefox_then_the_host
         ; test_case "an answering port: the host only" `Quick an_answering_port_starts_only_the_host
@@ -507,6 +564,8 @@ let () =
         ; test_case "a Firefox that goes on in another process" `Quick
             a_firefox_that_goes_on_in_another_process_gets_its_host
         ; test_case "a Firefox that never opens its port" `Quick a_firefox_that_never_opens_its_port_starts_no_host
+        ; test_case "a host that cannot start stops the Firefox started here" `Quick
+            a_host_that_cannot_start_stops_the_firefox_started_here
         ; test_case "no table, or the lane off" `Quick nothing_is_started_without_the_table_or_with_the_lane_off
         ; test_case "a host on another port" `Quick a_host_on_another_port_starts_nothing
         ; test_case "the host's environment" `Quick the_host_is_not_given_the_servers_address

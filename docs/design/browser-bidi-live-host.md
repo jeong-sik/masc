@@ -223,7 +223,7 @@ record: a host that held the lock under its predecessor's record would be
 read as that predecessor. A record that could not be written later does not
 stop a serving host; the next write that succeeds carries it.
 
-Three places read the record and say what it says, with what the operator
+Four places read the record and say what it says, with what the operator
 does next:
 
 - `masc doctor` prints a `browser_bidi_host` line. It reads the files, so it
@@ -252,10 +252,16 @@ does next:
   while no connected browser serves it gets `bidiHost` in the answer, with
   `state` and `message` only, to pass on to the operator. An answer that
   offers a connection in `servingClients` has no `bidiHost`.
+- The TUI's Browser Lane picker draws it from the server's `bidiHost`:
+  whether a host runs and whether the server lists it, why the last one
+  ended, what comes before the next, the results the host holds no
+  acknowledgement for, and the command that starts one
+  ([the rows](../guides/tui-browser-lanes.md)).
 
-Each of the three reads the record first and asks the server for its
-connections once, after that. What an answer says of the host and the
-connections it lists are of that one list.
+The doctor, the connection list and the Keeper's answer each read the
+record first and ask the server for its connections once, after that. What
+an answer says of the host and the connections it lists are of that one
+list. The TUI draws what the connection list answered.
 
 The paragraph says what comes before the next host. That follows what became
 of the last one's session. Once a host has run, the host command in the

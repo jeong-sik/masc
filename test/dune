@@ -7040,7 +7040,7 @@
 (test
  (name test_tui_browser_lane)
  (modules test_tui_browser_lane)
- (libraries masc.browser_lane masc_tui_frame masc_tui_types))
+ (libraries masc masc.browser_lane masc.string_util masc_tui_frame masc_tui_message_layout masc_tui_types))
 
 (test
  (name test_tui_browser_lane_text)

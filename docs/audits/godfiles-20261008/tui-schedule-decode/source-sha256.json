@@ -2,11 +2,5 @@
   "bin/dune": "398c62e9b85a258ba85883dcf3b5fafdaab4920d895d9db49af10b4db43f6e3f",
   "bin/masc_tui_loader.ml": "97fec2fc3a40d3d7046cb9c1277b64ab74131df5c7de980209f6184699e8de14",
   "bin/masc_tui_schedule_decode.ml": "f4f2d63f88ebd2fc864097d1db64fab0c07d4de98e5b41ca5858641256c442e4",
-  "bin/masc_tui_schedule_decode.mli": "fc051ff8867b2151bcda1033d97320f948cb5165e0ed5ec630acca6aad5d1cfc",
-  "test/test_tui_schedule_wake_error_once.py": "0ae7a3cef53aa5f8ab372a0cbd2754d98281b59318cac734bea29eef29b39e29",
-  "test/test_tui_keeper_schedule_error_once.py": "76ee712e8da1c60ec142f183fbe7545ee11391386f7898b01688083a4ced3987",
-  "test/test_tui_schedules_empty_row_names_its_key.py": "086366eb023e78f193e08ce17876583110db244cd243d655b0064bdf161f1929",
-  "test/tui_keyboard_schedule.py": "de1d51c49395a6698795c62b48442341d7be2a8a0a507754b0352a66a953e408",
-  "test/tui_keyboard_chat.py": "0e735631d674a3686af7e4d154c1fbe26d05a52c43baf262f6e61deef34d0646",
-  "test/tui_keyboard_harness.py": "45838a54d36eb178c62c00df08b57cc0d9477302b696fd60d01e9691e7b24f3b"
+  "bin/masc_tui_schedule_decode.mli": "fc051ff8867b2151bcda1033d97320f948cb5165e0ed5ec630acca6aad5d1cfc"
 }

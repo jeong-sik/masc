@@ -12,22 +12,7 @@
     {
       "command": "opam exec -- dune build --root . -j 4 bin/masc_tui.exe",
       "exit_code": 0
-    },
-    {
-      "command": "python3 test/test_tui_schedule_wake_error_once.py _build/default/bin/masc_tui.exe",
-      "exit_code": 0,
-      "scenarios": 2
-    },
-    {
-      "command": "python3 test/test_tui_keeper_schedule_error_once.py _build/default/bin/masc_tui.exe",
-      "exit_code": 0,
-      "scenarios": 2
-    },
-    {
-      "command": "python3 test/test_tui_schedules_empty_row_names_its_key.py _build/default/bin/masc_tui.exe",
-      "exit_code": 0,
-      "scenarios": 1
     }
   ],
-  "scope": "focused compile and existing actual PTY interactions; no full CI or deployment"
+  "scope": "focused compile; no full CI or deployment"
 }

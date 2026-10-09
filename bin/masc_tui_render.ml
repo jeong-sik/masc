@@ -12332,6 +12332,49 @@ let config_path_note (state : state) =
   | None, None ->
       Ansi.dim ^ title_missing_reading ~error:None ^ Ansi.reset
 
+(* A provider id such as [codex_727e6d05] does not say which account it is,
+   and one account can sit under several ids. The Models pane names the
+   account from the account-email reading: a short label beside every
+   provider id, and the whole email on the selected binding. Drawing and
+   scroll arithmetic below use these same rows and these same detail lines. *)
+let config_models_drawn_rows (state : state) =
+  List.map
+    (fun (row : Masc_tui_model_runtime_table.row) ->
+      match fst (models_source_account_reading ~provider:row.provider state.runtime_config_view) with
+      | Some email ->
+          { row with
+            account_label =
+              Some
+                (Masc_tui_model_runtime_table.account_label_of_email
+                   (Terminal_text.single_line email))
+          }
+      | None -> row)
+    state.config_models_rows
+
+(* How many Keepers already sit on the selected login is the reading that was
+   missing on 2026-10-08, when fourteen were moved onto one account. Only a
+   complete roster is counted: a partial one would read as fewer Keepers. *)
+let config_models_detail (state : state) (row : Masc_tui_model_runtime_table.row) =
+  let account_email, account_notes =
+    models_source_account_reading ~provider:row.provider state.runtime_config_view in
+  let keepers =
+    match state.keeper_roster with
+    | Masc_tui_keeper_control.Roster_complete rows ->
+        Some
+          (Masc_tui_model_runtime_table.keepers_on_login
+             ~rows:state.config_models_rows
+             ~assignments:
+               (List.map
+                  (fun (keeper : Masc.Tui_decode.keeper_runtime) ->
+                    keeper.kr_name, keeper.kr_runtime_id)
+                  rows)
+             row)
+    | Masc_tui_keeper_control.Roster_unobserved
+    | Masc_tui_keeper_control.Roster_partial _
+    | Masc_tui_keeper_control.Roster_invalid _ -> None
+  in
+  account_notes @ Masc_tui_model_runtime_table.detail_lines ?account_email ?keepers row
+
 (* The model knobs sit in different tables -- [reasoning-effort] and
    [temperature] under [models.NAME], [max-tokens] under
    [PROVIDER.NAME] -- and runtime.toml is 2,300 lines, so reading it top to
@@ -12375,9 +12418,10 @@ let render_config_models (state : state) =
          box_empty buf cols
        done
    | None, Some _ ->
+       let drawn_rows = config_models_drawn_rows state in
        let detail =
          List.nth_opt state.config_models_rows state.config_models_cursor
-         |> Option.map Masc_tui_model_runtime_table.detail_lines
+         |> Option.map (config_models_detail state)
          |> Option.value ~default:[]
        in
        (* Keep the explanation attached to the selected row. Five rows are
@@ -12400,7 +12444,7 @@ let render_config_models (state : state) =
          Masc_tui_model_runtime_table.render
            ~width:(max 40 (cols - 6 - 2))
            ~pane:(max 1 (cols - 6 - 2))
-           state.config_models_rows
+           drawn_rows
        in
        let total = List.length table in
        (* The cursor walks bindings, not lines. In table mode line 0 is the
@@ -12410,13 +12454,13 @@ let render_config_models (state : state) =
           resize, which is the whole point of the transition. *)
        let pane_width = max 1 (cols - 6 - 2) in
        let table_mode =
-         Masc_tui_model_runtime_table.fits ~width:pane_width state.config_models_rows
+         Masc_tui_model_runtime_table.fits ~width:pane_width drawn_rows
        in
        let starts =
          if table_mode then []
          else
            Masc_tui_model_runtime_table.stacked_item_starts ~pane:pane_width
-             state.config_models_rows
+             drawn_rows
        in
        let cursor_line =
          if table_mode then state.config_models_cursor + 1
@@ -12507,7 +12551,7 @@ let config_models_scrolled (state : state) : scrolled =
   | None, Some _ ->
       let terminal_rows, cols = get_terminal_size () in
       let pane = max 1 (cols - 6 - 2) in
-      let rows = state.config_models_rows in
+      let rows = config_models_drawn_rows state in
       let document =
         Masc_tui_model_runtime_table.render ~width:(max 40 pane) ~pane rows
       in
@@ -12516,8 +12560,7 @@ let config_models_scrolled (state : state) : scrolled =
       in
       let detail_len =
         List.nth_opt rows state.config_models_cursor
-        |> Option.map (fun r ->
-               List.length (Masc_tui_model_runtime_table.detail_lines r))
+        |> Option.map (fun r -> List.length (config_models_detail state r))
         |> Option.value ~default:0
       in
       let detail_height = min detail_len (max 0 (content_height - 2)) in
@@ -12532,7 +12575,7 @@ let config_models_stacked (state : state) =
   let _, cols = get_terminal_size () in
   not
     (Masc_tui_model_runtime_table.fits ~width:(max 1 (cols - 6 - 2))
-       state.config_models_rows)
+       (config_models_drawn_rows state))
 
 let config_metadata_style = function
   | Masc_tui_runtime_config_view.Neutral -> Theme.recede ()

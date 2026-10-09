@@ -558,7 +558,6 @@ module For_testing : sig
   val project_input_for_attempt :
     ?project_media:
       (needs_projection:(Keeper_media_reading.kind -> bool) ->
-       deadline:Monotonic_deadline.t ->
        Agent_core.Types.content_block list ->
        Agent_core.Types.content_block list * (string * int) list) ->
     project_images:

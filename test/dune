@@ -5481,6 +5481,11 @@
  (libraries masc_test_deps))
 
 (test
+ (name test_keeper_media_reading_maintenance)
+ (modules test_keeper_media_reading_maintenance)
+ (libraries masc_test_deps))
+
+(test
  (name test_runtime_adapter_credential_requirement)
  (modules test_runtime_adapter_credential_requirement)
  (libraries masc_test_deps))

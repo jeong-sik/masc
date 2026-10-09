@@ -18,6 +18,22 @@ let kind_to_string = function
 
 let source_sha256 bytes = Digestif.SHA256.to_hex (Digestif.SHA256.digest_string bytes)
 
+(* A stored reading lives while a durable record still carries its
+   attachment. The sweep (Keeper_media_reading_maintenance) cannot decode and
+   hash every payload in every durable file, so the record keeps this slice of
+   the base64 text exactly as the block carried it, and the sweep searches the
+   durable files for the slice. A slice that also occurs in another payload only
+   keeps a reading longer. A durable record that re-encoded the payload hides
+   the slice, and the reading is read once more after the sweep removes it. *)
+let source_probe_length = 64
+
+let source_probe data =
+  let length = String.length data in
+  if length <= source_probe_length
+  then data
+  else String.sub data ((length - source_probe_length) / 2) source_probe_length
+;;
+
 let audio_extension media_type =
   match String.lowercase_ascii media_type with
   | "audio/wav" | "audio/x-wav" | "audio/wave" -> ".wav"
@@ -135,10 +151,15 @@ let media_type_segment media_type =
     media_type
 ;;
 
+(* The store sits outside every durable-consumer tree that
+   Vision_artifact_reference scans, so a record's own [source_probe] never
+   counts as a reference to itself. *)
+let store_dirname = "media-readings"
+
 let record_path ~base_path ~keeper_name ~kind ~media_type ~sha =
   Filename.concat
     (Filename.concat
-       (Filename.concat (Common.masc_dir_from_base_path ~base_path) "media-readings")
+       (Filename.concat (Common.masc_dir_from_base_path ~base_path) store_dirname)
        (safe_segment keeper_name))
     (Printf.sprintf "%s-%s-%s.json" (kind_to_string kind) sha (media_type_segment media_type))
 ;;
@@ -171,7 +192,7 @@ let load_reading ~base_path ~keeper_name ~kind ~media_type ~sha =
            | _ -> None)))
 ;;
 
-let store_reading ~base_path ~keeper_name ~kind ~media_type ~sha ~text =
+let store_reading ~base_path ~keeper_name ~kind ~media_type ~sha ~probe ~text =
   match base_path with
   | None -> ()
   | Some base_path ->
@@ -182,6 +203,7 @@ let store_reading ~base_path ~keeper_name ~kind ~media_type ~sha ~text =
         ; "kind", `String (kind_to_string kind)
         ; "media_type", `String media_type
         ; "source_sha256", `String sha
+        ; "source_probe", `String probe
         ; "reader_version", `String reader_version
         ; "status", `String "read"
         ; "text", `String text
@@ -237,8 +259,37 @@ let reference_text ~kind ~media_type ~source =
     source
 ;;
 
-let project_blocks ?base_path ~keeper_name ~needs_projection ~deadline ~read blocks =
-  let memo : (kind * string * string, string) Hashtbl.t = Hashtbl.create 4 in
+(* One projector serves one lane walk: every candidate and every message of
+   the walk share [memo], so an attachment is read at most once per walk,
+   whether the reading succeeded or not (docs/KEEPER-MEDIA-FALLBACK-H5.md §3).
+   The next turn builds a new projector, which is where an unavailable
+   attachment is retried. The deadline starts when the walk first has to run
+   a reader, not when the walk starts: provider attempts before the first
+   text-only candidate do not spend the reading budget. *)
+type projector =
+  { base_path : string option
+  ; keeper_name : string
+  ; read : reader
+  ; start_deadline : unit -> Monotonic_deadline.t
+  ; mutable deadline : Monotonic_deadline.t option
+  ; memo : (kind * string * string, string) Hashtbl.t
+  }
+
+let projector ?base_path ~keeper_name ~start_deadline ~read () =
+  { base_path; keeper_name; read; start_deadline; deadline = None; memo = Hashtbl.create 4 }
+;;
+
+let projector_deadline projector =
+  match projector.deadline with
+  | Some deadline -> deadline
+  | None ->
+    let deadline = projector.start_deadline () in
+    projector.deadline <- Some deadline;
+    deadline
+;;
+
+let project projector ~needs_projection blocks =
+  let { base_path; keeper_name; read; memo; _ } = projector in
   let replaced : (string * int) list ref = ref [] in
   let project_one ~kind ~media_type ~data ~source_type block =
     if not (needs_projection kind)
@@ -267,13 +318,21 @@ let project_blocks ?base_path ~keeper_name ~needs_projection ~deadline ~read blo
                  match load_reading ~base_path ~keeper_name ~kind ~media_type ~sha with
                  | Some reading -> read_text ~kind ~media_type ~sha ~text:reading
                  | None ->
+                   let deadline = projector_deadline projector in
                    (match
                       if Monotonic_deadline.passed deadline
                       then Error "budget_spent"
                       else read ~deadline ~kind ~media_type ~bytes
                     with
                     | Ok reading when String.trim reading <> "" ->
-                      store_reading ~base_path ~keeper_name ~kind ~media_type ~sha ~text:reading;
+                      store_reading
+                        ~base_path
+                        ~keeper_name
+                        ~kind
+                        ~media_type
+                        ~sha
+                        ~probe:(source_probe data)
+                        ~text:reading;
                       read_text ~kind ~media_type ~sha ~text:reading
                     | Ok _ -> unavailable_text ~kind ~media_type ~sha ~reason:"empty_reading"
                     | Error reason -> unavailable_text ~kind ~media_type ~sha ~reason)
@@ -295,4 +354,11 @@ let project_blocks ?base_path ~keeper_name ~needs_projection ~deadline ~read blo
       blocks
   in
   projected, List.rev !replaced
+;;
+
+let project_blocks ?base_path ~keeper_name ~needs_projection ~deadline ~read blocks =
+  project
+    (projector ?base_path ~keeper_name ~start_deadline:(fun () -> deadline) ~read ())
+    ~needs_projection
+    blocks
 ;;

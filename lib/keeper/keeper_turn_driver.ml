@@ -68,6 +68,16 @@ let media_projection_manifest_decision ~(runtime_id : string)
         ("media_projected_counts", `String (modality_counts_summary projected));
       ])
 
+(* One wall-clock deadline for every attachment a lane walk reads, built from
+   the operator's existing [turn.provider_call_deadline_sec]. That setting is
+   the per-attempt no-progress ceiling of a provider call; here it only caps
+   the pre-provider reading step, once per walk. It is not a turn-wide
+   deadline and reserves nothing for the fallback provider call. Attachments
+   and candidates share it, so the total wait does not grow with their
+   number. *)
+let media_reading_deadline () =
+  Monotonic_deadline.after ~seconds:(Keeper_runtime_resolved.provider_call_deadline_sec ())
+
 type output_contract = Provider_default | Tool_verdict
 
 
@@ -1463,29 +1473,22 @@ let project_input_for_attempt
       | Some project -> project
       | None ->
         (* No reader is wired for a caller that supplied none: attachments are
-           marked unavailable rather than read. The production walk below
-           passes the real readers. *)
-        fun ~needs_projection ~deadline blocks ->
-          Keeper_media_reading.project_blocks
+           marked unavailable rather than read. The production walk in
+           [run_named] passes one projector with the real readers for the
+           whole walk. *)
+        let projector =
+          Keeper_media_reading.projector
             ~keeper_name
-            ~needs_projection
-            ~deadline
+            ~start_deadline:media_reading_deadline
             ~read:(fun ~deadline:_ ~kind:_ ~media_type:_ ~bytes:_ -> Error "no_reader")
-            blocks
-    in
-    (* One wall-clock deadline for every attachment this projection reads, built
-       from the operator's existing [turn.provider_call_deadline_sec]. That
-       setting is the per-attempt no-progress ceiling of a provider call;
-       here it only caps this pre-provider step. It is not a turn-wide
-       deadline and reserves nothing for the fallback provider call. Attachments
-       share it, so the total wait does not grow with their number. *)
-    let media_deadline =
-      Monotonic_deadline.after ~seconds:(Keeper_runtime_resolved.provider_call_deadline_sec ())
+            ()
+        in
+        Keeper_media_reading.project projector
     in
     let media_projected = ref [] in
     let project_media_blocks blocks =
       let projected, counts =
-        project_media ~needs_projection:needs_media_projection ~deadline:media_deadline blocks
+        project_media ~needs_projection:needs_media_projection blocks
       in
       media_projected := Runtime_agent.merge_modality_counts !media_projected counts;
       projected
@@ -2276,6 +2279,20 @@ let run_named
         | Tool_verdict -> Keeper_vision_ingest.Store_only in
       project ~mode blocks
   in
+  (* H5: audio and document readings, like [project_images], belong to the
+     walk. Every text-only candidate of this walk reuses what an earlier one
+     read or failed to read, under one reading deadline. *)
+  let media_projector =
+    Keeper_media_reading.projector
+      ~base_path
+      ~keeper_name
+      ~start_deadline:media_reading_deadline
+      ~read:
+        (Keeper_media_reading.production_reader
+           ~base_path
+           ~budget_sec:(Keeper_runtime_resolved.provider_call_deadline_sec ()))
+      ()
+  in
   (* Sequential candidate attempt loop. On failure we record a manifest row and
      move to the next candidate; on success we record completion and return. *)
   attempt_runtime_candidates
@@ -2433,18 +2450,7 @@ let run_named
            attempt_agent_core_checkpoint=agent_core_checkpoint;
            attempt_replay_prefix_projection=Keeper_replay_prefix.unchanged}
         | None, None -> project_input_for_attempt
-          ~project_media:
-            (fun ~needs_projection ~deadline blocks ->
-              Keeper_media_reading.project_blocks
-                ~base_path
-                ~keeper_name
-                ~needs_projection
-                ~deadline
-                ~read:
-                  (Keeper_media_reading.production_reader
-                     ~base_path
-                     ~budget_sec:(Keeper_runtime_resolved.provider_call_deadline_sec ()))
-                blocks)
+          ~project_media:(Keeper_media_reading.project media_projector)
           ~project_images
           ~keeper_name
           ~emit_runtime_manifest

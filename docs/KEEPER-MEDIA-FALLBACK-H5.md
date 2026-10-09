@@ -268,3 +268,26 @@ test_voice_runtime_overlay.ml covers a slow first endpoint, a spent deadline
 and unchanged failover without a deadline.
 Unchanged on purpose: the microphone-capture and probe paths do not pass a
 deadline.
+
+## Review fixes: one reading per walk, and retention (polisher P2-1, P2-2)
+- One lane walk owns one `Keeper_media_reading.projector`, built in
+  `run_named` next to `project_images`. Its memo holds read and unavailable
+  results, so an attachment is read at most once per walk across candidates
+  and messages (§3 "read once per lane walk"). Before this, every attempt and
+  every message built its own memo and its own deadline, so a failing STT
+  call ran again for each text-only candidate. The reading deadline starts
+  when the walk first runs a reader. A new turn is a new walk and retries an
+  unavailable attachment, as §3 says.
+- Stored readings follow the kept vision store's retention rule instead of
+  sitting next to it (§1). A record keeps `source_probe`, the middle 64
+  characters of the attachment's base64 text.
+  `Keeper_media_reading_maintenance` asks
+  `Vision_artifact_reference.is_referenced` whether a durable file still
+  contains the probe. It deletes a record only after two complete sweeps found
+  it unreferenced. The operator runs it as `masc-deployment-preflight-helper
+  media-reading-maintenance <base_path>` under the BasePath lease, like
+  `vision-kept-maintenance`. The store stays at `.masc/media-readings/`,
+  outside the scanned durable trees, so a record's own probe never counts as
+  a reference. One difference from the vision rule: a record without a probe
+  cannot be shown to be live and is a candidate, because a reading can be read
+  again and a kept image cannot.

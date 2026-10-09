@@ -114,6 +114,12 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # context_review = false       # source Context + proposed summary preservation review
 # skill_applicability = false  # current request + authorized Skill body advice
 # librarian_preflight = false # Memory-only no-change judgment; generates no text
+# workspace_memory_selection_enabled = false
+# Set true separately to send current input/task context, shared interpretations
+# and source details for host-side shared-memory selection. Board/absorb opt-in
+# does not enable this gate. Lane credentials and excluded_keepers still apply.
+# Capacity-driven host-memory retries support Agent Core, Codex and Claude Code.
+# Muse/Antigravity lack that retry path when their memory reader is suppressed.
 # excluded_keepers = []
 
 # max_output_tokens is the output budget a lane's requests send as max_tokens.
@@ -602,8 +608,8 @@ turn-timeout-s = 600.0
 
 [claude_code.claude-code-opus-high]
 
-# The rest of the Claude Code ladder: Fable 5.1, Opus 5, Opus 5.5 and Sonnet 5.5
-# at every level the CLI takes (low..max), and Haiku 4.5.
+# The rest of the Claude Code ladder: Fable 5.1, Opus 5, Opus 5.5, Sonnet 5.5 and
+# Haiku 5.5 at every level the CLI takes (low..max), and Haiku 4.5.
 # Haiku 4.5 carries no level, so the CLI picks; its window is 200K
 # (OpenRouter /models anthropic/claude-haiku-4.5, 2026-09-22), and it
 # answered `claude -p --model claude-haiku-4-5` the same day.
@@ -839,6 +845,71 @@ reasoning-effort = "max"
 supports-image-input = true
 
 [claude_code.claude-code-fable-max]
+
+# Haiku 5.5 (released 2026-10-07) serves on the subscription: Claude Code
+# 2.1.294 answered `claude-subscription -p --model claude-haiku-5-5` on
+# 2026-10-08 at the CLI default and at --effort low, xhigh and max, and
+# reported a 1M context window each time. Ladder low..max as the platform
+# effort page (checked the same day).
+[models.claude-code-haiku-5-5-low]
+api-name = "claude-haiku-5-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+reasoning-effort = "low"
+
+[models.claude-code-haiku-5-5-low.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-haiku-5-5-low]
+
+[models.claude-code-haiku-5-5-medium]
+api-name = "claude-haiku-5-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+reasoning-effort = "medium"
+
+[models.claude-code-haiku-5-5-medium.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-haiku-5-5-medium]
+
+[models.claude-code-haiku-5-5-high]
+api-name = "claude-haiku-5-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+reasoning-effort = "high"
+
+[models.claude-code-haiku-5-5-high.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-haiku-5-5-high]
+
+[models.claude-code-haiku-5-5-xhigh]
+api-name = "claude-haiku-5-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+reasoning-effort = "xhigh"
+
+[models.claude-code-haiku-5-5-xhigh.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-haiku-5-5-xhigh]
+
+[models.claude-code-haiku-5-5-max]
+api-name = "claude-haiku-5-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+reasoning-effort = "max"
+
+[models.claude-code-haiku-5-5-max.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-haiku-5-5-max]
 
 [models.claude-code-haiku]
 api-name = "claude-haiku-4-5"
@@ -1364,10 +1435,6 @@ path = "~/.gemini/antigravity-cli/antigravity-oauth-token"
 [models.antigravity-gemini-3-7-flash-high]
 api-name = "gemini-3.7-flash-high"
 max-context = 1048576
-# Last prompt size proven end to end with agy 1.2.6 on 2026-09-18. Long-lived
-# Keepers later reached 21-48 MB and failed before their first turn (#37123).
-# This conservative ceiling is a measured success point, not the CLI maximum
-# or a tokenizer estimate; raise it only after a larger end-to-end probe.
 tools-support = true
 streaming = true
 
@@ -1378,7 +1445,6 @@ wizard-default = true
 # The rest of `agy models` (2026-09-22); the level is part of each name.
 # Gemini windows are the agent_core catalog's; the two Claude 4.6 models
 # carry Anthropic's published 1M (OpenRouter /models) and gpt-oss-120b 131072.
-# The prompt ceiling is the same measured agy 1.2.6 point as the row above.
 # Called that day: claude-sonnet-4-6 and claude-opus-4-6-thinking answered in
 # 8-10s; every gemini model, the one above included, gave no answer in 80s;
 # gpt-oss-120b-medium answered 503 "No capacity available".

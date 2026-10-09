@@ -888,7 +888,7 @@ let run_keeper_cycle
                    []
                in
                let recent_work = Keeper_recent_work.collect ~config ~meta in
-               let render_prompt tools observation =
+               let render_prompt ?workspace_memory_access tools observation =
                  let recent_work = Keeper_recent_work.transmit ~base_path:config.base_path ~tools recent_work in
                  Keeper_unified_prompt.build_prompt
                      ~turn_decision
@@ -897,6 +897,7 @@ let run_keeper_cycle
                      ~task_skill_surfaces
                      ~active_goal_summaries
                      ~workspace_memory
+                     ?workspace_memory_access
                      ~lane_updates
                      ~repository_freshness
                      ~recent_work
@@ -907,7 +908,8 @@ let run_keeper_cycle
                  Eio_guard.with_named_switch "turn:prompt" (fun () -> render_prompt [] observation)
                in
                let { Keeper_unified_prompt.world_state; user_message } = prompt_parts in
-               let dynamic_context_for_tools = Some (fun tools ->
+               let dynamic_context_for_tools = Some (fun access ->
+                 let tools = Keeper_request_tool_access.offered access in
                  Domain_pool_ref.submit_io_or_inline (fun () ->
                    let observation = match meta.input_policy, observation.own_recent_actions with
                      | Keeper_input_policy.Small, Ok turns ->
@@ -916,7 +918,7 @@ let run_keeper_cycle
                          ~policy:meta.input_policy ~tools turns in
                        {observation with own_recent_actions=Ok own_recent_actions}
                      | Wide, _ | Small, Error _ -> observation in
-                   (render_prompt tools observation).world_state)) in
+                   (render_prompt ~workspace_memory_access:access tools observation).world_state)) in
                Eio.Fiber.yield ();
                let base_dir = session_base_dir config in
                (* Ensure session dir tree for trace artifacts. *)

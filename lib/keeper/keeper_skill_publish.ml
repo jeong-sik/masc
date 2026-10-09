@@ -75,7 +75,7 @@ let refusal_class_and_effect = function
   | Write_outcome_unknown -> Tool_result.Runtime_failure, Tool_result.Effect_outcome_unknown
 ;;
 
-let handle ~config ~keeper_name ~args =
+let handle ~descriptors ~config ~keeper_name ~args =
   match request ~keeper_name args with
   | Error error ->
     failure
@@ -92,7 +92,20 @@ let handle ~config ~keeper_name ~args =
             (List.map (fun value -> `String value) (Publish.evidence_to_list request.evidence)) )
       ]
     in
-    (match (Atomic.get Workspace_hooks.keeper_skill_publish_fn) config request with
+    let publication =
+      match Keeper_skill_catalog.validate_authored_source ~descriptors
+          ~directory:(Skill_reference.package_id_to_string request.package_id)
+          request.source_text with
+      | Ok _ -> (Atomic.get Workspace_hooks.keeper_skill_publish_fn) config request
+      | Error error ->
+          let code, message = match error with
+            | Keeper_skill_catalog.Source_too_large { bytes; max_bytes } ->
+                "source_too_large", Printf.sprintf "Skill source is %d bytes; maximum is %d bytes" bytes max_bytes
+            | Invalid_document error ->
+                Keeper_skill_catalog.error_code error, Keeper_skill_catalog.error_to_string error in
+          Error (Publish.Refused { code; message; cause = Publish.Request_refused })
+    in
+    (match publication with
      | Ok (Publish.Created_and_published { reference; snapshot_revision; kind; diagnostics }) ->
        Keeper_tool_execution.success_data
          (`Assoc

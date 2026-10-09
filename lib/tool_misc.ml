@@ -254,94 +254,32 @@ let dispatch ?(lane_access = Lane_addon_sources.Unauthenticated) ctx ~name ~args
       Some (Tool_misc_browser_lane.handle_act ~base_path:ctx.config.base_path ~tool_name:name ~start_time:start args)
   | Some Tool_schemas_misc.Misc_browser_instruct ->
       Some (Tool_misc_browser_lane.handle_instruct ~tool_name:name ~start_time:start args)
-  | Some Tool_schemas_misc.Misc_msx_load ->
-      Some
-        (Tool_misc_msx_lane.handle_load ~tool_name:name ~start_time:start
-           ~base_path:ctx.config.base_path ~agent_name:ctx.agent_name args)
-  | Some Tool_schemas_misc.Misc_msx_change_disk ->
-      Some (Tool_misc_msx_lane.handle_change_disk ~tool_name:name ~start_time:start
-        ~base_path:ctx.config.base_path args)
-  | Some (Tool_schemas_misc.Misc_msx_save as operation)
-  | Some (Tool_schemas_misc.Misc_msx_restore as operation) ->
-      Some (Tool_misc_msx_lane.handle_checkpoint
-        ~restore:(operation = Tool_schemas_misc.Misc_msx_restore)
-        ~tool_name:name ~start_time:start ~base_path:ctx.config.base_path args)
-  | Some Tool_schemas_misc.Misc_msx_eject ->
-      Some
-        (Tool_misc_msx_lane.handle_eject ~tool_name:name ~start_time:start
-           ~agent_name:ctx.agent_name args)
-  | Some Tool_schemas_misc.Misc_msx_screen ->
-      Some (Tool_misc_msx_lane.handle_screen ~tool_name:name ~start_time:start args)
-  | Some Tool_schemas_misc.Misc_msx_meta ->
-      Some (Tool_misc_msx_lane.handle_meta ~tool_name:name ~start_time:start ())
-  | Some Tool_schemas_misc.Misc_msx_checkpoint_info ->
-      Some
-        (Tool_misc_msx_lane.handle_checkpoint_info ~tool_name:name ~start_time:start
-           ~base_path:ctx.config.base_path args)
-  | Some Tool_schemas_misc.Misc_msx_press ->
-      Some
-        (Tool_misc_msx_lane.handle_press ~tool_name:name ~start_time:start
-           ~who:ctx.agent_name args)
-  | Some Tool_schemas_misc.Misc_msx_peek ->
-      Some (Tool_misc_msx_lane.handle_peek ~tool_name:name ~start_time:start args)
-  | Some Tool_schemas_misc.Misc_msx_ram_diff ->
-      Some (Tool_misc_msx_lane.handle_ram_diff ~tool_name:name ~start_time:start ())
-  | Some Tool_schemas_misc.Misc_msx_step ->
-      Some (Tool_misc_msx_lane.handle_step ~tool_name:name ~start_time:start args)
-  | Some Tool_schemas_misc.Misc_msx_step_until_change ->
-      Some
-        (Tool_misc_msx_lane.handle_step_until_change ~tool_name:name
-           ~start_time:start args)
-  | Some Tool_schemas_misc.Misc_dos_load ->
-      Some
-        (Tool_misc_dos_lane.handle_load ~tool_name:name ~start_time:start
-           ~base_path:ctx.config.base_path ~agent_name:ctx.agent_name args)
-  | Some Tool_schemas_misc.Misc_dos_meta ->
-      Some (Tool_misc_dos_lane.handle_meta ~tool_name:name ~start_time:start)
-  | Some Tool_schemas_misc.Misc_dos_inventory ->
-      Some
-        (Tool_misc_dos_lane.handle_inventory ~tool_name:name ~start_time:start
-           ~base_path:ctx.config.base_path)
-  | Some Tool_schemas_misc.Misc_dos_eject ->
-      Some
-        (Tool_misc_dos_lane.handle_eject ~tool_name:name ~start_time:start
-           ~agent_name:ctx.agent_name args)
-  | Some Tool_schemas_misc.Misc_dos_screen ->
-      Some
-        (Tool_misc_dos_lane.handle_screen ~tool_name:name ~start_time:start
-           ~base_path:ctx.config.base_path args)
-  | Some Tool_schemas_misc.Misc_dos_step ->
-      Some
-        (Tool_misc_dos_lane.handle_step ~tool_name:name ~start_time:start
-           ~base_path:ctx.config.base_path ~who:ctx.agent_name args)
-  | Some Tool_schemas_misc.Misc_dos_pass ->
-      Some
-        (Tool_misc_dos_lane.handle_pass ~tool_name:name ~start_time:start
-           ~base_path:ctx.config.base_path ~agent_name:ctx.agent_name args)
-  | Some Tool_schemas_misc.Misc_dos_press ->
-      Some
-        (Tool_misc_dos_lane.handle_press ~tool_name:name ~start_time:start
-           ~base_path:ctx.config.base_path ~who:ctx.agent_name args)
-  | Some Tool_schemas_misc.Misc_dos_click ->
-      Some
-        (Tool_misc_dos_lane.handle_click ~tool_name:name ~start_time:start
-           ~base_path:ctx.config.base_path ~who:ctx.agent_name args)
-  | Some Tool_schemas_misc.Misc_dos_type ->
-      Some
-        (Tool_misc_dos_lane.handle_type ~tool_name:name ~start_time:start
-           ~base_path:ctx.config.base_path ~who:ctx.agent_name args)
-  | Some Tool_schemas_misc.Misc_dos_peek ->
-      Some
-        (Tool_misc_dos_lane.handle_peek ~tool_name:name ~start_time:start
-           ~base_path:ctx.config.base_path args)
-  | Some Tool_schemas_misc.Misc_dos_save ->
-      Some
-        (Tool_misc_dos_lane.handle_save ~tool_name:name ~start_time:start
-           ~base_path:ctx.config.base_path ~who:ctx.agent_name args)
-  | Some Tool_schemas_misc.Misc_dos_restore ->
-      Some
-        (Tool_misc_dos_lane.handle_restore ~tool_name:name ~start_time:start
-           ~base_path:ctx.config.base_path ~agent_name:ctx.agent_name args)
+  | Some Tool_schemas_misc.Misc_msx_load
+  | Some Tool_schemas_misc.Misc_msx_change_disk
+  | Some Tool_schemas_misc.Misc_msx_save
+  | Some Tool_schemas_misc.Misc_msx_restore
+  | Some Tool_schemas_misc.Misc_msx_eject
+  | Some Tool_schemas_misc.Misc_msx_screen
+  | Some Tool_schemas_misc.Misc_msx_meta
+  | Some Tool_schemas_misc.Misc_msx_checkpoint_info
+  | Some Tool_schemas_misc.Misc_msx_press
+  | Some Tool_schemas_misc.Misc_msx_peek
+  | Some Tool_schemas_misc.Misc_msx_ram_diff
+  | Some Tool_schemas_misc.Misc_msx_step
+  | Some Tool_schemas_misc.Misc_msx_step_until_change
+  | Some Tool_schemas_misc.Misc_dos_load
+  | Some Tool_schemas_misc.Misc_dos_meta
+  | Some Tool_schemas_misc.Misc_dos_inventory
+  | Some Tool_schemas_misc.Misc_dos_eject
+  | Some Tool_schemas_misc.Misc_dos_screen
+  | Some Tool_schemas_misc.Misc_dos_step
+  | Some Tool_schemas_misc.Misc_dos_pass
+  | Some Tool_schemas_misc.Misc_dos_press
+  | Some Tool_schemas_misc.Misc_dos_click
+  | Some Tool_schemas_misc.Misc_dos_type
+  | Some Tool_schemas_misc.Misc_dos_peek
+  | Some Tool_schemas_misc.Misc_dos_save
+  | Some Tool_schemas_misc.Misc_dos_restore -> None
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)

@@ -484,13 +484,7 @@ let execute_tool_eio
                                endpoint does not have)"
                               name))
                     | (Some _ | None), None ->
-                      (match
-                         Keeper_dos_controller.execute ~config ~who:agent_name ~name
-                           ~args:coerced_args ~run:dispatch
-                       with
-                       | Ok result -> result
-                       | Error refusal ->
-                         Some (Keeper_dos_controller.refusal_result ~tool_name:name refusal)))
+                      dispatch ())
                  | Mod_library ->
                    Tool_library.dispatch
                      { Tool_library.base_path = config.base_path; agent_name }

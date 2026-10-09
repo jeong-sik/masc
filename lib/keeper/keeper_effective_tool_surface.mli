@@ -60,6 +60,7 @@ type t =
   ; skill_discovery_bytes : int
   ; skill_eager_body_bytes : int
   ; skill_body_bytes : int
+  ; lane_addon_conflicts : Lane_addon_tool_export.conflict list
   ; skills_left_out : string list
         (** Documents the catalog could not read, by the directory they were
             found in and why. This surface answers "what can this Keeper

@@ -22,6 +22,9 @@ type t = private
   { retained_artifacts : Tool_output.artifact_ref list
   ; raw_output : string
   ; data : Yojson.Safe.t option
+  ; content_blocks : Llm_provider.Types.content_block list option
+      (** Producer-owned multimodal content, preserved independently of JSON data
+          through the Keeper handler into the model-facing tool bridge. *)
   ; metadata : Yojson.Safe.t option
   ; failure_effect_disposition : Tool_result.failure_effect_disposition
       (** Meaningful only for [Failed]. Generic producers default to

@@ -183,10 +183,17 @@ type error =
       ; cause : recovery_cause
       }
 
+(** Capture the caller-visible attached tools once for authoring. Failure is
+    passed through to the editor; it never falls back to the static catalog. *)
+val authoring_descriptors :
+  config:Workspace.config -> access:Lane_addon_sources.access ->
+  (Keeper_tool_descriptor.t list, string) result
+
 val load : base_path:string -> Skill_reference.t -> (loaded, error) result
-val preview : base_path:string -> Skill_reference.t -> source_text:string -> (preview, error) result
+val preview : descriptors:(Keeper_tool_descriptor.t list, string) result -> base_path:string -> Skill_reference.t -> source_text:string -> (preview, error) result
 
 val save :
+  descriptors:(Keeper_tool_descriptor.t list, string) result ->
   base_path:string ->
   reference:Skill_reference.t ->
   source_text:string ->
@@ -199,6 +206,7 @@ val writable_sources : base_path:string -> (writable_source list, error) result
 
 (** Create one new package directory and SKILL.md without overwriting. *)
 val create :
+  descriptors:(Keeper_tool_descriptor.t list, string) result ->
   base_path:string ->
   source_id:Skill_source_config.source_id ->
   package_id:string ->

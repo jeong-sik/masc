@@ -19772,17 +19772,8 @@ and is loaded on demand through keeper_skill.
                     skill_template_placeholder_name)
              | Agent_core.Skill_document.Loaded document ->
                let package_id = document.name in
-               (* No directory exists yet, so its name is compared with itself.
-                  Catalog validation also checks composition names in the body. *)
-               (match Masc.Keeper_skill_catalog.validate_authored_source
-                        ~directory:package_id source_text with
-                | Error (Masc.Keeper_skill_catalog.Source_too_large { bytes; max_bytes }) ->
-                  report_action state "error"
-                    (Printf.sprintf "SKILL.md is too large: %d bytes (maximum %d)"
-                       bytes max_bytes)
-                | Error (Masc.Keeper_skill_catalog.Invalid_document error) ->
-                  report_action state "error" (Masc.Keeper_skill_catalog.error_to_string error)
-                | Ok _ ->
+               (* The server validates composition nodes against its current
+                  attached Add-ons and enforces source size before writing. *)
                (match
                   Result.bind (check ()) (fun () ->
                     Masc_tui_http.post_skill_editor_create
@@ -19872,7 +19863,7 @@ and is loaded on demand through keeper_skill.
                           "%s/%s: create receipt carried no status"
                           source_id
                           package_id));
-                  launch_tools_load state ~mailbox:async_messages)))))
+                  launch_tools_load state ~mailbox:async_messages))))
   in
   let handle_skill_evidence () =
     if not (server_authority_ready state) then

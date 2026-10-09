@@ -296,7 +296,7 @@ let execute_with_observers_with_authority
         Tool_result.Completed
           { Tool_result.retained_artifacts = result.retained_artifacts
           ; Tool_result.tool_name = name
-          ; content_blocks = None
+          ; content_blocks = result.content_blocks
           ; data = producer_payload ~raw:raw_result producer_data
           ; metadata = producer_metadata
           ; duration_ms = Float.of_int duration_ms
@@ -360,7 +360,7 @@ let execute_with_observers_with_authority
         Tool_result.Deferred
           { Tool_result.retained_artifacts = result.retained_artifacts
           ; Tool_result.tool_name = name
-          ; content_blocks = None
+          ; content_blocks = result.content_blocks
           ; data = producer_payload ~raw:raw_result producer_data
           ; metadata = producer_metadata
           ; duration_ms = Float.of_int duration_ms

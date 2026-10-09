@@ -870,6 +870,12 @@ let unique_exports ~reserved exports =
     Error "Add-on tool name is provided by multiple visible installations"
   else Ok exports
 
+let tool_export_snapshot ~config ~access ~reserved = Eio_context.run_on_owner_domain (fun () ->
+  let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+  let exports = match Hashtbl.find_opt managers root with
+    | None -> [] | Some m -> live_exports m access in
+  Lane_addon_tool_export.isolate ~reserved exports)
+
 let tool_exports ~config ~access ~reserved = Eio_context.run_on_owner_domain (fun () ->
   let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
   match Hashtbl.find_opt managers root with
@@ -922,8 +928,8 @@ let call_exported_tool_with_authority ~on_complete ~on_result ~authorize ~princi
     let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
     let* m = match Hashtbl.find_opt managers root with
       | Some m -> Ok m | None -> Error (Unavailable "Add-on owner is unavailable") in
-    let* exports = unique_exports ~reserved (live_exports m access)
-      |> Result.map_error (fun detail -> Unavailable detail) in
+    let snapshot = Lane_addon_tool_export.isolate ~reserved (live_exports m access) in
+    let exports = snapshot.exports in
     let* () = if List.exists (fun (current : tool_export) -> current.instance_id = export.instance_id
         && current.tool = export.tool) exports then Ok ()
       else Error (Unavailable "Add-on tool installation is no longer available") in

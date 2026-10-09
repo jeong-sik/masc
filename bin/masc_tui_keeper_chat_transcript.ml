@@ -845,6 +845,7 @@ let handler_activity_kind handler =
   match handler with
   | Tool_masc_fusion_dispatch | Tool_masc_fusion_status | Tool_masc_fusion_decision -> Fusion_activity
   | Tool_keeper_spawn_dispatch | Tool_masc_keeper_dispatch -> Keeper_activity
+  | Tool_lane_addon _
   | Tool_execute
   | Tool_search_files
   | Tool_read_file

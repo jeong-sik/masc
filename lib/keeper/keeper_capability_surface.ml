@@ -114,7 +114,8 @@ let descriptor_admitted descriptors descriptor =
   List.exists (fun admitted -> admitted == descriptor) descriptors
 ;;
 
-let create
+let create_with_descriptors
+      ~tool_descriptors
       ~tool_deny
       ~sandbox_profile
       ~skill_names
@@ -132,7 +133,10 @@ let create
   let denied descriptor =
     tool_deny <> []
     && List.exists
-         (fun name -> List.mem name tool_deny)
+         (fun name ->
+           let lane_addon = match descriptor.Keeper_tool_descriptor.runtime_handler with
+             | Tool_lane_addon _ -> true | _ -> false in
+           List.exists (Keeper_tool_deny.matches ~lane_addon ~name) tool_deny)
          (Keeper_tool_descriptor.keeper_model_names descriptor)
   in
   (* The spawn tools are refused together when the sandbox profile cannot start
@@ -160,7 +164,7 @@ let create
     | false, None -> None
   in
   let descriptors =
-    Keeper_tool_descriptor.model_visible_descriptors ()
+    (List.filter (fun descriptor -> Keeper_tool_descriptor.keeper_model_names descriptor <> []) tool_descriptors)
     |> List.filter (fun descriptor ->
       Option.is_none (off_turn_availability descriptor))
   in
@@ -173,7 +177,7 @@ let create
          ~admits:(descriptor_admitted descriptors)
   in
   let tool_capabilities =
-    Keeper_tool_descriptor.all_descriptors ()
+    tool_descriptors
     |> List.map (fun descriptor ->
       { descriptor
         (* [keeper_model_names] answers [] for an operator-only descriptor and
@@ -204,6 +208,19 @@ let create
   ; skill_snapshot_revision = Keeper_skill_inventory.snapshot_revision skill_inventory
   }
 ;;
+
+let create ~tool_deny ~sandbox_profile ~skill_names ~global_skill_catalog
+    ~skill_inventory ~task_skills =
+  create_with_descriptors ~tool_descriptors:(Keeper_tool_descriptor.all_descriptors ())
+    ~tool_deny ~sandbox_profile ~skill_names ~global_skill_catalog ~skill_inventory ~task_skills
+
+let find_descriptor_by_id surface id =
+  List.find_opt (fun (descriptor : Keeper_tool_descriptor.t) -> String.equal descriptor.id id)
+    surface.descriptors
+
+let find_descriptor_by_name surface name =
+  List.find_opt (fun (descriptor : Keeper_tool_descriptor.t) ->
+    List.mem name (Keeper_tool_descriptor.registered_names descriptor)) surface.descriptors
 
 let descriptors surface = surface.descriptors
 let admits surface descriptor = descriptor_admitted surface.descriptors descriptor

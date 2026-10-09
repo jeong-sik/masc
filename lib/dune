@@ -74,6 +74,7 @@
   masc.machine_live_publication
   masc.machine_configuration
   masc.tool_input_contract
+  masc.lane_addon_tool_result
   masc.lane_addon_call_context masc.machine_input_history masc.machine_controller_contract
   masc.msx_lane
   masc.dos_lane

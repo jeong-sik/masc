@@ -1617,6 +1617,9 @@ let test_unknown_deny_tool_refuses_load () =
   check (list string) "unknown_deny_tools keeps only the unnamed entry"
     [ "no-such-tool" ]
     (KTP.unknown_deny_tools [ known; "no-such-tool" ]);
+  check (list string) "qualified detached Add-on deny stays valid; empty selector does not"
+    [ "addon:" ]
+    (KTP.unknown_deny_tools [ "addon:machine_press"; "addon:" ]);
   let snapshot = KTP.read_keeper_profile_snapshot ~base_path in
   (match KTP.snapshot_profile_defaults snapshot "denier" with
    | Ok _ -> fail "snapshot admitted the unnamed deny entry"

@@ -51,6 +51,9 @@ val register_tool_change_handler : (unit -> unit) -> unit
 type tool_export = Lane_addon_tool_export.t = private { instance_id : string; tool : Mcp_protocol.Mcp_types.tool }
 type tool_call_error = Unavailable of string | Outcome_unknown of string
   | Host_refusal of Lane_addon_call_context.host_refusal
+val tool_export_snapshot : config:Workspace.config -> access:Lane_addon_sources.access ->
+  reserved:string list -> Lane_addon_tool_export.snapshot
+(** Live export snapshot with individual name conflicts quarantined. *)
 val tool_exports : config:Workspace.config -> access:Lane_addon_sources.access ->
   reserved:string list -> (tool_export list, string) result
 (** Reads initialized live workers only; does not start or recover installations.

@@ -1,4 +1,4 @@
-(* DOS lane tools — the lane's tools through Tool_misc.dispatch.
+(* DOS lane tools — the lane's tools through the shared worker implementation.
 
    The machine needs no image from outside: the tests assemble a COM program
    of their own, so CI carries no game. What they pin: the no-machine
@@ -10,14 +10,12 @@
 
 open Alcotest
 open Masc
+module Dos_tools = Dos_machine_tools.Make (Machine_dos_host_events)
 
 let dispatch ~base_path ?(agent = "dos-test") name assoc =
-  let ctx : Tool_misc.context =
-    { config = Workspace.default_config base_path; agent_name = agent; help_schemas = [] }
-  in
-  match Tool_misc.dispatch ctx ~name ~args:(`Assoc assoc) with
+  match Dos_tools.dispatch ~base_path ~agent ~name ~arguments:(`Assoc assoc) with
   | Some result -> result
-  | None -> fail (name ^ " is not dispatched by the misc tool owner")
+  | None -> fail (name ^ " is not dispatched by the machine worker")
 ;;
 
 (* Ejects whatever machine is there, as whoever holds it: the machine is
@@ -380,7 +378,7 @@ let test_inventory_directory_replacement_hides_child_names () =
         let moved = root ^ ".moved" in
         let replaced = ref false in
         let result =
-          Tool_misc_dos_lane.handle_inventory_with_read_hooks
+          Dos_tools.handle_inventory_with_read_hooks
             ~before_program:(fun _ -> ())
             ~after_read:(fun _ -> ())
             ~before_read:(fun real ->
@@ -445,7 +443,7 @@ let test_inventory_temporary_swap_cannot_publish_foreign_names () =
       Fun.protect ~finally:(fun () -> Fs_compat.remove_tree outside) (fun () ->
         write_file (Filename.concat outside "private-outside.exe") "private";
         let swapped = ref false in
-        let result = Tool_misc_dos_lane.handle_inventory_with_read_hooks
+        let result = Dos_tools.handle_inventory_with_read_hooks
             ~before_program:(fun _ -> ())
           ~before_read:(fun directory ->
             if String.equal directory target then begin
@@ -482,7 +480,7 @@ let test_inventory_root_replacement_between_reads_is_refused () =
       mkdir_p (Filename.concat outside "game");
       write_file (Filename.concat outside "game/private-outside.com") "foreign";
       let replaced = ref false in
-      let result = Tool_misc_dos_lane.handle_inventory_with_read_hooks
+      let result = Dos_tools.handle_inventory_with_read_hooks
         ~before_program:(fun canonical ->
           Unix.rename canonical moved;
           Unix.symlink outside canonical;
@@ -1033,15 +1031,51 @@ let with_holder ~base_path state name f =
     f
 ;;
 
+(* Keeper calls below cross the real attached SDK worker. Direct handler
+   helpers elsewhere in this file exercise the worker library itself. *)
+let with_attached_workspace f =
+  with_workspace (fun base_path ->
+    Eio_main.run (fun env ->
+      let previous_runtime = Runtime.For_testing.snapshot () in
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Fun.protect ~finally:(fun () ->
+        Runtime.For_testing.restore previous_runtime;
+        Fs_compat.clear_fs ()) (fun () ->
+        Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 30. (fun () ->
+          Eio.Switch.run (fun sw ->
+            Eio_context.with_test_env ~sw ~net:(Eio.Stdenv.net env)
+              ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
+              let runtime_path = Filename.concat base_path "runtime.toml" in
+              Out_channel.with_open_bin runtime_path (fun channel -> output_string channel {|[providers.local]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+[models.sample]
+api-name = "sample"
+max-context = 1024
+[local.sample]
+[runtime]
+default = "local.sample"
+|});
+              (match Runtime.init_default ~config_path:runtime_path with
+               | Ok () -> () | Error detail -> fail detail);
+              Lane_addon_runtime.For_testing.reset ();
+              Machine_worker_fixture.with_dos ~clock:(Eio.Stdenv.clock env) ~sw ~base_path
+                (fun ~invoke:_ ~detach -> let value = f base_path in detach (); value)))))))
+;;
+
+let keeper_call ~base_path who name arguments =
+  let config = Workspace.default_config base_path in
+  let exports = (Keeper_lane_addon_runtime.snapshot ~config ~keeper_name:who).exports in
+  let export = List.find (fun (export : Lane_addon_tool_export.t) -> export.tool.name=name) exports in
+  Keeper_lane_addon_runtime.call ~config ~keeper_name:who ~export ~arguments
+;;
+
 let keeper_press ~base_path who key =
-  let execution =
-    Keeper_tool_in_process_runtime.handle_masc_misc_with_outcome
-      ~config:(Workspace.default_config base_path) ~meta:(keeper_meta who)
-      ~name:"masc_dos_press" ~args:(`Assoc [ ("keys", `List [ `String key ]) ])
-  in
+  let execution = keeper_call ~base_path who "masc_dos_press"
+    (`Assoc ["keys", `List [`String key]]) in
   match execution.disposition with
-  | Tool_result.Failed _ -> false
-  | _ -> true
+  | Tool_result.Completed () -> true
+  | Tool_result.Failed _ | Tool_result.Deferred _ -> false
 ;;
 
 let current_controller () =
@@ -1053,7 +1087,7 @@ let current_controller () =
 let test_a_stopped_holders_controller_is_let_go () =
   List.iter
     (fun (state, label, released) ->
-      with_workspace (fun base_path ->
+      with_attached_workspace (fun base_path ->
         install_program ~base_path "hello.com" hello_com;
         with_holder ~base_path state "cao-cao" (fun () ->
           boot ~agent:"cao-cao" ~base_path "hello.com";
@@ -1061,7 +1095,10 @@ let test_a_stopped_holders_controller_is_let_go () =
             (keeper_press ~base_path "liu-bei" "a");
           check (option string) (label ^ ": holder")
             (Some (if released then "liu-bei" else "cao-cao"))
-            (current_controller ()))))
+            (current_controller ());
+          check (list string) (label ^ ": only admitted Keeper input reaches the ledger")
+            (if released then ["liu-bei"] else [])
+            (List.map (fun entry -> entry.Dos_lane.who) (Dos_lane.ledger ())))))
     [ (Stopped_and_gone, "a stopped Keeper", true)
     ; (Running, "a running Keeper", false)
     ; (Launching, "a launching Keeper", false)
@@ -1075,7 +1112,7 @@ let test_a_stopped_holders_controller_is_let_go () =
    own credential, which has no expiry. The next move reads that like an agent
    coming back, so the shutdown that removes it lets the controller go. *)
 let test_a_removed_keeper_lets_its_controller_go () =
-  with_workspace (fun base_path ->
+  with_attached_workspace (fun base_path ->
     let config = Workspace.default_config base_path in
     install_program ~base_path "hello.com" hello_com;
     (match Auth.create_token base_path ~agent_name:"cao-cao" ~role:Masc_domain.Worker with
@@ -1085,17 +1122,17 @@ let test_a_removed_keeper_lets_its_controller_go () =
       boot ~agent:"cao-cao" ~base_path "hello.com";
       let departure =
         match Auth.with_credential_transaction base_path (fun transaction ->
-          Keeper_dos_controller.holder_left ~transaction ~config
+          Keeper_machine_controller_authority.holder_left ~transaction ~config
             ~now:(Unix.gettimeofday ()) "cao-cao") with
         | Ok departure -> departure
         | Error error -> fail (Masc_domain.masc_error_to_string error)
       in
       check bool "the next move cannot see that a removed Keeper left" true
         (Option.is_none departure);
-      check (result unit string) "removing a Keeper that holds nothing" (Ok ())
+      check (result unit string) "removing a Keeper that holds nothing succeeds" (Ok ())
         (Keeper_dos_controller.release_retired ~keeper_name:"liu-bei" ~by:"operator");
       check (option string) "leaves the holder" (Some "cao-cao") (current_controller ());
-      check (result unit string) "removing the holder" (Ok ())
+      check (result unit string) "removing the holder succeeds" (Ok ())
         (Keeper_dos_controller.release_retired ~keeper_name:"cao-cao" ~by:"operator");
       check (option string) "frees the controller" None (current_controller ());
       check bool "and the next Keeper moves" true (keeper_press ~base_path "liu-bei" "a")))
@@ -1110,15 +1147,15 @@ let test_a_holder_departs_with_its_credential () =
     let config = Workspace.default_config base_path in
     let departure name at =
       match Auth.with_credential_transaction base_path (fun transaction ->
-        Keeper_dos_controller.holder_left ~transaction ~config ~now:at name) with
+        Keeper_machine_controller_authority.holder_left ~transaction ~config ~now:at name) with
       | Ok departure -> departure
       | Error error -> fail (Masc_domain.masc_error_to_string error)
     in
     let reason = function
       | None -> "still here"
-      | Some Tool_misc_dos_lane.Keeper_stopped -> "keeper stopped"
-      | Some Tool_misc_dos_lane.Credential_expired -> "credential expired"
-      | Some Tool_misc_dos_lane.No_credential -> "no credential"
+      | Some Machine_controller_contract.Keeper_stopped -> "keeper stopped"
+      | Some Machine_controller_contract.Credential_expired -> "credential expired"
+      | Some Machine_controller_contract.No_credential -> "no credential"
     in
     let token name role =
       match Auth.create_token base_path ~agent_name:name ~role with
@@ -1166,15 +1203,13 @@ let test_a_holder_departs_with_its_credential () =
     check string "expiry with unreadable auth config does not release the holder" "still here"
       (reason (departure "visiting-operator" later));
     let config = Workspace.default_config base_path in
-    (match
-       Keeper_dos_controller.execute ~config ~who:"minsu" ~name:"masc_dos_pass"
-         ~args:(`Assoc [ ("to", `String "operator") ])
-         ~run:(fun () -> fail "unreadable auth must refuse before the supplied operation")
-     with
-     | Error (Keeper_dos_controller.Seats_unknown _) -> ()
-     | Error (Keeper_dos_controller.Refused message) ->
-       failf "an unreadable auth config is not the caller's fault: %s" message
-     | Ok _ -> fail "a pass went through with the auth config unreadable"))
+    (match Auth.with_credential_transaction base_path (fun transaction ->
+       Keeper_machine_controller_authority.pass_refusal ~transaction ~config ~target:(Ok (Some "operator"))) with
+     | Ok (Some (Keeper_machine_controller_authority.Seats_unknown _)) -> ()
+     | Ok (Some (Keeper_machine_controller_authority.Refused message)) ->
+         failf "an unreadable auth config is not the caller's fault: %s" message
+     | Ok None -> fail "handoff admission ignored unreadable auth"
+     | Error error -> fail (Masc_domain.masc_error_to_string error)))
 ;;
 
 (* A credential listing that fails is not an empty list: nobody can say who
@@ -1186,28 +1221,25 @@ let test_a_pass_is_refused_when_the_credentials_do_not_list () =
     if Sys.file_exists agents then Fs_compat.remove_tree agents;
     Fs_compat.mkdir_p (Filename.dirname agents);
     Out_channel.with_open_bin agents (fun oc -> output_string oc "not a directory");
-    match
-      Keeper_dos_controller.execute ~config:(Workspace.default_config base_path)
-        ~who:"operator" ~name:"masc_dos_pass" ~args:(`Assoc [ ("to", `String "minsu") ])
-        ~run:(fun () -> fail "unlisted credentials must refuse before the supplied operation")
-    with
-    | Error (Keeper_dos_controller.Seats_unknown _) -> ()
-    | Error (Keeper_dos_controller.Refused message) ->
-      failf "a listing that failed is not the caller's fault: %s" message
-    | Ok _ -> fail "a pass went through with the credentials unlisted")
+    match Auth.with_credential_transaction base_path (fun transaction ->
+      Keeper_machine_controller_authority.pass_refusal ~transaction
+        ~config:(Workspace.default_config base_path) ~target:(Ok (Some "minsu"))) with
+    | Ok (Some (Keeper_machine_controller_authority.Seats_unknown _)) -> ()
+    | Ok (Some (Keeper_machine_controller_authority.Refused message)) ->
+        failf "a listing that failed is not the caller's fault: %s" message
+    | Ok None -> fail "handoff admission ignored unreadable credentials"
+    | Error error -> fail (Masc_domain.masc_error_to_string error))
 ;;
 
 let keeper_pass ~base_path who target =
-  Keeper_tool_in_process_runtime.handle_masc_misc_with_outcome
-    ~config:(Workspace.default_config base_path) ~meta:(keeper_meta who)
-    ~name:"masc_dos_pass" ~args:(`Assoc [ ("to", `String target) ])
+  keeper_call ~base_path who "masc_dos_pass" (`Assoc ["to", `String target])
 ;;
 
 (* RFC play-link-for-the-shared-machine §2.8 on a Keeper's own call: a pass
    goes only to someone at the machine. A name nobody sits under would leave
    the controller with no one who can move the machine. *)
 let test_a_keeper_passes_only_to_someone_at_the_machine () =
-  with_workspace (fun base_path ->
+  with_attached_workspace (fun base_path ->
     install_program ~base_path "hello.com" hello_com;
     with_holder ~base_path Running "cao-cao" (fun () ->
       with_holder ~base_path Running "liu-bei" (fun () ->
@@ -1361,10 +1393,10 @@ let test_every_tool_is_declared () =
       match Tool_schemas_misc.misc_operation_of_tool_name name with
       | None -> fail (name ^ " has no misc operation")
       | Some op ->
-        (match Tool_schemas_misc.misc_registered_schema op with
-         | Some (schema : Masc_domain.tool_schema) ->
-           check string "schema name" name schema.name
-         | None -> fail (name ^ " registers no schema")))
+        check bool (name ^ " is not statically registered") true
+          (Tool_schemas_misc.misc_registered_schema op = None);
+        check bool (name ^ " remains a packaged worker schema") true
+          (Option.is_some (Embedded_config.read ("tools/" ^ name ^ ".toml"))))
     [ "masc_dos_load"; "masc_dos_meta"; "masc_dos_inventory"; "masc_dos_eject"; "masc_dos_screen"; "masc_dos_step";
       "masc_dos_press"; "masc_dos_click"; "masc_dos_type"; "masc_dos_peek";
       "masc_dos_pass"; "masc_dos_save"; "masc_dos_restore" ]

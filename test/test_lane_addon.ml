@@ -1405,10 +1405,14 @@ let test_released_shared_bindings_keep_read_and_cleanup () =
     detach config id; await_phase clock config id "detached";
     check Alcotest.int "released surviving container retains exact cleanup ownership" 1 (List.length !(state.recovery)))
 
-let test_tool_exports_bind_live_incarnations () = with_fixture (fun env _sw config dir state ->
+let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw config dir state ->
   let clock = Eio.Stdenv.clock env in
   let access = Lane_addon_sources.Operator_configuration in
   let exports () = Runtime.tool_exports ~config ~access ~reserved:[] in
+  List.iter (fun name ->
+    check bool (name ^ " is absent from the static MCP inventory") false (Config.is_raw_tool_name name);
+    check bool (name ^ " has no static Keeper descriptor") true
+      (Keeper_tool_descriptor.find_public name = None)) ["masc_msx_step"; "masc_dos_step"];
   check Alcotest.int "no installation exposes nothing" 0 (List.length (unwrap (exports ())));
   let attach_export ?(names = ["masc_msx_step"]) mode =
     let path = manifest dir mode in
@@ -1417,6 +1421,36 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env _sw conf
       ^ Yojson.Safe.to_string (`List (List.map (fun name -> `String name) names)) ^ "\n");
     unwrap (dispatch config Runtime.Attach ["manifest_path",`String path;
       "run_id",`String "world";"binding",`Assoc ["sources",`List []]]) |> text "instance_id" in
+  ignore (Workspace.init config ~agent_name:(Some "fixture-operator"));
+  Auth.disable_auth config.base_path;
+  let server = Mcp_server_eio.For_testing.create_state ~base_path:config.base_path () in
+  let request ?auth_token ?(profile=Mcp_server_eio.Full) method_ params =
+    let fields = match params with `Assoc fields -> fields | _ -> assert false in
+    let metadata = `Assoc [
+      "io.modelcontextprotocol/protocolVersion", `String "2026-07-28";
+      "io.modelcontextprotocol/clientCapabilities", `Assoc [];
+      "io.modelcontextprotocol/clientInfo", `Assoc [
+        "name", `String "lane-addon-fixture"; "version", `String "1"]] in
+    Mcp_server_eio.handle_request ~profile ~clock ~sw ?auth_token server
+      (Yojson.Safe.to_string (`Assoc ["jsonrpc",`String "2.0"; "id",`Int 1;
+        "method",`String method_; "params",`Assoc (("_meta",metadata)::fields)])) in
+  let listed ?auth_token () =
+    let result = request ?auth_token "tools/list" (`Assoc ["names",`List [`String "masc_msx_step"]])
+      |> member "result" in
+    check string "2026 list result is complete" "complete" (text "resultType" result);
+    check string "caller-dependent list is private" "private" (text "cacheScope" result);
+    check bool "list carries a freshness duration" true
+      (match member "ttlMs" result with `Int n -> n >= 0 | _ -> false);
+    result |> member "tools" |> Yojson.Safe.Util.to_list in
+  let changes = ref [] in
+  let subscription = Mcp_subscriptions.register ~subscription_id:(`String "addon-tools")
+    ~filter:{ Mcp_transport_protocol.empty_subscription_filter with tools_list_changed = true }
+    ~send:(fun notification -> changes := notification :: !changes; true) in
+  Eio.Switch.on_release sw (fun () -> Mcp_subscriptions.unregister subscription);
+  let invoked () = request "tools/call" (`Assoc ["name",`String "masc_msx_step"; "arguments",`Assoc []]) in
+  check Alcotest.int "MCP has no tool before attach" 0 (List.length (listed ()));
+  check Alcotest.int "disabled auth ignores stale bearer before attach" 0
+    (List.length (listed ~auth_token:"unregistered-fixture-token" ()));
   let first = attach_export "good" in
   await clock (fun () -> match exports () with Ok [_] -> true | _ -> false);
   await clock (fun () -> int "observation_seq" (instance config first) > 0);
@@ -1426,6 +1460,24 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env _sw conf
   check bool "completed observation is stable while worker remains alive" false snapshot.refreshing;
   check string "cached observation belongs to selected installation" first snapshot.instance_id;
   check Alcotest.int "cached read performs no worker observation" calls_before (Hashtbl.find state.calls first);
+  check Alcotest.int "MCP lists attached worker tool" 1 (List.length (listed ()));
+  check Alcotest.int "disabled auth ignores stale bearer with shared addon" 1
+    (List.length (listed ~auth_token:"unregistered-fixture-token" ()));
+  let stale_token_call = request ~auth_token:"unregistered-fixture-token" "tools/call"
+    (`Assoc ["name", `String "masc_msx_step"; "arguments", `Assoc []]) in
+  check bool "disabled auth allows shared addon call with stale bearer" true
+    (member "result" stale_token_call <> `Null
+      && member "isError" (member "result" stale_token_call) <> `Bool true);
+  check bool "unverified bearer supplies no worker identity" true
+    (List.hd !(state.principals) = Lane_addon_call_context.Anonymous);
+  check bool "attach notifies opted-in tool subscriptions" true (!changes <> []);
+  changes := [];
+  let invoked_result = invoked () |> member "result" in
+  check string "2026 call result is complete" "complete" (text "resultType" invoked_result);
+  check bool "MCP invokes attached worker tool" true
+    (member "isError" invoked_result <> `Bool true);
+  check string "MCP preserves worker result content" first
+    (invoked_result |> member "content" |> Yojson.Safe.Util.to_list |> List.hd |> text "text");
   let handle = List.hd (unwrap (exports ())) in
   let call handle = Runtime.call_exported_tool ~config ~access ~reserved:[] ~export:handle ~arguments:(`Assoc []) in
   check bool "live installation is callable" true (Result.is_ok (call handle));
@@ -1435,17 +1487,94 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env _sw conf
       | Runtime.Host_refusal (Lane_addon_call_context.Rejected message | Unavailable message | Activity_disabled message | Activity_unobserved message) -> message)));
   check bool "model arguments cannot replace operator authority" true
     (List.hd !(state.principals) = Lane_addon_call_context.Operator);
+  let keeper_call () = Keeper_lane_addon_runtime.call ~config ~keeper_name:"fixture-keeper"
+      ~export:handle ~arguments:(`Assoc []) in
+  check bool "Keeper adapter calls a visible live installation" true
+    (match (keeper_call ()).disposition with Tool_result.Completed () -> true | _ -> false);
+  check bool "Keeper identity comes from verified access" true
+    (List.hd !(state.principals) = Lane_addon_call_context.Keeper "fixture-keeper");
+  (* An authenticated player keeps their actual identity and only the
+     package tools covered by the existing host permission catalog. *)
+  let invited_name = "fixture_player_export" in
+  let worker_name = "fixture_worker_export" in
+  Tool_catalog.For_testing.register_metadata invited_name (Tool_catalog.metadata "masc_dos_step");
+  Tool_catalog.For_testing.register_metadata worker_name (Tool_catalog.metadata "masc_lane_act");
+  let invited = attach_export ~names:[invited_name;worker_name] "invited" in
+  await clock (fun () -> int "observation_seq" (instance config invited) > 0);
+  Fun.protect ~finally:(fun () -> Auth.disable_auth config.base_path) (fun () ->
+    ignore (Auth.enable_auth config.base_path ~require_token:true ~agent_name:"fixture-admin");
+    let token = match Auth.create_token config.base_path ~agent_name:"fixture-player" ~role:Masc_domain.Player with
+      | Ok (token, _) -> token | Error error -> fail (Masc_domain.masc_error_to_string error) in
+    let seat = request ~profile:Mcp_server_eio.Seat ~auth_token:token "tools/list" (`Assoc [])
+      |> member "result" |> member "tools" |> Yojson.Safe.Util.to_list in
+    check bool "seat discovers authorized attached player tool" true
+      (List.exists (fun tool -> text "name" tool = invited_name) seat);
+    check bool "seat excludes worker-only addon" false
+      (List.exists (fun tool -> text "name" tool = worker_name) seat);
+    let result = request ~auth_token:token "tools/list" (`Assoc ["names", `List [`String invited_name; `String worker_name]])
+      |> member "result" |> member "tools" |> Yojson.Safe.Util.to_list in
+    check (list string) "player sees only the catalog-authorized export" [invited_name]
+      (List.map (text "name") result);
+    let result = request ~auth_token:token "tools/call" (`Assoc ["name", `String invited_name;
+      "arguments", `Assoc ["agent_name", `String "forged"]]) in
+    check bool "invited player can call the authorized export" true
+      (member "error" result = `Null && member "isError" (member "result" result) <> `Bool true);
+    check bool "credential owner reaches the private worker envelope" true
+      (List.hd !(state.principals) = Lane_addon_call_context.Authenticated_agent "fixture-player");
+    let denied = request ~auth_token:token "tools/call" (`Assoc ["name", `String worker_name; "arguments", `Assoc []]) in
+    check bool "player cannot invoke a worker-only export" true (member "error" denied <> `Null));
+  detach config invited;
+  await_phase clock config invited "detached";
   check bool "reserved host name rejects publication" true
     (Result.is_error (Runtime.tool_exports ~config ~access ~reserved:["masc_msx_step"]));
   let second = attach_export "second" in
   await clock (fun () -> int "observation_seq" (instance config second) > 0);
   check bool "ambiguous name rejects publication" true (Result.is_error (exports ()));
   check bool "ambiguous name rejects an old handle" true (Result.is_error (call handle));
+  let unrelated_name = "fixture_unrelated_export" in
+  let reserved_name = "masc_board_stats" in
+  check bool "fixture host tool exists" true (Config.is_raw_tool_name reserved_name);
+  let third = attach_export ~names:[unrelated_name; reserved_name] "isolated" in
+  await clock (fun () -> int "observation_seq" (instance config third) > 0);
+  let isolated = Keeper_lane_addon_runtime.snapshot ~config ~keeper_name:"fixture-keeper" in
+  check (list string) "only conflicting names are quarantined" [unrelated_name]
+    (List.map (fun (export : Lane_addon_tool_export.t) -> export.tool.name) isolated.exports);
+  check bool "duplicate name retains both installation identities" true
+    (List.exists (fun (conflict : Lane_addon_tool_export.conflict) ->
+       conflict.name = "masc_msx_step"
+       && conflict.reason = Lane_addon_tool_export.Multiple_installations
+       && List.sort String.compare conflict.instances = List.sort String.compare [first; second])
+       isolated.conflicts);
+  check bool "host collision retains its typed diagnostic" true
+    (List.exists (fun (conflict : Lane_addon_tool_export.conflict) ->
+       conflict.name = reserved_name && conflict.instances = [third]
+       && conflict.reason = Lane_addon_tool_export.Reserved_host_name) isolated.conflicts);
+  (* masc_board_stats is a raw MASC tool, not a Keeper descriptor, so the
+     host's own catalog is where it must still be after the collision. *)
+  check bool "static host descriptor remains available" true
+    (List.exists (fun (schema : Masc_domain.tool_schema) -> schema.name = reserved_name)
+       Config.raw_all_tool_schemas);
+  let unaffected_call = Keeper_lane_addon_runtime.call ~config ~keeper_name:"fixture-keeper"
+    ~export:(List.hd isolated.exports) ~arguments:(`Assoc []) in
+  check bool "unrelated Keeper export remains callable during collisions" true
+    (match unaffected_call.disposition with Tool_result.Completed () -> true | _ -> false);
+  check bool "conflicting frozen Keeper handle remains refused" true
+    ((keeper_call ()).disposition = Tool_result.Failed Tool_result.Workflow_rejection);
+  detach config third;
+  await_phase clock config third "detached";
   detach config second;
   await_phase clock config second "detached";
   detach config first;
   check bool "detach immediately revokes old handle" true (Result.is_error (call handle));
   check bool "detach immediately removes cached observation" true (cached () = None);
+  let detached_keeper_call = keeper_call () in
+  check bool "Keeper adapter rejects the detached frozen handle before effects" true
+    (detached_keeper_call.disposition = Tool_result.Failed Tool_result.Workflow_rejection
+      && detached_keeper_call.failure_effect_disposition = Tool_result.Proven_pre_effect);
+  await_phase clock config first "detached";
+  check Alcotest.int "MCP removes detached tool" 0 (List.length (listed ()));
+  check bool "detach notifies opted-in tool subscriptions" true (!changes <> []);
+  check bool "MCP rejects detached tool call" true (member "error" (invoked ()) <> `Null);
   let replacement = attach_export "replacement" in
   await clock (fun () -> match exports () with Ok [_] -> true | _ -> false);
   check bool "same-name replacement cannot receive old call" true (Result.is_error (call handle));
@@ -1635,10 +1764,10 @@ let test_machine_notices_keep_effect_order () =
 
 let () = run "Lane Add-on runtime" ["optional extension", [
   test_case "machine notices keep effect order" `Quick test_machine_notices_keep_effect_order;
+  test_case "machine source dependencies reject cycles" `Quick test_machine_dependencies_reject_cycles;
   test_case "machine activity applies to worker calls" `Quick test_machine_activity_applies_to_worker_calls;
   test_case "machine export host admission" `Quick test_machine_export_host_admission;
   test_case "tool exports bind live incarnations" `Quick test_tool_exports_bind_live_incarnations;
-  test_case "machine source dependencies reject cycles" `Quick test_machine_dependencies_reject_cycles;
   test_case "invalid retained visibility is isolated" `Quick test_invalid_retained_visibility_is_isolated;
   test_case "MCP attribution never authorizes private Lane reads" `Quick
     test_mcp_attribution_does_not_authorize_private_lane;

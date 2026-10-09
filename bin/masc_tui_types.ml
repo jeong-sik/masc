@@ -9313,7 +9313,8 @@ let play_change_request = function
 let workspace_change_origin state =
   match state.workspace_identity, workspace_input_identity_of_server state.server_identity with
   | Workspace_identity_match, Some origin -> Ok origin
-  | (Workspace_identity_unread | Workspace_identity_mismatch _), _
+  | ( Workspace_identity_unread | Workspace_identity_mismatch _
+    | Workspace_identity_match_unconfirmed _ ), _
   | Workspace_identity_match, None ->
       Error "Invite changes require a verified server matching this TUI's local workspace."
 

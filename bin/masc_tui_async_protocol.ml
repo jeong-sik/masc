@@ -655,6 +655,9 @@ let rec workspace_message_is_read = function
   | Lane_addons_loaded _
   | Lane_subscriptions_loaded _
   | Keeper_deletions_loaded _
+  (* A withdrawn tick never reached the server: keeping the observation is
+     the whole receipt (masc_tui.ml). *)
+  | Msx_tick_withdrawn _
   | Msx_activity_loaded _
   | Msx_live_loaded _
   | Dos_live_loaded _

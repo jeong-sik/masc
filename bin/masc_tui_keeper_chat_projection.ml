@@ -1035,16 +1035,25 @@ let decode_custom_event ~request state fields =
           |> Result.map_error (fun detail -> Malformed_event detail) in
       let* _ = optional_string ~surface:native_surface "toolCallName" native_fields
           |> Result.map_error (fun detail -> Malformed_event detail) in
-      (* Only END carries a completion: START is complete without one, and
-         the allowed-field list above already rejects a START that has one. *)
-      let* () = if String.equal name "KEEPER_NATIVE_TOOL_END" then
-          (match List.assoc_opt "completion" native_fields with
-           | None -> Error (Malformed_event (native_surface ^ ": completion is required"))
-           | Some json ->
-               Runtime_native_tools.completion_of_json json
-               |> Result.map (fun _ -> ())
-               |> Result.map_error (fun detail -> Malformed_event (native_surface ^ ": " ^ detail)))
+      (* The wire contract permits an END without a completion: an older
+         sender closes the occurrence without terminal metadata, which reads
+         as end_observed — the same default the live decoder applies. A
+         present completion must be exactly one and well-formed; START never
+         carries one and the allowed-field list already rejects a START
+         that has it. *)
+      let* () =
+        if String.equal name "KEEPER_NATIVE_TOOL_END" then
+          match List.filter (fun (key, _) -> String.equal key "completion") native_fields with
+          | [] | [_, _] -> Ok ()
+          | _ -> Error (Malformed_event (native_surface ^ ": completion must be unique"))
         else Ok () in
+      let* () = match List.assoc_opt "completion" native_fields with
+        | None -> Ok ()
+        | Some json ->
+            Runtime_native_tools.completion_of_json json
+            |> Result.map (fun _ -> ())
+            |> Result.map_error (fun detail -> Malformed_event (native_surface ^ ": " ^ detail))
+      in
       Ok state
     else if String.equal name "KEEPER_REPLY_DETAILS" then
       match state.reply_details with

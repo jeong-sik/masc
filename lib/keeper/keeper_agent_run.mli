@@ -87,6 +87,7 @@ module For_testing : sig
     repetition_execution:Keeper_repetition_scope.Execution.t option ->
     terminal_effect_state:Keeper_tools_agent_core.terminal_effect_state ->
     tool_calls:Keeper_agent_result.tool_call_detail list ->
+    input_tool_calls:Keeper_agent_result.tool_call_detail list ->
     assistant_turn_texts:string list ->
     yield_requested:(unit -> (yield_request option, string) result) option ->
     (Runtime_agent.cooperative_yield_decision, Agent_core.Error.t) result
@@ -97,6 +98,7 @@ module For_testing : sig
   val official_client_tool_boundary :
     repetition_execution:Keeper_repetition_scope.Execution.t option ->
     tool_calls:Keeper_agent_result.tool_call_detail list ->
+    input_tool_calls:Keeper_agent_result.tool_call_detail list ->
     unit ->
     (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result
   val registry_progress_on_event

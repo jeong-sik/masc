@@ -183,11 +183,13 @@ type taken =
 
 (** Takes the lock and replaces the previous host's record with this host's.
     The results that record lists in [unacknowledged] are first appended to
-    {!unacknowledged_archive_path}, under the previous host's [pid]. The
-    previous record stands when this fails: another host holds the lock, the
-    address is refused, those results cannot be archived, or the record cannot
-    be written. A previous record no reader can load is replaced without
-    archiving. *)
+    {!unacknowledged_archive_path}, under the previous host's [pid]. A
+    previous record this reader reads but cannot load (another layout, or
+    damaged) is first copied to {!unloadable_copy_path} with this host's
+    [pid] and [now]. The previous record stands when this fails: another host
+    holds the lock, the address is refused, the previous record cannot be
+    read at all, its results cannot be archived or its copy kept, or the new
+    record cannot be written. *)
 val take
   :  base_path:string
   -> pid:int
@@ -195,6 +197,10 @@ val take
   -> client_id:Browser_lane.client_id
   -> now:float
   -> (taken, refusal) result
+
+(** Where {!take} keeps the bytes of a previous record it could not load,
+    named by the taking host's [pid] and [now]. *)
+val unloadable_copy_path : base_path:string -> pid:int -> now:float -> string
 
 (** Firefox gave the host its session. *)
 val attached : held -> now:float -> (unit, write_failure) result

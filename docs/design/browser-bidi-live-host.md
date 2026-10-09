@@ -156,6 +156,9 @@ server:
     the host pid, start time and client ID alongside the unchanged result
     fields. This archive is append-only; the ordinary diagnostic log is not
     a durable backup. Archive rows may repeat after uncertain writes.
+  - A host that starts appends the previous record's results to the same
+    archive, under the previous host's pid, before it writes its own record.
+    When that append fails it does not start, and the previous record stays.
   - If archival fails, the host reports the failure and retains every
     unarchived entry in its snapshot, even above the normal window, then
     retries on a later addition. A snapshot write failure retains its state
@@ -202,7 +205,11 @@ lock and not yet its record, the reader still sees the host before it; and
 a host that wrote its ending and exited between the two looks reads as
 killed. The next read is right.
 
-A host that starts replaces the record. It carries no lane token, no
+A host that starts replaces the record, once the previous record's results
+are archived. A previous record it reads and cannot load (another layout, or
+damaged) is first copied to `bidi-host.json.unloadable-<pid>-<time>`, named
+by the new host; one it cannot read at all is left in place, and that host
+does not start. The record carries no lane token, no
 request's arguments and nothing read from a page. A request is named only by
 the UUID the server issued and by a verb the host knows; for anything else
 the field is `null`. A reader built before a verb was added reads that verb

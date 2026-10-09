@@ -469,7 +469,9 @@ let a_bidi_host_record_that_cannot_be_read_is_invalid () =
     (condition Onboarding_status.Browser_bidi_host observed = Onboarding_status.Invalid);
   says observed
     [ "record cannot be read"; "No host holds this workspace's lock, so none is running"
-    ; "The next host writes a new record in its place, and does not start when it cannot"
+    ; "The next host keeps a copy of a record it read and cannot load beside it and writes a new \
+       one in its place"
+    ; "It does not start while the record cannot be read at all, or a new one cannot be written"
     ; "then runs " ^ launch_command base ];
   let held = take_record base in
   write record "{\"pid\": 1";
@@ -479,8 +481,9 @@ let a_bidi_host_record_that_cannot_be_read_is_invalid () =
   says observed
     [ "A BiDi browser host holds this workspace's lock, so one is running"
     ; "its record cannot be read"; "A second host is refused while that one runs"
-    ; "Once the operator stops it, the next host writes a new record in its place, and does not \
-       start when it cannot." ];
+    ; "Once the operator stops it, the next host keeps a copy of a record it read and cannot load \
+       beside it and writes a new one in its place. It does not start while the record cannot be \
+       read at all, or a new one cannot be written." ];
   (* Why it cannot be read is the reader's own word; nothing is guessed
      beside it. *)
   lacks (bidi_message observed) [ "then runs" ];

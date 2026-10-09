@@ -289,6 +289,13 @@ let entry_of_json json =
   let* ended = Result.bind (field fields "ended") (nullable ending_of_json) in
   Ok { pid; started_at; bidi_url; client_id; attached_at; unacknowledged; ended }
 
+(* Why a record was not read: the file itself could not be read, so what it
+   lists is not known; or it was read and is no record this reader loads,
+   from another layout or damaged. *)
+type read_failure = File_unreadable of string | Not_a_record of { detail : string; contents : string }
+
+let read_failure_detail = function File_unreadable detail | Not_a_record { detail; _ } -> detail
+
 let state_of ~lock_held = function
   | Error detail -> Unreadable { detail; held = Some lock_held }
   | Ok None -> Never_started
@@ -297,12 +304,13 @@ let state_of ~lock_held = function
 
 let read_entry base_path =
   match Fs_compat.load_file_opt (path base_path record_name) with
-  | exception Sys_error detail -> Error detail
+  | exception Sys_error detail -> Error (File_unreadable detail)
   | None -> Ok None
   | Some contents ->
+    let not_a_record detail = Not_a_record { detail; contents } in
     (match Yojson.Safe.from_string contents with
-     | exception Yojson.Json_error _ -> Error (record_name ^ " is not JSON")
-     | json -> Result.map Option.some (entry_of_json json))
+     | exception Yojson.Json_error _ -> Error (not_a_record (record_name ^ " is not JSON"))
+     | json -> Result.map_error not_a_record (Result.map Option.some (entry_of_json json)))
 
 (* [lockf] locks belong to the process, not to the descriptor. This process's
    own test of a lock it holds says "free", a second [take] here would be
@@ -357,7 +365,7 @@ let lock_held base_path =
          held))
 
 let observe ~base_path =
-  match read_entry base_path with
+  match Result.map_error read_failure_detail (read_entry base_path) with
   (* No record, and a record with its ending, say the same whatever the lock
      says, so a lock that cannot be asked takes nothing from them. *)
   | (Ok None | Ok (Some { ended = Some _; _ })) as entry -> state_of ~lock_held:false entry
@@ -484,15 +492,35 @@ let archive base_path rows =
     (Result.map ignore
        (Fs_compat.append_private_jsonl_durable_stable_result (unacknowledged_archive_path ~base_path) rows))
 
+let unloadable_copy_path ~base_path ~pid ~now =
+  path base_path (Printf.sprintf "%s.unloadable-%d-%.0f" record_name pid now)
+
 (* The next host's record replaces the last one, and with it the results
    that host holds no acknowledgement for. They are archived first. A record
-   no reader can load is replaced as it is, as the host status says. *)
-let keep_predecessor_results base_path =
+   this reader cannot load may list some in a layout it does not know, so
+   its bytes are kept beside it; one that cannot be read at all is not
+   replaced. *)
+let keep_predecessor_results ~base_path ~pid ~now =
   match read_entry base_path with
   | Ok (Some ({ unacknowledged = _ :: _; _ } as previous)) ->
     Result.map_error (fun detail -> "the last host's results: " ^ detail)
       (archive base_path (archive_rows previous previous.unacknowledged))
-  | Ok (Some { unacknowledged = []; _ }) | Ok None | Error _ -> Ok ()
+  | Ok (Some { unacknowledged = []; _ }) | Ok None -> Ok ()
+  | Error (File_unreadable detail) ->
+    Error ("the last host's record cannot be read, so the results it may list cannot be archived: "
+           ^ detail)
+  | Error (Not_a_record { detail; contents }) ->
+    let copy = unloadable_copy_path ~base_path ~pid ~now in
+    (match
+       Fs_compat.write_file_atomic_strict_staged copy ~write:(fun channel ->
+         Unix.fchmod (Unix.descr_of_out_channel channel) file_permissions;
+         output_string channel contents)
+     with
+     | Ok () -> Ok ()
+     | Error failure ->
+       Error
+         (Printf.sprintf "the last host's record (%s) could not be kept as %s: %s" detail copy
+            (Fs_compat.atomic_replace_failure_to_string failure)))
 
 let take ~base_path ~pid ~bidi_url ~client_id ~now =
   match recorded_address bidi_url with
@@ -519,7 +547,7 @@ let take ~base_path ~pid ~bidi_url ~client_id ~now =
          }
        in
        (match
-          match keep_predecessor_results base_path with
+          match keep_predecessor_results ~base_path ~pid ~now with
           | Error detail -> Error (Not_written detail)
           | Ok () -> write held
         with

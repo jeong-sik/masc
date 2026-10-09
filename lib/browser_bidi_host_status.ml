@@ -286,15 +286,17 @@ let message { lane = t; record } =
       Printf.sprintf
         "A BiDi browser host holds this workspace's lock, so one is running, and its record \
          cannot be read (%s). A second host is refused while that one runs. Once the operator \
-         stops it, the next host writes a new record in its place, and does not start when it \
-         cannot."
+         stops it, the next host keeps a copy of a record it read and cannot load beside it and \
+         writes a new one in its place. It does not start while the record cannot be read at \
+         all, or a new one cannot be written."
         detail
   | Record.Unreadable { detail; held = Some false } ->
       Printf.sprintf
         "The BiDi browser host's record cannot be read (%s). No host holds this workspace's \
-         lock, so none is running. The next host writes a new record in its place, and does not \
-         start when it cannot. The operator starts Firefox on a profile kept for this with %s \
-         PORT, unless it runs already, then %s.%s%s"
+         lock, so none is running. The next host keeps a copy of a record it read and cannot \
+         load beside it and writes a new one in its place. It does not start while the record \
+         cannot be read at all, or a new one cannot be written. The operator starts Firefox on a \
+         profile kept for this with %s PORT, unless it runs already, then %s.%s%s"
         detail firefox_flag (run_host t ~address:None) (listed_beside t) (steps t)
   | Record.Unreadable { detail; held = None } ->
       Printf.sprintf

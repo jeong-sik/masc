@@ -738,7 +738,45 @@ let test_a_host_that_cannot_archive_them_does_not_take_the_workspace () =
   Unix.rmdir archive;
   let next = taken ~pid:300 base in
   check int "and the workspace is free for the next host" 300 (on_disk lane).pid;
+  check bool "the last host's result is archived once" true (archived_results base = [ result_json noted ]);
   released next
+
+(* A record this reader reads and cannot load may list results in a layout
+   it does not know: its bytes are kept before it is replaced. *)
+let test_a_record_that_cannot_be_loaded_is_kept_beside_it () =
+  with_workspace @@ fun ~base ~lane ->
+  released (taken ~pid:100 base);
+  let record = Filename.concat lane "bidi-host.json" in
+  let unknown = {|{"schema":99,"pid":100}|} in
+  Out_channel.with_open_bin record (fun output -> output_string output unknown);
+  let next = taken ~pid:200 base in
+  let copy = Record.unloadable_copy_path ~base_path:base ~pid:200 ~now:entry.started_at in
+  check string "its bytes, beside it" unknown (In_channel.with_open_bin copy In_channel.input_all);
+  check int "and the new record in its place" 200 (on_disk lane).pid;
+  released next
+
+(* A record that cannot be read at all may list results: it is not replaced. *)
+let test_a_record_that_cannot_be_read_is_not_replaced () =
+  if Unix.geteuid () = 0 then skip ()
+  else
+    with_workspace @@ fun ~base ~lane ->
+    let first = taken ~pid:100 base in
+    written (Record.note_unacknowledged first noted);
+    released first;
+    let record = Filename.concat lane "bidi-host.json" in
+    let left = on_disk lane in
+    Unix.chmod record 0o000;
+    (match Fun.protect ~finally:(fun () -> Unix.chmod record 0o600) (fun () -> take ~pid:200 base) with
+     | Error (Record.Unavailable detail) ->
+       check bool detail true (String_util.contains_substring detail "cannot be read")
+     | Error (Record.Another_host _) -> fail "refused as a second host"
+     | Error (Record.Bad_address detail) -> fail detail
+     | Ok _ -> fail "a host replaced a record it could not read");
+    check bool "the record stands, with its results" true (on_disk lane = left);
+    let next = taken ~pid:300 base in
+    check bool "once it can be read, its results are archived" true
+      (archived_results base = [ result_json noted ]);
+    released next
 
 let () =
   match Array.to_list Sys.argv with
@@ -779,4 +817,8 @@ let () =
           ; test_case "the next host archives the last one's results" `Quick
               test_the_next_host_archives_the_last_ones_results
           ; test_case "a host that cannot archive them does not take the workspace" `Quick
-              test_a_host_that_cannot_archive_them_does_not_take_the_workspace ] ) ]
+              test_a_host_that_cannot_archive_them_does_not_take_the_workspace
+          ; test_case "a record that cannot be loaded is kept beside it" `Quick
+              test_a_record_that_cannot_be_loaded_is_kept_beside_it
+          ; test_case "a record that cannot be read is not replaced" `Quick
+              test_a_record_that_cannot_be_read_is_not_replaced ] ) ]

@@ -929,8 +929,10 @@ def keeper_detail_overscroll_interaction(
                 b"\r",
                 b"Keepers \xe2\x96\xb8 \x1b[1mbeta",
             )
-            top = window(1)
-            if top not in beta:
+            # beta's detail has its own row count, so alpha's "first-last/count"
+            # cannot name beta's top window. The reset is beta's first row.
+            beta_windows = WINDOW_TEXT_RE.findall(CSI_RE.sub(b"", beta))
+            if not beta_windows or int(beta_windows[-1][0]) != 1:
                 raise AssertionError(
                     f"new Keeper detail did not reset to the top: {beta!r}"
                 )

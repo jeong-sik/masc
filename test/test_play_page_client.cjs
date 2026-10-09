@@ -2361,6 +2361,57 @@ for (const watched of ['dos', 'msx']) for (const initiallyConnected of [true, fa
   });
 }
 
+for (const status of [401, 403]) {
+  test(`terminal ${status} retires an initialized page after storage access is revoked`, async () => {
+    let blocked = false;
+    let rejected = false;
+    const backing = new Map();
+    const storage = {
+      get(key) { if (blocked) throw new Error('storage revoked'); return backing.get(key); },
+      set(key, value) { if (blocked) throw new Error('storage revoked'); backing.set(key, value); },
+      delete(key) { if (blocked) throw new Error('storage revoked'); return backing.delete(key); },
+    };
+    const page = fixture(({url}) => {
+      if (rejected) return response({}, status);
+      if (url === '/api/v1/play/seat') return response(seat);
+      if (url === '/api/v1/play/pad') return response(layout);
+      return response(frame);
+    }, {storage});
+    await page.settle();
+    blocked = true; rejected = true;
+    await page.poll();
+    await page.settle();
+    assert.equal(page.evaluate('authRejected'), true, 'rejected bearer is retired independently of storage cleanup');
+    const count = page.requests.length;
+    await page.seatTick();
+    assert.equal(page.requests.length, count, 'invalid bearer does not keep polling');
+    assert.equal(page.get('send-text').disabled, true);
+    assert.ok(backing.size > 0, 'inaccessible persisted evidence remains intact');
+  });
+}
+
+test('seat recovery cadence replaces a stalled authority request without machine activity', async () => {
+  let stalled;
+  let hold = false;
+  const page = fixture((request, signal) => {
+    if (request.url === '/api/v1/play/seat') {
+      if (hold && !stalled) { stalled = signal; return new Promise(() => {}); }
+      return response(seat);
+    }
+    if (request.url === '/api/v1/play/pad') return response(layout);
+    return response(frame);
+  });
+  await page.settle();
+  hold = true;
+  await page.seatTick();
+  const reads = page.requests.filter(r => r.url === '/api/v1/play/seat').length;
+  await page.seatTick();
+  await page.settle();
+  assert.equal(stalled.aborted, true);
+  assert.equal(page.requests.filter(r => r.url === '/api/v1/play/seat').length, reads + 1);
+  assert.equal(page.get('send-text').disabled, false);
+});
+
 test('storage-blocked observers read public room history without presence writes', async () => {
   const storage = new Map();
   storage.set = () => { throw new Error('storage blocked'); };

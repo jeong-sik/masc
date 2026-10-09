@@ -377,7 +377,11 @@
       "path": "lib/keeper/keeper_tool_composition_surface.ml",
       "baseline_lines": 2266,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; remaining semantic review pending",
+      "current_lines": 1921,
+      "prs": [
+        42113
+      ]
     },
     {
       "path": "lib/keeper/keeper_tool_descriptor.ml",

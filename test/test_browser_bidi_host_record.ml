@@ -204,7 +204,9 @@ let test_a_layout_this_reader_does_not_know_is_refused () =
     ; "a reason with a bare backslash", {|could not read C:\temp|}
     ; "a reason that ends in a backslash", {|stopped \|}
     ; "a reason with a lower-case mark", {|stopped \x5c|}
+    ; "a reason with a lower-case first digit", {|stopped \xaF|}
     ; "a reason with a mark cut short", {|stopped \x5|}
+    ; "a reason with a mark whose first digit is not hex", {|stopped \xgA|}
     ; "a reason with a mark whose second digit is not hex", {|stopped \x0Z|}
     ; "a reason with a mark for a byte a host writes as it is", {|stopped \x41|}
     ; "a reason with a mark cut by the length mark", String.make 509 'a' ^ {|\x5...|}
@@ -262,6 +264,7 @@ let test_a_time_is_written_back_as_it_was_read () =
 
 let state = testable (Fmt.of_to_string (function
   | Record.Never_started -> "never started"
+  | Record.Record_missing_but_locked -> "record missing but lock held"
   | Record.Running entry -> Printf.sprintf "running pid %d" entry.pid
   | Record.Ended (entry, ending) -> Printf.sprintf "ended pid %d: %s" entry.pid ending.reason
   | Record.Died entry -> Printf.sprintf "died pid %d" entry.pid
@@ -275,11 +278,9 @@ let said = Fmt.to_to_string (pp state)
 let test_what_a_record_and_its_lock_say () =
   let ended = { entry with ended = Some ending } in
   check state "no record" Record.Never_started (Record.state_of ~lock_held:false (Ok None));
-  (* With no record the lock is not asked: [observe] answers this row with
-     no lock at all, and a host that has taken the lock and not yet written
-     its first record reads as none. A second host is still refused by the
-     lock. *)
-  check state "no record, and a host holds the lock" Record.Never_started
+  (* A held lock with no record means a host has taken the workspace but
+     its record is absent; it is not evidence that no host has run. *)
+  check state "no record, but a host holds the lock" Record.Record_missing_but_locked
     (Record.state_of ~lock_held:true (Ok None));
   check state "a record and its lock" (Record.Running entry) (Record.state_of ~lock_held:true (Ok (Some entry)));
   check state "a record nobody holds" (Record.Died entry) (Record.state_of ~lock_held:false (Ok (Some entry)));
@@ -368,6 +369,9 @@ let test_a_reader_follows_a_host_from_start_to_death () =
       | Error (Record.Another_host named) -> check (option int) "it is told who holds it" (Some pid) named
       | Error (Record.Bad_address detail | Record.Unavailable detail) -> fail detail
       | Ok _ -> fail "a second host took a workspace that has one");
+     Sys.remove (Record.record_path ~base_path:base);
+     check state "a held lock with a missing record is unverified"
+       Record.Record_missing_but_locked (Record.observe ~base_path:base);
      output_string tell "attach\n";
      flush tell;
      check string "the host got its session" attached_marker (holder_line from_holder);
@@ -386,7 +390,7 @@ let test_a_reader_follows_a_host_from_start_to_death () =
      check bool "the observation every reader answers from carries the same state" true
        (match (Status.observe ~base_path:base).record with
         | Record.Running _ -> true
-        | Record.Never_started | Record.Ended _ | Record.Died _ | Record.Unreadable _ -> false);
+        | Record.Never_started | Record.Record_missing_but_locked | Record.Ended _ | Record.Died _ | Record.Unreadable _ -> false);
      (* Asking needs no leave to write the lock file. *)
      let lock = Filename.concat lane "bidi-host.lock" in
      Unix.chmod lock 0o400;
@@ -594,7 +598,9 @@ let test_a_lock_that_cannot_be_asked_costs_only_what_turns_on_it () =
      | Record.Ended (_, { reason; _ }) -> check string "the ending is read all the same" "stopped by SIGINT" reason
      | other -> failf "a record with its ending, its lock unasked, reads as %s" (said other));
     Sys.remove (Filename.concat lane "bidi-host.json");
-    check state "and so is the absence of a record" Record.Never_started (unasked ())
+    (match unasked () with
+     | Record.Unreadable { held = None; _ } -> ()
+     | other -> failf "absence of a record with an unasked lock reads as %s" (said other))
 
 (* A host that cannot write its first record does not hold the workspace,
    and what its predecessor left is still there to read. *)

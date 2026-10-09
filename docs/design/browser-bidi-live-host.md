@@ -75,10 +75,11 @@ from the list and keeps its `clientId` for the task.
 The host runs in the foreground until it is stopped with Ctrl-C or SIGTERM,
 or its terminal is closed (SIGHUP). It then finishes and answers a command in
 flight, tells the server, ends the BiDi session it asked for, and exits 0. A
-second Ctrl-C ends it at once and leaves the session in Firefox. A stop that
-comes before the WebSocket is up abandons the attempt. One that comes while
-the session request is unanswered waits for that answer, up to twenty
-seconds, and then ends the session.
+SIGTERM that arrives after another handled signal has already requested this
+graceful shutdown ends it at once, leaving the session in Firefox. A second
+Ctrl-C also ends it at once. A stop that comes before the WebSocket is up
+abandons the attempt. One that comes while the session request is unanswered
+waits for that answer, up to twenty seconds, and then ends the session.
 
 A host started ignoring one of these signals keeps ignoring it. Under
 `nohup` it therefore outlives its terminal, and is stopped with SIGTERM.
@@ -192,12 +193,14 @@ Read together they say one of these:
 
 | Record | Lock | Meaning |
 |---|---|---|
-| none | | No BiDi host has run for this workspace. |
+| none | free | No BiDi host has run for this workspace. |
+| none | held | A host holds the workspace lock before writing its first record; the state is `record_missing_but_locked`. |
 | no ending | held | A host is running. It is attached once the record has its session time; a server that is down does not change this. |
 | an ending | | The host left in order and said why. |
 | no ending | free | The host was killed or crashed, or it left in order and could not write its ending. Its BiDi session may be left in Firefox. |
 | unreadable | | The record is not one the reader takes. The reader still says whether a host holds the lock: one that does refuses the next host, which then cannot replace the record. |
-| no ending | cannot be asked | Whether the host runs is not known. The reader says so, with why the lock could not be asked. A record with its ending, and no record, are read without the lock. |
+| none | cannot be asked | Whether a host started cannot be known. The state is unreadable, with why the lock could not be asked. |
+| no ending | cannot be asked | Whether the host runs is not known. The state is unreadable, with why the lock could not be asked. |
 
 A reader looks at the record and then at the lock, so it can be wrong for
 as long as one write of the record takes: while a starting host has the
@@ -248,7 +251,7 @@ does next:
   A workspace with no browser lane installed and no record has no such line.
 - `GET /api/v1/dashboard/browser-lane/clients` adds `bidiHost` beside
   `clients`:
-  - `state`: `never_started`, `running`, `ended`, `died` or `unreadable`.
+  - `state`: `never_started`, `record_missing_but_locked`, `running`, `ended`, `died` or `unreadable`.
   - What the state was read from: the `record`, whether the host's lock was
     held as `lock_held`, and why either cannot be read as `detail`. A reader
     works the state out again from these and refuses a report whose `state`
@@ -322,7 +325,7 @@ These do leave the session behind. A host started after them is refused
 with `session not created` and exits; quit that Firefox, start it with the
 same command and profile, then start the host.
 
-- The host was killed with SIGKILL or a second Ctrl-C, or crashed.
+- The host was killed with SIGKILL, a second Ctrl-C, or a SIGTERM after graceful shutdown had already been requested, or crashed.
 - Firefox did not answer the session's end within two seconds, or its socket
   was already closed. The host logs `the BiDi session was not ended` with the
   reason. If the socket closed because Firefox quit, there is nothing to

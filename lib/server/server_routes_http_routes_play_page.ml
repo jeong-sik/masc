@@ -288,9 +288,9 @@ function connectionSettled() {
 function end(text, { terminalAuth = false } = {}) {
   if (ended) return;
   initialConnectIntent = false;
-  // An observation-only document has never admitted a mutation. Retire its
-  // rejected in-memory bearer without touching storage it does not own.
-  const observationOnly = terminalAuth && documentId === null && !unsettled;
+  // A terminally rejected bearer must stop polling even if storage became
+  // inaccessible after startup. Preserve any unreadable pending evidence.
+  let observationOnly = terminalAuth && (documentId === null || !connectionSettled());
   // Check storage at the forget boundary too, including authentication
   // failures delivered to a restored document with an older cached state.
   if (!observationOnly && token !== '' && !connectionSettled()) return;
@@ -299,7 +299,10 @@ function end(text, { terminalAuth = false } = {}) {
     catch (_) {
       setStatus('disconnect', '탭에 저장된 초대 연결을 지우지 못했어요. 연결 끊기를 다시 눌러 주세요.');
       setControlsEnabled(false);
-      return;
+      if (!terminalAuth) return;
+      // Retire the rejected bearer locally even when its persisted copy cannot
+      // be removed. Retain receipt/document storage for later diagnosis.
+      observationOnly = true;
     }
   }
   ended = true;
@@ -505,6 +508,7 @@ async function refreshSeat() {
 // its reads on the wire; direct action/handoff reads retain their own identity.
 function refreshFrameSeat(authorityChanged = false) {
   if (ended || disconnecting) return;
+  if (frameSeatRead !== null && performance.now() >= nextSeatPollAt) retireSeatRead();
   if (frameSeatRead !== null) {
     if (authorityChanged) {
       frameSeatNeedsRefresh = true;

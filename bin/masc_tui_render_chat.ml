@@ -261,7 +261,7 @@ let search_chat_markdown ~link_previews_mode ~theme ~preview ~(entry : Message_l
       | Thinking_summary -> Search.Thinking_summary_byte offset) else None) in
   List.iter (fun (index,url,start,(field : Masc_tui_link_preview.card_source_span)) ->
     for delta=0 to field.source_end_byte-field.source_start_byte-1 do
-      origins.(start+delta)<-Some(Search.Preview_byte {url;index;field=field.field;
+      origins.(start+delta)<-Some(Search.Preview_byte {url;index;field=field.field;order=field.order;
         byte=field.source_start_byte+delta;expansion=0})
     done) !fields;
   let context=Chat_theme.body_context theme entry.style in
@@ -1431,12 +1431,15 @@ let tool_result_rows state ~keeper_name ~max_cells projection =
                          (Keeper_chat_transcript.native_progress_details activity))
                | Keeper_chat_transcript.Native_running -> Keeper_chat_transcript.native_progress_details activity
                | Keeper_chat_transcript.Started
-               | Keeper_chat_transcript.Awaiting_result -> None
+               | Keeper_chat_transcript.Awaiting_result ->
+                   Keeper_chat_transcript.native_progress_details activity
                | Keeper_chat_transcript.Returned
                | Keeper_chat_transcript.Failed
                | Keeper_chat_transcript.Never_returned
                | Keeper_chat_transcript.Outcome_unrecorded ->
-                   Some unavailable)
+                   Some (Option.value
+                     (Keeper_chat_transcript.native_progress_details activity)
+                     ~default:unavailable))
         in
         (* Only generated status text is dressed. Payload stays terminal-safe
            plain text, including words or glyphs that resemble a failure. *)
@@ -3159,7 +3162,6 @@ type scroll_anchor_index = {
   indexed_entries : Message_layout.entry array;
   indexed_anchors : chat_scroll_anchor option array;
   transient_indices : (chat_scroll_anchor, int) Hashtbl.t;
-  newest_anchors : (int * chat_scroll_anchor) list;
 }
 
 let scroll_anchor_index_memo :
@@ -3173,10 +3175,6 @@ let scroll_anchor_index projection =
         (List.map (fun (tag, _) ->
            Option.map (fun anchor -> Scroll_durable anchor) (search_anchor_of_tag tag))
            projection.tagged_entries @ projection.transient_anchors) in
-      let newest_anchors = Array.fold_left (fun (index, newest) anchor ->
-        index + 1, (match anchor with
-          | Some anchor -> (index, anchor) :: newest
-          | None -> newest)) (0, []) indexed_anchors |> snd in
       let transient_indices = Hashtbl.create 8 in
       let offset = List.length projection.tagged_entries in
       List.iteri (fun at -> function
@@ -3195,11 +3193,9 @@ let scroll_anchor_index projection =
              | _ -> ())
         | Tagged_block _ -> ()) projection.tagged_entries;
       let indexed_entries = Array.of_list projection.layout_entries in
-      let anchors = {indexed_entries; indexed_anchors; newest_anchors; transient_indices} in
+      let anchors = {indexed_entries; indexed_anchors; transient_indices} in
       scroll_anchor_index_memo := Some (projection.layout_entries, anchors);
       anchors
-
-let newest_scroll_anchors projection = (scroll_anchor_index projection).newest_anchors
 
 let scroll_anchor_at projection index =
   let anchors = (scroll_anchor_index projection).indexed_anchors in
@@ -3216,6 +3212,7 @@ let projection_index_of_scroll_anchor projection = function
 type source_body_index = {
   source_rows : (chat_source_position, int) Hashtbl.t;
   row_sources : (int, chat_source_position) Hashtbl.t;
+  row_end_sources : (int, chat_source_position) Hashtbl.t;
 }
 
 type source_body_key = {
@@ -3329,6 +3326,7 @@ let source_body_lookup state ~keeper_name projection ~inner_width ~theme ~previe
                  | Body_label _ | Thinking_summary_byte _ | Thinking_summary_label _
                  | Preview_byte _ | Journal_byte _ -> None) in
           let source_rows = Hashtbl.create 64 and row_sources = Hashtbl.create 16 in
+          let row_end_sources = Hashtbl.create 16 in
           let body_rows = List.length body.mapped_rows in
           List.iter (fun (run : Search.run) ->
             let _, copied = Masc_tui_theme.strip_sgr_with_positions run.text in
@@ -3343,10 +3341,11 @@ let source_body_lookup state ~keeper_name projection ~inner_width ~theme ~previe
                          first actually visible row, matching search's source
                          producer traversal, without electing by source words. *)
                       if not (Hashtbl.mem source_rows position) then Hashtbl.add source_rows position row;
-                      if not (Hashtbl.mem row_sources row) then Hashtbl.add row_sources row position)
+                      if not (Hashtbl.mem row_sources row) then Hashtbl.add row_sources row position;
+                      Hashtbl.replace row_end_sources row position)
                       (Option.bind run.positions.(byte) convert)
                   done) ranges) run.visible_rows) body.runs;
-          Some {source_rows;row_sources} in
+          Some {source_rows;row_sources;row_end_sources} in
           Entry_cache.replace source_body_indexes entry {key;index};
           index in
         Hashtbl.add mapped entry_index value;
@@ -3383,30 +3382,21 @@ let requested_scroll_from_pin state ~keeper_name projection ~markdown ~source_bo
 
 let scroll_position_for_window state ~keeper_name projection ~markdown ~source_body ~inner_width
     (window : Message_layout.scroll_window) =
+  let live_edge = window.scroll = 0 in
+  let positions = if live_edge then List.rev window.body_positions else window.body_positions in
   let points = List.filter_map (fun (position : Message_layout.body_row_position) ->
     Option.bind (scroll_anchor_at projection position.entry_index) (fun anchor ->
+      let source = if live_edge then
+          Option.bind (source_body position.entry_index) (fun body ->
+            Hashtbl.find_opt body.row_end_sources position.body_row)
+        else source_point_on_row ~source_body position.entry_index position.body_row in
       Option.map (fun source_position ->
         {scroll_anchor=anchor; body_row=position.body_row; source_position=Some source_position;
-         rows_below=position.rows_below})
-        (source_point_on_row ~source_body position.entry_index position.body_row))) window.body_positions in
-  (* The live-edge layout can elide middle rows and does not return body
-     positions. Its newest structural entry still records the current tail
-     distance, so the first scroll key can freeze it before an arrival. *)
-  let search_held = match state.msg_scroll_pin with
-    | Some {pin_mode=Hold_search; _} -> true | Some _ | None -> false in
-  let points = if points <> [] || window.scroll <> 0 || search_held then points else
-    newest_scroll_anchors projection |> List.find_map (fun (entry_index, anchor) ->
-      Option.bind (source_body entry_index) (fun body ->
-        let first=Hashtbl.fold (fun row source held -> match held with
-          | Some(earlier,_) when earlier <= row -> held
-          | Some _ | None -> Some(row,source)) body.row_sources None in
-        Option.bind first (fun (body_row,source_position) ->
-          Option.map (fun suffix ->
-            [{scroll_anchor=anchor; body_row; source_position=Some source_position; rows_below=suffix}])
-            (Message_layout.scroll_for_body_row ~markdown
-              ~origin:state.msg_origin_display ~inner_width ~entry_index
-              ~body_row projection.layout_entries))))
-    |> Option.value ~default:[] in
+         rows_below=position.rows_below}) source)) positions in
+  (* Live-edge seeds use the last actually displayed mapped byte. Opening
+     rows separated from the tail by a generated gap never elect an offset
+     measured through an old, elided physical middle. *)
+  let points = if live_edge then (match points with [] -> [] | point::_ -> [point]) else points in
   (* Frame feedback must retain a searched query endpoint, rather than replace
      it with the first byte of whichever physical row is now at the top. An
      explicit scroll gesture changes Hold_search to Hold_scroll at the edge. *)
@@ -3478,9 +3468,40 @@ type chat_search_result = {
   unavailable_entries : int;
 }
 
-let keeper_message_find_scroll ?(preview_lookup=Masc_tui_link_preview.get_preview) (state : state) ~keeper_name ~needle ~older_than =
-  if String.equal needle "" then {match_result=None;unavailable_entries=0}
-  else
+type search_candidate =
+  | Search_unavailable
+  | Search_candidate of {index:int;anchor:chat_search_anchor;
+      before:Search.position option;body_rows:int;runs:Search.run list}
+
+type chat_search_work = {
+  search_workspace:workspace_authority;
+  search_generation:int;
+  search_keeper:string;
+  search_needle:string;
+  search_entries:Message_layout.entry list;
+  search_anchors:chat_search_anchor option list;
+  search_palette_generation:int;
+  search_chat_cols:int;
+  search_inner_width:int;
+  search_origin:Message_layout.origin_display;
+  search_preview_mode:[`Off | `Compact | `Rich];
+  search_view:surface;
+  search_target:string option;
+  search_selected_keeper:string option;
+  search_reasoning:reasoning_visibility;
+  search_tools:tool_visibility;
+  search_memory:memory_visibility;
+  search_markdown:entry:Message_layout.entry -> width:int -> string list;
+  search_previews:(string * Masc_tui_link_preview.og_preview) list;
+  search_candidates:search_candidate list;
+}
+
+type chat_search_match = {
+  matched:(int * chat_search_anchor * int * Search.position * Search.position) option;
+  unavailable_entries:int;
+}
+
+let prepare_keeper_message_search ?(preview_lookup=Masc_tui_link_preview.get_preview) (state : state) ~keeper_name ~needle ~older_than =
     let _, cols = get_terminal_size () in
     let chat_cols =
       Masc_tui_roster_pane.content_cols ~hidden:(roster_pane_hidden state) ~cols
@@ -3490,9 +3511,20 @@ let keeper_message_find_scroll ?(preview_lookup=Masc_tui_link_preview.get_previe
     let index_of = projection_index_of_anchor projection in
     let inner_width = max 1 (framed_inner_width chat_cols) in
     let theme=Chat_theme.snapshot () in
-    let preview=preview_snapshot preview_lookup in
-    let unavailable_entries=ref 0 in
+    let preview_values=ref [] in
+    let preview=preview_snapshot (fun url ->
+      let value=preview_lookup url in preview_values:=(url,value):: !preview_values; value) in
     let markdown=cached_chat_markdown_with_preview ~preview ~link_previews_mode:state.link_previews_mode ~theme in
+    (* Suffix geometry may include newer entries than a repeated cursor. Freeze
+       their actually displayed metadata too, before any worker is launched. *)
+    List.iter (fun (entry : Message_layout.entry) ->
+      match entry.style,entry.markdown_source,state.link_previews_mode with
+      | (Message_layout.Tool | Skill _),_,_
+      | _,(Message_layout.Markdown_growing _ | Markdown_streaming),_
+      | _,_,`Off -> ()
+      | _,Message_layout.Markdown_stable _,(`Compact | `Rich) ->
+          List.iter (fun url -> ignore (preview url)) (bare_urls_for_entry entry))
+      projection.layout_entries;
     let ceiling, repeat = match older_than with
       | None -> List.length tagged, None
       | Some cursor when cursor.search_workspace <> state.workspace_authority
@@ -3515,9 +3547,9 @@ let keeper_message_find_scroll ?(preview_lookup=Masc_tui_link_preview.get_previe
       | (tag, entry) :: rest ->
           candidates (index + 1) (Some entry) ((index, tag, entry, previous) :: acc) rest
     in
-    let matched =
+    let search_candidates =
       candidates 0 None [] tagged
-      |> List.find_map (fun (index, tag, (entry : Message_layout.entry), previous) ->
+      |> List.filter_map (fun (index, tag, (entry : Message_layout.entry), previous) ->
            Option.bind (search_anchor_of_tag tag) (fun anchor ->
                let mapped=ref None in
                let observe ~entry ~width =
@@ -3527,33 +3559,144 @@ let keeper_message_find_scroll ?(preview_lookup=Masc_tui_link_preview.get_previe
                let rows=Message_layout.rows_of_entry ~markdown:observe
                  ~origin:state.msg_origin_display ~inner_width ~previous entry in
                match !mapped with
-               | None -> incr unavailable_entries; None
-               | Some body when body.unavailable -> incr unavailable_entries; None
+               | None -> Some Search_unavailable
+               | Some body when body.unavailable -> Some Search_unavailable
                | Some body ->
                    let body_rows=List.fold_left (fun count (row : Message_layout.row) ->
                      match row.kind with Body -> count+1 | Metadata _ | Viewport_gap _ -> count) 0 rows in
                    let before=match repeat with
                      | Some (at,position) when at=index -> Some position | _ -> None in
-                   Option.map (fun (found : Search.matched) -> index,anchor,found.body_row,found.position,found.ending_position)
-                     (Search.find ~needle ~before ~body_rows body.runs)))
+                   Some (Search_candidate {index;anchor;before;body_rows;runs=body.runs})))
     in
+    {search_workspace=state.workspace_authority;search_generation=state.msg_search_generation;
+     search_keeper=keeper_name;
+     search_needle=needle;search_entries=projection.layout_entries;
+     search_anchors=List.map (fun (tag,_) -> search_anchor_of_tag tag) tagged;
+     search_palette_generation=(Chat_theme.body_context theme Message_layout.Keeper).palette_generation;
+     search_chat_cols=chat_cols;
+     search_inner_width=inner_width;search_origin=state.msg_origin_display;
+     search_preview_mode=state.link_previews_mode;search_view=state.view;
+     search_target=state.msg_target_keeper_name;
+     search_selected_keeper=Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state);
+     search_reasoning=state.msg_reasoning_visibility;search_tools=state.msg_tool_visibility;
+     search_memory=state.msg_memory_visibility;
+     search_markdown=markdown;search_previews= !preview_values;search_candidates}
+
+(* Only immutable producer-owned runs cross into the CPU worker. No UI state,
+   render caches, lookup effects or scroll publication is read by this step. *)
+let run_keeper_message_search work =
+  let unavailable_entries=ref 0 in
+  let matched=List.find_map (function
+    | Search_unavailable -> incr unavailable_entries; None
+    | Search_candidate {index;anchor;before;body_rows;runs} ->
+        Option.map (fun (found : Search.matched) ->
+          index,anchor,found.body_row,found.position,found.ending_position)
+          (Search.find ~needle:work.search_needle ~before ~body_rows runs)) work.search_candidates in
+  {matched;unavailable_entries= !unavailable_entries}
+
+let complete_keeper_message_search work {matched;unavailable_entries} =
     let match_result=match matched with
     | None -> None
     | Some (at, matched_anchor, body_row, matched_position, ending_position) ->
-        let older_anchors = tagged |> List.take at
-          |> List.filter_map (fun (tag, _) -> search_anchor_of_tag tag) |> List.rev in
+        let older_anchors = work.search_anchors |> List.take at |> List.filter_map Fun.id |> List.rev in
         Option.map (fun scroll ->
-          let pin = Some {pin_workspace=state.workspace_authority; pin_keeper=keeper_name;
+          let pin = Some {pin_workspace=work.search_workspace; pin_keeper=work.search_keeper;
             pin_scroll=scroll; pin_mode=Hold_search;
             held_transients=[]; pin_points=[{scroll_anchor=Scroll_durable matched_anchor; body_row;
               source_position=Some (Durable_position ending_position); rows_below=0}]} in
-          {scroll; pin}, {search_workspace=state.workspace_authority;
-            search_keeper=keeper_name; matched_anchor; matched_position; older_anchors})
-          (Message_layout.scroll_for_body_row ~markdown ~origin:state.msg_origin_display
-            ~inner_width ~entry_index:at ~body_row projection.layout_entries)
+          {scroll; pin}, {search_workspace=work.search_workspace;
+            search_keeper=work.search_keeper; matched_anchor; matched_position; older_anchors})
+          (Message_layout.scroll_for_body_row ~markdown:work.search_markdown ~origin:work.search_origin
+            ~inner_width:work.search_inner_width ~entry_index:at ~body_row work.search_entries)
 
     in
-    {match_result;unavailable_entries= !unavailable_entries}
+    {match_result;unavailable_entries}
+
+
+let keeper_message_search_owned state work =
+  state.msg_search_generation=work.search_generation
+  && state.workspace_authority=work.search_workspace && state.view=work.search_view
+  && state.msg_target_keeper_name=work.search_target
+  && (Option.is_some work.search_target
+      || Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state)=work.search_selected_keeper)
+
+let keeper_message_search_context_current state work =
+  let _,cols=get_terminal_size () in
+  let chat_cols=Masc_tui_roster_pane.content_cols ~hidden:(roster_pane_hidden state) ~cols in
+  keeper_message_search_owned state work
+  && state.link_previews_mode=work.search_preview_mode
+  && state.msg_reasoning_visibility=work.search_reasoning
+  && state.msg_tool_visibility=work.search_tools && state.msg_memory_visibility=work.search_memory
+  && state.msg_origin_display=work.search_origin && chat_cols=work.search_chat_cols
+  && (Chat_theme.body_context (Chat_theme.snapshot ()) Message_layout.Keeper).palette_generation
+      = work.search_palette_generation
+
+let search_source_signature (entry : Message_layout.entry) =
+  entry.style,entry.body_presentation,entry.markdown_source,entry.body,entry.journal
+
+let keeper_message_search_is_current ?(preview_lookup=Masc_tui_link_preview.get_preview) state work =
+  keeper_message_search_context_current state work
+  && List.for_all (fun (url,value) -> preview_lookup url=value) work.search_previews
+  && (let projection=keeper_message_projection state ~keeper_name:work.search_keeper
+          ~chat_cols:work.search_chat_cols in
+      List.map search_source_signature projection.layout_entries
+        = List.map search_source_signature work.search_entries
+      && List.map (fun (tag,_) -> search_anchor_of_tag tag) projection.tagged_entries=work.search_anchors)
+
+(* Reproject a genuine frozen match by its exact producer endpoint. Unrelated
+   activity metadata and new suffix rows cannot invalidate unchanged speech. *)
+let admit_keeper_message_search state work ({matched;unavailable_entries} as answer) =
+  if not (keeper_message_search_context_current state work) then None else
+  match matched with
+  | None -> if keeper_message_search_is_current state work
+      then Some (complete_keeper_message_search work answer) else None
+  | Some (at,matched_anchor,_,matched_position,ending_position) ->
+      let projection=keeper_message_projection state ~keeper_name:work.search_keeper
+        ~chat_cols:work.search_chat_cols in
+      Option.bind (projection_index_of_anchor projection matched_anchor) (fun entry_index ->
+        let entries=(scroll_anchor_index projection).indexed_entries in
+        match List.nth_opt work.search_entries at with
+        | None -> None
+        | Some _ when entry_index < 0 || entry_index >= Array.length entries -> None
+        | Some original ->
+          let current=entries.(entry_index) in
+          if search_source_signature original <> search_source_signature current then None else
+          let urls=match current.style,current.markdown_source,work.search_preview_mode with
+            | (Message_layout.Tool | Skill _),_,_
+            | _,(Message_layout.Markdown_growing _ | Markdown_streaming),_
+            | _,_,`Off -> []
+            | _,Message_layout.Markdown_stable _,(`Compact | `Rich) -> bare_urls_for_entry current in
+          if not (List.for_all (fun url -> match List.assoc_opt url work.search_previews with
+              | Some value -> Masc_tui_link_preview.get_preview url=value | None -> false) urls)
+          then None else
+          let theme=Chat_theme.snapshot () in
+          let preview=preview_snapshot Masc_tui_link_preview.get_preview in
+          let source_body=source_body_lookup state ~keeper_name:work.search_keeper projection
+            ~inner_width:work.search_inner_width ~theme ~preview in
+          let source=Durable_position ending_position in
+          Option.bind (source_body entry_index) (fun body ->
+            Option.bind (Hashtbl.find_opt body.source_rows source) (fun body_row ->
+              let markdown=cached_chat_markdown_with_preview ~preview
+                ~link_previews_mode:work.search_preview_mode ~theme in
+              Option.map (fun scroll ->
+                let pin=Some {pin_workspace=work.search_workspace;pin_keeper=work.search_keeper;
+                  pin_scroll=scroll;pin_mode=Hold_search;held_transients=[];
+                  pin_points=[{scroll_anchor=Scroll_durable matched_anchor;body_row;
+                    source_position=Some source;rows_below=0}]} in
+                let older_anchors=work.search_anchors |> List.take at |> List.filter_map Fun.id |> List.rev in
+                {match_result=Some ({scroll;pin},{search_workspace=work.search_workspace;
+                  search_keeper=work.search_keeper;matched_anchor;matched_position;older_anchors});
+                  unavailable_entries})
+                (Message_layout.scroll_for_body_row ~markdown ~origin:work.search_origin
+                  ~inner_width:work.search_inner_width ~entry_index ~body_row projection.layout_entries))))
+
+let keeper_message_search_identity work =
+  work.search_workspace,work.search_keeper,work.search_needle
+
+let keeper_message_find_scroll ?preview_lookup state ~keeper_name ~needle ~older_than =
+  if String.equal needle "" then {match_result=None;unavailable_entries=0} else
+  let work=prepare_keeper_message_search ?preview_lookup state ~keeper_name ~needle ~older_than in
+  complete_keeper_message_search work (run_keeper_message_search work)
 
 
 let render_keeper_message (state : state) =

@@ -8,44 +8,87 @@ type in_flight = {
   client_secret : string option;
 }
 
+type completion = Tools_discovered of int | Credentials_published_discovery_failed
+
+type status =
+  | Awaiting_consent of float
+  | Callback_admitted
+  | Completed of completion
+  | Failed
+  | Expired
+  | Superseded
+
 type entry = {
-  in_flight : in_flight;
-  expires_at : float;
+  attempt_id : string;
+  keeper : string;
+  provider_id : string;
+  state : string;
+  in_flight : in_flight option;
+  status : status;
 }
 
-(* A Stdlib mutex, not Eio's: the callback fiber and whatever started the
-   login are different fibers, and this has to complete under cancellation.
-   Losing the table's shape because a login was cut would be worse than the
-   cut itself. *)
-type t = {
-  mutex : Mutex.t;
-  mutable entries : (string * entry) list;
-}
-
+type t = { mutex : Mutex.t; mutable entries : entry list }
 let create () = { mutex = Mutex.create (); entries = [] }
-
 let with_lock t f =
   Mutex.lock t.mutex;
   Fun.protect ~finally:(fun () -> Mutex.unlock t.mutex) f
 
-let live ~now entries =
-  List.filter (fun (_, entry) -> entry.expires_at > now) entries
+let expire ~now entry = match entry.status with
+  | Awaiting_consent deadline when deadline <= now ->
+      {entry with in_flight=None; status=Expired}
+  | _ -> entry
+
+let terminal = function Completed _ | Failed | Expired | Superseded -> true
+  | Awaiting_consent _ | Callback_admitted -> false
 
 let remember t ~now ~ttl_sec in_flight =
+  let flow = in_flight.pending in
+  let attempt_id = Random_id.hex ~bytes:16 in
   with_lock t (fun () ->
-    let state = in_flight.pending.Keeper_oauth_flow.state in
-    (* Dropping what has expired here as well keeps a table that is only ever
-       written to from growing without bound. *)
-    t.entries <-
-      (state, { in_flight; expires_at = now +. ttl_sec })
-      :: live ~now (List.remove_assoc state t.entries))
+    (* A new operator attempt retires the previous consent for the same
+       scope, but cannot cancel a callback already admitted to publication.
+       Completed metadata lives until that scope starts another attempt. *)
+    let same_scope entry = entry.keeper=flow.Keeper_oauth_flow.keeper
+      && entry.provider_id=flow.Keeper_oauth_flow.provider_id in
+    let entries = List.map (expire ~now) t.entries
+      |> List.filter (fun entry -> not (same_scope entry && terminal entry.status))
+      |> List.map (fun entry -> match entry.status with
+        | Awaiting_consent _ when same_scope entry ->
+            {entry with in_flight=None; status=Superseded}
+        | _ -> entry) in
+    t.entries <- {attempt_id; keeper=flow.Keeper_oauth_flow.keeper;
+      provider_id=flow.Keeper_oauth_flow.provider_id; state=flow.Keeper_oauth_flow.state;
+      in_flight=Some in_flight; status=Awaiting_consent (now +. ttl_sec)} :: entries);
+  attempt_id
 
 let take t ~now ~state =
   with_lock t (fun () ->
-    let remaining = live ~now t.entries in
-    let found = List.assoc_opt state remaining in
-    t.entries <- List.remove_assoc state remaining;
-    Option.map (fun entry -> entry.in_flight) found)
+    let found = ref None in
+    t.entries <- List.map (fun entry ->
+      let entry = expire ~now entry in
+      match entry.status, entry.in_flight with
+      | Awaiting_consent _, Some held when entry.state=state ->
+          found := Some held;
+          (* Admission and verifier removal publish in one locked update. *)
+          {entry with in_flight=None; status=Callback_admitted}
+      | _ -> entry) t.entries;
+    !found)
 
-let waiting t ~now =
-  with_lock t (fun () -> List.length (live ~now t.entries))
+let status t ~now ~attempt_id ~keeper ~provider_id =
+  with_lock t (fun () ->
+    t.entries <- List.map (expire ~now) t.entries;
+    List.find_opt (fun entry -> entry.attempt_id=attempt_id
+      && entry.keeper=keeper && entry.provider_id=provider_id) t.entries
+    |> Option.map (fun entry -> entry.status))
+
+let finish t ~state outcome =
+  with_lock t (fun () ->
+    t.entries <- List.map (fun entry ->
+      if entry.state=state && entry.status=Callback_admitted
+      then {entry with status=(match outcome with Ok completion -> Completed completion | Error () -> Failed)}
+      else entry) t.entries)
+
+let waiting t ~now = with_lock t (fun () ->
+  t.entries <- List.map (expire ~now) t.entries;
+  List.fold_left (fun count entry -> match entry.status with
+    | Awaiting_consent _ -> count+1 | _ -> count) 0 t.entries)

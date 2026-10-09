@@ -3,7 +3,7 @@ type position =
   | Body_label of { block_start : int; field : Masc_tui_markdown.generated_field; byte : int }
   | Thinking_summary_byte of int
   | Thinking_summary_label of { field : Masc_tui_markdown.generated_field; byte : int }
-  | Preview_byte of { url : string; index : int; field : Masc_tui_link_preview.card_field; byte : int; expansion : int }
+  | Preview_byte of { url : string; index : int; field : Masc_tui_link_preview.card_field; order : Masc_tui_link_preview.card_order; byte : int; expansion : int }
   | Journal_byte of { line : int; field : Masc_tui_message_layout.journal_field; byte : int }
 
 val compare_position : position -> position -> int

@@ -622,6 +622,16 @@ val workspace_message_admitted :
 
 val account_login_action_is_read : Masc_tui_account_login.action -> bool
 
+val retired_operation_observation
+  : state
+  -> authority:workspace_authority
+  -> reading:unit ref option
+  -> async_msg
+  -> Masc_tui_types.retired_operation_observation option
+(** Capture a matching admitted effect's retired read before its receipt settles
+    the operation owner. The caller applies the receipt before retaining or
+    dispatching this observation; the effect itself is never repeated. *)
+
 val project_workspace_operation_reply : state -> authority:workspace_authority -> reading:unit ref option -> async_msg -> async_msg
 (** Preserve operation receipts while rejecting any separately fetched
     observation whose read epoch has retired, including queued completions. *)

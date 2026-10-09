@@ -12663,12 +12663,16 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
          Option.iter (fun path -> Masc_tui_code_requests.launch_file_load ~intent
            state ~host ~deliver ~path) (Masc_tui_fetched.current_key state.code_file);
          if intent = Refresh_code_file then begin
-         if state.code_history_open then Option.iter (fun (_,path) ->
+         (* An overlay can be opened while identity is unread, before its
+            first fetch has a key. Its intent belongs to the selected file,
+            not the last completed or dispatched overlay request. *)
+         let selected_file = Masc_tui_fetched.current_key state.code_file in
+         if state.code_history_open then Option.iter (fun path ->
            Masc_tui_code_requests.launch_history_load state ~host ~deliver ~path)
-           (Masc_tui_fetched.current_key state.code_history);
+           selected_file;
          if state.code_diff_open then Option.iter (fun path ->
            Masc_tui_code_requests.launch_diff_load state ~host ~deliver ~base_ref:tree_diff_base_ref ~path)
-           (Masc_tui_fetched.current_key state.code_diff);
+           selected_file;
          Option.iter (fun path -> Masc_tui_code_requests.launch_blame_load state ~host ~deliver ~path)
            (Masc_tui_fetched.current_key state.code_blame);
          Option.iter (fun query ->

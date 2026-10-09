@@ -320,6 +320,14 @@ type stream_event =
       ; block : content_block
       ; text : string
       }
+  | Child_content_observed of
+      { parent_tool_use_id : string
+      ; message_id : string option
+      ; model : string
+      ; block : content_block
+      ; channel : content_channel
+      ; text : string
+      }
   | Content_block_stopped of { block : content_block; channel : content_channel }
   | Dynamic_tool_started of
       { call_id : string
@@ -1564,14 +1572,14 @@ let allowed_tool_name (tool : dynamic_tool) =
 let assistant_blocks ~stage ~mcp_tool_names content =
   match content with
   | `List blocks ->
-    let rec loop parsed = function
+    let rec loop ordinal parsed = function
       | [] -> Ok (List.rev parsed)
       | `Assoc fields :: rest ->
         let* type_ = required_string stage "type" fields in
         (match type_ with
          | "text" ->
            let* text = text_value stage fields in
-           loop (Assistant_text text :: parsed) rest
+           loop (ordinal + 1) ((ordinal, Assistant_text text) :: parsed) rest
          | "tool_use" ->
            let* call_id = optional_string stage "id" fields in
            let* tool_name = optional_string stage "name" fields in
@@ -1582,30 +1590,34 @@ let assistant_blocks ~stage ~mcp_tool_names content =
                Runtime_native_tools.Mcp_wrapper
              | Some _ | None -> Runtime_native_tools.Built_in
            in
-           loop
-             (Assistant_native_tool
+           loop (ordinal + 1)
+             ((ordinal, Assistant_native_tool
                 { identity =
                     Option.map
                       (fun call_id -> Runtime_native_tools.Call_id call_id)
                       (non_blank call_id)
                 ; tool_name
                 ; origin
-                }
+                })
               :: parsed)
              rest
          | "thinking" ->
            let* thinking = required_member stage "thinking" fields in
            (match thinking with
-            | `String text -> loop (Assistant_thinking text :: parsed) rest
+            | `String text ->
+                loop (ordinal + 1) ((ordinal, Assistant_thinking text) :: parsed) rest
             | _ -> protocol_error stage "thinking must be a string")
-         | "redacted_thinking" -> loop parsed rest
+         | "redacted_thinking" ->
+             (* Omit opaque payloads, but retain every wire position in the
+                identities of later public body and native call blocks. *)
+             loop (ordinal + 1) parsed rest
          | other ->
            protocol_error
              stage
              (Printf.sprintf "unsupported assistant content type %S" other))
       | _ :: _ -> protocol_error stage "assistant content block must be an object"
     in
-    loop [] blocks
+    loop 0 [] blocks
   | _ -> protocol_error stage "assistant content must be an array"
 ;;
 
@@ -2193,25 +2205,35 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       let* () = result in
       match block with
       | Assistant_text text ->
-          (match origin with
-           | Api_error_diagnostic -> Ok ()
-           | Model_response ->
+          (match scope, origin with
+           | (Root_response | Child_response _), Api_error_diagnostic -> Ok ()
+           | Root_response, Model_response ->
                texts_rev := text :: !texts_rev;
                complete_partial_text partial_stream ~on_stream_event ~response_emitted
-                 ~channel:Text_content ~message_id ~uuid ~ordinal text)
+                 ~channel:Text_content ~message_id ~uuid ~ordinal text
+           | Child_response parent_tool_use_id, Model_response ->
+               emit_stream_event on_stream_event
+                 (Child_content_observed {parent_tool_use_id; message_id; model;
+                   block=Assistant_block {uuid; ordinal}; channel=Text_content; text});
+               Ok ())
       | Assistant_thinking text ->
-          (match origin with
-           | Api_error_diagnostic -> Ok ()
-           | Model_response ->
+          (match scope, origin with
+           | (Root_response | Child_response _), Api_error_diagnostic -> Ok ()
+           | Root_response, Model_response ->
                complete_partial_text partial_stream ~on_stream_event ~response_emitted
-                 ~channel:Thinking_content ~message_id ~uuid ~ordinal text)
+                 ~channel:Thinking_content ~message_id ~uuid ~ordinal text
+           | Child_response parent_tool_use_id, Model_response ->
+               emit_stream_event on_stream_event
+                 (Child_content_observed {parent_tool_use_id; message_id; model;
+                   block=Assistant_block {uuid; ordinal}; channel=Thinking_content; text});
+               Ok ())
       | Assistant_native_tool observation ->
           native_tool_attempted := true;
           (match observe_native_start native_tool_calls ~scope ~uuid ~ordinal observation with
            | Native_start_new ->
                emit_stream_event on_stream_event (Native_tool_started observation)
            | Native_start_active_replay | Native_start_closed_replay | Native_start_conflict -> ());
-          Ok ()) (Ok ()) (List.mapi (fun ordinal block -> ordinal, block) blocks) in
+          Ok ()) (Ok ()) blocks in
     let texts = List.rev !texts_rev in
     if List.exists (fun text -> String.length text > 0) texts then response_emitted := true;
     await_terminal

@@ -182,7 +182,7 @@ let claude_stream_callback ?on_native_task_observation ?on_native_tool_progress 
         | Runtime_claude_code.Conversation_compacted -> on_compacted ()
         | Runtime_claude_code.Usage_reported { session_id; turn_id; model; usage } ->
           report_usage ~session_id ~turn_id ~model usage
-        | Turn_started _ | Text_delta _ | Thinking_delta _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+        | Turn_started _ | Text_delta _ | Thinking_delta _ | Child_content_observed _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
         | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Native_task_observed _ | Turn_finished _ -> ())
   | _ ->
     let emit event = Option.iter (fun callback -> callback event) on_event in
@@ -234,6 +234,11 @@ let claude_stream_callback ?on_native_task_observation ?on_native_tool_progress 
           let index = content_index block Runtime_claude_code.Thinking_content in
           emit (Agent_core.Types.ContentBlockDelta
             { index; delta = Agent_core.Types.ThinkingDelta text })
+        | Runtime_claude_code.Child_content_observed _ ->
+          (* Child content has no root assistant authority. Its runtime event
+             retains the provider body and occurrence for a separate child
+             display/persistence consumer; that integration is still pending. *)
+          ()
         | Runtime_claude_code.Content_block_stopped {block; channel} ->
           Option.iter stop_content (Hashtbl.find_opt content_indexes (block, channel))
         | Runtime_claude_code.Dynamic_tool_started

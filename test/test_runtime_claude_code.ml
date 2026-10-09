@@ -39,6 +39,13 @@ let child_tool_result =
   {|{"type":"user","parent_tool_use_id":"parent-agent","session_id":"__SESSION__","uuid":"child-result","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"child-read","is_error":false,"content":"child tool output"}]}}|}
 ;;
 
+(* A valid complete Child_response carries provider-exposed body separately
+   from root content. This is an accepted-frame authority fixture, not proof
+   that the CLI's default forwardSubagentText setting emits child body. *)
+let child_body_assistant =
+  {|{"type":"assistant","parent_tool_use_id":"parent-agent","session_id":"__SESSION__","uuid":"child-body","message":{"id":"child-body-message","role":"assistant","model":"child-model","content":[{"type":"redacted_thinking","data":"DO_NOT_EXPOSE_CHILD_REDACTION"},{"type":"text","text":"CHILD_ONLY"},{"type":"thinking","thinking":"CHILD_REASONING"},{"type":"tool_use","id":"child-read","name":"Read","input":{}},{"type":"text","text":""}],"usage":{"input_tokens":900,"output_tokens":1,"cache_read_input_tokens":90}}}|}
+;;
+
 let tool_progress =
   {|{"type":"tool_progress","session_id":"__SESSION__","uuid":"tool-progress-1","parent_tool_use_id":"native-call-1","tool_use_id":"opaque-progress-id","tool_name":"Bash","elapsed_time_seconds":240}|}
 ;;
@@ -812,6 +819,81 @@ let test_child_tool_preserves_root_metadata () =
             (Option.is_none turn.usage.latest_request_input))
 ;;
 
+let test_child_body_cannot_supply_root_reply () =
+  List.iter (fun root_text ->
+    List.iter (fun result_member ->
+      let terminal = Yojson.Safe.to_string (`Assoc
+        (["type", `String "result"; "subtype", `String "success";
+          "is_error", `Bool false; "session_id", `String "__SESSION__";
+          "uuid", `String "child-body-terminal"] @ result_member)) in
+      let events = ref [] in
+      let root = if root_text then
+        {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-fixture-1","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"redacted_thinking","data":"DO_NOT_EXPOSE_ROOT_REDACTION"},{"type":"text","text":"MASC_CLAUDE_OK"}]}}|}
+        else empty_assistant in
+      with_fixture
+        [Emit parent_tool_assistant; Emit root; Emit child_body_assistant;
+         Emit child_tool_result; Emit terminal]
+        (fun path ->
+          let outcome = run_fixture
+            ~on_stream_event:(fun event -> events := event :: !events) path in
+          (match outcome with
+           | Ok _ when not root_text && result_member <> ["result", `String ""] ->
+               fail "missing root result was completed from child content"
+           | Ok turn ->
+               check string "root text excludes child body"
+                 (if root_text then "MASC_CLAUDE_OK" else "") turn.text;
+               check string "root model survives child body" "claude-fixture" turn.model;
+               (match turn.usage.latest_request_input with
+                | Some input -> check int "root input survives child body" 200 input.input_tokens
+                | None -> fail "child body erased root input")
+           | Error (Runtime_claude_code.Protocol_error {stage="result message"; detail; _})
+             when not root_text && result_member <> ["result", `String ""] ->
+               check string "child body cannot satisfy missing root result"
+                 "successful turn has no text" detail
+           | Error error -> fail (Runtime_claude_code.error_to_string error));
+          let child_bodies = List.filter_map (function
+            | Runtime_claude_code.Child_content_observed
+                {parent_tool_use_id; message_id; model; block; channel; text} ->
+                check string "reported child model preserved" "child-model" model;
+                Some (parent_tool_use_id, message_id, block, channel, text)
+            | _ -> None) (List.rev !events) in
+          (match child_bodies with
+           | [(parent, message, Runtime_claude_code.Assistant_block {uuid; ordinal=1},
+               Runtime_claude_code.Text_content, text);
+              (thinking_parent, thinking_message,
+               Runtime_claude_code.Assistant_block {uuid=thinking_uuid; ordinal=2},
+               Runtime_claude_code.Thinking_content, thinking);
+              (empty_parent, empty_message,
+               Runtime_claude_code.Assistant_block {uuid=empty_uuid; ordinal=4},
+               Runtime_claude_code.Text_content, "")] ->
+               List.iter (fun parent -> check string "literal child owner" "parent-agent" parent)
+                 [parent; thinking_parent; empty_parent];
+               List.iter (fun message -> check (option string) "literal child message"
+                   (Some "child-body-message") message) [message; thinking_message; empty_message];
+               List.iter (fun uuid -> check string "literal child envelope" "child-body" uuid)
+                 [uuid; thinking_uuid; empty_uuid];
+               check string "supplied child text preserved" "CHILD_ONLY" text;
+               check string "supplied child reasoning preserved" "CHILD_REASONING" thinking
+           | _ -> fail "child body lost its supplied payload or exact occurrence");
+          check bool "no child text leaks through root text event" true
+            (List.for_all (function
+              | Runtime_claude_code.Text_delta
+                  {text; block=Runtime_claude_code.Assistant_block {uuid="assistant-fixture-1"; ordinal=1}; _} ->
+                  text="MASC_CLAUDE_OK"
+              | Runtime_claude_code.Text_delta _ -> false
+              | Runtime_claude_code.Thinking_delta _ -> false
+              | _ -> true) !events);
+          check bool "child native start survives body isolation" true
+            (List.exists (function Runtime_claude_code.Native_tool_started
+              {identity=Some (Runtime_native_tools.Call_id "child-read"); _} -> true
+              | _ -> false) !events);
+          check bool "child native completion survives body isolation" true
+            (List.exists (function Runtime_claude_code.Native_tool_finished
+              {observation={identity=Some (Runtime_native_tools.Call_id "child-read"); _}; _} -> true
+              | _ -> false) !events)))
+      [["result", `String ""]; ["result", `Null]; []]) [false; true]
+;;
+
 let test_assistant_parent_provenance_is_required () =
   let fields = match Yojson.Safe.from_string parent_tool_assistant with
     | `Assoc fields -> List.remove_assoc "parent_tool_use_id" fields
@@ -1295,6 +1377,52 @@ let test_api_diagnostic_quota_keeps_failover_safe () =
        run_fixture ~on_stream_event:(fun event -> events := event :: !events) path
        |> check_quota_observation ~tool_effect_attempted:false ~response_emitted:false;
        check int "diagnostic starts no response stream" 0 (List.length !events))
+;;
+
+let test_child_body_is_not_root_response_evidence () =
+  let child =
+    {|{"type":"assistant","parent_tool_use_id":"parent-agent","session_id":"__SESSION__","uuid":"child-evidence","message":{"role":"assistant","model":"child-model","content":[{"type":"text","text":"CHILD_ONLY"},{"type":"thinking","thinking":"CHILD_REASONING"}]}}|} in
+  let events = ref [] in
+  with_fixture [Emit empty_assistant; Emit child; Emit rate_limit_rejected; Emit quota_result]
+    (fun path ->
+      run_fixture ~on_stream_event:(fun event -> events := event :: !events) path
+      |> check_quota_observation ~tool_effect_attempted:false ~response_emitted:false;
+      check int "child bodies retain absent message id" 2
+        (List.length (List.filter (function
+          | Runtime_claude_code.Child_content_observed {message_id=None; _} -> true
+          | _ -> false) !events));
+      check bool "child reasoning/text cannot become root evidence" true
+        (List.for_all (function
+          | Runtime_claude_code.Text_delta _ | Thinking_delta _ -> false
+          | _ -> true) !events))
+;;
+
+let test_child_diagnostic_body_is_excluded_but_tools_survive () =
+  let child_diagnostic = match Yojson.Safe.from_string child_body_assistant with
+    | `Assoc fields -> Yojson.Safe.to_string
+        (`Assoc (("is_api_error_message", `Bool true) :: fields))
+    | _ -> fail "child fixture is not an object" in
+  let terminal =
+    {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"child-diagnostic-terminal","result":""}|} in
+  let events = ref [] in
+  with_fixture [Emit parent_tool_assistant; Emit child_diagnostic;
+    Emit child_tool_result; Emit terminal]
+    (fun path ->
+      (match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+       | Ok turn -> check string "diagnostic cannot supply root reply" "" turn.text
+       | Error error -> fail (Runtime_claude_code.error_to_string error));
+      check bool "diagnostic body cannot publish child or root content" true
+        (List.for_all (function
+          | Runtime_claude_code.Child_content_observed _ | Text_delta _ | Thinking_delta _ -> false
+          | _ -> true) !events);
+      check bool "child diagnostic native start still observed" true
+        (List.exists (function Runtime_claude_code.Native_tool_started
+          {identity=Some (Runtime_native_tools.Call_id "child-read"); _} -> true
+          | _ -> false) !events);
+      check bool "child diagnostic native completion still observed" true
+        (List.exists (function Runtime_claude_code.Native_tool_finished
+          {observation={identity=Some (Runtime_native_tools.Call_id "child-read"); _}; _} -> true
+          | _ -> false) !events))
 ;;
 
 let test_api_diagnostic_preserves_prior_text () =
@@ -2765,7 +2893,9 @@ let test_tasks_survive_native_return_without_changing_root_response () =
     | `Assoc fields ->
         let message = match List.assoc "message" fields with `Assoc fields -> fields | _ -> fail "message" in
         let content = match List.assoc "content" message with `List blocks -> blocks | _ -> fail "content" in
-        replace_wire_field "message" (`Assoc (("content",`List (content @ [second_call]))::
+        let redacted = `Assoc ["type", `String "redacted_thinking";
+          "data", `String "DO_NOT_EXPOSE_NATIVE_REDACTION"] in
+        replace_wire_field "message" (`Assoc (("content",`List (redacted :: (content @ [second_call])))::
           List.remove_assoc "content" message)) parent_tool_assistant
     | _ -> fail "assistant" in
   let events = ref [] in
@@ -2809,7 +2939,7 @@ let test_tasks_survive_native_return_without_changing_root_response () =
           List.iter (fun (o:Runtime_claude_code.native_task_observation) ->
             check string "owner is original root envelope" "parent-assistant" o.owner.call_envelope_uuid;
             check int "parallel Agent calls retain their own ordinal"
-              (if o.owner.call_id="parent-agent" then 0 else 1) o.owner.call_ordinal;
+              (if o.owner.call_id="parent-agent" then 1 else 2) o.owner.call_ordinal;
             check string "observed session is actual runtime session" turn.session_id o.owner.session_id) observations;
           let counts = List.filter_map (fun (o:Runtime_claude_code.native_task_observation) ->
             match o.event with Task_progress_reported {usage;_} -> Some usage.total_tokens | _ -> None) observations in
@@ -3743,6 +3873,8 @@ let () =
             test_latest_request_input_and_result_total_both_travel
         ; test_case "child tool preserves root model and request input" `Quick
             test_child_tool_preserves_root_metadata
+        ; test_case "child body cannot supply root reply" `Quick
+            test_child_body_cannot_supply_root_reply
         ; test_case "assistant parent provenance is required" `Quick
             test_assistant_parent_provenance_is_required
         ; test_case "real two-request turn separates spend from occupancy" `Quick
@@ -3765,6 +3897,10 @@ let () =
             "quota remains failover safe"
             `Quick
             test_api_diagnostic_quota_keeps_failover_safe
+        ; test_case "child body is not root response evidence" `Quick
+            test_child_body_is_not_root_response_evidence
+        ; test_case "child diagnostic body excluded and native tools retained" `Quick
+            test_child_diagnostic_body_is_excluded_but_tools_survive
         ; test_case
             "prior text remains emitted"
             `Quick

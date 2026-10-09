@@ -282,6 +282,26 @@ type stream_event =
       }
       (** Provider-exposed thinking text from partial or complete assistant
           blocks. Opaque signatures and redacted payloads are not text. *)
+  | Child_content_observed of
+      { parent_tool_use_id : string
+      ; message_id : string option
+      ; model : string
+      ; block : content_block
+      ; channel : content_channel
+      ; text : string
+      }
+      (** Provider-exposed text or thinking from a complete child assistant
+          envelope, retaining its literal parent call and [Assistant_block]
+          UUID/content ordinal. [None] means the envelope has no message id.
+          [model] is the child envelope's reported model, never a root model.
+          Each accepted envelope reports a body snapshot, including empty
+          text. Repeated observations with the same occurrence identity,
+          channel and text can be applied idempotently by downstream consumers;
+          this event does not certify agreement of changed replay bodies. The
+          parent call is provenance, not an inferred task owner. Child
+          content cannot supply the root reply, root response-emitted evidence,
+          model or usage. This is separate from root partial reconciliation.
+          Keeper child-body display/persistence is not yet connected. *)
   | Content_block_stopped of { block : content_block; channel : content_channel }
       (** Published once after a partial block's stop and complete-envelope
           reconciliation, in either wire order. A late complete suffix precedes

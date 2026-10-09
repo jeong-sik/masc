@@ -120,6 +120,10 @@ def run_browser_scene_regression(executable: str) -> None:
     url = "https://example.org/scene"
     scenes, actions, scrolls, scene_viewports = [], [], [], []
     scroll_y = [0]
+    # J and K are ignored while a browser read is in flight, so the scoped
+    # refresh is held until its loading row is drawn and released before them.
+    hold_refresh = {"armed": False}
+    refresh_seen, refresh_release = threading.Event(), threading.Event()
 
     def node(identity, kind, text):
         result = {"nodeId": identity, "kind": kind, "tag": "button" if kind == "control" else "p",
@@ -138,6 +142,10 @@ def run_browser_scene_regression(executable: str) -> None:
 
     def scene(body):
         request = json.loads(body)
+        if hold_refresh["armed"]:
+            hold_refresh["armed"] = False
+            refresh_seen.set()
+            refresh_release.wait(10.0)
         scenes.append(request)
         assert {k:request[k] for k in target} == target, "scene read lost client/tab ownership"
         changed = bool(actions)
@@ -231,11 +239,29 @@ def run_browser_scene_regression(executable: str) -> None:
         def scrolled(sent: int, read: int) -> Callable[[], bool]:
             return lambda: len(scrolls) > sent and len(scene_viewports) > read
 
+        def settled(loading: bytes, what: str) -> None:
+            if not wait_for_fixture_state(process, master, output,
+                    lambda: loading not in screen_text(bytes(output)), timeout=5.0):
+                raise AssertionError(f"{what} was still in flight: {screen_text(bytes(output))!r}")
+
         scoped = len(scenes)
-        press_and_await(b"r", lambda: len(scenes) > scoped, "a scoped refresh")
-        assert scenes[-1] == focused and len(actions)==1, "scoped refresh widened or caused an effect"
+        region_loading = "Reading selected page region…".encode()
+        read_available(master, output)
+        drawn_from = len(output)
+        hold_refresh["armed"] = True
+        write_all(master, output, b"r")
+        try:
+            if not wait_for_fixture_event(process, master, output, refresh_seen, timeout=5.0):
+                raise AssertionError("b'r' did not reach the fixture: a scoped refresh")
+            wait_for_output(process, master, output, region_loading, start=drawn_from, timeout=5.0)
+        finally:
+            refresh_release.set()
+        settled(region_loading, "the scoped refresh")
+        assert len(scenes) > scoped and scenes[-1] == focused and len(actions)==1, \
+            "scoped refresh widened or caused an effect"
         press_and_await(b"J", scrolled(len(scrolls), len(scene_viewports)), "a scroll and its re-read")
         assert scrolls[-1]["y"] == 600 and scene_viewports[-1]["scrollY"] == 600
+        settled("Scrolling page and refreshing scene…".encode(), "the scroll's re-read")
         press_and_await(b"K", scrolled(len(scrolls), len(scene_viewports)), "a scroll and its re-read")
         assert scrolls[-1]["y"] == -600 and scene_viewports[-1]["scrollY"] == 0
         send_and_wait(process, master, output, b"\x1b", b"MASC Dashboard")

@@ -4,6 +4,7 @@
 (test
  (name test_msx_tools)
  (modules test_msx_tools)
+ ; lane 28 reads both pin inputs from the source root.
  (deps ../scripts/opam-pin-external-deps.sh ../masc.opam.locked)
  (action (chdir .. (run %{test})))
  (libraries

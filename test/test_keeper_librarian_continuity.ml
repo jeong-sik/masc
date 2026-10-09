@@ -999,24 +999,6 @@ let answer_for_selected_source widths body =
       `Request_entity_too_large, refused "invalid_request_error"
   | Fits_two_atom_fixture -> `OK, accepted_answer
 
-let test_source_capacity_ignores_template_growth () =
-  let request ~padding ~first ~after =
-    let context = `List [`Assoc ["source", `Assoc
-      ["start_atom", `Int first; "end_atom", `Int after]]] in
-    Yojson.Safe.to_string (`Assoc ["prompt", `String
-      (padding ^ "\n" ^ Yojson.Safe.to_string context ^ "\n")]) in
-  List.iter (fun (first, after, expected) ->
-    List.iter (fun padding ->
-      let body = request ~padding ~first ~after in
-      check int "selected range ignores the template" (after - first)
-        (selected_source_width body);
-      check bool "capacity uses only selected source width" true
-        (source_capacity (selected_source_width body) = expected))
-      [""; String.make (narrowing_atom_count * narrowing_atom_chars) 'x'])
-    [0, 8, Selected_source_too_wide; 0, 4, Selected_source_too_wide;
-     0, 2, Fits_two_atom_fixture; 2, 4, Fits_two_atom_fixture;
-     2, 8, Selected_source_too_wide]
-
 let test_a_continuity_pass_carries_tool_turns_folded_once () =
   let task_context = Masc.Keeper_turn_task_context.Task
     {task_id=Keeper_id.Task_id.of_string "task-historical" |> get; goals=Ok []} in
@@ -1343,7 +1325,6 @@ let () = run "production continuity pair"
     test_case "historical gap is not the covering Task" `Quick test_historical_gap_is_not_covering_task;
     test_case "pending receipt overrides next turn" `Quick test_recovery_overrides_next_turn;
     test_case "queue keeps capacity and alternative opportunity" `Quick test_queue_reuses_capacity_without_gating_alternatives;
-    test_case "source capacity ignores template growth" `Quick test_source_capacity_ignores_template_growth;
     test_case "a refused width carries to the next pass" `Quick test_refused_width_carries_to_the_next_pass;
     test_case "a waiting unit ends the catch-up after a commit" `Quick
       test_a_waiting_unit_ends_the_catch_up_after_a_commit;

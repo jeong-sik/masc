@@ -10,19 +10,33 @@ let auth_subscription =
 ;;
 
 let assistant =
-  {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-fixture-1","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"MASC_CLAUDE_OK"}]}}|}
+  {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-fixture-1","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"MASC_CLAUDE_OK"}]}}|}
 ;;
 
 let empty_assistant =
-  {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-empty-1","message":{"role":"assistant","model":"claude-fixture","content":[]}}|}
+  {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-empty-1","message":{"role":"assistant","model":"claude-fixture","content":[]}}|}
 ;;
 
 let native_tool_assistant =
-  {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-native-1","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"tool_use","id":"native-call-1","name":"Read","input":{"file_path":"/tmp/fixture"}}]}}|}
+  {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-native-1","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"tool_use","id":"native-call-1","name":"Read","input":{"file_path":"/tmp/fixture"}}]}}|}
 ;;
 
 let native_tool_result =
   {|{"type":"user","session_id":"__SESSION__","uuid":"user-native-1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"native-call-1","content":"fixture"}]}}|}
+;;
+
+(* Claude 2.1.292 forwards child tool envelopes with their own model/usage,
+   even with forwardSubagentText disabled. No child text is needed here. *)
+let parent_tool_assistant =
+  {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"parent-assistant","message":{"id":"parent-message","role":"assistant","model":"claude-fixture","content":[{"type":"tool_use","id":"parent-agent","name":"Agent","input":{}}],"usage":{"input_tokens":200,"output_tokens":1,"cache_read_input_tokens":5}}}|}
+;;
+
+let child_tool_assistant =
+  {|{"type":"assistant","parent_tool_use_id":"parent-agent","session_id":"__SESSION__","uuid":"child-assistant","message":{"id":"child-message","role":"assistant","model":"child-model","content":[{"type":"tool_use","id":"child-read","name":"Read","input":{}}],"usage":{"input_tokens":900,"output_tokens":1,"cache_read_input_tokens":90}}}|}
+;;
+
+let child_tool_result =
+  {|{"type":"user","parent_tool_use_id":"parent-agent","session_id":"__SESSION__","uuid":"child-result","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"child-read","is_error":false,"content":"child tool output"}]}}|}
 ;;
 
 let tool_progress =
@@ -40,21 +54,21 @@ let result_with_usage =
 (* Three assistant frames of one turn. The first two share a message id,
    the shape parallel tool calls produce, so their usage must count once. *)
 let assistant_with_usage_a =
-  {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-usage-a1","message":{"id":"msg-usage-a","role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"first"}],"usage":{"input_tokens":100,"output_tokens":10}}}|}
+  {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-usage-a1","message":{"id":"msg-usage-a","role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"first"}],"usage":{"input_tokens":100,"output_tokens":10}}}|}
 ;;
 
 let assistant_with_usage_a_sibling =
-  {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-usage-a2","message":{"id":"msg-usage-a","role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"first again"}],"usage":{"input_tokens":100,"output_tokens":10}}}|}
+  {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-usage-a2","message":{"id":"msg-usage-a","role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"first again"}],"usage":{"input_tokens":100,"output_tokens":10}}}|}
 ;;
 
 let assistant_with_usage_b =
-  {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-usage-b1","message":{"id":"msg-usage-b","role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"second"}],"usage":{"input_tokens":200,"output_tokens":20,"cache_read_input_tokens":5}}}|}
+  {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-usage-b1","message":{"id":"msg-usage-b","role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"second"}],"usage":{"input_tokens":200,"output_tokens":20,"cache_read_input_tokens":5}}}|}
 ;;
 
 (* A frame the CLI emits without a message id cannot be matched to a
    sibling, so it counts on its own. *)
 let assistant_with_usage_no_id =
-  {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-usage-c1","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"third"}],"usage":{"input_tokens":1,"output_tokens":1}}}|}
+  {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-usage-c1","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"third"}],"usage":{"input_tokens":1,"output_tokens":1}}}|}
 ;;
 
 let result_with_partial_usage =
@@ -740,6 +754,62 @@ let test_latest_request_input_and_result_total_both_travel () =
          | None -> fail "the counted assistant request replaced the result total"))
 ;;
 
+let test_child_tool_preserves_root_metadata () =
+  let events = ref [] in
+  with_fixture
+    [Emit parent_tool_assistant; Emit child_tool_assistant; Emit child_tool_result;
+     Emit result_with_usage]
+    (fun path ->
+      match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok turn ->
+          check string "child model cannot replace the root model" "claude-fixture" turn.model;
+          (match turn.usage.latest_request_input with
+           | Some input ->
+               check int "root request input survives child metadata" 200 input.input_tokens;
+               check int "root cache split survives child metadata" 5 input.cache_read_input_tokens
+           | None -> fail "root request input was dropped");
+          check bool "child native start survives metadata isolation" true
+            (List.exists (function Runtime_claude_code.Native_tool_started
+                {identity=Some (Call_id "child-read"); _} -> true | _ -> false) !events);
+          check bool "child native completion survives metadata isolation" true
+            (List.exists (function Runtime_claude_code.Native_tool_finished
+                {observation={identity=Some (Call_id "child-read"); _}; _} -> true | _ -> false) !events);
+          check bool "turn spend is still reported under the root model" true
+            (List.exists (function Runtime_claude_code.Usage_reported {model; usage; _} ->
+                model="claude-fixture" && usage.output_tokens=789 | _ -> false) !events));
+  let uncounted_root = match Yojson.Safe.from_string parent_tool_assistant with
+    | `Assoc fields ->
+        let message = match List.assoc "message" fields with
+          | `Assoc fields -> `Assoc (List.remove_assoc "usage" fields)
+          | _ -> fail "parent fixture has no message object" in
+        Yojson.Safe.to_string (`Assoc (("message", message) :: List.remove_assoc "message" fields))
+    | _ -> fail "parent fixture is not an object" in
+  with_fixture [Emit uncounted_root; Emit child_tool_assistant; Emit child_tool_result; Emit result]
+    (fun path -> match run_fixture path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok turn ->
+          check bool "child usage cannot manufacture an unreported root occupancy" true
+            (Option.is_none turn.usage.latest_request_input))
+;;
+
+let test_assistant_parent_provenance_is_required () =
+  let fields = match Yojson.Safe.from_string parent_tool_assistant with
+    | `Assoc fields -> List.remove_assoc "parent_tool_use_id" fields
+    | _ -> fail "assistant fixture is not an object" in
+  List.iter (fun parent_fields ->
+    let frame = Yojson.Safe.to_string (`Assoc (parent_fields @ fields)) in
+    with_fixture [Emit frame; Emit result] (fun path ->
+      match run_fixture path with
+      | Error (Runtime_claude_code.Protocol_error _) -> ()
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "unattributed or malformed assistant was accepted as root"))
+    [[]; ["parent_tool_use_id", `String ""]; ["parent_tool_use_id", `String " "];
+     ["parent_tool_use_id", `Bool false]; ["parent_tool_use_id", `Int 0];
+     ["parent_tool_use_id", `Assoc []]; ["parent_tool_use_id", `List []];
+     ["parent_tool_use_id", `Null; "parent_tool_use_id", `String "parent-agent"]]
+;;
+
 (* Recorded from Claude Code 2.1.280 on 2026-09-23: one client turn, two
    provider requests (a Bash round, then the answer). The session id is
    replaced by the fixture placeholder and the init frame keeps only its
@@ -1062,14 +1132,15 @@ let test_quota_refusal_still_reports_the_turns_spend () =
     | Conversation_compacted | Turn_finished _ -> ()
   in
   with_fixture
-    [ Emit native_tool_assistant
-    ; Emit native_tool_result
+    [ Emit parent_tool_assistant
+    ; Emit child_tool_assistant
+    ; Emit child_tool_result
     ; Emit rate_limit_rejected
     ; Emit quota_result_with_usage
     ]
     (fun path ->
       (match run_fixture ~on_stream_event path with
-       | Error (Runtime_claude_code.Quota_blocked _) -> ()
+       | Error (Runtime_claude_code.Quota_blocked {tool_effect_attempted=true; _}) -> ()
        | Error error -> fail (Runtime_claude_code.error_to_string error)
        | Ok _ -> fail "quota refusal was reported as completion");
       match !reported with
@@ -1172,15 +1243,15 @@ let probe_tool call_count : Runtime_claude_code.dynamic_tool =
 (* Producer contract measured in Claude Code 2.1.263: Yct emits the
    optional envelope boolean from isApiErrorMessage, outside message. *)
 let api_error_assistant =
-  {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-api-error-1","is_api_error_message":true,"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"You've hit your limit"}]}}|}
+  {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-api-error-1","is_api_error_message":true,"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"You've hit your limit"}]}}|}
 ;;
 
 let api_error_with_native_tool =
-  {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-api-error-native-1","is_api_error_message":true,"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"You've hit your limit"},{"type":"tool_use","id":"native-call-1","name":"Read","input":{}}]}}|}
+  {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-api-error-native-1","is_api_error_message":true,"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"You've hit your limit"},{"type":"tool_use","id":"native-call-1","name":"Read","input":{}}]}}|}
 ;;
 
 let api_error_with_mcp_tool =
-  {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-api-error-mcp-1","is_api_error_message":true,"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"You've hit your limit"},{"type":"tool_use","id":"mcp-observation-1","name":"mcp__masc__masc_probe","input":{}}]}}|}
+  {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-api-error-mcp-1","is_api_error_message":true,"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"You've hit your limit"},{"type":"tool_use","id":"mcp-observation-1","name":"mcp__masc__masc_probe","input":{}}]}}|}
 ;;
 
 let check_quota_observation ~tool_effect_attempted ~response_emitted = function
@@ -1678,6 +1749,8 @@ let test_host_stop_carries_the_newest_request_input () =
     ; Emit assistant_with_usage_a_sibling
     ; Emit assistant_with_usage_b
     ; Emit assistant_with_usage_no_id
+    ; Emit child_tool_assistant
+    ; Emit child_tool_result
     ; Emit_and_read mcp_initialize
     ; Emit mcp_initialized_notification
     ; Emit_and_read mcp_list
@@ -1744,7 +1817,7 @@ let test_partial_text_streams_before_complete_block () =
     "{\"type\":\"stream_event\",\"session_id\":\"__SESSION__\",\"event\":" ^ event ^ "}" in
   let events = ref [] in
   let complete =
-    {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-fixture-1","message":{"id":"msg-partial","role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"MASC_CLAUDE_ OK"}]}}|} in
+    {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-fixture-1","message":{"id":"msg-partial","role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"MASC_CLAUDE_ OK"}]}}|} in
   with_fixture
     [Emit (partial {|{"type":"message_start","message":{"id":"msg-partial","model":"claude-fixture"}}|});
      Emit (partial {|{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}|});
@@ -1779,7 +1852,7 @@ let test_partial_thinking_preserves_complete_suffix () =
      Emit (frame {|{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Inspect "}}|});
      Emit (frame {|{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"opaque-signature"}}|});
      Emit (frame {|{"type":"content_block_stop","index":0}|});
-     Emit {|{"type":"assistant","session_id":"__SESSION__","uuid":"thinking-envelope","message":{"id":"msg-thinking","role":"assistant","model":"claude-fixture","content":[{"type":"thinking","thinking":"Inspect the state","signature":"opaque-signature"},{"type":"redacted_thinking","data":"opaque-data"}]}}|};
+     Emit {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"thinking-envelope","message":{"id":"msg-thinking","role":"assistant","model":"claude-fixture","content":[{"type":"thinking","thinking":"Inspect the state","signature":"opaque-signature"},{"type":"redacted_thinking","data":"opaque-data"}]}}|};
      Emit assistant; Emit result]
     (fun path ->
       match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
@@ -1816,7 +1889,7 @@ let test_four_partial_messages_preserve_all_blocks () =
   let piece index text = frame (`Assoc ["type", `String "content_block_delta";
       "index", `Int index; "delta", `Assoc ["type", `String "text_delta"; "text", `String text]]) in
   let stop index = frame (`Assoc ["type", `String "content_block_stop"; "index", `Int index]) in
-  let complete id texts = Yojson.Safe.to_string (`Assoc ["type", `String "assistant";
+  let complete id texts = Yojson.Safe.to_string (`Assoc ["type", `String "assistant"; "parent_tool_use_id", `Null;
       "session_id", `String "__SESSION__"; "uuid", `String (id ^ "-complete");
       "message", `Assoc ["id", `String id; "model", `String "claude-fixture";
         "content", `List (List.map (fun text -> `Assoc ["type", `String "text"; "text", `String text]) texts)]]) in
@@ -2344,7 +2417,7 @@ let test_malformed_json_fails_closed () =
 
 let test_duplicate_keys_fail_closed () =
   let duplicate =
-    {|{"type":"assistant","type":"result","session_id":"__SESSION__","uuid":"duplicate-1"}|}
+    {|{"type":"assistant","parent_tool_use_id":null,"type":"result","session_id":"__SESSION__","uuid":"duplicate-1"}|}
   in
   with_fixture [ Emit duplicate ] (fun path ->
     match run_fixture path with
@@ -2747,6 +2820,10 @@ let () =
         ; test_case "result usage is carried" `Quick test_result_usage_is_carried
         ; test_case "latest request input and result total both travel" `Quick
             test_latest_request_input_and_result_total_both_travel
+        ; test_case "child tool preserves root model and request input" `Quick
+            test_child_tool_preserves_root_metadata
+        ; test_case "assistant parent provenance is required" `Quick
+            test_assistant_parent_provenance_is_required
         ; test_case "real two-request turn separates spend from occupancy" `Quick
             test_real_two_request_turn_separates_spend_from_occupancy
         ; test_case

@@ -306,7 +306,11 @@
       "path": "lib/keeper/keeper_gate.ml",
       "baseline_lines": 2386,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; authority lifecycle and worker recovery remain pending",
+      "current_lines": 2031,
+      "prs": [
+        42091
+      ]
     },
     {
       "path": "lib/keeper/keeper_memory_os_current.ml",
@@ -356,7 +360,9 @@
       "kind": "production",
       "status": "partial: canonical immutable evidence and pure total/scoped summaries separated; public private/abstract contracts and codec/replay/storage/revision effects preserved; remaining codec/replay/storage and repeated-scan performance audit pending",
       "current_lines": 2253,
-      "prs": [42089],
+      "prs": [
+        42089
+      ],
       "validation_artifact": "skill-activation-summary/README.md"
     },
     {

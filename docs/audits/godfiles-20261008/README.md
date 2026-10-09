@@ -7,8 +7,8 @@ This campaign covers tracked code files with at least 2,000 lines. The initial
 inventory contains 171 candidates: 75 production source/style/interface files,
 90 tests, 3 tooling files and 3 evidence scripts. `inventory.json` records each
 baseline path and its current audit state. A line count selects candidates; it
-is not a defect verdict or a new build gate. Twenty-four production candidates received
-bounded changes; their other responsibilities remain pending. The other 51
+is not a defect verdict or a new build gate. Twenty-five production candidates received
+bounded changes; their other responsibilities remain pending. The other 50
 production candidates still require semantic review. All 171 candidates remain
 in the campaign until their responsibilities and necessary repairs are assessed.
 
@@ -39,6 +39,8 @@ in the campaign until their responsibilities and necessary repairs are assessed.
 | [#42027](https://github.com/jeong-sik/masc/pull/42027) | Ignored declaration caller parameters and forwarding helper removed; host-owned access and meaningful dispatch provenance retained | `lane_addon_runtime.ml/.mli`, tool/HTTP and direct test consumers |
 | [#42036](https://github.com/jeong-sik/masc/pull/42036) | Private canonical Board partition data and pure wire/ledger framing separated from storage/entropy effects; public signature and nominal/private boundaries preserved | `keeper_board_attention_partition.ml`, private types/wire owners |
 | [#42060](https://github.com/jeong-sik/masc/pull/42060) | Private canonical current-row kinds, schema/identity and strict decoder separated from ledger storage, outbox and evidence caches; public signature preserved | `keeper_reaction_ledger.ml`, private wire owner |
+
+Gate decision projection is tracked in [#42091](https://github.com/jeong-sik/masc/pull/42091): private canonical data and pure JSON/diagnostic projection retain the public API while approval, CAS, audit and recovery effects stay in their owner. See [gate-projection/README.md](gate-projection/README.md).
 
 The declared branch dependencies follow that order, starting at `main`.
 GitHub may group a subset into a native stack; inspect live membership rather

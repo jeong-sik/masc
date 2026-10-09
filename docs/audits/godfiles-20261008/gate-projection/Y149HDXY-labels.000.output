@@ -1,0 +1,10 @@
+ASSERT completion_rejected:not_found
+ASSERT completion_rejected:key_mismatch
+ASSERT completion_rejected:invalid_identity
+ASSERT completion_rejected:summary_not_pending
+ASSERT completion_rejected:unbound_state
+ASSERT completion_rejected:disposition_conflict
+ASSERT completion_rejected:identity_conflict
+ASSERT completion_rejected:status_conflict
+ASSERT completion_rejected:provenance_mismatch
+ASSERT completion_rejected:content_conflict

@@ -188,7 +188,7 @@ type keeper_chat_event =
       }
 
 let redact_content ~redact_text = function
-  | Text_delta delta -> Text_delta (redact_text delta)
+  | Text_delta delta -> Text_delta {delta with text = redact_text delta.text}
   | Event_error event -> Event_error {message=redact_text event.message}
   | Reply_details event -> Reply_details {event with reply=redact_text event.reply}
   | Continuation_checkpoint event ->

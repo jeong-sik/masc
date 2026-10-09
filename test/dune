@@ -2813,6 +2813,8 @@
 (include stanzas/test_keeper_memory_admission_judgment.inc)
 (include stanzas/test_keeper_memory_successor_selection.inc)
 
+(include stanzas/test_keeper_memory_resolved_selection_capture.inc)
+
 (include stanzas/test_keeper_memory_successor_branch_capture.inc)
 
 (include stanzas/test_keeper_memory_successor_http_replay.inc)

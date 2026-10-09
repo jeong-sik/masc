@@ -31,6 +31,7 @@ type firefox_failure =
   | Spawn_failed of string
   | Exited_before_listening of Unix.process_status option
   | Not_listening of float
+  | Port_unknown of { seconds : float; detail : string }
 
 let status_text = function
   | Some (Unix.WEXITED code) -> Printf.sprintf "exit status %d" code
@@ -49,6 +50,10 @@ let firefox_failure_message (config : Browser_configuration.live_bidi) = functio
     Printf.sprintf "Firefox exited (%s) before port %d answered." (status_text status) config.port
   | Not_listening seconds ->
     Printf.sprintf "Firefox did not open port %d within %.0f s." config.port seconds
+  | Port_unknown { seconds; detail } ->
+    Printf.sprintf "Port %d did not answer within %.0f s, and the last check could not tell whether \
+                    anything listens: %s."
+      config.port seconds detail
 
 type launcher_missing = Not_installed | Needs_reinstall
 

@@ -81,7 +81,7 @@ BiDi 연결의 `hover_at` 과 `drag` 는 실제 Firefox 157.0.1 에서 확인했
   설계 문서는 "확장 ID 나 URL 과 잇지 않는다"고 적었다 (`docs/design/browser-bidi-live-host.md`).
 - WebExtension API 가 BiDi context ID 를 알려 주는지는 확인하지 못했다. 확인 필요.
 
-### 2.4 BiDi 연결은 운영자가 손으로 붙인다
+### 2.4 BiDi 연결을 붙이는 길
 
 - Firefox 를 `--remote-debugging-port` 로 띄워야 한다. 주소는 `ws://127.0.0.1:PORT/session` 이다.
   ([MDN](https://developer.mozilla.org/en-US/docs/Web/WebDriver/How_to/Create_BiDi_connection), 2026-10-08 확인)
@@ -90,9 +90,9 @@ BiDi 연결의 `hover_at` 과 `drag` 는 실제 Firefox 157.0.1 에서 확인했
   loopback 에서만 받는다.
   ([Mozilla Remote Agent Security](https://firefox-source-docs.mozilla.org/remote/Security.html), 2026-10-08 확인)
 - host 는 `masc-browser-host --bidi-url ws://127.0.0.1:PORT/session` 으로 띄운다.
-  이 명령을 대신 실행해 주는 것이 없다.
-  `connectors/browser/install-host.sh` 와 `scripts/install-local-build.sh` 에 BiDi 가 나오지 않는다.
-  손으로 붙이는 절차는 #41817 이 `docs/design/browser-bidi-live-host.md` 와 host README 에 적었다.
+  `runtime.toml` 에 `[browser.live.bidi]` 를 적은 워크스페이스는 MASC 서버가 뜰 때 Firefox 와 host 를 같이 띄운다
+  (RFC-browser-keeper-firefox). 표가 없으면 운영자가 `docs/design/browser-bidi-live-host.md` 와
+  host README 의 절차대로 손으로 붙인다.
 - BiDi host 는 세 경우에 끝난다 (`run_bidi`): 명령의 결과를 모르게 됐을 때, 서버에 묻는 요청(poll)이 실패했을 때,
   결과를 서버에 보내지 못했을 때. 확장 host 는 실패하면 잠시 뒤 다시 묻지만 BiDi host 는 다시 묻지 않는다.
   그래서 MASC 서버를 재시작하면 BiDi host 가 끝난다. 다시 띄우는 것도 손으로 한다.
@@ -398,9 +398,6 @@ B 의 순서:
   TUI 의 표시는 #41973 에서 했다: 브라우저 고르기 목록 아래의 BiDi host 줄들과,
   보내지 않은 drag 아래의 host 상태 줄 하나(TUI 가 보내는 포인터 동작 가운데 BiDi 가 맡는 것은 drag 다). 서버가 연결 목록과 함께 주는 `bidiHost` 를 읽는다.
   남은 것은 설정 명령의 확인 단계다.
-
-누가 Firefox 와 host 를 켜는가는 RFC-browser-keeper-firefox 가 정한다(2026-10-09).
-§2.4 의 "손으로 붙인다"는 이 RFC 를 쓴 때의 사실이다.
   설정 명령의 단계는 RFC `setup-web-search-and-browser-lane` 의 명령(`masc browser-lane-setup`)에 더하는 것인데,
   그 RFC 는 Draft 이고 명령이 아직 없다. 명령이 생긴 뒤에 더한다. 그 단계가 말할 내용 가운데
   host 기록의 상태와 붙이는 명령은 `masc doctor` 가 이미 말한다.

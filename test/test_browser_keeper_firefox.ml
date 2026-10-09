@@ -71,7 +71,12 @@ let commands_run () =
       (Keeper_firefox.firefox_failure_message config (Keeper_firefox.Exited_before_listening status))
       "Another Firefox may have /keeper/profile open" in
   check bool "status 0 names a profile another Firefox holds" true (says (Some (Unix.WEXITED 0)));
-  check bool "another status does not" false (says (Some (Unix.WEXITED 1)) || says None)
+  check bool "another status does not" false (says (Some (Unix.WEXITED 1)) || says None);
+  check bool "a port no check could read keeps the last reason" true
+    (String_util.contains_substring
+       (Keeper_firefox.firefox_failure_message config
+          (Keeper_firefox.Port_unknown { seconds = 30.; detail = "no answer within 1 s" }))
+       "no answer within 1 s")
 
 (* --- workspaces --------------------------------------------------------- *)
 
@@ -94,14 +99,18 @@ let read path = In_channel.with_open_bin path In_channel.input_all
 let lane base = List.fold_left Filename.concat base [ ".masc"; "browser-lane" ]
 let launcher base = Filename.concat (lane base) "host/launch"
 
+(* Runs until it is stopped. [name] is in its command line, which is how the
+   cleanup tells it from a process that later got the same pid. *)
+let sleeper_command name = Printf.sprintf "python3 -c 'import time; time.sleep(30)' %s" (Filename.quote name)
+
 (* What install-host.sh leaves, with a launcher that records what it was
    given. [declared:false] leaves out launch.json, which reads as a launcher
    to install again. *)
 let install_lane ?(declared = true) base ~marker =
   List.iter (fun dir -> Unix.mkdir dir 0o700)
     [ Filename.concat base ".masc"; lane base; Filename.concat (lane base) "host" ];
-  let script = Printf.sprintf "#!/bin/sh\nprintf '%%s\\n' \"$$\" \"$@\" > %s\nexec sleep 30\n"
-      (Filename.quote marker) in
+  let script = Printf.sprintf "#!/bin/sh\nprintf '%%s\\n' \"$$\" \"$@\" > %s\nexec %s\n"
+      (Filename.quote marker) (sleeper_command marker) in
   write ~mode:0o700 (launcher base) script;
   if declared then
     write (Filename.concat (lane base) "host/launch.json")
@@ -225,7 +234,7 @@ let fake_firefox base ~marker fake =
     | Listens -> Printf.sprintf "exec %s \"$port\" %s\n" listener_command pidfile
     | Exits -> "exit 0\n"
     | Relaunches -> Printf.sprintf "( sleep 0.5; exec %s \"$port\" %s ) &\nexit 0\n" listener_command pidfile
-    | Never_listens -> "exec sleep 30\n" in
+    | Never_listens -> Printf.sprintf "exec %s\n" (sleeper_command marker) in
   write ~mode:0o700 path
     (Printf.sprintf
        "#!/bin/sh\nprev=\nfor arg in \"$@\"; do [ \"$prev\" = --remote-debugging-port ] && port=$arg; prev=$arg; done\n\
@@ -267,11 +276,26 @@ let configured ?(live_enabled = true) ~firefox ~port base =
 let firefox_started base = Sys.file_exists (Keeper_firefox.firefox_log_path ~base_path:base)
 let host_started base = Sys.file_exists (Keeper_firefox.host_log_path ~base_path:base)
 
-(* Children are detached: stop them whatever the case checked. *)
-let with_children markers f =
+(* The command line of [pid], or "" when no process has that pid. *)
+let command_line pid =
+  let ps = Unix.open_process_args_in "/bin/ps" [| "ps"; "-ww"; "-o"; "command="; "-p"; string_of_int pid |] in
+  let text = In_channel.input_all ps in
+  ignore (Unix.close_process_in ps);
+  String.trim text
+
+(* Children are detached: stop them whatever the case checked. A marker
+   keeps the pid of a process that may have ended and been reaped already,
+   as a Firefox that exits does, and the system may have given that pid to
+   another process since. Every process a case starts names a path under
+   [base] in its command line, so only those are stopped. *)
+let with_children ~base markers f =
+  let stop_ours pid =
+    if String_util.contains_substring (command_line pid) base then
+      try Unix.kill pid Sys.sigkill with Unix.Unix_error _ -> () in
   Fun.protect
     ~finally:(fun () ->
-      List.iter (fun marker -> List.iter (fun path -> Option.iter stop (first_pid path)) [ marker; marker ^ ".listener" ])
+      List.iter
+        (fun marker -> List.iter (fun path -> Option.iter stop_ours (first_pid path)) [ marker; marker ^ ".listener" ])
         markers)
     f
 
@@ -283,7 +307,7 @@ let a_free_port_starts_firefox_then_the_host () =
     install_lane base ~marker:host_marker;
     let port = free_port () in
     let firefox = fake_firefox base ~marker:firefox_marker Listens in
-    with_children [ firefox_marker; host_marker ] (fun () ->
+    with_children ~base [ firefox_marker; host_marker ] (fun () ->
       started ~base ~configuration:(configured ~firefox ~port base) ();
       check (list string) "firefox was given the profile and the port"
         [ "--no-remote"; "--profile"; Filename.concat base "profile"; "--remote-debugging-port"; string_of_int port ]
@@ -299,7 +323,7 @@ let an_answering_port_starts_only_the_host () =
     let firefox_marker, host_marker = markers base in
     install_lane base ~marker:host_marker;
     let firefox = fake_firefox base ~marker:firefox_marker Listens in
-    with_children [ firefox_marker; host_marker ] (fun () ->
+    with_children ~base [ firefox_marker; host_marker ] (fun () ->
       Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
         let listener =
           Eio.Net.listen (Eio.Stdenv.net env) ~sw ~reuse_addr:true ~backlog:4
@@ -323,7 +347,7 @@ let a_running_host_is_not_started_again () =
     let firefox = fake_firefox base ~marker:firefox_marker Listens in
     let held = take base in
     Fun.protect ~finally:(fun () -> released held) (fun () ->
-      with_children [ firefox_marker; host_marker ] (fun () ->
+      with_children ~base [ firefox_marker; host_marker ] (fun () ->
         started ~base ~configuration:(configured ~firefox ~port:(free_port ()) base) ();
         check bool "firefox started" true (firefox_started base);
         check bool "no second host" false (host_started base))))
@@ -333,7 +357,7 @@ let a_firefox_that_exits_first_starts_no_host () =
     let firefox_marker, host_marker = markers base in
     install_lane base ~marker:host_marker;
     let firefox = fake_firefox base ~marker:firefox_marker Exits in
-    with_children [ firefox_marker; host_marker ] (fun () ->
+    with_children ~base [ firefox_marker; host_marker ] (fun () ->
       let began = Unix.gettimeofday () in
       started ~base ~configuration:(configured ~firefox ~port:(free_port ()) base) ();
       check bool "its exit ends the wait, not the timeout" true
@@ -346,7 +370,7 @@ let a_firefox_that_goes_on_in_another_process_gets_its_host () =
     let firefox_marker, host_marker = markers base in
     install_lane base ~marker:host_marker;
     let firefox = fake_firefox base ~marker:firefox_marker Relaunches in
-    with_children [ firefox_marker; host_marker ] (fun () ->
+    with_children ~base [ firefox_marker; host_marker ] (fun () ->
       started ~base ~configuration:(configured ~firefox ~port:(free_port ()) base) ();
       await_file host_marker;
       check bool "the host was started for the port the second process opened" true (host_started base)))
@@ -356,7 +380,7 @@ let a_firefox_that_never_opens_its_port_starts_no_host () =
     let firefox_marker, host_marker = markers base in
     install_lane base ~marker:host_marker;
     let firefox = fake_firefox base ~marker:firefox_marker Never_listens in
-    with_children [ firefox_marker; host_marker ] (fun () ->
+    with_children ~base [ firefox_marker; host_marker ] (fun () ->
       let began = Unix.gettimeofday () in
       started ~ready_timeout_s:1. ~base ~configuration:(configured ~firefox ~port:(free_port ()) base) ();
       let waited = Unix.gettimeofday () -. began in
@@ -368,7 +392,7 @@ let nothing_is_started_without_the_table_or_with_the_lane_off () =
     let firefox_marker, host_marker = markers base in
     install_lane base ~marker:host_marker;
     let firefox = fake_firefox base ~marker:firefox_marker Listens in
-    with_children [ firefox_marker; host_marker ] (fun () ->
+    with_children ~base [ firefox_marker; host_marker ] (fun () ->
       started ~base ~configuration:(configured ~live_enabled:false ~firefox ~port:(free_port ()) base) ();
       started ~base ~configuration:(Some Browser_configuration.none) ();
       started ~base ~configuration:None ();
@@ -379,7 +403,7 @@ let without_a_launcher_firefox_starts_and_no_host () =
   with_workspace (fun base ->
     let firefox_marker, _ = markers base in
     let firefox = fake_firefox base ~marker:firefox_marker Listens in
-    with_children [ firefox_marker ] (fun () ->
+    with_children ~base [ firefox_marker ] (fun () ->
       started ~base ~configuration:(configured ~firefox ~port:(free_port ()) base) ();
       check bool "firefox started" true (firefox_started base);
       check bool "no host without a launcher" false (host_started base)))

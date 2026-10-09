@@ -29,8 +29,9 @@ val start_error_to_string : start_error -> string
 type started = {
   authorize_url : string;  (** where the operator has to go *)
   state : string;
-      (** What the callback will echo. Returned so a caller can show which
-          login it is waiting on without reaching into the table. *)
+      (** Callback authority echoed by the provider; not a completion handle. *)
+  attempt_id : string;
+      (** Independently generated non-secret handle for authenticated status reads. *)
   credentials : Keeper_oauth_client_store.credentials;
       (** What the exchange will be redeemed with. A secret is here when the
           server answered registration with one, which is how a confidential

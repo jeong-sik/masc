@@ -65,10 +65,22 @@ type explicit_candidate_id =
   ; input_sha256 : string
   }
 
+type admission_recall_binding =
+  { candidate_id : explicit_candidate_id
+  ; source_fact : fact
+  ; target_memory_id : string
+  }
+
+type admission_recall =
+  { decided_at_revision : int option
+  ; bindings : admission_recall_binding list
+  }
+
 type consumed_range =
   | Atom_range of durable_range_id
   | Official_range of official_range_id
   | Explicit_candidate of explicit_candidate_id
+  | Explicit_candidate_with_recall of admission_recall_binding
 
 type durable_range_receipt =
   | Prepared of
@@ -254,6 +266,37 @@ let explicit_candidate_id_of_json = function
   | _ -> wire_here Expected_object
 ;;
 
+let admission_recall_binding_to_json binding =
+  `Assoc ["candidate_id", explicit_candidate_id_to_json binding.candidate_id;
+          "source_fact", fact_to_json binding.source_fact;
+          "target_memory_id", `String binding.target_memory_id]
+;;
+
+let admission_recall_binding_of_json = function
+  | `Assoc fields ->
+    let* () = exact_field_names_result ["candidate_id"; "source_fact"; "target_memory_id"] fields in
+    let* candidate_json = wire_json_field "candidate_id" fields in
+    let* candidate_id = wire_at (Wire_field "candidate_id") (explicit_candidate_id_of_json candidate_json) in
+    let* source_json = wire_json_field "source_fact" fields in
+    let* source_fact = wire_at (Wire_field "source_fact") (fact_of_json source_json) in
+    let* target_memory_id = wire_string_field "target_memory_id" fields in
+    let* () = if is_memory_id target_memory_id then Ok ()
+      else wire_fail [Wire_field "target_memory_id"] (Unknown_token target_memory_id) in
+    let row = `Assoc ["sequence", `Int candidate_id.sequence;
+      "request_id", `String candidate_id.request_id; "fact", fact_to_json source_fact] in
+    let digest = Digestif.SHA256.(digest_string (Yojson.Safe.to_string row) |> to_hex) in
+    let+ () = if String.equal digest candidate_id.input_sha256 then Ok ()
+      else wire_fail [Wire_field "source_fact"] (Unknown_token "candidate payload digest mismatch") in
+    {candidate_id; source_fact; target_memory_id}
+  | _ -> wire_here Expected_object
+;;
+
+let consumed_candidate = function
+  | Explicit_candidate candidate -> Some candidate
+  | Explicit_candidate_with_recall binding -> Some binding.candidate_id
+  | Atom_range _ | Official_range _ -> None
+;;
+
 (* Identity coordinates, not payload equality, determine whether an input was
    consumed. A changed digest or moved sequence never makes a reused ID new. *)
 let validate_unique_explicit_candidates candidates =
@@ -276,6 +319,7 @@ let consumed_range_field = function
   | Atom_range range -> "range_id", durable_range_id_to_json range
   | Official_range range -> "official_range_id", official_range_id_to_json range
   | Explicit_candidate candidate -> "explicit_candidate_id", explicit_candidate_id_to_json candidate
+  | Explicit_candidate_with_recall binding -> "admission_recall_binding", admission_recall_binding_to_json binding
 ;;
 
 let durable_range_receipt_to_json = function
@@ -304,12 +348,14 @@ let durable_range_receipt_of_json = function
         let* json = wire_json_field key fields in
         Result.map wrap (wire_at (Wire_field key) (parse json))
       in
-      let keys = ["range_id"; "official_range_id"; "explicit_candidate_id"] in
+      let keys = ["range_id"; "official_range_id"; "explicit_candidate_id"; "admission_recall_binding"] in
       match List.filter (fun key -> List.mem_assoc key fields) keys with
       | ["range_id"] -> decode "range_id" durable_range_id_of_json (fun range -> Atom_range range)
       | ["official_range_id"] -> decode "official_range_id" official_range_id_of_json (fun range -> Official_range range)
       | ["explicit_candidate_id"] -> decode "explicit_candidate_id" explicit_candidate_id_of_json
           (fun candidate -> Explicit_candidate candidate)
+      | ["admission_recall_binding"] -> decode "admission_recall_binding" admission_recall_binding_of_json
+          (fun binding -> Explicit_candidate_with_recall binding)
       | [] -> wire_here (Field_set_mismatch {missing=keys; unexpected=[]})
       | conflicting -> wire_here (Field_set_mismatch {missing=[]; unexpected=conflicting})
     in
@@ -349,9 +395,7 @@ let durable_range_receipts_of_json = function
          receipt :: accumulated)
       receipts (Ok []) in
     let candidates = List.filter_map (function
-      | Prepared {range_id=Explicit_candidate candidate; _}
-      | Committed {range_id=Explicit_candidate candidate; _} -> Some candidate
-      | Prepared _ | Committed _ -> None) decoded in
+      | Prepared {range_id; _} | Committed {range_id; _} -> consumed_candidate range_id) decoded in
     let+ () = validate_unique_explicit_candidates candidates
       |> Result.map_error (fun detail ->
         {path=[Wire_field "receipts"]; reason=Unknown_token detail}) in
@@ -360,11 +404,16 @@ let durable_range_receipts_of_json = function
     wire_here Expected_object
 ;;
 
+(* How many times this process decoded sidecar bytes. A read answered from
+   [durable_range_receipt_cache] below does not count. *)
+let durable_range_receipt_decodes = Atomic.make 0
+
 let read_durable_range_receipts ~keepers_dir ~keeper_id =
   let path = durable_range_receipt_path ~keepers_dir ~keeper_id in
   match Fs_compat.load_file_opt path with
   | None -> Ok []
   | Some content ->
+    Atomic.incr durable_range_receipt_decodes;
     (match Yojson.Safe.from_string content with
      | json ->
        durable_range_receipts_of_json json
@@ -393,10 +442,112 @@ let validate_durable_range_receipts ~keepers_dir ~keeper_id =
   read_durable_range_receipts ~keepers_dir ~keeper_id |> Result.map ignore
 ;;
 
+(* Same regular file with the same size and timestamps. An atomic replace
+   gives the path a new inode, and every change to a file's bytes or metadata
+   sets its ctime, which user space cannot set back. *)
+let same_file_identity a b =
+  a.Unix.st_kind = Unix.S_REG && b.Unix.st_kind = Unix.S_REG
+  && a.Unix.st_dev = b.Unix.st_dev && a.Unix.st_ino = b.Unix.st_ino
+  && a.Unix.st_size = b.Unix.st_size && a.Unix.st_mtime = b.Unix.st_mtime
+  && a.Unix.st_ctime = b.Unix.st_ctime
+
+module Path_map = Map.Make (String)
+
+(* A reconcile against the snapshot at [fixed_revision] whose bytes hash to
+   [fixed_snapshot_sha256] returned the cached receipts unchanged. *)
+type receipt_fixed_point =
+  { fixed_revision : int
+  ; fixed_snapshot_sha256 : string
+  }
+
+(* [receipts] is the result of [read_durable_range_receipts] for the file
+   [receipt_identity] describes: the same decode and the same validation. *)
+type durable_range_receipt_cache_entry =
+  { receipt_identity : Unix.stats
+  ; receipts : durable_range_receipt list
+  ; fixed_point : receipt_fixed_point option
+  }
+
+(* Keyed by sidecar path. Entries are immutable and replaced by compare-and-set,
+   so a reader on any domain sees a whole entry or none. *)
+let durable_range_receipt_cache : durable_range_receipt_cache_entry Path_map.t Atomic.t =
+  Atomic.make Path_map.empty
+
+let rec update_durable_range_receipt_cache path f =
+  let before = Atomic.get durable_range_receipt_cache in
+  let after = Path_map.update path f before in
+  if not (Atomic.compare_and_set durable_range_receipt_cache before after)
+  then update_durable_range_receipt_cache path f
+;;
+
+let forget_durable_range_receipts path =
+  update_durable_range_receipt_cache path
+    (fun (_ : durable_range_receipt_cache_entry option) -> None)
+;;
+
+(* File timestamps are no coarser than one second on the filesystems masc runs
+   on (HFS+ stores whole seconds; APFS and ext4 store nanoseconds at kernel
+   clock-tick resolution). A file whose ctime is further than this behind the
+   clock therefore cannot change again without its ctime changing. A file
+   changed more recently is decoded on every read: a second change within the
+   same timestamp tick can keep every field [same_file_identity] compares. *)
+let receipt_identity_settle_seconds = 1.0
+
+let inspect_receipt_file path =
+  match Unix.lstat path with
+  | stats -> Some stats
+  | exception Unix.Unix_error ((_ : Unix.error), (_ : string), (_ : string)) -> None
+;;
+
+type durable_range_receipt_read =
+  | Cached_receipts of durable_range_receipt_cache_entry
+  | Uncached_receipts of durable_range_receipt list
+
+(* A cached entry answers only while the file still has the identity it had
+   when it was decoded. An entry is published only when the file kept one
+   identity across the decode and its ctime was already settled when the read
+   began, so every later change to the file gives it an identity the entry
+   does not match. A missing, non-regular, recently changed, or concurrently
+   changed file is decoded on every read. *)
+let read_durable_range_receipts_cached ~keepers_dir ~keeper_id =
+  let path = durable_range_receipt_path ~keepers_dir ~keeper_id in
+  let started = Unix.gettimeofday () in
+  let before = inspect_receipt_file path in
+  match before, Path_map.find_opt path (Atomic.get durable_range_receipt_cache) with
+  | Some current, Some cached when same_file_identity cached.receipt_identity current ->
+    Ok (Cached_receipts cached)
+  | (Some _ | None), (Some _ | None) ->
+    forget_durable_range_receipts path;
+    let* receipts = read_durable_range_receipts ~keepers_dir ~keeper_id in
+    (match before, inspect_receipt_file path with
+     | Some before, Some after
+       when same_file_identity before after
+            && started -. before.Unix.st_ctime > receipt_identity_settle_seconds ->
+       let entry = { receipt_identity = after; receipts; fixed_point = None } in
+       update_durable_range_receipt_cache path
+         (fun (_ : durable_range_receipt_cache_entry option) -> Some entry);
+       Ok (Cached_receipts entry)
+     | (Some _ | None), (Some _ | None) -> Ok (Uncached_receipts receipts))
+;;
+
+let mark_receipt_fixed_point ~keepers_dir ~keeper_id entry fixed_point =
+  update_durable_range_receipt_cache
+    (durable_range_receipt_path ~keepers_dir ~keeper_id)
+    (function
+      | Some current when current == entry -> Some { entry with fixed_point = Some fixed_point }
+      | (Some _ | None) as unchanged -> unchanged)
+;;
+
+(* The replaced file already has a new identity; dropping the entry also covers
+   a write that reports failure after the replace. *)
 let write_durable_range_receipts ~keepers_dir ~keeper_id receipts =
   let path = durable_range_receipt_path ~keepers_dir ~keeper_id in
-  Fs_compat.save_file_atomic_strict path
-    (Yojson.Safe.to_string (durable_range_receipts_to_json receipts))
+  let written =
+    Fs_compat.save_file_atomic_strict path
+      (Yojson.Safe.to_string (durable_range_receipts_to_json receipts))
+  in
+  forget_durable_range_receipts path;
+  written
   |> Result.map_error (fun message ->
     Printf.sprintf
       "durable Librarian range receipt write failed path=%s: %s"
@@ -406,15 +557,19 @@ let write_durable_range_receipts ~keepers_dir ~keeper_id receipts =
 
 let remove_durable_range_receipts ~keepers_dir ~keeper_id =
   let path = durable_range_receipt_path ~keepers_dir ~keeper_id in
-  match Sys.remove path with
-  | () -> Ok ()
-  | exception Sys_error _ when not (Sys.file_exists path) -> Ok ()
-  | exception exn -> (* cancel-guard-ok: Sys.remove performs no Eio operation, so Cancelled cannot originate in this body. *)
-    Error
-      (Printf.sprintf
-         "durable Librarian range receipt removal failed path=%s: %s"
-         path
-         (Printexc.to_string exn))
+  let removed =
+    match Sys.remove path with
+    | () -> Ok ()
+    | exception Sys_error _ when not (Sys.file_exists path) -> Ok ()
+    | exception exn -> (* cancel-guard-ok: Sys.remove performs no Eio operation, so Cancelled cannot originate in this body. *)
+      Error
+        (Printf.sprintf
+           "durable Librarian range receipt removal failed path=%s: %s"
+           path
+           (Printexc.to_string exn))
+  in
+  forget_durable_range_receipts path;
+  removed
 ;;
 
 let sha256 content = Digestif.SHA256.(digest_string content |> to_hex)
@@ -427,6 +582,8 @@ let range_key = function
   | Atom_range range -> range.receipt_scope, `Atom
   | Official_range range -> range.receipt_scope, `Official
   | Explicit_candidate candidate -> candidate.queue_generation, `Explicit_candidate candidate.request_id
+  | Explicit_candidate_with_recall binding ->
+    binding.candidate_id.queue_generation, `Explicit_candidate binding.candidate_id.request_id
 ;;
 
 let upsert_durable_range_receipt receipts receipt =
@@ -443,43 +600,78 @@ let reconcile_durable_range_receipts
       ~keeper_id
       ~snapshot
   =
-  let* receipts = read_durable_range_receipts ~keepers_dir ~keeper_id in
-  let seen = Hashtbl.create 16 in
-  let reconciled =
-    List.filter_map
-      (function
-        | Prepared { range_id; snapshot_revision; snapshot_sha256 } ->
-          (match snapshot with
-           | Some (current, content)
-             when Int.equal current.revision snapshot_revision
-                  && String.equal (sha256 content) snapshot_sha256 ->
-             Some (Committed { range_id; snapshot_revision; snapshot_sha256 })
-           | None | Some _ -> None)
-        | Committed ({ snapshot_revision; snapshot_sha256; _ } as committed) ->
-          (match snapshot with
-           | Some (current, _content) when current.revision > snapshot_revision ->
-             Some (Committed committed)
-           | Some (current, content)
-             when Int.equal current.revision snapshot_revision
-                  && String.equal (sha256 content) snapshot_sha256 ->
-             Some (Committed committed)
-           | None | Some _ -> None))
-      receipts
-    |> List.fold_left (fun kept receipt ->
-         let key = range_key (receipt_range_id receipt) in
-         if Hashtbl.mem seen key then kept
-         else (Hashtbl.add seen key (); receipt :: kept)) []
-    |> List.rev
+  (* The snapshot is hashed at most once per pass, and only when a receipt or
+     the cached fixed point names its revision. *)
+  let snapshot =
+    Option.map (fun (current, content) -> current, lazy (sha256 content)) snapshot
   in
-  if receipts = reconciled
-  then Ok reconciled
-  else if reconciled = []
-  then
-    let+ () = remove_durable_range_receipts ~keepers_dir ~keeper_id in
-    []
+  let* read = read_durable_range_receipts_cached ~keepers_dir ~keeper_id in
+  let receipts, cached =
+    match read with
+    | Cached_receipts entry -> entry.receipts, Some entry
+    | Uncached_receipts receipts -> receipts, None
+  in
+  (* A reconcile that returned the receipts unchanged at revision R with bytes S
+     kept every receipt: each was committed, their keys were distinct, and each
+     named a revision below R, or R with S. The snapshot at R with S is the
+     same input. A snapshot above R keeps every receipt through the
+     [current.revision > snapshot_revision] arm below, so the result is
+     unchanged again. A missing snapshot, a lower revision, or R with other
+     bytes runs the full reconcile. *)
+  let covered =
+    match cached, snapshot with
+    | Some { fixed_point = Some fixed; _ }, Some (current, digest) ->
+      current.revision > fixed.fixed_revision
+      || (Int.equal current.revision fixed.fixed_revision
+          && String.equal (Lazy.force digest) fixed.fixed_snapshot_sha256)
+    | Some { fixed_point = Some _; _ }, None
+    | Some { fixed_point = None; _ }, (Some _ | None)
+    | None, (Some _ | None) -> false
+  in
+  if covered then Ok receipts
   else
-    let+ () = write_durable_range_receipts ~keepers_dir ~keeper_id reconciled in
-    reconciled
+    let seen = Hashtbl.create 16 in
+    let reconciled =
+      List.filter_map
+        (function
+          | Prepared { range_id; snapshot_revision; snapshot_sha256 } ->
+            (match snapshot with
+             | Some (current, digest)
+               when Int.equal current.revision snapshot_revision
+                    && String.equal (Lazy.force digest) snapshot_sha256 ->
+               Some (Committed { range_id; snapshot_revision; snapshot_sha256 })
+             | None | Some _ -> None)
+          | Committed ({ snapshot_revision; snapshot_sha256; _ } as committed) ->
+            (match snapshot with
+             | Some (current, _digest) when current.revision > snapshot_revision ->
+               Some (Committed committed)
+             | Some (current, digest)
+               when Int.equal current.revision snapshot_revision
+                    && String.equal (Lazy.force digest) snapshot_sha256 ->
+               Some (Committed committed)
+             | None | Some _ -> None))
+        receipts
+      |> List.fold_left (fun kept receipt ->
+           let key = range_key (receipt_range_id receipt) in
+           if Hashtbl.mem seen key then kept
+           else (Hashtbl.add seen key (); receipt :: kept)) []
+      |> List.rev
+    in
+    if receipts = reconciled
+    then (
+      (match cached, snapshot with
+       | Some entry, Some (current, digest) ->
+         mark_receipt_fixed_point ~keepers_dir ~keeper_id entry
+           { fixed_revision = current.revision; fixed_snapshot_sha256 = Lazy.force digest }
+       | Some _, None | None, (Some _ | None) -> ());
+      Ok reconciled)
+    else if reconciled = []
+    then
+      let+ () = remove_durable_range_receipts ~keepers_dir ~keeper_id in
+      []
+    else
+      let+ () = write_durable_range_receipts ~keepers_dir ~keeper_id reconciled in
+      reconciled
 ;;
 
 let keeper_id_of_filename filename = Filename.chop_suffix_opt ~suffix filename
@@ -1046,9 +1238,10 @@ let quarantined_outcome = "quarantined"
    empty ([dropped_by_commit]). Statements live on the journal line and its
    pending removal receipt; the snapshot's [change.removed] preserves the
    originals until finalization. *)
-let journal_entry_to_json ~dropped_statements snapshot =
+let journal_entry_to_json ~commit_effect ~dropped_statements snapshot =
   `Assoc
     ([ "outcome", `String committed_outcome
+     ; "commit_effect", `String (match commit_effect with Rewritten -> "rewritten" | Unchanged -> "unchanged")
      ; "recorded_at", `Float snapshot.updated_at
      ; "revision", `Int snapshot.revision
      ; "source", source_to_json snapshot.source
@@ -1074,144 +1267,20 @@ let journal_failure_to_json ~now ~trace_id ~kind ~detail ~snapshot_present =
     ]
 ;;
 
-(* Every journal writer and receipt recovery uses the canonical path mutex
-   and stable sibling lock. A data-file lock can be released by an unrelated
-   reader closing the journal; the sibling lock remains held through append. *)
-let append_journal_line_strict ~keepers_dir ~keeper_id json =
-  let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
-  let suffix = Yojson.Safe.to_string json ^ "\n" in
-  match Fs_compat.append_private_jsonl_durable_stable_result path suffix with
-  | Ok _ -> Ok ()
-  | Error error ->
-    Error
-      (Printf.sprintf
-         "memory journal durable append failed path=%s: %s"
-         path
-         (Fs_compat.private_jsonl_transaction_error_to_string error))
-;;
-
-(* Lines without actual reason-bearing removals are observations: their
-   snapshot already reached disk, so append failure warns. Destructive
-   removals below use [append_journal_line_strict] and a prepared receipt so
-   their originals and reasons survive failed journal finalization.
-   Cancellation is never absorbed. *)
-let append_journal_line ~keepers_dir ~keeper_id json =
-  let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
-  try
-    match append_journal_line_strict ~keepers_dir ~keeper_id json with
-    | Ok () -> ()
-    | Error detail -> Log.Keeper.warn "%s" detail
-  with
-  | Eio.Cancel.Cancelled _ as error -> raise error
-  | exn ->
-    Log.Keeper.warn
-      "memory journal append failed path=%s: %s"
-      path
-      (Printexc.to_string exn)
-;;
-
-let append_journal_entry ~keepers_dir ~keeper_id ~dropped_statements snapshot =
-  append_journal_line
-    ~keepers_dir
-    ~keeper_id
-    (journal_entry_to_json ~dropped_statements snapshot)
-;;
-
-(* A committed line's [dropped] lists what this commit removed: a memory the
-   locked snapshot held and the next one does not. An answer can drop a memory
-   the commit keeps -- its only successor was not stored -- or one the keeper
-   already removed during the pass. Written as given, the append-only journal
-   would say a current memory was dropped. *)
-let dropped_by_commit ~(previous : t option) ~(next : t) statements =
-  let ids facts =
-    List.fold_left
-      (fun ids fact -> Set_util.StringSet.add (memory_id fact) ids)
-      Set_util.StringSet.empty
-      facts
-  in
-  let held_before =
-    match previous with
-    | None -> Set_util.StringSet.empty
-    | Some snapshot -> ids snapshot.facts
-  in
-  let held_after = ids next.facts in
-  List.filter
-    (fun (statement : Keeper_memory_os_types.dropped_statement) ->
-       Set_util.StringSet.mem statement.memory_id held_before
-       && not (Set_util.StringSet.mem statement.memory_id held_after))
-    statements
-;;
-
-let append_librarian_failure
-      ~keepers_dir
-      ~keeper_id
-      ~now
-      ~trace_id
-      ~kind
-      ~detail
-      ~snapshot_present
-  =
-  append_journal_line
-    ~keepers_dir
-    ~keeper_id
-    (journal_failure_to_json ~now ~trace_id ~kind ~detail ~snapshot_present)
-;;
-
-(* A snapshot this build cannot decode is durable state no producer can leave:
-   every writer reads before it writes, so one undecodable file wedges the
-   keeper's memory permanently. The bytes move aside rather than being deleted
-   and this line says why, so a build that can read them again still has both.
-   Recorded on its own outcome because it is neither a pass that committed nor
-   a pass that failed. *)
-let journal_quarantine_to_json ~now ~rejection ~rejected_path =
-  `Assoc
-    [ "outcome", `String quarantined_outcome
-    ; "recorded_at", `Float now
-    ; "rejection", `String rejection
-    ; "rejected_path", `String rejected_path
-    ]
-;;
-
-(* [now] is the caller's own observation time and repeats: two writes in the
-   same second share it, and a caller may pass a fixed value. [rename] replaces
-   its destination, so a repeated name would delete the snapshot an earlier
-   quarantine kept — the one thing this path promises not to do. The search
-   runs under the snapshot lock the writer already holds, so the name it
-   settles on is still free when the rename happens. *)
-let unused_rejected_path ~snapshot_path ~now =
-  let base = Printf.sprintf "%s.rejected-%.0f" snapshot_path now in
-  if not (Fs_compat.file_exists base)
-  then base
-  else (
-    let rec next attempt =
-      let candidate = Printf.sprintf "%s-%d" base attempt in
-      if Fs_compat.file_exists candidate then next (attempt + 1) else candidate
-    in
-    next 2)
-;;
-
-let append_snapshot_quarantine ~keepers_dir ~keeper_id ~now ~rejection ~rejected_path =
-  append_journal_line
-    ~keepers_dir
-    ~keeper_id
-    (journal_quarantine_to_json ~now ~rejection ~rejected_path)
+let journal_commit_effect fields =
+  match List.assoc_opt "commit_effect" fields with
+  | None -> Ok None
+  | Some (`String "rewritten") -> Ok (Some Rewritten)
+  | Some (`String "unchanged") -> Ok (Some Unchanged)
+  | Some _ -> Error "committed line has an invalid commit_effect"
 ;;
 
 let committed_entry_of_fields fields =
-  let fields_are_exact =
-    exact_object_fields
-      [ "outcome"; "recorded_at"; "revision"; "source"; "change" ]
-      fields
-    || exact_object_fields
-         [ "outcome"
-         ; "recorded_at"
-         ; "revision"
-         ; "source"
-         ; "change"
-         ; "dropped"
-         ]
-         fields
-  in
+  let* _effect = journal_commit_effect fields in
+  let expected = ["outcome"; "recorded_at"; "revision"; "source"; "change"]
+    @ (if List.mem_assoc "dropped" fields then ["dropped"] else [])
+    @ (if List.mem_assoc "commit_effect" fields then ["commit_effect"] else []) in
+  let fields_are_exact = exact_object_fields expected fields in
   let dropped_of_json = function
     | `List items ->
       let rec loop index acc = function
@@ -1338,6 +1407,199 @@ let journal_entry_of_json = function
      | Some _ -> Error "journal line has a non-string outcome"
      | None -> Error "journal line has no outcome tag")
   | _ -> Error "journal line is not a JSON object"
+;;
+
+module Recall_revision_set = Set.Make (Int)
+
+type recall_journal_projection =
+  { revisions : Recall_revision_set.t
+  ; retired : int Identity_map.t
+  ; highest : int
+  ; invalid : string option
+  }
+
+type recall_journal_cache =
+  { oldest : int
+  ; identity : Unix.stats
+  ; projection : recall_journal_projection
+  }
+
+let recall_journal_cache = Atomic.make Identity_map.empty
+let empty_recall_projection =
+  {revisions=Recall_revision_set.empty;retired=Identity_map.empty;highest=0;invalid=None}
+
+let rec publish_recall_cache path value =
+  let before = Atomic.get recall_journal_cache in
+  let after = match value with
+    | None -> Identity_map.remove path before
+    | Some entry -> Identity_map.add path entry before in
+  if not (Atomic.compare_and_set recall_journal_cache before after) then
+    publish_recall_cache path value
+
+(* Forward projection matches the previous reverse reader's stopping boundary.
+   Only snapshot rewrites cover revisions; unchanged observations never fill a
+   missing transition. No observation rows are retained in memory. *)
+let project_recall_entry ~oldest projection = function
+  | Dated_jsonl.Malformed_json {detail;_} -> {projection with invalid=Some detail}
+  | Dated_jsonl.Parsed json ->
+    match journal_entry_of_json json with
+    | Error detail -> {projection with invalid=Some detail}
+    | Ok (Journal_failed _ | Journal_quarantined _) -> projection
+    | Ok (Journal_committed {revision;change;_}) ->
+      if revision <= oldest then empty_recall_projection
+      else
+        let revisions = match json with
+          | `Assoc fields when journal_commit_effect fields = Ok (Some Rewritten) ->
+            Recall_revision_set.add revision projection.revisions
+          | _ -> projection.revisions in
+        let added = Set_util.StringSet.of_list (List.map memory_id change.added) in
+        let retired = List.fold_left (fun retired fact ->
+          let id = memory_id fact in
+          if Set_util.StringSet.mem id added then retired
+          else Identity_map.update id
+            (function None -> Some revision | Some prior -> Some (max prior revision)) retired)
+          projection.retired change.removed in
+        {projection with revisions;retired;highest=max projection.highest revision}
+
+let observe_recall_append path (observation : Fs_compat.private_jsonl_append_observation) json =
+  match Identity_map.find_opt path (Atomic.get recall_journal_cache) with
+  | None -> ()
+  | Some cached ->
+    let before=observation.before and after=observation.after in
+    if same_file_identity cached.identity before
+       && before.Unix.st_dev=after.Unix.st_dev && before.Unix.st_ino=after.Unix.st_ino
+       && after.Unix.st_size-before.Unix.st_size=String.length observation.suffix
+       && String.equal observation.suffix (Yojson.Safe.to_string json ^ "\n")
+    then publish_recall_cache path (Some {cached with identity=after;
+      projection=project_recall_entry ~oldest:cached.oldest cached.projection
+        (Dated_jsonl.Parsed json)})
+    else publish_recall_cache path None
+
+(* Every journal writer and receipt recovery uses the canonical path mutex
+   and stable sibling lock. A data-file lock can be released by an unrelated
+   reader closing the journal; the sibling lock remains held through append. *)
+let append_journal_line_strict ~keepers_dir ~keeper_id json =
+  let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let suffix = Yojson.Safe.to_string json ^ "\n" in
+  match Fs_compat.append_private_jsonl_durable_observed_result path suffix with
+  | Ok (_, observation) ->
+    (match observation with
+     | None -> publish_recall_cache path None
+     | Some observation -> observe_recall_append path observation json);
+    Ok ()
+  | Error error ->
+    Error
+      (Printf.sprintf
+         "memory journal durable append failed path=%s: %s"
+         path
+         (Fs_compat.private_jsonl_transaction_error_to_string error))
+;;
+
+(* Lines without actual reason-bearing removals are observations: their
+   snapshot already reached disk, so append failure warns. Destructive
+   removals below use [append_journal_line_strict] and a prepared receipt so
+   their originals and reasons survive failed journal finalization.
+   Cancellation is never absorbed. *)
+let append_journal_line ~keepers_dir ~keeper_id json =
+  let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  try
+    match append_journal_line_strict ~keepers_dir ~keeper_id json with
+    | Ok () -> ()
+    | Error detail -> Log.Keeper.warn "%s" detail
+  with
+  | Eio.Cancel.Cancelled _ as error -> raise error
+  | exn ->
+    Log.Keeper.warn
+      "memory journal append failed path=%s: %s"
+      path
+      (Printexc.to_string exn)
+;;
+
+let append_journal_entry ~keepers_dir ~keeper_id ~commit_effect ~dropped_statements snapshot =
+  append_journal_line
+    ~keepers_dir
+    ~keeper_id
+    (journal_entry_to_json ~commit_effect ~dropped_statements snapshot)
+;;
+
+(* A committed line's [dropped] lists what this commit removed: a memory the
+   locked snapshot held and the next one does not. An answer can drop a memory
+   the commit keeps -- its only successor was not stored -- or one the keeper
+   already removed during the pass. Written as given, the append-only journal
+   would say a current memory was dropped. *)
+let dropped_by_commit ~(previous : t option) ~(next : t) statements =
+  let ids facts =
+    List.fold_left
+      (fun ids fact -> Set_util.StringSet.add (memory_id fact) ids)
+      Set_util.StringSet.empty
+      facts
+  in
+  let held_before =
+    match previous with
+    | None -> Set_util.StringSet.empty
+    | Some snapshot -> ids snapshot.facts
+  in
+  let held_after = ids next.facts in
+  List.filter
+    (fun (statement : Keeper_memory_os_types.dropped_statement) ->
+       Set_util.StringSet.mem statement.memory_id held_before
+       && not (Set_util.StringSet.mem statement.memory_id held_after))
+    statements
+;;
+
+let append_librarian_failure
+      ~keepers_dir
+      ~keeper_id
+      ~now
+      ~trace_id
+      ~kind
+      ~detail
+      ~snapshot_present
+  =
+  append_journal_line
+    ~keepers_dir
+    ~keeper_id
+    (journal_failure_to_json ~now ~trace_id ~kind ~detail ~snapshot_present)
+;;
+
+(* A snapshot this build cannot decode is durable state no producer can leave:
+   every writer reads before it writes, so one undecodable file wedges the
+   keeper's memory permanently. The bytes move aside rather than being deleted
+   and this line says why, so a build that can read them again still has both.
+   Recorded on its own outcome because it is neither a pass that committed nor
+   a pass that failed. *)
+let journal_quarantine_to_json ~now ~rejection ~rejected_path =
+  `Assoc
+    [ "outcome", `String quarantined_outcome
+    ; "recorded_at", `Float now
+    ; "rejection", `String rejection
+    ; "rejected_path", `String rejected_path
+    ]
+;;
+
+(* [now] is the caller's own observation time and repeats: two writes in the
+   same second share it, and a caller may pass a fixed value. [rename] replaces
+   its destination, so a repeated name would delete the snapshot an earlier
+   quarantine kept — the one thing this path promises not to do. The search
+   runs under the snapshot lock the writer already holds, so the name it
+   settles on is still free when the rename happens. *)
+let unused_rejected_path ~snapshot_path ~now =
+  let base = Printf.sprintf "%s.rejected-%.0f" snapshot_path now in
+  if not (Fs_compat.file_exists base)
+  then base
+  else (
+    let rec next attempt =
+      let candidate = Printf.sprintf "%s-%d" base attempt in
+      if Fs_compat.file_exists candidate then next (attempt + 1) else candidate
+    in
+    next 2)
+;;
+
+let append_snapshot_quarantine ~keepers_dir ~keeper_id ~now ~rejection ~rejected_path =
+  append_journal_line
+    ~keepers_dir
+    ~keeper_id
+    (journal_quarantine_to_json ~now ~rejection ~rejected_path)
 ;;
 
 type retraction_plan_receipt =
@@ -1505,6 +1767,7 @@ let append_removal_journal_and_clear_receipt
       ~keepers_dir
       ~keeper_id
       (journal_entry_to_json
+         ~commit_effect:Rewritten
          ~dropped_statements:(Some receipt.dropped_statements)
          snapshot)
   in
@@ -1787,6 +2050,45 @@ let read_retirement_context ~keepers_dir ~keeper_id ~expected_revision ~current_
   | exn -> Retirement_source_unavailable (Printexc.to_string exn)
 ;;
 
+(* The targets some committed line newer than [revision] removed without
+   adding back in the same line. Read newest first and stopped at the first
+   line at or below [revision], so it costs the commits since the decision,
+   not the journal's length. [None] reads every line: the decision saw no
+   snapshot. Caller holds the aggregate and snapshot locks, as for
+   [read_dropped]. *)
+let targets_retired_since ~keepers_dir ~keeper_id ~revision targets =
+  let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let retired = ref Set_util.StringSet.empty in
+  let newer line_revision = match revision with
+    | None -> true
+    | Some decided -> line_revision > decided in
+  let visit = function
+    | Dated_jsonl.Malformed_json { detail; _ } -> Some (Error detail)
+    | Dated_jsonl.Parsed json ->
+      match journal_entry_of_json json with
+      | Error detail -> Some (Error detail)
+      | Ok (Journal_failed _ | Journal_quarantined _) -> None
+      | Ok (Journal_committed { revision = line_revision; change; _ }) ->
+        if not (newer line_revision) then Some (Ok ())
+        else (
+          let added = Set_util.StringSet.of_list (List.map memory_id change.added) in
+          List.iter (fun fact ->
+            let identity = memory_id fact in
+            if Set_util.StringSet.mem identity targets
+               && not (Set_util.StringSet.mem identity added)
+            then retired := Set_util.StringSet.add identity !retired) change.removed;
+          None) in
+  match Unix.lstat path with
+  | _ ->
+    (match Dated_jsonl.find_latest_entry_in_file_result path visit with
+     | Ok (None | Some (Ok ())) -> Ok !retired
+     | Ok (Some (Error detail)) -> Error detail
+     | Error error -> Error (Dated_jsonl.read_error_to_string error))
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Set_util.StringSet.empty
+  | exception Unix.Unix_error (code, fn, arg) ->
+    Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code))
+;;
+
 (* An exact retraction batch: its plan id and the error that reports pending
    journal evidence for the snapshot it wrote. *)
 type 'error retraction_plan =
@@ -1866,6 +2168,7 @@ let update_locked_with_output
       ?durable_range_id
       ?official_range_id
       ?(explicit_candidate_ids = [])
+      ?admission_recall
       ~equal_facts
       ~store_error
       ~keepers_dir
@@ -1878,6 +2181,9 @@ let update_locked_with_output
     | Keep_stored -> None
     | Write_revision plan -> plan
   in
+  let admission_recall_bindings = match admission_recall with
+    | None -> []
+    | Some recall -> recall.bindings in
   let* () =
     match official_range_id with
     | None -> Ok ()
@@ -1892,6 +2198,15 @@ let update_locked_with_output
     |> Result.map ignore
     |> Result.map_error (fun error -> store_error (wire_error_to_string error)))
     (Ok ()) explicit_candidate_ids in
+  let* () = List.fold_left (fun result binding ->
+    let* () = result in
+    admission_recall_binding_of_json (admission_recall_binding_to_json binding)
+    |> Result.map ignore
+    |> Result.map_error (fun error -> store_error (wire_error_to_string error)))
+    (Ok ()) admission_recall_bindings in
+  let* () = validate_unique_explicit_candidates
+    (List.map (fun binding -> binding.candidate_id) admission_recall_bindings)
+    |> Result.map_error store_error in
   let dropped_statements_are_valid =
     match dropped_statements with
     | None -> true
@@ -1982,12 +2297,38 @@ let update_locked_with_output
          in
          let* () =
            let consumed = List.filter_map (function
-             | Committed {range_id=Explicit_candidate candidate; _} -> Some candidate
-             | Committed _ | Prepared _ -> None) durable_range_receipts in
+             | Committed {range_id; _} -> consumed_candidate range_id
+             | Prepared _ -> None) durable_range_receipts in
            validate_unique_explicit_candidates (consumed @ explicit_candidate_ids)
            |> Result.map_error store_error
          in
          let* next, output = build ~snapshot_content previous in
+         let* () = List.fold_left (fun result binding ->
+           let* () = result in
+           if not (List.mem binding.candidate_id explicit_candidate_ids) then
+             Error (store_error "recall binding does not name a consumed candidate")
+           else if not (List.exists (fun fact ->
+             String.equal (memory_id fact) binding.target_memory_id) next.facts) then
+             Error (store_error "recall binding target is absent from final Memory")
+           else Ok ()) (Ok ()) admission_recall_bindings in
+         (* [memory_id] hashes the claim text, so presence alone accepts a
+            target the keeper retracted and re-added while the decision ran,
+            and the binding would be born on the new incarnation after the
+            retirement its readers look for. A target retired after the
+            revision the decision read refuses the commit; the input stays
+            pending for a decision on current Memory. *)
+         let* () = match admission_recall with
+           | None | Some { bindings = []; _ } -> Ok ()
+           | Some { decided_at_revision; bindings } ->
+             let targets = Set_util.StringSet.of_list
+               (List.map (fun binding -> binding.target_memory_id) bindings) in
+             (match targets_retired_since ~keepers_dir ~keeper_id
+                      ~revision:decided_at_revision targets with
+              | Error detail -> Error (store_error ("recall binding retirement check: " ^ detail))
+              | Ok retired when Set_util.StringSet.is_empty retired -> Ok ()
+              | Ok _ ->
+                Error (store_error
+                  "recall binding target was retired after the admission decision read Memory")) in
          let* source_lines =
            match
              Keeper_memory_source_current.read_for_keepers_dir
@@ -2026,7 +2367,10 @@ let update_locked_with_output
          let ranges =
            Option.to_list (Option.map (fun range -> Atom_range range) durable_range_id)
            @ Option.to_list (Option.map (fun range -> Official_range range) official_range_id)
-           @ List.map (fun candidate -> Explicit_candidate candidate) explicit_candidate_ids
+           @ List.map (fun candidate ->
+               match List.find_opt (fun binding -> binding.candidate_id = candidate) admission_recall_bindings with
+               | None -> Explicit_candidate candidate
+               | Some binding -> Explicit_candidate_with_recall binding) explicit_candidate_ids
          in
          let receipts_for make =
            List.fold_left (fun receipts range_id ->
@@ -2103,6 +2447,7 @@ let update_locked_with_output
                 reads its newest Librarian line as the last success. This line
                 names the revision that stays current. *)
              append_journal_entry
+               ~commit_effect:Unchanged
                ~keepers_dir
                ~keeper_id
                ~dropped_statements:
@@ -2196,6 +2541,7 @@ let update_locked_with_output
                match retraction_receipt, retraction_plan with
                | None, _ ->
                  append_journal_entry
+                   ~commit_effect:Rewritten
                    ~keepers_dir
                    ~keeper_id
                    ~dropped_statements:committed_dropped
@@ -2286,7 +2632,7 @@ let update_locked_with_error
   |> Result.map (fun (snapshot, (_ : commit_effect), ()) -> snapshot)
 ;;
 
-let with_committed_receipts ~keepers_dir ~keeper_id select =
+let with_receipt_status ?(strict_snapshot=false) ~keepers_dir ~keeper_id select =
   try
     Fs_compat.mkdir_p keepers_dir;
     let snapshot_path = path_for_keepers_dir ~keepers_dir ~keeper_id in
@@ -2298,6 +2644,7 @@ let with_committed_receipts ~keepers_dir ~keeper_id select =
           | Some content ->
             (match parse snapshot_path content with
              | Ok current -> Ok (Some (current, content))
+             | Error rejection when strict_snapshot -> Error rejection
              | Error rejection ->
                (* A receipt is evidence for skipping already-committed work, so
                   an unverifiable receipt must read as no receipt, never as an
@@ -2312,13 +2659,13 @@ let with_committed_receipts ~keepers_dir ~keeper_id select =
                  rejection;
                Ok None)
         in
-        let* receipts =
-          reconcile_durable_range_receipts
-            ~keepers_dir
-            ~keeper_id
-            ~snapshot
+        let receipts =
+          try reconcile_durable_range_receipts ~keepers_dir ~keeper_id ~snapshot with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Printf.sprintf
+              "durable receipt reconciliation failed: %s" (Printexc.to_string exn))
         in
-        Ok (select receipts)))
+        select (Option.map fst snapshot) receipts))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
@@ -2329,32 +2676,110 @@ let with_committed_receipts ~keepers_dir ~keeper_id select =
          (Printexc.to_string exn))
 ;;
 
+let with_committed_receipts ?(strict_snapshot=false) ~keepers_dir ~keeper_id select =
+  with_receipt_status ~strict_snapshot ~keepers_dir ~keeper_id (fun snapshot receipts ->
+    let* receipts = receipts in
+    select snapshot receipts)
+;;
+
 let committed_range ~keepers_dir ~keeper_id select =
-  with_committed_receipts ~keepers_dir ~keeper_id (fun receipts ->
-    List.find_map (function
+  with_committed_receipts ~keepers_dir ~keeper_id (fun _snapshot receipts ->
+    Ok (List.find_map (function
       | Committed {range_id; _} -> select range_id
-      | Prepared _ -> None) receipts)
+      | Prepared _ -> None) receipts))
 ;;
 
 let committed_explicit_candidates ~keepers_dir ~keeper_id ~queue_generation =
-  with_committed_receipts ~keepers_dir ~keeper_id (fun receipts ->
-    List.filter_map (function
-      | Committed {range_id=Explicit_candidate candidate; _}
-        when String.equal candidate.queue_generation queue_generation -> Some candidate
-      | Committed _ | Prepared _ -> None) receipts
-    |> List.sort (fun (left : explicit_candidate_id) right -> Int.compare left.sequence right.sequence))
+  with_committed_receipts ~keepers_dir ~keeper_id (fun _snapshot receipts ->
+    Ok (List.filter_map (function
+      | Committed {range_id; _} ->
+        (match consumed_candidate range_id with
+         | Some candidate when String.equal candidate.queue_generation queue_generation -> Some candidate
+         | Some _ | None -> None)
+      | Prepared _ -> None) receipts
+    |> List.sort (fun (left : explicit_candidate_id) right -> Int.compare left.sequence right.sequence)))
+;;
+
+(* Bindings are only recalled in the incarnation they were committed against.
+   The snapshot hash proves the binding's birth; complete later journal revisions
+   prove no intervening retirement, even if the exact claim was re-added. *)
+let live_admission_bindings ~keepers_dir ~keeper_id (snapshot : t) bindings =
+  let current_ids = Set_util.StringSet.of_list (List.map memory_id snapshot.facts) in
+  let applicable = List.filter (fun (_, binding) ->
+    Set_util.StringSet.mem binding.target_memory_id current_ids) bindings in
+  let oldest = List.fold_left (fun oldest (revision, _) -> min oldest revision)
+    snapshot.revision applicable in
+  if oldest = snapshot.revision then Ok (List.map snd applicable)
+  else
+    Domain_pool_ref.submit_io_or_inline (fun () ->
+      let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+      let inspect () =
+        try Ok (Unix.lstat path) with
+        | Unix.Unix_error (error, _, _) -> Error (Unix.error_message error) in
+      let* before = inspect () in
+      let cached = Identity_map.find_opt path (Atomic.get recall_journal_cache) in
+      let* projection = match cached with
+        | Some cached when cached.oldest=oldest && same_file_identity cached.identity before ->
+          Ok cached.projection
+        | Some _ | None ->
+          (* Growth is not proof of an append. Only the normal local writer's
+             locked observation may advance the cached identity; any external
+             change requires the complete authoritative history again. *)
+          publish_recall_cache path None;
+          let* scanned = Dated_jsonl.fold_file_appended_entries_result path ~cursor:None
+            ~init:empty_recall_projection ~f:(project_recall_entry ~oldest)
+            |> Result.map_error Dated_jsonl.read_error_to_string in
+          let* projection = match scanned with
+            | Dated_jsonl.Appended (projection, _) -> Ok projection
+            | Dated_jsonl.Cursor_invalidated -> Error "admission recall cold journal cursor invalidated" in
+          let* after = inspect () in
+          if not (same_file_identity before after) then
+            Error "admission recall journal changed during full verification"
+          else (
+            publish_recall_cache path (Some {oldest;identity=after;projection});
+            Ok projection) in
+      let* () = match projection.invalid with None -> Ok () | Some detail -> Error detail in
+      if projection.highest > snapshot.revision then
+        Error "admission recall journal is ahead of the current snapshot"
+      else if Recall_revision_set.cardinal projection.revisions <> snapshot.revision - oldest then
+        Error "admission recall lacks complete intervening Memory revision history"
+      else Ok (List.filter_map (fun (born_revision, binding) ->
+        match Identity_map.find_opt binding.target_memory_id projection.retired with
+        | Some removed_revision when removed_revision > born_revision -> None
+        | Some _ | None -> Some binding) applicable))
+;;
+
+let read_with_admission_recall_status_for_keepers_dir ~keepers_dir ~keeper_id =
+  with_receipt_status ~strict_snapshot:true ~keepers_dir ~keeper_id
+    (fun snapshot receipts ->
+      match snapshot, receipts with
+      | snapshot, Error detail -> Ok (snapshot, Error detail)
+      | None, Ok _ -> Ok (None, Ok [])
+      | Some current, Ok receipts ->
+        let bindings = List.filter_map (function
+          | Committed {range_id=Explicit_candidate_with_recall binding; snapshot_revision; _} ->
+            Some (snapshot_revision, binding)
+          | Committed _ | Prepared _ -> None) receipts in
+        Ok (Some current, live_admission_bindings ~keepers_dir ~keeper_id current bindings))
+;;
+
+let read_with_admission_recall_for_keepers_dir ~keepers_dir ~keeper_id =
+  let* snapshot, bindings =
+    read_with_admission_recall_status_for_keepers_dir ~keepers_dir ~keeper_id in
+  let+ bindings = bindings in
+  snapshot, bindings
 ;;
 
 let committed_durable_range ~keepers_dir ~keeper_id ~receipt_scope =
   committed_range ~keepers_dir ~keeper_id (function
     | Atom_range range when String.equal range.receipt_scope receipt_scope -> Some range
-    | Atom_range _ | Official_range _ | Explicit_candidate _ -> None)
+    | Atom_range _ | Official_range _ | Explicit_candidate _ | Explicit_candidate_with_recall _ -> None)
 ;;
 
 let committed_official_range ~keepers_dir ~keeper_id ~receipt_scope =
   committed_range ~keepers_dir ~keeper_id (function
     | Official_range range when String.equal range.receipt_scope receipt_scope -> Some range
-    | Atom_range _ | Official_range _ | Explicit_candidate _ -> None)
+    | Atom_range _ | Official_range _ | Explicit_candidate _ | Explicit_candidate_with_recall _ -> None)
 ;;
 
 (* Apply a librarian's disposition to whatever the snapshot holds when the
@@ -2400,6 +2825,7 @@ let apply_disposition
       ?durable_range_id
       ?official_range_id
       ?(explicit_candidate_ids = [])
+      ?admission_recall
       ?(required_memory_ids = [])
       ~absorbed
       ~revisions
@@ -2573,6 +2999,7 @@ let apply_disposition
     ?durable_range_id
     ?official_range_id
     ~explicit_candidate_ids
+    ?admission_recall
     ~before_replace:write_absorbed_rows
     ~equal_facts:Keep_stored
     ~store_error:Fun.id
@@ -2994,3 +3421,7 @@ let move_aside_for_keepers_dir ?clock ~keepers_dir ~keeper_id ~now ~rejection ()
       quarantine_snapshot_and_receipt
         ~keepers_dir ~keeper_id ~snapshot_path ~now ~rejection))
 ;;
+
+module For_testing = struct
+  let durable_range_receipt_decodes () = Atomic.get durable_range_receipt_decodes
+end

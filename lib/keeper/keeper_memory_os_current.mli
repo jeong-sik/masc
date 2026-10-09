@@ -183,6 +183,24 @@ type explicit_candidate_id =
   ; input_sha256 : string
   }
 
+type admission_recall_binding =
+  { candidate_id : explicit_candidate_id
+  ; source_fact : Keeper_memory_os_types.fact
+  ; target_memory_id : string
+  }
+(** A consumed candidate's direct provenance pointing to its admitted current
+    identity. The source is search evidence, not another current fact. *)
+
+type admission_recall =
+  { decided_at_revision : int option
+        (** The Memory revision the admission decision read; [None] when it
+            read no snapshot. *)
+  ; bindings : admission_recall_binding list
+  }
+(** Recall bindings travel with the revision their decision read, so a commit
+    can refuse a target retired after that revision even when an identical
+    claim was added back. *)
+
 (** Why a librarian pass produced no snapshot. The journal is the only place
     this reaches disk, so the set is closed here rather than at the call site:
     a new failure mode has to name itself before it can be recorded, and
@@ -447,6 +465,37 @@ val committed_explicit_candidates :
     As with range receipts, missing or unverifiable snapshot evidence invalidates
     them; this is not a separate immutable consumption ledger. *)
 
+val read_with_admission_recall_status_for_keepers_dir :
+  keepers_dir:string -> keeper_id:string ->
+  ((t option * (admission_recall_binding list, string) result), string) result
+(** Read the snapshot and assess lookup provenance under the same store locks.
+    An inner error withholds all uncertain bindings while preserving a valid
+    current snapshot. Consumers must expose this incomplete lookup coverage;
+    it is not evidence that a query has no matching memory. Outer errors still
+    mean the snapshot or store lock could not be read safely. Receipt decoding
+    and reconciliation failures are inner errors: direct current facts remain
+    available, while consumption-ledger callers still receive a hard error.
+    The decoded receipt sidecar is kept per path while its file identity
+    (device, inode, size, mtime, ctime) is unchanged and its ctime is more than
+    one second old; a reconcile that left it unchanged is not repeated until the
+    snapshot is missing, older, or the same revision with other bytes. Any
+    change to the file, and every receipt write by this process, makes the next
+    read decode and reconcile it again. *)
+
+val read_with_admission_recall_for_keepers_dir :
+  keepers_dir:string -> keeper_id:string ->
+  ((t option * admission_recall_binding list), string) result
+(** Coherent snapshot and live bindings under the same store locks. A binding
+    must target an active exact identity and have no intervening retirement.
+    Later re-addition does not revive it; successors are not followed. When a
+    live binding needs later history, only explicitly marked snapshot rewrites
+    prove transitions. Unchanged observations and absent markers cannot fill a
+    missing revision; incomplete or unreadable evidence returns an error.
+    No bindings means no journal scan. Verified history is cached as an immutable
+    transition projection. Only a normal local append witnessed under the
+    stable writer lock may advance its exact file identity; any unexpected
+    metadata change requires full verification, including external growth. *)
+
 val apply_disposition
   :  ?on_committed:(disposition -> unit)
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
@@ -454,6 +503,7 @@ val apply_disposition
   -> ?durable_range_id:durable_range_id
   -> ?official_range_id:official_range_id
   -> ?explicit_candidate_ids:explicit_candidate_id list
+  -> ?admission_recall:admission_recall
   -> ?required_memory_ids:string list
   -> absorbed:Keeper_memory_os_types.absorbed_statement list
   -> revisions:Keeper_memory_os_types.revision list
@@ -495,7 +545,12 @@ val apply_disposition
     or in recovered receipts, are refused under the write lock before mutation.
     All supplied identities share the same snapshot revision and SHA-256. Each
     range kind retains its latest receipt per scope; candidate receipts retain
-    every consumed identity. The store writes a prepared transaction receipt
+    every consumed identity. [admission_recall] bindings must name exact consumed
+    candidate IDs, prove the canonical candidate-row digest from [source_fact],
+    and target identities present in the final snapshot under the same lock
+    that no committed line after [decided_at_revision] retired.
+    They share the candidate receipt transaction, including no-change commits.
+    The store writes a prepared transaction receipt
     before replacing the snapshot and marks it committed afterwards. Preparing
     the next transaction retains the prior committed receipt until the new
     snapshot is verified, so a failed snapshot write cannot erase its frontier.
@@ -699,3 +754,9 @@ val merge_basis
   :  Keeper_memory_os_types.basis
   -> Keeper_memory_os_types.basis
   -> Keeper_memory_os_types.basis
+
+module For_testing : sig
+  val durable_range_receipt_decodes : unit -> int
+  (** How many times this process has decoded receipt sidecar bytes. A read
+      answered from the verified receipt cache does not count. *)
+end

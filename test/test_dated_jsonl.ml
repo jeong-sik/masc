@@ -1438,11 +1438,32 @@ let test_strict_incremental_rejects_replacement_during_read () =
    | Ok (Dated_jsonl.Appended (rows, _)) -> check (list int) "new handle sees replacement" [2] rows
    | Ok Dated_jsonl.Cursor_invalidated | Error _ -> fail "fresh read of replacement failed")
 
+let test_strict_single_file_reports_malformed_and_torn_rows () =
+  let path = Filename.temp_file "dated_strict_single" ".jsonl" in
+  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
+    Out_channel.with_open_bin path (fun oc -> output_string oc "{\"i\":1}\nmalformed\n");
+    let read () = Dated_jsonl.fold_file_appended_entries_result path ~cursor:None
+      ~init:(0,0) ~f:(fun (parsed,malformed) -> function
+        | Dated_jsonl.Parsed _ -> parsed+1,malformed
+        | Dated_jsonl.Malformed_json _ -> parsed,malformed+1) in
+    (match read () with
+     | Ok (Dated_jsonl.Appended ((parsed,malformed),_)) ->
+       check int "valid physical row reported" 1 parsed;
+       check int "malformed evidence is not skipped" 1 malformed
+     | Ok Dated_jsonl.Cursor_invalidated | Error _ -> fail "complete cold read failed");
+    Out_channel.with_open_gen [Open_wronly;Open_append;Open_binary] 0o600 path
+      (fun oc -> output_string oc "{\"i\":2");
+    match read () with
+    | Error (Dated_jsonl.Io_error {operation=Read_file;_}) -> ()
+    | Error _ | Ok _ -> fail "torn authority row was silently skipped")
+
 let () =
   run "Dated_jsonl"
     [
       ( "append",
         [
+          test_case "strict single file reports malformed and torn evidence" `Quick
+            test_strict_single_file_reports_malformed_and_torn_rows;
           test_case "creates dated file" `Quick test_append_creates_dated_file;
           test_case "append reports its commit point" `Quick
             test_notifying_commit_reports_durable_row;

@@ -15,6 +15,16 @@ type t = Path of Form.t | Pending of int * string * t | Binding of preview * For
   | Catalog of Browser.t | Catalog_pending of int * string option * Browser.t * Form.t option
   | Directory of Form.t * Browser.t
 type event = Updated of t | Browse of string option | Preview of string | Draft of Document.session | Declare | Cancel
+type read = Read_catalog of string option | Read_preview of string
+let pending_read = function
+  | Pending (_,path,_) -> Some (Read_preview path)
+  | Catalog_pending (_,directory,_,_) -> Some (Read_catalog directory)
+  | Path _ | Binding _ | Catalog _ | Directory _ -> None
+let suspend_read = function
+  | Pending (_,_,previous) -> previous
+  | Catalog_pending (_,_,browser,None) -> Catalog browser
+  | Catalog_pending (_,_,browser,Some form) -> Directory (form,browser)
+  | (Path _ | Binding _ | Catalog _ | Directory _) as current -> current
 let browse ?directory () = Catalog (Browser.create ?directory ())
 let rec directory = function
   | Catalog browser | Directory (_,browser) -> Browser.directory browser

@@ -97,6 +97,7 @@ let direct_turn_dynamic_context
       ~(held_task_skills : Keeper_world_observation_inputs.held_task_skills list)
       ~(task_skill_surfaces : (string * Keeper_skill_catalog.exact_surface list) list)
       ~(workspace_memory : Workspace_memory_ledger.observation)
+      ~(workspace_memory_access : Keeper_request_tool_access.t option)
       ~(lane_updates : (Yojson.Safe.t,string) result)
       ~(approval_authority_text : string)
       ~(recent_direct_conversation_text : string)
@@ -107,7 +108,7 @@ let direct_turn_dynamic_context
   =
   ([ direct_turn_task_context ~current_task ~held_task_skills ~task_skill_surfaces ]
    @ Option.to_list
-       (Keeper_unified_prompt.format_workspace_memory_observation workspace_memory)
+       (Keeper_unified_prompt.format_workspace_memory_observation ?access:workspace_memory_access workspace_memory)
    @ Option.to_list (Lane_addon_subscription.render lane_updates)
    @ [ approval_authority_text
   ; recent_direct_conversation_text
@@ -770,12 +771,13 @@ let run_keeper_invocation_turn_admitted_inner
                           ""))
                 | Some false | None -> ""
               in
-              let dynamic_context =
+              let render_dynamic_context workspace_memory_access =
                 direct_turn_dynamic_context
                   ~current_task
                   ~held_task_skills
                   ~task_skill_surfaces
                   ~workspace_memory
+                  ~workspace_memory_access
                   ~lane_updates
                   ~approval_authority_text:
                     (Keeper_unified_prompt.format_approval_authority_observation
@@ -788,7 +790,8 @@ let run_keeper_invocation_turn_admitted_inner
               (* The system prompt is the base prompt [Keeper_run_context]
                  built, shared with autonomous turns. Channel-specific input
                  stays in [dynamic_context] and the persisted user message. *)
-              { dynamic_context; dynamic_context_for_tools = None }
+              { dynamic_context = render_dynamic_context None;
+                dynamic_context_for_tools = Some (fun access -> render_dynamic_context (Some access)) }
             in
             Progress.Tracker.step turn_tracker
               ~message:(Printf.sprintf "Executing Agent.run for %s" name) ();

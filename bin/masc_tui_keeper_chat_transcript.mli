@@ -105,6 +105,8 @@ type tool_activity = private
   ; outcome : tool_outcome
   ; native_completion : Runtime_native_tools.completion option
   ; native_progress : native_progress option
+  ; native_retry : Runtime_native_tools.retry_observation option
+      (** Separate from heartbeat/output timing and model activity. *)
   ; duration : string option
       (** The source's duration label. Live events do not currently carry one,
           so they retain [None]. *)
@@ -250,6 +252,7 @@ type tool_projection = private
 
 val make_tool_activity :
   ?native_progress:native_progress ->
+  ?native_retry:Runtime_native_tools.retry_observation ->
   ?native_completion:Runtime_native_tools.completion ->
   ?execution_id:string ->
   call_id:string option ->
@@ -597,9 +600,10 @@ val drawn : t -> drawn_item list
     drawn as that record, unless the item is [Skill_failed]: the server
     records a composition's delivery from an error tool result too, so a
     record cannot turn a call the stream saw fail into a finished read.
-    Records no skill item carries form one more [Drawn_skill], ahead of the
-    stretch the reply stands for, or ahead of the appended reply or status
-    row when no stretch streamed. *)
+    Records no skill item carries form one more [Drawn_skill] after the
+    observed trail and before the appended reply or status. Their position
+    relative to streamed text is unknown, so that text is preserved rather
+    than treated as the terminal reply's stretch. *)
 
 val of_log : now:float -> Masc_tui_keeper_chat_log.t -> t
 (** Replays entries in journal order using each recorded event time. [now]

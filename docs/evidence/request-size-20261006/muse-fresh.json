@@ -1,0 +1,25 @@
+{
+ "runs": 33,
+ "actual_input_tokens": 139819903,
+ "actual_uncached_tokens": 7379173,
+ "fresh": [
+  {
+   "seed_tokens": 70000,
+   "input_tokens": 39691861,
+   "ratio_to_actual": 0.284,
+   "seeds_sent_uncached": 2310000
+  },
+  {
+   "seed_tokens": 100000,
+   "input_tokens": 53101861,
+   "ratio_to_actual": 0.38,
+   "seeds_sent_uncached": 3300000
+  },
+  {
+   "seed_tokens": 130000,
+   "input_tokens": 66511861,
+   "ratio_to_actual": 0.476,
+   "seeds_sent_uncached": 4290000
+  }
+ ]
+}

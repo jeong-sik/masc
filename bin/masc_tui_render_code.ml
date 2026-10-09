@@ -97,6 +97,40 @@ let code_notes_viewport (state : state) =
   (List.length (code_notes_rows state ~cols:pane_cols),
    max 1 (code_pane_content_height state - 1))
 
+(* These are tool-call bytes, not a reconstruction of today's checkout.
+   Repeat the marker on wrapped rows so a narrow pane retains each side. *)
+let history_change_rows ~cols (change : Masc.Tui_decode.file_change) =
+  let open Masc.Tui_decode in
+  let wrap text =
+    Message_layout.wrap_body ~max_cells:(max 1 (cols - 6))
+      ~sanitize:Terminal_text.single_line text
+  in
+  let status =
+    if change.fc_succeeded then "Recorded change · applied call · d:collapse"
+    else "Recorded attempt · call failed · d:collapse"
+  in
+  let before, after, note = match change.fc_kind with
+    | Fc_edited { before; after; replace_all } ->
+        before, after,
+        (if replace_all then ["replace_all: recorded text once; every occurrence was targeted"] else [])
+    | Fc_inserted { text; _ } -> "", text, ["Inserted text; surrounding file is not recorded"]
+    | Fc_written { content } -> "", content, ["Written content; previous file bytes are not recorded"]
+    | Fc_materialized _ -> "", "", ["Blob coordinates only; no recorded text to compare"]
+  in
+  let rows = Diff.rows ~before ~after |> List.concat_map (fun row ->
+    let marker, style, text = match row with
+      | Diff.Context text -> "  ", Ansi.dim, text
+      | Diff.Removed text -> "- ", Theme.Syntax.diff_removed_bg, text
+      | Diff.Added text -> "+ ", Theme.Syntax.diff_added_bg, text
+    in
+    (* Code whitespace is evidence: word wrapping would erase indentation
+       and collapse internal spaces. Cell splitting also retains empty rows. *)
+    let lines = Terminal_text.single_line text
+      |> Message_layout.split_cells ~max_cells:(max 1 (cols - 8)) in
+    List.map (fun line -> style ^ marker ^ line ^ Ansi.reset) lines)
+  in
+  List.concat_map wrap (status :: note) @ rows
+
 let code_history_rows (state : state) ~cols =
   let wrap owner text =
     Message_layout.wrap_body
@@ -120,8 +154,8 @@ let code_history_rows (state : state) ~cols =
         | None -> []
         | Some detail -> wrap None (field "Git history unavailable" detail)
       in
-      let entries = List.concat_map
-        (fun entry ->
+      let entries = List.mapi
+        (fun index entry ->
           let lines = match entry with
             | Hist_commit row ->
                 let open Masc.Tui_decode in
@@ -144,8 +178,14 @@ let code_history_rows (state : state) ~cols =
                      Option.map (fun turn -> field "Turn" (string_of_int turn)) change.fc_turn;
                      Option.map (field "Execution") change.fc_execution_id]
           in
-          List.concat_map (wrap (Some entry)) lines)
-        listing.chl_entries
+          let owner = Some (index, entry) in
+          let metadata = List.concat_map (wrap owner) lines in
+          match entry, state.code_history_expanded with
+          | Hist_keeper_change change, Some expanded when index = expanded ->
+              metadata @ List.map (fun row -> owner, row)
+                (history_change_rows ~cols change)
+          | Hist_commit _, _ | Hist_keeper_change _, _ -> metadata)
+        listing.chl_entries |> List.concat
       in
       let empty = match listing.chl_entries with
         | [] -> wrap None "(no history entries returned; see source coverage below)"
@@ -172,7 +212,7 @@ let code_history_viewport (state : state) =
   (List.length (code_history_rows state ~cols:(code_history_pane_cols ())),
    max 1 (code_pane_content_height state - 1))
 
-let code_history_selected (state : state) =
+let code_history_selected_occurrence (state : state) =
   let rows = code_history_rows state ~cols:(code_history_pane_cols ()) in
   (* The first row owns Enter. Let every physical row reach that position,
      including the final record when the whole document fits the pane. *)
@@ -180,6 +220,23 @@ let code_history_selected (state : state) =
       state.code_history_scroll in
   match List.nth_opt rows scroll with
   | Some (owner, _) -> owner | None -> None
+
+let code_history_selected state =
+  Option.map snd (code_history_selected_occurrence state)
+
+let toggle_history_change state =
+  match code_history_selected_occurrence state with
+  | Some (index, Hist_keeper_change _) ->
+      state.code_history_expanded <-
+        (if state.code_history_expanded = Some index then None else Some index);
+      (* Switching records can collapse rows before this owner. Locate it in
+         the new document so the selected record stays at the top. *)
+      let rows = code_history_rows state ~cols:(code_history_pane_cols ()) in
+      let first = List.find_index
+          (fun (owner, _) -> Option.map fst owner = Some index) rows in
+      Option.iter (fun row -> state.code_history_scroll <- row) first;
+      true
+  | Some (_, Hist_commit _) | None -> false
 
 let render_code (state : state) =
   let terminal_rows, cols = get_terminal_size () in

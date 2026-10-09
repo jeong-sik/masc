@@ -390,7 +390,8 @@ let commit_partition_ready ~base_path command partition =
          "partition advanced before candidate requeue authorization")
 ;;
 
-let execute_with_before_partition_commit
+let execute_with_hooks
+    ~before_root_restore
     ~before_partition_commit
     ~now
     ~base_path
@@ -398,8 +399,9 @@ let execute_with_before_partition_commit
   =
   let* candidate = find_candidate ~base_path command in
   let* observed = matching_quarantine command candidate in
+  before_root_restore ();
   let* (_ : int) =
-    Partition.ensure_roots
+    Partition.ensure_current_roots
       ~base_path
       ~keeper_name:command.keeper_name
       [ candidate ]
@@ -481,12 +483,20 @@ let execute_with_before_partition_commit
          "candidate quarantine names a different partition")
 ;;
 
+let execute_with_before_partition_commit =
+  execute_with_hooks ~before_root_restore:(fun () -> ())
+;;
+
 let execute =
   execute_with_before_partition_commit
     ~before_partition_commit:(fun (_partition : Partition.t) -> ())
 ;;
 
 module For_testing = struct
+  let execute_with_before_root_restore =
+    execute_with_hooks ~before_partition_commit:(fun _ -> ())
+  ;;
+
   let execute_with_before_partition_commit =
     execute_with_before_partition_commit
   ;;

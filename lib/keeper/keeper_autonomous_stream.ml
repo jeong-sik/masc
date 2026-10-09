@@ -144,7 +144,8 @@ let finish t ending =
       flush t;
       (match ending with
        | Completed {reply; turn_outcome} ->
-           publish t (Events.Reply_details { reply = t.redact_text reply; turn_outcome; turn_ref = t.turn_ref })
+           publish t (Events.Reply_details { reply = t.redact_text reply; turn_outcome; turn_ref = t.turn_ref;
+             terminal_stream_scope = Bridge.terminal_text_scope t.bridge })
        | Failed message -> apply t (Bridge.fail_stream t.bridge ~reason:(t.redact_text message))
        | Cancelled -> apply t (Bridge.fail_stream t.bridge ~reason:"Autonomous turn cancelled"));
       publish t Events.Text_message_end;

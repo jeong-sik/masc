@@ -776,7 +776,29 @@ let failure_detail ~absorbed = function
          (List.length unjudgeable)
          (List.length left)
          (request_shas evaluations))
-  | Evaluated { outcome = Judged _; _ } | Skipped _ -> None
+  | Evaluated { outcome = Judged _; copy_checks; evaluations } ->
+    let failures = List.filter_map (fun check ->
+      match check.verdict with
+      | Not_judged (Request_failed detail) ->
+        Some (Printf.sprintf "claim %s: %s" check.claim_id detail)
+      | Copy _ | Carries_new_statement _
+      | Not_judged (Gate_judgment_failed | Continues_a_dropped_memory
+                   | No_source_fits_the_state | Statement_too_large | No_statement) -> None)
+      copy_checks in
+    (match failures with
+     | [] -> None
+     | _ :: _ -> Some (Printf.sprintf "reverse copy judgment failed; %s; requests=%s"
+         (String.concat "; " failures) (request_shas evaluations)))
+  | Skipped { reason = Unavailable reason; _ } ->
+    (match reason with
+     | Typesafeai_config.Absorb_gate_disabled | Typesafeai_config.Keeper_excluded -> None
+     | Typesafeai_config.Lane_disabled | Typesafeai_config.No_armed_destination
+     | Typesafeai_config.Board_attention_disabled | Typesafeai_config.Context_review_disabled
+     | Typesafeai_config.Skill_applicability_disabled | Typesafeai_config.Librarian_preflight_disabled
+     | Typesafeai_config.Workspace_memory_selection_disabled ->
+       Some ("enabled absorb judgment unavailable: " ^
+             Typesafeai_config.unavailable_reason_to_string reason))
+  | Skipped { reason = No_absorptions; _ } -> None
 ;;
 
 let absorbed_of_run = function
@@ -992,8 +1014,9 @@ let log_copy_checks ~keeper_id checks =
     in
     Log.Keeper.info
       ~keeper_name:keeper_id
-      "librarian absorb gate reverse: %d claim(s) absorbed nothing; %d copy (not applied), \
-       %d carry a new statement, %d not judged (applied); %d request(s)"
+      "librarian absorb gate reverse: %d claim(s) without accepted absorptions; %d copy proposals excluded, \
+       %d proposals carry a new statement, %d proposals not judged; %d request(s); \
+       these are gate decisions, not store commits"
       (List.length checks)
       (count is_copy)
       (count carries)
@@ -1005,15 +1028,15 @@ let log_copy_checks ~keeper_id checks =
          | Copy { statements } ->
            Log.Keeper.info
              ~keeper_name:keeper_id
-             "librarian absorb gate reverse: claim %s not applied, sources %s convey \
+             "librarian absorb gate reverse: claim %s excluded from the candidate set, sources %s convey \
               every statement: %s"
              check.claim_id
              (String.concat "," check.sources)
              (String.concat " | " statements)
          | Not_judged (Request_failed detail) ->
-           Log.Keeper.warn
+           Log.Keeper.info
              ~keeper_name:keeper_id
-             "librarian absorb gate reverse: claim %s applied unjudged, request failed: %s"
+             "librarian absorb gate reverse: claim %s remains a proposal, unjudged, request failed: %s"
              check.claim_id
              detail
          | Not_judged
@@ -1024,7 +1047,7 @@ let log_copy_checks ~keeper_id checks =
               | No_statement) as reason) ->
            Log.Keeper.info
              ~keeper_name:keeper_id
-             "librarian absorb gate reverse: claim %s applied unjudged (%s)"
+             "librarian absorb gate reverse: claim %s remains a proposal, unjudged (%s)"
              check.claim_id
              (copy_not_judged_to_string reason)
          | Carries_new_statement _ -> ())
@@ -1064,16 +1087,8 @@ let run
      | Error
          ((Typesafeai_config.Lane_disabled | Typesafeai_config.No_armed_destination) as reason)
        ->
-       (* Declared on and cannot be asked: the operator meant every absorption
-          to be judged, so none is; the sources stay current and the new
-          claims still apply. Applying the answer here would remove memories
-          from the current snapshot on the strength of a judgment that never
-          ran, which is the one direction this gate exists to close. *)
-       Log.Keeper.warn
-         ~keeper_name:keeper_id
-         "librarian absorb gate declared on but unavailable (%s): %d absorption(s) kept current"
-         (Typesafeai_config.unavailable_reason_to_string reason)
-         (List.length absorbed);
+       (* No evaluation ran. [failure_detail] defers the complete Memory
+          range, including new claims, and the runtime records the failure. *)
        complete (Skipped { reason = Unavailable reason; absorbed = [] })
      | Error
          ((Typesafeai_config.Board_attention_disabled
@@ -1085,11 +1100,6 @@ let run
        (* Another gate's switch: [absorb_gate_destinations] does not produce
           these. Named rather than caught so a new reason has to be placed;
           the safe direction is the same as above. *)
-       Log.Keeper.warn
-         ~keeper_name:keeper_id
-         "librarian absorb gate reported another gate's switch (%s): %d absorption(s) kept current"
-         (Typesafeai_config.unavailable_reason_to_string reason)
-         (List.length absorbed);
        complete (Skipped { reason = Unavailable reason; absorbed = [] })
      | Ok ((first, rest) as armed) ->
        let destinations = List.map Typesafeai_client.identify (first :: rest) in
@@ -1175,8 +1185,9 @@ let run
         | Judged judged ->
           Log.Keeper.info
             ~keeper_name:keeper_id
-            "librarian absorb gate: %d absorbed, %d kept current (context preservation \
-             not established), %d unjudged, %d too large to judge (kept current), %d request(s) %s"
+            "librarian absorb gate: %d source absorptions accepted for commit, %d refused \
+             (context preservation not established), %d unjudged, %d too large to judge, \
+             %d request(s) %s; current snapshot changes only after store commit"
             (List.length judged.conveyed)
             (List.length judged.left)
             (List.length judged.unjudged)

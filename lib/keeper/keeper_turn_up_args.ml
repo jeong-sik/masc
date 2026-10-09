@@ -239,7 +239,6 @@ let creation_stem =
 
 let known_turn_up_args =
   [ "name"
-  ; "create_only"
   ; "runtime_id"
   ; "activation_mode"
   ; "input_policy"

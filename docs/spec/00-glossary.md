@@ -55,9 +55,13 @@ status: reference
   (`Keeper_turn_driver.official_client_observation`). 성공 관측값은 그대로
   통과하고, 실패는 공식 클라이언트가 프롬프트 전송을 보고한 뒤에만 관찰값이
   된다. 전송 보고가 없는 실패는 이 관찰값으로 잡히지 않으므로, 실패 관찰값이
-  없다는 것은 성공을 뜻하지 않는다. 관찰값은 `runtime_id`와 `model_id`를
-  이름 짓고, `prompt_sent_at`을 기준 시각으로 둔다.
-  → [Keeper_turn_driver.official_client_observation](../../lib/keeper/keeper_turn_driver.mli)
+  없다는 것은 성공을 뜻하지 않는다. 실패 관찰값은 `runtime_id`를 보존하고,
+  지연 시간은 `prompt_sent_at`부터 잰다. 시도의 `model_id`에는 실제 모델 id 대신
+  `Boundary_redaction.runtime_model_label`(`runtime`)을 기록하며,
+  `selected_model`과 `selected_model_raw`는 모두 `None`이다. 따라서 이 실패
+  관찰값만으로 실제 모델을 식별할 수는 없다.
+  → [Keeper_turn_driver.official_client_observation](../../lib/keeper/keeper_turn_driver.mli) ·
+  [Runtime_observation](../../lib/runtime/runtime_observation.ml)
 
 **Clients (TUI 클라이언트 표)**
 : `GET /api/v1/dashboard/clients` 한 읽기를 그리는 TUI 표. 한 워크스페이스에 붙은
@@ -864,9 +868,9 @@ status: reference
     큐 입력 단축키(`Ctrl-T:queue`)와 현재 작업 중단 안내를 보존한다.
   - 큐 제어와 입력 보존: 대화 대기열 제어 명령(`/queue`·`/queue resume` 및 `Ctrl-T`)을 제공하며,
     작성 도중 `Esc`로 다른 화면을 탐색하더라도 대기열 상태와 입력 드래프트는 파기되지 않고 유지된다.
-  - 검증과 증거: PTY 시나리오(`test/test_tui_queue_visibility_pty.py`) 및 OCaml 생애주기
-    테스트(`test/test_tui_chat_queue_wiring.ml`, `test/test_tui_chat_activity.ml`)가
-    80열 레이아웃·재연결 불확실성·Keeper 이동 후 복귀 계약을 다룬다. 실행 증거와 한계는
+  - 검증과 증거: OCaml 생애주기 테스트(`test/test_tui_chat_queue_wiring.ml`,
+    `test/test_tui_chat_activity.ml`)가 재연결 불확실성·Keeper 이동 후 복귀 계약을
+    다룬다. 실행 증거와 한계는
     아래 증거 문서에 기록한다.
   → [Masc_tui_types](../../bin/masc_tui_types.ml) ·
   [docs/evidence/2026-09-30-chat-queue-visibility/README.md](../evidence/2026-09-30-chat-queue-visibility/README.md) ·
@@ -1295,17 +1299,24 @@ status: reference
   → [Runtime.get_default_route](../../lib/runtime/runtime.mli) · [config/runtime.toml](../../config/runtime.toml)
 
 **Exact Lane Slot 교체·이동 (Exact lane slot replacement and move)**
-: Dashboard 런타임 편집기가 exact-output lane의 선언된 후보 하나를 자리
-  그대로 다른 후보로 바꾸거나(`Runtime_route_exact_slot_replaced`,
-  `Runtime.replace_exact_output_lane_slot`) 자리를 옮기는 편집
-  (`Runtime_route_exact_slot_moved`의 위로·아래로·맨 처음으로). 교체는
-  쓰기 잠금 아래 제자리에서 일어난다. 새 후보는 같은 HTTP/CLI 그룹에
-  속하고 이 lane 어디에도 선언되지 않은 runtime id여야 하며, 나머지
-  후보의 순서는 보존된다. 그룹을 넘는 교체와 없는 id는 거절되고, lane에
-  후보를 더하는 것은 별개 편집이다. 이 편집은 **Runtime Candidate Order**
-  선언을 바꾸는 것이지, 그 순서로 이미 도는 turn을 바꾸는 게 아니다.
+: TUI 런타임 편집기와 서버의 `/api/v1/runtime/config/routing` API가 exact-output
+  lane의 선언된 후보 하나를 자리 그대로 바꾸거나
+  (`Runtime_route_exact_slot_replaced`, `Runtime.replace_exact_output_lane_slot`)
+  자리를 옮기는 편집(`Runtime_route_exact_slot_moved`의 위로·아래로·맨 처음으로).
+  웹 Dashboard의 슬롯 편집기는 추가·제거·위/아래 이동을 제공하며, 교체와
+  맨 처음으로 이동하는 조작은 제공하지 않는다.
+  교체는 쓰기 잠금 아래 제자리에서 일어난다. 새 후보는 같은 HTTP/CLI 그룹으로
+  분류되고 이 lane 어디에도 선언되지 않은 id여야 하며, 나머지 후보의 순서는
+  보존된다. 그룹을 넘는 교체는 거절되고, 후보 추가는 별개 편집이다.
+  알 수 없는 교체 id가 항상 저장 거절되는 것은 아니다. 카탈로그에서 찾지 못하는
+  후보는 거절 슬롯으로 보고되어 실행 후보에서 제외될 수 있으며, 다른 후보와
+  필수 lane 조건 등 전체 구성 검증을 통과하면 그 선언은 저장될 수 있다.
+  편집 대상은 `exact_output_lane_decl`의 **exact-output 슬롯 순서**이며,
+  Keeper turn의 **Runtime Candidate Order**와는 별개다.
   → [Runtime.replace_exact_output_lane_slot](../../lib/runtime/runtime.mli) ·
-  [Runtime_route_exact_slot_replaced](../../lib/server/server_dashboard_runtime_request.mli)
+  [Runtime_exact_output_registry](../../lib/runtime/runtime_exact_output_registry.ml) ·
+  [Runtime_route_exact_slot_replaced](../../lib/server/server_dashboard_runtime_request.mli) ·
+  [Dashboard 슬롯 API](../../dashboard/src/api/dashboard-runtime.ts)
 
 **Attempt Dispatch (실제로 보냈는지 여부)**
 : Keeper turn 실행 중 후보 순서(`Runtime Candidate Order`)의 각 런타임 후보를 시도할 때,
@@ -2165,13 +2176,18 @@ status: reference
   검증을 통과한 `Validated_preset`만 게이트와 orchestrator로 흐른다. 패널 정체성은
   `panelist_id` — 라벨이 있으면 `label (model)`, 없으면 `model`이고, 같은 model이라도
   라벨이 다르면 다른 패널이다. JOJ(judge-of-judges)는 1차 심판 여럿과 meta 심판을 둔다.
-  여기서 Fusion은 MASC의 Board-backed 실행을 뜻하며, Lane Add-on의 조립형 계산과는 다르다.
-  → [Fusion_policy](../../lib/fusion_core/fusion_policy.mli)
+  여기서 Fusion은 MASC의 native 패널·심판 실행을 뜻한다. 계산은 Board 없이 진행하며,
+  Board는 결과 증거를 게시하는 best-effort 투영이다. 일반적인 Board 게시 오류에도
+  chat/wake 전달은 진행한다. 단, 기존 게시물과 실행 정체성이 충돌하면 투영을 거절한다.
+  계산 완료와 결과 투영은 별개이며, Lane Add-on의 조립형 계산과도 실행 경로가 다르다.
+  → [Fusion_policy](../../lib/fusion_core/fusion_policy.mli),
+  [Fusion_orchestrator](../../lib/fusion/fusion_orchestrator.mli),
+  [Fusion_sink](../../lib/fusion/fusion_sink.mli)
 
 **Assembled Fusion Computation (조립형 Fusion 계산)**
 : `fusion-compute` Lane Add-on이 패널과 심판을 각각 격리 worker로 실행해 보존 입력과
   이름 지정 Lane 출력을 계산한다. `fusion/computation` 출력을 내고 `fusion-report`가
-  이를 에이전트가 읽을 보고서로 렌더한다. MASC의 Board-backed Fusion 실행과는 다르다.
+  이를 에이전트가 읽을 보고서로 렌더한다. MASC의 native Fusion 실행과는 실행 경로가 다르다.
   계산 완료는 보고서 전달·게시를 뜻하지 않는다. 보고서 읽기나 Broadcast에는 명시적
   evidence action이 필요하다.
   → [fusion-compute](../../addons/fusion-compute/README.md),

@@ -504,7 +504,7 @@ function validateKeeperCustomPayload(
       'quarantined_occurrence',
     ],
     KEEPER_CONTINUATION_CHECKPOINT: ['message', 'request_id'],
-    KEEPER_REPLY_DETAILS: ['reply', 'turn_outcome', 'turn_ref'],
+    KEEPER_REPLY_DETAILS: ['reply', 'turn_outcome', 'turn_ref', 'terminal_stream_scope'],
     KEEPER_TOOL_RESULT_READY: [
       'toolStreamScope',
       'toolCallBlockIndex',
@@ -656,9 +656,23 @@ function validateKeeperCustomPayload(
       }
       const turnRef = requiredString(value, 'turn_ref')
       if (!turnRef.success) return turnRef
-      return typeof value.turn_outcome === 'string' && KEEPER_TURN_OUTCOMES.has(value.turn_outcome)
+      const turnOutcome =
+        typeof value.turn_outcome === 'string' && KEEPER_TURN_OUTCOMES.has(value.turn_outcome)
+      if (!turnOutcome) {
+        return fail('ag_ui_event.value.turn_outcome', 'Expected typed Keeper turn outcome')
+      }
+      // Optional and key-omitted when absent: the server projector appends it
+      // with json_opt (None -> []). Same contract as the OCaml decoder's
+      // optional_stream_scope: absent ok, nonnegative integer ok, everything
+      // else (including null and negative) rejected.
+      const scope = value.terminal_stream_scope
+      if (scope === undefined) return ok(true)
+      return typeof scope === 'number' && Number.isSafeInteger(scope) && scope >= 0
         ? ok(true)
-        : fail('ag_ui_event.value.turn_outcome', 'Expected typed Keeper turn outcome')
+        : fail(
+            'ag_ui_event.value.terminal_stream_scope',
+            'Expected terminal_stream_scope integer >= 0',
+          )
     }
   }
   // The name reached here from the contract list, so a missing branch is a gap

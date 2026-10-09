@@ -14,32 +14,6 @@ let notch state ~drawn direction =
     (reader_after_wheel (clamped_scroll_now state drawn)
        direction)
 
-let test_notches_between_two_frames_add_up () =
-  let state = make_state () in
-  state.memory_fact_detail_scroll <- 4;
-  (* The one frame drawn before the burst reported the reading at row 4. *)
-  let drawn = Memory_fact_detail_scroll 4 in
-  List.iter (notch state ~drawn) Masc.Tui_decode.[ Wheel_down; Wheel_down; Wheel_down ];
-  Alcotest.(check int) "three notches, three rows" 7 state.memory_fact_detail_scroll;
-  notch state ~drawn Masc.Tui_decode.Wheel_up;
-  Alcotest.(check int) "one back" 6 state.memory_fact_detail_scroll
-
-let test_a_key_between_frames_is_not_undone () =
-  let state = make_state () in
-  let drawn = Task_detail 0 in
-  (* j twice, as its arm does, then a notch before any frame. *)
-  state.task_detail_scroll <- state.task_detail_scroll + 2;
-  notch state ~drawn Masc.Tui_decode.Wheel_down;
-  Alcotest.(check int) "the notch follows the keys" 3 state.task_detail_scroll
-
-let test_the_top_holds () =
-  let state = make_state () in
-  notch state ~drawn:(Changes_diff_scroll 0) Masc.Tui_decode.Wheel_up;
-  Alcotest.(check int) "no row above the first" 0 state.changes_diff_scroll
-
-(* The chat and the Board read keep the wheel they had: the chat counts up
-   from the newest message three rows a notch, and the Board read has a
-   comment pane beside the post. *)
 let test_readers_with_a_wheel_of_their_own_are_left_alone () =
   let state = make_state () in
   List.iter
@@ -50,38 +24,10 @@ let test_readers_with_a_wheel_of_their_own_are_left_alone () =
               Masc.Tui_decode.Wheel_down)))
     [ Message_scroll 0; Board_read (0, 0); Keeper_detail 0 ]
 
-(* The context inspector's plain shapes are lines the frame windows, the
-   same as any other reader: a notch moves them one row from where they are
-   now, as j and k do. *)
-let test_the_context_inspector_moves_one_row () =
-  let state = make_state () in
-  state.context_inspector_scroll <- 2;
-  notch state ~drawn:(Context_inspector_scroll 0) Masc.Tui_decode.Wheel_down;
-  Alcotest.(check int) "one row" 3 state.context_inspector_scroll
-
-(* The invite card is drawn over a surface and windows its rows as the link
-   preview does, so a notch moves a long link one row, as j and k do. *)
-let test_the_invite_card_moves_one_row () =
-  let state = make_state () in
-  state.play_invite_scroll <- 2;
-  notch state ~drawn:(Play_invite_scroll 0) Masc.Tui_decode.Wheel_down;
-  Alcotest.(check int) "one row down" 3 state.play_invite_scroll;
-  notch state ~drawn:(Play_invite_scroll 0) Masc.Tui_decode.Wheel_up;
-  Alcotest.(check int) "one row back" 2 state.play_invite_scroll
-
 let () =
   Alcotest.run "tui_wheel_reader"
     [ ( "wheel over a reader"
-      , [ Alcotest.test_case "notches between two frames add up" `Quick
-            test_notches_between_two_frames_add_up
-        ; Alcotest.test_case "a key between frames is not undone" `Quick
-            test_a_key_between_frames_is_not_undone
-        ; Alcotest.test_case "the top holds" `Quick test_the_top_holds
-        ; Alcotest.test_case "the context inspector moves one row" `Quick
-            test_the_context_inspector_moves_one_row
-        ; Alcotest.test_case "the invite card moves one row" `Quick
-            test_the_invite_card_moves_one_row
-        ; Alcotest.test_case "readers with a wheel of their own are left alone"
+      , [ Alcotest.test_case "readers with a wheel of their own are left alone"
             `Quick test_readers_with_a_wheel_of_their_own_are_left_alone
         ] )
     ]

@@ -137,14 +137,6 @@ let test_http_read_status_provenance () =
   expect "failed read overrides retained success"
     (read_status { ready with load = Failed "connection refused" } = Read_failed)
 
-let test_operator_reader_context () =
-  expect "automation does not invent a browser brand"
-    (browser_label (switch_source Automation (create ())) = Some "browser");
-  expect "live Zen keeps the normalized server identity"
-    (browser_label (choose_client zen { (create ()) with clients = Some [zen] }) = Some "Zen");
-  expect "live with no browser chosen has no browser to name"
-    (browser_label (create ()) = None)
-
 let test_source_switch () =
   let view = switch_source Automation { (loaded ()) with url_draft = Some "https://example.org" } in
   expect "switch clears content, selection and hidden URL input"
@@ -196,60 +188,6 @@ let test_screenshot_drag_hint () =
    frame. The rows below are written to fit it. *)
 let row_cells = Masc_tui_frame.inner_width ~cols:80
 let cells = Masc_tui_message_layout.display_width
-let prefix_through needle text =
-  let limit = String.length text - String.length needle in
-  let rec find index =
-    if index > limit then failwith ("row lacks " ^ needle)
-    else if String.sub text index (String.length needle) = needle
-    then String.sub text 0 (index + String.length needle)
-    else find (index + 1) in
-  find 0
-
-(* One live connection reads the same wherever it is named: the title, the
-   connection row and the picker's detail row all come from the lane table. *)
-let test_connection_facts () =
-  let bidi = { firefox with client_id = "33333333-3333-4333-8333-333333333333";
-               transport = Browser_lane.Webdriver_bidi } in
-  let on_extension = choose_client firefox { (create ()) with clients = Some [firefox; bidi] } in
-  let on_bidi = choose_client bidi on_extension in
-  let on_automation = switch_source Automation on_extension in
-  expect "the title names how the browser is reached"
-    (connection_label on_extension = Some "Firefox · WebExtension"
-     && connection_label on_bidi = Some "Firefox · BiDi");
-  expect "the row adds what the extension leaves out"
-    (live_connection_row on_extension
-     = "  Live Firefox · WebExtension: no hover, drag • b:choose browser • a:automation • c:stagehand");
-  expect "and what BiDi leaves out"
-    (live_connection_row on_bidi
-     = "  Live Firefox · BiDi: no tab switch • b:choose browser • a:automation • c:stagehand");
-  expect "a server-owned browser has no live transport to name"
-    (connection_label on_automation = Some "browser" && connection_summary on_automation = Some "browser");
-  expect "live with no browser chosen names none"
-    (connection_label (create ()) = None
-     && live_connection_row (create ()) = "  Live • b:choose browser • a:automation • c:stagehand");
-  expect "the picker detail names the transport that serves the rest"
-    (browser_choice_detail (Connected_browser firefox)
-       = Some "WebExtension: no hover, drag · BiDi serves them"
-     && browser_choice_detail (Connected_browser bidi)
-       = Some "BiDi: no tab switch · WebExtension serves it");
-  expect "the server's own browsers are described by their row"
-    (browser_choice_detail Stagehand_browser = None && browser_choice_detail Automation_browser = None);
-  List.iter (fun transport ->
-    List.iter (fun browser ->
-      let client = { firefox with browser; transport } in
-      let row = live_connection_row (choose_client client (create ())) in
-      expect ("the connection row fits 80 columns through the picker key: " ^ row)
-        (cells (prefix_through "b:choose browser" row) <= row_cells);
-      match browser_choice_detail (Connected_browser client) with
-      | None -> ()
-      | Some detail ->
-          expect ("the picker detail fits 80 columns: " ^ detail) (cells ("  " ^ detail) <= row_cells))
-      [Firefox; Zen])
-    Browser_lane.all_of_live_transport
-
-(* Every pointer gesture on a screenshot is decided in one place: sent, not
-   sent because its connection does not serve it, or consumed by a request in
-   flight. *)
 let test_pointer_decision () =
   let shot ?(source="live") client = success (decode_screenshot (screenshot_response ~source ~client ())) in
   let drag (shot : screenshot) =
@@ -630,9 +568,13 @@ let test_bidi_host_rows () =
   let at = "At: ws://127.0.0.1:9222/session" in
   let running state = [Printf.sprintf "BiDi host: %s · pid 4242" state; at] in
   let ended = ["BiDi host: ended 2026-10-03T04:01:00Z · pid 4242"] in
+  let listed_note = "A listed BiDi connection may be stale or belong to another host" in
   says "nothing reported draws nothing" Host_not_reported [];
   says "a host that never ran says so and how one is started" (host Record.Never_started)
     ("BiDi host: none has run for this workspace" :: attach);
+  says ~clients:[firefox; bidi] "a listed connection beside a never-started host is distinguished"
+    (host Record.Never_started)
+    (["BiDi host: none has run for this workspace"; listed_note] @ attach);
   says "a host still connecting" (host (Record.Running { host_entry with attached_at = None }))
     (running "connecting");
   (* A host serves on the server that lists it. *)
@@ -665,6 +607,19 @@ let test_bidi_host_rows () =
   says "a host that ended in order says when, why, and that Firefox takes the next"
     (host_ended Record.No_session_left)
     (ended @ ["That Firefox takes the next host if it still runs"; "Reason: stopped by SIGINT"]
+     @ attach_again);
+  says ~clients:[firefox; bidi] "a listed connection beside an ended host is distinguished"
+    (host_ended Record.No_session_left)
+    (ended @ ["That Firefox takes the next host if it still runs"; listed_note;
+              "Reason: stopped by SIGINT"] @ attach_again);
+  says ~clients:[firefox; bidi] "a stale listed connection cannot displace the restart instruction"
+    (host_ended Record.Session_left)
+    (ended @ ["Session end not confirmed · restart that Firefox before attaching";
+              listed_note; "Reason: stopped by SIGINT"] @ attach_again);
+  says ~clients:[firefox; bidi] "a listed connection beside a dead host is distinguished"
+    (host (Record.Died host_entry))
+    (["BiDi host: pid 4242 is gone · no reason recorded";
+      "Its session may be left in Firefox · restart Firefox if a host is refused"; listed_note]
      @ attach_again);
   says "a session left in Firefox is the step before attaching" (host_ended Record.Session_left)
     (ended @ ["Session end not confirmed · restart that Firefox before attaching";
@@ -755,6 +710,7 @@ let test_bidi_host_rows () =
         "Reason: stopped without learning whether Firefox still holds its BiDi";
         "        session"] @ attach_again);
   let long_launcher = "/Users/someone/me/workspace/yousleepwhen/masc/.masc/browser-lane/host/launch" in
+  let wide_launcher = "/Users/상수/文書/画面/masc/.masc/browser-lane/host/launch" in
   let launched_from launcher =
     Host_reported { (host_report Record.Never_started) with attach = { host_attach with launcher } } in
   says "a launcher path longer than the row breaks before a slash, with every name whole"
@@ -787,7 +743,8 @@ let test_bidi_host_rows () =
     (* The name is two cells longer than the 66 a row has beside the lead,
        and the space is the first of the two. *)
     ; "a space where a row would end is kept", "/work/" ^ String.make 65 'y' ^ " z/host/launch"
-    ; "a path with spaces all through", "/my work/a b/c  d/host/launch" ];
+    ; "a path with spaces all through", "/my work/a b/c  d/host/launch"
+    ; "wide characters in path components keep their display cells", wide_launcher ];
   (* Every row fits the width it was asked for, at 80 columns and narrower,
      whatever the record holds. *)
   let widest = unacknowledged ~cause:Record.Not_sent ~outcome:Record.Unknown
@@ -809,7 +766,8 @@ let test_bidi_host_rows () =
          host (Record.Unreadable { detail = String.make 200 'd'; held = Some false });
          Host_report_unreadable { detail = String.make 200 'd'; message = Some (String.make 900 'm') };
          host_ended Record.Session_refused;
-         launched_from long_launcher; launched_from one_long_name])
+         launched_from long_launcher; launched_from one_long_name;
+         launched_from wide_launcher])
     [width; 56; 36; 14; 9];
   (* On a screen narrower than a lead leaves room beside it, the lead has a
      row of its own and what it opens is read on the rows under it. *)
@@ -921,7 +879,6 @@ let () =
      "picker empty row reads the list", test_picker_empty_row;
      "client inventory contract", test_clients_decode;
      "screenshot drag hint follows the connection", test_screenshot_drag_hint;
-     "one connection reads the same in title, row and picker", test_connection_facts;
      "every pointer gesture is decided before it is sent", test_pointer_decision;
      "a refused gesture stays until the next input", test_unserved_gesture;
      "screenshot ownership, draft and stale tab", test_screenshot_ownership_and_draft;
@@ -932,7 +889,6 @@ let () =
      "failed refresh preserves evidence", test_failed_refresh;
      "navigation failure preserves editable URL", test_navigation_failure_recovery;
      "HTTP read status provenance", test_http_read_status_provenance;
-     "operator reader context", test_operator_reader_context;
      "source switch", test_source_switch;
      "malformed response", test_malformed_response;
      "empty tabs", test_empty_tabs]

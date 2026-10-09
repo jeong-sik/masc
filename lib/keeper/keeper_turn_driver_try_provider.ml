@@ -2304,19 +2304,68 @@ let default_context_overflow_shrink_capacity ~capacity =
   capacity / context_overflow_shrink_divisor
 ;;
 
+(* The refusals that say the request outgrew what carries it: the provider's
+   context overflow and the provider's refusal of the request body.
+   Each is answered by moving the carried front, never by rotating first: a
+   shorter range of the SAME conversation can still answer the same turn.
+   Enumerated so a new variant forces a decision here instead of a silent
+   [false]. *)
+let refusal_evicts = function
+  | Agent_core.Error.Api (ContextOverflow _)
+  | Agent_core.Error.Api
+      (InvalidRequest { reason = Request_body_refused_by_provider _; _ }) -> true
+  (* A refusal whose cause agent core does not model names no size. Tool
+     schema errors, unsupported parameters and unreadable images arrive
+     here too, and a shorter range answers none of them: every retry would
+     be another billed request, and the one that passed would hold its cut
+     front for every later turn although nothing was too large
+     (Retry.invalid_request_reason documents the same contract). The
+     refusal stays in hand for the declared-lane walk, which may ask
+     another candidate with the same range. A provider whose size refusal
+     is prose only reaches here as well: reading the sentence would be a
+     string classifier, so its size needs a typed reason at the parse
+     boundary before this ladder answers it. *)
+  | Agent_core.Error.Api
+      ( InvalidRequest
+          { reason =
+              ( Unknown_invalid_request
+              | Json_parse_error
+              | Attempt_rejected
+              | Refusal_body_not_received )
+          ; _
+          }
+      | InputCapacity _
+      | RateLimited _
+      | Overloaded _
+      | ServerError _
+      | AuthError _
+      | AuthorizationError _
+      | PaymentRequired _
+      | NotFound _
+      | NetworkError _
+      | Timeout _ )
+  | Agent_core.Error.Provider _
+  | Agent_core.Error.Agent _
+  | Agent_core.Error.Config _
+  | Agent_core.Error.Mcp _
+  | Agent_core.Error.Serialization _
+  | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Internal _
+  | Agent_core.Error.Internal_carried _ -> false
+;;
+
 (* The shrink-retry policy is expressed over an injected [attempt] callback
    so it stays testable without an Eio-backed provider: the official-client
    lanes wire their real attempt for production; tests can inject a canned
    Ok/Error sequence to verify the halving sequence, the walk to the floor,
    and the same-run-retry-authority gate on their own.
 
-   Classifies with [Keeper_turn_driver_try_runtime.context_overflow_should_try_next]
-   rather than [Keeper_error_classify.is_context_overflow]: the latter
-   depends on [Keeper_turn_driver], which depends on this module (it calls
-   [run_try_provider]), so reaching it here would close a module cycle. Both
-   predicates match the identical single case
-   ([Agent_core.Error.Api (ContextOverflow _)] -> [true]); see that function's
-   doc comment for why the byte-axis and token-axis siblings are excluded.
+   Classifies with [refusal_evicts] above -- the context overflow and the
+   provider's refusal of the request body, enumerated exhaustively -- rather
+   than [Keeper_error_classify.is_context_overflow]: the latter depends on
+   [Keeper_turn_driver], which depends on this module (it calls
+   [run_try_provider]), so reaching it here would close a module cycle.
    [same_run_retry_authorized] mirrors the exact same-run authority gate
    [Keeper_turn_driver]'s declared-lane walk applies before rotating
    candidates ([same_run_retry_allowed] / [checkpoint_progress]): a
@@ -2341,8 +2390,7 @@ let context_overflow_shrink_sequence
     match attempt ~capacity with
     | Ok _ as ok -> ok
     | Error error as failed ->
-      if Keeper_turn_driver_try_runtime.context_overflow_should_try_next error
-         && same_run_retry_authorized ()
+      if refusal_evicts error && same_run_retry_authorized ()
       then (
         match on_memory_capacity_refusal ~refusal:error with
         | Error _ -> failed
@@ -2396,57 +2444,6 @@ let context_overflow_shrink_sequence
       else failed
   in
   go ~capacity:starting_capacity ~shrink_attempt:0
-;;
-
-(* The refusals that say the request outgrew what carries it: the provider's
-   context overflow and the provider's refusal of the request body.
-   Each is answered by moving the carried front, never by rotating first: a
-   shorter range of the SAME conversation can still answer the same turn.
-   Enumerated so a new variant forces a decision here instead of a silent
-   [false]. *)
-let refusal_evicts = function
-  | Agent_core.Error.Api (ContextOverflow _)
-  | Agent_core.Error.Api
-      (InvalidRequest { reason = Request_body_refused_by_provider _; _ }) -> true
-  (* A refusal whose cause agent core does not model names no size. Tool
-     schema errors, unsupported parameters and unreadable images arrive
-     here too, and a shorter range answers none of them: every retry would
-     be another billed request, and the one that passed would hold its cut
-     front for every later turn although nothing was too large
-     (Retry.invalid_request_reason documents the same contract). The
-     refusal stays in hand for the declared-lane walk, which may ask
-     another candidate with the same range. A provider whose size refusal
-     is prose only reaches here as well: reading the sentence would be a
-     string classifier, so its size needs a typed reason at the parse
-     boundary before this ladder answers it. *)
-  | Agent_core.Error.Api
-      ( InvalidRequest
-          { reason =
-              ( Unknown_invalid_request
-              | Json_parse_error
-              | Attempt_rejected
-              | Refusal_body_not_received )
-          ; _
-          }
-      | InputCapacity _
-      | RateLimited _
-      | Overloaded _
-      | ServerError _
-      | AuthError _
-      | AuthorizationError _
-      | PaymentRequired _
-      | NotFound _
-      | NetworkError _
-      | Timeout _ )
-  | Agent_core.Error.Provider _
-  | Agent_core.Error.Agent _
-  | Agent_core.Error.Config _
-  | Agent_core.Error.Mcp _
-  | Agent_core.Error.Serialization _
-  | Agent_core.Error.Io _
-  | Agent_core.Error.Orchestration _
-  | Agent_core.Error.Internal _
-  | Agent_core.Error.Internal_carried _ -> false
 ;;
 
 type eviction_retry =

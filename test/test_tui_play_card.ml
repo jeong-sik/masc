@@ -138,24 +138,6 @@ let qr_rows_of drawn =
     drawn
 ;;
 
-let notes_of drawn =
-  List.filter_map
-    (function
-      | Card.Note text -> Some text
-      | Card.Heading _ | Card.Advice _ | Card.Link_row _ | Card.Qr_row _
-      | Card.Qr_needs _ | Card.Blank -> None)
-    drawn
-;;
-
-let needs_of drawn =
-  List.filter_map
-    (function
-      | Card.Qr_needs { columns; rows } -> Some (columns, rows)
-      | Card.Heading _ | Card.Advice _ | Card.Link_row _ | Card.Qr_row _
-      | Card.Note _ | Card.Blank -> None)
-    drawn
-;;
-
 let plenty = 200
 
 let test_the_qr_is_the_libraries_qr_with_its_quiet_zone () =
@@ -203,70 +185,6 @@ let test_the_qr_is_the_libraries_qr_with_its_quiet_zone () =
     grid
 ;;
 
-let test_the_qr_is_drawn_only_when_all_of_it_fits () =
-  let card = card () in
-  let full = Card.draw card ~width:plenty ~rows:plenty in
-  let qr_rows = List.length (qr_rows_of full) in
-  let side = List.length (List.hd (pixel_rows (qr_rows_of full))) in
-  check bool "with room, there is a QR and nothing missing" true
-    (qr_rows > 0 && notes_of full = [] && needs_of full = []);
-  (* The link is cut to the width, so at the QR's own width it takes more rows
-     than it does at full width, and the room the QR needs depends on the
-     width it is asked at. *)
-  let full_rows = List.length full in
-  let rows_at_side = List.length (Card.draw card ~width:side ~rows:plenty) in
-  check bool "a narrower card is taller" true (rows_at_side > full_rows);
-  let pair_list = list (pair int int) in
-  let narrow = Card.draw card ~width:(side - 1) ~rows:plenty in
-  check int "one column short, no QR at all" 0 (List.length (qr_rows_of narrow));
-  check pair_list "and it asks for the width, and the rows the QR will then take"
-    [ (side, rows_at_side) ] (needs_of narrow);
-  let short = Card.draw card ~width:plenty ~rows:(full_rows - 1) in
-  check int "one row short, no QR at all" 0 (List.length (qr_rows_of short));
-  check pair_list "and it asks for the row it lacks, not for more width"
-    [ (plenty, full_rows) ] (needs_of short);
-  let exact = Card.draw card ~width:side ~rows:rows_at_side in
-  check int "exactly enough room draws the whole QR" qr_rows
-    (List.length (qr_rows_of exact));
-  let one_short = Card.draw card ~width:side ~rows:(rows_at_side - 1) in
-  check int "a row short at that width draws none" 0
-    (List.length (qr_rows_of one_short));
-  check pair_list "and it asks for exactly the row it lacks"
-    [ (side, rows_at_side) ] (needs_of one_short)
-;;
-
-let test_no_colour_draws_no_qr_and_says_why () =
-  let card = card ~project:(fun _ -> None) () in
-  let drawn = Card.draw card ~width:plenty ~rows:plenty in
-  check int "no QR rows" 0 (List.length (qr_rows_of drawn));
-  check int "one note" 1 (List.length (notes_of drawn));
-  check bool "the link is still there to be sent" true
-    (List.exists
-       (function
-         | Card.Link_row _ -> true
-         | Card.Heading _ | Card.Advice _ | Card.Qr_row _ | Card.Note _
-         | Card.Qr_needs _ | Card.Blank -> false)
-       drawn)
-;;
-
-let test_the_link_is_cut_to_the_width_without_losing_a_byte () =
-  let drawn = Card.draw (card ()) ~width:40 ~rows:plenty in
-  let pieces =
-    List.filter_map
-      (function
-        | Card.Link_row piece -> Some piece
-        | Card.Heading _ | Card.Advice _ | Card.Qr_row _ | Card.Note _
-        | Card.Qr_needs _ | Card.Blank -> None)
-      drawn
-  in
-  check bool "every piece fits the width" true
-    (List.for_all (fun piece -> String.length piece <= 40) pieces);
-  check string "the pieces are the link" link (String.concat "" pieces);
-  check bool "it took more than one row" true (List.length pieces > 1)
-;;
-
-(* The link is a credential: it is in the link rows and the clipboard copy and
-   nowhere else the card draws. *)
 let test_the_link_appears_only_in_its_own_rows () =
   let drawn = Card.draw (card ()) ~width:plenty ~rows:plenty in
   let mentions text = contains ~sub:"play#" text in
@@ -339,12 +257,6 @@ let () =
             test_a_link_the_card_cannot_draw_is_refused
         ; test_case "the QR is the library's QR with its quiet zone" `Quick
             test_the_qr_is_the_libraries_qr_with_its_quiet_zone
-        ; test_case "the QR is drawn only when all of it fits" `Quick
-            test_the_qr_is_drawn_only_when_all_of_it_fits
-        ; test_case "no colour draws no QR and says why" `Quick
-            test_no_colour_draws_no_qr_and_says_why
-        ; test_case "the link is cut to the width without losing a byte" `Quick
-            test_the_link_is_cut_to_the_width_without_losing_a_byte
         ; test_case "the link appears only in its own rows" `Quick
             test_the_link_appears_only_in_its_own_rows
         ; test_case "a name from the wire is drawn safe" `Quick

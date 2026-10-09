@@ -318,7 +318,7 @@ let test_invalid_retained_visibility_is_isolated () = with_fixture (fun env _ co
     |> List.filter (fun (key, _) -> not (List.mem key
       ["runtime_presence";"visibility";"source_access";"instance_id";"incarnation";"binding"]))
     |> List.map (function
-      | "package", `Assoc fields -> "package", `Assoc (List.remove_assoc "model_access" fields)
+      | "package", `Assoc fields -> "package", `Assoc (List.remove_assoc "tool_invocation" (List.remove_assoc "state_storage" (List.remove_assoc "exported_tools" (List.remove_assoc "model_access" fields))))
       | field -> field) in
   let consumer = `Assoc (("instance_id",`String consumer_id)::("incarnation",`String consumer_id)::
     ("binding",`Assoc ["sources",`List [`Assoc ["source_id",`String "upstream";
@@ -1279,7 +1279,7 @@ let test_released_shared_bindings_keep_read_and_cleanup () =
     (* The published package envelope predates host model declarations. *)
     let released = List.map (fun (key, value) ->
       match key, value with
-      | "package", `Assoc fields -> key, `Assoc (List.remove_assoc "model_access" fields)
+      | "package", `Assoc fields -> key, `Assoc (List.remove_assoc "tool_invocation" (List.remove_assoc "state_storage" (List.remove_assoc "exported_tools" (List.remove_assoc "model_access" fields))))
       | _ -> key, value) released in
     let before = `Assoc released in
     unwrap (Store.save_binding store ~instance_id:id before);

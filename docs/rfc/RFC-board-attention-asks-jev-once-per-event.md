@@ -99,12 +99,12 @@ Jev 로 바로 끝날 뒤 후보들도 함께 기다린다. 그 GLM 칸은 태�
 기대 효과:
 
 - Jev 호출은 하루 약 19,600번에서 이벤트 수(약 840번) 근처로 준다. 재생(replay) 경로는 제외한 추정이다.
-- Jev 로 끝나는 후보는 대기열에 들어가지 않는다. 1.3의 나에서 뒤 후보들이 앞 LLM 후보를 기다리는 일이 사라진다.
+- Jev 로 끝나는 후보도 먼저 Pending 원장에 들어간다. 이벤트 batch가 기존 singleton 대기열과 별도로 claim하므로 앞 LLM 후보를 기다리지 않는다.
 
 지켜야 할 것:
 
-- push 경로의 전달을 네트워크 호출로 막지 않는다. 이벤트를 먼저 기록한 뒤, 별도 fiber 에서 Jev 를 부르고 결과로 후보를 기록한다.
-  Jev 가 늦거나 실패하면 대기 후보로 기록되고 지금 경로를 탄다.
+- push 경로의 전달을 네트워크 호출로 막지 않는다. 이벤트를 먼저 기록한 뒤, 별도 fiber 에서 Pending 후보를 영속화하고 partition을 claim한 뒤 Jev 를 부른다.
+  Jev 가 늦거나 실패하면 기존 대기 후보와 Ready partition을 워커가 이어받는다.
 - 한 요청의 질문 수 상한은 문서에 없다. 거절되면 그 이벤트는 대기 후보 경로로 보낸다. 질문 수를 임의로 잘라 나누지 않는다.
 
 **4단계 1번 결과 [사실]** (2026-10-01, `docs/evidence/board-attention-jev-20261001/jev-request-shape-eval.txt`):
@@ -181,7 +181,7 @@ Jev 로 바로 끝날 뒤 후보들도 함께 기다린다. 그 GLM 칸은 태�
 `keeper_board_attention_fanout`은 push 경로가 새로 저장한 후보들을 서버 switch의
 별도 fiber에서 한 요청으로 판정한다. 후보는 모델 호출 전에 Pending으로 영속화하고,
 기존 singleton partition의 Ready 세대를 먼저 claim한다. 기존 워커나 시작 복구가
-소유권을 바꾸면 CAS가 오래된 결과의 적용을 막는다. 이미 존재하는 후보는 기존 워커가 맡는다.
+소유권을 바꾸면 CAS가 오래된 결과의 적용을 막는다. 이미 판정·소비된 후보는 기존 워커가 맡는다.
 
 확신 있는 답은 Vendor_system_one 출처로 Completed partition에 기록한다.
 관련 없음은 바로 소비하고, 관련 있음은 owner의 Attention_result 경로로 전달한다.
@@ -189,9 +189,19 @@ Jev 로 바로 끝날 뒤 후보들도 함께 기다린다. 그 GLM 칸은 태�
 excluded_keepers는 외부 요청에 포함하지 않는다. 서버 clock을 넘겨 기존 HTTP timeout을 적용한다.
 재시작은 기존 partition 복구를 사용하며, 원장에 기록된 후보를 유실하지 않는다.
 
-기존 post_created owner cursor 경로는 유지한다. push의 댓글·수정 및 초기 cursor 예외만
-묶는다. 따라서 모든 Board 이벤트가 반드시 한 호출만 발생한다는 보장은 하지 않는다.
-워커 대체 경로와 destination failover도 추가 호출을 만들 수 있다.
+2026-10-08 소스 변경은 일반 Discoverable post_created도 비동기 push batch로 받는다.
+등록된 유한 Keeper 목록의 후보 소유권을 fork 전에 예약하고, 초기 cursor의 영속화
+예외를 제외한 metadata/원장 I/O는 receipt fiber가 돌아간 뒤 수행한다. Pending 후보를
+먼저 기록한 뒤 partition을 claim하고 모델을 부른다. owner cursor는 각자 같은 후보를
+멱등하게 기록한 다음에만 전진하므로 취소·실패·재시작 때 기존 복구 경로가 남는다.
+예약된 후보는 singleton worker가 claim하지 않지만 다른 Ready 후보는 처리할 수 있다.
+이미 singleton이 소유한 후보는 batch에서 제외한다. 반환된 기존 후보의 신호 전체가
+같은 경우만 한 요청에 묶고, 기존 판정·소비·quarantine 후보는 다시 모델에 보내지 않는다.
+일시정지한 초기 Keeper의 후보는 Pending으로 보존하되 모델을 부르지 않고, 이미 cursor가
+있는 일시정지 Keeper는 resume 후 자신의 cursor로 따라잡는다. 예약은 switch 취소와
+실제 batch 완료에서 해제한다. 모든 이벤트가 반드시 한 호출만 발생한다는 보장은 하지
+않는다. 기존 소유권 경합, 다른 신호 payload, 워커 복구와 destination failover는 추가
+호출을 만들 수 있다. 아래 기존 측정은 이 변경의 실행 검증이 아니다.
 
 소스 검증용 HTTP fixture는 한 요청의 다중 질문, owner를 거치는 관련 있음,
 관련 없음 소비, uncertain·낮은 확신·누락 답의 Ready 복귀 및 제외 Keeper를 확인한다.

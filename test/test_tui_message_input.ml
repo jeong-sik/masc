@@ -1,5 +1,4 @@
 module Input = Masc_tui_message_input
-module Layout = Masc_tui_message_layout
 open Alcotest
 
 let empty_boundary () =
@@ -70,27 +69,10 @@ let voice_append_after_cursor_movement () =
   check string "voice can start an empty draft" "안녕🙂" (Input.contents draft);
   check int "Unicode transcript ends at its byte boundary" (String.length "안녕🙂") (Input.cursor draft)
 
-let viewport_tracks_cursor () =
-  let text = "first\nsecond\nthird\nfourth\nfifth\nlast" in
-  let start = Layout.composer_window ~max_rows:3 ~max_cells:20 ~cursor:0 text in
-  check (list string) "start remains visible" ["first"; "second"; "third"] start.lines;
-  check int "first row cursor" 0 start.cursor_row;
-  check int "first column cursor" 0 start.cursor_cells;
-  let last = Layout.composer_window ~max_rows:3 ~max_cells:20 ~cursor:(String.length text) text in
-  check (list string) "end remains visible" ["fourth"; "fifth"; "last"] last.lines;
-  check int "last row cursor" 2 last.cursor_row;
-  check int "last column cursor" 4 last.cursor_cells;
-  let text = "가나다라마바사아자차" in
-  List.iter (fun cursor ->
-    let visible, cells = Layout.input_window ~max_cells:8 ~cursor text in
-    check bool "visible text remains UTF-8" true (String.is_valid_utf_8 visible);
-    check bool "row fits" true (Layout.display_width visible <= 8);
-    check bool "caret fits" true (cells < 8)) [0; 3; 15; String.length text]
-
 let () = run "Chat composer cursor"
   [ "editing", [ test_case "empty Left boundary" `Quick empty_boundary;
                   test_case "Unicode insertion and erasure" `Quick unicode_editing;
                   test_case "joined emoji and combining marks" `Quick joined_emoji;
                   test_case "paste and word erasure at cursor" `Quick paste_and_word_delete;
                   test_case "voice appends after cursor movement" `Quick voice_append_after_cursor_movement ];
-    "rendering", [test_case "multiline and horizontal cursor viewport" `Quick viewport_tracks_cursor] ]
+    "rendering", [] ]

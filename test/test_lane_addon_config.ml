@@ -427,9 +427,50 @@ max_reply_bytes = 4096
     (Result.is_error (Lane_addon_types.check_resources
       {Lane_addon_types.cpus = 1e-12; memory_bytes = 1L; pids = 1; max_reply_bytes = 1})))
 
+let tool_exports_are_explicit_and_revisioned () = with_directory (fun _root packages directory ->
+  let manifest = install_package packages in
+  let path = Filename.concat directory "machine.toml" in
+  write path (declaration msx_binding);
+  let original = unwrap (Config.load_file ~path) in
+  check (list string) "no implicit exports" [] original.package.exported_tools;
+  let install names =
+    write manifest (package () ^ "\n[world.tools]\nexport = " ^ names ^ "\n");
+    Config.load_file ~path in
+  let exported = unwrap (install {|["masc_msx_step", "masc_msx_load"]|}) in
+  check (list string) "declared tools" ["masc_msx_load"; "masc_msx_step"] exported.package.exported_tools;
+  check bool "tool membership changes applied revision" true (original.revision <> exported.revision);
+  let reordered = unwrap (install {|["masc_msx_load", "masc_msx_step"]|}) in
+  check string "declaration order does not restart worker" exported.revision reordered.revision;
+  List.iter (fun names -> check bool ("invalid exports: " ^ names) true (Result.is_error (install names)))
+    [ {|["masc_msx_load", "masc_msx_load"]|}; {|["lane_observe"]|}; {|[""]|}; {|[" leading"]|}; {|[7]|} ];
+  let removed = unwrap (install "[]") in
+  check (list string) "removing exports clears contract" [] removed.package.exported_tools)
+
+let persistent_state_is_explicit_and_revisioned () = with_directory (fun _root packages directory ->
+  let manifest = install_package packages in
+  let path = Filename.concat directory "machine.toml" in
+  write path (declaration msx_binding);
+  let original = unwrap (Config.load_file ~path) in
+  check bool "legacy packages are ephemeral" true
+    (original.package.state_storage = Masc.Lane_addon_types.Ephemeral);
+  let install state =
+    write manifest (package () ^ "\n[world.state]\n" ^ state ^ "\n");
+    Config.load_file ~path in
+  let persistent = unwrap (install {|mode = "persistent"|}) in
+  check bool "persistent storage is explicit" true
+    (persistent.package.state_storage = Masc.Lane_addon_types.Persistent);
+  check bool "storage policy changes installation revision" true
+    (persistent.revision <> original.revision);
+  List.iter (fun state -> check bool "invalid state contract refused" true
+    (Result.is_error (install state)))
+    [ {|mode = "writable"|}; {|mode = true|}; {|mode = "persistent"
+path = "/host"|} ])
+
 let () = run "Lane Add-on declarative composition"
   ["configuration",
-    [test_case "judge source schema is enforced before worker start" `Quick judge_source_schema_is_enforced;
+    [test_case "persistent state is explicit and revisioned" `Quick persistent_state_is_explicit_and_revisioned;
+     test_case "tool exports are explicit and revisioned" `Quick tool_exports_are_explicit_and_revisioned;
+     test_case "judge source schema is enforced before worker start" `Quick judge_source_schema_is_enforced;
      test_case "assembled Fusion declarations load with explicit model boundaries" `Quick assembled_fusion_declarations;
      test_case "model access is explicit and changes configuration identity" `Quick model_access_is_explicit_and_revisioned;
      test_case "shipped DOS chain packages declare enforceable binding contracts" `Quick shipped_dos_chain_declares_binding_contracts;

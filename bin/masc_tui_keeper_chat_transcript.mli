@@ -466,6 +466,7 @@ type reply =
   ; reply_at : float (** Recorded observation time, including checkpoints. *)
   ; reply_outcome : Masc.Keeper_turn_outcome.t
   ; reply_turn_ref : string
+  ; reply_stream_scope : int option
   }
 
 val reply : t -> reply option
@@ -501,8 +502,22 @@ type drawn =
   | Drawn_error of string
       (** The terminal stream failure, after any partial text and tools. *)
 
+type drawn_origin =
+  | Text_stretch of int
+  | Thinking_stretch of int
+  | Tool_stretch of int
+  | Unstreamed_skills
+  | Reply_of_segment of int
+  | Error_of_segment of int
+(** Source-local identity, independent of visibility and rendered position.
+    Stretch and tool ids are allocated monotonically across the whole log,
+    including retries and continuation segments. Replay of the same ordered
+    events produces the same ids. A recorded reply replacing streamed text
+    retains the surviving text stretch's origin. *)
+
 type drawn_item =
-  { at : float option
+  { origin : drawn_origin
+  ; at : float option
         (** First observed event time for this stretch; [None] for delivery
             records whose stream event was unavailable. Journal replay keeps
             the recorded time, rather than the time the page was fetched. *)
@@ -522,11 +537,12 @@ val drawn : t -> drawn_item list
     Without a reply, the trail stays as it is.
     The recorded reply is the terminal message's text, not
     the whole turn's, so with a [Visible_reply] it stands for the text
-    stretch that streamed after the current attempt's last tool or skill
-    round: that one stretch is replaced by one [Drawn_reply] carrying the
-    record's text, and the reply is appended when nothing streamed after that
-    round. Text that streamed before a round is progress and stays as it
-    streamed, like the stretches of the turn's earlier rounds. The reply is this turn's because the log this transcript
+    last stretch in the final response window. Provider message starts, tool
+    rounds, retries and continuations open a new window. The last text stretch
+    becomes one [Drawn_reply] at its existing position and origin. If no text
+    streamed in that window, the reply is appended. Earlier observed stretches
+    keep their text and position. The flat reply does not identify original
+    content blocks, so multi-block final reconciliation remains unresolved. The reply is this turn's because the log this transcript
     projects is one operation's and both the stream and the journal reach it
     by that id; the two texts are not compared. With a blank [Visible_reply]
     or any control outcome, one [Drawn_status] is appended and the streamed
@@ -536,10 +552,12 @@ val drawn : t -> drawn_item list
     drawn as that record, unless the item is [Skill_failed]: the server
     records a composition's delivery from an error tool result too, so a
     record cannot turn a call the stream saw fail into a finished read.
-    Records no skill item carries form one more [Drawn_skill] after the
-    observed trail and before the appended reply or status. Their position
-    relative to streamed text is unknown, so that text is preserved rather
-    than treated as the terminal reply's stretch. *)
+    Records no skill item carries form one more [Drawn_skill] before the
+    terminal stretch when its observed stream scope matches the recorded
+    reply's terminal scope. That stretch is reconciled once. Without this
+    provenance their position relative to streamed text is unknown: they
+    follow the observed trail and its text is preserved before the appended
+    reply or status. *)
 
 val of_log : now:float -> Masc_tui_keeper_chat_log.t -> t
 (** Replays entries in journal order using each recorded event time. [now]

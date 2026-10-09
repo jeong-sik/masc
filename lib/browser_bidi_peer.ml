@@ -45,9 +45,10 @@ type session_failure = Session_refused of string | Session_failed of string
 let session_failure_message = function Session_refused why | Session_failed why -> why
 type t = { ask : string -> Yojson.Safe.t -> (Yojson.Safe.t,refusal) result;
   session_end : unit -> (unit,session_end_failure) result; mutable session_may_exist : bool;
-  mutable contexts : (string * int) list; mutable next_tab : int; mutable version : string option }
+  mutable contexts : (string * int) list; mutable next_tab : int; mutable version : string option;
+  mutable profile : string option }
 let create ~session_end ~command =
-  {ask=command;session_end;session_may_exist=false;contexts=[];next_tab=0;version=None}
+  {ask=command;session_end;session_may_exist=false;contexts=[];next_tab=0;version=None;profile=None}
 let command t method_ params = Result.map_error refusal_message (t.ask method_ params)
 (* Firefox keeps a session whose socket closed and takes one session at a
    time, so one left behind refuses every later connection until that Firefox
@@ -71,7 +72,20 @@ let metadata t =
       (let* caps = required "capabilities" result in
        let* name = string "browserName" caps in
        if name <> "firefox" then Error "BiDi peer must be Firefox"
-       else let* version=string "browserVersion" caps in t.version<-Some version;Ok version)
+       else let* version=string "browserVersion" caps in t.version<-Some version;
+         t.profile <- Result.to_option (string "moz:profile" caps); Ok version)
+let profile t = t.profile
+(* Firefox 157.0.1 reports the profile path as it was given, a link left as
+   a link (2026-10-09), so both paths are resolved before they are compared.
+   A path that cannot be resolved is compared as written. *)
+let resolved path = match Unix.realpath path with resolved -> resolved | exception Unix.Unix_error _ -> path
+let runs_profile t ~expected =
+  match t.profile with
+  | None ->
+    Error (Printf.sprintf "Firefox did not say which profile it runs (moz:profile), so it cannot be \
+                           told to run %s" expected)
+  | Some actual when String.equal (resolved actual) (resolved expected) -> Ok ()
+  | Some actual -> Error (Printf.sprintf "this Firefox runs the profile %s, not %s" actual expected)
 (* The socket takes one message of at most this many bytes; a larger one ends
    the connection, and with it this client. *)
 let reply_limit_bytes = 8 * 1024 * 1024

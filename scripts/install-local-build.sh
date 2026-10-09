@@ -12,7 +12,9 @@
 # manifest whose launcher lives under a workspace's browser-lane/host is
 # reinstalled from the new prefix binary under its own host name, and the host
 # processes started from that workspace are stopped; the extension reconnects
-# after five seconds and starts the new copy.
+# after five seconds and starts the new copy. The host holding the workspace's
+# BiDi host lock (a BiDi host) is left running on its old copy, because
+# nothing would start it again.
 #
 # Before anything is replaced, the new build judges the runtime.toml of the
 # workspace its server runs on (#39311). A refusal leaves every binary and
@@ -197,10 +199,12 @@ else
 fi
 
 python3 - "$repo/connectors/browser/install-host.sh" "$prefix/masc-browser-host" "$manifest_dir" <<'PY'
+import fcntl
 import json
 import os
 from pathlib import Path
 import signal
+import struct
 import subprocess
 import sys
 
@@ -227,23 +231,64 @@ if not registered:
     print(f"no browser lane host is registered in {manifest_dir}")
     sys.exit(0)
 
-running = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True, text=True, check=True).stdout
+def bidi_host_pid(base):
+    # Firefox starts an extension host again once it stops; nothing starts a
+    # stopped BiDi host again. A BiDi host holds a lockf lock on
+    # bidi-host.lock while it runs (lib/browser_bidi_host_record.ml), and
+    # F_GETLK names the holder without taking the lock, so a host starting
+    # meanwhile is not refused. Its record's pid can outlive it, and ps joins
+    # arguments with spaces that a path may hold, so neither names it.
+    try:
+        fd = os.open(base / ".masc/browser-lane/bidi-host.lock", os.O_RDONLY)
+    except FileNotFoundError:
+        return None
+    try:
+        # struct flock orders its fields differently on the two platforms.
+        if sys.platform == "darwin":
+            layout = "@qqihh"
+            asked = struct.pack(layout, 0, 0, 0, fcntl.F_WRLCK, os.SEEK_SET)
+            _, _, holder, kind, _ = struct.unpack(layout, fcntl.fcntl(fd, fcntl.F_GETLK, asked))
+        elif sys.platform.startswith("linux"):
+            layout = "@hhqqi4x"
+            asked = struct.pack(layout, fcntl.F_WRLCK, os.SEEK_SET, 0, 0, 0)
+            kind, _, _, _, holder = struct.unpack(layout, fcntl.fcntl(fd, fcntl.F_GETLK, asked))
+        else:
+            sys.exit(f"cannot read the BiDi host lock's holder on {sys.platform}")
+    finally:
+        os.close(fd)
+    return None if kind == fcntl.F_UNLCK else str(holder)
+
+# -ww: whole commands, so a long host path is matched in full.
+running = subprocess.run(["ps", "-ww", "-axo", "pid=,command="], capture_output=True, text=True, check=True).stdout
+stopped_pids = set()
 for name, base in registered:
     subprocess.run(["bash", installer, "--binary", binary, "--base-path", str(base),
                     "--host-name", name, "--manifest-dir", str(manifest_dir)],
                    check=True, stdout=subprocess.DEVNULL)
     host = str(base / ".masc/browser-lane/host/masc-browser-host")
-    stopped = []
+    bidi_host = bidi_host_pid(base)
+    stopped, kept = [], []
     for line in running.splitlines():
         pid, _, command = line.strip().partition(" ")
-        if command == host or command.startswith(host + " "):
+        if (command == host or command.startswith(host + " ")) and pid not in stopped_pids:
+            if pid == bidi_host:
+                kept.append(pid)
+                continue
             try:
                 os.kill(int(pid), signal.SIGTERM)
                 stopped.append(pid)
+                stopped_pids.add(pid)
             except ProcessLookupError:
                 pass
-    restart = f"stopped host pid {', '.join(stopped)}; Firefox starts the new copy" if stopped else "no host running"
-    print(f"refreshed browser lane host {name} for {base} ({restart})")
+    said = []
+    if stopped:
+        said.append(f"stopped host pid {', '.join(stopped)}; Firefox starts the new copy")
+    if kept:
+        # The installer replaced the file, so the running host keeps the copy
+        # it started with.
+        said.append(f"kept BiDi host pid {', '.join(kept)}, which nothing would start again; "
+                    "it runs its old copy until it is restarted")
+    print(f"refreshed browser lane host {name} for {base} ({'; '.join(said) or 'no host running'})")
 PY
 
 # Installed binaries and browser hosts now hold their own copies. Clean only

@@ -934,7 +934,7 @@ function normalizeHistoryEntry(
   const delivery: KeeperConversationDelivery =
     asString(raw.kind) === 'transport_failure' ? 'transport_failure' : 'history'
   const blocks = serverBlocks
-    ?? ((role === 'assistant' || role === 'system') && text
+    ?? (delivery !== 'transport_failure' && (role === 'assistant' || role === 'system') && text
       ? parseTextToChatBlocks(text)
       : undefined)
   const streamContract = approvalLifecycle

@@ -192,8 +192,7 @@ let validation_line = function
    same verdict and differ only in how much of the revision they spend a row on,
    so the verdict lives in one place and the revision is the caller's: the
    compact summary has three rows for the whole read and prints the prefix, the
-   detail screen has the room for the revision a reader pastes into [git show],
-   and test/test_tui_keyboard_input.py reads it there whole. *)
+   detail screen has the room for the revision a reader pastes into [git show]. *)
 let revision_row revision = Neutral, "Source revision: " ^ revision
 
 let verdict_rows metadata =

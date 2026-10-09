@@ -32,9 +32,9 @@ type verdict =
       (** A host runs and the observed server lists its client as a BiDi
           connection, so hover and drag are served there. *)
   | Host_unverified
-      (** A host runs and that is all that is known: it is still connecting,
-          no server is observed here, or the observed one does not list the
-          client its record names. *)
+      (** A host's status is unverified: its record is missing while its lock
+          is held, it is still connecting, no server is observed here, or the
+          observed one does not list the client its record names. *)
   | Host_not_running
       (** None runs: the last one ended or died, or none has run where a
           lane is installed. *)
@@ -44,16 +44,23 @@ val verdict : observation -> verdict
 
 (** Whether a host runs and is attached, when and why the last one ended,
     and what the operator does next. That step follows what became of the
-    last host's session: a Firefox that may still hold one is restarted, one
-    that holds none takes the next host as it is, and a host that never got
-    a session needs a Firefox that answers at its address first. The command
-    names the address the last host was given. With a server observed it
-    also says whether that server lists a running host's client, and when it
-    lists a BiDi connection that is not the host the record names.
+    last host's session:
+    - ended, or never given: the Firefox takes the next host as it is; a
+      host that never got one needs a Firefox that answers at its address
+      first;
+    - not confirmed ended, or the connection gone before it could be ended:
+      the Firefox is restarted before the next host;
+    - refused, or a host that left no reason: the next host is run first,
+      and the Firefox is restarted when that host is refused a session.
+    The command names the address the last host was given. With a server
+    observed it also says whether that server lists a running host's client,
+    and when it lists a BiDi connection that is not the host the record
+    names.
 
     A path, an address and the reason for ending come from files and from
-    the host. A path and an address are written as one shell word; the
-    reason is set in quotes. *)
+    the host. In a command the operator runs, a path and an address are
+    written as one shell word. Elsewhere in the paragraph they are written
+    as read. The reason is set in quotes, with a quote in it marked. *)
 val message : observation -> string
 
 (** The launcher a host is started with, as the observation found it. *)
@@ -63,6 +70,18 @@ type launcher_standing =
   | Launcher_needs_reinstall
       (** A launcher is there and is not as one installation wrote it: the
           lane is installed again before it is run. *)
+
+(** The host's option that names the address it attaches to. The host
+    parses it under this name, and every command said here is written
+    with it. *)
+val bidi_url_flag : string
+
+(** The host's option that names the profile its Firefox must run. A host
+    given it ends a session on any other profile. *)
+val firefox_profile_flag : string
+
+(** Firefox's option that opens its BiDi address on a port. *)
+val firefox_flag : string
 
 (** How a host is started, for a Firefox the operator started with
     [--remote-debugging-port PORT]: where this workspace's launcher is, or
@@ -80,11 +99,12 @@ type report =
 val report : observation -> report
 
 (** An object with exactly these fields. [state] ([never_started],
-    [running], [ended], [died], [unreadable]) and what it was read from:
+    [record_missing_but_locked], [running], [ended], [died], [unreadable])
+    and what it was read from:
     [record] (the host's own record, null when there is none or it cannot be
-    read), [lock_held] (true or false where the state turns on it, null
-    otherwise and for a lock that could not be asked) and [detail] (why the
-    record or the lock cannot be read, null otherwise). Then [attach], an
+    read), [lock_held] (true or false when there is no record or the state
+    turns on the lock, null otherwise and for a lock that could not be asked)
+    and [detail] (why the record or the lock cannot be read, null otherwise). Then [attach], an
     object with exactly [launcher], [arguments] and [launcher_state]
     ([installed], [not_installed] or [needs_reinstall]), and [message]. *)
 val report_to_json : report -> Yojson.Safe.t

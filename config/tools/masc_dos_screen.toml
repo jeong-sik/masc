@@ -12,3 +12,9 @@ a game's own lettering (Korean menus) with keeper_analyze_image."""
 additional_properties = false
 
 defer_loading = true
+
+[[params]]
+name = "include_pad"
+type = "boolean"
+default = false
+description = "Include the current program's gamepad layout from worker-owned storage."

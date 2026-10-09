@@ -1750,6 +1750,7 @@ let start_keeper_loops_owned
     let config = Mcp_server.workspace_config state in
     Keeper_keepalive.wakeup_relevant_keeper_for_board_signal
       ~dispatch_attention:(Keeper_board_attention_fanout.dispatch ~sw ~clock ~base_path:config.base_path)
+      ~dispatch_discoverable_post:(Keeper_board_attention_fanout.enqueue_discoverable_post ~sw ~clock ~config)
       ~config
       signal);
   Board_dispatch.set_board_sse_hook (fun event ->

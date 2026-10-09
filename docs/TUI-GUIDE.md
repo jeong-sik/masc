@@ -1016,7 +1016,7 @@ steps in two cells and reads behind a solid bar in the sender's colour, where
 the journal's rows carry a dotted one. The operator's lines, the keeper's
 replies and its work rows stay at the conversation's edge.
 
-Chat opens without timestamps, turn time ranges, hourly separators or generated
+Chat opens without timestamps, hourly separators or generated
 progress timers (request age, call age and model silence).
 `Ctrl-F` adds a short clock (`metadata:inline`), then full timestamp headings
 (`metadata:full`), then returns to the default. The short clock appears only
@@ -1042,13 +1042,21 @@ That separator is a viewport projection, not a transcript row, and remains
 readable under `NO_COLOR`.
 
 Inputs waiting to enter a turn appear under `대기 입력` with the local `›` mark.
-Each input distinguishes unsent (`대기`), sending (`전송 중`), accepted by the
-server (`접수됨`), and unconfirmed delivery (`미확인`). Acceptance alone does not
-mean the Keeper has processed it. The conversation marks `입력 반영됨` only when
-the input is persisted or its bound execution has reported `Run_started`.
-Request headings connect inputs and responses; a shared batch states its input
-count. `TURN #N` appears where a recorded turn number is available. The progress
-row says `THINKING` or `STREAMING` only after receiving the corresponding signal.
+The label beside each original input distinguishes unsent (`전송 대기`), sending
+(`전송 중`), accepted and waiting to be processed (`처리 대기`), and unconfirmed
+delivery (`전송 확인 중`). Acceptance alone does not mean the Keeper has processed
+it. A persisted input or one whose bound execution reports `Run_started` moves
+into the conversation once. Rejection details appear separately as an error.
+
+User and Keeper speech keeps the recorded text. Request IDs, turn numbers,
+delivery receipts and attempt details are never prepended to the body. Literal
+words such as `요청` or `입력 반영됨` in a message remain untouched.
+Full request IDs still group inputs and responses internally; technical identity
+stays in expanded diagnostics, and timestamps stay in the gutter or heading.
+Expanded diagnostics (`Ctrl-D` to full) follow the whole message, and a waiting
+input names its request there too.
+Working means the turn is in progress. The progress row says `THINKING` or
+`STREAMING` only after receiving the corresponding signal.
 
 The pane opens on the keeper's durable transcript. A turn the keeper ran on
 its own is drawn as what it did. Reasoning starts folded with a `THINKING`
@@ -1811,6 +1819,12 @@ Right 또는 `Enter`를 누르면 선택한 저장소 범위의 Code 화면으�
 worktree, untracked, conflict 상태를 구분한다. 이 목록에서 `Right`, `d`, 또는 `Enter`를 누르면
 해당 파일의 Git diff를 구문 강조와 줄 번호가 포함된 인라인 뷰로 바로 확인한다. diff 뷰에서는 `j`/`k`로 스크롤하고 `Esc`/`Left`로 파일 목록으로 돌아온다.
 `v`를 누르면 해당 파일을 Code 화면에서 직접 열 수 있다. Left 또는 `Esc`는 이전 화면(저장소 목록, Keeper 상세, 또는 채팅)으로 돌아간다.
+
+Workspace에서 `H`는 서버의 공유 도구 호출 기록에서 지난 24시간 동안의 파일
+변경을 읽고, 선택한 저장소의 정확한 ID에 해당하는 변경만 보여준다. Keeper
+명부로 거르지 않으므로, 저장소 담당이 아닌 Keeper와 그사이 삭제됐거나 지금
+로드되지 않은 Keeper가 남긴 변경도 24시간 안이면 함께 나온다. 24시간보다
+오래된 변경은 나오지 않으므로 전체 과거 감사 기록으로 해석하지 않는다.
 
 저장소의 Git 변경 사항과 Keeper가 남긴 작업 기록은 서로 다른 정보다.
 아래 Changes 화면은 선택한 Keeper가 지난 24시간 동안 남긴 기록을 보여준다.

@@ -64,9 +64,13 @@ let component value =
   String.iter (fun c -> Buffer.add_string encoded (Printf.sprintf "%02x" (Char.code c))) value;
   Buffer.contents encoded
 
+let keeper_directory ~base_path ~keeper_name =
+  Filename.concat
+    (Filename.concat (Common.masc_dir_from_base_path ~base_path) "native-task-journals/v2")
+    (component keeper_name)
+
 let reader_for scope =
-  let path = Filename.concat (Common.masc_dir_from_base_path ~base_path:scope.base_path) "native-task-journals/v2" in
-  let path = Filename.concat path (component scope.keeper_name) in
+  let path = keeper_directory ~base_path:scope.base_path ~keeper_name:scope.keeper_name in
   let path = Filename.concat path (component scope.receiver_generation) in
   let path = Filename.concat path (component scope.session_id ^ ".sqlite3") in
   {scope; path}
@@ -423,24 +427,27 @@ let decode_component encoded =
     match nibble encoded.[2*i],nibble encoded.[2*i+1] with
     | Some a,Some b -> Bytes.set bytes i (Char.chr (16*a+b)); loop (i+1)
     | _ -> None in loop 0
-let discover ~base_path ~keeper_name = protect_io (fun () ->
+let discover_with ~before_read ~after_read ~base_path ~keeper_name = protect_io (fun () ->
   let result =
     let* base_path,keeper_name = context ~base_path ~keeper_name in
-    let root = Filename.concat (Common.masc_dir_from_base_path ~base_path)
-      ("native-task-journals/v2/" ^ component keeper_name) in
+    let root = keeper_directory ~base_path ~keeper_name in
     Eio_guard.run_in_systhread ~label:"native-task-discovery" (fun () ->
-      let directories path =
-        match Unix.lstat path with
-        | {Unix.st_kind=Unix.S_DIR;_} -> Ok (Array.to_list (Sys.readdir path) |> List.sort String.compare)
-        | _ -> corrupt "managed receiver directory is not a directory"
-        | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok [] in
-      let* generations = directories root in
+      let directories ~missing_allowed path =
+        match Fs_compat.read_owned_directory_if_present ~owner_uid:(Unix.geteuid ())
+            ~before_read ~after_read ~ownership_root:base_path path with
+        | Ok (Some names) -> Ok names
+        | Ok None when missing_allowed -> Ok []
+        | Ok None -> Error (Store_unavailable {operation="discover directory";
+            detail="previously enumerated receiver directory is missing"})
+        | Error error -> Error (Store_unavailable {operation="discover directory";
+            detail=Fs_compat.owned_regular_file_read_error_to_string error}) in
+      let* generations = directories ~missing_allowed:true root in
       List.fold_left (fun result name ->
         let* acc = result in
         match decode_component name with
         | None -> Ok acc
         | Some receiver_generation ->
-            let* files = directories (Filename.concat root name) in
+            let* files = directories ~missing_allowed:false (Filename.concat root name) in
             List.fold_left (fun result file ->
               let* acc = result in
               if not (Filename.check_suffix file ".sqlite3") then Ok acc else
@@ -466,6 +473,10 @@ let discover ~base_path ~keeper_name = protect_io (fun () ->
       | Some receiver -> entries @ [{receiver;state=Error Missing_store}]) durable snapshot.issues)) in
   {result;cleanup_failure=[]})
 
+let discover ~base_path ~keeper_name =
+  discover_with ~before_read:(fun _ -> ()) ~after_read:(fun _ -> ()) ~base_path ~keeper_name
+
 module For_testing = struct
+  let discover = discover_with
   let append_with_io ~commit ~close publication = append_with_io {commit;close} publication
 end

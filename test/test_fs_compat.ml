@@ -704,6 +704,89 @@ let test_owned_read_retains_ancestor_identity () =
   | Ok _ -> fail "changed ancestor admitted because immediate parent stayed the same"
 ;;
 
+let test_owned_directory_presence_and_permission_contract () =
+  with_tmp_dir @@ fun raw_base ->
+  let base = Unix.realpath raw_base in
+  let directory = Filename.concat base "inventory" in
+  let missing = Filename.concat base "missing/descendant" in
+  let uid = Unix.geteuid () in
+  let read ?before_read ?after_read path =
+    Fs_compat.read_owned_directory_if_present ~owner_uid:uid
+      ?before_read ?after_read ~ownership_root:base path in
+  (match read missing with
+   | Ok None -> ()
+   | _ -> fail "a missing descendant below a bound owned root was not distinct absence");
+  Unix.mkdir directory 0o700;
+  (match read directory with
+   | Ok (Some []) -> ()
+   | _ -> fail "existing empty directory was not a present inventory");
+  let foreign_uid = if uid=0 then 1 else 0 in
+  (match Fs_compat.read_owned_directory_if_present ~owner_uid:foreign_uid
+      ~ownership_root:base directory with
+   | Error {failure=Fs_compat.Owned_path_owner_mismatch {path;expected_uid;_};_} ->
+       check string "root owner is enforced before descent" base path;
+       check int "requested owner is preserved" foreign_uid expected_uid
+   | _ -> fail "empty directory bypassed requested owner");
+  Unix.chmod directory 0o777;
+  Fun.protect ~finally:(fun () -> Unix.chmod directory 0o700) (fun () ->
+    (match Fs_compat.read_owned_directory ~ownership_root:base directory with
+     | Ok [] -> ()
+     | _ -> fail "non-opt-in directory caller behavior changed");
+    match read directory with
+    | Error {failure=Fs_compat.Owned_path_writable_by_others {path;_};_} ->
+        check string "empty directory permissions are checked" directory path
+    | _ -> fail "unsafe empty directory became successful inventory");
+  Fun.protect ~finally:(fun () -> Unix.chmod directory 0o700) (fun () ->
+    match read ~after_read:(fun _ -> Unix.chmod directory 0o777) directory with
+    | Error {failure=Fs_compat.Owned_path_writable_by_others {path;_};_} ->
+        check string "final validation sees permission drift" directory path
+    | _ -> fail "permission drift after enumeration remained authoritative");
+  let root_permissions = (Unix.stat base).Unix.st_perm in
+  Fun.protect ~finally:(fun () -> Unix.chmod base root_permissions) (fun () ->
+    match read ~after_read:(fun _ -> Unix.chmod base 0o777) directory with
+    | Error {failure=Fs_compat.Owned_path_writable_by_others {path;_};_} ->
+        check string "final validation includes the captured root" base path
+    | _ -> fail "root permission drift after enumeration was ignored")
+;;
+
+let test_owned_directory_missing_authority_and_bound_failure () =
+  with_tmp_dir @@ fun raw_base ->
+  let base = Unix.realpath raw_base in
+  let directory = Filename.concat base "inventory" in
+  Unix.mkdir directory 0o700;
+  let read ?before_read ?after_read ~ownership_root path =
+    Fs_compat.read_owned_directory_if_present ~owner_uid:(Unix.geteuid ())
+      ?before_read ?after_read ~ownership_root path in
+  let absent_root = Filename.concat base "absent-root" in
+  (match read ~ownership_root:absent_root (Filename.concat absent_root "descendant") with
+   | Error {failure=Fs_compat.Owned_file_operation_failed
+       {cause=Unix.Unix_error (Unix.ENOENT,_,_);_};_} -> ()
+   | _ -> fail "unbound missing root was accepted as descendant absence");
+  let bound = ref false in
+  (match read ~ownership_root:base
+      ~before_read:(fun _ -> bound := true;
+        raise (Unix.Unix_error (Unix.ENOENT,"injected-after-bind",directory))) directory with
+   | Error {failure=Fs_compat.Owned_file_operation_failed
+       {cause=Unix.Unix_error (Unix.ENOENT,_,_);_};_} ->
+       check bool "fault occurred after descriptor binding" true !bound
+   | _ -> fail "bound directory failure became optional absence");
+  let removed = ref false in
+  Fun.protect ~finally:(fun () -> if !removed then Unix.mkdir directory 0o700) (fun () ->
+    match read ~ownership_root:base
+        ~after_read:(fun _ -> Unix.rmdir directory; removed := true) directory with
+    | Error {failure=Fs_compat.Owned_file_operation_failed
+        {cause=Unix.Unix_error (Unix.ENOENT,_,_);_};_} -> ()
+    | _ -> fail "directory removed after enumeration became absence");
+  let held_root = base ^ ".held" in
+  let renamed = ref false in
+  Fun.protect ~finally:(fun () -> if !renamed then Unix.rename held_root base) (fun () ->
+    match read ~ownership_root:base
+        ~after_read:(fun _ -> Unix.rename base held_root; renamed := true) directory with
+    | Error {failure=Fs_compat.Owned_file_operation_failed
+        {cause=Unix.Unix_error (Unix.ENOENT,_,_);_};_} -> ()
+    | _ -> fail "captured root disappearance after binding became absence")
+;;
+
 let test_owned_regular_file_read_uses_eio_systhread ~fs () =
   Fs_compat.set_fs fs;
   with_tmp_dir
@@ -1023,6 +1106,10 @@ let () =
       , [ test_case "requested UID checked before and after open/read" `Quick
             test_owned_read_checks_uid_in_each_parent_snapshot
         ; test_case "all ancestor identities retained" `Quick test_owned_read_retains_ancestor_identity
+        ; test_case "owned optional directory presence and permission contract" `Quick
+            test_owned_directory_presence_and_permission_contract
+        ; test_case "owned optional directory keeps root and bound failures" `Quick
+            test_owned_directory_missing_authority_and_bound_failure
         ; test_case
             "Eio systhread and cancellation"
             `Quick

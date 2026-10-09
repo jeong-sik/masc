@@ -3698,6 +3698,76 @@ let test_native_task_invalid_database_remains_typed () =
       (In_channel.with_open_bin (Task_journal.path reader) In_channel.input_all))
 ;;
 
+let test_native_task_sqlite_empty_directory_authority () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    let attempt,bound = List.hd observations in
+    let keeper_name = "claude-fixture" in
+    let sink = Task_journal.create ~base_path ~keeper_name
+        ~source:(task_journal_operation "sqlite-discovery") ~redact_text:Fun.id in
+    let publication = Result.get_ok (Task_journal.prepare sink ~attempt bound) in
+    let reader = Task_journal.reader_of_publication publication in
+    let generation = Filename.dirname (Task_journal.path reader) in
+    let keeper = Filename.dirname generation in
+    let discover () = Task_journal.discover ~base_path ~keeper_name in
+    let expect_failure outcome = match outcome.Task_journal.result with
+      | Error (Task_journal.Store_unavailable _) -> ()
+      | _ -> fail "unsafe empty directory became authoritative discovery" in
+    let writable directory f =
+      let permissions = (Unix.stat directory).Unix.st_perm in
+      Unix.chmod directory 0o777;
+      Fun.protect ~finally:(fun () -> Unix.chmod directory permissions) f in
+    Fs_compat.mkdir_p keeper;
+    writable keeper (fun () -> expect_failure (discover ()));
+    check int "owned empty Keeper retains a valid empty inventory" 0
+      (List.length (task_journal_ok (discover ())));
+    Fs_compat.mkdir_p generation;
+    writable generation (fun () -> expect_failure (discover ()));
+    check int "owned empty generation retains a valid empty inventory" 0
+      (List.length (task_journal_ok (discover ())));
+    Unix.rmdir generation;
+    Unix.rmdir keeper;
+    let ancestor = Filename.dirname keeper in
+    writable ancestor (fun () -> expect_failure (discover ()));
+    check int "cold descendant absence needs an owned bound ancestor" 0
+      (List.length (task_journal_ok (discover ()))))
+;;
+
+let test_native_task_sqlite_bound_directory_failure () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    let attempt,bound = List.hd observations in
+    let keeper_name = "claude-fixture" in
+    let sink = Task_journal.create ~base_path ~keeper_name
+        ~source:(task_journal_operation "sqlite-discovery") ~redact_text:Fun.id in
+    let publication = Result.get_ok (Task_journal.prepare sink ~attempt bound) in
+    let reader = Task_journal.reader_of_publication publication in
+    let generation = Filename.dirname (Task_journal.path reader) in
+    let keeper = Filename.dirname generation in
+    check int "initial absent subtree below captured root is an empty inventory" 0
+      (List.length (task_journal_ok (Task_journal.discover ~base_path ~keeper_name)));
+    Fs_compat.mkdir_p keeper;
+    let bound_path = ref None in
+    let after_binding = Task_journal.For_testing.discover ~base_path ~keeper_name
+        ~before_read:(fun path -> bound_path := Some path;
+          raise (Unix.Unix_error (Unix.ENOENT,"injected-after-directory-bind",path)))
+        ~after_read:(fun _ -> ()) in
+    check bool "fault reached the actual Keeper directory bind" true (!bound_path=Some keeper);
+    (match after_binding.result with
+     | Error (Task_journal.Store_unavailable _) -> ()
+     | _ -> fail "bound directory ENOENT became initial empty discovery");
+    Fs_compat.mkdir_p generation;
+    let removed = ref false in
+    Fun.protect ~finally:(fun () -> if !removed then Unix.mkdir generation 0o700) (fun () ->
+      let after_enumeration = Task_journal.For_testing.discover ~base_path ~keeper_name
+          ~before_read:(fun _ -> ())
+          ~after_read:(fun path -> if String.equal path keeper then begin
+            Unix.rmdir generation; removed := true
+          end) in
+      check bool "generation removed after names were read" true !removed;
+      match after_enumeration.result with
+      | Error (Task_journal.Store_unavailable _) -> ()
+      | _ -> fail "enumerated generation disappearance became successful partial inventory"))
+;;
+
 let test_task_binding_does_not_adopt_an_earlier_unattributed_call () =
   let base_path = temp_workspace () in
   Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
@@ -4963,6 +5033,10 @@ let () =
             test_native_task_sqlite_commit_cleanup_and_known_issues
         ; test_case "non-SQLite read and observe remain typed failures" `Quick
             test_native_task_invalid_database_remains_typed
+        ; test_case "SQLite discovery checks empty directory authority" `Quick
+            test_native_task_sqlite_empty_directory_authority
+        ; test_case "SQLite discovery preserves bound directory failure" `Quick
+            test_native_task_sqlite_bound_directory_failure
         ; test_case "later command witness cannot adopt an unattributed task owner" `Quick
             test_task_binding_does_not_adopt_an_earlier_unattributed_call
         ; test_case "task metadata retains closed native owner without flushing model content" `Quick

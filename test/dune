@@ -5233,7 +5233,7 @@
 (test
  (name test_lane_addon)
  (modules test_lane_addon)
- (libraries masc.machine_configuration masc_test_deps masc.fusion_core masc.server masc.msx_lane eio eio_main yojson unix))
+ (libraries mcp_protocol masc.machine_configuration masc_test_deps masc.fusion_core masc.server masc.msx_lane eio eio_main yojson unix))
 
 (test
  (name test_lane_addon_sources)
@@ -5354,7 +5354,8 @@
        ../addons/tests/stdio_fixture.py
        ../addons/fusion-results/server.py ../addons/fusion-results/lane.toml
        ../addons/fusion-report/server.py ../addons/fusion-report/lane.toml)
- (libraries masc.machine_configuration masc_test_deps masc.fusion_core masc.msx_lane eio eio_main yojson unix))
+ (libraries masc.machine_configuration masc_test_deps masc.fusion_core masc.msx_lane masc.msx_worker
+  mcp_protocol mcp_protocol.eio eio eio.unix eio_main yojson unix))
 
 (include stanzas/test_lane_quiz_packages.inc)
 (include stanzas/test_lane_fusion_compute_packages.inc)

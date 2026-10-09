@@ -40,9 +40,11 @@ let echoed request_id = if String.length request_id > 256 then Store.digest requ
 type fixture = {config:Workspace.config; root:string; calls:int ref; observes:int ref;
   outcome:outcome ref; barrier:unit Eio.Promise.t option ref}
 let backend fixture : Runtime.For_testing.backend = {
-  start=(fun ~sw:_ ~instance_id ~(package:Types.package) ~binding:_ ~on_created ->
+  start=(fun ~sw:_ ~state_owner:_ ~instance_id ~(package:Types.package) ~binding:_ ~on_created ->
     let connection : Runtime.For_testing.connection = {
       container_id=Store.digest instance_id;
+      exported_tools = (fun () -> []);
+      call_exported_tool = (fun ~on_result:_ ~authorize:_ ~principal:_ ~name:_ ~arguments:_ -> Error (Lane_addon_call_context.Transport_error "no exported tools"));
       action_schema=(fun () -> Option.map (fun _ -> schema) package.action_tool);
       observe=(fun ~binding:_ ~sources:_ -> incr fixture.observes; Ok output);
       act=(fun ~arguments ->
@@ -60,8 +62,8 @@ let backend fixture : Runtime.For_testing.backend = {
       stop=(fun () -> Ok ())} in
     on_created connection; Ok connection);
   image_ready=(fun ~package:_ -> Ok ());
-  acquire=(fun ~access:_ ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
-  recover_stop=(fun ~instance_id:_ ~container_id:_ -> Ok ())}
+  acquire=(fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
+  recover_stop=(fun ~state_owner:_ ~instance_id:_ ~container_id:_ -> Ok ())}
 let dispatch fixture operation fields =
   Runtime.dispatch ~caller:"authenticated-tester" ~config:fixture.config ~operation (obj fields)
 let inspect fixture id = dispatch fixture Runtime.Inspect ["instance_id",str id] |> unwrap

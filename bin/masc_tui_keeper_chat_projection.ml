@@ -1206,7 +1206,7 @@ let decode_data_event ~request state json =
             validate_running_fields request state ~surface
               ~allowed:
                 [ "type"; "threadId"; "timestamp"; "runId"; "messageId"
-                ; "delta"
+                ; "delta"; "textStreamScope"
                 ]
               fields
           in
@@ -1230,6 +1230,8 @@ let decode_data_event ~request state json =
               ~surface "delta" fields
             |> Result.map_error (fun detail -> Malformed_event detail)
           in
+          let* _scope = optional_nonnegative_int ~surface "textStreamScope" fields
+            |> Result.map_error (fun detail -> Malformed_event detail) in
           Ok state
       | "TEXT_MESSAGE_END" ->
           let surface = "Keeper chat TEXT_MESSAGE_END" in

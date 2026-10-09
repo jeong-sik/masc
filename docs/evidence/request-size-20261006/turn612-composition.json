@@ -1,0 +1,25 @@
+{
+ "atoms": [
+  3887,
+  4211
+ ],
+ "bytes": 1394920,
+ "share": {
+  "tool_result": 0.532,
+  "reasoning": 0.315,
+  "tool_call_arguments": 0.137,
+  "assistant_text": 0.014,
+  "user_input": 0.001
+ },
+ "bytes_by_kind": {
+  "tool_result": 742753,
+  "reasoning": 439544,
+  "tool_call_arguments": 191793,
+  "assistant_text": 19949,
+  "user_input": 881
+ },
+ "tool_results": 335,
+ "tool_result_bytes_p50": 1324,
+ "tool_result_bytes_p90": 4293,
+ "tool_result_bytes_max": 27913
+}

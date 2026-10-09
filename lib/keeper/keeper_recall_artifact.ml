@@ -1,6 +1,23 @@
 type kind = Memory_os | Librarian
 
-type pin_observation = Fs_compat.owned_regular_file_contents option
+type pin_observation = Absent | Retired | Published of string
+
+let decode_pin body =
+  try match Yojson.Safe.from_string body with
+  | `Null -> Ok Retired
+  | `Assoc fields when List.sort String.compare (List.map fst fields) = ["artifact"; "generation"] ->
+      (match List.assoc "generation" fields,
+             Tool_output.normalized_artifact_ref_of_json (List.assoc "artifact" fields) with
+       | `String generation, Tool_output.Decoded_normalized_artifact_ref _ ->
+           Result.bind (Random_id.parse_uuid_v7 generation) (fun canonical ->
+             if String.equal generation canonical then Ok (Published generation)
+             else Error "recall pin generation is not canonical")
+       | `String _, (Tool_output.Not_normalized_artifact_ref | Invalid_normalized_artifact_ref _)
+       | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _), _ ->
+           Error "recall pin requires a generation and normalized artifact")
+  | `Assoc _ | `List _ | `String _ | `Bool _ | `Int _ | `Intlit _ | `Float _ ->
+      Error "recall pin requires a versioned publication or null"
+  with Yojson.Json_error detail -> Error detail
 
 let current_path ~config ~keeper_id ~kind =
   let keeper_dir = Filename.concat (Workspace.keepers_runtime_dir config) keeper_id in
@@ -10,9 +27,11 @@ let current_path ~config ~keeper_id ~kind =
   Filename.concat keeper_dir file
 
 let read_pin ~config path =
-  Result.map_error Fs_compat.owned_regular_file_read_error_to_string
-    (Fs_compat.load_owned_regular_file_with_snapshot
-       ~ownership_root:(Workspace.keepers_runtime_dir config) path)
+  Result.bind
+    (Result.map_error Fs_compat.owned_regular_file_read_error_to_string
+       (Fs_compat.load_owned_regular_file
+          ~ownership_root:(Workspace.keepers_runtime_dir config) path))
+    (function None -> Ok Absent | Some body -> decode_pin body)
 
 let observe_current ~config ~keeper_id ~kind =
   read_pin ~config (current_path ~config ~keeper_id ~kind)
@@ -29,17 +48,16 @@ let with_pin_lock path run =
 
 let retire_current ~config ~keeper_id ~kind (observed : pin_observation) =
   match observed with
-  | None -> Ok ()
-  | Some expected ->
+  | Absent | Retired -> Ok ()
+  | Published expected ->
       let path = current_path ~config ~keeper_id ~kind in
       with_pin_lock path (fun () ->
         Result.bind (read_pin ~config path) (function
-          | Some current when Fs_compat.equal_owned_regular_file_snapshot
-              expected.snapshot current.snapshot && String.equal expected.content current.content ->
-              (* A structured empty root releases only this current pin. Dated
+          | Published current when String.equal expected current ->
+              (* A structured empty root releases only this generation. Dated
                  history remains owned by its normal retention policy. *)
               Fs_compat.save_file_atomic_strict path "null"
-          | None | Some _ -> Ok ()))
+          | Absent | Retired | Published _ -> Ok ()))
 
 let retain ~config ~keeper_id ~kind ~now (artifact : Tool_output.artifact_ref) =
   (* Prompt text is not a structured GC root, and latest-prompt captures are
@@ -70,5 +88,9 @@ let retain ~config ~keeper_id ~kind ~now (artifact : Tool_output.artifact_ref) =
      replacement of the previous current pin can release its reference. *)
   Result.bind retained (fun () ->
     let current = current_path ~config ~keeper_id ~kind in
-    with_pin_lock current (fun () -> Fs_compat.save_file_atomic_strict current payload))
+    with_pin_lock current (fun () ->
+      (* Publication identity is independent of reusable filesystem metadata
+         and artifact content, including repeated publication of one hash. *)
+      let publication = `Assoc ["generation", `String (Random_id.uuid_v7 ()); "artifact", json] in
+      Fs_compat.save_file_atomic_strict current (Yojson.Safe.to_string publication)))
 ;;

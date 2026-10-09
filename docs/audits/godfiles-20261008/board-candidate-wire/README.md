@@ -1,6 +1,7 @@
 # Canonical Board candidate wire boundary
 
-PR #42130. Base: dce14bcf4b91a06351a922117eb2e0f3c747e12f.
+PR #42130. Current base: 57266cf4178665779d5ffa4f7b6b06035a73eea4.
+Original base: dce14bcf4b91a06351a922117eb2e0f3c747e12f.
 
 Private keeper_board_attention_candidate_wire owns 18 canonical public data types, signal/candidate identity, current strict JSON codecs, context canonicalization, finite/state validation, judgment request projection and latest-row indexing (1533 lines). The root retains path resolution, durable storage/compaction, caches and locks, state mutations, quarantine/requeue, worker wake and delivery (1062 lines, previously 2450).
 

@@ -3565,8 +3565,7 @@ let render_keeper_message (state : state) =
                ^ Masc_tui_keys.expand_turn_label
          in
          let status_rows = Masc_tui_types.keeper_message_visible_status_rows state live ~now in
-         if folded_away > 0
-            && not (List.exists (fun (kind, _) -> kind = Keeper_chat_transcript.Progress) status_rows)
+         if Masc_tui_types.keeper_message_standalone_details_hint state live ~now
          then box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
            (Printf.sprintf "  +%d · %s:details" folded_away Masc_tui_keys.expand_turn_label);
          List.iter
@@ -3888,8 +3887,8 @@ let render_keeper_message (state : state) =
       if state.keeper_message_focus = Left_pane then
         "Up/Down:move  Enter:open  Right/Esc:chat"
       else if state.msg_origin_display = Message_layout.Origin_bare then
-        String.concat "  "
-          [enter_hint; "Ctrl-J:newline"; escape_hint; "/:commands"; "?:help"]
+        Masc_tui_footer.minimal_chat_hints ~max_cells:(max 0 (chat_cols - 4))
+          ~enter_hint ~escape_hint
       else if chat_cols < 120 then
         let compact_enter_hint =
           match disposition with

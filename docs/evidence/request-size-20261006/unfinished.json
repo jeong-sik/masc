@@ -1,0 +1,82 @@
+{
+ "spans": 88,
+ "keepers": 20,
+ "atoms": 5467,
+ "turns_without_line": 280,
+ "after_official_client_line": {
+  "spans": 17,
+  "atoms": 1119
+ },
+ "largest": [
+  {
+   "keeper": "sangsu",
+   "atoms": 2399,
+   "turns_without_line": 98,
+   "from": "10-05 18:04",
+   "until": "10-06 02:49"
+  },
+  {
+   "keeper": "you-never-change",
+   "atoms": 274,
+   "turns_without_line": 0,
+   "from": "10-06 05:21",
+   "until": "10-06 09:17"
+  },
+  {
+   "keeper": "indie-geek-blue",
+   "atoms": 267,
+   "turns_without_line": 2,
+   "from": "10-05 22:17",
+   "until": "10-06 00:12"
+  },
+  {
+   "keeper": "tui-developer",
+   "atoms": 117,
+   "turns_without_line": 1,
+   "from": "10-06 05:24",
+   "until": "10-06 07:47"
+  },
+  {
+   "keeper": "you-never-change",
+   "atoms": 109,
+   "turns_without_line": 1,
+   "from": "10-06 09:26",
+   "until": "10-06 10:11"
+  },
+  {
+   "keeper": "polisher",
+   "atoms": 107,
+   "turns_without_line": 0,
+   "from": "10-06 02:01",
+   "until": "10-06 05:30"
+  },
+  {
+   "keeper": "masc-pro-builder",
+   "atoms": 93,
+   "turns_without_line": 0,
+   "from": "10-06 05:59",
+   "until": "10-06 08:34"
+  },
+  {
+   "keeper": "wkbl-front",
+   "atoms": 89,
+   "turns_without_line": 0,
+   "from": "10-06 06:13",
+   "until": "10-06 08:32"
+  },
+  {
+   "keeper": "you-never-change",
+   "atoms": 89,
+   "turns_without_line": 79,
+   "from": "10-06 00:12",
+   "until": "10-06 05:21"
+  },
+  {
+   "keeper": "masc-pro-builder",
+   "atoms": 88,
+   "turns_without_line": 0,
+   "from": "10-06 08:34",
+   "until": "10-06 11:48"
+  }
+ ]
+}

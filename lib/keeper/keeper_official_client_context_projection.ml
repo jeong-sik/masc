@@ -131,6 +131,7 @@ type composed_context = Keeper_context_assembly.t
 
 type resume_delivery =
   { prompt : string
+  ; context_projection : Keeper_context_submission_link.t
   ; held_context : Session_store.held_context list
   }
 
@@ -242,23 +243,25 @@ let block_text item =
   | _ -> None
 ;;
 
+let block_id item = match item.held.Session_store.context with
+  | Session_store.Context_block id -> Some id | _ -> None
+
 let rec rendered_messages = function
   | [] -> []
   | item :: rest when is_block item ->
-    let rec take_blocks texts = function
+    let rec take_blocks texts ids = function
       | next :: rest when is_block next ->
-        (match block_text next with
-         | Some text -> take_blocks (text :: texts) rest
-         | None -> List.rev texts, next :: rest)
-      | rest -> List.rev texts, rest
-    in
-    (match block_text item with
-     | Some text ->
-       let texts, rest = take_blocks [ text ] rest in
-       extra_system_context_message (String.concat resume_section_separator texts)
+        (match block_text next, block_id next with
+         | Some text, Some id -> take_blocks (text :: texts) (id :: ids) rest
+         | _ -> List.rev texts, List.rev ids, next :: rest)
+      | rest -> List.rev texts, List.rev ids, rest in
+    (match block_text item, block_id item with
+     | Some text, Some id ->
+       let texts, ids, rest = take_blocks [text] [id] rest in
+       (extra_system_context_message (String.concat resume_section_separator texts),Some ids)
        :: rendered_messages rest
-     | None -> item.message :: rendered_messages rest)
-  | item :: rest -> item.message :: rendered_messages rest
+     | _ -> (item.message,None) :: rendered_messages rest)
+  | item :: rest -> (item.message,None) :: rendered_messages rest
 ;;
 
 let resume_prompt ~goal ~held ?composed_context messages =
@@ -266,14 +269,15 @@ let resume_prompt ~goal ~held ?composed_context messages =
   let already_held item =
     (not item.resent_when_held) && List.mem item.held held
   in
-  let context =
-    carried
-    |> List.filter (fun item -> not (already_held item))
-    |> rendered_messages
-    |> List.map (fun (message : Agent_core.Types.message) ->
-      history_role_label message.role ^ encode_history_message message)
-    |> String.concat resume_section_separator
-  in
+  let selected, omitted = List.partition (fun item -> not (already_held item)) carried in
+  let context_projection =
+    selected |> rendered_messages
+    |> List.map (fun ((message : Agent_core.Types.message),selected_blocks) ->
+      Keeper_context_submission_link.concat ~separator:""
+        [Keeper_context_submission_link.literal (history_role_label message.role);
+         Keeper_context_submission_link.encoded_carrier ~assembly:composed_context ~selected_blocks message])
+    |> Keeper_context_submission_link.concat ~separator:resume_section_separator
+    |> Keeper_context_submission_link.trim in
   let composed = held_of_carried carried in
   (* A context composed this turn supersedes what the session held under the
      same name. A whole carrier and the typed blocks name the same text, so
@@ -295,12 +299,17 @@ let resume_prompt ~goal ~held ?composed_context messages =
            not (List.exists (fun current -> supersedes current previous) composed))
         held
   in
-  let prompt =
-    match String_util.trim_nonempty context with
-    | None -> goal
-    | Some context -> context ^ resume_section_separator ^ goal
-  in
-  { prompt; held_context }
+  let context_projection =
+    if Keeper_context_submission_link.text context_projection = "" then
+      Keeper_context_submission_link.literal goal
+    else Keeper_context_submission_link.concat ~separator:resume_section_separator
+      [context_projection;Keeper_context_submission_link.literal goal] in
+  let context_projection = List.fold_left (fun projection item ->
+    Keeper_context_submission_link.omit_held ~assembly:composed_context
+      ~blocks:(Option.map (fun id -> [id]) (block_id item)) item.message projection)
+    context_projection omitted in
+  { prompt = Keeper_context_submission_link.text context_projection; held_context; context_projection }
+
 ;;
 
 let last_tool_results messages =

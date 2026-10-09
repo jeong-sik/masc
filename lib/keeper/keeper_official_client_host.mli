@@ -254,6 +254,7 @@ type composed_context = Keeper_context_assembly.t
 
 type resume_delivery =
   { prompt : string
+  ; context_projection : Keeper_context_submission_link.t
   ; held_context : Keeper_official_client_session_store.held_context list
   }
 

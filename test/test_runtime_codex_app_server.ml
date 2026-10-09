@@ -1585,6 +1585,215 @@ let test_content_free_context_submission () =
     check bool "cancellation occurs after the completed turn submission fence" true !cancelled_after_write)
 ;;
 
+let export_assembly_submission_measurement ~fixture_kind ~scenario ~binding ~submission ~raw =
+  let open Yojson.Safe.Util in
+  let hash text = Digestif.SHA256.(digest_string text |> to_hex) in
+  let slice label text offset bytes =
+    check bool (label ^ " has closed bounds") true
+      (offset >= 0 && bytes >= 0 && offset <= String.length text
+       && bytes <= String.length text - offset);
+    String.sub text offset bytes in
+  let verify_text label text record =
+    check int (label ^ " byte length") (member "bytes" record |> to_int) (String.length text);
+    check string (label ^ " SHA") (member "sha256" record |> to_string) (hash text) in
+  let slot = member "matched_slot" binding in
+  let offset = member "json_offset" slot |> to_int in
+  let bytes = member "json_bytes" slot |> to_int in
+  let captured_slot = slice "captured slot" raw offset bytes in
+  let captured_sha256 = Digestif.SHA256.(digest_string captured_slot |> to_hex) in
+  check string "exported slot hash comes from the same captured RPC"
+    (member "json_sha256" slot |> to_string) captured_sha256;
+  let decoded_slot = Yojson.Safe.from_string captured_slot |> to_string in
+  let previous_end = ref 0 in
+  binding |> member "occurrences" |> to_list |> List.iteri (fun index occurrence ->
+    check int "attributed occurrence ordinal" index
+      (member "attributed_occurrence_index" occurrence |> to_int);
+    let offset = member "encoded_message_offset_in_decoded_slot" occurrence |> to_int in
+    let bytes = member "encoded_message_bytes" occurrence |> to_int in
+    check bool "codec occurrences are ordered and disjoint" true (offset >= !previous_end);
+    let encoded = slice "codec occurrence" decoded_slot offset bytes in
+    previous_end := offset + bytes;
+    check string "actual codec slice SHA"
+      (member "encoded_message_sha256" occurrence |> to_string) (hash encoded);
+    let codec = Yojson.Safe.from_string encoded in
+    let source = member "source" occurrence in
+    check string "captured codec schema" Keeper_official_client_context_codec.schema
+      (member "schema" codec |> to_string);
+    check bool "proof names actual codec schema" true (member "schema" codec = member "codec_schema" source);
+    check string "proof names the structural text path" "/message/content_blocks/0/text"
+      (member "codec_text_path" source |> to_string);
+    let message = member "message" codec in
+    check string "issuer carrier stays a System message" "system" (member "role" message |> to_string);
+    let rendered = match member "content_blocks" message |> to_list with
+      | [block] when member "type" block = `String "text" -> member "text" block |> to_string
+      | _ -> fail "issuer codec must contain exactly one Text block" in
+    check int "actual rendered carrier bytes" (member "rendered_text_bytes" source |> to_int) (String.length rendered);
+    check string "actual rendered carrier SHA" (member "rendered_text_sha256" source |> to_string) (hash rendered);
+    let assembly = member "assembly" source in
+    let spans = member "spans" assembly |> to_list in
+    let source_bytes = member "bytes" assembly |> to_int in
+    check bool "issuer carrier length is nonnegative" true (source_bytes >= 0);
+    let source_end = ref 0 in
+    List.iter (fun span ->
+      let offset = member "offset" span |> to_int and bytes = member "bytes" span |> to_int in
+      check int "issuer source partition is contiguous" !source_end offset;
+      check bool "issuer span has closed source bounds" true
+        (offset >= 0 && offset <= source_bytes && bytes >= 0 && bytes <= source_bytes - offset);
+      source_end := offset + bytes) spans;
+    check int "issuer partition closes its source carrier" (member "bytes" assembly |> to_int) !source_end;
+    let indices = member "source_span_indices" source |> to_list |> List.map to_int in
+    check (list int) "selected source indices are unique and ordered"
+      (List.sort_uniq Int.compare indices) indices;
+    List.iter (fun i -> check bool "selected source index is in range" true (i >= 0 && i < List.length spans)) indices;
+    match member "rendering" source |> to_string with
+    | "whole_carrier" ->
+      check (list int) "whole carrier includes every issuer span" (List.mapi (fun i _ -> i) spans) indices;
+      verify_text "whole issuer carrier" rendered assembly;
+      List.iter (fun span ->
+        verify_text "actual whole-carrier span"
+          (slice "whole-carrier source span" rendered (member "offset" span |> to_int)
+             (member "bytes" span |> to_int)) span) spans
+    | "ordered_blocks_joined_by_two_newlines" ->
+      check bool "partial carrier names at least one block" true (indices <> []);
+      let cursor = ref 0 in
+      List.iteri (fun position i ->
+        if position > 0 then (
+          check string "actual newly rendered separator" "\n\n" (slice "separator" rendered !cursor 2);
+          cursor := !cursor + 2);
+        let span = List.nth spans i in
+        check string "subset selects source blocks, not old separators" "block"
+          (span |> member "source" |> member "kind" |> to_string);
+        let bytes = member "bytes" span |> to_int in
+        verify_text "actual selected raw block" (slice "selected raw block" rendered !cursor bytes) span;
+        cursor := !cursor + bytes) indices;
+      check int "selected blocks and new separators close actual text" (String.length rendered) !cursor
+    | _ -> fail "unknown carrier rendering proof");
+  Printf.printf "MEMORY_CODEX_ASSEMBLY_SUBMISSION %s\n%!"
+    (Yojson.Safe.to_string
+       (`Assoc
+          [ "fixture_kind", `String fixture_kind
+          ; "scenario", `String scenario
+          ; "binding", binding
+          ; "submission", submission
+          ; "captured_rpc_json_bytes", `Int (String.length raw)
+          ; "captured_slot", `Assoc
+              [ "json_offset", `Int offset
+              ; "json_bytes", `Int (String.length captured_slot)
+              ; "json_sha256", `String captured_sha256
+              ; "decoded_utf8_bytes", `Int (String.length decoded_slot)
+              ]
+          ]))
+;;
+
+let test_issuer_assembly_links_to_completed_slots () =
+  let module Link = Masc.Keeper_context_submission_link in
+  let module Assembly = Masc.Keeper_context_assembly in
+  let module Host = Masc.Keeper_official_client_host in
+  let module Client = Runtime_codex_app_server in
+  let open Yojson.Safe.Util in
+  let repeated="한글 \"same\"\n\\tail" in
+  let blocks=[Prompt_block_id.Dynamic_context,repeated;
+    Prompt_block_id.Memory_os_recall,repeated;Prompt_block_id.Temporal_summary,repeated] in
+  let assembly=Assembly.assemble ~existing_extra_system_context:None ~blocks in
+  let carrier assembly : Agent_core.Types.message =
+    {role=System;content=[Text (Option.get assembly.Assembly.extra_system_context)];name=None;
+     tool_call_id=None;metadata=Agent_core.Types.Extra_system_context_provenance.metadata} in
+  let message=carrier assembly in
+  let held=Host.start_held_context ~composed_context:assembly [message] in
+  let partial_held=List.filter (fun (item:Masc.Keeper_official_client_session_store.held_context) ->
+    item.context=Context_block Prompt_block_id.Memory_os_recall) held in
+  let subset=Host.resume_prompt ~goal:"GOAL" ~held:partial_held ~composed_context:assembly [message] in
+  let allheld=Host.resume_prompt ~goal:"GOAL" ~held ~composed_context:assembly [message] in
+  check string "held carrier contributes no bytes" "GOAL" allheld.prompt;
+  let changed=Assembly.assemble ~existing_extra_system_context:None
+    ~blocks:[Prompt_block_id.Dynamic_context,repeated;Prompt_block_id.Memory_os_recall,repeated;
+      Prompt_block_id.Temporal_summary,repeated ^ " changed"] in
+  let changed_delivery=Host.resume_prompt ~goal:"GOAL" ~held ~composed_context:changed [carrier changed] in
+  let prefixed=Assembly.assemble ~existing_extra_system_context:(Some "prefix\n") ~blocks in
+  let whole=Host.resume_prompt ~goal:"GOAL" ~held:[] ~composed_context:prefixed [carrier prefixed] in
+  let stale=Host.resume_prompt ~goal:"GOAL" ~held:[] ~composed_context:assembly [carrier prefixed] in
+  let missing = Host.resume_prompt ~goal:"GOAL" ~held:[] [message] in
+  let missing_held = Host.resume_prompt ~goal:"GOAL"
+      ~held:(Host.start_held_context [message]) [message] in
+  let unsupported = Host.resume_prompt ~goal:"GOAL" ~held:[] ~composed_context:assembly
+      [{message with content=[Text repeated;Text repeated]}] in
+  let verified_piece = Link.encoded_carrier ~assembly:(Some assembly) ~selected_blocks:None message in
+  let mixed = Link.concat ~separator:"\n\n" [verified_piece;
+    Link.encoded_carrier ~assembly:None ~selected_blocks:None message] |> Link.trim in
+  let invalid_subset = Link.encoded_carrier ~assembly:(Some assembly)
+      ~selected_blocks:(Some [Prompt_block_id.Memory_os_recall]) message in
+  let start=Link.concat ~separator:"\n\n"
+    [Link.literal "  base";Link.literal "posture";
+     Link.encoded_carrier ~assembly:(Some assembly) ~selected_blocks:None message] |> Link.trim in
+  let success=[init_result;account_chatgpt;thread_result;turn_result;item_completed;turn_completed] in
+  List.iter (fun (label,mode,projection,occurrences,omitted,indices,issuer_status,reasons) ->
+    let capture=Filename.temp_file "assembly-slot-" ".jsonl" in
+    Fun.protect ~finally:(fun () -> Sys.remove capture) @@ fun () ->
+    let events=ref [] in
+    let is_start=mode=Client.Start in
+    let images = if is_start then [] else
+      [{Client.media_type="image/png";base64_data="aGVsbG8="}] in
+    with_fixture ~capture_path:capture success (fun path ->
+      let result=run_fixture ~thread_mode:mode ~images
+        ~developer_instructions:(if is_start then Link.text projection else "base")
+        ~prompt:(if is_start then "GOAL" else Link.text projection)
+        ~on_context_submission:(fun observation -> events:=observation :: !events) path in
+      check bool (label ^ " completes") true (Result.is_ok result));
+    let event=List.find (fun (event:Client.context_submission) -> event.method_=
+      (if is_start then Client.Thread_start else Client.Turn_start)) !events in
+    let slot=if is_start then Client.Developer_instructions else Client.Turn_text (List.length images) in
+    let proof=Link.binding_to_json ~slot projection event in
+    check string (label ^ " exact completed slot") "matched_completed_slot" (proof |> member "status" |> to_string);
+    check string "new binding explicitly versions issuer attribution" "masc.codex-assembly-slot-binding.v2"
+      (proof |> member "schema" |> to_string);
+    let attribution = member "issuer_attribution" proof in
+    check string (label ^ " source acquisition state is independent of transport") issuer_status
+      (member "status" attribution |> to_string);
+    check (list (pair string string)) (label ^ " typed acquisition failures survive composition") reasons
+      (member "unavailable" attribution |> to_list |> List.map (fun row ->
+        (member "reason" row |> to_string), (member "disposition" row |> to_string)));
+    let found=proof |> member "occurrences" |> to_list in
+    check int (label ^ " attributed occurrences") occurrences (List.length found);
+    check int (label ^ " explicit held omissions") omitted (proof |> member "omitted_held" |> to_list |> List.length);
+    (match found with
+     | [row] -> check (list int) (label ^ " original source indices, not wire offsets") indices
+         (row |> member "source" |> member "source_span_indices" |> to_list |> List.map to_int)
+     | [] -> () | _ -> fail "unexpected duplicate carrier attribution");
+    let lines=In_channel.with_open_bin capture In_channel.input_lines in
+    let written=List.find (fun line -> member "id" (Yojson.Safe.from_string line)=`Int event.request_id) lines in
+    check_context_fragments written (Client.context_submission_to_json event);
+    let mismatch=Link.binding_to_json ~slot (Link.concat ~separator:"" [projection;Link.literal "changed"]) event in
+    check string "stale composed slot cannot acquire a binding" "unavailable_slot_mismatch"
+      (mismatch |> member "status" |> to_string);
+    export_assembly_submission_measurement
+      ~fixture_kind:"host_renderer_to_actual_app_server_write"
+      ~scenario:label ~binding:proof
+      ~submission:(Client.context_submission_to_json event) ~raw:written)
+    ["start",Client.Start,start,1,0,[0;1;2;3;4],"verified",[];
+     "held middle",Client.Resume {thread_id="thread-1"},subset.context_projection,1,1,[0;4],"verified",[];
+     "changed block",Client.Resume {thread_id="thread-1"},changed_delivery.context_projection,1,2,[4],"verified",[];
+     "all held",Client.Resume {thread_id="thread-1"},allheld.context_projection,0,3,[],"verified",[];
+     "prefix fallback",Client.Resume {thread_id="thread-1"},whole.context_projection,1,0,[0;1;2;3;4;5;6],"verified",[];
+     "stale issuer",Client.Resume {thread_id="thread-1"},stale.context_projection,0,0,[],"unavailable",["stale_issuer","rendered_carrier"];
+     "missing issuer",Client.Resume {thread_id="thread-1"},missing.context_projection,0,0,[],"unavailable",["missing_issuer","rendered_carrier"];
+     "missing held issuer",Client.Resume {thread_id="thread-1"},missing_held.context_projection,0,0,[],"unavailable",["missing_issuer","locally_omitted_held"];
+     "unsupported carrier",Client.Resume {thread_id="thread-1"},unsupported.context_projection,0,0,[],"unavailable",["unsupported_carrier","rendered_carrier"];
+     "literal only",Client.Resume {thread_id="thread-1"},Link.literal "GOAL",0,0,[],"not_applicable",[];
+     "mixed issuers",Client.Start,mixed,1,0,[0;1;2;3;4],"partial",["missing_issuer","rendered_carrier"];
+     "invalid subset",Client.Start,invalid_subset,0,0,[],"unavailable",["invalid_subset","rendered_carrier"]];
+  let events=ref [] in
+  with_fixture ~close_before_turn:true success (fun path ->
+    let result = run_fixture ~thread_mode:(Client.Resume {thread_id="thread-1"})
+      ~prompt:(String.make 1_100_000 'x')
+      ~on_context_submission:(fun event -> events:=event :: !events) path in
+    match result with
+    | Error (Client.Turn_input_write_failed _) -> ()
+    | Error error -> fail (Client.error_to_string error)
+    | Ok _ -> fail "incomplete turn write unexpectedly succeeded");
+  check bool "incomplete write has no turn slot available for binding" false
+    (List.exists (fun (event:Client.context_submission) -> event.method_=Client.Turn_start) !events)
+;;
+
 let test_subscription_probe_stops_before_thread () =
   with_fixture
     [ init_result
@@ -4446,6 +4655,7 @@ for line in sys.stdin:
 let fixture_trace_with_no_completed_turn = "fixture-trace-no-completed-turn"
 
 let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projection
+    ?official_client_composed_context
     ?on_memory_capacity_refusal
     ?(initial_messages = []) ?base_path ?raw_trace_path ?session_id
     ?on_native_tool_progress ?on_native_tool_completion ?on_event ?on_request_attribution ?(keeper_name = "codex-fixture")
@@ -4504,6 +4714,7 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                       ~agent_core_tools:tools
                       ~initial_messages
                       ?model_input_projection
+                      ?official_client_composed_context
                       ?on_memory_capacity_refusal
                       ?accept
                       ?hooks
@@ -5725,6 +5936,49 @@ let test_keeper_preserves_typed_history_on_codex_wire () =
          items)
 ;;
 
+let test_keeper_assembly_binding_is_durable_in_same_attempt () =
+  let base_path=temp_workspace "keeper-assembly-binding-" in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) @@ fun () ->
+  let assembly=Masc.Keeper_context_assembly.assemble ~existing_extra_system_context:None
+    ~blocks:[Prompt_block_id.Dynamic_context,"한글 \"same\"\n";
+      Prompt_block_id.Memory_os_recall,"한글 \"same\"\n"] in
+  let hooks : Agent_core.Hooks.hooks = {Agent_core.Hooks.empty with
+    before_turn_params=Some (function
+      | BeforeTurnParams {current_params;_} ->
+        AdjustParams {current_params with extra_system_context=assembly.extra_system_context}
+      | _ -> Continue)} in
+  let capture=Filename.concat base_path "wire.jsonl" in
+  let trace=Filename.concat base_path "trace.jsonl" in
+  with_fixture ~capture_path:capture
+    [init_result;account_chatgpt;thread_result;turn_result;item_completed;turn_completed]
+    (fun cli_path -> match run_keeper_turn ~base_path ~raw_trace_path:trace ~hooks
+      ~official_client_composed_context:(fun () -> Some assembly) ~cli_path ~model:"gpt-fixture" () with
+      | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+  let records=match Agent_core.Raw_trace.read_all ~path:trace () with
+    | Ok rows -> rows | Error error -> fail (Agent_core.Error.to_string error) in
+  let start=List.find (fun (row:Agent_core.Raw_trace.record) -> row.record_type=Run_started) records in
+  let submissions=List.filter (fun (row:Agent_core.Raw_trace.record) -> row.hook_name=Some "codex_context_submission") records in
+  let open Yojson.Safe.Util in
+  let developer=List.find (fun (row:Agent_core.Raw_trace.record) ->
+    let detail=Yojson.Safe.from_string (Option.get row.hook_detail) in
+    detail |> member "submission" |> member "method" = `String "thread/start") submissions in
+  check string "binding is attached to actual raw-trace attempt" start.worker_run_id developer.worker_run_id;
+  check (option string) "binding preserves session join" start.session_id developer.session_id;
+  let detail=Yojson.Safe.from_string (Option.get developer.hook_detail) in
+  let proof=member "logical_context_bindings" detail in
+  check string "actual Keeper publishes exact slot match" "matched_completed_slot" (proof |> member "status" |> to_string);
+  check int "actual carrier has one codec occurrence" 1 (proof |> member "occurrences" |> to_list |> List.length);
+  let submission=member "submission" detail in
+  let raw=In_channel.with_open_bin capture In_channel.input_lines |> List.find (fun line ->
+    Yojson.Safe.from_string line |> member "id" = member "request_id" submission) in
+  check_context_fragments raw submission;
+  check bool "existing v2 observation does not claim whole-memory attribution" true
+    (member "logical_memory_partition" submission=`String "unknown");
+  export_assembly_submission_measurement
+    ~fixture_kind:"actual_keeper_durable_trace_same_attempt"
+    ~scenario:"start" ~binding:proof ~submission ~raw
+;;
+
 let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
   let base_path = temp_workspace "masc-codex-raw-trace-" in
   let raw_trace_path = Filename.concat base_path "official-codex-raw.jsonl" in
@@ -5798,7 +6052,7 @@ let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
                 check string "submission names its real Keeper" record.agent_name
                   (detail |> member "keeper" |> to_string);
                 check (list string) "caller manifest carries identifiers and typed observation only"
-                  ["client_turn_ordinal";"keeper";"runtime_profile";"submission"]
+                  ["client_turn_ordinal";"keeper";"logical_context_bindings";"runtime_profile";"submission"]
                   (to_assoc detail |> List.map fst |> List.sort String.compare);
                 let event=member "submission" detail in
                 check (list string) "submission never retains content, tool schemas or credentials"
@@ -8144,6 +8398,8 @@ let () =
         ] )
     ; ( "subscription boundary"
       , [ test_case "ChatGPT turn completes" `Quick test_chatgpt_subscription_turn
+        ; test_case "Keeper persists assembly binding in same attempt" `Quick test_keeper_assembly_binding_is_durable_in_same_attempt
+        ; test_case "issuer assembly joins completed slots" `Quick test_issuer_assembly_links_to_completed_slots
         ; test_case "content-free actual context submission" `Quick test_content_free_context_submission
         ; test_case "context fragments read large unselected values from the written payload" `Quick
             test_context_fragments_read_large_unselected_values

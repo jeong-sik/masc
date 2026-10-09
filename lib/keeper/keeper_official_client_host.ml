@@ -30,6 +30,7 @@ type composed_context = Keeper_official_client_context_projection.composed_conte
 
 type resume_delivery = Keeper_official_client_context_projection.resume_delivery =
   { prompt : string
+  ; context_projection : Keeper_context_submission_link.t
   ; held_context : Keeper_official_client_session_store.held_context list
   }
 

@@ -293,7 +293,11 @@
       "path": "lib/keeper/keeper_board_attention_worker.ml",
       "baseline_lines": 2438,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; scheduler, state, quarantine, durability and control-loop semantic review pending",
+      "current_lines": 2165,
+      "prs": [
+        42133
+      ]
     },
     {
       "path": "lib/keeper/keeper_chat_store.ml",

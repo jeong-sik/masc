@@ -1,6 +1,6 @@
 # Board worker execution disposition boundary
 
-Base: a6cd66de76f9bf46e2ae604f29f28dd6d5d7602b.
+PR #42133. Base: a6cd66de76f9bf46e2ae604f29f28dd6d5d7602b.
 Code head: d51b19122f67a0a51c1901e4ac443e3be0f7ea04.
 
 Private keeper_board_attention_worker_disposition owns durable progress inspection, attempt/visit mapping, callback identity comparison, setup error rendering and typed lane execution disposition (277 lines). The root retains partition storage transitions, completion projection, quarantine/requeue, delivery, scheduler locks/timers and worker control loops (2165 lines, previously 2438).

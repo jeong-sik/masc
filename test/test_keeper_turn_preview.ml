@@ -299,10 +299,19 @@ let test_released_source_position_through_turns_decoder () =
   Keeper_turn_preview.note_stream ~writer ~now:6.
     (ContentBlockDelta {index=0; delta=TextSnapshot "replacement"});
   check_position 3 (String.length "replacement");
+  List.iteri (fun index text ->
+    Keeper_turn_preview.note_stream ~writer ~now:(6.1 +. float_of_int index)
+      (ContentBlockDelta {index=0;delta=TextSnapshot text});
+    check_position (4 + index) 0;
+    let observed = decoded (Keeper_turn_preview.to_json (current ())) in
+    Alcotest.(check string) "authoritative empty replacement clears the actual decoded tail"
+      "" observed.ktp_text_tail;
+    Alcotest.(check int) "empty replacement restarts released source bytes" 0
+      observed.ktp_text_position.kpp_start_byte) ["";" \t\n"];
   Keeper_turn_preview.note_attempt ~writer ~now:7. ~runtime_id:"second";
-  check_position 4 0;
+  check_position 6 0;
   Keeper_turn_preview.note_text ~writer ~now:8. "replacement";
-  check_position 5 (String.length "replacement");
+  check_position 7 (String.length "replacement");
   with_secret_redaction ~keeper_name:name "exact-secret" (fun redaction ->
     let writer = Some (Keeper_turn_preview.reset ~keeper_name:name ~now:9. ~redaction) in
     Keeper_turn_preview.note_stream ~writer ~now:10. (text_delta "before exact-");

@@ -199,11 +199,14 @@ let keeper_assignment_revision_of_yojson = function
   | _ -> Error "runtime assignment revision must be an object"
 ;;
 
-let config_observation ~path source_text =
+let config_source_revision_of_text source_text =
   let digest =
     Digestif.SHA256.(to_hex (digest_string ("runtime_config_source\x00" ^ source_text)))
   in
-  { path; source_text; source_revision = Config_source_revision digest }
+  Config_source_revision digest
+
+let config_observation ~path source_text =
+  { path; source_text; source_revision = config_source_revision_of_text source_text }
 ;;
 
 (* Explain why a validation target [id] is absent from the materialized

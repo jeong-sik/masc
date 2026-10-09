@@ -1035,13 +1035,16 @@ let decode_custom_event ~request state fields =
           |> Result.map_error (fun detail -> Malformed_event detail) in
       let* _ = optional_string ~surface:native_surface "toolCallName" native_fields
           |> Result.map_error (fun detail -> Malformed_event detail) in
-      let* () = match List.assoc_opt "completion" native_fields with
-        | None -> Error (Malformed_event (native_surface ^ ": completion is required"))
-        | Some json ->
-            Runtime_native_tools.completion_of_json json
-            |> Result.map (fun _ -> ())
-            |> Result.map_error (fun detail -> Malformed_event (native_surface ^ ": " ^ detail))
-      in
+      (* Only END carries a completion: START is complete without one, and
+         the allowed-field list above already rejects a START that has one. *)
+      let* () = if String.equal name "KEEPER_NATIVE_TOOL_END" then
+          (match List.assoc_opt "completion" native_fields with
+           | None -> Error (Malformed_event (native_surface ^ ": completion is required"))
+           | Some json ->
+               Runtime_native_tools.completion_of_json json
+               |> Result.map (fun _ -> ())
+               |> Result.map_error (fun detail -> Malformed_event (native_surface ^ ": " ^ detail)))
+        else Ok () in
       Ok state
     else if String.equal name "KEEPER_REPLY_DETAILS" then
       match state.reply_details with

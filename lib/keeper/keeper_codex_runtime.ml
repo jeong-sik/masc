@@ -578,18 +578,37 @@ let codex_error_to_core_error = function
     Agent_core.Error.Provider
       (Llm_provider.Error.ParseError
          { detail = Printf.sprintf "%s: %s" stage detail })
-  | Runtime_codex_app_server.Rpc_error { method_; code; message; _ } ->
-    Agent_core.Error.Provider
-      (Llm_provider.Error.ProviderReportedError
-         { provider = "codex_app_server"
-         ; error_type = Some "rpc_error"
-         ; detail =
-             Printf.sprintf
-               "%s%s: %s"
-               method_
-               (Option.fold ~none:"" ~some:(Printf.sprintf " (code %d)") code)
-               message
-         })
+  | Runtime_codex_app_server.Rpc_error { method_; code; message; _ } as error ->
+    (* The app-server refuses a turn/start whose input text exceeds its own
+       character limit with invalid_params (-32602) and typed data
+       (input_error_code = "input_too_large"), before any tool runs
+       (turn_processor.rs, input_too_large_error). Lower it to the typed size
+       refusal so the shrink ladder narrows the carried front and retries on
+       the same candidate; [InputCapacity] would rotate to a candidate that
+       refuses the same input. The status is the canonical payload-too-large
+       signal this type names; the app-server's own code is a generic
+       invalid-params, and the size fact is the typed data the parser already
+       witnessed. *)
+    (match Runtime_codex_app_server.input_capacity_refusal error with
+     | Some _ ->
+       Agent_core.Error.Api
+         (Agent_core.Retry.InvalidRequest
+            { message = Runtime_codex_app_server.error_to_string error
+            ; reason =
+                Agent_core.Retry.Request_body_refused_by_provider { status = 413 }
+            })
+     | None ->
+       Agent_core.Error.Provider
+         (Llm_provider.Error.ProviderReportedError
+            { provider = "codex_app_server"
+            ; error_type = Some "rpc_error"
+            ; detail =
+                Printf.sprintf
+                  "%s%s: %s"
+                  method_
+                  (Option.fold ~none:"" ~some:(Printf.sprintf " (code %d)") code)
+                  message
+            }))
   | Runtime_codex_app_server.Unsupported_server_request method_ ->
     Agent_core.Error.Provider
       (Llm_provider.Error.UnknownVariant
@@ -1712,7 +1731,7 @@ let run ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~
             ();
           Log.Keeper.warn
             ~keeper_name
-            "Codex typed context overflow; shrinking provider-bound history: attempt=%d previous_capacity_bytes=%d capacity_bytes=%d"
+            "Codex typed context overflow or input refusal; shrinking provider-bound history: attempt=%d previous_capacity_bytes=%d capacity_bytes=%d"
             shrink_attempt
             previous_capacity_bytes
             capacity_bytes)

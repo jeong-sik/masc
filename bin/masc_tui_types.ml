@@ -4110,6 +4110,9 @@ module Browser_lane_view = struct
          | Never_started ->
              [host_line "BiDi host: none has run for this workspace"]
              @ host_connection_note t @ attach ~address:None
+         | Record_missing_but_locked ->
+             [host_line "BiDi host: one holds the workspace lock, but its record is missing";
+              host_line "Do not start another host · inspect the existing process"]
          | Running entry ->
              (* The first row is the one a short screen keeps, so it says
                 where the host stands beside the list, not only that it runs. *)
@@ -4219,6 +4222,8 @@ module Browser_lane_view = struct
     | Host_reported report ->
         Some (match report.state with
           | Never_started -> "BiDi host: none has run for this workspace · b:how to attach"
+          | Record_missing_but_locked ->
+              "BiDi host: lock held, record missing · b:inspect the existing process"
           (* A gesture is refused for want of a listed BiDi connection, so a
              host that runs is one this server does not list. *)
           | Running { attached_at = Some _; pid; _ } ->
@@ -4268,6 +4273,7 @@ module Browser_lane_view = struct
     | Host_reported report ->
         (match report.state with
          | Never_started -> false
+         | Record_missing_but_locked -> true
          | Running _ | Ended _ | Died _ | Unreadable _ -> true)
   (* The rows of a host report a short screen reads first: where the host
      stands, and what that asks of the operator. *)

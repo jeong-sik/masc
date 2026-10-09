@@ -141,8 +141,17 @@ let test_authenticated_routes () = with_fixture (fun ~base_path ~state:_ ~admin 
       List.iter (fun (headers,expected) ->
         let status,_ = send headers path in check int (name ^ " authorization") expected status)
         [[],401;["authorization","Bearer invalid"],401;
-         ["authorization","Bearer " ^ worker],403]) [prefix ^ "receivers";records];
+         ["authorization","Bearer " ^ worker],403]) [prefix ^ "receivers";prefix ^ "hints";records];
     let headers = ["authorization","Bearer " ^ admin] in
+    let hint_status,hint_body=send headers (prefix ^ "hints") in
+    check int (name ^ " authenticated hints") 200 hint_status;
+    let hint_decoded=require_ok Read.decode_error_to_string (Read.of_json hint_body) in
+    let hint_page=require_ok Read.decode_error_to_string
+      (Read.hints_of_response ~keeper_name:"alpha" hint_decoded) in
+    check int (name ^ " cold hints never create storage") 0 (List.length hint_page.hints);
+    let bad_hint_status,_=send headers (prefix ^ "hints?extra=1") in
+    check int (name ^ " strict hint query") 400 bad_hint_status;
+
     let status,body = send headers records in
     check int (name ^ " missing is not empty success") 404 status;
     check string "missing code" "store_missing" Yojson.Safe.Util.(body |> member "error" |> to_string);

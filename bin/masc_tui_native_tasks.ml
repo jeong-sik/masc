@@ -77,7 +77,8 @@ let rec error_diagnostics = function
 let diagnostics state =
   let inventory = match state.inventory with
     | None -> []
-    | Some inventory -> "historical integrity checked on record reads; change hints unchecked" :: health_diagnostics inventory.health
+    | Some inventory -> (if state.stores=[] then [] else
+        ["historical integrity checked on record reads; change hints unchecked"]) @ health_diagnostics inventory.health
         @ List.map (fun operation -> "cleanup failed: " ^ operation) inventory.cleanup_failures in
   let retained = match state.inventory with
     | None -> []

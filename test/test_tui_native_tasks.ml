@@ -127,7 +127,7 @@ let test_real_chat_projection_preserves_flags_and_terminal_safety () =
     me_submitted_at=None;me_tool_block=None;me_skill_block=[];me_timestamp="";
     me_request_id="settled";me_execution_source=None;me_at=1.}];
   let entries=Masc_tui_render_chat.native_task_entries state ~keeper_name:keeper ~role_label_column:10 in
-  check int "skip_transcript hides only its inline entry" 3 (List.length entries);
+  check int "skip_transcript hides only its inline entry; integrity warning remains" 4 (List.length entries);
   check int "native observations do not fabricate root activity" 0
     (List.length (Masc_tui_types.keeper_message_activity_rows state));
   let safe text=check bool "opaque controls never reach terminal presentation" false
@@ -139,8 +139,8 @@ let test_real_chat_projection_preserves_flags_and_terminal_safety () =
   check string "raw task identity stays unchanged in cache" dangerous
     (List.hd (Native.tasks native)).origin.task_id;
   let projection=Masc_tui_render_chat.keeper_message_projection state ~keeper_name:keeper ~chat_cols:100 in
-  check int "independent entries join nonempty settled chat layout" 4 (List.length projection.layout_entries);
-  check int "one scroll placeholder per independent entry" 3 (List.length projection.transient_anchors);
+  check int "independent entries join nonempty settled chat layout" 5 (List.length projection.layout_entries);
+  check int "one scroll placeholder per independent entry" 4 (List.length projection.transient_anchors);
   let idle=Masc_tui_render_chat.keeper_message_projection state ~keeper_name:keeper ~chat_cols:100 in
   check bool "retained task lane preserves idle physical layout cache identity" true
     (projection.layout_entries == idle.layout_entries);

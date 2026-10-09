@@ -1,6 +1,6 @@
 # Board partition wire ownership, 2026-10-09
 
-Parent: `a5492cf76875b885386181a23069dd73ff1acd7f` (#42027).
+Parent: `1f482a08922981a9148e3a3de5f16e69e1ede1a0` (#42027).
 Issue: [#41857](https://github.com/jeong-sik/masc/issues/41857).
 
 `Keeper_board_attention_partition` combined durable ledger/cache/cursor effects
@@ -42,6 +42,15 @@ diagnostics are in [api-probes/checks.json](api-probes/checks.json). Those probe
 use built CMIs including internal paths: they establish public nominal/private
 boundaries, not private namespace exclusion or library installation.
 No tests were added to mirror the extraction or implementation layout.
+
+## Restack
+
+The parent branch was externally rewritten while this slice was being published.
+Its tree delta is limited to TUI retained-media/input code and related fixtures;
+the partition source/interface and all 12 recorded source/context hashes are
+unchanged. The two local slice commits were preserved on a checkpoint branch
+and rebased onto the actual parent. Original validation receipts remain recorded
+separately from focused checks on the new combined inputs.
 
 ## Scope
 

@@ -1,4 +1,4 @@
-File "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-partition-restack-api-q8z9lrng/public_record_update.ml", line 2, characters 22-50:
+File "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-partition-api-znazn4kp/public_record_update.ml", line 2, characters 22-50:
 2 | let forge (p : P.t) = { p with P.state = P.Ready }
                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: Cannot create values of the private type P.t

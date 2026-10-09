@@ -1,6 +1,6 @@
 {
   "date": "2026-10-09",
-  "parent": "a5492cf76875b885386181a23069dd73ff1acd7f",
+  "parent": "1f482a08922981a9148e3a3de5f16e69e1ede1a0",
   "build": {
     "command": "opam exec -- dune build --root . -j 4 test/test_keeper_board_attention_partition.exe test/test_keeper_board_attention_exact_flow.exe",
     "exit_code": 0,
@@ -20,8 +20,9 @@
   },
   "compiler_probes": "api-probes/checks.json",
   "executable_sha256": {
-    "_build/default/test/test_keeper_board_attention_partition.exe": "23cb323124cadffb75d4b7e38d247ed8d7f57d90560bddb28dee7f0309109635",
-    "_build/default/test/test_keeper_board_attention_exact_flow.exe": "044379893a8fbea97818ede5cb34117d5844c545481824bb1f8c99758472a3ec"
+    "_build/default/test/test_keeper_board_attention_partition.exe": "bd32a37bdc89bb5e01a2fac72e476922d79151231c341f532ca379b8217a9f1b",
+    "_build/default/test/test_keeper_board_attention_exact_flow.exe": "bdb10d16417c514c152b1da5911280e32e62dbf2a805316b96cc9438da7a3a73"
   },
-  "scope": "Focused macOS compilation, existing isolated real ledger/restart/codec scenarios and compiler API-boundary probes; no provider/live Keeper/UI/CI/installation/deployment or whole-stack proof."
+  "scope": "Focused macOS compilation, existing isolated real ledger/restart/codec scenarios and compiler API-boundary probes; no provider/live Keeper/UI/CI/installation/deployment or whole-stack proof.",
+  "initial_validation": "initial-checks.json"
 }

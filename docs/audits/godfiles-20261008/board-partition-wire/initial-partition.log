@@ -1,5 +1,5 @@
 Testing `keeper_board_attention_partition'.
-This run has ID `X6MZNDX7'.
+This run has ID `NY0LEER5'.
 
   [OK]          durable singleton exact FSM          0   roots are determinis...
   [OK]          durable singleton exact FSM          1   exact claim never re...
@@ -24,4 +24,4 @@ This run has ID `X6MZNDX7'.
   [OK]          durable singleton exact FSM         20   a judged candidate k...
 
 Full test results in `~/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/_build/_tests/keeper_board_attention_partition'.
-Test Successful in 0.246s. 21 tests run.
+Test Successful in 0.394s. 21 tests run.

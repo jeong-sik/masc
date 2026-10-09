@@ -1,7 +1,5 @@
 {
   "scope": "Compiler probes against current built CMIs including internal byte directory. Public record privacy, epoch opacity and nominal boundary only; not library installation or private namespace proof.",
-  "restacked_parent": "1f482a08922981a9148e3a3de5f16e69e1ede1a0",
-  "initial_validation": "initial-checks.json",
   "probes": [
     {
       "case": "public_roundtrip",
@@ -17,12 +15,12 @@
         "-I",
         "/Users/dancer/.opam/5.5.1/lib/yojson",
         "-c",
-        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-partition-restack-api-q8z9lrng/public_roundtrip.ml"
+        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-partition-api-znazn4kp/public_roundtrip.ml"
       ],
       "exit_code": 0,
       "expected_exit_code": 0,
       "source": "public_roundtrip.ml",
-      "log": "public_roundtrip.log"
+      "log": "initial-public_roundtrip.log"
     },
     {
       "case": "public_record_update",
@@ -38,12 +36,12 @@
         "-I",
         "/Users/dancer/.opam/5.5.1/lib/yojson",
         "-c",
-        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-partition-restack-api-q8z9lrng/public_record_update.ml"
+        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-partition-api-znazn4kp/public_record_update.ml"
       ],
       "exit_code": 2,
       "expected_exit_code": 2,
       "source": "public_record_update.ml",
-      "log": "public_record_update.log"
+      "log": "initial-public_record_update.log"
     },
     {
       "case": "public_epoch_literal",
@@ -59,12 +57,12 @@
         "-I",
         "/Users/dancer/.opam/5.5.1/lib/yojson",
         "-c",
-        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-partition-restack-api-q8z9lrng/public_epoch_literal.ml"
+        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-partition-api-znazn4kp/public_epoch_literal.ml"
       ],
       "exit_code": 2,
       "expected_exit_code": 2,
       "source": "public_epoch_literal.ml",
-      "log": "public_epoch_literal.log"
+      "log": "initial-public_epoch_literal.log"
     },
     {
       "case": "internal_record_to_public",
@@ -80,12 +78,12 @@
         "-I",
         "/Users/dancer/.opam/5.5.1/lib/yojson",
         "-c",
-        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-partition-restack-api-q8z9lrng/internal_record_to_public.ml"
+        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-partition-api-znazn4kp/internal_record_to_public.ml"
       ],
       "exit_code": 2,
       "expected_exit_code": 2,
       "source": "internal_record_to_public.ml",
-      "log": "internal_record_to_public.log"
+      "log": "initial-internal_record_to_public.log"
     }
   ]
 }

@@ -27,6 +27,7 @@ module Keeper_chat = Masc_tui_keeper_chat_projection
 module Keeper_chat_diff = Masc_tui_keeper_chat_diff
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Keeper_control = Masc_tui_keeper_control
+module Search = Masc_tui_chat_search
 module Markdown = Masc_tui_markdown
 module Markdown_cache = Masc_tui_markdown_render_cache
 module Message_layout = Masc_tui_message_layout
@@ -100,51 +101,65 @@ let chat_markdown_streaming ~context ~width body =
 (* Link cards must use the body budget supplied by Message_layout, after the
    clock, role and rail have been accounted for. Preview discovery and metadata
    fetching retain the existing link-preview cache policy. *)
-let chat_body_with_previews ~preview ~mode ~(entry : Message_layout.entry) ~width =
+module Entry_cache = Ephemeron.K1.Make (struct
+  type t = Message_layout.entry
+  let equal = ( == )
+  let hash entry = Hashtbl.hash (entry.Message_layout.style,
+    entry.markdown_source, entry.body_presentation)
+end)
+
+(* Immutable entry identity owns discovery. Ephemeron keys release both URLs
+   and source indexes when the projection no longer retains that entry. *)
+let entry_urls = Entry_cache.create 64
+let source_url_discoveries = ref 0
+
+let bare_urls_for_entry entry =
+  match Entry_cache.find_opt entry_urls entry with
+  | Some urls -> urls
+  | None ->
+      incr source_url_discoveries;
+      let seen = Hashtbl.create 4 in
+      let urls = Message_layout.bare_urls entry.Message_layout.body |> List.filter (fun url ->
+        if Hashtbl.mem seen url then false else (Hashtbl.add seen url (); true)) in
+      Entry_cache.replace entry_urls entry urls;
+      urls
+
+let chat_body_with_previews_internal ?on_field ~preview ~mode ~(entry : Message_layout.entry) ~width () =
   let body = entry.body in
   match entry.style, entry.markdown_source with
   | (Message_layout.Tool | Skill _), _
   | _, (Message_layout.Markdown_growing _ | Markdown_streaming) -> body
   | _, Message_layout.Markdown_stable _ ->
-    let seen = Hashtbl.create 4 in
-    let urls =
-      Message_layout.bare_urls body
-      |> List.filter (fun u ->
-             if Hashtbl.mem seen u then false
-             else begin
-               Hashtbl.add seen u ();
-               true
-             end)
-    in
-    match urls with
+    let cards = match mode with
+      | `Off -> []
+      | (`Compact | `Rich) -> List.mapi (fun index url -> index,url) (bare_urls_for_entry entry)
+          |> List.filter_map (fun (index,url) ->
+            let p=preview url in
+            let mapped = match mode,on_field with
+              | `Compact,None -> Option.map (fun row -> [row],[]) (Masc_tui_link_preview.render_compact_badge p)
+              | `Compact,Some _ -> Option.map (fun (mapped : Masc_tui_link_preview.card_render) -> mapped.rows,mapped.fields)
+                  (Masc_tui_link_preview.render_compact_badge_with_spans p)
+              | `Rich,_ when not (Masc_tui_link_preview.has_informative_preview p) -> None
+              | `Rich,None -> Some (Masc_tui_link_preview.render_inline_card ~width p,[])
+              | `Rich,Some _ -> let mapped=Masc_tui_link_preview.render_inline_card_with_spans ~width p in
+                  Some(mapped.rows,mapped.fields)
+              | `Off,_ -> None in
+            Option.map (fun (rows,fields) -> index,url,rows,fields) mapped) in
+    match cards with
     | [] -> body
-    | urls -> (
-        match mode with
-        | `Off -> body
-        | `Compact ->
-            let badges =
-              List.filter_map
-                (fun u ->
-                   let p = preview u in
-                   Masc_tui_link_preview.render_compact_badge p)
-                urls
-            in
-            (match badges with
-             | [] -> body
-             | _ -> body ^ "\n" ^ String.concat "\n" badges)
-        | `Rich ->
-            let cards =
-              List.filter_map
-                (fun u ->
-                   let p = preview u in
-                   if Masc_tui_link_preview.has_informative_preview p then
-                     Some (String.concat "\n" (Masc_tui_link_preview.render_inline_card ~width p))
-                   else None)
-                urls
-            in
-            (match cards with
-             | [] -> body
-             | _ -> body ^ "\n" ^ String.concat "\n" cards))
+    | _ ->
+        let offset=ref (String.length body+1) in
+        let texts=List.map (fun (index,url,rows,fields) ->
+          Option.iter (fun emit ->
+            let row_offsets=Array.of_list rows |> Array.map (fun row ->
+              let start= !offset in offset:=start+String.length row+1; start) in
+            List.iter (fun (field : Masc_tui_link_preview.card_source_span) ->
+              emit ~index ~url ~start:(row_offsets.(field.row)+field.row_start_byte) field) fields) on_field;
+          String.concat "\n" rows) cards in
+        body ^ "\n" ^ String.concat "\n" texts
+
+let chat_body_with_previews ~preview ~mode ~entry ~width =
+  chat_body_with_previews_internal ~preview ~mode ~entry ~width ()
 
 (* A journal revision's lines, in the columns [Message_layout.journal_rows]
    cut. Two questions, two channels: the sign keeps the diff colours, since
@@ -177,18 +192,13 @@ let chat_journal_rows ~(context : Chat_theme.body_context) ~width lines =
                 if String.equal opening "" then text else opening ^ text ^ closing)
               pieces))
 
-let cached_chat_markdown ~link_previews_mode ~theme =
-  (* One render closure serves measurement and drawing. Metadata arriving
-     between them belongs to the next frame, not a second height for this one. *)
-  let previews = Hashtbl.create 4 in
-  let preview url =
-    match Hashtbl.find_opt previews url with
+let preview_snapshot lookup =
+  let previews=Hashtbl.create 4 in
+  fun url -> match Hashtbl.find_opt previews url with
     | Some value -> value
-    | None ->
-        let value = Masc_tui_link_preview.get_preview url in
-        Hashtbl.add previews url value;
-        value
-  in
+    | None -> let value=lookup url in Hashtbl.add previews url value; value
+
+let cached_chat_markdown_with_preview ~preview ~link_previews_mode ~theme =
   fun ~(entry : Message_layout.entry) ~width ->
   let body = chat_body_with_previews ~preview ~mode:link_previews_mode ~entry ~width in
   let context = Chat_theme.body_context theme entry.style in
@@ -233,6 +243,50 @@ let cached_chat_markdown ~link_previews_mode ~theme =
   body_rows @ journal
 
 
+let cached_chat_markdown ~link_previews_mode ~theme =
+  (* One frozen preview provider serves measurement and drawing. Search passes
+     this same provider to its mapping and suffix measurement closures. *)
+  cached_chat_markdown_with_preview
+    ~preview:(preview_snapshot Masc_tui_link_preview.get_preview) ~link_previews_mode ~theme
+
+type mapped_chat_body = { mapped_rows : string list; runs : Search.run list; unavailable : bool }
+
+let search_chat_markdown ~link_previews_mode ~theme ~preview ~(entry : Message_layout.entry) ~width =
+  let fields=ref [] in
+  let body=chat_body_with_previews_internal ~on_field:(fun ~index ~url ~start field ->
+    fields:=(index,url,start,field):: !fields) ~preview ~mode:link_previews_mode ~entry ~width () in
+  let origins=Array.init (String.length body) (fun offset ->
+    if offset<String.length entry.body then Some(match entry.body_presentation with
+      | Source_body -> Search.Body_byte {offset;expansion=0}
+      | Thinking_summary -> Search.Thinking_summary_byte offset) else None) in
+  List.iter (fun (index,url,start,(field : Masc_tui_link_preview.card_source_span)) ->
+    for delta=0 to field.source_end_byte-field.source_start_byte-1 do
+      origins.(start+delta)<-Some(Search.Preview_byte {url;index;field=field.field;
+        byte=field.source_start_byte+delta;expansion=0})
+    done) !fields;
+  let context=Chat_theme.body_context theme entry.style in
+  let palette=chat_markdown_palette ~closing:context.Chat_theme.markdown_close in
+  let document=Markdown.render_document_with_spans ~palette ~width body in
+  let runs,unavailable=Search.of_document ~presentation:entry.body_presentation ~body_length:(String.length entry.body) ~origins document in
+  let journal_rows,journal_runs=match entry.journal with
+    | [] -> [],[]
+    | lines ->
+        let mapped=Message_layout.journal_rows_with_spans ~width lines in
+        let first=List.length document.document_rows+1 in
+        let fields=Hashtbl.create 16 in
+        List.iter (fun (span : Message_layout.journal_source_span) ->
+          let key=span.line_index,span.field in
+          let ranges=List.map (fun (start_byte,end_byte) -> {Markdown.start_byte;end_byte}) span.source_ranges in
+          match Hashtbl.find_opt fields key with
+          | None -> Hashtbl.add fields key {Search.text=span.value;
+              positions=Array.init (String.length span.value) (fun byte -> Some(Search.Journal_byte {line=span.line_index;field=span.field;byte}));
+              visible_rows=[first+span.row,ranges];joins_previous=false}
+          | Some (run : Search.run) -> Hashtbl.replace fields key {run with visible_rows=(first+span.row,ranges)::run.visible_rows}) mapped.journal_fields;
+        let runs=Hashtbl.to_seq fields |> List.of_seq |> List.sort (fun (a,_) (b,_) -> compare a b) |> List.map snd in
+        "" :: chat_journal_rows ~context ~width lines,runs in
+  {mapped_rows=document.document_rows @ journal_rows;runs=runs @ journal_runs;unavailable}
+
+
 (* Conversation colour names the source, not the prose. A keeper can return a
    page of Markdown; painting every byte green turns syntax, emphasis, links,
    and ordinary text into one undifferentiated status light. The compact
@@ -241,8 +295,10 @@ let cached_chat_markdown ~link_previews_mode ~theme =
    Markdown colours. *)
 (* How many reasoning lines a folded block stands for. The count is the
    non-blank lines, matching what the unfolded block draws. *)
-let folded_thinking_summary ~line_count ~source_height ~summary_height body =
-  if line_count = 0 then body
+type thinking_fold = Keep_source | Use_thinking_summary of string
+
+let folded_thinking_summary ~line_count ~source_height ~summary_height =
+  if line_count = 0 then Keep_source
   else
       let count = line_count in
       let summary = Printf.sprintf "Reasoning · %d %s folded · Ctrl-R"
@@ -250,8 +306,8 @@ let folded_thinking_summary ~line_count ~source_height ~summary_height body =
       (* Formatting syntax is not visible width, and the summary can wrap
          too. Folding is useful only when it actually saves terminal rows. *)
       if summary_height summary < source_height ()
-      then summary
-      else body
+      then Use_thinking_summary summary
+      else Keep_source
 
 
 let thinking_height_cache = Markdown_cache.create ~capacity:chat_markdown_cache_capacity
@@ -293,7 +349,10 @@ let fold_thinking_entry (state : state) ~chat_cols (entry : Message_layout.entry
       | Message_layout.Markdown_streaming ->
         (fun () -> chat_markdown ~context ~width entry.body |> trimmed_height), logical_lines () in
     let summary_height body = chat_markdown ~context ~width body |> trimmed_height in
-    { entry with body = folded_thinking_summary ~line_count ~source_height ~summary_height entry.body }
+    match folded_thinking_summary ~line_count ~source_height ~summary_height with
+    | Keep_source -> {entry with body_presentation=Message_layout.Source_body}
+    | Use_thinking_summary body ->
+        {entry with body;body_presentation=Message_layout.Thinking_summary}
   else entry
 
 let tool_projection_mode (state : state) =
@@ -1834,8 +1893,10 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name ~request_
           | Message_status | Message_local | Message_error ->
               message.me_text
         in
+        let body_presentation = Message_layout.Source_body in
         ({ style;
              heading_boundary = Message_layout.Inherit_heading;
+             body_presentation;
              timestamp =
                Option.fold ~none:message.me_timestamp
                  ~some:keeper_message_clock timeline_at;
@@ -1922,6 +1983,7 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
     let style = Message_layout.Local in
     ({ style
      ; heading_boundary = Message_layout.Inherit_heading
+     ; body_presentation = Message_layout.Source_body
      ; timestamp = keeper_message_clock at
      ; timeline_bucket = Some (keeper_message_timeline_bucket at)
      (* A pending input has no execution yet, so its request is its only
@@ -1980,6 +2042,23 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
 (* The polled tail is an excerpt for a turn whose journal is unavailable.
    Once that exact turn's journal supplies text, the chronological transcript
    owns the output and the excerpt must disappear. *)
+let preview_for_polled_anchor state keeper_name anchor =
+  List.find_map (fun (row : Tui_decode.keeper_turn_row) ->
+    if not (String.equal row.ktr_keeper_name keeper_name) then None else
+    match anchor, row.ktr_state with
+    | Scroll_polled (token, generation, Polled_speech),
+      Tui_decode.Keeper_turn_running {interrupt_token;preview=Some preview;_}
+      when String.equal token interrupt_token
+        && generation = preview.ktp_text_position.kpp_generation -> Some preview
+    | _ -> None) state.keeper_turns
+
+let held_polled_for_keeper state keeper_name =
+  match state.msg_scroll_pin with
+  | Some pin when pin.pin_mode <> Follow_live
+      && pin.pin_workspace = state.workspace_authority
+      && String.equal pin.pin_keeper keeper_name -> pin.held_transients
+  | Some _ | None -> []
+
 let polled_turn_output_with_anchors (state : state) ~keeper_name ~role_label_column =
   let live_text_drawn =
     match state.msg_live with
@@ -2030,6 +2109,7 @@ let polled_turn_output_with_anchors (state : state) ~keeper_name ~role_label_col
         in
         let speech = ({ style
            ; heading_boundary = Message_layout.Inherit_heading
+           ; body_presentation = Message_layout.Source_body
            ; timestamp = keeper_message_clock preview.ktp_updated_at_unix
            ; timeline_bucket = Some (keeper_message_timeline_bucket preview.ktp_updated_at_unix)
            ; diagnostics = []
@@ -2046,8 +2126,8 @@ let polled_turn_output_with_anchors (state : state) ~keeper_name ~role_label_col
            ; action = Message_layout.Action_none
            } : Message_layout.entry) in
         let status_style = Message_layout.Status in
-        [ Scroll_polled (interrupt_token, Polled_speech), speech
-        ; Scroll_polled (interrupt_token, Polled_status),
+        [ Scroll_polled (interrupt_token, preview.ktp_text_position.kpp_generation, Polled_speech), speech
+        ; Scroll_polled (interrupt_token, preview.ktp_text_position.kpp_generation, Polled_status),
           { speech with style = status_style; speaker = "STATUS";
             role_label = Message_layout.align_role_label
               ~column:role_label_column ~style:status_style "STATUS";
@@ -2556,7 +2636,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                   { keeper_name; request_id; entry_index }
               in
               let entry ?(speaker : string option)
-                  ?(heading_boundary = Message_layout.Inherit_heading) style role_label body =
+                  ?(heading_boundary = Message_layout.Inherit_heading) ?(body_presentation=Message_layout.Source_body) style role_label body =
                 (* One alignment, on the label the row actually carries.
                    Aligning the continuation mark and then aligning the
                    result again pays the badge's width twice, so the second
@@ -2588,6 +2668,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                       | Drawn_skill _ | Drawn_status _ | Drawn_error _ -> false);
                     le_entry = ({ style;
                      heading_boundary;
+                     body_presentation;
                      timestamp = keeper_message_clock (Option.value timeline_at ~default:started_at);
                      timeline_bucket;
                      diagnostics;
@@ -2780,6 +2861,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                  names none of that entry's request or attempt. *)
               [{ last with le_origin = None; le_is_reply = false; le_entry = { last.le_entry with style; speaker = "STATUS";
                  heading_boundary = Message_layout.Inherit_heading;
+                 body_presentation = Message_layout.Source_body;
                  diagnostics = [];
                  role_label = Message_layout.align_role_label
                    ~column:role_label_column ~style "STATUS";
@@ -2981,6 +3063,10 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
      speech. They have no durable search origin, but their height participates
      in every search and scroll-pin measurement. *)
   let polled = polled_turn_output_with_anchors state ~keeper_name ~role_label_column in
+  let held = held_polled_for_keeper state keeper_name in
+  let polled = List.filter (fun (anchor, _) ->
+      not (List.exists (fun excerpt -> excerpt.held_anchor = anchor) held)) polled
+    @ List.map (fun excerpt -> excerpt.held_anchor, excerpt.held_entry) held in
   let pending = chat_tail_entries state ~keeper_name ~role_label_column in
   let transient_anchors = List.map (fun (anchor, _) -> Some anchor) polled
     @ List.map (fun (entry : Message_layout.entry) ->
@@ -3066,61 +3152,11 @@ let projection_index_of_anchor projection =
       | None, found | found, None -> found
       | Some left, Some right -> Some (Int.min left right)) None keys
 
-(* The body has already passed the exact same Markdown and width calculation
-   as the frame. Search text is deliberately separate from origin matching:
-   a viewport pin below uses only the typed source and body ordinal. *)
-let matching_body_row ~needle ~before_occurrence rows =
-  let bodies = List.filter_map (fun (row : Message_layout.row) ->
-    match row.kind with
-    | Message_layout.Body -> Some (Masc_tui_theme.strip_sgr row.text |> String.trim)
-    | Metadata _ | Viewport_gap _ -> None) rows in
-  let needle = String.lowercase_ascii needle in
-  let body = String.lowercase_ascii (String.concat "\n" bodies) in
-  let body_length = String.length body and needle_length = String.length needle in
-  let rec matches body_at needle_at last =
-    if needle_at = needle_length then Some last
-    else if body_at = body_length then None
-    else if body.[body_at] = '\n' then
-      (* A physical wrap either replaces the space between words or splits a
-         long word without adding one. Only layout boundaries are optional;
-         spaces inside a rendered row still have to match the query. *)
-      let across =
-        if needle.[needle_at] = ' ' || needle.[needle_at] = '\n' then
-          matches (body_at + 1) (needle_at + 1) body_at
-        else None
-      in
-      (match across with Some _ -> across | None -> matches (body_at + 1) needle_at last)
-    else if body.[body_at] = needle.[needle_at] then
-      matches (body_at + 1) (needle_at + 1) body_at
-    else None
-  in
-  (* A cursor needs only the newest eligible endpoint. Stop at its ordinal
-     boundary instead of retaining every match in a repetitive body. *)
-  let rec collect from ordinal found =
-    if from >= body_length || Option.exists (fun before -> ordinal >= before) before_occurrence then found
-    else if body.[from] = '\n' then collect (from + 1) ordinal found
-    else match matches from 0 from with
-      | Some ending -> collect (from + 1) (ordinal + 1) (Some (ordinal, ending))
-      | None -> collect (from + 1) ordinal found
-  in
-  let found = collect 0 0 None in
-  match found with
-  | None -> None
-  | Some (occurrence, offset) ->
-      (* Put the last row of a wrapped phrase at the viewport bottom; putting
-         its first row there would leave the rest below the visible window. *)
-      let rec locate ordinal start = function
-        | [] -> None
-        | line :: rest ->
-            if offset < start + String.length line then Some (ordinal, occurrence)
-            else locate (ordinal + 1) (start + String.length line + 1) rest
-      in
-      locate 0 0 bodies
-
 (* The layout reuses its entry list while a projection is unchanged. Keep the
    newest anchor alongside that identity instead of allocating every index on
    idle live-edge paints. Changed source/tail lists get a fresh observation. *)
 type scroll_anchor_index = {
+  indexed_entries : Message_layout.entry array;
   indexed_anchors : chat_scroll_anchor option array;
   transient_indices : (chat_scroll_anchor, int) Hashtbl.t;
   newest_anchors : (int * chat_scroll_anchor) list;
@@ -3158,7 +3194,8 @@ let scroll_anchor_index projection =
                    Hashtbl.add transient_indices anchor at
              | _ -> ())
         | Tagged_block _ -> ()) projection.tagged_entries;
-      let anchors = {indexed_anchors; newest_anchors; transient_indices} in
+      let indexed_entries = Array.of_list projection.layout_entries in
+      let anchors = {indexed_entries; indexed_anchors; newest_anchors; transient_indices} in
       scroll_anchor_index_memo := Some (projection.layout_entries, anchors);
       anchors
 
@@ -3173,29 +3210,176 @@ let projection_index_of_scroll_anchor projection = function
   | (Scroll_pending _ | Scroll_polled _) as anchor ->
       Hashtbl.find_opt (scroll_anchor_index projection).transient_indices anchor
 
-let requested_scroll_from_pin state ~keeper_name projection ~markdown ~inner_width =
+(* A frame owns one preview snapshot and one semantic map per projected entry.
+   Physical row ordinals can change with terminal width or origin gutters;
+   only a producer-owned source byte can recover that same reading position. *)
+type source_body_index = {
+  source_rows : (chat_source_position, int) Hashtbl.t;
+  row_sources : (int, chat_source_position) Hashtbl.t;
+  last_source_row : int option;
+}
+
+type source_body_key = {
+  source_width : int;
+  source_palette_generation : int;
+  source_origin : Message_layout.origin_display;
+  source_preview_mode : [`Off | `Compact | `Rich];
+  source_previews : Masc_tui_link_preview.og_preview list;
+  source_polled_input : (int * int * string) option;
+  source_polled_unavailable : bool;
+}
+
+type source_body_memo = { key : source_body_key; index : source_body_index option }
+
+let source_body_indexes = Entry_cache.create 64
+let source_index_builds = ref 0
+
+type source_mapping_owner =
+  | Durable_source
+  | Polled_source of { start_byte : int; mapped : Masc.Tui_terminal_text.mapped_text Lazy.t }
+  | Unknown_polled_source
+
+let source_mapping_owner state ~keeper_name projection entry_index =
+  match scroll_anchor_at projection entry_index with
+  | Some (Scroll_polled (token, generation, Polled_speech)) ->
+      (match (let held = held_polled_for_keeper state keeper_name in
+        match List.find_opt (fun excerpt -> excerpt.held_anchor =
+            Scroll_polled (token,generation,Polled_speech)) held with
+        | Some excerpt -> Some excerpt.held_preview
+        | None -> preview_for_polled_anchor state keeper_name
+            (Scroll_polled (token,generation,Polled_speech))) with
+       | None -> Unknown_polled_source, None
+       | Some preview ->
+           Polled_source {start_byte=preview.ktp_text_position.kpp_start_byte;
+             mapped=lazy (Masc.Tui_terminal_text.sanitize_terminal_lines_with_source preview.ktp_text_tail)},
+           Some (generation,preview.ktp_text_position.kpp_start_byte,preview.ktp_text_tail))
+  | Some (Scroll_polled (_, _, Polled_status)) ->
+      (* Activity labels can change within one speech generation. They have
+         neither immutable held text nor a producer-owned source identity. *)
+      Unknown_polled_source, None
+  | Some (Scroll_durable _ | Scroll_pending _) | None ->
+      Durable_source, None
+
+let source_body_key state ~width ~theme ~preview ~polled_input ~unavailable entry =
+  let context = Chat_theme.body_context theme entry.Message_layout.style in
+  let urls = match entry.style, entry.markdown_source, state.link_previews_mode with
+    | (Message_layout.Tool | Skill _), _, _
+    | _, (Message_layout.Markdown_growing _ | Markdown_streaming), _
+    | _, _, `Off -> []
+    | _, Message_layout.Markdown_stable _, (`Compact | `Rich) -> bare_urls_for_entry entry in
+  {source_width=width;source_palette_generation=context.palette_generation;
+   source_origin=state.msg_origin_display;source_preview_mode=state.link_previews_mode;
+   source_previews=List.map preview urls;source_polled_input=polled_input;
+   source_polled_unavailable=unavailable}
+
+let source_body_lookup state ~keeper_name projection ~inner_width ~theme ~preview =
+  let entries = (scroll_anchor_index projection).indexed_entries in
+  let mapped = Hashtbl.create 8 in
+  fun entry_index ->
+    match Hashtbl.find_opt mapped entry_index with
+    | Some value -> value
+    | None ->
+        let value = if entry_index < 0 || entry_index >= Array.length entries then None else
+          let entry = entries.(entry_index) in
+          let width = Message_layout.entry_body_cells ~origin:state.msg_origin_display
+            ~inner_width entry in
+          let owner, polled_input = source_mapping_owner state ~keeper_name projection entry_index in
+          let key = source_body_key state ~width ~theme ~preview ~polled_input
+            ~unavailable:(owner = Unknown_polled_source) entry in
+          match Entry_cache.find_opt source_body_indexes entry with
+          | Some memo when memo.key = key -> memo.index
+          | Some _ | None ->
+          incr source_index_builds;
+          let body = search_chat_markdown ~link_previews_mode:state.link_previews_mode
+            ~theme ~preview ~entry ~width in
+          let index = if body.unavailable || owner = Unknown_polled_source then None else
+          let convert = match owner with
+            | Durable_source -> (fun position -> Some (Durable_position position))
+            | Unknown_polled_source -> (fun _ -> None)
+            | Polled_source {start_byte;mapped} ->
+                let mapped = Lazy.force mapped in
+                let output = Masc.Tui_terminal_text.mapped_text mapped in
+                (* The exact shared sanitizer must own this same projection.
+                   A stale or inconsistent producer map authorizes no pin. *)
+                if not (String.equal output entry.body) then (fun _ -> None) else
+                let expansions = Array.make (String.length output) 0 in
+                let previous = ref None and expansion = ref 0 in
+                for byte = 0 to String.length output - 1 do
+                  let source = Masc.Tui_terminal_text.source_byte_at mapped byte in
+                  if source = !previous then incr expansion else expansion := 0;
+                  previous := source;
+                  expansions.(byte) <- !expansion
+                done;
+                (function
+                 | Search.Body_byte {offset;expansion=semantic_expansion} ->
+                     Option.map (fun source -> Polled_body_byte {offset=start_byte+source;
+                       sanitizer_expansion=expansions.(offset); semantic_expansion})
+                       (Masc.Tui_terminal_text.source_byte_at mapped offset)
+                 | Body_label _ | Thinking_summary_byte _ | Thinking_summary_label _
+                 | Preview_byte _ | Journal_byte _ -> None) in
+          let source_rows = Hashtbl.create 64 and row_sources = Hashtbl.create 16 in
+          let last_source_row = ref None in
+          let body_rows = List.length body.mapped_rows in
+          List.iter (fun (run : Search.run) ->
+            let _, copied = Masc_tui_theme.strip_sgr_with_positions run.text in
+            let visible_bytes = Array.make (String.length run.text) false in
+            Array.iter (fun byte -> visible_bytes.(byte) <- true) copied;
+            List.iter (fun (row, ranges) ->
+              if row >= 0 && row < body_rows then
+                List.iter (fun (range : Markdown.source_range) ->
+                  for byte = range.start_byte to range.end_byte - 1 do
+                    if visible_bytes.(byte) then Option.iter (fun position ->
+                      (* A normalized origin can occur more than once. Keep the
+                         first actually visible row, matching search's source
+                         producer traversal, without electing by source words. *)
+                      last_source_row := Some (match !last_source_row with None -> row | Some held -> max row held);
+                      if not (Hashtbl.mem source_rows position) then Hashtbl.add source_rows position row;
+                      if not (Hashtbl.mem row_sources row) then Hashtbl.add row_sources row position)
+                      (Option.bind run.positions.(byte) convert)
+                  done) ranges) run.visible_rows) body.runs;
+          Some {source_rows;row_sources;last_source_row= !last_source_row} in
+          Entry_cache.replace source_body_indexes entry {key;index};
+          index in
+        Hashtbl.add mapped entry_index value;
+        value
+
+let body_row_of_point ~source_body entry_index (point : chat_scroll_point) =
+  match point.source_position with
+  | None -> None
+  | Some position -> Option.bind (source_body entry_index) (fun body ->
+      Hashtbl.find_opt body.source_rows position)
+
+let source_point_on_row ~source_body entry_index body_row =
+  Option.bind (source_body entry_index) (fun body -> Hashtbl.find_opt body.row_sources body_row)
+
+let requested_scroll_from_pin state ~keeper_name projection ~markdown ~source_body ~inner_width =
   if state.msg_scroll = max_int then max_int
   else match state.msg_scroll_pin with
   | Some pin when pin.pin_workspace = state.workspace_authority
       && String.equal pin.pin_keeper keeper_name
       && pin.pin_mode <> Follow_live ->
-      Option.value ~default:state.msg_scroll
+      (* Every saved byte may have been removed. A stale numeric distance
+         must not become a successful pin to newly arriving content. *)
+      Option.value ~default:0
         (List.find_map (fun point ->
           Option.bind (projection_index_of_scroll_anchor projection point.scroll_anchor)
             (fun entry_index ->
-              Option.map (fun suffix -> max 0
-                (suffix - point.rows_below + state.msg_scroll - pin.pin_scroll))
-                (Message_layout.scroll_for_body_row ~markdown
-                  ~origin:state.msg_origin_display ~inner_width ~entry_index
-                  ~body_row:point.body_row projection.layout_entries))) pin.pin_points)
+              Option.bind (body_row_of_point ~source_body entry_index point) (fun body_row ->
+                Option.map (fun suffix -> max 0
+                  (suffix - point.rows_below + state.msg_scroll - pin.pin_scroll))
+                  (Message_layout.scroll_for_body_row ~markdown
+                    ~origin:state.msg_origin_display ~inner_width ~entry_index
+                    ~body_row projection.layout_entries)))) pin.pin_points)
   | Some _ | None -> state.msg_scroll
 
-let scroll_position_for_window state ~keeper_name projection ~markdown ~inner_width
+let scroll_position_for_window state ~keeper_name projection ~markdown ~source_body ~inner_width
     (window : Message_layout.scroll_window) =
   let points = List.filter_map (fun (position : Message_layout.body_row_position) ->
-    Option.map (fun anchor ->
-      {scroll_anchor=anchor; body_row=position.body_row; rows_below=position.rows_below})
-      (scroll_anchor_at projection position.entry_index)) window.body_positions in
+    Option.bind (scroll_anchor_at projection position.entry_index) (fun anchor ->
+      Option.map (fun source_position ->
+        {scroll_anchor=anchor; body_row=position.body_row; source_position=Some source_position;
+         rows_below=position.rows_below})
+        (source_point_on_row ~source_body position.entry_index position.body_row))) window.body_positions in
   (* The live-edge layout can elide middle rows and does not return body
      positions. Its newest structural entry still records the current tail
      distance, so the first scroll key can freeze it before an arrival. *)
@@ -3203,18 +3387,53 @@ let scroll_position_for_window state ~keeper_name projection ~markdown ~inner_wi
     | Some {pin_mode=Hold_search; _} -> true | Some _ | None -> false in
   let points = if points <> [] || window.scroll <> 0 || search_held then points else
     newest_scroll_anchors projection |> List.find_map (fun (entry_index, anchor) ->
-      Option.map (fun suffix ->
-        [{scroll_anchor=anchor; body_row=0; rows_below=suffix}])
-        (Message_layout.scroll_for_body_row ~markdown
-          ~origin:state.msg_origin_display ~inner_width ~entry_index
-          ~body_row:0 projection.layout_entries))
+      Option.bind (source_body entry_index) (fun body ->
+        let first=Hashtbl.fold (fun row source held -> match held with
+          | Some(earlier,_) when earlier <= row -> held
+          | Some _ | None -> Some(row,source)) body.row_sources None in
+        Option.bind first (fun (body_row,source_position) ->
+          Option.map (fun suffix ->
+            [{scroll_anchor=anchor; body_row; source_position=Some source_position; rows_below=suffix}])
+            (Message_layout.scroll_for_body_row ~markdown
+              ~origin:state.msg_origin_display ~inner_width ~entry_index
+              ~body_row projection.layout_entries))))
     |> Option.value ~default:[] in
-  let pin_mode = match state.msg_scroll_pin with
-    | Some {pin_mode=Hold_search; _} when window.scroll = 0 -> Hold_search
-    | Some _ | None -> if window.scroll = 0 then Follow_live else Hold_scroll in
+  (* Frame feedback must retain a searched query endpoint, rather than replace
+     it with the first byte of whichever physical row is now at the top. An
+     explicit scroll gesture changes Hold_search to Hold_scroll at the edge. *)
+  let searched_points = match state.msg_scroll_pin with
+    | Some pin when pin.pin_mode=Hold_search && pin.pin_workspace=state.workspace_authority
+        && String.equal pin.pin_keeper keeper_name ->
+        Some (List.filter_map (fun point ->
+          Option.bind (projection_index_of_scroll_anchor projection point.scroll_anchor) (fun entry_index ->
+            Option.bind (body_row_of_point ~source_body entry_index point) (fun body_row ->
+              Option.map (fun suffix -> {point with body_row;rows_below=suffix-window.scroll})
+                (Message_layout.scroll_for_body_row ~markdown
+                  ~origin:state.msg_origin_display ~inner_width ~entry_index
+                  ~body_row projection.layout_entries)))) pin.pin_points)
+    | Some _ | None -> None in
+  let points,pin_mode = match searched_points with
+    | Some (_ :: _ as retained) -> retained,Hold_search
+    | Some [] | None -> points,(if window.scroll=0 then Follow_live else Hold_scroll) in
+  let held_transients = if pin_mode = Follow_live then [] else
+    let previous = held_polled_for_keeper state keeper_name in
+    let entries = (scroll_anchor_index projection).indexed_entries in
+    List.filter_map (fun point ->
+      match point.scroll_anchor with
+      | Scroll_polled (_, _, Polled_speech) as anchor ->
+          (match List.find_opt (fun excerpt -> excerpt.held_anchor = anchor) previous with
+           | Some excerpt -> Some excerpt
+           | None -> Option.bind (preview_for_polled_anchor state keeper_name anchor)
+               (fun held_preview -> Option.bind (projection_index_of_scroll_anchor projection anchor)
+                 (fun index -> if index < 0 || index >= Array.length entries then None else
+                   Some {held_anchor=anchor;held_preview;held_entry=entries.(index)})))
+      | _ -> None) points
+    |> List.sort_uniq (fun left right -> compare left.held_anchor right.held_anchor) in
+  let empty_follow_live () = Some {pin_workspace=state.workspace_authority;
+    pin_keeper=keeper_name;pin_scroll=0;pin_mode=Follow_live;held_transients=[];pin_points=[]} in
   let pin = match points with
     | _ :: _ -> Some { pin_workspace=state.workspace_authority;
-        pin_keeper=keeper_name; pin_scroll=window.scroll; pin_mode; pin_points=points }
+        pin_keeper=keeper_name; pin_scroll=window.scroll; pin_mode; held_transients; pin_points=points }
     | [] ->
         (* Search pins hold even at zero. Follow_live snapshots only seed
            the next scroll key and do not compensate new arrivals. *)
@@ -3224,16 +3443,18 @@ let scroll_position_for_window state ~keeper_name projection ~markdown ~inner_wi
              let pin_points = List.filter_map (fun point ->
                Option.bind (projection_index_of_scroll_anchor projection point.scroll_anchor)
                  (fun entry_index ->
-                   Option.map (fun suffix -> {point with rows_below=suffix-window.scroll})
-                     (Message_layout.scroll_for_body_row ~markdown
-                       ~origin:state.msg_origin_display ~inner_width ~entry_index
-                       ~body_row:point.body_row projection.layout_entries))) pin.pin_points in
+                   Option.bind (body_row_of_point ~source_body entry_index point) (fun body_row ->
+                     Option.map (fun suffix -> {point with body_row;rows_below=suffix-window.scroll})
+                       (Message_layout.scroll_for_body_row ~markdown
+                         ~origin:state.msg_origin_display ~inner_width ~entry_index
+                         ~body_row projection.layout_entries)))) pin.pin_points in
              (match pin_points with
-              | [] -> None
-              | _ :: _ -> Some {pin with pin_scroll=window.scroll; pin_mode; pin_points})
-         | Some _ | None -> None)
+              | [] -> empty_follow_live ()
+              | _ :: _ -> Some {pin with pin_scroll=window.scroll; pin_mode; held_transients; pin_points})
+         | Some _ | None -> empty_follow_live ())
   in
-  { scroll=window.scroll; pin }
+  { scroll=(match pin with Some {pin_points=[];pin_mode=Follow_live;_} -> 0
+      | Some _ | None -> window.scroll); pin }
 
 (* Search uses exactly the projected speech/activity rows and measures every
    displayed suffix row, including polled notices and pending input. Pending
@@ -3243,8 +3464,13 @@ let scroll_position_for_window state ~keeper_name projection ~markdown ~inner_wi
    The repeat cursor uses source identity, never a timestamp, text match or
    viewport index. Reconciliation may remove a text stretch; in that case
    the saved older identities continue the walk without repeating new rows. *)
-let keeper_message_find_scroll (state : state) ~keeper_name ~needle ~older_than =
-  if String.equal needle "" then None
+type chat_search_result = {
+  match_result : (chat_scroll_position * chat_search_cursor) option;
+  unavailable_entries : int;
+}
+
+let keeper_message_find_scroll ?(preview_lookup=Masc_tui_link_preview.get_preview) (state : state) ~keeper_name ~needle ~older_than =
+  if String.equal needle "" then {match_result=None;unavailable_entries=0}
   else
     let _, cols = get_terminal_size () in
     let chat_cols =
@@ -3254,8 +3480,10 @@ let keeper_message_find_scroll (state : state) ~keeper_name ~needle ~older_than 
     let tagged = projection.tagged_entries in
     let index_of = projection_index_of_anchor projection in
     let inner_width = max 1 (framed_inner_width chat_cols) in
-    let markdown = cached_chat_markdown ~link_previews_mode:state.link_previews_mode
-      ~theme:(Chat_theme.snapshot ()) in
+    let theme=Chat_theme.snapshot () in
+    let preview=preview_snapshot preview_lookup in
+    let unavailable_entries=ref 0 in
+    let markdown=cached_chat_markdown_with_preview ~preview ~link_previews_mode:state.link_previews_mode ~theme in
     let ceiling, repeat = match older_than with
       | None -> List.length tagged, None
       | Some cursor when cursor.search_workspace <> state.workspace_authority
@@ -3263,7 +3491,7 @@ let keeper_message_find_scroll (state : state) ~keeper_name ~needle ~older_than 
           List.length tagged, None
       | Some cursor ->
           (match index_of cursor.matched_anchor with
-           | Some index -> index + 1, Some (index, cursor.matched_occurrence)
+           | Some index -> index + 1, Some (index, cursor.matched_position)
            | None ->
                Option.value ~default:0
                  (List.find_map (fun anchor ->
@@ -3282,27 +3510,41 @@ let keeper_message_find_scroll (state : state) ~keeper_name ~needle ~older_than 
       candidates 0 None [] tagged
       |> List.find_map (fun (index, tag, (entry : Message_layout.entry), previous) ->
            Option.bind (search_anchor_of_tag tag) (fun anchor ->
-               let rows = Message_layout.rows_of_entry ~markdown
+               let mapped=ref None in
+               let observe ~entry ~width =
+                 let body=search_chat_markdown ~link_previews_mode:state.link_previews_mode ~theme ~preview ~entry ~width in
+                 mapped:=Some body;
+                 body.mapped_rows in
+               let rows=Message_layout.rows_of_entry ~markdown:observe
                  ~origin:state.msg_origin_display ~inner_width ~previous entry in
-               let before_occurrence = match repeat with
-                 | Some (at, occurrence) when at = index -> Some occurrence
-                 | Some _ | None -> None in
-               Option.map (fun (body_row, occurrence) -> index, anchor, body_row, occurrence)
-                 (matching_body_row ~needle ~before_occurrence rows)))
+               match !mapped with
+               | None -> incr unavailable_entries; None
+               | Some body when body.unavailable -> incr unavailable_entries; None
+               | Some body ->
+                   let body_rows=List.fold_left (fun count (row : Message_layout.row) ->
+                     match row.kind with Body -> count+1 | Metadata _ | Viewport_gap _ -> count) 0 rows in
+                   let before=match repeat with
+                     | Some (at,position) when at=index -> Some position | _ -> None in
+                   Option.map (fun (found : Search.matched) -> index,anchor,found.body_row,found.position,found.ending_position)
+                     (Search.find ~needle ~before ~body_rows body.runs)))
     in
-    match matched with
+    let match_result=match matched with
     | None -> None
-    | Some (at, matched_anchor, body_row, matched_occurrence) ->
+    | Some (at, matched_anchor, body_row, matched_position, ending_position) ->
         let older_anchors = tagged |> List.take at
           |> List.filter_map (fun (tag, _) -> search_anchor_of_tag tag) |> List.rev in
         Option.map (fun scroll ->
           let pin = Some {pin_workspace=state.workspace_authority; pin_keeper=keeper_name;
             pin_scroll=scroll; pin_mode=Hold_search;
-            pin_points=[{scroll_anchor=Scroll_durable matched_anchor; body_row; rows_below=0}]} in
+            held_transients=[]; pin_points=[{scroll_anchor=Scroll_durable matched_anchor; body_row;
+              source_position=Some (Durable_position ending_position); rows_below=0}]} in
           {scroll; pin}, {search_workspace=state.workspace_authority;
-            search_keeper=keeper_name; matched_anchor; matched_occurrence; older_anchors})
+            search_keeper=keeper_name; matched_anchor; matched_position; older_anchors})
           (Message_layout.scroll_for_body_row ~markdown ~origin:state.msg_origin_display
             ~inner_width ~entry_index:at ~body_row projection.layout_entries)
+
+    in
+    {match_result;unavailable_entries= !unavailable_entries}
 
 
 let render_keeper_message (state : state) =
@@ -3331,10 +3573,12 @@ let render_keeper_message (state : state) =
     in
     let projection = keeper_message_projection state ~keeper_name ~chat_cols in
     let inner_width = max 1 (framed_inner_width chat_cols) in
-    let markdown = cached_chat_markdown ~link_previews_mode:state.link_previews_mode
-      ~theme:chat_theme in
+    let preview = preview_snapshot Masc_tui_link_preview.get_preview in
+    let markdown = cached_chat_markdown_with_preview ~preview
+      ~link_previews_mode:state.link_previews_mode ~theme:chat_theme in
+    let source_body = source_body_lookup state ~keeper_name projection ~inner_width ~theme:chat_theme ~preview in
     let requested = requested_scroll_from_pin state ~keeper_name projection
-      ~markdown ~inner_width in
+      ~markdown ~source_body ~inner_width in
     (* A search can pin a short conversation at scroll zero. If an arrival
        precedes its first paint, the pin already restores a reading position
        although the stored scroll is still zero. Reserve and draw its chrome
@@ -3545,7 +3789,7 @@ let render_keeper_message (state : state) =
     in
     let scroll = window.scroll and visible_rows = window.rows in
     let scroll_feedback = scroll_position_for_window state ~keeper_name projection
-      ~markdown ~inner_width window in
+      ~markdown ~source_body ~inner_width window in
 
     (* The chat buffer starts below the one-row tab strip, which is added by
        [finish_frame_beside_acting_pane]. Mouse reports count from the terminal's
@@ -4195,4 +4439,6 @@ module For_testing = struct
   let thinking_height_cache = thinking_height_cache
   let chat_markdown_cache = chat_markdown_cache
   let chat_markdown_theme_revision = chat_markdown_theme_revision
+  let source_index_build_count () = !source_index_builds
+  let source_url_discovery_count () = !source_url_discoveries
 end

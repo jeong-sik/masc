@@ -20,6 +20,13 @@
 
 - Home retains visited conversations and presents decisions by request identity with detail and return context (#40137, #40152).
 - Work and decision indexes use aligned titles and focus-aware navigation. Keeper roster navigation preserves draft cursor editing and voice input (#41558, #41583).
+
+### Removed
+
+- `/play qr` is removed; invite QR codes now appear only on the card opened by `/play invite` or `/play link` (#39877).
+- The hourly Issue Taxonomy reconciliation workflow is removed; issue-creation labels and on-demand drift repair remain (#41275).
+- Remove the unused Lane add-on sampling recovery iterator (#41293).
+- Remove 22 retired `ollama_cloud` model catalog rows; the corresponding local Ollama rows remain (#41474).
 - The unused English Keeper prompt draft and its dashboard toggle are removed; managed asset synchronization retires the runtime copy (#41493).
 
 ### Fixed

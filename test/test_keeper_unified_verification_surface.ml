@@ -4,8 +4,8 @@ module WO = Masc.Keeper_world_observation
 module UM = Masc.Keeper_unified_metrics
 
 (* Use the same embedded prompt assets as runtime bootstrap, in an isolated
-   directory. [Prompt_defaults.init] scans an already registered directory;
-   it does not discover or install one. *)
+   directory. Catalog initialization resolves a registered directory or the
+   Dune source-root fallback; direct execution registers these assets explicitly. *)
 let () =
   let prompts_dir = Filename.temp_dir "verification_surface_prompts_" "" in
   at_exit (fun () -> Fs_compat.remove_tree prompts_dir);

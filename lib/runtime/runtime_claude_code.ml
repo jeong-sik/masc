@@ -2043,6 +2043,25 @@ let partial_stream_event ~expected_session_id ~stream_started ~response_emitted
     | other -> protocol_error stage ("unsupported partial event type " ^ other)
 ;;
 
+(* A partial frame stamped with a child's [parent_tool_use_id] carries that
+   child's model output. The complete [Child_response] envelope publishes the
+   same body once as [Child_content_observed]; the partial copy must not open,
+   extend, or close root blocks, nor count as root response evidence. Frames
+   without the field keep the root reading this parser has always given them. *)
+let partial_stream_scope fields =
+  match List.assoc_opt "parent_tool_use_id" fields with
+  | None -> Ok Root_response
+  | Some _ -> assistant_scope ~stage:"partial stream event" fields
+;;
+
+let child_partial_stream_event ~expected_session_id fields =
+  let stage = "partial stream event" in
+  let* session_id = required_string stage "session_id" fields in
+  if session_id <> expected_session_id then
+    protocol_error stage "session_id does not match the active Claude session"
+  else Ok ()
+;;
+
 let complete_partial_text (partial : partial_stream) ~on_stream_event ~response_emitted
     ~channel ~message_id ~uuid ~ordinal text =
   let envelope = uuid, ordinal in
@@ -2173,8 +2192,12 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
   | "control_response" ->
     protocol_error "turn" "received an unsolicited control response"
   | "stream_event" ->
-    let* () = partial_stream_event ~expected_session_id ~stream_started ~response_emitted
-        ~on_stream_event partial_stream fields in
+    let* scope = partial_stream_scope fields in
+    let* () = match scope with
+      | Root_response ->
+          partial_stream_event ~expected_session_id ~stream_started ~response_emitted
+            ~on_stream_event partial_stream fields
+      | Child_response _ -> child_partial_stream_event ~expected_session_id fields in
     observe_partial_input input_observer ~session_id:expected_session_id fields;
     await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~expected_session_id ~subscription ~resumed ~rate_limit ~assistant_model

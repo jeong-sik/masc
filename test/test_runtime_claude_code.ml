@@ -1397,6 +1397,80 @@ let test_child_body_is_not_root_response_evidence () =
           | _ -> true) !events))
 ;;
 
+(* Partial frames as Claude Code sends them when the client forwards child
+   text: same root session, stamped with the child's parent tool call. *)
+let scoped_partial ~parent event =
+  Yojson.Safe.to_string (`Assoc ["type", `String "stream_event";
+    "parent_tool_use_id", parent; "session_id", `String "__SESSION__"; "event", event])
+
+let partial_start message = `Assoc ["type", `String "message_start";
+  "message", `Assoc ["id", `String message; "model", `String "claude-fixture"]]
+let partial_block index kind = `Assoc ["type", `String "content_block_start"; "index", `Int index;
+  "content_block", `Assoc ["type", `String kind; kind, `String ""]]
+let partial_piece index kind text = `Assoc ["type", `String "content_block_delta";
+  "index", `Int index; "delta", `Assoc ["type", `String (kind ^ "_delta"); kind, `String text]]
+let partial_stop index = `Assoc ["type", `String "content_block_stop"; "index", `Int index]
+
+let child_partial_frames =
+  let child = scoped_partial ~parent:(`String "parent-agent") in
+  [child (partial_start "child-partial-message"); child (partial_block 0 "thinking");
+   child (partial_piece 0 "thinking" "CHILD_REASONING"); child (partial_stop 0);
+   child (partial_block 1 "text"); child (partial_piece 1 "text" "CHILD_ONLY");
+   child (partial_stop 1)]
+
+let test_child_partial_frames_are_not_root_response_evidence () =
+  let events = ref [] in
+  with_fixture
+    (List.map (fun frame -> Emit frame) child_partial_frames
+     @ [Emit rate_limit_rejected; Emit quota_result])
+    (fun path ->
+      run_fixture ~on_stream_event:(fun event -> events := event :: !events) path
+      |> check_quota_observation ~tool_effect_attempted:false ~response_emitted:false;
+      check bool "child partial body publishes no root stream event" true
+        (List.for_all (function
+          | Runtime_claude_code.Turn_started _ | Text_delta _ | Thinking_delta _
+          | Content_block_stopped _ -> false
+          | _ -> true) !events))
+;;
+
+let test_child_partial_frames_leave_root_stream_intact () =
+  let root = scoped_partial ~parent:`Null in
+  let child_complete =
+    {|{"type":"assistant","parent_tool_use_id":"parent-agent","session_id":"__SESSION__","uuid":"child-partial-complete","message":{"id":"child-partial-message","role":"assistant","model":"child-model","content":[{"type":"text","text":"CHILD_ONLY"}]}}|} in
+  let root_complete =
+    {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"root-partial-complete","message":{"id":"root-partial-message","role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"MASC_CLAUDE_OK"}]}}|} in
+  let events = ref [] in
+  (* The child stream opens between the root block's start and its text. *)
+  let frames = [root (partial_start "root-partial-message"); root (partial_block 0 "text")]
+    @ child_partial_frames
+    @ [root (partial_piece 0 "text" "MASC_CLAUDE_OK"); root (partial_stop 0);
+       child_complete; root_complete; result] in
+  with_fixture (List.map (fun frame -> Emit frame) frames) (fun path ->
+    (match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+     | Ok turn -> check string "root reply is the root text" "MASC_CLAUDE_OK" turn.text
+     | Error error -> fail (Runtime_claude_code.error_to_string error));
+    let events = List.rev !events in
+    check (list string) "root stream carries only root text" ["MASC_CLAUDE_OK"]
+      (List.filter_map (function
+        | Runtime_claude_code.Text_delta {text; _} | Thinking_delta {text; _} -> Some text
+        | _ -> None) events);
+    check (list (pair string string)) "child body is published once, from its complete envelope"
+      ["parent-agent", "CHILD_ONLY"]
+      (List.filter_map (function
+        | Runtime_claude_code.Child_content_observed {parent_tool_use_id; text; _} ->
+            Some (parent_tool_use_id, text)
+        | _ -> None) events))
+;;
+
+let test_partial_frame_parent_must_be_null_or_nonblank () =
+  with_fixture
+    [Emit (scoped_partial ~parent:(`String " ") (partial_start "blank-parent")); Emit result]
+    (fun path -> match run_fixture path with
+      | Error (Runtime_claude_code.Protocol_error {stage="partial stream event"; _}) -> ()
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "a blank partial parent was read as root")
+;;
+
 let test_child_diagnostic_body_is_excluded_but_tools_survive () =
   let child_diagnostic = match Yojson.Safe.from_string child_body_assistant with
     | `Assoc fields -> Yojson.Safe.to_string
@@ -3899,6 +3973,12 @@ let () =
             test_api_diagnostic_quota_keeps_failover_safe
         ; test_case "child body is not root response evidence" `Quick
             test_child_body_is_not_root_response_evidence
+        ; test_case "child partial frames are not root response evidence" `Quick
+            test_child_partial_frames_are_not_root_response_evidence
+        ; test_case "child partial frames leave the root stream intact" `Quick
+            test_child_partial_frames_leave_root_stream_intact
+        ; test_case "partial frame parent must be null or nonblank" `Quick
+            test_partial_frame_parent_must_be_null_or_nonblank
         ; test_case "child diagnostic body excluded and native tools retained" `Quick
             test_child_diagnostic_body_is_excluded_but_tools_survive
         ; test_case

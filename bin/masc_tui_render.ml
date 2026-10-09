@@ -8955,22 +8955,20 @@ let browser_lane_source_hint view =
        | (Located _ | Invalid _) as source ->
            Some (Masc.Browser_source_context.label source))
 
-let browser_lane_unserved_gesture_rows (view : Browser_lane_view.t) =
-  match view.unserved_gesture with
-  | None -> []
-  | Some unserved -> Browser_lane_view.unserved_gesture_rows unserved
-
 let browser_lane_fixed_rows view =
   (* Status, selection, tab, URL, divider and text position are always drawn.
      A source hint contributes a row only when the selected node has one, and
      a refused gesture its rows until the next input. *)
   6 + (if Option.is_some (browser_lane_source_hint view) then 1 else 0)
-  + List.length (browser_lane_unserved_gesture_rows view)
+  + List.length (Browser_lane_view.unserved_rows view)
 
-(* The picker's rows besides its choices: the status row, the heading and the
-   divider above them, the detail row for the highlighted choice below them,
-   and the row an empty connection list explains itself on. *)
-let browser_picker_frame_rows = 5
+(* The picker's rows besides its choices and what an empty connection list
+   says: the status row, the heading and the divider above the choices, and
+   the detail row for the highlighted choice below them. *)
+let browser_picker_frame_rows = 4
+
+(* The cells a BiDi host row has behind the surface's two-cell indent. *)
+let browser_host_row_cells ~cols = max 1 (framed_inner_width cols - 2)
 
 let browser_lane_visible_rows (state : state) ~terminal_rows view =
   let body_rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -9088,9 +9086,30 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       | Some cursor ->
           c.push_styled ~style:(Theme.info ()) "  Choose browser · separate sessions do not share login";
           c.push_divider ();
-          let room = max 1 (budget - browser_picker_frame_rows) in
+          (* The rows under the choices cannot be scrolled to. Where they
+             report a BiDi host, one that runs or ran, the first of them
+             keep a place however many choices there are, with the row that
+             says more is hidden, unless that would leave too few choices to
+             choose from. *)
+          let host_rows =
+            Browser_lane_view.bidi_host_rows ~width:(browser_host_row_cells ~cols) view in
+          let empty_line = browser_lane_picker_empty_line view in
+          let extension_rows =
+            if Option.is_some empty_line && awaiting_browser view then
+              [ Theme.info (), "  The MASC extension and its registered native host connect a live browser."
+              ; Theme.recede (), "  " ^ transport_setup_row [Browser_lane.Web_extension]
+              ; Theme.recede (), "  Enable the extension in your Zen/Firefox profile, then r:refresh." ]
+            else [] in
+          let choices = browser_choices view in
+          let reports_a_host = Browser_lane_view.host_rows_report_a_host view in
+          let room =
+            Browser_lane_view.picker_choice_rows
+              ~rows:(budget - browser_picker_frame_rows - List.length (Option.to_list empty_line))
+              ~choices:(List.length choices)
+              ~below:(if reports_a_host
+                      then List.length host_rows + List.length extension_rows else 0) in
           let start = max 0 (cursor - room + 1) in
-          browser_choices view |> List.iteri (fun index choice ->
+          choices |> List.iteri (fun index choice ->
             if index >= start && index < start + room then
               let line = "  " ^ Terminal_text.single_line (browser_choice_label choice)
                 ^ (if browser_choice_selected view choice then " (current)" else "") in
@@ -9100,19 +9119,38 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
              the cursor. *)
           c.push_styled ~style:(Theme.recede ())
             ("  " ^ Option.value ~default:""
-               (Option.bind (List.nth_opt (browser_choices view) cursor) browser_choice_detail));
-          (match browser_lane_picker_empty_line view with
-           | None -> ()
-           | Some line ->
-            c.push_styled ~style:(Theme.recede ()) line;
-            if awaiting_browser view then (
-              c.push_styled ~style:(Theme.info ()) "  Live requires the MASC extension and its registered native host.";
-              c.push_styled ~style:(Theme.recede ())
-                ("  " ^ transport_setup_row [Browser_lane.Web_extension]);
-              c.push_styled ~style:(Theme.recede ()) "  Enable the extension in your Zen/Firefox profile, then r:refresh."))
+               (Option.bind (List.nth_opt choices cursor) browser_choice_detail));
+          Option.iter (c.push_styled ~style:(Theme.recede ())) empty_line;
+          (* A terminal too short for everything loses rows from the end.
+             With no host yet, the host's rows only say how one is started:
+             they take no row from what is above them, and are drawn where
+             the screen has rows left. Rows that report a host come before
+             the rows on the extension. On a screen that holds all of both
+             the host's rows stay together; on a shorter one the host's
+             first rows are followed by the extension's, and what is cut
+             from the end is the rest of the host's. *)
+          let draw_host rows =
+            List.iter (fun row -> c.push_styled ~style:(Theme.recede ()) ("  " ^ row)) rows in
+          let draw_extension () =
+            List.iter (fun (style, row) -> c.push_styled ~style row) extension_rows in
+          let above =
+            browser_picker_frame_rows + min room (List.length choices)
+            + List.length (Option.to_list empty_line) in
+          let extension = List.length extension_rows in
+          if not reports_a_host then (
+            draw_extension ();
+            if budget > above + extension then draw_host host_rows)
+          else if above + List.length host_rows + extension <= budget then (
+            draw_host host_rows;
+            draw_extension ())
+          else (
+            let head, rest = Browser_lane_view.picker_host_head host_rows in
+            draw_host head;
+            draw_extension ();
+            draw_host rest)
       | None ->
       List.iter (fun row -> c.push_styled ~style:(Theme.warn ()) ("  " ^ row))
-        (browser_lane_unserved_gesture_rows view);
+        (Browser_lane_view.unserved_rows view);
       c.push_styled ~style:(Theme.info ())
         (match view.url_draft with
          | Some draft -> browser_lane_url_line ~cols draft

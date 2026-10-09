@@ -7108,7 +7108,7 @@
 (test
  (name test_tui_browser_lane)
  (modules test_tui_browser_lane)
- (libraries masc.browser_lane masc_tui_frame masc_tui_types))
+ (libraries masc masc.browser_lane masc.string_util masc_tui_frame masc_tui_message_layout masc_tui_types))
 
 (test
  (name test_tui_browser_lane_text)
@@ -8526,6 +8526,7 @@
  (libraries masc_test_deps))
 
 (include stanzas/test_browser_bidi_peer.inc)
+(include stanzas/test_browser_bidi_host_record.inc)
 
 ; An attempt that published its answer must not publish a failure over it:
 ; the light body refresh, and the window around the attempt, run after it.
@@ -9879,6 +9880,11 @@
  (name test_h3_working_state_meaning)
  (modules test_h3_working_state_meaning)
  (libraries masc_test_deps))
+
+(test
+ (name test_lane_addon_tool_result)
+ (modules test_lane_addon_tool_result)
+ (libraries alcotest masc.lane_addon_tool_result masc.tool_types mcp_protocol yojson))
 
 (test
  (name test_tui_models_account_reading)

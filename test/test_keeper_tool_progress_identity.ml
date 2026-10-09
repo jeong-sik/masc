@@ -189,6 +189,71 @@ let test_a_third_memory_rewrite_stops_the_turn () =
     (Masc.Keeper_agent_run.For_testing.repeated_exact_tool_call ~threshold:3
        [ call 3; call 2; call 1 ])
 
+let test_memory_identity_survives_changing_inputs () =
+  let call ~tool_name ~memory_id ~content ~revision =
+    let input =
+      match tool_name with
+      | "keeper_memory_write" ->
+        `Assoc
+          [ "content", `String content
+          ; "observed_at", `String content
+          ]
+      | "keeper_memory_retract" ->
+        `Assoc [ "memory_id", `String memory_id ]
+      | _ -> fail "unexpected memory tool"
+    in
+    match
+      P.digest_tool_io ~tool_name ~input
+        ~output_text:
+          (memory_receipt ~disposition:"reobserved" ~memory_id ~revision
+             ~recorded_at:content)
+    with
+    | Some io -> io
+    | None -> fail "digest_tool_io returned no fingerprints"
+  in
+  let first =
+    call ~tool_name:"keeper_memory_write" ~memory_id:"sha256:aa"
+      ~content:"10:01Z" ~revision:1
+  in
+  let repeated =
+    call ~tool_name:"keeper_memory_write" ~memory_id:"sha256:aa"
+      ~content:"10:02Z" ~revision:2
+  in
+  let other =
+    call ~tool_name:"keeper_memory_write" ~memory_id:"sha256:bb"
+      ~content:"10:02Z" ~revision:2
+  in
+  check string "same claim despite changed input"
+    first.P.input_fingerprint repeated.P.input_fingerprint;
+  let detail content revision : Masc.Keeper_agent_result.tool_call_detail =
+    let io =
+      call ~tool_name:"keeper_memory_write" ~memory_id:"sha256:aa" ~content
+        ~revision
+    in
+    { tool_name = "keeper_memory_write"
+    ; provider = "test"
+    ; execution_outcome = Tool_result.Ok
+    ; typed_outcome = None
+    ; latency_ms = 1.
+    ; task_id = None
+    ; route_evidence = None
+    ; input_fingerprint = Some io.P.input_fingerprint
+    ; output_fingerprint = Some io.P.output_fingerprint
+    }
+  in
+  check (option (pair string int)) "changing write payload still reaches repeat threshold"
+    (Some ("keeper_memory_write", 3))
+    (Masc.Keeper_agent_run.For_testing.repeated_exact_tool_call ~threshold:3
+       [ detail "10:03Z" 3; detail "10:02Z" 2; detail "10:01Z" 1 ]);
+  check string "same claim despite changed receipt"
+    first.P.output_fingerprint repeated.P.output_fingerprint;
+  check bool "different claim keeps its own identity" false
+    (String.equal first.P.input_fingerprint other.P.input_fingerprint);
+  check bool "write and retract remain distinct operations" false
+    (String.equal first.P.input_fingerprint
+       (call ~tool_name:"keeper_memory_retract" ~memory_id:"sha256:aa"
+          ~content:"10:02Z" ~revision:2).P.input_fingerprint)
+
 let () =
   run "keeper_tool_progress_identity"
     [ ( "identity"
@@ -204,6 +269,8 @@ let () =
             test_a_source_bound_rewrite_is_named_by_its_hash
         ; test_case "a third memory rewrite stops the turn" `Quick
             test_a_third_memory_rewrite_stops_the_turn
+        ; test_case "memory identity survives changing inputs" `Quick
+            test_memory_identity_survives_changing_inputs
         ; test_case "a changed answer changes identity" `Quick
             test_a_changed_answer_changes_identity
         ; test_case "field order does not name identity" `Quick

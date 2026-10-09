@@ -74,10 +74,10 @@ let custom ~timestamp ~redact_json state name value =
 let reply_details_to_json ~redact_text
     (event : Keeper_chat_events.reply_details) =
   `Assoc
-    [ "reply", `String (redact_text event.reply)
+    ([ "reply", `String (redact_text event.reply)
     ; "turn_outcome", `String (Keeper_turn_outcome.to_label event.turn_outcome)
     ; "turn_ref", `String (Ids.Turn_ref.to_string event.turn_ref)
-    ]
+    ] @ json_opt "terminal_stream_scope" (Option.map (fun scope -> `Int scope) event.terminal_stream_scope))
 
 let continuation_checkpoint_to_json ~redact_text
     (event : Keeper_chat_events.continuation_checkpoint) =
@@ -114,12 +114,12 @@ let project ~timestamp ~redact_text ~redact_json state event =
           (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
              ~run_id:state.run_id ~message_id:(Some message_id)
              ~role:(Some (ag_role role)) Ag_ui.Text_message_start) )
-  | Text_delta delta ->
+  | Text_delta {text; stream_scope} ->
       ( state
       , Some
           (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
              ~run_id:state.run_id ~message_id:state.message_id
-             ~delta:(Some delta) Ag_ui.Text_message_content) )
+             ~delta:(Some text) ~text_stream_scope:stream_scope Ag_ui.Text_message_content) )
   | Text_message_end ->
       ( state
       , Some
@@ -147,19 +147,20 @@ let project ~timestamp ~redact_text ~redact_json state event =
                    (Option.map (fun i -> `Int i) attempt_index))
       in
       state, Some (custom ~timestamp ~redact_json state Runtime_attempt_started value)
-  | Agent_core_stream_message_start { provider_message_id; model; usage } ->
+  | Agent_core_stream_message_start { stream_scope; provider_message_id; model; usage } ->
       let value =
         `Assoc
-          ([ "provider_message_id", `String provider_message_id
+          ([ "stream_scope", `Int stream_scope; "provider_message_id", `String provider_message_id
            ; "model", `String model
            ]
            @ json_opt "usage" (Option.map api_usage_to_json usage))
       in
       state, Some (custom ~timestamp ~redact_json state Stream_message_start value)
-  | Agent_core_stream_message_delta { stop_reason; usage } ->
+  | Agent_core_stream_message_delta { stream_scope; stop_reason; usage } ->
       let value =
         `Assoc
-          (json_opt "stop_reason"
+          (["stream_scope", `Int stream_scope]
+           @ json_opt "stop_reason"
              (Option.map
                 (fun reason ->
                    `String (Agent_core.Types.stop_reason_to_string reason))

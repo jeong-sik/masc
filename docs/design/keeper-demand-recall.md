@@ -12,6 +12,8 @@ Stored memory and per-turn model context have different lifetimes. A Keeper keep
 
 Every notice marks previous Recall blocks and retrieved claims as historical and requires a current lookup before using remembered claims. It grants no instruction or permission. Ordinary/source absence, unreadability, and disabled recall stay explicit. The notice does not claim source bytes were verified. Its size scales with count digits and fixed guidance, not stored claim or source-path lengths. Current snapshot decoding remains proportional to store size; this change does not claim constant-time store reads.
 
+The default `source=current` search pages ordinary and source-bound facts without preparing a complete artifact. When `truncated=true`, pass `next_cursor` as `cursor` with the same query to continue. Each page keeps the existing result-size bound; the cursor binds the Keeper, workspace, complete current corpus and ordered answer. Corpus, source verification or query changes refuse the cursor and require restarting without it. Only ordinary facts actually returned on a page receive Retrieved events. Historical scopes remain bounded searches and reject cursors; this change does not add historical-store pagination.
+
 Search continues to use the existing whole-query and SQLite FTS ranking. No new word heuristic, importance score, TTL, top-N auto injection, or cumulative runtime budget is introduced. The model makes the relevance choice through its tool invocation. Standing identity, constraints and role instructions remain in the runtime prompt/configuration; a remembered fact is not promoted to a standing instruction by its category.
 
 ## Source validation efficiency

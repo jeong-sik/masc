@@ -2304,91 +2304,6 @@ let default_context_overflow_shrink_capacity ~capacity =
   capacity / context_overflow_shrink_divisor
 ;;
 
-(* The shrink-retry policy is expressed over an injected [attempt] callback
-   so it stays testable without an Eio-backed provider: the official-client
-   lanes wire their real attempt for production; tests can inject a canned
-   Ok/Error sequence to verify the halving sequence, the walk to the floor,
-   and the same-run-retry-authority gate on their own.
-
-   Classifies with [Keeper_turn_driver_try_runtime.context_overflow_should_try_next]
-   rather than [Keeper_error_classify.is_context_overflow]: the latter
-   depends on [Keeper_turn_driver], which depends on this module (it calls
-   [run_try_provider]), so reaching it here would close a module cycle. Both
-   predicates match the identical single case
-   ([Agent_core.Error.Api (ContextOverflow _)] -> [true]); see that function's
-   doc comment for why the byte-axis and token-axis siblings are excluded.
-   [same_run_retry_authorized] mirrors the exact same-run authority gate
-   [Keeper_turn_driver]'s declared-lane walk applies before rotating
-   candidates ([same_run_retry_allowed] / [checkpoint_progress]): a
-   shrink retry is a same-run retry too, so it must not fire once AGENT_CORE has
-   mutated agent state at a durable checkpoint stage. *)
-let context_overflow_shrink_sequence
-      ?(shrink_capacity = fun ~capacity:_ ~default_capacity ->
-        default_capacity)
-      ?(final_shrink_capacity = fun ~capacity:_ -> None)
-      ~starting_capacity
-      ~same_run_retry_authorized
-      ~shrink_admits_history
-      ~on_shrink_retry
-      ~(attempt : capacity:int -> ('ok, Agent_core.Error.t) result)
-      ()
-  : ('ok, Agent_core.Error.t) result
-  =
-  let rec go ~capacity ~shrink_attempt =
-    match attempt ~capacity with
-    | Ok _ as ok -> ok
-    | Error error as failed ->
-      if Keeper_turn_driver_try_runtime.context_overflow_should_try_next error
-         && same_run_retry_authorized ()
-      then (
-        let default_capacity =
-          default_context_overflow_shrink_capacity ~capacity
-        in
-        let ordinary_capacity =
-          shrink_capacity ~capacity ~default_capacity
-        in
-        (* The walk carries no attempt count: it ends where no strictly
-           smaller view exists. A lane that has measured its floor names it
-           through [final_shrink_capacity]; once the ordinary target would
-           reach or pass that floor, the floor itself is the next attempt,
-           and its refusal is the floor verdict. Measured 2026-09-05 on
-           keeper geek-scout: a 4.1 MB history against a 128k-token model was
-           refused at 1.9 MB, 507 KB and 498 KB and then committed as
-           [Bootstrap_floor_exceeded] with 79 messages still attached; the
-           floor had never been asked, and the keeper sat on an operator
-           recovery it could have walked out of in two more attempts. *)
-        let shrunk_capacity =
-          match final_shrink_capacity ~capacity with
-          | Some floor_capacity
-            when ordinary_capacity <= floor_capacity ->
-            floor_capacity
-          | Some _ | None -> ordinary_capacity
-        in
-        (* Halving is a bet that the same request fits once less history
-           rides along. The bet is void when the part that cannot be cut --
-           tool schemas, system prompt, and the unmeasured-field allowance --
-           already fills the smaller capacity: every atom would be dropped and
-           the window would still refuse, one size lower. #31684 measured that
-           on a live keeper: a 469638-byte reserve against capacities of
-           131072 then 65536, three refusals per turn, none of which could
-           have succeeded. Returning the original failure here hands the turn
-           to the declared-lane walk. *)
-        if shrunk_capacity >= capacity
-           || not (shrink_admits_history ~capacity:shrunk_capacity)
-        then failed
-        else (
-          on_shrink_retry
-            ~shrink_attempt:(shrink_attempt + 1)
-            ~previous_capacity:capacity
-            ~capacity:shrunk_capacity;
-          go
-            ~capacity:shrunk_capacity
-            ~shrink_attempt:(shrink_attempt + 1)))
-      else failed
-  in
-  go ~capacity:starting_capacity ~shrink_attempt:0
-;;
-
 (* The refusals that say the request outgrew what carries it: the provider's
    context overflow and the provider's refusal of the request body.
    Each is answered by moving the carried front, never by rotating first: a
@@ -2438,6 +2353,97 @@ let refusal_evicts = function
   | Agent_core.Error.Orchestration _
   | Agent_core.Error.Internal _
   | Agent_core.Error.Internal_carried _ -> false
+;;
+
+(* The shrink-retry policy is expressed over an injected [attempt] callback
+   so it stays testable without an Eio-backed provider: the official-client
+   lanes wire their real attempt for production; tests can inject a canned
+   Ok/Error sequence to verify the halving sequence, the walk to the floor,
+   and the same-run-retry-authority gate on their own.
+
+   Classifies with [refusal_evicts] above -- the context overflow and the
+   provider's refusal of the request body, enumerated exhaustively -- rather
+   than [Keeper_error_classify.is_context_overflow]: the latter depends on
+   [Keeper_turn_driver], which depends on this module (it calls
+   [run_try_provider]), so reaching it here would close a module cycle.
+   [same_run_retry_authorized] mirrors the exact same-run authority gate
+   [Keeper_turn_driver]'s declared-lane walk applies before rotating
+   candidates ([same_run_retry_allowed] / [checkpoint_progress]): a
+   shrink retry is a same-run retry too, so it must not fire once AGENT_CORE has
+   mutated agent state at a durable checkpoint stage. *)
+let context_overflow_shrink_sequence
+      ?(shrink_capacity = fun ~capacity:_ ~default_capacity ->
+        default_capacity)
+      ?(final_shrink_capacity = fun ~capacity:_ -> None)
+      ?(on_memory_capacity_refusal : Keeper_memory_delivery_reprojection.t =
+          fun ~refusal:_ -> Ok Keeper_memory_delivery_reprojection.Unchanged)
+      ?(on_memory_retry = fun () -> ())
+      ~starting_capacity
+      ~same_run_retry_authorized
+      ~shrink_admits_history
+      ~on_shrink_retry
+      ~(attempt : capacity:int -> ('ok, Agent_core.Error.t) result)
+      ()
+  : ('ok, Agent_core.Error.t) result
+  =
+  let rec go ~capacity ~shrink_attempt =
+    match attempt ~capacity with
+    | Ok _ as ok -> ok
+    | Error error as failed ->
+      if refusal_evicts error && same_run_retry_authorized ()
+      then (
+        match on_memory_capacity_refusal ~refusal:error with
+        | Error _ -> failed
+        | Ok Keeper_memory_delivery_reprojection.Reprojected ->
+          on_memory_retry ();
+          go ~capacity ~shrink_attempt
+        | Ok Keeper_memory_delivery_reprojection.Unchanged ->
+        let default_capacity =
+          default_context_overflow_shrink_capacity ~capacity
+        in
+        let ordinary_capacity =
+          shrink_capacity ~capacity ~default_capacity
+        in
+        (* The walk carries no attempt count: it ends where no strictly
+           smaller view exists. A lane that has measured its floor names it
+           through [final_shrink_capacity]; once the ordinary target would
+           reach or pass that floor, the floor itself is the next attempt,
+           and its refusal is the floor verdict. Measured 2026-09-05 on
+           keeper geek-scout: a 4.1 MB history against a 128k-token model was
+           refused at 1.9 MB, 507 KB and 498 KB and then committed as
+           [Bootstrap_floor_exceeded] with 79 messages still attached; the
+           floor had never been asked, and the keeper sat on an operator
+           recovery it could have walked out of in two more attempts. *)
+        let shrunk_capacity =
+          match final_shrink_capacity ~capacity with
+          | Some floor_capacity
+            when ordinary_capacity <= floor_capacity ->
+            floor_capacity
+          | Some _ | None -> ordinary_capacity
+        in
+        (* Halving is a bet that the same request fits once less history
+           rides along. The bet is void when the part that cannot be cut --
+           tool schemas, system prompt, and the unmeasured-field allowance --
+           already fills the smaller capacity: every atom would be dropped and
+           the window would still refuse, one size lower. #31684 measured that
+           on a live keeper: a 469638-byte reserve against capacities of
+           131072 then 65536, three refusals per turn, none of which could
+           have succeeded. Returning the original failure here hands the turn
+           to the declared-lane walk. *)
+        if shrunk_capacity >= capacity
+           || not (shrink_admits_history ~capacity:shrunk_capacity)
+        then failed
+        else (
+          on_shrink_retry
+            ~shrink_attempt:(shrink_attempt + 1)
+            ~previous_capacity:capacity
+            ~capacity:shrunk_capacity;
+          go
+            ~capacity:shrunk_capacity
+            ~shrink_attempt:(shrink_attempt + 1)))
+      else failed
+  in
+  go ~capacity:starting_capacity ~shrink_attempt:0
 ;;
 
 type eviction_retry =
@@ -2756,7 +2762,22 @@ let native_retry_allowed (ctx : try_provider_ctx) =
     |> Keeper_provider_attempt_effect.allows_same_turn_retry
 ;;
 
+let memory_capacity_retry_sequence ~same_run_retry_authorized
+    ~on_memory_capacity_refusal ~on_projection_failure ~attempt () =
+  let rec go () = match attempt () with
+    | Ok _ as result -> result
+    | Error error as failed ->
+      if not (refusal_evicts error && same_run_retry_authorized ()) then failed
+      else match on_memory_capacity_refusal ~refusal:error with
+        | Error _ -> on_projection_failure (); failed
+        | Ok Keeper_memory_delivery_reprojection.Unchanged -> failed
+        | Ok Reprojected -> go () in
+  go ()
+;;
+
 let run_try_provider_with_carried_range_eviction
+      ?(on_memory_capacity_refusal = fun ~refusal:_ ->
+        Ok Keeper_memory_delivery_reprojection.Unchanged)
       ?continuation_checkpoint
       (ctx : try_provider_ctx)
       candidate
@@ -2768,7 +2789,7 @@ let run_try_provider_with_carried_range_eviction
       ~context_marks:ctx.context_marks state.ledger;
   let checkpoint_after = ref None in
   let success_sample = ref None in
-  let attempt () =
+  let attempt_once () =
     let attempt_result, attempt_checkpoint_after, attempt_success_sample =
       run_try_provider_attempt ?continuation_checkpoint ~state ctx candidate
     in
@@ -2776,8 +2797,14 @@ let run_try_provider_with_carried_range_eviction
     success_sample := attempt_success_sample;
     attempt_result
   in
+  let projection_failed = ref false in
   let same_run_retry_authorized () =
-    same_run_retry_allowed ctx.checkpoint_progress && native_retry_allowed ctx in
+    not !projection_failed
+    && same_run_retry_allowed ctx.checkpoint_progress && native_retry_allowed ctx in
+  let attempt () = memory_capacity_retry_sequence
+    ~same_run_retry_authorized ~on_memory_capacity_refusal
+    ~on_projection_failure:(fun () -> projection_failed := true)
+    ~attempt:attempt_once () in
   (* The lane's own answer to a size refusal, which depends on where the
      range started; what is left after it is the current turn's demotion. *)
   let boundary_resend ?(on_turn_start_extra = fun (_ : Keeper_carried_front.seed) -> ()) ~source () =
@@ -3075,12 +3102,13 @@ let retry_without_thinking_admitted (candidate : Runtime_candidate.t) =
 ;;
 
 let run_try_provider_with_truncation_recovery
+      ?on_memory_capacity_refusal
       ?continuation_checkpoint
       (ctx : try_provider_ctx)
       candidate
   =
   let first_result, checkpoint_after, success_sample =
-    run_try_provider_with_carried_range_eviction ?continuation_checkpoint ctx candidate
+    run_try_provider_with_carried_range_eviction ?on_memory_capacity_refusal ?continuation_checkpoint ctx candidate
   in
   let thinking_can_be_disabled = retry_without_thinking_admitted candidate in
   if not (native_retry_allowed ctx) then first_result, checkpoint_after, success_sample

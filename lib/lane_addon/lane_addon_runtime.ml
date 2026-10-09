@@ -202,6 +202,16 @@ let validate_released_binding ~package_shape fields =
   let* () = match package_shape with
     | Released_package -> exact_fields package_fields package
     | Current_package ->
+        let* package_fields = match List.assoc_opt "tool_invocation" package with
+          | None -> Ok package_fields
+          | Some (`String ("direct" | "host_context")) -> Ok ("tool_invocation" :: package_fields)
+          | Some _ -> Error "invalid retained tool invocation mode" in
+        let* package_fields = match List.assoc_opt "state_storage" package with
+          | None -> Ok package_fields
+          | Some (`String ("ephemeral" | "persistent")) -> Ok ("state_storage" :: package_fields)
+          | Some _ -> Error "invalid retained state storage" in
+        let package_fields = match List.assoc_opt "exported_tools" package with
+          | None -> package_fields | Some _ -> "exported_tools" :: package_fields in
         (match List.assoc_opt "model_access" package with
          | None -> exact_fields package_fields package
          | Some (`String ("disabled" | "host_sampling")) ->
@@ -213,6 +223,17 @@ let validate_released_binding ~package_shape fields =
     if List.assoc outer fields = List.assoc inner package then Ok () else Error "retained package identity mismatch")
     (Ok ()) ["addon_id","id";"revision","revision";"title","title"] in
   let strings = function `List values -> List.for_all (function `String s -> String.trim s <> "" | _ -> false) values | _ -> false in
+  let* () = match package_shape with
+    | Released_package -> Ok ()
+    | Current_package ->
+        (match List.assoc_opt "exported_tools" package with
+         | None -> Ok ()
+         | Some (`List names as value) when strings value ->
+             let names = List.filter_map (function `String name -> Some name | _ -> None) names in
+             let action_tool = match List.assoc "action_tool" package with
+               | `String name -> Some name | _ -> None in
+             Lane_addon_types.validate_exported_tools ~action_tool names |> Result.map (fun _ -> ())
+         | Some _ -> Error "invalid retained exported tools") in
   let* () = match List.assoc "command" package with `List (_::_) as v when strings v -> Ok () | _ -> Error "invalid retained command" in
   let* () = match List.assoc "contributions" package with
     | `List (_::_ as values) when List.for_all (function `String ("observe"|"derive"|"act") -> true | _ -> false) values -> Ok ()

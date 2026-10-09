@@ -164,11 +164,12 @@ let speaker_header_field (m : Agent_core.Types.message) =
   | Agent_core.Types.Assistant | Agent_core.Types.System | Agent_core.Types.Tool -> ""
 ;;
 
-let message_to_text ~turn (m : Agent_core.Types.message) : string =
+let message_to_text ~position_label ~position (m : Agent_core.Types.message) : string =
   let parts = List.filter_map text_of_content m.content in
   let body = String.concat "\n" parts |> String.trim in
   let header =
-    Printf.sprintf "turn=%d role=%s%s" turn (role_to_string m.role) (speaker_header_field m)
+    Printf.sprintf "%s=%d role=%s%s" position_label position
+      (role_to_string m.role) (speaker_header_field m)
   in
   if String.equal body ""
   then Printf.sprintf "[%s] (empty)" header
@@ -180,7 +181,7 @@ let format_messages_for_prompt messages =
   | [] -> "[no messages]"
   | _ ->
     messages
-    |> List.mapi (fun turn message -> message_to_text ~turn message)
+    |> List.mapi (fun position message -> message_to_text ~position_label:"turn" ~position message)
     |> String.concat "\n\n---\n\n"
 ;;
 
@@ -279,6 +280,34 @@ let format_tool_observations_for_prompt observations =
             ])
        observations)
   |> Yojson.Safe.to_string
+;;
+
+let observations_for_absorption (inp : input) =
+  let observation ~kind ~position fields =
+    `Assoc ([ "kind", `String kind
+            ; "batch_turn_ref", Ids.Turn_ref.to_yojson inp.turn_ref
+            ; "local_position", `Int position ] @ fields)
+  in
+  let messages = List.mapi (fun position message ->
+    observation ~kind:"conversation" ~position
+      ["text", `String (message_to_text ~position_label:"local_position" ~position message)]) inp.messages in
+  let tools = List.mapi (fun position (tool : tool_observation) ->
+    observation ~kind:"tool_execution" ~position
+      [ "tool_name", `String tool.tool_name
+      ; "outcome", `String (tool_observation_outcome_to_string tool.outcome) ])
+      inp.tool_observations in
+  let counterparts = match inp.counterpart_observations with
+    | [] -> []
+    | observations ->
+      [ observation ~kind:"counterpart" ~position:0
+          [ "text", `String
+              (Keeper_counterpart_observation.render_for_prompt observations) ] ] in
+  let historical_contexts = match inp.historical_task_contexts with
+    | [] -> []
+    | contexts ->
+      [ observation ~kind:"historical_task_contexts" ~position:0
+          ["ranges", Keeper_librarian_task_context.to_json contexts] ] in
+  messages @ tools @ counterparts @ historical_contexts
 ;;
 
 let goal_context_to_json = function

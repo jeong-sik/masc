@@ -51,6 +51,7 @@ type reply_details =
   { reply : string
   ; turn_outcome : Keeper_turn_outcome.t
   ; turn_ref : Ids.Turn_ref.t
+  ; terminal_stream_scope : int option
   }
 
 type continuation_checkpoint =
@@ -68,7 +69,7 @@ type keeper_chat_event =
   | Run_started of { run_id : string; thread_id : string }
   | Batch_bound of { operation_id : Keeper_chat_operation.Operation_id.t; execution_id : Keeper_chat_operation.Operation_id.t }
   | Text_message_start of { message_id : string; role : role }
-  | Text_delta of string
+  | Text_delta of { text : string; stream_scope : int option }
   | Text_message_end
   | External_effect_completed of
       { target : Keeper_surface_post.delivery_target }
@@ -82,12 +83,14 @@ type keeper_chat_event =
       ; attempt_index : int option
       }
   | Agent_core_stream_message_start of
-      { provider_message_id : string
+      { stream_scope : int
+      ; provider_message_id : string
       ; model : string
       ; usage : Agent_core.Types.api_usage option
       }
   | Agent_core_stream_message_delta of
-      { stop_reason : Agent_core.Types.stop_reason option
+      { stream_scope : int
+      ; stop_reason : Agent_core.Types.stop_reason option
       ; usage : Agent_core.Types.delta_usage option
       }
   | Agent_core_stream_message_stop
@@ -354,8 +357,9 @@ let api_usage_to_json (usage : Agent_core.Types.api_usage) =
      @ json_opt "cost_usd"
          (Option.map (fun value -> `Float value) usage.cost_usd))
 
-(* Cumulative mid-stream counters: only the fields the delta actually
-   reported appear, so a reader can tell "not reported" from 0. *)
+(* Cumulative mid-stream counters and provider-reported charge: only fields
+   the delta actually reported appear, so "not reported" remains distinct from 0.
+   Non-finite charges are unavailable on live projections; never emit invalid JSON. *)
 let delta_usage_to_json (usage : Agent_core.Types.delta_usage) =
   `Assoc
     (json_opt "input_tokens" (Option.map (fun v -> `Int v) usage.input_tokens)
@@ -363,7 +367,10 @@ let delta_usage_to_json (usage : Agent_core.Types.delta_usage) =
     @ json_opt "cache_creation_input_tokens"
         (Option.map (fun v -> `Int v) usage.cache_creation_input_tokens)
     @ json_opt "cache_read_input_tokens"
-        (Option.map (fun v -> `Int v) usage.cache_read_input_tokens))
+        (Option.map (fun v -> `Int v) usage.cache_read_input_tokens)
+    @ json_opt "cost_usd"
+        (Option.bind usage.cost_usd (fun amount ->
+             if Float.is_finite amount then Some (`Float amount) else None)))
 
 (* One owner for the stop-reason word. The journal and the AGUI projection
    both write [Agent_core.Types.stop_reason_to_string]; re-exporting it here

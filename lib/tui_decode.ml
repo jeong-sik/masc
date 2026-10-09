@@ -6544,6 +6544,14 @@ type file_change_snapshot = {
   fcs_malformed : int;
 }
 
+type repository_activity_snapshot = {
+  ras_repo_id : string;
+  ras_window_hours : float;
+  ras_changes : file_change list;
+  ras_incomplete : int;
+  ras_unattributed : int;
+}
+
 type file_activity_snapshot = {
   fas_codebase : string;
   fas_repo_id : string;
@@ -6794,6 +6802,19 @@ let decode_file_change_snapshot json =
     ; fcs_over_budget
     ; fcs_malformed
     }
+
+let decode_repository_activity_snapshot json =
+  let* ras_repo_id = required_string_field json "repo_id" in
+  let* ras_window_hours = Json_util.require_float json "window_hours" in
+  let* changes = required_list_field json "changes" in
+  let* ras_changes = decode_list "changes" decode_file_change changes in
+  let* ras_incomplete = required_int_field json "incomplete" in
+  let* ras_unattributed = required_int_field json "unattributed" in
+  let* () = if List.for_all (fun change -> match change.fc_location with
+      | Fc_in_repo {repo_id; _} -> String.equal repo_id ras_repo_id
+      | Fc_in_bundle _ | Fc_at_absolute_path _ -> false) ras_changes
+    then Ok () else Error "repository activity contains another address" in
+  Ok {ras_repo_id; ras_window_hours; ras_changes; ras_incomplete; ras_unattributed}
 
 let decode_file_activity_snapshot json =
   let* schema = required_string_field json "schema" in

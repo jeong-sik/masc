@@ -820,11 +820,16 @@ let test_a_revisionless_ask_is_taught_the_exact_reference () =
 
 let test_every_bundle_tool_is_classifiable () =
   with_bundle (fun composition_plan_index names ->
+    (* The bundle offers [identity_tools ()], so this turn's index is built
+       from the same list, as turn setup builds it from the tools it kept. *)
+    let identity_tool_index =
+      Masc.Keeper_identity_tool_index.of_tools (identity_tools ())
+    in
     let unclassifiable =
       List.filter
         (fun tool_name ->
            not
-             (Policy.classifies ~identity_tool_index:Masc.Keeper_identity_tool_index.empty
+             (Policy.classifies ~identity_tool_index
                 ~composition_plan_index:(Some composition_plan_index) ~tool_name))
         names
     in

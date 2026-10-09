@@ -2,9 +2,12 @@ type automation = { driver : string; binary : string option }
 [@@deriving show, eq]
 type stagehand = { chrome : string; extension : string; profile : string option }
 [@@deriving show, eq]
+type live_bidi = { firefox : string; profile : string; port : int }
+[@@deriving show, eq]
 type t = {
   automation : automation option;
   stagehand : stagehand option;
+  live_bidi : live_bidi option;
   live_enabled : bool;
   automation_enabled : bool;
   stagehand_enabled : bool;
@@ -12,7 +15,9 @@ type t = {
 [@@deriving show, eq]
 
 let browser_table = Runtime_toml_namespace.(key Browser)
-let none = { automation = None; stagehand = None;
+let default_live_bidi_port = 9222
+let max_port = 65535
+let none = { automation = None; stagehand = None; live_bidi = None;
   live_enabled = true; automation_enabled = true; stagehand_enabled = true }
 let ( let* ) = Result.bind
 
@@ -57,6 +62,24 @@ let parse_stagehand ~path configured =
   | None, _, _ -> Error (path ^ ".chrome is required when the backend is configured")
   | Some _, None, _ -> Error (path ^ ".extension is required when the backend is configured")
 
+let port ~path entries =
+  match List.assoc_opt "port" entries with
+  | None -> Ok default_live_bidi_port
+  | Some (Otoml.TomlInteger value) when value >= 1 && value <= max_port -> Ok value
+  | Some _ -> Error (Printf.sprintf "%s.port must be an integer from 1 to %d" path max_port)
+
+(* A table that is there names a Firefox to start, so both paths are needed. *)
+let parse_live_bidi ~path = function
+  | None -> Ok None
+  | Some entries ->
+    let* firefox = absolute ~path entries "firefox" in
+    let* profile = absolute ~path entries "profile" in
+    let* port = port ~path entries in
+    (match firefox, profile with
+     | Some firefox, Some profile -> Ok (Some { firefox; profile; port })
+     | None, _ -> Error (path ^ ".firefox is required when the table is configured")
+     | Some _, None -> Error (path ^ ".profile is required when the table is configured"))
+
 let parse toml =
   let* root = table ~path:browser_table
     ~keys:["geckodriver"; "binary"; "live"; "automation"; "stagehand"]
@@ -65,11 +88,15 @@ let parse toml =
   let automation_path = browser_table ^ ".automation" in
   let stagehand_path = browser_table ^ ".stagehand" in
   let live_path = browser_table ^ ".live" in
+  let live_bidi_path = live_path ^ ".bidi" in
   let* automation_table = table ~path:automation_path
     ~keys:["enabled"; "geckodriver"; "binary"] (List.assoc_opt "automation" root) in
   let* stagehand_table = table ~path:stagehand_path
     ~keys:["enabled"; "chrome"; "extension"; "profile"] (List.assoc_opt "stagehand" root) in
-  let* live_table = table ~path:live_path ~keys:["enabled"] (List.assoc_opt "live" root) in
+  let* live_table = table ~path:live_path ~keys:["enabled"; "bidi"] (List.assoc_opt "live" root) in
+  let* live_bidi_table = table ~path:live_bidi_path
+    ~keys:["firefox"; "profile"; "port"] (List.assoc_opt "bidi" (fields live_table)) in
+  let* live_bidi = parse_live_bidi ~path:live_bidi_path live_bidi_table in
   let root_automation = List.mem_assoc "geckodriver" root || List.mem_assoc "binary" root in
   let* automation = match automation_table with
     | Some _ when root_automation ->
@@ -81,4 +108,4 @@ let parse toml =
   let* live_enabled = enabled ~path:live_path (fields live_table) in
   let* automation_enabled = enabled ~path:automation_path (fields automation_table) in
   let* stagehand_enabled = enabled ~path:stagehand_path (fields stagehand_table) in
-  Ok { automation; stagehand; live_enabled; automation_enabled; stagehand_enabled }
+  Ok { automation; stagehand; live_bidi; live_enabled; automation_enabled; stagehand_enabled }

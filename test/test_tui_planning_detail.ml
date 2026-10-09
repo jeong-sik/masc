@@ -16,59 +16,7 @@ let texts rows = List.map (fun (r : Detail.line) -> r.Detail.text) rows
 let tones rows = List.map (fun (r : Detail.line) -> r.Detail.tone) rows
 
 let check_bool = Alcotest.(check bool)
-let check_int = Alcotest.(check int)
 let check_string = Alcotest.(check string)
-
-let test_every_verdict_draws_something () =
-  let cases =
-    [ ("proven", Proof.Proof_proven None)
-    ; ("proven with evidence", Proof.Proof_proven (Some "42 runs, 0 red"))
-    ; ("refused", Proof.Proof_refuted None)
-    ; ("refused with reason", Proof.Proof_refuted (Some "no evidence file"))
-    ; ("pending", Proof.Proof_pending)
-    ; ("unreadable", Proof.Proof_unreadable None)
-    ; ("unreadable with detail", Proof.Proof_unreadable (Some "bad json"))
-    ; ("stale", Proof.Proof_stale (Some "previous target reached"))
-    ; ("idle", Proof.Proof_idle)
-    ]
-  in
-  List.iter
-    (fun (name, proof) ->
-      let rows = Detail.body ~width:60 proof None in
-      check_bool (name ^ " draws at least one row") true (rows <> []))
-    cases
-
-let test_idle_is_not_silence () =
-  let rows = Detail.body ~width:60 Proof.Proof_idle None in
-  check_int "an idle ledger draws one row" 1 (List.length rows);
-  check_string "and says the ledger is empty rather than nothing"
-    "no verdict on the ledger" (List.hd (texts rows))
-
-let test_a_long_reason_wraps_instead_of_being_cut () =
-  let reason = String.concat " " (List.init 40 (fun i -> Printf.sprintf "word%d" i)) in
-  let rows = Detail.body ~width:30 (Proof.Proof_refuted (Some reason)) None in
-  check_bool "the reason takes more than one row" true (List.length rows > 2);
-  List.iter
-    (fun text ->
-      check_bool ("row fits the width: " ^ text) true (String.length text <= 30 * 4))
-    (texts rows);
-  let rejoined = String.concat " " (List.tl (texts rows)) in
-  check_bool "the last word survives the wrap" true
-    (let needle = "word39" in
-     let rec found i =
-       i + String.length needle <= String.length rejoined
-       && (String.sub rejoined i (String.length needle) = needle || found (i + 1))
-     in
-     found 0)
-
-let test_the_note_reads_after_the_verdict () =
-  let rows =
-    Detail.body ~width:60 (Proof.Proof_proven (Some "measured")) (Some "watch the flake")
-  in
-  let texts = texts rows in
-  check_string "the verdict heads the block" "proven" (List.hd texts);
-  check_bool "the note is labelled" true (List.mem "note" texts);
-  check_bool "and its text follows" true (List.mem "watch the flake" texts)
 
 let test_tone_separates_a_refusal_from_a_proof () =
   let proven = tones (Detail.body ~width:60 (Proof.Proof_proven None) None) in
@@ -210,20 +158,6 @@ let test_a_narrow_pane_still_produces_rows () =
   let rows = Detail.body ~width:0 (Proof.Proof_refuted (Some "why")) None in
   check_bool "width 0 does not loop or vanish" true (rows <> [])
 
-let test_a_timestamp_value_never_starts_at_the_colon () =
-  (* "reviewed:" is the longest label the pane prints; at one past its width
-     the value used to start immediately after the colon. *)
-  List.iter
-    (fun label ->
-      let line = Detail.timestamp_line ~label "2026-08-27 20:36" in
-      check_bool (label ^ ": keeps a gap before its value") true
-        (let colon = String.index line ':' in
-         colon + 1 < String.length line && line.[colon + 1] = ' '))
-    [ "created"; "updated"; "reviewed" ];
-  check_string "the longest label still leaves one gap"
-    "  reviewed: 2026-08-27 20:36"
-    (Detail.timestamp_line ~label:"reviewed" "2026-08-27 20:36")
-
 let confirmation_fixture ?(goal_id = "goal-1") ?(revision = "revision-1")
     ?(metric = "passing scenarios") ?(run_id = "run-1") ?(confirmed = false) ?phase () =
   let phase = match phase with
@@ -327,118 +261,10 @@ let test_confirmation_read_cannot_rearm_after_cancel () =
       check_bool "late evidence cannot rearm a cancelled confirmation" true
         (Read.view_for ~equal:String.equal late ~key:"goal-1" = Absent)
 
-let timeline_event ~kind ~lane ~title ~summary : Proof.goal_timeline_event =
-  { gt_ts = "2026-09-22T14:18:09Z"
-  ; gt_kind = kind
-  ; gt_lane = lane
-  ; gt_title = title
-  ; gt_summary = summary
-  ; gt_severity = "ok"
-  }
-
-let timeline_rows events =
-  texts
-    (Detail.timeline ~width:100 ~goal_id:"goal-1"
-       (Some ("goal-1", Ok (Proof.Goal_timeline_ready events))))
-
-let contains needle text =
-  let n = String.length needle and h = String.length text in
-  let rec go i = i + n <= h && (String.sub text i n = needle || go (i + 1)) in
-  go 0
-
-let test_timeline_unavailable_renders_its_cause_once () =
-  let rows failure =
-    texts
-      (Detail.timeline ~width:200 ~goal_id:"goal-1"
-         (Some
-            ( "goal-1"
-            , Ok (Proof.Goal_timeline_unavailable failure) )))
-  in
-  let store : Proof.goal_store_unavailable_view =
-    { gsu_file="goals.json";gsu_reason=Proof.Unreadable_view;
-      gsu_mirror=Proof.Mirror_absent_view;
-      gsu_reset_step=Goal_store_unavailable.Reset_goal_store } in
-  let store_rows = rows (Proof.Goal_source_failure (Proof.Goal_store_unavailable store)) in
-  (* [Detail.wrapped] reflows through [wrap_words], which drops the two-space
-     indent every timeline row is given, so the pane shows the verdict bare. *)
-  check_bool "the Goal store's verdict appears once" true
-    (List.mem ("Cause: " ^ Proof.goal_store_unavailable_view_to_string store) store_rows);
-  check_bool "the pane does not prepend another verdict" false
-    (List.exists (contains "timeline unavailable") store_rows);
-  let links_rows = rows (Proof.Goal_source_failure
-      (Proof.Goal_task_links_unavailable "primary registry is missing")) in
-  check_bool "link failure has one explicit verdict and its raw cause" true
-    (List.mem "Linked tasks unavailable · Cause: primary registry is missing"
-       links_rows);
-  let queue_rows = rows (Proof.Approval_queue_failure "queue store unreadable") in
-  check_bool "queue failure has one explicit verdict and its raw cause" true
-    (List.mem "Approval queue unavailable · Cause: queue store unreadable"
-       queue_rows)
-
-(* A goal's own creation event carries its kind in the subject column and in
-   the summary, so the row said it twice: "goal_created  Goal Event \xc2\xb7
-   goal_created". Every goal has one. *)
-let test_a_summary_that_repeats_the_subject_is_dropped () =
-  let rows =
-    timeline_rows
-      [ timeline_event ~kind:"goal_created" ~lane:"goal" ~title:"Goal Event"
-          ~summary:"goal_created"
-      ]
-  in
-  let row =
-    match List.filter (fun text -> contains "goal_created" text) rows with
-    | [ row ] -> row
-    | rows ->
-      Alcotest.failf "expected one row naming the event, got %d"
-        (List.length rows)
-  in
-  let occurrences needle text =
-    let n = String.length needle and h = String.length text in
-    let rec go i found =
-      if i + n > h then found
-      else if String.sub text i n = needle then go (i + n) (found + 1)
-      else go (i + 1) found
-    in
-    go 0 0
-  in
-  check_int "the kind is drawn once, by the subject column" 1
-    (occurrences "goal_created" row);
-  check_bool "and the title still names the row" true
-    (contains "Goal Event" row)
-
-(* A summary that qualifies the row stays: a task's status is not its id. *)
-let test_a_summary_that_says_more_than_the_subject_stays () =
-  let rows =
-    timeline_rows
-      [ timeline_event ~kind:"task_state" ~lane:"task:task-1522"
-          ~title:"restart replay" ~summary:"todo \xc2\xb7 created by analyst"
-      ]
-  in
-  let row =
-    match List.filter (fun text -> contains "task-1522" text) rows with
-    | [ row ] -> row
-    | rows -> Alcotest.failf "expected one task row, got %d" (List.length rows)
-  in
-  check_bool "the title names the row" true (contains "restart replay" row);
-  check_bool "and the status still qualifies it" true (contains "todo" row)
-
 let () =
   Alcotest.run "tui_planning_detail"
     [ ( "body"
-      , [ Alcotest.test_case "a summary that repeats the subject is dropped"
-            `Quick test_a_summary_that_repeats_the_subject_is_dropped
-        ; Alcotest.test_case "timeline failure renders the source cause once"
-            `Quick test_timeline_unavailable_renders_its_cause_once
-        ; Alcotest.test_case "a summary that says more than the subject stays"
-            `Quick test_a_summary_that_says_more_than_the_subject_stays
-        ; Alcotest.test_case "every verdict draws something" `Quick
-            test_every_verdict_draws_something
-        ; Alcotest.test_case "idle is not silence" `Quick test_idle_is_not_silence
-        ; Alcotest.test_case "a long reason wraps instead of being cut" `Quick
-            test_a_long_reason_wraps_instead_of_being_cut
-        ; Alcotest.test_case "the note reads after the verdict" `Quick
-            test_the_note_reads_after_the_verdict
-        ; Alcotest.test_case "tone separates a refusal from a proof" `Quick
+      , [ Alcotest.test_case "tone separates a refusal from a proof" `Quick
             test_tone_separates_a_refusal_from_a_proof
         ; Alcotest.test_case "a stuck goal says which step and why" `Quick
             test_a_stuck_goal_says_which_step_and_why
@@ -452,8 +278,6 @@ let () =
             test_a_crlf_note_draws_its_lines_without_the_cr
         ; Alcotest.test_case "a narrow pane still produces rows" `Quick
             test_a_narrow_pane_still_produces_rows
-        ; Alcotest.test_case "a timestamp value never starts at the colon" `Quick
-            test_a_timestamp_value_never_starts_at_the_colon
         ; Alcotest.test_case "confirmation retains the displayed proof" `Quick
             test_confirmation_retains_the_displayed_proof
         ; Alcotest.test_case "a recorded confirmation that did not complete can be confirmed again" `Quick

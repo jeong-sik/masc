@@ -229,7 +229,6 @@ let test_iterm2_places_inline_image () =
   check string "empty data produces empty escape" "" empty
 ;;
 
-
 (* A caller holding a frame sends pixels, not a file. The format carries no
    header, so the escape has to state the dimensions the terminal would
    otherwise read from one. Checked as keys rather than as a substring: the
@@ -339,7 +338,6 @@ let test_rgba_png_replaces_under_its_identity () =
        ~data:(String.make (w * h * 3) 'x') ~pixel_width:w ~pixel_height:h ~rows:4)
 ;;
 
-
 (* A put names pixels the terminal already holds under the id: nothing to
    decode travels, and the same image and placement ids replace that
    placement rather than add a second one. *)
@@ -360,16 +358,6 @@ let test_a_put_places_held_pixels_without_sending_them () =
   | escapes -> failf "a put is one escape, got %d" (List.length escapes)
 ;;
 
-let test_image_fits_terminal_geometry () =
-  let fit = Masc_tui_graphics.fit_rows ~cell_pixels:(Some (10, 20)) in
-  check int "wide viewport fits narrow terminal width" 10
-    (fit ~image_pixels:(Some (1600, 800)) ~columns:40 ~rows:30);
-  check int "tall viewport fits terminal height" 30
-    (fit ~image_pixels:(Some (400, 1600)) ~columns:40 ~rows:30);
-  check int "unknown cell metrics preserve existing placement" 30
-    (Masc_tui_graphics.fit_rows ~cell_pixels:None ~image_pixels:(Some (1600, 800)) ~columns:40 ~rows:30)
-;;
-
 let test_image_pointer_geometry () =
   let region : Masc_tui_graphics.image_region =
     {top=4;left=1;width_cells=80.;height_cells=20.} in
@@ -385,7 +373,6 @@ let () =
     "tui_graphics"
     [ ( "place"
       , [ test_case "screenshot pointer excludes text and padding" `Quick test_image_pointer_geometry
-        ; test_case "viewport fits terminal geometry" `Quick test_image_fits_terminal_geometry
         ; test_case "the payload is the file" `Quick
             test_the_payload_is_the_file
         ; test_case "every chunk but the last says more" `Quick

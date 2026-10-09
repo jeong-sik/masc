@@ -197,6 +197,8 @@ let test_purge_plan_removes_the_progress_file () =
     (has Shutdown.Keeper_memory_retraction_plan_artifact);
   check bool "plan removes the official-turn position" true
     (has Shutdown.Keeper_librarian_official_progress_artifact);
+  check bool "plan removes the external admission cursor" true
+    (has Shutdown.Keeper_external_read_cursor_artifact);
   check bool "and the log it is a position in" true
     (has Shutdown.Keeper_turn_boundaries_artifact)
 ;;

@@ -1,15 +1,17 @@
 type read_error =
   | Chat_store_unreadable of string
   | External_attention_unreadable of Keeper_external_attention.read_error
+  | External_cursor_failed of string
 
 let read_error_to_string = function
+  | External_cursor_failed detail -> "external admission cursor: " ^ detail
   | Chat_store_unreadable detail -> "keeper chat store is unreadable: " ^ detail
   | External_attention_unreadable error ->
     "external attention store is unreadable: "
     ^ Keeper_external_attention.read_error_to_string error
 ;;
 
-let counterpart_observations_between ~base_dir ~keeper_name ~after ~before =
+let counterpart_observations_read ?external_after ~base_dir ~keeper_name ~after ~before () =
   let ( let* ) = Result.bind in
   let in_range ts =
     ts <= before
@@ -40,10 +42,28 @@ let counterpart_observations_between ~base_dir ~keeper_name ~after ~before =
     |> Result.map (List.filter_map (function
       | Keeper_external_attention.Recorded item -> Some item))
   in
-  let external_items =
-    List.filter
-      (fun (item : Keeper_external_attention.item) -> in_range item.received_at)
-      all_external_items
+  let received_at (item : Keeper_external_attention.item) = item.received_at in
+  let* external_items, external_through = match external_after with
+    | None ->
+      let items =
+        all_external_items
+        |> List.filter (fun item -> in_range (received_at item))
+        |> List.stable_sort (fun left right ->
+          Float.compare (received_at left) (received_at right))
+      in
+      Ok (items, List.length all_external_items)
+    | Some cursor when cursor < 0 || cursor > List.length all_external_items ->
+      Error (External_cursor_failed "external log shrank behind its admission cursor")
+    | Some cursor ->
+      (* Rows stay in durable admission order. The snapshot ends at the first
+         row admitted after this range, so a later turn's evidence is not
+         committed with this one. A row stamped before a clock rollback holds
+         the rows behind it until a range ends after its stamp. *)
+      let items =
+        List.drop cursor all_external_items
+        |> List.take_while (fun item -> received_at item <= before)
+      in
+      Ok (items, cursor + List.length items)
   in
   (* This key answers whether a chat row came from an external delivery, not
      whether that delivery happened inside this Memory range. The external
@@ -80,10 +100,32 @@ let counterpart_observations_between ~base_dir ~keeper_name ~after ~before =
       Keeper_counterpart_observation.of_chat_message message
       |> Option.map (fun observation -> message.ts, observation))
   in
-  external_observations @ chat_observations
-  |> List.stable_sort (fun (left_ts, _) (right_ts, _) -> Float.compare left_ts right_ts)
+  let chat_observations =
+    List.stable_sort
+      (fun (left_ts, _) (right_ts, _) -> Float.compare left_ts right_ts)
+      chat_observations
+  in
+  (* Interleave by time without reordering either side: external rows keep the
+     order chosen above, and an external row goes first on a tie. *)
+  let rec interleave acc externals chats =
+    match externals, chats with
+    | [], rest | rest, [] -> List.rev_append acc rest
+    | ((admitted_ts, _) as admitted) :: admitted_rest, ((chat_ts, _) as chat) :: chat_rest ->
+      if Float.compare chat_ts admitted_ts < 0
+      then interleave (chat :: acc) externals chat_rest
+      else interleave (admitted :: acc) admitted_rest chats
+  in
+  interleave [] external_observations chat_observations
   |> List.map snd
-  |> Result.ok
+  |> fun observations -> Ok (observations, external_through)
+;;
+
+let counterpart_observations_between ~base_dir ~keeper_name ~after ~before =
+  counterpart_observations_read ~base_dir ~keeper_name ~after ~before () |> Result.map fst
+;;
+
+let counterpart_observations_from ~external_after ~base_dir ~keeper_name ~after ~before =
+  counterpart_observations_read ~external_after ~base_dir ~keeper_name ~after ~before ()
 ;;
 
 let counterpart_observations_between_offloaded ~base_dir ~keeper_name ~after ~before =

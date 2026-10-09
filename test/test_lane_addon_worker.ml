@@ -17,6 +17,24 @@ if argv[:2] == ["image", "inspect"]:
         raise SystemExit(2)
     print("sha256:" + "a" * 64)
     raise SystemExit(0)
+if argv[:1] == ["volume"]:
+    action, args = argv[1], argv[2:]
+    if (root / "daemon-unavailable").exists():
+        raise SystemExit(7)
+    if action == "ls":
+        name = args[args.index("--filter") + 1].removeprefix("name=^").removesuffix("$")
+        if (root / (name + ".volume")).exists(): print(json.dumps(name))
+    elif action == "create":
+        name = args[-1]
+        path = root / (name + ".volume")
+        if not path.exists():
+            label = args[args.index("--label") + 1]
+            path.write_text(json.dumps({"Name": name, "Labels": dict([label.split("=", 1)])}))
+        print(name)
+    elif action == "inspect":
+        print(json.dumps([json.loads((root / (args[-1] + ".volume")).read_text())]))
+    else: raise SystemExit(2)
+    raise SystemExit(0)
 if not argv or argv[0] != "container":
     raise SystemExit(2)
 action, args = argv[1], argv[2:]
@@ -105,6 +123,11 @@ elif action == "start":
         elif method == "tools/list":
             result = {"tools": [{"name": "lane_observe", "description": "fixture",
                 "inputSchema": {"type": "object"}, "outputSchema": {"type": "object"}}]}
+            if mode in ("exports", "duplicate_exports"):
+                exported = {"name":"machine_step", "description":"Advance the machine",
+                    "inputSchema":{"type":"object", "properties":{"frames":{"type":"integer"}}}}
+                result["tools"].append(exported)
+                if mode == "duplicate_exports": result["tools"].append(exported)
             if mode == "artifacts":
                 def object_schema(properties):
                     return {"type":"object", "properties":properties,
@@ -187,7 +210,7 @@ let with_fixture f =
 let package directory mode : Types.package = {
   id = "worker-test"; revision = "fixture-1"; title = "Worker test";
   contributions = [ Types.Observe ]; image = "fixture/image";
-  command = [ "observer"; mode ]; directory; skills_directory = None; action_tool = None; outputs = [];
+  command = [ "observer"; mode ]; directory; skills_directory = None; action_tool = None; state_storage=Types.Ephemeral;tool_invocation=Types.Direct; exported_tools = []; outputs = [];
   binding_schema=None;presentation=Masc.Lane_addon_presentation.empty;refresh_policy=Types.Every_hint;
   model_access=Types.Model_disabled;
   resources = { cpus = 0.5; memory_bytes = 67_108_864L;
@@ -198,16 +221,41 @@ let unwrap = function Ok value -> value | Error error -> fail (Worker.error_to_s
 let sources mode = `Assoc [ "mode", `String mode ]
 let observe worker mode = Worker.observe worker ~binding:(`Assoc []) ~sources:(sources mode)
 let control_timeout_sec = 1.
-let start ?(instance_id = Random_id.uuid_v7 ()) env sw dir docker mode =
+let start ?state_owner ?(instance_id = Random_id.uuid_v7 ()) env sw dir docker mode =
   Worker.start ~sw ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
     ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id
-    ~package:(package dir mode) ~docker_command:docker ()
+    ~package:{ (package dir mode) with state_storage =
+      (match state_owner with None -> Types.Ephemeral | Some _ -> Types.Persistent) }
+    ?state_owner ~docker_command:docker ()
 
 let await_marker clock file =
   let rec wait () =
     if Sys.file_exists file then ()
     else (Eio.Time.sleep clock 0.005; wait ())
   in wait ()
+
+let test_persistent_state_has_one_writer_and_survives_detach () =
+  with_fixture (fun env sw dir docker ->
+    let module State = Masc.Lane_addon_worker_state in
+    let state_owner = match State.create_owner ~workspace_root:dir
+        ~installation_id:"machine-installation" ~package_id:(package dir "good").id with
+      | Ok owner -> owner | Error message -> fail message in
+    let first = unwrap (start ~state_owner ~instance_id:"first-writer" env sw dir docker "good") in
+    let volume = Filename.concat dir (State.volume_name state_owner ^ ".volume") in
+    check bool "state exists before worker use" true (Sys.file_exists volume);
+    check bool "another incarnation cannot concurrently write this installation" true
+      (Result.is_error (start ~state_owner ~instance_id:"second-writer" env sw dir docker "good"));
+    ignore (unwrap (observe first "good"));
+    unwrap (Worker.stop first);
+    check bool "detach retains named state" true (Sys.file_exists volume);
+    let replacement = unwrap (start ~state_owner ~instance_id:"replacement" env sw dir docker "good") in
+    let recovery = Worker.recover_stop ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+      ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"replacement" ~container_id:None
+      ~state_owner ~docker_command:docker () in
+    unwrap recovery;
+    check bool "receiptless recovery finds the persistent writer slot" false
+      (Sys.file_exists (Filename.concat dir (Worker.container_id replacement ^ ".json")));
+    check bool "recovery retains named state" true (Sys.file_exists volume))
 
 let test_structured_observation_and_exact_removal () = with_fixture (fun env sw dir docker ->
   let first = unwrap (start env sw dir docker "good") in
@@ -1672,7 +1720,80 @@ let test_relative_store_root ~sequence () =
       check string "relative root published blob is readable after reopen" "relative blob"
         (require (Store.read_blob (Store.create ~root) reference))))
 
+let test_exported_tools_follow_worker_lifetime () = with_fixture (fun env sw dir docker ->
+  let start_export mode = Worker.start ~sw ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+    ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:(Random_id.uuid_v7 ())
+    ~package:{ (package dir mode) with exported_tools = ["machine_step"] }
+    ~docker_command:docker () in
+  let worker = unwrap (start_export "exports") in
+  let tools = Worker.exported_tools worker in
+  check (list string) "only explicit exports" ["machine_step"]
+    (List.map (fun (tool : Mcp_protocol.Mcp_types.tool) -> tool.name) tools);
+  (match tools with
+   | [tool] -> check string "worker owns schema" "integer"
+       Yojson.Safe.Util.(tool.input_schema |> member "properties" |> member "frames" |> member "type" |> to_string)
+   | _ -> fail "one exported schema expected");
+  check bool "declared tool is callable" true
+    (Result.is_ok (Worker.call_exported_tool worker ~name:"machine_step" ~arguments:(`Assoc ["frames", `Int 1])));
+  check bool "control tool is not callable as an export" true
+    (Result.is_error (Worker.call_exported_tool worker ~name:"lane_observe" ~arguments:(`Assoc [])));
+  unwrap (Worker.stop worker);
+  check bool "stale worker call is refused after stop" true
+    (match Worker.call_exported_tool worker ~name:"machine_step" ~arguments:(`Assoc []) with
+     | Error Worker.Stopped -> true | _ -> false);
+  check int "stopped worker withdraws its tools" 0 (List.length (Worker.exported_tools worker));
+  check bool "missing declared export fails startup" true (Result.is_error (start_export "good"));
+  check bool "ambiguous advertised export fails startup" true (Result.is_error (start_export "duplicate_exports")))
+
+let test_persistent_state_requires_exact_owner () =
+  let module State = Masc.Lane_addon_worker_state in
+  let owner installation_id =
+    match State.create_owner ~workspace_root:(Sys.getcwd ()) ~installation_id ~package_id:"machine" with
+    | Ok owner -> owner | Error message -> fail message in
+  let first = owner "installation-a" in
+  let second = owner "installation-b" in
+  check bool "different logical installations do not share state" false
+    (String.equal (State.volume_name first) (State.volume_name second));
+  let labels = ref None in
+  let creates = ref 0 in
+  let run ~operation:_ args = match args with
+    | ["volume"; "ls"; "--filter"; _; "--format"; _] ->
+        Ok (match !labels with None -> "" | Some _ -> Yojson.Safe.to_string (`String (State.volume_name first)))
+    | ["volume"; "create"; "--label"; label; name] ->
+        incr creates;
+        let at = String.index label '=' in
+        labels := Some [String.sub label 0 at, `String (String.sub label (at+1) (String.length label-at-1))];
+        Ok name
+    | ["volume"; "inspect"; name] ->
+        Ok (Yojson.Safe.to_string (`List [`Assoc ["Name", `String name;
+          "Labels", `Assoc (Option.value ~default:[] !labels)]]))
+    | _ -> fail "state allocation attempted an unexpected Docker operation" in
+  let ensure () = match State.ensure ~run first with
+    | Ok mount -> mount | Error message -> fail message in
+  let mount = ensure () in
+  check string "reconnect uses the same owned state" mount (ensure ());
+  check int "owned state is created only once" 1 !creates;
+  labels := Some ["masc.lane.state.owner", `String "foreign"];
+  check bool "a same-name foreign volume never grants a mount" true
+    (Result.is_error (State.ensure ~run first));
+  check bool "daemon failure is not treated as absence" true
+    (Result.is_error (State.ensure ~run:(fun ~operation:_ _ -> Error "daemon unavailable") first));
+  check int "refusals never recreate or delete state" 1 !creates
+
+let test_caller_context_is_a_separate_envelope () =
+  let module Context = Lane_addon_call_context in
+  let arguments = `Assoc ["caller", `String "forged"] in
+  let encoded = Context.to_json ~tool:"machine_step" ~arguments ~principal:(Context.Keeper "actual") in
+  let decoded = match Context.of_json encoded with Ok value -> value | Error message -> fail message in
+  check bool "inner caller is ordinary tool data" true (decoded.arguments = arguments);
+  check bool "outer principal remains host-owned" true (decoded.principal = Context.Keeper "actual");
+  let duplicated = match encoded with `Assoc fields -> `Assoc (("caller", `Assoc ["kind", `String "operator"])::fields) | _ -> assert false in
+  check bool "duplicate caller authority is rejected" true (Result.is_error (Context.of_json duplicated));
+  check bool "the private control tool is never exported" true
+    (Result.is_error (Types.validate_exported_tools ~action_tool:None [Context.tool_name]))
+
 let () = run "Lane Add-on worker" [ "lifecycle", [
+  test_case "exported tools follow worker lifetime" `Quick test_exported_tools_follow_worker_lifetime;
   test_case "canonical missing under external parent refuses public read" `Quick
     (test_canonical_parent_is_not_followed ~directory:false);
   test_case "canonical directory under external parent refuses public read" `Quick
@@ -1688,6 +1809,8 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "sampling publication requires readable address" `Quick test_sampling_publication_requires_readable_address;
   test_case "sampling fallback rejects external symlinks" `Quick
     (test_sampling_fallback_rejects_external_links "symlink" (fun target path -> Unix.symlink target path));
+  test_case "caller context stays outside model arguments" `Quick test_caller_context_is_a_separate_envelope;
+  test_case "persistent worker state verifies exact ownership" `Quick test_persistent_state_requires_exact_owner;
   test_case "sampling fallback rejects external hardlinks" `Quick
     (test_sampling_fallback_rejects_external_links "hardlink" (fun target path -> Unix.link target path));
   test_case "sampling reads preserve canonical failures" `Quick test_sampling_blob_read_preserves_canonical_failure;
@@ -1710,6 +1833,8 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "image preview is read only and preserves engine failures" `Quick test_image_preview_does_not_create_worker;
   test_case "docker control ignores the package reply bound" `Quick test_docker_control_ignores_the_package_reply_bound;
   test_case "world action and binary artifact ingress" `Quick test_world_action_artifact_ingress;
+  test_case "persistent state has one writer and survives detach" `Quick
+    test_persistent_state_has_one_writer_and_survives_detach;
   test_case "structured observation and exact removal" `Quick test_structured_observation_and_exact_removal;
   test_case "blocked observation preserves other owner" `Quick test_hanging_observation_is_optional_and_detachable;
   test_case "blocked initialization can detach" `Quick test_initialize_can_be_detached;

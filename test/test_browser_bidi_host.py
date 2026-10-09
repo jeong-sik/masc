@@ -139,6 +139,12 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]
         (root / "profile").mkdir()
+        # The profile is checked only by a BiDi host; given without
+        # --bidi-url it is refused, not dropped.
+        unattached = subprocess.run([host, "--base-path", str(root), "--token-file", str(root / "token"),
+            "--firefox-profile", str(root / "profile")], stdin=subprocess.DEVNULL, capture_output=True, timeout=10)
+        said = (unattached.stdout + unattached.stderr).decode(errors="replace")
+        assert unattached.returncode == 1 and "--firefox-profile needs --bidi-url" in said, (unattached.returncode, said)
         ff = native = None
         log = (evidence / "firefox.log").open("wb")
         native_log = (evidence / "native.log").open("wb")
@@ -155,8 +161,10 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
                     if time.monotonic() >= deadline:
                         raise AssertionError("owned Firefox did not start")
                     time.sleep(.05)
-            host_argv = [host, "--base-path", str(root), "--token-file", str(root / "token"),
+            attach_argv = [host, "--base-path", str(root), "--token-file", str(root / "token"),
                 "--server", f"http://127.0.0.1:{server.server_port}", "--bidi-url", f"ws://127.0.0.1:{port}/session"]
+            # As the MASC server starts a host for the Keeper's Firefox.
+            host_argv = attach_argv + ["--firefox-profile", str(root / "profile")]
             native = subprocess.Popen(host_argv, stdin=subprocess.DEVNULL, stdout=native_log, stderr=native_log)
             assert ready.wait(20), f"native peer did not register; stderr retained in {evidence / 'native.log'}"
 
@@ -345,22 +353,42 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
             assert other["ok"] and other["data"] == before["data"]
             assert len({row[0] for row in metadata}) == 1 and all(row[1] for row in metadata)
             assert all(row[2] == "webdriver_bidi" for row in metadata), metadata
-            # Firefox takes one session. A host started while this one is
-            # attached is refused, leaves no session of its own to end, and
-            # takes nothing from the first.
-            with (evidence / "rival.log").open("wb") as rival_log:
-                rival = subprocess.Popen(host_argv, stdin=subprocess.DEVNULL, stdout=rival_log, stderr=rival_log)
-                try:
-                    rival_exit = rival.wait(timeout=30)
-                except subprocess.TimeoutExpired:
-                    rival.kill()
-                    rival.wait(timeout=5)
-                    raise AssertionError(f"a second host was not refused; see {evidence / 'rival.log'}")
-            rival_said = (evidence / "rival.log").read_text(errors="replace")
-            assert rival_exit == 1, rival_said
-            assert "BiDi command rejected: session not created" in rival_said, rival_said
-            assert "was not ended" not in rival_said, rival_said
+            # A workspace has one BiDi host. A second one for it is refused
+            # by the first one's record, before it asks Firefox for anything.
+            def refused(name, argv):
+                with (evidence / name).open("wb") as rival_log:
+                    rival = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=rival_log, stderr=rival_log)
+                    try:
+                        rival_exit = rival.wait(timeout=30)
+                    except subprocess.TimeoutExpired:
+                        rival.kill()
+                        rival.wait(timeout=5)
+                        raise AssertionError(f"a second host was not refused; see {evidence / name}")
+                said = (evidence / name).read_text(errors="replace")
+                assert rival_exit == 1, said
+                return said
+
+            same_workspace = refused("rival-same-workspace.log", host_argv)
+            assert f"another BiDi host (pid {native.pid}) is running for this workspace" in same_workspace, same_workspace
+            # Firefox takes one session. A host of another workspace that
+            # reaches this Firefox is refused by Firefox, leaves no session
+            # of its own to end, and takes nothing from the first.
+            other_root = evidence / "other-workspace"
+            other_root.mkdir()
+            (other_root / "token").write_bytes((root / "token").read_bytes())
+            other_workspace = refused("rival-other-workspace.log", [
+                host, "--base-path", str(other_root), "--token-file", str(other_root / "token"),
+                "--server", f"http://127.0.0.1:{server.server_port}", "--bidi-url", f"ws://127.0.0.1:{port}/session"])
+            assert "BiDi command rejected: session not created" in other_workspace, other_workspace
+            assert "was not ended" not in other_workspace, other_workspace
             assert call("tabs.list", {})["ok"], "the attached host lost its session to a refused one"
+            # Each host left its own record: the attached one is still
+            # running, the refused one says why it ended.
+            attached = json.loads((root / ".masc/browser-lane/bidi-host.json").read_text())
+            assert attached["pid"] == native.pid and attached["ended"] is None, attached
+            turned_away = json.loads((other_root / ".masc/browser-lane/bidi-host.json").read_text())
+            assert turned_away["ended"]["reason"] == "BiDi command rejected: session not created", turned_away
+            assert turned_away["ended"]["session_in_firefox"] == "refused", turned_away
             # A host that is stopped ends the BiDi session it created, so
             # this same Firefox, not restarted, takes the next host. Its tabs
             # are the ones the first host saw.
@@ -369,9 +397,23 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
             native.terminate()
             assert native.wait(timeout=10) == 0, f"stopped host exit; see {evidence / 'native.log'}"
             assert stopped.wait(5), "the stopped host did not tell the server"
+            left = json.loads((root / ".masc/browser-lane/bidi-host.json").read_text())["ended"]
+            assert left["session_in_firefox"] == "none" and left["reason"].startswith("stopped by"), left
             assert ff.poll() is None, "Firefox ended with the host's session"
+            # A host given another profile keeps no session with this
+            # Firefox: it ends the one it was given and says why.
+            another_profile = refused("rival-another-profile.log",
+                attach_argv + ["--firefox-profile", str(evidence / "another-profile")])
+            assert "runs the profile" in another_profile, another_profile
+            assert "was not ended" not in another_profile, another_profile
+            elsewhere = json.loads((root / ".masc/browser-lane/bidi-host.json").read_text())["ended"]
+            assert "runs the profile" in elsewhere["reason"] and elsewhere["session_in_firefox"] == "none", elsewhere
+            # Firefox reports the profile path as it was given; a link to
+            # the same directory is the same profile.
+            (root / "profile-link").symlink_to(root / "profile")
             ready.clear()
-            native = subprocess.Popen(host_argv, stdin=subprocess.DEVNULL, stdout=native_log, stderr=native_log)
+            native = subprocess.Popen(attach_argv + ["--firefox-profile", str(root / "profile-link")],
+                stdin=subprocess.DEVNULL, stdout=native_log, stderr=native_log)
             assert ready.wait(20), f"a second host did not attach; see {evidence / 'native.log'}"
             again = call("tabs.list", {})
             assert again["ok"] and sorted(tab["url"] for tab in again["data"]) == seen, again

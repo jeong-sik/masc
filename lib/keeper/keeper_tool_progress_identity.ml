@@ -76,6 +76,63 @@ let retain_confirmation_identity ~tool_name original redacted =
   | _ -> redacted
 ;;
 
+(* A memory write returns the content-addressed [memory_id]; a retract
+   receives that id as input. The answer therefore groups changing write
+   requests and snapshot stamps by the claim they affect. A write also says
+   what it did to that claim ([identity_disposition]): inserting a claim and
+   observing it again are different answers, so the disposition stays in the
+   write's identity. *)
+type memory_identity =
+  | Memory_write of { disposition : string option; memory_id : string }
+  | Memory_retract of string
+
+let memory_id_of_json = function
+  | `Assoc fields ->
+    (match List.assoc_opt "memory_id" fields with
+     | Some (`String memory_id) -> Some memory_id
+     | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _)
+     | None -> None)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+    None
+;;
+
+let disposition_of_json = function
+  | `Assoc fields ->
+    (match List.assoc_opt "identity_disposition" fields with
+     | Some (`String disposition) -> Some disposition
+     | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _)
+     | None -> None)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+    None
+;;
+
+let memory_identity ~tool_name ~input ~output_text =
+  match Keeper_tool_answer.resolve tool_name with
+  | Keeper_tool_answer.Keeper_handler Keeper_tool_descriptor.Tool_memory_write ->
+    Option.bind (Keeper_tool_answer.answer ~tool_name ~output_text) (fun answer ->
+      Option.map
+        (fun memory_id ->
+          Memory_write { disposition = disposition_of_json answer; memory_id })
+        (memory_id_of_json answer))
+  | Keeper_tool_answer.Keeper_handler Keeper_tool_descriptor.Tool_memory_retract ->
+    Option.map (fun memory_id -> Memory_retract memory_id)
+      (memory_id_of_json input)
+  | Keeper_tool_answer.Keeper_handler _ | Keeper_tool_answer.Outside_keeper_descriptors ->
+    None
+;;
+
+let memory_identity_fingerprint = function
+  | Memory_write { disposition; memory_id } ->
+    digest_json
+      (`Assoc
+        [ "tool", `String "write"
+        ; "disposition", (match disposition with Some d -> `String d | None -> `Null)
+        ; "memory_id", `String memory_id
+        ])
+  | Memory_retract memory_id ->
+    digest_json (`Assoc [ "tool", `String "retract"; "memory_id", `String memory_id ])
+;;
+
 let digest_tool_input ~tool_name input =
   redacted_input input
   |> retain_page_cursor_identity input
@@ -129,10 +186,15 @@ let digest_tool_output ~tool_name output_text =
 ;;
 
 let compute_tool_io ~tool_name ~input ~output_text =
-  match digest_tool_input ~tool_name input, digest_tool_output ~tool_name output_text with
-  | Some input_fingerprint, Some output_fingerprint ->
-    Some { input_fingerprint; output_fingerprint }
-  | None, _ | _, None -> None
+  match memory_identity ~tool_name ~input ~output_text with
+  | Some identity ->
+    let fingerprint = memory_identity_fingerprint identity in
+    Some { input_fingerprint = fingerprint; output_fingerprint = fingerprint }
+  | None ->
+    (match digest_tool_input ~tool_name input, digest_tool_output ~tool_name output_text with
+     | Some input_fingerprint, Some output_fingerprint ->
+       Some { input_fingerprint; output_fingerprint }
+     | None, _ | _, None -> None)
 ;;
 
 (* Answers already computed, kept because the same questions come back. The
@@ -280,9 +342,27 @@ type history_pair = Io_memo.key =
    of one keeper each read a finished table and the later publication wins,
    with the same answers. *)
 module History_memo = struct
-  type t = io_fingerprints option Io_memo.Table.t Atomic.t
+  type ledger_call =
+    { position : Keeper_tool_call_index.position
+    ; tool_use_id : string option
+    ; tool_name : string
+    ; fingerprints : io_fingerprints
+    }
+  type ledger_seed =
+    { ledger_dir : string
+    ; judged : Keeper_tool_call_index.frontier
+    ; through : Keeper_tool_call_index.frontier
+    ; calls : ledger_call list
+    }
+  type t =
+    { digests : io_fingerprints option Io_memo.Table.t Atomic.t
+    ; ledger : ledger_seed option Atomic.t
+    }
 
-  let create () : t = Atomic.make (Io_memo.Table.create 0)
+  let create () : t =
+    { digests = Atomic.make (Io_memo.Table.create 0); ledger = Atomic.make None }
+  let ledger_seed memo = Atomic.get memo.ledger
+  let hold_ledger_seed memo seed = Atomic.set memo.ledger (Some seed)
 end
 
 let history_memos : (string * string, History_memo.t) Hashtbl.t = Hashtbl.create 16
@@ -299,7 +379,7 @@ let history_memo ~base_path ~keeper_name =
 ;;
 
 let digest_history_pairs (memo : History_memo.t) pairs =
-  let previous = Atomic.get memo in
+  let previous = Atomic.get memo.History_memo.digests in
   let next = Io_memo.Table.create (List.length pairs) in
   let answers =
     List.map
@@ -317,7 +397,7 @@ let digest_history_pairs (memo : History_memo.t) pairs =
          answer)
       pairs
   in
-  Atomic.set memo next;
+  Atomic.set memo.History_memo.digests next;
   answers
 ;;
 

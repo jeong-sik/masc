@@ -1,16 +1,60 @@
 open Alcotest
 module Peer = Masc.Browser_bidi_peer
+(* The session request's failure as the sentence the host logs. Which kind of
+   failure it was is asked where a case is about that. *)
+let metadata peer = Result.map_error Peer.session_failure_message (Peer.metadata peer)
 let obj xs = `Assoc xs
+(* The session's end, with a failure as its sentence. *)
+let ended_session peer =
+  Result.map_error Peer.session_end_failure_message (Peer.end_session peer)
 (* A peer for a case that asks for no session. *)
 let peer_of command =
   Peer.create ~command ~session_end:(fun () -> fail "this case has no session to end")
+(* A host started for the Keeper's Firefox keeps a session only with a
+   Firefox that reports running that profile. Firefox 157.0.1 reports the
+   path as it was given, so a link and its directory are the same profile. *)
+let test_a_session_runs_the_expected_profile () =
+  let profile = Filename.temp_dir "masc-peer-profile-" "" in
+  let link = profile ^ "-link" in
+  Unix.symlink profile link;
+  Fun.protect ~finally:(fun () -> Sys.remove link; Unix.rmdir profile) (fun () ->
+    let session reported =
+      let caps =
+        obj ([ "browserName", `String "firefox"; "browserVersion", `String "157.0.1" ]
+             @ match reported with Some path -> [ "moz:profile", `String path ] | None -> [])
+      in
+      let peer =
+        Peer.create ~session_end:(fun () -> Ok ()) ~command:(fun method_ _ ->
+          match method_ with
+          | "session.new" -> Ok (obj [ "sessionId", `String "s"; "capabilities", caps ])
+          | other -> failf "unexpected command %s" other)
+      in
+      (match metadata peer with Ok _ -> () | Error detail -> fail detail);
+      peer
+    in
+    check (option string) "none before a session" None
+      (Peer.profile (peer_of (fun _ _ -> fail "nothing is asked")));
+    check (option string) "as Firefox reported it" (Some link) (Peer.profile (session (Some link)));
+    List.iter
+      (fun (name, reported, expected) ->
+        check (result unit string) name (Ok ()) (Peer.runs_profile (session (Some reported)) ~expected))
+      [ "the same directory", profile, profile; "reported through a link", link, profile
+      ; "expected through a link", profile, link ];
+    let refused name reported ~mentions =
+      match Peer.runs_profile (session reported) ~expected:profile with
+      | Error detail -> check bool (name ^ ": " ^ detail) true (String_util.contains_substring detail mentions)
+      | Ok () -> fail (name ^ " was taken")
+    in
+    refused "another profile" (Some "/Users/someone/Firefox/Profiles/x.default") ~mentions:"x.default";
+    refused "a Firefox that did not say" None ~mentions:"moz:profile")
+
 let script_value json = obj ["type",`String "success";"result",obj ["type",`String "string";"value",`String (Yojson.Safe.to_string json)]]
 let test_context_identity () =
   let contexts=ref ["a";"b"] in
   let command method_ _ = match method_ with
     | "browsingContext.getTree" -> Ok (obj ["contexts",`List (List.map (fun c->obj ["context",`String c;"url",`String "https://same.example/"]) !contexts)])
     | "script.callFunction" -> Ok (script_value (obj ["url",`String "https://same.example/";"title",`String "same";"active",`Bool true]))
-    | _ -> Error (Peer.Rejected "unexpected test command") in
+    | _ -> Error (Peer.Rejected (Peer.error_code_of_wire "unexpected test command")) in
   let peer=peer_of command in
   let ids () = match Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) with
     | Ok (`List rows) -> List.map (fun row->Yojson.Safe.Util.(row |> member "id" |> to_int)) rows
@@ -139,7 +183,7 @@ let test_pointer_validation () =
     calls:=method_::!calls;
     match method_ with
     | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "owned"]]])
-    | _ -> Error (Peer.Rejected "unexpected effect dispatch") in
+    | _ -> Error (Peer.Rejected (Peer.error_code_of_wire "unexpected effect dispatch")) in
   let peer=peer_of command in
   let viewport=obj ["documentId",`String "observed";"width",`Int 800;"height",`Int 600;
     "scrollX",`Int 0;"scrollY",`Int 0] in
@@ -275,9 +319,9 @@ let test_the_session_is_ended_after_a_command_got_no_reply () =
     seen:=method_of ending :: !seen;
     send_server_message flow (reply_to ending (obj [])) in
   let outcome=with_scripted_firefox script (fun ~ended peer ->
-    check (result unit string) "nothing to end before a session exists" (Ok ()) (Peer.end_session peer);
+    check (result unit string) "nothing to end before a session exists" (Ok ()) (ended_session peer);
     check bool "and nothing was sent for it" true (!seen=[]);
-    (match Peer.metadata peer with
+    (match metadata peer with
      | Ok version -> check string "the session was created" "157.0-scripted" version
      | Error detail -> fail detail);
     (match Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) with
@@ -289,8 +333,8 @@ let test_the_session_is_ended_after_a_command_got_no_reply () =
     check (option string) "its holder is told" (Some "BiDi transport deadline exceeded")
       (Eio.Promise.peek ended);
     check (result unit string) "the session is still ended, over the open socket" (Ok ())
-      (Peer.end_session peer);
-    check (result unit string) "once" (Ok ()) (Peer.end_session peer);
+      (ended_session peer);
+    check (result unit string) "once" (Ok ()) (ended_session peer);
     Ok ()) in
   check (result unit string) "the connection finished" (Ok ()) outcome;
   check (list string) "what Firefox was sent, in order"
@@ -302,11 +346,11 @@ let test_a_session_that_cannot_be_ended_is_an_error () =
   let closed_under_it=with_scripted_firefox (fun flow ->
       send_server_message flow (session_created (read_client_message flow)))
     (fun ~ended peer ->
-      (match Peer.metadata peer with Ok _ -> () | Error detail -> fail detail);
+      (match metadata peer with Ok _ -> () | Error detail -> fail detail);
       (* The script returned after its one answer, which closed the socket.
          The session is ended only once this side has seen that. *)
       let closed=Eio.Promise.await ended in
-      Error (closed ^ " / " ^ (match Peer.end_session peer with
+      Error (closed ^ " / " ^ (match ended_session peer with
         | Ok () -> "ended" | Error detail -> detail))) in
   check (result unit string) "a closed socket" (Error "BiDi EOF / BiDi EOF") closed_under_it;
   let unanswered=with_scripted_firefox (fun flow ->
@@ -315,8 +359,8 @@ let test_a_session_that_cannot_be_ended_is_an_error () =
       (* Held open without an answer until the client is done. *)
       try ignore (Eio.Flow.single_read flow (Cstruct.create 1) : int) with End_of_file -> ())
     (fun ~ended:_ peer ->
-      (match Peer.metadata peer with Ok _ -> () | Error detail -> fail detail);
-      match Peer.end_session peer with
+      (match metadata peer with Ok _ -> () | Error detail -> fail detail);
+      match ended_session peer with
       | Ok () -> Ok ()
       | Error detail -> Error detail) in
   check (result unit string) "no answer in the window" (Error "no answer to session.end in time") unanswered
@@ -330,13 +374,51 @@ let test_a_socket_closing_under_session_end_is_told_at_once () =
       (* Returning after session.end arrived closes the socket under it. *)
       ignore (read_client_message flow : Yojson.Safe.t))
     (fun ~ended:_ peer ->
-      (match Peer.metadata peer with Ok _ -> () | Error detail -> fail detail);
+      (match metadata peer with Ok _ -> () | Error detail -> fail detail);
       (match Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) with
        | Error (Peer.Before_effect _) -> ()
        | Error (Peer.Outcome_unknown detail) -> fail detail
        | Ok _ -> fail "an unanswered command produced an answer");
-      Peer.end_session peer) in
+      ended_session peer) in
   check (result unit string) "the socket's end, not the window's" (Error "BiDi EOF") outcome
+(* Whether Firefox still holds the session depends on why it was not ended:
+   with the socket gone this side cannot tell, and a Firefox that was asked
+   and did not confirm keeps it. *)
+let test_why_a_session_was_not_ended_says_whether_firefox_could_be_asked () =
+  let kind = function
+    | Ok () -> "ended"
+    | Error (Peer.Connection_gone _) -> "connection gone"
+    | Error (Peer.Not_confirmed _) -> "not confirmed" in
+  let ending script =
+    let seen=ref "not reached" in
+    let finished=with_scripted_firefox script (fun ~ended:_ peer ->
+      (match metadata peer with Ok _ -> () | Error detail -> fail detail);
+      seen:=kind (Peer.end_session peer);
+      Ok ()) in
+    check (result unit string) "the connection finished" (Ok ()) finished;
+    !seen in
+  (* What Firefox says of a session it was asked for and does not have
+     (measured on 157.0.1): there is none to end. *)
+  check string "Firefox has no such session" "ended" (ending (fun flow ->
+    send_server_message flow (session_created (read_client_message flow));
+    let ending=read_client_message flow in
+    send_server_message flow (obj ["type",`String "error";"id",Yojson.Safe.Util.member "id" ending;
+      "error",`String "invalid session id"])));
+  List.iter (fun code ->
+      check string ("Firefox refuses to end it: " ^ code) "not confirmed" (ending (fun flow ->
+        send_server_message flow (session_created (read_client_message flow));
+        let ending=read_client_message flow in
+        send_server_message flow (obj ["type",`String "error";"id",Yojson.Safe.Util.member "id" ending;
+          "error",`String code]))))
+    (* The code that refuses a [session.new] says nothing of ending one. *)
+    ["unknown error"; "session not created"];
+  check string "Firefox does not answer" "not confirmed" (ending (fun flow ->
+    send_server_message flow (session_created (read_client_message flow));
+    ignore (read_client_message flow : Yojson.Safe.t);
+    try ignore (Eio.Flow.single_read flow (Cstruct.create 1) : int) with End_of_file -> ()));
+  check string "the socket closes under the request" "connection gone" (ending (fun flow ->
+    send_server_message flow (session_created (read_client_message flow));
+    ignore (read_client_message flow : Yojson.Safe.t)))
 (* Firefox may hold a session from the moment it is asked for one. An answer
    that never came leaves one to end; Firefox's own refusal leaves none. *)
 let test_a_session_nobody_confirmed_is_ended () =
@@ -349,8 +431,8 @@ let test_a_session_nobody_confirmed_is_ended () =
       send_server_message flow (reply_to ending (obj [])))
     (fun ~ended:_ peer ->
       check (result string string) "no answer to session.new"
-        (Error "BiDi transport deadline exceeded") (Peer.metadata peer);
-      Peer.end_session peer) in
+        (Error "BiDi transport deadline exceeded") (metadata peer);
+      ended_session peer) in
   check (result unit string) "the session is ended all the same" (Ok ()) unanswered;
   check (list string) "what Firefox was sent, in order" ["session.new";"session.end"] (List.rev !seen)
 let test_a_refused_session_leaves_none_to_end () =
@@ -365,12 +447,40 @@ let test_a_refused_session_leaves_none_to_end () =
       | further -> seen:=method_of further :: !seen
       | exception End_of_file -> ())
     (fun ~ended peer ->
-      check (result string string) "Firefox's refusal is the error"
-        (Error "BiDi command rejected: session not created") (Peer.metadata peer);
+      (* Firefox says this while it holds a session, so the host is told it
+         was refused one, apart from every other way of getting none. *)
+      (match Peer.metadata peer with
+       | Error (Peer.Session_refused said) ->
+         check string "Firefox's refusal is the error" "BiDi command rejected: session not created" said
+       | Error (Peer.Session_failed said) -> failf "a refused session was read as a failed one: %s" said
+       | Ok version -> failf "a refused session answered a version: %s" version);
       check bool "and the connection is not ended by it" true (Eio.Promise.peek ended=None);
-      Peer.end_session peer) in
+      ended_session peer) in
   check (result unit string) "nothing to end" (Ok ()) refused;
   check (list string) "Firefox was sent nothing after its refusal" ["session.new"] (List.rev !seen)
+(* "session not created" is the one refusal that says Firefox holds a
+   session. Any other is a session it did not start, with nothing said of
+   one that is there. *)
+let test_a_session_refused_for_another_reason_is_a_failed_one () =
+  List.iter (fun code ->
+      let refused=with_scripted_firefox (fun flow ->
+          let asked=read_client_message flow in
+          send_server_message flow (obj ["type",`String "error";"id",Yojson.Safe.Util.member "id" asked;
+            "error",`String code;"message",`String "the profile is locked"]);
+          match read_client_message flow with
+          | (_ : Yojson.Safe.t) -> ()
+          | exception End_of_file -> ())
+        (fun ~ended:_ peer ->
+          (match Peer.metadata peer with
+           | Error (Peer.Session_failed said) ->
+             check string "Firefox's own error is the reason" ("BiDi command rejected: " ^ code) said
+           | Error (Peer.Session_refused said) -> failf "another error was read as a session Firefox holds: %s" said
+           | Ok version -> failf "a refused session answered a version: %s" version);
+          ended_session peer) in
+      check (result unit string) ("nothing to end: " ^ code) (Ok ()) refused)
+    (* The code a session command gets without a session says nothing of
+       one Firefox holds. *)
+    ["unknown error"; "invalid session id"]
 (* An error answer without its code is not a refusal this side can read, so
    the session is still ended. *)
 let test_an_unreadable_refusal_leaves_a_session_to_end () =
@@ -383,8 +493,8 @@ let test_an_unreadable_refusal_leaves_a_session_to_end () =
       seen:=method_of ending :: !seen;
       send_server_message flow (reply_to ending (obj [])))
     (fun ~ended:_ peer ->
-      check (result string string) "the answer has no code" (Error "BiDi missing error") (Peer.metadata peer);
-      Peer.end_session peer) in
+      check (result string string) "the answer has no code" (Error "BiDi missing error") (metadata peer);
+      ended_session peer) in
   check (result unit string) "the session is ended" (Ok ()) outcome;
   check (list string) "what Firefox was sent, in order" ["session.new";"session.end"] (List.rev !seen)
 (* The ways a session request ends without an answer that no socket scripts:
@@ -398,21 +508,21 @@ let test_a_session_is_there_to_end_once_asked_for () =
         | "session.new" -> answer ()
         | other -> failf "unexpected command: %s" other) in
     let abandoned=asking (fun () -> Eio.Fiber.await_cancel ()) in
-    Eio.Fiber.first (fun () -> ignore (Peer.metadata abandoned : (string,string) result)) (fun () -> ());
-    check (result unit string) "a request the caller gave up on" (Ok ()) (Peer.end_session abandoned);
+    Eio.Fiber.first (fun () -> ignore (metadata abandoned : (string,string) result)) (fun () -> ());
+    check (result unit string) "a request the caller gave up on" (Ok ()) (ended_session abandoned);
     check int "is ended" 1 !ended;
-    check (result unit string) "once" (Ok ()) (Peer.end_session abandoned);
+    check (result unit string) "once" (Ok ()) (ended_session abandoned);
     check int "and not again" 1 !ended;
     let other_browser=asking (fun () -> Ok (obj ["sessionId",`String "scripted";"capabilities",
       obj ["browserName",`String "chromium";"browserVersion",`String "1"]])) in
     check (result string string) "a browser that is not Firefox is turned down"
-      (Error "BiDi peer must be Firefox") (Peer.metadata other_browser);
-    check (result unit string) "with the session it created" (Ok ()) (Peer.end_session other_browser);
+      (Error "BiDi peer must be Firefox") (metadata other_browser);
+    check (result unit string) "with the session it created" (Ok ()) (ended_session other_browser);
     check int "ended" 2 !ended;
     let never_written=asking (fun () -> Error (Peer.Unsent "BiDi EOF")) in
     check (result string string) "a request the connection never carried"
-      (Error "BiDi EOF") (Peer.metadata never_written);
-    check (result unit string) "asked Firefox for nothing" (Ok ()) (Peer.end_session never_written);
+      (Error "BiDi EOF") (metadata never_written);
+    check (result unit string) "asked Firefox for nothing" (Ok ()) (ended_session never_written);
     check int "so nothing is ended" 2 !ended)
 (* A peer that refuses the WebSocket upgrade. ws-direct raises [Failure] for
    the refused handshake; the connection returns it as its error rather than
@@ -540,7 +650,25 @@ let test_peer_serves_what_the_lane_table_says () =
       | Error (Peer.Before_effect detail), true | Error (Peer.Outcome_unknown detail), _ ->
         failf "the peer did not serve %s (%s), which the lane table says BiDi does" name detail)
       Lane.all_of_live_capability)
-let () = run "BiDi live peer" ["identity",[test_case "opaque contexts" `Quick test_context_identity];
+(* Firefox's error codes are read once where the answer arrives. The two
+   this host acts on are their own cases; any other is kept as Firefox wrote
+   it, and every code is written back as it was read. *)
+let test_an_error_code_is_read_once_and_written_back () =
+  let read code =
+    match Peer.error_code_of_wire code with
+    | Peer.Session_not_created -> "session not created"
+    | Peer.Invalid_session_id -> "invalid session id"
+    | Peer.Other_error kept -> "other: " ^ kept in
+  check string "session not created" "session not created" (read "session not created");
+  check string "invalid session id" "invalid session id" (read "invalid session id");
+  List.iter (fun code -> check string ("another code is kept: " ^ code) ("other: " ^ code) (read code))
+    [ "no such frame"; "unknown command"; "Session not created"; "session not created " ];
+  List.iter (fun code ->
+      check string ("written back: " ^ code) code (Peer.error_code_to_wire (Peer.error_code_of_wire code)))
+    [ "session not created"; "invalid session id"; "no such frame"; "" ]
+let () = run "BiDi live peer" ["identity",[test_case "opaque contexts" `Quick test_context_identity;
+    test_case "an error code is read once and written back" `Quick test_an_error_code_is_read_once_and_written_back;
+    test_case "a session runs the expected profile" `Quick test_a_session_runs_the_expected_profile];
   "lifetime",[test_case "normal callback closes held socket" `Quick (test_held_open_completion (Ok ()) );
     test_case "error callback closes held socket" `Quick (test_held_open_completion (Error "owned failure"));
     test_case "a refused upgrade is the connection's error" `Quick test_refused_upgrade_is_the_connections_error;
@@ -550,8 +678,12 @@ let () = run "BiDi live peer" ["identity",[test_case "opaque contexts" `Quick te
     test_case "a session that cannot be ended is an error" `Quick test_a_session_that_cannot_be_ended_is_an_error;
     test_case "a socket closing under session.end is told at once" `Quick
       test_a_socket_closing_under_session_end_is_told_at_once;
+    test_case "why a session was not ended says whether Firefox could be asked" `Quick
+      test_why_a_session_was_not_ended_says_whether_firefox_could_be_asked;
     test_case "a session nobody confirmed is ended" `Quick test_a_session_nobody_confirmed_is_ended;
     test_case "a refused session leaves none to end" `Quick test_a_refused_session_leaves_none_to_end;
+    test_case "a session refused for another reason is a failed one" `Quick
+      test_a_session_refused_for_another_reason_is_a_failed_one;
     test_case "an unreadable refusal leaves a session to end" `Quick
       test_an_unreadable_refusal_leaves_a_session_to_end;
     test_case "a session is there to end once asked for" `Quick test_a_session_is_there_to_end_once_asked_for];

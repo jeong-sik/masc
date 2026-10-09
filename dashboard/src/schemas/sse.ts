@@ -219,7 +219,7 @@ const KEEPER_CHAT_AG_UI_FIELDS_BY_TYPE = new Map<string, ReadonlySet<string>>([
   ['RUN_FINISHED', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId'])],
   ['RUN_ERROR', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'message', 'code'])],
   ['TEXT_MESSAGE_START', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'messageId', 'role'])],
-  ['TEXT_MESSAGE_CONTENT', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'messageId', 'delta'])],
+  ['TEXT_MESSAGE_CONTENT', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'messageId', 'delta', 'textStreamScope'])],
   ['TEXT_MESSAGE_END', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'messageId'])],
   ['TOOL_CALL_START', new Set([
     ...KEEPER_CHAT_AG_UI_BASE_FIELDS,
@@ -392,7 +392,8 @@ function validateUsage(value: unknown): SafeParseResult<true> {
 
 // KEEPER_STREAM_MESSAGE_DELTA usage carries cumulative counters and emits
 // only the ones the wire actually reported, so every field is optional and
-// there is no total_tokens or cost_usd. Requiring the full set here silently
+// there is no total_tokens. Provider-reported cost_usd is optional too.
+// Requiring the full set here silently
 // dropped every classic (output-only) delta once the producer stopped
 // zero-filling unreported counters.
 function validateDeltaUsage(value: unknown): SafeParseResult<true> {
@@ -401,6 +402,7 @@ function validateDeltaUsage(value: unknown): SafeParseResult<true> {
     'output_tokens',
     'cache_creation_input_tokens',
     'cache_read_input_tokens',
+    'cost_usd',
   ])
   if (!result.success) return result
   for (const field of [
@@ -413,7 +415,11 @@ function validateDeltaUsage(value: unknown): SafeParseResult<true> {
     const valid = requiredInteger(result.data, field)
     if (!valid.success) return valid
   }
-  return ok(true)
+  return result.data.cost_usd === undefined
+    || (typeof result.data.cost_usd === 'number' && Number.isFinite(result.data.cost_usd)
+      && result.data.cost_usd >= 0)
+    ? ok(true)
+    : fail('ag_ui_event.value.usage.cost_usd', 'Expected finite nonnegative cost_usd')
 }
 
 function validateKeeperCustomPayload(
@@ -481,8 +487,8 @@ function validateKeeperCustomPayload(
       'because',
     ],
     KEEPER_TOOL_APPROVAL_SETTLED: ['tool_call_id', 'outcome'],
-    KEEPER_STREAM_MESSAGE_START: ['provider_message_id', 'model', 'usage'],
-    KEEPER_STREAM_MESSAGE_DELTA: ['stop_reason', 'usage'],
+    KEEPER_STREAM_MESSAGE_START: ['stream_scope', 'provider_message_id', 'model', 'usage'],
+    KEEPER_STREAM_MESSAGE_DELTA: ['stream_scope', 'stop_reason', 'usage'],
     KEEPER_CONTENT_BLOCK_START: ['index', 'content_type', 'tool_call_id', 'tool_call_name'],
     KEEPER_CONTENT_BLOCK_STOP: ['index'],
     KEEPER_THINKING_DELTA: ['index', 'delta'],
@@ -498,7 +504,7 @@ function validateKeeperCustomPayload(
       'quarantined_occurrence',
     ],
     KEEPER_CONTINUATION_CHECKPOINT: ['message', 'request_id'],
-    KEEPER_REPLY_DETAILS: ['reply', 'turn_outcome', 'turn_ref'],
+    KEEPER_REPLY_DETAILS: ['reply', 'turn_outcome', 'turn_ref', 'terminal_stream_scope'],
     KEEPER_TOOL_RESULT_READY: [
       'toolStreamScope',
       'toolCallBlockIndex',
@@ -513,6 +519,8 @@ function validateKeeperCustomPayload(
 
   switch (name) {
     case 'KEEPER_STREAM_MESSAGE_START': {
+      const scope = requiredInteger(value, 'stream_scope')
+      if (!scope.success) return scope
       const provider = requiredString(value, 'provider_message_id')
       if (!provider.success) return provider
       const model = requiredString(value, 'model')
@@ -520,6 +528,8 @@ function validateKeeperCustomPayload(
       return value.usage === undefined ? ok(true) : validateUsage(value.usage)
     }
     case 'KEEPER_STREAM_MESSAGE_DELTA': {
+      const scope = requiredInteger(value, 'stream_scope')
+      if (!scope.success) return scope
       const stopReason = optionalString(value, 'stop_reason')
       if (!stopReason.success) return stopReason
       return value.usage === undefined ? ok(true) : validateDeltaUsage(value.usage)
@@ -646,9 +656,23 @@ function validateKeeperCustomPayload(
       }
       const turnRef = requiredString(value, 'turn_ref')
       if (!turnRef.success) return turnRef
-      return typeof value.turn_outcome === 'string' && KEEPER_TURN_OUTCOMES.has(value.turn_outcome)
+      const turnOutcome =
+        typeof value.turn_outcome === 'string' && KEEPER_TURN_OUTCOMES.has(value.turn_outcome)
+      if (!turnOutcome) {
+        return fail('ag_ui_event.value.turn_outcome', 'Expected typed Keeper turn outcome')
+      }
+      // Optional and key-omitted when absent: the server projector appends it
+      // with json_opt (None -> []). Same contract as the OCaml decoder's
+      // optional_stream_scope: absent ok, nonnegative integer ok, everything
+      // else (including null and negative) rejected.
+      const scope = value.terminal_stream_scope
+      if (scope === undefined) return ok(true)
+      return typeof scope === 'number' && Number.isSafeInteger(scope) && scope >= 0
         ? ok(true)
-        : fail('ag_ui_event.value.turn_outcome', 'Expected typed Keeper turn outcome')
+        : fail(
+            'ag_ui_event.value.terminal_stream_scope',
+            'Expected terminal_stream_scope integer >= 0',
+          )
     }
   }
   // The name reached here from the contract list, so a missing branch is a gap
@@ -708,6 +732,13 @@ function validateKeeperChatAgUiEvent(value: Record<string, unknown>): SafeParseR
         ? ok(true)
         : fail('ag_ui_event.role', 'Expected assistant or user AG-UI role')
     case 'TEXT_MESSAGE_CONTENT':
+      if ('textStreamScope' in value && (
+        typeof value.textStreamScope !== 'number'
+        || !Number.isSafeInteger(value.textStreamScope)
+        || value.textStreamScope < 0
+      )) {
+        return fail('ag_ui_event.textStreamScope', 'Expected textStreamScope non-negative integer')
+      }
       return typeof value.delta === 'string'
         ? ok(true)
         : fail('ag_ui_event.delta', 'Expected AG-UI text delta')

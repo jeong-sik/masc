@@ -477,6 +477,95 @@ let test_get_file_activity_resolves_the_project_checkout_exactly () =
       (json_string_member "file activity" "schema" data))
 ;;
 
+let test_repository_activity_covers_all_writers () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    let repository = repository_fixture ~id:"masc" ~url:masc_remote ~local_path:base_path in
+    (match Repo_store.save_all ~base_path [repository] with Ok () -> () | Error e -> fail e);
+    Masc.Keeper_tool_call_log.init ~base_path ();
+    let directory = match Masc.Keeper_tool_call_log.store_dir () with
+      | Some path -> path | None -> fail "tool-call store was not initialized" in
+    let store = Dated_jsonl.create ~base_dir:directory () in
+    Fun.protect ~finally:(fun () ->
+      Dated_jsonl.prepare_for_directory_removal store;
+      Masc.Keeper_tool_call_log.reset_for_testing ()) (fun () ->
+    let append ~keeper ~repo ~input = Dated_jsonl.append store
+      (`Assoc ["ts", `Float (Unix.gettimeofday ()); "keeper", `String keeper;
+        "route_evidence", `Assoc ["descriptor_id", `String "agent.edit_file"];
+        "action_radius", `Assoc ["target_path", `String ("repos/" ^ repo ^ "/a.ml")];
+        "disposition", `String "completed"; "input", input]) in
+    let input = `Assoc ["file_path", `String "a.ml"; "old_string", `String "old";
+                        "new_string", `String "new"] in
+    (* More writers than the UI roster, none assigned to the repository. *)
+    List.init 205 (fun n -> "writer-" ^ string_of_int n)
+    |> List.iter (fun keeper -> append ~keeper ~repo:"masc" ~input);
+    append ~keeper:"outsider" ~repo:"other" ~input;
+    append ~keeper:"incomplete" ~repo:"masc" ~input:(`Assoc []);
+    Dated_jsonl.append store (`Assoc ["ts", `Float (Unix.gettimeofday ());
+      "keeper", `String "unknown-address";
+      "route_evidence", `Assoc ["descriptor_id", `String "agent.edit_file"];
+      "disposition", `String "completed"; "input", `Assoc []]);
+    let token = create_admin_token base_path "operator" in
+    let path = "/api/v1/ide/repository-activity?repo_id=masc&window_hours=24" in
+    let read () =
+      let response = dispatch router (http_request ~meth:`GET ~path ~token:(Some token) ()) in
+      check_status "one fleet request" 200 response;
+      let data = response |> response_body |> Yojson.Safe.from_string |> Json.member "data" in
+      match Masc.Tui_decode.decode_repository_activity_snapshot data with
+      | Ok snapshot -> snapshot | Error e -> fail e in
+    let snapshot = read () in
+    check int "all unassigned writers, no other repository" 205 (List.length snapshot.ras_changes);
+    check (list string) "writer identities survive without roster membership"
+      (List.init 205 (fun n -> "writer-" ^ string_of_int n) |> List.sort String.compare)
+      (List.map (fun (row : Masc.Tui_decode.file_change) -> row.fc_keeper)
+         snapshot.ras_changes |> List.sort String.compare);
+    check int "incomplete addressed write is visible" 1 snapshot.ras_incomplete;
+    check int "unknown-address evidence is not attributed to repo" 1 snapshot.ras_unattributed;
+    append ~keeper:"later-writer" ~repo:"masc" ~input;
+    let next = read () in
+    check int "incremental fleet read retains old and new writers" 206 (List.length next.ras_changes);
+    check_status "exact write content requires authentication" 401
+      (dispatch router (http_request ~meth:`GET ~path ()))))
+;;
+
+let test_repository_activity_needs_no_canonical_remote () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    let local_remote = "/srv/git/local-masc" in
+    check bool "precondition: a filesystem remote has no canonical codebase" true
+      (Option.is_none (Ide_paths.canonical_url_of_remote local_remote));
+    let repository = repository_fixture ~id:"local" ~url:local_remote ~local_path:base_path in
+    (match Repo_store.save_all ~base_path [repository] with Ok () -> () | Error e -> fail e);
+    Masc.Keeper_tool_call_log.init ~base_path ();
+    let directory = match Masc.Keeper_tool_call_log.store_dir () with
+      | Some path -> path | None -> fail "tool-call store was not initialized" in
+    let store = Dated_jsonl.create ~base_dir:directory () in
+    Fun.protect ~finally:(fun () ->
+      Dated_jsonl.prepare_for_directory_removal store;
+      Masc.Keeper_tool_call_log.reset_for_testing ()) (fun () ->
+    Dated_jsonl.append store
+      (`Assoc ["ts", `Float (Unix.gettimeofday ()); "keeper", `String "writer";
+        "route_evidence", `Assoc ["descriptor_id", `String "agent.edit_file"];
+        "action_radius", `Assoc ["target_path", `String "repos/local/a.ml"];
+        "disposition", `String "completed";
+        "input", `Assoc ["file_path", `String "a.ml"; "old_string", `String "old";
+                         "new_string", `String "new"]]);
+    let token = create_admin_token base_path "operator" in
+    let get path = dispatch router (http_request ~meth:`GET ~path ~token:(Some token) ()) in
+    let response = get "/api/v1/ide/repository-activity?repo_id=local&window_hours=24" in
+    check_status "repository activity needs only the registered id" 200 response;
+    let data = response |> response_body |> Yojson.Safe.from_string |> Json.member "data" in
+    (match Masc.Tui_decode.decode_repository_activity_snapshot data with
+     | Ok snapshot ->
+       check (list string) "the write is read by repository id"
+         ["writer"]
+         (List.map (fun (row : Masc.Tui_decode.file_change) -> row.fc_keeper) snapshot.ras_changes)
+     | Error e -> fail e);
+    check_status "an unknown repository id is still not found" 404
+      (get "/api/v1/ide/repository-activity?repo_id=missing&window_hours=24");
+    (* File activity keys rows by codebase too, so it still refuses. *)
+    check_status "file activity still needs a canonical codebase" 400
+      (get "/api/v1/ide/file-activity?repo_id=local&file_path=a.ml&window_hours=24")))
+;;
+
 (* ── POST /api/v1/ide/asks ── M1: the IDE files a Todo task for the pool. *)
 
 let ask_body ?(question = "why does this retry?") ?file_path ?line ?context ?priority () =
@@ -657,6 +746,10 @@ let () =
             test_get_events_rejects_invalid_limit
         ; test_case "GET events rejects negative offset" `Quick
             test_get_events_rejects_negative_offset
+        ; test_case "repository activity covers all writers in one request" `Quick
+            test_repository_activity_covers_all_writers
+        ; test_case "repository activity needs no canonical remote" `Quick
+            test_repository_activity_needs_no_canonical_remote
         ; test_case "GET file activity requires file path" `Quick
             test_get_file_activity_requires_a_file_path
         ; test_case "GET file activity rejects invalid window" `Quick

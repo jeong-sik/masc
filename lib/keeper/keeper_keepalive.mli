@@ -45,10 +45,13 @@ val not_in_registry_warn_state_step :
 
 val wakeup_relevant_keeper_for_board_signal :
   ?dispatch_attention:(Keeper_board_attention_candidate.candidate list -> unit) ->
+  ?dispatch_discoverable_post:(Board_dispatch.board_signal -> unit) ->
   config:Workspace.config -> Board_dispatch.addressed_board_signal -> unit
-(** Addressed signals are durably routed immediately. Discoverable posts are
-    left to the existing per-Keeper durable Board cursor because they have no
-    immediate wake target. *)
+(** Addressed signals are durably routed immediately. With
+    [dispatch_discoverable_post], normal discoverable posts enter asynchronous
+    event admission; owners keep idempotent durable cursor catchup. Without
+    the callback, established owners use their cursor and initial owners retain
+    the synchronous persistence fallback. *)
 
 (** Fork the Board-attention judgment worker as a sibling of the heartbeat
     loop on the same Keeper lane switch. Both lane-start paths call this, so

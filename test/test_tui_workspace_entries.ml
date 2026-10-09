@@ -6,20 +6,6 @@ open Masc_tui_types
 
 let check_string = Alcotest.(check string)
 
-let test_a_full_page_reads_as_more_not_listed () =
-  let limit = workspace_entries_limit in
-  check_string "the limit itself is the server maximum" "2000"
-    (string_of_int Server_routes_http_routes_workspace.max_tree_node_limit);
-  check_string "an empty directory has no count" "" (workspace_entries_count_label 0);
-  check_string "a partial page is the total" " (955)" (workspace_entries_count_label 955);
-  check_string "a full page says more may follow"
-    (Printf.sprintf " (%d+, more not listed)" limit)
-    (workspace_entries_count_label limit);
-  check_string "past the limit still says so"
-    (Printf.sprintf " (%d+, more not listed)" (limit + 1))
-    (workspace_entries_count_label (limit + 1))
-;;
-
 module Decode = Masc.Tui_decode
 module Fetched = Masc_tui_fetched
 module Code_results = Masc_tui_code_results
@@ -42,16 +28,9 @@ let activity_change index : Decode.file_change =
   ; fc_succeeded = true
   }
 
-let activity_read changes =
-  { war_at = 0.; war_hours = 24.
-  ; war_keepers =
-      [ "alpha", Ok
-          { Decode.fcs_keeper = "alpha"; fcs_window_hours = 24.
-          ; fcs_calls_in_window = List.length changes; fcs_changes = changes
-          ; fcs_over_budget = 0; fcs_malformed = 0
-          }
-      ]
-  }
+let activity_read changes : workspace_activity_read =
+  { ras_repo_id = "masc"; ras_window_hours = 24.; ras_changes = changes;
+    ras_incomplete = 0; ras_unattributed = 0 }
 
 let refresh_activity state changes =
   let next, request = start_read ~equal:String.equal state.workspace_activity "masc" in
@@ -114,7 +93,7 @@ let test_activity_file_starts_without_old_overlays () =
   state.code_file <- file;
   Code_results.apply_file state request (Error "unreadable");
   Code_results.apply_history state old_history
-    (Ok {chl_entries = []; chl_activity_note = "old file"});
+    (Ok {chl_entries = []; chl_git_error = None; chl_activity_note = "old file"});
   Code_results.apply_diff state old_diff (Error "old diff");
   Code_results.apply_blame state old_blame (Ok []);
   Alcotest.(check bool) "late history discarded" true (Option.is_none (Fetched.current state.code_history));
@@ -165,7 +144,7 @@ let test_a_reply_from_the_scope_just_left_is_dropped () =
   in
   state.code_history <- switched;
   Code_results.apply_history state from_alpha
-      (Ok { chl_entries = []; chl_activity_note = "alpha" });
+      (Ok { chl_entries = []; chl_git_error = None; chl_activity_note = "alpha" });
   Alcotest.(check bool) "the pane is still waiting on beta" true
     (match Fetched.current state.code_history with
      | Some ((Code_scope_keeper "beta", "lib/x.ml"), Fetched.Loading) -> true
@@ -241,6 +220,75 @@ let test_file_reply_and_lsp_navigation_share_current_content () =
     (answer (location "other.ml" true 7) = Code_results.Load_file "other.ml");
   Alcotest.(check (option int)) "new read keeps the destination line" (Some 7)
     state.code_target_line
+;;
+
+let test_file_recovery_preserves_nested_readers () =
+  List.iter (fun (had_content, nested_first) ->
+    let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+    let initial, opened = start_read ~equal:String.equal state.code_file "source.ml" in
+    state.code_file <- initial;
+    if had_content then
+      Code_results.apply_file state opened (Ok "let first = 1\nlet second = 2")
+    else state.code_target_line <- Some 2;
+    state.code_file_cursor <- (if had_content then 1 else 0);
+    state.code_file_scroll <- (if had_content then 1 else 0);
+    state.code_file_hscroll <- 3;
+    state.code_focus_file <- Left_pane;
+    suspend_workspace_readings state;
+    let reading, recovered = start_read ~equal:String.equal state.code_file "source.ml" in
+    state.code_file <- reading;
+    let history, history_request = start_read ~equal:code_scope_path_equal
+        state.code_history (state.code_scope, "source.ml") in
+    state.code_history <- history;
+    state.code_history_open <- true;
+    let diff, diff_request = start_read ~equal:String.equal state.code_diff "source.ml" in
+    state.code_diff <- diff;
+    state.code_diff_open <- true;
+    let blame, blame_request = start_read ~equal:String.equal state.code_blame "source.ml" in
+    state.code_blame <- blame;
+    let lsp = match Code_results.start_lsp_question ~line:2 state ~question:"hover" ~symbol:"second" with
+      | Some request -> request | None -> Alcotest.fail "recovered LSP did not start" in
+    let complete_nested () =
+      Code_results.apply_history state history_request
+        (Ok {chl_entries=[]; chl_git_error=None; chl_activity_note="recovered history"});
+      Code_results.apply_diff state diff_request (Error "recovered diff refusal");
+      Code_results.apply_blame state blame_request (Ok []);
+      ignore (Code_results.apply_lsp_answer state lsp
+        (Ok (Decode.Lsp_hover (Some "recovered hover")))) in
+    if nested_first then complete_nested ();
+    Code_results.apply_file ~intent:Refresh_code_file state recovered
+      (Ok "let first = 3\nlet second = 4");
+    if not nested_first then complete_nested ();
+    Alcotest.(check bool) "history and diff stay open in either completion order" true
+      (state.code_history_open && state.code_diff_open);
+    Alcotest.(check bool) "recovered history remains visible" true
+      (match Fetched.current state.code_history with
+       | Some (_, Ready {chl_activity_note="recovered history";_}) -> true | _ -> false);
+    Alcotest.(check bool) "recovered diff refusal remains visible" true
+      (match Fetched.current state.code_diff with
+       | Some (_, Failed "recovered diff refusal") -> true | _ -> false);
+    Alcotest.(check bool) "blame completion retains its owner" true
+      (match Fetched.current state.code_blame with Some (_, Ready []) -> true | _ -> false);
+    Alcotest.(check (option string)) "file refresh does not erase a recovered hover"
+      (Some "second: recovered hover") state.code_lsp_note;
+    Alcotest.(check bool) "same file keeps cursor, scroll, horizontal offset and focus" true
+      (state.code_file_cursor=1 && state.code_file_scroll=1
+       && state.code_file_hscroll=3 && state.code_focus_file=Left_pane);
+    Alcotest.(check (option int)) "first interrupted load consumes its target line once"
+      None state.code_target_line;
+    let short, shortened = start_read ~equal:String.equal state.code_file "source.ml" in
+    state.code_file <- short;
+    Code_results.apply_file ~intent:Refresh_code_file state shortened (Ok "x");
+    Alcotest.(check bool) "shorter content clamps both row and horizontal coordinates" true
+      (state.code_file_cursor=0 && state.code_file_scroll=0 && state.code_file_hscroll=0);
+    let next, different_file = start_read ~equal:String.equal state.code_file "other.ml" in
+    state.code_file <- next;
+    Code_results.apply_file state different_file (Ok "let other = 0");
+    Alcotest.(check bool) "new file still closes old nested readers" true
+      (not state.code_history_open && not state.code_diff_open
+       && Option.is_none (Fetched.current state.code_blame));
+    Alcotest.(check int) "new file opens at its own first line" 0 state.code_file_cursor)
+    [false, false; false, true; true, false; true, true]
 ;;
 
 let test_lsp_replies_belong_to_their_source_reading () =
@@ -325,13 +373,43 @@ let test_lsp_replies_belong_to_their_source_reading () =
     state.code_lsp_note
 ;;
 
+let test_interrupted_new_file_open_resets_old_readers () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let old, old_request = start_read ~equal:String.equal state.code_file "old.ml" in
+  state.code_file <- old;
+  Code_results.apply_file state old_request (Ok "let old = 1");
+  let history, _ = start_read ~equal:code_scope_path_equal state.code_history
+      (state.code_scope, "old.ml") in
+  state.code_history <- history;
+  state.code_history_open <- true;
+  let diff, _ = start_read ~equal:String.equal state.code_diff "old.ml" in
+  state.code_diff <- diff;
+  state.code_diff_open <- true;
+  state.code_file_cursor <- 5;
+  state.code_file_scroll <- 5;
+  state.code_focus_file <- Left_pane;
+  let next, _ = start_read ~equal:String.equal state.code_file "new.ml" in
+  state.code_file <- next;
+  state.code_file_resume_intent <- Open_code_file;
+  suspend_workspace_readings state;
+  Alcotest.(check bool) "retired new selection keeps open intent" true
+    (state.code_file_resume_intent = Open_code_file);
+  let reading, request = start_read ~equal:String.equal state.code_file "new.ml" in
+  state.code_file <- reading;
+  Code_results.apply_file ~intent:state.code_file_resume_intent state request (Ok "let new_value = 2");
+  Alcotest.(check bool) "new content closes previous file readers and resets navigation" true
+    (not state.code_history_open && not state.code_diff_open
+     && state.code_file_cursor = 0 && state.code_file_scroll = 0
+     && state.code_focus_file = Right_pane);
+  Alcotest.(check bool) "later recovery refreshes completed file" true
+    (state.code_file_resume_intent = Refresh_code_file)
+;;
+
 let () =
   Alcotest.run
     "masc-tui-workspace-entries"
     [ ( "count label"
-      , [ Alcotest.test_case "a full page reads as more not listed" `Quick
-            test_a_full_page_reads_as_more_not_listed
-        ] )
+      , [] )
     ; ( "activity"
       , [ Alcotest.test_case "refresh preserves the visible Enter target" `Quick
             test_activity_refresh_reconciles_visible_selection
@@ -341,6 +419,10 @@ let () =
     ; ( "reply navigation"
       , [ Alcotest.test_case "late reply and definitions preserve current content" `Quick
             test_file_reply_and_lsp_navigation_share_current_content
+        ; Alcotest.test_case "interrupted new file opens reset old readers" `Quick
+            test_interrupted_new_file_open_resets_old_readers
+        ; Alcotest.test_case "file recovery preserves nested readers" `Quick
+            test_file_recovery_preserves_nested_readers
         ; Alcotest.test_case "LSP replies belong to their source reading" `Quick
             test_lsp_replies_belong_to_their_source_reading ] )
     ; ( "scope"

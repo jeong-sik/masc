@@ -1367,8 +1367,10 @@ let test_base_path_lock_failed_commit_closes_fd () =
    descriptor is swapped for a read-only stub with [dup2] before the lease
    commit, so [lockf F_TLOCK] raises [EBADF] but the same descriptor number is
    still open and closable. This walks the remaining branch of the commit
-   failure handling — the close success branch that leaves no fence — and the
-   fresh re-acquisition proves no kernel lock survives the failed commit. *)
+   failure handling — the close success branch that leaves no fence. The
+   swapped-in descriptor is checked for closure with [fstat] before the fresh
+   re-acquisition, and the re-acquisition proves no [Failed_close] fence
+   remains after the successful close. *)
 let test_base_path_lock_failed_commit_close_succeeds_releases_lock () =
   with_base_and_run "startup-takeover-failed-commit-close-succeeds"
     (fun ~base_path ~run_dir ->
@@ -1379,6 +1381,7 @@ let test_base_path_lock_failed_commit_close_succeeds_releases_lock () =
       in
       write_file path "stale\n";
       let stub_fd = Unix.openfile "/dev/null" [ Unix.O_RDONLY ] 0 in
+      let swapped_fd = ref None in
       Fun.protect
         ~finally:(fun () ->
           (try Unix.close stub_fd with
@@ -1394,7 +1397,8 @@ let test_base_path_lock_failed_commit_close_succeeds_releases_lock () =
                    [lockf F_TLOCK] could not persist; [dup2] makes [lockf]
                    raise [EBADF] deterministically while the descriptor number
                    stays open and its later [close] succeeds. *)
-                Unix.dup2 stub_fd fd)
+                Unix.dup2 stub_fd fd;
+                swapped_fd := Some fd)
               ~before_lease_open:(fun () -> ())
               ~before_commit_identity_check:(fun () ->
                 Alcotest.fail "acquisition continued after failed lock commit")
@@ -1415,6 +1419,27 @@ let test_base_path_lock_failed_commit_close_succeeds_releases_lock () =
               "failed-commit rejection reports only the lockf failure"
               "Unix.Unix_error(Unix.EBADF, \"lockf\", \"\")"
               (String.trim reason);
+            (* The production close must have actually closed the swapped-in
+               descriptor: [fstat] it before the fresh acquisition, since the
+               new lease may receive the same descriptor number. Without the
+               close this [fstat] succeeds on the still-open stub, so this
+               check keeps the case honest about the closed-vs-left-open
+               difference. *)
+            (match !swapped_fd with
+            | Some fd -> (
+              match Unix.fstat fd with
+              | exception Unix.Unix_error (Unix.EBADF, "fstat", "") -> ()
+              | exception Unix.Unix_error (code, fn, _) ->
+                Alcotest.failf
+                  "swapped-in lease descriptor was not closed: fstat raised \
+                   %s (%s)"
+                  (Unix.error_message code)
+                  fn
+              | _ ->
+                Alcotest.fail
+                  "the swapped-in lease descriptor is still open; the \
+                   close-success branch left it open")
+            | None -> Alcotest.fail "before_lease_commit hook never ran");
             (* The close succeeded, so no [Failed_close] fence is recorded and
                a fresh acquisition must take the lock back. *)
             (match

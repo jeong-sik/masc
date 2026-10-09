@@ -352,9 +352,11 @@
       후보 원장에는 가장 최근 전체 회귀의 run id·head·TARGET_SUITES 를 적고, 이번 후보에서 돌리지 않았으면 "미실행" 이라고 적는다.
       Release/Tag 후보는 태그 직전 head 에 결속된 독립 Release 승인이 있어야 발행한다.
       승인은 본문 첫 줄 verdict: PASS head: &lt;40hex&gt; run: &lt;id&gt; by: &lt;이름&gt; 과 approve-guard footer 를 갖춘다.
-      독립은 그 후보에 판정 대상 내용을 바꾼 커밋을 넣지 않은 세션을 뜻한다.
-      승인 범위는 직전 후보 이후 델타·RC 영수증·릴리스 노트이며, 승인 본문에 직전 후보 SHA 를 적는다.
-      승인자가 없으면 운영자의 명시 결정으로 대체하고 그 결정의 원문 좌표를 후보 원장에 적는다.
+      독립은 그 후보 PR 을 작성하거나 push 하지 않았고 판정 대상 내용을 바꾼 커밋도 넣지 않은 세션을 뜻한다.
+      승인자는 approve-guard 가 결속하는 전체 diff 와 RC 영수증·릴리스 노트를 검토한다.
+      직전 후보의 검토는 기록된 head·base·diff 범위에서만 재사용하고, 승인 본문에 직전 후보 SHA 와 그 뒤의 델타를 적는다.
+      승인자가 없으면 운영자의 명시 결정으로 대체한다. 그 결정은 태그 직전 head 와 RC run 을 지목해야 하며 후보가 바뀌면 다시 받는다.
+      결정의 원문 좌표는 후보 원장에 적는다.
       승인 없이 발행됐으면 발행한 쪽 또는 최초 확인 Keeper 가 그 사실과 사유를 후보 원장에 기록한다.
       이 후보 검증은 산출물 게시 범위다. production-ready 판정에는
       docs/PRODUCTION-READINESS-GATES.md 의 fleet·연속성·성능·Agent Core 증거가 모두 필요하다.

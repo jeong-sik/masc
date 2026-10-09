@@ -182,8 +182,6 @@ let keeper_checks base_path =
        "Check the selected sandbox service and prepare imp's isolated workspace."
        [Configure_sandbox; Start_imp]]
 
-(* The browser tools read the same observation when no browser answers, so an
-   operator and a Keeper are told the same cause. *)
 (* The BiDi host is read from its own record on disk, so this answers with
    no server running. A workspace with no browser lane installed and no host
    record has nothing to say about one. A running host is satisfied only
@@ -201,8 +199,9 @@ let browser_bidi_host_check host =
   | Browser_bidi_host_status.Host_not_running -> report Needs_setup
   | Browser_bidi_host_status.Host_unreadable -> report Invalid
 
-(* One observation answers both checks, so they say of one launcher and one
-   list of connections. *)
+(* The browser tools read the same observation when no browser answers, so an
+   operator and a Keeper are told the same cause. One observation answers both
+   checks, so they say of one launcher and one list of connections. *)
 let browser_lane_check base_path =
   let host = Browser_bidi_host_status.observe ~base_path in
   let observation = host.lane in

@@ -1444,6 +1444,9 @@
   masc.masc_tool_blob_store
   masc_tui_lane_application
   masc_tui_lane_addons
+  masc_tui_lane_installer
+  ;; [tools_evidence_reference] is a [Skill_reference.t].
+  masc_skill_reference
   masc_tui_lane_broadcast_pending
   masc_tui_fusion_launch
   masc_tui_queue_inspection

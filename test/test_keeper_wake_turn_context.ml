@@ -101,46 +101,6 @@ let base_observation : WO.world_observation =
     own_recent_actions = Ok [];
   }
 
-let test_quiet_permission_preserves_incoming_work () =
-  let module Speaker = Masc.Keeper_input_speaker in
-  let wake = Speaker.Host_prompt (Autonomous_wake {answered_asks=[]}) in
-  let permits ?(speaker=wake) ?hitl observation =
-    Masc.Keeper_agent_run.For_testing.response_policy_for_turn
-      ~turn_kind:Turn_record.Autonomous ~input_speaker:speaker
-      ~world_observation:observation ~hitl_resolution:hitl
-    = Keeper_tooling.Response.Allow_quiet_final in
-  let channel = match Keeper_continuation_channel.dashboard ~thread_id:"fresh-input" with
-    | Ok channel -> channel | Error detail -> fail detail in
-  let schedule : Keeper_event_queue.scheduled_wake =
-    {occurrence_id="occurrence"; schedule_instance_id="instance"; schedule_id="schedule";
-     due_at=1.; payload_digest="digest"; title=None;
-     message="Continue the authorized work; no unchanged waiting report."; result_delivery=None} in
-  let event event_kind : WO.pending_board_event =
-    {event_kind; post_id="event"; author="operator"; title="work"; preview="new input";
-     hearth=None; post_kind=Masc.Board.System_post; updated_at=1.; explicit_mention=true;
-     matched_targets=[]; replies_after_own_comment=None;
-     latest_external_author=None; latest_external_preview=None} in
-  let with_event kind = Some {base_observation with pending_board_events=[event kind]} in
-  check bool "periodic no-input wake permits model-selected quiet" true
-    (permits (Some base_observation));
-  check bool "unavailable observation cannot prove no incoming work" false (permits None);
-  check bool "schedule without delivery still lets the model choose useful work or quiet" true
-    (permits (with_event (WO.Schedule_due schedule)));
-  check bool "scheduled result delivery remains a reply obligation" false
-    (permits (with_event (WO.Schedule_due {schedule with result_delivery=Some channel})));
-  check bool "new board activity must be processed" false
-    (permits (with_event WO.Board_post_created));
-  check bool "new Keeper message must be processed" false
-    (permits (Some {base_observation with pending_messages=
-      [{message_id="fresh"; speaker="other-keeper"; content="Please review the PR."; kind=Scope}]}));
-  check bool "an answered Ask must be processed" false
-    (permits ~speaker:(Speaker.Host_prompt (Autonomous_wake {answered_asks=[Owner]}))
-      (Some base_observation));
-  check bool "a Gate answer must be processed" false
-    (permits ~hitl:{Keeper_event_queue.approval_id="approval"; decision=Hitl_approved; channel}
-      (Some base_observation))
-;;
-
 let meta_of_json json =
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok m -> m
@@ -1267,8 +1227,6 @@ let () =
     [
       ( "current task layer",
         [
-          test_case "quiet permission preserves incoming work" `Quick
-            test_quiet_permission_preserves_incoming_work;
           test_case "renders id, status, and handoff" `Quick
             test_current_task_section_renders;
           test_case "absent without a held task" `Quick

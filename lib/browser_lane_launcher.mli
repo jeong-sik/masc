@@ -72,6 +72,14 @@ val verdict : t -> verdict
 (** One operator sentence naming the cause and the change that resolves it. *)
 val message : t -> string
 
+(** Where this workspace's [launch] script is, or will be once the lane is
+    installed. *)
+val launcher_path : base_path:string -> string
+
+(** The installer and what it is given for this workspace, as the words that
+    follow "the operator runs". *)
+val install : base_path:string -> string
+
 (** [launcher], [workspace_port], [workspace_port_error], [serving_port],
     [polling_hosts], [verdict] and [message], for a tool result a Keeper
     reads. The two server fields are null when no server is observed. *)

@@ -2782,6 +2782,26 @@ let test_receipt_cache_skips_decoding_an_unchanged_sidecar () =
     (receipt_decodes ())
 ;;
 
+(* Admission authority reads the committed candidates on every refresh while
+   the queue file exists. Over an unchanged sidecar it decodes nothing, and it
+   never writes the sidecar. *)
+let test_admission_authority_reads_reuse_the_receipt_cache () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let _target, binding = cached_recall_fixture ~keepers_dir in
+  let path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+  let bytes = Fs_compat.load_file path in
+  let decoded = receipt_decodes () in
+  for _ = 1 to 3 do
+    check bool "authority keeps the committed candidate" true
+      (Current.committed_explicit_candidates ~keepers_dir ~keeper_id:"keeper"
+         ~queue_generation:binding.candidate_id.queue_generation
+       |> require_ok = [binding.candidate_id])
+  done;
+  check int "authority reads over an unchanged sidecar decode nothing" decoded
+    (receipt_decodes ());
+  check string "authority reads leave the sidecar bytes alone" bytes (Fs_compat.load_file path)
+;;
+
 let test_receipt_cache_rereads_an_externally_rewritten_sidecar () =
   List.iter (fun (label, rewrite) ->
     with_temp_keepers @@ fun keepers_dir ->
@@ -4027,6 +4047,8 @@ let () =
             test_admission_recall_cache_invalidates_external_prefix_edit_and_growth
         ; test_case "receipt cache skips decoding an unchanged sidecar" `Quick
             test_receipt_cache_skips_decoding_an_unchanged_sidecar
+        ; test_case "admission authority reads reuse the receipt cache" `Quick
+            test_admission_authority_reads_reuse_the_receipt_cache
         ; test_case "receipt cache rereads an externally rewritten sidecar" `Quick
             test_receipt_cache_rereads_an_externally_rewritten_sidecar
         ; test_case "receipt cache reflects this process's receipt write" `Quick

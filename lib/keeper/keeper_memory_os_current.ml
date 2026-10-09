@@ -2787,23 +2787,32 @@ type receipt_read = Reconcile_receipts | Preserve_authority of string
    disappears. This read projects prepared commits in memory only, preserving
    every stored byte even when the caller subsequently rejects queue coverage. *)
 let preserved_committed_receipts ~keepers_dir ~keeper_id ~snapshot ~queue_generation =
-  let* receipts = read_durable_range_receipts ~keepers_dir ~keeper_id in
+  (* The cached read decodes the sidecar only when its file identity changed.
+     Nothing here writes the sidecar or marks a fixed point. *)
+  let* read = read_durable_range_receipts_cached ~keepers_dir ~keeper_id in
+  let receipts = match read with
+    | Cached_receipts entry -> entry.receipts
+    | Uncached_receipts receipts -> receipts in
   let receipts = List.filter (fun receipt ->
     match consumed_candidate (receipt_range_id receipt) with
     | Some candidate -> String.equal candidate.queue_generation queue_generation
     | None -> false) receipts in
+  (* Hashed at most once, and only when a receipt names the current revision. *)
+  let snapshot =
+    Option.map (fun (current, content) -> current, lazy (sha256 content)) snapshot in
   let rec verify kept = function
     | [] -> Ok (List.rev kept)
     | Prepared {range_id; snapshot_revision; snapshot_sha256} :: rest ->
       (match snapshot with
-       | Some (current, content) when current.revision = snapshot_revision
-           && String.equal (sha256 content) snapshot_sha256 ->
+       | Some (current, digest) when current.revision = snapshot_revision
+           && String.equal (Lazy.force digest) snapshot_sha256 ->
          verify (Committed {range_id; snapshot_revision; snapshot_sha256} :: kept) rest
        | None | Some _ -> verify kept rest)
     | (Committed {snapshot_revision; snapshot_sha256; _} as receipt) :: rest ->
       (match snapshot with
-       | Some (current, content) when current.revision > snapshot_revision
-           || (current.revision = snapshot_revision && String.equal (sha256 content) snapshot_sha256) ->
+       | Some (current, digest) when current.revision > snapshot_revision
+           || (current.revision = snapshot_revision
+               && String.equal (Lazy.force digest) snapshot_sha256) ->
          verify (receipt :: kept) rest
        | None | Some _ -> Error "explicit admission authority unavailable: committed receipt has no verifiable current snapshot; stores preserved") in
   verify [] receipts

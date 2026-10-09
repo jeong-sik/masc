@@ -8,6 +8,13 @@
 
 let check = Alcotest.check
 
+let contains needle text =
+  let n = String.length needle and len = String.length text in
+  let rec seek i =
+    i + n <= len && (String.equal (String.sub text i n) needle || seek (i + 1))
+  in
+  n = 0 || seek 0
+
 let declared ?tools ?(also_on = []) ?enabled ?switch_problem id label =
   Masc_tui_identity_model.Identity_declared
     { idp_id = id

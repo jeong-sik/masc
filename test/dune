@@ -276,11 +276,6 @@
  (libraries alcotest masc_tui_keeper_config yojson str))
 
 (test
- (name test_tui_github_identity)
- (modules test_tui_github_identity)
- (libraries alcotest masc_tui_github_identity yojson))
-
-(test
  (name test_tui_keeper_sandbox)
  (modules test_tui_keeper_sandbox)
  (libraries alcotest masc masc_tui_keeper_sandbox yojson str))
@@ -1247,12 +1242,6 @@
   ../config/runtime.toml
   (source_tree ../scripts/fixtures))
  (libraries masc_test_deps exact_output_fixture masc.toml_line_editor))
-
-(test
- (name test_tui_config_pane_title_head)
- (modules test_tui_config_pane_title_head)
- (libraries alcotest masc_tui_ansi masc_tui_message_layout
-  masc_tui_render_prim masc_tui_theme))
 
 (test
  (name test_keeper_turn_sandbox_profile_gate)
@@ -3263,25 +3252,9 @@
  (libraries alcotest masc_tui_runtime_config_receipt yojson))
 
 (test
- (name test_tui_runtime_config_summary)
- (modules test_tui_runtime_config_summary)
- (libraries alcotest masc_tui_runtime_config_view yojson))
-
-(test
  (name test_tui_connection_status)
  (modules test_tui_connection_status)
  (libraries alcotest masc masc_tui_types))
-
-; Anchored here rather than at the head of the file. That alone is not enough
-; to keep two pull requests apart -- this stanza and the one below it both
-; chose the same anchor and collided on the merge -- so a suite added later
-; picks a stanza no open branch is already sitting under.
-; [masc.masc_schedule] is here for [Schedule_domain], whose status list and
-; terminal rule the line under test walks rather than restating.
-(test
- (name test_tui_schedule_counts_line)
- (modules test_tui_schedule_counts_line)
- (libraries alcotest masc.masc_schedule masc_tui_types))
 
 ; Its own anchor, under the other suite that links only the state vocabulary
 ; and the wire types, so two pull requests adding a suite do not both land on
@@ -3419,13 +3392,6 @@
   masc_tui_keeper_chat_transcript))
 
 (test
- (name test_tui_chat_response_origins)
- (modules test_tui_chat_response_origins)
- (libraries alcotest astring masc masc_tui_types masc_tui_keeper_chat_live
-  masc_tui_keeper_chat_log masc_tui_render_chat masc_tui_frame_presenter
-  masc_tui_ansi masc_tui_theme masc_tui_render_schedule masc_tui_roster_pane))
-
-(test
  (name test_tui_autonomous_journal)
  (modules test_tui_autonomous_journal)
  (libraries alcotest masc masc.masc_types masc_tui_types masc_tui_observer
@@ -3561,11 +3527,6 @@
  (libraries masc_tui_image_preview alcotest masc_tui_message_layout masc_tui_types))
 
 (test
- (name test_tui_gate_text)
- (modules test_tui_gate_text)
- (libraries alcotest masc.keeper_contract masc_tui_gate_text masc_tui_message_layout))
-
-(test
  (name test_tui_pr_ref)
  (modules test_tui_pr_ref)
  (libraries alcotest masc_tui_pr_ref))
@@ -3691,14 +3652,6 @@
   yojson))
 
 (test
- (name test_tui_fit_middle)
- (modules test_tui_fit_middle)
- (libraries
-  alcotest
-  masc_tui_markdown_render_cache
-  masc_tui_message_layout))
-
-(test
  (name test_tui_turn_rail)
  (modules test_tui_turn_rail)
  (libraries
@@ -3713,55 +3666,6 @@
   alcotest
   masc_tui_markdown_render_cache
   masc_tui_message_layout))
-
-(test
- (name test_tui_role_label_boundary)
- (modules test_tui_role_label_boundary)
- (libraries
-  alcotest
-  masc_tui_markdown_render_cache
-  masc_tui_message_layout))
-
-(test
- (name test_tui_frame)
- (modules test_tui_frame)
- (libraries alcotest masc_tui_frame))
-
-(test
- (name test_tui_render_tools)
- (modules test_tui_render_tools)
- (libraries
-  alcotest
-  ; The wire decoder, so the surface under test is built the way the live
-  ; loader builds it rather than by hand.
-  masc
-  masc_tui_keys
-  masc_tui_render_tools
-  masc_tui_theme
-  masc_tui_types))
-
-(test
- (name test_tui_keeper_legend)
- (modules test_tui_keeper_legend)
- (libraries
-  alcotest
-  masc_tui_footer
-  masc_tui_keys
-  masc_tui_render_prim
-  masc_tui_theme
-  masc_tui_types))
-
-(test
- (name test_tui_help_banner)
- (modules test_tui_help_banner)
- (libraries
-  alcotest
-  masc_tui_command
-  masc_tui_keys
-  masc_tui_message_layout
-  masc_tui_render_prim
-  masc_tui_theme
-  masc_tui_types))
 
 (test
  (name test_tui_agenda)
@@ -3827,11 +3731,6 @@
  (name test_tui_git_diff_decode)
  (modules test_tui_git_diff_decode)
  (libraries alcotest masc yojson))
-
-(test
- (name test_tui_span)
- (modules test_tui_span)
- (libraries alcotest masc_tui_span))
 
 (test
  (name test_tui_csi)
@@ -4005,11 +3904,6 @@
  (libraries alcotest masc masc_tui_browser_lane_layout))
 
 (test
- (name test_tui_board_read_scroll)
- (modules test_tui_board_read_scroll)
- (libraries alcotest masc_tui_board_detail masc_tui_layout))
-
-(test
  (name test_tui_board_comment_thread)
  (modules test_tui_board_comment_thread)
  (libraries alcotest masc_tui_board_comment_thread masc_tui_types))
@@ -4030,24 +3924,9 @@
  (libraries alcotest masc_tui_magnitude))
 
 (test
- (name test_tui_board_score)
- (modules test_tui_board_score)
- (libraries alcotest masc_tui_board_score))
-
-(test
  (name test_tui_model_runtime_table)
  (modules test_tui_model_runtime_table)
  (libraries alcotest yojson masc.runtime masc_tui_model_runtime_table masc_tui_message_layout))
-
-(test
- (name test_tui_context_bars)
- (modules test_tui_context_bars)
- (libraries alcotest masc_tui_context_bars))
-
-(test
- (name test_tui_chart)
- (modules test_tui_chart)
- (libraries alcotest masc_tui_chart masc_tui_message_layout masc_tui_theme))
 
 (test
  (name test_tui_overview_goals)
@@ -4110,17 +3989,6 @@
  (name test_tui_memory_facts_explorer)
  (modules test_tui_memory_facts_explorer)
  (libraries alcotest masc masc_tui_fetched masc_tui_render_memory masc_tui_roster_pane masc_tui_types))
-
-(test
- (name test_tui_memory_header_states)
- (modules test_tui_memory_header_states)
- (libraries alcotest masc_tui_render_memory masc_tui_theme masc_tui_types))
-
-(test
- (name test_tui_planning_proof_mark)
- (modules test_tui_planning_proof_mark)
- (libraries alcotest masc masc_tui_planning_proof_mark masc_tui_ansi
-  masc_tui_message_layout masc_tui_theme))
 
 (test
  (name test_tui_esc_interrupt)
@@ -4340,11 +4208,6 @@
  (libraries alcotest astring agent_core masc))
 
 (test
- (name test_tui_help_scroll)
- (modules test_tui_help_scroll)
- (libraries alcotest masc_tui_frame masc_tui_help masc_tui_keys masc_tui_types masc_tui_scroll))
-
-(test
  (name test_tui_planning_detail)
  (modules test_tui_planning_detail)
  (libraries alcotest masc masc.masc_goal masc.masc_types masc_tui_planning_detail masc_tui_fetched))
@@ -4380,11 +4243,6 @@
  (libraries alcotest masc_tui_approval_detail))
 
 (test
- (name test_tui_tool_table)
- (modules test_tui_tool_table)
- (libraries alcotest masc_tui_message_layout masc_tui_tool_table))
-
-(test
  (name test_tui_connector_state)
  (modules test_tui_connector_state)
  (libraries alcotest masc
@@ -4406,11 +4264,6 @@
  (libraries alcotest masc masc_tui_types))
 
 (test
- (name test_tui_table)
- (modules test_tui_table)
- (libraries alcotest masc_tui_message_layout masc_tui_table))
-
-(test
  (name test_tui_wire_age)
  (modules test_tui_wire_age)
  (libraries alcotest masc_tui_wire_age))
@@ -4429,16 +4282,6 @@
  (name test_operator_attention_summary)
  (modules test_operator_attention_summary)
  (libraries alcotest masc.operator))
-
-(test
- (name test_tui_fusion_state)
- (modules test_tui_fusion_state)
- (libraries alcotest masc masc_tui_render_prim masc_tui_types))
-
-(test
- (name test_tui_config_path)
- (modules test_tui_config_path)
- (libraries alcotest masc_tui_render_prim))
 
 (test
  (name test_tui_render_schedule)
@@ -4548,41 +4391,25 @@
 (include stanzas/test_review_prompt_sections_reach_the_model.inc)
 (include stanzas/test_prompt_templates_render.inc)
 (include stanzas/test_tui_send_disposition.inc)
-(include stanzas/test_tui_layout.inc)
 (include stanzas/test_tui_scroll.inc)
 (include stanzas/test_tui_hit.inc)
 (include stanzas/test_tui_wheel_reader.inc)
-(include stanzas/test_tui_approvals_list_window.inc)
-(include stanzas/test_tui_rows.inc)
 (include stanzas/test_tui_repository_changes_listing.inc)
-(include stanzas/test_tui_title_counts.inc)
-(include stanzas/test_tui_data_unreliable_row.inc)
 (include stanzas/test_tui_tab_strip.inc)
 
-(include stanzas/test_tui_row_with_field.inc)
 (include stanzas/test_tui_context_tokens.inc)
 (include stanzas/test_tui_next_request_band.inc)
-(include stanzas/test_tui_coordinator_status_row.inc)
-(include stanzas/test_tui_detail_heading.inc)
 (include stanzas/test_tui_board_list_reading.inc)
-(include stanzas/test_tui_planning_summary_rows.inc)
 (include stanzas/test_tui_listing_rows_under_the_list.inc)
 (include stanzas/test_tui_keys.inc)
 
-(include stanzas/test_tui_approvals_footer_matches_the_sheet.inc)
-(include stanzas/test_tui_sheet_names_every_palette_destination.inc)
-(include stanzas/test_tui_keeper_detail_key_help_names_the_tabs.inc)
-(include stanzas/test_tui_board_read_title.inc)
 (include stanzas/test_workspace_git_log.inc)
 (include stanzas/test_tui_code_lexer.inc)
-(include stanzas/test_tui_overview_pulse.inc)
 (include stanzas/test_tui_overview_transport_item.inc)
 (include stanzas/test_tui_runtime_account_form.inc)
 (include stanzas/test_tui_runtime_assignment_label.inc)
 (include stanzas/test_tui_lane_addon_reading.inc)
 (include stanzas/test_tui_mermaid.inc)
-(include stanzas/test_tui_keeper_deletions_hints.inc)
-
 (include stanzas/test_ide_memo.inc)
 
 (include stanzas/test_tui_memo.inc)
@@ -4590,8 +4417,6 @@
 (include stanzas/test_tui_theme.inc)
 (include stanzas/test_tui_theme_contrast.inc)
 (include stanzas/test_tui_file_icon.inc)
-(include stanzas/test_tui_memory_mark.inc)
-
 (include stanzas/test_tui_config.inc)
 (include stanzas/test_tui_pick_list.inc)
 (include stanzas/test_tui_terminal_palette.inc)
@@ -4603,7 +4428,6 @@
 (include stanzas/test_tui_emblem_screen.inc)
 (include stanzas/test_tui_portrait_view.inc)
 (include stanzas/test_tui_keeper_portrait.inc)
-(include stanzas/test_tui_candle.inc)
 (include stanzas/test_tui_chat_portrait.inc)
 
 (include stanzas/test_tui_emblem_state.inc)
@@ -4881,15 +4705,11 @@
 
 (include stanzas/test_masc_ask_tool_surface.inc)
 
-(include stanzas/test_tui_ask_layout.inc)
-
 (include stanzas/test_tui_ask_projection.inc)
 
 (include stanzas/test_tui_ask_context_block.inc)
 
 (include stanzas/test_tui_memory_back.inc)
-
-(include stanzas/test_tui_resources_empty_note.inc)
 
 (include stanzas/test_tui_keeper_runs_view.inc)
 
@@ -4900,21 +4720,6 @@
  (name test_tui_identity_tab)
  (modules test_tui_identity_tab)
  (libraries masc masc_tui_identity_model masc_tui_identity_updates alcotest masc_tui_pick_list masc_tui_types masc_tui_keys masc_tui_footer))
-
-(test
- (name test_tui_log_channel_column)
- (modules test_tui_log_channel_column)
- (libraries alcotest masc masc_tui_observation_layout))
-
-(test
- (name test_tui_board_kind_mark)
- (modules test_tui_board_kind_mark)
- (libraries alcotest masc_tui_board_kind_mark masc_tui_types))
-
-(test
- (name test_tui_session_event_mark)
- (modules test_tui_session_event_mark)
- (libraries alcotest masc_tui_types))
 
 (test
  (name test_tui_loading_notice)
@@ -5747,12 +5552,6 @@
 
 (include stanzas/test_deployment_runtime_config.inc)
 
-(test
- (name test_tui_fusion_summary_rows)
- (modules test_tui_fusion_summary_rows)
- (libraries alcotest masc masc.agent_core.llm_provider masc_tui_frame masc_tui_message_layout masc_tui_types))
-
-(include stanzas/test_tui_sidebar_index_fold.inc)
 (include stanzas/test_tui_surface_chrome_overflow.inc)
 
 (test

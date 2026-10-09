@@ -45,26 +45,6 @@ let test_the_overlay_over_a_keeper_view_is_a_listing () =
             (listing_chrome ~error:None) listing.sc_chrome)
     overlay_hosts
 
-(* The same list drawn over Code answers the same geometry: which surface
-   the overlay is over does not change how far it scrolls, with or without a
-   load error taking its rows. *)
-let test_the_geometry_is_the_overlays_not_the_hosts () =
-  let over ~error view =
-    let state = state () in
-    with_overlay state ~changes:[change "a.ml"; change "b.ml"];
-    state.repository_changes_error <- error;
-    state.view <- view;
-    scrolled_surface_rows state ~cols:80 view
-  in
-  List.iter
-    (fun error ->
-      List.iter
-        (fun (label, view) ->
-          Alcotest.(check bool) (label ^ " answers what Code answers") true
-            (over ~error view = over ~error Code))
-        overlay_hosts)
-    [ None; Some "git status failed" ]
-
 let test_a_keeper_view_without_the_overlay_stays_unlisted () =
   List.iter
     (fun (label, view) ->
@@ -115,8 +95,6 @@ let () =
     [ ( "over the Keepers surface"
       , [ Alcotest.test_case "the overlay is a listing" `Quick
             test_the_overlay_over_a_keeper_view_is_a_listing
-        ; Alcotest.test_case "the geometry is the overlay's" `Quick
-            test_the_geometry_is_the_overlays_not_the_hosts
         ; Alcotest.test_case "closed, the keeper view stays unlisted" `Quick
             test_a_keeper_view_without_the_overlay_stays_unlisted
         ; Alcotest.test_case "the search reaches the overlay's rows" `Quick

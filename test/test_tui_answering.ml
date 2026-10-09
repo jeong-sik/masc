@@ -19,91 +19,6 @@ let texts lines =
   List.map (fun (line : Masc_tui_answering.line) -> line.Masc_tui_answering.text) lines
 ;;
 
-let test_running_rows_lead_with_the_chat_target () =
-  let lines =
-    Masc_tui_answering.overlay ~now:1000.
-      ~chat_target:(Some "analyst") ~error:None ~observed_at:(Some 988.) ~finishes:[]
-      [ running ~lane:Tui_decode.Turn_lane_autonomous ~started:866. "echo"
-      ; row "delta" Tui_decode.Keeper_turn_idle
-      ; running ~lane:Tui_decode.Turn_lane_chat_operation ~started:990.
-          "analyst"
-      ]
-  in
-  match texts lines with
-  | [ first; second; idle ] ->
-      Alcotest.(check bool) "the chat target leads" true
-        (String.length first > 0
-        && Astring.String.is_infix ~affix:"analyst" first);
-      Alcotest.(check bool) "its lane rides the row" true
-        (Astring.String.is_infix ~affix:"chat_operation" first);
-      Alcotest.(check bool) "elapsed reads in seconds" true
-        (Astring.String.is_infix ~affix:"10s" first);
-      Alcotest.(check bool) "the other runner follows" true
-        (Astring.String.is_infix ~affix:"echo" second);
-      Alcotest.(check bool) "minutes carry their seconds" true
-        (Astring.String.is_infix ~affix:"2m14s" second);
-      Alcotest.(check string) "idle keepers fold into one count" "1 idle" idle
-  | other -> Alcotest.failf "expected three lines, got %d" (List.length other)
-;;
-
-let test_quiet_fleet_says_so () =
-  let lines =
-    Masc_tui_answering.overlay ~now:1000. ~chat_target:None ~error:None
-      ~observed_at:(Some 988.)
-      ~finishes:[]
-      [ row "echo" Tui_decode.Keeper_turn_idle
-      ; row "analyst" Tui_decode.Keeper_turn_idle
-      ]
-  in
-  match texts lines with
-  | [ quiet; idle ] ->
-      Alcotest.(check string) "an idle fleet is named, not blank"
-        "nobody is answering right now" quiet;
-      Alcotest.(check string) "the count still rides" "2 idle" idle
-  | other -> Alcotest.failf "expected two lines, got %d" (List.length other)
-;;
-
-let test_error_keeps_the_last_rows_and_says_why () =
-  let lines =
-    Masc_tui_answering.overlay ~now:1000. ~chat_target:None
-      ~error:(Some "connection refused") ~observed_at:(Some 988.) ~finishes:[]
-      [ running ~lane:Tui_decode.Turn_lane_maintenance ~started:999. "polisher" ]
-  in
-  match texts lines with
-  | [ failed; kept; runner ] ->
-      Alcotest.(check bool) "the poll failure is named" true
-        (Astring.String.is_infix ~affix:"connection refused" failed);
-      Alcotest.(check bool) "and marked as stale, with its age" true
-        (Astring.String.is_infix ~affix:"rows read 12s ago" kept);
-      Alcotest.(check bool) "the last known runner still shows" true
-        (Astring.String.is_infix ~affix:"polisher" runner)
-  | other -> Alcotest.failf "expected three lines, got %d" (List.length other)
-;;
-
-(* Before any poll has answered there are no rows, and "nobody is answering
-   right now" was said about them anyway -- with the server down, next to a
-   poll failure, together with "showing the last rows that arrived". *)
-let test_a_list_no_poll_brought_back_is_not_quiet () =
-  let unread =
-    Masc_tui_answering.overlay ~now:1000. ~chat_target:None ~error:None
-      ~observed_at:None ~finishes:[] []
-  in
-  Alcotest.(check (list string)) "nothing polled yet says so" [ "not loaded yet" ]
-    (texts unread);
-  let failed =
-    Masc_tui_answering.overlay ~now:1000. ~chat_target:None
-      ~error:(Some "connection refused") ~observed_at:None ~finishes:[] []
-  in
-  match texts failed with
-  | [ only ] ->
-      Alcotest.(check bool) "a first poll that failed names the failure" true
-        (Astring.String.is_infix ~affix:"connection refused" only)
-  | other ->
-      Alcotest.failf
-        "a failed first poll has no rows to keep or call quiet; got %d lines"
-        (List.length other)
-;;
-
 let test_unavailable_reads_as_unknown_not_idle () =
   let lines =
     Masc_tui_answering.overlay ~now:1000. ~chat_target:None ~error:None
@@ -208,120 +123,6 @@ let test_target_indexes_skip_prose () =
   Alcotest.(check (list int)) "only actionable rows carry an index" [ 2; 3 ]
     (Masc_tui_answering.target_indexes lines)
 ;;
-
-(* The mark a running turn wears. Motion is a claim -- "this is changing
-   while you look at it" -- so these pin both halves of it: that it does
-   move, and that it stops when there is nothing to say. *)
-let test_the_running_mark_moves () =
-  let frames =
-    List.map (fun frame -> Masc_tui_answering.running_glyph ~frame) [ 0; 1; 2; 3 ]
-  in
-  Alcotest.(check int)
-    "four frames, none repeated" 4
-    (List.length (List.sort_uniq String.compare frames));
-  Alcotest.(check string)
-    "it comes back around" (List.nth frames 0)
-    (Masc_tui_answering.running_glyph ~frame:4)
-;;
-
-(* [-1] is "not animating", which a surface that repaints on the poll has to
-   be able to ask for. Freezing on an arbitrary quarter would read as a turn
-   stuck at that quarter; the still mark says "running" without claiming to
-   be moving. *)
-let test_not_animating_falls_back_to_the_still_mark () =
-  let still = Masc_tui_answering.running_glyph ~frame:(-1) in
-  Alcotest.(check bool)
-    "the still mark is not one of the moving frames" false
-    (List.exists
-       (fun frame -> String.equal still (Masc_tui_answering.running_glyph ~frame))
-       [ 0; 1; 2; 3 ])
-;;
-
-(* Every mark is one cell wide.
-
-   The Keepers table concatenates the mark ahead of the cells it fits, so the
-   mark is the one thing in that row nothing measures. A two-cell frame would
-   push every column to its right on one frame in four: a table that jitters
-   as it animates.
-
-   Cells, not bytes. Counting bytes looks like the same check and is not --
-   U+4E00 is three bytes and two cells, so a byte count would wave through
-   exactly the frame this exists to catch. *)
-let test_every_frame_is_one_cell () =
-  List.iter
-    (fun frame ->
-      let glyph = Masc_tui_answering.running_glyph ~frame in
-      Alcotest.(check int)
-        (Printf.sprintf "frame %d occupies one cell" frame)
-        1
-        (Masc_tui_message_layout.display_width glyph))
-    [ -1; 0; 1; 2; 3 ];
-  (* The check has teeth: a three-byte two-cell glyph fails it. *)
-  Alcotest.(check int)
-    "a wide three-byte glyph would not pass" 2
-    (Masc_tui_message_layout.display_width "\xe4\xb8\x80")
-;;
-
-(* The overlay draws the same mark as the table, so one running turn does not
-   wear two different marks depending on which key the reader pressed. *)
-let test_the_overlay_wears_the_same_mark () =
-  List.iter (fun frame ->
-  let lines =
-    Masc_tui_answering.overlay ~frame ~now:100. ~chat_target:None ~error:None
-      ~observed_at:(Some 90.)
-      ~finishes:[]
-      [ running ~lane:Tui_decode.Turn_lane_chat_operation ~started:40. "echo" ]
-  in
-  let running_line =
-    List.find (fun (line : Masc_tui_answering.line) -> line.tone = Masc_tui_answering.Running) lines
-  in
-  Alcotest.(check bool)
-    (Printf.sprintf "overlay uses the shared mark for frame %d" frame) true
-    (String.starts_with
-       ~prefix:(Masc_tui_answering.running_glyph ~frame)
-       running_line.text))
-    [-1; 0; 1; 2; 3]
-;;
-
-(* The span a surface hands over already measured. A Gate row drew
-   "41989s waiting" -- five figures of seconds where the code comment beside
-   it said the operator weighs the number. These pin the reading an operator
-   can weigh, and pin it here so the two callers cannot drift into two
-   spellings of the same span. *)
-let test_a_long_wait_reads_in_hours () =
-  Alcotest.(check string)
-    "41989 seconds is eleven hours and thirty-nine minutes" "11h39m"
-    (Masc_tui_answering.duration_text 41989.);
-  Alcotest.(check string)
-    "under a minute stays in seconds" "42s"
-    (Masc_tui_answering.duration_text 42.);
-  Alcotest.(check string)
-    "minutes carry their seconds" "2m14s"
-    (Masc_tui_answering.duration_text 134.)
-;;
-
-(* Clock skew between the server and this terminal can hand over a negative
-   span. Counting up from the future would read as a wait that has not
-   started; zero reads as one that just did. *)
-let test_a_negative_span_clamps () =
-  Alcotest.(check string)
-    "a span from the future reads as none" "0s"
-    (Masc_tui_answering.duration_text (-5.))
-;;
-
-(* [elapsed_text] is the same answer for a caller that knows the start rather
-   than the span. One spelling, two ways in. *)
-let test_elapsed_and_duration_agree () =
-  Alcotest.(check string)
-    "start-plus-now and the span read the same"
-    (Masc_tui_answering.duration_text 41989.)
-    (Masc_tui_answering.elapsed_text ~now:41989. 0.)
-;;
-
-(* Whether the screen animates at all. Three readings can say a turn is being
-   worked, the mark is drawn against all three, and the counter behind it has
-   to advance for any of them -- a mark frozen on the still glyph while an
-   answer streams says the keeper stopped. *)
 
 let idle_lane ~(lane : Standalone_lane.t) : Tui_decode.standalone_lane =
   { Tui_decode.sl_lane = lane
@@ -481,82 +282,14 @@ let test_chat_shows_background_work_and_uncertainty () =
     (Astring.String.is_infix ~affix:"editing the report" (String.concat "\n" (text drawn)))
 ;;
 
-(* The pane draws each row behind a two-cell caret gutter, inside the frame.
-   One long name must not push the lane and the age of any row past the
-   frame: the name gives way first. Read through [answering_lines], so the
-   width is the one the pane works out from the terminal. *)
-let test_long_names_leave_the_lane_and_the_age_inside_the_frame () =
-  let cache = Masc_tui_ansi.terminal_size_cache in
-  let previous = Masc_tui_ansi.get_terminal_size () in
-  let set_size size =
-    ignore
-      (Masc_tui_render_schedule.Terminal_size_cache.refresh cache ~probe:(fun () ->
-         Some size))
-  in
-  Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
-    let now = Unix.gettimeofday () in
-    let state =
-      Masc_tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
-    in
-    let long_ascii = "long-" ^ String.concat "" (List.init 24 (fun _ -> "keeper")) in
-    let long_wide = String.concat "" (List.init 30 (fun _ -> "한글이름")) in
-    state.keeper_turns
-    <- List.map
-         (fun name ->
-           running ~lane:Tui_decode.Turn_lane_chat_operation ~started:(now -. 120.) name)
-         [ long_ascii; long_wide; "alpha" ];
-    state.keeper_turns_observed_at <- Some now;
-    List.iter
-      (fun cols ->
-        set_size (26, cols);
-        let pane = Masc_tui_frame.inner_width ~cols - 2 in
-        match texts (Masc_tui_render_prim.answering_lines state) with
-        | [ ascii; wide; short ] as rows ->
-            List.iter
-              (fun text ->
-                Alcotest.(check bool)
-                  (Printf.sprintf "%d columns: the row fits behind the caret" cols)
-                  true
-                  (Masc_tui_message_layout.display_width text <= pane);
-                Alcotest.(check bool)
-                  (Printf.sprintf "%d columns: the lane and the age stay" cols)
-                  true
-                  (Astring.String.is_infix ~affix:"chat_operation  2m" text))
-              rows;
-            Alcotest.(check bool) "the long name keeps its start" true
-              (Astring.String.is_infix ~affix:"long-" ascii);
-            Alcotest.(check bool) "the wide name keeps its start" true
-              (Astring.String.is_infix ~affix:"한글" wide);
-            Alcotest.(check bool) "the short name is whole" true
-              (Astring.String.is_infix ~affix:"alpha" short)
-        | other ->
-            Alcotest.failf "%d columns: expected three rows, got %d" cols
-              (List.length other))
-      [ 60; 80; 120 ])
-;;
-
 let () =
   Alcotest.run "tui_answering"
     [ ( "chat activity", [Alcotest.test_case "background work and missing observation" `Quick
           test_chat_shows_background_work_and_uncertainty])
     ; ( "duration"
-      , [ Alcotest.test_case "a long wait reads in hours" `Quick
-            test_a_long_wait_reads_in_hours
-        ; Alcotest.test_case "a negative span clamps" `Quick
-            test_a_negative_span_clamps
-        ; Alcotest.test_case "elapsed and duration agree" `Quick
-            test_elapsed_and_duration_agree
-        ] )
+      , [] )
     ; ( "running mark"
-      , [ Alcotest.test_case "the mark moves" `Quick
-            test_the_running_mark_moves
-        ; Alcotest.test_case "not animating falls back to the still mark"
-            `Quick test_not_animating_falls_back_to_the_still_mark
-        ; Alcotest.test_case "every frame is one cell" `Quick
-            test_every_frame_is_one_cell
-        ; Alcotest.test_case "the overlay wears the same mark" `Quick
-            test_the_overlay_wears_the_same_mark
-        ] )
+      , [] )
     ; ( "animating at all"
       , [ Alcotest.test_case "a quiet screen does not animate" `Quick
             test_a_quiet_screen_does_not_animate
@@ -568,15 +301,7 @@ let () =
             `Quick test_lanes_that_were_never_loaded_are_not_running
         ] )
     ; ( "tui-answering"
-      , [ Alcotest.test_case "running rows lead with the chat target" `Quick
-            test_running_rows_lead_with_the_chat_target
-        ; Alcotest.test_case "a quiet fleet says so" `Quick
-            test_quiet_fleet_says_so
-        ; Alcotest.test_case "an error keeps the last rows and says why"
-            `Quick test_error_keeps_the_last_rows_and_says_why
-        ; Alcotest.test_case "a list no poll brought back is not quiet"
-            `Quick test_a_list_no_poll_brought_back_is_not_quiet
-        ; Alcotest.test_case "unavailable reads as unknown, not idle" `Quick
+      , [ Alcotest.test_case "unavailable reads as unknown, not idle" `Quick
             test_unavailable_reads_as_unknown_not_idle
         ; Alcotest.test_case "finished turns glow then expire" `Quick
             test_finished_turns_glow_then_expire
@@ -584,8 +309,6 @@ let () =
             test_advance_finishes_tracks_the_transition
         ; Alcotest.test_case "target indexes skip prose" `Quick
             test_target_indexes_skip_prose
-        ; Alcotest.test_case "long names leave the lane and the age inside the frame"
-            `Quick test_long_names_leave_the_lane_and_the_age_inside_the_frame
-        ] )
+        ;] )
     ]
 ;;

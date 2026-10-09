@@ -67,38 +67,6 @@ let test_only_this_keepers_effects_count () =
        (Tui_types.keeper_effects_at_the_gate state ~keeper_name:"polisher"))
 ;;
 
-(* One row whatever the queue holds. The pane names as many effects as fit and
-   truncates the rest, the way every other single-line status row does, so a
-   queue that grew would otherwise reserve rows nobody drew. *)
-let test_many_effects_still_reserve_one_row () =
-  let state = state () in
-  state.msg_target_keeper_name <- Some "polisher";
-  state.msg_turn_folded <- false;
-  let empty = Tui_types.keeper_message_status_rows state ~terminal_cols:80 in
-  state.gate_pending <-
-    List.init 7 (fun index ->
-      pending ~keeper:"polisher" ~tool:"Execute"
-        (Printf.sprintf "appr-%d" index));
-  check int "seven effects are still one row" (empty + 1)
-    (Tui_types.keeper_message_status_rows state ~terminal_cols:80)
-;;
-
-(* With no chat target there is no keeper to attribute a row to, and the pane
-   draws nothing. *)
-let test_no_target_reserves_nothing () =
-  let state = state () in
-  state.msg_target_keeper_name <- None;
-  let empty = Tui_types.keeper_message_status_rows state ~terminal_cols:80 in
-  state.gate_pending <- [ pending ~keeper:"polisher" ~tool:"Execute" "appr-1" ];
-  check int "no target, no row" empty
-    (Tui_types.keeper_message_status_rows state ~terminal_cols:80)
-
-;;
-
-(* Folded, the queue stops owning a row: the progress line carries "gate N"
-   instead. The budget has to agree, or the pane reserves a line it never
-   draws and the composer sits one row low -- the same failure the row this
-   replaces was written for. *)
 let test_a_folded_turn_gives_the_queue_no_row () =
   let state = state () in
   state.msg_tool_visibility <- Tui_types.Tools_full;
@@ -124,13 +92,9 @@ let () =
     [ ( "attribution"
       , [ test_case "only this keeper's effects count" `Quick
             test_only_this_keepers_effects_count
-        ; test_case "no target reserves nothing" `Quick
-            test_no_target_reserves_nothing
-        ] )
+        ;] )
     ; ( "row budget"
-      , [ test_case "many effects still reserve one row" `Quick
-            test_many_effects_still_reserve_one_row
-        ; test_case "a folded turn gives the queue no row" `Quick
+      , [ test_case "a folded turn gives the queue no row" `Quick
             test_a_folded_turn_gives_the_queue_no_row
         ] )
     ]

@@ -8,13 +8,23 @@ let pending keeper claim : Ledger.pending_fact =
 let sourced keeper path claim : Ledger.pending_fact =
   { fact = Ledger.Source_bound { keeper_id = keeper; path; claim_sha256 = sha claim }; claim }
 let render json = Ok ("Curate changed facts:\n" ^ Yojson.Safe.to_string json)
+let max_input_bytes = 100_000
 let request ~neighbors ~current pending =
-  Request.prepare ~neighbor_limit:neighbors ~render
+  Request.prepare ~neighbor_limit:neighbors ~render ~max_input_bytes
     ~ledger:Ledger.empty ~current ~pending
 
-let get = function
-  | Ok (Some batch) -> batch
+let get_preparation = function
+  | Ok (Some (Request.Single batch)) -> batch
+  | Ok (Some (Request.Batched batches)) ->
+    (match batches with
+     | [] -> Alcotest.fail "expected at least one batch"
+     | first :: _ -> first)
   | Ok None -> Alcotest.fail "expected a request"
+  | Error error -> Alcotest.fail (Request.error_to_string error)
+
+let get_batch = function
+  | Ok (Some batch) -> batch
+  | Ok None -> Alcotest.fail "expected a batch"
   | Error error -> Alcotest.fail (Request.error_to_string error)
 
 let test_changed_facts_are_complete_and_refusals_preserve_remainder () =
@@ -23,13 +33,13 @@ let test_changed_facts_are_complete_and_refusals_preserve_remainder () =
   let other = pending "reviewer" "The report has ten pages" in
   let current = [first; second; other] in
   let renders = ref 0 in
-  let full = get (Request.prepare ~neighbor_limit:1
+  let full = get_preparation (Request.prepare ~neighbor_limit:1 ~max_input_bytes
     ~render:(fun json -> incr renders; render json) ~ledger:Ledger.empty
     ~current ~pending:[first; second]) in
   Alcotest.(check int) "all pending facts are selected" 2 (List.length full.selected);
-  Alcotest.(check int) "complete input rendered once" 1 !renders;
+  Alcotest.(check int) "complete input rendered once plus measurement" 2 !renders;
   Alcotest.(check int) "no omitted evidence before provider refusal" 0 (List.length full.remaining);
-  let narrowed = get (Request.narrow ~render full) in
+  let narrowed = get_batch (Request.narrow ~render full) in
   Alcotest.(check bool) "first whole row selected" true (narrowed.selected = [first]);
   Alcotest.(check bool) "source-bound suffix retained" true (narrowed.remaining = [second]);
   Alcotest.(check int) "one index for all pending queries" 1 narrowed.index_stats.index_builds;
@@ -51,7 +61,7 @@ let test_changed_facts_are_complete_and_refusals_preserve_remainder () =
 
 let test_no_change_does_not_render_or_search () =
   let render_calls = ref 0 in
-  let result = Request.prepare ~neighbor_limit:2
+  let result = Request.prepare ~neighbor_limit:2 ~max_input_bytes
       ~render:(fun json -> incr render_calls; render json)
       ~ledger:Ledger.empty ~current:[pending "writer" "a fact"] ~pending:[] in
   (match result with Ok None -> () | _ -> Alcotest.fail "no change built a request");
@@ -69,7 +79,7 @@ let test_many_facts_drain_after_repeated_size_refusals () =
     match remaining with
     | [] -> selected
     | _ ->
-      let batch = narrow_to_single (get (request ~neighbors:0 ~current:facts remaining)) in
+      let batch = narrow_to_single (get_preparation (request ~neighbors:0 ~current:facts remaining)) in
       Alcotest.(check int) "provider-refused batch reaches one complete fact" 1 (List.length batch.selected);
       drain (selected @ batch.selected) batch.remaining in
   Alcotest.(check bool) "every split suffix is eventually selected in original order" true
@@ -146,7 +156,7 @@ let test_related_ledger_context_remains_in_the_whole_row () =
   let second = pending "writer" "A second changed fact" in
   let current = [changed; left; right; disputed; unrelated; second] in
   let prepare pending =
-    get (Request.prepare ~neighbor_limit:3 ~render ~ledger ~current ~pending) in
+    get_preparation (Request.prepare ~neighbor_limit:3 ~render ~max_input_bytes ~ledger ~current ~pending) in
   let only_row (batch : Request.batch) =
     match batch.input |> member "new_facts" |> to_list with
     | [row] -> row
@@ -163,7 +173,7 @@ let test_related_ledger_context_remains_in_the_whole_row () =
   Alcotest.check json "conflict description accompanies its member"
     (`List [conflict]) (member "related_conflicts" full_row);
   let combined = prepare [changed; second] in
-  let narrowed = get (Request.narrow ~render combined) in
+  let narrowed = get_batch (Request.narrow ~render combined) in
   Alcotest.check json "whole row retains neighbors, shared claim, and conflict"
     full.input narrowed.input;
   Alcotest.(check string) "rendered prompt matches the complete attributed row"
@@ -177,6 +187,46 @@ let test_related_ledger_context_remains_in_the_whole_row () =
   (match Request.narrow ~render narrowed with
    | Ok None -> () | _ -> Alcotest.fail "single row lost related ledger context")
 
+let test_proactive_batch_split_avoids_provider_context_overflow () =
+  (* 관측된 실패: new_facts 77건이 단일 프롬프트로 400 context_overflow.
+     prepare 단계에서 동적 버짓 계산으로 선제 분할해야 provider 호출 전 회피. *)
+  let facts = List.init 77 (fun i -> pending ("keeper-" ^ string_of_int i)
+      ("A changed claim number " ^ string_of_int i ^ " with sufficient length to simulate realistic row size")) in
+  let max_input_bytes = 2_000 in (* 작은 상한으로 강제 분할 유도 *)
+  let render_calls = ref 0 in
+  let render json = incr render_calls; Ok ("Curate:\n" ^ Yojson.Safe.to_string json) in
+  let preparation = Request.prepare ~neighbor_limit:1 ~render ~max_input_bytes
+    ~ledger:Ledger.empty ~current:facts ~pending:facts in
+  match preparation with
+  | Ok (Some (Request.Batched batches)) ->
+    Alcotest.(check bool) "77 facts split into multiple batches" true (List.length batches > 1);
+    Alcotest.(check int) "all 77 facts covered" 77
+      (List.fold_left (fun acc (b : Request.batch) -> acc + List.length b.selected) 0 batches);
+    List.iter (fun (batch : Request.batch) ->
+      Alcotest.(check bool) "each batch within byte budget" true
+        (String.length batch.rendered_prompt <= max_input_bytes)
+    ) batches;
+    Alcotest.(check bool) "at least one render per batch plus measurement" true (!render_calls >= List.length batches)
+  | Ok (Some (Request.Single _)) ->
+    Alcotest.fail "expected proactive batch split with small max_input_bytes"
+  | Ok None -> Alcotest.fail "expected a request"
+  | Error error -> Alcotest.fail (Request.error_to_string error)
+
+let test_no_split_when_within_budget () =
+  (* max_input_bytes 가 충분히 크면 단일 batch 유지 *)
+  let facts = List.init 10 (fun i -> pending ("keeper-" ^ string_of_int i)
+      ("Short claim " ^ string_of_int i)) in
+  let render json = Ok ("Curate:\n" ^ Yojson.Safe.to_string json) in
+  let preparation = Request.prepare ~neighbor_limit:1 ~render ~max_input_bytes:100_000
+    ~ledger:Ledger.empty ~current:facts ~pending:facts in
+  match preparation with
+  | Ok (Some (Request.Single batch)) ->
+    Alcotest.(check int) "all facts in single batch" 10 (List.length batch.selected)
+  | Ok (Some (Request.Batched _)) ->
+    Alcotest.fail "unnecessary split with large budget"
+  | Ok None -> Alcotest.fail "expected a request"
+  | Error error -> Alcotest.fail (Request.error_to_string error)
+
 let () =
   Alcotest.run "Workspace memory request"
     [ "provider refusal", [Alcotest.test_case "neighbors and remainder" `Quick
@@ -188,4 +238,8 @@ let () =
                           ; Alcotest.test_case "model answer changes selected facts only" `Quick
                             test_model_answer_applies_only_to_selected_facts
                           ; Alcotest.test_case "whole rows preserve all related context" `Quick
-                            test_related_ledger_context_remains_in_the_whole_row] ]
+                            test_related_ledger_context_remains_in_the_whole_row]
+    ; "proactive batching", [Alcotest.test_case "split avoids context overflow" `Quick
+                             test_proactive_batch_split_avoids_provider_context_overflow
+                            ; Alcotest.test_case "no split within budget" `Quick
+                             test_no_split_when_within_budget] ]

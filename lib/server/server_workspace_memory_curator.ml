@@ -232,6 +232,7 @@ let request ~base_path =
 
 type execution =
   { configuration : Yojson.Safe.t
+  ; max_input_bytes : int
   ; execute : rendered_prompt:string -> selected:Ledger.pending_fact list
       -> ledger:Ledger.t -> (Yojson.Safe.t * string, execution_failure) result
   ; summarize : batch:Briefing.batch -> (Yojson.Safe.t * string, execution_failure) result
@@ -248,7 +249,9 @@ let prepare_execution ~base_path =
     [ "catalog_generation", `String (Runtime_exact_output_registry.catalog_generation_fingerprint registry)
     ; "slots", `List (List.map (fun (slot : Runtime_exact_output_registry.selected_slot) -> `String slot.slot_id) resolved.selected_slots)
     ; "cli_slots", `List (List.map (fun id -> `String id) resolved.cli_slots) ] in
-  Ok { configuration;
+  (* Provider context window 상한 (바이트). 동적 버짓 계산의 기준. *)
+  let max_input_bytes = 100_000 in
+  Ok { configuration; max_input_bytes;
        execute = execute ~resolved; summarize = summarize ~resolved }
 
 type classification_error = Inventory_failed of string | Curation_failed of string
@@ -272,17 +275,30 @@ let classify ~base_path ~prepare =
       let render json = Prompt_registry.render_resolved_prompt_template key resolution
         ["workspace_memory_changes", Yojson.Safe.to_string json] in
       let owner_count = List.length (Context.keepers context) in
-      let* batch = Request.prepare ~neighbor_limit:(max 0 (owner_count - 1)) ~render ~ledger:change.ledger
-        ~current:change.current_facts ~pending:change.new_facts
+      let max_input_bytes = execution.max_input_bytes in
+      let* preparation = Request.prepare ~neighbor_limit:(max 0 (owner_count - 1)) ~render ~ledger:change.ledger
+        ~current:change.current_facts ~pending:change.new_facts ~max_input_bytes
         |> Result.map_error Request.error_to_string in
-      match batch with
+      match preparation with
       | None -> Error "workspace curator found pending facts but prepared no batch"
-      | Some batch -> Ok (execution, resolution, render, batch)
+      | Some (Single batch) -> Ok (execution, resolution, render, [batch])
+      | Some (Batched batches) -> Ok (execution, resolution, render, batches)
     in
     (match prepared with
      | Error detail -> Error (Curation_failed detail)
-     | Ok (execution, resolution, render, batch) ->
-       let rec attempt (batch : Request.batch) =
+     | Ok (execution, resolution, render, batches) ->
+       let rec attempt_batches (batches : Request.batch list) =
+         match batches with
+         | [] -> Ok false
+         | batch :: remaining_batches ->
+           let result = attempt batch in
+           (match result with
+            | Ok has_remaining -> 
+              if has_remaining || remaining_batches <> [] then
+                attempt_batches remaining_batches
+              else Ok false
+            | Error e -> Error e)
+       and attempt (batch : Request.batch) =
        let registry = Runs.global () in
        let run_id = Random_id.prefixed ~prefix:"workspace-curator-" ~bytes:16 in
        let started_at = Time_compat.now () in
@@ -354,7 +370,7 @@ let classify ~base_path ~prepare =
           | Error error -> Error (Curation_failed (Request.error_to_string error))
           | Ok None -> Error (Curation_failed detail)
           | Ok (Some smaller) -> attempt smaller)
-       in attempt batch)
+       in attempt_batches batches)
 
 (* Classification and synthesis have separate durable boundaries. In
    particular, an existing ledger and a deletion-only reconciliation need a

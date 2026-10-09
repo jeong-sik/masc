@@ -83,25 +83,58 @@ claim to reconstruct missing scope provenance in those older journals.
 | Runtime | Turn and text events | Thinking | Tools and progress |
 | --- | --- | --- | --- |
 | Codex app-server | `Turn_started` becomes `MessageStart`; agent-message deltas and completed-item suffixes become `TextDelta`; terminal completion becomes `MessageDelta` and `MessageStop`. Item IDs separate messages within a turn. | `item/reasoning/summaryTextDelta` and `item/reasoning/textDelta` become `ThinkingDelta`. The item ID and summary/content index identify each part; completed reasoning contributes only missing suffixes. | Dynamic tools carry call IDs and argument snapshots. Native `item/started` and `item/completed` produce observed start/end with identity and name. Known completed-item status and nullable command exit code remain native metadata. Command output deltas carry byte observations; MCP progress carries a redacted message, attached only to its active native item. File-change output notifications are outside this contract. |
-| Claude Code | Partial SDK text and complete assistant envelopes contribute text once. `message.id` separates responses; the first response opens the normalized turn and the result closes it. | Partial `thinking_delta` and complete thinking blocks become `ThinkingDelta`; complete blocks contribute only missing suffixes. Signatures and redacted payloads are not displayed as text. | MASC MCP callbacks provide dynamic-tool identity/arguments. Assistant `tool_use` and user tool results provide native observed start/end with the tool result’s optional `is_error` flag. Root `tool_progress` with `heartbeat: true` and matching session, parent scope, tool name and active native invocation becomes `Heartbeat_reported {elapsed_seconds}`. Unsupported or unbound progress does not create a chat row. |
+| Claude Code | SDK main-session partial text (provider contract) and complete root assistant envelopes contribute text once. `message.id` separates responses; the first response opens the normalized turn and the result closes it. | SDK main-session partial `thinking_delta` (provider contract) and complete root thinking blocks become `ThinkingDelta`; complete blocks contribute only missing suffixes. Signatures and redacted payloads are not displayed as text. | MASC MCP callbacks provide dynamic-tool identity/arguments. Assistant `tool_use` and user tool results provide native observed start/end with the tool result’s optional `is_error` flag. Root `tool_progress` with `heartbeat: true` and matching session, parent scope, tool name and active native invocation becomes `Heartbeat_reported {elapsed_seconds}`. Unsupported or unbound progress does not create a chat row. |
 | Antigravity | Init opens the normalized turn; step text and terminal response reconciliation provide text; result closes the turn. Step index identifies the source. | No typed thinking event exists in this adapter. `Internal` is not established as a reasoning payload. Thinking support is unverified. | MCP callbacks provide dynamic-tool events; tool steps provide native observed start/end using conversation ID and step index. `Done` reports native completion; `Step_error` reports a native error. Neither is a MASC execution receipt. |
 | GLM Coding | The configured `openai-compatible-http` route uses AGENT_CORE SSE parsing with message start/stop, text deltas, and indexed blocks. | Provider reasoning fields accepted by the configured streaming dialect produce `ThinkingDelta` or `ReasoningDetailsDelta`. Absence of a provider reasoning payload produces no invented thinking. | Indexed tool calls carry their IDs, names, and argument deltas. MASC execution receipts determine tool execution results. Official-client native-tool notifications do not apply to this HTTP route. |
 
-Claude assistant metadata has a separate root authority. Its required
-`parent_tool_use_id` is null for a root response and a nonblank call ID for a
-child response; missing, malformed, or duplicate fields are rejected. Only a root
-model response can update the root model and latest-request input usage. Child
-tool envelopes retain their native start/end and effect observations without
-replacing those fields, including when a failure or host stop follows the child.
-The result frame still supplies the turn's aggregate spend.
+Claude assistant body and metadata have separate root and child authority. The
+required `parent_tool_use_id` is null for a root response and a nonblank call ID
+for a child response; missing, malformed, or duplicate fields are rejected for
+complete assistant envelopes. In that complete-envelope path, only root model
+responses update root model/latest-request input usage and contribute root
+text/thinking or root reply fallback. Partial events rely on the SDK's
+main-session-only stream contract: the existing partial parser validates the
+session and event shape without independently checking parent scope. The result
+frame still supplies the turn's aggregate spend. Child tool envelopes retain
+native start/end and effect observations without replacing root metadata.
 
-This distinction matters with the current invocation: Claude Code 2.1.292 forwards
-child tool-use/result envelopes with their own model and usage even when
-`forwardSubagentText` is false. MASC leaves that option disabled, so this change
-does not enable child text or thinking. See the
-[SDK forwarding contract](https://code.claude.com/docs/en/agent-sdk/python#claudeagentoptions).
-Parent-qualified native occurrence identity and child progress remain separate
-work; this metadata isolation does not establish either capability.
+Accepted complete child model text and thinking produce `Child_content_observed`
+snapshots with the literal parent call ID, message ID/absence, reported child
+model, original envelope UUID and observed content-array ordinal, channel and
+supplied body. Redacted payloads are omitted without compressing later ordinals.
+A single-content-block SDK envelope can have ordinal zero even when it shares a
+message ID with another envelope; this ordinal is not an API streaming index.
+Complete child-envelope body never becomes root `TextDelta`/`ThinkingDelta`, root reply fallback or
+root response-emitted evidence. API diagnostic child body publishes no body
+observation. [SDK output streaming](https://code.claude.com/docs/en/agent-sdk/streaming-output)
+provides main-session partial deltas and attributes subagent output through
+complete messages; this separation does not invent child token streaming.
+
+Each child snapshot optionally carries a private `native_agent_parent_witness`.
+The existing invocation native-call registry is its only authority: under
+`Native_full`, an unambiguous root built-in `Agent` call retains its original
+session, call ID, envelope UUID and observed array ordinal while open and after
+native return. No task registration is required. Unknown, ambiguous, nested,
+non-Agent, MCP-wrapper or unadmitted parents yield `None`, preserving body
+provenance. No task/run or input ticket is inferred. The witness certifies the
+original native call only; a downstream join must compare the child's literal
+parent ID with the witness call ID. Public event construction does not certify
+that pairing or body authenticity.
+
+The witness is a fact at observation time. A later call-ID collision makes
+subsequent child observations unknown; earlier witness values remain historical
+snapshots and prove neither current authority nor cancellation. Later witnesses
+cannot retroactively certify earlier unknown snapshots. Separate child display,
+persistence and original-input binding are not connected in the Keeper wrapper,
+which explicitly excludes child body from root projection. Native task metadata
+journals do not receive child body or user input from this event.
+
+The recorded Claude Code 2.1.292 observation established child tool-use/result
+envelopes with their own model and usage even when `forwardSubagentText` was
+false. That is historical producer evidence. The runtime command and initialize
+builders in this source do not enable that option; accepting typed complete
+child body or attaching a parent witness does not change the flag and does not
+claim current default CLI child-body exposure.
 
 ## Source boundaries
 

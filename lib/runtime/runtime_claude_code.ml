@@ -305,6 +305,13 @@ type native_task_observation =
     This client still returns on the first root result; post-result receiving
     requires a separate process/session lifetime implementation. *)
 
+type native_agent_parent_witness =
+  { session_id : string
+  ; call_id : string
+  ; call_envelope_uuid : string
+  ; call_ordinal : int
+  }
+
 type stream_event =
   | Turn_started of
       { turn_id : string
@@ -322,6 +329,7 @@ type stream_event =
       }
   | Child_content_observed of
       { parent_tool_use_id : string
+      ; parent_occurrence : native_agent_parent_witness option
       ; message_id : string option
       ; model : string
       ; block : content_block
@@ -1264,6 +1272,18 @@ let finish_native_call registry ~scope id =
   | Some (Native_open _ | Native_closed _ | Native_ambiguous) | None -> None
 ;;
 
+let root_native_agent_parent registry ~session_id ~call_id : native_agent_parent_witness option =
+  match registry.native_posture, Hashtbl.find_opt registry.calls call_id with
+  | Runtime_native_tools.Native_full,
+    Some (Native_open {scope=Root_response;envelope_uuid;ordinal;
+            observation={origin=Built_in;tool_name=Some "Agent";_}}
+        | Native_closed {scope=Root_response;envelope_uuid;ordinal;
+            observation={origin=Built_in;tool_name=Some "Agent";_}}) ->
+      Some {session_id;call_id;call_envelope_uuid=envelope_uuid;call_ordinal=ordinal}
+  | (Native_full | Native_read | Native_none),
+    (Some (Native_open _ | Native_closed _ | Native_ambiguous) | None) -> None
+;;
+
 type heartbeat_ignored =
   | Not_heartbeat
   | Malformed_heartbeat
@@ -1498,18 +1518,16 @@ let project_native_task registry ~expected_session_id fields =
     let emit owner boundary = Some {owner;uuid=frame.task_uuid;event=frame.task_event;boundary} in
     let register () =
       let binding =
-        match registry.native_posture, frame.root_registration, frame.tool_use_id with
-        | Runtime_native_tools.Native_full, true, Some call_id ->
-            (match Hashtbl.find_opt registry.calls call_id with
-             | Some (Native_open {scope=Root_response;envelope_uuid;ordinal;
-                   observation={origin=Built_in;tool_name=Some "Agent";_}}
-                 | Native_closed {scope=Root_response;envelope_uuid;ordinal;
-                   observation={origin=Built_in;tool_name=Some "Agent";_}}) ->
-                 Task_owned {owner={session_id=expected_session_id;task_id=frame.task_id;
-                     run_id;call_id;call_envelope_uuid=envelope_uuid;call_ordinal=ordinal};
+        match frame.root_registration, frame.tool_use_id with
+        | true, Some call_id ->
+            (match root_native_agent_parent registry ~session_id:expected_session_id ~call_id with
+             | Some parent ->
+                 Task_owned {owner={session_id=parent.session_id;task_id=frame.task_id;
+                     run_id;call_id=parent.call_id;call_envelope_uuid=parent.call_envelope_uuid;
+                     call_ordinal=parent.call_ordinal};
                    registration=frame.task_event;boundary=Task_terminal_unobserved}
-             | Some (Native_open _ | Native_closed _ | Native_ambiguous) | None -> Task_unowned)
-        | (Native_full | Native_read | Native_none), _, _ -> Task_unowned in
+             | None -> Task_unowned)
+        | false, (Some _ | None) | true, None -> Task_unowned in
       Hashtbl.replace registry.task_runs frame.task_id {run_id;binding};
       match binding with Task_owned {owner;boundary;_} -> emit owner boundary | Task_unowned -> None in
     match frame.task_event, Hashtbl.find_opt registry.task_runs frame.task_id with
@@ -2235,8 +2253,10 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
                complete_partial_text partial_stream ~on_stream_event ~response_emitted
                  ~channel:Text_content ~message_id ~uuid ~ordinal text
            | Child_response parent_tool_use_id, Model_response ->
+               let parent_occurrence = root_native_agent_parent native_tool_calls
+                 ~session_id:expected_session_id ~call_id:parent_tool_use_id in
                emit_stream_event on_stream_event
-                 (Child_content_observed {parent_tool_use_id; message_id; model;
+                 (Child_content_observed {parent_tool_use_id; parent_occurrence; message_id; model;
                    block=Assistant_block {uuid; ordinal}; channel=Text_content; text});
                Ok ())
       | Assistant_thinking text ->
@@ -2246,8 +2266,10 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
                complete_partial_text partial_stream ~on_stream_event ~response_emitted
                  ~channel:Thinking_content ~message_id ~uuid ~ordinal text
            | Child_response parent_tool_use_id, Model_response ->
+               let parent_occurrence = root_native_agent_parent native_tool_calls
+                 ~session_id:expected_session_id ~call_id:parent_tool_use_id in
                emit_stream_event on_stream_event
-                 (Child_content_observed {parent_tool_use_id; message_id; model;
+                 (Child_content_observed {parent_tool_use_id; parent_occurrence; message_id; model;
                    block=Assistant_block {uuid; ordinal}; channel=Thinking_content; text});
                Ok ())
       | Assistant_native_tool observation ->

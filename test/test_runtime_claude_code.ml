@@ -853,7 +853,8 @@ let test_child_body_cannot_supply_root_reply () =
            | Error error -> fail (Runtime_claude_code.error_to_string error));
           let child_bodies = List.filter_map (function
             | Runtime_claude_code.Child_content_observed
-                {parent_tool_use_id; message_id; model; block; channel; text} ->
+                {parent_tool_use_id; parent_occurrence; message_id; model; block; channel; text} ->
+                check bool "no parent witness outside Native_full" true (Option.is_none parent_occurrence);
                 check string "reported child model preserved" "child-model" model;
                 Some (parent_tool_use_id, message_id, block, channel, text)
             | _ -> None) (List.rev !events) in
@@ -2960,6 +2961,118 @@ let task_observations events = List.filter_map (function
   | Runtime_claude_code.Native_task_observed observation -> Some observation | _ -> None) events
 ;;
 
+let test_child_parent_witness_uses_original_native_occurrence () =
+  let original_parent = match Yojson.Safe.from_string parent_tool_assistant with
+    | `Assoc fields ->
+        let message = match List.assoc "message" fields with
+          | `Assoc message -> message | _ -> fail "parent message" in
+        let content = match List.assoc "content" message with
+          | `List content -> content | _ -> fail "parent content" in
+        replace_wire_field "message" (`Assoc (("content", `List
+          (`Assoc ["type", `String "redacted_thinking"; "data", `String "NOT_BODY"] :: content))
+          :: List.remove_assoc "content" message)) parent_tool_assistant
+    | _ -> fail "parent object" in
+  let child uuid =
+    {|{"type":"assistant","parent_tool_use_id":"parent-agent","session_id":"__SESSION__","uuid":"|}
+    ^ uuid ^ {|","message":{"id":"child-witness-message","role":"assistant","model":"child-model","content":[{"type":"redacted_thinking","data":"NOT_CHILD_BODY"},{"type":"text","text":"CHILD_ONLY"},{"type":"thinking","thinking":"CHILD_REASONING"}]}}|} in
+  let reused_parent = replace_wire_field "uuid" (`String "reused-parent-envelope") original_parent in
+  let bodies = ref [] in
+  let events = ref [] in
+  let on_stream_event event =
+    events := event :: !events;
+    match event with
+    | Runtime_claude_code.Child_content_observed
+        {parent_tool_use_id;parent_occurrence;message_id;model;block;channel;text} ->
+        bodies := (parent_tool_use_id,message_id,model,block,channel,text,parent_occurrence,
+          List.length (task_observations !events)) :: !bodies
+    | _ -> () in
+  let terminal = replace_wire_field "result" (`String "") result in
+  with_fixture
+    [Emit empty_assistant; Emit (child "unknown-parent");
+     Emit original_parent; Emit (child "before-task");
+     Emit (agent_launch_result "parent-agent"); Emit (child "closed-parent");
+     Emit (task_wire ~uuid:"registered-after-child" "task_started" task_start_payload);
+     Emit reused_parent; Emit (child "ambiguous-parent"); Emit terminal]
+    (fun path ->
+      match run_fixture ~native:Runtime_native_tools.Native_full ~on_stream_event path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok turn ->
+          check string "child body still cannot supply root reply" "" turn.text;
+          (* Assert outside the callback: runtime observers deliberately log
+             callback exceptions instead of failing the provider turn. *)
+          let bodies=List.map (fun (literal_parent,message,model,block,channel,text,parent,task_count) ->
+            check string "supplied child parent remains literal" "parent-agent" literal_parent;
+            check (option string) "supplied message remains literal" (Some "child-witness-message") message;
+            check string "reported child model" "child-model" model;
+            match block with
+            | Runtime_claude_code.Assistant_block {uuid;ordinal} ->
+                if uuid="before-task" then
+                  check int "parent witness does not mint a task observation" 0 task_count;
+                (uuid,ordinal,channel,text,parent)
+            | Partial_block _ -> fail "complete child used partial identity") (List.rev !bodies) in
+          check (list string) "every body snapshot preserves its envelope"
+            ["unknown-parent";"unknown-parent";"before-task";"before-task";
+             "closed-parent";"closed-parent";"ambiguous-parent";"ambiguous-parent"]
+            (List.map (fun (uuid,_,_,_,_) -> uuid) bodies);
+          List.iter (fun (uuid,ordinal,channel,text,parent) ->
+            (match channel with
+             | Runtime_claude_code.Text_content ->
+                 check int "original child wire ordinal" 1 ordinal;
+                 check string "child text preserved" "CHILD_ONLY" text
+             | Thinking_content ->
+                 check int "original child thinking ordinal" 2 ordinal;
+                 check string "child thinking preserved" "CHILD_REASONING" text);
+            if uuid="unknown-parent" || uuid="ambiguous-parent" then
+              check bool "unknown or conflicted parent stays unknown" true (Option.is_none parent)
+            else match parent with
+              | None -> fail "known open/returned root Agent lost original occurrence"
+              | Some (parent : Runtime_claude_code.native_agent_parent_witness) ->
+                  check string "witness uses admitted session" turn.session_id parent.session_id;
+                  check string "witness uses original literal call" "parent-agent" parent.call_id;
+                  check string "old witness survives later ID conflict without mutation"
+                    "parent-assistant" parent.call_envelope_uuid;
+                  check int "original parent wire ordinal, not API index" 1 parent.call_ordinal)
+            bodies;
+          (match task_observations !events with
+           | [observation] ->
+               check string "existing task admission retains exact parent"
+                 "parent-assistant" observation.owner.call_envelope_uuid;
+               check int "existing task shares original ordinal" 1 observation.owner.call_ordinal
+           | _ -> fail "child witness altered independent task registration"))
+;;
+
+let test_child_parent_witness_refuses_unowned_native_parents () =
+  let parent_with_name name = match Yojson.Safe.from_string parent_tool_assistant with
+    | `Assoc fields ->
+        let message = match List.assoc "message" fields with
+          | `Assoc message -> message | _ -> fail "parent message" in
+        let content = `List [`Assoc ["type", `String "tool_use"; "id", `String "parent-agent";
+          "name", `String name; "input", `Assoc []]] in
+        replace_wire_field "message" (`Assoc (("content",content)::List.remove_assoc "content" message))
+          parent_tool_assistant
+    | _ -> fail "parent object" in
+  let nested = replace_wire_field "parent_tool_use_id" (`String "outer-agent") parent_tool_assistant in
+  let mcp_agent = {(probe_tool (ref 0)) with name="Agent"} in
+  List.iter (fun (native,dynamic_tools,parent) ->
+    let bodies=ref [] in
+    with_fixture [Emit empty_assistant; Emit parent; Emit child_body_assistant; Emit result]
+      (fun path ->
+        match run_fixture ~native ~dynamic_tools ~on_stream_event:(function
+          | Runtime_claude_code.Child_content_observed {parent_occurrence;_} ->
+              bodies := parent_occurrence :: !bodies
+          | _ -> ()) path with
+        | Error error -> fail (Runtime_claude_code.error_to_string error)
+        | Ok _ ->
+            check int "unowned body provenance is retained" 3 (List.length !bodies);
+            check bool "unowned parent cannot mint a private witness" true
+              (List.for_all Option.is_none !bodies)))
+    [Runtime_native_tools.Native_read,[],parent_tool_assistant;
+     Native_none,[],parent_tool_assistant;
+     Native_full,[],nested;
+     Native_full,[],parent_with_name "Read";
+     Native_full,[mcp_agent],parent_with_name "mcp__masc__Agent"]
+;;
+
 let test_tasks_survive_native_return_without_changing_root_response () =
   let second_call = `Assoc ["type",`String "tool_use";"id",`String "second-agent";
     "name",`String "Agent";"input",`Assoc []] in
@@ -4105,6 +4218,10 @@ let () =
         ; test_case "Agent retry clear and cross-kind UUID ownership" `Quick test_agent_retry_identity_clear_and_uuid_interleaving
         ; test_case "Agent retry exception stays producer scoped" `Quick test_agent_retry_observation_exception_is_narrow
         ; test_case "Agent retry requires root native_full" `Quick test_agent_retry_requires_root_native_full
+        ; test_case "child witness retains original open/returned native parent" `Quick
+            test_child_parent_witness_uses_original_native_occurrence
+        ; test_case "child witness refuses unowned native parents" `Quick
+            test_child_parent_witness_refuses_unowned_native_parents
         ; test_case "tasks survive native return with exact root ownership" `Quick test_tasks_survive_native_return_without_changing_root_response
         ; test_case "task run ordering and cross-kind UUID replay" `Quick test_task_run_order_replays_and_cross_kind_uuid
         ; test_case "unowned and malformed tasks preserve the healthy turn" `Quick test_task_registration_rejects_unowned_and_malformed_frames

@@ -259,6 +259,24 @@ type native_task_observation = private
     This client still returns on the first root result; post-result receiving
     requires a separate process/session lifetime implementation. *)
 
+type native_agent_parent_witness = private
+  { session_id : string
+  ; call_id : string
+  ; call_envelope_uuid : string
+  ; call_ordinal : int
+  }
+(** Invocation-registry witness to an unambiguous Root_response/Built_in Agent
+    call admitted under Native_full. An open or returned native call retains
+    the same original envelope UUID and its observed content-array ordinal;
+    this is not an API streaming index. No task/run, input ticket or publication
+    authority is inferred from this witness. Later call-ID reuse can make
+    the registry ambiguous and subsequent child observations unknown; an
+    earlier witness remains its immutable historical snapshot, not current
+    authority or cancellation evidence. It certifies only the original
+    native call, not the authenticity or parent pairing of a publicly
+    constructed child event. A downstream join must also compare the event's
+    literal [parent_tool_use_id] with [call_id] before binding it. *)
+
 type stream_event =
   | Turn_started of
       { turn_id : string
@@ -274,16 +292,23 @@ type stream_event =
           [message.id]. The CLI writes each content block of a response as
           its own frame under the same id, so blocks sharing an id are one
           assistant message and a new id is the next one. [None] when the
-          frame carries no id. *)
+          frame carries no id. Complete-envelope body isolation admits only
+          root model responses here. Partial events rely on the SDK's
+          main-session-only contract; their parser checks the session and
+          event shape without independently validating parent scope. *)
   | Thinking_delta of
       { message_id : string option
       ; block : content_block
       ; text : string
       }
       (** Provider-exposed thinking text from partial or complete assistant
-          blocks. Opaque signatures and redacted payloads are not text. *)
+          blocks. Complete child envelopes use [Child_content_observed];
+          partial attribution relies on the SDK main-session-only contract
+          described on [Text_delta]. Opaque signatures and redacted payloads
+          are not text. *)
   | Child_content_observed of
       { parent_tool_use_id : string
+      ; parent_occurrence : native_agent_parent_witness option
       ; message_id : string option
       ; model : string
       ; block : content_block
@@ -298,7 +323,13 @@ type stream_event =
           text. Repeated observations with the same occurrence identity,
           channel and text can be applied idempotently by downstream consumers;
           this event does not certify agreement of changed replay bodies. The
-          parent call is provenance, not an inferred task owner. Child
+          parent call is provenance, not an inferred task owner.
+          [parent_occurrence] is the registry's fact when this body is observed,
+          even before task registration or after native return. [None] means
+          the parent is unknown, ambiguous, not a root built-in Agent, or not
+          admitted under Native_full. It preserves the supplied body and parent
+          ID and never retroactively upgrades an earlier unknown observation.
+          A later observation is not certification of the earlier binding. Child
           content cannot supply the root reply, root response-emitted evidence,
           model or usage. This is separate from root partial reconciliation.
           Keeper child-body display/persistence is not yet connected. *)

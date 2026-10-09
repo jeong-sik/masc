@@ -5,6 +5,10 @@ import json
 import re
 import subprocess
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _gh_merge_base import merge_base as gh_merge_base
 
 
 def stack_scope(stack):
@@ -40,12 +44,7 @@ def main():
     a = p.parse_args()
     review = json.load(sys.stdin)
     def merge_base(base, head):
-        sha = subprocess.check_output([a.gh, "api",
-            f"repos/{a.repo}/compare/{base}...{head}", "--jq", ".merge_base_commit.sha"],
-            text=True).strip()
-        if re.fullmatch(r"[0-9a-f]{40}", sha) is None:
-            raise ValueError("GitHub comparison did not return a merge-base SHA")
-        return sha
+        return gh_merge_base(a.gh, a.repo, base, head)
     matched = scope_matches(review.get("body", ""), base_ref=a.base_ref,
         base_sha=a.base_sha, stack=stack_scope(json.loads(a.stack)),
         head=a.head, merge_base=merge_base)

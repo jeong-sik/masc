@@ -47,7 +47,7 @@ class GuardHarness(unittest.TestCase):
         self.scripts = self.tmp / "scripts"
         self.scripts.mkdir()
         for name in ("approve-guard.sh", "ci-checks.sh", "review-verdict.sh",
-                     "review-scope.py", "review-refusal.py"):
+                     "review-scope.py", "review-refusal.py", "_gh_merge_base.py"):
             shutil.copy(HERE / name, self.scripts / name)
         # The real review-diff.py needs Git objects; the diff identity is a fixed fixture here.
         (self.scripts / "review-diff.py").write_text(f"#!/usr/bin/env python3\nprint('{DIFF}')\n")

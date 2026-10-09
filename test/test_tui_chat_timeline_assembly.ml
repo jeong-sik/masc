@@ -29,6 +29,7 @@ let row ?(keeper = "alpha") ?(request_id = "") ?turn_sequence
   ; me_skill_block = []
   ; me_timestamp = ""
   ; me_request_id = request_id
+  ; me_execution_source = Some (Masc_tui_keeper_chat_log.Operation request_id)
   ; me_at = at
   }
 ;;
@@ -389,7 +390,7 @@ let test_a_held_turn_keeps_only_the_rows_the_log_does_not_draw () =
   in
   let texts rows = List.map (fun (r : Tui_types.msg_entry) -> r.me_text) rows in
   let held ~reasoning =
-    [ { Tui_types.ht_request_id = "held"; ht_reasoning = reasoning } ]
+    [ { Tui_types.ht_source = Masc_tui_keeper_chat_log.Operation "held"; ht_reasoning = reasoning } ]
   in
   Alcotest.(check (list string))
     "held with reasoning: the keeper's words, tools, skills and reasoning leave"

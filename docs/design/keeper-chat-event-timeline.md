@@ -19,15 +19,52 @@ pages also discover these sources, so opening the pane after a turn started or
 after it ended does not require a new token notification. Live SSE timestamps and
 replayed journal timestamps both retain the server's epoch-seconds clock.
 
+The operation SSE subscription buffers live events through acceptance and replay.
+A single sender then drains that queue, including events arriving during the
+drain, before releasing sender ownership. The state lock never covers a send.
+Rejection, release and send failure close the queue; a publisher holding an old
+subscription callback cannot reactivate it. Replay still deduplicates exact
+sequence membership, retaining a buffered event if its journal append failed.
+Live subscriptions and terminal accounting are keyed by canonical runtime base,
+Keeper and operation ID, matching the owner registry's authority and each Keeper's
+operation store. Reusing a request ID in another Keeper or runtime cannot share
+its live audience, consume its terminal record or unregister it.
+
 Inputs remain in a separate pending area through local dispatch, unconfirmed
 transport, and server queue admission. `Run_started` or an authoritative persisted
-input proves processing began. A verified refusal keeps the original recall text
-and marks the displayed input as rejected. A batch retains each input identity,
+input proves processing began. A verified refusal keeps the original input text
+and displays its error separately. A batch retains each input identity,
 including identical consecutive messages, while all bound inputs precede one shared
 response. Each output stretch keeps its server event time and continuation segment;
 resuming an operation cannot move a later answer above an intervening input or replace
 an earlier segment's text. Autonomous journals end at their own turn boundary even
 when their outcome is a continuation checkpoint for a later turn.
+
+Provider message starts, tool rounds, retries, and continuation segments open a
+new response window. A flat canonical reply replaces only the last text stretch
+in that window, retaining its source origin. Earlier observed text and reasoning
+keep their positions. A flat reply cannot map canonical content back to multiple
+original text blocks: the text/reasoning/text duplication case remains unresolved
+until response provenance or a separate canonical presentation is available.
+Text and reasoning origins are allocated across the whole operation, without
+resetting at retry or continuation. Tool groups use their first local call's
+identity; records without streamed text have explicit synthetic origins. Rendering
+visibility and array positions do not define these identities.
+
+Message-start usage seeds the current provider response's counters. Later sparse
+usage reports replace only present fields, including explicit zero values. A new
+message, retry, or continuation clears the previous counters and stop reason.
+The producer bridge suppresses exact message-start prelude replays within its open
+stream scope before journal or SSE publication. Conflicting starts publish only
+protocol errors. Every published start therefore opens a fresh response, even if
+a later sealed scope reuses the provider's message id. Journal/transport replay
+is deduplicated by sequence, not message-id text. Live SSE decoding and journal
+replay preserve the same message identity and usage fields already present in the
+server events; no new wire format is required. Historical journals written before
+this producer normalization may contain distinct-sequence prelude replays. Their
+flat start events carry no stream scope, so replay treats each recorded start as
+a boundary rather than guessing from provider-id equality. This change does not
+claim to reconstruct missing scope provenance in those older journals.
 
 | Runtime | Turn and text events | Thinking | Tools and progress |
 | --- | --- | --- | --- |
@@ -72,6 +109,10 @@ active steps through runtime parsing, the Keeper adapter, and the chat bridge,
 checking one native occurrence and one observed end for either done or error.
 These cases require execution in the normal
 verification environment; syntax parsing alone does not establish their behavior.
+Response-boundary and usage coverage also includes the server's SSE projection
+and journal replay in `test_tui_keeper_chat_log.ml`, boundary/origin fixtures in
+`test_tui_keeper_chat_transcript.ml`, and hidden/folded/full reasoning rendering in
+`test_tui_chat_response_origins.ml`.
 
 Provider-internal subturns are not fabricated as completed Keeper turns. Native
 progress payloads, native success/failure outcomes, and Antigravity reasoning remain

@@ -222,9 +222,29 @@ let test_split_secret_held_across_native_progress () =
             {reply="Safe final response";turn_outcome=Masc.Keeper_turn_outcome.Visible_reply}))))
       [output 3; Native.Message_reported {message="still working"}]) [false;true]
 
+(* A blank MCP message says the tool is active and nothing more. *)
+let test_blank_message_keeps_the_last_message () =
+  let t = T.create ~keeper_name:"fixture" ~request_id:"blank" ~started_at:0. in
+  let occurrence : Live.tool_occurrence = {stream_scope=0;block_index=1;provider_message_id=None;tool_call_id=Some "native"} in
+  let message value = Live.Native_tool_progress {occurrence;progress=Native.Message_reported {message=value}} in
+  T.apply ~now:1. t Live.Run_started;
+  T.apply ~now:1. t (Live.Native_tool_started {occurrence;tool_name=Some "Search"});
+  let progress () = match T.tool_calls t with
+    | [call] -> call.native_progress
+    | _ -> fail "expected one native call" in
+  let words () = Option.map (fun (value : T.native_progress) -> value.message) (progress ()) in
+  T.apply ~now:2. t (message " \t");
+  check (option (option string)) "a blank first message records activity without words" (Some None) (words ());
+  T.apply ~now:3. t (message "indexing");
+  T.apply ~now:4. t (message "");
+  check (option (option string)) "a blank message keeps the last useful one" (Some (Some "indexing")) (words ());
+  check (option (float 0.)) "a blank message still moves the update time" (Some 4.)
+    (Option.map (fun (value : T.native_progress) -> value.updated_at) (progress ()))
+
 let () = run "native tool progress" ["contract",[
   test_case "same deltas count twice, same journal seq once" `Quick test_replayed_sequence_and_model_signal;
   test_case "exact current active native scope" `Quick test_exact_active_scope_only;
   test_case "split secrets stay held across native side observations" `Quick test_split_secret_held_across_native_progress;
   test_case "strict nested progress payload" `Quick test_strict_nested_wire_and_journal;
-  test_case "autonomous actual journal matches direct projection" `Quick test_autonomous_progress_journal_matches_direct_projection]]
+  test_case "autonomous actual journal matches direct projection" `Quick test_autonomous_progress_journal_matches_direct_projection;
+  test_case "a blank message keeps the last message" `Quick test_blank_message_keeps_the_last_message]]

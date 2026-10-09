@@ -1499,6 +1499,11 @@ let apply_delta ~now t (delta : Live.delta) =
                 let previous = Option.value previous_bytes ~default:0 in
                 if byte_count <= 0 || byte_count > max_int - previous then None
                 else Some (Some (previous + byte_count), previous_message)
+            (* A blank message says the tool is active and nothing more. It
+               keeps the time current but does not replace a message that
+               said something. *)
+            | Runtime_native_tools.Message_reported {message} when String.trim message = "" ->
+                Some (previous_bytes, previous_message)
             | Runtime_native_tools.Message_reported {message} -> Some (previous_bytes, Some message) in
           match updated with
           | None -> note_unreadable t "native progress byte count is invalid"; call

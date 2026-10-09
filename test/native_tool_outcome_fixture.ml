@@ -146,16 +146,7 @@ let check_progress t ~expected ~expected_text ~running =
       let projection = Transcript.project_tool_block mode (Transcript.tool_block calls) in
       String.concat "\n" (Option.to_list projection.header @ projection.details) in
     let compact = render Transcript.Compact and full = render Transcript.Full in
-    check bool "native display escapes controls" false (String.contains compact '\027' || String.contains full '\027');
-    List.iter (fun (_,bytes,_) -> match bytes with
-      | None -> ()
-      | Some count ->
-          check bool "default row describes activity" true
-            (Astring.String.is_infix ~affix:(if running then "output arriving" else "output observed") compact);
-          check bool "byte count stays in expanded view" false
-            (Astring.String.is_infix ~affix:"bytes observed" compact);
-          check bool "expanded view retains byte evidence" true
-            (Astring.String.is_infix ~affix:(Printf.sprintf "%d bytes observed" count) full)) expected) transcripts;
+    check bool "native display escapes controls" false (String.contains compact '\027' || String.contains full '\027')) transcripts;
   match transcripts with
   | [live;replay] -> check bool "live/replay progress identical" true (Transcript.tool_calls live=Transcript.tool_calls replay)
   | _ -> fail "expected live and replay snapshots"

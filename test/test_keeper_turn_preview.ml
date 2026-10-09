@@ -265,10 +265,61 @@ let test_late_execution_keeps_successor_preview_and_redactor () =
       (Some "Read") (Option.get (Keeper_turn_preview.current ~keeper_name)).last_tool)
 ;;
 
+let test_released_source_position_through_turns_decoder () =
+  let name = "source-position" in
+  let writer = Some (reset name ~now:0.) in
+  let current () = Option.get (Keeper_turn_preview.current ~keeper_name:name) in
+  let decoded payload =
+    let wire = `Assoc ["schema", `String "masc.keeper_turns.v1";
+      "keepers", `List [`Assoc ["keeper_name", `String name; "status", `String "ok";
+        "turn", `Assoc ["lane", `String "maintenance"; "interrupt_token", `String "turn";
+          "started_at_unix", `Float 0.; "preview", payload]]]] in
+    match Tui_decode.decode_keeper_turns wire with
+    | Ok [{ktr_state=Keeper_turn_running {preview=Some value; _}; _}] -> value
+    | Ok _ -> Alcotest.fail "current preview lost in actual turns decoder"
+    | Error error -> Alcotest.fail error in
+  let check_position generation total =
+    let preview = current () in
+    let observed = decoded (Keeper_turn_preview.to_json preview) in
+    Alcotest.(check int) "actual wire generation" generation observed.ktp_text_position.kpp_generation;
+    Alcotest.(check int) "actual redacted stream byte boundary" total
+      (observed.ktp_text_position.kpp_start_byte + String.length observed.ktp_text_tail) in
+  Keeper_turn_preview.note_attempt ~writer ~now:1. ~runtime_id:"first";
+  let first = String.make 300 'a' ^ "\n" in
+  Keeper_turn_preview.note_stream ~writer ~now:2. (text_delta first);
+  check_position 1 (String.length first);
+  Keeper_turn_preview.note_stream ~writer ~now:3. (text_delta "가나다\n");
+  check_position 1 (String.length first + String.length "가나다\n");
+  let held = (current ()).text_position in
+  Keeper_turn_preview.note_tool ~writer ~now:4. "Read";
+  Alcotest.(check bool) "tool cannot advance text position" true ((current ()).text_position=held);
+  Keeper_turn_preview.note_stream ~writer ~now:5.
+    (ContentBlockDelta {index=0; delta=TextSnapshot "replacement"});
+  check_position 2 (String.length "replacement");
+  Keeper_turn_preview.note_stream ~writer ~now:6.
+    (ContentBlockDelta {index=0; delta=TextSnapshot "replacement"});
+  check_position 3 (String.length "replacement");
+  Keeper_turn_preview.note_attempt ~writer ~now:7. ~runtime_id:"second";
+  check_position 4 0;
+  Keeper_turn_preview.note_text ~writer ~now:8. "replacement";
+  check_position 5 (String.length "replacement");
+  with_secret_redaction ~keeper_name:name "exact-secret" (fun redaction ->
+    let writer = Some (Keeper_turn_preview.reset ~keeper_name:name ~now:9. ~redaction) in
+    Keeper_turn_preview.note_stream ~writer ~now:10. (text_delta "before exact-");
+    check_position 0 0;
+    Keeper_turn_preview.note_stream ~writer ~now:11. (text_delta "secret after\n");
+    let expected = Keeper_secret_redaction.redact_text redaction "before exact-secret after\n" in
+    check_position 0 (String.length expected);
+    Alcotest.(check bool) "raw secret bytes never counted as visible text" false
+      (contains (current ()).text_tail "exact-secret"))
+;;
+
 let () =
   Alcotest.run "keeper_turn_preview"
     [ ( "keeper-turn-preview"
-      , [ Alcotest.test_case "late execution preserves successor preview and redactor" `Quick
+      , [ Alcotest.test_case "actual released position through turns decoder" `Quick
+            test_released_source_position_through_turns_decoder
+        ; Alcotest.test_case "late execution preserves successor preview and redactor" `Quick
             test_late_execution_keeps_successor_preview_and_redactor
         ; Alcotest.test_case "overlapping and rejected tools are observations" `Quick
             test_overlapping_and_rejected_tools_remain_observations

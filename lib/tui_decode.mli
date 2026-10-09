@@ -1171,7 +1171,13 @@ type keeper_turn_lane =
   | Turn_lane_chat_operation
   | Turn_lane_maintenance
 
+type keeper_preview_position = {
+  kpp_generation : int;
+  kpp_start_byte : int;
+}
+
 type keeper_turn_preview = {
+  ktp_text_position : keeper_preview_position;
   ktp_status_text : string;
   ktp_updated_at_unix : float;
   ktp_text_tail : string;

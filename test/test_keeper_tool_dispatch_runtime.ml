@@ -9112,10 +9112,21 @@ let test_workspace_memory_read_dispatch () =
         | Error error -> fail (Ledger.apply_error_to_string error) in
       (match Ledger.save ~base_path:config.base_path ledger with
        | Ok () -> () | Error detail -> fail detail);
-      let listed = invoke (`Assoc []) |> check_success_result "list ledger" in
+      let inventory = invoke (`Assoc []) |> check_success_result "inventory" in
+      check int "inventory counts without listing conflicts" 1
+        Yojson.Safe.Util.(member "workspace_memory" inventory |> member "conflict_count" |> to_int);
+      check bool "inventory omits conflict bodies" true
+        Yojson.Safe.Util.(member "workspace_memory" inventory |> member "conflicts" = `Null);
+      let searched = invoke (`Assoc ["query", `String "PDF"])
+        |> check_success_result "search current concern" in
+      check int "query finds the conflict" 1
+        Yojson.Safe.Util.(member "workspace_memory" searched |> member "matches" |> to_list |> List.length);
+      let listed = invoke (`Assoc ["view", `String "index"]) |> check_success_result "list ledger" in
       let actual = Yojson.Safe.Util.(member "workspace_memory" listed |> member "conflicts" |> to_list) in
       check int "conflict summary is available" 1 (List.length actual);
       let id = Yojson.Safe.Util.(List.hd actual |> member "id" |> to_string) in
+      let mixed = invoke (`Assoc ["id", `String id; "query", `String "PDF"]) in
+      check string "selectors are exclusive" "failure" (outcome_label mixed.disposition);
       let fetched = invoke (`Assoc ["id", `String id]) |> check_success_result "read one conflict" in
       let members = Yojson.Safe.Util.(member "workspace_memory" fetched |> member "members" |> to_list) in
       check int "only the selected conflict's two members are returned" 2 (List.length members);

@@ -94,10 +94,25 @@ class MergeBaseReading(unittest.TestCase):
         self.assertIn("no merge_base_commit", str(caught.exception))
 
     def test_bad_sha_is_refused_instead_of_returned(self):
+        import os
+
         raw = compare_document(EVEN).replace(MERGE.encode(), b"not-a-sha")
-        with self.assertRaises(ValueError) as caught:
-            read_merge_base(self.directory, raw)
+        before = set(os.listdir(self.directory))
+        os.environ["GUARD_EVIDENCE_DIR"] = str(self.directory)
+        try:
+            with self.assertRaises(ValueError) as caught:
+                read_merge_base(self.directory, raw)
+        finally:
+            del os.environ["GUARD_EVIDENCE_DIR"]
         self.assertIn("complete merge base", str(caught.exception))
+        self.assertIn("preserved at", str(caught.exception))
+        # The exact response bytes must be preserved for later attribution.
+        new = set(os.listdir(self.directory)) - before
+        self.assertEqual(
+            new,
+            {"gh", "compare.json", "guard-unparsed-compare.json"})
+        self.assertEqual(
+            (self.directory / "guard-unparsed-compare.json").read_bytes(), raw)
 
     def test_gh_failure_names_the_comparison(self):
         with self.assertRaises(ValueError) as caught:

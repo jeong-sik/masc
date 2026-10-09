@@ -13,6 +13,14 @@ bytes. The ``files`` array, including every patch, is never interpreted. The
 same input therefore keeps returning the same merge base whether or not the
 patch region happens to be serialised correctly, and any other corruption is
 refused with the cause instead of inventing a base.
+
+Attribution note: whether the previously observed failure (task-2220,
+PR #41696 report) came from GitHub's serialisation or from an earlier step
+is unknown — the raw response was not preserved at the time and the report
+no longer reproduces. The scanner is kept because a full-response decode is
+fragile against patch bytes by construction; a failed decode now preserves
+the raw bytes for evidence (see ``_preserve_bytes``) so any future failure
+can be attributed instead of guessed.
 """
 
 import json
@@ -21,6 +29,34 @@ import subprocess
 
 _MERGE_BASE_OBJECT = re.compile(rb'"merge_base_commit"\s*:\s*\{')
 _SHA = re.compile(r"^[0-9a-f]{40}$")
+
+
+def _preserve_bytes(raw: bytes, reason: str) -> str:
+    """Best-effort: keep the exact bytes for review.
+
+    ``GUARD_EVIDENCE_DIR`` names the directory when set, else the caller's
+    cwd, else /tmp. Never raises: evidence preservation must not change the
+    refusal cause. Returns the path or a short note when nothing was written.
+    """
+    import os
+    from pathlib import Path
+
+    candidates = []
+    override = os.environ.get("GUARD_EVIDENCE_DIR")
+    if override:
+        candidates.append(Path(override))
+    candidates += [Path.cwd(), Path("/tmp")]
+    for directory in candidates:
+        if not directory.is_dir():
+            continue
+        path = directory / "guard-unparsed-compare.json"
+        try:
+            path.write_bytes(raw)
+        except OSError:
+            continue
+        return str(path)
+    return "could not preserve the raw response"
+
 
 
 def _slice_merge_base_object(raw: bytes) -> bytes:
@@ -87,5 +123,9 @@ def merge_base(gh: str, repo: str, base: str, head: str) -> str:
     )
     sha = commit.get("merge_base_commit", {}).get("sha")
     if not isinstance(sha, str) or _SHA.fullmatch(sha) is None:
-        raise ValueError("GitHub did not return a complete merge base")
+        where = _preserve_bytes(result.stdout, "incomplete merge base")
+        raise ValueError(
+            "GitHub did not return a complete merge base; "
+            f"raw compare response preserved at: {where}"
+        )
     return sha

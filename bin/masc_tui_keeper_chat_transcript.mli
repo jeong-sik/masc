@@ -261,8 +261,9 @@ val make_tool_activity :
 (** Build an activity and derive its [subject] through the shared tool-subject
     authority. History and live projection must not derive it independently. *)
 
-val native_progress_details : tool_activity -> string option
-(** Terminal-safe provider progress and byte metadata for the expanded tool view. *)
+val native_progress_details : ?include_elapsed:bool -> tool_activity -> string option
+(** Terminal-safe provider progress and byte metadata. Results omit elapsed
+    observation time; Full opts in with [include_elapsed=true]. *)
 
 val native_completion_summary : Runtime_native_tools.completion -> string
 (** Provider observation only; never implies a persisted MASC execution receipt. *)

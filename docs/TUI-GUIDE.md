@@ -587,17 +587,16 @@ footer for twelve seconds and stays in the event log.
 Every keeper under `.masc/keepers/`, sorted by name.
 
 ```
- MASC Keepers (10)  10:55:25
-    HEALTH       KEEPER             A P S   TURN LIFECYCLE / RUNTIME             TASK
- >  ● healthy    adm-race-cf-001    A P D  4m12s running anthropic.claude-opus-5 task-471
-    ● idle       analyst            A - M  2h08m paused kimi.kimi-k2.5           task-464
-   OPERATIONS  lifecycle running · turn executing · idle 7m · last done · deepseek-v4 · running_fiber_alive
-  j/k move  p pause  w wake  s shutdown  x delete  g yolo  c chat  right/enter detail
+ MASC Keepers (10)
+    KEEPER             HEALTH       Mode S   TURN LIFECYCLE / RUNTIME             TASK
 ```
 
-`A` is autoboot, `P` is autonomous turns, and `S` is the sandbox profile as a
-letter — `D` docker, `M` microvm, `L` local — because a sandbox is a name, not
-an on/off. `TURN` is the time since the keeper's last turn (the lifetime turn
+`Mode` is how the keeper is started — `M` manual, `D` on demand, `A`
+autonomous — and `S` is the sandbox profile as a letter — `D` docker, `M`
+microvm, `L` local — because a sandbox is a name, not an on/off. `Mode S` and
+`LIFECYCLE / RUNTIME` are shown only when the pane has room for them. A keeper
+whose tool gate is YOLO draws its name in red; the stance has no column of its
+own. `TURN` is the time since the keeper's last turn (the lifetime turn
 count moved to the detail pane; a keeper that never turned shows a dash). The
 metadata list needs no server, so names, last-turn times, and tasks stay
 readable while the runtime is down. `HEALTH`, `LIFECYCLE / RUNTIME`, and lifecycle
@@ -625,12 +624,13 @@ malformed or mismatched identities before applying any directive. Clients may
 omit the precondition entirely; the TUI always sends both components. On 409,
 refresh identity before issuing a new command; retained input stays local.
 
-The fixed `OPERATIONS` line follows the selected Keeper. It comes from
-`GET /api/v1/keepers/composite` and keeps the current lifecycle, turn step,
-idle age, last runtime/model outcome, and producer diagnosis together on the
-surface that owns Keeper operations. A failed refresh preserves the previous
-typed reading and marks it unavailable rather than replacing it with guessed
-zeros.
+Execution facts are not on the list. Open the selected Keeper's detail
+(`right`/`enter`); its Info tab shows `Lifecycle`, `Turn`, `Idle` and
+`Last outcome`, read from
+`GET /api/v1/keepers/composite`. When a refresh fails after an earlier
+reading, Info keeps that reading and puts `stale · refresh failed: <reason>`
+above it; when there was no earlier reading it says `unavailable` with the
+reason instead of guessing zeros.
 
 `g` toggles the selected Keeper's tool gate. The footer names the action that
 will happen next: `g yolo` from the approval policy and `g auto` while YOLO is

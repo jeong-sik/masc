@@ -6351,7 +6351,9 @@ let launch_surface_reads state ~mailbox (surface : surface) =
   match surface with
   | Lanes -> launch_lanes_load state ~mailbox
   | Clients -> launch_clients_load state ~mailbox
-  | Keepers Keeper_list -> launch_keeper_lanes_load state ~mailbox
+  (* The list draws nothing from the Keeper composite; Info and Secrets read
+     it on entry and on their own cadence. *)
+  | Keepers Keeper_list -> ()
   | Approvals ->
       launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox;
       launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox
@@ -25922,8 +25924,7 @@ and is loaded on demand through keeper_skill.
                   Masc_tui_code_requests.launch_entries_load state
                     ~host:server_peer_host
                     ~deliver:(workspace_enqueue state async_messages)
-            | Keepers Keeper_list ->
-                launch_keeper_lanes_load state ~mailbox:async_messages
+            | Keepers Keeper_list -> ()
             | Keepers Keeper_logs ->
                 load_keeper_logs_if_safe state base_path 200
                   (List.nth_opt state.keepers state.keeper_cursor)
@@ -28724,8 +28725,9 @@ and is loaded on demand through keeper_skill.
         (match state.view with
          | Code -> ()
          | Keepers Keeper_runtime_pick -> ()
-         | Keepers Keeper_list ->
-             launch_keeper_lanes_load state ~mailbox:async_messages
+         (* Nothing on the list reads the composite; the detail arm below
+            keeps Info and Secrets current while they are on screen. *)
+         | Keepers Keeper_list -> ()
          | Keepers (Keeper_logs | Keeper_detail) ->
              load_keeper_logs_if_safe state base_path 200
                (List.nth_opt state.keepers state.keeper_cursor);

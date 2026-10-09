@@ -1686,7 +1686,7 @@ type build_link_plan =
   | Link_retarget of string
   | Link_already_correct
   | Link_refused_real_directory
-  | Link_refused_invalid_path of string
+  | Link_refused_invalid_path of { detail : string; state : build_link_state }
 
 (** Deciding is separate from acting so the refusal is testable.
 
@@ -1835,7 +1835,7 @@ let build_link_rows_of_scan rows =
     (fun { checkout; state } ->
       match build_link_target ~playground_relative:checkout with
       | Error detail ->
-        { checkout; target = None; plan = Link_refused_invalid_path detail }
+        { checkout; target = None; plan = Link_refused_invalid_path { detail; state } }
       | Ok target -> { checkout; target = Some target; plan = plan_build_link ~target state })
     rows
 ;;
@@ -1852,6 +1852,24 @@ let build_link_refusal_message ~checkout =
     checkout
     build_output_dir_name
     build_keep_marker
+;;
+
+(** The refusal a caller reports for {!Link_refused_invalid_path}. The path
+    names no build target, so this scan never links the checkout. A real
+    [_build] it holds is still removed by the next boot's helper unless the
+    checkout holds the keep marker, so that removal is reported too. *)
+let build_link_invalid_path_message ~checkout ~detail = function
+  | Build_real_directory ->
+    Printf.sprintf
+      "Build link refused for checkout %S: %s. Its %s is a real directory that \
+       stays on the unified work volume while this guest runs; the next guest \
+       boot removes it unless the checkout holds %s."
+      checkout
+      detail
+      build_output_dir_name
+      build_keep_marker
+  | Build_absent | Build_symlink _ ->
+    Printf.sprintf "Build link refused for checkout %S: %s" checkout detail
 ;;
 
 (** The [(checkout, target)] pairs a plan actually needs a guest command

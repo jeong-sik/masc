@@ -1745,11 +1745,26 @@ let test_invalid_build_link_path_keeps_its_refusal_reason () =
   let checkout = "repos/ambiguous:name" in
   let rows = M.build_link_rows_of_scan [ { M.checkout; state = M.Build_absent } ] in
   (match rows, M.build_link_target ~playground_relative:checkout with
-   | [ { target = None; plan = M.Link_refused_invalid_path detail; _ } ], Error expected ->
+   | [ { target = None; plan = M.Link_refused_invalid_path { detail; state = M.Build_absent }; _ } ],
+     Error expected ->
      Alcotest.(check string) "original path refusal retained" expected detail
    | _ -> Alcotest.fail "invalid path was reported as a real directory or accepted");
   Alcotest.(check bool) "no guest link action" true (M.build_link_actions rows = []);
   Alcotest.(check bool) "no guest target directory" true (M.build_link_targets rows = [])
+;;
+
+(* An invalid path over a real [_build]: the path reason and the scanned
+   state both survive, so the caller can still report the next-boot removal. *)
+let test_invalid_build_link_path_keeps_a_real_directory () =
+  let checkout = "repos/ambiguous:name" in
+  let rows = M.build_link_rows_of_scan [ { M.checkout; state = M.Build_real_directory } ] in
+  (match rows with
+   | [ { target = None; plan = M.Link_refused_invalid_path { state = M.Build_real_directory; _ }; _ } ] -> ()
+   | _ -> Alcotest.fail "the real directory under an invalid path was dropped");
+  Alcotest.(check bool) "no guest link action" true (M.build_link_actions rows = []);
+  let message state = M.build_link_invalid_path_message ~checkout ~detail:"d" state in
+  Alcotest.(check bool) "only the real directory reports its removal" true
+    (message M.Build_real_directory <> message M.Build_absent)
 ;;
 
 let test_build_link_refusal_message_names_the_checkout () =
@@ -3450,6 +3465,8 @@ let () =
             test_build_link_rows_of_scan_decides_purely
         ; Alcotest.test_case "invalid path retains its refusal reason" `Quick
             test_invalid_build_link_path_keeps_its_refusal_reason
+        ; Alcotest.test_case "invalid path keeps a real directory" `Quick
+            test_invalid_build_link_path_keeps_a_real_directory
         ; Alcotest.test_case "build link refusal message names the checkout" `Quick
             test_build_link_refusal_message_names_the_checkout
         ; Alcotest.test_case "boot removal deletes only unkept dune build output" `Quick

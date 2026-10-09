@@ -1833,7 +1833,7 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name ~request_
           | Message_status | Message_local | Message_error ->
               message.me_text
         in
-        ({ style;
+        ({ delivery_state = None; style;
              timestamp =
                Option.fold ~none:message.me_timestamp
                  ~some:keeper_message_clock timeline_at;
@@ -1917,7 +1917,7 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
     (* Pending input has not entered the conversation. It uses the composer's
        local mark, not the arrow that means a submitted conversation row. *)
     let style = Message_layout.Local in
-    ({ style
+    ({ delivery_state = Some label; style
      ; timestamp = keeper_message_clock at
      ; timeline_bucket = Some (keeper_message_timeline_bucket at)
      (* A pending input has no execution yet, so its request is its only
@@ -1961,7 +1961,7 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
   | first :: _ ->
       let style = Message_layout.Status in
       (* The heading is not the input it was copied from. *)
-      { first with style; timestamp = ""; timeline_bucket = None;
+      { first with delivery_state = None; style; timestamp = ""; timeline_bucket = None;
           diagnostics = [];
           speaker = "대기 입력";
           role_label = Message_layout.align_role_label
@@ -2024,7 +2024,7 @@ let polled_turn_output_entries (state : state) ~keeper_name ~role_label_column =
           | None -> "진행 중"
           | Some _ -> "마지막 관측, 갱신 실패"
         in
-        let speech = ({ style
+        let speech = ({ delivery_state = None; style
            ; timestamp = keeper_message_clock preview.ktp_updated_at_unix
            ; timeline_bucket = Some (keeper_message_timeline_bucket preview.ktp_updated_at_unix)
            ; diagnostics = []
@@ -2835,7 +2835,7 @@ let render_keeper_message (state : state) =
                     request @ attempt
                   in
                   Some
-                    { le_at = timeline_at; le_entry = ({ style;
+                    { le_at = timeline_at; le_entry = ({ delivery_state = None; style;
                        timestamp = keeper_message_clock (Option.value timeline_at ~default:started_at);
                        timeline_bucket;
                        diagnostics;
@@ -3006,7 +3006,7 @@ let render_keeper_message (state : state) =
                 entries @
                 (* The status row is not the entry it was copied from, so it
                    names none of that entry's request or attempt. *)
-                [{ last with le_entry = { last.le_entry with style; speaker = "STATUS";
+                [{ last with le_entry = { last.le_entry with delivery_state = None; style; speaker = "STATUS";
                    diagnostics = [];
                    role_label = Message_layout.align_role_label
                      ~column:role_label_column ~style "STATUS";

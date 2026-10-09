@@ -18,7 +18,7 @@ open Alcotest
 module Layout = Masc_tui_message_layout
 
 let entry style body : Layout.entry =
-  { style
+  { delivery_state = None; style
   ; timestamp = "01:41:00"
   ; timeline_bucket = None
   ; diagnostics = []

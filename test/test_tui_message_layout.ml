@@ -7,7 +7,7 @@ module Markdown_cache = Masc_tui_markdown_render_cache
 let entry ?(timestamp = "12:34:56") ?timeline_bucket ?speaker
     ?(markdown_source = Layout.Markdown_streaming) style role request_label body :
     Layout.entry =
-  { style
+  { delivery_state = None; style
   ; timestamp
   ; timeline_bucket
   ; diagnostics = []
@@ -89,7 +89,7 @@ let test_word_delete_removes_blanks_then_word () =
 
 let transcript count =
   List.init count (fun index ->
-      { Layout.style = Layout.Keeper;
+      { Layout.delivery_state = None; Layout.style = Layout.Keeper;
         timestamp = Printf.sprintf "12:%02d:00" (index mod 60);
         timeline_bucket = None;
         diagnostics = [];

@@ -179,6 +179,11 @@ type entry = {
       (** The label {!role_label} was aligned from, whole. The gutter cuts a
           long name to its column; the origin heading under {!Origin_row}
           has the pane's width and draws this instead. *)
+  delivery_state : string option;
+      (** [Some state] only on an operator input that is still pending
+          delivery (전송 대기, 전송 중, 처리 대기, 전송 확인 중). The bare
+          gutter, which otherwise draws only a mark, keeps this state beside
+          the input so several pending inputs can be told apart. *)
   role_label : string;
   role_label_mark_cells : int;
       (** Cells the speaker mark occupies at the head of {!role_label}, from

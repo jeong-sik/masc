@@ -41,8 +41,13 @@ type records =
 type receivers =
   { keeper_name : string; receivers : entry list
   ; cleanup_failures : string list; health : health }
+type hint_storage = Unchecked of cursor | Hint_failed of error_code
+type hint_entry = { receiver : receiver; hint : hint_storage }
+type hints =
+  { keeper_name : string; hints : hint_entry list
+  ; cleanup_failures : string list; health : health }
 type failure = { error : error_code; health : health option }
-type response = Records of records | Receivers of receivers | Failure of failure
+type response = Records of records | Receivers of receivers | Hints of hints | Failure of failure
 
 let error_code_of_journal = function
   | Journal.Missing_store -> Store_missing
@@ -102,6 +107,15 @@ let receivers_of_journal ~keeper_name ~entries ~cleanup_failures ~health =
           after_sequence=validation.through_sequence})}) entries;
     cleanup_failures=cleanup_of_journal cleanup_failures;health}
 
+let hints_of_journal ~keeper_name ~entries ~cleanup_failures ~health =
+  Hints {keeper_name; hints=List.map (fun (entry:Journal.hint_entry) ->
+    {receiver=receiver_of_journal entry.receiver;
+     hint=(match entry.state with
+       | Error error -> Hint_failed (error_code_of_journal error)
+       | Ok hint -> Unchecked {store_id=hint.store_id;
+           after_sequence=hint.through_sequence})}) entries;
+    cleanup_failures=cleanup_of_journal cleanup_failures;health}
+
 let unknown_fields =
   ["provider_completeness",`String "unknown";
    "historical_persistence_failures",`String "unknown"]
@@ -152,6 +166,21 @@ let to_json = function
                  "store_id",`String cursor.store_id;"through_sequence",`Int cursor.after_sequence] in
            `Assoc (receiver_fields entry.receiver @ ["storage",storage])) page.receivers)] @
         unknown_fields @ ["cleanup_failures",cleanup_json page.cleanup_failures]))
+
+  | Hints page -> `Assoc
+      (["schema",`String "masc.native_tasks.hints.v1";
+        "keeper_name",`String page.keeper_name;
+        "historical_integrity",`String "unchecked";
+        "observed_persistence_health",health_json page.health;
+        "cleanup_failures",cleanup_json page.cleanup_failures;
+        "hints",`List (List.map (fun (entry:hint_entry) ->
+          let hint = match entry.hint with
+            | Hint_failed error -> error_json error
+            | Unchecked cursor -> `Assoc ["status",`String "unchecked";
+                "store_id",`String cursor.store_id;
+                "through_sequence",`Int cursor.after_sequence] in
+          `Assoc (receiver_fields entry.receiver @ ["hint",hint])) page.hints)]
+        @ unknown_fields)
 
 let shape detail = Error (Invalid_shape detail)
 let object_fields required optional = function
@@ -307,12 +336,45 @@ let decode_receivers json =
   let* cleanup_failures=decode_cleanup (field fields "cleanup_failures") in
   let* health=decode_health (field fields "observed_persistence_health") in
   Ok (Receivers {keeper_name;receivers;cleanup_failures;health})
+let decode_hints json =
+  let* fields=object_fields ["schema";"keeper_name";"hints";"historical_integrity";
+    "provider_completeness";"historical_persistence_failures";"cleanup_failures";
+    "observed_persistence_health"] [] json in
+  let* ()=fixed "masc.native_tasks.hints.v1" (field fields "schema") in
+  let* ()=fixed "unchecked" (field fields "historical_integrity") in
+  let* ()=unknown fields in
+  let* keeper_name=nonempty (field fields "keeper_name") in
+  let* hints=list (fun json ->
+    let* fields=object_fields ["receiver_generation";"session_id";"hint"] [] json in
+    let* receiver=decode_receiver_fields fields in
+    let json=field fields "hint" in
+    let* hint=match json with
+      | `Assoc fields when List.mem_assoc "status" fields ->
+          let* fields=object_fields ["status";"store_id";"through_sequence"] [] json in
+          let* ()=fixed "unchecked" (field fields "status") in
+          let* store_id=store_id (field fields "store_id") in
+          let* after_sequence=nonnegative (field fields "through_sequence") in
+          Ok (Unchecked {store_id;after_sequence})
+      | _ -> decode_error_code json |> Result.map (fun error -> Hint_failed error) in
+    Ok {receiver;hint}) (field fields "hints") in
+  let seen=Hashtbl.create 16 in
+  let rec unique = function
+    | [] -> Ok ()
+    | (entry:hint_entry)::rest ->
+        if Hashtbl.mem seen entry.receiver then Error Duplicate_receiver
+        else (Hashtbl.add seen entry.receiver ();unique rest) in
+  let* ()=unique hints in
+  let* cleanup_failures=decode_cleanup (field fields "cleanup_failures") in
+  let* health=decode_health (field fields "observed_persistence_health") in
+  Ok (Hints {keeper_name;hints;cleanup_failures;health})
+
 let of_json json =
   let* fields=object_fields ["schema"] ["error";"keeper_name";"receiver_generation";"session_id";
     "records";"validation";"next_cursor";"provider_completeness";"historical_persistence_failures";
-    "terminal_without_observation";"cleanup_failures";"observed_persistence_health";"receivers"] json in
+    "terminal_without_observation";"cleanup_failures";"observed_persistence_health";"receivers";"hints";"historical_integrity"] json in
   let* schema=string (field fields "schema") in
   match schema with
+  | "masc.native_tasks.hints.v1" -> decode_hints json
   | "masc.native_tasks.records.v1" -> decode_records json
   | "masc.native_tasks.receivers.v1" -> decode_receivers json
   | "masc.native_tasks.error.v1" ->
@@ -328,7 +390,7 @@ let of_json json =
 
 type records_request = { scope : scope; after : cursor option }
 let records_of_response ~request = function
-  | Receivers _ | Failure _ -> Error Unexpected_response
+  | Receivers _ | Hints _ | Failure _ -> Error Unexpected_response
   | Records page ->
       let* ()=if page.scope=request.scope then Ok () else Error Scope_mismatch in
       let* boundary=match request.after with
@@ -345,5 +407,9 @@ let records_of_response ~request = function
         | (first:record)::_ -> if first.seq=boundary+1 then Ok () else Error Sequence_mismatch in
       Ok page
 let receivers_of_response ~keeper_name = function
-  | Records _ | Failure _ -> Error Unexpected_response
+  | Records _ | Hints _ | Failure _ -> Error Unexpected_response
   | Receivers page -> if page.keeper_name=keeper_name then Ok page else Error Scope_mismatch
+
+let hints_of_response ~keeper_name = function
+  | Hints page -> if page.keeper_name=keeper_name then Ok page else Error Scope_mismatch
+  | Records _ | Receivers _ | Failure _ -> Error Unexpected_response

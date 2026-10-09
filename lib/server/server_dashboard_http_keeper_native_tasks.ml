@@ -1,7 +1,7 @@
 module Journal = Keeper_native_task_journal
 module Read = Keeper_native_task_read
 
-type route = Receivers of string | Records of string
+type route = Receivers of string | Records of string | Hints of string
 let permission = Masc_domain.CanAdmin
 
 let route path =
@@ -10,6 +10,8 @@ let route path =
       Some (Receivers (Uri.pct_decode name))
   | [""; "api"; "v1"; "keepers"; name; "native-tasks"; "records"] ->
       Some (Records (Uri.pct_decode name))
+  | [""; "api"; "v1"; "keepers"; name; "native-tasks"; "hints"] ->
+      Some (Hints (Uri.pct_decode name))
   | _ -> None
 
 (* Build the read result first, then attach the actual process-health snapshot
@@ -81,15 +83,26 @@ let receivers_response ~base_path ~keeper_name request =
           `OK, (fun health -> Read.receivers_of_journal ~keeper_name ~entries
             ~cleanup_failures:result.cleanup_failure ~health)
 
+let hints_response ~base_path ~keeper_name request =
+  match strict_query request [] with
+  | Error () -> error `Bad_request Read.Invalid_query
+  | Ok _ ->
+      let result=Journal.discover_hints ~base_path ~keeper_name in
+      match result.result with
+      | Error e -> store_error e
+      | Ok entries -> `OK, (fun health -> Read.hints_of_journal ~keeper_name ~entries
+          ~cleanup_failures:result.cleanup_failure ~health)
+
 let response state request route =
-  let keeper_name = match route with Receivers name | Records name -> name in
+  let keeper_name = match route with Receivers name | Records name | Hints name -> name in
   if not (Keeper_config.validate_name keeper_name) then
     `Bad_request, Read.to_json (Read.failure Read.Invalid_keeper)
   else
     let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
     let status, build = match route with
       | Receivers _ -> receivers_response ~base_path ~keeper_name request
-      | Records _ -> records_response ~base_path ~keeper_name request in
+      | Records _ -> records_response ~base_path ~keeper_name request
+      | Hints _ -> hints_response ~base_path ~keeper_name request in
     let health = Read.health_of_journal (Journal.issue_snapshot ~base_path ~keeper_name) in
     status, Read.to_json (build health)
 

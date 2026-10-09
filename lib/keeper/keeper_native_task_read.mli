@@ -42,10 +42,16 @@ type records = private
 type receivers = private
   { keeper_name : string; receivers : entry list
   ; cleanup_failures : string list; health : health }
+type hint_storage = Unchecked of cursor | Hint_failed of error_code
+type hint_entry = private { receiver : receiver; hint : hint_storage }
+type hints = private
+  { keeper_name : string; hints : hint_entry list
+  ; cleanup_failures : string list; health : health }
+(** Metadata change hints never certify historical payload integrity. *)
 type failure = private { error : error_code; health : health option }
 (** Absent health is allowed only for the existing early invalid-Keeper response;
     nested storage/issue errors never carry health. *)
-type response = Records of records | Receivers of receivers | Failure of failure
+type response = Records of records | Receivers of receivers | Hints of hints | Failure of failure
 
 val error_code_of_journal : Keeper_native_task_journal.error -> error_code
 val failure : ?health:health -> error_code -> response
@@ -79,3 +85,10 @@ val records_of_response : request:records_request -> response ->
     Workspace authority stays with the authenticated connection/cache key. *)
 val receivers_of_response : keeper_name:string -> response ->
   (receivers, decode_error) result
+
+val hints_of_journal : keeper_name:string ->
+  entries:Keeper_native_task_journal.hint_entry list ->
+  cleanup_failures:Keeper_native_task_journal.cleanup_failure list -> health:health -> response
+val hints_of_response : keeper_name:string -> response -> (hints, decode_error) result
+(** Exact Keeper matching; unchecked hints cannot be accepted as audited receivers
+    or records. Historical integrity is established only by a subsequent full read. *)

@@ -226,5 +226,40 @@ let test_authenticated_routes () = with_fixture (fun ~base_path ~state:_ ~admin 
          | _ -> fail "duplicate receiver was accepted")
     | _ -> fail "discovery was not an object") protocols)
 
+let test_unchecked_hint_codec () =
+  let health = `Assoc ["coverage",`String "issues_observed_in_this_process_only";
+    "process_epoch",`String "process";"historical_failure_coverage",`String "unknown";
+    "issues",`List []] in
+  let entry = `Assoc ["receiver_generation",`String "generation";"session_id",`String "session";
+    "hint",`Assoc ["status",`String "unchecked";"store_id",`String "store";
+      "through_sequence",`Int 3]] in
+  let body = `Assoc ["schema",`String "masc.native_tasks.hints.v1";
+    "keeper_name",`String "alpha";"hints",`List [entry];
+    "historical_integrity",`String "unchecked";
+    "provider_completeness",`String "unknown";"historical_persistence_failures",`String "unknown";
+    "cleanup_failures",`List [];"observed_persistence_health",health] in
+  let decoded=require_ok Read.decode_error_to_string (Read.of_json body) in
+  let hints=require_ok Read.decode_error_to_string
+    (Read.hints_of_response ~keeper_name:"alpha" decoded) in
+  check int "hint preserved" 1 (List.length hints.hints);
+  check bool "no audited discovery capability" true
+    (Read.receivers_of_response ~keeper_name:"alpha" decoded=Error Read.Unexpected_response);
+  check bool "no cross Keeper acceptance" true
+    (Read.hints_of_response ~keeper_name:"other" decoded=Error Read.Scope_mismatch);
+  check bool "round trip retains unchecked meaning" true (Read.of_json (Read.to_json decoded)=Ok decoded);
+  let replace name value = match body with
+    | `Assoc fields -> `Assoc ((name,value)::List.remove_assoc name fields)
+    | _ -> fail "object expected" in
+  let reject body = match Read.of_json body with Error _ -> () | Ok _ -> fail "unsafe hint accepted" in
+  reject (replace "historical_integrity" (`String "audited"));
+  reject (replace "hints" (`List [entry;entry]));
+  reject (replace "hints" (`List [match entry with
+    | `Assoc fields -> `Assoc (("hint",`Assoc ["status",`String "audited";
+        "store_id",`String "store";"through_sequence",`Int 3])::List.remove_assoc "hint" fields)
+    | _ -> fail "object expected"]));
+  check bool "route parses exact hints endpoint" true
+    (Api.route "/api/v1/keepers/alpha/native-tasks/hints"=Some (Api.Hints "alpha"))
+
 let () = run "native task authenticated read" ["registered routes",[
-  test_case "H1/H2 auth, strict scope and failed storage" `Quick test_authenticated_routes]]
+  test_case "H1/H2 auth, strict scope and failed storage" `Quick test_authenticated_routes;
+  test_case "unchecked hints cannot become audited reads" `Quick test_unchecked_hint_codec]]

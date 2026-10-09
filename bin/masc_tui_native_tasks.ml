@@ -130,10 +130,10 @@ let decode ~fetch path =
     let* response=parsed in
     match response with
     | Read.Failure _ -> Error (Invalid_response Read.Unexpected_response)
-    | Read.Records _ | Read.Receivers _ -> Ok response
+    | Read.Records _ | Read.Receivers _ | Read.Hints _ -> Ok response
   else match parsed with
     | Ok (Read.Failure failure) -> Error (Service failure)
-    | Ok (Read.Records _ | Read.Receivers _) | Error _ -> Error (Http_refused status)
+    | Ok (Read.Records _ | Read.Receivers _ | Read.Hints _) | Error _ -> Error (Http_refused status)
 
 let prefix keeper_name = "/api/v1/keepers/"
   ^ Uri.pct_encode ~component:(`Custom (`Path,"","/")) keeper_name ^ "/native-tasks/"

@@ -8,7 +8,7 @@ character the US layout has no key for is refused before anything is typed. \
 By default each character runs to an empty-poll/unchanged-screen observation, \
 which does not prove a final prompt. until_ready=false injects only the first \
 character and runs the requested steps unless the program exits. The call \
-stops at 4000000 instructions in total; keys_pressed says how many entered \
+stops at 4000000 machine steps in total; keys_pressed says how many entered \
 the BIOS ring, and the remaining suffix is unsent."""
 additional_properties = false
 
@@ -24,7 +24,7 @@ max_length = 256
 [[params]]
 name = "steps"
 type = "integer"
-description = "Instruction budget per character. Default 4000000."
+description = "Machine-step budget per character. Default 4000000."
 minimum = 1
 maximum = 4000000
 default = 4000000

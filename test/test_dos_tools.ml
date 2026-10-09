@@ -1451,7 +1451,7 @@ let test_attached_input_can_run_past_a_settling_observation () =
         let before = load () in
         let result = call name (("until_ready", `Bool false) :: ("steps", `Int steps) :: arguments) in
         check int "full allowance actually executes" steps (number "steps_run" result);
-        check int "absolute instruction count matches the receipt" steps
+        check int "absolute execution clock matches the receipt" steps
           (number "steps" result - number "steps" before);
         check bool "full allowance does not report readiness" true
           (member "settled" result = Some (`Bool false));
@@ -1473,6 +1473,65 @@ let test_attached_input_can_run_past_a_settling_observation () =
         ; "masc_dos_press", ["keys", `List [`String "a"; `String "b"];
             "expected_program", `String "delayed.com"], "press a"
         ; "masc_dos_type", ["text", `String "ab"], "type 1 chars" ]))
+;;
+
+(* A blocking BIOS read must retain its guest continuation. IRQ0 is masked
+   here so an idle interval has no guest interrupt instructions to count. *)
+let blocking_read_com =
+  "\xfa\xb0\x01\xe6\x21\xb4\x00\xcd\x16\xb2\x58\xb4\x02\xcd\x21\xb8\x00\x4c\xcd\x21"
+
+let test_attached_blocking_read_and_execution_clock () =
+  with_attached_workspace (fun base_path ->
+    let who = "blocking-reader" in
+    with_holder ~base_path Running who (fun () ->
+      install_program ~base_path "blocking.com" blocking_read_com;
+      let call name fields =
+        let execution = keeper_call ~base_path who name (`Assoc fields) in
+        match execution.disposition, execution.data with
+        | Tool_result.Completed (), Some wire ->
+            (match member "structuredContent" wire with
+             | Some data -> data
+             | None -> fail "attached worker omitted structured observation")
+        | _ -> fail execution.raw_output
+      in
+      let number key data = Yojson.Safe.Util.(data |> member key |> to_int) in
+      let screen data = Yojson.Safe.Util.(data |> member "screen_text" |> to_string) in
+      let loaded = call "masc_dos_load" ["program", `String "blocking.com"] in
+      check bool "empty BIOS read cannot reach exit" true
+        (member "exited" loaded = Some (`Bool false));
+      check bool "empty BIOS read cannot print its following marker" false
+        (contains "X" (screen loaded));
+      let budget = 1_000 in
+      let waited = call "masc_dos_step"
+        ["steps", `Int budget; "until_ready", `Bool false] in
+      check int "idle time consumes the bounded execution budget" budget
+        (number "steps_run" waited);
+      check int "idle time preserves the input ledger clock" budget
+        (number "steps" waited - number "steps" loaded);
+      check int "idle time is not guest instructions" 0
+        (number "instructions_run" waited);
+      check bool "idle clocks advance" true (number "elapsed_cycles" waited > 0);
+      check bool "no-key execution still cannot print the marker" false
+        (contains "X" (screen waited));
+      ignore (call "masc_dos_save" ["slot", `String "blocking-input"]);
+      let complete () =
+        let result = call "masc_dos_press"
+          ["keys", `List [`String "a"; `String "b"];
+           "steps", `Int budget; "until_ready", `Bool false] in
+        check int "one supplied key completes the blocking read" 1
+          (number "keys_pressed" result);
+        check bool "guest instructions resume" true
+          (number "instructions_run" result > 0);
+        check bool "the marker is reached after input" true
+          (contains "X" (screen result));
+        check bool "the guest exits after the completed read" true
+          (member "exited" result = Some (`Bool true));
+        check (list string) "the unused suffix never enters the ledger" ["a"]
+          (List.map (fun (entry : Dos_lane.entry) -> entry.key_name) (Dos_lane.ledger ()))
+      in
+      complete ();
+      ignore (call "masc_dos_restore" ["slot", `String "blocking-input"]);
+      complete ()))
 ;;
 
 let save_as ?(agent = "dos-test") ~base_path slot =
@@ -1962,6 +2021,8 @@ let () =
         ; test_case "one ceiling" `Quick test_a_sequence_spends_one_ceiling_not_one_per_key
         ; test_case "attached input runs past a settling observation" `Quick
             test_attached_input_can_run_past_a_settling_observation
+        ; test_case "attached blocking read and execution clock" `Quick
+            test_attached_blocking_read_and_execution_clock
         ; test_case "sequence length" `Quick test_a_sequence_has_a_length
         ; test_case "case collision" `Quick test_two_names_that_differ_only_in_case_are_refused
         ; test_case "save outlives machine" `Quick test_a_save_outlives_its_machine

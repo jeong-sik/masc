@@ -11,29 +11,24 @@ Info owns their entry/manual/periodic refresh; a failed refresh labels retained
 values stale. Labels are muted and narrower, and an overlong label gets its own
 row rather than being elided.
 
-## Source projection
-
-`python3 docs/evidence/tui-keepers-reading-20261007/project-fields.py` passed.
-It extracts the actual header, column allocator, field renderer and SGR-strip
-functions and interprets them with the actual message-layout module. The
-isolated `Ansi` module supplies only the reset sequence used by the local field
-helper. `fields.json` records 24 field projections at 40, 76 and 116 content
-cells, with intact labels/values (including Korean and long runtime identities)
-and no row overflow. This is not a compiled application or terminal capture.
-
 ## Direct consumers and remaining execution
 
 | Changed interface | Consumer | Verification |
 | --- | --- | --- |
-| Keeper list order and chrome | selection bands, pointer rows, viewport window | Updated primary-list/region/open-turn/roster-window scenarios; PTY run pending |
-| Wrapped Info labels and execution fields | counted detail rows, scroll, metadata tails | Source projection passed; metadata-wrap and composite navigation PTY pending |
-| Info lane read ownership | entry, manual refresh, periodic updates, stale recovery | Info refresh scenario pending |
+| Keeper list order and chrome | selection bands, pointer rows, viewport window | Manual check in a rebuilt TUI pending |
+| Wrapped Info labels and execution fields | counted detail rows, scroll, metadata tails | Manual check in a rebuilt TUI pending |
+| Info lane read ownership | entry, manual refresh, periodic updates, stale recovery | `test_tui_server_identity_refresh` covers the queued reread folding into resume; live refresh check pending |
+
+Tests do not pin screen wording, widths or row order (`docs/constitution.xml`
+execution protocol), so layout is checked by hand.
 
 Independent source review found two P2 issues: the relocated fields needed
 Info-owned refresh, and the expanded overflow fixture initially waited for an
 offscreen row. Review-response changes address both; final rereview status is
-recorded in the PR. No local Dune build, CI dispatch or installed binary change
-was performed for this slice.
+recorded in the PR. The stack is type-checked with `dune build --root . @check`;
+the PR comments name the run and the head it covered. `source-checks.json`
+records the parser check and SHA-256 of `bin/masc_tui.ml` and
+`bin/masc_tui_render.ml` in this layer's tree.
 
 The [consistency ledger](../../design/tui/CONSISTENCY-PROGRESS.md) keeps broader
 surface work and actual executable validation open.

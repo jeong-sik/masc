@@ -326,7 +326,7 @@ def superseded_scoped_match_journey(executable):
             return [line for line in runtime_log.read_text(encoding="utf-8").split("\n")[:-1]
                     if "Gate snapshot request=" in line]
 
-        def gate_refresh_tickets():
+        def gate_refresh_tickets(*, refresh_only=True):
             # Read the explicit diagnostic fields. Startup Poll tickets must
             # never acknowledge the held explicit Refresh below.
             prefix = "started Gate snapshot request="
@@ -334,7 +334,7 @@ def superseded_scoped_match_journey(executable):
             for line in gate_log_lines():
                 if prefix in line:
                     ticket, intent = line.split(prefix, 1)[1].split(" intent=")
-                    if intent == "refresh":
+                    if not refresh_only or intent == "refresh":
                         tickets.append(int(ticket))
             return tickets
 
@@ -424,6 +424,12 @@ def superseded_scoped_match_journey(executable):
                     ("/health", "new-full")
                 ) < calls.index((h.KEEPER_ASKS_PATH, "new-full")), calls
                 state["phase"] = "released"
+            # The explicit full-B r key also dispatches a Gate Refresh before
+            # its identity probe. Its ticket belongs to the setup, even when
+            # the foreign probe prevents the decision GET. Freeze every issued
+            # ticket only after full B has published and before either release.
+            pre_release_gate_tickets = gate_refresh_tickets(refresh_only=False)
+            assert held_gate_ticket in pre_release_gate_tickets
             log_start = runtime_log.stat().st_size
 
             def discarded(message):
@@ -482,8 +488,8 @@ def superseded_scoped_match_journey(executable):
                     for path, phase in calls
                 ), ("replacement decision read masked a late response", calls)
                 assert held_gate.calls == 1, "more than one independent Gate GET was gated"
-            assert gate_refresh_tickets() == prior_gate_tickets + [held_gate_ticket], (
-                "another Gate refresh obscured the held ticket", gate_log_lines())
+            assert gate_refresh_tickets(refresh_only=False) == pre_release_gate_tickets, (
+                "another Gate request after release obscured the held ticket", gate_log_lines())
             home.assert_no_decision_posts(requests)
             os.write(fd, b"q")
         finally:

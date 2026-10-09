@@ -2047,9 +2047,12 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
           Ok ()
       | Keeper_hooks_agent_core.Native_task_observed {attempt; bound} ->
           (* Independent receiver journal, including after root stream closure.
-             Persistence failure is not a tool occurrence mapping failure. *)
-          Keeper_native_task_journal.observe task_journal ~attempt bound
-          |> Keeper_native_task_journal.report ~keeper_name:payload.name;
+             Persistence failure is not a tool occurrence mapping failure.
+             The provider-emitted task event must reach the journal and the
+             health report even when an operator cancellation lands mid-append. *)
+          Eio.Cancel.protect (fun () ->
+            Keeper_native_task_journal.observe task_journal ~attempt bound
+            |> Keeper_native_task_journal.report ~keeper_name:payload.name);
           Ok ()
       | Keeper_hooks_agent_core.Native_tool_progress {block_index; tool_call_id; progress} ->
         push_worker_event (Stream_native_tool_progress

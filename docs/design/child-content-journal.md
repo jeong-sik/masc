@@ -83,3 +83,45 @@ A future authenticated receiver/read transport and TUI consumer need a distinct
 unchecked change-hint path and explicit audited refresh, preserving the
 corruption contract without repeatedly scanning unchanged history. This unit
 adds neither endpoint nor TUI row integration nor cross-root/Child ordering.
+
+## Scoped read contract and unchecked discovery hints
+
+The journal exposes descriptor-owned discovery of actual Keeper/generation/
+session/client-UUID directories. The same canonical path derivation serves
+writers and discovery. The existing filesystem primitive checks bound root,
+ancestor and final directory UID/permissions/identity, including empty paths.
+Only validated initial descendant absence is a cold empty inventory; an
+already enumerated generation/session disappearing is failure. A captured leaf
+that subsequently disappears retains its receiver identity with `Missing_store`.
+Unknown names follow the existing managed-directory skip policy. Enumeration
+and subsequent SQLite pathname opening remain separate observations, not a leaf
+TOCTOU security proof or atomic inventory.
+
+`read_hint`/`discover_hints` return a private `change_hint`, never `validation`.
+They read immutable schema/full-ticket metadata and tail agreement in a READONLY
+snapshot, without quick-check or historical payload/sequence audit. A tampered
+prefix with the same tail can leave a hint unchanged while full `read` or audited
+`discover` refuses it. Hints cannot clear an audited failure or certify silence,
+liveness or completeness. No stat trust cache, automatic retry or extra receiver
+registry is added.
+
+`Keeper_child_content_read` is a closed public codec for records, audited receiver
+inventories, unchecked hints and typed failures. It reuses the Child observation
+codec and re-redacts only human body/model leaves during authoritative read
+projection. Scope retains Keeper plus all three invocation fields. Records have
+unique `(observation_id, ordinal, channel)` keys and contiguous positive sequences;
+provider envelope UUID alone is deliberately not unique across received snapshots.
+The mandatory request matcher rechecks projected or decoded rows against actual
+scope, cursor and complete requested suffix, including an empty caught-up page.
+Unknown/duplicate/null/schema/unsafe numeric/scope/cursor/gap mismatches refuse.
+Public decoded views cannot mint runtime, binding or journal publication authority.
+
+Every read response explicitly reports persistence-failure history `unavailable`,
+provider completeness `unknown` and liveness `unknown`. Collector-local health is
+not represented as an empty surviving process history. Cleanup operations and
+closed failure codes expose no raw filesystem paths or exception details.
+These codecs/discovery primitives are not yet an authenticated HTTP endpoint or
+TUI consumer. The subsequent transport must use captured authenticated workspace
+scope, strict URI queries and both H1/H2 auth gates; the UI must poll unchecked
+hints and fully read changed stores or an explicit audit rather than repeatedly
+auditing unchanged full history.

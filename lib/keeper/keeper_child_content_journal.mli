@@ -58,7 +58,31 @@ val read : ?after:cursor -> reader -> snapshot outcome
     Canonical directory preparation is reused; SQLite pathname open is separate
     from leaf checks and does not establish complete owned leaf-open continuity. *)
 val error_to_string : error -> string
+
+type receiver = { receiver_generation : string; session_id : string; client_uuid : string }
+type change_hint = private { store_id : string; through_sequence : int }
+(** Unchecked schema/full-ticket metadata/tail observation only, not a history
+    payload/sequence audit, quick_check, validation or liveness/completeness proof.
+    Same hint can conceal semantic tampering; never clears a prior audit failure. *)
+val read_hint : reader -> change_hint outcome
+(** READONLY/no creation, existing typed failure and separate cleanup contract. *)
+type discovery_entry = { receiver : receiver; state : (validation,error) result }
+type hint_entry = { receiver : receiver; state : (change_hint,error) result }
+val discover : base_path:string -> keeper_name:string -> discovery_entry list outcome
+val discover_hints : base_path:string -> keeper_name:string -> hint_entry list outcome
+(** Captured canonical workspace/Keeper and actual ticket3 directory components.
+    Descriptor-owned reads check UID/permissions/identity of root/ancestors/final
+    directories, including empty directories. Only initial validated descendant
+    absence is cold empty. Enumerated generation/session disappearance is failure.
+    Unknown names follow existing skip policy; no live roster or new inventory.
+    Outer enumeration errors differ from per-store missing/corrupt/I/O failures.
+    No process failure history is available from lost collectors; coverage unknown.
+    Directory enumeration does not certify subsequent SQLite pathname leaf opens. *)
 module For_testing : sig
   val append_with_io : commit:(Sqlite3.db -> Sqlite3.Rc.t) ->
     close:(Sqlite3.db -> bool) -> publication -> commit outcome
+  val discover : before_read:(string -> unit) -> after_read:(string -> unit) ->
+    base_path:string -> keeper_name:string -> discovery_entry list outcome
+  val discover_hints : before_read:(string -> unit) -> after_read:(string -> unit) ->
+    base_path:string -> keeper_name:string -> hint_entry list outcome
 end

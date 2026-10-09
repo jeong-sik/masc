@@ -368,6 +368,100 @@ let report ~keeper_name outcome =
   List.iter (fun failure -> Log.Keeper.warn ~keeper_name
     "child content cleanup failed (primary outcome retained): %s"
     (cleanup_failure_to_string failure)) outcome.cleanup_failure
+type receiver = { receiver_generation : string; session_id : string; client_uuid : string }
+type change_hint = { store_id : string; through_sequence : int }
+let read_hint reader = with_database ~create:false reader (fun db cleanup ->
+  let* () = exec db "begin hint snapshot" "BEGIN" in
+  let body () =
+    let* () = validate_schema db cleanup in
+    let* store_id,next = metadata db cleanup reader.scope in
+    let* () = tail_boundary db cleanup next in
+    let* () = exec db "end hint snapshot" "COMMIT" in
+    Ok ({store_id;through_sequence=Int64.to_int (Int64.pred next)} : change_hint) in
+  match body () with
+  | Ok _ as result -> result
+  | Error _ as result -> rollback db cleanup; result
+  | exception exn -> rollback db cleanup; raise exn)
+
+let decode_component encoded =
+  let nibble = function
+    | '0'..'9' as c -> Some (Char.code c - Char.code '0')
+    | 'a'..'f' as c -> Some (Char.code c - Char.code 'a' + 10)
+    | _ -> None in
+  if encoded="" || String.length encoded mod 2<>0 then None else
+  let bytes = Bytes.create (String.length encoded / 2) in
+  let rec loop i =
+    if i=Bytes.length bytes then Some (Bytes.to_string bytes) else
+    match nibble encoded.[2*i],nibble encoded.[2*i+1] with
+    | Some a,Some b -> Bytes.set bytes i (Char.chr (16*a+b)); loop (i+1)
+    | _ -> None in loop 0
+
+let discover_states_with ~observe ~before_read ~after_read ~base_path ~keeper_name =
+  protect_io (fun () ->
+    let result =
+      let* base_path,keeper_name = context ~base_path ~keeper_name in
+      let root = keeper_directory ~base_path ~keeper_name in
+      Eio_guard.run_in_systhread ~label:"child-content-discovery" (fun () ->
+        let directories ~missing_allowed path =
+          match Fs_compat.read_owned_directory_if_present ~owner_uid:(Unix.geteuid ())
+              ~before_read ~after_read ~ownership_root:base_path path with
+          | Ok (Some names) -> Ok names
+          | Ok None when missing_allowed -> Ok []
+          | Ok None -> Error (Store_unavailable {operation="discover directory";
+              detail="previously enumerated invocation directory is missing"})
+          | Error error -> Error (Store_unavailable {operation="discover directory";
+              detail=Fs_compat.owned_regular_file_read_error_to_string error}) in
+        let* generations = directories ~missing_allowed:true root in
+        List.fold_left (fun result generation_name ->
+          let* acc = result in
+          match decode_component generation_name with
+          | None -> Ok acc
+          | Some receiver_generation ->
+              let generation_path = Filename.concat root generation_name in
+              let* sessions = directories ~missing_allowed:false generation_path in
+              List.fold_left (fun result session_name ->
+                let* acc = result in
+                match decode_component session_name with
+                | None -> Ok acc
+                | Some session_id ->
+                    let session_path = Filename.concat generation_path session_name in
+                    let* clients = directories ~missing_allowed:false session_path in
+                    List.fold_left (fun result file ->
+                      let* acc = result in
+                      if not (Filename.check_suffix file ".sqlite3") then Ok acc else
+                      match decode_component (Filename.chop_suffix file ".sqlite3") with
+                      | None -> Ok acc
+                      | Some client_uuid ->
+                          let receiver = {receiver_generation;session_id;client_uuid} in
+                          let reader = reader_for {base_path;keeper_name;
+                            receiver_generation;session_id;client_uuid} in
+                          Ok ((receiver,observe reader)::acc)) (Ok acc) clients)
+                (Ok acc) sessions) (Ok []) generations |> Result.map List.rev) in
+    {result;cleanup_failure=[]})
+let discovery_result project outcome =
+  match outcome.result,outcome.cleanup_failure with
+  | Ok value,[] -> Ok (project value)
+  | Error error,_ -> Error error
+  | Ok _,_::_ -> Error (Store_unavailable {operation="discovery cleanup";
+      detail="store read cleanup failed"})
+type discovery_entry = { receiver : receiver; state : (validation,error) result }
+type hint_entry = { receiver : receiver; state : (change_hint,error) result }
+let discover_with ~before_read ~after_read ~base_path ~keeper_name =
+  let outcome = discover_states_with ~before_read ~after_read ~base_path ~keeper_name
+    ~observe:(fun reader -> discovery_result (fun (snapshot:snapshot) -> snapshot.validation) (read reader)) in
+  {result=Result.map (List.map (fun (receiver,state) -> ({receiver;state}:discovery_entry))) outcome.result;
+   cleanup_failure=outcome.cleanup_failure}
+let discover_hints_with ~before_read ~after_read ~base_path ~keeper_name =
+  let outcome = discover_states_with ~before_read ~after_read ~base_path ~keeper_name
+    ~observe:(fun reader -> discovery_result Fun.id (read_hint reader)) in
+  {result=Result.map (List.map (fun (receiver,state) -> ({receiver;state}:hint_entry))) outcome.result;
+   cleanup_failure=outcome.cleanup_failure}
+let discover ~base_path ~keeper_name =
+  discover_with ~before_read:(fun _ -> ()) ~after_read:(fun _ -> ()) ~base_path ~keeper_name
+let discover_hints ~base_path ~keeper_name =
+  discover_hints_with ~before_read:(fun _ -> ()) ~after_read:(fun _ -> ()) ~base_path ~keeper_name
 module For_testing = struct
   let append_with_io ~commit ~close publication = append_with_io {commit;close} publication
+  let discover = discover_with
+  let discover_hints = discover_hints_with
 end

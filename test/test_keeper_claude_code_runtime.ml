@@ -3752,6 +3752,188 @@ let test_child_journal_failure_preserves_root () =
         | Error _ -> () | Ok _ -> fail "failed path cannot acknowledge body") !failures)
 ;;
 
+module Child_read = Keeper_child_content_read
+
+let with_child_read_snapshot f =
+  with_child_journal_observations (fun ~base_path observations ->
+    let keeper_name="claude-fixture" in
+    let collector=Child_journal.create ~base_path ~keeper_name
+      ~source:(task_journal_operation "child-read") ~redact_text:Fun.id in
+    let publications=List.map (fun (attempt,observation) ->
+      Result.get_ok (Child_journal.prepare collector ~attempt observation)) observations in
+    List.iter (fun publication -> ignore (child_journal_ok (Child_journal.append publication))) publications;
+    let reader=Child_journal.reader_of_publication (List.hd publications) in
+    let snapshot=child_journal_ok (Child_journal.read reader) in
+    let invocation=(List.hd snapshot.records).observation.origin.invocation in
+    let scope:Child_read.scope={keeper_name;receiver={receiver_generation=invocation.receiver_generation;
+      session_id=invocation.session_id;client_uuid=invocation.client_uuid}} in
+    f ~base_path ~reader ~snapshot ~scope ~publications)
+;;
+
+let test_child_read_closed_codec_and_exact_suffix () =
+  with_child_read_snapshot (fun ~base_path ~reader ~snapshot ~scope ~publications:_ ->
+    let module Read = Child_read in
+    let token=Keeper_secret_redaction.ssh_remote_token_file ~base_path ~keeper_name:scope.keeper_name in
+    Fs_compat.mkdir_p (Filename.dirname token);
+    Out_channel.with_open_bin token (fun out -> output_string out "CHILD_SECRET_BODY");
+    let redact_text=Keeper_secret_redaction.redact_text
+      (Keeper_secret_redaction.snapshot ~base_path ~keeper_name:scope.keeper_name) in
+    let wire response=Read.to_json response |> Yojson.Safe.to_string |> Yojson.Safe.from_string in
+    let decoded json=match Read.of_json json with
+      | Ok response -> response | Error error -> fail (Read.decode_error_to_string error) in
+    let body=wire (Read.records_of_journal ~redact_text ~scope ~snapshot ~cleanup_failures:[]) in
+    let response=decoded body in
+    let request:Read.records_request={scope;after=None} in
+    let page=Result.get_ok (Read.records_of_response ~request response) in
+    check int "actual private journal projection roundtrip keeps all snapshots" 4 (List.length page.records);
+    check bool "collector failure coverage unavailable, never zero success history" true (page.coverage=Read.Unavailable);
+    List.iter (fun (row:Read.record) ->
+      check bool "redaction again on public read keeps configured body secret absent" false
+        (Astring.String.is_infix ~affix:"CHILD_SECRET_BODY" row.observation.text)) page.records;
+    check (list string) "opaque invocation unchanged across read redaction"
+      (List.map (fun (r:Child_journal.record) -> r.observation.origin.invocation.client_uuid) snapshot.records)
+      (List.map (fun (r:Read.record) -> r.observation.origin.invocation.client_uuid) page.records);
+    let set name value = function
+      | `Assoc fields -> `Assoc ((name,value)::List.remove_assoc name fields)
+      | _ -> fail "fixture object required" in
+    let member=Yojson.Safe.Util.member in
+    let rows=body |> member "records" |> Yojson.Safe.Util.to_list in
+    let malformed json=match Read.of_json json with Error _ -> () | Ok _ -> fail "malformed Child read accepted" in
+    malformed (set "unexpected" (`Bool true) body);
+    malformed (match body with `Assoc fields -> `Assoc (("schema",`String "masc.child_content.records.v1")::fields) | _ -> body);
+    malformed (set "scope" `Null body);
+    malformed (set "persistence_failure_history" (`String "complete") body);
+    malformed (set "schema" (`String "masc.native_tasks.records.v1") body);
+    let replace_first row=set "records" (`List (row::List.tl rows)) body in
+    malformed (replace_first (set "seq" (`Intlit "9007199254740992") (List.hd rows)));
+    malformed (replace_first (set "recorded_at" (`Float Float.infinity) (List.hd rows)));
+    malformed (set "records" (`List (List.rev rows)) body);
+    malformed (set "records" (`List [List.nth rows 0;List.nth rows 2;List.nth rows 3]) body);
+    let first=List.hd rows and second=List.nth rows 1 in
+    let duplicate=set "observation" (member "observation" first) second in
+    malformed (set "records" (`List [first;duplicate;List.nth rows 2;List.nth rows 3]) body);
+    let observation=member "observation" first in
+    let origin=member "origin" observation in let invocation=member "invocation" origin in
+    let foreign=set "invocation" (set "client_uuid" (`String "foreign-client") invocation) origin in
+    malformed (replace_first (set "observation" (set "origin" foreign observation) first));
+    let refused request=match Read.records_of_response ~request response with
+      | Error _ -> () | Ok _ -> fail "foreign/invalid request accepted" in
+    refused {scope={scope with receiver={scope.receiver with client_uuid="foreign"}};after=None};
+    let foreign_scope:Read.scope={scope with receiver={scope.receiver with client_uuid="foreign"}} in
+    let projected=Read.records_of_journal ~redact_text ~scope:foreign_scope ~snapshot ~cleanup_failures:[] in
+    (match Read.records_of_response ~request:{scope=foreign_scope;after=None} projected with
+     | Error Read.Scope_mismatch -> () | _ -> fail "in-memory projection bypassed actual row scope");
+    refused {scope;after=Some {store_id=page.next_cursor.store_id;after_sequence=(-1)}};
+    refused {scope;after=Some {store_id="";after_sequence=0}};
+    refused {scope;after=Some {store_id="other";after_sequence=0}};
+    refused {scope;after=Some {store_id=page.next_cursor.store_id;after_sequence=9007199254740992}};
+    let suffix=decoded (set "records" (`List (List.tl rows)) body) in
+    (match Read.records_of_response ~request suffix with Error Read.Sequence_mismatch -> () | _ -> fail "missing first row hidden");
+    let after_one:Read.records_request={scope;after=Some {store_id=page.next_cursor.store_id;after_sequence=1}} in
+    check int "complete requested suffix begins after exact cursor" 3
+      (List.length (Result.get_ok (Read.records_of_response ~request:after_one suffix)).records);
+    let after=Child_journal.next_cursor snapshot in
+    let caught=child_journal_ok (Child_journal.read ~after reader) in
+    let caught=decoded (wire (Read.records_of_journal ~redact_text ~scope ~snapshot:caught ~cleanup_failures:[])) in
+    check int "actual caught-up empty suffix accepted" 0 (List.length
+      (Result.get_ok (Read.records_of_response ~request:{scope;after=Some page.next_cursor} caught)).records);
+    (match Read.records_of_response ~request caught with Error Read.Sequence_mismatch -> () | _ -> fail "empty cannot conceal requested history");
+    let discovered=child_journal_ok (Child_journal.discover ~base_path ~keeper_name:scope.keeper_name) in
+    let receivers=decoded (wire (Read.receivers_of_journal ~keeper_name:scope.keeper_name ~entries:discovered ~cleanup_failures:[])) in
+    let inventory=Result.get_ok (Read.receivers_of_response ~keeper_name:scope.keeper_name receivers) in
+    check int "full ticket3 receiver retained" 1 (List.length inventory.receivers);
+    let hinted=child_journal_ok (Child_journal.discover_hints ~base_path ~keeper_name:scope.keeper_name) in
+    let hints=decoded (wire (Read.hints_of_journal ~keeper_name:scope.keeper_name ~entries:hinted ~cleanup_failures:[])) in
+    let hints_page=Result.get_ok (Read.hints_of_response ~keeper_name:scope.keeper_name hints) in
+    check int "hint receiver is distinct from audited receiver" 1 (List.length hints_page.hints);
+    (match Read.receivers_of_response ~keeper_name:scope.keeper_name hints with Error Read.Unexpected_response -> () | _ -> fail "hint became audit");
+    let failed=decoded (wire (Read.failure Read.Store_missing)) in
+    (match failed with Read.Failure failure -> check bool "typed missing survives" true (failure.error=Read.Store_missing)
+     | Records _ | Receivers _ | Hints _ -> fail "missing became success");
+    (match Read.records_of_response ~request failed with Error Read.Unexpected_response -> () | _ -> fail "typed failure became empty"))
+;;
+
+let test_child_read_hints_do_not_audit_tampered_history () =
+  with_child_read_snapshot (fun ~base_path ~reader ~snapshot:_ ~scope ~publications ->
+    let before=child_journal_ok (Child_journal.read_hint reader) in
+    let db=Sqlite3.db_open (Child_journal.path reader) in
+    Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db)) (fun () ->
+      let stmt=Sqlite3.prepare db "SELECT sql FROM sqlite_master WHERE name='immutable_observations'" in
+      let trigger=Fun.protect ~finally:(fun () -> ignore (Sqlite3.finalize stmt)) (fun () ->
+        match Sqlite3.step stmt with Sqlite3.Rc.ROW -> Sqlite3.column_text stmt 0 | _ -> fail "missing trigger") in
+      let sql value=match Sqlite3.exec db value with Sqlite3.Rc.OK -> () | rc -> fail (Sqlite3.Rc.to_string rc) in
+      sql "BEGIN IMMEDIATE";sql "DROP TRIGGER immutable_observations";
+      sql "UPDATE observations SET payload='{}' WHERE seq=1";sql trigger;sql "COMMIT");
+    let after=child_journal_ok (Child_journal.read_hint reader) in
+    check bool "same metadata/tail hint does not certify historical integrity" true (before=after);
+    let hints=child_journal_ok (Child_journal.discover_hints ~base_path ~keeper_name:scope.keeper_name) in
+    (match hints with [entry] -> check bool "discovery hint remains explicitly unchecked success" true (Result.is_ok entry.state)
+     | _ -> fail "one hint required");
+    (match (Child_journal.read reader).result with Error (Child_journal.Corrupt {seq=1;_}) -> ()
+     | _ -> fail "full audit concealed same-tail corruption");
+    let entries=child_journal_ok (Child_journal.discover ~base_path ~keeper_name:scope.keeper_name) in
+    (match entries with [entry] -> (match entry.state with Error (Child_journal.Corrupt _) -> ()
+       | _ -> fail "audited discovery became hint") | _ -> fail "one audited entry required");
+    Unix.rename (Child_journal.path reader) (Child_journal.path reader ^ ".corrupt");
+    ignore (child_journal_ok (Child_journal.append (List.hd publications)));
+    let one=child_journal_ok (Child_journal.read_hint reader) in
+    ignore (child_journal_ok (Child_journal.append (List.nth publications 1)));
+    let two=child_journal_ok (Child_journal.read_hint reader) in
+    check (list int) "append changes unchecked disk tail" [1;2] [one.through_sequence;two.through_sequence];
+    List.iter (fun publication -> ignore (child_journal_ok (Child_journal.append publication)))
+      [List.nth publications 2;List.nth publications 3];
+    let replacement=child_journal_ok (Child_journal.read_hint reader) in
+    check int "replacement may have same tail" before.through_sequence replacement.through_sequence;
+    check bool "same-tail replacement has distinct actual store incarnation" false
+      (before.store_id=replacement.store_id))
+;;
+
+let test_child_read_discovery_bound_directory_authority () =
+  with_child_journal_observations (fun ~base_path observations ->
+    let keeper_name="claude-fixture" in
+    let collector=Child_journal.create ~base_path ~keeper_name
+      ~source:(task_journal_operation "child-directories") ~redact_text:Fun.id in
+    let attempt,observation=List.hd observations in
+    let publication=Result.get_ok (Child_journal.prepare collector ~attempt observation) in
+    let reader=Child_journal.reader_of_publication publication in
+    let session_path=Filename.dirname (Child_journal.path reader) in
+    let generation_path=Filename.dirname session_path in
+    let keeper_path=Filename.dirname generation_path in
+    (match (Child_journal.read_hint reader).result with Error Child_journal.Missing_store -> ()
+     | _ -> fail "missing hint must refuse without creating store");
+    check bool "missing hint never creates leaf" false (Sys.file_exists (Child_journal.path reader));
+    let masc_root=Common.masc_dir_from_base_path ~base_path in
+    let mode=(Unix.stat masc_root).Unix.st_perm in
+    Fun.protect ~finally:(fun () -> Unix.chmod masc_root mode) (fun () ->
+      Unix.chmod masc_root 0o777;
+      (match (Child_journal.discover_hints ~base_path ~keeper_name).result with
+       | Error (Child_journal.Store_unavailable _) -> () | _ -> fail "unsafe ancestor cannot grant cold absence"));
+    check int "cold missing descendant is valid empty discovery" 0
+      (List.length (child_journal_ok (Child_journal.discover_hints ~base_path ~keeper_name)));
+    List.iter (fun directory ->
+      Fs_compat.mkdir_p directory;
+      let mode=(Unix.stat directory).Unix.st_perm in
+      Fun.protect ~finally:(fun () -> Unix.chmod directory mode) (fun () ->
+        Unix.chmod directory 0o777;
+        (match (Child_journal.discover_hints ~base_path ~keeper_name).result with
+         | Error (Child_journal.Store_unavailable _) -> () | _ -> fail "unsafe empty directory was authoritative")))
+      [keeper_path;generation_path;session_path];
+    let result=Child_journal.For_testing.discover_hints ~base_path ~keeper_name
+      ~before_read:(fun _ -> ()) ~after_read:(fun directory ->
+        if directory=generation_path then Unix.rmdir session_path) in
+    (match result.result with Error (Child_journal.Store_unavailable _) -> ()
+     | _ -> fail "enumerated session disappearance became cold empty");
+    ignore (child_journal_ok (Child_journal.append publication));
+    let removed=ref false in
+    let result=Child_journal.For_testing.discover_hints ~base_path ~keeper_name
+      ~before_read:(fun _ -> ()) ~after_read:(fun directory ->
+        if directory=session_path && not !removed then begin removed:=true;
+          Unix.rename (Child_journal.path reader) (Child_journal.path reader ^ ".gone") end) in
+    let entries=child_journal_ok result in
+    (match entries with [entry] -> (match entry.state with Error Child_journal.Missing_store -> ()
+       | _ -> fail "enumerated leaf disappearance became success") | _ -> fail "captured receiver identity lost"))
+;;
+
 let test_native_task_journal_commit_replay_and_scope () =
   with_task_journal_bindings (fun ~base_path observations ->
     let secret = "general-purpose" and keeper_name = "claude-fixture" in
@@ -5730,6 +5912,12 @@ let () =
             test_every_posture_names_the_schema_lookup
         ; test_case "task input and routed dispatch retain exact native envelope" `Quick
             test_task_binding_freezes_exact_envelope_and_dispatch
+        ; test_case "Child read closed codec and exact requested suffix" `Quick
+            test_child_read_closed_codec_and_exact_suffix
+        ; test_case "Child hints never certify same-tail historical integrity" `Quick
+            test_child_read_hints_do_not_audit_tampered_history
+        ; test_case "Child discovery retains bound empty-directory authority" `Quick
+            test_child_read_discovery_bound_directory_authority
         ; test_case "child durable driver receipts redaction replay and ticket scope" `Quick
             test_child_journal_driver_replay_redaction_and_scope
         ; test_case "child concurrent exact replay has one disk sequence" `Quick

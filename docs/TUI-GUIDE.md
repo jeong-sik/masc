@@ -612,6 +612,19 @@ it keeps both the shared head and distinguishing tail around a middle ellipsis.
 Phase and runtime identity stay neutral so an ordinary row does not turn into a
 strip of competing colours.
 
+Roster reads and pause/resume/wakeup requests bind to the complete workspace
+identity observed in `/health`: `paths.effective_base_path` and
+`paths.effective_masc_root`. API clients bind `GET /api/v1/gate/keepers` with
+both URL-encoded query parameters `expected_workspace=<base_path>` and
+`expected_masc_root=<masc_root>`. Supplying only one, a blank value, or a
+duplicate component returns 400. A different canonical path returns 409.
+Individual `POST /api/v1/keepers/:name/directive` and bulk
+`POST /api/v1/keepers_bulk/directive` accept the JSON field
+`"expected_workspace": {"base_path": "...", "masc_root": "..."}` and reject
+malformed or mismatched identities before applying any directive. Clients may
+omit the precondition entirely; the TUI always sends both components. On 409,
+refresh identity before issuing a new command; retained input stays local.
+
 The fixed `OPERATIONS` line follows the selected Keeper. It comes from
 `GET /api/v1/keepers/composite` and keeps the current lifecycle, turn step,
 idle age, last runtime/model outcome, and producer diagnosis together on the
@@ -958,7 +971,8 @@ steps in two cells and reads behind a solid bar in the sender's colour, where
 the journal's rows carry a dotted one. The operator's lines, the keeper's
 replies and its work rows stay at the conversation's edge.
 
-Chat opens without timestamps, turn time ranges or hourly separators.
+Chat opens without timestamps, turn time ranges, hourly separators or generated
+progress timers (request age, call age and model silence).
 `Ctrl-F` adds a short clock (`metadata:inline`), then full timestamp headings
 (`metadata:full`), then returns to the default. The short clock appears only
 where the minute moved. An open request between continuation segments has no
@@ -1820,6 +1834,9 @@ in place:
   not be rendered, and fleet rows that lost even their address. `Enter` on a commit answers with its pull
   request link (the subject's `(#N)` against the registered remote). `Enter`
   on a Keeper change returns to the file at its producer-recorded line. A
+  Git and Keeper reads are independent: if either fails, the other remains
+  visible with the failed source named. `r` in History retries both sources;
+  reopening `H` alone keeps the existing reading. A
   project tree is joined automatically only when the server base path exactly
   matches one registered repository's resolved path; otherwise it keeps Git
   history and explicitly says why Keeper activity cannot be joined.

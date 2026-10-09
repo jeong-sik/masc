@@ -429,7 +429,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
        ~mgr ~clock ~cwd config ~prompt ~images:(List.map (fun (image : image_input) ->
            ({ media_type = image.media_type; base64_data = image.base64_data }
             : Runtime_codex_app_server.image_input)) images) with
-     | Ok (result : Runtime_codex_app_server.turn_result) -> succeeded { text = result.text; model = result.model; usage = (match result.usage with
+     | Ok (result : Runtime_codex_app_server.turn_result) -> succeeded { text = Option.value result.text ~default:""; model = result.model; usage = (match result.usage with
          | Some Runtime_codex_app_server.Thread_count_replaced -> !observed_usage
          | usage -> optional_usage codex_usage usage) }
      | Error error -> codex_failed error)
@@ -468,19 +468,6 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
     let* prompt =
       framed_prompt ~system_prompt ~prompt
       |> Result.map_error (fun detail -> Setup_failure detail)
-    in
-    let* () =
-      match Runtime_instance.muse_prompt_capacity runtime with
-      | Error error ->
-        Error (Muse_failure (Runtime_muse_serve.Invalid_config
-          ("Muse Code has no prompt ceiling: "
-           ^ Runtime_muse_prompt_capacity.error_to_string error)))
-      | Ok capacity_bytes when String.length prompt > capacity_bytes ->
-        Error (Muse_failure (Runtime_muse_serve.Invalid_config
-          (Printf.sprintf
-            "Muse Code framed input is %d bytes, exceeding the prompt ceiling %d"
-            (String.length prompt) capacity_bytes)))
-      | Ok _ -> Ok ()
     in
     Eio.Switch.run
     @@ fun sw ->
@@ -546,7 +533,9 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
          | Some reported -> reported
          | None -> execution.model
        in
-       succeeded { text = result.text; model; usage = optional_usage muse_usage result.usage }
+       succeeded
+         { text = Option.value result.text ~default:""
+         ; model; usage = optional_usage muse_usage result.usage }
      | Error error -> Error (Muse_failure error))
 ;;
 

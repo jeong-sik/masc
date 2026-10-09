@@ -138,7 +138,8 @@ class Peer(http.server.BaseHTTPRequestHandler):
             self.send_error(400)
             return
         self.server.identities.append((client_id, self.headers.get("x-browser-name"),
-            self.headers.get("x-browser-version"), self.headers.get("x-browser-engine-version")))
+            self.headers.get("x-browser-version"), self.headers.get("x-browser-engine-version"),
+            self.headers.get("x-browser-transport")))
         if self.path == "/browser-lane/ping":
             # The lane answers without registering a client.
             self.server.ping_seen.set()
@@ -150,7 +151,13 @@ class Peer(http.server.BaseHTTPRequestHandler):
             if self.server.result_refused.is_set():
                 self.server.polls_after_result_refused.set()
             if self.server.reject_client:
-                self.send_error(400)
+                # What the lane answers a client it has ended.
+                refusal = json.dumps({"ok": False, "error": "client_disconnected"}).encode()
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(refusal)))
+                self.end_headers()
+                self.wfile.write(refusal)
                 return
             if self.server.fail_next_poll.is_set():
                 self.server.fail_next_poll.clear()
@@ -256,7 +263,7 @@ class NativeHost(unittest.TestCase):
 
     def test_firefox_metadata(self):
         self.assertTrue(self.server.poll_seen.wait(timeout=5))
-        self.assertTrue(all(row[1:] == ("firefox", "155.0.1", "155.0.1") for row in self.server.identities))
+        self.assertTrue(all(row[1:] == ("firefox", "155.0.1", "155.0.1", "web_extension") for row in self.server.identities))
 
     def test_workspace_connection_port_is_followed(self):
         self.assertTrue(self.server.poll_seen.wait(timeout=5))
@@ -327,6 +334,8 @@ class NativeHost(unittest.TestCase):
         self.assertFalse(self.server.ping_seen.is_set(), "a fixed address has nothing to compare")
 
     def test_retired_client_exits_for_fresh_identity(self):
+        # The extension starts the next host, which has the new identity;
+        # this process does not take one itself.
         self.assertTrue(self.server.poll_seen.wait(timeout=5))
         self.assertNotEqual(self.process.wait(timeout=5), 0)
         self.assertTrue(self.server.disconnected.is_set())
@@ -417,7 +426,7 @@ class NativeHost(unittest.TestCase):
         self.assertTrue(self.server.disconnected.is_set())
         ids = {row[0] for row in self.server.identities}
         self.assertEqual(len(ids), 1, "one native process owns one client UUID")
-        self.assertTrue(all(row[1:] == ("zen", "1.22b", "155.0.1") for row in self.server.identities))
+        self.assertTrue(all(row[1:] == ("zen", "1.22b", "155.0.1", "web_extension") for row in self.server.identities))
 
     def test_oversized_frame_rejected_before_payload(self):
         self.process.stdin.write(struct.pack("<I", 8 * 1024 * 1024 + 1))

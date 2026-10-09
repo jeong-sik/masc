@@ -549,13 +549,55 @@ let test_compact_progress_follows_working_execution () =
   state.msg_settled_logs <- [active.log];
   state.msg_inflight <- [];
   state.msg_live <- None;
+  Masc_tui_keeper_chat_log.observe_operation_state active.log.tl_log
+    (Some (Keeper_chat_operation.Running { started_at = 1. }));
   check bool "an observed journal keeps the same compact tool progress" true
     (Astring.String.is_infix ~affix:"Inspect_state" (progress ~now:6.))
+
+let test_historical_open_journal_cannot_own_progress () =
+  let module Log = Masc_tui_keeper_chat_log in
+  let module Transcript = Masc_tui_keeper_chat_transcript in
+  let state = state () in
+  let old = inflight ~request_id:"yesterday" ~at:1. () in
+  Tui.turn_log_add ~now:2. old.log ~seq:(Some 0) Live.Run_started;
+  Tui.turn_log_add ~now:3. old.log ~seq:(Some 1) (Live.Text {text="retained partial output"; stream_scope=None});
+  Log.commit old.log.tl_log;
+  state.msg_settled_logs <- [old.log];
+  check bool "an unclosed historical stream alone is not current progress" true
+    (Option.is_none (Tui.keeper_message_status_log state));
+  let current = inflight ~request_id:"today" ~at:100. () in
+  Tui.turn_log_add ~now:101. current.log ~seq:(Some 0) Live.Run_started;
+  state.msg_inflight <- [current];
+  state.msg_live <- Some current.log;
+  check (option string) "current input owns progress before historical reconciliation"
+    (Some "today") (Option.map Tui.turn_log_request_id (Tui.keeper_message_status_log state));
+  List.iter (fun terminal ->
+    let log = Log.create ~keeper_name:"alpha" ~request_id:"yesterday" ~started_at:1. in
+    ignore (Log.add ~at:2. log ~seq:(Some 0) Live.Run_started);
+    ignore (Log.add ~at:3. log ~seq:(Some 1) (Live.Text {text="retained partial output"; stream_scope=None}));
+    Log.observe_operation_state log (Some terminal);
+    Log.observe_operation_state log (Some (Keeper_chat_operation.Running {started_at=1.}));
+    check bool "terminal facts cannot regress on a delayed open observation" true
+      (Option.exists Keeper_chat_operation.is_terminal (Log.operation_state log));
+    let transcript = Transcript.of_log ~now:100. log in
+    check bool "terminal operation closes an incomplete stream" true
+      (match Transcript.phase transcript with Stream_ended | Stream_failed _ -> true | Waiting | Working -> false);
+    check bool "partial output survives reconciliation" true
+      (List.exists (fun (item : Transcript.drawn_item) ->
+        match item.drawn with Drawn_text text -> text = "retained partial output" | _ -> false)
+        (Transcript.drawn transcript));
+    check int "no invented journal sequence" 1
+      (match Log.resume_position log with After_seq seq -> seq | Whole_turn -> -1))
+    [ Keeper_chat_operation.Failed {completed_at=4.; failure={kind=Turn_cancelled;
+        detail="owner stopped the turn"; outcome_ref=None}}
+    ; Cancelled {completed_at=4.}
+    ; Succeeded {completed_at=4.; outcome_ref="recorded-result"} ]
 
 let () =
   run "TUI chat activity"
     [ "request and lane states",
-      [ test_case "compact exact failure cause" `Quick test_compact_failure_keeps_exact_cause
+      [ test_case "historical open journal cannot own progress" `Quick test_historical_open_journal_cannot_own_progress
+      ; test_case "compact exact failure cause" `Quick test_compact_failure_keeps_exact_cause
       ; test_case "compact progress follows working execution" `Quick
           test_compact_progress_follows_working_execution
       ; test_case "priority control receipt ordering" `Quick test_priority_control_receipt_ordering

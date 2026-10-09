@@ -175,17 +175,19 @@ let restart_interrupted_reply = "Keeper request failed: " ^ restart_interrupted_
    and its stream died with the process. A client that reopens the operation
    replays that journal and then finds the operation settled, so the journal
    needs the terminal the stream would have carried. Recorded through the same
-   helper the Owner's settlement uses, so a second start on the same store
-   finds the terminal already there and writes nothing. A journal that cannot
-   be written is logged and does not stop the owner from starting. *)
-let record_restart_terminal ~base_dir ~keeper_name ~operation_id =
+   helper the Owner's settlement uses. Durable failed operations are retried
+   on every start; their exact journal settlement marker prevents duplicates.
+   An earlier segment's error cannot stand in for this restart. A journal that
+   cannot be written is logged and does not stop the owner from starting. *)
+let record_restart_terminal ~base_dir ~keeper_name ~settlement =
+  let operation_id = Keeper_chat_operation.Operation_id.to_string settlement.Keeper_chat_event_log.operation_id in
   let journal =
     Keeper_chat_event_log.open_journal ~base_dir ~keeper_name ~operation_id ()
   in
   match
     Keeper_chat_event_log.record_terminal_error
-      journal
-      ~ts:(Time_compat.now ())
+      ~segment:(Keeper_chat_event_log.Restart_settlement settlement) journal
+      ~ts:settlement.completed_at
       ~message:restart_interrupted_summary
   with
   | Ok (Recorded_terminal_error _ | Existing_terminal_error _) -> ()
@@ -206,26 +208,6 @@ let record_restart_terminal ~base_dir ~keeper_name ~operation_id =
    evidence for the operator, not the keeper's utterance, so it does not
    advance the lane watermark. A row that cannot be written is logged and
    does not stop the owner from starting. *)
-(* The store settles a running shared batch as one execution and fails its
-   members with it, but it hands back only the execution leader. The run
-   journaled to every member, and a client may reopen any of them, so each
-   member needs the terminal and the failure row the leader gets. A batch that
-   cannot be read keeps the leader alone and says so. *)
-let restart_interrupted_with_batch_members ~keeper_name owner =
-  List.concat_map
-    (fun (leader : Keeper_owner.Chat_operation.t) ->
-       match Keeper_owner.batch_operations owner leader.operation_id with
-       | Ok members -> members
-       | Error error ->
-         Log.Keeper.warn
-           ~keeper_name
-           "restart-interrupted operation %s: its batch members could not be read, so only the execution leader is ended: %s"
-           (Keeper_owner.Chat_operation.Operation_id.to_string leader.operation_id)
-           (Keeper_owner.error_to_string error);
-         [ leader ])
-    (Keeper_owner.restart_interrupted_operations owner)
-;;
-
 let record_restart_interruptions pool ~keeper_name owner =
   let base_dir = pool.config.Workspace.base_path in
   List.iter
@@ -233,7 +215,11 @@ let record_restart_interruptions pool ~keeper_name owner =
        let operation_id =
          Keeper_owner.Chat_operation.Operation_id.to_string operation.operation_id
        in
-       record_restart_terminal ~base_dir ~keeper_name ~operation_id;
+       (match operation.state with
+        | Failed {completed_at;failure={kind=Interrupted_by_restart;_}} ->
+            record_restart_terminal ~base_dir ~keeper_name
+              ~settlement:{Keeper_chat_event_log.operation_id=operation.operation_id;completed_at}
+        | Queued | Running _ | Succeeded _ | Failed _ | Cancelled _ -> ());
        let surface, conversation_id, broadcast_source =
          match Keeper_chat_operation_payload.source_of_json operation.source with
          | Ok source ->
@@ -267,19 +253,20 @@ let record_restart_interruptions pool ~keeper_name owner =
               ?conversation_id
               ()
           with
-          | Ok _ ->
+          | Ok (Keeper_chat_store.Appended _) ->
             Keeper_chat_broadcast.chat_appended
               ~keeper_name
               ~source:broadcast_source
               ~content:restart_interrupted_reply
               ()
+          | Ok (Keeper_chat_store.Already_present _) -> ()
           | Error detail ->
             Log.Keeper.warn
               ~keeper_name
               "restart-interrupted operation %s left no failure row: %s"
               operation_id
               detail))
-    (restart_interrupted_with_batch_members ~keeper_name owner)
+    (Keeper_owner.restart_interrupted_operations owner)
 ;;
 
 let start_owner pool ~keeper_name ~initial_meta =

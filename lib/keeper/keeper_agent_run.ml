@@ -32,8 +32,37 @@ let progress_keeper_tool_names_for_contract =
   Contract_helpers.progress_keeper_tool_names_for_contract
 ;;
 
+let response_policy_for_turn ~turn_kind ~input_speaker
+    ~(world_observation : Keeper_world_observation.world_observation option)
+    ~hitl_resolution =
+  let open Keeper_tooling.Response in
+  match turn_kind, input_speaker, hitl_resolution, world_observation with
+  | Turn_record.Autonomous,
+    Keeper_input_speaker.Host_prompt (Autonomous_wake { answered_asks = [] }),
+    None, Some observation ->
+    (* Only a schedule without an authorized result delivery may end quietly.
+       Its substantive instructions still reach the model; this permits a
+       model-chosen no-update result, not skipping scheduled work. Every other
+       delivered event, unacknowledged message, and Gate/Ask answer keeps the
+       response contract. A pending Ask is not an input here and never disables
+       other work or changes its wake schedule. *)
+    let reminder_only (event : Keeper_world_observation.pending_board_event) =
+      match event.event_kind with
+      | Schedule_due wake -> Option.is_none wake.result_delivery
+      | Board_post_created | Board_post_updated | Board_comment_added _
+      | Board_reaction_changed _ | Board_vote_cast _ | Fusion_completed
+      | Delegate_completed _ | Ask_answered_row _ | Composition_completed
+      | External_attention _ | Completion_authority_rejected _
+      | Task_outcome _ | Task_cancelled _ -> false in
+    if observation.pending_messages = []
+       && List.for_all reminder_only observation.pending_board_events
+    then Allow_quiet_final
+    else Require_progress
+  | (Direct | Autonomous), _, _, _ -> Require_progress
+;;
 
 let normalize_response_text_for_finalization
+      ?(response_policy = Keeper_tooling.Response.Require_progress)
       ~runtime_id
       ~initial_messages:_
       ~(run_result : Runtime_agent.run_result)
@@ -55,6 +84,14 @@ let normalize_response_text_for_finalization
   else
     match Keeper_tooling.Response.normalize_response_text ~text ~tool_names () with
   | Ok response_text -> Ok response_text
+  | Error _ when
+      (match run_result.stop_reason with
+       | Runtime_agent.Completed ->
+         Keeper_tooling.Response.is_quiet_final
+           ~policy:response_policy run_result.response
+       | InputRequired _ | Yielded_to_operation_queued _
+       | Yielded_to_durable_stimulus _ | Yielded_after_repeated_tool_call _
+       | Yielded_after_repeated_assistant_text _ -> false) -> Ok ""
   | Error _ ->
     (* Finalization exposes the typed accept-rejected response itself. Tool
        execution history stays in the AGENT_CORE checkpoint; it is not projected into
@@ -762,6 +799,7 @@ module For_testing = struct
     Contract_helpers.progress_keeper_tool_names_for_contract
   let normalize_response_text_for_finalization =
     normalize_response_text_for_finalization
+  let response_policy_for_turn = response_policy_for_turn
   let keeper_raw_trace_sink = keeper_raw_trace_sink
   let raw_trace_for_dispatch = raw_trace_for_dispatch
   let prune_raw_traces_after_turn_record = prune_raw_traces_after_turn_record
@@ -886,6 +924,8 @@ let run_turn
   (* RFC-0468 §3.2: the speaker of the User message this turn creates. Stamped
      where that message is born and never changed afterwards. *)
   let input_metadata = Keeper_input_speaker.metadata input_speaker in
+  let response_policy = response_policy_for_turn
+      ~turn_kind ~input_speaker ~world_observation ~hitl_resolution in
   let deferred_runtime_lane_ref = ref None in
   let record_produced_checkpoint ~runtime_id ~attempt checkpoint =
     Option.iter (fun callback -> callback ~runtime_id ~attempt checkpoint) on_produced_checkpoint in
@@ -1204,6 +1244,10 @@ let run_turn
   | Error e ->
     Keeper_agent_result.not_dispatched e
   | Ok s ->
+    let approval_gate = Option.map
+      (fun (gate : Keeper_tool_approval_gate.t) ->
+        { gate with identity_tool_index = s.Keeper_run_tools.identity_tool_index })
+      approval_gate in
     let original_gate_message = user_message in
     let prepared_gate_input = s.Keeper_run_tools.model_message in
     let user_message = prepared_gate_input.text in
@@ -1741,6 +1785,7 @@ let run_turn
                 dispatch_input
                   ~dispatch:(fun ~checkpoint initial_messages ->
                     Keeper_turn_driver.run_named
+                      ~on_memory_capacity_refusal:s.Keeper_run_tools.on_memory_capacity_refusal
                       ~input_policy:meta.input_policy
                       ~runtime_id:(match native_resume with
                         | None -> runtime_id_string
@@ -1783,7 +1828,7 @@ let run_turn
                       ?on_deferred_runtime_consumed
                       ~temperature
                       ~accept:
-                        Keeper_tooling.Response.response_has_text_or_tool_progress
+                        (Keeper_tooling.Response.accepts_response ~policy:response_policy)
                       ?on_event
                       ~on_yield
                       ~on_resume
@@ -2118,6 +2163,7 @@ let run_turn
                      world_observation;
                      (match
                         normalize_response_text_for_finalization
+                          ~response_policy
                           ~runtime_id:selected_runtime_id
                           ~initial_messages:history_messages
                           ~run_result:result

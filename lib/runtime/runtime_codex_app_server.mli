@@ -144,7 +144,10 @@ type turn_result =
   { thread_id : string
   ; turn_id : string
   ; model : string
-  ; text : string
+  ; text : string option
+    (** Observed assistant text, including an explicit empty final. [None]
+        means a tool-only terminal without an assistant message. Tool-call
+        count does not prove that any of those calls succeeded. *)
   ; dynamic_tool_calls : int
   ; scheduling_handoff : handoff_state
   ; subscription : subscription

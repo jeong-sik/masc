@@ -41,6 +41,7 @@ def runtime_config_read_metadata() -> dict[str, object]:
     return {
         "ok": True,
         "source_revision": "fixture-read-revision",
+        "account_groups": [],
         "validation": {
             "valid": True, "schema_version": 1, "current_schema_version": 1,
             "forward_schema": False, "issues": [],
@@ -325,6 +326,7 @@ def runtime_resolved_runtime(
         "is_default": False,
         "rate_limited": False,
         "rate_limit_resets_at": None,
+        "failed_attempt": None,
     }
 
 

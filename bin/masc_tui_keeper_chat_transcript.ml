@@ -166,6 +166,7 @@ type unreadable =
    have opened (arguments stream in, the result lands). *)
 type trail_node =
   | Node_segment_boundary
+  | Node_response_boundary
   | Node_thinking of float * Buffer.t
   | Node_text of float * Buffer.t
   | Node_tool of int
@@ -219,6 +220,7 @@ type t =
   ; mutable reversed_trail : trail_node list
   ; mutable next_tool_local_id : int
   ; mutable segment : int
+  ; mutable segment_turn_refs : (int * string) list
   ; mutable phase : phase
   ; mutable ended_at : float option
         (* [Some] the instant the run said it was over -- finished or failed.
@@ -254,7 +256,7 @@ type t =
            report replaces the one before it rather than adding to it. Reset
            when the next request starts ([Stream_model_started]) and per
            attempt with the runtime. *)
-  ; mutable observed_stop_reason : string option
+  ; mutable observed_stop_reason : Agent_core.Types.stop_reason option
         (* Why the provider said the request it last answered stopped, in the
            provider's own word ([end_turn], [max_tokens], [refusal], …). It
            belongs to that request, so it is cleared when the next one starts
@@ -266,6 +268,13 @@ type t =
            verdict masc settled afterwards. And it is a different fact from
            [Keeper_turn_outcome.t], which says what masc did with the turn: a
            reply cut off at [max_tokens] is still a visible reply. *)
+  ; mutable response_scope : int option
+        (* The bridge's response identity observed at MessageStart. None
+           means no identified start was retained in this attempt. *)
+  ; mutable stop_scope : int option
+        (* The identity carried by the last reported stop reason. A partial
+           replay can retain this while losing that response's start; only
+           matching observed identities permit terminal reconciliation. *)
   ; mutable model_signal : model_signal option
         (* The last thing the model side sent in this attempt, and when.
            Tool calls carry their own pending state; this covers the stretches
@@ -296,9 +305,9 @@ type t =
            moment when it covered a span, and a turn that ran twenty minutes
            sits under rows typed during it carrying an opening clock (the
            2026-09-10 msx-retro-mania misread). *)
-  ; mutable noted_skills : (string * skill_activity) list
+  ; mutable noted_skills : ((string * string) * skill_activity) list
         (* The exact delivery records [note_skill_activity] took, keyed by
-           the read call's tool-use id, in the order they were first noted.
+           the read call's (turn_ref, tool-use id), in first-noted order.
            Not a trail node: the stream has no event for a delivery, so
            [drawn] lays these over the skill items the trail derived from
            the same calls, and draws the ones whose call the trail never saw
@@ -321,6 +330,7 @@ let create_for_source ~keeper_name ~source ~started_at =
   ; reversed_trail = []
   ; next_tool_local_id = 0
   ; segment = 0
+  ; segment_turn_refs = []
   ; phase = Waiting
   ; ended_at = None
   ; interrupt = Not_requested
@@ -336,6 +346,8 @@ let create_for_source ~keeper_name ~source ~started_at =
   ; observed_model = None
   ; observed_usage = None
   ; observed_stop_reason = None
+  ; response_scope = None
+  ; stop_scope = None
   ; model_signal = None
   ; runtime_named_at = None
   ; reply = None
@@ -415,7 +427,7 @@ let stream_details_text ~keeper_name transcript =
         (fun clause -> clause)
         [ stream_tokens_text ~keeper_name transcript
         ; Option.map
-            (fun reason -> "stopped: " ^ safe_line reason)
+            (fun reason -> "stopped: " ^ safe_line (Agent_core.Types.stop_reason_to_string reason))
             t.observed_stop_reason
         ]
     in
@@ -447,7 +459,7 @@ let stream_details_within ~keeper_name ~room transcript =
 let trail_thinking ~now t text =
   (match t.reversed_trail with
    | Node_thinking (_, buffer) :: _ -> Buffer.add_string buffer text
-   | (Node_segment_boundary | Node_text _ | Node_tool _ | Node_superseded _) :: _ | [] ->
+   | (Node_segment_boundary | Node_response_boundary | Node_text _ | Node_tool _ | Node_superseded _) :: _ | [] ->
        let buffer = Buffer.create 256 in
        Buffer.add_string buffer text;
        t.reversed_trail <- Node_thinking (now, buffer) :: t.reversed_trail)
@@ -455,7 +467,7 @@ let trail_thinking ~now t text =
 let trail_text ~now t text =
   (match t.reversed_trail with
    | Node_text (_, buffer) :: _ -> Buffer.add_string buffer text
-   | (Node_segment_boundary | Node_thinking _ | Node_tool _ | Node_superseded _) :: _ | [] ->
+   | (Node_segment_boundary | Node_response_boundary | Node_thinking _ | Node_tool _ | Node_superseded _) :: _ | [] ->
        let buffer = Buffer.create 256 in
        Buffer.add_string buffer text;
        t.reversed_trail <- Node_text (now, buffer) :: t.reversed_trail)
@@ -1373,7 +1385,7 @@ type trail_item =
    current record, because the node names the call and the record keeps
    updating. Blank stretches are dropped here so the pane never budgets a row
    for an empty heading. *)
-let project_trail t ~thinking ~text ~tools ~skills ~superseded =
+let project_trail ?(response_boundary = fun acc -> acc) t ~thinking ~text ~tools ~skills ~superseded =
   let call_of local_id =
     List.find_opt
       (fun (call : live_tool_call) -> call.local_id = local_id)
@@ -1406,6 +1418,8 @@ let project_trail t ~thinking ~text ~tools ~skills ~superseded =
               split acc ((at, activity) :: generic) [] rest
           | Some skill ->
               let acc = flush_generic acc generic in
+              let skill = { skill with turn_ref =
+                Option.map safe_line (nonblank (List.assoc_opt segment t.segment_turn_refs)) } in
               split acc [] ((at, skill) :: skills) rest)
     in
     group |> List.rev |> List.map (fun (call : live_tool_call) -> call.started_at, activity_of_live_call t call) |> split acc [] []
@@ -1413,6 +1427,8 @@ let project_trail t ~thinking ~text ~tools ~skills ~superseded =
   let rec walk segment acc group = function
     | [] -> List.rev (flush_tools ~segment acc group)
     | Node_segment_boundary :: rest -> walk (segment + 1) (flush_tools ~segment acc group) [] rest
+    | Node_response_boundary :: rest ->
+        walk segment (response_boundary (flush_tools ~segment acc group)) [] rest
     | Node_tool local_id :: rest -> (
         match call_of local_id with
         | Some call -> walk segment acc (call :: group) rest
@@ -1497,7 +1513,7 @@ let quiet_after_s = 2.0
 
 (* The model side's phase as one clause, or [None] before the first byte,
    where the named runtime is the subject instead. *)
-let model_phase_text ~now t =
+let model_phase_text ~show_timing ~now t =
   match t.model_signal with
   | None -> None
   | Some signal ->
@@ -1508,17 +1524,15 @@ let model_phase_text ~now t =
       | Answering_at since -> "STREAMING · answering", since
       | Tool_returned_at (tool_name, since) -> tool_name ^ " returned", since
     in
-    if now -. since < quiet_after_s then Some word
+    if not show_timing || now -. since < quiet_after_s then Some word
     else
       match Masc_tui_message_layout.age_text ~now ~since with
       | None -> Some word
       | Some age -> Some (Printf.sprintf "%s, nothing back for %s" word age)
 ;;
 
-let phase_text ~now t =
+let phase_text ~show_timing ~now t =
   match t.phase with
-  | Waiting when awaiting_continuation t ->
-      "waiting for the Keeper to continue; this request is still open"
   | Waiting -> (
       (* The wait before RUN_STARTED is the one an operator cannot read from
          the outside. Saying which of the two it is -- the keeper's queue, or a
@@ -1607,6 +1621,7 @@ let phase_text ~now t =
       (* Keep the age beside the current pending calls. A held approval's
          age belongs to the approval surface, not another call's progress. *)
       let in_this_call =
+        if not show_timing then "" else
         match List.filter
           (fun (call : live_tool_call) ->
             Some call.local_id <> awaiting_call
@@ -1642,6 +1657,7 @@ let phase_text ~now t =
          then went quiet for ten seconds reports the minute. Which of the two
          is growing is the difference between slow and stuck. *)
       let silent_for =
+        if not show_timing then "" else
         match t.runtime_named_at with
         | None -> ""
         | Some since -> (
@@ -1672,7 +1688,7 @@ let phase_text ~now t =
       let leading =
         if has_pending_activity then runtime_tag
         else
-          match model_phase_text ~now t with
+          match model_phase_text ~show_timing ~now t with
           | Some phase -> String.concat " \xc2\xb7 " (List.filter (fun part -> part <> "") [phase; runtime_tag])
           | None -> (
             match t.current_runtime_id with
@@ -1745,10 +1761,12 @@ let elapsed_text ~now t =
       else Some (Masc_tui_message_layout.span_text (ended -. t.started_at))
   | None -> Masc_tui_message_layout.age_text ~now ~since:t.started_at
 
-let progress_text ~now t =
+let progress_text ~show_timing ~now t =
+  let phase = phase_text ~show_timing ~now t in
+  if not show_timing then phase else
   match elapsed_text ~now t with
-  | None -> phase_text ~now t
-  | Some age -> Printf.sprintf "%s · %s" (phase_text ~now t) age
+  | None -> phase
+  | Some age -> Printf.sprintf "%s · %s" phase age
 
 (* The question, as an Attention row. It is the one row an operator has to act
    on, so it is styled like the others that need them rather than like
@@ -1763,9 +1781,9 @@ let awaiting_text t =
       | because -> Printf.sprintf "%s\n  because %s" base because)
     t.awaiting
 
-let status_rows ~now t =
+let status_rows ?(show_timing = true) ~now t =
   [ (if awaiting_continuation t then None
-     else Some (Progress, progress_text ~now t))
+     else Some (Progress, progress_text ~show_timing ~now t))
   ; Option.map (fun text -> (Answer_needed, text)) (awaiting_text t)
   ; Option.map
       (fun settlement ->
@@ -1973,6 +1991,16 @@ let start_tool ~now t ~authority ~occurrence ~tool_name =
            :: t.reversed_tool_calls;
          t.reversed_trail <- Node_tool local_id :: t.reversed_trail)
 
+let enter_text_response_scope t scope =
+  if t.response_scope <> Some scope then begin
+    t.response_scope <- Some scope;
+    t.reversed_trail <- Node_response_boundary :: t.reversed_trail;
+    t.observed_model <- None;
+    t.observed_usage <- None;
+    t.observed_stop_reason <- None;
+    t.stop_scope <- None
+  end
+
 let apply_delta ~now t (delta : Live.delta) =
   match delta with
   | Live.Run_started -> (
@@ -1982,6 +2010,9 @@ let apply_delta ~now t (delta : Live.delta) =
         Buffer.clear t.text_buffer;
         Buffer.clear t.thinking_buffer;
         t.reply <- None;
+        t.observed_stop_reason <- None;
+        t.response_scope <- None;
+        t.stop_scope <- None;
         t.interrupt <- Not_requested
       end;
       match t.phase with
@@ -2043,15 +2074,30 @@ let apply_delta ~now t (delta : Live.delta) =
          a repeated event for the same attempt keeps it. *)
       if new_attempt then t.observed_model <- None;
       if new_attempt then t.observed_usage <- None;
-      if new_attempt then t.observed_stop_reason <- None;
+      if new_attempt then begin
+        t.observed_stop_reason <- None;
+        t.response_scope <- None;
+        t.stop_scope <- None
+      end;
       t.model_signal <- None;
       t.runtime_named_at <- Some now;
       t.awaiting <- None;
       (match t.phase with
        | Waiting | Working -> t.phase <- Working
        | Stream_ended | Stream_failed _ -> ())
-  | Live.Stream_model_started { model } ->
+  | Live.Stream_model_started { model; stream_scope } ->
+      (* The bridge can repeat the same MessageStart without opening another
+         response. Its allocated stream scope, unlike model names or text,
+         identifies the response even when the provider omits its own id. *)
+      let repeated = match stream_scope, t.response_scope with
+        | Some incoming, Some current -> Int.equal incoming current
+        | None, _ | Some _, None -> false in
+      (* A scoped text chunk can be the first surviving event. Its later
+         start still supplies model metadata, without splitting the text. *)
       t.observed_model <- Some model;
+      if not repeated then begin
+      t.response_scope <- stream_scope;
+      t.reversed_trail <- Node_response_boundary :: t.reversed_trail;
       (* A request's counters and its stop reason belong to that request. The
          provider accumulates the counters inside one request and reports the
          reason at its end, so a turn that calls tools asks several times and
@@ -2061,8 +2107,10 @@ let apply_delta ~now t (delta : Live.delta) =
          the header while the next round is still writing. *)
       t.observed_usage <- None;
       t.observed_stop_reason <- None;
+      t.stop_scope <- None;
       t.model_signal <- Some (Model_started_at now)
-  | Live.Stream_details { usage; stop_reason } ->
+      end
+  | Live.Stream_details { usage; stop_reason; stream_scope } ->
       (* What the provider reported, not that anything was written, so the
          model-side signal is left as whatever last moved the answer. A field
          the delta did not carry leaves the last report standing: the wire
@@ -2072,9 +2120,12 @@ let apply_delta ~now t (delta : Live.delta) =
        | Some usage -> t.observed_usage <- Some usage
        | None -> ());
       (match stop_reason with
-       | Some stop_reason -> t.observed_stop_reason <- Some stop_reason
+       | Some stop_reason ->
+           t.observed_stop_reason <- Some stop_reason;
+           t.stop_scope <- stream_scope
        | None -> ())
-  | Live.Text text ->
+  | Live.Text {text; stream_scope} ->
+      Option.iter (enter_text_response_scope t) stream_scope;
       t.model_signal <- Some (Answering_at now);
       Buffer.add_string t.text_buffer text;
       trail_text ~now t text
@@ -2213,6 +2264,8 @@ let apply_delta ~now t (delta : Live.delta) =
          t.ended_at <- Some now;
          settle t ~now)
   | Live.Reply_details { reply; turn_outcome; turn_ref } ->
+      t.segment_turn_refs <-
+        (t.segment, turn_ref) :: List.remove_assoc t.segment t.segment_turn_refs;
       t.reply <-
         Some { reply_text = reply; reply_at = now; reply_outcome = turn_outcome; reply_turn_ref = turn_ref };
       (match turn_outcome with
@@ -2224,6 +2277,37 @@ let apply_delta ~now t (delta : Live.delta) =
 let apply ~now t delta =
   bump t;
   apply_delta ~now t delta
+
+(* The operation closes progress but does not fill gaps in its journal.
+   Keep the same partial-log authority as a terminal subscription receipt. *)
+let reconcile_operation t (state : Keeper_chat_operation.state) =
+  let ending_source = match t.phase with
+    | Waiting | Working -> Ending_read_from_record
+    | Stream_ended | Stream_failed _ -> t.ending_source in
+  match state with
+  | Queued | Running _ -> ()
+  | Failed { completed_at; failure } ->
+      (match t.phase with
+       | Stream_failed _ -> ()
+       | Waiting | Working | Stream_ended ->
+           apply ~now:completed_at t (Live.Run_failed { message = failure.detail });
+           t.ending_source <- ending_source)
+  | Cancelled { completed_at } ->
+      (match t.phase with
+       | Stream_failed _ -> ()
+       | Waiting | Working | Stream_ended ->
+           apply ~now:completed_at t (Live.Run_failed { message = "요청이 취소되었습니다" });
+           t.ending_source <- ending_source)
+  | Succeeded { completed_at; _ } ->
+      (match t.phase with
+       | Stream_ended | Stream_failed _ -> ()
+       | Waiting | Working ->
+           bump t;
+           t.phase <- Stream_ended;
+           t.ending_source <- Ending_read_from_record;
+           t.ended_at <- Some completed_at;
+           settle t ~now:completed_at)
+;;
 
 (* A stop or a restart settles the operation on the server without writing its
    closing event, so the journal stops where the turn was cut and this log
@@ -2261,6 +2345,7 @@ let of_log ~now (log : Masc_tui_keeper_chat_log.t) =
       apply ~now:(Option.value entry.at ~default:now) t entry.delta)
     (Masc_tui_keeper_chat_log.entries log);
   if not !timed then t.ended_at <- None;
+  Option.iter (reconcile_operation t) (Masc_tui_keeper_chat_log.operation_state log);
   t
 ;;
 
@@ -2299,31 +2384,36 @@ let note_tool_outcome t ~execution_id ~outcome ~duration =
    can never reach are taken; calling, pending and failed are the stream's
    own words, and the two evidence gaps name no read. The record is kept
    whole, not merged field by field, so the row a held turn draws for the
-   read says what the loaded row said about it. Keyed by the read call's
-   tool-use id, the one identity the wire and the ledger share; a record
-   without one has nothing to stand over. A later record for the same id
+   read says what the loaded row said about it. Keyed by the exact turn and
+   tool-use id: a continuation may reuse a provider id in a different turn.
+   An incomplete identity has nothing to stand over. A later record for the same key
    replaces the earlier one, as a later page replaces the loaded row. *)
+let skill_identity (skill : skill_activity) =
+  match skill.turn_ref, skill.skill_tool_use_id with
+  | Some turn_ref, Some use_id -> Some (turn_ref, use_id)
+  | (None, _) | (_, None) -> None
+
 let note_skill_activity t (evidence : skill_activity) =
   match evidence.state with
   | Skill_calling | Skill_served_pending | Skill_failed | Skill_evidence_missing
   | Skill_evidence_unavailable ->
       ()
   | Skill_served_only | Skill_delivered | Skill_used -> (
-      match evidence.skill_tool_use_id with
+      match skill_identity evidence with
       | None -> ()
-      | Some use_id ->
+      | Some key ->
           let known =
-            List.exists (fun (noted_id, _) -> String.equal noted_id use_id)
+            List.exists (fun (noted_key, _) -> noted_key = key)
               t.noted_skills
           in
           t.noted_skills <-
             (if known then
                List.map
-                 (fun (noted_id, noted) ->
-                   if String.equal noted_id use_id then (noted_id, evidence)
-                   else (noted_id, noted))
+                 (fun (noted_key, noted) ->
+                   if noted_key = key then (noted_key, evidence)
+                   else (noted_key, noted))
                  t.noted_skills
-             else t.noted_skills @ [ (use_id, evidence) ]);
+             else t.noted_skills @ [ (key, evidence) ]);
           bump t)
 
 let turn_status_text ~reply ~turn_ref (outcome : Masc.Keeper_turn_outcome.t) =
@@ -2366,7 +2456,7 @@ type drawn_item =
    cut stream, a gap in the journal -- while the loaded row that carried the
    record is one a held log leaves out of the timeline.
 
-   Only the id pairs the two. The stream's tool start always names its call
+   Only the exact turn and id pair the two. The stream's tool start names its call
    (the agent-core stream bridge reports a start without a tool id as a
    protocol error instead), so a skill item without an id is not expected.
    One that came anyway would stay as the stream drew it, and the record
@@ -2391,13 +2481,13 @@ let with_noted_skills noted items =
         | Skill_calling | Skill_served_pending | Skill_served_only
         | Skill_delivered | Skill_used | Skill_evidence_missing
         | Skill_evidence_unavailable -> (
-            match skill.skill_tool_use_id with
+            match skill_identity skill with
             | None -> skill
-            | Some use_id -> (
+            | Some key -> (
                 match
                   List.find_map
-                    (fun (noted_id, note) ->
-                      if String.equal noted_id use_id then Some note else None)
+                    (fun (noted_key, note) ->
+                      if noted_key = key then Some note else None)
                     noted
                 with
                 | Some note -> note
@@ -2421,18 +2511,16 @@ let with_noted_skills noted items =
                 item)
           items
       in
-      let drawn_use_ids =
+      let drawn_identities =
         List.concat_map
           (fun item ->
-            List.filter_map
-              (fun (skill : skill_activity) -> skill.skill_tool_use_id)
-              (skills_of item))
+            List.filter_map skill_identity (skills_of item))
           items
       in
       let unseen =
         List.filter_map
-          (fun (noted_id, note) ->
-            if List.exists (String.equal noted_id) drawn_use_ids then None
+          (fun (noted_key, note) ->
+            if List.mem noted_key drawn_identities then None
             else Some note)
           noted
       in
@@ -2441,19 +2529,30 @@ let with_noted_skills noted items =
 (* The trail, flattened, with the recorded reply reconciled against what
    streamed. Superseded blocks are siblings in the trail, never nested (see
    [trail_item]), so one level of flattening is the whole of it. *)
+type drawn_projection =
+  | Projected_item of drawn_item
+  | Projected_response_boundary
+
 let drawn t =
   let item ~segment ~at drawn =
-    [{ at = Some at; segment; superseded = None; superseded_runtime_id = None; drawn }] in
-  let items, unseen =
-    project_trail t
+    [Projected_item { at = Some at; segment; superseded = None; superseded_runtime_id = None; drawn }] in
+  let projected =
+    project_trail ~response_boundary:(fun acc -> [Projected_response_boundary] :: acc) t
       ~thinking:(fun ~segment ~at lines -> item ~segment ~at (Drawn_thinking lines))
       ~text:(fun ~segment ~at text -> item ~segment ~at (Drawn_text text))
       ~tools:(fun ~segment ~at block -> item ~segment ~at (Drawn_tools block))
       ~skills:(fun ~segment ~at skills -> item ~segment ~at (Drawn_skill skills))
       ~superseded:(fun ~attempt ~runtime_id items ->
-        List.concat items |> List.map (fun item ->
-          { item with superseded = Some attempt; superseded_runtime_id = runtime_id }))
+        List.concat items |> List.filter_map (function
+          | Projected_response_boundary -> None
+          | Projected_item item -> Some (Projected_item
+              { item with superseded = Some attempt; superseded_runtime_id = runtime_id })))
     |> List.concat
+  in
+  let items, unseen =
+    List.filter_map (function
+      | Projected_response_boundary -> None
+      | Projected_item item -> Some item) projected
     |> with_noted_skills t.noted_skills
   in
   let current_text = function
@@ -2477,36 +2576,44 @@ let drawn t =
      after it has no stretch for the reply to stand for. *)
   let last_text =
     List.fold_left
-      (fun (index, last) item ->
-        let last =
-          match item.superseded, item.drawn with
-          | None, (Drawn_tools _ | Drawn_skill _) -> None
-          | _ -> if current_text item then Some index else last
-        in
-        (index + 1, last))
-      (0, None) items
+      (fun (index, last) -> function
+        | Projected_response_boundary -> index, None
+        | Projected_item item ->
+            let last =
+              match item.superseded, item.drawn with
+              | None, (Drawn_tools _ | Drawn_skill _) -> None
+              | _ -> if current_text item then Some index else last
+            in
+            (index + 1, last))
+      (0, None) projected
     |> snd
   in
-  (* A read the trail never saw has no place of its own in it. Every read
-     comes before the turn's terminal message, so it goes ahead of the
-     stretch the reply stands for, or last when no stretch streamed -- ahead
-     of the reply or status row appended below either way. *)
+  (* An unobserved read belongs before the terminal reply, but its order
+     among streamed stretches is unknown. Preserve those stretches: the
+     final one may be progress from before the missing skill round. *)
   let items, last_text =
     match unseen with
     | [] -> items, last_text
-    | skills -> (
+    | skills ->
         let unseen_item =
           { at = None; segment = t.segment; superseded = None; superseded_runtime_id = None; drawn = Drawn_skill skills }
         in
-        match last_text with
-        | None -> items @ [ unseen_item ], None
-        | Some last ->
-            ( List.concat
-                (List.mapi
-                   (fun index item ->
-                     if index = last then [ unseen_item; item ] else [ item ])
-                   items)
-            , Some (last + 1) ))
+        (* An identified model response that reports its own terminal ending identifies
+           its final stretch even if the Skill call itself was omitted. The
+           projected response boundary resets the candidate even when that
+           response has no text, so earlier progress cannot stand for it.
+           An ending for another response, or one without a response identity,
+           cannot identify earlier retained progress as final text. *)
+        let terminal = match t.observed_stop_reason with
+          | Some (Agent_core.Types.EndTurn | StopSequence | MaxTokens | Refusal
+                 | ContentFilter | RepetitionTruncation | PauseTurn | Compaction
+                 | ContextWindowExceeded) -> true
+          | Some (StopToolUse | UnmatchedToolCalls | Unknown _) | None -> false in
+        (match t.response_scope, t.stop_scope, terminal, last_text with
+         | Some started, Some stopped, true, Some last when Int.equal started stopped ->
+             List.concat (List.mapi (fun index item ->
+               if index = last then [unseen_item; item] else [item]) items), Some (last + 1)
+         | _ -> items @ [ unseen_item ], None)
   in
   let items = match t.reply with
   | None -> items

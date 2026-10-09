@@ -140,14 +140,21 @@ def run(executable, no_color):
             detail_released.set()
         h.send_and_wait(process, fd, output, b"\x1b[H", b"DESCHEAD")
         # Refresh keeps the selected row, full detail and report, with one
-        # failure row outside the list. The end hint remains inside 18 rows.
+        # failure row outside the list. Retained content stays navigable
+        # inside 18 rows.
         failed.set()
         h.send_and_wait(process, fd, output, b"r", b"Refresh failed:")
         h.drain_until_quiet(process, fd, output)
         rows = h.screen_rows(bytes(output))
         assert max(rows) <= 18, rows
         assert b"layout-proof" in screen(output), screen(output)
-        assert b"Home/End" in screen(output), screen(output)
+        # Verify the actual edge navigation after a failed refresh. Footer
+        # hints can be shortened to preserve the preset's write actions.
+        h.send_and_wait(process, fd, output, b"\x1b[F", b"ERRORRECOVERYEND")
+        start, end, count = window(output)
+        assert start > 1 and end == count, (start, end, count)
+        h.send_and_wait(process, fd, output, b"\x1b[H", b"REFRESHEND")
+        assert window(output)[0] == 1, window(output)
         h.resize_and_wait(process, fd, output, rows=220, columns=40,
                           needle=b"REFRESHEND", final_cursor=b"\x1b[?25l")
         h.drain_until_quiet(process, fd, output)

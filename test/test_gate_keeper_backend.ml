@@ -243,6 +243,18 @@ discord.binding_via_parent: true
 hello from a thread|}
     rendered
 
+let test_contextualize_message_preserves_content () =
+  let content = "    첫 줄\n    둘째 줄  \n\n" in
+  let rendered =
+    Gate_keeper_backend.contextualize_message
+      ~channel:"discord" ~channel_user_id:"user-42" ~channel_user_name:"Alice"
+      ~channel_workspace_id:"thread-9" ~metadata:[] ~content
+  in
+  check string "context remains separate from verbatim message"
+    ("[External channel context]\nchannel: discord\nworkspace_id: thread-9\n"
+     ^ "user_id: user-42\nuser_name: Alice\n\n[User message]\n" ^ content)
+    rendered
+
 let test_parse_keeper_chat_stream_request_accepts_connector_context () =
   let body =
     {|{"request_id":"kmsg-connector","name":"luna","message":"hello","channel":"discord","channel_user_id":"user-42","channel_user_name":"Alice","channel_workspace_id":"workspace-9"}|}
@@ -254,6 +266,53 @@ let test_parse_keeper_chat_stream_request_accepts_connector_context () =
       check string "user name" "Alice" payload.channel_user_name;
       check string "workspace id" "workspace-9" payload.channel_workspace_id
   | Error err -> fail ("expected connector context to parse: " ^ err)
+
+let test_chat_input_preserves_text_whitespace () =
+  let text = "    첫 줄\n    둘째 줄  \n\n" in
+  let blocks = [ Keeper_multimodal_input.User_text text ] in
+  let request ~message ~user_blocks =
+    Yojson.Safe.to_string
+      (`Assoc
+         [ "request_id", `String "kmsg-whitespace"
+         ; "name", `String "luna"
+         ; "message", `String message
+         ; "user_blocks", Keeper_multimodal_input.user_blocks_to_yojson user_blocks
+         ])
+  in
+  List.iter
+    (fun body ->
+       match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+       | Error detail -> fail detail
+       | Ok payload ->
+           check string "chat message retained" text payload.message;
+           check string "invocation prompt retained" text
+             (Keeper_invocation_contract.direct_message_prompt payload.direct_message))
+    [ request ~message:text ~user_blocks:[]
+    ; request ~message:" \n " ~user_blocks:blocks ];
+  let input =
+    Keeper_chat_operation_payload.input_to_json ~message:text ~user_blocks:blocks
+      ~turn_instructions:None ~surface_context:None ~attachments:[]
+  in
+  match Keeper_chat_operation_payload.input_of_json input with
+  | Error detail -> fail detail
+  | Ok decoded ->
+      check string "durable message retained" text decoded.message;
+      check bool "durable block retained" true (decoded.user_blocks = blocks);
+      (match Keeper_multimodal_input.to_agent_core_blocks ~attachments:[] decoded.user_blocks with
+       | Ok [ Agent_core.Types.Text actual ] ->
+           check string "model input retained" text actual
+       | Ok _ -> fail "expected one text block"
+       | Error detail -> fail detail)
+
+let test_blank_chat_input_still_rejected () =
+  let body = {|{"request_id":"kmsg-blank","name":"luna","message":"  \n\t "}|} in
+  (match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+   | Error _ -> ()
+   | Ok _ -> fail "blank message without media should be rejected");
+  match Keeper_multimodal_input.parse_user_blocks
+      (`Assoc [ "user_blocks", `List [ `Assoc [ "type", `String "text"; "text", `String " \n\t " ] ] ]) with
+  | Error _ -> ()
+  | Ok _ -> fail "blank text block should be rejected"
 
 let test_parse_keeper_chat_stream_request_rejects_unknown_field () =
   let body = {|{"request_id":"kmsg-unknown","name":"luna","message":"hello","unexpected":true}|} in
@@ -2152,7 +2211,7 @@ let test_keeper_stream_bridge_isolates_tool_blocks_across_messages () =
 
 let stream_text_deltas events =
   List.filter_map
-    (function Keeper_chat_events.Text_delta text -> Some text | _ -> None)
+    (function Keeper_chat_events.Text_delta {text=text; _} -> Some text | _ -> None)
     events
 
 let resolve_canonical_agent_core_stream_events events =
@@ -2190,7 +2249,11 @@ let test_keeper_stream_bridge_text_delta_passthrough_incremental () =
   in
   check (list string) "incremental deltas pass through in order"
     [ "Hello"; ""; " world"; "second block" ]
-    (stream_text_deltas events)
+    (stream_text_deltas events);
+  check (list (option int)) "bridge stamps its allocated scope on every text chunk"
+    [Some 0; Some 0; Some 0; Some 0]
+    (List.filter_map (function Keeper_chat_events.Text_delta {stream_scope; _} ->
+       Some stream_scope | _ -> None) events)
 
 let test_keeper_stream_pipeline_reconciles_cumulative_snapshot_once () =
   let open Agent_core.Types in
@@ -2388,9 +2451,9 @@ let test_keeper_stream_bridge_surfaces_agent_core_message_metadata () =
   in
   match events with
   | [ Keeper_chat_events.Agent_core_stream_message_start
-        { provider_message_id; model; usage = Some start_usage };
+        { stream_scope = 0; provider_message_id; model; usage = Some start_usage };
       Keeper_chat_events.Agent_core_stream_message_delta
-        { stop_reason = Some stop_reason; usage = Some delta_usage };
+        { stream_scope = 0; stop_reason = Some stop_reason; usage = Some delta_usage };
       Keeper_chat_events.Agent_core_stream_message_stop;
       Keeper_chat_events.Agent_core_stream_ping ] ->
       check string "provider message id" "msg-agent_core-1" provider_message_id;
@@ -2889,13 +2952,26 @@ let test_keeper_stream_bridge_preserves_native_tool_origin () =
         ; tool_call_id = Some "native-1"
         ; tool_call_name = Some "commandExecution"
         }
+    ; Native_tool_start native_start
     ; Agent_core_content_block_stop { index = 7 }
+    ; Native_tool_end native_end
     ] ->
     check string
       "typed native content origin"
       Runtime_native_tools.stream_content_type
-      content_type
-  | _ -> fail "native tool origin was rejected or promoted to a MASC tool"
+      content_type;
+    List.iter
+      (fun (label, (tool : Keeper_chat_events.native_tool)) ->
+        check int (label ^ " stream scope") 0 tool.occurrence.stream_scope;
+        check (option string) (label ^ " provider message id") None
+          tool.occurrence.provider_message_id;
+        check int (label ^ " block index") 7 tool.occurrence.block_index;
+        check (option string) (label ^ " tool id") (Some "native-1")
+          tool.tool_call_id;
+        check (option string) (label ^ " tool name") (Some "commandExecution")
+          tool.tool_call_name)
+      [ "native start", native_start; "native end", native_end ]
+  | _ -> fail "expected native lifecycle observations around the content block"
 
 let test_keeper_stream_bridge_rejects_tool_args_without_start () =
   let open Agent_core.Types in
@@ -2981,7 +3057,7 @@ let test_keeper_stream_bridge_rejects_reasoning_as_public_text () =
       ContentBlockStart {index=1; content_type="text"; tool_id=None; tool_name=None};
       ContentBlockDelta {index=1; delta=TextDelta "PUBLIC_ANSWER"} ] in
   check (list string) "valid signature preserves separate answer" ["PUBLIC_ANSWER"]
-    (List.filter_map (function Keeper_chat_events.Text_delta text -> Some text | _ -> None) valid);
+    (List.filter_map (function Keeper_chat_events.Text_delta {text=text; _} -> Some text | _ -> None) valid);
   check bool "valid reasoning has no protocol error" false
     (List.exists (function Keeper_chat_events.Agent_core_stream_protocol_error _ -> true | _ -> false) valid)
 
@@ -3477,13 +3553,13 @@ let test_canonical_reply_payload_redacts_reply_and_preserves_evidence () =
           ("runtime_class", `String "keeper");
           ("turn_outcome", `String "visible_reply");
           ("turn_ref", Ids.Turn_ref.to_yojson turn_ref);
-          ("reply", `String "api_key=secret Done.");
+          ("reply", `String "    api_key=secret Done.  \n\n");
           ("tool_call_evidence", tool_evidence);
           ("runtime_note", `String "must not be user-visible");
         ])
   in
   let redact_text = function
-    | "api_key=secret Done." -> "api_key=[redacted] Done."
+    | "    api_key=secret Done.  \n\n" -> "    api_key=[redacted] Done.  \n\n"
     | text -> text
   in
   match
@@ -3495,8 +3571,16 @@ let test_canonical_reply_payload_redacts_reply_and_preserves_evidence () =
       (Server_routes_http_keeper_stream.canonical_reply_payload_error_to_string
          error)
   | Ok canonical ->
-    check string "visible reply is redacted once" "api_key=[redacted] Done."
+    check string "visible reply is redacted without changing whitespace"
+      "    api_key=[redacted] Done.  \n\n"
       canonical.visible_reply;
+    check string "poll reply keeps the same redacted text"
+      canonical.visible_reply
+      (json_string_field "reply" (Some (Yojson.Safe.from_string canonical.poll_body)));
+    check string "stream chunk reassembly keeps the same redacted text"
+      canonical.visible_reply
+      (String.concat "" (Server_routes_http_keeper_stream.split_keeper_reply_chunks
+         canonical.visible_reply));
     check bool "turn_ref identity is preserved" true
       (Ids.Turn_ref.equal turn_ref canonical.turn_ref);
     check string "turn outcome label is unchanged" "visible_reply"
@@ -4164,6 +4248,12 @@ let () =
             test_contextualize_message_sanitizes_context_lines;
           test_case "context envelope includes channel metadata" `Quick
             test_contextualize_message_includes_channel_metadata;
+          test_case "context envelope preserves message whitespace" `Quick
+            test_contextualize_message_preserves_content;
+          test_case "chat input preserves text whitespace" `Quick
+            test_chat_input_preserves_text_whitespace;
+          test_case "blank chat input remains rejected" `Quick
+            test_blank_chat_input_still_rejected;
           test_case "stream request accepts connector context" `Quick
             test_parse_keeper_chat_stream_request_accepts_connector_context;
           test_case "stream request rejects unknown fields" `Quick

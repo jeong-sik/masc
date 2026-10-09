@@ -25,7 +25,7 @@ type pending_board_event_kind =
   | Board_reaction_changed of board_reaction_event
   | Board_vote_cast of Board_dispatch.board_vote_change
   | Fusion_completed
-  | Delegate_completed
+  | Delegate_completed of Keeper_event_queue.delegate_terminal
   | Ask_answered_row of { answered_by : Keeper_input_speaker.person }
       (** A human answered a question this Keeper asked. Like
           {!Composition_completed} the row carries the answer itself: the
@@ -82,7 +82,7 @@ let is_board_activity_event (event : pending_board_event) =
      same reason it is still counted here: this block is the only one that
      renders the row's title and preview, and the answer is the whole point of
      the wake. Excluded, the Keeper would be woken with nothing to read. *)
-  | Delegate_completed
+  | Delegate_completed _
   (* Same shape: no Board post behind the id, and this block is the only one
      that renders the row, so leaving it out would wake the Keeper with an
      empty pending-events list. *)
@@ -107,7 +107,7 @@ let is_scheduled_automation_event (event : pending_board_event) =
   | Board_reaction_changed _
   | Board_vote_cast _
   | Fusion_completed
-  | Delegate_completed
+  | Delegate_completed _
   | Composition_completed
   | Ask_answered_row _
   | External_attention _
@@ -125,7 +125,7 @@ let is_completion_authority_rejection_event (event : pending_board_event) =
   | Board_reaction_changed _
   | Board_vote_cast _
   | Fusion_completed
-  | Delegate_completed
+  | Delegate_completed _
   | Composition_completed
   | Ask_answered_row _
   | Schedule_due _
@@ -145,7 +145,7 @@ let is_task_outcome_event (event : pending_board_event) =
   | Board_reaction_changed _
   | Board_vote_cast _
   | Fusion_completed
-  | Delegate_completed
+  | Delegate_completed _
   | Composition_completed
   | Ask_answered_row _
   | Schedule_due _
@@ -160,7 +160,7 @@ let is_task_outcome_event (event : pending_board_event) =
 let is_task_cancellation_event (event : pending_board_event) =
   match event.event_kind with
   | Task_cancelled _ -> true
-  | Delegate_completed
+  | Delegate_completed _
   | Composition_completed
   | Ask_answered_row _
   | Board_post_created
@@ -738,6 +738,29 @@ let pending_board_event_of_composition_completion
     | Keeper_event_queue.Composition_failed detail -> "failed", detail
     | Keeper_event_queue.Composition_cancelled reason -> "cancelled", reason
   in
+  (* Same silent-cut gap as the delegate reply above: a failed or cancelled
+     composition's detail exists nowhere else, so a cut here is never silent
+     either -- the row appends the request id the title already carries. *)
+  let preview =
+    (* [short_preview] measures after [String.trim], so the cut test must
+       measure the same trimmed bytes: a space-padded short answer must not
+       read as cut. Trim once here and share it with the preview. *)
+    let message = String.trim message in
+    let cut = short_preview ~max_len:delegate_reply_preview_max_len message in
+    if String.length message > delegate_reply_preview_max_len then
+      let note =
+        event_row_text
+          Prompt_names.keeper_world_event_rows_composition_detail_lookup
+          [ "request_id", cc.cc_request_id ]
+          ~fallback:(Yojson.Safe.to_string
+            (`Assoc
+               [ "tool", `String "keeper_composition_status"
+               ; "arguments", `Assoc [ "request_id", `String cc.cc_request_id ]
+               ]))
+      in
+      if String.equal note "" then cut else cut ^ "\n" ^ note
+    else cut
+  in
   { event_kind = Composition_completed
   ; post_id = Keeper_event_queue.composition_completion_post_id cc
   ; author = keeper_name
@@ -745,7 +768,7 @@ let pending_board_event_of_composition_completion
        model-facing prose slot, and the three fields already say everything
        the row states. *)
   ; title = String.concat " " [ cc.cc_tool; outcome; cc.cc_request_id ]
-  ; preview = short_preview ~max_len:delegate_reply_preview_max_len message
+  ; preview
   ; hearth = None
   ; post_kind = Board.System_post
   ; updated_at = arrived_at
@@ -779,11 +802,39 @@ let pending_board_event_of_delegate_completion
     | Keeper_event_queue.Delegate_no_reply -> "no_reply", ""
     | Keeper_event_queue.Delegate_failed detail -> "failed", detail
   in
-  { event_kind = Delegate_completed
+  (* The preview stays bounded, while [Delegate_completed] preserves the
+     original terminal payload. The unified prompt adds [reply_full] for a
+     cut reply; the configured note names that field as the primary source
+     and retains the operation lookup only for events without it. A prompt
+     render failure still leaves the lookup coordinates as structured data. *)
+  let preview =
+    (* [short_preview] measures after [String.trim], so the cut test must
+       measure the same trimmed bytes: a space-padded short reply must not
+       read as cut. Trim once here and share it with the preview. *)
+    let message = String.trim message in
+    let cut = short_preview ~max_len:delegate_reply_preview_max_len message in
+    if String.length message > delegate_reply_preview_max_len then
+      let note =
+        event_row_text
+          Prompt_names.keeper_world_event_rows_delegate_reply_lookup
+          [ "operation_id", dc.dc_operation_id; "keeper", dc.dc_keeper ]
+          ~fallback:(Yojson.Safe.to_string
+            (`Assoc
+               [ "tool", `String "masc_keeper_delegate_status"
+               ; "arguments", `Assoc
+                   [ "target", `Assoc
+                       [ "kind", `String "keeper"; "name", `String dc.dc_keeper ]
+                   ; "operation_id", `String dc.dc_operation_id
+                   ] ]))
+      in
+      if String.equal note "" then cut else cut ^ "\n" ^ note
+    else cut
+  in
+  { event_kind = Delegate_completed dc.dc_terminal
   ; post_id = Keeper_event_queue.delegate_completion_post_id dc
   ; author = dc.dc_keeper
   ; title = Printf.sprintf "%s %s" dc.dc_keeper outcome
-  ; preview = short_preview ~max_len:delegate_reply_preview_max_len message
+  ; preview
   ; hearth = None
   ; post_kind = Board.System_post
   ; updated_at = arrived_at

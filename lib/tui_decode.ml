@@ -1724,6 +1724,18 @@ type runtime_context_source =
 
 type exact_slot_group = Exact_http_slots | Exact_cli_slots | Exact_output_unsupported
 
+(* Why a runtime's last attempt failed without answering. A name this build
+   does not know is kept as the server wrote it. *)
+type runtime_attempt_failure =
+  | Attempt_failure of Runtime_candidate_backpressure.attempt_failure
+  | Unrecognised_attempt_failure of string
+
+type runtime_failed_attempt = {
+  rfa_noted_at : float;
+  rfa_failure : runtime_attempt_failure;
+  rfa_recorded_by : string;
+}
+
 type runtime_option = {
   ro_id : string;
   ro_provider : string;
@@ -1743,6 +1755,7 @@ type runtime_option = {
   ro_quota_scope_id : string option;
   ro_rate_limited : bool;
   ro_rate_limit_resets_at : float option;
+  ro_failed_attempt : runtime_failed_attempt option;
 }
 
 type runtime_resolved_lane = {
@@ -1989,6 +2002,22 @@ let decode_runtime_option ~usage ~default_id json =
   in
   let* ro_rate_limited = required_bool_field json "rate_limited" in
   let* ro_rate_limit_resets_at = optional_float_field json "rate_limit_resets_at" in
+  let* ro_failed_attempt =
+    match Json_util.assoc_member_opt "failed_attempt" json with
+    | None -> missing_field "failed_attempt"
+    | Some `Null -> Ok None
+    | Some (`Assoc _ as attempt) ->
+        let* rfa_noted_at = Json_util.require_float attempt "noted_at" in
+        let* failure = required_string_field attempt "failure" in
+        let* rfa_recorded_by = required_string_field attempt "recorded_by" in
+        let rfa_failure =
+          match Runtime_candidate_backpressure.attempt_failure_of_wire_name failure with
+          | Some failure -> Attempt_failure failure
+          | None -> Unrecognised_attempt_failure failure
+        in
+        Ok (Some { rfa_noted_at; rfa_failure; rfa_recorded_by })
+    | Some _ -> Error "runtime failed_attempt must be an object or null"
+  in
   let ro_is_default = Option.equal String.equal default_id (Some ro_id) in
   Ok
     { ro_id
@@ -2009,6 +2038,7 @@ let decode_runtime_option ~usage ~default_id json =
     ; ro_quota_scope_id
     ; ro_rate_limited
     ; ro_rate_limit_resets_at
+    ; ro_failed_attempt
     }
 
 let decode_runtime_default_member json =
@@ -5016,6 +5046,7 @@ type preset_detail =
   { pd_name : string
   ; pd_directory : string
   ; pd_settings_match : preset_settings_match
+  ; pd_default_prompts : Prompt_preset.default_comparison
   ; pd_prompt_files : (string * string option * prompt_source) list
   ; pd_overrides : (string * int) list  (** prompt key, bytes *)
   ; pd_instructions : (string * int) list  (** keeper TOML file name, bytes *)
@@ -5040,6 +5071,7 @@ type preset_restore_report =
   ; prr_prompt_overrides : preset_part
   ; prr_instructions : preset_part
   ; prr_runtime : preset_runtime_status
+  ; prr_default_prompts : Prompt_preset.default_comparison
   }
 
 (* The routes answer [{ok:false, error}] on a refused request; read that
@@ -5101,10 +5133,30 @@ let decode_preset_manifest json =
     }
 ;;
 
+let decode_preset_defaults json =
+  match member "default_prompts" json with
+  | `Null -> Ok Prompt_preset.Defaults_unknown
+  | defaults ->
+      let* status = required_string_field defaults "status" in
+      let* rows = required_list_field defaults "changes" in
+      let* changes = decode_list "default prompt changes" (fun row ->
+        let* key = required_string_field row "key" in
+        let* saved = required_nullable_string_field row "saved_sha256" in
+        let* current = required_nullable_string_field row "current_sha256" in
+        if saved = current then Error ("unchanged default prompt in changes: " ^ key)
+        else Ok (key, saved, current)) rows in
+      match status, changes with
+      | "unknown", [] -> Ok Prompt_preset.Defaults_unknown
+      | "matches", [] -> Ok Prompt_preset.Defaults_match
+      | "differs", (_ :: _ as changes) -> Ok (Prompt_preset.Defaults_differ changes)
+      | _ -> Error ("invalid default prompt comparison: " ^ status)
+;;
+
 let decode_preset_detail json =
   let* preset = required_object_field json "preset" in
   let* pd_name = required_string_field preset "name" in
   let* pd_directory = required_string_field json "directory" in
+  let* pd_default_prompts = decode_preset_defaults json in
   let* matching = required_object_field json "saved_settings" in
   let* match_status = required_string_field matching "status" in
   let* pd_settings_match = match match_status with
@@ -5162,7 +5214,7 @@ let decode_preset_detail json =
         items
     | _ -> []
   in
-  Ok { pd_name; pd_directory; pd_settings_match; pd_prompt_files; pd_overrides; pd_instructions; pd_assignments; pd_lanes }
+  Ok { pd_name; pd_directory; pd_settings_match; pd_default_prompts; pd_prompt_files; pd_overrides; pd_instructions; pd_assignments; pd_lanes }
 ;;
 
 let decode_name_reason_list json key ~name_key ~reason_key =
@@ -5243,7 +5295,8 @@ let decode_preset_restore json =
     let* prr_prompt_overrides = decode_preset_part report "prompt_overrides" in
     let* prr_instructions = decode_preset_part report "instructions" in
     let* prr_runtime = decode_preset_runtime report in
-    Ok { prr_restored; prr_autosave; prr_prompt_overrides; prr_instructions; prr_runtime }
+    let* prr_default_prompts = decode_preset_defaults report in
+    Ok { prr_restored; prr_autosave; prr_prompt_overrides; prr_instructions; prr_runtime; prr_default_prompts }
 ;;
 
 type librarian_run_page =

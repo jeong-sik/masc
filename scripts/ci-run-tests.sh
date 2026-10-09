@@ -152,16 +152,14 @@ diag_dump() {
   echo "[ci-diag] active_cmd_pid=${ACTIVE_CMD_PID:-<none>}"
   echo "[ci-diag] active_cmd_pgid=${ACTIVE_CMD_PGID:-<none>}"
   echo "[ci-diag] tmpdir usage: $(tmpdir_disk_usage)"
+  # Runner processes may carry credentials in argv. Emit executable names only.
   echo "[ci-diag] process snapshot (dune/ocaml/test):"
-  ps -eo pid,ppid,etime,%cpu,%mem,comm,args \
+  ps -eo pid,ppid,pgid,etime,%cpu,%mem,comm \
     | grep -Ei 'dune|ocaml|alcotest|test_' \
-    | grep -v grep \
     || true
 
   echo "[ci-diag] global process snapshot:"
-  ps -eo pid,ppid,pgid,etime,comm,args \
-    | grep -v grep \
-    || true
+  ps -eo pid,ppid,pgid,etime,%cpu,%mem,comm || true
 
   if [[ -n "${ACTIVE_CMD_PID}" ]]; then
     echo "[ci-diag] active command process tree snapshot:"
@@ -171,7 +169,7 @@ diag_dump() {
       [[ -n "${pid}" ]] && tree_filter+=" ${pid} "
     done < <(active_cmd_tree_pids)
     if [[ -n "${tree_filter}" ]]; then
-      ps -axo pid=,ppid=,pgid=,etime=,%cpu=,%mem=,command= \
+      ps -axo pid=,ppid=,pgid=,etime=,%cpu=,%mem=,comm= \
         | awk -v wanted="${tree_filter}" 'index(wanted, " " $1 " ") > 0 { print }' \
         || true
     fi

@@ -355,7 +355,10 @@ let classify_official_client_turn ~model_facing_name ~seen ~elapsed_s ~text
             "client reported %d host-tool call(s) but no declared tool ran"
             dynamic_tool_calls
       }
-  | [] -> Replied_no_tool { reply_bytes = String.length text; elapsed_s }
+  | [] ->
+    (match text with
+     | Some text -> Replied_no_tool { reply_bytes = String.length text; elapsed_s }
+     | None -> Provider_rejected {detail="completed turn has no assistant message"})
   | invoked -> Other_tool_invoked { requested = model_facing_name; invoked; elapsed_s }
 ;;
 
@@ -454,7 +457,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
                      ~model_facing_name
                      ~seen
                      ~elapsed_s:(now () -. started)
-                     ~text:turn.text
+                     ~text:(Some turn.text)
                      ~dynamic_tool_calls:turn.dynamic_tool_calls))
            | Runtime_execution.Codex_app_server exec ->
              let config : Runtime_codex_app_server.config =
@@ -644,7 +647,7 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
                            ~model_facing_name
                            ~seen
                            ~elapsed_s:(now () -. started)
-                           ~text:turn.text
+                           ~text:(Some turn.text)
                            ~dynamic_tool_calls:(List.length !seen))))))))
 ;;
 
@@ -683,7 +686,7 @@ let probe_muse_invocation ~net ~secure_random ~mgr ~clock ~fs ~base_path ~now
           let started = now () in
           (match Runtime_verification_muse.run ~secure_random ~net ~mgr ~clock
               ~cwd:Eio.Path.(fs / base_path) ~directory:base_path ~account_home:exec.account_home ~quota_scope
-              ~config ~prompt_capacity:(Runtime_instance.muse_prompt_capacity runtime) ~reasoning_effort ~tool ~prompt with
+              ~config ~reasoning_effort ~tool ~prompt with
            | Error (Runtime_verification_muse.Home_error error) ->
              Error (Muse_home_unavailable (Runtime_muse_home.error_to_string error))
            | Error Runtime_verification_muse.Private_workspace_unavailable ->

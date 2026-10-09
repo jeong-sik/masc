@@ -174,6 +174,46 @@ let test_rate_limit_lifecycle_reaches_the_tui () =
   assert_state "success clears a stated wait before expiry" false None (project ~now:0.)
 ;;
 
+(* The failed attempt the lane walk orders by reaches the runtime detail, with
+   the Keeper that saw it, and an answer takes it away again. *)
+let test_failed_attempt_reaches_the_tui () =
+  with_runtimes @@ fun () ->
+  let runtime =
+    match Runtime.get_runtime_by_id "usage_claude.sonnet" with
+    | Some runtime -> runtime
+    | None -> fail "fixture runtime missing"
+  in
+  let candidate = runtime.Runtime_instance.candidate_backpressure in
+  let project () =
+    let json =
+      Server_dashboard_runtime_resolved_json.build_at ~now:0.
+        ~generated_at_iso:"2026-10-07T00:00:00Z"
+        ~config:(Workspace.default_config (Filename.get_temp_dir_name ()))
+    in
+    match Tui_decode.decode_runtime_resolved json with
+    | Error detail -> fail detail
+    | Ok (rows, _) ->
+      (List.find (fun (row : Tui_decode.runtime_option) -> String.equal row.ro_id runtime.id) rows)
+        .Tui_decode.ro_failed_attempt
+  in
+  Runtime_candidate_backpressure.note_candidate_success ~candidate;
+  check bool "clear before any failure" true (Option.is_none (project ()));
+  Runtime_candidate_backpressure.note_failed_attempt ~candidate
+    ~failure:Runtime_candidate_backpressure.Provider_timeout
+    ~recorded_by:(Runtime_candidate_backpressure.keeper_recorder ~keeper_name:"alpha");
+  (match project () with
+   | Some
+       { Tui_decode.rfa_failure =
+           Tui_decode.Attempt_failure Runtime_candidate_backpressure.Provider_timeout
+       ; rfa_recorded_by = "alpha"
+       ; _
+       } -> ()
+   | Some _ -> fail "the failed attempt lost its kind or its recorder"
+   | None -> fail "the failed attempt did not reach the resolved document");
+  Runtime_candidate_backpressure.note_candidate_success ~candidate;
+  check bool "an answer clears it" true (Option.is_none (project ()))
+;;
+
 let test_reports_reach_the_resolved_document () =
   with_runtimes @@ fun () ->
   let claude_scope = scope_of "usage_claude.sonnet" in
@@ -577,20 +617,20 @@ let refused decode body =
 
 let test_openrouter_key () =
   check (list string) "windows"
-    [ "limit=- label \"credit limit\" usd 100 limit=100 resets=- role=gates"
+    [ "limit=- label \"API key credit limit\" usd 100 limit=100 resets=- role=gates"
     ; "limit=- label \"free model requests, daily\" fraction 0 resets=- role=other"
     ]
     (decoded_windows Usage.decode_openrouter_key ~source:"openrouter.key"
        openrouter_key_response);
   check (list string) "a stated reset period is not part of the label, which keys the row"
-    [ "limit=- label \"credit limit\" usd 5 limit=20 resets=- role=gates" ]
+    [ "limit=- label \"API key credit limit\" usd 5 limit=20 resets=- role=gates" ]
     (decoded_windows Usage.decode_openrouter_key ~source:"openrouter.key"
        {|{"data":{"limit":20,"limit_reset":"monthly","limit_remaining":15}}|});
   check (list string) "a null limit has no credit window" []
     (decoded_windows Usage.decode_openrouter_key ~source:"openrouter.key"
        {|{"data":{"limit":null,"limit_remaining":null}}|});
   check (list string) "uncapped all-time USD usage is retained"
-    [ "limit=- label \"credit usage (all time)\" usd 12.3456 limit=none resets=- role=other" ]
+    [ "limit=- label \"API key usage (all time)\" usd 12.3456 limit=none resets=- role=other" ]
     (decoded_windows Usage.decode_openrouter_key ~source:"openrouter.key"
        {|{"data":{"limit":null,"limit_remaining":null,"usage":12.3456}}|});
   check string "invalid USD totals do not become zero"
@@ -1012,7 +1052,7 @@ let test_only_gating_windows_explain_a_refusal () =
     "no window spent"
     (refusal_read Usage.decode_ollama_balance
        {|{"included":{"session":{"remaining_percent":0,"resets_at":"2026-10-07T08:00:00Z"},"weekly":{"remaining_percent":0,"resets_at":"2026-10-12T00:00:00Z"}},"purchased":{"balance_usd":4.5}}|});
-  check string "a spent OpenRouter credit limit states no reset"
+  check string "a spent OpenRouter API key credit limit states no reset"
     "spent without reset"
     (refusal_read Usage.decode_openrouter_key
        {|{"data":{"limit":100,"limit_remaining":0}}|});
@@ -1322,6 +1362,8 @@ let () =
     [ ( "resolved"
       , [ test_case "rate-limit lifecycle reaches the TUI" `Quick
             test_rate_limit_lifecycle_reaches_the_tui
+        ; test_case "failed attempt reaches the TUI" `Quick
+            test_failed_attempt_reaches_the_tui
         ; test_case "reports reach the resolved document" `Quick
             test_reports_reach_the_resolved_document
         ; test_case "malformed window is a typed error" `Quick
@@ -1359,7 +1401,7 @@ let () =
         ; test_case "version" `Quick test_antigravity_version
         ] )
     ; ( "reading scopes"
-      , [ test_case "empty HTTP report removes old credit limits" `Quick
+      , [ test_case "empty HTTP report removes old API key credit limits" `Quick
             test_http_empty_report_replaces_old_limit
         ; test_case "a raising scope does not stop the rest" `Quick
             test_a_raising_scope_does_not_stop_the_rest

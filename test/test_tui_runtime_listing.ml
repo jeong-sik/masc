@@ -25,7 +25,8 @@ let runtime id : Masc.Tui_decode.runtime_option =
     ro_max_output_tokens = Some 8192; ro_declared_reasoning_effort = None; ro_is_local = false;
     ro_is_default = false;
     ro_quota_exhausted = false; ro_quota_resets_at = None; ro_quota_scope = None; ro_quota_scope_id = None;
-    ro_rate_limited = false; ro_rate_limit_resets_at = None }
+    ro_rate_limited = false; ro_rate_limit_resets_at = None;
+    ro_failed_attempt = None }
 
 let state () = create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
 
@@ -169,6 +170,42 @@ let lane_state () =
    | Error detail -> Alcotest.fail detail);
   state.runtime_mode <- Runtime_lanes;
   state
+
+let test_refusing_runtimes_are_deemphasized_and_toggle_keeps_order () =
+  let state = lane_state () in
+  let snapshot = match state.runtime_surface with
+    | Some snapshot -> snapshot | None -> Alcotest.fail "missing fixture" in
+  let exhausted = { (runtime "b") with ro_quota_exhausted = true } in
+  let limited = { (runtime "c") with ro_rate_limited = true } in
+  let resolved = { snapshot.rss_resolved with
+    rrs_runtimes = [runtime "a"; exhausted; limited] } in
+  state.runtime_surface <- Some (match Masc.Tui_decode.join_runtime_surface
+      ~probe:None ~probe_error:None ~resolved with
+    | Ok snapshot -> snapshot | Error detail -> Alcotest.fail detail);
+  let runtime_ids () =
+    match state.runtime_surface with
+    | None -> []
+    | Some snapshot -> List.map (fun (runtime : Masc.Tui_decode.runtime_option) -> runtime.ro_id)
+        snapshot.rss_resolved.rrs_runtimes in
+  let original_order = ["a"; "b"; "c"] in
+  Alcotest.(check (list string)) "default view preserves configured order"
+    original_order (runtime_ids ());
+  Alcotest.(check bool) "ordinary runtime remains prominent" false
+    (runtime_row_deemphasized state (runtime "a"));
+  Alcotest.(check bool) "quota exhausted runtime is de-emphasized" true
+    (runtime_row_deemphasized state exhausted);
+  Alcotest.(check bool) "rate limited runtime is de-emphasized" true
+    (runtime_row_deemphasized state limited);
+  Alcotest.(check bool) "dimming is on by default" true state.runtime_dim_refusals;
+  toggle_runtime_dim_refusals state;
+  Alcotest.(check bool) "toggle restores normal emphasis" false
+    (runtime_row_deemphasized state exhausted);
+  Alcotest.(check (list string)) "toggle never changes configured order"
+    original_order (runtime_ids ());
+  toggle_runtime_dim_refusals state;
+  Alcotest.(check bool) "second toggle restores dimming" true state.runtime_dim_refusals;
+  Alcotest.(check bool) "refusing row is dimmed again" true
+    (runtime_row_deemphasized state exhausted)
 
 let notice_text = function
   | None -> "no line"
@@ -1582,7 +1619,8 @@ let test_the_keeper_picker_window_follows_the_cursor () =
 
 let test_account_usage_stays_spent_until_new_report () =
   let open Masc.Tui_decode_usage in
-  let snapshot = match (lane_state ()).runtime_surface with
+  let state = lane_state () in
+  let snapshot = match state.runtime_surface with
     | Some snapshot -> snapshot
     | None -> Alcotest.fail "missing fixture" in
   let window = { puw_limit_id = Some "account-bucket";
@@ -1594,6 +1632,9 @@ let test_account_usage_stays_spent_until_new_report () =
   let resolved window = { snapshot.rss_resolved with
     rrs_usage = Ok { puws_since = 0.; puws_accounts = [account window] } } in
   let rt = { (runtime "a") with ro_quota_scope = Some "account:1" } in
+  state.runtime_surface <- Some {snapshot with rss_resolved = resolved window};
+  Alcotest.(check bool) "observed spent usage de-emphasizes the runtime" true
+    (runtime_row_deemphasized state rt);
   let count resolved rt = match runtime_spent_usage resolved rt with
     | Ok windows -> List.length windows
     | Error detail -> Alcotest.fail detail in
@@ -1760,11 +1801,34 @@ let test_short_viewport_preserves_selected_list_row () =
       (runtime_selection_summary_lines ~cols state)
       (runtime_selection_summary_for_viewport ~rows:100 ~cols state)) [80; 132]
 
+
+(* The detail row says what the failure was, who saw it, and what the lane
+   walk does with it; a failure name this build does not know is drawn as the
+   server wrote it. *)
+let test_failed_attempt_row_names_the_failure_and_its_keeper () =
+  let at = 1790000000. in
+  let text failure =
+    runtime_failed_attempt_text
+      { Masc.Tui_decode.rfa_noted_at = at; rfa_failure = failure; rfa_recorded_by = "alpha" }
+  in
+  let has affix text = Astring.String.is_infix ~affix text in
+  let known =
+    text (Masc.Tui_decode.Attempt_failure Runtime_candidate_backpressure.Provider_timeout)
+  in
+  Alcotest.(check bool) "names the failure" true (has "timeout at " known);
+  Alcotest.(check bool) "names the Keeper that saw it" true (has "seen by alpha" known);
+  Alcotest.(check bool) "says what the walk does" true
+    (has "other Keepers try it after the ones that answered" known);
+  Alcotest.(check bool) "an unknown failure keeps its name" true
+    (has "quota_drift at " (text (Masc.Tui_decode.Unrecognised_attempt_failure "quota_drift")))
+
 let () = Alcotest.run "runtime list geometry"
   ["operator states", [ Alcotest.test_case "dismissed commit stays dismissed after reread" `Quick test_dismissed_commit_stays_dismissed_after_reread;
        Alcotest.test_case "commit application survives successful and failed rereads" `Quick test_commit_application_survives_reread;
        Alcotest.test_case "quota scope label preserves correlation" `Quick
         test_quota_scope_label_preserves_correlation;
+      Alcotest.test_case "refusing runtimes are de-emphasized without changing order" `Quick
+        test_refusing_runtimes_are_deemphasized_and_toggle_keeps_order;
       Alcotest.test_case "short viewport retains selected list row" `Quick
         test_short_viewport_preserves_selected_list_row;
       Alcotest.test_case "lanes overview and exact picker count every notice line" `Quick
@@ -1834,4 +1898,6 @@ let () = Alcotest.run "runtime list geometry"
         test_schema_less_client_is_refused_only_for_exact_lane
         ;Alcotest.test_case "HTTP slot without a body deadline is refused for an exact lane" `Quick
           test_http_slot_without_body_deadline_is_refused_for_exact_lane
+        ;Alcotest.test_case "failed attempt row names the failure and its Keeper" `Quick
+          test_failed_attempt_row_names_the_failure_and_its_keeper
 ]]

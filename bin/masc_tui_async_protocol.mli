@@ -109,11 +109,22 @@ type currency_authority_request = {
   car_identity : Masc.Tui_decode.server_identity option;
 }
 
+(* What the resume preflight learned about the Keeper's owner before the queue
+   snapshot is read. *)
+type resume_confirmation =
+  | Owner_resumed
+  | Owner_already_active
+
 type async_msg =
   | Workspace_scoped of workspace_authority * async_msg
   | Workspace_identity_unconfirmed of string
+  | Schedule_form_authority_refused of
+      { action : string; detail : string; workspace : workspace_input_identity option }
+      (** A schedule create/modify form refused by the workspace guard: the
+          guard's withdrawal, then the refusal kept on the Schedules surface. *)
   | Lane_package_catalog_loaded of int * string option * (Yojson.Safe.t, string) result
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
+  | Keeper_queue_resume_confirmed of string * int * resume_confirmation
   | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list, string) result
   | Lane_addons_loaded of int * (string * string) option * (lane_addons_reply, lane_addons_failure) result
   | Lane_application_loaded of Masc_tui_lane_application.ticket
@@ -159,6 +170,12 @@ type async_msg =
   | Http_refresh_done of http_refresh_outcome
   | Http_refresh_failed of
       string * Masc_tui_operator_projection.Listing_order.ticket option * Http_refresh_order.ticket
+  | Approvals_listing_superseded
+  | Approvals_summary_loaded of
+      Masc_tui_types.Snapshot_read.request
+      * Masc_tui_operator_projection.Listing_order.ticket
+      * Masc.Tui_decode.server_identity
+      * (approval_snapshot, string) result
   | Surface_composer_released
   | Http_scoped_refresh_done of workspace_authority * currency_authority_request * http_scoped_surface_results
   | Http_scoped_refresh_failed of
@@ -202,10 +219,16 @@ type async_msg =
       * (Masc_tui_keeper_chat_history.decoded, string) result
   | Keeper_chat_copy_loaded of
       int * string * (Masc_tui_keeper_chat_history.decoded, string) result
+  | Keeper_chat_operation_loaded of
+      { keeper_name : string
+      ; operation_id : string
+      ; operation_state : (Keeper_chat_operation.state, string) result
+      }
   | Keeper_chat_journal_loaded of
       { keeper_name : string
       ; source : Masc_tui_keeper_chat_log.journal_source
       ; started_at : float
+      ; operation_state : (Keeper_chat_operation.state option, string) result
       ; journal :
           ( Masc.Keeper_chat_event_log.journaled_event list
           , Masc_tui_keeper_chat_log.events_error )

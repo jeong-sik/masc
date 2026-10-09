@@ -354,6 +354,7 @@ let seed_tool_calls_from_ledger
      a seed that cannot be written degrades like one that cannot be read
      instead of failing the turn. *)
   match (try Ok (Keeper_tool_call_log.flush_now ()) with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn -> Error (Printexc.to_string exn)) with
   | Error detail ->
     Log.Keeper.warn
@@ -1015,13 +1016,13 @@ let prepare_agent_setup
        tools were built. The attached-service listing widens the callable set
        mid-turn, so from the round after a load the built list is short by
        exactly the tools the model just asked for -- and this is the record an
-       operator reads to find out what the model was offered. Before the agent
-       exists the built list is the whole truth. *)
+       operator reads to find out what the model was offered. Official-client
+       attempts use their complete built set even if a prior Agent Core
+       attempt left its agent in the shared cell. *)
     let schema_filter =
-      match !agent_cell with
-      | Some agent -> Agent_core.Tool_set.names (Agent_core.Agent.tools agent)
-      | None -> all_tool_names
-    in
+      (Keeper_agent_tool_surface.for_attempt
+         ~checkpoint_owner:!active_checkpoint_owner ~agent_cell ~built:keeper_tools).tools
+      |> List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) in
     let lane : Keeper_agent_tool_surface.turn_lane =
       if schema_filter <> []
       then Lane_tool_optional
@@ -1034,7 +1035,9 @@ let prepare_agent_setup
   in
 
   let ctx : Keeper_run_tools_hooks.ctx =
-    { acc
+    { identity_tool_index = Keeper_identity_tool_index.of_tools
+        identity_allow.Keeper_identity_tool_allow.kept
+    ; acc
     ; agent_cell
     ; agent_name
     ; all_tool_names

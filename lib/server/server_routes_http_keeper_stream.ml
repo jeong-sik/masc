@@ -910,7 +910,7 @@ let parse_keeper_chat_stream_request body_str =
     let* request_id = required_string "request_id" in
     let* request_id = Keeper_owner.Chat_operation.Operation_id.of_string request_id in
     let* name = required_string "name" |> Result.map String.trim in
-    let* raw_message = optional_string "message" |> Result.map String.trim in
+    let* raw_message = optional_string "message" in
     let* channel = optional_string "channel" |> Result.map String.trim in
     let* channel_user_id =
       optional_string "channel_user_id" |> Result.map String.trim
@@ -962,7 +962,7 @@ let parse_keeper_chat_stream_request body_str =
         user_blocks
     in
     let message =
-      if String.equal raw_message ""
+      if String.equal (String.trim raw_message) ""
       then Keeper_multimodal_input.fallback_message ~attachments user_blocks
       else raw_message
     in
@@ -1071,9 +1071,9 @@ let operation_payload_of_json ~keeper_name ~operation_id ~source ~input =
   let ( let* ) = Result.bind in
   let* source = Keeper_chat_operation_payload.source_of_json source in
   let* input = Keeper_chat_operation_payload.input_of_json input in
-  let raw_message = String.trim input.message in
+  let raw_message = input.message in
   let message =
-    if String.equal raw_message ""
+    if String.equal (String.trim raw_message) ""
     then
       Keeper_multimodal_input.fallback_message
         ~attachments:input.attachments
@@ -1132,9 +1132,6 @@ let operation_payload_of_json ~keeper_name ~operation_id ~source ~input =
   in
   Ok { payload; source }
 ;;
-
-let strip_keeper_visible_reply (reply : string) =
-  String.trim reply
 
 let split_keeper_reply_chunks (text : string) : string list =
   let len = String.length text in
@@ -1501,7 +1498,7 @@ let canonical_reply_payload_of_body ~redact_text body =
   let visible_reply =
     match public_reply_of_outcome ~turn_outcome ~reply:reply_raw with
     | None -> "" (* The public wire requires a reply string beside its typed outcome. *)
-    | Some reply -> strip_keeper_visible_reply reply |> redact_text |> String.trim
+    | Some reply -> redact_text reply
   in
   let payload_json =
     `Assoc (assoc_replace "reply" (`String visible_reply) fields)
@@ -2349,7 +2346,10 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                    | Error detail -> Error detail
                    | Ok (Some _) -> persist_tool_calls_only () |> delivered_after_persist
                    | Ok None ->
-                   match turn_outcome, String_util.trim_nonempty visible_reply with
+                   let spoken =
+                     if String.trim visible_reply = "" then None else Some visible_reply
+                   in
+                   match turn_outcome, spoken with
                    | ( ( Keeper_turn_outcome.Continuation_checkpoint
                        | Keeper_turn_outcome.Awaiting_gate_approval
                        | Keeper_turn_outcome.Terminal_effect_settled ) as
@@ -2782,7 +2782,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
           ~status:(Request_stream Stream_reconciliation_required)
           ~message
           ();
-        Keeper_chat_events.publish events (Text_delta message);
+        Keeper_chat_events.publish events (Text_delta {text=message; stream_scope=None});
         Keeper_chat_events.publish events Text_message_end;
         Keeper_chat_events.publish events (Run_finished { run_id });
         queued_outcome
@@ -2824,7 +2824,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
           then
             split_keeper_reply_chunks visible_reply
             |> List.iter (fun chunk ->
-                   Keeper_chat_events.publish events (Text_delta chunk));
+                   Keeper_chat_events.publish events (Text_delta {text=chunk; stream_scope=None}));
           Keeper_chat_events.publish events
             (Reply_details
                { reply = visible_reply
@@ -3456,6 +3456,30 @@ let journal_replay_frames ~base_path ~keeper_name ~operation_id ~since_seq =
      | exception exn -> skipped (Printexc.to_string exn))
 ;;
 
+(* Live delivery may outrun a fail-open journal. The operation store is the
+   terminal authority after restart, so a cursor past the repaired journal
+   must not suppress its failure. A matching terminal already sent by this
+   replay needs no supplement. The fallback has no sequence and cannot move
+   the client's cursor backwards. *)
+let restart_terminal_after_replay ~base_path ~keeper_name
+    ~(operation : Keeper_chat_operation.t) ~replayed =
+  match operation.state with
+  | Failed {completed_at;failure={kind=Interrupted_by_restart;_}} ->
+      let operation_id = Keeper_chat_operation.Operation_id.to_string operation.operation_id in
+      let journal = Keeper_chat_event_log.open_journal ~base_dir:base_path ~keeper_name ~operation_id () in
+      let settlement = {Keeper_chat_event_log.operation_id=operation.operation_id;completed_at} in
+      let already_sent = match Keeper_chat_event_log.find_restart_terminal journal ~settlement with
+        | Ok (Some (Existing_terminal_error {seq;_} | Recorded_terminal_error {seq;_})) -> Hashtbl.mem replayed seq
+        | Ok None | Error _ -> false in
+      if already_sent then None
+      else Some (Ag_ui.make_event ~timestamp:completed_at
+        ~thread_id:("keeper:" ^ keeper_name)
+        ~run_id:(Some ("keeper-operation-run-" ^ operation_id))
+        ~message:(Some (Keeper_request_failure.summary {cause=Keeper_request_failure.Server_restarted}))
+        ~code:(Some (Keeper_chat_operation.failure_kind_to_string Interrupted_by_restart)) Ag_ui.Run_error)
+  | Queued | Running _ | Succeeded _ | Failed _ | Cancelled _ -> None
+;;
+
 let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payload =
   let origin = get_origin request in
   let headers = keeper_chat_stream_headers origin in
@@ -3587,6 +3611,8 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
             pending)
         in
         List.iter (fun (seq, event) -> send_live ~seq event) pending;
+        Option.iter (send_event ~seq:None)
+          (restart_terminal_after_replay ~base_path ~keeper_name:payload.name ~operation ~replayed);
         if Keeper_owner.Chat_operation.is_terminal operation.state then finish ()
       in
       let submit_result =
@@ -3702,6 +3728,7 @@ module For_testing = struct
   let parse_request = parse_keeper_chat_stream_request
   let live_event_is_new = live_event_is_new
   let journal_replay_frames = journal_replay_frames
+  let restart_terminal_after_replay = restart_terminal_after_replay
   let has_connector_context = has_connector_context
   let has_external_speaker = has_external_speaker
   let message_for_request = message_for_request

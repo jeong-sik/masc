@@ -1476,7 +1476,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
          { Agent_core.Types.id = turn.turn_id
          ; model = turn.model
          ; stop_reason = EndTurn
-         ; content = [ Text turn.text ]
+         ; content = (match turn.text with None -> [] | Some text -> [ Text text ])
          ; usage = spend
          ; telemetry =
              Some
@@ -1641,7 +1641,7 @@ let note_transport_uncertainty effect_disposition =
   | true | false -> ()
 ;;
 
-let run ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~context_window ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
+let run ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~context_window ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context
@@ -1681,6 +1681,9 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
   let result =
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
       Keeper_turn_driver_try_provider.context_overflow_shrink_sequence
+        ?on_memory_capacity_refusal
+        ~on_memory_retry:(fun () ->
+          resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id ())
       ~starting_capacity:unbounded_model_input_capacity_bytes
       (* A continuation always resumes its original thread, and a Resume's
          input is the same at every capacity; the retry would be a fresh
@@ -1689,12 +1692,11 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
       ~same_run_retry_authorized:(fun () ->
         Option.is_none official_client_continuation
         && Keeper_provider_attempt_effect.allows_same_turn_retry
-             (Atomic.get effect_disposition)
-        && Option.is_some !observed_next_shrink_capacity_bytes)
-      ~shrink_capacity:(fun ~capacity:_ ~default_capacity ->
+             (Atomic.get effect_disposition))
+      ~shrink_capacity:(fun ~capacity ~default_capacity:_ ->
         Option.value
           !observed_next_shrink_capacity_bytes
-          ~default:(max 1 default_capacity))
+          ~default:capacity)
       (* This runtime shrinks to the size the provider itself named
          ([observed_next_shrink_capacity_bytes]), not to a fraction of a
          request-body cap. There is no

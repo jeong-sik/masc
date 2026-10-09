@@ -45,6 +45,12 @@ let generic_provider_rejection =
   {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-rejected-1","result":"API Error: Sonnet safeguards flagged this message","api_error_status":null}|}
 ;;
 
+let access_rejection status =
+  Printf.sprintf
+    {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-access-rejected","result":"Your organization has disabled Claude subscription access for Claude Code","api_error_status":%d,"terminal_reason":"api_error"}|}
+    status
+;;
+
 let prompt_too_long_result =
   {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-overflow-1","result":"Prompt is too long · the request is ~250000 tokens (limit 200000)","api_error_status":400,"terminal_reason":"prompt_too_long"}|}
 ;;
@@ -336,7 +342,7 @@ let content_of_wire_message raw =
    newest atom alone ([Keeper_turn_driver.For_testing.official_client_turn_start]). *)
 let fixture_trace_with_no_completed_turn = "fixture-trace-no-completed-turn"
 
-let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = []) ?event_bus
+let run_keeper_turn ?accept ?(tools = []) ?(tools_support = true) ?(initial_messages = []) ?event_bus
     ?event_capture ?on_event ?agent_core_checkpoint ?runtime_manifest_context
     ?runtime_manifest_append ?raw_trace ?on_official_client_native_action
     ?on_official_client_usage_report
@@ -371,7 +377,7 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
                     let run () =
                       Result.map
                         (fun selected -> selected.Keeper_turn_driver.run_result)
-                        (Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+                        (Keeper_turn_driver.run_named ?accept ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                            ~runtime_id:"claude.claude"
                            ~keeper_name:"claude-fixture"
                            ~base_path
@@ -2476,6 +2482,55 @@ let test_quota_enters_typed_recovery () =
          | _ -> fail "quota rejection did not require explicit recovery"))
 ;;
 
+let test_access_refusal_uses_status_and_keeps_pre_effect_rotation () =
+  List.iter (fun status ->
+    let base_path = temp_workspace () in
+    Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+      with_fixture [ Emit (access_rejection status) ] (fun cli_path ->
+        match run_keeper_turn ~base_path ~cli_path ~goal:"REVIEW_ACCESS" () with
+        | Ok _ -> fail "provider access rejection completed the turn"
+        | Error error ->
+          let route = Keeper_runtime_failure_route.route_of_error
+              ~boundary:Keeper_runtime_failure_route.Agent_core_execution error in
+          let expected = match status with
+            | 401 -> Keeper_runtime_failure_route.Auth_failed
+            | 403 -> Keeper_runtime_failure_route.Authorization_refused
+            | _ -> Keeper_runtime_failure_route.Provider_reported_failure in
+          check bool "numeric status selects the existing typed route" true
+            (route = Keeper_runtime_failure_route.Rotate_now { rotate = expected });
+          check bool "access rejection does not resume the same failed path" false
+            (Keeper_runtime_failure_route.route_resumes_on_same_path route);
+          if status = 403 then
+            check bool "receipt retains authorization refusal" true
+              (match Keeper_agent_error.terminal_reason_code_of_core_error error
+                 |> Keeper_terminal_reason.of_wire with
+               | Keeper_terminal_reason.Authorization_refused _ -> true
+               | _ -> false);
+          (match (load_state base_path).phase with
+           | Recovery_required { failure = Provider_rejected; _ } -> ()
+           | _ -> fail "account refusal lost the durable provider rejection"))))
+    [401; 403; 400]
+;;
+
+let test_access_refusal_after_native_tool_remains_fenced () =
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    with_fixture
+      [ Emit (native_tool_call_block ~turn_id:"native-access"
+          ~call_id:"native-access-call" ~tool_name:"Write")
+      ; Emit (native_tool_result ~call_id:"native-access-call" ~content:"written")
+      ; Emit (access_rejection 403)
+      ] (fun cli_path ->
+        match run_keeper_turn ~base_path ~cli_path ~goal:"TOOL_THEN_ACCESS_REFUSAL" () with
+        | Error error ->
+          (match Keeper_internal_error.classify_masc_internal_error error with
+           | Some (Keeper_internal_error.Provider_attempt_effect_fenced { effect_disposition; _ }) ->
+             check bool "account refusal cannot bypass an observed effect" false
+               (Keeper_provider_attempt_effect.allows_same_turn_retry effect_disposition)
+           | _ -> fail (Agent_core.Error.to_string error))
+        | Ok _ -> fail "post-effect access rejection completed the turn"))
+;;
+
 let test_quota_after_tool_effect_remains_fenced () =
   let base_path = temp_workspace () in
   let call_count = ref 0 in
@@ -2600,6 +2655,7 @@ let test_spawn_failure_fences_claim () =
 ;;
 
 let run_direct_attempt
+      ?on_memory_capacity_refusal
       ?hooks
       ?(system_prompt = "pre-dispatch fixture system prompt")
       ~base_path
@@ -2637,6 +2693,7 @@ let run_direct_attempt
                     | Some _ | None -> fail "Claude runtime fixture did not resolve"
                   in
                   Keeper_claude_code_runtime.run
+                    ?on_memory_capacity_refusal
                     ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
                     ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
                       ~runtime:(Runtime.get_runtime_by_id "claude.claude" |> Option.get))
@@ -2767,6 +2824,64 @@ let repeated_tool () =
    so the attempt ends on the overflow. No answer or tool activity was
    observed, so the attempt must report no effect: that is what lets
    the lane move to its next runtime instead of fencing the turn. *)
+let test_memory_capacity_reprojection_reaches_cli_input () =
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    let module Host = Keeper_workspace_memory_host_recall in
+    let module IO = Keeper_workspace_memory_selection_io in
+    let config = Workspace.default_config base_path in
+    let destination : Typesafeai_client.destination =
+      {endpoint="https://fixture.invalid/evaluate";model="fixture";api_key="fixture"} in
+    let adapter = IO.create ~config ~keeper_id:"claude-pre-dispatch" ~destinations:(destination,[]) in
+    let row id = `Assoc ["id",`String id;"use",`String "comparison";
+      "sources",`String ("MEMORY-" ^ id ^ "-" ^ String.make 2000 'x')] in
+    let payload = `Assoc ["selection_id",`String (IO.selection_id adapter);
+      "status",`String "selected";"selected",`List (List.map row ["A";"B";"C";"D"])] in
+    let prepared = Host.For_testing.prepare_projection ~payload
+      ~validate:(fun _ -> Ok ()) ~retain:(IO.retain_projection adapter) in
+    let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (function
+      | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
+        AdjustParams {current_params with extra_system_context=Some (Host.render_prepared prepared)}
+      | _ -> Continue)} in
+    let first_system_marker = Filename.concat base_path "memory-first-system" in
+    let second_system_marker = Filename.concat base_path "memory-second-system" in
+    let first_prompt_marker = Filename.concat base_path "memory-first-input" in
+    let second_prompt_marker = Filename.concat base_path "memory-second-input" in
+    with_fixture_sequence ~first_system_marker ~second_system_marker
+      ~first_prompt_marker ~second_prompt_marker
+      [Emit blocking_limit_diagnostic;Emit blocking_limit_result]
+      [Emit (assistant ~turn_id:"memory-recovered" "RECOVERED");
+       Emit (result ~turn_id:"memory-recovered" "RECOVERED")]
+      (fun cli_path ->
+        let attempt = run_direct_attempt ~hooks
+            ~on_memory_capacity_refusal:(Host.defer_for_capacity prepared)
+            ~base_path ~cli_path ~goal:"MEMORY_CAPACITY_GOAL" ~tools:[] () in
+        match attempt.result with
+        | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+    let read path = In_channel.with_open_bin path In_channel.input_all in
+    (* Start transmits composed context through --system-prompt-file.
+       Stdin carries the current goal, which must stay unchanged. *)
+    let first = read first_system_marker and second = read second_system_marker in
+    let first_input = read first_prompt_marker and second_input = read second_prompt_marker in
+    check string "memory-only retry preserves the exact stdin input" first_input second_input;
+    check bool "the CLI received a strictly smaller system context" true (String.length second < String.length first);
+    List.iter (fun id -> check bool (id ^ " originally transmitted") true
+      (String_util.contains_substring first ("MEMORY-" ^ id ^ "-"))) ["A";"B";"C";"D"];
+    List.iter (fun id -> check bool (id ^ " retained whole on the wire") true
+      (String_util.contains_substring second ("MEMORY-" ^ id ^ "-" ^ String.make 2000 'x'))) ["A";"B"];
+    List.iter (fun id -> check bool (id ^ " deferred from the wire") false
+      (String_util.contains_substring second ("MEMORY-" ^ id ^ "-"))) ["C";"D"];
+    check bool "the retry tells the model evidence is incomplete" true
+      (String_util.contains_substring second "capacity_deferred_count");
+    check bool "the user's goal survives memory reduction" true
+      (String_util.contains_substring second_input "MEMORY_CAPACITY_GOAL");
+    let receipts = read (IO.journal_path adapter) |> String.split_on_char '\n'
+      |> List.filter (fun row -> row<>"") |> List.map Yojson.Safe.from_string in
+    check (list string) "one retained memory projection, no new Jev evaluation"
+      ["delivery_projection_prepared"]
+      (List.map (fun row -> Yojson.Safe.Util.(row |> member "status" |> to_string)) receipts))
+;;
+
 let test_unshrinkable_context_limit_reports_no_effect ~overflow_frames () =
   let base_path = temp_workspace () in
   Fun.protect
@@ -3687,6 +3802,32 @@ let test_a_working_state_that_displaces_nothing_goes () =
       (working_state_not_carried ~reason:"displaces_atoms")
 ;;
 
+let test_quiet_result_preserves_claude_output_presence () =
+  let absent = {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"quiet"}|} in
+  let null_result = {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"quiet","result":null}|} in
+  List.iter (fun (label, final, policy, quiet) ->
+    let base_path = temp_workspace () in
+    Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+      with_fixture [Emit (assistant ~turn_id:"quiet" ""); Emit final] (fun cli_path ->
+        match run_keeper_turn ~accept:(Keeper_tooling.Response.accepts_response ~policy)
+            ~base_path ~cli_path ~goal:"Continue useful work or finish quietly if nothing changed." () with
+        | Error _ when not quiet -> ()
+        | Error error -> failf "%s: %s" label (Agent_core.Error.to_string error)
+        | Ok _ when not quiet -> failf "%s was incorrectly accepted as quiet" label
+        | Ok run_result ->
+          match Keeper_agent_run.For_testing.normalize_response_text_for_finalization
+              ~response_policy:policy ~runtime_id:"claude.claude" ~initial_messages:[]
+              ~run_result ~text:"" ~tool_names:[] () with
+          | Error error -> fail (Agent_core.Error.to_string error)
+          | Ok text -> check string label "" text)))
+    [ "explicit", result ~turn_id:"quiet" "", Keeper_tooling.Response.Allow_quiet_final, true
+    ; "absent", absent, Allow_quiet_final, false
+    ; "null", null_result, Allow_quiet_final, false
+    ; "direct", result ~turn_id:"quiet" "", Require_progress, false
+    ; "failure", generic_provider_rejection, Allow_quiet_final, false
+    ]
+;;
+
 let () =
   (* Pin the prompt directory explicitly. Under dune the registry falls back to
      [DUNE_SOURCEROOT], but a test executable run directly has neither that
@@ -3697,7 +3838,9 @@ let () =
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   run
     "keeper_claude_code_runtime"
-    [ ( "native action", [ test_case "exact provider identity" `Quick test_native_action_observer_keeps_exact_provider_identity ] )
+    [ ( "quiet completion", [test_case "explicit result survives adapter and caller acceptance" `Quick
+        test_quiet_result_preserves_claude_output_presence] )
+    ; ( "native action", [ test_case "exact provider identity" `Quick test_native_action_observer_keeps_exact_provider_identity ] )
     ; ( "usage scope"
       , [ test_case "result-only usage keeps client-turn scope" `Quick
             test_result_only_usage_keeps_client_turn_scope
@@ -3786,6 +3929,10 @@ let () =
             `Quick
             test_pre_effect_provider_rejection_keeps_failover_open
         ; test_case "quota enters recovery" `Quick test_quota_enters_typed_recovery
+        ; test_case "access refusal preserves structured status and rotation" `Quick
+            test_access_refusal_uses_status_and_keeps_pre_effect_rotation
+        ; test_case "access refusal after native tool remains fenced" `Quick
+            test_access_refusal_after_native_tool_remains_fenced
         ; test_case "quota after tool effect remains fenced" `Quick
             test_quota_after_tool_effect_remains_fenced
         ; test_case "quota after native tool remains fenced" `Quick
@@ -3806,6 +3953,8 @@ let () =
             "unbounded turn keeps subscription probe bounded"
             `Quick
             test_unbounded_turn_keeps_subscription_probe_bounded
+        ; test_case "memory reprojection reaches the real CLI fixture input" `Quick
+            test_memory_capacity_reprojection_reaches_cli_input
         ; test_case
             "unshrinkable blocking_limit reports no effect"
             `Quick

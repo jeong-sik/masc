@@ -1806,7 +1806,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
       | None -> ctx.hooks
       | Some (gate : Keeper_tool_approval_gate.t) ->
         let gate_hooks =
-          { Agent_core.Hooks.empty with pre_tool_use = Some gate.pre_tool_use }
+          { Agent_core.Hooks.empty with pre_tool_use = Some (gate.pre_tool_use ~identity_tool_index:gate.identity_tool_index) }
         in
         Some
           (match ctx.hooks with
@@ -2284,10 +2284,12 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
 ;;
 
 (* #27320: same-runtime retry stage for a typed provider context overflow on
-   the official-client lanes, whose seed history is cut against a declared
-   prompt byte cap ([Keeper_claude_code_runtime], [Keeper_codex_runtime]).
-   A ContextOverflow there means the cap over-states what the client
-   carries, not that the request was malformed: a smaller view of the SAME
+   the official-client lanes ([Keeper_claude_code_runtime],
+   [Keeper_codex_runtime]). Their first request carries the whole windowed
+   history, or the start-prompt ceiling a Muse or Antigravity runtime derives
+   from its declared window ([Runtime_instance.prompt_capacity_bytes]).
+   A ContextOverflow there means that view is more than the client carries,
+   not that the request was malformed: a smaller view of the SAME
    conversation can still answer the same turn, so the lane retries the same
    candidate rather than rotating runtimes immediately. The Agent Core lane
    answers the same refusal by moving the carried front instead
@@ -2324,6 +2326,9 @@ let context_overflow_shrink_sequence
       ?(shrink_capacity = fun ~capacity:_ ~default_capacity ->
         default_capacity)
       ?(final_shrink_capacity = fun ~capacity:_ -> None)
+      ?(on_memory_capacity_refusal : Keeper_memory_delivery_reprojection.t =
+          fun ~refusal:_ -> Ok Keeper_memory_delivery_reprojection.Unchanged)
+      ?(on_memory_retry = fun () -> ())
       ~starting_capacity
       ~same_run_retry_authorized
       ~shrink_admits_history
@@ -2339,6 +2344,12 @@ let context_overflow_shrink_sequence
       if Keeper_turn_driver_try_runtime.context_overflow_should_try_next error
          && same_run_retry_authorized ()
       then (
+        match on_memory_capacity_refusal ~refusal:error with
+        | Error _ -> failed
+        | Ok Keeper_memory_delivery_reprojection.Reprojected ->
+          on_memory_retry ();
+          go ~capacity ~shrink_attempt
+        | Ok Keeper_memory_delivery_reprojection.Unchanged ->
         let default_capacity =
           default_context_overflow_shrink_capacity ~capacity
         in
@@ -2754,7 +2765,22 @@ let native_retry_allowed (ctx : try_provider_ctx) =
     |> Keeper_provider_attempt_effect.allows_same_turn_retry
 ;;
 
+let memory_capacity_retry_sequence ~same_run_retry_authorized
+    ~on_memory_capacity_refusal ~on_projection_failure ~attempt () =
+  let rec go () = match attempt () with
+    | Ok _ as result -> result
+    | Error error as failed ->
+      if not (refusal_evicts error && same_run_retry_authorized ()) then failed
+      else match on_memory_capacity_refusal ~refusal:error with
+        | Error _ -> on_projection_failure (); failed
+        | Ok Keeper_memory_delivery_reprojection.Unchanged -> failed
+        | Ok Reprojected -> go () in
+  go ()
+;;
+
 let run_try_provider_with_carried_range_eviction
+      ?(on_memory_capacity_refusal = fun ~refusal:_ ->
+        Ok Keeper_memory_delivery_reprojection.Unchanged)
       ?continuation_checkpoint
       (ctx : try_provider_ctx)
       candidate
@@ -2766,7 +2792,7 @@ let run_try_provider_with_carried_range_eviction
       ~context_marks:ctx.context_marks state.ledger;
   let checkpoint_after = ref None in
   let success_sample = ref None in
-  let attempt () =
+  let attempt_once () =
     let attempt_result, attempt_checkpoint_after, attempt_success_sample =
       run_try_provider_attempt ?continuation_checkpoint ~state ctx candidate
     in
@@ -2774,8 +2800,14 @@ let run_try_provider_with_carried_range_eviction
     success_sample := attempt_success_sample;
     attempt_result
   in
+  let projection_failed = ref false in
   let same_run_retry_authorized () =
-    same_run_retry_allowed ctx.checkpoint_progress && native_retry_allowed ctx in
+    not !projection_failed
+    && same_run_retry_allowed ctx.checkpoint_progress && native_retry_allowed ctx in
+  let attempt () = memory_capacity_retry_sequence
+    ~same_run_retry_authorized ~on_memory_capacity_refusal
+    ~on_projection_failure:(fun () -> projection_failed := true)
+    ~attempt:attempt_once () in
   (* The lane's own answer to a size refusal, which depends on where the
      range started; what is left after it is the current turn's demotion. *)
   let boundary_resend ?(on_turn_start_extra = fun (_ : Keeper_carried_front.seed) -> ()) ~source () =
@@ -3073,12 +3105,13 @@ let retry_without_thinking_admitted (candidate : Runtime_candidate.t) =
 ;;
 
 let run_try_provider_with_truncation_recovery
+      ?on_memory_capacity_refusal
       ?continuation_checkpoint
       (ctx : try_provider_ctx)
       candidate
   =
   let first_result, checkpoint_after, success_sample =
-    run_try_provider_with_carried_range_eviction ?continuation_checkpoint ctx candidate
+    run_try_provider_with_carried_range_eviction ?on_memory_capacity_refusal ?continuation_checkpoint ctx candidate
   in
   let thinking_can_be_disabled = retry_without_thinking_admitted candidate in
   if not (native_retry_allowed ctx) then first_result, checkpoint_after, success_sample

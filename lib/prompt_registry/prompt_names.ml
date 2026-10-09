@@ -400,6 +400,14 @@ let keeper_world_event_rows_external_attention_title =
 let keeper_world_event_rows_ask_title = "keeper.world.event_rows.ask_title"
 let keeper_world_event_rows_ask_skipped = "keeper.world.event_rows.ask_skipped"
 
+let keeper_world_event_rows_delegate_reply_lookup =
+  "keeper.world.event_rows.delegate_reply_lookup"
+;;
+
+let keeper_world_event_rows_composition_detail_lookup =
+  "keeper.world.event_rows.composition_detail_lookup"
+;;
+
 let keeper_world_event_rows_completion_authority_title =
   "keeper.world.event_rows.completion_authority_title"
 ;;
@@ -677,6 +685,11 @@ let agent_core_agent_tool_prompt_param_description =
   "agent_core.agent_tool.prompt_param_description"
 ;;
 let keeper_context_workspace_memory_available = "keeper.context.workspace_memory.available"
+let keeper_context_workspace_memory_retrieval_direct = "keeper.context.workspace_memory.retrieval_direct"
+let keeper_context_workspace_memory_retrieval_discoverable = "keeper.context.workspace_memory.retrieval_discoverable"
+let keeper_context_workspace_memory_retrieval_unavailable = "keeper.context.workspace_memory.retrieval_unavailable"
+let keeper_context_workspace_memory_retrieval_preview = "keeper.context.workspace_memory.retrieval_preview"
+let keeper_context_workspace_memory_host_selected = "keeper.context.workspace_memory.host_selected"
 let keeper_context_workspace_memory_unavailable = "keeper.context.workspace_memory.unavailable"
 let keeper_context_workspace_memory_briefing_current = "keeper.context.workspace_memory.briefing_current"
 let keeper_context_workspace_memory_briefing_stale = "keeper.context.workspace_memory.briefing_stale"

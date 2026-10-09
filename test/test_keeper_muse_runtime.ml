@@ -432,9 +432,8 @@ let user_message text : Agent_core.Types.message =
 ;;
 
 (* MSP has no system-prompt channel: a start carries the system prompt, the
-   history and the goal in one prompt, in that order, and never measures
-   more than the window charged for it. *)
-let test_start_prompt_frames_and_fits_its_charge () =
+   history and the goal in one prompt, in that order. *)
+let test_start_prompt_frames_system_history_and_goal () =
   let system_prompt = "MUSE_SYSTEM_PROMPT" in
   let goal = "MUSE_GOAL" in
   let history = [ user_message "history-one"; user_message "history-two" ] in
@@ -450,15 +449,7 @@ let test_start_prompt_frames_and_fits_its_charge () =
      | [ Some system; Some first; Some second; Some goal_at ] ->
        check bool "system, history, goal in order" true
          (system < first && first < second && second < goal_at)
-     | _ -> fail "a section is missing from the start prompt");
-    let charged =
-      Adapter.reserved_prompt_bytes ~system_prompt ~goal
-      + List.fold_left
-          (fun total message -> total + Adapter.measure_model_input_message_bytes message)
-          0
-          history
-    in
-    check bool "the prompt fits what the window charged" true (String.length prompt <= charged)
+     | _ -> fail "a section is missing from the start prompt")
 ;;
 
 (* ── One turn through a scripted [muse serve] ────────────────────────── *)
@@ -531,7 +522,7 @@ assert init["method"] == "initialize", init
 if SCENARIO == "hang_init":
     drain()
 requested_capabilities = init["params"]["capabilities"]["requestedCapabilities"]
-expected_capabilities = [] if SCENARIO == "text_only" or (FIXTURE.get("usage_read_only") and requested_capabilities == []) else ["sessionMcp"]
+expected_capabilities = [] if SCENARIO in ("text_only", "quiet_final", "missing_final") or (FIXTURE.get("usage_read_only") and requested_capabilities == []) else ["sessionMcp"]
 assert init["params"]["capabilities"]["requestedCapabilities"] == expected_capabilities, init
 send({"jsonrpc": "2.0", "id": init["id"], "result": {
     "serverInfo": {"name": "muse-session-server", "version": "1.3.0"},
@@ -574,7 +565,7 @@ else:
 with open(os.path.join(HERE, "sessions.log"), "a") as handle:
     handle.write(mode + "\n")
 servers = opened["params"].get("config", {}).get("mcpServers", {})
-if SCENARIO == "text_only":
+if SCENARIO in ("text_only", "quiet_final", "missing_final"):
     assert servers == {}, servers
     server = None
 else:
@@ -765,6 +756,12 @@ if SCENARIO in ["turn_failed", "turn_failed_with_usage", "read_only_tool_failure
                              "cachedTokens": 0, "reasoningTokens": 0}
     notify("turn/completed", terminal)
     drain()
+if SCENARIO in ["quiet_final", "missing_final"]:
+    if SCENARIO == "quiet_final":
+        item("item/completed", {"itemId": "m-1", "kind": "agentMessage", "turnId": turn_id,
+                                "revision": 1, "status": "completed", "text": ""})
+    notify("turn/completed", {"sessionId": SESSION, "turnId": turn_id, "terminal": "completed"})
+    drain()
 if SCENARIO == "text_only":
     item("item/completed", {"itemId": "m-1", "kind": "agentMessage", "turnId": turn_id,
                             "revision": 1, "status": "completed", "text": "TEXT_ONLY_OK"})
@@ -881,8 +878,6 @@ let run_turn_with ?composed_context ?goal_blocks ?(accepts_image_input = false) 
   let outcome =
     Keeper_muse_runtime.run
       ?composed_context
-      ~prompt_capacity:
-        (Runtime_muse_prompt_capacity.start_prompt_bytes ~max_context:(Some 200_000))
       ~configured_reasoning_effort:(Runtime_inference.resolve_reasoning_effort ~runtime_id)
       ~turn_timeout_s:(Runtime_inference.resolve_turn_timeout_s ~runtime_id)
       ~quota_scope:(Runtime_quota_window.scope_of_muse_home selected_home)
@@ -2544,10 +2539,29 @@ let test_attached_mcp_approvals_are_exact () =
       (Adapter.native_posture_note Runtime_native_tools.Native_read))
 ;;
 
+let test_quiet_final_preserves_muse_output_presence () =
+  List.iter (fun (name, expected) ->
+    with_scripted_host ~fixture:(scenario name) (fun ~base_path ->
+      let run = run_turn_with ~tools:[] ~base_path ~tool:(masc_probe_tool (ref `Null)) () in
+      match run.outcome.result with
+      | Error error -> fail (Agent_core.Error.to_string error)
+      | Ok run_result ->
+        let policy = Keeper_tooling.Response.Allow_quiet_final in
+        check bool "adapter preserves explicit message presence for acceptance" expected
+          (Keeper_tooling.Response.accepts_response ~policy run_result.response);
+        check bool "adapter preserves explicit message presence for finalization" expected
+          (Result.is_ok (Keeper_agent_run.For_testing.normalize_response_text_for_finalization
+            ~response_policy:policy ~runtime_id ~initial_messages:[] ~run_result
+            ~text:"" ~tool_names:[] ()))))
+    ["quiet_final", true; "missing_final", false]
+;;
+
 let () =
   run
     "keeper_muse_runtime"
-    [ ( "stream"
+    [ ( "quiet completion", [test_case "explicit message survives adapter and acceptance" `Quick
+        test_quiet_final_preserves_muse_output_presence] )
+    ; ( "stream"
       , [ test_case "identity-less native tool leaves no open block" `Quick test_native_tool_without_identity_does_not_open_a_block
         ; test_case "projection order" `Quick test_stream_order
         ; test_case "unstreamed reply is forwarded at the end" `Quick
@@ -2579,8 +2593,8 @@ let () =
             test_documented_refusal_exits_are_not_dropped_connections
         ] )
     ; ( "prompt"
-      , [ test_case "start prompt frames and fits its charge" `Quick
-            test_start_prompt_frames_and_fits_its_charge
+      , [ test_case "start prompt frames system, history and goal" `Quick
+            test_start_prompt_frames_system_history_and_goal
         ] )
     ; ( "scripted host"
       , [ test_case "start and resume through muse serve with a MASC tool" `Quick

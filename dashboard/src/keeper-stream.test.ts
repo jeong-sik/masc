@@ -65,11 +65,33 @@ describe('Keeper operation stream projection', () => {
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TEXT_MESSAGE_CONTENT',
       delta: '안녕',
+      textStreamScope: 2,
     })).toBeNull()
 
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
     expect(entry?.text).toBe('안녕')
     expect(entry?.delivery).toBe('streaming')
+  })
+
+  it('preserves visible reply whitespace and SKILL-prefixed prose across deltas', () => {
+    assistantEntry()
+    const chunks = ['    ', '첫 줄', '\n', 'SKILL', '.md 설명', '\n\n\n', '끝  ', '\n\n']
+    for (const delta of chunks) {
+      expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'TEXT_MESSAGE_CONTENT', delta,
+      })).toBeNull()
+    }
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.text).toBe(chunks.join(''))
+    expect(entry?.rawText).toBe(chunks.join(''))
+    const reply = '    완료\nSKILL.md 설명\n\n\n끝  \n'
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM', name: 'KEEPER_REPLY_DETAILS',
+      value: { reply, turn_ref: 'turn-1', turn_outcome: 'visible_reply' },
+    })).toBeNull()
+    const completed = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(completed?.text).toBe(reply)
+    expect(completed?.rawText).toBe(reply)
   })
 
   it.each([
@@ -330,6 +352,7 @@ describe('Keeper operation stream projection', () => {
       type: 'CUSTOM',
       name: 'KEEPER_STREAM_MESSAGE_START',
       value: {
+        stream_scope: 4,
         provider_message_id: 'msg-1',
         model: 'claude-sonnet-5',
         usage: {
@@ -346,7 +369,7 @@ describe('Keeper operation stream projection', () => {
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
       name: 'KEEPER_STREAM_MESSAGE_DELTA',
-      value: { stop_reason: 'end_turn', usage: { output_tokens: 510 } },
+      value: { stream_scope: 4, stop_reason: 'end_turn', usage: { output_tokens: 510 } },
     })
 
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')

@@ -65,6 +65,7 @@ let runtime ?resets ~scope ~exhausted id : Tui_decode.runtime_option =
   ; ro_quota_scope = Some scope
   ; ro_rate_limited = false
   ; ro_rate_limit_resets_at = None
+  ; ro_failed_attempt = None
   }
 
 let contains ~affix text = Astring.String.is_infix ~affix text
@@ -630,9 +631,9 @@ let test_usd_cards_do_not_invent_a_percentage () =
     {|{"provider_usage_windows_since":1,"provider_usage_windows":[
       {"scope":"usd","scope_id":"usd","providers":[{"id":"openrouter","display_name":"OpenRouter"}],
        "state":"reported","windows":[
-        {"limit_id":null,"window":{"kind":"provider_label","label":"credit limit"},"role":"gates_model_calls",
+        {"limit_id":null,"window":{"kind":"provider_label","label":"API key credit limit"},"role":"gates_model_calls",
          "utilization":{"unit":"usd","value":5.125,"limit":20},"resets_at":null,"observed_at":2},
-        {"limit_id":null,"window":{"kind":"provider_label","label":"credit usage (all time)"},"role":"counts_other_use",
+        {"limit_id":null,"window":{"kind":"provider_label","label":"API key usage (all time)"},"role":"counts_other_use",
          "utilization":{"unit":"usd","value":12.3456,"limit":null},"resets_at":null,"observed_at":2}]}]}|}
   in
   let reading = match Masc.Tui_decode_usage.decode_provider_usage_windows json with
@@ -644,7 +645,7 @@ let test_usd_cards_do_not_invent_a_percentage () =
     let lines = List.map plain section.lines in
     let text = String.concat " " lines in
     List.iter (fun value -> check bool ("retains " ^ value) true (contains ~affix:value text))
-      [ "Used  25%"; "$5.1250"; "$20.0000"; "$14.8750"; "$12.3456"; "no key limit" ];
+      [ "Used $5.1250 / $20.0000"; "$5.1250"; "$20.0000"; "$14.8750"; "$12.3456"; "no key limit" ];
     check int "only the capped amount has a meter" 1
       (List.length (List.filter (contains ~affix:meter_open) lines));
     List.iter (fun line -> check bool "USD rows fit the terminal" true

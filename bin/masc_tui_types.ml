@@ -18,6 +18,8 @@ module Snapshot_read : sig
   val invalidate : t -> t
   (** Retire a pending owner without reusing its request number. *)
   val settle : t -> request -> t option
+  (** Whether a request is on the wire for this source right now. *)
+  val in_flight : t -> bool
 end = struct
   type request = int
   type t = { next : int; pending : request option }
@@ -38,6 +40,8 @@ end = struct
     match state.pending with
     | Some pending when pending = request -> Some { state with pending = None }
     | Some _ | None -> None
+
+  let in_flight state = Option.is_some state.pending
 end
 
 (** TUI shared types — split from masc_tui.ml (#3808) *)
@@ -144,8 +148,14 @@ let workspace_identity_of_refresh ~local_base_path reading =
   | Ok identity ->
     let local_base_path = canonical_path local_base_path in
     let server_base_path = canonical_path identity.Tui_decode.sid_base_path in
+    (* The server reports its cluster-aware masc root ([<base>/.masc] for the
+       default cluster, [<base>/.masc/clusters/<name>] otherwise). Compose
+       the local one with the same function from the same cluster selection:
+       a plain [<base>/.masc] calls every healthy non-default-cluster server
+       a mismatch, and every Keeper message is refused. *)
     let local_masc_root = canonical_path
-      (Filename.concat local_base_path Common.masc_dirname) in
+      (Workspace_utils.masc_root_dir_from ~base_path:local_base_path
+         ~cluster_name:(Env_config_core.cluster_name ())) in
     let server_masc_root = canonical_path identity.sid_masc_root in
     if String.equal local_base_path "" || String.equal server_base_path ""
        || String.equal server_masc_root "" || server_is_booting reading
@@ -2769,8 +2779,11 @@ and surface_needs_of_surface : surface -> surface_needs = function
         ; needs_provider_history = true
         ; needs_account_emails = true
       }
+  (* The Models pane names the account behind a provider id, so Config reads
+     account emails as Usage does. *)
+  | Config -> { nothing with needs_account_emails = true }
   | Memory | Lanes | Clients | Schedules | Verification | Harness | Fusion
-  | Repositories | Code | Changes | Connectors | Runtime | Config | Resources
+  | Repositories | Code | Changes | Connectors | Runtime | Resources
   | Tools ->
       nothing
 
@@ -3060,7 +3073,16 @@ let turn_log_holds_the_turn turn_log =
   match Masc_tui_keeper_chat_transcript.phase turn_log.tl_transcript with
   | Masc_tui_keeper_chat_transcript.Stream_failed _ -> true
   | Masc_tui_keeper_chat_transcript.Stream_ended ->
-      Option.is_some
+      Option.exists (fun (reply : Masc_tui_keeper_chat_transcript.reply) ->
+        match reply.reply_outcome with
+        | Masc.Keeper_turn_outcome.Continuation_checkpoint ->
+            (* An autonomous journal owns one finished turn. A direct
+               operation can continue past this checkpoint, so its final
+               history must remain visible if that later journal is lost. *)
+            (match Masc_tui_keeper_chat_log.source turn_log.tl_log with
+             | Autonomous_turn _ -> true
+             | Operation _ -> false)
+        | Visible_reply | Terminal_effect_settled | Awaiting_gate_approval | No_visible_reply -> true)
         (Masc_tui_keeper_chat_transcript.reply turn_log.tl_transcript)
   | Masc_tui_keeper_chat_transcript.Waiting
   | Masc_tui_keeper_chat_transcript.Working ->
@@ -3131,6 +3153,8 @@ type code_history_entry =
 
 type code_history_listing = {
   chl_entries: code_history_entry list;
+  chl_git_error: string option;
+      (** None means the Git read succeeded, including an empty result. *)
   chl_activity_note: string;
       (** Coverage or failure of the durable Keeper-change read. Git commits
           remain visible when this says unavailable. *)
@@ -3525,7 +3549,7 @@ type palette_mode =
 module Browser_lane_view = struct
   type source = Browser_lane.Lane_name.t = Live | Automation | Stagehand
   type browser = Firefox | Zen
-  type client = { client_id : string; browser : browser }
+  type client = { client_id : string; browser : browser; transport : Browser_lane.live_transport }
   type discovery = Read_after_discovery | Choose_client
   type tab = { id : int; title : string; url : string; active : bool }
   type page = {
@@ -3598,9 +3622,21 @@ module Browser_lane_view = struct
   type read_continuation = No_read_continuation | Deferred_read
   type read_view = Text_view | Scene_view of {
     scene_view : Browser_lane.scene_view; scope : Browser_lane.node_ref option }
+  (* A pointer gesture that was not sent, because the connection the
+     screenshot came from does not serve it. [serving_listed] is whether a
+     listed connection does. *)
+  type unserved_gesture = {
+    asked : Browser_lane.live_transport;
+    capability : Browser_lane.live_capability;
+    serving_listed : bool;
+  }
   (* [clients] is what the last discovery answered, and [None] until one has:
      a discovery that failed leaves no list rather than an empty one, so the
-     picker cannot tell an operator there is no browser when it could not ask. *)
+     picker cannot tell an operator there is no browser when it could not ask.
+
+     [unserved_gesture] is not a [load]: nothing was requested, so the read
+     and its badge stay what they were, and a background refresh does not
+     erase it. The operator's next input withdraws it. *)
   type t = {
     clients : client list option; selected_client : client option; client_picker : int option;
     source : source; selected_tab : int option; scroll : int;
@@ -3611,6 +3647,7 @@ module Browser_lane_view = struct
     read_view : read_view;
     refresh_pending : int option;
     read_continuation : read_continuation;
+    unserved_gesture : unserved_gesture option;
   }
 
   let source_name = Browser_lane.Lane_name.to_wire
@@ -3631,14 +3668,14 @@ module Browser_lane_view = struct
       source = Live; selected_tab = None; scroll = 0;
       reading = None; load = Idle; url_draft = None; scene = None; scene_cursor = 0; scene_scope = None;
       scene_guard = None; scene_delta = None; read_view = Text_view; refresh_pending = None;
-      read_continuation = No_read_continuation }
+      read_continuation = No_read_continuation; unserved_gesture = None }
   let switch_source source _t = { (create ()) with source }
   let refresh t = { t with selected_tab = None; scroll = 0; scene = None; scene_cursor = 0; scene_scope = None;
     scene_guard = None; scene_delta = None; read_view = Text_view }
   let after_action t =
     { t with reading = None; scene = None; scene_cursor = 0; scene_scope = None;
       scene_guard = None; scene_delta = None; selected_tab = None; scroll = 0; load = Idle;
-      read_continuation = No_read_continuation }
+      read_continuation = No_read_continuation; unserved_gesture = None }
   let defer_read t = { t with read_continuation = Deferred_read }
   let pending_read t = match t.read_continuation with
     | No_read_continuation -> None | Deferred_read -> Some Read
@@ -3686,10 +3723,152 @@ module Browser_lane_view = struct
     | Connected_browser client -> t.source = Live && t.selected_client = Some client
     | Stagehand_browser -> t.source = Stagehand
     | Automation_browser -> t.source = Automation
+  let transport_label = function
+    | Browser_lane.Web_extension -> "WebExtension"
+    | Browser_lane.Webdriver_bidi -> "BiDi"
+  let transport_names transports = String.concat " or " (List.map transport_label transports)
+  (* The operator's word for a piece of live work. They are short because a
+     connection's whole list has to fit one 80-column row beside its name. *)
+  let capability_word : Browser_lane.live_capability -> string = function
+    | Tab_listing -> "tab list"
+    | Text_read -> "text"
+    | Document_source -> "HTML"
+    | Element_inventory -> "elements"
+    | Viewport_capture -> "screenshot"
+    | Scene_read -> "scene"
+    | Dom_interaction -> "click/fill"
+    | Point_click -> "point click"
+    | Point_scroll -> "point scroll"
+    | Trusted_hover -> "hover"
+    | Trusted_drag -> "drag"
+    | Tab_activation -> "tab switch"
+  (* What a live connection of this transport leaves out, read from the lane's
+     table, and the transports that serve all of it. *)
+  let transport_lacks transport =
+    List.filter (fun capability -> not (Browser_lane.live_transport_serves transport capability))
+      Browser_lane.all_of_live_capability
+  let transports_serving_all capabilities =
+    List.filter (fun transport ->
+      List.for_all (Browser_lane.live_transport_serves transport) capabilities)
+      Browser_lane.all_of_live_transport
+  (* "WebExtension: no hover, drag". Every row that says what a connection
+     leaves out says it through here: the connection row, the picker's detail
+     row, a refused gesture and a refused Keeper call. *)
+  let lacking_clause transport capabilities =
+    transport_label transport ^ ": no "
+    ^ String.concat ", " (List.map capability_word capabilities)
+  let served_elsewhere capabilities =
+    match transports_serving_all capabilities with
+    | [] -> None
+    | serving ->
+        let them = match capabilities with [_] -> "it" | [] | _ :: _ :: _ -> "them" in
+        Some (transport_names serving ^ " serves " ^ them)
+  (* Where attaching a connection of one of these transports is written. *)
+  let transport_setup_row transports =
+    "Setup: " ^ String.concat " or " (List.map Browser_lane.live_transport_setup_doc transports)
+  let connection_name (client : client) =
+    browser_name client.browser ^ " · " ^ transport_label client.transport
+  (* The title names the connection; the connection row adds what it leaves
+     out. *)
+  let connection_label t = match t.source, t.selected_client with
+    | Live, Some client -> Some (connection_name client)
+    | Live, None | Automation, _ | Stagehand, _ -> browser_label t
+  let connection_summary t = match t.source, t.selected_client with
+    | Live, Some client ->
+        (match transport_lacks client.transport with
+         | [] -> Some (connection_name client)
+         | lacking ->
+             Some (browser_name client.browser ^ " · "
+                   ^ lacking_clause client.transport lacking))
+    | Live, None | Automation, _ | Stagehand, _ -> browser_label t
+  (* The Live connection row. It fits 80 columns up to the picker key; the
+     lane keys after that are in the footer too. *)
+  let live_connection_row t =
+    (match connection_summary t with
+     | Some connection -> "  Live " ^ connection
+     | None -> "  Live")
+    ^ " • b:choose browser • a:automation • c:stagehand"
   let browser_choice_label = function
-    | Connected_browser client -> browser_name client.browser ^ " · existing login · " ^ client.client_id
+    | Connected_browser client ->
+        connection_name client ^ " · existing login · " ^ client.client_id
     | Stagehand_browser -> "Stagehand Chromium · sentence actions · separate login"
     | Automation_browser -> "Independent Firefox/Zen · automation · separate login"
+  (* The row under the picker for the highlighted choice. A live connection
+     says what its transport leaves out and which transport serves that; the
+     server's own browsers are described by their row. *)
+  let browser_choice_detail = function
+    | Stagehand_browser | Automation_browser -> None
+    | Connected_browser client ->
+        (match transport_lacks client.transport with
+         | [] -> None
+         | lacking ->
+             Some (lacking_clause client.transport lacking
+                   ^ (match served_elsewhere lacking with
+                      | Some clause -> " · " ^ clause
+                      | None -> "")))
+  (* Whether the connection a screenshot came from takes a drag. A live
+     screenshot names its client, and the answer is the lane table's for that
+     client's transport. It is unknown when the view no longer holds that
+     client: the footer then says so instead of naming a rule. *)
+  type drag_support = Drag_served | Drag_needs of Browser_lane.live_transport list | Drag_unknown
+  let screenshot_client t (shot : screenshot) =
+    List.find_opt (fun (client : client) -> Some client.client_id = shot.client_id)
+      (Option.to_list t.selected_client @ listed_clients t)
+  let screenshot_drag_support t (shot : screenshot) =
+    match shot.source with
+    | Automation | Stagehand -> Drag_served
+    | Live ->
+        (match screenshot_client t shot with
+         | None -> Drag_unknown
+         | Some client ->
+             if Browser_lane.live_transport_serves client.transport Browser_lane.Trusted_drag
+             then Drag_served
+             else Drag_needs (Browser_lane.live_transports_serving Browser_lane.Trusted_drag))
+  let screenshot_drag_hint t shot =
+    match screenshot_drag_support t shot with
+    | Drag_served -> "drag: move"
+    | Drag_needs transports -> "drag: needs a " ^ transport_names transports ^ " connection"
+    | Drag_unknown -> "drag: connection not listed"
+  (* What becomes of a pointer gesture on a screenshot. Every gesture -- a
+     click, a drag, a wheel notch, a scroll key -- is decided here, so none
+     reaches a connection that does not serve it. A request in flight consumes
+     the gesture. A connection the view no longer holds is left to the server
+     to answer. *)
+  type pointer_decision =
+    | Pointer_consumed
+    | Pointer_unserved of unserved_gesture
+    | Pointer_send of operation
+  let pointer_decision t (shot : screenshot) action =
+    let send = Pointer_send (Viewport_pointer {tab_id = shot.tab_id; expected_url = shot.url; action}) in
+    if busy t then Pointer_consumed
+    else match shot.source, screenshot_client t shot with
+      | (Automation | Stagehand), _ | Live, None -> send
+      | Live, Some client ->
+          let capability = Browser_lane.live_capability_of_interaction action in
+          if Browser_lane.live_transport_serves client.transport capability then send
+          else
+            let serving_listed =
+              List.exists (fun (other : client) ->
+                Browser_lane.live_transport_serves other.transport capability)
+                (listed_clients t) in
+            Pointer_unserved {asked = client.transport; capability; serving_listed}
+  let refuse_gesture unserved t = {t with unserved_gesture = Some unserved}
+  let withdraw_unserved_gesture t = match t.unserved_gesture with
+    | None -> t
+    | Some _ -> {t with unserved_gesture = None}
+  (* The rows a refused gesture draws: what was not sent and why, then the
+     operator's next step. With a serving connection listed the step is the
+     picker and fits the same row; with none listed it is where attaching one
+     is written, on a row of its own. Each row fits 80 columns. *)
+  let unserved_gesture_rows (unserved : unserved_gesture) =
+    let cause = "Not sent · " ^ lacking_clause unserved.asked [unserved.capability] in
+    match Browser_lane.live_transports_serving unserved.capability with
+    | [] -> [cause]
+    | serving when unserved.serving_listed ->
+        [cause ^ " · " ^ transport_names serving ^ " serves it · b:choose browser"]
+    | serving ->
+        [cause ^ " · no " ^ transport_names serving ^ " connection is listed";
+         transport_setup_row serving]
   let request_body t =
     `Assoc ([ "lane", `String (source_name t.source) ]
             @ (match client_id t with None -> [] | Some id -> ["clientId", `String id])
@@ -3733,7 +3912,7 @@ module Browser_lane_view = struct
   let choose_client client t =
     { t with source = Live; selected_client = Some client; selected_tab = None;
       reading = None; scene = None; scene_cursor = 0; scene_scope = None; scene_guard = None; scene_delta = None;
-      scroll = 0; load = Idle; client_picker = None; read_view = Text_view }
+      scroll = 0; load = Idle; client_picker = None; read_view = Text_view; unserved_gesture = None }
   let choose_browser choice t =
     if browser_choice_selected t choice then { t with client_picker = None }
     else match choice with
@@ -3784,8 +3963,10 @@ module Browser_lane_view = struct
     let* browser = get (function
       | `String "firefox" -> Ok Firefox | `String "zen" -> Ok Zen
       | _ -> Error "unknown native browser") "browser" json in
+    let* transport = get string "transport" json in
+    let* transport = Browser_lane.live_transport_of_string transport in
     if String.trim client_id = "" then Error "empty browser client ID"
-    else Ok { client_id; browser }
+    else Ok { client_id; browser; transport }
   let decode_clients json =
     let* ok = get boolean "ok" json in
     if not ok then let* detail = get string "error" json in Error detail
@@ -4648,6 +4829,7 @@ type runtime_config_reading = {
   rcv_source_text : string;
   rcv_rows : (string * string) list list;
   rcv_metadata : Masc_tui_runtime_config_view.metadata;
+  rcv_account_emails : (Masc_tui_account_login.account_emails, string) result;
 }
 
 type runtime_config_edit_view = Config_edit_draft | Config_edit_current of (string * string) list list
@@ -4901,6 +5083,17 @@ type goal_action_pending =
 type preset_arm =
   | Restore_armed of string
   | Delete_armed of string
+
+(* A refused schedule create or modify form, kept on the Schedules surface for
+   the last-action window. [sfr_workspace] is the workspace the form was sent
+   to: a reading that only loses the identity, or reads that workspace again,
+   keeps the refusal; a reading of another workspace retires it. *)
+type schedule_form_refusal =
+  { sfr_action : string
+  ; sfr_detail : string
+  ; sfr_at : float
+  ; sfr_workspace : workspace_input_identity option
+  }
 
 type state = {
   mutable home_selected : home_action option;
@@ -5491,6 +5684,9 @@ type state = {
      screen showing it would be state nobody can see. *)
   mutable followed_from: (surface * string option) option;
   mutable keeper_cursor: int;
+  (* Roster row to return to when the Keeper message view closes. Kept by name
+     so an empty roster read, which clamps [keeper_cursor], does not lose it. *)
+  mutable keeper_message_return: string option;
   (* The first Keepers list row on screen, as the last frame drew it
      ([Keeper_list_scroll]). A cursor move to a row already on screen leaves
      the window where it is. *)
@@ -5548,6 +5744,10 @@ type state = {
   mutable transport_error: string option;
   mutable approval_snapshot: approval_snapshot option;
   mutable approvals_error: string option;
+  (* Ticket for the confirm-queue read outside the refresh bundle. The count
+     on Home draws from [approval_snapshot] alone, so a refused refresh answer
+     needs a read of its own to recover the count before the next cadence. *)
+  mutable approvals_summary_read: Snapshot_read.t;
   (* Questions Keepers put to a human, drawn beside the approvals. [None]
      means nothing has been read yet, which is not the same as a fleet with
      no open questions. *)
@@ -5759,6 +5959,9 @@ type state = {
      press on a different row re-arms for that row. *)
   mutable schedule_cancel_armed: string option;
   mutable schedule_cancel_error: (string * string) option;
+  (* The latest refused create/modify form, kept on the Schedules surface for
+     the last-action window. *)
+  mutable schedule_form_refusal: schedule_form_refusal option;
   mutable lanes: Tui_decode.keeper_lanes_snapshot option;
   mutable keeper_lanes_inflight: bool;
   mutable lane_inventory: Masc.Tui_decode_lane_inventory.snapshot option;
@@ -5896,6 +6099,7 @@ type state = {
   mutable runtime_lane_replacement_selection:
     (slot_editor_target * slot_editor_identity * slot_editor_identity) option;
   mutable runtime_lane_write: runtime_lane_write;
+  mutable runtime_dim_refusals: bool;
   mutable runtime_cursor: int;
   mutable runtime_surface_generation: int;
   mutable runtime_surface_inflight: int option;
@@ -7034,6 +7238,33 @@ let journal_held_request_ids state keeper_name =
   @ state.msg_journal_inflight
 ;;
 
+(* A journal's permanent failure says nothing about the exact operation
+   endpoint. On a later history refresh, retained partial direct logs still
+   need that endpoint until it records an ending. Reuse the source read's
+   inflight exclusion; the operation-only read never advances a journal cursor.
+   Autonomous turns have no operation record, and pane-owned requests settle
+   through their own subscription. *)
+let unavailable_journal_operation_targets state keeper_name =
+  state.msg_settled_logs
+  |> List.filter_map (fun log ->
+      let request_id = turn_log_request_id log in
+      let journal_unavailable = state.msg_journal_reads_refused
+        || List.mem request_id state.msg_journal_unavailable in
+      let read_inflight = List.mem request_id state.msg_journal_inflight in
+      let owned = List.exists (fun (entry : inflight) ->
+        String.equal entry.sent_request.request_id request_id) state.msg_inflight in
+      let terminal = Option.exists Keeper_chat_operation.is_terminal
+        (Masc_tui_keeper_chat_log.operation_state log.tl_log) in
+      match Masc_tui_keeper_chat_log.source log.tl_log with
+      | Operation operation_id
+        when String.equal (turn_log_keeper_name log) keeper_name
+             && journal_unavailable && not read_inflight && not owned && not terminal
+             && not (turn_log_holds_the_turn log) ->
+          Some operation_id
+      | Operation _ | Autonomous_turn _ -> None)
+  |> List.sort_uniq String.compare
+;;
+
 (* A settled log takes its place among the others by when its turn started,
    so a turn rebuilt from its journal sits where a turn settled live would
    have. A request already held by a log that stands for its turn is not
@@ -7407,12 +7638,23 @@ let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
       List.iter
         (fun (row : msg_entry) ->
           if String.equal row.me_request_id request_id then
-            List.iter
-              (Masc_tui_keeper_chat_transcript.note_skill_activity
-                 turn_log.tl_transcript)
+            List.iter (fun (skill : Masc_tui_keeper_chat_transcript.skill_activity) ->
+              let observed =
+                Option.is_some skill.turn_ref && Option.is_some skill.skill_tool_use_id
+                && List.exists (fun (item : Masc_tui_keeper_chat_transcript.drawn_item) ->
+                  match item.drawn with
+                  | Drawn_skill skills -> List.exists
+                      (fun (shown : Masc_tui_keeper_chat_transcript.skill_activity) ->
+                        shown.turn_ref = skill.turn_ref
+                        && shown.skill_tool_use_id = skill.skill_tool_use_id) skills
+                  | Drawn_tools _ | Drawn_thinking _ | Drawn_text _ | Drawn_reply _
+                  | Drawn_status _ | Drawn_error _ -> false)
+                    (Masc_tui_keeper_chat_transcript.drawn turn_log.tl_transcript) in
+              if turn_log_holds_the_turn turn_log || observed then
+                Masc_tui_keeper_chat_transcript.note_skill_activity turn_log.tl_transcript skill)
               row.me_skill_block)
         rows)
-    (List.filter turn_log_holds_the_turn (settled_logs_for_keeper state keeper_name))
+    (selected_source_logs_for_keeper state keeper_name)
 ;;
 
 (* Settling a turn: its log is committed and, when it has anything to draw,
@@ -7573,20 +7815,10 @@ let keeper_chat_control_generation state keeper_name =
 
 (* These messages never paused the server. Explicit local resume authorizes
    their first POST; an actual stop still needs the server's resume receipt. *)
-let resume_preflight_keeper_input ~owner_paused state keeper_name =
+let can_resume_preflight_keeper_input state keeper_name =
   let holds = List.filter_map (fun (name, _, intervention) ->
     if name = keeper_name then Some intervention else None) state.keeper_interactive_waiting in
-  if not owner_paused
-     && List.mem Retained_before_dispatch holds && not (List.mem Retained_after_stop holds)
-  then begin
-    let generation = keeper_chat_control_generation state keeper_name in
-    state.keeper_interactive_waiting <- List.map (fun (name, id, intervention) ->
-      let intervention = match intervention with
-        | Retained_before_dispatch when name = keeper_name -> Awaiting_control {generation; target=None}
-        | Awaiting_control _ | Retained_after_stop | Retained_before_dispatch -> intervention in
-      name, id, intervention) state.keeper_interactive_waiting;
-    true
-  end else false
+  List.mem Retained_before_dispatch holds && not (List.mem Retained_after_stop holds)
 
 (* The holds a queue keeps when its chat survives an unread identity: a hold
    it already had stays as it was, and a steer queued behind a stop is held
@@ -7610,10 +7842,9 @@ let advance_keeper_chat_control state keeper_name =
     List.remove_assoc keeper_name state.keeper_chat_control_generations;
   generation
 
-let begin_keeper_chat_control state keeper_name =
-  let generation = advance_keeper_chat_control state keeper_name in
-  state.keeper_chat_control_pending <- (keeper_name, Mtime_clock.elapsed_ns ()) :: List.remove_assoc keeper_name state.keeper_chat_control_pending;
-  state.keeper_chat_control_tokens <- List.remove_assoc keeper_name state.keeper_chat_control_tokens;
+(* A server control that stops or resumes the owner supersedes the priority
+   requests still waiting locally for that Keeper. *)
+let clear_keeper_priority_requests state keeper_name =
   state.keeper_run_next_pending <- List.filter
     (fun (request : Masc_tui_keeper_chat_projection.request) ->
        not (String.equal request.keeper_name keeper_name))
@@ -7622,6 +7853,21 @@ let begin_keeper_chat_control state keeper_name =
     (fun (request : Masc_tui_keeper_chat_projection.request) ->
        not (String.equal request.keeper_name keeper_name))
     state.keeper_run_next_ready;
+  state.keeper_auto_priority_pending <- List.filter
+    (fun (name, _) -> not (String.equal name keeper_name))
+    state.keeper_auto_priority_pending
+
+(* [preserve_priority_requests] is for a resume that first reads the owner's
+   state: when the read fails or the owner is already running, no server
+   control happened, so waiting priority requests stay. The caller clears them
+   with [clear_keeper_priority_requests] once a server resume is confirmed. *)
+let begin_keeper_chat_control ?(preserve_input_holds = false)
+    ?(preserve_priority_requests = false) state keeper_name =
+  let previous_generation = keeper_chat_control_generation state keeper_name in
+  let generation = advance_keeper_chat_control state keeper_name in
+  state.keeper_chat_control_pending <- (keeper_name, Mtime_clock.elapsed_ns ()) :: List.remove_assoc keeper_name state.keeper_chat_control_pending;
+  state.keeper_chat_control_tokens <- List.remove_assoc keeper_name state.keeper_chat_control_tokens;
+  if not preserve_priority_requests then clear_keeper_priority_requests state keeper_name;
   (* Keep acknowledged evidence and active callbacks until the control's
      semantic result arrives. The token callback alone is not that result. *)
   let previous = List.concat_map (fun (name, control) ->
@@ -7635,12 +7881,15 @@ let begin_keeper_chat_control state keeper_name =
   state.keeper_priority_controls <-
     (keeper_name, { priority_generation = generation; priority_requests = requests }) ::
     state.keeper_priority_controls;
-  state.keeper_auto_priority_pending <- List.filter
-    (fun (name, _) -> not (String.equal name keeper_name))
-    state.keeper_auto_priority_pending;
   state.keeper_interactive_waiting <- List.map (fun (name, id, intervention) ->
-    name, id, (if name = keeper_name then Retained_after_stop else intervention))
-    state.keeper_interactive_waiting;
+    let intervention =
+      if name <> keeper_name then intervention
+      else if not preserve_input_holds then Retained_after_stop
+      else match intervention with
+        | Awaiting_control held when held.generation = previous_generation ->
+            Awaiting_control {held with generation}
+        | Awaiting_control _ | Retained_after_stop | Retained_before_dispatch -> intervention in
+    name, id, intervention) state.keeper_interactive_waiting;
   generation
 
 let keeper_run_next_receipt_provisional state request =
@@ -7709,9 +7958,13 @@ let finish_keeper_chat_control state keeper_name ~generation =
   end
 
 let release_retained_keeper_input state keeper_name =
-  state.keeper_interactive_waiting <- List.filter (fun (name, _, intervention) ->
-    name <> keeper_name || match intervention with
-    | Retained_after_stop | Retained_before_dispatch -> false | Awaiting_control _ -> true)
+  let generation = keeper_chat_control_generation state keeper_name in
+  state.keeper_interactive_waiting <- List.map (fun (name, id, intervention) ->
+    let intervention = match intervention with
+      | Retained_after_stop | Retained_before_dispatch when name = keeper_name ->
+          Awaiting_control {generation; target=None}
+      | Retained_after_stop | Retained_before_dispatch | Awaiting_control _ -> intervention in
+    name, id, intervention)
     state.keeper_interactive_waiting
 
 (* A receipt callback finishes control before its outcome arrives, advancing
@@ -8548,6 +8801,7 @@ let create_state
   opening_notice = None;
   followed_from = None;
   keeper_cursor = 0;
+  keeper_message_return = None;
   keeper_list_scroll = 0;
   runtime_pick_keeper = None;
   runtime_pick_list = Masc_tui_pick_list.closed;
@@ -8585,6 +8839,7 @@ let create_state
   transport_error = None;
   approval_snapshot = None;
   approvals_error = None;
+  approvals_summary_read = Snapshot_read.idle;
   asks_snapshot = None;
   asks_error = None;
   ask_answer_mode = Ask_browsing;
@@ -8683,6 +8938,7 @@ let create_state
   keeper_schedules_error = None;
   schedule_cancel_armed = None;
   schedule_cancel_error = None;
+  schedule_form_refusal = None;
   lanes = None;
   keeper_lanes_inflight = false;
   lane_inventory = None;
@@ -8771,6 +9027,7 @@ let create_state
   runtime_lane_cursor_after_write = None;
   runtime_lane_replacement_selection = None;
   runtime_lane_write = Lane_write_idle;
+  runtime_dim_refusals = true;
   runtime_cursor = 0;
   runtime_surface_generation = 0;
   runtime_surface_inflight = None;
@@ -9369,6 +9626,47 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
         | _ -> true)
       rows
   in
+  (* Partial selected logs own the exact activities already drawn, even
+     when they cannot own the final reply. Keep unmatched durable activities
+     and evidence gaps; a call name or transcript position is not identity. *)
+  let partial_logs = selected_source_logs_for_keeper state keeper_name
+    |> List.filter (fun log -> not (turn_log_holds_the_turn log)) in
+  let remaining_activity (row : msg_entry) =
+    let module Transcript = Masc_tui_keeper_chat_transcript in
+    let drawn = partial_logs
+      |> List.filter (fun log -> String.equal row.me_request_id (turn_log_execution_id log))
+      |> List.concat_map (fun log -> Transcript.drawn log.tl_transcript) in
+    if drawn = [] then Some row else match row.me_role with
+    | Message_tool ->
+        (match row.me_tool_block with
+         | None -> Some row
+         | Some block ->
+             let executions = List.concat_map (fun (item : Transcript.drawn_item) ->
+               match item.drawn with
+               | Drawn_tools observed -> List.filter_map (fun (activity : Transcript.tool_activity) ->
+                   activity.execution_id) observed.activities
+               | _ -> []) drawn in
+             let activities = List.filter (fun (activity : Transcript.tool_activity) ->
+               not (Option.exists (fun id -> List.mem id executions) activity.execution_id)) block.activities in
+             if activities = [] && block.omitted_steps = 0 then None
+             else Some {row with me_tool_block=Some (Transcript.tool_block
+               ~omitted_steps:block.omitted_steps activities)})
+    | Message_skill _ when row.me_skill_block <> [] ->
+        let observed = List.concat_map (fun (item : Transcript.drawn_item) ->
+          match item.drawn with Drawn_skill skills -> skills | _ -> []) drawn in
+        let skills = List.filter (fun (skill : Transcript.skill_activity) ->
+          not (List.exists (fun (shown : Transcript.skill_activity) ->
+            Option.is_some skill.skill_tool_use_id
+            && skill.skill_tool_use_id = shown.skill_tool_use_id
+            && skill.turn_ref = shown.turn_ref
+            && skill.runtime_id = shown.runtime_id) observed)) row.me_skill_block in
+        if skills = [] then None
+        else Some {row with me_skill_block=skills;
+          me_role=Message_skill (Transcript.skill_block_state skills)}
+    | _ -> Some row
+  in
+  let loaded = List.filter_map remaining_activity loaded in
+  let session = List.filter_map remaining_activity session in
   let loaded = without_partial_replies loaded in
   let session = without_partial_replies session in
   chat_timeline ~loaded ~session ~queued_request_ids |> chat_timeline_rows
@@ -11289,6 +11587,19 @@ let runtime_spent_usage (resolved : Tui_decode.runtime_resolved_snapshot)
 let runtime_option_refusing (option : Tui_decode.runtime_option) =
   option.Tui_decode.ro_quota_exhausted || option.Tui_decode.ro_rate_limited
 
+let runtime_row_deemphasized state (option : Tui_decode.runtime_option) =
+  state.runtime_dim_refusals
+  && (runtime_option_refusing option
+      || match state.runtime_surface with
+         | None -> false
+         | Some snapshot ->
+             (match runtime_spent_usage snapshot.Tui_decode.rss_resolved option with
+              | Ok (_ :: _) -> true
+              | Ok [] | Error _ -> false))
+
+let toggle_runtime_dim_refusals state =
+  state.runtime_dim_refusals <- not state.runtime_dim_refusals
+
 let runtime_quota_label (runtime : Tui_decode.runtime_option) =
   if not runtime.ro_quota_exhausted then None
   else Some (match runtime.ro_quota_resets_at with
@@ -11302,6 +11613,28 @@ let runtime_rate_limit_label (runtime : Tui_decode.runtime_option) =
     | Some at -> let tm = Unix.localtime at in
         Printf.sprintf "rate limited (retry %02d:%02d)" tm.Unix.tm_hour tm.Unix.tm_min
     | None -> "rate limited")
+
+(* What the last failed attempt was, in the words the failure route uses. *)
+let runtime_attempt_failure_word = function
+  | Tui_decode.Attempt_failure Runtime_candidate_backpressure.Server_error -> "server error"
+  | Tui_decode.Attempt_failure Runtime_candidate_backpressure.Provider_capacity ->
+      "provider at capacity"
+  | Tui_decode.Attempt_failure Runtime_candidate_backpressure.Network_transient ->
+      "network failure"
+  | Tui_decode.Attempt_failure Runtime_candidate_backpressure.Provider_timeout -> "timeout"
+  | Tui_decode.Unrecognised_attempt_failure raw -> raw
+
+(* The failed attempt the lane walk orders by, for the runtime detail. It says
+   what the walk does with it: the Keeper that saw it tries the runtime first
+   on its next cycle, every other Keeper tries it after the candidates that
+   answered, and only an answer clears it. *)
+let runtime_failed_attempt_text (attempt : Tui_decode.runtime_failed_attempt) =
+  let tm = Unix.localtime attempt.rfa_noted_at in
+  Printf.sprintf
+    "%s at %02d:%02d, seen by %s; other Keepers try it after the ones that \
+     answered, until it answers"
+    (runtime_attempt_failure_word attempt.rfa_failure)
+    tm.Unix.tm_hour tm.Unix.tm_min attempt.rfa_recorded_by
 
 let runtime_usage_label state runtime =
   match state.runtime_surface with
@@ -12085,8 +12418,14 @@ let keeper_effects_at_the_gate (state : state) ~keeper_name =
    returns and the pane draws what this returns, which is the arrangement that
    kept the unavailable row from going missing while the send hint still read
    Enter:send. Folding would have been a second place to disagree. *)
-let keeper_message_unfolded_status_rows (_state : state) live ~now =
-  Masc_tui_keeper_chat_transcript.status_rows ~now live
+let keeper_message_timing_visible (state : state) =
+  match state.msg_origin_display with
+  | Masc_tui_message_layout.Origin_bare -> false
+  | Origin_inline | Origin_row -> true
+
+let keeper_message_unfolded_status_rows (state : state) live ~now =
+  Masc_tui_keeper_chat_transcript.status_rows
+    ~show_timing:(keeper_message_timing_visible state) ~now live
 
 (* The most recently submitted input can be queued behind the execution that
    is streaming. Status follows the selected execution, including a journal
@@ -12096,14 +12435,37 @@ let keeper_message_status_log (state : state) =
   | None -> None
   | Some keeper_name ->
       let logs = selected_source_logs_for_keeper state keeper_name in
-      (match List.find_opt (fun log ->
-          Masc_tui_keeper_chat_transcript.phase log.tl_transcript = Working
-          && not (observed_log_has_ended state log)
-          && not (observed_log_is_unavailable state log)) logs with
+      let owned log =
+        List.exists (fun (entry : inflight) ->
+          turn_log_keeper_name entry.log = keeper_name
+          && turn_log_execution_id entry.log = turn_log_execution_id log)
+          state.msg_inflight
+      in
+      let autonomous log =
+        List.exists (fun (source, _) -> source = Masc_tui_keeper_chat_log.source log.tl_log)
+          (autonomous_journal_candidates ~keeper_name state.keeper_turns)
+      in
+      let observed log =
+        match Masc_tui_keeper_chat_log.operation_state log.tl_log with
+        | Some (Keeper_chat_operation.Running _) -> true
+        | Some (Queued | Succeeded _ | Failed _ | Cancelled _) | None -> false
+      in
+      let current log = owned log || autonomous log || observed log in
+      let working log =
+        Masc_tui_keeper_chat_transcript.phase log.tl_transcript = Working
+        && not (observed_log_has_ended state log)
+        && not (observed_log_is_unavailable state log)
+      in
+      let active = List.find_map (fun authority ->
+        List.find_opt (fun log -> authority log && working log) logs)
+        [owned; autonomous; observed] in
+      (match active with
        | Some log -> Some log
        | None ->
            match state.msg_live with
-           | Some log when turn_log_keeper_name log = keeper_name -> Some log
+           | Some log when turn_log_keeper_name log = keeper_name
+               && (Masc_tui_keeper_chat_transcript.phase log.tl_transcript <> Working
+                   || current log) -> Some log
            | Some _ | None ->
                List.find_opt (fun log ->
                  Masc_tui_keeper_chat_transcript.awaiting_continuation log.tl_transcript
@@ -12249,6 +12611,7 @@ let keeper_message_diagnostic_activity_rows (state : state) =
           ; keys = "" } ]
       | None ->
         Masc_tui_answering.chat_activity ~frame:state.activity_frame
+          ~show_timing:(keeper_message_timing_visible state)
           ?stop_keys:(keeper_observed_stop_hint state)
           ~now:(Unix.gettimeofday ()) ~keeper_name ~error:state.keeper_turns_error
           state.keeper_turns
@@ -12529,6 +12892,7 @@ let keeper_message_inflight_rows (state : state) ~chat_cols ~now =
   in
   let summary group =
     let age =
+      if not (keeper_message_timing_visible state) then "" else
       match Masc_tui_message_layout.age_text ~now ~since:group.representative.sent_at with
       | None -> ""
       | Some text -> " · " ^ text

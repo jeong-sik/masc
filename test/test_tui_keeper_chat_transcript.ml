@@ -12,7 +12,13 @@ let fresh () =
   Transcript.create ~keeper_name:"keeper.one" ~request_id:"req-1"
     ~started_at:origin
 
-let rows ?(now = origin) t = Transcript.status_rows ~now t
+let missing_skill_activity () =
+  Transcript.make_skill_activity ~invocation:Transcript.Instruction_read
+    ~skill_name:"source-review" ~skill_tool_use_id:"missing-read"
+    ~turn_ref:"trace-1#3" ~state:Transcript.Skill_delivered ~actions:[] ()
+
+let rows ?(show_timing = true) ?(now = origin) t =
+  Transcript.status_rows ~show_timing ~now t
 
 let feed ?(now = origin) t deltas =
   List.iter (Transcript.apply ~now t) deltas
@@ -99,9 +105,9 @@ let test_text_and_thinking_accumulate () =
   let t = fresh () in
   feed t
     [ Live.Run_started
-    ; Live.Text "Let me "
+    ; Live.Text {text="Let me "; stream_scope=None}
     ; Live.Thinking "checking "
-    ; Live.Text "look."
+    ; Live.Text {text="look."; stream_scope=None}
     ; Live.Thinking "the caller"
     ];
   check string "text is joined in arrival order" "Let me look." (Transcript.text t);
@@ -265,13 +271,13 @@ let test_runtime_attempt_keeps_the_earlier_attempt_superseded () =
   let t = fresh () in
   feed t
     [ Live.Run_started
-    ; Live.Text "finished before the tool"
+    ; Live.Text {text="finished before the tool"; stream_scope=None}
     ; tool_started "call-kept" "Read"
     ; tool_ended "call-kept"
     ; tool_result "call-kept" "exec-kept"
-    ; Live.Text "still growing when the attempt turned over"
+    ; Live.Text {text="still growing when the attempt turned over"; stream_scope=None}
     ; Live.Runtime_attempt_started { runtime_id = Some "claude-3-7-sonnet"; attempt_index = Some 1 }
-    ; Live.Text "second attempt"
+    ; Live.Text {text="second attempt"; stream_scope=None}
     ];
   check int "one retry" 1 (Transcript.attempt t);
   match Transcript.trail t with
@@ -303,13 +309,13 @@ let test_runtime_attempt_restarts_the_per_attempt_totals () =
   feed t
     [ Live.Run_started
     ; Live.Thinking "failed reasoning"
-    ; Live.Text "failed reply"
+    ; Live.Text {text="failed reply"; stream_scope=None}
     ; tool_started "call-kept" "Read"
     ; tool_ended "call-kept"
     ; tool_result "call-kept" "exec-kept"
     ; Live.Runtime_attempt_started { runtime_id = Some "gpt-4o"; attempt_index = Some 1 }
     ; Live.Thinking "fallback reasoning"
-    ; Live.Text "fallback reply"
+    ; Live.Text {text="fallback reply"; stream_scope=None}
     ];
   check string "text is the current attempt's" "fallback reply" (Transcript.text t);
   check string "thinking is the current attempt's" "fallback reasoning"
@@ -324,7 +330,7 @@ let test_runtime_attempt_restarts_the_per_attempt_totals () =
   (* A second retry folds only what came after the first boundary: the two
      superseded attempts sit side by side, each with its number, and neither
      block holds a block. *)
-  feed t [ Live.Runtime_attempt_started { runtime_id = Some "deepseek-r1"; attempt_index = Some 2 }; Live.Text "third try" ];
+  feed t [ Live.Runtime_attempt_started { runtime_id = Some "deepseek-r1"; attempt_index = Some 2 }; Live.Text {text="third try"; stream_scope=None} ];
   check int "two retries" 2 (Transcript.attempt t);
   match Transcript.trail t with
   | [ Transcript.Trail_superseded { attempt = 0; items = first; _ }
@@ -363,7 +369,7 @@ let reply_details ?(reply = "Let me look.") () =
    would draw the same words twice. *)
 let test_reply_details_is_recorded_not_drawn () =
   let t = fresh () in
-  feed t [ Live.Run_started; Live.Text "Let me look." ];
+  feed t [ Live.Run_started; Live.Text {text="Let me look."; stream_scope=None} ];
   let before = Transcript.trail t in
   let recorded t =
     Option.map
@@ -418,8 +424,8 @@ let test_drawn_is_one_row_when_the_record_differs_from_the_stream_by_whitespace 
     ; Live.Thinking "look first"
     ; tool_started "c1" "read_file"
     ; tool_ended "c1"
-    ; Live.Text "Let me "
-    ; Live.Text "look.\n"
+    ; Live.Text {text="Let me "; stream_scope=None}
+    ; Live.Text {text="look.\n"; stream_scope=None}
     ; reply_details ~reply:"Let me look." ()
     ];
   check (list string) "one row per stretch, the last one the record's"
@@ -438,8 +444,8 @@ let test_drawn_places_a_reply_by_its_operation_not_by_its_text () =
     Transcript.create ~keeper_name:"keeper.one" ~request_id:"req-2"
       ~started_at:(origin +. 1.)
   in
-  feed earlier [ Live.Run_started; Live.Text "Done." ];
-  feed later [ Live.Run_started; Live.Text "Done."; reply_details ~reply:"Done." () ];
+  feed earlier [ Live.Run_started; Live.Text {text="Done."; stream_scope=None} ];
+  feed later [ Live.Run_started; Live.Text {text="Done."; stream_scope=None}; reply_details ~reply:"Done." () ];
   check (list string) "the earlier turn, still streaming, keeps its stream"
     [ "text:Done." ] (drawn earlier);
   check (list string) "the later turn's row is its own record"
@@ -458,12 +464,12 @@ let test_drawn_replaces_the_streamed_text_with_a_differing_reply () =
   let t = fresh () in
   feed t
     [ Live.Run_started
-    ; Live.Text "first try"
+    ; Live.Text {text="first try"; stream_scope=None}
     ; Live.Runtime_attempt_started { runtime_id = None; attempt_index = None }
-    ; Live.Text "Let me check."
+    ; Live.Text {text="Let me check."; stream_scope=None}
     ; tool_started "c1" "read_file"
     ; tool_ended "c1"
-    ; Live.Text "Here it is.<|eot|>"
+    ; Live.Text {text="Here it is.<|eot|>"; stream_scope=None}
     ; reply_details ~reply:"Here it is." ()
     ];
   check (list string) "only the last stretch gives way to the recorded reply"
@@ -482,10 +488,10 @@ let test_drawn_keeps_earlier_rounds_when_the_reply_is_the_last_stretch () =
   let t = fresh () in
   feed t
     [ Live.Run_started
-    ; Live.Text "Let me check."
+    ; Live.Text {text="Let me check."; stream_scope=None}
     ; tool_started "c1" "read_file"
     ; tool_ended "c1"
-    ; Live.Text "Done."
+    ; Live.Text {text="Done."; stream_scope=None}
     ; reply_details ~reply:"Done." ()
     ];
   check (list string) "the earlier round stays as it streamed, the last is the record"
@@ -504,7 +510,7 @@ let test_drawn_keeps_pre_tool_progress_when_nothing_streamed_after () =
   let t = fresh () in
   feed t
     [ Live.Run_started
-    ; Live.Text "Let me check."
+    ; Live.Text {text="Let me check."; stream_scope=None}
     ; tool_started "c1" "read_file"
     ; tool_ended "c1"
     ; reply_details ~reply:"Done." ()
@@ -515,6 +521,112 @@ let test_drawn_keeps_pre_tool_progress_when_nothing_streamed_after () =
     ; "reply:Done."
     ]
     (drawn t)
+;;
+
+(* A durable skill receipt can survive a missing stream call. With no
+   observed boundary, the last text may have preceded that read; it cannot
+   safely stand in for the terminal reply. *)
+let test_drawn_preserves_text_when_a_skill_round_was_unobserved () =
+  let t = fresh () in
+  feed t [ Live.Run_started; Live.Text {text="Let me check."; stream_scope=None} ];
+  Transcript.note_skill_activity t (missing_skill_activity ());
+  check (list string) "the receipt preserves the observed progress while running"
+    [ "text:Let me check."; "skill:source-review" ] (drawn t);
+  feed t [ reply_details ~reply:"Done." () ];
+  check (list string) "the reply follows the unseen read without replacing progress"
+    [ "text:Let me check."; "skill:source-review"; "reply:Done." ] (drawn t)
+;;
+
+let test_final_response_boundary_survives_a_missing_skill_call () =
+  List.iter (fun stop_reason ->
+    List.iter (fun final_text ->
+      List.iter (fun progress ->
+        let t = fresh () in
+        feed t [Live.Run_started; Live.Stream_model_started {stream_scope=Some 1; model="observed"};
+          Live.Text {text=progress; stream_scope=None};
+          Live.Stream_details {stream_scope=Some 1; usage=None; stop_reason=Some Agent_core.Types.StopToolUse};
+          Live.Stream_model_started {stream_scope=Some 2; model="observed"}];
+        Option.iter (fun text -> feed t [Live.Text {text=text; stream_scope=None}]) final_text;
+        feed t [Live.Stream_details {stream_scope=Some 2; usage=None; stop_reason=Some stop_reason}];
+        Transcript.note_skill_activity t (missing_skill_activity ());
+        feed t [reply_details ~reply:"Done." ()];
+        check (list string) "only text observed after the terminal boundary is replaced"
+          ["text:" ^ progress; "skill:source-review"; "reply:Done."] (drawn t))
+        ["Let me check."; "Done."])
+      [Some "Done."; None])
+    [Agent_core.Types.EndTurn; StopSequence; MaxTokens; Refusal; ContentFilter;
+     RepetitionTruncation; PauseTurn; Compaction; ContextWindowExceeded]
+;;
+
+let test_stop_from_an_unobserved_response_preserves_progress () =
+  List.iter (fun stopped_scope ->
+    let t = fresh () in
+    feed t [Live.Run_started;
+      Live.Stream_model_started {stream_scope=Some 1; model="observed"};
+      Live.Text {text="Let me check."; stream_scope=None};
+      (* The tool call and the next MessageStart were not retained. *)
+      Live.Stream_details {stream_scope=stopped_scope; usage=None; stop_reason=Some Agent_core.Types.EndTurn}];
+    Transcript.note_skill_activity t (missing_skill_activity ());
+    feed t [reply_details ~reply:"Done." ()];
+    check (list string) "another or unidentified response ending cannot consume earlier progress"
+      ["text:Let me check."; "skill:source-review"; "reply:Done."] (drawn t))
+    [Some 2; None]
+;;
+
+let test_repeated_response_start_is_not_a_boundary () =
+  List.iter (fun tail ->
+    let t = fresh () in
+    let start = Live.Stream_model_started {stream_scope=Some 4; model="observed"} in
+    feed t [Live.Run_started; start; Live.Text {text="Done"; stream_scope=None}; start];
+    Option.iter (fun text -> feed t [Live.Text {text=text; stream_scope=None}]) tail;
+    feed t [Live.Stream_details {stream_scope=Some 4; usage=None; stop_reason=Some Agent_core.Types.EndTurn}];
+    Transcript.note_skill_activity t (missing_skill_activity ());
+    feed t [reply_details ~reply:"Done." ()];
+    check (list string) "an identical start cannot leave a prefix or a second final answer"
+      ["skill:source-review"; "reply:Done."] (drawn t)) [None; Some "."]
+;;
+
+let test_scoped_text_retires_prior_response_metadata () =
+  let t = fresh () in
+  feed t [Live.Run_started;
+    Live.Stream_model_started {stream_scope=Some 1; model="first"};
+    Live.Stream_details {stream_scope=Some 1;
+      usage=Some {input_tokens=Some 100; output_tokens=Some 20;
+        cache_read_input_tokens=None; cache_creation_input_tokens=None};
+      stop_reason=Some Agent_core.Types.EndTurn};
+    Live.Text {text="next response"; stream_scope=Some 2}];
+  check (option string) "a distinct text scope retires prior counters and stop" None
+    (Transcript.stream_details_text ~keeper_name:"keeper.one" (Some t));
+  feed t [Live.Stream_details {stream_scope=Some 2; usage=None;
+    stop_reason=Some Agent_core.Types.MaxTokens};
+    Live.Stream_model_started {stream_scope=Some 2; model="second"}];
+  check (option string) "the delayed equal start preserves current stop metadata"
+    (Some "stopped: max_tokens")
+    (Transcript.stream_details_text ~keeper_name:"keeper.one" (Some t));
+  check string "the delayed equal start still records the observed model"
+    "model: second · configured: configured"
+    (Transcript.runtime_identity_text ~keeper_name:"keeper.one"
+       ~configured_runtime:"configured" (Some t))
+;;
+
+let test_drawn_reconciles_text_after_an_observed_skill_round () =
+  let t = fresh () in
+  feed t
+    [ Live.Run_started
+    ; Live.Text {text="Let me check."; stream_scope=None}
+    ; tool_started "seen-read" "keeper_compose_source-review"
+    ; tool_ended "seen-read"
+    ; tool_result "seen-read" "skill-exec"
+    ; Live.Text {text="Done."; stream_scope=None}
+    ];
+  Transcript.note_skill_activity t
+    (Transcript.make_skill_activity
+       ~invocation:(Transcript.Composition_run { tool_name = "keeper_compose_source-review" })
+       ~skill_name:"source-review" ~skill_tool_use_id:"seen-read"
+       ~turn_ref:"trace-1#3" ~state:Transcript.Skill_delivered ~actions:[] ());
+  feed t [ reply_details ~reply:"Done." () ];
+  check (list string) "an observed skill still identifies the final reply stretch"
+    [ "text:Let me check."; "skill:source-review"; "reply:Done." ] (drawn t)
 ;;
 
 (* The wire carries neither a call's duration nor whether it failed; the
@@ -575,7 +687,7 @@ let test_drawn_ends_each_control_outcome_with_its_status_row () =
   List.iter
     (fun (outcome, expected) ->
       let t = fresh () in
-      feed t [ Live.Run_started; Live.Text "partial words"; control_reply outcome ];
+      feed t [ Live.Run_started; Live.Text {text="partial words"; stream_scope=None}; control_reply outcome ];
       check (list string) (Masc.Keeper_turn_outcome.to_label outcome)
         [ "text:partial words"; "status:" ^ expected ]
         (drawn t))
@@ -835,8 +947,8 @@ let index_of ~needle haystack =
 let test_control_bytes_never_reach_the_pane () =
   let t = fresh () in
   feed t
-    [ Live.Text "before\x1b"
-    ; Live.Text "[2Jafter"
+    [ Live.Text {text="before\x1b"; stream_scope=None}
+    ; Live.Text {text="[2Jafter"; stream_scope=None}
     ; Live.Thinking "\x1b[31mred"
     ; tool_started "c1" "read_file"
     ; tool_args_delta "c1" "{\"file_path\":\"a\x1b[2Jb.ml\"}"
@@ -894,6 +1006,11 @@ let test_progress_row_carries_the_turn_age () =
        check bool "a turn that has not started yet still reports its age" true
          (contains ~needle:"12s" text)
    | got -> failf "expected a progress row, got %d rows" (List.length got));
+  (match rows ~show_timing:false ~now:(origin +. 12.) t with
+   | (Transcript.Progress, text) :: _ ->
+       check string "hiding timing keeps the admission fact"
+         "sent; not accepted yet" text
+   | got -> failf "expected admission progress, got %d rows" (List.length got));
   feed t [ Live.Run_started ];
   (match rows ~now:(origin +. 90.) t with
    | (Transcript.Progress, text) :: _ ->
@@ -936,7 +1053,7 @@ let test_a_settled_turn_reports_its_span_not_a_growing_age () =
    say how long ago the turn began while calling it how long the turn took. A
    forty-second turn replayed three hours later would read 3h00m. *)
 let test_a_replayed_turn_reports_an_age_not_a_frozen_span () =
-  let deltas = [ Live.Run_started; Live.Text "done"; Live.Run_finished ] in
+  let deltas = [ Live.Run_started; Live.Text {text="done"; stream_scope=None}; Live.Run_finished ] in
   let log = Log.create ~keeper_name:"keeper.one" ~request_id:"req-1" ~started_at:origin in
   List.iteri (fun seq delta -> ignore (Log.add log ~seq:(Some seq) delta : bool)) deltas;
   let three_hours_later = origin +. 10_800. in
@@ -1344,7 +1461,7 @@ let test_runtime_failover_visibility_and_error_attribution () =
     (contains ~needle:"waiting on [claude-3-7-sonnet]" (progress_text t));
   check (option string) "current runtime is claude" (Some "claude-3-7-sonnet")
     (Transcript.current_runtime_id t);
-  feed t [ Live.Text "streaming token" ];
+  feed t [ Live.Text {text="streaming token"; stream_scope=None} ];
   (* A text token identifies answer streaming and the serving runtime. *)
   check bool "a text token identifies answer streaming" true
     (contains ~needle:"STREAMING · answering · [claude-3-7-sonnet]" (progress_text t));
@@ -1388,7 +1505,7 @@ let test_runtime_silence_is_timed_from_the_attempt_not_the_turn () =
      question is no longer whether the endpoint is there but whether the
      model that was answering has stopped. The age is re-timed from the
      token, and it sits beside the phase word so the two are one clause. *)
-  feed ~now:(origin +. 111.) t [ Live.Text "first token" ];
+  feed ~now:(origin +. 111.) t [ Live.Text {text="first token"; stream_scope=None} ];
   check bool "a token re-times the silence from itself, beside the phase" true
     (contains ~needle:"answering, nothing back for 3m09s"
        (progress_text ~now:(origin +. 300.) t));
@@ -1408,7 +1525,7 @@ let test_the_row_names_the_model_phase_between_tool_calls () =
     [ Live.Run_started
     ; Live.Runtime_attempt_started { runtime_id = Some "deepseek"; attempt_index = Some 0 }
     ];
-  feed ~now:(origin +. 1.) t [ Live.Stream_model_started { model = "deepseek" } ];
+  feed ~now:(origin +. 1.) t [ Live.Stream_model_started { stream_scope = None; model = "deepseek" } ];
   check bool "the endpoint answering without a token is its own phase" true
     (contains ~needle:"model started, nothing back for 4s" (progress_text ~now:(origin +. 5.) t));
   feed ~now:(origin +. 6.) t [ Live.Thinking "let me" ];
@@ -1419,7 +1536,7 @@ let test_the_row_names_the_model_phase_between_tool_calls () =
     (contains ~needle:"nothing back" at_7);
   check bool "a stalled reasoning phase states how long" true
     (contains ~needle:"reasoning, nothing back for 9s" (progress_text ~now:(origin +. 15.) t));
-  feed ~now:(origin +. 16.) t [ Live.Text "Here is" ];
+  feed ~now:(origin +. 16.) t [ Live.Text {text="Here is"; stream_scope=None} ];
   check bool "a text delta is the answering phase" true
     (contains ~needle:"answering \xc2\xb7 [deepseek]" (progress_text ~now:(origin +. 17.) t));
   (* A pending call is the subject; the model-side word steps aside for it. *)
@@ -1480,7 +1597,7 @@ let test_the_turn_reports_the_tokens_it_has_spent () =
   let usage ?(keeper_name = "keeper.one") transcript =
     Transcript.stream_details_text ~keeper_name transcript
   in
-  let counters ?stop_reason usage = Live.Stream_details { usage = Some usage; stop_reason } in
+  let counters ?stop_reason usage = Live.Stream_details { stream_scope = None; usage = Some usage; stop_reason } in
   check (option string) "nothing is claimed without a transcript" None (usage None);
   let t = fresh () in
   check (option string) "a turn that reported no counters says nothing" None
@@ -1518,7 +1635,7 @@ let test_the_turn_reports_the_tokens_it_has_spent () =
      cannot say this: a reply cut off at max_tokens is still a visible reply,
      so without this clause the screen shows a finished answer and no sign
      that the provider ran out of room. *)
-  feed t [ Live.Stream_details { usage = None; stop_reason = Some "max_tokens" } ];
+  feed t [ Live.Stream_details { stream_scope = None; usage = None; stop_reason = Some Agent_core.Types.MaxTokens } ];
   check (option string) "why the provider stopped joins the same clause"
     (Some
        "tokens: in 1200 \xc2\xb7 out 900 \xc2\xb7 cache read 4096 \xc2\xb7 stopped: max_tokens")
@@ -1527,7 +1644,7 @@ let test_the_turn_reports_the_tokens_it_has_spent () =
      ordinary reason is drawn too: keeping a list of reasons worth hiding
      would go stale the day a provider adds one. *)
   feed t
-    [ counters ~stop_reason:"end_turn"
+    [ counters ~stop_reason:Agent_core.Types.EndTurn
         { input_tokens = Some 1200
         ; output_tokens = Some 950
         ; cache_read_input_tokens = Some 4096
@@ -1545,17 +1662,17 @@ let test_the_turn_reports_the_tokens_it_has_spent () =
      tokens what the turn has spent, and leaving [stopped: tool_use] up would
      say the provider has stopped while round two is still writing. *)
   feed t
-    [ counters ~stop_reason:"tool_use"
+    [ counters ~stop_reason:Agent_core.Types.StopToolUse
         { input_tokens = Some 1200
         ; output_tokens = Some 980
         ; cache_read_input_tokens = Some 4096
         ; cache_creation_input_tokens = None
         }
-    ; Live.Stream_model_started { model = "glm-5-turbo" }
+    ; Live.Stream_model_started { stream_scope = None; model = "glm-5-turbo" }
     ];
   check (option string) "a second round starts from neither" None
     (usage (Some t));
-  feed t [ Live.Text "still writing" ];
+  feed t [ Live.Text {text="still writing"; stream_scope=None} ];
   check (option string) "and text arriving does not bring the old ones back"
     None (usage (Some t));
   feed t
@@ -1580,7 +1697,7 @@ let test_the_turn_reports_the_tokens_it_has_spent () =
      The reason has to be on the header when the attempt changes or this
      asserts nothing -- the request reset above has already cleared it. *)
   feed t
-    [ counters ~stop_reason:"max_tokens"
+    [ counters ~stop_reason:Agent_core.Types.MaxTokens
         { input_tokens = Some 40
         ; output_tokens = Some 20
         ; cache_read_input_tokens = None
@@ -1608,9 +1725,9 @@ let test_a_narrow_row_keeps_the_counters_it_was_drawing () =
     ; Live.Runtime_attempt_started
         { runtime_id = Some "observed-glm"; attempt_index = Some 0 }
     ; (let counters ?stop_reason usage =
-         Live.Stream_details { usage = Some usage; stop_reason }
+         Live.Stream_details { stream_scope = None; usage = Some usage; stop_reason }
        in
-       counters ~stop_reason:"max_tokens"
+       counters ~stop_reason:Agent_core.Types.MaxTokens
          { input_tokens = Some 1200
          ; output_tokens = Some 900
          ; cache_read_input_tokens = Some 4096
@@ -1648,7 +1765,7 @@ let test_new_attempt_does_not_inherit_previous_runtime () =
       [ Live.Run_started
       ; Live.Runtime_attempt_started
           { runtime_id = Some "old-runtime"; attempt_index = Some 0 }
-      ; Live.Text "old attempt text"
+      ; Live.Text {text="old attempt text"; stream_scope=None}
       ; Live.Runtime_attempt_started { runtime_id = None; attempt_index }
       ];
     check (option string) "new attempt starts with unknown runtime" None
@@ -1657,7 +1774,7 @@ let test_new_attempt_does_not_inherit_previous_runtime () =
       "configured: assigned-runtime"
       (Transcript.runtime_identity_text ~keeper_name:"keeper.one"
          ~configured_runtime:"assigned-runtime" (Some t));
-    feed t [ Live.Stream_model_started { model = "new-model" } ];
+    feed t [ Live.Stream_model_started { stream_scope = None; model = "new-model" } ];
     (* A model name is not a runtime id: the header says which it has. *)
     check (option string) "the model event does not name a runtime" None
       (Transcript.current_runtime_id t);
@@ -1694,10 +1811,10 @@ let test_drawn_items_carry_superseded_runtime_id () =
     [ Live.Run_started
     ; Live.Runtime_attempt_started
         { runtime_id = Some "claude-3-7-sonnet"; attempt_index = Some 0 }
-    ; Live.Text "attempt zero reply"
+    ; Live.Text {text="attempt zero reply"; stream_scope=None}
     ; Live.Runtime_attempt_started
         { runtime_id = Some "gpt-4o"; attempt_index = Some 1 }
-    ; Live.Text "attempt one reply"
+    ; Live.Text {text="attempt one reply"; stream_scope=None}
     ];
   let items = Transcript.drawn t in
   match items with
@@ -2198,10 +2315,10 @@ let test_of_log_equals_the_incremental_fold () =
     ; tool_args_delta "c1" "{\"file_path\":\"a.ml\"}"
     ; tool_ended "c1"
     ; tool_result "c1" "exec-c1"
-    ; Live.Text "half "
+    ; Live.Text {text="half "; stream_scope=None}
     ; Live.Runtime_attempt_started { runtime_id = Some "claude-3-7-sonnet"; attempt_index = Some 1 }
     ; Live.Thinking "again"
-    ; Live.Text "whole reply"
+    ; Live.Text {text="whole reply"; stream_scope=None}
     ; reply_details ~reply:"whole reply" ()
     ; Live.Run_finished
     ]
@@ -2232,7 +2349,7 @@ let test_trail_keeps_arrival_order () =
     ; tool_ended "c1"
     ; tool_result "c1" "exec-c1"
     ; Live.Thinking "now the caller"
-    ; Live.Text "The caller is safe."
+    ; Live.Text {text="The caller is safe."; stream_scope=None}
     ];
   match Transcript.trail t with
   | [ Transcript.Trail_thinking first
@@ -2279,7 +2396,7 @@ let test_trail_groups_consecutive_calls_into_one_block () =
     [ Live.Run_started
     ; tool_started "c1" "read_file"
     ; tool_started "c2" "execute"
-    ; Live.Text "done"
+    ; Live.Text {text="done"; stream_scope=None}
     ];
   match Transcript.trail t with
   | [ Transcript.Trail_tools block; Transcript.Trail_text _ ] ->
@@ -2312,7 +2429,7 @@ let test_trail_updates_a_call_after_later_stretches_open () =
 
 let test_trail_drops_blank_stretches () =
   let t = fresh () in
-  feed t [ Live.Run_started; Live.Thinking "\n\n"; Live.Text "  " ];
+  feed t [ Live.Run_started; Live.Thinking "\n\n"; Live.Text {text="  "; stream_scope=None} ];
   check (list trail_item) "blank stretches draw nothing" []
     (Transcript.trail t)
 
@@ -2325,7 +2442,7 @@ let test_live_skill_is_not_folded_into_generic_tools () =
         {|{"identity":{"source_id":"local","package_id":"ops","name":"ci-red-attribution"}}|}
     ; tool_ended "skill-use-1"
     ; tool_result "skill-use-1" "exec-skill-1"
-    ; Live.Text "done"
+    ; Live.Text {text="done"; stream_scope=None}
     ];
   match Transcript.trail t with
   | [ Transcript.Trail_skill [ skill ]; Transcript.Trail_text "done" ] ->
@@ -2723,7 +2840,7 @@ let test_checkpoint_wait_keeps_the_request_live () =
   check phase "continued segment is working" Transcript.Working (Transcript.phase t);
   check bool "new segment no longer waits" false (Transcript.awaiting_continuation t);
   feed t [tool_started ~block_index:0 "after" "read_file"; tool_ended ~block_index:0 "after";
-    tool_result ~block_index:0 "after" "exec-after"; Live.Text "answer"; reply_details ~reply:"answer" (); Live.Run_finished];
+    tool_result ~block_index:0 "after" "exec-after"; Live.Text {text="answer"; stream_scope=None}; reply_details ~reply:"answer" (); Live.Run_finished];
   check phase "actual answer ends request" Transcript.Stream_ended (Transcript.phase t);
   check int "reused stream coordinates preserve both segments" 2 (List.length (Transcript.tool_calls t))
 ;;
@@ -2740,7 +2857,7 @@ let test_the_legend_names_every_mark_and_phrase_the_rows_draw () =
   (* The two lists are written by hand: a constructor added later compiles
      (the label functions are exhaustive) but would be missing from the
      rollup and the legend, so their lengths are held here. *)
-  check int "six outcomes" 6 (List.length Transcript.all_outcomes);
+  check int "eight outcomes" 8 (List.length Transcript.all_outcomes);
   check int "eight skill states" 8 (List.length Transcript.all_skill_states);
   List.iter
     (fun outcome ->
@@ -2782,7 +2899,7 @@ let test_event_times_survive_log_replay_and_continuation () =
   let log = Log.create ~keeper_name:"keeper.one" ~request_id:"timed" ~started_at:100. in
   let put at delta = ignore (Log.add ~at log ~seq:None delta) in
   put 101. Live.Run_started;
-  put 110. (Live.Text "First segment.");
+  put 110. (Live.Text {text="First segment."; stream_scope=None});
   put 115. (Live.Reply_details {reply="";
     turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint; turn_ref="trace#1"});
   put 116. Live.Run_finished;
@@ -2823,8 +2940,8 @@ let test_native_tools_are_observations_without_execution_receipts () =
   check bool "mixed-authority event is reported" true (Option.is_some (Transcript.unreadable t));
   let rows = Transcript.project_tool_block Transcript.Compact
       (Transcript.tool_block (Transcript.tool_calls t)) in
-  check tool_outcome "collapsed tools retain native outcome" Transcript.Native_ended
-    (Option.get rows.summary_outcome)
+  check bool "a single native step has no roll-up summary" true
+    (Option.is_none rows.summary_outcome)
 ;;
 
 let () =
@@ -2862,6 +2979,18 @@ let () =
             test_drawn_keeps_earlier_rounds_when_the_reply_is_the_last_stretch
         ; test_case "drawn keeps pre-tool progress when nothing streamed after" `Quick
             test_drawn_keeps_pre_tool_progress_when_nothing_streamed_after
+        ; test_case "drawn preserves text around an unobserved skill round" `Quick
+            test_drawn_preserves_text_when_a_skill_round_was_unobserved
+        ; test_case "final response boundary survives missing Skill call" `Quick
+            test_final_response_boundary_survives_a_missing_skill_call
+        ; test_case "missing response start keeps prior progress" `Quick
+            test_stop_from_an_unobserved_response_preserves_progress
+        ; test_case "duplicate response start keeps one reply" `Quick
+            test_repeated_response_start_is_not_a_boundary
+        ; test_case "scoped text retires prior metadata" `Quick
+            test_scoped_text_retires_prior_response_metadata
+        ; test_case "drawn reconciles text after an observed skill round" `Quick
+            test_drawn_reconciles_text_after_an_observed_skill_round
         ; test_case "note_tool_outcome folds the durable facts in" `Quick
             test_note_tool_outcome_folds_the_durable_facts_in
         ; test_case "drawn appends the reply when nothing streamed" `Quick

@@ -671,7 +671,9 @@ let test_stop_ack_releases_only_input_after_that_stop () =
   Tui_types.release_retained_keeper_input state "alpha";
   check bool "explicit resume releases only stopped input for its keeper" true
     (state.keeper_interactive_waiting =
-      ["beta", "other-stopped", Tui_types.Retained_after_stop;
+      ["alpha", "after-stop", Tui_types.Awaiting_control {
+         generation=Tui_types.keeper_chat_control_generation state "alpha"; target=None};
+       "beta", "other-stopped", Tui_types.Retained_after_stop;
        "alpha", "fresh-input", Tui_types.Awaiting_control {generation=acknowledged;target=None}])
 ;;
 
@@ -707,6 +709,33 @@ let test_control_receipts_are_scoped_to_each_keeper () =
     (Tui_types.finish_keeper_chat_control state "alpha" ~generation:alpha);
   check bool "alpha does not invalidate beta receipt" true
     (Tui_types.finish_keeper_chat_control state "beta" ~generation:beta)
+;;
+
+let test_preflight_resume_keeps_priority_intents_until_server_resume () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let alpha = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"alpha" () in
+  let beta = Keeper_chat.create_request ~keeper_name:"beta" ~message:"beta" () in
+  let ids requests =
+    List.map (fun (request : Keeper_chat.request) -> request.request_id) requests in
+  state.keeper_run_next_pending <- [alpha; beta];
+  state.keeper_run_next_ready <- [alpha; beta];
+  state.keeper_auto_priority_pending <- ["alpha", alpha.request_id; "beta", beta.request_id];
+  let resume =
+    Tui_types.begin_keeper_chat_control ~preserve_priority_requests:true state "alpha" in
+  check (list string) "an unconfirmed preflight keeps pending priority intents"
+    [alpha.request_id; beta.request_id] (ids state.keeper_run_next_pending);
+  check (list string) "an unconfirmed preflight keeps ready priority intents"
+    [alpha.request_id; beta.request_id] (ids state.keeper_run_next_ready);
+  check (list string) "an unconfirmed preflight keeps automatic priority"
+    ["alpha"; "beta"] (List.map fst state.keeper_auto_priority_pending);
+  ignore (Tui_types.finish_keeper_chat_control state "alpha" ~generation:resume : bool);
+  Tui_types.clear_keeper_priority_requests state "alpha";
+  check (list string) "a confirmed server resume drops only alpha pending intents"
+    [beta.request_id] (ids state.keeper_run_next_pending);
+  check (list string) "a confirmed server resume drops only alpha ready intents"
+    [beta.request_id] (ids state.keeper_run_next_ready);
+  check (list string) "a confirmed server resume drops only alpha automatic priority"
+    ["beta"] (List.map fst state.keeper_auto_priority_pending)
 ;;
 
 let test_new_control_discards_only_its_keeper_priority_intents () =
@@ -827,11 +856,11 @@ let test_a_turn_log_folds_each_accepted_delta_once () =
   in
   let add seq delta = Tui_types.turn_log_add ~now:11.0 log ~seq delta in
   add (Some 1) Live.Run_started;
-  add (Some 2) (Live.Text "hel");
-  add (Some 2) (Live.Text "hel");
-  add (Some 3) (Live.Text "lo");
-  add None (Live.Text "!");
-  add None (Live.Text "!");
+  add (Some 2) (Live.Text {text="hel"; stream_scope=None});
+  add (Some 2) (Live.Text {text="hel"; stream_scope=None});
+  add (Some 3) (Live.Text {text="lo"; stream_scope=None});
+  add None (Live.Text {text="!"; stream_scope=None});
+  add None (Live.Text {text="!"; stream_scope=None});
   check string "a replayed seq is folded once, an id-less frame every time"
     "hello!!"
     (Keeper_chat_transcript.text log.Tui_types.tl_transcript);
@@ -991,23 +1020,35 @@ let test_preflight_local_resume_keeps_fifo_and_respects_server_stop () =
     Tui_types.Awaiting_control {generation=0; target=None}) :: state.keeper_interactive_waiting;
   check bool "later Enter cannot bypass retained first input" true
     (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"));
-  check bool "an already-paused owner still needs a server resume" false
-    (Tui_types.resume_preflight_keeper_input ~owner_paused:true state "alpha");
-  check bool "paused owner refusal preserves the queued input hold" true
+  check bool "never-posted input needs a current owner reading" true
+    (Tui_types.can_resume_preflight_keeper_input state "alpha");
+  check bool "checking eligibility preserves the queued input hold" true
     (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"));
-  check bool "operator can resume never-posted input locally" true
-    (Tui_types.resume_preflight_keeper_input ~owner_paused:false state "alpha");
+  let resume = Tui_types.begin_keeper_chat_control ~preserve_input_holds:true state "alpha" in
+  ignore (Tui_types.finish_keeper_chat_control state "alpha" ~generation:resume);
+  check bool "a failed owner reading can retry the local resume" true
+    (Tui_types.can_resume_preflight_keeper_input state "alpha");
+  check bool "a failed owner reading does not release input" true
+    (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"));
+  Tui_types.release_retained_keeper_input state "alpha";
   (match Tui_types.next_authorized_keeper_input state "alpha" with
    | Some (first, _) -> check string "resume dispatches original input first"
        item.request.request_id first.request.request_id
    | None -> fail "local resume still blocked");
+  (match Q.take state.msg_queued ~request_id:item.request.request_id with
+   | Some (_, queue) -> state.msg_queued <- queue
+   | None -> fail "resumed input disappeared");
+  (match Tui_types.next_authorized_keeper_input state "alpha" with
+   | Some (next, _) -> check string "later Enter follows the resumed input"
+       later.request_id next.request.request_id
+   | None -> fail "later Enter lost its control generation");
   check bool "local resume does not manufacture a server control token" true
     (state.keeper_chat_control_tokens = [] && state.keeper_chat_control_pending = []);
   state.keeper_interactive_waiting <- ["alpha", item.request.request_id,
     Tui_types.Retained_before_dispatch];
   ignore (Tui_types.begin_keeper_chat_control state "alpha" : int);
   check bool "a real stop still requires its server resume receipt" false
-    (Tui_types.resume_preflight_keeper_input ~owner_paused:false state "alpha");
+    (Tui_types.can_resume_preflight_keeper_input state "alpha");
   check bool "server-stopped input remains held" true
     (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"))
 ;;
@@ -1020,13 +1061,13 @@ let test_workspace_suspension_preserves_real_stop_ownership () =
   Tui_types.withdraw_keeper_chat_requests state;
   Tui_types.restore_suspended_keeper_input state local;
   check bool "workspace return permits explicit local preflight resume" true
-    (Tui_types.resume_preflight_keeper_input ~owner_paused:false state "alpha");
+    (Tui_types.can_resume_preflight_keeper_input state "alpha");
   ignore (Tui_types.begin_keeper_chat_control state "alpha" : int);
   let stopped = Tui_types.suspend_keeper_input state in
   Tui_types.withdraw_keeper_chat_requests state;
   Tui_types.restore_suspended_keeper_input state stopped;
   check bool "workspace return never converts a real stop to local resume" false
-    (Tui_types.resume_preflight_keeper_input ~owner_paused:false state "alpha");
+    (Tui_types.can_resume_preflight_keeper_input state "alpha");
   check bool "real stopped input remains undispatchable" true
     (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"))
 ;;
@@ -1146,7 +1187,7 @@ let test_new_input_preserves_running_output () =
     let occurrence : Live.tool_occurrence =
       {stream_scope=0; block_index=0; provider_message_id=None; tool_call_id=Some "call-old"} in
     let old = inflight_with_log ~keeper_name:"alpha" ~started_at:1.
-        [Live.Run_started; Live.Text "OLD_RUNNING_TEXT";
+        [Live.Run_started; Live.Text {text="OLD_RUNNING_TEXT"; stream_scope=None};
          Live.Tool_started {occurrence; tool_name="read_file"}] in
     state.msg_inflight <- [old];
     state.msg_live <- Some old.log;
@@ -1169,7 +1210,7 @@ let test_new_input_preserves_running_output () =
       (Live.Batch_bound {operation_id=queued.sent_request.request_id; execution_id});
     assert_old ();
     Tui_types.turn_log_add ~now:3.5 old.log ~seq:None
-      (Live.Text "OLD_REPLY_STRETCH");
+      (Live.Text {text="OLD_REPLY_STRETCH"; stream_scope=None});
     Tui_types.turn_log_add ~now:4. old.log ~seq:(Some 3)
       (Live.Reply_details {reply="OLD_FINAL_REPLY";
         turn_outcome=Masc.Keeper_turn_outcome.Visible_reply; turn_ref="trace-1#1"});
@@ -1292,7 +1333,7 @@ let test_settle_turn_log_commits_holds_and_clears_live () =
   in
   let entry =
     inflight_with_log ~keeper_name:"alpha" ~started_at:10.
-      [ Live.Run_started; Live.Text "hi"; visible_reply "hi"; Live.Run_finished ]
+      [ Live.Run_started; Live.Text {text="hi"; stream_scope=None}; visible_reply "hi"; Live.Run_finished ]
   in
   state.msg_live <- Some entry.log;
   Tui_types.settle_turn_log state entry;
@@ -1333,7 +1374,7 @@ let test_a_turn_the_server_ended_without_a_closing_event_is_closed () =
       state.msg_target_keeper_name <- Some "alpha";
       let entry =
         inflight_with_log ~keeper_name:"alpha" ~started_at:10.
-          [ Live.Run_started; Live.Text "partial" ]
+          [ Live.Run_started; Live.Text {text="partial"; stream_scope=None} ]
       in
       state.msg_live <- Some entry.log;
       check string "before settling it is the running turn" "working" (phase_name entry);
@@ -1359,7 +1400,7 @@ let test_an_ending_a_delta_already_wrote_is_not_overwritten () =
   in
   let entry =
     inflight_with_log ~keeper_name:"alpha" ~started_at:10.
-      [ Live.Run_started; Live.Text "hi"; visible_reply "hi"; Live.Run_finished ]
+      [ Live.Run_started; Live.Text {text="hi"; stream_scope=None}; visible_reply "hi"; Live.Run_finished ]
   in
   Tui_types.settle_turn_log_ended_by state entry
     ~record:(Some Keeper_chat.Operation_cancelled);
@@ -1380,7 +1421,7 @@ let test_a_checkpoint_closed_by_the_record_does_not_claim_the_final_reply () =
   let entry =
     inflight_with_log ~keeper_name:"alpha" ~started_at:10.
       [ Live.Run_started
-      ; Live.Text "before the checkpoint"
+      ; Live.Text {text="before the checkpoint"; stream_scope=None}
       ; Live.Reply_details
           { reply = ""
           ; turn_outcome = Masc.Keeper_turn_outcome.Continuation_checkpoint
@@ -1409,7 +1450,7 @@ let test_a_failure_learned_only_from_the_record_keeps_the_log_partial () =
   in
   let entry =
     inflight_with_log ~keeper_name:"alpha" ~started_at:10.
-      [ Live.Run_started; Live.Text "partial" ]
+      [ Live.Run_started; Live.Text {text="partial"; stream_scope=None} ]
   in
   Tui_types.settle_turn_log_ended_by state entry
     ~record:(Some Keeper_chat.Operation_failed);
@@ -1453,7 +1494,7 @@ let test_the_reply_row_defers_to_a_log_that_holds_the_turn () =
   in
   let entry =
     inflight_with_log ~keeper_name:"alpha" ~started_at:10.
-      [ Live.Run_started; Live.Text "hi"; visible_reply "hi"; Live.Run_finished ]
+      [ Live.Run_started; Live.Text {text="hi"; stream_scope=None}; visible_reply "hi"; Live.Run_finished ]
   in
   let request = entry.sent_request in
   let role_name = function
@@ -1481,7 +1522,7 @@ let test_the_reply_row_defers_to_a_log_that_holds_the_turn () =
     (Option.is_none (row request (completed "hi")));
   let cut =
     inflight_with_log ~keeper_name:"alpha" ~started_at:11.
-      [ Live.Run_started; Live.Text "half" ]
+      [ Live.Run_started; Live.Text {text="half"; stream_scope=None} ]
   in
   Log.commit cut.log.Tui_types.tl_log;
   state.msg_settled_logs <- [ cut.log ];
@@ -1489,7 +1530,7 @@ let test_the_reply_row_defers_to_a_log_that_holds_the_turn () =
     (Option.is_some (row cut.sent_request (completed "half and more")));
   let cancelled =
     inflight_with_log ~keeper_name:"alpha" ~started_at:12.
-      [ Live.Run_started; Live.Text "some"; Live.Run_finished ]
+      [ Live.Run_started; Live.Text {text="some"; stream_scope=None}; Live.Run_finished ]
   in
   Log.commit cancelled.log.Tui_types.tl_log;
   state.msg_settled_logs <- [ cancelled.log ];
@@ -1511,13 +1552,13 @@ let test_replayed_frames_up_to_the_last_seq_are_not_added_twice () =
   in
   let add seq delta = Tui_types.turn_log_add ~now:11.0 log ~seq:(Some seq) delta in
   add 0 Live.Run_started;
-  List.iteri (fun i word -> add (i + 1) (Live.Text word)) [ "a"; "b"; "c"; "d"; "e" ];
+  List.iteri (fun i word -> add (i + 1) (Live.Text {text=word; stream_scope=None})) [ "a"; "b"; "c"; "d"; "e" ];
   check position "the cut stream left the log at seq 5"
     (Masc.Keeper_chat_event_log.After_seq 5)
     (Log.resume_position log.Tui_types.tl_log);
   (* The server replays from 3 (a generous since_seq) and continues live. *)
   List.iter
-    (fun (seq, word) -> add seq (Live.Text word))
+    (fun (seq, word) -> add seq (Live.Text {text=word; stream_scope=None}))
     [ (3, "c"); (4, "d"); (5, "e"); (6, "f"); (7, "g") ];
   check string "only the frames past the last seq are folded" "abcdefg"
     (Keeper_chat_transcript.text log.Tui_types.tl_transcript);
@@ -1633,8 +1674,8 @@ let test_a_journal_fills_a_turn_log_at_the_lines_own_times () =
   let _ = Tui_types.turn_log_add_journaled log
     [ line 0 100.5 (E.Run_started { run_id = "r"; thread_id = "keeper:alpha" })
     ; line 1 100.6 (E.Text_message_start { message_id = "m"; role = E.Assistant })
-    ; line 2 100.7 (E.Text_delta "hel")
-    ; line 3 100.8 (E.Text_delta "lo")
+    ; line 2 100.7 (E.Text_delta {text="hel"; stream_scope=None})
+    ; line 3 100.8 (E.Text_delta {text="lo"; stream_scope=None})
     ; line 4 100.85 (journal_reply "hello")
     ; line 5 100.9 (E.Run_finished { run_id = "r" })
     ] in
@@ -1671,7 +1712,7 @@ let test_journal_receipts_only_name_newly_folded_results () =
   check (list int) "one result receipt even with same-page overlap" [3]
     (result_seqs first);
   let replay = Tui_types.turn_log_add_journaled log
-      [result; line 4 100.4 (E.Text_delta "still working")] in
+      [result; line 4 100.4 (E.Text_delta {text="still working"; stream_scope=None})] in
   check (list int) "replayed result plus fresh text requests no calls" []
     (result_seqs replay);
   check string "the fresh text still reaches the observed transcript" "still working"
@@ -1690,7 +1731,7 @@ let journal_log ~request_id ~started_at ?(finished = true) () =
     ([ line 0 started_at (E.Run_started { run_id = "r"; thread_id = "keeper:alpha" })
      ; line 1 (started_at +. 0.05)
          (E.Agent_core_thinking_delta { index = 0; delta = "thought about it" })
-     ; line 2 (started_at +. 0.1) (E.Text_delta "said") ]
+     ; line 2 (started_at +. 0.1) (E.Text_delta {text="said"; stream_scope=None}) ]
     @
     if finished
     then
@@ -1935,7 +1976,10 @@ let test_skill_evidence_stands_for_a_read_the_trail_missed () =
   in
   let log =
     settled_log ~request_id:"op-1"
-      [ Live.Run_started; Live.Text "done"; visible_reply "done"; Live.Run_finished ]
+      [ Live.Run_started; Live.Stream_model_started { stream_scope = Some 1; model = "observed" }
+      ; Live.Text {text="done"; stream_scope=None}
+      ; Live.Stream_details { stream_scope = Some 1; usage = None; stop_reason = Some EndTurn }
+      ; visible_reply "done"; Live.Run_finished ]
   in
   state.msg_settled_logs <- [ log ];
   check int "the trail has nothing to draw the skill from" 0
@@ -2024,7 +2068,7 @@ let test_a_settled_log_holds_its_turn_in_the_timeline () =
     [ settled_log ~request_id:"held"
         [ Live.Run_started
         ; Live.Thinking "thought about it"
-        ; Live.Text "answered"
+        ; Live.Text {text="answered"; stream_scope=None}
         ; Live.Reply_details
             { reply = "answered"
             ; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply
@@ -2058,7 +2102,7 @@ let test_a_log_without_reasoning_leaves_the_trace_row () =
   state.msg_loaded <- loaded_turn ~request_id:"held";
   state.msg_settled_logs <-
     [ settled_log ~request_id:"held"
-        [ Live.Run_started; Live.Text "answered"; visible_reply "answered"; Live.Run_finished ]
+        [ Live.Run_started; Live.Text {text="answered"; stream_scope=None}; visible_reply "answered"; Live.Run_finished ]
     ];
   check (list string) "the trace row stays beside the log's rows"
     [ "asked"; "2 reasoning steps, content withheld"; "Gate approved read_file"
@@ -2077,11 +2121,59 @@ let test_an_unfinished_settled_log_suppresses_nothing () =
   state.msg_loaded_keeper <- Some "alpha";
   state.msg_loaded <- loaded_turn ~request_id:"cut";
   state.msg_settled_logs <-
-    [ settled_log ~request_id:"cut" [ Live.Run_started; Live.Text "half" ] ];
+    [ settled_log ~request_id:"cut" [ Live.Run_started; Live.Text {text="half"; stream_scope=None} ] ];
   check bool "the log does not stand for the turn" false
     (Tui_types.turn_log_holds_the_turn (List.hd state.msg_settled_logs));
   check int "every loaded row is still drawn" 6
     (List.length (Tui_types.chat_rows_for state "alpha"))
+;;
+
+let test_exact_operation_ending_keeps_unjournaled_rows () =
+  List.iter (fun terminal ->
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    state.msg_target_keeper_name <- Some "alpha";
+    state.msg_loaded_keeper <- Some "alpha";
+    state.msg_loaded <- loaded_turn ~request_id:"cut";
+    let log = settled_log ~request_id:"cut" [Live.Run_started; Live.Text {text="half"; stream_scope=None}] in
+    Log.observe_operation_state log.tl_log (Some terminal);
+    Keeper_chat_transcript.reconcile_operation log.tl_transcript terminal;
+    let expected = List.map (fun (row : Tui_types.msg_entry) -> row.me_text) state.msg_loaded in
+    let verify log =
+      state.msg_settled_logs <- [log];
+      check bool "record-only terminal closes progress" true
+        (match Keeper_chat_transcript.phase log.tl_transcript with
+         | Stream_ended | Stream_failed _ -> true | Waiting | Working -> false);
+      check bool "missing journal entries are not claimed complete" false
+        (Tui_types.turn_log_holds_the_turn log);
+      check (list string) "durable keeper, tool and skill rows stay visible" expected
+        (Tui_types.chat_rows_for state "alpha" |> List.map (fun (row : Tui_types.msg_entry) -> row.me_text))
+    in
+    verify log;
+    verify {log with tl_transcript=Keeper_chat_transcript.of_log ~now:200. log.tl_log})
+    [ Keeper_chat_operation.Failed {completed_at=150.; failure={kind=Turn_cancelled;
+        detail="owner stopped"; outcome_ref=None}}
+    ; Cancelled {completed_at=150.}
+    ; Succeeded {completed_at=150.; outcome_ref="stored-result"} ]
+;;
+
+let test_delivery_failure_keeps_complete_stream_authority () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  state.msg_target_keeper_name <- Some "alpha";
+  state.msg_loaded_keeper <- Some "alpha";
+  state.msg_loaded <- loaded_turn ~request_id:"delivered";
+  let log = settled_log ~request_id:"delivered"
+    [Live.Run_started; Live.Text {text="answered"; stream_scope=None}; visible_reply "answered"; Live.Run_finished] in
+  state.msg_settled_logs <- [log];
+  let before = Tui_types.chat_rows_for state "alpha" in
+  let terminal = Keeper_chat_operation.Failed {completed_at=150.; failure={kind=Delivery_failed;
+    detail="delivery failed";outcome_ref=None}} in
+  Log.observe_operation_state log.tl_log (Some terminal);
+  Keeper_chat_transcript.reconcile_operation log.tl_transcript terminal;
+  check bool "delivery failure retains the stream's complete log" true
+    (Tui_types.turn_log_holds_the_turn log);
+  check (list string) "delivery failure does not reintroduce duplicate durable rows"
+    (List.map (fun (row : Tui_types.msg_entry) -> row.me_text) before)
+    (Tui_types.chat_rows_for state "alpha" |> List.map (fun (row : Tui_types.msg_entry) -> row.me_text))
 ;;
 
 (* Two turns settled in one session, one of them for another keeper: only
@@ -2206,7 +2298,7 @@ let test_parallel_blocks_share_a_chronological_insertion_slot () =
     let entries = List.init 4 (fun i ->
       inflight_with_log ~keeper_name:"alpha"
         ~started_at:(1_790_053_724. +. 60. *. float_of_int i)
-        [Live.Run_started; Live.Text (Printf.sprintf "ORDER_%d" i)]) in
+        [Live.Run_started; Live.Text {text=(Printf.sprintf "ORDER_%d" i); stream_scope=None}]) in
     List.iter (fun order ->
       (* No durable rows: all blocks share insertion slot zero. *)
       state.msg_inflight <- List.map (List.nth entries) order;
@@ -2248,7 +2340,7 @@ let test_live_gutter_clock_matches_its_causal_frontier () =
        chat_entry ~request_id ~turn_phase:Tui_types.Turn_progress
          ~role:Tui_types.Message_status ~text:"CLOCK_FRONTIER" ~at:frontier ()];
     Tui_types.turn_log_add ~now:start entry.log ~seq:(Some 0) Live.Run_started;
-    Tui_types.turn_log_add ~now:frontier entry.log ~seq:(Some 1) (Live.Text "CLOCK_OUTPUT");
+    Tui_types.turn_log_add ~now:frontier entry.log ~seq:(Some 1) (Live.Text {text="CLOCK_OUTPUT"; stream_scope=None});
     let frame, _ = Masc_tui_render_chat.render_keeper_message state in
     let plain = List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines in
     let clock = Masc_tui_render_chat.keeper_message_clock frontier in
@@ -2303,9 +2395,9 @@ let test_promoted_live_output_survives_settlement_and_replay () =
          tool_call_id=Some "read-1"}
       in
       let deltas =
-        [ Live.Run_started; Live.Text "EARLY_ANSWER";
+        [ Live.Run_started; Live.Text {text="EARLY_ANSWER"; stream_scope=None};
           Live.Tool_started {occurrence; tool_name="read_file"};
-          Live.Tool_ended {occurrence}; Live.Text "LATER_ANSWER" ]
+          Live.Tool_ended {occurrence}; Live.Text {text="LATER_ANSWER"; stream_scope=None} ]
       in
       List.iteri (fun seq delta ->
         Tui_types.turn_log_add ~now:(43. +. float_of_int seq)
@@ -2354,8 +2446,8 @@ let test_promoted_live_output_survives_settlement_and_replay () =
       (* A durable page overlaps already streamed text. The frame must keep
          each source once, including after cancellation or a failed run. *)
       let replay : Masc.Keeper_chat_event_log.journaled_event list =
-        [ {seq=1; ts=44.; event=Masc.Keeper_chat_events.Text_delta "EARLY_ANSWER"};
-          {seq=4; ts=47.; event=Masc.Keeper_chat_events.Text_delta "LATER_ANSWER"} ]
+        [ {seq=1; ts=44.; event=Masc.Keeper_chat_events.Text_delta {text="EARLY_ANSWER"; stream_scope=None}};
+          {seq=4; ts=47.; event=Masc.Keeper_chat_events.Text_delta {text="LATER_ANSWER"; stream_scope=None}} ]
       in
       let _ = Tui_types.turn_log_add_journaled entry.log replay in
       let _ = Tui_types.turn_log_add_journaled entry.log replay in
@@ -2408,7 +2500,7 @@ let test_replayed_chat_failure_is_visible_without_a_history_error () =
       let events =
         [Masc.Keeper_chat_events.Run_started
            {run_id="cancelled-run"; thread_id="keeper:alpha"}]
-        @ (if partial then [Masc.Keeper_chat_events.Text_delta "PARTIAL_REPLY"] else [])
+        @ (if partial then [Masc.Keeper_chat_events.Text_delta {text="PARTIAL_REPLY"; stream_scope=None}] else [])
         @ [Masc.Keeper_chat_events.Event_error
              {message="operator interrupted the turn"}]
       in
@@ -3307,7 +3399,7 @@ let test_the_panes_own_turn_is_live_in_flight_and_observed_once_cut () =
   state.msg_target_keeper_name <- Some "alpha";
   let entry =
     inflight_with_log ~keeper_name:"alpha" ~started_at:10.
-      [ Live.Run_started; Live.Text "partial" ]
+      [ Live.Run_started; Live.Text {text="partial"; stream_scope=None} ]
   in
   state.msg_live <- Some entry.log;
   state.msg_inflight <- [ entry ];
@@ -3368,6 +3460,191 @@ let test_partial_observation_survives_history_ending_and_unavailable_journal () 
     (Tui_types.observed_log_has_ended state (List.hd state.msg_settled_logs))
 ;;
 
+let test_succeeded_operation_with_checkpoint_only_keeps_final_history () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  state.msg_loaded_keeper <- Some "alpha";
+  let log = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id:"checkpoint-only" ~started_at:1. in
+  Tui_types.turn_log_add ~now:2. log ~seq:(Some 0) Live.Run_started;
+  Tui_types.turn_log_add ~now:3. log ~seq:(Some 1)
+    (Live.Reply_details {reply=""; turn_outcome=Continuation_checkpoint; turn_ref="trace-checkpoint#1"});
+  Tui_types.turn_log_add ~now:4. log ~seq:(Some 2) Live.Run_finished;
+  let terminal = Keeper_chat_operation.Succeeded {completed_at=8.; outcome_ref="final-result"} in
+  Log.observe_operation_state log.tl_log (Some terminal);
+  Keeper_chat_transcript.reconcile_operation log.tl_transcript terminal;
+  Log.commit log.tl_log;
+  Tui_types.hold_settled_log state log;
+  state.msg_loaded <- [chat_entry ~request_id:"checkpoint-only" ~role:Tui_types.Message_keeper
+    ~text:"FINAL_REPLY_FROM_HISTORY" ~at:8. ()];
+  check bool "a closed checkpoint does not claim the final reply" false
+    (Tui_types.turn_log_holds_the_turn log);
+  check (list string) "durable final output remains visible beside the checkpoint"
+    ["FINAL_REPLY_FROM_HISTORY"]
+    (Tui_types.chat_rows_for state "alpha" |> List.map (fun (row : Tui_types.msg_entry) -> row.me_text))
+;;
+
+let test_checkpoint_activities_have_exact_row_authority () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  state.msg_loaded_keeper <- Some "alpha";
+  let occurrence id index : Live.tool_occurrence =
+    {stream_scope=0; block_index=index; provider_message_id=None; tool_call_id=Some id} in
+  let skill = occurrence "c1" 1 and tool = occurrence "c2" 2 in
+  let log = settled_log ~request_id:"checkpoint-activities"
+    [Live.Run_started; Live.Tool_started {occurrence=skill; tool_name="keeper_skill"};
+     Live.Tool_ended {occurrence=skill}; Live.Tool_result {occurrence=skill; execution_id="skill-exec"};
+     Live.Tool_started {occurrence=tool; tool_name="read_file"}; Live.Tool_ended {occurrence=tool};
+     Live.Tool_result {occurrence=tool; execution_id="exec-1"};
+     Live.Reply_details {reply=""; turn_outcome=Continuation_checkpoint; turn_ref="trace-1#1"}; Live.Run_finished] in
+  let terminal = Keeper_chat_operation.Succeeded {completed_at=8.; outcome_ref="final"} in
+  Log.observe_operation_state log.tl_log (Some terminal);
+  Keeper_chat_transcript.reconcile_operation log.tl_transcript terminal;
+  Tui_types.hold_settled_log state log;
+  let activity execution_id = Keeper_chat_transcript.make_tool_activity ~execution_id
+      ~call_id:None ~tool_name:"read_file" ~args:"{}" ~outcome:Returned ~duration:None () in
+  let tool_row = { (chat_entry ~request_id:"checkpoint-activities" ~role:Tui_types.Message_tool ~text:"tools" ~at:7. ())
+    with me_tool_block=Some (Keeper_chat_transcript.tool_block [activity "exec-1"; activity "exec-2"]) } in
+  state.msg_loaded <- [tool_row; skill_evidence_row ~request_id:"checkpoint-activities" ~at:7.;
+    chat_entry ~request_id:"checkpoint-activities" ~role:Tui_types.Message_keeper ~text:"FINAL" ~at:8. ()];
+  Tui_types.enrich_held_logs_from_rows state ~keeper_name:"alpha" state.msg_loaded;
+  let rows = Tui_types.chat_rows_for state "alpha" in
+  let executions = List.concat_map (fun (row : Tui_types.msg_entry) -> match row.me_tool_block with
+    | None -> [] | Some block -> List.filter_map (fun (activity : Keeper_chat_transcript.tool_activity) -> activity.execution_id) block.activities) rows in
+  check (list string) "only the unobserved execution remains in history" ["exec-2"] executions;
+  let skills = List.concat_map (fun (row : Tui_types.msg_entry) -> row.me_skill_block) rows in
+  check (list string) "unidentified evidence gap remains durable" ["Skill evidence"]
+    (List.map (fun (skill : Keeper_chat_transcript.skill_activity) -> skill.skill_name) skills);
+  check bool "final history remains visible" true
+    (List.exists (fun (row : Tui_types.msg_entry) -> row.me_text = "FINAL") rows)
+;;
+
+let test_checkpoint_skill_receipts_stay_in_their_exact_turn () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous_size = Masc_tui_ansi.get_terminal_size () in
+  let set_size size =
+    match Masc_tui_render_schedule.Terminal_size_cache.refresh cache
+            ~probe:(fun () -> Some size) with
+    | Changed _ | Unchanged _ -> () in
+  Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
+    set_size (100, 160);
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+    state.msg_target_keeper_name <- Some "alpha";
+    state.msg_loaded_keeper <- Some "alpha";
+    state.msg_tool_visibility <- Tui_types.Tools_full;
+    let request_id = "checkpoint-skills" in
+    let segment ~progress turn_ref execution_id =
+      let occurrence : Live.tool_occurrence =
+        {stream_scope=0; block_index=0; provider_message_id=None; tool_call_id=Some "reused-id"} in
+      [Live.Run_started]
+      @ (if progress then [Live.Text {text="EARLIER_PROGRESS"; stream_scope=None}] else [])
+      @ [Live.Tool_started {occurrence; tool_name="keeper_skill"}
+      ; Live.Tool_args {occurrence; fragment=Live.Args_snapshot
+          {|{"identity":{"name":"checkpoint-skill"}}|}}
+      ; Live.Tool_ended {occurrence}; Live.Tool_result {occurrence; execution_id}
+      ; Live.Reply_details {reply=""; turn_outcome=Continuation_checkpoint; turn_ref}
+      ; Live.Run_finished] in
+    let log = settled_log ~request_id
+        (segment ~progress:true "trace-first#1" "skill-exec-first"
+        @ segment ~progress:false "trace-second#1" "skill-exec-second") in
+    let terminal = Keeper_chat_operation.Succeeded {completed_at=150.; outcome_ref="final"} in
+    Log.observe_operation_state log.tl_log (Some terminal);
+    Keeper_chat_transcript.reconcile_operation log.tl_transcript terminal;
+    Tui_types.hold_settled_log state log;
+    let receipt seq turn_ref runtime_id action =
+      { (chat_entry ~request_id ~operation_seq:seq ~at:(120. +. float_of_int seq)
+          ~role:(Tui_types.Message_skill Keeper_chat_transcript.Skill_used)
+          ~text:"Skill receipt" ()) with me_skill_block=
+        [Keeper_chat_transcript.make_skill_activity ~invocation:Instruction_read
+          ~skill_tool_use_id:"reused-id" ~turn_ref ~runtime_id
+          ~content_revision:"sha256:exact" ~skill_name:"checkpoint-skill"
+          ~state:Skill_used ~actions:[action] ()] } in
+    let first = receipt 1 "trace-first#1" "runtime-first" "FIRST_ACTION" in
+    let second = receipt 2 "trace-second#1" "runtime-second" "SECOND_ACTION" in
+    let absent = receipt 3 "trace-unseen#1" "runtime-unseen" "UNSEEN_ACTION" in
+    let final = chat_entry ~request_id ~operation_seq:4 ~role:Tui_types.Message_keeper
+        ~text:"FINAL_HISTORY_REPLY" ~at:150. () in
+    let install rows =
+      state.msg_loaded <- rows;
+      Tui_types.enrich_held_logs_from_rows state ~keeper_name:"alpha" rows in
+    let screen () =
+      let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+      String.concat "\n" (List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines) in
+    let count needle text = List.length (Astring.String.cuts ~sep:needle text) - 1 in
+    let verify marker_count markers =
+      let rendered = screen () in
+      check int "one Skill per observed or unmatched durable invocation" marker_count
+        (count "checkpoint-skill" rendered);
+      List.iter (fun marker -> check int (marker ^ " appears once") 1 (count marker rendered))
+        ("EARLIER_PROGRESS" :: "FINAL_HISTORY_REPLY" :: markers) in
+    install [first; final];
+    verify 2 ["FIRST_ACTION"];
+    (* The first receipt cannot mark the other segment delivered. *)
+    (match drawn_skills_of log with
+     | [first; second] ->
+         check bool "first segment received its exact receipt" true
+           (first.state = Keeper_chat_transcript.Skill_used);
+         check bool "other segment still awaits its own evidence" true
+           (second.state = Keeper_chat_transcript.Skill_served_pending)
+     | skills -> failf "expected two segment skills, got %d" (List.length skills));
+    install [first; second; absent; final];
+    verify 3 ["FIRST_ACTION"; "SECOND_ACTION"; "UNSEEN_ACTION"];
+    let rows = Tui_types.chat_rows_for state "alpha" in
+    check (list (option string)) "only unmatched Skill receipt stays in history"
+      [Some "trace-unseen#1"]
+      (List.concat_map (fun (row : Tui_types.msg_entry) ->
+        List.map (fun (skill : Keeper_chat_transcript.skill_activity) -> skill.turn_ref) row.me_skill_block) rows);
+    (* A reopened journal rebuilds both segment identities from real receipts. *)
+    let replay = {log with tl_transcript=Keeper_chat_transcript.of_log ~now:200. log.tl_log} in
+    state.msg_settled_logs <- [replay];
+    install [first; second; absent; final];
+    verify 3 ["FIRST_ACTION"; "SECOND_ACTION"; "UNSEEN_ACTION"])
+;;
+
+let test_checkpoint_remaining_skill_uses_its_own_state () =
+  List.iter
+    (fun retained_state ->
+      let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+      state.msg_loaded_keeper <- Some "alpha";
+      let request_id = "checkpoint-skill-state" in
+      let occurrence : Live.tool_occurrence =
+        {stream_scope=0; block_index=1; provider_message_id=None; tool_call_id=Some "covered"} in
+      let log = settled_log ~request_id
+        [Live.Run_started; Live.Tool_started {occurrence; tool_name="keeper_skill"};
+         Live.Tool_ended {occurrence}; Live.Tool_result {occurrence; execution_id="skill-exec"};
+         Live.Reply_details {reply=""; turn_outcome=Continuation_checkpoint; turn_ref="trace-1#1"};
+         Live.Run_finished] in
+      Tui_types.hold_settled_log state log;
+      let skill id skill_state actions =
+        Keeper_chat_transcript.make_skill_activity ~skill_tool_use_id:id
+          ~turn_ref:"trace-1#1" ~content_revision:"sha256:abc" ~runtime_id:"rt-1"
+          ~skill_name:id ~state:skill_state ~actions () in
+      let covered = skill "covered" Keeper_chat_transcript.Skill_served_only [] in
+      let actions = match retained_state with
+        | Keeper_chat_transcript.Skill_used -> ["read_file"]
+        | _ -> [] in
+      let remaining = skill "remaining" retained_state actions in
+      let skills = [covered; remaining] in
+      let original_state = Keeper_chat_transcript.skill_block_state skills in
+      check bool "the covered undelivered receipt originally needs attention" true
+        (Masc_tui_render_chat.skill_tone_of_state original_state
+         = Masc_tui_message_layout.Skill_attention);
+      state.msg_loaded <-
+        [{ (chat_entry ~request_id ~role:(Tui_types.Message_skill original_state)
+              ~text:"skills" ~at:102. ()) with me_skill_block=skills }];
+      Tui_types.enrich_held_logs_from_rows state ~keeper_name:"alpha" state.msg_loaded;
+      match Tui_types.chat_rows_for state "alpha" with
+      | [{me_role=Message_skill actual_state; me_skill_block=[remaining]; _}] ->
+          check (option string) "only the unseen receipt remains" (Some "remaining")
+            remaining.Keeper_chat_transcript.skill_tool_use_id;
+          check bool "the retained block determines its role" true
+            (actual_state = retained_state);
+          check bool "the remaining receipt draws the settled mark and tone" true
+            (Masc_tui_render_chat.skill_tone_of_state actual_state
+             = Masc_tui_message_layout.Skill_settled)
+      | _ -> fail "expected one retained Skill receipt")
+    [Keeper_chat_transcript.Skill_delivered; Keeper_chat_transcript.Skill_used]
+;;
+
 let test_observed_history_handoff_keeps_progress_and_one_final_reply () =
   let cache = Masc_tui_ansi.terminal_size_cache in
   let previous_size = Masc_tui_ansi.get_terminal_size () in
@@ -3388,7 +3665,7 @@ let test_observed_history_handoff_keeps_progress_and_one_final_reply () =
       {stream_scope = 0; block_index = 0; provider_message_id = None
       ; tool_call_id = Some "handoff-tool"} in
     let log = settled_log ~request_id:"handoff"
-        [Live.Run_started; Live.Text "earlier progress stays visible"
+        [Live.Run_started; Live.Text {text="earlier progress stays visible"; stream_scope=None}
         ; Live.Tool_started {occurrence; tool_name = "read_handoff_evidence"}
         ; Live.Tool_ended {occurrence}] in
     Tui_types.hold_settled_log state log;
@@ -3420,7 +3697,7 @@ let test_observed_history_handoff_keeps_progress_and_one_final_reply () =
     (* The tool round separates earlier progress from the terminal stretch.
        Reply_details replaces only the latter, even before finish. *)
     Tui_types.turn_log_add ~now:130. log ~seq:None
-      (Live.Text "terminal stretch");
+      (Live.Text {text="terminal stretch"; stream_scope=None});
     Tui_types.turn_log_add ~now:130. log ~seq:None
       (visible_reply "final answer stays once");
     Tui_types.hold_settled_log state log;
@@ -3440,7 +3717,7 @@ let test_a_journal_log_of_the_live_execution_is_not_observed () =
   state.msg_target_keeper_name <- Some "alpha";
   let live =
     inflight_with_log ~keeper_name:"alpha" ~started_at:10.
-      [ Live.Run_started; Live.Text "shared answer" ]
+      [ Live.Run_started; Live.Text {text="shared answer"; stream_scope=None} ]
   in
   let execution_id = live.sent_request.request_id in
   Tui_types.turn_log_add ~now:11. live.log ~seq:(Some 2)
@@ -3455,7 +3732,7 @@ let test_a_journal_log_of_the_live_execution_is_not_observed () =
     (fun seq delta -> Tui_types.turn_log_add ~now:10. follower ~seq:(Some seq) delta)
     [ Live.Run_started
     ; Live.Batch_bound { operation_id = "batch-follower"; execution_id }
-    ; Live.Text "shared answer" ];
+    ; Live.Text {text="shared answer"; stream_scope=None} ];
   Log.commit follower.Tui_types.tl_log;
   Tui_types.hold_settled_log state follower;
   check string "the follower is bound to the live execution" execution_id
@@ -3471,11 +3748,11 @@ let test_hidden_partial_reply_cannot_remove_the_durable_reply () =
   state.msg_target_keeper_name <- Some "alpha";
   state.msg_loaded_keeper <- Some "alpha";
   let live = inflight_with_log ~keeper_name:"alpha" ~started_at:100.
-      [Live.Run_started; Live.Text "still catching up"] in
+      [Live.Run_started; Live.Text {text="still catching up"; stream_scope=None}] in
   let execution_id = live.sent_request.request_id in
   (* This follower is hidden because the live stream has greater coverage,
      not merely because both are bound to the same execution. *)
-  Tui_types.turn_log_add ~now:110. live.log ~seq:(Some 3) (Live.Text "");
+  Tui_types.turn_log_add ~now:110. live.log ~seq:(Some 3) (Live.Text {text=""; stream_scope=None});
   let follower = Tui_types.turn_log_create ~keeper_name:"alpha"
       ~request_id:"hidden-follower" ~started_at:100. in
   List.iteri
@@ -3633,7 +3910,7 @@ let test_a_wanted_journal_read_is_remembered_once_and_taken_once () =
    not at the moment the read was asked for. *)
 let test_a_journal_built_log_starts_at_the_journal_head () =
   let head = line 0 100. (E.Run_started { run_id = "r"; thread_id = "keeper:alpha" }) in
-  let later = line 3 100.3 (E.Text_delta "said") in
+  let later = line 3 100.3 (E.Text_delta {text="said"; stream_scope=None}) in
   check (float 0.) "a read from the head takes the head's time" 100.
     (Tui_types.journal_log_started_at ~fallback:300. [ head; later ]);
   check (float 0.) "a read that resumes past the head keeps the fallback" 300.
@@ -4040,12 +4317,9 @@ let test_composing_holds_only_while_the_composer_is_live () =
 
 ;;
 
-(* The rows that say a request is being sent have to say how long for. A turn
-   running minutes is ordinary, and without an age those rows read the same at
-   three seconds and at thirteen minutes -- which is the difference between
-   slow and stuck. The age is computed where it can be tested; this pins that
-   the pane actually asks for it. *)
-let test_the_sending_rows_show_an_age () =
+(* In-flight status remains visible without a clock by default. Opting into
+   clocks also reveals request ages, including other Keepers' compact rows. *)
+let test_the_sending_rows_follow_clock_visibility () =
   List.iter (fun keeper_name ->
     let state = Tui_types.create_state ~tool_visibility:Tui_types.Tools_full
         ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
@@ -4056,6 +4330,12 @@ let test_the_sending_rows_show_an_age () =
       | (_, text) :: _ -> text
       | [] -> fail "an in-flight request lost its status row"
     in
+    let bare_summary = summary ~now:5. in
+    check bool "default request row retains its running status" true
+      (String.starts_with ~prefix:"  (running " bare_summary);
+    check string "default request row omits changing ages" bare_summary
+      (summary ~now:782.);
+    state.msg_origin_display <- Masc_tui_message_layout.Origin_inline;
     check bool "three-second request displays its age" true
       (String.ends_with ~suffix:" · 3s)" (summary ~now:5.));
     check bool "thirteen-minute request displays its changed age" true
@@ -4067,9 +4347,14 @@ let test_the_sending_rows_show_an_age () =
       check (list string) "compact status retains the running request" ["기존 작업 처리 중"]
         (List.map Masc_tui_answering.chat_activity_row_text
            (Tui_types.keeper_message_activity_rows state))
-    end else
+    end else begin
+      state.msg_origin_display <- Masc_tui_message_layout.Origin_bare;
+      check string "compact mode hides the other Keeper request age" bare_summary
+        (summary ~now:782.);
+      state.msg_origin_display <- Masc_tui_message_layout.Origin_inline;
       check bool "compact mode retains the other Keeper request age" true
-        (String.ends_with ~suffix:" · 3s)" (summary ~now:5.)))
+        (String.ends_with ~suffix:" · 3s)" (summary ~now:5.))
+    end)
     ["alpha"; "beta"]
 
 ;;
@@ -4126,17 +4411,17 @@ let test_batch_source_selection_preserves_four_request_history () =
     let bind (entry : Tui_types.inflight) = Tui_types.turn_log_add ~now:2. entry.Tui_types.log ~seq:(Some 2)
         (Live.Batch_bound {operation_id=entry.sent_request.request_id; execution_id}) in
     bind n;
-    Tui_types.turn_log_add ~now:2. n.log ~seq:(Some 20) (Live.Text "PARTIAL_CANONICAL");
+    Tui_types.turn_log_add ~now:2. n.log ~seq:(Some 20) (Live.Text {text="PARTIAL_CANONICAL"; stream_scope=None});
     let next = inflight_with_log ~keeper_name:"alpha" ~started_at:2. [Live.Run_started] in
     bind next;
-    Tui_types.turn_log_add ~now:3. next.log ~seq:(Some 80) (Live.Text "RICH_OBSERVED_OUTPUT");
+    Tui_types.turn_log_add ~now:3. next.log ~seq:(Some 80) (Live.Text {text="RICH_OBSERVED_OUTPUT"; stream_scope=None});
     let n2 = inflight_with_log ~keeper_name:"alpha" ~started_at:3.
         [Live.Accepted {admission=Live.Queued; queue_length=1; interactive=None}] in
     let n3 = inflight_with_log ~keeper_name:"alpha" ~started_at:4.
-        [Live.Run_started; Live.Text "INDEPENDENT_OUTPUT"] in
+        [Live.Run_started; Live.Text {text="INDEPENDENT_OUTPUT"; stream_scope=None}] in
     let beta = inflight_with_log ~keeper_name:"beta" ~started_at:5. [Live.Run_started] in
     bind beta;
-    Tui_types.turn_log_add ~now:5. beta.log ~seq:(Some 100) (Live.Text "BETA_ONLY_OUTPUT");
+    Tui_types.turn_log_add ~now:5. beta.log ~seq:(Some 100) (Live.Text {text="BETA_ONLY_OUTPUT"; stream_scope=None});
     Log.commit next.log.tl_log;
     Tui_types.hold_settled_log state next.log;
     Log.commit beta.log.tl_log;
@@ -4154,7 +4439,7 @@ let test_batch_source_selection_preserves_four_request_history () =
     check bool "weaker live output omitted" false (contains "PARTIAL_CANONICAL");
     check bool "independent fourth execution retained" true (contains "INDEPENDENT_OUTPUT");
     check bool "different Keeper cannot win same execution selection" false (contains "BETA_ONLY_OUTPUT");
-    Tui_types.turn_log_add ~now:5. n.log ~seq:(Some 85) (Live.Text "LIVE_CAUGHT_UP");
+    Tui_types.turn_log_add ~now:5. n.log ~seq:(Some 85) (Live.Text {text="LIVE_CAUGHT_UP"; stream_scope=None});
     check (list string) "caught-up live subscriber now dominates the partial observer" []
       (List.map Tui_types.turn_log_request_id (Tui_types.observed_logs_for_keeper state "alpha"));
     check bool "late live coverage is selected" true (contains "LIVE_CAUGHT_UP");
@@ -4172,7 +4457,7 @@ let test_batch_source_selection_preserves_four_request_history () =
     check bool "durable canonical reply suppressed by selected complete sibling" false
       (List.exists (fun (row : Tui_types.msg_entry) -> row.me_role = Tui_types.Message_keeper)
          (Tui_types.chat_rows_for state "alpha"));
-    Tui_types.turn_log_add ~now:7. n.log ~seq:(Some 90) (Live.Text "LATE_PARTIAL_UPDATE");
+    Tui_types.turn_log_add ~now:7. n.log ~seq:(Some 90) (Live.Text {text="LATE_PARTIAL_UPDATE"; stream_scope=None});
     Tui_types.hold_settled_log state n.log;
     check bool "higher partial seq cannot displace authoritative ending" false (contains "LATE_PARTIAL_UPDATE");
     check bool "authoritative ending survives late partial update" true (contains "COMPLETED_SIBLING_REPLY");
@@ -4204,7 +4489,7 @@ let test_history_and_renderer_share_all_inflight_candidates () =
     Tui_types.hold_settled_log state observed.log;
     let competitor = inflight_with_log ~keeper_name:"alpha" ~started_at:3. [Live.Run_started] in
     bind competitor;
-    Tui_types.turn_log_add ~now:4. competitor.log ~seq:(Some 90) (Live.Text "GAPPED_PROGRESS");
+    Tui_types.turn_log_add ~now:4. competitor.log ~seq:(Some 90) (Live.Text {text="GAPPED_PROGRESS"; stream_scope=None});
     let n3 = inflight_with_log ~keeper_name:"alpha" ~started_at:4.
         [Live.Accepted {admission=Live.Queued; queue_length=1; interactive=None}] in
     state.msg_live <- Some n3.log;
@@ -4224,7 +4509,7 @@ let test_history_and_renderer_share_all_inflight_candidates () =
     check bool "selected inflight revision invalidates history memo" false (before == after);
     check int "selected inflight reply owns durable suppression" 0 (List.length after);
     check int "late lower-seq reply draws exactly once" 1 (final_count ());
-    Tui_types.turn_log_add ~now:7. observed.log ~seq:(Some 100) (Live.Text "OBSERVED_CAUGHT_UP");
+    Tui_types.turn_log_add ~now:7. observed.log ~seq:(Some 100) (Live.Text {text="OBSERVED_CAUGHT_UP"; stream_scope=None});
     Tui_types.hold_settled_log state observed.log;
     check int "candidate catch-up preserves one final reply" 1 (final_count ()))
 ;;
@@ -4235,7 +4520,7 @@ let test_batch_watchers_render_one_shared_settled_turn () =
     let log = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id ~started_at:1. in
     List.iter (fun delta -> Tui_types.turn_log_add ~now:2. log ~seq:None delta)
       [Live.Run_started; Live.Batch_bound {operation_id=request_id; execution_id};
-       Live.Text "shared answer";
+       Live.Text {text="shared answer"; stream_scope=None};
        Live.Reply_details {reply="shared answer"; turn_outcome=Masc.Keeper_turn_outcome.Visible_reply; turn_ref="batch#1"};
        Live.Run_finished];
     log in
@@ -4361,7 +4646,7 @@ let test_observed_checkpoint_retains_earlier_output () =
     let log = settled_log ~request_id:"observed-checkpoint"
         [Live.Run_started; Live.Thinking "THINKING_BEFORE_CHECKPOINT";
          Live.Tool_started {occurrence; tool_name="Inspect_before_checkpoint"};
-         Live.Tool_ended {occurrence}; Live.Text "TEXT_BEFORE_CHECKPOINT";
+         Live.Tool_ended {occurrence}; Live.Text {text="TEXT_BEFORE_CHECKPOINT"; stream_scope=None};
          Live.Reply_details {reply=""; turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint;
            turn_ref="trace-1#1"}; Live.Checkpoint; Live.Run_finished] in
     state.msg_settled_logs <- [log];
@@ -4381,8 +4666,23 @@ let test_observed_checkpoint_retains_earlier_output () =
     check bool "checkpoint remains open to later journal events" false
       (Tui_types.turn_log_holds_the_turn log);
     Tui_types.turn_log_add ~now:110. log ~seq:(Some 8) Live.Run_started;
-    Tui_types.turn_log_add ~now:111. log ~seq:(Some 9) (Live.Text "TEXT_AFTER_CHECKPOINT");
+    Tui_types.turn_log_add ~now:111. log ~seq:(Some 9) (Live.Text {text="TEXT_AFTER_CHECKPOINT"; stream_scope=None});
     retained "continuation starts";
+    let status () = Tui_types.keeper_message_visible_status_rows state
+        log.tl_transcript ~now:172_911.
+      |> List.map snd |> String.concat "\n" in
+    check bool "resumed progress keeps its activity" true
+      (Astring.String.is_infix ~affix:"STREAMING" (status ()));
+    check bool "resumed progress hides the cumulative request age" false
+      (Astring.String.is_infix ~affix:"2d" (status ()));
+    check bool "resumed progress hides silence timing" false
+      (Astring.String.is_infix ~affix:"nothing back for" (status ()));
+    state.msg_origin_display <- Masc_tui_message_layout.Origin_inline;
+    check bool "clock metadata restores elapsed details" true
+      (Astring.String.is_infix ~affix:"2d" (status ()));
+    state.msg_origin_display <- Masc_tui_message_layout.Origin_bare;
+    check bool "turning clocks off hides silence timers again" false
+      (Astring.String.is_infix ~affix:"nothing back for" (status ()));
     check bool "new continuation text also appears" true
       (Astring.String.is_infix ~affix:"TEXT_AFTER_CHECKPOINT" (screen ())))
 ;;
@@ -4411,12 +4711,12 @@ let test_continuation_output_interleaves_at_its_event_time () =
         ~request_id:"continuing-operation" ~started_at:90. in
     let add seq now delta = Tui_types.turn_log_add ~now log ~seq:(Some seq) delta in
     add 0 90. Live.Run_started;
-    add 1 100. (Live.Text "BEFORE_CHECKPOINT");
+    add 1 100. (Live.Text {text="BEFORE_CHECKPOINT"; stream_scope=None});
     add 2 110. (Live.Reply_details {reply="";
       turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint; turn_ref="trace-1#1"});
     add 3 111. Live.Run_finished;
     add 4 190. Live.Run_started;
-    add 5 200. (Live.Text "AFTER_CHECKPOINT");
+    add 5 200. (Live.Text {text="AFTER_CHECKPOINT"; stream_scope=None});
     Log.commit log.tl_log;
     state.msg_settled_logs <- [log];
     let verify stage =
@@ -4452,7 +4752,7 @@ let test_every_request_of_a_held_batch_is_held_for_journal_reads () =
     let log = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id ~started_at:1. in
     List.iter (fun delta -> Tui_types.turn_log_add ~now:2. log ~seq:None delta)
       [Live.Run_started; Live.Batch_bound {operation_id=request_id; execution_id};
-       Live.Text "shared answer";
+       Live.Text {text="shared answer"; stream_scope=None};
        Live.Reply_details {reply="shared answer"; turn_outcome=Masc.Keeper_turn_outcome.Visible_reply; turn_ref="batch#1"};
        Live.Run_finished];
     Log.commit log.Tui_types.tl_log;
@@ -4884,7 +5184,7 @@ let test_delivery_states_and_observed_work_are_identifiable () =
       Tui_types.turn_log_add ~now:5. entry.log ~seq:(Some 2)
         (Live.Native_tool_started {occurrence; tool_name=Some "Read"});
       Tui_types.turn_log_add ~now:6. entry.log ~seq:(Some 3) (Live.Native_tool_ended {occurrence});
-      Tui_types.turn_log_add ~now:7. entry.log ~seq:(Some 4) (Live.Text "OBSERVED_ANSWER");
+      Tui_types.turn_log_add ~now:7. entry.log ~seq:(Some 4) (Live.Text {text="OBSERVED_ANSWER"; stream_scope=None});
       let streaming = screen () in
       List.iter (fun marker -> check bool ("default work label: " ^ marker) true (has streaming marker))
         ["THINKING"; "TOOLS"; "STREAMING"; "OBSERVED_ANSWER"];
@@ -4930,15 +5230,59 @@ let test_search_counts_visible_request_annotations () =
               (Masc_tui_theme.strip_sgr line)) frame.Masc_tui_frame_presenter.lines))
 ;;
 
+let test_attachment_caption_whitespace_reaches_chat_rows () =
+  let module History = Masc_tui_keeper_chat_history in
+  let module Layout = Masc_tui_message_layout in
+  let module Render = Masc_tui_render_chat in
+  let note : History.attachment_note =
+    { att_name = "notes.txt"; att_mime = ""; att_bytes = 0
+    ; att_width = None; att_height = None; att_image = Masc_tui_image_preview.No_image } in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let theme = Masc_tui_ansi.Chat_theme.snapshot () in
+  let role = Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }) in
+  let render caption =
+    let text = History.text_with_attachments ~format_bytes:string_of_int
+        ~text:caption ~notes:[note]
+      |> Keeper_chat.terminal_safe_text ~preserve_newlines:true in
+    let message = chat_entry ~request_id:"" ~role ~text ~at:42. () in
+    let entry = match Render.keeper_message_layout_entries ~messages:[message]
+        state ~keeper_name:"alpha" ~chat_cols:120 with
+      | [entry] -> entry
+      | _ -> fail "expected one caption entry" in
+    check bool "the production projection uses stable Markdown" true
+      (match entry.Layout.markdown_source with Markdown_stable _ -> true | _ -> false);
+    let markdown = Render.cached_chat_markdown ~link_previews_mode:`Off ~theme in
+    Layout.visible_rows ~markdown ~origin:Layout.Origin_bare ~inner_width:120
+      ~height:100 [entry]
+    |> List.filter_map (fun (row : Layout.row) -> match row.kind with
+      | Layout.Body -> Some (Masc_tui_theme.strip_sgr row.text)
+      | Layout.Metadata _ | Layout.Viewport_gap _ -> None) in
+  List.iter (fun (caption, expected) ->
+    check (list string) (Printf.sprintf "displayed caption %S" caption)
+      (List.map (fun line -> "  " ^ line) (expected @ ["⎘ #1 notes.txt"]))
+      (render caption))
+    [ "    first line\n    second line", ["    first line"; "    second line"]
+    ; "  앞뒤 공백  ", ["  앞뒤 공백  "]
+    ; "  **styled caption**  ", ["  styled caption  "]
+    ; "caption", ["caption"]
+    ; "caption\n", ["caption"]
+    ; "caption\n\n", ["caption"; ""]
+    ; "first\n\nsecond\n\n", ["first"; ""; "second"; ""]
+    ; " \n  ", []
+    ]
+;;
+
 let () =
   run
     "tui_chat_queue_wiring"
-    [ ( "visible delivery", [test_case "pending to observed work" `Quick test_delivery_states_and_observed_work_are_identifiable; test_case "search counts annotations" `Quick test_search_counts_visible_request_annotations] )
+    [ ( "attachment captions", [test_case "whitespace and separators survive rendered chat rows" `Quick test_attachment_caption_whitespace_reaches_chat_rows] )
+    ; ( "visible delivery", [test_case "pending to observed work" `Quick test_delivery_states_and_observed_work_are_identifiable; test_case "search counts annotations" `Quick test_search_counts_visible_request_annotations] )
     ; ( "rejected input", [test_case "refusal preserves original input" `Quick test_verified_rejection_is_visible_without_mutating_original_input] )
     ; ( "status ownership",
         [ test_case "withdrawal restores only input before the first POST" `Quick test_withdrawal_restores_only_input_before_the_first_post
         ; test_case "preflight recovery keeps newer input and full queue" `Quick test_preflight_recovery_keeps_newer_input_and_a_full_queue
         ; test_case "preflight recovery preserves order and steer intent" `Quick test_preflight_recovery_preserves_order_and_steer_intent
+        ; test_case "preflight resume keeps priority intents until a server resume" `Quick test_preflight_resume_keeps_priority_intents_until_server_resume
         ; test_case "preflight local resume preserves FIFO and server stops" `Quick test_preflight_local_resume_keeps_fifo_and_respects_server_stop
         ; test_case "workspace suspension preserves real stop ownership" `Quick test_workspace_suspension_preserves_real_stop_ownership
         ; test_case "unmarked input respects composer and recall ownership" `Quick test_unmarked_input_cannot_escape_composer_or_recall_ownership
@@ -4996,6 +5340,10 @@ let () =
             test_a_log_without_reasoning_leaves_the_trace_row
         ; test_case "an unfinished settled log suppresses nothing" `Quick
             test_an_unfinished_settled_log_suppresses_nothing
+        ; test_case "exact operation ending retains unjournaled history rows" `Quick
+            test_exact_operation_ending_keeps_unjournaled_rows
+        ; test_case "delivery failure preserves complete stream authority" `Quick
+            test_delivery_failure_keeps_complete_stream_authority
         ; test_case "settle_turn_log commits, holds and clears live" `Quick
             test_settle_turn_log_commits_holds_and_clears_live
         ; test_case "a turn the server ended without a closing event is closed" `Quick
@@ -5069,6 +5417,14 @@ let () =
             test_partial_observation_survives_history_ending_and_unavailable_journal
         ; test_case "observed handoff retains progress and one final reply" `Quick
             test_observed_history_handoff_keeps_progress_and_one_final_reply
+        ; test_case "checkpoint activity rows retain exact source authority" `Quick
+            test_checkpoint_activities_have_exact_row_authority
+        ; test_case "checkpoint Skill receipts retain exact turn scope when ids repeat" `Quick
+            test_checkpoint_skill_receipts_stay_in_their_exact_turn
+        ; test_case "checkpoint remaining Skill uses its own state" `Quick
+            test_checkpoint_remaining_skill_uses_its_own_state
+        ; test_case "succeeded operation with checkpoint-only journal keeps final history" `Quick
+            test_succeeded_operation_with_checkpoint_only_keeps_final_history
         ; test_case "a journal log of the live execution is not observed" `Quick
             test_a_journal_log_of_the_live_execution_is_not_observed
         ; test_case "hidden partial reply cannot remove durable final reply" `Quick
@@ -5101,8 +5457,8 @@ let () =
             test_composing_holds_only_while_the_composer_is_live
         ; test_case "the support threshold reserves the scrollback row" `Quick
             test_the_support_threshold_reserves_the_scrollback_row
-        ; test_case "the sending rows show an age" `Quick
-            test_the_sending_rows_show_an_age
+        ; test_case "the sending rows follow clock visibility" `Quick
+            test_the_sending_rows_follow_clock_visibility
         ; test_case "a refresh keeps what was paged back to" `Quick
             test_a_refresh_keeps_what_was_paged_back_to
         ; test_case "a refresh does not double the overlap" `Quick

@@ -147,9 +147,16 @@ let list ~base_path ~now =
         else invalid_named_player rest
     | Ok _ :: rest | Error _ :: rest -> invalid_named_player rest
   in
-  let* () = invalid_named_player (Auth.list_credential_results base_path) in
-  let* credentials = Auth.list_current_credentials base_path
-    |> Result.map_error (fun error -> Credentials_unavailable error) in
+  (* Batch the file reads without moving transaction admission to a blocking
+     thread. A cancelled HTTP request must stop waiting for a publisher; the
+     admitted transaction then protects its read and release as before. *)
+  let diagnostics = Eio_guard.run_in_systhread ~label:"play-invite-diagnostics"
+      (fun () -> Auth.list_credential_results base_path) in
+  let* () = invalid_named_player diagnostics in
+  let* credentials = Auth.with_credential_transaction base_path (fun transaction ->
+      Eio_guard.run_in_systhread ~label:"play-invite-current-credentials" (fun () ->
+        Auth.list_current_credentials_in_transaction transaction))
+    |> Result.join |> Result.map_error (fun error -> Credentials_unavailable error) in
   collect [] credentials |> Result.map_error (fun error -> Invalid_expiry error)
 
 type revoked =

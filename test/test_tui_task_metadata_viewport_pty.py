@@ -40,24 +40,17 @@ def compact(text):
 def detail_screen(output):
     """The Task detail's own cells. From the split width on, the Task list
     stands beside the detail (render_task_detail), and a whole row puts that
-    list's titles between the lines of a wrapped field. Since #41558 the list
-    is an unboxed sidebar whose every drawn row ends in one divider standing
-    in the band's rightmost column, and the detail's own rows carry two-space
-    margins with no borders (box_line). The divider cell on the row holding
-    the detail's header -- read with the same display-width arithmetic the
-    region harness uses -- is therefore where the detail's cells start, in
-    the stacked width (no divider, nothing to cut) just as in the split."""
+    list's titles between the lines of a wrapped field. The detail header
+    follows two margin cells and one title-indent cell, whether the list
+    stands beside it or the detail occupies the terminal width."""
     end = output.rfind(h.FRAME_END)
     rows = h.screen_rows(bytes(output[:end + len(h.FRAME_END)]) if end >= 0 else bytes(output))
     header = next((rows[key] for key in sorted(rows) if b"MASC Task" in rows[key]), None)
     if header is None:
         raise AssertionError(f"Task detail header missing: {screen(output)!r}")
     text = header.decode("utf-8", "replace")
-    divider = text.rfind("│", 0, text.index("MASC Task"))
-    if divider < 0:
-        left = 0
-    else:
-        left = sum(region.cell_width(character) for character in text[:divider + 1])
+    left = sum(region.cell_width(character) for character in text[:text.index("MASC Task")]) - 3
+    assert left >= 0, header
     columns = max(sum(region.cell_width(character) for character in row.decode("utf-8", "replace"))
                   for row in rows.values())
     return b"\n".join(region.cells(rows[key], left, columns).encode() for key in sorted(rows))

@@ -345,6 +345,23 @@ type runtime_context_source =
 
 type exact_slot_group = Exact_http_slots | Exact_cli_slots | Exact_output_unsupported
 
+(** Why a runtime's last attempt failed without answering
+    ({!Runtime_candidate_backpressure.attempt_failure}). A name this build does
+    not know is kept as the server wrote it. *)
+type runtime_attempt_failure =
+  | Attempt_failure of Runtime_candidate_backpressure.attempt_failure
+  | Unrecognised_attempt_failure of string
+
+(** The last attempt on a runtime that failed without answering, as the
+    server holds it. Other Keepers' lane walks try the runtime after the
+    candidates that answered; the walk of [rfa_recorded_by] tries it again
+    first. Only an answer clears it. *)
+type runtime_failed_attempt = {
+  rfa_noted_at : float;
+  rfa_failure : runtime_attempt_failure;
+  rfa_recorded_by : string;
+}
+
 type runtime_option = {
   ro_id : string;
   ro_provider : string;
@@ -379,6 +396,7 @@ type runtime_option = {
   ro_rate_limit_resets_at : float option;
       (** The end of the provider's active wait; [None] when no limit remains
           or the active limit stated no wait. *)
+  ro_failed_attempt : runtime_failed_attempt option;
 }
 
 type runtime_resolved_lane = {
@@ -1487,6 +1505,7 @@ type preset_detail = {
   pd_name : string;
   pd_directory : string;
   pd_settings_match : preset_settings_match;
+  pd_default_prompts : Prompt_preset.default_comparison;
   pd_prompt_files : (string * string option * prompt_source) list;
   pd_overrides : (string * int) list;  (** prompt key, bytes *)
   pd_instructions : (string * int) list;  (** keeper TOML file name, bytes *)
@@ -1516,6 +1535,7 @@ type preset_restore_report = {
   prr_prompt_overrides : preset_part;
   prr_instructions : preset_part;
   prr_runtime : preset_runtime_status;
+  prr_default_prompts : Prompt_preset.default_comparison;
 }
 
 val decode_presets : Yojson.Safe.t -> (presets_snapshot, string) result

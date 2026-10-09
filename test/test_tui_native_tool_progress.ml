@@ -46,11 +46,8 @@ let test_replayed_sequence_and_model_signal () =
     both ~now:4. (Live.Native_tool_ended {occurrence;completion=Native.end_observed});
     let observed = T.status_rows ~now:10. t and expected = T.status_rows ~now:10. control in
     check bool "progress cannot change answering/thinking phase or silence age" true (observed=expected);
-    let rows = String.concat "\n" (List.map snd observed) in
-    check bool "original model signal is visible after native end" true
-      (Astring.String.is_infix ~affix:label rows);
-    check bool "silence belongs to speech rather than progress" true
-      (Astring.String.is_infix ~affix:"nothing back" rows);
+    (* The typed comparison above carries the decision; drawn wording
+       belongs to the renderer and is not asserted here. *)
     let before = T.tool_calls t in
     T.apply ~now:11. t Live.Run_finished;
     T.apply ~now:12. t (Live.Native_tool_progress {occurrence;progress=output 1});

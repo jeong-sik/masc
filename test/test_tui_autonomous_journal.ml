@@ -89,7 +89,7 @@ let test_poll_excerpt_defers_only_to_exact_journal_text () =
       ktr_state=Keeper_turn_running {lane=Turn_lane_autonomous; started_at_unix=10.;
         interrupt_token="stop-token"; turn_ref=Some turn_ref;
         preview=Some {ktp_status_text="working"; ktp_updated_at_unix=12.;
-          ktp_text_tail="latest answer"; ktp_last_tool=None}}}];
+          ktp_text_position={kpp_generation=0; kpp_start_byte=0}; ktp_text_tail="latest answer"; ktp_last_tool=None}}}];
     let log = Types.turn_log_create_for_source ~keeper_name:"alpha"
         ~source:(Log.Autonomous_turn journal_turn) ~started_at:10. in
     Types.turn_log_add ~now:10. log ~seq:(Some 0) Masc_tui_keeper_chat_live.Run_started;

@@ -2002,8 +2002,8 @@ let polled_turn_output_with_anchors (state : state) ~keeper_name ~role_label_col
            ; action = Message_layout.Action_none
            } : Message_layout.entry) in
         let status_style = Message_layout.Status in
-        [ Scroll_polled (interrupt_token, Polled_speech), speech
-        ; Scroll_polled (interrupt_token, Polled_status),
+        [ Scroll_polled (interrupt_token, preview.ktp_text_position.kpp_generation, Polled_speech), speech
+        ; Scroll_polled (interrupt_token, preview.ktp_text_position.kpp_generation, Polled_status),
           { speech with style = status_style; speaker = "STATUS";
             role_label = Message_layout.align_role_label
               ~column:role_label_column ~style:status_style "STATUS";

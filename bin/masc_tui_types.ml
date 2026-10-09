@@ -912,7 +912,7 @@ type polled_scroll_part = Polled_status | Polled_speech
 type chat_scroll_anchor =
   | Scroll_durable of chat_search_anchor
   | Scroll_pending of string
-  | Scroll_polled of string * polled_scroll_part
+  | Scroll_polled of string * int * polled_scroll_part
 
 type chat_pin_mode = Follow_live | Hold_scroll | Hold_search
 (** [Follow_live] is the last frame's structural snapshot, activated by a

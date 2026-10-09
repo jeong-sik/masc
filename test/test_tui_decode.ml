@@ -8321,7 +8321,8 @@ let test_decode_keeper_turns_reads_the_preview () =
                       ; ("started_at_unix", `Float 1.0)
                       ; ( "preview"
                         , `Assoc
-                            [ ("text_tail", `String "PR body \xeb\xa7\x88\xeb\xac\xb4\xeb\xa6\xac")
+                            [ ("text_position", `Assoc ["generation", `Int 0; "start_byte", `Int 0])
+                            ; ("text_tail", `String "PR body \xeb\xa7\x88\xeb\xac\xb4\xeb\xa6\xac")
                             ; ("status_text", `String "last observed tool: Execute")
                             ; ("last_tool", `String "Execute")
                             ; ("updated_at_unix", `Float 2.0)
@@ -8339,6 +8340,20 @@ let test_decode_keeper_turns_reads_the_preview () =
      Alcotest.(check (option string)) "last observed tool rides" (Some "Execute")
        p.Tui_decode.ktp_last_tool
    | Ok _ -> Alcotest.fail "preview did not decode as running+Some");
+  let rec replace_position position = function
+    | `Assoc fields -> `Assoc (List.map (fun (key, value) ->
+        key, (if key="text_position" then position else replace_position position value)) fields)
+    | `List values -> `List (List.map (replace_position position) values)
+    | value -> value in
+  List.iter (fun position ->
+    Alcotest.(check bool) "malformed source position rejected" true
+      (Result.is_error (Tui_decode.decode_keeper_turns (replace_position position with_preview))))
+    [`Null; `Assoc ["generation", `Int 0];
+     `Assoc ["generation", `Int 0; "generation", `Int 1; "start_byte", `Int 0];
+     `Assoc ["generation", `Int 0; "start_byte", `Int (-1)];
+     `Assoc ["generation", `Int 0; "start_byte", `Float 0.5];
+     `Assoc ["generation", `Int 0; "start_byte", `Float 9_007_199_254_740_992.];
+     `Assoc ["generation", `Int 0; "start_byte", `Int 0; "unknown", `Null]];
   (* An older server sends no preview field at all: running still decodes. *)
   match Tui_decode.decode_keeper_turns keeper_turns_json with
   | Error err -> Alcotest.fail err

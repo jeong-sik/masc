@@ -325,11 +325,13 @@
       "path": "lib/keeper/keeper_tool_filesystem_runtime.ml",
       "baseline_lines": 3315,
       "kind": "production",
-      "status": "partial: pure line-window projection separated",
+      "status": "partial: pure line-window slicing and strict coordinate decoding separated; path/read effects sequenced after decode; other responsibilities pending",
       "prs": [
-        41879
+        41879,
+        41932
       ],
-      "current_lines": 3210
+      "current_lines": 3188,
+      "validation_artifact": "read-window-input/README.md"
     },
     {
       "path": "lib/keeper/keeper_tool_in_process_runtime.ml",

@@ -1,0 +1,17 @@
+{
+  "config/prompts/keeper.md": "6383e6ec9cd761a90c6b1aea78f3b60ecebbcd450e1e187a7d2ed7d4775a196b",
+  "lib/keeper/keeper_tool_filesystem_guidance.ml": "3c332c699b686a44ef6d7ab34989f783b0b4dd0e2c124680c54818a9f4581f75",
+  "lib/keeper/keeper_tool_filesystem_guidance.mli": "086f651e870b6e07ad8eeb41f329b441220fabff62f3fb78656ac0e1baf9c8ed",
+  "lib/keeper/keeper_tool_filesystem_runtime.ml": "329fb3f22666d67e3591e53290bf121d6cf168c4ad0d177844ba4d746d55b3aa",
+  "lib/keeper/keeper_tool_read_window.ml": "6f4b038e1e43d5d8ee35cdf3bd36aa2f78eba682e4aae183b89f4be8950bd919",
+  "lib/keeper/keeper_tool_read_window.mli": "73cc26295c71d4025398fe067e17fde15012c236b12d6406e1fa0ccde0a83d08",
+  "lib/prompt_registry/prompt_names.ml": "52cc19d3272b682afc08f39c422ca1bdb8d27c3855cb0b1bdf2f28ead32075bb",
+  "lib/prompt_registry/prompt_names.mli": "22e4723cc7ba19e286c776c801c267010abab6301790a00d710b4ec9103f6ff4",
+  "lib/prompt_registry/tool_guidance.mli": "9ef27dbb7e3bc55b203b8056d86f245fc94073687f6257b7626a300e04ed4337",
+  "test/test_keeper_tool_read_window.ml": "4c61237606b497d750957da98f2946b5643ea4156d5ca4fef01290fdc47a25c9",
+  "lib/keeper/keeper_tool_descriptor_resolution.ml": "3d471a80f9db1657b3757a9320e097f186a4a6fd778ee92fb5d93bc6142745ee",
+  "lib/keeper/keeper_tool_runtime.ml": "7ad238f25b0d612e813713ba96e95bf2baa8ac631f7db555cc20a428aa8fe179",
+  "lib/verification_authority_tools.ml": "69fe44cfea9ebe5829d2ffe9f8b6cfae50cc44714e2e65c4db127b726fa58cc4",
+  "packages/agent_core/lib/tool_input_validation.ml": "095c6c5bf3c3d5139ce22ee171a3ac69952c4964810fb3b60a4b551b3e53066e",
+  "config/tools/Read.toml": "007ea215e6473c9b7daf9228abd213deb8473f49c32dac51ad158e58e5c0c06f"
+}

@@ -4,6 +4,7 @@ open Keeper_types_profile
 open Keeper_tool_shared_runtime
 open Result.Syntax
 open Keeper_tool_read_window
+open Keeper_tool_filesystem_guidance
 
 (* The write mode is defined once in [Keeper_tool_write_mode], shared with the
    remote-lane handler; the names below keep this module's surface. *)
@@ -42,56 +43,21 @@ let read_window_fetch_bytes ~max_bytes = function
   | _ -> read_file_max_max_bytes
 ;;
 
-(* Every model-facing guidance sentence this module emits lives in a managed
-   template under the keeper.tool_filesystem prefix; the execution path only
-   picks the variant and supplies the data. The variant and its renderer live
-   in [Keeper_tool_filesystem_guidance]: the remote write lane
-   ([Keeper_tool_filesystem_remote_write]) renders the same slots and this
-   module already calls into that lane, so keeping the machinery here would
-   close a module cycle. The type equation keeps the constructors in scope
-   unqualified, so the call sites below read exactly as before. *)
-type fs_guidance = Keeper_tool_filesystem_guidance.t =
-  | Offset_not_1_based of { offset : int }
-  | Limit_not_positive of { limit : int }
-  | Available_cwds_partial of
-      { limit : string
-      ; cwds : string
-      }
-  | Checkout_scan_failed of { detail : string }
-  | Offset_beyond_window of
-      { offset : int
-      ; window_bytes : int
-      }
-  | Capability_unavailable
-  | Publication_failed
-  | Directory_publication_failed
-  | Append_capability_failed
-  | Append_incomplete
-  | Recovery_lane_committed
-  | Recovery_lane_effect_observed
-  | Recovery_lane_not_executed
-  | Recovery_lane_indeterminate
-  | Recovery_lane_cleanup_detail
-  | Gate_record_unavailable
-  | Path_required
-  | Patch_requires_old_string
-  | Patch_target_missing
-
 let fs_guidance_text = Keeper_tool_filesystem_guidance.text
 
 (* Range violations are rejected loudly instead of being defaulted: a model
    that sent [limit=0] or [offset=-3] gets a payload naming the contract, so
    the next attempt can self-correct. *)
 let read_line_window_of_args args =
-  match Safe_ops.json_int_opt "offset" args, Safe_ops.json_int_opt "limit" args with
-  | Some offset, _ when offset < 1 ->
-    Error (fs_guidance_text (Offset_not_1_based { offset }))
-  | _, Some limit when limit < 1 ->
-    Error (fs_guidance_text (Limit_not_positive { limit }))
-  | offset, max_lines ->
-    (* DET-OK: absent offset = the schema-declared default (line 1); range
-       violations are rejected above — documented-default resolution. *)
-    Ok { start_line = Option.value ~default:1 offset; max_lines }
+  Keeper_tool_read_window.of_args args
+  |> Result.map_error (fun error ->
+    let guidance = match error with
+      | Below_one { coordinate = Offset; value = offset } -> Offset_not_1_based { offset }
+      | Below_one { coordinate = Limit; value = limit } -> Limit_not_positive { limit }
+      | Invalid_integer { coordinate; value } -> Invalid_read_integer { coordinate; value }
+      | Not_an_object value -> Invalid_read_arguments { value }
+    in
+    fs_guidance_text guidance)
 ;;
 
 type read_file_resolution_error = Read_path_error of Keeper_alerting_path.path_refusal
@@ -289,16 +255,22 @@ let handle_read_file_with_outcome
     |> fun n -> max read_file_min_max_bytes (min read_file_max_max_bytes n)
   in
   let cwd = string_opt_nonempty "cwd" args in
-  match read_line_window_of_args args, resolve_read_file_target ~config ~meta ~args ~raw_path:path with
-  | Error window_error, _ ->
+  let read_target =
+    let* window = read_line_window_of_args args |> Result.map_error (fun e -> `Window e) in
+    let* target = resolve_read_file_target ~config ~meta ~args ~raw_path:path
+      |> Result.map_error (fun (Read_path_error refusal) -> `Path refusal) in
+    Ok (window, target)
+  in
+  match read_target with
+  | Error (`Window window_error) ->
     Keeper_tool_execution.failure
       ~class_:Tool_result.Policy_rejection
       (error_json window_error)
-  | Ok _, Error (Read_path_error refusal) ->
+  | Error (`Path refusal) ->
     Keeper_tool_execution.failure
       ~class_:refusal.Keeper_alerting_path.failure_class
       (error_json refusal.message)
-  | Ok window, Ok read_target ->
+  | Ok (window, read_target) ->
     let target = read_file_target_path read_target in
     let payload_of_slice ~scan_complete body =
       match
@@ -595,12 +567,18 @@ let handle_owned_read_file_with_outcome
   let path = Safe_ops.json_string ~default:"" "path" args |> String.trim in
   let max_bytes = read_file_default_max_bytes in
   let cwd = string_opt_nonempty "cwd" args in
-  match read_line_window_of_args args, resolve_owned_read_target ~ownership_root ~path ~cwd with
-  | Error window_error, _ ->
+  let read_target =
+    let* window = read_line_window_of_args args |> Result.map_error (fun e -> `Window e) in
+    let* target = resolve_owned_read_target ~ownership_root ~path ~cwd
+      |> Result.map_error (fun refusal -> `Path refusal) in
+    Ok (window, target)
+  in
+  match read_target with
+  | Error (`Window window_error) ->
     Keeper_tool_execution.failure ~class_:Tool_result.Policy_rejection (error_json window_error)
-  | Ok _, Error (refusal : Keeper_alerting_path.path_refusal) ->
+  | Error (`Path (refusal : Keeper_alerting_path.path_refusal)) ->
     Keeper_tool_execution.failure ~class_:refusal.failure_class (error_json refusal.message)
-  | Ok window, Ok target ->
+  | Ok (window, target) ->
     let fetch_bytes = read_window_fetch_bytes ~max_bytes window in
     (match
        Fs_compat.load_owned_regular_file_prefix

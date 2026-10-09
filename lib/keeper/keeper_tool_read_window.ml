@@ -1,9 +1,45 @@
-(** Pure line-window projection after filesystem acquisition. *)
+(** Pure Read coordinate decoding and line-window projection. *)
 
 type read_line_window =
   { start_line : int (* 1-based first line to return *)
   ; max_lines : int option (* cap on returned lines; None = to EOF *)
   }
+
+type coordinate = Offset | Limit
+
+type argument_error =
+  | Invalid_integer of { coordinate : coordinate; value : Yojson.Safe.t }
+  | Below_one of { coordinate : coordinate; value : int }
+  | Not_an_object of Yojson.Safe.t
+
+let of_args = function
+  | `Assoc fields ->
+    let open Result.Syntax in
+    let integer coordinate key =
+      match List.assoc_opt key fields with
+      | None -> Ok None
+      | Some value ->
+        let parsed = match value with
+          | `Int value -> Some value
+          | `Intlit raw -> int_of_string_opt raw
+          (* [min_int] is an exact power of two; its float negation is the
+             exclusive upper index bound on both 32-bit and 64-bit OCaml. *)
+          | `Float value
+            when Float.is_finite value && Float.is_integer value
+              && value >= float_of_int min_int
+              && value < -. (float_of_int min_int) -> Some (int_of_float value)
+          | `Float _ | `String _ | `Null | `Bool _ | `List _ | `Assoc _ -> None
+        in
+        match parsed with
+        | None -> Error (Invalid_integer { coordinate; value })
+        | Some value when value < 1 -> Error (Below_one { coordinate; value })
+        | Some value -> Ok (Some value)
+    in
+    let* offset = integer Offset "offset" in
+    let* max_lines = integer Limit "limit" in
+    Ok { start_line = (match offset with None -> 1 | Some value -> value); max_lines }
+  | value -> Error (Not_an_object value)
+;;
 
 type read_window_slice =
   { window_content : string

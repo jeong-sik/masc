@@ -112,8 +112,15 @@ type card_field =
   | Banner_brand | Banner_repository | Banner_paper_id | Banner_image_format
   | Banner_service_label | Banner_content_label | Banner_action
 
+type card_band = Header_band | Title_band | Description_band | Address_band | Actions_band
+type card_column = Primary_column | Banner_column
+type card_order = { band : card_band; column : card_column }
+(** Producer-owned reading sequence. Bands name logical content roles, not
+    wrapped row ordinals; missing narrow-card fields leave this order intact. *)
+
 type card_source_span = {
   field : card_field;
+  order : card_order;
   value : string;
   row : int;
   row_start_byte : int;

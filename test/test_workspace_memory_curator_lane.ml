@@ -620,21 +620,55 @@ let occurrences ~needle text =
     else count (offset + 1) found in
   if needle = "" then Alcotest.fail "empty briefing assertion" else count 0 0
 
-let check_delivery ~base_path expected =
+type delivery_freshness = Current_briefing | Stale_briefing
+
+let check_delivery ~base_path ~freshness expected =
+  let expected_status = match freshness with
+    | Current_briefing -> "current" | Stale_briefing -> "stale" in
+  let read args =
+    let outcome = Masc.Keeper_workspace_memory_read.handle ~base_path ~args in
+    (match outcome.disposition with
+     | Tool_result.Completed () -> ()
+     | Deferred () | Failed _ -> Alcotest.fail outcome.raw_output);
+    match outcome.data with
+    | Some data -> data
+    | None -> Alcotest.fail "memory reader omitted its structured result" in
+  let reader = Agent_core.Tool.create ~name:"keeper_workspace_memory_read"
+      ~description:"Read the fixture's actual shared memory"
+      ~parameters:[{ Agent_core.Types.name = "view"; description = "Optional memory view";
+        param_type = String; required = false }]
+      (fun args -> Ok { Agent_core.Types.content = Yojson.Safe.to_string (read args);
+        content_blocks = None; _meta = None }) in
+  let access = Masc.Keeper_request_tool_access.create ~offered:[reader]
+      ~deferred_names:[] ~loader_alive:false in
   let observation = Ledger.observe ~base_path in
   let direct = Masc.Keeper_turn.For_testing.direct_turn_dynamic_context
     ~lane_updates:(Ok (`List [])) ~workspace_memory:observation
+    ~workspace_memory_access:(Some access)
     ~current_task:Inputs.No_current_task ~held_task_skills:[] ~task_skill_surfaces:[]
     ~approval_authority_text:"" ~recent_direct_conversation_text:""
     ~worktree_text:"" ~telemetry_feedback_text:"" ~turn_instructions_text:"" in
   let autonomous = Prompt.build_prompt_preview ~current_task:Inputs.No_current_task
-      ~observation:empty_world ~workspace_memory:observation () in
+      ~observation:empty_world ~workspace_memory:observation
+      ~workspace_memory_access:access () in
   List.iter (fun (name, text) ->
-    Alcotest.(check int) (name ^ " receives the saved semantic briefing once") 1
+    Alcotest.(check int) (name ^ " defers the saved semantic briefing") 0
       (occurrences ~needle:expected text);
     Alcotest.(check bool) (name ^ " can retrieve the supporting ledger") true
       (occurrences ~needle:"keeper_workspace_memory_read" text > 0))
-    ["direct", direct; "autonomous", autonomous.world_state]
+    ["direct", direct; "autonomous", autonomous.world_state];
+  let inventory = read (`Assoc []) |> field "workspace_memory" |> field "briefing" in
+  Alcotest.check json "inventory carries freshness without briefing prose"
+    (`Assoc ["status", `String expected_status]) inventory;
+  let delivered = match Agent_core.Tool.execute reader
+      (`Assoc ["view", `String "briefing"]) with
+    | Ok result -> Yojson.Safe.from_string result.content
+    | Error _ -> Alcotest.fail "advertised memory reader failed" in
+  let briefing = delivered |> field "workspace_memory" |> field "briefing" in
+  Alcotest.(check string) "reader returns the exact saved semantic briefing"
+    expected (briefing |> field "text" |> string);
+  Alcotest.(check string) "reader preserves the expected publication freshness"
+    expected_status (briefing |> field "status" |> string)
 
 let observed_briefing base_path = match Ledger.observe ~base_path with
   | Ledger.Available { briefing = Ok value; _ } -> value
@@ -679,27 +713,27 @@ let test_briefing_reaches_turns_and_tracks_addition_and_deletion () =
     Eio.Switch.run (fun sw ->
       Worker.For_testing.start ~sw ~base_path ~execute ~summarize;
       await_idle ~base_path;
-      check_delivery ~base_path first; check_current_sources base_path;
+      check_delivery ~base_path ~freshness:Current_briefing first; check_current_sources base_path;
       let published = current_briefing base_path in
       request_existing base_path; await_idle ~base_path;
       Alcotest.(check int) "unchanged request makes no classification call" 1 !classifications;
       Alcotest.(check int) "unchanged request makes no summary call" 1 !summaries;
       Alcotest.(check string) "unchanged summary is reused" published.text
         (current_briefing base_path).text;
-      check_delivery ~base_path first;
+      check_delivery ~base_path ~freshness:Current_briefing first;
       commit ~keeper_id:"operator" base_path "Deployment is paused until owner confirmation";
       await_idle ~base_path;
       Alcotest.(check int) "addition is classified once" 2 !classifications;
       Alcotest.check json "addition reuses the prior semantic summary" (`String first)
         (field "previous_summary" (List.hd !inputs));
-      check_delivery ~base_path added; check_current_sources base_path;
+      check_delivery ~base_path ~freshness:Current_briefing added; check_current_sources base_path;
       commit_facts ~keeper_id:"reviewer" base_path [];
       await_idle ~base_path;
       Alcotest.(check int) "deletion needs no new classification" 2 !classifications;
       Alcotest.(check int) "deletion-only update rebuilds the briefing" 3 !summaries;
       Alcotest.check json "deleted prose cannot enter the rebuilt summary" `Null
         (field "previous_summary" (List.hd !inputs));
-      check_delivery ~base_path removed; check_current_sources base_path;
+      check_delivery ~base_path ~freshness:Current_briefing removed; check_current_sources base_path;
       Worker.For_testing.stop ~base_path))
 
 let test_existing_ledger_gets_its_first_briefing_without_reclassification () =
@@ -721,7 +755,7 @@ let test_existing_ledger_gets_its_first_briefing_without_reclassification () =
       await_idle ~base_path;
       Alcotest.(check int) "existing ledger gets a summary" 1 !calls;
       check_current_sources base_path;
-      check_delivery ~base_path (current_briefing base_path).text;
+      check_delivery ~base_path ~freshness:Current_briefing (current_briefing base_path).text;
       Worker.For_testing.stop ~base_path))
 
 type classification_failure_fixture = Provider_error | Invalid_decision
@@ -762,7 +796,7 @@ let test_existing_ledger_briefing_survives_new_classification_failure fault =
       Alcotest.(check int) "existing durable evidence still receives its first briefing" 1 !summaries;
       let first = current_briefing base_path in
       check_current_sources base_path;
-      check_delivery ~base_path first.text;
+      check_delivery ~base_path ~freshness:Current_briefing first.text;
       Alcotest.check json "failed classification leaves the ledger unchanged"
         (Ledger.to_json ledger) (Ledger.to_json (Ledger.load ~base_path |> require));
       request_existing base_path; await_idle ~base_path;
@@ -781,7 +815,7 @@ let test_existing_ledger_briefing_survives_new_classification_failure fault =
            | Runs.Completed { outcome = Runs.Failed { code = "workspace_curator_failed"; _ }; _ } -> true
            | _ -> false) in
       Alcotest.(check int) "both classification failures remain observable" 2 (List.length failures);
-      check_delivery ~base_path first.text;
+      check_delivery ~base_path ~freshness:Current_briefing first.text;
       Worker.For_testing.stop ~base_path))
 
 let test_failed_briefing_keeps_publication_and_request_resumes_same_input () =
@@ -807,7 +841,7 @@ let test_failed_briefing_keeps_publication_and_request_resumes_same_input () =
            previous.text retained.text
        | Briefing.Current _ -> Alcotest.fail "old summary was called current after new evidence"
        | Briefing.Missing -> Alcotest.fail "failed replacement erased the published summary");
-      check_delivery ~base_path previous.text;
+      check_delivery ~base_path ~freshness:Stale_briefing previous.text;
       Alcotest.(check int) "classification already committed before summary failure" 2 !classifications;
       failing := false;
       (* This is the real owner request, not a model/helper retry. It proves
@@ -816,7 +850,7 @@ let test_failed_briefing_keeps_publication_and_request_resumes_same_input () =
       Alcotest.(check int) "same classified input is not reclassified" 2 !classifications;
       Alcotest.(check int) "failed summary is retried at the next admitted wake" 3 !summaries;
       check_current_sources base_path;
-      check_delivery ~base_path (current_briefing base_path).text;
+      check_delivery ~base_path ~freshness:Current_briefing (current_briefing base_path).text;
       Worker.For_testing.stop ~base_path))
 
 let test_removing_all_sources_erases_publication_and_pending_pass () =
@@ -870,7 +904,7 @@ let test_removing_all_sources_erases_publication_and_pending_pass () =
         (field "entries" input |> Yojson.Safe.Util.to_list
          |> List.map (fun entry -> field "text" entry |> string) |> List.sort String.compare);
       check_current_sources base_path;
-      check_delivery ~base_path (current_briefing base_path).text;
+      check_delivery ~base_path ~freshness:Current_briefing (current_briefing base_path).text;
       Worker.For_testing.stop ~base_path))
 
 let test_removing_pending_addition_cleans_pass_without_model_work () =
@@ -950,7 +984,7 @@ let test_in_flight_addition_waits_for_fixed_briefing_pass () =
       await_idle ~base_path;
       Alcotest.(check int) "addition waits for one subsequent pass" 2 !calls;
       check_current_sources base_path;
-      check_delivery ~base_path (current_briefing base_path).text;
+      check_delivery ~base_path ~freshness:Current_briefing (current_briefing base_path).text;
       Worker.For_testing.stop ~base_path))
 
 let failed_runs ~base_path ~code =
@@ -1000,7 +1034,7 @@ let test_summary_narrows_only_after_provider_size_refusal () =
         Alcotest.(check int) "final semantic text retains each supplied observation once" 1
           (occurrences ~needle:claim summary.text)) claims;
       check_current_sources base_path;
-      check_delivery ~base_path summary.text;
+      check_delivery ~base_path ~freshness:Current_briefing summary.text;
       Worker.For_testing.stop ~base_path))
 
 type failed_phase = During_classification | During_summary
@@ -1067,7 +1101,7 @@ let test_size_refusal_keeps_previous_briefing_and_parks refusal =
       List.iter (check_refusal_output refusal) failures;
       Alcotest.(check bool) "no empty-batch or immediate retry loop remains" true
         (Worker.For_testing.is_idle ~base_path);
-      check_delivery ~base_path previous.text;
+      check_delivery ~base_path ~freshness:Stale_briefing previous.text;
       Worker.For_testing.stop ~base_path))
 
 let () = Alcotest.run "workspace curator lane"

@@ -71,7 +71,7 @@ let test_settled_reply_and_complete_suffix () = at_sizes (fun origin ->
     row ~id:"reply" ~request_id:"first" ~role:T.Message_keeper
       ~text:"HELD_REPLY_NEEDLE" 3. ];
   ignore (log state ~id:"first" ~at:1.
-    [Live.Run_started; Live.Text "HELD_REPLY_NEEDLE"; reply "HELD_REPLY_NEEDLE"; Live.Run_finished]);
+    [Live.Run_started; Live.Text {text="HELD_REPLY_NEEDLE"; stream_scope=None}; reply "HELD_REPLY_NEEDLE"; Live.Run_finished]);
   check int "held reply replaces its durable copy exactly once" 1
     (count (screen state) "HELD_REPLY_NEEDLE");
   ignore (find state "HELD_REPLY_NEEDLE");
@@ -82,7 +82,7 @@ let test_settled_reply_and_complete_suffix () = at_sizes (fun origin ->
     let text = String.concat "\n" (List.init 10 (fun line ->
       Printf.sprintf "later answer %d line %d" index line)) in
     ignore (log state ~id ~at:(10. *. float_of_int index)
-      [Live.Run_started; Live.Text text; reply text; Live.Run_finished])
+      [Live.Run_started; Live.Text {text=text; stream_scope=None}; reply text; Live.Run_finished])
   done;
   state.msg_loaded <- state.msg_loaded @ [row ~id:"broadcast" ~request_id:"outside"
     ~role:(T.Message_user (T.Sent_by_other {speaker="beta"; surface=Some "broadcast"}))
@@ -149,8 +149,8 @@ let test_repeat_survives_reasoning_visibility_and_backfill () = at_sizes (fun or
   state.msg_loaded <- [row ~id:"old" ~request_id:"old" ~role:user
     ~text:"MATCH_HISTORY" 1.];
   let held = log state ~id:"running" ~at:10.
-    [Live.Run_started; Live.Text "MATCH_PROGRESS";
-     Live.Thinking "MATCH_REASONING"; Live.Text "MATCH_REPLY"] in
+    [Live.Run_started; Live.Text {text="MATCH_PROGRESS"; stream_scope=None};
+     Live.Thinking "MATCH_REASONING"; Live.Text {text="MATCH_REPLY"; stream_scope=None}] in
   let latest = find state "MATCH_" in
   let thought = find ~older:latest state "MATCH_" in
   check bool "repeating search visits a distinct journal stretch" true
@@ -196,7 +196,7 @@ let test_repeat_across_history_journal_replacement () = at_sizes (fun origin ->
     row ~id:"b" ~request_id:"b" ~role:T.Message_keeper ~text:"MATCH_B" 10. ];
   let latest = find state "MATCH_" in
   List.iter (fun (id, at, text) -> ignore (log state ~id ~at
-    [Live.Run_started; Live.Text text; reply text; Live.Run_finished]))
+    [Live.Run_started; Live.Text {text=text; stream_scope=None}; reply text; Live.Run_finished]))
     ["a", 1., "MATCH_A"; "b", 10., "MATCH_B"];
   let older = find ~older:latest state "MATCH_" in
   (match older.matched_anchor with
@@ -257,7 +257,7 @@ let test_long_answer_match_location () = at_sizes (fun origin ->
     let state = state origin in
     let text = long_answer "LONG_NEEDLE_" in
     if journal then ignore (log state ~id:"long" ~at:1.
-      [Live.Run_started; Live.Text text; reply text; Live.Run_finished])
+      [Live.Run_started; Live.Text {text=text; stream_scope=None}; reply text; Live.Run_finished])
     else state.msg_loaded <- [row ~id:"long" ~request_id:"long"
       ~role:T.Message_keeper ~text 1.];
     List.iter (fun index ->
@@ -271,7 +271,7 @@ let test_word_wrapped_match_location () = at_sizes (fun origin ->
   let words = List.init 300 (fun index -> Printf.sprintf "token%03d" index) in
   let text = String.concat " " words in
   ignore (log state ~id:"wrapped" ~at:1.
-    [Live.Run_started; Live.Text text; reply text; Live.Run_finished]);
+    [Live.Run_started; Live.Text {text=text; stream_scope=None}; reply text; Live.Run_finished]);
   List.iter (fun index ->
     let needle = Printf.sprintf "token%03d" index in
     ignore (find state needle);
@@ -287,7 +287,7 @@ let test_word_wrapped_match_location () = at_sizes (fun origin ->
   let unbroken = "HARDSTART" ^ String.make 180 'x' ^ "HARDEND" in
   let wrapped_word = text ^ "\n" ^ unbroken ^ "\n" ^ text in
   ignore (log state ~id:"hard-wrap" ~at:200.
-    [Live.Run_started; Live.Text wrapped_word; reply wrapped_word; Live.Run_finished]);
+    [Live.Run_started; Live.Text {text=wrapped_word; stream_scope=None}; reply wrapped_word; Live.Run_finished]);
   ignore (find state unbroken);
   let lines = frame_lines state in
   check bool "a hard-wrapped token retains both ends of its match" true
@@ -297,7 +297,7 @@ let test_search_matches_rendered_words () = at_sizes (fun origin ->
   let state = state origin in
   let text = "Visible **styled** text\nVISIBLE\nBOUNDARY\n" ^ long_answer "TAIL_" in
   ignore (log state ~id:"markdown" ~at:1.
-    [Live.Run_started; Live.Text text; reply text; Live.Run_finished]);
+    [Live.Run_started; Live.Text {text=text; stream_scope=None}; reply text; Live.Run_finished]);
   ignore (find state "Visible styled text");
   assert_still_reading state "Visible styled text";
   (* Search treats physical breaks as presentation boundaries, including an
@@ -313,14 +313,14 @@ let test_journal_only_pin_survives_all_arrivals () = at_sizes (fun origin ->
   let state = state origin in
   let text = long_answer "READ_A_" in
   ignore (log state ~id:"a" ~at:1.
-    [Live.Run_started; Live.Text text; reply text; Live.Run_finished]);
+    [Live.Run_started; Live.Text {text=text; stream_scope=None}; reply text; Live.Run_finished]);
   ignore (find state "READ_A_035");
   check bool "search pins the journal before a frame can arrive" true
     (Option.is_some state.msg_scroll_pin);
   let before = visible_line (frame_lines state) "READ_A_035" in
   let later = long_answer "NEW_C_" in
   ignore (log state ~id:"c" ~at:100.
-    [Live.Run_started; Live.Text later; reply later; Live.Run_finished]);
+    [Live.Run_started; Live.Text {text=later; stream_scope=None}; reply later; Live.Run_finished]);
   check int "a large journal arrival cannot move the reading row" before
     (visible_line (frame_lines state) "READ_A_035");
   assert_still_reading state "READ_A_035";
@@ -336,10 +336,10 @@ let test_journal_only_pin_survives_all_arrivals () = at_sizes (fun origin ->
   assert_still_reading state "READ_A_035";
   let live = T.turn_log_create ~keeper_name:"alpha" ~request_id:"live" ~started_at:300. in
   T.turn_log_add ~now:300. live ~seq:(Some 0) Live.Run_started;
-  T.turn_log_add ~now:301. live ~seq:(Some 1) (Live.Text (long_answer "LIVE_"));
+  T.turn_log_add ~now:301. live ~seq:(Some 1) (Live.Text {text=long_answer "LIVE_"; stream_scope=None});
   state.msg_live <- Some live;
   assert_still_reading state "READ_A_035";
-  T.turn_log_add ~now:302. live ~seq:(Some 2) (Live.Text ("\n" ^ long_answer "GROWTH_"));
+  T.turn_log_add ~now:302. live ~seq:(Some 2) (Live.Text {text=("\n" ^ long_answer "GROWTH_"); stream_scope=None});
   assert_still_reading state "READ_A_035";
   T.turn_log_add ~now:303. live ~seq:(Some 3)
     (reply (long_answer "LIVE_" ^ "\n" ^ long_answer "GROWTH_"));
@@ -357,10 +357,10 @@ let test_pin_aliases_history_and_canonical_reply () = at_sizes (fun origin ->
   ignore (find state "ALIASED_040");
   ignore (frame_lines state);
   ignore (log state ~id:"alias" ~at:1.
-    [Live.Run_started; Live.Text text; reply text; Live.Run_finished]);
+    [Live.Run_started; Live.Text {text=text; stream_scope=None}; reply text; Live.Run_finished]);
   let later = long_answer "LATER_" in
   let tail = log state ~id:"tail" ~at:100.
-    [Live.Run_started; Live.Text later; reply later; Live.Run_finished] in
+    [Live.Run_started; Live.Text {text=later; stream_scope=None}; reply later; Live.Run_finished] in
   assert_still_reading state "ALIASED_040";
   state.msg_settled_logs <- [tail];
   assert_still_reading state "ALIASED_040";
@@ -376,13 +376,13 @@ let test_search_pin_before_first_frame_and_at_tail () = at_sizes (fun origin ->
       state.keeper_message_focus <- T.Right_pane;
       Masc_tui_message_input.insert state.msg_input draft;
       ignore (log state ~id:"short" ~at:1.
-        [Live.Run_started; Live.Text "SHORT_MATCH"; reply "SHORT_MATCH"; Live.Run_finished]);
+        [Live.Run_started; Live.Text {text="SHORT_MATCH"; stream_scope=None}; reply "SHORT_MATCH"; Live.Run_finished]);
       ignore (find state "SHORT_MATCH");
       if paint_before_arrival then ignore (frame_lines state);
       check int "short-answer search starts at the live edge" 0 state.msg_scroll;
       let tail = long_answer "ARRIVED_BEFORE_PAINT_" in
       ignore (log state ~id:"tail" ~at:50.
-        [Live.Run_started; Live.Text tail; reply tail; Live.Run_finished]);
+        [Live.Run_started; Live.Text {text=tail; stream_scope=None}; reply tail; Live.Run_finished]);
       let first_frame, feedback = Render.render_keeper_message state in
       check int "render returns scroll feedback without changing the stored position" 0
         state.msg_scroll;
@@ -403,7 +403,7 @@ let test_search_pin_before_first_frame_and_at_tail () = at_sizes (fun origin ->
         (follows_live ());
       let newest = long_answer "AFTER_RELEASE_" in
       ignore (log state ~id:"after-release" ~at:300.
-        [Live.Run_started; Live.Text newest; reply newest; Live.Run_finished]);
+        [Live.Run_started; Live.Text {text=newest; stream_scope=None}; reply newest; Live.Run_finished]);
       let lines = frame_lines state in
       check int "new arrivals after End keep the live edge" 0 state.msg_scroll;
       ignore (visible_line lines "AFTER_RELEASE_099");

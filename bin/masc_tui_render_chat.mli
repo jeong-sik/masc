@@ -46,6 +46,12 @@ val render_keeper_message :
   Masc_tui_render_prim.Frame_presenter.frame *
   Masc_tui_types.clamped_scroll option
 
+val native_task_entries :
+  Masc_tui_types.state -> keeper_name:string -> role_label_column:int ->
+  Message_layout.entry list
+(** Rows for this Keeper's native task observations, separate from its
+    conversation. Empty when no observation is loaded. *)
+
 val keeper_message_layout_entries :
   ?messages:Masc_tui_types.msg_entry list -> Masc_tui_types.state ->
   keeper_name:string -> chat_cols:int -> Message_layout.entry list

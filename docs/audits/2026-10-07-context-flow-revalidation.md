@@ -127,7 +127,7 @@ Candle 반감기는 화폐 가치의 감쇠이며 Memory 소거나 Task 만료�
 | [#41533](https://github.com/jeong-sik/masc/pull/41533) | `69047992a4248e429797dfe7e1f942bf857e321e` | prompt/caller complete diff, rebase 및 changelog delta. 입력 재구성 실측은 재검산 가능한 기록이 없어 검증 근거에서 제외 |
 | [#41550](https://github.com/jeong-sik/masc/pull/41550) | `05c14758825d8516ab619150101b2b1dc35073f1` | cursor·flush·두 provider 경계·scope 복원·changelog, 20개 OCaml 파일 parse-only, 분리된 SQLite·fixture dispatcher·독립 순수 함수 실행. 추가한 native 회귀 fixture는 이 리뷰 시점에는 미실행 |
 
-#41550 은 위 리뷰 뒤 `05e2f3d78b`에서 파일 generation, cold read projection, 커밋 시점 보고를 추가했고 `a2b331af82`에서 부모 브랜치를 합쳤다. 이 변경은 아직 독립 소스 리뷰를 받지 않았다. 같은 head에서 `test_keeper_tool_call_log`(79개), `test_keeper_turn_outcome`(48개), `test_dated_jsonl`(69개)을 `dune build --root .`로 컴파일하고 실행해 통과했다. CI와 그 밖의 test는 실행하지 않았다.
+#41550 은 위 리뷰 뒤 `05e2f3d78b`에서 파일 generation, cold read projection, 커밋 시점 보고를 추가했고 `a2b331af82`에서 부모 브랜치를 합쳤다. 이 변경은 아직 독립 소스 리뷰를 받지 않았다. 같은 head에서 `test_keeper_tool_call_log`(79개), `test_keeper_turn_outcome`(48개), `test_dated_jsonl`(69개)을 `dune build --root .`로 컴파일하고 실행해 통과했다. CI와 그 밖의 test는 실행하지 않았다. 이 실행은 `a2b331af82` 기준이다. 그 뒤 #41550 은 restack 으로 다시 쓰여 `a2b331af82` 는 현재 브랜치에서 조회되지 않으며, 이 PR 의 직접 부모는 #41550 의 `7794bd5563b67a70cf9fee9d0fc379dcf36f30bf` 다. 위 컴파일·실행 결과와 독립 소스 리뷰 범위는 `7794bd5563` 에 적용되지 않으며, `7794bd5563` 은 이 감사에서 재검증하지 않았다. 부모 수리의 최종 head 에 대한 판정은 #41550 의 리뷰를 따른다.
 
 유지하는 각 direct diff는 작성하지 않은 에이전트가 읽었다. local PASS는 GitHub의 독립 승인이나 compiled/native 실행을 대신하지 않는다. TUI Keeper 질의는 별도 비동기 작업이며 접수나 Running을 답변 완료로 취급하지 않는다.
 

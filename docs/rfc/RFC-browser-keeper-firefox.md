@@ -150,8 +150,8 @@ BiDi 가 아니어도 되는 요청(읽기, 클릭, 스크롤)은 BiDi 연결이
 
 - `docs/design/browser-bidi-live-host.md` §Attaching a connection: "Nothing in MASC starts this Firefox or this host"
   를 지우고, 설정 한 덩어리로 켜는 절차를 첫 길로 적는다. 손으로 띄우는 절차는 설정이 없을 때의 길로 남긴다.
-- RFC-browser-live-one-connection §2.4 의 "이 명령을 대신 실행해 주는 것이 없다"는 그 RFC 를 쓴 때의 사실이다.
-  그 RFC 에 이 RFC 를 `related` 로 걸고, §7 끝에 "누가 켜는가는 RFC-browser-keeper-firefox 가 정한다"고 적는다.
+- RFC-browser-live-one-connection §2.4 의 host 항목을 지금 사실로 고친다.
+  표를 적은 워크스페이스는 서버가 띄우고, 표가 없으면 운영자가 손으로 붙인다. 그 RFC 에 이 RFC 를 `related` 로 건다.
 
 ## 4. 하지 않는 것
 

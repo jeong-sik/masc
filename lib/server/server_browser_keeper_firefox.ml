@@ -40,10 +40,15 @@ let spawn_logged ~sw ~argv ~log_path =
       ~finally:(fun () -> try Unix.close output with Unix.Unix_error _ -> ())
       (fun () -> Posix_spawn_detached.spawn ~sw ~argv ~env:(Unix.environment ()) ~output)
 
-(* A Firefox may end its first process and go on in another: applying a
-   staged update it starts the updater, which starts Firefox again, and both
-   stay in the group of the one started here unless they leave it. So the
-   wait ends at an exit only once nothing is left in that group. *)
+(* Who opened the port: the process started here, or, once that one has
+   ended, one it left in its process group. *)
+type started = First_process of int | Its_group of int
+
+(* A Firefox may end its first process and go on in another. Applying a
+   staged update, it starts the updater, which starts Firefox again; whether
+   those stay in the group of the one started here was not measured
+   (RFC-browser-keeper-firefox §3.2). So the wait ends at an exit only once
+   nothing is left in that group. *)
 let start_firefox ~sw ~net ~clock ~ready_timeout_s ~base_path (config : Browser_configuration.live_bidi) =
   match
     spawn_logged ~sw ~argv:(Keeper_firefox.firefox_argv config)
@@ -54,14 +59,20 @@ let start_firefox ~sw ~net ~clock ~ready_timeout_s ~base_path (config : Browser_
     let deadline = Monotonic_deadline.after ~seconds:ready_timeout_s in
     let rec await () =
       match port_state ~net ~clock ~port:config.port with
-      | Answers -> Ok firefox.pid
-      | Nothing_listens | Unknown _ ->
+      | Answers ->
         (match Eio.Promise.peek firefox.exited with
-         | Some status when not (Posix_spawn_detached.group_has_members firefox) ->
-           Error (Keeper_firefox.Exited_before_listening status)
-         | Some _ | None when Monotonic_deadline.passed deadline ->
-           Error (Keeper_firefox.Not_listening ready_timeout_s)
-         | Some _ | None -> Eio.Time.sleep clock firefox_ready_poll_s; await ())
+         | None -> Ok (First_process firefox.pid)
+         | Some _ -> Ok (Its_group firefox.pid))
+      | Nothing_listens -> not_yet ~timed_out:(Keeper_firefox.Not_listening ready_timeout_s)
+      | Unknown detail ->
+        not_yet ~timed_out:(Keeper_firefox.Port_unknown { seconds = ready_timeout_s; detail })
+    (* [timed_out] is what this check found, reported if it was the last. *)
+    and not_yet ~timed_out =
+      match Eio.Promise.peek firefox.exited with
+      | Some status when not (Posix_spawn_detached.group_has_members firefox) ->
+        Error (Keeper_firefox.Exited_before_listening status)
+      | Some _ | None when Monotonic_deadline.passed deadline -> Error timed_out
+      | Some _ | None -> Eio.Time.sleep clock firefox_ready_poll_s; await ()
     in
     await ()
 
@@ -97,9 +108,13 @@ let bring_up ~sw ~env ~ready_timeout_s ~base_path (config : Browser_configuratio
     | Unknown detail -> Undetermined detail
     | Nothing_listens ->
       (match start_firefox ~sw ~net ~clock ~ready_timeout_s ~base_path config with
-       | Ok pid ->
-         Log.Server.info "browser-lane: started the Keeper Firefox (pid %d) on %s with profile %s"
-           pid (Keeper_firefox.bidi_url ~port:config.port) config.profile;
+       | Ok started ->
+         Log.Server.info "browser-lane: started the Keeper Firefox (%s) on %s with profile %s"
+           (match started with
+            | First_process pid -> Printf.sprintf "pid %d" pid
+            | Its_group pgid ->
+              Printf.sprintf "process group %d; its first process ended before the port answered" pgid)
+           (Keeper_firefox.bidi_url ~port:config.port) config.profile;
          Ready
        | Error failure -> Failed failure)
   in

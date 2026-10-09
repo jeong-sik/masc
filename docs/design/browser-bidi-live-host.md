@@ -35,8 +35,9 @@ profile = "/Users/you/masc-keeper-firefox-profile"
 - A Firefox that exits before its port answers, leaving nothing in its process
   group, is reported as such: Firefox 157.0.1 exits with status 0 when another
   Firefox has the profile open, so quit that Firefox first. One that goes on
-  in another process of its group, as when it applies an update, is waited
-  for. The wait ends after 30 seconds.
+  in another process of its group is waited for. A Firefox applying an
+  update starts itself again; whether that process stays in the group was
+  not measured. The wait ends after 30 seconds.
 - Write the table only once a server that reads it is installed:
   `runtime.toml` refuses a key it does not know.
 

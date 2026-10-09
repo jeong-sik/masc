@@ -30,7 +30,12 @@ type firefox_failure =
           another Firefox has the profile open, and says so only in the
           system's language (measured 2026-10-09); the message names that
           case for status 0 alone. [None]: the status was not known here. *)
-  | Not_listening of float  (** The port did not answer within these seconds. *)
+  | Not_listening of float
+      (** The port did not answer within these seconds; at the last check a
+          connect to it was refused. *)
+  | Port_unknown of { seconds : float; detail : string }
+      (** The port did not answer within these seconds, and the last check
+          could not tell whether anything listens: [detail] says why. *)
 
 val firefox_failure_message : Browser_configuration.live_bidi -> firefox_failure -> string
 

@@ -56,8 +56,11 @@ let spawn ~sw ~argv ~env ~output =
         (fun () ->
           match spawn_with ~opened ~executable ~argv ~env ~output with
           | pid -> Ok pid
-          | exception Unix.Unix_error (code, call, _) ->
-            Error (Printf.sprintf "%s %s: %s" call executable (Unix.error_message code)))
+          | exception Unix.Unix_error (code, call, target) ->
+            (* [target] is what [call] failed on: "/dev/null" for openfile,
+               the executable for posix_spawn, nothing for dup. *)
+            let call = if String.equal target "" then call else Printf.sprintf "%s %s" call target in
+            Error (Printf.sprintf "%s: %s" call (Unix.error_message code)))
     in
     Result.map
       (fun pid ->

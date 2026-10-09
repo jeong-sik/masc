@@ -1100,21 +1100,13 @@ let test_model_visible_board_maintenance_dispatches_in_process () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let model_names = Keeper_tool_policy.keeper_model_tool_names () in
-  Alcotest.(check bool) "cleanup descriptor is model-visible" true
+  (* Cleanup removes other authors' posts and is CanAdmin, so it stays on the
+     operator surface; delete checks the author in its handler. *)
+  Alcotest.(check bool) "cleanup descriptor is operator-only" false
     (List.mem "masc_board_cleanup" model_names);
   Alcotest.(check bool) "delete descriptor is model-visible" true
     (List.mem "masc_board_delete" model_names);
   let keeper_meta = make_keeper_meta ~name:"maintenance-keeper" () in
-  let cleanup_result =
-    Keeper_tool_board_runtime.handle_board_tool
-      ~meta:keeper_meta
-      ~result_projection:Tool_output.default_model_projection
-      ~name:"masc_board_cleanup"
-      ~args:(make_args [ "dry_run", `Bool true ])
-  in
-  Alcotest.(check bool) "cleanup reaches its Board handler" true
-    (String.starts_with ~prefix:"Scan complete:" cleanup_result
-     || String.starts_with ~prefix:"Dry-run:" cleanup_result);
   let ok, created =
     dispatch
       "masc_board_post"

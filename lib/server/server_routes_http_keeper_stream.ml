@@ -2782,7 +2782,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
           ~status:(Request_stream Stream_reconciliation_required)
           ~message
           ();
-        Keeper_chat_events.publish events (Text_delta message);
+        Keeper_chat_events.publish events (Text_delta {text=message; stream_scope=None});
         Keeper_chat_events.publish events Text_message_end;
         Keeper_chat_events.publish events (Run_finished { run_id });
         queued_outcome
@@ -2824,7 +2824,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
           then
             split_keeper_reply_chunks visible_reply
             |> List.iter (fun chunk ->
-                   Keeper_chat_events.publish events (Text_delta chunk));
+                   Keeper_chat_events.publish events (Text_delta {text=chunk; stream_scope=None}));
           Keeper_chat_events.publish events
             (Reply_details
                { reply = visible_reply
@@ -3456,6 +3456,30 @@ let journal_replay_frames ~base_path ~keeper_name ~operation_id ~since_seq =
      | exception exn -> skipped (Printexc.to_string exn))
 ;;
 
+(* Live delivery may outrun a fail-open journal. The operation store is the
+   terminal authority after restart, so a cursor past the repaired journal
+   must not suppress its failure. A matching terminal already sent by this
+   replay needs no supplement. The fallback has no sequence and cannot move
+   the client's cursor backwards. *)
+let restart_terminal_after_replay ~base_path ~keeper_name
+    ~(operation : Keeper_chat_operation.t) ~replayed =
+  match operation.state with
+  | Failed {completed_at;failure={kind=Interrupted_by_restart;_}} ->
+      let operation_id = Keeper_chat_operation.Operation_id.to_string operation.operation_id in
+      let journal = Keeper_chat_event_log.open_journal ~base_dir:base_path ~keeper_name ~operation_id () in
+      let settlement = {Keeper_chat_event_log.operation_id=operation.operation_id;completed_at} in
+      let already_sent = match Keeper_chat_event_log.find_restart_terminal journal ~settlement with
+        | Ok (Some (Existing_terminal_error {seq;_} | Recorded_terminal_error {seq;_})) -> Hashtbl.mem replayed seq
+        | Ok None | Error _ -> false in
+      if already_sent then None
+      else Some (Ag_ui.make_event ~timestamp:completed_at
+        ~thread_id:("keeper:" ^ keeper_name)
+        ~run_id:(Some ("keeper-operation-run-" ^ operation_id))
+        ~message:(Some (Keeper_request_failure.summary {cause=Keeper_request_failure.Server_restarted}))
+        ~code:(Some (Keeper_chat_operation.failure_kind_to_string Interrupted_by_restart)) Ag_ui.Run_error)
+  | Queued | Running _ | Succeeded _ | Failed _ | Cancelled _ -> None
+;;
+
 let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payload =
   let origin = get_origin request in
   let headers = keeper_chat_stream_headers origin in
@@ -3587,6 +3611,8 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
             pending)
         in
         List.iter (fun (seq, event) -> send_live ~seq event) pending;
+        Option.iter (send_event ~seq:None)
+          (restart_terminal_after_replay ~base_path ~keeper_name:payload.name ~operation ~replayed);
         if Keeper_owner.Chat_operation.is_terminal operation.state then finish ()
       in
       let submit_result =
@@ -3702,6 +3728,7 @@ module For_testing = struct
   let parse_request = parse_keeper_chat_stream_request
   let live_event_is_new = live_event_is_new
   let journal_replay_frames = journal_replay_frames
+  let restart_terminal_after_replay = restart_terminal_after_replay
   let has_connector_context = has_connector_context
   let has_external_speaker = has_external_speaker
   let message_for_request = message_for_request

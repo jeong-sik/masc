@@ -712,11 +712,141 @@ let test_restore_preserves_lane_activity_and_autosave () =
         (librarian autosave.lanes).enabled)) [false; true]
 ;;
 
+let test_default_baseline_survives_drift_and_restore () =
+  with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    let prompts_dir = Filename.concat base_path "prompts" in
+    write_file (Filename.concat prompts_dir "test.unoverridden.md")
+      "---\ndescription: unoverridden\ncategory: test\n---\nUntouched default.\n";
+    Prompt_registry.set_markdown_dir prompts_dir;
+    set_override ~base_path "Saved override.";
+    let saved = or_fail (Preset.capture ~base_path ~name:"baseline" ~description:"") in
+    let saved_hash = match saved.default_revisions with
+      | Some rows -> List.assoc prompt_key rows
+      | None -> Alcotest.fail "capture must record default bodies" in
+    let body = Option.get (Prompt_registry.resolve_prompt prompt_key).file_value in
+    let untouched_body = Option.get (Prompt_registry.resolve_prompt "test.unoverridden").file_value in
+    Alcotest.(check bool) "unoverridden defaults are also recorded" true
+      (match saved.default_revisions with
+       | None -> false
+       | Some rows -> List.assoc_opt "test.unoverridden" rows =
+           Some (Override.default_revision ~body:untouched_body));
+    Alcotest.(check string) "hash is the default, not the override"
+      (Override.default_revision ~body) saved_hash;
+    or_fail (Preset.save ~base_path saved);
+    let loaded = or_fail (Preset.load ~base_path "baseline") in
+    Alcotest.(check bool) "baseline loads unchanged" true
+      (loaded.default_revisions = saved.default_revisions);
+    Alcotest.(check bool) "defaults initially match" true
+      (Preset.compare_defaults loaded = Preset.Defaults_match);
+    let path = Filename.concat (Filename.concat base_path "prompts") (prompt_key ^ ".md") in
+    write_file path "---\ndescription: changed\ncategory: test\n---\nNew default body.\n";
+    let current = Option.get (Prompt_registry.resolve_prompt prompt_key).file_value in
+    let expected = Preset.Defaults_differ
+      [prompt_key, Some saved_hash, Some (Override.default_revision ~body:current)] in
+    Alcotest.(check bool) "detail sees changed default" true
+      (Preset.compare_defaults loaded = expected);
+    set_override ~base_path "Current override.";
+    let report = or_fail (Preset.restore ~base_path "baseline") in
+    Alcotest.(check bool) "restore reports drift" true (report.default_comparison = expected);
+    Alcotest.(check string) "drift does not prevent override restore" "Saved override."
+      (Prompt_registry.resolve_prompt prompt_key).effective;
+    Alcotest.(check (option string)) "default body is never restored" (Some current)
+      (Prompt_registry.resolve_prompt prompt_key).file_value;
+    let autosave = or_fail (Preset.load ~base_path report.autosave) in
+    Alcotest.(check bool) "autosave records current defaults" true
+      (Preset.compare_defaults autosave = Preset.Defaults_match);
+    Sys.remove path;
+    Alcotest.(check bool) "missing default is visible" true
+      (Preset.compare_defaults loaded = Preset.Defaults_differ [prompt_key, Some saved_hash, None]);
+    let no_defaults = { saved with default_revisions = Some [] } in
+    write_file path prompt_fixture;
+    Alcotest.(check bool) "new defaults are visible" true
+      (match Preset.compare_defaults no_defaults with
+       | Preset.Defaults_differ rows -> List.exists (fun (key, before, after) ->
+           key = prompt_key && before = None && Option.is_some after) rows
+       | Preset.Defaults_unknown | Preset.Defaults_match -> false))
+;;
+
+let test_unreadable_default_does_not_block_preset_operations () =
+  with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    let unreadable_key = "test.unreadable" in
+    let prompts_dir = Filename.concat base_path "prompts" in
+    let path = Filename.concat prompts_dir (unreadable_key ^ ".md") in
+    write_file path "---\ndescription: becomes unreadable\ncategory: test\n---\nAuxiliary default.\n";
+    Prompt_registry.set_markdown_dir prompts_dir;
+    set_override ~base_path "Saved override.";
+    let saved = or_fail (Preset.capture ~base_path ~name:"baseline" ~description:"") in
+    or_fail (Preset.save ~base_path saved);
+    let hash = match saved.default_revisions with
+      | Some rows -> List.assoc unreadable_key rows
+      | None -> Alcotest.fail "baseline must include readable auxiliary default" in
+    (* A socket behind the registered path reliably refuses ordinary file
+       reads regardless of permission privileges. A short temporary leaf keeps
+       its bind address independent of the longer preset fixture directory. *)
+    Sys.remove path;
+    let socket_path = Filename.temp_file "p" ".sock" in
+    Sys.remove socket_path;
+    let socket = Unix.socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+    Fun.protect ~finally:(fun () ->
+      Unix.close socket;
+      ignore (Fs_compat.unlink_if_exists path);
+      ignore (Fs_compat.unlink_if_exists socket_path)) (fun () ->
+      Unix.bind socket (Unix.ADDR_UNIX socket_path);
+      Unix.symlink socket_path path;
+      let captured = or_fail (Preset.capture ~base_path ~name:"unreadable" ~description:"") in
+      (match captured.default_revisions with
+       | Some rows ->
+           Alcotest.(check (option string)) "unreadable default alone is omitted" None
+             (List.assoc_opt unreadable_key rows);
+           Alcotest.(check bool) "healthy default still has its revision" true
+             (List.mem_assoc prompt_key rows)
+       | None -> Alcotest.fail "read error must not discard healthy baselines");
+      or_fail (Preset.save ~base_path captured);
+      let expected = Preset.Defaults_differ [unreadable_key, Some hash, None] in
+      Alcotest.(check bool) "comparison reports unreadable default without throwing" true
+        (Preset.compare_defaults saved = expected);
+      set_override ~base_path "Current override.";
+      let report = or_fail (Preset.restore ~base_path "baseline") in
+      Alcotest.(check bool) "restore reports informational baseline difference" true
+        (report.default_comparison = expected);
+      Alcotest.(check string) "healthy override is restored" "Saved override."
+        (Prompt_registry.resolve_prompt prompt_key).effective;
+      let autosave = or_fail (Preset.load ~base_path report.autosave) in
+      Alcotest.(check string) "autosave retained the pre-restore override" "Current override."
+        (List.assoc prompt_key (List.map (fun (entry : Override.entry) -> entry.key, entry.value)
+          autosave.prompt_overrides))))
+;;
+
+let test_default_baseline_missing_or_invalid () =
+  with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    let saved = or_fail (Preset.capture ~base_path ~name:"baseline" ~description:"") in
+    or_fail (Preset.save ~base_path saved);
+    let path = Filename.concat (Preset.source_directory ~base_path saved) "manifest.json" in
+    let fields = match Yojson.Safe.from_file path with
+      | `Assoc fields -> List.remove_assoc "default_revisions" fields
+      | _ -> Alcotest.fail "manifest must be an object" in
+    write_file path (Yojson.Safe.to_string (`Assoc fields));
+    let loaded = or_fail (Preset.load ~base_path "baseline") in
+    Alcotest.(check bool) "no baseline means unknown" true
+      (Preset.compare_defaults loaded = Preset.Defaults_unknown);
+    let report = or_fail (Preset.restore ~base_path "baseline") in
+    Alcotest.(check bool) "missing baseline does not block restore" true
+      (report.default_comparison = Preset.Defaults_unknown);
+    write_file path (Yojson.Safe.to_string (`Assoc
+      (("default_revisions", `Assoc [prompt_key, `String "invalid"]) :: fields)));
+    Alcotest.(check bool) "corrupt hashes are refused" true
+      (Result.is_error (Preset.load ~base_path "baseline")))
+;;
+
 let () =
   Alcotest.run
     "Prompt_preset"
     [ ( "presets"
-      , [ Alcotest.test_case "legacy lane activity loads; mistyped activity is refused" `Quick test_saved_lane_activity_shape
+      , [ Alcotest.test_case "default baseline survives drift and restore" `Quick test_default_baseline_survives_drift_and_restore
+        ; Alcotest.test_case "unreadable baseline cannot block preset capture or restore" `Quick
+            test_unreadable_default_does_not_block_preset_operations
+        ; Alcotest.test_case "missing baseline is unknown; corrupt hashes are refused" `Quick test_default_baseline_missing_or_invalid
+        ; Alcotest.test_case "legacy lane activity loads; mistyped activity is refused" `Quick test_saved_lane_activity_shape
         ; Alcotest.test_case "activity restore and autosave roundtrip" `Quick test_restore_preserves_lane_activity_and_autosave
         ; Alcotest.test_case "capture, save, load, list round trip" `Quick
             test_capture_save_load_round_trip

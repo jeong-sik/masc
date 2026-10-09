@@ -2,11 +2,12 @@
 
 ## [Unreleased]
 
-## [0.50.0] - 2026-10-08
+## [0.50.0] - 2026-10-09
 
 ### Upgrade notes
 
 - Each Muse account's managed configuration is replaced once on first use after the upgrade, carrying its sign-in, so no new sign-in is needed; Muse Keepers start one fresh host session because the account revision changes, and a Gate a Muse Keeper left open across the upgrade is not resumed, as with any release that changes the tool surface (#41349).
+
 
 ### Added
 
@@ -109,37 +110,59 @@ The native execution entries below describe successive changes included together
 
 - Align the Keeper chat projection, transcript and Runtime key table tests with the native tool events, the eight outcomes and the per-reading `e` key; the key sheet lists `e` once as "model settings / add candidate" (#41912).
 
+### Changes merged from main on 2026-10-09
 
-### Remaining included candidate changes
+The candidate was brought up to current main before tagging. The sections below list what a reader acts on; the fixes, documentation and internal changes are in the complete change record.
 
-The complete record includes the remaining change fragments already present in this candidate. Their actionable changes are listed below; detailed fixes and internal changes are retained in the linked complete record.
+### Upgrade notes
+
+- The lease key change means a v1 (older) server and a v2 server cannot see each other's lease. Stop the old server before starting the new one across an upgrade; starting both at once on the same BasePath is refused only while both use the same lease format. (#42032)
 
 ### Added
 
+- `espeak_ng` voice endpoint kind for local speech-out on Linux and macOS without `say`, supporting `-v`/`-w` synthesis, `--voices` catalogue lookup, and voice variant suffixes (`+<variant>`) (#41412).
 - `/api/v1/runtime/resolved` carries each runtime's `failed_attempt` (time, failure kind and the Keeper that recorded it), and the TUI runtime detail draws it as "Last failure". The lane walk already put such a runtime behind the candidates that answered; the projection dropped the fact, so the reason a lane skipped its head was not visible (#41479).
-
 - Store complete and resumable World Curator briefings so Keepers can reuse shared semantic context across source changes and interrupted synthesis (#41592).
-
 - Browser `hover_at` moves a trusted pointer without clicking on an attached live Firefox BiDi tab or the automation lane, guarded by the observed URL and viewport. Extension-only live connections explain the required BiDi attachment before sending input (#41620).
-
 - Live-client discovery identifies the host transport so callers can select the BiDi connection when the same Firefox also has an extension connection (#41620).
+- H3 librarian continuity working-state meaning-preservation harness (#41725): five separate-process phases over one shared MASC root judging obligation records per-ID, per-status and whole-clause verbatim across cuts, a real process restart whose S2 phases require and store-assert a switched fixture identity via `H3_FIXTURE_MODEL` (checkpoint model field, default `h3-fixture-a`, S2 requires `h3-fixture-b`), and an explicit lossy-projection injection whose acceptance currently overwrites the lossless original (finding recorded).
+- `approve-guard.sh --print-footer --repo <owner>/<repo> --pr <number> --head <40hex>` prints the exact `approve-guard:` footer line a reviewer should append, computed from the PR's live base/head diff (`reviewed base` + `diff sha256`). Read-only: it posts nothing, approves nothing, and refuses when combined with any approval or mutation flag (#41761).
+- `masc_msx_meta` reports which ocaml-msx core this server linked — the core's own source digest, the digest at the CI pin, and whether they match — the way the DOS lane's core identity already does. `masc_msx_checkpoint_info` reads a checkpoint slot's metadata (format version, saved-at time, the core digest that wrote it, media names, saved input edge count) without restoring it, so asking what a slot holds no longer replaces the machine every spectator watches (#41773).
+- Prompt presets record default prompt body hashes and show changes since saving in preset detail and restore output. Defaults remain current when restoring; drift is informational. (#41783)
+- Expose the linked `ocaml-dos` core identity through the read-only `masc_dos_meta` Tool, before a game is loaded. (#41812)
+- Add the read-only `masc_dos_inventory` Tool so operators can inspect the files and byte lengths a DOS game directory will mount before boot (#41819).
+- Keep inventory and load selection aligned across directory aliases, classify non-regular entries as unavailable without opening them, and redact host paths from inventory errors (#41819).
+- Capture Agent retry TUI frames with verified source and executable provenance using the targeted runner's resolved suite selection (#41891).
 
 ### Changed
 
+- Antigravity and Muse Code send a new session's carried range as composed; the start-prompt byte ceilings derived from `max-context` are removed, and a Muse model is no longer refused at load for a window below the host's overhead (#41369).
 - Goal creation requires a non-blank title and refuses a due date already past
   its 23:59:59 UTC deadline; existing Goal dates remain editable (#41399).
-
+- Glossary Korean wording: replaced 15 translationese terms with plain Korean across `docs/spec/00-glossary.md` (audit H section 5, T1-T15), e.g. Candidate Fault, Attempt Dispatch, Reasoning Effort, Seed, Librarian Gap entries; `ledger` is now glossed once at first `ledger` occurrence (#41446).
 - Glossary size RFC: `docs/rfc/RFC-glossary-one-line-index-and-domain-files.md` proposes restructuring `docs/spec/00-glossary.md` (298KB, 236 entries) into a one-line index plus per-domain files, with growth evidence and open questions; no code changes (#41449).
-
 - Deliver a reusable World Curator synthesis to Keeper turns, replacing fixed-byte claim prefixes while preserving completed shared context during refresh failures and exposing source freshness (#41596).
-
 - When `merge-guard.sh` / `approve-guard.sh --merge-check` refuses because no approval is bound to the head and complete diff, the refusal now lists for each non-author approval which test failed (author association, first-line verdict, footer prefix, `reviewed base` / `diff sha256` tail, a stale diff hash, or the `review-scope` stamp) and prints the exact footer line to copy. The same script now makes the admission decision, so the decision and the reasons come from one place (#41614).
-
 - Print rejected-review details before a structured-verdict refusal, and diagnose scope stamps independently of malformed footers only when admission fails. Successful admission reuses each fetched review and does not fetch rejected reviews again for diagnostics (#41614).
-
 - Open Keeper chat without timestamps, turn time ranges or hourly separators; Ctrl-F restores short or full clock metadata (#41699).
-
 - Hash continuity snapshot prefixes one checkpoint message at a time, preserving their identity without building a whole-history JSON string (#41734).
+- Browser live connections answer from one typed table of what each transport serves. A request the chosen connection cannot serve (`hover_at` or `drag` on WebExtension; `activate_tab` on BiDi) is refused before any command is queued as `live_transport_unsupported`, and the Keeper tool rejection names the connected browsers that can take the retry or what the operator attaches when none can (#41795).
+- The Browser Lane TUI shows what the chosen live connection serves: the title names its transport, and the connection row and the browser picker say what it leaves out (`WebExtension: no hover, drag`). A pointer gesture on a screenshot whose connection does not serve it is not sent; a row says so and names the next step (`b:choose browser`, or where attaching a BiDi connection is written), stays through the lane's own refreshes and goes with the next input. These rows fit an 80-column terminal (#41802).
+- A refused browser tool call in the Keeper chat reads as one line: its refusal code, what the connection leaves out and how many connected browsers serve it, or the refusal's next step. Every browser refusal that dispatched nothing now lists its deciding fields (`retry` or `message`, and `capability`, `transport`, `clientId` where they apply) before its connection lists, so a truncated record still carries them (#41802).
+- A BiDi live browser connection serves `BrowserRead mode=elements` and the `browser_document` source. Its peer runs the automation lane's element script and document helper in the requested tab, so a control that appears only under a trusted hover can be found, seen and pressed on one connection. A BiDi connection still refuses `activate_tab` (#41813).
+- A successful live browser answer carries `transport` beside `clientId`: the Keeper tools (a stored screenshot included), the dashboard read, the screenshot, the scene and the live optional document read state the connection through one function, and a value the page or browser answered under either name is dropped. A Keeper sees which live work its connection serves from the first tab list instead of from a refusal (#41839).
+- A BiDi browser host (`masc-browser-host --bidi-url`) stays attached across a MASC server restart. A poll that got no answer is asked again, the workspace `connection.toml` is followed to a port that answers, and a result that may not have arrived is sent again before the next poll; the restarted server sees the same client ID. The host used to end on the first failed request (#41851).
+- A BiDi browser host ends when Firefox closes the BiDi connection, also while it waits for work, and tells the server. It used to keep polling and answer every later command with the connection's error while still listed as connected (#41851).
+- A BiDi browser host ends the BiDi session it asked for when it is stopped and when it ends by itself, so the same Firefox takes the next host without being restarted. Firefox keeps a session whose socket closed and takes one at a time; a second host used to be refused with `session not created`. The session is ended while the socket is open, also after a command or the session request itself got no reply. A session that could not be ended is logged with what to do, and a host that was being stopped then exits 1 instead of 0 (#41853).
+- A BiDi browser host takes Ctrl-C, SIGTERM and a closing terminal (SIGHUP) as a request to stop: it finishes and answers a command in flight, tells the server, ends its session and exits 0. A second Ctrl-C ends it at once and leaves the session in Firefox. A stop before the WebSocket is up abandons the connection attempt. A signal the host was started ignoring, as under `nohup`, stays ignored (#41853).
+- A BiDi browser host whose connection the server ended registers again under a new client ID and keeps its BiDi session, instead of exiting with `native client registration rejected`. The server ends a live browser connection after two minutes without a poll, which a host meets after its machine slept or it was suspended. Requests under the old client ID are refused as `selected_client_disconnected`; the connection list shows the new one. A refusal that asking again would not change still ends the host, and its log now names the server's code, as in `native client registration rejected (client_identity_changed)` (#41898).
+- Defer shared workspace memory bodies until Keeper requests a query, entry, briefing or index; default context carries inventory and freshness. #41909
+- Project direct, discoverable and unavailable memory-read routes from the actual request tool surface, including direct turns and failover. (#41909).
+- Add opt-in host retrieval for requests without a callable or loadable reader, preserving source scope and recording selection evidence before prompt delivery. (#41909).
+- Keep curator addition, deletion and recovery fixtures bound to deferred prompt inventory and actual briefing retrieval. (#41909).
+- The Runtime readings now dim quota-exhausted, rate-limited, and fully spent runtime rows by default; press `h` to toggle the emphasis without changing configured order (#41970).
+- Key the BasePath lease by the directory's `(st_dev, st_ino)` digest instead of the canonical path string, so two `realpath` spellings of one directory on macOS share one lease and the second server is refused. Lease files are named `masc-base-path-owner-v2-<digest>.lease`; the v1 path-digest lease surface is removed. (#42032)
+- Report a typed lease failure instead of leaking a locked descriptor when the lease commit (`lockf`/`ftruncate`/`fsync`) or its close fails, in both the contention and non-contention paths. (#42032)
 
 ## [0.49.0] - 2026-10-04
 

@@ -673,15 +673,15 @@ let continuity_observation_input ~trace_id ~continuity front =
    starts without a ledger too (RFC keeper-context-window-in-tokens §13.4).
 
    [own_first_atom] is the front the calling lane already chose for its own
-   reason — Antigravity cuts its start seed to the ceiling derived from its
-   window. A seed at or past that cut decides, even when it is
-   older than [turn_start]: the range the last answered request carried is
-   this lane's continuity, and the turn start is only where a lane with no
-   seed begins. Without a seed the range starts at the later of the lane's
-   cut and [turn_start]. A lane with no cut of its own passes 0; a history
-   with no completed turn has [turn_start] 0. The first request after a new
-   keeper or a purge therefore starts at the turn start, and its record seeds
-   the requests after it from that same atom.
+   reason — Claude Code and Codex cut their start seed to the capacity a typed
+   overflow narrowed the turn to. A seed at or past that cut decides, even
+   when it is older than [turn_start]: the range the last answered request
+   carried is this lane's continuity, and the turn start is only where a lane
+   with no seed begins. Without a seed the range starts at the later of the
+   lane's cut and [turn_start]. A lane with no cut of its own passes 0; a
+   history with no completed turn has [turn_start] 0. The first request after
+   a new keeper or a purge therefore starts at the turn start, and its record
+   seeds the requests after it from that same atom.
 
    Runs on the calling fiber: reading the seed opens the keeper's turn-record
    store, which takes an [Eio.Mutex], so it cannot run on a CPU-pool domain.
@@ -900,7 +900,7 @@ let carried_atoms (carried : carried_start) =
   - carried.projection.Runtime_model_input_tail_window.dropped_atoms
 ;;
 
-(* A carried range windowed at a declared ceiling.
+(* A carried range windowed at a capacity.
    [Runtime_model_input_tail_window.project_with_drop] charges the omission
    preamble up front, as the message it puts back whenever a cut lands on a
    non-[User] head. A range that already opens with one would pay for it
@@ -908,27 +908,18 @@ let carried_atoms (carried : carried_start) =
    fail at no drop and lose a whole quantum of atoms. So the preamble comes
    off before the window and goes back when the window dropped nothing: a
    range that fit goes exactly as it was cut, and a cut that did land puts
-   back its own. [source_projection] runs on the range as composed, preamble
-   and all, so what it records is what goes out; it appends after the range,
-   so a drop from the front reaches what it added only after every durable
-   atom went. *)
+   back its own. *)
 let window_carried_range
       ~measure_message_bytes
       ~capacity_bytes
       ~reserved_bytes
-      ?source_projection
       (carried : carried_start)
   =
-  let* projected =
-    match source_projection with
-    | None -> Ok carried.messages
-    | Some project -> project carried.messages
-  in
   let opened_with, input =
-    match projected with
+    match carried.messages with
     | head :: rest when Runtime_model_input_tail_window.is_synthetic_preamble head ->
       Some head, rest
-    | _ :: _ | [] -> None, projected
+    | _ :: _ | [] -> None, carried.messages
   in
   let* projection =
     Domain_pool_ref.submit_cpu_or_inline (fun () ->
@@ -1110,13 +1101,12 @@ let compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front =
         | Error error -> leave_out (Does_not_fit error)))
 ;;
 
-(* Claude Code and a fresh Codex thread apply their declared ceiling before
-   choosing a carried front. The zero-history floor must survive that choice:
-   a seed would otherwise restore an atom the provider just refused. A
-   resumed Codex thread sends no history and never enters this function.
-   Antigravity composes its source projection before its single range window,
-   so it uses [window_carried_range] directly instead of this capacity-first
-   policy. *)
+(* Claude Code and a fresh Codex thread apply their capacity before choosing
+   a carried front. The zero-history floor must survive that choice: a seed
+   would otherwise restore an atom the provider just refused. A resumed Codex
+   thread sends no history and never enters this function. Antigravity and
+   Muse Code cut nothing, so they compose with [carried_start_range] and
+   [compose_librarian_range] directly. *)
 let start_range_projection
     ~measure_message_bytes ~capacity_bytes ~unbounded_capacity_bytes
     ~reserved_bytes ?on_model_input_window_observation ?carried_front_seed

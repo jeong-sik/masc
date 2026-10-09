@@ -24,7 +24,7 @@ import urllib.request
 
 
 def configure_terminal():
-    # Same controlling-terminal protocol as test_tui_keyboard_input.py.
+    # Make the terminal on stdin this new session's controlling terminal.
     os.setsid()
     fcntl.ioctl(0, termios.TIOCSCTTY, 0)
     os.tcsetpgrp(0, os.getpgrp())

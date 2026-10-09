@@ -48,7 +48,7 @@ let switch_set
       , Printf.sprintf "switch %s: %s" provider_id detail )
 ;;
 
-let apply_login_status (state : state) ~catalog expectation result =
+let apply_login_status (state : state) ~report ~catalog expectation result =
   let current = server_authority_ready state
     && identity_expectation_workspace_matches ~origin:expectation.ile_origin state
     && List.exists ((=) expectation) state.identity_login_expectations in
@@ -69,8 +69,7 @@ let apply_login_status (state : state) ~catalog expectation result =
             Masc_tui_identity_model.identity_provider_attached ~providers
               ~provider_id:expectation.ile_provider
         | None -> false in
-      if keeper_detail_target_matches state expectation.ile_keeper then
-        state.identity_attempt_error <- (match terminal with
+      let notice = match terminal with
           | Credentials_published (Ok _) -> None
           | Credentials_published (Error ()) -> Some (Masc_tui_identity_model.Notice_bad, "credentials attached; tool discovery failed, refresh tools to retry")
           | Login_exchange_failed -> Some (Masc_tui_identity_model.Notice_bad, "login failed; start a new login")
@@ -78,9 +77,18 @@ let apply_login_status (state : state) ~catalog expectation result =
           | Consent_superseded -> Some (Masc_tui_identity_model.Notice_bad, "login superseded by a newer attempt")
           | Attempt_unavailable when attached -> Some (Masc_tui_identity_model.Notice_bad, "this server no longer knows how the login ended; the provider is attached, possibly from an earlier login, so check its tools before starting another")
           | Attempt_unavailable -> Some (Masc_tui_identity_model.Notice_bad, "login status unavailable on this server; start a new login")
-          | Consent_waiting _ | Callback_in_progress -> None)
+          | Consent_waiting _ | Callback_in_progress -> None in
+      (* The expectation is forgotten either way. A reader on another surface
+         or another Keeper would otherwise lose the attempt and its reason
+         without a word, so the outcome goes to the event log and footer,
+         named by Keeper and provider. *)
+      if keeper_detail_target_matches state expectation.ile_keeper then
+        state.identity_attempt_error <- notice
+      else Option.iter (fun (_, detail) ->
+        report (Printf.sprintf "%s %s login: %s" expectation.ile_keeper
+          expectation.ile_provider detail)) notice
 
-let providers_loaded (state : state) request ~attempts result =
+let providers_loaded (state : state) request ~report ~attempts result =
   let keeper_name = request.drr_keeper in
   let current =
     Masc_tui_types.finish_detail_read state request
@@ -100,7 +108,7 @@ let providers_loaded (state : state) request ~attempts result =
     | Error detail -> state.identity_view_error <- Some detail);
   if current then List.iter (fun (expectation, status) ->
     if String.equal expectation.ile_keeper keeper_name then
-      apply_login_status state ~catalog:(Result.to_option result) expectation status) attempts
+      apply_login_status state ~report ~catalog:(Result.to_option result) expectation status) attempts
 ;;
 
 let login_started (state : state) request ~now ~report ~notice result =

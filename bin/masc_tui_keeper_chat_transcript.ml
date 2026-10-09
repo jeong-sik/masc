@@ -1925,8 +1925,6 @@ let drawn t =
         let unseen_item =
           { origin = Unstreamed_skills; response_part = None; at = None; segment = t.segment; superseded = None; superseded_runtime_id = None; drawn = Drawn_skill skills }
         in
-        if text_count > 1 then items @ [unseen_item], last_text
-        else
         (* An identified model response that reports its own terminal ending identifies
            its final stretch even if the Skill call itself was omitted. The
            projected response boundary resets the candidate even when that

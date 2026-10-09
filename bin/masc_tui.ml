@@ -16210,7 +16210,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         ~refresh:(fun keeper -> Masc_tui_identity_requests.launch_view state
           ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper) result
   | Identity_providers_loaded (request, result, attempts) ->
-      Masc_tui_identity_updates.providers_loaded state request ~attempts result
+      Masc_tui_identity_updates.providers_loaded state request
+        ~report:(report_action state "error") ~attempts result
   | Identity_login_started (request, result) ->
       Masc_tui_identity_updates.login_started state request ~now:(Unix.gettimeofday ())
         ~report:(report_action state) ~notice:(present_identity_notice state) result

@@ -1276,9 +1276,12 @@ let short_clock timestamp =
    same second have nothing left to say, so they get no heading and read as
    the one message they look like. *)
 let continues_previous ~(previous : entry option) (entry : entry) =
-  match previous with
-  | None -> false
-  | Some previous ->
+  (* An explicit boundary opens its own heading in every origin layout, not
+     only Origin_row: two stretches of one response that sit side by side
+     once reasoning is hidden stay two sections. *)
+  match entry.heading_boundary, previous with
+  | Start_heading, _ | Inherit_heading, None -> false
+  | Inherit_heading, Some previous ->
       previous.style = entry.style
       (* [role_label] is [speaker] cut to the gutter column, so two long names
          can share it. Only the whole name says it is the same speaker. *)

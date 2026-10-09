@@ -141,7 +141,7 @@ let complete_attempt state keeper provider =
   | Some expectation ->
       let read = Masc_tui_types.mark_detail_read_started state
         ~tab:Masc_tui_types.Detail_identity ~keeper ~now_ns:10L in
-      Masc_tui_identity_updates.providers_loaded state read
+      Masc_tui_identity_updates.providers_loaded state read ~report:ignore
         ~attempts:[expectation, Ok (Masc_tui_identity_model.Credentials_published (Ok 0))]
         (Ok (Masc_tui_types.identity_expectations_for_keeper state keeper
           |> List.map (fun held -> declared ~tools:[] held.Masc_tui_types.ile_provider held.ile_provider)))
@@ -263,7 +263,7 @@ let test_removed_provider_retires_display_and_late_start () =
     ~keeper_name:"A" ~provider_id:"slack" in
   let read = Masc_tui_types.mark_detail_read_started state
     ~tab:Masc_tui_types.Detail_identity ~keeper:"A" ~now_ns:1L in
-  Masc_tui_identity_updates.providers_loaded state read ~attempts:[]
+  Masc_tui_identity_updates.providers_loaded state read ~report:ignore ~attempts:[]
     (Ok []);
   apply_login state pending ~now:10. (login_result ());
   check (Alcotest.list Alcotest.string) "removed provider cannot restore its URL" []
@@ -327,7 +327,7 @@ let test_admitted_callback_outlives_consent_deadline () =
   let apply json =
     let read = Masc_tui_types.mark_detail_read_started state
       ~tab:Masc_tui_types.Detail_identity ~keeper:"A" ~now_ns:10L in
-    Masc_tui_identity_updates.providers_loaded state read
+    Masc_tui_identity_updates.providers_loaded state read ~report:ignore
       ~attempts:[expectation, Masc_tui_identity_model.decode_identity_login_status json]
       (Ok [declared "slack" "Slack"]) in
   apply (`Assoc ["kind", `String "callback_admitted"]);
@@ -345,6 +345,32 @@ let test_admitted_callback_outlives_consent_deadline () =
     (match state.identity_attempt_error with
      | Some (_, detail) -> contains "credentials attached" detail | None -> false)
 
+let test_an_offscreen_login_failure_is_reported () =
+  let state = identity_state () in
+  state.server_identity <- Some (workspace_identity ~base_path:"/w/a" ~masc_root:"/r");
+  let keeper name = { Decode.k_origin=Decode.Persisted_keeper; k_name=name; k_paused=false;
+    k_identity=Ok {k_trace_id="trace-" ^ name;k_created_at="2026-09-01T00:00:00Z";
+      k_updated_at="2026-09-05T12:00:00Z"};k_activity=None } in
+  state.keepers <- [keeper "A"; keeper "B"];
+  state.keeper_cursor <- 1;
+  Masc_tui_types.remember_identity_login state
+    (pending_login ~keeper:"A" ~provider:"slack" ~url:"https://auth/A" ());
+  let expectation = List.hd (Masc_tui_types.identity_expectations_for_keeper state "A") in
+  let reported = ref [] in
+  let read = Masc_tui_types.mark_detail_read_started state
+    ~tab:Masc_tui_types.Detail_identity ~keeper:"A" ~now_ns:10L in
+  Masc_tui_identity_updates.providers_loaded state read
+    ~report:(fun line -> reported := line :: !reported)
+    ~attempts:[expectation, Ok Masc_tui_identity_model.Login_exchange_failed]
+    (Ok [declared "slack" "Slack"]);
+  check (Alcotest.list Alcotest.string) "the failed attempt ends the wait"
+    [] (held_expectations state "A");
+  check Alcotest.int "the outcome is reported once" 1 (List.length !reported);
+  check Alcotest.bool "the report names the Keeper and the provider" true
+    (List.for_all (fun line -> contains "A slack" line) !reported);
+  check Alcotest.bool "the Keeper on screen gets no notice that is not its own" true
+    (Option.is_none state.identity_attempt_error)
+
 let test_a_lost_attempt_is_read_against_the_catalog () =
   let setup () =
     let state = identity_state () in
@@ -358,7 +384,7 @@ let test_a_lost_attempt_is_read_against_the_catalog () =
     let apply catalog =
       let read = Masc_tui_types.mark_detail_read_started state
         ~tab:Masc_tui_types.Detail_identity ~keeper:"A" ~now_ns:10L in
-      Masc_tui_identity_updates.providers_loaded state read
+      Masc_tui_identity_updates.providers_loaded state read ~report:ignore
         ~attempts:[expectation, Ok Masc_tui_identity_model.Attempt_unavailable] catalog in
     state, apply in
   let notice state = match state.Masc_tui_types.identity_attempt_error with
@@ -395,7 +421,7 @@ let test_completed_attempt_requires_current_owned_catalog () =
       "tool_discovery", `Assoc ["kind", `String "discovered"; "count", `Int 0]]) in
   let start ns = Masc_tui_types.mark_detail_read_started state
     ~tab:Masc_tui_types.Detail_identity ~keeper:"A" ~now_ns:ns in
-  let apply read providers = Masc_tui_identity_updates.providers_loaded state read
+  let apply read providers = Masc_tui_identity_updates.providers_loaded state read ~report:ignore
     ~attempts:[expectation,completed] providers in
   let stale = start 1L in
   let current = start 2L in
@@ -416,7 +442,7 @@ let test_completed_attempt_requires_current_owned_catalog () =
   check (Alcotest.list Alcotest.string) "old attempt cannot retire replacement under current read"
     ["slack"] (held_expectations state "A");
   let read = start 5L in
-  Masc_tui_identity_updates.providers_loaded state read
+  Masc_tui_identity_updates.providers_loaded state read ~report:ignore
     ~attempts:[replacement,Ok Masc_tui_identity_model.Consent_expired]
     (Error "catalog unavailable");
   check (Alcotest.list Alcotest.string) "immutable consent expiry needs no catalog"
@@ -575,7 +601,7 @@ let test_late_callback_is_observed_after_authority_recovery () =
   in
   check Alcotest.bool "pending recovery read blocks a second read" false
     (Masc_tui_types.identity_login_recovery_poll_ready state ~now:10. "A");
-  Masc_tui_identity_updates.providers_loaded state recovery_read ~attempts:[]
+  Masc_tui_identity_updates.providers_loaded state recovery_read ~report:ignore ~attempts:[]
     (Ok [ declared "slack" "Slack" ]);
   check (Alcotest.list Alcotest.string)
     "incomplete provider read keeps the browser wait" [ "slack" ]
@@ -587,7 +613,7 @@ let test_late_callback_is_observed_after_authority_recovery () =
     Masc_tui_types.mark_detail_read_started state ~tab:Masc_tui_types.Detail_identity
       ~keeper:"A" ~now_ns:2L
   in
-  Masc_tui_identity_updates.providers_loaded state late_callback_read ~attempts:[]
+  Masc_tui_identity_updates.providers_loaded state late_callback_read ~report:ignore ~attempts:[]
     (Ok [ declared ~tools:[ "postMessage" ] "slack" "Slack" ]);
   check Alcotest.bool "the attached provider is visible" true
     (match state.identity_view with
@@ -1034,6 +1060,7 @@ let () =
         ] );
       ( "pending consent lifecycle",
         [ Alcotest.test_case "completed attempt requires current owned catalog" `Quick test_completed_attempt_requires_current_owned_catalog;
+          Alcotest.test_case "an offscreen login failure is reported" `Quick test_an_offscreen_login_failure_is_reported;
           Alcotest.test_case "a lost attempt is read against the catalog" `Quick test_a_lost_attempt_is_read_against_the_catalog;
           Alcotest.test_case "admitted callback outlives consent deadline" `Quick test_admitted_callback_outlives_consent_deadline;
           Alcotest.test_case "wire decoder preserves the server deadline" `Quick

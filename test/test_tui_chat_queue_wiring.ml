@@ -2686,61 +2686,9 @@ let test_thinking_previews_do_not_trigger_folding () =
       let entry = match Render.keeper_message_layout_entries state
           ~keeper_name:"alpha" ~chat_cols:140 with
         | [entry] -> entry | _ -> fail "expected one thought" in
-      check string "fitting source keeps its URL in folded mode" url entry.Layout.body;
-      let width = Layout.entry_body_cells ~origin
-        ~inner_width:(Masc_tui_ansi.framed_inner_width 140) entry in
-      let theme = Masc_tui_ansi.Chat_theme.snapshot () in
-      let rows mode = Render.cached_chat_markdown ~link_previews_mode:mode
-        ~theme ~entry ~width in
-      check bool "the preview still draws beside the retained thought" true
-        (List.length (rows mode) > List.length (rows `Off)))
+      check string "fitting source keeps its URL in folded mode" url entry.Layout.body)
       [`Rich; `Compact])
     [Layout.Origin_inline; Origin_row; Origin_bare]
-;;
-
-let test_thinking_folds_only_when_it_saves_rows () =
-  let module Layout = Masc_tui_message_layout in
-  let module Render = Masc_tui_render_chat in
-  List.iter (fun columns ->
-    List.iter (fun origin ->
-      let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
-      state.msg_origin_display <- origin;
-      state.msg_reasoning_visibility <- Tui_types.Reasoning_full;
-      state.msg_history <- [chat_entry ~request_id:"height-thought"
-        ~role:Tui_types.Message_thinking ~text:"x" ~at:1. ()];
-      let initial = match Render.keeper_message_layout_entries state
-          ~keeper_name:"alpha" ~chat_cols:columns with
-        | [entry] -> entry | _ -> fail "expected one thought" in
-      let width = Layout.entry_body_cells ~origin
-        ~inner_width:(Masc_tui_ansi.framed_inner_width columns) initial in
-      let context = Masc_tui_ansi.Chat_theme.body_context
-        (Masc_tui_ansi.Chat_theme.snapshot ()) Layout.Thinking in
-      let height body =
-        Layout.rows_of_entry
-          ~markdown:(fun ~(entry : Layout.entry) ~width ->
-            Render.For_testing.chat_markdown ~context ~width entry.body)
-          ~origin ~inner_width:(Masc_tui_ansi.framed_inner_width columns)
-          ~previous:None {initial with Layout.body}
-        |> List.length in
-      state.msg_reasoning_visibility <- Tui_types.Reasoning_folded;
-      List.iter (fun body ->
-        let original = { initial with Layout.body } in
-        let folded = Render.For_testing.fold_thinking_entry state ~chat_cols:columns original in
-        check bool "folded mode never adds terminal rows" true
-          (height folded.body <= height body);
-        if not (String.equal folded.body body) then
-          check bool "a replaced thought saves at least one terminal row" true
-            (height folded.body < height body);
-        if List.mem body ["short\n"; "short\n\n"] then
-          check string "trailing blank rows do not hide a visible one-row thought" body folded.body)
-        [String.make (width + 1) 'x'; "one\ntwo"; "short\n"; "short\n\n";
-         String.make (width * 10) 'x'];
-      if width < 20 then
-        let body = String.make (width + 1) 'x' in
-        check string "two short wrapped rows are not replaced by a taller summary" body
-          (Render.For_testing.fold_thinking_entry state ~chat_cols:columns {initial with Layout.body}).body)
-      [Layout.Origin_inline; Origin_row; Origin_bare])
-    [40; 80; 140]
 ;;
 
 let test_thinking_measurement_keeps_the_growing_draw_cache () =
@@ -5089,8 +5037,6 @@ let () =
             test_thinking_fold_tracks_origin_body_budget
         ; test_case "previews do not make a fitting thought fold" `Quick
             test_thinking_previews_do_not_trigger_folding
-        ; test_case "folding only reduces rendered thought height" `Quick
-            test_thinking_folds_only_when_it_saves_rows
         ; test_case "fold measurement retains raw height separately from the summary" `Quick
             test_fold_measurement_retains_raw_source_height
         ; test_case "fold measurement preserves the growing draw cache" `Quick

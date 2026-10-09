@@ -113,13 +113,15 @@ def queue_refusal_retains_payload(executable, *, steer):
                 raise AssertionError("queue refusal lost the authored composer text")
 
             # Ctrl-K cancels only the newest queued item. It must not clear a
-            # separate refused draft. The outstanding POST still blocks dispatcterminal.
+            # separate refused draft. The outstanding POST still blocks dispatch.
             terminal.send_and_wait(process, fd, output, b"\x0b", b"Cancelled queued message")
             if steer:
                 # Retry as ordinary input without Ctrl-U, which intentionally
                 # discards staged media. Backspace edits only the authored text.
-                terminal.send_and_wait(process, fd, output, b"\x7f" * len(command) + text,
-                                terminal.composer_showing(text))
+                terminal.send_and_wait(
+                    process, fd, output, b"\x7f" * len(command) + text,
+                    terminal.composer_showing(text),
+                )
             terminal.send_and_wait(process, fd, output, b"\r", terminal.composer_showing(b""))
             release_blocker.set()
             chat.wait_for_atomic_admissions(process, fd, output, fixture, queue_capacity + 2)

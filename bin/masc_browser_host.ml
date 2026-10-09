@@ -52,6 +52,12 @@ let () =
   in
   let result =
     if not arguments_valid then Error "unexpected native host arguments"
+    (* The profile is what a BiDi host checks its Firefox against; an
+       extension host given it would drop that check without a word. *)
+    else if Option.is_some !firefox_profile && Option.is_none !bidi_url then
+      Error
+        (Masc.Browser_bidi_host_status.firefox_profile_flag ^ " needs "
+         ^ Masc.Browser_bidi_host_status.bidi_url_flag)
     else if Sys.big_endian then Error "native host requires a little-endian platform"
     else
       let* config = Browser_host.resolve_config ~base_path:!base_path ~server:!server ~token_file:!token_file in

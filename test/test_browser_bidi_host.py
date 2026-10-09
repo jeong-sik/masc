@@ -139,6 +139,12 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]
         (root / "profile").mkdir()
+        # The profile is checked only by a BiDi host; given without
+        # --bidi-url it is refused, not dropped.
+        unattached = subprocess.run([host, "--base-path", str(root), "--token-file", str(root / "token"),
+            "--firefox-profile", str(root / "profile")], stdin=subprocess.DEVNULL, capture_output=True, timeout=10)
+        said = (unattached.stdout + unattached.stderr).decode(errors="replace")
+        assert unattached.returncode == 1 and "--firefox-profile needs --bidi-url" in said, (unattached.returncode, said)
         ff = native = None
         log = (evidence / "firefox.log").open("wb")
         native_log = (evidence / "native.log").open("wb")

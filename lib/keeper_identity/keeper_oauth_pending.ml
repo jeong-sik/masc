@@ -24,7 +24,6 @@ type stale_start = Newer_start_admitted
 
 type entry = {
   attempt_id : string;
-  admission : admission;
   keeper : string;
   provider_id : string;
   state : string;
@@ -58,12 +57,13 @@ let remember t admission ~now ~ttl_sec in_flight =
     let same_scope entry = entry.keeper=flow.Keeper_oauth_flow.keeper
       && entry.provider_id=flow.Keeper_oauth_flow.provider_id in
     let entries = List.map (expire ~now) t.entries in
-    (* Starts are ordered by admission, not by which one's discovery and
-       registration finished first. A later start that is already held
-       stays the scope's attempt; this earlier one is refused rather than
-       retiring the consent its operator was just shown. *)
-    if List.exists (fun entry -> same_scope entry && entry.admission > admission) entries
-    then Error Newer_start_admitted
+    (* Starts are ordered by the admission issued when they began, not by
+       which one's discovery and registration finished first: a later start
+       that fails before reaching this table still consumed its admission,
+       so the issued counter — not only the entries that survived to
+       register — decides. This earlier one is refused rather than retiring
+       the consent its operator was just shown. *)
+    if t.admitted > admission then Error Newer_start_admitted
     else begin
       (* A new operator attempt retires the previous consent for the same
          scope, but cannot cancel a callback already admitted to publication.
@@ -73,9 +73,15 @@ let remember t admission ~now ~ttl_sec in_flight =
         |> List.map (fun entry -> match entry.status with
           | Awaiting_consent _ when same_scope entry ->
               {entry with in_flight=None; status=Superseded}
+          (* The publication an admitted callback already holds cannot be
+             cancelled, but its result must not overwrite the newer attempt's
+             tokens: superseding the entry makes the older finish a no-op
+             instead of a second writer. *)
+          | Callback_admitted when same_scope entry ->
+              {entry with in_flight=None; status=Superseded}
           | Awaiting_consent _ | Callback_admitted | Completed _ | Failed
           | Expired | Superseded -> entry) in
-      t.entries <- {attempt_id; admission; keeper=flow.Keeper_oauth_flow.keeper;
+      t.entries <- {attempt_id; keeper=flow.Keeper_oauth_flow.keeper;
         provider_id=flow.Keeper_oauth_flow.provider_id; state=flow.Keeper_oauth_flow.state;
         in_flight=Some in_flight; status=Awaiting_consent (now +. ttl_sec)} :: entries;
       Ok attempt_id

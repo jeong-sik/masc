@@ -724,6 +724,38 @@ let test_admitted_exchange_status_outlives_deadline () =
   check Alcotest.bool "other Keeper cannot read handle" true
     (Keeper_oauth_pending.status table ~now:604. ~attempt_id ~keeper:"other" ~provider_id:provider.id = None)
 
+let test_a_start_that_never_registers_still_refuses_an_earlier_one () =
+  let provider = load_or_fail atlassian_toml in
+  let table = Keeper_oauth_pending.create () in
+  let earlier = Keeper_oauth_pending.admit table in
+  (* The later start consumed its admission and then died during discovery,
+     so it never reaches this table. *)
+  ignore (Keeper_oauth_pending.admit table);
+  let held = in_flight_for provider in
+  check Alcotest.bool "an issued admission refuses an earlier start, not a registered one" true
+    (Keeper_oauth_pending.remember table earlier ~now:0. ~ttl_sec:600. held
+     = Error Keeper_oauth_pending.Newer_start_admitted);
+  Alcotest.(check int) "nothing was remembered" 0 (Keeper_oauth_pending.waiting table ~now:1.)
+
+let test_a_newer_start_supersedes_an_admitted_publication () =
+  let provider = load_or_fail atlassian_toml in
+  let table = Keeper_oauth_pending.create () in
+  let first = in_flight_for provider and second = in_flight_for provider in
+  let first_id = remember_held table ~now:0. ~ttl_sec:600. first in
+  let state = first.pending.Keeper_oauth_flow.state in
+  check Alcotest.bool "the first exchange was admitted for publication" true
+    (Keeper_oauth_pending.take table ~now:1. ~state <> None);
+  let () = match Keeper_oauth_pending.remember table (Keeper_oauth_pending.admit table) ~now:2. ~ttl_sec:600. second with
+    | Ok _ -> ()
+    | Error Keeper_oauth_pending.Newer_start_admitted ->
+        Alcotest.fail "the newer start was refused" in
+  Keeper_oauth_pending.finish table ~state
+    (Ok Keeper_oauth_pending.Credentials_published_discovery_failed);
+  check Alcotest.bool "a superseded publication cannot complete over the newer attempt" true
+    (Keeper_oauth_pending.status table ~now:3. ~attempt_id:first_id
+       ~keeper:"oauth-fixture" ~provider_id:provider.Keeper_oauth_provider.id
+     = Some Keeper_oauth_pending.Superseded)
+
 let test_an_earlier_start_cannot_retire_a_later_one () =
   let provider = load_or_fail atlassian_toml in
   let table = Keeper_oauth_pending.create () in
@@ -1997,6 +2029,10 @@ let () =
             test_an_abandoned_login_expires;
           Alcotest.test_case "two logins do not collide" `Quick
             test_logins_do_not_collide;
+          Alcotest.test_case "a start that never registers still refuses an earlier one" `Quick
+            test_a_start_that_never_registers_still_refuses_an_earlier_one;
+          Alcotest.test_case "a newer start supersedes an admitted publication" `Quick
+            test_a_newer_start_supersedes_an_admitted_publication;
           Alcotest.test_case "an earlier start cannot retire a later one" `Quick
             test_an_earlier_start_cannot_retire_a_later_one;
           Alcotest.test_case "a restart during discovery keeps its consent" `Quick

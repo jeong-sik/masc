@@ -1,13 +1,13 @@
 {
-  "scope": "Current source syntax only. Historical runtime/footer/PTY results are not re-executed or certified by this receipt.",
+  "scope": "Current committed source syntax only, refreshed after main integration. Historical runtime/footer/PTY results are not re-executed or certified by this receipt.",
   "checks": {
     "bin/masc_tui.ml": {
-      "sha256": "47214fd75ffed6459301812094f782d71e2d1b618a4423a3ab488cc1c5d9f8e5",
+      "sha256": "2dffbdd251957d57580090f42e28ad78105b9d9dd258df3ca91569ddce2aa3d2",
       "check": "ocaml parsing",
       "result": "PASS"
     },
     "bin/masc_tui_render.ml": {
-      "sha256": "de7973167b884e77526463dbc1be0640cab8c221433f5c51f6c5e72397e62972",
+      "sha256": "951a3b4223c5766f844d04187bb45e6714dafced40e707f9e6f118dd4091ec2a",
       "check": "ocaml parsing",
       "result": "PASS"
     },

@@ -1,18 +1,18 @@
 {
-  "scope": "Current source syntax only. Historical runtime/footer/PTY results are not re-executed or certified by this receipt.",
+  "scope": "Current committed source syntax only, refreshed after main integration. Historical runtime/footer/PTY results are not re-executed or certified by this receipt.",
   "checks": {
     "bin/masc_tui_footer.ml": {
-      "sha256": "18e805648b1774fc64322fc81600b453b96b63069e60c39b21fb2d7b28dbf67d",
+      "sha256": "0c29fa65b7930e4b4be5590a60f530a03f69ba7c91b9f078e85e1a157bbd5cb6",
       "check": "ocaml parsing",
       "result": "PASS"
     },
     "bin/masc_tui_render.ml": {
-      "sha256": "de7973167b884e77526463dbc1be0640cab8c221433f5c51f6c5e72397e62972",
+      "sha256": "951a3b4223c5766f844d04187bb45e6714dafced40e707f9e6f118dd4091ec2a",
       "check": "ocaml parsing",
       "result": "PASS"
     },
     "bin/masc_tui_render_prim.ml": {
-      "sha256": "7045e2d3f0457e2cbd6b4e5833f36778db73d73e1126c6a0ec35224e4980bc44",
+      "sha256": "52845f2384935ec32a5f782bf5adda109e21e10376199fc9181f7e78d63f0953",
       "check": "ocaml parsing",
       "result": "PASS"
     },
@@ -27,7 +27,7 @@
       "result": "PASS"
     },
     "test/test_tui_footer_status_items.ml": {
-      "sha256": "e72773cc0f0cd3778c57aac44a40583bde23f09f042d43963e7751add0aeabbe",
+      "sha256": "9857bb895b8508cd85f4460ad7935ff98978a33e7b998adb34558d19653e95a1",
       "check": "ocaml parsing",
       "result": "PASS"
     },
@@ -37,7 +37,7 @@
       "result": "PASS"
     },
     "test/test_tui_remote_workspace_history_pty.py": {
-      "sha256": "b984bec2df1d82f225aa1c26d10fd8288566e34a72234283ba180927b590e45e",
+      "sha256": "aacb714b9d92104a8a631590575feef79b93972030e574358742d9981d91d3ac",
       "check": "python ast.parse",
       "result": "PASS"
     }

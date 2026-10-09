@@ -282,7 +282,7 @@ let node_deferral = function
 (* The executor's causes split in two, and the split is the disposition they
    carry. [Pre_effect_only] is the completion mismatch: the executor refuses
    the invocation before any node runs and stamps it [Proven_pre_effect]
-   (keeper_tool_plan_executor.ml 505-513), so it has no terminal effect to
+   in [Keeper_tool_plan_executor.execute_bound], so it has no terminal effect to
    name. Everything else can settle after a node acted. Naming both arms keeps
    the projection total, so a new [Executor.cause] is a compile error here
    rather than a failure the caller drops. *)

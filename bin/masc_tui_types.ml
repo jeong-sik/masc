@@ -2728,14 +2728,14 @@ type identity_login_request = {
 (* Login-completion expectation, held across a transient authority loss.
    Where [identity_login_started] is the consent the pane presents, this is
    only what the tick polls on: the workspace that admitted the login and
-   which Keeper/provider is still waiting. No URL is carried, so an old
+   which Keeper/provider/attempt is still waiting. No URL is carried, so an old
    consent is never resurrected, and the expectation alone cannot attach
    anyone to anything. *)
 type identity_login_expectation = {
   ile_origin: Tui_decode.server_identity;
   ile_keeper: string;
   ile_provider: string;
-  ile_expires_at: float;
+  ile_attempt_id: string;
 }
 
 (** Where [Esc] returns after the chat pane was opened. Keeping only the legal
@@ -6446,6 +6446,8 @@ type state = {
       (** What [/find] was last given on this pane, or [""] before it is used.
           Kept so the arg-less form continues the same search instead of
           asking for the text again. *)
+  mutable msg_search_generation: int;
+      (** Async search admission generation; shared target reset retires old jobs. *)
   mutable msg_find_at: chat_search_cursor option;
       (** Structural identity of the message [/find] last landed on. The next
           search resolves it in the current causal timeline and starts
@@ -7284,7 +7286,11 @@ let suspend_voice_wizard_read state =
 (* Observation receipts have a shorter lifetime than admitted operations.
    Retire their owners without cancelling a write or erasing its outcome,
    the rows already shown, navigation, or the operator's draft. *)
+let retire_keeper_message_search state =
+  state.msg_search_generation <- state.msg_search_generation + 1
+
 let suspend_workspace_readings state =
+  retire_keeper_message_search state;
   state.workspace_read_authority <- ref ();
   let cancellations = state.workspace_observation_cancellations in
   state.workspace_observation_cancellations <- [];
@@ -7549,11 +7555,10 @@ let identity_logins_for_keeper (state : state) keeper_name =
 
 (* A recovered provider read may still be pending browser consent. Continue
    the existing cadence without resurrecting the withdrawn consent URL. *)
-let identity_login_pending_for_keeper (state : state) ~now keeper_name =
+let identity_login_pending_for_keeper (state : state) ~now:_ keeper_name =
   server_authority_ready state
   && List.exists (fun expectation ->
        String.equal expectation.ile_keeper keeper_name
-       && expectation.ile_expires_at > now
        && identity_expectation_workspace_matches ~origin:expectation.ile_origin state)
        state.identity_login_expectations
 
@@ -7626,7 +7631,7 @@ let remember_identity_login (state : state) login =
    | Some origin when server_authority_ready state ->
        remember_identity_login_expectation state
          { ile_origin=origin; ile_keeper=login.ils_keeper; ile_provider=login.ils_provider;
-           ile_expires_at=login.ils_expires_at }
+           ile_attempt_id=login.ils_attempt_id }
    | _ -> ())
 
 (* A terminal observation retires both the browser URL and its background
@@ -7656,8 +7661,8 @@ let retire_identity_login_state (state : state) retirement =
        | Login_deadline now -> expires_at > now)
   in
   state.identity_login_expectations <- List.filter
-    (fun held -> keep ~keeper:held.ile_keeper ~provider:held.ile_provider
-       ~expires_at:held.ile_expires_at) state.identity_login_expectations;
+    (fun held -> not (disappeared ~keeper:held.ile_keeper ~provider:held.ile_provider))
+    state.identity_login_expectations;
   state.identity_logins <- List.filter
     (fun login -> keep ~keeper:login.ils_keeper ~provider:login.ils_provider
        ~expires_at:login.ils_expires_at) state.identity_logins;
@@ -8582,6 +8587,31 @@ let rows_the_logs_do_not_draw ~held rows =
    about those calls and reads. A skill evidence gap on a loaded row
    (missing, unreadable) names no read and is not carried over. Run where
    loaded rows arrive and where a journal log is held. *)
+let same_skill_invocation ~inventory
+    (left : Masc_tui_keeper_chat_transcript.skill_activity)
+    (right : Masc_tui_keeper_chat_transcript.skill_activity) =
+  Option.is_some left.turn_ref && Option.is_some left.skill_tool_use_id
+  && left.turn_ref = right.turn_ref
+  && left.skill_tool_use_id = right.skill_tool_use_id
+  && (match left.runtime_id, right.runtime_id with
+      | Some left, Some right -> String.equal left right
+      | None, _ | _, None ->
+          let runtimes = left :: right :: inventory
+            |> List.filter_map (fun (candidate : Masc_tui_keeper_chat_transcript.skill_activity) ->
+              if candidate.turn_ref=left.turn_ref && candidate.skill_tool_use_id=left.skill_tool_use_id
+              then candidate.runtime_id else None)
+            |> List.sort_uniq String.compare in
+          match runtimes with [] | [_] -> true | _ :: _ :: _ -> false)
+
+let skills_drawn_by_items items =
+  List.concat_map (fun (item : Masc_tui_keeper_chat_transcript.drawn_item) ->
+    match item.drawn with Drawn_skill skills -> skills | _ -> []) items
+
+let skills_in_source_rows ~keeper_name source rows =
+  List.concat_map (fun (row : msg_entry) ->
+    if String.equal row.me_keeper_name keeper_name && row.me_execution_source=source
+    then row.me_skill_block else []) rows
+
 let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
   List.iter
     (fun turn_log ->
@@ -8606,23 +8636,22 @@ let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
       (* The stream has no event for a delivery, so without this the log's
          skill row stays at what the read call alone says while the loaded
          row that knew better is left out of the timeline (#36882). *)
+      (* Freeze candidates before any row is enriched, so nullable runtime
+         completion cannot depend on which durable record arrives first. *)
+      let observed_skills = skills_drawn_by_items
+        (Masc_tui_keeper_chat_transcript.drawn turn_log.tl_transcript) in
+      let inventory = observed_skills @ skills_in_source_rows ~keeper_name (Some execution_source)
+        (rows @ state.msg_loaded @ state.msg_history) in
       List.iter
         (fun (row : msg_entry) ->
-          if row.me_execution_source = Some execution_source then
+          if String.equal row.me_keeper_name keeper_name
+             && row.me_execution_source = Some execution_source then
             List.iter (fun (skill : Masc_tui_keeper_chat_transcript.skill_activity) ->
-              let observed =
-                Option.is_some skill.turn_ref && Option.is_some skill.skill_tool_use_id
-                && List.exists (fun (item : Masc_tui_keeper_chat_transcript.drawn_item) ->
-                  match item.drawn with
-                  | Drawn_skill skills -> List.exists
-                      (fun (shown : Masc_tui_keeper_chat_transcript.skill_activity) ->
-                        shown.turn_ref = skill.turn_ref
-                        && shown.skill_tool_use_id = skill.skill_tool_use_id) skills
-                  | Drawn_tools _ | Drawn_thinking _ | Drawn_text _ | Drawn_reply _
-                  | Drawn_status _ | Drawn_error _ -> false)
-                    (Masc_tui_keeper_chat_transcript.drawn turn_log.tl_transcript) in
+              let observed = List.exists (fun shown ->
+                same_skill_invocation ~inventory shown skill) observed_skills in
               if turn_log_holds_the_turn turn_log || observed then
-                Masc_tui_keeper_chat_transcript.note_skill_activity turn_log.tl_transcript skill)
+                Masc_tui_keeper_chat_transcript.note_skill_activity ~runtime_inventory:inventory
+                  turn_log.tl_transcript skill)
               row.me_skill_block)
         rows)
     (selected_source_logs_for_keeper state keeper_name)
@@ -9885,6 +9914,7 @@ let create_state
   board_list_reading = Board_list_unread;
   board_cursor = 0;
   msg_find = "";
+  msg_search_generation = 0;
   msg_find_at = None;
   board_sort = Board_hot;
   board_hearth = None;
@@ -10472,6 +10502,7 @@ let restore_keeper_chat_page (state : state) keeper_name =
        in
        state.msg_loaded_pages <-
          (loaded_keeper, page) :: List.remove_assoc loaded_keeper state.msg_loaded_pages);
+  retire_keeper_message_search state;
   (* Requests that belonged to the outgoing page cannot publish into a page
      restored during A -> B -> A, even before the next GET starts. *)
   state.msg_history_load_generation <- state.msg_history_load_generation + 1;
@@ -10645,23 +10676,13 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
              else Some {row with me_tool_block=Some (Transcript.tool_block
                ~omitted_steps:block.omitted_steps activities)})
     | Message_skill _ when row.me_skill_block <> [] ->
-        let observed = List.concat_map (fun (item : Transcript.drawn_item) ->
-          match item.drawn with Drawn_skill skills -> skills | _ -> []) drawn in
-        (* Runtime identity is proof metadata, not the receipt identity. A
-           journal replay may know the runtime while the stream-side skill
-           row does not, so an unknown runtime on one side completes the
-           other's missing metadata. Two known-but-different runtimes never
-           merge: a failover reuses the same turn reference and provider
-           tool-use id across distinct invocations, and collapsing them
-           would hide one invocation's evidence. *)
+        let observed = skills_drawn_by_items drawn in
+        let inventory = observed @ skills_in_source_rows ~keeper_name row.me_execution_source (loaded @ session) in
+        (* A missing runtime can be completed by the other observation, but
+           two known runtimes belong to distinct invocations. *)
         let skills = List.filter (fun (skill : Transcript.skill_activity) ->
           not (List.exists (fun (shown : Transcript.skill_activity) ->
-            Option.is_some skill.skill_tool_use_id
-            && skill.skill_tool_use_id = shown.skill_tool_use_id
-            && skill.turn_ref = shown.turn_ref
-            && (match skill.runtime_id, shown.runtime_id with
-               | Some a, Some b -> String.equal a b
-               | Some _, None | None, Some _ | None, None -> true)) observed)) row.me_skill_block in
+            same_skill_invocation ~inventory skill shown) observed)) row.me_skill_block in
         if skills = [] then None
         else Some {row with me_skill_block=skills;
           me_role=Message_skill (Transcript.skill_block_state skills)}

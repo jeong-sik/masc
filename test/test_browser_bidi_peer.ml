@@ -16,7 +16,7 @@ let test_context_identity () =
   let command method_ _ = match method_ with
     | "browsingContext.getTree" -> Ok (obj ["contexts",`List (List.map (fun c->obj ["context",`String c;"url",`String "https://same.example/"]) !contexts)])
     | "script.callFunction" -> Ok (script_value (obj ["url",`String "https://same.example/";"title",`String "same";"active",`Bool true]))
-    | _ -> Error (Peer.Rejected "unexpected test command") in
+    | _ -> Error (Peer.Rejected (Peer.error_code_of_wire "unexpected test command")) in
   let peer=peer_of command in
   let ids () = match Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) with
     | Ok (`List rows) -> List.map (fun row->Yojson.Safe.Util.(row |> member "id" |> to_int)) rows
@@ -145,7 +145,7 @@ let test_pointer_validation () =
     calls:=method_::!calls;
     match method_ with
     | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "owned"]]])
-    | _ -> Error (Peer.Rejected "unexpected effect dispatch") in
+    | _ -> Error (Peer.Rejected (Peer.error_code_of_wire "unexpected effect dispatch")) in
   let peer=peer_of command in
   let viewport=obj ["documentId",`String "observed";"width",`Int 800;"height",`Int 600;
     "scrollX",`Int 0;"scrollY",`Int 0] in
@@ -366,11 +366,14 @@ let test_why_a_session_was_not_ended_says_whether_firefox_could_be_asked () =
     let ending=read_client_message flow in
     send_server_message flow (obj ["type",`String "error";"id",Yojson.Safe.Util.member "id" ending;
       "error",`String "invalid session id"])));
-  check string "Firefox refuses to end it" "not confirmed" (ending (fun flow ->
-    send_server_message flow (session_created (read_client_message flow));
-    let ending=read_client_message flow in
-    send_server_message flow (obj ["type",`String "error";"id",Yojson.Safe.Util.member "id" ending;
-      "error",`String "unknown error"])));
+  List.iter (fun code ->
+      check string ("Firefox refuses to end it: " ^ code) "not confirmed" (ending (fun flow ->
+        send_server_message flow (session_created (read_client_message flow));
+        let ending=read_client_message flow in
+        send_server_message flow (obj ["type",`String "error";"id",Yojson.Safe.Util.member "id" ending;
+          "error",`String code]))))
+    (* The code that refuses a [session.new] says nothing of ending one. *)
+    ["unknown error"; "session not created"];
   check string "Firefox does not answer" "not confirmed" (ending (fun flow ->
     send_server_message flow (session_created (read_client_message flow));
     ignore (read_client_message flow : Yojson.Safe.t);
@@ -421,21 +424,25 @@ let test_a_refused_session_leaves_none_to_end () =
    session. Any other is a session it did not start, with nothing said of
    one that is there. *)
 let test_a_session_refused_for_another_reason_is_a_failed_one () =
-  let refused=with_scripted_firefox (fun flow ->
-      let asked=read_client_message flow in
-      send_server_message flow (obj ["type",`String "error";"id",Yojson.Safe.Util.member "id" asked;
-        "error",`String "unknown error";"message",`String "the profile is locked"]);
-      match read_client_message flow with
-      | (_ : Yojson.Safe.t) -> ()
-      | exception End_of_file -> ())
-    (fun ~ended:_ peer ->
-      (match Peer.metadata peer with
-       | Error (Peer.Session_failed said) ->
-         check string "Firefox's own error is the reason" "BiDi command rejected: unknown error" said
-       | Error (Peer.Session_refused said) -> failf "another error was read as a session Firefox holds: %s" said
-       | Ok version -> failf "a refused session answered a version: %s" version);
-      ended_session peer) in
-  check (result unit string) "nothing to end" (Ok ()) refused
+  List.iter (fun code ->
+      let refused=with_scripted_firefox (fun flow ->
+          let asked=read_client_message flow in
+          send_server_message flow (obj ["type",`String "error";"id",Yojson.Safe.Util.member "id" asked;
+            "error",`String code;"message",`String "the profile is locked"]);
+          match read_client_message flow with
+          | (_ : Yojson.Safe.t) -> ()
+          | exception End_of_file -> ())
+        (fun ~ended:_ peer ->
+          (match Peer.metadata peer with
+           | Error (Peer.Session_failed said) ->
+             check string "Firefox's own error is the reason" ("BiDi command rejected: " ^ code) said
+           | Error (Peer.Session_refused said) -> failf "another error was read as a session Firefox holds: %s" said
+           | Ok version -> failf "a refused session answered a version: %s" version);
+          ended_session peer) in
+      check (result unit string) ("nothing to end: " ^ code) (Ok ()) refused)
+    (* The code a session command gets without a session says nothing of
+       one Firefox holds. *)
+    ["unknown error"; "invalid session id"]
 (* An error answer without its code is not a refusal this side can read, so
    the session is still ended. *)
 let test_an_unreadable_refusal_leaves_a_session_to_end () =
@@ -605,7 +612,24 @@ let test_peer_serves_what_the_lane_table_says () =
       | Error (Peer.Before_effect detail), true | Error (Peer.Outcome_unknown detail), _ ->
         failf "the peer did not serve %s (%s), which the lane table says BiDi does" name detail)
       Lane.all_of_live_capability)
-let () = run "BiDi live peer" ["identity",[test_case "opaque contexts" `Quick test_context_identity];
+(* Firefox's error codes are read once where the answer arrives. The two
+   this host acts on are their own cases; any other is kept as Firefox wrote
+   it, and every code is written back as it was read. *)
+let test_an_error_code_is_read_once_and_written_back () =
+  let read code =
+    match Peer.error_code_of_wire code with
+    | Peer.Session_not_created -> "session not created"
+    | Peer.Invalid_session_id -> "invalid session id"
+    | Peer.Other_error kept -> "other: " ^ kept in
+  check string "session not created" "session not created" (read "session not created");
+  check string "invalid session id" "invalid session id" (read "invalid session id");
+  List.iter (fun code -> check string ("another code is kept: " ^ code) ("other: " ^ code) (read code))
+    [ "no such frame"; "unknown command"; "Session not created"; "session not created " ];
+  List.iter (fun code ->
+      check string ("written back: " ^ code) code (Peer.error_code_to_wire (Peer.error_code_of_wire code)))
+    [ "session not created"; "invalid session id"; "no such frame"; "" ]
+let () = run "BiDi live peer" ["identity",[test_case "opaque contexts" `Quick test_context_identity;
+    test_case "an error code is read once and written back" `Quick test_an_error_code_is_read_once_and_written_back];
   "lifetime",[test_case "normal callback closes held socket" `Quick (test_held_open_completion (Ok ()) );
     test_case "error callback closes held socket" `Quick (test_held_open_completion (Error "owned failure"));
     test_case "a refused upgrade is the connection's error" `Quick test_refused_upgrade_is_the_connections_error;

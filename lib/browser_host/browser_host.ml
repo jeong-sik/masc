@@ -211,7 +211,9 @@ let resolve_config ~base_path ~server ~token_file =
       match token_file with
       | Some path ->
           if Filename.is_relative path then Filename.concat base path else path
-      | None -> Filename.concat (Filename.concat base Common.masc_dirname) "browser-lane/token"
+      | None ->
+          List.fold_left Filename.concat base
+            [ Common.masc_dirname; Common.browser_lane_dirname; Common.browser_lane_token_name ]
     in
     Ok { base; destination; server; token_file; client_id = Random_id.uuid_v7_value () }
   with

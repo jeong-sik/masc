@@ -144,8 +144,9 @@ val record_path : base_path:string -> string
     still connecting. *)
 val observe : base_path:string -> state
 
-(** The state for a record and what the lock says; {!observe} reads both and
-    asks this. *)
+(** The state for a record and what the lock says. With no record, or with
+    a record that has its ending, the lock changes nothing, and {!observe}
+    asks it only for the others. *)
 val state_of : lock_held:bool -> (entry option, string) result -> state
 
 (** {1 The host's side} *)

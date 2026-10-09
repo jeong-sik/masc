@@ -6,9 +6,28 @@ let obj xs = `Assoc xs
 let str s = `String s
 let required name json = match field name json with Some v -> Ok v | None -> Error ("missing " ^ name)
 type failure = Before_effect of string | Outcome_unknown of string
-type refusal = Rejected of string | Unanswered of string | Unsent of string
+(* The error codes Firefox answers that this host acts on, read once where
+   the answer arrives; any other code is kept as Firefox wrote it.
+   "session not created": Firefox will not serve a [session.new]. It takes
+   one session at a time, and 157.0.1 answers a second connection's request
+   with this ("Maximum number of active sessions") for as long as the first
+   is there, also after the socket that asked for it has closed.
+   "invalid session id": a session command on a connection that has no
+   session. Firefox 157.0.1 answers [session.end] with it before any
+   [session.new], after a [session.new] it refused, and it closes the socket
+   once it has ended one. *)
+type error_code = Session_not_created | Invalid_session_id | Other_error of string
+let error_code_of_wire = function
+  | "session not created" -> Session_not_created
+  | "invalid session id" -> Invalid_session_id
+  | code -> Other_error code
+let error_code_to_wire = function
+  | Session_not_created -> "session not created"
+  | Invalid_session_id -> "invalid session id"
+  | Other_error code -> code
+type refusal = Rejected of error_code | Unanswered of string | Unsent of string
 let refusal_message = function
-  | Rejected code -> "BiDi command rejected: " ^ code
+  | Rejected code -> "BiDi command rejected: " ^ error_code_to_wire code
   | Unanswered why | Unsent why -> why
 type verb = Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact
 let verb_to_wire = function
@@ -24,11 +43,6 @@ type session_end_failure = Connection_gone of string | Not_confirmed of string
 let session_end_failure_message = function Connection_gone why | Not_confirmed why -> why
 type session_failure = Session_refused of string | Session_failed of string
 let session_failure_message = function Session_refused why | Session_failed why -> why
-(* Firefox's error for a [session.new] it will not serve. It takes one session
-   at a time, and 157.0.1 answers a second connection's request with this
-   ("Maximum number of active sessions") for as long as the first is there,
-   also after the socket that asked for it has closed. *)
-let session_not_created_error = "session not created"
 type t = { ask : string -> Yojson.Safe.t -> (Yojson.Safe.t,refusal) result;
   session_end : unit -> (unit,session_end_failure) result; mutable session_may_exist : bool;
   mutable contexts : (string * int) list; mutable next_tab : int; mutable version : string option }
@@ -47,9 +61,9 @@ let metadata t =
      the request was never written. *)
   t.session_may_exist <- true;
   match t.ask "session.new" (obj ["capabilities",obj []]) with
-  | Error (Rejected code as refused) when String.equal code session_not_created_error ->
+  | Error (Rejected Session_not_created as refused) ->
     t.session_may_exist <- false; Error (Session_refused (refusal_message refused))
-  | Error (Rejected _ | Unsent _ as refused) ->
+  | Error (Rejected (Invalid_session_id | Other_error _) | Unsent _ as refused) ->
     t.session_may_exist <- false; Error (Session_failed (refusal_message refused))
   | Error (Unanswered _ as unanswered) -> Error (Session_failed (refusal_message unanswered))
   | Ok result ->
@@ -228,11 +242,6 @@ let dispatch t ~verb args =
       | Browser_lane.Activate_tab -> Error (Before_effect "unsupported BiDi interaction") in
       Result.map_error (fun detail -> Outcome_unknown detail) (with_tab id receipt))
 
-(* Firefox's error for a session command on a connection that has no session
-   (WebDriver's "invalid session id"). Firefox 157.0.1 answers [session.end]
-   with it before any [session.new], after a [session.new] it refused, and
-   it closes the socket once it has ended one. *)
-let no_session_error = "invalid session id"
 (* How long a finishing connection waits for Firefox to end the session. A
    Firefox that is there answers at once; the window only bounds one that is
    not, so stopping the host does not wait on it. *)
@@ -277,7 +286,7 @@ let with_connection ~env ~timeout ~url use =
               settle id (Result.map_error (fun detail->Unanswered detail) (required "result" json))
             | Some (`String "error"),Some (`Int id)->
               settle id (match string "error" json with
-                | Ok code->Error (Rejected code) | Error detail->Error (Unanswered detail))
+                | Ok code->Error (Rejected (error_code_of_wire code)) | Error detail->Error (Unanswered detail))
             | _->disconnect "invalid BiDi response envelope") in
       let builder _=Endpoint.handlers ~on_message
         ~on_close:(fun ~code:_ ~reason:_->closed "BiDi peer closed")
@@ -322,10 +331,11 @@ let with_connection ~env ~timeout ~url use =
            | Ok (Ok _)->Ok ()
            (* A session asked for and never confirmed, which Firefox says it
               does not have: there is none to end. *)
-           | Ok (Error (Rejected code)) when String.equal code no_session_error->Ok ()
+           | Ok (Error (Rejected Invalid_session_id))->Ok ()
            (* Firefox's own answer stays its answer when the socket closes
               right behind it. *)
-           | Ok (Error (Rejected _ as declined))->Error (Not_confirmed (refusal_message declined))
+           | Ok (Error (Rejected (Session_not_created | Other_error _) as declined))->
+             Error (Not_confirmed (refusal_message declined))
            (* No answer: the socket closing under the request is the
               connection going, not Firefox declining. *)
            | Ok (Error (Unanswered _ | Unsent _ as lost))->

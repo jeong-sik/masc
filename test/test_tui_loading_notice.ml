@@ -214,6 +214,15 @@ let test_schedule_responses_follow_keeper_and_generation () =
     ; scs_rows = []; scs_runner_status = Masc.Tui_decode.Runner_status Schedule_contract_values.Runner_ok }
   in
   let state = fresh () in
+  (* A schedule page is applied only under a ready server identity
+     (server_authority_ready); the case here is the Keeper and generation
+     check, so the server has answered for its workspace. *)
+  state.server_identity <- Some
+    { Masc.Tui_decode.sid_version = "test"; sid_binary_commit = "test"
+    ; sid_binary_commit_age_s = None; sid_base_path = "/workspace"
+    ; sid_masc_root = "/workspace/.masc"; sid_executable_in_worktree = None
+    ; sid_state_ready = Some true; sid_uptime = None; sid_sse_clients = None
+    ; sid_gc = None; sid_scheduler = None };
   state.keepers <- [keeper "alpha"; keeper "beta"];
   let ask name = Types.mark_detail_read_started state
     ~tab:Types.Detail_automation ~keeper:name ~now_ns:(ns 10) in

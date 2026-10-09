@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
@@ -292,14 +293,21 @@ class LocalBuildInstall(unittest.TestCase):
                            check=True, capture_output=True)
             host = base / ".masc/browser-lane/host/masc-browser-host"
 
-            # Both run as the workspace's copy of the host, which is what ps shows first.
-            def running_as_host():
-                return subprocess.Popen(["bash", "-c", 'exec -a "$0" sleep 60', str(host)])
+            # Each runs as the workspace's copy of the host with the arguments
+            # it was given, which is what ps shows. A bash builtin waits on
+            # stdin, so no other process is started.
+            def running_as_host(*arguments):
+                return subprocess.Popen(["bash", "-c", 'exec -a "$0" /bin/bash -c "read line" "$0" "$@"',
+                                         str(host), *arguments], stdin=subprocess.PIPE)
 
-            extension, bidi = running_as_host(), running_as_host()
+            extension = running_as_host(str(root / "native manifests/masc_browser_host.json"), "masc@yousleepwhen")
+            bidi = running_as_host("--bidi-url", "ws://127.0.0.1:9222/session")
+            bidi_with_equals = running_as_host("--bidi-url=ws://127.0.0.1:9223/session")
             try:
+                # A host that was killed leaves its record without an ending,
+                # and its pid may now be another process's.
                 (base / ".masc/browser-lane/bidi-host.json").write_text(
-                    json.dumps({"pid": bidi.pid, "ended": None}))
+                    json.dumps({"pid": extension.pid, "ended": None}))
                 build = root / "build"
                 build.mkdir()
                 for exe in ("main_eio.exe", "masc_tui.exe", "masc_browser_host.exe"):
@@ -311,13 +319,17 @@ class LocalBuildInstall(unittest.TestCase):
                                         check=True, capture_output=True, text=True)
                 self.assertEqual(extension.wait(timeout=10), -15, result.stdout)
                 self.assertIsNone(bidi.poll(), "the BiDi host was stopped")
+                self.assertIsNone(bidi_with_equals.poll(), "the BiDi host given --bidi-url=URL was stopped")
                 self.assertIn(f"stopped host pid {extension.pid}; Firefox starts the new copy", result.stdout)
-                self.assertIn(f"kept BiDi host pid {bidi.pid}, which nothing would start again", result.stdout)
+                kept = re.search(r"kept BiDi host pid ([0-9, ]+), which nothing would start again", result.stdout)
+                self.assertIsNotNone(kept, result.stdout)
+                self.assertEqual(sorted(kept.group(1).split(", ")), sorted([str(bidi.pid), str(bidi_with_equals.pid)]))
             finally:
-                for process in (extension, bidi):
+                for process in (extension, bidi, bidi_with_equals):
                     if process.poll() is None:
                         process.kill()
                         process.wait()
+                    process.stdin.close()
 
     def test_no_registered_host_installs_binaries_and_says_so(self):
         with tempfile.TemporaryDirectory() as temporary:

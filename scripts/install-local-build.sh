@@ -12,9 +12,9 @@
 # manifest whose launcher lives under a workspace's browser-lane/host is
 # reinstalled from the new prefix binary under its own host name, and the host
 # processes started from that workspace are stopped; the extension reconnects
-# after five seconds and starts the new copy. The workspace's running BiDi host
-# (the pid in its bidi-host.json) is left running on its old copy, because
-# nothing would start it again.
+# after five seconds and starts the new copy. A host started with --bidi-url
+# (a BiDi host) is left running on its old copy, because nothing would start
+# it again.
 #
 # Before anything is replaced, the new build judges the runtime.toml of the
 # workspace its server runs on (#39311). A refusal leaves every binary and
@@ -229,31 +229,25 @@ if not registered:
     print(f"no browser lane host is registered in {manifest_dir}")
     sys.exit(0)
 
-def running_bidi_host(base):
-    # A BiDi host records its pid in bidi-host.json, with no "ended" while it
-    # runs (lib/browser_bidi_host_record.ml). Firefox starts a stopped
-    # extension host again; nothing starts a stopped BiDi host again.
-    try:
-        record = json.loads((base / ".masc/browser-lane/bidi-host.json").read_text())
-    except (OSError, ValueError):
-        return None
-    if not isinstance(record, dict) or record.get("ended") is not None:
-        return None
-    pid = record.get("pid")
-    return pid if isinstance(pid, int) and not isinstance(pid, bool) else None
+def bidi_host(arguments):
+    # Firefox starts an extension host with its manifest path and extension
+    # id, and starts it again once it stops. A BiDi host is started with
+    # --bidi-url, which the host also takes as --bidi-url=URL
+    # (bin/masc_browser_host.ml), and nothing starts a stopped one again.
+    return any(word == "--bidi-url" or word.startswith("--bidi-url=") for word in arguments.split())
 
-running = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True, text=True, check=True).stdout
+# -ww: the whole command, so the arguments after the host path are there to read.
+running = subprocess.run(["ps", "-ww", "-axo", "pid=,command="], capture_output=True, text=True, check=True).stdout
 for name, base in registered:
     subprocess.run(["bash", installer, "--binary", binary, "--base-path", str(base),
                     "--host-name", name, "--manifest-dir", str(manifest_dir)],
                    check=True, stdout=subprocess.DEVNULL)
     host = str(base / ".masc/browser-lane/host/masc-browser-host")
-    bidi_host = running_bidi_host(base)
     stopped, kept = [], []
     for line in running.splitlines():
         pid, _, command = line.strip().partition(" ")
         if command == host or command.startswith(host + " "):
-            if int(pid) == bidi_host:
+            if bidi_host(command[len(host):]):
                 kept.append(pid)
                 continue
             try:

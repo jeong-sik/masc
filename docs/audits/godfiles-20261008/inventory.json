@@ -407,7 +407,11 @@
       "path": "lib/keeper/keeper_tool_memory_runtime.ml",
       "baseline_lines": 2345,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; search, source reads, storage and event effects remain pending",
+      "current_lines": 1828,
+      "prs": [
+        42110
+      ]
     },
     {
       "path": "lib/keeper/keeper_turn_driver.ml",

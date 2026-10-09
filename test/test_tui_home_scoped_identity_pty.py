@@ -377,9 +377,12 @@ def superseded_scoped_match_journey(executable):
             assert h.wait_for_fixture_event(
                 process, fd, output, released_asks_read, timeout=10
             ), "old scoped reader never consumed its released operator response"
+            # The refresh tail can add its own identity recheck to a phase, so
+            # these waits ask for at least one; an exact count can be
+            # overtaken before the predicate is polled and never come true.
             def scoped_probe_finished():
                 with lock:
-                    return calls.count(("/health", "released")) == 1
+                    return calls.count(("/health", "released")) >= 1
             assert h.wait_for_fixture_state(process, fd, output,
                 scoped_probe_finished, timeout=10), "released scoped read did not recheck identity"
             with lock:
@@ -389,7 +392,7 @@ def superseded_scoped_match_journey(executable):
                 "old Gate read never completed after workspace invalidation")
             def gate_probe_finished():
                 with lock:
-                    return calls.count(("/health", "gate-released")) == 1
+                    return calls.count(("/health", "gate-released")) >= 1
             assert h.wait_for_fixture_state(process, fd, output,
                 gate_probe_finished, timeout=10), "released Gate read did not recheck identity"
             # Consume the returned response and mailbox, then force a fresh

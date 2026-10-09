@@ -21,7 +21,7 @@ CONTENT = 'CONTENTHEAD\n```\n*literal* **/*.ml\n' + '한글 artifact ' * 30 + 'C
 GOAL = 'goal-linked'
 GOAL_TITLE = 'GOALHEAD ' + '한글 goal ' * 30 + 'GOALEND'
 METRIC = 'METRICHEAD ' + '한글 metric ' * 30 + 'METRICEND'
-WINDOW = re.compile(r'\b(\d+)-(\d+)/(\d+)\b')
+WINDOW = re.compile(r'\[rows (\d+)-(\d+)/(\d+)\]')
 
 
 def cell_width(text):
@@ -113,10 +113,13 @@ def run(binary, columns, plain, review, timezone='UTC'):
 
         def window():
             screen = _keyboard_harness.screen_rows(completed(output))
-            match = next((WINDOW.search(text.decode('utf-8')) for row, text in sorted(screen.items())
-                          if WINDOW.search(text.decode('utf-8'))), None)
-            assert match is not None, screen
+            position = next(((row, WINDOW.search(text.decode('utf-8')))
+                             for row, text in sorted(screen.items())
+                             if WINDOW.search(text.decode('utf-8'))), None)
+            assert position is not None, screen
+            position_row, match = position
             first, last, total = map(int, match.groups())
+            assert position_row == body_row + last - first + 1, (position_row, body_row, first, last)
             body = []
             for index in range(last-first+1):
                 line = screen[body_row+index].decode('utf-8', errors='strict')

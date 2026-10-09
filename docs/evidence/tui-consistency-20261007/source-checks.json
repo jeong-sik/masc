@@ -1,5 +1,5 @@
 {
-  "scope": "Parser checks rerun on 2026-10-09 for the recorded source hashes only; a file whose current hash differs from its entry is not covered. Syntax only: native regressions, geometry and PTY were not rerun.",
+  "scope": "Parser checks rerun on 2026-10-10 against this commit's files for the recorded source hashes only; a file whose current hash differs from its entry is not covered. Syntax only: native regressions and geometry were not rerun. The four PTY scripts listed before were deleted by main (#42155) and are no longer checked.",
   "checks": {
     "bin/masc_tui_footer.ml": {
       "sha256": "ef84845ad664c67843ebfafefd9392c250b627e662e1fa9f8bd85bdf96b262d0",
@@ -7,7 +7,7 @@
       "result": "PASS"
     },
     "bin/masc_tui_render.ml": {
-      "sha256": "aba7cb0bd4edab32ad7af354ad97ad28ff10c859d6c07a1bde806ba03b8ada77",
+      "sha256": "ed38fadc660bf213c1e8f54008ef1df37f360646b13d796378fb858e3b6a9d5b",
       "check": "ocaml parsing",
       "result": "PASS"
     },
@@ -16,29 +16,9 @@
       "check": "ocaml parsing",
       "result": "PASS"
     },
-    "test/test_tui_candle_currency_pty.py": {
-      "sha256": "d88d6b5b332630d679c44747b13e43ca9626eff2df40c51d77fe449347f09dc4",
-      "check": "python ast.parse",
-      "result": "PASS"
-    },
-    "test/test_tui_config_paths_row.py": {
-      "sha256": "2f2b8d5a803b537e9d0b3f551b8b4d02dadaa89d530c545af39b0b5eeb501838",
-      "check": "python ast.parse",
-      "result": "PASS"
-    },
     "test/test_tui_footer_status_items.ml": {
-      "sha256": "10fdb53a875ace5288803cd52d194573d2f0ba08c6d0b42773931508102d7f5c",
+      "sha256": "924bd76fa3158f50237c214b4063983e874c8ba107f99250095d9427bdda973c",
       "check": "ocaml parsing",
-      "result": "PASS"
-    },
-    "test/test_tui_remote_equipped_portrait.py": {
-      "sha256": "8e0402d6584fc1c13fea2286080273c19224c05879769c64aeefdb9c2e8e2d70",
-      "check": "python ast.parse",
-      "result": "PASS"
-    },
-    "test/test_tui_remote_workspace_history_pty.py": {
-      "sha256": "aacb714b9d92104a8a631590575feef79b93972030e574358742d9981d91d3ac",
-      "check": "python ast.parse",
       "result": "PASS"
     }
   }

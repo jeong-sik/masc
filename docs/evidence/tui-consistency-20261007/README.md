@@ -15,7 +15,8 @@ height/cursor calculations.
 its listed source files. These checks establish syntax only. The archived
 `footer-fitting.txt` and earlier prose reports are historical evidence, not
 execution or independent-review receipts for this revised tree. No footer
-suite or PTY scenario was rerun for this repair.
+suite was rerun for this repair. The PTY scripts the manifest used to list were
+removed by main (#42155), so the manifest now covers OCaml sources only.
 
 ## Execution still needed
 

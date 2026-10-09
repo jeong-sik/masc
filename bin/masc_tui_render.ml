@@ -12664,10 +12664,28 @@ let config_identity_rows ~cols (state : state) =
           |> List.map (fun line -> "  " ^ line)) in
   match state.workspace_identity with
   | Masc_tui_types.Workspace_identity_match_unconfirmed reason ->
-      let notice = "(server identity unconfirmed: "
-        ^ Terminal_text.single_line reason ^ "; last confirmed below)" in
-      (Masc_tui_text_block.rows ~max_cells:(max 1 (width - 2)) notice
-       |> List.map (fun line -> "  " ^ line)) @ rows
+      (* One row. A failed /health can carry a long transport body, such as a
+         proxy's HTML page; wrapped whole, it filled the [Fits] body and hid
+         the last confirmed identity and the configuration below it. The
+         reason is cut in the middle so its start and its end stay readable. *)
+      let max_cells = max 1 (width - 2) in
+      let lead = "(server identity unconfirmed: " in
+      let trail = "; last confirmed below)" in
+      let reason = Terminal_text.single_line reason in
+      let room =
+        max_cells - Message_layout.display_width lead - Message_layout.display_width trail
+      in
+      (* [fit_middle] pads a label that fits, so it only runs on one that
+         does not. *)
+      let fit cells text =
+        if Message_layout.display_width text <= cells then text
+        else Message_layout.fit_middle cells text
+      in
+      let notice =
+        if room > 0 then lead ^ fit room reason ^ trail
+        else fit max_cells (lead ^ reason ^ trail)
+      in
+      ("  " ^ notice) :: rows
   | Workspace_identity_unread | Workspace_identity_match
   | Workspace_identity_mismatch _ -> rows
 

@@ -19,8 +19,10 @@ val start :
 
 module For_testing : sig
   (** The same work, resolved once Firefox and the host were started, found,
-      or not started. *)
+      or not started, waiting [ready_timeout_s] for Firefox's port rather
+      than {!Browser_keeper_firefox.firefox_ready_timeout_s}. *)
   val start :
+    ready_timeout_s:float ->
     sw:Eio.Switch.t ->
     env:Eio_unix.Stdenv.base ->
     base_path:string ->

@@ -10,7 +10,7 @@ a parent base. Retargeting the unchanged head to its older ancestor adds the
 parent file to the complete diff. A new old-guard process still returns
 approval 99 with exit 0. Expected admission is exit 2: this is the red control.
 
-The recorded candidate producer requires the reviewer to supply the base and complete
+The candidate producer requires the reviewer to supply the base and complete
 change hash captured at review time. A fresh consumer yields:
 
 | Case | Expected and observed exit | Approval |
@@ -24,27 +24,21 @@ change hash captured at review time. A fresh consumer yields:
 the actual produced review bodies and consumer stdout/stderr. The original
 candidate approval body remains byte-identical. Actions requests: none.
 
-Reproduce the historical receipt with both source commits available locally:
-`93cc6dc01fa557022687d47305bb95c7e9016229` contains the probe and fixture, and
-`1f1cd345b3f81459004371b53ca647433df31dce` contains the old guard. Fetch missing
-history first in a shallow or partial clone. These are historical checks, not
-checks of the current source-review policy.
+Reproduce from this checkout with its Git history available (fetch history first
+if using a shallow clone):
 
 ```sh
-evidence_checkout="$(mktemp -d)"
-git worktree add --detach "$evidence_checkout" 93cc6dc01fa557022687d47305bb95c7e9016229
-python3 "$evidence_checkout/docs/evidence/task-1868/probe.py" "$evidence_checkout"
-python3 "$evidence_checkout/scripts/review/test_source_review_policy.py"
-git worktree remove "$evidence_checkout"
+python3 docs/evidence/task-1868/probe.py .
+python3 scripts/review/test_source_review_policy.py
 ```
 
-The pinned suite also exercises head movement, latest FAIL/HOLD, open CR,
+The focused suite also exercises head movement, latest FAIL/HOLD, open CR,
 author/untrusted approvals, explicit review-snapshot requirements, missing
 diff evidence, binary content, executable mode and filename/newline boundaries.
 Release verification remains independently required by the existing policy.
 
 The receipt was regenerated on 2026-10-01 against the reachable baseline above.
-The old guard still accepts the expanded diff; the recorded candidate guard refuses both
+The old guard still accepts the expanded diff; the current guard refuses both
 changed-diff cases and preserves the original approval for identical diffs.
 All 43 focused policy tests passed, including root/nested tree-filtered clones
 with an unavailable caller remote. Python AST and diff checks passed.

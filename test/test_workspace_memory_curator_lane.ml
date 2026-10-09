@@ -221,6 +221,35 @@ let test_initial_inventory_drains_after_provider_size_refusal refusal = with_bas
     List.iter (check_refusal_output refusal) failures;
     Worker.For_testing.stop ~base_path))
 
+(* A whole source row can exceed the removed estimated byte gate. Actual
+   singleton refusal must park without losing the source or retrying forever. *)
+let test_large_singleton_refusal_preserves_pending_until_wake () =
+  with_base (fun base_path _clock ->
+    let claim = "Complete long observation: " ^ String.make 120_000 'x' in
+    commit base_path claim;
+    let refused = ref true and attempts = ref 0 in
+    let execute ~rendered_prompt:_ ~selected ~ledger:_ =
+      incr attempts;
+      Alcotest.(check (list string)) "the source row is never truncated" [claim]
+        (List.map (fun (fact : Ledger.pending_fact) -> fact.claim) selected);
+      if !refused then Error (Worker.Input_too_large "fixture singleton capacity refusal")
+      else Ok (answer selected, "test.slot") in
+    Eio.Switch.run (fun sw ->
+      Worker.For_testing.start ~summarize:fixture_summarize ~sw ~base_path ~execute;
+      await_idle ~base_path;
+      Alcotest.(check int) "singleton refusal does not retry or split empty input" 1 !attempts;
+      Alcotest.(check int) "refusal cannot classify the pending row" 0
+        (List.length (Ledger.dispositions (Ledger.load ~base_path |> require)));
+      refused := false;
+      (match Worker.request ~base_path with
+       | Worker.Queued -> ()
+       | Worker.No_owner | Worker.Unavailable _ -> Alcotest.fail "retry wake was not admitted");
+      await_idle ~base_path;
+      Alcotest.(check int) "explicit wake retries the same pending row once" 2 !attempts;
+      Alcotest.(check int) "successful retry classifies the retained row" 1
+        (List.length (Ledger.dispositions (Ledger.load ~base_path |> require)));
+      Worker.For_testing.stop ~base_path))
+
 let accept_registry result =
   result |> Result.map_error Registry.publication_error_to_string |> require
 
@@ -1114,6 +1143,8 @@ let () = Alcotest.run "workspace curator lane"
         test_invalid_model_answer_is_not_saved
     ; Alcotest.test_case "missing Keeper directory preserves ledger" `Quick
         test_missing_keeper_directory_preserves_existing_ledger
+    ; Alcotest.test_case "large singleton refusal parks and retains its source" `Quick
+        test_large_singleton_refusal_preserves_pending_until_wake
     ; Alcotest.test_case "initial inventory drains after provider input refusal" `Quick
         (fun () -> test_initial_inventory_drains_after_provider_size_refusal Input_refusal)
     ; Alcotest.test_case "initial inventory drains after provider output refusal" `Quick

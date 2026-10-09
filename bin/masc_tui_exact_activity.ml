@@ -53,6 +53,9 @@ let apply desired lane (document : document) =
   else Ok (Toml_line_editor.edit_table_bool document.source_text ~path:(table lane)
     ~key:"enabled" ~value:desired)
 
+let suspend_read t = match t.phase with
+  | Reading _ -> {t with phase=Idle}
+  | Idle | Writing _ -> t
 let suspend t = {t with phase=Idle;current=None;message=Some
   (match t.phase with Writing _ -> "Save result unconfirmed after workspace change. Read current before retrying."
    | Idle | Reading _ -> "Workspace reading withdrawn; activity draft retained.")}

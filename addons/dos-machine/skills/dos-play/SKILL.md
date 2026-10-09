@@ -1,6 +1,6 @@
 ---
 name: dos-play
-description: Play the shared DOS machine with other Keepers — who holds the controller and how to pass it in a hotseat game, reading VGA screens through the returned PNG image, when a call has really settled, and where a game's own saves live.
+description: Play the shared DOS machine with other Keepers — controller handoff, reading VGA screens through PNG images, choosing explicit input execution, the limits of settling observations, and where a game's own saves live.
 ---
 
 # DOS play
@@ -38,21 +38,27 @@ what it says, and `frame_nonblack` only tells that the picture changed.
 
 ## Pressing and waiting
 
-`masc_dos_press` puts each key into the BIOS ring and runs until the machine
-is ready again. `settled: true` means the program asked for a key and the
-screen stopped changing — your turn to read and decide. `settled: false`
-with the budget spent means the program is still busy (an animation, an AI
-turn): call `masc_dos_step` again rather than pressing more keys. A key call
-proves delivery, not that the game accepted the choice: read the screen.
-Menus often want the number and then `enter`.
+By default `masc_dos_press` and `masc_dos_type` advance after each key until an
+empty keyboard poll overlaps unchanged screen memory between samples.
+`settled: true` reports that observation. A game can still be in a timed
+transition or repaint; this is not proof that its final prompt is ready.
+`waiting_for_key` also records an empty-ring observation, not guest acceptance.
 
-Send one decision per call — a menu number and `enter` — and read the
-picture before the next. Do not chain keys across a screen change: while a
-game fades or loads it often shows a still screen and polls for a "skip"
-key, which reads as settled, and the next key you queued is eaten by that
-wait instead of reaching the next prompt. A sequence stops by itself at a key
-that leaves the program busy; `keys_pressed` below the number you sent says
-where, and the rest never reached the machine.
+For one input followed by an explicit run, pass `until_ready: false` with the
+instruction allowance `steps`. Only the first key or character enters the BIOS
+ring; execution continues for `steps` unless the program exits. The response
+preserves the resulting observation, `steps_run` and `keys_pressed`, and always
+reports `settled: false`. That false value does not itself mean the game is busy.
+Read `masc_dos_screen` for the PNG before choosing another input. If the visible
+transition still needs time, use `masc_dos_step` with `until_ready: false` without
+repeating the key.
+
+The default remains `until_ready: true`. Its batch continuation uses the same
+limited settling observation, so do not chain keys across an unobserved screen
+change. `keys_pressed` is the delivered prefix length; the remaining suffix
+never entered the ring or ledger. Resume only the suffix you still intend to
+send after reading the screen. A delivered key may be ignored or consumed by a
+skip check rather than the intended menu.
 
 ## Saves
 

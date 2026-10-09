@@ -889,10 +889,9 @@ let handle_screen ~tool_name ~start_time ~base_path _args =
       (Ok observation)
 ;;
 
-(* The whole per-call ceiling: a call that settles stops early, so a large
-   default costs a quick program nothing, while a game whose screen change
-   takes a few million instructions (삼국지3's transitions take 3-4 million)
-   settles in one call instead of coming back busy. *)
+(* The existing per-call resource ceiling. Settling observations may stop
+   earlier; an explicit [until_ready=false] call runs this allowance without
+   treating an empty keyboard poll as a finished game transition. *)
 let default_steps = Dos_lane.max_steps_per_call
 
 let handle_step ~tool_name ~start_time ~base_path ~who args =
@@ -909,9 +908,10 @@ let handle_press ~tool_name ~start_time ~base_path ~who args =
     (off_domain @@ fun () ->
       let keys = get_string_list args "keys" in
       let steps = get_int args "steps" default_steps in
+      let until_ready = get_bool args "until_ready" true in
       match get_string_opt args "expected_program" with
-      | None -> Dos_lane.press ~who ~keys ~steps
-      | Some saves_name -> Dos_lane.press_into ~saves_name ~who ~keys ~steps)
+      | None -> Dos_lane.press ~who ~keys ~steps ~until_ready
+      | Some saves_name -> Dos_lane.press_into ~saves_name ~who ~keys ~steps ~until_ready)
 
 ;;
 
@@ -921,7 +921,7 @@ let handle_press ~tool_name ~start_time ~base_path ~who args =
 let press_into ~tool_name ~start_time ~base_path ~who ~saves_name ~keys =
   after_announcing @@
   of_lane_run ~base_path ~tool_name ~start_time
-    (off_domain @@ fun () -> Dos_lane.press_into ~saves_name ~who ~keys ~steps:default_steps)
+    (off_domain @@ fun () -> Dos_lane.press_into ~saves_name ~who ~keys ~steps:default_steps ~until_ready:true)
 ;;
 
 let handle_click ~tool_name ~start_time ~base_path ~who args =
@@ -938,7 +938,8 @@ let handle_type ~tool_name ~start_time ~base_path ~who args =
   after_announcing @@
   of_lane_run ~base_path ~tool_name ~start_time
     (off_domain @@ fun () -> Dos_lane.type_text ~who ~text:(get_string args "text" "")
-       ~steps:(get_int args "steps" default_steps))
+       ~steps:(get_int args "steps" default_steps)
+       ~until_ready:(get_bool args "until_ready" true))
 ;;
 
 (* Addresses arrive as hex strings ("b8000", "0xB8000") because that is how

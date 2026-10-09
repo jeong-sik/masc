@@ -10,6 +10,38 @@ of the game. Apply a step only when the screen shows the prompt it names, and
 read the screen (returned PNG image) after every decision. The general DOS lane
 rules — controller, passing, saves — are in the `dos-play` Skill.
 
+## Timed transitions and explicit input execution
+
+A controlled battle replay on worker source `1632107405` returned
+`settled: true` after one Space and 350,000 instructions, with two empty keyboard
+polls, while the command menu was absent. With no further key, running another
+4,000,000 instructions displayed “유비님, 명령을(1–9)?”. A control restored the
+same checkpoint and ran 350,000 plus 4,000,000 instructions without any key;
+the menu appeared there too. This demonstrates that an ordinary timed transition
+can outlast the settling observation. It does not establish that Space caused
+the transition or that every transition needs that instruction count.
+
+When a visible prompt calls for one key and the default call returns too early:
+
+1. Send only that key with an explicit run, for example
+   `masc_dos_press {"keys":["space"],"until_ready":false,"steps":4000000}`.
+   Choose the key from the current prompt; this example does not authorize Space
+   on an unknown screen. `masc_dos_type` supports the same mode but sends only
+   its first character.
+2. Read `masc_dos_screen` and inspect its PNG. This mode reports `settled: false`
+   regardless of which screen it reaches. It guarantees the requested run
+   allowance unless the program exits, not a final prompt.
+3. If the transition remains visible, advance with `masc_dos_step` and
+   `until_ready: false`, then inspect again. Do not repeat an already delivered
+   key just because the picture was unchanged.
+
+The default batch mode is unchanged and still uses the settling observation
+between keys. `keys_pressed` identifies the delivered prefix; in explicit-run
+mode every later key or character is unsent. A still “어느 부대입니까?” selection
+screen after a digit or time advance can also mean that the selection needs a
+different input. Screen identity or elapsed instructions alone do not prove
+that the game accepted a command.
+
 ## Boot
 
 `masc_dos_load` with `program: samguk3`, `boot: KOEI.COM`. KOEI.COM runs the
@@ -22,7 +54,8 @@ A white box: `CODE:` / `INPUT CODE [孫李呂]`, three red hanja. The code for
 `[孫李呂]` is `10183`: `masc_dos_type` `10183`, then `enter`.
 
 Type the code only once the box is on the screen. After the key at the KOEI
-logo the screen can settle black for a moment; `masc_dos_step` until the box
+logo the screen can report settled while black; run `masc_dos_step` with
+`until_ready: false` and inspect the PNG until the box
 shows. Digits typed into that black screen move the question: in one run the
 box then asked `[馬李袁]`, the typed code was wrong, and the loader printed
 `MAIN.EXE : fatal error occurred.` and exited. If the box shows other hanja,

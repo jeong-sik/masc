@@ -3,7 +3,7 @@
    The machine needs no image from outside: the tests assemble a COM program
    of their own, so CI carries no game. What they pin: the no-machine
    refusal, the inventory listing, that a loaded program's screen text comes
-   back readable, that waiting_for_key marks the turn, that a key reaches the
+   back readable, that empty keyboard polling is observed, that a key reaches the
    guest and lands in the ledger under the caller's name, that a key name the
    machine has no key for is refused before anything is pressed, the per-call
    step cap, memory reads, and the read-only classification. *)
@@ -1412,6 +1412,69 @@ let test_every_tool_is_declared () =
               mov dl,al / mov ah,2 / int 21h / jmp wait *)
 let echo_com = "\xb4\x00\xcd\x16\x09\xc0\x74\xf8\x88\xc2\xb4\x02\xcd\x21\xeb\xf0"
 
+(* Disable IRQ delivery, wait for one key, poll an empty keyboard 65535 times
+   without changing the screen, print N, then echo subsequent input. CLI
+   makes the guest LOOP's instruction count independent of timer interrupts.
+   Early settling can return before N; an explicit run allowance must advance
+   through that same observation. *)
+let delayed_prompt_com =
+  "\xfa\xb4\x00\xcd\x16\x09\xc0\x74\xf8\xb9\xff\xff\
+   \xb4\x01\xcd\x16\xe2\xfa\xb2\x4e\xb4\x02\xcd\x21" ^ echo_com
+
+let test_attached_input_can_run_past_a_settling_observation () =
+  with_attached_workspace (fun base_path ->
+    let who = "input-reader" in
+    with_holder ~base_path Running who (fun () ->
+      install_program ~base_path "delayed.com" delayed_prompt_com;
+      let call name fields =
+        let execution = keeper_call ~base_path who name (`Assoc fields) in
+        match execution.disposition, execution.data with
+        | Tool_result.Completed (), Some wire ->
+            (match member "structuredContent" wire with
+             | Some data -> data
+             | None -> fail "attached worker omitted structured observation")
+        | _ -> fail execution.raw_output
+      in
+      let number key data = Yojson.Safe.Util.(data |> member key |> to_int) in
+      let screen data = Yojson.Safe.Util.(data |> member "screen_text" |> to_string) in
+      let load () = call "masc_dos_load" ["program", `String "delayed.com"] in
+      ignore (load ());
+      let ordinary = call "masc_dos_press" ["keys", `List [`String "a"]] in
+      check bool "default keeps the existing settling observation" true
+        (member "settled" ordinary = Some (`Bool true));
+      check bool "settling is not the delayed guest prompt" false
+        (contains "N" (screen ordinary));
+      (* The guest's delay takes three instructions per LOOP iteration.
+         Four per iteration leaves room to print and return to the echo loop. *)
+      let steps = 4 * 65535 in
+      List.iter (fun (name, arguments, activity) ->
+        let before = load () in
+        let result = call name (("until_ready", `Bool false) :: ("steps", `Int steps) :: arguments) in
+        check int "full allowance actually executes" steps (number "steps_run" result);
+        check int "absolute instruction count matches the receipt" steps
+          (number "steps" result - number "steps" before);
+        check bool "full allowance does not report readiness" true
+          (member "settled" result = Some (`Bool false));
+        check bool "empty polling did not stop execution" true (number "input_requests" result > 0);
+        check bool "the delayed guest output is now observed" true (contains "N" (screen result));
+        check int "only the first key was injected" 1 (number "keys_pressed" result);
+        check (list string) "the unsent suffix is absent from the ledger" ["a"]
+          (List.map (fun (entry : Dos_lane.entry) -> entry.key_name) (Dos_lane.ledger ()));
+        (match Dos_lane.recent_activity () with
+         | (entry : Machine_action_feed.entry) :: _ ->
+             check string "activity describes only delivered input" activity entry.action
+         | [] -> fail "input activity was not recorded");
+        check bool "the unsent suffix was not consumed by the guest" false
+          (contains "b" (screen result));
+        let after = call "masc_dos_step" ["steps", `Int 1000; "until_ready", `Bool false] in
+        check bool "the unsent suffix was not left queued in the BIOS ring" false
+          (contains "b" (screen after)))
+        [ "masc_dos_press", ["keys", `List [`String "a"; `String "b"]], "press a"
+        ; "masc_dos_press", ["keys", `List [`String "a"; `String "b"];
+            "expected_program", `String "delayed.com"], "press a"
+        ; "masc_dos_type", ["text", `String "ab"], "type 1 chars" ]))
+;;
+
 let save_as ?(agent = "dos-test") ~base_path slot =
   dispatch ~base_path ~agent "masc_dos_save" [ ("slot", `String slot) ]
 ;;
@@ -1897,6 +1960,8 @@ let () =
         ; test_case "boot inside a directory" `Quick
             test_boot_names_the_program_inside_a_directory
         ; test_case "one ceiling" `Quick test_a_sequence_spends_one_ceiling_not_one_per_key
+        ; test_case "attached input runs past a settling observation" `Quick
+            test_attached_input_can_run_past_a_settling_observation
         ; test_case "sequence length" `Quick test_a_sequence_has_a_length
         ; test_case "case collision" `Quick test_two_names_that_differ_only_in_case_are_refused
         ; test_case "save outlives machine" `Quick test_a_save_outlives_its_machine

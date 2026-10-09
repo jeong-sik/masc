@@ -2,10 +2,11 @@ name = "masc_dos_step"
 description = """
 Let the DOS machine run with no key pressed.
 
-Time is 8086 instructions. Returns when the machine is ready for input: the \
-program asked for a key AND the screen stopped changing (asking alone comes \
-mid-repaint). until_ready=false spends the whole budget, for a program that \
-is computing. Returns settled, steps_run and input_requests."""
+Time is 8086 instructions. By default, stops when an empty keyboard poll \
+overlaps unchanged screen memory between samples. This can happen during a \
+game transition; settled does not prove a final prompt. until_ready=false \
+runs the instruction budget unless the program exits and always reports \
+settled=false. Returns settled, steps_run and input_requests."""
 additional_properties = false
 
 defer_loading = true
@@ -21,5 +22,5 @@ default = 4000000
 [[params]]
 name = "until_ready"
 type = "boolean"
-description = "Stop when ready for input, as described above. Default true."
+description = "Stop at the empty-poll/unchanged-screen observation, as described above. Default true."
 default = true

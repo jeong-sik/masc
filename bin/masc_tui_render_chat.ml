@@ -2900,11 +2900,16 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
 
 let search_reply_source (message : msg_entry) =
   match message.me_role, message.me_turn_phase with
-  | Message_keeper, Turn_output ->
-      Some (Masc_tui_keeper_chat_log.Operation message.me_request_id)
-  | Message_autonomous, Turn_output ->
-      Option.map (fun turn_ref -> Masc_tui_keeper_chat_log.Autonomous_turn turn_ref)
-        (Ids.Turn_ref.of_string message.me_request_id)
+  | (Message_keeper | Message_autonomous), Turn_output ->
+      (match message.me_execution_source with
+       | Some source -> Some source
+       | None ->
+           (match message.me_role with
+            | Message_keeper -> Some (Masc_tui_keeper_chat_log.Operation message.me_request_id)
+            | Message_autonomous ->
+                Option.map (fun turn_ref -> Masc_tui_keeper_chat_log.Autonomous_turn turn_ref)
+                  (Ids.Turn_ref.of_string message.me_request_id)
+            | _ -> None))
   | (Message_user _ | Message_status | Message_local | Message_error
     | Message_tool | Message_skill _ | Message_thinking | Message_memory), _
   | (Message_keeper | Message_autonomous), (Turn_input | Turn_progress | Turn_tool) -> None
@@ -3041,6 +3046,17 @@ let scroll_anchor_index projection =
         | Some anchor when not (Hashtbl.mem transient_indices anchor) ->
             Hashtbl.add transient_indices anchor (offset + at)
         | Some _ | None -> ()) projection.transient_anchors;
+      (* A pending input is promoted into the durable user row by Run_started.
+         The request identity continues to name that same speech position. *)
+      List.iteri (fun at (tag, _) -> match tag with
+        | Tagged_row row ->
+            (match row.me_role, row.me_turn_phase with
+             | Message_user _, Turn_input when row.me_request_id <> "" ->
+                 let anchor = Scroll_pending row.me_request_id in
+                 if not (Hashtbl.mem transient_indices anchor) then
+                   Hashtbl.add transient_indices anchor at
+             | _ -> ())
+        | Tagged_block _ -> ()) projection.tagged_entries;
       let anchors = {indexed_anchors; newest_anchors; transient_indices} in
       scroll_anchor_index_memo := Some (projection.layout_entries, anchors);
       anchors

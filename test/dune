@@ -1923,6 +1923,9 @@
   ; test_goal_store and test_goal_tools freeze the creation clock
   ptime
   eio.mock
+  ; test_server_startup_takeover plants v2 lease files whose name is the
+  ; digest of the directory's own (st_dev, st_ino) identity.
+  digestif
   masc.tool_metrics_store)
  (deps ../bin/main_eio.exe))
 

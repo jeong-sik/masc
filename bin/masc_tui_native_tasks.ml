@@ -16,11 +16,15 @@ type task =
   ; last_tool_name : string option; skip_transcript : bool option; ambient : bool option
   ; is_backgrounded : bool option; end_time : int option; total_paused_ms : int option
   ; reason : Task.reason option; boundary : Task.boundary }
+type read_mode = Audit | Poll
+type inventory =
+  { receivers : (Read.receiver * (Read.cursor, Read.error_code) result) list
+  ; health : Read.health; cleanup_failures : string list }
 type store =
   { receiver : Read.receiver; store_id : string; cursor : Read.cursor option; tasks : task list
-  ; error : error option; health : Read.health; cleanup : string list }
+  ; error : error option; attempted : Read.cursor option; health : Read.health; cleanup : string list }
 type t =
-  { keeper_name : string option; inventory : Read.receivers option; stores : store list; error : error option }
+  { keeper_name : string option; inventory : inventory option; stores : store list; error : error option }
 let empty = {keeper_name=None;inventory=None;stores=[];error=None}
 let failed previous error = {previous with error=Some error}
 let tasks state = List.concat_map (fun (store:store) -> store.tasks) state.stores
@@ -30,10 +34,10 @@ let errors state =
       Option.map (fun error -> Receiver_read (store.receiver,error)) store.error) state.stores
   @ (match state.inventory with
      | None -> []
-     | Some inventory -> List.filter_map (fun (entry:Read.entry) ->
-         match entry.storage with
-         | Read.Audited _ -> None
-         | Read.Failed code -> Some (Persistence (entry.receiver,code))) inventory.receivers)
+     | Some inventory -> List.filter_map (fun (receiver,storage) ->
+         match storage with
+         | Ok _ -> None
+         | Error code -> Some (Persistence (receiver,code))) inventory.receivers)
 
 let code_text = function
   | Read.Store_missing -> "store missing"
@@ -73,16 +77,16 @@ let rec error_diagnostics = function
 let diagnostics state =
   let inventory = match state.inventory with
     | None -> []
-    | Some inventory -> health_diagnostics inventory.health
+    | Some inventory -> "historical integrity checked on record reads; change hints unchecked" :: health_diagnostics inventory.health
         @ List.map (fun operation -> "cleanup failed: " ^ operation) inventory.cleanup_failures in
   let retained = match state.inventory with
     | None -> []
     | Some inventory ->
         List.filter_map (fun (store:store) ->
-          if List.exists (fun (entry:Read.entry) -> entry.receiver=store.receiver
-            && match entry.storage with
-               | Read.Audited cursor -> cursor.store_id=store.store_id
-               | Read.Failed _ -> true) inventory.receivers
+          if List.exists (fun (receiver,storage) -> receiver=store.receiver
+            && match storage with
+               | Ok cursor -> cursor.Read.store_id=store.store_id
+               | Error _ -> true) inventory.receivers
           then None else Some "retained receiver history absent from latest inventory") state.stores in
   List.sort_uniq String.compare (inventory @ retained @
     List.concat_map error_diagnostics (errors state) @
@@ -143,28 +147,42 @@ let records_path keeper_name (receiver:Read.receiver) after =
         ["store_id",cursor.store_id;"after_sequence",string_of_int cursor.after_sequence]) in
   Uri.with_query' (Uri.of_string (prefix keeper_name ^ "records")) query |> Uri.to_string
 
-let read ~keeper_name ~fetch ~previous =
+let read ~mode ~keeper_name ~fetch ~previous =
   let* ()=match previous.keeper_name with
     | None -> Ok ()
     | Some owner when owner=keeper_name -> Ok ()
     | Some _ -> Error (Invalid_response Read.Scope_mismatch) in
-  let* response=decode ~fetch (prefix keeper_name ^ "receivers") in
-  let* inventory=Read.receivers_of_response ~keeper_name response
-    |> Result.map_error (fun error -> Invalid_response error) in
-  let stores = List.fold_left (fun stores (entry:Read.entry) ->
-    match entry.storage with
-    | Read.Failed _ -> stores
-    | Read.Audited advertised ->
-        let same (store:store) = store.receiver=entry.receiver
+  let* inventory = match mode with
+    | Audit ->
+        let* response=decode ~fetch (prefix keeper_name ^ "receivers") in
+        let* page=Read.receivers_of_response ~keeper_name response
+          |> Result.map_error (fun error -> Invalid_response error) in
+        Ok {receivers=List.map (fun (entry:Read.entry) -> entry.receiver,
+          match entry.storage with Read.Audited cursor -> Ok cursor | Read.Failed code -> Error code)
+            page.receivers;health=page.health;cleanup_failures=page.cleanup_failures}
+    | Poll ->
+        let* response=decode ~fetch (prefix keeper_name ^ "hints") in
+        let* page=Read.hints_of_response ~keeper_name response
+          |> Result.map_error (fun error -> Invalid_response error) in
+        Ok {receivers=List.map (fun (entry:Read.hint_entry) -> entry.receiver,
+          match entry.hint with Read.Unchecked cursor -> Ok cursor | Read.Hint_failed code -> Error code)
+            page.hints;health=page.health;cleanup_failures=page.cleanup_failures} in
+  let stores = List.fold_left (fun stores (receiver,storage) ->
+    match storage with
+    | Error _ -> stores
+    | Ok advertised ->
+        let same (store:store) = store.receiver=receiver
           && store.store_id=advertised.store_id in
         let old=List.find_opt same stores in
-        (* Discovery audited this complete committed boundary. An unchanged
-           successful cursor needs no suffix HTTP read; failed reads still retry. *)
-        if Option.exists (fun (store:store) ->
-          store.cursor=Some advertised && store.error=None) old then stores else
+        (* Poll hints are change triggers, never fresh historical audit receipts.
+           Retain a failed audit until the hint changes or Audit is requested;
+           otherwise the failure path would restore full-history cadence scans. *)
+        if Option.exists (fun (store:store) -> match mode with
+          | Audit -> store.cursor=Some advertised && store.error=None
+          | Poll -> store.attempted=Some advertised) old then stores else
         let after=Option.bind old (fun (store:store) -> store.cursor) in
-        let request:Read.records_request={scope={keeper_name;receiver=entry.receiver};after} in
-        let page = let* response=decode ~fetch (records_path keeper_name entry.receiver after) in
+        let request:Read.records_request={scope={keeper_name;receiver};after} in
+        let page = let* response=decode ~fetch (records_path keeper_name receiver after) in
           let* page=Read.records_of_response ~request response
             |> Result.map_error (fun error -> Invalid_response error) in
           if page.next_cursor.store_id=advertised.store_id then Ok page
@@ -174,14 +192,14 @@ let read ~keeper_name ~fetch ~previous =
               let tasks=List.fold_left (fun tasks (row:Read.record) ->
                 apply_observation ~store_id:advertised.store_id tasks row.observation)
                 (match old with None -> [] | Some store -> store.tasks) page.records in
-              {receiver=entry.receiver;store_id=advertised.store_id;
-                cursor=Some page.next_cursor;tasks;error=None;
+              {receiver;store_id=advertised.store_id;
+                cursor=Some page.next_cursor;tasks;error=None;attempted=Some advertised;
                 health=page.health;cleanup=page.cleanup_failures}
           | Error error -> (match old with
-              | Some store -> {store with error=Some error}
-              | None -> {receiver=entry.receiver;store_id=advertised.store_id;
+              | Some store -> {store with error=Some error;attempted=Some advertised}
+              | None -> {receiver;store_id=advertised.store_id;
                   cursor=None;tasks=[];
-                  error=Some error;health=inventory.health;cleanup=[]}) in
+                  error=Some error;attempted=Some advertised;health=inventory.health;cleanup=[]}) in
         match old with
         | None -> stores @ [store]
         | Some _ -> List.map (fun old -> if same old then store else old) stores)

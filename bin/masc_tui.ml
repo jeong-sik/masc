@@ -6556,7 +6556,7 @@ let launch_keeper_older_page state ~mailbox ~keeper_name ~before =
            (generation, keeper_name, before, Error "Eio switch is unavailable"))
   end
 
-let launch_keeper_native_tasks_load state ~mailbox ~keeper_name =
+let launch_keeper_native_tasks_load ?(mode=Masc_tui_native_tasks.Poll) state ~mailbox ~keeper_name =
   if state.workspace_identity = Workspace_identity_match
      && keeper_available_for_new_message state keeper_name
      && not (List.mem keeper_name state.msg_native_tasks_inflight) then begin
@@ -6570,7 +6570,7 @@ let launch_keeper_native_tasks_load state ~mailbox ~keeper_name =
     Masc_tui_async_read.launch_with
       ~boundary_error:(fun detail -> Masc_tui_native_tasks.Transport detail)
       ~deliver:(fun result -> enqueue_async mailbox (Keeper_native_tasks_loaded (keeper_name,result)))
-      (fun () -> Masc_tui_native_tasks.read ~keeper_name ~previous
+      (fun () -> Masc_tui_native_tasks.read ~mode ~keeper_name ~previous
         ~fetch:(fun path ->
           let ( let* ) = Result.bind in
           let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
@@ -6582,7 +6582,9 @@ let launch_keeper_native_tasks_load state ~mailbox ~keeper_name =
 let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) state ~mailbox
     ~keeper_name =
   if server_authority_ready state then begin
-  launch_keeper_native_tasks_load state ~mailbox ~keeper_name;
+  launch_keeper_native_tasks_load
+    ~mode:(if force then Masc_tui_native_tasks.Audit else Masc_tui_native_tasks.Poll)
+    state ~mailbox ~keeper_name;
   let identity = state.server_identity in
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in

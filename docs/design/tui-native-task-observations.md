@@ -2,7 +2,10 @@
 
 Keeper chat reads the existing authenticated native-task discovery and records
 endpoints separately from root chat journals. Opening chat and the existing
-refresh cadence request observations for the selected Keeper. Reading older
+refresh cadence polls unchecked change hints for the selected Keeper. Changed
+store incarnations or metadata tails trigger fully audited record reads. A hint
+is never a new historical-integrity receipt. Forced history refresh runs full
+audited discovery; opening an uncached chat obtains records with full audit. Reading older
 chat rows does not stop task reads. Leaving the surface stops new polls;
 returning catches up. Root-turn completion does not clear this state.
 
@@ -20,8 +23,10 @@ not reset a retained cursor. Only a validated successful page advances that
 history. Missing receivers do not erase observations or imply completion.
 Per-receiver failure retains its cursor/tasks while other receivers can advance.
 Discovery/transport failure retains previous state with explicit failure. An
-unchanged audited successful boundary skips redundant records HTTP; failed
-reads retry on the existing cadence.
+unchanged hint retains the prior snapshot without reading full history. Failed
+audits retain their evidence and retry when the hint changes or a forced refresh
+requests an audit. Same-tail external historical tampering is detected by full
+audit, not by change hints. Hint polling does not claim continuous integrity.
 
 The launcher captures workspace authority and identity, checking before and
 after every HTTP read. Mailbox delivery uses `Workspace_scoped`; withdrawal

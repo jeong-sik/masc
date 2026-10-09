@@ -54,7 +54,7 @@ let load previous ~store ~through ~rows ~after =
           (Option.map (fun _ -> [store]) after) (List.assoc_opt "store_id" query);
         Ok (200,Yojson.Safe.to_string (page store through rows))
     | _ -> fail ("unexpected native read path: " ^ path) in
-  match Native.read ~keeper_name:keeper ~fetch ~previous with
+  match Native.read ~mode:Native.Audit ~keeper_name:keeper ~fetch ~previous with
   | Ok state -> state,!record_reads | Error error -> fail (Native.error_text error)
 
 let test_independent_suffix_and_identity () =
@@ -86,7 +86,7 @@ let test_independent_suffix_and_identity () =
 
 let test_failure_keeps_cursor_and_scope () =
   let first,_=load Native.empty ~store:"store" ~through:1 ~rows:[1,registered "one"] ~after:None in
-  (match Native.read ~keeper_name:"beta" ~previous:first
+  (match Native.read ~mode:Native.Audit ~keeper_name:"beta" ~previous:first
       ~fetch:(fun _ -> fail "foreign cache must refuse before HTTP") with
    | Error (Native.Invalid_response Read.Scope_mismatch) -> ()
    | _ -> fail "another Keeper was allowed to reuse this history");
@@ -104,7 +104,7 @@ let test_failure_keeps_cursor_and_scope () =
   let missing_inventory = match inventory "store" 2 with
     | `Assoc fields -> `Assoc (("receivers",`List [])::List.remove_assoc "receivers" fields)
     | _ -> fail "expected inventory" in
-  let absent = Native.read ~keeper_name:keeper ~previous:retried
+  let absent = Native.read ~mode:Native.Audit ~keeper_name:keeper ~previous:retried
     ~fetch:(fun _ -> Ok (200,Yojson.Safe.to_string missing_inventory)) |> Result.get_ok in
   check int "missing receiver is not task completion/deletion" 2 (List.length (Native.tasks absent));
   check bool "missing receiver retains unknown-coverage diagnostic" true (Native.diagnostics absent<>[])
@@ -166,7 +166,45 @@ let test_real_chat_projection_preserves_flags_and_terminal_safety () =
     "worker · paused reported · terminal unobserved · backgrounded"
     (List.nth refreshed.layout_entries 2).body
 
+let test_change_hint_poll () =
+  let state,_=load Native.empty ~store:"store" ~through:1 ~rows:[1,registered "one"] ~after:None in
+  let hints through = match inventory "store" through with
+    | `Assoc fields ->
+        let entries=Yojson.Safe.Util.(List.assoc "receivers" fields |> to_list) in
+        let entries=List.map (function
+          | `Assoc fields ->
+              let storage=List.assoc "storage" fields in
+              let hint=match storage with
+                | `Assoc fields -> `Assoc (("status",`String "unchecked")::List.remove_assoc "status" fields)
+                | _ -> fail "storage object" in
+              `Assoc (("hint",hint)::List.remove_assoc "storage" fields)
+          | _ -> fail "receiver object") entries in
+        `Assoc (["schema",`String "masc.native_tasks.hints.v1";
+          "historical_integrity",`String "unchecked";"hints",`List entries]
+          @ List.filter (fun (name,_) -> name<>"schema" && name<>"receivers") fields)
+    | _ -> fail "inventory object" in
+  let records=ref 0 and through=ref 1 in
+  let fetch path = match Uri.path (Uri.of_string path) with
+    | "/api/v1/keepers/alpha/native-tasks/hints" -> Ok (200,Yojson.Safe.to_string (hints !through))
+    | "/api/v1/keepers/alpha/native-tasks/records" -> incr records; Error "audit unavailable"
+    | _ -> fail "poll requested full audited discovery" in
+  let poll previous = match Native.read ~mode:Native.Poll ~keeper_name:keeper ~fetch ~previous with
+    | Ok value -> value | Error error -> fail (Native.error_text error) in
+  let unchanged=poll state in
+  check int "unchanged hint performs no full read" 0 !records;
+  check bool "unchanged state preserves projection cache" true (unchanged==state);
+  through:=2;
+  let failed=poll unchanged in
+  check int "changed hint audits once" 1 !records;
+  check int "failed audit preserves observations" 1 (List.length (Native.tasks failed));
+  ignore (poll failed);
+  check int "unchanged failed hint avoids repeated full-history audit" 1 !records;
+  through:=3;
+  ignore (poll failed);
+  check int "changed hint allows reconciliation again" 2 !records
+
 let () = run "native task TUI consumer" ["observations",[
-  test_case "suffix, original identity and store incarnation" `Quick test_independent_suffix_and_identity;
+  test_case "change hints avoid idle and failed audit scans" `Quick test_change_hint_poll;
+    test_case "suffix, original identity and store incarnation" `Quick test_independent_suffix_and_identity;
   test_case "failure, cursor preservation and absent receiver" `Quick test_failure_keeps_cursor_and_scope;
   test_case "actual chat projection, flags and terminal safety" `Quick test_real_chat_projection_preserves_flags_and_terminal_safety]]

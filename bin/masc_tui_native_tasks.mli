@@ -29,6 +29,7 @@ type task = private
   ; boundary : Task.boundary
   }
 
+type read_mode = Audit | Poll
 type t
 val empty : t
 val failed : t -> error -> t
@@ -40,7 +41,7 @@ val diagnostics : t -> string list
 (** Coverage and cleanup warnings, never interpreted as task state. *)
 val error_text : error -> string
 
-val read : keeper_name:string ->
+val read : mode:read_mode -> keeper_name:string ->
   fetch:(string -> (int * string, string) result) -> previous:t ->
   (t, error) result
 (** Sequential discovery and per-incarnation suffix reads. Successful pages
@@ -49,3 +50,8 @@ val read : keeper_name:string ->
     discovered store incarnation starts a distinct history from sequence 1.
     Disappearance never deletes retained history. The caller supplies and
     checks workspace authority before each HTTP read and at mailbox delivery. *)
+
+(** [Poll] reads unchecked metadata hints and fully audits changed stores only.
+    Same-tail historical tampering is not detected by hints. A failed audited read
+    is retained without repeating full scans until the hint changes or [Audit].
+    [Audit] always runs fully audited discovery and retries failed record reads. *)

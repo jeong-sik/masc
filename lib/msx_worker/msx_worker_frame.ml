@@ -146,6 +146,7 @@ let step ~arguments =
           Tool_result.make_ok ~tool_name ~start_time
             ~metadata:Msx_machine_tools.moved_the_machine
             ~data:(tick_frame_json pixel_response frame entries mark) ()
-      | Error Msx_lane.No_machine ->
-          Tool_result.make_ok ~tool_name ~start_time ~data:(`Assoc ["loaded", `Bool false]) ()
+      (* No machine is the same pre-effect refusal the sibling step path
+         answers: requesting a frame must not turn a failed advance into a
+         successful one. *)
       | Error error -> Msx_machine_tools.of_lane ~tool_name ~start_time (Error error)

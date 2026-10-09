@@ -30,6 +30,7 @@ import { formatTimeHms } from '../../lib/format-time'
 import { formatCost, formatMsCompact } from '../../lib/format-number'
 import { isSubmitEnter } from '../../lib/keyboard'
 import { isFailedDelivery } from '../../lib/keeper-delivery'
+import { parseTextToChatBlocks } from '../../lib/chat-blocks'
 import { createPortal, memo } from 'preact/compat'
 import { readKeeperDraft, writeKeeperDraft } from '../../keeper-chat-store'
 import type { ChatBlock, ChatBroadcastBlock, ChatCalloutBlock, ChatChartBlock, ChatIssueBlock, ChatLinkBlock, ChatMermaidBlock, ChatShellBlock, ChatSuggestionsBlock, ChatTableBlock, ChatTraceStep, ChatTraceToolStep, ChatVoiceBlock, KeeperUserInputBlock } from '../../types'
@@ -2191,6 +2192,42 @@ const blockBodyWeight = (blocks: ChatBlock[]): number =>
     .filter(block => block.t !== 'thinking')
     .reduce((total, block) => total + JSON.stringify(block).length, 0)
 
+// Key-order-independent block shape for equality: REST rows deserialize with
+// the writer's key order while the local parser builds its own.
+const canonicalBlock = (value: unknown): string => {
+  if (Array.isArray(value)) return `[${value.map(canonicalBlock).join(',')}]`
+  if (value !== null && typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    return `{${Object.entries(record)
+      .filter(([, v]) => v !== undefined && v !== null)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([k, v]) => `${JSON.stringify(k)}:${canonicalBlock(v)}`)
+      .join(',')}}`
+  }
+  return JSON.stringify(value)
+}
+
+// A failed request's history row can carry blocks the old writer derived from
+// the diagnostic itself: keeper_chat_store parsed the failure text when the
+// row was stored without blocks (kind=transport_failure rows reached that
+// fallback). Re-parsing the diagnostic with the same line-based rules
+// reproduces exactly that projection, so an exact match is the diagnostic
+// again — not producer output — and renders only inside the failure card's
+// detail. Anything a producer actually supplied (media completed before the
+// failure) does not match the re-parse and is retained.
+function completedOutputFromFailureHistory(
+  blocks: ChatBlock[] | undefined,
+  diagnostic: string | undefined,
+): ChatBlock[] {
+  const persisted = blocks ?? []
+  if (persisted.length === 0 || !diagnostic?.trim()) return persisted
+  const derived = parseTextToChatBlocks(diagnostic)
+  const isLegacyDiagnosticProjection =
+    derived.length === persisted.length
+    && derived.every((candidate, index) => canonicalBlock(candidate) === canonicalBlock(persisted[index]))
+  return isLegacyDiagnosticProjection ? [] : persisted
+}
+
 function ChatBlocks({ blocks, fallbackText }: { blocks: ChatBlock[]; fallbackText?: string }) {
   return html`
     <div class="flex flex-col gap-3" data-chat-blocks>
@@ -2796,8 +2833,13 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
     ? [...persistedThinkingBlocks, ...parsedBlocks]
     : (entry.blocks ?? [])
   // Failed settlement can follow completed output. Retain the persisted
-  // blocks, while never reparsing the diagnostic as Keeper prose.
-  const effectiveBlocks = isFailureMessage ? (entry.blocks ?? []) : renderedServerBlocks
+  // blocks, while never reparsing the diagnostic as Keeper prose — except
+  // the persisted projection an old writer derived from the diagnostic
+  // itself, which completedOutputFromFailureHistory separates below.
+  const diagnosticText = entry.error?.trim() ? entry.error : messageText
+  const effectiveBlocks = isFailureMessage
+    ? completedOutputFromFailureHistory(entry.blocks, diagnosticText)
+    : renderedServerBlocks
   const hasEffectiveBlocks = effectiveBlocks.length > 0
   const hasNonThinkingBlocks = effectiveBlocks.some(block => block.t !== 'thinking')
   const collapseThreshold = hasNonThinkingBlocks ? 2400 : 1200

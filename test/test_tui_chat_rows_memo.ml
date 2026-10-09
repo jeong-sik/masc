@@ -29,6 +29,7 @@ let entry_at ?(keeper = "alpha") ?(request_id = "") at : Tui_types.msg_entry =
   ; me_skill_block = []
   ; me_timestamp = ""
   ; me_request_id = request_id
+  ; me_execution_source = Some (Masc_tui_keeper_chat_log.Operation request_id)
   ; me_at = at
   }
 ;;

@@ -71,3 +71,8 @@ val translate :
   translated_event
 (** [base_dir] is the workspace base path used to persist RFC-0301 model-generated
     media (via {!Keeper_chat_media_store}) when a media block completes. *)
+
+val terminal_text_scope : state -> int option
+(** The accumulator-owned stream scope whose terminal provider message
+    actually emitted text. Missing text or a newer uncompleted scope leaves
+    this unknown; provider message IDs are not used as round identities. *)

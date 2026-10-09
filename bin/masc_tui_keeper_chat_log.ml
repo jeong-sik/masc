@@ -198,10 +198,10 @@ let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
   | E.External_effect_completed _ -> Some Live.External_effect_completed
   | E.Run_finished _ -> Some Live.Run_finished
   | E.Event_error { message } -> Some (Live.Run_failed { message })
-  | E.Reply_details { reply; turn_outcome; turn_ref } ->
+  | E.Reply_details { reply; turn_outcome; turn_ref; terminal_stream_scope } ->
     Some
       (Live.Reply_details
-         { reply; turn_outcome; turn_ref = Ids.Turn_ref.to_string turn_ref })
+         { reply; turn_outcome; turn_ref = Ids.Turn_ref.to_string turn_ref; terminal_stream_scope })
   | E.Continuation_checkpoint _ -> Some Live.Checkpoint
   | E.Agent_core_stream_connected -> None
   | E.Agent_core_runtime_attempt_started { runtime_id; attempt_index } ->

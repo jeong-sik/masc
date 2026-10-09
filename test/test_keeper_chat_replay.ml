@@ -23,7 +23,7 @@ let events : E.keeper_chat_event list =
   ; E.Text_delta {text="beta "; stream_scope=None}
   ; E.Text_delta {text="gamma"; stream_scope=None}
   ; E.Reply_details
-      { reply = "alpha beta gamma"
+      { terminal_stream_scope = None; reply = "alpha beta gamma"
       ; turn_outcome = Keeper_turn_outcome.Visible_reply
       ; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-replay" ~absolute_turn:1
       }

@@ -361,7 +361,7 @@ let test_runtime_attempt_restarts_the_per_attempt_totals () =
 
 let reply_details ?(reply = "Let me look.") () =
   Live.Reply_details
-    { reply; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply; turn_ref = "trace-1#3" }
+    { terminal_stream_scope = None; reply; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply; turn_ref = "trace-1#3" }
 ;;
 
 (* The reply is recorded, not drawn: the server streams the reply text as
@@ -411,7 +411,7 @@ let drawn t = List.map drawn_to_string (Transcript.drawn t)
 
 let control_reply outcome =
   Live.Reply_details
-    { reply = "recorded but not chunked"; turn_outcome = outcome; turn_ref = "trace-1#3" }
+    { terminal_stream_scope = None; reply = "recorded but not chunked"; turn_outcome = outcome; turn_ref = "trace-1#3" }
 ;;
 
 (* The record stands where the last stretch streamed, one row, however the
@@ -535,6 +535,51 @@ let test_drawn_preserves_text_when_a_skill_round_was_unobserved () =
   feed t [ reply_details ~reply:"Done." () ];
   check (list string) "the reply follows the unseen read without replacing progress"
     [ "text:Let me check."; "skill:source-review"; "reply:Done." ] (drawn t)
+;;
+
+let test_missing_skill_boundary_reconciles_the_identified_terminal_round () =
+  List.iter (fun terminal_text ->
+    let deltas =
+      [ Live.Run_started
+      ; Live.Stream_model_started {model="model"; stream_scope=Some 0; message_id=None; usage=None}
+      ; Live.Text {text="Let me check."; stream_scope=Some 0}
+      ; Live.Stream_model_started {model="model"; stream_scope=Some 1; message_id=None; usage=None}
+      ] @ (if terminal_text then [Live.Text {text="Done."; stream_scope=Some 1}] else []) @
+      [ Live.Reply_details {reply="Done.";turn_outcome=Masc.Keeper_turn_outcome.Visible_reply;
+          turn_ref="trace-1#3";terminal_stream_scope=Some 1} ] in
+    let t = fresh () in
+    feed t deltas;
+    Transcript.note_skill_activity t (missing_skill_activity ());
+    check (list string) "known final scope replaces only its text; absent final text preserves progress"
+      ["text:Let me check.";"skill:source-review";"reply:Done."] (drawn t)) [true;false]
+;;
+
+let test_terminal_scope_survives_a_missing_start () =
+  List.iter (fun repeated_start ->
+    let t = fresh () in
+    feed t [Live.Run_started;
+      Live.Text {text="Let me check."; stream_scope=Some 0};
+      Live.Text {text="Do"; stream_scope=Some 1}];
+    let text_origins () = Transcript.drawn t |> List.filter_map
+      (fun (item : Transcript.drawn_item) -> match item.origin, item.drawn with
+       | Transcript.Text_stretch id, (Transcript.Drawn_text _ | Transcript.Drawn_reply _) -> Some id
+       | _ -> None) in
+    let before = text_origins () in
+    check int "distinct scoped text has distinct stable stretches" 2 (List.length before);
+    check bool "each scoped stretch keeps its own identity" true
+      (List.sort_uniq Int.compare before = before);
+    if repeated_start then
+      feed t [Live.Stream_model_started {model="model"; stream_scope=Some 1; message_id=None; usage=None}];
+    feed t [Live.Text {text="ne"; stream_scope=Some 1};
+      Live.Reply_details {reply="Done.";
+        turn_outcome=Masc.Keeper_turn_outcome.Visible_reply;
+        turn_ref="trace-1#3"; terminal_stream_scope=Some 1}];
+    Transcript.note_skill_activity t (missing_skill_activity ());
+    check (list int) "late start and canonical reply retain both source origins"
+      before (text_origins ());
+    check (list string) "text identity reconciles the terminal reply without its first start"
+      ["text:Let me check."; "skill:source-review"; "reply:Done."] (drawn t))
+    [false; true]
 ;;
 
 let test_final_response_boundary_survives_a_missing_skill_call () =
@@ -1718,7 +1763,7 @@ let test_a_failed_trigger_is_named_on_the_compact_row () =
 let test_checkpoint_wait_keeps_the_request_live () =
   let t = fresh () in
   feed t [Live.Run_started; tool_started ~block_index:0 "before" "read_file"; tool_ended ~block_index:0 "before";
-    tool_result ~block_index:0 "before" "exec-before"; Live.Reply_details {reply="";
+    tool_result ~block_index:0 "before" "exec-before"; Live.Reply_details {terminal_stream_scope = None; reply="";
     turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint; turn_ref="trace-1#3"}; Live.Run_finished];
   check bool "checkpoint waits for continuation" true (Transcript.awaiting_continuation t);
   check (option (float 0.)) "checkpoint does not settle request" None (Transcript.settled_at t);
@@ -1790,7 +1835,7 @@ let test_event_times_survive_log_replay_and_continuation () =
   let put at delta = ignore (Log.add ~at log ~seq:None delta) in
   put 101. Live.Run_started;
   put 110. (Live.Text {text="First segment."; stream_scope=None});
-  put 115. (Live.Reply_details {reply="";
+  put 115. (Live.Reply_details {terminal_stream_scope = None; reply="";
     turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint; turn_ref="trace#1"});
   put 116. Live.Run_finished;
   let checkpoint = Transcript.of_log ~now:999. log |> Transcript.drawn in
@@ -1800,7 +1845,7 @@ let test_event_times_survive_log_replay_and_continuation () =
   put 141. (Live.Runtime_attempt_started {runtime_id=Some "codex"; attempt_index=Some 0});
   (* This continuation supplies a canonical answer without a text delta.
      It cannot replace the first segment's text. *)
-  put 150. (Live.Reply_details {reply="Second segment.";
+  put 150. (Live.Reply_details {terminal_stream_scope = None; reply="Second segment.";
     turn_outcome=Masc.Keeper_turn_outcome.Visible_reply; turn_ref="trace#2"});
   put 151. Live.Run_finished;
   let replayed = Transcript.of_log ~now:999. log |> Transcript.drawn in
@@ -1847,7 +1892,7 @@ let test_response_boundaries_preserve_origins () =
     "retry", [Live.Text {text="COMMENTARY"; stream_scope=None};
       Live.Runtime_attempt_started {runtime_id=Some "retry";attempt_index=Some 1}];
     "continuation", [Live.Text {text="COMMENTARY"; stream_scope=None};
-      Live.Reply_details {reply="";turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint;
+      Live.Reply_details {terminal_stream_scope = None; reply="";turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint;
         turn_ref="trace#1"}; Live.Run_finished; Live.Run_started]
   ] in
   List.iter (fun (label,boundary) ->
@@ -1894,7 +1939,7 @@ let test_usage_resets_only_at_response_boundaries () =
   feed t [Live.Runtime_attempt_started {runtime_id=Some "retry";attempt_index=Some 1}];
   check (option string) "retry clears prior message counters" None (tokens ());
   seed ();
-  feed t [Live.Reply_details {reply="";turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint;
+  feed t [Live.Reply_details {terminal_stream_scope = None; reply="";turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint;
     turn_ref="trace#1"};Live.Run_finished;Live.Run_started];
   check (option string) "continuation does not inherit old counters" None (tokens ());
   check (option string) "continuation does not inherit old stop reason" None
@@ -2030,6 +2075,10 @@ let () =
             test_drawn_keeps_pre_tool_progress_when_nothing_streamed_after
         ; test_case "drawn preserves text around an unobserved skill round" `Quick
             test_drawn_preserves_text_when_a_skill_round_was_unobserved
+        ; test_case "missing skill boundaries retain the identified terminal round" `Quick
+            test_missing_skill_boundary_reconciles_the_identified_terminal_round
+        ; test_case "terminal text scope survives a missing response start" `Quick
+            test_terminal_scope_survives_a_missing_start
         ; test_case "final response boundary survives missing Skill call" `Quick
             test_final_response_boundary_survives_a_missing_skill_call
         ; test_case "missing response start keeps prior progress" `Quick

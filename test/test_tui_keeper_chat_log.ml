@@ -86,7 +86,7 @@ let delta_to_string : Live.delta -> string = function
         queue_length
   | Live.Checkpoint -> "checkpoint"
   | Live.External_effect_completed -> "external_effect_completed"
-  | Live.Reply_details { reply; turn_outcome; turn_ref } ->
+  | Live.Reply_details { reply; turn_outcome; turn_ref; _ } ->
       Printf.sprintf "reply_details(%s,%s,%s)" reply (Outcome.to_label turn_outcome) turn_ref
   | Live.Run_failed { message } -> "run_failed(" ^ message ^ ")"
   | Live.Run_finished -> "run_finished"
@@ -428,7 +428,7 @@ let golden : E.keeper_chat_event list =
   ; E.External_effect_completed
       { target = Masc.Keeper_surface_post.Delivered_to_slack { channel_id = "C1"; thread_ts = None } }
   ; E.Reply_details
-      { reply = "Let me look."
+      { terminal_stream_scope = Some 7; reply = "Let me look."
       ; turn_outcome = Outcome.Visible_reply
       ; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:3
       }
@@ -951,7 +951,7 @@ let test_response_boundaries_and_usage_survive_wire_and_replay () =
       sparse 9;start next_model next_initial;
       ContentBlockDelta {index=2;delta=TextDelta "SUFFIX"};MessageStop];
     let turn_ref = Ids.Turn_ref.make ~trace_id:"trace" ~absolute_turn:1 in
-    publish (E.Reply_details {reply="SUFFIX";turn_outcome=Outcome.Visible_reply;turn_ref});
+    publish (E.Reply_details {terminal_stream_scope = None; reply="SUFFIX";turn_outcome=Outcome.Visible_reply;turn_ref});
     publish (E.Run_finished {run_id="run"});
     check int "each new sealed scope publishes one start, even with a reused or absent id" 2
       (List.length (List.filter (function E.Agent_core_stream_message_start _ -> true | _ -> false) !reversed));
@@ -1013,6 +1013,9 @@ let test_missing_start_text_scope_survives_journal_and_wire () =
          E.Agent_core_stream_message_delta {stream_scope=stopped_scope;
            stop_reason=Some Agent_core.Types.EndTurn; usage=None};
          E.Reply_details {reply="Done"; turn_outcome=Outcome.Visible_reply;
+           (* Exercise recovery from observed text/stop scopes without a
+              separate terminal identity on the durable reply. *)
+           terminal_stream_scope=None;
            turn_ref=Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:3}]
       |> List.mapi (fun seq event ->
         let wire = Journal.keeper_chat_event_to_json event

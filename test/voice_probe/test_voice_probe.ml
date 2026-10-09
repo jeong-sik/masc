@@ -80,6 +80,8 @@ let test_every_kind_says_how_it_transcribes () =
     (transcriber Voice_config.Whisper_cli = By_command);
   Alcotest.(check bool) "say speaks and has no ear" true
     (transcriber Voice_config.Macos_say = Does_not_transcribe);
+  Alcotest.(check bool) "espeak-ng speaks and has no ear either" true
+    (transcriber Voice_config.Espeak_ng = Does_not_transcribe);
   Alcotest.(check bool) "the mcp endpoint carries a tool call, not audio" true
     (transcriber Voice_config.Voice_mcp = Does_not_transcribe)
 

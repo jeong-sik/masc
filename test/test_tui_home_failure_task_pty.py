@@ -383,18 +383,22 @@ def task_cancel_previous_workspace_receipt(executable, *, unconfirmed=False):
                 # this receipt (/health). The accepted A write must not
                 # reload scoped Task history in B.
                 assert state["history_reads"] == history_before_receipt, state
-                assert b"[workspace mismatch]" in h.screen_text(bytes(output)), h.screen_text(bytes(output))
                 assert len(transitions) == 1, transitions
                 if unconfirmed:
+                    # The workspace was never foreign, so the receipt must not
+                    # claim a mismatch; recovery is the next refresh away.
+                    assert b"[workspace mismatch]" not in h.screen_text(bytes(output)), h.screen_text(bytes(output))
                     assert b"previous workspace" not in h.screen_text(bytes(output)), output[-4000:]
                     state["unread"] = False
                     start = len(output)
                     os.write(fd, b"r")
                     assert h.wait_for_fixture_state(process, fd, output,
-                        lambda: state["history_reads"] > before[1], timeout=10), state
+                        lambda: state["history_reads"] > history_before_receipt, timeout=10), state
                     h.wait_for_output(process, fd, output, b"RECOVERED_CANCEL_HISTORY",
                         start=start, timeout=10)
                     assert len(transitions) == 1, "recovery repeated the cancellation POST"
+                else:
+                    assert b"[workspace mismatch]" in h.screen_text(bytes(output)), h.screen_text(bytes(output))
                 os.write(fd, b"q")
             finally:
                 release.set()

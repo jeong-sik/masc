@@ -58,6 +58,17 @@ and changed land 65 → 72. These are results of that campaign, not a fixed yiel
 `0`, Return ends province commands after the game's confirmation; another
 province can follow in the same month.
 
+Diplomacy `6`, Return, then alliance `1`, Return asks for a ruler and envoy.
+Wait for the complete prompt before each choice. In the observed Cao Pi,
+January 220 province-10 campaign, choosing Liu Bei and envoy Cao Pi, then `y`
+and Return at the send-envoy confirmation produced an alliance-success report.
+The subsequent ruler list showed hostility 50 → 30, with gold unchanged at 950.
+The alliance-break list was inspected and canceled with empty Return without
+choosing a target. This proves that negotiation in that state, not guaranteed
+success for other envoys or rulers. Separate digit and Return calls allowed the
+visible field to be checked; shorter sequences during transitions had failed
+to reach the intended selection.
+
 For war, command `3`, Return asks for the target province. Select officers one
 at a time and confirm each with Return; an empty Return finishes the selected
 roster. Read the gold, food and confirmation prompts before answering them.

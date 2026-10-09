@@ -80,6 +80,22 @@ Observed 2026-09-29 from a fresh boot of disk A.
 4. An event screen can come first; Return goes on to the first
    `<君主>様、第N国に御命令を(0-19)?`.
 
+## Alliance negotiation
+
+At the province prompt, `6`, Return opens diplomacy; `1`, Return selects an
+alliance. Wait for the complete ruler-selection prompt and read the list before
+choosing a ruler, then select an available envoy. In the observed Cao Pi,
+January 220, province-10 campaign, Liu Bei and envoy Cao Pi were each number 1.
+At `使者を送りますか(Y/N)?`, `y` appeared in the field; Return submitted it.
+The game reported the alliance concluded and returned to province commands.
+Liu Bei's displayed hostility changed 50 → 30; gold stayed 950.
+
+These numbers and success are specific to that campaign. Short input sequences
+sent during the list transition did not reach the intended choice. Read the
+complete prompt, send the digit, verify it in the field, then send Return.
+The later alliance-break list was inspected and canceled with an empty Return
+without choosing a ruler; opening that list did not itself break the alliance.
+
 ## Going to war
 
 Observed 220年1月 as 曹丕, from 20 against 31 (劉備).

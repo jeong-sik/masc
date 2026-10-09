@@ -39,7 +39,9 @@ admit_scope() {
     check_current_ci || return $?
     # approve-guard owns review/verdict admission and emits the actionable
     # failure detail. Do not preempt it with a generic verdict-only refusal.
-    GUARD_GH="$GH" bash "$here/approve-guard.sh" --merge-check --repo "$repo" --pr "$pr" --head "$head" || return $?
+    guard_args=(--merge-check --repo "$repo" --pr "$pr" --head "$head")
+    [ -z "$run" ] || guard_args+=(--run "$run")
+    GUARD_GH="$GH" bash "$here/approve-guard.sh" "${guard_args[@]}" || return $?
   done <<<"$members"
 }
 # Revalidate every included PR, then freeze the same membership and identities.

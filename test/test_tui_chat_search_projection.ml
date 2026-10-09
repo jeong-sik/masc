@@ -227,26 +227,24 @@ let test_search_freezes_preview_lookup () = at_sizes (fun origin ->
   check int "mapping and suffix measurement share one preview read" 1 !calls)
 
 let test_folded_thinking_search_identity () = at_sizes (fun origin ->
-  let set_cols columns=ignore(Masc_tui_render_schedule.Terminal_size_cache.refresh
-    Masc_tui_ansi.terminal_size_cache ~probe:(fun () -> Some(26,columns))) in
   let state=state origin in
   state.msg_reasoning_visibility <- T.Reasoning_folded;
   state.msg_loaded <- [row ~id:"thinking-identity" ~request_id:"thinking-identity"
-    ~role:T.Message_thinking ~text:("Reasoning " ^ String.make 100 'x') 1.];
-  set_cols 45;
+    ~role:T.Message_thinking ~text:("Reasoning " ^ String.make 100 'x' ^ "\nsecond reasoning line") 1.];
+  state.msg_reasoning_visibility <- T.Reasoning_folded;
   let summary=find state "Reasoning" in
   check bool "fold producer marks generated summary identity" true
     (match summary.matched_position with Masc_tui_chat_search.Thinking_summary_byte _ -> true | _ -> false);
-  set_cols 180;
+  state.msg_reasoning_visibility <- T.Reasoning_full;
   let source=find ~older:summary state "Reasoning" in
   check bool "unfolded original is a distinct source occurrence" true
     (match source.matched_position with Masc_tui_chat_search.Body_byte _ -> true | _ -> false);
-  set_cols 45;
+  state.msg_reasoning_visibility <- T.Reasoning_folded;
   check bool "returning to summary cannot cycle to its prior match" true
     ((Render.keeper_message_find_scroll state ~keeper_name:"alpha" ~needle:"Reasoning" ~older_than:(Some source)).match_result=None);
-  set_cols 180;
+  state.msg_reasoning_visibility <- T.Reasoning_full;
   let source=find state "Reasoning" in
-  set_cols 45;
+  state.msg_reasoning_visibility <- T.Reasoning_folded;
   check bool "source-to-summary transition respects the same fixed order" true
     ((Render.keeper_message_find_scroll state ~keeper_name:"alpha" ~needle:"Reasoning" ~older_than:(Some source)).match_result=None))
 
@@ -713,9 +711,52 @@ let test_idle_search_pin_reuses_semantic_index () = at_sizes (fun origin ->
   check bool "changed actual preview metadata rebuilds the source map" true
     (Render.For_testing.source_index_build_count () > builds))
 
+let test_polled_source_survives_tail_and_journal_takeover () = at_sizes (fun origin ->
+  let state = state origin in
+  let text = String.concat "\n" (List.init 60 (fun index ->
+    Printf.sprintf "OBSERVED_%03d 글\226\128\174\027" index)) in
+  let preview generation start text : Masc.Tui_decode.keeper_turn_row =
+    {ktr_keeper_name="alpha";ktr_chat_control_token=None;
+     ktr_state=Keeper_turn_running {lane=Turn_lane_maintenance;
+       started_at_unix=120.;interrupt_token="exact-polled";turn_ref=None;
+       preview=Some {ktp_status_text="working";ktp_updated_at_unix=121.;
+         ktp_text_position={kpp_generation=generation;kpp_start_byte=start};
+         ktp_text_tail=text;ktp_last_tool=None}}} in
+  state.keeper_turns <- [preview 3 120 text];
+  ignore (frame_lines state);
+  T.set_msg_scroll state 5;
+  let before = frame_lines state in
+  let observed = List.find_map (fun line ->
+    if Astring.String.is_infix ~affix:"OBSERVED_" line then Some line else None) before
+    |> Option.value ~default:"" in
+  check bool "actual polled row is visible while reading" true (observed <> "");
+  let pin = Option.get state.msg_scroll_pin in
+  check bool "polled pin owns producer absolute bytes" true
+    (List.exists (fun point -> match point.T.source_position with
+      | Some (T.Polled_body_byte {offset;_}) -> offset >= 120 | _ -> false) pin.pin_points);
+  check int "pin holds one immutable observed source" 1 (List.length pin.held_transients);
+  state.keeper_turns <- [preview 3 400 "NEW_ROLLING_TAIL"];
+  check bool "expired rolling bytes retain exact observed viewport" true
+    (List.mem observed (frame_lines state));
+  state.keeper_turns <- [];
+  ignore (log state ~id:"journal-takeover" ~at:130.
+    [Live.Run_started;Live.Text {text="ACTUAL_JOURNAL_TAKEOVER";stream_scope=None};
+     reply "ACTUAL_JOURNAL_TAKEOVER";Live.Run_finished]);
+  check bool "journal takeover preserves polled-only viewport" true
+    (List.mem observed (frame_lines state));
+  T.set_msg_scroll state 0;
+  check bool "End releases held source immediately" true
+    (Option.fold ~none:true ~some:(fun pin -> pin.T.held_transients=[]) state.msg_scroll_pin);
+  let live = screen state in
+  check bool "End shows actual journal" true
+    (Astring.String.is_infix ~affix:"ACTUAL_JOURNAL_TAKEOVER" live);
+  check bool "End removes frozen excerpt" true
+    (not (Astring.String.is_infix ~affix:"OBSERVED_" live)))
+
 let () = run "chat search projection" [
   "rendered conversation", [
     test_case "empty projection follows future arrivals" `Quick test_empty_projection_does_not_hold_future_arrivals;
+    test_case "polled absolute source survives rolling and journal takeover" `Quick test_polled_source_survives_tail_and_journal_takeover;
     test_case "idle search pin reuses semantic and URL indexes" `Quick test_idle_search_pin_reuses_semantic_index;
     test_case "search pin preserves query endpoint through width and gutters" `Quick test_search_pin_retains_query_endpoint_through_reflow;
     test_case "semantic search repetitive prefixes and optional boundaries" `Quick test_semantic_search_repetitive_prefix_and_boundaries;

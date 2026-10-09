@@ -918,10 +918,16 @@ type chat_pin_mode = Follow_live | Hold_scroll | Hold_search
 (** [Follow_live] is the last frame's structural snapshot, activated by a
     scroll key before asynchronous arrivals. It never stops tail following. *)
 
+type chat_source_position =
+  | Durable_position of Masc_tui_chat_search.position
+  | Polled_body_byte of { offset : int; expansion : int }
+
+(* A polled absolute byte is owned by the generation in Scroll_polled. Escape
+   expansion names the exact displayed byte of an escaped source scalar. *)
 type chat_scroll_point = {
   scroll_anchor : chat_scroll_anchor;
   body_row : int;
-  source_position : Masc_tui_chat_search.position option;
+  source_position : chat_source_position option;
     (** Exact semantic byte retained across physical reflow. [None] is a
         generated or transient row whose source has no stable byte map. *)
   rows_below : int;
@@ -929,11 +935,18 @@ type chat_scroll_point = {
         from the viewport bottom. Neither field is a text/clock identity. *)
 }
 
+type held_polled_excerpt = {
+  held_anchor : chat_scroll_anchor;
+  held_preview : Tui_decode.keeper_turn_preview;
+  held_entry : Masc_tui_message_layout.entry;
+}
+
 type chat_scroll_pin = {
   pin_workspace : workspace_authority;
   pin_keeper : string;
   pin_scroll : int;
   pin_mode : chat_pin_mode;
+  held_transients : held_polled_excerpt list;
   pin_points : chat_scroll_point list;
     (** Drawn origins, oldest first. If a folded or replaced stretch disappears,
         a surviving origin can still hold the reader's position. A viewport
@@ -10718,7 +10731,7 @@ let set_msg_scroll (state : state) rows =
   state.msg_scroll <- rows;
   state.msg_scroll_pin <- Option.map (fun pin ->
     if rows = 0 then
-      {pin with pin_mode=Follow_live; pin_scroll=0;
+      {pin with pin_mode=Follow_live; pin_scroll=0; held_transients=[];
         pin_points=List.map (fun point ->
           {point with rows_below=point.rows_below + pin.pin_scroll}) pin.pin_points}
     else {pin with pin_mode=Hold_scroll}) state.msg_scroll_pin

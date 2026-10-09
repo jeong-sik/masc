@@ -1999,6 +1999,23 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
 (* The polled tail is an excerpt for a turn whose journal is unavailable.
    Once that exact turn's journal supplies text, the chronological transcript
    owns the output and the excerpt must disappear. *)
+let preview_for_polled_anchor state keeper_name anchor =
+  List.find_map (fun (row : Tui_decode.keeper_turn_row) ->
+    if not (String.equal row.ktr_keeper_name keeper_name) then None else
+    match anchor, row.ktr_state with
+    | Scroll_polled (token, generation, Polled_speech),
+      Tui_decode.Keeper_turn_running {interrupt_token;preview=Some preview;_}
+      when String.equal token interrupt_token
+        && generation = preview.ktp_text_position.kpp_generation -> Some preview
+    | _ -> None) state.keeper_turns
+
+let held_polled_for_keeper state keeper_name =
+  match state.msg_scroll_pin with
+  | Some pin when pin.pin_mode <> Follow_live
+      && pin.pin_workspace = state.workspace_authority
+      && String.equal pin.pin_keeper keeper_name -> pin.held_transients
+  | Some _ | None -> []
+
 let polled_turn_output_with_anchors (state : state) ~keeper_name ~role_label_column =
   let live_text_drawn =
     match state.msg_live with
@@ -2954,6 +2971,10 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
      speech. They have no durable search origin, but their height participates
      in every search and scroll-pin measurement. *)
   let polled = polled_turn_output_with_anchors state ~keeper_name ~role_label_column in
+  let held = held_polled_for_keeper state keeper_name in
+  let polled = List.filter (fun (anchor, _) ->
+      not (List.exists (fun excerpt -> excerpt.held_anchor = anchor) held)) polled
+    @ List.map (fun excerpt -> excerpt.held_anchor, excerpt.held_entry) held in
   let pending = chat_tail_entries state ~keeper_name ~role_label_column in
   let transient_anchors = List.map (fun (anchor, _) -> Some anchor) polled
     @ List.map (fun (entry : Message_layout.entry) ->
@@ -3092,8 +3113,9 @@ let projection_index_of_scroll_anchor projection = function
    Physical row ordinals can change with terminal width or origin gutters;
    only a producer-owned source byte can recover that same reading position. *)
 type source_body_index = {
-  source_rows : (Search.position, int) Hashtbl.t;
-  row_sources : (int, Search.position) Hashtbl.t;
+  source_rows : (chat_source_position, int) Hashtbl.t;
+  row_sources : (int, chat_source_position) Hashtbl.t;
+  last_source_row : int option;
 }
 
 type source_body_key = {
@@ -3102,6 +3124,8 @@ type source_body_key = {
   source_origin : Message_layout.origin_display;
   source_preview_mode : [`Off | `Compact | `Rich];
   source_previews : Masc_tui_link_preview.og_preview list;
+  source_polled_input : (int * int * string) option;
+  source_polled_unavailable : bool;
 }
 
 type source_body_memo = { key : source_body_key; index : source_body_index option }
@@ -3109,7 +3133,29 @@ type source_body_memo = { key : source_body_key; index : source_body_index optio
 let source_body_indexes = Entry_cache.create 64
 let source_index_builds = ref 0
 
-let source_body_key state ~width ~theme ~preview entry =
+type source_mapping_owner =
+  | Durable_source
+  | Polled_source of { start_byte : int; mapped : Masc.Tui_terminal_text.mapped_text Lazy.t }
+  | Unknown_polled_source
+
+let source_mapping_owner state ~keeper_name projection entry_index =
+  match scroll_anchor_at projection entry_index with
+  | Some (Scroll_polled (token, generation, Polled_speech)) ->
+      (match (let held = held_polled_for_keeper state keeper_name in
+        match List.find_opt (fun excerpt -> excerpt.held_anchor =
+            Scroll_polled (token,generation,Polled_speech)) held with
+        | Some excerpt -> Some excerpt.held_preview
+        | None -> preview_for_polled_anchor state keeper_name
+            (Scroll_polled (token,generation,Polled_speech))) with
+       | None -> Unknown_polled_source, None
+       | Some preview ->
+           Polled_source {start_byte=preview.ktp_text_position.kpp_start_byte;
+             mapped=lazy (Masc.Tui_terminal_text.sanitize_terminal_lines_with_source preview.ktp_text_tail)},
+           Some (generation,preview.ktp_text_position.kpp_start_byte,preview.ktp_text_tail))
+  | Some (Scroll_durable _ | Scroll_pending _ | Scroll_polled (_, _, Polled_status)) | None ->
+      Durable_source, None
+
+let source_body_key state ~width ~theme ~preview ~polled_input ~unavailable entry =
   let context = Chat_theme.body_context theme entry.Message_layout.style in
   let urls = match entry.style, entry.markdown_source, state.link_previews_mode with
     | (Message_layout.Tool | Skill _), _, _
@@ -3118,9 +3164,10 @@ let source_body_key state ~width ~theme ~preview entry =
     | _, Message_layout.Markdown_stable _, (`Compact | `Rich) -> bare_urls_for_entry entry in
   {source_width=width;source_palette_generation=context.palette_generation;
    source_origin=state.msg_origin_display;source_preview_mode=state.link_previews_mode;
-   source_previews=List.map preview urls}
+   source_previews=List.map preview urls;source_polled_input=polled_input;
+   source_polled_unavailable=unavailable}
 
-let source_body_lookup state projection ~inner_width ~theme ~preview =
+let source_body_lookup state ~keeper_name projection ~inner_width ~theme ~preview =
   let entries = (scroll_anchor_index projection).indexed_entries in
   let mapped = Hashtbl.create 8 in
   fun entry_index ->
@@ -3131,15 +3178,42 @@ let source_body_lookup state projection ~inner_width ~theme ~preview =
           let entry = entries.(entry_index) in
           let width = Message_layout.entry_body_cells ~origin:state.msg_origin_display
             ~inner_width entry in
-          let key = source_body_key state ~width ~theme ~preview entry in
+          let owner, polled_input = source_mapping_owner state ~keeper_name projection entry_index in
+          let key = source_body_key state ~width ~theme ~preview ~polled_input
+            ~unavailable:(owner = Unknown_polled_source) entry in
           match Entry_cache.find_opt source_body_indexes entry with
           | Some memo when memo.key = key -> memo.index
           | Some _ | None ->
           incr source_index_builds;
           let body = search_chat_markdown ~link_previews_mode:state.link_previews_mode
             ~theme ~preview ~entry ~width in
-          let index = if body.unavailable then None else
+          let index = if body.unavailable || owner = Unknown_polled_source then None else
+          let convert = match owner with
+            | Durable_source -> (fun position -> Some (Durable_position position))
+            | Unknown_polled_source -> (fun _ -> None)
+            | Polled_source {start_byte;mapped} ->
+                let mapped = Lazy.force mapped in
+                let output = Masc.Tui_terminal_text.mapped_text mapped in
+                (* The exact shared sanitizer must own this same projection.
+                   A stale or inconsistent producer map authorizes no pin. *)
+                if not (String.equal output entry.body) then (fun _ -> None) else
+                let expansions = Array.make (String.length output) 0 in
+                let previous = ref None and expansion = ref 0 in
+                for byte = 0 to String.length output - 1 do
+                  let source = Masc.Tui_terminal_text.source_byte_at mapped byte in
+                  if source = !previous then incr expansion else expansion := 0;
+                  previous := source;
+                  expansions.(byte) <- !expansion
+                done;
+                (function
+                 | Search.Body_byte {offset;_} ->
+                     Option.map (fun source -> Polled_body_byte {offset=start_byte+source;
+                       expansion=expansions.(offset)})
+                       (Masc.Tui_terminal_text.source_byte_at mapped offset)
+                 | Body_label _ | Thinking_summary_byte _ | Thinking_summary_label _
+                 | Preview_byte _ | Journal_byte _ -> None) in
           let source_rows = Hashtbl.create 64 and row_sources = Hashtbl.create 16 in
+          let last_source_row = ref None in
           let body_rows = List.length body.mapped_rows in
           List.iter (fun (run : Search.run) ->
             let _, copied = Masc_tui_theme.strip_sgr_with_positions run.text in
@@ -3153,11 +3227,12 @@ let source_body_lookup state projection ~inner_width ~theme ~preview =
                       (* A normalized origin can occur more than once. Keep the
                          first actually visible row, matching search's source
                          producer traversal, without electing by source words. *)
+                      last_source_row := Some (match !last_source_row with None -> row | Some held -> max row held);
                       if not (Hashtbl.mem source_rows position) then Hashtbl.add source_rows position row;
                       if not (Hashtbl.mem row_sources row) then Hashtbl.add row_sources row position)
-                      run.positions.(byte)
+                      (Option.bind run.positions.(byte) convert)
                   done) ranges) run.visible_rows) body.runs;
-          Some {source_rows;row_sources} in
+          Some {source_rows;row_sources;last_source_row= !last_source_row} in
           Entry_cache.replace source_body_indexes entry {key;index};
           index in
         Hashtbl.add mapped entry_index value;
@@ -3197,7 +3272,9 @@ let scroll_position_for_window state ~keeper_name projection ~markdown ~source_b
       {scroll_anchor=anchor; body_row=position.body_row;
        source_position=(match anchor with Scroll_durable _ | Scroll_pending _ ->
          source_point_on_row ~source_body position.entry_index position.body_row
-         | Scroll_polled _ -> None);
+         | Scroll_polled (_, _, Polled_speech) ->
+             source_point_on_row ~source_body position.entry_index position.body_row
+         | Scroll_polled (_, _, Polled_status) -> None);
        rows_below=position.rows_below})
       (scroll_anchor_at projection position.entry_index)) window.body_positions in
   (* The live-edge layout can elide middle rows and does not return body
@@ -3236,11 +3313,25 @@ let scroll_position_for_window state ~keeper_name projection ~markdown ~source_b
                   | Some suffix -> {point with body_row;rows_below=suffix-window.scroll}) pin.pin_points)
     | Some _ | None -> None in
   let points = Option.value searched_points ~default:points in
+  let held_transients = if pin_mode = Follow_live then [] else
+    let previous = held_polled_for_keeper state keeper_name in
+    let entries = (scroll_anchor_index projection).indexed_entries in
+    List.filter_map (fun point ->
+      match point.scroll_anchor with
+      | Scroll_polled (_, _, Polled_speech) as anchor ->
+          (match List.find_opt (fun excerpt -> excerpt.held_anchor = anchor) previous with
+           | Some excerpt -> Some excerpt
+           | None -> Option.bind (preview_for_polled_anchor state keeper_name anchor)
+               (fun held_preview -> Option.bind (projection_index_of_scroll_anchor projection anchor)
+                 (fun index -> if index < 0 || index >= Array.length entries then None else
+                   Some {held_anchor=anchor;held_preview;held_entry=entries.(index)})))
+      | _ -> None) points
+    |> List.sort_uniq (fun left right -> compare left.held_anchor right.held_anchor) in
   let empty_follow_live () = Some {pin_workspace=state.workspace_authority;
-    pin_keeper=keeper_name;pin_scroll=0;pin_mode=Follow_live;pin_points=[]} in
+    pin_keeper=keeper_name;pin_scroll=0;pin_mode=Follow_live;held_transients=[];pin_points=[]} in
   let pin = match points with
     | _ :: _ -> Some { pin_workspace=state.workspace_authority;
-        pin_keeper=keeper_name; pin_scroll=window.scroll; pin_mode; pin_points=points }
+        pin_keeper=keeper_name; pin_scroll=window.scroll; pin_mode; held_transients; pin_points=points }
     | [] ->
         (* Search pins hold even at zero. Follow_live snapshots only seed
            the next scroll key and do not compensate new arrivals. *)
@@ -3257,7 +3348,7 @@ let scroll_position_for_window state ~keeper_name projection ~markdown ~source_b
                          ~body_row projection.layout_entries)))) pin.pin_points in
              (match pin_points with
               | [] -> empty_follow_live ()
-              | _ :: _ -> Some {pin with pin_scroll=window.scroll; pin_mode; pin_points})
+              | _ :: _ -> Some {pin with pin_scroll=window.scroll; pin_mode; held_transients; pin_points})
          | Some _ | None -> empty_follow_live ())
   in
   { scroll=(match pin with Some {pin_points=[];pin_mode=Follow_live;_} -> 0
@@ -3343,8 +3434,8 @@ let keeper_message_find_scroll ?(preview_lookup=Masc_tui_link_preview.get_previe
         Option.map (fun scroll ->
           let pin = Some {pin_workspace=state.workspace_authority; pin_keeper=keeper_name;
             pin_scroll=scroll; pin_mode=Hold_search;
-            pin_points=[{scroll_anchor=Scroll_durable matched_anchor; body_row;
-              source_position=Some ending_position; rows_below=0}]} in
+            held_transients=[]; pin_points=[{scroll_anchor=Scroll_durable matched_anchor; body_row;
+              source_position=Some (Durable_position ending_position); rows_below=0}]} in
           {scroll; pin}, {search_workspace=state.workspace_authority;
             search_keeper=keeper_name; matched_anchor; matched_position; older_anchors})
           (Message_layout.scroll_for_body_row ~markdown ~origin:state.msg_origin_display
@@ -3383,7 +3474,7 @@ let render_keeper_message (state : state) =
     let preview = preview_snapshot Masc_tui_link_preview.get_preview in
     let markdown = cached_chat_markdown_with_preview ~preview
       ~link_previews_mode:state.link_previews_mode ~theme:chat_theme in
-    let source_body = source_body_lookup state projection ~inner_width ~theme:chat_theme ~preview in
+    let source_body = source_body_lookup state ~keeper_name projection ~inner_width ~theme:chat_theme ~preview in
     let requested = requested_scroll_from_pin state ~keeper_name projection
       ~markdown ~source_body ~inner_width in
     (* A search can pin a short conversation at scroll zero. If an arrival

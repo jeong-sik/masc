@@ -9,7 +9,7 @@ module Canonical_tool = Agent_core.Canonical_tool
     run context's base prompt and is not returned here (#38354). *)
 type turn_prompt =
   { dynamic_context : string
-  ; dynamic_context_for_tools : (Agent_core.Tool.t list -> string) option
+  ; dynamic_context_for_tools : (Keeper_request_tool_access.t -> string) option
       (** Optional transmission view, evaluated only after the actual offered
           tool surface is known. [dynamic_context] remains the full source. *)
   }

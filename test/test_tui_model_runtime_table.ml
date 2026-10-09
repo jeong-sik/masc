@@ -16,7 +16,12 @@ let parse lines =
   let lines = List.concat_map (fun line -> if line = "[providers.ollama_cloud]" then
     [line; "protocol = \"openai-compatible-http\""; "kind = \"openai_compat\"";
      "endpoint = \"http://localhost:9000/v1\""] else [line]) lines in
-  match T.parse (lines @ declared) with
+  let lines = lines @ declared in
+  let config = Runtime_toml.parse_string (String.concat "\n" lines) |> Result.get_ok in
+  let account_groups = Runtime_wizard_inventory.account_groups_json config
+    |> Yojson.Safe.Util.to_list |> List.map (fun group ->
+      Yojson.Safe.Util.(group |> member "integration_ids" |> to_list |> List.map to_string)) in
+  match T.parse ~account_groups lines with
   | Ok rows -> rows | Error detail -> Alcotest.fail detail
 
 let sample =
@@ -250,6 +255,9 @@ let test_detail_quotes_dotted_model_section () =
     ; temperature = None
     ; max_tokens = None
     ; context = None; model_context = None
+    ; same_login = []
+    ; login_group = None
+    ; account_label = None
     }
   in
   let detail = T.detail_lines row in
@@ -276,6 +284,142 @@ let test_accounts_and_sets () =
   check (Alcotest.list (Alcotest.option (Alcotest.pair string int))) "binding context is account scoped"
     [Some ("model", 500000); Some ("binding", 272000)]
     (List.map (fun (r:T.row) -> r.context) rows)
+
+(* A provider id does not name its account: on 2026-10-08 one Codex login sat
+   under three ids and read as three accounts. Ids that share an account-home
+   name each other. *)
+let test_same_login_names_other_ids () =
+  let provider id home =
+    [ "[providers." ^ id ^ "]"; "protocol = 'codex-app-server'"; "command = 'codex'";
+      "is-non-interactive = true"; "model-set = 'family'" ]
+    @ (match home with
+       | Some home -> [ "account-home = '" ^ home ^ "'" ]
+       | None -> [])
+  in
+  let lines =
+    [ "[models.shared]"; "max-context = 500000";
+      "[model_sets.family]"; "models = ['shared']" ]
+    @ provider "codex_a" (Some "/tmp/login-one")
+    @ provider "codex_b" (Some "/tmp/login-one")
+    @ provider "codex_c" (Some "/tmp/login-two")
+    @ provider "codex_d" None
+  in
+  check
+    (Alcotest.list (Alcotest.pair string (Alcotest.list string)))
+    "ids on one account-home name each other and nobody else"
+    [ "codex_a", [ "codex_b" ]; "codex_b", [ "codex_a" ]; "codex_c", []; "codex_d", [] ]
+    (List.map (fun (r : T.row) -> r.provider, r.same_login) (parse lines))
+
+let test_server_owned_membership () =
+  let lines = ["[models.shared]"; "max-context=8192";
+    "[providers.a]"; "protocol='codex-app-server'"; "command='codex'";
+    "is-non-interactive=true"; "account-home='/client/distinct-a'";
+    "[providers.b]"; "protocol='codex-app-server'"; "command='codex'";
+    "is-non-interactive=true"; "account-home='/client/distinct-b'";
+    "[a.shared]"; "[b.shared]"] in
+  (* The client consumes membership as evidence; it cannot recompute the
+     server environment. An unknown member instead refuses mismatched source. *)
+  let rows = T.parse ~account_groups:[["a";"b"]] lines |> Result.get_ok in
+  check (Alcotest.list string) "server membership controls peers"
+    ["b"] (List.hd rows).same_login;
+  check bool "foreign-source membership rejected" true
+    (Result.is_error (T.parse ~account_groups:[["a";"missing"]] lines))
+
+let test_detail_names_the_account () =
+  let alpha = row_named (parse sample) "alpha" in
+  let shared = { alpha with same_login = [ "codex_b"; "codex_c" ] } in
+  check
+    (Alcotest.list string)
+    "account lines follow the binding line"
+    [ "Binding: provider=ollama_cloud  model=alpha"
+    ; "Account: someone@example.com"
+    ; "Same login as codex_b, codex_c (shared account-home)"
+    ; "API model: alpha-v2 (api-name override)"
+    ]
+    (List.filteri (fun index _ -> index < 4)
+       (T.detail_lines ~account_email:"someone@example.com" shared));
+  check
+    (Alcotest.list string)
+    "an email alone adds one line"
+    [ "Binding: provider=ollama_cloud  model=alpha"
+    ; "Account: someone@example.com"
+    ; "API model: alpha-v2 (api-name override)"
+    ]
+    (List.filteri (fun index _ -> index < 3)
+       (T.detail_lines ~account_email:"someone@example.com" alpha))
+
+(* Ids of one login sit together and carry the same [#n]; the old order by
+   provider id alone put another account between them. *)
+let test_one_login_is_adjacent_and_tagged () =
+  let provider id home =
+    [ "[providers." ^ id ^ "]"; "protocol = 'codex-app-server'"; "command = 'codex'";
+      "is-non-interactive = true"; "model-set = 'family'";
+      "account-home = '" ^ home ^ "'" ]
+  in
+  let rows =
+    parse
+      ([ "[models.shared]"; "max-context = 500000";
+         "[model_sets.family]"; "models = ['shared']" ]
+       @ provider "codex_a" "/tmp/login-one"
+       @ provider "codex_m" "/tmp/login-two"
+       @ provider "codex_z" "/tmp/login-one")
+  in
+  check (Alcotest.list string) "the two ids of one login are adjacent"
+    [ "codex_a"; "codex_z"; "codex_m" ]
+    (List.map (fun (r : T.row) -> r.provider) rows);
+  check (Alcotest.list (Alcotest.option int)) "a shared login is numbered, a single id is not"
+    [ Some 1; Some 1; None ]
+    (List.map (fun (r : T.row) -> r.login_group) rows);
+  check (Alcotest.list string) "without a label the column shows the group"
+    [ "codex_a #1"; "codex_z #1"; "codex_m" ]
+    (List.map T.provider_text rows);
+  let labelled =
+    List.map (fun (r : T.row) -> { r with account_label = Some "someone" }) rows
+  in
+  check (Alcotest.list string) "a label replaces the group number"
+    [ "codex_a someone"; "codex_z someone"; "codex_m someone" ]
+    (List.map T.provider_text labelled);
+  (* The drawn column is the measured column: every row starts its model
+     name at the same cell with the label in place. *)
+  let width = 120 in
+  check bool "the labelled table fits a wide pane" true (T.fits ~width labelled);
+  (match T.render ~width ~pane:width labelled with
+   | _header :: lines ->
+     let model_at line =
+       let rec find i =
+         if i + 6 > String.length line then -1
+         else if String.sub line i 6 = "shared" then i else find (i + 1) in
+       find 0 in
+     check (Alcotest.list int) "model names line up under one column"
+       (List.map (fun _ -> model_at (List.hd lines)) lines)
+       (List.map model_at lines)
+   | [] -> Alcotest.fail "no table was drawn")
+
+let test_account_label_of_email () =
+  check string "the part before @" "someone" (T.account_label_of_email "someone@example.com");
+  check string "no @ keeps the text" "someone" (T.account_label_of_email "someone");
+  check bool "a long name is cut to the label column" true
+    (Masc_tui_message_layout.display_width
+       (T.account_label_of_email "a-very-long-account-name-indeed@example.com")
+     <= 18)
+
+let test_keepers_on_login () =
+  let alpha = row_named (parse sample) "alpha" in
+  let row = { alpha with provider = "codex_a"; same_login = [ "codex_z" ] } in
+  let assignments =
+    [ "zed", "codex_z.model"; "amy", "codex_a.model"; "lane-user", "sonnet-lane";
+      "other", "codex_ab.model"; "dotted", "codex_a.extra.model"; "unknown", "codex_a.undeclared" ]
+  in
+  check (Alcotest.list string) "direct assignments on any id of the login, sorted"
+    [ "amy"; "zed" ] (T.keepers_on_login ~rows:[{row with model="model"}; {row with provider="codex_z";model="model"};
+      {row with provider="codex_a.extra";model="model";same_login=[]}]
+      ~assignments row);
+  check string "the count comes before the names"
+    "Keepers assigned directly (lanes not counted): 2 - amy, zed"
+    (List.nth (T.detail_lines ~keepers:[ "amy"; "zed" ] row) 2);
+  check string "an empty login says none"
+    "Keepers assigned directly (lanes not counted): none"
+    (List.nth (T.detail_lines ~keepers:[] row) 2)
 
 let test_invalid_is_error () =
   match T.parse ["[models.broken"] with
@@ -333,6 +477,12 @@ let () =
     "masc_tui_model_runtime_table"
     [ ( "accounts", [ Alcotest.test_case "settings target exact account" `Quick test_exact_runtime_lookup;
        Alcotest.test_case "shared model preserves each account and context" `Quick test_accounts_and_sets;
+       Alcotest.test_case "server-owned membership" `Quick test_server_owned_membership;
+       Alcotest.test_case "ids on one login name each other" `Quick test_same_login_names_other_ids;
+       Alcotest.test_case "detail names the account" `Quick test_detail_names_the_account;
+       Alcotest.test_case "one login is adjacent and tagged" `Quick test_one_login_is_adjacent_and_tagged;
+       Alcotest.test_case "account label of an email" `Quick test_account_label_of_email;
+       Alcotest.test_case "keepers on a login" `Quick test_keepers_on_login;
        Alcotest.test_case "invalid source is visible" `Quick test_invalid_is_error ])
     ; ( "parse"
       , [ Alcotest.test_case "reads both tables" `Quick test_reads_both_tables

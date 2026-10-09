@@ -524,6 +524,7 @@ let canonical_catalog_evidence catalog model_entries target_declarations =
          | Some task -> Binding.task_string (Some task))
       ; "supported_models=" ^ canonical_supported_models model.supported_models
       ; option_bool model.supports_system_prompt
+      ; option_bool model.supports_assistant_prefill
       ; Binding.anthropic_thinking_control_string
           (Binding.catalog_anthropic_thinking_control model.anthropic_thinking_control)
       ; "input_per_million=" ^ option_price model.input_per_million

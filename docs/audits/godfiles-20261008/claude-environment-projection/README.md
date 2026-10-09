@@ -1,6 +1,6 @@
 # Claude child environment policy boundary
 
-Base: 35546db8521d494683be8d3d212d9fa2124977ad.
+PR #42126. Base: 35546db8521d494683be8d3d212d9fa2124977ad.
 
 Private runtime_claude_environment_projection owns allowed variable names for inherited/selected accounts and mandatory CLI environment assembly (64 lines). The runtime retains actual environment reads, inherited config-path normalization, account/config-file acquisition, authentication probes and process execution (2236 lines, previously 2292). Public MLI is unchanged.
 

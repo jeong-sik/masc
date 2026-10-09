@@ -523,7 +523,11 @@
       "path": "lib/runtime/runtime_claude_code.ml",
       "baseline_lines": 2292,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; protocol, event, subprocess and configuration semantic review pending",
+      "current_lines": 2236,
+      "prs": [
+        42126
+      ]
     },
     {
       "path": "lib/runtime/runtime_codex_app_server.ml",

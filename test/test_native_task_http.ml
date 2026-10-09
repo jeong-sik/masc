@@ -316,6 +316,18 @@ let test_child_authenticated_routes () =
         let status, _ = send headers (prefix ^ endpoint ^ "?extra=1") in
         check int (name ^ " Child discovery query refused") 400 status)
         ["receivers"; "hints"];
+      let overlong = String.make (Keeper_id.Keeper_name.max_length + 1) 'a' in
+      List.iter (fun endpoint ->
+        let status, body = send headers ("/api/v1/keepers/" ^ overlong ^ "/child-content/" ^ endpoint) in
+        check int (name ^ " overlong Child keeper name refused before storage") 400 status;
+        (match Child_read.of_json body with
+         | Ok (Child_read.Failure {error=Child_read.Invalid_keeper;_}) -> ()
+         | Ok _ | Error _ -> fail "overlong Child keeper name reached journal I/O"))
+        ["receivers"; "hints";
+         "records?receiver_generation=receiver&session_id=session&client_uuid=client"];
+      let longest = String.make Keeper_id.Keeper_name.max_length 'a' in
+      let status, _ = send headers ("/api/v1/keepers/" ^ longest ^ "/child-content/receivers") in
+      check int (name ^ " longest canonical Child keeper name is read") 200 status;
       check bool (name ^ " read-only Child cold paths do not create storage") false
         (Sys.file_exists (Filename.concat (Common.masc_dir_from_base_path ~base_path) "child-content-journals"));
       check bool "exact Child records route" true

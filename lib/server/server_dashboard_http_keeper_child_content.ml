@@ -97,10 +97,13 @@ let hints_response ~base_path ~keeper_name request =
           ~cleanup_failures:result.cleanup_failure
 
 let response state request route =
-  let keeper_name = match route with Receivers name | Records name | Hints name -> name in
-  if not (Keeper_config.validate_name keeper_name) then
-    `Bad_request, Read.to_json (Read.failure Read.Invalid_keeper)
-  else
+  let raw_name = match route with Receivers name | Records name | Hints name -> name in
+  (* The journal hex-encodes the name into one path component, so the name
+     must pass the canonical parser, including its length bound, before I/O. *)
+  match Keeper_id.Keeper_name.of_string raw_name with
+  | Error _ -> `Bad_request, Read.to_json (Read.failure Read.Invalid_keeper)
+  | Ok name ->
+    let keeper_name = (name :> string) in
     let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
     let status, body = match route with
       | Receivers _ -> receivers_response ~base_path ~keeper_name request

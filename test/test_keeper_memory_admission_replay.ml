@@ -23,6 +23,25 @@ let decode_fact json = Memory.fact_of_json json
   |> Result.map_error Memory.wire_error_to_string |> require
 let fixture_dir = "test/fixtures/memory_admission_replay"
 
+(* Each manifest entry names the outcome its saved response reaches at this
+   head. A capture that stops matching the current request then fails the
+   suite instead of silently skipping its replay. *)
+type outcome = Capture_not_current | Committed_and_acknowledged | Not_committed
+
+let outcome_label = function
+  | Capture_not_current -> "capture_not_current"
+  | Committed_and_acknowledged -> "committed_and_acknowledged"
+  | Not_committed -> "not_committed"
+
+let outcome_of_label = function
+  | "capture_not_current" -> Capture_not_current
+  | "committed_and_acknowledged" -> Committed_and_acknowledged
+  | "not_committed" -> Not_committed
+  | other -> fail ("unknown expected replay outcome: " ^ other)
+
+let outcome_testable =
+  testable (fun ppf value -> Format.pp_print_string ppf (outcome_label value)) ( = )
+
 let with_workspace f =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -297,6 +316,8 @@ let replay filename () =
      | Runs.Completed {outcome=Runs.Succeeded; _} -> ()
      | Running | Completed _ | Completion_persistence_failed _ ->
          fail "verified replacement must complete its exact run successfully");
+  let actual_outcome = if not !injected then Capture_not_current
+    else if receipts<>[] then Committed_and_acknowledged else Not_committed in
   let payload = `Assoc ["fixture",`String filename; "cohort",`String cohort;
     "response_sha256",`String (sha256 response_raw); "model_metadata",model_metadata;
     "model_schema_encoding",`String (schema_encoding_label model_schema_encoding);
@@ -304,8 +325,7 @@ let replay filename () =
       "lane_enabled",`Bool false; "absorb_gate",`Bool false];
     "actual_request",request_hashes current_request;
     "response_replayed",`Bool !injected;
-    "actual_outcome",`String (if not !injected then "capture_not_current"
-      else if receipts<>[] then "committed_and_acknowledged" else "not_committed");
+    "actual_outcome",`String (outcome_label actual_outcome);
     "current_facts",`List (List.map Memory.fact_to_json current_facts);
     "current_snapshot_present",`Bool (Option.is_some current);
     "recall_before",`List recall_before;
@@ -314,12 +334,15 @@ let replay filename () =
     "not_committed",`List (List.rev_map (fun (reason : Runtime.not_committed) ->
       `Assoc ["detail",`String reason.detail; "walk_shows_size",`Bool reason.walk_shows_size]) !refusals);
     "exact_run",Runs.run_to_yojson exact_run] in
-  Printf.printf "MEMORY_ADMISSION_REPLAY %s\n%!" (Yojson.Safe.to_string payload)
+  Printf.printf "MEMORY_ADMISSION_REPLAY %s\n%!" (Yojson.Safe.to_string payload);
+  actual_outcome
 
 let () =
   let manifest = Yojson.Safe.from_file (Masc_test_deps.source_path
       (Filename.concat fixture_dir "manifest.json")) in
-  let filenames = json_list "fixtures" manifest |> List.map Yojson.Safe.Util.to_string in
+  let entries = json_list "fixtures" manifest |> List.map (fun entry ->
+    json_string "file" entry, outcome_of_label (json_string "expected_outcome" entry)) in
+  let filenames = List.map fst entries in
   if filenames = [] then fail "replay manifest must contain actual response fixtures";
   check bool "replay manifest includes the required verified replacement" true
     (List.mem "verified_replacement.json" filenames);
@@ -328,4 +351,7 @@ let () =
   if List.length (List.sort_uniq String.compare filenames) <> List.length filenames then
     fail "duplicate replay fixture in manifest";
   run "synthetic admission exact store replay"
-    ["responses",List.map (fun name -> test_case name `Quick (replay name)) filenames]
+    ["responses",List.map (fun (name, expected_outcome) ->
+      test_case name `Quick (fun () ->
+        check outcome_testable "replay reaches the manifest's expected outcome"
+          expected_outcome (replay name ()))) entries]

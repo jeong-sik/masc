@@ -3290,7 +3290,7 @@ let test_registry_start_leaves_a_failure_row_for_a_restart_interrupted_request (
        let torn = open_out_gen [Open_wronly; Open_append; Open_binary] 0o600 member_path in
        output_string torn "{\"incomplete\":";
        close_out torn;
-       let start_and_check () = Eio.Switch.run (fun sw ->
+       let start_and_check journals = Eio.Switch.run (fun sw ->
        (match
           Owner_registry.install_from_store
             ~sw
@@ -3318,7 +3318,7 @@ let test_registry_start_leaves_a_failure_row_for_a_restart_interrupted_request (
         | Error _ -> fail "the restart-interrupted journal could not be read");
        (match Keeper_chat_event_log.next_sequence journal with
         | Ok seq -> check int "restart terminal follows complete rows with no torn tail" 2 seq
-        | Error _ -> fail "restart left a torn or corrupt journal")) [journal; member_journal];
+        | Error _ -> fail "restart left a torn or corrupt journal")) journals;
        let rows = Keeper_chat_store.load ~base_dir:base_path ~keeper_name in
        let failure_rows =
          List.filter
@@ -3332,9 +3332,19 @@ let test_registry_start_leaves_a_failure_row_for_a_restart_interrupted_request (
          check string "the row says what happened"
            "Keeper request failed: the server restarted before this request finished."
            row.content) failure_rows) in
-       start_and_check ();
-       (* The operation store no longer returns these settled segments. *)
-       start_and_check ())
+       (* Fail one member's journal after the operation store commits Failed.
+          The leader succeeds; a later startup must retry the missing member
+          without duplicating the leader's already appended terminal. *)
+       let held_path = member_path ^ ".held" in
+       Unix.rename member_path held_path;
+       Unix.mkdir member_path 0o700;
+       start_and_check [journal];
+       Unix.rmdir member_path;
+       Unix.rename held_path member_path;
+       start_and_check [journal;member_journal];
+       (* There is no separate recovery acknowledgment to lose: the terminal's
+          durable settlement identity itself makes another startup a no-op. *)
+       start_and_check [journal;member_journal])
 ;;
 
 (* A shared chat batch runs once and journals to every member. The restart

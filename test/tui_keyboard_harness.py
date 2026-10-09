@@ -2363,6 +2363,10 @@ def run_terminal_scenario(
                 # The harness owns this temporary workspace. An inherited
                 # config override would read the caller's live TUI settings.
                 environment.pop("MASC_CONFIG_DIR", None)
+                # The fixtures report the default cluster's root, and the TUI
+                # composes its own root from the cluster selection; a shell's
+                # MASC_CLUSTER_NAME would turn every fixture into a mismatch.
+                environment.pop("MASC_CLUSTER_NAME", None)
                 environment.pop("LINES", None)
                 environment.pop("COLUMNS", None)
                 # Same reason as LINES/COLUMNS: the terminal the assertions

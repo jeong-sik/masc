@@ -1364,7 +1364,7 @@ let add_routes ~sw ~clock router =
      supplied by an admitted token-less same-origin request. *)
   |> Http.Router.post "/api/v1/tools/masc_board_comment_vote" (fun request reqd ->
        with_tool_actor_auth ~tool_name:"masc_board_comment_vote"
-         (fun _state agent_name _req reqd ->
+         (fun state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let ( let* ) r f =
@@ -1378,6 +1378,7 @@ let add_routes ~sw ~clock router =
                try Ok (Yojson.Safe.from_string body_str)
                with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
              in
+             let* args = validate_write_workspace ~config:(Mcp_server.workspace_config state) args in
              let voter = board_actor_author_for_write agent_name in
              let* args = json_upsert_string_field "voter" voter args in
              let result = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client "masc_board_comment_vote" args in

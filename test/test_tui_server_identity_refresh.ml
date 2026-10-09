@@ -68,6 +68,47 @@ let test_workspace_identity_mismatch_keeps_both_paths () =
     Alcotest.(check string) "server path" "/workspace/server" server_base_path
   | _ -> Alcotest.fail "different workspaces were not blocked"
 
+(* A non-default cluster's server reports [<base>/.masc/clusters/<name>] as
+   its root. The TUI started with the same MASC_CLUSTER_NAME must call that
+   the same workspace; comparing against a plain [<base>/.masc] refused every
+   Keeper message on a healthy connection. The server's root is computed the
+   way the server computes it. *)
+let with_cluster_name value f =
+  let key = "MASC_CLUSTER_NAME" in
+  let previous = Sys.getenv_opt key in
+  let set = function
+    | Some v -> Unix.putenv key v
+    | None -> Unix.unsetenv key
+  in
+  set value;
+  Fun.protect ~finally:(fun () -> set previous) f
+
+let test_workspace_identity_follows_the_cluster_selection () =
+  let base = "/workspace/local" in
+  let server_root cluster_name =
+    Workspace_utils.masc_root_dir_from ~base_path:base ~cluster_name
+  in
+  let classify masc_root =
+    Masc_tui_types.workspace_identity_of_refresh ~local_base_path:base
+      (Ok { (identity base) with Tui_decode.sid_masc_root = masc_root })
+  in
+  let is_match = function
+    | Masc_tui_types.Workspace_identity_match -> true
+    | Masc_tui_types.Workspace_identity_match_unconfirmed _
+    | Masc_tui_types.Workspace_identity_mismatch _
+    | Masc_tui_types.Workspace_identity_unread -> false
+  in
+  with_cluster_name (Some "team-a") (fun () ->
+    Alcotest.(check bool) "the cluster's own root is this workspace" true
+      (is_match (classify (server_root "team-a")));
+    Alcotest.(check bool) "the default root is another store" false
+      (is_match (classify (server_root "default"))));
+  with_cluster_name None (fun () ->
+    Alcotest.(check bool) "without a cluster the default root is this workspace" true
+      (is_match (classify (server_root "default")));
+    Alcotest.(check bool) "and a cluster root is another store" false
+      (is_match (classify (server_root "team-a"))))
+
 let test_broadcast_retry_scope_follows_verified_workspace () =
   let scope reading = Masc_tui_types.broadcast_workspace_scope
     ~local_base_path:"/workspace/local" reading in
@@ -240,10 +281,562 @@ let test_detail_focus_waits_for_authoritative_roster () =
   ready foreign [keeper "focused"];
   Alcotest.(check bool) "foreign store retires intent even after returning" false (restore_keeper_detail_focus foreign)
 
+(* A read that cannot name the server's workspace does not say it serves
+   another one. After a match it keeps that match, unconfirmed; only a read
+   that names a different workspace changes it. *)
+let test_unread_after_a_match_keeps_it_unconfirmed () =
+  let local = "/workspace/local" in
+  let next previous reading =
+    Masc_tui_types.next_workspace_identity ~previous ~local_base_path:local reading
+  in
+  let label = function
+    | Masc_tui_types.Workspace_identity_unread -> "unread"
+    | Workspace_identity_match -> "match"
+    | Workspace_identity_match_unconfirmed reason -> "unconfirmed: " ^ reason
+    | Workspace_identity_mismatch { server_base_path; _ } ->
+      "mismatch: " ^ server_base_path
+  in
+  let check name expected previous reading =
+    Alcotest.(check string) name expected (label (next previous reading))
+  in
+  let booting = { (identity local) with sid_state_ready = Some false } in
+  check "a failed read after a match keeps it" "unconfirmed: one failed tick"
+    Workspace_identity_match (Error "one failed tick");
+  check "a booting server after a match keeps it" "unconfirmed: the server is starting"
+    Workspace_identity_match (Ok booting);
+  check "another failed read stays unconfirmed" "unconfirmed: still down"
+    (Workspace_identity_match_unconfirmed "one failed tick") (Error "still down");
+  check "the same workspace confirms it again" "match"
+    (Workspace_identity_match_unconfirmed "one failed tick") (Ok (identity local));
+  check "a different workspace is still a mismatch" "mismatch: /workspace/other"
+    (Workspace_identity_match_unconfirmed "one failed tick")
+    (Ok (identity "/workspace/other"));
+  check "a failed read with no match before is unread" "unread"
+    Workspace_identity_unread (Error "boot");
+  check "a failed read after a mismatch is unread" "unread"
+    (Workspace_identity_mismatch
+       { local_base_path = local; server_base_path = "/workspace/other" })
+    (Error "one failed tick");
+  (* A booting server's paths name its workspace even though it cannot
+     serve yet: another workspace withdraws the match. *)
+  check "a booting server of another workspace withdraws the match" "unread"
+    Workspace_identity_match
+    (Ok { (identity "/workspace/other") with sid_state_ready = Some false })
+
+(* A write goes out only while the authority it was launched under is current
+   and the server identity is confirmed. *)
+let test_writes_wait_for_a_confirmed_identity () =
+  let state = Masc_tui_types.create_state ~workspace:"a"
+    ~local_base_path:"/workspace/a" ~port:0 ~refresh_interval:0. () in
+  state.server_identity <- Some (identity "/workspace/a");
+  state.workspace_identity <- Masc_tui_types.Workspace_identity_match;
+  let authority = state.workspace_authority in
+  let refusal () = Masc_tui_types.write_authority_refusal state authority in
+  Alcotest.(check (option string)) "a confirmed match sends" None (refusal ());
+  state.workspace_identity <-
+    Masc_tui_types.Workspace_identity_match_unconfirmed "one failed tick";
+  Alcotest.(check (option string)) "an unconfirmed match waits"
+    (Some "Workspace identity is unconfirmed") (refusal ());
+  state.workspace_identity <- Masc_tui_types.Workspace_identity_match;
+  let (Masc_tui_types.Workspace_authority generation) = state.workspace_authority in
+  state.workspace_authority <- Masc_tui_types.Workspace_authority (generation + 1);
+  Alcotest.(check (option string)) "a moved authority refuses"
+    (Some "Workspace authority withdrawn") (refusal ())
+
+let test_partial_identity_keeps_definite_mismatches () =
+  let local = "/workspace/a" in
+  let original = identity local in
+  let different_partial_paths =
+    [ { original with sid_base_path = "/workspace/b"; sid_masc_root = "" }
+    ; { original with sid_base_path = ""; sid_masc_root = "/workspace/b/.masc" } ] in
+  List.iter (fun observed ->
+    List.iter (fun previous ->
+      match Masc_tui_types.next_workspace_identity ~previous ~local_base_path:local (Ok observed) with
+      | Masc_tui_types.Workspace_identity_mismatch _ -> ()
+      | Workspace_identity_unread | Workspace_identity_match
+      | Workspace_identity_match_unconfirmed _ ->
+        Alcotest.fail "one missing path hid the other path's definite mismatch")
+      [ Masc_tui_types.Workspace_identity_match
+      ; Workspace_identity_match_unconfirmed "health failed" ])
+    different_partial_paths;
+  List.iter (fun observed ->
+    match Masc_tui_types.next_workspace_identity
+        ~previous:Workspace_identity_match ~local_base_path:local
+        (Ok { observed with sid_state_ready = Some false }) with
+    | Masc_tui_types.Workspace_identity_unread -> ()
+    | Workspace_identity_match | Workspace_identity_mismatch _
+    | Workspace_identity_match_unconfirmed _ ->
+      Alcotest.fail "a booting replacement must withdraw the retained match")
+    different_partial_paths;
+  List.iter (fun observed ->
+    match Masc_tui_types.next_workspace_identity
+        ~previous:Workspace_identity_match ~local_base_path:local (Ok observed) with
+    | Masc_tui_types.Workspace_identity_match_unconfirmed _ -> ()
+    | Workspace_identity_unread | Workspace_identity_match | Workspace_identity_mismatch _ ->
+      Alcotest.fail "a missing path without contradictory evidence must stay unconfirmed")
+    [ { original with sid_base_path = "" }; { original with sid_masc_root = "" } ]
+
+let test_deletion_inventory_waits_for_reconfirmed_workspace () =
+  let open Masc_tui_types in
+  let module Deletions = Masc_tui_keeper_control in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
+      ~port:0 ~refresh_interval:0. () in
+  state.server_identity <- Some (identity "/workspace/a");
+  state.workspace_identity <- Workspace_identity_match;
+  let record keeper_name : Deletions.deletion_row =
+    { operation = Deletions.Configuration_removal
+        { Masc.Keeper_configuration_removal.operation_id = Masc.Keeper_shutdown_types.Operation_id.generate ()
+        ; keeper_name; actor = "test"; source_sha256 = ""; source_path = ""
+        ; requested_at = ""; updated_at = ""
+        ; state = Masc.Keeper_configuration_removal.Cleanup_required "pending cleanup"
+        ; last_error = None }
+    ; completed = false; can_retry = true }
+  in
+  let first = record "workspace-a-first" in
+  let selected = record "workspace-a-selected" in
+  let a : Deletions.deletion_inventory = { operations = [ first; selected ]; errors = [] } in
+  let b : Deletions.deletion_inventory = { operations = [ record "workspace-b" ]; errors = [] } in
+  let begin_read () = match begin_keeper_deletions_read state with
+    | Some generation -> generation
+    | None -> Alcotest.fail "confirmed workspace should admit inventory read" in
+  apply_keeper_deletions_read state ~generation:(begin_read ()) (Ok a);
+  state.keeper_deletions_cursor <- 1;
+  let before_failure = begin_read () in
+  state.workspace_identity <- next_workspace_identity ~previous:state.workspace_identity
+      ~local_base_path:state.local_base_path (Error "health unavailable");
+  (* The identity transition retires only the request, not its cached rows. *)
+  suspend_keeper_deletions_read state;
+  let check_preserved label =
+    Alcotest.(check bool) (label ^ ": A inventory remains visible") true
+      (state.keeper_deletions = Some (Ok a));
+    Alcotest.(check int) (label ^ ": selected row stays selected") 1 state.keeper_deletions_cursor in
+  apply_keeper_deletions_read state ~generation:before_failure (Ok b);
+  check_preserved "B responds during uncertainty";
+  Alcotest.(check (option int)) "D/r does not launch an unconfirmed read" None
+    (begin_keeper_deletions_read state);
+  (* Completion checks identity itself as well as generation. *)
+  apply_keeper_deletions_read state ~generation:state.keeper_deletions_generation (Ok b);
+  check_preserved "matching generation cannot replace unconfirmed rows";
+  apply_keeper_deletions_read state ~generation:state.keeper_deletions_generation (Error "HTTP 503");
+  check_preserved "failed unconfirmed read";
+  state.workspace_identity <- next_workspace_identity ~previous:state.workspace_identity
+      ~local_base_path:state.local_base_path (Ok (identity "/workspace/a"));
+  apply_keeper_deletions_read state ~generation:before_failure (Ok b);
+  check_preserved "late response remains stale after A reconfirms";
+  let refreshed = { a with operations = [ selected; first ] } in
+  apply_keeper_deletions_read state ~generation:(begin_read ()) (Ok refreshed);
+  Alcotest.(check bool) "a new confirmed read replaces the inventory" true
+    (state.keeper_deletions = Some (Ok refreshed));
+  Alcotest.(check int) "selection follows its operation after reorder" 0 state.keeper_deletions_cursor
+
+let test_uncertain_identity_retires_reads_not_admitted_operations () =
+  let open Masc_tui_types in
+  let module Detail = Masc_tui_board_detail in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
+      ~port:0 ~refresh_interval:0. () in
+  state.server_identity <- Some (identity "/workspace/a");
+  state.workspace_identity <- Workspace_identity_match;
+  let post body : board_post =
+    { bp_id = "same-id"; bp_author = "author"; bp_title = "Thread";
+      bp_body = body; bp_votes = 0; bp_comment_count = 0;
+      bp_created_at = "2026-10-07"; bp_created_at_unix = None; bp_updated_at = None;
+      bp_hearth = None; bp_kind = None; bp_closed = None } in
+  let a = post "A's retained post" and b = post "B's delayed post" in
+  let begin_read () = match Detail.start state.board_detail ~post_id:a.bp_id with
+    | Detail.Started (next, request) -> state.board_detail <- next; request
+    | Detail.Already_loading -> Alcotest.fail "retired Board read still owns its slot" in
+  let initial = begin_read () in
+  state.board_detail <- Detail.complete state.board_detail initial (Ok (a, [], None));
+  let delayed = begin_read () in
+  let authority = state.workspace_authority in
+  let reading = Some state.workspace_read_authority in
+  let admitted kind = workspace_reply_admitted state ~authority ~reading ~kind in
+  let cancelled_write = ref false and cancelled_observation = ref false in
+  state.workspace_cancellations <- [ref (), (fun () -> cancelled_write := true)];
+  state.workspace_observation_cancellations <- [ref (), (fun () -> cancelled_observation := true)];
+  Masc_tui_message_input.insert state.msg_input "unsent draft";
+  state.keeper_yolo_names <- ["A-keeper"];
+  state.keeper_turns_inflight <- true;
+  let browser = Browser_lane_view.create () in
+  state.browser_lane <- Some {browser with load=Browser_lane_view.Loading (1, Read)};
+  state.keeper_queue_inflight <- ["reading"; "writing"];
+  state.keeper_queue_readings <- ["reading"];
+  state.workspace_identity <- next_workspace_identity ~previous:state.workspace_identity
+      ~local_base_path:state.local_base_path (Error "health failed");
+  suspend_workspace_readings state;
+  Alcotest.(check bool) "old Board/mode read is inadmissible during uncertainty" false
+    (admitted Workspace_observation);
+  Alcotest.(check bool) "admitted write and chat receipt keep their authority" true
+    (admitted Workspace_operation_outcome);
+  Alcotest.(check bool) "observation stream is cancelled" true !cancelled_observation;
+  Alcotest.(check bool) "admitted operation is not cancelled" false !cancelled_write;
+  Alcotest.(check bool) "read-only in-flight slot is released" false state.keeper_turns_inflight;
+  Alcotest.(check string) "draft is preserved" "unsent draft"
+    (Masc_tui_message_input.contents state.msg_input);
+  Alcotest.(check (list string)) "retained mode rows are preserved" ["A-keeper"] state.keeper_yolo_names;
+
+  Alcotest.(check (list string)) "queue observation releases only its own slot" ["writing"]
+    state.keeper_queue_inflight;
+  (match state.browser_lane with
+   | Some {load=Browser_lane_view.Idle; _} -> ()
+   | _ -> Alcotest.fail "browser read stayed pending");
+  state.browser_lane <- Some {browser with load=Browser_lane_view.Loading (2, Goto "https://example.test")};
+  suspend_workspace_readings state;
+  (match state.browser_lane with
+   | Some {load=Browser_lane_view.Loading (2, Goto _); _} -> ()
+   | _ -> Alcotest.fail "admitted browser navigation lost its receipt owner");
+  state.board_detail <- Detail.complete state.board_detail delayed (Ok (b, [], None));
+  (match Detail.view_for state.board_detail ~post_id:a.bp_id with
+   | Detail.Ready (shown, _, _) -> Alcotest.(check string) "A stays on screen" a.bp_body shown.bp_body
+   | Detail.Absent | Detail.Loading | Detail.Failed _ -> Alcotest.fail "retirement erased A's detail");
+  state.workspace_identity <- next_workspace_identity ~previous:state.workspace_identity
+      ~local_base_path:state.local_base_path (Ok (identity "/workspace/a"));
+  Alcotest.(check bool) "reconfirming A cannot revive B's old read stamp" false
+    (admitted Workspace_observation);
+  Alcotest.(check bool) "a read dispatched during uncertainty cannot enter on reconfirmation" false
+    (workspace_reply_admitted state ~authority ~reading:None ~kind:Workspace_observation);
+  let refreshed = begin_read () in
+  Alcotest.(check bool) "reconfirmed reads get a fresh Board request" false
+    (Detail.same_request delayed refreshed);
+  Alcotest.(check bool) "new confirmed read is admitted" true
+    (workspace_reply_admitted state ~authority ~reading:(Some state.workspace_read_authority)
+      ~kind:Workspace_observation);
+  state.board_detail <- Detail.complete state.board_detail refreshed (Ok (a, [], None))
+
+let test_operation_receipt_outlives_queued_followup_read () =
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
+      ~port:0 ~refresh_interval:0. () in
+  state.server_identity <- Some (identity "/workspace/a");
+  state.workspace_identity <- Workspace_identity_match;
+  let authority = state.workspace_authority in
+  let reading = Some state.workspace_read_authority in
+  (* The POST has completed; its later GET has produced B's snapshot and
+     the combined result is already queued, before health failure applies. *)
+  let queued = ("saved-A-revision", Ok "B's follow-up snapshot") in
+  state.workspace_identity <- next_workspace_identity ~previous:state.workspace_identity
+      ~local_base_path:state.local_base_path (Error "health failed");
+  suspend_workspace_readings state;
+  state.workspace_identity <- next_workspace_identity ~previous:state.workspace_identity
+      ~local_base_path:state.local_base_path (Ok (identity "/workspace/a"));
+  let receipt, observation = workspace_operation_reply state ~authority ~reading queued in
+  Alcotest.(check string) "POST revision receipt survives reconfirmation" "saved-A-revision" receipt;
+  Alcotest.(check bool) "queued GET snapshot stays retired after A returns" true (Result.is_error observation);
+  let fresh_receipt, fresh_observation = workspace_operation_reply state ~authority
+      ~reading:(Some state.workspace_read_authority) ("next-receipt", Ok "A's current snapshot") in
+  Alcotest.(check string) "fresh receipt retained" "next-receipt" fresh_receipt;
+  Alcotest.(check (result string string)) "new epoch can observe A" (Ok "A's current snapshot") fresh_observation;
+  let module Login = Masc_tui_account_login in
+  let view = Login.create "test" in
+  view.phase <- Login.Finished {saved=Login.Saved_verified;
+    activation=Login.Active {exact_output_available=true}; refresh_failed=false};
+  suspend_account_login_read view;
+  (match view.phase with
+   | Login.Finished {saved=Login.Saved_verified; activation=Login.Active _; refresh_failed=true} -> ()
+   | _ -> Alcotest.fail "retired account inventory lost the save/activation receipt")
+
+let test_unknown_voice_save_read_retirement () =
+  let open Masc_tui_types in
+  let module Wizard = Masc_tui_voice_wizard_session in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
+      ~port:0 ~refresh_interval:0. () in
+  let opened = Wizard.voice_wizard_open ~section:Voice_setup.Tts
+      ~provider:Voice_wizard.Elevenlabs ~revision:"before-save" in
+  let sending = Wizard.voice_wizard_sending opened ~request:7 in
+  state.voice_wizard <- Some sending;
+  suspend_workspace_readings state;
+  (match state.voice_wizard with
+   | Some {vws_save=Wizard.Save_sending 7; _} -> ()
+   | _ -> Alcotest.fail "admitted voice save lost its receipt owner");
+  let unanswered = match Wizard.voice_wizard_after_save sending ~request:7
+      (Wizard.Save_unanswered_reply "connection lost") with
+    | Some session -> session | None -> Alcotest.fail "save receipt lost" in
+  let check_retired () = match state.voice_wizard with
+    | Some {vws_save=Wizard.Save_needs_reopen _; vws_revision; vws_draft; _} ->
+        Alcotest.(check string) "original revision retained" "before-save" vws_revision;
+        Alcotest.(check bool) "voice draft retained" true (vws_draft = opened.vws_draft)
+    | _ -> Alcotest.fail "unanswered save still waits for a retired reread" in
+  state.voice_wizard <- Some unanswered;
+  suspend_workspace_readings state;
+  check_retired ();
+  (* The receipt can first arrive after retirement; refused read admission
+     must settle only its observation owner, leaving the save unknown. *)
+  state.voice_wizard <- Some unanswered;
+  suspend_voice_wizard_read state;
+  check_retired ()
+
+let test_nested_read_owners_retire_without_losing_selection () =
+  let open Masc_tui_types in
+  let module Wizard = Masc_tui_voice_wizard_session in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
+      ~port:0 ~refresh_interval:0. () in
+  let opened = Wizard.voice_wizard_open ~section:Voice_setup.Tts
+      ~provider:Voice_wizard.Elevenlabs ~revision:"saved" in
+  state.voice_wizard <- Some {opened with vws_save=Wizard.Save_probing 7};
+  state.runtime_catalog_reading <- Runtime_catalog_loading;
+  let generation = state.runtime_catalog_generation in
+  state.context_inspector_open <- true;
+  state.context_inspector_keeper <- Some "alpha";
+  state.context_inspector_loading <- true;
+  state.schedule_detail_id <- Some "schedule-a";
+  state.schedule_wake_history_inflight <- Some "schedule-a";
+  state.patch_modal_open <- true;
+  state.patch_modal_path <- Some "lib/example.ml";
+  state.resource_pending_uri <- Some "masc://selected/resource";
+  state.prompts_librarian_input_requested <- Some "librarian-input";
+  state.prompts_librarian_input_loading <- true;
+  suspend_workspace_readings state;
+  Alcotest.(check (option string)) "resource URI survives retirement" (Some "masc://selected/resource") state.resource_pending_uri;
+  Alcotest.(check (option string)) "Librarian target survives retirement" (Some "librarian-input") state.prompts_librarian_input_requested;
+  Alcotest.(check bool) "catalog owner can be restarted" true
+    (state.runtime_catalog_reading = Runtime_catalog_unread);
+  Alcotest.(check bool) "catalog generation retired" true
+    (state.runtime_catalog_generation > generation);
+  Alcotest.(check bool) "context owner released" false state.context_inspector_loading;
+  Alcotest.(check (option string)) "context selection retained" (Some "alpha") state.context_inspector_keeper;
+  Alcotest.(check (option string)) "schedule owner released" None state.schedule_wake_history_inflight;
+  Alcotest.(check (option string)) "schedule selection retained" (Some "schedule-a") state.schedule_detail_id;
+  Alcotest.(check (option string)) "patch selection retained" (Some "lib/example.ml") state.patch_modal_path;
+  (match state.voice_wizard with
+   | Some ({vws_save=Wizard.Save_settled; _} as session) ->
+       Alcotest.(check bool) "retired probe cannot populate the wizard" true
+         (Option.is_none (Wizard.voice_wizard_after_probe session ~request:7 (Ok ["foreign endpoint"])));
+       Alcotest.(check bool) "saved draft is preserved" true (session.vws_draft = opened.vws_draft)
+   | _ -> Alcotest.fail "probe still owns the saved wizard")
+
+let test_discarded_bundle_retires_readings_before_reconfirming_a () =
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
+      ~port:0 ~refresh_interval:0. () in
+  state.server_identity <- Some (identity "/workspace/a");
+  state.workspace_identity <- Workspace_identity_match;
+  let authority = state.workspace_authority in
+  let reading = Some state.workspace_read_authority in
+  Masc_tui_message_input.insert state.msg_input "retained draft";
+  (* The refresh crossed B, but its final probe already sees A again. *)
+  let latest = retire_refused_workspace_readings state ~detail:"mixed workspace bundle"
+      (Some (Ok (identity "/workspace/a"))) in
+  state.workspace_identity <- next_workspace_identity ~previous:state.workspace_identity
+      ~local_base_path:state.local_base_path latest;
+  Alcotest.(check bool) "A is confirmed again" true (server_authority_ready state);
+  Alcotest.(check bool) "independent B response cannot enter the reconfirmed A screen" false
+    (workspace_reply_admitted state ~authority ~reading ~kind:Workspace_observation);
+  Alcotest.(check bool) "A's admitted operation receipt is retained" true
+    (workspace_reply_admitted state ~authority ~reading ~kind:Workspace_operation_outcome);
+  Alcotest.(check string) "draft survives discarded bundle" "retained draft"
+    (Masc_tui_message_input.contents state.msg_input)
+
+let test_preset_selection_waits_without_owning_an_unconfirmed_read () =
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
+      ~port:0 ~refresh_interval:0. () in
+  state.server_identity <- Some (identity "/workspace/a");
+  state.workspace_identity <- next_workspace_identity ~previous:Workspace_identity_match
+      ~local_base_path:state.local_base_path (Error "health unavailable");
+  Alcotest.(check bool) "unconfirmed selection does not start a read" true
+    (Option.is_none (begin_preset_detail_read state ~name:"selected-preset"));
+  Alcotest.(check bool) "no stuck Loading owner is created" true
+    (Option.is_none (Masc_tui_fetched.current_request state.preset_detail));
+  state.workspace_identity <- Workspace_identity_match;
+  Alcotest.(check bool) "same preset can load once A is confirmed" true
+    (Option.is_some (begin_preset_detail_read state ~name:"selected-preset"));
+  Alcotest.(check bool) "an admitted read is still deduplicated" true
+    (Option.is_none (begin_preset_detail_read state ~name:"selected-preset"))
+
+let test_pending_nested_reader_intents_survive_repeated_suspension () =
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
+      ~port:0 ~refresh_interval:0. () in
+  state.msg_target_keeper_name <- Some "alpha";
+  state.msg_older_cursor <- Some 42.;
+  state.msg_older_loading <- true;
+  let loading, _ = match Masc_tui_fetched.start ~equal:String.equal state.code_file ~key:"src/a.ml" with
+    | Started (reading, request) -> reading, request
+    | Already_loading -> Alcotest.fail "unexpected initial file owner" in
+  state.code_file <- loading;
+  let installer = Masc_tui_lane_installer.browse () in
+  let installer = Result.get_ok (Masc_tui_lane_installer.begin_catalog ~request_id:7 ~directory:(Some "packages") installer) in
+  state.lane_addons <- Some {state.lane_addons_cached with generation=7; loading=true; installer=Some installer};
+  state.lane_addons_reading <- Some 7;
+  suspend_workspace_readings state;
+  suspend_workspace_readings state;
+  Alcotest.(check (option (pair string (float 0.)))) "older page cursor survives" (Some ("alpha",42.)) state.msg_older_resume;
+  Alcotest.(check (option string)) "pending file key survives" (Some "src/a.ml") (Masc_tui_fetched.current_key state.code_file);
+  Alcotest.(check bool) "package catalog parameters survive" true
+    (state.lane_installer_read_resume = Some (7, Masc_tui_lane_installer.Read_catalog (Some "packages")))
+
+let test_task_receipts_wait_for_identity_and_roster () =
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
+      ~port:0 ~refresh_interval:0. () in
+  let origin = identity "/workspace/a" in
+  state.server_identity <- Some origin;
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "health timed out";
+  let handoff = Task_handoff {keeper="alpha"; task_id="task-9"; title="accepted"; body="body"} in
+  let cancelled = Task_cancel_refresh "task-8" in
+  remember_task_followup state ~expected_workspace:origin handoff;
+  remember_task_followup state ~expected_workspace:origin cancelled;
+  let run, withdrawn = take_task_followups state ~ready:(fun _ -> true) in
+  Alcotest.(check bool) "no sends or foreign-workspace claims while unconfirmed" true
+    (run = [] && withdrawn = [] && List.length state.pending_task_followups = 2);
+  suspend_workspace_readings state;
+  state.workspace_identity <- Workspace_identity_match;
+  let run, withdrawn = take_task_followups state ~ready:(function
+    | Task_handoff _ -> false | Task_cancel_refresh _ -> true) in
+  Alcotest.(check bool) "cancel refresh resumes while handoff waits for roster" true
+    (run = [cancelled] && withdrawn = [] && List.length state.pending_task_followups = 1);
+  let run, withdrawn = take_task_followups state ~ready:(fun _ -> true) in
+  Alcotest.(check bool) "same workspace resumes the original handoff" true
+    (run = [handoff] && withdrawn = []);
+  Alcotest.(check bool) "later refresh cannot send it twice" true
+    (take_task_followups state ~ready:(fun _ -> true) = ([], []));
+  remember_task_followup state ~expected_workspace:origin handoff;
+  state.server_identity <- Some {origin with sid_masc_root="/workspace/other/.masc";
+    sid_state_ready=Some false};
+  state.workspace_identity <- Workspace_identity_unread;
+  let run, withdrawn = take_task_followups state ~ready:(fun _ -> true) in
+  Alcotest.(check bool) "booting foreign root withdraws handoff" true
+    (run = [] && withdrawn = [handoff]);
+  state.server_identity <- Some origin;
+  state.workspace_identity <- Workspace_identity_match;
+  Alcotest.(check bool) "return to A never resurrects withdrawn task" true
+    (take_task_followups state ~ready:(fun _ -> true) = ([], []));
+  remember_task_followup state ~expected_workspace:origin handoff;
+  let Workspace_authority generation = state.workspace_authority in
+  state.workspace_authority <- Workspace_authority (generation + 1);
+  Alcotest.(check bool) "A-B-A with unchanged final paths still retires original authority" true
+    (take_task_followups state ~ready:(fun _ -> true) = ([], [handoff]))
+
+let test_account_read_intents_survive_repeated_suspension () =
+  let open Masc_tui_types in
+  let module Login = Masc_tui_account_login in
+  let provider : Login.provider = {id="codex"; label="Codex"; client=Login.Codex;
+    origin=Login.Configured; enabled=true; setup_supported=true} in
+  List.iter (fun action ->
+    let state = create_state ~workspace:"a" ~port:0 ~refresh_interval:0. () in
+    let view = Login.create "codex" in
+    view.generation <- 7;
+    view.account_ref <- Some "selected-account";
+    view.login_id <- Some "selected-session";
+    view.provider <- Some provider;
+    state.account_login <- Some view;
+    state.account_login_readings <- [view, 7, action];
+    suspend_workspace_readings state;
+    suspend_workspace_readings state;
+    Alcotest.(check bool) "exact read survives repeated retirement" true
+      (match state.account_login_read_resume with
+       | [(pending, generation, saved_action)] ->
+           pending == view && generation = 7 && saved_action = action
+       | _ -> false);
+    Alcotest.(check (option string)) "selected account is preserved"
+      (Some "selected-account") view.account_ref;
+    Alcotest.(check bool) "selected provider is preserved" true
+      (view.provider = Some provider);
+    let saving = Login.create "codex" in
+    saving.generation <- 8;
+    saving.phase <- Login.Saving;
+    state.account_login_readings <- [saving, 7, Login.Inventory];
+    suspend_workspace_readings state;
+    Alcotest.(check bool) "superseded read cannot retire newer mutation" true
+      (saving.phase = Login.Saving && saving.generation = 8);
+    Alcotest.(check int) "superseded read is not queued" 1
+      (List.length state.account_login_read_resume))
+    [Login.Inventory; Discover; Recover;
+     Preview_removal {provider; refused=Some "retained refusal"}]
+
+let test_unsent_resource_and_log_intents_survive_reconfirmation () =
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
+      ~port:0 ~refresh_interval:0. () in
+  state.server_identity <- Some (identity "/workspace/a");
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "health failed";
+  state.resource_content <- Some ("masc://old", []);
+  state.resource_scroll <- 12;
+  retain_resource_read state ~uri:"masc://new";
+  retain_sandbox_log_read state ~keeper_name:"selected-keeper";
+  Alcotest.(check bool) "intent does not authorize network reads" false
+    (server_authority_ready state);
+  Alcotest.(check bool) "new selection cannot display old resource" true
+    (state.resource_content = None && state.resource_scroll = 0);
+  suspend_workspace_readings state;
+  state.workspace_identity <- Workspace_identity_match;
+  Alcotest.(check (option string)) "resource recovery selects the unsent URI"
+    (Some "masc://new") state.resource_pending_uri;
+  Alcotest.(check (option string)) "first log open survives without a previous result"
+    (Some "selected-keeper") state.keeper_sandbox_logs_requested;
+  Alcotest.(check bool) "unsent logs retain their originating workspace" true
+    (state.keeper_sandbox_logs_origin = Some (identity "/workspace/a"));
+  reconcile_detail_intent_origins state (Ok (identity "/workspace/b"));
+  Alcotest.(check (option string)) "foreign workspace cannot inherit unsent logs"
+    None state.keeper_sandbox_logs_requested
+
+let test_effect_observations_resume_without_repeating_effects () =
+  let open Masc_tui_types in
+  let module Browser = Browser_lane_view in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
+      ~port:0 ~refresh_interval:0. () in
+  state.server_identity <- Some (identity "/workspace/a");
+  state.workspace_identity <- Workspace_identity_match_unconfirmed "health failed";
+  let initial = Browser.create () in
+  let prior = {initial with selected_tab=Some 7} in
+  state.browser_lane_generation <- 3;
+  state.browser_lane <- Some {prior with load=Browser.Failed "observation retired"};
+  let gestures = [Browser.Scene_scroll {tab_id=7; document_id="doc";
+      expected_url="https://example.test"; scene_view=Browser_lane.Content; scope=None; delta_y=100};
+    Browser.Scene_click {tab_id=7; document_id="doc"; node_id="node";
+      expected_url="https://example.test"; scope=None}] in
+  List.iter (fun gesture ->
+    let read = match Browser.observation_after_effect gesture with
+      | Some read -> read | None -> Alcotest.fail "effect lost its observation intent" in
+    Alcotest.(check bool) "the retry is a read, never the gesture" true
+      (Browser.operation_is_read read);
+    Alcotest.(check bool) "settled matching effect retains its observation" true
+      (retain_operation_observation state (Browser_scene_observation (3, prior, read)));
+    suspend_workspace_readings state;
+    Alcotest.(check bool) "repeated uncertainty preserves selected scene read" true
+      (match state.browser_lane_read_resume with
+       | Some (3, _, Browser.Scene_refresh {tab_id=7; _}) -> true | _ -> false)) gestures;
+  state.browser_lane_generation <- 4;
+  Alcotest.(check bool) "late receipt cannot replace a newer selection" false
+    (retain_operation_observation state (Browser_scene_observation (3, prior, Browser.Scene_read 7)));
+  let panel = Masc_tui_lane_subscriptions.initial ~keepers:[] ~targets:[] in
+  let saved = {Masc_tui_lane_addons.initial with generation=9; loading=false;
+    subscription_panel=Some panel} in
+  state.lane_addons <- Some saved;
+  Alcotest.(check bool) "settled save retains only subscription inspection" true
+    (retain_operation_observation state (Lane_subscriptions_observation 9));
+  suspend_workspace_readings state;
+  state.workspace_identity <- Workspace_identity_match;
+  Alcotest.(check bool) "late save recovery targets open subscriptions panel" true
+    (state.lane_nested_read_resume = Some (9, Lane_subscriptions_read));
+  state.lane_addons <- Some {saved with generation=10};
+  Alcotest.(check bool) "old save cannot replace newer panel read" false
+    (retain_operation_observation state (Lane_subscriptions_observation 9))
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "detail focus waits for authoritative roster" `Quick
+      , [ Alcotest.test_case "unsent resource and log intents survive reconfirmation" `Quick
+            test_unsent_resource_and_log_intents_survive_reconfirmation
+        ; Alcotest.test_case "effect observations resume without repeating effects" `Quick
+            test_effect_observations_resume_without_repeating_effects
+        ; Alcotest.test_case "account read intents survive repeated suspension" `Quick
+            test_account_read_intents_survive_repeated_suspension
+        ; Alcotest.test_case "nested reader intents survive repeated suspension" `Quick
+            test_pending_nested_reader_intents_survive_repeated_suspension
+        ; Alcotest.test_case "task receipts wait for identity and roster" `Quick
+            test_task_receipts_wait_for_identity_and_roster
+        ; Alcotest.test_case "nested read owners retire without losing selection" `Quick
+            test_nested_read_owners_retire_without_losing_selection
+        ; Alcotest.test_case "discarded bundle retires readings before reconfirming A" `Quick
+            test_discarded_bundle_retires_readings_before_reconfirming_a
+        ; Alcotest.test_case "preset selection waits without an unconfirmed read" `Quick
+            test_preset_selection_waits_without_owning_an_unconfirmed_read
+        ; Alcotest.test_case "operation receipt outlives queued follow-up read" `Quick
+            test_operation_receipt_outlives_queued_followup_read
+        ; Alcotest.test_case "unknown voice save read retirement" `Quick
+            test_unknown_voice_save_read_retirement
+        ; Alcotest.test_case "detail focus waits for authoritative roster" `Quick
             test_detail_focus_waits_for_authoritative_roster
         ; Alcotest.test_case "same base and different MASC root retain separate inputs" `Quick
             test_same_base_with_different_masc_root_cannot_restore_inputs
@@ -255,6 +848,8 @@ let () =
             test_failed_probe_is_unread_not_stale
         ; Alcotest.test_case "canonical aliases match" `Quick
             test_workspace_identity_matches_canonical_paths
+        ; Alcotest.test_case "workspace identity follows the cluster selection" `Quick
+            test_workspace_identity_follows_the_cluster_selection
         ; Alcotest.test_case "mismatch preserves both paths" `Quick
             test_workspace_identity_mismatch_keeps_both_paths
         ; Alcotest.test_case "Broadcast retry uses verified workspace store" `Quick
@@ -263,5 +858,15 @@ let () =
             test_detail_intents_wait_for_comparable_identity
         ; Alcotest.test_case "local rows are unread until read" `Quick
             test_local_rows_are_unread_until_the_workspace_is_read
+        ; Alcotest.test_case "an unread after a match keeps it unconfirmed" `Quick
+            test_unread_after_a_match_keeps_it_unconfirmed
+        ; Alcotest.test_case "writes wait for a confirmed identity" `Quick
+            test_writes_wait_for_a_confirmed_identity
+        ; Alcotest.test_case "a missing path does not hide a mismatch" `Quick
+            test_partial_identity_keeps_definite_mismatches
+        ; Alcotest.test_case "deletion inventory waits for workspace reconfirmation" `Quick
+            test_deletion_inventory_waits_for_reconfirmed_workspace
+        ; Alcotest.test_case "uncertainty retires reads while admitted operations survive" `Quick
+            test_uncertain_identity_retires_reads_not_admitted_operations
         ] )
     ]

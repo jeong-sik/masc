@@ -3086,7 +3086,8 @@ let render_keeper_list (state : state) =
       match keeper_rows_page state ~error:keepers_error with
       | Page_empty -> Some (match state.workspace_identity with
           | Workspace_identity_mismatch _ -> "   server Keeper roster is empty"
-          | Workspace_identity_match | Workspace_identity_unread ->
+          | Workspace_identity_match | Workspace_identity_match_unconfirmed _
+          | Workspace_identity_unread ->
             "   no keeper metadata under .masc/keepers/")
       | Page_unread -> Some page_unread_note
       | Page_failed -> None
@@ -7950,7 +7951,7 @@ let harness_detail_pane (state : state) ~rows ~cols verdict buf =
        | goal_lines -> (Ansi.dim, "") :: goal_lines)
     |> judgement_detail_rows ~width:(max 1 (framed_inner_width cols))
   in
-  let content_height = max 1 (rows - 5) in
+  let content_height = max 1 (rows - framed_chrome_rows - 1) in
   let max_scroll = max 0 (List.length lines - content_height) in
   let scroll = max 0 (min state.harness_detail_scroll max_scroll) in
   let lines_window = Rows.of_list ~first:scroll ~height:content_height lines in
@@ -7959,16 +7960,14 @@ let harness_detail_pane (state : state) ~rows ~cols verdict buf =
     | Some (style, line) -> box_line_styled buf cols ~style line
     | None -> box_empty buf cols
   done;
+  (* Keep the reading inside the pane: the way out can occupy the entire
+     key footer at narrow widths, leaving no room for a trailing position. *)
+  box_line_styled buf cols ~style:Ansi.dim
+    (Printf.sprintf "  [rows %s]"
+       (Masc_tui_scroll.window_text ~scroll ~height:content_height
+          (List.length lines)));
   box_bottom buf cols;
-  (* A position, not a key. Packed into the hints string it was read as a key
-     item and dropped from the back before any of them, so the one screen that
-     exists for reading a ruling in full never said which part of it was on
-     screen -- at a hundred, a hundred and thirty and a hundred and sixty
-     columns alike. *)
-  ( scroll
-  , Some
-      (Masc_tui_scroll.window_text ~scroll ~height:content_height
-         (List.length lines)) )
+  scroll
 ;;
 
 (* The verdict list stays beside the verdict. A verdict is a judgement
@@ -7979,7 +7978,7 @@ let render_harness_detail (state : state) verdict =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
-  let scroll, position =
+  let scroll =
     if cols < keeper_split_threshold_cols then
       harness_detail_pane state ~rows ~cols verdict buf
     else begin
@@ -8015,7 +8014,7 @@ let render_harness_detail (state : state) verdict =
        it left out was the pair that answers a ruling -- [y / x] -- on the one
        screen that exists for reading a ruling in full. It also left out
        [[ / ]], which the dispatcher answers here and only here. *)
-    (footer_line state ~max_cells:cols ?position
+    (footer_line state ~max_cells:cols
        ~hints:(Masc_tui_keys.footer_hints ~detail_open:true Masc_tui_types.Harness));
   finish_surface state ~clamped:(Harness_detail_scroll scroll)
     ~surface_key:"harness-detail" ~rows:terminal_rows ~cols buf
@@ -8958,8 +8957,18 @@ let browser_lane_source_hint view =
 
 let browser_lane_fixed_rows view =
   (* Status, selection, tab, URL, divider and text position are always drawn.
-     A source hint contributes a row only when the selected node has one. *)
+     A source hint contributes a row only when the selected node has one, and
+     a refused gesture its rows until the next input. *)
   6 + (if Option.is_some (browser_lane_source_hint view) then 1 else 0)
+  + List.length (Browser_lane_view.unserved_rows view)
+
+(* The picker's rows besides its choices and what an empty connection list
+   says: the status row, the heading and the divider above the choices, and
+   the detail row for the highlighted choice below them. *)
+let browser_picker_frame_rows = 4
+
+(* The cells a BiDi host row has behind the surface's two-cell indent. *)
+let browser_host_row_cells ~cols = max 1 (framed_inner_width cols - 2)
 
 let browser_lane_visible_rows (state : state) ~terminal_rows view =
   let body_rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -8993,7 +9002,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
   in
   let title = Printf.sprintf "%s  %s  %s[%s]%s"
       (screen_title " MASC Browser Lane") (source_name view.source ^ " · "
-       ^ Option.value (browser_label view) ~default:"no browser")
+       ^ Option.value (connection_label view) ~default:"no browser")
       read_style (Browser_lane_view.read_status_label read_status) Ansi.reset in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"connectors" ~title
     ~hints:(match view.client_picker, view.url_draft with
@@ -9077,23 +9086,71 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       | Some cursor ->
           c.push_styled ~style:(Theme.info ()) "  Choose browser · separate sessions do not share login";
           c.push_divider ();
-          let room = max 1 (budget - 4) in
+          (* The rows under the choices cannot be scrolled to. Where they
+             report a BiDi host, one that runs or ran, the first of them
+             keep a place however many choices there are, with the row that
+             says more is hidden, unless that would leave too few choices to
+             choose from. *)
+          let host_rows =
+            Browser_lane_view.bidi_host_rows ~width:(browser_host_row_cells ~cols) view in
+          let empty_line = browser_lane_picker_empty_line view in
+          let extension_rows =
+            if Option.is_some empty_line && awaiting_browser view then
+              [ Theme.info (), "  The MASC extension and its registered native host connect a live browser."
+              ; Theme.recede (), "  " ^ transport_setup_row [Browser_lane.Web_extension]
+              ; Theme.recede (), "  Enable the extension in your Zen/Firefox profile, then r:refresh." ]
+            else [] in
+          let choices = browser_choices view in
+          let reports_a_host = Browser_lane_view.host_rows_report_a_host view in
+          let room =
+            Browser_lane_view.picker_choice_rows
+              ~rows:(budget - browser_picker_frame_rows - List.length (Option.to_list empty_line))
+              ~choices:(List.length choices)
+              ~below:(if reports_a_host
+                      then List.length host_rows + List.length extension_rows else 0) in
           let start = max 0 (cursor - room + 1) in
-          browser_choices view |> List.iteri (fun index choice ->
+          choices |> List.iteri (fun index choice ->
             if index >= start && index < start + room then
               let line = "  " ^ Terminal_text.single_line (browser_choice_label choice)
                 ^ (if browser_choice_selected view choice then " (current)" else "") in
               if index = cursor then c.push_selected line
               else c.push_styled ~style:Ansi.reset line);
-          (match browser_lane_picker_empty_line view with
-           | None -> ()
-           | Some line ->
-            c.push_styled ~style:(Theme.recede ()) line;
-            if awaiting_browser view then (
-              c.push_styled ~style:(Theme.info ()) "  Live requires the MASC extension and its registered native host.";
-              c.push_styled ~style:(Theme.recede ()) "  Setup: connectors/browser/host/README.md";
-              c.push_styled ~style:(Theme.recede ()) "  Enable the extension in your Zen/Firefox profile, then r:refresh."))
+          (* One row whatever the choice, so the rows below do not move with
+             the cursor. *)
+          c.push_styled ~style:(Theme.recede ())
+            ("  " ^ Option.value ~default:""
+               (Option.bind (List.nth_opt choices cursor) browser_choice_detail));
+          Option.iter (c.push_styled ~style:(Theme.recede ())) empty_line;
+          (* A terminal too short for everything loses rows from the end.
+             With no host yet, the host's rows only say how one is started:
+             they take no row from what is above them, and are drawn where
+             the screen has rows left. Rows that report a host come before
+             the rows on the extension. On a screen that holds all of both
+             the host's rows stay together; on a shorter one the host's
+             first rows are followed by the extension's, and what is cut
+             from the end is the rest of the host's. *)
+          let draw_host rows =
+            List.iter (fun row -> c.push_styled ~style:(Theme.recede ()) ("  " ^ row)) rows in
+          let draw_extension () =
+            List.iter (fun (style, row) -> c.push_styled ~style row) extension_rows in
+          let above =
+            browser_picker_frame_rows + min room (List.length choices)
+            + List.length (Option.to_list empty_line) in
+          let extension = List.length extension_rows in
+          if not reports_a_host then (
+            draw_extension ();
+            if budget > above + extension then draw_host host_rows)
+          else if above + List.length host_rows + extension <= budget then (
+            draw_host host_rows;
+            draw_extension ())
+          else (
+            let head, rest = Browser_lane_view.picker_host_head host_rows in
+            draw_host head;
+            draw_extension ();
+            draw_host rest)
       | None ->
+      List.iter (fun row -> c.push_styled ~style:(Theme.warn ()) ("  " ^ row))
+        (Browser_lane_view.unserved_rows view);
       c.push_styled ~style:(Theme.info ())
         (match view.url_draft with
          | Some draft -> browser_lane_url_line ~cols draft
@@ -9105,10 +9162,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
                     label (view.scene_cursor + 1) (List.length (scene_targets view)) (Terminal_text.single_line node.text)
               | None -> "  No observed elements in this viewport • Ctrl-O:image")
          | None -> match view.source with
-             | Live ->
-               (match browser_label view with
-                | Some browser -> "  Live " ^ browser ^ " • b:choose browser • a:automation • c:stagehand"
-                | None -> "  Live • b:choose browser • a:automation • c:stagehand")
+             | Live -> live_connection_row view
              | Automation -> "  Independent browser • b:choose browser • g:URL • o:open / x:close • l:live • c:stagehand"
              | Stagehand -> "  Stagehand Chromium • b:choose browser • g:URL • o:open / x:close • l:live • a:automation");
       let tabs, page = match view.reading with
@@ -9182,7 +9236,7 @@ let render_browser_history (state : state) (history : Browser_history.t) =
   let terminal_rows, cols = get_terminal_size () in
   let title = screen_title (" MASC Browser Lane · " ^ Terminal_text.single_line history.keeper_name ^ " · retained observations") in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"connectors" ~title
-    ~hints:"[/]:observation  j/k:scroll  y:copy record  r:reload list  h/Esc:back to browser"
+    ~hints:"[/]:observation  j/k:scroll  y:copy record  r:reload list  R:recheck workspace  h/Esc:back to browser"
     ~body:(fun ~budget c ->
       let status = match history.content with
         | Listing -> "Reading the Keeper's recent tool receipts…"
@@ -10255,6 +10309,8 @@ let render_runtime (state : state) =
                    ~detail:(Terminal_text.single_line (Masc_tui_theme.strip_sgr detail))) in
                if index + scroll = state.runtime_cursor then
                  c.push_selected (Masc_tui_theme.strip_sgr line)
+               else if Masc_tui_types.runtime_row_deemphasized state runtime then
+                 c.push_styled ~style:(Theme.recede ()) (Masc_tui_theme.strip_sgr line)
                else c.push line)
       | Masc_tui_types.Runtime_lanes ->
       match Rows.at candidates_window (index + scroll) with
@@ -10329,6 +10385,8 @@ let render_runtime (state : state) =
               ~detail:(Terminal_text.single_line (Masc_tui_theme.strip_sgr detail))) in
           if index + scroll = state.runtime_cursor then
             c.push_selected (Masc_tui_theme.strip_sgr line)
+          else if Masc_tui_types.runtime_row_deemphasized state runtime then
+            c.push_styled ~style:(Theme.recede ()) (Masc_tui_theme.strip_sgr line)
           else c.push line
     done;
 )
@@ -12028,13 +12086,13 @@ let preset_detail_lines (state : state) ~cols ~selected =
        if String.equal line "" then [""]
        else Masc_tui_text_block.rows ~max_cells:(max 1 (framed_inner_width cols - 2)) line)
 
-let preset_pane_heights (state : state) ~rows ~count =
+let preset_pane_heights (state : state) ~rows ~count ~presets_count =
   let error_rows = if Option.is_some state.presets_error then 1 else 0 in
   let entry_rows = if Option.is_some state.preset_save_draft then 1 else 0 in
   (* Top, title, divider, list/detail divider, bottom, and footer. The error
      is outside the selection list, so a retained list keeps its full slot. *)
   let combined_height = max 2 (rows - 6 - error_rows - entry_rows) in
-  let list_height = min 8 (max 1 (combined_height / 3)) in
+  let list_height = min (max 1 presets_count) (min 8 (max 1 (combined_height / 3))) in
   let detail_rows = max 1 (combined_height - list_height) in
   let detail_height = Masc_tui_scroll.content_height ~rows:detail_rows ~chrome:0
       ~count ~preview_keep:None ~overflow_takes_row:true
@@ -12049,7 +12107,8 @@ let presets_viewport (state : state) =
   let selected = List.nth_opt presets cursor in
   let count = List.length (preset_detail_lines state ~cols ~selected) in
   let _, height = preset_pane_heights state
-      ~rows:(Masc_tui_types.surface_body_rows state ~terminal_rows) ~count in
+      ~rows:(Masc_tui_types.surface_body_rows state ~terminal_rows) ~count
+      ~presets_count:(List.length presets) in
   count, height
 
 let render_presets (state : state) =
@@ -12079,7 +12138,7 @@ let render_presets (state : state) =
   box_divider buf cols;
   let detail = preset_detail_lines state ~cols ~selected in
   let count = List.length detail in
-  let list_height, detail_height = preset_pane_heights state ~rows ~count in
+  let list_height, detail_height = preset_pane_heights state ~rows ~count ~presets_count:total in
   let preset_rows = list_height in
   let first = if cursor < preset_rows then 0 else cursor - preset_rows + 1 in
   (match state.presets_error with
@@ -12312,6 +12371,49 @@ let config_path_note (state : state) =
   | None, None ->
       Ansi.dim ^ title_missing_reading ~error:None ^ Ansi.reset
 
+(* A provider id such as [codex_727e6d05] does not say which account it is,
+   and one account can sit under several ids. The Models pane names the
+   account from the account-email reading: a short label beside every
+   provider id, and the whole email on the selected binding. Drawing and
+   scroll arithmetic below use these same rows and these same detail lines. *)
+let config_models_drawn_rows (state : state) =
+  List.map
+    (fun (row : Masc_tui_model_runtime_table.row) ->
+      match fst (models_source_account_reading ~provider:row.provider state.runtime_config_view) with
+      | Some email ->
+          { row with
+            account_label =
+              Some
+                (Masc_tui_model_runtime_table.account_label_of_email
+                   (Terminal_text.single_line email))
+          }
+      | None -> row)
+    state.config_models_rows
+
+(* How many Keepers already sit on the selected login is the reading that was
+   missing on 2026-10-08, when fourteen were moved onto one account. Only a
+   complete roster is counted: a partial one would read as fewer Keepers. *)
+let config_models_detail (state : state) (row : Masc_tui_model_runtime_table.row) =
+  let account_email, account_notes =
+    models_source_account_reading ~provider:row.provider state.runtime_config_view in
+  let keepers =
+    match state.keeper_roster with
+    | Masc_tui_keeper_control.Roster_complete rows ->
+        Some
+          (Masc_tui_model_runtime_table.keepers_on_login
+             ~rows:state.config_models_rows
+             ~assignments:
+               (List.map
+                  (fun (keeper : Masc.Tui_decode.keeper_runtime) ->
+                    keeper.kr_name, keeper.kr_runtime_id)
+                  rows)
+             row)
+    | Masc_tui_keeper_control.Roster_unobserved
+    | Masc_tui_keeper_control.Roster_partial _
+    | Masc_tui_keeper_control.Roster_invalid _ -> None
+  in
+  account_notes @ Masc_tui_model_runtime_table.detail_lines ?account_email ?keepers row
+
 (* The model knobs sit in different tables -- [reasoning-effort] and
    [temperature] under [models.NAME], [max-tokens] under
    [PROVIDER.NAME] -- and runtime.toml is 2,300 lines, so reading it top to
@@ -12355,9 +12457,10 @@ let render_config_models (state : state) =
          box_empty buf cols
        done
    | None, Some _ ->
+       let drawn_rows = config_models_drawn_rows state in
        let detail =
          List.nth_opt state.config_models_rows state.config_models_cursor
-         |> Option.map Masc_tui_model_runtime_table.detail_lines
+         |> Option.map (config_models_detail state)
          |> Option.value ~default:[]
        in
        (* Keep the explanation attached to the selected row. Five rows are
@@ -12380,7 +12483,7 @@ let render_config_models (state : state) =
          Masc_tui_model_runtime_table.render
            ~width:(max 40 (cols - 6 - 2))
            ~pane:(max 1 (cols - 6 - 2))
-           state.config_models_rows
+           drawn_rows
        in
        let total = List.length table in
        (* The cursor walks bindings, not lines. In table mode line 0 is the
@@ -12390,13 +12493,13 @@ let render_config_models (state : state) =
           resize, which is the whole point of the transition. *)
        let pane_width = max 1 (cols - 6 - 2) in
        let table_mode =
-         Masc_tui_model_runtime_table.fits ~width:pane_width state.config_models_rows
+         Masc_tui_model_runtime_table.fits ~width:pane_width drawn_rows
        in
        let starts =
          if table_mode then []
          else
            Masc_tui_model_runtime_table.stacked_item_starts ~pane:pane_width
-             state.config_models_rows
+             drawn_rows
        in
        let cursor_line =
          if table_mode then state.config_models_cursor + 1
@@ -12487,7 +12590,7 @@ let config_models_scrolled (state : state) : scrolled =
   | None, Some _ ->
       let terminal_rows, cols = get_terminal_size () in
       let pane = max 1 (cols - 6 - 2) in
-      let rows = state.config_models_rows in
+      let rows = config_models_drawn_rows state in
       let document =
         Masc_tui_model_runtime_table.render ~width:(max 40 pane) ~pane rows
       in
@@ -12496,8 +12599,7 @@ let config_models_scrolled (state : state) : scrolled =
       in
       let detail_len =
         List.nth_opt rows state.config_models_cursor
-        |> Option.map (fun r ->
-               List.length (Masc_tui_model_runtime_table.detail_lines r))
+        |> Option.map (fun r -> List.length (config_models_detail state r))
         |> Option.value ~default:0
       in
       let detail_height = min detail_len (max 0 (content_height - 2)) in
@@ -12512,7 +12614,7 @@ let config_models_stacked (state : state) =
   let _, cols = get_terminal_size () in
   not
     (Masc_tui_model_runtime_table.fits ~width:(max 1 (cols - 6 - 2))
-       state.config_models_rows)
+       (config_models_drawn_rows state))
 
 let config_metadata_style = function
   | Masc_tui_runtime_config_view.Neutral -> Theme.recede ()
@@ -12990,6 +13092,12 @@ let render_config (state : state) =
          workspace under /var/folders both read as the same "/var/folders/
          bv/cjrbl01x52s…" while the age behind them left the row. A path's
          deciding end is its tail, which [fit_middle] keeps. *)
+      (match state.workspace_identity with
+       | Masc_tui_types.Workspace_identity_match_unconfirmed reason ->
+           c.push (Ansi.dim ^ "  (server identity unconfirmed: "
+                   ^ Terminal_text.single_line reason ^ "; last confirmed below)" ^ Ansi.reset)
+       | Workspace_identity_unread | Workspace_identity_match
+       | Workspace_identity_mismatch _ -> ());
       (match state.server_identity with
        | None -> c.push (Ansi.dim ^ "  (server identity unread)" ^ Ansi.reset)
        | Some identity ->

@@ -22,14 +22,14 @@ let make_grpc_heartbeat_ping ~config ~agent_name ~session_id =
     }
 ;;
 
-let handle_grpc_heartbeat_ack ~agent_name (ack : Masc_grpc_types.HeartbeatAck.t) =
+let handle_grpc_heartbeat_ack ~base_path ~agent_name (ack : Masc_grpc_types.HeartbeatAck.t) =
   Log.Keeper.debug
     "gRPC bidi heartbeat: agent=%s agents=%d tasks=%d directives=%d"
     agent_name
     ack.active_agent_count
     ack.pending_task_count
     (List.length ack.directives);
-  List.iter (Keeper_keepalive.process_directive ~agent_name) ack.directives
+  List.iter (Keeper_keepalive.process_directive ~base_path ~agent_name) ack.directives
 ;;
 
 let run_grpc_heartbeat_stream
@@ -50,7 +50,7 @@ let run_grpc_heartbeat_stream
       (try
          send (make_grpc_heartbeat_ping ~config ~agent_name ~session_id);
          match recv () with
-         | Ok ack -> handle_grpc_heartbeat_ack ~agent_name ack
+         | Ok ack -> handle_grpc_heartbeat_ack ~base_path:config.Workspace.base_path ~agent_name ack
          | Error err ->
            Otel_metric_store.inc_counter
              Keeper_metrics.(to_string HeartbeatFailures)

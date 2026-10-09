@@ -1149,6 +1149,9 @@ class AtomicChatFixture:
         request = json.loads(body)
         if request.get("action") != "resume":
             raise AssertionError(f"retained input expected explicit resume: {request!r}")
+        expected = self.submitted[0]["expected_workspace"]
+        if set(expected) != {"base_path", "masc_root"} or request.get("expected_workspace") != expected:
+            raise AssertionError(f"resume changed the retained input workspace: {request!r}")
         self.paused = False
         self.resume_confirmed = True
         return 200, {"ok": True}
@@ -1503,7 +1506,7 @@ def chat_reconcile_interaction(
             send_and_wait(process, master_fd, output, b"\r", "내 메시지 2건 대기".encode())
             completed = output.rfind(FRAME_END) + len(FRAME_END)
             pending_screen = screen_text(bytes(output[:completed]))
-            if "1건 전달 재확인 중".encode() not in pending_screen or "접수됨".encode() in pending_screen:
+            if "1건 전송 확인 중".encode() not in pending_screen or "처리 대기".encode() in pending_screen:
                 raise AssertionError("unknown admission was presented as confirmed queued: " + repr(pending_screen))
             before_release = [
                 json.loads(body).get("message")
@@ -1848,26 +1851,41 @@ def chat_visibility_modes_interaction(
             )
         if b"2 reasoning steps" not in initial or b"THINKING" not in initial:
             raise AssertionError(f"folded reasoning was not identifiable: {initial!r}")
-        # The skill row leads with its mark, lane label and the
-        # skill's name, with the badge padding and SGR runs between -- the
-        # same token-split shape the tool-lane needles above take, because
-        # a literal "◆ ci-red-attribution" never exists as contiguous
-        # bytes. The rail is a token of its own, the way " · " is above: a
-        # needle anchored on the gutter mark crosses into the body, and
-        # Skill rows are Shade_quoted, so the renderer draws "│" (>= 0x80,
-        # outside the gap class) between badge padding and body.
-        # Body-anchored needles (✗, 씀, proof) never cross it and keep the
-        # plain gap.
-        if re.search(
-            "◆".encode()
-            + rb"[\x1b\x20-\x7e]*?"
-            + "│".encode()
-            + rb"[\x1b\x20-\x7e]*?"
-            + rb"ci-red-attribution",
-            initial,
-        ) is None:
+        # The skill row and its bold name must belong to one turn on the
+        # completed screen, not separate turns or historical frames. The
+        # conversation draws no TURN heading; a turn is one rail block that
+        # opens on ╭ and closes on ╰, and a one-row turn stands alone on ╶.
+        styled_rows = screen_rows(completed, preserve_styles=True)
+        turn_blocks: list[list[int]] = []
+        open_block: list[int] = []
+        for row in sorted(
+            row for row in observed_rows if title_row < row < composer_row
+        ):
+            text = observed_rows[row]
+            if "╭".encode() in text or "╶".encode() in text:
+                open_block = [row]
+            elif open_block:
+                open_block.append(row)
+            if open_block and ("╰".encode() in text or "╶".encode() in text):
+                turn_blocks.append(open_block)
+                open_block = []
+        skill_in_turn = False
+        for block in turn_blocks:
+            skill_rows = [
+                row for row in block
+                if re.search("◆\\s+SKILL".encode(), observed_rows[row])
+            ]
+            if skill_rows and any(
+                b"\x1b[1mci-red-attribution" in styled_rows.get(row, b"")
+                for row in block
+                if row >= skill_rows[0]
+            ):
+                skill_in_turn = True
+                break
+        if not skill_in_turn:
             raise AssertionError(
-                f"the exact Skill evidence did not start its turn: {initial!r}"
+                "the completed Skill TURN did not contain its bold skill name: "
+                f"{styled_rows!r}"
             )
         # How far one invocation got is not on the resting row any more:
         # the row stands for every trigger of that skill.
@@ -1875,8 +1893,6 @@ def chat_visibility_modes_interaction(
             raise AssertionError(
                 f"the compact skill row still spells a lifecycle: {initial!r}"
             )
-        if b"\x1b[1mci-red-attribution" not in initial:
-            raise AssertionError(f"the Skill name was not bold: {initial!r}")
         # The rest of the skill row rides the tool toggle now: the action
         # rows and the proof line exist only behind Ctrl-D, so the compact
         # frame must not carry them. Their presence is waited for below,
@@ -2485,12 +2501,46 @@ def message_origin_badge_interaction(
     draft_frame = send_and_wait(
         process, master_fd, output, b"draft-neutral", b"draft-neutral"
     )
-    # Restore only the foreground after the accented prompt. A full reset
-    # would erase the input surface background; accepting arbitrary SGR here
-    # could instead leave the draft tinted or clear its background with 49m.
-    if b"\x1b[96m  > \x1b[39mdraft-neutral" not in draft_frame:
+    # The prompt recedes (dim without a known palette). Reset its foreground
+    # and weight before the draft, restoring the exact same input background
+    # when one was projected. A missing restore, tint or dim leak must fail.
+    def text_style(prefix):
+        foreground, background, weight = None, None, 0
+        for match in re.finditer(rb"\x1b\[([0-9;]*)m", prefix):
+            codes = [int(part or b"0") for part in match[1].split(b";")]
+            index = 0
+            while index < len(codes):
+                code = codes[index]
+                if code == 0:
+                    foreground, background, weight = None, None, 0
+                elif code in (1, 2, 22):
+                    weight = 0 if code == 22 else code
+                elif code == 39:
+                    foreground = None
+                elif code == 49:
+                    background = None
+                elif 30 <= code <= 37 or 90 <= code <= 97:
+                    foreground = (code,)
+                elif 40 <= code <= 47 or 100 <= code <= 107:
+                    background = (code,)
+                elif code in (38, 48):
+                    width = {2: 5, 5: 3}[codes[index + 1]]
+                    color = tuple(codes[index:index + width])
+                    if code == 38:
+                        foreground = color
+                    else:
+                        background = color
+                    index += width - 1
+                index += 1
+        return foreground, background, weight
+
+    row = next(row for row in screen_rows(draft_frame, preserve_styles=True).values()
+               if b"draft-neutral" in row)
+    prompt_style = text_style(row[:row.index(b"  > ")])
+    draft_style = text_style(row[:row.index(b"draft-neutral")])
+    if draft_style != (None, prompt_style[1], 0):
         raise AssertionError(
-            f"chat composer did not restore default foreground while preserving its background: {draft_frame!r}"
+            f"chat composer did not restore neutral draft text and its background: {draft_frame!r}"
         )
     escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
     os.write(master_fd, b"q")

@@ -2211,7 +2211,7 @@ let test_keeper_stream_bridge_isolates_tool_blocks_across_messages () =
 
 let stream_text_deltas events =
   List.filter_map
-    (function Keeper_chat_events.Text_delta text -> Some text | _ -> None)
+    (function Keeper_chat_events.Text_delta {text=text; _} -> Some text | _ -> None)
     events
 
 let resolve_canonical_agent_core_stream_events events =
@@ -2249,7 +2249,11 @@ let test_keeper_stream_bridge_text_delta_passthrough_incremental () =
   in
   check (list string) "incremental deltas pass through in order"
     [ "Hello"; ""; " world"; "second block" ]
-    (stream_text_deltas events)
+    (stream_text_deltas events);
+  check (list (option int)) "bridge stamps its allocated scope on every text chunk"
+    [Some 0; Some 0; Some 0; Some 0]
+    (List.filter_map (function Keeper_chat_events.Text_delta {stream_scope; _} ->
+       Some stream_scope | _ -> None) events)
 
 let test_keeper_stream_pipeline_reconciles_cumulative_snapshot_once () =
   let open Agent_core.Types in
@@ -2447,9 +2451,9 @@ let test_keeper_stream_bridge_surfaces_agent_core_message_metadata () =
   in
   match events with
   | [ Keeper_chat_events.Agent_core_stream_message_start
-        { provider_message_id; model; usage = Some start_usage };
+        { stream_scope = 0; provider_message_id; model; usage = Some start_usage };
       Keeper_chat_events.Agent_core_stream_message_delta
-        { stop_reason = Some stop_reason; usage = Some delta_usage };
+        { stream_scope = 0; stop_reason = Some stop_reason; usage = Some delta_usage };
       Keeper_chat_events.Agent_core_stream_message_stop;
       Keeper_chat_events.Agent_core_stream_ping ] ->
       check string "provider message id" "msg-agent_core-1" provider_message_id;
@@ -2948,13 +2952,26 @@ let test_keeper_stream_bridge_preserves_native_tool_origin () =
         ; tool_call_id = Some "native-1"
         ; tool_call_name = Some "commandExecution"
         }
+    ; Native_tool_start native_start
     ; Agent_core_content_block_stop { index = 7 }
+    ; Native_tool_end native_end
     ] ->
     check string
       "typed native content origin"
       Runtime_native_tools.stream_content_type
-      content_type
-  | _ -> fail "native tool origin was rejected or promoted to a MASC tool"
+      content_type;
+    List.iter
+      (fun (label, (tool : Keeper_chat_events.native_tool)) ->
+        check int (label ^ " stream scope") 0 tool.occurrence.stream_scope;
+        check (option string) (label ^ " provider message id") None
+          tool.occurrence.provider_message_id;
+        check int (label ^ " block index") 7 tool.occurrence.block_index;
+        check (option string) (label ^ " tool id") (Some "native-1")
+          tool.tool_call_id;
+        check (option string) (label ^ " tool name") (Some "commandExecution")
+          tool.tool_call_name)
+      [ "native start", native_start; "native end", native_end ]
+  | _ -> fail "expected native lifecycle observations around the content block"
 
 let test_keeper_stream_bridge_rejects_tool_args_without_start () =
   let open Agent_core.Types in
@@ -3040,7 +3057,7 @@ let test_keeper_stream_bridge_rejects_reasoning_as_public_text () =
       ContentBlockStart {index=1; content_type="text"; tool_id=None; tool_name=None};
       ContentBlockDelta {index=1; delta=TextDelta "PUBLIC_ANSWER"} ] in
   check (list string) "valid signature preserves separate answer" ["PUBLIC_ANSWER"]
-    (List.filter_map (function Keeper_chat_events.Text_delta text -> Some text | _ -> None) valid);
+    (List.filter_map (function Keeper_chat_events.Text_delta {text=text; _} -> Some text | _ -> None) valid);
   check bool "valid reasoning has no protocol error" false
     (List.exists (function Keeper_chat_events.Agent_core_stream_protocol_error _ -> true | _ -> false) valid)
 

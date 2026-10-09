@@ -58,7 +58,7 @@ let test_single_and_stale_selection () = with_clients (fun _ connect ->
     (Lane.issue_for ~target:pinned ~verb:Lane.Tabs_list ~timeout_sec:0.1
      = Error (Lane.Selected_client_disconnected old.client_id));
   check bool "retired native identity cannot re-register" true
-    (Lane.take_command ~client_info:old ~window_sec:0.001 = Error "client_disconnected"))
+    (Lane.take_command ~client_info:old ~window_sec:0.001 = Error Lane.Client_retired))
 let test_expired_resolved_target_is_pre_dispatch () = with_clients (fun _ connect ->
   let info = connect Lane.Firefox in
   let pinned = target info.client_id in
@@ -103,29 +103,154 @@ let test_sources_and_live_policy () = with_clients (fun _ connect ->
   check bool "automation still needs its native executor" true
     (Lane.issue_automation ~verb:Lane.Tabs_list ~timeout_sec:0.1 = Lane.Lane_absent))
 
-let test_hover_uses_bidi_transport () = with_clients (fun sw connect ->
+(* One live verb for each capability, so a capability added to the lane has
+   to be given a verb here before this file's table checks pass. *)
+let viewport : Lane.Pointer.viewport =
+  {document_id="observed-page"; width=800.; height=600.; scroll_x=0.; scroll_y=0.}
+let point : Lane.Pointer.point = {x=0.5;y=0.5}
+let interact action = Lane.Page_interact {tab_id=2; expected_url=Some "https://example.org"; action}
+let verb_asking_for : Lane.live_capability -> Lane.verb = Lane.(function
+  | Tab_listing -> Tabs_list
+  | Text_read -> Page_read {tab_id=Some 2; max_chars=None}
+  | Document_source -> Page_document {tab_id=2}
+  | Element_inventory -> Page_elements {tab_id=Some 2}
+  | Viewport_capture -> Page_capture {tab_id=2}
+  | Scene_read -> Page_scene {tab_id=2; max_chars=1000; view=Content; scope=None}
+  | Dom_interaction -> interact (Click "#button")
+  | Point_click -> interact (Click_at {point;viewport})
+  | Point_scroll -> interact (Scroll_at {point;viewport;x=0;y=120})
+  | Trusted_hover -> interact (Hover_at {point;viewport})
+  | Trusted_drag -> interact (Drag {from=point;to_=point;viewport})
+  | Tab_activation -> interact Activate_tab)
+
+let capability = testable
+  (fun ppf value -> Format.pp_print_string ppf (Lane.live_capability_to_wire value)) ( = )
+
+let test_transport_table () =
+  let unserved transport = List.filter (fun capability ->
+    not (Lane.live_transport_serves transport capability)) Lane.all_of_live_capability in
+  check (list capability) "the extension has no pointer the browser trusts"
+    Lane.[Trusted_hover; Trusted_drag] (unserved Lane.Web_extension);
+  check (list capability) "the BiDi peer has no tab activation"
+    Lane.[Tab_activation] (unserved Lane.Webdriver_bidi);
+  List.iter (fun capability ->
+    check bool (Lane.live_capability_to_wire capability ^ " is reachable on some connection") true
+      (Lane.live_transports_serving capability <> []);
+    check bool (Lane.live_capability_to_wire capability ^ " is what its verb asks for") true
+      (Lane.live_capability (verb_asking_for capability) = Some capability))
+    Lane.all_of_live_capability
+
+(* Every transport and capability: served work reaches that connection's
+   queue, and unserved work is answered before anything is queued. *)
+let test_unserved_work_queues_nothing () = with_clients (fun sw connect ->
   let extension = connect Lane.Firefox in
-  let extension_target = target extension.client_id in
-  let client = match extension_target with Lane.Live_client client -> client
-    | Lane.Automation | Lane.Stagehand -> fail "expected live target" in
-  let viewport : Lane.Pointer.viewport =
-    {document_id="observed-page"; width=800.; height=600.; scroll_x=0.; scroll_y=0.} in
-  let verb = Lane.Page_interact {tab_id=2; expected_url=Some "https://example.org";
-    action=Lane.Hover_at {point={x=0.5;y=0.5};viewport}} in
-  check bool "extension hover is refused before dispatch" true
-    (Lane.issue_for ~target:extension_target ~verb ~timeout_sec:1.
-       = Ok (Lane.Rejected_before_effect "trusted_hover_requires_live_bidi_connection"));
-  check int "no extension waiter" 0 (Hashtbl.length client.waiters);
-  check int "no extension command" 0 (Eio.Stream.length client.commands);
   let bidi = { (info Lane.Firefox) with transport=Lane.Webdriver_bidi } in
   ignore (Lane.take_command ~client_info:bidi ~window_sec:0.001);
   Eio.Switch.on_release sw (fun () -> ignore (Lane.disconnect_client ~client_id:bidi.client_id));
-  let result = Eio.Fiber.fork_promise ~sw (fun () ->
-    Lane.issue_for ~target:(target bidi.client_id) ~verb ~timeout_sec:1.) in
+  List.iter (fun (info : Lane.client_info) ->
+    let selected = target info.client_id in
+    let client = match selected with Lane.Live_client client -> client
+      | Lane.Automation | Lane.Stagehand -> fail "expected live target" in
+    List.iter (fun capability ->
+      let verb = verb_asking_for capability in
+      let name = Lane.live_transport_to_string info.transport ^ " " ^ Lane.live_capability_to_wire capability in
+      if Lane.live_transport_serves info.transport capability then begin
+        let result = Eio.Fiber.fork_promise ~sw (fun () ->
+          Lane.issue_for ~target:selected ~verb ~timeout_sec:1.) in
+        let command = take info in
+        check bool (name ^ " reaches the connection") true (command.verb_json = Lane.verb_json verb);
+        ignore (Lane.deliver_result ~client_id:info.client_id ~id:command.id ~payload:(payload name));
+        answered result name
+      end else begin
+        check bool (name ^ " is refused as a selection") true
+          (Lane.issue_for ~target:selected ~verb ~timeout_sec:1.
+             = Error (Lane.Transport_unsupported
+                 {client_id=info.client_id; transport=info.transport; capability}));
+        check int (name ^ " left no waiter") 0 (Hashtbl.length client.waiters);
+        check int (name ^ " queued no command") 0 (Eio.Stream.length client.commands)
+      end) Lane.all_of_live_capability)
+    [extension; bidi];
+  (* The optional document read asks the same table. Both transports serve
+     it, so on BiDi it reaches that connection's queue. *)
+  let bidi_target = target bidi.client_id in
+  let document = Eio.Fiber.fork_promise ~sw (fun () ->
+    Lane.issue_document_if_idle ~target:bidi_target ~tab_id:2 ~timeout_sec:1.) in
   let command = take bidi in
-  check bool "BiDi receives the requested hover" true (command.verb_json = Lane.verb_json verb);
-  ignore (Lane.deliver_result ~client_id:bidi.client_id ~id:command.id ~payload:(payload "hovered"));
-  answered result "hovered")
+  check bool "the optional document read reaches the BiDi connection" true
+    (command.verb_json = Lane.verb_json (Lane.Page_document {tab_id=2}));
+  ignore (Lane.deliver_result ~client_id:bidi.client_id ~id:command.id ~payload:(payload "document"));
+  answered document "document")
+
+(* A successful answer states its connection through one function: a live
+   browser's client ID and transport, a null client for the server's own
+   browsers. Where an answer is rebuilt around those fields, a value the page
+   or browser supplied under the same names is dropped. *)
+let test_answers_state_their_connection () = with_clients (fun sw connect ->
+  let extension = connect Lane.Firefox in
+  let bidi = { (info Lane.Firefox) with transport=Lane.Webdriver_bidi } in
+  ignore (Lane.take_command ~client_info:bidi ~window_sec:0.001);
+  Eio.Switch.on_release sw (fun () -> ignore (Lane.disconnect_client ~client_id:bidi.client_id));
+  let stated (client : Lane.client_info) = Lane.target_connection_fields (target client.client_id) in
+  let expected (client : Lane.client_info) transport =
+    ["clientId", `String (Lane.client_id_to_string client.client_id); "transport", `String transport] in
+  check bool "an extension answer names its client and its transport" true
+    (stated extension = expected extension "web_extension");
+  check bool "a BiDi answer names its own" true (stated bidi = expected bidi "webdriver_bidi");
+  check bool "the server's own browsers have no client and no transport" true
+    (Lane.target_connection_fields Lane.Automation = ["clientId", `Null]
+     && Lane.target_connection_fields Lane.Stagehand = ["clientId", `Null]);
+  let supplied = ["transport", `String "carrier_pigeon"; "tabId", `Int 2; "clientId", `String "forged"] in
+  check bool "a value supplied under those names is replaced, not kept beside the route's" true
+    (Lane.with_connection_fields (target bidi.client_id) supplied = expected bidi "webdriver_bidi" @ ["tabId", `Int 2]);
+  check bool "also for the server's own browsers" true
+    (Lane.with_connection_fields Lane.Automation supplied = ["clientId", `Null; "tabId", `Int 2]);
+  (* A holder that keeps only checked fields reads back exactly what was
+     stated, and refuses half a live connection. *)
+  List.iter (fun (name, written) ->
+    check bool (name ^ " reads back as written") true
+      (Lane.connection_fields_of_json (written @ ["tabId", `Int 2]) = Ok written))
+    ["an extension connection", stated extension; "a BiDi connection", stated bidi;
+     "the server's own browser", Lane.target_connection_fields Lane.Automation;
+     "an answer that states no connection", []];
+  let client_id = `String (Lane.client_id_to_string bidi.client_id) in
+  List.iter (fun (name, fields, expected) ->
+    check (result reject string) name (Error expected) (Lane.connection_fields_of_json fields))
+    ["a client without its transport", ["clientId", client_id], "client_without_transport";
+     "a transport without its client", ["transport", `String "webdriver_bidi"], "invalid_connection_fields";
+     "a transport on the server's own browser",
+     ["clientId", `Null; "transport", `String "webdriver_bidi"], "invalid_connection_fields";
+     "a transport no connection has",
+     ["clientId", client_id; "transport", `String "carrier_pigeon"], "unsupported_browser_transport";
+     "a client that is not an ID",
+     ["clientId", `String "forged"; "transport", `String "webdriver_bidi"], "invalid_client_id";
+     "a client of another JSON type", ["clientId", `Int 7], "invalid_connection_fields"];
+  (* The live optional document read attaches the same fields. The automation
+     lane's keeps the session ID its own observer wrote, which the document
+     source requires. *)
+  let document = Eio.Fiber.fork_promise ~sw (fun () ->
+    Lane.issue_document_if_idle ~target:(target bidi.client_id) ~tab_id:2 ~timeout_sec:1.) in
+  let command = take bidi in
+  ignore (Lane.deliver_result ~client_id:bidi.client_id ~id:command.id
+    ~payload:(`Assoc ["ok", `Bool true; "data", `Assoc ["html", `String "<html></html>"; "transport", `String "forged"]]));
+  match Eio.Promise.await document with
+  | Ok (Ok (Lane.Answered (`Assoc fields))) ->
+    check bool "the document answer states the BiDi connection once" true
+      (List.assoc_opt "data" fields
+       = Some (`Assoc (expected bidi "webdriver_bidi" @ ["html", `String "<html></html>"])))
+  | _ -> fail "the document read did not answer")
+
+let test_unsupported_message_names_the_serving_transport () =
+  let client_id = (info Lane.Firefox).client_id in
+  check string "hover on the extension points at BiDi"
+    "live_transport_unsupported: this browser is connected over web_extension, which does not serve \
+     trusted_hover; a webdriver_bidi connection does"
+    (Lane.selection_error_message (Lane.Transport_unsupported
+       {client_id; transport=Web_extension; capability=Trusted_hover}));
+  check string "tab activation on BiDi points at the extension"
+    "live_transport_unsupported: this browser is connected over webdriver_bidi, which does not serve \
+     tab_activation; a web_extension connection does"
+    (Lane.selection_error_message (Lane.Transport_unsupported
+       {client_id; transport=Webdriver_bidi; capability=Tab_activation}))
 
 let test_optional_document_preserves_existing_work () = with_clients (fun sw connect ->
   let info = connect Lane.Firefox in
@@ -176,7 +301,9 @@ let test_inventory_does_not_prune () = with_clients (fun sw connect ->
   | _ -> fail "explicit disconnect must still settle the request")
 
 let () = run "browser client routing" ["ownership", [
-  test_case "hover requires BiDi before queue admission" `Quick test_hover_uses_bidi_transport;
+  test_case "each live transport serves its part of the table" `Quick test_transport_table;
+  test_case "unserved live work is refused before queue admission" `Quick test_unserved_work_queues_nothing;
+  test_case "an unserved request names the transport that serves it" `Quick test_unsupported_message_names_the_serving_transport;
   test_case "inventory observes without pruning a pending client" `Quick test_inventory_does_not_prune;
   test_case "optional document preserves existing work" `Quick test_optional_document_preserves_existing_work;
   test_case "colliding tab IDs and spoofed results" `Quick test_colliding_tabs_are_isolated;
@@ -184,4 +311,5 @@ let () = run "browser client routing" ["ownership", [
   test_case "resolved target expires before dispatch" `Quick test_expired_resolved_target_is_pre_dispatch;
   test_case "expired queued actions do not execute" `Quick test_timed_out_queue_is_not_executed;
   test_case "disconnect releases pending caller" `Quick test_disconnect_releases_waiter;
-  test_case "source and live command policy" `Quick test_sources_and_live_policy]]
+  test_case "source and live command policy" `Quick test_sources_and_live_policy;
+  test_case "answers state their connection" `Quick test_answers_state_their_connection]]

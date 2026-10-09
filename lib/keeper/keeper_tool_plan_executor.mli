@@ -82,13 +82,24 @@ type dispatch =
   -> input:Yojson.Safe.t
   -> dispatch_result
 
-(** Execute dependency batches to completion. Before the first batch, every
-    node input that reads no producer output is validated
+(** Execute a validated plan as a dynamic ready wave to completion. Before any
+    node runs, every node input that reads no producer output is validated
     ({!Keeper_tool_plan.prepare_inputs}); a rejection there ends the plan with
     [Plan_execution_failed], no settled node and [Proven_pre_effect]. Inputs
-    that read a producer output are validated when their node runs.
-    Concurrent siblings are all settled before the lowest-planned-index cause
-    is selected. A [Deferred]
+    that read a producer output are validated when their node runs. Each node
+    dispatches as soon as its dependencies have settled instead of waiting
+    for a static batch barrier; serial and terminal nodes additionally run
+    alone in static schedule order, and a serial or terminal node whose serial
+    predecessor failed, deferred (a cause), or was skipped never dispatches a
+    tool — the chain stands down under either branch failure policy, while the
+    failed predecessor itself carries the plan cause through planned index
+    order. In-flight nodes always settle before the lowest-planned-index cause
+    is selected. Settled results are reported in canonical plan order
+    (non-decreasing [planned_index]); the plan's
+    {!Keeper_tool_plan.branch_failure_policy} decides what a blocked node
+    stops: [Fail_fast] stops every node that has not dispatched yet, while
+    [Continue_independent] only stops the failed node's descendants and lets
+    independent branches settle. A [Deferred]
     or [Failed] tool result is carried unchanged in [Tool_did_not_complete];
     no text or payload inference is performed. A deferred node produces no
     composable output, so it cannot satisfy a downstream output reference and
@@ -96,8 +107,8 @@ type dispatch =
     The executor mints one non-empty [tool_use_id] before calling [dispatch];
     the dispatch, exception settlement, durable row, and live refresh all share
     that identity. [observe_node_result], when supplied, is part of settlement: an observation
-    error becomes [Node_observation_failed] after every sibling in the current
-    batch has settled, preserving the aggregate effect disposition. *)
+    error becomes [Node_observation_failed] after every in-flight sibling has
+    settled, preserving the aggregate effect disposition. *)
 val execute
   :  plan:Keeper_tool_plan.t
   -> run_id:Keeper_tool_plan.Run_id.t

@@ -500,6 +500,23 @@ let get store operation_id =
   match operation with None -> Ok None
   | Some operation -> project_batch_with_db store.db operation |> Result.map Option.some
 ;;
+
+let list_restart_interrupted store =
+  let* () = ensure_open store in
+  with_statement store.db ~operation:"read durable restart interruptions"
+    ("SELECT " ^ select_columns ^ " FROM operations WHERE state = 'failed' AND failure_kind = ? ORDER BY sequence")
+    (fun stmt ->
+      let* () = bind_text store.db stmt ~operation:"bind restart failure kind" 1
+        (Operation.failure_kind_to_string Operation.Interrupted_by_restart) in
+      let rec read acc =
+        let rc = Sqlite3.step stmt in
+        if rc = Sqlite3.Rc.DONE then Ok (List.rev acc)
+        else if rc = Sqlite3.Rc.ROW then
+          let* operation = decode_operation stmt in
+          read (operation :: acc)
+        else Error (Store_unavailable (sqlite_error store.db "read durable restart interruptions" rc)) in
+      read [])
+;;
 let batch_operations store ~operation_id =
   let* () = ensure_open store in
   let* execution_id = batch_execution_with_db store.db operation_id in

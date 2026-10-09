@@ -252,6 +252,25 @@ def measure_pane(rows: dict[int, bytes], *, left: int, right: int) -> dict[str, 
     return {"top": tops[0], "bottom": bottoms[0]}
 
 
+def measure_rail(rows: dict[int, bytes], *, right: int, heading: str) -> dict[str, int]:
+    """A side rail's heading row and the rule under it, in cells [0, right).
+
+    A rail has no box of its own: a heading, a rule, then its rows, with a
+    divider standing in its last cell."""
+    pane = {row: cells(rows[row], 0, right) for row in rows}
+    headings = [row for row, text in pane.items() if text.strip(" │").startswith(heading)]
+    if len(headings) != 1:
+        raise AssertionError(f"the rail in cells 0-{right} has heading rows {headings}: {rows!r}")
+    top = headings[0]
+    rule = pane.get(top + 1, "")
+    if set(rule.strip(" │")) != {"─"}:
+        raise AssertionError(f"the rail in cells 0-{right} has no rule under its heading: {rule!r}")
+    for row in (top, top + 1):
+        if not pane[row].endswith("│"):
+            raise AssertionError(f"the rail row {row} has no divider in cell {right - 1}: {pane[row]!r}")
+    return {"heading": top, "rule": top + 1}
+
+
 def assert_pane_edge(rows: dict[int, bytes], column: int, where: str) -> None:
     """The column a side pane's border stands in holds a border glyph on a
     row of the body's top band, so a body slice cut there is cut at the pane

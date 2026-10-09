@@ -58,6 +58,17 @@ def run(executable):
     fixtures['/api/v1/keepers/alpha/chat/history']=(200,[{'id':'quiet-question','role':'user',
       'content':'OPEN_REQUEST','ts':started,'speaker_authority':'owner',
       'transcript_slot':{'kind':'accepted_user'},'delivery_key':{'kind':'operation','operation_id':operation}}])
+    # Live progress is drawn only for an operation the server reports Running,
+    # and the client reads that record before each journal read.
+    def operation_record(_path):
+        record:dict[str,object]={'schema':'masc.keeper_chat_operation.v1','operation_id':operation}
+        if failed.is_set():
+            record.update(state='Failed',completed_at=time.time(),
+                          failure_kind='Turn_exception',failure_detail='VISIBLE_FAILURE')
+        else:
+            record.update(state='Running',started_at=started)
+        return 200,record
+    fixtures['/api/v1/keepers/alpha/chat/operations/'+operation]=h.PathHttpResponse(operation_record)
     fixtures['/api/v1/keepers/alpha/chat/events']=h.PathHttpResponse(journal)
     fixtures['/api/v1/keepers/alpha/memory-journal?limit=20']=(200,{'entries':[]})
     fixtures['/api/v1/keepers/turns']=(200,{'schema':'masc.keeper_turns.v1',

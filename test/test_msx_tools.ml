@@ -1028,11 +1028,151 @@ let test_registration () =
     ; (Tool_schemas_misc.Misc_msx_restore, "masc_msx_restore", false)
     ; (Tool_schemas_misc.Misc_msx_eject, "masc_msx_eject", false)
     ; (Tool_schemas_misc.Misc_msx_screen, "masc_msx_screen", true)
+    ; (Tool_schemas_misc.Misc_msx_meta, "masc_msx_meta", true)
+    ; (Tool_schemas_misc.Misc_msx_checkpoint_info, "masc_msx_checkpoint_info", true)
     ; (Tool_schemas_misc.Misc_msx_press, "masc_msx_press", false)
     ; (Tool_schemas_misc.Misc_msx_step, "masc_msx_step", false)
     ; (Tool_schemas_misc.Misc_msx_peek, "masc_msx_peek", true)
     ; (Tool_schemas_misc.Misc_msx_ram_diff, "masc_msx_ram_diff", true)
     ]
+;;
+
+(* The lane reports which core it linked, the way Dos_lane.core does for DOS.
+   What this pins: the linked digest equals the digest masc's pin table
+   declares, so a pin bumped alone turns red here with the new digest in the
+   failure instead of a server quietly running another core. *)
+let test_core_identity_matches_pin () =
+  let core = Msx_lane.core in
+  check bool "matches_pin agrees with the two digests"
+    core.matches_pin (String.equal core.source_digest core.pinned_source_digest);
+  check string "the linked core is the one at the CI pin" core.pinned_source_digest core.source_digest;
+  check bool "digest is 32 lowercase hex characters"
+    (String.length core.source_digest = 32
+    && String.for_all (fun c -> (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) core.source_digest)
+    true
+;;
+
+(* The pin commit is named twice: OCAML_MSX_SHA in the pin script CI runs and
+   the pin-depends URL the lock file solves from. The two name the same
+   40-hex commit or one of them is stale. The digest itself is bound to the
+   commit by the core's own recomputation test at build time. *)
+let test_pin_table_names_the_same_core () =
+  let script = "../scripts/opam-pin-external-deps.sh" in
+  let text = In_channel.with_open_text script In_channel.input_all in
+  let marker = "OCAML_MSX_SHA=\"" in
+  let script_sha =
+    let rec find from =
+      if from + String.length marker > String.length text then None
+      else if String.sub text from (String.length marker) = marker then
+        Some (String.sub text (from + String.length marker) 40)
+      else find (from + 1) in
+    find 0 in
+  check bool "pin script names a 40-hex commit"
+    (match script_sha with
+     | Some sha ->
+       String.length sha = 40
+       && String.for_all (fun c -> (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) sha
+     | None -> false)
+    (match script_sha with Some sha -> String.length sha = 40 | None -> false);
+  let lock = In_channel.with_open_text "../masc.opam.locked" In_channel.input_all in
+  check bool "lock file names the same pin commit" true
+    (match script_sha with
+     | Some sha ->
+       let url = "git+https://github.com/jeong-sik/ocaml-msx.git#" in
+       let rec contains from =
+         if from + String.length url > String.length lock then false
+         else if String.sub lock from (String.length url) = url then
+           String.sub lock (from + String.length url) 40 = sha
+         else contains (from + 1) in
+       contains 0
+     | None -> false)
+;;
+
+(* Slot metadata without a restore. The machine keeps its incarnation, a slot
+   that does not exist is a refusal naming the slot, and a saved checkpoint
+   reports the saved edge count and the core digest that wrote it. *)
+let test_checkpoint_info_reads_without_restoring () =
+  with_workspace @@ fun base_path ->
+  let call name args = dispatch ~base_path name args in
+  let load = call "masc_msx_load" ["roms_dir", `String ""] in
+  check bool "initial machine loaded" true (is_completed load);
+  let press = call "masc_msx_press" ["keys", `List [`String "space"]; "frames", `Int 7] in
+  check bool "input recorded" true (is_completed press);
+  let before_incarnation =
+    match Msx_lane.capture_with_identity () with
+    | Ok captured -> captured.incarnation
+    | Error e -> fail (Msx_lane.error_to_string e) in
+  let missing = call "masc_msx_checkpoint_info" ["slot", `String "no-such-slot"] in
+  check bool "missing slot refused" true (rejected missing);
+  check string "a refused info preserves the machine" before_incarnation
+    (match Msx_lane.capture_with_identity () with
+     | Ok captured -> captured.incarnation
+     | Error e -> fail (Msx_lane.error_to_string e));
+  let save = call "masc_msx_save" ["slot", `String "info-slot"] in
+  check bool "checkpoint saved" true (is_completed save);
+  let info = call "masc_msx_checkpoint_info" ["slot", `String "info-slot"] in
+  check bool "info completes" true (is_completed info);
+  check bool "no media names on a BIOS-only save" true
+    (match (member "cartridge" (Tool_result.data info), member "disk" (Tool_result.data info)) with
+     | Some `Null, Some `Null -> true
+     | _ -> false);
+  check bool "saved core digest reported and current" true
+    (match (member "core_sha" (Tool_result.data info), member "core_matches_current" (Tool_result.data info)) with
+     | Some (`String sha), Some (`Bool true) -> String.equal sha Msx_lane.core.source_digest
+     | _ -> false);
+  check int "one press is two edges" 2
+    (match member "ledger_entries" (Tool_result.data info) with
+     | Some (`Int n) -> n
+     | _ -> -1);
+  check string "info does not replace the machine" before_incarnation
+    (match Msx_lane.capture_with_identity () with
+     | Ok captured -> captured.incarnation
+     | Error e -> fail (Msx_lane.error_to_string e));
+  let unsafe = call "masc_msx_checkpoint_info" ["slot", `String "../escape"] in
+  check bool "unsafe slot refused" true (rejected unsafe);
+  let dir = Filename.concat (Filename.concat base_path ".masc") "msx" in
+  let path = Filename.concat (Filename.concat dir "saves") "info-slot.json" in
+  let payload = In_channel.with_open_bin path In_channel.input_all in
+  check int "checkpoint byte length reported" (String.length payload)
+    (match member "byte_length" (Tool_result.data info) with
+     | Some (`Int n) -> n
+     | _ -> -1);
+  check string "checkpoint sha256 reported"
+    Digestif.SHA256.(to_hex (digest_string payload))
+    (match member "sha256" (Tool_result.data info) with
+     | Some (`String s) -> s
+     | _ -> "");
+  let legacy_path = Filename.concat (Filename.concat dir "saves") "legacy-slot.json" in
+  let legacy_payload =
+    match Yojson.Safe.from_string payload with
+    | `Assoc fields ->
+      Yojson.Safe.to_string (`Assoc (List.remove_assoc "core_sha" fields))
+    | _ -> fail "saved checkpoint is not an object" in
+  Out_channel.with_open_bin legacy_path (fun oc -> output_string oc legacy_payload);
+  let legacy = call "masc_msx_checkpoint_info" ["slot", `String "legacy-slot"] in
+  check bool "legacy checkpoint info completes" true (is_completed legacy);
+  check bool "legacy core identity is unknown" true
+    (match (member "core_sha" (Tool_result.data legacy), member "core_matches_current" (Tool_result.data legacy)) with
+     | Some `Null, Some `Null -> true
+     | _ -> false);
+  let expect_malformed label malformed =
+    Out_channel.with_open_bin path (fun oc -> output_string oc malformed);
+    let result = call "masc_msx_checkpoint_info" ["slot", `String "info-slot"] in
+    check bool (label ^ " is refused") true (rejected result);
+    check string (label ^ " preserves the machine") before_incarnation
+      (match Msx_lane.capture_with_identity () with
+       | Ok captured -> captured.incarnation
+       | Error e -> fail (Msx_lane.error_to_string e))
+  in
+  expect_malformed "missing envelope fields" "{}";
+  expect_malformed "wrong envelope field types" {|{"version":"broken","ledger":"broken"}|};
+  Out_channel.with_open_bin path (fun oc -> output_string oc "{broken");
+  let broken = call "masc_msx_checkpoint_info" ["slot", `String "info-slot"] in
+  check bool "unparsable slot refused" true (rejected broken);
+  check string "refusal still preserves the machine" before_incarnation
+    (match Msx_lane.capture_with_identity () with
+     | Ok captured -> captured.incarnation
+     | Error e -> fail (Msx_lane.error_to_string e))
 ;;
 
 (* RAM introspection: peek reads memory as hex and takes the snapshot,
@@ -1223,6 +1363,10 @@ let () =
             test_incomplete_bios_triple_is_refused
         ; test_case "registration" `Quick test_registration
         ; test_case "peek and ram_diff" `Quick test_peek_and_ram_diff
+        ; test_case "core identity matches the pin" `Quick test_core_identity_matches_pin
+        ; test_case "pin table names the same core commit" `Quick test_pin_table_names_the_same_core
+        ; test_case "checkpoint info reads without restoring" `Quick
+            test_checkpoint_info_reads_without_restoring
         ; test_case "xspelunker: two presses reach the level card" `Quick
             test_xspelunker_two_presses
         ; test_case "two keepers share one machine" `Quick

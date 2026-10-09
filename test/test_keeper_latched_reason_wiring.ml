@@ -225,7 +225,7 @@ let test_grpc_pause_directive_records_reason () =
        |> ignore;
        Keeper_registry.For_testing.clear ();
        ignore (Keeper_registry.For_testing.register ~base_path:config.base_path keeper_name meta);
-       Keeper_keepalive.process_directive
+       Keeper_keepalive.process_directive ~base_path:config.base_path
          ~agent_name:keeper_name
          Keeper_directive.Pause;
        (match Keeper_registry.get ~base_path:config.base_path keeper_name with
@@ -237,7 +237,7 @@ let test_grpc_pause_directive_records_reason () =
             (Some wire_grpc_directive)
             (latched_reason_wire entry.meta)
         | None -> fail "expected registered keeper after pause directive");
-       Keeper_keepalive.process_directive
+       Keeper_keepalive.process_directive ~base_path:config.base_path
          ~agent_name:keeper_name
          Keeper_directive.Wakeup;
        (match Keeper_registry.get ~base_path:config.base_path keeper_name with
@@ -295,7 +295,7 @@ let test_reflected_operator_pause_reconciles_registry_phase () =
        |> ignore;
        Keeper_registry.For_testing.clear ();
        ignore (Keeper_registry.For_testing.register ~base_path:config.base_path keeper_name meta);
-       Keeper_keepalive.process_directive ~agent_name:keeper_name Keeper_directive.Pause;
+       Keeper_keepalive.process_directive ~base_path:config.base_path ~agent_name:keeper_name Keeper_directive.Pause;
        match Keeper_registry.get ~base_path:config.base_path keeper_name with
        | Some entry ->
          check

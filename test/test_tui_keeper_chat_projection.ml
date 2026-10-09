@@ -482,6 +482,14 @@ let test_current_nonterminal_event_set () =
           ; "toolCallId", `String "tool-1"
           ; "executionId", `String "exec-1"
           ]
+      else if String.equal name "KEEPER_NATIVE_TOOL_START"
+              || String.equal name "KEEPER_NATIVE_TOOL_END" then
+        `Assoc
+          [ "toolStreamScope", `Int 0
+          ; "toolCallBlockIndex", `Int 0
+          ; "toolCallId", `String "tool-1"
+          ; "toolCallName", `String "read"
+          ]
       else if String.equal name "KEEPER_CHAT_BATCH_BOUND" then
         `Assoc ["operation_id", `String request.request_id; "execution_id", `String "shared-execution"]
       else if String.equal name "KEEPER_STREAM_PROTOCOL_ERROR" then
@@ -1256,7 +1264,7 @@ let test_batch_member_events_pass_request_bound_stream_decode () =
     [ Events.Run_started {run_id="keeper-operation-run-batch-owner"; thread_id}
     ; Events.Batch_bound {operation_id=owner_id; execution_id=owner_id}
     ; Events.Text_message_start {message_id="keeper-operation-message-batch-owner"; role=Events.Assistant}
-    ; Events.Text_delta "hello"
+    ; Events.Text_delta {text="hello"; stream_scope=None}
     ; Events.Reply_details {reply="hello"; turn_outcome=Masc.Keeper_turn_outcome.Visible_reply;
         turn_ref=Ids.Turn_ref.make ~trace_id:"shared" ~absolute_turn:1}
     ; Events.Text_message_end
@@ -1516,10 +1524,28 @@ let test_interactive_admission_wire_roundtrip () =
   (match Stream.parse_keeper_chat_stream_request (Yojson.Safe.to_string both) with
    | Error _ -> () | Ok _ -> fail "two independent cancellation targets were accepted")
 
+let test_text_scope_validation () =
+  let frames fields =
+    let scoped = match delta "part" with
+      | `Assoc existing -> `Assoc (existing @ fields)
+      | _ -> fail "text fixture must be an object" in
+    [acceptance (); run_started; text_start; scoped;
+     reply_details ~reply:"part" (); text_end; run_finished] in
+  List.iter (fun fields -> check bool "unknown or valid text scope is accepted" true
+    (Result.is_ok (decode (frames fields)))) [ []; ["textStreamScope", `Int 0]; ["textStreamScope", `Int 2] ];
+  List.iter (fun fields ->
+    check bool "malformed text scope is refused by the strict live contract" true
+      (Result.is_error (decode (frames fields))))
+    [["textStreamScope", `Int (-1)]; ["textStreamScope", `String "2"];
+     ["textStreamScope", `Float 2.]; ["textStreamScope", `Null];
+     ["textStreamScope", `Int 2; "textStreamScope", `Int 3]]
+;;
+
 let () =
   run "tui_keeper_chat_projection"
     [ ( "keeper chat"
-      , [ test_case "checkpoint segments replay until actual answer" `Quick test_checkpoint_segments_replay_until_actual_answer
+      , [ test_case "text scope validation" `Quick test_text_scope_validation
+        ; test_case "checkpoint segments replay until actual answer" `Quick test_checkpoint_segments_replay_until_actual_answer
         ; test_case "interactive admission serializer matches server authority" `Quick test_interactive_admission_wire_roundtrip
         ; test_case "exact request body and UUIDv7" `Quick
             test_request_body_and_identity

@@ -207,4 +207,3 @@ let connector_post_call_summary replay =
   | Replay_slack_post { channel_id; content; _ } ->
     line ~connector:Keeper_surface_post.slack_label ~channel_id ~content
 ;;
-

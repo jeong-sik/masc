@@ -61,6 +61,7 @@ def run(executable, columns):
         h.send_and_wait(process, fd, output, b"H", b"Keeper:")
         document = read_document(process, fd, output)
         assert "Githistoryunavailable" in document, document
+        assert "KEEPERTAIL" in document, document
         assert "TASKTAIL" in document and "EXECTAIL" in document, document
         assert mode["activity_reads"] == 1, mode
 

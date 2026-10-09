@@ -505,7 +505,7 @@ let resolve_managed_agent_call ?mcp_session_id request =
 
 (** Handle tools/call JSON-RPC method *)
 let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
-    ~broadcast_tools_list_changed ~sw ~clock ?(profile = Full) ?mcp_session_id
+    ~broadcast_tools_list_changed ?(wire_result = fun () -> None) ~sw ~clock ?(profile = Full) ?mcp_session_id
     ?auth_token ?(internal_keeper_runtime = false) state id request =
   (* The active workspace is an admission fact for this call.  In particular,
      [masc_start] may publish a new current scope while executing, but the
@@ -885,6 +885,15 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     | Some value -> [ ("structuredContent", value) ]
     | None -> []
   in
+  let result_fields = match wire_result () with
+    | None -> result_fields
+    | Some result ->
+        let fields = match Mcp_protocol.Mcp_types.tool_result_to_yojson result with
+          | `Assoc fields -> fields | _ -> [] in
+        let worker_meta = match result._meta with Some (`Assoc fields) -> fields | None | Some _ -> [] in
+        ("_meta", `Assoc (call_meta @ List.filter (fun (key, _) -> not (List.mem_assoc key call_meta)
+          && not (String.equal key "io.modelcontextprotocol/serverInfo")) worker_meta))
+        :: List.remove_assoc "_meta" fields in
   let result = make_response ~id (`Assoc result_fields) in
 
   maybe_emit_resource_notifications ~success ~tool_name:name;

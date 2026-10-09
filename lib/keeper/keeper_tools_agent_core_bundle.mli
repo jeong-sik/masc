@@ -50,6 +50,7 @@ module For_testing : sig
     -> ?gate_context:Keeper_gate_causal_context.t
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
     -> ?on_gate_deferred:(string -> unit)
+    -> ?capability_surface:Keeper_capability_surface.t
     -> ?skill_catalog:Keeper_skill_catalog.t
     -> ?turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell
     -> unit

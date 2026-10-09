@@ -1,4 +1,4 @@
-(* MSX lane tools (RFC-0439 §6.1) — the five tools through Tool_misc.dispatch.
+(* MSX lane tools (RFC-0439 §6.1) — the five tools through the shared worker implementation.
 
    The machine boots without ROMs (bus reads 0xFF) so the tests need no game
    image. What they pin: the no-machine refusal, that every refusal declares
@@ -10,12 +10,9 @@ open Alcotest
 open Masc
 
 let dispatch ~base_path ?(agent = "msx-test") name assoc =
-  let ctx : Tool_misc.context =
-    { config = Workspace.default_config base_path; agent_name = agent; help_schemas = [] }
-  in
-  match Tool_misc.dispatch ctx ~name ~args:(`Assoc assoc) with
+  match Msx_machine_tools.dispatch ~relay:Machine_msx_host_events.relay ~base_path ~agent ~name ~arguments:(`Assoc assoc) with
   | Some result -> result
-  | None -> fail (name ^ " is not dispatched by the misc tool owner")
+  | None -> fail (name ^ " is not dispatched by the machine worker")
 ;;
 
 let with_workspace f =
@@ -550,7 +547,7 @@ let test_load_activity_precedes_board_relay () =
     let interrupted =
       try
         ignore
-          (Tool_misc_msx_lane.handle_load ~tool_name:"masc_msx_load"
+          (Msx_machine_tools.handle_load ~tool_name:"masc_msx_load"
              ~start_time:(Tool_timing.start ()) ~base_path ~agent_name:"msx-test"
              ~after_load:(fun () -> notified := true) ~relay
              (`Assoc [ ("roms_dir", `String ""); ("cart", `String "hero") ]));
@@ -595,7 +592,7 @@ let test_concurrent_loads_announce_the_medium_once () =
   check (list string) "the cartridge is announced once between them"
     [ announced ~name:"hero.rom" ~kind:"카트리지" ]
     (List.filter_map
-       (Tool_misc_msx_lane.arcade_announcement ~agent_name:"msx-test")
+       (Msx_machine_tools.arcade_announcement ~agent_name:"msx-test")
        transitions)
 ;;
 
@@ -1010,18 +1007,13 @@ let test_key_vocabulary () =
 
 let test_registration () =
   List.iter
-    (fun (operation, name, readonly) ->
-      (match Tool_schemas_misc.misc_registered_schema operation with
-       | Some (schema : Masc_domain.tool_schema) -> check string "schema name" name schema.name
-       | None -> fail (name ^ " has no registered schema"));
-      match Keeper_tool_descriptor.descriptors_for_internal name with
-      | [ d ] ->
-        check string (name ^ " runtime handler") "tool_masc_misc_dispatch"
-          (Keeper_tool_descriptor.runtime_handler_to_string d.runtime_handler);
-        check bool (name ^ " descriptor readonly") readonly
-          (d.policy.readonly_hint = Some true)
-      | [] -> fail ("missing descriptor for " ^ name)
-      | _ -> fail ("duplicate descriptor for " ^ name))
+    (fun (operation, name, _readonly) ->
+      check bool (name ^ " is not statically registered") true
+        (Tool_schemas_misc.misc_registered_schema operation = None);
+      check bool (name ^ " has no static Keeper descriptor") true
+        (Keeper_tool_descriptor.descriptors_for_internal name = []);
+      check bool (name ^ " remains a packaged worker schema") true
+        (Option.is_some (Embedded_config.read ("tools/" ^ name ^ ".toml"))))
     [ (Tool_schemas_misc.Misc_msx_load, "masc_msx_load", false)
     ; (Tool_schemas_misc.Misc_msx_change_disk, "masc_msx_change_disk", false)
     ; (Tool_schemas_misc.Misc_msx_save, "masc_msx_save", false)

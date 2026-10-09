@@ -82,6 +82,32 @@ let test_threshold_default_under () =
 
 (* --- Round-trip via to_agent_core_typed_result on small payloads --- *)
 
+let test_keeper_execution_retains_multimodal_producer_output () =
+  let blocks = Llm_provider.Types.[
+    Text "screen";
+    Image { media_type = "image/png"; data = "c2NyZWVu"; source_type = Base64 }] in
+  let completed = Tool_result.make_ok ~tool_name:"machine_screen"
+    ~start_time:(Tool_timing.start ()) ~data:(`Assoc ["frame", `Int 7])
+    ~content_blocks:blocks ~metadata:(`Assoc ["source", `String "worker"]) () in
+  let deferred = match completed with
+    | Tool_result.Completed payload -> Tool_result.Deferred payload
+    | _ -> assert false in
+  List.iter (fun producer ->
+    let execution = Masc.Keeper_tool_execution.of_tool_result producer in
+    Alcotest.(check bool) "Keeper retains ordered text and image bytes" true
+      (execution.content_blocks = Some blocks);
+    Alcotest.(check bool) "JSON data remains independent of visual content" true
+      (execution.data = Some (`Assoc ["frame", `Int 7]));
+    Alcotest.(check bool) "producer metadata survives" true
+      (execution.metadata = Some (`Assoc ["source", `String "worker"])))
+    [completed; deferred];
+  let failed = Masc.Keeper_tool_execution.of_tool_result
+      (tool_error ~tool_name:"machine_screen" "unavailable") in
+  Alcotest.(check bool) "failure cannot retain a previous screen" true
+    (failed.content_blocks = None);
+  Alcotest.(check bool) "plain text remains plain text" true
+    ((Masc.Keeper_tool_execution.success "text").content_blocks = None)
+
 let test_to_agent_core_typed_small_inlined () =
   let small = "small ok" in
   match B.to_agent_core_typed_result (tool_ok ~tool_name:"test" small) with
@@ -893,6 +919,8 @@ let () =
             test_to_agent_core_dependency_failure_carries_no_replay_hint;
           Alcotest.test_case "failure class reaches the model" `Quick
             test_failure_class_reaches_the_model;
+          Alcotest.test_case "Keeper execution retains multimodal output" `Quick
+            test_keeper_execution_retains_multimodal_producer_output;
           Alcotest.test_case "round-trip through AGENT_CORE" `Quick
             test_round_trip_through_agent_core;
           Alcotest.test_case "execution env preserves exact invocation" `Quick

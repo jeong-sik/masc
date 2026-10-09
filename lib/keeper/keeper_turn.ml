@@ -682,7 +682,8 @@ let run_keeper_invocation_turn_admitted_inner
                 ~base_path:ctx.config.base_path
             in
             let task_skill_selection =
-              Keeper_task_skill_turn.resolve_observations
+              Keeper_task_skill_turn.resolve_live_observations
+                  ~config:ctx.config ~keeper_name:meta.name
                 ~snapshot:skill_snapshot ~current_task ~held_task_skills
             in
             let task_skill_surfaces =

@@ -2339,6 +2339,8 @@ let add_routes ~sw ~clock router =
                in
                (match
                   Server_skill_editor.create
+                    ~descriptors:(Server_skill_editor.authoring_descriptors
+                      ~config:(Mcp_server.workspace_config state) ~access:Lane_addon_sources.Operator_configuration)
                     ~base_path
                     ~source_id
                     ~package_id
@@ -2457,6 +2459,8 @@ let add_routes ~sw ~clock router =
              | Ok { reference; source_text = Some source_text; confirmed = _ } ->
                (match
                   Server_skill_editor.preview
+                    ~descriptors:(Server_skill_editor.authoring_descriptors
+                      ~config:(Mcp_server.workspace_config state) ~access:Lane_addon_sources.Operator_configuration)
                     ~base_path:(Mcp_server.workspace_config state).base_path
                     reference
                     ~source_text
@@ -2499,6 +2503,8 @@ let add_routes ~sw ~clock router =
                in
                (match
                   Server_skill_editor.save
+                    ~descriptors:(Server_skill_editor.authoring_descriptors
+                      ~config:(Mcp_server.workspace_config state) ~access:Lane_addon_sources.Operator_configuration)
                     ~base_path
                     ~reference
                     ~source_text

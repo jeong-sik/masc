@@ -599,7 +599,7 @@ let parse_node ~path value =
                           | Ok input -> Ok (Plan.node ~id ~tool_name ~after ~input ())))))))))
 ;;
 
-let parse_composition ~index value =
+let parse_composition ~descriptors ~index value =
   let path = [ "compositions"; string_of_int index ] in
   match table_fields ~path ~field:"composition" value with
   | Error _ as error -> error
@@ -674,7 +674,7 @@ let parse_composition ~index value =
                     | Ok nodes ->
                       (match
                          Plan.create
-                           ~descriptors:(Keeper_tool_descriptor.all_descriptors ())
+                           ~descriptors
                            nodes
                        with
                        | Error error -> Error (Plan_rejected { name; error })
@@ -709,7 +709,7 @@ let parse_composition ~index value =
                                     })))))))))))))))))
 ;;
 
-let parse content =
+let parse ?(descriptors = Keeper_tool_descriptor.all_descriptors ()) content =
   match Toml.parse_toml content with
   | Error message -> Error (Toml_syntax message)
   | Ok fields ->
@@ -726,7 +726,7 @@ let parse content =
              let rec parse_entries index parsed = function
                | [] -> Ok (List.rev parsed)
                | composition :: rest ->
-                 (match parse_composition ~index composition with
+                 (match parse_composition ~descriptors ~index composition with
                   | Error _ as error -> error
                   | Ok entry ->
                     (match List.find_opt (fun current -> String.equal current.name entry.name) parsed with

@@ -345,7 +345,15 @@ let publish_finished ~clock ~(config : Workspace.config) ~state ~finished ~now =
   in
   (* The refresh token first. Every other write can be repeated by logging in
      again; losing this one means the Keeper works until the access token
-     expires and then stops with nothing on disk to say why. *)
+     expires and then stops with nothing on disk to say why.
+
+     All credential writes run inside [while_admitted]: a newer start for this
+     Keeper and provider supersedes the admitted callback only between two
+     publications, never in the middle of one, and a publication that was
+     superseded before its first write writes nothing. Superseding the table
+     entry alone would only make the final [finish] a no-op after the older
+     exchange had already overwritten the newer attempt's tokens. *)
+  let write_credentials () =
   let* () =
     match refresh_token with
     | None ->
@@ -365,12 +373,22 @@ let publish_finished ~clock ~(config : Workspace.config) ~state ~finished ~now =
      Keeper that was attached to this provider before may have a moment
      recorded from that login; leaving it there would have the renewal check
      read a stale clock against a credential that does not answer to it. *)
+  set_env ~name:provider.Provider.expires_at_env
+    ~value:
+      (match expires_at with
+       | None -> ""
+       | Some expires_at -> Printf.sprintf "%.0f" expires_at)
+  in
   let* () =
-    set_env ~name:provider.Provider.expires_at_env
-      ~value:
-        (match expires_at with
-         | None -> ""
-         | Some expires_at -> Printf.sprintf "%.0f" expires_at)
+    match
+      Keeper_oauth_pending.while_admitted (pending_for_base_path base_path) ~state
+        write_credentials
+    with
+    | Some written -> written
+    | None ->
+      Error
+        "this login was superseded by a newer attempt for the same Keeper and \
+         provider; its credentials were not written"
   in
   (* The credentials are on disk by now, so this can fail without undoing
      the attachment. Its outcome is carried rather than logged: the operator

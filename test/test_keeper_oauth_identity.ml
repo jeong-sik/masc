@@ -625,10 +625,19 @@ let in_flight_for ?(keeper="oauth-fixture") provider : Keeper_oauth_pending.in_f
   ; client_secret = None
   }
 
+let admit_scope table provider =
+  Keeper_oauth_pending.admit table ~keeper:"oauth-fixture"
+    ~provider_id:provider.Keeper_oauth_provider.id
+
+let admit_held table (held : Keeper_oauth_pending.in_flight) =
+  Keeper_oauth_pending.admit table
+    ~keeper:held.Keeper_oauth_pending.pending.Keeper_oauth_flow.keeper
+    ~provider_id:held.Keeper_oauth_pending.pending.Keeper_oauth_flow.provider_id
+
 (* One start with nothing admitted after it: the order rule cannot refuse it. *)
 let remember_held table ~now ~ttl_sec held =
   match
-    Keeper_oauth_pending.remember table (Keeper_oauth_pending.admit table) ~now
+    Keeper_oauth_pending.remember table (admit_held table held) ~now
       ~ttl_sec held
   with
   | Ok attempt_id -> attempt_id
@@ -727,10 +736,10 @@ let test_admitted_exchange_status_outlives_deadline () =
 let test_a_start_that_never_registers_still_refuses_an_earlier_one () =
   let provider = load_or_fail atlassian_toml in
   let table = Keeper_oauth_pending.create () in
-  let earlier = Keeper_oauth_pending.admit table in
+  let earlier = admit_scope table provider in
   (* The later start consumed its admission and then died during discovery,
      so it never reaches this table. *)
-  ignore (Keeper_oauth_pending.admit table);
+  ignore (admit_scope table provider);
   let held = in_flight_for provider in
   check Alcotest.bool "an issued admission refuses an earlier start, not a registered one" true
     (Keeper_oauth_pending.remember table earlier ~now:0. ~ttl_sec:600. held
@@ -745,7 +754,7 @@ let test_a_newer_start_supersedes_an_admitted_publication () =
   let state = first.pending.Keeper_oauth_flow.state in
   check Alcotest.bool "the first exchange was admitted for publication" true
     (Keeper_oauth_pending.take table ~now:1. ~state <> None);
-  let () = match Keeper_oauth_pending.remember table (Keeper_oauth_pending.admit table) ~now:2. ~ttl_sec:600. second with
+  let () = match Keeper_oauth_pending.remember table (admit_scope table provider) ~now:2. ~ttl_sec:600. second with
     | Ok _ -> ()
     | Error Keeper_oauth_pending.Newer_start_admitted ->
         Alcotest.fail "the newer start was refused" in
@@ -756,11 +765,52 @@ let test_a_newer_start_supersedes_an_admitted_publication () =
        ~keeper:"oauth-fixture" ~provider_id:provider.Keeper_oauth_provider.id
      = Some Keeper_oauth_pending.Superseded)
 
+let test_a_start_for_another_scope_does_not_refuse_an_earlier_one () =
+  let provider = load_or_fail atlassian_toml in
+  let table = Keeper_oauth_pending.create () in
+  let earlier = admit_scope table provider in
+  (* Another Keeper logging in to the same provider is unrelated to this
+     Keeper's start, however its admission compares. *)
+  ignore
+    (Keeper_oauth_pending.admit table ~keeper:"another-keeper"
+       ~provider_id:provider.Keeper_oauth_provider.id);
+  (match
+     Keeper_oauth_pending.remember table earlier ~now:0. ~ttl_sec:600.
+       (in_flight_for provider)
+   with
+   | Ok _ -> ()
+   | Error Keeper_oauth_pending.Newer_start_admitted ->
+       Alcotest.fail "a start for another Keeper refused this Keeper's start");
+  Alcotest.(check int) "the earlier start is held" 1
+    (Keeper_oauth_pending.waiting table ~now:1.)
+
+let test_a_superseded_publication_writes_nothing () =
+  let provider = load_or_fail atlassian_toml in
+  let table = Keeper_oauth_pending.create () in
+  let first = in_flight_for provider and second = in_flight_for provider in
+  let _first_id = remember_held table ~now:0. ~ttl_sec:600. first in
+  let state = first.pending.Keeper_oauth_flow.state in
+  check Alcotest.bool "the callback was admitted" true
+    (Keeper_oauth_pending.take table ~now:1. ~state <> None);
+  let writes = ref 0 in
+  check Alcotest.bool "an admitted publication runs its writes" true
+    (Keeper_oauth_pending.while_admitted table ~state (fun () -> incr writes)
+     = Some ());
+  let () = match Keeper_oauth_pending.remember table (admit_scope table provider)
+                   ~now:2. ~ttl_sec:600. second with
+    | Ok _ -> ()
+    | Error Keeper_oauth_pending.Newer_start_admitted ->
+        Alcotest.fail "the newer start was refused" in
+  check Alcotest.bool "a superseded publication runs no write" true
+    (Keeper_oauth_pending.while_admitted table ~state (fun () -> incr writes)
+     = None);
+  Alcotest.(check int) "only the admitted publication wrote" 1 !writes
+
 let test_an_earlier_start_cannot_retire_a_later_one () =
   let provider = load_or_fail atlassian_toml in
   let table = Keeper_oauth_pending.create () in
-  let earlier = Keeper_oauth_pending.admit table in
-  let later = Keeper_oauth_pending.admit table in
+  let earlier = admit_scope table provider in
+  let later = admit_scope table provider in
   let first = in_flight_for provider and second = in_flight_for provider in
   let status_of attempt_id = Keeper_oauth_pending.status table ~now:2. ~attempt_id
     ~keeper:"oauth-fixture" ~provider_id:provider.Keeper_oauth_provider.id in
@@ -783,7 +833,7 @@ let test_an_earlier_start_cannot_retire_a_later_one () =
     (Keeper_oauth_pending.take table ~now:2.
        ~state:first.Keeper_oauth_pending.pending.Keeper_oauth_flow.state = None);
   (* Arrival order still lets a later start retire an earlier consent. *)
-  let next = Keeper_oauth_pending.admit table in
+  let next = admit_scope table provider in
   (match Keeper_oauth_pending.remember table next ~now:3. ~ttl_sec:600.
            (in_flight_for provider) with
    | Ok _ -> ()
@@ -2033,6 +2083,10 @@ let () =
             test_a_start_that_never_registers_still_refuses_an_earlier_one;
           Alcotest.test_case "a newer start supersedes an admitted publication" `Quick
             test_a_newer_start_supersedes_an_admitted_publication;
+          Alcotest.test_case "a start for another scope does not refuse an earlier one" `Quick
+            test_a_start_for_another_scope_does_not_refuse_an_earlier_one;
+          Alcotest.test_case "a superseded publication writes nothing" `Quick
+            test_a_superseded_publication_writes_nothing;
           Alcotest.test_case "an earlier start cannot retire a later one" `Quick
             test_an_earlier_start_cannot_retire_a_later_one;
           Alcotest.test_case "a restart during discovery keeps its consent" `Quick

@@ -40,9 +40,11 @@ type admission
 (** Where one start request stands among the starts this table has admitted.
     Taken when the request arrives, before discovery or registration, so two
     starts for one Keeper and provider keep the order they were asked in even
-    when the earlier one's network calls finish last. *)
+    when the earlier one's network calls finish last. The order is per
+    Keeper and provider: a start for another scope neither outranks nor is
+    outranked by this one. *)
 
-val admit : t -> admission
+val admit : t -> keeper:string -> provider_id:string -> admission
 
 type stale_start =
   | Newer_start_admitted
@@ -79,5 +81,14 @@ type status = Awaiting_consent of float | Callback_admitted
   | Completed of completion | Failed | Expired | Superseded
 val status : t -> now:float -> attempt_id:string -> keeper:string -> provider_id:string -> status option
 (** [None] means unavailable in this process/scope, never inferred expiry. *)
+val while_admitted : t -> state:string -> (unit -> 'a) -> 'a option
+(** Run [f] only while the exchange echoed as [state] is still an admitted
+    callback, and keep the table locked for the whole of [f]: a newer start
+    for the same scope cannot supersede it until [f] returns, so a publication
+    that reaches its writes is never overtaken by a later attempt's writes.
+    [None] means the exchange was superseded (or never admitted) and [f] did
+    not run. [f] must be short and must not call back into this table; it is
+    for the credential writes, not for network discovery. *)
+
 val finish : t -> state:string -> (completion, unit) result -> unit
 (** Only admitted callbacks can become terminal. Replay cannot replace a result. *)

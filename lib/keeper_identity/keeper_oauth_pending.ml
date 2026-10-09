@@ -31,8 +31,17 @@ type entry = {
   status : status;
 }
 
-type t = { mutex : Mutex.t; mutable entries : entry list; mutable admitted : admission }
-let create () = { mutex = Mutex.create (); entries = []; admitted = 0 }
+(* [newest] keeps, for each Keeper and provider, the latest admission issued
+   to that scope. It is not derived from [entries]: a start that died during
+   discovery never registers, yet it still outranks the earlier start of its
+   own scope. A start for a different scope outranks nothing here. *)
+type t = {
+  mutex : Mutex.t;
+  mutable entries : entry list;
+  mutable admitted : admission;
+  mutable newest : ((string * string) * admission) list;
+}
+let create () = { mutex = Mutex.create (); entries = []; admitted = 0; newest = [] }
 let with_lock t f =
   Mutex.lock t.mutex;
   Fun.protect ~finally:(fun () -> Mutex.unlock t.mutex) f
@@ -46,8 +55,10 @@ let expire ~now entry = match entry.status with
 let terminal = function Completed _ | Failed | Expired | Superseded -> true
   | Awaiting_consent _ | Callback_admitted -> false
 
-let admit t = with_lock t (fun () ->
+let admit t ~keeper ~provider_id = with_lock t (fun () ->
   t.admitted <- t.admitted + 1;
+  let scope = (keeper, provider_id) in
+  t.newest <- (scope, t.admitted) :: List.remove_assoc scope t.newest;
   t.admitted)
 
 let remember t admission ~now ~ttl_sec in_flight =
@@ -60,10 +71,16 @@ let remember t admission ~now ~ttl_sec in_flight =
     (* Starts are ordered by the admission issued when they began, not by
        which one's discovery and registration finished first: a later start
        that fails before reaching this table still consumed its admission,
-       so the issued counter — not only the entries that survived to
-       register — decides. This earlier one is refused rather than retiring
-       the consent its operator was just shown. *)
-    if t.admitted > admission then Error Newer_start_admitted
+       so the newest admission issued to this Keeper and provider — not only
+       the entries that survived to register — decides. A start for another
+       scope does not. This earlier one is refused rather than retiring the
+       consent its operator was just shown. *)
+    let newest_for_scope =
+      Option.value ~default:0
+        (List.assoc_opt
+           (flow.Keeper_oauth_flow.keeper, flow.Keeper_oauth_flow.provider_id)
+           t.newest) in
+    if newest_for_scope > admission then Error Newer_start_admitted
     else begin
       (* A new operator attempt retires the previous consent for the same
          scope, but cannot cancel a callback already admitted to publication.
@@ -121,3 +138,10 @@ let waiting t ~now = with_lock t (fun () ->
     | Awaiting_consent _ -> count+1
     | Callback_admitted | Completed _ | Failed | Expired | Superseded -> count)
     0 t.entries)
+
+let while_admitted t ~state f =
+  with_lock t (fun () ->
+    if List.exists (fun entry -> entry.state=state && entry.status=Callback_admitted)
+         t.entries
+    then Some (f ())
+    else None)

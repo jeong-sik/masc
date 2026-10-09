@@ -61,7 +61,8 @@ let start
   =
   (* Admitted before any network call, so a restart's order is the order the
      operator asked in rather than the order discovery happened to answer. *)
-  let admission = Pending.admit pending in
+  let admission =
+    Pending.admit pending ~keeper ~provider_id:provider.Provider.id in
   let* discovered =
     Result.map_error
       (fun err -> Discovery_failed err)

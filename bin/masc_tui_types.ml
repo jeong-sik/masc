@@ -4186,14 +4186,27 @@ module Browser_lane_view = struct
      | Launcher_installed ->
          { lead; said = Filename.quote attach.launcher; breaks = At_slashes }
          :: (match address with
-             | Some address -> [host_said under ("--bidi-url " ^ Filename.quote address)]
+             | Some address ->
+                 [host_said under (Masc.Browser_bidi_host_status.bidi_url_flag ^ " " ^ Filename.quote address)]
              | None ->
                  [host_said under attach.arguments;
-                  host_said under "PORT: the --remote-debugging-port Firefox was started with"])
+                  host_said under
+                    ("PORT: the " ^ Masc.Browser_bidi_host_status.firefox_flag ^ " Firefox was started with")])
      | Launcher_not_installed -> [host_said lead "install the browser lane in this workspace first"]
      | Launcher_needs_reinstall ->
          [host_said lead "install the browser lane again first (launcher not as installed)"])
     @ [host_line (transport_setup_row [Browser_lane.Webdriver_bidi])]
+  (* The listed connection can outlive its host, or belong to another
+     host. Keep that distinction visible beside a report that says none ran
+     here or that this host ended. *)
+  let host_connection_note t =
+    let bidi_listed =
+      List.exists (fun (client : client) -> client.transport = Browser_lane.Webdriver_bidi)
+        (listed_clients t) in
+    match t.bidi_host with
+    | Host_reported { state = (Never_started | Ended _ | Died _); _ } when bidi_listed ->
+        [host_line "A listed BiDi connection may be stale or belong to another host"]
+    | Host_not_reported | Host_report_unreadable _ | Host_reported _ -> []
   (* Everything the picker says of the BiDi host: whether one runs, what
      stands in the way of the next one, and how one is started. A host that
      is running is not told how to start one. *)
@@ -4211,7 +4224,8 @@ module Browser_lane_view = struct
         let attach ~address = host_attach_lines ~address report.attach in
         (match report.state with
          | Never_started ->
-             host_line "BiDi host: none has run for this workspace" :: attach ~address:None
+             [host_line "BiDi host: none has run for this workspace"]
+             @ host_connection_note t @ attach ~address:None
          | Running entry ->
              (* The first row is the one a short screen keeps, so it says
                 where the host stands beside the list, not only that it runs. *)
@@ -4237,15 +4251,16 @@ module Browser_lane_view = struct
          | Ended (entry, ending) ->
              (* What to do comes before why: on a screen that holds two of
                 these rows, the step is the one that has to be there. *)
-             (host_line (Printf.sprintf "BiDi host: ended %s · pid %d" (host_time ending.at) entry.pid)
-              :: host_session_lines entry ending)
+             [host_line (Printf.sprintf "BiDi host: ended %s · pid %d" (host_time ending.at) entry.pid)]
+             @ host_session_lines entry ending
+             @ host_connection_note t
              @ [host_said "Reason: " ending.reason]
              @ host_unacknowledged_lines entry
              @ attach ~address:(Some entry.bidi_url)
          | Died entry ->
-             List.map host_line
-               [Printf.sprintf "BiDi host: pid %d is gone · no reason recorded" entry.pid;
-                "Its session may be left in Firefox · restart Firefox if a host is refused"]
+             [host_line (Printf.sprintf "BiDi host: pid %d is gone · no reason recorded" entry.pid)]
+             @ [host_line "Its session may be left in Firefox · restart Firefox if a host is refused"]
+             @ host_connection_note t
              @ host_unacknowledged_lines entry
              @ attach ~address:(Some entry.bidi_url)
          | Unreadable { detail; held = Some true } ->
@@ -4539,7 +4554,12 @@ module Browser_lane_view = struct
     let* listed = decode_clients json in
     (* The same [data] the connections were read from. A server from before
        the report has no such field. *)
-    let reported = Result.to_option (Result.bind (field "data" json) (field "bidiHost")) in
+    let* data = field "data" json in
+    let* reported =
+      match data with
+      | `Assoc fields -> Ok (List.assoc_opt "bidiHost" fields)
+      | _ -> Error "expected object"
+    in
     Ok { listed; bidi_host = decode_bidi_host reported }
   let parse_client_id source json =
     let* value = field "clientId" json in

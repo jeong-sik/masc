@@ -7136,6 +7136,7 @@ type state = {
   mutable msg_journal_inflight: journal_key list;
   mutable msg_native_tasks: (string * Masc_tui_native_tasks.t) list;
   mutable msg_native_tasks_inflight: string list;
+  mutable msg_native_tasks_audit_pending: string list;
   (* Journal sources a stream frame named while their journal was being read,
      with the highest journal seq the frames named: the read in flight may
      have stopped short of that line, so when it lands another read starts
@@ -10271,6 +10272,7 @@ let create_state
   msg_journal_inflight = [];
   msg_native_tasks = [];
   msg_native_tasks_inflight = [];
+  msg_native_tasks_audit_pending = [];
   msg_journal_wanted = [];
   msg_journal_reads_refused = false;
   detail_scroll = 0;

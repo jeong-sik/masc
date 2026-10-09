@@ -6557,9 +6557,17 @@ let launch_keeper_older_page state ~mailbox ~keeper_name ~before =
   end
 
 let launch_keeper_native_tasks_load ?(mode=Masc_tui_native_tasks.Poll) state ~mailbox ~keeper_name =
-  if state.workspace_identity = Workspace_identity_match
-     && keeper_available_for_new_message state keeper_name
-     && not (List.mem keeper_name state.msg_native_tasks_inflight) then begin
+  let eligible = state.workspace_identity = Workspace_identity_match
+     && keeper_available_for_new_message state keeper_name in
+  if eligible && mode=Masc_tui_native_tasks.Audit
+     && List.mem keeper_name state.msg_native_tasks_inflight
+     && not (List.mem keeper_name state.msg_native_tasks_audit_pending) then
+    state.msg_native_tasks_audit_pending <- keeper_name :: state.msg_native_tasks_audit_pending;
+  if eligible && not (List.mem keeper_name state.msg_native_tasks_inflight) then begin
+    let mode = if List.mem keeper_name state.msg_native_tasks_audit_pending
+      then Masc_tui_native_tasks.Audit else mode in
+    state.msg_native_tasks_audit_pending <-
+      List.filter ((<>) keeper_name) state.msg_native_tasks_audit_pending;
     let enqueue_async = workspace_enqueue state in
     let authority = state.workspace_authority in
     let identity = state.server_identity in
@@ -11285,6 +11293,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.msg_journal_inflight <- [];
   state.msg_native_tasks <- [];
   state.msg_native_tasks_inflight <- [];
+  state.msg_native_tasks_audit_pending <- [];
   state.msg_journal_wanted <- [];
   state.msg_journal_unavailable <- [];
   state.msg_journal_reads_refused <- false;
@@ -17413,7 +17422,9 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       let tasks = match result with
         | Ok tasks -> tasks
         | Error error -> Masc_tui_native_tasks.failed previous error in
-      state.msg_native_tasks <- (keeper_name,tasks) :: List.remove_assoc keeper_name state.msg_native_tasks
+      state.msg_native_tasks <- (keeper_name,tasks) :: List.remove_assoc keeper_name state.msg_native_tasks;
+      if List.mem keeper_name state.msg_native_tasks_audit_pending then
+        launch_keeper_native_tasks_load ~mode:Masc_tui_native_tasks.Audit state ~mailbox ~keeper_name
   | Keeper_chat_journal_loaded { keeper_name; source; started_at; journal; operation_state; terminal_replay } -> (
       let journal_id = Keeper_chat_log.source_key source in
       (* Not generation-guarded: a journal is the turn's record whichever

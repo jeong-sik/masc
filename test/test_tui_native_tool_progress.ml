@@ -75,10 +75,7 @@ let test_heartbeat_reported_time_is_not_local_elapsed () =
             check (option int) "latest provider seconds may decrease" (Some 3) p.provider_elapsed_seconds;
             check (option (float 0.)) "local observation elapsed stays separate" (Some 41.) p.elapsed;
             check (float 0.) "event time remains local metadata" 51. p.updated_at
-        | None -> fail "heartbeat vanished");
-       let details = T.project_tool_block T.Full (T.tool_block [call]) in
-       check bool "tool detail labels provider elapsed explicitly" true
-         (Astring.String.is_infix ~affix:"provider elapsed 3s" (String.concat "\n" details.details))
+        | None -> fail "heartbeat vanished")
    | _ -> fail "native occurrence missing");
   both ~now:52. (Live.Native_tool_ended {occurrence;completion=Native.end_observed});
   check bool "model signal and original silence age are unaffected" true

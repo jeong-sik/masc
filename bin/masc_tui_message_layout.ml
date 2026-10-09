@@ -119,6 +119,9 @@ type entry = {
       (** The label {!role_label} was aligned from, whole. The gutter cuts a
           long name to its column; the origin heading under {!Origin_row}
           has the pane's width and draws this instead. *)
+  delivery_state : string option;
+      (** [Some state] only on an operator input still pending delivery; see
+          the .mli. *)
   role_label : string;
   role_label_mark_cells : int;
   diagnostics : string list;

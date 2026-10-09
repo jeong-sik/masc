@@ -1007,12 +1007,15 @@ class BidiHostLink(unittest.TestCase):
     def test_what_something_that_is_no_firefox_said_is_recorded_as_ascii(self):
         # The host quotes the first line it was answered with. Whatever bytes
         # those were, the record is text any reader loads.
-        self.firefox.state.says_instead = b"\xff\xfe\x00 no WebSocket here\r\n\r\n"
+        self.firefox.state.says_instead = b"\xff\xfe\x00\x1b[31m no WebSocket here\r\n\r\n"
         self.start(fixed=True)
         self.assert_ends("BiDi connection", within=ATTACH_WAIT_SEC)
         self.assertTrue(self.record_bytes().isascii(), self.record_bytes())
         ending = self.record()["ended"]
-        self.assertIn("\\xFF\\xFE\\x00 no WebSocket here", ending["reason"])
+        self.assertIn("\\xFF\\xFE\\x00\\x1B[31m no WebSocket here", ending["reason"])
+        logged = (self.base / "host.log").read_bytes()
+        self.assertIn(b"\\xFF\\xFE\\x00\\x1B[31m no WebSocket here", logged)
+        self.assertTrue(all(byte == 10 or 32 <= byte <= 126 for byte in logged), logged)
         self.assertIsNone(self.record()["attached_at"])
 
     def test_the_address_is_recorded_without_its_query(self):

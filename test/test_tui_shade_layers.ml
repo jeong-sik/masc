@@ -21,7 +21,7 @@ let entry style body : Layout.entry =
   { style
   ; timestamp = "01:41:00"
   ; timeline_bucket = None
-  ; span_clock = None
+  ; diagnostics = []
   ; speaker = "LABEL"
   ; role_label = "LABEL"
   (* No speaker mark on this fixture: the shade layers are what it is about,

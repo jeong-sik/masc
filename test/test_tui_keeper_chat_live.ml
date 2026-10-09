@@ -740,7 +740,7 @@ let test_stream_model_started_is_typed () =
             ]))
   in
   check (list delta) "stream message start yields stream_model_started"
-    [ Live.Stream_model_started { stream_scope = Some 4; model = "claude-3-7-sonnet" } ]
+    [ Live.Stream_model_started { stream_scope = Some 4; message_id = Some "pm-1"; model = "claude-3-7-sonnet"; usage = None } ]
     (feed_whole body)
 
 let test_stream_usage_is_typed () =

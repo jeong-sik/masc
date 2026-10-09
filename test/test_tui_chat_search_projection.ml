@@ -686,6 +686,54 @@ let test_search_pin_retains_query_endpoint_through_reflow () = at_sizes (fun ori
         check bool "frame feedback retains the actual searched endpoint" true (held = original))
         [(); (); ()]) [Layout.Origin_inline; Origin_bare; Origin_row]) [42; 160; 60])
 
+let test_live_edge_seed_owns_source_position () = at_sizes (fun origin ->
+  let state=state origin in
+  state.msg_loaded <- [row ~id:"seed-source" ~request_id:"seed-source" ~role:user
+    ~text:("\n\n" ^ long_answer "SEED_") 1.];
+  ignore(frame_lines state);
+  let pin=Option.get state.msg_scroll_pin in
+  check bool "live-edge snapshot has at least one mapped source point" true
+    (pin.pin_points<>[] && List.for_all (fun point -> Option.is_some point.T.source_position) pin.pin_points))
+
+let test_unmapped_blank_does_not_override_typed_pin () = at_sizes (fun origin ->
+  let set_cols columns=ignore(Masc_tui_render_schedule.Terminal_size_cache.refresh
+    Masc_tui_ansi.terminal_size_cache ~probe:(fun () -> Some(26,columns))) in
+  let state=state origin in
+  let paragraph=String.concat " " (List.init 100 (fun n -> Printf.sprintf "before%03d" n)) in
+  state.msg_loaded <- [row ~id:"blank-reflow" ~request_id:"blank-reflow" ~role:user
+    ~text:(paragraph ^ "\n\nPIN_HIT\n" ^ long_answer "TAIL_") 1.];
+  set_cols 160;
+  ignore(find state "PIN_HIT");
+  let pin=Option.get state.msg_scroll_pin in
+  let mapped=List.hd pin.pin_points in
+  check bool "fixture's blank follows a physically wrapped paragraph" true (mapped.body_row>1);
+  (* The two oldest visible points produced before this fix can be the blank
+     immediately before the mapped row. Keep their genuine source/row values,
+     then resize without a second find. The blank must not win by old ordinal. *)
+  let blank={mapped with T.body_row=mapped.body_row-1;source_position=None;rows_below=1} in
+  state.msg_scroll_pin <- Some {pin with pin_mode=T.Hold_scroll;pin_points=[blank;mapped]};
+  set_cols 42;
+  ignore(visible_line (frame_lines state) "PIN_HIT");
+  check bool "feedback keeps only source-backed positions" true
+    (List.for_all (fun point -> Option.is_some point.T.source_position)
+       (Option.get state.msg_scroll_pin).pin_points))
+
+let test_lost_source_points_release_numeric_scroll () = at_sizes (fun origin ->
+  let state=state origin in
+  state.msg_loaded <- [row ~id:"replaced" ~request_id:"replaced" ~role:user
+    ~text:(long_answer "OLD_") 1.];
+  ignore(find state "OLD_050");
+  ignore(frame_lines state);
+  state.msg_loaded <- [row ~id:"replaced" ~request_id:"replaced" ~role:user ~text:"replacement" 1.;
+    row ~id:"arrival" ~request_id:"arrival" ~role:T.Message_keeper
+      ~text:(long_answer "NEW_") 2.];
+  let shown=screen state in
+  check int "all removed source positions explicitly return to live edge" 0 state.msg_scroll;
+  check bool "new arrival does not inherit the old numeric offset" true
+    (Astring.String.is_infix ~affix:"NEW_099" shown);
+  check bool "lost search pin is released" true
+    (match state.msg_scroll_pin with None | Some {T.pin_mode=T.Follow_live;_} -> true | Some _ -> false))
+
 let test_idle_search_pin_reuses_semantic_index () = at_sizes (fun origin ->
   let state = state origin in
   state.link_previews_mode <- `Rich;
@@ -739,11 +787,16 @@ let test_polled_source_survives_tail_and_journal_takeover () = at_sizes (fun ori
   check bool "real writer dropped an earlier released prefix" true
     (initial.text_position.start_byte > 0);
   ignore (frame_lines state);
+  let has_status_pin pin=List.exists (fun point -> match point.T.scroll_anchor with
+    | T.Scroll_polled (_,_,T.Polled_status) -> true | _ -> false) pin.T.pin_points in
+  check bool "live-edge seed excludes mutable polled status text" false
+    (has_status_pin (Option.get state.msg_scroll_pin));
   T.set_msg_scroll state 5;
   let before = frame_lines state in
   let observed = List.init 100 (fun index -> Printf.sprintf "R%02d\\x1B" index)
     |> List.find (fun token -> List.exists (Astring.String.is_infix ~affix:token) before) in
   let pin = Option.get state.msg_scroll_pin in
+  check bool "held viewport excludes mutable polled status text" false (has_status_pin pin);
   check bool "polled pin owns actual producer absolute bytes" true
     (List.exists (fun point -> match point.T.source_position with
       | Some (T.Polled_body_byte {offset;_}) -> offset >= initial.text_position.start_byte
@@ -784,6 +837,9 @@ let () = run "chat search projection" [
   "rendered conversation", [
     test_case "empty projection follows future arrivals" `Quick test_empty_projection_does_not_hold_future_arrivals;
     test_case "polled absolute source survives rolling and journal takeover" `Quick test_polled_source_survives_tail_and_journal_takeover;
+    test_case "live-edge seed owns a source position" `Quick test_live_edge_seed_owns_source_position;
+    test_case "unmapped blank cannot override typed pin after reflow" `Quick test_unmapped_blank_does_not_override_typed_pin;
+    test_case "lost source points release stale numeric scroll" `Quick test_lost_source_points_release_numeric_scroll;
     test_case "idle search pin reuses semantic and URL indexes" `Quick test_idle_search_pin_reuses_semantic_index;
     test_case "search pin preserves query endpoint through width and gutters" `Quick test_search_pin_retains_query_endpoint_through_reflow;
     test_case "semantic search repetitive prefixes and optional boundaries" `Quick test_semantic_search_repetitive_prefix_and_boundaries;

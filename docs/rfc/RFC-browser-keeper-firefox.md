@@ -90,7 +90,10 @@ port = 9222
    듣는 것이 없으면 `firefox --no-remote --profile <profile> --remote-debugging-port <port>` 를 `spawn_detached` 로 띄운다.
    포트가 열릴 때까지 기다린다. 열리지 않거나 Firefox 가 먼저 끝나면 띄우지 않은 까닭을 기록한다(§3.4).
    같은 프로필로 이미 떠 있는 Firefox(플래그 없이 운영자가 띄운 것)가 있으면 Firefox 는 그 프로필을 두 번 열지 않는다.
-   그때 Firefox 가 어떻게 끝나는지(종료 코드, 창)는 아직 재지 않았다. 구현 전에 잰다.
+   2026-10-09 Firefox 157.0.1 을 임시 프로필로 재 보니(headless), 두 번째 Firefox 는 약 5초 뒤 **종료 코드 0** 으로 끝났고
+   포트는 열리지 않았다. stderr 에는 시스템 언어로 된 "이미 실행 중" 안내만 나왔다.
+   그래서 종료 코드로도, 출력 글자로도 가르지 않는다. "포트가 열리기 전에 Firefox 가 끝났다"를 하나의 까닭으로 기록하고,
+   문장은 그 프로필을 다른 Firefox 가 열고 있을 수 있다고 말한다.
 2. host 기록이 `Running` 이고 잠금이 잡혀 있으면 host 를 띄우지 않는다.
    아니면 `<base>/.masc/browser-lane/host/launch --bidi-url ws://127.0.0.1:<port>/session` 을 `spawn_detached` 로 띄운다.
    launcher 가 설치되어 있지 않으면 띄우지 않고 그렇게 기록한다

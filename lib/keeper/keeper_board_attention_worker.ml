@@ -1882,6 +1882,21 @@ let process_next_with_claim_ready_exact_current
        "board_attention_candidate_prune_failed keeper=%s detail=%s"
        keeper_name
        detail);
+  (* The settled receipts of consumed candidates go on the same wake, so the
+     partition ledger of a Keeper that never restarts stays bounded too. Like
+     the candidate prune, a failure is observed and retried on the next wake. *)
+  (match Partition.prune_settled_receipts ~base_path ~keeper_name with
+   | Ok 0 -> ()
+   | Ok removed ->
+     Log.Keeper.info
+       "board_attention_settled_receipts_pruned keeper=%s removed=%d"
+       keeper_name
+       removed
+   | Error detail ->
+     Log.Keeper.warn
+       "board_attention_settled_receipt_prune_failed keeper=%s detail=%s"
+       keeper_name
+       detail);
   let* (_ : int) = Partition.ensure_roots ~base_path ~keeper_name candidates in
   let selected_generation_is_ready ~partition_id ~generation =
     let* partitions = Partition.load ~base_path ~keeper_name in

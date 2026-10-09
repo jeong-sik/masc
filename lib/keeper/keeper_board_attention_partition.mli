@@ -207,6 +207,16 @@ val recover_for_process_start :
     Old schema rows and non-tail malformed JSON are rejected without migration.
     A torn final append is truncated under the ledger lock. *)
 
+val prune_settled_receipts :
+  base_path:string -> keeper_name:string -> (int, string) result
+(** Drop the [Settled] receipts whose candidate is [Consumed] or gone from
+    the candidate ledger, with the same gate as [recover_for_process_start]:
+    an unreadable candidate ledger, or one holding rows the decoder refused,
+    keeps every receipt. Other states are kept as they are; [Running] roots
+    are not released. Returns the number of receipts dropped. The rewrite is
+    fenced on the ledger cursor, so a concurrent append fails it and the next
+    drain retries. *)
+
 val claim_ready_exact :
   now:float ->
   worker_epoch:Worker_epoch.t ->

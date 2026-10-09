@@ -1644,6 +1644,43 @@ let settled_receipt_droppable gate (partition : t) =
     not (Id_set.mem partition.candidate_id open_candidates)
 ;;
 
+(* #41422: a settled receipt is droppable unless its candidate is still
+   non-terminal on the candidate ledger — Pending, Judged, or in quarantine.
+   Such a candidate replayed later must still find the settled root instead of
+   re-minting a Ready root and re-running the judgment. A Consumed candidate,
+   or one already pruned from the candidate ledger by the cursor-gated
+   cleanup, adds nothing durable to the receipt, so the receipt goes with it.
+   An unreadable candidate ledger keeps every receipt: nothing here loses the
+   durable judgment record. The caller holds the partition mutation lock. *)
+let settled_receipt_gate ~base_path ~keeper_name view =
+  let has_settled =
+    List.exists
+      (fun (partition : t) ->
+         match partition.state with
+         | Settled _ -> true
+         | Ready | Running _ | Completed _ | Abandoned _ | Blocked _ -> false)
+      view
+  in
+  if not has_settled
+  then Drop_unless_open Id_set.empty
+  else
+    match Candidate.load_candidates_with_rejections ~base_path ~keeper_name with
+    | Error _ | Ok (_, _ :: _) ->
+      (* Unreadable ledger, or rows the decoder refused: the hidden
+         candidate may be non-terminal, so every receipt stays. *)
+      Keep_all_settled
+    | Ok (candidates, []) ->
+      Drop_unless_open
+        (Id_set.of_list
+           (List.filter_map
+              (fun (candidate : Candidate.candidate) ->
+                 match candidate.status with
+                 | Candidate.Consumed _ -> None
+                 | Candidate.Pending _ | Candidate.Judged _
+                 | Candidate.Quarantine _ -> Some candidate.candidate_id)
+              candidates))
+;;
+
 let recover_for_process_start ~now ~base_path ~keeper_name =
   let* () = valid_time "partition process-start recovery time" now in
   let ledger_path = path ~base_path ~keeper_name in
@@ -1662,41 +1699,7 @@ let recover_for_process_start ~now ~base_path ~keeper_name =
         let* current = apply_rows (empty_view snapshot.cursor) rows in
         let* () = validate_keeper_identity ~keeper_name current in
         let view = view_partitions current in
-        (* #41422: a settled receipt is droppable unless its candidate is
-           still non-terminal on the candidate ledger — Pending, Judged, or
-           in quarantine. Such a candidate replayed after a restart must
-           still find the settled root instead of re-minting a Ready root
-           and re-running the judgment. A Consumed candidate, or one already
-           pruned from the candidate ledger by the cursor-gated cleanup,
-           adds nothing durable to the receipt, so the receipt goes with it.
-           An unreadable candidate ledger keeps every receipt: nothing here
-           loses the durable judgment record. *)
-        let has_settled =
-          List.exists
-            (fun (partition : t) ->
-               match partition.state with Settled _ -> true | _ -> false)
-            view
-        in
-        let settled_receipt_gate =
-          if not has_settled
-          then Drop_unless_open Id_set.empty
-          else
-            match Candidate.load_candidates_with_rejections ~base_path ~keeper_name with
-            | Error _ | Ok (_, _ :: _) ->
-              (* Unreadable ledger, or rows the decoder refused: the hidden
-                 candidate may be non-terminal, so every receipt stays. *)
-              Keep_all_settled
-            | Ok (candidates, []) ->
-              Drop_unless_open
-                (Id_set.of_list
-                   (List.filter_map
-                      (fun (candidate : Candidate.candidate) ->
-                         match candidate.status with
-                         | Candidate.Consumed _ -> None
-                         | Candidate.Pending _ | Candidate.Judged _
-                         | Candidate.Quarantine _ -> Some candidate.candidate_id)
-                      candidates))
-        in
+        let settled_receipt_gate = settled_receipt_gate ~base_path ~keeper_name view in
         let* recovered, latest =
           view
           |> List.fold_left
@@ -1743,6 +1746,71 @@ let recover_for_process_start ~now ~base_path ~keeper_name =
              let* compacted = apply_rows (empty_view cursor) latest in
              Atomic.set entry.cached (Some compacted);
              Ok recovered)))
+;;
+
+(* Startup recovery is not the only place a settled receipt can go: a Keeper
+   that stays up drains for its whole run, and each judgment it settles would
+   otherwise leave one row until the next restart. This applies the same gate
+   on a drain, without releasing [Running] roots, which only a restart cuts. *)
+let prune_settled_receipts ~base_path ~keeper_name =
+  let ledger_path = path ~base_path ~keeper_name in
+  run_blocking "board-attention-partition-settled-prune" (fun () ->
+    let entry = cache_entry ledger_path in
+    Stdlib.Mutex.protect entry.mutation_mutex (fun () ->
+      let* cached = read_view_blocking ledger_path in
+      let* () = validate_keeper_identity ~keeper_name cached in
+      let any_settled =
+        Id_map.exists
+          (fun _ (partition : t) ->
+             match partition.state with
+             | Settled _ -> true
+             | Ready | Running _ | Completed _ | Abandoned _ | Blocked _ -> false)
+          cached.by_id
+      in
+      if not any_settled
+      then Ok 0
+      else
+        (* The rewrite must carry every row and confirmation, so it reads the
+           whole ledger rather than the cached view. *)
+        match
+          Fs_compat.read_private_jsonl_durable_locked_result ledger_path ~after:None
+          |> snapshot_result ~ledger_path
+        with
+        | Error error -> Error error
+        | Ok snapshot ->
+          let* rows, confirmations = parse snapshot.bytes in
+          let* current = apply_rows (empty_view snapshot.cursor) rows in
+          let* () = validate_keeper_identity ~keeper_name current in
+          let view = view_partitions current in
+          let gate = settled_receipt_gate ~base_path ~keeper_name view in
+          let kept =
+            List.filter
+              (fun (partition : t) ->
+                 match partition.state with
+                 | Settled _ -> not (settled_receipt_droppable gate partition)
+                 | Ready | Running _ | Completed _ | Abandoned _ | Blocked _ -> true)
+              view
+          in
+          let removed = List.length view - List.length kept in
+          if removed = 0
+          then (
+            Atomic.set entry.cached (Some current);
+            Ok 0)
+          else (
+            match
+              Fs_compat.rewrite_private_jsonl_durable_locked_at_cursor_result
+                ledger_path
+                ~expected:snapshot.cursor
+                (serialize kept ^ serialize_confirmations confirmations)
+              |> cursor_result ~ledger_path
+            with
+            | Error error ->
+              Atomic.set entry.cached None;
+              Error error
+            | Ok cursor ->
+              let* compacted = apply_rows (empty_view cursor) kept in
+              Atomic.set entry.cached (Some compacted);
+              Ok removed)))
 ;;
 
 let claim_ready_exact

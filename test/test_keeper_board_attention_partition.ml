@@ -1106,6 +1106,75 @@ let test_startup_recovery_keeps_settled_receipts_when_candidates_are_unreadable 
     Sys.mkdir ledger_path 0o700)
 ;;
 
+(* A Keeper that never restarts reaches the same gate on a drain. The prune
+   drops the consumed candidate's receipt, keeps the non-terminal one's, and
+   leaves a Running root running: only a restart cuts a run. *)
+let test_drain_prune_drops_settled_receipts_and_keeps_running_roots () =
+  with_temp_base "board-attention-partition-drain-settled-prune" @@ fun base_path ->
+  ignore (settle_root ~base_path ~id:"candidate-consumed" ~recorded_at:1.0 ~consume_candidate:true : string);
+  let pending_id =
+    settle_root ~base_path ~id:"candidate-pending" ~recorded_at:2.0 ~consume_candidate:false
+  in
+  let running_row = recorded_candidate ~id:"candidate-running" ~recorded_at:3.0 () in
+  (match A.record ~base_path running_row with
+   | A.Recorded _ -> ()
+   | A.Duplicate _ | A.Record_error _ -> Alcotest.fail "fixture candidate was not recorded");
+  ignore (roots ~base_path [ running_row ] : P.t list);
+  let running =
+    claim ~base_path ~worker_epoch:(P.Worker_epoch.generate ()) ~now:5.0
+  in
+  Alcotest.(check int)
+    "one receipt is dropped"
+    1
+    (ok "prune on a drain" (P.prune_settled_receipts ~base_path ~keeper_name:"alpha"));
+  let remaining = ok "load after prune" (P.load ~base_path ~keeper_name:"alpha") in
+  let state_of candidate_id =
+    List.find_map
+      (fun (partition : P.t) ->
+         if String.equal partition.candidate_id candidate_id then Some partition.state else None)
+      remaining
+  in
+  (match state_of pending_id with
+   | Some (P.Settled _) -> ()
+   | Some (P.Ready | P.Running _ | P.Completed _ | P.Abandoned _ | P.Blocked _) | None ->
+     Alcotest.fail "the non-terminal candidate lost its settled receipt");
+  (match state_of running.P.candidate_id with
+   | Some (P.Running _) -> ()
+   | Some (P.Ready | P.Settled _ | P.Completed _ | P.Abandoned _ | P.Blocked _) | None ->
+     Alcotest.fail "a drain prune released or dropped a Running root");
+  Alcotest.(check int) "two partitions remain" 2 (List.length remaining);
+  Alcotest.(check int)
+    "a second prune has nothing to drop"
+    0
+    (ok "prune again" (P.prune_settled_receipts ~base_path ~keeper_name:"alpha"))
+;;
+
+let test_drain_prune_keeps_settled_receipts_when_candidates_are_unreadable () =
+  let settled_receipt_survives ~name ~damage =
+    with_temp_base ("board-attention-partition-drain-receipt-keep-" ^ name) @@ fun base_path ->
+    let candidate_id =
+      settle_root ~base_path ~id:("candidate-" ^ name) ~recorded_at:1.0 ~consume_candidate:true
+    in
+    damage (A.ledger_path ~base_path ~keeper_name:"alpha");
+    Alcotest.(check int)
+      (name ^ ": nothing is dropped")
+      0
+      (ok ("prune with " ^ name) (P.prune_settled_receipts ~base_path ~keeper_name:"alpha"));
+    match ok "load after prune" (P.load ~base_path ~keeper_name:"alpha") with
+    | [ ({ P.state = P.Settled _; _ } as kept) ] ->
+      Alcotest.(check string) (name ^ ": the settled receipt stays") candidate_id kept.P.candidate_id
+    | rows ->
+      Alcotest.failf "%s: expected one settled receipt, got %d rows" name (List.length rows)
+  in
+  settled_receipt_survives ~name:"rejected-row" ~damage:(fun ledger_path ->
+    let out = open_out_gen [ Open_append ] 0o600 ledger_path in
+    output_string out "not a candidate row\n";
+    close_out out);
+  settled_receipt_survives ~name:"unreadable-ledger" ~damage:(fun ledger_path ->
+    Sys.remove ledger_path;
+    Sys.mkdir ledger_path 0o700)
+;;
+
 let test_ready_confirmations_survive_requeue_deferral_and_restart () =
   with_temp_base "board-attention-ready-confirmations" @@ fun base_path ->
   let pending = recorded_candidate ~id:"candidate-confirmation" ~recorded_at:1.0 () in
@@ -1951,6 +2020,14 @@ let () =
             "startup recovery keeps settled receipts when candidates are unreadable"
             `Quick
             test_startup_recovery_keeps_settled_receipts_when_candidates_are_unreadable
+        ; Alcotest.test_case
+            "drain prune drops settled receipts and keeps Running roots"
+            `Quick
+            test_drain_prune_drops_settled_receipts_and_keeps_running_roots
+        ; Alcotest.test_case
+            "drain prune keeps settled receipts when candidates are unreadable"
+            `Quick
+            test_drain_prune_keeps_settled_receipts_when_candidates_are_unreadable
         ; Alcotest.test_case
             "Ready confirmations survive requeue, deferral, and restarts"
             `Quick

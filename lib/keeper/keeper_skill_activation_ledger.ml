@@ -1,116 +1,9 @@
 open Result.Syntax
 
+include Keeper_skill_activation_types
+
 type ledger_revision = string
 type workspace_key = string
-
-type task_id_set =
-  | Task_ids of
-      { first : Keeper_id.Task_id.t
-      ; rest : Keeper_id.Task_id.t list
-      }
-
-type instruction_origin =
-  | Task_instruction of { task_ids : task_id_set }
-  | Session_instruction
-
-type composition_origin =
-  | Task_composition of
-      { task_ids : task_id_set }
-  | Session_composition
-
-type delivery_boundary =
-  | Model_response of { agent_core_turn : int }
-  | Official_client_result_handoff of { agent_core_turn : int }
-
-type delivery =
-  { boundary : delivery_boundary
-  ; runtime_id : string
-  ; delivered_at : string
-  ; content_bytes : int
-  ; content_sha256 : string
-  }
-
-type tool_result_receipt =
-  { tool_use_id : string
-  ; content_bytes : int
-  ; content_sha256 : string
-  }
-
-type action_identity = Runtime_native_tools.action_identity =
-  | Call_id of string
-  | Provider_step of
-      { conversation_id : string
-      ; step_index : int
-      }
-
-type action =
-  { identity : action_identity
-  ; tool_name : string
-  ; runtime_id : string
-  ; agent_core_turn : int
-  ; observed_at : string
-  }
-
-type served_content =
-  | Skill_body of
-      { bytes : int
-      ; sha256 : string
-      }
-  | Skill_resource of
-      { relative_path : string
-      ; bytes : int
-      ; sha256 : string
-      }
-
-type invocation =
-  | Instruction_invocation of
-      { origin : instruction_origin
-      ; served_content : served_content
-      }
-  | Composition_invocation of
-      { origin : composition_origin
-      ; tool_name : string
-      }
-
-type transition_rejection =
-  | Delivery_order_rejected of
-      { skill_tool_use_id : string
-      ; activation_turn_ref : Ids.Turn_ref.t
-      ; observed_turn_ref : Ids.Turn_ref.t
-      ; activation_agent_core_turn : int
-      ; observed_agent_core_turn : int
-      ; observed_at : string
-      }
-  | Delivery_conflict_rejected of
-      { skill_tool_use_id : string
-      ; activation_turn_ref : Ids.Turn_ref.t
-      ; observed_turn_ref : Ids.Turn_ref.t
-      ; observed_agent_core_turn : int
-      ; observed_at : string
-      }
-  | Action_before_delivery_rejected of
-      { skill_tool_use_id : string
-      ; activation_turn_ref : Ids.Turn_ref.t
-      ; observed_turn_ref : Ids.Turn_ref.t
-      ; action_identity : action_identity
-      ; tool_name : string
-      ; observed_agent_core_turn : int
-      ; observed_at : string
-      }
-
-type activation =
-  { identity : Skill_reference.identity
-  ; content_revision : Skill_reference.content_revision
-  ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
-  ; turn_ref : Ids.Turn_ref.t
-  ; runtime_id : string
-  ; skill_tool_use_id : string
-  ; agent_core_turn : int
-  ; invocation : invocation
-  ; delivery : delivery option
-  ; actions : action list
-  ; activated_at : string
-  }
 
 (* The revision is the SHA-256 of the whole canonical ledger, so computing it
    costs a serialisation of every activation. A mutation does not need it --
@@ -123,40 +16,6 @@ type t =
   ; activations : activation list
   ; transition_rejections : transition_rejection list
   ; mutable revision_memo : ledger_revision option
-  }
-
-type summary =
-  { instruction_invocations : int
-  ; skill_bodies_served : int
-  ; skill_resources_served : int
-  ; instruction_provider_deliveries : int
-  ; instruction_official_client_handoffs : int
-  ; instruction_actions_observed : int
-  ; composition_invocations : int
-  ; composition_provider_deliveries : int
-  ; composition_official_client_handoffs : int
-  ; composition_actions_observed : int
-  ; invalid_transitions : int
-  }
-
-type summary_scope =
-  { snapshot_revision : Skill_catalog_snapshot.snapshot_revision
-  ; turn_ref : Ids.Turn_ref.t
-  ; invocation_runtime_id : string
-  ; reference : Skill_reference.t
-  }
-
-type runtime_count =
-  { runtime_id : string
-  ; count : int
-  }
-
-type scoped_summary =
-  { scope : summary_scope
-  ; summary : summary
-  ; provider_delivery_runtime_counts : runtime_count list
-  ; official_client_handoff_runtime_counts : runtime_count list
-  ; action_runtime_counts : runtime_count list
   }
 
 type record_outcome =
@@ -378,241 +237,26 @@ let task_id_set_of_list task_ids =
        Error (Duplicate_task_id (Keeper_id.Task_id.to_string task_id)))
 ;;
 
-let empty_summary invalid_transitions =
-  { instruction_invocations = 0
-  ; skill_bodies_served = 0
-  ; skill_resources_served = 0
-  ; instruction_provider_deliveries = 0
-  ; instruction_official_client_handoffs = 0
-  ; instruction_actions_observed = 0
-  ; composition_invocations = 0
-  ; composition_provider_deliveries = 0
-  ; composition_official_client_handoffs = 0
-  ; composition_actions_observed = 0
-  ; invalid_transitions
-  }
-;;
-
 let summarize ledger =
-  List.fold_left
-    (fun summary activation ->
-       let provider_delivered, official_client_handoff =
-         match activation.delivery with
-         | Some { boundary = Model_response _; _ } -> 1, 0
-         | Some { boundary = Official_client_result_handoff _; _ } -> 0, 1
-         | None -> 0, 0
-       in
-       let actions = List.length activation.actions in
-       match activation.invocation with
-       | Instruction_invocation { served_content; _ } ->
-         let skill_bodies_served, skill_resources_served =
-           match served_content with
-           | Skill_body _ -> summary.skill_bodies_served + 1, summary.skill_resources_served
-           | Skill_resource _ ->
-             summary.skill_bodies_served, summary.skill_resources_served + 1
-         in
-         { summary with
-           instruction_invocations = summary.instruction_invocations + 1
-         ; skill_bodies_served
-         ; skill_resources_served
-         ; instruction_provider_deliveries =
-             summary.instruction_provider_deliveries + provider_delivered
-         ; instruction_official_client_handoffs =
-             summary.instruction_official_client_handoffs
-             + official_client_handoff
-         ; instruction_actions_observed =
-             summary.instruction_actions_observed + actions
-         }
-       | Composition_invocation _ ->
-         { summary with
-           composition_invocations = summary.composition_invocations + 1
-         ; composition_provider_deliveries =
-             summary.composition_provider_deliveries + provider_delivered
-         ; composition_official_client_handoffs =
-             summary.composition_official_client_handoffs
-             + official_client_handoff
-         ; composition_actions_observed =
-             summary.composition_actions_observed + actions
-         })
-    (empty_summary (List.length ledger.transition_rejections))
-    ledger.activations
+  Keeper_skill_activation_summary.summarize
+    ~activations:ledger.activations
+    ~transition_rejections:ledger.transition_rejections
 ;;
 
-let summary_to_yojson summary =
-  `Assoc
-    [ "instruction_invocations", `Int summary.instruction_invocations
-    ; "skill_bodies_served", `Int summary.skill_bodies_served
-    ; "skill_resources_served", `Int summary.skill_resources_served
-    ; ( "instruction_provider_deliveries"
-      , `Int summary.instruction_provider_deliveries )
-    ; ( "instruction_official_client_handoffs"
-      , `Int summary.instruction_official_client_handoffs )
-    ; "instruction_actions_observed", `Int summary.instruction_actions_observed
-    ; "composition_invocations", `Int summary.composition_invocations
-    ; ( "composition_provider_deliveries"
-      , `Int summary.composition_provider_deliveries )
-    ; ( "composition_official_client_handoffs"
-      , `Int summary.composition_official_client_handoffs )
-    ; "composition_actions_observed", `Int summary.composition_actions_observed
-    ; "invalid_transitions", `Int summary.invalid_transitions
-    ]
+let summarize_by_scope ledger =
+  Keeper_skill_activation_summary.summarize_by_scope
+    ~activations:ledger.activations
+    ~transition_rejections:ledger.transition_rejections
 ;;
 
-let rejection_skill_tool_use_id = function
-  | Delivery_order_rejected { skill_tool_use_id; _ }
-  | Delivery_conflict_rejected { skill_tool_use_id; _ }
-  | Action_before_delivery_rejected { skill_tool_use_id; _ } ->
-    skill_tool_use_id
-;;
+let summary_to_yojson = Keeper_skill_activation_summary.summary_to_yojson
+let scoped_summary_to_yojson = Keeper_skill_activation_summary.scoped_summary_to_yojson
 
 let rejection_activation_turn_ref = function
   | Delivery_order_rejected { activation_turn_ref; _ }
   | Delivery_conflict_rejected { activation_turn_ref; _ }
   | Action_before_delivery_rejected { activation_turn_ref; _ } ->
     activation_turn_ref
-;;
-
-let scope_of_activation (activation : activation) =
-  { snapshot_revision = activation.snapshot_revision
-  ; turn_ref = activation.turn_ref
-  ; invocation_runtime_id = activation.runtime_id
-  ; reference =
-      Skill_reference.make
-        ~identity:activation.identity
-        ~content_revision:activation.content_revision
-  }
-;;
-
-let equal_summary_scope left right =
-  Skill_catalog_snapshot.equal_snapshot_revision
-    left.snapshot_revision
-    right.snapshot_revision
-  && Ids.Turn_ref.equal left.turn_ref right.turn_ref
-  && String.equal left.invocation_runtime_id right.invocation_runtime_id
-  && Skill_reference.equal left.reference right.reference
-;;
-
-let runtime_counts runtime_ids =
-  List.fold_left
-    (fun counts runtime_id ->
-       let rec increment reversed = function
-         | [] -> List.rev_append reversed [ { runtime_id; count = 1 } ]
-         | ({ runtime_id = known; count } as current) :: rest ->
-           if String.equal runtime_id known
-           then List.rev_append reversed ({ current with count = count + 1 } :: rest)
-           else increment (current :: reversed) rest
-       in
-       increment [] counts)
-    []
-    runtime_ids
-;;
-
-let summarize_by_scope ledger =
-  let scopes =
-    List.fold_left
-      (fun scopes activation ->
-         let scope = scope_of_activation activation in
-         if List.exists (equal_summary_scope scope) scopes
-         then scopes
-         else scopes @ [ scope ])
-      []
-      ledger.activations
-  in
-  List.map
-    (fun scope ->
-       let activations =
-         List.filter
-           (fun activation ->
-              equal_summary_scope scope (scope_of_activation activation))
-           ledger.activations
-       in
-       let invocation_ids =
-         List.map (fun activation -> activation.skill_tool_use_id) activations
-       in
-       let transition_rejections =
-         List.filter
-           (fun rejection ->
-              List.mem (rejection_skill_tool_use_id rejection) invocation_ids)
-           ledger.transition_rejections
-       in
-       let scoped_ledger = { ledger with activations; transition_rejections } in
-       let provider_delivery_runtime_counts =
-         activations
-         |> List.filter_map (fun activation ->
-              match activation.delivery with
-              | Some { boundary = Model_response _; runtime_id; _ } ->
-                Some runtime_id
-              | Some { boundary = Official_client_result_handoff _; _ }
-              | None -> None)
-         |> runtime_counts
-       in
-       let official_client_handoff_runtime_counts =
-         activations
-         |> List.filter_map (fun activation ->
-              match activation.delivery with
-              | Some
-                  { boundary = Official_client_result_handoff _; runtime_id; _ } ->
-                Some runtime_id
-              | Some { boundary = Model_response _; _ }
-              | None -> None)
-         |> runtime_counts
-       in
-       let action_runtime_counts =
-         activations
-         |> List.concat_map (fun activation ->
-              List.map (fun (action : action) -> action.runtime_id) activation.actions)
-         |> runtime_counts
-       in
-       { scope
-       ; summary = summarize scoped_ledger
-       ; provider_delivery_runtime_counts
-       ; official_client_handoff_runtime_counts
-       ; action_runtime_counts
-       })
-    scopes
-;;
-
-let scoped_summary_to_yojson scoped =
-  `Assoc
-    [ ( "scope"
-      , `Assoc
-          [ ( "snapshot_revision"
-            , `String
-                (Skill_catalog_snapshot.snapshot_revision_to_string
-                   scoped.scope.snapshot_revision) )
-          ; "turn_ref", Ids.Turn_ref.to_yojson scoped.scope.turn_ref
-          ; "invocation_runtime_id", `String scoped.scope.invocation_runtime_id
-          ; "reference", Skill_reference.to_yojson scoped.scope.reference
-          ] )
-    ; "summary", summary_to_yojson scoped.summary
-    ; ( "provider_delivery_runtime_counts"
-      , `List
-          (List.map
-             (fun runtime ->
-                `Assoc
-                  [ "runtime_id", `String runtime.runtime_id
-                  ; "count", `Int runtime.count
-                  ])
-             scoped.provider_delivery_runtime_counts) )
-    ; ( "official_client_handoff_runtime_counts"
-      , `List
-          (List.map
-             (fun runtime ->
-                `Assoc
-                  [ "runtime_id", `String runtime.runtime_id
-                  ; "count", `Int runtime.count
-                  ])
-             scoped.official_client_handoff_runtime_counts) )
-    ; ( "action_runtime_counts"
-      , `List
-          (List.map
-             (fun runtime ->
-                `Assoc
-                  [ "runtime_id", `String runtime.runtime_id
-                  ; "count", `Int runtime.count
-                  ])
-             scoped.action_runtime_counts) )
-    ]
 ;;
 
 let validate_served_content = function

@@ -4,6 +4,8 @@
  (flags :standard)
  (public_name masc)
  (private_modules
+  keeper_skill_activation_types
+  keeper_skill_activation_summary
   keeper_board_attention_partition_types
   keeper_board_attention_partition_wire
   keeper_reaction_ledger_wire

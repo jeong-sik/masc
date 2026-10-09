@@ -335,7 +335,7 @@ type t =
            moment when it covered a span, and a turn that ran twenty minutes
            sits under rows typed during it carrying an opening clock (the
            2026-09-10 msx-retro-mania misread). *)
-  ; mutable noted_skills : ((string * string) * skill_activity) list
+  ; mutable noted_skills : ((string * string * string option) * skill_activity) list
         (* The exact delivery records [note_skill_activity] took, keyed by
            the read call's (turn_ref, tool-use id), in first-noted order.
            Not a trail node: the stream has no event for a delivery, so
@@ -2637,15 +2637,48 @@ let note_tool_outcome t ~execution_id ~outcome ~duration =
    own words, and the two evidence gaps name no read. The record is kept
    whole, not merged field by field, so the row a held turn draws for the
    read says what the loaded row said about it. Keyed by the exact turn and
-   tool-use id: a continuation may reuse a provider id in a different turn.
-   An incomplete identity has nothing to stand over. A later record for the same key
+   tool-use id and invocation runtime: a continuation or failover may reuse a provider id.
+   An incomplete turn/tool identity has nothing to stand over. Runtime is the
+   third key dimension; a later record for the same key
    replaces the earlier one, as a later page replaces the loaded row. *)
 let skill_identity (skill : skill_activity) =
   match skill.turn_ref, skill.skill_tool_use_id with
-  | Some turn_ref, Some use_id -> Some (turn_ref, use_id)
+  | Some turn_ref, Some use_id -> Some (turn_ref, use_id, skill.runtime_id)
   | (None, _) | (_, None) -> None
 
-let note_skill_activity t (evidence : skill_activity) =
+let compatible_skill_identity (left_turn, left_use, left_runtime)
+    (right_turn, right_use, right_runtime) =
+  String.equal left_turn right_turn && String.equal left_use right_use
+  && (match left_runtime, right_runtime with
+      | Some left, Some right -> String.equal left right
+      | None, _ | _, None -> true)
+
+(* Complete an absent runtime only with one compatible observation. Known
+   runtime A and B never match, and an unknown record cannot elect between them. *)
+let matching_skill_note ?(runtime_inventory=[]) key notes =
+  match List.find_opt (fun (noted_key, _) -> noted_key = key) notes with
+  | Some _ as exact -> exact
+  | None ->
+      let turn_ref, use_id, runtime = key in
+      let identities = key :: List.map fst notes
+        @ List.filter_map skill_identity runtime_inventory in
+      let runtimes = List.filter_map (fun (turn, use, runtime) ->
+        if turn=turn_ref && use=use_id then runtime else None) identities
+        |> List.sort_uniq String.compare in
+      match runtimes with
+      | _ :: _ :: _ -> None
+      | [] | [_] ->
+          match List.filter (fun (noted_key, _) -> compatible_skill_identity noted_key
+              (turn_ref,use_id,runtime)) notes with
+          | [note] -> Some note
+          | [] | _ :: _ :: _ -> None
+
+let complete_skill_runtime (known : skill_activity) (incoming : skill_activity) =
+  match incoming.runtime_id with
+  | Some _ -> incoming
+  | None -> {incoming with runtime_id=known.runtime_id}
+
+let note_skill_activity ?(runtime_inventory=[]) t (evidence : skill_activity) =
   match evidence.state with
   | Skill_calling | Skill_served_pending | Skill_failed | Skill_evidence_missing
   | Skill_evidence_unavailable ->
@@ -2654,18 +2687,15 @@ let note_skill_activity t (evidence : skill_activity) =
       match skill_identity evidence with
       | None -> ()
       | Some key ->
-          let known =
-            List.exists (fun (noted_key, _) -> noted_key = key)
-              t.noted_skills
-          in
-          t.noted_skills <-
-            (if known then
-               List.map
-                 (fun (noted_key, noted) ->
-                   if noted_key = key then (noted_key, evidence)
-                   else (noted_key, noted))
-                 t.noted_skills
-             else t.noted_skills @ [ (key, evidence) ]);
+          t.noted_skills <- (match matching_skill_note ~runtime_inventory key t.noted_skills with
+            | None -> t.noted_skills @ [key,evidence]
+            | Some (previous_key, previous) ->
+                let evidence = complete_skill_runtime previous evidence in
+                let turn_ref, use_id, _ = key in
+                let key = turn_ref, use_id, evidence.runtime_id in
+                List.map (fun (noted_key, noted) ->
+                  if noted_key = previous_key then key,evidence else noted_key,noted)
+                  t.noted_skills);
           bump t)
 
 let turn_status_text ~reply ~turn_ref (outcome : Masc.Keeper_turn_outcome.t) =
@@ -2720,7 +2750,7 @@ type drawn_item =
    cut stream, a gap in the journal -- while the loaded row that carried the
    record is one a held log leaves out of the timeline.
 
-   Only the exact turn and id pair the two. The stream's tool start names its call
+   The exact turn, id and compatible runtime pair the two. The stream's tool start names its call
    (the agent-core stream bridge reports a start without a tool id as a
    protocol error instead), so a skill item without an id is not expected.
    One that came anyway would stay as the stream drew it, and the record
@@ -2739,23 +2769,22 @@ let with_noted_skills noted items =
          a call that failed, and taking it would draw a failed read as a
          finished one. The record is then not drawn at all: its id is on the
          failed item, so nothing appends it either. *)
+      let consumed_keys = ref [] in
       let exact (skill : skill_activity) =
-        match skill.state with
-        | Skill_failed -> skill
-        | Skill_calling | Skill_served_pending | Skill_served_only
-        | Skill_delivered | Skill_used | Skill_evidence_missing
-        | Skill_evidence_unavailable -> (
-            match skill_identity skill with
+        match skill_identity skill with
+        | None -> skill
+        | Some key ->
+            match matching_skill_note key noted with
             | None -> skill
-            | Some key -> (
-                match
-                  List.find_map
-                    (fun (noted_key, note) ->
-                      if noted_key = key then Some note else None)
-                    noted
-                with
-                | Some note -> note
-                | None -> skill))
+            | Some (noted_key, note) ->
+                consumed_keys := noted_key :: !consumed_keys;
+                (* A unique receipt can complete runtime provenance, never
+                   turn an observed failure into successful delivery. *)
+                match skill.state with
+                | Skill_failed -> complete_skill_runtime note skill
+                | Skill_calling | Skill_served_pending | Skill_served_only
+                | Skill_delivered | Skill_used | Skill_evidence_missing
+                | Skill_evidence_unavailable -> complete_skill_runtime skill note
       in
       let skills_of item =
         match item.drawn with
@@ -2784,7 +2813,9 @@ let with_noted_skills noted items =
       let unseen =
         List.filter_map
           (fun (noted_key, note) ->
-            if List.mem noted_key drawn_identities then None
+            (* Resolved drawn identities already include any unique runtime
+               completion. An ambiguous unknown stream cannot suppress A/B. *)
+            if List.mem noted_key !consumed_keys || List.mem noted_key drawn_identities then None
             else Some note)
           noted
       in

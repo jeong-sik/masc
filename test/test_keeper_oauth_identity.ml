@@ -226,10 +226,10 @@ let discovered_atlassian () =
       Alcotest.failf "discovery failed: %s"
         (Keeper_oauth_discovery.error_to_string err)
 
-let begin_for provider =
+let begin_for ?(keeper="oauth-fixture") provider =
   Keeper_oauth_flow.begin_authorization ~provider
     ~discovered:(discovered_atlassian ()) ~client_id:"client-abc" ~scopes:[]
-    ~redirect_uri ~keeper:"oauth-fixture"
+    ~redirect_uri ~keeper
 
 let query_of url =
   match String.index_opt url '?' with
@@ -618,8 +618,8 @@ let test_renewal_window_opens_before_expiry () =
 
 (* ── the exchanges waiting for a browser ─────────────────────────────── *)
 
-let in_flight_for provider : Keeper_oauth_pending.in_flight =
-  { pending = begin_for provider
+let in_flight_for ?(keeper="oauth-fixture") provider : Keeper_oauth_pending.in_flight =
+  { pending = begin_for ~keeper provider
   ; discovered = discovered_atlassian ()
   ; client_id = "client-abc"
   ; client_secret = None
@@ -629,7 +629,7 @@ let test_a_state_is_redeemed_once () =
   let provider = load_or_fail atlassian_toml in
   let table = Keeper_oauth_pending.create () in
   let held = in_flight_for provider in
-  Keeper_oauth_pending.remember table ~now:0.0 ~ttl_sec:600.0 held;
+  ignore (Keeper_oauth_pending.remember table ~now:0.0 ~ttl_sec:600.0 held);
   let state = held.Keeper_oauth_pending.pending.Keeper_oauth_flow.state in
   (match Keeper_oauth_pending.take table ~now:1.0 ~state with
   | None -> Alcotest.fail "the exchange was not held"
@@ -651,7 +651,7 @@ let test_an_abandoned_login_expires () =
   let provider = load_or_fail atlassian_toml in
   let table = Keeper_oauth_pending.create () in
   let held = in_flight_for provider in
-  Keeper_oauth_pending.remember table ~now:0.0 ~ttl_sec:600.0 held;
+  ignore (Keeper_oauth_pending.remember table ~now:0.0 ~ttl_sec:600.0 held);
   let state = held.Keeper_oauth_pending.pending.Keeper_oauth_flow.state in
   Alcotest.(check int) "held while inside the window" 1
     (Keeper_oauth_pending.waiting table ~now:599.0);
@@ -664,9 +664,9 @@ let test_an_abandoned_login_expires () =
 let test_logins_do_not_collide () =
   let provider = load_or_fail atlassian_toml in
   let table = Keeper_oauth_pending.create () in
-  let one = in_flight_for provider and two = in_flight_for provider in
-  Keeper_oauth_pending.remember table ~now:0.0 ~ttl_sec:600.0 one;
-  Keeper_oauth_pending.remember table ~now:0.0 ~ttl_sec:600.0 two;
+  let one = in_flight_for provider and two = in_flight_for ~keeper:"other-keeper" provider in
+  ignore (Keeper_oauth_pending.remember table ~now:0.0 ~ttl_sec:600.0 one);
+  ignore (Keeper_oauth_pending.remember table ~now:0.0 ~ttl_sec:600.0 two);
   Alcotest.(check int) "both are held" 2
     (Keeper_oauth_pending.waiting table ~now:1.0);
   let verifier (f : Keeper_oauth_pending.in_flight) =
@@ -683,6 +683,36 @@ let test_logins_do_not_collide () =
       check str "the first kept its own verifier" (verifier one) (verifier a);
       check str "the second kept its own" (verifier two) (verifier b)
   | _ -> Alcotest.fail "one of two concurrent logins was lost"
+
+let test_admitted_exchange_status_outlives_deadline () =
+  let provider = load_or_fail atlassian_toml in
+  let table = Keeper_oauth_pending.create () in
+  let held = in_flight_for provider in
+  let attempt_id = Keeper_oauth_pending.remember table ~now:0. ~ttl_sec:600. held in
+  let state = held.pending.Keeper_oauth_flow.state in
+  check bool "completion id is not callback authority" true (attempt_id <> state);
+  let status now = Keeper_oauth_pending.status table ~now ~attempt_id
+    ~keeper:"oauth-fixture" ~provider_id:provider.Keeper_oauth_provider.id in
+  let post ~url:_ ~headers:_ ~body:_ =
+    check bool "admission survives deadline during actual exchange" true
+      (status 601. = Some Keeper_oauth_pending.Callback_admitted);
+    check bool "callback replay cannot redeem admitted exchange" true
+      (Keeper_oauth_pending.take table ~now:601. ~state = None);
+    Ok (200, {|{"access_token":"synthetic-token"}|}) in
+  (match Keeper_oauth_session.finish ~post ~pending:table ~state ~code:"synthetic-code" ~now:599. () with
+   | Error error -> Alcotest.fail (Keeper_oauth_session.finish_error_to_string error)
+   | Ok _ -> ());
+  check bool "exchange alone does not claim credential publication" true
+    (status 602. = Some Keeper_oauth_pending.Callback_admitted);
+  Keeper_oauth_pending.finish table ~state
+    (Ok Keeper_oauth_pending.Credentials_published_discovery_failed);
+  check bool "publication remains observable after consent deadline" true
+    (status 603. = Some (Keeper_oauth_pending.Completed Keeper_oauth_pending.Credentials_published_discovery_failed));
+  Keeper_oauth_pending.finish table ~state (Error ());
+  check bool "replay cannot replace terminal completion" true
+    (status 604. = Some (Keeper_oauth_pending.Completed Keeper_oauth_pending.Credentials_published_discovery_failed));
+  check bool "other Keeper cannot read handle" true
+    (Keeper_oauth_pending.status table ~now:604. ~attempt_id ~keeper:"other" ~provider_id:provider.id = None)
 
 let test_discovery_reads_both_hops () =
   let get, asked =
@@ -1878,7 +1908,8 @@ let () =
             test_the_shipped_env_entries_are_ones_the_projection_accepts;
         ] );
       ( "pending",
-        [ Alcotest.test_case "a state is redeemed once" `Quick
+        [ Alcotest.test_case "admitted exchange survives consent deadline" `Quick test_admitted_exchange_status_outlives_deadline;
+          Alcotest.test_case "a state is redeemed once" `Quick
             test_a_state_is_redeemed_once;
           Alcotest.test_case "an abandoned login expires" `Quick
             test_an_abandoned_login_expires;

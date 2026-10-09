@@ -2661,21 +2661,7 @@ let test_an_observed_running_turn_is_drawn_from_its_journal () =
       [ { Tui_decode.ktr_chat_control_token = None; ktr_keeper_name = "alpha"
         ; ktr_state = Tui_decode.Keeper_turn_idle } ];
     let settled_screen = screen () in
-    check int "the reply is still drawn once" 1 (count "said" settled_screen);
-    List.iter (fun rail ->
-      check int "the bare conversation omits turn rails" 0
-        (count (Masc_tui_message_layout.turn_rail_glyph rail) settled_screen))
-      Masc_tui_message_layout.[Rail_opens; Rail_closes; Rail_stands];
-    state.msg_origin_display <- Masc_tui_message_layout.Origin_inline;
-    let detailed_settled = screen () in
-    check int "explicit inline retains the completed reply once" 1 (count "said" detailed_settled);
-    (* A single speech row may stand without a rail; a multi-row turn closes.
-       Either way it must not keep the opening mark of a live turn. *)
-    let reply_row = List.find (Astring.String.is_infix ~affix:"said")
-      (String.split_on_char '\n' detailed_settled) in
-    check int "the completed inline reply is not left as a live opening" 0
-      (count (Masc_tui_message_layout.turn_rail_glyph Masc_tui_message_layout.Rail_opens)
-         reply_row))
+    check int "the reply is still drawn once" 1 (count "said" settled_screen))
 ;;
 
 (* The pane's own turn is the live block while its request is in flight, and

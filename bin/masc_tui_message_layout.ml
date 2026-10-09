@@ -1534,6 +1534,9 @@ let continues_previous ~(previous : entry option) (entry : entry) =
   | None -> false
   | Some previous ->
       previous.style = entry.style
+      (* [role_label] is [speaker] cut to the gutter column, so two long names
+         can share it. Only the whole name says it is the same speaker. *)
+      && String.equal previous.speaker entry.speaker
       && String.equal previous.role_label entry.role_label
       && String.equal previous.request_label entry.request_label
       && (if String.equal entry.request_label "" then

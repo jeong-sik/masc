@@ -133,6 +133,7 @@ let selection_error ~base_path ~tool_name ~start_time error =
        whatever it would have said. *)
     let running = match observation.record with
       | Browser_bidi_host_record.Running _
+      | Browser_bidi_host_record.Record_missing_but_locked
       | Browser_bidi_host_record.Unreadable { held = Some true; _ } -> true
       | Browser_bidi_host_record.Unreadable { held = Some false | None; _ }
       | Browser_bidi_host_record.Never_started

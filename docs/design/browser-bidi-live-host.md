@@ -190,12 +190,14 @@ Read together they say one of these:
 
 | Record | Lock | Meaning |
 |---|---|---|
-| none | | No BiDi host has run for this workspace. |
+| none | free | No BiDi host has run for this workspace. |
+| none | held | A host holds the workspace lock before writing its first record; the state is `record_missing_but_locked`. |
 | no ending | held | A host is running. It is attached once the record has its session time; a server that is down does not change this. |
 | an ending | | The host left in order and said why. |
 | no ending | free | The host was killed or crashed, or it left in order and could not write its ending. Its BiDi session may be left in Firefox. |
 | unreadable | | The record is not one the reader takes. The reader still says whether a host holds the lock: one that does refuses the next host, which then cannot replace the record. |
-| no ending | cannot be asked | Whether the host runs is not known. The reader says so, with why the lock could not be asked. A record with its ending, and no record, are read without the lock. |
+| none | cannot be asked | Whether a host started cannot be known. The state is unreadable, with why the lock could not be asked. |
+| no ending | cannot be asked | Whether the host runs is not known. The state is unreadable, with why the lock could not be asked. |
 
 A reader looks at the record and then at the lock, so it can be wrong for
 as long as one write of the record takes: while a starting host has the
@@ -242,7 +244,7 @@ does next:
   A workspace with no browser lane installed and no record has no such line.
 - `GET /api/v1/dashboard/browser-lane/clients` adds `bidiHost` beside
   `clients`:
-  - `state`: `never_started`, `running`, `ended`, `died` or `unreadable`.
+  - `state`: `never_started`, `record_missing_but_locked`, `running`, `ended`, `died` or `unreadable`.
   - What the state was read from: the `record`, whether the host's lock was
     held as `lock_held`, and why either cannot be read as `detail`. A reader
     works the state out again from these and refuses a report whose `state`

@@ -596,7 +596,9 @@ let test_a_lock_that_cannot_be_asked_costs_only_what_turns_on_it () =
      | Record.Ended (_, { reason; _ }) -> check string "the ending is read all the same" "stopped by SIGINT" reason
      | other -> failf "a record with its ending, its lock unasked, reads as %s" (said other));
     Sys.remove (Filename.concat lane "bidi-host.json");
-    check state "and so is the absence of a record" Record.Never_started (unasked ())
+    (match unasked () with
+     | Record.Unreadable { held = None; _ } -> ()
+     | other -> failf "absence of a record with an unasked lock reads as %s" (said other))
 
 (* A host that cannot write its first record does not hold the workspace,
    and what its predecessor left is still there to read. *)

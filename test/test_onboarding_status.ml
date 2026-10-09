@@ -655,6 +655,11 @@ let a_bidi_host_report_reads_back_as_written () =
   refused "an attach field written twice"
     (with_attach (`Assoc (attach_fields @ [ "launcher", `String "/elsewhere/launch" ])));
   refused "an attach that is no object" (with_attach (`String "launch"));
+  refused "an empty launcher" (with_attach (with_field attach_fields "launcher" (`String "")));
+  refused "arguments the launcher does not use"
+    (with_attach (with_field attach_fields "arguments" (`String "anything goes")));
+  refused "a message with a terminal control character"
+    (with_field ended_fields "message" (`String "No BiDi browser host is running.\027"));
   (* A Keeper is sent the state and the paragraph, not the record. *)
   let ended_observation = observation (Record.Ended (ended, ending)) in
   check bool "the summary is the state and its message" true

@@ -427,7 +427,15 @@ let report_of_json json =
       exactly ~what:"the BiDi host report's attach" ~names:attach_fields (List.assoc "attach" fields)
     in
     let* launcher = text attach "launcher" in
+    let* () =
+      if String.trim launcher <> "" then Ok ()
+      else Error "the BiDi host report's launcher is empty"
+    in
     let* arguments = text attach "arguments" in
+    let* () =
+      if String.equal arguments host_arguments then Ok ()
+      else Error "the BiDi host report's attach arguments are not the launcher's arguments"
+    in
     let* standing =
       let* raw = text attach "launcher_state" in
       Option.to_result
@@ -437,4 +445,13 @@ let report_of_json json =
     Ok { launcher; arguments; standing }
   in
   let* message = text fields "message" in
+  let printable =
+    String.for_all
+      (fun ch -> let code = Char.code ch in code >= 0x20 && code <> 0x7f)
+      message
+  in
+  let* () =
+    if printable then Ok ()
+    else Error "the BiDi host report's message contains a control character"
+  in
   Ok { state; attach; message }

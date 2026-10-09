@@ -456,6 +456,9 @@ val run_turn :
   ?on_turn_starting:(session_id:string -> (unit, string) result) ->
   ?on_turn_started:(session_id:string -> turn_id:string -> (unit, string) result) ->
   ?on_stream_event:(stream_event -> unit) ->
+  ?on_input_observation:(Runtime_claude_input_attribution.observation -> unit) ->
+  (* Optional invocation-local ticket/write/response metadata, separate from
+     authored content and native tasks. It does not extend receiver lifetime. *)
   config ->
   prompt:string ->
   images:image_input list ->

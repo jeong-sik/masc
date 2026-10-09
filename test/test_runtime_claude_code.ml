@@ -80,6 +80,7 @@ type fixture_step =
   | Emit_and_read of string
   | Emit_and_expect_request_id of string * string
   | Emit_after_closing_input of string
+  | Bind_input_uuid
   | Expect_user_message_contains of string
     (* Assert against the user message the CLI actually received on stdin. The
        fixture exits 97 when the needle is absent, so a turn that loses a block
@@ -113,6 +114,16 @@ let fixture_script
     | Emit_after_closing_input line ->
       output_string output "exec 0<&-\n";
       output_string output ("emit " ^ shell_quote line ^ "\n")
+    | Bind_input_uuid ->
+      (* Parse the actual serialized outer envelope. No prompt echo or
+         fixture-generated replacement UUID can satisfy this assertion. *)
+      let validate =
+        "import json,sys,uuid; x=json.load(sys.stdin); u=x['uuid']; "
+        ^ "assert isinstance(u,str) and str(uuid.UUID(u))==u and uuid.UUID(u).version==7; "
+        ^ "assert x['type']=='user' and x['parent_tool_use_id'] is None; "
+        ^ "assert x['message']['role']=='user' and isinstance(x['message']['content'],list); print(u)" in
+      output_string output
+        ("input_uuid=$(printf '%s' \"$user_message\" | python3 -c " ^ shell_quote validate ^ ")\n")
     | Expect_user_message_contains needle ->
       output_string output
         (Printf.sprintf
@@ -153,7 +164,7 @@ let fixture_script
   output_string output "  esac\n";
   output_string output "done\n";
   output_string output "[ -n \"$session\" ] || exit 94\n";
-  output_string output "emit() { printf '%s\\n' \"$1\" | sed \"s/__SESSION__/$session/g\"; }\n";
+  output_string output "emit() { printf '%s\\n' \"$1\" | sed \"s/__SESSION__/$session/g; s/__INPUT_UUID__/${input_uuid-}/g\"; }\n";
   output_string output "IFS= read -r initialize\n";
   output_string output
     "request_id=$(printf '%s' \"$initialize\" | sed -n 's/.*\"request_id\":\"\\([^\"]*\\)\".*/\\1/p')\n";
@@ -204,7 +215,7 @@ let run_fixture ?(dynamic_tools = []) ?session_mode ?(timeout_s = 2.0)
     ?(native = Runtime_native_tools.claude_code_default)
     ?account_home
     ?admission_timeout_s ?(no_turn_deadline = false) ?on_session_ready_delay_s
-    ?on_turn_started_delay_s ?on_stream_event ?on_prompt_sent ?on_spawned
+    ?on_turn_started_delay_s ?on_stream_event ?on_input_observation ?on_prompt_sent ?on_spawned
     ?(prompt = "Return the fixture marker") ?(images = []) path =
   Eio_main.run (fun env ->
     let clock = Eio.Stdenv.clock env in
@@ -240,6 +251,7 @@ let run_fixture ?(dynamic_tools = []) ?session_mode ?(timeout_s = 2.0)
       ?on_session_ready
       ?on_turn_started
       ?on_stream_event
+      ?on_input_observation
       ?on_prompt_sent
       ?on_spawned
       config
@@ -414,13 +426,18 @@ let test_prompt_transmission_boundary () =
   check bool "missing client fails" true
     (Result.is_error (run_fixture ~on_prompt_sent:report missing));
   check int "spawn failure emits no input" 0 !sent;
+  let input_writes = ref [] in
   with_fixture ~close_before_user:true [] (fun path ->
-    (match run_fixture ~prompt:(String.make 1_100_000 'x') ~on_prompt_sent:report path with
+    (match run_fixture ~prompt:(String.make 1_100_000 'x') ~on_prompt_sent:report
+        ~on_input_observation:(fun (o : Runtime_claude_input_attribution.observation) ->
+          input_writes := o.phase :: !input_writes) path with
      | Error (Runtime_claude_code.Turn_transport_interrupted
          { stage = "user message write"; _ }) -> ()
      | Error error -> fail (Runtime_claude_code.error_to_string error)
      | Ok _ -> fail "incomplete user message completed");
-    check int "incomplete write emits no input" 0 !sent);
+    check int "incomplete write emits no input" 0 !sent;
+    check bool "incomplete write keeps unknown-delivery evidence" true
+      (List.rev !input_writes = [Runtime_claude_input_attribution.Prepared; Write_unknown]));
   with_fixture [ Expect_user_message_contains "transmission-marker";
                  Emit assistant; Emit result ] (fun path ->
     check bool "complete turn succeeds" true
@@ -3033,6 +3050,352 @@ let test_dynamic_tool_tokenizer_chars_are_validated () =
   | Ok () -> fail "allowedTools delimiter was admitted in a tool name"
 ;;
 
+module Input_evidence = Runtime_claude_input_attribution
+
+let input_stamp primary consumed =
+  ["user_message_uuid", `String primary;
+   "user_message_uuids", `List (List.map (fun id -> `String id) consumed)]
+let input_own_stamp = input_stamp "__INPUT_UUID__" ["__INPUT_UUID__"]
+let with_input_fields line fields =
+  match Yojson.Safe.from_string line with
+  | `Assoc original -> Yojson.Safe.to_string (`Assoc (fields @ original))
+  | _ -> fail "fixture envelope must be an object"
+let input_partial ?(uuid=Some "partial-input") event fields =
+  let identity = Option.to_list (Option.map (fun value -> "uuid", `String value) uuid) in
+  Yojson.Safe.to_string (`Assoc (identity @ fields @ ["type",`String "stream_event";
+    "parent_tool_use_id",`Null; "session_id",`String "__SESSION__";
+    "event",Yojson.Safe.from_string event]))
+let input_begin uuid message_id fields =
+  input_partial ~uuid:(Some uuid)
+    (Yojson.Safe.to_string (`Assoc ["type",`String "message_start";
+      "message",`Assoc ["id",`String message_id;"model",`String "claude-fixture"]])) fields
+let input_tick ?uuid fields =
+  input_partial ?uuid {|{"type":"message_delta","delta":{"stop_reason":null},"usage":{"output_tokens":1}}|} fields
+let input_frame_uuid = function
+  | Input_evidence.Partial_start {uuid;_} | Partial_fragment {uuid} | Partial_stop {uuid}
+  | Assistant {uuid;_} | Result {uuid;_} -> uuid
+let input_observed uuid observations =
+  List.find (fun (o : Input_evidence.observation) ->
+    Option.bind o.frame input_frame_uuid=Some uuid) observations
+let run_input_success steps =
+  let observations = ref [] in
+  with_fixture (Bind_input_uuid :: steps) (fun path ->
+    match run_fixture ~on_input_observation:(fun value -> observations := value :: !observations) path with
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok turn -> check string "single-shot authored body unchanged" "MASC_CLAUDE_OK" turn.text);
+  let observations = List.rev !observations in
+  (match observations with
+   | prepared :: written :: _ ->
+       check bool "prepared then fully written" true
+         (prepared.phase=Input_evidence.Prepared && written.phase=Input_evidence.Written)
+   | _ -> fail "input write evidence missing");
+  observations
+
+let test_input_uuid_is_serialized_and_fresh_on_resume () =
+  let run () =
+    let observations = ref [] in
+    with_fixture [Bind_input_uuid;Emit (with_input_fields assistant input_own_stamp);
+        Emit (with_input_fields result input_own_stamp)] (fun path ->
+      match run_fixture ~session_mode:(Runtime_claude_code.Resume {session_id="11111111-1111-4111-8111-111111111111"})
+          ~on_input_observation:(fun o -> observations := o :: !observations) path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok turn -> check string "same prompt body" "MASC_CLAUDE_OK" turn.text);
+    match !observations with
+    | last :: _ ->
+        check bool "matching explicit result settles" true (last.phase=Input_evidence.Settled Provider_success);
+        last.ticket
+    | [] -> fail "ticket missing" in
+  let first=run () in let second=run () in
+  check string "same provider session" first.session_id second.session_id;
+  check bool "fresh process generation" true (first.receiver_generation<>second.receiver_generation);
+  check bool "same prompt does not identify input" true (first.client_uuid<>second.client_uuid)
+
+let test_input_attribution_partial_group_updates_and_absent_result () =
+  let folded = input_stamp "__INPUT_UUID__" ["__INPUT_UUID__";"folded-client"] in
+  let complete =
+    {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"complete-input","message":{"id":"input-message","role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"MASC_CLAUDE_OK"}]}}|} in
+  let observations = run_input_success [
+    Emit (input_begin "p1" "input-message" input_own_stamp);
+    Emit (input_begin "p1" "input-message" input_own_stamp);
+    Emit (input_tick ~uuid:(Some "p2") folded);
+    Emit (input_tick ~uuid:(Some "p3") []);
+    Emit complete;Emit result] in
+  check int "identical root stamp replay emits once" 1
+    (List.length (List.filter (fun (o : Input_evidence.observation) -> Option.bind o.frame input_frame_uuid=Some "p1") observations));
+  let inherited = input_observed "p3" observations in
+  (match inherited.attribution with
+   | Input_evidence.Inherited group ->
+       check (list string) "complete consumed group and original primary retained"
+         [inherited.ticket.client_uuid;"folded-client"] group.consumed;
+       check string "primary need not be last" inherited.ticket.client_uuid group.primary
+   | _ -> fail "missing stamp did not inherit exact occurrence");
+  check bool "complete envelope inherits only matching response" true
+    ((input_observed "complete-input" observations).attribution=inherited.attribution);
+  let last=input_observed "turn-fixture-1" observations in
+  check bool "result cannot inherit consumed input" true
+    (last.attribution=Input_evidence.Unattributed && last.phase=Input_evidence.Consumed)
+
+let test_input_optional_malformed_foreign_and_child_metadata () =
+  let malformed = [
+    ["user_message_uuid",`String "__INPUT_UUID__";"user_message_uuids",`Null];
+    input_stamp "__INPUT_UUID__" ["foreign-client"];
+    input_stamp "__INPUT_UUID__" ["__INPUT_UUID__";"__INPUT_UUID__"];
+    ["user_message_uuids",`List [`String "__INPUT_UUID__"]]] in
+  List.iter (fun fields ->
+    let observations=run_input_success [Emit (with_input_fields assistant fields);Emit (with_input_fields result fields)] in
+    let last=input_observed "turn-fixture-1" observations in
+    check bool "malformed optional metadata never consumes or settles" true
+      (last.phase=Input_evidence.Written && match last.attribution with Rejected _ -> true | _ -> false)) malformed;
+  let observations=run_input_success [Emit (with_input_fields child_tool_assistant input_own_stamp);
+    Emit assistant;Emit (with_input_fields result (input_stamp "other-generation-client" ["other-generation-client"]))] in
+  check bool "child envelope never adopts root ticket" false
+    (List.exists (fun (o : Input_evidence.observation) -> Option.bind o.frame input_frame_uuid=Some "child-assistant") observations);
+  check bool "unknown client member never settles current ticket" true
+    ((input_observed "turn-fixture-1" observations).phase=Input_evidence.Written)
+
+let test_input_error_and_batch_membership () =
+  let observations=run_input_success [Emit assistant;
+    Emit (with_input_fields result (input_stamp "other-primary" ["__INPUT_UUID__";"other-primary"]))] in
+  check bool "non-primary member settles on explicit group" true
+    ((input_observed "turn-fixture-1" observations).phase=Input_evidence.Settled Provider_success);
+  List.iter (fun attributed ->
+    let observations=ref [] in
+    let failure={|{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"__SESSION__","uuid":"input-error","errors":["fixture failure"]}|} in
+    let failure=with_input_fields failure (if attributed then input_own_stamp else []) in
+    with_fixture [Bind_input_uuid;Emit failure] (fun path ->
+      match run_fixture ~on_input_observation:(fun o -> observations := o :: !observations) path with
+      | Error (Runtime_claude_code.Turn_failed_with_observation _) -> ()
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "provider failure lost");
+    let last=input_observed "input-error" !observations in
+    check bool "error ownership requires explicit membership" true
+      (last.phase=(if attributed then Input_evidence.Settled Provider_error else Written))) [false;true]
+
+let test_input_typed_command_owns_unstamped_agent_tool_round () =
+  let first =
+    {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"first-command-assistant","message":{"id":"command-model-1","role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"First response stays original."}]}}|} in
+  let second =
+    {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"second-command-agent","message":{"id":"command-model-2","role":"assistant","model":"claude-fixture","content":[{"type":"tool_use","id":"second-root-agent","name":"Agent","input":{"description":"fixture","prompt":"fixture-only task","subagent_type":"general-purpose"}}]}}|} in
+  let tool_result =
+    {|{"type":"user","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"second-command-agent-result","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"second-root-agent","is_error":false,"content":"fixture Agent returned"}]}}|} in
+  List.iter (fun (initial_stamp, owned_command) ->
+    let observations=ref [] in
+    let native_inputs=ref [] in
+    with_fixture [Bind_input_uuid;
+      Emit (input_begin "first-command-partial" "command-model-1" initial_stamp);
+      Emit (with_input_fields first initial_stamp);
+      Emit (input_partial ~uuid:(Some "first-command-stop") {|{"type":"message_stop"}|} []);
+      Emit (input_begin "second-command-partial" "command-model-2" []);
+      Emit second;
+      Emit {|{"type":"assistant","parent_tool_use_id":"second-root-agent","session_id":"__SESSION__","uuid":"command-child-read","message":{"id":"child-request","role":"assistant","model":"child-fixture","content":[{"type":"tool_use","id":"child-read","name":"Read","input":{"file_path":"/tmp/fixture"}}]}}|};
+      Emit {|{"type":"user","parent_tool_use_id":"second-root-agent","session_id":"__SESSION__","uuid":"command-child-read-result","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"child-read","is_error":false,"content":"child fixture"}]}}|};
+      Emit tool_result;
+      Emit (input_partial ~uuid:(Some "second-command-stop") {|{"type":"message_stop"}|} []);
+      Emit assistant;
+      Emit (with_input_fields result input_own_stamp)] (fun path ->
+      let on_stream_event = function
+        | Runtime_claude_code.Native_tool_started {identity=Some (Runtime_native_tools.Call_id "second-root-agent");_} ->
+            (* Assertions run after the callback: runtime observers deliberately
+               isolate ordinary callback exceptions. *)
+            native_inputs := List.find_opt (fun (o : Input_evidence.observation) ->
+              Option.bind o.frame input_frame_uuid=Some "second-command-agent") !observations :: !native_inputs
+        | _ -> () in
+      match run_fixture ~native:Runtime_native_tools.Native_full ~on_stream_event
+          ~on_input_observation:(fun o -> observations := o :: !observations) path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok turn -> check string "canonical single-shot result preserved" "MASC_CLAUDE_OK" turn.text);
+    let own_link label (o : Input_evidence.observation) =
+      check bool label owned_command
+        (match o.attribution with Input_evidence.Command_inherited witness ->
+          witness.stamp_uuid="first-command-assistant"
+          && witness.group.primary=o.ticket.client_uuid
+          && witness.group.consumed=[o.ticket.client_uuid]
+         | _ -> false);
+      if not owned_command then check bool "unwitnessed/foreign/malformed command stays unknown" true
+        (o.attribution=Input_evidence.Unattributed) in
+    own_link "later model start carries command proof only" (input_observed "second-command-partial" !observations);
+    own_link "unstamped Agent envelope retains typed command" (input_observed "second-command-agent" !observations);
+    own_link "complete-only root keeps command after child tool envelopes" (input_observed "assistant-fixture-1" !observations);
+    check bool "child assistant cannot acquire root input attribution" false
+      (List.exists (fun (o : Input_evidence.observation) -> Option.bind o.frame input_frame_uuid=Some "command-child-read") !observations);
+    (match !native_inputs with
+     | [Some observation] -> own_link "exact input association arrives before native start" observation
+     | _ -> fail "native Agent start did not see its exact assistant envelope observation");
+    check bool "final result settles by its explicit own group" true
+      ((input_observed "turn-fixture-1" !observations).phase=Input_evidence.Settled Provider_success))
+    [input_own_stamp,true;
+     [],false;
+     input_stamp "foreign-primary" ["__INPUT_UUID__";"foreign-primary"],false;
+     ["user_message_uuid",`String "__INPUT_UUID__";"user_message_uuids",`Null],false]
+
+let test_input_command_recovers_after_unowned_partial_start () =
+  List.iter (fun parent ->
+    let unowned_start =
+      match Yojson.Safe.from_string (input_begin "unowned-start" "child-model" input_own_stamp) with
+      | `Assoc fields ->
+          let fields=List.remove_assoc "parent_tool_use_id" fields in
+          let ownership=Option.to_list (Option.map (fun id -> "parent_tool_use_id", `String id) parent) in
+          Yojson.Safe.to_string (`Assoc (ownership @ fields))
+      | _ -> fail "partial fixture must be an object" in
+    List.iter (fun (initial_stamp, witnessed) ->
+      let observations=run_input_success [
+        Emit (input_begin "root-command-witness" "root-before-child" initial_stamp);
+        Emit unowned_start;
+        Emit (input_tick ~uuid:(Some "uncertain-root-fragment") []);
+        Emit (input_begin "fresh-root-start" "root-after-child" []);
+        Emit assistant;
+        Emit (with_input_fields result input_own_stamp)] in
+      check bool "unowned partial is not root input evidence" false
+        (List.exists (fun (o : Input_evidence.observation) ->
+          Option.bind o.frame input_frame_uuid=Some "unowned-start") observations);
+      check bool "root fragment cannot inherit before a fresh root start" true
+        ((input_observed "uncertain-root-fragment" observations).attribution=Input_evidence.Unattributed);
+      List.iter (fun uuid ->
+        let observation=input_observed uuid observations in
+        check bool "fresh root retains only the original witnessed command" witnessed
+          (match observation.attribution with
+           | Input_evidence.Command_inherited witness ->
+               witness.stamp_uuid="root-command-witness"
+               && witness.group.primary=observation.ticket.client_uuid
+               && witness.group.consumed=[observation.ticket.client_uuid]
+           | Unattributed | Explicit _ | Inherited _ | Rejected _ -> false);
+        if not witnessed then check bool "child stamp cannot create root command proof" true
+          (observation.attribution=Input_evidence.Unattributed))
+        ["fresh-root-start";"assistant-fixture-1"])
+      [input_own_stamp,true; [],false;
+       input_stamp "foreign-primary" ["__INPUT_UUID__";"foreign-primary"],false])
+    [Some "parent-agent"; None]
+
+let test_input_command_owns_native_agent_with_reused_model_id () =
+  let first =
+    {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"reuse-first-native","message":{"id":"reused-native-model","role":"assistant","model":"claude-fixture","content":[{"type":"tool_use","id":"reuse-first-read","name":"Read","input":{"file_path":"/tmp/fixture"}}]}}|} in
+  let first_result =
+    {|{"type":"user","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"reuse-first-result","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"reuse-first-read","is_error":false,"content":"fixture Read returned"}]}}|} in
+  let second =
+    {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"reuse-second-native","message":{"id":"reused-native-model","role":"assistant","model":"claude-fixture","content":[{"type":"tool_use","id":"reuse-second-agent","name":"Agent","input":{"description":"fixture","prompt":"fixture-only task","subagent_type":"general-purpose"}}]}}|} in
+  let second_result =
+    {|{"type":"user","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"reuse-second-result","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"reuse-second-agent","is_error":false,"content":"fixture Agent returned"}]}}|} in
+  List.iter (fun (initial_stamp, has_command) ->
+    let observations=ref [] in
+    let at_native_start=ref [] in
+    (* Both reused-model envelopes are native-only: no partial text index or
+       complete-text reconciliation decides whether the runtime admits them. *)
+    with_fixture [Bind_input_uuid;
+      Emit (input_begin "reuse-first-start" "reused-native-model" initial_stamp);
+      Emit (with_input_fields first initial_stamp);
+      Emit first_result;
+      Emit (input_partial ~uuid:(Some "reuse-first-stop") {|{"type":"message_stop"}|} []);
+      Emit (input_begin "reuse-second-start" "reused-native-model" []);
+      Emit second;
+      Emit second_result;
+      Emit (input_partial ~uuid:(Some "reuse-second-stop") {|{"type":"message_stop"}|} []);
+      Emit assistant;Emit (with_input_fields result input_own_stamp)] (fun path ->
+      let on_stream_event = function
+        | Runtime_claude_code.Native_tool_started {identity=Some (Runtime_native_tools.Call_id "reuse-second-agent");_} ->
+            at_native_start := List.find_opt (fun (o : Input_evidence.observation) ->
+              Option.bind o.frame input_frame_uuid=Some "reuse-second-native") !observations :: !at_native_start
+        | _ -> () in
+      match run_fixture ~native:Runtime_native_tools.Native_full ~on_stream_event
+          ~on_input_observation:(fun o -> observations := o :: !observations) path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok turn -> check string "native-only model ID reuse preserves result" "MASC_CLAUDE_OK" turn.text);
+    let check_owner (observation : Input_evidence.observation) =
+      if has_command then
+        check bool "fresh Agent envelope uses typed command, not an arbitrary reused response" true
+          (match observation.attribution with Input_evidence.Command_inherited witness ->
+            witness.stamp_uuid="reuse-first-native"
+            && witness.group.primary=observation.ticket.client_uuid
+            && witness.group.consumed=[observation.ticket.client_uuid]
+           | _ -> false)
+      else check bool "reused ID without command proof stays rejected" true
+        (observation.attribution=Input_evidence.Rejected Ambiguous_response) in
+    check_owner (input_observed "reuse-second-native" !observations);
+    match !at_native_start with
+    | [Some observation] -> check_owner observation
+    | _ -> fail "actual native start lacked its exact input observation")
+    [input_own_stamp,true; [],false;
+     input_stamp "foreign-primary" ["__INPUT_UUID__";"foreign-primary"],false]
+
+let test_input_replayed_boundaries_preserve_exact_scope () =
+  let old_start=input_begin "start-A" "response-A" input_own_stamp in
+  let old_stop=input_partial ~uuid:(Some "stop-C") {|{"type":"message_stop"}|} [] in
+  let observations=run_input_success [
+    Emit old_start;
+    Emit (input_begin "start-B" "response-B" (input_stamp "other" ["other"]));
+    Emit old_start;
+    (* Accepted by the real partial parser after it resets message_id to A.
+       The callback must not retain B's different consumed input group. *)
+    Emit (input_tick ~uuid:(Some "after-old-start") []);
+    Emit (input_begin "start-C" "response-C" input_own_stamp);
+    Emit old_stop;
+    Emit (input_begin "start-D" "response-D" (input_stamp "other" ["other"]));
+    Emit old_stop;
+    Emit (input_tick ~uuid:(Some "after-old-stop") []);
+    Emit (input_partial ~uuid:(Some "stop-D") {|{"type":"message_stop"}|} []);
+    Emit (input_tick ~uuid:(Some "after-fresh-stop") []);
+    Emit (input_begin "start-E" "response-E" input_own_stamp);
+    Emit (input_partial ~uuid:None {|{"type":"message_stop"}|} []);
+    Emit (input_tick ~uuid:(Some "after-missing-stop") []);
+    Emit (input_begin "start-F" "response-F" input_own_stamp);
+    Emit (input_partial ~uuid:(Some "start-F") {|{"type":"message_stop"}|} []);
+    Emit (input_tick ~uuid:(Some "after-conflicting-stop") []);
+    Emit (input_partial ~uuid:(Some "unowned-stop") {|{"type":"message_stop"}|} []);
+    Emit (input_tick ~uuid:(Some "after-unowned-stop") []);
+    Emit (input_begin "start-G" "response-G" input_own_stamp);
+    Emit (input_tick ~uuid:(Some "after-fresh-start") []);
+    Emit assistant;Emit result] in
+  List.iter (fun uuid ->
+    let observation=input_observed uuid observations in
+    check bool "unowned boundary cannot retain an input owner" true
+      (observation.attribution=Input_evidence.Unattributed && observation.phase=Input_evidence.Consumed))
+    ["after-old-start";"after-fresh-stop";"after-missing-stop";"after-conflicting-stop";"after-unowned-stop"];
+  check bool "exact historical stop leaves the current D owner intact" true
+    (match (input_observed "after-old-stop" observations).attribution with
+     | Input_evidence.Inherited group -> group.primary="other" && group.consumed=["other"]
+     | _ -> false);
+  check bool "new start restores explicit witnessed scope" true
+    (match (input_observed "after-fresh-start" observations).attribution with Input_evidence.Inherited _ -> true | _ -> false);
+  List.iter (fun uuid -> check int "replayed boundary emits no duplicate observation" 1
+      (List.length (List.filter (fun (o : Input_evidence.observation) -> Option.bind o.frame input_frame_uuid=Some uuid) observations)))
+    ["start-A";"stop-C"]
+
+let test_input_rejected_partial_identity_cannot_keep_old_inheritance () =
+  let observations=run_input_success [
+    Emit (input_begin "first" "message-one" input_own_stamp);
+    Emit empty_assistant;
+    (* Cross-kind reuse of an envelope without a response binding. *)
+    Emit (input_begin "assistant-empty-1" "message-two" []);
+    Emit (input_tick ~uuid:(Some "after-collision") []);
+    Emit (input_begin "third" "message-three" input_own_stamp);
+    Emit (input_tick ~uuid:None (input_stamp "other" ["other"]));
+    Emit (input_tick ~uuid:(Some "after-missing") []);
+    Emit (input_begin "fourth" "message-four" input_own_stamp);
+    Emit {|{"type":"stream_event","uuid":"unscoped-start","session_id":"__SESSION__","event":{"type":"message_start","message":{"id":"unscoped-model","model":"claude-fixture"}}}|};
+    Emit (input_tick ~uuid:(Some "after-unscoped") []);
+    Emit assistant;Emit result] in
+  check bool "rejected start retires prior occurrence" true
+    ((input_observed "after-collision" observations).attribution=Input_evidence.Unattributed);
+  check bool "unidentifiable changed stamp invalidates inherited group" true
+    (match (input_observed "after-missing" observations).attribution with Input_evidence.Rejected _ -> true | _ -> false);
+  check bool "earlier proven consumption stays true" true
+    ((input_observed "after-missing" observations).phase=Input_evidence.Consumed);
+  check bool "unscoped start retires former root inheritance" true
+    ((input_observed "after-unscoped" observations).attribution=Input_evidence.Unattributed)
+
+let test_input_metadata_duplicate_and_foreign_session_stay_protocol_errors () =
+  let duplicate=with_input_fields assistant ["user_message_uuid",`String "__INPUT_UUID__";
+    "user_message_uuid",`String "__INPUT_UUID__"] in
+  let foreign = match Yojson.Safe.from_string assistant with
+    | `Assoc fields -> Yojson.Safe.to_string (`Assoc
+        (("session_id",`String "foreign-session") :: input_own_stamp @ List.remove_assoc "session_id" fields))
+    | _ -> fail "assistant fixture must be an object" in
+  List.iter (fun line ->
+    with_fixture [Bind_input_uuid;Emit line;Emit result] (fun path ->
+      match run_fixture ~on_input_observation:(fun _ -> ()) path with
+      | Error (Runtime_claude_code.Protocol_error _) -> ()
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "global JSON/session admission weakened")) [duplicate;foreign]
+
 let test_resume_preserves_session_identity () =
   with_fixture [ Emit assistant; Emit result ] (fun path ->
     match
@@ -3544,6 +3907,17 @@ let () =
             (fun () -> test_unsupported_image_media_type_is_rejected
               ~media_type:"image/png" ~base64_data:"%%%" ~expected:"valid Base64" ())
         ] )
+    ; "input-attribution", [
+        test_case "serialized UUID and fresh resume generation" `Quick test_input_uuid_is_serialized_and_fresh_on_resume;
+        test_case "partial group updates and absent result" `Quick test_input_attribution_partial_group_updates_and_absent_result;
+        test_case "malformed foreign and child metadata" `Quick test_input_optional_malformed_foreign_and_child_metadata;
+        test_case "error and batch membership" `Quick test_input_error_and_batch_membership;
+        test_case "rejected partial identity quarantines inheritance" `Quick test_input_rejected_partial_identity_cannot_keep_old_inheritance;
+        test_case "old start retires scope and historical stop preserves it" `Quick test_input_replayed_boundaries_preserve_exact_scope;
+        test_case "typed command owns unstamped Agent tool round" `Quick test_input_typed_command_owns_unstamped_agent_tool_round;
+        test_case "command recovers after child or unscoped partial start" `Quick test_input_command_recovers_after_unowned_partial_start;
+        test_case "command owns native Agent with reused model ID" `Quick test_input_command_owns_native_agent_with_reused_model_id;
+        test_case "strict duplicate and session boundary" `Quick test_input_metadata_duplicate_and_foreign_session_stay_protocol_errors]
     ; "session", [ test_case "resume identity" `Quick test_resume_preserves_session_identity ]
     ; "live", [ test_case "subscription turn" `Slow test_live_subscription ]
     ]

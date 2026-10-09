@@ -15230,12 +15230,14 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                       (Masc.Tui_terminal_text.sanitize_terminal_text text, kind)))
           in
           state.runtime_config_view <- Some
-             { rcv_path = path; rcv_source_text = reading.source_text; rcv_rows = rows; rcv_metadata = metadata };
+             { rcv_path = path; rcv_source_text = reading.source_text; rcv_rows = rows; rcv_metadata = metadata;
+               rcv_account_emails = reading.account_emails };
           state.runtime_config_view_error <- None;
           (* Parsed here, with the lex, so the pane and the scroll bound read
              one list. Parsing per frame would put the count a frame behind
              the keys on a reload. *)
-          (match Masc_tui_model_runtime_table.parse lines with
+          (match Result.bind reading.account_groups (fun account_groups ->
+             Masc_tui_model_runtime_table.parse ~account_groups lines) with
            | Ok rows ->
              state.config_models_rows <- rows;
              state.config_models_cursor <- min state.config_models_cursor (max 0 (List.length rows - 1));
@@ -22516,6 +22518,13 @@ and is loaded on demand through keeper_skill.
            state.runtime_detail_scroll <-
              (if String.equal edge "home" then 0
               else Masc_tui_types.clamped_scroll_end)
+       | Some "h"
+         when state.view = Runtime
+              && Option.is_none state.runtime_detail_target
+              && Option.is_none state.runtime_lane_pick
+              && Option.is_none state.slot_editor
+              && Option.is_none (Masc_tui_types.runtime_lane_prompt state) ->
+           Masc_tui_types.toggle_runtime_dim_refusals state
        | Some "v"
          when state.view = Runtime
               && Option.is_none state.runtime_detail_target
@@ -24984,7 +24993,18 @@ and is loaded on demand through keeper_skill.
              refresh_repository_changes state ~mailbox:async_messages
            else
            (match state.view with
-            | Code -> Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages)
+            | Code ->
+                if state.code_history_open then
+                  (match Masc_tui_fetched.current_key state.code_file with
+                   | None -> ()
+                   | Some path ->
+                       Masc_tui_code_requests.launch_history_load state
+                         ~host:server_peer_host
+                         ~deliver:(workspace_enqueue state async_messages) ~path)
+                else
+                  Masc_tui_code_requests.launch_entries_load state
+                    ~host:server_peer_host
+                    ~deliver:(workspace_enqueue state async_messages)
             | Keepers Keeper_list ->
                 launch_keeper_lanes_load state ~mailbox:async_messages
             | Keepers Keeper_logs ->

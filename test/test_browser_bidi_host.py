@@ -155,8 +155,10 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
                     if time.monotonic() >= deadline:
                         raise AssertionError("owned Firefox did not start")
                     time.sleep(.05)
-            host_argv = [host, "--base-path", str(root), "--token-file", str(root / "token"),
+            attach_argv = [host, "--base-path", str(root), "--token-file", str(root / "token"),
                 "--server", f"http://127.0.0.1:{server.server_port}", "--bidi-url", f"ws://127.0.0.1:{port}/session"]
+            # As the MASC server starts a host for the Keeper's Firefox.
+            host_argv = attach_argv + ["--firefox-profile", str(root / "profile")]
             native = subprocess.Popen(host_argv, stdin=subprocess.DEVNULL, stdout=native_log, stderr=native_log)
             assert ready.wait(20), f"native peer did not register; stderr retained in {evidence / 'native.log'}"
 
@@ -392,8 +394,20 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
             left = json.loads((root / ".masc/browser-lane/bidi-host.json").read_text())["ended"]
             assert left["session_in_firefox"] == "none" and left["reason"].startswith("stopped by"), left
             assert ff.poll() is None, "Firefox ended with the host's session"
+            # A host given another profile keeps no session with this
+            # Firefox: it ends the one it was given and says why.
+            another_profile = refused("rival-another-profile.log",
+                attach_argv + ["--firefox-profile", str(evidence / "another-profile")])
+            assert "runs the profile" in another_profile, another_profile
+            assert "was not ended" not in another_profile, another_profile
+            elsewhere = json.loads((root / ".masc/browser-lane/bidi-host.json").read_text())["ended"]
+            assert "runs the profile" in elsewhere["reason"] and elsewhere["session_in_firefox"] == "none", elsewhere
+            # Firefox reports the profile path as it was given; a link to
+            # the same directory is the same profile.
+            (root / "profile-link").symlink_to(root / "profile")
             ready.clear()
-            native = subprocess.Popen(host_argv, stdin=subprocess.DEVNULL, stdout=native_log, stderr=native_log)
+            native = subprocess.Popen(attach_argv + ["--firefox-profile", str(root / "profile-link")],
+                stdin=subprocess.DEVNULL, stdout=native_log, stderr=native_log)
             assert ready.wait(20), f"a second host did not attach; see {evidence / 'native.log'}"
             again = call("tabs.list", {})
             assert again["ok"] and sorted(tab["url"] for tab in again["data"]) == seen, again

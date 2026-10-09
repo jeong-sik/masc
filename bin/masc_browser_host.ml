@@ -31,10 +31,12 @@ let leave_terminal () =
 let () =
   Log.init_from_env ();
   let base_path = ref None and server = ref None and token_file = ref None and bidi_url = ref None in
+  let firefox_profile = ref None in
   let positional = ref [] in
   let set target value = target := Some value in
   let options =
     [ Masc.Browser_bidi_host_status.bidi_url_flag, Arg.String (set bidi_url), "URL Attach to an explicitly enabled loopback Firefox BiDi endpoint"
+    ; Masc.Browser_bidi_host_status.firefox_profile_flag, Arg.String (set firefox_profile), "PATH With --bidi-url: end the session unless that Firefox runs this profile"
     ; "--base-path", Arg.String (set base_path), "PATH Workspace containing .masc (or MASC_BASE_PATH)"
     ; "--server", Arg.String (set server), "URL Fixed MASC HTTP server; without it the port comes from the workspace connection.toml, followed after a failed request only to an address that answers the lane"
     ; "--token-file", Arg.String (set token_file), "PATH Lane token (default: <base-path>/.masc/browser-lane/token)"
@@ -92,7 +94,7 @@ let () =
             | Sys.Signal_ignore -> Sys.set_signal number Sys.Signal_ignore
             | Sys.Signal_default | Sys.Signal_handle _ -> ())
             [ Interrupt; Terminate; Hangup ];
-          Browser_host.run_bidi env config url
+          Browser_host.run_bidi env config url ~firefox_profile:!firefox_profile
             ~stop:(fun () ->
               let signal = Eio.Condition.loop_no_mutex wake (fun () -> Atomic.get asked) in
               Log.Transport.info "browser-host: %s received; %s" (signal_name signal)

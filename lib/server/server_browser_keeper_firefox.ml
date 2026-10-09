@@ -110,7 +110,7 @@ let start_host ~sw ~base_path (config : Browser_configuration.live_bidi) =
   | Keeper_firefox.Start_host launcher ->
     let log_path = Keeper_firefox.host_log_path ~base_path in
     (match
-       spawn_logged ~sw ~argv:(Keeper_firefox.host_argv ~launcher ~port:config.port)
+       spawn_logged ~sw ~argv:(Keeper_firefox.host_argv ~launcher config)
          ~env:(host_environment ()) ~log_path
      with
      | Error detail -> Log.Server.error "browser-lane: the BiDi host did not start: %s" detail

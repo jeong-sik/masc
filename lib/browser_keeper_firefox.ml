@@ -12,7 +12,13 @@ let firefox_argv (config : Browser_configuration.live_bidi) =
   ; string_of_int config.port
   ]
 
-let host_argv ~launcher ~port = [ launcher; Browser_bidi_host_status.bidi_url_flag; bidi_url ~port ]
+let host_argv ~launcher (config : Browser_configuration.live_bidi) =
+  [ launcher
+  ; Browser_bidi_host_status.bidi_url_flag
+  ; bidi_url ~port:config.port
+  ; Browser_bidi_host_status.firefox_profile_flag
+  ; config.profile
+  ]
 
 (* The directory the host keeps its record in (Browser_bidi_host_record). *)
 let lane_path ~base_path name =

@@ -11,8 +11,9 @@ val bidi_url : port:int -> string
     running ([--no-remote]), with its BiDi address open. *)
 val firefox_argv : Browser_configuration.live_bidi -> string list
 
-(** This workspace's launcher, attaching to the configured port. *)
-val host_argv : launcher:string -> port:int -> string list
+(** This workspace's launcher, attaching to [config]'s port and keeping a
+    session only with a Firefox on [config]'s profile. *)
+val host_argv : launcher:string -> Browser_configuration.live_bidi -> string list
 
 (** Where each one writes its output, under the workspace's
     [.masc/browser-lane]. *)

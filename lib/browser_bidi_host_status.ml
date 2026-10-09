@@ -26,6 +26,7 @@ type attach = { launcher : string; arguments : string; standing : launcher_stand
 (* What the launcher is given to attach to a Firefox the operator started
    with [firefox_flag PORT]. *)
 let bidi_url_flag = "--bidi-url"
+let firefox_profile_flag = "--firefox-profile"
 let host_arguments = bidi_url_flag ^ " ws://127.0.0.1:PORT/session"
 let firefox_flag = "--remote-debugging-port"
 

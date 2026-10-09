@@ -1470,19 +1470,9 @@ let candidate_of_json json =
   Ok candidate
 ;;
 
-(* One unreadable row used to fail the whole read, and the write path reads
-   before it writes — so compaction could never run and the row stayed
-   forever. Measured 2026-08-28: 17 of 575 rows carried a field a hard cut had
-   removed, and those 17 stopped all 10 keeper ledgers, 402 WARN/day.
-
-   This ledger is a projection. [latest_candidates] keeps the newest row per
-   candidate_id and the board itself is the source, so a dropped row costs a
-   cached candidate, not durable truth. Reading the rest is worth more than
-   refusing everything.
-
-   Rejected rows are returned, never swallowed: the caller logs them, and the
-   next write rewrites the store from the rows that parsed (see
-   [needs_compaction]). *)
+(* Decode readable rows and retain every rejection with its line number.
+   The caller reports those rejections; the storage owner preserves the
+   unreadable rows and refuses compaction while any remain. *)
 type parse_report =
   { rows : candidate list
   ; rejected : (int * string) list

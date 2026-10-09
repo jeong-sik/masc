@@ -201,7 +201,32 @@ let test_change_hint_poll () =
   check int "unchanged failed hint avoids repeated full-history audit" 1 !records;
   through:=3;
   ignore (poll failed);
-  check int "changed hint allows reconciliation again" 2 !records
+  check int "changed hint allows reconciliation again" 2 !records;
+  let corrupted_inventory = match inventory "store" 1 with
+    | `Assoc fields ->
+        let storage=`Assoc (["schema",`String "masc.native_tasks.error.v1";
+          "error",`String "store_corrupt"] @ unknown) in
+        `Assoc (("receivers",`List [`Assoc ["receiver_generation",`String receiver.receiver_generation;
+          "session_id",`String receiver.session_id;"storage",storage]])::List.remove_assoc "receivers" fields)
+    | _ -> fail "inventory object" in
+  let audit_body=ref corrupted_inventory in
+  let scoped_fetch path = match Uri.path (Uri.of_string path) with
+    | "/api/v1/keepers/alpha/native-tasks/receivers" -> Ok (200,Yojson.Safe.to_string !audit_body)
+    | "/api/v1/keepers/alpha/native-tasks/hints" -> Ok (200,Yojson.Safe.to_string (hints 1))
+    | _ -> fail "unexpected records request at unchanged audited tail" in
+  let read mode previous = match Native.read ~mode ~keeper_name:keeper ~fetch:scoped_fetch ~previous with
+    | Ok value -> value | Error error -> fail (Native.error_text error) in
+  let corrupt=read Native.Audit state in
+  let has_corruption state = List.exists (function
+    | Native.Persistence (_,Read.Store_corrupt) -> true | _ -> false) (Native.errors state) in
+  check bool "full audit exposes corruption" true (has_corruption corrupt);
+  let hinted=read Native.Poll corrupt in
+  check bool "equal unchecked hint cannot clear audited corruption" true (has_corruption hinted);
+  check int "corruption retains original observations" 1 (List.length (Native.tasks hinted));
+  audit_body:=inventory "store" 1;
+  let repaired=read Native.Audit hinted in
+  check bool "successful full audit clears observed corruption" false (has_corruption repaired)
+
 
 let () = run "native task TUI consumer" ["observations",[
   test_case "change hints avoid idle and failed audit scans" `Quick test_change_hint_poll;

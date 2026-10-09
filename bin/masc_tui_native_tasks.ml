@@ -24,12 +24,14 @@ type store =
   { receiver : Read.receiver; store_id : string; cursor : Read.cursor option; tasks : task list
   ; error : error option; attempted : Read.cursor option; health : Read.health; cleanup : string list }
 type t =
-  { keeper_name : string option; inventory : inventory option; stores : store list; error : error option }
-let empty = {keeper_name=None;inventory=None;stores=[];error=None}
+  { keeper_name : string option; inventory : inventory option; stores : store list; error : error option
+  ; audit_failures : (Read.receiver * Read.error_code) list }
+let empty = {keeper_name=None;inventory=None;stores=[];error=None;audit_failures=[]}
 let failed previous error = {previous with error=Some error}
 let tasks state = List.concat_map (fun (store:store) -> store.tasks) state.stores
 let errors state =
   Option.to_list state.error
+  @ List.map (fun (receiver,code) -> Persistence (receiver,code)) state.audit_failures
   @ List.filter_map (fun (store:store) ->
       Option.map (fun error -> Receiver_read (store.receiver,error)) store.error) state.stores
   @ (match state.inventory with
@@ -168,6 +170,15 @@ let read ~mode ~keeper_name ~fetch ~previous =
         Ok {receivers=List.map (fun (entry:Read.hint_entry) -> entry.receiver,
           match entry.hint with Read.Unchecked cursor -> Ok cursor | Read.Hint_failed code -> Error code)
             page.hints;health=page.health;cleanup_failures=page.cleanup_failures} in
+  (* An unchecked hint cannot erase an audited failure, even when the last
+     successful cursor has the same tail. Only a new full read can clear it. *)
+  let audit_failures = ref (match mode with
+    | Poll -> previous.audit_failures
+    | Audit -> List.fold_left (fun failures (receiver,storage) ->
+        match storage with
+        | Error code -> (receiver,code) :: List.remove_assoc receiver failures
+        | Ok _ -> List.remove_assoc receiver failures)
+        previous.audit_failures inventory.receivers) in
   let stores = List.fold_left (fun stores (receiver,storage) ->
     match storage with
     | Error _ -> stores
@@ -190,6 +201,7 @@ let read ~mode ~keeper_name ~fetch ~previous =
           else Error (Invalid_response Read.Cursor_mismatch) in
         let store = match page with
           | Ok page ->
+              audit_failures := List.remove_assoc receiver !audit_failures;
               let tasks=List.fold_left (fun tasks (row:Read.record) ->
                 apply_observation ~store_id:advertised.store_id tasks row.observation)
                 (match old with None -> [] | Some store -> store.tasks) page.records in
@@ -206,5 +218,7 @@ let read ~mode ~keeper_name ~fetch ~previous =
         | Some _ -> List.map (fun old -> if same old then store else old) stores)
       previous.stores inventory.receivers in
   if previous.error=None && stores == previous.stores && previous.inventory=Some inventory
+     && previous.audit_failures = !audit_failures
   then Ok previous
-  else Ok {keeper_name=Some keeper_name;inventory=Some inventory;stores;error=None}
+  else Ok {keeper_name=Some keeper_name;inventory=Some inventory;stores;error=None;
+    audit_failures= !audit_failures}

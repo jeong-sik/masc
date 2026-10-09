@@ -398,6 +398,15 @@ let test_background_work_stays_outside_composer () =
     check int "request is still tracked" 1 (List.length state.msg_inflight))
     [Tui.Tools_compact; Tools_results; Tools_full]
 
+let test_hidden_memory_failures_reserve_rows () =
+  let state = state () in
+  state.msg_memory_visibility <- Tui.Memory_hidden;
+  let before = Tui.keeper_message_status_rows state ~terminal_cols:80 in
+  state.msg_memory_error <- Some "fixture read failure";
+  state.msg_memory_dropped <- 2;
+  check int "hidden contents still reserve both failure diagnostics" (before+2)
+    (Tui.keeper_message_status_rows state ~terminal_cols:80)
+
 let test_checkpoint_details_hint_is_counted () =
   let state = state () in
   state.msg_turn_folded <- true;
@@ -614,6 +623,7 @@ let () =
           test_compact_progress_follows_working_execution
       ; test_case "priority control receipt ordering" `Quick test_priority_control_receipt_ordering
       ; test_case "background work stays outside composer" `Quick test_background_work_stays_outside_composer
+      ; test_case "hidden memory errors remain counted" `Quick test_hidden_memory_failures_reserve_rows
       ; test_case "checkpoint details hint is counted" `Quick test_checkpoint_details_hint_is_counted
       ; test_case "minimal chat keeps unconfirmed control visible" `Quick test_minimal_chat_keeps_unconfirmed_control_visible
       ; test_case "uncovered execution failures remain visible" `Quick test_compact_keeps_uncovered_execution_problems

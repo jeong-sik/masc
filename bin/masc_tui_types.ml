@@ -13747,10 +13747,8 @@ let keeper_message_status_rows (state : state) ~terminal_cols =
          1
      | Some _ | None -> 0)
   + (if Option.is_some state.msg_loaded_error then 1 else 0)
-  + (if state.msg_memory_visibility <> Memory_hidden
-        && Option.is_some state.msg_memory_error then 1 else 0)
-  + (if state.msg_memory_visibility <> Memory_hidden
-        && state.msg_memory_dropped > 0 then 1 else 0)
+  + (if Option.is_some state.msg_memory_error then 1 else 0)
+  + (if state.msg_memory_dropped > 0 then 1 else 0)
   + (if state.msg_loaded_dropped > 0 then 1 else 0)
   + (if state.msg_older_loading || Option.is_some state.msg_older_error then 1
      else 0)

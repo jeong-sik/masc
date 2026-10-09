@@ -125,4 +125,3 @@ type auto_judge_resume_report =
   ; failures : auto_judge_resume_failure list
   ; queue_error : Keeper_approval_queue_result.storage_error option
   }
-

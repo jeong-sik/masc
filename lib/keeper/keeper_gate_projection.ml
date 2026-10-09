@@ -207,4 +207,3 @@ let authorization_metadata ?producer_metadata authorization =
          ~some:(fun metadata -> [ "producer", metadata ])
          producer_metadata)
 ;;
-

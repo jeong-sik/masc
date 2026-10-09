@@ -1222,6 +1222,12 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     Masc_tui_message_input.insert state.msg_input completed;
     state.msg_command_menu <- Masc_tui_command.Menu_dismissed completed;
     true in
+  let move_recall move =
+    let was_editing = Option.is_some state.msg_recall_replaces in
+    move state;
+    if was_editing && Option.is_none state.msg_recall_replaces
+    then drain_queue ()
+  in
   match key with
   (* Esc cancels the innermost thing, and a running capture is inside
      everything else here: the operator is mid-utterance, not mid-turn. ^Y
@@ -1317,13 +1323,10 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
   | "down" when slash_navigable () -> apply_autocomplete Masc_tui_command.Next
   | "up" when slash_navigable () -> apply_autocomplete Masc_tui_command.Prev
   | "up" ->
-    recall_older state;
+    move_recall recall_older;
     true
   | "down" ->
-    let was_editing = Option.is_some state.msg_recall_replaces in
-    recall_newer state;
-    if was_editing && Option.is_none state.msg_recall_replaces
-    then drain_queue ();
+    move_recall recall_newer;
     true
   | "wheel-up" ->
     (* A notch is worth more than a row. The wheel used to arrive as the arrow
@@ -1466,7 +1469,8 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
          forget_queued_history state request;
          report_action state "info"
            (Printf.sprintf "Cancelled queued message to %s"
-              (Keeper_chat.terminal_safe_text request.Keeper_chat.keeper_name)));
+              (Keeper_chat.terminal_safe_text request.Keeper_chat.keeper_name));
+         drain_queue ());
       true
     end else if c = Some 16 then begin
       (* Ctrl-P: pull the newest waiting line back into the composer. That is
@@ -7777,13 +7781,7 @@ let drain_queued_message state ~base_path ~mailbox =
         && not (List.exists (fun (name, _, _) -> String.equal name keeper_name)
           state.keeper_interactive_waiting)
         && not (composing_for_keeper state keeper_name)
-        &&
-        match state.msg_recall_replaces with
-        | Some editing ->
-            not
-              (String.equal editing.Chat_queue.request.Keeper_chat.keeper_name
-                 keeper_name)
-        | None -> true)
+        && not (recalling_for_keeper state keeper_name))
     with
     | None -> ()
     | Some (item, rest) ->
@@ -7827,7 +7825,17 @@ let drain_queued_message state ~base_path ~mailbox =
           next ())
   in
   if state.workspace_identity = Workspace_identity_match
-     && Option.is_none state.keepers_error then next ()
+     && Option.is_none state.keepers_error then begin
+    (* Releasing a recalled edit may be the only event after its predecessor
+       was accepted. Revisit explicit Enter admission as well as unmarked
+       input; the admission path still owns control and transport checks. *)
+    let waiting_keepers = Chat_queue.waiting state.msg_queued
+      |> List.map (fun (item : Chat_queue.item) -> item.request.keeper_name)
+      |> List.sort_uniq String.compare in
+    List.iter (fun keeper_name ->
+      launch_waiting_keeper_input state ~mailbox ~keeper_name) waiting_keepers;
+    next ()
+  end
 ;;
 
 (* /task in the composer or the chat pane: create the task first, then hand
@@ -9595,7 +9603,8 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
                     | Some editing when editing.Chat_queue.request.request_id = id ->
                       state.msg_recall_replaces <- None; clear_staged_attachments state
                     | Some _ | None -> ());
-                   notice ~kind:Notice_reply ("Cancelled unsent message " ^ id)
+                   notice ~kind:Notice_reply ("Cancelled unsent message " ^ id);
+                   drain_queued_message state ~base_path ~mailbox
                | None -> notice ~kind:Notice_failure "Local queue changed; inspect /queue again")
             | Edit (id, message) ->
               let request = {item.request with Keeper_chat.message = message} in
@@ -23795,16 +23804,19 @@ and is loaded on demand through keeper_skill.
              || scroll_recovery_key
            then
              if switch_key then begin
-               if Option.is_some state.msg_recall_replaces then begin
+               let released_recall = Option.is_some state.msg_recall_replaces in
+               if released_recall then begin
                  state.msg_recall_replaces <- None;
-                 clear_staged_attachments state;
-                 drain_queued_message state ~base_path
-                   ~mailbox:async_messages
+                 clear_staged_attachments state
                end;
                switch_to_next_keeper_message state ~mailbox:async_messages
                  ~drain_queue:(fun () ->
                    drain_queued_message state ~base_path
-                     ~mailbox:async_messages)
+                     ~mailbox:async_messages);
+               (* Select the explicit target before released input can create
+                  an inflight owner and pin the previous conversation. *)
+               if released_recall then
+                 drain_queued_message state ~base_path ~mailbox:async_messages
              end else
                let (_handled : bool) =
                  handle_message_key state

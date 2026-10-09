@@ -1103,6 +1103,67 @@ let test_unmarked_input_cannot_escape_composer_or_recall_ownership () =
     (Option.is_some (Tui_types.next_authorized_keeper_input state "alpha"))
 ;;
 
+let test_recalled_marked_input_holds_admission_for_its_keeper () =
+  let module Q = Masc_tui_keeper_chat_queue in
+  List.iter (fun coalesce ->
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    let _, item = preflight_input () in
+    state.msg_queued <- Q.restore_unsent Q.empty item;
+    let later = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"later input" () in
+    let other = Keeper_chat.create_request ~keeper_name:"beta" ~message:"other Keeper input" () in
+    List.iter (fun request -> match Q.push state.msg_queued ~submitted_at:2. request with
+      | Ok (queue, _) -> state.msg_queued <- queue
+      | Error detail -> fail detail) [later; other];
+    let generation name = Tui_types.keeper_chat_control_generation state name in
+    state.keeper_interactive_waiting <- List.map (fun request ->
+      request.Keeper_chat.keeper_name, request.request_id,
+      Tui_types.Awaiting_control {generation=generation request.keeper_name; target=None})
+      [item.request; later; other];
+    state.coalesce_queued_input <- coalesce;
+    state.msg_target_keeper_name <- Some "beta";
+    state.msg_recall_replaces <- Some item;
+    let held_queue = Q.waiting state.msg_queued in
+    check string "the emptied editor does not revoke recall ownership" ""
+      (Masc_tui_message_input.contents state.msg_input);
+    check bool "earlier Enter permission cannot send a recalled body or pass it" true
+      (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"));
+    (match Tui_types.next_authorized_keeper_input state "beta" with
+     | Some (ready, _) -> check string "recall does not hold another Keeper"
+         other.request_id ready.request.request_id
+     | None -> fail "another Keeper was held by the recall");
+    check bool "waiting payloads and queue order remain owned locally" true
+      (held_queue = Q.waiting state.msg_queued);
+    state.msg_recall_replaces <- None;
+    (match Tui_types.next_authorized_keeper_input state "alpha" with
+     | Some (ready, _) -> check bool "abandoning edit releases the unchanged original payload" true
+         (ready.request = item.request)
+     | None -> fail "abandoned edit kept its input held")) [false; true]
+;;
+
+let test_recalled_admission_uses_the_explicitly_replaced_payload () =
+  let module Q = Masc_tui_keeper_chat_queue in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let _, item = preflight_input () in
+  state.msg_queued <- Q.restore_unsent Q.empty item;
+  state.msg_recall_replaces <- Some item;
+  state.keeper_interactive_waiting <- ["alpha", item.request.request_id,
+    Tui_types.Awaiting_control {generation=Tui_types.keeper_chat_control_generation state "alpha";
+      target=None}];
+  let edited = {item.request with Keeper_chat.message="아니야 진행해"} in
+  (match Q.replace_request state.msg_queued ~request_id:item.request.request_id edited with
+   | Ok queue -> state.msg_queued <- queue
+   | Error detail -> fail detail);
+  check bool "queue replacement alone does not release the editor's ownership" true
+    (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"));
+  state.msg_recall_replaces <- None;
+  (match Tui_types.next_authorized_keeper_input state "alpha" with
+   | Some (ready, _) ->
+     check bool "explicit edit release dispatches the exact new text and image payload" true
+       (ready.request = edited);
+     check int "replacement preserves the original queue position" item.submission_seq ready.submission_seq
+   | None -> fail "submitted edit did not release its input")
+;;
+
 let test_new_enter_can_bypass_an_explicitly_stopped_input () =
   let module Q = Masc_tui_keeper_chat_queue in
   let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
@@ -6141,6 +6202,8 @@ let () =
         ; test_case "preflight local resume preserves FIFO and server stops" `Quick test_preflight_local_resume_keeps_fifo_and_respects_server_stop
         ; test_case "workspace suspension preserves real stop ownership" `Quick test_workspace_suspension_preserves_real_stop_ownership
         ; test_case "unmarked input respects composer and recall ownership" `Quick test_unmarked_input_cannot_escape_composer_or_recall_ownership
+        ; test_case "recalled marked input holds admission for its Keeper" `Quick test_recalled_marked_input_holds_admission_for_its_keeper
+        ; test_case "recalled admission uses the explicitly replaced payload" `Quick test_recalled_admission_uses_the_explicitly_replaced_payload
         ; test_case "new Enter bypasses an explicit stop hold" `Quick test_new_enter_can_bypass_an_explicitly_stopped_input
         ; test_case "empty composer preserves already queued input order" `Quick test_empty_composer_cannot_reverse_already_queued_input
         ; test_case "preflight restoration preserves submission chronology" `Quick test_preflight_restoration_preserves_submission_chronology

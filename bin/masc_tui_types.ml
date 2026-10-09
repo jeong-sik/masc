@@ -8525,6 +8525,13 @@ let composing_for_keeper (state : state) keeper_name =
   && Masc_tui_message_input.length state.msg_input > 0
   && Option.exists (String.equal keeper_name) state.msg_target_keeper_name
 
+(* Recall owns this Keeper's queued input until the edit is submitted or
+   abandoned. Earlier Enter/control authorization cannot send its old body. *)
+let recalling_for_keeper (state : state) keeper_name =
+  match state.msg_recall_replaces with
+  | Some editing -> String.equal editing.request.keeper_name keeper_name
+  | None -> false
+
 (* A fresh Enter may bypass input held by an explicit stop. A refused
    preflight keeps its place until local resume; unmarked input remains owned
    by the generic drainer and its composer/recall checks. *)
@@ -8540,7 +8547,8 @@ let next_authorized_keeper_input state keeper_name =
       | Some (_, _, Retained_before_dispatch) -> None
       | Some (_, _, (Awaiting_control _ | Retained_after_stop)) | None -> ready rest
   in
-  ready (Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued ~keeper_name)
+  if recalling_for_keeper state keeper_name then None
+  else ready (Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued ~keeper_name)
 
 (** The next target both the input path and footer agree is safe to select.
     A pending request or live transcript stays pinned to its Keeper until that

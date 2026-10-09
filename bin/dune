@@ -1746,6 +1746,12 @@
   masc_tui_theme))
 
 (library
+ (name masc_tui_msx_checkpoint_pending)
+ (wrapped false)
+ (modules masc_tui_msx_checkpoint_pending)
+ (libraries masc.keeper_operation_identity masc.machine_checkpoint yojson unix))
+
+(library
  (name masc_tui_msx_tick)
  (wrapped false)
  (modules masc_tui_msx_tick)
@@ -2058,6 +2064,8 @@
   masc_tui_interactive
   masc_tui_msx
   masc_tui_msx_tick
+  masc_tui_msx_checkpoint_pending
+  masc.keeper_operation_identity
   masc_tui_machine_live
   masc_tui_terminal_profile
   masc_tui_terminal_title

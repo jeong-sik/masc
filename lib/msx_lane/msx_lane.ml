@@ -797,12 +797,29 @@ let ram_diff () =
       Ok (go 0 [] 0))
 ;;
 
+let sync_checkpoint_directory path =
+  let fd = Unix.openfile path [Unix.O_RDONLY; Unix.O_CLOEXEC] 0 in
+  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd)
+
+let rec mkdir_checkpoint_directory dir =
+  if not (Sys.file_exists dir) then begin
+    mkdir_checkpoint_directory (Filename.dirname dir);
+    Unix.mkdir dir 0o755;
+    sync_checkpoint_directory (Filename.dirname dir)
+  end
+
 let atomic_write path contents =
-  mkdir_p (Filename.dirname path);
+  mkdir_checkpoint_directory (Filename.dirname path);
   let tmp, oc = Filename.open_temp_file ~temp_dir:(Filename.dirname path) ".msx-" ".tmp" in
   Fun.protect
     ~finally:(fun () -> close_out_noerr oc; if Sys.file_exists tmp then Sys.remove tmp)
-    (fun () -> output_string oc contents; close_out oc; Sys.rename tmp path)
+    (fun () ->
+      output_string oc contents;
+      flush oc;
+      Unix.fsync (Unix.descr_of_out_channel oc);
+      close_out oc;
+      Sys.rename tmp path;
+      sync_checkpoint_directory (Filename.dirname path))
 ;;
 
 let checkpoint_json (st : machine) =
@@ -837,7 +854,10 @@ let save ~path =
         Ok { observation = observe st;
              mark = { count = !change_count; incarnation = st.incarnation };
              checkpoint_sha256 }
-      with Sys_error message -> Error (Unreadable message))
+      with
+      | Sys_error message -> Error (Unreadable message)
+      | Unix.Unix_error (error, operation, path) ->
+          Error (Unreadable (operation ^ " " ^ path ^ ": " ^ Unix.error_message error)))
 ;;
 
 let decode_checkpoint json =
@@ -926,7 +946,10 @@ let restore ~path ~ledger_dir =
         Ok { observation = observe st;
              mark = { count = !change_count; incarnation = st.incarnation };
              checkpoint_sha256 }
-      with Sys_error message -> Error (Unreadable message))
+      with
+      | Sys_error message -> Error (Unreadable message)
+      | Unix.Unix_error (error, operation, path) ->
+          Error (Unreadable (operation ^ " " ^ path ^ ": " ^ Unix.error_message error)))
 ;;
 
 let change_disk ~path ~backup_path =
@@ -952,7 +975,10 @@ let change_disk ~path ~backup_path =
             mark_change ();
             Ok (observe next)))
       | _ -> Error (Invalid_request "load a disk game before changing disks"))
-  with Sys_error message -> Error (Unreadable message)
+  with
+  | Sys_error message -> Error (Unreadable message)
+  | Unix.Unix_error (error, operation, path) ->
+      Error (Unreadable (operation ^ " " ^ path ^ ": " ^ Unix.error_message error))
 ;;
 
 (* The digest ocaml-msx reports for the sources at OCAML_MSX_SHA in

@@ -25,8 +25,12 @@ function fixture(reply, { storage = new Map(), hash = '#fixture-token',
   sessionReply = ({ body }) => response({ ok:true, connected:body.connected }) } = {}) {
   const nodes = new Map();
   function element() {
+    let disabled = false;
     return { textContent: '', className: '', value: '', hidden: false,
-      disabled: false, children: [], dataset: {}, handlers: {},
+      disabledChanges: [],
+      get disabled() { return disabled; },
+      set disabled(value) { disabled = value; this.disabledChanges.push(value); },
+      children: [], dataset: {}, handlers: {},
       addEventListener(name, fn) { this.handlers[name] = fn; },
       append(node) { this.children.push(node); },
       replaceChildren() { this.children = []; },
@@ -35,7 +39,7 @@ function fixture(reply, { storage = new Map(), hash = '#fixture-token',
     };
   }
   const get = id => {
-    if (!nodes.has(id)) nodes.set(id, element());
+    if (!nodes.has(id)) { const node = element(); node.id = id; nodes.set(id, node); }
     return nodes.get(id);
   };
   const padButton = element();
@@ -76,10 +80,12 @@ function fixture(reply, { storage = new Map(), hash = '#fixture-token',
     atob,
     crypto: { getRandomValues: values => require('node:crypto').webcrypto.getRandomValues(values) },
     TextEncoder,
+    AbortController,
     performance: { now: () => now },
     setTimeout: fn => timers.push(fn),
     fetch: async (url, init) => {
       const request = { url, authorization: init.headers.Authorization, method: init.method, body: init.body && JSON.parse(init.body) };
+      if (init.signal !== undefined) Object.defineProperty(request, 'signal', { value: init.signal });
       requests.push(request);
       if (url === '/api/v1/play/session') return sessionReply(request);
       return reply(request);
@@ -1072,7 +1078,8 @@ for (const status of [401, 403]) {
     await page.settle();
     assert.match(page.get('turn').textContent, /초대가 끝났거나 회수됐어요/);
     assert.equal(page.get('leave').disabled, true);
-    assert.equal(page.requests.length, 1);
+    assert.equal(page.requests.some(request => request.method === 'POST'), false,
+      'concurrent observation reads cannot send a mutation after terminal authentication');
     assert.equal(page.timerCount, 0);
     assert.equal(Map.prototype.get.call(storage, 'masc.play.invite'), 'unread-identity');
   });

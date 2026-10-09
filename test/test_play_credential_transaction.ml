@@ -711,7 +711,13 @@ let test_departed_caller_cannot_pass_a_free_controller () =
   let pass () = Keeper_dos_controller.execute ~config ~who:"player" ~name:"masc_dos_pass"
       ~args:(`Assoc ["to", `String "operator"])
       ~run:(fun ?dos_admission:_ () -> fail "pass cannot bypass its admitted lane effect") in
-  check bool "departure blocks handoff admission" true (Result.is_error (pass ()));
+  (match pass () with
+   | Error (Keeper_dos_controller.Refused _) -> ()
+   | _ -> fail "departure must be a client refusal, not unreadable authority");
+  (match Keeper_dos_controller.with_move_admission ~config ~who:"player"
+      ~run:(fun () -> fail "departed caller reached machine effect") with
+   | Error (Keeper_dos_controller.Refused _) -> ()
+   | _ -> fail "departed move must preserve the typed client refusal");
   check (option string) "free controller remains free" None (controller ());
   participation_ok (participate config token Play_participation.Connected);
   ignore (handed (pass ()));

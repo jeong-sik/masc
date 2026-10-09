@@ -110,6 +110,7 @@ function fixture(reply, { storage = new Map(), hash = '#fixture-token', roomRepl
   const settle = () => new Promise(resolve => setImmediate(resolve));
   return {
     get, padButton, rendered, settle,
+    evaluate(code) { return vm.runInContext(code, context); },
     // Existing cases assert game requests; room traffic has its own assertions.
     get requests() { return requests.filter(request => request.url !== '/api/v1/play/room'); },
     get roomRequests() { return requests.filter(request => request.url === '/api/v1/play/room'); },
@@ -2409,4 +2410,41 @@ test('external reconnect recovers room authority while the live-frame request is
   await page.roomPoll();
   assert.ok(page.roomRequests.length > 0, 'same invitation reconnect restores room observation');
   assert.equal(page.get('chat-text').disabled, false);
+});
+
+for (const status of [401,403]) test(`superseded direct seat ${status} cannot terminate newer authority`, async () => {
+  let held;
+  let reads=0;
+  const f=fixture(({url}) => {
+    if(url==='/api/v1/play/seat') { reads++; if(reads===1) return new Promise(resolve => {held=resolve;}); return response(seat); }
+    if(url==='/api/v1/play/pad') return response(layout);
+    return response(frame);
+  });
+  await f.settle();
+  await f.evaluate('refreshSeat()');
+  held(response({error:'expired'},status));
+  await f.settle();
+  assert.equal(f.evaluate('authRejected'),false);
+  assert.equal(f.evaluate('ended'),false);
+});
+test('MSX departed observation does not advertise participation', async () => {
+  const f=fixture(({url}) => url==='/api/v1/play/seat' ? response(seat) : response(frame));
+  await f.settle();
+  f.evaluate("viewMachine='msx'; connected=false; renderTurn()");
+  assert.match(f.get('turn').textContent,/끊겨/);
+  assert.doesNotMatch(f.get('turn').textContent,/참여할 수/);
+});
+for (const status of [200,404]) test(`pad ${status} for an older program stays unsettled`, async () => {
+  let held;
+  const f=fixture(({url}) => {
+    if(url==='/api/v1/play/seat') return response(seat);
+    if(url==='/api/v1/play/pad') return new Promise(resolve => {held=resolve;});
+    return response(frame);
+  });
+  await f.settle();
+  f.evaluate("seatSavesName='replacement'");
+  held(response({saves_name:'game',buttons:[]},status));
+  await f.settle();
+  assert.equal(f.evaluate('padFor'),undefined);
+  assert.equal(f.get('keys').hidden,true);
 });

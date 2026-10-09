@@ -287,6 +287,7 @@ let roomBefore = null;
 let roomSnapshot = null;
 let roomMessagesKey = null;
 let pendingChat = null;
+let settledChatRequest = null;
 let roomReadAbort = null;
 let roomReadRequest = null;
 let roomDetached = false;
@@ -351,7 +352,7 @@ function connectionSettled() {
 }
 
 function end(text, { terminalAuth = false } = {}) {
-  if (ended) return;
+  if (ended || !settleChatReceipt()) return;
   if (pendingChat !== null) {
     el('room-status').textContent = '대화 전송 결과가 확인되지 않아 초대와 전송 기록을 유지했어요.';
     setControlsEnabled(false);
@@ -439,9 +440,10 @@ function roomConnectionCurrent(checkDraft = false) {
   return false;
 }
 
-function saveRoomDraft() {
+function saveRoomDraft({ settlingRequest = null } = {}) {
   if (documentId === null) return false;
-  if (authRejected || departureConfirmed || retainedDeparture || !roomConnectionCurrent(true)) return false;
+  if ((authRejected && (settlingRequest === null || settlingRequest !== settledChatRequest))
+      || departureConfirmed || retainedDeparture || !roomConnectionCurrent(true)) return false;
   try {
     const saved = JSON.stringify({ token, text:el('chat-text').value, pending:pendingChat });
     sessionStorage.setItem(ROOM_DRAFT_KEY, saved);
@@ -451,6 +453,22 @@ function saveRoomDraft() {
     el('room-status').textContent = '대화 초안을 저장하지 못해 보내지 않았어요. 이 사이트의 탭 저장소를 허용해 주세요.';
     return false;
   }
+}
+
+// Persist a definite terminal say receipt before forgetting its bearer. This
+// exception to rejected-auth draft editing owns only that exact request and
+// the current document/draft CAS. Storage failure keeps the receipt retryable.
+function settleChatReceipt() {
+  const request = settledChatRequest;
+  if (request === null) return true;
+  if (pendingChat !== request || !roomConnectionCurrent(true)) return false;
+  pendingChat = null;
+  if (!saveRoomDraft({ settlingRequest: request })) {
+    pendingChat = request;
+    return false;
+  }
+  settledChatRequest = null;
+  return true;
 }
 
 function restoreRoomDraft() {
@@ -611,6 +629,11 @@ function tickRoom() {
 
 function sendChat() {
   if (documentId === null) return;
+  if (settledChatRequest !== null) {
+    settleChatReceipt();
+    setRoomControls();
+    return;
+  }
   // An edited textarea is the next draft, not permission to abandon a send
   // whose outcome is still unknown. Reconcile that exact payload first.
   const text = pendingChat ? pendingChat.text : el('chat-text').value;
@@ -635,7 +658,7 @@ function sendChat() {
       roomReadRequest = null;
       roomBusy = false;
       if (roomReadAbort) roomReadAbort.abort();
-      pendingChat = null;
+      settledChatRequest = request;
       if (el('chat-text').value === request.text) el('chat-text').value = '';
       roomBefore = null;
       renderRoom(result.json);
@@ -643,12 +666,14 @@ function sendChat() {
       el('room-status').textContent = el('chat-text').value === '' ? ''
         : '이전 대화 전송을 확인했어요. 작성 중인 초안은 따로 보낼 수 있어요.';
     } else if (result.status >= 400 && result.status < 500) {
-      pendingChat = null;
+      settledChatRequest = request;
       el('room-status').textContent = (result.json && result.json.error) || '대화 전송이 거절됐어요. 초안은 남겨 두었어요.';
     } else {
       el('room-status').textContent = '전송 결과를 확인하지 못했어요. 다시 보내면 같은 메시지를 확인해요.';
     }
-    saveRoomDraft();
+    if (!settleChatReceipt()) return;
+    if (authRejected) end('초대가 끝났거나 회수됐어요. 운영자에게 새 링크를 받아 주세요.', { terminalAuth:true });
+    else saveRoomDraft();
   }).catch(() => {
     if (!ended && !departureConfirmed && !roomDetached) el('room-status').textContent = '전송 결과를 확인하지 못했어요. 다시 보내면 같은 메시지를 확인해요.';
   }).finally(() => {
@@ -801,12 +826,13 @@ async function refreshSeat(signal) {
   // Only observed connection, successful reconnect, or ending it settles it.
   if (initialConnectIntent && controllerError === null && !disconnecting) {
     if (connected) {
-      initialConnectIntent = false;
       if (retainedDeparture) {
         sessionStorage.removeItem(DEPARTURE_KEY);
         retainedDeparture = false;
         setRoomControls();
+        renderTurn();
       }
+      initialConnectIntent = false;
     }
     else if (performance.now() >= nextReconnectAt && connectionSettled()) {
       nextReconnectAt = performance.now() + SEAT_POLL_MS;
@@ -999,6 +1025,16 @@ function refreshFrameSeat(revision, signal, activityKey) {
     if (!ended && !abort.signal.aborted && revision === viewRevision && pendingSeatActivity !== activityKey)
       refreshFrameSeat(revision, signal, pendingSeatActivity);
   });
+}
+
+// Seat authority must recover even when the frame transport never resolves.
+// Reuse the same coalesced owner as frame-triggered refreshes.
+function tickSeat() {
+  if (ended) return;
+  if (!authRejected && !disconnecting && frameAbort !== null
+      && performance.now() >= nextSeatPollAt)
+    refreshFrameSeat(viewRevision, frameAbort.signal, pendingSeatActivity);
+  setTimeout(tickSeat, SEAT_POLL_MS);
 }
 
 async function tick(revision, abort) {
@@ -1251,6 +1287,7 @@ if (token === '') {
   end('링크에 초대 토큰이 없어요. 받은 링크를 그대로 열어 주세요.');
 } else {
   tickRoom();
+  setTimeout(tickSeat, SEAT_POLL_MS);
   refreshSeat().catch(() => setStatus('seat', '자리 정보를 읽지 못했어요. 다시 시도하고 있어요.'));
   // Frame observation does not depend on controller authority being readable.
   restartFrames();

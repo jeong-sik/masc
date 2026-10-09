@@ -9856,3 +9856,8 @@
 (include stanzas/test_tui_code_history_diff_pty.inc)
 
 (include stanzas/test_tui_code_history_task_pty.inc)
+
+(test
+ (name test_tui_msx_checkpoint_pending)
+ (modules test_tui_msx_checkpoint_pending)
+ (libraries alcotest unix masc.keeper_operation_identity masc_tui_msx_checkpoint_pending))

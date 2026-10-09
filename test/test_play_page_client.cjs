@@ -119,6 +119,15 @@ function fixture(reply, { storage = new Map(), hash = '#fixture-token', roomRepl
     navigateFragment(hash) { context.location.hash = hash; windowHandlers.get('hashchange')?.(); },
     restoreFromCache() { windowHandlers.get('pageshow')?.({ persisted: true }); },
     get clears() { return clears; },
+    async seatTick() {
+      const pending = timers.filter(timer => timer.delay === 5000);
+      assert.equal(pending.length, 1, 'authority owns one independent timer');
+      const timer = pending[0];
+      timers.splice(timers.indexOf(timer), 1);
+      now += timer.delay;
+      await timer.callback();
+      await settle();
+    },
     async roomTick() {
       const pending = timers.filter(timer => timer.delay === 2000);
       assert.equal(pending.length, 1, 'conversation owns one independent refresh timer');
@@ -2379,4 +2388,25 @@ test('a pad event observed on MSX cannot turn into a DOS move after changing vie
   page.get('machine-view').handlers.change();
   await page.settle();
   assert.equal(page.requests.some(r => r.method === 'POST' && r.url === '/api/v1/play/pad'), false);
+});
+
+test('external reconnect recovers room authority while the live-frame request is stalled', async () => {
+  let connected = false;
+  let seats = 0;
+  const page = fixture(request => {
+    if (request.url === '/api/v1/play/seat') {
+      seats += 1;
+      return response({ ...seat, connected });
+    }
+    if (request.url.includes('_capture')) return new Promise(() => {});
+    return gameReply(request);
+  }, { hash:'', storage:new Map([['masc.play.invite', 'fixture-token']]) });
+  await page.settle();
+  assert.equal(seats, 1);
+  connected = true;
+  await page.seatTick();
+  assert.equal(seats, 2, 'stalled frame did not stop seat observation');
+  await page.roomPoll();
+  assert.ok(page.roomRequests.length > 0, 'same invitation reconnect restores room observation');
+  assert.equal(page.get('chat-text').disabled, false);
 });

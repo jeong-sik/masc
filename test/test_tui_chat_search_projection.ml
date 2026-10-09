@@ -228,23 +228,26 @@ let test_search_freezes_preview_lookup () = at_sizes (fun origin ->
   check int "mapping and suffix measurement share one preview read" 1 !calls)
 
 let test_folded_thinking_search_identity () = at_sizes (fun origin ->
+  let set_cols columns=ignore(Masc_tui_render_schedule.Terminal_size_cache.refresh
+    Masc_tui_ansi.terminal_size_cache ~probe:(fun () -> Some(26,columns))) in
   let state=state origin in
   state.msg_reasoning_visibility <- T.Reasoning_folded;
   state.msg_loaded <- [row ~id:"thinking-identity" ~request_id:"thinking-identity"
-    ~role:T.Message_thinking ~text:("Reasoning " ^ String.make 100 'x' ^ "\nsecond reasoning line") 1.];
+    ~role:T.Message_thinking ~text:("Reasoning " ^ String.make 100 'x') 1.];
+  set_cols 45;
   let summary=find state "Reasoning" in
   check bool "fold producer marks generated summary identity" true
     (match summary.matched_position with Masc_tui_chat_search.Thinking_summary_byte _ -> true | _ -> false);
-  state.msg_reasoning_visibility <- T.Reasoning_full;
+  set_cols 180;
   let source=find ~older:summary state "Reasoning" in
   check bool "unfolded original is a distinct source occurrence" true
     (match source.matched_position with Masc_tui_chat_search.Body_byte _ -> true | _ -> false);
-  state.msg_reasoning_visibility <- T.Reasoning_folded;
+  set_cols 45;
   check bool "returning to summary cannot cycle to its prior match" true
     ((Render.keeper_message_find_scroll state ~keeper_name:"alpha" ~needle:"Reasoning" ~older_than:(Some source)).match_result=None);
-  state.msg_reasoning_visibility <- T.Reasoning_full;
+  set_cols 180;
   let source=find state "Reasoning" in
-  state.msg_reasoning_visibility <- T.Reasoning_folded;
+  set_cols 45;
   check bool "source-to-summary transition respects the same fixed order" true
     ((Render.keeper_message_find_scroll state ~keeper_name:"alpha" ~needle:"Reasoning" ~older_than:(Some source)).match_result=None))
 

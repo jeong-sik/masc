@@ -316,7 +316,8 @@ let folded_thinking_summary ~line_count ~source_height ~summary_height =
 let thinking_height_cache = Markdown_cache.create ~capacity:chat_markdown_cache_capacity
 
 let fold_thinking_entry (state : state) ~chat_cols (entry : Message_layout.entry) =
-  if entry.style = Message_layout.Thinking && state.msg_reasoning_visibility = Reasoning_folded then
+  if entry.style = Message_layout.Thinking && entry.body_presentation=Message_layout.Source_body
+     && state.msg_reasoning_visibility = Reasoning_folded then
     let context = Chat_theme.body_context (Chat_theme.snapshot ()) entry.style in
     let width = Message_layout.entry_body_cells ~origin:state.msg_origin_display
       ~inner_width:(max 1 (framed_inner_width chat_cols)) entry in

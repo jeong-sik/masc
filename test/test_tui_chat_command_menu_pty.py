@@ -81,7 +81,7 @@ def assert_menu_selection(output, rows, *, selected_offset):
     draft = h.screen_row_of(rows, b"> /")
     assert menu > 0 and draft > menu + 2, "menu has no visible candidates"
     styled = styled_screen(output)
-    # At 150 columns the automatic roster owns the first 34 cells.
+    # At 150 columns the explicitly opened roster owns the first 34 cells.
     for number in range(menu + 1, draft - 1):
         cells = styled_cells(styled[number])[34:150]
         selected = number == menu + selected_offset
@@ -251,6 +251,7 @@ def run(executable):
         h.select_keeper_row(process, fd, output, b"alpha")
         # Open by identity to keep this case independent of roster navigation.
         h.palette_go(process, fd, output, b"keeper alpha", CHAT)
+        h.send_and_wait(process, fd, output, b"\x02", b"KEEPERS")
         h.send_and_wait(process, fd, output, b"/", b"Commands  1/")
         rows = screen(process, fd, output)
         assert_menu_selection(output, rows, selected_offset=1)

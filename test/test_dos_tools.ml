@@ -424,8 +424,10 @@ let test_inventory_skips_subdirectories_like_load () =
         | Some (`String name) -> name | _ -> fail "no filename") files);
     let loaded = load ~base_path "game" in
     check bool "directory with subdirectories still loads" true (is_completed loaded);
-    check bool "machine mounts exactly the advertised file" true
-      (member "files" (Tool_result.data loaded) = Some (`List [`String "game.com"])))
+    (* The inventory names host assets; the DOS machine publishes its
+       case-insensitive guest namespace in canonical uppercase. *)
+    check bool "machine mounts the advertised file under its DOS name" true
+      (member "files" (Tool_result.data loaded) = Some (`List [`String "GAME.COM"])))
 ;;
 
 (* Swap a directory out during enumeration, then restore it before final

@@ -196,6 +196,7 @@ type KeeperChatCustomEvent =
       type: 'CUSTOM'
       name: 'KEEPER_STREAM_MESSAGE_START'
       value: {
+        stream_scope: number
         provider_message_id?: string
         model?: string
         usage?: KeeperStreamUsage
@@ -204,7 +205,7 @@ type KeeperChatCustomEvent =
   | {
       type: 'CUSTOM'
       name: 'KEEPER_STREAM_MESSAGE_DELTA'
-      value: { stop_reason?: string; usage?: KeeperStreamDeltaUsage }
+      value: { stream_scope: number; stop_reason?: string; usage?: KeeperStreamDeltaUsage }
     }
   | { type: 'CUSTOM'; name: 'KEEPER_STREAM_MESSAGE_STOP'; value: null }
   | { type: 'CUSTOM'; name: 'KEEPER_STREAM_PING'; value: null }
@@ -304,7 +305,7 @@ export type KeeperChatStreamEvent = KeeperChatStreamEventBase & (
   | { type: 'RUN_STARTED' | 'RUN_FINISHED' }
   | { type: 'RUN_ERROR'; message?: string; code?: string }
   | { type: 'TEXT_MESSAGE_START'; messageId?: string; role?: 'assistant' | 'user' }
-  | { type: 'TEXT_MESSAGE_CONTENT'; messageId?: string; delta?: string }
+  | { type: 'TEXT_MESSAGE_CONTENT'; messageId?: string; delta?: string; textStreamScope?: number }
   | { type: 'TEXT_MESSAGE_END'; messageId?: string }
   | (KeeperToolStreamOccurrence & { type: 'TOOL_CALL_START'; toolCallName?: string })
   | (KeeperToolStreamOccurrence & { type: 'TOOL_CALL_ARGS'; delta?: string; snapshot?: string })

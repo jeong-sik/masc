@@ -177,7 +177,7 @@ let test_a_held_log_completed_in_place_is_seen () =
      the settle committed what it had. *)
   let _ = Tui_types.turn_log_add_journaled log
     [ line 0 3.0 (E.Run_started { run_id = "r"; thread_id = "keeper:alpha" })
-    ; line 1 3.1 (E.Text_delta "row at 3")
+    ; line 1 3.1 (E.Text_delta {text="row at 3"; stream_scope=None})
     ] in
   Masc_tui_keeper_chat_log.commit log.Tui_types.tl_log;
   Tui_types.hold_settled_log state log;

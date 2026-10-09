@@ -1174,7 +1174,7 @@ let keeper_summary_status_to_string = function
   | Summary_unavailable -> "unavailable"
 ;;
 
-let summarize_rows ~keeper_name ~limit rows =
+let summarize_rows ~keeper_name rows =
   let scanned_row_count = List.length rows in
   let current_event_ids = ref Event_id_set.empty in
   let row_count = ref 0 in
@@ -1313,7 +1313,7 @@ let summarize_rows ~keeper_name ~limit rows =
     ] )
 ;;
 
-let error_summary ~keeper_name ~limit error =
+let error_summary ~keeper_name error =
   ( Summary_unknown
   , `Assoc
     [ "schema", `String summary_schema
@@ -1348,15 +1348,14 @@ let summary_with_status ~base_path ~keeper_name ~limit =
         (store_for_base_path ~base_path ~keeper_name)
         limit
     with
-    | Ok rows -> summarize_rows ~keeper_name ~limit rows
+    | Ok rows -> summarize_rows ~keeper_name rows
     | Error error ->
       error_summary
         ~keeper_name
-        ~limit
         (Dated_jsonl.read_error_to_string error)
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> error_summary ~keeper_name ~limit (Printexc.to_string exn)
+  | exn -> error_summary ~keeper_name (Printexc.to_string exn)
 ;;
 
 let summary_for_keeper ~base_path ~keeper_name ~limit =

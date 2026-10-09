@@ -85,6 +85,17 @@ val append : t -> Yojson.Safe.t -> unit
 (** Append [json] to today's [DD.jsonl] inside [YYYY-MM/].
     Creates directories as needed.  Thread-safe via internal mutex. *)
 
+exception Append_guard_skipped
+(** The append guard returned without allowing a commit-aware append. *)
+
+val append_notifying_commit : t -> Yojson.Safe.t -> on_committed:(unit -> unit) -> unit
+(** Same as {!append}, and calls [on_committed] once the row is in the file,
+    before retention and byte-budget pruning run. An exception raised after
+    [on_committed] returned leaves the row durable; one raised before it
+    leaves nothing written. A caller that retries a failed append uses this to
+    tell the two apart, so it does not write the same row twice.
+    Raises [Append_guard_skipped] when the guard declines the callback. *)
+
 type append_outcome =
   | Appended_to_current
       (** The row landed in today's current [DD.jsonl]. *)

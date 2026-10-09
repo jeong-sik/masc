@@ -593,11 +593,88 @@ let test_turn_returns_before_a_background_child_releases_the_pipes () =
            (elapsed < turn_return_window_s))
 ;;
 
+let check_context_fragments raw event =
+  let open Yojson.Safe.Util in
+  let request = Yojson.Safe.from_string raw in
+  let params = member "params" request in
+  let expected = match member "method" request with
+    | `String "thread/start" | `String "thread/resume" ->
+      ["developer_instructions",`Null,member "developerInstructions" params;
+       "dynamic_tools",`Null,member "dynamicTools" params]
+      |> List.filter (fun (_,_,value) -> value <> `Null)
+    | `String "thread/inject_items" ->
+      member "items" params |> to_list
+      |> List.mapi (fun index value -> "injected_item",`Int index,value)
+    | `String "turn/start" | `String "turn/steer" ->
+      member "input" params |> to_list
+      |> List.mapi (fun index value -> index,value)
+      |> List.filter_map (fun (index,value) ->
+        if member "type" value = `String "text"
+        then Some ("turn_text",`Int index,member "text" value) else None)
+    | `Null when member "result" request <> `Null -> []
+    | _ -> fail "unexpected observed method" in
+  check string "versioned fragment receipt" "masc.codex-context-submission.v3"
+    (member "schema" event |> to_string);
+  check string "logical memory attribution is not claimed" "unknown"
+    (member "logical_memory_partition" event |> to_string);
+  let partition = member "fragments" event in
+  check string "actual serializer supports exact slot attribution" "partitioned"
+    (member "status" partition |> to_string);
+  let fragments = member "values" partition |> to_list in
+  check int "all selected values plus exactly one residual" (List.length expected + 1)
+    (List.length fragments);
+  let cursor = ref 0 and selected_bytes = ref 0 in
+  let residual = Buffer.create (String.length raw) in
+  List.iteri (fun index (slot,item,value) ->
+    let fragment = List.nth fragments index in
+    check (list string) "fragment metadata is content-free"
+      ["index";"json_bytes";"json_offset";"json_sha256";"slot"]
+      (to_assoc fragment |> List.map fst |> List.sort String.compare);
+    check string "slot identity" slot (member "slot" fragment |> to_string);
+    check bool "array position is preserved" true (member "index" fragment=item);
+    let offset = member "json_offset" fragment |> to_int in
+    let bytes = member "json_bytes" fragment |> to_int in
+    check bool "selected ranges are disjoint and inside exact wire bytes" true
+      (offset >= !cursor && bytes >= 0 && offset + bytes <= String.length raw);
+    Buffer.add_substring residual raw !cursor (offset - !cursor);
+    let selected = String.sub raw offset bytes in
+    check string "actual range equals independently decoded JSON slot" (Yojson.Safe.to_string value) selected;
+    check string "fragment SHA binds actual captured bytes"
+      Digestif.SHA256.(digest_string selected |> to_hex)
+      (member "json_sha256" fragment |> to_string);
+    cursor := offset + bytes; selected_bytes := !selected_bytes + bytes) expected;
+  Buffer.add_substring residual raw !cursor (String.length raw - !cursor);
+  let residual_bytes = Buffer.contents residual in
+  let remainder = List.nth fragments (List.length expected) in
+  check string "residual identity" "unattributed_carrier" (member "slot" remainder |> to_string);
+  check bool "noncontiguous residual has no fictitious offset" true (member "json_offset" remainder=`Null);
+  check int "residual counts captured gaps including framing" (String.length residual_bytes)
+    (member "json_bytes" remainder |> to_int);
+  check string "residual SHA binds ordered captured gaps"
+    Digestif.SHA256.(digest_string residual_bytes |> to_hex)
+    (member "json_sha256" remainder |> to_string);
+  check int "disjoint selected values plus residual close exact IPC JSON bytes"
+    (String.length raw) (!selected_bytes + String.length residual_bytes)
+;;
+
+(* The captured stdin line a recorded submission describes: the same JSON-RPC
+   id, and a request or a response as its frame says. An app-server request id
+   can equal one of MASC's own request ids. *)
+let captured_frame submission lines =
+  let open Yojson.Safe.Util in
+  let wants_request = member "frame" submission = `String "request" in
+  List.find (fun line ->
+    let json = Yojson.Safe.from_string line in
+    member "id" json = member "request_id" submission
+    && (member "method" json <> `Null) = wants_request) lines
+;;
+
 let test_scheduling_handoff_preserves_active_protocol ?(terminal_second = false) () =
   List.iter (fun acceptance ->
     let capture_path = Filename.temp_file "codex-handoff-" ".jsonl" in
     Fun.protect ~finally:(fun () -> Sys.remove capture_path) (fun () ->
       let calls = ref 0 in
+      let observed = ref [] in
       let ready, signal = Eio.Promise.create () in
       let tool : Runtime_codex_app_server.dynamic_tool =
         { name = "masc_probe"; description = "Observe an effect exactly once"
@@ -634,7 +711,8 @@ let test_scheduling_handoff_preserves_active_protocol ?(terminal_second = false)
               then [capture ^ capture ^ capture ^ (if terminal_second then capture else ""); line] else [line])
             |> String.concat "\n" in
           Out_channel.with_open_bin path (fun out -> output_string out instrumented);
-          match run_fixture ~dynamic_tools:[tool] ~await_handoff:(fun () -> Eio.Promise.await ready; true) path with
+          match run_fixture ~dynamic_tools:[tool] ~await_handoff:(fun () -> Eio.Promise.await ready; true)
+              ~on_context_submission:(fun event -> observed := event :: !observed) path with
           | Error error -> fail (Runtime_codex_app_server.error_to_string error)
           | Ok result ->
             let expected_handoff = match acceptance with
@@ -648,7 +726,7 @@ let test_scheduling_handoff_preserves_active_protocol ?(terminal_second = false)
       let rows = In_channel.with_open_bin capture_path In_channel.input_lines
         |> List.map Yojson.Safe.from_string in
       let open Yojson.Safe.Util in
-      match rows with
+      (match rows with
       | first_result :: steer :: second_result :: rest ->
         check string "first effect returned before steering" "tool-request-1"
           (first_result |> member "id" |> to_string);
@@ -666,7 +744,34 @@ let test_scheduling_handoff_preserves_active_protocol ?(terminal_second = false)
            check bool "post-terminal effect is refused while vendor settles" false
              (denied |> member "result" |> member "success" |> to_bool)
          | _ -> fail "unexpected protocol writes after terminal effect")
-      | _ -> fail "expected tool result, scheduling steer, and second tool result"))
+      | _ -> fail "expected tool result, scheduling steer, and second tool result");
+      (* Tool results and the steer carry model context written after
+         turn/start. Each is recorded from its send site with the id as written:
+         MASC's own number for the steer, the app-server's JSON id for a result. *)
+      let lines = In_channel.with_open_bin capture_path In_channel.input_lines in
+      let late = List.rev !observed |> List.filter (fun (event : Runtime_codex_app_server.context_submission) ->
+        match event.method_ with
+        | Turn_steer | Dynamic_tool_response -> true
+        | Thread_start | Thread_resume | Thread_inject_items | Turn_start -> false) in
+      check (list string) "every tool result and the steer is a recorded context frame"
+        (List.map (fun line -> match member "method" (Yojson.Safe.from_string line) with
+           | `String method_ -> method_ | _ -> "item/tool/call") lines)
+        (List.map (fun (event : Runtime_codex_app_server.context_submission) ->
+           Runtime_codex_app_server.context_submission_method_label event.method_) late);
+      List.iter2 (fun (event : Runtime_codex_app_server.context_submission) line ->
+        let json = Runtime_codex_app_server.context_submission_to_json event in
+        let written = Yojson.Safe.from_string line in
+        check string "recorded frame is the captured line" line (captured_frame json lines);
+        check bool "recorded id is the written JSON-RPC id as is" true
+          (member "request_id" json = member "id" written);
+        check string "frame kind follows the written shape"
+          (if member "method" written = `Null then "response" else "request")
+          (member "frame" json |> to_string);
+        check (option string) "late frames name the active thread" (Some "thread-1") event.thread_id;
+        check int "byte count is the written line" (String.length line) event.ipc_json_bytes;
+        check string "SHA binds the written line"
+          Digestif.SHA256.(digest_string line |> to_hex) event.ipc_json_sha256;
+        check_context_fragments line json) late lines))
     (if terminal_second then [Some true; None] else [Some true; Some false; None])
 ;;
 
@@ -1424,69 +1529,6 @@ let test_prompt_transmission_boundary ?(worker_pool = false) () =
     | Ok _ -> fail "observation failure silently continued")
 ;;
 
-let check_context_fragments raw event =
-  let open Yojson.Safe.Util in
-  let request = Yojson.Safe.from_string raw in
-  let params = member "params" request in
-  let expected = match member "method" request with
-    | `String "thread/start" | `String "thread/resume" ->
-      ["developer_instructions",`Null,member "developerInstructions" params;
-       "dynamic_tools",`Null,member "dynamicTools" params]
-      |> List.filter (fun (_,_,value) -> value <> `Null)
-    | `String "thread/inject_items" ->
-      member "items" params |> to_list
-      |> List.mapi (fun index value -> "injected_item",`Int index,value)
-    | `String "turn/start" ->
-      member "input" params |> to_list
-      |> List.mapi (fun index value -> index,value)
-      |> List.filter_map (fun (index,value) ->
-        if member "type" value = `String "text"
-        then Some ("turn_text",`Int index,member "text" value) else None)
-    | _ -> fail "unexpected observed method" in
-  check string "versioned fragment receipt" "masc.codex-context-submission.v2"
-    (member "schema" event |> to_string);
-  check string "logical memory attribution is not claimed" "unknown"
-    (member "logical_memory_partition" event |> to_string);
-  let partition = member "fragments" event in
-  check string "actual serializer supports exact slot attribution" "partitioned"
-    (member "status" partition |> to_string);
-  let fragments = member "values" partition |> to_list in
-  check int "all selected values plus exactly one residual" (List.length expected + 1)
-    (List.length fragments);
-  let cursor = ref 0 and selected_bytes = ref 0 in
-  let residual = Buffer.create (String.length raw) in
-  List.iteri (fun index (slot,item,value) ->
-    let fragment = List.nth fragments index in
-    check (list string) "fragment metadata is content-free"
-      ["index";"json_bytes";"json_offset";"json_sha256";"slot"]
-      (to_assoc fragment |> List.map fst |> List.sort String.compare);
-    check string "slot identity" slot (member "slot" fragment |> to_string);
-    check bool "array position is preserved" true (member "index" fragment=item);
-    let offset = member "json_offset" fragment |> to_int in
-    let bytes = member "json_bytes" fragment |> to_int in
-    check bool "selected ranges are disjoint and inside exact wire bytes" true
-      (offset >= !cursor && bytes >= 0 && offset + bytes <= String.length raw);
-    Buffer.add_substring residual raw !cursor (offset - !cursor);
-    let selected = String.sub raw offset bytes in
-    check string "actual range equals independently decoded JSON slot" (Yojson.Safe.to_string value) selected;
-    check string "fragment SHA binds actual captured bytes"
-      Digestif.SHA256.(digest_string selected |> to_hex)
-      (member "json_sha256" fragment |> to_string);
-    cursor := offset + bytes; selected_bytes := !selected_bytes + bytes) expected;
-  Buffer.add_substring residual raw !cursor (String.length raw - !cursor);
-  let residual_bytes = Buffer.contents residual in
-  let remainder = List.nth fragments (List.length expected) in
-  check string "residual identity" "unattributed_carrier" (member "slot" remainder |> to_string);
-  check bool "noncontiguous residual has no fictitious offset" true (member "json_offset" remainder=`Null);
-  check int "residual counts captured gaps including framing" (String.length residual_bytes)
-    (member "json_bytes" remainder |> to_int);
-  check string "residual SHA binds ordered captured gaps"
-    Digestif.SHA256.(digest_string residual_bytes |> to_hex)
-    (member "json_sha256" remainder |> to_string);
-  check int "disjoint selected values plus residual close exact IPC JSON bytes"
-    (String.length raw) (!selected_bytes + String.length residual_bytes)
-;;
-
 let test_content_free_context_submission () =
   let module Client = Runtime_codex_app_server in
   let hash text=Digestif.SHA256.(digest_string text |> to_hex) in
@@ -1520,7 +1562,8 @@ let test_content_free_context_submission () =
       let lines=In_channel.with_open_bin capture In_channel.input_all |> String.split_on_char '\n'
         |> List.filter (fun line -> line<>"") in
       List.iter (fun (event:Client.context_submission) ->
-        let line=List.find (fun line -> Yojson.Safe.Util.member "id" (Yojson.Safe.from_string line)=`Int event.request_id) lines in
+        let line=List.find (fun line -> Yojson.Safe.Util.member "id" (Yojson.Safe.from_string line)
+          =Client.context_frame_id_to_json event.request_id) lines in
         check int "byte count is exact written JSON excluding newline" (String.length line) event.ipc_json_bytes;
         check string "SHA binds exact serialized bytes" (hash line) event.ipc_json_sha256;
         let json=Client.context_submission_to_json event in
@@ -1760,7 +1803,7 @@ let test_issuer_assembly_links_to_completed_slots () =
          (row |> member "source" |> member "source_span_indices" |> to_list |> List.map to_int)
      | [] -> () | _ -> fail "unexpected duplicate carrier attribution");
     let lines=In_channel.with_open_bin capture In_channel.input_lines in
-    let written=List.find (fun line -> member "id" (Yojson.Safe.from_string line)=`Int event.request_id) lines in
+    let written=captured_frame (Client.context_submission_to_json event) lines in
     check_context_fragments written (Client.context_submission_to_json event);
     let mismatch=Link.binding_to_json ~slot (Link.concat ~separator:"" [projection;Link.literal "changed"]) event in
     check string "stale composed slot cannot acquire a binding" "unavailable_slot_mismatch"
@@ -5969,10 +6012,9 @@ let test_keeper_assembly_binding_is_durable_in_same_attempt () =
   check string "actual Keeper publishes exact slot match" "matched_completed_slot" (proof |> member "status" |> to_string);
   check int "actual carrier has one codec occurrence" 1 (proof |> member "occurrences" |> to_list |> List.length);
   let submission=member "submission" detail in
-  let raw=In_channel.with_open_bin capture In_channel.input_lines |> List.find (fun line ->
-    Yojson.Safe.from_string line |> member "id" = member "request_id" submission) in
+  let raw=captured_frame submission (In_channel.with_open_bin capture In_channel.input_lines) in
   check_context_fragments raw submission;
-  check bool "existing v2 observation does not claim whole-memory attribution" true
+  check bool "observation does not claim whole-memory attribution" true
     (member "logical_memory_partition" submission=`String "unknown");
   export_assembly_submission_measurement
     ~fixture_kind:"actual_keeper_durable_trace_same_attempt"
@@ -6087,8 +6129,7 @@ let test_keeper_context_lifecycle_three_settled_turns () =
       record.hook_name = Some "codex_context_submission") |> List.iter (fun record ->
         let observed = Yojson.Safe.from_string (Option.get record.Agent_core.Raw_trace.hook_detail)
           |> member "submission" in
-        let captured = List.find (fun line -> Yojson.Safe.from_string line |> member "id"
-          = member "request_id" observed) written in
+        let captured = captured_frame observed written in
         check int "whole RPC byte count matches actual captured frame" (String.length captured)
           (member "ipc_json_bytes" observed |> to_int);
         check string "whole RPC SHA matches actual captured frame"
@@ -6124,7 +6165,7 @@ let test_keeper_context_lifecycle_three_settled_turns () =
           issued.blocks);
     check int "settled Resume never resends history" 0
       (List.length (List.filter (fun row -> member "method" row=`String "thread/inject_items") calls));
-    let raw = List.find (fun line -> Yojson.Safe.from_string line |> member "id" = member "request_id" submission) written in
+    let raw = captured_frame submission written in
     check_context_fragments raw submission;
     if ordinal = 1 then (
       let developer = Yojson.Safe.from_string raw |> member "params" |> member "developerInstructions" |> to_string in
@@ -6186,6 +6227,18 @@ let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
          ; turn_completed
          ]
          (fun cli_path ->
+            (* Read and capture the tool result before the turn settles, so the
+               recorded response frame has its written line to compare with. *)
+            let settle = "printf '%s\\n' " ^ shell_quote item_completed in
+            let capture = "IFS= read -r result\nprintf '%s\\n' \"$result\" >> "
+              ^ shell_quote capture_path ^ "\n" in
+            let script = In_channel.with_open_bin cli_path In_channel.input_all in
+            check bool "fixture settles the turn after the tool call" true
+              (List.mem settle (String.split_on_char '\n' script));
+            Out_channel.with_open_bin cli_path (fun out ->
+              output_string out (script |> String.split_on_char '\n'
+                |> List.concat_map (fun line -> if line = settle then [capture; line] else [line])
+                |> String.concat "\n"));
             match
               run_keeper_turn
                 ~tools:[ tool ]
@@ -6208,7 +6261,8 @@ let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
               in
               let submitted=List.filter (fun (record:Agent_core.Raw_trace.record) ->
                 record.hook_name=Some "codex_context_submission") records in
-              check int "actual Keeper caller durably records both context writes" 2 (List.length submitted);
+              check int "actual Keeper caller durably records thread start, turn start and the tool result" 3
+                (List.length submitted);
               let written=In_channel.with_open_bin capture_path In_channel.input_all
                 |> String.split_on_char '\n' |> List.filter (fun line -> line<>"") in
               let run_started=List.find (fun (record:Agent_core.Raw_trace.record) ->
@@ -6228,14 +6282,16 @@ let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
                   (to_assoc detail |> List.map fst |> List.sort String.compare);
                 let event=member "submission" detail in
                 check (list string) "submission never retains content, tool schemas or credentials"
-                  ["fragments";"framing";"ipc_json_bytes";"ipc_json_sha256";"logical_memory_partition";"method";"phase";"remote_history";
+                  ["fragments";"frame";"framing";"ipc_json_bytes";"ipc_json_sha256";"logical_memory_partition";"method";"phase";"remote_history";
                    "request_id";"schema";"server_acceptance";"thread_id"]
                   (to_assoc event |> List.map fst |> List.sort String.compare);
-                let request_id=member "request_id" event in
-                let raw=List.find (fun raw -> member "id" (Yojson.Safe.from_string raw)=request_id) written in
+                let raw=captured_frame event written in
                 check_context_fragments raw event;
-                check bool "durable method matches actual request" true
-                  (member "method" event=member "method" (Yojson.Safe.from_string raw));
+                check bool "durable method matches actual frame" true
+                  (match member "frame" event with
+                   | `String "request" -> member "method" event=member "method" (Yojson.Safe.from_string raw)
+                   | _ -> member "method" event=`String "item/tool/call"
+                     && member "result" (Yojson.Safe.from_string raw)<>`Null);
                 check int "durable submission names exact stdin bytes" (String.length raw)
                   (event |> member "ipc_json_bytes" |> to_int);
                 check string "durable submission SHA binds the actual stdin request"
@@ -6293,9 +6349,7 @@ let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
                 finished.final_text;
               let observations = List.map (fun (record:Agent_core.Raw_trace.record) ->
                 let manifest = Yojson.Safe.from_string (Option.get record.hook_detail) in
-                let request_id = Yojson.Safe.Util.(manifest |> member "submission" |> member "request_id") in
-                let raw = List.find (fun raw ->
-                  Yojson.Safe.Util.member "id" (Yojson.Safe.from_string raw)=request_id) written in
+                let raw = captured_frame (Yojson.Safe.Util.member "submission" manifest) written in
                 `Assoc ["worker_run_id",`String record.worker_run_id;
                   "session_id",(match record.session_id with None -> `Null | Some id -> `String id);
                   "manifest",manifest;

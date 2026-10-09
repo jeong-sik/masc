@@ -160,9 +160,6 @@ let binding_to_json ~slot piece (submission : Wire.context_submission) =
     | Partitioned fragments -> List.find_opt (fun (f : Wire.context_fragment) ->
       f.slot = slot && f.json_bytes = String.length encoded && f.json_sha256 = hash encoded) fragments in
   let status = match matched with None -> "unavailable_slot_mismatch" | Some _ -> "matched_completed_slot" in
-  let method_name = match submission.method_ with
-    | Thread_start -> "thread/start" | Thread_resume -> "thread/resume"
-    | Thread_inject_items -> "thread/inject_items" | Turn_start -> "turn/start" in
   let slot_name, index = match slot with
     | Developer_instructions -> "developer_instructions", `Null
     | Turn_text i -> "turn_text", `Int i
@@ -182,8 +179,8 @@ let binding_to_json ~slot piece (submission : Wire.context_submission) =
   `Assoc [ "schema", `String "masc.codex-assembly-slot-binding.v2";
       "status", `String status;
     "scope", `String "issuer_carrier_only_not_tool_history_or_remote_retention";
-    "request_id", `Int submission.request_id;
-    "method", `String method_name; "slot", `String slot_name; "index", index;
+    "request_id", Wire.context_frame_id_to_json submission.request_id;
+    "method", `String (Wire.context_submission_method_label submission.method_); "slot", `String slot_name; "index", index;
     "matched_slot", matched_slot;
     "expected_slot_json_sha256", `String (hash encoded);
     "issuer_attribution", issuer_attribution piece.acquisitions;

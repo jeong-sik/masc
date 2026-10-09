@@ -1476,7 +1476,9 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
                  ~slot:Developer_instructions composed_developer_instructions observation
              | Turn_start -> Keeper_context_submission_link.binding_to_json
                  ~slot:(Turn_text (List.length images)) prompt_projection observation
-             | Thread_inject_items -> `Assoc ["status", `String "out_of_scope_history"]) in
+             | Thread_inject_items -> `Assoc ["status", `String "out_of_scope_history"]
+             | Turn_steer -> `Assoc ["status", `String "out_of_scope_host_notice"]
+             | Dynamic_tool_response -> `Assoc ["status", `String "out_of_scope_tool_result"]) in
            let detail=`Assoc ["keeper",`String keeper_name;
              "runtime_profile",`String runtime_id;"client_turn_ordinal",`Int turn_count;
              "submission",Runtime_codex_app_server.context_submission_to_json observation;

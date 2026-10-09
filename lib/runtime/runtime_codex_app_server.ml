@@ -649,20 +649,84 @@ let parse_wire_line line =
   | None, None -> protocol_error stage "message has neither id nor method"
 ;;
 
+(* The context-bearing frames MASC writes to Codex stdin. The site that builds
+   a frame names it here; nothing re-reads the serialized JSON to decide. A
+   [Dynamic_tool_response] answers the app-server's [item/tool/call] with the
+   tool's content items. *)
+type context_submission_method =
+  | Thread_start
+  | Thread_resume
+  | Thread_inject_items
+  | Turn_start
+  | Turn_steer
+  | Dynamic_tool_response
+
+let context_submission_method_label = function
+  | Thread_start -> "thread/start"
+  | Thread_resume -> "thread/resume"
+  | Thread_inject_items -> "thread/inject_items"
+  | Turn_start -> "turn/start"
+  | Turn_steer -> "turn/steer"
+  | Dynamic_tool_response -> "item/tool/call"
+;;
+
+(* A request MASC numbers itself, or the app-server's request id that a
+   response echoes. The echoed id stays the JSON value the server sent. *)
+type context_frame_id =
+  | Request_id of int
+  | Answered_request_id of Yojson.Safe.t
+
+let context_frame_id_to_json = function
+  | Request_id id -> `Int id
+  | Answered_request_id id -> id
+;;
+
+type outbound_frame =
+  | Control
+  | Context of
+      { method_ : context_submission_method
+      ; id : context_frame_id
+      ; thread_id : string option
+      }
+
 type io =
-  { send : Yojson.Safe.t -> unit
+  { send : outbound_frame -> Yojson.Safe.t -> unit
   ; receive : unit -> (wire_message, error) result
   ; set_receive_phase : receive_phase -> unit
   }
 
-let send_request io ~id ~method_ ~params =
-  io.send (`Assoc [ "id", `Int id; "method", `String method_; "params", params ])
+(* Requests that carry model context. The wire method comes from the
+   constructor, so a frame and its observation cannot name different methods. *)
+type context_request = Start_thread | Resume_thread | Inject_items | Start_turn | Steer_turn
+
+let context_request_method = function
+  | Start_thread -> Thread_start
+  | Resume_thread -> Thread_resume
+  | Inject_items -> Thread_inject_items
+  | Start_turn -> Turn_start
+  | Steer_turn -> Turn_steer
 ;;
 
-let send_notification io method_ = io.send (`Assoc [ "method", `String method_ ])
+let send_control_request io ~id ~method_ ~params =
+  io.send Control (`Assoc [ "id", `Int id; "method", `String method_; "params", params ])
+;;
+
+let send_context_request io request ~id ~thread_id ~params =
+  let method_ = context_request_method request in
+  io.send
+    (Context { method_; id = Request_id id; thread_id })
+    (`Assoc
+       [ "id", `Int id
+       ; "method", `String (context_submission_method_label method_)
+       ; "params", params
+       ])
+;;
+
+let send_notification io method_ = io.send Control (`Assoc [ "method", `String method_ ])
 
 let reject_server_request io id =
   io.send
+    Control
     (`Assoc
        [ "id", id
        ; ( "error"
@@ -716,7 +780,7 @@ let find_dynamic_tool tools name =
   List.find_opt (fun (tool : dynamic_tool) -> String.equal tool.name name) tools
 ;;
 
-let send_dynamic_tool_response io ~id (result : dynamic_tool_result) =
+let send_dynamic_tool_response io ~thread_id ~id (result : dynamic_tool_result) =
   let success, content_items =
     match Runtime_official_client_tool.codex_content_items
       ~content:result.content ~content_blocks:result.content_blocks with
@@ -727,6 +791,8 @@ let send_dynamic_tool_response io ~id (result : dynamic_tool_result) =
             `String (Llm_provider.Utf8_sanitize.sanitize result.content) ] ]
   in
   io.send
+    (Context
+       { method_ = Dynamic_tool_response; id = Answered_request_id id; thread_id = Some thread_id })
     (`Assoc
        [ "id", id
        ; "result", `Assoc
@@ -754,7 +820,7 @@ let handle_dynamic_tool_call io ~tools ~terminal_tools_closed ~thread_id ~turn_i
     (* A terminal tool already completed during scheduling handoff. Preserve
        that result while the vendor settles the turn, without admitting another
        host effect or killing the client before it records the returned result. *)
-    send_dynamic_tool_response io ~id
+    send_dynamic_tool_response io ~thread_id ~id
       { success = false; content = "A terminal tool already completed. No further tools are admitted in this turn. Preserve its result and finish with your progress reply.";
         content_blocks = None; abort_turn = None };
     Ok ())
@@ -784,7 +850,7 @@ let handle_dynamic_tool_call io ~tools ~terminal_tools_closed ~thread_id ~turn_i
       in
       incr tool_call_count;
       emit_stream_event on_stream_event (Dynamic_tool_finished { call_id });
-      send_dynamic_tool_response io ~id result;
+      send_dynamic_tool_response io ~thread_id ~id result;
       (match result.abort_turn with
        | None -> Ok ()
        | Some stop -> Error (Stopped_by_host stop))
@@ -837,7 +903,7 @@ let parse_subscription result =
 ;;
 
 let probe_protocol io =
-  send_request
+  send_control_request
     io
     ~id:1
     ~method_:"initialize"
@@ -854,7 +920,7 @@ let probe_protocol io =
   let* initialize = await_response io ~id:1 ~method_:"initialize" in
   let* user_agent = parse_initialize initialize in
   send_notification io "initialized";
-  send_request
+  send_control_request
     io
     ~id:2
     ~method_:"account/read"
@@ -898,7 +964,7 @@ let read_model_pages io ~include_hidden ~request_id =
   let rec page request_id cursor seen rows =
     let params = ["includeHidden", `Bool include_hidden] @
       (match cursor with None -> [] | Some value -> ["cursor", `String value]) in
-    send_request io ~id:request_id ~method_:stage ~params:(`Assoc params);
+    send_control_request io ~id:request_id ~method_:stage ~params:(`Assoc params);
     let* response = await_response io ~id:request_id ~method_:stage in
     let* fields = assoc_at stage response in
     let* items = match List.assoc_opt "data" fields with
@@ -958,7 +1024,7 @@ let admit_reasoning_effort io ~model ~requested ~request_id =
 let rate_limits_read_protocol io =
   let* _ = probe_protocol io in
   let stage = "account/rateLimits/read" in
-  send_request
+  send_control_request
     io
     ~id:3
     ~method_:stage
@@ -1447,7 +1513,7 @@ let cancel_unhandled_elicitation io ~thread_id ~turn_id ~on_stream_event ~id par
      || (match request_turn with Some value -> not (String.equal value turn_id) | None -> false)
   then protocol_error stage "elicitation identity does not match the active thread/turn"
   else (
-    io.send (`Assoc [ "id", id; "result", `Assoc ["action", `String "cancel"; "content", `Null] ]);
+    io.send Control (`Assoc [ "id", id; "result", `Assoc ["action", `String "cancel"; "content", `Null] ]);
     Log.Runtime_agent.info
       "Codex MCP elicitation cancelled because host input is unavailable (server=%s)" server_name;
     emit_stream_event on_stream_event
@@ -1456,7 +1522,7 @@ let cancel_unhandled_elicitation io ~thread_id ~turn_id ~on_stream_event ~id par
 ;;
 
 let request_scheduling_handoff io ~thread_id ~turn_id =
-  send_request io ~id:6 ~method_:"turn/steer"
+  send_context_request io Steer_turn ~id:6 ~thread_id:(Some thread_id)
     ~params:(`Assoc
       [ "threadId", `String thread_id
       ; "expectedTurnId", `String turn_id
@@ -2067,7 +2133,7 @@ let history_item (message : history_message) =
 let run_protocol io (config : config) ~await_handoff ~protocol_cwd ~dynamic_tools ~reasoning_effort
     ~thread_mode ~history ~developer_context ~prompt ~images ~on_thread_ready ~on_turn_starting ~on_turn_dispatched ~on_prompt_sent
     ~on_turn_started ~on_stream_event ~on_reasoning_effort_resolved =
-  send_request io ~id:1 ~method_:"initialize"
+  send_control_request io ~id:1 ~method_:"initialize"
     ~params:
       (`Assoc
          [ ( "clientInfo"
@@ -2081,7 +2147,7 @@ let run_protocol io (config : config) ~await_handoff ~protocol_cwd ~dynamic_tool
   let* initialize = await_response io ~id:1 ~method_:"initialize" in
   let* user_agent = parse_initialize initialize in
   send_notification io "initialized";
-  send_request io ~id:2 ~method_:"account/read"
+  send_control_request io ~id:2 ~method_:"account/read"
     ~params:(`Assoc [ "refreshToken", `Bool false ]);
   let* account = await_response io ~id:2 ~method_:"account/read" in
   let* subscription = parse_subscription account in
@@ -2111,10 +2177,10 @@ let run_protocol io (config : config) ~await_handoff ~protocol_cwd ~dynamic_tool
     | Start, None | Resume _, _ -> Ok None in
   let selected_model = match start_admission with
     | Some (model,_,_) -> Some model | None -> config.model in
-  let thread_method, thread_fields, resumed =
+  let thread_request, thread_fields, resumed =
     match thread_mode with
     | Start ->
-      ( "thread/start"
+      ( Start_thread
       , ([ "cwd", `String protocol_cwd
          ; "approvalPolicy", `String approval_policy
          ; "permissions", `String permissions_profile
@@ -2128,7 +2194,7 @@ let run_protocol io (config : config) ~await_handoff ~protocol_cwd ~dynamic_tool
          | tools -> [ "dynamicTools", `List (List.map dynamic_tool_spec tools) ])
       , false )
     | Resume { thread_id } ->
-      ( "thread/resume"
+      ( Resume_thread
       (* [excludeTurns]: the reply is read for the thread id and the model only
          (parse_thread_response). Without it Codex returns every past turn in
          [thread.turns], and a long thread's reply outgrew the 8 MiB line limit
@@ -2149,7 +2215,10 @@ let run_protocol io (config : config) ~await_handoff ~protocol_cwd ~dynamic_tool
          | tools -> [ "dynamicTools", `List (List.map dynamic_tool_spec tools) ])
       , true )
   in
-  send_request io ~id:3 ~method_:thread_method ~params:(`Assoc thread_fields);
+  let thread_method = context_submission_method_label (context_request_method thread_request) in
+  send_context_request io thread_request ~id:3
+    ~thread_id:(match thread_mode with Start -> None | Resume { thread_id } -> Some thread_id)
+    ~params:(`Assoc thread_fields);
   let* thread = await_response io ~id:3 ~method_:thread_method in
   let* thread_id, model = parse_thread_response ~stage:thread_method thread in
   let* () =
@@ -2187,7 +2256,7 @@ let run_protocol io (config : config) ~await_handoff ~protocol_cwd ~dynamic_tool
     match messages_to_inject with
     | [] -> Ok next_request_id
     | messages ->
-      send_request io ~id:next_request_id ~method_:"thread/inject_items"
+      send_context_request io Inject_items ~id:next_request_id ~thread_id:(Some thread_id)
         ~params:
           (`Assoc
              [ "threadId", `String thread_id
@@ -2203,7 +2272,7 @@ let run_protocol io (config : config) ~await_handoff ~protocol_cwd ~dynamic_tool
   in
   let* () =
     try
-      send_request io ~id:turn_request_id ~method_:"turn/start"
+      send_context_request io Start_turn ~id:turn_request_id ~thread_id:(Some thread_id)
         ~params:
           (`Assoc
              ([ "threadId", `String thread_id
@@ -2445,8 +2514,6 @@ let client_argv (config : config) =
   @ sub_agent_overrides
 ;;
 
-type context_submission_method = Thread_start | Thread_resume | Thread_inject_items | Turn_start
-
 type context_fragment_slot =
   | Developer_instructions
   | Dynamic_tools
@@ -2465,7 +2532,7 @@ type context_fragments = Partitioned of context_fragment list | Serialization_mi
 
 type context_submission =
   { method_ : context_submission_method
-  ; request_id : int
+  ; request_id : context_frame_id
   ; thread_id : string option
   ; ipc_json_bytes : int
   ; ipc_json_sha256 : string
@@ -2573,7 +2640,7 @@ let context_fragments method_ json payload =
     | (Thread_start | Thread_resume),"dynamicTools",`List _ ->
       selected Dynamic_tools value
     | Thread_inject_items,"items",`List values -> list (fun index -> selected (Injected_item index)) values
-    | Turn_start,"input",`List values -> list turn_item values
+    | (Turn_start | Turn_steer),"input",`List values -> list turn_item values
     | _ -> ordinary value in
   match
     (match json with
@@ -2591,18 +2658,18 @@ let context_fragments method_ json payload =
 ;;
 
 let context_submission_to_json observation =
-  let method_ = match observation.method_ with
-    | Thread_start -> "thread/start" | Thread_resume -> "thread/resume"
-    | Thread_inject_items -> "thread/inject_items" | Turn_start -> "turn/start" in
+  let frame = match observation.request_id with
+    | Request_id _ -> "request" | Answered_request_id _ -> "response" in
   let fragments = match observation.fragments with
     | Partitioned values -> `Assoc ["status",`String "partitioned";
         "values",`List (List.map context_fragment_to_json values);
         "residual_hash_basis",`String "ordered_unselected_json_bytes"]
     | Serialization_mismatch -> `Assoc ["status",`String "unavailable";
         "reason",`String "serialization_mismatch"] in
-  `Assoc ["schema",`String "masc.codex-context-submission.v2";
-    "phase",`String "stdin_write_completed";"method",`String method_;
-    "request_id",`Int observation.request_id;
+  `Assoc ["schema",`String "masc.codex-context-submission.v3";
+    "phase",`String "stdin_write_completed";"frame",`String frame;
+    "method",`String (context_submission_method_label observation.method_);
+    "request_id",context_frame_id_to_json observation.request_id;
     "thread_id",(match observation.thread_id with None -> `Null | Some id -> `String id);
     "ipc_json_bytes",`Int observation.ipc_json_bytes;"ipc_json_sha256",`String observation.ipc_json_sha256;
     "fragments",fragments;
@@ -2612,26 +2679,13 @@ let context_submission_to_json observation =
     "remote_history",`String "unknown"]
 ;;
 
-let context_submission json payload =
-  match json with
-  | `Assoc fields ->
-    let method_ = match List.assoc_opt "method" fields with
-      | Some (`String "thread/start") -> Some Thread_start
-      | Some (`String "thread/resume") -> Some Thread_resume
-      | Some (`String "thread/inject_items") -> Some Thread_inject_items
-      | Some (`String "turn/start") -> Some Turn_start
-      | _ -> None in
-    (match method_,List.assoc_opt "id" fields with
-     | Some method_,Some (`Int request_id) ->
-       let thread_id=match List.assoc_opt "params" fields with
-         | Some (`Assoc params) -> (match List.assoc_opt "threadId" params with
-             | Some (`String id) -> Some id | _ -> None)
-         | _ -> None in
-       Some {method_;request_id;thread_id;ipc_json_bytes=String.length payload;
-         ipc_json_sha256=Digestif.SHA256.(digest_string payload |> to_hex);
-         fragments=context_fragments method_ json payload}
-     | _ -> None)
-  | _ -> None
+let context_submission frame json payload =
+  match frame with
+  | Control -> None
+  | Context { method_; id; thread_id } ->
+    Some {method_;request_id=id;thread_id;ipc_json_bytes=String.length payload;
+      ipc_json_sha256=Digestif.SHA256.(digest_string payload |> to_hex);
+      fragments=context_fragments method_ json payload}
 ;;
 
 let with_spawned_client ?(on_context_submission = fun _ -> ()) ~mgr ~clock ~cwd config run =
@@ -2668,7 +2722,7 @@ let with_spawned_client ?(on_context_submission = fun _ -> ()) ~mgr ~clock ~cwd 
       `Stop_daemon);
     let reader = Eio.Buf_read.of_flow ~max_size:max_wire_line_bytes stdout_r in
     let receive_phase = ref Awaiting_admission in
-    let send json =
+    let send frame json =
       let observation = with_idle_timeout clock
         config.admission_timeout_s
         (fun () ->
@@ -2689,7 +2743,7 @@ let with_spawned_client ?(on_context_submission = fun _ -> ()) ~mgr ~clock ~cwd 
                      (match invalid_utf8_field json with
                       | Some field -> field
                       | None -> "<unknown>"));
-              payload, context_submission json payload)
+              payload, context_submission frame json payload)
           in
           Eio.Flow.copy_string payload stdin_w;
           Eio.Flow.copy_string "\n" stdin_w;
@@ -2708,8 +2762,9 @@ let with_spawned_client ?(on_context_submission = fun _ -> ()) ~mgr ~clock ~cwd 
         | exn ->
           Llm_provider.Reserved_exn.reraise_if_reserved exn;
           Log.Runtime_agent.warn
-            "Codex context submission measurement unavailable after complete write request_id=%d: %s"
-            observation.request_id (Printexc.to_string exn)) observation
+            "Codex context submission measurement unavailable after complete write request_id=%s: %s"
+            (Yojson.Safe.to_string (context_frame_id_to_json observation.request_id))
+            (Printexc.to_string exn)) observation
     in
     let receive () =
       try
@@ -2939,7 +2994,7 @@ let run_turn ?await_handoff ?(dynamic_tools = []) ?reasoning_effort ?(thread_mod
   let turn_accepted = ref false in
   let on_context_submission observation =
     (match observation.method_ with Turn_start -> turn_accepted := true
-     | Thread_start | Thread_resume | Thread_inject_items -> ());
+     | Thread_start | Thread_resume | Thread_inject_items | Turn_steer | Dynamic_tool_response -> ());
     on_context_submission observation in
   let on_turn_started ~thread_id ~turn_id =
     turn_accepted := true;

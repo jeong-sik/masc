@@ -441,7 +441,30 @@ val read_rate_limits :
     thread/start or turn/start. The windows are for the operator projection;
     the app-server's schema says clients must not infer recovery from them. *)
 
-type context_submission_method = Thread_start | Thread_resume | Thread_inject_items | Turn_start
+type context_submission_method =
+  | Thread_start
+  | Thread_resume
+  | Thread_inject_items
+  | Turn_start
+  | Turn_steer
+  | Dynamic_tool_response
+(** Every context-bearing frame MASC writes to Codex stdin. The send site names
+    the frame; the method is never re-read from the serialized JSON. A
+    [Dynamic_tool_response] answers the app-server's [item/tool/call] with the
+    tool's content items. Control traffic (initialize, account and model reads,
+    notifications, refusals, elicitation cancels) is not observed. *)
+
+val context_submission_method_label : context_submission_method -> string
+(** The JSON-RPC method of a request, or for [Dynamic_tool_response] the
+    method of the app-server request it answers. *)
+
+type context_frame_id =
+  | Request_id of int
+  | Answered_request_id of Yojson.Safe.t
+(** A request MASC numbers itself, or the app-server's request id that a
+    response echoes, kept as the JSON value the server sent. *)
+
+val context_frame_id_to_json : context_frame_id -> Yojson.Safe.t
 
 type context_fragment_slot =
   | Developer_instructions
@@ -459,7 +482,10 @@ type context_fragment = private
 (** Selected values include their JSON quotes/brackets. Their offsets name
     disjoint ranges in the submitted JSON. [Unattributed_carrier] has no single
     offset: its hash covers the ordered concatenation of all remaining bytes,
-    including field names and punctuation, excluding the transport LF. *)
+    including field names and punctuation, excluding the transport LF.
+    [Turn_steer] input text uses [Turn_text] like [Turn_start]. A
+    [Dynamic_tool_response] selects no slot: its content items are counted in
+    [Unattributed_carrier]. *)
 
 type context_fragments =
   | Partitioned of context_fragment list
@@ -469,7 +495,7 @@ type context_fragments =
 
 type context_submission = private
   { method_ : context_submission_method
-  ; request_id : int
+  ; request_id : context_frame_id
   ; thread_id : string option
   ; ipc_json_bytes : int
   ; ipc_json_sha256 : string
@@ -502,7 +528,7 @@ val run_turn :
      own retry/reconciliation and must not infer token savings from IPC bytes.
      Empty by default; Keeper production projection is unchanged. *)
   ?on_context_submission:(context_submission -> unit) ->
-  (* Observes only thread start/resume, history injection and turn start after
+  (* Observes every [context_submission_method] frame after
       both payload and newline were written. Non-reserved observer exceptions,
       including a timeout the observer raises itself, are reported as
       unavailable measurement, never retried as a failed write. The turn

@@ -6,15 +6,16 @@ Codex, Claude Code, Antigravity and OpenAI-compatible/GLM stream paths.
 
 This is a bug-discovery audit. Production fixes are not implied by this report.
 No local Dune build, behavioral suite, PTY scenario or provider session was run.
-The metadata/body defect was observed in operator-supplied screenshots. The
-other findings are source-backed counterexamples with explicitly stated inputs
-and configuration. They are not claimed as reproduced production incidents.
+All findings, including the metadata/body defect, are source-backed
+counterexamples with explicitly stated inputs and configuration. This report
+contains no frozen screenshot or durable observation record for the supplied
+operator example, so it does not establish a reproduced production incident.
 
 ## Findings
 
 | ID | Priority | Trigger and consequence | Evidence |
 |---|---|---|---|
-| UX1 | P2 | A user types only `엉...`, but their speech block also contains generated request ID and receipt text. Diagnostic metadata is indistinguishable from authored content. | User screenshots; `identify_chat_entries`, render_chat:2268-2290; pending construction:1840-1848 |
+| UX1 | P2 | A user types only `엉...`, but their speech block also contains generated request ID and receipt text. Diagnostic metadata is indistinguishable from authored content. | Source counterexample at [frozen renderer](https://github.com/jeong-sik/masc/blob/5a9d7aeac2e609a5dab261204cf89825155860b6/bin/masc_tui_render_chat.ml#L2268-L2290), pending construction:1840-1848; screenshot observation unverified |
 | F1 | P2 | Final reply history arrives before an overlapping partial journal page. The assistant row makes the TUI permanently stop fetching that still-open journal, losing final event reconciliation and termination. | [State lifecycle](state-lifecycle-audit.md), main:16317 |
 | F2 | P2 | Two Keepers legitimately use the same operation ID. An unavailable or in-flight journal for one suppresses the other's journal because tracking omits the Keeper key. | [State lifecycle](state-lifecycle-audit.md), types:7082,7191 |
 | F3 | P2 | A held journal supplies a settled visible answer. `/find` searches only the history rows left after that answer was suppressed in favor of the journal, and reports no match. Its scroll count also omits held blocks. | [Renderer search](renderer-search-audit.md), render_chat:2330,2350 |
@@ -36,10 +37,19 @@ records the frozen commit, inventory size and ranked results.
 The source-decision score is `1 + if/loop decisions + (match arms - 1) + try
 handlers + guarded cases + short-circuit boolean decisions`. Function-case arms
 are included. The report also records source span, decision nesting, explicit
-field/ref/table/buffer mutation sites, and distinct field/callee names. Callback
+record-field assignments and selected mutation calls, and distinct field/callee names. Callback
 and nested-function decisions are included in the aggregate score, with a
 separate score excluding nested function bodies. Bindings overlap: do not sum
 these scores into a codebase total.
+
+The JSON field `mutable_writes` counts each `Pexp_setfield` and only these
+exact callee names: `:=`, `Hashtbl.replace`, `Hashtbl.add`, `Hashtbl.remove`,
+`Buffer.add_string`, and `Buffer.clear`. It excludes `Hashtbl.clear`, `incr`,
+`Buffer.add_char`, `Buffer.add_substring`, `Array.set`, and mutations hidden
+behind other calls. Thus `begin_frame` records its two reference assignments
+and `cell_prefix_of_pieces` records zero selected calls despite modifying a
+buffer. This field is a partial operation count, not a total of mutations.
+The baseline and repaired JSON samples retain that same definition.
 
 This is an AST-based approximation for prioritizing inspection, **not exact CFG
 McCabe complexity, Sonar Cognitive Complexity, path coverage or a quality gate**.
@@ -47,7 +57,7 @@ It omits implicit exception edges, detailed pattern decision trees and dynamic
 call paths. Deep boolean expression nesting can contribute to the nesting count.
 No numeric limit is being introduced into product behavior or CI.
 
-| Function | Lines | AST decision score | Excluding nested functions | Mutation sites |
+| Function | Lines | AST decision score | Excluding nested functions | Selected mutation sites |
 |---|---:|---:|---:|---:|
 | `render_keeper_message` | 1,483 | 220 | 111 | 17 |
 | `apply_async_message` (all TUI surfaces) | 3,553 | 934 | 798 | 445 |

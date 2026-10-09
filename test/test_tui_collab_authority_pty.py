@@ -451,6 +451,8 @@ def run_machine_post_workspace_swap(executable, operation, *, alias_identity=Fal
             'masc_root': str(Path(current['base'], '.masc'))}, payload
         first_tick.set()
         assert release_tick.wait(8), 'admitted original tick was not released'
+        if operation in ('save', 'restore'):
+            return 409, {'ok': False, 'code': 'activity_disabled'}
         return 200, {'loaded': True, 'number': 2, 'change_count': 2,
             'incarnation': 'a', 'width': 1, 'height': 1, 'mode': 'SCREEN2',
             'cartridge': 'game.rom', 'disk': None, 'players': [], 'pixels': {
@@ -470,6 +472,10 @@ def run_machine_post_workspace_swap(executable, operation, *, alias_identity=Fal
                 key(b'\x1b[15~', b'Controlling')
                 if operation != 'tick':
                     assert h.wait_for_fixture_event(process, master, output, first_tick, timeout=8)
+                    if operation in ('save', 'restore'):
+                        settled_from = len(output)
+                        release_tick.set()
+                        h.wait_for_output(process, master, output, b'MSX is off;', start=settled_from, timeout=8)
                 if operation == 'disk':
                     key(b'\x1b[19~', b'change disk')
                     key(b'j', b'game.dsk')
@@ -482,9 +488,12 @@ def run_machine_post_workspace_swap(executable, operation, *, alias_identity=Fal
             # In particular, a refused F6/F7 must not read B's frame and replace
             # the retained A evidence while its original poll is still held.
             assert foreign_reads == [], foreign_reads
+            if operation in ('save', 'restore'):
+                retained = h.screen_text(bytes(output))
+                assert b'frame 1 ' in retained, retained
             if operation == 'tick':
                 assert h.wait_for_fixture_event(process, master, output, observed['b'], timeout=8)
-                h.wait_for_output(process, master, output, b'MASC Dashboard', timeout=8)
+                h.wait_for_output(process, master, output, b'MASC Dashboard', start=0, timeout=8)
                 assert sum(path == endpoint for path, _ in requests) == 1, requests
             else:
                 if operation == 'disk':
@@ -681,11 +690,14 @@ def run_workspace_control_rearm(executable):
         key(b':go Collab\r', '› guest'.encode())
         key(b'm', b'frame 1 ')
         key(b'\x1b[15~', b'Controlling')
-        h.wait_for_output(process, master, output, b'MSX workspace changed;', timeout=8)
-        # A completed activity/live consumer is a causal barrier, not a sleep.
-        h.wait_for_output(process, master, output, b'frame 3 ', timeout=8)
+        h.wait_for_output(process, master, output, b'MSX workspace changed;', start=0, timeout=8)
+        # The typed workspace refusal must retain A's frame until an explicit
+        # interaction obtains a new bound observation; background activity is
+        # not permission to read a replacement server.
+        assert b'frame 1 ' in h.screen_text(bytes(output))
         assert ticks == ['tick'], ticks
         key(b'\x1b[15~', b'Watching only')
+        h.wait_for_output(process, master, output, b'frame 3 ', start=0, timeout=8)
         key(b'\x1b[15~', b'Controlling')
         assert h.wait_for_fixture_event(process, master, output, resumed, timeout=8)
         os.write(master, b'\x1b\x1bq')

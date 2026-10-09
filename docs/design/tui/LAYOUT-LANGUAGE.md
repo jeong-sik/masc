@@ -98,6 +98,17 @@ and values wrap into counted rows instead of being shortened to fit a cell.
 
 ## Implementation scope
 
+Dashboard begins with decisions and continuation destinations. Opening notices
+and the last decision receipt stay ahead of the actions they affect; passive
+health, completed-work and Candle summaries follow using spare rows. The same
+typed selection and cursor window determine which requests remain visible.
+Candle uses either full rows or one compact reading, without repeating both.
+
+Work uses the same wrapped Goal/Backlog summary rows at every width. Extra width
+does not add framed statistics cards. The baseline/current snapshot timestamps
+and change since baseline remain together; they are measured source times,
+distinct from the wall clock removed from Dashboard, Work and Task titles.
+
 `sidebar_line`, `sidebar_rule` and `sidebar_heading` in
 `bin/masc_tui_render_prim.ml` are now shared by the Keeper rail and
 `write_list_sidebar_selection`. The latter reaches the Tasks, Work, Schedules,

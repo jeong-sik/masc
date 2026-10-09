@@ -1,0 +1,35 @@
+{
+  "scope": "Parser checks rerun on 2026-10-09 for the recorded source hashes only; a file whose current hash differs from its entry is not covered. Syntax only: native regressions, geometry and PTY were not rerun.",
+  "checks": {
+    "bin/masc_tui_render.ml": {
+      "sha256": "f9a60ad0a15cf69186b0d73d208036edd251375a732e2e76c7d54a32753edcad",
+      "check": "ocaml parsing",
+      "result": "PASS"
+    },
+    "test/tui_keyboard_planning.py": {
+      "sha256": "1a525c35e031dc608bb7408c92429ed677fc1f0b02db10f9c251205c68cf6f6e",
+      "check": "python ast.parse",
+      "result": "PASS"
+    },
+    "bin/masc_tui_home.ml": {
+      "sha256": "dd1195d8468dc3a4a80d3908feb545cb5b07e79fd8519aeb2d4cdd5e18f8389d",
+      "check": "ocaml parsing",
+      "result": "PASS"
+    },
+    "bin/masc_tui_home.mli": {
+      "sha256": "559ae491cf3ca38add80755e3e6fd6131f5c789ac98037fcec32ff0420281724",
+      "check": "ocaml parsing",
+      "result": "PASS"
+    },
+    "test/test_tui_home_decision_receipt_pty.py": {
+      "sha256": "9910dd7c714669a191e83893887a238301d19b8d308072332bc02bc20f26dfe1",
+      "check": "python ast.parse",
+      "result": "PASS"
+    },
+    "test/test_tui_surface_studio_pty.py": {
+      "sha256": "2b091c43122de7afc175f747ab8e666cbec9fa690dda43b7718509074a0e4734",
+      "check": "python ast.parse",
+      "result": "PASS"
+    }
+  }
+}

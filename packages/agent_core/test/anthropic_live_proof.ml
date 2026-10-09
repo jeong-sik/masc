@@ -225,17 +225,15 @@ let () =
        | Error e -> fail label (describe_error e)
        | Ok response -> pass label (describe_response response))
     efforts;
-  (* A request that turns thinking off must either be refused here or come
-     back without a thinking block. A row whose control sends nothing for
-     that request lets the API keep thinking on, and this is where it shows. *)
+  (* This proof requires an API response to the thinking-off request. A local
+     admission refusal is not evidence of API acceptance. A row whose control
+     sends nothing lets the API keep thinking on, and this is where it shows. *)
   (let label = "thinking off (sync)" in
    match
      sync
        ~config:{ config with Provider_config.enable_thinking = Some false }
        [ Types.user_msg reasoning_prompt ]
    with
-   | Error (Http_client.AcceptRejected { reason }) ->
-     pass label ("refused before dispatch: " ^ reason)
    | Error e -> fail label (describe_error e)
    | Ok response ->
      let seen = seen_of_blocks response.content in

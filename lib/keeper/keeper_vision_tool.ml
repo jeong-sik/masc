@@ -486,7 +486,7 @@ type candidate_failure =
    admission and effect observations. An accepted-but-unobserved timeout is
    not evidence that another candidate may safely replace the turn. *)
 let official_failure_can_advance : Fusion_official_client.failure -> bool = function
-  | Setup_failure _ | Antigravity_failure _ | Muse_failure _ -> false
+  | Missing_reply | Setup_failure _ | Antigravity_failure _ | Muse_failure _ -> false
   | Claude_admission_failure (Invalid_config _) -> false
   | Claude_admission_failure _ -> true
   | Codex_failure error ->
@@ -538,7 +538,7 @@ let official_failure_effect : Fusion_official_client.failure -> Tool_result.fail
       | Quota_blocked { tool_effect_attempted = false; response_emitted = false; _ }
       | Context_window_exceeded { tool_effect_attempted = false; response_emitted = false; _ }
       | Turn_failed_with_observation { tool_effect_attempted = false; response_emitted = false; _ }) -> Proven_pre_effect
-  | Codex_failure _ | Claude_failure _ | Antigravity_failure _ | Muse_failure _ ->
+  | Missing_reply | Codex_failure _ | Claude_failure _ | Antigravity_failure _ | Muse_failure _ ->
     Effect_outcome_unknown
 ;;
 

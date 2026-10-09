@@ -342,7 +342,8 @@ let test_journal_skips_non_finite_floats () =
        List.iteri
          (fun i charge ->
             let event = E.Agent_core_stream_message_delta
-                { stop_reason = Some Agent_core.Types.EndTurn
+                { stream_scope = 0
+                ; stop_reason = Some Agent_core.Types.EndTurn
                 ; usage = Some { delta_usage_partial with cost_usd = Some charge } } in
             (match L.append_result journal ~seq:(4 + i) ~ts:1_762_300_001.0 event with
              | Error _ -> ()

@@ -555,10 +555,57 @@ let test_a_manifest_wrapped_execute_keeps_identity () =
   check bool "a changed externalized answer changes identity" false
     (identity ~base_path:path first = identity ~base_path:path changed)
 
+let test_execute_manifest_identity_does_not_read_child_artifacts () =
+  let base_path = Filename.temp_file "execute-manifest-identity-" "" in
+  Sys.remove base_path;
+  Unix.mkdir base_path 0o700;
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) @@ fun () ->
+  let store = Tool_blob_store.create ~base_path in
+  let child text = Tool_blob_store.put_durable store ~bytes:text ~mime:"text/plain" in
+  let stdout = child "release verification passed" in
+  let stderr = child "" in
+  let changed_stdout = child "release verification failed" in
+  let data output code = `Assoc ["ok",`Bool (code=0);"status",`Assoc
+      ["kind",`String "exit";"code",`Int code];"execution_time_ms",`Int 42;
+      "stdout_artifact",O.normalized_artifact_ref_to_json output;
+      "stderr_artifact",O.normalized_artifact_ref_to_json stderr;
+      "output_artifact",O.normalized_artifact_ref_to_json output] in
+  let project data =
+    let result = Tool_result.make_ok ~tool_name:"Execute" ~start_time:(Tool_timing.start ()) ~data () in
+    let result = match Masc.Tool_bridge.attach_artifact_manifest ~base_path result with
+      | Ok result -> result | Error error -> fail error.Masc.Tool_bridge.message in
+    match Masc.Tool_bridge.to_agent_core_typed_result ~base_path
+        ~answer_reader:(fun output_text -> A.answer ~tool_name:"Execute" ~output_text) result with
+    | Ok result -> result.Agent_core.Types.content
+    | Error error -> fail error.Agent_core.Types.message in
+  let fingerprint content = match P.digest_tool_io ~base_path ~tool_name:"Execute"
+      ~input:(`Assoc ["command",`String "verify-release"]) ~output_text:content () with
+    | Some io -> io.P.output_fingerprint | None -> fail "fingerprint missing" in
+  let original = project (data stdout 0) in
+  let expected = fingerprint original in
+  List.iter (fun changed -> check bool "output address and exit status change the answer" false
+      (expected=fingerprint changed)) [project (data changed_stdout 0);project (data stdout 1)];
+  let memo = P.History_memo.create () in
+  let pair : P.history_pair = {tool_name="Execute";input=`Assoc [];output_text=original} in
+  let history () = match P.digest_history_pairs ~base_path memo [pair] with
+    | [Some io] -> io.P.output_fingerprint | _ -> fail "history fingerprint missing" in
+  check string "history starts from verified manifest" expected (history ());
+  List.iter (fun (reference : O.artifact_ref) ->
+    Unix.unlink (Filename.concat (Tool_blob_store.root_dir store)
+      (Filename.concat (String.sub reference.sha256 0 2) reference.sha256)))
+    [stdout;stderr;changed_stdout];
+  check string "child availability does not change original command answer" expected (fingerprint original);
+  check string "history verifies manifest without traversing missing children" expected (history ());
+  check bool "verification does not restore output child" true
+    (match Tool_blob_store.fetch store ~sha256:stdout.sha256 with Ok None -> true | _ -> false)
+
+
 let () =
   run "keeper_tool_progress_identity"
     [ ( "identity"
-      , [ test_case "measurement does not name identity" `Quick
+      , [ test_case "Execute manifest does not traverse child artifacts" `Quick
+            test_execute_manifest_identity_does_not_read_child_artifacts
+        ; test_case "measurement does not name identity" `Quick
             test_measurement_does_not_name_identity
         ; test_case "tool names reach their handlers" `Quick
             test_tool_names_reach_their_handlers

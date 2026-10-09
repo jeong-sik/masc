@@ -86,6 +86,24 @@ let answer ~tool_name ~output_text =
      | Reads_answer read -> read output_text)
 ;;
 
+(* Only the bridge's closed manifest envelope may expose an original answer.
+   Child artifact addresses remain answer data; never follow them recursively. *)
+let stored_answer_content ~mime original =
+  if not (String.equal mime Tool_output.artifact_manifest_mime) then Some original
+  else
+    match Yojson.Safe.from_string original with
+    | json ->
+      (match Tool_output.artifact_manifest_of_json json with
+       | Tool_output.Decoded_artifact_manifest {content; structured_content; artifact_refs = _ :: _} ->
+         (match Yojson.Safe.from_string content with
+          | data when Yojson.Safe.sort data = Yojson.Safe.sort structured_content -> Some content
+          | _ -> None
+          | exception Yojson.Json_error _ -> None)
+       | Tool_output.Decoded_artifact_manifest _
+       | Tool_output.Not_artifact_manifest | Tool_output.Invalid_artifact_manifest _ -> None)
+    | exception Yojson.Json_error _ -> None
+;;
+
 let verified_stored_answer ~base_path ~tool_name ~output_text =
   let declared_reader = match resolve tool_name with
     | Outside_keeper_descriptors -> None
@@ -98,23 +116,7 @@ let verified_stored_answer ~base_path ~tool_name ~output_text =
   | Tool_output.Decoded {sha256; bytes; mime; answer_fingerprint = Some declared; _} ->
     (match Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256 with
      | Ok (Some original) when String.length original = bytes ->
-       (* A stored manifest carries the original result in its [content]
-          field. The reader answers from that content — the fingerprint
-          covers the answer, not the wrapper around it — and a manifest
-          that does not decode reads as itself, failing verification
-          rather than reading a wrapper as an answer. *)
-       let answer_source =
-         if String.equal mime Tool_output.artifact_manifest_mime then
-           match Yojson.Safe.from_string original with
-           | json ->
-             (match Tool_output.artifact_manifest_of_json json with
-              | Tool_output.Decoded_artifact_manifest { content; _ } -> content
-              | Tool_output.Not_artifact_manifest
-              | Tool_output.Invalid_artifact_manifest _ -> original)
-           | exception Yojson.Json_error _ -> original
-         else original
-       in
-       (match read answer_source with
+       (match Option.bind (stored_answer_content ~mime original) read with
         | Some value ->
           let actual = Digestif.SHA256.(digest_string
               (value |> Yojson.Safe.sort |> Yojson.Safe.to_string) |> to_hex) in

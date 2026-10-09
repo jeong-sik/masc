@@ -39,6 +39,8 @@ val answer : tool_name:string -> output_text:string -> Yojson.Safe.t option
 
 (** Recompute a declared stored answer from integrity-checked original bytes
     in the caller-owned blob store. Missing, corrupt, mismatched or unsupported
-    evidence returns [None]; marker paths and declarations are never authority. *)
+    evidence returns [None]; marker paths and declarations are never authority.
+    A closed manifest with the declared manifest MIME is unwrapped only when
+    its JSON content equals its structured data. Child blobs are never read. *)
 val verified_stored_answer :
   base_path:string -> tool_name:string -> output_text:string -> Yojson.Safe.t option

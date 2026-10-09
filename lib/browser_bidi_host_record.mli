@@ -101,12 +101,15 @@ type entry =
           {!unacknowledged_limit} of them; when one more arrives, the oldest
           leave only after their metadata is durably appended to
           {!unacknowledged_archive_path}. Archive failure keeps the longer
-          list and reports an error. Each addition writes the whole record. *)
+          list and reports an error. Each addition writes the whole record.
+          The next host's {!take} archives whatever is left here. *)
   ; ended : ending option
   }
 
 type state =
-  | Never_started  (** No record: no BiDi host has run for this workspace. *)
+  | Never_started  (** No record, and no host holds the lock. *)
+  | Record_missing_but_locked
+      (** A host holds the lock but has not left a readable record. *)
   | Running of entry
       (** The lock is held. [attached_at] says whether the host has its
           session yet. A server that is down does not change this: the host
@@ -124,8 +127,8 @@ type state =
           [held = None] is the lock that could not be asked, and [detail] is
           then why. That is also what a record without an ending reads as
           when its lock cannot be asked: whether its host runs is not known.
-          A record with its ending, and no record, do not turn on the lock
-          and are read without it. *)
+          A record with its ending does not turn on the lock and is read
+          without it. *)
 
 (** Where a workspace's [bidi-host.json] is, for a reader that tells the
     operator which file it means. *)
@@ -136,7 +139,8 @@ val record_path : base_path:string -> string
     record write takes, and right on its next read:
     - a host has just taken the lock and not yet written its record: the
       reader sees its predecessor, as [Running] when that one died, as [Ended]
-      when it left in order, and [Never_started] when there was none;
+      when it left in order, and [Record_missing_but_locked] when there was
+      no predecessor;
     - a host wrote its ending and exited between the two reads: [Died].
 
     A record write that failed is carried by the host's next one that
@@ -144,9 +148,9 @@ val record_path : base_path:string -> string
     still connecting. *)
 val observe : base_path:string -> state
 
-(** The state for a record and what the lock says. With no record, or with
-    a record that has its ending, the lock changes nothing, and {!observe}
-    asks it only for the others. *)
+(** The state for a record and what the lock says. With no record, a held
+    lock means [Record_missing_but_locked]; with an ended record the lock
+    changes nothing. {!observe} asks it for the others. *)
 val state_of : lock_held:bool -> (entry option, string) result -> state
 
 (** {1 The host's side} *)
@@ -181,8 +185,14 @@ type taken =
   }
 
 (** Takes the lock and replaces the previous host's record with this host's.
-    The previous record stands when this fails: another host holds the lock,
-    the address is refused, or the record cannot be written. *)
+    The results that record lists in [unacknowledged] are first appended to
+    {!unacknowledged_archive_path}, under the previous host's [pid]. A
+    previous record this reader reads but cannot load (another layout, or
+    damaged) is first copied to {!unloadable_copy_path} with this host's
+    [pid] and [now]. The previous record stands when this fails: another host
+    holds the lock, the address is refused, the previous record cannot be
+    read at all, its results cannot be archived or its copy kept, or the new
+    record cannot be written. *)
 val take
   :  base_path:string
   -> pid:int
@@ -190,6 +200,10 @@ val take
   -> client_id:Browser_lane.client_id
   -> now:float
   -> (taken, refusal) result
+
+(** Where {!take} keeps the bytes of a previous record it could not load,
+    named by the taking host's [pid] and [now]. *)
+val unloadable_copy_path : base_path:string -> pid:int -> now:float -> string
 
 (** Firefox gave the host its session. *)
 val attached : held -> now:float -> (unit, write_failure) result

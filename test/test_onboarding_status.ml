@@ -469,7 +469,9 @@ let a_bidi_host_record_that_cannot_be_read_is_invalid () =
     (condition Onboarding_status.Browser_bidi_host observed = Onboarding_status.Invalid);
   says observed
     [ "record cannot be read"; "No host holds this workspace's lock, so none is running"
-    ; "The next host writes a new record in its place, and does not start when it cannot"
+    ; "The next host keeps a copy of a record it read and cannot load beside it and writes a new \
+       one in its place"
+    ; "It does not start while the record cannot be read at all, or a new one cannot be written"
     ; "then runs " ^ launch_command base ];
   let held = take_record base in
   write record "{\"pid\": 1";
@@ -479,8 +481,9 @@ let a_bidi_host_record_that_cannot_be_read_is_invalid () =
   says observed
     [ "A BiDi browser host holds this workspace's lock, so one is running"
     ; "its record cannot be read"; "A second host is refused while that one runs"
-    ; "Once the operator stops it, the next host writes a new record in its place, and does not \
-       start when it cannot." ];
+    ; "Once the operator stops it, the next host keeps a copy of a record it read and cannot load \
+       beside it and writes a new one in its place. It does not start while the record cannot be \
+       read at all, or a new one cannot be written." ];
   (* Why it cannot be read is the reader's own word; nothing is guessed
      beside it. *)
   lacks (bidi_message observed) [ "then runs" ];
@@ -595,6 +598,7 @@ let a_bidi_host_report_reads_back_as_written () =
   List.iter (fun (name, written) ->
       check bool name true (Status.report_of_json (Status.report_to_json written) = Ok written))
     [ "never started", report Record.Never_started
+    ; "record missing but lock held", report Record.Record_missing_but_locked
     ; "connecting", report (Record.Running { entry with attached_at = None })
     ; "attached", report (Record.Running entry)
     ; "ended", report (Record.Ended (ended, ending))
@@ -683,6 +687,11 @@ let a_bidi_host_report_reads_back_as_written () =
   refused "an attach field written twice"
     (with_attach (`Assoc (attach_fields @ [ "launcher", `String "/elsewhere/launch" ])));
   refused "an attach that is no object" (with_attach (`String "launch"));
+  refused "an empty launcher" (with_attach (with_field attach_fields "launcher" (`String "")));
+  refused "arguments the launcher does not use"
+    (with_attach (with_field attach_fields "arguments" (`String "anything goes")));
+  refused "a message with a terminal control character"
+    (with_field ended_fields "message" (`String "No BiDi browser host is running.\027"));
   (* A Keeper is sent the state and the paragraph, not the record. *)
   let ended_observation = observation (Record.Ended (ended, ending)) in
   check bool "the summary is the state and its message" true

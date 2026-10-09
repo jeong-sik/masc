@@ -23,6 +23,7 @@ type t =
 type publication = { reader : reader; observation : Task.t; collector : t }
 type cursor = { store_id : string; after_sequence : int }
 type validation = { store_id : string; through_sequence : int }
+type change_hint = { store_id : string; through_sequence : int }
 type snapshot = { validation : validation; records : record list }
 
 let error_to_string = function
@@ -415,6 +416,21 @@ let read ?after reader = with_database ~create:false reader (fun db cleanup ->
   | exception exn -> rollback db cleanup; raise exn)
 
 type discovery_entry = { receiver : receiver; state : (validation, error) result }
+(* This read deliberately does not construct [validation]. A metadata/tail
+   hint is not an audit of historical payloads or SQLite page integrity. *)
+let read_hint reader = with_database ~create:false reader (fun db cleanup ->
+  let* () = exec db "begin hint snapshot" "BEGIN" in
+  let body () =
+    let* () = validate_schema db cleanup in
+    let* store_id,next = metadata db cleanup reader.scope in
+    let* () = tail_boundary db cleanup next in
+    let* () = exec db "end hint snapshot" "COMMIT" in
+    Ok ({store_id;through_sequence=Int64.to_int (Int64.pred next)} : change_hint) in
+  match body () with
+  | Ok _ as result -> result
+  | Error _ as result -> rollback db cleanup; result
+  | exception exn -> rollback db cleanup; raise exn)
+
 let decode_component encoded =
   let nibble = function
     | '0'..'9' as c -> Some (Char.code c - Char.code '0')
@@ -427,7 +443,7 @@ let decode_component encoded =
     match nibble encoded.[2*i],nibble encoded.[2*i+1] with
     | Some a,Some b -> Bytes.set bytes i (Char.chr (16*a+b)); loop (i+1)
     | _ -> None in loop 0
-let discover_with ~before_read ~after_read ~base_path ~keeper_name = protect_io (fun () ->
+let discover_states_with ~observe ~before_read ~after_read ~base_path ~keeper_name = protect_io (fun () ->
   let result =
     let* base_path,keeper_name = context ~base_path ~keeper_name in
     let root = keeper_directory ~base_path ~keeper_name in
@@ -456,27 +472,47 @@ let discover_with ~before_read ~after_read ~base_path ~keeper_name = protect_io 
               | Some session_id ->
                   let receiver = {receiver_generation;session_id} in
                   let reader = reader_for {base_path;keeper_name;receiver_generation;session_id} in
-                  let outcome = read reader in
-                  let state = match outcome.result,outcome.cleanup_failure with
-                    | Ok snapshot,[] -> Ok snapshot.validation
-                    | Error error,_ -> Error error
-                    | Ok _,failure::_ -> Error (Store_unavailable
-                        {operation="discovery cleanup";detail=cleanup_failure_to_string failure}) in
-                  Ok ({receiver;state}::acc)) (Ok acc) files) (Ok []) generations
+                  let state = observe reader in
+                  Ok ((receiver,state)::acc)) (Ok acc) files) (Ok []) generations
       |> Result.map List.rev) in
   let result = Result.bind result (fun durable ->
     let* snapshot = issue_snapshot ~base_path ~keeper_name in
     Ok (List.fold_left (fun entries (entry : process_issue) ->
       match entry.receiver with
       | None -> entries
-      | Some receiver when List.exists (fun (entry : discovery_entry) -> entry.receiver=receiver) entries -> entries
-      | Some receiver -> entries @ [{receiver;state=Error Missing_store}]) durable snapshot.issues)) in
+      | Some receiver when List.exists (fun (held,_) -> held=receiver) entries -> entries
+      | Some receiver -> entries @ [receiver,Error Missing_store]) durable snapshot.issues)) in
   {result;cleanup_failure=[]})
+
+let discovery_result project outcome =
+  match outcome.result,outcome.cleanup_failure with
+  | Ok value,[] -> Ok (project value)
+  | Error error,_ -> Error error
+  | Ok _,failure::_ -> Error (Store_unavailable
+      {operation="discovery cleanup";detail=cleanup_failure_to_string failure})
+
+let discover_with ~before_read ~after_read ~base_path ~keeper_name =
+  let outcome = discover_states_with ~before_read ~after_read ~base_path ~keeper_name
+    ~observe:(fun reader -> discovery_result (fun (snapshot:snapshot) -> snapshot.validation) (read reader)) in
+  {result=Result.map (List.map (fun (receiver,state) ->
+    ({receiver;state}:discovery_entry))) outcome.result;
+   cleanup_failure=outcome.cleanup_failure}
+
+type hint_entry = { receiver : receiver; state : (change_hint, error) result }
+let discover_hints_with ~before_read ~after_read ~base_path ~keeper_name =
+  let outcome = discover_states_with ~before_read ~after_read ~base_path ~keeper_name
+    ~observe:(fun reader -> discovery_result Fun.id (read_hint reader)) in
+  {result=Result.map (List.map (fun (receiver,state) ->
+    ({receiver;state}:hint_entry))) outcome.result;
+   cleanup_failure=outcome.cleanup_failure}
 
 let discover ~base_path ~keeper_name =
   discover_with ~before_read:(fun _ -> ()) ~after_read:(fun _ -> ()) ~base_path ~keeper_name
+let discover_hints ~base_path ~keeper_name =
+  discover_hints_with ~before_read:(fun _ -> ()) ~after_read:(fun _ -> ()) ~base_path ~keeper_name
 
 module For_testing = struct
   let discover = discover_with
+  let discover_hints = discover_hints_with
   let append_with_io ~commit ~close publication = append_with_io {commit;close} publication
 end

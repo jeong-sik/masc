@@ -3786,6 +3786,107 @@ let test_native_task_sqlite_validation_scope_and_cursor () =
     | Error (Task_journal.Corrupt _) -> () | _ -> fail "discovery advertised corrupt history as validated")
 ;;
 
+let test_native_task_change_hints_keep_full_audit_separate () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    let keeper_name="claude-fixture" in
+    let collector=Task_journal.create ~base_path ~keeper_name
+      ~source:(task_journal_operation "change-hints") ~redact_text:Fun.id in
+    let publications=List.map (fun (attempt,bound) ->
+      Result.get_ok (Task_journal.prepare collector ~attempt bound)) observations in
+    let first=List.hd publications and second=List.nth publications 1 in
+    let reader=Task_journal.reader_of_publication first in
+    (match (Task_journal.read_hint reader).result with
+     | Error Task_journal.Missing_store -> () | _ -> fail "missing hint created a store");
+    check bool "hint leaves missing database absent" false (Sys.file_exists (Task_journal.path reader));
+    check int "cold hints return explicit empty inventory" 0
+      (List.length (task_journal_ok (Task_journal.discover_hints ~base_path ~keeper_name)));
+    check bool "cold discovery creates no receiver directory" false
+      (Sys.file_exists (Filename.dirname (Task_journal.path reader)));
+    ignore (task_journal_ok (Task_journal.append first));
+    let initial=task_journal_ok (Task_journal.read_hint reader) in
+    check int "hint sees committed first sequence" 1 initial.through_sequence;
+    ignore (task_journal_ok (Task_journal.append second));
+    let before=task_journal_ok (Task_journal.read_hint reader) in
+    check bool "append changes tail without replacing incarnation" true
+      (before.store_id=initial.store_id && before.through_sequence=2);
+    (* Bypass row immutability deliberately, then restore the exact trigger.
+       Metadata/tail/schema are unchanged: no hint can certify this payload. *)
+    let db=Sqlite3.db_open (Task_journal.path reader) in
+    Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db)) (fun () ->
+      let stmt=Sqlite3.prepare db "SELECT sql FROM sqlite_master WHERE name='immutable_observations'" in
+      let trigger=Fun.protect ~finally:(fun () -> ignore (Sqlite3.finalize stmt)) (fun () ->
+        match Sqlite3.step stmt with Sqlite3.Rc.ROW -> Sqlite3.column_text stmt 0
+        | _ -> fail "missing immutable trigger") in
+      let sql value=match Sqlite3.exec db value with
+        | Sqlite3.Rc.OK -> () | rc -> fail (Sqlite3.Rc.to_string rc) in
+      sql "BEGIN IMMEDIATE";sql "DROP TRIGGER immutable_observations";
+      sql "UPDATE observations SET payload='!' || substr(payload,2) WHERE seq=1";
+      sql trigger;sql "COMMIT");
+    let after=task_journal_ok (Task_journal.read_hint reader) in
+    check bool "same-tail semantic tamper leaves only unchecked hint equal" true (before=after);
+    let hints=task_journal_ok (Task_journal.discover_hints ~base_path ~keeper_name) in
+    (match hints with
+     | [{Task_journal.state=Ok hint;_}] -> check bool "hint discovery preserves unchecked result" true (hint=after)
+     | _ -> fail "hint discovery performed historical audit or lost receiver");
+    (match (Task_journal.read reader).result with
+     | Error (Task_journal.Corrupt {line=1;_}) -> () | _ -> fail "full read lost historical corruption refusal");
+    let audited=task_journal_ok (Task_journal.discover ~base_path ~keeper_name) in
+    (match audited with
+     | [{Task_journal.state=Error (Task_journal.Corrupt {line=1;_});_}] -> ()
+     | _ -> fail "audited discovery adopted unchecked hint semantics");
+    let foreign=Result.get_ok (Task_journal.open_reader ~base_path ~keeper_name
+      ~receiver_generation:"another generation" ~session_id:"another session") in
+    Fs_compat.mkdir_p (Filename.dirname (Task_journal.path foreign));
+    let bytes=In_channel.with_open_bin (Task_journal.path reader) In_channel.input_all in
+    Out_channel.with_open_bin (Task_journal.path foreign) (fun out -> output_string out bytes);
+    (match (Task_journal.read_hint foreign).result with
+     | Error (Task_journal.Corrupt _) -> () | _ -> fail "hint accepted copied foreign-scope database");
+    Sys.remove (Task_journal.path foreign);
+    Sys.remove (Task_journal.path reader);
+    ignore (task_journal_ok (Task_journal.append first));
+    let replacement=task_journal_ok (Task_journal.read_hint reader) in
+    check bool "replacement store has distinct unchecked incarnation" true
+      (replacement.store_id<>before.store_id && replacement.through_sequence=1);
+    let db=Sqlite3.db_open (Task_journal.path reader) in
+    Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db)) (fun () ->
+      match Sqlite3.exec db "UPDATE metadata SET next_sequence=3" with
+      | Sqlite3.Rc.OK -> () | rc -> fail (Sqlite3.Rc.to_string rc));
+    (match (Task_journal.read_hint reader).result with
+     | Error (Task_journal.Corrupt _) -> () | _ -> fail "hint ignored tail/metadata disagreement");
+    let hints=task_journal_ok (Task_journal.discover_hints ~base_path ~keeper_name) in
+    match hints with
+    | [{Task_journal.state=Error (Task_journal.Corrupt _);_}] -> ()
+    | _ -> fail "failed hint became absent or successful receiver")
+;;
+
+let test_native_task_change_hint_directory_authority () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    let attempt,bound=List.hd observations in
+    let keeper_name="claude-fixture" in
+    let collector=Task_journal.create ~base_path ~keeper_name
+      ~source:(task_journal_operation "hint-directory") ~redact_text:Fun.id in
+    let publication=Result.get_ok (Task_journal.prepare collector ~attempt bound) in
+    let reader=Task_journal.reader_of_publication publication in
+    let generation=Filename.dirname (Task_journal.path reader) in
+    let keeper=Filename.dirname generation in
+    Fs_compat.mkdir_p keeper;
+    Unix.chmod keeper 0o777;
+    Fun.protect ~finally:(fun () -> Unix.chmod keeper 0o700) (fun () ->
+      match (Task_journal.discover_hints ~base_path ~keeper_name).result with
+      | Error (Task_journal.Store_unavailable _) -> ()
+      | _ -> fail "empty unsafe Keeper became successful hint inventory");
+    Fs_compat.mkdir_p generation;
+    let removed=ref false in
+    Fun.protect ~finally:(fun () -> if !removed then Unix.mkdir generation 0o700) (fun () ->
+      let outcome=Task_journal.For_testing.discover_hints ~base_path ~keeper_name
+        ~before_read:(fun _ -> ()) ~after_read:(fun path ->
+          if path=keeper then (Unix.rmdir generation;removed:=true)) in
+      check bool "hint fixture reached actual enumeration boundary" true !removed;
+      match outcome.result with
+      | Error (Task_journal.Store_unavailable _) -> ()
+      | _ -> fail "enumerated generation disappearance became cold hint absence"))
+;;
+
 let test_native_task_sqlite_commit_cleanup_and_known_issues () =
   with_task_journal_bindings (fun ~base_path observations ->
     let keeper_name = "claude-fixture" in
@@ -3840,6 +3941,12 @@ let test_native_task_sqlite_commit_cleanup_and_known_issues () =
     check int "discovery preserves failed receiver identity without a file" 1 (List.length inventory);
     (match (List.hd inventory).state with Error Task_journal.Missing_store -> ()
      | _ -> fail "failed receiver advertised committed history");
+    let hints=task_journal_ok (Task_journal.discover_hints ~base_path ~keeper_name:failure_keeper) in
+    (match hints with
+     | [{Task_journal.state=Error Task_journal.Missing_store;_}] -> ()
+     | _ -> fail "unchecked inventory dropped known failed first-append receiver");
+    let after_hint=Result.get_ok (Task_journal.issue_snapshot ~base_path ~keeper_name:failure_keeper) in
+    check bool "hint does not clear process failure evidence" true (after_hint=known);
     ignore (task_journal_ok (Task_journal.observe sink ~attempt:first_attempt first_bound));
     let after = Result.get_ok (Task_journal.issue_snapshot ~base_path ~keeper_name:failure_keeper) in
     check string "issue epoch stays process scoped" known.process_epoch after.process_epoch;
@@ -5235,6 +5342,10 @@ let () =
             test_native_task_journal_wait_does_not_hold_root_stream
         ; test_case "SQLite validation scope and incarnation cursor" `Quick
             test_native_task_sqlite_validation_scope_and_cursor
+        ; test_case "unchecked change hints retain full audit corruption boundary" `Quick
+            test_native_task_change_hints_keep_full_audit_separate
+        ; test_case "unchecked hints preserve directory authority" `Quick
+            test_native_task_change_hint_directory_authority
         ; test_case "SQLite commit cleanup and known process issues" `Quick
             test_native_task_sqlite_commit_cleanup_and_known_issues
         ; test_case "non-SQLite read and observe remain typed failures" `Quick

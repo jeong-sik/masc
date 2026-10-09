@@ -39,6 +39,12 @@ val cursor : store_id:string -> after_sequence:int -> (cursor, error) result
     supplied cursor is checked against the actual store inside the read snapshot. *)
 type validation = private { store_id : string; through_sequence : int }
 type snapshot = private { validation : validation; records : record list }
+type change_hint = private { store_id : string; through_sequence : int }
+(** Unchecked change observation, distinct from [validation]. Only schema,
+    exact receiver metadata and sequence-tail agreement were read in a SQLite
+    snapshot. No historical payload/UUID/sequence audit or quick_check occurred.
+    Equal hints do not establish unchanged history or integrity; a hint cannot
+    clear a prior audit failure, mint an audited receipt or imply liveness. *)
 val next_cursor : snapshot -> cursor
 
 val create : base_path:string -> keeper_name:string -> source:source ->
@@ -63,6 +69,9 @@ val open_reader : base_path:string -> keeper_name:string ->
   receiver_generation:string -> session_id:string -> (reader, error) result
 val reader_of_publication : publication -> reader
 val path : reader -> string
+val read_hint : reader -> change_hint outcome
+(** Read-only/no creation. Returns typed missing, scope/schema/tail and I/O
+    failures with the existing cleanup contract. No stat cache or retry. *)
 val read : ?after:cursor -> reader -> snapshot outcome
 (** READONLY, never creates a missing store. Every row in one SQLite read
     transaction is semantically validated before any selected rows are returned.
@@ -95,11 +104,22 @@ val discover : base_path:string -> keeper_name:string -> discovery_entry list ou
     Directory enumeration and later SQLite pathname opens are independent;
     this API does not establish owned leaf-open continuity or fix leaf TOCTOU. *)
 
+type hint_entry = { receiver : receiver; state : (change_hint, error) result }
+val discover_hints : base_path:string -> keeper_name:string -> hint_entry list outcome
+(** Same descriptor-owned enumeration, disappearance/empty-directory authority,
+    known process-issue receiver inclusion and typed outer/entry failures as
+    [discover], but each successful entry is only an unchecked change hint.
+    No receiver inventory SSOT or leaf-open continuity is introduced. Existing
+    [discover]/[read] retain their full historical audit guarantee. *)
+
 module For_testing : sig
   val discover : before_read:(string -> unit) -> after_read:(string -> unit) ->
     base_path:string -> keeper_name:string -> discovery_entry list outcome
   (** Fault callbacks after actual directory binding and after enumeration.
       Uses the production descriptor-owned discovery path. *)
+  val discover_hints : before_read:(string -> unit) -> after_read:(string -> unit) ->
+    base_path:string -> keeper_name:string -> hint_entry list outcome
+  (** Same actual enumeration callbacks as [discover], with unchecked reads. *)
   val append_with_io : commit:(Sqlite3.db -> Sqlite3.Rc.t) ->
     close:(Sqlite3.db -> bool) -> publication -> commit outcome
   (** The actual append transaction with injected COMMIT/close operations.

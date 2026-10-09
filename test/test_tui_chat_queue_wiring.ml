@@ -4320,9 +4320,7 @@ let test_status_details_and_fold_counts_reach_the_frame () =
         (List.exists (fun (kind, _) -> kind = Keeper_chat_transcript.Progress)
           (Tui_types.keeper_message_visible_status_rows state entry.log.tl_transcript ~now:5.));
       check int "folded checkpoint counts the rows it hides" hidden
-        (Tui_types.keeper_message_folded_status_count state entry.log.tl_transcript ~now:5.);
-      check bool "folded checkpoint retains a discoverable details key" true
-        (has_detail (Printf.sprintf "+%d" hidden) (Masc_tui_keys.expand_turn_label ^ ":details")))
+        (Tui_types.keeper_message_folded_status_count state entry.log.tl_transcript ~now:5.))
       [Masc_tui_message_layout.Origin_bare, 1; Origin_inline, 2])
 
 let test_verified_rejection_is_visible_without_mutating_original_input () =

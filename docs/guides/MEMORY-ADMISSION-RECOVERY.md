@@ -7,7 +7,8 @@ the pending tail. A missing snapshot cannot be reconstructed from the journal: t
 journal does not contain the complete snapshot.
 
 This is a supported **offline exact-backup recovery**, not automatic reconstruction.
-It requires a coherent, product-validated backup of the same Keeper's current
+It requires a coherent backup — validated against the product's recovery schema —
+of the same Keeper's current
 snapshot, committed range receipts, admission queue and journal. The operator must
 establish that this is the last committed snapshot before damage, using the stopped
 writer interval and an independently retained snapshot SHA-256/backup inventory.

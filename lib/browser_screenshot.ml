@@ -11,16 +11,9 @@ let persist ~keeper_name json =
     | `Assoc fields -> (match List.assoc_opt "tabId" fields with
         | Some (`Int id) when id >= 0 -> Ok id | _ -> Error "screenshot missing tabId")
     | _ -> Error "screenshot must be an object" in
-  let* client_fields = match json with
-    | `Assoc fields ->
-      (match List.assoc_opt "clientId" fields with
-       (* Direct pixel persistence may omit routing metadata. Never invent an identity. *)
-       | None -> Ok []
-       | Some `Null -> Ok ["clientId", `Null]
-       | Some (`String raw) ->
-         let* id = Browser_lane.client_id_of_string raw in
-         Ok ["clientId", `String (Browser_lane.client_id_to_string id)]
-       | Some _ -> Error "invalid screenshot clientId")
+  let* connection_fields = match json with
+    (* Direct pixel persistence may omit routing metadata. Never invent an identity. *)
+    | `Assoc fields -> Browser_lane.connection_fields_of_json fields
     | _ -> Error "screenshot must be an object" in
   let* observation_fields = match json with
     | `Assoc fields ->
@@ -51,7 +44,7 @@ let persist ~keeper_name json =
         | Some (width,height) when width > 0 && height > 0 -> Ok (width,height)
         | _ -> Error "invalid screenshot dimensions" in
       let* handle = Keeper_vision_tool.store_frame ~keeper_name bytes in
-      Ok (`Assoc (client_fields @ observation_fields @ ["artifact", `String (Multimodal.Vision_artifact_store.to_string handle);
+      Ok (`Assoc (connection_fields @ observation_fields @ ["artifact", `String (Multimodal.Vision_artifact_store.to_string handle);
         "media_type", `String mime; "tabId", `Int tab_id; "url", `String url;
         "title", `String title; "width", `Int width; "height", `Int height;
         "bytes", `Int (String.length bytes); "scope", `String "viewport"]))

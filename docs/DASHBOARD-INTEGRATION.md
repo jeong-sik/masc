@@ -149,6 +149,8 @@ status: reference
   - connectors descriptor + live state
 - `GET /api/v1/dashboard/board`
   - workspace board
+- `POST /api/v1/tools/masc_board_post`, `masc_board_comment`, `masc_board_vote`, `masc_board_comment_vote`
+  - Each Board write accepts optional `"expected_workspace": {"base_path": "...", "masc_root": "..."}` using the canonical paths observed in `/health`. Invalid or mismatched identities return 400 before a write, including comment votes. The route consumes this precondition before dispatching the Board tool; omitting it preserves the authenticated write behavior.
 - `GET /api/v1/board/hearths`, `GET /api/v1/board/curation`, `GET /api/v1/board/karma/ledger`
   - workspace board filters, curation, and karma ledger
 - `GET /api/v1/board/sub-boards`

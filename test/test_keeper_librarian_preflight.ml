@@ -34,6 +34,7 @@ let consumed_source =
 
 let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
     ?(context_only = false) ?(context = No_context) ?(lane_enabled = true)
+    ?(maintenance = false)
     ?(disable_during_preflight = false) ~name ~status ~body
     ~expected_jev ~expected_llm () =
   Fixture.with_official_client_runtimes @@ fun () ->
@@ -81,8 +82,12 @@ let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
   let fact : Memory.fact = Memory.observed ~claim:"The established constraint is still valid."
     ~category:Memory.Constraint ~now:1000.
     ~origin:{Memory.kind=Memory.Authored; trace_id=name} in
+  let facts = if maintenance then
+      List.init (Env_config.KeeperMemoryOs.facts_per_category_cap () + 1)
+        (fun index -> {fact with claim=Printf.sprintf "Constraint %d remains recorded." index})
+    else [fact] in
   let stored = match Current.replace ~keepers_dir ~keeper_id:name ~expected_revision:None
-    ~now:1000. ~source:{Current.kind=Current.Librarian;trace_id=name} ~facts:[fact] () with
+    ~now:1000. ~source:{Current.kind=Current.Librarian;trace_id=name} ~facts () with
     | Ok stored -> stored | Error detail -> Alcotest.fail detail in
   let working_context = match context with
     | No_context -> Keeper_librarian_context.empty
@@ -106,18 +111,23 @@ let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
      keeper_id=Masc_test_deps.keeper_id_fixture name;
      keeper_instructions="Keep explicit constraints.";
      current=Some {Keeper_librarian.facts=stored.facts};working_context;
-     messages=[Agent_core.Types.user_msg "The already remembered constraint still holds."];
+     messages=(if maintenance then [] else
+       [Agent_core.Types.user_msg "The already remembered constraint still holds."]);
      tool_observations=[];counterpart_observations=[]} in
   let range : Current.durable_range_id =
     {receipt_scope="preflight-fixture";trace_id=name;history_start_boundary_line=1;
      start_atom=0;end_atom=1;last_atom_digest=String.make 64 'a';
      end_boundary_line=2;boundary_lines_seen=2} in
   let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
-    incr llm_calls; Ok (if context_only then {|{"working_contexts":[]}|} else generated) in
+    incr llm_calls;
+    Ok (if maintenance then
+      {|{"new_claims":[],"dropped":[{"memory_id":"m1","reason":"This constraint is no longer applicable."}],"working_contexts":[],"working_state":null}|}
+      else if context_only then {|{"working_contexts":[]}|} else generated) in
   let committed = ref false in
   Keeper_librarian_runtime.run_best_effort
-    ~write_scope:(if context_only then Keeper_librarian_runtime.Context_only else Context_and_memory)
-    ?durable_range_id:(if context_only then None else Some range)
+    ~write_scope:(if maintenance then Keeper_librarian_runtime.Memory_maintenance
+      else if context_only then Context_only else Context_and_memory)
+    ?durable_range_id:(if context_only || maintenance then None else Some range)
     ~cli_runner:runner ~on_memory_committed:(fun () -> committed := true)
     ~base_path ~keepers_dir ~keeper_id:name ~expected_revision:(Some stored.revision) input;
   Alcotest.(check int) "actual JEV dispatches" expected_jev !jev_calls;
@@ -129,6 +139,20 @@ let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
     match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:name with
     | Ok (Some snapshot) -> Alcotest.(check int) "off retains prior revision" stored.revision snapshot.revision
     | Ok None -> Alcotest.fail "off removed memory" | Error detail -> Alcotest.fail detail)
+  else if maintenance then (
+    Alcotest.(check bool) "maintenance commit observer ran" true !committed;
+    (match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:name with
+     | Ok (Some snapshot) ->
+       Alcotest.(check int) "full review reduced excess" (List.length facts - 1)
+         (List.length snapshot.facts);
+       Alcotest.(check bool) "the selected obsolete fact was removed" false
+         (List.exists (fun (row : Memory.fact) -> row.claim = (List.hd facts).claim) snapshot.facts)
+     | Ok None -> Alcotest.fail "maintenance removed snapshot"
+     | Error detail -> Alcotest.fail detail);
+    (match Keeper_librarian_context.read ~keepers_dir ~keeper_id:name with
+     | Ok None -> ()
+     | Ok (Some _) -> Alcotest.fail "maintenance wrote working context"
+     | Error detail -> Alcotest.fail detail))
   else if not context_only then (
     Alcotest.(check bool) "normal commit observer ran" true !committed;
     (match Current.committed_durable_range ~keepers_dir ~keeper_id:name
@@ -142,7 +166,7 @@ let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
        if expected_llm = 0 then Alcotest.(check int) "no-change keeps revision"
          stored.revision snapshot.revision
      | Ok None -> Alcotest.fail "snapshot missing" | Error detail -> Alcotest.fail detail));
-  (match lane_enabled, context, context_only with
+  (if maintenance then () else match lane_enabled, context, context_only with
    | false, No_context, _ ->
      (* Nothing runs while the lane is off, so no working context is written. *)
      (match Keeper_librarian_context.read ~keepers_dir ~keeper_id:name with
@@ -174,7 +198,7 @@ let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
   | [{Runs.status=Runs.Completed {outcome=Runs.Succeeded;selected_slot;_};run_id;_}] ->
     Alcotest.(check (option string)) "JEV never claims a catalog or CLI slot"
       (if expected_llm = 0 then None else Some Fixture.cli_primary_runtime) selected_slot;
-    (match context, context_only with
+    (if maintenance then () else match context, context_only with
      | (No_context | Live_nothing_pending), false ->
        (* The listing omits payloads; one run is read whole. *)
        let output = match Runs.get registry ~run_id with
@@ -197,9 +221,9 @@ let () =
   let root = Option.value (Sys.getenv_opt "DUNE_SOURCEROOT") ~default:(Sys.getcwd ()) in
   Prompt_registry.set_markdown_dir (Filename.concat root "config/prompts");
   Prompt_defaults.init ();
-  let case ?enabled ?excluded ?context_only ?context ?lane_enabled ?disable_during_preflight name status body jev llm =
+  let case ?enabled ?excluded ?context_only ?context ?lane_enabled ?disable_during_preflight ?maintenance name status body jev llm =
     Alcotest.test_case name `Quick
-      (run_case ~base_path ~registry ?enabled ?excluded ?context_only ?context ?lane_enabled ?disable_during_preflight
+      (run_case ~base_path ~registry ?enabled ?excluded ?context_only ?context ?lane_enabled ?disable_during_preflight ?maintenance
         ~name ~status ~body ~expected_jev:jev ~expected_llm:llm) in
   let prompt_shape name input expected =
     Alcotest.test_case name `Quick (fun () ->
@@ -223,6 +247,8 @@ let () =
       prompt_shape "unavailable source"
         {Keeper_librarian_context.empty with unavailable=["events: fixture"]} false];
      "real dispatch and commit", [
+      case ~maintenance:true "maintenance-reviews-excess-without-no-change-shortcut"
+        `OK (answer "keep_current") 0 1;
       case ~lane_enabled:false "off-skips-jev-and-consumption" `OK (answer "keep_current") 0 0;
       case ~disable_during_preflight:true "accepted-pass-keeps-cli-after-off" `OK (answer "needs_generation") 1 1;
       case ~disable_during_preflight:true "accepted-no-change-finishes-after-off" `OK (answer "keep_current") 1 0;

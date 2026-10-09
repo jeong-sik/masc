@@ -1419,7 +1419,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
                   recovery_detail))))
 ;;
 
-let run ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
+let run ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context
@@ -1447,26 +1447,20 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
   let observed_next_shrink_capacity_bytes = ref None in
   let observed_floor_capacity_bytes = ref None in
   let context_overflow_retry_safe = ref false in
-  let starting_capacity_bytes =
-    (* Every turn starts at the runtime's own ceiling when it has one, and
-       unbounded otherwise: the provider's typed overflow is what narrows it.
-       The shrink below cuts only the conversation window; the pinned
-       briefing is sent whole. *)
-    Option.value
-      (Runtime.prompt_capacity_bytes_of_runtime_id runtime_id)
-      ~default:unbounded_model_input_capacity_bytes
-  in
   let result =
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
       Keeper_turn_driver_try_provider.context_overflow_shrink_sequence
-        ~starting_capacity:starting_capacity_bytes
+        ?on_memory_capacity_refusal
+        ~on_memory_retry:(fun () ->
+          resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id ())
+        (* The provider's typed overflow narrows the initially unbounded turn. *)
+        ~starting_capacity:unbounded_model_input_capacity_bytes
         ~same_run_retry_authorized:(fun () ->
-          !context_overflow_retry_safe
-          && Option.is_some !observed_next_shrink_capacity_bytes)
-        ~shrink_capacity:(fun ~capacity:_ ~default_capacity ->
+          !context_overflow_retry_safe)
+        ~shrink_capacity:(fun ~capacity ~default_capacity:_ ->
           Option.value
             !observed_next_shrink_capacity_bytes
-            ~default:(max 1 default_capacity))
+            ~default:capacity)
         ~final_shrink_capacity:(fun ~capacity:_ ->
           !observed_floor_capacity_bytes)
         (* This runtime shrinks to the size the provider itself named

@@ -95,8 +95,9 @@ let verdict t =
 
 let install ~base_path =
   Printf.sprintf
-    "the MASC browser host installer, install-host.sh (connectors/browser/host/README.md in the \
-     MASC repository), with --base-path %s"
+    "the MASC browser host installer, install-host.sh (%s in the MASC repository), with \
+     --base-path %s"
+    (Browser_lane.live_transport_setup_doc Browser_lane.Web_extension)
     base_path
 
 let reinstall ~base_path =

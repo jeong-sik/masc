@@ -394,7 +394,7 @@ let test_record_terminal_error_cuts_a_torn_tail () =
     | Ok () -> ()
     | Error detail -> fail detail in
   append 0 (Events.Run_started { run_id = "run-torn"; thread_id = "keeper:terminal-torn" });
-  append 1 (Events.Text_delta "partial");
+  append 1 (Events.Text_delta {text="partial"; stream_scope=None});
   let path = Journal.journal_path ~base_dir:base_path ~keeper_name ~operation_id in
   let oc = open_out_gen [ Open_append; Open_wronly; Open_binary ] 0o600 path in
   output_string oc "{\"v\":1,\"seq\":2,\"ts\":1.5,\"event\":{\"type\":\"text_del";
@@ -419,6 +419,59 @@ let test_record_terminal_error_creates_a_missing_journal () =
    | Error detail -> fail detail);
   check int "the terminal is the journal" 1
     (List.length (read_journal ~base_path ~keeper_name ~operation_id))
+
+let test_restart_settlement_retries_and_replays_past_a_live_cursor () =
+  with_workspace @@ fun base_path ->
+  let module Store = Keeper_chat_operation_store in
+  let keeper_name = "restart-replay" and operation_id = "op-restart-replay" in
+  let id = match Keeper_chat_operation.Operation_id.of_string operation_id with
+    | Ok id -> id | Error detail -> fail detail in
+  let store_ok = function Ok value -> value | Error error -> fail (Store.error_to_string error) in
+  let store = store_ok (Store.open_or_create ~path:(Filename.concat base_path "restart-replay.sqlite3")) in
+  Fun.protect ~finally:(fun () -> ignore (Store.close store)) (fun () ->
+    ignore (store_ok (Store.submit store ~now:1. ~operation_id:id
+      ~source:(`Assoc ["kind",`String "dashboard"]) ~input:(`Assoc ["message",`String "work"])));
+    ignore (store_ok (Store.claim_next store ~now:2.));
+    ignore (store_ok (Store.settle_running_after_restart store ~now:3.));
+    let operation = Option.get (store_ok (Store.get store id)) in
+    let settlement : Journal.restart_settlement = {operation_id=id;completed_at=3.} in
+    let journal = Journal.open_journal ~base_dir:base_path ~keeper_name ~operation_id () in
+    let message = Keeper_request_failure.summary {cause=Keeper_request_failure.Server_restarted} in
+    Journal.append journal ~seq:0 ~ts:1. (Events.Run_started {run_id="run";thread_id="keeper:restart-replay"});
+    (* Identical text from an earlier segment does not identify this settlement. *)
+    Journal.append journal ~seq:1 ~ts:2. (Events.Event_error {message});
+    (match Journal.record_terminal_error ~segment:(Restart_settlement settlement) journal ~ts:3. ~message with
+     | Ok (Recorded_terminal_error {seq=2;_}) -> ()
+     | _ -> fail "restart must append its own identified terminal");
+    (* Simulate restart after append success without any in-memory receipt. *)
+    let reopened = Journal.open_journal ~base_dir:base_path ~keeper_name ~operation_id () in
+    (match Journal.record_terminal_error ~segment:(Restart_settlement settlement) reopened ~ts:99. ~message with
+     | Ok (Existing_terminal_error {seq=2;ts=3.;_}) -> ()
+     | _ -> fail "retry must reuse the durable settlement marker");
+    check int "retry appends no duplicate" 3 (List.length (read_journal ~base_path ~keeper_name ~operation_id));
+    let replayed = Hashtbl.create 4 in
+    let suffix = Stream.For_testing.journal_replay_frames ~base_path ~keeper_name ~operation_id
+      ~since_seq:(Journal.After_seq 50) in
+    check int "the client's live cursor is ahead of the journal" 0 (List.length suffix);
+    let fallback = Stream.For_testing.restart_terminal_after_replay ~base_path ~keeper_name ~operation ~replayed in
+    (match fallback with
+     | Some event ->
+         check bool "the durable failure still yields RUN_ERROR" true (event.Ag_ui.event_type=Ag_ui.Run_error);
+         let wire = Ag_ui.event_to_sse event in
+         check bool "the supplemental frame does not regress the cursor" false (String.starts_with ~prefix:"id:" wire)
+     | None -> fail "a cursor beyond the repaired journal lost the terminal");
+    Stream.For_testing.journal_replay_frames ~base_path ~keeper_name ~operation_id ~since_seq:Journal.Whole_turn
+    |> List.iter (fun (seq,_) -> Hashtbl.replace replayed seq ());
+    check bool "ordinary replay already includes this exact terminal" true
+      (Option.is_none (Stream.For_testing.restart_terminal_after_replay ~base_path ~keeper_name ~operation ~replayed));
+    let metadata = `Assoc ["operation_id",`String operation_id;"completed_at",`Float 3.] in
+    List.iter (fun (event, fields) ->
+      let envelope = Journal.journaled_event_to_json {seq=0;ts=3.;event} in
+      let envelope = match envelope with `Assoc base -> `Assoc (base @ fields) | _ -> assert false in
+      check bool "malformed restart provenance is refused" true (Result.is_error (Journal.journaled_event_of_json envelope)))
+      [ Events.Event_error {message}, ["restart_settlement",`String "unknown"]
+      ; Events.Event_error {message}, ["restart_settlement",metadata;"restart_settlement",metadata]
+      ; Events.Text_delta {text="not terminal"; stream_scope=None}, ["restart_settlement",metadata] ])
 
 let () =
   Alcotest.run "keeper_wire_terminal"
@@ -451,5 +504,7 @@ let () =
             test_record_terminal_error_cuts_a_torn_tail
         ; test_case "record_terminal_error creates a missing journal" `Quick
             test_record_terminal_error_creates_a_missing_journal
+        ; test_case "durable restart settlement retries and survives a newer live cursor" `Quick
+            test_restart_settlement_retries_and_replays_past_a_live_cursor
         ] )
     ]

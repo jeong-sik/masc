@@ -359,9 +359,9 @@ val await_newer_original_operation
     stops running, the store cannot be read or the owner closes. Cancellation
     unregisters the condition waiter; no timer or polling loop is installed. *)
 
-(** The running operations {!start} settled as [Interrupted_by_restart], as
-    they were read before settlement. The registry leaves a failure row in the
-    transcript for each; the owner has no transcript of its own. *)
+(** Durable [Failed Interrupted_by_restart] records, including batch members
+    and earlier starts. The registry retries their idempotent journal and
+    transcript projections; the owner has no transcript of its own. *)
 val restart_interrupted_operations : t -> Chat_operation.t list
 
 (** Durable cooperative checkpoint continuation, independent of provider retry. *)

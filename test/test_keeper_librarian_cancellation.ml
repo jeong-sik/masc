@@ -257,19 +257,7 @@ let test_cancel ?(observer_checks = true) ?(closed_pool = false) ~base_path ~reg
        (member "destination_uri" asked |> string);
      List.iter (fun key -> check_json ("partial report has no " ^ key) `Null
        (member key gate)) [ "applied_absorptions"; "left"; "conveyed" ]);
-  let module Projection = Server_standalone_lane_projection in
-  let detail = match Projection.For_testing.run_detail_json_with
-      ~run_id:replayed_run.run_id ~exact_runs:[ replayed_run ]
-      ~verification_runs:[] ~goal_verification_runs:[] with
-    | Projection.Detail_found detail -> detail
-    | Detail_not_found | Detail_ambiguous -> Alcotest.fail "cancelled run has no HTTP detail" in
-  let page = Projection.For_testing.recent_run_page_json_with
-      ~limit:1 ~before:None ~lane:(Some "librarian_exact") ~run_kind:None
-      ~exact_runs:[ replayed_run ] ~verification_runs:[] ~goal_verification_runs:[]
-    |> require in
-  Printf.printf "CANCELLATION_FIXTURE %s\n%!"
-    (Yojson.Safe.to_string (`Assoc
-       [ "scenario", `String keeper_id; "detail", detail; "page", page ]));
+  Librarian_run_tui_reading.check replayed_run;
   Printf.printf "CANCELLATION_EVIDENCE keeper=%s status=%s journal_cancelled=%d memory_unchanged=%b jev_requests=%d\n%!"
     keeper_id (Runs.status_label replayed_run.status) (List.length cancellations)
     (after_bytes = before_bytes) (Fixture.post_count jev);

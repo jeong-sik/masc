@@ -85,6 +85,9 @@ type durable_search_error =
   | Absorbed_read_failed of string
   | Dropped_read_failed of string
   | Events_read_failed of string
+  | Cursor_invalid
+  | Cursor_stale
+  | Cursor_scope_unsupported
 
 let durable_search_error_kind_to_string = function
   | Snapshot_read_failed _ -> "snapshot_read_failed"
@@ -92,6 +95,9 @@ let durable_search_error_kind_to_string = function
   | Absorbed_read_failed _ -> "absorbed_read_failed"
   | Dropped_read_failed _ -> "dropped_read_failed"
   | Events_read_failed _ -> "events_read_failed"
+  | Cursor_invalid -> "invalid_memory_search_cursor"
+  | Cursor_stale -> "stale_memory_search_cursor"
+  | Cursor_scope_unsupported -> "unsupported_memory_search_cursor_scope"
 ;;
 
 let durable_search_error_detail = function
@@ -100,6 +106,9 @@ let durable_search_error_detail = function
   | Absorbed_read_failed detail
   | Dropped_read_failed detail
   | Events_read_failed detail -> detail
+  | Cursor_invalid -> "Pass the next_cursor returned by the previous current-memory page."
+  | Cursor_stale -> "Current memory or query changed. Restart the search without cursor."
+  | Cursor_scope_unsupported -> "Pagination is available only for source=current."
 ;;
 
 let read_current_facts ~keepers_dir ~keeper_id =
@@ -175,8 +184,8 @@ let search_durable_facts
       ~(meta : keeper_meta)
       ~(facts : Keeper_memory_os_types.fact list)
       ~(query : string)
-      ~(limit : int)
-  : (fact_match list * int * Keeper_memory_source_current.file_source list,
+      ~(limit : int option)
+  : (fact_match list * int * Keeper_memory_source_current.file_source list * (unit -> string),
      durable_search_error) result
   =
   let selected_sources =
@@ -250,14 +259,25 @@ let search_durable_facts
     }
   in
   Ok
-    ( take
-        limit
-        (List.map ordinary_match ordinary_whole
-         @ List.map source_match source_whole
-         @ List.map ordinary_match ordinary_fragments
-         @ List.map source_match source_fragments)
+    ( (let matches = List.map ordinary_match ordinary_whole
+           @ List.map source_match source_whole
+           @ List.map ordinary_match ordinary_fragments
+           @ List.map source_match source_fragments in
+       match limit with None -> matches | Some limit -> take limit matches)
     , total_candidates
-    , deferred_sources )
+    , deferred_sources
+    (* Only paged current search needs a corpus revision. Capture this read's
+       immutable values; combined all-store search never serializes or hashes
+       the corpus merely to discard its revision. *)
+    , (fun () -> Snapshot_protocol.revision_of_json ~namespace:"keeper-current-memory-corpus"
+        (`Assoc
+           [ "ordinary", `List (List.map Keeper_memory_os_types.fact_to_json facts)
+           ; "source", (match source_projection.snapshot with
+               | None -> `Null
+               | Some snapshot -> Keeper_memory_source_current.to_json snapshot)
+           ; "unverified_paths", `List (List.map (fun path -> `String path)
+               source_projection.unverified_paths)
+           ])) )
 ;;
 
 let fact_match_to_json (m : fact_match) : Yojson.Safe.t =
@@ -704,6 +724,39 @@ type search_answer =
   ; matched_memory_ids : string list
   }
 
+(* The cursor names a current corpus and a position in its ordered answer.
+   It carries no fact bodies and never authorizes mutation. *)
+let current_cursor_of_json = function
+  | `Null -> Ok None
+  | `String raw ->
+    (match Base64.decode ~pad:false ~alphabet:Base64.uri_safe_alphabet raw with
+     | Error _ -> Error Cursor_invalid
+     | Ok bytes ->
+       (match Yojson.Safe.from_string bytes with
+        | `Assoc fields when List.length fields = 2 ->
+          (match List.assoc_opt "revision" fields, List.assoc_opt "offset" fields with
+           | Some (`String previous), Some (`Int offset) when offset > 0 ->
+             Ok (Some (previous, offset))
+           | _ -> Error Cursor_invalid)
+        | _ -> Error Cursor_invalid
+        | exception Yojson.Json_error _ -> Error Cursor_invalid))
+  | _ -> Error Cursor_invalid
+;;
+
+let current_page_offset ~revision ~count = function
+  | None -> Ok 0
+  | Some (previous, offset) ->
+    if not (String.equal previous revision) then Error Cursor_stale
+    else if offset >= count then Error Cursor_stale
+    else Ok offset
+;;
+
+let current_page_cursor ~revision ~offset =
+  Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet
+    (Yojson.Safe.to_string
+       (`Assoc [ "revision", `String revision; "offset", `Int offset ]))
+;;
+
 let keeper_memory_search_with_outcome
       ?turn_ref
       ~(config : Workspace.config)
@@ -837,33 +890,53 @@ let keeper_memory_search_with_outcome
                           "source_sha256", `String source.sha256]) sources)
             ; "guidance", `String "Query-matching stored claims could not be verified and were withheld. Retry relevant retrieval before drawing a negative conclusion; no claim body is supplied."
             ] ] in
-    let current_stores () =
+    let current_stores cursor =
       match read_current_facts ~keepers_dir ~keeper_id:meta.name with
       | Error _ as error -> error
       | Ok facts ->
-        (match search_durable_facts ~config ~keepers_dir ~meta ~facts ~query ~limit with
+        (* Rank the complete current answer before slicing. The per-page
+           bound must not discard the facts later pages need. *)
+        (match search_durable_facts ~config ~keepers_dir ~meta ~facts ~query ~limit:None with
          | Error _ as error -> error
-         | Ok (fact_matches, fact_total, deferred_sources) ->
-           Ok
-             { output =
-                 durable_json
-                   ~fact_jsons:(List.map fact_match_to_json fact_matches)
-                   ~fact_total
-                   ~total_matches:(List.length fact_matches)
-                   ~extra_matches:[]
-                   ~read_errors:(deferred_sources <> [])
-                   ~read_error_fields:(source_verification_fields deferred_sources)
-             ; match_count = List.length fact_matches
-             ; durable_candidates = Some fact_total
-             ; read_errors = deferred_sources <> []
-             ; matched_memory_ids =
-                 List.filter_map
-                   (fun (matched : fact_match) ->
-                      match matched.identity with
-                      | Ordinary_memory_id { memory_id; _ } -> Some memory_id
-                      | Source_sha256 _ -> None)
-                   fact_matches
-             })
+         | Ok (matches, fact_total, deferred_sources, corpus_revision) ->
+           let revision = Snapshot_protocol.revision_of_json
+               ~namespace:"keeper-current-memory-search-page"
+               (`Assoc [ "corpus", `String (corpus_revision ())
+                       ; "keeper", `String meta.name
+                       ; "workspace", `String config.base_path
+                       ; "query", `String query
+                       ; "matches", `List (List.map fact_match_to_json matches) ]) in
+           (match current_page_offset ~revision ~count:(List.length matches) cursor with
+            | Error _ as error -> error
+            | Ok offset ->
+              let fact_matches = take limit (List.drop offset matches) in
+              let next_offset = offset + List.length fact_matches in
+              let truncated = next_offset < List.length matches in
+              let page_fields =
+                [ "truncated", `Bool truncated; "revision", `String revision ]
+                @ (if truncated then
+                     [ "next_cursor", `String (current_page_cursor ~revision ~offset:next_offset) ]
+                   else []) in
+              Ok
+                { output =
+                    durable_json
+                      ~fact_jsons:(List.map fact_match_to_json fact_matches)
+                      ~fact_total
+                      ~total_matches:(List.length fact_matches)
+                      ~extra_matches:[]
+                      ~read_errors:(deferred_sources <> [])
+                      ~read_error_fields:(page_fields @ source_verification_fields deferred_sources)
+                ; match_count = List.length fact_matches
+                ; durable_candidates = Some fact_total
+                ; read_errors = deferred_sources <> []
+                ; matched_memory_ids =
+                    List.filter_map
+                      (fun (matched : fact_match) ->
+                         match matched.identity with
+                         | Ordinary_memory_id { memory_id; _ } -> Some memory_id
+                         | Source_sha256 _ -> None)
+                      fact_matches
+                }))
     in
     (* Source=all combines current facts, absorbed/dropped rows, and history. The match
        tier before the store order ({!answering}): a weaker current fact does
@@ -875,9 +948,9 @@ let keeper_memory_search_with_outcome
       match read_current_facts ~keepers_dir ~keeper_id:meta.name with
       | Error _ as error -> error
       | Ok facts ->
-        (match search_durable_facts ~config ~keepers_dir ~meta ~facts ~query ~limit with
+        (match search_durable_facts ~config ~keepers_dir ~meta ~facts ~query ~limit:(Some limit) with
          | Error _ as error -> error
-         | Ok (fact_matches, fact_total, deferred_sources) ->
+         | Ok (fact_matches, fact_total, deferred_sources, _corpus_revision) ->
            (* A librarian made one claim of the rows it absorbed (RFC-0456
               §4.2). When that claim answers this search too, the rows say
               the same thing again and are left out, so the claim is not
@@ -964,6 +1037,10 @@ let keeper_memory_search_with_outcome
              })
     in
     let result =
+      match source, Safe_ops.safe_member "cursor" args with
+      | (Absorbed | Dropped | History | All), (`String _ | `Int _ | `Intlit _ | `Bool _ | `Float _ | `List _ | `Assoc _) ->
+        Error Cursor_scope_unsupported
+      | (Current | Absorbed | Dropped | History | All), _ ->
       match source with
       | History ->
         let history = search_history ~config ~meta ~ctx_work ~query ~limit in
@@ -1039,7 +1116,10 @@ let keeper_memory_search_with_outcome
                 ; read_errors
                 ; matched_memory_ids = []
                 }))
-      | Current -> current_stores ()
+      | Current ->
+        (match current_cursor_of_json (Safe_ops.safe_member "cursor" args) with
+         | Error _ as error -> error
+         | Ok cursor -> current_stores cursor)
     in
     let record_search_outcome outcome =
       Otel_metric_store.inc_counter
@@ -1050,17 +1130,26 @@ let keeper_memory_search_with_outcome
     in
     match result with
     | Error error ->
-      record_search_outcome Store_unavailable;
+      let rejection = match error with
+        | Cursor_invalid | Cursor_stale | Cursor_scope_unsupported -> true
+        | Snapshot_read_failed _ | Source_revalidate_failed _ | Absorbed_read_failed _
+        | Dropped_read_failed _ | Events_read_failed _ -> false in
+      if not rejection then record_search_outcome Store_unavailable;
       Keeper_tool_execution.failure
-        ~class_:Tool_result.Dependency_unavailable
-        ~effect_disposition:Tool_result.Proven_pre_effect
+        ~class_:(if rejection then Tool_result.Policy_rejection else Tool_result.Dependency_unavailable)
+        ~effect_disposition:(match error with
+          | Cursor_stale -> Tool_result.Effect_outcome_unknown
+          | Cursor_invalid | Cursor_scope_unsupported
+          | Snapshot_read_failed _ | Source_revalidate_failed _ | Absorbed_read_failed _
+          | Dropped_read_failed _ | Events_read_failed _ -> Tool_result.Proven_pre_effect)
         (error_json
            ~fields:
              [ "error_kind", `String (durable_search_error_kind_to_string error)
              ; "source", `String source_label
              ; "detail", `String (durable_search_error_detail error)
              ]
-           "keeper_memory_search could not read the durable memory store")
+           (if rejection then "keeper_memory_search refused the page cursor"
+            else "keeper_memory_search could not read the durable memory store"))
     | Ok { output = result; match_count; durable_candidates; read_errors; matched_memory_ids } ->
     record_search_outcome
       (match match_count > 0, read_errors with

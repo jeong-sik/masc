@@ -169,11 +169,11 @@ let current_facts ~keepers_dir ~keeper_id =
   | Error detail -> Alcotest.fail detail
 ;;
 
-let replace_current_facts ~keepers_dir ~keeper_id facts =
+let replace_current_facts ?expected_revision ~keepers_dir ~keeper_id facts =
   Current.replace
     ~keepers_dir
     ~keeper_id
-    ~expected_revision:None
+    ~expected_revision
     ~now:(Time_compat.now ())
     ~source:{ Current.kind = Current.Librarian; trace_id = "seed" }
     ~facts
@@ -3291,6 +3291,83 @@ let string_list_field key json =
    recorded with the query and the turn. A miss records nothing. The
    decision-log line names the same ids, so the two records agree, and counts
    the facts searched, so a miss can be told from an empty store. *)
+let test_current_search_pages_all_matching_memory () =
+  with_temp_dir @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "current-pages" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let ordinary = List.init 23 (fun index -> fact (Printf.sprintf "deployment decision %02d" index)) in
+  replace_current_facts ~keepers_dir ~keeper_id:meta.name ordinary;
+  let sandbox_root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  Fs_compat.mkdir_p sandbox_root;
+  List.iter (fun index ->
+    let source_path = Printf.sprintf "decision-%02d.txt" index in
+    Fs_compat.save_file (Filename.concat sandbox_root source_path) "original decision";
+    let written = Runtime.keeper_memory_write_with_outcome ~config ~meta
+        ~args:(make_source_args ~title:""
+          ~content:(Printf.sprintf "deployment source decision %02d" index) ~source_path) in
+    Alcotest.(check bool) "source fact persisted" true
+      (json_field "ok" (Yojson.Safe.from_string written.raw_output) = `Bool true))
+    (List.init 12 Fun.id);
+  let search ?cursor ?(source = "current") ?(query = "deployment") ?(limit = 10) () =
+    Runtime.keeper_memory_search_json ~config ~meta
+      ~ctx_work:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
+      ~args:(`Assoc ([ "query", `String query; "source", `String source; "limit", `Int limit ]
+        @ match cursor with None -> [] | Some cursor -> [ "cursor", cursor ]))
+    |> Yojson.Safe.from_string in
+  let first = search () in
+  Alcotest.(check int) "first page respects existing page size" 10 (int_field "match_count" first);
+  let cursor = json_field "next_cursor" first in
+  let rec pages response =
+    let matches = match_texts response in
+    if json_field "truncated" response = `Bool true then
+      matches @ pages (search ~cursor:(json_field "next_cursor" response) ())
+    else (
+      (* The last page leaves the field out; [json_field] fails on a missing
+         one, so read it as optional. *)
+      Alcotest.(check bool) "last page has no next cursor" true
+        (Yojson.Safe.Util.member "next_cursor" response = `Null);
+      matches) in
+  let all = pages first in
+  let source_snapshot = match Masc.Keeper_memory_source_current.read_for_keepers_dir
+      ~keepers_dir ~keeper_id:meta.name with
+    | Ok (Some snapshot) -> snapshot
+    | _ -> Alcotest.fail "source snapshot missing" in
+  Alcotest.(check (list string)) "every ordinary and source fact appears once in store order"
+    (List.map (fun (f : Masc.Keeper_memory_os_types.fact) -> f.claim) ordinary
+     @ List.map (fun (f : Masc.Keeper_memory_source_current.fact) -> f.claim) source_snapshot.facts)
+    all;
+  Alcotest.(check (list string)) "only emitted ordinary facts receive retrievals"
+    (List.map Masc.Keeper_memory_os_types.memory_id ordinary)
+    (List.map (fun (event : Events.event) -> event.memory_id)
+       (events_for ~keepers_dir ~keeper_id:meta.name));
+  let count = List.length (events_for ~keepers_dir ~keeper_id:meta.name) in
+  let rejected kind response =
+    Alcotest.(check string) "cursor rejection is explicit" kind (string_field "error_kind" response);
+    Alcotest.(check int) "rejected cursor emits no retrieval" count
+      (List.length (events_for ~keepers_dir ~keeper_id:meta.name)) in
+  rejected "stale_memory_search_cursor" (search ~cursor ~query:"decision" ());
+  rejected "unsupported_memory_search_cursor_scope" (search ~cursor ~source:"all" ());
+  rejected "invalid_memory_search_cursor" (search ~cursor:(`String "malformed") ());
+  rejected "invalid_memory_search_cursor" (search ~cursor:(`Int 10) ());
+  (* The snapshot seeded above is revision 1; replacing it names that one. *)
+  replace_current_facts ~expected_revision:1 ~keepers_dir ~keeper_id:meta.name
+    (ordinary @ [fact "unrelated new fact changes the corpus"]);
+  rejected "stale_memory_search_cursor" (search ~cursor ());
+  let restart = search () in
+  Alcotest.(check int) "restart after corpus change returns first page" 10 (int_field "match_count" restart);
+  let source_cursor = json_field "next_cursor" restart in
+  Fs_compat.save_file (Filename.concat sandbox_root "decision-00.txt") "changed source";
+  let refused = Runtime.keeper_memory_search_with_outcome ~config ~meta
+      ~ctx_work:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
+      ~args:(`Assoc [ "query", `String "deployment"; "cursor", source_cursor ]) () in
+  Alcotest.(check string) "source invalidation makes the old page cursor stale"
+    "stale_memory_search_cursor"
+    (string_field "error_kind" (Yojson.Safe.from_string refused.raw_output));
+  Alcotest.(check bool) "post-revalidation refusal does not claim proven no effects" true
+    (refused.failure_effect_disposition = Tool_result.Effect_outcome_unknown)
+;;
+
 let test_search_records_a_retrieval_per_ordinary_match () =
   with_temp_dir
   @@ fun base_path ->
@@ -3841,6 +3918,8 @@ let () =
             "history complete query outranks retained fragments"
             `Quick
             test_history_complete_query_outranks_retained_fragments
+        ; Alcotest.test_case "current search pages every matching fact and refuses stale cursors" `Quick
+            test_current_search_pages_all_matching_memory
         ; Alcotest.test_case "history search limits distinct matches" `Quick
             test_history_search_limits_distinct_matches
         ; Alcotest.test_case "history search orders selected messages" `Quick

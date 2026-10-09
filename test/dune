@@ -183,7 +183,7 @@
 (test
  (name test_msx_vision)
  (modules test_msx_vision)
- (libraries masc.machine_configuration alcotest unix base64 yojson fs_compat masc masc_test_deps
+ (libraries masc.lane_addon_call_context masc.msx_worker mcp_protocol mcp_protocol.eio eio.unix masc.machine_configuration alcotest unix base64 yojson fs_compat masc masc_test_deps
    masc.msx_lane masc.masc_compression masc.multimodal masc.tool_types))
 
 (test
@@ -5225,7 +5225,7 @@
 (test
  (name test_lane_addon_worker)
  (modules test_lane_addon_worker)
- (libraries masc masc_random_id mcp_protocol alcotest eio eio_main yojson unix digestif masc.fs_compat))
+ (libraries masc.lane_addon_call_context masc masc_random_id mcp_protocol alcotest eio eio_main yojson unix digestif masc.fs_compat))
 
 (include stanzas/test_bedrock_sdk.inc)
 (test
@@ -5722,6 +5722,24 @@
  (name test_lane_addon_tool_result)
  (modules test_lane_addon_tool_result)
  (libraries alcotest masc.lane_addon_tool_result masc.tool_types mcp_protocol yojson))
+
+(test
+ (name test_msx_addon_worker)
+ (modules test_msx_addon_worker)
+ (libraries masc.lane_addon_call_context masc.msx_worker masc.msx_lane masc.masc_core masc.machine_configuration
+  mcp_protocol mcp_protocol.eio eio eio_main eio.unix alcotest yojson base64 digestif unix))
+
+(test
+ (name test_dos_addon_worker)
+ (modules test_dos_addon_worker)
+ (libraries masc.tool_types masc.lane_addon_tool_result masc.lane_addon_call_context masc.machine_controller_contract
+  masc.dos_worker masc.dos_lane masc.machine_pad_layout masc.masc_core masc.machine_configuration
+  mcp_protocol mcp_protocol.eio eio eio_main eio.unix alcotest yojson base64 digestif unix))
+
+(test
+ (name test_machine_input_history)
+ (modules test_machine_input_history)
+ (libraries masc_test_deps masc.machine_input_history mcp_protocol eio_main yojson alcotest unix))
 
 (test
  (name test_tui_models_account_reading)

@@ -63,6 +63,7 @@ type dashboard_purge_artifact =
   | Keeper_memory_events_artifact
   | Keeper_turn_boundaries_artifact
   | Keeper_librarian_progress_artifact
+  | Keeper_external_read_cursor_artifact
   | Keeper_librarian_official_progress_artifact
   | Keeper_playground_bundles_artifact
   | Keeper_runtime_configuration_artifact
@@ -645,6 +646,7 @@ let dashboard_purge_artifact_plan ~keeper_name context =
        log (RFC librarian-lifecycle §10-3). Left behind with the log gone, it
        would point past lines a same-name successor has not written yet, and
        that keeper's first official turns would be passed unread. *)
+  ; Keeper_external_read_cursor_artifact
   ; Keeper_librarian_official_progress_artifact
     (* A Keeper can change sandbox profiles across lifetimes. Remove every
        backend-scoped root for the exact name so a same-name successor cannot

@@ -951,7 +951,6 @@ let test_invariant_fiber_started_reset_exhaustive () =
     ; stop_requested = true
     ; restart_requested = true
     ; drain_complete = true
-    ; credential_archived = true
     }
   in
   let updated =
@@ -976,8 +975,6 @@ let test_invariant_fiber_started_reset_exhaustive () =
   check bool "stop_requested reset" false updated.stop_requested;
   (* Operator-intent conditions that ARE preserved *)
   check bool "operator_paused preserved" true updated.operator_paused;
-  (* Failure markers remain observations across a fiber start. *)
-  check bool "credential_archived preserved" true updated.credential_archived;
   (* Untouched conditions stay as-is *)
   check bool "context_handoff_needed unchanged" true updated.context_handoff_needed
 ;;
@@ -1208,7 +1205,6 @@ let test_invariant_priority_chain () =
     ; stop_requested = true
     ; restart_requested = true
     ; drain_complete = true
-    ; credential_archived = false
     }
   in
   check phase_t "all true: Stopped" SM.Stopped (SM.derive_phase all_true);
@@ -1252,7 +1248,6 @@ let test_setclear_coverage () =
     ; ("stop_requested", fun c -> c.stop_requested)
     ; ("restart_requested", fun c -> c.restart_requested)
     ; ("drain_complete", fun c -> c.drain_complete)
-    ; ("credential_archived", fun c -> c.credential_archived)
     ]
   in
   (* Conditions with all booleans false *)
@@ -1266,7 +1261,6 @@ let test_setclear_coverage () =
     ; stop_requested = false
     ; restart_requested = false
     ; drain_complete = false
-    ; credential_archived = false
     }
   in
   (* Conditions with all booleans true *)
@@ -1280,7 +1274,6 @@ let test_setclear_coverage () =
     ; stop_requested = true
     ; restart_requested = true
     ; drain_complete = true
-    ; credential_archived = true
     }
   in
   let context_actions_clean : SM.context_actions =
@@ -1350,10 +1343,8 @@ let test_setclear_coverage () =
          fields)
     all_events;
   (* Fields managed outside the ordinary FSM event loop are exempt. *)
-  let exempt_from_clearer = [ "credential_archived" ] in
   let exempt_from_setter =
     [ "launch_pending" (* set externally before Fiber_started *)
-    ; "credential_archived" (* no event sets it; the composite JSON still carries the key *)
     ]
   in
   (* Print coverage report for diagnostics *)
@@ -1380,12 +1371,11 @@ let test_setclear_coverage () =
   Buffer.add_string buf "--- End Report ---\n";
   (* Use Alcotest check with diagnostic message *)
   let report = Buffer.contents buf in
-  (* Assert: every non-exempt field has at least one clearer *)
+  (* Every condition can be cleared by an event. *)
   let missing_clearers =
     List.filter
       (fun (field_name, _) ->
-         (not (List.mem field_name exempt_from_clearer))
-         && List.length (Hashtbl.find clearers field_name) = 0)
+         List.length (Hashtbl.find clearers field_name) = 0)
       fields
   in
   if missing_clearers <> []

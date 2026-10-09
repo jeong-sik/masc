@@ -14,17 +14,6 @@
     },
     {
       "publisher": "anthropic",
-      "model_id": "claude-opus-5",
-      "release": {
-        "status": "official_release",
-        "released_on": "2026-07-24",
-        "kind": "general_availability",
-        "source_url": "https://www.anthropic.com/news/claude-opus-5",
-        "checked_on": "2026-09-10"
-      }
-    },
-    {
-      "publisher": "anthropic",
       "model_id": "claude-opus-5-5",
       "release": {
         "status": "official_release",

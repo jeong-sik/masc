@@ -29,3 +29,9 @@ description = "Instruction budget per key. Default 4000000."
 minimum = 1
 maximum = 4000000
 default = 4000000
+
+[[params]]
+name = "expected_program"
+type = "string"
+min_length = 1
+description = "If supplied, press only while this saved program identity is still loaded. Useful for controls selected from a program-specific pad layout."

@@ -242,15 +242,22 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
       (0, 0, [], [], []) (P.source_spans unit) in
     {base with messages=List.rev messages; tool_observations=List.rev observations;
       historical_task_contexts=List.rev contexts} in
+  let runtime_keepers_dir = Workspace.keepers_runtime_dir config in
+  let external_capture = ref None in
   let memory_input (base : Keeper_librarian.input) unit =
     let ( let* ) = Result.bind in
     let input = source_input ~include_observations:true base unit in
     let* counterpart_observations = match P.turn_window unit with
-      | None -> Ok []
+      | None -> external_capture := None; Ok []
       | Some { P.after; through } ->
-        Keeper_librarian_input_sources.counterpart_observations_between
+        let* cursor = Keeper_external_read_cursor.read ~memory_keepers_dir:keepers_dir
+          ~runtime_keepers_dir ~keeper_name in
+        let* observations, through = Keeper_librarian_input_sources.counterpart_observations_from
+          ~external_after:(Keeper_external_read_cursor.offset cursor)
           ~base_dir:base_path ~keeper_name ~after ~before:through
-        |> Result.map_error Keeper_librarian_input_sources.read_error_to_string in
+          |> Result.map_error Keeper_librarian_input_sources.read_error_to_string in
+        external_capture := Some (cursor,through);
+        Ok observations in
     Ok { input with counterpart_observations } in
   let rec next () =
     observe O.Checking;
@@ -347,6 +354,12 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
       let* input =
         if memory_committed then Ok (source_input ~include_observations:false input selected)
         else memory_input input selected in
+      let* () = if memory_committed then Ok () else
+        match !external_capture with
+        | None -> Ok ()
+        | Some (cursor,through) ->
+          Keeper_external_read_cursor.prepare ~memory_keepers_dir:keepers_dir ~runtime_keepers_dir ~keeper_name cursor
+            ~through ~atom:(Some range_id) ~official:None in
       Ok (current, memory_committed, range_id, selected, input)) in
     match inputs with
     | Error detail -> report O.Input_unavailable detail

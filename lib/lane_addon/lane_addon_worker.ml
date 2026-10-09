@@ -4,6 +4,7 @@ type error =
   | Invalid_package of string
   | Docker_failed of { operation : string; detail : string }
   | Protocol_failed of string
+  | Host_refusal of Lane_addon_call_context.host_refusal
   | Invalid_observation of string
   | Stopped
 
@@ -15,7 +16,9 @@ type t = {
   instance_id : string;
   package : package;
   artifact_store : Lane_addon_store.t option;
+  input_history : Lane_addon_machine_history.t;
   sampling_broker : Lane_addon_sampling.t option;
+  mutable exported_tools : Mcp_protocol.Mcp_types.tool list;
   mutable action_schema : Yojson.Safe.t option;
   mutable client : Agent_core.Mcp.t option;
   cleanup : unit -> (unit, error) result;
@@ -28,6 +31,7 @@ let error_to_string = function
   | Invalid_package detail -> "invalid Add-on package: " ^ detail
   | Docker_failed { operation; detail } ->
       Printf.sprintf "Add-on Docker %s failed: %s" operation detail
+  | Host_refusal (Lane_addon_call_context.Rejected detail | Unavailable detail | Activity_disabled detail | Activity_unobserved detail) -> detail
   | Protocol_failed detail -> "Add-on MCP failure: " ^ detail
   | Invalid_observation detail -> "invalid Add-on observation: " ^ detail
   | Stopped -> "Add-on worker is stopped"
@@ -36,6 +40,7 @@ let ( let* ) = Result.bind
 let container_id t = t.id
 let container_name t = t.name
 let action_schema t = t.action_schema
+let exported_tools t = if t.stopping then [] else t.exported_tools
 let owned_name instance_id =
   "masc-lane-" ^ Digestif.SHA256.(to_hex (digest_string instance_id))
 let valid_container_id id =
@@ -212,7 +217,7 @@ let inspect_owned_container ~run ~instance_id ~name id =
   with Yojson.Json_error detail ->
     Error (Docker_failed { operation = "recover ownership"; detail })
 
-let recover_stop ~clock ~control_timeout_sec ~mgr ~instance_id ~container_id
+let recover_stop ~clock ~control_timeout_sec ~mgr ~instance_id ~container_id ?state_owner
     ?(docker_command = "docker") () =
   if not (Float.is_finite control_timeout_sec) || control_timeout_sec <= 0. then
     Error (Invalid_package "control_timeout_sec must be finite and positive")
@@ -223,7 +228,9 @@ let recover_stop ~clock ~control_timeout_sec ~mgr ~instance_id ~container_id
     let run = run_control ~clock ~timeout_sec:control_timeout_sec ~mgr ~docker_command in
     let* found, name = match container_id with
       | None ->
-          let name = owned_name instance_id in
+          let name = match state_owner with
+            | None -> owned_name instance_id
+            | Some owner -> Lane_addon_worker_state.container_name owner in
           let* id = find_named_container ~run name in
           Ok (id, Some name)
       | Some id ->
@@ -250,13 +257,19 @@ let stop t =
      | Eio.Io _ | Unix.Unix_error _ | Sys_error _ -> ());
     Ok ()
 
-let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package) ?(mounts = [])
+let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package) ?state_owner ?(mounts = [])
     ?(docker_command = "docker") ?(on_created = fun _ -> ()) ?artifact_store ?sampling_handler () =
   let* () = if String.trim instance_id = "" then Error (Invalid_package "instance_id must be non-blank")
     else Ok () in
   let* () = if Float.is_finite control_timeout_sec && control_timeout_sec > 0. then Ok ()
     else Error (Invalid_package "control_timeout_sec must be finite and positive") in
   let* () = validate_package package in
+  let* () = match package.state_storage, state_owner with
+    | Persistent, None -> Error (Invalid_package "persistent state requires a host-owned installation identity")
+    | Ephemeral, Some _ -> Error (Invalid_package "package did not declare persistent state")
+    | Persistent, Some _ | Ephemeral, None -> Ok () in
+  let* _ = validate_exported_tools ~action_tool:package.action_tool package.exported_tools
+    |> Result.map_error (fun detail -> Invalid_package detail) in
   let sampling_broker = sampling_handler in
   let* sampling_handler = match package.model_access, sampling_handler with
     | Model_disabled, None -> Ok None
@@ -278,8 +291,20 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
      identifies a container when the process dies before receiving create's
      stdout or persisting [on_created]. Domain labels are checked before any
      recovered container is removed. *)
-  let name = owned_name instance_id in
+  let name = match state_owner with
+            | None -> owned_name instance_id
+            | Some owner -> Lane_addon_worker_state.container_name owner in
   let run = run_control ~clock ~timeout_sec:control_timeout_sec ~mgr ~docker_command in
+  let* state_mount = match state_owner with
+    | None -> Ok []
+    | Some owner when not (Lane_addon_worker_state.belongs_to owner ~package_id:package.id) ->
+        Error (Invalid_package "persistent state owner names a different package")
+    | Some owner ->
+        Lane_addon_worker_state.ensure owner
+          ~run:(fun ~operation args -> run ~operation args |> Result.map_error error_to_string)
+        |> Result.map (fun mount -> ["--mount"; mount])
+        |> Result.map_error (fun detail -> Docker_failed {operation="persistent state";detail})
+  in
   let identity = ref None in
   let cleanup_finished = ref false in
   let cleanup () =
@@ -289,7 +314,7 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
           (* create can take effect before its stdout is received. Verify the
              binding's deterministic name and label instead of removing an
              unverified name collision. *)
-          let* () = recover_stop ~clock ~control_timeout_sec ~mgr ~instance_id ~container_id:None
+          let* () = recover_stop ~clock ~control_timeout_sec ~mgr ~instance_id ~container_id:None ?state_owner
               ~docker_command () in
           cleanup_finished := true;
           Ok ()
@@ -320,7 +345,7 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
          "--network"; "none"; "--read-only"; "--cap-drop"; "ALL";
          "--security-opt"; "no-new-privileges"; "--log-driver"; "none";
          "--interactive"; "--workdir"; "/addon"; "--mount"; package_mount ]
-       @ mounted @ [ "--"; package.image ] @ package.command) with
+       @ mounted @ state_mount @ [ "--"; package.image ] @ package.command) with
     | Ok value -> Ok value
     | Error error -> fail_start error
   in
@@ -336,7 +361,7 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
         try Eio.Flow.close source with Eio.Io _ | Unix.Unix_error _ -> ()) !stderr_source;
       stderr_source := None;
       Ok () in
-    let worker = { id; name; instance_id; package; artifact_store; sampling_broker; action_schema = None;
+    let worker = { id; name; instance_id; package; artifact_store; input_history=Lane_addon_machine_history.create (); sampling_broker; action_schema = None; exported_tools = [];
                    client = None; cleanup = worker_cleanup;
                    mutex = Eio.Mutex.create (); stopping = false; removed = false } in
     let result = try
@@ -377,6 +402,22 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
                        |> Result.map_error (fun detail -> Protocol_failed detail) in
                      worker.action_schema <- Some tool.input_schema; Ok ()
                  | _ -> Error (Protocol_failed "package must advertise exactly one configured action tool")) in
+          let* () = match package.tool_invocation with
+            | Direct -> Ok ()
+            | Host_context ->
+                if package.action_tool = Some Lane_addon_call_context.tool_name then
+                  Error (Invalid_package "caller-context control port cannot also be the action port")
+                else match List.filter (fun (tool : Mcp_protocol.Mcp_types.tool) ->
+                    String.equal tool.name Lane_addon_call_context.tool_name) tools with
+                  | [_] -> Ok ()
+                  | _ -> Error (Protocol_failed "package must advertise exactly one lane_call control tool") in
+          let* exported = List.fold_left (fun result name ->
+            let* selected = result in
+            match List.filter (fun (tool : Mcp_protocol.Mcp_types.tool) -> String.equal tool.name name) tools with
+            | [tool] -> Ok (tool :: selected)
+            | _ -> Error (Protocol_failed ("package must advertise exactly one exported tool: " ^ name)))
+            (Ok []) package.exported_tools in
+          worker.exported_tools <- List.rev exported;
           Ok worker
       with
       | (Eio.Io _ | Unix.Unix_error _ | Sys_error _ | End_of_file | Failure _
@@ -415,9 +456,21 @@ let observe t ~binding ~sources =
               match result.structured_content with
               | None -> Error (Invalid_observation "lane_observe must return structuredContent")
               | Some json ->
-                  Eio_unix.run_in_systhread (fun () ->
+                  let* output = Eio_unix.run_in_systhread (fun () ->
                     Lane_addon_packet.decode ?store:t.artifact_store json)
-                  |> Result.map_error (fun detail -> Invalid_observation detail)
+                    |> Result.map_error (fun detail -> Invalid_observation detail) in
+                  let has_history = List.exists (fun (row : row) -> List.mem_assoc "input_history" row.fields) output.rows in
+                  if not has_history then Ok output else
+                  let* store = match t.artifact_store with Some store -> Ok store
+                    | None -> Error (Invalid_observation "machine history requires an owned artifact store") in
+                  let* output = Lane_addon_machine_history.retain t.input_history ~store ~instance_id:t.instance_id
+                    ~max_response_bytes:t.package.resources.max_reply_bytes
+                    ~call:(fun ~name ~arguments ->
+                      if t.stopping then Error "worker stopped during input history transfer"
+                      else Agent_core.Mcp.call_tool_full client ~name ~arguments
+                        |> Result.map_error Agent_core.Error.to_string) output
+                    |> Result.map_error (fun detail -> Invalid_observation detail) in
+                  if t.stopping then Error Stopped else Ok output
       with
       | Eio.Cancel.Cancelled _ as exn -> t.stopping <- true; raise exn
       | (Eio.Io _ | Unix.Unix_error _ | Sys_error _ | End_of_file | Failure _
@@ -457,3 +510,28 @@ let act t ~arguments =
     | Eio.Cancel.Cancelled _ as exn -> t.stopping <- true; raise exn
     | (Eio.Io _ | Unix.Unix_error _ | Sys_error _ | End_of_file | Failure _ | Invalid_argument _) as exn ->
         Error (Protocol_failed (Printexc.to_string exn)))
+
+let call_exported_tool ?(on_result = fun _ -> ()) ?authorize ?(principal = Lane_addon_call_context.Anonymous) t ~name ~arguments =
+  if t.stopping then Error Stopped
+  else
+      let* () = if List.exists (fun (tool : Mcp_protocol.Mcp_types.tool) ->
+          String.equal tool.name name) t.exported_tools then Ok ()
+        else Error (Protocol_failed "tool is not exported by this worker") in
+      let* client = match t.client with Some client -> Ok client
+        | None -> Error (Protocol_failed "worker initialization pending") in
+      let call ~name ~arguments =
+        Eio.Mutex.use_ro t.mutex (fun () ->
+          if t.stopping then Error "Add-on worker is stopped"
+          else Agent_core.Mcp.call_tool_full client ~name ~arguments
+            |> Result.map (fun result -> on_result result; result)
+            |> Result.map_error Agent_core.Error.to_string) in
+      try
+        Lane_addon_worker_invocation.run ~invocation:t.package.tool_invocation
+          ~authorize ~principal ~name ~arguments ~call
+        |> Result.map_error (function
+          | Lane_addon_call_context.Host_refusal refusal -> Host_refusal refusal
+          | Transport_error detail -> Protocol_failed detail)
+      with
+      | Eio.Cancel.Cancelled _ as exn -> t.stopping <- true; raise exn
+      | (Eio.Io _ | Unix.Unix_error _ | Sys_error _ | End_of_file | Failure _ | Invalid_argument _) as exn ->
+          Error (Protocol_failed (Printexc.to_string exn))

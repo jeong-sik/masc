@@ -424,8 +424,11 @@ let test_inventory_skips_subdirectories_like_load () =
         | Some (`String name) -> name | _ -> fail "no filename") files);
     let loaded = load ~base_path "game" in
     check bool "directory with subdirectories still loads" true (is_completed loaded);
+    (* The machine reports the names the guest sees, and DOS folds names to
+       upper case (Dos_lane.dos_name_collision). *)
     check bool "machine mounts exactly the advertised file" true
-      (member "files" (Tool_result.data loaded) = Some (`List [`String "game.com"])))
+      (member "files" (Tool_result.data loaded)
+       = Some (`List [`String (String.uppercase_ascii "game.com")])))
 ;;
 
 (* Swap a directory out during enumeration, then restore it before final

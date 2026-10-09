@@ -482,6 +482,14 @@ let test_current_nonterminal_event_set () =
           ; "toolCallId", `String "tool-1"
           ; "executionId", `String "exec-1"
           ]
+      else if String.equal name "KEEPER_NATIVE_TOOL_START"
+              || String.equal name "KEEPER_NATIVE_TOOL_END" then
+        `Assoc
+          [ "toolStreamScope", `Int 0
+          ; "toolCallBlockIndex", `Int 0
+          ; "toolCallId", `String "tool-1"
+          ; "toolCallName", `String "read"
+          ]
       else if String.equal name "KEEPER_CHAT_BATCH_BOUND" then
         `Assoc ["operation_id", `String request.request_id; "execution_id", `String "shared-execution"]
       else if String.equal name "KEEPER_STREAM_PROTOCOL_ERROR" then
@@ -1170,7 +1178,7 @@ let test_batch_member_events_pass_request_bound_stream_decode () =
     ; Events.Batch_bound {operation_id=owner_id; execution_id=owner_id}
     ; Events.Text_message_start {message_id="keeper-operation-message-batch-owner"; role=Events.Assistant}
     ; Events.Text_delta {text="hello"; stream_scope=None}
-    ; Events.Reply_details {reply="hello"; turn_outcome=Masc.Keeper_turn_outcome.Visible_reply;
+    ; Events.Reply_details {terminal_stream_scope = Some 0; reply="hello"; turn_outcome=Masc.Keeper_turn_outcome.Visible_reply;
         turn_ref=Ids.Turn_ref.make ~trace_id:"shared" ~absolute_turn:1}
     ; Events.Text_message_end
     ; Events.Run_finished {run_id="keeper-operation-run-batch-owner"} ] in

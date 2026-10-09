@@ -48,6 +48,7 @@ module Id : sig
     | Turn_records
     | Turn_boundaries
     | Librarian_progress
+    | Librarian_external_cursor
     | Librarian_official_progress
     | Turn_fragments
     | Memory_absorbed

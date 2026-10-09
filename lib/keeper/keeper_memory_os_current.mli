@@ -178,6 +178,12 @@ type explicit_write_range_id =
   ; input_sha256 : string
   }
 
+val durable_range_id_to_json : durable_range_id -> Yojson.Safe.t
+val official_range_id_to_json : official_range_id -> Yojson.Safe.t
+val durable_range_id_of_json : Yojson.Safe.t -> (durable_range_id, Keeper_memory_os_types.wire_error) result
+val official_range_id_of_json : Yojson.Safe.t -> (official_range_id, Keeper_memory_os_types.wire_error) result
+(** Canonical receipt identities, also used to recover the external read cursor
+    from the same committed Memory transaction. *)
 (** Why a librarian pass produced no snapshot. The journal is the only place
     this reaches disk, so the set is closed here rather than at the call site:
     a new failure mode has to name itself before it can be recorded, and

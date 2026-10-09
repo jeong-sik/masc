@@ -527,6 +527,45 @@ let test_repository_activity_covers_all_writers () =
       (dispatch router (http_request ~meth:`GET ~path ()))))
 ;;
 
+let test_repository_activity_needs_no_canonical_remote () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    let local_remote = "/srv/git/local-masc" in
+    check bool "precondition: a filesystem remote has no canonical codebase" true
+      (Option.is_none (Ide_paths.canonical_url_of_remote local_remote));
+    let repository = repository_fixture ~id:"local" ~url:local_remote ~local_path:base_path in
+    (match Repo_store.save_all ~base_path [repository] with Ok () -> () | Error e -> fail e);
+    Masc.Keeper_tool_call_log.init ~base_path ();
+    let directory = match Masc.Keeper_tool_call_log.store_dir () with
+      | Some path -> path | None -> fail "tool-call store was not initialized" in
+    let store = Dated_jsonl.create ~base_dir:directory () in
+    Fun.protect ~finally:(fun () ->
+      Dated_jsonl.prepare_for_directory_removal store;
+      Masc.Keeper_tool_call_log.reset_for_testing ()) (fun () ->
+    Dated_jsonl.append store
+      (`Assoc ["ts", `Float (Unix.gettimeofday ()); "keeper", `String "writer";
+        "route_evidence", `Assoc ["descriptor_id", `String "agent.edit_file"];
+        "action_radius", `Assoc ["target_path", `String "repos/local/a.ml"];
+        "disposition", `String "completed";
+        "input", `Assoc ["file_path", `String "a.ml"; "old_string", `String "old";
+                         "new_string", `String "new"]]);
+    let token = create_admin_token base_path "operator" in
+    let get path = dispatch router (http_request ~meth:`GET ~path ~token:(Some token) ()) in
+    let response = get "/api/v1/ide/repository-activity?repo_id=local&window_hours=24" in
+    check_status "repository activity needs only the registered id" 200 response;
+    let data = response |> response_body |> Yojson.Safe.from_string |> Json.member "data" in
+    (match Masc.Tui_decode.decode_repository_activity_snapshot data with
+     | Ok snapshot ->
+       check (list string) "the write is read by repository id"
+         ["writer"]
+         (List.map (fun (row : Masc.Tui_decode.file_change) -> row.fc_keeper) snapshot.ras_changes)
+     | Error e -> fail e);
+    check_status "an unknown repository id is still not found" 404
+      (get "/api/v1/ide/repository-activity?repo_id=missing&window_hours=24");
+    (* File activity keys rows by codebase too, so it still refuses. *)
+    check_status "file activity still needs a canonical codebase" 400
+      (get "/api/v1/ide/file-activity?repo_id=local&file_path=a.ml&window_hours=24")))
+;;
+
 (* ── POST /api/v1/ide/asks ── M1: the IDE files a Todo task for the pool. *)
 
 let ask_body ?(question = "why does this retry?") ?file_path ?line ?context ?priority () =
@@ -709,6 +748,8 @@ let () =
             test_get_events_rejects_negative_offset
         ; test_case "repository activity covers all writers in one request" `Quick
             test_repository_activity_covers_all_writers
+        ; test_case "repository activity needs no canonical remote" `Quick
+            test_repository_activity_needs_no_canonical_remote
         ; test_case "GET file activity requires file path" `Quick
             test_get_file_activity_requires_a_file_path
         ; test_case "GET file activity rejects invalid window" `Quick

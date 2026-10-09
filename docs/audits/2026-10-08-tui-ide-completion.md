@@ -59,8 +59,9 @@ interaction; it is not evidence of MASC runtime behavior.
    recorded Task into its existing detail and event history, then return to the
    same file/history position. Missing/unlinked/unreadable destinations keep the
    history visible and state the reason.
-4. [PR #41959](https://github.com/jeong-sik/masc/pull/41959): include unassigned
-   writers from the loaded roster in repository Activity. Exact repository-ID
+4. [PR #41959](https://github.com/jeong-sik/masc/pull/41959): include every
+   writer the shared fleet record holds for the 24-hour window in repository
+   Activity, including unassigned, deleted and unloaded Keepers. Exact repository-ID
    filtering and partial read failures remain explicit. Installed before-change
    omission reproduced in [this fixture PTY](../evidence/tui-writer-coverage-20261008/README.md).
 
@@ -89,9 +90,10 @@ are separate from formal GitHub approval and release verification.
 
 ## Next useful work and acceptance
 
-- Repository activity coverage: unassigned writers in the loaded roster are
-  now included in the fourth source slice. The installed before-change TUI
-  omission was reproduced in a real fixture PTY. Unloaded/deleted Keeper history
+- Repository activity coverage: the fourth source slice reads the shared fleet
+  record once, so every writer recorded in the 24-hour window is included,
+  whether unassigned, deleted or unloaded. The installed before-change TUI
+  omission was reproduced in a real fixture PTY. History older than the window
   still needs a durable inventory API before broader coverage can be claimed.
 - Task/result follow-through: the direct Task-detail and return path is now
   implemented in the third source slice. It includes task status, completion

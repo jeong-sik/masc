@@ -8,7 +8,8 @@ The first 60-column scenario failed waiting for beta-change.ml; only alpha's
 write was visible. The final completed screen is `before-60.txt`, with right cell
 padding removed. No live Keeper work was invoked.
 
-The repair reads the loaded roster and retains exact repository-ID filtering.
-Deleted/unloaded Keepers remain outside this stated scope. Parsing and source
+The repair reads the shared fleet tool-call record for the 24-hour window and
+retains exact repository-ID filtering. It does not filter by roster, so writes
+from deleted or unloaded Keepers inside the window are included. Parsing and source
 review do not prove candidate behavior; after-change PTY and deployment are
 separate, pending stages.

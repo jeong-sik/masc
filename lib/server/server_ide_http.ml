@@ -69,7 +69,7 @@ let canonical_path path =
   try Unix.realpath path with
   | Unix.Unix_error _ -> path
 
-let resolve_file_activity_repository ~base_path ~repo_id =
+let find_registered_repository ~base_path ~repo_id =
   match Repo_store.load_all ~base_path with
   | Error detail -> Error (`Unavailable detail)
   | Ok repositories -> (
@@ -105,15 +105,23 @@ let resolve_file_activity_repository ~base_path ~repo_id =
                "more than one registered repository uses id " ^ repo_id
              | None ->
                "more than one registered repository resolves to the project base path"))
-      | [ repository ] -> (
-          match Agent_observation.canonical_url_of_remote repository.url with
-          | Some codebase -> Ok (repository, codebase)
-          | None ->
-            Error
-              (`No_codebase
-                (Printf.sprintf
-                   "repository %s has no canonical codebase"
-                   repository.id))))
+      | [ repository ] -> Ok repository)
+
+(* File activity keys rows by codebase as well as repository, so it also needs
+   the remote's canonical form. Repository activity filters by the exact
+   repository ID alone and uses [find_registered_repository] directly. *)
+let resolve_file_activity_repository ~base_path ~repo_id =
+  match find_registered_repository ~base_path ~repo_id with
+  | Error (`Unavailable _ | `Not_found _ | `Ambiguous _ as error) -> Error error
+  | Ok (repository : Repo_manager_types.repository) -> (
+      match Agent_observation.canonical_url_of_remote repository.url with
+      | Some codebase -> Ok (repository, codebase)
+      | None ->
+        Error
+          (`No_codebase
+            (Printf.sprintf
+               "repository %s has no canonical codebase"
+               repository.id)))
 
 let file_activity_json ~codebase ~repo_id ~file_path ~window_hours =
   let tally = Keeper_tool_call_log.file_change_tally ~window_hours () in
@@ -479,15 +487,13 @@ let add_routes router =
         | Error detail, _ | _, Error detail ->
           Http.Response.json_value ~status:`Bad_request ~request (json_error detail) reqd
         | Ok repo_id, Ok window_hours ->
-          match resolve_file_activity_repository ~base_path:(base_path_of_state state) ~repo_id:(Some repo_id) with
+          match find_registered_repository ~base_path:(base_path_of_state state) ~repo_id:(Some repo_id) with
           | Error (`Unavailable detail) ->
             Http.Response.json_value ~status:`Service_unavailable ~request (json_error detail) reqd
           | Error (`Not_found detail) ->
             Http.Response.json_value ~status:`Not_found ~request (json_error detail) reqd
           | Error (`Ambiguous detail) ->
             Http.Response.json_value ~status:`Conflict ~request (json_error detail) reqd
-          | Error (`No_codebase detail) ->
-            Http.Response.json_value ~status:`Bad_request ~request (json_error detail) reqd
           | Ok _ ->
             let data = Domain_pool_ref.submit_io_or_inline (fun () ->
               repository_activity_json ~repo_id ~window_hours) in

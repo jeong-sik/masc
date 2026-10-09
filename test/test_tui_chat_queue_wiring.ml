@@ -6374,10 +6374,44 @@ let test_history_suppression_preserves_typed_source_collisions () =
     [operation,autonomous;autonomous,operation]
 ;;
 
+let test_native_progress_timing_follows_tool_density () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous = Masc_tui_ansi.get_terminal_size () in
+  let set_size value = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+      cache ~probe:(fun () -> Some value)) in
+  Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
+    set_size (60, 140);
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.msg_target_keeper_name <- Some "alpha";
+    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+    state.msg_origin_display <- Masc_tui_message_layout.Origin_bare;
+    let occurrence : Live.tool_occurrence = {stream_scope=0;block_index=1;
+      provider_message_id=None;tool_call_id=Some "native-progress"} in
+    let live = inflight_with_log ~keeper_name:"alpha" ~started_at:1.
+      [Live.Run_started;Live.Native_tool_started {occurrence;tool_name=Some "Execute"}] in
+    Tui_types.turn_log_add ~now:4. live.log ~seq:(Some 2)
+      (Live.Native_tool_progress {occurrence;progress=Runtime_native_tools.Output_observed {byte_count=9}});
+    Tui_types.turn_log_add ~now:5. live.log ~seq:(Some 3)
+      (Live.Native_tool_progress {occurrence;progress=Runtime_native_tools.Message_reported {message="provider waiting"}});
+    state.msg_inflight <- [live];
+    List.iter (fun tools ->
+      state.msg_tool_visibility <- tools;
+      let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+      let screen = String.concat "\n" (List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines) in
+      let has text = Astring.String.is_infix ~affix:text screen in
+      check bool "provider message remains visible in each density" true (has "provider waiting");
+      check bool "only Full exposes elapsed observation metadata"
+        (tools=Tui_types.Tools_full) (has "updated +");
+      check bool "Results and Full retain byte metadata"
+        (tools<>Tui_types.Tools_compact) (has "9 bytes observed"))
+      [Tui_types.Tools_compact;Tools_results;Tools_full])
+;;
+
 let () =
   run
     "tui_chat_queue_wiring"
-    [ ( "expanded diagnostics",
+    [("native progress density", [test_case "only Full shows elapsed progress" `Quick test_native_progress_timing_follows_tool_density]); ( "expanded diagnostics",
         [ test_case "settled identity and shared pending width" `Quick
             test_expanded_chat_diagnostics_preserve_settled_identity
         ; test_case "unavailable status repeats no diagnostics" `Quick

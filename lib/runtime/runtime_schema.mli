@@ -217,6 +217,7 @@ type model_capabilities =
   ; supports_response_format_json : bool option
   ; supports_structured_output : bool option
   ; supports_system_prompt : bool option
+  ; supports_assistant_prefill : bool option
   ; supports_prompt_caching : bool option
   ; supports_top_k : bool option
   ; supports_min_p : bool option
@@ -398,7 +399,8 @@ type typesafeai_destination =
     {!Keeper_board_attention_exact_flow}, which sends the post and the
     keeper's context) and [absorb_gate] (the librarian absorb gate,
     {!Keeper_librarian_absorb_gate}, which sends memory sentences). Context
-    preservation and Skill applicability review are opt-in too. All reach the
+    preservation, Skill applicability and host shared-memory selection each
+    require independent opt-in. All reach the
     same destinations, so one [excluded_keepers] applies to every review: a
     keeper named there is never asked about, whichever gate asks. *)
 type typesafeai =
@@ -415,6 +417,9 @@ type typesafeai =
   ; skill_applicability : bool
   ; librarian_preflight : bool
       (** Opt-in JEV no-change judgment for Memory-only passes. *)
+  ; workspace_memory_selection_enabled : bool
+      (** Independent opt-in to send current input/task context and shared-memory
+          interpretations/source details for host retrieval. Defaults to false. *)
   ; excluded_keepers : string list
   }
 [@@deriving show, eq]

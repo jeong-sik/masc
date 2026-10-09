@@ -277,6 +277,7 @@ function runtimeDeclaredModelControlText(provider: DashboardRuntimeProviderSnaps
     flagText(caps.supports_named_tool_choice, 'named'),
     flagText(caps.supports_parallel_tool_calls, 'parallel'),
     flagText(caps.supports_system_prompt, 'system-prompt'),
+    flagText(caps.supports_assistant_prefill, 'assistant-prefill'),
     flagText(caps.supports_prompt_caching, 'prompt-cache'),
     flagText(caps.emits_usage_tokens, 'usage'),
   ])
@@ -336,6 +337,7 @@ function runtimeEffectiveControlText(provider: DashboardRuntimeProviderSnapshot)
   return textList([
     flagText(caps.supports_native_streaming, 'native-stream'),
     flagText(caps.supports_system_prompt, 'system-prompt'),
+    flagText(caps.supports_assistant_prefill, 'assistant-prefill'),
     flagText(caps.supports_prompt_caching, 'prompt-cache'),
     flagText(caps.emits_usage_tokens, 'usage'),
   ])

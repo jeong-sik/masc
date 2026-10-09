@@ -41,7 +41,8 @@ let create ~base_path ~keeper_name ~turn_ref = Eio.Cancel.protect (fun () ->
     (* A notification names the canonical journal cursor. Readers fetch the
        journal rather than racing live frames against replay or exposing
        reasoning on a general observer connection. *)
-    (try Sse.broadcast_to Sse.Observers
+    (try Sse.broadcast_to
+       (Sse.Runtime_observers (Sse.runtime_authority_exn ~base_path))
        (`Assoc [ "type", `String "keeper_turn_stream_event";
          "name", `String keeper_name;
          "turn_ref", `String (Ids.Turn_ref.to_string turn_ref);

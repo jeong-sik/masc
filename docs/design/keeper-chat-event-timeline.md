@@ -132,3 +132,21 @@ Provider-internal subturns are not fabricated as completed Keeper turns. Native
 progress payloads, native success/failure outcomes, and Antigravity reasoning remain
 separate missing capabilities. Provider omissions and opaque signatures cannot be
 recovered by a renderer.
+
+Keeper operation events and autonomous journal notifications carry a typed runtime
+audience in the SSE delivery record. The audience is built from the canonical
+workspace base path, using the same resolver as Keeper registry identity. SSE
+registration retains its authenticated root; live delivery and replay require that
+root to match. External subscribers without a root receive only unscoped events.
+WebSocket upgrades bind their root before subscribing, and dashboard authentication
+cannot change it. gRPC subscriptions use the service's workspace root and a unique
+subscription occurrence id, independent of agent name or wall-clock time. Other
+global broadcast categories retain their existing audience contracts.
+
+The two-runtime fixtures in `test_sse_stream.ml` exercise the actual operation and
+autonomous publishers, live SSE, replay, and external subscribers with identical
+Keeper/operation identities. `test_ws_transport.ml` checks the upgrade/hello root
+binding; `test_grpc_workspace.ml` opens actual Subscribe handlers for the same
+agent in two roots and verifies sibling subscriptions survive another's closure.
+These are source-added regression cases, not a claim that this change was executed
+in a local application or deployment.

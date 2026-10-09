@@ -778,7 +778,8 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                  reads no such header, so its gap is not reported. *)
               let replay =
                 Option.map
-                  (Sse.replay_after_for_session ~session_id ~kind:sse_kind)
+                  (Sse.replay_after_for_session
+                     ~runtime_authority:(Sse.runtime_authority_exn ~base_path) ~session_id ~kind:sse_kind)
                   last_event_id
               in
               let observer_headers =

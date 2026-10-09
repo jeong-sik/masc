@@ -1,30 +1,45 @@
 {
-  "base": "a35ee4a8e7e0a10f05f854b03ac572bdd01972c1",
+  "scope": "Current source syntax only. Historical runtime/footer/PTY results are not re-executed or certified by this receipt.",
   "checks": {
-    "ocaml_syntax": "PASS",
-    "python_syntax": "PASS",
-    "footer_fitting_tests": 8
-  },
-  "source_sha256": {
-    "bin/masc_tui_footer.ml": "18e805648b1774fc64322fc81600b453b96b63069e60c39b21fb2d7b28dbf67d",
-    "bin/masc_tui_render.ml": "138af99d5abfa6ae5668d48b9005bea760bd4835605d3508354742984c29b267",
-    "bin/masc_tui_render_prim.ml": "8d4a8c501947d1a19cb287f7307394bb2d778c2a10a4321aafce388e2a712c68",
-    "test/test_tui_candle_currency_pty.py": "d88d6b5b332630d679c44747b13e43ca9626eff2df40c51d77fe449347f09dc4",
-    "test/test_tui_config_paths_row.py": "2f2b8d5a803b537e9d0b3f551b8b4d02dadaa89d530c545af39b0b5eeb501838",
-    "test/test_tui_footer_status_items.ml": "fa5daebf6b875068ca53046645e44eb4bb82441e8d6d5a74f3781ace5351f239",
-    "test/test_tui_remote_equipped_portrait.py": "8e0402d6584fc1c13fea2286080273c19224c05879769c64aeefdb9c2e8e2d70",
-    "test/test_tui_remote_workspace_history_pty.py": "a0b092531a1460d393c8fd7aece1ab6b7af8f90ed01d4bd3e16bb979a097335d"
-  },
-  "renderer_syntax_refresh": {
-    "source_commit": "4f999900e744b4649507ca140045906c5189e957",
-    "command": [
-      "ocamlc",
-      "-stop-after",
-      "parsing",
-      "-impl",
-      "bin/masc_tui_render.ml"
-    ],
-    "result": "PASS",
-    "scope": "Parser-only check rerun on the recorded renderer bytes; no native build, footer test, or PTY rerun."
+    "bin/masc_tui_footer.ml": {
+      "sha256": "18e805648b1774fc64322fc81600b453b96b63069e60c39b21fb2d7b28dbf67d",
+      "check": "ocaml parsing",
+      "result": "PASS"
+    },
+    "bin/masc_tui_render.ml": {
+      "sha256": "ff42d74a1ec7072e4695a43672b06fc52d2919612bf15d0dfa16a8a44ea31bde",
+      "check": "ocaml parsing",
+      "result": "PASS"
+    },
+    "bin/masc_tui_render_prim.ml": {
+      "sha256": "7045e2d3f0457e2cbd6b4e5833f36778db73d73e1126c6a0ec35224e4980bc44",
+      "check": "ocaml parsing",
+      "result": "PASS"
+    },
+    "test/test_tui_candle_currency_pty.py": {
+      "sha256": "d88d6b5b332630d679c44747b13e43ca9626eff2df40c51d77fe449347f09dc4",
+      "check": "python ast.parse",
+      "result": "PASS"
+    },
+    "test/test_tui_config_paths_row.py": {
+      "sha256": "2f2b8d5a803b537e9d0b3f551b8b4d02dadaa89d530c545af39b0b5eeb501838",
+      "check": "python ast.parse",
+      "result": "PASS"
+    },
+    "test/test_tui_footer_status_items.ml": {
+      "sha256": "e72773cc0f0cd3778c57aac44a40583bde23f09f042d43963e7751add0aeabbe",
+      "check": "ocaml parsing",
+      "result": "PASS"
+    },
+    "test/test_tui_remote_equipped_portrait.py": {
+      "sha256": "8e0402d6584fc1c13fea2286080273c19224c05879769c64aeefdb9c2e8e2d70",
+      "check": "python ast.parse",
+      "result": "PASS"
+    },
+    "test/test_tui_remote_workspace_history_pty.py": {
+      "sha256": "b984bec2df1d82f225aa1c26d10fd8288566e34a72234283ba180927b590e45e",
+      "check": "python ast.parse",
+      "result": "PASS"
+    }
   }
 }

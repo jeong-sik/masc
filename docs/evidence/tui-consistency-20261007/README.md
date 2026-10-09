@@ -9,23 +9,13 @@ System displays workspace paths and server version/commit/port/age on separate
 bounded rows. `config_identity_rows` supplies both the renderer and source-view
 height/cursor calculations.
 
-## Checks performed
+## Current syntax evidence
 
-- Eight existing pure footer fitting tests passed by interpreting the actual
-  message-layout/footer modules and the exact `strip_sgr` function extracted from
-  the theme source. They cover explicit diagnostic callers, search, narrow key
-  fitting, mismatch priority, armed actions, ANSI and leaving the screen.
-  `footer-fitting.txt` records the selected tests and result. This is not a
-  full application test or a built executable.
-- Changed OCaml syntax checked with `ocamlc -stop-after parsing`; changed Python
-  syntax checked with `ast.parse`. `source-checks.json` records exact file hashes.
-- The renderer hash was refreshed after the final source edit, and its
-  `ocamlc -stop-after parsing -impl bin/masc_tui_render.ml` check was rerun.
-  `renderer_syntax_refresh` records the checked source commit and command.
-  This refresh did not rerun the earlier footer tests or any PTY scenario.
-- Independent review identified narrow System diagnostics losing paths and PTY
-  fixtures using removed passive footer content. Responsive rows and current
-  System-authority barriers address those findings.
+`source-checks.json` records fresh parser results and SHA-256 identities for
+its listed source files. These checks establish syntax only. The archived
+`footer-fitting.txt` and earlier prose reports are historical evidence, not
+execution or independent-review receipts for this revised tree. No footer
+suite or PTY scenario was rerun for this repair.
 
 ## Execution still needed
 

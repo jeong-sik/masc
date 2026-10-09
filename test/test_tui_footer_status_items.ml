@@ -73,6 +73,16 @@ let test_working_footer_keeps_attention_without_background_activity () =
     [Masc_tui_types.Overview; Keepers Keeper_message; Board;
      Repositories; Config]
 
+let test_inflight_action_survives_navigation () =
+  let state = Masc_tui_types.create_state ~workspace:"" ~port:8935 ~refresh_interval:2. () in
+  state.keeper_action_inflight <- Some ("alpha", Masc_tui_keeper_control.Shutdown);
+  state.last_action <- None;
+  List.iter (fun view ->
+    state.view <- view;
+    check_bool "inflight action is shared across surfaces" true
+      (contains ~needle:"alpha" (render_action state 200)))
+    [Masc_tui_types.Overview; Board; Repositories; Config]
+
 let test_action_text_is_not_dropped_as_a_key () =
   List.iter (fun view ->
     let state = action_state view in
@@ -1447,4 +1457,5 @@ let tests =
 
 
 
-let () = Alcotest.run "tui_footer_status_items" tests
+let () = Alcotest.run "tui_footer_status_items"
+  (("inflight navigation", [Alcotest.test_case "global action survives navigation" `Quick test_inflight_action_survives_navigation]) :: tests)

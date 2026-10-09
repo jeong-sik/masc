@@ -12542,7 +12542,7 @@ let config_metadata_style = function
 let config_identity_rows ~cols (state : state) =
   let width = framed_inner_width cols in
   match state.server_identity with
-  | None -> ["  (server identity unread)"]
+  | None -> [Printf.sprintf "  port :%d · server identity unread" state.port]
   | Some identity ->
       let base = Terminal_text.single_line identity.Tui_decode.sid_base_path in
       let masc = Terminal_text.single_line identity.Tui_decode.sid_masc_root in

@@ -518,6 +518,26 @@ let search_marker_styled (state : state) =
          | None -> Ansi.dim)
         marker Ansi.reset
 
+let keeper_action_status (state : state) : Masc_tui_footer.status_item list =
+  match (state.keeper_action_inflight, state.keeper_action_pending) with
+  | Some (keeper_name, action), _ ->
+    [ Masc_tui_footer.Keeper_action_running
+        { gerund = Keeper_control.action_gerund action
+        ; keeper = Terminal_text.single_line keeper_name
+        }
+    ]
+  | None, Some pending ->
+    [ Masc_tui_footer.Keeper_action_armed
+        { key = Keeper_control.action_key pending.Keeper_control.pending_action
+        ; action =
+            Keeper_control.action_label pending.Keeper_control.pending_action
+        ; keeper =
+            Terminal_text.single_line pending.Keeper_control.pending_keeper
+        }
+    ]
+  | None, None -> []
+
+
 let footer_line ?(status = []) ?position (state : state) ~max_cells ~hints =
   (* Hints off trades the key text for status room; "?:help" stays as the
      door back. One seam for every surface, which is what makes the setting
@@ -591,7 +611,10 @@ let footer_line ?(status = []) ?position (state : state) ~max_cells ~hints =
     | Masc_tui_types.Workspace_identity_match -> []
   in
   Masc_tui_footer.line ?literal_prefix ?action_text ?position
-    ~status:(List.filter Masc_tui_footer.needs_operator status @ identity @ conflict)
+    ~status:(keeper_action_status state
+      @ List.filter (fun item -> Masc_tui_footer.needs_operator item
+          && not (List.mem item (keeper_action_status state))) status
+      @ identity @ conflict)
     ~dim:Ansi.dim ~reset:Ansi.reset ~max_cells ~hints ()
 
 
@@ -2486,24 +2509,6 @@ let planning_proof_mark proof =
    key cancels the arm, so a footer that gives this up to fit something else
    gives up the only notice of a state the operator is standing in. The keys stay
    on the row beside it now instead of being replaced by it. *)
-let keeper_action_status (state : state) : Masc_tui_footer.status_item list =
-  match (state.keeper_action_inflight, state.keeper_action_pending) with
-  | Some (keeper_name, action), _ ->
-    [ Masc_tui_footer.Keeper_action_running
-        { gerund = Keeper_control.action_gerund action
-        ; keeper = Terminal_text.single_line keeper_name
-        }
-    ]
-  | None, Some pending ->
-    [ Masc_tui_footer.Keeper_action_armed
-        { key = Keeper_control.action_key pending.Keeper_control.pending_action
-        ; action =
-            Keeper_control.action_label pending.Keeper_control.pending_action
-        ; keeper =
-            Terminal_text.single_line pending.Keeper_control.pending_keeper
-        }
-    ]
-  | None, None -> []
 
 let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [])
     state reading =

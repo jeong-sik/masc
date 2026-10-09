@@ -160,7 +160,7 @@ enabled = %b
 enabled = %b
 |} enabled enabled
 
-let with_fixture ?acquire ?observe_step f =
+let with_fixture ?acquire ?observe_step ?(msx_worker=false) f =
   let dir = Filename.temp_file "lane-runtime-" ".fixture" in
   Sys.remove dir; Unix.mkdir dir 0o700;
   Fun.protect ~finally:(fun () -> remove_tree dir) (fun () ->
@@ -181,7 +181,12 @@ let with_fixture ?acquire ?observe_step f =
                   let path = Filename.concat dir "runtime-fixture.toml" in
                   write path (machine_runtime_config ~enabled:true);
                   ignore (unwrap (Host_runtime.init_default ~config_path:path));
-                  f env sw (Workspace.default_config dir) dir state)))))))
+                  let run () = f env sw (Workspace.default_config dir) dir state in
+                  if msx_worker then
+                    Machine_worker_fixture.with_msx ~other_backend:backend
+                      ~clock:(Eio.Stdenv.clock env) ~sw ~base_path:dir
+                      (fun ~invoke:_ ~detach -> run (); detach ())
+                  else run ())))))))
 
 let test_hang_error_coalescing_and_primary_progress () = with_fixture (fun env sw config dir state ->
   let clock = Eio.Stdenv.clock env in
@@ -514,22 +519,27 @@ let attach_machine_watcher config dir =
        ["kind",`String "msx_capture";"source_id",`String "machine"]]]])
   |> text "instance_id"
 
-(* Hold the second capture after a route wakes the watcher. A second route
+(* Hold the next capture after a route wakes the watcher. A second route
    notification must now remain visible as pending or coalesced, with no timing
    guess about how long the worker needs to finish its capture. *)
-let with_held_second_observation f =
+let with_held_machine_observation f =
   let entered, enter = Eio.Promise.create () in
   let released, release = Eio.Promise.create () in
   let release_sent = ref false in
+  let hold_next = ref false in
   let release_once () =
     if not !release_sent then (release_sent := true; Eio.Promise.resolve release ())
   in
-  let observe_step call =
-    if call = 2 then (Eio.Promise.resolve enter (); Eio.Promise.await released)
+  let observe_step _call =
+    if !hold_next then begin
+      hold_next := false;
+      Eio.Promise.resolve enter (); Eio.Promise.await released
+    end
   in
-  with_fixture ~observe_step (fun env sw config dir state ->
+  with_fixture ~observe_step ~msx_worker:true (fun env sw config dir state ->
     Fun.protect ~finally:release_once (fun () ->
-      f env sw config dir state ~entered ~release:release_once))
+      f env sw config dir state ~entered ~hold_next:(fun () -> hold_next := true)
+        ~release:release_once))
 
 let check_no_extra_machine_wake config id =
   let current = instance config id in
@@ -538,40 +548,61 @@ let check_no_extra_machine_wake config id =
   check Alcotest.int "no second wake was coalesced" 0
     (int "coalesced_wakes" current)
 
+let await_machine_publication clock config =
+  await clock (fun () ->
+    match Runtime.observation_for_export ~config
+        ~access:Lane_addon_sources.Operator_configuration ~name:"masc_msx_screen" with
+    | Ok (Some reading) -> not reading.refreshing
+    | Ok None | Error _ -> false)
+
 let test_human_press_wakes_machine_watchers_once () =
-  with_held_second_observation (fun env _sw config dir _state ~entered ~release ->
+  with_held_machine_observation (fun env _sw config dir _state ~entered ~hold_next ~release ->
     let clock = Eio.Stdenv.clock env in
     let msx = function Ok value -> value | Error error -> fail (Msx_lane.error_to_string error) in
     Fun.protect ~finally:(fun () ->
       Msx_lane.install_activity_observer None;
       ignore (Msx_lane.eject ())) (fun () ->
       Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
-      ignore (msx (Msx_lane.load ~ledger_dir:(Filename.concat dir "machine") ~roms_dir:None
-        ~cart_path:None ~disk_path:None));
+      check bool "attached worker loads the fixture machine" true
+        (fst (Server_routes_http_routes_msx.load_response ~config
+          ~agent_name:"operator" ~body:{|{"roms_dir":""}|}) = `OK);
+      await_machine_publication clock config;
       let id = attach_machine_watcher config dir in
       let sequence () = int "observation_seq" (instance config id) in
       await clock (fun () -> sequence () = 1);
       let press body =
         fst (Server_routes_http_routes_msx.press_response ~config ~who:"operator" ~body) in
+      let before = msx (Msx_lane.capture_with_identity ()) in
       check bool "a key the machine lacks is refused" true
         (press {|{"keys":["not-a-key"]}|} = `Bad_request);
+      check bool "refused key leaves frame, identity and input ledger unchanged" true
+        (msx (Msx_lane.capture_with_identity ()) = before);
+      (* A completed worker refusal refreshes the producer, then its watcher.
+         Settle that publication before measuring the accepted human action. *)
+      await clock (fun () -> sequence () > 1 && phase (instance config id) = "attached");
+      await_machine_publication clock config;
+      let baseline = sequence () in
+      hold_next ();
       check bool "a human press is accepted" true (press {|{"keys":["space"]}|} = `OK);
       Eio.Promise.await entered;
       check_no_extra_machine_wake config id;
       release ();
-      await clock (fun () -> sequence () = 2);
-      check Alcotest.int "one accepted press is one observation, the refusal none" 2 (sequence ());
+      await clock (fun () -> sequence () = baseline + 1 && phase (instance config id) = "attached");
+      await_machine_publication clock config;
+      check_no_extra_machine_wake config id;
+      check Alcotest.int "one accepted press is one watcher publication" (baseline + 1) (sequence ());
       detach config id;
       await_phase clock config id "detached"))
 
 let test_human_load_wakes_machine_watchers_once () =
-  with_held_second_observation (fun env _sw config dir _state ~entered ~release ->
+  with_held_machine_observation (fun env _sw config dir _state ~entered ~hold_next ~release ->
     let clock = Eio.Stdenv.clock env in
     ignore (Msx_lane.eject ());
     Fun.protect ~finally:(fun () ->
       Msx_lane.install_activity_observer None;
       ignore (Msx_lane.eject ())) (fun () ->
       Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
+      await_machine_publication clock config;
       let id = attach_machine_watcher config dir in
       let sequence () = int "observation_seq" (instance config id) in
       await clock (fun () -> sequence () = 1);
@@ -580,13 +611,23 @@ let test_human_load_wakes_machine_watchers_once () =
           ~agent_name:"operator" ~body) in
       check bool "a missing cartridge is refused" true
         (load {|{"roms_dir":"","cart":"missing.rom"}|} = `Bad_request);
+      check bool "missing cartridge leaves the machine unloaded" true
+        (Msx_lane.live ~since:None = Msx_lane.Nothing_loaded);
+      check Alcotest.int "missing cartridge creates no input ledger" 0
+        (List.length (Msx_lane.ledger ()));
+      await clock (fun () -> sequence () > 1 && phase (instance config id) = "attached");
+      await_machine_publication clock config;
+      let baseline = sequence () in
+      hold_next ();
       check bool "a human BIOS-only load is accepted" true
         (load {|{"roms_dir":""}|} = `OK);
       Eio.Promise.await entered;
       check_no_extra_machine_wake config id;
       release ();
-      await clock (fun () -> sequence () = 2);
-      check Alcotest.int "one accepted load is one observation, the refusal none" 2
+      await clock (fun () -> sequence () = baseline + 1 && phase (instance config id) = "attached");
+      await_machine_publication clock config;
+      check_no_extra_machine_wake config id;
+      check Alcotest.int "one accepted load is one watcher publication" (baseline + 1)
         (sequence ());
       detach config id;
       await_phase clock config id "detached"))
@@ -1534,6 +1575,10 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw confi
   let unrelated_name = "fixture_unrelated_export" in
   let reserved_name = "masc_board_stats" in
   check bool "fixture host tool exists" true (Config.is_raw_tool_name reserved_name);
+  let host_descriptors () = Keeper_tool_descriptor.descriptors_for_internal reserved_name
+    |> List.map (fun (descriptor : Keeper_tool_descriptor.t) -> descriptor.id) in
+  let host_before = host_descriptors () in
+  check bool "fixture owns an internal host descriptor" true (host_before <> []);
   let third = attach_export ~names:[unrelated_name; reserved_name] "isolated" in
   await clock (fun () -> int "observation_seq" (instance config third) > 0);
   let isolated = Keeper_lane_addon_runtime.snapshot ~config ~keeper_name:"fixture-keeper" in
@@ -1549,9 +1594,11 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw confi
     (List.exists (fun (conflict : Lane_addon_tool_export.conflict) ->
        conflict.name = reserved_name && conflict.instances = [third]
        && conflict.reason = Lane_addon_tool_export.Reserved_host_name) isolated.conflicts);
-  (* masc_board_stats is a raw MASC tool, not a Keeper descriptor, so the
-     host's own catalog is where it must still be after the collision. *)
-  check bool "static host descriptor remains available" true
+  check (list string) "static host descriptors remain available" host_before
+    (host_descriptors ());
+  (* Also retain the raw host catalog entry; descriptor availability above
+     and raw registration are distinct collision-isolation guarantees. *)
+  check bool "raw host catalog entry remains available" true
     (List.exists (fun (schema : Masc_domain.tool_schema) -> schema.name = reserved_name)
        Config.raw_all_tool_schemas);
   let unaffected_call = Keeper_lane_addon_runtime.call ~config ~keeper_name:"fixture-keeper"

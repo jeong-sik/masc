@@ -95,6 +95,13 @@ describe('Keeper operation stream projection', () => {
       { type: 'CUSTOM', name: 'KEEPER_NATIVE_TOOL_PROGRESS', value: { ...observation, progress: { kind: 'heartbeat_reported', elapsed_seconds: 3 } } },
       { type: 'CUSTOM', name: 'KEEPER_NATIVE_TOOL_PROGRESS', value: { ...observation, progress: { kind: 'output_observed', byte_count: 13 } } },
       { type: 'CUSTOM', name: 'KEEPER_NATIVE_TOOL_PROGRESS', value: { ...observation, progress: { kind: 'message_reported', message: 'not authored text' } } },
+      { type: 'CUSTOM', name: 'KEEPER_NATIVE_TOOL_PROGRESS', value: { ...observation, progress: {
+        kind: 'retry_reported', agent_id: 'child', subagent_type: 'Explore', attempt: 1,
+        max_retries: 3, retry_delay_ms: 1500, error_status: 529, error_category: 'overloaded',
+      } } },
+      { type: 'CUSTOM', name: 'KEEPER_NATIVE_TOOL_PROGRESS', value: { ...observation, progress: {
+        kind: 'retry_cleared', agent_id: 'child', subagent_type: 'Explore',
+      } } },
       { type: 'CUSTOM', name: 'KEEPER_NATIVE_TOOL_END', value: { ...observation, completion: { kind: 'completion_reported', exit_code: 17 } } },
       { type: 'CUSTOM', name: 'KEEPER_NATIVE_TOOL_END', value: observation },
     ]
@@ -126,6 +133,7 @@ describe('Keeper operation stream projection', () => {
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TEXT_MESSAGE_CONTENT',
       delta: '안녕',
+      textStreamScope: 2,
     })).toBeNull()
 
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
@@ -412,6 +420,7 @@ describe('Keeper operation stream projection', () => {
       type: 'CUSTOM',
       name: 'KEEPER_STREAM_MESSAGE_START',
       value: {
+        stream_scope: 4,
         provider_message_id: 'msg-1',
         model: 'claude-sonnet-5',
         usage: {
@@ -428,7 +437,7 @@ describe('Keeper operation stream projection', () => {
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
       name: 'KEEPER_STREAM_MESSAGE_DELTA',
-      value: { stop_reason: 'end_turn', usage: { output_tokens: 510 } },
+      value: { stream_scope: 4, stop_reason: 'end_turn', usage: { output_tokens: 510 } },
     })
 
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')

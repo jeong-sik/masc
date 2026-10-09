@@ -42,12 +42,29 @@ type completion_outcome =
 type completion = { outcome : completion_outcome; exit_code : int option }
 type finished = { observation : observation; completion : completion }
 
+type retry_agent = { agent_id : string; subagent_type : string }
+type retry_note =
+  { agent : retry_agent; attempt : int; max_retries : int; retry_delay_ms : int
+  ; error_status : int option; error_category : string }
+type retry_observation = Retry_reported of retry_note | Retry_cleared of retry_agent
+
 type progress =
   | Output_observed of { byte_count : int }
   | Message_reported of { message : string }
   | Heartbeat_reported of { elapsed_seconds : int }
+  | Retry_observed of retry_observation
+
+let retry_agent_fields agent =
+  ["agent_id", `String agent.agent_id; "subagent_type", `String agent.subagent_type]
 
 let progress_to_json = function
+  | Retry_observed (Retry_cleared agent) ->
+      `Assoc (("kind", `String "retry_cleared") :: retry_agent_fields agent)
+  | Retry_observed (Retry_reported note) ->
+      `Assoc (["kind", `String "retry_reported"; "attempt", `Int note.attempt;
+        "max_retries", `Int note.max_retries; "retry_delay_ms", `Int note.retry_delay_ms;
+        "error_status", Option.fold ~none:`Null ~some:(fun value -> `Int value) note.error_status;
+        "error_category", `String note.error_category] @ retry_agent_fields note.agent)
   | Heartbeat_reported {elapsed_seconds} -> `Assoc ["kind", `String "heartbeat_reported"; "elapsed_seconds", `Int elapsed_seconds]
   | Output_observed {byte_count} -> `Assoc ["kind", `String "output_observed"; "byte_count", `Int byte_count]
   | Message_reported {message} -> `Assoc ["kind", `String "message_reported"; "message", `String message]
@@ -58,7 +75,31 @@ let progress_of_json = function
       let sorted = List.sort String.compare keys in
       if List.length keys <> List.length (List.sort_uniq String.compare keys)
       then Error "duplicate native progress field"
-      else (match List.assoc_opt "kind" fields with
+      else
+        let ( let* ) = Result.bind in
+        let string key = match List.assoc_opt key fields with
+          | Some (`String value) when String.trim value <> "" -> Ok value
+          | Some _ | None -> Error ("native retry " ^ key ^ " must be a nonblank string") in
+        let integer key = match List.assoc_opt key fields with
+          | Some json -> Runtime_json_integer.of_json json
+          | None -> Error ("native retry " ^ key ^ " is required") in
+        let agent () = let* agent_id = string "agent_id" in
+          let* subagent_type = string "subagent_type" in Ok {agent_id;subagent_type} in
+        (match List.assoc_opt "kind" fields with
+        | Some (`String "retry_cleared") when sorted = ["agent_id";"kind";"subagent_type"] ->
+            let* agent = agent () in Ok (Retry_observed (Retry_cleared agent))
+        | Some (`String "retry_reported") when sorted =
+            ["agent_id";"attempt";"error_category";"error_status";"kind";"max_retries";"retry_delay_ms";"subagent_type"] ->
+            let* agent = agent () in
+            let* attempt = integer "attempt" in
+            let* max_retries = integer "max_retries" in
+            let* retry_delay_ms = integer "retry_delay_ms" in
+            let* error_status = match List.assoc_opt "error_status" fields with
+              | Some `Null -> Ok None
+              | Some _ -> Result.map Option.some (integer "error_status")
+              | None -> Error "native retry error_status is required" in
+            let* error_category = string "error_category" in
+            Ok (Retry_observed (Retry_reported {agent;attempt;max_retries;retry_delay_ms;error_status;error_category}))
         | Some (`String "output_observed") when sorted = ["byte_count"; "kind"] ->
             (match List.assoc_opt "byte_count" fields with
              | Some json ->
@@ -83,6 +124,12 @@ let progress_of_json = function
 let redact_progress redact = function
   | (Output_observed _ | Heartbeat_reported _) as progress -> progress
   | Message_reported {message} -> Message_reported {message=redact message}
+  | Retry_observed retry ->
+      let agent value = {value with subagent_type=redact value.subagent_type} in
+      Retry_observed (match retry with
+        | Retry_cleared value -> Retry_cleared (agent value)
+        | Retry_reported note -> Retry_reported
+            {note with agent=agent note.agent; error_category=redact note.error_category})
 
 let end_observed = {outcome=End_observed; exit_code=None}
 

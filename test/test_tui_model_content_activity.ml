@@ -12,7 +12,7 @@ let activity ?(generation=0) ?(scope=0) ?(index=0) ?(channel=E.Model_text) state
   {E.content_generation=generation; content_scope=scope; content_index=index; content_provider_message_id=Some "reusable"; channel; state}
 let observed ?generation ?scope ?index ?channel () = L.Model_content_activity (activity ?generation ?scope ?index ?channel E.Content_observed)
 let ended ?generation ?scope ?index ?channel () = L.Model_content_activity (activity ?generation ?scope ?index ?channel E.Content_ended)
-let start = L.Stream_model_started {message_id=Some "reusable"; model="fixture"; usage=None}
+let start = L.Stream_model_started {stream_scope=None; message_id=Some "reusable"; model="fixture"; usage=None}
 let rows t = String.concat "\n" (List.map snd (T.status_rows ~now:1000. t))
 let contains t needle = Astring.String.is_infix ~affix:needle (rows t)
 let assert_signal t signal =
@@ -31,9 +31,9 @@ let test_overlap_uses_event_order () =
   (* Wall clock moves backwards. The last event, not the biggest clock, owns
      the label; stopping it returns to the newest remaining active event. *)
   List.iter (fun (now,delta) -> T.apply ~now t delta)
-    [90.,L.Text "A"; 90.,observed (); 80.,L.Thinking "R";
+    [90.,L.Text {text="A"; stream_scope=None}; 90.,observed (); 80.,L.Thinking "R";
      80.,observed ~index:1 ~channel:E.Model_thinking ();
-     70.,L.Text "B"; 70.,observed ~index:2 ()];
+     70.,L.Text {text="B"; stream_scope=None}; 70.,observed ~index:2 ()];
   assert_signal t "STREAMING";
   T.apply ~now:60. t (ended ~index:2 ()); assert_signal t "THINKING";
   T.apply ~now:50. t (ended ~index:99 ()); assert_signal t "THINKING";
@@ -61,7 +61,7 @@ let test_scope_retry_and_fallback () =
   T.apply ~now:11. t (ended ~scope:2 ~channel:E.Model_thinking ()); assert_signal t "model content ended";
   (* Legacy flat data lacks occurrence authority: an unrelated old content
      stop cannot certify that this later text has ended. *)
-  T.apply ~now:12. t (L.Text "legacy");
+  T.apply ~now:12. t (L.Text {text="legacy"; stream_scope=None});
   T.apply ~now:13. t (ended ~scope:2 ~channel:E.Model_thinking ()); assert_signal t "STREAMING";
   T.apply ~now:14. t L.Stream_model_stopped;
   T.apply ~now:15. t (observed ~scope:2 ()); assert_signal t "model response ended";

@@ -46,12 +46,13 @@ module For_testing : sig
     -> runtime_id:string
     -> Agent_core.Types.message list
     -> (Agent_core.Types.message list, Agent_core.Error.t) result
-  (** The start seed this lane composes: the declared ceiling's cut and the
-      seeded front, whichever names the later atom. Pinned by
+  (** The start seed this lane composes: the capacity's cut and the seeded
+      front, whichever names the later atom. Pinned by
       [test_keeper_claude_code_runtime]. *)
 
   val unbounded_capacity_bytes : int
-  (** [capacity_bytes] for a runtime with no prompt ceiling. *)
+  (** [capacity_bytes] of a turn's first attempt, before a typed overflow
+      narrows it. *)
 
   val recovery_failure_of_client_error
     :  Runtime_claude_code.error
@@ -72,6 +73,7 @@ module For_testing : sig
 end
 
 val run :
+  ?on_memory_capacity_refusal:Keeper_memory_delivery_reprojection.t ->
   ?official_task_reference:Keeper_official_task_reference.t ->
   ?composed_context:(unit -> Keeper_official_client_host.composed_context option) ->
   accepts_image_input:bool ->
@@ -109,6 +111,11 @@ val run :
     (block_index:int -> tool_call_id:string option -> Runtime_native_tools.progress -> unit) ->
   ?on_native_tool_completion:
     (block_index:int -> tool_call_id:string option -> Runtime_native_tools.completion -> unit) ->
+  ?on_native_task_observation:(Keeper_claude_task_binding.bound -> unit) ->
+  (* Task metadata carries exact private input evidence and keeps its registered
+      native occurrence after the spawning
+      call closes. It emits no model content, native completion or receipt.
+      Journal/UI transport is a separate consumer of this callback. *)
   ?on_native_action:(official_turn:int ->
     identity:Runtime_native_tools.action_identity -> tool_name:string -> unit) ->
   ?on_usage_report:(Keeper_client_usage_report.t -> unit) ->
@@ -131,24 +138,24 @@ val run :
     [carried_front_seed] names where the start seed begins: the range the
     newest completed turn record on this history carried, whichever runtime
     measured it ({!Keeper_official_client_host.carried_start_range}). The
-    prompt ceiling, when the runtime has one, still cuts, and the range starts at
-    whichever of the two positions is later, so a turn seeded from a narrow
-    range does not widen it and the ceiling does not undo the seed.
+    capacity a typed overflow narrowed the turn to still cuts, and the range
+    starts at whichever of the two positions is later, so a turn seeded from a
+    narrow range does not widen it and the capacity does not undo the seed.
     [turn_start] is where the range starts when no seed names a front: the
     end of the last completed turn on this history, 0 when it has none, and
     the newest atom alone when that boundary is unknown (RFC
     keeper-context-window-in-tokens §13.4). A caller that passes no seed
-    starts there, inside the ceiling.
+    starts there, inside the capacity.
 
     [librarian_front] hands over the turn's continuity choice as a position
     in the messages it is handed
     ({!Keeper_turn_driver_try_provider.librarian_position}): a fitting working
     state, carried in place of the atoms before it, or the Librarian's read
     position alone, with nothing carried for the atoms before it. It wins
-    when it is at or past the seed that holds, or the ceiling's cut when no
+    when it is at or past the seed that holds, or the capacity's cut when no
     seed holds, so the range never moves back behind either; [turn_start] is
     not weighed against it, since it is where a range with no absorbed point
-    begins. The ceiling cuts before the working state is known, so whether
+    begins. The capacity cuts before the working state is known, so whether
     it goes is decided by {!Keeper_official_client_host.compose_librarian_range}
     (RFC-0460): it is carried only where it displaces none of the range's
     atoms, and otherwise the Librarian position goes alone and the turn is

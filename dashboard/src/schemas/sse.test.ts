@@ -487,6 +487,11 @@ describe('SSEMessageSchema', () => {
     { kind: 'heartbeat_reported', elapsed_seconds: 0 },
     { kind: 'heartbeat_reported', elapsed_seconds: 30 },
     { kind: 'heartbeat_reported', elapsed_seconds: 3 },
+    { kind: 'retry_reported', agent_id: 'child', subagent_type: 'Explore', attempt: 1,
+      max_retries: 3, retry_delay_ms: 1500, error_status: 529, error_category: 'overloaded' },
+    { kind: 'retry_reported', agent_id: 'child', subagent_type: 'Explore', attempt: -1,
+      max_retries: 0, retry_delay_ms: 0, error_status: null, error_category: 'unknown' },
+    { kind: 'retry_cleared', agent_id: 'child', subagent_type: 'Explore' },
     { kind: 'message_reported', message: '' },
     { kind: 'message_reported', message: 'provider progress \n다음' },
   ])('accepts and retains typed native progress: %j', progress => {
@@ -494,6 +499,25 @@ describe('SSEMessageSchema', () => {
       toolStreamScope: 2, toolCallBlockIndex: 7, toolCallName: 'Read', progress,
     })
     expect(parseSSEMessage(event)?.ag_ui_event).toEqual(event.ag_ui_event)
+  })
+
+  it.each(['\u00a0', '\ufeff', '\u000b'])('retains canonical retry Unicode metadata: %j', value => {
+    const note = { kind: 'retry_reported', agent_id: 'child', subagent_type: 'Explore',
+      attempt: 1, max_retries: 3, retry_delay_ms: 1500, error_status: 529, error_category: 'overloaded' }
+    for (const field of ['agent_id', 'subagent_type', 'error_category']) {
+      const event = customEvent('KEEPER_NATIVE_TOOL_PROGRESS', {
+        toolStreamScope: 0, toolCallBlockIndex: 1, toolCallName: 'Agent',
+        progress: { ...note, [field]: value },
+      })
+      expect(parseSSEMessage(event)?.ag_ui_event).toEqual(event.ag_ui_event)
+    }
+    for (const field of ['agent_id', 'subagent_type']) {
+      const event = customEvent('KEEPER_NATIVE_TOOL_PROGRESS', {
+        toolStreamScope: 0, toolCallBlockIndex: 1, toolCallName: 'Agent',
+        progress: { kind: 'retry_cleared', agent_id: 'child', subagent_type: 'Explore', [field]: value },
+      })
+      expect(parseSSEMessage(event)?.ag_ui_event).toEqual(event.ag_ui_event)
+    }
   })
 
   it('rejects malformed or contradictory native completion objects', () => {
@@ -544,6 +568,15 @@ describe('SSEMessageSchema', () => {
       { kind: 'heartbeat_reported', elapsed_seconds: Number.MAX_SAFE_INTEGER + 1 },
       { kind: 'heartbeat_reported', elapsed_seconds: 30, byte_count: 1 },
       { kind: 'heartbeat_reported', elapsed_seconds: 30, message: 'wrong variant' },
+      { kind: 'retry_reported', agent_id: 'child', subagent_type: 'Explore', attempt: 0.5,
+        max_retries: 3, retry_delay_ms: 1500, error_status: 529, error_category: 'overloaded' },
+      { kind: 'retry_reported', agent_id: 'child', subagent_type: 'Explore', attempt: 1,
+        max_retries: Number.MAX_SAFE_INTEGER + 1, retry_delay_ms: 1500, error_status: 529, error_category: 'overloaded' },
+      { kind: 'retry_cleared', agent_id: 'child', subagent_type: 'Explore', attempt: 1 },
+      { kind: 'retry_cleared', agent_id: 'child' },
+      { kind: 'retry_cleared', agent_id: ' \t\n\r\f', subagent_type: 'Explore' },
+      { kind: 'retry_reported', agent_id: 'child', subagent_type: 'Explore', attempt: 1,
+        max_retries: 3, retry_delay_ms: 1500, error_status: null, error_category: ' \t\n\r\f' },
     ]) {
       expect(SSEMessageSchema.safeParse(customEvent('KEEPER_NATIVE_TOOL_PROGRESS', {
         toolStreamScope: 0, toolCallBlockIndex: 0, progress,
@@ -767,7 +800,7 @@ describe('SSEMessageSchema', () => {
         threadId: 'keeper-consumer:sangsu',
         runId: 'run-1',
         name: 'KEEPER_STREAM_MESSAGE_DELTA',
-        value: { stop_reason: 'end_turn', usage },
+        value: { stream_scope: 4, stop_reason: 'end_turn', usage },
         timestamp: 1_712_000_000,
       },
     })
@@ -775,7 +808,7 @@ describe('SSEMessageSchema', () => {
     // output counter. The producer omits unreported fields entirely.
     expect(SSEMessageSchema.safeParse(event({ output_tokens: 42 })).success).toBe(true)
     // The server-tool shape: every counter repeated as a cumulative total —
-    // still no total_tokens or cost on a delta.
+    // still no total_tokens on a delta.
     expect(
       SSEMessageSchema.safeParse(
         event({
@@ -788,7 +821,46 @@ describe('SSEMessageSchema', () => {
     ).toBe(true)
     expect(SSEMessageSchema.safeParse(event({ output_tokens: 4.2 })).success).toBe(false)
     expect(SSEMessageSchema.safeParse(event({ total_tokens: 9 })).success).toBe(false)
+    for (const cost_usd of [0, 0.0123]) {
+      const parsed = SSEMessageSchema.safeParse(event({ output_tokens: 42, cost_usd }))
+      expect(parsed.success).toBe(true)
+      if (parsed.success) expect(parsed.data).toEqual(event({ output_tokens: 42, cost_usd }))
+      expect(SSEMessageSchema.safeParse(event({ cost_usd })).success).toBe(true)
+    }
+    for (const cost_usd of [null, '0.0123', -0.0123, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(SSEMessageSchema.safeParse(event({ cost_usd })).success).toBe(false)
+    }
   })
+
+  it.each(['KEEPER_STREAM_MESSAGE_START', 'KEEPER_STREAM_MESSAGE_DELTA'])(
+    'retains a response identity on %s frames and rejects invalid identities', name => {
+      const event = (stream_scope: unknown) => ({
+        type: 'keeper_chat_operation_event',
+        name: 'sangsu',
+        operation_id: 'kmsg-operation-1',
+        ag_ui_event: {
+          type: 'CUSTOM',
+          threadId: 'keeper-consumer:sangsu',
+          runId: 'run-1',
+          name,
+          value: name === 'KEEPER_STREAM_MESSAGE_START'
+            ? { stream_scope, provider_message_id: 'pm-1', model: 'observed-model' }
+            : { stream_scope, stop_reason: 'end_turn' },
+          timestamp: 1_712_000_000,
+        },
+      })
+      for (const scope of [0, 4]) {
+        const result = SSEMessageSchema.safeParse(event(scope))
+        expect(result.success).toBe(true)
+        if (result.success) {
+          expect(result.data).toMatchObject({ ag_ui_event: { value: { stream_scope: scope } } })
+        }
+      }
+      for (const scope of [undefined, null, -1, 0.5, '4']) {
+        expect(SSEMessageSchema.safeParse(event(scope)).success).toBe(false)
+      }
+    },
+  )
 
   it('accepts an operator-visible projection error for an operation', () => {
     const r = SSEMessageSchema.safeParse({

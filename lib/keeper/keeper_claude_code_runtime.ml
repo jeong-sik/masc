@@ -154,7 +154,7 @@ let api_usage_of_turn_usage (usage : Runtime_claude_code.turn_usage) =
 (* Always installed so usage-window and turn usage reports are recorded. A
    turn nobody streams, traces or observes gets only those; its other events
    are ignored as before. *)
-let claude_stream_callback ?on_native_tool_progress ?on_native_tool_completion ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~turn_count
+let claude_stream_callback ?on_native_task_observation ?on_native_tool_progress ?on_native_tool_completion ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~turn_count
     ~on_native_action ~on_usage_report ~position ~on_compacted on_event =
   (* The result frame's uuid is the response identity the completion hook
      also writes for a Claude Code turn; the session is the conversation. *)
@@ -173,8 +173,8 @@ let claude_stream_callback ?on_native_tool_progress ?on_native_tool_completion ?
            })
       on_usage_report
   in
-  match on_event, raw_trace_run, on_native_action, receipts, on_native_tool_completion, on_native_tool_progress with
-  | None, None, None, None, None, None ->
+  match on_event, raw_trace_run, on_native_action, receipts, on_native_tool_completion, on_native_tool_progress, on_native_task_observation with
+  | None, None, None, None, None, None, None ->
     Some
       (function
         | Runtime_claude_code.Usage_windows_reported report ->
@@ -183,7 +183,7 @@ let claude_stream_callback ?on_native_tool_progress ?on_native_tool_completion ?
         | Runtime_claude_code.Usage_reported { session_id; turn_id; model; usage } ->
           report_usage ~session_id ~turn_id ~model usage
         | Turn_started _ | Text_delta _ | Thinking_delta _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
-        | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Turn_finished _ -> ())
+        | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Native_task_observed _ | Turn_finished _ -> ())
   | _ ->
     let emit event = Option.iter (fun callback -> callback event) on_event in
     let next_tool_index = ref 1 in
@@ -296,6 +296,8 @@ let claude_stream_callback ?on_native_tool_progress ?on_native_tool_completion ?
                ; tool_id = Runtime_native_tools.call_id observation
                ; tool_name = observation.tool_name
                })
+        | Runtime_claude_code.Native_task_observed observation ->
+          Option.iter (fun observe -> observe observation) on_native_task_observation
         | Runtime_claude_code.Native_tool_progress {identity; progress} ->
           Option.iter (fun index ->
             Option.iter (fun observe -> observe ~block_index:index
@@ -617,7 +619,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event ~effect_disposition
     ~context_overflow_retry_safe
-    ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_progress ~on_native_tool_completion
+    ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_progress ~on_native_tool_completion ~on_native_task_observation
     ~on_usage_report ~on_tool_execution ~(config : Runtime_execution.claude_code) =
   context_overflow_retry_safe := false;
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
@@ -1202,8 +1204,23 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       Printexc.raise_with_backtrace exn backtrace
     in
     let turn_result =
+      (* This scope owns one actual CLI invocation, not the routed candidate or
+         its capacity retries. Input observations precede native registration. *)
+      let task_binding = Option.map (fun _ -> Keeper_claude_task_binding.create ())
+          on_native_task_observation in
+      let on_input_observation = Option.map
+          Keeper_claude_task_binding.observe_input task_binding in
+      let on_bound_task = match task_binding, on_native_task_observation with
+        | Some binding, Some observe -> Some (fun observation ->
+            match Keeper_claude_task_binding.bind_task binding observation with
+            | Ok bound -> observe bound
+            | Error reason -> Log.Runtime_agent.debug
+                "Claude native task input binding unavailable: %s"
+                (Keeper_claude_task_binding.rejection_to_string reason))
+        | None, _ | _, None -> None in
       let on_stream_event =
         claude_stream_callback ?receipts ?on_native_tool_progress ?on_native_tool_completion
+          ?on_native_task_observation:on_bound_task
           ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
           ~on_usage_report
           ~position:
@@ -1254,7 +1271,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
                    ~turn_id
                    ~turn_count
                    ~updated_at:(Time_compat.now ())))
-             ?on_stream_event
+             ?on_stream_event ?on_input_observation
              client_config
              ~prompt
              ~images
@@ -1453,7 +1470,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
                   recovery_detail))))
 ;;
 
-let run ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
+let run ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context
@@ -1465,7 +1482,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
     ~turn_start
     ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
-    ?on_native_tool_progress ?on_native_tool_completion
+    ?on_native_tool_progress ?on_native_tool_completion ?on_native_task_observation
     ?on_native_action
     ?on_usage_report
     ?on_tool_execution
@@ -1482,26 +1499,20 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
   let observed_next_shrink_capacity_bytes = ref None in
   let observed_floor_capacity_bytes = ref None in
   let context_overflow_retry_safe = ref false in
-  let starting_capacity_bytes =
-    (* Every turn starts at the runtime's own ceiling when it has one, and
-       unbounded otherwise: the provider's typed overflow is what narrows it.
-       The shrink below cuts only the conversation window; the pinned
-       briefing is sent whole. *)
-    Option.value
-      (Runtime.prompt_capacity_bytes_of_runtime_id runtime_id)
-      ~default:unbounded_model_input_capacity_bytes
-  in
   let result =
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
       Keeper_turn_driver_try_provider.context_overflow_shrink_sequence
-        ~starting_capacity:starting_capacity_bytes
+        ?on_memory_capacity_refusal
+        ~on_memory_retry:(fun () ->
+          resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id ())
+        (* The provider's typed overflow narrows the initially unbounded turn. *)
+        ~starting_capacity:unbounded_model_input_capacity_bytes
         ~same_run_retry_authorized:(fun () ->
-          !context_overflow_retry_safe
-          && Option.is_some !observed_next_shrink_capacity_bytes)
-        ~shrink_capacity:(fun ~capacity:_ ~default_capacity ->
+          !context_overflow_retry_safe)
+        ~shrink_capacity:(fun ~capacity ~default_capacity:_ ->
           Option.value
             !observed_next_shrink_capacity_bytes
-            ~default:(max 1 default_capacity))
+            ~default:capacity)
         ~final_shrink_capacity:(fun ~capacity:_ ->
           !observed_floor_capacity_bytes)
         (* This runtime shrinks to the size the provider itself named
@@ -1578,7 +1589,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
             ~on_event
             ~effect_disposition
             ~context_overflow_retry_safe
-        ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_progress ~on_native_tool_completion
+        ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_progress ~on_native_tool_completion ~on_native_task_observation
             ~on_usage_report
             ~on_tool_execution
             ~config)

@@ -112,7 +112,7 @@ let api_usage_of_json json =
   | Type_error (message, _) -> Error ("api_usage: " ^ message)
 ;;
 
-let delta_usage_of_json json =
+let delta_usage_of_json json : (Agent_core.Types.delta_usage, string) result =
   let open Yojson.Safe.Util in
   try
     Ok
@@ -122,6 +122,7 @@ let delta_usage_of_json json =
           json |> member "cache_creation_input_tokens" |> to_int_option
       ; cache_read_input_tokens =
           json |> member "cache_read_input_tokens" |> to_int_option
+      ; cost_usd = json |> member "cost_usd" |> to_float_option
       }
   with
   | Type_error (message, _) -> Error ("delta_usage: " ^ message)
@@ -175,7 +176,8 @@ let keeper_chat_event_to_json event =
     type_tag
       "text_message_start"
       [ "message_id", `String message_id; "role", role_to_json role ]
-  | Text_delta delta -> type_tag "text_delta" [ "delta", `String delta ]
+  | Text_delta {text; stream_scope} -> type_tag "text_delta"
+      (["delta", `String text] @ json_opt "stream_scope" (Option.map (fun scope -> `Int scope) stream_scope))
   | Text_message_end -> type_tag "text_message_end" []
   | External_effect_completed { target } ->
     type_tag
@@ -202,15 +204,16 @@ let keeper_chat_event_to_json event =
       (json_opt "runtime_id" (Option.map (fun value -> `String value) runtime_id)
        @ json_opt "attempt_index"
            (Option.map (fun value -> `Int value) attempt_index))
-  | Agent_core_stream_message_start { provider_message_id; model; usage } ->
+  | Agent_core_stream_message_start { stream_scope; provider_message_id; model; usage } ->
     type_tag
       "agent_core_stream_message_start"
-      ([ "provider_message_id", `String provider_message_id; "model", `String model ]
+      ([ "stream_scope", `Int stream_scope; "provider_message_id", `String provider_message_id; "model", `String model ]
        @ json_opt "usage" (Option.map api_usage_to_json usage))
-  | Agent_core_stream_message_delta { stop_reason; usage } ->
+  | Agent_core_stream_message_delta { stream_scope; stop_reason; usage } ->
     type_tag
       "agent_core_stream_message_delta"
-      (json_opt
+      (["stream_scope", `Int stream_scope]
+       @ json_opt
          "stop_reason"
          (Option.map
             (fun reason -> `String (Agent_core.Types.stop_reason_to_string reason))
@@ -362,7 +365,15 @@ let keeper_chat_event_of_json json =
       Ok
         (Text_message_start
            { message_id = json |> member "message_id" |> to_string; role })
-    | "text_delta" -> Ok (Text_delta (json |> member "delta" |> to_string))
+    | "text_delta" ->
+        let* stream_scope = match json with
+          | `Assoc fields ->
+              (match List.filter (fun (key, _) -> key = "stream_scope") fields with
+               | [] -> Ok None
+               | [_, `Int scope] when scope >= 0 -> Ok (Some scope)
+               | _ -> Error "text_delta.stream_scope must be one nonnegative integer")
+          | _ -> Error "text_delta must be an object" in
+        Ok (Text_delta {text=json |> member "delta" |> to_string; stream_scope})
     | "text_message_end" -> Ok Text_message_end
     | "external_effect_completed" ->
       let* target =
@@ -410,7 +421,8 @@ let keeper_chat_event_of_json json =
       let* usage = opt_member json "usage" api_usage_of_json in
       Ok
         (Agent_core_stream_message_start
-           { provider_message_id = json |> member "provider_message_id" |> to_string
+           { stream_scope = json |> member "stream_scope" |> to_int
+           ; provider_message_id = json |> member "provider_message_id" |> to_string
            ; model = json |> member "model" |> to_string
            ; usage
            })
@@ -419,7 +431,8 @@ let keeper_chat_event_of_json json =
       let* usage = opt_member json "usage" delta_usage_of_json in
       Ok
         (Agent_core_stream_message_delta
-           { stop_reason =
+           { stream_scope = json |> member "stream_scope" |> to_int
+           ; stop_reason =
                Option.map Agent_core.Types.stop_reason_of_string stop_reason_raw
            ; usage
            })
@@ -749,6 +762,9 @@ let float_is_finite value =
 
 let event_floats_are_finite = function
   | Agent_core_stream_message_start
+      { usage = Some { Agent_core.Types.cost_usd = Some cost_usd; _ }; _ } ->
+    float_is_finite cost_usd
+  | Agent_core_stream_message_delta
       { usage = Some { Agent_core.Types.cost_usd = Some cost_usd; _ }; _ } ->
     float_is_finite cost_usd
   | Audio_block { duration_sec = Some duration_sec; _ } ->

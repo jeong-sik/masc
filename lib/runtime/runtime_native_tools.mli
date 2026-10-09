@@ -65,14 +65,33 @@ type completion_outcome =
 type completion = { outcome : completion_outcome; exit_code : int option }
 type finished = { observation : observation; completion : completion }
 
+type retry_agent = { agent_id : string; subagent_type : string }
+type retry_note =
+  { agent : retry_agent
+  ; attempt : int
+  ; max_retries : int
+  ; retry_delay_ms : int
+  ; error_status : int option
+  ; error_category : string
+  }
+type retry_observation =
+  | Retry_reported of retry_note
+  | Retry_cleared of retry_agent
+(** A provider's Agent retry notice, or explicit clearing of that notice.
+    Clearing proves neither success nor resumed model content. Agent identity
+    names the child; the owning native occurrence separately names its call. *)
+
 type progress =
   | Output_observed of { byte_count : int }
   | Message_reported of { message : string }
   | Heartbeat_reported of { elapsed_seconds : int }
+  | Retry_observed of retry_observation
 
 val progress_to_json : progress -> Yojson.Safe.t
 (** Numeric progress fields use {!Runtime_json_integer.of_json}: byte counts
-    are positive and heartbeat seconds are nonnegative JSON safe integers. *)
+    are positive and heartbeat seconds are nonnegative JSON safe integers.
+    Retry integers retain signed safe integer provider values; no range is
+    inferred from an attempt, delay or status field name. *)
 val progress_of_json : Yojson.Safe.t -> (progress, string) result
 val redact_progress : (string -> string) -> progress -> progress
 (** Progress is provider observation, not output content or a completion.

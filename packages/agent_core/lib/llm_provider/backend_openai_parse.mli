@@ -5,6 +5,9 @@
     @stability Internal
     @since 0.93.1 *)
 
+(** Parse a partial streaming usage update without filling absent counters. *)
+val delta_usage_of_openai_json : Yojson.Safe.t -> Types.delta_usage option
+
 val usage_of_openai_json : Yojson.Safe.t -> Types.api_usage option
 
 (** Identity of an all-empty completion (agent-core boundary): a 200 that carried no

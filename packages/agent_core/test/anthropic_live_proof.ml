@@ -280,6 +280,8 @@ let () =
      when not caps.supports_required_tool_choice ->
      pass label ("refused before dispatch: " ^ reason)
    | Error e -> fail label (describe_error e)
+   | Ok _ when not caps.supports_required_tool_choice ->
+     fail label "unsupported forced tool choice reached the API"
    | Ok response ->
      if (seen_of_blocks response.content).tool_use_ids = []
      then fail label ("no tool call came back: " ^ describe_response response)

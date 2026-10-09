@@ -6290,7 +6290,7 @@ let typesafeai_table =
    \  { endpoint = \"http://127.0.0.1:9/reserve\", model = \"~typesafe/jev-latest\", api_key_env = \"OPENROUTER_API_KEY\" },\n\
    ]\n\
    board_attention = false\nboard_attention_confidence_floor = 0.45\n\
-   absorb_gate = true\ncontext_review = true\nskill_applicability = true\nlibrarian_preflight = true\n\
+   absorb_gate = true\ncontext_review = true\nskill_applicability = true\nlibrarian_preflight = true\nworkspace_memory_selection_enabled = true\n\
    excluded_keepers = [\"kidsnote-slack-context-collector\", \"other\"]\n"
 ;;
 
@@ -6310,6 +6310,7 @@ let test_typesafeai_absent_is_the_default () =
     check bool "Context review is off" false t.Runtime_schema.context_review;
     check bool "Skill applicability is off" false t.Runtime_schema.skill_applicability;
     check bool "Librarian preflight is off" false t.Runtime_schema.librarian_preflight;
+    check bool "Shared memory selection is off" false t.Runtime_schema.workspace_memory_selection_enabled;
     check (list string) "nobody is excluded" [] t.Runtime_schema.excluded_keepers
 ;;
 
@@ -6336,6 +6337,7 @@ let test_typesafeai_reads_the_whole_table () =
     check bool "Context review enabled" true t.Runtime_schema.context_review;
     check bool "Skill applicability enabled" true t.Runtime_schema.skill_applicability;
     check bool "Librarian preflight enabled" true t.Runtime_schema.librarian_preflight;
+    check bool "Shared memory selection enabled" true t.Runtime_schema.workspace_memory_selection_enabled;
     check (list string) "excluded keepers, in order"
       [ "kidsnote-slack-context-collector"; "other" ]
       t.Runtime_schema.excluded_keepers
@@ -6376,7 +6378,10 @@ let test_typesafeai_refuses_a_stray_key () =
   typesafeai_rejects ~what:"a stray [typesafeai] key"
     "[typesafeai]\nabsorb = true\n" "unknown [typesafeai] key \"absorb\"";
   typesafeai_rejects ~what:"a sub-table where a switch is expected"
-    "[typesafeai.absorb_gate]\nenabled = true\n" "absorb_gate must be a boolean"
+    "[typesafeai.absorb_gate]\nenabled = true\n" "absorb_gate must be a boolean";
+  typesafeai_rejects ~what:"nonboolean shared-memory selection opt-in"
+    "[typesafeai]\nworkspace_memory_selection_enabled = \"true\"\n"
+    "workspace_memory_selection_enabled must be a boolean"
 ;;
 
 (* otoml's strict float getter still reads a TOML integer, so the two

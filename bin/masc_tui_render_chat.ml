@@ -261,7 +261,7 @@ let search_chat_markdown ~link_previews_mode ~theme ~preview ~(entry : Message_l
       | Thinking_summary -> Search.Thinking_summary_byte offset) else None) in
   List.iter (fun (index,url,start,(field : Masc_tui_link_preview.card_source_span)) ->
     for delta=0 to field.source_end_byte-field.source_start_byte-1 do
-      origins.(start+delta)<-Some(Search.Preview_byte {url;index;field=field.field;
+      origins.(start+delta)<-Some(Search.Preview_byte {url;index;field=field.field;order=field.order;
         byte=field.source_start_byte+delta;expansion=0})
     done) !fields;
   let context=Chat_theme.body_context theme entry.style in

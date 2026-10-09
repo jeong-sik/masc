@@ -780,8 +780,37 @@ let test_polled_source_survives_tail_and_journal_takeover () = at_sizes (fun ori
   check bool "End removes frozen excerpt" true
     (not (Astring.String.is_infix ~affix:observed live)))
 
+let test_rich_card_repeat_follows_interleaved_source_order () = at_sizes (fun origin ->
+  let set_cols columns = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+    Masc_tui_ansi.terminal_size_cache ~probe:(fun () -> Some (26,columns))) in
+  let state=state origin in
+  state.link_previews_mode <- `Rich;
+  let url="https://example.test/interleaved-card" in
+  let preview=Masc_tui_link_preview.synthesize_preview url in
+  Masc_tui_link_preview.cache_store {preview with has_metadata=true;
+    title=Some "WEB LINK";description=Some "source ordering"};
+  state.msg_loaded <- [row ~id:"card-order" ~request_id:"card-order" ~role:user ~text:url 1.];
+  set_cols 180;
+  let newest=find state "WEB LINK" in
+  check bool "initial find chooses lower primary title" true
+    (match newest.matched_position with
+     | Masc_tui_chat_search.Preview_byte {field=Card_title;_} -> true | _ -> false);
+  let older=find ~older:newest state "WEB LINK" in
+  check bool "repeat moves upward to the header banner" true
+    (match older.matched_position with
+     | Masc_tui_chat_search.Preview_byte {field=Banner_brand;_} -> true | _ -> false);
+  set_cols 42;
+  check bool "narrow reflow cannot revisit newer title after banner cursor" true
+    ((Render.keeper_message_find_scroll state ~keeper_name:"alpha" ~needle:"WEB LINK"
+      ~older_than:(Some older)).match_result=None);
+  set_cols 180;
+  check bool "widening cannot restart exhausted interleaved sources" true
+    ((Render.keeper_message_find_scroll state ~keeper_name:"alpha" ~needle:"WEB LINK"
+      ~older_than:(Some older)).match_result=None))
+
 let () = run "chat search projection" [
   "rendered conversation", [
+    test_case "rich card repeat follows interleaved source sequence" `Quick test_rich_card_repeat_follows_interleaved_source_order;
     test_case "empty projection follows future arrivals" `Quick test_empty_projection_does_not_hold_future_arrivals;
     test_case "polled absolute source survives rolling and journal takeover" `Quick test_polled_source_survives_tail_and_journal_takeover;
     test_case "idle search pin reuses semantic and URL indexes" `Quick test_idle_search_pin_reuses_semantic_index;

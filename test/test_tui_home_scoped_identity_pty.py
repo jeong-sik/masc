@@ -931,7 +931,7 @@ def recovery_operator_boundary_journey(executable, *, foreign, failed_get=False)
             visible = h.screen_text(shown)
             if foreign:
                 assert recovery_label not in visible, ("foreign recovery row was admitted", visible)
-                assert b"workspace identity not read" in visible, visible
+                assert b"[workspace mismatch]" in visible, visible
                 assert b"not fully read" in visible, visible
                 assert not regular_read.is_set(), "ordinary refresh masked the identity regression"
             else:

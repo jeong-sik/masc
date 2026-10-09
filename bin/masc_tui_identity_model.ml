@@ -305,6 +305,7 @@ type identity_login_started =
   ; ils_label : string
   ; ils_url : string
   ; ils_expires_at : float
+  ; ils_attempt_id : string
   }
 
 (** Whether the login [login] started has landed: the service it was for now
@@ -346,13 +347,13 @@ type identity_login_result =
       ; label : string
       ; url : string
       ; expires_at : float
+      ; attempt_id : string
       }
   | Login_attached of string
   | Login_failed of string
 
-(* The OAuth route's absolute deadline is also the pending-state store's
-   deadline. Missing or malformed values must not create an unbounded wait;
-   CLI-token attachment is already complete and carries no consent deadline. *)
+(* The absolute deadline governs browser consent only. Completion is observed
+   with the independent attempt id; CLI-token attachment is already complete. *)
 let decode_identity_login ~provider_id ~label ~now (json : Yojson.Safe.t) =
   match json with
   | `Assoc fields ->
@@ -379,7 +380,37 @@ let decode_identity_login ~provider_id ~label ~now (json : Yojson.Safe.t) =
                   | Some (`String id) -> id
                   | _ -> provider_id
                 in
-                Login_started { provider_id; label; url; expires_at }
+                (match List.assoc_opt "attempt_id" fields with
+                 | Some (`String attempt_id) when attempt_id <> "" ->
+                     Login_started { provider_id; label; url; expires_at; attempt_id }
+                 | _ -> Login_failed "the server answered without an attempt_id")
             | _ -> Login_failed "the server answered without an authorize_url"))
   | _ -> Login_failed "the server answered with something this cannot read"
 ;;
+
+type identity_login_status =
+  | Consent_waiting of float | Callback_in_progress
+  | Credentials_published of (int, unit) result
+  | Login_exchange_failed | Consent_expired | Consent_superseded | Attempt_unavailable
+let decode_identity_login_status = function
+  | `Assoc fields ->
+      (match List.assoc_opt "kind" fields with
+       | Some (`String "awaiting_consent") -> (match List.assoc_opt "expires_at" fields with
+           | Some (`Float value) when Float.is_finite value -> Ok (Consent_waiting value)
+           | Some (`Int value) -> Ok (Consent_waiting (float_of_int value))
+           | _ -> Error "invalid consent deadline")
+       | Some (`String "callback_admitted") -> Ok Callback_in_progress
+       | Some (`String "completed") ->
+           (match List.assoc_opt "credential_publication" fields, List.assoc_opt "tool_discovery" fields with
+            | Some (`String "published"), Some (`Assoc discovery) ->
+                (match List.assoc_opt "kind" discovery, List.assoc_opt "count" discovery with
+                 | Some (`String "discovered"), Some (`Int count) when count >= 0 -> Ok (Credentials_published (Ok count))
+                 | Some (`String "failed"), _ -> Ok (Credentials_published (Error ()))
+                 | _ -> Error "invalid discovery outcome")
+            | _ -> Error "invalid credential publication")
+       | Some (`String "failed") -> Ok Login_exchange_failed
+       | Some (`String "expired") -> Ok Consent_expired
+       | Some (`String "superseded") -> Ok Consent_superseded
+       | Some (`String "unavailable") -> Ok Attempt_unavailable
+       | _ -> Error "unknown login attempt state")
+  | _ -> Error "login attempt response is not an object"

@@ -607,20 +607,21 @@ let test_login_receipt_during_unconfirmation_keeps_polling () =
   let request = Masc_tui_types.start_identity_login_request state
       ~keeper_name:"A" ~provider_id:"slack" in
   state.workspace_identity <- Masc_tui_types.Workspace_identity_match_unconfirmed "health unavailable";
-  Masc_tui_identity_updates.login_started state request
+  Masc_tui_identity_updates.login_started state request ~now:10.
     ~report:(fun _ _ -> ()) ~notice:(fun ~keeper_name:_ _ -> ())
     (Masc_tui_identity_model.Login_started
-       { provider_id = "slack"; label = "Slack"; url = "https://auth/A/consent" });
+       { provider_id = "slack"; label = "Slack"; url = "https://auth/A/consent";
+         expires_at = 100. });
   check (Alcotest.list Alcotest.string) "late receipt retains its wait" ["slack"]
     (held_expectations state "A");
   check Alcotest.bool "unconfirmed workspace cannot poll" false
-    (Masc_tui_types.identity_login_pending_for_keeper state "A");
+    (Masc_tui_types.identity_login_pending_for_keeper state ~now:10. "A");
   state.workspace_identity <- Masc_tui_types.Workspace_identity_match;
   check Alcotest.bool "same workspace resumes poll" true
-    (Masc_tui_types.identity_login_pending_for_keeper state "A");
+    (Masc_tui_types.identity_login_pending_for_keeper state ~now:10. "A");
   state.server_identity <- Some (workspace_identity ~base_path:"/w/b" ~masc_root:"/other");
   check Alcotest.bool "replacement workspace cannot inherit poll" false
-    (Masc_tui_types.identity_login_pending_for_keeper state "A")
+    (Masc_tui_types.identity_login_pending_for_keeper state ~now:10. "A")
 
 let test_inverse_retry_responses_keep_the_newest_consent () =
   let state = identity_state () in

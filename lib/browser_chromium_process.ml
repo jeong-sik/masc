@@ -4,7 +4,7 @@
 type owner = { pid : int; chrome : string; profile : string }
 type leftover = Stop_recorded_browser of int | Not_the_recorded_browser
 
-let lane_dir ~masc_root = Filename.concat masc_root "browser-lane"
+let lane_dir ~masc_root = Filename.concat masc_root Common.browser_lane_dirname
 let owner_record_path ~masc_root = Filename.concat (lane_dir ~masc_root) "stagehand-owner.json"
 let server_profile ~masc_root = Filename.concat (lane_dir ~masc_root) "stagehand-profile"
 

@@ -1648,15 +1648,16 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
         assistant_texts
         |> String.concat "\n"
         |> String.trim
-        |> fun value ->
-        (* A successful result with an explicit empty string is a completed
-           answer. Absence/null with no assistant text remains a protocol
-           failure; the Keeper chooses whether a quiet answer is admissible. *)
-        if value = "" then result else Some value
+        |> fun value -> if value = "" then None else Some value
     in
     let* text =
       match text with
       | Some text -> Ok text
+      | None when Option.is_some result ->
+          (* A measured successful result with an explicit blank is valid
+             protocol. Keeper acceptance still requires text or tool progress;
+             rejecting that response must not retire the resumable session. *)
+          Ok ""
       | None -> protocol_error "result message" "successful turn has no text"
     in
     emit_stream_event on_stream_event (Turn_finished { text });

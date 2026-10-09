@@ -72,7 +72,8 @@ let test_model_form_requires_current_workspace_reading () =
   let row : Masc_tui_model_runtime_table.row =
     { model="shared-name"; provider="shared-provider"; api_name=Some "api-model";
       reasoning_effort=None; temperature=None; context=Some ("binding",8192);
-      model_context=None; max_tokens=None } in
+      model_context=None; max_tokens=None; same_login=[]; login_group=None;
+      account_label=None } in
   state.config_models_rows <- [row];
   check bool "retained rows cannot open without a current reading" true
     (Result.is_error (Tui_types.selected_config_model state));
@@ -82,7 +83,7 @@ let test_model_form_requires_current_workspace_reading () =
       routing=Routing_active; routing_requires_restart=false; keeper=Not_configured;
       keeper_requires_restart=false; configured_count=0; pending_keys=[];
       applied_keys=[]; preempted_keys=[] } in
-  state.runtime_config_view <- Some {rcv_path="runtime.toml";rcv_source_text="";rcv_rows=[];rcv_metadata=metadata};
+  state.runtime_config_view <- Some {rcv_path="runtime.toml";rcv_source_text="";rcv_rows=[];rcv_metadata=metadata;rcv_account_emails=Ok (Masc_tui_account_login.Email_rows {rows=[]; unattributed=0})};
   check bool "current successful reading permits the selected model" true
     (Tui_types.selected_config_model state=Ok row);
   state.runtime_config_view_error <- Some "read failed";

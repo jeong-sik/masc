@@ -68,49 +68,87 @@ def sha256(text):
     return hashlib.sha256(text.encode()).hexdigest()
 
 
+BASE_MARKER = "MEMORY_ADMISSION_EXPORT "
+FOLLOWUP_MARKER = "MEMORY_ADMISSION_FOLLOWUP_EXPORT "
+BASE_COHORTS = {f"{kind}_{count}" for kind in ("repeated", "independent")
+                for count in (1, 30, 200)} | {"verified_replacement", "unresolved_event"}
+# The replay suite captures one scoped follow-up after its predecessor fixture.
+FOLLOWUP_COHORTS = {"independent_200_followup": "independent_200.json"}
+FOLLOWUP_PHASE = "after_predecessor_recall_and_followup_enqueue_before_retirement"
+
+
+def verify_export(value, raw_fields, cohort):
+    """Check one export's request material against its own wire hashes."""
+    if value["semantic_judgment_performed"] is not False:
+        raise ValueError("capture unexpectedly claims semantic judgment")
+    for field in ("prompt", "system_prompt", "keeper_instructions"):
+        if sha256(value[field]) != value["input_hashes"][field + "_sha256"]:
+            raise ValueError(f"{cohort}: {field} hash mismatch")
+    for field in ("schema", "candidates", "initial_current_facts", "scenario_input"):
+        if sha256(raw_fields[field]) != value["input_hashes"][field + "_sha256"]:
+            raise ValueError(f"{cohort}: {field} wire hash mismatch")
+    candidate_rows = raw_array_items(raw_fields["candidates"])
+    receipts = value["candidate_receipts"]
+    if len(candidate_rows) != len(receipts):
+        raise ValueError(f"{cohort}: candidate receipt coverage mismatch")
+    generations, requests, sequences = set(), set(), set()
+    for row, receipt in zip(candidate_rows, receipts):
+        candidate = json.loads(row)
+        if (receipt["request_id"] != candidate["request_id"]
+                or receipt["sequence"] != candidate["sequence"]
+                or receipt["input_sha256"] != sha256(row)):
+            raise ValueError(f"{cohort}: candidate receipt identity mismatch")
+        if receipt["request_id"] in requests or receipt["sequence"] in sequences:
+            raise ValueError(f"{cohort}: duplicate candidate identity")
+        generations.add(receipt["queue_generation"])
+        requests.add(receipt["request_id"])
+        sequences.add(receipt["sequence"])
+    if len(generations) != 1 or not next(iter(generations)):
+        raise ValueError(f"{cohort}: invalid queue generation")
+
+
+def verify_followup(value, cohort):
+    """A follow-up also carries the predecessor state it was captured from."""
+    if value["phase"] != FOLLOWUP_PHASE:
+        raise ValueError(f"{cohort}: unexpected capture phase")
+    predecessor = FOLLOWUP_COHORTS[cohort]
+    scenario = value["scenario_input"]
+    if (value["predecessor_fixture"] != predecessor
+            or scenario["predecessor_fixture"] != predecessor
+            or scenario["predecessor_response_sha256"] != value["predecessor_response_sha256"]):
+        raise ValueError(f"{cohort}: predecessor identity mismatch")
+    if not scenario["proposed_claims"]:
+        raise ValueError(f"{cohort}: no proposed follow-up claim")
+    for name, entry in value["state_bundle"].items():
+        if entry["present"] is True:
+            if sha256(entry["bytes"]) != entry["sha256"]:
+                raise ValueError(f"{cohort}: state bundle {name} hash mismatch")
+        elif entry["present"] is not False or set(entry) != {"present"}:
+            raise ValueError(f"{cohort}: state bundle {name} is malformed")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("log", type=Path)
     parser.add_argument("out", type=Path)
+    parser.add_argument("--followup", action="store_true",
+                        help="collect the replay suite's follow-up exports instead")
     args = parser.parse_args()
-    expected = {f"{kind}_{count}" for kind in ("repeated", "independent")
-                for count in (1, 30, 200)} | {"verified_replacement", "unresolved_event"}
+    marker, expected = ((FOLLOWUP_MARKER, set(FOLLOWUP_COHORTS)) if args.followup
+                        else (BASE_MARKER, BASE_COHORTS))
     exports = {}
     for line in args.log.read_text().splitlines():
-        if "MEMORY_ADMISSION_EXPORT " not in line:
+        if marker not in line:
             continue
-        raw = line.split("MEMORY_ADMISSION_EXPORT ", 1)[1]
+        raw = line.split(marker, 1)[1]
         value = json.loads(raw)
         raw_fields = top_level_raw_fields(raw)
         cohort = value["cohort"]
         if cohort not in expected or cohort in exports:
             raise ValueError(f"unexpected or duplicate cohort: {cohort}")
-        if value["semantic_judgment_performed"] is not False:
-            raise ValueError("capture unexpectedly claims semantic judgment")
-        for field in ("prompt", "system_prompt", "keeper_instructions"):
-            if sha256(value[field]) != value["input_hashes"][field + "_sha256"]:
-                raise ValueError(f"{cohort}: {field} hash mismatch")
-        for field in ("schema", "candidates", "initial_current_facts", "scenario_input"):
-            if sha256(raw_fields[field]) != value["input_hashes"][field + "_sha256"]:
-                raise ValueError(f"{cohort}: {field} wire hash mismatch")
-        candidate_rows = raw_array_items(raw_fields["candidates"])
-        receipts = value["candidate_receipts"]
-        if len(candidate_rows) != len(receipts):
-            raise ValueError(f"{cohort}: candidate receipt coverage mismatch")
-        generations, requests, sequences = set(), set(), set()
-        for row, receipt in zip(candidate_rows, receipts):
-            candidate = json.loads(row)
-            if (receipt["request_id"] != candidate["request_id"]
-                    or receipt["sequence"] != candidate["sequence"]
-                    or receipt["input_sha256"] != sha256(row)):
-                raise ValueError(f"{cohort}: candidate receipt identity mismatch")
-            if receipt["request_id"] in requests or receipt["sequence"] in sequences:
-                raise ValueError(f"{cohort}: duplicate candidate identity")
-            generations.add(receipt["queue_generation"])
-            requests.add(receipt["request_id"])
-            sequences.add(receipt["sequence"])
-        if len(generations) != 1 or not next(iter(generations)):
-            raise ValueError(f"{cohort}: invalid queue generation")
+        verify_export(value, raw_fields, cohort)
+        if args.followup:
+            verify_followup(value, cohort)
         exports[cohort] = raw
     if set(exports) != expected:
         raise ValueError(f"missing cohorts: {sorted(expected - set(exports))}")

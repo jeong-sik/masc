@@ -43,6 +43,19 @@ hash mismatches and overwrites of different exports. Hashes for JSON objects
 use original wire bytes so floating-point formatting is not normalized away.
 Do not reconstruct missing request material by hand.
 
+The scoped follow-up capture (`independent_200_followup`) is printed by the
+replay suite (`suite=test_keeper_memory_admission_replay`) as
+`MEMORY_ADMISSION_FOLLOWUP_EXPORT`, not by the export suite. Recover it from
+that run's log with `--followup`:
+
+```sh
+python3 scripts/experiments/collect-admission-exports.py --followup REPLAY.log exports/
+```
+
+This mode applies the same checks, refuses a missing follow-up, and also checks
+each present state-bundle file against its SHA-256 and that the export and its
+scenario input name the same predecessor fixture and response hash.
+
 For the next measurement, retain the untouched model response and replay it
 through the real admission decoder and store with these candidate IDs and fact
 payloads. A separate CLI model call is not the production Keeper exact lane.

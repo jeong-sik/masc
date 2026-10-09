@@ -1,0 +1,10 @@
+# Official-client pure context projection
+
+Base: 8ce6878ee82501b91a463bdc4e7328edbd585595.
+Code head: 60c73819fa8a9983643c4c4af755706952fbe4b6.
+
+Private keeper_official_client_context_projection owns canonical context/image/resume records, text/image admission, message and typed metadata construction, held-context/resend calculation, summaries, resume prompt and last-tool-result extraction (319 lines). Root retains hooks, runtime input acquisition, librarian/window integration, events, tracing, tools and host execution (2068 lines). Four manifest record re-exports with destructive type substitution preserve identity and the public MLI is byte-identical. Extracted bodies are exact apart from final newline normalization.
+
+Initial focused build and source review found resume_delivery referring to the moved Session_store alias before the include defined it. Its field now directly names Keeper_official_client_session_store.held_context. Corrected `opam exec -- dune build test/test_keeper_official_client_host.exe` completed exit 0. Execution `_build/default/test/test_keeper_official_client_host.exe --color=never`: 74 PASS, A87M17L8, exit 0. Existing isolated fixtures cover context/provenance, held-block resend/supersession, resume rendering, image/block refusals, input window integration, hooks, tool and lifecycle boundaries. No live provider/client login or Keeper was contacted. This does not establish installed adapters or multi-turn live continuity.
+
+Five source hashes, one executable hash and actual output are retained. Code source review passed after the P2 fix; final evidence delta remains subject to review. Full CI, installation, deployment, formal GitHub approval and merge remain unverified. Host/librarian/window/session orchestration and effect policies require continued semantic audit. The original Godfile candidate and full campaign remain open.

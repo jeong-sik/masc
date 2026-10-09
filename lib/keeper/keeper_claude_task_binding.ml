@@ -11,6 +11,12 @@ type bound =
   ; observation : Runtime_claude_code.native_task_observation
   }
 
+type bound_parent =
+  { ticket : Input.ticket
+  ; evidence : evidence
+  ; parent : Runtime_claude_code.native_agent_parent_witness
+  }
+
 type rejection =
   | Missing_ticket
   | Conflicting_invocation
@@ -80,22 +86,21 @@ let observe_input t (observation : Input.observation) =
       | Input.Partial_start _ | Input.Partial_fragment _ | Input.Partial_stop _
       | Input.Result _)) -> ()
 
-let bind_task t (observation : Runtime_claude_code.native_task_observation) =
+let bind_owner t ~(invocation : Input.ticket) ~call_envelope_uuid ~call_ordinal ~call_id =
   let ( let* ) = Result.bind in
-  let owner = observation.owner in
   (* Refuse captured observations from another runtime before touching the
      current owner's cache, even when all provider/session IDs were replayed. *)
   let* () = match t.invocation with
-    | Ticket ticket when not (String.equal ticket.session_id owner.invocation.session_id) ->
+    | Ticket ticket when not (String.equal ticket.session_id invocation.session_id) ->
         Error Foreign_session
-    | Ticket ticket when not (same_ticket ticket owner.invocation) -> Error Foreign_invocation
+    | Ticket ticket when not (same_ticket ticket invocation) -> Error Foreign_invocation
     | Awaiting_ticket | Conflicted | Ticket _ -> Ok () in
-  let key = owner.invocation, owner.call_envelope_uuid, owner.call_ordinal, owner.call_id in
+  let key = invocation, call_envelope_uuid, call_ordinal, call_id in
   let current = match t.invocation with
     | Awaiting_ticket -> Error Missing_ticket
     | Conflicted -> Error Conflicting_invocation
     | Ticket _ ->
-        match Hashtbl.find_opt t.envelopes owner.call_envelope_uuid with
+        match Hashtbl.find_opt t.envelopes call_envelope_uuid with
           | None -> Error Missing_assistant_evidence
           | Some evidence -> evidence
   in
@@ -108,16 +113,31 @@ let bind_task t (observation : Runtime_claude_code.native_task_observation) =
         (match current with Error _ as rejected -> rejected | Ok _ -> Ok frozen)
   in
   match t.invocation, evidence with
-  | Ticket ticket, Ok evidence -> Ok {ticket; evidence; observation}
+  | Ticket ticket, Ok evidence -> Ok (ticket, evidence)
   | (Awaiting_ticket | Ticket _ | Conflicted), Error reason -> Error reason
   | Awaiting_ticket, Ok _ -> Error Missing_ticket
   | Conflicted, Ok _ -> Error Conflicting_invocation
 
+let bind_task t (observation : Runtime_claude_code.native_task_observation) =
+  let owner = observation.owner in
+  let ( let* ) = Result.bind in
+  let* ticket, evidence = bind_owner t ~invocation:owner.invocation
+    ~call_envelope_uuid:owner.call_envelope_uuid ~call_ordinal:owner.call_ordinal
+    ~call_id:owner.call_id in
+  Ok {ticket; evidence; observation}
+
+let bind_parent t (parent : Runtime_claude_code.native_agent_parent_witness) =
+  let ( let* ) = Result.bind in
+  let* ticket, evidence = bind_owner t ~invocation:parent.invocation
+    ~call_envelope_uuid:parent.call_envelope_uuid ~call_ordinal:parent.call_ordinal
+    ~call_id:parent.call_id in
+  Ok {ticket; evidence; parent}
+
 let rejection_to_string = function
   | Missing_ticket -> "no invocation input ticket"
   | Conflicting_invocation -> "conflicting invocation input ticket"
-  | Foreign_session -> "native task belongs to another input session"
-  | Foreign_invocation -> "native task belongs to another input invocation"
+  | Foreign_session -> "native occurrence belongs to another input session"
+  | Foreign_invocation -> "native occurrence belongs to another input invocation"
   | Missing_assistant_evidence -> "no input evidence for the native assistant envelope"
   | Unattributed_assistant -> "native assistant envelope has no input attribution"
   | Rejected_assistant _ -> "native assistant input attribution was rejected"

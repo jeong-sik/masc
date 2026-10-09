@@ -124,19 +124,28 @@ witness certifies the original native call and its actual receiving invocation;
 a downstream input join must compare its whole ticket (receiver generation,
 session and client UUID) with the actual Prepared ticket before owner-cache
 access. The existing native task owner carries the same invocation ticket.
-`bind_task` rejects foreign session/invocation without touching the current
-owner cache and keys failed-first evidence by exact invocation and SDK occurrence.
-An exact provider-ID replay in another resumed invocation cannot reuse the old
-input proof. Child `bind_parent` and wrapper integration are not implemented by
-this prerequisite. A downstream child join must also compare the child's literal
-parent ID with the witness call ID. Public event construction does not certify
-that pairing or body authenticity.
+`bind_task` and `bind_parent` use one owner-joining function: foreign
+session/invocation is refused before current owner-cache access, and failed-first
+evidence is keyed by exact invocation and SDK occurrence. Parent-before-task and
+task-before-parent use the same original evidence decision, including after
+native return and across a later input in another envelope. A contradiction in
+the same assistant envelope refuses subsequent bindings of both kinds without
+mutating earlier delivered values. An exact provider-ID replay in another
+resumed invocation cannot reuse the old input proof.
+
+`bind_parent` returns private `bound_parent {ticket; evidence; parent}` for the
+original Agent call and its exact input evidence. It does not assert that child
+body consumed that input group, authenticate body/parent pairing, create Task/run
+ownership, or authorize public child transport/persistence. A downstream child
+join must separately compare the child's literal parent ID with the witness call
+ID. Public event construction does not certify that pairing or body authenticity.
+The host wrapper has not connected this API.
 
 The witness is a fact at observation time. A later call-ID collision makes
 subsequent child observations unknown; earlier witness values remain historical
 snapshots and prove neither current authority nor cancellation. Later witnesses
 cannot retroactively certify earlier unknown snapshots. Separate child display,
-persistence and original-input binding are not connected in the Keeper wrapper,
+persistence and the original-input binding API are not connected in the Keeper wrapper,
 which explicitly excludes child body from root projection. Native task metadata
 journals do not receive child body or user input from this event. Public native
 task transport and SQLite journal shapes are unchanged. This new-capture proof

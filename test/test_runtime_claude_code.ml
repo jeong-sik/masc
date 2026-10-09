@@ -3408,42 +3408,48 @@ let run_input_success steps =
    | _ -> fail "input write evidence missing");
   observations
 
+let capture_native_invocation_proof ?(conflicting_parent=false) ~session_id ~task_first () =
+  let inputs=ref [] and parents=ref [] and tasks=ref [] in
+  let child=Emit child_body_assistant in
+  let start=Emit (task_wire ~uuid:"replayed-task-start" "task_started" task_start_payload) in
+  let ordering=if task_first then [start;child] else [child;start] in
+  with_fixture
+    ([Bind_input_uuid; Emit (with_input_fields parent_tool_assistant input_own_stamp);
+      Emit (agent_launch_result "parent-agent")] @ ordering @
+     [Emit (with_input_fields assistant (input_stamp "later-input" ["later-input"]))] @
+     (if conflicting_parent then
+        [Emit (with_input_fields parent_tool_assistant
+          (input_stamp "contradictory-input" ["contradictory-input"]))] else []) @
+     [Emit (task_wire ~uuid:"replayed-task-progress" "task_progress"
+        (task_progress_payload (`Int 7))); Emit result])
+    (fun path ->
+      match run_fixture ~native:Runtime_native_tools.Native_full
+        ~session_mode:(Runtime_claude_code.Resume {session_id})
+        ~on_input_observation:(fun observation -> inputs:=observation :: !inputs)
+        ~on_stream_event:(function
+          | Runtime_claude_code.Child_content_observed {parent_occurrence=Some parent;_} ->
+              parents:=parent :: !parents
+          | Native_task_observed observation -> tasks:=observation :: !tasks
+          | _ -> ()) path with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok turn -> check string "root body remains authored root result" "MASC_CLAUDE_OK" turn.text);
+  let inputs=List.rev !inputs in
+  let prepared=List.find (fun (o:Input_evidence.observation) ->
+    o.frame=None && o.phase=Input_evidence.Prepared) inputs in
+  let parents=List.rev !parents and tasks=List.rev !tasks in
+  check int "actual child callbacks supply every body witness" 3 (List.length parents);
+  check int "actual task callbacks supply registration and progress" 2 (List.length tasks);
+  List.iter (fun (parent:Runtime_claude_code.native_agent_parent_witness) ->
+    check bool "parent refers to actual Prepared ticket object" true (parent.invocation==prepared.ticket)) parents;
+  List.iter (fun (task:Runtime_claude_code.native_task_observation) ->
+    check bool "task refers to same actual invocation ticket object" true
+      (task.owner.invocation==prepared.ticket)) tasks;
+  prepared,inputs,List.hd parents,List.hd tasks,List.nth tasks 1
+;;
+
 let test_native_invocation_proof_rejects_replayed_foreign_owners () =
   let module Binding = Keeper_claude_task_binding in
-  let capture ~session_id ~task_first =
-    let inputs=ref [] and parents=ref [] and tasks=ref [] in
-    let child=Emit child_body_assistant in
-    let start=Emit (task_wire ~uuid:"replayed-task-start" "task_started" task_start_payload) in
-    let ordering=if task_first then [start;child] else [child;start] in
-    with_fixture
-      ([Bind_input_uuid; Emit (with_input_fields parent_tool_assistant input_own_stamp);
-        Emit (agent_launch_result "parent-agent")] @ ordering @
-       [Emit (with_input_fields assistant (input_stamp "later-input" ["later-input"]));
-        Emit (task_wire ~uuid:"replayed-task-progress" "task_progress"
-          (task_progress_payload (`Int 7))); Emit result])
-      (fun path ->
-        match run_fixture ~native:Runtime_native_tools.Native_full
-          ~session_mode:(Runtime_claude_code.Resume {session_id})
-          ~on_input_observation:(fun observation -> inputs:=observation :: !inputs)
-          ~on_stream_event:(function
-            | Runtime_claude_code.Child_content_observed {parent_occurrence=Some parent;_} ->
-                parents:=parent :: !parents
-            | Native_task_observed observation -> tasks:=observation :: !tasks
-            | _ -> ()) path with
-        | Error error -> fail (Runtime_claude_code.error_to_string error)
-        | Ok turn -> check string "root body remains authored root result" "MASC_CLAUDE_OK" turn.text);
-    let inputs=List.rev !inputs in
-    let prepared=List.find (fun (o:Input_evidence.observation) ->
-      o.frame=None && o.phase=Input_evidence.Prepared) inputs in
-    let parents=List.rev !parents and tasks=List.rev !tasks in
-    check int "actual child callbacks supply every body witness" 3 (List.length parents);
-    check int "actual task callbacks supply registration and progress" 2 (List.length tasks);
-    List.iter (fun (parent:Runtime_claude_code.native_agent_parent_witness) ->
-      check bool "parent refers to actual Prepared ticket object" true (parent.invocation==prepared.ticket)) parents;
-    List.iter (fun (task:Runtime_claude_code.native_task_observation) ->
-      check bool "task refers to same actual invocation ticket object" true
-        (task.owner.invocation==prepared.ticket)) tasks;
-    prepared,inputs,List.hd parents,List.hd tasks,List.nth tasks 1 in
+  let capture ~session_id ~task_first = capture_native_invocation_proof ~session_id ~task_first () in
   let session_id="11111111-1111-4111-8111-111111111111" in
   let first,inputs1,parent1,task1,_=capture ~session_id ~task_first:false in
   let second,inputs2,parent2,task2,progress2=capture ~session_id ~task_first:true in
@@ -3506,6 +3512,109 @@ let test_native_invocation_proof_rejects_replayed_foreign_owners () =
   expect Binding.Conflicting_invocation (Binding.bind_task conflicted task1);
   check bool "later invocation conflict cannot mutate delivered original binding" true
     (old_bound.ticket==first.ticket && old_bound.observation.owner.invocation==first.ticket)
+;;
+
+let test_parent_binding_shares_original_task_evidence () =
+  let module Binding = Keeper_claude_task_binding in
+  let expect reason = function
+    | Error actual -> check bool "shared exact refusal" true (actual=reason)
+    | Ok _ -> fail "failed-first owner unexpectedly bound" in
+  List.iter (fun task_first ->
+    let prepared,inputs,parent,task,progress=capture_native_invocation_proof
+      ~session_id:"33333333-3333-4333-8333-333333333333" ~task_first () in
+    let observe binding inputs=List.iter (Binding.observe_input binding) inputs in
+    let initial=List.filter (fun (o:Input_evidence.observation) ->
+      match o.frame with
+      | None -> true
+      | Some (Input_evidence.Assistant {uuid=Some uuid;_}) -> uuid=parent.call_envelope_uuid
+      | Some _ -> false) inputs in
+    let binding=Binding.create () in
+    observe binding initial;
+    let require_parent () = match Binding.bind_parent binding parent with
+      | Ok bound -> bound | Error reason -> fail (Binding.rejection_to_string reason) in
+    let require_task observation = match Binding.bind_task binding observation with
+      | Ok bound -> bound | Error reason -> fail (Binding.rejection_to_string reason) in
+    let parent_bound,task_bound=if task_first then
+      let task_bound=require_task task in require_parent (),task_bound
+      else let parent_bound=require_parent () in parent_bound,require_task task in
+    check bool "parent keeps exact captured runtime witness" true (parent_bound.parent==parent);
+    check bool "both APIs bind actual original Prepared ticket" true
+      (parent_bound.ticket==prepared.ticket && task_bound.ticket==prepared.ticket);
+    check bool "both orderings use one original evidence decision" true
+      (parent_bound.evidence=task_bound.evidence);
+    observe binding inputs;
+    let after_parent=require_parent () and after_task=require_task progress in
+    check bool "later input preserves original shared evidence" true
+      (after_parent.evidence=parent_bound.evidence && after_task.evidence=task_bound.evidence);
+    (match after_parent.evidence with
+     | Binding.Explicit_group group ->
+         check string "original Agent input, not later response group" prepared.ticket.client_uuid group.primary
+     | Response_inherited _ | Command_inherited _ -> fail "explicit original Agent input required");
+    let parent_first_failure=Binding.create () in
+    expect Binding.Missing_ticket (Binding.bind_parent parent_first_failure parent);
+    observe parent_first_failure inputs;
+    expect Binding.Missing_ticket (Binding.bind_task parent_first_failure task);
+    let task_first_failure=Binding.create () in
+    Binding.observe_input task_first_failure prepared;
+    expect Binding.Missing_assistant_evidence (Binding.bind_task task_first_failure task);
+    observe task_first_failure inputs;
+    expect Binding.Missing_assistant_evidence (Binding.bind_parent task_first_failure parent))
+    [false;true]
+;;
+
+let test_parent_binding_refuses_foreign_and_conflicting_evidence () =
+  let module Binding = Keeper_claude_task_binding in
+  let session_id="44444444-4444-4444-8444-444444444444" in
+  let _,_,old_parent,old_task,_=capture_native_invocation_proof ~session_id ~task_first:false () in
+  let prepared,inputs,parent,task,progress=capture_native_invocation_proof ~session_id ~task_first:true () in
+  let _,_,foreign_parent,_,_=capture_native_invocation_proof
+    ~session_id:"55555555-5555-4555-8555-555555555555" ~task_first:false () in
+  let expect reason = function
+    | Error actual -> check bool "exact shared refusal" true (actual=reason)
+    | Ok _ -> fail "foreign or contradicted owner unexpectedly bound" in
+  let binding=Binding.create () in
+  List.iter (Binding.observe_input binding) inputs;
+  expect Binding.Foreign_invocation (Binding.bind_parent binding old_parent);
+  let held_task=match Binding.bind_task binding task with
+    | Ok bound -> bound | Error reason -> fail (Binding.rejection_to_string reason) in
+  expect Binding.Foreign_invocation (Binding.bind_task binding old_task);
+  let held_parent=match Binding.bind_parent binding parent with
+    | Ok bound -> bound | Error reason -> fail (Binding.rejection_to_string reason) in
+  expect Binding.Foreign_session (Binding.bind_parent binding foreign_parent);
+  (match Binding.bind_task binding progress with
+   | Ok bound -> check bool "foreign parent does not poison current shared owner" true
+       (bound.ticket==prepared.ticket && bound.evidence=held_parent.evidence)
+   | Error reason -> fail (Binding.rejection_to_string reason));
+  check bool "new bound parent certifies original invocation only" true
+    (held_parent.ticket==prepared.ticket && held_parent.parent==parent
+     && held_parent.evidence=held_task.evidence);
+  let contradictory_prepared,contradictory_inputs,contradictory_parent,contradictory_task,contradictory_progress=
+    capture_native_invocation_proof ~conflicting_parent:true ~session_id ~task_first:true () in
+  let contradiction=List.find (fun (o:Input_evidence.observation) ->
+    match o.attribution with
+    | Input_evidence.Rejected Input_evidence.Conflicting_frame_replay -> true
+    | Unattributed | Explicit _ | Inherited _ | Command_inherited _ | Rejected _ -> false)
+    contradictory_inputs in
+  let rec before_contradiction acc = function
+    | o::_ when o==contradiction -> List.rev acc
+    | o::rest -> before_contradiction (o::acc) rest
+    | [] -> fail "actual private contradiction is absent" in
+  let conflicted=Binding.create () in
+  List.iter (Binding.observe_input conflicted) (before_contradiction [] contradictory_inputs);
+  let original_parent=match Binding.bind_parent conflicted contradictory_parent with
+    | Ok bound -> bound | Error reason -> fail (Binding.rejection_to_string reason) in
+  let original_task=match Binding.bind_task conflicted contradictory_task with
+    | Ok bound -> bound | Error reason -> fail (Binding.rejection_to_string reason) in
+  Binding.observe_input conflicted contradiction;
+  expect Binding.Conflicting_assistant_evidence (Binding.bind_parent conflicted contradictory_parent);
+  expect Binding.Conflicting_assistant_evidence (Binding.bind_task conflicted contradictory_progress);
+  check bool "contradiction leaves already delivered values unchanged" true
+    (original_parent.ticket==contradictory_prepared.ticket
+     && original_task.ticket==contradictory_prepared.ticket
+     && original_parent.evidence=original_task.evidence);
+  Binding.observe_input binding contradictory_prepared;
+  expect Binding.Conflicting_invocation (Binding.bind_parent binding parent);
+  expect Binding.Conflicting_invocation (Binding.bind_task binding progress)
 ;;
 
 let test_input_uuid_is_serialized_and_fresh_on_resume () =
@@ -4318,6 +4427,10 @@ let () =
         ; test_case "Agent retry clear and cross-kind UUID ownership" `Quick test_agent_retry_identity_clear_and_uuid_interleaving
         ; test_case "Agent retry exception stays producer scoped" `Quick test_agent_retry_observation_exception_is_narrow
         ; test_case "Agent retry requires root native_full" `Quick test_agent_retry_requires_root_native_full
+        ; test_case "parent/task bindings share original input and failed-first decisions" `Quick
+            test_parent_binding_shares_original_task_evidence
+        ; test_case "parent binding rejects foreign or contradictory actual private evidence" `Quick
+            test_parent_binding_refuses_foreign_and_conflicting_evidence
         ; test_case "native invocation proof refuses exact foreign SDK replays" `Quick
             test_native_invocation_proof_rejects_replayed_foreign_owners
         ; test_case "child witness retains original open/returned native parent" `Quick

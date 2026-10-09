@@ -1,5 +1,5 @@
 (** Invocation-local join of private input evidence and runtime-admitted native
-    task ownership. Public task transport data cannot enter this boundary. *)
+    ownership. Public task/child transport data cannot enter this boundary. *)
 
 type evidence = private
   | Explicit_group of Runtime_claude_input_attribution.group
@@ -11,6 +11,15 @@ type bound = private
   ; evidence : evidence
   ; observation : Runtime_claude_code.native_task_observation
   }
+
+type bound_parent = private
+  { ticket : Runtime_claude_input_attribution.ticket
+  ; evidence : evidence
+  ; parent : Runtime_claude_code.native_agent_parent_witness
+  }
+(** Original native Agent occurrence joined to its exact invocation input
+    evidence. This certifies neither a child body's authenticity/parent pairing,
+    Task/run ownership, current call authority, nor publication/persistence. *)
 
 type rejection =
   | Missing_ticket
@@ -46,4 +55,12 @@ val bind_task : t -> Runtime_claude_code.native_task_observation ->
     neither admits raw frames nor changes model content, effects or task phase.
     Root result does not erase historical bindings; this module does not keep
     the current one-result runtime receiver alive. *)
+val bind_parent : t -> Runtime_claude_code.native_agent_parent_witness ->
+  (bound_parent, rejection) result
+(** Uses the same exact invocation/occurrence key, foreign-invocation guard and
+    frozen failed-first evidence cache as [bind_task]. Parent-before-task and
+    task-before-parent therefore share the same original input decision.
+    The witness may precede task registration or follow native return. A
+    publicly constructed child event must separately validate its literal
+    parent ID; this API receives no body and cannot bind or publish one. *)
 val rejection_to_string : rejection -> string

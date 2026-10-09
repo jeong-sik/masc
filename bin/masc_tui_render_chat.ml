@@ -104,7 +104,7 @@ let chat_markdown_streaming ~context ~width body =
 module Entry_cache = Ephemeron.K1.Make (struct
   type t = Message_layout.entry
   let equal = ( == )
-  let hash entry = Hashtbl.hash (entry.Message_layout.style,
+  let hash (entry : t) = Hashtbl.hash (entry.Message_layout.style,
     entry.markdown_source, entry.body_presentation)
 end)
 
@@ -3164,7 +3164,6 @@ let projection_index_of_scroll_anchor projection = function
 type source_body_index = {
   source_rows : (chat_source_position, int) Hashtbl.t;
   row_sources : (int, chat_source_position) Hashtbl.t;
-  last_source_row : int option;
 }
 
 type source_body_key = {
@@ -3176,6 +3175,17 @@ type source_body_key = {
   source_polled_input : (int * int * string) option;
   source_polled_unavailable : bool;
 }
+
+(* Every field is compared, so a field added to the key and left out here is
+   reported as never read. *)
+let same_source_body_key (a : source_body_key) (b : source_body_key) =
+  a.source_width = b.source_width
+  && a.source_palette_generation = b.source_palette_generation
+  && a.source_origin = b.source_origin
+  && a.source_preview_mode = b.source_preview_mode
+  && a.source_previews = b.source_previews
+  && a.source_polled_input = b.source_polled_input
+  && Bool.equal a.source_polled_unavailable b.source_polled_unavailable
 
 type source_body_memo = { key : source_body_key; index : source_body_index option }
 
@@ -3208,7 +3218,8 @@ let source_mapping_owner state ~keeper_name projection entry_index =
   | Some (Scroll_durable _ | Scroll_pending _) | None ->
       Durable_source, None
 
-let source_body_key state ~width ~theme ~preview ~polled_input ~unavailable entry =
+let source_body_key state ~width ~theme ~preview ~polled_input ~unavailable
+    (entry : Message_layout.entry) =
   let context = Chat_theme.body_context theme entry.Message_layout.style in
   let urls = match entry.style, entry.markdown_source, state.link_previews_mode with
     | (Message_layout.Tool | Skill _), _, _
@@ -3235,7 +3246,7 @@ let source_body_lookup state ~keeper_name projection ~inner_width ~theme ~previe
           let key = source_body_key state ~width ~theme ~preview ~polled_input
             ~unavailable:(owner = Unknown_polled_source) entry in
           match Entry_cache.find_opt source_body_indexes entry with
-          | Some memo when memo.key = key -> memo.index
+          | Some memo when same_source_body_key memo.key key -> memo.index
           | Some _ | None ->
           incr source_index_builds;
           let body = search_chat_markdown ~link_previews_mode:state.link_previews_mode
@@ -3266,7 +3277,6 @@ let source_body_lookup state ~keeper_name projection ~inner_width ~theme ~previe
                  | Body_label _ | Thinking_summary_byte _ | Thinking_summary_label _
                  | Preview_byte _ | Journal_byte _ -> None) in
           let source_rows = Hashtbl.create 64 and row_sources = Hashtbl.create 16 in
-          let last_source_row = ref None in
           let body_rows = List.length body.mapped_rows in
           List.iter (fun (run : Search.run) ->
             let _, copied = Masc_tui_theme.strip_sgr_with_positions run.text in
@@ -3280,12 +3290,11 @@ let source_body_lookup state ~keeper_name projection ~inner_width ~theme ~previe
                       (* A normalized origin can occur more than once. Keep the
                          first actually visible row, matching search's source
                          producer traversal, without electing by source words. *)
-                      last_source_row := Some (match !last_source_row with None -> row | Some held -> max row held);
                       if not (Hashtbl.mem source_rows position) then Hashtbl.add source_rows position row;
                       if not (Hashtbl.mem row_sources row) then Hashtbl.add row_sources row position)
                       (Option.bind run.positions.(byte) convert)
                   done) ranges) run.visible_rows) body.runs;
-          Some {source_rows;row_sources;last_source_row= !last_source_row} in
+          Some {source_rows;row_sources} in
           Entry_cache.replace source_body_indexes entry {key;index};
           index in
         Hashtbl.add mapped entry_index value;

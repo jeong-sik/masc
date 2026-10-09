@@ -111,6 +111,8 @@ type turn_result =
   ; wall_duration_s : float
   }
 
+type response_ending = Response_done | Response_error
+
 type stream_event =
   | Turn_started of
       { conversation_id : string
@@ -126,6 +128,11 @@ type stream_event =
           1.2.11: steps 1 and 3 around tool step 2). [None] when the step
           named no usable index, and for the result event's response, which
           is forwarded only when no step carried text. *)
+  | Text_completed of { step_index : int; ending : response_ending }
+      (** The identified [agent_response] step reached DONE/ERROR, after its
+          final text delta. This closes only that response's content, not the
+          turn or any native tool. An absent/drifted step index cannot prove
+          which content ended, so it emits no guessed completion. *)
   | Native_tool_started of Runtime_native_tools.observation
   | Native_tool_finished of Runtime_native_tools.finished
   | Usage_reported of

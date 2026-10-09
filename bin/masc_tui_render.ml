@@ -2597,9 +2597,9 @@ let keeper_flag_cell (runtime : keeper_runtime option) =
 let keeper_column_header (columns : Render_schedule.keeper_columns) =
   String.concat ""
     [ String.make Render_schedule.keeper_marker_width ' '
-    ; Printf.sprintf "%-*s" Render_schedule.keeper_status_width "HEALTH"
-    ; " "
     ; Printf.sprintf "%-*s" columns.kcol_name "KEEPER"
+    ; " "
+    ; Printf.sprintf "%-*s" Render_schedule.keeper_status_width "HEALTH"
     ; (if columns.kcol_show_flags then
          " " ^ Printf.sprintf "%-*s" Render_schedule.keeper_flags_width "Mode S"
        else "")
@@ -2625,9 +2625,8 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
      screen that is changing as the reader looks at it.
 
      The word beside the mark is the health word on every row, open turn or
-     not, because it is the word the roster header counts: a healthy keeper
-     says nothing, a failing one says "failing". How long the turn has run
-     belongs to the TURN cell (see [Masc_tui_keeper_mark.turn_clock]), on
+     not: a healthy keeper says nothing, a failing one says "failing". How
+     long the turn has run belongs to TURN (see [Masc_tui_keeper_mark.turn_clock]), on
      every row alike. A failing keeper's row keeps its health word, so a
      clock drawn here was left out of exactly that row, and the TURN cell's
      last recorded turn -- the failure -- was the only age beside a moving
@@ -2679,15 +2678,15 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
   in
   String.concat ""
     [ "   "
-    ; status_color ^ glyph ^ " "
-      ^ fit_width health_word (Render_schedule.keeper_status_width - 2)
-      ^ Ansi.reset
-    ; " "
     ; (* A keeper whose gate runs every call unasked wears its name in
          red: the stance has no column of its own, and the name is what
          the eye finds first. On the selected row the band folds this red
          with every other cell colour. *)
       (if yolo then (Theme.bad ()) ^ name ^ Ansi.reset else name)
+    ; " "
+    ; status_color ^ glyph ^ " "
+      ^ fit_width health_word (Render_schedule.keeper_status_width - 2)
+      ^ Ansi.reset
     ; (if columns.kcol_show_flags then " " ^ keeper_flag_cell runtime else "")
     ; (* The lifetime turn count said nothing an operator acts on; how long
          this keeper has been at its turn, or since it last turned, does. An
@@ -2722,31 +2721,6 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
     ; " "
     ; Ansi.dim ^ task ^ Ansi.reset
     ]
-
-(* Counted from the same readings the rows are drawn from, so the heading
-   cannot disagree with the list under it. *)
-(* Tally words come from [Keeper_control.health_label], so this paints the
-   health vocabulary. A word is parsed back into a health reading rather than
-   compared as text, so a new reading is a compile error here instead of a word
-   that falls to dim. A word that is not a health -- [unread], [absent],
-   [config error] -- is the roster not answering, which is dim rather than any
-   health colour. *)
-let keeper_roster_status_color label =
-  match Tui_decode.keeper_health_of_string label with
-  | None -> Ansi.dim
-  | Some health -> (
-      match Tui_decode.keeper_health_reading health with
-      | Tui_decode.Health_running -> Theme.ok ()
-      | Tui_decode.Health_failing -> Theme.warn ()
-      | Tui_decode.Health_idle | Tui_decode.Health_offline -> Theme.muted ())
-
-(* The tally is [Keeper_control.status_tally], so every word here is a word the
-   status column shows for the same keeper. This function only paints it. *)
-let keeper_roster_summary readings =
-  Keeper_control.health_tally readings
-  |> List.map (fun (label, count) ->
-         Printf.sprintf "%s%d %s%s" (keeper_roster_status_color label) count
-           label Ansi.reset)
 
 (* The subtractions over the fleet's name lists. They answer different
    questions and only one of them is about being stopped: a keeper the fleet
@@ -2817,63 +2791,40 @@ let keeper_operations_outcome_text = function
            state ^ " · " ^ Terminal_text.single_line model
        | Some _ | None -> state)
 
-(* The Keeper composite used to live only in Lanes. Keep the roster compact,
-   then give the selected Keeper one exact operational line: no lifecycle fact
-   is dropped, and Lanes no longer has to repeat the whole Keeper table. *)
-let keeper_operations_preview (state : state) =
-  match selected_keeper state with
-  | None -> Ansi.dim ^ "  Keeper operations: no Keeper selected" ^ Ansi.reset
-  | Some keeper ->
-      (match state.lanes with
-       | Some snapshot ->
-           let target_note =
-             match
-               List.find_opt
-                 (fun (a : Tui_decode.runtime_assignment) ->
-                    String.equal a.ra_keeper keeper.k_name)
-                 state.runtime_assignments
-             with
-             | Some a -> " \xc2\xb7 target " ^ runtime_assignment_label a
-             | None ->
-                 match state.runtime_surface with
-                 | Some s ->
-                     (match s.rss_resolved.rrs_default_runtime_id with
-                      | Some def -> Printf.sprintf " \xc2\xb7 target %s (default)" def
-                      | None -> "")
-                 | None -> ""
-           in
-           (match
-              List.find_opt
-                (fun (lane : Tui_decode.keeper_lane) ->
-                  String.equal lane.kl_keeper keeper.k_name)
-                snapshot.kls_lanes
-            with
-            | Some lane ->
-                String.concat ""
-                  [ (Masc_tui_theme.tone Masc_tui_theme.Accent)
-                  ; "  OPERATIONS"
-                  ; Ansi.reset
-                  ; "  lifecycle "
-                  ; keeper_lane_lifecycle_text lane
-                  ; " · turn "
-                  ; Terminal_text.single_line
-                      (Tui_decode.keeper_lane_turn_phase_to_string
-                         lane.kl_turn_phase)
-                  ; " · idle "
-                  ; keeper_lane_idle_text lane.kl_idle_seconds
-                  ; " · last "
-                  ; keeper_operations_outcome_text lane.kl_last_outcome
-                  ; target_note
-                  ]
-            | None ->
-                Ansi.dim ^ "  OPERATIONS  no composite row for "
-                ^ Terminal_text.single_line keeper.k_name ^ target_note ^ Ansi.reset)
+(* Composite execution facts belong to this Keeper's Info pane. Separate
+   fields use the pane's wrapped, scrollable rows; a long one-line preview
+   beside the list footer silently lost its outcome and runtime target. *)
+let keeper_operations_fields (state : state) ~keeper_name =
+  let fields = match state.lanes with
+  | Some snapshot ->
+      (match
+         List.find_opt
+           (fun (lane : Tui_decode.keeper_lane) ->
+             String.equal lane.kl_keeper keeper_name)
+           snapshot.kls_lanes
+       with
+       | Some lane ->
+           [ "Lifecycle:", keeper_lane_lifecycle_text lane
+           ; "Turn:", Terminal_text.single_line
+               (Tui_decode.keeper_lane_turn_phase_to_string lane.kl_turn_phase)
+           ; "Idle:", keeper_lane_idle_text lane.kl_idle_seconds
+           ; "Last outcome:", keeper_operations_outcome_text lane.kl_last_outcome
+           ]
        | None ->
-           (match state.lanes_error with
-            | Some detail ->
-                (Theme.warn ()) ^ "  OPERATIONS unavailable · "
-                ^ Terminal_text.single_line detail ^ Ansi.reset
-            | None -> Ansi.dim ^ "  OPERATIONS loading…" ^ Ansi.reset))
+           [ "Execution:", Ansi.dim ^ "no composite row for "
+             ^ Terminal_text.single_line keeper_name ^ Ansi.reset ])
+  | None ->
+      (match state.lanes_error with
+       | Some detail ->
+           [ "Execution:", Theme.warn () ^ "unavailable · "
+             ^ Terminal_text.single_line detail ^ Ansi.reset ]
+       | None -> [ "Execution:", Ansi.dim ^ "loading…" ^ Ansi.reset ])
+  in
+  match state.lanes, state.lanes_error with
+  | Some _, Some detail ->
+      ("Execution:", Theme.warn () ^ "stale · refresh failed: "
+        ^ Terminal_text.single_line detail ^ Ansi.reset) :: fields
+  | Some _, None | None, _ -> fields
 
 let render_keeper_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -2890,14 +2841,8 @@ let render_keeper_list (state : state) =
 
   Buffer.add_char buf '\n';
 
-  (* One clock read for the frame: the header clock and the age of a stale
-     fleet reading below are the same instant. *)
+  (* One observation time for stale fleet readings and roster turn ages. *)
   let now_unix = Unix.gettimeofday () in
-  let now = Unix.localtime now_unix in
-  let timestamp =
-    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
-      now.Unix.tm_sec
-  in
   let heading =
     screen_title
       (Printf.sprintf " MASC Keepers %s"
@@ -2906,38 +2851,22 @@ let render_keeper_list (state : state) =
               Printf.sprintf "(%d)" (List.length state.keepers)
           | [], (Page_unread | Page_failed) ->
               title_missing_reading ~error:keepers_error))
-    (* The same marker the footer draws. These two said different things
-       about the same pair of fields: the heading kept its own spelling and
-       so reported no count, and named n/N on surfaces where those keys do
-       nothing. *)
-    ^ search_marker_styled state
   in
   (* The roster is the surface an operator watches to see which keepers are
      up, and it was the one top-level surface whose title never said whether
      the reading was live: "1 healthy · 1 idle" read the same over a dead
      coordinator as over a live one. The badge also carries the workspace
-     mismatch, which this screen could not report at all. It sits at the right
-     edge, where the clock was, and the clock moves left of it. *)
+     mismatch, which this screen could not report at all. *)
   let badge = connection_badge state in
   (* Style bytes are zero-width to [display_width], so the gap is measured on
      the styled string rather than on a plain copy that could drift from it. *)
   let gap =
     max 1
-      (inner - Message_layout.display_width heading - String.length timestamp
-       - 2 - Message_layout.display_width badge)
+      (inner - Message_layout.display_width heading
+       - Message_layout.display_width badge)
   in
-  box_line buf cols
-    (heading ^ String.make gap ' ' ^ Ansi.dim ^ timestamp ^ Ansi.reset ^ "  "
-     ^ badge);
-
-  Buffer.add_string buf
-    (Printf.sprintf " %s%s%s\n" (Theme.recede ()) (draw_hline (cols - 2)) Ansi.reset);
-
-  (match keeper_roster_summary readings with
-   | [] -> ()
-   | parts ->
-       box_line buf cols
-         ("  Health  " ^ String.concat (Ansi.dim ^ " · " ^ Ansi.reset) parts));
+  box_line buf cols (heading ^ String.make gap ' ' ^ badge);
+  box_empty buf cols;
 
   (match (state.fleet_safety, state.fleet_safety_error) with
    | _, Some err ->
@@ -3045,8 +2974,6 @@ let render_keeper_list (state : state) =
     Render_schedule.allocate_keeper_columns ~inner_width:inner ~widest_runtime
   in
   box_line_styled buf cols ~style:(Theme.recede ()) (keeper_column_header columns);
-  Buffer.add_string buf
-    (Printf.sprintf " %s%s%s\n" (Theme.recede ()) (draw_hline (cols - 2)) Ansi.reset);
 
   (match keepers_error with
    | Some err -> box_line buf cols ((Theme.bad ()) ^ "  " ^ err ^ Ansi.reset)
@@ -3057,7 +2984,7 @@ let render_keeper_list (state : state) =
      arithmetic copy of its height would drift from what was just emitted and
      scroll the frame. *)
   let chrome_rows = count_frame_lines buf in
-  let footer_rows = 3 in
+  let footer_rows = 2 in
   let list_rows = max 0 (rows - chrome_rows - footer_rows) in
   let keeper_count = List.length state.keepers in
   (* A roster with more keepers than rows says which of them these are, the
@@ -3122,7 +3049,7 @@ let render_keeper_list (state : state) =
           in
           let row =
             keeper_row_content ~columns
-              ~now:(Unix.gettimeofday ())
+              ~now:now_unix
               ~frame:state.activity_frame
               ~yolo:(List.mem keeper.k_name state.keeper_yolo_names)
               ~paused:reading.Keeper_control.paused
@@ -3149,10 +3076,7 @@ let render_keeper_list (state : state) =
          (Masc_tui_scroll.window_text ~scroll:scroll_offset ~height:keeper_rows
             keeper_count));
 
-  box_line buf cols (keeper_operations_preview state);
-  (* A section rule, drawn by the helper the rest of this surface uses, so it
-     reads as the two rules above it do. No corners: the Keepers frame holds
-     no box_tl, box_tr or edge bar for a corner to point at. *)
+  (* One quiet boundary between the roster and its actions. *)
   box_divider buf cols;
   Buffer.add_string buf
     (footer_line state
@@ -5395,7 +5319,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
        passed their wire-boundary sanitizer and may carry this pane's SGR. *)
     let field_rows ~width ~label_cells ~label_style label value =
       let prefix = "  " ^ label_style ^ fit_width label label_cells ^ Ansi.reset ^ " " in
-      if Message_layout.display_width (prefix ^ value) <= width then
+      if Message_layout.display_width label <= label_cells
+         && Message_layout.display_width (prefix ^ value) <= width then
         [prefix ^ value]
       else
         ("  " ^ label_style ^ label ^ Ansi.reset)
@@ -5413,8 +5338,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
 
       (* Helper to add a labeled row *)
       let row_lines ~width label value =
-        field_rows ~width ~label_cells:22
-          ~label_style:(Masc_tui_theme.tone Masc_tui_theme.Accent) label value
+        field_rows ~width ~label_cells:18
+          ~label_style:Ansi.dim label value
       in
       let add_row label value = List.iter add_line (row_lines ~width:inner label value) in
       let add_empty () = add_line "" in
@@ -5653,6 +5578,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
 
       (* Runtime section *)
       add_section "Runtime Stats";
+      List.iter (fun (label, value) -> add_row label value)
+        (keeper_operations_fields state ~keeper_name:k.k_name);
       let assignment =
         List.find_opt
           (fun (a : Tui_decode.runtime_assignment) ->

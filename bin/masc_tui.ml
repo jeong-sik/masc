@@ -11330,7 +11330,12 @@ let load_keeper_logs_if_safe state base_path limit keeper =
    fetched nothing in all three. One table, called from all three. *)
 let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
   match state.detail_tab with
-  | Detail_info -> launch_keeper_board_quarantines state ~mailbox keeper.k_name
+  | Detail_info ->
+      (* Runtime Stats reads the composite snapshot. Entry and explicit [r]
+         both request a current reading, including after a failed refresh;
+         the shared launcher retains its single-flight and authority guards. *)
+      launch_keeper_lanes_load state ~mailbox;
+      launch_keeper_board_quarantines state ~mailbox keeper.k_name
   | Detail_items ->
       launch_keeper_items state ~mailbox keeper.k_name
   | Detail_sandbox ->
@@ -27790,12 +27795,16 @@ and is loaded on demand through keeper_skill.
          | Keepers (Keeper_logs | Keeper_detail) ->
              load_keeper_logs_if_safe state base_path 200
                (List.nth_opt state.keepers state.keeper_cursor);
-             (* The Secrets tab reads through the Keeper lanes body, which
-                only the list refreshed; r on the tab had no way to retry a
-                failed read. *)
-             if state.view = Keepers Keeper_detail
-                && state.detail_tab = Detail_secrets
-             then launch_keeper_lanes_load state ~mailbox:async_messages
+             (* Info's execution facts and Secrets share the composite
+                reading. Keep a visible pane current without leaving it,
+                and let the next cadence retry a failed request. *)
+             if state.view = Keepers Keeper_detail then
+               (match state.detail_tab with
+                | Detail_info | Detail_secrets ->
+                    launch_keeper_lanes_load state ~mailbox:async_messages
+                | Detail_items | Detail_sandbox | Detail_instructions
+                | Detail_github | Detail_identity | Detail_channels
+                | Detail_automation | Detail_runs -> ())
          | Keepers Keeper_calls ->
              (match selected_keeper state with
               | Some keeper ->

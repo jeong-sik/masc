@@ -22,7 +22,7 @@ FOOTER = b"j/k:move"
 
 # Named to sort ahead of the two keepers every scenario's workspace is seeded
 # with, so a window that starts at the first row holds these and only these.
-NAMES = tuple("aa-roster-%02d" % n for n in range(1, 13))
+NAMES = tuple("aa-roster-%02d" % n for n in range(1, 25))
 LAST = NAMES[-1].encode()
 
 
@@ -51,10 +51,11 @@ def run(executable: str) -> None:
         h.palette_go(process, fd, output, b"go keepers", TITLE)
         # The roster is read off .masc/keepers on a refresh tick, so the
         # first frame can still say "(not loaded)". Every resize below is a
-        # reading of what the roster holds, so wait for it to hold something:
-        # on a Linux runner the scenario read an unloaded roster and asked
-        # why its rows were missing.
-        h.wait_for_output(process, fd, output, LAST, start=0, timeout=20)
+        # reading of what the roster holds, so wait for its first seeded row.
+        # The harness starts at 30 rows, where the last seeded keeper is
+        # offscreen until the tall resize below.
+        h.wait_for_output(process, fd, output, NAMES[0].encode(), start=0,
+                          timeout=20)
 
         # Tall: every keeper has a row, so there is nothing for the line to
         # say that the rows do not.
@@ -64,9 +65,10 @@ def run(executable: str) -> None:
         drawn = h.resize_and_wait(process, fd, output, rows=44, columns=120,
                                   needle=FOOTER, controls=(h.FULL_REDRAW,))
         screen = screen_of(drawn)
-        if LAST not in screen:
+        if drawn_names(screen) != list(NAMES):
             raise AssertionError(
-                f"at 44 rows the roster did not draw {LAST!r}: {screen!r}")
+                f"at 44 rows the roster did not draw every seeded keeper: "
+                f"{screen!r}")
         found = WINDOW.search(screen)
         if found:
             raise AssertionError(

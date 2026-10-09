@@ -15,6 +15,7 @@ type rejection =
   | Missing_ticket
   | Conflicting_invocation
   | Foreign_session
+  | Foreign_invocation
   | Missing_assistant_evidence
   | Unattributed_assistant
   | Rejected_assistant of Input.rejection
@@ -22,7 +23,7 @@ type rejection =
   | Conflicting_assistant_evidence
 
 type invocation = Awaiting_ticket | Ticket of Input.ticket | Conflicted
-type owner_key = string * string * int * string
+type owner_key = Input.ticket * string * int * string
 
 type t =
   { mutable invocation : invocation
@@ -80,14 +81,21 @@ let observe_input t (observation : Input.observation) =
       | Input.Result _)) -> ()
 
 let bind_task t (observation : Runtime_claude_code.native_task_observation) =
+  let ( let* ) = Result.bind in
   let owner = observation.owner in
-  let key = owner.session_id, owner.call_envelope_uuid, owner.call_ordinal, owner.call_id in
+  (* Refuse captured observations from another runtime before touching the
+     current owner's cache, even when all provider/session IDs were replayed. *)
+  let* () = match t.invocation with
+    | Ticket ticket when not (String.equal ticket.session_id owner.invocation.session_id) ->
+        Error Foreign_session
+    | Ticket ticket when not (same_ticket ticket owner.invocation) -> Error Foreign_invocation
+    | Awaiting_ticket | Conflicted | Ticket _ -> Ok () in
+  let key = owner.invocation, owner.call_envelope_uuid, owner.call_ordinal, owner.call_id in
   let current = match t.invocation with
     | Awaiting_ticket -> Error Missing_ticket
     | Conflicted -> Error Conflicting_invocation
-    | Ticket ticket ->
-        if not (String.equal ticket.session_id owner.session_id) then Error Foreign_session
-        else match Hashtbl.find_opt t.envelopes owner.call_envelope_uuid with
+    | Ticket _ ->
+        match Hashtbl.find_opt t.envelopes owner.call_envelope_uuid with
           | None -> Error Missing_assistant_evidence
           | Some evidence -> evidence
   in
@@ -109,6 +117,7 @@ let rejection_to_string = function
   | Missing_ticket -> "no invocation input ticket"
   | Conflicting_invocation -> "conflicting invocation input ticket"
   | Foreign_session -> "native task belongs to another input session"
+  | Foreign_invocation -> "native task belongs to another input invocation"
   | Missing_assistant_evidence -> "no input evidence for the native assistant envelope"
   | Unattributed_assistant -> "native assistant envelope has no input attribution"
   | Rejected_assistant _ -> "native assistant input attribution was rejected"

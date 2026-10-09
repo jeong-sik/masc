@@ -240,11 +240,16 @@ type native_task_event = Runtime_native_tasks.event =
       ; ambient : bool option }
 
 type native_task_owner = private
-  { session_id : string; task_id : string; run_id : string; call_id : string
+  { invocation : Runtime_claude_input_attribution.ticket
+  ; task_id : string; run_id : string; call_id : string
   ; call_envelope_uuid : string; call_ordinal : int }
 (** Exact root Agent occurrence that registered this task run. The call may
     already have returned an async launch result. [run_id] is opaque except
-    for the provider-declared lexical ordering of runs of the same task. *)
+    for the provider-declared lexical ordering of runs of the same task.
+    [invocation] is the actual ticket minted before this runtime invocation's
+    user write, also emitted by its Prepared input observation. Replayed SDK
+    IDs cannot replace this invocation identity. It proves the receiving
+    invocation, not the native envelope's consumed-input attribution. *)
 
 type native_task_observation = private
   { owner : native_task_owner; uuid : string; event : native_task_event
@@ -260,7 +265,7 @@ type native_task_observation = private
     requires a separate process/session lifetime implementation. *)
 
 type native_agent_parent_witness = private
-  { session_id : string
+  { invocation : Runtime_claude_input_attribution.ticket
   ; call_id : string
   ; call_envelope_uuid : string
   ; call_ordinal : int
@@ -268,8 +273,13 @@ type native_agent_parent_witness = private
 (** Invocation-registry witness to an unambiguous Root_response/Built_in Agent
     call admitted under Native_full. An open or returned native call retains
     the same original envelope UUID and its observed content-array ordinal;
-    this is not an API streaming index. No task/run, input ticket or publication
-    authority is inferred from this witness. Later call-ID reuse can make
+    this is not an API streaming index. [invocation] refers to the actual
+    immutable Prepared ticket captured once by that runtime's native registry,
+    not a copied provider session or a newly generated identifier. No task/run,
+    consumed-input attribution or publication authority is inferred. A later
+    input join must compare the whole ticket, including receiver generation and
+    client UUID, before reading or changing its owner evidence cache.
+    Later call-ID reuse can make
     the registry ambiguous and subsequent child observations unknown; an
     earlier witness remains its immutable historical snapshot, not current
     authority or cancellation evidence. It certifies only the original

@@ -97,7 +97,7 @@ let prepare t ~attempt (bound : Keeper_claude_task_binding.bound) =
     { keeper_name; source; attempt
     ; invocation = {receiver_generation=ticket.receiver_generation;
         session_id=ticket.session_id; client_uuid=ticket.client_uuid}
-    ; native_call = {session_id=owner.session_id; call_id=owner.call_id;
+    ; native_call = {session_id=owner.invocation.session_id; call_id=owner.call_id;
         call_envelope_uuid=owner.call_envelope_uuid; call_ordinal=owner.call_ordinal}
     ; task_id=owner.task_id; run_id=owner.run_id } in
   let* observation = Task.make ~origin ~uuid:observed.uuid ~event:observed.event

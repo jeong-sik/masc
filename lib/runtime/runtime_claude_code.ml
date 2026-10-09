@@ -288,7 +288,8 @@ type native_task_event = Runtime_native_tasks.event =
       ; ambient : bool option }
 
 type native_task_owner =
-  { session_id : string; task_id : string; run_id : string; call_id : string
+  { invocation : Runtime_claude_input_attribution.ticket
+  ; task_id : string; run_id : string; call_id : string
   ; call_envelope_uuid : string; call_ordinal : int }
 (** Exact root Agent occurrence that registered this task run. The call may
     already have returned an async launch result. [run_id] is opaque except
@@ -306,7 +307,7 @@ type native_task_observation =
     requires a separate process/session lifetime implementation. *)
 
 type native_agent_parent_witness =
-  { session_id : string
+  { invocation : Runtime_claude_input_attribution.ticket
   ; call_id : string
   ; call_envelope_uuid : string
   ; call_ordinal : int
@@ -1221,7 +1222,8 @@ type retry_binding =
   { progress_id : string; agent : Runtime_native_tools.retry_agent; mutable pending : bool }
 
 type native_call_registry =
-  { calls : (string, native_call_state) Hashtbl.t
+  { invocation : Runtime_claude_input_attribution.ticket
+  ; calls : (string, native_call_state) Hashtbl.t
   ; progress_uuids : (string, observed_progress) Hashtbl.t
   ; retry_bindings : (string, retry_binding) Hashtbl.t
   ; task_runs : (string, task_run) Hashtbl.t
@@ -1272,14 +1274,15 @@ let finish_native_call registry ~scope id =
   | Some (Native_open _ | Native_closed _ | Native_ambiguous) | None -> None
 ;;
 
-let root_native_agent_parent registry ~session_id ~call_id : native_agent_parent_witness option =
+let root_native_agent_parent registry ~call_id : native_agent_parent_witness option =
   match registry.native_posture, Hashtbl.find_opt registry.calls call_id with
   | Runtime_native_tools.Native_full,
     Some (Native_open {scope=Root_response;envelope_uuid;ordinal;
             observation={origin=Built_in;tool_name=Some "Agent";_}}
         | Native_closed {scope=Root_response;envelope_uuid;ordinal;
             observation={origin=Built_in;tool_name=Some "Agent";_}}) ->
-      Some {session_id;call_id;call_envelope_uuid=envelope_uuid;call_ordinal=ordinal}
+      Some {invocation=registry.invocation;call_id;
+        call_envelope_uuid=envelope_uuid;call_ordinal=ordinal}
   | (Native_full | Native_read | Native_none),
     (Some (Native_open _ | Native_closed _ | Native_ambiguous) | None) -> None
 ;;
@@ -1520,9 +1523,9 @@ let project_native_task registry ~expected_session_id fields =
       let binding =
         match frame.root_registration, frame.tool_use_id with
         | true, Some call_id ->
-            (match root_native_agent_parent registry ~session_id:expected_session_id ~call_id with
+            (match root_native_agent_parent registry ~call_id with
              | Some parent ->
-                 Task_owned {owner={session_id=parent.session_id;task_id=frame.task_id;
+                 Task_owned {owner={invocation=parent.invocation;task_id=frame.task_id;
                      run_id;call_id=parent.call_id;call_envelope_uuid=parent.call_envelope_uuid;
                      call_ordinal=parent.call_ordinal};
                    registration=frame.task_event;boundary=Task_terminal_unobserved}
@@ -2254,7 +2257,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
                  ~channel:Text_content ~message_id ~uuid ~ordinal text
            | Child_response parent_tool_use_id, Model_response ->
                let parent_occurrence = root_native_agent_parent native_tool_calls
-                 ~session_id:expected_session_id ~call_id:parent_tool_use_id in
+                 ~call_id:parent_tool_use_id in
                emit_stream_event on_stream_event
                  (Child_content_observed {parent_tool_use_id; parent_occurrence; message_id; model;
                    block=Assistant_block {uuid; ordinal}; channel=Text_content; text});
@@ -2267,7 +2270,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
                  ~channel:Thinking_content ~message_id ~uuid ~ordinal text
            | Child_response parent_tool_use_id, Model_response ->
                let parent_occurrence = root_native_agent_parent native_tool_calls
-                 ~session_id:expected_session_id ~call_id:parent_tool_use_id in
+                 ~call_id:parent_tool_use_id in
                emit_stream_event on_stream_event
                  (Child_content_observed {parent_tool_use_id; parent_occurrence; message_id; model;
                    block=Assistant_block {uuid; ordinal}; channel=Thinking_content; text});
@@ -2702,7 +2705,8 @@ let run_protocol io ~native_posture ~dynamic_tools ~subscription ~session_mode ~
     ~rate_limit:None
     ~assistant_model:None
     ~assistant_texts:[]
-    ~native_tool_calls:{calls=Hashtbl.create 8;progress_uuids=Hashtbl.create 8;
+    ~native_tool_calls:{invocation=Input_attribution.ticket input_observer.input_state;
+      calls=Hashtbl.create 8;progress_uuids=Hashtbl.create 8;
       retry_bindings=Hashtbl.create 8;task_runs=Hashtbl.create 8;native_posture}
     ~native_tool_attempted:(ref false)
     ~on_turn_started

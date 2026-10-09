@@ -3112,7 +3112,7 @@ let test_task_callback_keeps_closed_native_owner_and_model_content () =
       let on_native_task_observation (bound : Keeper_claude_task_binding.bound) =
         let observation = bound.observation in
         check string "input session is the native owner's actual session"
-          observation.owner.session_id bound.ticket.session_id;
+          observation.owner.invocation.session_id bound.ticket.session_id;
         (match bound.evidence with
          | Keeper_claude_task_binding.Explicit_group group ->
              check string "native envelope uses the actual host input UUID"
@@ -3268,7 +3268,7 @@ let test_task_binding_freezes_exact_envelope_and_dispatch () =
             check string "runtime captured by actual dispatch" admitted.runtime_id attempt.runtime_id;
             check int "lane captured by actual dispatch" admitted.lane_attempt_index attempt.lane_attempt_index;
             check string "original envelope survives native closure" "two-agents" b.observation.owner.call_envelope_uuid;
-            check string "ticket/native session match" b.ticket.session_id b.observation.owner.session_id;
+            check string "ticket/native session match" b.ticket.session_id b.observation.owner.invocation.session_id;
             (match b.evidence with
              | Keeper_claude_task_binding.Explicit_group group when invocation = 1 ->
                  check string "actual written input owns both calls" b.ticket.client_uuid group.primary

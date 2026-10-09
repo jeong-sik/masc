@@ -113,11 +113,22 @@ complete messages; this separation does not invent child token streaming.
 Each child snapshot optionally carries a private `native_agent_parent_witness`.
 The existing invocation native-call registry is its only authority: under
 `Native_full`, an unambiguous root built-in `Agent` call retains its original
-session, call ID, envelope UUID and observed array ordinal while open and after
-native return. No task registration is required. Unknown, ambiguous, nested,
+actual invocation ticket, call ID, envelope UUID and observed array ordinal
+while open and after native return. The registry captures the immutable ticket
+already minted before the runtime's user write and emitted by Prepared input
+observation; it does not generate another invocation identifier or duplicate the
+session field. No task registration is required. Unknown, ambiguous, nested,
 non-Agent, MCP-wrapper or unadmitted parents yield `None`, preserving body
-provenance. No task/run or input ticket is inferred. The witness certifies the
-original native call only; a downstream join must compare the child's literal
+provenance. Neither task/run nor consumed-input attribution is inferred. The
+witness certifies the original native call and its actual receiving invocation;
+a downstream input join must compare its whole ticket (receiver generation,
+session and client UUID) with the actual Prepared ticket before owner-cache
+access. The existing native task owner carries the same invocation ticket.
+`bind_task` rejects foreign session/invocation without touching the current
+owner cache and keys failed-first evidence by exact invocation and SDK occurrence.
+An exact provider-ID replay in another resumed invocation cannot reuse the old
+input proof. Child `bind_parent` and wrapper integration are not implemented by
+this prerequisite. A downstream child join must also compare the child's literal
 parent ID with the witness call ID. Public event construction does not certify
 that pairing or body authenticity.
 
@@ -127,7 +138,10 @@ snapshots and prove neither current authority nor cancellation. Later witnesses
 cannot retroactively certify earlier unknown snapshots. Separate child display,
 persistence and original-input binding are not connected in the Keeper wrapper,
 which explicitly excludes child body from root projection. Native task metadata
-journals do not receive child body or user input from this event.
+journals do not receive child body or user input from this event. Public native
+task transport and SQLite journal shapes are unchanged. This new-capture proof
+does not reconstruct original invocation evidence for historical stored rows or
+validate past display behavior.
 
 The recorded Claude Code 2.1.292 observation established child tool-use/result
 envelopes with their own model and usage even when `forwardSubagentText` was

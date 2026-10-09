@@ -16,6 +16,7 @@ type rejection =
   | Missing_ticket
   | Conflicting_invocation
   | Foreign_session
+  | Foreign_invocation
   | Missing_assistant_evidence
   | Unattributed_assistant
   | Rejected_assistant of Runtime_claude_input_attribution.rejection
@@ -36,7 +37,12 @@ val observe_input : t -> Runtime_claude_input_attribution.observation -> unit
 val bind_task : t -> Runtime_claude_code.native_task_observation ->
   (bound, rejection) result
 (** Keeps the original native occurrence's input across call closure and task
-    run changes. Failed first binding is retained for that occurrence. This
+    run changes. The runtime owner's actual invocation ticket must match the
+    observed Prepared ticket in receiver generation, session and client UUID.
+    Foreign session/invocation is refused before owner-cache access, preserving
+    subsequent bindings of the current invocation's owner. Failed first binding
+    is retained for that exact invocation/occurrence, including before Prepared;
+    another invocation reusing the SDK IDs has a separate cache identity. This
     neither admits raw frames nor changes model content, effects or task phase.
     Root result does not erase historical bindings; this module does not keep
     the current one-result runtime receiver alive. *)

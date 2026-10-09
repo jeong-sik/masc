@@ -444,6 +444,130 @@ describe('SSEMessageSchema', () => {
     }
   })
 
+  it('accepts native starts with exact occurrence and optional provider identity', () => {
+    for (const value of [
+      { toolStreamScope: 0, toolCallBlockIndex: 0 },
+      { toolStreamScope: 2, toolCallBlockIndex: 7, providerMessageId: 'reused', toolCallId: 'native', toolCallName: 'Read' },
+    ]) {
+      const event = customEvent('KEEPER_NATIVE_TOOL_START', value)
+      const parsed = parseSSEMessage(event)
+      expect(parsed?.ag_ui_event).toEqual(event.ag_ui_event)
+    }
+  })
+
+  it.each([
+    { kind: 'end_observed', exit_code: null },
+    { kind: 'completion_reported', exit_code: null },
+    { kind: 'completion_reported', exit_code: 0 },
+    { kind: 'completion_reported', exit_code: 17 },
+    { kind: 'error_reported', exit_code: -15 },
+    { kind: 'decline_reported', exit_code: null },
+    { kind: 'result_received', exit_code: null, is_error: null },
+    { kind: 'result_received', exit_code: null, is_error: false },
+    { kind: 'result_received', exit_code: 3, is_error: true },
+    { kind: 'unrecognized_status', exit_code: null, status: 'future-provider-status' },
+    { kind: 'unrecognized_status', exit_code: null, status: '' },
+  ])('preserves native completion facts without a success inference: %j', completion => {
+    const event = customEvent('KEEPER_NATIVE_TOOL_END', {
+      toolStreamScope: 2, toolCallBlockIndex: 7, completion,
+    })
+    const parsed = parseSSEMessage(event)
+    expect(parsed?.ag_ui_event).toEqual(event.ag_ui_event)
+  })
+
+  it('accepts an older native end without inventing completion metadata', () => {
+    const event = customEvent('KEEPER_NATIVE_TOOL_END', { toolStreamScope: 0, toolCallBlockIndex: 0 })
+    const parsed = parseSSEMessage(event)
+    expect(parsed?.ag_ui_event).toEqual(event.ag_ui_event)
+  })
+
+  it.each([
+    { kind: 'output_observed', byte_count: 1 },
+    { kind: 'output_observed', byte_count: 4096 },
+    { kind: 'message_reported', message: '' },
+    { kind: 'message_reported', message: 'provider progress \n다음' },
+  ])('accepts and retains typed native progress: %j', progress => {
+    const event = customEvent('KEEPER_NATIVE_TOOL_PROGRESS', {
+      toolStreamScope: 2, toolCallBlockIndex: 7, toolCallName: 'Read', progress,
+    })
+    expect(parseSSEMessage(event)?.ag_ui_event).toEqual(event.ag_ui_event)
+  })
+
+  it('rejects malformed or contradictory native completion objects', () => {
+    for (const completion of [
+      null, [], 'completed', {},
+      { kind: 'success', exit_code: 0 },
+      { kind: 'end_observed' },
+      { kind: 'completion_reported', exit_code: '0' },
+      { kind: 'completion_reported', exit_code: 0.5 },
+      { kind: 'completion_reported', exit_code: Number.MAX_SAFE_INTEGER + 1 },
+      { kind: 'completion_reported', exit_code: Infinity },
+      { kind: 'completion_reported', exit_code: 0, is_error: false },
+      { kind: 'error_reported', exit_code: 0, status: 'failed' },
+      { kind: 'result_received', exit_code: null },
+      { kind: 'result_received', exit_code: null, is_error: 'false' },
+      { kind: 'result_received', exit_code: null, is_error: false, status: 'completed' },
+      { kind: 'unrecognized_status', exit_code: null },
+      { kind: 'unrecognized_status', exit_code: null, status: false },
+      { kind: 'unrecognized_status', exit_code: null, status: 'future', is_error: true },
+      { kind: 'end_observed', exit_code: null, extra: true },
+    ]) {
+      expect(SSEMessageSchema.safeParse(customEvent('KEEPER_NATIVE_TOOL_END', {
+        toolStreamScope: 0, toolCallBlockIndex: 0, completion,
+      })).success).toBe(false)
+    }
+  })
+
+  it('rejects missing, malformed, and cross-variant native progress', () => {
+    for (const progress of [
+      undefined, null, [], {},
+      { kind: 'output_observed', byte_count: 0 },
+      { kind: 'output_observed', byte_count: -1 },
+      { kind: 'output_observed', byte_count: 1.5 },
+      { kind: 'output_observed', byte_count: '1' },
+      { kind: 'output_observed', byte_count: Number.MAX_SAFE_INTEGER + 1 },
+      { kind: 'output_observed', byte_count: 1, message: 'not output bytes' },
+      { kind: 'message_reported' },
+      { kind: 'message_reported', message: null },
+      { kind: 'message_reported', message: 'ok', byte_count: 1 },
+      { kind: 'message_reported', message: '', extra: true },
+      { kind: 'heartbeat', elapsed_seconds: 1 },
+    ]) {
+      expect(SSEMessageSchema.safeParse(customEvent('KEEPER_NATIVE_TOOL_PROGRESS', {
+        toolStreamScope: 0, toolCallBlockIndex: 0, progress,
+      })).success).toBe(false)
+    }
+    expect(SSEMessageSchema.safeParse(customEvent('KEEPER_NATIVE_TOOL_PROGRESS', {
+      toolStreamScope: 0, toolCallBlockIndex: 0,
+    })).success).toBe(false)
+  })
+
+  it('rejects malformed occurrence and event-incompatible native fields', () => {
+    const occurrence = { toolStreamScope: 0, toolCallBlockIndex: 0 }
+    for (const value of [
+      {}, { ...occurrence, toolStreamScope: -1 }, { ...occurrence, toolCallBlockIndex: '0' },
+      { ...occurrence, toolCallBlockIndex: 0.5 }, { ...occurrence, providerMessageId: null },
+      { ...occurrence, toolCallId: '' }, { ...occurrence, toolCallName: ' ' },
+      { ...occurrence, toolCallName: 1 }, { ...occurrence, toolCallName: undefined },
+      { ...occurrence, executionId: 'invented-receipt' },
+      { ...occurrence, completion: { kind: 'end_observed', exit_code: null } },
+      { ...occurrence, progress: { kind: 'output_observed', byte_count: 1 } },
+    ]) {
+      expect(SSEMessageSchema.safeParse(customEvent('KEEPER_NATIVE_TOOL_START', value)).success).toBe(false)
+    }
+    expect(SSEMessageSchema.safeParse(customEvent('KEEPER_NATIVE_TOOL_END', {
+      ...occurrence, progress: { kind: 'output_observed', byte_count: 1 },
+    })).success).toBe(false)
+    expect(SSEMessageSchema.safeParse(customEvent('KEEPER_NATIVE_TOOL_PROGRESS', {
+      ...occurrence, progress: { kind: 'message_reported', message: '' },
+      completion: { kind: 'end_observed', exit_code: null },
+    })).success).toBe(false)
+    const malformed = parseSSEMessage(customEvent('KEEPER_NATIVE_TOOL_END', {
+      ...occurrence, completion: null,
+    }))
+    expect(malformed?.ag_ui_event).toEqual(expect.objectContaining({ type: 'RUN_ERROR', code: 'invalid_event_payload' }))
+  })
+
   it('accepts the null runtime-attempt boundary event', () => {
     const r = SSEMessageSchema.safeParse(
       customEvent('KEEPER_RUNTIME_ATTEMPT_STARTED', null),

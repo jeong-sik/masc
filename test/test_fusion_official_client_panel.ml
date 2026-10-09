@@ -609,9 +609,10 @@ notify("turn/started", {"sessionId": "panel-session", "turnId": turn_id,
 notify("usage/changed", {"observedAtMs": 100000, "tier": "fixture",
     "window": {"usedPercent": 100, "resetsAtMs": 500000, "windowDurationMins": 5},
     "weekly": {"usedPercent": 99, "resetsAtMs": 900000}})
-notify("item/completed", {"sessionId": "panel-session", "viewCursor": "v:3", "item": {
-    "itemId": "m-1", "kind": "agentMessage", "turnId": turn_id, "revision": 1,
-    "status": "completed", "text": control.get("answers", {}).get(opened["params"]["modelId"], "MUSE_PANEL_ANSWER")}})
+if not control.get("missing_reply", False):
+    notify("item/completed", {"sessionId": "panel-session", "viewCursor": "v:3", "item": {
+        "itemId": "m-1", "kind": "agentMessage", "turnId": turn_id, "revision": 1,
+        "status": "completed", "text": control.get("answers", {}).get(opened["params"]["modelId"], "MUSE_PANEL_ANSWER")}})
 notify("turn/completed", {"sessionId": "panel-session", "turnId": turn_id,
                           "terminal": control.get("terminal", "completed"), "viewCursor": "v:4",
                           "error": control.get("error"),
@@ -760,6 +761,19 @@ let test_muse_code_panelist_reaches_muse_serve () =
   in
   check (list int) "instructions label, group prompt, goal label, question, in that order"
     (List.sort Int.compare order) order
+;;
+
+let test_muse_missing_reply_is_consumer_failure () =
+  with_muse_runtime ~muse_cli:muse_panel_launcher (fun ~base_dir ->
+    write_file ~path:(Filename.concat base_dir "fixture-control.json") ~perm:0o600
+      {|{"missing_reply":true}|};
+    let runtime = match Runtime.get_runtime_by_id muse_runtime_id with
+      | Some runtime -> runtime | None -> fail "Muse fixture missing" in
+    match in_eio_context (fun () -> Masc.Fusion_official_client.run_with_images
+        ~images:[] ~base_dir ~runtime ~system_prompt:"" ~prompt:"reply" ()) with
+    | Error Masc.Fusion_official_client.Missing_reply -> ()
+    | Error failure -> fail (Masc.Fusion_official_client.failure_detail ~runtime_id:muse_runtime_id failure)
+    | Ok _ -> fail "missing assistant message became a successful panel reply")
 ;;
 
 let test_muse_frozen_candidate_and_quota_scope () =
@@ -1670,6 +1684,8 @@ let () =
             "Muse Code panelist reaches muse serve"
             `Quick
             test_muse_code_panelist_reaches_muse_serve
+        ; test_case "Muse missing reply is a consumer failure" `Quick
+            test_muse_missing_reply_is_consumer_failure
         ; test_case "Muse frozen candidate and account quota" `Quick test_muse_frozen_candidate_and_quota_scope
         ; test_case "paid failed seats and successful fallbacks retain usage" `Quick
             test_panel_paid_failures_survive_exhaustion_and_fallback

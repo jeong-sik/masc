@@ -1215,6 +1215,7 @@ let rec observe_repeated_call state fingerprint =
 type raw_trace_stage =
   | Run_start
   | Reasoning_effort
+  | Context_submission
   | Assistant_block
   | Tool_start
   | Tool_finish
@@ -1225,6 +1226,7 @@ type raw_trace_stage =
 let raw_trace_stage_label = function
   | Run_start -> "run_start"
   | Reasoning_effort -> "reasoning_effort"
+  | Context_submission -> "context_submission"
   | Assistant_block -> "assistant_block"
   | Tool_start -> "tool_start"
   | Tool_finish -> "tool_finish"
@@ -1236,6 +1238,8 @@ let raw_trace_stage_label = function
 let observe_raw_trace ~keeper_name ~stage observe =
   match
     try observe () with
+    | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+    | Eio.Time.Timeout as exn -> raise exn
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | (Out_of_memory | Stack_overflow | Sys.Break) as exn -> raise exn
     | exn -> Error (Agent_core.Error.Internal (Printexc.to_string exn))

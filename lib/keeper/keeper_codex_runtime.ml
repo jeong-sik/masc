@@ -1472,6 +1472,18 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
                ~expected
                ~session_id:thread_id
                ~updated_at:(Time_compat.now ())))
+         ~on_context_submission:(fun observation ->
+           let detail=`Assoc ["keeper",`String keeper_name;
+             "runtime_profile",`String runtime_id;"client_turn_ordinal",`Int turn_count;
+             "submission",Runtime_codex_app_server.context_submission_to_json observation] in
+           match raw_trace_run with
+           | None -> Log.Keeper.warn ~keeper_name
+               "Codex context submission measurement unavailable: no raw-trace attempt binding"
+           | Some active ->
+             ignore (Host.observe_raw_trace ~keeper_name ~stage:Host.Context_submission (fun () ->
+               Agent_core.Raw_trace.record_hook_invoked active
+                 ~hook_name:"codex_context_submission" ~hook_decision:"stdin_write_completed"
+                 ~hook_detail:(Yojson.Safe.to_string detail) ())))
          ~on_prompt_sent:report_transmitted_input
          ~on_turn_starting:(fun ~thread_id ->
            update_session "turn-starting transition" (fun expected ->

@@ -125,6 +125,7 @@ type rejected_tool_call =
 type raw_trace_stage =
   | Run_start
   | Reasoning_effort
+  | Context_submission
   | Assistant_block
   | Tool_start
   | Tool_finish

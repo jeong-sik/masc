@@ -220,7 +220,24 @@ let test_raw_observation_preserves_reserved_exceptions () =
   in
   check bool "Out_of_memory propagates" true raises_out_of_memory;
   check bool "Stack_overflow propagates" true raises_stack_overflow;
-  check bool "Sys.Break propagates" true raises_sys_break
+  check bool "Sys.Break propagates" true raises_sys_break;
+  List.iter (fun control ->
+    let keeper_name = "raw-observer-driver-control" in
+    let labels = ["keeper",keeper_name;"source","official_client_raw";"stage","context_submission"] in
+    let failures () = Otel_metric_store.metric_value_or_zero
+      Keeper_metrics.(to_string TraceEmitFailures) ~labels () in
+    let before = failures () in
+    let propagated =
+      try
+        ignore (Host.observe_raw_trace ~keeper_name ~stage:Host.Context_submission
+          (fun () -> raise control));
+        false
+      with exn -> exn == control
+    in
+    check bool "driver control propagates unchanged through the real trace observer" true propagated;
+    check bool "driver cancellation/deadline is not counted as a degraded trace sink" true
+      (failures () = before))
+    [Keeper_operator_interrupt.Operator_interrupt; Eio.Time.Timeout]
 ;;
 
 let test_raw_finish_failure_does_not_reverse_tool_success () =

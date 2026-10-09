@@ -178,9 +178,9 @@ let warm_fresh_executable path =
     wait ()
 ;;
 
-let fixture_script ?(close_before_turn = false) ?(inject_items = false) ?(model_pages = []) ?(model_pages_before_thread = false) ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
+let fixture_script ?(close_before_turn = false) ?(close_after_injection = false) ?(inject_items = false) ?(model_pages = []) ?(model_pages_before_thread = false) ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
     ?(terminal_line_delay_start_index = 0) ?(line_delays = []) ?before_final_stdin_drain_s
-    ?pipe_holder_s lines =
+    ?pipe_holder_s ?break_raw_trace_path lines =
   let path = Filename.temp_file "masc-codex-app-server-" ".sh" in
   let output = open_out_bin path in
   let read_request ?(expect_version = false) () =
@@ -210,6 +210,9 @@ let fixture_script ?(close_before_turn = false) ?(inject_items = false) ?(model_
   output_string output "#!/bin/sh\n";
   output_string output "case \"$1\" in --masc-warmup) exit 0 ;; esac\n";
   read_request ~expect_version:true ();
+  Option.iter (fun path ->
+    output_string output ("mv " ^ shell_quote path ^ " " ^ shell_quote (path ^ ".before")
+      ^ " && mkdir " ^ shell_quote path ^ "\n")) break_raw_trace_path;
   Option.iter
     (fun seconds -> output_string output (Printf.sprintf "sleep %.3f\n" seconds))
     initial_line_delay_s;
@@ -233,7 +236,9 @@ let fixture_script ?(close_before_turn = false) ?(inject_items = false) ?(model_
       (* Acknowledge thread/inject_items before reading/capturing turn/start.
          Sending all replies up front lets the host finish before the fixture
          has observed the request whose exact bytes the test asserts. *)
+      if close_after_injection then output_string output "exec 0<&-\n";
       output_string output ("printf '%s\\n' " ^ shell_quote (List.nth lines 3) ^ "\n");
+      if close_after_injection then output_string output "exit 63\n";
       read_request ();
       drop 4 lines)
     else drop 3 lines
@@ -279,11 +284,12 @@ let fixture_script ?(close_before_turn = false) ?(inject_items = false) ?(model_
   path
 ;;
 
-let with_fixture ?close_before_turn ?inject_items ?model_pages ?model_pages_before_thread ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
-    ?terminal_line_delay_start_index ?line_delays ?before_final_stdin_drain_s ?pipe_holder_s lines f =
+let with_fixture ?close_before_turn ?close_after_injection ?inject_items ?model_pages ?model_pages_before_thread ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
+    ?terminal_line_delay_start_index ?line_delays ?before_final_stdin_drain_s ?pipe_holder_s ?break_raw_trace_path lines f =
   let path =
     fixture_script
       ?close_before_turn
+      ?close_after_injection
       ?inject_items
       ?model_pages
       ?model_pages_before_thread
@@ -294,6 +300,7 @@ let with_fixture ?close_before_turn ?inject_items ?model_pages ?model_pages_befo
       ?line_delays
       ?before_final_stdin_drain_s
       ?pipe_holder_s
+      ?break_raw_trace_path
       lines
   in
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () -> f path)
@@ -338,7 +345,7 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
     ?(developer_context = []) ?developer_instructions ?context_window ?(cwd = "/tmp")
     ?(timeout_s = 2.0) ?admission_timeout_s ?(no_turn_deadline = false)
     ?on_thread_ready ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event
-    ?on_prompt_sent ?on_reasoning_effort_resolved ?await_handoff ?(prompt = "Return the fixture marker")
+    ?on_prompt_sent ?on_context_submission ?on_context_submission_delay_s ?on_reasoning_effort_resolved ?await_handoff ?(prompt = "Return the fixture marker")
     ?(images = []) ?(native = Runtime_native_tools.codex_default) path =
   Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     let previous_pool = Domain_pool_ref.get () in
@@ -387,6 +394,9 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
       ?on_turn_started
       ?on_stream_event
       ?on_prompt_sent
+      ~on_context_submission:(fun event ->
+        Option.iter (Eio.Time.sleep clock) on_context_submission_delay_s;
+        Option.iter (fun callback -> callback event) on_context_submission)
       ?on_reasoning_effort_resolved
       ?await_handoff
       config
@@ -1411,6 +1421,94 @@ let test_prompt_transmission_boundary ?(worker_pool = false) () =
     | Error (Runtime_codex_app_server.Protocol_error { stage = "prompt sent callback"; _ }) -> ()
     | Error error -> fail (Runtime_codex_app_server.error_to_string error)
     | Ok _ -> fail "observation failure silently continued")
+;;
+
+let test_content_free_context_submission () =
+  let module Client = Runtime_codex_app_server in
+  let hash text=Digestif.SHA256.(digest_string text |> to_hex) in
+  let success=[init_result;account_chatgpt;thread_result;turn_result;item_completed;turn_completed] in
+  let injected=[init_result;account_chatgpt;thread_result;
+    {|{"id":4,"result":{}}|}; {|{"id":5,"result":{"turn":{"id":"turn-1"}}}|};item_completed;turn_completed] in
+  let history=[{Client.role=Client.User;text="previous input"}] in
+  List.iter (fun thread_mode ->
+    let observed=ref [] in
+    let capture=Filename.temp_file "codex-context-submission-" ".jsonl" in
+    Fun.protect ~finally:(fun () -> Sys.remove capture) @@ fun () ->
+    let start=match thread_mode with Client.Start -> true | Client.Resume _ -> false in
+    with_fixture ~capture_path:capture ~inject_items:start (if start then injected else success) (fun path ->
+      let result=run_fixture ~thread_mode ~history ~prompt:"current input 한글 \"quoted\""
+          ~on_context_submission:(fun event -> observed:=event :: !observed) path in
+      check bool "context-bearing transport completes" true (Result.is_ok result);
+      let observed=List.rev !observed in
+      let expected=if start then [Client.Thread_start;Client.Thread_inject_items;Client.Turn_start]
+        else [Client.Thread_resume;Client.Turn_start] in
+      check bool "only context operations are observed, never account/auth traffic" true
+        (List.map (fun (event:Client.context_submission) -> event.method_) observed=expected);
+      let lines=In_channel.with_open_bin capture In_channel.input_all |> String.split_on_char '\n'
+        |> List.filter (fun line -> line<>"") in
+      List.iter (fun (event:Client.context_submission) ->
+        let line=List.find (fun line -> Yojson.Safe.Util.member "id" (Yojson.Safe.from_string line)=`Int event.request_id) lines in
+        check int "byte count is exact written JSON excluding newline" (String.length line) event.ipc_json_bytes;
+        check string "SHA binds exact serialized bytes" (hash line) event.ipc_json_sha256;
+        let json=Client.context_submission_to_json event in
+        check bool "observation has no payload" true (Yojson.Safe.Util.member "params" json=`Null);
+        check bool "remote retained history remains unknown" true
+          (Yojson.Safe.Util.member "remote_history" json=`String "unknown")) observed))
+    [Client.Start;Client.Resume {thread_id="thread-1"}];
+  List.iter (fun after_injection ->
+    let observed=ref [] in
+    with_fixture ~close_before_turn:(not after_injection) ~close_after_injection:after_injection
+      ~inject_items:after_injection (if after_injection then injected else success) (fun path ->
+      let result=run_fixture ~history:(if after_injection then history else [])
+          ~prompt:(String.make 1_100_000 'x')
+          ~on_context_submission:(fun event -> observed:=event :: !observed) path in
+      (match result with Error (Client.Turn_input_write_failed _) -> ()
+       | Error error -> fail (Client.error_to_string error) | Ok _ -> fail "partial turn input completed");
+      check bool "partial turn write never produces completed submission" false
+        (List.exists (fun (event:Client.context_submission) -> event.method_=Client.Turn_start) !observed);
+      check bool "completed injection survives subsequent turn write failure" after_injection
+        (List.exists (fun (event:Client.context_submission) -> event.method_=Client.Thread_inject_items) !observed)))
+    [false;true];
+  let calls=ref 0 in
+  with_fixture success (fun path ->
+    let result=run_fixture ~on_context_submission:(fun _ -> incr calls; failwith "measurement sink failure") path in
+    check bool "observer failure cannot reject an already written request" true (Result.is_ok result);
+    check int "observer failure does not cause retry or duplicate dispatch" 2 !calls);
+  with_fixture success (fun path ->
+    let result=run_fixture ~admission_timeout_s:1. ~on_context_submission_delay_s:1.5 path in
+    check bool "slow observer after complete write cannot expire the write deadline" true
+      (Result.is_ok result));
+  let observer_timeout (event:Client.context_submission) =
+    if event.method_=Client.Turn_start then raise Eio.Time.Timeout in
+  with_fixture success (fun path ->
+    match run_fixture ~on_context_submission:observer_timeout path with
+    | Ok _ -> ()
+    | Error error -> fail ("observer timeout after a complete write is unavailable measurement: "
+        ^ Client.error_to_string error));
+  with_fixture ~terminal_line_delay_s:2.0
+    [init_result;account_chatgpt;thread_result;turn_result;turn_completed] (fun path ->
+    match run_fixture ~timeout_s:1.0 ~on_context_submission:observer_timeout path with
+    | Error (Client.Timeout {turn_accepted=true; _}) -> ()
+    | Error (Client.Timeout {turn_accepted=false; _}) ->
+      fail "observer timeout dropped the turn/start dispatch fence"
+    | Error error -> fail (Client.error_to_string error)
+    | Ok _ -> fail "silent app-server after observer timeout ignored its idle timeout");
+  with_fixture success (fun path ->
+    try
+      ignore (run_fixture ~on_context_submission:(fun (event:Client.context_submission) ->
+        if event.method_=Client.Turn_start then raise Sys.Break) path);
+      fail "reserved observer control after write must not become a retryable spawn failure"
+    with Sys.Break -> ());
+  let cancelled_after_write=ref false in
+  with_fixture success (fun path ->
+    (try
+       ignore (run_fixture ~on_context_submission:(fun (event:Client.context_submission) ->
+         if event.method_=Client.Turn_start then (
+           cancelled_after_write:=true;
+           raise (Eio.Cancel.Cancelled (Failure "cancel after completed IPC write")))) path);
+       fail "observer cancellation must propagate"
+     with Eio.Cancel.Cancelled _ -> ());
+    check bool "cancellation occurs after the completed turn submission fence" true !cancelled_after_write)
 ;;
 
 let test_subscription_probe_stops_before_thread () =
@@ -3680,7 +3778,9 @@ let run_production_keeper_turn_with_projection ~write_cost_ledger ~after_turn
     ~base_path ~sandbox_profile:None "codex-production-fixture";
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
-    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+    ~finally:(fun () ->
+      Keeper_tool_call_log.reset_for_testing ();
+      Runtime.For_testing.restore runtime_snapshot)
     (fun () ->
        with_runtime_config ~model cli_path (fun runtime_path ->
          Eio_main.run (fun env ->
@@ -5527,6 +5627,7 @@ let test_keeper_preserves_typed_history_on_codex_wire () =
 let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
   let base_path = temp_workspace "masc-codex-raw-trace-" in
   let raw_trace_path = Filename.concat base_path "official-codex-raw.jsonl" in
+  let capture_path = Filename.concat base_path "actual-stdin.jsonl" in
   let tool =
     Agent_core.Tool.create
       ~name:"masc_probe"
@@ -5548,7 +5649,7 @@ let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
-       with_fixture
+       with_fixture ~capture_path
          [ init_result
          ; account_chatgpt
          ; thread_result
@@ -5578,6 +5679,40 @@ let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
                 | Ok records -> records
                 | Error error -> fail (Agent_core.Error.to_string error)
               in
+              let submitted=List.filter (fun (record:Agent_core.Raw_trace.record) ->
+                record.hook_name=Some "codex_context_submission") records in
+              check int "actual Keeper caller durably records both context writes" 2 (List.length submitted);
+              let written=In_channel.with_open_bin capture_path In_channel.input_all
+                |> String.split_on_char '\n' |> List.filter (fun line -> line<>"") in
+              let run_started=List.find (fun (record:Agent_core.Raw_trace.record) ->
+                record.record_type=Agent_core.Raw_trace.Run_started) records in
+              List.iter (fun (record:Agent_core.Raw_trace.record) ->
+                check string "submission belongs to this immutable raw-trace attempt"
+                  run_started.worker_run_id record.worker_run_id;
+                check (option string) "submission retains the admitted session binding"
+                  run_started.session_id record.session_id;
+                let detail=match record.hook_detail with Some text -> Yojson.Safe.from_string text
+                  | None -> fail "submission detail missing" in
+                let open Yojson.Safe.Util in
+                check string "submission names its real Keeper" record.agent_name
+                  (detail |> member "keeper" |> to_string);
+                check (list string) "caller manifest carries identifiers and typed observation only"
+                  ["client_turn_ordinal";"keeper";"runtime_profile";"submission"]
+                  (to_assoc detail |> List.map fst |> List.sort String.compare);
+                let event=member "submission" detail in
+                check (list string) "submission never retains content, tool schemas or credentials"
+                  ["framing";"ipc_json_bytes";"ipc_json_sha256";"method";"phase";"remote_history";
+                   "request_id";"schema";"server_acceptance";"thread_id"]
+                  (to_assoc event |> List.map fst |> List.sort String.compare);
+                let request_id=member "request_id" event in
+                let raw=List.find (fun raw -> member "id" (Yojson.Safe.from_string raw)=request_id) written in
+                check bool "durable method matches actual request" true
+                  (member "method" event=member "method" (Yojson.Safe.from_string raw));
+                check int "durable submission names exact stdin bytes" (String.length raw)
+                  (event |> member "ipc_json_bytes" |> to_int);
+                check string "durable submission SHA binds the actual stdin request"
+                  Digestif.SHA256.(digest_string raw |> to_hex)
+                  (event |> member "ipc_json_sha256" |> to_string)) submitted;
               let kinds =
                 List.map
                   (fun (record : Agent_core.Raw_trace.record) -> record.record_type)
@@ -5627,7 +5762,48 @@ let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
                 (option string)
                 "RAW retains actual final response"
                 (Some "MASC_SUBSCRIPTION_OK")
-                finished.final_text))
+                finished.final_text;
+              let observations = List.map (fun (record:Agent_core.Raw_trace.record) ->
+                let manifest = Yojson.Safe.from_string (Option.get record.hook_detail) in
+                let request_id = Yojson.Safe.Util.(manifest |> member "submission" |> member "request_id") in
+                let raw = List.find (fun raw ->
+                  Yojson.Safe.Util.member "id" (Yojson.Safe.from_string raw)=request_id) written in
+                `Assoc ["worker_run_id",`String record.worker_run_id;
+                  "session_id",(match record.session_id with None -> `Null | Some id -> `String id);
+                  "manifest",manifest;
+                  "captured_ipc_json_bytes",`Int (String.length raw);
+                  "captured_ipc_json_sha256",`String Digestif.SHA256.(digest_string raw |> to_hex)]) submitted in
+              Printf.printf "MEMORY_CODEX_CONTEXT_SUBMISSION_JSON %s\n%!"
+                (Yojson.Safe.to_string (`Assoc [
+                  "evidence",`String "actual_keeper_fake_cli_complete_stdin_writes";
+                  "observations",`List observations;
+                  "remote_provider_input",`String "unobserved";
+                  "payload_contents_retained",`Bool false]))))
+;;
+
+let test_keeper_codex_context_submission_sink_failure () =
+  let base_path = temp_workspace "masc-codex-submission-sink-" in
+  let raw_trace_path = Filename.concat base_path "raw.jsonl" in
+  let keeper_name = "codex-submission-sink-fixture" in
+  let labels = ["keeper",keeper_name;"source","official_client_raw";"stage","context_submission"] in
+  let failures () = Otel_metric_store.metric_value_or_zero
+    Keeper_metrics.(to_string TraceEmitFailures) ~labels () in
+  let before = failures () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    with_fixture ~break_raw_trace_path:raw_trace_path
+      [init_result;account_chatgpt;thread_result;turn_result;item_completed;turn_completed]
+      (fun cli_path ->
+        match run_keeper_turn ~keeper_name ~base_path ~raw_trace_path ~cli_path
+          ~model:"gpt-fixture" () with
+        | Error error -> fail (Agent_core.Error.to_string error)
+        | Ok _ ->
+          check bool "real sink outage is visible without rejecting provider success" true
+            (failures () -. before = 2.);
+          let records = match Agent_core.Raw_trace.read_all ~path:(raw_trace_path ^ ".before") () with
+            | Ok records -> records | Error error -> fail (Agent_core.Error.to_string error) in
+          check bool "outage follows actual run admission, not missing trace setup" true
+            (List.exists (fun (record:Agent_core.Raw_trace.record) ->
+              record.record_type=Agent_core.Raw_trace.Run_started) records)))
 ;;
 
 let test_keeper_codex_raw_trace_separates_native_tool_observation () =
@@ -7839,6 +8015,8 @@ let () =
         ] )
     ; ( "subscription boundary"
       , [ test_case "ChatGPT turn completes" `Quick test_chatgpt_subscription_turn
+        ; test_case "content-free actual context submission" `Quick test_content_free_context_submission
+        ; test_case "actual Keeper context submission sink failure" `Quick test_keeper_codex_context_submission_sink_failure
         ; test_case "prompt transmission boundary" `Quick
             (fun () -> test_prompt_transmission_boundary ())
         ; test_case "worker encoded prompt transmission boundary" `Quick

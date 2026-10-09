@@ -441,6 +441,21 @@ val read_rate_limits :
     thread/start or turn/start. The windows are for the operator projection;
     the app-server's schema says clients must not infer recovery from them. *)
 
+type context_submission_method = Thread_start | Thread_resume | Thread_inject_items | Turn_start
+
+type context_submission = private
+  { method_ : context_submission_method
+  ; request_id : int
+  ; thread_id : string option
+  ; ipc_json_bytes : int
+  ; ipc_json_sha256 : string
+  }
+
+val context_submission_to_json : context_submission -> Yojson.Safe.t
+(** Content-free proof of a complete JSON-plus-newline write to Codex stdin.
+    Bytes and SHA cover serialized JSON only, excluding its trailing newline.
+    This is neither server acceptance nor the provider's complete model input. *)
+
 val run_turn :
   ?await_handoff:(unit -> bool) ->
   (* Event-driven scheduling notice. The waiter returns true when queued input
@@ -461,6 +476,13 @@ val run_turn :
      a temporary context replacement or an idempotent delivery API. Callers
      own retry/reconciliation and must not infer token savings from IPC bytes.
      Empty by default; Keeper production projection is unchanged. *)
+  ?on_context_submission:(context_submission -> unit) ->
+  (* Observes only thread start/resume, history injection and turn start after
+      both payload and newline were written. Non-reserved observer exceptions,
+      including a timeout the observer raises itself, are reported as
+      unavailable measurement, never retried as a failed write. The turn
+      continues, so a completed turn write retains its dispatch fence.
+      Cancellation propagates. *)
   ?on_prompt_sent:(unit -> unit) ->
   (* Called after the complete turn-input message is written to the CLI.
       This is transport evidence, not provider acceptance. Never called for

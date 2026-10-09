@@ -2445,7 +2445,52 @@ let client_argv (config : config) =
   @ sub_agent_overrides
 ;;
 
-let with_spawned_client ~mgr ~clock ~cwd config run =
+type context_submission_method = Thread_start | Thread_resume | Thread_inject_items | Turn_start
+
+type context_submission =
+  { method_ : context_submission_method
+  ; request_id : int
+  ; thread_id : string option
+  ; ipc_json_bytes : int
+  ; ipc_json_sha256 : string
+  }
+
+let context_submission_to_json observation =
+  let method_ = match observation.method_ with
+    | Thread_start -> "thread/start" | Thread_resume -> "thread/resume"
+    | Thread_inject_items -> "thread/inject_items" | Turn_start -> "turn/start" in
+  `Assoc ["schema",`String "masc.codex-context-submission.v1";
+    "phase",`String "stdin_write_completed";"method",`String method_;
+    "request_id",`Int observation.request_id;
+    "thread_id",(match observation.thread_id with None -> `Null | Some id -> `String id);
+    "ipc_json_bytes",`Int observation.ipc_json_bytes;"ipc_json_sha256",`String observation.ipc_json_sha256;
+    "framing",`String "json_followed_by_lf_hash_excludes_lf";
+    "server_acceptance",`String "not_observed_by_this_event";
+    "remote_history",`String "unknown"]
+;;
+
+let context_submission json payload =
+  match json with
+  | `Assoc fields ->
+    let method_ = match List.assoc_opt "method" fields with
+      | Some (`String "thread/start") -> Some Thread_start
+      | Some (`String "thread/resume") -> Some Thread_resume
+      | Some (`String "thread/inject_items") -> Some Thread_inject_items
+      | Some (`String "turn/start") -> Some Turn_start
+      | _ -> None in
+    (match method_,List.assoc_opt "id" fields with
+     | Some method_,Some (`Int request_id) ->
+       let thread_id=match List.assoc_opt "params" fields with
+         | Some (`Assoc params) -> (match List.assoc_opt "threadId" params with
+             | Some (`String id) -> Some id | _ -> None)
+         | _ -> None in
+       Some {method_;request_id;thread_id;ipc_json_bytes=String.length payload;
+         ipc_json_sha256=Digestif.SHA256.(digest_string payload |> to_hex)}
+     | _ -> None)
+  | _ -> None
+;;
+
+let with_spawned_client ?(on_context_submission = fun _ -> ()) ~mgr ~clock ~cwd config run =
   let selected_home = match config.isolated_home with
     | Some home -> Some home
     | None -> config.account_home in
@@ -2480,13 +2525,13 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
     let reader = Eio.Buf_read.of_flow ~max_size:max_wire_line_bytes stdout_r in
     let receive_phase = ref Awaiting_admission in
     let send json =
-      with_idle_timeout clock
+      let observation = with_idle_timeout clock
         config.admission_timeout_s
         (fun () ->
           (* Encoding and its worker queue wait share the write's admission
              bound. Await the immutable payload before the
              owner writes, preserving protocol order and callback ownership. *)
-          let payload =
+          let payload, observation =
             Domain_pool_ref.submit_cpu_or_inline (fun () ->
               let payload = Yojson.Safe.to_string json in
               (* The child decodes stdin as UTF-8 and exits on an invalid sequence,
@@ -2500,10 +2545,27 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
                      (match invalid_utf8_field json with
                       | Some field -> field
                       | None -> "<unknown>"));
-              payload)
+              payload, context_submission json payload)
           in
           Eio.Flow.copy_string payload stdin_w;
-          Eio.Flow.copy_string "\n" stdin_w)
+          Eio.Flow.copy_string "\n" stdin_w;
+          observation)
+      in
+      (* Persistence is outside the write deadline. A completed frame must not
+         become an input-write failure because its observer is slow. A deadline
+         the observer raises itself ([Eio.Time.Timeout] from its own
+         [with_timeout_exn], or an [Idle_timeout]) is that observer giving up:
+         the frame is already outside this process, so the turn continues and a
+         written turn/start keeps its dispatch fence. An enclosing deadline
+         reaches this code as [Eio.Cancel.Cancelled], which still propagates. *)
+      Option.iter (fun observation ->
+        try on_context_submission observation with
+        | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+        | exn ->
+          Llm_provider.Reserved_exn.reraise_if_reserved exn;
+          Log.Runtime_agent.warn
+            "Codex context submission measurement unavailable after complete write request_id=%d: %s"
+            observation.request_id (Printexc.to_string exn)) observation
     in
     let receive () =
       try
@@ -2549,11 +2611,11 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
            }))
 ;;
 
-let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~await_handoff ~dynamic_tools
+let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~await_handoff ~dynamic_tools ~on_context_submission
     ~reasoning_effort ~thread_mode ~history ~developer_context ~prompt ~images ~on_thread_ready
     ~on_turn_starting ~on_turn_dispatched ~on_prompt_sent ~on_turn_started ~on_stream_event
     ~on_reasoning_effort_resolved =
-  with_spawned_client
+  with_spawned_client ~on_context_submission
     ~mgr
     ~clock
     ~cwd
@@ -2718,18 +2780,23 @@ let read_rate_limits ~mgr ~clock ~cwd config =
 let run_turn ?await_handoff ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr ~clock ~cwd
     ?(history = [])
     ?(developer_context = [])
+    ?(on_context_submission = fun _ -> ())
     ?(on_prompt_sent = fun () -> ())
     ?(on_reasoning_effort_resolved = fun ~model:_ ~requested:_ ~effective:_ -> ())
     ?(on_thread_ready = fun ~thread_id:_ -> Ok ())
     ?(on_turn_starting = fun ~thread_id:_ -> Ok ())
     ?(on_turn_started = fun ~thread_id:_ ~turn_id:_ -> Ok ()) ?on_stream_event
     config ~prompt ~images =
-  (* [turn/start] acceptance is the fact that decides whether a later idle
-     timeout is ambiguous (the upstream turn may still commit effects). The
-     transport constructs [Timeout] with [turn_accepted = false] because it
-     cannot know; this entry point observes acceptance through the
-     [on_turn_started] callback and rewraps timeout results with the truth. *)
+  (* A complete [turn/start] write already makes a later timeout ambiguous:
+     the upstream may accept and execute it without returning an acknowledgement.
+     The legacy [turn_accepted] flag is this conservative dispatch fence, not
+     proof of server acceptance. Set it before any post-write observer; the
+     separate [on_turn_started] callback witnesses the server's acceptance. *)
   let turn_accepted = ref false in
+  let on_context_submission observation =
+    (match observation.method_ with Turn_start -> turn_accepted := true
+     | Thread_start | Thread_resume | Thread_inject_items -> ());
+    on_context_submission observation in
   let on_turn_started ~thread_id ~turn_id =
     turn_accepted := true;
     on_turn_started ~thread_id ~turn_id
@@ -2760,6 +2827,7 @@ let run_turn ?await_handoff ?(dynamic_tools = []) ?reasoning_effort ?(thread_mod
               config
               ~await_handoff
               ~dynamic_tools
+              ~on_context_submission
               ~reasoning_effort
               ~on_reasoning_effort_resolved
               ~thread_mode
@@ -2779,7 +2847,9 @@ let run_turn ?await_handoff ?(dynamic_tools = []) ?reasoning_effort ?(thread_mod
           | Idle_timeout seconds ->
             Error (Timeout { seconds; turn_accepted = !turn_accepted })
           | Eio.Time.Timeout as exn -> raise exn
-          | exn -> Error (Spawn_failed (Printexc.to_string exn)))
+          | exn ->
+            Llm_provider.Reserved_exn.reraise_if_reserved exn;
+            Error (Spawn_failed (Printexc.to_string exn)))
        with
        | Error (Timeout { seconds; turn_accepted = dispatch_ambiguous }) ->
          Error

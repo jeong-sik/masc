@@ -76,3 +76,28 @@ let group_has_members t =
   match Unix.kill (-t.pid) 0 with
   | () -> true
   | exception Unix.Unix_error ((Unix.ESRCH | Unix.EPERM), _, _) -> false
+
+let signal_group t signal =
+  if group_has_members t then
+    match Unix.kill (-t.pid) signal with
+    | () -> ()
+    (* It emptied between the two calls. *)
+    | exception Unix.Unix_error ((Unix.ESRCH | Unix.EPERM), _, _) -> ()
+
+type stopped = Ended_on_term | Killed_after_grace
+
+let group_poll_s = 0.1
+
+let stop_group ~clock ~grace_s t =
+  signal_group t Sys.sigterm;
+  let deadline = Monotonic_deadline.after ~seconds:grace_s in
+  let rec wait () =
+    if not (group_has_members t) then Ended_on_term
+    else if Monotonic_deadline.passed deadline then (
+      signal_group t Sys.sigkill;
+      Killed_after_grace)
+    else (
+      Eio.Time.sleep clock group_poll_s;
+      wait ())
+  in
+  wait ()

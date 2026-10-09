@@ -95,9 +95,13 @@ port = 9222
    - 잠금을 잡은 host 가 이 포트에 있을 때. host 는 시작할 때 한 번만 Firefox 에 붙으니,
      지금 띄우는 Firefox 에는 붙지 않는다. 포트가 비어 있으면 그 host 는 Firefox 가 사라져 곧 끝나고, 다음 서버 시작이 둘을 띄운다.
    서버는 그 까닭을 로그에 남긴다. host 를 띄울지는 이 한 번으로 정한다.
+   - 기록에 끝난 까닭(`ended`)이 있는데 잠금이 아직 잡혀 있으면, 그 host 가 끝나는 중이다.
+     host 는 끝난 까닭을 먼저 쓰고 나서 잠금을 놓는다. 이때 띄운 host 는 잠금에 막혀 끝나고 host 가 하나도 남지 않으니,
+     잠금이 풀릴 때까지 5초까지 기다린다. 그래도 잡혀 있으면 아무것도 띄우지 않는다.
 1. 그 포트에 무언가 듣고 있으면 Firefox 를 띄우지 않는다.
    듣는 것이 없으면 `firefox --no-remote --profile <profile> --remote-debugging-port <port>` 를 떨어진 프로세스로 띄운다(§2.2).
    포트가 열릴 때까지 기다린다. 열리지 않거나 Firefox 가 먼저 끝나면 띄우지 않은 까닭을 기록한다(§3.4).
+   마감까지 포트가 열리지 않은 Firefox 는 멈춘다(아래 2 의 끝).
    같은 프로필로 이미 떠 있는 Firefox(플래그 없이 운영자가 띄운 것)가 있으면 Firefox 는 그 프로필을 두 번 열지 않는다.
    2026-10-09 Firefox 157.0.1 을 임시 프로필로 재 보니(headless), 두 번째 Firefox 는 약 5초 뒤 **종료 코드 0** 으로 끝났고
    포트는 열리지 않았다. stderr 에는 시스템 언어로 된 "이미 실행 중" 안내만 나왔다.
@@ -112,6 +116,10 @@ port = 9222
 2. 0 에서 띄우기로 했으면 `<base>/.masc/browser-lane/host/launch --bidi-url ws://127.0.0.1:<port>/session` 을 떨어진 프로세스로 띄운다.
    launcher 상태는 0 에서 본 그대로다(연결 목록이 `bidiHost.attach.launcher_state` 로 말하는 상태).
    그 사이 다른 host 가 잠금을 잡았으면 여기서 띄운 host 는 잠금에서 거절되고, 자기 로그에 그렇게 남긴다.
+   host 를 띄우지 못하면(로그를 열 수 없음, launcher 를 실행할 수 없음), 여기서 띄운 Firefox 는 짝 없이 남는다.
+   - 여기서 띄운 Firefox 가 짝 없이 남으면 그 process group 을 멈춘다. 1 의 마감에 포트가 열리지 않은 경우도 같다.
+     SIGTERM 을 보내고, 5초가 지나도 남아 있으면 SIGKILL 을 보낸다. group 이 비면 신호를 보내지 않는다.
+   - 포트가 처음부터 답한 Firefox 는 서버가 띄운 것이 아니라 건드리지 않는다.
    host 에는 서버의 `MASC_HTTP_BASE_URL`·`MASC_HTTP_PORT` 를 넘기지 않는다.
    host 는 이 둘을 `connection.toml` 보다 먼저 고정 주소로 쓰기 때문이다(`connectors/browser/host/README.md`).
    새 host 는 지난 host 기록의 확인 못 한 결과를 archive 에 옮긴 뒤에 기록을 바꾼다(#42150).

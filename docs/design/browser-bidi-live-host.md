@@ -31,6 +31,15 @@ profile = "/Users/you/masc-keeper-firefox-profile"
   such a host is stopped first; one whose Firefox is gone ends by itself,
   and the next server start opens both. Firefox's port lets any local
   process drive it, so it is not opened for nothing.
+- A Firefox the server started and left with no host is stopped through its
+  process group: one whose port did not open within the 30 seconds, and one
+  whose host could not be started. It gets SIGTERM, then SIGKILL after 5
+  seconds. A Firefox whose port answered before the server looked is never
+  touched.
+- A host that leaves in order writes its ending before it gives up the
+  lock. A server that starts in between waits up to 5 seconds for the lock,
+  so the host it starts is not refused; a lock still held then starts
+  nothing.
 - Both run apart from the server, so a server restart leaves them running.
   Firefox writes to `.masc/browser-lane/keeper-firefox.log` and the host to
   `.masc/browser-lane/bidi-host.log`. Each start moves the last run's log to
@@ -214,6 +223,9 @@ server:
     the host pid, start time and client ID alongside the unchanged result
     fields. This archive is append-only; the ordinary diagnostic log is not
     a durable backup. Archive rows may repeat after uncertain writes.
+  - A host that starts appends the previous record's results to the same
+    archive, under the previous host's pid, before it writes its own record.
+    When that append fails it does not start, and the previous record stays.
   - If archival fails, the host reports the failure and retains every
     unarchived entry in its snapshot, even above the normal window, then
     retries on a later addition. A snapshot write failure retains its state
@@ -262,7 +274,11 @@ lock and not yet its record, the reader still sees the host before it; and
 a host that wrote its ending and exited between the two looks reads as
 killed. The next read is right.
 
-A host that starts replaces the record. It carries no lane token, no
+A host that starts replaces the record, once the previous record's results
+are archived. A previous record it reads and cannot load (another layout, or
+damaged) is first copied to `bidi-host.json.unloadable-<pid>-<time>`, named
+by the new host; one it cannot read at all is left in place, and that host
+does not start. The record carries no lane token, no
 request's arguments and nothing read from a page. A request is named only by
 the UUID the server issued and by a verb the host knows; for anything else
 the field is `null`. A reader built before a verb was added reads that verb

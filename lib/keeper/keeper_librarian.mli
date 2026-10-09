@@ -62,6 +62,17 @@ type input =
         direct turns on runtimes that return no AGENT_CORE checkpoint. *)
   }
 
+val observations_for_absorption : input -> Yojson.Safe.t list
+(** Source observations from the same selected input as the Librarian pass.
+    [batch_turn_ref] identifies the selected batch, never an individual source
+    turn. [local_position] is zero based within each observation kind.
+    Conversation entries retain local position, role and host speaker provenance;
+    tool entries report execution outcome only, not payload or domain success.
+    When present, historical task contexts are a separate observation whose
+    [ranges] preserve the original source spans, attributions and local offsets.
+    Missing individual turn attribution remains missing; no turn is inferred.
+    Counterpart content remains untrusted. These are data, not memory proposals. *)
+
 (** A new claim that continues a dropped memory, both by exact memory id.
     The librarian named the old one with [supersedes]; the parser checked
     that it exists and is in [dropped]. Recorded as a [Revised] event on the

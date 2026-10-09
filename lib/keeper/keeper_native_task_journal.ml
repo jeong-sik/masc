@@ -337,12 +337,20 @@ let issue_snapshot ~base_path ~keeper_name =
     let issues = match Hashtbl.find_opt process_issues key with
       | None -> [] | Some values -> List.rev values in
     {process_epoch;issues}))
+(* Every observed failure of a broken journal would otherwise grow this
+   process-global list for the server's lifetime and serialize in full in
+   every native-task health snapshot. Keep the most recent evidence only. *)
+let retained_process_issues = 64
+
 let record_process_issue t receiver issue =
   match t.context with
   | Error _ -> () (* Invalid workspace cannot be indexed as authenticated scope. *)
   | Ok key -> Mutex.protect issue_mutex (fun () ->
       let previous = match Hashtbl.find_opt process_issues key with None -> [] | Some xs -> xs in
-      Hashtbl.replace process_issues key ({receiver;issue}::previous))
+      let kept =
+        if List.length previous < retained_process_issues then previous
+        else List.rev (List.tl (List.rev previous)) in
+      Hashtbl.replace process_issues key ({receiver;issue}::kept))
 
 let with_health t f = Mutex.protect t.health_mutex f
 let observe t ~attempt bound =

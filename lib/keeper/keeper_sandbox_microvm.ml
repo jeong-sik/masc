@@ -1686,6 +1686,7 @@ type build_link_plan =
   | Link_retarget of string
   | Link_already_correct
   | Link_refused_real_directory
+  | Link_refused_invalid_path of string
 
 (** Deciding is separate from acting so the refusal is testable.
 
@@ -1833,10 +1834,8 @@ let build_link_rows_of_scan rows =
   List.map
     (fun { checkout; state } ->
       match build_link_target ~playground_relative:checkout with
-      | Error _ ->
-        (* No safe guest path to point at -- refuse the same way a real
-           directory is refused, rather than guess one. *)
-        { checkout; target = None; plan = Link_refused_real_directory }
+      | Error detail ->
+        { checkout; target = None; plan = Link_refused_invalid_path detail }
       | Ok target -> { checkout; target = Some target; plan = plan_build_link ~target state })
     rows
 ;;
@@ -1877,7 +1876,7 @@ let build_link_targets rows =
     (fun { checkout = _; target; plan } ->
       match plan, target with
       | (Link_create _ | Link_retarget _ | Link_already_correct), Some target -> Some target
-      | (Link_create _ | Link_retarget _ | Link_already_correct | Link_refused_real_directory), _ ->
+      | (Link_create _ | Link_retarget _ | Link_already_correct | Link_refused_real_directory | Link_refused_invalid_path _), _ ->
         None)
     rows
 ;;

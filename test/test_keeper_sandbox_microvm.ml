@@ -1741,6 +1741,17 @@ let test_build_link_rows_of_scan_decides_purely () =
     (plan_for "occupied" = M.Link_refused_real_directory)
 ;;
 
+let test_invalid_build_link_path_keeps_its_refusal_reason () =
+  let checkout = "repos/ambiguous:name" in
+  let rows = M.build_link_rows_of_scan [ { M.checkout; state = M.Build_absent } ] in
+  (match rows, M.build_link_target ~playground_relative:checkout with
+   | [ { target = None; plan = M.Link_refused_invalid_path detail; _ } ], Error expected ->
+     Alcotest.(check string) "original path refusal retained" expected detail
+   | _ -> Alcotest.fail "invalid path was reported as a real directory or accepted");
+  Alcotest.(check bool) "no guest link action" true (M.build_link_actions rows = []);
+  Alcotest.(check bool) "no guest target directory" true (M.build_link_targets rows = [])
+;;
+
 let test_build_link_refusal_message_names_the_checkout () =
   let message = M.build_link_refusal_message ~checkout:"repos/wt-370" in
   Alcotest.(check bool)
@@ -3437,6 +3448,8 @@ let () =
             test_build_scan_rows_of_output_skips_blank_and_malformed_lines
         ; Alcotest.test_case "build link rows of scan decides purely" `Quick
             test_build_link_rows_of_scan_decides_purely
+        ; Alcotest.test_case "invalid path retains its refusal reason" `Quick
+            test_invalid_build_link_path_keeps_its_refusal_reason
         ; Alcotest.test_case "build link refusal message names the checkout" `Quick
             test_build_link_refusal_message_names_the_checkout
         ; Alcotest.test_case "boot removal deletes only unkept dune build output" `Quick

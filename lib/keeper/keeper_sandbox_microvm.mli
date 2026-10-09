@@ -484,6 +484,7 @@ type build_link_plan =
   | Link_retarget of string
   | Link_already_correct
   | Link_refused_real_directory
+  | Link_refused_invalid_path of string
 
 val build_link_target : playground_relative:string -> (string, string) result
 (** The checkout's [_build] target inside {!build_volume_guest_root}: the

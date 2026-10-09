@@ -1280,6 +1280,9 @@ let ensure_microvm_build_links ?timeout_sec (t : t) ~backend ~container_name =
              Log.Keeper.warn ~keeper_name:t.meta.name
                "%s"
                (Keeper_sandbox_microvm.build_link_refusal_message ~checkout:row.checkout)
+           | Link_refused_invalid_path detail ->
+             Log.Keeper.warn ~keeper_name:t.meta.name
+               "Build link refused for checkout %S: %s" row.checkout detail
            | Link_already_correct | Link_create _ | Link_retarget _ -> ())
          rows;
        let actions = Keeper_sandbox_microvm.build_link_actions rows in

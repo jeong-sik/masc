@@ -358,6 +358,22 @@ let test_strict_reader_waits_for_admission () =
       receive result_read)
 ;;
 
+let test_tail_boundary_keeps_complete_row () =
+  with_temp_base "keeper-external-tail-boundary" @@ fun base_path ->
+  let path = Filename.concat base_path "tail.jsonl" in
+  let source = "old\nkept\nlast\n" in
+  write_file path source;
+  let read max_bytes expected =
+    match Fs_compat.update_private_file_tail_durable_locked_result path ~max_bytes
+      (fun rows -> None, rows) with
+    | Fs_compat.Private_file_succeeded rows ->
+      Alcotest.(check string) "tail contains exactly complete boundary rows" expected rows
+    | _ -> Alcotest.fail "tail transaction failed" in
+  read 10 "kept\nlast\n";
+  read 9 "last\n";
+  Alcotest.(check string) "read-only decision preserves log" source (Fs_compat.load_file path)
+;;
+
 let () =
   Alcotest.run "keeper_external_attention"
     [
@@ -366,6 +382,8 @@ let () =
       );
       ( "store",
         [
+          Alcotest.test_case "tail boundary preserves a complete first row" `Quick
+            test_tail_boundary_keeps_complete_row;
           Alcotest.test_case "strict reader waits for timestamped admission" `Quick
             test_strict_reader_waits_for_admission;
           Alcotest.test_case "admission resamples delayed ingress and preserves duplicates" `Quick

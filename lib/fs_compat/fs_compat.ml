@@ -3918,10 +3918,14 @@ let update_private_file_durable_locked_with_io ?(create=true) ?(recover_incomple
              | Some max_bytes ->
                Int.max 0 ((Unix.fstat fd).Unix.st_size - max_bytes)
            in
+           let starts_at_row =
+             from = 0
+             || Char.equal (private_jsonl_read_byte fd (Bytes.create 1) (from - 1)) '\n'
+           in
            ignore (Unix.lseek fd from Unix.SEEK_SET : int);
            let existing = read_fd_chunks fd (Buffer.create 4096) in
            let existing =
-             if from = 0 then existing
+             if starts_at_row then existing
              else match String.index_opt existing '\n' with
              | None -> existing
              | Some newline ->

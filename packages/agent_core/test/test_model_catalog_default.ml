@@ -394,7 +394,7 @@ let anthropic_cache_pricing_rows =
   [ "claude-opus-5", 1.25, 0.1
   ; "claude-opus-5-5", 1.25, 0.05
   ; "claude-sonnet-5", 1.25, 0.1
-  ; "claude-sonnet-5-5", 1.25, 0.1
+  ; "claude-sonnet-5-5", 1.25, 0.05
   ; "claude-fable-5", 1.25, 0.1
   ; "claude-fable-5-1", 1.25, 0.025
   ]
@@ -420,6 +420,78 @@ let test_anthropic_rows_price_cache_tokens () =
            (Some expected_read)
            entry.cache_read_multiplier)
     anthropic_cache_pricing_rows
+;;
+
+(* What the Messages API answered for each model on 2026-10-08. A sampling
+   parameter with a non-default value came back 400 on every one of them, so a
+   row has to keep all three off the wire. Forced tool use -- tool_choice "any"
+   or a named tool -- came back 400 on the three marked false and 200 on the
+   rest. The flags are read through the resolved capabilities, the way a
+   request is checked, so a 5.5 or 5.1 id that fell back to the shorter row
+   would show here. *)
+let claude_rows_forced_tool_choice =
+  [ "claude-opus-5-5", false
+  ; "claude-sonnet-5", true
+  ; "claude-sonnet-5-5", false
+  ; "claude-fable-5", true
+  ; "claude-fable-5-1", false
+  ; "claude-haiku-5-5", true
+  ]
+;;
+
+let test_claude_rows_keep_sampling_parameters_off_the_wire () =
+  let module Backend = Llm_provider.Backend_anthropic in
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"Claude sampling"
+  in
+  with_clean_model_catalog_override (fun () ->
+    Model_catalog.set_global catalog;
+    let messages = [ Llm_provider.Types.make_message ~role:User [ Text "hello" ] ] in
+    List.iter
+      (fun (model_id, _) ->
+         let config =
+           Llm_provider.Provider_config.make
+             ~kind:Anthropic ~model_id
+             ~base_url:"https://api.anthropic.com" ~max_tokens:1024
+             ~temperature:0.2 ~top_p:0.5 ~top_k:40 ()
+         in
+         let body = Backend.build_request ~config ~messages () |> Yojson.Safe.from_string in
+         List.iter
+           (fun field ->
+              check bool
+                (Printf.sprintf "%s does not send %s" model_id field)
+                true
+                (Yojson.Safe.Util.member field body = `Null))
+           [ "temperature"; "top_p"; "top_k" ];
+         check (option bool)
+           (model_id ^ " does not offer top_k")
+           (Some false)
+           (Option.map
+              (fun (caps : Capabilities.capabilities) -> caps.supports_top_k)
+              (Capabilities.for_model_id_catalog model_id)))
+      claude_rows_forced_tool_choice)
+;;
+
+let test_claude_rows_state_forced_tool_choice_as_the_api_takes_it () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"Claude tool_choice"
+  in
+  with_clean_model_catalog_override (fun () ->
+    Model_catalog.set_global catalog;
+    List.iter
+      (fun (model_id, accepted) ->
+         match Capabilities.for_model_id_catalog model_id with
+         | None -> failf "%s resolves to no capabilities" model_id
+         | Some (caps : Capabilities.capabilities) ->
+           check bool
+             (model_id ^ " required tool_choice")
+             accepted
+             caps.supports_required_tool_choice;
+           check bool
+             (model_id ^ " named tool_choice")
+             accepted
+             caps.supports_named_tool_choice)
+      claude_rows_forced_tool_choice)
 ;;
 
 let test_load_default_catalog () =
@@ -1098,6 +1170,14 @@ let () =
             "anthropic rows price cache tokens"
             `Quick
             test_anthropic_rows_price_cache_tokens
+        ; test_case
+            "Claude rows keep sampling parameters off the wire"
+            `Quick
+            test_claude_rows_keep_sampling_parameters_off_the_wire
+        ; test_case
+            "Claude rows state forced tool_choice as the API takes it"
+            `Quick
+            test_claude_rows_state_forced_tool_choice_as_the_api_takes_it
         ; test_case
             "Ollama Cloud v1 vendor rows preserve probe truth"
             `Quick

@@ -25,6 +25,7 @@ type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator =
   { mutable meta : Keeper_meta_contract.keeper_meta
   ; mutable tool_calls : tool_call_detail list
   ; historical_tool_calls : tool_call_detail list
+  ; historical_order : Keeper_run_tools_hook_accumulator.historical_order
   ; history_pairs_at_setup : int option
   ; mutable current_turn : int
   ; mutable tool_surface : tool_surface_metrics
@@ -66,6 +67,7 @@ type agent_setup =
     (** See {!Keeper_tools_agent_core.tool_bundle}: the Agent Core lane
         sends this instead, with attached-service schemas behind a
         listing. *)
+  ; identity_tool_index : Keeper_identity_tool_index.t
   ; on_demand_tool_names : string list
   ; result_bounds : (string * int) list
       (** {!Keeper_tools_agent_core.tool_bundle.result_bounds}. *)
@@ -75,6 +77,7 @@ type agent_setup =
   ; model_message : Keeper_gate_replay.model_message
   ; hooks : Agent_core.Hooks.hooks
   ; on_runtime_attempt : Keeper_turn_driver.runtime_attempt -> unit
+  ; on_memory_capacity_refusal : Keeper_memory_delivery_reprojection.t
   ; model_input_projection : Agent_core.Agent.model_input_projection
   ; stage_skill_delivery_on_wire :
       runtime_id:string -> agent_core_turn:int -> Agent_core.Types.message list -> unit
@@ -136,7 +139,7 @@ val prepare_agent_setup
        (** Frozen current+held exact selection captured beside the prompt.
            Setup must not reread mutable Workspace task state. *)
   -> trajectory_acc:Trajectory.accumulator option
-  -> ?dynamic_context_for_tools:(Agent_core.Tool.t list -> string)
+  -> ?dynamic_context_for_tools:(Keeper_request_tool_access.t -> string)
   -> ?repetition_execution:Keeper_repetition_scope.Execution.t
   -> ?runtime_manifest_context:Keeper_runtime_manifest.turn_context
   -> ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit)

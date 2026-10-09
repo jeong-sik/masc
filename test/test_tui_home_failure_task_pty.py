@@ -176,16 +176,19 @@ def full_http_loss_retains_local_work_and_draft(executable):
             assert draft in screen, "identity outage discarded the unsent local draft"
             home.assert_no_decision_posts(requests)
         assert_no_chat_delivery()
-        h.send_and_wait(process, fd, output, b"\x1b", b"Goal confirmations not read")
+        h.send_and_wait(process, fd, output, b"\x1b", b"decisions wait")
         visible = cards.frame(process, fd, output, "all-http-503-local-work")
-        for label in (b"Goal confirmations not read", b"Operator tasks not read", b"not fully read"):
+        # A failed identity read keeps the last confirmed Home rows on screen
+        # and says that decisions wait; it does not turn them into "not read".
+        for label in (b"workspace identity unconfirmed \xc2\xb7 decisions wait",
+                      b"Confirm Goal", b"goal-local-loss", TASK_A.encode(), TASK_B.encode()):
             assert label in visible, (label, visible)
-        for label in (b"Confirm Goal", b"goal-local-loss", TASK_A.encode(), TASK_B.encode()):
-            assert label not in visible, ("unverified Home retained an actionable card", label, visible)
+        for label in (b"Goal confirmations not read", b"Operator tasks not read"):
+            assert label not in visible, ("a failed read replaced the kept rows", label, visible)
         assert b"No decision is waiting" not in visible, visible
-        assert b"workspace identity not read" in visible, visible
-        # Unverified Home offers no history reader; the unsent draft was
-        # witnessed above before returning to this nonactionable context.
+        home.assert_no_decision_posts(requests)
+        # Unconfirmed Home offers no history reader; the unsent draft was
+        # witnessed above before returning to this context.
         assert b"read history" not in visible and b"Continue with beta" not in visible, visible
         assert backlog(base).read_bytes() == original
         assert_no_chat_delivery()
@@ -360,14 +363,14 @@ class RefreshCompletionGate:
             return (self.held, self.exchanges)
 
 
-def task_cancel_previous_workspace_receipt(executable):
+def task_cancel_previous_workspace_receipt(executable, *, unconfirmed=False):
     """Accepted A cancellation remains visible after a refresh observes B."""
     fixtures = quiet_fixtures()
     requests = []
     accepted = threading.Event()
     release = threading.Event()
     gate = RefreshCompletionGate()
-    state = {"foreign": False, "health_reads": 0, "history_reads": 0,
+    state = {"foreign": False, "unread": False, "health_reads": 0, "history_reads": 0,
              "health_gate": gate, "drill_delay": 0.0,
              "exchange_log": []}
     transitions = []
@@ -421,6 +424,9 @@ def task_cancel_previous_workspace_receipt(executable):
                         e["completed"] = time.monotonic()
 
                     on_sent = record_sent
+                if state["unread"]:
+                    return h.RawHttpResponse(503, b'{"error":"identity temporarily unread"}',
+                        content_type="application/json", on_sent=on_sent)
                 return h.RawHttpResponse(200, json.dumps({
                     "status": "ok", "paths": {
                         "cwd": str(root), "effective_base_path": str(root),
@@ -463,6 +469,10 @@ def task_cancel_previous_workspace_receipt(executable):
 
             def history():
                 state["history_reads"] += 1
+                if unconfirmed:
+                    return 200, [{"ts": STAMP, "action": "cancel", "to_status": "cancelled",
+                        "handoff_context": {"summary": "RECOVERED_CANCEL_HISTORY" if release.is_set()
+                                            else "INITIAL_TASK_HISTORY"}}]
                 return previous_history() if callable(previous_history) else previous_history
 
             fixtures[history_path] = history
@@ -488,106 +498,120 @@ def task_cancel_previous_workspace_receipt(executable):
                 h.send_and_wait(process, fd, output, b"\r", b"exact-detail-claimed-a")
                 os.write(fd, b"x")
                 assert h.wait_for_fixture_event(process, fd, output, accepted, timeout=10)
-                state["foreign"] = True
-                state["drill_delay"] = 0.75
-                try:
-                    # This single key owns the B revalidation pass. The
-                    # initial local pass was rendered and quiet before the
-                    # key, so it cannot leave a queued Revalidate intent.
-                    b_press_output_start = len(output)
-                    h.send_and_wait(process, fd, output, b"r", b"[workspace mismatch]")
-                    h.wait_for_output(
-                        process, fd, output, b"task-receipt-foreign-B",
-                        start=b_press_output_start, timeout=10)
-                    assert h.drain_until_quiet(process, fd, output, cap=10), (
-                        "TUI output did not settle after foreign-B applied: " + repr(bytes(output)))
-                    # The B frame proves the client applied the first refresh;
-                    # then wait for every response already registered by that
-                    # generation and a complete quiet span before starting C.
-                    prior_settle_deadline = time.monotonic() + 10
-                    while not gate.quiesced():
-                        if time.monotonic() > prior_settle_deadline:
-                            raise AssertionError(
-                                "prior refresh tail did not settle after foreign-B applied: "
-                                + repr(state["exchange_log"])
-                                + f" held={gate.held} reads="
-                                + repr((state["health_reads"], state["history_reads"])))
-                        gate.changed.clear()
-                        h.wait_for_fixture_event(process, fd, output, gate.changed, timeout=0.25)
-                    assert gate.held == 0, f"exchange still held before second press: {gate.snapshot()}"
-                    pre_press_count = len(state["exchange_log"])
-                    assert all(e["completed"] is not None for e in state["exchange_log"]), (
-                        "pre-press exchange is still running before second press: "
-                        + repr(state["exchange_log"]))
-                    assert all(e.get("root") == str(foreign_b) or e.get("root") == local_base
-                               for e in state["exchange_log"][:pre_press_count]), (
-                        "pre-press exchange log contaminated with unexpected root: "
-                        + repr(state["exchange_log"][:pre_press_count]))
-
-                    # The boundary out of the settle segment is a client-side
-                    # identifiable completion event, not elapsed time alone:
-                    # we configure the fixture to return a unique workspace
-                    # root foreign_C ("task-receipt-foreign-C"), then deliver
-                    # a fresh refresh press ('r').
-                    # Observing that the screen renders the new workspace identity
-                    # ("task-receipt-foreign-C") proves that:
-                    # 1. The client processed the fresh 'r' key and dispatched HTTP.
-                    # 2. The second refresh reached the server, received foreign_C,
-                    #    and completed surface collection on the wire.
-                    # 3. The client applied the bundle, updated state.server_identity,
-                    #    and painted the frame to the PTY.
-                    # Producer code (bin/masc_tui.ml:10435-10470, 10980-11050, 11840-11870)
-                    # guarantees that identity_after (/health) is the final call in
-                    # load_http_surfaces. Because Workspace_identity_mismatch
-                    # is established, all scoped surface application and authority-change
-                    # follow-up refreshes are skipped (:11865).
-                    # Side reads launched on authority change (:11850-11857) target
-                    # /turns and /schedules, which do not touch /health or /tasks/history.
-                    # Furthermore, because http_refresh_inflight was false when 'r'
-                    # was pressed, scoped_refresh_followup remained No_scoped_followup,
-                    # so start_scoped_refresh_followup launches no subsequent pass.
-                    # Zero trailing /health or /tasks/history reads follow this screen observation.
-                    state["workspace_root"] = foreign_c
-                    second_press_output_start = len(output)
-                    second_pressed_at = time.monotonic()
-                    os.write(fd, b"r")
-                    h.wait_for_output(
-                        process, fd, output, b"task-receipt-foreign-C",
-                        start=second_press_output_start, timeout=15)
-
-                    settle_deadline = time.monotonic() + 15
+                if unconfirmed:
+                    state["foreign"] = not unconfirmed
+                    state["unread"] = unconfirmed
+                    h.send_and_wait(process, fd, output, b"r",
+                        b"[workspace unconfirmed]" if unconfirmed else b"[workspace mismatch]")
+                    h.drain_until_quiet(process, fd, output)
+                    settle_deadline = time.monotonic() + 10
                     while not gate.quiesced():
                         if time.monotonic() > settle_deadline:
-                            raise AssertionError(
-                                "refresh tail did not quiesce after foreign_C applied: "
-                                + repr(state["exchange_log"])
-                                + f" held={gate.held} reads="
-                                + repr((state["health_reads"], state["history_reads"])))
+                            raise AssertionError("unconfirmed identity response did not settle")
                         gate.changed.clear()
                         h.wait_for_fixture_event(process, fd, output, gate.changed, timeout=0.25)
-                    boundary = [entry for entry in state["exchange_log"][pre_press_count:]
-                                if entry.get("root") == str(foreign_c)
-                                and entry["registered"] >= second_pressed_at]
-                    assert boundary, (
-                        "settled without any foreign_C registration: "
-                        + repr(state["exchange_log"]))
-                    assert all(entry["completed"] is not None for entry in boundary), (
-                        "a post-press exchange is still running at settle time: "
-                        + repr(boundary))
-                    assert len(boundary) == len(state["exchange_log"][pre_press_count:]), (
-                        "unexpected extra exchanges occurred outside boundary: "
-                        + repr(state["exchange_log"][pre_press_count:]))
-                    assert any(length >= 0.5 for length in gate.durations), (
-                        "the completion gate never held the drill's slow exchange: "
-                        + repr(gate.durations))
-                    window_opened_at = boundary[-1]["completed"]
-                finally:
-                    state["drill_delay"] = 0.0
-                # The gate stays armed through the receipt window: any
-                # exchange that arrives or completes there still registers
-                # and completes on the wire, so the assertions below see it.
-                assert h.drain_until_quiet(process, fd, output), (
-                    "TUI output did not settle after refresh applied: " + repr(bytes(output)))
+                    window_opened_at = gate.last_event_time()
+                else:
+                    state["foreign"] = True
+                    state["drill_delay"] = 0.75
+                    try:
+                        # This single key owns the B revalidation pass. The
+                        # initial local pass was rendered and quiet before the
+                        # key, so it cannot leave a queued Revalidate intent.
+                        b_press_output_start = len(output)
+                        h.send_and_wait(process, fd, output, b"r", b"[workspace mismatch]")
+                        h.wait_for_output(
+                            process, fd, output, b"task-receipt-foreign-B",
+                            start=b_press_output_start, timeout=10)
+                        assert h.drain_until_quiet(process, fd, output, cap=10), (
+                            "TUI output did not settle after foreign-B applied: " + repr(bytes(output)))
+                        # The B frame proves the client applied the first refresh;
+                        # then wait for every response already registered by that
+                        # generation and a complete quiet span before starting C.
+                        prior_settle_deadline = time.monotonic() + 10
+                        while not gate.quiesced():
+                            if time.monotonic() > prior_settle_deadline:
+                                raise AssertionError(
+                                    "prior refresh tail did not settle after foreign-B applied: "
+                                    + repr(state["exchange_log"])
+                                    + f" held={gate.held} reads="
+                                    + repr((state["health_reads"], state["history_reads"])))
+                            gate.changed.clear()
+                            h.wait_for_fixture_event(process, fd, output, gate.changed, timeout=0.25)
+                        assert gate.held == 0, f"exchange still held before second press: {gate.snapshot()}"
+                        pre_press_count = len(state["exchange_log"])
+                        assert all(e["completed"] is not None for e in state["exchange_log"]), (
+                            "pre-press exchange is still running before second press: "
+                            + repr(state["exchange_log"]))
+                        assert all(e.get("root") == str(foreign_b) or e.get("root") == local_base
+                                   for e in state["exchange_log"][:pre_press_count]), (
+                            "pre-press exchange log contaminated with unexpected root: "
+                            + repr(state["exchange_log"][:pre_press_count]))
+
+                        # The boundary out of the settle segment is a client-side
+                        # identifiable completion event, not elapsed time alone:
+                        # we configure the fixture to return a unique workspace
+                        # root foreign_C ("task-receipt-foreign-C"), then deliver
+                        # a fresh refresh press ('r').
+                        # Observing that the screen renders the new workspace identity
+                        # ("task-receipt-foreign-C") proves that:
+                        # 1. The client processed the fresh 'r' key and dispatched HTTP.
+                        # 2. The second refresh reached the server, received foreign_C,
+                        #    and completed surface collection on the wire.
+                        # 3. The client applied the bundle, updated state.server_identity,
+                        #    and painted the frame to the PTY.
+                        # Producer code (bin/masc_tui.ml:10435-10470, 10980-11050, 11840-11870)
+                        # guarantees that identity_after (/health) is the final call in
+                        # load_http_surfaces. Because Workspace_identity_mismatch
+                        # is established, all scoped surface application and authority-change
+                        # follow-up refreshes are skipped (:11865).
+                        # Side reads launched on authority change (:11850-11857) target
+                        # /turns and /schedules, which do not touch /health or /tasks/history.
+                        # Furthermore, because http_refresh_inflight was false when 'r'
+                        # was pressed, scoped_refresh_followup remained No_scoped_followup,
+                        # so start_scoped_refresh_followup launches no subsequent pass.
+                        # Zero trailing /health or /tasks/history reads follow this screen observation.
+                        state["workspace_root"] = foreign_c
+                        second_press_output_start = len(output)
+                        second_pressed_at = time.monotonic()
+                        os.write(fd, b"r")
+                        h.wait_for_output(
+                            process, fd, output, b"task-receipt-foreign-C",
+                            start=second_press_output_start, timeout=15)
+
+                        settle_deadline = time.monotonic() + 15
+                        while not gate.quiesced():
+                            if time.monotonic() > settle_deadline:
+                                raise AssertionError(
+                                    "refresh tail did not quiesce after foreign_C applied: "
+                                    + repr(state["exchange_log"])
+                                    + f" held={gate.held} reads="
+                                    + repr((state["health_reads"], state["history_reads"])))
+                            gate.changed.clear()
+                            h.wait_for_fixture_event(process, fd, output, gate.changed, timeout=0.25)
+                        boundary = [entry for entry in state["exchange_log"][pre_press_count:]
+                                    if entry.get("root") == str(foreign_c)
+                                    and entry["registered"] >= second_pressed_at]
+                        assert boundary, (
+                            "settled without any foreign_C registration: "
+                            + repr(state["exchange_log"]))
+                        assert all(entry["completed"] is not None for entry in boundary), (
+                            "a post-press exchange is still running at settle time: "
+                            + repr(boundary))
+                        assert len(boundary) == len(state["exchange_log"][pre_press_count:]), (
+                            "unexpected extra exchanges occurred outside boundary: "
+                            + repr(state["exchange_log"][pre_press_count:]))
+                        assert any(length >= 0.5 for length in gate.durations), (
+                            "the completion gate never held the drill's slow exchange: "
+                            + repr(gate.durations))
+                        window_opened_at = boundary[-1]["completed"]
+                    finally:
+                        state["drill_delay"] = 0.0
+                    # The gate stays armed through the receipt window: any
+                    # exchange that arrives or completes there still registers
+                    # and completes on the wire, so the assertions below see it.
+                    assert h.drain_until_quiet(process, fd, output), (
+                        "TUI output did not settle after refresh applied: " + repr(bytes(output)))
                 before = (state["health_reads"], state["history_reads"])
                 before_gate = gate.snapshot()
                 # The window must not open over a still-running exchange:
@@ -616,14 +640,9 @@ def task_cancel_previous_workspace_receipt(executable):
                             "span": gate.span}))
                 start = len(output)
                 release.set()
-                # The status line states the bare cancellation ("task ... "
-                # "cancelled") in every identity state -- the previous-
-                # workspace clause appears only when the applied workspace
-                # still reads foreign, so the receipt is observed on the
-                # phrase that does not depend on the identity flip.
-                h.wait_for_output(process, fd, output,
-                                  ("task " + TASK_A + " cancelled").encode(),
-                                  start=start, timeout=10)
+                receipt = ("task " + TASK_A + " cancelled" +
+                           ("" if unconfirmed else " in the previous workspace")).encode()
+                h.wait_for_output(process, fd, output, receipt, start=start, timeout=10)
                 h.drain_until_quiet(process, fd, output)
                 after = (state["health_reads"], state["history_reads"])
                 assert after == before, {"before": before, "after": after}
@@ -633,21 +652,33 @@ def task_cancel_previous_workspace_receipt(executable):
                     + repr({"before": before_gate, "after": after_gate,
                             "reads": {"before": before, "after": after}}))
                 assert len(transitions) == 1, transitions
-                # Liveness backstop: any read the window wrongly swallowed
-                # still arrives after the release, and turns this red.
-                os.write(fd, b"r")
-                reads_before_probe = (state["health_reads"], state["history_reads"])
-                h.drain_until_quiet(process, fd, output)
-                leaked = (state["health_reads"], state["history_reads"])
-                assert leaked != reads_before_probe, (
-                    "the refresh chain never re-fired after the receipt window: "
-                    + repr({"window": before, "after_probe": leaked}))
+                if unconfirmed:
+                    assert b"previous workspace" not in h.screen_text(bytes(output)), output[-4000:]
+                    state["unread"] = False
+                    start = len(output)
+                    os.write(fd, b"r")
+                    assert h.wait_for_fixture_state(process, fd, output,
+                        lambda: state["history_reads"] > before[1], timeout=10), state
+                    h.wait_for_output(process, fd, output, b"RECOVERED_CANCEL_HISTORY",
+                        start=start, timeout=10)
+                    assert len(transitions) == 1, "recovery repeated the cancellation POST"
+                else:
+                    # Liveness backstop: any read the window wrongly swallowed
+                    # still arrives after the release, and turns this red.
+                    os.write(fd, b"r")
+                    reads_before_probe = (state["health_reads"], state["history_reads"])
+                    h.drain_until_quiet(process, fd, output)
+                    leaked = (state["health_reads"], state["history_reads"])
+                    assert leaked != reads_before_probe, (
+                        "the refresh chain never re-fired after the receipt window: "
+                        + repr({"window": before, "after_probe": leaked}))
                 os.write(fd, b"q")
             finally:
                 release.set()
 
         h.run_terminal_scenario(
-            executable, description="accepted Task cancel reports previous workspace without refresh",
+            executable, description=("accepted Task cancel waits for same-workspace history recovery"
+                if unconfirmed else "accepted Task cancel reports previous workspace without refresh"),
             interact=interact, http_fixtures=fixtures, http_requests=requests,
             prepare_workspace=prepare, refresh=3600.0,
             extra_env={"EDITOR": f"{shlex.quote(sys.executable)} {shlex.quote(str(editor))}"},
@@ -660,4 +691,5 @@ if __name__ == "__main__":
     full_http_loss_retains_local_work_and_draft(exe)
     task_cancel_editor_replacement(exe)
     task_cancel_previous_workspace_receipt(exe)
-    print("Home failure and Task PTY: PASS (4 scenarios)")
+    task_cancel_previous_workspace_receipt(exe, unconfirmed=True)
+    print("Home failure and Task PTY: PASS (5 scenarios)")

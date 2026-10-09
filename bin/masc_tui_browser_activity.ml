@@ -146,6 +146,9 @@ let apply desired lane (document : document) =
       then Ok source_text
       else Error "The edit did not preserve the Browser configuration; use the Runtime source editor."
 
+let suspend_read t = match t.phase with
+  | Reading _ -> {t with phase=Idle}
+  | Idle | Writing _ -> t
 let suspend t = {t with phase=Idle;current=None;message=Some
   (match t.phase with Writing _ -> "Save result unconfirmed after workspace change. Read current before retrying."
    | Idle | Reading _ -> "Workspace reading withdrawn; activity draft retained.")}

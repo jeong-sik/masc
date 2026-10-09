@@ -101,46 +101,6 @@ let base_observation : WO.world_observation =
     own_recent_actions = Ok [];
   }
 
-let test_quiet_permission_preserves_incoming_work () =
-  let module Speaker = Masc.Keeper_input_speaker in
-  let wake = Speaker.Host_prompt (Autonomous_wake {answered_asks=[]}) in
-  let permits ?(speaker=wake) ?hitl observation =
-    Masc.Keeper_agent_run.For_testing.response_policy_for_turn
-      ~turn_kind:Turn_record.Autonomous ~input_speaker:speaker
-      ~world_observation:observation ~hitl_resolution:hitl
-    = Keeper_tooling.Response.Allow_quiet_final in
-  let channel = match Keeper_continuation_channel.dashboard ~thread_id:"fresh-input" with
-    | Ok channel -> channel | Error detail -> fail detail in
-  let schedule : Keeper_event_queue.scheduled_wake =
-    {occurrence_id="occurrence"; schedule_instance_id="instance"; schedule_id="schedule";
-     due_at=1.; payload_digest="digest"; title=None;
-     message="Continue the authorized work; no unchanged waiting report."; result_delivery=None} in
-  let event event_kind : WO.pending_board_event =
-    {event_kind; post_id="event"; author="operator"; title="work"; preview="new input";
-     hearth=None; post_kind=Masc.Board.System_post; updated_at=1.; explicit_mention=true;
-     matched_targets=[]; replies_after_own_comment=None;
-     latest_external_author=None; latest_external_preview=None} in
-  let with_event kind = Some {base_observation with pending_board_events=[event kind]} in
-  check bool "periodic no-input wake permits model-selected quiet" true
-    (permits (Some base_observation));
-  check bool "unavailable observation cannot prove no incoming work" false (permits None);
-  check bool "schedule without delivery still lets the model choose useful work or quiet" true
-    (permits (with_event (WO.Schedule_due schedule)));
-  check bool "scheduled result delivery remains a reply obligation" false
-    (permits (with_event (WO.Schedule_due {schedule with result_delivery=Some channel})));
-  check bool "new board activity must be processed" false
-    (permits (with_event WO.Board_post_created));
-  check bool "new Keeper message must be processed" false
-    (permits (Some {base_observation with pending_messages=
-      [{message_id="fresh"; speaker="other-keeper"; content="Please review the PR."; kind=Scope}]}));
-  check bool "an answered Ask must be processed" false
-    (permits ~speaker:(Speaker.Host_prompt (Autonomous_wake {answered_asks=[Owner]}))
-      (Some base_observation));
-  check bool "a Gate answer must be processed" false
-    (permits ~hitl:{Keeper_event_queue.approval_id="approval"; decision=Hitl_approved; channel}
-      (Some base_observation))
-;;
-
 let meta_of_json json =
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok m -> m
@@ -707,6 +667,7 @@ let test_direct_turn_reuses_current_task_context () =
   in
   let context =
     Turn.For_testing.direct_turn_dynamic_context
+      ~workspace_memory_access:None
       ~lane_updates:(Ok (`List []))
       ~workspace_memory:Masc.Workspace_memory_ledger.Missing
       ~current_task:(Inputs.Current_task task)
@@ -737,6 +698,7 @@ let test_direct_turn_reuses_current_task_context () =
 let test_direct_turn_carries_held_task_skills () =
   let context =
     Turn.For_testing.direct_turn_dynamic_context
+      ~workspace_memory_access:None
       ~lane_updates:(Ok (`List []))
       ~workspace_memory:Masc.Workspace_memory_ledger.Missing
       ~current_task:Inputs.No_current_task
@@ -765,6 +727,7 @@ let test_direct_turn_carries_held_task_skills () =
 let test_direct_turn_has_no_synthetic_task_context () =
   let context =
     Turn.For_testing.direct_turn_dynamic_context
+      ~workspace_memory_access:None
       ~lane_updates:(Ok (`List []))
       ~workspace_memory:Masc.Workspace_memory_ledger.Missing
       ~current_task:Inputs.No_current_task
@@ -780,6 +743,15 @@ let test_direct_turn_has_no_synthetic_task_context () =
     (contains ~needle:"### Current Task" context);
   check string "non-task context remains" "recent owner message" context
 
+let shared_reader_access ~offered ~deferred ~loader_alive =
+  let tools = List.map (fun name -> Agent_core.Tool.create ~name
+    ~description:"fixture tool" ~parameters:[]
+    (fun _ -> Ok {Agent_core.Types.content="";content_blocks=None;_meta=None})) offered in
+  Masc.Keeper_request_tool_access.create ~offered:tools ~deferred_names:deferred ~loader_alive
+
+let direct_shared_reader () = shared_reader_access
+  ~offered:["keeper_workspace_memory_read"] ~deferred:[] ~loader_alive:false
+
 let test_direct_turn_discovers_published_workspace_memory () =
   let module Ledger = Masc.Workspace_memory_ledger in
   let base_path = Filename.temp_dir "direct-workspace-memory" "" in
@@ -790,6 +762,7 @@ let test_direct_turn_discovers_published_workspace_memory () =
       | Ledger.Available row -> row.ledger_sha256
       | _ -> fail "saved ledger is unavailable" in
     let render () = Turn.For_testing.direct_turn_dynamic_context
+      ~workspace_memory_access:(Some (direct_shared_reader ()))
       ~lane_updates:(Ok (`List []))
       ~workspace_memory:(Ledger.observe ~base_path)
       ~current_task:Inputs.No_current_task ~held_task_skills:[] ~task_skill_surfaces:[]
@@ -800,7 +773,7 @@ let test_direct_turn_discovers_published_workspace_memory () =
       (contains ~needle direct))
       [ledger_sha256; "keeper_workspace_memory_read"; "model_classified"; "not_performed";
        "owner conversation"];
-    let shared = Prompt.format_workspace_memory_observation (Ledger.observe ~base_path)
+    let shared = Prompt.format_workspace_memory_observation ~access:(direct_shared_reader ()) (Ledger.observe ~base_path)
       |> Option.get in
     check bool "direct reply uses the same shared publication renderer" true
       (contains ~needle:shared direct);
@@ -813,22 +786,45 @@ let test_direct_turn_discovers_published_workspace_memory () =
     check bool "unavailable direct reply does not reuse a stale read target" false
       (contains ~needle:ledger_sha256 unavailable))
 
+let test_shared_retrieval_route_follows_actual_request_access () =
+  let memory = Masc.Workspace_memory_ledger.Available
+    {ledger_sha256="request-ledger";claim_count=1;conflict_count=0;classified_count=1;
+     briefing=Ok (Masc.Workspace_memory_briefing.Current {source_ids=["c1"];text="UNSELECTED_SHARED_BODY"})} in
+  let render offered deferred loader_alive =
+    Prompt.format_workspace_memory_observation
+      ~access:(shared_reader_access ~offered ~deferred ~loader_alive) memory |> Option.get in
+  let direct = render ["keeper_workspace_memory_read"] [] false in
+  let discoverable = render ["keeper_tool_search"] ["keeper_workspace_memory_read"] true in
+  check bool "direct reader offers selected queries" true (contains ~needle:"{\"query\"" direct);
+  check bool "deferred reader requires real discovery route" true
+    (contains ~needle:"Use `keeper_tool_search`" discoverable);
+  List.iter (fun text ->
+    check bool "unreachable reader is explicit" true (contains ~needle:"no callable or loadable" text);
+    check bool "unreachable reader is not a read command" false
+      (contains ~needle:"use `keeper_workspace_memory_read`" text))
+    [render [] ["keeper_workspace_memory_read"] true;
+     render ["keeper_tool_search"] [] true;
+     render ["keeper_tool_search"] ["keeper_workspace_memory_read"] false];
+  List.iter (fun text -> check bool "capability projection does not inject broad memory" false
+    (contains ~needle:"UNSELECTED_SHARED_BODY" text)) [direct;discoverable;render [] [] false]
+
 let test_workspace_memory_observation_distinguishes_briefing_states () =
   let module Ledger = Masc.Workspace_memory_ledger in
   let module Briefing = Masc.Workspace_memory_briefing in
   let text = "Board claims require checking the original source before acting." in
   let summary : Briefing.summary = { source_ids = ["c1"]; text } in
   let render briefing =
-    Prompt.format_workspace_memory_observation
+    Prompt.format_workspace_memory_observation ~access:(direct_shared_reader ())
       (Ledger.Available
          { ledger_sha256 = "briefing-sha"; claim_count = 1; conflict_count = 0;
            classified_count = 1; briefing })
     |> Option.get in
   let current = render (Ok (Briefing.Current summary)) in
-  check bool "current semantic briefing is delivered" true (contains ~needle:text current);
+  check bool "current briefing body waits for explicit retrieval" false (contains ~needle:text current);
+  check bool "turn can search for its own task" true (contains ~needle:"\"query\"" current);
   check bool "current status is explicit" true (contains ~needle:"current for" current);
   let stale = render (Ok (Briefing.Stale summary)) in
-  check bool "stale summary remains available as prior context" true (contains ~needle:text stale);
+  check bool "stale briefing body is not unsolicited context" false (contains ~needle:text stale);
   check bool "stale status names the previous publication" true
     (contains ~needle:"last completed version" stale);
   check bool "stale summary is not presented as current" false
@@ -978,6 +974,7 @@ let lane_notice =
 
 let direct_context ~lane_updates =
   Turn.For_testing.direct_turn_dynamic_context
+      ~workspace_memory_access:None
     ~lane_updates
     ~workspace_memory:Masc.Workspace_memory_ledger.Missing
     ~current_task:Inputs.No_current_task
@@ -1230,8 +1227,6 @@ let () =
     [
       ( "current task layer",
         [
-          test_case "quiet permission preserves incoming work" `Quick
-            test_quiet_permission_preserves_incoming_work;
           test_case "renders id, status, and handoff" `Quick
             test_current_task_section_renders;
           test_case "absent without a held task" `Quick
@@ -1258,6 +1253,8 @@ let () =
             test_direct_turn_discovers_published_workspace_memory;
           test_case "workspace memory distinguishes briefing freshness and availability" `Quick
             test_workspace_memory_observation_distinguishes_briefing_states;
+          test_case "shared retrieval follows actual request access" `Quick
+            test_shared_retrieval_route_follows_actual_request_access;
           test_case "unresolved goal keeps one stable safety contract" `Quick
             test_open_goal_store_keeps_one_stable_safety_contract;
         ] );

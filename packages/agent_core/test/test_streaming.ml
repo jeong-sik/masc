@@ -501,7 +501,8 @@ let test_openai_compat_interleaved_reasoning_and_tool_deltas () =
   in
   Alcotest.(check bool) "no first telemetry" true (Option.is_none first_telemetry);
   (match first_events with
-   | [ ContentBlockStart { index = 0; content_type = "thinking"; _ }
+   | [ MessageStart {id="chatcmpl-1";model="qwen3.5:397b";usage=None}
+     ; ContentBlockStart { index = 0; content_type = "thinking"; _ }
      ; ContentBlockDelta { index = 0; delta = ThinkingDelta "plan-" }
      ; ContentBlockStart
          { index = 1

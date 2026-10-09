@@ -5,6 +5,17 @@ module S = Llm_provider.Streaming
 module RD = Llm_provider.Reasoning_dialect
 module Acc = Llm_provider.Complete_stream_acc
 
+let expect_reported_start ?(id="c") ?(model="m") = function
+  | MessageStart {id=reported_id;model=reported_model;usage} :: events ->
+      Alcotest.(check string) "reported response id" id reported_id;
+      Alcotest.(check string) "reported response model" model reported_model;
+      Alcotest.(check bool) "usage stays on its existing delta" true (Option.is_none usage);
+      Alcotest.(check bool) "one response prelude" false
+        (List.exists (function MessageStart _ -> true | _ -> false) events);
+      events
+  | _ -> Alcotest.fail "expected one reported response prelude before content"
+;;
+
 (* ── parse_openai_sse_chunk ─────────────────────────────── *)
 
 let test_parse_text_chunk () =
@@ -75,10 +86,9 @@ let test_parse_final_chunk_llama_server_timings () =
    upstream server-task.cpp to_json_oaicompat_chat is_progress branch): a
    choice whose delta carries only role with content:null, no finish_reason,
    and the progress payload on an unknown top-level key. The parser must
-   treat it as an ordinary empty chunk — zero events, so it feeds the SSE
-   idle/first-event deadlines (RFC-0382 §7) without fabricating a message
-   start or polluting first-token metrics. *)
-let test_parse_prompt_progress_chunk_yields_no_events () =
+   preserve its reported response metadata as a prelude without fabricating
+   content or polluting first-token metrics. *)
+let test_parse_prompt_progress_chunk_reports_prelude () =
   let data =
     {|{"choices":[{"finish_reason":null,"index":0,"delta":{"role":"assistant","content":null}}],"created":1786821448,"id":"chatcmpl-Fdm6BTycfa2vhBZkSBkKeuDjyviIE2Ve","model":"qwen3.8-27b","system_fingerprint":"b10180-11b068d06","object":"chat.completion.chunk","prompt_progress":{"total":15,"cache":0,"processed":11,"time_ms":7}}|}
   in
@@ -97,7 +107,11 @@ let test_parse_prompt_progress_chunk_yields_no_events () =
      -> Alcotest.fail "expected OpenAI chunk");
   let state = S.create_openai_stream_state ~provider:"openai" ~model:"m" () in
   let events, _telemetry = S.openai_sse_parse_result_to_events state parsed in
-  Alcotest.(check int) "zero events" 0 (List.length events)
+  Alcotest.(check bool) "a metadata prelude is not a first token" false
+    (List.exists S.sse_event_is_first_token_signal events);
+  let content_events = expect_reported_start
+      ~id:"chatcmpl-Fdm6BTycfa2vhBZkSBkKeuDjyviIE2Ve" ~model:"qwen3.8-27b" events in
+  Alcotest.(check int) "no content events" 0 (List.length content_events)
 ;;
 
 let test_parse_final_chunk_timings_cache_hit () =
@@ -206,6 +220,7 @@ let test_events_text_first_chunk () =
     }
   in
   let events, _tel = S.openai_chunk_to_events state chunk in
+  let events = expect_reported_start events in
   Alcotest.(check int) "2 events" 2 (List.length events);
   (match List.nth events 0 with
    | ContentBlockStart { index = 0; content_type; _ } ->
@@ -278,6 +293,7 @@ let test_events_tool_call () =
       ; chunk_timings = None
       }
   in
+  let events = expect_reported_start events in
   Alcotest.(check int) "2 events" 2 (List.length events);
   (match List.nth events 0 with
    | ContentBlockStart { content_type; tool_id; tool_name; _ } ->
@@ -314,7 +330,8 @@ let idless_openai_tool_start () =
       }
   in
   match events with
-  | [ ContentBlockStart { index = 0; content_type = "tool_use"; tool_id = Some id; _ }
+  | [ MessageStart {id="same-provider-chunk";model="model";usage=None}
+    ; ContentBlockStart { index = 0; content_type = "tool_use"; tool_id = Some id; _ }
     ; ContentBlockDelta { index = 0; delta = InputJsonDelta _ }
     ] -> id, state, events
   | _ -> Alcotest.fail "expected id-less call to receive one identity at block start"
@@ -323,9 +340,6 @@ let idless_openai_tool_start () =
 let test_events_idless_tool_identity_matches_final_response () =
   let start_id, state, events = idless_openai_tool_start () in
   let acc = Acc.create_stream_acc () in
-  Acc.accumulate_event
-    acc
-    (MessageStart { id = "response"; model = "model"; usage = None });
   List.iter (Acc.accumulate_event acc) events;
   let terminal, _ =
     S.openai_chunk_to_events
@@ -342,9 +356,20 @@ let test_events_idless_tool_identity_matches_final_response () =
       }
   in
   List.iter (Acc.accumulate_event acc) terminal;
+  let accounting, _ = S.openai_sse_parse_result_to_events state
+      (S.parse_openai_sse_chunk ~streaming_reasoning:RD.No_streaming_reasoning
+        {|{"choices":[],"usage":{"prompt_tokens":7,"completion_tokens":3}}|}) in
+  (match accounting with
+   | [MessageDelta {stop_reason=None;usage=Some _}] -> ()
+   | _ -> Alcotest.fail "metadata-poor accounting tail must remain usage only");
+  List.iter (Acc.accumulate_event acc) accounting;
   match Acc.finalize_stream_acc acc with
-  | Ok { content = [ ToolUse { id; name = "lookup"; _ } ]; _ } ->
-    Alcotest.(check string) "start and final identity" start_id id
+  | Ok { id=response_id; model; content = [ ToolUse { id; name = "lookup"; _ } ]; usage=Some usage; _ } ->
+    Alcotest.(check string) "start and final identity" start_id id;
+    Alcotest.(check string) "tool-only response id" "same-provider-chunk" response_id;
+    Alcotest.(check string) "tool-only reported model" "model" model;
+    Alcotest.(check int) "usage tail input count" 7 usage.input_tokens;
+    Alcotest.(check int) "usage tail output count" 3 usage.output_tokens
   | Ok _ -> Alcotest.fail "expected one finalized ToolUse"
   | Error _ -> Alcotest.fail "expected id-less normalized stream to finalize"
 ;;
@@ -439,6 +464,7 @@ let test_events_finish_reason () =
       ; chunk_timings = None
       }
   in
+  let events = expect_reported_start events in
   Alcotest.(check int) "1 event" 1 (List.length events);
   match List.hd events with
   | MessageDelta { stop_reason = Some EndTurn; _ } -> ()
@@ -461,6 +487,7 @@ let test_events_tool_calls_finish () =
       ; chunk_timings = None
       }
   in
+  let events = expect_reported_start events in
   match List.hd events with
   | MessageDelta { stop_reason = Some StopToolUse; _ } -> ()
   | _ -> Alcotest.fail "expected StopToolUse"
@@ -539,6 +566,7 @@ let test_events_length_finish () =
       ; chunk_timings = None
       }
   in
+  let events = expect_reported_start events in
   match List.hd events with
   | MessageDelta { stop_reason = Some MaxTokens; _ } -> ()
   | _ -> Alcotest.fail "expected MaxTokens"
@@ -560,6 +588,7 @@ let test_events_empty_content_ignored () =
       ; chunk_timings = None
       }
   in
+  let events = expect_reported_start events in
   Alcotest.(check int) "0 events" 0 (List.length events)
 ;;
 
@@ -898,6 +927,7 @@ let test_events_reasoning_then_text () =
       ; chunk_timings = None
       }
   in
+  let r_events = expect_reported_start r_events in
   Alcotest.(check int) "2 events (start+delta)" 2 (List.length r_events);
   (match List.nth r_events 0 with
    | ContentBlockStart { index = 0; content_type; _ } ->
@@ -951,6 +981,7 @@ let test_events_reasoning_delta_index_multi_chunk () =
       ; chunk_timings = None
       }
   in
+  let r1 = expect_reported_start r1 in
   Alcotest.(check int) "2 events (start+delta)" 2 (List.length r1);
   (match List.nth r1 0 with
    | ContentBlockStart { index; content_type; _ } ->
@@ -1029,6 +1060,7 @@ let test_events_tool_first_then_text () =
       ; chunk_timings = None
       }
   in
+  let tool_events = expect_reported_start tool_events in
   Alcotest.(check int) "2 tool events" 2 (List.length tool_events);
   (match List.nth tool_events 0 with
    | ContentBlockStart { index; content_type; _ } ->
@@ -1226,7 +1258,8 @@ let test_events_reasoning_details_accumulates_typed () =
   in
   let events, _tel = S.openai_chunk_to_events (S.create_openai_stream_state ()) chunk in
   (match events with
-   | [ ContentBlockStart { index = 0; content_type = "reasoning_details"; _ }
+   | [ MessageStart {id="c-minimax";model="minimax-m3";usage=None}
+     ; ContentBlockStart { index = 0; content_type = "reasoning_details"; _ }
      ; ContentBlockDelta
          { index = 0
          ; delta =
@@ -1240,9 +1273,6 @@ let test_events_reasoning_details_accumulates_typed () =
        detail.text
    | _ -> Alcotest.fail "expected reasoning_details start+delta");
   let acc = Acc.create_stream_acc () in
-  Acc.accumulate_event
-    acc
-    (MessageStart { id = "msg"; model = "minimax-m3"; usage = None });
   List.iter (Acc.accumulate_event acc) events;
   Acc.accumulate_event acc (MessageDelta { stop_reason = Some EndTurn; usage = None });
   match Acc.finalize_stream_acc acc with
@@ -1877,6 +1907,98 @@ let test_rejected_chunk_preserves_inline_framing () =
   check "<think>private</thi" "nk>discarded" "nk>reply"
 ;;
 
+let prelude_wire ?id ?model ?usage ?finish ?(delta=[]) () =
+  `Assoc ((match id with None -> [] | Some id -> ["id",`String id])
+    @ (match model with None -> [] | Some model -> ["model",`String model])
+    @ (match usage with None -> [] | Some usage -> ["usage",usage])
+    @ ["choices",`List [`Assoc (["delta",`Assoc delta]
+        @ match finish with None -> [] | Some reason -> ["finish_reason",`String reason])]])
+  |> Yojson.Safe.to_string
+;;
+
+let project_prelude_wire state wire =
+  fst (S.openai_sse_parse_result_to_events state
+    (S.parse_openai_sse_chunk ~streaming_reasoning:RD.No_streaming_reasoning wire))
+;;
+
+let test_reported_prelude_uses_complete_pair_once () =
+  let state = S.create_openai_stream_state ~model:"requested-alias" () in
+  let empty = project_prelude_wire state {|{"choices":[]}|} in
+  Alcotest.(check bool) "empty frame leaves the prelude window open" true (empty=[]);
+  let partial_id = project_prelude_wire state (prelude_wire ~id:"partial-id" ()) in
+  let partial_model = project_prelude_wire state (prelude_wire ~model:"partial-model" ()) in
+  Alcotest.(check bool) "separate partial headers are not a reported pair" true
+    (partial_id=[] && partial_model=[]);
+  let first = project_prelude_wire state
+      (prelude_wire ~id:"reported-id" ~model:"reported-model"
+         ~delta:["content",`String "first"] ()) in
+  ignore (expect_reported_start ~id:"reported-id" ~model:"reported-model" first);
+  let repeated = project_prelude_wire state
+      (prelude_wire ~id:"reported-id" ~model:"reported-model" ()) in
+  Alcotest.(check bool) "repeated prelude adds no events" true (repeated=[]);
+  let later = project_prelude_wire state
+      (prelude_wire ~id:"different-id" ~model:"different-model"
+         ~delta:["content",`String " second"] ~finish:"stop" ()) in
+  Alcotest.(check bool) "later metadata is not another response boundary" false
+    (List.exists (function MessageStart _ -> true | _ -> false) later);
+  let acc = Acc.create_stream_acc () in
+  List.iter (Acc.accumulate_event acc) (first @ repeated @ later);
+  match Acc.finalize_stream_acc acc with
+  | Ok response ->
+      Alcotest.(check string) "first reported id retained" "reported-id" response.id;
+      Alcotest.(check string) "reported model is not requested model" "reported-model" response.model;
+      Alcotest.(check bool) "metadata changes do not reset content" true
+        (response.content=[Text "first second"])
+  | Error _ -> Alcotest.fail "reported metadata must not fail admitted output"
+;;
+
+let test_metadata_poor_output_never_gets_a_late_start () =
+  let usage = `Assoc ["prompt_tokens",`Int 7;"completion_tokens",`Int 3] in
+  let usage_only = Yojson.Safe.to_string (`Assoc ["choices",`List [];"usage",usage]) in
+  let text_prefix ?id ?model () = prelude_wire ?id ?model ~usage
+      ~delta:["content",`String "before"] () in
+  List.iter (fun (first_wire,expected_text) ->
+    let state = S.create_openai_stream_state ~model:"requested-alias" () in
+    let first = project_prelude_wire state first_wire in
+    let later = project_prelude_wire state
+        (prelude_wire ~id:"late-id" ~model:"late-model"
+           ~delta:["content",`String "after"] ~finish:"stop" ()) in
+    Alcotest.(check bool) "no fabricated or late response start" false
+      (List.exists (function MessageStart _ -> true | _ -> false) (first @ later));
+    let acc = Acc.create_stream_acc () in
+    List.iter (Acc.accumulate_event acc) (first @ later);
+    match Acc.finalize_stream_acc acc with
+    | Ok {content;usage=Some usage;id;model;_} ->
+        Alcotest.(check string) "missing id stays unreported" "" id;
+        Alcotest.(check string) "missing model stays unreported" "" model;
+        Alcotest.(check bool) "content survives late complete metadata" true (content=[Text expected_text]);
+        Alcotest.(check int) "earlier input usage survives" 7 usage.input_tokens;
+        Alcotest.(check int) "earlier output usage survives" 3 usage.output_tokens
+    | Ok _ -> Alcotest.fail "earlier usage was lost"
+    | Error _ -> Alcotest.fail "metadata-poor admitted output must remain accepted")
+    [text_prefix (),"beforeafter"; text_prefix ~id:"id-only" (),"beforeafter";
+     text_prefix ~model:"model-only" (),"beforeafter";
+     text_prefix ~id:"  " ~model:"\t" (),"beforeafter";
+     usage_only,"after"]
+;;
+
+let test_reported_prelude_is_request_local () =
+  List.iter (fun model ->
+    let state = S.create_openai_stream_state () in
+    let events = project_prelude_wire state
+        (prelude_wire ~id:"reused-provider-id" ~model ()) in
+    let remaining = expect_reported_start ~id:"reused-provider-id" ~model events in
+    Alcotest.(check bool) "new request emits its own prelude without content" true (remaining=[]))
+    ["first-model";"second-model"];
+  let state = S.create_openai_stream_state () in
+  let terminal = project_prelude_wire state "[DONE]" in
+  Alcotest.(check bool) "sentinel remains a stop" true (terminal=[MessageStop]);
+  let later = project_prelude_wire state
+      (prelude_wire ~id:"late-id" ~model:"late-model" ()) in
+  Alcotest.(check bool) "terminal sentinel closed the prelude window" true (later=[])
+;;
+
+
 let () =
   let open Alcotest in
   run
@@ -1894,9 +2016,9 @@ let () =
             `Quick
             test_parse_final_chunk_timings_cache_hit
         ; test_case
-            "prompt_progress chunk yields no events"
+            "prompt_progress reports metadata without a token"
             `Quick
-            test_parse_prompt_progress_chunk_yields_no_events
+            test_parse_prompt_progress_chunk_reports_prelude
         ; test_case "tool_call start" `Quick test_parse_tool_call_start
         ; test_case "tool_call args" `Quick test_parse_tool_call_args
         ; test_case "usage" `Quick test_parse_usage
@@ -1958,7 +2080,10 @@ let () =
         ] )
     ; ( "inline_transaction_rollback", [test_case "rejected chunk preserves framing" `Quick test_rejected_chunk_preserves_inline_framing] )
     ; ( "openai_chunk_to_events"
-      , [ test_case "text first chunk" `Quick test_events_text_first_chunk
+      , [ test_case "reported complete prelude once" `Quick test_reported_prelude_uses_complete_pair_once
+        ; test_case "metadata-poor output preserves content and usage" `Quick test_metadata_poor_output_never_gets_a_late_start
+        ; test_case "reported prelude is request local" `Quick test_reported_prelude_is_request_local
+        ; test_case "text first chunk" `Quick test_events_text_first_chunk
         ; test_case "text subsequent" `Quick test_events_text_subsequent
         ; test_case "tool_call" `Quick test_events_tool_call
         ; test_case

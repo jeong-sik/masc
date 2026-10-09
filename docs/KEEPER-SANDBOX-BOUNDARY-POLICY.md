@@ -27,7 +27,7 @@ failure just because a keeper uses the Docker backend.
 | `Agent_tool_execute_command_words` | Dependency-light command word extraction for guard tokens, action keys, and history/logging command prefixes | Sandbox cwd policy, Docker process execution |
 | `Agent_tool_execute_command_semantics` | Pure command-shape and cwd policy for `git`/`gh` commands | Docker process execution |
 | `Keeper_sandbox_shell_ir_target` | Backend target construction for typed Shell IR dispatch | Tool-surface ownership, command parsing, `tool_execute` policy |
-| `Keeper_sandbox_runner` | Effective sandbox profile; backend-neutral command execution facade with a mockable backend contract | Git/remote workflow semantics, tool input validation, command parsing ownership |
+| `Keeper_sandbox_runner` | Effective sandbox profile and the backend name a write reports (`sandbox_backend_via`) | Git/remote workflow semantics, tool input validation, command parsing ownership |
 | `Keeper_sandbox_docker` | Docker runtime setup, mounts, network mode, command execution, Docker result envelope | Generic command classification or cwd policy ownership |
 | `Keeper_sandbox_exec_failure` | Sandbox backend failure messages and registry recording | Tool-surface naming, command classification, shell-specific policy |
 
@@ -102,7 +102,6 @@ Focused behavioral tests verify path and command behavior:
 Source-level boundary tests prevent regressions in layer ownership:
 
 - `test_keeper_sandbox_boundary_policy`
-- `test_keeper_sandbox_runner`
 
 The boundary test intentionally fails if:
 

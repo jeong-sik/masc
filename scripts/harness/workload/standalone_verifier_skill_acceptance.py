@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Probe a built MASC binary with real configured models in a fresh workspace.
+"""Historical 20260909 Goal-verifier Skill experiment (not current acceptance).
+
+The recorded binary was 05cf7d67be8ae46d2bde0c257a6af6be12404008.
+Current verifiers do not offer keeper_skill, so their correct verdicts cannot
+pass this runner's mandatory Skill-read check. Retained to explain/reproduce
+the historical receipt with its matching binary and runtime configuration.
 
 Three Goal proofs exercise the shared Task/Goal reviewer: matching evidence,
 wrong revision, and missing evidence. No Keeper or production Task is created.

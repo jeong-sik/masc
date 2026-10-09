@@ -1,4 +1,5 @@
 module Keeper_firefox = Browser_keeper_firefox
+module Firefox_record = Browser_keeper_firefox_record
 module Host_status = Browser_bidi_host_status
 
 (* One attempt to reach a loopback port. A refused connect is the answer
@@ -78,12 +79,72 @@ let stop_message = function
 let stop_started ~clock firefox =
   Posix_spawn_detached.stop_group ~clock ~grace_s:firefox_stop_grace_s firefox
 
+(* The record tells the process started here from a later one given its
+   number by when it started (RFC-browser-keeper-firefox §3.4). *)
+let running_leader (firefox : Posix_spawn_detached.t) =
+  match Server_startup_takeover.process_started firefox.pid with
+  | Some started -> Firefox_record.Started_at started
+  | None -> Firefox_record.Start_unreadable
+
+let forget ~base_path =
+  match Firefox_record.remove ~base_path with
+  | Ok () -> ()
+  | Error detail -> Log.Server.error "browser-lane: the Keeper Firefox record is not removed: %s" detail
+
+(* A start counts once the record names it: a server that later finds the
+   workspace no longer asks for a Keeper Firefox stops this one by it, and
+   nothing else would name it once this server is gone. It is written before
+   the wait for the port, so a server that ends during that wait leaves it
+   named. *)
+let record_started ~clock ~base_path (config : Browser_configuration.live_bidi) firefox =
+  let entry =
+    { Firefox_record.group = firefox.Posix_spawn_detached.pid; leader = running_leader firefox
+    ; profile = config.profile; port = config.port; started_at = Eio.Time.now clock }
+  in
+  match Firefox_record.write ~base_path entry with
+  | Ok () -> Ok ()
+  | Error (Firefox_record.Not_synced _ as failure) ->
+    Log.Server.warn "browser-lane: the Keeper Firefox record %s is %s"
+      (Firefox_record.record_path ~base_path) (Firefox_record.write_failure_message failure);
+    Ok ()
+  | Error (Firefox_record.Not_written _ as failure) ->
+    Error
+      (Printf.sprintf "%s is %s" (Firefox_record.record_path ~base_path)
+         (Firefox_record.write_failure_message failure))
+
 (* A Firefox may end its first process and go on in another. Applying a
    staged update, it starts the updater, which starts Firefox again; whether
    those stay in the group of the one started here was not measured
    (RFC-browser-keeper-firefox §3.2). So the wait ends at an exit only once
    nothing is left in that group. A Firefox still there at the deadline is
    stopped. *)
+let await_port ~net ~clock ~ready_timeout_s ~base_path (config : Browser_configuration.live_bidi)
+    (firefox : Posix_spawn_detached.t) =
+  let deadline = Monotonic_deadline.after ~seconds:ready_timeout_s in
+  let rec await () =
+    match port_state ~net ~clock ~port:config.port with
+    | Answers ->
+      (match Eio.Promise.peek firefox.exited with
+       | None -> Ok (firefox, First_process)
+       | Some _ when Posix_spawn_detached.group_has_members firefox -> Ok (firefox, Its_group)
+       | Some _ -> forget ~base_path; Ok (firefox, Not_started_here))
+    | Nothing_listens -> not_yet ~timed_out:(Keeper_firefox.Not_listening ready_timeout_s)
+    | Unknown detail ->
+      not_yet ~timed_out:(Keeper_firefox.Port_unknown { seconds = ready_timeout_s; detail })
+  (* [timed_out] is what this check found, reported if it was the last. *)
+  and not_yet ~timed_out =
+    match Eio.Promise.peek firefox.exited with
+    | Some status when not (Posix_spawn_detached.group_has_members firefox) ->
+      forget ~base_path;
+      Error (Keeper_firefox.Exited_before_listening status, None)
+    | Some _ | None when Monotonic_deadline.passed deadline ->
+      let stopped = stop_started ~clock firefox in
+      forget ~base_path;
+      Error (timed_out, Some stopped)
+    | Some _ | None -> Eio.Time.sleep clock firefox_ready_poll_s; await ()
+  in
+  await ()
+
 let start_firefox ~sw ~net ~clock ~ready_timeout_s ~base_path (config : Browser_configuration.live_bidi) =
   match
     spawn_logged ~sw ~argv:(Keeper_firefox.firefox_argv config) ~env:(Unix.environment ())
@@ -91,27 +152,9 @@ let start_firefox ~sw ~net ~clock ~ready_timeout_s ~base_path (config : Browser_
   with
   | Error detail -> Error (Keeper_firefox.Spawn_failed detail, None)
   | Ok firefox ->
-    let deadline = Monotonic_deadline.after ~seconds:ready_timeout_s in
-    let rec await () =
-      match port_state ~net ~clock ~port:config.port with
-      | Answers ->
-        (match Eio.Promise.peek firefox.exited with
-         | None -> Ok (firefox, First_process)
-         | Some _ when Posix_spawn_detached.group_has_members firefox -> Ok (firefox, Its_group)
-         | Some _ -> Ok (firefox, Not_started_here))
-      | Nothing_listens -> not_yet ~timed_out:(Keeper_firefox.Not_listening ready_timeout_s)
-      | Unknown detail ->
-        not_yet ~timed_out:(Keeper_firefox.Port_unknown { seconds = ready_timeout_s; detail })
-    (* [timed_out] is what this check found, reported if it was the last. *)
-    and not_yet ~timed_out =
-      match Eio.Promise.peek firefox.exited with
-      | Some status when not (Posix_spawn_detached.group_has_members firefox) ->
-        Error (Keeper_firefox.Exited_before_listening status, None)
-      | Some _ | None when Monotonic_deadline.passed deadline ->
-        Error (timed_out, Some (stop_started ~clock firefox))
-      | Some _ | None -> Eio.Time.sleep clock firefox_ready_poll_s; await ()
-    in
-    await ()
+    (match record_started ~clock ~base_path config firefox with
+     | Error detail -> Error (Keeper_firefox.Not_recorded detail, Some (stop_started ~clock firefox))
+     | Ok () -> await_port ~net ~clock ~ready_timeout_s ~base_path config firefox)
 
 let host_step ~base_path (config : Browser_configuration.live_bidi) =
   Keeper_firefox.host_step ~port:config.port (Host_status.report (Host_status.observe ~base_path))
@@ -201,8 +244,9 @@ let start_both ~sw ~env ~ready_timeout_s ~ending_host_wait_s ~base_path ~launche
             (match started_here with
              | None -> ""
              | Some started ->
-               " The Keeper Firefox started for it is left with no host. "
-               ^ stop_message (stop_started ~clock started)))
+               let stopped = stop_started ~clock started in
+               forget ~base_path;
+               " The Keeper Firefox started for it is left with no host. " ^ stop_message stopped))
      | Undetermined detail ->
        Log.Server.error
          "browser-lane: cannot tell whether port %d answers (%s); neither the Keeper Firefox nor \
@@ -247,15 +291,54 @@ let bring_up ~sw ~env ~ready_timeout_s ~ending_host_wait_s ~base_path (config : 
   | Keeper_firefox.Start_host launcher ->
     start_both ~sw ~env ~ready_timeout_s ~ending_host_wait_s ~base_path ~launcher config
 
+(* A workspace that no longer asks for a Keeper Firefox has the one MASC
+   started stopped, and no other process: a group is stopped only once it is
+   shown to be that Firefox (RFC-browser-keeper-firefox §3.3, §3.5.4). Its
+   host ends with its Firefox. *)
+let stop_recorded ~env ~base_path ~why =
+  match Firefox_record.read ~base_path with
+  | Firefox_record.Absent -> ()
+  | Firefox_record.Unreadable detail ->
+    Log.Server.error
+      "browser-lane: %s, and the record of the Keeper Firefox MASC started cannot be read (%s); \
+       nothing is stopped"
+      why detail
+  | Firefox_record.Recorded entry ->
+    let found =
+      Keeper_firefox.recorded_firefox entry
+        ~leader_started:(Server_startup_takeover.process_started entry.group)
+        ~leader_group:(Posix_spawn_detached.group_of_pid entry.group)
+        ~group_has_members:(Posix_spawn_detached.group_id_has_members entry.group)
+    in
+    (match found with
+     | Keeper_firefox.Started_here ->
+       let stopped =
+         Posix_spawn_detached.stop_group_id ~clock:(Eio.Stdenv.clock env) ~grace_s:firefox_stop_grace_s
+           entry.group
+       in
+       Log.Server.info
+         "browser-lane: %s, so the Keeper Firefox MASC started on port %d (process group %d) is \
+          stopped. %s"
+         why entry.port entry.group (stop_message stopped);
+       forget ~base_path
+     | Keeper_firefox.Gone -> forget ~base_path
+     | Keeper_firefox.Unproven detail ->
+       Log.Server.warn
+         "browser-lane: %s; the Keeper Firefox MASC started on port %d is not stopped, since %s. \
+          Close that Firefox if it is still open."
+         why entry.port detail)
+
 let work ~sw ~env ~ready_timeout_s ~ending_host_wait_s ~base_path ~configuration () =
   match configuration with
   | Some { Browser_configuration.live_bidi = Some config; live_enabled = true; _ } ->
     bring_up ~sw ~env ~ready_timeout_s ~ending_host_wait_s ~base_path config
   | Some { Browser_configuration.live_bidi = Some _; live_enabled = false; _ } ->
-    Log.Server.info
-      "browser-lane: [browser.live] is off; the Keeper Firefox and its host are neither \
-       started nor checked"
-  | Some { Browser_configuration.live_bidi = None; _ } | None -> ()
+    stop_recorded ~env ~base_path ~why:"[browser.live] is off"
+  | Some { Browser_configuration.live_bidi = None; _ } ->
+    stop_recorded ~env ~base_path ~why:"runtime.toml has no [browser.live.bidi]"
+  (* No runtime configuration was loaded, so what the operator asks for is
+     not known, and nothing is stopped. *)
+  | None -> ()
 
 (* This fiber runs on the server's root switch, where an exception would end
    the server. One the work did not expect is logged instead, as the

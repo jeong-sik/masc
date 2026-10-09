@@ -306,3 +306,14 @@ CAMLprim value masc_process_group_members(value v_pgid)
 #endif
   CAMLreturn(result);
 }
+
+/* Observe only: the process group [pid] is in now, from getpgid(2), which
+   POSIX defines on every platform this file is built for (OCaml's Unix has
+   no binding for it). */
+CAMLprim value masc_process_group_of(value v_pid)
+{
+  CAMLparam1(v_pid);
+  pid_t group = getpgid((pid_t)Int_val(v_pid));
+  if (group < 0) uerror("getpgid", Nothing);
+  CAMLreturn(Val_int(group));
+}

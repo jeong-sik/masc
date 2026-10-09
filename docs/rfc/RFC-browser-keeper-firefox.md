@@ -3,7 +3,7 @@ rfc: "browser-keeper-firefox"
 title: "Start the Keeper Firefox and its BiDi host with the MASC server"
 status: Active
 created: 2026-10-09
-updated: 2026-10-09
+updated: 2026-10-10
 author: vincent + claude
 related: ["browser-live-one-connection"]
 ---
@@ -137,26 +137,31 @@ port = 9222
   배포할 때마다 서버가 다시 뜨는데, 그때마다 Keeper 창이 닫혔다 열리지 않게 하려는 것이다.
 - 다시 뜬 서버는 §3.2 를 다시 한다. 둘 다 떠 있으면 아무것도 하지 않는다.
   host 는 #41898 대로 새 서버에 다시 등록한다.
-- 표를 지우거나 `[browser.live] enabled = false` 로 바꿔도, 이미 떠 있는 Firefox 와 host 는 멈추지 않는다.
-  어느 프로세스를 MASC 가 띄웠는지 아는 기록(`keeper-firefox.json`, §3.4)이 3단계에 생긴다.
-  그때부터 표가 없거나 lane 이 꺼진 서버는 MASC 가 띄운 것만 멈춘다. 운영자가 띄운 것은 그대로 둔다.
-  MASC 가 띄웠는지는 §3.5 의 4 와 같이 확인하고, 확인되지 않으면 멈추지 않는다.
-  그 전까지는 운영자가 창을 닫는다.
+- 표를 지우거나 `[browser.live] enabled = false` 로 바꾼 서버는, 뜰 때 `keeper-firefox.json`(§3.4)을 읽어
+  MASC 가 띄운 Firefox 만 멈춘다. 운영자가 띄운 것은 그대로 둔다. host 는 자기 Firefox 가 끝나면 같이 끝난다(§2.4).
+  - MASC 가 띄웠는지는 §3.5 의 4 와 같이 확인하고, 확인되지 않으면 멈추지 않는다. 서버 로그에 까닭과 "그 Firefox 를 닫으라"를 남긴다.
+  - 기록을 읽을 수 없으면 아무것도 멈추지 않고, 기록도 그대로 둔다.
+  - `runtime.toml` 을 읽지 못한 서버(설정이 로드되지 않음)는 운영자가 무엇을 원하는지 모르므로 아무것도 멈추지 않는다.
+  - 멈췄거나, 기록의 process group 에 남은 프로세스가 없으면 기록을 지운다.
 - 이 점이 geckodriver 와 다르다. geckodriver 는 세션을 서버만 닫을 수 있어서 서버와 같이 멈춘다.
   BiDi host 는 스스로 `session.end` 를 보내고, 다음 host 를 위한 기록을 남긴다.
 
 ### 3.4 서버가 남기는 것
 
-- `<base>/.masc/browser-lane/keeper-firefox.json`: 서버가 띄운 Firefox 의 pid 와 process group, 그 프로세스의 시작 표지,
-  프로필, 포트, 띄운 시각. 띄우지 못했으면 그 까닭(포트를 다른 프로세스가 씀, 실행 파일 없음, 포트가 안 열림, 먼저 끝남).
-  host 기록과 같은 방식으로 통째로 다시 쓴다.
+- `<base>/.masc/browser-lane/keeper-firefox.json`: 서버가 띄운 Firefox 의 process group(띄운 프로세스의 pid 와 같은 번호),
+  그 프로세스를 알아볼 표지, 프로필, 포트, 띄운 시각. host 기록과 같은 방식으로 통째로 다시 쓴다.
+  - 표지는 셋 중 하나다. 포트가 열릴 때 그 프로세스가 돌고 있었으면 그 프로세스의 시작 표지다.
+    처음 프로세스가 먼저 끝나고 group 의 다른 프로세스가 포트를 열었으면(업데이트를 적용하며 다시 뜬 경우) "처음 프로세스가 끝남",
+    시작 표지를 읽지 못했으면 "시작을 읽지 못함"이다. 뒤의 둘은 나중의 다른 group 과 가를 수 없으므로 MASC 가 멈추지 않는다.
   - 시작 표지는 서버 시작 잠금이 쓰는 값과 같다(`Server_startup_takeover.process_started`).
     Linux 는 boot id 와 `/proc/<pid>/stat` 의 starttime, macOS 는 C locale·UTC 로 읽은 `ps -o lstart=` 다.
     pid 가 다른 프로세스에게 다시 주어져도 이 표지는 같지 않다.
+  - 띄우지 못한 까닭은 기록에 넣지 않고 서버 로그에 남긴다. 그 까닭을 읽는 곳(연결 목록·doctor 문장)이 생기는 4단계에서 기록에 더한다.
 - Firefox 띄우기는 이 기록을 디스크에 쓰기까지 해야 성공이다. 쓰지 못하면(디스크가 가득 참, 쓸 수 없는 디렉터리)
-  방금 띄운 process group 을 멈추고 거둔 뒤, 띄우지 못한 까닭으로 로그에 남긴다.
+  방금 띄운 process group 을 멈추고, host 도 띄우지 않고, 그 까닭을 로그에 남긴다.
   주인을 알 수 없는 Firefox 와 열린 포트가 서버보다 오래 남지 않게 하려는 것이다.
-  이 기록은 그것을 읽는 3단계에서 생기므로, 이 규칙도 3단계에서 지킨다.
+  기록은 썼는데 디렉터리 항목을 디스크에 내리지 못했으면, 기록이 있는 것으로 보고 경고만 남긴다.
+- host 를 띄우지 못해 서버가 그 Firefox 를 멈추면 기록도 지운다.
 - host 의 출력은 `<base>/.masc/browser-lane/bidi-host.log`, Firefox 의 출력은 `keeper-firefox.log` 에 쓴다.
   떨어진 프로세스는 처음부터 그 파일을 stdout·stderr 로 받는다.
   띄울 때마다 지난 실행의 로그를 `<이름>.1` 로 옮긴다(그 전 것은 덮인다). 그래서 파일은 두 번의 실행만 담는다.
@@ -231,7 +236,10 @@ BiDi 가 아니어도 되는 요청(읽기, 클릭, 스크롤)은 BiDi 연결이
    `keeper-firefox.json` 은 그것을 읽는 3단계에서 더한다.
    읽기만 하는 PR 을 따로 두지 않는다. 읽는 곳이 없는 설정 필드가 main 에 남기 때문이다.
    이 PR 이 배포된 뒤에 운영자가 `runtime.toml` 에 표를 적는다(§2.3).
-3. Keeper 의 hover·drag 요청이 빠진 것을 다시 켜고 기다린다(§3.5). 남은 세션 때문에 MASC 가 띄운 Firefox 를 다시 띄우는 것도 여기서 한다.
+3. 세 PR 로 나눈다.
+   1. `keeper-firefox.json` 을 쓰고(§3.4), 표가 없거나 lane 이 꺼진 서버가 그것으로 MASC 가 띄운 Firefox 만 멈춘다(§3.3).
+   2. Keeper 의 hover·drag 요청이 빠진 것을 다시 켜고 기다린다(§3.5 의 1~3).
+   3. 남은 세션 때문에 MASC 가 띄운 Firefox 를 다시 띄운다(§3.5 의 4).
 4. 연결 목록·doctor·Keeper 답의 문장과 TUI 의 host 줄이 "MASC 가 켠다"를 말한다.
 
 ## 7. 확인 방법

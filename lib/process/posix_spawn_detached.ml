@@ -72,32 +72,45 @@ let spawn ~sw ~argv ~env ~output =
         { pid; exited })
       started
 
-let group_has_members t =
-  match Unix.kill (-t.pid) 0 with
+let group_id_has_members group =
+  match Unix.kill (-group) 0 with
   | () -> true
   | exception Unix.Unix_error ((Unix.ESRCH | Unix.EPERM), _, _) -> false
 
-let signal_group t signal =
-  if group_has_members t then
-    match Unix.kill (-t.pid) signal with
+let group_has_members t = group_id_has_members t.pid
+
+let signal_group_id group signal =
+  if group_id_has_members group then
+    match Unix.kill (-group) signal with
     | () -> ()
     (* It emptied between the two calls. *)
     | exception Unix.Unix_error ((Unix.ESRCH | Unix.EPERM), _, _) -> ()
+
+let signal_group t signal = signal_group_id t.pid signal
 
 type stopped = Ended_on_term | Killed_after_grace
 
 let group_poll_s = 0.1
 
-let stop_group ~clock ~grace_s t =
-  signal_group t Sys.sigterm;
+let stop_group_id ~clock ~grace_s group =
+  signal_group_id group Sys.sigterm;
   let deadline = Monotonic_deadline.after ~seconds:grace_s in
   let rec wait () =
-    if not (group_has_members t) then Ended_on_term
+    if not (group_id_has_members group) then Ended_on_term
     else if Monotonic_deadline.passed deadline then (
-      signal_group t Sys.sigkill;
+      signal_group_id group Sys.sigkill;
       Killed_after_grace)
     else (
       Eio.Time.sleep clock group_poll_s;
       wait ())
   in
   wait ()
+
+let stop_group ~clock ~grace_s t = stop_group_id ~clock ~grace_s t.pid
+
+external process_group_of : int -> int = "masc_process_group_of"
+
+let group_of_pid pid =
+  match process_group_of pid with
+  | group -> Ok group
+  | exception Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)

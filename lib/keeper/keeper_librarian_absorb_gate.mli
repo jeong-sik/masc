@@ -74,9 +74,12 @@ type judged =
   ; requests : int  (** evaluation requests made *)
   }
 
+type failure_kind = Evaluation_failed | Input_capacity_exceeded
+
 type outcome =
   | Failed of
       { reason : string
+      ; kind : failure_kind
       ; absorbed : Keeper_memory_os_types.absorbed_statement list
       ; left : source_verdict list
       ; conveyed : source_verdict list
@@ -116,6 +119,7 @@ val request_bytes_limit : int
 
 val judge
   :  evaluate:evaluate
+  -> new_observations:Yojson.Safe.t list
   -> facts:Keeper_memory_os_types.fact list
   -> new_claims:Keeper_memory_os_types.fact list
   -> absorbed:Keeper_memory_os_types.absorbed_statement list
@@ -124,7 +128,14 @@ val judge
     absorbed memories; [new_claims] the claims the answer adds; [absorbed] the
     absorptions it states. An absorption whose [into] is a current memory the
     answer restated is judged against that memory's text. Each complete source
-    and proposed claim are a structured pair in one judgment request. *)
+    and proposed claim are sent with nonempty [new_observations] in one judgment
+    request. Empty observations retain the original pair-only instruction and
+    two-field state; both paths budget the question actually dispatched.
+    The observations are source data from the selected pass, not the proposed
+    claim. Their serialized bytes count toward the provider request boundary;
+    an oversized request with new observations fails the pass before dispatch,
+    keeping the whole range pending without truncating evidence or adding a
+    partially grounded candidate beside its original. *)
 
 (** {1 The reverse question} *)
 
@@ -257,6 +268,10 @@ val run_result_to_yojson : run_result -> Yojson.Safe.t
     the existing [actual_input]. The existing exact-run HTTP detail requires
     CanAdmin; this payload is not a public or secret-free projection. *)
 
+val failure_shows_size : run_result -> bool
+(** True only for a typed pre-dispatch input-capacity failure. The runtime
+    exposes this to its existing source-range narrowing path. *)
+
 val failure_detail
   :  absorbed:Keeper_memory_os_types.absorbed_statement list
   -> run_result
@@ -280,6 +295,7 @@ val run
        (evaluation_id:'evaluation_id -> [ `Cancelled | `Failed of string ] -> unit)
   -> ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t
   -> keeper_id:string
+  -> new_observations:Yojson.Safe.t list
   -> facts:Keeper_memory_os_types.fact list
   -> new_claims:Keeper_memory_os_types.fact list
   -> superseding:string list

@@ -81,7 +81,9 @@ objective, not a newly enforced database invariant.
 
 ## Jev forward review
 
-Each proposed absorption is evaluated with a structured pair:
+Each proposed absorption is evaluated with a structured pair. Nonempty selected
+source observations are additionally supplied as `new_observations`; the empty
+path retains the pair-only state and instruction:
 
 ```json
 {
@@ -155,12 +157,18 @@ historical retrieval boundary and are not removed by the change.
 
 ## Validation and acceptance boundaries
 
-A synthetic event-lineage probe of the current question matched 10 of 12 intended
+A historical synthetic event-lineage probe of the pair-only question matched 10 of 12 intended
 admission decisions. Two same-event follow-up resolution cases were still refused,
 including a held-out restoration case. Thus the instructions express the intended
-policy but do not establish reliable temporal consolidation. The source/candidate
-pair does not carry independently identifiable follow-up evidence; adding grounded
-event context and validating that path remains necessary. These refusals retain
+policy but do not establish reliable temporal consolidation. That historical source/candidate-only
+probe lacked independently identifiable follow-up evidence. Forward requests now
+include conversation, tool-outcome, counterpart and historical-range observations
+from the same selected Librarian input, retaining their distinct provenance. Empty
+input preserves the original pair-only request; oversized evidence leaves the
+whole range pending without truncation. This corrects the missing input path,
+not the semantic-quality measurement. The subsequent development experiment in
+PR #41922 supports supplying evidence (18/18 intended admissions versus 15/18
+pair-only), but does not prove held-out or installed behavior. These refusals retain
 original memories, so no memory-reduction claim follows from this experiment.
 
 

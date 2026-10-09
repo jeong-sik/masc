@@ -2351,6 +2351,36 @@ for (const watched of ['dos', 'msx']) for (const initiallyConnected of [true, fa
   });
 }
 
+test('storage-blocked observers read public room history without presence writes', async () => {
+  const storage = new Map();
+  storage.set = () => { throw new Error('storage blocked'); };
+  const page = fixture(gameReply, { storage,
+    roomReply: request => {
+      assert.equal(request.method, 'GET');
+      assert.equal(request.body, undefined);
+      return response({ ...emptyRoom, messages:[roomMessage(1, 'visible without tab storage')] });
+    } });
+  await page.settle();
+  assert.equal(page.roomRequests.length, 1);
+  assert.match(page.get('room-messages').children[0].children[1].textContent, /visible without tab storage/);
+  assert.equal(page.get('chat-text').disabled, true);
+  assert.equal(page.get('chat-send').disabled, true);
+  await page.roomTick();
+  assert.equal(page.roomRequests.length, 2);
+});
+
+test('a pad event observed on MSX cannot turn into a DOS move after changing view', async () => {
+  const page = fixture(gameReply);
+  await page.settle();
+  page.get('machine-view').value = 'msx';
+  page.get('machine-view').handlers.change();
+  page.padButton.handlers.click();
+  page.get('machine-view').value = 'dos';
+  page.get('machine-view').handlers.change();
+  await page.settle();
+  assert.equal(page.requests.some(r => r.method === 'POST' && r.url === '/api/v1/play/pad'), false);
+});
+
 for (const status of [401, 403]) {
   test('a fresh say ' + status + ' persists its cleared receipt before retryable cleanup and reload', async () => {
     const storage = new Map();

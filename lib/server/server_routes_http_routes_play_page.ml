@@ -417,8 +417,8 @@ function participationClosed() {
 
 function setRoomControls() {
   const closed = ended || authRejected || disconnecting || departureConfirmed || retainedDeparture || participationClosed() || roomDetached;
-  el('chat-text').disabled = closed;
-  el('chat-send').disabled = closed || chatSending || (!pendingChat && el('chat-text').value.trim() === '');
+  el('chat-text').disabled = closed || documentId === null;
+  el('chat-send').disabled = closed || documentId === null || chatSending || (!pendingChat && el('chat-text').value.trim() === '');
   el('chat-send').textContent = pendingChat ? '이전 전송 확인' : '대화 보내기';
   el('room-older').disabled = closed || roomBusy || !roomSnapshot || !roomSnapshot.has_more;
   el('room-latest').disabled = closed || roomBusy;
@@ -441,6 +441,7 @@ function roomConnectionCurrent(checkDraft = false) {
 }
 
 function saveRoomDraft({ settlingRequest = null } = {}) {
+  if (documentId === null) return false;
   if ((authRejected && (settlingRequest === null || settlingRequest !== settledChatRequest))
       || departureConfirmed || retainedDeparture || !roomConnectionCurrent(true)) return false;
   try {
@@ -560,15 +561,23 @@ function roomRequest(body) {
   const dispatch = () => {
     // Another document can replace this tab's draft before dispatch.
     // Recheck its authority at the public write boundary.
-    if (ended || authRejected || disconnecting || departureConfirmed || retainedDeparture || participationClosed() || !roomConnectionCurrent(body.action === 'say')) return null;
+    if (ended || authRejected || disconnecting || departureConfirmed || retainedDeparture || participationClosed()) return null;
+    const observationOnly = body.action === 'read' && documentId === null;
+    if (!observationOnly && !roomConnectionCurrent(body.action === 'say')) return null;
     if (body.action === 'read' && readRequest !== roomReadRequest) return null;
-    roomClients.add(body.client_id);
-    // Record leases before dispatch so a reload without a pending chat still
-    // knows every presence created by this tab when the user disconnects.
-    sessionStorage.setItem(ROOM_CLIENTS_KEY, JSON.stringify([...roomClients]));
+    if (!observationOnly) {
+      roomClients.add(body.client_id);
+      // Record leases before dispatch so a reload without a pending chat still
+      // knows every presence created by this tab when the user disconnects.
+      sessionStorage.setItem(ROOM_CLIENTS_KEY, JSON.stringify([...roomClients]));
+    }
     const abort = new AbortController();
     if (body.action === 'read') roomReadAbort = abort;
-    return api('POST', ROOM_PATH, body, abort.signal).finally(() => {
+    // Observation has no client lease or storage ownership to renew.
+    const request = observationOnly
+      ? api('GET', ROOM_PATH + (body.before === undefined ? '' : '?before=' + encodeURIComponent(body.before)), undefined, abort.signal)
+      : api('POST', ROOM_PATH, body, abort.signal);
+    return request.finally(() => {
       if (roomReadAbort === abort) roomReadAbort = null;
     });
   };
@@ -595,7 +604,7 @@ function refreshRoom(replace = true) {
   const body = { action:'read', client_id:roomClient, machine:viewMachine };
   if (before !== null) body.before = before;
   roomRequest(body).then(result => {
-    if (ended || authRejected || departureConfirmed || request !== roomReadRequest || !result || !roomConnectionCurrent()) return;
+    if (ended || authRejected || departureConfirmed || request !== roomReadRequest || !result || (documentId !== null && !roomConnectionCurrent())) return;
     if (result.status === 200 && validRoom(result.json)) {
       renderRoom(result.json, before === roomBefore);
       if (!pendingChat) el('room-status').textContent = '';
@@ -619,6 +628,7 @@ function tickRoom() {
 }
 
 function sendChat() {
+  if (documentId === null) return;
   if (settledChatRequest !== null) {
     settleChatReceipt();
     setRoomControls();
@@ -1076,8 +1086,10 @@ async function poll(revision, signal) {
 }
 
 function send(path, body) {
+  if (viewMachine !== 'dos') return Promise.resolve(null);
+  const inputView = viewRevision;
   sending = sending.then(async () => {
-    if (!canMove()) return null;
+    if (inputView !== viewRevision || !canMove()) return null;
     const r = await mutate(path, body);
     if (ended || r === null) return null;
     const applied = r.status >= 200 && r.status < 300 && r.json && r.json.ok === true;

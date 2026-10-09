@@ -149,6 +149,24 @@ let test_activity_refusal_and_recovery () =
   check bool "even observed on cannot retry an unknown mutation" true
     (Client.policy_after_activity unknown (Ok Client.Enabled)=Client.Outcome_unknown)
 
+let test_workspace_refusal_is_unstarted_and_cannot_rearm () =
+  let cache = Client.create () in
+  let tag = revision 'a' in
+  ignore (fetch cache (fun ~body:_ -> Ok (frame 1 (inline tag "rgb"))) |> require);
+  let calls = ref 0 in
+  let result = Client.fetch cache ~host:"localhost" ~port:8935 ~headers:(auth "a")
+    ~request:(fun ~body:_ -> incr calls; Ok (409, `Assoc
+      ["ok", `Bool false; "code", `String "workspace_precondition_failed";
+       "message", `String "workspace precondition failed"])) in
+  check bool "workspace refusal precedes execution" true (result = Ok (Client.Not_started Workspace_changed));
+  check int "workspace refusal cannot retry POST" 1 !calls;
+  let policy = Client.policy_after_tick result in
+  check bool "new workspace activity cannot authorize captured workspace" true
+    (Client.policy_after_activity policy (Ok Client.Enabled) = policy);
+  ignore (fetch cache (fun ~body ->
+    check bool "known refusal retains original pixel evidence" true (known body = `Assoc (reference tag));
+    Ok (frame 2 (retained tag))) |> require)
+
 let test_malformed_activity_is_not_permission () =
   List.iter (fun json -> check bool "invalid observation refused" true (Result.is_error (Client.decode_activity json)))
     [`Assoc []; `Assoc ["schema",`String "masc.msx-activity/v1"];
@@ -167,7 +185,8 @@ let test_malformed_activity_is_not_permission () =
 let () =
   run "retained MSX tick"
     ["response protocol",
-      [test_case "typed activity refusal preserves pixels and resumes only from observation" `Quick test_activity_refusal_and_recovery;
+      [test_case "workspace refusal never executes or rearms from activity" `Quick test_workspace_refusal_is_unstarted_and_cannot_rearm;
+       test_case "typed activity refusal preserves pixels and resumes only from observation" `Quick test_activity_refusal_and_recovery;
        test_case "malformed activity cannot authorize execution" `Quick test_malformed_activity_is_not_permission;
        test_case "fresh metadata with retained and replaced pixels" `Quick test_retained_metadata;
        test_case "malformed or failed responses never retry or resurrect" `Quick test_rejected_responses;

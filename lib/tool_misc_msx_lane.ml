@@ -403,14 +403,18 @@ let checkpoint_slot args =
     else Ok slot
 ;;
 
+let run_checkpoint ~restore ~base_path ~slot =
+  let ledger_dir = msx_dir ~base_path in
+  let path = Filename.concat (Filename.concat ledger_dir "saves") (slot ^ ".json") in
+  if restore then Msx_lane.restore ~path ~ledger_dir else Msx_lane.save ~path
+
 let handle_checkpoint ~restore ~tool_name ~start_time ~base_path args =
   match checkpoint_slot args with
   | Error message -> reject ~tool_name ~start_time message
   | Ok slot ->
-    let ledger_dir = msx_dir ~base_path in
-    let path = Filename.concat (Filename.concat ledger_dir "saves") (slot ^ ".json") in
-    let result = if restore then Msx_lane.restore ~path ~ledger_dir else Msx_lane.save ~path in
-    of_lane ~tool_name ~start_time ~extra:["slot", `String slot] result
+    of_lane ~tool_name ~start_time ~extra:["slot", `String slot]
+      (Result.map (fun (completed : Msx_lane.checkpoint_effect) -> completed.observation)
+        (run_checkpoint ~restore ~base_path ~slot))
 ;;
 
 (* masc_msx_meta — which core this server linked, as [Msx_lane.core] reports

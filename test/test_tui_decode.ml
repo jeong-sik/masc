@@ -1,5 +1,35 @@
 open Masc
 
+let test_checkpoint_receipt_identity_and_completion () =
+  let fields = ["ok",`Bool true;"operation_id",`String "op-1";
+    "checkpoint",`String "restore";"slot",`String "quick";"epoch",`String "server-a";
+    "status",`String "committed";
+    "workspace",`Assoc ["base_path",`String "/workspace";"masc_root",`String "/workspace/.masc"];
+    "effect",`Assoc ["change_count",`Int 2;"incarnation",`String "restored";
+                    "checkpoint_sha256",`String (String.make 64 'a')]] in
+  let decode fields = Tui_decode.decode_msx_checkpoint_receipt ~operation_id:"op-1"
+    ~restore:true ~slot:"quick" ~base_path:"/workspace" ~masc_root:"/workspace/.masc" (`Assoc fields) in
+  Alcotest.(check bool) "exact committed operation is known without inventing pixels" true
+    (decode fields = Ok (Tui_decode.Checkpoint_committed None));
+  let replace key value = (key,value)::List.remove_assoc key fields in
+  List.iter (fun changed -> Alcotest.(check bool) "unbound or legacy evidence cannot settle" true
+    (Result.is_error (decode changed)))
+    [["ok",`Bool true];replace "operation_id" (`String "other");
+     replace "checkpoint" (`String "save");replace "slot" (`String "other");
+     replace "workspace" (`Assoc ["base_path",`String "/foreign";"masc_root",`String "/foreign/.masc"]);
+     ("operation_id",`String "op-1")::fields;
+     replace "effect" (`Assoc ["change_count",`Int (-1);"incarnation",`String "restored";
+       "checkpoint_sha256",`String (String.make 64 'a')]);
+     ("live",`Assoc [])::fields];
+  let pending = ("ok",`Bool false)::("status",`String "pending")::
+    List.remove_assoc "ok" (List.remove_assoc "status" fields) in
+  Alcotest.(check bool) "pending never becomes committed from other metadata" true
+    (decode pending = Ok Tui_decode.Checkpoint_pending);
+  let later = ("live",`Assoc [])::("live_relation",`String "observed_after_completion")::fields in
+  Alcotest.(check bool) "later raw pixels still require machine decoder" true
+    (decode later = Ok (Tui_decode.Checkpoint_committed (Some (`Assoc []))))
+;;
+
 let test_play_invite_responses_preserve_recovery_facts () =
   let json = Yojson.Safe.from_string in
   (match Tui_decode.decode_play_invites
@@ -13669,6 +13699,10 @@ let () =
           test_keeper_usage_rejects_unrenderable_generated_at;
         Alcotest.test_case "Keeper usage unread turns remain partial" `Quick
           test_keeper_usage_unread_turns_remain_partial ] );
+    ( "checkpoint disposition"
+    , [ Alcotest.test_case "operation receipt requires exact identity and terminal evidence" `Quick
+          test_checkpoint_receipt_identity_and_completion
+ ] );
     ( "play invites"
     , [ Alcotest.test_case "preserves partial revoke and rejects unreadable links"
           `Quick test_play_invite_responses_preserve_recovery_facts

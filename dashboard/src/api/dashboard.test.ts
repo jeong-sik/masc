@@ -4804,6 +4804,7 @@ describe('fetchRuntimeProviders', () => {
             supports_response_format_json: true,
             supports_structured_output: true,
             supports_system_prompt: true,
+            supports_assistant_prefill: false,
             supports_prompt_caching: true,
             supports_top_k: true,
             supports_min_p: true,
@@ -4888,6 +4889,7 @@ describe('fetchRuntimeProviders', () => {
               task: null,
               supports_native_streaming: true,
               supports_system_prompt: true,
+              supports_assistant_prefill: false,
               supports_prompt_caching: true,
               supports_top_k: true,
               supports_min_p: true,
@@ -4944,6 +4946,7 @@ describe('fetchRuntimeProviders', () => {
                   supports_response_format_json: true,
                   supports_structured_output: true,
                   supports_system_prompt: true,
+                  supports_assistant_prefill: false,
                   supports_prompt_caching: true,
                   supports_top_k: true,
                   supports_min_p: true,
@@ -5059,6 +5062,9 @@ describe('fetchRuntimeProviders', () => {
     expect(result.providers[0]?.supports_response_format_json).toBe(true)
     expect(result.providers[0]?.supports_structured_output).toBe(true)
     expect(result.providers[0]?.effective_capabilities?.supports_native_streaming).toBe(true)
+    expect(result.providers[0]?.supports_assistant_prefill).toBe(false)
+    expect(result.providers[0]?.effective_capabilities?.supports_assistant_prefill).toBe(false)
+    expect(result.providers[1]?.supports_assistant_prefill).toBeUndefined()
     expect(result.providers[0]?.supports_system_prompt).toBe(true)
     expect(result.providers[0]?.supports_prompt_caching).toBe(true)
     expect(result.providers[0]?.supports_top_k).toBe(true)
@@ -5102,6 +5108,7 @@ describe('fetchRuntimeProviders', () => {
     ).toBe(true)
     expect(result.providers[0]?.declared_spec?.model?.capabilities?.supports_structured_output).toBe(true)
     expect(result.providers[0]?.declared_spec?.model?.capabilities?.supports_parallel_tool_calls).toBe(true)
+    expect(result.providers[0]?.declared_spec?.model?.capabilities?.supports_assistant_prefill).toBe(false)
     expect(result.providers[0]?.declared_spec?.model?.capabilities?.supports_system_prompt).toBe(true)
     expect(result.providers[0]?.declared_spec?.model?.top_p).toBe(0.91)
     expect(result.providers[0]?.declared_spec?.model?.top_k).toBe(42)

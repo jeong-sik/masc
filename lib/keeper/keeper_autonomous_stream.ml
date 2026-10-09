@@ -9,6 +9,7 @@ type t =
   ; turn_ref : Ids.Turn_ref.t
   ; events : Events.t option
   ; accum : Accum.t
+  ; child_journal : Keeper_child_content_journal.t
   ; task_journal : Keeper_native_task_journal.t
   ; text : Keeper_stream_text_redaction.Scoped.t
   ; redact_text : string -> string
@@ -62,6 +63,9 @@ let create ~base_path ~keeper_name ~turn_ref = Eio.Cancel.protect (fun () ->
   let t =
     { base_path; keeper_name; turn_ref; events; accum = Accum.create ();
       text = Keeper_stream_text_redaction.Scoped.create redaction;
+      child_journal = Keeper_child_content_journal.create ~base_path ~keeper_name
+        ~source:(Keeper_native_task_journal.Autonomous_turn turn_ref)
+        ~redact_text:(Keeper_secret_redaction.redact_text redaction);
       task_journal = Keeper_native_task_journal.create ~base_path ~keeper_name
         ~source:(Keeper_native_task_journal.Autonomous_turn turn_ref)
         ~redact_text:(Keeper_secret_redaction.redact_text redaction);
@@ -117,6 +121,7 @@ let on_event t event = with_stream t (fun () ->
 
 let on_tool_stream_observation t observation =
   let protect_observation = match observation with
+    | Keeper_hooks_agent_core.Child_content_observed _
     | Keeper_hooks_agent_core.Native_task_observed _ ->
         (* Preserve admitted persistence through its health/report outcome,
            without holding the unrelated root publication mutex. *)
@@ -136,6 +141,9 @@ let on_tool_stream_observation t observation =
   | Keeper_hooks_agent_core.Turn_closed_without_sources {turn} ->
       (match Accum.close_turn_without_sources t.accum ~turn with
        | Ok () -> () | Error detail -> mapping_failed t detail)
+  | Keeper_hooks_agent_core.Child_content_observed {attempt; observation} ->
+      Keeper_child_content_journal.observe t.child_journal ~attempt observation
+      |> Keeper_child_content_journal.report ~keeper_name:t.keeper_name
   | Keeper_hooks_agent_core.Native_task_observed {attempt; bound} ->
       Keeper_native_task_journal.observe t.task_journal ~attempt bound
       |> Keeper_native_task_journal.report ~keeper_name:t.keeper_name
@@ -186,3 +194,5 @@ let finish t ending =
         | Cancelled -> Events.Event_error {message = "Autonomous turn cancelled"}))))
 
 let task_journal_health t = Keeper_native_task_journal.health t.task_journal
+
+let child_journal_health t = Keeper_child_content_journal.health t.child_journal

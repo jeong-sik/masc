@@ -364,7 +364,7 @@ let fixture_trace_with_no_completed_turn = "fixture-trace-no-completed-turn"
 
 let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = []) ?event_bus
     ?required_native_posture
-    ?event_capture ?on_native_task_observation ?on_native_tool_progress ?on_native_tool_completion ?on_event ?agent_core_checkpoint ?runtime_manifest_context
+    ?event_capture ?on_child_content_observation ?on_native_task_observation ?on_native_tool_progress ?on_native_tool_completion ?on_event ?agent_core_checkpoint ?runtime_manifest_context
     ?runtime_manifest_append ?raw_trace ?on_official_client_native_action
     ?on_official_client_usage_report ?on_runtime_attempt
     ?(system_prompt = "pre-dispatch fixture system prompt")
@@ -410,7 +410,7 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
                            ~initial_messages
                            ?context
                            ?event_bus
-                           ?on_native_task_observation ?on_native_tool_progress ?on_native_tool_completion ?on_event
+                           ?on_child_content_observation ?on_native_task_observation ?on_native_tool_progress ?on_native_tool_completion ?on_event
                            ?agent_core_checkpoint
                            ?runtime_manifest_context
                            ?runtime_manifest_append
@@ -3513,6 +3513,245 @@ let with_task_journal_bindings ?on_bound f =
         f ~base_path observations))
 ;;
 
+module Child_journal = Keeper_child_content_journal
+
+let child_journal_ok (outcome : 'a Child_journal.outcome) =
+  match outcome.result,outcome.cleanup_failure with
+  | Ok value,[] -> value
+  | Error error,_ -> fail (Child_journal.error_to_string error)
+  | Ok _,_ -> fail "unexpected child journal cleanup warning"
+;;
+
+(* This fixture enters the actual turn Driver, not only the direct adapter.
+   The provider emits complete child frames before/after the original Agent;
+   all assertions run outside callbacks, whose exceptions runtime may catch. *)
+let with_child_journal_observations ?on_observed f =
+  let base_path=temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    let observed=ref [] and admitted=ref None in
+    let child=child_content_frame ~uuid:"same-child-envelope" ~parent:"child-parent"
+      ~text:"CHILD_SECRET_BODY" () in
+    with_fixture [Emit child;
+      Emit_with_input (native_tool_call_block ~turn_id:"child-parent-envelope"
+        ~call_id:"child-parent" ~tool_name:"Agent");
+      Emit (task_binding_native_result ~uuid:"child-parent-return" ~call_id:"child-parent");
+      Emit child;
+      Emit (child_content_frame ~diagnostic:true ~uuid:"diagnostic-child"
+        ~parent:"child-parent" ~text:"NOT_A_BODY" ());
+      Emit (response_text ~turn_id:"answer" ~message_id:"answer" "Unchanged child sink answer");
+      Emit (result_text ~turn_id:"final" "Unchanged child sink answer")] (fun cli_path ->
+      let result=with_fixture_yolo ~keeper_name:"claude-fixture" (fun () ->
+        run_keeper_turn ~base_path ~cli_path ~goal:"CHILD_JOURNAL" ~tools:[]
+          ~required_native_posture:Runtime_native_tools.Native_full
+          ~on_runtime_attempt:(fun attempt -> admitted:=Some attempt)
+          ~on_child_content_observation:(fun ~attempt observation ->
+            observed:=(attempt,observation)::!observed;
+            Option.iter (fun observe -> observe ~base_path ~attempt observation) on_observed) ()) in
+      (match result with Error error -> fail (Agent_core.Error.to_string error)
+       | Ok result -> check string "root reply unaffected by child persistence"
+           "Unchanged child sink answer" (keeper_response_text result));
+      let observations=List.rev !observed in
+      check int "actual driver captures two channels of unknown then known; no diagnostic" 4 (List.length observations);
+      let admitted=match !admitted with Some attempt -> attempt | None -> fail "missing actual dispatch" in
+      List.iter (fun ((attempt:Runtime_native_tasks.attempt),_) ->
+        check string "child captures actual routing attempt" admitted.routing_run_id attempt.routing_run_id;
+        check string "child captures actual runtime" admitted.runtime_id attempt.runtime_id;
+        check int "child captures actual lane" admitted.lane_attempt_index attempt.lane_attempt_index) observations;
+      f ~base_path observations))
+;;
+
+let test_child_journal_driver_replay_redaction_and_scope () =
+  with_child_journal_observations (fun ~base_path observations ->
+    let keeper_name="claude-fixture" in
+    let secret="CHILD_SECRET_BODY" in
+    let token_file=Keeper_secret_redaction.ssh_remote_token_file ~base_path ~keeper_name in
+    Fs_compat.mkdir_p (Filename.dirname token_file);
+    Out_channel.with_open_bin token_file (fun out -> output_string out secret);
+    let redact_text=Keeper_secret_redaction.redact_text
+      (Keeper_secret_redaction.snapshot ~base_path ~keeper_name) in
+    let source=task_journal_operation "child-operation" in
+    let sink=Child_journal.create ~base_path ~keeper_name ~source ~redact_text in
+    let publications=List.map (fun (attempt,observation) ->
+      Result.get_ok (Child_journal.prepare sink ~attempt observation)) observations in
+    let reader=Child_journal.reader_of_publication (List.hd publications) in
+    (match (Child_journal.read reader).result with
+     | Error Child_journal.Missing_store -> () | _ -> fail "missing read must remain distinct");
+    check bool "READONLY missing read does not create receiver file" false (Sys.file_exists (Child_journal.path reader));
+    let commits=List.map (fun publication -> child_journal_ok (Child_journal.append publication)) publications in
+    let snapshot=child_journal_ok (Child_journal.read reader) in
+    let rows=snapshot.records in
+    check (list int) "disk sequence includes every original ordinal/channel" [1;2;3;4]
+      (List.map (fun (r:Child_journal.record) -> r.seq) rows);
+    List.iter2 (fun publication receipt ->
+      match receipt,child_journal_ok (Child_journal.append publication) with
+      | Child_journal.Appended first,Child_journal.Replayed replay ->
+          check bool "same publication exact replay preserves sequence/time/payload" true (first=replay)
+      | _ -> fail "expected replay") publications commits;
+    (match rows with
+     | [one;two;three;four] ->
+         check bool "all channels of actual accepted envelope share observation identity" true
+           (one.observation.observation_id=two.observation.observation_id
+            && three.observation.observation_id=four.observation.observation_id);
+         check bool "same provider envelope replay is a distinct accepted snapshot" false
+           (one.observation.observation_id=three.observation.observation_id);
+         check bool "provider envelope correlation remains same" true
+           (one.observation.envelope_uuid=three.observation.envelope_uuid);
+         check bool "unknown is not upgraded by later parent" true
+           (one.observation.attribution=Keeper_child_content.Parent_input_refused Keeper_claude_task_binding.Unknown_parent);
+         (match three.observation.attribution with
+          | Keeper_child_content.Original_parent_input _ -> ()
+          | Parent_input_refused _ -> fail "known actual parent must retain evidence")
+     | _ -> fail "four durable observations required");
+    check (list int) "original redacted-thinking hole preserved" [1;2;1;2]
+      (List.map (fun (r:Child_journal.record) -> r.observation.ordinal) rows);
+    let bytes=In_channel.with_open_bin (Child_journal.path reader) In_channel.input_all in
+    check bool "secret body is redacted before disk" false (Astring.String.is_infix ~affix:secret bytes);
+    let after=Child_journal.next_cursor snapshot in
+    check int "validated unchanged suffix is empty" 0
+      (List.length (child_journal_ok (Child_journal.read ~after reader)).records);
+    let invocation=(List.hd rows).observation.origin.invocation in
+    let foreign=Result.get_ok (Child_journal.open_reader ~base_path ~keeper_name
+      ~receiver_generation:invocation.receiver_generation ~session_id:invocation.session_id
+      ~client_uuid:(invocation.client_uuid ^ "foreign")) in
+    (match (Child_journal.read foreign).result with
+     | Error Child_journal.Missing_store -> () | _ -> fail "foreign client cannot read this store");
+    check bool "foreign missing store is not created" false (Sys.file_exists (Child_journal.path foreign));
+    Fs_compat.mkdir_p (Filename.dirname (Child_journal.path foreign));
+    Out_channel.with_open_bin (Child_journal.path foreign) (fun out -> output_string out bytes);
+    (match (Child_journal.read foreign).result with
+     | Error (Child_journal.Corrupt _) -> () | _ -> fail "copied rows cannot establish foreign client scope");
+    let forged=Result.get_ok (Child_journal.cursor ~store_id:"foreign-incarnation" ~after_sequence:0) in
+    (match (Child_journal.read ~after:forged reader).result with
+     | Error Child_journal.Cursor_store_mismatch -> () | _ -> fail "foreign incarnation cannot look empty");
+    let attempt,observation=List.hd observations in
+    let other=Child_journal.create ~base_path ~keeper_name ~redact_text
+      ~source:(task_journal_operation "other-source") in
+    (match (Child_journal.observe other ~attempt observation).result with
+     | Error (Child_journal.Conflicting_observation _) -> () | _ -> fail "same composite key with changed source cannot replay");
+    check int "failure retained by exact collector" 1 (List.length (Child_journal.health other));
+    check int "collision adds no sequence" 4 (List.length (child_journal_ok (Child_journal.read reader)).records);
+    Unix.rename (Child_journal.path reader) (Child_journal.path reader ^ ".previous");
+    ignore (child_journal_ok (Child_journal.append (List.hd publications)));
+    (match (Child_journal.read ~after reader).result with
+     | Error Child_journal.Cursor_store_mismatch -> () | _ -> fail "replacement cannot inherit old incarnation cursor"))
+;;
+
+let test_child_journal_concurrent_exact_replay () =
+  with_child_journal_observations (fun ~base_path observations ->
+    let collector=Child_journal.create ~base_path ~keeper_name:"claude-fixture"
+      ~source:(task_journal_operation "child-concurrent") ~redact_text:Fun.id in
+    let attempt,observation=List.hd observations in
+    let publication=Result.get_ok (Child_journal.prepare collector ~attempt observation) in
+    let workers=List.init 4 (fun _ -> Domain.spawn (fun () ->
+      Eio_main.run (fun _ -> Child_journal.append publication))) in
+    let outcomes=List.map Domain.join workers |> List.map (fun outcome ->
+      match outcome.Child_journal.result with
+      | Error (Child_journal.Store_unavailable _) ->
+          (* Immediate SQLite busy refusal is explicit, then the test retries
+             the same publication once all concurrent workers have joined. *)
+          child_journal_ok (Child_journal.append publication)
+      | Ok _ | Error _ -> child_journal_ok outcome) in
+    check int "concurrent received duplicate commits exactly once" 1
+      (List.length (List.filter (function Child_journal.Appended _ -> true | Replayed _ -> false) outcomes));
+    let reader=Child_journal.reader_of_publication publication in
+    check int "one disk sequence after concurrent replay" 1
+      (child_journal_ok (Child_journal.read reader)).validation.through_sequence)
+;;
+
+let test_child_journal_commit_uncertainty_and_cleanup () =
+  with_child_journal_observations (fun ~base_path observations ->
+    let sink=Child_journal.create ~base_path ~keeper_name:"claude-fixture"
+      ~source:(task_journal_operation "child-outcomes") ~redact_text:Fun.id in
+    let publications=List.map (fun (attempt,observation) ->
+      Result.get_ok (Child_journal.prepare sink ~attempt observation)) observations in
+    let first=List.hd publications in
+    let warning=Child_journal.For_testing.append_with_io ~commit:(fun db -> Sqlite3.exec db "COMMIT")
+      ~close:(fun db -> ignore (Sqlite3.db_close db);false) first in
+    (match warning.result,warning.cleanup_failure with
+     | Ok (Child_journal.Appended row),[_] -> check int "close failure preserves known commit" 1 row.seq
+     | _ -> fail "cleanup overwrote primary receipt");
+    let second=List.nth publications 1 in
+    let uncertain=Child_journal.For_testing.append_with_io
+      ~commit:(fun db -> ignore (Sqlite3.exec db "COMMIT");Sqlite3.Rc.IOERR)
+      ~close:Sqlite3.db_close second in
+    (match uncertain.result with
+     | Error (Child_journal.Commit_unconfirmed _) -> () | _ -> fail "uncertain commit cannot be guessed");
+    (match child_journal_ok (Child_journal.append second) with
+     | Child_journal.Replayed row -> check int "same sealed publication reconciles uncertain commit" 2 row.seq
+     | _ -> fail "uncertain retry must not remint or duplicate");
+    let reader=Child_journal.reader_of_publication first in
+    check int "one receipt per complete block, not all four envelope blocks" 2
+      (List.length (child_journal_ok (Child_journal.read reader)).records))
+;;
+
+let test_child_journal_full_audit_cannot_hide_prefix () =
+  with_child_journal_observations (fun ~base_path observations ->
+    let sink=Child_journal.create ~base_path ~keeper_name:"claude-fixture"
+      ~source:(task_journal_operation "child-corruption") ~redact_text:Fun.id in
+    let publications=List.map (fun (attempt,observation) ->
+      Result.get_ok (Child_journal.prepare sink ~attempt observation)) observations in
+    List.iter (fun p -> ignore (child_journal_ok (Child_journal.append p))) publications;
+    let reader=Child_journal.reader_of_publication (List.hd publications) in
+    let after=Child_journal.next_cursor (child_journal_ok (Child_journal.read reader)) in
+    let db=Sqlite3.db_open (Child_journal.path reader) in
+    Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db)) (fun () ->
+      let stmt=Sqlite3.prepare db "SELECT sql FROM sqlite_master WHERE name='immutable_observations'" in
+      let trigger=Fun.protect ~finally:(fun () -> ignore (Sqlite3.finalize stmt)) (fun () ->
+        match Sqlite3.step stmt with
+        | Sqlite3.Rc.ROW -> Sqlite3.column_text stmt 0 | _ -> fail "missing immutable trigger") in
+      let sql value=match Sqlite3.exec db value with
+        | Sqlite3.Rc.OK -> () | rc -> fail (Sqlite3.Rc.to_string rc) in
+      sql "BEGIN IMMEDIATE";sql "DROP TRIGGER immutable_observations";
+      sql "UPDATE observations SET payload='{}' WHERE seq=1";sql trigger;sql "COMMIT");
+    (match (Child_journal.read ~after reader).result with
+     | Error (Child_journal.Corrupt {seq=1;_}) -> ()
+     | _ -> fail "unchanged cursor must still refuse corrupted prefix"))
+;;
+
+let test_child_journal_received_after_closed_root () =
+  with_child_journal_observations (fun ~base_path observations ->
+    Eio_main.run (fun _ ->
+      let keeper_name="claude-fixture" in
+      let turn_ref=Ids.Turn_ref.make ~trace_id:"child-closed-root" ~absolute_turn:1 in
+      let stream=Keeper_autonomous_stream.create ~base_path ~keeper_name ~turn_ref in
+      Keeper_autonomous_stream.finish stream Keeper_autonomous_stream.Cancelled;
+      let root_path=Keeper_chat_event_log.turn_journal_path ~base_dir:base_path ~keeper_name ~turn_ref in
+      let before=In_channel.with_open_bin root_path In_channel.input_all in
+      List.iter (fun (attempt,observation) -> Keeper_autonomous_stream.on_tool_stream_observation stream
+        (Keeper_hooks_agent_core.Child_content_observed {attempt;observation})) observations;
+      check string "real sink commits received child after closure without root events"
+        before (In_channel.with_open_bin root_path In_channel.input_all);
+      check int "closed root does not reject durable child callback" 0
+        (List.length (Keeper_autonomous_stream.child_journal_health stream));
+      let attempt,observation=List.hd observations in
+      let collector=Child_journal.create ~base_path ~keeper_name ~redact_text:Fun.id
+        ~source:(Keeper_native_task_journal.Autonomous_turn turn_ref) in
+      let reader=Child_journal.reader_of_publication (Result.get_ok (Child_journal.prepare collector ~attempt observation)) in
+      let rows=(child_journal_ok (Child_journal.read reader)).records in
+      check int "all received unknown/known channels remain durable" 4 (List.length rows);
+      List.iter (fun (row:Child_journal.record) -> match row.observation.origin.source with
+        | Runtime_native_tasks.Autonomous_turn {turn_ref=actual} ->
+            check string "collector keeps captured autonomous origin" (Ids.Turn_ref.to_string turn_ref) actual
+        | Operation _ -> fail "wrong collector source") rows;
+      check bool "durable child does not reopen root" true
+        (Keeper_autonomous_stream.current ~base_path ~keeper_name=None)))
+;;
+
+let test_child_journal_failure_preserves_root () =
+  let failures=ref [] in
+  with_child_journal_observations
+    ~on_observed:(fun ~base_path ~attempt observation ->
+      let blocker=Filename.concat base_path "child-blocker" in
+      if not (Sys.file_exists blocker) then Out_channel.with_open_bin blocker (fun out -> output_string out "fixture");
+      let sink=Child_journal.create ~base_path:blocker ~keeper_name:"claude-fixture"
+        ~source:(task_journal_operation "failed-child") ~redact_text:Fun.id in
+      failures:=Child_journal.observe sink ~attempt observation :: !failures)
+    (fun ~base_path:_ _ ->
+      check int "all driver child callbacks return typed failures without root mutation" 4 (List.length !failures);
+      List.iter (fun (outcome:Child_journal.commit Child_journal.outcome) -> match outcome.result with
+        | Error _ -> () | Ok _ -> fail "failed path cannot acknowledge body") !failures)
+;;
+
 let test_native_task_journal_commit_replay_and_scope () =
   with_task_journal_bindings (fun ~base_path observations ->
     let secret = "general-purpose" and keeper_name = "claude-fixture" in
@@ -5491,6 +5730,18 @@ let () =
             test_every_posture_names_the_schema_lookup
         ; test_case "task input and routed dispatch retain exact native envelope" `Quick
             test_task_binding_freezes_exact_envelope_and_dispatch
+        ; test_case "child durable driver receipts redaction replay and ticket scope" `Quick
+            test_child_journal_driver_replay_redaction_and_scope
+        ; test_case "child concurrent exact replay has one disk sequence" `Quick
+            test_child_journal_concurrent_exact_replay
+        ; test_case "child durable uncertain commit and independent cleanup" `Quick
+            test_child_journal_commit_uncertainty_and_cleanup
+        ; test_case "child durable suffix still audits corrupt prefix" `Quick
+            test_child_journal_full_audit_cannot_hide_prefix
+        ; test_case "received child persists through real closed autonomous sink" `Quick
+            test_child_journal_received_after_closed_root
+        ; test_case "child persistence failure cannot mutate root answer" `Quick
+            test_child_journal_failure_preserves_root
         ; test_case "native task journal retains authority and exact replay" `Quick
             test_native_task_journal_commit_replay_and_scope
         ; test_case "native task journal serializes writers and distinguishes corruption" `Quick

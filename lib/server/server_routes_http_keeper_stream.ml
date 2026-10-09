@@ -1774,6 +1774,8 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
   let redact_text = Keeper_secret_redaction.redact_text redaction in
   let task_source = match submission with
     | Owner_operation {operation_id; _} -> Keeper_native_task_journal.Operation operation_id in
+  let child_journal = Keeper_child_content_journal.create ~base_path
+      ~keeper_name:payload.name ~source:task_source ~redact_text in
   let task_journal = Keeper_native_task_journal.create ~base_path
       ~keeper_name:payload.name ~source:task_source ~redact_text in
   let content_generation = Keeper_chat_events.publish_with_sequence events
@@ -2035,6 +2037,13 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
       | Keeper_hooks_agent_core.Turn_collected { turn; tool_source_map } ->
         Keeper_stream_tool_accum.seal_turn worker_tool_accum ~turn
           ~tool_source_map
+      | Keeper_hooks_agent_core.Child_content_observed {attempt; observation} ->
+          (* Received child snapshots commit independently of worker queue,
+             client disconnect and root lifecycle closure. No chat-bus publish. *)
+          Eio.Cancel.protect (fun () ->
+            Keeper_child_content_journal.observe child_journal ~attempt observation
+            |> Keeper_child_content_journal.report ~keeper_name:payload.name);
+          Ok ()
       | Keeper_hooks_agent_core.Native_task_observed {attempt; bound} ->
           (* Independent receiver journal, including after root stream closure.
              Persistence failure is not a tool occurrence mapping failure. *)

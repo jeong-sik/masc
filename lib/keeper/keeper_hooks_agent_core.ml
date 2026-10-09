@@ -237,6 +237,10 @@ type tool_stream_observation =
       { turn : int
       ; tool_source_map : Agent_core.Hooks.admitted_tool_source_map
       }
+  | Child_content_observed of
+      { attempt : Runtime_native_tasks.attempt
+      ; observation : Keeper_claude_task_binding.child_observation
+      }
   | Native_task_observed of
       { attempt : Runtime_native_tasks.attempt
       ; bound : Keeper_claude_task_binding.bound }

@@ -2015,6 +2015,12 @@ let run_turn
                                      ~messages:provider_content
                                  | Some (Error _) | None ->
                                    Keeper_projection_change.Request_not_digested))
+                      ?on_child_content_observation:
+                        (Option.map
+                           (fun observe ~attempt observation ->
+                              observe (Keeper_hooks_agent_core.Child_content_observed
+                                {attempt; observation}))
+                           on_tool_stream_observation)
                       ?on_native_task_observation:
                         (Option.map
                            (fun observe ~attempt bound ->

@@ -197,6 +197,11 @@ type tool_stream_observation =
       ; tool_source_map : Agent_core.Hooks.admitted_tool_source_map
       }
       (** Agent Core retained the exact pre-admission mapping before tools run. *)
+  | Child_content_observed of
+      { attempt : Runtime_native_tasks.attempt
+      ; observation : Keeper_claude_task_binding.child_observation }
+      (** Actual private body/binding fact and original dispatch. Durable sinks
+          handle this without root content/lifecycle or network-cutoff authority. *)
   | Native_task_observed of
       { attempt : Runtime_native_tasks.attempt
       ; bound : Keeper_claude_task_binding.bound }

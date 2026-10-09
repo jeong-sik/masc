@@ -183,17 +183,21 @@ The shared closed codec decodes an unprivileged public view, not a private
 publication or runtime/input witness. Read serialization can redact the body
 and model leaves again while preserving every protocol identity and evidence
 fact. This is per complete field/body snapshot; it provides no streaming-secret
-guarantee across Child blocks or repeated snapshots. Durable sink, authenticated
+guarantee across Child blocks or repeated snapshots. Authenticated
 read/wire transport and TUI integration remain pending. Existing live worker
-cutoff discards ordinary queued events after disconnect; a durable Child sink
-must receive already observed content independently of that cutoff, with actual
-atomic sequence/commit ownership rather than concurrent chat-bus appends.
+cutoff discards ordinary queued events after disconnect; the received Child sink
+commits already observed content independently of that cutoff, with its own
+atomic sequence/commit ownership.
 
 The witness is a fact at observation time. A later call-ID collision makes
 subsequent child observations unknown; earlier witness values remain historical
 snapshots and prove neither current authority nor cancellation. Later witnesses
-cannot retroactively certify earlier unknown snapshots. Separate child display,
-persistence and the public driver/agent-run sink are not connected. The Keeper
+cannot retroactively certify earlier unknown snapshots. Separate child display
+and authenticated read/TUI integration remain pending. The actual Driver and
+Agent-run forward the sealed callback to independent interactive/autonomous
+Child stores, including received callbacks after root closure or client cutoff.
+See [received Child durability](child-content-journal.md) for scoped receipts,
+local health coverage and the remaining read/UI boundary. The Keeper
 adapter supplies the bound/rejected callback while excluding child body from
 root projection. Native task metadata
 journals do not receive child body or user input from this event. Public native

@@ -60,7 +60,8 @@ val start :
   (Yojson.Safe.t, string) result
 (** Begin a login. Finds the declaration, asks the provider's server where
     its authorization lives, registers a client if this install has none, and
-    returns the URL to open along with the state that identifies this login.
+    returns the URL to open along with a non-secret [attempt_id] for authenticated
+    completion observation. Callback state is kept inside the browser URL only.
 
     Nothing is written to the Keeper yet -- an operator who closes the browser
     leaves no trace beyond a registered client, and that is reused. *)
@@ -124,3 +125,9 @@ val finish :
     tokens: the browser that arrives here belongs to whoever followed the
     redirect, and the point of the exchange is that the credential goes to
     the Keeper rather than through a screen. *)
+
+val attempt_status_json : base_path:string -> now:float -> keeper:string -> provider_id:string -> attempt_id:string -> Yojson.Safe.t
+(** Authenticated exact-scope read of non-secret login completion facts. *)
+
+val reject_callback : base_path:string -> state:string -> now:float -> unit
+(** Only a still-awaiting consent is rejected. Replay cannot fail an admitted callback. *)

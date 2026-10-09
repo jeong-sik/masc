@@ -17,7 +17,10 @@ let with_root f =
 let test_restart_and_exact_retirement () = with_root (fun root ->
   let restore = binding ~root "restore-before-restart" true in
   let save = binding ~root "save-before-restart" false in
+  check int "reader initialized before another writer" 0 (List.length (require (Pending.load ~masc_root:root)));
   require (Pending.remember ~masc_root:root restore);
+  check bool "next inventory read observes the other writer" true
+    (List.mem restore (require (Pending.load ~masc_root:root)));
   require (Pending.remember ~masc_root:root save);
   (* The reader shares no process-local pending map with the writer. Both
      bindings remain inspectable after reconstructing all client state. *)

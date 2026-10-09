@@ -69,6 +69,14 @@ let incarnation () =
   | Error e -> fail (Msx_lane.error_to_string e)
 ;;
 
+let test_unknown_checkpoint_effect_is_not_refused () =
+  let result = Tool_misc_msx_lane.of_lane ~tool_name:"masc_msx_save"
+    ~start_time:(Tool_timing.start ()) (Error (Msx_lane.Effect_unknown "directory sync failed after replacement")) in
+  check bool "post-replacement failure is not pre-effect" false (took_no_effect result);
+  check bool "uncertainty remains a runtime failure" true
+    (Tool_result.failure_class result = Some Tool_result.Runtime_failure)
+;;
+
 let rejected result =
   Tool_result.failure_class result = Some Tool_result.Workflow_rejection
   && took_no_effect result
@@ -1351,6 +1359,7 @@ let () =
         ; test_case "concurrent loads announce the medium once" `Quick
             test_concurrent_loads_announce_the_medium_once
         ; test_case "disk image loads into the drive" `Quick test_disk_load
+        ; test_case "uncertain checkpoint effect is not refused" `Quick test_unknown_checkpoint_effect_is_not_refused
         ; test_case "checkpoint survives eject and rejects corruption" `Quick test_checkpoint_roundtrip
         ; test_case "disk swaps retain guest writes across checkpoint restore" `Quick test_disk_swap_retains_guest_writes_and_checkpoint
         ; test_case "failed disk backup preserves machine and ledger" `Quick test_disk_backup_failure_preserves_machine

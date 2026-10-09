@@ -756,6 +756,10 @@ let rec workspace_message_is_read = function
     -> true
   | Voice_wizard_saved _
   | Msx_frame_loaded _
+  (* A withdrawn tick attempted no POST and changes no server state; it only
+     releases the pending poll token, so it stays an observation, not an
+     operation outcome. *)
+  | Msx_tick_withdrawn _
   | Voice_agent_voice_saved _
   | Voice_level _
   | Voice_transcribed _

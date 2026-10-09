@@ -35,6 +35,7 @@ let start_error_to_string = function
 type started = {
   authorize_url : string;
   state : string;
+  attempt_id : string;
   credentials : Keeper_oauth_client_store.credentials;
   registered_now : bool;
 }
@@ -103,14 +104,15 @@ let start
         ~scopes:credentials.Store.scopes ~redirect_uri
         ~keeper
     in
-    Pending.remember pending ~now ~ttl_sec
+    let attempt_id = Pending.remember pending ~now ~ttl_sec
       { Pending.pending = flow_pending
       ; discovered
       ; client_id
       ; client_secret = credentials.Store.client_secret
-      };
+      } in
     Ok
       { authorize_url = flow_pending.Flow.authorize_url
+      ; attempt_id
       ; state = flow_pending.Flow.state
       ; credentials
       ; registered_now
@@ -162,12 +164,13 @@ let finish ~post ~pending ~state ~code ~now () =
     let flow_pending = in_flight.Pending.pending in
     let* tokens =
       Result.map_error
-        (fun err -> Exchange_failed err)
-        (Flow.complete ~post ~discovered:in_flight.Pending.discovered
+        (fun err -> Pending.finish pending ~state (Error ()); Exchange_failed err)
+        (match Flow.complete ~post ~discovered:in_flight.Pending.discovered
            ~client_id:in_flight.Pending.client_id
            ?client_secret:in_flight.Pending.client_secret ~pending:flow_pending
-           ~code
-           ~state ~now ())
+           ~code ~state ~now () with
+         | result -> result
+         | exception exn -> Pending.finish pending ~state (Error ()); raise exn)
     in
     (* The four pairings the answer can carry, read into the three that mean
        something different to whoever stores them. A token with no expiry

@@ -118,6 +118,8 @@ type resume_confirmation =
   | Owner_already_active
 
 type async_msg =
+  | Chat_search_finished of int * bool * Masc_tui_render_chat.chat_search_work
+      * (Masc_tui_render_chat.chat_search_match, string) result
   | Workspace_scoped of workspace_authority * unit ref option * async_msg
   | Workspace_operation of async_msg
   | Chat_command_read_completed of unit ref * async_msg
@@ -568,6 +570,7 @@ type async_msg =
   | Github_identity_view_loaded of Masc_tui_types.detail_read_request * (string list, string) result
   | Identity_providers_loaded of
       Masc_tui_types.detail_read_request * (Masc_tui_identity_model.identity_provider list, string) result
+      * (identity_login_expectation * (Masc_tui_identity_model.identity_login_status, string) result) list
   | Identity_switch_set of
       string * string * bool * (unit, string) result
       (** keeper, provider, the state the operator asked for, and whether

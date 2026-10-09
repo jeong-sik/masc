@@ -2447,23 +2447,166 @@ let client_argv (config : config) =
 
 type context_submission_method = Thread_start | Thread_resume | Thread_inject_items | Turn_start
 
+type context_fragment_slot =
+  | Developer_instructions
+  | Dynamic_tools
+  | Injected_item of int
+  | Turn_text of int
+  | Unattributed_carrier
+
+type context_fragment =
+  { slot : context_fragment_slot
+  ; json_offset : int option
+  ; json_bytes : int
+  ; json_sha256 : string
+  }
+
+type context_fragments = Partitioned of context_fragment list | Serialization_mismatch
+
 type context_submission =
   { method_ : context_submission_method
   ; request_id : int
   ; thread_id : string option
   ; ipc_json_bytes : int
   ; ipc_json_sha256 : string
+  ; fragments : context_fragments
   }
+
+let context_fragment_to_json fragment =
+  let slot, index = match fragment.slot with
+    | Developer_instructions -> "developer_instructions",None
+    | Dynamic_tools -> "dynamic_tools",None
+    | Injected_item index -> "injected_item",Some index
+    | Turn_text index -> "turn_text",Some index
+    | Unattributed_carrier -> "unattributed_carrier",None in
+  let int_option = function None -> `Null | Some value -> `Int value in
+  `Assoc ["slot",`String slot;"index",int_option index;
+    "json_offset",int_option fragment.json_offset;
+    "json_bytes",`Int fragment.json_bytes;"json_sha256",`String fragment.json_sha256]
+;;
+
+(* End offset of the JSON value starting at [pos] in compact serializer output,
+   or [None] when those bytes are not one complete value. Strings end at their
+   first unescaped quote; containers at the bracket that closes depth one,
+   skipping brackets inside strings; scalars at the next delimiter. *)
+let json_value_end payload pos =
+  let length = String.length payload in
+  let rec string_end i =
+    if i >= length then None
+    else match payload.[i] with
+      | '\\' -> string_end (i + 2)
+      | '"' -> Some (i + 1)
+      | _ -> string_end (i + 1) in
+  let rec container_end depth i =
+    if i >= length then None
+    else match payload.[i] with
+      | '"' -> Option.bind (string_end (i + 1)) (container_end depth)
+      | '{' | '[' -> container_end (depth + 1) (i + 1)
+      | '}' | ']' -> if depth = 1 then Some (i + 1) else container_end (depth - 1) (i + 1)
+      | _ -> container_end depth (i + 1) in
+  let rec scalar_end i = match payload.[i] with
+    | ',' | '}' | ']' -> i
+    | _ -> if i + 1 >= length then length else scalar_end (i + 1) in
+  if pos >= length then None
+  else match payload.[pos] with
+    | '"' -> string_end (pos + 1)
+    | '{' | '[' -> container_end 0 pos
+    | ',' | '}' | ']' | ':' -> None
+    | _ -> Some (scalar_end pos)
+;;
+
+(* Ranges are read from [payload], the bytes actually written, never from a
+   second serialization: a large image or output schema is not copied again
+   before the write deadline. Selected ranges are hashed in place and the
+   unselected gaps feed one incremental hash. The walk follows [json]'s
+   structure and checks every key and delimiter against the payload, so a
+   serializer layout it does not expect leaves attribution unavailable instead
+   of claiming offsets. *)
+let context_fragments method_ json payload =
+  let length = String.length payload in
+  let exception Layout_mismatch in
+  let cursor = ref 0 in
+  let fragments = ref [] in
+  let residual = ref Digestif.SHA256.empty and residual_bytes = ref 0 in
+  let carry stop =
+    residual := Digestif.SHA256.feed_string !residual ~off:!cursor ~len:(stop - !cursor) payload;
+    residual_bytes := !residual_bytes + (stop - !cursor);
+    cursor := stop in
+  let literal text =
+    let stop = !cursor + String.length text in
+    if stop > length || not (String.equal (String.sub payload !cursor (String.length text)) text)
+    then raise Layout_mismatch;
+    carry stop in
+  let value_end () = match json_value_end payload !cursor with
+    | Some stop -> stop | None -> raise Layout_mismatch in
+  let ordinary _value = carry (value_end ()) in
+  let selected slot value =
+    let opener = match value with
+      | `String _ -> '"' | `List _ -> '[' | `Assoc _ -> '{' | _ -> raise Layout_mismatch in
+    if !cursor >= length || payload.[!cursor] <> opener then raise Layout_mismatch;
+    let offset = !cursor and stop = value_end () in
+    fragments := {slot;json_offset=Some offset;json_bytes=stop - offset;
+      json_sha256=Digestif.SHA256.(digest_string ~off:offset ~len:(stop - offset) payload |> to_hex)}
+      :: !fragments;
+    cursor := stop in
+  let assoc render fields =
+    literal "{";
+    List.iteri (fun index (key,value) ->
+      if index > 0 then literal ",";
+      literal (Yojson.Safe.to_string (`String key)); literal ":"; render key value) fields;
+    literal "}" in
+  let list render values =
+    literal "[";
+    List.iteri (fun index value ->
+      if index > 0 then literal ",";
+      render index value) values;
+    literal "]" in
+  let turn_item index = function
+    | `Assoc fields when List.assoc_opt "type" fields = Some (`String "text") ->
+      assoc (fun key value -> match key,value with
+        | "text",`String _ -> selected (Turn_text index) value
+        | _ -> ordinary value) fields
+    | value -> ordinary value in
+  let param key value = match method_,key,value with
+    | (Thread_start | Thread_resume),"developerInstructions",`String _ ->
+      selected Developer_instructions value
+    | (Thread_start | Thread_resume),"dynamicTools",`List _ ->
+      selected Dynamic_tools value
+    | Thread_inject_items,"items",`List values -> list (fun index -> selected (Injected_item index)) values
+    | Turn_start,"input",`List values -> list turn_item values
+    | _ -> ordinary value in
+  match
+    (match json with
+     | `Assoc fields -> assoc (fun key value -> match key,value with
+         | "params",`Assoc fields -> assoc param fields
+         | _ -> ordinary value) fields
+     | value -> ordinary value);
+    if !cursor <> length then raise Layout_mismatch
+  with
+  | exception Layout_mismatch -> Serialization_mismatch
+  | () ->
+    Partitioned (List.rev !fragments @
+      [{slot=Unattributed_carrier;json_offset=None;json_bytes= !residual_bytes;
+        json_sha256=Digestif.SHA256.(get !residual |> to_hex)}])
+;;
 
 let context_submission_to_json observation =
   let method_ = match observation.method_ with
     | Thread_start -> "thread/start" | Thread_resume -> "thread/resume"
     | Thread_inject_items -> "thread/inject_items" | Turn_start -> "turn/start" in
-  `Assoc ["schema",`String "masc.codex-context-submission.v1";
+  let fragments = match observation.fragments with
+    | Partitioned values -> `Assoc ["status",`String "partitioned";
+        "values",`List (List.map context_fragment_to_json values);
+        "residual_hash_basis",`String "ordered_unselected_json_bytes"]
+    | Serialization_mismatch -> `Assoc ["status",`String "unavailable";
+        "reason",`String "serialization_mismatch"] in
+  `Assoc ["schema",`String "masc.codex-context-submission.v2";
     "phase",`String "stdin_write_completed";"method",`String method_;
     "request_id",`Int observation.request_id;
     "thread_id",(match observation.thread_id with None -> `Null | Some id -> `String id);
     "ipc_json_bytes",`Int observation.ipc_json_bytes;"ipc_json_sha256",`String observation.ipc_json_sha256;
+    "fragments",fragments;
+    "logical_memory_partition",`String "unknown";
     "framing",`String "json_followed_by_lf_hash_excludes_lf";
     "server_acceptance",`String "not_observed_by_this_event";
     "remote_history",`String "unknown"]
@@ -2485,7 +2628,8 @@ let context_submission json payload =
              | Some (`String id) -> Some id | _ -> None)
          | _ -> None in
        Some {method_;request_id;thread_id;ipc_json_bytes=String.length payload;
-         ipc_json_sha256=Digestif.SHA256.(digest_string payload |> to_hex)}
+         ipc_json_sha256=Digestif.SHA256.(digest_string payload |> to_hex);
+         fragments=context_fragments method_ json payload}
      | _ -> None)
   | _ -> None
 ;;

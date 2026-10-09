@@ -443,12 +443,37 @@ val read_rate_limits :
 
 type context_submission_method = Thread_start | Thread_resume | Thread_inject_items | Turn_start
 
+type context_fragment_slot =
+  | Developer_instructions
+  | Dynamic_tools
+  | Injected_item of int
+  | Turn_text of int
+  | Unattributed_carrier
+
+type context_fragment = private
+  { slot : context_fragment_slot
+  ; json_offset : int option
+  ; json_bytes : int
+  ; json_sha256 : string
+  }
+(** Selected values include their JSON quotes/brackets. Their offsets name
+    disjoint ranges in the submitted JSON. [Unattributed_carrier] has no single
+    offset: its hash covers the ordered concatenation of all remaining bytes,
+    including field names and punctuation, excluding the transport LF. *)
+
+type context_fragments =
+  | Partitioned of context_fragment list
+  | Serialization_mismatch
+(** A mismatch leaves the complete-write receipt valid but slot attribution
+    unavailable. These are serialized JSON bytes, not source text or tokens. *)
+
 type context_submission = private
   { method_ : context_submission_method
   ; request_id : int
   ; thread_id : string option
   ; ipc_json_bytes : int
   ; ipc_json_sha256 : string
+  ; fragments : context_fragments
   }
 
 val context_submission_to_json : context_submission -> Yojson.Safe.t

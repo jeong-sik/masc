@@ -346,7 +346,7 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
     ?(timeout_s = 2.0) ?admission_timeout_s ?(no_turn_deadline = false)
     ?on_thread_ready ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event
     ?on_prompt_sent ?on_context_submission ?on_context_submission_delay_s ?on_reasoning_effort_resolved ?await_handoff ?(prompt = "Return the fixture marker")
-    ?(images = []) ?(native = Runtime_native_tools.codex_default) path =
+    ?(images = []) ?output_schema ?(native = Runtime_native_tools.codex_default) path =
   Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     let previous_pool = Domain_pool_ref.get () in
     Eio.Switch.on_release sw (fun () ->
@@ -370,6 +370,7 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
       ; timeout_s = if no_turn_deadline then None else Some timeout_s
       }
     in
+    let config = { config with output_schema } in
     let on_thread_ready ~thread_id =
       Option.iter (Eio.Time.sleep clock) on_thread_ready_delay_s;
       match on_thread_ready with None -> Ok () | Some callback -> callback ~thread_id
@@ -1423,20 +1424,92 @@ let test_prompt_transmission_boundary ?(worker_pool = false) () =
     | Ok _ -> fail "observation failure silently continued")
 ;;
 
+let check_context_fragments raw event =
+  let open Yojson.Safe.Util in
+  let request = Yojson.Safe.from_string raw in
+  let params = member "params" request in
+  let expected = match member "method" request with
+    | `String "thread/start" | `String "thread/resume" ->
+      ["developer_instructions",`Null,member "developerInstructions" params;
+       "dynamic_tools",`Null,member "dynamicTools" params]
+      |> List.filter (fun (_,_,value) -> value <> `Null)
+    | `String "thread/inject_items" ->
+      member "items" params |> to_list
+      |> List.mapi (fun index value -> "injected_item",`Int index,value)
+    | `String "turn/start" ->
+      member "input" params |> to_list
+      |> List.mapi (fun index value -> index,value)
+      |> List.filter_map (fun (index,value) ->
+        if member "type" value = `String "text"
+        then Some ("turn_text",`Int index,member "text" value) else None)
+    | _ -> fail "unexpected observed method" in
+  check string "versioned fragment receipt" "masc.codex-context-submission.v2"
+    (member "schema" event |> to_string);
+  check string "logical memory attribution is not claimed" "unknown"
+    (member "logical_memory_partition" event |> to_string);
+  let partition = member "fragments" event in
+  check string "actual serializer supports exact slot attribution" "partitioned"
+    (member "status" partition |> to_string);
+  let fragments = member "values" partition |> to_list in
+  check int "all selected values plus exactly one residual" (List.length expected + 1)
+    (List.length fragments);
+  let cursor = ref 0 and selected_bytes = ref 0 in
+  let residual = Buffer.create (String.length raw) in
+  List.iteri (fun index (slot,item,value) ->
+    let fragment = List.nth fragments index in
+    check (list string) "fragment metadata is content-free"
+      ["index";"json_bytes";"json_offset";"json_sha256";"slot"]
+      (to_assoc fragment |> List.map fst |> List.sort String.compare);
+    check string "slot identity" slot (member "slot" fragment |> to_string);
+    check bool "array position is preserved" true (member "index" fragment=item);
+    let offset = member "json_offset" fragment |> to_int in
+    let bytes = member "json_bytes" fragment |> to_int in
+    check bool "selected ranges are disjoint and inside exact wire bytes" true
+      (offset >= !cursor && bytes >= 0 && offset + bytes <= String.length raw);
+    Buffer.add_substring residual raw !cursor (offset - !cursor);
+    let selected = String.sub raw offset bytes in
+    check string "actual range equals independently decoded JSON slot" (Yojson.Safe.to_string value) selected;
+    check string "fragment SHA binds actual captured bytes"
+      Digestif.SHA256.(digest_string selected |> to_hex)
+      (member "json_sha256" fragment |> to_string);
+    cursor := offset + bytes; selected_bytes := !selected_bytes + bytes) expected;
+  Buffer.add_substring residual raw !cursor (String.length raw - !cursor);
+  let residual_bytes = Buffer.contents residual in
+  let remainder = List.nth fragments (List.length expected) in
+  check string "residual identity" "unattributed_carrier" (member "slot" remainder |> to_string);
+  check bool "noncontiguous residual has no fictitious offset" true (member "json_offset" remainder=`Null);
+  check int "residual counts captured gaps including framing" (String.length residual_bytes)
+    (member "json_bytes" remainder |> to_int);
+  check string "residual SHA binds ordered captured gaps"
+    Digestif.SHA256.(digest_string residual_bytes |> to_hex)
+    (member "json_sha256" remainder |> to_string);
+  check int "disjoint selected values plus residual close exact IPC JSON bytes"
+    (String.length raw) (!selected_bytes + String.length residual_bytes)
+;;
+
 let test_content_free_context_submission () =
   let module Client = Runtime_codex_app_server in
   let hash text=Digestif.SHA256.(digest_string text |> to_hex) in
   let success=[init_result;account_chatgpt;thread_result;turn_result;item_completed;turn_completed] in
   let injected=[init_result;account_chatgpt;thread_result;
     {|{"id":4,"result":{}}|}; {|{"id":5,"result":{"turn":{"id":"turn-1"}}}|};item_completed;turn_completed] in
-  let history=[{Client.role=Client.User;text="previous input"}] in
+  let escaped = "한글 \"quoted\"\nnext line \\ end" in
+  let history=[{Client.role=Client.User;text=escaped};{Client.role=Client.Assistant;text=escaped}] in
+  let tool : Client.dynamic_tool =
+    { name="fragment_fixture"; description=escaped
+    ; input_schema=`Assoc ["type",`String "object";"description",`String escaped]
+    ; loading=Runtime_official_client_tool.On_demand
+    ; result_bound=Runtime_official_client_tool.Unbounded
+    ; call_effect=(fun _ -> Agent_core.Tool.Effect_possible)
+    ; call=(fun ~call_id:_ _ -> fail "fragment fixture does not request a tool call") } in
   List.iter (fun thread_mode ->
     let observed=ref [] in
     let capture=Filename.temp_file "codex-context-submission-" ".jsonl" in
     Fun.protect ~finally:(fun () -> Sys.remove capture) @@ fun () ->
     let start=match thread_mode with Client.Start -> true | Client.Resume _ -> false in
     with_fixture ~capture_path:capture ~inject_items:start (if start then injected else success) (fun path ->
-      let result=run_fixture ~thread_mode ~history ~prompt:"current input 한글 \"quoted\""
+      let result=run_fixture ~thread_mode ~history ~prompt:escaped ~developer_instructions:escaped
+          ~dynamic_tools:[tool]
           ~on_context_submission:(fun event -> observed:=event :: !observed) path in
       check bool "context-bearing transport completes" true (Result.is_ok result);
       let observed=List.rev !observed in
@@ -1451,6 +1524,7 @@ let test_content_free_context_submission () =
         check int "byte count is exact written JSON excluding newline" (String.length line) event.ipc_json_bytes;
         check string "SHA binds exact serialized bytes" (hash line) event.ipc_json_sha256;
         let json=Client.context_submission_to_json event in
+        check_context_fragments line json;
         check bool "observation has no payload" true (Yojson.Safe.Util.member "params" json=`Null);
         check bool "remote retained history remains unknown" true
           (Yojson.Safe.Util.member "remote_history" json=`String "unknown")) observed))
@@ -1540,6 +1614,33 @@ let test_subscription_probe_stops_before_thread () =
       | Ok probe ->
         check (option string) "plan" (Some "pro") (match probe.subscription with Runtime_codex_app_server.Chatgpt { plan_type; _ } -> Some plan_type | _ -> None);
         check (option string) "user agent" (Some "fixture/0.147.0") probe.user_agent)
+;;
+
+(* Images and the output schema are unselected carrier bytes. Attribution reads
+   their ranges from the written payload and hashes the gaps, so the turn text
+   between and around them keeps exact offsets and the residual closes the line. *)
+let test_context_fragments_read_large_unselected_values () =
+  let module Client = Runtime_codex_app_server in
+  let capture=Filename.temp_file "codex-context-fragments-" ".jsonl" in
+  Fun.protect ~finally:(fun () -> Sys.remove capture) @@ fun () ->
+  let escaped = "한글 \"quoted\"\nnext line \\ end ] } ," in
+  let image={Client.media_type="image/png";base64_data=String.make (64 * 1024) 'A'} in
+  let output_schema=`Assoc ["type",`String "object";"description",`String escaped;
+    "properties",`Assoc ["answer",`Assoc ["type",`String "string"]]] in
+  let observed=ref [] in
+  with_fixture ~capture_path:capture
+    [init_result;account_chatgpt;thread_result;turn_result;item_completed;turn_completed] (fun path ->
+    (match run_fixture ~admission_timeout_s:10. ~images:[image;image] ~output_schema ~prompt:escaped
+       ~on_context_submission:(fun event -> observed:=event :: !observed) path with
+     | Ok _ -> () | Error error -> fail (Client.error_to_string error));
+    let turn=List.find (fun (event:Client.context_submission) -> event.method_=Client.Turn_start) !observed
+      |> Client.context_submission_to_json in
+    let line=In_channel.with_open_bin capture In_channel.input_all |> String.split_on_char '\n'
+      |> List.find (fun line -> line<>"" &&
+        Yojson.Safe.Util.(member "id" (Yojson.Safe.from_string line)=member "request_id" turn)) in
+    check bool "written turn carries both images and the schema" true
+      (String.length line > 2 * 64 * 1024);
+    check_context_fragments line turn)
 ;;
 
 let effort_page ~request_id ~model ~efforts ?cursor () =
@@ -5701,11 +5802,12 @@ let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
                   (to_assoc detail |> List.map fst |> List.sort String.compare);
                 let event=member "submission" detail in
                 check (list string) "submission never retains content, tool schemas or credentials"
-                  ["framing";"ipc_json_bytes";"ipc_json_sha256";"method";"phase";"remote_history";
+                  ["fragments";"framing";"ipc_json_bytes";"ipc_json_sha256";"logical_memory_partition";"method";"phase";"remote_history";
                    "request_id";"schema";"server_acceptance";"thread_id"]
                   (to_assoc event |> List.map fst |> List.sort String.compare);
                 let request_id=member "request_id" event in
                 let raw=List.find (fun raw -> member "id" (Yojson.Safe.from_string raw)=request_id) written in
+                check_context_fragments raw event;
                 check bool "durable method matches actual request" true
                   (member "method" event=member "method" (Yojson.Safe.from_string raw));
                 check int "durable submission names exact stdin bytes" (String.length raw)
@@ -8016,6 +8118,8 @@ let () =
     ; ( "subscription boundary"
       , [ test_case "ChatGPT turn completes" `Quick test_chatgpt_subscription_turn
         ; test_case "content-free actual context submission" `Quick test_content_free_context_submission
+        ; test_case "context fragments read large unselected values from the written payload" `Quick
+            test_context_fragments_read_large_unselected_values
         ; test_case "actual Keeper context submission sink failure" `Quick test_keeper_codex_context_submission_sink_failure
         ; test_case "prompt transmission boundary" `Quick
             (fun () -> test_prompt_transmission_boundary ())

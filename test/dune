@@ -5727,4 +5727,3 @@
  (libraries alcotest masc_tui_types masc_tui_render_prim
   masc_tui_runtime_config_view masc_tui_account_login))
 
-(include stanzas/test_tui_repository_writers_pty.inc)

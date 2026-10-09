@@ -160,25 +160,50 @@ let test_prepared_rollback_keeps_acknowledged_frontier () = with_store (fun keep
     (outcome = Worker.Settled {has_more=false});
   check bool "second input acknowledged once" true (pending keepers_dir = None))
 
-let test_missing_receipt_requires_recovery_before_judging () = with_store (fun keepers_dir ->
+let test_missing_receipt_requires_recovery_before_judging () = with_store (fun root ->
+  let keepers_dir = Filename.concat root "current" in
+  let backup = Filename.concat root "backup" in
+  let output = Filename.concat root "prepared" in
+  Fs_compat.mkdir_p keepers_dir;
+  Fs_compat.mkdir_p backup;
   ignore (append keepers_dir "one" "first rule");
-  ignore (commit keepers_dir (Queue.range_id (batch keepers_dir)) [fact "first rule"]);
+  let initial = commit keepers_dir (Queue.range_id (batch keepers_dir)) [fact "first rule"] in
   acknowledge keepers_dir;
+  Array.iter (fun name -> Fs_compat.save_file (Filename.concat backup name)
+    (Fs_compat.load_file (Filename.concat keepers_dir name))) (Sys.readdir keepers_dir);
+  let snapshot_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let expected_hash = Digestif.SHA256.(digest_string (Fs_compat.load_file snapshot_path) |> to_hex) in
   ignore (append keepers_dir "two" "second rule");
   let receipt_path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
-  let saved = Fs_compat.load_file receipt_path in
   Sys.remove receipt_path;
+  Sys.remove snapshot_path;
   let before = Queue.range_id (batch keepers_dir) in
   (match Worker.For_testing.run_with ~keepers_dir ~keeper_name:"keeper"
     ~judge:(fun _ -> fail "missing receipt dispatched a model") with
    | Worker.Unavailable _ -> () | _ -> fail "missing receipt was not explicit recovery failure");
-  check bool "failed recovery neither resets nor consumes input" true
+  let args = [|"python3"; Masc_test_deps.source_path "scripts/maintenance/recover-memory-admission.py";
+    "--format"; "masc.memory-admission-recovery.range-v1";
+    "--current-copy"; keepers_dir; "--backup"; backup; "--output"; output;
+    "--keeper"; "keeper"; "--expected-snapshot-sha256"; expected_hash|] in
+  let pid = Unix.create_process "python3" args Unix.stdin Unix.stdout Unix.stderr in
+  (match snd (Unix.waitpid [] pid) with Unix.WEXITED 0 -> ()
+   | _ -> fail "offline recovery tool refused valid native backup");
+  check bool "source pending input stays unchanged" true
     (before = Queue.range_id (batch keepers_dir));
-  Fs_compat.save_file receipt_path saved;
-  let outcome = Worker.For_testing.run_with ~keepers_dir ~keeper_name:"keeper"
-    ~judge:(fun part -> ignore (commit keepers_dir (Queue.range_id part) [fact "second rule"]);
+  let repaired = Filename.concat output "repaired" in
+  let restored = Current.read_for_keepers_dir ~keepers_dir:repaired ~keeper_id:"keeper" |> require in
+  check bool "real decoder reads exact restored snapshot" true
+    (restored = Some initial.snapshot);
+  check string "pending bytes are preserved by operator tool"
+    (Fs_compat.load_file (Queue.path ~keepers_dir ~keeper_id:"keeper"))
+    (Fs_compat.load_file (Queue.path ~keepers_dir:repaired ~keeper_id:"keeper"));
+  let outcome = Worker.For_testing.run_with ~keepers_dir:repaired ~keeper_name:"keeper"
+    ~judge:(fun part ->
+      check (list string) "only accepted pending tail is judged" ["two"]
+        (List.map (fun (row : Queue.candidate) -> row.request_id) (Queue.candidates part));
+      ignore (commit repaired (Queue.range_id part) [fact "second rule"]);
       Worker.Committed) in
-  check bool "restored receipt resumes without replaying acknowledged input" true
+  check bool "tool restoration resumes without replaying acknowledged input" true
     (outcome = Worker.Settled {has_more=false}))
 
 let () = run "durable explicit admission queue"

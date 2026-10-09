@@ -36,7 +36,9 @@ val acknowledge_committed :
     A positive acknowledged frontier without its committed receipt returns a
     recovery-required error before judging pending input. Restore the matching
     snapshot and receipt; this function never resets a generation or frontier
-    to guess which inputs were consumed. *)
+    to guess which inputs were consumed. The offline operator procedure is
+    [docs/guides/MEMORY-ADMISSION-RECOVERY.md]; its range-v1 tool refuses
+    successor receipt schemas. *)
 
 val path : keepers_dir:string -> keeper_id:string -> string
 val list_keeper_ids : keepers_dir:string -> (string list, string) result

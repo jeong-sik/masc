@@ -32,37 +32,8 @@ let progress_keeper_tool_names_for_contract =
   Contract_helpers.progress_keeper_tool_names_for_contract
 ;;
 
-let response_policy_for_turn ~turn_kind ~input_speaker
-    ~(world_observation : Keeper_world_observation.world_observation option)
-    ~hitl_resolution =
-  let open Keeper_tooling.Response in
-  match turn_kind, input_speaker, hitl_resolution, world_observation with
-  | Turn_record.Autonomous,
-    Keeper_input_speaker.Host_prompt (Autonomous_wake { answered_asks = [] }),
-    None, Some observation ->
-    (* Only a schedule without an authorized result delivery may end quietly.
-       Its substantive instructions still reach the model; this permits a
-       model-chosen no-update result, not skipping scheduled work. Every other
-       delivered event, unacknowledged message, and Gate/Ask answer keeps the
-       response contract. A pending Ask is not an input here and never disables
-       other work or changes its wake schedule. *)
-    let reminder_only (event : Keeper_world_observation.pending_board_event) =
-      match event.event_kind with
-      | Schedule_due wake -> Option.is_none wake.result_delivery
-      | Board_post_created | Board_post_updated | Board_comment_added _
-      | Board_reaction_changed _ | Board_vote_cast _ | Fusion_completed
-      | Delegate_completed _ | Ask_answered_row _ | Composition_completed
-      | External_attention _ | Completion_authority_rejected _
-      | Task_outcome _ | Task_cancelled _ -> false in
-    if observation.pending_messages = []
-       && List.for_all reminder_only observation.pending_board_events
-    then Allow_quiet_final
-    else Require_progress
-  | (Direct | Autonomous), _, _, _ -> Require_progress
-;;
 
 let normalize_response_text_for_finalization
-      ?(response_policy = Keeper_tooling.Response.Require_progress)
       ~runtime_id
       ~initial_messages:_
       ~(run_result : Runtime_agent.run_result)
@@ -84,14 +55,6 @@ let normalize_response_text_for_finalization
   else
     match Keeper_tooling.Response.normalize_response_text ~text ~tool_names () with
   | Ok response_text -> Ok response_text
-  | Error _ when
-      (match run_result.stop_reason with
-       | Runtime_agent.Completed ->
-         Keeper_tooling.Response.is_quiet_final
-           ~policy:response_policy run_result.response
-       | InputRequired _ | Yielded_to_operation_queued _
-       | Yielded_to_durable_stimulus _ | Yielded_after_repeated_tool_call _
-       | Yielded_after_repeated_assistant_text _ -> false) -> Ok ""
   | Error _ ->
     (* Finalization exposes the typed accept-rejected response itself. Tool
        execution history stays in the AGENT_CORE checkpoint; it is not projected into
@@ -381,7 +344,7 @@ let repeated_tool_call_input ~threshold tool_calls =
    scope contributes only its latched observation failure; it is not what
    makes the boundary exist (#34083). *)
 let official_client_tool_boundary
-      ~repetition_execution ~tool_calls () =
+      ~repetition_execution ~tool_calls ~input_tool_calls () =
   match Option.bind repetition_execution Keeper_repetition_scope.Execution.failure with
   | Some error ->
     Error (Agent_core.Error.Internal (Keeper_repetition_snapshot.error_to_string error))
@@ -393,7 +356,7 @@ let official_client_tool_boundary
         | Some _ as repeated -> repeated
         | None ->
           repeated_tool_call_input
-            ~threshold:repeated_tool_call_input_yield_threshold tool_calls
+            ~threshold:repeated_tool_call_input_yield_threshold input_tool_calls
       in
       Ok (Option.map (fun (tool_name, repeated_count) ->
         Keeper_official_client_host.Repeated_tool_call { tool_name; repeated_count }) repeated)
@@ -678,6 +641,7 @@ let native_tool_boundary
       ~repetition_execution
       ~terminal_effect_state
       ~tool_calls
+      ~input_tool_calls
       ~assistant_turn_texts
       ~yield_requested
   =
@@ -715,7 +679,7 @@ let native_tool_boundary
                  repeated_tool_call_input
                    ~threshold:
                      repeated_tool_call_input_yield_threshold
-                   tool_calls
+                   input_tool_calls
                with
                | Some (tool_name, repeated_count) ->
                  Log.Keeper.warn
@@ -799,7 +763,6 @@ module For_testing = struct
     Contract_helpers.progress_keeper_tool_names_for_contract
   let normalize_response_text_for_finalization =
     normalize_response_text_for_finalization
-  let response_policy_for_turn = response_policy_for_turn
   let keeper_raw_trace_sink = keeper_raw_trace_sink
   let raw_trace_for_dispatch = raw_trace_for_dispatch
   let prune_raw_traces_after_turn_record = prune_raw_traces_after_turn_record
@@ -924,8 +887,6 @@ let run_turn
   (* RFC-0468 §3.2: the speaker of the User message this turn creates. Stamped
      where that message is born and never changed afterwards. *)
   let input_metadata = Keeper_input_speaker.metadata input_speaker in
-  let response_policy = response_policy_for_turn
-      ~turn_kind ~input_speaker ~world_observation ~hitl_resolution in
   let deferred_runtime_lane_ref = ref None in
   let record_produced_checkpoint ~runtime_id ~attempt checkpoint =
     Option.iter (fun callback -> callback ~runtime_id ~attempt checkpoint) on_produced_checkpoint in
@@ -1622,23 +1583,56 @@ let run_turn
           how the error path below knows the turn ran on an official client. *)
        let last_dispatched_checkpoint_owner = ref None in
        let turn_result =
-         (* A repetition yield is the judgment on the calls it saw. On the
-            lane seeded from the checkpoint history, record where those
-            calls end so the next seed starts past them; the checkpoint
-            AGENT_CORE takes after this probe carries the record. A
-            scope-bound lane has no history count and records nothing. *)
+         (* A repetition yield advances the two source positions independently.
+            The current Agent Core checkpoint owns the history coordinate;
+            committed ledger appends own the other. Direct scopes record their
+            own observations and do not move this autonomous boundary. *)
          let record_repetition_judged () =
            match s.acc.history_pairs_at_setup with
-           | Some history_pairs_at_setup ->
-             Keeper_repetition_judged.record shared_context
-               (Keeper_repetition_judged.pairs_judged_by ~history_pairs_at_setup
-                  s.acc.tool_calls)
            | None -> ()
+           | Some history_pairs_at_setup ->
+             (match Keeper_repetition_judged.read shared_context with
+              | Error error -> Log.Keeper.warn ~keeper_name:meta.name "%s"
+                  (Keeper_repetition_judged.error_to_string error)
+              | Ok previous ->
+                let history_pairs = match !agent_ref, !last_dispatched_checkpoint_owner with
+                  | Some agent, _ ->
+                    (* The Agent Core checkpoint is the persisted history, and
+                       an Agent Core attempt that ran tools before failing over
+                       to an official client still left its pairs there. The
+                       run accumulator also holds the official-client attempts,
+                       so only the checkpoint's own pairs move the boundary. *)
+                    let checkpoint = Agent_core.Agent.checkpoint agent in
+                    Keeper_run_tools_setup.initial_tool_calls
+                      ~history_memo:(Keeper_tool_progress_identity.history_memo
+                        ~base_path:config.base_path ~keeper_name:meta.name)
+                      ~history_messages:checkpoint.messages
+                    |> List.length
+                  | None, Some Runtime_execution.Masc_agent_core ->
+                    Log.Keeper.warn ~keeper_name:meta.name
+                      "repetition history judgment retained: dispatched agent is unavailable";
+                    history_pairs_at_setup
+                  | None, (Some Runtime_execution.Official_client | None) ->
+                    history_pairs_at_setup in
+                let frontier =
+                  match Keeper_run_tools_setup.flush_ledger () with
+                  | Error detail -> Error detail
+                  | Ok () -> Keeper_tool_call_log.current_frontier ~keeper_name:meta.name
+                      |> Result.map_error (function Keeper_tool_call_log.Index_unavailable detail -> detail) in
+                let ledger_frontier = match frontier with
+                  | Ok frontier -> frontier
+                  | Error detail ->
+                    Log.Keeper.warn ~keeper_name:meta.name
+                      "repetition ledger judgment was not advanced: %s" detail;
+                    previous.ledger_frontier in
+                Keeper_repetition_judged.record shared_context
+                  { previous with history_pairs = max previous.history_pairs history_pairs; ledger_frontier })
          in
          let on_official_client_tool_boundary () =
            match
              official_client_tool_boundary ~repetition_execution
                ~tool_calls:(Keeper_run_tools_hook_accumulator.tool_calls_for_repetition s.acc)
+               ~input_tool_calls:(Keeper_run_tools_hook_accumulator.tool_calls_for_input_repetition s.acc)
                ()
            with
            | Ok (Some (Keeper_official_client_host.Repeated_tool_call _)) as stop ->
@@ -1660,6 +1654,7 @@ let run_turn
                        ~repetition_execution
                        ~terminal_effect_state:(s.terminal_effect_state ())
                        ~tool_calls:(Keeper_run_tools_hook_accumulator.tool_calls_for_repetition s.acc)
+                       ~input_tool_calls:(Keeper_run_tools_hook_accumulator.tool_calls_for_input_repetition s.acc)
                        ~assistant_turn_texts:s.acc.assistant_turn_texts
                        ~yield_requested
                    with
@@ -1828,7 +1823,7 @@ let run_turn
                       ?on_deferred_runtime_consumed
                       ~temperature
                       ~accept:
-                        (Keeper_tooling.Response.accepts_response ~policy:response_policy)
+                        Keeper_tooling.Response.response_has_text_or_tool_progress
                       ?on_event
                       ~on_yield
                       ~on_resume
@@ -2181,7 +2176,6 @@ let run_turn
                      world_observation;
                      (match
                         normalize_response_text_for_finalization
-                          ~response_policy
                           ~runtime_id:selected_runtime_id
                           ~initial_messages:history_messages
                           ~run_result:result

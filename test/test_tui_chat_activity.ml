@@ -601,7 +601,7 @@ let test_open_request_between_segments_has_no_banner () =
   let entry = inflight ~request_id:"checkpointed" ~at:1. () in
   List.iter (fun delta -> Tui.turn_log_add ~now:2. entry.log ~seq:None delta)
     [ Live.Run_started
-    ; Live.Reply_details { reply = ""; turn_outcome = Continuation_checkpoint; turn_ref = "trace#1" }
+    ; Live.Reply_details { terminal_stream_scope = None; reply = ""; turn_outcome = Continuation_checkpoint; turn_ref = "trace#1" }
     ; Live.Run_finished ];
   state.msg_inflight <- [entry];
   check bool "the request waits for its next segment" true

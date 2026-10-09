@@ -1,0 +1,3 @@
+### Documentation
+
+- Align attached Sangokushi skills with observed numeric input, compatible checkpoints, MSX data-disk export and DOS ending asset requirements.

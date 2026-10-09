@@ -55,6 +55,12 @@ whether a digit needs `enter` or what an empty `enter` will do.
 
 ## From the title to the first turn
 
+In the isolated native-worker run, the initial numeric menus required the
+number **then `enter`**, including new game, scenario, player count, ruler,
+level, other wars and mode. The table names choices, not complete key sequences.
+Read the resulting prompt before the next choice; battle-menu digits below
+behave differently.
+
 | Prompt | Observed choice |
 | --- | --- |
 | 마우스를 사용할 경우에는 클릭해 주세요 / 키보드… 키를 눌러 주세요 | any key (`space`) |
@@ -147,8 +153,8 @@ in `dos-play` is separate and also keeps a turn that is half done.
 
 Save, at a ruler's command prompt (`<군주>님, <번호>.<도시>에 명령을(0-9)?`):
 
-1. `9` (기능), then `1` (중단). The 끝/저장/로드 menu opens.
-2. `2` (저장). The slot list shows `1.`–`10.`; a filled slot names the month,
+1. `9`, `enter` (기능), then `1`, `enter` (중단). The 끝/저장/로드 menu opens.
+2. `2`, `enter` (저장). The slot list shows `1.`–`10.`; a filled slot names the month,
    ruler and city, for example `3.189년 2월:조조 :진류`.
 3. Type the slot number, then `enter`.
 4. Open the list again (steps 1–2) and read the slot's line. That is how you
@@ -160,7 +166,7 @@ press it. Read the list before you write: use an empty slot or one that names
 your own ruler, never the other player's. When all ten are full, agree with
 the other Keeper on which slots each of you overwrites.
 
-Load, at the title menu `어느 것을 하겠습니까(1-3)?`: `2` (데이터 로드), the
+Load, at the title menu `어느 것을 하겠습니까(1-3)?`: `2`, `enter` (데이터 로드), then the
 slot number, `enter`. The screen goes black while the game reads; call
 `masc_dos_step` until it settles, then `space`. After a server restart with
 no `autosave` to restore, this is the way back: boot, pass the copy
@@ -168,16 +174,19 @@ protection, then `2`.
 
 ## The ending
 
-In the loader experiment on 2026-09-29, `MAIN.EXE` was replaced with a test
-program that exited with code 0. KOEI.COM then ran `END.EXE`. This forced the
-loader's ending path; it did not establish that one ruler held every city or
-that an actual campaign had reached unification.
+Keep the ending assets with your game: `END.EXE`, `ENDSTIL.DAT`, `KOEI.DAT`
+and `FMDRV.COM`. A missing `ENDSTIL.DAT` produced `END.EXE : file access failure.`
+in an earlier installation. Confirm the inventory instead of assuming every
+copy of the game includes the ending data.
 
-`END.EXE` tried to read `ENDSTIL.DAT` first. The observed `samguk3` program
-folder had no such file, and the INT 21h trace recorded a file-not-found error
-(2). The screen showed `END.EXE : file access failure.` and the machine
-exited. The experiment established that ending-display failure; the intended
-ending and a campaign's unification remain unverified by this evidence.
+A separate native-worker probe on source
+`1632107405d574726b90f0ac918ceeaf98ddbbcb` used ordinary DOS `EXEC` calls to load
+the sound driver and unchanged ending executable. It displayed character
+scenes, Korean narrative and the copyright screen, then exited with code 0
+after Space on that screen. This verifies the renderer and assets, not a
+winning campaign or the normal `MAIN.EXE` transition into the ending. Continue
+normal play through `KOEI.COM`; directly loading `END.EXE` does not reproduce
+the parent process and resident-driver setup.
 
 In the observed game where every ruler's clan died out, the KOEI copyright
 screen appeared and a key exited.

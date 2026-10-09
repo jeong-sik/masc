@@ -58,6 +58,7 @@ type tool_activity = Masc_tui_keeper_chat_activity_projection.tool_activity =
   ; outcome : tool_outcome
   ; native_completion : Runtime_native_tools.completion option
   ; native_progress : native_progress option
+  ; native_retry : Runtime_native_tools.retry_observation option
   ; duration : string option
   }
 
@@ -145,6 +146,7 @@ type live_tool_call =
   ; ended : bool
   ; native_completion : Runtime_native_tools.completion option
   ; native_progress : native_progress option
+  ; native_retry : Runtime_native_tools.retry_observation option
   ; result_ready : bool
   ; failed : bool
   ; duration : string option
@@ -580,7 +582,7 @@ let activity_of_live_call (t : t) (call : live_tool_call) =
         | Waiting | Working -> false
         | Stream_ended | Stream_failed _ -> true)
   in
-  make_tool_activity ?native_progress:call.native_progress ?native_completion:call.native_completion ?execution_id:call.execution_id
+  make_tool_activity ?native_retry:call.native_retry ?native_progress:call.native_progress ?native_completion:call.native_completion ?execution_id:call.execution_id
     ~call_id:call.call_id ~tool_name:call.tool_name
     ~args:call.args
     ~outcome:
@@ -1309,6 +1311,7 @@ let start_tool ~now t ~authority ~occurrence ~tool_name =
            ; ended = false
            ; native_completion = None
            ; native_progress = None
+           ; native_retry = None
            ; result_ready = false
            ; failed = false
            ; duration = None
@@ -1562,25 +1565,25 @@ let apply_delta ~now t (delta : Live.delta) =
           let previous_bytes = Option.bind call.native_progress (fun previous -> previous.output_bytes) in
           let previous_message = Option.bind call.native_progress (fun previous -> previous.message) in
           let previous_elapsed = Option.bind call.native_progress (fun previous -> previous.provider_elapsed_seconds) in
-          let updated = match progress with
-            | Runtime_native_tools.Output_observed {byte_count} ->
-                let previous = Option.value previous_bytes ~default:0 in
-                if byte_count <= 0 || byte_count > max_int - previous then None
-                else Some (Some (previous + byte_count), previous_message, previous_elapsed)
-            (* A blank message says the tool is active and nothing more. It
-               keeps the time current but does not replace a message that
-               said something. *)
-            | Runtime_native_tools.Message_reported {message} when String.trim message = "" ->
-                Some (previous_bytes, previous_message, previous_elapsed)
-            | Runtime_native_tools.Message_reported {message} -> Some (previous_bytes, Some message, previous_elapsed)
-            | Runtime_native_tools.Heartbeat_reported {elapsed_seconds} ->
-                if elapsed_seconds < 0 then None
-                else Some (previous_bytes, previous_message, Some elapsed_seconds) in
-          match updated with
-          | None -> note_unreadable t "native progress measurement is invalid"; call
-          | Some (output_bytes, message, provider_elapsed_seconds) ->
-              {call with native_progress=Some {output_bytes; message; provider_elapsed_seconds; updated_at=now;
-                elapsed=(if now >= call.started_at then Some (now -. call.started_at) else None)}}) with
+          let store output_bytes message provider_elapsed_seconds =
+            {call with native_progress=Some {output_bytes;message;provider_elapsed_seconds;updated_at=now;
+              elapsed=(if now >= call.started_at then Some (now -. call.started_at) else None)}} in
+          let invalid () = note_unreadable t "native progress measurement is invalid"; call in
+          match progress with
+          | Runtime_native_tools.Retry_observed retry -> {call with native_retry=Some retry}
+          | Runtime_native_tools.Output_observed {byte_count} ->
+              let previous = Option.value previous_bytes ~default:0 in
+              if byte_count <= 0 || byte_count > max_int - previous then invalid ()
+              else store (Some (previous + byte_count)) previous_message previous_elapsed
+          (* A blank message says the tool is active and nothing more. It
+             keeps the time current but does not replace a message that
+             said something. *)
+          | Runtime_native_tools.Message_reported {message} when String.trim message = "" ->
+              store previous_bytes previous_message previous_elapsed
+          | Runtime_native_tools.Message_reported {message} -> store previous_bytes (Some message) previous_elapsed
+          | Runtime_native_tools.Heartbeat_reported {elapsed_seconds} ->
+              if elapsed_seconds < 0 then invalid ()
+              else store previous_bytes previous_message (Some elapsed_seconds)) with
        | Call_updated | Call_ambiguous -> ()
        | Call_missing | Call_conflicting -> note_unreadable t "native progress has no matching provider occurrence")
   | Live.Native_tool_ended { occurrence; completion } ->

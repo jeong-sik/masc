@@ -1224,6 +1224,12 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     Masc_tui_message_input.insert state.msg_input completed;
     state.msg_command_menu <- Masc_tui_command.Menu_dismissed completed;
     true in
+  let move_recall move =
+    let was_editing = Option.is_some state.msg_recall_replaces in
+    move state;
+    if was_editing && Option.is_none state.msg_recall_replaces
+    then drain_queue ()
+  in
   match key with
   (* Esc cancels the innermost thing, and a running capture is inside
      everything else here: the operator is mid-utterance, not mid-turn. ^Y
@@ -1319,13 +1325,10 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
   | "down" when slash_navigable () -> apply_autocomplete Masc_tui_command.Next
   | "up" when slash_navigable () -> apply_autocomplete Masc_tui_command.Prev
   | "up" ->
-    recall_older state;
+    move_recall recall_older;
     true
   | "down" ->
-    let was_editing = Option.is_some state.msg_recall_replaces in
-    recall_newer state;
-    if was_editing && Option.is_none state.msg_recall_replaces
-    then drain_queue ();
+    move_recall recall_newer;
     true
   | "wheel-up" ->
     (* A notch is worth more than a row. The wheel used to arrive as the arrow
@@ -1468,7 +1471,8 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
          forget_queued_history state request;
          report_action state "info"
            (Printf.sprintf "Cancelled queued message to %s"
-              (Keeper_chat.terminal_safe_text request.Keeper_chat.keeper_name)));
+              (Keeper_chat.terminal_safe_text request.Keeper_chat.keeper_name));
+         drain_queue ());
       true
     end else if c = Some 16 then begin
       (* Ctrl-P: pull the newest waiting line back into the composer. That is
@@ -6541,9 +6545,44 @@ let launch_keeper_older_page state ~mailbox ~keeper_name ~before =
            (generation, keeper_name, before, Error "Eio switch is unavailable"))
   end
 
+let launch_keeper_native_tasks_load ?(mode=Masc_tui_native_tasks.Poll) state ~mailbox ~keeper_name =
+  let eligible = server_authority_ready state
+     && state.workspace_identity = Workspace_identity_match
+     && keeper_available_for_new_message state keeper_name in
+  if eligible && mode=Masc_tui_native_tasks.Audit
+     && List.mem keeper_name state.msg_native_tasks_inflight
+     && not (List.mem keeper_name state.msg_native_tasks_audit_pending) then
+    state.msg_native_tasks_audit_pending <- keeper_name :: state.msg_native_tasks_audit_pending;
+  if eligible && not (List.mem keeper_name state.msg_native_tasks_inflight) then begin
+    let mode = if List.mem keeper_name state.msg_native_tasks_audit_pending
+      then Masc_tui_native_tasks.Audit else mode in
+    state.msg_native_tasks_audit_pending <-
+      List.filter ((<>) keeper_name) state.msg_native_tasks_audit_pending;
+    let enqueue_async = workspace_enqueue state in
+    let authority = state.workspace_authority in
+    let identity = state.server_identity in
+    let host = server_peer_host and port = state.port in
+    let previous = Option.value ~default:Masc_tui_native_tasks.empty
+        (List.assoc_opt keeper_name state.msg_native_tasks) in
+    state.msg_native_tasks_inflight <- keeper_name :: state.msg_native_tasks_inflight;
+    Masc_tui_async_read.launch_with
+      ~boundary_error:(fun detail -> Masc_tui_native_tasks.Transport detail)
+      ~deliver:(fun result -> enqueue_async mailbox (Keeper_native_tasks_loaded (keeper_name,result)))
+      (fun () -> Masc_tui_native_tasks.read ~mode ~keeper_name ~previous
+        ~fetch:(fun path ->
+          let ( let* ) = Result.bind in
+          let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
+          let result = Masc_tui_http.http_get ~host ~port ~path in
+          let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
+          result))
+  end
+
 let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) state ~mailbox
     ~keeper_name =
   if server_authority_ready state then begin
+  launch_keeper_native_tasks_load
+    ~mode:(if force then Masc_tui_native_tasks.Audit else Masc_tui_native_tasks.Poll)
+    state ~mailbox ~keeper_name;
   let identity = state.server_identity in
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
@@ -7715,17 +7754,11 @@ let drop_inflight state request =
    cannot produce a second turn. The client used to hold its own five-phase
    fence to prevent exactly that, and the price was one un-acknowledged POST
    per workspace — talking to one keeper stopped every other. *)
-(* Staged images belong to the message being composed, so the send that consumes
-   the draft consumes them too. Returning and clearing in one step keeps a failed
-   send from silently re-attaching the same image to the next one. *)
-(* Staged references follow the same rule as staged images: the send that
-   consumes the draft consumes them. Returned together so every request
-   builder carries both or neither. *)
-let take_pending_attachments state =
-  let staged = state.msg_attachments in
-  let references = state.msg_references in
-  clear_staged_attachments state;
-  (staged, references)
+(* Request construction only borrows the composer payload. Transfer ownership
+   after queue admission succeeds: a full queue, duplicate steer, or refused
+   edit must leave text, attachment bytes, references, and staging time intact. *)
+let pending_attachments state =
+  (state.msg_attachments, state.msg_references)
 ;;
 
 let launch_keeper_request ~(promoted : Chat_queue.item) ?(admission_intent = Keeper_chat.Queue_only) state ~mailbox request =
@@ -7958,7 +7991,7 @@ let start_keeper_steer ?keeper_name state ~base_path ~mailbox text =
             place_spilled_paste state ~base_path ~keeper_name text
           in
           let request =
-            let attachments, references = take_pending_attachments state in
+            let attachments, references = pending_attachments state in
             Keeper_chat.create_request ~attachments ~references
               ~keeper_name ~message:text ()
           in
@@ -8025,7 +8058,7 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                target ->
           let original = editing.Chat_queue.request in
           let request =
-            let attachments, references = take_pending_attachments state in
+            let attachments, references = pending_attachments state in
             { original with
               message = text
             ; attachments
@@ -8038,6 +8071,7 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
            with
            | Error detail -> report_action state "error" detail
            | Ok queue ->
+               clear_staged_attachments state;
                state.msg_queued <- queue;
                state.msg_recall_replaces <- None;
                let safe_text =
@@ -8087,7 +8121,7 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
             "Queued edit belongs to another Keeper; switch back or press Ctrl-U"
       | None ->
         let request =
-          let attachments, references = take_pending_attachments state in
+          let attachments, references = pending_attachments state in
           Keeper_chat.create_request ~attachments ~references ~keeper_name:target
             ~message:text () in
         (* Enter admits the line in queue order and interrupts nothing: the
@@ -8107,6 +8141,7 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
         (match queue_keeper_message state request with
          | Error detail -> report_action state "error" detail
          | Ok _ ->
+           clear_staged_attachments state;
            let queued = match Chat_queue.find state.msg_queued ~request_id:request.request_id with
              | Some _ as item -> item
              | None -> Chat_queue.join_target state.msg_queued ~keeper_name:target in
@@ -8153,13 +8188,7 @@ let drain_queued_message state ~base_path ~mailbox =
         && not (List.exists (fun (name, _, _) -> String.equal name keeper_name)
           state.keeper_interactive_waiting)
         && not (composing_for_keeper state keeper_name)
-        &&
-        match state.msg_recall_replaces with
-        | Some editing ->
-            not
-              (String.equal editing.Chat_queue.request.Keeper_chat.keeper_name
-                 keeper_name)
-        | None -> true)
+        && not (recalling_for_keeper state keeper_name))
     with
     | None -> ()
     | Some (item, rest) ->
@@ -8203,7 +8232,17 @@ let drain_queued_message state ~base_path ~mailbox =
           next ())
   in
   if state.workspace_identity = Workspace_identity_match
-     && Option.is_none state.keepers_error then next ()
+     && Option.is_none state.keepers_error then begin
+    (* Releasing a recalled edit may be the only event after its predecessor
+       was accepted. Revisit explicit Enter admission as well as unmarked
+       input; the admission path still owns control and transport checks. *)
+    let waiting_keepers = Chat_queue.waiting state.msg_queued
+      |> List.map (fun (item : Chat_queue.item) -> item.request.keeper_name)
+      |> List.sort_uniq String.compare in
+    List.iter (fun keeper_name ->
+      launch_waiting_keeper_input state ~mailbox ~keeper_name) waiting_keepers;
+    next ()
+  end
 ;;
 
 (* /task in the composer or the chat pane: create the task first, then hand
@@ -10029,7 +10068,8 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
                     | Some editing when editing.Chat_queue.request.request_id = id ->
                       state.msg_recall_replaces <- None; clear_staged_attachments state
                     | Some _ | None -> ());
-                   notice ~kind:Notice_reply ("Cancelled unsent message " ^ id)
+                   notice ~kind:Notice_reply ("Cancelled unsent message " ^ id);
+                   drain_queued_message state ~base_path ~mailbox
                | None -> notice ~kind:Notice_failure "Local queue changed; inspect /queue again")
             | Edit (id, message) ->
               let request = {item.request with Keeper_chat.message = message} in
@@ -11238,6 +11278,9 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.item_account <- None;
   state.item_account_error <- None;
   state.msg_journal_inflight <- [];
+  state.msg_native_tasks <- [];
+  state.msg_native_tasks_inflight <- [];
+  state.msg_native_tasks_audit_pending <- [];
   state.msg_journal_wanted <- [];
   state.msg_journal_unavailable <- [];
   state.msg_journal_reads_refused <- false;
@@ -11942,6 +11985,11 @@ let current_surface_needs state =
    them again from this same list. *)
 let launch_tick_side_reads state ~mailbox ~(needs : Masc_tui_types.surface_needs) =
   if server_authority_ready state then begin
+  (* Independent task observations continue while reading older chat rows.
+     Root-turn settlement and history scroll do not own their lifecycle. *)
+  (if needs.Masc_tui_types.needs_keeper_chat then
+     Option.iter (fun keeper_name -> launch_keeper_native_tasks_load state ~mailbox ~keeper_name)
+       state.msg_target_keeper_name);
   (* The chat pane's history comes down its own generation-guarded path, not
      in the surface bundle, so the tick asks for it here. Without this the
      pane read once on open and a message that arrived after that waited for
@@ -17361,6 +17409,16 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         apply_keeper_chat_operation_state state ~journal_id:operation_id log
           (Result.map Option.some operation_state))
         (settled_log_for_request state ~keeper_name operation_id)
+  | Keeper_native_tasks_loaded (keeper_name,result) ->
+      state.msg_native_tasks_inflight <- List.filter ((<>) keeper_name) state.msg_native_tasks_inflight;
+      let previous = Option.value ~default:Masc_tui_native_tasks.empty
+          (List.assoc_opt keeper_name state.msg_native_tasks) in
+      let tasks = match result with
+        | Ok tasks -> tasks
+        | Error error -> Masc_tui_native_tasks.failed previous error in
+      state.msg_native_tasks <- (keeper_name,tasks) :: List.remove_assoc keeper_name state.msg_native_tasks;
+      if List.mem keeper_name state.msg_native_tasks_audit_pending then
+        launch_keeper_native_tasks_load ~mode:Masc_tui_native_tasks.Audit state ~mailbox ~keeper_name
   | Keeper_chat_journal_loaded { keeper_name; source; started_at; journal; operation_state; terminal_replay } -> (
       let journal_id = Keeper_chat_log.source_key source in
       (* Not generation-guarded: a journal is the turn's record whichever
@@ -24729,16 +24787,19 @@ and is loaded on demand through keeper_skill.
              || scroll_recovery_key
            then
              if switch_key then begin
-               if Option.is_some state.msg_recall_replaces then begin
+               let released_recall = Option.is_some state.msg_recall_replaces in
+               if released_recall then begin
                  state.msg_recall_replaces <- None;
-                 clear_staged_attachments state;
-                 drain_queued_message state ~base_path
-                   ~mailbox:async_messages
+                 clear_staged_attachments state
                end;
                switch_to_next_keeper_message state ~mailbox:async_messages
                  ~drain_queue:(fun () ->
                    drain_queued_message state ~base_path
-                     ~mailbox:async_messages)
+                     ~mailbox:async_messages);
+               (* Select the explicit target before released input can create
+                  an inflight owner and pin the previous conversation. *)
+               if released_recall then
+                 drain_queued_message state ~base_path ~mailbox:async_messages
              end else
                let (_handled : bool) =
                  handle_message_key state
@@ -25966,7 +26027,7 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_message ->
                 (match state.msg_target_keeper_name with
                  | Some keeper_name ->
-                     launch_keeper_history_load ~load_file_changes:false state
+                     launch_keeper_history_load ~force:true ~load_file_changes:false state
                        ~mailbox:async_messages ~keeper_name;
                      launch_keeper_chat_tool_details_load ~force:true state
                        ~mailbox:async_messages ~keeper_name

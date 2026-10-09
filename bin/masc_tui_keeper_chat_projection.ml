@@ -822,8 +822,15 @@ let validate_current_custom_name name =
   else Error (Unknown_custom_event name)
 
 let decode_tool_occurrence ~surface fields =
-  let* stream_scope = required_nonnegative_int ~surface "toolStreamScope" fields in
-  let* block_index = required_nonnegative_int ~surface "toolCallBlockIndex" fields in
+  let index field = match List.assoc_opt field fields with
+    | Some json ->
+        (match Runtime_json_integer.of_json json with
+         | Ok value when value >= 0 -> Ok value
+         | Ok _ | Error _ ->
+             Error (Printf.sprintf "%s.%s must be a nonnegative safe integer" surface field))
+    | None -> Error (Printf.sprintf "%s.%s is required" surface field) in
+  let* stream_scope = index "toolStreamScope" in
+  let* block_index = index "toolCallBlockIndex" in
   let* provider_message_id = optional_string ~surface "providerMessageId" fields in
   let* tool_call_id = optional_string ~surface "toolCallId" fields in
   Ok ({ stream_scope; block_index; provider_message_id }, tool_call_id)

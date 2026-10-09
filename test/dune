@@ -2924,6 +2924,7 @@
 (include stanzas/test_keeper_tool_definition_source.inc)
 (include stanzas/test_runtime_codex_app_server.inc)
 (include stanzas/test_runtime_claude_code.inc)
+(include stanzas/test_runtime_claude_input_attribution.inc)
 (include stanzas/test_runtime_antigravity.inc)
 (include stanzas/test_runtime_antigravity_home.inc)
 (include stanzas/test_runtime_antigravity_context.inc)
@@ -3613,7 +3614,7 @@
 (test
  (name test_tui_server_identity_refresh)
  (modules test_tui_server_identity_refresh)
- (libraries alcotest masc masc.browser_lane masc_tui_lane_subscriptions masc_tui_lane_addons masc_tui_types masc_workspace masc_tui_fetched masc_tui_keeper_control masc_tui_board_detail masc_tui_message_input masc_tui_lane_installer masc_tui_voice_wizard_session masc_tui_account_login masc.voice_setup masc.voice_wizard unix))
+ (libraries masc_tui_native_tasks alcotest masc masc.browser_lane masc_tui_lane_subscriptions masc_tui_lane_addons masc_tui_types masc_workspace masc_tui_fetched masc_tui_keeper_control masc_tui_board_detail masc_tui_message_input masc_tui_lane_installer masc_tui_voice_wizard_session masc_tui_account_login masc.voice_setup masc.voice_wizard unix))
 
 (test
  (name test_tool_transport_prefix)
@@ -5744,16 +5745,17 @@
 (test
  (name test_tui_native_tool_outcomes)
  (modules test_tui_native_tool_outcomes)
- (libraries alcotest yojson masc masc.runtime masc.agent_core masc.server masc.ag_ui native_tool_outcome_fixture
+ (libraries alcotest yojson masc masc.runtime masc.agent_core masc.server masc.ag_ui masc.sse_wire native_tool_outcome_fixture
   masc_tui_keeper_chat_live masc_tui_keeper_chat_log masc_tui_keeper_chat_transcript))
+
 
 
 (test
  (name test_tui_native_tool_progress)
  (modules test_tui_native_tool_progress)
- (libraries masc.fs_compat astring alcotest yojson unix eio_main masc masc.runtime masc.agent_core masc.server masc.ag_ui
+ (libraries masc.fs_compat astring alcotest yojson unix eio_main masc masc.runtime masc.agent_core masc.server masc.ag_ui masc.sse_wire
   masc.masc_types native_tool_outcome_fixture masc_tui_keeper_chat_live masc_tui_keeper_chat_log
-  masc_tui_keeper_chat_transcript))
+  masc_tui_keeper_chat_transcript masc_tui_keeper_chat_projection))
 
 (test
  (name test_redaction_source_spans)
@@ -5821,4 +5823,17 @@
  (libraries alcotest astring yojson masc masc.masc_types masc.agent_core masc.runtime masc.server masc.ag_ui
   native_tool_outcome_fixture masc_tui_keeper_chat_projection
   masc_tui_keeper_chat_live masc_tui_keeper_chat_log masc_tui_keeper_chat_transcript))
+
+(test
+ (name test_tui_native_tasks)
+ (modules test_tui_native_tasks)
+ (libraries alcotest yojson uri masc masc.runtime masc_tui_native_tasks
+  masc_tui_types masc_tui_render_chat masc_tui_message_layout masc_tui_image_preview))
+
+(test
+ (name test_runtime_native_tasks)
+ (modules test_runtime_native_tasks)
+ (libraries alcotest yojson masc.runtime))
+
+(include stanzas/test_native_task_http.inc)
 

@@ -372,7 +372,7 @@ let test_journal_skips_non_finite_floats () =
                shared serializer must still produce valid JSON and retain
                the other reported counters. *)
             let _, projected = Projection.project ~timestamp:1_762_300_001.0
-                ~redact_text:Fun.id ~redact_json:Fun.id Projection.initial event in
+                ~redact_text:Fun.id Projection.initial event in
             let json = match projected with
               | Some event -> Ag_ui.event_to_json event
               | None -> Alcotest.fail "usage delta did not project" in
@@ -390,7 +390,7 @@ let test_journal_skips_non_finite_floats () =
                ; stop_reason = None
                ; usage = Some { delta_usage_partial with cost_usd = Some charge } } in
            let _, projected = Projection.project ~timestamp:1_762_300_001.0
-               ~redact_text:Fun.id ~redact_json:Fun.id Projection.initial event in
+               ~redact_text:Fun.id Projection.initial event in
            let json = match projected with
              | Some event -> Ag_ui.event_to_json event
              | None -> Alcotest.fail "finite usage delta did not project" in
@@ -979,7 +979,7 @@ let projected_sse_bytes timed_events =
            Projection.project
              ~timestamp:ts
              ~redact_text:Fun.id
-             ~redact_json:Fun.id
+
              projection
              event
          in
@@ -1102,7 +1102,7 @@ let test_continued_short_reply_uses_monotonic_journal_ids () =
     Alcotest.(check int) "short final answer survives old cursor" (List.length final_events) (List.length replay);
     let frames entries =
       let _, frames = List.fold_left (fun (state, frames) (entry : L.journaled_event) ->
-        let state, event = Projection.project ~timestamp:entry.ts ~redact_text:Fun.id ~redact_json:Fun.id state entry.event in
+        let state, event = Projection.project ~timestamp:entry.ts ~redact_text:Fun.id state entry.event in
         state, (match event with None -> frames | Some event -> Ag_ui.event_to_sse ~id:entry.seq event :: frames))
         (Projection.initial, []) entries in
       String.concat "" (List.rev frames) in
@@ -1160,7 +1160,7 @@ let test_native_activity_survives_bridge_journal_and_projection () =
          | _ -> false) entries);
     let _, projected = List.fold_left (fun (projection, result) (entry : L.journaled_event) ->
       let projection, event = Projection.project ~timestamp:entry.ts ~redact_text:Fun.id
-          ~redact_json:Fun.id projection entry.event in
+           projection entry.event in
       let result = match entry.event, event with
         | (E.Native_tool_start _ | E.Native_tool_end _), Some event -> Ag_ui.event_to_json event :: result
         | (E.Native_tool_start _ | E.Native_tool_end _), None -> Alcotest.fail "native activity vanished on wire"
@@ -1241,7 +1241,7 @@ let test_autonomous_turn_journal_is_live_and_replayable () =
         (Sys.file_exists (L.journal_path ~base_dir ~keeper_name:"k" ~operation_id:(Ids.Turn_ref.to_string turn_ref)));
       let page = {L.events=entries;has_more=false;next_offset=123} in
       let body = Server_dashboard_http_keeper_chat_operations.turn_events_page ~turn_ref
-          ~since_seq:L.Whole_turn ~redact_json:Fun.id page in
+          ~since_seq:L.Whole_turn ~redact_text:Fun.id page in
       let open Yojson.Safe.Util in
       Alcotest.(check string) "typed autonomous wire schema" "masc.keeper_turn_events.v1"
         (body |> member "schema" |> to_string);
@@ -1263,6 +1263,33 @@ let test_text_scope_codec () =
     [["stream_scope", `Int (-1)]; ["stream_scope", `String "2"];
      ["stream_scope", `Float 2.]; ["stream_scope", `Null];
      ["stream_scope", `Int 2; "stream_scope", `Int 3]]
+;;
+
+let test_native_journal_rejects_ambiguous_identity () =
+  let occurrence : E.tool_stream_occurrence =
+    {stream_scope=0; block_index=1; provider_message_id=None} in
+  let native : E.native_tool = {occurrence; tool_call_id=Some "call"; tool_call_name=Some "Read"} in
+  let fields = match L.keeper_chat_event_to_json (E.Native_tool_start native) with
+    | `Assoc fields -> fields | _ -> Alcotest.fail "expected event object" in
+  let reject label json = Alcotest.(check bool) label true
+      (Result.is_error (L.keeper_chat_event_of_json json)) in
+  reject "duplicate discriminant is ambiguous"
+    (`Assoc (("type",`String "native_tool_end")::fields));
+  List.iter (fun value -> reject "present invalid identity is not absent"
+    (`Assoc (("tool_call_id",value)::List.remove_assoc "tool_call_id" fields)))
+    [`Null; `Int 1; `String " "];
+  reject "unknown native fields cannot hide a conflicting completion"
+    (`Assoc (("completion",Runtime_native_tools.completion_to_json Runtime_native_tools.end_observed)::fields));
+  reject "negative occurrence has no matching live identity"
+    (`Assoc (("occurrence",`Assoc ["stream_scope",`Int (-1); "block_index",`Int 1])
+      ::List.remove_assoc "occurrence" fields));
+  let valid = L.journaled_event_to_json {seq=0; ts=1.; event=E.Native_tool_start native} in
+  let envelope = match valid with `Assoc fields -> fields | _ -> Alcotest.fail "expected envelope" in
+  List.iter (fun invalid -> Alcotest.(check bool) "journal envelope is unambiguous" true
+    (Result.is_error (L.journaled_event_of_json invalid)))
+    [`Assoc (("seq",`Int 2)::envelope);
+     `Assoc (("seq",`Int (-1))::List.remove_assoc "seq" envelope);
+     `Assoc (("ts",`Float infinity)::List.remove_assoc "ts" envelope)]
 ;;
 
 let () =
@@ -1355,7 +1382,9 @@ let () =
             test_reader_gone_releases_every_parked_publisher
         ] )
     ; ( "integration"
-      , [ Alcotest.test_case "native tool observations survive journal and wire" `Quick
+      , [ Alcotest.test_case "native journal rejects ambiguous identity" `Quick
+            test_native_journal_rejects_ambiguous_identity
+        ; Alcotest.test_case "native tool observations survive journal and wire" `Quick
             test_native_activity_survives_bridge_journal_and_projection
         ; Alcotest.test_case "native content cannot enter assistant channels" `Quick
             test_native_content_cannot_become_assistant_text

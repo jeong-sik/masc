@@ -83,25 +83,134 @@ claim to reconstruct missing scope provenance in those older journals.
 | Runtime | Turn and text events | Thinking | Tools and progress |
 | --- | --- | --- | --- |
 | Codex app-server | `Turn_started` becomes `MessageStart`; agent-message deltas and completed-item suffixes become `TextDelta`; terminal completion becomes `MessageDelta` and `MessageStop`. Item IDs separate messages within a turn. | `item/reasoning/summaryTextDelta` and `item/reasoning/textDelta` become `ThinkingDelta`. The item ID and summary/content index identify each part; completed reasoning contributes only missing suffixes. | Dynamic tools carry call IDs and argument snapshots. Native `item/started` and `item/completed` produce observed start/end with identity and name. Known completed-item status and nullable command exit code remain native metadata. Command output deltas carry byte observations; MCP progress carries a redacted message, attached only to its active native item. File-change output notifications are outside this contract. |
-| Claude Code | Partial SDK text and complete assistant envelopes contribute text once. `message.id` separates responses; the first response opens the normalized turn and the result closes it. | Partial `thinking_delta` and complete thinking blocks become `ThinkingDelta`; complete blocks contribute only missing suffixes. Signatures and redacted payloads are not displayed as text. | MASC MCP callbacks provide dynamic-tool identity/arguments. Assistant `tool_use` and user tool results provide native observed start/end with the tool result’s optional `is_error` flag. Root `tool_progress` with `heartbeat: true` and matching session, parent scope, tool name and active native invocation becomes `Heartbeat_reported {elapsed_seconds}`. Unsupported or unbound progress does not create a chat row. |
+| Claude Code | SDK main-session partial text (provider contract) and complete root assistant envelopes contribute text once. `message.id` separates responses; the first response opens the normalized turn and the result closes it. | SDK main-session partial `thinking_delta` (provider contract) and complete root thinking blocks become `ThinkingDelta`; complete blocks contribute only missing suffixes. Signatures and redacted payloads are not displayed as text. | MASC MCP callbacks provide dynamic-tool identity/arguments. Assistant `tool_use` and user tool results provide native observed start/end with the tool result’s optional `is_error` flag. Root `tool_progress` with `heartbeat: true` and matching session, parent scope, tool name and active native invocation becomes `Heartbeat_reported {elapsed_seconds}`. Unsupported or unbound progress does not create a chat row. |
 | Antigravity | Init opens the normalized turn; step text and terminal response reconciliation provide text; result closes the turn. Step index identifies the source. | No typed thinking event exists in this adapter. `Internal` is not established as a reasoning payload. Thinking support is unverified. | MCP callbacks provide dynamic-tool events; tool steps provide native observed start/end using conversation ID and step index. `Done` reports native completion; `Step_error` reports a native error. Neither is a MASC execution receipt. |
 | GLM Coding | The configured `openai-compatible-http` route uses AGENT_CORE SSE parsing with message start/stop, text deltas, and indexed blocks. | Provider reasoning fields accepted by the configured streaming dialect produce `ThinkingDelta` or `ReasoningDetailsDelta`. Absence of a provider reasoning payload produces no invented thinking. | Indexed tool calls carry their IDs, names, and argument deltas. MASC execution receipts determine tool execution results. Official-client native-tool notifications do not apply to this HTTP route. |
 
-Claude assistant metadata has a separate root authority. Its required
-`parent_tool_use_id` is null for a root response and a nonblank call ID for a
-child response; missing, malformed, or duplicate fields are rejected. Only a root
-model response can update the root model and latest-request input usage. Child
-tool envelopes retain their native start/end and effect observations without
-replacing those fields, including when a failure or host stop follows the child.
-The result frame still supplies the turn's aggregate spend.
+Claude assistant body and metadata have separate root and child authority. The
+required `parent_tool_use_id` is null for a root response and a nonblank call ID
+for a child response; missing, malformed, or duplicate fields are rejected for
+complete assistant envelopes. In that complete-envelope path, only root model
+responses update root model/latest-request input usage and contribute root
+text/thinking or root reply fallback. Partial events rely on the SDK's
+main-session-only stream contract: the existing partial parser validates the
+session and event shape without independently checking parent scope. The result
+frame still supplies the turn's aggregate spend. Child tool envelopes retain
+native start/end and effect observations without replacing root metadata.
 
-This distinction matters with the current invocation: Claude Code 2.1.292 forwards
-child tool-use/result envelopes with their own model and usage even when
-`forwardSubagentText` is false. MASC leaves that option disabled, so this change
-does not enable child text or thinking. See the
-[SDK forwarding contract](https://code.claude.com/docs/en/agent-sdk/python#claudeagentoptions).
-Parent-qualified native occurrence identity and child progress remain separate
-work; this metadata isolation does not establish either capability.
+Accepted complete child model text and thinking produce `Child_content_observed`
+snapshots with the literal parent call ID, message ID/absence, reported child
+model, original envelope UUID and observed content-array ordinal, channel and
+supplied body. Redacted payloads are omitted without compressing later ordinals.
+A single-content-block SDK envelope can have ordinal zero even when it shares a
+message ID with another envelope; this ordinal is not an API streaming index.
+Complete child-envelope body never becomes root `TextDelta`/`ThinkingDelta`, root reply fallback or
+root response-emitted evidence. API diagnostic child body publishes no body
+observation. [SDK output streaming](https://code.claude.com/docs/en/agent-sdk/streaming-output)
+provides main-session partial deltas and attributes subagent output through
+complete messages; this separation does not invent child token streaming.
+
+Each child snapshot optionally carries a private `native_agent_parent_witness`.
+The existing invocation native-call registry is its only authority: under
+`Native_full`, an unambiguous root built-in `Agent` call retains its original
+actual invocation ticket, call ID, envelope UUID and observed array ordinal
+while open and after native return. The registry captures the immutable ticket
+already minted before the runtime's user write and emitted by Prepared input
+observation; it does not generate another invocation identifier or duplicate the
+session field. No task registration is required. Unknown, ambiguous, nested,
+non-Agent, MCP-wrapper or unadmitted parents yield `None`, preserving body
+provenance. Neither task/run nor consumed-input attribution is inferred. The
+witness certifies the original native call and its actual receiving invocation;
+a downstream input join must compare its whole ticket (receiver generation,
+session and client UUID) with the actual Prepared ticket before owner-cache
+access. The existing native task owner carries the same invocation ticket.
+`bind_task` and `bind_parent` use one owner-joining function: foreign
+session/invocation is refused before current owner-cache access, and failed-first
+evidence is keyed by exact invocation and SDK occurrence. Parent-before-task and
+task-before-parent use the same original evidence decision, including after
+native return and across a later input in another envelope. A contradiction in
+the same assistant envelope refuses subsequent bindings of both kinds without
+mutating earlier delivered values. An exact provider-ID replay in another
+resumed invocation cannot reuse the old input proof.
+
+`bind_parent` returns private `bound_parent {ticket; evidence; parent}` for the
+original Agent call and its exact input evidence. It does not assert that child
+body consumed that input group, authenticate body/parent pairing, create Task/run
+ownership, or authorize public child transport/persistence. A downstream child
+join must separately compare the child's literal parent ID with the witness call
+ID. A captured parent witness alone does not certify separately supplied body
+provenance or pairing.
+The host wrapper connects the private complete-child producer through a
+separate optional `on_child_content_observation` callback. Runtime
+`complete_child_content` binds the accepted complete envelope's literal parent,
+body, original block identity, reported model, current registry witness (if any)
+and actual immutable invocation ticket in one private value. It also carries
+one host-minted `observation_id` per accepted complete Child model envelope,
+shared by its blocks. An earlier unknown and later known reception of the same
+provider envelope therefore remain distinct observed facts. The provider UUID,
+original ordinal and channel are retained exactly; observation ID is not a
+commit/delivery receipt, clock or inference from body content. It cannot be
+constructed by recombining a captured witness with arbitrary public text. The
+binder's private `bound_child {parent_input; content}` factory receives that
+value alone, checks actual invocation and literal parent, and reuses the same
+parent/task owner evidence cache. It certifies observed child provenance and
+the original Agent call's input evidence; it does not infer that child consumed
+that group, mint Task/run ownership, or authorize publication/persistence.
+
+Task or Child subscription creates one binder per actual CLI invocation. Both
+subscriptions share it. Child-only subscription does not require a root event
+observer. `Child_rejected` retains actual private content and a typed reason,
+including an unknown parent, without input/Task/root authority. Replaying an old
+unknown observation into another invocation is refused by its retained ticket.
+Complete API-error diagnostic child envelopes do not publish child body. The
+callback emits no root Agent Core text/thinking/lifecycle, usage, native
+completion, receipt or content index. It does not flush root redaction state;
+a separate child sink must redact before display or persistence.
+
+`child_observation` is a private closed bound/rejected decision made only by
+`observe_child` from the actual private content and existing shared binder.
+A caller cannot replace its typed refusal reason around a captured body.
+`Keeper_child_content.prepare` alone creates an abstract publication from that
+sealed decision and the caller's captured Keeper/source/attempt. It retains only
+validated redacted body/model view, never raw body or private input member list.
+The view preserves actual invocation, accepted observation and original child
+block identities, optional provider message ID (including an actual empty
+string), original parent occurrence if observed, and historical original-parent
+input evidence kind/command stamp or exact typed refusal. These are not claims
+that Child consumed an input group or owns a Task/run.
+
+The shared closed codec decodes an unprivileged public view, not a private
+publication or runtime/input witness. Read serialization can redact the body
+and model leaves again while preserving every protocol identity and evidence
+fact. This is per complete field/body snapshot; it provides no streaming-secret
+guarantee across Child blocks or repeated snapshots. Authenticated
+read/wire transport and TUI integration remain pending. Existing live worker
+cutoff discards ordinary queued events after disconnect; the received Child sink
+commits already observed content independently of that cutoff, with its own
+atomic sequence/commit ownership.
+
+The witness is a fact at observation time. A later call-ID collision makes
+subsequent child observations unknown; earlier witness values remain historical
+snapshots and prove neither current authority nor cancellation. Later witnesses
+cannot retroactively certify earlier unknown snapshots. Separate child display
+and authenticated read/TUI integration remain pending. The actual Driver and
+Agent-run forward the sealed callback to independent interactive/autonomous
+Child stores, including received callbacks after root closure or client cutoff.
+See [received Child durability](child-content-journal.md) for scoped receipts,
+local health coverage and the remaining read/UI boundary. The Keeper
+adapter supplies the bound/rejected callback while excluding child body from
+root projection. Native task metadata
+journals do not receive child body or user input from this event. Public native
+task transport and SQLite journal shapes are unchanged. This new-capture proof
+does not reconstruct original invocation evidence for historical stored rows or
+validate past display behavior.
+
+The recorded Claude Code 2.1.292 observation established child tool-use/result
+envelopes with their own model and usage even when `forwardSubagentText` was
+false. That is historical producer evidence. The runtime command and initialize
+builders in this source do not enable that option; accepting typed complete
+child body or attaching a parent witness does not change the flag and does not
+claim current default CLI child-body exposure.
 
 ## Source boundaries
 

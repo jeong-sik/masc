@@ -252,6 +252,8 @@ type async_msg =
           , Masc_tui_keeper_chat_log.events_error )
           result
       }
+  | Keeper_native_tasks_loaded of
+      string * (Masc_tui_native_tasks.t, Masc_tui_native_tasks.error) result
   | Context_inspector_loaded of
       int * string * Masc_tui_context_inspector.reading
   | Keeper_chat_older_loaded of
@@ -664,6 +666,7 @@ let rec workspace_message_is_read = function
   | Board_post_refresh_done _
   | Keeper_chat_history_loaded _
   | Keeper_chat_copy_loaded _
+  | Keeper_native_tasks_loaded _
   | Keeper_chat_journal_loaded _
   | Context_inspector_loaded _
   | Keeper_chat_older_loaded _

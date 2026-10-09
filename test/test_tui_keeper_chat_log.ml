@@ -475,7 +475,7 @@ let wire_tagged_deltas events =
       (fun (projection, acc) (seq, event) ->
          let projection, projected =
            Projection.project ~timestamp:(1000.0 +. float_of_int seq)
-             ~redact_text:Fun.id ~redact_json:Fun.id projection event
+             ~redact_text:Fun.id projection event
          in
          ( projection
          , match projected with
@@ -508,7 +508,7 @@ let test_wire_timestamps_match_journal_and_survive_reconnect () =
       (fun (projection, body) (event : Journal.journaled_event) ->
         let projection, projected =
           Projection.project ~timestamp:event.ts ~redact_text:Fun.id
-            ~redact_json:Fun.id projection event.event
+             projection event.event
         in
         ( projection
         , body
@@ -796,7 +796,7 @@ let test_golden_journal_equals_wire_in_chunks () =
         (fun (projection, acc) (seq, event) ->
            let projection, projected =
              Projection.project ~timestamp:(1000.0 +. float_of_int seq)
-               ~redact_text:Fun.id ~redact_json:Fun.id projection event
+               ~redact_text:Fun.id projection event
            in
            ( projection
            , match projected with

@@ -1,6 +1,10 @@
 open Alcotest
 open Masc
 
+let require_ok to_string = function
+  | Ok value -> value
+  | Error error -> fail (to_string error)
+
 let carried_digest = function
   | Model_input_front.At_atom digest -> digest
   | Model_input_front.After_history _ | Model_input_front.Empty_history ->
@@ -154,6 +158,7 @@ let child_tool_result =
 
 type fixture_step =
   | Emit of string
+  | Emit_with_input of string
   | Emit_and_read of string
   | Close_transport
 
@@ -209,6 +214,11 @@ let fixture_script ?system_marker ?prompt_marker ?(remove_after_auth = false) ?(
   List.iter
     (function
       | Emit line -> output_string output ("emit " ^ shell_quote line ^ "\n")
+      | Emit_with_input line ->
+        let stamp = "import json,sys; frame=json.loads(sys.argv[1]); " ^
+          "frame['user_message_uuid']=json.loads(sys.argv[2])['uuid']; print(json.dumps(frame))" in
+        output_string output ("emit \"$(python3 -c " ^ shell_quote stamp ^ " " ^
+          shell_quote line ^ " \"$user_message\")\"\n")
       | Emit_and_read line ->
         output_string output ("emit " ^ shell_quote line ^ "\n");
         output_string output "IFS= read -r ignored_response\n"
@@ -357,9 +367,10 @@ let content_of_wire_message raw =
 let fixture_trace_with_no_completed_turn = "fixture-trace-no-completed-turn"
 
 let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = []) ?event_bus
-    ?event_capture ?on_native_tool_progress ?on_native_tool_completion ?on_event ?agent_core_checkpoint ?runtime_manifest_context
+    ?required_native_posture
+    ?event_capture ?on_child_content_observation ?on_native_task_observation ?on_native_tool_progress ?on_native_tool_completion ?on_event ?agent_core_checkpoint ?runtime_manifest_context
     ?runtime_manifest_append ?raw_trace ?on_official_client_native_action
-    ?on_official_client_usage_report
+    ?on_official_client_usage_report ?on_runtime_attempt
     ?(system_prompt = "pre-dispatch fixture system prompt")
     ?on_request_attribution ?official_client_continuation ?session_id ?accept ~base_path ~cli_path ~goal () =
   Masc_test_deps.declare_fixture_keeper
@@ -399,16 +410,17 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
                            ~system_prompt
                            ~tools
                            ~agent_core_tools:tools
+                           ?required_native_posture
                            ~initial_messages
                            ?context
                            ?event_bus
-                           ?on_native_tool_progress ?on_native_tool_completion ?on_event
+                           ?on_child_content_observation ?on_native_task_observation ?on_native_tool_progress ?on_native_tool_completion ?on_event
                            ?agent_core_checkpoint
                            ?runtime_manifest_context
                            ?runtime_manifest_append
                            ~raw_trace
                            ?on_official_client_native_action
-                           ?on_official_client_usage_report
+                           ?on_official_client_usage_report ?on_runtime_attempt
                            ?on_request_attribution
                            ?official_client_continuation
                            ?session_id
@@ -1670,7 +1682,7 @@ let test_native_completion_reaches_tui () =
     [None; Some false; Some true]
 ;;
 
-let test_root_heartbeat_reaches_scoped_journal_and_tui () =
+let test_root_heartbeat_reaches_scoped_journal_and_tui ?(retry = false) () =
   let module F = Native_tool_outcome_fixture in
   let module Stream = Keeper_autonomous_stream in
   let module J = Keeper_chat_event_log in
@@ -1731,29 +1743,56 @@ let test_root_heartbeat_reaches_scoped_journal_and_tui () =
       let kind = if thinking then "thinking" else "text" in
       let piece value = frame (`Assoc ["type",`String "content_block_delta";"index",`Int 0;
         "delta",`Assoc ["type",`String (kind ^ "_delta");kind,`String value]]) in
+      let tool_name = if retry then "Agent" else "Read" in
       let heartbeat uuid seconds = Yojson.Safe.to_string (`Assoc ["type",`String "tool_progress";
         "session_id",`String "__SESSION__";"uuid",`String uuid;"heartbeat",`Bool true;
         "parent_tool_use_id",`String "native-heartbeat";"tool_use_id",`String "opaque-observation";
-        "tool_name",`String "Read";"elapsed_time_seconds",`Int seconds]) in
+        "tool_name",`String tool_name;"elapsed_time_seconds",`Int seconds]) in
+      let retry_frames = if not retry then [] else
+        List.map (fun clear -> Emit (Yojson.Safe.to_string (`Assoc (
+          ["type",`String "tool_progress";"session_id",`String "__SESSION__";
+           "uuid",`String (if clear then "retry-clear" else "retry-note");
+           "parent_tool_use_id",`String "native-heartbeat";"tool_use_id",`String "opaque-agent-progress";
+           "tool_name",`String "Agent";"elapsed_time_seconds",`Int 0;"subagent_type",`String "Explore"]
+          @ if clear then [] else ["subagent_retry",`Assoc ["agent_id",`String "child-agent";
+            "attempt",`Int 1;"max_retries",`Int 3;"retry_delay_ms",`Int 1500;
+            "error_status",`Int 529;"error_category",`String "overloaded"]])))) [false;true] in
       let first = heartbeat "heartbeat-first" 30 in
-      with_fixture [
-        Emit (response_native_tool ~turn_id:"native" ~message_id:"native" ~call_id:"native-heartbeat" ~tool_name:"Read");
+      with_fixture ([
+        Emit (response_native_tool ~turn_id:"native" ~message_id:"native" ~call_id:"native-heartbeat" ~tool_name);
         Emit (frame (`Assoc ["type",`String "message_start";"message",`Assoc ["id",`String "body";"model",`String "claude-fixture"]]));
         Emit (frame (`Assoc ["type",`String "content_block_start";"index",`Int 0;"content_block",`Assoc ["type",`String kind;kind,`String ""]]));
-        Emit (piece prefix); Emit first; Emit first; Emit (heartbeat "heartbeat-second" 3);
+        Emit (piece prefix); Emit first; Emit first; Emit (heartbeat "heartbeat-second" 3)]
+        @ retry_frames @ [
         Emit (piece suffix);
         Emit (frame (`Assoc ["type",`String "content_block_stop";"index",`Int 0]));
         Emit (response_frame ~uuid:"body-complete" ~message_id:"body" (`Assoc ["type",`String kind;kind,`String (secret ^ "\n")]));
         Emit (native_tool_result ~call_id:"native-heartbeat" ~content:"observed");
         Emit (heartbeat "heartbeat-late" 100);
         Emit (response_text ~turn_id:"answer" ~message_id:"answer" "Answer");
-        Emit (result_text ~turn_id:"final" "Answer")]
-        (fun cli_path -> match run_keeper_turn ~base_path ~cli_path ~goal:"HEARTBEAT"
-          ~on_event ~on_native_tool_progress:on_progress ~on_native_tool_completion:on_completion () with
+        Emit (result_text ~turn_id:"final" "Answer")])
+        (fun cli_path ->
+         let run () = run_keeper_turn ~base_path ~cli_path ~goal:"HEARTBEAT"
+           ?required_native_posture:(if retry then Some Runtime_native_tools.Native_full else None)
+           ~on_event ~on_native_tool_progress:on_progress ~on_native_tool_completion:on_completion () in
+         let result =
+           if not retry then run ()
+           else
+             let modes = Keeper_tool_approval_mode.shared () in
+             (* [run_keeper_turn] dispatches this exact keeper. Native_full
+                requires explicit approval even for a controlled fake CLI. *)
+             let keeper_name = "claude-fixture" in
+             let previous = Keeper_tool_approval_mode.resolve modes ~keeper_name in
+             Fun.protect
+               ~finally:(fun () -> Keeper_tool_approval_mode.set modes ~keeper_name previous)
+               (fun () ->
+                 Keeper_tool_approval_mode.set modes ~keeper_name Keeper_tool_approval_mode.Yolo;
+                 run ()) in
+         match result with
          | Error error -> fail (Agent_core.Error.to_string error)
          | Ok _ ->
            List.iter raise (List.rev !failures);
-           check int "actual receiver UUID-deduplicates and rejects late heartbeat" 2 !reports;
+           check int "actual receiver preserves each owned observation once" (if retry then 4 else 2) !reports;
            let lines = read_journal () in
            let replay = Chat_log.create_for_source ~keeper_name ~source:(Chat_log.Autonomous_turn turn_ref) ~started_at:0. in
            ignore (Chat_log.add_journaled replay lines);
@@ -1768,7 +1807,10 @@ let test_root_heartbeat_reaches_scoped_journal_and_tui () =
                  check bool "native end stays an observation" true (call.outcome=T.Native_ended);
                  check (option string) "heartbeat cannot mint a receipt" None call.execution_id;
                  check (option int) "decreasing provider elapsed is retained" (Some 3)
-                   (Option.bind call.native_progress (fun p -> p.provider_elapsed_seconds))
+                   (Option.bind call.native_progress (fun p -> p.provider_elapsed_seconds));
+                 if retry then check bool "actual Agent clear reaches live and durable native observation" true
+                   (call.native_retry=Some (Runtime_native_tools.Retry_cleared
+                     {agent_id="child-agent";subagent_type="Explore"}))
              | _ -> fail "heartbeat did not retain one exact native occurrence") [live;durable;replay];
            List.iter (fun events ->
              let body = String.concat "" (fragments events) in
@@ -2980,6 +3022,7 @@ let test_spawn_failure_fences_claim () =
 
 let run_direct_attempt
       ?on_memory_capacity_refusal
+      ?required_native_posture ?on_native_task_observation ?on_child_content_observation ?on_event
       ?hooks
       ?(system_prompt = "pre-dispatch fixture system prompt")
       ~base_path
@@ -3018,6 +3061,7 @@ let run_direct_attempt
                   in
                   Keeper_claude_code_runtime.run
                     ?on_memory_capacity_refusal
+                    ?required_native_posture ?on_native_task_observation ?on_child_content_observation
                     ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
                     ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
                       ~runtime:(Runtime.get_runtime_by_id "claude.claude" |> Option.get))
@@ -3050,9 +3094,1686 @@ let run_direct_attempt
                     ~context:(Some (Agent_core.Context.create ()))
                     ~event_bus:None
                     ~raw_trace:None
-                    ~on_event:None
+                    ~on_event
                     ~config
                     ())))))
+;;
+
+let test_task_callback_keeps_closed_native_owner_and_model_content () =
+  let module F = Native_tool_outcome_fixture in
+  List.iter (fun thinking ->
+    let base_path = temp_workspace () in
+    Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+      let keeper_name = "claude-pre-dispatch" in
+      let secret = "task-private-cobalt-forest-value" in
+      let token_file = Keeper_secret_redaction.ssh_remote_token_file ~base_path ~keeper_name in
+      Fs_compat.mkdir_p (Filename.dirname token_file);
+      Out_channel.with_open_bin token_file (fun out -> output_string out secret);
+      let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
+      let projection = F.create ~redaction () in
+      let events = ref [] and snapshots = ref [] in
+      let on_event event = events := event :: !events; F.on_event projection event in
+      let on_native_task_observation (bound : Keeper_claude_task_binding.bound) =
+        let observation = bound.observation in
+        check string "input session is the native owner's actual session"
+          observation.owner.invocation.session_id bound.ticket.session_id;
+        (match bound.evidence with
+         | Keeper_claude_task_binding.Explicit_group group ->
+             check string "native envelope uses the actual host input UUID"
+               bound.ticket.client_uuid group.primary
+         | Response_inherited _ | Command_inherited _ -> fail "explicit parent evidence required");
+        snapshots := (observation, List.rev !events, F.events projection) :: !snapshots in
+      let frame event = Yojson.Safe.to_string (`Assoc ["type",`String "stream_event";
+        "session_id",`String "__SESSION__";"parent_tool_use_id",`Null;"event",event]) in
+      let kind = if thinking then "thinking" else "text" in
+      let piece value = frame (`Assoc ["type",`String "content_block_delta";"index",`Int 0;
+        "delta",`Assoc ["type",`String (kind ^ "_delta");kind,`String value]]) in
+      let task uuid subtype fields = Yojson.Safe.to_string (`Assoc
+        (["type",`String "system";"subtype",`String subtype;"session_id",`String "__SESSION__";
+          "uuid",`String uuid;"task_id",`String "child-task";"run_id",`String "run-alpha";
+          "tool_use_id",`String "parent-agent"] @ fields)) in
+      with_fixture [
+        Emit_with_input (response_native_tool ~turn_id:"parent" ~message_id:"parent" ~call_id:"parent-agent" ~tool_name:"Agent");
+        Emit (native_tool_result ~call_id:"parent-agent" ~content:"background launch");
+        Emit (frame (`Assoc ["type",`String "message_start";"message",`Assoc ["id",`String "body";"model",`String "claude-fixture"]]));
+        Emit (frame (`Assoc ["type",`String "content_block_start";"index",`Int 0;"content_block",`Assoc ["type",`String kind;kind,`String ""]]));
+        Emit (piece "task-private-");
+        Emit (task "task-register" "task_started" ["task_type",`String "local_agent";
+          "spawn_depth",`Int 1;"description",`String "not root speech";"is_backgrounded",`Bool true]);
+        Emit (task "task-progress" "task_progress" ["description",`String "not root thinking";
+          "usage",`Assoc ["total_tokens",`Int 9;"tool_uses",`Int 1;"duration_ms",`Int 30]]);
+        Emit (task "task-completed" "task_notification" ["status",`String "completed";
+          "summary",`String "not root answer";"output_file",`String "/private/child-output"]);
+        Emit (piece "cobalt-forest-value\n");
+        Emit (frame (`Assoc ["type",`String "content_block_stop";"index",`Int 0]));
+        Emit (response_frame ~uuid:"body-complete" ~message_id:"body" (`Assoc ["type",`String kind;kind,`String (secret ^ "\n")]));
+        Emit (response_text ~turn_id:"answer" ~message_id:"answer" "Answer");
+        Emit (result_text ~turn_id:"final" "Answer")]
+        (fun cli_path ->
+          let modes = Keeper_tool_approval_mode.shared () in
+          let previous = Keeper_tool_approval_mode.resolve modes ~keeper_name in
+          let attempt = Fun.protect
+            ~finally:(fun () -> Keeper_tool_approval_mode.set modes ~keeper_name previous)
+            (fun () ->
+              Keeper_tool_approval_mode.set modes ~keeper_name Keeper_tool_approval_mode.Yolo;
+              run_direct_attempt ~base_path ~cli_path ~goal:"TASK_METADATA" ~tools:[]
+                ~required_native_posture:Runtime_native_tools.Native_full
+                ~on_event ~on_native_task_observation ()) in
+          (match attempt.result with
+           | Error error -> fail (Agent_core.Error.to_string error)
+           | Ok _ -> ());
+          let observations = List.rev !snapshots in
+          check (list string) "typed task callback survives removal of native content index"
+            ["task-register";"task-progress";"task-completed"]
+            (List.map (fun ((o:Runtime_claude_code.native_task_observation),_,_) -> o.uuid) observations);
+          check (list bool) "only the actual task terminal seals its observation boundary"
+            [false;false;true] (List.map (fun ((o:Runtime_claude_code.native_task_observation),_,_) ->
+              o.boundary=Task_terminal_observed) observations);
+          List.iter (fun ((o:Runtime_claude_code.native_task_observation),sse,chat) ->
+            check string "task owns the exact original native call" "parent-agent" o.owner.call_id;
+            check int "root occurrence ordinal stays available" 0 o.owner.call_ordinal;
+            check int "one native block is already closed" 1
+              (List.length (List.filter (function Agent_core.Types.ContentBlockStop _ -> true | _ -> false) sse));
+            check bool "task completion cannot stop the model response" false
+              (List.exists (function Agent_core.Types.MessageStop -> true | _ -> false) sse);
+            check (list string) "task metadata never flushes the held secret prefix" []
+              (List.filter_map (function Keeper_chat_events.Text_delta {text; _}
+                | Agent_core_thinking_delta {delta=text;_} -> Some text | _ -> None) chat)) observations;
+          (match observations with
+           | [(_,first,_);(_,second,_);(_,third,_)] ->
+               check bool "no task edge emits an Agent Core content/lifecycle event" true
+                 (first=second && second=third)
+           | _ -> fail "three actual task edges required");
+          let body = F.events projection |> List.filter_map (function Keeper_chat_events.Text_delta {text; _}
+            | Agent_core_thinking_delta {delta=text;_} -> Some text | _ -> None) |> String.concat "" in
+          check bool "task observations never publish the configured secret" false
+            (Astring.String.is_infix ~affix:secret body);
+          check bool "safe authored content survives the task interleave" true
+            (Astring.String.is_infix ~affix:(Keeper_secret_redaction.redact_text redaction (secret ^ "\n")) body))))
+    [false;true]
+;;
+
+let task_binding_frame ~uuid ~task_id ~call_id subtype fields =
+  Yojson.Safe.to_string (`Assoc (["type",`String "system";"subtype",`String subtype;
+    "session_id",`String "__SESSION__";"uuid",`String uuid;
+    "task_id",`String task_id;"run_id",`String "run-alpha";
+    "tool_use_id",`String call_id] @ fields))
+;;
+
+let task_binding_start ~uuid ~task_id ~call_id =
+  task_binding_frame ~uuid ~task_id ~call_id "task_started"
+    ["task_type",`String "local_agent";"spawn_depth",`Int 1;
+     "description",`String "provider task metadata";"is_backgrounded",`Bool true]
+;;
+
+let task_binding_native_result ~uuid ~call_id =
+  Yojson.Safe.to_string (`Assoc ["type",`String "user";"parent_tool_use_id",`Null;
+    "session_id",`String "__SESSION__";"uuid",`String uuid;"message",`Assoc
+      ["role",`String "user";"content",`List [`Assoc ["type",`String "tool_result";
+        "tool_use_id",`String call_id;"content",`String "background launch"]]]])
+;;
+
+let with_fixture_yolo ~keeper_name f =
+  let modes = Keeper_tool_approval_mode.shared () in
+  let previous = Keeper_tool_approval_mode.resolve modes ~keeper_name in
+  Fun.protect ~finally:(fun () -> Keeper_tool_approval_mode.set modes ~keeper_name previous)
+    (fun () -> Keeper_tool_approval_mode.set modes ~keeper_name Keeper_tool_approval_mode.Yolo; f ())
+;;
+
+let child_content_frame ?(diagnostic=false) ~uuid ~parent ~text () =
+  Yojson.Safe.to_string (`Assoc ["type",`String "assistant";
+    "parent_tool_use_id",`String parent;"session_id",`String "__SESSION__";
+    "uuid",`String uuid;"is_api_error_message",`Bool diagnostic;
+    "message",`Assoc ["id",`String ("child-message-" ^ uuid);"role",`String "assistant";
+      "model",`String "child-model";"usage",`Assoc ["input_tokens",`Int 999];
+      "content",`List [`Assoc ["type",`String "redacted_thinking";"data",`String "NOT_BODY"];
+        `Assoc ["type",`String "text";"text",`String text];
+        `Assoc ["type",`String "thinking";"thinking",`String "CHILD_THINKING"]]]])
+;;
+
+let test_child_callback_binds_original_input_without_root_events () =
+  let module Binding = Keeper_claude_task_binding in
+  let module F = Native_tool_outcome_fixture in
+  List.iter (fun task_subscribed ->
+    let base_path=temp_workspace () in
+    Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+      let keeper_name="claude-pre-dispatch" in
+      let secret="child-private-cobalt-value" in
+      let token_file=Keeper_secret_redaction.ssh_remote_token_file ~base_path ~keeper_name in
+      Fs_compat.mkdir_p (Filename.dirname token_file);
+      Out_channel.with_open_bin token_file (fun out -> output_string out secret);
+      let redaction=Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
+      let projection=F.create ~redaction () in
+      let events=ref [] and children=ref [] and tasks=ref [] in
+      let on_event event=events:=event :: !events; F.on_event projection event in
+      let on_child_content_observation observation=
+        children:=(observation,List.rev !events,F.events projection) :: !children in
+      let on_native_task_observation=if task_subscribed then
+        Some (fun bound -> tasks:=bound :: !tasks) else None in
+      let frame event=Yojson.Safe.to_string (`Assoc ["type",`String "stream_event";
+        "session_id",`String "__SESSION__";"parent_tool_use_id",`Null;"event",event]) in
+      let delta text=frame (`Assoc ["type",`String "content_block_delta";"index",`Int 0;
+        "delta",`Assoc ["type",`String "text_delta";"text",`String text]]) in
+      let later=match Yojson.Safe.from_string (response_text ~turn_id:"later" ~message_id:"later" "Answer") with
+        | `Assoc fields -> Yojson.Safe.to_string (`Assoc
+            (["user_message_uuid",`String "later-input";
+              "user_message_uuids",`List [`String "later-input"]] @ fields))
+        | _ -> fail "later root frame object" in
+      let child uuid parent=Emit (child_content_frame ~uuid ~parent ~text:("CHILD_" ^ secret) ()) in
+      with_fixture ([child "unknown" "parent-agent";
+        Emit (child_content_frame ~diagnostic:true ~uuid:"diagnostic" ~parent:"parent-agent" ~text:"NOT_CONTENT" ());
+        Emit_with_input (response_native_tool ~turn_id:"parent" ~message_id:"parent" ~call_id:"parent-agent" ~tool_name:"Agent");
+        Emit (task_binding_native_result ~uuid:"parent-return" ~call_id:"parent-agent");
+        Emit (frame (`Assoc ["type",`String "message_start";"message",`Assoc
+          ["id",`String "body";"model",`String "claude-fixture"]]));
+        Emit (frame (`Assoc ["type",`String "content_block_start";"index",`Int 0;
+          "content_block",`Assoc ["type",`String "text";"text",`String ""]]));
+        Emit (delta "child-private-"); child "before-task" "parent-agent"] @
+        (if task_subscribed then [Emit (task_binding_start ~uuid:"task-start" ~task_id:"one" ~call_id:"parent-agent")] else []) @
+        [child "after-task" "parent-agent";Emit (delta "cobalt-value");
+         Emit (frame (`Assoc ["type",`String "content_block_stop";"index",`Int 0]));
+         Emit (response_text ~turn_id:"body-complete" ~message_id:"body" secret);
+         Emit later;child "after-later-input" "parent-agent";
+         Emit (result_text ~turn_id:"final" "Answer")]) (fun cli_path ->
+          let attempt=with_fixture_yolo ~keeper_name (fun () ->
+            run_direct_attempt ~base_path ~cli_path ~goal:"CHILD_INPUT" ~tools:[]
+              ~required_native_posture:Runtime_native_tools.Native_full
+              ?on_native_task_observation ~on_child_content_observation
+              ?on_event:(if task_subscribed then Some on_event else None) ()) in
+          (match attempt.result with Error error -> fail (Agent_core.Error.to_string error) | Ok _ -> ());
+          let observations=List.rev !children in
+          check int "unknown and three known complete envelopes retain text/thinking; diagnostic excluded" 8
+            (List.length observations);
+          let bound=List.filter_map (fun (observation,sse,chat) -> match observation with
+            | Binding.Child_rejected {content;reason} ->
+                check bool "only unknown parent is refused" true (reason=Binding.Unknown_parent);
+                check bool "unknown still carries its actual receiving invocation" true
+                  (String.length content.invocation.receiver_generation>0);
+                check (option bool) "unknown has no invented parent" None
+                  (Option.map (fun _ -> true) content.parent_occurrence);
+                None
+            | Child_bound bound -> Some (bound,sse,chat)) observations in
+          check int "known child body binds before task and after native return/later input" 6 (List.length bound);
+          List.iter (fun ((b:Binding.bound_child),_,_) ->
+            check string "reported child model remains separate" "child-model" b.content.model;
+            check string "literal parent agrees with admitted occurrence" b.parent_input.parent.call_id b.content.parent_tool_use_id;
+            check bool "private child and original input refer to same actual invocation" true
+              (b.content.invocation==b.parent_input.ticket);
+            (match b.parent_input.evidence with
+             | Binding.Explicit_group group -> check string "original input survives later different stamp"
+                 b.parent_input.ticket.client_uuid group.primary
+             | Response_inherited _ | Command_inherited _ -> fail "original explicit parent group required");
+            (match b.content.block,b.content.channel with
+             | Runtime_claude_code.Assistant_block {ordinal=1;_},Text_content ->
+                 check string "side callback preserves provider body; separate sink redacts it" ("CHILD_" ^ secret) b.content.text
+             | Assistant_block {ordinal=2;_},Thinking_content -> check string "provider child thinking remains scoped" "CHILD_THINKING" b.content.text
+             | _ -> fail "complete child wire ordinal/channel changed")) bound;
+          if task_subscribed then begin
+            check int "same binding also admits one actual task" 1 (List.length !tasks);
+            let task=List.hd !tasks in
+            let first,_,_=List.hd bound in
+            check bool "task and child share original private evidence" true
+              (task.evidence=first.parent_input.evidence && task.ticket==first.parent_input.ticket);
+            (match bound with
+             | (_,one_sse,one_chat)::(_,two_sse,two_chat)::(_,three_sse,three_chat)::(_,four_sse,four_chat)::_ ->
+                 check bool "child/task side callbacks emit no root lifecycle/content and do not flush held prefix" true
+                   (one_sse=two_sse && two_sse=three_sse && three_sse=four_sse
+                    && one_chat=two_chat && two_chat=three_chat && three_chat=four_chat)
+             | _ -> fail "four consecutive known snapshots required");
+            check bool "child reported model never starts a root response" true
+              (List.for_all (function Agent_core.Types.MessageStart {model;_} -> model="claude-fixture" | _ -> true) !events);
+            let body=F.events projection |> List.filter_map (function
+              | Keeper_chat_events.Text_delta {text;_} | Agent_core_thinking_delta {delta=text;_} -> Some text
+              | _ -> None) |> String.concat "" in
+            check bool "child text/thinking never enters root transcript" false
+              (Astring.String.is_infix ~affix:"CHILD_" body);
+            check bool "configured secret remains redacted on independent root path" false
+              (Astring.String.is_infix ~affix:secret body);
+            check bool "root authored text survives independent redaction" true
+              (Astring.String.is_infix ~affix:(Keeper_secret_redaction.redact_text redaction secret) body)
+          end else check int "child-only subscription does not require root event observer" 0 (List.length !events))))
+    [false;true]
+;;
+
+let test_child_and_task_callbacks_share_failed_original_evidence () =
+  let module Binding = Keeper_claude_task_binding in
+  List.iter (fun task_first ->
+    let base_path=temp_workspace () in
+    Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+      let children=ref [] and tasks=ref [] in
+      let child uuid parent=Emit (child_content_frame ~uuid ~parent ~text:"SCOPED_CHILD" ()) in
+      let old_task=Emit (task_binding_start ~uuid:"old-task" ~task_id:"old" ~call_id:"old-call") in
+      let old_child=child "old-child" "old-call" in
+      let order=if task_first then [old_task;old_child] else [old_child;old_task] in
+      with_fixture ([Emit (native_tool_call_block ~turn_id:"unattributed-parent" ~call_id:"old-call" ~tool_name:"Agent")] @ order @
+        [Emit (task_binding_native_result ~uuid:"old-return" ~call_id:"old-call");
+         Emit_with_input (response_text ~turn_id:"input-stamp" ~message_id:"stamp" "Stamp");
+         child "old-after-input" "old-call";
+         Emit (task_binding_frame ~uuid:"old-progress" ~task_id:"old" ~call_id:"old-call" "task_progress"
+           ["description",`String "metadata";"usage",`Assoc ["total_tokens",`Int 1;"tool_uses",`Int 1;"duration_ms",`Int 1]]);
+         Emit (native_tool_call_block ~turn_id:"command-parent" ~call_id:"new-call" ~tool_name:"Agent");
+         Emit (task_binding_native_result ~uuid:"new-return" ~call_id:"new-call");
+         child "new-child" "new-call";
+         Emit (task_binding_start ~uuid:"new-task" ~task_id:"new" ~call_id:"new-call");
+         Emit (response_text ~turn_id:"answer" ~message_id:"answer" "Answer");
+         Emit_with_input (result_text ~turn_id:"final" "Answer")]) (fun cli_path ->
+          let attempt=with_fixture_yolo ~keeper_name:"claude-pre-dispatch" (fun () ->
+            run_direct_attempt ~base_path ~cli_path ~goal:"CHILD_FAILURE" ~tools:[]
+              ~required_native_posture:Runtime_native_tools.Native_full
+              ~on_child_content_observation:(fun observation -> children:=observation :: !children)
+              ~on_native_task_observation:(fun bound -> tasks:=bound :: !tasks) ()) in
+          (match attempt.result with Error error -> fail (Agent_core.Error.to_string error) | Ok _ -> ());
+          let rejected=List.filter_map (function
+            | Binding.Child_rejected {content;reason} -> Some (content,reason)
+            | Child_bound _ -> None) (List.rev !children) in
+          check int "both old snapshots retain text/thinking despite refusal" 4 (List.length rejected);
+          List.iter (fun ((content:Runtime_claude_code.complete_child_content),reason) ->
+            check bool "shared failed-first authority never adopts later input" true (reason=Binding.Unattributed_assistant);
+            check string "refused content retains literal parent" "old-call" content.parent_tool_use_id) rejected;
+          let bound=List.filter_map (function Binding.Child_bound bound -> Some bound | Child_rejected _ -> None) !children in
+          check int "only genuinely witnessed new parent binds child text/thinking" 2 (List.length bound);
+          check int "same shared binding admits only new task" 1 (List.length !tasks);
+          let task=List.hd !tasks in
+          List.iter (fun (child:Binding.bound_child) ->
+            check bool "new task/child preserve exact same canonical evidence" true
+              (child.parent_input.evidence=task.evidence && child.parent_input.ticket==task.ticket);
+            match child.parent_input.evidence with
+            | Binding.Command_inherited _ -> ()
+            | Explicit_group _ | Response_inherited _ -> fail "actual root stamp command evidence required") bound)))
+    [false;true]
+;;
+
+let test_task_binding_freezes_exact_envelope_and_dispatch () =
+  let generations = ref [] and dispatches = ref [] in
+  for invocation = 1 to 2 do
+    let base_path = temp_workspace () in
+    Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+      let envelope = Yojson.Safe.to_string (`Assoc ["type",`String "assistant";
+        "parent_tool_use_id",`Null;"session_id",`String "__SESSION__";
+        "uuid",`String "two-agents";"message",`Assoc ["id",`String "task-response";"role",`String "assistant";
+          "model",`String "claude-fixture";"content",`List (List.map (fun id ->
+            `Assoc ["type",`String "tool_use";"id",`String id;"name",`String "Agent";
+              "input",`Assoc ["prompt",`String "Complete the delegated fixture task.";
+                "description",`String "provider task metadata";
+                "subagent_type",`String "general-purpose"]]) ["call-a";"call-b"])]]) in
+      let seen = ref [] and streams = ref [] and admitted = ref None in
+      let parent_frames = if invocation = 1 then [Emit_with_input envelope] else
+        [Emit_with_input (Yojson.Safe.to_string (`Assoc ["type",`String "stream_event";
+          "uuid",`String "partial-input-stamp";"session_id",`String "__SESSION__";
+          "parent_tool_use_id",`Null;"event",`Assoc ["type",`String "message_start";
+            "message",`Assoc ["id",`String "task-response";"model",`String "claude-fixture"]]]));
+         Emit envelope] in
+      with_fixture (parent_frames @ [
+        Emit (native_tool_result ~call_id:"call-a" ~content:"background launch");
+        Emit (task_binding_start ~uuid:"task-a" ~task_id:"a" ~call_id:"call-a");
+        Emit (task_binding_start ~uuid:"task-b" ~task_id:"b" ~call_id:"call-b");
+        Emit (task_binding_native_result ~uuid:"return-b" ~call_id:"call-b");
+        Emit (response_text ~turn_id:"answer" ~message_id:"answer" "Answer");
+        Emit (result_text ~turn_id:"final" "Answer")])
+        (fun cli_path ->
+          let result = with_fixture_yolo ~keeper_name:"claude-fixture" (fun () ->
+            run_keeper_turn ~base_path ~cli_path ~goal:"TASK_BINDING" ~tools:[]
+              ~required_native_posture:Runtime_native_tools.Native_full
+              ~on_runtime_attempt:(fun attempt -> admitted := Some attempt)
+              ~on_event:(fun event -> streams := event :: !streams)
+              ~on_native_task_observation:(fun ~attempt bound ->
+                let response_stopped = List.exists
+                    (function Agent_core.Types.MessageStop -> true | _ -> false) !streams in
+                seen := (attempt,bound,response_stopped) :: !seen) ()) in
+          (match result with Error error -> fail (Agent_core.Error.to_string error)
+           | Ok result -> check string "authored final response survives task binding" "Answer" (keeper_response_text result));
+          let observed = List.rev !seen in
+          check (list bool) "both task callbacks precede root response stop"
+            [false;false] (List.map (fun (_,_,stopped) -> stopped) observed);
+          check (list (pair string int)) "two native ordinals share their exact envelope, not a latest call"
+            ["call-a",0;"call-b",1]
+            (List.map (fun (_, (b:Keeper_claude_task_binding.bound), _) ->
+              b.observation.owner.call_id,b.observation.owner.call_ordinal) observed);
+          let admitted = match !admitted with Some value -> value | None -> fail "driver did not report dispatch" in
+          List.iter (fun ((attempt:Runtime_native_tasks.attempt), (b:Keeper_claude_task_binding.bound), _) ->
+            check string "routing run captured by actual dispatch" admitted.routing_run_id attempt.routing_run_id;
+            check string "runtime captured by actual dispatch" admitted.runtime_id attempt.runtime_id;
+            check int "lane captured by actual dispatch" admitted.lane_attempt_index attempt.lane_attempt_index;
+            check string "original envelope survives native closure" "two-agents" b.observation.owner.call_envelope_uuid;
+            check string "ticket/native session match" b.ticket.session_id b.observation.owner.invocation.session_id;
+            (match b.evidence with
+             | Keeper_claude_task_binding.Explicit_group group when invocation = 1 ->
+                 check string "actual written input owns both calls" b.ticket.client_uuid group.primary
+             | Response_inherited group when invocation = 2 ->
+                 check string "exact partial response evidence owns the complete envelope" b.ticket.client_uuid group.primary
+             | Explicit_group _ | Response_inherited _ | Command_inherited _ ->
+                 fail "expected explicit then response-inherited envelope evidence")) observed;
+          match observed with
+          | (attempt,bound,_) :: _ ->
+              generations := bound.ticket.receiver_generation :: !generations;
+              dispatches := attempt.routing_run_id :: !dispatches
+          | [] -> fail "missing bound task callback"))
+  done;
+  (match !generations,!dispatches with
+   | [second;first],[second_run;first_run] ->
+       check bool "separate actual CLI invocations retain separate input generations" false (String.equal first second);
+       check bool "another dispatch cannot overwrite the first routed attempt" false (String.equal first_run second_run)
+   | _ -> fail "two actual driver calls required")
+;;
+
+module Task_journal = Keeper_native_task_journal
+
+let task_journal_ok (outcome : 'a Task_journal.outcome) =
+  match outcome.result, outcome.cleanup_failure with
+  | Ok value, [] -> value
+  | Error error, _ -> fail (Task_journal.error_to_string error)
+  | Ok _, failure :: _ -> fail (Task_journal.cleanup_failure_to_string failure)
+;;
+
+let task_journal_rows reader = (task_journal_ok (Task_journal.read reader)).records
+;;
+
+let task_journal_operation name =
+  match Keeper_chat_operation.Operation_id.of_string name with
+  | Ok id -> Task_journal.Operation id | Error detail -> fail detail
+;;
+
+(* The store tests cannot manufacture a privileged binding with JSON. Obtain
+   one through the real fake-CLI -> runtime -> adapter -> driver callback. *)
+let with_task_journal_bindings ?on_bound f =
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    let envelope = Yojson.Safe.to_string (`Assoc ["type",`String "assistant";
+      "parent_tool_use_id",`Null;"session_id",`String "__SESSION__";
+      "uuid",`String "task-parent-envelope";"message",`Assoc ["id",`String "task-parent-response";
+      "role",`String "assistant";"model",`String "claude-fixture";"content",`List [
+        `Assoc ["type",`String "tool_use";"id",`String "task-parent-call";
+          "name",`String "Agent";"input",`Assoc ["prompt",`String "Complete the delegated fixture task.";
+          "description",`String "background task persistence";"subagent_type",`String "general-purpose"]]]]]) in
+    let frame ~uuid subtype fields = task_binding_frame ~uuid ~task_id:"task/id"
+        ~call_id:"task-parent-call" subtype fields in
+    let observed = ref [] in
+    with_fixture [Emit_with_input envelope;
+      Emit (task_binding_native_result ~uuid:"task-parent-return" ~call_id:"task-parent-call");
+      Emit (frame ~uuid:"task-journal-start" "task_started"
+        ["task_type",`String "local_agent";"spawn_depth",`Int 1;
+         "description",`String "EXCLUDED_DESCRIPTION";"subagent_type",`String "general-purpose";
+         "is_backgrounded",`Bool true]);
+      Emit (frame ~uuid:"task-journal-progress" "task_progress"
+        ["description",`String "EXCLUDED_PROGRESS";"usage",`Assoc
+          ["total_tokens",`Int 12;"tool_uses",`Int 1;"duration_ms",`Int (-3)];
+         "last_tool_name",`String "Read"]);
+      Emit (frame ~uuid:"task-journal-end" "task_notification"
+        ["status",`String "completed";"summary",`String "EXCLUDED_SUMMARY";
+         "output_file",`String "/EXCLUDED_PATH"]);
+      Emit (response_text ~turn_id:"answer" ~message_id:"answer" "Unchanged answer");
+      Emit (result_text ~turn_id:"final" "Unchanged answer")]
+      (fun cli_path ->
+        let result = with_fixture_yolo ~keeper_name:"claude-fixture" (fun () ->
+          run_keeper_turn ~base_path ~cli_path ~goal:"TASK_JOURNAL"
+            ~required_native_posture:Runtime_native_tools.Native_full
+            ~on_native_task_observation:(fun ~attempt bound ->
+              observed := (attempt,bound) :: !observed;
+              Option.iter (fun observe -> observe ~base_path ~attempt bound) on_bound) ()) in
+        (match result with Error error -> fail (Agent_core.Error.to_string error)
+         | Ok result -> check string "root answer is unchanged" "Unchanged answer" (keeper_response_text result));
+        let observations = List.rev !observed in
+        check int "actual driver yielded all owned task edges" 3 (List.length observations);
+        f ~base_path observations))
+;;
+
+module Child_journal = Keeper_child_content_journal
+
+let child_journal_ok (outcome : 'a Child_journal.outcome) =
+  match outcome.result,outcome.cleanup_failure with
+  | Ok value,[] -> value
+  | Error error,_ -> fail (Child_journal.error_to_string error)
+  | Ok _,_ -> fail "unexpected child journal cleanup warning"
+;;
+
+(* This fixture enters the actual turn Driver, not only the direct adapter.
+   The provider emits complete child frames before/after the original Agent;
+   all assertions run outside callbacks, whose exceptions runtime may catch. *)
+let with_child_journal_observations ?on_observed f =
+  let base_path=temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    let observed=ref [] and admitted=ref None in
+    let child=child_content_frame ~uuid:"same-child-envelope" ~parent:"child-parent"
+      ~text:"CHILD_SECRET_BODY" () in
+    with_fixture [Emit child;
+      Emit_with_input (native_tool_call_block ~turn_id:"child-parent-envelope"
+        ~call_id:"child-parent" ~tool_name:"Agent");
+      Emit (task_binding_native_result ~uuid:"child-parent-return" ~call_id:"child-parent");
+      Emit child;
+      Emit (child_content_frame ~diagnostic:true ~uuid:"diagnostic-child"
+        ~parent:"child-parent" ~text:"NOT_A_BODY" ());
+      Emit (response_text ~turn_id:"answer" ~message_id:"answer" "Unchanged child sink answer");
+      Emit (result_text ~turn_id:"final" "Unchanged child sink answer")] (fun cli_path ->
+      let result=with_fixture_yolo ~keeper_name:"claude-fixture" (fun () ->
+        run_keeper_turn ~base_path ~cli_path ~goal:"CHILD_JOURNAL" ~tools:[]
+          ~required_native_posture:Runtime_native_tools.Native_full
+          ~on_runtime_attempt:(fun attempt -> admitted:=Some attempt)
+          ~on_child_content_observation:(fun ~attempt observation ->
+            observed:=(attempt,observation)::!observed;
+            Option.iter (fun observe -> observe ~base_path ~attempt observation) on_observed) ()) in
+      (match result with Error error -> fail (Agent_core.Error.to_string error)
+       | Ok result -> check string "root reply unaffected by child persistence"
+           "Unchanged child sink answer" (keeper_response_text result));
+      let observations=List.rev !observed in
+      check int "actual driver captures two channels of unknown then known; no diagnostic" 4 (List.length observations);
+      let admitted=match !admitted with Some attempt -> attempt | None -> fail "missing actual dispatch" in
+      List.iter (fun ((attempt:Runtime_native_tasks.attempt),_) ->
+        check string "child captures actual routing attempt" admitted.routing_run_id attempt.routing_run_id;
+        check string "child captures actual runtime" admitted.runtime_id attempt.runtime_id;
+        check int "child captures actual lane" admitted.lane_attempt_index attempt.lane_attempt_index) observations;
+      f ~base_path observations))
+;;
+
+let test_child_journal_driver_replay_redaction_and_scope () =
+  with_child_journal_observations (fun ~base_path observations ->
+    let keeper_name="claude-fixture" in
+    let secret="CHILD_SECRET_BODY" in
+    let token_file=Keeper_secret_redaction.ssh_remote_token_file ~base_path ~keeper_name in
+    Fs_compat.mkdir_p (Filename.dirname token_file);
+    Out_channel.with_open_bin token_file (fun out -> output_string out secret);
+    let redact_text=Keeper_secret_redaction.redact_text
+      (Keeper_secret_redaction.snapshot ~base_path ~keeper_name) in
+    let source=task_journal_operation "child-operation" in
+    let sink=Child_journal.create ~base_path ~keeper_name ~source ~redact_text in
+    let publications=List.map (fun (attempt,observation) ->
+      Result.get_ok (Child_journal.prepare sink ~attempt observation)) observations in
+    let reader=Child_journal.reader_of_publication (List.hd publications) in
+    (match (Child_journal.read reader).result with
+     | Error Child_journal.Missing_store -> () | _ -> fail "missing read must remain distinct");
+    check bool "READONLY missing read does not create receiver file" false (Sys.file_exists (Child_journal.path reader));
+    let commits=List.map (fun publication -> child_journal_ok (Child_journal.append publication)) publications in
+    let snapshot=child_journal_ok (Child_journal.read reader) in
+    let rows=snapshot.records in
+    check (list int) "disk sequence includes every original ordinal/channel" [1;2;3;4]
+      (List.map (fun (r:Child_journal.record) -> r.seq) rows);
+    List.iter2 (fun publication receipt ->
+      match receipt,child_journal_ok (Child_journal.append publication) with
+      | Child_journal.Appended first,Child_journal.Replayed replay ->
+          check bool "same publication exact replay preserves sequence/time/payload" true (first=replay)
+      | _ -> fail "expected replay") publications commits;
+    (match rows with
+     | [one;two;three;four] ->
+         check bool "all channels of actual accepted envelope share observation identity" true
+           (one.observation.observation_id=two.observation.observation_id
+            && three.observation.observation_id=four.observation.observation_id);
+         check bool "same provider envelope replay is a distinct accepted snapshot" false
+           (one.observation.observation_id=three.observation.observation_id);
+         check bool "provider envelope correlation remains same" true
+           (one.observation.envelope_uuid=three.observation.envelope_uuid);
+         check bool "unknown is not upgraded by later parent" true
+           (one.observation.attribution=Keeper_child_content.Parent_input_refused Keeper_claude_task_binding.Unknown_parent);
+         (match three.observation.attribution with
+          | Keeper_child_content.Original_parent_input _ -> ()
+          | Parent_input_refused _ -> fail "known actual parent must retain evidence")
+     | _ -> fail "four durable observations required");
+    check (list int) "original redacted-thinking hole preserved" [1;2;1;2]
+      (List.map (fun (r:Child_journal.record) -> r.observation.ordinal) rows);
+    let bytes=In_channel.with_open_bin (Child_journal.path reader) In_channel.input_all in
+    check bool "secret body is redacted before disk" false (Astring.String.is_infix ~affix:secret bytes);
+    let after=Child_journal.next_cursor snapshot in
+    check int "validated unchanged suffix is empty" 0
+      (List.length (child_journal_ok (Child_journal.read ~after reader)).records);
+    let invocation=(List.hd rows).observation.origin.invocation in
+    let foreign=Result.get_ok (Child_journal.open_reader ~base_path ~keeper_name
+      ~receiver_generation:invocation.receiver_generation ~session_id:invocation.session_id
+      ~client_uuid:(invocation.client_uuid ^ "foreign")) in
+    (match (Child_journal.read foreign).result with
+     | Error Child_journal.Missing_store -> () | _ -> fail "foreign client cannot read this store");
+    check bool "foreign missing store is not created" false (Sys.file_exists (Child_journal.path foreign));
+    Fs_compat.mkdir_p (Filename.dirname (Child_journal.path foreign));
+    Out_channel.with_open_bin (Child_journal.path foreign) (fun out -> output_string out bytes);
+    (match (Child_journal.read foreign).result with
+     | Error (Child_journal.Corrupt _) -> () | _ -> fail "copied rows cannot establish foreign client scope");
+    let forged=Result.get_ok (Child_journal.cursor ~store_id:"foreign-incarnation" ~after_sequence:0) in
+    (match (Child_journal.read ~after:forged reader).result with
+     | Error Child_journal.Cursor_store_mismatch -> () | _ -> fail "foreign incarnation cannot look empty");
+    let attempt,observation=List.hd observations in
+    let other=Child_journal.create ~base_path ~keeper_name ~redact_text
+      ~source:(task_journal_operation "other-source") in
+    (match (Child_journal.observe other ~attempt observation).result with
+     | Error (Child_journal.Conflicting_observation _) -> () | _ -> fail "same composite key with changed source cannot replay");
+    check int "failure retained by exact collector" 1 (List.length (Child_journal.health other));
+    check int "collision adds no sequence" 4 (List.length (child_journal_ok (Child_journal.read reader)).records);
+    Unix.rename (Child_journal.path reader) (Child_journal.path reader ^ ".previous");
+    ignore (child_journal_ok (Child_journal.append (List.hd publications)));
+    (match (Child_journal.read ~after reader).result with
+     | Error Child_journal.Cursor_store_mismatch -> () | _ -> fail "replacement cannot inherit old incarnation cursor"))
+;;
+
+let test_child_journal_concurrent_exact_replay () =
+  with_child_journal_observations (fun ~base_path observations ->
+    let collector=Child_journal.create ~base_path ~keeper_name:"claude-fixture"
+      ~source:(task_journal_operation "child-concurrent") ~redact_text:Fun.id in
+    let attempt,observation=List.hd observations in
+    let publication=Result.get_ok (Child_journal.prepare collector ~attempt observation) in
+    let workers=List.init 4 (fun _ -> Domain.spawn (fun () ->
+      Eio_main.run (fun _ -> Child_journal.append publication))) in
+    let outcomes=List.map Domain.join workers |> List.map (fun outcome ->
+      match outcome.Child_journal.result with
+      | Error (Child_journal.Store_unavailable _) ->
+          (* Immediate SQLite busy refusal is explicit, then the test retries
+             the same publication once all concurrent workers have joined. *)
+          child_journal_ok (Child_journal.append publication)
+      | Ok _ | Error _ -> child_journal_ok outcome) in
+    check int "concurrent received duplicate commits exactly once" 1
+      (List.length (List.filter (function Child_journal.Appended _ -> true | Replayed _ -> false) outcomes));
+    let reader=Child_journal.reader_of_publication publication in
+    check int "one disk sequence after concurrent replay" 1
+      (child_journal_ok (Child_journal.read reader)).validation.through_sequence)
+;;
+
+let test_child_journal_commit_uncertainty_and_cleanup () =
+  with_child_journal_observations (fun ~base_path observations ->
+    let sink=Child_journal.create ~base_path ~keeper_name:"claude-fixture"
+      ~source:(task_journal_operation "child-outcomes") ~redact_text:Fun.id in
+    let publications=List.map (fun (attempt,observation) ->
+      Result.get_ok (Child_journal.prepare sink ~attempt observation)) observations in
+    let first=List.hd publications in
+    let warning=Child_journal.For_testing.append_with_io ~commit:(fun db -> Sqlite3.exec db "COMMIT")
+      ~close:(fun db -> ignore (Sqlite3.db_close db);false) first in
+    (match warning.result,warning.cleanup_failure with
+     | Ok (Child_journal.Appended row),[_] -> check int "close failure preserves known commit" 1 row.seq
+     | _ -> fail "cleanup overwrote primary receipt");
+    let second=List.nth publications 1 in
+    let uncertain=Child_journal.For_testing.append_with_io
+      ~commit:(fun db -> ignore (Sqlite3.exec db "COMMIT");Sqlite3.Rc.IOERR)
+      ~close:Sqlite3.db_close second in
+    (match uncertain.result with
+     | Error (Child_journal.Commit_unconfirmed _) -> () | _ -> fail "uncertain commit cannot be guessed");
+    (match child_journal_ok (Child_journal.append second) with
+     | Child_journal.Replayed row -> check int "same sealed publication reconciles uncertain commit" 2 row.seq
+     | _ -> fail "uncertain retry must not remint or duplicate");
+    let reader=Child_journal.reader_of_publication first in
+    check int "one receipt per complete block, not all four envelope blocks" 2
+      (List.length (child_journal_ok (Child_journal.read reader)).records))
+;;
+
+let test_child_journal_full_audit_cannot_hide_prefix () =
+  with_child_journal_observations (fun ~base_path observations ->
+    let sink=Child_journal.create ~base_path ~keeper_name:"claude-fixture"
+      ~source:(task_journal_operation "child-corruption") ~redact_text:Fun.id in
+    let publications=List.map (fun (attempt,observation) ->
+      Result.get_ok (Child_journal.prepare sink ~attempt observation)) observations in
+    List.iter (fun p -> ignore (child_journal_ok (Child_journal.append p))) publications;
+    let reader=Child_journal.reader_of_publication (List.hd publications) in
+    let after=Child_journal.next_cursor (child_journal_ok (Child_journal.read reader)) in
+    let db=Sqlite3.db_open (Child_journal.path reader) in
+    Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db)) (fun () ->
+      let stmt=Sqlite3.prepare db "SELECT sql FROM sqlite_master WHERE name='immutable_observations'" in
+      let trigger=Fun.protect ~finally:(fun () -> ignore (Sqlite3.finalize stmt)) (fun () ->
+        match Sqlite3.step stmt with
+        | Sqlite3.Rc.ROW -> Sqlite3.column_text stmt 0 | _ -> fail "missing immutable trigger") in
+      let sql value=match Sqlite3.exec db value with
+        | Sqlite3.Rc.OK -> () | rc -> fail (Sqlite3.Rc.to_string rc) in
+      sql "BEGIN IMMEDIATE";sql "DROP TRIGGER immutable_observations";
+      sql "UPDATE observations SET payload='{}' WHERE seq=1";sql trigger;sql "COMMIT");
+    (match (Child_journal.read ~after reader).result with
+     | Error (Child_journal.Corrupt {seq=1;_}) -> ()
+     | _ -> fail "unchanged cursor must still refuse corrupted prefix"))
+;;
+
+let test_child_journal_received_after_closed_root () =
+  with_child_journal_observations (fun ~base_path observations ->
+    Eio_main.run (fun _ ->
+      let keeper_name="claude-fixture" in
+      let turn_ref=Ids.Turn_ref.make ~trace_id:"child-closed-root" ~absolute_turn:1 in
+      let stream=Keeper_autonomous_stream.create ~base_path ~keeper_name ~turn_ref in
+      Keeper_autonomous_stream.finish stream Keeper_autonomous_stream.Cancelled;
+      let root_path=Keeper_chat_event_log.turn_journal_path ~base_dir:base_path ~keeper_name ~turn_ref in
+      let before=In_channel.with_open_bin root_path In_channel.input_all in
+      List.iter (fun (attempt,observation) -> Keeper_autonomous_stream.on_tool_stream_observation stream
+        (Keeper_hooks_agent_core.Child_content_observed {attempt;observation})) observations;
+      check string "real sink commits received child after closure without root events"
+        before (In_channel.with_open_bin root_path In_channel.input_all);
+      check int "closed root does not reject durable child callback" 0
+        (List.length (Keeper_autonomous_stream.child_journal_health stream));
+      let attempt,observation=List.hd observations in
+      let collector=Child_journal.create ~base_path ~keeper_name ~redact_text:Fun.id
+        ~source:(Keeper_native_task_journal.Autonomous_turn turn_ref) in
+      let reader=Child_journal.reader_of_publication (Result.get_ok (Child_journal.prepare collector ~attempt observation)) in
+      let rows=(child_journal_ok (Child_journal.read reader)).records in
+      check int "all received unknown/known channels remain durable" 4 (List.length rows);
+      List.iter (fun (row:Child_journal.record) -> match row.observation.origin.source with
+        | Runtime_native_tasks.Autonomous_turn {turn_ref=actual} ->
+            check string "collector keeps captured autonomous origin" (Ids.Turn_ref.to_string turn_ref) actual
+        | Operation _ -> fail "wrong collector source") rows;
+      check bool "durable child does not reopen root" true
+        (Keeper_autonomous_stream.current ~base_path ~keeper_name=None)))
+;;
+
+let test_child_journal_failure_preserves_root () =
+  let failures=ref [] in
+  with_child_journal_observations
+    ~on_observed:(fun ~base_path ~attempt observation ->
+      let blocker=Filename.concat base_path "child-blocker" in
+      if not (Sys.file_exists blocker) then Out_channel.with_open_bin blocker (fun out -> output_string out "fixture");
+      let sink=Child_journal.create ~base_path:blocker ~keeper_name:"claude-fixture"
+        ~source:(task_journal_operation "failed-child") ~redact_text:Fun.id in
+      failures:=Child_journal.observe sink ~attempt observation :: !failures)
+    (fun ~base_path:_ _ ->
+      check int "all driver child callbacks return typed failures without root mutation" 4 (List.length !failures);
+      List.iter (fun (outcome:Child_journal.commit Child_journal.outcome) -> match outcome.result with
+        | Error _ -> () | Ok _ -> fail "failed path cannot acknowledge body") !failures)
+;;
+
+module Child_read = Keeper_child_content_read
+
+let with_child_read_snapshot f =
+  with_child_journal_observations (fun ~base_path observations ->
+    let keeper_name="claude-fixture" in
+    let collector=Child_journal.create ~base_path ~keeper_name
+      ~source:(task_journal_operation "child-read") ~redact_text:Fun.id in
+    let publications=List.map (fun (attempt,observation) ->
+      Result.get_ok (Child_journal.prepare collector ~attempt observation)) observations in
+    List.iter (fun publication -> ignore (child_journal_ok (Child_journal.append publication))) publications;
+    let reader=Child_journal.reader_of_publication (List.hd publications) in
+    let snapshot=child_journal_ok (Child_journal.read reader) in
+    let invocation=(List.hd snapshot.records).observation.origin.invocation in
+    let scope:Child_read.scope={keeper_name;receiver={receiver_generation=invocation.receiver_generation;
+      session_id=invocation.session_id;client_uuid=invocation.client_uuid}} in
+    f ~base_path ~reader ~snapshot ~scope ~publications)
+;;
+
+let test_child_read_closed_codec_and_exact_suffix () =
+  with_child_read_snapshot (fun ~base_path ~reader ~snapshot ~scope ~publications:_ ->
+    let module Read = Child_read in
+    let token=Keeper_secret_redaction.ssh_remote_token_file ~base_path ~keeper_name:scope.keeper_name in
+    Fs_compat.mkdir_p (Filename.dirname token);
+    Out_channel.with_open_bin token (fun out -> output_string out "CHILD_SECRET_BODY");
+    let redact_text=Keeper_secret_redaction.redact_text
+      (Keeper_secret_redaction.snapshot ~base_path ~keeper_name:scope.keeper_name) in
+    let wire response=Read.to_json response |> Yojson.Safe.to_string |> Yojson.Safe.from_string in
+    let decoded json=match Read.of_json json with
+      | Ok response -> response | Error error -> fail (Read.decode_error_to_string error) in
+    let body=wire (Read.records_of_journal ~redact_text ~scope ~snapshot ~cleanup_failures:[]) in
+    let response=decoded body in
+    let request:Read.records_request={scope;after=None} in
+    let page=Result.get_ok (Read.records_of_response ~request response) in
+    check int "actual private journal projection roundtrip keeps all snapshots" 4 (List.length page.records);
+    check bool "collector failure coverage unavailable, never zero success history" true (page.coverage=Read.Unavailable);
+    List.iter (fun (row:Read.record) ->
+      check bool "redaction again on public read keeps configured body secret absent" false
+        (Astring.String.is_infix ~affix:"CHILD_SECRET_BODY" row.observation.text)) page.records;
+    check (list string) "opaque invocation unchanged across read redaction"
+      (List.map (fun (r:Child_journal.record) -> r.observation.origin.invocation.client_uuid) snapshot.records)
+      (List.map (fun (r:Read.record) -> r.observation.origin.invocation.client_uuid) page.records);
+    let set name value = function
+      | `Assoc fields -> `Assoc ((name,value)::List.remove_assoc name fields)
+      | _ -> fail "fixture object required" in
+    let member=Yojson.Safe.Util.member in
+    let rows=body |> member "records" |> Yojson.Safe.Util.to_list in
+    let malformed json=match Read.of_json json with Error _ -> () | Ok _ -> fail "malformed Child read accepted" in
+    malformed (set "unexpected" (`Bool true) body);
+    malformed (match body with `Assoc fields -> `Assoc (("schema",`String "masc.child_content.records.v1")::fields) | _ -> body);
+    malformed (set "scope" `Null body);
+    malformed (set "persistence_failure_history" (`String "complete") body);
+    malformed (set "schema" (`String "masc.native_tasks.records.v1") body);
+    let replace_first row=set "records" (`List (row::List.tl rows)) body in
+    malformed (replace_first (set "seq" (`Intlit "9007199254740992") (List.hd rows)));
+    malformed (replace_first (set "recorded_at" (`Float Float.infinity) (List.hd rows)));
+    malformed (set "records" (`List (List.rev rows)) body);
+    malformed (set "records" (`List [List.nth rows 0;List.nth rows 2;List.nth rows 3]) body);
+    let first=List.hd rows and second=List.nth rows 1 in
+    let duplicate=set "observation" (member "observation" first) second in
+    malformed (set "records" (`List [first;duplicate;List.nth rows 2;List.nth rows 3]) body);
+    let observation=member "observation" first in
+    let origin=member "origin" observation in let invocation=member "invocation" origin in
+    let foreign=set "invocation" (set "client_uuid" (`String "foreign-client") invocation) origin in
+    malformed (replace_first (set "observation" (set "origin" foreign observation) first));
+    let refused request=match Read.records_of_response ~request response with
+      | Error _ -> () | Ok _ -> fail "foreign/invalid request accepted" in
+    refused {scope={scope with receiver={scope.receiver with client_uuid="foreign"}};after=None};
+    let foreign_scope:Read.scope={scope with receiver={scope.receiver with client_uuid="foreign"}} in
+    let mislabelled snapshot=match Read.records_of_journal ~redact_text ~scope:foreign_scope ~snapshot
+        ~cleanup_failures:[] with
+      | Read.Failure {error=Read.Invalid_scope;_} -> ()
+      | Records _ | Receivers _ | Hints _ | Failure _ -> fail "projection labelled a page with a foreign scope" in
+    mislabelled snapshot;
+    refused {scope;after=Some {store_id=page.next_cursor.store_id;after_sequence=(-1)}};
+    refused {scope;after=Some {store_id="";after_sequence=0}};
+    refused {scope;after=Some {store_id="other";after_sequence=0}};
+    refused {scope;after=Some {store_id=page.next_cursor.store_id;after_sequence=9007199254740992}};
+    let suffix=decoded (set "records" (`List (List.tl rows)) body) in
+    (match Read.records_of_response ~request suffix with Error Read.Sequence_mismatch -> () | _ -> fail "missing first row hidden");
+    let after_one:Read.records_request={scope;after=Some {store_id=page.next_cursor.store_id;after_sequence=1}} in
+    check int "complete requested suffix begins after exact cursor" 3
+      (List.length (Result.get_ok (Read.records_of_response ~request:after_one suffix)).records);
+    let after=Child_journal.next_cursor snapshot in
+    let caught=child_journal_ok (Child_journal.read ~after reader) in
+    check int "caught-up suffix has no row to carry scope" 0 (List.length caught.records);
+    mislabelled caught;
+    let caught=decoded (wire (Read.records_of_journal ~redact_text ~scope ~snapshot:caught ~cleanup_failures:[])) in
+    check int "actual caught-up empty suffix accepted" 0 (List.length
+      (Result.get_ok (Read.records_of_response ~request:{scope;after=Some page.next_cursor} caught)).records);
+    (match Read.records_of_response ~request caught with Error Read.Sequence_mismatch -> () | _ -> fail "empty cannot conceal requested history");
+    let discovered=child_journal_ok (Child_journal.discover ~base_path ~keeper_name:scope.keeper_name) in
+    let receivers=decoded (wire (Read.receivers_of_journal ~keeper_name:scope.keeper_name ~entries:discovered ~cleanup_failures:[])) in
+    let inventory=Result.get_ok (Read.receivers_of_response ~keeper_name:scope.keeper_name receivers) in
+    check int "full ticket3 receiver retained" 1 (List.length inventory.receivers);
+    let hinted=child_journal_ok (Child_journal.discover_hints ~base_path ~keeper_name:scope.keeper_name) in
+    let hints=decoded (wire (Read.hints_of_journal ~keeper_name:scope.keeper_name ~entries:hinted ~cleanup_failures:[])) in
+    let hints_page=Result.get_ok (Read.hints_of_response ~keeper_name:scope.keeper_name hints) in
+    check int "hint receiver is distinct from audited receiver" 1 (List.length hints_page.hints);
+    (match Read.receivers_of_response ~keeper_name:scope.keeper_name hints with Error Read.Unexpected_response -> () | _ -> fail "hint became audit");
+    let failed=decoded (wire (Read.failure Read.Store_missing)) in
+    (match failed with Read.Failure failure -> check bool "typed missing survives" true (failure.error=Read.Store_missing)
+     | Records _ | Receivers _ | Hints _ -> fail "missing became success");
+    (match Read.records_of_response ~request failed with Error Read.Unexpected_response -> () | _ -> fail "typed failure became empty"))
+;;
+
+let test_child_read_hints_do_not_audit_tampered_history () =
+  with_child_read_snapshot (fun ~base_path ~reader ~snapshot:_ ~scope ~publications ->
+    let before=child_journal_ok (Child_journal.read_hint reader) in
+    let db=Sqlite3.db_open (Child_journal.path reader) in
+    Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db)) (fun () ->
+      let stmt=Sqlite3.prepare db "SELECT sql FROM sqlite_master WHERE name='immutable_observations'" in
+      let trigger=Fun.protect ~finally:(fun () -> ignore (Sqlite3.finalize stmt)) (fun () ->
+        match Sqlite3.step stmt with Sqlite3.Rc.ROW -> Sqlite3.column_text stmt 0 | _ -> fail "missing trigger") in
+      let sql value=match Sqlite3.exec db value with Sqlite3.Rc.OK -> () | rc -> fail (Sqlite3.Rc.to_string rc) in
+      sql "BEGIN IMMEDIATE";sql "DROP TRIGGER immutable_observations";
+      sql "UPDATE observations SET payload='{}' WHERE seq=1";sql trigger;sql "COMMIT");
+    let after=child_journal_ok (Child_journal.read_hint reader) in
+    check bool "same metadata/tail hint does not certify historical integrity" true (before=after);
+    let hints=child_journal_ok (Child_journal.discover_hints ~base_path ~keeper_name:scope.keeper_name) in
+    (match hints with [entry] -> check bool "discovery hint remains explicitly unchecked success" true (Result.is_ok entry.state)
+     | _ -> fail "one hint required");
+    (match (Child_journal.read reader).result with Error (Child_journal.Corrupt {seq=1;_}) -> ()
+     | _ -> fail "full audit concealed same-tail corruption");
+    let entries=child_journal_ok (Child_journal.discover ~base_path ~keeper_name:scope.keeper_name) in
+    (match entries with [entry] -> (match entry.state with Error (Child_journal.Corrupt _) -> ()
+       | _ -> fail "audited discovery became hint") | _ -> fail "one audited entry required");
+    Unix.rename (Child_journal.path reader) (Child_journal.path reader ^ ".corrupt");
+    ignore (child_journal_ok (Child_journal.append (List.hd publications)));
+    let one=child_journal_ok (Child_journal.read_hint reader) in
+    ignore (child_journal_ok (Child_journal.append (List.nth publications 1)));
+    let two=child_journal_ok (Child_journal.read_hint reader) in
+    check (list int) "append changes unchecked disk tail" [1;2] [one.through_sequence;two.through_sequence];
+    List.iter (fun publication -> ignore (child_journal_ok (Child_journal.append publication)))
+      [List.nth publications 2;List.nth publications 3];
+    let replacement=child_journal_ok (Child_journal.read_hint reader) in
+    check int "replacement may have same tail" before.through_sequence replacement.through_sequence;
+    check bool "same-tail replacement has distinct actual store incarnation" false
+      (before.store_id=replacement.store_id))
+;;
+
+let test_child_read_discovery_bound_directory_authority () =
+  with_child_journal_observations (fun ~base_path observations ->
+    let keeper_name="claude-fixture" in
+    let collector=Child_journal.create ~base_path ~keeper_name
+      ~source:(task_journal_operation "child-directories") ~redact_text:Fun.id in
+    let attempt,observation=List.hd observations in
+    let publication=Result.get_ok (Child_journal.prepare collector ~attempt observation) in
+    let reader=Child_journal.reader_of_publication publication in
+    let session_path=Filename.dirname (Child_journal.path reader) in
+    let generation_path=Filename.dirname session_path in
+    let keeper_path=Filename.dirname generation_path in
+    (match (Child_journal.read_hint reader).result with Error Child_journal.Missing_store -> ()
+     | _ -> fail "missing hint must refuse without creating store");
+    check bool "missing hint never creates leaf" false (Sys.file_exists (Child_journal.path reader));
+    let masc_root=Common.masc_dir_from_base_path ~base_path in
+    let mode=(Unix.stat masc_root).Unix.st_perm in
+    Fun.protect ~finally:(fun () -> Unix.chmod masc_root mode) (fun () ->
+      Unix.chmod masc_root 0o777;
+      (match (Child_journal.discover_hints ~base_path ~keeper_name).result with
+       | Error (Child_journal.Store_unavailable _) -> () | _ -> fail "unsafe ancestor cannot grant cold absence"));
+    check int "cold missing descendant is valid empty discovery" 0
+      (List.length (child_journal_ok (Child_journal.discover_hints ~base_path ~keeper_name)));
+    List.iter (fun directory ->
+      Fs_compat.mkdir_p directory;
+      let mode=(Unix.stat directory).Unix.st_perm in
+      Fun.protect ~finally:(fun () -> Unix.chmod directory mode) (fun () ->
+        Unix.chmod directory 0o777;
+        (match (Child_journal.discover_hints ~base_path ~keeper_name).result with
+         | Error (Child_journal.Store_unavailable _) -> () | _ -> fail "unsafe empty directory was authoritative")))
+      [keeper_path;generation_path;session_path];
+    let result=Child_journal.For_testing.discover_hints ~base_path ~keeper_name
+      ~before_read:(fun _ -> ()) ~after_read:(fun directory ->
+        if directory=generation_path then Unix.rmdir session_path) in
+    (match result.result with Error (Child_journal.Store_unavailable _) -> ()
+     | _ -> fail "enumerated session disappearance became cold empty");
+    ignore (child_journal_ok (Child_journal.append publication));
+    let removed=ref false in
+    let result=Child_journal.For_testing.discover_hints ~base_path ~keeper_name
+      ~before_read:(fun _ -> ()) ~after_read:(fun directory ->
+        if directory=session_path && not !removed then begin removed:=true;
+          Unix.rename (Child_journal.path reader) (Child_journal.path reader ^ ".gone") end) in
+    let entries=child_journal_ok result in
+    (match entries with [entry] -> (match entry.state with Error Child_journal.Missing_store -> ()
+       | _ -> fail "enumerated leaf disappearance became success") | _ -> fail "captured receiver identity lost"))
+;;
+
+let test_native_task_journal_commit_replay_and_scope () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    let secret = "general-purpose" and keeper_name = "claude-fixture" in
+    let token_file = Keeper_secret_redaction.ssh_remote_token_file ~base_path ~keeper_name in
+    Fs_compat.mkdir_p (Filename.dirname token_file);
+    Out_channel.with_open_bin token_file (fun out -> output_string out secret);
+    let redact_text = Keeper_secret_redaction.redact_text
+        (Keeper_secret_redaction.snapshot ~base_path ~keeper_name) in
+    let source = task_journal_operation "execution-operation" in
+    let sink = Task_journal.create ~base_path ~keeper_name ~source ~redact_text in
+    let publications = List.map (fun (attempt,bound) ->
+      match Task_journal.prepare sink ~attempt bound with Ok p -> p
+      | Error e -> fail (Task_journal.error_to_string e)) observations in
+    let committed = List.map (fun publication -> task_journal_ok (Task_journal.append publication)) publications in
+    let reader = Task_journal.reader_of_publication (List.hd publications) in
+    let rows = task_journal_rows reader in
+    check (list int) "one durable contiguous receiver sequence" [1;2;3]
+      (List.map (fun (r:Task_journal.record) -> r.seq) rows);
+    List.iter2 (fun publication expected ->
+      match expected, task_journal_ok (Task_journal.append publication) with
+      | Task_journal.Appended old, Task_journal.Replayed replay ->
+          check bool "replay retains exact original receipt and recorded time" true (old=replay)
+      | _ -> fail "expected append then exact replay") publications committed;
+    List.iter (fun (r:Task_journal.record) ->
+      match r.observation.origin.source with
+      | Runtime_native_tasks.Operation {operation_id} ->
+          check string "canonical execution operation is retained" "execution-operation" operation_id
+      | Autonomous_turn _ -> fail "operation changed to autonomous source") rows;
+    (match List.map (fun (r:Task_journal.record) -> r.observation.event) rows with
+     | [Runtime_native_tasks.Task_registered {subagent_type=Some value;_};
+        Task_progress_reported {usage;_};Task_terminal_reported _] ->
+          check string "only supplied metadata leaf is redacted" (redact_text secret) value;
+          check int "signed provider duration survives journal" (-3) usage.duration_ms
+     | _ -> fail "wrong typed disk events");
+    let bytes = In_channel.with_open_bin (Task_journal.path reader) In_channel.input_all in
+    List.iter (fun value -> check bool "private source strings never reach journal" false
+      (Astring.String.is_infix ~affix:value bytes))
+      [secret;"EXCLUDED_DESCRIPTION";"EXCLUDED_PROGRESS";"EXCLUDED_SUMMARY";"EXCLUDED_PATH"];
+    let attempt,bound = List.hd observations in
+    let foreign_source = Task_journal.create ~base_path ~keeper_name
+        ~source:(task_journal_operation "member-request-alias") ~redact_text in
+    (match (Task_journal.observe foreign_source ~attempt bound).result with
+     | Error (Task_journal.Conflicting_uuid "task-journal-start") -> ()
+     | _ -> fail "same UUID with different source was acknowledged");
+    check int "conflict is retained as task persistence health" 1
+      (List.length (Task_journal.health foreign_source));
+    check int "conflict cannot append a row" 3 (List.length (task_journal_rows reader));
+    let alias = Task_journal.create ~base_path:(Filename.concat base_path ".")
+        ~keeper_name ~source ~redact_text in
+    (match (Task_journal.observe alias ~attempt bound).result with
+     | Ok (Task_journal.Replayed _) -> () | _ -> fail "canonical root alias split the receiver journal");
+    let separate_root = temp_workspace () in
+    Fun.protect ~finally:(fun () -> cleanup_tree separate_root) (fun () ->
+      let other = Task_journal.create ~base_path:separate_root ~keeper_name ~source ~redact_text in
+      (match task_journal_ok (Task_journal.observe other ~attempt bound) with
+       | Task_journal.Appended r -> check int "other canonical root has its own sequence" 1 r.seq
+       | Replayed _ -> fail "other workspace inherited a receipt"));
+    let other_keeper = Task_journal.create ~base_path ~keeper_name:"claude/fixture" ~source ~redact_text in
+    let other = match Task_journal.prepare other_keeper ~attempt bound with
+      | Ok p -> p | Error e -> fail (Task_journal.error_to_string e) in
+    let other_reader = Task_journal.reader_of_publication other in
+    check bool "slash is encoded, never a path segment" false
+      (String.equal (Task_journal.path reader) (Task_journal.path other_reader));
+    ignore (task_journal_ok (Task_journal.append other));
+    (* Copying a valid row from another authority cannot establish that scope. *)
+    Out_channel.with_open_bin (Task_journal.path other_reader) (fun out -> output_string out bytes);
+    (match (Task_journal.append other).result with
+     | Error (Task_journal.Corrupt _) -> () | _ -> fail "foreign-scope copied journal was accepted"))
+;;
+
+let test_native_task_journal_atomicity_recovery_and_failure () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    let sink = Task_journal.create ~base_path ~keeper_name:"claude-fixture"
+        ~source:(task_journal_operation "operation") ~redact_text:Fun.id in
+    let publications = List.map (fun (attempt,bound) ->
+      Result.get_ok (Task_journal.prepare sink ~attempt bound)) observations in
+    let first = List.hd publications and second = List.nth publications 1 and third = List.nth publications 2 in
+    let reader = Task_journal.reader_of_publication first in
+    let workers = List.init 4 (fun _ -> Domain.spawn (fun () ->
+      Eio_main.run (fun _ -> Task_journal.append first))) in
+    let outcomes = List.map Domain.join workers |> List.map (fun outcome ->
+      match outcome.Task_journal.result with
+      | Error (Task_journal.Store_unavailable _) ->
+          (* SQLITE_BUSY is an immediate explicit refusal. Reconcile after the
+             concurrent workers have completed, with the identical UUID. *)
+          task_journal_ok (Task_journal.append first)
+      | Ok _ | Error _ -> task_journal_ok outcome) in
+    check int "concurrent duplicate writers commit exactly once" 1
+      (List.length (List.filter (function Task_journal.Appended _ -> true | Replayed _ -> false) outcomes));
+    let db = Sqlite3.db_open (Task_journal.path reader) in
+    Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db)) (fun () ->
+      let sql statement = match Sqlite3.exec db statement with
+        | Sqlite3.Rc.OK -> () | rc -> fail (Sqlite3.Rc.to_string rc) in
+      sql "BEGIN IMMEDIATE";
+      sql "UPDATE metadata SET next_sequence=99";
+      sql "ROLLBACK");
+    check int "rolled-back transaction changes no committed rows" 1
+      (List.length (task_journal_rows reader));
+    (match task_journal_ok (Task_journal.append second) with
+     | Task_journal.Appended r -> check int "rollback preserves next committed sequence" 2 r.seq
+     | Replayed _ -> fail "new event became replay");
+    let db = Sqlite3.db_open (Task_journal.path reader) in
+    Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db)) (fun () ->
+      match Sqlite3.exec db "UPDATE metadata SET next_sequence=99" with
+      | Sqlite3.Rc.OK -> () | rc -> fail (Sqlite3.Rc.to_string rc));
+    (match (Task_journal.append third).result with
+     | Error (Task_journal.Corrupt _) -> () | _ -> fail "inconsistent sequence metadata was accepted");
+    let blocked = Filename.concat base_path "file-instead-of-directory" in
+    Out_channel.with_open_bin blocked (fun out -> output_string out "unchanged");
+    let unavailable = Task_journal.create ~base_path:blocked ~keeper_name:"claude-fixture"
+        ~source:(task_journal_operation "operation") ~redact_text:Fun.id in
+    let attempt,bound = List.hd observations in
+    (match (Task_journal.observe unavailable ~attempt bound).result with
+     | Error _ -> () | Ok _ -> fail "I/O failure produced a committed receipt");
+    check int "failed observation remains explicitly unhealthy" 1
+      (List.length (Task_journal.health unavailable));
+    check string "filesystem failure cannot overwrite unrelated file" "unchanged"
+      (In_channel.with_open_bin blocked In_channel.input_all))
+;;
+
+let test_child_http_reads_actual_driver_observations () =
+  with_child_journal_observations (fun ~base_path observations ->
+    let module Api = Server_dashboard_http_keeper_child_content in
+    let module Read = Keeper_child_content_read in
+    let keeper_name = "claude-fixture" in
+    let sink = Child_journal.create ~base_path ~keeper_name
+      ~source:(task_journal_operation "child-http") ~redact_text:Fun.id in
+    let publications = List.map (fun (attempt, observation) ->
+      Result.get_ok (Child_journal.prepare sink ~attempt observation)) observations in
+    List.iter (fun publication -> ignore (child_journal_ok (Child_journal.append publication))) publications;
+    let reader = Child_journal.reader_of_publication (List.hd publications) in
+    let original = child_journal_ok (Child_journal.read reader) in
+    let invocation = (List.hd original.records).observation.origin.invocation in
+    let receiver : Read.receiver = {receiver_generation=invocation.receiver_generation;
+      session_id=invocation.session_id;client_uuid=invocation.client_uuid} in
+    let scope : Read.scope = {keeper_name;receiver} in
+    (* The actual store predates this secret policy; HTTP must apply current
+       redaction without changing original correlations or typed attribution. *)
+    let secret = "CHILD_SECRET_BODY" in
+    let token_file = Keeper_secret_redaction.ssh_remote_token_file ~base_path ~keeper_name in
+    Fs_compat.mkdir_p (Filename.dirname token_file);
+    Out_channel.with_open_bin token_file (fun out -> output_string out secret);
+    let state = Mcp_server.For_testing.create_state ~base_path in
+    let prefix = "/api/v1/keepers/" ^ keeper_name ^ "/child-content/" in
+    let receiver_query = ["receiver_generation",receiver.receiver_generation;
+      "session_id",receiver.session_id;"client_uuid",receiver.client_uuid] in
+    let get endpoint query =
+      let target = Uri.to_string (Uri.with_query' (Uri.of_string (prefix ^ endpoint)) query) in
+      let request = Httpun.Request.create `GET target in
+      let route = match Api.route (Uri.path (Uri.of_string target)) with
+        | Some route -> route | None -> fail "Child read route not recognized" in
+      let status, body = Api.response state request route in
+      Httpun.Status.to_code status, body in
+    let decode body = require_ok Read.decode_error_to_string
+      (Read.of_json (Yojson.Safe.from_string (Yojson.Safe.to_string body))) in
+    let status, body = get "records" receiver_query in
+    check int "actual Child store HTTP read" 200 status;
+    check bool "newly learned secret is redacted on HTTP read" false
+      (Astring.String.is_infix ~affix:secret (Yojson.Safe.to_string body));
+    let page = require_ok Read.decode_error_to_string
+      (Read.records_of_response ~request:{scope;after=None} (decode body)) in
+    check (list int) "actual four captured channel snapshots survive HTTP" [1;2;3;4]
+      (List.map (fun (row:Read.record) -> row.seq) page.records);
+    List.iter2 (fun (stored:Child_journal.record) (row:Read.record) ->
+      check bool "HTTP keeps exact complete-frame correlations and refusal" true
+        (stored.observation.origin=row.observation.origin
+         && stored.observation.observation_id=row.observation.observation_id
+         && stored.observation.envelope_uuid=row.observation.envelope_uuid
+         && stored.observation.ordinal=row.observation.ordinal
+         && stored.observation.channel=row.observation.channel
+         && stored.observation.message_id=row.observation.message_id
+         && stored.observation.attribution=row.observation.attribution)) original.records page.records;
+    let after = page.next_cursor in
+    let cursor_query = receiver_query @ ["store_id",after.store_id;
+      "after_sequence",string_of_int after.after_sequence] in
+    let status, suffix = get "records" cursor_query in
+    check int "actual caught-up Child suffix" 200 status;
+    let suffix = require_ok Read.decode_error_to_string
+      (Read.records_of_response ~request:{scope;after=Some after} (decode suffix)) in
+    check int "caught-up suffix is empty only with matching receipt" 0 (List.length suffix.records);
+    let status, foreign = get "records" (receiver_query @
+      ["store_id","foreign-incarnation";"after_sequence","0"]) in
+    check int "foreign Child incarnation refuses" 409 status;
+    (match decode foreign with Read.Failure {error=Read.Cursor_store_mismatch;_} -> ()
+     | _ -> fail "foreign cursor lost typed refusal");
+    let foreign_query = List.map (fun (key,value) ->
+      key,(if key="client_uuid" then value ^ "+&/%foreign" else value)) receiver_query in
+    let status, foreign = get "records" foreign_query in
+    check int "opaque different client UUID cannot select original store" 404 status;
+    (match decode foreign with Read.Failure {error=Read.Store_missing;_} -> ()
+     | _ -> fail "foreign invocation lost missing-store refusal");
+    let status, hints = get "hints" [] in
+    check int "Child HTTP unchecked hints" 200 status;
+    let decoded_hints = decode hints in
+    let hints = require_ok Read.decode_error_to_string
+      (Read.hints_of_response ~keeper_name decoded_hints) in
+    (match hints.hints with
+     | [{receiver=held;hint=Read.Unchecked cursor}] ->
+         check bool "actual hint retains full invocation and tail" true
+           (held=receiver && cursor=page.next_cursor)
+     | _ -> fail "actual store hint missing or falsely audited");
+    check bool "hint cannot become audited discovery" true
+      (Read.receivers_of_response ~keeper_name decoded_hints=Error Read.Unexpected_response);
+    let status, receivers = get "receivers" [] in
+    check int "Child HTTP audited discovery" 200 status;
+    let receivers = require_ok Read.decode_error_to_string
+      (Read.receivers_of_response ~keeper_name (decode receivers)) in
+    (match receivers.receivers with
+     | [{receiver=held;storage=Read.Audited cursor}] ->
+         check bool "audited discovery retains same actual ticket and tail" true
+           (held=receiver && cursor=page.next_cursor)
+     | _ -> fail "actual Child audited discovery missing");
+    check bool "Child read does not invent persistence failure history" true
+      (page.coverage=Read.Unavailable && hints.coverage=Read.Unavailable
+       && receivers.coverage=Read.Unavailable))
+;;
+
+let test_native_task_http_reads_actual_bound_observations () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    let module Api = Server_dashboard_http_keeper_native_tasks in
+    let keeper_name = "claude-fixture" in
+    let sink = Task_journal.create ~base_path ~keeper_name
+      ~source:(task_journal_operation "http-observation") ~redact_text:Fun.id in
+    List.iter (fun (attempt,bound) ->
+      ignore (task_journal_ok (Task_journal.observe sink ~attempt bound))) observations;
+    let attempt,(bound : Keeper_claude_task_binding.bound) = List.hd observations in
+    (* The secret is learned after persistence: reads must use current policy. *)
+    let secret = "general-purpose" in
+    let token_file = Keeper_secret_redaction.ssh_remote_token_file ~base_path ~keeper_name in
+    Fs_compat.mkdir_p (Filename.dirname token_file);
+    Out_channel.with_open_bin token_file (fun out -> output_string out secret);
+    let state = Mcp_server.For_testing.create_state ~base_path in
+    let prefix = "/api/v1/keepers/" ^ keeper_name ^ "/native-tasks/" in
+    let query = "?receiver_generation=" ^ Uri.pct_encode bound.ticket.receiver_generation
+      ^ "&session_id=" ^ Uri.pct_encode bound.ticket.session_id in
+    let get suffix =
+      let target = prefix ^ suffix in
+      let request = Httpun.Request.create `GET target in
+      let route = match Api.route (Uri.path (Uri.of_string target)) with
+        | Some route -> route | None -> fail "native task route not recognized" in
+      let status, body = Api.response state request route in
+      Httpun.Status.to_code status, body in
+    let member = Yojson.Safe.Util.member in
+    let status, body = get ("records" ^ query) in
+    check int "production handler reads real bound journal" 200 status;
+    check bool "read applies current redaction to previously stored metadata" false
+      (Astring.String.is_infix ~affix:secret (Yojson.Safe.to_string body));
+    let rows = body |> member "records" |> Yojson.Safe.Util.to_list in
+    check (list int) "actual committed sequence returned" [1;2;3]
+      (List.map (fun row -> row |> member "seq" |> Yojson.Safe.Util.to_int) rows);
+    check string "read does not certify provider completeness" "unknown"
+      (body |> member "provider_completeness" |> Yojson.Safe.Util.to_string);
+    check string "absent terminal is never inferred complete" "unknown"
+      (body |> member "terminal_without_observation" |> Yojson.Safe.Util.to_string);
+    let module Read = Keeper_native_task_read in
+    let wire_decode body =
+      body |> Yojson.Safe.to_string |> Yojson.Safe.from_string |> Read.of_json
+      |> Result.get_ok in
+    let scope : Read.scope = {keeper_name;receiver={
+      receiver_generation=bound.ticket.receiver_generation;session_id=bound.ticket.session_id}} in
+    let request : Read.records_request = {scope;after=None} in
+    let decoded = wire_decode body in
+    let page = match Read.records_of_response ~request decoded with
+      | Ok page -> page | Error e -> fail (Read.decode_error_to_string e) in
+    check (list int) "actual HTTP JSON to shared closed read view retains commit order" [1;2;3]
+      (List.map (fun (row:Read.record) -> row.seq) page.records);
+    (match List.map (fun (row:Read.record) -> row.observation.event) page.records with
+     | [Runtime_native_tasks.Task_registered _;
+        Task_progress_reported {usage;_};Task_terminal_reported _] ->
+         check int "public page retains signed provider duration" (-3) usage.duration_ms
+     | _ -> fail "closed public read changed observation kinds");
+    let set name value = function
+      | `Assoc fields -> `Assoc ((name,value)::List.remove_assoc name fields)
+      | _ -> fail "expected actual HTTP JSON object" in
+    let malformed value = match Read.of_json value with
+      | Error _ -> () | Ok _ -> fail "malformed actual record page was accepted" in
+    let original_rows = rows in
+    malformed (set "records" (`List (List.rev original_rows)) body);
+    malformed (set "records" (`List [List.hd original_rows;List.nth original_rows 2]) body);
+    let replace_first row = set "records" (`List (row::List.tl original_rows)) body in
+    malformed (replace_first (set "seq" (`Int 0) (List.hd original_rows)));
+    malformed (replace_first (set "seq" (`Intlit "9007199254740992") (List.hd original_rows)));
+    (match Read.of_json (replace_first (set "recorded_at" (`Float Float.infinity) (List.hd original_rows))) with
+     | Error (Read.Invalid_number _) -> () | _ -> fail "nonfinite timestamp was accepted");
+    let first_uuid=List.hd original_rows |> member "observation" |> member "uuid" in
+    let second=List.nth original_rows 1 in
+    let duplicate=set "observation" (set "uuid" first_uuid (member "observation" second)) second in
+    (match Read.of_json (set "records" (`List [List.hd original_rows;duplicate;List.nth original_rows 2]) body) with
+     | Error Read.Duplicate_event_uuid -> () | _ -> fail "duplicate event UUID with valid sequence was accepted");
+    let foreign_row = List.hd original_rows in
+    let foreign_observation=foreign_row |> member "observation" in
+    let foreign_origin=foreign_observation |> member "origin" in
+    (match Read.of_json (replace_first (set "observation"
+      (set "origin" (set "keeper_name" (`String "foreign") foreign_origin) foreign_observation) foreign_row)) with
+     | Error Read.Scope_mismatch -> () | _ -> fail "foreign row scope with valid sequence was accepted");
+    malformed (set "validation" (`Assoc ["kind",`String "full_committed_history";"through_sequence",`Int 4]) body);
+    malformed (set "next_cursor" (`Assoc ["store_id",`String "store";"after_sequence",`Int (-1)]) body);
+    let refusal request = match Read.records_of_response ~request decoded with
+      | Error _ -> () | Ok _ -> fail "foreign/malformed public request cursor accepted" in
+    refusal {request with scope={scope with keeper_name="foreign"}};
+    refusal {request with scope={scope with receiver={scope.receiver with session_id="foreign"}}};
+    refusal {scope;after=Some {page.next_cursor with store_id="foreign"}};
+    refusal {scope;after=Some {page.next_cursor with after_sequence=(-1)}};
+    refusal {scope;after=Some {page.next_cursor with after_sequence=9007199254740992}};
+    refusal {scope;after=Some {page.next_cursor with store_id=" "}};
+    (* A suffix is structurally legal, but only the matching request may accept
+       its first sequence. This prevents silent cursor skipping/reset. *)
+    let suffix_json = set "records" (`List (List.tl original_rows)) body in
+    let suffix = wire_decode suffix_json in
+    (match Read.records_of_response ~request suffix with
+     | Error Read.Sequence_mismatch -> ()
+     | _ -> fail "structural suffix was accepted for a Beginning request");
+    let after_one : Read.records_request =
+      {scope;after=Some {page.next_cursor with after_sequence=1}} in
+    (match Read.records_of_response ~request:after_one suffix with
+     | Ok suffix -> check int "correct request accepts complete two-row suffix" 2 (List.length suffix.records)
+     | Error e -> fail (Read.decode_error_to_string e));
+    let cursor = body |> member "next_cursor" in
+    let cursor_query = "&store_id=" ^ Uri.pct_encode
+      (cursor |> member "store_id" |> Yojson.Safe.Util.to_string)
+      ^ "&after_sequence=3" in
+    let status, replay = get ("records" ^ query ^ cursor_query) in
+    check int "exact cursor accepted" 200 status;
+    check int "no repeated committed rows" 0
+      (List.length (replay |> member "records" |> Yojson.Safe.Util.to_list));
+    let caught_up = wire_decode replay in
+    (match Read.records_of_response ~request:{scope;after=Some page.next_cursor} caught_up with
+     | Ok page -> check int "actual caught-up HTTP suffix remains existing empty success" 0 (List.length page.records)
+     | Error e -> fail (Read.decode_error_to_string e));
+    (match Read.records_of_response ~request caught_up with
+     | Error Read.Sequence_mismatch -> () | _ -> fail "empty suffix reset a Beginning cursor");
+    let status,foreign = get ("records" ^ query ^ "&store_id=foreign&after_sequence=3") in
+    check int "foreign store cursor refused" 409 status;
+    (match wire_decode foreign with
+     | Read.Failure {error=Read.Cursor_store_mismatch;health=Some _} -> ()
+     | _ -> fail "HTTP cursor refusal lost its typed service error");
+    let status, discovery = get "receivers" in
+    check int "production discovery" 200 status;
+    check int "actual receiver discoverable" 1
+      (List.length (discovery |> member "receivers" |> Yojson.Safe.Util.to_list));
+    (match Read.receivers_of_response ~keeper_name (wire_decode discovery) with
+     | Ok {receivers=[{receiver;storage=Read.Audited cursor}];_} ->
+         check bool "actual HTTP discovery names the same cursor incarnation and receiver" true
+           (receiver=scope.receiver && cursor=page.next_cursor)
+     | Ok _ -> fail "actual receiver did not remain audited"
+     | Error e -> fail (Read.decode_error_to_string e));
+    let conflict = Task_journal.create ~base_path ~keeper_name
+      ~source:(task_journal_operation "other-source") ~redact_text:Fun.id in
+    (match (Task_journal.observe conflict ~attempt bound).result with
+     | Error (Task_journal.Conflicting_uuid _) -> ()
+     | _ -> fail "fixture failed to produce real persistence conflict");
+    let _, discovery = get "receivers" in
+    let health = discovery |> member "observed_persistence_health" in
+    check string "health explicitly process scoped" "issues_observed_in_this_process_only"
+      (health |> member "coverage" |> Yojson.Safe.Util.to_string);
+    check bool "actual failed observation exposed" true
+      (List.exists (fun issue -> issue |> member "error" |> member "error" = `String "conflicting_uuid")
+        (health |> member "issues" |> Yojson.Safe.Util.to_list));
+    let reader = Task_journal.reader_of_publication
+      (Result.get_ok (Task_journal.prepare sink ~attempt bound)) in
+    let db = Sqlite3.db_open (Task_journal.path reader) in
+    Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db)) (fun () ->
+      let stmt = Sqlite3.prepare db "SELECT sql FROM sqlite_master WHERE name='immutable_observations'" in
+      let trigger = Fun.protect ~finally:(fun () -> ignore (Sqlite3.finalize stmt)) (fun () ->
+        match Sqlite3.step stmt with
+        | Sqlite3.Rc.ROW -> Sqlite3.column_text stmt 0 | _ -> fail "missing immutable trigger") in
+      let sql value = match Sqlite3.exec db value with
+        | Sqlite3.Rc.OK -> () | rc -> fail (Sqlite3.Rc.to_string rc) in
+      sql "BEGIN IMMEDIATE"; sql "DROP TRIGGER immutable_observations";
+      sql "UPDATE observations SET payload='{}' WHERE seq=1";
+      sql trigger; sql "COMMIT");
+    let status,_ = get ("records" ^ query ^ cursor_query) in
+    check int "cursor cannot hide corrupt historical row" 503 status)
+;;
+
+let test_native_task_journal_callback_failure_preserves_root_answer () =
+  let outcomes = ref [] in
+  with_task_journal_bindings
+    ~on_bound:(fun ~base_path ~attempt bound ->
+      let blocker = Filename.concat base_path "task-store-blocker" in
+      Out_channel.with_open_bin blocker (fun out -> output_string out "fixture");
+      let sink = Task_journal.create ~base_path:blocker ~keeper_name:"claude-fixture"
+          ~source:(task_journal_operation "callback-operation") ~redact_text:Fun.id in
+      outcomes := Task_journal.observe sink ~attempt bound :: !outcomes)
+    (fun ~base_path:_ _ ->
+      check int "all actual driver callbacks returned typed persistence failures" 3 (List.length !outcomes);
+      List.iter (fun (outcome:Task_journal.commit Task_journal.outcome) ->
+        match outcome.result with Error _ -> ()
+        | Ok _ -> fail "blocked task store reported a receipt") !outcomes)
+;;
+
+let test_native_task_journal_autonomous_closed_root () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    Eio_main.run (fun _ ->
+      let turn_ref = Ids.Turn_ref.make ~trace_id:"task-journal-autonomous" ~absolute_turn:1 in
+      let stream = Keeper_autonomous_stream.create ~base_path ~keeper_name:"claude-fixture" ~turn_ref in
+      Keeper_autonomous_stream.finish stream Keeper_autonomous_stream.Cancelled;
+      let root_path = Keeper_chat_event_log.turn_journal_path ~base_dir:base_path
+          ~keeper_name:"claude-fixture" ~turn_ref in
+      let root_before = In_channel.with_open_bin root_path In_channel.input_all in
+      List.iter (fun (attempt,bound) ->
+        Keeper_autonomous_stream.on_tool_stream_observation stream
+          (Keeper_hooks_agent_core.Native_task_observed {attempt;bound})) observations;
+      check string "late tasks append no root events or fabricated lifecycle"
+        root_before (In_channel.with_open_bin root_path In_channel.input_all);
+      check int "task writes remain healthy after root journal closure" 0
+        (List.length (Keeper_autonomous_stream.task_journal_health stream));
+      let _,(bound:Keeper_claude_task_binding.bound) = List.hd observations in
+      let reader = Result.get_ok (Task_journal.open_reader ~base_path ~keeper_name:"claude-fixture"
+        ~receiver_generation:bound.ticket.receiver_generation ~session_id:bound.ticket.session_id) in
+      let rows = task_journal_rows reader in
+      check int "all late bound observations persisted without reopening root" 3 (List.length rows);
+      List.iter (fun (r:Task_journal.record) -> match r.observation.origin.source with
+        | Runtime_native_tasks.Autonomous_turn {turn_ref=actual} ->
+            check string "actual autonomous reference retained" (Ids.Turn_ref.to_string turn_ref) actual
+        | Operation _ -> fail "invented operation for autonomous task") rows;
+      check bool "task writes never restore the closed root current identity" true
+        (Keeper_autonomous_stream.current ~base_path ~keeper_name:"claude-fixture" = None)))
+;;
+
+let test_native_task_journal_wait_does_not_hold_root_stream () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    Eio_main.run (fun env ->
+      Eio.Switch.run (fun sw ->
+        let keeper_name = "claude-fixture" in
+        let turn_ref = Ids.Turn_ref.make ~trace_id:"task-journal-lock" ~absolute_turn:1 in
+        let stream = Keeper_autonomous_stream.create ~base_path ~keeper_name ~turn_ref in
+        let attempt, (bound : Keeper_claude_task_binding.bound) = List.hd observations in
+        let reader = Result.get_ok (Task_journal.open_reader ~base_path ~keeper_name
+          ~receiver_generation:bound.ticket.receiver_generation ~session_id:bound.ticket.session_id) in
+        let entered, signal_entered = Eio.Promise.create () in
+        let release, signal_release = Eio.Promise.create () in
+        let callback_entered, signal_callback = Eio.Promise.create () in
+        let task_done, signal_done = Eio.Promise.create () in
+        let root_done, signal_root = Eio.Promise.create () in
+        Eio.Fiber.fork ~sw (fun () ->
+          match Keeper_fs_durable_directory.ensure ~ownership_root:base_path
+            ~before_prepare:(fun () ->
+              Eio.Promise.resolve signal_entered ();
+              Eio.Promise.await release)
+            ~before_directory_fsync:(fun _ -> ())
+            (Filename.dirname (Task_journal.path reader)) with
+          | Ok _ -> ()
+          | Error _ -> fail "fixture directory preparation failed");
+        Eio.Promise.await entered;
+        Fun.protect ~finally:(fun () -> Eio.Promise.resolve signal_release ()) (fun () ->
+          Eio.Fiber.fork ~sw (fun () ->
+            (* No yielding operation separates this signal from entry into the
+               real callback. Its first filesystem wait retains the old root
+               mutex on the regression path. *)
+            Eio.Promise.resolve signal_callback ();
+            Keeper_autonomous_stream.on_tool_stream_observation stream
+              (Keeper_hooks_agent_core.Native_task_observed {attempt;bound});
+            Eio.Promise.resolve signal_done ());
+          Eio.Promise.await callback_entered;
+          Eio.Fiber.fork ~sw (fun () ->
+            Keeper_autonomous_stream.finish stream Keeper_autonomous_stream.Cancelled;
+            Eio.Promise.resolve signal_root ());
+          (* Timeout only the waiter: finish itself masks cancellation. The
+             finally releases task preparation before the switch joins either
+             protected callback, including on the old implementation. *)
+          Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5. (fun () ->
+            Eio.Promise.await root_done);
+          check bool "root closes while task directory preparation is held" true
+            (Keeper_autonomous_stream.current ~base_path ~keeper_name = None);
+          check bool "blocked task has not committed a receiver file" false
+            (Sys.file_exists (Task_journal.path reader)));
+        Eio.Promise.await task_done;
+        let rows = task_journal_rows reader in
+        check (list string) "released callback persists its original task UUID"
+          [bound.observation.uuid]
+          (List.map (fun (row : Task_journal.record) -> row.observation.uuid) rows);
+        check bool "task completion cannot reopen the closed root" true
+          (Keeper_autonomous_stream.current ~base_path ~keeper_name = None))))
+;;
+
+let test_native_task_sqlite_validation_scope_and_cursor () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    let keeper_name = "claude-fixture" in
+    let sink () = Task_journal.create ~base_path ~keeper_name
+      ~source:(task_journal_operation "sqlite-validation") ~redact_text:Fun.id in
+    let collector = sink () in
+    let publications = List.map (fun (attempt,bound) ->
+      Result.get_ok (Task_journal.prepare collector ~attempt bound)) observations in
+    let first = List.hd publications and second = List.nth publications 1
+    and third = List.nth publications 2 in
+    let reader = Task_journal.reader_of_publication first in
+    (match (Task_journal.read reader).result with
+     | Error Task_journal.Missing_store -> () | _ -> fail "missing read must not create a database");
+    check bool "read leaves missing database absent" false (Sys.file_exists (Task_journal.path reader));
+    ignore (task_journal_ok (Task_journal.append first));
+    let snapshot = task_journal_ok (Task_journal.read reader) in
+    let cursor = Task_journal.next_cursor snapshot in
+    ignore (task_journal_ok (Task_journal.append second));
+    let suffix = task_journal_ok (Task_journal.read ~after:cursor reader) in
+    check (list int) "incarnation cursor returns only later committed rows" [2]
+      (List.map (fun (r:Task_journal.record) -> r.seq) suffix.records);
+    check int "full audit still names entire snapshot boundary" 2 suffix.validation.through_sequence;
+    let foreign = Result.get_ok (Task_journal.cursor ~store_id:"another-store" ~after_sequence:0) in
+    (match (Task_journal.read ~after:foreign reader).result with
+     | Error Task_journal.Cursor_store_mismatch -> () | _ -> fail "foreign cursor accepted");
+    let ahead = Result.get_ok (Task_journal.cursor ~store_id:cursor.store_id ~after_sequence:3) in
+    (match (Task_journal.read ~after:ahead reader).result with
+     | Error Task_journal.Cursor_ahead -> () | _ -> fail "future cursor accepted");
+    (* Deliberate bypass of the application immutability trigger. Restore its
+       exact schema so this isolates changed OLD payload detection timing. *)
+    let db = Sqlite3.db_open (Task_journal.path reader) in
+    Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db)) (fun () ->
+      let stmt = Sqlite3.prepare db "SELECT sql FROM sqlite_master WHERE name='immutable_observations'" in
+      let trigger = Fun.protect ~finally:(fun () -> ignore (Sqlite3.finalize stmt)) (fun () ->
+        match Sqlite3.step stmt with
+        | Sqlite3.Rc.ROW -> Sqlite3.column_text stmt 0 | _ -> fail "missing immutable trigger") in
+      let sql value = match Sqlite3.exec db value with
+        | Sqlite3.Rc.OK -> () | rc -> fail (Sqlite3.Rc.to_string rc) in
+      sql "BEGIN IMMEDIATE"; sql "DROP TRIGGER immutable_observations";
+      sql "UPDATE observations SET payload='!' || substr(payload,2) WHERE seq=1";
+      sql trigger; sql "COMMIT");
+    (match task_journal_ok (Task_journal.append third) with
+     | Task_journal.Appended row -> check int "warm append does not audit unrelated historical payload" 3 row.seq
+     | Replayed _ -> fail "third event was not new");
+    (match (Task_journal.read reader).result with
+     | Error (Task_journal.Corrupt {line=1;_}) -> () | _ -> fail "full read failed to detect old corruption");
+    (match (Task_journal.append first).result with
+     | Error (Task_journal.Corrupt {line=1;_}) -> () | _ -> fail "addressed UUID corruption was acknowledged");
+    let attempt,bound = List.nth observations 2 in
+    (match (Task_journal.observe (sink ()) ~attempt bound).result with
+     | Error (Task_journal.Corrupt {line=1;_}) -> () | _ -> fail "fresh writer skipped complete startup audit");
+    let inventory = task_journal_ok (Task_journal.discover ~base_path ~keeper_name) in
+    check int "corrupt canonical receiver remains discoverable" 1 (List.length inventory);
+    match (List.hd inventory).state with
+    | Error (Task_journal.Corrupt _) -> () | _ -> fail "discovery advertised corrupt history as validated")
+;;
+
+let test_native_task_change_hints_keep_full_audit_separate () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    let keeper_name="claude-fixture" in
+    let collector=Task_journal.create ~base_path ~keeper_name
+      ~source:(task_journal_operation "change-hints") ~redact_text:Fun.id in
+    let publications=List.map (fun (attempt,bound) ->
+      Result.get_ok (Task_journal.prepare collector ~attempt bound)) observations in
+    let first=List.hd publications and second=List.nth publications 1 in
+    let reader=Task_journal.reader_of_publication first in
+    (match (Task_journal.read_hint reader).result with
+     | Error Task_journal.Missing_store -> () | _ -> fail "missing hint created a store");
+    check bool "hint leaves missing database absent" false (Sys.file_exists (Task_journal.path reader));
+    check int "cold hints return explicit empty inventory" 0
+      (List.length (task_journal_ok (Task_journal.discover_hints ~base_path ~keeper_name)));
+    check bool "cold discovery creates no receiver directory" false
+      (Sys.file_exists (Filename.dirname (Task_journal.path reader)));
+    ignore (task_journal_ok (Task_journal.append first));
+    let initial=task_journal_ok (Task_journal.read_hint reader) in
+    check int "hint sees committed first sequence" 1 initial.through_sequence;
+    ignore (task_journal_ok (Task_journal.append second));
+    let before=task_journal_ok (Task_journal.read_hint reader) in
+    check bool "append changes tail without replacing incarnation" true
+      (before.store_id=initial.store_id && before.through_sequence=2);
+    (* Bypass row immutability deliberately, then restore the exact trigger.
+       Metadata/tail/schema are unchanged: no hint can certify this payload. *)
+    let db=Sqlite3.db_open (Task_journal.path reader) in
+    Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db)) (fun () ->
+      let stmt=Sqlite3.prepare db "SELECT sql FROM sqlite_master WHERE name='immutable_observations'" in
+      let trigger=Fun.protect ~finally:(fun () -> ignore (Sqlite3.finalize stmt)) (fun () ->
+        match Sqlite3.step stmt with Sqlite3.Rc.ROW -> Sqlite3.column_text stmt 0
+        | _ -> fail "missing immutable trigger") in
+      let sql value=match Sqlite3.exec db value with
+        | Sqlite3.Rc.OK -> () | rc -> fail (Sqlite3.Rc.to_string rc) in
+      sql "BEGIN IMMEDIATE";sql "DROP TRIGGER immutable_observations";
+      sql "UPDATE observations SET payload='!' || substr(payload,2) WHERE seq=1";
+      sql trigger;sql "COMMIT");
+    let after=task_journal_ok (Task_journal.read_hint reader) in
+    check bool "same-tail semantic tamper leaves only unchecked hint equal" true (before=after);
+    let hints=task_journal_ok (Task_journal.discover_hints ~base_path ~keeper_name) in
+    (match hints with
+     | [{Task_journal.state=Ok hint;_}] -> check bool "hint discovery preserves unchecked result" true (hint=after)
+     | _ -> fail "hint discovery performed historical audit or lost receiver");
+    (match (Task_journal.read reader).result with
+     | Error (Task_journal.Corrupt {line=1;_}) -> () | _ -> fail "full read lost historical corruption refusal");
+    let audited=task_journal_ok (Task_journal.discover ~base_path ~keeper_name) in
+    (match audited with
+     | [{Task_journal.state=Error (Task_journal.Corrupt {line=1;_});_}] -> ()
+     | _ -> fail "audited discovery adopted unchecked hint semantics");
+    let foreign=Result.get_ok (Task_journal.open_reader ~base_path ~keeper_name
+      ~receiver_generation:"another generation" ~session_id:"another session") in
+    Fs_compat.mkdir_p (Filename.dirname (Task_journal.path foreign));
+    let bytes=In_channel.with_open_bin (Task_journal.path reader) In_channel.input_all in
+    Out_channel.with_open_bin (Task_journal.path foreign) (fun out -> output_string out bytes);
+    (match (Task_journal.read_hint foreign).result with
+     | Error (Task_journal.Corrupt _) -> () | _ -> fail "hint accepted copied foreign-scope database");
+    Sys.remove (Task_journal.path foreign);
+    Sys.remove (Task_journal.path reader);
+    ignore (task_journal_ok (Task_journal.append first));
+    let replacement=task_journal_ok (Task_journal.read_hint reader) in
+    check bool "replacement store has distinct unchecked incarnation" true
+      (replacement.store_id<>before.store_id && replacement.through_sequence=1);
+    let db=Sqlite3.db_open (Task_journal.path reader) in
+    Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db)) (fun () ->
+      match Sqlite3.exec db "UPDATE metadata SET next_sequence=3" with
+      | Sqlite3.Rc.OK -> () | rc -> fail (Sqlite3.Rc.to_string rc));
+    (match (Task_journal.read_hint reader).result with
+     | Error (Task_journal.Corrupt _) -> () | _ -> fail "hint ignored tail/metadata disagreement");
+    let hints=task_journal_ok (Task_journal.discover_hints ~base_path ~keeper_name) in
+    match hints with
+    | [{Task_journal.state=Error (Task_journal.Corrupt _);_}] -> ()
+    | _ -> fail "failed hint became absent or successful receiver")
+;;
+
+let test_native_task_change_hint_directory_authority () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    let attempt,bound=List.hd observations in
+    let keeper_name="claude-fixture" in
+    let collector=Task_journal.create ~base_path ~keeper_name
+      ~source:(task_journal_operation "hint-directory") ~redact_text:Fun.id in
+    let publication=Result.get_ok (Task_journal.prepare collector ~attempt bound) in
+    let reader=Task_journal.reader_of_publication publication in
+    let generation=Filename.dirname (Task_journal.path reader) in
+    let keeper=Filename.dirname generation in
+    Fs_compat.mkdir_p keeper;
+    Unix.chmod keeper 0o777;
+    Fun.protect ~finally:(fun () -> Unix.chmod keeper 0o700) (fun () ->
+      match (Task_journal.discover_hints ~base_path ~keeper_name).result with
+      | Error (Task_journal.Store_unavailable _) -> ()
+      | _ -> fail "empty unsafe Keeper became successful hint inventory");
+    Fs_compat.mkdir_p generation;
+    let removed=ref false in
+    Fun.protect ~finally:(fun () -> if !removed then Unix.mkdir generation 0o700) (fun () ->
+      let outcome=Task_journal.For_testing.discover_hints ~base_path ~keeper_name
+        ~before_read:(fun _ -> ()) ~after_read:(fun path ->
+          if path=keeper then (Unix.rmdir generation;removed:=true)) in
+      check bool "hint fixture reached actual enumeration boundary" true !removed;
+      match outcome.result with
+      | Error (Task_journal.Store_unavailable _) -> ()
+      | _ -> fail "enumerated generation disappearance became cold hint absence"))
+;;
+
+let test_native_task_sqlite_commit_cleanup_and_known_issues () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    let keeper_name = "claude-fixture" in
+    let make () = Task_journal.create ~base_path ~keeper_name
+      ~source:(task_journal_operation "sqlite-outcomes") ~redact_text:Fun.id in
+    let collector = make () in
+    let first_attempt,first_bound = List.hd observations in
+    let publication = Result.get_ok (Task_journal.prepare collector ~attempt:first_attempt first_bound) in
+    let reader = Task_journal.reader_of_publication publication in
+    let commit db = Sqlite3.exec db "COMMIT" in
+    let warning = Task_journal.For_testing.append_with_io ~commit
+      ~close:(fun db -> ignore (Sqlite3.db_close db);false) publication in
+    (match warning.result,warning.cleanup_failure with
+     | Ok (Task_journal.Appended row),[_] -> check int "cleanup warning retains committed sequence" 1 row.seq
+     | _ -> fail "close warning rewrote known commit");
+    let warning_exception = Task_journal.For_testing.append_with_io ~commit
+      ~close:(fun db -> ignore (Sqlite3.db_close db);raise (Sqlite3.SqliteError "injected close")) publication in
+    (match warning_exception.result,warning_exception.cleanup_failure with
+     | Ok (Task_journal.Replayed row),[_] -> check int "close exception retains replay receipt" 1 row.seq
+     | _ -> fail "close exception replaced primary receipt");
+    let attempt,bound = List.nth observations 1 in
+    let second = Result.get_ok (Task_journal.prepare collector ~attempt bound) in
+    let uncertain = Task_journal.For_testing.append_with_io
+      ~commit:(fun db -> ignore (Sqlite3.exec db "COMMIT");Sqlite3.Rc.IOERR)
+      ~close:Sqlite3.db_close second in
+    (match uncertain.result with
+     | Error (Task_journal.Commit_unconfirmed _) -> () | _ -> fail "ambiguous commit reported definite failure or success");
+    (match task_journal_ok (Task_journal.append second) with
+     | Task_journal.Replayed row -> check int "same UUID reconciles an uncertain committed write" 2 row.seq
+     | Appended _ -> fail "uncertain commit was duplicated");
+    let uncertain_exception = Task_journal.For_testing.append_with_io
+      ~commit:(fun db -> ignore (Sqlite3.exec db "COMMIT");raise (Sqlite3.SqliteError "injected commit"))
+      ~close:Sqlite3.db_close second in
+    (match uncertain_exception.result with
+     | Error (Task_journal.Commit_unconfirmed _) -> ()
+     | Error _ | Ok _ -> fail "commit exception lost unknown-outcome classification");
+    (* Block only this receiver file after binding. The process registry must
+       expose a failed first append even though no authority DB exists. *)
+    let failure_keeper = "failed-first-append" in
+    let sink = Task_journal.create ~base_path ~keeper_name:failure_keeper
+      ~source:(task_journal_operation "failed") ~redact_text:Fun.id in
+    let publication = Result.get_ok (Task_journal.prepare sink ~attempt:first_attempt first_bound) in
+    let failed_reader = Task_journal.reader_of_publication publication in
+    Fs_compat.mkdir_p (Filename.dirname (Task_journal.path failed_reader));
+    Unix.mkdir (Task_journal.path failed_reader) 0o700;
+    (match (Task_journal.observe sink ~attempt:first_attempt first_bound).result with
+     | Error _ -> () | Ok _ -> fail "directory masquerading as authority store accepted");
+    Unix.rmdir (Task_journal.path failed_reader);
+    let known = Result.get_ok (Task_journal.issue_snapshot ~base_path ~keeper_name:failure_keeper) in
+    check int "failed first append is registered without a database" 1 (List.length known.issues);
+    let inventory = task_journal_ok (Task_journal.discover ~base_path ~keeper_name:failure_keeper) in
+    check int "discovery preserves failed receiver identity without a file" 1 (List.length inventory);
+    (match (List.hd inventory).state with Error Task_journal.Missing_store -> ()
+     | _ -> fail "failed receiver advertised committed history");
+    let hints=task_journal_ok (Task_journal.discover_hints ~base_path ~keeper_name:failure_keeper) in
+    (match hints with
+     | [{Task_journal.state=Error Task_journal.Missing_store;_}] -> ()
+     | _ -> fail "unchecked inventory dropped known failed first-append receiver");
+    let after_hint=Result.get_ok (Task_journal.issue_snapshot ~base_path ~keeper_name:failure_keeper) in
+    check bool "hint does not clear process failure evidence" true (after_hint=known);
+    ignore (task_journal_ok (Task_journal.observe sink ~attempt:first_attempt first_bound));
+    let after = Result.get_ok (Task_journal.issue_snapshot ~base_path ~keeper_name:failure_keeper) in
+    check string "issue epoch stays process scoped" known.process_epoch after.process_epoch;
+    check int "later success cannot erase prior failure" 1 (List.length after.issues);
+    check int "original receiver remains separately readable" 2 (List.length (task_journal_rows reader)))
+;;
+
+let test_native_task_invalid_database_remains_typed () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    let keeper_name = "claude-fixture" in
+    let sink = Task_journal.create ~base_path ~keeper_name
+      ~source:(task_journal_operation "invalid-database") ~redact_text:Fun.id in
+    let attempt,bound = List.hd observations in
+    let publication = Result.get_ok (Task_journal.prepare sink ~attempt bound) in
+    let reader = Task_journal.reader_of_publication publication in
+    Fs_compat.mkdir_p (Filename.dirname (Task_journal.path reader));
+    Out_channel.with_open_bin (Task_journal.path reader) (fun out ->
+      output_string out "not a SQLite database");
+    (match (Task_journal.read reader).result with
+     | Error (Task_journal.Store_unavailable _) -> ()
+     | Error _ | Ok _ -> fail "non-SQLite read did not retain typed SQLite failure");
+    (match (Task_journal.observe sink ~attempt bound).result with
+     | Error (Task_journal.Store_unavailable _) -> ()
+     | Error _ | Ok _ -> fail "non-SQLite append did not retain typed SQLite failure");
+    check int "observe records failed prepare/statement as process issue" 1
+      (List.length (Result.get_ok (Task_journal.issue_snapshot ~base_path ~keeper_name)).issues);
+    check string "failed append never rewrites unrelated bytes" "not a SQLite database"
+      (In_channel.with_open_bin (Task_journal.path reader) In_channel.input_all))
+;;
+
+let test_native_task_sqlite_empty_directory_authority () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    let attempt,bound = List.hd observations in
+    let keeper_name = "claude-fixture" in
+    let sink = Task_journal.create ~base_path ~keeper_name
+        ~source:(task_journal_operation "sqlite-discovery") ~redact_text:Fun.id in
+    let publication = Result.get_ok (Task_journal.prepare sink ~attempt bound) in
+    let reader = Task_journal.reader_of_publication publication in
+    let generation = Filename.dirname (Task_journal.path reader) in
+    let keeper = Filename.dirname generation in
+    let discover () = Task_journal.discover ~base_path ~keeper_name in
+    let expect_failure outcome = match outcome.Task_journal.result with
+      | Error (Task_journal.Store_unavailable _) -> ()
+      | _ -> fail "unsafe empty directory became authoritative discovery" in
+    let writable directory f =
+      let permissions = (Unix.stat directory).Unix.st_perm in
+      Unix.chmod directory 0o777;
+      Fun.protect ~finally:(fun () -> Unix.chmod directory permissions) f in
+    Fs_compat.mkdir_p keeper;
+    writable keeper (fun () -> expect_failure (discover ()));
+    check int "owned empty Keeper retains a valid empty inventory" 0
+      (List.length (task_journal_ok (discover ())));
+    Fs_compat.mkdir_p generation;
+    writable generation (fun () -> expect_failure (discover ()));
+    check int "owned empty generation retains a valid empty inventory" 0
+      (List.length (task_journal_ok (discover ())));
+    Unix.rmdir generation;
+    Unix.rmdir keeper;
+    let ancestor = Filename.dirname keeper in
+    writable ancestor (fun () -> expect_failure (discover ()));
+    check int "cold descendant absence needs an owned bound ancestor" 0
+      (List.length (task_journal_ok (discover ()))))
+;;
+
+let test_native_task_sqlite_bound_directory_failure () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    let attempt,bound = List.hd observations in
+    let keeper_name = "claude-fixture" in
+    let sink = Task_journal.create ~base_path ~keeper_name
+        ~source:(task_journal_operation "sqlite-discovery") ~redact_text:Fun.id in
+    let publication = Result.get_ok (Task_journal.prepare sink ~attempt bound) in
+    let reader = Task_journal.reader_of_publication publication in
+    let generation = Filename.dirname (Task_journal.path reader) in
+    let keeper = Filename.dirname generation in
+    check int "initial absent subtree below captured root is an empty inventory" 0
+      (List.length (task_journal_ok (Task_journal.discover ~base_path ~keeper_name)));
+    Fs_compat.mkdir_p keeper;
+    let bound_path = ref None in
+    let after_binding = Task_journal.For_testing.discover ~base_path ~keeper_name
+        ~before_read:(fun path -> bound_path := Some path;
+          raise (Unix.Unix_error (Unix.ENOENT,"injected-after-directory-bind",path)))
+        ~after_read:(fun _ -> ()) in
+    check bool "fault reached the actual Keeper directory bind" true (!bound_path=Some keeper);
+    (match after_binding.result with
+     | Error (Task_journal.Store_unavailable _) -> ()
+     | _ -> fail "bound directory ENOENT became initial empty discovery");
+    Fs_compat.mkdir_p generation;
+    let removed = ref false in
+    Fun.protect ~finally:(fun () -> if !removed then Unix.mkdir generation 0o700) (fun () ->
+      let after_enumeration = Task_journal.For_testing.discover ~base_path ~keeper_name
+          ~before_read:(fun _ -> ())
+          ~after_read:(fun path -> if String.equal path keeper then begin
+            Unix.rmdir generation; removed := true
+          end) in
+      check bool "generation removed after names were read" true !removed;
+      match after_enumeration.result with
+      | Error (Task_journal.Store_unavailable _) -> ()
+      | _ -> fail "enumerated generation disappearance became successful partial inventory"))
+;;
+
+let test_task_binding_does_not_adopt_an_earlier_unattributed_call () =
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    let seen = ref [] in
+    let progress ~uuid ~task_id ~call_id = task_binding_frame ~uuid ~task_id ~call_id "task_progress"
+      ["description",`String "not root body";"usage",`Assoc
+        ["total_tokens",`Int 1;"tool_uses",`Int 1;"duration_ms",`Int 1]] in
+    let new_start = task_binding_start ~uuid:"new-start" ~task_id:"new-task" ~call_id:"new-call" in
+    with_fixture [
+      Emit (native_tool_call_block ~turn_id:"unattributed" ~call_id:"old-call" ~tool_name:"Agent");
+      Emit (task_binding_start ~uuid:"old-start" ~task_id:"old-task" ~call_id:"old-call");
+      Emit (task_binding_native_result ~uuid:"old-return" ~call_id:"old-call");
+      Emit_with_input (response_text ~turn_id:"command-stamp" ~message_id:"stamp-message" "Stamp");
+      Emit (progress ~uuid:"old-progress" ~task_id:"old-task" ~call_id:"old-call");
+      Emit (native_tool_call_block ~turn_id:"command-child" ~call_id:"new-call" ~tool_name:"Agent");
+      Emit (native_tool_result ~call_id:"new-call" ~content:"background launch");
+      Emit new_start; Emit new_start;
+      Emit (progress ~uuid:"unknown-progress" ~task_id:"unknown-task" ~call_id:"new-call");
+      Emit (response_text ~turn_id:"answer" ~message_id:"answer" "Answer");
+      Emit_with_input (result_text ~turn_id:"final" "Answer")]
+      (fun cli_path ->
+        let result = with_fixture_yolo ~keeper_name:"claude-pre-dispatch" (fun () ->
+          run_direct_attempt ~base_path ~cli_path ~goal:"COMMAND_BINDING" ~tools:[]
+            ~required_native_posture:Runtime_native_tools.Native_full
+            ~on_native_task_observation:(fun bound -> seen := bound :: !seen) ()) in
+        (match result.result with Error error -> fail (Agent_core.Error.to_string error)
+         | Ok _ -> ());
+        match List.rev !seen with
+        | [bound] ->
+            check string "unowned old call and unknown task never acquire the later input" "new-task" bound.observation.owner.task_id;
+            check string "complete-only envelope remains original native owner" "assistant-command-child" bound.observation.owner.call_envelope_uuid;
+            check string "exact task replay adds no callback" "new-start" bound.observation.uuid;
+            (match bound.evidence with
+             | Keeper_claude_task_binding.Command_inherited witness ->
+                 check string "command provenance is the real prior root stamp" "assistant-command-stamp-stamp-message" witness.stamp_uuid;
+                 check string "command witness belongs to the actual input" bound.ticket.client_uuid witness.group.primary
+             | Explicit_group _ | Response_inherited _ -> fail "complete-only command inheritance required")
+        | _ -> fail "exactly the witnessed new native owner must bind"))
 ;;
 
 let check_pre_dispatch_attempt label attempt =
@@ -4209,7 +5930,10 @@ let () =
         ; test_case "thinking stays ahead of tools and outside answer text" `Quick
             test_keeper_preserves_claude_thinking_before_tools
         ; test_case "native completion through adapter, journal, SSE and TUI" `Quick test_native_completion_reaches_tui
-        ; test_case "root heartbeat through receiver, scoped redaction, autonomous journal and TUI" `Quick test_root_heartbeat_reaches_scoped_journal_and_tui
+        ; test_case "root heartbeat through receiver, scoped redaction, autonomous journal and TUI" `Quick
+            (fun () -> test_root_heartbeat_reaches_scoped_journal_and_tui ())
+        ; test_case "root Agent retry through adapter, held content and both journals" `Quick
+            (fun () -> test_root_heartbeat_reaches_scoped_journal_and_tui ~retry:true ())
         ; test_case
             "no break across a MASC tool row"
             `Quick
@@ -4291,6 +6015,62 @@ let () =
             "every posture names the schema lookup"
             `Quick
             test_every_posture_names_the_schema_lookup
+        ; test_case "task input and routed dispatch retain exact native envelope" `Quick
+            test_task_binding_freezes_exact_envelope_and_dispatch
+        ; test_case "Child read closed codec and exact requested suffix" `Quick
+            test_child_read_closed_codec_and_exact_suffix
+        ; test_case "Child hints never certify same-tail historical integrity" `Quick
+            test_child_read_hints_do_not_audit_tampered_history
+        ; test_case "Child discovery retains bound empty-directory authority" `Quick
+            test_child_read_discovery_bound_directory_authority
+        ; test_case "child durable driver receipts redaction replay and ticket scope" `Quick
+            test_child_journal_driver_replay_redaction_and_scope
+        ; test_case "child concurrent exact replay has one disk sequence" `Quick
+            test_child_journal_concurrent_exact_replay
+        ; test_case "child durable uncertain commit and independent cleanup" `Quick
+            test_child_journal_commit_uncertainty_and_cleanup
+        ; test_case "child durable suffix still audits corrupt prefix" `Quick
+            test_child_journal_full_audit_cannot_hide_prefix
+        ; test_case "received child persists through real closed autonomous sink" `Quick
+            test_child_journal_received_after_closed_root
+        ; test_case "child persistence failure cannot mutate root answer" `Quick
+            test_child_journal_failure_preserves_root
+        ; test_case "native task journal retains authority and exact replay" `Quick
+            test_native_task_journal_commit_replay_and_scope
+        ; test_case "native task journal serializes writers and distinguishes corruption" `Quick
+            test_native_task_journal_atomicity_recovery_and_failure
+        ; test_case "native task production read consumes actual bound observations" `Quick
+            test_native_task_http_reads_actual_bound_observations
+        ; test_case "Child HTTP reads actual Driver snapshots with current redaction and ticket3" `Quick
+            test_child_http_reads_actual_driver_observations
+        ; test_case "task persistence callback failure preserves root answer" `Quick
+            test_native_task_journal_callback_failure_preserves_root_answer
+        ; test_case "autonomous task journal outlives its closed root stream" `Quick
+            test_native_task_journal_autonomous_closed_root
+        ; test_case "task journal wait does not hold root stream" `Quick
+            test_native_task_journal_wait_does_not_hold_root_stream
+        ; test_case "SQLite validation scope and incarnation cursor" `Quick
+            test_native_task_sqlite_validation_scope_and_cursor
+        ; test_case "unchecked change hints retain full audit corruption boundary" `Quick
+            test_native_task_change_hints_keep_full_audit_separate
+        ; test_case "unchecked hints preserve directory authority" `Quick
+            test_native_task_change_hint_directory_authority
+        ; test_case "SQLite commit cleanup and known process issues" `Quick
+            test_native_task_sqlite_commit_cleanup_and_known_issues
+        ; test_case "non-SQLite read and observe remain typed failures" `Quick
+            test_native_task_invalid_database_remains_typed
+        ; test_case "SQLite discovery checks empty directory authority" `Quick
+            test_native_task_sqlite_empty_directory_authority
+        ; test_case "SQLite discovery preserves bound directory failure" `Quick
+            test_native_task_sqlite_bound_directory_failure
+        ; test_case "later command witness cannot adopt an unattributed task owner" `Quick
+            test_task_binding_does_not_adopt_an_earlier_unattributed_call
+        ; test_case "task metadata retains closed native owner without flushing model content" `Quick
+            test_task_callback_keeps_closed_native_owner_and_model_content
+        ; test_case "complete child callback keeps original input and separate root projection" `Quick
+            test_child_callback_binds_original_input_without_root_events
+        ; test_case "child/task callbacks share failed-first original evidence" `Quick
+            test_child_and_task_callbacks_share_failed_original_evidence
         ; test_case
             "a closed client connection is typed"
             `Quick

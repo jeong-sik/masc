@@ -35,6 +35,7 @@ type tool_activity =
   ; outcome : tool_outcome
   ; native_completion : Runtime_native_tools.completion option
   ; native_progress : native_progress option
+  ; native_retry : Runtime_native_tools.retry_observation option
   ; duration : string option
   }
 
@@ -90,7 +91,7 @@ let nonblank = function
   | Some value when String.trim value <> "" -> Some value
   | Some _ | None -> None
 
-let make_tool_activity ?native_progress ?native_completion ?execution_id ~call_id ~tool_name ~args ~outcome
+let make_tool_activity ?native_progress ?native_retry ?native_completion ?execution_id ~call_id ~tool_name ~args ~outcome
     ~duration () =
   let call_id = nonblank call_id in
   let execution_id = nonblank execution_id in
@@ -102,6 +103,7 @@ let make_tool_activity ?native_progress ?native_completion ?execution_id ~call_i
   ; outcome
   ; native_completion
   ; native_progress
+  ; native_retry
   ; duration
   }
 
@@ -201,7 +203,7 @@ let native_activity_summary (activity : tool_activity) =
   | Outcome_unrecorded -> None
 
 let native_progress_summary (activity : tool_activity) =
-  Option.map (fun progress ->
+  let progress = Option.map (fun progress ->
     let observation = match progress.message, progress.output_bytes, progress.provider_elapsed_seconds with
       | Some message, _, _ -> safe_line message
       | None, Some _, _ when activity.outcome=Native_running -> "output arriving"
@@ -209,7 +211,21 @@ let native_progress_summary (activity : tool_activity) =
       | None, None, Some seconds -> Printf.sprintf "heartbeat · provider elapsed %ds" seconds
       | None, None, None -> "native activity observed" in
     observation)
-    activity.native_progress
+    activity.native_progress in
+  let retry = Option.map (function
+    | Runtime_native_tools.Retry_cleared agent ->
+        "provider retry notice cleared · " ^ safe_line agent.subagent_type
+    | Runtime_native_tools.Retry_reported note ->
+        Printf.sprintf "%sprovider retry %d/%d · delay %dms · %s · %s%s"
+          (if activity.outcome=Native_running then "" else "last observed ")
+          note.attempt note.max_retries note.retry_delay_ms
+          (safe_line note.agent.subagent_type) (safe_line note.error_category)
+          (Option.fold ~none:"" ~some:(fun code -> Printf.sprintf " · status %d" code) note.error_status))
+    activity.native_retry in
+  match progress, retry with
+  | Some progress, Some retry -> Some (progress ^ " · " ^ retry)
+  | Some _ as value, None | None, (Some _ as value) -> value
+  | None, None -> None
 
 let native_progress_details ?(include_elapsed=false) (activity : tool_activity) =
   match native_progress_summary activity, activity.native_progress with
@@ -217,11 +233,18 @@ let native_progress_details ?(include_elapsed=false) (activity : tool_activity) 
       let summary = match include_elapsed, progress.elapsed with
         | true, Some elapsed -> summary ^ " · updated +" ^ Masc_tui_message_layout.span_text elapsed
         | false, _ | true, None -> summary in
-      Some (match progress.output_bytes with
-        | Some count -> Printf.sprintf "%s · %d bytes observed" summary count
-        | None -> summary)
-  | Some summary, None -> Some summary
-  | None, _ -> None
+      let bytes = Option.fold ~none:[]
+          ~some:(fun count -> [Printf.sprintf "%d bytes observed" count]) progress.output_bytes in
+      (* Heartbeat-only summaries already name the provider report. When a
+         message or output takes that summary slot, retain the independent
+         provider elapsed fact in the expanded detail as well. *)
+      let provider_elapsed = match progress.provider_elapsed_seconds,
+          progress.message, progress.output_bytes with
+        | Some seconds, Some _, _
+        | Some seconds, None, Some _ -> [Printf.sprintf "provider elapsed %ds" seconds]
+        | None, _, _ | Some _, None, None -> [] in
+      Some (String.concat " · " (summary :: bytes @ provider_elapsed))
+  | summary, _ -> summary
 
 let render_activity_rows ~expanded (activities : tool_activity list) =
   let name_width =

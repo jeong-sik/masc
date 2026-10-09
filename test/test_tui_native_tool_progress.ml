@@ -8,12 +8,70 @@ module Live = Masc_tui_keeper_chat_live
 module Log = Masc_tui_keeper_chat_log
 module T = Masc_tui_keeper_chat_transcript
 
+(* Malformed fixtures edit the public serialized payload, preserving the
+   producer's metadata without constructing its private event record. *)
+let wire_with_custom_value ?id event replace =
+  let json = match Ag_ui.event_to_json event with
+    | `Assoc fields -> `Assoc (List.map (fun (key, value) ->
+        key, if key = "value" then replace value else value) fields)
+    | _ -> fail "projected event must be an object" in
+  Sse_wire.format_event_yojson ?id json
+
 let start_message id = Agent_core.Types.MessageStart {id;model="fixture";usage=None}
-let tool_start ~native index id = Agent_core.Types.ContentBlockStart
+let tool_start ?(tool_name="Read") ~native index id = Agent_core.Types.ContentBlockStart
   {index;content_type=(if native then Native.stream_content_type else "tool_use");
-   tool_id=Some id;tool_name=Some "Read"}
+   tool_id=Some id;tool_name=Some tool_name}
 let output count = Native.Output_observed {byte_count=count}
 let text value = Agent_core.Types.ContentBlockDelta {index=0;delta=TextDelta value}
+let retry_agent : Native.retry_agent = {agent_id="child-agent";subagent_type="Explore"}
+let retry_note : Native.retry_note = {agent=retry_agent;attempt=1;max_retries=3;
+  retry_delay_ms=1500;error_status=Some 529;error_category="overloaded"}
+let retry = Native.Retry_observed (Native.Retry_reported retry_note)
+let clear_retry = Native.Retry_observed (Native.Retry_cleared retry_agent)
+
+let test_retry_clear_preserves_other_observations () =
+  List.iter (fun speech ->
+    let f = F.create () in
+    F.on_event f (start_message "retry-response");
+    F.on_event f (tool_start ~tool_name:"Agent" ~native:true 1 "agent-call");
+    F.on_event f speech;
+    F.on_progress f ~block_index:1 ~tool_call_id:(Some "agent-call") (output 3);
+    F.on_progress f ~block_index:1 ~tool_call_id:(Some "agent-call")
+      (Native.Heartbeat_reported {elapsed_seconds=30});
+    let snapshots () = let live,replay = F.snapshots f in
+      List.map (T.of_log ~now:2000.) [live;replay] in
+    let before = List.map T.tool_calls (snapshots ()) in
+    F.on_progress f ~block_index:1 ~tool_call_id:(Some "agent-call") retry;
+    List.iter (fun t -> match T.tool_calls t with
+      | [call] ->
+          check bool "native row retains typed provider retry" true (call.native_retry=Some (Native.Retry_reported retry_note));
+          check bool "retry detail is visible" true (Option.exists
+            (Astring.String.is_infix ~affix:"provider retry 1/3") (T.native_progress_details call))
+      | _ -> fail "one native call expected") (snapshots ());
+    F.on_progress f ~block_index:1 ~tool_call_id:(Some "agent-call") clear_retry;
+    List.iter2 (fun (previous : T.tool_activity list) t -> match previous,T.tool_calls t with
+      | [previous],[call] ->
+          check bool "clear leaves the last real heartbeat/output and its clock unchanged" true
+            (previous.native_progress=call.native_progress);
+          check bool "clear is a separate observed state" true (call.native_retry=Some (Native.Retry_cleared retry_agent));
+          check bool "clear leaves native work open" true (call.outcome=T.Native_running);
+          check (option string) "clear is not a MASC execution receipt" None call.execution_id;
+          check bool "clear label does not claim resumed model or success" true (Option.exists
+            (Astring.String.is_infix ~affix:"provider retry notice cleared") (T.native_progress_details call));
+          check bool "turn remains in progress" true (T.phase t=T.Working)
+      | _ -> fail "one native call expected") before (snapshots ());
+    F.on_progress f ~block_index:1 ~tool_call_id:(Some "agent-call") retry;
+    F.on_completion f ~block_index:1 ~tool_call_id:(Some "agent-call") Native.end_observed;
+    F.on_event f (Agent_core.Types.ContentBlockStop {index=1});
+    List.iter (fun t -> match T.tool_calls t with
+      | [call] ->
+          check bool "native end retains the last retry without inventing clear" true
+            (call.native_retry=Some (Native.Retry_reported retry_note));
+          check bool "ended row labels retry as historical" true (Option.exists
+            (Astring.String.is_infix ~affix:"last observed provider retry") (T.native_progress_details call));
+          check bool "native end leaves the turn in progress" true (T.phase t=T.Working)
+      | _ -> fail "one native call expected") (snapshots ()))
+    [text "Authored text\n";Agent_core.Types.ContentBlockDelta {index=0;delta=ThinkingDelta "Observed thinking\n"}]
 
 let test_replayed_sequence_and_model_signal () =
   let f = F.create () in
@@ -40,7 +98,8 @@ let test_replayed_sequence_and_model_signal () =
     both ~now:1. Live.Run_started;
     both ~now:1. (Live.Native_tool_started {occurrence;tool_name=Some "Read"});
     both ~now:2. speech;
-    T.apply ~now:3. t (Live.Native_tool_progress {occurrence;progress=output 1});
+    List.iter (fun progress -> T.apply ~now:3. t (Live.Native_tool_progress {occurrence;progress}))
+      [output 1;retry;clear_retry];
     (* Pending tools hide model activity. Close both calls before comparing the
        visible signal and the silence measured from the original speech time. *)
     both ~now:4. (Live.Native_tool_ended {occurrence;completion=Native.end_observed});
@@ -50,9 +109,11 @@ let test_replayed_sequence_and_model_signal () =
        belongs to the renderer and is not asserted here. *)
     let before = T.tool_calls t in
     T.apply ~now:11. t Live.Run_finished;
-    T.apply ~now:12. t (Live.Native_tool_progress {occurrence;progress=output 1});
+    List.iter (fun progress -> T.apply ~now:12. t (Live.Native_tool_progress {occurrence;progress}))
+      [output 1;clear_retry;retry];
     check bool "turn terminal rejects new progress" true
-      ((List.hd before).native_progress=(List.hd (T.tool_calls t)).native_progress))
+      ((List.hd before).native_progress=(List.hd (T.tool_calls t)).native_progress
+       && (List.hd before).native_retry=(List.hd (T.tool_calls t)).native_retry))
     [Live.Text {text="Answer"; stream_scope=None},"STREAMING";Live.Thinking "Reason","THINKING"]
 
 let test_heartbeat_reported_time_is_not_local_elapsed () =
@@ -112,7 +173,8 @@ let test_exact_active_scope_only () =
   let failed = Bridge.fail_stream accepted.bridge_state ~reason:"cancelled" in
   ignore (assert_rejected ~scope:1 ~index:1 ~id:"same-id" failed.bridge_state);
   let stopped = translate 1 accepted.bridge_state Agent_core.Types.MessageStop in
-  ignore (assert_rejected ~scope:1 ~index:1 ~id:"same-id" stopped.bridge_state)) [output 3;Native.Heartbeat_reported {elapsed_seconds=30}]
+  ignore (assert_rejected ~scope:1 ~index:1 ~id:"same-id" stopped.bridge_state))
+    [output 3;Native.Heartbeat_reported {elapsed_seconds=30};retry;clear_retry]
 
 let test_strict_nested_wire_and_journal () =
   let native : E.native_tool = {occurrence={stream_scope=0;provider_message_id=None;block_index=1};tool_call_id=Some "native";tool_call_name=None} in
@@ -120,17 +182,22 @@ let test_strict_nested_wire_and_journal () =
   let replace progress = function
     | `Assoc fields -> `Assoc (("progress",progress)::List.remove_assoc "progress" fields)
     | _ -> fail "expected object" in
+  let retry_fields = match Native.progress_to_json retry with
+    | `Assoc fields -> fields | _ -> fail "retry object expected" in
+  let replace_retry field value = `Assoc ((field,value)::List.remove_assoc field retry_fields) in
   List.iter (fun progress ->
     check bool "malformed journal rejects progress" true
       (Result.is_error (Journal.keeper_chat_event_of_json
         (replace progress (Journal.keeper_chat_event_to_json event))));
     let _, projected = Server_keeper_chat_agui_projection.project ~timestamp:1000.
-      ~redact_text:Fun.id ~redact_json:(replace progress) Server_keeper_chat_agui_projection.initial event in
-    let wire = match projected with Some event -> Ag_ui.event_to_sse ~id:1 event | None -> fail "missing progress" in
+      ~redact_text:Fun.id Server_keeper_chat_agui_projection.initial event in
+    let wire = match projected with
+      | Some event -> wire_with_custom_value ~id:1 event (replace progress)
+      | None -> fail "missing progress" in
     check bool "malformed wire is unreadable, never a tool update" true
       (match Live.feed (Live.create ()) wire with
        | [{delta=Live.Undecodable _;_}] -> true | _ -> false))
-    [`Null;
+    ([`Null;
      `Assoc ["kind",`String "output_observed";"byte_count",`Int (-1)];
      `Assoc ["kind",`String "output_observed";"byte_count",`Int 0];
      `Assoc ["kind",`String "output_observed";"byte_count",`Int 1;"byte_count",`Int 1];
@@ -142,6 +209,60 @@ let test_strict_nested_wire_and_journal () =
      `Assoc ["kind",`String "heartbeat_reported";"elapsed_seconds",`Float 1.5];
      `Assoc ["kind",`String "heartbeat_reported";"elapsed_seconds",`Int 1;"elapsed_seconds",`Int 1];
      `Assoc ["kind",`String "heartbeat_reported";"elapsed_seconds",`Int 1;"message",`String "wrong variant"]]
+     @ [replace_retry "attempt" (`Float 1.5);
+        replace_retry "max_retries" (`Int 9_007_199_254_740_992);
+        replace_retry "retry_delay_ms" (`String "1500");
+        replace_retry "error_status" (`Bool false);
+        replace_retry "agent_id" (`String "");
+        `Assoc (("attempt",`Int 1)::retry_fields);
+        `Assoc ["kind",`String "retry_cleared";"agent_id",`String "child-agent";
+          "subagent_type",`String "Explore";"attempt",`Int 1]])
+
+let test_retry_wire_safe_integer_and_redaction () =
+  let fields = match Native.progress_to_json retry with
+    | `Assoc fields -> fields | _ -> fail "retry object expected" in
+  let native : E.native_tool = {occurrence={stream_scope=0;provider_message_id=None;block_index=1};
+    tool_call_id=Some "agent";tool_call_name=Some "Agent"} in
+  List.iter (fun (wire,expected) ->
+    let numeric_fields = ["attempt";"max_retries";"retry_delay_ms";"error_status"] in
+    let json = `Assoc (List.map (fun (key,value) ->
+      key,(if List.mem key numeric_fields then Yojson.Safe.from_string wire else value)) fields) in
+    let progress = match Native.progress_of_json json with
+      | Ok (Native.Retry_observed (Retry_reported note) as progress) ->
+          check (list int) "signed provider integer facts are retained" [expected;expected;expected]
+            [note.attempt;note.max_retries;note.retry_delay_ms];
+          check (option int) "signed provider status is retained" (Some expected) note.error_status; progress
+      | Ok _ | Error _ -> fail "safe retry integers rejected" in
+    let event = E.Native_tool_progress (native,progress) in
+    check bool "retry journal roundtrip" true
+      (Journal.keeper_chat_event_of_json (Journal.keeper_chat_event_to_json event)=Ok event);
+    let _,wire_event = Server_keeper_chat_agui_projection.project ~timestamp:1000.
+      ~redact_text:Fun.id Server_keeper_chat_agui_projection.initial event in
+    let wire = match wire_event with Some event -> Ag_ui.event_to_sse event | None -> fail "missing retry event" in
+    match Live.feed (Live.create ()) wire with
+    | [{delta=Live.Native_tool_progress {progress=received;_};_}] -> check bool "live feed retains exact retry fact" true (received=progress)
+    | _ -> fail "live retry event rejected")
+    ["-1",-1;"0.0",0;"1e0",1;"9007199254740991",9_007_199_254_740_991];
+  let state = Bridge.translate ~redact_text:Fun.id ~base_dir:"/unused-no-media" ~stream_scope:0
+      (Bridge.empty_state ()) (start_message "retry-redaction") in
+  let state = Bridge.translate ~redact_text:Fun.id ~base_dir:"/unused-no-media" ~stream_scope:0
+      state.bridge_state (tool_start ~tool_name:"Agent" ~native:true 1 "agent") in
+  let agent : Native.retry_agent = {agent_id="opaque-child-id";subagent_type="private-type"} in
+  List.iter (fun progress ->
+    let result = Bridge.progress_native_tool ~redact_text:(fun _ -> "[redacted]")
+      ~stream_scope:0 ~block_index:1 ~tool_call_id:(Some "agent") progress state.bridge_state in
+    match result.chat_events with
+    | [E.Native_tool_progress (_,Native.Retry_observed (Retry_reported note))] ->
+        check string "agent identity is retained, never interpreted as body" agent.agent_id note.agent.agent_id;
+        check string "subagent label is redacted" "[redacted]" note.agent.subagent_type;
+        check string "error category is redacted" "[redacted]" note.error_category;
+        check (option int) "null error status remains absent" None note.error_status
+    | [E.Native_tool_progress (_,Native.Retry_observed (Retry_cleared received))] ->
+        check string "clear retains identity" agent.agent_id received.agent_id;
+        check string "clear label is redacted" "[redacted]" received.subagent_type
+    | _ -> fail "retry escaped its typed redacted bridge path")
+    [Native.Retry_observed (Retry_reported {retry_note with agent;error_status=None;error_category="private-category"});
+     Native.Retry_observed (Retry_cleared agent)]
 
 let rec remove_tree path =
   if Sys.is_directory path then begin
@@ -269,7 +390,7 @@ let test_split_secret_held_across_native_side_events () =
           Stream.finish stream (Stream.Completed
             {reply="Safe final response";turn_outcome=Masc.Keeper_turn_outcome.Visible_reply}))))
       [Progress (output 3); Progress (Native.Message_reported {message="still working"});
-       Progress (Native.Heartbeat_reported {elapsed_seconds=30}); Completion]) [false;true]
+       Progress (Native.Heartbeat_reported {elapsed_seconds=30});Progress retry;Progress clear_retry; Completion]) [false;true]
 
 let test_held_content_reserves_its_index_before_native_headers () =
   let module Stream = Masc.Keeper_autonomous_stream in
@@ -315,7 +436,98 @@ let test_blank_message_keeps_the_last_message () =
   check (option (float 0.)) "a blank message still moves the update time" (Some 4.)
     (Option.map (fun (value : T.native_progress) -> value.updated_at) (progress ()))
 
+let test_progress_numeric_wire_boundary () =
+  let decode kind field wire = Native.progress_of_json
+      (`Assoc ["kind",`String kind;field,Yojson.Safe.from_string wire]) in
+  List.iter (fun (wire,expected) ->
+    (match decode "output_observed" "byte_count" wire with
+     | Ok (Native.Output_observed {byte_count}) -> check int "exact byte count" expected byte_count
+     | Ok _ | Error _ -> fail ("safe byte count rejected: " ^ wire));
+    (match decode "heartbeat_reported" "elapsed_seconds" wire with
+     | Ok (Native.Heartbeat_reported {elapsed_seconds}) -> check int "exact provider seconds" expected elapsed_seconds
+     | Ok _ | Error _ -> fail ("safe provider seconds rejected: " ^ wire)))
+    ["1",1;"1.0",1;"1e0",1;"9007199254740991",9_007_199_254_740_991;
+     "9007199254740991.0",9_007_199_254_740_991];
+  check bool "zero is not an output byte observation" true
+    (Result.is_error (decode "output_observed" "byte_count" "0.0"));
+  check bool "zero provider seconds is valid" true
+    (decode "heartbeat_reported" "elapsed_seconds" "-0.0" = Ok (Native.Heartbeat_reported {elapsed_seconds=0}));
+  List.iter (fun wire -> List.iter (fun (kind,field) ->
+    check bool (field ^ " rejects " ^ wire) true (Result.is_error (decode kind field wire)))
+    ["output_observed","byte_count";"heartbeat_reported","elapsed_seconds"])
+    ["-1";"0.5";"9007199254740992";"9007199254740992.0";
+     "9007199254740993";"9223372036854775808";"1e309";"\"1\"";"null"]
+
+let test_native_occurrence_numeric_live_and_projection () =
+  let module Projection = Masc_tui_keeper_chat_projection in
+  let request = Projection.create_request ~keeper_name:"fixture" ~message:"numeric" () in
+  let run_id = "keeper-operation-run-" ^ request.request_id in
+  let acceptance = "data: " ^ Yojson.Safe.to_string (`Assoc [
+      "type",`String "CUSTOM";"threadId",`String "default";"timestamp",`Float 1000.;
+      "name",`String "KEEPER_CHAT_OPERATION_ACCEPTED";"value",`Assoc [
+        "operation_id",`String request.request_id;"state",`String "Running";"queued_count",`Int 0]]) ^ "\n\n" in
+  let native : E.native_tool = {occurrence={stream_scope=1;block_index=2;provider_message_id=None};
+      tool_call_id=Some "native-numeric";tool_call_name=Some "Read"} in
+  let events = [E.Run_started {run_id;thread_id="keeper:fixture"};
+      E.Text_message_start {message_id="keeper-operation-message-" ^ request.request_id;role=E.Assistant};
+      E.Text_delta {text="body"; stream_scope=None}; E.Native_tool_start native;
+      E.Native_tool_progress (native,output 1); E.Native_tool_end (native,Native.end_observed);
+      E.Reply_details {reply="body";turn_outcome=Masc.Keeper_turn_outcome.Visible_reply;
+        turn_ref=Ids.Turn_ref.make ~trace_id:"numeric-wire" ~absolute_turn:1; terminal_stream_scope=None};
+      E.Text_message_end; E.Run_finished {run_id}] in
+  let wire scope index =
+    let _,wire = List.fold_left (fun (state,wire) source ->
+      let state,event = Server_keeper_chat_agui_projection.project ~timestamp:1000.
+          ~redact_text:Fun.id state source in
+      match event with
+      | None -> fail "missing projected fixture event"
+      | Some event ->
+          let encoded = match source with
+            | E.Native_tool_start _ | E.Native_tool_progress _ | E.Native_tool_end _ ->
+                wire_with_custom_value event (function
+                  | `Assoc fields -> `Assoc (("toolStreamScope",scope)::("toolCallBlockIndex",index)::
+                      List.remove_assoc "toolStreamScope" (List.remove_assoc "toolCallBlockIndex" fields))
+                  | _ -> fail "native event must have an object payload")
+            | _ -> Ag_ui.event_to_sse event in
+          state,wire ^ encoded)
+      (Server_keeper_chat_agui_projection.initial,acceptance) events in wire in
+  List.iter (fun (scope,index,expected_scope,expected_index) ->
+    let wire = wire scope index in
+    (match Projection.decode_response ~request wire with
+     | Ok (Projection.Turn_completed {reply="body";_}) -> ()
+     | Ok _ -> fail "numeric occurrence lost terminal reply"
+     | Error error -> fail (Projection.stream_error_to_string error));
+    let deltas = Live.feed (Live.create ()) wire in
+    check bool "live feed accepts the same occurrence numeric values" false
+      (List.exists (fun (item:Live.observed_delta) -> match item.delta with Live.Undecodable _ -> true | _ -> false) deltas);
+    let identities = List.filter_map (fun (item:Live.observed_delta) -> match item.delta with
+      | Live.Native_tool_started {occurrence;_}
+      | Live.Native_tool_progress {occurrence;_}
+      | Live.Native_tool_ended {occurrence;_} -> Some (occurrence.stream_scope,occurrence.block_index)
+      | _ -> None) deltas in
+    check (list (pair int int)) "start, progress and end retain one exact numeric occurrence"
+      [expected_scope,expected_index;expected_scope,expected_index;expected_scope,expected_index] identities)
+    [`Float 1.,`Float 2.,1,2;
+     Yojson.Safe.from_string "1e0",Yojson.Safe.from_string "2e0",1,2;
+     `Int 9_007_199_254_740_991,`Float 9_007_199_254_740_991.,9_007_199_254_740_991,9_007_199_254_740_991];
+  List.iter (fun invalid -> List.iter (fun (scope,index) ->
+    let wire = wire scope index in
+    check bool "strict response rejects unsafe or nonintegral native identity" true
+      (Result.is_error (Projection.decode_response ~request wire));
+    let deltas = Live.feed (Live.create ()) wire in
+    check int "each native event is unreadable" 3
+      (List.length (List.filter (fun (item:Live.observed_delta) -> match item.delta with Live.Undecodable _ -> true | _ -> false) deltas));
+    check bool "invalid occurrence never reaches native activity" false
+      (List.exists (fun (item:Live.observed_delta) -> match item.delta with
+        | Live.Native_tool_started _ | Live.Native_tool_progress _ | Live.Native_tool_ended _ -> true
+        | _ -> false) deltas)) [invalid,`Int 2;`Int 1,invalid])
+    [`Int 9_007_199_254_740_992;`Float 9_007_199_254_740_992.;`Float 1.5;`Int (-1);`String "1"]
+
 let () = run "native tool progress" ["contract",[
+  test_case "retry wire safe integers and metadata redaction" `Quick test_retry_wire_safe_integer_and_redaction;
+  test_case "retry clear preserves heartbeat, bytes and open turn authority" `Quick test_retry_clear_preserves_other_observations;
+  test_case "native occurrence numeric parity through actual wire consumers" `Quick test_native_occurrence_numeric_live_and_projection;
+  test_case "progress JSON safe-integer boundary" `Quick test_progress_numeric_wire_boundary;
   test_case "same deltas count twice, same journal seq once" `Quick test_replayed_sequence_and_model_signal;
   test_case "exact current active native scope" `Quick test_exact_active_scope_only;
      test_case "heartbeat provider time and model noninterference" `Quick test_heartbeat_reported_time_is_not_local_elapsed;

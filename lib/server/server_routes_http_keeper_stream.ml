@@ -1775,6 +1775,12 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
     Keeper_secret_redaction.snapshot ~base_path ~keeper_name:payload.name
   in
   let redact_text = Keeper_secret_redaction.redact_text redaction in
+  let task_source = match submission with
+    | Owner_operation {operation_id; _} -> Keeper_native_task_journal.Operation operation_id in
+  let child_journal = Keeper_child_content_journal.create ~base_path
+      ~keeper_name:payload.name ~source:task_source ~redact_text in
+  let task_journal = Keeper_native_task_journal.create ~base_path
+      ~keeper_name:payload.name ~source:task_source ~redact_text in
   let content_generation = Keeper_chat_events.publish_with_sequence events
     (Run_started { run_id; thread_id }) in
   Option.iter (fun (operation_id, execution_id) ->
@@ -2032,6 +2038,19 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
       | Keeper_hooks_agent_core.Turn_collected { turn; tool_source_map } ->
         Keeper_stream_tool_accum.seal_turn worker_tool_accum ~turn
           ~tool_source_map
+      | Keeper_hooks_agent_core.Child_content_observed {attempt; observation} ->
+          (* Received child snapshots commit independently of worker queue,
+             client disconnect and root lifecycle closure. No chat-bus publish. *)
+          Eio.Cancel.protect (fun () ->
+            Keeper_child_content_journal.observe child_journal ~attempt observation
+            |> Keeper_child_content_journal.report ~keeper_name:payload.name);
+          Ok ()
+      | Keeper_hooks_agent_core.Native_task_observed {attempt; bound} ->
+          (* Independent receiver journal, including after root stream closure.
+             Persistence failure is not a tool occurrence mapping failure. *)
+          Keeper_native_task_journal.observe task_journal ~attempt bound
+          |> Keeper_native_task_journal.report ~keeper_name:payload.name;
+          Ok ()
       | Keeper_hooks_agent_core.Native_tool_progress {block_index; tool_call_id; progress} ->
         push_worker_event (Stream_native_tool_progress
           (Keeper_stream_tool_accum.current_stream_scope worker_tool_accum, block_index, tool_call_id, progress));
@@ -3078,7 +3097,6 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                      ~keeper_name
                  in
                  let redact_text = Keeper_secret_redaction.redact_text redaction in
-                 let redact_json = Keeper_secret_redaction.redact_json redaction in
                  let rec loop ~terminal_seen projections =
                    match Keeper_chat_events.subscribe_published events with
                    | Keeper_chat_events.Closed ->
@@ -3087,7 +3105,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                    let projections = List.map (fun (member_id, projection) ->
                      let member_event = Keeper_chat_operation_batch.event_for_member ~operation_id:member_id event in
                      let projection, projected = Server_keeper_chat_agui_projection.project
-                       ~timestamp:ts ~redact_text ~redact_json projection member_event in
+                       ~timestamp:ts ~redact_text projection member_event in
                      Option.iter (fun event ->
                        let operation_id = Keeper_chat_operation.Operation_id.to_string member_id in
                        note_operation_wire_event ~base_path ~keeper_name ~operation_id event;
@@ -3481,7 +3499,6 @@ let journal_replay_frames ~base_path ~keeper_name ~operation_id ~since_seq =
        let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
        Server_keeper_chat_replay.replay
          ~redact_text:(Keeper_secret_redaction.redact_text redaction)
-         ~redact_json:(Keeper_secret_redaction.redact_json redaction)
          ~since_seq
          entries
      with

@@ -1345,3 +1345,55 @@ for (const initiallyConnected of [true, false]) {
     assert.equal(storage.get('masc.play.invite'), 'fixture-token');
   });
 }
+
+for (const status of [401, 403]) {
+  test(`terminal ${status} retires an initialized page after storage access is revoked`, async () => {
+    let blocked = false;
+    let rejected = false;
+    const backing = new Map();
+    const storage = {
+      get(key) { if (blocked) throw new Error('storage revoked'); return backing.get(key); },
+      set(key, value) { if (blocked) throw new Error('storage revoked'); backing.set(key, value); },
+      delete(key) { if (blocked) throw new Error('storage revoked'); return backing.delete(key); },
+    };
+    const page = fixture(({url}) => {
+      if (rejected) return response({}, status);
+      if (url === '/api/v1/play/seat') return response(seat);
+      if (url === '/api/v1/play/pad') return response(layout);
+      return response(frame);
+    }, {storage});
+    await page.settle();
+    blocked = true; rejected = true;
+    await page.poll();
+    await page.settle();
+    assert.match(page.get('turn').textContent, /초대가 끝났거나/);
+    const count = page.requests.length;
+    if (page.timerCount) await page.poll();
+    assert.equal(page.requests.length, count, 'invalid bearer does not keep polling');
+    assert.equal(page.get('send-text').disabled, true);
+    assert.ok(backing.size > 0, 'inaccessible persisted evidence remains intact');
+  });
+}
+
+test('seat recovery cadence replaces a stalled authority request without machine activity', async () => {
+  let stalled;
+  let hold = false;
+  const page = fixture(request => {
+    if (request.url === '/api/v1/play/seat') {
+      if (hold && !stalled) { stalled = request; return new Promise(() => {}); }
+      return response(seat);
+    }
+    if (request.url === '/api/v1/play/pad') return response(layout);
+    return response(frame);
+  });
+  await page.settle();
+  hold = true;
+  await page.poll(5000);
+  assert.equal(page.get('send-text').disabled, true);
+  const reads = page.requests.filter(r => r.url === '/api/v1/play/seat').length;
+  await page.poll(5000);
+  await page.settle();
+  assert.equal(stalled.signal.aborted, true);
+  assert.equal(page.requests.filter(r => r.url === '/api/v1/play/seat').length, reads + 1);
+  assert.equal(page.get('send-text').disabled, false);
+});

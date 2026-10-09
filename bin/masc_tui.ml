@@ -1559,7 +1559,6 @@ type pending_msx_checkpoint = {
 }
 module Checkpoint_pending = Masc_tui_msx_checkpoint_pending
 let pending_msx_checkpoints : pending_msx_checkpoint list ref = ref []
-let loaded_checkpoint_workspaces : (string * string) list ref = ref []
 let checkpoint_storage_errors : (string, string) Hashtbl.t = Hashtbl.create 4
 let checkpoint_root workspace = Masc_tui_types.canonical_path workspace.Tui_decode.sid_masc_root
 let checkpoint_binding pending =
@@ -1571,9 +1570,9 @@ let checkpoint_binding pending =
 let recover_checkpoints state workspace =
   let root = checkpoint_root workspace in
   let base_path = Masc_tui_types.canonical_path workspace.Tui_decode.sid_base_path in
-  let key = base_path, root in
-  if not (List.mem key !loaded_checkpoint_workspaces)
-     && Result.is_ok (Masc_tui_types.workspace_change_origin state) then
+  (* Other TUI processes can publish an unresolved intent after our first read.
+     Read the shared inventory on every write-admission check. *)
+  if Result.is_ok (Masc_tui_types.workspace_change_origin state) then
     match Checkpoint_pending.load ~masc_root:root with
     | Error detail ->
         Hashtbl.replace checkpoint_storage_errors root detail;
@@ -1584,8 +1583,9 @@ let recover_checkpoints state workspace =
            checkpoint_restore=binding.restore; checkpoint_slot=binding.slot;
            checkpoint_workspace={workspace with sid_base_path=binding.base_path; sid_masc_root=binding.masc_root}})
           (List.filter (fun (binding : Checkpoint_pending.binding) -> binding.base_path=base_path) bindings) in
-        pending_msx_checkpoints := recovered @ !pending_msx_checkpoints;
-        loaded_checkpoint_workspaces := key :: !loaded_checkpoint_workspaces;
+        pending_msx_checkpoints := recovered @ List.filter (fun pending ->
+          Masc_tui_types.canonical_path pending.checkpoint_workspace.sid_base_path <> base_path
+          || checkpoint_root pending.checkpoint_workspace <> root) !pending_msx_checkpoints;
         Hashtbl.remove checkpoint_storage_errors root;
         if recovered <> [] then
           state.msx_notice <- Some "Unresolved checkpoint recovered; F5 inspects its original receipt before machine control resumes."

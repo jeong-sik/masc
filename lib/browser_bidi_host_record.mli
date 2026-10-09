@@ -153,6 +153,11 @@ val observe : base_path:string -> state
     changes nothing. {!observe} asks it for the others. *)
 val state_of : lock_held:bool -> (entry option, string) result -> state
 
+(** Whether a host holds the workspace's lock now, read without taking it.
+    A host that left in order writes its ending before it gives the lock
+    up, so for a moment {!observe} says [Ended] while this says [true]. *)
+val lock_is_held : base_path:string -> (bool, string) result
+
 (** {1 The host's side} *)
 
 type held

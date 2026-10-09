@@ -645,8 +645,8 @@ let revoke_play_invite ~expected_base_path ~expected_masc_root ~host ~port ~name
   let response =
     http_delete ~host ~port
       ~path:("/api/v1/play/invites/" ^ percent_encode_path_segment name
-        ^ "?expected_base_path=" ^ percent_encode_path_segment expected_base_path
-        ^ "&expected_masc_root=" ^ percent_encode_path_segment expected_masc_root)
+        ^ "?expected_base_path=" ^ percent_encode_query_value expected_base_path
+        ^ "&expected_masc_root=" ^ percent_encode_query_value expected_masc_root)
   in
   match response with
   | Ok (404, body) when Masc.Tui_decode.play_invite_absent_body body ->

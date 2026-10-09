@@ -72,13 +72,18 @@ whether a digit needs `enter` or what an empty `enter` will do.
   officer carrying food, and the save-slot number. Follow their named steps.
 - Empty `enter` closed the 군사 submenu and gold prompt in the observed run.
   In the war officer list it returned to the command prompt while nobody was
-  sent yet; once an officer has a `*`, it ends the list and advances to gold.
+  sent yet; once an officer has a `*`, it ends the list, and the next prompt
+  is the commander selection (`누구를 총대장으로`) when the run asks for one
+  or the gold amount — do not type a resource amount into the commander
+  prompt.
   At `어떻게 하겠습니까(1-3)` in the save menu, it returns to the command
   prompt.
 - Battle-menu digits act immediately; a following `enter` backs out of the
   menu just opened. During officer placement, `enter` does nothing and `0`
   places the officer. Read those sections before sending another key.
-- `backspace` deletes the last typed digit (`55` became `5`).
+- `backspace` deletes the last typed digit where that was observed (`55`
+  became `5` at a resource prompt). At the commander prompt it had not
+  visibly cleared the field: read the field before `enter` there.
 - `esc` does nothing. At eight prompts — command, submenu, officer list, gold,
   battle menu, move direction, attack type, attack target — the screen stayed
   the same.
@@ -130,7 +135,18 @@ Observed 2026-09-29 in scenario 6 as 조예, from 17 하비 against 33 건업.
    then the unit type `1.보병 2.기마 3.노궁 4.강노`, number, `enter`. A type
    the city cannot field answers `그 부대는 안됩니다`. A sent officer gets a
    `*`. Several officers can go; an empty `enter` ends the list.
-4. Gold, then food: the amount, `enter`. Then `처들어가겠습니까(Y/N)?`, `y`.
+4. If `누구를 총대장으로 하겠습니까(1-N)?` appears after ending the list,
+   choose a commander from the displayed expedition officers, then `enter`.
+   Inspect the following commander confirmation and answer `y` if correct;
+   the observed Xiahou Dun selection required this before the gold prompt.
+   In the February 189 Chenliu-to-city-9 preparation with Xiahou Yuan and
+   Xiahou Dun, this prompt appeared before any resource amount. Do not type
+   gold into it. An observed out-of-range `5` followed by Enter abandoned
+   that preparation and returned to the campaign menu; it did not launch a
+   battle. Backspace had not visibly cleared that field.
+5. Only when the resource prompts are visible, enter gold and then food,
+   each amount followed by `enter`. Then answer the visible
+   `처들어가겠습니까(Y/N)?` confirmation with `y`.
 
 ## Placing officers for a battle
 

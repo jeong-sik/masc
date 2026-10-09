@@ -1282,6 +1282,12 @@ let test_approval_does_not_hide_other_current_work () =
     | (Transcript.Progress, text) :: _ -> text
     | _ -> fail "missing current progress"
   in
+  let compact = Transcript.status_rows ~compact:true ~show_timing:false
+      ~now:(origin +. 30.) t |> List.assoc Transcript.Progress in
+  check bool "compact progress keeps the sibling tool visible" true
+    (contains ~needle:"BrowserRead" compact);
+  check bool "compact progress excludes the held tool" false
+    (contains ~needle:"Edit" compact);
   check bool "other work remains visible while approval is outstanding" true
     (contains ~needle:"awaiting results: BrowserRead" (progress ()));
   check bool "the held call is not advertised as executing" false

@@ -1773,10 +1773,21 @@ let compact_progress_text ~show_timing ~now t =
     match t.phase with
     | Waiting | Stream_ended | Stream_failed _ -> phase_text ~show_timing ~now t
     | Working ->
-        let pending =
-          t.reversed_tool_calls
+        let current_calls = t.reversed_tool_calls
           |> List.filter (fun (call : live_tool_call) ->
-               call.segment = t.segment && call.attempt = t.attempt)
+               call.segment = t.segment && call.attempt = t.attempt) in
+        let held = match t.awaiting with
+          | None -> None
+          | Some awaiting ->
+              (match List.filter (fun (call : live_tool_call) ->
+                Option.exists (String.equal awaiting.call_id) call.call_id
+                && match (activity_of_live_call t call).outcome with
+                   | Started | Awaiting_result | Native_running -> true
+                   | Returned | Native_ended | Failed | Never_returned | Outcome_unrecorded -> false)
+                current_calls with
+               | [call] -> Some call.local_id | _ -> None) in
+        let pending = current_calls
+          |> List.filter (fun (call : live_tool_call) -> Some call.local_id <> held)
           |> List.rev
           |> List.filter_map (fun call ->
                let activity = activity_of_live_call t call in
@@ -1788,8 +1799,8 @@ let compact_progress_text ~show_timing ~now t =
                | Outcome_unrecorded -> None)
         in
         match t.awaiting, pending with
-        | Some awaiting, _ -> "approval pending: " ^ awaiting.tool_name
-        | None, _ :: _ -> String.concat " · " pending
+        | _, _ :: _ -> String.concat " · " pending
+        | Some awaiting, [] -> "approval pending: " ^ awaiting.tool_name
         | None, [] ->
             match model_phase_text ~show_timing ~now t with
             | Some phase -> phase

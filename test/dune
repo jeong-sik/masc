@@ -3353,7 +3353,7 @@
   masc_tui_keeper_chat_transcript masc_tui_image_preview masc_tui_message_layout
   masc_tui_message_input masc_tui_chat_search masc_tui_link_preview
   masc_tui_render_chat masc_tui_render_schedule masc_tui_frame_presenter
-  masc_tui_ansi masc_tui_theme masc_tui_roster_pane))
+  masc_tui_ansi masc_tui_theme masc_tui_roster_pane masc_tui_markdown))
 
 (test
  (name test_tui_chat_rows_memo)

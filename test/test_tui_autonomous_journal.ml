@@ -69,8 +69,7 @@ let test_cold_open_discovery () =
     (List.length (Types.autonomous_journal_candidates ~keeper_name:"other" [running]));
   let json = `List [`Assoc ["role", `String "assistant";
     "autonomous_turn", `Assoc ["turn_id", `String (Ids.Turn_ref.to_string turn_ref)];
-    "content", `String "done"; "ts", `Float 12.;
-    "turn_ref", `String (Ids.Turn_ref.to_string turn_ref)]] in
+    "content", `String "done"; "ts", `Float 12. ]] in
   (match Masc_tui_keeper_chat_history.rows_of_json json with
    | Error detail -> fail detail
    | Ok decoded ->
@@ -132,9 +131,43 @@ let test_autonomous_checkpoint_closes_its_source () =
    | Types.Follow_nothing -> ()
    | _ -> fail "ended autonomous checkpoint requested another journal read")
 
+let test_history_closes_only_matching_autonomous_progress () =
+  let state = Types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let log = Types.turn_log_create_for_source ~keeper_name:"alpha" ~source ~started_at:10. in
+  Types.turn_log_add ~now:10. log ~seq:(Some 0) Masc_tui_keeper_chat_live.Run_started;
+  Types.hold_settled_log state log;
+  let raw = Ids.Turn_ref.to_string turn_ref in
+  let row : Types.msg_entry = {
+    me_keeper_name="alpha"; me_role=Message_autonomous;
+    me_identity=Persisted_row "autonomous-final"; me_turn_phase=Turn_output;
+    me_turn_sequence=None; me_operation_seq=0; me_text="done";
+    me_image=Masc_tui_image_preview.No_image; me_memory_summary=None;
+    me_journal=[]; me_memory_pass=Masc_tui_message_layout.No_pass;
+    me_gate=None; me_submitted_at=None; me_tool_block=None; me_skill_block=[];
+    me_timestamp=""; me_request_id=raw; me_execution_source=Some (Log.Operation raw);
+    me_at=12. } in
+  state.msg_loaded_keeper <- Some "alpha";
+  state.msg_loaded <- [row];
+  check bool "equal display id from another source cannot close progress" false
+    (Types.observed_log_has_ended state log);
+  state.msg_loaded <- [{row with me_execution_source=Some source}];
+  check bool "durable autonomous output closes visual progress" true
+    (Types.observed_log_has_ended state log);
+  check bool "history never settles the partial journal" false (Types.turn_log_holds_the_turn log);
+  (match Types.journal_follow_for_source state ~keeper_name:"alpha" ~source ~seq:(Some 2) ~at:13. with
+   | Types.Follow_read _ -> ()
+   | _ -> fail "visual closure retired journal replay");
+  let direct = {row with me_role=Message_keeper} in
+  let autonomous = {row with me_execution_source=Some source} in
+  check int "same serialized ids retain separate timeline turns" 2
+    (List.length (Types.chat_timeline_slots [direct; autonomous]));
+  check bool "distinct sources do not share a rail" true
+    (List.map snd (Types.mark_turn_edges [direct; autonomous]) = [Types.Turn_alone; Types.Turn_alone])
+
 let () =
   run "TUI autonomous journal"
-    ["consumer", [test_case "typed sources select separate routes" `Quick test_source_routes_and_decodes;
+    ["consumer", [test_case "typed history closes visuals without retiring replay" `Quick test_history_closes_only_matching_autonomous_progress;
+      test_case "typed sources select separate routes" `Quick test_source_routes_and_decodes;
       test_case "observer only triggers ordered journal reads" `Quick test_notification_only_triggers_journal_read;
       test_case "cold open discovers current and historical journals" `Quick test_cold_open_discovery;
       test_case "polled excerpt yields only to exact journal text" `Quick test_poll_excerpt_defers_only_to_exact_journal_text;

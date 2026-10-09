@@ -106,6 +106,41 @@ val render_notion_card : width:int -> og_preview -> string list
 (** Notion-grade 2-column web bookmark block with platform branding and TrueColor visual banner.
     On narrow viewports (width < 55), gracefully degrades to a 1-column layout. *)
 
+type card_field =
+  | Card_site | Card_domain | Card_title | Card_description | Card_address
+  | Card_browser_action | Card_copy_action | Card_visual_action
+  | Banner_brand | Banner_repository | Banner_paper_id | Banner_image_format
+  | Banner_service_label | Banner_content_label | Banner_action
+
+type card_source_span = {
+  field : card_field;
+  value : string;
+  row : int;
+  row_start_byte : int;
+  source_start_byte : int;
+  source_end_byte : int;
+}
+(** Formatter-owned semantic field identity and its visible half-open source
+    byte interval. [row_start_byte] indexes the actual styled output row.
+    A caller retains the URL/card identity separately. *)
+
+type card_render = {
+  rows : string list;
+  fields : card_source_span list;
+}
+
+val render_compact_badge_with_spans : og_preview -> card_render option
+(** The same compact badge and silence contract as {!render_compact_badge},
+    with site/title source ranges at formatter-owned original row offsets.
+    Compose these through the subsequent Markdown pass, as for rich cards. *)
+
+val render_inline_card_with_spans : width:int -> og_preview -> card_render
+(** Same card rows as [render_inline_card], with metadata/action/banner field
+    placement retained through clipping and narrow/wide layout changes.
+    Borders and pictorial artwork have no semantic field. Ranges index original
+    field bytes before any later Markdown parsing; callers must compose them
+    through that parser instead of finding substrings in final display text. *)
+
 val render_inline_card : width:int -> og_preview -> string list
 (** Multi-line styled Unicode box embed card for chat stream rendering.
     Uses grapheme-safe cell width measurement and Notion-style 2-column layout. *)

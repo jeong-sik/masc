@@ -97,6 +97,10 @@ let all_events : E.keeper_chat_event list =
       }
   ; E.Agent_core_content_block_start
       { index = 1; content_type = "text"; tool_call_id = None; tool_call_name = None }
+  ; E.Model_content_activity {content_generation=0; content_scope=0; content_index=0;
+      content_provider_message_id=None; channel=E.Model_thinking; state=E.Content_observed}
+  ; E.Model_content_activity {content_generation=0; content_scope=0; content_index=0;
+      content_provider_message_id=None; channel=E.Model_thinking; state=E.Content_ended}
   ; E.Agent_core_content_block_stop { index = 0 }
   ; E.Agent_core_thinking_delta { index = 3; delta = "pondering" }
   ; E.Agent_core_thinking_signature_delta { index = 3; signature_bytes = 42 }

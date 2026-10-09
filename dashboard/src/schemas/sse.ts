@@ -491,6 +491,9 @@ function validateKeeperCustomPayload(
     KEEPER_STREAM_MESSAGE_DELTA: ['stream_scope', 'stop_reason', 'usage'],
     KEEPER_CONTENT_BLOCK_START: ['index', 'content_type', 'tool_call_id', 'tool_call_name'],
     KEEPER_CONTENT_BLOCK_STOP: ['index'],
+    KEEPER_MODEL_CONTENT_ACTIVITY: [
+      'generation', 'stream_scope', 'block_index', 'provider_message_id', 'channel', 'state',
+    ],
     KEEPER_THINKING_DELTA: ['index', 'delta'],
     KEEPER_THINKING_SIGNATURE_DELTA: ['index', 'signature_bytes'],
     KEEPER_MEDIA_DELTA: ['index', 'media_type', 'source_type', 'media_ref'],
@@ -544,6 +547,22 @@ function validateKeeperCustomPayload(
     }
     case 'KEEPER_CONTENT_BLOCK_STOP':
       return requiredInteger(value, 'index')
+    case 'KEEPER_MODEL_CONTENT_ACTIVITY': {
+      for (const field of ['generation', 'stream_scope', 'block_index']) {
+        const valid = requiredInteger(value, field)
+        if (!valid.success) return valid
+      }
+      if (Object.prototype.hasOwnProperty.call(value, 'provider_message_id')) {
+        const provider = requiredString(value, 'provider_message_id')
+        if (!provider.success) return provider
+      }
+      if (value.channel !== 'text' && value.channel !== 'thinking') {
+        return fail('ag_ui_event.value.channel', 'Expected text or thinking content channel')
+      }
+      return value.state === 'observed' || value.state === 'ended'
+        ? ok(true)
+        : fail('ag_ui_event.value.state', 'Expected observed or ended content state')
+    }
     case 'KEEPER_TOOL_RESULT_READY': {
       const occurrence = validateToolStreamOccurrence(value, 'ag_ui_event.value')
       return occurrence.success ? requiredString(value, 'executionId') : occurrence

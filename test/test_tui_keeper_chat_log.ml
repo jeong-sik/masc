@@ -40,6 +40,7 @@ let delta_to_string : Live.delta -> string = function
         (Option.value ~default:"none" runtime_id)
         (match attempt_index with Some i -> string_of_int i | None -> "none")
   | Live.Stream_model_started { model; _ } -> Printf.sprintf "stream_model_started(%s)" model
+  | Live.Model_content_activity activity -> Yojson.Safe.to_string (Masc.Keeper_chat_events.model_content_activity_to_json activity)
   | Live.Stream_model_stopped -> "stream_model_stopped"
   | Live.Stream_details { usage; stop_reason; _ } ->
       Printf.sprintf "stream_details(%s,stop=%s)"
@@ -392,6 +393,10 @@ let golden : E.keeper_chat_event list =
   ; E.Text_message_start { message_id = "msg-1"; role = E.Assistant }
   ; E.Agent_core_thinking_delta { index = 0; delta = "weighing it" }
   ; E.Agent_core_thinking_signature_delta { index = 0; signature_bytes = 42 }
+  ; E.Model_content_activity {content_generation=0; content_scope=0; content_index=0;
+      content_provider_message_id=None; channel=E.Model_thinking; state=E.Content_observed}
+  ; E.Model_content_activity {content_generation=0; content_scope=0; content_index=0;
+      content_provider_message_id=None; channel=E.Model_thinking; state=E.Content_ended}
   ; E.Agent_core_content_block_stop { index = 0 }
   ; E.Agent_core_stream_ping
   ; E.Text_delta {text="Let me "; stream_scope=None}

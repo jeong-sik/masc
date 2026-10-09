@@ -5815,3 +5815,10 @@
  (libraries alcotest masc_tui_types masc_tui_render_prim
   masc_tui_runtime_config_view masc_tui_account_login))
 
+(test
+ (name test_tui_model_content_activity)
+ (modules test_tui_model_content_activity)
+ (libraries alcotest astring yojson masc masc.masc_types masc.agent_core masc.runtime masc.server masc.ag_ui
+  native_tool_outcome_fixture masc_tui_keeper_chat_projection
+  masc_tui_keeper_chat_live masc_tui_keeper_chat_log masc_tui_keeper_chat_transcript))
+

@@ -84,6 +84,9 @@ type delta =
       (** Provider response metadata. The bridge scope is retained across repeated
           starts, including a surviving start following scoped text. The optional
           provider id is correlation data, not response identity. *)
+  | Model_content_activity of Masc.Keeper_chat_events.model_content_activity
+      (** Exact run generation/scope/index metadata, separate from body bytes.
+          Ended closes only the named Text/Thinking occurrence. *)
   | Stream_model_stopped
       (** The provider response ended; the Keeper turn may still be running. *)
   | Stream_details of

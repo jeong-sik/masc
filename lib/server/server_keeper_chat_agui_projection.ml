@@ -13,6 +13,7 @@ type custom_event_name =
   | Stream_ping
   | Content_block_start
   | Content_block_stop
+  | Model_content_activity
   | Thinking_delta
   | Thinking_signature_delta
   | Media_delta
@@ -53,6 +54,7 @@ let custom_event_name_to_string = function
   | Stream_ping -> "KEEPER_STREAM_PING"
   | Content_block_start -> "KEEPER_CONTENT_BLOCK_START"
   | Content_block_stop -> "KEEPER_CONTENT_BLOCK_STOP"
+  | Model_content_activity -> "KEEPER_MODEL_CONTENT_ACTIVITY"
   | Thinking_delta -> "KEEPER_THINKING_DELTA"
   | Thinking_signature_delta -> "KEEPER_THINKING_SIGNATURE_DELTA"
   | Media_delta -> "KEEPER_MEDIA_DELTA"
@@ -189,6 +191,9 @@ let project ~timestamp ~redact_text ~redact_json state event =
                (Option.map (fun value -> `String value) tool_call_name))
       in
       state, Some (custom ~timestamp ~redact_json state Content_block_start value)
+  | Model_content_activity activity ->
+      state, Some (custom ~timestamp ~redact_json state Model_content_activity
+                     (model_content_activity_to_json activity))
   | Agent_core_content_block_stop { index } ->
       state, Some (custom ~timestamp ~redact_json state Content_block_stop
                      (`Assoc [ "index", `Int index ]))

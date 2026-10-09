@@ -228,6 +228,8 @@ let keeper_chat_event_to_json event =
        @ json_opt
            "tool_call_name"
            (Option.map (fun value -> `String value) tool_call_name))
+  | Model_content_activity activity ->
+    type_tag "model_content_activity" ["activity", model_content_activity_to_json activity]
   | Agent_core_content_block_stop { index } ->
     type_tag "agent_core_content_block_stop" [ "index", `Int index ]
   | Agent_core_thinking_delta { index; delta } ->
@@ -442,6 +444,9 @@ let keeper_chat_event_of_json json =
            ; tool_call_id = json |> member "tool_call_id" |> to_string_option
            ; tool_call_name = json |> member "tool_call_name" |> to_string_option
            })
+    | "model_content_activity" ->
+      let* activity = model_content_activity_of_json (json |> member "activity") in
+      Ok (Model_content_activity activity)
     | "agent_core_content_block_stop" ->
       Ok (Agent_core_content_block_stop { index = json |> member "index" |> to_int })
     | "agent_core_thinking_delta" ->

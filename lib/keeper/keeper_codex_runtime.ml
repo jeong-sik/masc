@@ -1731,7 +1731,7 @@ let run ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~
             ();
           Log.Keeper.warn
             ~keeper_name
-            "Codex typed context overflow; shrinking provider-bound history: attempt=%d previous_capacity_bytes=%d capacity_bytes=%d"
+            "Codex typed context overflow or input refusal; shrinking provider-bound history: attempt=%d previous_capacity_bytes=%d capacity_bytes=%d"
             shrink_attempt
             previous_capacity_bytes
             capacity_bytes)

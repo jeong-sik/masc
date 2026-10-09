@@ -27,3 +27,5 @@ Final TUI response execution passed: Collab request ownership 3 cases, card/over
 The public-address probe used an isolated candidate with `MASC_HTTP_BASE_URL=https://masc.crying.pictures`: configured Host accepted, unrelated Host rejected, expected link origin, Player administration refused with exact403, and revoked credentials refused with exact401. The selected origin is saved in the operator's ignored launch `.env`; the shared process has not adopted it yet.
 
 Fresh review response (2026-10-09): the committed browser receipt/screenshots were regenerated from this page source in Chromium (21 controlled-browser checks); the Node log was regenerated from the same source (87/87). The DOS departed-caller mapping has parse-only native evidence; this does not claim native execution or deployment.
+
+Refreshed after terminal storage-loss and stalled-seat recovery fixes: current shipped page Chromium fixture21 checks and Node90 cases pass. This does not execute a deployed server or emulator.

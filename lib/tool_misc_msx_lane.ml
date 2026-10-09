@@ -11,9 +11,8 @@
 
 open Tool_args
 
-(* Every failure this module builds is a refusal before the machine is touched:
-   arguments that did not parse, or an [Msx_lane.error], which the lane only
-   answers before anything it keeps has changed (msx_lane.mli). Left
+(* Argument and pre-effect lane failures are refusals. [Effect_unknown]
+   remains a runtime failure with unknown effect disposition. Left
    undeclared, a failure reads as effect-outcome-unknown, and a composition
    that ran this tool ends the Keeper's turn over it instead of handing it
    back: "no MSX machine is loaded" after a server restart failed the whole
@@ -75,6 +74,8 @@ let of_lane ?(extra = []) ?sprites ?metadata ~tool_name ~start_time
       ()
   | Error ((Msx_lane.Activity_disabled | Msx_lane.Activity_unobserved | Msx_lane.No_machine | Msx_lane.Invalid_request _) as e) ->
     reject ~tool_name ~start_time (Msx_lane.error_to_string e)
+  | Error (Msx_lane.Effect_unknown message) ->
+    Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time message
   | Error (Msx_lane.Unreadable _ as e) ->
     refuse ~class_:Tool_result.Runtime_failure ~tool_name ~start_time
       (Msx_lane.error_to_string e)
@@ -459,6 +460,8 @@ let handle_checkpoint_info ~tool_name ~start_time ~base_path args =
         ()
     | Error ((Msx_lane.Invalid_request _ | Msx_lane.No_machine | Msx_lane.Activity_disabled | Msx_lane.Activity_unobserved) as e) ->
       reject ~tool_name ~start_time (Msx_lane.error_to_string e)
+    | Error (Msx_lane.Effect_unknown message) ->
+      Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time message
     | Error (Msx_lane.Unreadable _ as e) ->
       refuse ~class_:Tool_result.Runtime_failure ~tool_name ~start_time
         (Msx_lane.error_to_string e)

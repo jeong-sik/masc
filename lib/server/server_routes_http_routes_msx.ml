@@ -179,7 +179,7 @@ let press_response ~config ~who ~body =
         `Conflict, activity_rejection_json "activity_unobserved"
       | Error ((Msx_lane.No_machine | Msx_lane.Invalid_request _) as e) ->
         error `Bad_request (Msx_lane.error_to_string e)
-      | Error (Msx_lane.Unreadable _ as e) ->
+      | Error ((Msx_lane.Unreadable _ | Msx_lane.Effect_unknown _) as e) ->
         error `Internal_server_error (Msx_lane.error_to_string e)))
 ;;
 
@@ -409,7 +409,7 @@ let tick_response_in (config : Workspace.config option) body =
         `Conflict, activity_rejection_json "activity_unobserved"
       | Error (Msx_lane.Invalid_request _ as e) ->
         error `Bad_request (Msx_lane.error_to_string e)
-      | Error (Msx_lane.Unreadable _ as e) ->
+      | Error ((Msx_lane.Unreadable _ | Msx_lane.Effect_unknown _) as e) ->
         error `Internal_server_error (Msx_lane.error_to_string e))
     with
     | Ok response -> response
@@ -575,6 +575,7 @@ let checkpoint_operation_response ~(config : Workspace.config) ~restore ~body =
                 try match Tool_misc_msx_lane.run_checkpoint ~restore ~base_path:config.base_path ~slot:binding.slot with
                 | Ok completed -> Checkpoint_receipt.Committed {
                     mark=completed.mark;checkpoint_sha256=completed.checkpoint_sha256}
+                | Error (Msx_lane.Effect_unknown detail) -> Unknown detail
                 | Error error -> Refused (Msx_lane.error_to_string error)
                 with
                 | Eio.Cancel.Cancelled _ as exn -> raise exn

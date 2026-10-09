@@ -1858,6 +1858,83 @@ let test_new_attempt_does_not_inherit_previous_runtime () =
          ~configured_runtime:"assigned-runtime" (Some t)))
     [ Some 1; None ]
 
+let test_current_attempt_metadata_keeps_observed_activity () =
+  let t = fresh () in
+  feed t [Live.Run_started;
+    Live.Runtime_attempt_started {runtime_id=Some "runtime-a";attempt_index=Some 2};
+    Live.Stream_model_started {stream_scope=None; message_id=Some "message";model="model-a";usage=None};
+    Live.Text {text="current text"; stream_scope=None}; Live.Thinking "current reasoning";
+    Live.Model_content_activity {Masc.Keeper_chat_events.content_generation=0;
+      content_scope=0;content_index=1;content_provider_message_id=Some "message";
+      channel=Model_thinking;state=Content_observed};
+    Live.Approval_requested {call_id="approval";tool_name="Write";args="";
+      question="continue?";because="approval required"}];
+  let trail = Transcript.trail t in
+  let drawn = Transcript.drawn t in
+  let before = progress_text t in
+  List.iter (fun event ->
+    feed t [event];
+    check string "metadata preserves answer bytes" "current text" (Transcript.text t);
+    check string "metadata preserves reasoning bytes" "current reasoning" (Transcript.thinking t);
+    check bool "metadata preserves trail and origins" true
+      (Transcript.trail t=trail && Transcript.drawn t=drawn);
+    check string "metadata preserves thinking and pending approval" before (progress_text t))
+    [Live.Runtime_attempt_started {runtime_id=Some "runtime-a";attempt_index=Some 2};
+     Live.Runtime_attempt_started {runtime_id=None;attempt_index=Some 2};
+     Live.Runtime_attempt_started {runtime_id=Some "stale-runtime";attempt_index=Some 1}];
+  feed t [Live.Runtime_attempt_started {runtime_id=Some "conflicting-runtime";attempt_index=Some 2}];
+  check (option string) "conflicting runtime cannot relabel the active attempt"
+    (Some "runtime-a") (Transcript.current_runtime_id t);
+  check string "conflict does not erase answer" "current text" (Transcript.text t);
+  check bool "conflict remains visible" true
+    (List.exists (fun (_,row) -> contains ~needle:"runtime identity conflicts" row) (rows t))
+
+let test_late_runtime_name_does_not_supersede_observed_output () =
+  let t = fresh () in
+  feed t [Live.Run_started;
+    Live.Stream_model_started {stream_scope=None; message_id=Some "message";model="observed-model";usage=None};
+    Live.Text {text="already streaming"; stream_scope=None};
+    Live.Runtime_attempt_started {runtime_id=Some "late-runtime";attempt_index=Some 0}];
+  check string "late runtime metadata retains output" "already streaming" (Transcript.text t);
+  check bool "late name does not invent a superseded attempt" true
+    (match Transcript.trail t with [Transcript.Trail_text "already streaming"] -> true | _ -> false);
+  check bool "actual output activity remains visible" true
+    (contains ~needle:"STREAMING" (progress_text t));
+  check (option string) "runtime identity fills the current attempt"
+    (Some "late-runtime") (Transcript.current_runtime_id t)
+
+let test_continuation_restarts_attempt_identity () =
+  let t = fresh () in
+  feed t [Live.Run_started;
+    Live.Runtime_attempt_started {runtime_id=Some "old-runtime";attempt_index=Some 2};
+    Live.Text {text="previous segment"; stream_scope=None};
+    Live.Reply_details {reply="";turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint;
+      turn_ref="trace#1"}; Live.Run_finished; Live.Run_started];
+  check (option string) "new run does not inherit the previous runtime" None
+    (Transcript.current_runtime_id t);
+  feed t [Live.Runtime_attempt_started {runtime_id=Some "new-runtime";attempt_index=Some 0};
+    Live.Text {text="next segment"; stream_scope=None}];
+  check (option string) "attempt zero belongs to the new run"
+    (Some "new-runtime") (Transcript.current_runtime_id t);
+  check string "new segment owns its answer" "next segment" (Transcript.text t);
+  check bool "previous segment remains in the timeline" true
+    (List.exists (function Transcript.Trail_text "previous segment" -> true | _ -> false)
+       (Transcript.trail t))
+
+let test_late_attempt_cannot_rewrite_ended_work () =
+  List.iter (fun terminal ->
+    let t = fresh () in
+    feed t [Live.Run_started;
+      Live.Runtime_attempt_started {runtime_id=Some "runtime-a";attempt_index=Some 0};
+      Live.Text {text="finished answer"; stream_scope=None}; terminal];
+    let before = Transcript.drawn t in
+    feed t [Live.Runtime_attempt_started {runtime_id=Some "late-runtime";attempt_index=Some 1}];
+    check string "late attempt retains ended answer" "finished answer" (Transcript.text t);
+    check bool "late attempt cannot alter ended timeline" true (Transcript.drawn t=before);
+    check (option string) "late attempt cannot relabel ended runtime"
+      (Some "runtime-a") (Transcript.current_runtime_id t))
+    [Live.Run_finished; Live.Run_failed {message="provider failed"}]
+
 let test_drawn_items_carry_superseded_runtime_id () =
   let t = fresh () in
   feed t
@@ -3195,6 +3272,34 @@ let test_empty_new_response_does_not_replace_prior_message () =
     ((List.hd (List.rev items)).origin = Transcript.Reply_of_segment 0)
 ;;
 
+let test_scoped_details_retire_prior_response_usage () =
+  let t = fresh () in
+  let initial : Live.stream_usage =
+    { input_tokens=Some 99; output_tokens=Some 7;
+      cache_read_input_tokens=Some 12; cache_creation_input_tokens=Some 3 } in
+  let incoming : Live.stream_usage =
+    { input_tokens=None; output_tokens=Some 8;
+      cache_read_input_tokens=None; cache_creation_input_tokens=None } in
+  feed t [Live.Run_started;
+    Live.Stream_model_started {stream_scope=Some 1;message_id=Some "first";
+      model="first-model";usage=Some initial};
+    Live.Text {text="earlier response";stream_scope=Some 1};
+    Live.Stream_details {stream_scope=Some 1;usage=None;
+      stop_reason=Some Agent_core.Types.StopToolUse};
+    Live.Stream_details {stream_scope=Some 2;usage=Some incoming;stop_reason=None}];
+  check (option string) "detail-only next response has no prior input/cache/stop"
+    (Some "tokens: out 8")
+    (Transcript.stream_details_text ~keeper_name:"keeper.one" (Some t));
+  feed t [Live.Stream_model_started {stream_scope=Some 2;message_id=Some "second";
+    model="second-model";usage=Some {initial with output_tokens=Some 0}}];
+  check (option string) "late start fills this response without rewinding output"
+    (Some "tokens: in 99 · out 8 · cache read 12 · cache write 3")
+    (Transcript.stream_tokens_text ~keeper_name:"keeper.one" (Some t));
+  feed t [reply_details ~reply:"final response" ();Live.Run_finished];
+  check (list string) "missing start before details keeps earlier speech"
+    ["text:earlier response";"reply:final response"] (drawn t)
+;;
+
 let test_late_scoped_start_fills_only_unobserved_usage () =
   let t = fresh () in
   let initial : Live.stream_usage =
@@ -3219,8 +3324,13 @@ let test_late_scoped_start_fills_only_unobserved_usage () =
 
 let () =
   run "tui_keeper_chat_transcript"
-    [ ( "response boundaries", [test_case "late scoped start fills only unobserved usage" `Quick test_late_scoped_start_fills_only_unobserved_usage;
+    [ ( "response boundaries", [test_case "scoped details retire prior response usage" `Quick test_scoped_details_retire_prior_response_usage;
+      test_case "late scoped start fills only unobserved usage" `Quick test_late_scoped_start_fills_only_unobserved_usage;
       test_case "boundaries and stable origins" `Quick test_response_boundaries_preserve_origins; test_case "interleaved final authority" `Quick test_interleaved_final_keeps_observed_times_and_bytes; test_case "usage reset boundaries" `Quick test_usage_resets_only_at_response_boundaries; test_case "response end retains turn and tool lifecycle" `Quick test_response_stop_preserves_pending_work; test_case "new response without text" `Quick test_empty_new_response_does_not_replace_prior_message])
+    ; ( "attempt authority", [test_case "current attempt metadata retains activity" `Quick test_current_attempt_metadata_keeps_observed_activity;
+        test_case "late runtime naming retains streaming" `Quick test_late_runtime_name_does_not_supersede_observed_output;
+        test_case "continuation restarts attempt identity" `Quick test_continuation_restarts_attempt_identity;
+        test_case "late attempt retains ended work" `Quick test_late_attempt_cannot_rewrite_ended_work])
     ; ( "event timeline"
       , [test_case "replay preserves continuation event times" `Quick test_event_times_survive_log_replay_and_continuation;
          test_case "native tools have no MASC receipt" `Quick test_native_tools_are_observations_without_execution_receipts;

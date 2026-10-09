@@ -32,7 +32,16 @@ let client_name = "masc"
 (* In this process only, like the exchanges it holds. A restart between the
    two halves loses the login, which is the correct outcome -- see
    Keeper_oauth_pending. *)
-let pending = Keeper_oauth_pending.create ()
+let pending_mutex = Mutex.create ()
+let pending_by_workspace = Hashtbl.create 1
+let pending_for_base_path base_path =
+  let key = base_path in
+  Mutex.lock pending_mutex;
+  Fun.protect ~finally:(fun () -> Mutex.unlock pending_mutex) (fun () ->
+    match Hashtbl.find_opt pending_by_workspace key with
+    | Some pending -> pending
+    | None -> let pending = Keeper_oauth_pending.create () in
+        Hashtbl.add pending_by_workspace key pending; pending)
 
 (* One path for every provider. Which login a callback belongs to is the
    state it echoes, not the URL it arrives at, and a state is unguessable and
@@ -202,7 +211,7 @@ let start ~clock ~(config : Workspace.config) ~keeper ~provider_id ~now =
       Result.map_error Session.start_error_to_string
         (Session.start ~discover:transports.Keeper_identity_tools.discover
            ~register:(register_with ~clock) ~provider ~configured ~client_name
-           ~redirect_uri ~keeper ~pending ~now ~ttl_sec:login_window_sec ())
+           ~redirect_uri ~keeper ~pending:(pending_for_base_path base_path) ~now ~ttl_sec:login_window_sec ())
     in
     let* () =
       if started.Session.registered_now
@@ -215,7 +224,7 @@ let start ~clock ~(config : Workspace.config) ~keeper ~provider_id ~now =
         ; "provider", `String provider.Provider.id
         ; "provider_label", `String provider.Provider.label
         ; "authorize_url", `String started.Session.authorize_url
-        ; "state", `String started.Session.state
+        ; "attempt_id", `String started.Session.attempt_id
         ; "registered_now", `Bool started.Session.registered_now
         ; "expires_at", `Float (now +. login_window_sec)
         ])
@@ -317,14 +326,8 @@ type attached = {
   tool_discovery : (int, string) result;
 }
 
-let finish ~clock ~(config : Workspace.config) ~state ~code ~now =
+let publish_finished ~clock ~(config : Workspace.config) ~state ~finished ~now =
   let base_path = config.Workspace.base_path in
-  let* finished =
-    Result.map_error Session.finish_error_to_string
-      (Session.finish
-         ~post:(Keeper_oauth_flow.http_post ~clock ~timeout_sec:rest_timeout_sec)
-         ~pending ~state ~code ~now ())
-  in
   (* Which provider is the exchange's own answer, not the URL's: the
      declaration that named where these tokens go is the one that started
      this login. *)
@@ -375,9 +378,16 @@ let finish ~clock ~(config : Workspace.config) ~state ~code ~now =
   let tool_discovery =
     Result.map
       (fun catalog -> List.length catalog.Keeper_identity_tools.tools)
-      (Keeper_identity_tools.refresh
+      (match Keeper_identity_tools.refresh
          ~mcp_post:(Keeper_identity_tools.http_transports ~clock).Keeper_identity_tools.mcp_post
-         ~config ~keeper_name ~provider ~now ())
+         ~config ~keeper_name ~provider ~now () with
+       | result -> result
+       | exception exn ->
+           (* All credential writes completed before discovery began. Keep
+              that fact even if discovery is cancelled or raises. *)
+           Keeper_oauth_pending.finish (pending_for_base_path base_path) ~state
+             (Ok Keeper_oauth_pending.Credentials_published_discovery_failed);
+           raise exn)
   in
   Ok
     { keeper = keeper_name
@@ -388,3 +398,46 @@ let finish ~clock ~(config : Workspace.config) ~state ~code ~now =
     ; tool_discovery
     }
 ;;
+
+let finish ~clock ~(config : Workspace.config) ~state ~code ~now =
+  let pending = pending_for_base_path config.Workspace.base_path in
+  let finish_result result =
+    Keeper_oauth_pending.finish pending ~state
+      (match result with
+       | Error _ -> Error ()
+       | Ok attached -> Ok (match attached.tool_discovery with
+           | Ok count -> Keeper_oauth_pending.Tools_discovered count
+           | Error _ -> Keeper_oauth_pending.Credentials_published_discovery_failed));
+    result in
+  match Session.finish
+      ~post:(Keeper_oauth_flow.http_post ~clock ~timeout_sec:rest_timeout_sec)
+      ~pending ~state ~code ~now () with
+  | Error error -> Error (Session.finish_error_to_string error)
+  | Ok finished ->
+      (match publish_finished ~clock ~config ~state ~finished ~now with
+       | result -> finish_result result
+       | exception exn ->
+           Keeper_oauth_pending.finish pending ~state (Error ());
+           raise exn)
+
+let attempt_status_json ~base_path ~now ~keeper ~provider_id ~attempt_id =
+  let fields = match Keeper_oauth_pending.status (pending_for_base_path base_path)
+      ~now ~keeper ~provider_id ~attempt_id with
+    | None -> ["kind", `String "unavailable"]
+    | Some (Awaiting_consent expires_at) -> ["kind", `String "awaiting_consent"; "expires_at", `Float expires_at]
+    | Some Callback_admitted -> ["kind", `String "callback_admitted"]
+    | Some (Completed completion) -> ["kind", `String "completed";
+        "credential_publication", `String "published";
+        "tool_discovery", (match completion with
+          | Tools_discovered count -> `Assoc ["kind", `String "discovered"; "count", `Int count]
+          | Credentials_published_discovery_failed -> `Assoc ["kind", `String "failed"])]
+    | Some Failed -> ["kind", `String "failed"]
+    | Some Expired -> ["kind", `String "expired"]
+    | Some Superseded -> ["kind", `String "superseded"] in
+  `Assoc fields
+
+let reject_callback ~base_path ~state ~now =
+  let pending = pending_for_base_path base_path in
+  match Keeper_oauth_pending.take pending ~now ~state with
+  | None -> ()
+  | Some _ -> Keeper_oauth_pending.finish pending ~state (Error ())

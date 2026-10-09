@@ -155,7 +155,7 @@ let with_cached_surface_success
      restore this used to carry collapsed with the record. *)
   let saved = Server_dashboard_http_cache.snapshot surface in
   Fun.protect
-    ~finally:(fun () -> surface.Server_dashboard_http_cache.current <- saved)
+    ~finally:(fun () -> Server_dashboard_http_cache.update_cached_surface surface (fun _ -> saved))
     (fun () ->
       Server_dashboard_http_cache.mark_cached_surface_success surface json;
       f ())
@@ -164,11 +164,9 @@ let with_mission_cache_success json f =
   let module Core = Server_dashboard_http_core in
   let surface = Core.mission_cache in
   let saved = Core.snapshot surface in
-  let saved_payload = surface.Core.memoized_payload in
   Fun.protect
     ~finally:(fun () ->
-      surface.Core.current <- saved;
-      surface.Core.memoized_payload <- saved_payload)
+      Core.update_cached_surface surface (fun _ -> saved))
     (fun () -> Core.mark_cached_surface_success surface json; f ())
 
 let with_env key value f =
@@ -7515,6 +7513,49 @@ let test_cached_surface_success_clears_the_previous_error () =
     (Yojson.Safe.to_string succeeded.Cache.json)
 ;;
 
+let test_cached_surface_retains_observations () =
+  let module Cache = Server_dashboard_http_cache in
+  let seed = `Assoc [ "value", `String "before" ] in
+  let surface = Cache.create_cached_surface seed in
+  Cache.mark_cached_surface_success surface seed;
+  let before = Cache.snapshot surface in
+  let payload_before = Cache.cached_surface_payload surface in
+  check bool "unchanged publication reuses its payload" true
+    (payload_before == Cache.cached_surface_payload surface);
+  let replacement = `Assoc [ "value", `String "after" ] in
+  Cache.invalidate_cached_surface ~json:replacement surface;
+  let after = Cache.snapshot surface in
+  check bool "retained snapshot keeps its success" true
+    (Option.is_some before.Cache.last_success_unix);
+  check bool "retained snapshot keeps its JSON" true (before.Cache.json = seed);
+  check bool "invalidation replaces JSON and success together" true
+    (after.Cache.json = replacement && Option.is_none after.Cache.last_success_unix);
+  let payload_after = Cache.cached_surface_payload surface in
+  check bool "invalidation retires encoded payload" false
+    (String.equal payload_before.raw_json payload_after.raw_json);
+  check bool "ETag follows the new payload" false
+    (String.equal payload_before.etag payload_after.etag);
+  let stale = { before with last_success_unix = Some 10.;
+    last_error_unix = Some 11.; last_error = Some "refresh failed" } in
+  let rendered = Cache.surface_snapshot_json ~now:12. stale in
+  check bool "same observation renders identically" true
+    (rendered = Cache.surface_snapshot_json ~now:12. stale);
+  check int "stale age uses the supplied observation time" 2000
+    (rendered |> Yojson.Safe.Util.member "projection_diagnostics"
+     |> Yojson.Safe.Util.member "stale_age_ms" |> Yojson.Safe.Util.to_int)
+;;
+
+let test_cached_surface_diagnostics_have_one_authority () =
+  let module Cache = Server_dashboard_http_cache in
+  let original = `Assoc [
+    "projection_diagnostics", `Assoc ["state", `String "old"; "state", `String "older"];
+    "projection_diagnostics", `Assoc ["state", `String "shadow"] ] in
+  let merged = Cache.extend_projection_diagnostics original
+    ["state", `String "first"; "state", `String "last"] in
+  check bool "last diagnostic wins with no duplicate authorities" true
+    (merged = `Assoc ["projection_diagnostics", `Assoc ["state", `String "last"]])
+;;
+
 let test_tool_calls_select_keeper_before_limiting () =
   let base_path = test_dir () in
   Fun.protect
@@ -7965,7 +8006,11 @@ let () =
             test_running_keeper_reconciliation_leaves_a_stale_declaration_row;
         ] );
       ( "context-window shrink guard (#25062/#25268)",
-        [ test_case "success clears the previous error" `Quick
+        [ test_case "cache retains immutable observations" `Quick
+            test_cached_surface_retains_observations;
+          test_case "cache diagnostics have one authority" `Quick
+            test_cached_surface_diagnostics_have_one_authority;
+          test_case "success clears the previous error" `Quick
             test_cached_surface_success_clears_the_previous_error;
           test_case "shrink of max_context_override is detected" `Quick
             test_context_shrink_detection;

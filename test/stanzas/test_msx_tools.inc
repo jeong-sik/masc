@@ -4,6 +4,8 @@
 (test
  (name test_msx_tools)
  (modules test_msx_tools)
+ (deps ../scripts/opam-pin-external-deps.sh ../masc.opam.locked)
+ (action (chdir .. (run %{test})))
  (libraries
   masc.machine_configuration
   alcotest yojson unix eio_main fs_compat ocaml-msx.msx masc masc.msx_lane masc.board_handlers

@@ -1,0 +1,68 @@
+{
+ "runs": 33,
+ "model_calls": 447,
+ "input_tokens": 139819903,
+ "cached_share": 0.947,
+ "input_per_call_mean": 312796,
+ "input_per_call_max": 393922,
+ "observer_child_sessions": 633,
+ "largest_request_bytes": 1584353,
+ "largest_request_by_lane": [
+  {
+   "lane": "system_base",
+   "source": "provider_default",
+   "role": "option:meta.instructions",
+   "parts": 1,
+   "bytes": 41271
+  },
+  {
+   "lane": "context",
+   "source": "run_context",
+   "role": "message.role:developer",
+   "parts": 1,
+   "bytes": 26379
+  },
+  {
+   "lane": "history",
+   "source": "external_history",
+   "role": "message.role:user",
+   "parts": 13,
+   "bytes": 515130
+  },
+  {
+   "lane": "history",
+   "source": "external_history",
+   "role": "message.role:assistant",
+   "parts": 270,
+   "bytes": 556701
+  },
+  {
+   "lane": "tool_result",
+   "source": "tool_result",
+   "role": "message.role:tool",
+   "parts": 138,
+   "bytes": 426096
+  },
+  {
+   "lane": "history",
+   "source": "external_history",
+   "role": "message.role:developer",
+   "parts": 2,
+   "bytes": 1336
+  },
+  {
+   "lane": "history",
+   "source": "current_user",
+   "role": "message.role:user",
+   "parts": 1,
+   "bytes": 15788
+  },
+  {
+   "lane": "history",
+   "source": "history",
+   "role": "message.role:assistant",
+   "parts": 2,
+   "bytes": 1652
+  }
+ ]
+}

@@ -46,6 +46,17 @@
       }
     },
     {
+      "publisher": "anthropic",
+      "model_id": "claude-haiku-5-5",
+      "release": {
+        "status": "official_release",
+        "released_on": "2026-10-07",
+        "kind": "general_availability",
+        "source_url": "https://platform.claude.com/docs/en/models/haiku-5-5/overview",
+        "checked_on": "2026-10-08"
+      }
+    },
+    {
       "publisher": "openai",
       "model_id": "gpt-5.6-sol",
       "release": {

@@ -161,8 +161,8 @@ and confirm the next officer or battle prompt before continuing.
   prompt appeared. The displayed troop totals did not change, so this does
   not establish an enemy hit or a universally valid attack direction.
 - `4` asks `誰の様子を見ますか? (0:見る RET:やめる)`. `0` displayed an officer
-  panel including soldiers, training and morale; Return left information
-  mode. Inspect these values rather than assuming recruited troops are trained.
+  panel including soldiers, training and armament. From the officer-choice
+  prompt, Return left information mode. Inspect these values rather than assuming recruited troops are trained.
 - `6` asks `全軍退却しますか(Y/N)?`; after `y` each unit asks
   `<退却>:20 <武将>はどこに退却しますか?`. Type the province number shown and
   Return; an empty Return is not an answer. After the last unit the map comes

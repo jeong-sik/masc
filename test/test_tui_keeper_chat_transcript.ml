@@ -3002,7 +3002,7 @@ let test_response_boundaries_preserve_origins () =
     "retry", [Live.Text {text="COMMENTARY"; stream_scope=None};
       Live.Runtime_attempt_started {runtime_id=Some "retry";attempt_index=Some 1}];
     "continuation", [Live.Text {text="COMMENTARY"; stream_scope=None};
-      Live.Reply_details {reply="";turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint;
+      Live.Reply_details {terminal_stream_scope = None; reply="";turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint;
         turn_ref="trace#1"}; Live.Run_finished; Live.Run_started]
   ] in
   List.iter (fun (label,boundary) ->
@@ -3049,7 +3049,7 @@ let test_usage_resets_only_at_response_boundaries () =
   feed t [Live.Runtime_attempt_started {runtime_id=Some "retry";attempt_index=Some 1}];
   check (option string) "retry clears prior message counters" None (tokens ());
   seed ();
-  feed t [Live.Reply_details {reply="";turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint;
+  feed t [Live.Reply_details {terminal_stream_scope = None; reply="";turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint;
     turn_ref="trace#1"};Live.Run_finished;Live.Run_started];
   check (option string) "continuation does not inherit old counters" None (tokens ());
   check (option string) "continuation does not inherit old stop reason" None

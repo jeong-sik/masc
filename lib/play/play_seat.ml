@@ -8,16 +8,20 @@ let keeper_names config =
     (Keeper_meta_store.keeper_names_result config)
 
 let eligible_credentials ~keepers ~now credentials =
+  (* Worker credentials are excluded by role first: a Worker whose
+     agent_name matches a configured Keeper is not that Keeper, so the
+     name membership must not carry it into the roster. *)
   let eligible (cred : Masc_domain.agent_credential) =
-    List.mem cred.agent_name keepers || match cred.role with
-    | Masc_domain.Admin | Masc_domain.Player ->
-      (match Play_invite.expired ~now cred with
-       | Ok false -> true
-       | Ok true -> false
-       | Error (Masc_domain.Credential_expiry.Invalid_timestamp stamp) ->
-         Log.Auth.warn "Play seat cannot read credential expiry for %s: %S" cred.agent_name stamp;
-         false)
+    match cred.role with
     | Masc_domain.Worker -> false
+    | Masc_domain.Admin | Masc_domain.Player ->
+      List.mem cred.agent_name keepers
+      || (match Play_invite.expired ~now cred with
+         | Ok false -> true
+         | Ok true -> false
+         | Error (Masc_domain.Credential_expiry.Invalid_timestamp stamp) ->
+           Log.Auth.warn "Play seat cannot read credential expiry for %s: %S" cred.agent_name stamp;
+           false)
   in
   List.filter eligible credentials
 

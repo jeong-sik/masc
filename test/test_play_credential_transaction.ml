@@ -688,7 +688,7 @@ let test_cancelled_disconnect_does_not_publish_departure () =
   check bool "cancelled admission retains eligibility" true (List.mem "player" names);
   check (option string) "cancelled admission retains ownership" (Some "player") (controller ())
 
-let test_departed_worker_keeper_is_not_a_handoff_target () =
+let test_departed_worker_keeper_does_not_remove_the_keeper_roster () =
   with_machine @@ fun config _ _ ->
   let token, _ = auth_ok (Auth.ensure_keeper_credential config.base_path ~agent_name:"player") in
   let meta = match Masc_test_deps.meta_of_json_fixture
@@ -697,9 +697,12 @@ let test_departed_worker_keeper_is_not_a_handoff_target () =
   (match Keeper_meta_store.replace_snapshot config meta with
    | Ok () -> () | Error detail -> fail detail);
   operator_holds config;
+  (* A Worker credential is not a seat: its departure record cannot remove the
+     configured same-name Keeper from the roster. Input authority is still
+     checked at execution. *)
   participation_ok (participate config token Play_participation.Departed);
-  refused_target "departed Keeper with a Worker credential" (hand_to config "player");
-  check (option string) "refused Keeper handoff preserves the holder" (Some "operator") (controller ());
+  ignore (handed (hand_to config "player"));
+  check (option string) "handoff to the same-name Keeper moves the holder" (Some "player") (controller ());
   participation_ok (participate config token Play_participation.Connected);
   ignore (handed (hand_to config "player"))
 
@@ -828,7 +831,7 @@ let () =
     [ "controller recovery",
       [ test_case "preparation allows disconnect before final admission" `Quick test_preparation_allows_disconnect_before_final_admission
       ; test_case "current discovery follows regular symlinks" `Quick test_current_listing_follows_regular_symlink
-      ; test_case "departed Worker Keepers are excluded from handoffs" `Quick test_departed_worker_keeper_is_not_a_handoff_target
+      ; test_case "departed Worker Keepers cannot remove the same-name Keeper" `Quick test_departed_worker_keeper_does_not_remove_the_keeper_roster
       ; test_case "departed callers cannot pass a free controller" `Quick test_departed_caller_cannot_pass_a_free_controller
       ; test_case "independent stop and expiry survive damaged participation" `Quick test_independent_departure_recovers_damaged_participation
       ; test_case "disconnect waits for the admitted move effect" `Quick test_disconnect_waits_for_an_admitted_move_effect

@@ -721,9 +721,7 @@ let native_progress_summary (activity : tool_activity) =
       | None, Some _, _ -> "output observed"
       | None, None, Some seconds -> Printf.sprintf "heartbeat · provider elapsed %ds" seconds
       | None, None, None -> "native activity observed" in
-    match progress.elapsed with
-    | None -> observation
-    | Some elapsed -> observation ^ " · updated +" ^ Masc_tui_message_layout.span_text elapsed)
+    observation)
     activity.native_progress in
   let retry = Option.map (function
     | Runtime_native_tools.Retry_cleared agent ->
@@ -740,9 +738,12 @@ let native_progress_summary (activity : tool_activity) =
   | Some _ as value, None | None, (Some _ as value) -> value
   | None, None -> None
 
-let native_progress_details (activity : tool_activity) =
+let native_progress_details ?(include_elapsed=false) (activity : tool_activity) =
   match native_progress_summary activity, activity.native_progress with
   | Some summary, Some progress ->
+      let summary = match include_elapsed, progress.elapsed with
+        | true, Some elapsed -> summary ^ " · updated +" ^ Masc_tui_message_layout.span_text elapsed
+        | false, _ | true, None -> summary in
       let bytes = Option.fold ~none:[]
           ~some:(fun count -> [Printf.sprintf "%d bytes observed" count]) progress.output_bytes in
       (* Heartbeat-only summaries already name the provider report. When a
@@ -774,7 +775,7 @@ let render_activity_rows ~expanded (activities : tool_activity list) =
   List.map
     (fun (activity : tool_activity) ->
       let marker = marker_of_outcome activity.outcome in
-      let progress = if expanded then native_progress_details activity else native_progress_summary activity in
+      let progress = if expanded then native_progress_details ~include_elapsed:true activity else native_progress_summary activity in
       let observation = match native_activity_summary activity, progress with
         | None, progress -> progress
         | Some completion, None -> Some completion
@@ -2350,6 +2351,9 @@ let apply_delta ~now t (delta : Live.delta) =
       retire_model_content t;
       t.model_signal <- Some Model_response_ended
   | Live.Stream_details { usage; stop_reason; stream_scope } ->
+      (* A retained detail can be the first surviving event of a response.
+         Its scope retires prior counters before sparse fields are merged. *)
+      Option.iter (enter_text_response_scope t) stream_scope;
       (* What the provider reported, not that anything was written, so the
          model-side signal is left as whatever last moved the answer. A field
          the delta did not carry leaves the last report standing: the wire

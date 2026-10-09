@@ -1482,3 +1482,363 @@ test('seat recovery cadence replaces a stalled authority request without machine
   assert.equal(page.requests.filter(r => r.url === '/api/v1/play/seat').length, reads + 1);
   assert.equal(page.get('send-text').disabled, false);
 });
+
+
+test('a stalled periodic seat read cannot stop live frames or admit stale controls', async () => {
+  let seatReads = 0;
+  let liveReads = 0;
+  let resumeSeat;
+  const heldSeat = new Promise(resolve => { resumeSeat = resolve; });
+  const page = fixture(({ url, method }) => {
+    if (url === '/api/v1/play/seat') {
+      seatReads += 1;
+      return seatReads === 3 ? heldSeat
+        : response(seatReads > 3 ? { ...seat, controller: 'operator' } : seat);
+    }
+    if (url === '/api/v1/play/pad') return response(layout);
+    if (method === 'POST') return response({ ok: true });
+    liveReads += 1;
+    return response({ ...frame, change_count: liveReads,
+      screen: { ...frame.screen, rgb_base64: liveReads >= 3 ? 'AAAA' : '/wAA' },
+      activity: [{ at: liveReads, who: 'operator', action: 'frame-' + liveReads }] });
+  });
+  await page.settle();
+  assert.match(page.get('turn').textContent, /내 차례/);
+  await page.poll(5000);
+  assert.equal(seatReads, 3, 'periodic authority request is pending');
+  const before = liveReads;
+  await page.poll(300);
+  await page.poll(300);
+  assert.equal(liveReads, before + 2, 'subsequent live polls keep completing');
+  assert.equal(page.timerCount, 1, 'the live loop schedules its next frame');
+  assert.equal(seatReads, 3, 'pending periodic authority is coalesced');
+  assert.deepEqual(page.rendered.at(-1), [0, 0, 0, 255]);
+  assert.equal(page.get('activity').children[0].textContent, 'operator · frame-' + liveReads);
+  page.padButton.handlers.click();
+  await page.settle();
+  assert.equal(page.requests.some(r => r.method === 'POST'), false, 'stale seat cannot authorize input');
+  resumeSeat(response(seat));
+  await page.settle();
+  await page.settle();
+  assert.equal(seatReads, 4, 'activity refresh debt starts another authority read without a user action');
+  await page.poll(5000);
+  assert.equal(seatReads, 5, 'obsolete frame request cannot block later authority polling');
+  assert.equal(page.get('turn').textContent, 'operator 님 차례예요', 'old seat cannot restore stale control');
+});
+
+
+for (const replacement of ['no_machine then new program', 'new incarnation with the same program']) {
+  test('an old pad response cannot restore controls after ' + replacement, async () => {
+    let phase = 'A';
+    let padReads = 0;
+    let releaseOld;
+    let oldRequest;
+    const oldPad = new Promise(resolve => { releaseOld = resolve; });
+    const newProgram = replacement === 'no_machine then new program' ? 'program-B' : seat.saves_name;
+    const newLayout = { saves_name: newProgram,
+      buttons: [{ ...layout.buttons[0], label: 'new-layout' }] };
+    const page = fixture(request => {
+      const { url } = request;
+      if (url === '/api/v1/play/seat') return response({ ...seat,
+        machine: phase !== 'empty', saves_name: phase === 'empty' ? null
+          : phase === 'B' ? newProgram : seat.saves_name });
+      if (url === '/api/v1/play/pad') {
+        if (++padReads === 1) { oldRequest = request; return oldPad; }
+        return response(newLayout);
+      }
+      if (phase === 'empty') return response({ state: 'no_machine', activity: [] });
+      return response({ ...frame, change_count: phase === 'B' ? 2 : 1,
+        incarnation: phase === 'B' ? 'machine-B' : 'machine-A',
+        activity: [{ at: phase === 'B' ? 2 : 1, who: 'operator', action: phase }] });
+    });
+    await page.settle();
+    assert.equal(padReads, 1, 'old layout request is still held');
+    if (replacement === 'no_machine then new program') {
+      phase = 'empty';
+      await page.poll(300);
+      assert.equal(page.get('pad').hidden, true, 'eject clears old controls while GET is pending');
+    }
+    phase = 'B';
+    await page.poll(300);
+    assert.equal(padReads, 2, 'replacement layout can be read without waiting for obsolete GET');
+    assert.equal(page.get('pad').hidden, false);
+    assert.equal(page.padButton.textContent, 'new-layout');
+    assert.equal(oldRequest.signal.aborted, true, 'retirement frees the obsolete HTTP request');
+    releaseOld(replacement === 'no_machine then new program' ? response({}, 401) : response(layout));
+    await page.settle();
+    assert.equal(page.padButton.textContent, 'new-layout', 'late old layout cannot restore stale buttons');
+    assert.equal(page.get('pad').hidden, false);
+  });
+}
+
+
+for (const replacement of ['eject then replacement', 'direct incarnation replacement']) {
+  test('a stalled old seat cannot block fresh authority after ' + replacement, async () => {
+    let phase = 'A';
+    let seatReads = 0;
+    let releaseOld;
+    const oldSeat = new Promise(resolve => { releaseOld = resolve; });
+    const page = fixture(({ url }) => {
+      if (url === '/api/v1/play/seat') {
+        seatReads += 1;
+        if (seatReads === 3) return oldSeat;
+        return response({ ...seat, machine: phase !== 'empty',
+          saves_name: phase === 'empty' ? null : phase === 'B' ? 'program-B' : seat.saves_name,
+          controller: phase === 'B' ? 'operator' : seat.controller });
+      }
+      if (url === '/api/v1/play/pad') return response({ ...layout,
+        saves_name: phase === 'B' ? 'program-B' : seat.saves_name });
+      if (phase === 'empty') return response({ state: 'no_machine', activity: [] });
+      return response({ ...frame, incarnation: phase === 'B' ? 'machine-B' : 'machine-A',
+        // Keep the activity identical: incarnation itself must revoke A.
+        activity });
+    });
+    await page.settle();
+    await page.poll(5000);
+    assert.equal(seatReads, 3, 'old A periodic seat response is held');
+    if (replacement === 'eject then replacement') {
+      phase = 'empty';
+      await page.poll(300);
+      assert.equal(page.get('pad').hidden, true);
+    }
+    phase = 'B';
+    await page.poll(300);
+    assert.equal(page.get('turn').textContent, 'operator 님 차례예요');
+    const observed = seatReads;
+    assert.ok(observed > 3, 'replacement requested its own authority before old GET settled');
+    await page.poll(5000);
+    assert.equal(seatReads, observed + 1, 'new owner keeps periodic authority refresh enabled');
+    releaseOld(replacement === 'eject then replacement' ? response({}, 401) : response(seat));
+    await page.settle();
+    assert.equal(page.get('turn').textContent, 'operator 님 차례예요', 'late A cannot restore control');
+  });
+}
+
+
+test('held initial seat authority cannot block first or subsequent live observations', async () => {
+  let seatReads = 0;
+  let liveReads = 0;
+  const held = new Promise(() => {});
+  const page = fixture(({ url }) => {
+    if (url === '/api/v1/play/seat') { seatReads += 1; return held; }
+    if (url === '/api/v1/play/pad') return response(layout);
+    liveReads += 1;
+    return response({ ...frame, change_count: liveReads,
+      activity: [{ at: liveReads, who: 'operator', action: 'initial-frame-' + liveReads }] });
+  });
+  await page.settle();
+  assert.equal(liveReads, 1, 'first frame does not wait for unread authority');
+  // Discovering the first actual machine incarnation retires the boot read
+  // and owns one new authority request; subsequent ticks coalesce that owner.
+  assert.equal(seatReads, 2);
+  await page.poll(300);
+  await page.poll(5000);
+  assert.equal(liveReads, 3);
+  assert.equal(seatReads, 3, 'the recovery cadence replaces stalled authority without waiting for a new incarnation');
+  assert.equal(page.timerCount, 1);
+  assert.deepEqual(page.rendered.at(-1), [255, 0, 0, 255]);
+  assert.equal(page.get('activity').children[0].textContent, 'operator · initial-frame-3');
+  page.padButton.handlers.click();
+  page.get('pass').handlers.click();
+  page.get('text').value = 'unread authority draft';
+  page.get('send-text').handlers.click();
+  await page.settle();
+  assert.equal(page.requests.some(request => request.method === 'POST'), false);
+  assert.equal(page.get('text').value, 'unread authority draft');
+});
+
+
+test('opening the handoff picker keeps selection enabled while authority refresh is pending', async () => {
+  let hold = false, releaseSeat;
+  const page = fixture(request => {
+    if (request.url === '/api/v1/play/seat' && hold)
+      return new Promise(resolve => { releaseSeat = resolve; });
+    return normalReply(request);
+  });
+  await page.settle();
+  const select = page.get('pass-to');
+  assert.equal(select.disabled, false);
+  hold = true;
+  select.disabledChanges = [];
+  select.handlers.pointerdown();
+  select.handlers.focus();
+  assert.equal(select.disabled, false, 'pending refresh cannot cancel the opened native picker');
+  assert.equal(select.disabledChanges.includes(true), false, 'refresh never toggles the native picker disabled even transiently');
+  assert.equal(page.get('pass').disabled, true, 'the mutation still waits for authority');
+  select.value = 'operator';
+  releaseSeat(response(seat));
+  await page.settle();
+  assert.equal(select.value, 'operator');
+  assert.equal(page.get('pass').disabled, false);
+});
+
+test('a refused disconnect retires a stalled frame seat read so authority polling recovers', async () => {
+  let seatReads = 0;
+  let heldRequest;
+  const page = fixture(request => {
+    if (request.url === '/api/v1/play/seat') {
+      seatReads += 1;
+      if (seatReads === 3) {
+        heldRequest = request;
+        return new Promise(() => {});
+      }
+      return response(seat);
+    }
+    return normalReply(request);
+  }, { sessionReply: () => response({ ok: false, message: 'try later' }, 409) });
+  await page.settle();
+  await page.poll(5000);
+  assert.equal(seatReads, 3, 'periodic authority is stalled');
+  assert.equal(page.padButton.disabled, true);
+  await page.get('leave').handlers.click();
+  assert.equal(heldRequest.signal.aborted, true, 'departure cancels the obsolete transport');
+  await page.poll(5000);
+  assert.equal(seatReads, 4, 'refused departure cannot leave polls behind the retired promise');
+  assert.match(page.get('turn').textContent, /내 차례/);
+  assert.equal(page.padButton.disabled, false);
+  page.padButton.handlers.click();
+  await page.settle();
+  assert.ok(page.requests.some(request => request.method === 'POST'
+    && request.url === '/api/v1/play/pad'), 'fresh authority admits game input again');
+});
+
+test('two queued distinct keys survive the first write while its projection read can stall', async () => {
+  let completeFirst, holdProjection = false;
+  const presses = [];
+  const page = fixture(request => {
+    if (request.url === '/api/v1/play/seat' && holdProjection) return new Promise(() => {});
+    if (request.method === 'POST' && request.url === '/api/v1/dos/press') {
+      presses.push(request.body.keys[0]);
+      if (presses.length === 1) return new Promise(resolve => {
+        completeFirst = () => { holdProjection = true; resolve(response({ ok:true })); };
+      });
+      return response({ ok:true });
+    }
+    return normalReply(request);
+  });
+  await page.settle();
+  const keydown = page.get('screen-wrap').handlers.keydown;
+  keydown({ key:'a', preventDefault() {} });
+  keydown({ key:'b', preventDefault() {} });
+  await page.settle();
+  assert.deepEqual(presses, ['a'], 'the writes remain serialized');
+  completeFirst();
+  await page.settle();
+  assert.deepEqual(presses, ['a', 'b'], 'the projection read does not drop already-queued input');
+  await page.get('leave').handlers.click();
+  assert.equal(page.requests.at(-1).url, '/api/v1/play/session', 'disconnect does not wait for projection');
+});
+
+
+test('first no-machine observation retires pending bootstrap authority', async () => {
+  let releaseBoot, bootRequest, reads = 0;
+  const storage = new Map();
+  const page = fixture(request => {
+    if (request.url === '/api/v1/play/seat') {
+      if (++reads === 1) { bootRequest = request; return new Promise(resolve => { releaseBoot = resolve; }); }
+      return response({ ...seat, machine:false, saves_name:null });
+    }
+    if (request.url === '/api/v1/play/pad') return response(layout);
+    return response({ state:'no_machine', activity:[] });
+  }, { storage });
+  await page.settle();
+  assert.equal(bootRequest.signal.aborted, true, 'unobserved-to-absent retires the bootstrap read');
+  assert.equal(reads, 2);
+  releaseBoot(response(seat));
+  await page.settle();
+  assert.equal(page.get('send-text').disabled, true);
+  assert.equal(page.get('pad').hidden, true);
+  assert.equal(storage.get('masc.play.invite'), 'fixture-token');
+});
+
+// Like fetch, a stalled request settles only when its signal aborts.
+const stall = signal => new Promise((_, reject) =>
+  signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+
+test('changed activity aborts a stalled frame seat read and starts its follow-up', async () => {
+  let seatReads = 0, liveReads = 0, stalled;
+  const page = fixture(request => {
+    if (request.url === '/api/v1/play/seat') {
+      seatReads += 1;
+      if (seatReads === 3) { stalled = request; return stall(request.signal); }
+      return response(seat);
+    }
+    if (request.url === '/api/v1/play/pad') return response(layout);
+    if (request.method === 'POST') return response({ ok: true });
+    liveReads += 1;
+    return response({ ...frame, change_count: liveReads,
+      activity: [{ at: liveReads, who: 'operator', action: 'frame-' + liveReads }] });
+  });
+  await page.settle();
+  await page.poll(5000);
+  assert.equal(seatReads, 3, 'periodic authority read is stalled');
+  assert.equal(stalled.signal.aborted, false);
+  await page.poll(300);
+  assert.equal(stalled.signal.aborted, true, 'new activity cancels the stalled authority transport');
+  assert.equal(seatReads, 4, 'the follow-up authority read starts without the stalled reply');
+});
+
+test('a seat that reports a new program retires the stalled pad read before live does', async () => {
+  let program = seat.saves_name, padReads = 0, oldPad;
+  const newLayout = { saves_name: 'program-B', buttons: [{ ...layout.buttons[0], label: 'new-layout' }] };
+  const page = fixture(request => {
+    if (request.url === '/api/v1/play/seat') return response({ ...seat, saves_name: program });
+    if (request.url === '/api/v1/play/pad') {
+      if (++padReads === 1) { oldPad = request; return stall(request.signal); }
+      return response(newLayout);
+    }
+    // Live keeps reporting incarnation A with unchanged activity.
+    return response(frame);
+  });
+  await page.settle();
+  assert.equal(padReads, 1, 'program A layout read is stalled');
+  program = 'program-B';
+  await page.poll(5000);
+  assert.equal(oldPad.signal.aborted, true, 'the seat observation retires the program A layout read');
+  assert.equal(padReads, 2, 'program B layout is read while live still reports the old incarnation');
+  assert.equal(page.padButton.textContent, 'new-layout');
+});
+
+test('a same-program incarnation replacement rereads a settled pad layout', async () => {
+  let incarnation = 'machine-A', padReads = 0;
+  const page = fixture(request => {
+    if (request.url === '/api/v1/play/seat') return response(seat);
+    if (request.url === '/api/v1/play/pad') {
+      padReads += 1;
+      return response(incarnation === 'machine-A' ? layout
+        : { ...layout, buttons: [{ ...layout.buttons[0], label: 'new-layout' }] });
+    }
+    return response({ ...frame, incarnation });
+  });
+  await page.settle();
+  assert.equal(page.padButton.textContent, layout.buttons[0].label, 'program A layout is settled');
+  const settledReads = padReads;
+  incarnation = 'machine-B';
+  await page.poll(300);
+  await page.settle();
+  assert.equal(padReads, settledReads + 1, 'the replacement machine rereads the same program layout');
+  assert.equal(page.padButton.textContent, 'new-layout');
+});
+
+test('an incarnation replaced during a refused disconnect keeps stale controls closed', async () => {
+  let incarnation = 'machine-A', releaseSession;
+  const page = fixture(request => {
+    if (request.url === '/api/v1/play/seat') return response(seat);
+    if (request.url === '/api/v1/play/pad') return response(layout);
+    if (request.method === 'POST') return response({ ok: true });
+    return response({ ...frame, incarnation });
+  }, { sessionReply: () => new Promise(resolve => { releaseSession = resolve; }) });
+  await page.settle();
+  assert.equal(page.padButton.disabled, false, 'machine A authority admits input');
+  const leaving = page.get('leave').handlers.click();
+  await page.settle();
+  incarnation = 'machine-B';
+  await page.poll(300);
+  releaseSession(response({ ok: false, message: 'try later' }, 409));
+  await leaving;
+  await page.settle();
+  assert.equal(page.padButton.disabled, true, 'machine A authority cannot return after the refusal');
+  page.padButton.handlers.click();
+  await page.settle();
+  assert.equal(page.requests.some(r => r.method === 'POST' && r.url === '/api/v1/play/pad'), false);
+});

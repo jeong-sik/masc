@@ -67,7 +67,7 @@ type status_item =
 (* A working surface needs decisions and warnings. Passive diagnostics and
    other Keepers' activity have their own System/Activity surfaces. *)
 let needs_operator = function
-  | Workspace_mismatch _ | Server_worktree_binary | Tui_build_mismatch _
+  | Workspace_mismatch _ | Workspace_unconfirmed | Server_worktree_binary | Tui_build_mismatch _
   | Keeper_action_armed _ | Keeper_action_running _ -> true
   | Refresh_interval _ | Server_build _ | Server_base_path _
   | Keeper_answering _ | Keeper_answered _ | Port _ -> false

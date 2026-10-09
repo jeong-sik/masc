@@ -197,6 +197,15 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
 
+(** A partial block keeps the SDK message id and block index. A complete-only
+    envelope has its own UUID and content ordinal; neither is a turn-wide text
+    bucket. This identity is separate from native tool occurrence identity. *)
+type content_block =
+  | Partial_block of { message_id : string; index : int }
+  | Assistant_block of { uuid : string; ordinal : int }
+
+type content_channel = Text_content | Thinking_content
+
 type stream_event =
   | Turn_started of
       { turn_id : string
@@ -204,6 +213,7 @@ type stream_event =
       }
   | Text_delta of
       { message_id : string option
+      ; block : content_block
       ; text : string
       }
       (** A partial text delta or the missing suffix of a complete [assistant]
@@ -214,10 +224,16 @@ type stream_event =
           frame carries no id. *)
   | Thinking_delta of
       { message_id : string option
+      ; block : content_block
       ; text : string
       }
       (** Provider-exposed thinking text from partial or complete assistant
           blocks. Opaque signatures and redacted payloads are not text. *)
+  | Content_block_stopped of { block : content_block; channel : content_channel }
+      (** Published once after a partial block's stop and complete-envelope
+          reconciliation, in either wire order. A late complete suffix precedes
+          this event under the original identity. Complete-only blocks close
+          after their content. Empty partial blocks close at their wire stop. *)
   | Dynamic_tool_started of
       { call_id : string
       ; tool_name : string

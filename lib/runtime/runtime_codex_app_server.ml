@@ -221,6 +221,8 @@ type elicitation_cancel_reason = Host_input_unavailable
 
 type reasoning_part = Summary of int | Content of int
 
+type text_completion_source = Item_content | Adopted_anonymous_content
+
 type stream_event =
   | Turn_started of
       { turn_id : string
@@ -235,6 +237,8 @@ type stream_event =
       ; part : reasoning_part
       ; delta : string
       }
+  | Text_completed of { item_id : string option; source : text_completion_source }
+  | Thinking_completed of { item_id : string; part : reasoning_part }
   | Dynamic_tool_started of
       { call_id : string
       ; tool_name : string
@@ -1504,6 +1508,9 @@ let with_scheduling_handoff io ~await_handoff ~handoff ~thread_id ~turn_id run =
 type streamed_texts =
   { buffers : (string option, Buffer.t) Hashtbl.t
   ; reasoning_buffers : (string * reasoning_part, Buffer.t) Hashtbl.t
+  ; completed_texts : (string, unit) Hashtbl.t
+  ; completed_reasoning : (string * reasoning_part, unit) Hashtbl.t
+  ; completed_reasoning_items : (string, unit) Hashtbl.t
   ; native_items : (string, item_kind) Hashtbl.t
       (* Native start/completion lifetime, independent of [open_tool_call_ids]
          which tracks the idle receive phase and clears when the model speaks. *)
@@ -1533,14 +1540,35 @@ let complete_reasoning_item ~stage ~on_stream_event streamed_texts item =
       let prefix = Buffer.contents buffer in
       if String.starts_with ~prefix text then begin
         let delta = String.sub text (String.length prefix) (String.length text - String.length prefix) in
+        if (Hashtbl.mem streamed_texts.completed_reasoning key
+            || Hashtbl.mem streamed_texts.completed_reasoning_items item_id) && delta <> "" then
+          protocol_error stage "completed reasoning changed after its content boundary"
+        else begin
         Buffer.add_string buffer delta;
         if delta <> "" then emit_stream_event on_stream_event (Thinking_delta {item_id; part; delta});
+        if not (Hashtbl.mem streamed_texts.completed_reasoning key) then begin
+          Hashtbl.add streamed_texts.completed_reasoning key ();
+          emit_stream_event on_stream_event (Thinking_completed {item_id; part})
+        end;
         Ok ()
+        end
       end else protocol_error stage "completed reasoning conflicts with streamed content")
       (Ok ()) (List.mapi (fun index value -> index, value) parts)
   in
   let* () = complete_parts "summary" (fun index -> Summary index) in
-  complete_parts "content" (fun index -> Content index)
+  let* () = complete_parts "content" (fun index -> Content index) in
+  (* The item closes every observed part, including one whose full text the
+     completion payload does not restate. Sort to keep closure deterministic. *)
+  Hashtbl.to_seq_keys streamed_texts.reasoning_buffers |> List.of_seq
+  |> List.filter (fun (id, _) -> id = item_id)
+  |> List.sort compare
+  |> List.iter (fun ((_, part) as key) ->
+       if not (Hashtbl.mem streamed_texts.completed_reasoning key) then begin
+         Hashtbl.add streamed_texts.completed_reasoning key ();
+         emit_stream_event on_stream_event (Thinking_completed {item_id; part})
+       end);
+  Hashtbl.replace streamed_texts.completed_reasoning_items item_id ();
+  Ok ()
 ;;
 
 let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id ~model ~seen_final
@@ -1608,6 +1636,10 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
     let key = match item_id with
       | Some _ -> item_id
       | None -> streamed_texts.current_item in
+    let* () = match key with
+      | Some id when Hashtbl.mem streamed_texts.completed_texts id ->
+          protocol_error method_ "text delta arrived after item completion"
+      | Some _ | None -> Ok () in
     let buffer = match Hashtbl.find_opt streamed_texts.buffers key with
       | Some buffer -> buffer
       | None ->
@@ -1651,6 +1683,9 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
           let* index = required_count method_ "summaryIndex" fields in Ok (Summary index)
       | _ -> let* index = required_count method_ "contentIndex" fields in Ok (Content index) in
     let key = item_id, part in
+    let* () = if Hashtbl.mem streamed_texts.completed_reasoning_items item_id then
+      protocol_error method_ "reasoning delta arrived after item completion"
+      else Ok () in
     let buffer = match Hashtbl.find_opt streamed_texts.reasoning_buffers key with
       | Some buffer -> buffer
       | None -> let buffer = Buffer.create 256 in
@@ -1769,18 +1804,30 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
           let* item_fields = assoc_at stage item in
           let* item_id = optional_string stage "id" item_fields in
           let key = match item_id with Some _ -> item_id | None -> streamed_texts.current_item in
-          let prefix = match Hashtbl.find_opt streamed_texts.buffers key with
-            | Some buffer -> Buffer.contents buffer
+          let prefix, source = match Hashtbl.find_opt streamed_texts.buffers key with
+            | Some buffer -> Buffer.contents buffer, Item_content
             | None ->
                 (* A wire delta may omit itemId; the completed item supplies
                    it. Consume that unnamed prefix once at this boundary. *)
                 (match Hashtbl.find_opt streamed_texts.buffers None with
-                 | Some buffer -> Hashtbl.remove streamed_texts.buffers None; Buffer.contents buffer
-                 | None -> "") in
+                 | Some buffer ->
+                     Hashtbl.remove streamed_texts.buffers None;
+                     Buffer.contents buffer, Adopted_anonymous_content
+                 | None -> "", Item_content) in
           if String.starts_with ~prefix text then begin
             let delta = String.sub text (String.length prefix)
                 (String.length text - String.length prefix) in
+            let already_completed = match key with
+              | Some id -> Hashtbl.mem streamed_texts.completed_texts id
+              | None -> false in
+            let* () = if already_completed && delta <> "" then
+              protocol_error stage "completed text changed after its content boundary"
+              else Ok () in
             if delta <> "" then emit_stream_event on_stream_event (Text_delta {item_id; delta});
+            if not already_completed then begin
+              Option.iter (fun id -> Hashtbl.replace streamed_texts.completed_texts id ()) key;
+              emit_stream_event on_stream_event (Text_completed {item_id=key; source})
+            end;
             if streamed_texts.current_item = key then streamed_texts.current_item <- None;
             (match key with
              | None -> Hashtbl.remove streamed_texts.buffers None
@@ -2225,7 +2272,10 @@ let run_protocol io (config : config) ~await_handoff ~protocol_cwd ~dynamic_tool
       ~seen_fallback:None
       ~seen_usage:None
       ~open_tool_call_ids:[]
-      ~streamed_texts:{buffers=Hashtbl.create 8; reasoning_buffers=Hashtbl.create 8; native_items=Hashtbl.create 8; current_item=None; assistant_message_completed=false}
+      ~streamed_texts:{buffers=Hashtbl.create 8; reasoning_buffers=Hashtbl.create 8;
+        completed_texts=Hashtbl.create 8; completed_reasoning=Hashtbl.create 8;
+        completed_reasoning_items=Hashtbl.create 8;
+        native_items=Hashtbl.create 8; current_item=None; assistant_message_completed=false}
       ~on_stream_event)
   in
   emit_stream_event on_stream_event (Turn_finished { text });

@@ -119,6 +119,7 @@ let verdict { lane; record } =
   | ( Record.Never_started
     , Launcher.(Undeclared | Unreadable | Describes_another_launcher | Follows_workspace) )
   | (Record.Ended _ | Record.Died _), _ -> Host_not_running
+  | Record.Record_missing_but_locked, _ -> Host_unverified
   | Record.Running entry, _ ->
       (match poll_of lane entry with
        | Polls_here -> Host_serving
@@ -247,6 +248,10 @@ let message { lane = t; record } =
         "No BiDi browser host has run for this workspace. Hover and drag on the live lane need \
          one. The operator starts Firefox on a profile kept for this with %s PORT, then %s.%s%s"
         firefox_flag (run_host t ~address:None) (listed_beside t) (steps t)
+  | Record.Record_missing_but_locked ->
+      "A BiDi browser host holds this workspace's lock, but its record is missing. It may be \
+       starting or the record may have been removed while it ran; its status is unverified. \
+       A second host is refused while the lock is held."
   | Record.Running entry ->
       let client = Browser_lane.client_id_to_string entry.client_id in
       (match entry.attached_at, poll_of t entry with
@@ -286,15 +291,17 @@ let message { lane = t; record } =
       Printf.sprintf
         "A BiDi browser host holds this workspace's lock, so one is running, and its record \
          cannot be read (%s). A second host is refused while that one runs. Once the operator \
-         stops it, the next host writes a new record in its place, and does not start when it \
-         cannot."
+         stops it, the next host keeps a copy of a record it read and cannot load beside it and \
+         writes a new one in its place. It does not start while the record cannot be read at \
+         all, or a new one cannot be written."
         detail
   | Record.Unreadable { detail; held = Some false } ->
       Printf.sprintf
         "The BiDi browser host's record cannot be read (%s). No host holds this workspace's \
-         lock, so none is running. The next host writes a new record in its place, and does not \
-         start when it cannot. The operator starts Firefox on a profile kept for this with %s \
-         PORT, unless it runs already, then %s.%s%s"
+         lock, so none is running. The next host keeps a copy of a record it read and cannot \
+         load beside it and writes a new one in its place. It does not start while the record \
+         cannot be read at all, or a new one cannot be written. The operator starts Firefox on a \
+         profile kept for this with %s PORT, unless it runs already, then %s.%s%s"
         detail firefox_flag (run_host t ~address:None) (listed_beside t) (steps t)
   | Record.Unreadable { detail; held = None } ->
       Printf.sprintf
@@ -314,6 +321,7 @@ let report observation =
 
 let state_name = function
   | Record.Never_started -> "never_started"
+  | Record.Record_missing_but_locked -> "record_missing_but_locked"
   | Record.Running _ -> "running"
   | Record.Ended _ -> "ended"
   | Record.Died _ -> "died"
@@ -340,7 +348,8 @@ let report_to_json { state; attach; message } =
   let entry_json = Record.entry_to_json in
   let record, lock_held, detail =
     match state with
-    | Record.Never_started -> `Null, `Null, `Null
+    | Record.Never_started -> `Null, `Bool false, `Null
+    | Record.Record_missing_but_locked -> `Null, `Bool true, `Null
     | Record.Running entry -> entry_json entry, `Bool true, `Null
     | Record.Ended (entry, ending) ->
         entry_json { entry with ended = Some ending }, `Null, `Null
@@ -414,8 +423,8 @@ let report_of_json json =
     | None, Some detail, held -> Ok (Record.Unreadable { detail; held })
     | Some _, Some _, (Some _ | None) ->
         Error "the BiDi host report has a record and a reason it cannot be read"
-    | None, None, None -> Ok (Record.state_of ~lock_held:false (Ok None))
-    | None, None, Some _ -> Error "the BiDi host report says of a lock with no record beside it"
+    | None, None, Some lock_held -> Ok (Record.state_of ~lock_held (Ok None))
+    | None, None, None -> Error "the BiDi host report does not say whether the lock is held"
     | Some ({ ended = Some _; _ } as entry), None, None ->
         Ok (Record.state_of ~lock_held:false (Ok (Some entry)))
     | Some { ended = Some _; _ }, None, Some _ ->
@@ -435,7 +444,15 @@ let report_of_json json =
       exactly ~what:"the BiDi host report's attach" ~names:attach_fields (List.assoc "attach" fields)
     in
     let* launcher = text attach "launcher" in
+    let* () =
+      if String.trim launcher <> "" then Ok ()
+      else Error "the BiDi host report's launcher is empty"
+    in
     let* arguments = text attach "arguments" in
+    let* () =
+      if String.equal arguments host_arguments then Ok ()
+      else Error "the BiDi host report's attach arguments are not the launcher's arguments"
+    in
     let* standing =
       let* raw = text attach "launcher_state" in
       Option.to_result
@@ -445,4 +462,13 @@ let report_of_json json =
     Ok { launcher; arguments; standing }
   in
   let* message = text fields "message" in
+  let printable =
+    String.for_all
+      (fun ch -> let code = Char.code ch in code >= 0x20 && code <> 0x7f)
+      message
+  in
+  let* () =
+    if printable then Ok ()
+    else Error "the BiDi host report's message contains a control character"
+  in
   Ok { state; attach; message }

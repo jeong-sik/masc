@@ -2822,6 +2822,7 @@
 (include stanzas/test_keeper_surface_status.inc)
 
 (include stanzas/test_keeper_memory_write.inc)
+(include stanzas/test_keeper_memory_write_growth_probe.inc)
 
 (include stanzas/test_keeper_memory_write_supersedes.inc)
 

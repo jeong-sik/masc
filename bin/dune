@@ -11,7 +11,7 @@
  (modules masc_browser_host)
  (public_name masc-browser-host)
  (package masc)
- (libraries masc.browser_host masc.masc_log eio eio_main unix))
+ (libraries masc masc.browser_host masc.masc_log eio eio_main unix))
 
 (executable
  (name masc_reliable_change_g1_check)

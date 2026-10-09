@@ -418,6 +418,53 @@ let test_decode_keeper_zero_last_turn_is_empty () =
         activity.k_last_turn_ts
   | Error err -> Alcotest.fail err
 
+let test_terminal_lines_source_mapping () =
+  let module Terminal = Masc.Tui_terminal_text in
+  let check input expected expected_positions =
+    let mapped = Terminal.sanitize_terminal_lines_with_source input in
+    Alcotest.(check string) "mapped output preserves actual sanitizer contract" expected
+      (Terminal.mapped_text mapped);
+    Alcotest.(check string) "both public APIs use the same whole-line decisions"
+      (Terminal.sanitize_terminal_lines input) (Terminal.mapped_text mapped);
+    let observed = List.init (String.length expected) (fun at ->
+      Option.get (Terminal.source_byte_at mapped at)) in
+    Alcotest.(check (list int)) "every output byte has its true original owner"
+      expected_positions observed;
+    Alcotest.(check (option int)) "negative output position absent" None
+      (Terminal.source_byte_at mapped (-1));
+    Alcotest.(check (option int)) "end is not an output byte" None
+      (Terminal.source_byte_at mapped (String.length expected));
+    List.iteri (fun at owner ->
+      let first = let rec find index = function
+        | [] -> Alcotest.fail "source owner missing"
+        | current :: rest -> if current=owner then index else find (index+1) rest in
+      find 0 expected_positions in
+      Alcotest.(check (option int)) "reverse returns first output of exact source owner"
+        (Some first) (Terminal.output_byte_at_source mapped owner);
+      Alcotest.(check bool) "source order never moves backwards" true
+        (at=0 || List.nth expected_positions (at-1) <= owner)) observed in
+  check "" "" [];
+  check "A\027가\194\128\n\226\128\174Z\255"
+    "A\\x1B가\\u0080\n\\u202EZ\\xFF"
+    ([0] @ List.init 4 (fun _ -> 1) @ [2;3;4]
+     @ List.init 6 (fun _ -> 5) @ [7] @ List.init 6 (fun _ -> 8)
+     @ [11] @ List.init 4 (fun _ -> 12));
+  (* Neighbour-sensitive emoji and subdivision-flag admission must survive
+     intact; escaping each character separately would change this output. *)
+  let emoji = "👩🏽‍💻" in
+  let flag = "\240\159\143\180\243\160\129\167\243\160\129\162\243\160\129\179\243\160\129\163\243\160\129\180\243\160\129\191" in
+  let visible = emoji ^ "\n" ^ flag in
+  check visible visible (List.init (String.length visible) Fun.id);
+  check "a\239\184\143\n❤\239\184\143"
+    "a\\uFE0F\n❤\239\184\143"
+    ([0] @ List.init 6 (fun _ -> 1) @ [4;5;6;7;8;9;10]);
+  let composed = Terminal.sanitize_terminal_lines_with_source "\027\226\128\174" in
+  Alcotest.(check (option int)) "invisible scalar continuation is not separately emitted"
+    None (Terminal.output_byte_at_source composed 2);
+  Alcotest.(check (option int)) "second-pass escape composes first-pass expansion map"
+    (Some 4) (Terminal.output_byte_at_source composed 1)
+;;
+
 let test_terminal_text_escapes_control_sequences () =
   let payload = "safe\027]0;owned\007\n\t\194\128done" in
   Alcotest.(check string)
@@ -13315,7 +13362,9 @@ let () =
           test_decode_fleet_safety_rejects_a_body_without_the_section;
       ] );
     ( "terminal_text",
-      [ Alcotest.test_case "escapes control sequences" `Quick
+      [ Alcotest.test_case "whole-line sanitizer retains exact source positions" `Quick
+          test_terminal_lines_source_mapping
+      ; Alcotest.test_case "escapes control sequences" `Quick
           test_terminal_text_escapes_control_sequences
       ; Alcotest.test_case "preserves printable UTF-8" `Quick
           test_terminal_text_preserves_printable_utf8

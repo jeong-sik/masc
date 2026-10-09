@@ -81,7 +81,7 @@ export interface IdentityLoginStarted {
   provider: string
   provider_label: string
   authorize_url: string
-  state: string
+  attempt_id: string
   registered_now: boolean
   expires_at: number
 }

@@ -6137,10 +6137,57 @@ let test_native_progress_timing_follows_tool_density () =
       [Tui_types.Tools_compact;Tools_results;Tools_full])
 ;;
 
+let test_interrupted_native_progress_survives_results_projection () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous = Masc_tui_ansi.get_terminal_size () in
+  Fun.protect ~finally:(fun () -> ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+      cache ~probe:(fun () -> Some previous))) (fun () ->
+    ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+      cache ~probe:(fun () -> Some (60,140)));
+    List.iter (fun (label,expected_outcome,terminal) ->
+      let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+      state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+      state.msg_target_keeper_name <- Some "alpha";
+      state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+      state.msg_origin_display <- Masc_tui_message_layout.Origin_bare;
+      state.msg_tool_visibility <- Tui_types.Tools_results;
+      let occurrence : Live.tool_occurrence = {stream_scope=0;block_index=1;
+        provider_message_id=None;tool_call_id=Some "interrupted-native"} in
+      let live = inflight_with_log ~keeper_name:"alpha" ~started_at:1.
+        [Live.Run_started;Live.Native_tool_started {occurrence;tool_name=Some "Execute"}] in
+      Tui_types.turn_log_add ~now:4. live.log ~seq:(Some 2)
+        (Live.Native_tool_progress {occurrence;progress=Runtime_native_tools.Output_observed {byte_count=9}});
+      Tui_types.turn_log_add ~now:5. live.log ~seq:(Some 3)
+        (Live.Native_tool_progress {occurrence;progress=Runtime_native_tools.Message_reported {message="retained provider output"}});
+      Tui_types.turn_log_add ~now:6. live.log ~seq:(Some 4) (terminal occurrence);
+      let activities = Keeper_chat_transcript.tool_calls live.log.tl_transcript in
+      check bool (label ^ " preserves terminal native evidence") true
+        (List.exists (fun (activity : Keeper_chat_transcript.tool_activity) ->
+          Option.is_some activity.native_progress
+          && activity.outcome=expected_outcome) activities);
+      state.msg_inflight <- [live];
+      let frame,_ = Masc_tui_render_chat.render_keeper_message state in
+      let screen = String.concat "\n" (List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines) in
+      check bool (label ^ " keeps observed bytes in Results") true
+        (Astring.String.is_infix ~affix:"9 bytes observed" screen);
+      check bool (label ^ " keeps provider progress in Results") true
+        (Astring.String.is_infix ~affix:"retained provider output" screen);
+      check bool (label ^ " Results keeps elapsed metadata hidden") false
+        (Astring.String.is_infix ~affix:"updated +" screen))
+      ["cancelled",Keeper_chat_transcript.Never_returned,
+         (fun _ -> Live.Run_failed {message="native runtime cancelled"});
+       "superseded",Keeper_chat_transcript.Never_returned,
+         (fun _ -> Live.Runtime_attempt_started {runtime_id=Some "retry";attempt_index=Some 1});
+       "quarantined",Keeper_chat_transcript.Failed,
+         (fun occurrence -> Live.Stream_protocol_error {
+           quarantined_occurrence=Some occurrence;detail="invalid correlated native event"})])
+;;
+
 let () =
   run
     "tui_chat_queue_wiring"
-    [("native progress density", [test_case "only Full shows elapsed progress" `Quick test_native_progress_timing_follows_tool_density]); ( "expanded diagnostics",
+    [("native progress density", [test_case "only Full shows elapsed progress" `Quick test_native_progress_timing_follows_tool_density;
+      test_case "interrupted native output remains in Results" `Quick test_interrupted_native_progress_survives_results_projection]); ( "expanded diagnostics",
         [ test_case "settled identity and shared pending width" `Quick
             test_expanded_chat_diagnostics_preserve_settled_identity
         ; test_case "unavailable status repeats no diagnostics" `Quick

@@ -34,3 +34,5 @@ fixture and records full original ANSI frames. Screenshot replay must retain
 source SHA, executable hash, terminal dimensions and the original ANSI; compare
 xterm cells to the recorded PTY before accepting a screenshot. Fixture evidence
 does not establish behavior of installed or live-provider binaries.
+
+A poisoned provider scope publishes ended activity for each model block it actually observed. The typed protocol diagnostic remains visible, body bytes remain intact, and later events from that scope are rejected. This does not publish a provider MessageStop or complete the Keeper turn. A cut scope (incomplete or repeating response) retains activity tracking because its legal content/terminal sequence is still admitted.

@@ -350,7 +350,21 @@ let record_tool_result state occurrence =
   { state with committed_tools = occurrence :: state.committed_tools }
 ;;
 
-let poison_scope ?(preserve_committed = false) state ~kind ~reason =
+(* Activity is separate from body bytes: it preserves the exact producer
+   occurrence after the reader-facing text projection discards block indices.
+   Headers do not establish activity, and duplicate/unknown stops say nothing. *)
+let model_content_event bridge_state ~stream_scope ~index ~channel state =
+  Keeper_chat_events.Model_content_activity
+    { content_generation = bridge_state.content_generation
+    ; content_scope = stream_scope
+    ; content_index = index
+    ; content_provider_message_id = bridge_state.current_provider_message_id
+    ; channel = (match channel with Public_text -> Model_text | Provider_reasoning -> Model_thinking)
+    ; state
+    }
+;;
+
+let poison_scope ?(preserve_committed = false) ?(retire_content = true) state ~kind ~reason =
   let retained (tool : tool_ref) =
     preserve_committed
     && List.exists
@@ -391,14 +405,29 @@ let poison_scope ?(preserve_committed = false) state ~kind ~reason =
          | Invalid_media_block -> index, block)
       state.blocks_by_index
   in
+  (* Poisoning makes later scope events inadmissible. Retire only the model
+     blocks this scope actually observed; this is an activity boundary, not
+     a provider MessageStop or a Keeper turn completion. *)
+  let content_ends = if not retire_content then [] else match state.current_stream_scope with
+    | None -> []
+    | Some stream_scope ->
+        state.model_content
+        |> List.sort (fun (left,_,_) (right,_,_) -> Int.compare left right)
+        |> List.filter_map (fun (index,channel,active) ->
+            if active then Some (model_content_event state ~stream_scope ~index
+              ~channel Keeper_chat_events.Content_ended) else None)
+  in
   let state = remember_tool_quarantines state ~kind tools in
   { bridge_state =
       { state with
         blocks_by_index
       ; scope_disposition = Scope_poisoned
       ; message_open = false
+      ; model_content = if retire_content then
+          List.map (fun (index,channel,_) -> index,channel,false) state.model_content
+        else state.model_content
       }
-  ; chat_events
+  ; chat_events = chat_events @ content_ends
   }
 ;;
 
@@ -407,7 +436,10 @@ let poison_scope_with state ~kind ~reason ~diagnostic extra_events =
   let poisoned = poison_scope state ~kind ~reason in
   { poisoned with
     chat_events =
-      (if had_tools then poisoned.chat_events else [ diagnostic ]) @ extra_events
+      (if had_tools then poisoned.chat_events
+       else match poisoned.chat_events with
+         | _old_diagnostic :: activity_ends -> diagnostic :: activity_ends
+         | [] -> [ diagnostic ]) @ extra_events
   }
 ;;
 
@@ -544,20 +576,6 @@ let finalize_media_block ~max_wire_bytes ~redact_text ~base_dir ~index ~media_ty
           ~reason:(redact_text (media_persist_protocol_reason err))
           (media_persist_error_kind err)
       ]
-
-(* Activity is separate from body bytes: it preserves the exact producer
-   occurrence after the reader-facing text projection discards block indices.
-   Headers do not establish activity, and duplicate/unknown stops say nothing. *)
-let model_content_event bridge_state ~stream_scope ~index ~channel state =
-  Keeper_chat_events.Model_content_activity
-    { content_generation = bridge_state.content_generation
-    ; content_scope = stream_scope
-    ; content_index = index
-    ; content_provider_message_id = bridge_state.current_provider_message_id
-    ; channel = (match channel with Public_text -> Model_text | Provider_reasoning -> Model_thinking)
-    ; state
-    }
-;;
 
 let observe_model_content bridge_state ~stream_scope ~index ~channel text events =
   if text = "" then {bridge_state; chat_events=events}
@@ -1475,7 +1493,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
   | StreamIncomplete { reason } ->
       let redacted_reason = redact_text reason in
       let quarantined =
-        poison_scope bridge_state ~kind:Sse_stream_incomplete
+        poison_scope ~retire_content:false bridge_state ~kind:Sse_stream_incomplete
           ~reason:redacted_reason
       in
       { bridge_state =
@@ -1503,7 +1521,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
              shape)
       in
       let quarantined =
-        poison_scope bridge_state ~kind:Sse_stream_repeating ~reason
+        poison_scope ~retire_content:false bridge_state ~kind:Sse_stream_repeating ~reason
       in
       { bridge_state =
           { quarantined.bridge_state with

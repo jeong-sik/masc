@@ -229,7 +229,7 @@ enabled = {fusion}
 # The lane declares no capabilities of its own: the catalog gate
 # (runtime.ml decide_capability_gate) resolves official-client models by
 # api-name against the embedded catalog, which already carries bare
-# claude-sonnet-5 / claude-opus-5 rows and the claude_code prefix row.
+# claude-sonnet-5 / claude-opus-5-5 rows and the claude_code prefix row.
 OFFICIAL_CLIENT_RUNTIME_TOML = """\
 [runtime]
 default = "{runtime_id}"

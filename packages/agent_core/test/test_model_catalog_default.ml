@@ -25,11 +25,7 @@ let with_clean_model_catalog_override f =
    lookup succeeded — is what separates "gpt-5.6-sol found its own row" from
    "gpt-5.6-sol silently landed on gpt-5". *)
 let subscription_model_rows =
-  [ "claude-opus-5", "claude-opus-5"
-    (* Opus 5.5 needs a row of its own for the same reason as Fable 5.1 below:
-       5.5 reads cached tokens at 0.05x the base input price and 5 reads them
-       at 0.1x, and it refuses forced tool use where 5 takes it. *)
-  ; "claude-opus-5-5", "claude-opus-5-5"
+  [ "claude-opus-5-5", "claude-opus-5-5"
   ; "claude-fable-5", "claude-fable-5"
     (* Fable 5.1 needs a row of its own even though "claude-fable-5" prefixes
        it: 5.1 reads cached tokens at 0.025x the base input price and 5 reads
@@ -216,7 +212,7 @@ let test_documented_claude_prefill_exclusions () =
           (Result.is_ok (P.Complete.inspect_serialized_request ~stream ~config
             ~messages:(prefill @ [user]) ()))) [false; true])
       ["claude-fable-5"; "claude-fable-5-1"; "claude-mythos-5"; "claude-mythos-preview";
-       "claude-opus-5"; "claude-opus-5-5"; "claude-sonnet-5"; "claude-sonnet-5-5"];
+       "claude-opus-5-5"; "claude-sonnet-5"; "claude-sonnet-5-5"];
     List.iter (fun model_id ->
       check bool (model_id ^ " keeps existing default admission") true
         (Result.is_ok (P.Complete.inspect_serialized_request ~stream:false
@@ -297,7 +293,7 @@ let test_sonnet_5_5_thinking_modes_reach_the_wire () =
    row under test: a comparison that sources both sides from the catalog passes
    whatever the catalog happens to say, including a row that admits nothing. *)
 let subscription_model_efforts =
-  [ None, "claude-opus-5", [ "low"; "medium"; "high"; "xhigh"; "max" ]
+  [ None, "claude-opus-5-5", [ "low"; "medium"; "high"; "xhigh"; "max" ]
     (* Probed on /v1/responses 2026-09-07: sol, terra and luna each answer 400
        for "minimal" -- the message names the model -- and 200 for none, low,
        medium, high, xhigh and max. The list this replaces came from the
@@ -391,8 +387,7 @@ let test_responses_sol_rejects_codex_only_ultra () =
    whichever change starts running them. Haiku 5.5 is left out because its row
    states no price at all, so it has no multiplier to carry. *)
 let anthropic_cache_pricing_rows =
-  [ "claude-opus-5", 1.25, 0.1
-  ; "claude-opus-5-5", 1.25, 0.05
+  [ "claude-opus-5-5", 1.25, 0.05
   ; "claude-sonnet-5", 1.25, 0.1
   ; "claude-sonnet-5-5", 1.25, 0.05
   ; "claude-fable-5", 1.25, 0.1

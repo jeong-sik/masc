@@ -646,7 +646,7 @@ class RuntimeSetupAdapter(unittest.TestCase):
                    repr(str(ROOT / 'scripts/install-runtime-setup.py')) +
                    '); m=importlib.util.module_from_spec(s); s.loader.exec_module(m);\n'
                    'try:\n'
-                   '    m.pick("Choose a connection", ["Claude Code / claude-opus-5"])\n'
+                   '    m.pick("Choose a connection", ["Claude Code / claude-opus-5-5"])\n'
                    'except m.SetupError as error:\n'
                    '    print(json.dumps({"cancelled": str(error)}))')
         process = subprocess.Popen([sys.executable, '-c', program], stdin=slave, stderr=slave,

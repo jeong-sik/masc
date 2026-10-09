@@ -6075,7 +6075,7 @@ let test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values () =
   let last_outcome =
     `Assoc
       [ "runtime_state", `String "done"
-      ; "selected_model", `String "claude-opus-5"
+      ; "selected_model", `String "claude-opus-5-5"
       ]
   in
   match
@@ -6102,7 +6102,7 @@ let test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values () =
                 Alcotest.(check string) "outcome" "done"
                   outcome.klo_runtime_state;
                 Alcotest.(check (option string)) "model"
-                  (Some "claude-opus-5") outcome.klo_selected_model
+                  (Some "claude-opus-5-5") outcome.klo_selected_model
             | None -> Alcotest.fail "alpha lost its last outcome");
            (match beta.kl_phase with
             | Tui_decode.Lane_phase_unknown raw ->

@@ -2483,20 +2483,6 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                     Printf.sprintf "%s \xe2\x86\xba%d" text (attempt + 1)
                 | None -> text
               in
-              let annotate_body body =
-                match item.superseded_runtime_id with
-                | Some rid when String.trim rid <> "" ->
-                    let attempt_num =
-                      match item.superseded with
-                      | Some a -> a + 1
-                      | None -> 1
-                    in
-                    let prefix =
-                      Printf.sprintf "*(attempt %d: `%s`)*" attempt_num (String.trim rid)
-                    in
-                    if body = "" then prefix else prefix ^ "\n" ^ body
-                | _ -> body
-              in
               let markdown_source =
                 Message_layout.Markdown_growing
                   { keeper_name; request_id; entry_index }
@@ -2571,14 +2557,14 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                     then folded_thinking_summary (String.concat "\n" lines)
                     else String.concat "\n" lines
                   in
-                  entry Message_layout.Thinking (label "THINKING") (annotate_body body)
+                  entry Message_layout.Thinking (label "THINKING") body
               | Keeper_chat_transcript.Drawn_tools block ->
                   let projection =
                     Keeper_chat_transcript.project_tool_block
                       (tool_projection_mode state) block
                   in
                   let body = String.concat "\n" (projected_tool_rows projection) in
-                  entry (tool_block_style projection) (label "TOOLS") (annotate_body body)
+                  entry (tool_block_style projection) (label "TOOLS") body
               | Keeper_chat_transcript.Drawn_skill skills ->
                   entry
                     (Message_layout.Skill
@@ -2946,10 +2932,48 @@ let search_anchor_matches anchor tag =
   | Search_history _, Tagged_block _
   | Search_journal _, Tagged_block (_, None, _) -> false
 
-let projection_index_of_anchor projection anchor =
-  List.find_mapi (fun index (tag, _) ->
-    if search_anchor_matches anchor tag then Some index else None)
-    projection.tagged_entries
+type search_index_key =
+  | History_identity of msg_identity
+  | History_user_slot of string * chat_turn_phase * int
+  | History_reply of Masc_tui_keeper_chat_log.journal_source
+  | Journal_origin of Masc_tui_keeper_chat_log.journal_source * Masc_tui_keeper_chat_transcript.drawn_origin
+  | Journal_reply of Masc_tui_keeper_chat_log.journal_source
+
+let search_index_memo = ref None
+
+let projection_index_of_anchor projection =
+  let index = match !search_index_memo with
+    | Some (tags, index) when tags == projection.tagged_entries -> index
+    | _ ->
+        let index = Hashtbl.create 64 in
+        let add key at = if not (Hashtbl.mem index key) then Hashtbl.add index key at in
+        List.iteri (fun at (tag, _) -> match tag with
+          | Tagged_row row ->
+              add (History_identity row.me_identity) at;
+              (match row.me_role with
+               | Message_user _ -> add (History_user_slot (row.me_request_id, row.me_turn_phase, row.me_operation_seq)) at
+               | _ -> ());
+              Option.iter (fun source -> add (History_reply source) at) (search_reply_source row)
+          | Tagged_block (log, origin, canonical) ->
+              let source = Masc_tui_types.turn_log_execution_source log in
+              Option.iter (fun origin -> add (Journal_origin (source, origin)) at) origin;
+              if canonical then add (Journal_reply source) at) projection.tagged_entries;
+        search_index_memo := Some (projection.tagged_entries, index);
+        index in
+  fun anchor ->
+    let keys = match anchor with
+      | Search_history {row_anchor; reply_source} ->
+          History_identity row_anchor.ma_identity
+          :: (match row_anchor.ma_session_user_slot with None -> []
+              | Some (id, phase, seq) -> [History_user_slot (id, phase, seq)])
+          @ (match reply_source with None -> [] | Some source -> [Journal_reply source])
+      | Search_journal {source; origin; canonical_reply} ->
+          Journal_origin (source, origin)
+          :: (if canonical_reply then [History_reply source] else []) in
+    List.fold_left (fun earliest key ->
+      match earliest, Hashtbl.find_opt index key with
+      | None, found | found, None -> found
+      | Some left, Some right -> Some (Int.min left right)) None keys
 
 (* The body has already passed the exact same Markdown and width calculation
    as the frame. Search text is deliberately separate from origin matching:
@@ -2979,18 +3003,16 @@ let matching_body_row ~needle ~before_occurrence rows =
       matches (body_at + 1) (needle_at + 1) body_at
     else None
   in
-  (* Keep all occurrence endpoints newest first. A cursor counts occurrences,
-     not physical rows: two matches on one row remain distinct, and wrapping
-     the same entry differently does not change which occurrence comes next. *)
+  (* A cursor needs only the newest eligible endpoint. Stop at its ordinal
+     boundary instead of retaining every match in a repetitive body. *)
   let rec collect from ordinal found =
-    if from >= body_length then found
+    if from >= body_length || Option.exists (fun before -> ordinal >= before) before_occurrence then found
     else if body.[from] = '\n' then collect (from + 1) ordinal found
     else match matches from 0 from with
-      | Some ending -> collect (from + 1) (ordinal + 1) ((ordinal, ending) :: found)
+      | Some ending -> collect (from + 1) (ordinal + 1) (Some (ordinal, ending))
       | None -> collect (from + 1) ordinal found
   in
-  let found = collect 0 0 [] |> List.find_opt (fun (ordinal, _) ->
-    match before_occurrence with None -> true | Some before -> ordinal < before) in
+  let found = collect 0 0 None in
   match found with
   | None -> None
   | Some (occurrence, offset) ->
@@ -3009,6 +3031,7 @@ let matching_body_row ~needle ~before_occurrence rows =
    idle live-edge paints. Changed source/tail lists get a fresh observation. *)
 type scroll_anchor_index = {
   indexed_anchors : chat_scroll_anchor option array;
+  transient_indices : (chat_scroll_anchor, int) Hashtbl.t;
   newest_anchors : (int * chat_scroll_anchor) list;
 }
 
@@ -3027,7 +3050,13 @@ let scroll_anchor_index projection =
         index + 1, (match anchor with
           | Some anchor -> (index, anchor) :: newest
           | None -> newest)) (0, []) indexed_anchors |> snd in
-      let anchors = {indexed_anchors; newest_anchors} in
+      let transient_indices = Hashtbl.create 8 in
+      let offset = List.length projection.tagged_entries in
+      List.iteri (fun at -> function
+        | Some anchor when not (Hashtbl.mem transient_indices anchor) ->
+            Hashtbl.add transient_indices anchor (offset + at)
+        | Some _ | None -> ()) projection.transient_anchors;
+      let anchors = {indexed_anchors; newest_anchors; transient_indices} in
       scroll_anchor_index_memo := Some (projection.layout_entries, anchors);
       anchors
 
@@ -3040,9 +3069,7 @@ let scroll_anchor_at projection index =
 let projection_index_of_scroll_anchor projection = function
   | Scroll_durable anchor -> projection_index_of_anchor projection anchor
   | (Scroll_pending _ | Scroll_polled _) as anchor ->
-      Option.map ((+) (List.length projection.tagged_entries))
-        (List.find_mapi (fun index held -> if held = Some anchor then Some index else None)
-          projection.transient_anchors)
+      Hashtbl.find_opt (scroll_anchor_index projection).transient_indices anchor
 
 let requested_scroll_from_pin state ~keeper_name projection ~markdown ~inner_width =
   if state.msg_scroll = max_int then max_int

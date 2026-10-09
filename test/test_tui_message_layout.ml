@@ -2971,7 +2971,8 @@ let test_diagnostics_continue_the_turn_rail () =
     check bool "the diagnostic carries the rail the entry ends with" true
       (holds diagnostic.gutter (Layout.turn_rail_glyph ends_with));
     check bool "expanded row includes its rail in width" true (diagnostic.gutter_rail_cells > 0))
-    [Layout.Rail_opens, Layout.Rail_says; Layout.Rail_closes, Layout.Rail_closes]
+    [Layout.Rail_opens, Layout.Rail_says; Layout.Rail_closes, Layout.Rail_closes;
+     Layout.Rail_stands, Layout.Rail_closes]
 ;;
 
 let test_diagnostics_keep_the_message_opening () =
@@ -3001,7 +3002,14 @@ let test_diagnostics_keep_the_message_opening () =
     let cramped = Layout.visible_rows ~origin ~inner_width:80 ~height:4 [source] in
     check bool "a pane too short for both keeps the latest output" true
       (body_shown "body-19" cramped);
-    check (list string) "and the last diagnostic" ["  attempt 1: runtime"] (diagnostics cramped))
+    check (list string) "and the last diagnostic" ["  attempt 1: runtime"] (diagnostics cramped);
+    let minimal = Layout.visible_rows ~origin ~inner_width:80 ~height:3 [source] in
+    check int "three-row viewport stays bounded" 3 (List.length minimal);
+    check bool "three rows keep latest output" true (body_shown "body-19" minimal);
+    check (list string) "three rows keep the last diagnostic"
+      ["  attempt 1: runtime"] (diagnostics minimal);
+    check bool "omission remains explicit" true
+      (List.exists (fun (r : Layout.row) -> match r.kind with Layout.Viewport_gap _ -> true | _ -> false) minimal))
     [Layout.Origin_inline; Origin_bare; Origin_row]
 ;;
 

@@ -19,8 +19,8 @@ public nominal partition type. Existing public codec calls bind directly to thei
 owner. No new public raw decoder, unsafe conversion, construction wrapper,
 schema, wire tag, compatibility reader or test forwarding API is introduced.
 
-Partition storage changes from 2,123 to 1,329 lines; internal types have 138 lines
-and the wire owner 685. [extraction-comparison.json](extraction-comparison.json)
+Partition storage changes from 2,123 to 1,329 lines; internal types have 137 lines
+and the wire owner 684. [extraction-comparison.json](extraction-comparison.json)
 confirms the complete wire/ledger body equals the extracted parent, domain
 declarations and pure epoch helpers match, entropy/mutex/generation remain
 byte-identical at the storage boundary, and the remaining root after its identity

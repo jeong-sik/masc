@@ -217,6 +217,12 @@ Keeper의 도구 목록에 `keeper_memory_select`가 있으면 `purpose`에
 `keeper_memory_search`는 과거 기록을 명시적으로 찾는 경우를 포함한 텍스트
 검색 도구로 유지됩니다.
 
+개인 기억 안내는 정책이 허용하고 선택 도구가 직접 제공되거나, 제공된 탐색
+도구와 활성 로더를 통해 불러올 수 있을 때 목적에 따른 선택을 안내합니다.
+안내를 만드는 것만으로 선택을 호출하거나 저장된 문장을 주입하지는 않습니다.
+그 외에는 실제 제공된 도구에 따라 기존 검색, 아티팩트 읽기 또는 회수 불가
+안내를 유지합니다.
+
 선택에는 `typesafeai.workspace_memory_selection_enabled`, 활성 TypeSafe 레인과
 사용 가능한 목적지가 필요하며 Keeper 제외 설정도 적용됩니다. 결과는
 `current_decision`과 `comparison`으로 구분됩니다. 비교용 기억은 원래 사건과

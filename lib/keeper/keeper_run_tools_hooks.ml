@@ -999,6 +999,9 @@ let assemble_hooks
                     ~enabled:!active_tool_surface_enabled
                     ~tool_choice:current_params.tool_choice ~schema_names:schema_filter
                     ~agent_cell:turn_agent_cell ~built:built_tools in
+                let personal_recall_access = Keeper_request_tool_access.create
+                    ~offered:offered_tools ~deferred_names:ctx.deferred_tool_names
+                    ~loader_alive:attempt_surface.loader_alive in
                 let recall_tool_available name =
                   List.exists (fun (tool : Agent_core.Tool.t) ->
                     String.equal tool.schema.name name) offered_tools
@@ -1058,6 +1061,8 @@ let assemble_hooks
                         file instead of starving the main Eio domain. *)
                      Domain_pool_ref.submit_io_or_inline (fun () ->
                        Keeper_memory_os_recall.render_if_enabled
+                         ~memory_select_route:(Keeper_request_tool_access.route personal_recall_access
+                           ~name:"keeper_memory_select")
                          ~memory_search_available:(recall_tool_available "keeper_memory_search")
                          ~artifact_reader_available:
                            (recall_tool_available Keeper_runtime_schemas_toml.artifact_read.name)

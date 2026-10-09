@@ -311,10 +311,12 @@ let add_event (state : state) event_type content =
    started, uses this; [add_event] alone is for what happened on its own --
    the feed, a failed poll, the server's lifecycle. The footer copy is one
    line: a server's reason can carry newlines. *)
-let report_action (state : state) event_type content =
+let report_action ?(show_in_footer = true) (state : state) event_type content =
   add_event state event_type content;
   state.last_action <-
-    Some (Masc_tui_ansi.Terminal_text.single_line content, Unix.gettimeofday ())
+    if show_in_footer then
+      Some (Masc_tui_ansi.Terminal_text.single_line content, Unix.gettimeofday ())
+    else None
 
 (* Local metadata and the public remote roster share identity-based navigation.
    Replacing rows never reads a local directory. *)

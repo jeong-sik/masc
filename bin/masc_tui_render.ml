@@ -12617,10 +12617,65 @@ let config_metadata_style = function
   | Masc_tui_runtime_config_view.Neutral -> Theme.recede ()
   | Good -> Theme.ok () | Warning -> Theme.warn () | Bad -> Theme.bad ()
 
+(* Paths and build facts have separate rows so the server identity cannot
+   spend every path cell on a narrow terminal. Use these same rows when
+   budgeting the source viewport and keeping the cursor visible. *)
+let config_identity_rows ~cols (state : state) =
+  let width = framed_inner_width cols in
+  let rows = match state.server_identity with
+  | None -> [Printf.sprintf "  port :%d · server identity unread" state.port]
+  | Some identity ->
+      let base = Terminal_text.single_line identity.Tui_decode.sid_base_path in
+      let masc = Terminal_text.single_line identity.Tui_decode.sid_masc_root in
+      let masc =
+        let prefix = base ^ "/" in
+        let prefix_len = String.length prefix in
+        if String.length masc > prefix_len && String.starts_with ~prefix masc then
+          "<base>/" ^ String.sub masc prefix_len (String.length masc - prefix_len)
+        else masc
+      in
+      let room = max 0 (width - Message_layout.display_width "  base    masc ") in
+      let base_cells = Message_layout.display_width base in
+      let masc_cells = Message_layout.display_width masc in
+      let base, masc =
+        if base_cells + masc_cells <= room then base, masc
+        else
+          (* Keep a shorter path whole and give the other the remaining
+             cells. When both are long, preserve both deciding tails. *)
+          let half = room / 2 in
+          let base_room, masc_room =
+            if base_cells <= half then base_cells, room - base_cells
+            else if masc_cells <= half then room - masc_cells, masc_cells
+            else half, room - half
+          in
+          Message_layout.fit_middle base_room base,
+          Message_layout.fit_middle masc_room masc
+      in
+      let server =
+        "server " ^ String.concat " · "
+          [ Terminal_text.single_line
+              ("v" ^ identity.sid_version ^ " "
+               ^ Masc_tui_footer.short_commit identity.sid_binary_commit);
+            Printf.sprintf ":%d" state.port;
+            binary_age_text identity.sid_binary_commit_age_s ]
+      in
+      Printf.sprintf "  base %s   masc %s" base masc
+      :: (Masc_tui_text_block.rows ~max_cells:(max 1 (width - 2)) server
+          |> List.map (fun line -> "  " ^ line)) in
+  match state.workspace_identity with
+  | Masc_tui_types.Workspace_identity_match_unconfirmed reason ->
+      let notice = "(server identity unconfirmed: "
+        ^ Terminal_text.single_line reason ^ "; last confirmed below)" in
+      (Masc_tui_text_block.rows ~max_cells:(max 1 (width - 2)) notice
+       |> List.map (fun line -> "  " ^ line)) @ rows
+  | Workspace_identity_unread | Workspace_identity_match
+  | Workspace_identity_mismatch _ -> rows
+
 (* What the runtime.toml body spends above the source: the server identity,
    one row per metadata line, and the rule under them. *)
 let config_heading_rows ~cols (state : state) =
-  1 + List.length (config_metadata_summary state) + 1
+  List.length (config_identity_rows ~cols state)
+  + List.length (config_metadata_summary state) + 1
   + List.length (runtime_config_edit_lines ~cols state)
   + (if Option.is_none state.runtime_account_form
         && Option.is_some state.runtime_config_view_error then 1 else 0)
@@ -13080,70 +13135,8 @@ let render_config (state : state) =
        | Some _ -> Masc_tui_keys.footer_hints_runtime_account_form ()
        | None -> Masc_tui_keys.footer_hints_config ~pane:state.config_pane)
     ~body:(fun ~budget:_ c ->
-      (* Where this server reads from, and how old the binary serving it is.
-         A stale binary answers every request as confidently as a current
-         one, so the age is the only thing on screen that separates them.
-
-         The age is measured first and the paths take what is left: they
-         were padded to 28 and 32 cells and cut from the right, so on a
-         workspace under /var/folders both read as the same "/var/folders/
-         bv/cjrbl01x52s…" while the age behind them left the row. A path's
-         deciding end is its tail, which [fit_middle] keeps. *)
-      (match state.workspace_identity with
-       | Masc_tui_types.Workspace_identity_match_unconfirmed reason ->
-           c.push (Ansi.dim ^ "  (server identity unconfirmed: "
-                   ^ Terminal_text.single_line reason ^ "; last confirmed below)" ^ Ansi.reset)
-       | Workspace_identity_unread | Workspace_identity_match
-       | Workspace_identity_mismatch _ -> ());
-      (match state.server_identity with
-       | None -> c.push (Ansi.dim ^ "  (server identity unread)" ^ Ansi.reset)
-       | Some identity ->
-           let base = Terminal_text.single_line identity.Tui_decode.sid_base_path in
-           let masc = Terminal_text.single_line identity.Tui_decode.sid_masc_root in
-           let age = binary_age_text identity.Tui_decode.sid_binary_commit_age_s in
-           (* On a workspace that follows the convention the masc root is the
-              base path with one segment added, so drawing it whole spends the
-              base path's cells saying the base path again. Under /var/folders
-              both were cut to "/var/fold\xe2\x80\xa6" and neither could be read.
-              Named against the label beside it the nested case costs twelve
-              cells and the base keeps the rest. A root that is not under the
-              base is the reading worth the room, and still draws whole. *)
-           let masc =
-             let prefix = base ^ "/" in
-             let prefix_len = String.length prefix in
-             if String.length masc > prefix_len
-                && String.starts_with ~prefix masc
-             then
-               "<base>/"
-               ^ String.sub masc prefix_len (String.length masc - prefix_len)
-             else masc
-           in
-           let labels = "  base " ^ "   masc " ^ "   binary " in
-           let room =
-             framed_inner_width cols
-             - Message_layout.display_width labels
-             - Message_layout.display_width age
-           in
-           let base_cells = Message_layout.display_width base in
-           let masc_cells = Message_layout.display_width masc in
-           let base, masc =
-             if base_cells + masc_cells <= room then base, masc
-             else
-               (* A path that fits its half keeps its whole self and the
-                  other takes the rest; two long ones split the room. The
-                  shorter path is never cut to make room for a blank. *)
-               let half = room / 2 in
-               let base_room, masc_room =
-                 if base_cells <= half then base_cells, room - base_cells
-                 else if masc_cells <= half then room - masc_cells, masc_cells
-                 else half, room - half
-               in
-               ( Message_layout.fit_middle base_room base
-               , Message_layout.fit_middle masc_room masc )
-           in
-           c.push
-             (Printf.sprintf "%s  base %s   masc %s   binary %s%s" Ansi.dim base masc
-                age Ansi.reset));
+      List.iter (c.push_styled ~style:(Theme.recede ()))
+        (config_identity_rows ~cols state);
       List.iter (fun (tone, text) ->
         c.push_styled ~style:(config_metadata_style tone)
           ("  " ^ Terminal_text.single_line text)) (config_metadata_summary state);

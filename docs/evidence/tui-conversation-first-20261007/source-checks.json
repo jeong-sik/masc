@@ -18,8 +18,8 @@
     "test/test_tui_chat_queue_wiring.ml": "6145a7e1c9159810696898908b9f9aa8aa7124f350a8ee362ff2c71b19d20dc0",
     "test/test_tui_message_layout.ml": "a0ea3cd7beabdbbca6f1ff5446ce889ac9dfff65ded5e67c13e991c5a9dcb5d4",
     "test/test_tui_shade_layers.ml": "e44e1d58a088693756bd9c303e7e18efbf2ca34477b76e7584ff4bc13aaf92f0",
-    "bin/masc_tui_footer.ml": "735b677c6116fb9c19a1840dc9071bb5e556facfb4b45b6267ff816899c177dd",
-    "test/test_tui_footer_status_items.ml": "bb34add7379695cecbefede4b60c434e5778720c2a7c6637a0531ab8bb6b2420",
+    "bin/masc_tui_footer.ml": "ef84845ad664c67843ebfafefd9392c250b627e662e1fa9f8bd85bdf96b262d0",
+    "test/test_tui_footer_status_items.ml": "8fed8d6f54a80d9b770ce82f8c098a374a4d9f6c1fabff3601d3d5923c59704d",
     "test/test_tui_keeper_chat_transcript.ml": "6b045bd468366c9982e2f4f35574a8b40255a9be65c018f4f5ef8411df8a091d"
   },
   "historical_checks": {

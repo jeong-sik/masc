@@ -1,9 +1,5 @@
-(** Every surface footer ends with the same status facts.
-
-    Before Masc_tui_footer each of the 21 footers spelled [Port: %d] into its
-    own format string, so a screen could carry a different spelling, a
-    different separator, or no port at all and nothing would say so. These
-    tests pin the shared tail. *)
+(** Working footers keep decisions and warnings. Explicit diagnostic callers
+    may still project connection facts through the same bounded fitter. *)
 
 let check_string = Alcotest.(check string)
 let check_bool = Alcotest.(check bool)
@@ -39,6 +35,53 @@ let render_action state width =
   Masc_tui_render_prim.footer_line state ~max_cells:width
     ~hints:(Masc_tui_keys.footer_hints state.Masc_tui_types.view)
   |> Masc_tui_theme.strip_sgr
+
+let test_working_footer_keeps_attention_without_background_activity () =
+  let module Footer = Masc_tui_footer in
+  let state = Masc_tui_types.create_state ~workspace:"" ~port:8935 ~refresh_interval:2. () in
+  state.keeper_turns <-
+    [{ Masc.Tui_decode.ktr_chat_control_token = None;
+       ktr_keeper_name = "background-keeper";
+       ktr_state = Keeper_turn_running
+         {lane = Turn_lane_autonomous; started_at_unix = 1.;
+          interrupt_token = "fixture"; turn_ref = None; preview = None} }];
+  state.keeper_turn_finishes <- ["finished-keeper", Unix.gettimeofday ()];
+  let passive = [Footer.Refresh_interval 2.;
+    Footer.Server_build {version="0.49.0";commit="abcdef123"};
+    Footer.Server_base_path "/fixture/workspace";
+    Footer.Keeper_answering {names=["background-keeper"];lead_elapsed_s=Some 12};
+    Footer.Keeper_answered {name="finished-keeper";seconds_ago=1;more=0};
+    Footer.Port 8935] in
+  List.iter (fun view ->
+    state.view <- view;
+    let draw status = Masc_tui_render_prim.footer_line state ~max_cells:200
+      ~status ~hints:"Enter:open  q:quit  ?:help" |> Masc_tui_theme.strip_sgr in
+    let quiet = draw passive in
+    List.iter (fun text -> check_bool ("not in a working footer: " ^ text) false
+      (contains ~needle:text quiet))
+      ["background-keeper"; "finished-keeper"; "Refresh:"; "Port:";
+       "abcdef"; "/fixture/workspace"];
+    List.iter (fun warning ->
+      let row = draw (warning :: passive) in
+      let expected = Option.get (Footer.status_item_projection warning) in
+      check_bool "actionable status remains on the same surface" true
+        (contains ~needle:expected.text row))
+      [Footer.Workspace_mismatch "/other-workspace";
+       Footer.Server_worktree_binary;
+       Footer.Keeper_action_armed {key="d";action="delete";keeper="alpha"};
+       Footer.Keeper_action_running {gerund="Stopping";keeper="alpha"}])
+    [Masc_tui_types.Overview; Keepers Keeper_message; Board;
+     Repositories; Config]
+
+let test_inflight_action_survives_navigation () =
+  let state = Masc_tui_types.create_state ~workspace:"" ~port:8935 ~refresh_interval:2. () in
+  state.keeper_action_inflight <- Some ("alpha", Masc_tui_keeper_control.Shutdown);
+  state.last_action <- None;
+  List.iter (fun view ->
+    state.view <- view;
+    check_bool "inflight action is shared across surfaces" true
+      (contains ~needle:"alpha" (render_action state 200)))
+    [Masc_tui_types.Overview; Board; Repositories; Config]
 
 let test_action_text_is_not_dropped_as_a_key () =
   List.iter (fun view ->
@@ -143,7 +186,9 @@ let contains ~needle haystack =
    it kept going once the row was full enough. *)
 let tests =
   [ ( "tui-footer-status-items"
-    , [ Alcotest.test_case "action text is not dropped as a key" `Quick
+    , [ Alcotest.test_case "working footer keeps only attention" `Quick
+          test_working_footer_keeps_attention_without_background_activity
+      ; Alcotest.test_case "action text is not dropped as a key" `Quick
           test_action_text_is_not_dropped_as_a_key
       ; Alcotest.test_case "build mismatch names the older side" `Quick
           test_build_mismatch_names_the_older_side
@@ -154,4 +199,5 @@ let tests =
     , [] )
   ]
 
-let () = Alcotest.run "tui_footer_status_items" tests
+let () = Alcotest.run "tui_footer_status_items"
+  (("inflight navigation", [Alcotest.test_case "global action survives navigation" `Quick test_inflight_action_survives_navigation]) :: tests)

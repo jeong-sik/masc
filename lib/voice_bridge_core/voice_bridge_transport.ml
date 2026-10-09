@@ -111,8 +111,13 @@ let run_voice_command ~timeout_sec argv =
 let stt_timeout_sec ?deadline () =
   let configured = Env_config_runtime.Voice.http_request_timeout_sec in
   match deadline with
-  | None -> configured
-  | Some deadline -> Float.min configured (Monotonic_deadline.remaining_seconds deadline)
+  | None -> Some configured
+  | Some deadline ->
+    (* The time left is read once. A spent budget is an answer of its own
+       ([None]); it is not handed to the process runner, which refuses a
+       timeout that is not above zero by raising. *)
+    let left = Monotonic_deadline.remaining_seconds deadline in
+    if left > 0. then Some (Float.min configured left) else None
 ;;
 
 let stt_deadline_spent = function
@@ -328,12 +333,12 @@ let transcribe_via_command ?deadline endpoint ~audio_file ~model =
               command
               (Voice_runtime_overlay.audio_container_name container)))
   in
-  if stt_deadline_spent deadline
-  then Error "budget_spent"
-  else
+  match stt_timeout_sec ?deadline () with
+  | None -> Error "budget_spent"
+  | Some timeout_sec ->
   match
     run_voice_command
-      ~timeout_sec:(stt_timeout_sec ?deadline ())
+      ~timeout_sec
       request.Voice_runtime_overlay.argv
   with
   | Error refusal -> Error (command_refusal_reason ~command refusal)
@@ -403,9 +408,10 @@ let run_stt_multipart_request ?deadline (req : Voice_runtime_overlay.stt_request
     @ form_args
     @ file_arg
   in
-  let status, body =
-    run_voice_status ~timeout_sec:(stt_timeout_sec ?deadline ()) argv
-  in
+  match stt_timeout_sec ?deadline () with
+  | None -> Error "budget_spent"
+  | Some timeout_sec ->
+  let status, body = run_voice_status ~timeout_sec argv in
   match status with
   | Unix.WEXITED 0 ->
     (match Yojson.Safe.from_string body with

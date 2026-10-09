@@ -19,6 +19,12 @@ val make_audio_file : format:Voice_bridge_core.clip_format -> string
     [<token><extension>] for the format the caller is about to write. The
     128-bit token is also the HTTP capability the dashboard fetches it by. *)
 
+val stt_timeout_sec : ?deadline:Monotonic_deadline.t -> unit -> float option
+(** The time one STT process may take: the configured per-call timeout, capped
+    by what is left of [deadline], read once. [None] when [deadline] is spent;
+    a spent budget is never turned into a zero timeout, which the process runner
+    refuses by raising. *)
+
 val run_voice_status
   :  ?timeout_sec:float
   -> ?stdin_content:string

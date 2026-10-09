@@ -1062,6 +1062,24 @@ let test_h5_stt_slow_first_endpoint_stops_the_chain_at_the_shared_deadline () =
         (Sys.file_exists second_marker))
 ;;
 
+let test_h5_stt_timeout_is_none_for_a_spent_budget () =
+  (match
+     Voice_bridge_transport.stt_timeout_sec
+       ~deadline:(Monotonic_deadline.after ~seconds:0.) ()
+   with
+   | None -> ()
+   | Some seconds -> failf "a spent budget gave a timeout of %g s" seconds);
+  (match
+     Voice_bridge_transport.stt_timeout_sec
+       ~deadline:(Monotonic_deadline.after ~seconds:30.) ()
+   with
+   | Some seconds -> check bool "a live budget gives a positive timeout" true (seconds > 0.)
+   | None -> fail "a live budget must give a timeout");
+  match Voice_bridge_transport.stt_timeout_sec () with
+  | Some seconds -> check bool "no deadline keeps the configured timeout" true (seconds > 0.)
+  | None -> fail "without a deadline the configured timeout applies"
+;;
+
 let test_h5_stt_spent_deadline_starts_no_endpoint () =
   h5_stt_fixture ~first:"printf first" ~second:"printf second"
     (fun ~audio ~first_marker ~second_marker ->
@@ -1321,6 +1339,10 @@ let () =
             "H5 STT: a slow first endpoint stops the chain at the shared deadline"
             `Quick
             test_h5_stt_slow_first_endpoint_stops_the_chain_at_the_shared_deadline
+        ; test_case
+            "H5 STT: a spent budget gives no timeout"
+            `Quick
+            test_h5_stt_timeout_is_none_for_a_spent_budget
         ; test_case
             "H5 STT: a spent deadline starts no endpoint"
             `Quick

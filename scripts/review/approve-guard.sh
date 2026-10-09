@@ -151,6 +151,14 @@ check_verdict() {
     [ -n "$approvals" ] || emit_refusal_detail
     refuse "latest structured verdict is $state"
   fi
+  if [ "$state" = PASS ] && [ "$review_policy" = source ] && [ "$cited" != - ]; then
+    [ -n "$approvals" ] || emit_refusal_detail
+    refuse "source verdict must not cite a CI run (cited $cited)"
+  fi
+  if [ "$state" = PASS ] && [ "$review_policy" = release ] && [ "$cited" != "$release_run" ]; then
+    [ -n "$approvals" ] || emit_refusal_detail
+    refuse "release verdict cites run $cited, admitted run is $release_run"
+  fi
 }
 check_reviews
 check_verdict

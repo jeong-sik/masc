@@ -19,6 +19,7 @@ type verdict =
 val verdict_because : verdict -> string
 
 val verdict_for :
+  identity_tool_index:Keeper_identity_tool_index.t ->
   composition_plan_index:Keeper_tool_composition_plan_index.t option ->
   tool_name:string ->
   input:Yojson.Safe.t ->
@@ -38,7 +39,7 @@ val verdict_for :
 
     A tool from a work service this Keeper is attached to is judged by what
     that service said: [annotations.readOnlyHint] on its own listing, carried
-    to here through {!Keeper_identity_tool_index}. Only an explicit "this
+    to here through the immutable turn-local [identity_tool_index]. Only an explicit "this
     tool only reads" runs on that word alone. Writes and silence run too —
     but into the durable Gate ({!Keeper_identity_gate}), which defers them
     to the approvals queue on the external-services lane. That queue, not
@@ -52,6 +53,7 @@ val verdict_for :
     reading the questions. *)
 
 val classifies :
+  identity_tool_index:Keeper_identity_tool_index.t ->
   composition_plan_index:Keeper_tool_composition_plan_index.t option ->
   tool_name:string ->
   bool
@@ -59,7 +61,7 @@ val classifies :
 
     Not the same question as {!verdict_for}, and not answerable by calling it
     with a fabricated empty input: classification is decided from the name and
-    the turn's plan index alone.
+    the turn's plan and attached-service indexes alone.
 
     Both this and {!verdict_for} read one closed variant, so an arm added to
     one is an arm added to the other. The bundle gate

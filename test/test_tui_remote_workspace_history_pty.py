@@ -1952,9 +1952,8 @@ def live_identity_before_chat_and_lifecycle(binary: str, captures: Path | None =
                 _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
                 assert writes == [], "leaving the refused draft dispatched chat"
                 wire.publish("a-returned")
-                # The banner's own escape is the way back: Esc opens the roster
-                # and r rereads it under the returned authority...
-                _keyboard_harness.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+                # Already on the roster after leaving the disabled composer.
+                # Refresh it under the returned authority without escaping again.
                 os.write(fd, b"r")
                 assert _keyboard_harness.wait_for_fixture_state(process, fd, output,
                     lambda: b"a.returned" in screen(output)

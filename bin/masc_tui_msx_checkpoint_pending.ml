@@ -50,7 +50,7 @@ let with_workspace_lock ~masc_root f =
   match File_lock_eio.with_durable_lock ~lock_path:path f with
   | Ok result -> result
   | Error error -> Error (File_lock_eio.durable_lock_error_to_string error)
-let remember ~masc_root binding = protect (fun () ->
+let remember_with ~sync_directory ~masc_root binding = protect (fun () ->
   let* () = if binding.masc_root = masc_root && not (Filename.is_relative binding.base_path)
     && not (Filename.is_relative masc_root) then Ok () else Error "checkpoint intent workspace differs" in
   let* _ = Machine_checkpoint.slot_of_string binding.slot in
@@ -75,8 +75,15 @@ let remember ~masc_root binding = protect (fun () ->
             Unix.fsync (Unix.descr_of_out_channel channel);
             close_out channel;
             Unix.rename tmp path;
-            fsync_directory dir;
+            (* The caller dispatches nothing when this returns an error. An
+               intent whose directory entry could not be made durable is
+               withdrawn, so the next admission does not wait on a request
+               that was never sent. *)
+            (try sync_directory dir with Unix.Unix_error _ as unsynced ->
+               (try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+               raise unsynced);
             Ok ())))
+let remember ~masc_root binding = remember_with ~sync_directory:fsync_directory ~masc_root binding
 let forget ~masc_root binding = protect (fun () ->
   let* () = if binding.masc_root = masc_root then Ok () else Error "checkpoint intent workspace differs" in
   ensure_directory (Filename.concat masc_root "tui");
@@ -92,3 +99,6 @@ let forget ~masc_root binding = protect (fun () ->
           else (Unix.unlink path; Ok ()) in
     fsync_directory dir;
     Ok ()))
+module For_testing = struct
+  let remember_with = remember_with
+end

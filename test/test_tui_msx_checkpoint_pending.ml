@@ -56,7 +56,17 @@ let test_failed_intent_write_refuses_dispatch () = with_root (fun root ->
   Out_channel.with_open_text (Filename.concat root "tui") (fun out -> output_string out "not a directory");
   check bool "intent must be durable before caller dispatches" true
     (Result.is_error (Pending.remember ~masc_root:root (binding ~root "not-dispatched" true))))
+let test_unflushed_publication_is_withdrawn () = with_root (fun root ->
+  let refused = Pending.For_testing.remember_with
+      ~sync_directory:(fun dir -> raise (Unix.Unix_error (Unix.EIO, "fsync", dir)))
+      ~masc_root:root (binding ~root "unflushed-publication" true) in
+  check bool "a publication whose directory entry is not flushed refuses dispatch" true
+    (Result.is_error refused);
+  check int "the refused intent does not gate the next admission" 0
+    (List.length (require (Pending.load ~masc_root:root)));
+  require (Pending.remember ~masc_root:root (binding ~root "next-operation" false)))
 let () = run "MSX durable pending checkpoint" ["intent",[
   test_case "restart preserves operation identity and workspace" `Quick test_restart_and_exact_retirement;
   test_case "corruption fails closed" `Quick test_corruption_is_not_an_empty_gate;
-  test_case "failed intent persistence refuses dispatch" `Quick test_failed_intent_write_refuses_dispatch]]
+  test_case "failed intent persistence refuses dispatch" `Quick test_failed_intent_write_refuses_dispatch;
+  test_case "unflushed publication is withdrawn" `Quick test_unflushed_publication_is_withdrawn]]

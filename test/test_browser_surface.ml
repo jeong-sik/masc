@@ -543,6 +543,7 @@ let test_keeper_hears_which_connection_serves_the_work () =
   let workspace = Filename.temp_dir "masc-browser-surface-bidi-" "" in
   let lane_directory = List.fold_left Filename.concat workspace [".masc"; "browser-lane"] in
   Fun.protect ~finally:(fun () ->
+      Browser_lane.withdraw_serving_port ();
       if Sys.file_exists lane_directory then
         Array.iter (fun name -> Sys.remove (Filename.concat lane_directory name))
           (Sys.readdir lane_directory);
@@ -555,6 +556,9 @@ let test_keeper_hears_which_connection_serves_the_work () =
       let module Tools = Masc.Tool_misc_browser_lane in
       let module Record = Masc.Browser_bidi_host_record in
       let module U = Yojson.Safe.Util in
+      (* The answer is read as a running server reads it, beside the
+         connections this server lists. *)
+      Lane.install_serving_port 61372;
       let info n transport : Lane.client_info =
         let raw = Printf.sprintf "60000000-0000-4000-8000-%012d" n in
         let client_id = match Lane.client_id_of_string raw with
@@ -650,16 +654,21 @@ let test_keeper_hears_which_connection_serves_the_work () =
         U.(data |> member "bidiHost" |> member "state" |> to_string);
       (* A host Firefox refused a session leaves that as its ending, and
          the Keeper is told what the operator does about it. *)
-      let held =
+      let take (client : Lane.client_info) =
         match Record.take ~base_path:workspace ~pid:4242 ~bidi_url:"ws://127.0.0.1:9222/session"
-                ~client_id:bidi.client_id ~now:1_791_000_000. with
+                ~client_id:client.client_id ~now:1_791_000_000. with
         | Ok { held; not_synced = _ } -> held
         | Error refusal -> fail (Record.refusal_message refusal) in
-      (match Record.ended held ~reason:"BiDi command rejected: session not created"
-               ~session:Record.Session_refused ~now:1_791_000_060. with
-       | Ok () -> ()
-       | Error failure -> fail (Record.write_failure_message failure));
-      (match Record.release held with Ok () -> () | Error detail -> fail detail);
+      let written = function
+        | Ok () -> ()
+        | Error failure -> fail (Record.write_failure_message failure) in
+      let released held = match Record.release held with Ok () -> () | Error detail -> fail detail in
+      let ids key data =
+        U.(data |> member key |> to_list |> List.map (fun client -> client |> member "clientId" |> to_string)) in
+      let held = take bidi in
+      written (Record.ended held ~reason:"BiDi command rejected: session not created"
+                 ~session:Record.Session_refused ~now:1_791_000_060.);
+      released held;
       let data = interact extension hover in
       check string "the last host's ending is in the answer" "ended"
         U.(data |> member "bidiHost" |> member "state" |> to_string);
@@ -669,7 +678,18 @@ let test_keeper_hears_which_connection_serves_the_work () =
         [ {|with this reason: "BiDi command rejected: session not created".|}
         ; "Firefox refused it a BiDi session"
         ; "The operator stops a host still attached to the Firefox at that address"
-        ; "that Firefox is restarted with --remote-debugging-port 9222 first" ];
+        ; "that Firefox is first restarted with --remote-debugging-port 9222 on the profile kept for this." ];
+      (* A host that runs and polls this server is the connection to retry on,
+         and the operator has nothing to do. *)
+      let host = info 4 Lane.Webdriver_bidi in
+      connect host;
+      let held = take host in
+      written (Record.attached held ~now:1_791_000_002.);
+      let data = interact extension hover in
+      check (list string) "the running host's connection is offered" [id host] (ids "servingClients" data);
+      check bool "with no host remedy" false (List.mem_assoc "bidiHost" U.(data |> to_assoc));
+      released held;
+      ignore (Lane.disconnect_client ~client_id:host.client_id);
       (* Work no BiDi connection does is refused without a word of the BiDi
          host, also when nothing connected serves it. *)
       ignore (Lane.disconnect_client ~client_id:extension.client_id);

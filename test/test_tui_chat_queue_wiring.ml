@@ -5122,14 +5122,21 @@ let test_status_details_and_fold_counts_reach_the_frame () =
     Tui_types.turn_log_add ~now:4. entry.log ~seq:(Some 4)
       (Live.Reply_details {reply=""; turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint;
         turn_ref="trace-fold#1"});
-    List.iter (fun origin ->
+    (* The run that carried the checkpoint ends; the operation then waits for
+       its continuation, which is the reading this check is about. *)
+    Tui_types.turn_log_add ~now:4. entry.log ~seq:(Some 5) Live.Run_finished;
+    (* The bare reading keeps Attention rows through the fold, so it hides one
+       row fewer than the inline reading. *)
+    List.iter (fun (origin, hidden) ->
       state.msg_origin_display <- origin;
       check bool "checkpoint has no progress row" false
         (List.exists (fun (kind, _) -> kind = Keeper_chat_transcript.Progress)
           (Tui_types.keeper_message_visible_status_rows state entry.log.tl_transcript ~now:5.));
+      check int "folded checkpoint counts the rows it hides" hidden
+        (Tui_types.keeper_message_folded_status_count state entry.log.tl_transcript ~now:5.);
       check bool "folded checkpoint retains a discoverable details key" true
-        (has_detail "+2" (Masc_tui_keys.expand_turn_label ^ ":details")))
-      [Masc_tui_message_layout.Origin_bare; Origin_inline])
+        (has_detail (Printf.sprintf "+%d" hidden) (Masc_tui_keys.expand_turn_label ^ ":details")))
+      [Masc_tui_message_layout.Origin_bare, 1; Origin_inline, 2])
 
 let test_verified_rejection_is_visible_without_mutating_original_input () =
   let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in

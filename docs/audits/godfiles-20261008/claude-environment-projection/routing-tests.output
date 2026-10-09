@@ -1,5 +1,5 @@
 Testing `runtime_claude_code'.
-This run has ID `A3X3OKNS'.
+This run has ID `BOYWJ56J'.
 
   [SKIP]        native posture argv (RFC-0390)          0   posture selects -...
   [SKIP]        native posture argv (RFC-0390)          1   command loads no ...
@@ -88,5 +88,5 @@ This run has ID `A3X3OKNS'.
   [SKIP]        session                                 0   resume identity.
   [SKIP]        live                                    0   subscription turn.
 
-Full test results in `~/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/_build/_tests/runtime_claude_code'.
-Test Successful in 1.196s. 1 test run.
+Full test results in `/private/tmp/masc-godfile-top/_build/_tests/runtime_claude_code'.
+Test Successful in 0.848s. 1 test run.

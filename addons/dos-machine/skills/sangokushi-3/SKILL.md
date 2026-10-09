@@ -174,12 +174,21 @@ Observed at 193년 7월 6 평원 (유비 defending against 원소) and at 235년
   backs out of the menu the digit opened.
 - `1` (이동) asks `어느 방향입니까?` with `남은 기동력`. Each digit moves one
   hex in the directions above and spends mobility; at 0 the next officer's
-  menu comes up.
+  menu comes up. Read the remaining value after each move: in the
+  February 189 Puyang battle, two northward moves changed Xiahou Dun
+  from 4 to 2 to 1; another was refused with `기동력이 부족합니다`.
+  Acknowledge that notice with `space`. With no movement spent, an empty
+  `enter` closed the direction prompt and returned to the same officer
+  command menu. A refusal alone does not identify the terrain or its cost.
 - `2` (공격) opens `1.통상 2.일제 3.기습 4.화살 5.불화살 6.돌격 7.일기토`;
   after the type, `어느 곳입니까?` takes a direction digit. An empty hex
   answers `적은 없었습니다`.
 - `3` (대기) ends the officer's move; `<장수>의 기동력이 N가 되었습니다` waits
-  for any key.
+  for any key. Waiting can build mobility for a later turn: in the same
+  Puyang battle, successive waits displayed Xiahou Yuan mobility 5, 6,
+  and 7, and a later direction prompt retained the higher value. Use the
+  displayed value instead of assuming that every turn resets it to 4.
+  This observation does not establish a universal cost for crossing walls.
 - `8` (위임) asks `전군위임합니다 해제할 수 없습니다만 좋겠습니까(Y/N)?`; `y`
   hands every officer to the computer until the battle ends. Each
   `<장수>의 전술` line still waits for a key (`space`). One delegated siege ran

@@ -15,6 +15,8 @@ type entry =
   ; delta : Live.delta
   }
 
+type terminal_replay = Replay_pending | Replayed_after_terminal
+
 type t =
   { keeper_name : string
   ; request_id : string
@@ -28,6 +30,7 @@ type t =
   ; mutable committed : bool
   ; mutable revision : int
   ; mutable operation_state : Keeper_chat_operation.state option
+  ; mutable terminal_replay : terminal_replay
   }
 
 let create_for_source ~keeper_name ~source ~started_at =
@@ -42,6 +45,7 @@ let create_for_source ~keeper_name ~source ~started_at =
   ; committed = false
   ; revision = 0
   ; operation_state = None
+  ; terminal_replay = Replay_pending
   }
 
 let create ~keeper_name ~request_id ~started_at =
@@ -60,6 +64,15 @@ let revision t = t.revision
 let bump t = t.revision <- t.revision + 1
 
 let operation_state t = t.operation_state
+let terminal_replay t = t.terminal_replay
+let observe_terminal_replay t replay =
+  match replay, t.terminal_replay with
+  | Replayed_after_terminal, Replay_pending
+    when Option.exists Keeper_chat_operation.is_terminal t.operation_state ->
+      t.terminal_replay <- Replayed_after_terminal;
+      bump t
+  | _ -> ()
+
 
 let observe_operation_state t state =
   match t.source, t.operation_state with
@@ -185,16 +198,19 @@ let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
   | E.External_effect_completed _ -> Some Live.External_effect_completed
   | E.Run_finished _ -> Some Live.Run_finished
   | E.Event_error { message } -> Some (Live.Run_failed { message })
-  | E.Reply_details { reply; turn_outcome; turn_ref } ->
+  | E.Reply_details { reply; turn_outcome; turn_ref; terminal_stream_scope } ->
     Some
       (Live.Reply_details
-         { reply; turn_outcome; turn_ref = Ids.Turn_ref.to_string turn_ref })
+         { reply; turn_outcome; turn_ref = Ids.Turn_ref.to_string turn_ref; terminal_stream_scope })
   | E.Continuation_checkpoint _ -> Some Live.Checkpoint
   | E.Agent_core_stream_connected -> None
   | E.Agent_core_runtime_attempt_started { runtime_id; attempt_index } ->
     Some (Live.Runtime_attempt_started { runtime_id; attempt_index })
-  | E.Agent_core_stream_message_start { model; stream_scope; _ } ->
-    Some (Live.Stream_model_started { model; stream_scope = Some stream_scope })
+  | E.Agent_core_stream_message_start { provider_message_id; model; usage; stream_scope } ->
+    Some (Live.Stream_model_started
+      { message_id = (if String.trim provider_message_id = "" then None else Some provider_message_id); model; stream_scope = Some stream_scope
+      ; usage = Option.bind usage (fun usage ->
+          Live.stream_usage_of_usage_json (E.api_usage_to_json usage)) })
   | E.Agent_core_stream_message_delta { stream_scope; stop_reason; usage } ->
     (* Through the same readers as the live arm, over the same bytes the
        producer writes ([E.delta_usage_to_json], [E.stop_reason_to_string]), so
@@ -557,14 +573,21 @@ let read_whole_journal ~fetch ~since_seq =
 ;;
 
 let read_with_operation_state ~read_operation ~read_journal =
+  let completion operation journal =
+    match operation, journal with
+    | Ok (Some state), Ok _ when Keeper_chat_operation.is_terminal state ->
+        Replayed_after_terminal
+    | _ -> Replay_pending in
   let operation = read_operation () in
   let journal = read_journal () in
   let reread refreshed =
-    let latest = match read_journal (), journal with
+    let latest = read_journal () in
+    let replay = completion refreshed latest in
+    let retained = match latest, journal with
       | Ok _ as latest, _ -> latest
       | Error _, (Ok _ as first) -> first
       | (Error _ as latest), Error _ -> latest in
-    refreshed, latest in
+    refreshed, retained, replay in
   match operation with
   | Ok (Some (Keeper_chat_operation.Queued | Running _)) ->
       let refreshed = read_operation () in
@@ -572,8 +595,8 @@ let read_with_operation_state ~read_operation ~read_journal =
        | _, Ok (Some (Keeper_chat_operation.Succeeded _ | Failed _ | Cancelled _)) ->
            reread refreshed
        | Ok (Some Queued), Ok (Some (Running _)) -> reread refreshed
-       | _, Ok (Some (Queued | Running _)) -> refreshed, journal
-       | _, (Ok None | Error _) -> operation, journal)
+       | _, Ok (Some (Queued | Running _)) -> refreshed, journal, Replay_pending
+       | _, (Ok None | Error _) -> operation, journal, Replay_pending)
   | Ok (Some (Succeeded _ | Failed _ | Cancelled _)) | Ok None | Error _ ->
-      operation, journal
+      operation, journal, completion operation journal
 ;;

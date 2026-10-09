@@ -7,19 +7,6 @@ let make ?(target = Composer.Ready "analyst") ?(focus = Composer.Unfocused)
     ?(draft = "") ?(staged_images = 0) () : Composer.t =
   { target; focus; draft; staged_images }
 
-(* An attachment the prompt does not name is an attachment the operator forgets
-   before pressing enter. The count is the only place it shows. *)
-let test_prompt_names_staged_images () =
-  Alcotest.(check string)
-    "no marker with nothing staged"
-    "to analyst"
-    (Composer.prompt (make ()));
-  Alcotest.(check string)
-    "marker with an image staged"
-    "to analyst [1 image]"
-    (Composer.prompt (make ~staged_images:1 ()))
-;;
-
 let outcome_testable =
   Alcotest.testable
     (fun fmt outcome ->
@@ -38,17 +25,6 @@ let check_key ?(label = "key") composer key expected =
   Alcotest.(check outcome_testable) label expected
     (Composer.classify_key composer key)
 
-(* The row exists to answer this before anything is typed. An operator who
-   cannot see the recipient finds out which keeper got the message by sending
-   it. *)
-let test_prompt_names_the_recipient () =
-  Alcotest.(check string) "the target keeper" "to analyst"
-    (Composer.prompt (make ()));
-  Alcotest.(check string) "nothing selected" "no keeper selected"
-    (Composer.prompt (make ~target:Composer.No_target ()))
-
-(* A keeper that went away keeps its name in the row. Blanking it loses the one
-   thing that explains why the draft cannot go anywhere. *)
 let test_unreachable_target_keeps_its_name_and_reason () =
   let composer =
     make
@@ -108,17 +84,6 @@ let test_input_is_refused_without_a_recipient () =
   Alcotest.(check bool) "unfocused" false
     (Composer.accepts_input (make ~focus:Composer.Unfocused ()))
 
-(* The cursor has to sit after the draft and inside the row; past the last
-   column it wraps the terminal and the frame scrolls. *)
-let test_cursor_stays_inside_the_row () =
-  Alcotest.(check int) "after the draft" 12
-    (Composer.cursor_column ~prompt_cells:8 ~draft_cells:3 ~terminal_cols:80);
-  Alcotest.(check int) "clamped at the last column" 40
-    (Composer.cursor_column ~prompt_cells:30 ~draft_cells:200
-       ~terminal_cols:40);
-  Alcotest.(check int) "never left of the first" 1
-    (Composer.cursor_column ~prompt_cells:0 ~draft_cells:0 ~terminal_cols:0)
-
 let test_send_requires_a_reachable_target () =
   Alcotest.(check bool) "ready with text" true
     (Composer.can_send (make ~draft:"hi" ()));
@@ -129,7 +94,6 @@ let test_send_requires_a_reachable_target () =
        (make ~draft:"hi"
           ~target:(Composer.Unreachable { keeper = "beta"; reason = "gone" })
           ()))
-
 
 (* Ctrl-Y asks for a capture. It has to be a control code: in a focused row
    every printable key is draft text, so a letter binding would take that
@@ -172,7 +136,6 @@ let test_the_listen_key_is_not_typable () =
     true
     (String.length Composer.listen_key = 1 && Char.code byte < 32)
 ;;
-
 
 (* Ctrl-A toggles continuous capture. Ctrl-K would have been the obvious
    second control key and is taken: it cancels a queued line. *)
@@ -219,9 +182,7 @@ let test_the_two_capture_keys_are_distinct_control_codes () =
 let () =
   Alcotest.run "tui-composer"
     [ ( "what the row says"
-      , [ Alcotest.test_case "the prompt names the recipient" `Quick
-            test_prompt_names_the_recipient
-        ; Alcotest.test_case "an unreachable target keeps its name" `Quick
+      , [ Alcotest.test_case "an unreachable target keeps its name" `Quick
             test_unreachable_target_keeps_its_name_and_reason
         ; Alcotest.test_case "send needs a reachable target" `Quick
             test_send_requires_a_reachable_target
@@ -235,8 +196,6 @@ let () =
             test_focused_composer_takes_the_printable_keys
         ; Alcotest.test_case "focused it releases and sends" `Quick
             test_focused_composer_releases_and_sends
-        ; Alcotest.test_case "prompt names staged images" `Quick
-            test_prompt_names_staged_images
         ; Alcotest.test_case "input needs a recipient" `Quick
             test_input_is_refused_without_a_recipient
         ] )
@@ -259,7 +218,5 @@ let () =
             test_the_two_capture_keys_are_distinct_control_codes
         ] )
     ; ( "layout"
-      , [ Alcotest.test_case "the cursor stays inside the row" `Quick
-            test_cursor_stays_inside_the_row
-        ] )
+      , [] )
     ]

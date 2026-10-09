@@ -284,8 +284,7 @@ jobs:
       # cannot boot it the way the server binary is booted above. --help
       # returns before that check, which is enough to prove the shipped file
       # loads its dynamic libraries -- the one thing that differs between this
-      # runner and the machine that downloads the asset. Rendering is covered
-      # by test/test_tui_keyboard_input.py in CI, over a real PTY.
+      # runner and the machine that downloads the asset.
       - name: Terminal UI binary smoke (dynamic link)
         run: |
           "$MASC_BIN_DIR"/masc_tui.exe --help < /dev/null > /tmp/masc-tui-help.txt

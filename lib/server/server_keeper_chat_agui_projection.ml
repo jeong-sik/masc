@@ -74,10 +74,10 @@ let custom ~timestamp ~redact_json state name value =
 let reply_details_to_json ~redact_text
     (event : Keeper_chat_events.reply_details) =
   `Assoc
-    [ "reply", `String (redact_text event.reply)
+    ([ "reply", `String (redact_text event.reply)
     ; "turn_outcome", `String (Keeper_turn_outcome.to_label event.turn_outcome)
     ; "turn_ref", `String (Ids.Turn_ref.to_string event.turn_ref)
-    ]
+    ] @ json_opt "terminal_stream_scope" (Option.map (fun scope -> `Int scope) event.terminal_stream_scope))
 
 let continuation_checkpoint_to_json ~redact_text
     (event : Keeper_chat_events.continuation_checkpoint) =

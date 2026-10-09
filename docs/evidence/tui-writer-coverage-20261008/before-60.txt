@@ -1,0 +1,30 @@
+ Dashboard  Work  Keepers  Usage  Board  ▸Workspace  System
+
+   MASC Workspace / Activity · masc
+ ──────────────────────────────────────────────────────────
+    Last 24h · 1 recorded changes · 1 successful · 0 Keep…
+    Changes by Keeper: alpha 1
+    Recorded clone writes from loaded Keepers · Enter ope…
+    DATE             KEEPER             RESULT FILE
+ ──────────────────────────────────────────────────────────
+    2026-08-25 04:33 alpha              ok     alp…ange.ml
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ ──────────────────────────────────────────────────────────
+    v:context · alpha-change.ml
+
+  v:context  j/k:select  Enter:file  Esc:back  …?
+ › to alpha   (i to write)

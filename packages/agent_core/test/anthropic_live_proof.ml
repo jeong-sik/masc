@@ -11,8 +11,9 @@
    What it settles that a unit test cannot: test_model_catalog_default reads
    the request body a row produces, so it proves what is sent. This sends it,
    so it proves the API accepts every shape the row allows -- each declared
-   effort, thinking turned off, caller-set sampling parameters -- and that a
-   signed thinking block the model returns replays through a tool turn. *)
+   effort, thinking turned off, caller-set sampling parameters, forced tool
+   use -- and that a signed thinking block the model returns replays through a
+   tool turn. *)
 
 module Provider_config = Llm_provider.Provider_config
 module Model_catalog = Llm_provider.Model_catalog
@@ -161,13 +162,14 @@ let () =
      Printf.eprintf "embedded catalog unavailable: %s\n" detail;
      exit 1);
   let config = base_config ~api_key ~model_id in
-  let efforts =
+  let caps =
     match Provider_config.capabilities_for_config_model config with
     | None ->
       Printf.eprintf "no capabilities resolved for %s\n" model_id;
       exit 1
-    | Some caps -> Option.value caps.accepted_reasoning_efforts ~default:[]
+    | Some caps -> caps
   in
+  let efforts = Option.value caps.accepted_reasoning_efforts ~default:[] in
   Printf.printf
     "model: %s, declared efforts: [%s]\n%!"
     model_id
@@ -263,6 +265,27 @@ let () =
    with
    | Error e -> fail label (describe_error e)
    | Ok response -> pass label (describe_response response));
+  (* Forced tool use. A row that offers it must have it accepted, and a row
+     that does not must stop the request here: the API answers 400 to it on
+     the models that dropped it. Thinking is left unset because the backend
+     refuses a forced choice on a request that also turns thinking on. *)
+  (let label = "forced tool_choice (sync)" in
+   match
+     sync
+       ~tools:[ lookup_tool ]
+       ~config:{ config with Provider_config.tool_choice = Some Types.Any }
+       [ Types.user_msg lookup_prompt ]
+   with
+   | Error (Http_client.AcceptRejected { reason })
+     when not caps.supports_required_tool_choice ->
+     pass label ("refused before dispatch: " ^ reason)
+   | Error e -> fail label (describe_error e)
+   | Ok _ when not caps.supports_required_tool_choice ->
+     fail label "unsupported forced tool choice reached the API"
+   | Ok response ->
+     if (seen_of_blocks response.content).tool_use_ids = []
+     then fail label ("no tool call came back: " ^ describe_response response)
+     else pass label (describe_response response));
   (* Tool turn at the highest declared effort: the assistant turn, thinking
      block included, goes back with the tool result. *)
   let tool_config =

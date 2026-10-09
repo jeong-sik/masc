@@ -1825,6 +1825,7 @@ let append_chat_history ?at ?submitted_at ?turn_phase ?operation_seq state
           me_timestamp = clock_text_of_unix at;
           me_keeper_name = request.Keeper_chat.keeper_name;
           me_request_id = request.request_id;
+          me_execution_source = Some (Keeper_chat_log.Operation request.request_id);
           me_at = at;
         } ]
 
@@ -5048,35 +5049,16 @@ let launch_workspace_activity state ~mailbox ~repo_id =
   | Masc_tui_fetched.Already_loading -> ()
   | Masc_tui_fetched.Started (next, request) ->
       state.workspace_activity <- next;
-      let assigned_keepers =
-        match state.repositories with
-        | None -> []
-        | Some snap ->
-            match List.find_opt (fun (r : Tui_decode.repository) -> String.equal r.rp_id repo_id) snap.rs_repositories with
-            | None -> []
-            | Some r -> r.rp_keepers
-      in
-      let fleet_keepers =
-        List.map (fun (k : Tui_decode.keeper) -> k.k_name) state.keepers
-        |> List.sort_uniq String.compare
-      in
-      let keepers =
-        match assigned_keepers with
-        | [] -> fleet_keepers
-        | ks ->
-            let active = List.filter (fun name -> List.mem name fleet_keepers) ks in
-            if active = [] then fleet_keepers
-            else List.sort_uniq String.compare active
-      in
+      let host = server_peer_host and port = state.port in
       let run () =
-        let reads = Eio.Fiber.List.map ~max_fibers:4 (fun keeper_name ->
-          let result = try Masc_tui_loader.load_keeper_file_changes
-              ~host:server_peer_host ~port:state.port ~keeper_name ~window_hours:changes_window_hours
-            with Eio.Cancel.Cancelled _ as exn -> raise exn
-               | exn -> Error (Printexc.to_string exn) in
-          (keeper_name, result)) keepers in
-        enqueue_async mailbox (Workspace_activity_loaded (request,
-          Ok {war_at = Unix.gettimeofday (); war_hours = changes_window_hours; war_keepers = reads}))
+        let result = try Masc_tui_http.fetch_repository_activity ~host ~port
+            ~repo_id ~window_hours:changes_window_hours
+          with Eio.Cancel.Cancelled _ as exn -> raise exn
+             | exn -> Error (Printexc.to_string exn) in
+        let result = Result.bind result (fun snapshot ->
+          if String.equal snapshot.Tui_decode.ras_repo_id repo_id then Ok snapshot
+          else Error "repository activity response names another repository") in
+        enqueue_async mailbox (Workspace_activity_loaded (request, result))
       in
       match Eio_context.get_switch_opt () with
       | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
@@ -6697,7 +6679,8 @@ let launch_unavailable_journal_operations state ~mailbox ~keeper_name =
       let enqueue_async = workspace_enqueue state in
       let host = server_peer_host and port = state.port in
       let check_request = capture_workspace_check state ~mailbox in
-      List.iter (journal_read_started state) targets;
+      List.iter (fun operation_id ->
+        journal_read_started state (keeper_name, Keeper_chat_log.Operation operation_id)) targets;
       fork_workspace_job state ~sw (fun () ->
         List.iter (fun operation_id ->
           let operation_state = read_keeper_chat_operation ~check_request ~host ~port
@@ -6757,16 +6740,16 @@ let launch_keeper_chat_journal_loads state ~mailbox ~keeper_name targets =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Keeper_chat_log.Events_transport (Printexc.to_string exn))
     in
-    let operation_state, journal = Keeper_chat_log.read_with_operation_state
+    let operation_state, journal, terminal_replay = Keeper_chat_log.read_with_operation_state
       ~read_operation ~read_journal in
     enqueue_async mailbox
-      (Keeper_chat_journal_loaded { keeper_name; source; started_at; journal; operation_state })
+      (Keeper_chat_journal_loaded { keeper_name; source; started_at; journal; operation_state; terminal_replay })
   in
   match targets, Eio_context.get_switch_opt () with
   | [], Some _ | [], None -> ()
   | _ :: _, Some sw ->
       List.iter
-        (fun (source, _, _) -> journal_read_started state (Keeper_chat_log.source_key source))
+        (fun (source, _, _) -> journal_read_started state (keeper_name, source))
         targets;
       fork_workspace_job state ~sw (fun () -> List.iter run targets)
   | _ :: _, None ->
@@ -6778,7 +6761,7 @@ let launch_keeper_chat_journal_loads state ~mailbox ~keeper_name targets =
 let launch_current_autonomous_journals state ~mailbox ~keeper_name =
   autonomous_journal_candidates ~keeper_name state.keeper_turns
   |> List.iter (fun (source, at) ->
-      let key = Keeper_chat_log.source_key source in
+      let key = keeper_name, source in
       match journal_follow_for_source state ~keeper_name ~source ~seq:None ~at with
       | Follow_nothing -> ()
       | Follow_read_after_inflight -> journal_read_wanted state key None
@@ -7198,6 +7181,7 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
        persisted turn_ref. Old rows and Memory journal entries carry neither,
        so the empty value continues to mean "no grouping authority". *)
     me_request_id = Option.value ~default:"" row.Keeper_chat_history.turn_id
+  ; me_execution_source = row.Keeper_chat_history.execution_source
   ; me_at = row.Keeper_chat_history.at
   }
 
@@ -8340,6 +8324,7 @@ let chat_notice state ~keeper_name ~kind text =
               me_timestamp = current_clock_text ();
               me_keeper_name = keeper;
               me_request_id = "";
+              me_execution_source = None;
               me_at = Unix.gettimeofday ();
             } ]
 
@@ -15302,7 +15287,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
        | Some keeper_name ->
            List.iter
              (fun (source, (seq, at)) ->
-               let key = Keeper_chat_log.source_key source in
+               let key = keeper_name, source in
                match
                  journal_follow_for_source state ~keeper_name ~source ~seq ~at
                with
@@ -17275,8 +17260,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                 content-withheld by design. *)
              if not state.msg_journal_reads_refused then
                journal_targets :=
-                 journal_source_fetch_targets
-                   ~held:(journal_held_request_ids state keeper_name)
+                 journal_source_fetch_targets ~keeper_name
+                   ~held:(journal_held_keys state keeper_name)
                    ~unavailable:state.msg_journal_unavailable
                    (List.filter_map
                       (fun (row : Keeper_chat_history.row) ->
@@ -17287,7 +17272,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                  |> List.map (fun (source, at) ->
                         ( source
                         , at
-                        , journal_resume_position state ~keeper_name (Keeper_chat_log.source_key source) ));
+                        , journal_resume_position state ~keeper_name source ));
              let fresh = msg_entries_of_history_rows state keeper_name rows in
              (* The durable outcome and duration of a held turn's calls reach
                 its block through its log's transcript, not through the rows
@@ -17329,22 +17314,21 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         launch_current_autonomous_journals state ~mailbox ~keeper_name;
         launch_unavailable_journal_operations state ~mailbox ~keeper_name
   | Keeper_chat_operation_loaded {keeper_name; operation_id; operation_state} ->
-      journal_read_finished state operation_id;
+      journal_read_finished state (keeper_name, Keeper_chat_log.Operation operation_id);
       Option.iter (fun log ->
         apply_keeper_chat_operation_state state ~journal_id:operation_id log
           (Result.map Option.some operation_state))
         (settled_log_for_request state ~keeper_name operation_id)
-  | Keeper_chat_journal_loaded { keeper_name; source; started_at; journal; operation_state } -> (
+  | Keeper_chat_journal_loaded { keeper_name; source; started_at; journal; operation_state; terminal_replay } -> (
       let journal_id = Keeper_chat_log.source_key source in
       (* Not generation-guarded: a journal is the turn's record whichever
          keeper the pane shows now, and the log is kept per keeper. *)
-      journal_read_finished state journal_id;
       (* A stream frame arrived while this read was in flight: the read may
          have stopped short of the line it announced. Decided after the
          result below is folded, so the next read starts past it and a turn
          that just ended asks for nothing. *)
       let read_again () =
-        match take_journal_wanted state journal_id with
+        match take_journal_wanted state (keeper_name, source) with
         | Not_wanted -> ()
         | Wanted { highest_seq } -> (
             (* Against the highest seq the frames named: a read that reached
@@ -17368,22 +17352,11 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       (match journal with
        | Ok _ -> ()
        | Error _ -> Option.iter reconcile_operation
-           (settled_log_for_request state ~keeper_name journal_id));
-      (match journal with
-      | Ok lines ->
-          (* The lines join the session's record of the turn when it has one
-             -- a cut live stream's partial log, an earlier read of a turn
-             then still running -- else a fresh log. The same fold, the same
-             seq dedup. *)
-          let log =
-            match settled_log_for_request state ~keeper_name journal_id with
-            | Some held when not (turn_log_holds_the_turn held) -> held
-            | Some _ | None ->
-                turn_log_create_for_source ~keeper_name ~source
-                  ~started_at:(journal_log_started_at ~fallback:started_at lines)
-          in
-          let accepted = turn_log_add_journaled log lines in
+           (settled_log_for_source state ~keeper_name source));
+      (match receive_journal_result state ~keeper_name ~source ~started_at journal with
+      | Ok (log, accepted) ->
           reconcile_operation log;
+          record_terminal_replay state log terminal_replay;
           (* An observer-followed turn has no pane-owned delta delivery.
              Refresh its durable results after the journal accepts them;
              replayed seqs and text-only reads do not request another load. *)
@@ -17396,35 +17369,15 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                     | _ -> false)
                   accepted
           then launch_keeper_calls_load ~force:true state ~mailbox keeper_name;
-          Keeper_chat_log.commit log.tl_log;
-          if Keeper_chat_log.entries log.tl_log <> [] then hold_settled_log state log;
           (match state.msg_loaded_keeper with
             | Some loaded_keeper when String.equal loaded_keeper keeper_name ->
                 enrich_held_logs_from_rows state ~keeper_name state.msg_loaded
-            | Some _ | None -> ());
-          if not (turn_log_holds_the_turn log) &&
-            (* A journal read whole that still cannot stand for the turn has
-               nothing more to say when the loaded transcript says the turn is
-               over: a cancelled turn (finished without a recorded reply), or
-               a failure the server never journaled (#33108). A turn still
-               running is asked again on the next load, from where this read
-               stopped. *)
-            ((match Keeper_chat_transcript.phase log.tl_transcript with
-             | Keeper_chat_transcript.Stream_ended
-             | Keeper_chat_transcript.Stream_failed _ ->
-                 true
-             | Keeper_chat_transcript.Waiting | Keeper_chat_transcript.Working ->
-                 false)
-            || (match source with
-                | Keeper_chat_log.Operation _ -> loaded_turn_has_ended state ~keeper_name journal_id
-                | Keeper_chat_log.Autonomous_turn _ -> false))
-          then remember_journal_unavailable state journal_id
+            | Some _ | None -> ())
       | Error (Keeper_chat_log.Unknown_operation | Keeper_chat_log.Journal_pruned | Keeper_chat_log.Journal_missing) ->
           (* Nothing to reload, now or later this session: the v1 rows are
              the turn. *)
-          remember_journal_unavailable state journal_id
+          ()
       | Error (Keeper_chat_log.Journal_unavailable detail) ->
-          remember_journal_unavailable state journal_id;
           add_event state "error"
             (Printf.sprintf "journal for %s unavailable: %s"
                (Keeper_chat.compact_request_id journal_id)
@@ -17432,7 +17385,6 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       | Error (Keeper_chat_log.Events_denied detail) ->
           (* The server refused this operation's journal and said why; asking
              again this session gets the same answer. *)
-          remember_journal_unavailable state journal_id;
           add_event state "error"
             (Printf.sprintf "journal for %s refused: %s"
                (Keeper_chat.compact_request_id journal_id)
@@ -17440,7 +17392,6 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       | Error (Keeper_chat_log.Events_undecodable detail) ->
           (* A body this build cannot read will not read differently next
              time; the v1 rows stay and this operation is not asked again. *)
-          remember_journal_unavailable state journal_id;
           add_event state "error"
             (Printf.sprintf "journal for %s not readable: %s"
                (Keeper_chat.compact_request_id journal_id)
@@ -18191,14 +18142,14 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         | Ok page ->
             let journal_targets =
               if state.msg_journal_reads_refused then []
-              else journal_source_fetch_targets
-                ~held:(journal_held_request_ids state keeper_name)
+              else journal_source_fetch_targets ~keeper_name
+                ~held:(journal_held_keys state keeper_name)
                 ~unavailable:state.msg_journal_unavailable
                 (List.filter_map (fun (row : Keeper_chat_history.row) ->
                   Option.map (fun source -> source, row.at) (journal_source_of_history row))
                   page.Keeper_chat_history.decoded.rows)
                 |> List.map (fun (source, at) -> source, at,
-                    journal_resume_position state ~keeper_name (Keeper_chat_log.source_key source))
+                    journal_resume_position state ~keeper_name source)
             in
             let rows =
               msg_entries_of_history_rows state keeper_name
@@ -24561,7 +24512,7 @@ and is loaded on demand through keeper_skill.
            goto_surface state ~mailbox:async_messages System_logs
        | Some key when state.keeper_navigation_open ->
            (match key with
-            | "right" | "esc" | "\t" ->
+            | "right" | "esc" | "\t" | "tab" ->
                 state.keeper_navigation_open <- false;
                 state.keeper_message_focus <- Right_pane
             | "down" | "j" ->

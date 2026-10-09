@@ -5,7 +5,7 @@ status: runbook
 # Release Evidence
 
 > Version source: [`dune-project`](../dune-project)
-> Updated: 2026-10-04
+> Updated: 2026-10-10
 
 증거는 릴리즈 산출물 게시 준비와 운영 준비를 구분합니다. 설치 가능한 후보의 검증과
 태그·자산 게시가 성공했다고 fleet 연속성이나 performance SLO까지 통과한 것은 아닙니다.
@@ -15,15 +15,17 @@ status: runbook
 - exact source SHA: 후보 원장, 독립 소스 리뷰, 모든 후보 검증 단계와 산출물 identity 연결
 - full type/compile: development/release OCaml과 Agent Core, dashboard 타입·payload 소비자 검사
 - supported-platform installation: macOS ARM64/x64와 Linux ARM64/x64의 같은 후보 산출물 설치 검증
-- declared essential behavior: 고정된 core flow와 변경 표면의 실제 동작 검사; 선택 profile이 구현되면 버전·suite 목록·hash를 receipt에 기록
+- declared essential behavior: 고정된 core flow와 변경 표면의 실제 동작 검사; 고정된 profile 버전·suite 목록·hash를 receipt에 기록
 - artifact install smoke: 설치 경로에서 binary를 실행하고 version·isolated boot·`/health` 확인
 - public API smoke: MCP `initialize`·`tools/list`, `masc_status`, dashboard briefing·project-snapshot raw captures
 - raw evidence: 실행 결과와 headers/body/json 정규화본·`server.log`, checksums와 배포 묶음
 
-현재 RC는 root `@runtest` 전체를 실행합니다. #41156의 선택 profile은 별도 변경이며,
-이 문서만으로 현재 workflow가 바뀌거나 실패한 후보가 통과하지 않습니다. 이후 검토된
-profile을 쓰더라도 같은 SHA의 full compile/type·4-platform install·선언된 필수 동작을
-모두 통과해야 게시 준비로 판정합니다. repository 전체 회귀는 별도 manual lane에 유지합니다.
+이 후보의 RC는 `config/release-behavior.json`에 고정된 `release-essential-v2`를 실행합니다.
+같은 SHA의 full compile/type·4-platform install·선언된 필수 동작을 모두 통과해야
+산출물 게시 준비로 판정합니다. receipt의 profile·정확한 suite 목록·manifest hash가
+태그의 manifest와 다르면 게시를 거부합니다. 선택을 실패 후 축소해 통과시킬 수 없습니다.
+repository 전체 `@runtest` 회귀는 별도 manual lane이며 필수 profile 통과가 전체 회귀
+또는 production-ready 판정을 뜻하지 않습니다.
 
 ## Production-ready bundle
 
@@ -75,9 +77,9 @@ release 브랜치로 치환합니다. 현재 workflow는 `release/v*` 브랜치 
 gh workflow run release-candidate.yml --ref release/vX.Y.Z
 ```
 
-이 실행은 같은 커밋의 `Full Check(full-check.yml)`, 전체 `Test`, 4개 플랫폼 `release-build.yml` 설치
+이 실행은 같은 커밋의 `Full Check(full-check.yml)`, 명시된 출시 필수 동작 검사, 4개 플랫폼 `release-build.yml` 설치
 검증과 최종 배포 자산 조립을 함께 호출합니다. 부분 suite를 선택하는
-입력은 없습니다. 전체 Test는 루트 `@runtest`를 한 번 실행하고 Dune의 종료 코드로
+입력은 없습니다. 별도의 수동 전체 회귀 Test 워크플로는 루트 `@runtest`를 한 번 실행하고 Dune의 종료 코드로
 판정합니다. 실패를 허용하는 목록이나 별도 재컴파일 경로는 없습니다.
 
 `candidate-verification-<sha>-attempt-<n>` artifact는 커밋과 세 결과를 기록합니다.

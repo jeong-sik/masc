@@ -99,10 +99,12 @@ rg -n '^\((test|tests|executable)\b|^\s+\((name|names|modules)\b' test/dune test
 1. **Pure synchronous tests**: 순수 동기 기능 검증을 `(tests ...)` 블록과 개별 `(test ...)`로 선언한다.
 2. **Eio-dependent tests** (개별 `(test ...)` 블록): Eio.Mutex, Session.with_lock 등을 사용하는 테스트는 `eio eio_main` 의존으로 개별 빌드
 3. **agent core bridge tests**: `agent_core` 의존
-4. **Product script tests**: 설치·업그레이드·실행 스크립트의 사용자 동작을 검증한다. CI 러너·리뷰 가드·PTY fixture·증거 수집기·빌드 검사기의 자체 테스트는 두지 않는다.
+4. **Product script tests**: 설치·업그레이드·실행 스크립트의 사용자 동작을 검증한다. CI 러너·리뷰 가드·증거 수집기·빌드 검사기의 자체 테스트는 두지 않는다.
 
 테스트는 입력에 대한 제품의 출력·상태 변화·저장·복구를 검증한다. 소스의 함수 호출
 횟수, 문구·파일명·구현 형태를 고정하는 검사, 과거 호환만 유지하는 검사와 폐기한 기능의 부재 검사는 두지 않는다.
+TUI 화면 문구·배치·폭별 레이아웃·행 순서를 확인하는 테스트(PTY 시나리오 포함)도 두지 않는다.
+TUI 는 자주 바뀐다. TUI 검사는 보낸 요청·저장한 상태·결정만 본다.
 기능 검증에 필요한 프로토콜·권한·자원 경계는 실제 입력과 결과로 확인한다.
 
 ---

@@ -3389,6 +3389,73 @@ let test_same_quarantine_command_cas_loser_converges () =
   | _ -> Alcotest.fail "same command CAS loser did not converge to Ready"
 ;;
 
+let test_quarantine_command_rejects_candidate_purged_after_snapshot () =
+  with_temp_base "board-attention-worker-purge-race" @@ fun base_path ->
+  ignore (record ~base_path (candidate ()) : A.candidate);
+  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+    raise (Failure "injected exact worker exception")
+  in
+  (match
+     ok
+       "create durable quarantine"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Partition_blocked _ -> ()
+   | _ -> Alcotest.fail "fixture did not block the singleton partition");
+  let quarantined = load_one_candidate ~base_path in
+  let partition = load_one_partition ~base_path in
+  let quarantine =
+    match quarantined.status with
+    | A.Quarantine { quarantine; phase = A.Quarantined } -> quarantine
+    | _ -> Alcotest.fail "fixture candidate was not Quarantined"
+  in
+  let request : Q.request =
+    { candidate_id = quarantined.candidate_id
+    ; expected_quarantine_id = quarantine.quarantine_id
+    ; decision = Q.Acknowledge_and_requeue
+    }
+  in
+  let command =
+    match
+      Q.make
+        ~keeper_name:"alpha"
+        ~raw_partition_id:partition.partition_id
+        ~requested_by:"operator-test"
+        request
+    with
+    | Ok command -> command
+    | Error error ->
+      Alcotest.failf "requeue command rejected: %s" (Q.input_error_to_string error)
+  in
+  (match
+     Q.For_testing.execute_with_before_root_restore
+       ~before_root_restore:(fun () ->
+         match A.purge ~base_path ~keeper_name:"alpha" with
+         | Ok () -> ()
+         | Error detail -> Alcotest.failf "candidate purge failed: %s" detail)
+       ~now:20.0
+       ~base_path
+       command
+   with
+   | Error (Q.Partition_state_conflict detail) ->
+     Alcotest.(check string)
+       "purged candidate blocks stale root restoration"
+       "Board attention candidates changed before root restoration"
+       detail
+   | Error error ->
+     Alcotest.failf
+       "candidate purge race returned the wrong error: %s"
+       (Q.execution_error_label error)
+   | Ok _ -> Alcotest.fail "stale command restored a purged candidate root");
+  Alcotest.(check bool)
+    "candidate remains purged"
+    false
+    (Sys.file_exists (A.ledger_path ~base_path ~keeper_name:"alpha"));
+  match ok "load partition after rejected restore" (P.load ~base_path ~keeper_name:"alpha") with
+  | [ current ] when current.partition_id = partition.partition_id -> ()
+  | _ -> Alcotest.fail "candidate purge race changed the existing partition"
+;;
+
 let test_stale_blocked_snapshot_cannot_requeue_new_generation () =
   with_temp_base "board-attention-worker-stale-blocked-generation" @@ fun base_path ->
   ignore (record ~base_path (candidate ()) : A.candidate);
@@ -4082,6 +4149,10 @@ let () =
             "same quarantine command CAS loser converges"
             `Quick
             test_same_quarantine_command_cas_loser_converges
+        ; Alcotest.test_case
+            "quarantine rejects a candidate purged after its snapshot"
+            `Quick
+            test_quarantine_command_rejects_candidate_purged_after_snapshot
         ; Alcotest.test_case
             "requeue records the requesting principal"
             `Quick

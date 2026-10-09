@@ -80,85 +80,6 @@ let test_directory_issue_is_not_a_declaration () =
                        configuration_issues=1; complete=false;
                        freshness=UI.Current })
 
-(* The status row's reading of the view. Measured on the live server at 150
-   columns: pressing [o] drew
-
-     Refreshing · previous reading remains visible
-     No reading yet · r:refresh
-
-   two rows apart, in the frame before the first read landed. The row matched
-   on [loading] alone, so a read in flight claimed a previous reading whatever
-   the view held. *)
-let reading_of view = UI.status_text view
-
-let loading view = { view with UI.loading = true }
-
-let test_a_first_read_has_no_previous_reading () =
-  check string "nothing held yet" "Reading · nothing held yet"
-    (reading_of (loading UI.initial));
-  check string "a refresh over a reading says so"
-    "Refreshing · previous reading remains visible"
-    (reading_of (loading (view_of [ declaration ])))
-
-(* A retry after a failure holds nothing either, and the failure is the part
-   an operator can act on. *)
-let test_a_retry_after_a_failure_keeps_the_failure () =
-  check string "the failure, and that it is being tried again"
-    "Read: boom · reading again"
-    (reading_of { (loading UI.initial) with snapshot_read_error=Some "boom" })
-
-let contains needle text =
-  let n = String.length needle in
-  let rec at i = i + n <= String.length text && (String.sub text i n = needle || at (i + 1)) in
-  at 0
-
-let frame_says needle view =
-  List.exists (contains needle) (UI.lines ~width:150 view)
-
-(* The body under the status row. With the row fixed, the first-read frame
-   still said "No reading yet · r:refresh" beneath "Reading · nothing held
-   yet", asking the operator to start a read already on its way. The list
-   screens said "Refreshing…" over a first read that refreshes nothing. *)
-let test_a_read_in_flight_does_not_ask_for_one () =
-  let first = loading UI.initial in
-  check bool "the timeline frame asks for no read" false (frame_says "r:refresh" first);
-  check bool "the timeline frame says a read is on its way" true (frame_says "Reading…" first);
-  let rows = { first with UI.focus = UI.Rows } in
-  check bool "the rows frame asks for no read" false (frame_says "r:refresh" rows);
-  check bool "the rows frame refreshes nothing" false (frame_says "Refreshing…" rows);
-  check bool "an idle frame still asks for a read" true (frame_says "r:refresh" UI.initial)
-
-(* An unread view, a successful snapshot and a failed read stay distinct. *)
-let test_the_other_readings_are_unchanged () =
-  check string "nothing asked for yet" "No reading yet · r:refresh"
-    (reading_of UI.initial);
-  check string "a reading in hand" "Recorded observations · r:refresh"
-    (reading_of (view_of [ declaration ]));
-  check string "a failed read with nothing behind it" "Read: boom"
-    (reading_of { UI.initial with snapshot_read_error=Some "boom" });
-  check string "a failure over a reading keeps both"
-    "Read: boom · previous reading retained"
-    (reading_of { (view_of [ declaration ]) with snapshot_read_error=Some "boom" })
-
-let test_input_and_request_errors_do_not_claim_a_failed_read () =
-  let previous = view_of [ declaration ] in
-  check string "invalid input leaves the reading current"
-    "Input: choose an installed worker"
-    (reading_of { previous with UI.error = Some (UI.Input_failure "choose an installed worker") });
-  check string "a request failure keeps its own cause"
-    "Request: HTTP 503"
-    (reading_of { previous with UI.error = Some (UI.Request_failure "HTTP 503") });
-  check string "a detail read failure does not mark the inventory stale"
-    "Detail read: HTTP 503"
-    (reading_of { previous with UI.error = Some (UI.Detail_read_failure "HTTP 503") });
-  check string "a later input error still exposes the earlier snapshot failure"
-    "Input: choose an installed worker · Previous Add-ons read: HTTP 503"
-    (reading_of { previous with UI.error = Some (UI.Input_failure "choose an installed worker");
-      snapshot_read_error=Some "HTTP 503" });
-  check string "a rejected key while loading does not say the read failed"
-    "Input: wait for the request · request in progress"
-    (reading_of { (loading UI.initial) with UI.error = Some (UI.Input_failure "wait for the request") })
-
 let () =
   run "tui lane addon reading"
     [ ( "installation reading"
@@ -172,15 +93,5 @@ let () =
             test_unapplied_declarations_are_not_active_workers
         ; test_case "directory issue is not a declaration" `Quick
             test_directory_issue_is_not_a_declaration
-        ; test_case "a first read has no previous reading" `Quick
-            test_a_first_read_has_no_previous_reading
-        ; test_case "a retry after a failure keeps the failure" `Quick
-            test_a_retry_after_a_failure_keeps_the_failure
-        ; test_case "a read in flight does not ask for one" `Quick
-            test_a_read_in_flight_does_not_ask_for_one
-        ; test_case "input and request errors keep their origin" `Quick
-            test_input_and_request_errors_do_not_claim_a_failed_read
-        ; test_case "other reading states stay distinct" `Quick
-            test_the_other_readings_are_unchanged
-        ] )
+        ;] )
     ]

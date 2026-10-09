@@ -3,12 +3,75 @@
 `masc-browser-host --bidi-url ws://127.0.0.1:9222/session` opts into a
 Firefox Remote Agent that the operator explicitly enabled. Without this option
 the executable continues using WebExtension native messaging stdin/stdout.
-The endpoint must be loopback; MASC does not start Firefox, copy a profile,
-change preferences, or obtain application tokens.
+The endpoint must be loopback. MASC starts that Firefox only for a workspace
+whose `runtime.toml` names it (below); it does not copy a profile, change
+preferences, or obtain application tokens.
 
 ## Attaching a connection
 
-The operator does both steps. Nothing in MASC starts this Firefox or this host.
+### Let the MASC server start both
+
+With this table in the workspace's `runtime.toml`, the MASC server starts the
+Firefox and the host when it starts (RFC-browser-keeper-firefox):
+
+```toml
+[browser.live.bidi]
+firefox = "/Applications/Firefox.app/Contents/MacOS/firefox"
+profile = "/Users/you/masc-keeper-firefox-profile"
+# port = 9222
+```
+
+- It starts only what is missing. A port that already answers gets no second
+  Firefox, and a host holding the host lock gets no second host.
+- It starts Firefox only together with a host. It starts neither when the
+  browser lane is not installed, or not as its installation wrote it; when
+  the host holding the lock was given another port, or its record cannot be
+  read to say which; or when that host is on this port, since a host
+  attaches to Firefox once, when it starts. A workspace has one host, so
+  such a host is stopped first; one whose Firefox is gone ends by itself,
+  and the next server start opens both. Firefox's port lets any local
+  process drive it, so it is not opened for nothing.
+- A Firefox the server started and left with no host is stopped through its
+  process group: one whose port did not open within the 30 seconds, and one
+  whose host could not be started. It gets SIGTERM, then SIGKILL after 5
+  seconds. A Firefox whose port answered before the server looked is never
+  touched.
+- A host that leaves in order writes its ending before it gives up the
+  lock. A server that starts in between waits up to 5 seconds for the lock,
+  so the host it starts is not refused; a lock still held then starts
+  nothing.
+- Both run apart from the server, so a server restart leaves them running.
+  Firefox writes to `.masc/browser-lane/keeper-firefox.log` and the host to
+  `.masc/browser-lane/bidi-host.log`. Each start moves the last run's log to
+  `<name>.1`, over the one before; within one run a log keeps growing, by a
+  line every five seconds from a host whose server is away. The server log
+  says what it started and why it did not.
+- The host is started with the workspace's installed `launch`, so the browser
+  lane is installed first (step 2 below). It is not given the server's
+  `MASC_HTTP_BASE_URL` or `MASC_HTTP_PORT`, which would fix its server
+  address over `connection.toml`.
+- The host is also given the profile (`--firefox-profile`). Firefox reports
+  the profile it runs with the session (`moz:profile`; Firefox 157.0.1 gives
+  the path as it was given, so both paths are resolved first). A host whose
+  Firefox runs another profile ends that session and stops, and its record
+  says which profile it found. So a port that answers because the everyday
+  Firefox was started with `--remote-debugging-port` does not give a Keeper
+  that profile; it gets a session that is ended at once.
+- `[browser.live] enabled = false` starts nothing.
+- The operator still logs in once, in that Firefox, to the sites a Keeper
+  works on; the profile keeps the login.
+- A Firefox that exits before its port answers, leaving nothing in its process
+  group, is reported as such: Firefox 157.0.1 exits with status 0 when another
+  Firefox has the profile open, so quit that Firefox first. One that goes on
+  in another process of its group is waited for. A Firefox applying an
+  update starts itself again; whether that process stays in the group was
+  not measured. The wait ends after 30 seconds.
+- Write the table only once a server that reads it is installed:
+  `runtime.toml` refuses a key it does not know.
+
+### By hand
+
+Without the table the operator does both steps.
 
 1. Start a Firefox with its Remote Agent on a loopback port, on a profile
    kept for this.
@@ -53,6 +116,9 @@ The operator does both steps. Nothing in MASC starts this Firefox or this host.
    with this workspace's `--base-path` and token file and passes on what
    follows it, so it does not depend on the `PATH`.
 
+   Adding `--firefox-profile <profile>` makes the host end a session with a
+   Firefox on any other profile, as the server-started host does.
+
    `masc-browser-host --base-path "$BASE_PATH" --bidi-url ...` is the same
    host when the executable is on the `PATH`. Set `BASE_PATH` before it: an
    empty `--base-path` is taken as the current directory, not as "use the
@@ -75,10 +141,11 @@ from the list and keeps its `clientId` for the task.
 The host runs in the foreground until it is stopped with Ctrl-C or SIGTERM,
 or its terminal is closed (SIGHUP). It then finishes and answers a command in
 flight, tells the server, ends the BiDi session it asked for, and exits 0. A
-second Ctrl-C ends it at once and leaves the session in Firefox. A stop that
-comes before the WebSocket is up abandons the attempt. One that comes while
-the session request is unanswered waits for that answer, up to twenty
-seconds, and then ends the session.
+SIGTERM that arrives after another handled signal has already requested this
+graceful shutdown ends it at once, leaving the session in Firefox. A second
+Ctrl-C also ends it at once. A stop that comes before the WebSocket is up
+abandons the attempt. One that comes while the session request is unanswered
+waits for that answer, up to twenty seconds, and then ends the session.
 
 A host started ignoring one of these signals keeps ignoring it. Under
 `nohup` it therefore outlives its terminal, and is stopped with SIGTERM.
@@ -156,6 +223,9 @@ server:
     the host pid, start time and client ID alongside the unchanged result
     fields. This archive is append-only; the ordinary diagnostic log is not
     a durable backup. Archive rows may repeat after uncertain writes.
+  - A host that starts appends the previous record's results to the same
+    archive, under the previous host's pid, before it writes its own record.
+    When that append fails it does not start, and the previous record stays.
   - If archival fails, the host reports the failure and retains every
     unarchived entry in its snapshot, even above the normal window, then
     retries on a later addition. A snapshot write failure retains its state
@@ -189,12 +259,14 @@ Read together they say one of these:
 
 | Record | Lock | Meaning |
 |---|---|---|
-| none | | No BiDi host has run for this workspace. |
+| none | free | No BiDi host has run for this workspace. |
+| none | held | A host holds the workspace lock before writing its first record; the state is `record_missing_but_locked`. |
 | no ending | held | A host is running. It is attached once the record has its session time; a server that is down does not change this. |
 | an ending | | The host left in order and said why. |
 | no ending | free | The host was killed or crashed, or it left in order and could not write its ending. Its BiDi session may be left in Firefox. |
 | unreadable | | The record is not one the reader takes. The reader still says whether a host holds the lock: one that does refuses the next host, which then cannot replace the record. |
-| no ending | cannot be asked | Whether the host runs is not known. The reader says so, with why the lock could not be asked. A record with its ending, and no record, are read without the lock. |
+| none | cannot be asked | Whether a host started cannot be known. The state is unreadable, with why the lock could not be asked. |
+| no ending | cannot be asked | Whether the host runs is not known. The state is unreadable, with why the lock could not be asked. |
 
 A reader looks at the record and then at the lock, so it can be wrong for
 as long as one write of the record takes: while a starting host has the
@@ -202,7 +274,11 @@ lock and not yet its record, the reader still sees the host before it; and
 a host that wrote its ending and exited between the two looks reads as
 killed. The next read is right.
 
-A host that starts replaces the record. It carries no lane token, no
+A host that starts replaces the record, once the previous record's results
+are archived. A previous record it reads and cannot load (another layout, or
+damaged) is first copied to `bidi-host.json.unloadable-<pid>-<time>`, named
+by the new host; one it cannot read at all is left in place, and that host
+does not start. The record carries no lane token, no
 request's arguments and nothing read from a page. A request is named only by
 the UUID the server issued and by a verb the host knows; for anything else
 the field is `null`. A reader built before a verb was added reads that verb
@@ -241,7 +317,7 @@ does next:
   A workspace with no browser lane installed and no record has no such line.
 - `GET /api/v1/dashboard/browser-lane/clients` adds `bidiHost` beside
   `clients`:
-  - `state`: `never_started`, `running`, `ended`, `died` or `unreadable`.
+  - `state`: `never_started`, `record_missing_but_locked`, `running`, `ended`, `died` or `unreadable`.
   - What the state was read from: the `record`, whether the host's lock was
     held as `lock_held`, and why either cannot be read as `detail`. A reader
     works the state out again from these and refuses a report whose `state`
@@ -315,7 +391,7 @@ These do leave the session behind. A host started after them is refused
 with `session not created` and exits; quit that Firefox, start it with the
 same command and profile, then start the host.
 
-- The host was killed with SIGKILL or a second Ctrl-C, or crashed.
+- The host was killed with SIGKILL, a second Ctrl-C, or a SIGTERM after graceful shutdown had already been requested, or crashed.
 - Firefox did not answer the session's end within two seconds, or its socket
   was already closed. The host logs `the BiDi session was not ended` with the
   reason. If the socket closed because Firefox quit, there is nothing to

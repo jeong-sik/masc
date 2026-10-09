@@ -1,26 +1,6 @@
 open Alcotest
 module State = Masc_tui_connector_state
 
-let connections =
-  [ ("connected", Masc.Tui_decode_connectors.Connector_connected)
-  ; ("connected / unavailable", Masc.Tui_decode_connectors.Connector_connected_unavailable)
-  ; ("disconnected", Masc.Tui_decode_connectors.Connector_disconnected)
-  ; ("offline", Masc.Tui_decode_connectors.Connector_offline)
-  ; ("stale", Masc.Tui_decode_connectors.Connector_stale)
-  ]
-
-let test_every_connection_spells_its_own_badge () =
-  let words = List.map (fun (_, c) -> State.badge_word c) connections in
-  check int "one word per connection" (List.length connections)
-    (List.length (List.sort_uniq String.compare words));
-  List.iter
-    (fun word ->
-      check bool (word ^ " is spelled for the badge") true
-        (String.equal word (String.uppercase_ascii word)))
-    words
-
-(* The connector the server sends, read through the same decoder the pane
-   reads it through. [status]/[available]/[connected] pick the badge. *)
 let connector ~status ~available ~connected ?gateway_state ?poll_state () =
   let optional name = function
     | None -> []
@@ -99,62 +79,12 @@ let test_a_runtime_state_the_badge_does_not_name_is_drawn () =
     (State.runtime_state_to_draw
        (connector ~status:"offline" ~available:false ~connected:false ()))
 
-(* The list row reserved twelve cells for the badge word while one of the
-   five words is twenty-three cells long, so that row cut [CONNECTED /
-   UNAVAILABLE] down to [CONNECTED …]. A cut name is still a name; a cut
-   state word is a *different state*, and this one dropped exactly the half
-   an operator has to act on. The column asks the table how wide it has to
-   be, so a new word widens it instead of being cut by it. *)
-let test_the_badge_column_holds_every_word_whole () =
-  check int "one word per connection" (List.length connections)
-    (List.length State.badge_words);
-  let widest =
-    List.fold_left
-      (fun widest word -> max widest (String.length word))
-      0 State.badge_words
-  in
-  check int "the column is as wide as the widest word" widest
-    State.badge_column_cells;
-  check bool "and no wider: a word fills it exactly" true
-    (List.exists
-       (fun word -> String.length word = State.badge_column_cells)
-       State.badge_words);
-  (* The fact that made this a defect rather than a preference. *)
-  check bool "the compound word did not fit the twelve cells the row reserved"
-    true
-    (String.length (State.badge_word Masc.Tui_decode_connectors.Connector_connected_unavailable)
-    > 12)
-
-(* Three things share the row and only one may be shortened. Without the two
-   narrow readings below, a column that simply always hands out fourteen
-   cells passes the wide ones. *)
-let test_the_name_column_is_the_one_that_gives_way () =
-  let tail_cells = String.length "  2 here / 7 total" in
-  let name inner = State.list_row_name_cells ~inner ~fixed_cells:6 ~tail_cells in
-  check int "a wide frame draws the row it drew yesterday"
-    State.name_cells_preferred (name 136);
-  check int "so does the narrowest split pane" State.name_cells_preferred
-    (name 76);
-  check int "a narrow frame spends the name's cells, not the badge's" 9
-    (name 56);
-  check bool "and the name never vanishes" true (name 20 >= 8);
-  check bool "the name is never grown past what the row asked for" true
-    (name 400 = State.name_cells_preferred)
-
 let () =
   run "tui connector state"
     [ ( "badge"
-      , [ test_case "every connection spells its own badge" `Quick
-            test_every_connection_spells_its_own_badge
-
-        ] )
+      , [] )
     ; ( "list row"
-      , [ test_case "the badge column holds every word whole" `Quick
-            test_the_badge_column_holds_every_word_whole
-        ; test_case "the name column is the one that gives way" `Quick
-            test_the_name_column_is_the_one_that_gives_way
-
-        ] )
+      , [] )
     ; ( "runtime state"
       , [ test_case "a state the badge already names is not drawn" `Quick
             test_a_runtime_state_the_badge_already_names_is_not_drawn

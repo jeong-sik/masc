@@ -1111,6 +1111,68 @@ let test_private_jsonl_transaction_missing_and_delta_contract () =
     (Fs_compat.Private_jsonl_cursor.equal next delta.cursor)
 ;;
 
+(* [Private_jsonl_cursor.t] is abstract, so the missing-store cursor has no
+   name outside [Fs_compat]. With the data file gone, a locked read reports
+   that cursor, and [equal] compares a purge result with it. *)
+let check_missing_store_cursor label path cursor =
+  check bool (label ^ ": the data file is absent") false (Sys.file_exists path);
+  let absent = transaction_snapshot path ~after:None in
+  check bool label true (Fs_compat.Private_jsonl_cursor.equal cursor absent.cursor)
+;;
+
+let test_private_jsonl_purge_removes_store_and_retains_lock () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  ignore (transaction_snapshot path ~after:None);
+  let lock_path = Fs_compat.private_jsonl_lock_path path in
+  let purged =
+    match Fs_compat.purge_private_jsonl_durable_locked_result path with
+    | Ok cursor -> cursor
+    | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+  in
+  check bool "purge removes the data file" false (Sys.file_exists path);
+  check bool "purge retains the stable lock" true (Sys.file_exists lock_path);
+  (* After the lock check: this read takes the stable lock itself. *)
+  check_missing_store_cursor "purge returns the missing-store cursor" path purged;
+  let successor = "{\"row\":2}\n" in
+  (match Fs_compat.append_private_jsonl_durable_locked_result path successor with
+   | Fs_compat.Private_file_succeeded () -> ()
+   | Fs_compat.Private_file_failed error ->
+     fail (Fs_compat.private_jsonl_append_error_to_string error)
+   | Fs_compat.Private_file_succeeded_with_cleanup_failure _
+   | Fs_compat.Private_file_failed_with_cleanup_failure _ ->
+     fail "successor append had a descriptor settlement failure");
+  check string "successor uses the retained lock" successor (Fs_compat.load_file path)
+;;
+
+let test_private_jsonl_purge_reports_parent_sync_after_unlink () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  let parent_syncs = ref 0 in
+  let io : Fs_compat.private_jsonl_transaction_io_for_testing =
+    { before_sync_parent =
+        (fun dir ->
+          incr parent_syncs;
+          if !parent_syncs > 1
+          then raise (Unix.Unix_error (Unix.EIO, "injected_parent_fsync", dir)))
+    ; close_fd = Unix.close
+    }
+  in
+  ignore
+    (transaction_snapshot_with_io ~io path ~after:None);
+  (match
+     Fs_compat.purge_private_jsonl_durable_locked_with_io_for_testing ~io path
+   with
+   | Error
+       (Fs_compat.Private_jsonl_operation_failed
+         { operation = Fs_compat.Sync_removal_parent; _ }) -> ()
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+   | Ok _ -> fail "parent-sync failure after unlink was reported as success");
+  check bool "failed removal has already unlinked the data" false (Sys.file_exists path);
+  match Fs_compat.purge_private_jsonl_durable_locked_result path with
+  | Ok retried ->
+    check_missing_store_cursor "retry returns the missing-store cursor" path retried
+  | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+;;
+
 let test_private_jsonl_transaction_rejects_second_writer_cursor () =
   with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
   let snapshot = transaction_snapshot path ~after:None in
@@ -1427,6 +1489,14 @@ let () =
             "private JSONL transaction handles missing stores and deltas"
             `Quick
             test_private_jsonl_transaction_missing_and_delta_contract
+        ; test_case
+            "private JSONL purge removes data and retains its stable lock"
+            `Quick
+            test_private_jsonl_purge_removes_store_and_retains_lock
+        ; test_case
+            "private JSONL purge reports parent-sync failure after unlink"
+            `Quick
+            test_private_jsonl_purge_reports_parent_sync_after_unlink
         ; test_case
             "private JSONL transaction rejects a second writer cursor"
             `Quick

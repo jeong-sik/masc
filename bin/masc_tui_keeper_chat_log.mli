@@ -19,6 +19,13 @@ type entry =
 
 type t
 
+type terminal_replay = Replay_pending | Replayed_after_terminal
+
+val terminal_replay : t -> terminal_replay
+val observe_terminal_replay : t -> terminal_replay -> unit
+(** Record a successful journal read made after observing a terminal operation.
+    A preserved pre-terminal page after a failed reread is not such evidence. *)
+
 type journal_source = Operation of string | Autonomous_turn of Ids.Turn_ref.t
 
 val source_key : journal_source -> string
@@ -197,6 +204,7 @@ val read_with_operation_state :
   read_journal:(unit -> (Masc.Keeper_chat_event_log.journaled_event list, events_error) result) ->
   (Keeper_chat_operation.state option, string) result
   * (Masc.Keeper_chat_event_log.journaled_event list, events_error) result
+  * terminal_replay
 (** Read operation state before its journal. Recheck queued and running observations after reading the journal. If the
     state advanced, read the journal again; retain a successful first journal
     if that second fetch fails. An unavailable operation recheck retains the

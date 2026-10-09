@@ -36,3 +36,5 @@ xterm cells to the recorded PTY before accepting a screenshot. Fixture evidence
 does not establish behavior of installed or live-provider binaries.
 
 A poisoned provider scope publishes ended activity for each model block it actually observed. The typed protocol diagnostic remains visible, body bytes remain intact, and later events from that scope are rejected. This does not publish a provider MessageStop or complete the Keeper turn. A cut scope (incomplete or repeating response) retains activity tracking because its legal content/terminal sequence is still admitted.
+
+History append identity and turn ownership are distinct. Operation delivery keys retain their operation journal identity. Workspace broadcast, Fusion and approval delivery keys require an explicit turn_ref or autonomous marker to claim a turn; otherwise the row stays unowned. The structural append identity remains intact, including when separate delivery namespaces reuse the same request string. A passive broadcast is not evidence that a Keeper consumed that message.

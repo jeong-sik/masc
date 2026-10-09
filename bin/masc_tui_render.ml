@@ -3086,7 +3086,8 @@ let render_keeper_list (state : state) =
       match keeper_rows_page state ~error:keepers_error with
       | Page_empty -> Some (match state.workspace_identity with
           | Workspace_identity_mismatch _ -> "   server Keeper roster is empty"
-          | Workspace_identity_match | Workspace_identity_unread ->
+          | Workspace_identity_match | Workspace_identity_match_unconfirmed _
+          | Workspace_identity_unread ->
             "   no keeper metadata under .masc/keepers/")
       | Page_unread -> Some page_unread_note
       | Page_failed -> None
@@ -7950,7 +7951,7 @@ let harness_detail_pane (state : state) ~rows ~cols verdict buf =
        | goal_lines -> (Ansi.dim, "") :: goal_lines)
     |> judgement_detail_rows ~width:(max 1 (framed_inner_width cols))
   in
-  let content_height = max 1 (rows - 5) in
+  let content_height = max 1 (rows - framed_chrome_rows - 1) in
   let max_scroll = max 0 (List.length lines - content_height) in
   let scroll = max 0 (min state.harness_detail_scroll max_scroll) in
   let lines_window = Rows.of_list ~first:scroll ~height:content_height lines in
@@ -7959,16 +7960,14 @@ let harness_detail_pane (state : state) ~rows ~cols verdict buf =
     | Some (style, line) -> box_line_styled buf cols ~style line
     | None -> box_empty buf cols
   done;
+  (* Keep the reading inside the pane: the way out can occupy the entire
+     key footer at narrow widths, leaving no room for a trailing position. *)
+  box_line_styled buf cols ~style:Ansi.dim
+    (Printf.sprintf "  [rows %s]"
+       (Masc_tui_scroll.window_text ~scroll ~height:content_height
+          (List.length lines)));
   box_bottom buf cols;
-  (* A position, not a key. Packed into the hints string it was read as a key
-     item and dropped from the back before any of them, so the one screen that
-     exists for reading a ruling in full never said which part of it was on
-     screen -- at a hundred, a hundred and thirty and a hundred and sixty
-     columns alike. *)
-  ( scroll
-  , Some
-      (Masc_tui_scroll.window_text ~scroll ~height:content_height
-         (List.length lines)) )
+  scroll
 ;;
 
 (* The verdict list stays beside the verdict. A verdict is a judgement
@@ -7979,7 +7978,7 @@ let render_harness_detail (state : state) verdict =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
-  let scroll, position =
+  let scroll =
     if cols < keeper_split_threshold_cols then
       harness_detail_pane state ~rows ~cols verdict buf
     else begin
@@ -8015,7 +8014,7 @@ let render_harness_detail (state : state) verdict =
        it left out was the pair that answers a ruling -- [y / x] -- on the one
        screen that exists for reading a ruling in full. It also left out
        [[ / ]], which the dispatcher answers here and only here. *)
-    (footer_line state ~max_cells:cols ?position
+    (footer_line state ~max_cells:cols
        ~hints:(Masc_tui_keys.footer_hints ~detail_open:true Masc_tui_types.Harness));
   finish_surface state ~clamped:(Harness_detail_scroll scroll)
     ~surface_key:"harness-detail" ~rows:terminal_rows ~cols buf
@@ -9237,7 +9236,7 @@ let render_browser_history (state : state) (history : Browser_history.t) =
   let terminal_rows, cols = get_terminal_size () in
   let title = screen_title (" MASC Browser Lane · " ^ Terminal_text.single_line history.keeper_name ^ " · retained observations") in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"connectors" ~title
-    ~hints:"[/]:observation  j/k:scroll  y:copy record  r:reload list  h/Esc:back to browser"
+    ~hints:"[/]:observation  j/k:scroll  y:copy record  r:reload list  R:recheck workspace  h/Esc:back to browser"
     ~body:(fun ~budget c ->
       let status = match history.content with
         | Listing -> "Reading the Keeper's recent tool receipts…"
@@ -10310,6 +10309,8 @@ let render_runtime (state : state) =
                    ~detail:(Terminal_text.single_line (Masc_tui_theme.strip_sgr detail))) in
                if index + scroll = state.runtime_cursor then
                  c.push_selected (Masc_tui_theme.strip_sgr line)
+               else if Masc_tui_types.runtime_row_deemphasized state runtime then
+                 c.push_styled ~style:(Theme.recede ()) (Masc_tui_theme.strip_sgr line)
                else c.push line)
       | Masc_tui_types.Runtime_lanes ->
       match Rows.at candidates_window (index + scroll) with
@@ -10384,6 +10385,8 @@ let render_runtime (state : state) =
               ~detail:(Terminal_text.single_line (Masc_tui_theme.strip_sgr detail))) in
           if index + scroll = state.runtime_cursor then
             c.push_selected (Masc_tui_theme.strip_sgr line)
+          else if Masc_tui_types.runtime_row_deemphasized state runtime then
+            c.push_styled ~style:(Theme.recede ()) (Masc_tui_theme.strip_sgr line)
           else c.push line
     done;
 )
@@ -12368,6 +12371,49 @@ let config_path_note (state : state) =
   | None, None ->
       Ansi.dim ^ title_missing_reading ~error:None ^ Ansi.reset
 
+(* A provider id such as [codex_727e6d05] does not say which account it is,
+   and one account can sit under several ids. The Models pane names the
+   account from the account-email reading: a short label beside every
+   provider id, and the whole email on the selected binding. Drawing and
+   scroll arithmetic below use these same rows and these same detail lines. *)
+let config_models_drawn_rows (state : state) =
+  List.map
+    (fun (row : Masc_tui_model_runtime_table.row) ->
+      match fst (models_source_account_reading ~provider:row.provider state.runtime_config_view) with
+      | Some email ->
+          { row with
+            account_label =
+              Some
+                (Masc_tui_model_runtime_table.account_label_of_email
+                   (Terminal_text.single_line email))
+          }
+      | None -> row)
+    state.config_models_rows
+
+(* How many Keepers already sit on the selected login is the reading that was
+   missing on 2026-10-08, when fourteen were moved onto one account. Only a
+   complete roster is counted: a partial one would read as fewer Keepers. *)
+let config_models_detail (state : state) (row : Masc_tui_model_runtime_table.row) =
+  let account_email, account_notes =
+    models_source_account_reading ~provider:row.provider state.runtime_config_view in
+  let keepers =
+    match state.keeper_roster with
+    | Masc_tui_keeper_control.Roster_complete rows ->
+        Some
+          (Masc_tui_model_runtime_table.keepers_on_login
+             ~rows:state.config_models_rows
+             ~assignments:
+               (List.map
+                  (fun (keeper : Masc.Tui_decode.keeper_runtime) ->
+                    keeper.kr_name, keeper.kr_runtime_id)
+                  rows)
+             row)
+    | Masc_tui_keeper_control.Roster_unobserved
+    | Masc_tui_keeper_control.Roster_partial _
+    | Masc_tui_keeper_control.Roster_invalid _ -> None
+  in
+  account_notes @ Masc_tui_model_runtime_table.detail_lines ?account_email ?keepers row
+
 (* The model knobs sit in different tables -- [reasoning-effort] and
    [temperature] under [models.NAME], [max-tokens] under
    [PROVIDER.NAME] -- and runtime.toml is 2,300 lines, so reading it top to
@@ -12411,9 +12457,10 @@ let render_config_models (state : state) =
          box_empty buf cols
        done
    | None, Some _ ->
+       let drawn_rows = config_models_drawn_rows state in
        let detail =
          List.nth_opt state.config_models_rows state.config_models_cursor
-         |> Option.map Masc_tui_model_runtime_table.detail_lines
+         |> Option.map (config_models_detail state)
          |> Option.value ~default:[]
        in
        (* Keep the explanation attached to the selected row. Five rows are
@@ -12436,7 +12483,7 @@ let render_config_models (state : state) =
          Masc_tui_model_runtime_table.render
            ~width:(max 40 (cols - 6 - 2))
            ~pane:(max 1 (cols - 6 - 2))
-           state.config_models_rows
+           drawn_rows
        in
        let total = List.length table in
        (* The cursor walks bindings, not lines. In table mode line 0 is the
@@ -12446,13 +12493,13 @@ let render_config_models (state : state) =
           resize, which is the whole point of the transition. *)
        let pane_width = max 1 (cols - 6 - 2) in
        let table_mode =
-         Masc_tui_model_runtime_table.fits ~width:pane_width state.config_models_rows
+         Masc_tui_model_runtime_table.fits ~width:pane_width drawn_rows
        in
        let starts =
          if table_mode then []
          else
            Masc_tui_model_runtime_table.stacked_item_starts ~pane:pane_width
-             state.config_models_rows
+             drawn_rows
        in
        let cursor_line =
          if table_mode then state.config_models_cursor + 1
@@ -12543,7 +12590,7 @@ let config_models_scrolled (state : state) : scrolled =
   | None, Some _ ->
       let terminal_rows, cols = get_terminal_size () in
       let pane = max 1 (cols - 6 - 2) in
-      let rows = state.config_models_rows in
+      let rows = config_models_drawn_rows state in
       let document =
         Masc_tui_model_runtime_table.render ~width:(max 40 pane) ~pane rows
       in
@@ -12552,8 +12599,7 @@ let config_models_scrolled (state : state) : scrolled =
       in
       let detail_len =
         List.nth_opt rows state.config_models_cursor
-        |> Option.map (fun r ->
-               List.length (Masc_tui_model_runtime_table.detail_lines r))
+        |> Option.map (fun r -> List.length (config_models_detail state r))
         |> Option.value ~default:0
       in
       let detail_height = min detail_len (max 0 (content_height - 2)) in
@@ -12568,7 +12614,7 @@ let config_models_stacked (state : state) =
   let _, cols = get_terminal_size () in
   not
     (Masc_tui_model_runtime_table.fits ~width:(max 1 (cols - 6 - 2))
-       state.config_models_rows)
+       (config_models_drawn_rows state))
 
 let config_metadata_style = function
   | Masc_tui_runtime_config_view.Neutral -> Theme.recede ()
@@ -13046,6 +13092,12 @@ let render_config (state : state) =
          workspace under /var/folders both read as the same "/var/folders/
          bv/cjrbl01x52s…" while the age behind them left the row. A path's
          deciding end is its tail, which [fit_middle] keeps. *)
+      (match state.workspace_identity with
+       | Masc_tui_types.Workspace_identity_match_unconfirmed reason ->
+           c.push (Ansi.dim ^ "  (server identity unconfirmed: "
+                   ^ Terminal_text.single_line reason ^ "; last confirmed below)" ^ Ansi.reset)
+       | Workspace_identity_unread | Workspace_identity_match
+       | Workspace_identity_mismatch _ -> ());
       (match state.server_identity with
        | None -> c.push (Ansi.dim ^ "  (server identity unread)" ^ Ansi.reset)
        | Some identity ->

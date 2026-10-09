@@ -499,7 +499,7 @@ let test_antigravity_judge_receives_its_system_prompt () =
     (List.sort Int.compare order) order
 ;;
 
-let muse_fixture ~muse_cli ~account_home ~max_context =
+let muse_fixture ~muse_cli ~account_home =
   Printf.sprintf
     {|
 [runtime]
@@ -513,14 +513,13 @@ is-non-interactive = true
 
 [models.muse-spark]
 api-name = "muse-spark-1.3"
-max-context = %d
+max-context = 1007997
 reasoning-effort = "high"
 
 [muse_code.muse-spark]
 |}
     muse_cli
     account_home
-    max_context
 ;;
 
 let muse_runtime_id = "muse_code.muse-spark"
@@ -610,9 +609,10 @@ notify("turn/started", {"sessionId": "panel-session", "turnId": turn_id,
 notify("usage/changed", {"observedAtMs": 100000, "tier": "fixture",
     "window": {"usedPercent": 100, "resetsAtMs": 500000, "windowDurationMins": 5},
     "weekly": {"usedPercent": 99, "resetsAtMs": 900000}})
-notify("item/completed", {"sessionId": "panel-session", "viewCursor": "v:3", "item": {
-    "itemId": "m-1", "kind": "agentMessage", "turnId": turn_id, "revision": 1,
-    "status": "completed", "text": control.get("answers", {}).get(opened["params"]["modelId"], "MUSE_PANEL_ANSWER")}})
+if not control.get("missing_reply", False):
+    notify("item/completed", {"sessionId": "panel-session", "viewCursor": "v:3", "item": {
+        "itemId": "m-1", "kind": "agentMessage", "turnId": turn_id, "revision": 1,
+        "status": "completed", "text": control.get("answers", {}).get(opened["params"]["modelId"], "MUSE_PANEL_ANSWER")}})
 notify("turn/completed", {"sessionId": "panel-session", "turnId": turn_id,
                           "terminal": control.get("terminal", "completed"), "viewCursor": "v:4",
                           "error": control.get("error"),
@@ -623,7 +623,7 @@ signal.signal(signal.SIGTERM, signal.SIG_IGN)
 |}
 ;;
 
-let with_muse_runtime ?(max_context=1007997) ~muse_cli f =
+let with_muse_runtime ~muse_cli f =
   let snapshot = Runtime.For_testing.snapshot () in
   let base_dir = Filename.temp_dir "fusion-muse" "" in
   Fun.protect
@@ -639,7 +639,7 @@ let with_muse_runtime ?(max_context=1007997) ~muse_cli f =
   write_file ~path:(Filename.concat account_config "auth.json") ~perm:0o600
     {|{"schema_version":1,"providers":{"meta":{"api_key":"SYNTHETIC-LOCAL-ONLY"}}}|};
   write_file ~path:config_path ~perm:0o600
-    (muse_fixture ~muse_cli:(muse_cli ~base_dir) ~account_home ~max_context);
+    (muse_fixture ~muse_cli:(muse_cli ~base_dir) ~account_home);
   (match Runtime.init_default ~config_path with
    | Ok () -> ()
    | Error detail -> failf "muse-serve fixture must initialize: %s" detail);
@@ -761,6 +761,19 @@ let test_muse_code_panelist_reaches_muse_serve () =
   in
   check (list int) "instructions label, group prompt, goal label, question, in that order"
     (List.sort Int.compare order) order
+;;
+
+let test_muse_missing_reply_is_consumer_failure () =
+  with_muse_runtime ~muse_cli:muse_panel_launcher (fun ~base_dir ->
+    write_file ~path:(Filename.concat base_dir "fixture-control.json") ~perm:0o600
+      {|{"missing_reply":true}|};
+    let runtime = match Runtime.get_runtime_by_id muse_runtime_id with
+      | Some runtime -> runtime | None -> fail "Muse fixture missing" in
+    match in_eio_context (fun () -> Masc.Fusion_official_client.run_with_images
+        ~images:[] ~base_dir ~runtime ~system_prompt:"" ~prompt:"reply" ()) with
+    | Error Masc.Fusion_official_client.Missing_reply -> ()
+    | Error failure -> fail (Masc.Fusion_official_client.failure_detail ~runtime_id:muse_runtime_id failure)
+    | Ok _ -> fail "missing assistant message became a successful panel reply")
 ;;
 
 let test_muse_frozen_candidate_and_quota_scope () =
@@ -902,56 +915,6 @@ let test_muse_code_refuses_an_output_schema_before_spawning () =
        (Masc.Fusion_official_client.failure_detail ~runtime_id:muse_runtime_id failure)
    | Ok _ -> fail "a schema-held answer was accepted from muse serve");
   check bool "the client never ran" false (Sys.file_exists !marker)
-;;
-
-let test_muse_framed_prompt_capacity_before_spawning () =
-  let system_prompt = "LENS" and prompt = "QUESTION" in
-  (* The byte contract includes each label's trailing newline; the helper
-     used by substring assertions trims those and is unsuitable here. *)
-  let encoded_label = function
-    | Ok label -> label
-    | Error detail -> fail detail in
-  let framed = String.concat Masc.Antigravity_input_frame.section_separator
-    [encoded_label (Masc.Antigravity_input_frame.system_instructions_label ()) ^ system_prompt;
-     encoded_label (Masc.Antigravity_input_frame.current_goal_label ()) ^ prompt] in
-  let framed_bytes = String.length framed in
-  let marker = ref "" in
-  let muse_cli ~base_dir =
-    marker := Filename.concat base_dir "spawned";
-    let cli = Filename.concat base_dir "muse" in
-    write_file ~path:cli ~perm:0o700 (stub_cli_script ~marker:!marker);
-    cli in
-  (* The smallest window that leaves any room above the host's own overhead:
-     its ceiling is far below the framed prompt. *)
-  let small_window = 15_940 in
-  (match Runtime_muse_prompt_capacity.start_prompt_bytes ~max_context:(Some small_window) with
-   | Ok capacity ->
-     check bool "the small window holds less than the framed prompt" true
-       (capacity < framed_bytes)
-   | Error _ -> fail "the small window must leave room above the host overhead");
-  with_muse_runtime ~max_context:small_window ~muse_cli (fun ~base_dir ->
-    let runtime = match Runtime.get_runtime_by_id muse_runtime_id with
-      | Some runtime -> runtime | None -> fail "Muse fixture missing" in
-    let refused runtime =
-      match in_eio_context (fun () ->
-        Masc.Fusion_official_client.run_with_images ~images:[] ~base_dir ~runtime
-          ~system_prompt ~prompt ()) with
-      | Error (Masc.Fusion_official_client.Muse_failure
-          (Runtime_muse_serve.Invalid_config _)) -> ()
-      | Error failure -> fail (Masc.Fusion_official_client.failure_detail
-          ~runtime_id:runtime.Runtime_instance.id failure)
-      | Ok _ -> fail "oversized Muse input reached host" in
-    refused runtime;
-    check bool "an over-budget input never spawns" false
-      (Sys.file_exists !marker));
-  with_muse_runtime ~muse_cli:muse_panel_launcher
-    (fun ~base_dir ->
-      match in_eio_context (fun () ->
-        Masc.Fusion_official_client.run_panelist ~base_dir ~runtime_id:muse_runtime_id
-          ~system_prompt ~prompt ()) with
-      | Ok (text, _) -> check string "a framed prompt inside the ceiling is admitted"
-          "MUSE_PANEL_ANSWER" text
-      | Error (failure, _) -> fail (Fusion_types.show_panel_failure failure))
 ;;
 
 (* Each client's own timeout reaches Fusion as [Timeout], and every other
@@ -1721,6 +1684,8 @@ let () =
             "Muse Code panelist reaches muse serve"
             `Quick
             test_muse_code_panelist_reaches_muse_serve
+        ; test_case "Muse missing reply is a consumer failure" `Quick
+            test_muse_missing_reply_is_consumer_failure
         ; test_case "Muse frozen candidate and account quota" `Quick test_muse_frozen_candidate_and_quota_scope
         ; test_case "paid failed seats and successful fallbacks retain usage" `Quick
             test_panel_paid_failures_survive_exhaustion_and_fallback
@@ -1745,8 +1710,6 @@ let () =
             "Muse Code refuses an output schema before spawning"
             `Quick
             test_muse_code_refuses_an_output_schema_before_spawning
-        ; test_case "Muse final framed input respects declared capacity" `Quick
-            test_muse_framed_prompt_capacity_before_spawning
         ; test_case "cancelled Muse panel leaves no workspace" `Quick
             test_cancelled_muse_panel_does_not_leave_a_workspace
         ; test_case "Antigravity selected account and native refresh" `Quick

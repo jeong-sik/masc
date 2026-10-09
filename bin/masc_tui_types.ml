@@ -14,6 +14,8 @@ module Snapshot_read : sig
   type intent = Poll | Refresh
 
   val idle : t
+  (** Stable per-source ticket for correlating runtime diagnostics. *)
+  val request_id : request -> int
   val start : intent:intent -> t -> t * request option
   val invalidate : t -> t
   (** Retire a pending owner without reusing its request number. *)
@@ -26,6 +28,7 @@ end = struct
   type intent = Poll | Refresh
 
   let idle = { next = 0; pending = None }
+  let request_id request = request
 
   let invalidate state = { state with pending = None }
 
@@ -98,14 +101,35 @@ let server_is_booting
 ;;
 
 type workspace_authority = Workspace_authority of int
+type workspace_reply_kind = Workspace_observation | Workspace_operation_outcome
 
 type workspace_identity =
   | Workspace_identity_unread
   | Workspace_identity_match
+  | Workspace_identity_match_unconfirmed of string
+      (** The last read that could say served this workspace; the latest
+          could not say (it failed, the server was starting, or a path was
+          missing) and the string says why. The rows that read authorized stay
+          on screen. It is not [Workspace_identity_match], so nothing that needs
+          a fresh match -- a decision, a write, applying a new read -- runs until
+          a read says match again. *)
   | Workspace_identity_mismatch of
       { local_base_path : string
       ; server_base_path : string
       }
+
+(* A task POST has already succeeded. Only its dependent handoff/reading
+   waits for identity recovery; creating or cancelling the task is never
+   repeated. Authority also prevents A -> B -> A from reviving a handoff. *)
+type task_followup =
+  | Task_handoff of { keeper : string; task_id : string; title : string; body : string }
+  | Task_cancel_refresh of string
+
+type pending_task_followup =
+  { tf_workspace : Tui_decode.server_identity
+  ; tf_authority : workspace_authority
+  ; tf_action : task_followup
+  }
 
 type workspace_input_identity =
   { wi_base_path : string
@@ -142,28 +166,72 @@ let server_workspace_matches ~expected reading =
   | None, (Ok _ | Error _) | Some _, Error _ -> false
 ;;
 
+(* What the paths alone say, booting or not. *)
+let workspace_identity_of_paths ~local_base_path (identity : Tui_decode.server_identity) =
+  let local_base_path = canonical_path local_base_path in
+  let server_base_path = canonical_path identity.sid_base_path in
+  (* The server reports its cluster-aware masc root ([<base>/.masc] for the
+     default cluster, [<base>/.masc/clusters/<name>] otherwise). Compose
+     the local one with the same function from the same cluster selection:
+     a plain [<base>/.masc] calls every healthy non-default-cluster server
+     a mismatch, and every Keeper message is refused. *)
+  let local_masc_root = canonical_path
+    (Workspace_utils.masc_root_dir_from ~base_path:local_base_path
+       ~cluster_name:(Env_config_core.cluster_name ())) in
+  let server_masc_root = canonical_path identity.sid_masc_root in
+  if String.equal local_base_path ""
+  then Workspace_identity_unread
+  else if
+    (server_base_path <> "" && not (String.equal local_base_path server_base_path))
+    || (server_masc_root <> "" && not (String.equal local_masc_root server_masc_root))
+  then Workspace_identity_mismatch { local_base_path; server_base_path }
+  else if String.equal server_base_path "" || String.equal server_masc_root ""
+  then Workspace_identity_unread
+  else Workspace_identity_match
+;;
+
 let workspace_identity_of_refresh ~local_base_path reading =
   match reading with
   | Error _ -> Workspace_identity_unread
-  | Ok identity ->
-    let local_base_path = canonical_path local_base_path in
-    let server_base_path = canonical_path identity.Tui_decode.sid_base_path in
-    (* The server reports its cluster-aware masc root ([<base>/.masc] for the
-       default cluster, [<base>/.masc/clusters/<name>] otherwise). Compose
-       the local one with the same function from the same cluster selection:
-       a plain [<base>/.masc] calls every healthy non-default-cluster server
-       a mismatch, and every Keeper message is refused. *)
-    let local_masc_root = canonical_path
-      (Workspace_utils.masc_root_dir_from ~base_path:local_base_path
-         ~cluster_name:(Env_config_core.cluster_name ())) in
-    let server_masc_root = canonical_path identity.sid_masc_root in
-    if String.equal local_base_path "" || String.equal server_base_path ""
-       || String.equal server_masc_root "" || server_is_booting reading
-    then Workspace_identity_unread
-    else if String.equal local_base_path server_base_path
-         && String.equal local_masc_root server_masc_root
-    then Workspace_identity_match
-    else Workspace_identity_mismatch { local_base_path; server_base_path }
+  | Ok _ when server_is_booting reading -> Workspace_identity_unread
+  | Ok identity -> workspace_identity_of_paths ~local_base_path identity
+;;
+
+let unconfirmed_identity_reason reading =
+  match reading with
+  | Error detail -> detail
+  | Ok _ when server_is_booting reading -> "the server is starting"
+  | Ok _ -> "the server did not report a complete workspace path"
+;;
+
+(* A read that cannot say which workspace the server serves does not say it
+   serves another one. After a match it keeps that match, unconfirmed; only a
+   read that names a different workspace withdraws what the match authorized.
+   A booting server's paths do name its workspace: one that names another
+   workspace answers unread, so the match is withdrawn as before. *)
+let next_workspace_identity ~previous ~local_base_path reading =
+  let names_another_workspace =
+    match reading with
+    | Ok identity ->
+      (match workspace_identity_of_paths ~local_base_path identity with
+       | Workspace_identity_mismatch _ -> true
+       | Workspace_identity_unread | Workspace_identity_match
+       | Workspace_identity_match_unconfirmed _ -> false)
+    | Error _ -> false
+  in
+  match workspace_identity_of_refresh ~local_base_path reading, previous with
+  | Workspace_identity_unread
+  , (Workspace_identity_match | Workspace_identity_match_unconfirmed _)
+    when not names_another_workspace ->
+    Workspace_identity_match_unconfirmed (unconfirmed_identity_reason reading)
+  | Workspace_identity_unread
+  , ( Workspace_identity_unread | Workspace_identity_match
+    | Workspace_identity_match_unconfirmed _ | Workspace_identity_mismatch _ ) ->
+    Workspace_identity_unread
+  | ( (Workspace_identity_match
+      | Workspace_identity_match_unconfirmed _
+      | Workspace_identity_mismatch _) as next )
+  , _ -> next
 ;;
 
 (* A Broadcast retry belongs to the verified workspace store, not to the
@@ -2563,6 +2631,7 @@ type identity_login_request = {
   ilr_keeper: string;
   ilr_provider: string;
   ilr_generation: int;
+  ilr_origin: Tui_decode.server_identity option;
 }
 
 (* Login-completion expectation, held across a transient authority loss.
@@ -2779,8 +2848,11 @@ and surface_needs_of_surface : surface -> surface_needs = function
         ; needs_provider_history = true
         ; needs_account_emails = true
       }
+  (* The Models pane names the account behind a provider id, so Config reads
+     account emails as Usage does. *)
+  | Config -> { nothing with needs_account_emails = true }
   | Memory | Lanes | Clients | Schedules | Verification | Harness | Fusion
-  | Repositories | Code | Changes | Connectors | Runtime | Config | Resources
+  | Repositories | Code | Changes | Connectors | Runtime | Resources
   | Tools ->
       nothing
 
@@ -3105,6 +3177,8 @@ type inflight =
    through its own query axis: a keeper's playground via [?keeper=] (where a
    Changes row's clone-relative path lives), a registered repository via
    [?repo_id=] (what a Repositories row names). *)
+type code_file_load_intent = Open_code_file | Refresh_code_file
+
 type code_workspace_scope =
   | Code_scope_project
   | Code_scope_keeper of string
@@ -3150,6 +3224,8 @@ type code_history_entry =
 
 type code_history_listing = {
   chl_entries: code_history_entry list;
+  chl_git_error: string option;
+      (** None means the Git read succeeded, including an empty result. *)
   chl_activity_note: string;
       (** Coverage or failure of the durable Keeper-change read. Git commits
           remain visible when this says unavailable. *)
@@ -3288,6 +3364,7 @@ type voice_agent_session =
             the way the wizard carries it. *)
   ; vas_status : string option
   ; vas_saving : bool
+  ; vas_lookup : (string * string option) option
   }
 
 let voice_agent_open ~agents ~revision =
@@ -3298,6 +3375,7 @@ let voice_agent_open ~agents ~revision =
   ; vas_revision = revision
   ; vas_status = None
   ; vas_saving = false
+  ; vas_lookup = None
   }
 
 (* The two axes move on their own keys -- the keeper under up and down, the
@@ -3613,6 +3691,25 @@ module Browser_lane_view = struct
     | Viewport_refresh of { tab_id : int; expected_url : string }
     | Viewport_cadence of int
     | Viewport_pointer of { tab_id : int; expected_url : string; action : Browser_lane.interaction }
+  let operation_is_read = function
+    | Discover _ | Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _
+    | Scene_refresh _ | Scene_focus _ | Scene_follow_refresh _
+    | Viewport_refresh _ | Viewport_cadence _ -> true
+    | Open_session | Close_session | Goto _ | Scene_scroll _ | Scene_click _
+    | Scene_follow _ | Viewport_pointer _ -> false
+
+  (* A committed gesture is never retried. Only its discarded observation
+     can be resumed after workspace identity is reconfirmed. *)
+  let observation_after_effect = function
+    | Scene_scroll {tab_id; scene_view; scope; _} ->
+        Some (Scene_refresh {tab_id; scene_view; scope})
+    | Scene_click {tab_id; scope; _} ->
+        Some (Scene_refresh {tab_id; scene_view=Browser_lane.Content; scope})
+    | Discover _ | Read | Open_session | Close_session | Goto _ | Screenshot _
+    | Read_refresh | Scene_read _ | Scene_regions _ | Scene_refresh _
+    | Scene_focus _ | Scene_follow _ | Scene_follow_refresh _
+    | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> None
+
   type load = Idle | No_browser | Loading of int * operation | Failed of string
   type read_continuation = No_read_continuation | Deferred_read
   type read_view = Text_view | Scene_view of {
@@ -3964,6 +4061,17 @@ module Browser_lane_view = struct
      | Launcher_needs_reinstall ->
          [host_said lead "install the browser lane again first (launcher not as installed)"])
     @ [host_line (transport_setup_row [Browser_lane.Webdriver_bidi])]
+  (* The listed connection can outlive its host, or belong to another
+     host. Keep that distinction visible beside a report that says none ran
+     here or that this host ended. *)
+  let host_connection_note t =
+    let bidi_listed =
+      List.exists (fun (client : client) -> client.transport = Browser_lane.Webdriver_bidi)
+        (listed_clients t) in
+    match t.bidi_host with
+    | Host_reported { state = (Never_started | Ended _ | Died _); _ } when bidi_listed ->
+        [host_line "A listed BiDi connection may be stale or belong to another host"]
+    | Host_not_reported | Host_report_unreadable _ | Host_reported _ -> []
   (* Everything the picker says of the BiDi host: whether one runs, what
      stands in the way of the next one, and how one is started. A host that
      is running is not told how to start one. *)
@@ -3981,7 +4089,8 @@ module Browser_lane_view = struct
         let attach ~address = host_attach_lines ~address report.attach in
         (match report.state with
          | Never_started ->
-             host_line "BiDi host: none has run for this workspace" :: attach ~address:None
+             [host_line "BiDi host: none has run for this workspace"]
+             @ host_connection_note t @ attach ~address:None
          | Record_missing_but_locked ->
              [host_line "BiDi host: one holds the workspace lock, but its record is missing";
               host_line "Do not start another host · inspect the existing process"]
@@ -4010,15 +4119,16 @@ module Browser_lane_view = struct
          | Ended (entry, ending) ->
              (* What to do comes before why: on a screen that holds two of
                 these rows, the step is the one that has to be there. *)
-             (host_line (Printf.sprintf "BiDi host: ended %s · pid %d" (host_time ending.at) entry.pid)
-              :: host_session_lines entry ending)
+             [host_line (Printf.sprintf "BiDi host: ended %s · pid %d" (host_time ending.at) entry.pid)]
+             @ host_session_lines entry ending
+             @ host_connection_note t
              @ [host_said "Reason: " ending.reason]
              @ host_unacknowledged_lines entry
              @ attach ~address:(Some entry.bidi_url)
          | Died entry ->
-             List.map host_line
-               [Printf.sprintf "BiDi host: pid %d is gone · no reason recorded" entry.pid;
-                "Its session may be left in Firefox · restart Firefox if a host is refused"]
+             [host_line (Printf.sprintf "BiDi host: pid %d is gone · no reason recorded" entry.pid)]
+             @ [host_line "Its session may be left in Firefox · restart Firefox if a host is refused"]
+             @ host_connection_note t
              @ host_unacknowledged_lines entry
              @ attach ~address:(Some entry.bidi_url)
          | Unreadable { detail; held = Some true } ->
@@ -4315,7 +4425,12 @@ module Browser_lane_view = struct
     let* listed = decode_clients json in
     (* The same [data] the connections were read from. A server from before
        the report has no such field. *)
-    let reported = Result.to_option (Result.bind (field "data" json) (field "bidiHost")) in
+    let* data = field "data" json in
+    let* reported =
+      match data with
+      | `Assoc fields -> Ok (List.assoc_opt "bidiHost" fields)
+      | _ -> Error "expected object"
+    in
     Ok { listed; bidi_host = decode_bidi_host reported }
   let parse_client_id source json =
     let* value = field "clientId" json in
@@ -4892,8 +5007,21 @@ module Browser_history = struct
     | Listing
     | List_failed of string
     | Entries of { entries : entry list; cursor : int; selection : selection }
-  type t = { keeper_name : string; content : content; scroll : int }
-  let create keeper_name = {keeper_name;content=Listing;scroll=0}
+  type resume = Reload_list | Reload_selection
+  type t = { keeper_name : string; content : content; scroll : int; resume : resume option }
+  let create keeper_name = {keeper_name;content=Listing;scroll=0;resume=None}
+  let start_read ~reload t =
+    let content = if reload then Listing else match t.content with
+      | Entries entries -> Entries {entries with selection=Loading}
+      | Listing | List_failed _ -> t.content in
+    {t with content; resume=None}
+  let suspend t =
+    let detail = "Workspace identity is unconfirmed; reading will resume after recovery" in
+    match t.content with
+    | Listing -> {t with content=List_failed detail; resume=Some Reload_list}
+    | Entries ({selection=Loading; _} as entries) ->
+        {t with content=Entries {entries with selection=Failed detail}; resume=Some Reload_selection}
+    | List_failed _ | Entries _ -> t
   let entries (snapshot : Tui_decode.keeper_calls_snapshot) =
     snapshot.kcs_entries |> List.rev |> List.concat_map (fun (call : Tui_decode.keeper_call) ->
       match call.kc_execution_id with
@@ -4905,7 +5033,7 @@ module Browser_history = struct
     | Entries {entries;cursor;_} -> List.nth_opt entries cursor
     | Listing | List_failed _ -> None
   let select cursor entries t =
-    {t with content=Entries {entries;cursor;selection=Loading};scroll=0}
+    {t with content=Entries {entries;cursor;selection=Loading};scroll=0;resume=None}
   let move delta t = match t.content with
     | Entries {entries;cursor;_} when entries <> [] ->
         let next = max 0 (min (List.length entries - 1) (cursor + delta)) in
@@ -5162,6 +5290,7 @@ type runtime_config_reading = {
   rcv_source_text : string;
   rcv_rows : (string * string) list list;
   rcv_metadata : Masc_tui_runtime_config_view.metadata;
+  rcv_account_emails : (Masc_tui_account_login.account_emails, string) result;
 }
 
 type runtime_config_edit_view = Config_edit_draft | Config_edit_current of (string * string) list list
@@ -5427,6 +5556,18 @@ type schedule_form_refusal =
   ; sfr_workspace : workspace_input_identity option
   }
 
+type sent_image_read =
+  { sir_generation : int
+  ; sir_view : surface
+  ; sir_keeper : string option
+  ; sir_name : string
+  ; sir_authority : unit ref
+  }
+
+type lane_nested_read =
+  | Lane_subscriptions_read
+  | Lane_declaration_read of { path : string; edit : bool }
+
 type state = {
   mutable home_selected : home_action option;
   mutable home_decision_scroll : int;
@@ -5468,6 +5609,7 @@ type state = {
   mutable help_open: bool;
   mutable keeper_deletions_open: bool;
   mutable keeper_deletions_loading: bool;
+  mutable keeper_deletions_retry_receipt: (int * string) option;
   mutable keeper_deletions_generation: int;
   mutable keeper_deletions_cursor: int;
   mutable keeper_deletions_scroll: int;
@@ -5502,6 +5644,8 @@ type state = {
   mutable keeper_chat_control_pending : (string * int64) list;
   mutable keeper_interactive_waiting : (string * string * local_intervention) list;
   mutable keeper_queue_inflight : string list;
+  mutable keeper_queue_readings : string list;
+  mutable keeper_queue_inspections : (string * unit ref) list;
   (* Exact requests awaiting admission and accepted requests awaiting their
      ordered run-next call. No priority intent is inferred from queue text. *)
   mutable keeper_run_next_pending : Masc_tui_keeper_chat_projection.request list;
@@ -5547,6 +5691,9 @@ type state = {
   (* A saved activation may finish while its panel is closed. It belongs to
      this workspace and is cleared when workspace authority is withdrawn. *)
   mutable account_login_detached: Masc_tui_account_login.t list;
+  mutable account_login_readings: (Masc_tui_account_login.t * int * Masc_tui_account_login.action) list;
+  mutable account_login_activation_resume: (Masc_tui_account_login.t * int * Masc_tui_account_login.saved) list;
+  mutable account_login_read_resume: (Masc_tui_account_login.t * int * Masc_tui_account_login.action) list;
   mutable context_inspector_open: bool;
   mutable context_inspector_keeper: string option;
   mutable context_inspector_loading: bool;
@@ -5647,8 +5794,11 @@ type state = {
   local_base_path: string;
   mutable workspace_identity: workspace_identity;
   mutable workspace_authority: workspace_authority;
+  mutable workspace_read_authority: unit ref;
+  mutable pending_task_followups: pending_task_followup list;
   mutable suspended_keeper_inputs: (workspace_input_identity option * suspended_keeper_input) list;
   mutable workspace_cancellations: (unit ref * (unit -> unit)) list;
+  mutable workspace_observation_cancellations: (unit ref * (unit -> unit)) list;
   mutable help_scroll: int;
   (* An image the operator asked to see, drawn over the whole terminal rather
      than into a frame. A picture does not live in a row: the terminal keeps
@@ -5664,6 +5814,7 @@ type state = {
   mutable browser_viewport : (Browser_lane_view.screenshot * string) option;
   mutable image_request_generation: int;
   (* Any new input cancels an outstanding asynchronous image preview. *)
+  mutable sent_image_read: sent_image_read option;
   (* The MSX spectator screen, the image overlay's twin: while [msx_open] is
      set the loop draws no frames and every key belongs to the emulator. The
      machine is [Option] so it exists only once the screen has been opened,
@@ -5745,6 +5896,8 @@ type state = {
   (* The keeper-voice screen, drawn instead of the voice pane while it is
      open. Never both this and the wizard: each is a whole surface. *)
   mutable voice_agent_voices: voice_agent_session option;
+  mutable lane_nested_read_resume: (int * lane_nested_read) option;
+  mutable lane_installer_read_resume: (int * Masc_tui_lane_installer.read) option;
   (* The number the next wizard save is sent under. Never reused, so a reply
      for a save made by a session that has since closed cannot match the one
      open now. *)
@@ -5784,6 +5937,7 @@ type state = {
   mutable prompts_librarian_input: (string * string list) option;
   mutable prompts_librarian_input_error: string option;
   mutable prompts_librarian_input_loading: bool;
+  mutable prompts_librarian_input_requested: string option;
   (* Prompt presets (#32777). The pane holds the listing, the name being
      typed for a save, the preset armed for a restore or delete, and the last report —
      which stays on screen because it is the only place the skipped keys and
@@ -6138,6 +6292,7 @@ type state = {
   mutable gate_error: string option;
   mutable gate_snapshot_observed: bool;
   mutable gate_snapshot_read: Snapshot_read.t;
+  mutable gate_receipt_refresh_pending: bool;
   (* Keepers whose approval gate runs every call unasked. Names only: the
      wire carries (keeper, mode) pairs and [auto] is the absent default, so
      what the pane needs is exactly the yolo set. *)
@@ -6296,6 +6451,7 @@ type state = {
   mutable schedule_form_refusal: schedule_form_refusal option;
   mutable lanes: Tui_decode.keeper_lanes_snapshot option;
   mutable keeper_lanes_inflight: bool;
+  mutable keeper_lanes_resume: bool;
   mutable lane_inventory: Masc.Tui_decode_lane_inventory.snapshot option;
   mutable standalone_lanes: Tui_decode.standalone_lanes_snapshot option;
   mutable standalone_lanes_error: string option;
@@ -6360,16 +6516,20 @@ type state = {
   mutable tools_scroll: int;
   mutable tools_skill_cursor: int;
   mutable tools_skill_evidence: (string * Yojson.Safe.t) option;
+  mutable tools_evidence_request: unit ref option;
+  mutable tools_evidence_reference: Skill_reference.t option;
   mutable tools_async_observation: Tui_decode.async_request_observation option;
   mutable tools_async_observation_error: string option;
   mutable lane_addons: Masc_tui_lane_addons.t option;
   mutable lane_addons_cached: Masc_tui_lane_addons.t;
   mutable lane_addons_generation: int;
+  mutable lane_addons_reading: int option;
   mutable browser_lane: Browser_lane_view.t option;
   mutable browser_history: Browser_history.t option;
   mutable browser_history_generation: int;
   mutable browser_lane_visibility: browser_lane_visibility;
   mutable browser_lane_generation: int;
+  mutable browser_lane_read_resume: (int * Browser_lane_view.t * Browser_lane_view.operation) option;
   mutable connectors: Masc.Tui_decode_connectors.connector_snapshot option;
   mutable connectors_error: string option;
   mutable connectors_inflight: bool;
@@ -6431,6 +6591,7 @@ type state = {
   mutable runtime_lane_replacement_selection:
     (slot_editor_target * slot_editor_identity * slot_editor_identity) option;
   mutable runtime_lane_write: runtime_lane_write;
+  mutable runtime_dim_refusals: bool;
   mutable runtime_cursor: int;
   mutable runtime_surface_generation: int;
   mutable runtime_surface_inflight: int option;
@@ -6530,6 +6691,7 @@ type state = {
      that row's line number in the whole file, so the lookups are scattered
      rather than sequential and a list walked from the front on every one. *)
   mutable code_file: (string, (string * string) list array) Masc_tui_fetched.t;
+  mutable code_file_resume_intent: code_file_load_intent;
   mutable code_file_scroll: int;
   (* The line the pane's cursor is on (0-based), the anchor a language-server
      question is asked at. j/k move it; the scroll follows to keep it
@@ -6560,6 +6722,9 @@ type state = {
   mutable code_history:
     (code_workspace_scope * string, code_history_listing) Masc_tui_fetched.t;
   mutable code_history_open: bool;
+  mutable code_history_expanded: int option;
+      (** Listing occurrence whose recorded text is expanded. Reset when a new
+          listing lands; equal payloads remain distinct timeline records. *)
   mutable code_history_scroll: int;  (** Physical wrapped rows; Enter resolves the visible row owner. *)
   (* The file pane's diff view: d on an open file swaps the content for what
      the working tree holds against HEAD, keyed the same way. One overlay at
@@ -6805,6 +6970,8 @@ type state = {
   mutable msg_history_load_generation: int;
   mutable msg_history_inflight: (int * string) option;
   mutable msg_copy_generation: int;
+  mutable chat_command_reads: (unit ref * unit ref * string) list;
+  mutable msg_copy_pending: (int * string * unit ref) option;
   (* The newest row [msg_scroll] counts back from, by causal row identity, while the
      operator is reading back. Counting from whatever is newest right now made
      the count mean something different every time a reply landed: the new rows
@@ -6825,6 +6992,7 @@ type state = {
   mutable msg_older_cursor: float option;
   mutable msg_older_exist: bool;
   mutable msg_older_loading: bool;
+  mutable msg_older_resume: (string * float) option;
   mutable msg_older_error: string option;
   (* Presentation-only defaults come from the CLI and can be changed in the
      pane without mutating the transcript. *)
@@ -6896,12 +7064,312 @@ type state = {
    them. A successful health response with missing paths is still unread;
    only comparable paths can confirm that an origin has been replaced. *)
 let server_authority_ready state =
+  (* An unconfirmed match keeps the identity it last confirmed so its rows
+     stay on screen; that identity does not authorize a new read. *)
+  (match state.workspace_identity with
+   | Workspace_identity_match_unconfirmed _ -> false
+   | Workspace_identity_unread | Workspace_identity_match
+   | Workspace_identity_mismatch _ -> true)
+  &&
   match state.server_identity with
   | Some identity ->
       identity.Tui_decode.sid_state_ready <> Some false
       && not (String.equal identity.sid_base_path "")
       && not (String.equal identity.sid_masc_root "")
   | None -> false
+
+let remember_task_followup state ~expected_workspace action =
+  state.pending_task_followups <- state.pending_task_followups @
+    [{tf_workspace = expected_workspace; tf_authority = state.workspace_authority;
+      tf_action = action}]
+
+(* Consume each ready followup once, leaving unread identity/roster work
+   pending. A comparable foreign workspace retires it even if that workspace
+   has not finished booting. *)
+let take_task_followups state ~ready =
+  let foreign held =
+    held.tf_authority <> state.workspace_authority
+    || match state.server_identity with
+       | Some current when current.Tui_decode.sid_base_path <> ""
+                           && current.sid_masc_root <> "" ->
+           not (String.equal (canonical_path held.tf_workspace.sid_base_path)
+                  (canonical_path current.sid_base_path)
+                && String.equal (canonical_path held.tf_workspace.sid_masc_root)
+                     (canonical_path current.sid_masc_root))
+       | Some _ | None -> false
+  in
+  let run, withdrawn, waiting = List.fold_left (fun (run, withdrawn, waiting) held ->
+    if foreign held then run, held.tf_action :: withdrawn, waiting
+    else if state.workspace_identity = Workspace_identity_match
+            && server_workspace_matches ~expected:(Some held.tf_workspace)
+                 (match state.server_identity with Some id -> Ok id | None -> Error "unread")
+            && ready held.tf_action
+    then held.tf_action :: run, withdrawn, waiting
+    else run, withdrawn, held :: waiting)
+    ([], [], []) state.pending_task_followups in
+  state.pending_task_followups <- List.rev waiting;
+  List.rev run, List.rev withdrawn
+
+let workspace_reply_admitted state ~authority ~reading ~kind =
+  authority = state.workspace_authority
+  && match kind with
+     | Workspace_operation_outcome -> true
+     | Workspace_observation ->
+       server_authority_ready state
+       && match reading with
+          | Some admitted -> admitted == state.workspace_read_authority
+          | None -> false
+
+(* A POST receipt can outlive the GET started after it, including a result
+   already queued when identity is lost. Never promote that GET's authority
+   merely because it shares a completion with an admitted operation. *)
+let workspace_operation_reply state ~authority ~reading (receipt, observation) =
+  let observation = match observation with
+    | Error _ -> observation
+    | Ok _ when workspace_reply_admitted state ~authority ~reading ~kind:Workspace_observation -> observation
+    | Ok _ -> Error "Action outcome retained; follow-up reading was retired while workspace identity was unconfirmed. Refresh before acting again."
+  in
+  receipt, observation
+
+let retain_resource_read state ~uri =
+  let same_resource = match state.resource_content with
+    | Some (current, _) -> String.equal current uri
+    | None -> false in
+  state.resource_pending_uri <- Some uri;
+  if not same_resource then begin
+    state.resource_content <- None;
+    state.resource_content_error <- None;
+    state.resource_scroll <- 0
+  end
+
+let retain_sandbox_log_read state ~keeper_name =
+  state.keeper_sandbox_logs_requested <- Some keeper_name;
+  state.keeper_sandbox_logs_origin <- state.server_identity
+
+type retired_operation_observation =
+  | Browser_scene_observation of int * Browser_lane_view.t * Browser_lane_view.operation
+  | Lane_subscriptions_observation of int
+
+let retain_operation_observation state = function
+  | Browser_scene_observation (generation, prior, operation) ->
+      (match state.browser_lane with
+       | Some current when generation = state.browser_lane_generation
+           && prior.source = current.source
+           && prior.selected_client = current.selected_client
+           && prior.selected_tab = current.selected_tab ->
+             state.browser_lane_read_resume <- Some (generation, current, operation);
+             true
+       | _ -> false)
+  | Lane_subscriptions_observation generation ->
+      (match state.lane_addons with
+       | Some view when view.generation = generation
+           && Option.is_some view.subscription_panel ->
+             state.lane_nested_read_resume <- Some (generation, Lane_subscriptions_read);
+             true
+       | _ -> false)
+
+(* The deletion overlay keeps its confirmed inventory while identity is
+   unavailable. Invalidate the read generation as well: reconfirming A must
+   not admit a reply that was in flight during an uncertain A -> B -> A. *)
+let suspend_keeper_deletions_read state =
+  state.keeper_deletions_generation <- state.keeper_deletions_generation + 1;
+  state.keeper_deletions_loading <- false
+
+let suspend_account_login_read (view : Masc_tui_account_login.t) =
+  view.phase <- (match view.phase with
+    | Masc_tui_account_login.Finished outcome -> Finished {outcome with refresh_failed=true}
+    | Loading | Providers _ | Logging | Models | Documented_context _ | Saving
+    | Removing | Failed | Removal _ -> Failed);
+  view.notice <- "Workspace reading is unconfirmed; read again after identity returns."
+
+let suspend_voice_wizard_read state =
+  let module Wizard = Masc_tui_voice_wizard_session in
+  state.voice_wizard <- Option.map (fun (session : Wizard.voice_wizard_session) ->
+    match session.vws_save with
+    | Wizard.Save_unanswered {request; _} ->
+        Option.value ~default:session (Wizard.voice_wizard_after_reread session ~request
+          (Error "workspace identity is unconfirmed; the save outcome is still unknown"))
+    | Save_probing request ->
+        Option.value ~default:session (Wizard.voice_wizard_after_probe session ~request
+          (Error "Configuration saved; endpoint probe retired while workspace identity was unconfirmed."))
+    | Save_not_sent | Save_sending _ | Save_settled
+    | Save_needs_reopen _ -> session) state.voice_wizard
+
+(* Observation receipts have a shorter lifetime than admitted operations.
+   Retire their owners without cancelling a write or erasing its outcome,
+   the rows already shown, navigation, or the operator's draft. *)
+let suspend_workspace_readings state =
+  state.workspace_read_authority <- ref ();
+  let cancellations = state.workspace_observation_cancellations in
+  state.workspace_observation_cancellations <- [];
+  List.iter (fun (_, cancel) -> cancel ()) cancellations;
+  state.observer <- Observer_off;
+  state.detail_read_authority <- ref ();
+  state.detail_reads <- [];
+  suspend_keeper_deletions_read state;
+  suspend_voice_wizard_read state;
+  state.keeper_queue_inflight <- List.filter
+    (fun keeper -> not (List.mem keeper state.keeper_queue_readings)) state.keeper_queue_inflight;
+  state.keeper_queue_readings <- [];
+  List.iter (fun ((view : Masc_tui_account_login.t), generation, action) ->
+    if view.generation = generation then begin
+      state.account_login_read_resume <- (view, generation, action)
+        :: List.filter (fun (pending, _, _) -> pending != view) state.account_login_read_resume;
+      suspend_account_login_read view
+    end)
+    state.account_login_readings;
+  state.account_login_readings <- [];
+  state.tools_evidence_request <- None;
+  state.browser_history_generation <- state.browser_history_generation + 1;
+  state.browser_history <- Option.map Browser_history.suspend state.browser_history;
+  state.browser_lane <- Option.map (fun (view : Browser_lane_view.t) ->
+    match view.load with
+    | Browser_lane_view.Loading (generation, operation) when Browser_lane_view.operation_is_read operation ->
+        state.browser_lane_read_resume <- Some (generation, view, operation);
+        {view with load=Browser_lane_view.Idle; refresh_pending=None}
+    | _ -> view) state.browser_lane;
+  let suspend_lane (view : Masc_tui_lane_addons.t) =
+    if state.lane_addons_reading = Some view.generation then begin
+      Option.iter (fun read -> state.lane_installer_read_resume <- Some (view.generation, read))
+        (Option.bind view.installer Masc_tui_lane_installer.pending_read);
+      {view with loading=false; installer=Option.map Masc_tui_lane_installer.suspend_read view.installer}
+    end else view in
+  state.lane_addons <- Option.map suspend_lane state.lane_addons;
+  state.lane_addons_cached <- suspend_lane state.lane_addons_cached;
+  state.lane_addons_reading <- None;
+  state.board_detail <- Masc_tui_board_detail.suspend state.board_detail;
+  state.acting_pane_changes <- Masc_tui_fetched.suspend state.acting_pane_changes;
+  state.prompts <- Masc_tui_fetched.suspend state.prompts;
+  state.preset_detail <- Masc_tui_fetched.suspend state.preset_detail;
+  state.keeper_board_quarantines <- Masc_tui_fetched.suspend state.keeper_board_quarantines;
+  state.workspace_activity <- Masc_tui_fetched.suspend state.workspace_activity;
+  state.memory_input <- Masc_tui_fetched.suspend state.memory_input;
+  state.memory_facts <- Masc_tui_fetched.suspend state.memory_facts;
+  state.code_listing <- Masc_tui_fetched.suspend state.code_listing;
+  state.code_file <- Masc_tui_fetched.suspend state.code_file;
+  state.code_history <- Masc_tui_fetched.suspend state.code_history;
+  state.code_diff <- Masc_tui_fetched.suspend state.code_diff;
+  state.code_blame <- Masc_tui_fetched.suspend state.code_blame;
+  state.code_lsp_query <- Masc_tui_fetched.suspend state.code_lsp_query;
+  state.fusion_runs <- Masc_tui_fetched.suspend state.fusion_runs;
+  (match state.goal_confirmation with
+   | Masc_tui_planning_detail.Inspecting reading ->
+       state.goal_confirmation <- Masc_tui_planning_detail.Inspecting
+         (Masc_tui_fetched.suspend reading)
+   | Masc_tui_planning_detail.Submitting _ -> ());
+  state.exact_activity_sessions <- List.map Masc_tui_exact_activity.suspend_read state.exact_activity_sessions;
+  state.browser_activity_sessions <- List.map Masc_tui_browser_activity.suspend_read state.browser_activity_sessions;
+  state.machine_activity_sessions <- List.map Masc_tui_machine_activity.suspend_read state.machine_activity_sessions;
+  let suspend_application (view : Masc_tui_lane_addons.t) =
+    {view with application_reading = Masc_tui_lane_application.suspend view.application_reading} in
+  state.lane_addons <- Option.map suspend_application state.lane_addons;
+  state.lane_addons_cached <- suspend_application state.lane_addons_cached;
+  state.keeper_tool_approvals_read <- Snapshot_read.invalidate state.keeper_tool_approvals_read;
+  state.gate_snapshot_read <- Snapshot_read.invalidate state.gate_snapshot_read;
+  state.schedules_read <- Snapshot_read.invalidate state.schedules_read;
+  state.keeper_sandbox_logs_inflight <- None;
+  state.keeper_lanes_resume <- state.keeper_lanes_resume || state.keeper_lanes_inflight;
+  state.keeper_lanes_inflight <- false;
+  state.connectors_inflight <- false;
+  state.connectors_reload_after_inflight <- false;
+  state.memory_health_inflight <- false;
+  state.runtime_catalog_generation <- state.runtime_catalog_generation + 1;
+  (match state.runtime_catalog_reading with
+   | Runtime_catalog_loading -> state.runtime_catalog_reading <- Runtime_catalog_unread
+   | Runtime_catalog_unread | Runtime_catalog_failed _ | Runtime_catalog_read -> ());
+  state.runtime_config_read <- `Idle;
+  state.runtime_params_loading <- false;
+  state.standalone_lanes_inflight <- false;
+  state.standalone_lanes_reread_pending <- false;
+  state.runtime_surface_inflight <- None;
+  state.runtime_surface_force_pending <- false;
+  state.clients_surface_inflight <- false;
+  state.repositories_inflight <- false;
+  state.tools_read_inflight <- None;
+  state.harness_inflight <- false;
+  state.verification_inflight <- false;
+  state.verification_refresh_after_inflight <- false;
+  state.fusion_detail_inflight <- None;
+  state.fusion_historical_inflight <- None;
+  state.lane_runs_loading <- false;
+  state.schedule_wake_history_inflight <- None;
+  state.keeper_turns_inflight <- false;
+  state.keeper_calls_loading <- false;
+  state.keeper_calls_refresh_pending <- false;
+  state.msg_file_changes_loading <- false;
+  state.msg_file_changes_refresh_pending <- false;
+  state.msg_history_inflight <- None;
+  if state.msg_older_loading then
+    state.msg_older_resume <-
+      (match state.msg_target_keeper_name, state.msg_older_cursor with
+       | Some keeper, Some before -> Some (keeper, before)
+       | _ -> None);
+  state.msg_older_loading <- false;
+  state.msg_journal_inflight <- [];
+  state.context_inspector_loading <- false;
+  state.prompts_librarian_input_loading <- false;
+  state.msx_live_in_flight <- None;
+  state.dos_live_in_flight <- None
+
+(* A discarded bundle proves its observation interval was inconsistent,
+   even when its last probe sees the original workspace again. Retire that
+   interval before allowing the last identity to confirm a new reading. *)
+let retire_refused_workspace_readings state ~detail latest =
+  suspend_workspace_readings state;
+  match latest with
+  | Some (Ok _ as reading) -> reading
+  | Some (Error _) | None -> Error detail
+
+let begin_keeper_deletions_read state =
+  if not (server_authority_ready state) || state.keeper_deletions_loading then None
+  else (
+    state.keeper_deletions_loading <- true;
+    state.keeper_deletions_generation <- state.keeper_deletions_generation + 1;
+    Some state.keeper_deletions_generation)
+
+let apply_keeper_deletions_read state ~generation
+    (result : (Masc_tui_keeper_control.deletion_inventory, string) result) =
+  if generation = state.keeper_deletions_generation then (
+    state.keeper_deletions_loading <- false;
+    if server_authority_ready state then (
+      let selected = match state.keeper_deletions with
+        | Some (Ok inventory) -> List.nth_opt inventory.operations state.keeper_deletions_cursor
+        | Some (Error _) | None -> None in
+      state.keeper_deletions <- Some result;
+      match result with
+      | Error _ -> ()
+      | Ok inventory ->
+        (match state.keeper_deletions_retry_receipt with
+         | Some (received_at, _) when generation > received_at ->
+             state.keeper_deletions_retry_receipt <- None
+         | _ -> ());
+        let same_operation row = match selected with
+          | None -> false
+          | Some previous -> Masc.Keeper_shutdown_types.Operation_id.equal
+              (Masc_tui_keeper_control.deletion_operation_id row)
+              (Masc_tui_keeper_control.deletion_operation_id previous) in
+        let rec find index = function
+          | [] -> None
+          | row :: rest -> if same_operation row then Some index else find (index + 1) rest in
+        state.keeper_deletions_cursor <- (match find 0 inventory.operations with
+          | Some index -> index | None -> 0)))
+
+(* Why a write launched under [authority] must not go out now: the workspace
+   moved since launch, or the server identity is not confirmed (unread, or a
+   match kept unconfirmed). [None] means it may be sent. *)
+let write_authority_refusal state authority =
+  if authority <> state.workspace_authority then Some "Workspace authority withdrawn"
+  else if not (server_authority_ready state) then Some "Workspace identity is unconfirmed"
+  else None
+
+let begin_preset_detail_read state ~name =
+  if not (server_authority_ready state) then None
+  else
+    match Masc_tui_fetched.start ~equal:String.equal state.preset_detail ~key:name with
+    | Masc_tui_fetched.Already_loading -> None
+    | Masc_tui_fetched.Started (next, request) ->
+        state.preset_detail <- next;
+        Some request
 
 (* The one definition of "same workspace" used to admit a held expectation
    back into the poll after authority is restored. Same answer as the screen
@@ -7021,7 +7489,8 @@ let start_identity_login_request (state : state) ~keeper_name ~provider_id =
   let request =
     { ilr_keeper = keeper_name;
       ilr_provider = provider_id;
-      ilr_generation = state.identity_login_generation }
+      ilr_generation = state.identity_login_generation;
+      ilr_origin = state.server_identity }
   in
   state.identity_login_requests <-
     request :: List.filter
@@ -8131,6 +8600,8 @@ let withdraw_keeper_chat_requests (state : state) =
   state.keeper_chat_control_tokens <- [];
   state.keeper_chat_control_pending <- [];
   state.keeper_queue_inflight <- [];
+  state.keeper_queue_readings <- [];
+  state.keeper_queue_inspections <- [];
   state.keeper_run_next_pending <- [];
   state.keeper_run_next_ready <- [];
   state.keeper_run_next_inflight <- [];
@@ -8490,7 +8961,8 @@ let keeper_detail_target_matches state keeper_name =
    only to the currently selected Keeper and the newest request generation. *)
 let apply_keeper_schedules_read state request result =
   let current = finish_detail_read state request in
-  if current && keeper_detail_target_matches state request.drr_keeper then
+  if current && server_authority_ready state
+     && keeper_detail_target_matches state request.drr_keeper then
     match result with
     | Ok snapshot ->
         state.keeper_schedules <- Some (request.drr_keeper, snapshot);
@@ -8583,6 +9055,7 @@ let set_code_scope state scope =
   if state.code_scope <> scope then begin
     state.code_lsp_query <- Masc_tui_fetched.clear state.code_lsp_query;
     state.code_file <- Masc_tui_fetched.clear state.code_file;
+    state.code_file_resume_intent <- Refresh_code_file;
     state.code_lsp_note <- None;
     state.code_target_line <- None
   end;
@@ -8596,6 +9069,7 @@ let enter_keeper_code_file state ~keeper ~path =
   state.code_cursor <- 0;
   state.code_listing <- Masc_tui_fetched.clear state.code_listing;
   state.code_file <- Masc_tui_fetched.clear state.code_file;
+  state.code_file_resume_intent <- Refresh_code_file;
   state.code_file_cursor <- 0;
   state.code_file_scroll <- 0;
   state.code_file_hscroll <- 0;
@@ -8894,6 +9368,7 @@ let create_state
   help_open = false;
   keeper_deletions_open = false;
   keeper_deletions_loading = false;
+  keeper_deletions_retry_receipt = None;
   keeper_deletions_generation = 0;
   keeper_deletions_cursor = 0;
   keeper_deletions_scroll = 0;
@@ -8910,6 +9385,8 @@ let create_state
   keeper_chat_control_pending = [];
   keeper_interactive_waiting = [];
   keeper_queue_inflight = [];
+  keeper_queue_readings = [];
+  keeper_queue_inspections = [];
   keeper_run_next_pending = [];
   keeper_run_next_ready = [];
   keeper_priority_controls = [];
@@ -8926,6 +9403,9 @@ let create_state
   keeper_turns_observed_at = None;
   account_login = None;
   account_login_detached = [];
+  account_login_readings = [];
+  account_login_read_resume = [];
+  account_login_activation_resume = [];
   context_inspector_open = false;
   context_inspector_keeper = None;
   context_inspector_loading = false;
@@ -8963,7 +9443,10 @@ let create_state
   server_identity = None;
   local_base_path;
   workspace_authority = Workspace_authority 0;
+  workspace_read_authority = ref ();
   workspace_cancellations = [];
+  workspace_observation_cancellations = [];
+  pending_task_followups = [];
   suspended_keeper_inputs = [];
   workspace_identity =
     (if String.equal local_base_path ""
@@ -8973,6 +9456,7 @@ let create_state
   image_open = false;
   browser_viewport = None;
   image_request_generation = 0;
+  sent_image_read = None;
   msx_open = false;
   msx_frame = None;
   msx_last_poll_ns = 0L;
@@ -9003,6 +9487,8 @@ let create_state
   voice_setup_error = None;
   voice_wizard = None;
   voice_agent_voices = None;
+  lane_nested_read_resume = None;
+  lane_installer_read_resume = None;
   voice_wizard_requests = 0;
   resources_list = None;
   resources_error = None;
@@ -9033,6 +9519,7 @@ let create_state
   prompts_librarian_input = None;
   prompts_librarian_input_error = None;
   prompts_librarian_input_loading = false;
+  prompts_librarian_input_requested = None;
   exact_activity_sessions = [];
   exact_activity_open = None;
   exact_activity_generation = 0;
@@ -9199,6 +9686,7 @@ let create_state
   gate_error = None;
   gate_snapshot_observed = false;
   gate_snapshot_read = Snapshot_read.idle;
+  gate_receipt_refresh_pending = false;
   keeper_yolo_names = [];
   keeper_tool_modes_observed = false;
   keeper_tool_modes_error = None;
@@ -9272,6 +9760,7 @@ let create_state
   schedule_form_refusal = None;
   lanes = None;
   keeper_lanes_inflight = false;
+  keeper_lanes_resume = false;
   lane_inventory = None;
   standalone_lanes = None;
   standalone_lanes_error = None;
@@ -9319,16 +9808,20 @@ let create_state
   tools_scroll = 0;
   tools_skill_cursor = 0;
   tools_skill_evidence = None;
+  tools_evidence_request = None;
+  tools_evidence_reference = None;
   tools_async_observation = None;
   tools_async_observation_error = None;
   lane_addons = None;
   lane_addons_cached = Masc_tui_lane_addons.initial;
   lane_addons_generation = 0;
+  lane_addons_reading = None;
   browser_lane = None;
   browser_history = None;
   browser_history_generation = 0;
   browser_lane_visibility = Browser_lane_hidden;
   browser_lane_generation = 0;
+  browser_lane_read_resume = None;
   connectors = None;
   connectors_error = None;
   connectors_inflight = false;
@@ -9358,6 +9851,7 @@ let create_state
   runtime_lane_cursor_after_write = None;
   runtime_lane_replacement_selection = None;
   runtime_lane_write = Lane_write_idle;
+  runtime_dim_refusals = true;
   runtime_cursor = 0;
   runtime_surface_generation = 0;
   runtime_surface_inflight = None;
@@ -9419,6 +9913,7 @@ let create_state
   code_listing = Masc_tui_fetched.initial;
   code_cursor = 0;
   code_file = Masc_tui_fetched.initial;
+  code_file_resume_intent = Refresh_code_file;
   code_file_scroll = 0;
   code_file_cursor = 0;
   code_lsp_note = None;
@@ -9430,6 +9925,7 @@ let create_state
   code_focus_file = Left_pane;
   code_history = Masc_tui_fetched.initial;
   code_history_open = false;
+  code_history_expanded = None;
   code_history_scroll = 0;
   code_diff = Masc_tui_fetched.initial;
   code_diff_open = false;
@@ -9539,11 +10035,14 @@ let create_state
   msg_history_load_generation = 0;
   msg_history_inflight = None;
   msg_copy_generation = 0;
+  msg_copy_pending = None;
+  chat_command_reads = [];
   msg_scroll = 0;
   msg_scroll_pin = None;
   msg_older_cursor = None;
   msg_older_exist = false;
   msg_older_loading = false;
+  msg_older_resume = None;
   msg_older_error = None;
   msg_reasoning_visibility = reasoning_visibility;
   (* Chat opens on the answer, not its bookkeeping. The gutter still carries
@@ -9744,7 +10243,8 @@ let local_rows_page (state : state) ~error =
 (* A remote roster is its own observation, never evidence of a local read. *)
 let keeper_rows_page (state : state) ~error =
   match state.workspace_identity with
-  | Workspace_identity_match -> local_rows_page state ~error
+  | Workspace_identity_match | Workspace_identity_match_unconfirmed _ ->
+    local_rows_page state ~error
   | Workspace_identity_unread -> empty_page_of ~error ~snapshot:None
   | Workspace_identity_mismatch _ ->
     empty_page_of ~error ~snapshot:
@@ -11916,6 +12416,19 @@ let runtime_spent_usage (resolved : Tui_decode.runtime_resolved_snapshot)
 
 let runtime_option_refusing (option : Tui_decode.runtime_option) =
   option.Tui_decode.ro_quota_exhausted || option.Tui_decode.ro_rate_limited
+
+let runtime_row_deemphasized state (option : Tui_decode.runtime_option) =
+  state.runtime_dim_refusals
+  && (runtime_option_refusing option
+      || match state.runtime_surface with
+         | None -> false
+         | Some snapshot ->
+             (match runtime_spent_usage snapshot.Tui_decode.rss_resolved option with
+              | Ok (_ :: _) -> true
+              | Ok [] | Error _ -> false))
+
+let toggle_runtime_dim_refusals state =
+  state.runtime_dim_refusals <- not state.runtime_dim_refusals
 
 let runtime_quota_label (runtime : Tui_decode.runtime_option) =
   if not runtime.ro_quota_exhausted then None

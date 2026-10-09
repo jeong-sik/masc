@@ -34,13 +34,12 @@ queue, operation or running process.
 | Dashboard action/provenance consumers | Two focused Vitest files | 81 passed |
 | TypeScript contracts | `pnpm --dir dashboard typecheck` | passed |
 | Current TUI executable | focused Dune build | [tui-build.json](tui-build.json) records command, exit and binary SHA256 |
-| Reopened TUI with partial/absent output and present/absent failure history | `test_tui_chat_replay_failure_pty.py` | four real PTY interactions passed; [pty.log](pty.log) |
 | Dashboard rendering | production component browser fixture | default workspace visibility filter applied; image decoded, audio played, failure displayed as System, diagnostics expanded/collapsed/copied; [browser.json](browser.json) |
 
 Raw logs are in this directory. The browser receipt and
 [overview.png](overview.png), [collapsed.png](collapsed.png),
 [expanded.png](expanded.png) are from the current local component fixture.
-Neither browser nor PTY evidence is a deployed service or a real provider run.
+The browser evidence is not a deployed service or a real provider run.
 The first zero-match runtime-resume invocation is excluded from evidence;
 the corrected `authority` group above actually ran three scenarios.
 The final state reconciliation regression also passed after correcting its typed trace fixture; it keeps the failed server result visible and preserves the matching live trace once. No full build, full CI, installation or deployment is claimed.

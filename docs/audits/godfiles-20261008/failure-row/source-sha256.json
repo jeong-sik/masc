@@ -53,7 +53,5 @@
   "test/test_keeper_owner.ml": "31f85efac43b065af03c28981b3087b8cb5f044ac3c84140dde30710b6402a20",
   "test/test_keeper_surface_post.ml": "5869671d8c05100bdc49475e2b09a0f3c257984149bf9d5f3406e23bf370fce1",
   "test/test_keeper_surface_read.ml": "33f850043261ab3772326e8998751d7309e43b632424696cf874f9b7126f6e1f",
-  "test/test_tui_chat_replay_failure_pty.py": "b971c9ca9648eecd0e73248eb7ea9297751747d520f3d3a40687ce622d0541e2",
-  "test/test_tui_keeper_chat_history.ml": "10bd5bb1ce2f04319e700e62bbf804e987b9aa5953433835a644f1fac96579d2",
-  "test/tui_keyboard_memory.py": "73a8be69f4c2e251e282b7e90e96f644e007753d6275e48d89b9ae78d0f902cf"
+  "test/test_tui_keeper_chat_history.ml": "10bd5bb1ce2f04319e700e62bbf804e987b9aa5953433835a644f1fac96579d2"
 }

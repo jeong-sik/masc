@@ -231,7 +231,6 @@ let test_folded_thinking_search_identity () = at_sizes (fun origin ->
   state.msg_reasoning_visibility <- T.Reasoning_folded;
   state.msg_loaded <- [row ~id:"thinking-identity" ~request_id:"thinking-identity"
     ~role:T.Message_thinking ~text:("Reasoning " ^ String.make 100 'x' ^ "\nsecond reasoning line") 1.];
-  state.msg_reasoning_visibility <- T.Reasoning_folded;
   let summary=find state "Reasoning" in
   check bool "fold producer marks generated summary identity" true
     (match summary.matched_position with Masc_tui_chat_search.Thinking_summary_byte _ -> true | _ -> false);
@@ -712,38 +711,66 @@ let test_idle_search_pin_reuses_semantic_index () = at_sizes (fun origin ->
     (Render.For_testing.source_index_build_count () > builds))
 
 let test_polled_source_survives_tail_and_journal_takeover () = at_sizes (fun origin ->
+  let module Preview = Masc.Keeper_turn_preview in
   let state = state origin in
-  let text = String.concat "\n" (List.init 60 (fun index ->
-    Printf.sprintf "OBSERVED_%03d 글\226\128\174\027" index)) in
-  let preview generation start text : Masc.Tui_decode.keeper_turn_row =
-    {ktr_keeper_name="alpha";ktr_chat_control_token=None;
-     ktr_state=Keeper_turn_running {lane=Turn_lane_maintenance;
-       started_at_unix=120.;interrupt_token="exact-polled";turn_ref=None;
-       preview=Some {ktp_status_text="working";ktp_updated_at_unix=121.;
-         ktp_text_position={kpp_generation=generation;kpp_start_byte=start};
-         ktp_text_tail=text;ktp_last_tool=None}}} in
-  state.keeper_turns <- [preview 3 120 text];
+  let writer = Preview.reset ~keeper_name:"alpha" ~now:120.
+    ~redaction:Masc.Keeper_secret_redaction.empty in
+  let stream delta = Preview.note_stream ~writer:(Some writer) ~now:121.
+    (Agent_core.Types.ContentBlockDelta {index=0;delta}) in
+  Preview.note_attempt ~writer:(Some writer) ~now:120. ~runtime_id:"fixture-runtime";
+  let poll () =
+    let preview = match Preview.current ~keeper_name:"alpha" with
+      | Some preview -> preview | None -> fail "real preview writer disappeared" in
+    check bool "actual producer suffix obeys its byte bound" true
+      (String.length preview.text_tail <= Preview.tail_bytes);
+    let wire = `Assoc ["schema",`String "masc.keeper_turns.v1";
+      "keepers",`List [`Assoc ["keeper_name",`String "alpha";"status",`String "ok";
+        "turn",`Assoc ["lane",`String "maintenance";
+          "started_at_unix",`Float 120.;"interrupt_token",`String "exact-polled";
+          "preview",Preview.to_json preview]]]] in
+    state.keeper_turns <- (match Masc.Tui_decode.decode_keeper_turns wire with
+      | Ok rows -> rows | Error detail -> fail detail);
+    preview in
+  (* Short released records provide enough real suffix rows for scrollback.
+     ESC also exercises the shared sanitizer's visible expansion provenance. *)
+  stream (Agent_core.Types.TextDelta
+    (String.concat "" (List.init 100 (fun index -> Printf.sprintf "R%02d\027\n" index))));
+  let initial = poll () in
+  check bool "real writer dropped an earlier released prefix" true
+    (initial.text_position.start_byte > 0);
   ignore (frame_lines state);
   T.set_msg_scroll state 5;
   let before = frame_lines state in
-  let observed = List.find_map (fun line ->
-    if Astring.String.is_infix ~affix:"OBSERVED_" line then Some line else None) before
-    |> Option.value ~default:"" in
-  check bool "actual polled row is visible while reading" true (observed <> "");
+  let observed = List.init 100 (fun index -> Printf.sprintf "R%02d\\x1B" index)
+    |> List.find (fun token -> List.exists (Astring.String.is_infix ~affix:token) before) in
   let pin = Option.get state.msg_scroll_pin in
-  check bool "polled pin owns producer absolute bytes" true
+  check bool "polled pin owns actual producer absolute bytes" true
     (List.exists (fun point -> match point.T.source_position with
-      | Some (T.Polled_body_byte {offset;_}) -> offset >= 120 | _ -> false) pin.pin_points);
+      | Some (T.Polled_body_byte {offset;_}) -> offset >= initial.text_position.start_byte
+      | _ -> false) pin.pin_points);
   check int "pin holds one immutable observed source" 1 (List.length pin.held_transients);
-  state.keeper_turns <- [preview 3 400 "NEW_ROLLING_TAIL"];
-  check bool "expired rolling bytes retain exact observed viewport" true
-    (List.mem observed (frame_lines state));
+  stream (Agent_core.Types.TextDelta
+    (String.concat "" (List.init 100 (fun index -> Printf.sprintf "N%02d\n" index))));
+  let later = poll () in
+  check bool "actual rolling prefix moved forward" true
+    (later.text_position.start_byte > initial.text_position.start_byte);
+  ignore (visible_line (frame_lines state) observed);
+  stream (Agent_core.Types.TextSnapshot "SNAPSHOT_REPLACEMENT\n");
+  let replacement = poll () in
+  check bool "actual snapshot establishes a new generation" true
+    (replacement.text_position.generation > initial.text_position.generation);
+  ignore (visible_line (frame_lines state) observed);
+  List.iter (fun columns ->
+    ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+      Masc_tui_ansi.terminal_size_cache ~probe:(fun () -> Some (26,columns)));
+    List.iter (fun display -> state.msg_origin_display <- display;
+      ignore (visible_line (frame_lines state) observed))
+      [Layout.Origin_inline;Origin_bare;Origin_row]) [42;140;60];
   state.keeper_turns <- [];
   ignore (log state ~id:"journal-takeover" ~at:130.
     [Live.Run_started;Live.Text {text="ACTUAL_JOURNAL_TAKEOVER";stream_scope=None};
      reply "ACTUAL_JOURNAL_TAKEOVER";Live.Run_finished]);
-  check bool "journal takeover preserves polled-only viewport" true
-    (List.mem observed (frame_lines state));
+  ignore (visible_line (frame_lines state) observed);
   T.set_msg_scroll state 0;
   check bool "End releases held source immediately" true
     (Option.fold ~none:true ~some:(fun pin -> pin.T.held_transients=[]) state.msg_scroll_pin);
@@ -751,7 +778,7 @@ let test_polled_source_survives_tail_and_journal_takeover () = at_sizes (fun ori
   check bool "End shows actual journal" true
     (Astring.String.is_infix ~affix:"ACTUAL_JOURNAL_TAKEOVER" live);
   check bool "End removes frozen excerpt" true
-    (not (Astring.String.is_infix ~affix:"OBSERVED_" live)))
+    (not (Astring.String.is_infix ~affix:observed live)))
 
 let () = run "chat search projection" [
   "rendered conversation", [

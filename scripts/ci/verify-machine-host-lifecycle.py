@@ -45,13 +45,17 @@ def wait_for(label, read, accept, server):
 class Sink(http.server.BaseHTTPRequestHandler):
     requests = []
 
+    def parse_request(self):
+        accepted = super().parse_request()
+        if accepted:
+            self.requests.append({'method': self.command, 'path': self.path})
+        return accepted
+
     def do_POST(self):
-        self.requests.append({'method': 'POST', 'path': self.path})
         self.send_response(503)
         self.end_headers()
 
     def do_GET(self):
-        self.requests.append({'method': 'GET', 'path': self.path})
         self.send_response(503)
         self.end_headers()
 

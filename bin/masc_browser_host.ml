@@ -106,7 +106,4 @@ let () =
   in
   match result with
   | Ok () -> ()
-  | Error detail ->
-      Log.Transport.error "browser-host: %s"
-        (Masc.Tui_terminal_text.sanitize_terminal_text detail);
-      exit 1
+  | Error detail -> Log.Transport.error "browser-host: %s" detail; exit 1

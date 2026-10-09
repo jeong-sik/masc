@@ -1,12 +1,5 @@
 {
   "base_sha": "48a38add3816c8045c54a43450b014b09a9c35b0",
-  "before": {
-    "binary_sha256": "ab6fc57790119ec91c2212f835fabab5bed60d5e11160303d8f3dfb445d2ccc5",
-    "binary_source_pr": 41915,
-    "command": "python3 test/test_tui_output_media_pty.py _build/default/bin/masc_tui.exe --mode inline --evidence-dir /tmp/masc-tui-output-media-before",
-    "exit_code": 1,
-    "scope": "Image-only assistant output invisible. This initial fixture used a boolean autonomous_turn; the canonical parser treats that row as direct. No autonomous-drop reproduction is claimed from this run."
-  },
   "checks": [
     {
       "command": "opam exec -- dune exec --root . -j 4 test/test_tui_chat_media.exe",
@@ -27,6 +20,11 @@
       "command": "opam exec -- dune exec --root . -j 4 test/test_tui_image_cache.exe",
       "exit_code": 0,
       "cases": 29
+    },
+    {
+      "command": "opam exec -- dune build --root . -j 4 bin/masc_tui.exe",
+      "exit_code": 0,
+      "binary_sha256": "d93b635b43f0a33bfc16db2c6b60484c2689524fee5470cb1030420e969dcf08"
     }
   ]
 }

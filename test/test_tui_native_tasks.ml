@@ -149,8 +149,11 @@ let test_real_chat_projection_preserves_flags_and_terminal_safety () =
   check bool "tools setting change invalidates native layout" false
     (idle.layout_entries == compact.layout_entries);
   let wide=Masc_tui_render_chat.native_task_entries state ~keeper_name:keeper ~role_label_column:10 in
+  check bool "compact native entries actually remove expanded diagnostics" true
+    (List.for_all (fun (entry:Layout.entry) -> entry.diagnostics=[]) wide);
   let narrow=Masc_tui_render_chat.native_task_entries state ~keeper_name:keeper ~role_label_column:8 in
   check bool "changed label width invalidates native entries" false (wide == narrow);
+  let before_update=Masc_tui_render_chat.keeper_message_projection state ~keeper_name:keeper ~chat_cols:100 in
   let patch=observation ~origin:(origin ~task_id:dangerous ()) "patch"
     (Task.Task_patched {status=Some Task.Task_paused;is_backgrounded=None;
       end_time=None;total_paused_ms=Some (-2)}) in
@@ -158,7 +161,10 @@ let test_real_chat_projection_preserves_flags_and_terminal_safety () =
   state.msg_native_tasks <- [keeper,changed];
   let refreshed=Masc_tui_render_chat.keeper_message_projection state ~keeper_name:keeper ~chat_cols:100 in
   check bool "changed observation invalidates native layout" false
-    (compact.layout_entries == refreshed.layout_entries)
+    (before_update.layout_entries == refreshed.layout_entries);
+  check string "actual task row exposes patched status rather than stale cached text"
+    "worker · paused reported · terminal unobserved · backgrounded"
+    (List.nth refreshed.layout_entries 2).body
 
 let () = run "native task TUI consumer" ["observations",[
   test_case "suffix, original identity and store incarnation" `Quick test_independent_suffix_and_identity;

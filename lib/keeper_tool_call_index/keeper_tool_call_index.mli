@@ -2,7 +2,14 @@
 
     The ledger is the authority. This holds only where each row lives and the
     fields the reads filter on, and it can be deleted at any time: the
-    next read rebuilds it from the ledger.
+    next read rebuilds it from the ledger. Hidden continuity records at the
+    ledger root own generations independently of SQLite and are retired after
+    the corresponding data file disappears. Changed/cold files verify their
+    prefix content in the blocking worker without locking out appenders.
+    This costs O(existing prefix bytes) on a changed ledger, including ordinary
+    appends. The unchanged-observation fast path assumes the filesystem reports
+    external modification in inode/size/mtime/ctime; it is not byte proof against
+    metadata-preserving raw edits. Storage ownership optimization is separate.
 
     There is no gate. Each read advances the index to the ledger's
     current end before it queries, so "is the index current" is not a
@@ -12,6 +19,44 @@
 
 val database_path : ledger_dir:string -> string
 (** Where the index for the ledger rooted at [ledger_dir] lives. *)
+
+type position
+type frontier
+(** A set of append positions, one per dated file identity. Positions come
+    from the authoritative ledger, not row counts or observation timestamps. *)
+
+val empty_frontier : frontier
+val merge_frontiers : frontier -> frontier -> frontier
+val equal_frontiers : frontier -> frontier -> bool
+val covers : frontier -> position -> bool
+val frontier_to_json : frontier -> Yojson.Safe.t
+val frontier_of_json : Yojson.Safe.t -> (frontier, string) result
+
+type 'a positioned = { position : position; value : 'a }
+type 'a batch =
+  { frontier : frontier; retained : frontier; rows : 'a positioned list }
+
+val rows_after :
+  store:Dated_jsonl.t -> keeper_name:string -> after:frontier ->
+  project:(Yojson.Safe.t -> 'a option) -> ('a batch, string) result
+(** Read every row beyond [after], with no tail-size cutoff. Each row is read
+    back from the ledger and handed to [project], which keeps what the caller
+    needs (or [None] to skip the row); the parsed body is dropped before the
+    next row is read, so a first read over a large ledger holds only the
+    projections. Rows come back in descending file/append-offset order. This
+    order does not infer chronology from provider or host timestamps. The
+    returned frontier is the exact indexed snapshot queried, including files
+    with no new rows. [retained] names the prior file positions still present;
+    callers discard cached rows outside it after replacement, shrink or
+    retention. A file gets a new generation when the index finds it replaced,
+    shrunk or rewritten, so a position from the old generation covers none of
+    its rows and the file is read from its beginning. Removed files disappear
+    from the returned frontier. *)
+
+val current_frontier :
+  store:Dated_jsonl.t -> keeper_name:string -> (frontier, string) result
+(** The current committed append positions, without reading row bodies.
+    Pending appends must be flushed by the caller before recording a boundary. *)
 
 val recent_rows :
   store:Dated_jsonl.t ->

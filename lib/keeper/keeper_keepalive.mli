@@ -7,10 +7,11 @@ module StringMap = Set_util.StringMap
 (** Inject the shared Event_bus for keeper snapshot publishing. *)
 val set_bus : Agent_core.Event_bus.t -> unit
 
-(** Apply one typed runtime directive to a Keeper lane. [Wakeup] only
+(** Apply one typed runtime directive to a Keeper lane in [base_path].
+    Same-named Keepers in other workspaces are never selected. [Wakeup] only
     signals scheduling and never clears an operator pause; paused-work resume
     belongs to [Keeper_paused_work_resume_transaction]. *)
-val process_directive : agent_name:string -> Keeper_directive.t -> unit
+val process_directive : base_path:string -> agent_name:string -> Keeper_directive.t -> unit
 
 (** Test-visible helper for the [current_task_id] sent in gRPC heartbeats.
     This may reconcile registry state against the task backlog before reading

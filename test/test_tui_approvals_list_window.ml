@@ -1,7 +1,6 @@
 (* The Approvals queue's window: which rows it draws and what its line says.
-   The PTY scenario (test_tui_approvals_window_pty.py) shows the screen; this
-   table pins the arithmetic at the edges a three-row fixture cannot reach --
-   a queue exactly the size of its rows, and a surface left with one row. *)
+   This table pins the arithmetic at the edges -- a queue exactly the size of
+   its rows, and a surface left with one row. *)
 
 module R = Masc_tui_approvals_window
 

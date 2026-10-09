@@ -49,8 +49,7 @@ let test_the_revision_is_cut_to_a_comparable_length () =
 
 (* The prefix is the compact summary's economy, not the view's. [v] opens the
    detail screen to compare this read against the last one, and a prefix cannot
-   be pasted into [git show]; test/test_tui_keyboard_input.py waits on the whole
-   string there. *)
+   be pasted into [git show]. *)
 let test_the_detail_screen_keeps_the_whole_revision () =
   let read = metadata () in
   let detail n = snd (List.nth (View.detail_lines read) n) in

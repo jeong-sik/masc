@@ -22,8 +22,8 @@ let delta_to_string : Live.delta -> string = function
       Printf.sprintf "runtime_attempt_started(%s,%s)"
         (Option.value ~default:"none" runtime_id)
         (match attempt_index with Some i -> string_of_int i | None -> "none")
-  | Live.Stream_model_started { model } -> Printf.sprintf "stream_model_started(%s)" model
-  | Live.Stream_details { usage; stop_reason } ->
+  | Live.Stream_model_started { model; _ } -> Printf.sprintf "stream_model_started(%s)" model
+  | Live.Stream_details { usage; stop_reason; _ } ->
       Printf.sprintf "stream_details(%s,stop=%s)"
         (match usage with
          | None -> "no usage"
@@ -33,8 +33,8 @@ let delta_to_string : Live.delta -> string = function
                (token_count usage.Live.output_tokens)
                (token_count usage.Live.cache_read_input_tokens)
                (token_count usage.Live.cache_creation_input_tokens))
-        (Option.value ~default:"none" stop_reason)
-  | Live.Text text -> Printf.sprintf "text(%s)" text
+        (Option.fold ~none:"none" ~some:Agent_core.Types.stop_reason_to_string stop_reason)
+  | Live.Text {text=text; _} -> Printf.sprintf "text(%s)" text
   | Live.Thinking text -> Printf.sprintf "thinking(%s)" text
   | Live.Native_tool_started { occurrence; tool_name } ->
       Printf.sprintf "native_tool_started(%d/%d,%s)" occurrence.stream_scope
@@ -165,15 +165,15 @@ let coding_turn_body =
 
 let expected_coding_turn =
   [ Live.Run_started
-  ; Live.Text "Let me "
-  ; Live.Text "look."
+  ; Live.Text {text="Let me "; stream_scope=None}
+  ; Live.Text {text="look."; stream_scope=None}
   ; Live.Tool_started { occurrence = occurrence (); tool_name = "read_file" }
   ; Live.Tool_args
       { occurrence = occurrence (); fragment = Live.Args_delta "{\"path\":\"lib/a.ml\"}" }
   ; Live.Tool_ended { occurrence = occurrence () }
   ; Live.Tool_result { occurrence = occurrence (); execution_id = "exec-1" }
   ; Live.Thinking "weighing it"
-  ; Live.Text " Found it."
+  ; Live.Text {text=" Found it."; stream_scope=None}
   ; Live.Run_finished
   ]
 
@@ -256,7 +256,7 @@ let test_partial_line_emits_nothing_until_it_ends () =
   check (list delta) "an unfinished line yields no delta" []
     (List.map snd (feed decoder head));
   check (list delta) "the delta arrives when the line ends"
-    [ Live.Text "hello" ]
+    [ Live.Text {text="hello"; stream_scope=None} ]
     (List.map snd (feed decoder tail))
 
 (* ── Journal seq on the frame ─────────────────────────────────────── *)
@@ -265,7 +265,7 @@ let with_id seq frame = Printf.sprintf "id: %d\n%s" seq frame
 
 let test_a_frame_id_tags_its_deltas () =
   check (list tagged) "the id line's seq rides the delta"
-    [ (Some 7, Live.Text "hello") ]
+    [ (Some 7, Live.Text {text="hello"; stream_scope=None}) ]
     (feed_whole_tagged (with_id 7 (sse (text_content "hello"))))
 
 let test_frame_timestamps_keep_server_epoch_seconds () =
@@ -288,9 +288,9 @@ let test_frame_timestamps_keep_server_epoch_seconds () =
     ^ frame 9 None "untimed"
   in
   let expected =
-    [ ((Some 7, Some published_at), Live.Text "fractional")
-    ; ((Some 8, Some 1791363125.), Live.Text "integer")
-    ; ((Some 9, None), Live.Text "untimed")
+    [ ((Some 7, Some published_at), Live.Text {text="fractional"; stream_scope=None})
+    ; ((Some 8, Some 1791363125.), Live.Text {text="integer"; stream_scope=None})
+    ; ((Some 9, None), Live.Text {text="untimed"; stream_scope=None})
     ]
   in
   List.iter
@@ -318,7 +318,7 @@ let test_an_id_held_across_a_chunk_boundary () =
   check (list tagged) "the id line alone yields nothing" []
     (feed decoder "id: 7\n");
   check (list tagged) "the data line that follows carries it"
-    [ (Some 7, Live.Text "hello") ]
+    [ (Some 7, Live.Text {text="hello"; stream_scope=None}) ]
     (feed decoder (sse (text_content "hello")))
 
 (* A stream cut right after an [id:] line leaves that decoder armed with the
@@ -335,7 +335,7 @@ let test_a_fresh_decoder_starts_without_a_seq () =
     [ (None, Live.Accepted { admission = Live.Running; queue_length = 0; interactive = None }) ]
     (feed fresh (sse (accepted ~state:"Running" ~queued_count:0 ())));
   check (list tagged) "the cut decoder's seq never reaches the new stream"
-    [ (Some 10, Live.Text "b") ]
+    [ (Some 10, Live.Text {text="b"; stream_scope=None}) ]
     (feed fresh (with_id 10 (sse (text_content "b"))))
 
 let test_an_id_less_frame_does_not_inherit_the_previous_seq () =
@@ -345,9 +345,9 @@ let test_an_id_less_frame_does_not_inherit_the_previous_seq () =
     ^ with_id 4 (sse (text_content "b"))
   in
   check (list tagged) "acceptance is None between two tagged frames"
-    [ (Some 3, Live.Text "a")
+    [ (Some 3, Live.Text {text="a"; stream_scope=None})
     ; (None, Live.Accepted { admission = Live.Running; queue_length = 1; interactive = None })
-    ; (Some 4, Live.Text "b")
+    ; (Some 4, Live.Text {text="b"; stream_scope=None})
     ]
     (feed_whole_tagged body);
   List.iter
@@ -360,21 +360,21 @@ let test_an_id_less_frame_does_not_inherit_the_previous_seq () =
 
 let test_a_non_integer_id_is_no_seq () =
   check (list tagged) "id: x tags nothing"
-    [ (None, Live.Text "hello") ]
+    [ (None, Live.Text {text="hello"; stream_scope=None}) ]
     (feed_whole_tagged ("id: x\n" ^ sse (text_content "hello")));
   List.iter
     (fun raw ->
       check (list tagged) (raw ^ " is not a decimal seq")
-        [ (None, Live.Text "hello") ]
+        [ (None, Live.Text {text="hello"; stream_scope=None}) ]
         (feed_whole_tagged (raw ^ "\n" ^ sse (text_content "hello"))))
     [ "id: 0x10"; "id: 1_0"; "id: -1"; "id: +5" ]
 
 let test_id_line_spellings () =
-  check (list tagged) "no space after the colon" [ (Some 7, Live.Text "hello") ]
+  check (list tagged) "no space after the colon" [ (Some 7, Live.Text {text="hello"; stream_scope=None}) ]
     (feed_whole_tagged ("id:7\n" ^ sse (text_content "hello")));
-  check (list tagged) "trailing spaces" [ (Some 7, Live.Text "hello") ]
+  check (list tagged) "trailing spaces" [ (Some 7, Live.Text {text="hello"; stream_scope=None}) ]
     (feed_whole_tagged ("id: 7   \n" ^ sse (text_content "hello")));
-  check (list tagged) "two id lines: the last one wins" [ (Some 8, Live.Text "hello") ]
+  check (list tagged) "two id lines: the last one wins" [ (Some 8, Live.Text {text="hello"; stream_scope=None}) ]
     (feed_whole_tagged ("id: 7\nid: 8\n" ^ sse (text_content "hello")))
 
 (* SSE dispatches on the empty line alone; a line of spaces is a nameless
@@ -382,7 +382,7 @@ let test_id_line_spellings () =
    data line it belongs to. *)
 let test_a_whitespace_line_is_not_a_frame_end () =
   check (list tagged) "the seq survives a blank-but-not-empty line"
-    [ (Some 7, Live.Text "hello") ]
+    [ (Some 7, Live.Text {text="hello"; stream_scope=None}) ]
     (feed_whole_tagged ("id: 7\n   \n" ^ sse (text_content "hello")))
 
 let reply_details_value ?(outcome = "visible_reply") ?(turn_ref = "trace-1#3") () =
@@ -421,16 +421,16 @@ let test_reply_details_short_of_a_field_is_reported () =
 let test_two_data_lines_in_one_frame_share_the_seq () =
   let frame = "id: 7\ndata:{\ndata: \"type\":\"TEXT_MESSAGE_CONTENT\",\"delta\":\"a\"}\n\n" in
   check (list tagged) "one complete multiline event carries seq 7"
-    [ (Some 7, Live.Text "a") ] (feed_whole_tagged frame);
+    [ (Some 7, Live.Text {text="a"; stream_scope=None}) ] (feed_whole_tagged frame);
   List.iter (fun size ->
     check (list tagged) "chunk boundaries preserve multiline event"
-      [ (Some 7, Live.Text "a") ] (feed_in_chunks_tagged ~size frame)) [1; 2; 7]
+      [ (Some 7, Live.Text {text="a"; stream_scope=None}) ] (feed_in_chunks_tagged ~size frame)) [1; 2; 7]
 ;
   List.iter (fun newline ->
     let wire = "\239\187\191" ^ String.concat newline
       ["id:7"; "data:{"; "data:\"type\":\"TEXT_MESSAGE_CONTENT\",\"delta\":\"a\"}"; ""; ""] in
     check (list tagged) "byte chunks preserve BOM and line endings"
-      [Some 7, Live.Text "a"] (feed_in_chunks_tagged ~size:1 wire)) ["\n"; "\r\n"; "\r"];
+      [Some 7, Live.Text {text="a"; stream_scope=None}] (feed_in_chunks_tagged ~size:1 wire)) ["\n"; "\r\n"; "\r"];
   check (list delta) "unterminated frame does not publish a delta" []
     (feed_whole ("data:" ^ Yojson.Safe.to_string (text_content "unfinished")))
 
@@ -439,7 +439,7 @@ let test_unreadable_line_is_reported_and_does_not_stop_the_stream () =
     "data: {not json\n\n" ^ sse (text_content "after") ^ "data:{\"type\":\"X\"}\n\n"
   in
   match feed_whole body with
-  | [ Live.Undecodable json_detail; Live.Text "after"; Live.Undecodable frame_detail ]
+  | [ Live.Undecodable json_detail; Live.Text {text="after"; stream_scope=None}; Live.Undecodable frame_detail ]
     ->
       check bool "the unreadable JSON says so" true
         (String.length json_detail > 0);
@@ -729,12 +729,12 @@ let test_stream_model_started_is_typed () =
     sse
       (custom "KEEPER_STREAM_MESSAGE_START"
          (`Assoc
-            [ "provider_message_id", `String "pm-1"
+            [ "stream_scope", `Int 4; "provider_message_id", `String "pm-1"
             ; "model", `String "claude-3-7-sonnet"
             ]))
   in
   check (list delta) "stream message start yields stream_model_started"
-    [ Live.Stream_model_started { model = "claude-3-7-sonnet" } ]
+    [ Live.Stream_model_started { stream_scope = Some 4; message_id = Some "pm-1"; model = "claude-3-7-sonnet"; usage = None } ]
     (feed_whole body)
 
 let test_stream_usage_is_typed () =
@@ -742,7 +742,7 @@ let test_stream_usage_is_typed () =
     sse
       (custom "KEEPER_STREAM_MESSAGE_DELTA"
          (`Assoc
-            [ "stop_reason", `String "end_turn"
+            [ "stream_scope", `Int 4; "stop_reason", `String "end_turn"
             ; ( "usage"
               , `Assoc
                   [ "input_tokens", `Int 1200
@@ -756,14 +756,14 @@ let test_stream_usage_is_typed () =
      measured fact. *)
   check (list delta) "stream message delta yields the reported token counters"
     [ Live.Stream_details
-        { usage =
+        { stream_scope = Some 4; usage =
             Some
               { input_tokens = Some 1200
               ; output_tokens = Some 340
               ; cache_read_input_tokens = Some 900
               ; cache_creation_input_tokens = None
               }
-        ; stop_reason = Some "end_turn"
+        ; stop_reason = Some Agent_core.Types.EndTurn
         }
     ]
     (feed_whole body)
@@ -779,7 +779,7 @@ let test_stream_delta_with_only_a_stop_reason_is_a_row () =
          (`Assoc [ "stop_reason", `String "max_tokens" ]))
   in
   check (list delta) "a delta that reported only why it stopped is still a row"
-    [ Live.Stream_details { usage = None; stop_reason = Some "max_tokens" } ]
+    [ Live.Stream_details { stream_scope = None; usage = None; stop_reason = Some Agent_core.Types.MaxTokens } ]
     (feed_whole body)
 
 let test_stream_delta_without_usage_is_no_row () =

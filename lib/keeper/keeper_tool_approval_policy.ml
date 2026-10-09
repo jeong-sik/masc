@@ -47,9 +47,9 @@ let owner_reason = function
   | Execution_gate -> "the execution Gate decides this call with its resolved context"
   | Filesystem_boundary -> "the filesystem producer authorizes this call with its resolved capability and Gate"
 
-let rec verdict_for ~composition_plan_index ~tool_name ~input =
+let rec verdict_for ~identity_tool_index ~composition_plan_index ~tool_name ~input =
   match descriptor_for tool_name with
-  | None -> verdict_for_undescribed ~composition_plan_index ~tool_name ~input
+  | None -> verdict_for_undescribed ~identity_tool_index ~composition_plan_index ~tool_name ~input
   | Some descriptor -> (
       match producer_authorization_owner descriptor with
       | Some owner -> Run { because = owner_reason owner }
@@ -117,7 +117,7 @@ and node_asks_for_approval node =
    place the name at all. Splitting that into two predicates is how one grows
    an arm the other does not have, and the gate then passes while the tool
    still asks with a reason nobody can act on. *)
-and undescribed_kind ?composition_plan_index tool_name =
+and undescribed_kind ~identity_tool_index ?composition_plan_index tool_name =
   if String.equal tool_name Keeper_tool_composition_catalog.status_tool_name
   then Control (Run { because = "reads a composition request this keeper made" })
   else if String.equal tool_name Keeper_tool_composition_catalog.cancel_tool_name
@@ -145,7 +145,7 @@ and undescribed_kind ?composition_plan_index tool_name =
     | None ->
       (match
          Keeper_identity_tool_index.read_only
-           (Keeper_identity_tool_index.shared ())
+           identity_tool_index
            ~tool_name
        with
        | Some read_only -> Attached_service read_only
@@ -162,8 +162,8 @@ and verdict_of_nodes node_tools =
             (List.length node_tools)
       }
 
-and verdict_for_undescribed ~composition_plan_index ~tool_name ~input =
-  match undescribed_kind ?composition_plan_index tool_name with
+and verdict_for_undescribed ~identity_tool_index ~composition_plan_index ~tool_name ~input =
+  match undescribed_kind ~identity_tool_index ?composition_plan_index tool_name with
   | Control verdict -> verdict
   | Attached_service (Some true) ->
     Run { because = "the service says this tool only reads" }
@@ -193,11 +193,11 @@ and verdict_for_undescribed ~composition_plan_index ~tool_name ~input =
     Ask { because = unclassifiable_because }
 ;;
 
-let classifies ~composition_plan_index ~tool_name =
+let classifies ~identity_tool_index ~composition_plan_index ~tool_name =
   match descriptor_for tool_name with
   | Some _ -> true
   | None ->
-    (match undescribed_kind ?composition_plan_index tool_name with
+    (match undescribed_kind ~identity_tool_index ?composition_plan_index tool_name with
      | Control _ | Composition _ | Attached_service _ -> true
      | Unknown -> false)
 ;;

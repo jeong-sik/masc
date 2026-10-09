@@ -113,27 +113,65 @@ let selection_error ~base_path ~tool_name ~start_time error =
     Tool_result.make_err ~tool_name ~start_time
       ~class_:Tool_result.Workflow_rejection ~effect_disposition:Tool_result.Proven_pre_effect
       ~data (Yojson.Safe.to_string data) in
+  (* With no connection left to carry the work, what the BiDi host's own
+     record says is the rest of the answer: whether one runs, and why the
+     last one ended. The operator acts on it, so the answer carries it —
+     without it a workspace that lives on a BiDi host alone reads a host
+     that ended with the bare no_live_client. A host that runs is named
+     whatever the lists say: one that polls here stands in them, and one
+     they lack is exactly what its report tells the operator to look into.
+     For a host that has ended, the lists being empty is what makes the
+     ending the reason the work cannot go on: while any connection remains,
+     choosing among them is the remedy, and the ending says nothing about
+     that. *)
+  let bidi_host_field (observation : Browser_bidi_host_status.observation) ~remaining =
+    (* Every state answers here, no catch-all: a record the reader cannot
+       make out still says whether a host holds the workspace's lock, and
+       one that does is running — the paragraph says so, and the remedy is
+       not choosing among connections. A lock that could not be asked is
+       carried by the no-connection arm, where the host's word is due
+       whatever it would have said. *)
+    let running = match observation.record with
+      | Browser_bidi_host_record.Running _
+      | Browser_bidi_host_record.Record_missing_but_locked
+      | Browser_bidi_host_record.Unreadable { held = Some true; _ } -> true
+      | Browser_bidi_host_record.Unreadable { held = Some false | None; _ }
+      | Browser_bidi_host_record.Never_started
+      | Browser_bidi_host_record.Ended _
+      | Browser_bidi_host_record.Died _ -> false in
+    if running || remaining = [] then
+      ["bidiHost", Browser_bidi_host_status.summary_to_json observation]
+    else []
+  in
+  (* One observation answers for the launcher, the host's record and the
+     connections: the record is read first and the server asked last, so the
+     list an answer shows is the one its host paragraph was written from. *)
   let observe () =
-    Browser_lane_launcher.observe ~base_path ~server:(Browser_lane_launcher.current_server ()) in
+    let observation = Browser_bidi_host_status.observe ~base_path in
+    let clients =
+      Browser_bidi_host_status.listed_clients observation |> List.map Browser_lane.client_json in
+    observation, clients in
   match error with
   | Browser_lane.Activity_rejected refusal ->
     rejection ~deciding:["message", `String (Browser_lane.activity_rejection_message refusal)]
       ~listing:[]
   | Browser_lane.No_live_client ->
-    let clients = clients () in
-    let host = observe () in
-    rejection ~deciding:["retry", `String (no_client_retry host);
-                         "host", Browser_lane_launcher.to_json host]
+    let observation, clients = observe () in
+    let host = observation.lane in
+    rejection ~deciding:(["retry", `String (no_client_retry host);
+                          "host", Browser_lane_launcher.to_json host]
+                         @ bidi_host_field observation ~remaining:clients)
       ~listing:["clients", `List clients]
   | Browser_lane.Selected_client_disconnected client_id ->
-    let clients = clients () in
-    let host = observe () in
+    let observation, clients = observe () in
+    let host = observation.lane in
     let retry = match clients with
       | _ :: _ -> "That browser is no longer connected. Choose a browser from clients and retry \
                    with its clientId. No browser command was dispatched."
       | [] -> "That browser is no longer connected and none is. " ^ no_client_retry host in
-    rejection ~deciding:["clientId", `String (Browser_lane.client_id_to_string client_id);
-                         "retry", `String retry; "host", Browser_lane_launcher.to_json host]
+    rejection ~deciding:(["clientId", `String (Browser_lane.client_id_to_string client_id);
+                          "retry", `String retry; "host", Browser_lane_launcher.to_json host]
+                         @ bidi_host_field observation ~remaining:clients)
       ~listing:["clients", `List clients]
   | Browser_lane.Ambiguous_clients _ ->
     rejection ~deciding:["retry", `String "Choose a connected browser and retry with its clientId. \
@@ -141,10 +179,21 @@ let selection_error ~base_path ~tool_name ~start_time error =
       ~listing:["clients", `List (clients ())]
   | Browser_lane.Transport_unsupported { client_id; transport; capability } ->
     let serving_transports = Browser_lane.live_transports_serving capability in
+    (* An answer lists the lane's connections once. Where BiDi serves the
+       work, the BiDi host's record is read first, which can let other
+       fibers run, and the list is the one that observation holds: a host
+       that attached meanwhile is in it, offered and not reported on. *)
+    let host =
+      if List.mem Browser_lane.Webdriver_bidi serving_transports
+      then Some (Browser_bidi_host_status.observe ~base_path)
+      else None in
+    let listed =
+      match host with
+      | Some host -> Browser_bidi_host_status.listed_clients host
+      | None -> Browser_lane.active_clients () in
     let serving_clients =
-      Browser_lane.active_clients ()
-      |> List.filter (fun (info : Browser_lane.client_info) ->
-           Browser_lane.live_transport_serves info.transport capability) in
+      List.filter (fun (info : Browser_lane.client_info) ->
+        Browser_lane.live_transport_serves info.transport capability) listed in
     (* A connection of the other kind may belong to another browser profile,
        and its tab IDs are its own, so the retry starts from its tabs. *)
     let retry = match serving_clients with
@@ -157,15 +206,30 @@ let selection_error ~base_path ~tool_name ~start_time error =
         ^ String.concat "; or " (List.map Browser_lane.live_transport_setup serving_transports)
         ^ ". The same request returns the same answer until then; other work this \
            connection serves is unaffected. No browser command was dispatched." in
+    (* With no connection that serves work BiDi does, the answer says what
+       the BiDi host's own record says: whether one runs and why the last
+       one ended. The operator acts on it, not the Keeper. A connection that
+       serves the work makes that beside the point: the Keeper retries
+       there. The state and the paragraph sit with the fields that decide.
+       The paragraph does not grow with what a host has done. Its length
+       follows the workspace path, the address the last host was given and
+       the reason for ending, which a host writes in at most 515 bytes; the
+       address has no limit of its own. The record itself is not sent: its
+       list of results grows while a host runs. *)
+    let bidi_host =
+      match serving_clients, host with
+      | [], Some host -> ["bidiHost", Browser_bidi_host_status.summary_to_json host]
+      | [], None | _ :: _, (Some _ | None) -> [] in
     rejection
-      ~deciding:["capability", `String (Browser_lane.live_capability_to_wire capability);
+      ~deciding:(["capability", `String (Browser_lane.live_capability_to_wire capability);
                  "transport", `String (Browser_lane.live_transport_to_string transport);
                  "clientId", `String (Browser_lane.client_id_to_string client_id);
                  "retry", `String retry;
                  "servingTransports", `List (List.map (fun transport ->
                    `String (Browser_lane.live_transport_to_string transport)) serving_transports)]
+                 @ bidi_host)
       ~listing:["servingClients", `List (List.map Browser_lane.client_json serving_clients);
-                "clients", `List (clients ())]
+                "clients", `List (List.map Browser_lane.client_json listed)]
 
 let read_failure ~base_path ~tool_name ~start_time = function
   | Browser_surface.Unselected error -> selection_error ~base_path ~tool_name ~start_time error

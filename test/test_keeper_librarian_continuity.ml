@@ -646,18 +646,18 @@ let narrowing_atom_count = List.length narrowing_marks
 
 (* The rendered prompt carries each atom once, as conversation_history, on top
    of a fixed part T (template plus output schema), so a unit of n atoms sends
-   roughly n * narrowing_atom_chars + T. With 16,000 characters an atom and the
-   ceiling below at 65,000, four atoms (64 kB + T) land over the ceiling and
-   two (32 kB + T) under it for any T between 1 kB and 33 kB. The Memory pass
-   renders librarian.md, about 21.7 kB with its working_contexts rule spliced
-   in and before the schema, so the output schema and the request envelope
-   share the remaining 11 kB or so before two atoms stop fitting. That margin
-   is narrower than it looks. The context-only pass renders the
-   [continuity] slot of librarian.md, about 2.7 kB. Eight atoms rather than four so that
+   roughly n * narrowing_atom_chars + T. With 28,000 characters an atom and the
+   ceiling below at 105,000, four atoms (112 kB + T) land over the ceiling and
+   two (56 kB + T) under it for any T up to 49 kB. The Memory pass measured
+   T at about 34 kB on 2026-10-09 (librarian.md with its working_contexts rule,
+   the output schema and the request envelope); #41908 added about 1.5 kB of
+   rules and took T past the 33 kB the earlier 16,000 / 65,000 pair allowed.
+   The context-only pass renders the [continuity] slot of librarian.md, about
+   2.7 kB. Eight atoms rather than four so that
    six remain after the first committed unit: a pass that released the width
    on a commit would offer those six and be refused, which four atoms could
    not have shown. *)
-let narrowing_atom_chars = 16_000
+let narrowing_atom_chars = 28_000
 let narrowing_atom_text mark = String.make narrowing_atom_chars mark
 
 (* A Keeper whose continuity snapshot no longer fits its history prepares from
@@ -735,7 +735,7 @@ let narrowing_fixture ?(cli_slot_ids = []) ?cli_runner
   let restart () = Masc.Keeper_librarian_queue_refresh.forget_measurement ~config ~keeper_name in
   f ~bodies ~pass ~coverage ~hide_source ~restart ~config
 
-let narrowing_ceiling = 65_000
+let narrowing_ceiling = 105_000
 let accepted_answer =
   Exact_output_fixture.openai_response
     (Yojson.Safe.from_string

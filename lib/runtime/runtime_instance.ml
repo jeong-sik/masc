@@ -296,38 +296,6 @@ let resolve_max_context_of_runtime (rt : t) : (int * max_context_source) option 
   | None, None -> None
 ;;
 
-(* The start-prompt ceiling of a Muse runtime: derived from the window its
-   host reports, because the host rewrites an oversized input instead of
-   refusing it ([Runtime_muse_prompt_capacity]). *)
-let muse_prompt_capacity (runtime : t) : (int, Runtime_muse_prompt_capacity.error) result =
-  Runtime_muse_prompt_capacity.start_prompt_bytes
-    ~max_context:(Option.map fst (resolve_max_context_of_runtime runtime))
-;;
-
-let prompt_capacity_bytes (runtime : t) : int option =
-  match runtime.provider.api_format with
-  | Muse_serve_runtime ->
-    (match muse_prompt_capacity runtime with
-     | Ok bytes -> Some bytes
-     (* A full load refuses such a runtime; one built without it (a load that
-        skips the window check, [of_binding]) refuses its own turn with this
-        cause through [muse_prompt_capacity]. *)
-     | Error Runtime_muse_prompt_capacity.No_window_declared
-     | Error (Runtime_muse_prompt_capacity.Window_below_host_overhead _) -> None)
-  | Antigravity_cli_runtime ->
-    Option.map
-      (fun (max_context, _source) ->
-         Runtime_client_prompt_ceiling.antigravity_start_prompt_bytes ~max_context)
-      (resolve_max_context_of_runtime runtime)
-  | Codex_app_server_runtime
-  | Claude_code_runtime
-  | Messages_api
-  | Chat_completions_api
-  | Ollama_api
-  | Gemini_api
-  | Vertex_gemini_api -> None
-;;
-
 let max_context_of_runtime (rt : t) : int =
   match resolve_max_context_of_runtime rt with
   | Some (n, _source) -> n

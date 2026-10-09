@@ -159,6 +159,101 @@ let test_sparse_consumption_retains_gap_and_append () = with_store (fun keepers_
   check bool "recovery did not restore retired claim" true
     (match snapshot with Some snapshot -> snapshot.facts=[] | None -> false))
 
+(* Accepted B no longer has a queue row after acknowledgement. A missing
+   authority file must not turn that state into a fresh empty memory store. *)
+let test_sparse_authority_loss_refuses_judgment () =
+  List.iter (fun damage -> with_store (fun keepers_dir ->
+    ignore (append keepers_dir "a" "uncertain A");
+    ignore (append keepers_dir "b" "settled B");
+    let selected=batch keepers_dir in
+    let b=List.find (fun (id:Current.explicit_candidate_id) -> id.request_id="b")
+      (Queue.candidate_ids selected) in
+    let source_fact=(List.find (fun (row:Queue.candidate) -> row.request_id="b")
+      (Queue.candidates selected)).fact in
+    let target=fact "settled B" in
+    let binding={Current.candidate_id=b;source_fact;target_memory_id=Types.memory_id target} in
+    ignore(Current.apply_disposition ~explicit_candidate_ids:[b]
+      ~admission_recall:{Current.decided_at_revision=None; bindings=[binding]}
+      ~absorbed:[] ~revisions:[]
+      ~keepers_dir ~keeper_id:"keeper" ~now:200.
+      ~source:{kind=Current.Librarian;trace_id="authority-fixture"} ~new_claims:[target] ()
+      |> require : Current.disposition);
+    acknowledge keepers_dir;
+    check (list string) "B settled while A remains deferred" ["a"]
+      (List.map (fun (row:Queue.candidate) -> row.request_id) (Queue.candidates (batch keepers_dir)));
+    let snapshot=Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+    let receipt=Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+    let queue=Queue.path ~keepers_dir ~keeper_id:"keeper" in
+    let journal=Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+    (match damage with
+     | `Missing_snapshot -> Sys.remove snapshot
+     | `Corrupt_snapshot -> Fs_compat.save_file snapshot "{broken snapshot"
+     | `Mismatched_snapshot ->
+       let json=Yojson.Safe.from_file snapshot in
+       let fields=Yojson.Safe.Util.to_assoc json in
+       Fs_compat.save_file snapshot (Yojson.Safe.to_string
+         (`Assoc (("updated_at",`Float 999.) :: List.remove_assoc "updated_at" fields)))
+     | `Missing_receipt -> Sys.remove receipt
+     | `Corrupt_receipt -> Fs_compat.save_file receipt "{broken receipt");
+    let before=List.map (fun path -> path,Fs_compat.load_file_opt path) [snapshot;receipt;queue;journal] in
+    let calls=ref 0 in
+    let outcome=Worker.For_testing.run_with ~keepers_dir ~keeper_name:"keeper"
+      ~judge:(fun _ -> incr calls; Worker.Awaiting_evidence) in
+    check int "missing authority never reaches semantic judgment" 0 !calls;
+    (match outcome with Worker.Unavailable _ -> ()
+     | _ -> fail "lost sparse admission authority was treated as ordinary pending input");
+    List.iter (fun (path,bytes) -> check (option string)
+      "failed authority check preserves every surviving store byte" bytes (Fs_compat.load_file_opt path)) before))
+    [`Missing_snapshot;`Corrupt_snapshot;`Mismatched_snapshot;`Missing_receipt;`Corrupt_receipt]
+
+let test_contiguous_pending_recovers_without_sparse_authority () =
+  List.iter (fun empty_receipts -> with_store (fun keepers_dir ->
+    ignore (append keepers_dir "fresh" "recoverable current fact");
+    let snapshot = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+    Fs_compat.save_file snapshot "{broken snapshot";
+    if empty_receipts then Fs_compat.save_file
+      (Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper")
+      {|{"receipts":[]}|};
+    let calls = ref 0 in
+    let outcome = Worker.For_testing.run_with ~keepers_dir ~keeper_name:"keeper"
+      ~judge:(fun selected ->
+        incr calls;
+        ignore (commit keepers_dir (Queue.candidate_ids selected)
+          [fact "recoverable current fact"]);
+        Worker.Committed) in
+    check int "contiguous pending input reaches judgment once" 1 !calls;
+    check bool "recovery settles the queue" true
+      (outcome = Worker.Settled {has_more=false});
+    let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" |> require in
+    check bool "ordinary commit replaces undecodable snapshot" true
+      (match current with Some current ->
+         List.exists (fun (f : Types.fact) -> f.claim = "recoverable current fact") current.facts
+       | None -> false))) [false;true]
+
+(* Characterization of the remaining ambiguity, not a recovery guarantee:
+   all original rows are still queued before acknowledgement. Losing the only
+   receipt then leaves no sequence hole from which to detect a prior commit. *)
+let test_missing_receipt_before_acknowledgement_is_unresolved_authority () = with_store (fun keepers_dir ->
+  ignore (append keepers_dir "a" "uncertain A");
+  ignore (append keepers_dir "b" "settled B");
+  let b=List.find (fun (id:Current.explicit_candidate_id) -> id.request_id="b")
+    (Queue.candidate_ids (batch keepers_dir)) in
+  ignore (commit keepers_dir [b] [fact "settled B"]);
+  let receipt=Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+  Sys.remove receipt;
+  let queue=Queue.path ~keepers_dir ~keeper_id:"keeper" in
+  let before=Fs_compat.load_file queue in
+  let calls=ref [] in
+  let outcome=Worker.For_testing.run_with ~keepers_dir ~keeper_name:"keeper"
+    ~judge:(fun selected ->
+      calls:=List.map (fun (row:Queue.candidate) -> row.request_id) (Queue.candidates selected) :: !calls;
+      Worker.Awaiting_evidence) in
+  check (list (list string)) "known limitation: contiguous queued rows can reach judgment again"
+    [["a";"b"]] !calls;
+  (match outcome with Worker.Pending _ -> () | _ -> fail "unexpected diagnostic outcome");
+  check string "diagnostic performs no consumption or reconstruction" before (Fs_compat.load_file queue);
+  check (option string) "missing receipt is not fabricated" None (Fs_compat.load_file_opt receipt))
+
 let test_worker_partial_consumption_wakes_only_new_input () =
   List.iter (fun append_during_judgment -> with_store (fun keepers_dir ->
     ignore (append keepers_dir "a" "uncertain A");
@@ -347,6 +442,9 @@ let test_size_with_a_same_failure_is_deferred_whole () =
 
 let () = run "durable explicit admission queue"
   ["storage boundaries", [
+    test_case "missing receipt before acknowledgement remains explicit scope limitation" `Quick test_missing_receipt_before_acknowledgement_is_unresolved_authority;
+    test_case "contiguous pending recovers without sparse authority" `Quick test_contiguous_pending_recovers_without_sparse_authority;
+    test_case "lost sparse authority refuses judgment without retiring evidence" `Quick test_sparse_authority_loss_refuses_judgment;
     test_case "new input during semantic deferral is recheck, not commit" `Quick test_semantic_deferral_with_new_tail_is_not_commit;
     test_case "capacity siblings continue past semantic uncertainty" `Quick test_capacity_left_uncertainty_does_not_block_right;
     test_case "capacity sibling traversal stops on provider outage" `Quick test_capacity_outage_stops_before_sibling;

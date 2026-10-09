@@ -37,11 +37,11 @@ val acknowledge_committed :
     generation and exact ID/sequence/payload matches before removing those rows.
     Deferred gaps and concurrently appended rows survive. Any receipt collision
     refuses the entire rewrite. No success flag authorizes consumption.
-    Every sequence up to last_sequence that pending no longer holds must be
-    named by a committed receipt of the generation; otherwise this returns a
-    recovery-required error and leaves the queue unchanged, whether all or only
-    some of those receipts are missing.
-    The persisted last_sequence is never reduced, even when pending is empty. *)
+    Every allocated sequence must be represented by pending input or a committed
+    candidate; an unexplained sparse gap refuses judgment without rewriting stores.
+    The persisted last_sequence is never reduced, even when pending is empty.
+    Missing receipts before any acknowledgement can remain indistinguishable from
+    never-committed contiguous input; this check cannot reconstruct that authority. *)
 
 val path : keepers_dir:string -> keeper_id:string -> string
 val list_keeper_ids : keepers_dir:string -> (string list, string) result

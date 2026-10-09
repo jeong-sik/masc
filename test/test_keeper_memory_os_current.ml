@@ -2124,8 +2124,13 @@ let test_candidate_receipt_reconciliation_preserves_first_order () =
           Yojson.Safe.Util.member "range_id" receipt <> `Null) receipts in
         `List (receipts @ [atom])
     | _ -> fail "expected candidate and atom receipts"));
-  check bool "dedup preserves the first occurrence order" true
+  let unreconciled = Fs_compat.load_file path in
+  check bool "authority projection preserves exact candidate order" true
     (read_candidates ~keepers_dir a.queue_generation = expected);
+  check string "authority read does not rewrite unrelated duplicate receipts" unreconciled
+    (Fs_compat.load_file path);
+  check bool "generic range reader still reconciles its receipt" true
+    (require_committed_range ~keepers_dir "atom receipt disappeared" = durable_range_id);
   let reconciled = Fs_compat.load_file path in
   check string "on-disk first-occurrence order is preserved" canonical reconciled;
   check int "duplicate atom removed without dropping candidates" 3
@@ -2161,19 +2166,33 @@ let test_candidate_prepared_set_recovers_exact_snapshot () =
     let b = candidate_receipt 2 "request-b" "B" in
     let c = candidate_receipt 3 "request-c" "C" in
     ignore (commit_candidates ~keepers_dir [b;c] [fact ~claim:"settled policy" ()] |> require_ok);
+    let expected = read_candidates ~keepers_dir b.queue_generation in
     rewrite_receipts ~keepers_dir (map_receipts (fun receipt ->
       let receipt = map_field "state" (fun _ -> `String "prepared") receipt in
       if exact then receipt
       else map_field "snapshot_sha256" (fun _ -> `String (String.make 64 'f')) receipt));
+    let path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+    let prepared = Fs_compat.load_file path in
     let found = read_candidates ~keepers_dir b.queue_generation in
     check bool "whole set recovers only for the exact committed snapshot" true
-      (if exact then List.length found=2 && List.mem b found && List.mem c found else found=[]);
+      (if exact then found=expected && List.length found=2 && List.mem b found && List.mem c found else found=[]);
+    check string "authority projection preserves prepared evidence bytes" prepared
+      (Fs_compat.load_file path);
+    check bool "repeated authority projection returns the same candidate set" true
+      (read_candidates ~keepers_dir b.queue_generation = found);
+    (* Generic range recovery retains its persistence contract even when this
+       mixed-format receipt store has no Atom range for the requested scope. *)
+    require_no_committed_range ~keepers_dir "candidate-only store invented an atom receipt";
     if exact then (
       let json = Yojson.Safe.from_file
         (Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper") in
-      check (list string) "recovery persists both committed states" ["committed";"committed"]
+      check (list string) "generic recovery persists both committed states" ["committed";"committed"]
         Yojson.Safe.Util.(json |> member "receipts" |> to_list
-          |> List.map (fun receipt -> receipt |> member "state" |> to_string)))) [true;false]
+          |> List.map (fun receipt -> receipt |> member "state" |> to_string));
+      check bool "persisted recovery retains exact candidate identities" true
+        (read_candidates ~keepers_dir b.queue_generation = found))
+    else check bool "generic recovery discards only unverifiable prepared evidence" false
+      (Sys.file_exists path)) [true;false]
 ;;
 
 let recall_binding sequence source_fact target : Current.admission_recall_binding =

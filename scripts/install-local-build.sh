@@ -12,7 +12,9 @@
 # manifest whose launcher lives under a workspace's browser-lane/host is
 # reinstalled from the new prefix binary under its own host name, and the host
 # processes started from that workspace are stopped; the extension reconnects
-# after five seconds and starts the new copy.
+# after five seconds and starts the new copy. The workspace's running BiDi host
+# (the pid in its bidi-host.json) is left running on its old copy, because
+# nothing would start it again.
 #
 # Before anything is replaced, the new build judges the runtime.toml of the
 # workspace its server runs on (#39311). A refusal leaves every binary and
@@ -227,23 +229,47 @@ if not registered:
     print(f"no browser lane host is registered in {manifest_dir}")
     sys.exit(0)
 
+def running_bidi_host(base):
+    # A BiDi host records its pid in bidi-host.json, with no "ended" while it
+    # runs (lib/browser_bidi_host_record.ml). Firefox starts a stopped
+    # extension host again; nothing starts a stopped BiDi host again.
+    try:
+        record = json.loads((base / ".masc/browser-lane/bidi-host.json").read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(record, dict) or record.get("ended") is not None:
+        return None
+    pid = record.get("pid")
+    return pid if isinstance(pid, int) and not isinstance(pid, bool) else None
+
 running = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True, text=True, check=True).stdout
 for name, base in registered:
     subprocess.run(["bash", installer, "--binary", binary, "--base-path", str(base),
                     "--host-name", name, "--manifest-dir", str(manifest_dir)],
                    check=True, stdout=subprocess.DEVNULL)
     host = str(base / ".masc/browser-lane/host/masc-browser-host")
-    stopped = []
+    bidi_host = running_bidi_host(base)
+    stopped, kept = [], []
     for line in running.splitlines():
         pid, _, command = line.strip().partition(" ")
         if command == host or command.startswith(host + " "):
+            if int(pid) == bidi_host:
+                kept.append(pid)
+                continue
             try:
                 os.kill(int(pid), signal.SIGTERM)
                 stopped.append(pid)
             except ProcessLookupError:
                 pass
-    restart = f"stopped host pid {', '.join(stopped)}; Firefox starts the new copy" if stopped else "no host running"
-    print(f"refreshed browser lane host {name} for {base} ({restart})")
+    said = []
+    if stopped:
+        said.append(f"stopped host pid {', '.join(stopped)}; Firefox starts the new copy")
+    if kept:
+        # The installer replaced the file, so the running host keeps the copy
+        # it started with.
+        said.append(f"kept BiDi host pid {', '.join(kept)}, which nothing would start again; "
+                    "it runs its old copy until it is restarted")
+    print(f"refreshed browser lane host {name} for {base} ({'; '.join(said) or 'no host running'})")
 PY
 
 # Installed binaries and browser hosts now hold their own copies. Clean only

@@ -281,6 +281,44 @@ class LocalBuildInstall(unittest.TestCase):
             self.assertEqual(unrelated.read_text(), before_unrelated)
             self.assertFalse((root / "elsewhere").exists())
 
+    def test_the_extension_host_is_stopped_and_the_running_bidi_host_is_kept(self):
+        with tempfile.TemporaryDirectory(prefix="local build ' ") as temporary:
+            root = Path(temporary).resolve()
+            manifests = root / "native manifests"
+            base = root / "workspace one"
+            subprocess.run(["bash", str(HOST_INSTALLER), "--binary", str(executable(root / "old-host", "old")),
+                            "--base-path", str(base), "--host-name", "masc_browser_host",
+                            "--manifest-dir", str(manifests)],
+                           check=True, capture_output=True)
+            host = base / ".masc/browser-lane/host/masc-browser-host"
+
+            # Both run as the workspace's copy of the host, which is what ps shows first.
+            def running_as_host():
+                return subprocess.Popen(["bash", "-c", 'exec -a "$0" sleep 60', str(host)])
+
+            extension, bidi = running_as_host(), running_as_host()
+            try:
+                (base / ".masc/browser-lane/bidi-host.json").write_text(
+                    json.dumps({"pid": bidi.pid, "ended": None}))
+                build = root / "build"
+                build.mkdir()
+                for exe in ("main_eio.exe", "masc_tui.exe", "masc_browser_host.exe"):
+                    executable(build / exe, exe)
+                preflight_helper(build)
+                result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
+                                         "--prefix", str(root / "prefix"), "--manifest-dir", str(manifests),
+                                         "--base-path", str(workspace(root))],
+                                        check=True, capture_output=True, text=True)
+                self.assertEqual(extension.wait(timeout=10), -15, result.stdout)
+                self.assertIsNone(bidi.poll(), "the BiDi host was stopped")
+                self.assertIn(f"stopped host pid {extension.pid}; Firefox starts the new copy", result.stdout)
+                self.assertIn(f"kept BiDi host pid {bidi.pid}, which nothing would start again", result.stdout)
+            finally:
+                for process in (extension, bidi):
+                    if process.poll() is None:
+                        process.kill()
+                        process.wait()
+
     def test_no_registered_host_installs_binaries_and_says_so(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()

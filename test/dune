@@ -180,7 +180,7 @@
  (deps ../config/prompts/workspace_memory_curator.md
        ../config/prompts/workspace_memory_briefing.md
        ../config/prompts/keeper.md)
- (libraries alcotest masc masc.agent_core masc.agent_core.llm_provider masc.server masc.masc_core masc.runtime masc.fs_compat masc.config_dir_resolver masc.prompt_registry exact_output_fixture yojson eio eio_main unix))
+ (libraries alcotest masc masc.tool_types masc.agent_core masc.agent_core.llm_provider masc.server masc.masc_core masc.runtime masc.fs_compat masc.config_dir_resolver masc.prompt_registry exact_output_fixture yojson eio eio_main unix))
 
 (test
  (name test_msx_vision)
@@ -1923,6 +1923,9 @@
   ; test_goal_store and test_goal_tools freeze the creation clock
   ptime
   eio.mock
+  ; test_server_startup_takeover plants v2 lease files whose name is the
+  ; digest of the directory's own (st_dev, st_ino) identity.
+  digestif
   masc.tool_metrics_store)
  (deps ../bin/main_eio.exe))
 
@@ -2744,6 +2747,7 @@
 
 (include stanzas/test_keeper_fs_edit_containment.inc)
 
+(include stanzas/test_keeper_workspace_memory_selection.inc)
 (include stanzas/test_keeper_workspace_ops.inc)
 
 (include stanzas/test_keeper_identity_drift_counter.inc)
@@ -3365,7 +3369,7 @@
 (test
  (name test_tui_text_input_target)
  (modules test_tui_text_input_target)
- (libraries masc_tui_message_input masc_tui_identity_model masc_tui_surface_navigation
+ (libraries masc_tui_account_login masc_tui_message_input masc_tui_identity_model masc_tui_surface_navigation
   alcotest
   fmt
   masc
@@ -3407,6 +3411,7 @@
  (modules test_tui_keeper_chat_transcript)
  (libraries
   alcotest
+  agent_core
   fmt
   masc
   masc.string_util
@@ -3443,6 +3448,7 @@
   masc_tui_credential
   masc_tui_keeper_chat_live
   masc_tui_keeper_chat_log
+  masc_tui_keeper_chat_transcript
   yojson))
 
 (test
@@ -3496,7 +3502,7 @@
 (test
  (name test_tui_keeper_chat_live)
  (modules test_tui_keeper_chat_live)
- (libraries alcotest fmt masc masc_tui_keeper_chat_live masc_tui_keeper_chat_projection yojson))
+ (libraries alcotest agent_core fmt masc masc_tui_keeper_chat_live masc_tui_keeper_chat_projection yojson))
 
 (test
  (name test_tui_measurement)
@@ -4027,7 +4033,7 @@
 (test
  (name test_tui_model_runtime_table)
  (modules test_tui_model_runtime_table)
- (libraries alcotest masc_tui_model_runtime_table masc_tui_message_layout))
+ (libraries alcotest yojson masc.runtime masc_tui_model_runtime_table masc_tui_message_layout))
 
 (test
  (name test_tui_context_bars)
@@ -7111,7 +7117,7 @@
 (test
  (name test_tui_runtime_config_view)
  (modules test_tui_runtime_config_view)
- (libraries masc_tui_runtime_config_view))
+ (libraries masc_tui_runtime_config_view masc_tui_account_login))
 
 (test
  (name test_tui_runtime_listing)
@@ -9810,4 +9816,14 @@
  (modules test_lane_addon_tool_result)
  (libraries alcotest masc.lane_addon_tool_result masc.tool_types mcp_protocol yojson))
 
+(test
+ (name test_tui_models_account_reading)
+ (modules test_tui_models_account_reading)
+ (libraries alcotest masc_tui_types masc_tui_render_prim
+  masc_tui_runtime_config_view masc_tui_account_login))
+
 (include stanzas/test_tui_code_history_sources_pty.inc)
+
+(include stanzas/test_tui_code_history_diff_pty.inc)
+
+(include stanzas/test_tui_code_history_task_pty.inc)

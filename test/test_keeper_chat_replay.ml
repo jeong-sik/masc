@@ -17,10 +17,10 @@ module Stream = Server_routes_http_keeper_stream
 let events : E.keeper_chat_event list =
   [ E.Run_started { run_id = "run-replay"; thread_id = "keeper:replay" }
   ; E.Text_message_start { message_id = "msg-replay"; role = E.Assistant }
-  ; E.Text_delta "alpha "
+  ; E.Text_delta {text="alpha "; stream_scope=None}
   ; E.Status_block { kind = Blocks.Continuation_checkpoint }
-  ; E.Text_delta "beta "
-  ; E.Text_delta "gamma"
+  ; E.Text_delta {text="beta "; stream_scope=None}
+  ; E.Text_delta {text="gamma"; stream_scope=None}
   ; E.Reply_details
       { reply = "alpha beta gamma"
       ; turn_outcome = Keeper_turn_outcome.Visible_reply

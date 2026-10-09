@@ -554,7 +554,7 @@ let test_historical_open_journal_cannot_own_progress () =
   let state = state () in
   let old = inflight ~request_id:"yesterday" ~at:1. () in
   Tui.turn_log_add ~now:2. old.log ~seq:(Some 0) Live.Run_started;
-  Tui.turn_log_add ~now:3. old.log ~seq:(Some 1) (Live.Text "retained partial output");
+  Tui.turn_log_add ~now:3. old.log ~seq:(Some 1) (Live.Text {text="retained partial output"; stream_scope=None});
   Log.commit old.log.tl_log;
   state.msg_settled_logs <- [old.log];
   check bool "an unclosed historical stream alone is not current progress" true
@@ -568,7 +568,7 @@ let test_historical_open_journal_cannot_own_progress () =
   List.iter (fun terminal ->
     let log = Log.create ~keeper_name:"alpha" ~request_id:"yesterday" ~started_at:1. in
     ignore (Log.add ~at:2. log ~seq:(Some 0) Live.Run_started);
-    ignore (Log.add ~at:3. log ~seq:(Some 1) (Live.Text "retained partial output"));
+    ignore (Log.add ~at:3. log ~seq:(Some 1) (Live.Text {text="retained partial output"; stream_scope=None}));
     Log.observe_operation_state log (Some terminal);
     Log.observe_operation_state log (Some (Keeper_chat_operation.Running {started_at=1.}));
     check bool "terminal facts cannot regress on a delayed open observation" true

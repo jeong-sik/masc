@@ -1437,12 +1437,17 @@ let stop_reason_to_metric_label = function
 (* delta_usage is declared before api_usage on purpose: the two records
    share field labels, and OCaml resolves an unqualified label to the most
    recently defined record — the codebase's pervasive unannotated
-   [u.input_tokens] accesses must keep meaning api_usage. *)
+   [u.input_tokens] accesses must keep meaning api_usage.
+   Both records carry the same five labels, so a delta_usage literal is not
+   told apart by its field count: state its type (an annotation, or a
+   context that already expects delta_usage) or it is read as api_usage. *)
 type delta_usage =
   { input_tokens : int option
   ; output_tokens : int option
   ; cache_creation_input_tokens : int option
   ; cache_read_input_tokens : int option
+  ; cost_usd : float option [@default None]
+    (** Optional provider-reported cumulative charge; zero is authoritative. *)
   }
 [@@deriving show, yojson]
 
@@ -1460,6 +1465,7 @@ let delta_usage_of_api_usage (u : api_usage) : delta_usage =
   ; output_tokens = Some u.output_tokens
   ; cache_creation_input_tokens = Some u.cache_creation_input_tokens
   ; cache_read_input_tokens = Some u.cache_read_input_tokens
+  ; cost_usd = u.cost_usd
   }
 ;;
 

@@ -117,7 +117,11 @@ type resume_confirmation =
 
 type async_msg =
   | Workspace_scoped of workspace_authority * async_msg
-  | Workspace_identity_unconfirmed of string
+  | Workspace_identity_unconfirmed of
+      { detail : string
+      ; reading : (Masc.Tui_decode.server_identity, string) result
+      ; prior_contact : Masc_tui_server_lifecycle.contact
+      ; refresh_ticket : Http_refresh_order.ticket }
   | Schedule_form_authority_refused of
       { action : string; detail : string; workspace : workspace_input_identity option }
       (** A schedule create/modify form refused by the workspace guard: the
@@ -304,7 +308,7 @@ type async_msg =
   | Git_diff_loaded of string * (Masc.Tui_decode.git_diff, string) result
   | Browser_history_list_loaded of int * (Masc.Tui_decode.keeper_calls_snapshot, string) result
   | Browser_history_page_loaded of int * (Masc.Browser_observation.t, string) result
-  | Browser_lane_clients_loaded of int * (Browser_lane_view.client list, string) result
+  | Browser_lane_clients_loaded of int * (Browser_lane_view.discovered, string) result
   | Browser_lane_loaded of
       int * (Browser_lane_view.reading, string) result
   | Browser_lane_action_done of int * (unit, string) result

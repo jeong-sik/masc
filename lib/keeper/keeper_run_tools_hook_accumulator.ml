@@ -12,17 +12,20 @@ open Keeper_types_profile
 open Keeper_agent_tool_surface
 open Keeper_agent_result
 
+type historical_order = Ordered | Unordered
+
 type hook_accumulator =
   { mutable meta : Keeper_meta_contract.keeper_meta
   ; mutable tool_calls : tool_call_detail list
   ; historical_tool_calls : tool_call_detail list
+  ; historical_order : historical_order
   ; history_pairs_at_setup : int option
     (* How many matched tool-call pairs the checkpoint history held when this
        run was set up, on the autonomous lane -- the lane whose seed is read
        from that history. [None] on a lane whose seed is scope-bound, which
        has no history count to move a boundary to. Read by
-       [Keeper_repetition_judged.pairs_judged_by] when a repetition yield
-       records where the next seed stops. *)
+       the repetition boundary when an official-client yield advances only
+       the ledger. Agent Core yields count their actual checkpoint pairs. *)
   ; mutable current_turn : int
   ; mutable tool_surface : tool_surface_metrics
   ; mutable requested_tool_names : string list
@@ -70,10 +73,11 @@ type hook_outputs =
       Keeper_contract_classifier.actionable_signal option
   }
 
-let create ~meta ~tool_surface ~historical_tool_calls ~history_pairs_at_setup =
+let create ~meta ~tool_surface ~historical_tool_calls ~historical_order ~history_pairs_at_setup =
   { meta
   ; tool_calls = []
   ; historical_tool_calls
+  ; historical_order
   ; history_pairs_at_setup
   ; current_turn = 0
   ; tool_surface
@@ -92,6 +96,12 @@ let create ~meta ~tool_surface ~historical_tool_calls ~history_pairs_at_setup =
 
 let tool_calls_for_repetition (acc : hook_accumulator) =
   acc.tool_calls @ acc.historical_tool_calls
+;;
+
+let tool_calls_for_input_repetition (acc : hook_accumulator) =
+  match acc.historical_order with
+  | Ordered -> tool_calls_for_repetition acc
+  | Unordered -> acc.tool_calls
 ;;
 
 let freeze (acc : hook_accumulator) : hook_outputs =

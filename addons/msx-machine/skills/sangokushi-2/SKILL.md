@@ -1,6 +1,6 @@
 ---
 name: sangokushi-2
-description: "Sangokushi II (Koei 1990, Japanese, 3-disk set) on the shared MSX: media set and verified origin slot, starting a new game, the province command menu, going to war, placing units (digits move, 0 places), battle commands and retreat, in-game save flow, media-change pitfalls, an all-AI run to the game's end, and one-call macros for the two verified key sequences. Apply a fact only when the visible prompt matches it."
+description: "Sangokushi II (Koei 1990, Japanese, 3-disk set) on the shared MSX: media set and checkpoint compatibility, starting a new game, the province command menu, going to war, placing units (digits move, 0 places), battle commands and retreat, in-game save flow, media-change pitfalls, an all-AI run to the game's end, and one-call macros for the two verified key sequences. Apply a fact only when the visible prompt matches it."
 ---
 
 # Sangokushi II
@@ -12,11 +12,12 @@ only when the visible prompt matches, and re-verify from the actual screen.
 ## Media
 
 A = `sangokushi-2.dsk`, B = `sangokushi-2-b.dsk`, user data disk =
-`sangokushi-2-data.dsk`. Catalog names only; no host paths. Verified origin
-slot `sangokushi2-cao-pi-ready`: scenario 6, beginner, historical, 1 human
-player as Cao Pi, province 10 awaiting its first command, frame 26865. It is a
-test origin — after restoring it, save under your own slot prefix instead of
-keeping the original.
+`sangokushi-2-data.dsk`. Catalog names only; no host paths. Start a fresh game or load your own in-game
+save. A named checkpoint is local to its workspace and requires a compatible
+emulator core. One older format-1 Cao Pi checkpoint restored a picture but reset
+to C-BIOS after stepping on the newer core. A restored screenshot alone does
+not prove a resumable game: verify continued input, and preserve an incompatible
+checkpoint for its matching core rather than overwriting it.
 
 ## Province command prompt `(0-19)?`
 
@@ -79,6 +80,22 @@ Observed 2026-09-29 from a fresh boot of disk A.
 4. An event screen can come first; Return goes on to the first
    `<君主>様、第N国に御命令を(0-19)?`.
 
+## Alliance negotiation
+
+At the province prompt, `6`, Return opens diplomacy; `1`, Return selects an
+alliance. Wait for the complete ruler-selection prompt and read the list before
+choosing a ruler, then select an available envoy. In the observed Cao Pi,
+January 220, province-10 campaign, Liu Bei and envoy Cao Pi were each number 1.
+At `使者を送りますか(Y/N)?`, `y` appeared in the field; Return submitted it.
+The game reported the alliance concluded and returned to province commands.
+Liu Bei's displayed hostility changed 50 → 30; gold stayed 950.
+
+These numbers and success are specific to that campaign. Short input sequences
+sent during the list transition did not reach the intended choice. Read the
+complete prompt, send the digit, verify it in the field, then send Return.
+The later alliance-break list was inspected and canceled with an empty Return
+without choosing a ruler; opening that list did not itself break the alliance.
+
 ## Going to war
 
 Observed 220年1月 as 曹丕, from 20 against 31 (劉備).
@@ -96,11 +113,12 @@ Observed 220年1月 as 曹丕, from 20 against 31 (劉備).
 made of hexes and its cursor moves on the digit keys; arrow keys, `4` and `6`
 did nothing. `0` places the unit on the cursor's hex.
 
-The cursor stays where the last unit went, so `0` alone for the second unit
-lands on a taken hex: the game refuses it and the same prompt stays. That is
-what a stuck "second unit" prompt was. Move first — `1` (down-left) placed
-the second unit, and `7` (up-left) the third — then `0`. A hex off the map or
-outside the side's area also keeps the prompt.
+The next unit can start on the occupied hex. Move to a permitted tile before
+pressing `0`; an occupied, off-map or disallowed tile keeps the same prompt.
+In one province-18 → 27 battle, `0` placed Zhang Liao, then separate presses
+`1`, `8`, `0` placed Xiahou Dun. This is specific to that terrain and starting
+cursor, not a universal placement macro. Inspect the PNG after every decision
+and confirm the next officer or battle prompt before continuing.
 
 ## Battle commands
 
@@ -123,6 +141,20 @@ outside the side's area also keeps the prompt.
 flow. Swap to the data disk only when the game requests D; follow the slot
 and name prompts; swap back to B when requested. Emulator checkpoints and the
 game's own save/load are distinct behaviors to verify separately.
+
+To retain the game's changed disk as reusable media, wait for the completed
+write / return-to-B prompt and call `masc_msx_export_disk` **while D is still
+mounted**, with a new `filename`, for example `campaign-data-01.dsk`. Check the
+returned filename, byte count and SHA-256. Existing names are refused. Only
+then swap back to B as requested. Exporting after the swap would copy B instead.
+
+To verify the save independently of an emulator checkpoint, fresh-boot A,
+choose title option `2`, Return, insert the exported data disk when D is
+requested, choose the saved slot with Return, and insert B when requested.
+Read the restored ruler, date, province and resources, then verify a command
+still opens. This round-trip was observed for Cao Pi, January 220, province 10,
+gold 950 and land 72 on native worker source `1632107405d574726b90f0ac918ceeaf98ddbbcb`.
+
 
 ## Media-change pitfall
 

@@ -329,10 +329,9 @@ val keeper_name : t -> string
 val request_id : t -> string
 val execution_id : t -> string
 (** Shared batch execution owner, or the singleton request identity. *)
-val rejection : t -> string option
 val note_rejection : now:float -> t -> string -> unit
-(** A verified pre-execution refusal. Retained separately from user content;
-    an interrupted or unverified transport is never a rejection. *)
+(** Ends the turn as failed with the detail of a verified pre-execution
+    refusal. An interrupted or unverified transport is never a rejection. *)
 val started_at : t -> float
 (** The dispatch instant supplied to {!create}. Exposed as typed timeline
     input so a live turn keeps its original civil-hour rail while it grows. *)

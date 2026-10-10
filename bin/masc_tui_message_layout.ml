@@ -1776,7 +1776,10 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
         | Rail_none | Rail_joins _ -> Rail_none
         | (Rail_closes | Rail_stands) when index = List.length chunks - 1 -> Rail_closes
         | Rail_opens | Rail_says | Rail_does | Rail_stands | Rail_closes -> Rail_says in
-      { style = Status; kind = Metadata Diagnostic; shade = Shade_none;
+      (* The entry's own style and layer: the renderer draws the bar of the
+         entry's body rows in the two cells before the text. *)
+      { style = entry.style; kind = Metadata Diagnostic;
+        shade = shade_of_style entry.style;
         text = "  " ^ text;
         gutter = (if rail_cells = 0 then "" else turn_rail_gutter rail)
           ^ String.make indent ' ' ^ blank;

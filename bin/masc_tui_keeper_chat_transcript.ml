@@ -268,7 +268,6 @@ type t =
            turns the open-ended age into the turn's span. *)
   ; mutable interrupt : interrupt
   ; mutable checkpoints : int
-  ; mutable rejection : string option
   ; mutable unreadable_count : int
   ; mutable last_unreadable : string
   ; mutable awaiting : awaiting_approval option
@@ -385,7 +384,6 @@ let create_for_source ~keeper_name ~source ~started_at =
   ; ended_at = None
   ; interrupt = Not_requested
   ; checkpoints = 0
-  ; rejection = None
   ; unreadable_count = 0
   ; last_unreadable = ""
   ; awaiting = None
@@ -547,9 +545,7 @@ let trail_text ~now t text =
 let keeper_name t = t.keeper_name
 let request_id t = t.request_id
 let execution_id t = Option.value ~default:t.request_id t.batch_execution_id
-let rejection t = t.rejection
 let note_rejection ~now t detail =
-  t.rejection <- Some detail;
   t.phase <- Stream_failed detail;
   t.ended_at <- Some now;
   t.settled_at <- Some now;
@@ -1770,7 +1766,7 @@ let reconcile_operation t (state : Keeper_chat_operation.state) =
    never sees RUN_FINISHED or RUN_ERROR. The end is known only from the
    operation record the server answered a repeat with. Only a turn still open
    is closed; one a delta already ended keeps its own ending. This is not a
-   rejection: the server ran the request, so [rejection] stays empty. *)
+   rejection: the server ran the request. *)
 let close_from_operation_record ~now t (record : Projection.operation_record) =
   match t.phase with
   | Stream_ended | Stream_failed _ -> ()

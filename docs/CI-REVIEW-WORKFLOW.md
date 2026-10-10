@@ -72,7 +72,15 @@ and installation. Native files are uploaded after installation validation;
 early unverified duplicates and the separate fixture-preview bundle are omitted.
 The release behavior selection uses isolated fixtures; full regression builds its own sandbox image where required.
 The behavior lane prepares its sandbox image directly from the checked-in recipe
-before testing; it does not build the server just to print that recipe. The
+before testing; it does not build the server just to print that recipe. BuildKit
+reuses the sandbox's document/media package layers through an architecture-scoped
+GitHub Actions cache. Recipe or resolved base-image changes rebuild affected
+layers; `pull` checks the base tag on every run. The full lane reuses its shim
+Buildx builder, while targeted non-minimal runs set one up without preparing the
+shim. Minimal runs prepare neither image.
+Native PDF, presentation and video suites still need host tools. Those packages
+are installed separately with `--no-install-recommends`; this omits optional
+packages, not required dependencies. All real media checks remain enabled. The
 installation lane still tests the embedded recipe through the release CLI.
 The dashboard build helper owns dependency installation, so its caller does not
 install the same dependencies a second time.

@@ -331,17 +331,13 @@ val ram_diff : unit -> (ram_diff, error) result
     CI pin, and whether the linked digest matches that pin. *)
 
 type core = {
-  source_commit : string option;
-      (** The linked core's own clean-checkout Git commit, when its build
-          can establish it. [None] for dirty, archive or unowned checkouts,
-          or unavailable Git identity. Never replaced by the installation
-          pin or MASC's commit. *)
   source_digest : string;
       (** the linked ocaml-msx core's own identity: a digest of its [lib/]
           sources, computed by its build ([Msx_core_identity]). *)
   source_commit : string option;
-      (** the exact commit embedded by the linked core build, or [None] for
-          dirty or archive builds. *)
+      (** the exact commit embedded by the linked core build, or [None] when
+          that build saw no clean Git checkout: dirty or archive builds, and
+          the opam-pinned install that CI uses. *)
   pinned_source_digest : string;
       (** the digest of the core at the CI pin, [OCAML_MSX_SHA] in
           [scripts/opam-pin-external-deps.sh]. *)

@@ -5,6 +5,28 @@ conversation per workspace. Each message names MSX or DOS, and both machines
 share the same history. Sending a room message never advances either machine
 and does not take the DOS controller.
 
+In the TUI, open Collab with `&` or `:go Collab`, then watch MSX (`m`) or DOS
+(`d`). The same spectator window shows game pixels, joined participants and
+public conversation. `F4` switches the viewed machine without leaving the room.
+`Tab` focuses conversation; Enter sends, Escape or Tab returns to observation.
+While conversation is focused, game keys, checkpoints and paste belong only to
+the conversation. Page Up/Down scroll the visible page; Home reads older history,
+End returns to the latest page. Closing and reopening retains an unsent draft and
+an uncertain send's receipt. A confirmed different workspace never inherits them.
+Wide terminals place conversation on the right; narrow terminals stack it under
+the picture. A viewport smaller than 20 columns or 8 rows cannot submit chat.
+
+Play links show the same room next to the game on wide screens and below it on
+phones. The game selector switches DOS/MSX observation. DOS controls are enabled
+only when its controller policy allows the guest to move; chat remains available
+while watching someone else. Enter sends a message, Shift+Enter adds a newline.
+The current draft and an uncertain-send receipt survive reload in the same tab.
+Disconnect confirms controller release before forgetting its credential; presence
+departure is best effort and cannot hold the disconnect open.
+
+Keepers join and speak using `masc_play_room`. Several Keepers can participate
+at once; joining the conversation does not start a Keeper or force it to reply.
+
 Only deliberate room messages are shared. Keeper transcripts, workspace
 broadcasts, private instructions and invite credentials are not copied here.
 The HTTP API requires an authenticated `CanPlayMachine` bearer. Keeper tools use

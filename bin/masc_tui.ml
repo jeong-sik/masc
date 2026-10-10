@@ -2840,11 +2840,13 @@ let launch_voice_config_load state ~mailbox =
 
 let launch_msx_live_read (state : Masc_tui_types.state) ~mailbox =
   if not (server_authority_ready state) || Option.is_some (checkpoint_for_workspace state) then () else
+  let current_view = !msx_poll_view in
   match state.msx_live_in_flight with
-  | Some pending
-    when pending.live_view == !msx_poll_view && pending.live_port = state.port -> ()
+  | Some pending when pending.live_view == current_view && pending.live_port = state.port -> ()
   | Some _ | None ->
-    let request = { live_view = !msx_poll_view; live_port = state.port } in
+    (* An abandoned view's slow read does not own the reopened screen. Its
+       reply still has to match this exact slot before it can settle it. *)
+    let request = { live_view = current_view; live_port = state.port } in
     let since = Masc_tui_machine_live.since state.msx_live in
     let expected_workspace = state.server_identity in
     state.msx_live_in_flight <- Some request;
@@ -8945,16 +8947,69 @@ let msx_surface_current () =
 ;;
 
 let render_spectator (state : Masc_tui_types.state) =
-  match state.machine_source with
+  (* Layout is pure; publish its navigation bounds only after the complete
+     spectator frame is written. A hidden room has no scrollable rows. *)
+  let next_room = ref (Option.map (fun room ->
+    fst (Masc_tui_play_room.layout room ~width:0 ~height:0)) state.play_room) in
+  let room = Option.map (fun room ~width ~height ->
+    let next, lines = Masc_tui_play_room.layout room ~width ~height in
+    next_room := Some next;
+    lines) state.play_room in
+  let room_footer = Option.map Masc_tui_play_room.footer state.play_room in
+  (match state.machine_source with
   | Masc.Machine_lane.Msx ->
       Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
+        ?room ?room_footer
         ~interaction:state.machine_interaction
         ~connection:state.connection_status ~live:state.msx_live state.msx_frame
         (msx_surface_current ())
   | Masc.Machine_lane.Dos ->
       Masc_tui_msx.render_live ~write:write_to_terminal ~connection:state.connection_status
-        ~activity:state.dos_activity Masc.Machine_lane.Dos state.dos_live
+        ?room ?room_footer
+        ~activity:state.dos_activity Masc.Machine_lane.Dos state.dos_live);
+  state.play_room <- !next_room
 ;;
+
+let room_workspace_ready state =
+  match state.workspace_identity, workspace_input_identity_of_server state.server_identity with
+  | Workspace_identity_match, Some _ -> true
+  | (Workspace_identity_unread | Workspace_identity_match_unconfirmed _ | Workspace_identity_mismatch _), _
+  | Workspace_identity_match, None -> false
+
+let launch_play_room state ~mailbox request =
+  if room_workspace_ready state then begin
+  let credential = Masc_tui_http.bind_credential () in
+  Option.iter (fun expected_workspace ->
+  launch_preset_call state ~mailbox
+    ~call:(fun ~host ~port ->
+      let fields = match Masc_tui_play_room.request_json request with
+        | `Assoc fields -> fields | _ -> assert false in
+      let body = `Assoc (Masc_tui_http.expected_workspace_field expected_workspace :: fields) in
+      Masc_tui_http.post_json_bound ~credential ~host ~port ~path:"/api/v1/play/room"
+        ~body:(Yojson.Safe.to_string body)
+      |> fun result -> Result.bind result Masc.Play_room.view_of_json)
+    ~wrap:(fun result -> Play_room_received (request, result))) state.server_identity
+  end
+
+let poll_play_room state ~mailbox =
+  if room_workspace_ready state then begin
+  let watching = state.msx_open && not state.msx_menu_open in
+  if watching && Option.is_some (workspace_input_identity_of_server state.server_identity)
+    && Option.is_none state.play_room
+  then state.play_room <- Some (Masc_tui_play_room.create ());
+  Option.iter (fun room ->
+    let room = Masc_tui_play_room.active room watching in
+    let room, request = Masc_tui_play_room.poll room ~now:(Int64.to_float (Mtime_clock.elapsed_ns ()) /. 1e9) ~machine:state.machine_source in
+    state.play_room <- Some room;
+    Option.iter (launch_play_room state ~mailbox) request) state.play_room
+  end
+
+let send_play_room state ~mailbox =
+  if room_workspace_ready state then
+  Option.iter (fun room ->
+    let room, request = Masc_tui_play_room.send room ~machine:state.machine_source in
+    state.play_room <- Some room;
+    Option.iter (launch_play_room state ~mailbox) request) state.play_room
 
 (* A live read names no mode, media or players. Keep the last tick metadata
    only within the same incarnation, so a keypress does not briefly erase the
@@ -11484,8 +11539,9 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   Masc_tui_msx.close ~write:write_to_terminal state;
   msx_surface_frame := None;
   Masc_tui_types.withdraw_machine_control state;
-  Masc_tui_types.withdraw_play_invite_workspace state ~previous
-    ~current:(workspace_input_identity_of_server state.server_identity);
+  let current = workspace_input_identity_of_server state.server_identity in
+  Masc_tui_types.withdraw_play_room_workspace state ~previous ~current;
+  Masc_tui_types.withdraw_play_invite_workspace state ~previous ~current;
   state.play_invite_scroll <- 0;
   Masc_tui_types.withdraw_play_changes state;
   (* A decision receipt states what one workspace's Keeper answered; the
@@ -16305,6 +16361,13 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
            state.preset_busy <- false;
            report_action state "error" ("preset delete: " ^ detail);
            launch_presets_load state ~mailbox)
+  | Play_room_received (request, result) ->
+      state.play_room <- Option.map (fun room ->
+        let viewer, result = match result with
+          | Ok (viewer, snapshot) -> Some viewer, Ok snapshot
+          | Error detail -> None, Error detail in
+        Masc_tui_play_room.receive ?viewer room request ~now:(Int64.to_float (Mtime_clock.elapsed_ns ()) /. 1e9) result) state.play_room;
+      if state.msx_open && not state.msx_menu_open then render_spectator state
   | Play_invites_listed (target, result) ->
       (match target with
        | Play_collab_list read ->
@@ -21062,6 +21125,7 @@ and is loaded on demand through keeper_skill.
           else
             render_spectator state
       end;
+      poll_play_room state ~mailbox:async_messages;
       if state.msx_open && not state.msx_menu_open then begin
         let now_ns = Mtime_clock.elapsed_ns () in
         if
@@ -21308,6 +21372,10 @@ and is loaded on demand through keeper_skill.
           | None -> None
         else None
       in
+      let room_focused = not state.msx_menu_open
+        && Option.fold ~none:false ~some:Masc_tui_play_room.focused state.play_room in
+      let room_visible =
+        let rows, cols = Masc_tui_ansi.get_terminal_size () in rows >= 8 && cols >= 20 in
       (* Menu decisions, game input and closing own a new view. Pure size or
          non-game input keeps the snapshot current; completion renders using
          the geometry the UI owns at that later instant. *)
@@ -21315,6 +21383,7 @@ and is loaded on demand through keeper_skill.
          repaint, and disowning the DOS read in flight there would drop its
          answer, so keys typed steadily would freeze the picture. *)
       (match msx_key, state.machine_source with
+       | Some _, _ when room_focused -> ()
        | Some _, (Masc.Machine_lane.Msx | Masc.Machine_lane.Dos)
          when state.msx_menu_open -> invalidate_msx_poll ()
        | Some "esc", (Masc.Machine_lane.Msx | Masc.Machine_lane.Dos) ->
@@ -21334,6 +21403,25 @@ and is loaded on demand through keeper_skill.
           && Option.is_some (checkpoint_for_workspace state) ->
           Option.iter (inspect_pending_msx_checkpoint state) (checkpoint_for_workspace state);
           state.machine_interaction <- Observe_machine;
+          render_spectator state
+      (* Switching the observed machine belongs to the whole spectator,
+         including its focused conversation. The room keeps its draft/focus. *)
+      | Some "f4" when not state.msx_menu_open ->
+          (match state.machine_source with
+           | Masc.Machine_lane.Msx -> open_dos_screen state ~mailbox:async_messages
+           | Masc.Machine_lane.Dos -> open_msx_spectator state ~mailbox:async_messages)
+      | Some name when room_focused ->
+          Option.iter (fun room ->
+            let room, intent =
+              if not room_visible && not (List.mem name ["esc"; "tab"; "\t"]) then room, Masc_tui_play_room.Repaint
+              else match input with
+                | Some (Pasted paste) -> Masc_tui_play_room.paste room paste.Masc_tui_paste.text, Masc_tui_play_room.Repaint
+                | _ -> Masc_tui_play_room.key room name in
+            state.play_room <- Some room;
+            (match intent with Repaint -> () | Send -> send_play_room state ~mailbox:async_messages)) state.play_room;
+          render_spectator state
+      | Some ("tab" | "\t") when not state.msx_menu_open ->
+          if room_visible then state.play_room <- Option.map (fun room -> Masc_tui_play_room.focus room true) state.play_room;
           render_spectator state
       | Some name when state.msx_menu_open -> (
           (* The load menu owns the keyboard: the lib navigates the picker and
@@ -21505,8 +21593,7 @@ and is loaded on demand through keeper_skill.
                   render_spectator state)
                 (fun ~port ~expected_workspace -> Masc_tui_http.post_msx_press
                   ~expected_workspace ~host:server_peer_host ~port ~keys:[ server_key ])
-          (* See Masc_tui_msx.consume: a non-game key only repaints, always open. *)
-          | None -> ignore (Masc_tui_msx.consume ~write:write_to_terminal state name)));
+          | None -> render_spectator state));
       (* Async agenda state can change the usable row budget after the last
          paint. Read the compact marker from that paint, not from the newer
          state. An invalidated or not-yet-painted frame stays compact until
@@ -21602,6 +21689,7 @@ and is loaded on demand through keeper_skill.
           the composer under the card would put the link [y] just copied into a
           draft that goes to a Keeper on the next Enter. It is first, above the
           overlays the card is drawn over. *)
+       | Some (Pasted _) when state.msx_open -> ()
        | Some (Pasted _) when Option.is_some (Masc_tui_types.play_card_shown state) -> ()
        | Some (Pasted paste) when Option.is_some state.collab ->
            (* The whole Collab overlay owns paste. Only its visible form may

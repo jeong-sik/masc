@@ -1619,11 +1619,10 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
       | `POST, path when path = Server_routes_http_routes_play_room.path ->
           with_h2_token_permission_auth h2_reqd
             ~permission:Masc_domain.CanPlayMachine (fun state viewer ->
-              let base_path = (Mcp_server.workspace_config state).base_path in
+              let config = Mcp_server.workspace_config state in
               h2_read_body h2_reqd (fun body ->
                 let status, json =
-                  Server_routes_http_routes_play_room.perform ~base_path ~who:viewer body
-                  |> Server_routes_http_routes_play_room.response ~viewer
+                  Server_routes_http_routes_play_room.perform_bound ~config ~who:viewer body
                 in
                 h2_respond_json_value h2_reqd json
                   ~status:(status :> H2.Status.t) ~extra_headers:cors))

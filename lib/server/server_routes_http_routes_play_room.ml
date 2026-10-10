@@ -30,6 +30,18 @@ let perform ~base_path ~who body =
   Result.bind action (fun action ->
     Play_room.perform ~base_path ~who ~speaker:Play_room.Participant
       ~now:(Time_compat.now ()) action)
+let perform_bound ~config ~who body =
+  match Yojson.Safe.from_string body with
+  | exception Yojson.Json_error _ ->
+    response ~viewer:who (Error (Play_room.Invalid_request "body must be JSON"))
+  | json ->
+    match Workspace.validate_expected_workspace ~config json with
+    | Error Workspace.Invalid_workspace_precondition ->
+      `Bad_request, Server_refusal.json ~code:"invalid_workspace_precondition" "invalid expected_workspace precondition"
+    | Error Workspace.Workspace_precondition_failed ->
+      `Conflict, Server_refusal.json ~code:"workspace_precondition_failed" "workspace precondition failed"
+    | Ok args -> perform ~base_path:config.Workspace.base_path ~who (Yojson.Safe.to_string args)
+        |> response ~viewer:who
 let add_routes router =
   router
   |> Http.Router.get path (fun request reqd ->
@@ -40,5 +52,5 @@ let add_routes router =
     with_token_permission_auth ~permission:Masc_domain.CanPlayMachine (fun state name request reqd ->
       let config = Mcp_server.workspace_config state in
       Http.Request.read_body_async reqd (fun body ->
-        respond ~viewer:name request reqd
-          (perform ~base_path:config.base_path ~who:name body))) request reqd)
+        let status, json = perform_bound ~config ~who:name body in
+        respond_json_value_with_cors ~status request reqd json)) request reqd)

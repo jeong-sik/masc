@@ -50,7 +50,11 @@ val operation_event_to_json :
   event:Ag_ui.event ->
   Yojson.Safe.t
 
+(** Publish only to observers of [base_path]'s canonical runtime authority,
+    including external transports and reconnect replay. The root is delivery
+    authority, not a field inferred from the event's JSON payload. *)
 val operation_event :
+  base_path:string ->
   keeper_name:string ->
   operation_id:string ->
   seq:int option ->

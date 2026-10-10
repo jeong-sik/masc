@@ -217,6 +217,8 @@ type reply =
 type model_signal =
   | Model_started_at of float
       (* STREAM_MODEL_STARTED: the endpoint answered; no token yet. *)
+  | Model_response_ended
+      (* Provider response stop; the Keeper turn remains open. *)
   | Reasoning_at of float (* the last THINKING delta *)
   | Answering_at of float (* the last TEXT delta *)
   | Tool_returned_at of string * float
@@ -754,21 +756,20 @@ let quiet_after_s = 2.0
 (* The model side's phase as one clause, or [None] before the first byte,
    where the named runtime is the subject instead. *)
 let model_phase_text ~show_timing ~now t =
-  match t.model_signal with
-  | None -> None
-  | Some signal ->
-    let word, since =
-      match signal with
-      | Model_started_at since -> "model started", since
-      | Reasoning_at since -> "THINKING · reasoning", since
-      | Answering_at since -> "STREAMING · answering", since
-      | Tool_returned_at (tool_name, since) -> tool_name ^ " returned", since
-    in
+  let observed ~since word =
     if not show_timing || now -. since < quiet_after_s then Some word
     else
       match Masc_tui_message_layout.age_text ~now ~since with
       | None -> Some word
       | Some age -> Some (Printf.sprintf "%s, nothing back for %s" word age)
+  in
+  match t.model_signal with
+  | None -> None
+  | Some Model_response_ended -> Some "model response ended"
+  | Some (Model_started_at since) -> observed ~since "model started"
+  | Some (Reasoning_at since) -> observed ~since "THINKING · reasoning"
+  | Some (Answering_at since) -> observed ~since "STREAMING · answering"
+  | Some (Tool_returned_at (tool_name, since)) -> observed ~since (tool_name ^ " returned")
 ;;
 
 let phase_text ~show_timing ~now t =
@@ -1424,6 +1425,8 @@ let apply_delta ~now t (delta : Live.delta) =
               ; cache_creation_input_tokens = fill current.cache_creation_input_tokens initial.cache_creation_input_tokens }
         | _, None -> ()
       end
+  | Live.Stream_model_stopped ->
+      t.model_signal <- Some Model_response_ended
   | Live.Stream_details { usage; stop_reason; stream_scope } ->
       (* A retained detail can be the first surviving event of a response.
          Its scope retires prior counters before sparse fields are merged. *)
@@ -1449,6 +1452,13 @@ let apply_delta ~now t (delta : Live.delta) =
            t.observed_stop_reason <- Some stop_reason;
            t.stop_scope <- stream_scope
        | None -> ())
+  | Live.Text {text=""; stream_scope} ->
+      (* An empty chunk writes nothing, so it does not move the answer. Its
+         scope is still a response boundary: when the next response's start
+         frame is lost, this chunk is the first thing that says the previous
+         response's model, counters and stop no longer apply. *)
+      Option.iter (enter_text_response_scope t) stream_scope
+  | Live.Thinking "" -> ()
   | Live.Text {text; stream_scope} ->
       Option.iter (enter_text_response_scope t) stream_scope;
       t.model_signal <- Some (Answering_at now);
@@ -2033,3 +2043,19 @@ let drawn t =
           ; drawn = Drawn_error (safe_block message)
           } ]
 ;;
+
+type model_activity =
+  | Activity_model_started
+  | Activity_response_ended
+  | Activity_reasoning
+  | Activity_answering
+  | Activity_tool_returned of string
+
+let model_activity t =
+  match t.model_signal with
+  | None -> None
+  | Some (Model_started_at _) -> Some Activity_model_started
+  | Some Model_response_ended -> Some Activity_response_ended
+  | Some (Reasoning_at _) -> Some Activity_reasoning
+  | Some (Answering_at _) -> Some Activity_answering
+  | Some (Tool_returned_at (tool_name, _)) -> Some (Activity_tool_returned tool_name)

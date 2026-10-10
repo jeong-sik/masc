@@ -373,6 +373,17 @@ val revision : t -> int
 
 val phase : t -> phase
 
+(** What the model side is doing, read from the latest model signal, without
+    the words the progress row draws for it. *)
+type model_activity =
+  | Activity_model_started
+  | Activity_response_ended
+  | Activity_reasoning
+  | Activity_answering
+  | Activity_tool_returned of string
+
+val model_activity : t -> model_activity option
+
 val ending_source : t -> ending_source
 (** {!Ending_read_from_record} only after {!close_from_operation_record} closed
     the turn. A later RUN_FINISHED or RUN_ERROR the log hears sets it back to

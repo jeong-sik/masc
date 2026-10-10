@@ -1163,6 +1163,79 @@ let test_runtime_failover_visibility_and_error_attribution () =
     (Transcript.Stream_failed "[gpt-4o] RateLimitExceeded (429)")
     (Transcript.phase t)
 
+let test_empty_scoped_text_still_retires_prior_response_metadata () =
+  let t = fresh () in
+  feed t [Live.Run_started;
+    Live.Stream_model_started {usage = None; message_id = None; stream_scope=Some 1; model="first"};
+    Live.Stream_details {stream_scope=Some 1;
+      usage=Some {input_tokens=Some 100; output_tokens=Some 20;
+        cache_read_input_tokens=None; cache_creation_input_tokens=None};
+      stop_reason=Some Agent_core.Types.EndTurn}];
+  let before = Transcript.drawn t in
+  feed t [Live.Text {text=""; stream_scope=Some 2}];
+  check (option string) "an empty chunk in a new scope retires prior counters and stop" None
+    (Transcript.stream_details_text ~keeper_name:"keeper.one" (Some t));
+  check bool "the empty chunk writes nothing" true (before = Transcript.drawn t);
+  check bool "the empty chunk does not invent an answer in progress" false
+    (Transcript.model_activity t = Some Transcript.Activity_answering);
+  feed t [Live.Stream_details {stream_scope=None; usage=None;
+    stop_reason=Some Agent_core.Types.MaxTokens}];
+  check (option string) "a later unscoped stop belongs to the new response alone"
+    (Some "stopped: max_tokens")
+    (Transcript.stream_details_text ~keeper_name:"keeper.one" (Some t))
+;;
+
+let test_response_stop_preserves_pending_work () =
+  List.iter (fun content ->
+    let t = fresh () in
+    feed t [Live.Run_started; Live.Stream_model_started {stream_scope=None; message_id=Some "response";model="observed";usage=None}; content];
+    let before = Transcript.drawn t in
+    let active = Transcript.model_activity t in
+    let decoder = Live.create () in
+    let receive json =
+      Live.feed decoder ("data: " ^ json ^ "\n\n")
+      |> List.iter (fun (observed : Live.observed_delta) ->
+          Transcript.apply ~now:origin t observed.delta) in
+    List.iter (fun json ->
+      receive json;
+      check phase "malformed provider stop leaves Keeper running" Transcript.Working
+        (Transcript.phase t);
+      check bool "malformed provider stop preserves current model activity" true
+        (active = Transcript.model_activity t);
+      check bool "malformed provider stop is reported" true
+        (Option.is_some (Transcript.unreadable t)))
+      [{|{"type":"CUSTOM","name":"KEEPER_STREAM_MESSAGE_STOP"}|};
+       {|{"type":"CUSTOM","name":"KEEPER_STREAM_MESSAGE_STOP","value":{}}|}];
+    receive {|{"type":"CUSTOM","name":"KEEPER_STREAM_MESSAGE_STOP","value":null}|};
+    check bool "a subsequent valid wire stop ends only model activity" true
+      (Transcript.model_activity t = Some Transcript.Activity_response_ended);
+    feed t [Live.Stream_model_stopped; Live.Stream_model_stopped; Live.Text {text=""; stream_scope=None}; Live.Thinking ""];
+    check phase "provider stop leaves Keeper running" Transcript.Working (Transcript.phase t);
+    check bool "response stop and empty chunks leave the transcript body unchanged" true
+      (before = Transcript.drawn t);
+    check bool "the ended response is visible" true (Transcript.model_activity t = Some Transcript.Activity_response_ended);
+    check bool "empty chunks do not invent resumed output" false
+      (match Transcript.model_activity t with
+       | Some (Transcript.Activity_answering | Transcript.Activity_reasoning) -> true
+       | Some _ | None -> false);
+    feed t [tool_started "pending" "Execute"; tool_ended "pending"];
+    let pending = Transcript.tool_calls t in
+    feed t [Live.Stream_model_stopped];
+    check bool "response stop preserves existing pending execution" true
+      (pending = Transcript.tool_calls t);
+    feed t [tool_result "pending" "executed"; Live.Stream_model_started {stream_scope=None; message_id=Some "response";model="observed";usage=None}; Live.Thinking "next"];
+    check bool "a later response can resume reasoning with a reused id" true
+      (Transcript.model_activity t = Some Transcript.Activity_reasoning);
+    feed t [Live.Stream_model_stopped; Live.Runtime_attempt_started
+      {runtime_id=Some "retry";attempt_index=Some 1}];
+    check bool "retry clears the prior response's end" false
+      (Transcript.model_activity t = Some Transcript.Activity_response_ended);
+    feed t [Live.Run_finished; Live.Stream_model_stopped];
+    check phase "a late response stop cannot reopen a completed turn" Transcript.Stream_ended
+      (Transcript.phase t))
+    [Live.Text {text="answer"; stream_scope=None}; Live.Thinking "reason"]
+;;
+
 let test_the_turn_reports_the_tokens_it_has_spent () =
   let usage ?(keeper_name = "keeper.one") transcript =
     Transcript.stream_details_text ~keeper_name transcript
@@ -2135,7 +2208,7 @@ let () =
   run "tui_keeper_chat_transcript"
     [ ( "response boundaries", [test_case "scoped details retire prior model activity" `Quick test_scoped_details_retire_prior_model_activity;
       test_case "scoped details retire prior response usage" `Quick test_scoped_details_retire_prior_response_usage;
-      test_case "boundaries and stable origins" `Quick test_response_boundaries_preserve_origins; test_case "interleaved final authority" `Quick test_interleaved_final_keeps_observed_times_and_bytes; test_case "usage reset boundaries" `Quick test_usage_resets_only_at_response_boundaries; test_case "new response without text" `Quick test_empty_new_response_does_not_replace_prior_message])
+      test_case "boundaries and stable origins" `Quick test_response_boundaries_preserve_origins; test_case "interleaved final authority" `Quick test_interleaved_final_keeps_observed_times_and_bytes; test_case "usage reset boundaries" `Quick test_usage_resets_only_at_response_boundaries; test_case "response end retains turn and tool lifecycle" `Quick test_response_stop_preserves_pending_work; test_case "new response without text" `Quick test_empty_new_response_does_not_replace_prior_message])
     ; ( "event timeline"
       , [test_case "replay preserves continuation event times" `Quick test_event_times_survive_log_replay_and_continuation;
          test_case "native tools have no MASC receipt" `Quick test_native_tools_are_observations_without_execution_receipts;
@@ -2185,6 +2258,8 @@ let () =
             test_repeated_response_start_is_not_a_boundary
         ; test_case "scoped text retires prior metadata" `Quick
             test_scoped_text_retires_prior_response_metadata
+        ; test_case "empty scoped text still retires prior metadata" `Quick
+            test_empty_scoped_text_still_retires_prior_response_metadata
         ; test_case "drawn reconciles text after an observed skill round" `Quick
             test_drawn_reconciles_text_after_an_observed_skill_round
         ; test_case "note_tool_outcome folds the durable facts in" `Quick

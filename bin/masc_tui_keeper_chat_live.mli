@@ -84,6 +84,8 @@ type delta =
       (** Provider response metadata. The bridge scope is retained across repeated
           starts, including a surviving start following scoped text. The optional
           provider id is correlation data, not response identity. *)
+  | Stream_model_stopped
+      (** The provider response ended; the Keeper turn may still be running. *)
   | Stream_details of
       { stream_scope : int option
       ; usage : stream_usage option

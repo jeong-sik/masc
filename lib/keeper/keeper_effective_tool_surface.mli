@@ -58,7 +58,6 @@ type t =
   ; tool_surface_bytes : int
   ; skill_tool_surface_bytes : int
   ; skill_discovery_bytes : int
-  ; skill_eager_body_bytes : int
   ; skill_body_bytes : int
   ; lane_addon_conflicts : Lane_addon_tool_export.conflict list
   ; skills_left_out : string list

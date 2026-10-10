@@ -319,11 +319,10 @@ let test_projection_names_equal_turn_surface_authority () =
     check bool "Skill tool bytes are a strict subset" true
       (surface.skill_tool_surface_bytes > 0
        && surface.skill_tool_surface_bytes < surface.tool_surface_bytes);
-    check bool "Skill bodies are measured but never eager" true
+    check bool "Skill bodies are measured" true
       (surface.skill_body_bytes > 0);
     check bool "Skill discovery total is measured" true
       (surface.skill_discovery_bytes > 0);
-    check int "Skill eager total remains exact" 0 surface.skill_eager_body_bytes;
     let json = Keeper_effective_tool_surface.to_yojson (Available surface) in
     let profile_reasons =
       Yojson.Safe.Util.(member "skill_profiles" json |> to_list)
@@ -339,7 +338,6 @@ let test_projection_names_equal_turn_surface_authority () =
     (match surface.skill_profiles with
      | [ instruction; composition ] ->
        check string "instruction activation" "on_demand" instruction.execution;
-       check int "instruction eager bytes" 0 instruction.eager_body_bytes;
        check (option int) "shared instruction schema is not double-counted" None
          instruction.tool_schema_bytes;
        check string "composition execution" "async" composition.execution;

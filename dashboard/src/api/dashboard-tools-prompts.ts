@@ -582,7 +582,6 @@ export interface DashboardEffectiveSkillProfile {
   execution: string
   context: {
     body_bytes: number
-    eager_body_bytes: number
     discovery_bytes: number
     tool_schema_bytes: number | null
   }
@@ -613,7 +612,6 @@ export type DashboardEffectiveKeeperSurface =
       tool_surface_bytes: number
       skill_tool_surface_bytes: number
       skill_discovery_bytes: number
-      skill_eager_body_bytes: number
       skill_body_bytes: number
       skills_left_out: string[]
       count: number

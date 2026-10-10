@@ -43,7 +43,6 @@ type t =
   ; tool_surface_bytes : int
   ; skill_tool_surface_bytes : int
   ; skill_discovery_bytes : int
-  ; skill_eager_body_bytes : int
   ; skill_body_bytes : int
         (* Documents the catalog could not read, by the directory they were
            found in. They are here because this is the surface that answers
@@ -274,13 +273,6 @@ let project
         0
         skill_profiles
     in
-    let skill_eager_body_bytes =
-      List.fold_left
-        (fun total (profile : Keeper_skill_observability.profile) ->
-           total + profile.eager_body_bytes)
-        0
-        skill_profiles
-    in
     let tool_surface_sha256 =
       Option.map
         (fun native_posture ->
@@ -312,7 +304,6 @@ let project
       ; tool_surface_bytes
       ; skill_tool_surface_bytes
       ; skill_discovery_bytes
-      ; skill_eager_body_bytes
       ; skill_body_bytes
         (* Both sides added to this record and neither replaced the other:
            main (#31092) brought the profile and byte fields above, and this
@@ -634,7 +625,6 @@ let to_yojson = function
       ; "tool_surface_bytes", `Int surface.tool_surface_bytes
       ; "skill_tool_surface_bytes", `Int surface.skill_tool_surface_bytes
       ; "skill_discovery_bytes", `Int surface.skill_discovery_bytes
-      ; "skill_eager_body_bytes", `Int surface.skill_eager_body_bytes
       ; "skill_body_bytes", `Int surface.skill_body_bytes
       ; "lane_addon_conflicts", `List (List.map (fun (conflict : Lane_addon_tool_export.conflict) ->
           `Assoc ["name",`String conflict.name; "instances",string_list conflict.instances;

@@ -88,7 +88,6 @@ const editorProfile = {
   },
   context: {
     body_bytes: 120,
-    eager_body_bytes: 0,
     discovery_bytes: 48,
     tool_schema_bytes: null,
   },

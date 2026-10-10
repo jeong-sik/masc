@@ -3720,7 +3720,6 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
       ; "tool_surface_bytes", `Int 79984
       ; "skill_tool_surface_bytes", `Int 2360
       ; "skill_discovery_bytes", `Int 369
-      ; "skill_eager_body_bytes", `Int 0
       ; "skill_body_bytes", `Int 0
       ; "skills_left_out", `List []
       ; "unavailable_skill_names", `List []
@@ -3777,7 +3776,6 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
                  ets_tool_surface_bytes;
                  ets_skill_tool_surface_bytes;
                  ets_skill_discovery_bytes;
-                 ets_skill_eager_body_bytes;
                  ets_skill_body_bytes;
                  ets_tools = [ tool; bare_tool ];
                  ets_tool_surface_sha256 = Some digest;
@@ -3824,7 +3822,6 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
       Alcotest.(check (option int)) "whole surface bytes" (Some 79984) ets_tool_surface_bytes;
       Alcotest.(check (option int)) "Skill surface bytes" (Some 2360) ets_skill_tool_surface_bytes;
       Alcotest.(check int) "Skill discovery bytes" 369 ets_skill_discovery_bytes;
-      Alcotest.(check int) "Skill eager bytes" 0 ets_skill_eager_body_bytes;
       Alcotest.(check (option int)) "reported zero body bytes" (Some 0) ets_skill_body_bytes;
       (* The skill source is asserted above, against the shape the producer
          emits. This used to pin a SKILL.md path that no producer has sent
@@ -3846,7 +3843,6 @@ let test_decode_effective_keeper_surface_rejects_legacy_skill_names () =
       ; "instruction_skills", `List [ `String "legacy-name" ]
       ; "composition_skills", `List []
       ; "skill_discovery_bytes", `Int 0
-      ; "skill_eager_body_bytes", `Int 0
       ; "skills_left_out", `List []
       ; "unavailable_skill_names", `List []
       ; "count", `Int 0
@@ -3872,7 +3868,6 @@ let minimal_available_surface ?(unavailable_skill_names = Some (`List [])) tools
      ; "instruction_skills", `List []
      ; "composition_skills", `List []
      ; "skill_discovery_bytes", `Int 0
-     ; "skill_eager_body_bytes", `Int 0
      ; "skills_left_out", `List []
      ; "count", `Int (List.length tools)
      ; "tools", `List tools
@@ -4026,7 +4021,6 @@ let test_decode_effective_keeper_surface_keeps_tool_suppression () =
       ; "instruction_skills", `List []
       ; "composition_skills", `List []
       ; "skill_discovery_bytes", `Int 0
-      ; "skill_eager_body_bytes", `Int 0
       ; "skills_left_out", `List []
       ; "unavailable_skill_names", `List []
       ; "count", `Int 0

@@ -123,7 +123,6 @@ let test_load_preview_and_publish () =
    | Error error -> fail (Editor.error_to_string error)
    | Ok preview ->
      check string "instruction profile" "instruction" preview.profile.kind;
-     check int "body remains deferred" 0 preview.profile.eager_body_bytes;
      check bool "candidate revision changes" false
        (Skill_reference.equal reference preview.profile.reference));
   (match Editor.save ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ())) ~base_path ~reference ~source_text:edited ~refresh with

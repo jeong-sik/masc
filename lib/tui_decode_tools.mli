@@ -236,7 +236,6 @@ type effective_tool_surface =
       ets_tool_surface_bytes : int option;
       ets_skill_tool_surface_bytes : int option;
       ets_skill_discovery_bytes : int;
-      ets_skill_eager_body_bytes : int;
       ets_skill_body_bytes : int option;
       ets_tools : effective_tool list;
       ets_tool_surface_sha256 : string option;

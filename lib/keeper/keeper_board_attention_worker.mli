@@ -150,6 +150,16 @@ module For_testing : sig
   type rearm_scheduler
   type deferred_rearm_scheduler
 
+  val deliver_and_settle_completed :
+    base_path:string ->
+    keeper_name:string ->
+    Keeper_board_attention_partition.t ->
+    (Keeper_board_attention_partition.t, string) result
+  (** The settlement half of [signal_completion]: durably delivers the
+      completed judgment to the candidate and settles the partition. Exposed
+      so a test can reproduce the owner settlement's exact write path without
+      standing up the full worker lifecycle. *)
+
   val reconcile_quarantines :
     now:float ->
     worker_epoch:Keeper_board_attention_partition.Worker_epoch.t ->

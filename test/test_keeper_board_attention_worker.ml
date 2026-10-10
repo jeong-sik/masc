@@ -1330,6 +1330,185 @@ let test_drain_drops_the_settled_receipt_of_a_consumed_candidate () =
     (List.length (ok "load partitions" (P.load ~base_path ~keeper_name:"alpha")))
 ;;
 
+(* PR #41506 moved the candidate-list read after both prunes so that a
+   settlement racing the wake cannot leave the pruned ledger one [Ready]
+   root short of its ledger: with the read first, [ensure_roots] mints a
+   fresh [Ready] root on the partition whose settled receipt the prune
+   just dropped, and the worker blocks on "candidate ledger lacks
+   partition member" forever because only [Settled] receipts are pruned.
+   These tests pin that order. The helpers below run the reads the way
+   the worker does -- after both prunes, and inside the process call --
+   so a refactor that moves the read back to the front still satisfies
+   every open-code assertion below and fails only here. *)
+
+let read_candidate_and_roots ~base_path =
+  (* Read both ledgers back-to-back, exactly the way
+     [process_next_with_claim_ready_exact_current] does after its two
+     prunes, so the assertions below read the same pair that root
+     minting saw. *)
+  let candidates =
+    ok "load candidates for roots" (A.load_candidates ~base_path ~keeper_name:"alpha")
+  in
+  let partitions = ok "load partitions for roots" (P.load ~base_path ~keeper_name:"alpha") in
+  (candidates, partitions)
+;;
+
+(* Both prunes plus the post-prune ledger read, with no work to do: the
+   exact seam of a wake that drains the ledgers the way the worker does.
+   Runs the two prunes even when the ledger is empty, so the helper
+   exercises the same path the overlap tests need. *)
+let drain ~base_path =
+  ignore
+    (ok "drain with nothing to do"
+       (W.For_testing.process_next_with_claim_ready_exact
+          ~claim_ready_exact:(fun ~now:_ ~worker_epoch:_ ~base_path:_ ~keeper_name:_
+                                ~partition_id:_ ~generation:_ ->
+            Ok None)
+          ~now:(fun () -> 3.0)
+          ~worker_epoch:(P.Worker_epoch.generate ())
+          ~base_path
+          ~keeper_name:"alpha"
+          ~prepare:(fun candidate -> Ok candidate)
+          ~execute:(fun ~before_dispatch:_ ~before_advance:_ _candidate ->
+            Alcotest.fail "an empty ledger dispatched a judgment")))
+;;
+
+(* Step order: judge X (1), deliver X (2 — the durable delivery the owner
+   settlement performs), advance the board cursor, drain (3 — both prunes
+   drop X's Consumed row and its settled receipt), settle X (4 — the
+   partition settles on top of the pruned ledger), then read the ledger
+   pair and mint roots (5 — the next wake's post-prune read). The read
+   sees an empty ledger, and root minting over the settled receipt must
+   mint nothing. The re-ordered overlap is exactly what a settlement that
+   lands between the wake's read and its root minting produces when the
+   pre-#41506 order put the read in front of the prunes: a list that still
+   holds the candidate while its settled receipt has already been dropped.
+   This test pins that the post-prune read pairs with the pruned ledger,
+   so no fresh Ready root can be minted over the settled one. *)
+let test_drain_then_settle_does_not_mint_a_ready_root () =
+  with_temp_base "board-attention-worker-drain-then-settle" @@ fun base_path ->
+  let kept = record ~base_path (candidate ~id:"candidate-overlap-judged" ()) in
+  let (selected : A.candidate), completed_judgment = complete_next ~base_path J.Relevant in
+  Alcotest.(check string) "the judged candidate is ours" kept.candidate_id
+    selected.candidate_id;
+  (* Deliver the Relevant judgment the way the owner settlement will, so the
+     drain prunes and the later settlement operate on the same ledger the
+     racing owner would have written. The settle below re-delivers the same
+     exact judgment already on the row (the same provenance the worker
+     bound), which is idempotent. *)
+  ignore
+    (delivered
+       "deliver the judged candidate's Relevant verdict"
+       (A.apply_judgment_and_deliver
+          ~base_path
+          ~keeper_name:"alpha"
+          ~candidate_id:kept.candidate_id
+          ~judgment:completed_judgment)
+      : A.candidate);
+  (* The board cursor passes the signal coordinate: the drain's candidate
+     prune can now remove the row, which is what a racing wake would have
+     already done when the read runs after the prunes. *)
+  Masc.Keeper_registry.set_board_cursor ~base_path "alpha" 50.0 (Some "cursor-post");
+  drain ~base_path;
+  Alcotest.(check int) "the drain pruned the consumed row" 0
+    (List.length (ok "load candidates after drain"
+                   (A.load_candidates ~base_path ~keeper_name:"alpha")));
+  (* The owner settlement path: deliver (the row is gone — Candidate_absent)
+     and settle the partition. The settle appends the Settled receipt on top
+     of the pruned ledger. The next wake here reads after its prunes, sees
+     an empty ledger, and must mint nothing over the settled receipt. *)
+  ignore
+    (ok "settle the completed snapshot"
+       (W.For_testing.deliver_and_settle_completed
+          ~base_path
+          ~keeper_name:"alpha"
+          (load_one_partition ~base_path)));
+  let candidates, partitions = read_candidate_and_roots ~base_path in
+  ignore
+    (ok "mint roots after settlement"
+       (P.ensure_roots ~base_path ~keeper_name:"alpha" candidates));
+  (* The durable pair after a full overlap is (empty candidate ledger,
+     Settled receipt): the read must see no candidate, and root minting
+     over the settled receipt must mint nothing. A read taken before the
+     prunes would still hold the Consumed row while the receipt is already
+     gone, and minting over that stale pair is the #41506 overlap. *)
+  Alcotest.(check int) "the consumed row was pruned" 0 (List.length candidates);
+  List.iter
+    (fun (partition : P.t) ->
+       match partition.state with
+       | P.Settled _ -> ()
+       | _ -> Alcotest.fail "the settlement minted a fresh Ready partition")
+    partitions
+;;
+
+(* The task's second overlap case, driven deterministically through the
+   public settlement seam: the wake completes X (the judgment lands on X's
+   partition as its Completed item) and then reads the ledger pair; the
+   owner settlement — which runs without the worker lock — consumes X and
+   settles the partition BEFORE root minting runs. [ensure_roots] must
+   return the settled receipt without minting a fresh Ready root over it:
+   X is Consumed by the time root minting sees its Completed row. *)
+let test_settlement_between_reads_and_roots_mints_no_root () =
+  with_temp_base "board-attention-worker-settle-between-read-and-roots" @@ fun base_path ->
+  let kept = record ~base_path (candidate ~id:"candidate-overlap-race" ()) in
+  let (selected : A.candidate), completed_judgment = complete_next ~base_path J.Relevant in
+  Alcotest.(check string) "the judged candidate is ours" kept.candidate_id
+    selected.candidate_id;
+  (* The wake's read of the pair happens here — between completion and
+     settlement. X's row is Pending (the verdict lives on the partition),
+     and X's partition is Completed. *)
+  let candidates, partitions = read_candidate_and_roots ~base_path in
+  (match
+     List.find_opt (fun (c : A.candidate) -> String.equal c.candidate_id kept.candidate_id)
+       candidates
+   with
+   | Some { status = A.Pending _; _ } -> ()
+   | _ -> Alcotest.fail "fixture read did not see the completed candidate");
+  (match partitions with
+   | [ { state = P.Completed { item; _ }; _ } ] ->
+     let completed_call_id =
+       match completed_judgment.source with
+       | A.Exact_attempt { call_id; _ } -> call_id
+       | A.Cli_lane_slot | A.Vendor_system_one _ -> "not-exact"
+     in
+     let recorded_call_id =
+       match item.judgment.source with
+       | A.Exact_attempt { call_id; _ } -> call_id
+       | _ -> "not-exact"
+     in
+     Alcotest.(check string) "the completed item carries the settled judgment"
+       completed_call_id recorded_call_id
+   | _ -> Alcotest.fail "fixture read did not see the Completed partition");
+  (* The owner settlement lands between the read and root minting. *)
+  ignore (ok "settle the completed snapshot"
+       (W.For_testing.deliver_and_settle_completed
+          ~base_path
+          ~keeper_name:"alpha"
+          (load_one_partition ~base_path)));
+  ignore
+    (ok "mint roots over the racing settlement"
+       (P.ensure_roots ~base_path ~keeper_name:"alpha" candidates));
+  let candidates_after, partitions_after = read_candidate_and_roots ~base_path in
+  Alcotest.(check int) "the ledger still holds only the completed candidate" 1
+    (List.length candidates_after);
+  List.iter
+    (fun (candidate : A.candidate) ->
+       match candidate.candidate_id, candidate.status with
+       | id, A.Consumed { delivery = A.Enqueued_to_keeper_lane; _ }
+         when String.equal id kept.candidate_id -> ()
+       | _ -> Alcotest.fail "root minting moved a candidate row")
+    candidates_after;
+  List.iter
+    (fun (partition : P.t) ->
+       match partition.state with
+       | P.Settled _ -> ()
+       | _ ->
+         Alcotest.failf
+           "root minting minted a fresh Ready root over the settled partition: %s"
+           partition.partition_id)
+    partitions_after
+;;
+
 let test_execution_error_preserves_bound_progress_without_hot_retry () =
   with_temp_base "board-attention-worker-execution-error" @@ fun base_path ->
   let persisted = record ~base_path (candidate ()) in
@@ -4123,6 +4302,14 @@ let () =
             "drain drops the settled receipt of a consumed candidate"
             `Quick
             test_drain_drops_the_settled_receipt_of_a_consumed_candidate
+        ; Alcotest.test_case
+            "drain then settle does not mint a ready root"
+            `Quick
+            test_drain_then_settle_does_not_mint_a_ready_root
+        ; Alcotest.test_case
+            "settlement between reads and roots mints no root"
+            `Quick
+            test_settlement_between_reads_and_roots_mints_no_root
         ; Alcotest.test_case
             "bookkeeping failure keeps its cause and the flow sentence"
             `Quick

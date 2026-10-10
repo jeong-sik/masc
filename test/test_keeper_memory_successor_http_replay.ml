@@ -9,7 +9,7 @@ let member = Json.member
 let jstring name json = member name json |> Json.to_string
 let rows name json = member name json |> Json.to_list
 let sha bytes = Digestif.SHA256.(digest_string bytes |> to_hex)
-let fixture_path = "test/fixtures/memory_successor_http_replay/actual.json"
+let fixture_dir = "test/fixtures/memory_successor_http_replay"
 let () = Masc.Prompt_defaults.init ()
 
 let restore ~keepers_dir ~keeper_id bundle =
@@ -33,8 +33,8 @@ let restore ~keepers_dir ~keeper_id bundle =
     Fs_compat.save_file_atomic_strict path bytes |> require) decoded;
   decoded
 
-let replay ~enabled () =
-  let envelope=Yojson.Safe.from_file (Masc_test_deps.source_path fixture_path) in
+let replay filename ~enabled () =
+  let envelope=Yojson.Safe.from_file (Masc_test_deps.source_path (Filename.concat fixture_dir filename)) in
   let capture=member "capture" envelope in
   check string "captured state bundle SHA" (jstring "state_bundle_sha256" capture)
     (sha (Yojson.Safe.to_string (member "state_bundle" capture)));
@@ -134,8 +134,10 @@ let replay ~enabled () =
   if enabled then check bool "enabled replay performed actual local HTTP calls" true (posts>0)
   else check int "disabled lane sends no HTTP" 0 posts;
   Printf.printf "MEMORY_SUCCESSOR_HTTP_REPLAY %s\n%!" (Yojson.Safe.to_string (`Assoc
-    ["lane_enabled",`Bool enabled;"measurement",`String "recorded_actual_response_through_production_tool";
+    ["fixture",`String filename;"lane_enabled",`Bool enabled;"measurement",`String "recorded_actual_response_through_production_tool";
      "network_scope",`String "local_fixture_only";"http_requests",`Int posts;"results",`List results]))
 let () = run "successor production HTTP replay"
-  ["captured responses",[test_case "disabled lane keeps unresolved retrieval explicit" `Quick (replay ~enabled:false);
-    test_case "actual answers traverse HTTP selector and current/all search" `Quick (replay ~enabled:true)]]
+  ["captured responses",[test_case "disabled lane keeps unresolved retrieval explicit" `Quick (replay "actual.json" ~enabled:false);
+    test_case "actual answers traverse HTTP selector and current/all search" `Quick (replay "actual.json" ~enabled:true);
+    test_case "branch lineage stays unresolved with lane disabled" `Quick (replay "event-branches.json" ~enabled:false);
+    test_case "original branch responses traverse HTTP and current/all search" `Quick (replay "event-branches.json" ~enabled:true)]]

@@ -3296,7 +3296,7 @@ status: reference
 
 **Demand Retrieval across Revisions (리비전을 넘는 요청 시 검색)**
 : 과거 admission 관측이 확정된 리비전 계보를 따라 현재 후속 기억을 찾아내는 `keeper_memory_search`의 경로(#42029·#42054·#42055). 세 단계가 분리되어 있다.
-  1. **Admission Lookup Binding**: Librarian이 `incorporated`/`already_represented`로 판정한 미룬 명시 쓰기는 원본 관측·후보 식별자·선택된 대상의 조회 결속(`admission_recall_binding`)을 후보 소비와 같은 WAL 트랜잭션으로 커밋한다. `not_durable`·`deferred` 판정은 결속을 만들지 않는다. 결속은 Librarian이 선언한 관계를 기록할 뿐 그 관계를 독립 검증한 것이 아니다.
+  1. **Admission Lookup Binding**: Librarian이 `incorporated`/`already_represented`로 판정한 미룬 명시 쓰기는 원본 관측·후보 식별자·선택된 대상의 조회 결속(`admission_recall_binding`)을 후보 소비와 같은 WAL 트랜잭션으로 커밋한다. `not_durable`·`deferred` 판정은 결속을 만들지 않는다. 결속 대상은 Librarian이 돌려준 claim과 글이 똑같은 선택된 기억으로 정해지고(`fact.claim = claim`), 같은 글의 기억이 둘이면 먼저 찾은 쪽이 대상이다(`keeper_librarian_runtime.ml:1022`). 결속은 Librarian이 선언한 관계를 기록할 뿐 그 관계를 독립 검증한 것이 아니다.
   2. **구조적 후보 수집**: `read_successor_recall_for_keepers_dir`가 커밋된 스냅샷 전이와 리비전 링크만 리비전 순서로 깊이 제한 없이 따라간다. 전이 증거가 빠지면 미해결이고, 철회 뒤 무관하게 같은 글이 다시 추가돼도 끊긴 경로를 되살리지 않는다. 구조적 후보는 아직 답이 아니다.
   3. **범위 판정**: 후속 선택기(`Keeper_memory_successor_selection`)가 쿼리·원본 관측·대상·커밋된 경로를 보고 현재 대상이 같은 주제·사건·적용 범위를 다루는지 판정한다. 모델 실패·불확실한 범위·바뀐 증거는 미해결로 남기며 직접 일치 결과는 그대로 보존한다 — 권위 있는 "일치 없음" 답으로 바꾸지 않는다.
   결과의 본문과 Memory ID는 현재 대상 것이고 과거 조회 출처(`lookup_evidence`·`successor_lookup_evidence`)는 별도로 표시된다. 여러 관측이 같은 현재 대상을 가리켜도 결과는 하나다.

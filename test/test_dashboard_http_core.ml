@@ -314,8 +314,145 @@ let test_gate_resolve_workspace_precondition () =
      | Error (Server_dashboard_http.Unavailable _) -> ()
      | _ -> fail "matching Gate workspace did not reach approval lookup"))
 
-let test_gate_retry_workspace_precondition () =
-  let dir = test_dir () in
+(* The D4 recover route parses its [:id] exactly and refuses bodies whose
+   typed preconditions do not name a restart-latched attempt (design §5-4).
+   The queue's own CAS behavior is pinned in test_keeper_approval_queue;
+   this pins the HTTP surface's admission shape. *)
+let test_hitl_recover_route_and_preconditions () =
+  let module Recover = Server_dashboard_http_hitl_recover in
+  let ack = ["action", `String "ack_uncertain"; "keeper_name", `String "alpha";
+             "consume_id", `String "exact-consume"] in
+  check bool "ack uses listed keeper and exact consume without original args" true
+    (Recover.parse_ack_fields ack = Ok ("alpha", "exact-consume"));
+  check bool "ack cannot omit exact consume" true
+    (Result.is_error (Recover.parse_ack_fields (List.remove_assoc "consume_id" ack)));
+  check bool "ack rejects duplicate consume identity" true
+    (Result.is_error (Recover.parse_ack_fields (("consume_id", `String "other") :: ack)));
+  let base = "/api/v1/keepers/" in
+  check (option string)
+    "recover route extracts the approval id"
+    (Some "appr-1")
+    (Recover.route (base ^ "hitl/approvals/appr-1/recover"));
+  check (option string)
+    "recover route refuses non-recover keeper paths" None
+    (Recover.route (base ^ "hitl/approvals/appr-1/resolve"));
+  check (option string)
+    "recover route refuses an empty id" None
+    (Recover.route (base ^ "hitl/approvals//recover"));
+  let rearm_body ~status ~disposition =
+    `Assoc
+      [ "action", `String "rearm"
+      ; "id", `String "appr-1"
+      ; "input_hash", `String (String.make 64 'a')
+      ; "sequence", `Int 1
+      ; "slot_id", `String "slot-1"
+      ; "call_id", `String "call-1"
+      ; "plan_fingerprint", `String "fp-1"
+      ; "request_body_sha256", `String (String.make 64 'b')
+      ; ( "exact_attempt"
+        , `Assoc
+            [ "state", `String "bound"
+            ; "approval_id", `String "appr-1"
+            ; "input_hash", `String (String.make 64 'a')
+            ; "sequence", `Int 1
+            ; "slot_id", `String "slot-1"
+            ; "call_id", `String "call-1"
+            ; "plan_fingerprint", `String "fp-1"
+            ; "request_body_sha256", `String (String.make 64 'b')
+            ; "status", `String status
+            ; "quarantine_cause", `Null
+            ] )
+      ; ( "summary_attempt_disposition"
+        , match disposition with
+          | "persistence_uncertain" ->
+            `Assoc
+              [ "code", `String disposition
+              ; ( "operator_detail"
+                , `String
+                    "Exact-output terminalization durability is not confirmed." )
+              ]
+          | other -> `Assoc [ "code", `String other ]
+        )
+      ]
+  in
+  let parse fields =
+    match (fields : Yojson.Safe.t) with
+    | `Assoc pairs -> (
+      match Recover.parse_rearm_fields pairs with
+      | Ok _ -> "admitted"
+      | Error detail -> detail)
+    | _ -> "recover request must be an object"
+  in
+  check string
+    "the unlatchable pair persistence_uncertain over released_recovery_required \
+     passes the typed preconditions"
+    "admitted"
+    (parse
+       (rearm_body
+          ~status:"released_recovery_required"
+          ~disposition:"persistence_uncertain"));
+  check string
+    "the only CAS-admitted pair is the only admitted pair"
+    "recover rearm requires summary_attempt_disposition \
+     persistence_uncertain"
+    (parse
+       (rearm_body
+          ~status:"released_recovery_required"
+          ~disposition:"in_flight"));
+  check string
+    "a restart-quarantined attempt is refused before the queue (terminal \
+     projection for dispatch-uncertain work)"
+    "recover rearm targets a released-recovery-required exact attempt \
+     (the only restart latch the queue's CAS admits)"
+    (parse
+       (rearm_body
+          ~status:"restart_quarantined"
+          ~disposition:"persistence_uncertain"));
+  check string
+    "a completed attempt is not recoverable"
+    "recover rearm targets a released-recovery-required exact attempt \
+     (the only restart latch the queue's CAS admits)"
+    (parse (rearm_body ~status:"completed" ~disposition:"in_flight"));
+  check string
+    "a settled disposition is not recoverable"
+    "recover rearm requires summary_attempt_disposition \
+     persistence_uncertain"
+    (parse
+       (rearm_body
+          ~status:"released_recovery_required"
+          ~disposition:"settled"));
+  (* The admitted binding must repeat the request's top-level identity, so
+     an inconsistent body fails typed admission instead of surfacing later
+     as a CAS key mismatch. *)
+  let mismatched =
+    match
+      rearm_body
+        ~status:"released_recovery_required"
+        ~disposition:"persistence_uncertain"
+    with
+    | `Assoc fields ->
+      let rewrite = function
+        | "exact_attempt", `Assoc binding ->
+          ( "exact_attempt"
+          , `Assoc
+              (List.map
+                 (function
+                   | "call_id", _ -> ("call_id", `String "call-OTHER")
+                   | field -> field)
+                 binding) )
+        | field -> field
+      in
+      `Assoc (List.map rewrite fields)
+    | other -> other
+  in
+  check string
+    "a binding that disagrees with the request identity is refused"
+    "recover request.exact_attempt must repeat the request's approval \
+     identity (id, input_hash, sequence, slot_id, call_id, \
+     plan_fingerprint, request_body_sha256)"
+    (parse mismatched)
+
+let test_gate_retry_workspace_precondition () =  let dir = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
     let config = Workspace.default_config dir in
     mkdir_p (Workspace.masc_root_dir config);
@@ -7905,6 +8042,8 @@ let () =
             test_gate_resolve_workspace_precondition;
           test_case "Gate retry workspace precondition" `Quick
             test_gate_retry_workspace_precondition;
+          test_case "HITL recover route and typed preconditions" `Quick
+            test_hitl_recover_route_and_preconditions;
           test_case "keeper memory cleanup routes and requests are closed" `Quick
             test_keeper_memory_cleanup_routes_and_closed_requests;
           test_case "keeper sensitive GET permissions are exact" `Quick

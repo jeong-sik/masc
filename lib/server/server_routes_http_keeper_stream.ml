@@ -307,12 +307,15 @@ let direct_message_of_request payload = payload.direct_message
 
 (* How long a held tool call waits for an operator.
 
-   Long enough to read the question and decide -- an operator glancing away
-   should not come back to a denied call. Short enough that a turn does not
-   sit on a provider connection all afternoon when the reader has walked
-   away: the chat stream's own silence bound is the same order, and a wait
-   outliving it would hold a turn whose reader is already gone. *)
-let keeper_tool_approval_timeout_sec = 180.0
+   The value lives in [Keeper_config
+   .keeper_tool_approval_timeout_sec] (env
+   MASC_KEEPER_TOOL_APPROVAL_TIMEOUT_SEC, clamp [5.0, 3600.0], design D3
+   task-1665). The historical inline default was 180.0 and is NOT a
+   measured value: the keeper_hitl_gate health section's answered/
+   timed_out counters are accumulating the evidence a future typed
+   condition ("wait only while an operator pane holds the stream") will
+   need to replace the constant. A wait that times out is not lost --
+   the durable late-approval journal carries a later operator answer. *)
 
 (* Answer a held tool call.
 
@@ -393,7 +396,7 @@ let handle_keeper_tool_approval ~actor state request reqd =
             match
               Keeper_late_approval.remember_late
                 (Keeper_late_approval.shared ())
-                ~keeper_name ~tool_call_id ~actor decision ()
+                ~base_path ~keeper_name ~tool_call_id ~actor decision ()
             with
             | Keeper_late_approval.Remembered _ -> true
             | Keeper_late_approval.No_matching_ask -> false
@@ -2103,8 +2106,9 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
       ~publish:(fun event -> push_worker_event (Stream_chat_event event))
       ~redact_text
       ~clock
+      ~base_path
       ~keeper_name:payload.name
-      ~timeout_sec:keeper_tool_approval_timeout_sec
+      ~timeout_sec:(Keeper_config.keeper_tool_approval_timeout_sec ())
   in
   let accumulated_media_blocks () =
     match

@@ -189,6 +189,69 @@ let keeper_board_event_collection_health_json () =
       ~keeper_names
 ;;
 
+(* The keeper_hitl_gate section (task-1665, design D1): live waits from the
+   tool-approval registry — the same source GET /api/v1/keepers/tool-approvals
+   serves — over the durable ask counts from the asking workspace's queue.
+   Every computation failure is a distinct projection rather than a zero:
+   [Keeper_hitl_gate_health.no_workspace_json] keeps the live side when there
+   is no server state, and [queue_unreadable_json] goes unavailable instead
+   of letting an unread authority read as "nothing pending". Timeout
+   counters (design D3) come from the registry's process-lifetime totals. *)
+let keeper_hitl_gate_health_snapshot () =
+  let registry = Keeper_tool_approval_registry.shared () in
+  let waits = Keeper_tool_approval_registry.pending registry in
+  let { Keeper_tool_approval_registry.answered_total
+      ; timed_out_total } =
+    Keeper_tool_approval_registry.outcome_totals registry
+  in
+  let now = Unix.gettimeofday () in
+  match current_server_state_opt () with
+  | None ->
+    (* No workspace to scope the journal with: the process-wide count is
+       the only one there is, and the durable side reports itself unread. *)
+    Keeper_hitl_gate_health.no_workspace_json ~now ~waits ~answered_total
+      ~timed_out_total
+      ~late_uncertain:
+        (Keeper_late_approval.journal_uncertain (Keeper_late_approval.shared ()))
+      ()
+  | Some state ->
+    let config = Mcp_server.workspace_config state in
+    (match
+       Keeper_approval_queue.list_pending_entries_with_read_errors_for_workspace
+         ~base_path:config.base_path
+     with
+     | Error error ->
+       Keeper_hitl_gate_health.queue_unreadable_json
+         ~error:(Keeper_approval_queue_result.storage_error_to_string error)
+     | Ok (entries, read_errors) ->
+       (match
+          Keeper_late_approval.uncertain_attempts
+            (Keeper_late_approval.shared ())
+            ~base_path:config.base_path
+        with
+        | Error (Keeper_late_approval.Corrupt_journal error)
+        | Error (Keeper_late_approval.Journal_unavailable error) ->
+          Keeper_hitl_gate_health.late_journal_unavailable_json ~error
+        | Ok uncertain ->
+          Keeper_hitl_gate_health.aggregate
+            ~now
+            ~is_live:Keeper_gate.auto_judge_entry_claimed
+            ~waits
+            ~entries
+            ~unread_entries:(List.length read_errors)
+            ~answered_total
+            ~timed_out_total
+            ~late_uncertain:(List.length uncertain)))
+;;
+
+let keeper_hitl_gate_health_json () =
+  match Keeper_late_approval.journal_error (Keeper_late_approval.shared ()) with
+  | None -> keeper_hitl_gate_health_snapshot ()
+  | Some (Keeper_late_approval.Corrupt_journal error)
+  | Some (Keeper_late_approval.Journal_unavailable error) ->
+    Keeper_hitl_gate_health.late_journal_unavailable_json ~error
+;;
+
 let paused_keeper_count = function
   | `Assoc fields ->
       (match List.assoc_opt "count" fields with

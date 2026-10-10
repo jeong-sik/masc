@@ -974,6 +974,12 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
             h2_respond_json_value h2_reqd json
               ~status:`Gone ~extra_headers:cors)
 
+      | `GET, p when p = Server_dashboard_http_hitl_recover.uncertain_path ->
+          with_h2_token_permission_auth h2_reqd
+            ~permission:Server_dashboard_http_hitl_recover.permission (fun state _actor ->
+              let status, body = Server_dashboard_http_hitl_recover.uncertain_response state in
+              h2_respond_json_value h2_reqd body ~status:(status :> H2.Status.t) ~extra_headers:cors)
+
       | `GET, "/api/v1/dashboard/shell" ->
           with_h2_public_read h2_reqd (fun state ->
             let light =

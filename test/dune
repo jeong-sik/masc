@@ -3484,6 +3484,16 @@
  (libraries alcotest eio eio_main eio.mock fmt masc))
 
 (test
+ (name test_keeper_tool_approval_registry_outcomes)
+ (modules test_keeper_tool_approval_registry_outcomes)
+ (libraries alcotest eio eio_main eio.mock fmt masc))
+
+(test
+ (name test_keeper_hitl_gate_health)
+ (modules test_keeper_hitl_gate_health)
+ (libraries alcotest masc masc_test_deps yojson))
+
+(test
  (name test_tui_keeper_chat_live)
  (modules test_tui_keeper_chat_live)
  (libraries alcotest agent_core fmt masc masc_tui_keeper_chat_live masc_tui_keeper_chat_projection yojson))

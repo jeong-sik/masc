@@ -893,7 +893,7 @@ let test_turn_declarations_are_isolated () =
       ~registry:(Masc.Keeper_tool_approval_registry.create ())
       ~late_approvals:(Masc.Keeper_late_approval.create ())
       ~publish:(fun _ -> ()) ~redact_text:Fun.id ~clock:env#clock
-      ~keeper_name:"isolated-identity-turn" ~timeout_sec:1.0 in
+      ~base_path ~keeper_name:"isolated-identity-turn" ~timeout_sec:1.0 in
     let bound = { gate with Gate.identity_tool_index = first_index } in
     let invocation = Agent_core.Tool_contract.Invocation.create
       ~tool_use_id:"isolated-call" ~turn:1

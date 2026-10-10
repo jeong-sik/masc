@@ -184,6 +184,18 @@ val durable_range_id_of_json : Yojson.Safe.t -> (durable_range_id, Keeper_memory
 val official_range_id_of_json : Yojson.Safe.t -> (official_range_id, Keeper_memory_os_types.wire_error) result
 (** Canonical receipt identities, also used to recover the external read cursor
     from the same committed Memory transaction. *)
+(** One explicit input, independent of a contiguous range. Generation and
+    request ID are nonblank canonical strings; sequence is positive and input
+    SHA-256 is lowercase hexadecimal. The caller binds the digest to the exact
+    candidate payload. Neither request IDs nor sequence numbers may be reused
+    within a generation, including with a changed digest. *)
+type explicit_candidate_id =
+  { queue_generation : string
+  ; request_id : string
+  ; sequence : int
+  ; input_sha256 : string
+  }
+
 (** Why a librarian pass produced no snapshot. The journal is the only place
     this reaches disk, so the set is closed here rather than at the call site:
     a new failure mode has to name itself before it can be recorded, and
@@ -448,6 +460,16 @@ type disposition =
     the store did. The two absorption lists together hold every absorption
     passed in. *)
 
+val committed_explicit_candidates :
+  keepers_dir:string -> keeper_id:string -> queue_generation:string ->
+  (explicit_candidate_id list, string) result
+(** Recover once under the store locks and return every committed candidate for
+    this generation, ordered by sequence. These receipts authorize no queue
+    acknowledgement by themselves: a consumer must match the original payload.
+    Candidate receipts survive later valid snapshot revisions and retirement.
+    As with range receipts, missing or unverifiable snapshot evidence invalidates
+    them; this is not a separate immutable consumption ledger. *)
+
 val apply_disposition
   :  ?on_committed:(disposition -> unit)
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
@@ -455,6 +477,7 @@ val apply_disposition
   -> ?durable_range_id:durable_range_id
   -> ?official_range_id:official_range_id
   -> ?explicit_write_range_id:explicit_write_range_id
+  -> ?explicit_candidate_ids:explicit_candidate_id list
   -> ?required_memory_ids:string list
   -> absorbed:Keeper_memory_os_types.absorbed_statement list
   -> revisions:Keeper_memory_os_types.revision list
@@ -491,8 +514,12 @@ val apply_disposition
 
     [durable_range_id], [official_range_id] and [explicit_write_range_id] join
     this disposition to its atom, official-client and explicit-write inputs.
+    [explicit_candidate_ids] binds a sparse settled subset to the same commit;
+    duplicate request IDs or sequences in a generation, either within this set
+    or in recovered receipts, are refused under the write lock before mutation.
     All supplied identities share the same snapshot revision and SHA-256. Each
-    source kind retains its latest receipt per scope. The store writes a prepared transaction receipt
+    range kind retains its latest receipt per scope; candidate receipts retain
+    every consumed identity. The store writes a prepared transaction receipt
     before replacing the snapshot and marks it committed afterwards. Preparing
     the next transaction retains the prior committed receipt until the new
     snapshot is verified, so a failed snapshot write cannot erase its frontier.

@@ -187,17 +187,21 @@ let test_codec_round_trip_all_constructors () =
           (Some charge) usage.cost_usd
     | Ok _ | Error _ -> Alcotest.fail "charged delta must decode") [0.001; 0.0]
 
-(* The writer always records a native end's completion. A record without one
-   is refused instead of being read as a generic end. *)
-let test_native_tool_end_requires_completion () =
-  let encoded = L.keeper_chat_event_to_json
-    (E.Native_tool_end ({ occurrence; tool_call_id = Some "native-1"; tool_call_name = Some "Read" },
-       Runtime_native_tools.end_observed)) in
-  let stripped = match encoded with
-    | `Assoc fields -> `Assoc (List.remove_assoc "completion" fields)
-    | other -> other in
-  Alcotest.(check bool) "a native end without completion is refused" true
-    (Result.is_error (L.keeper_chat_event_of_json stripped))
+(* The production writer still emits native ends without a completion
+   (11,865 rows in the live keeper_turn_events on 2026-10-10), so a record
+   without one reads as end_observed. A repeated completion is refused. *)
+let test_native_tool_end_reads_an_omitted_completion_as_observed () =
+  let ended = E.Native_tool_end
+      ({ occurrence; tool_call_id = Some "native-1"; tool_call_name = Some "Read" },
+       Runtime_native_tools.end_observed) in
+  let fields = match L.keeper_chat_event_to_json ended with
+    | `Assoc fields -> fields
+    | _ -> Alcotest.fail "native end must encode as an object" in
+  Alcotest.(check bool) "an omitted completion reads as end_observed" true
+    (L.keeper_chat_event_of_json (`Assoc (List.remove_assoc "completion" fields)) = Ok ended);
+  Alcotest.(check bool) "a repeated completion is refused" true
+    (Result.is_error (L.keeper_chat_event_of_json
+       (`Assoc (fields @ [ "completion", List.assoc "completion" fields ]))))
 
 let test_envelope_round_trip () =
   let entry : L.journaled_event =
@@ -1268,7 +1272,8 @@ let () =
             `Quick
             test_codec_round_trip_all_constructors
         ; Alcotest.test_case "envelope round trip" `Quick test_envelope_round_trip
-        ; Alcotest.test_case "native end requires completion" `Quick test_native_tool_end_requires_completion
+        ; Alcotest.test_case "native end reads an omitted completion as observed" `Quick
+            test_native_tool_end_reads_an_omitted_completion_as_observed
         ; Alcotest.test_case
             "envelope rejects unknown version"
             `Quick

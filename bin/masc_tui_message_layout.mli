@@ -293,6 +293,9 @@ type metadata =
       role_label : string;
     }
   | Diagnostic
+      (** One wrapped line of the entry's [diagnostics], under its body. The
+          row keeps the entry's style and {!shade}, so the bar its body rows
+          draw runs on through it. *)
   | Continued_at of { clock : string }
       (** Only emitted where the entry has a trustworthy time: a continuation
           that cannot say when it moved has nothing to draw. *)

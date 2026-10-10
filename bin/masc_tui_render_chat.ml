@@ -578,6 +578,33 @@ let arrival_bar (style : Message_layout.style) =
   | Message_layout.Tool | Message_layout.Skill _ | Message_layout.Thinking ->
       ("", "")
 
+(* The two cells between a row's margin and its text, styled: the dotted bar
+   of a journal revision, the bar of an arrival, the rail of a quoted block,
+   or the plain gap prose keeps. Body rows and the diagnostic rows under them
+   both draw it, so an entry's bar runs down to its last diagnostic. *)
+let body_bar ~origin (row : Message_layout.row) =
+  match row.style, row.shade with
+  | Message_layout.Journal, (Message_layout.Shade_none | Message_layout.Shade_quoted) ->
+      Printf.sprintf "%s┊%s " (Chat_theme.origin row.style) Ansi.reset
+  | Message_layout.Inbound, (Message_layout.Shade_none | Message_layout.Shade_quoted) ->
+      snd (arrival_bar row.style)
+  | ( Message_layout.User | Message_layout.Keeper | Message_layout.Status
+    | Message_layout.Local | Message_layout.Error | Message_layout.Tool
+    | Message_layout.Skill _ | Message_layout.Thinking ),
+    Message_layout.Shade_none ->
+      "  "
+  | ( Message_layout.User | Message_layout.Keeper | Message_layout.Status
+    | Message_layout.Local | Message_layout.Error | Message_layout.Tool
+    | Message_layout.Skill _ | Message_layout.Thinking ),
+    Message_layout.Shade_quoted
+    when origin = Message_layout.Origin_bare ->
+      "  "
+  | ( Message_layout.User | Message_layout.Keeper | Message_layout.Status
+    | Message_layout.Local | Message_layout.Error | Message_layout.Tool
+    | Message_layout.Skill _ | Message_layout.Thinking ),
+    Message_layout.Shade_quoted ->
+      Printf.sprintf "%s\xe2\x94\x82%s " (Theme.recede ()) Ansi.reset
+
 let origin_heading buf cols ~plain ~styled ~clock =
   let inner = framed_inner_width cols in
   let recede = Theme.recede () in
@@ -736,16 +763,7 @@ let render_chat_row ~theme ~origin ~tool_visibility buf cols (row : Message_layo
            [Shade_none] keeps the plain gap. An ambient background is only ever
            the operator's own message, which is prose and never quoted, so the
            rail cannot land inside a span this branch would have to restore. *)
-        let rail =
-          match row.style, row.shade with
-          | Message_layout.Journal, _ ->
-              Printf.sprintf "%s┊%s " (Chat_theme.origin row.style) Ansi.reset
-          | Message_layout.Inbound, _ -> snd (arrival_bar row.style)
-          | _, Message_layout.Shade_none -> "  "
-          | _, Message_layout.Shade_quoted when origin = Message_layout.Origin_bare -> "  "
-          | _, Message_layout.Shade_quoted ->
-              Printf.sprintf "%s\xe2\x94\x82%s " (Theme.recede ()) Ansi.reset
-        in
+        let rail = body_bar ~origin row in
         let body_style =
           if sender then context.opening ^ Chat_theme.origin row.style ^ Ansi.bold
           else context.opening
@@ -765,8 +783,12 @@ let render_chat_row ~theme ~origin ~tool_visibility buf cols (row : Message_layo
         box_line_styled buf cols ~style:context.opening (dress text)
   | Message_layout.Metadata Message_layout.Diagnostic ->
       (* The layout puts a diagnostic in its entry's body column and carries
-         the turn's rail past it; both are in the gutter. *)
-      box_line_styled buf cols ~style:(Theme.recede ()) (row.gutter ^ row.text)
+         the turn's rail past it; both are in the gutter. The two cells before
+         the text hold the bar the entry's body rows draw. The bar closes its
+         own colour, so the receded tone is opened again after it. *)
+      let recede = Theme.recede () in
+      box_line_styled buf cols ~style:recede
+        (row.gutter ^ body_bar ~origin row ^ recede ^ Message_layout.drop_cells row.text 2)
   | Message_layout.Metadata (Message_layout.Timeline_break _) ->
       (* The hour rail is a scrollbar landmark, not content: it stays, but
          recedes instead of holding the pane's brightest slot. *)

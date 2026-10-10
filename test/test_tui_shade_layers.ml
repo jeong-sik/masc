@@ -79,26 +79,33 @@ let test_the_keepers_own_words_are_not_quoted () =
     ]
 ;;
 
-(* The origin banner frames the message; it is not part of what is quoted. *)
-let test_metadata_rows_are_never_quoted () =
+(* The origin banner frames the message; it is not part of what is quoted. A
+   diagnostic line is not frame: it is drawn inside its entry and shares the
+   entry's layer. *)
+let test_the_frame_is_never_quoted () =
   let rows =
     Layout.visible_rows ~origin:Layout.Origin_row ~inner_width:60 ~height:20
       [ entry Layout.Tool "quoted body" ]
   in
-  let metadata_shades =
+  let frame_shades =
     List.filter_map
       (fun (row : Layout.row) ->
          match row.kind with
-         | Layout.Metadata _ -> Some row.shade
-         | Layout.Body | Layout.Spacing | Layout.Viewport_gap _ -> None)
+         | Layout.Metadata
+             (Layout.Origin _ | Layout.Continued_at _ | Layout.Timeline_break _
+             | Layout.Sender) ->
+           Some row.shade
+         | Layout.Metadata Layout.Diagnostic | Layout.Body | Layout.Spacing
+         | Layout.Viewport_gap _ ->
+           None)
       rows
   in
-  check bool "there is a metadata row to check" true (metadata_shades <> []);
+  check bool "there is a frame row to check" true (frame_shades <> []);
   check
     bool
     "the frame around a quotation is not itself quoted"
     false
-    (List.exists is_quoted metadata_shades)
+    (List.exists is_quoted frame_shades)
 ;;
 
 (* Three steps is the ceiling a terminal background can hold before the eye
@@ -123,7 +130,7 @@ let () =
             "the keeper's own words are not"
             `Quick
             test_the_keepers_own_words_are_not_quoted
-        ; test_case "metadata is never quoted" `Quick test_metadata_rows_are_never_quoted
+        ; test_case "the frame is never quoted" `Quick test_the_frame_is_never_quoted
         ; test_case "the layers are closed" `Quick test_the_layers_are_closed
         ] )
     ]

@@ -833,7 +833,7 @@ else:
     result = mcp("tools/call", {"name": tool, "arguments": {}}, 3)["result"]
     assert not result.get("isError", False)
     text = result["content"][0]["text"]
-    emit({"type": "assistant", "session_id": session, "uuid": "effort-assistant", "message": {
+    emit({"type": "assistant", "parent_tool_use_id": None, "session_id": session, "uuid": "effort-assistant", "message": {
         "role": "assistant", "model": model, "content": [{"type": "text", "text": text}]}})
     emit({"type": "result", "subtype": "success", "is_error": False, "session_id": session,
         "uuid": "effort-result", "result": text, "api_error_status": None})

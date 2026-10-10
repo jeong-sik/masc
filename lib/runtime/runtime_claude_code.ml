@@ -938,6 +938,20 @@ type assistant_origin =
   | Model_response
   | Api_error_diagnostic
 
+type assistant_scope = Root_response | Child_response of string
+
+(* Claude Code 2.1.292 forwards child tool envelopes even when child text
+   forwarding is disabled. Their session id is the root session's, while
+   this required field distinguishes whose model request the envelope carries. *)
+let assistant_scope ~stage fields =
+  match List.filter (fun (key, _) -> key = "parent_tool_use_id") fields with
+  | [_, `Null] -> Ok Root_response
+  | [_, `String parent] when String.trim parent <> "" -> Ok (Child_response parent)
+  | [] -> protocol_error stage "field \"parent_tool_use_id\" is required"
+  | [_] -> protocol_error stage "field \"parent_tool_use_id\" must be null or a nonblank string"
+  | _ -> protocol_error stage "field \"parent_tool_use_id\" is duplicated"
+;;
+
 (* Claude Code 2.1.263's assistant envelope declares this optional boolean;
    its producer maps isApiErrorMessage=true to is_api_error_message=true.
    The text of an API diagnostic is not a model response. Only the terminal
@@ -1084,6 +1098,7 @@ let parse_assistant ~expected_session_id ~tools fields =
   if session_id <> expected_session_id
   then protocol_error stage "session_id does not match the active Claude session"
   else
+    let* scope = assistant_scope ~stage fields in
     let* origin = assistant_origin ~stage fields in
     let* uuid = required_string stage "uuid" fields in
     let* message = required_member stage "message" fields in
@@ -1102,7 +1117,7 @@ let parse_assistant ~expected_session_id ~tools fields =
         ~mcp_tool_names:(List.map allowed_tool_name tools)
         content
     in
-    Ok (origin, uuid, model, blocks, message_id, usage)
+    Ok (scope, origin, uuid, model, blocks, message_id, usage)
 ;;
 
 let native_tool_results ~expected_session_id fields =
@@ -1466,13 +1481,14 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~assistant_texts ~native_tool_calls ~native_tool_attempted ~on_turn_started
       ~on_stream_event ~partial_stream ~stream_started ~response_emitted
   | "assistant" ->
-    let* origin, uuid, model, blocks, message_id, usage =
+    let* scope, origin, uuid, model, blocks, message_id, usage =
       parse_assistant ~expected_session_id ~tools fields
     in
     let assistant_model =
-      match origin with
-      | Api_error_diagnostic -> assistant_model
-      | Model_response ->
+      match scope, origin with
+      | (Root_response | Child_response _), Api_error_diagnostic
+      | Child_response _, Model_response -> assistant_model
+      | Root_response, Model_response ->
         observe_assistant_usage assistant_usage ~message_id usage;
         if not !stream_started
         then (

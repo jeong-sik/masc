@@ -87,6 +87,22 @@ claim to reconstruct missing scope provenance in those older journals.
 | Antigravity | Init opens the normalized turn; step text and terminal response reconciliation provide text; result closes the turn. Step index identifies the source. | No typed thinking event exists in this adapter. `Internal` is not established as a reasoning payload. Thinking support is unverified. | MCP callbacks provide dynamic-tool events; tool steps provide native observed start/end using conversation ID and step index. `Done` reports native completion; `Step_error` reports a native error. Neither is a MASC execution receipt. |
 | GLM Coding | The configured `openai-compatible-http` route uses AGENT_CORE SSE parsing with message start/stop, text deltas, and indexed blocks. | Provider reasoning fields accepted by the configured streaming dialect produce `ThinkingDelta` or `ReasoningDetailsDelta`. Absence of a provider reasoning payload produces no invented thinking. | Indexed tool calls carry their IDs, names, and argument deltas. MASC execution receipts determine tool execution results. Official-client native-tool notifications do not apply to this HTTP route. |
 
+Claude assistant metadata has a separate root authority. Its required
+`parent_tool_use_id` is null for a root response and a nonblank call ID for a
+child response; missing, malformed, or duplicate fields are rejected. Only a root
+model response can update the root model and latest-request input usage. Child
+tool envelopes retain their native start/end and effect observations without
+replacing those fields, including when a failure or host stop follows the child.
+The result frame still supplies the turn's aggregate spend.
+
+This distinction matters with the current invocation: Claude Code 2.1.292 forwards
+child tool-use/result envelopes with their own model and usage even when
+`forwardSubagentText` is false. MASC leaves that option disabled, so this change
+does not enable child text or thinking. See the
+[SDK forwarding contract](https://code.claude.com/docs/en/agent-sdk/python#claudeagentoptions).
+Parent-qualified native occurrence identity and child progress remain separate
+work; this metadata isolation does not establish either capability.
+
 ## Source boundaries
 
 - Codex: [`runtime_codex_app_server.ml`](../../lib/runtime/runtime_codex_app_server.ml),

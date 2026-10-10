@@ -29,14 +29,14 @@
 | Memory 강화(reinforcement) | 설계상 없음 | M-15 | RFC-0418에서 일부러 뺌 |
 | Skills 자동 재생성 | 없음 | 코드 검색 결과 0건 | 수동 publish만 있음. 프롬프트 한 문단(`keeper.md:58`)이 전부 |
 | Skills 카탈로그·Task pin | 결함 | S-1 P1 | Skill을 수정하거나 지우면, 그 Skill을 pin한 Task의 Keeper가 매 턴 setup에서 실패함 |
-| Board / 후보 원장 | 부분 | BOARD-1 P1(못 읽는 행이 하나라도 있으면 prune이 영구히 멈춤), BOARD-2 | #41506이 consumed 행은 지움 |
+| Board / 후보 원장 | 부분 | BOARD-1 P1(못 읽는 행이 하나라도 있으면 prune이 영구히 멈춤. 열린 #38068이 같은 뿌리를 다룸), BOARD-2 | #41506이 consumed 행은 지움 |
 | Task FSM | 확인됨 | 전이를 모두 명시함 | |
-| Goal | 부분 | GOAL-1 P1(refuted 뒤 순환을 끝내는 규칙이 없음) | FSM 전이 쌍은 모두 명시되어 있어 확인됨 |
+| Goal | 부분 | GOAL-1 P3(refuted 뒤 순환을 끝내는 규칙이 없음. keeper가 매번 다시 요청해야만 도는 경로라서 관측되기 전까지는 잠복 결함) | FSM 전이 쌍은 모두 명시되어 있어 확인됨. 같은 결함을 닫힌 #31244가 "관측 없음, 잠복"으로 닫음 |
 | HITL | 부분 | HITL-1, HITL-2 | 늦게 온 승인을 메모리에만 기억함 |
 | Access Control | 미확인 | 범위를 확인한 뒤 별도로 기록 | 이 문서에는 상세를 싣지 않음 |
 | Multi Lane | 부분 | LANE-1(거절 원인이 2초 뒤에 사라짐), LANE-2(미확인) | lane action이 재시작 때 닫히는 것은 확인됨 |
 | Schedule | 결함 | SCH-1 P1(반복 스케줄이 terminal 거절 한 번에 영구 Failed), SCH-2, SCH-3, SCH-4 | |
-| Candle 원장 | 부분 | E-01 P1(수신자가 있는지 검증하지 않음), E-02 P1(Disabled 중에 지급하면 소실), E-04 | 잔액 보존식은 유지됨 |
+| Candle 원장 | 부분 | E-01 P1(수신자가 있는지 검증하지 않음), E-02 P1(Disabled 중에 지급하면 소실. 열린 #41322이 같은 결함), E-04 | 잔액 보존식은 유지됨 |
 | 반감기·분배 산식 | 확인됨 | 결함을 찾지 못함 | |
 | 논공행상 | 부분 | E-09(Goal당 1회만 지급. 의도인지 확인 못 함) | |
 | Item Slot / Portrait | 미확인 | P3: 아이템을 늘리면 모든 keeper의 기본 외모가 바뀜 | 깊이 보지 못함 |
@@ -44,26 +44,25 @@
 | TUI 연결·가시성 | 부분 | LANE-1, SCH-6, E-04(Rejected가 안 보임), TUI-1(`*_error`가 약 50개) | |
 | 토큰·캐시 | 부분 | W1 P1, W3, W5, W7, W8 | 접두 캐시와 keeper_tool_search는 문제 없음 |
 
-## P1 목록 (14건)
+## P1 목록 (13건)
 
 크기는 읽고 어림잡은 값이에요. 측정한 값이 아니에요.
 
-| ID | 한 줄 | 크기(추정) |
-|---|---|---|
-| CX-01 | 공식 클라이언트 Keeper가 매 턴 history_restarted를 기록함 | 작음(조건 하나) |
-| W1 | Codex, Claude Code가 매 턴 이력 전체를 직렬화하고 SHA256을 계산함. 읽는 곳이 있는지 불확실 | 작음(호출 지점부터 확인) |
-| SCH-1 | 반복 스케줄이 terminal 거절 한 번에 영구히 멈춤 | 중간 |
-| GOAL-1 | refuted, Executing, Verifying 순환을 끝내는 규칙이 없음 | 중간 |
-| BOARD-1 | rejected_rows가 0보다 크면 prune과 compaction이 영구히 멈춤 | 중간 |
-| LB-01 | absorb gate가 32KB를 넘으면 패스 전체가 실패하고, 깨울 때마다 반복됨 | 중간 |
-| E-01 | 선물 수신자가 있는지 검증하지 않아 돈이 사라짐 | 작음 |
-| E-02 | Disabled 중에 Goal을 통과하면 지급이 영구히 사라짐(warn만 남기고 Ok) | 중간 |
-| F-1 | claude_code 펜스가 spawn 시점에 걸려서 다음 후보로 못 넘어감 | 중간 |
-| M-1 | quarantine가 receipt를 전부 지워서 explicit-write 큐가 영구히 멈춤 | 중간 |
-| M-2 | 철회한 주장이 다시 살아남 | 중간 |
-| M-3 | write 도구가 lane이 꺼진 채로 ok:true를 돌려주고, 큐 상한이 없음 | 작음~중간 |
-| M-4 | 후보 reason을 파싱만 하고 쓰지 않음. not_durable write가 기록 없이 사라짐 | 중간 |
-| S-1 | Skill을 수정하거나 지우면 pin한 Task의 Keeper가 매 턴 실패함 | 작음 |
+| ID | 한 줄 | 크기(추정) | 기록 |
+|---|---|---|---|
+| CX-01 | 공식 클라이언트 Keeper가 매 턴 history_restarted를 기록함 | 작음(조건 하나) | PR #42206 |
+| W1 | Codex, Claude Code가 매 턴 이력 전체를 직렬화하고 SHA256을 계산함. 읽는 곳이 있는지 불확실 | 작음(호출 지점부터 확인) | #42210 |
+| SCH-1 | 반복 스케줄이 terminal 거절 한 번에 영구히 멈춤 | 중간 | #42209 |
+| BOARD-1 | rejected_rows가 0보다 크면 prune과 compaction이 영구히 멈춤 | 중간 | #38068(기존) |
+| LB-01 | absorb gate가 32KB를 넘으면 패스 전체가 실패하고, 깨울 때마다 반복됨 | 중간 | #42211 |
+| E-01 | 선물 수신자가 있는지 검증하지 않아 돈이 사라짐 | 작음 | PR #42207 |
+| E-02 | Disabled 중에 Goal을 통과하면 지급이 영구히 사라짐(warn만 남기고 Ok) | 중간 | #41322(기존) |
+| F-1 | claude_code 펜스가 spawn 시점에 걸려서 다음 후보로 못 넘어감 | 중간 | #42212 |
+| M-1 | quarantine가 receipt를 전부 지워서 explicit-write 큐가 영구히 멈춤 | 중간 | #42213 |
+| M-2 | 철회한 주장이 다시 살아남 | 중간 | #42214 |
+| M-3 | write 도구가 lane이 꺼진 채로 ok:true를 돌려주고, 큐 상한이 없음 | 작음~중간 | #42215 |
+| M-4 | 후보 reason을 파싱만 하고 쓰지 않음. not_durable write가 기록 없이 사라짐 | 중간 | #42216 |
+| S-1 | Skill을 수정하거나 지우면 pin한 Task의 Keeper가 매 턴 실패함 | 작음 | PR #42208 |
 
 ## 공통 주제
 

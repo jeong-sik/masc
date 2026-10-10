@@ -235,7 +235,35 @@ let compact_request_id value =
   if length <= 20 then value
   else String.sub value 0 6 ^ ".." ^ String.sub value (length - 12) 12
 
+(* Whether [terminal_safe_text]'s first two passes would hand [text] back
+   unchanged: it is valid UTF-8, carries no control byte, and has no scalar in
+   U+007F..U+009F. A newline passes only when it is being preserved. Such a
+   text needs nothing but the invisible-character pass, which is by far the
+   common case for conversation text. *)
+let passes_unchanged ~preserve_newlines text =
+  let length = String.length text in
+  let rec scan offset =
+    if offset >= length then true
+    else
+      let byte = Char.code (String.unsafe_get text offset) in
+      if byte < 0x80 then
+        if (byte >= 0x20 && byte <> 0x7f) || (byte = 0x0a && preserve_newlines)
+        then scan (offset + 1)
+        else false
+      else
+        let decoded = String.get_utf_8_uchar text offset in
+        if not (Uchar.utf_decode_is_valid decoded) then false
+        else
+          let code = Uchar.to_int (Uchar.utf_decode_uchar decoded) in
+          if code >= 0x80 && code <= 0x9f then false
+          else scan (offset + Uchar.utf_decode_length decoded)
+  in
+  scan 0
+
 let terminal_safe_text ?(preserve_newlines = false) text =
+  if passes_unchanged ~preserve_newlines text
+  then Masc.Tui_terminal_text.escape_invisible text
+  else
   let text = Safe_ops.sanitize_text_utf8 text in
   let output = Buffer.create (String.length text) in
   let rec loop offset =

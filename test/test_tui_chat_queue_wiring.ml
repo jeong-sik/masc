@@ -3668,6 +3668,60 @@ let test_held_turn_block_follows_only_its_own_requests_rows () =
     before third "said held" "input q2")
 ;;
 
+(* [terminal_safe_text] has a path for a text that its first two passes would
+   not change. It must answer exactly what the three passes answer, for valid
+   and invalid UTF-8, every control, C1 scalars, invisible characters and both
+   newline modes. The reference is the three passes as they were written. *)
+let test_terminal_safe_text_matches_its_three_passes () =
+  let reference ?(preserve_newlines = false) text =
+    let text = Safe_ops.sanitize_text_utf8 text in
+    let output = Buffer.create (String.length text) in
+    let rec loop offset =
+      if offset < String.length text then begin
+        let decoded = String.get_utf_8_uchar text offset in
+        let length = Uchar.utf_decode_length decoded in
+        let scalar = Uchar.utf_decode_uchar decoded in
+        let code = Uchar.to_int scalar in
+        if code = 0x0a && preserve_newlines then Buffer.add_char output '\n'
+        else if code < 0x20 || (code >= 0x7f && code <= 0x9f) then
+          Buffer.add_char output ' '
+        else Buffer.add_utf_8_uchar output scalar;
+        loop (offset + length)
+      end
+    in
+    loop 0;
+    Masc.Tui_terminal_text.escape_invisible (Buffer.contents output)
+  in
+  let pieces =
+    [| "a"; "plain words"; "안녕하세요"; "한글 텍스트"; "·→…"; "\n"; "\r"; "\t"; "\x00";
+       "\x1b[31m"; "\x7f"; "\xc2\x80"; "\xc2\x9f"; "\xc2\xa0"; "\xe2\x80\x8b";
+       "\xe2\x80\xae"; "\xe2\x80\x8d"; "\xf0\x9f\x98\x80"; "\xf0\x9f\x91\xa8\xe2\x80\x8d\xf0\x9f\x91\xa9";
+       "\xff"; "\xc3"; "\xe2\x82"; "\xed\xa0\x80"; "\xef\xbb\xbf" |]
+  in
+  let rng = Random.State.make [| 4242 |] in
+  let compared = ref 0 in
+  let unchanged = ref 0 in
+  for _case = 1 to 4000 do
+    let count = Random.State.int rng 8 in
+    let text =
+      String.concat ""
+        (List.init count (fun _ -> pieces.(Random.State.int rng (Array.length pieces))))
+    in
+    List.iter
+      (fun preserve_newlines ->
+        incr compared;
+        let expected = reference ~preserve_newlines text in
+        if String.equal expected text then incr unchanged;
+        check string
+          (Printf.sprintf "text %S preserve=%b" text preserve_newlines)
+          expected
+          (Keeper_chat.terminal_safe_text ~preserve_newlines text))
+      [ false; true ]
+  done;
+  check bool "the generator covered many texts" true (!compared = 8000);
+  check bool "and many of them pass through unchanged" true (!unchanged > 500)
+;;
+
 (* A log built from a journal read stands at the journal head's own time,
    not at the moment the read was asked for. *)
 let test_a_journal_built_log_starts_at_the_journal_head () =
@@ -5140,6 +5194,8 @@ let () =
             test_settled_logs_are_the_selected_logs_the_session_holds_settled
         ; test_case "held turn block follows only its own requests rows" `Quick
             test_held_turn_block_follows_only_its_own_requests_rows
+        ; test_case "terminal_safe_text matches its three passes" `Quick
+            test_terminal_safe_text_matches_its_three_passes
         ; test_case "a journal-built log starts at the journal head" `Quick
             test_a_journal_built_log_starts_at_the_journal_head
         ; test_case "pending input enters transcript on execution evidence" `Quick

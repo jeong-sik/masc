@@ -1,3 +1,5 @@
+(include stanzas/test_play_room.inc)
+(include stanzas/test_h2_play_room.inc)
 (test
  (name test_tui_play_change)
  (modules test_tui_play_change)

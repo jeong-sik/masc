@@ -67,7 +67,8 @@ let lane_addon_schemas : tool_schema list =
 
 let schemas : tool_schema list =
   lane_addon_schemas
-  @ [ Tool_schemas_misc_toml.portrait_read
+  @ [ Tool_schemas_misc_toml.play_room
+    ; Tool_schemas_misc_toml.portrait_read
     ; Tool_schemas_misc_toml.candle_balance
     ; Tool_schemas_misc_toml.candle_catalog
     ; Tool_schemas_misc_toml.candle_purchase
@@ -182,6 +183,7 @@ type misc_operation =
   | Misc_dos_click
   | Misc_dos_type
   | Misc_dos_peek
+  | Misc_play_room
   | Misc_dos_pass
   | Misc_dos_save
   | Misc_dos_restore
@@ -202,6 +204,7 @@ let dos_controller_need = function
   | Misc_dos_type | Misc_dos_restore ->
     Takes_controller
   | Misc_dos_pass -> Hands_controller
+  | Misc_play_room
   | Misc_lane_declaration_read | Misc_lane_declaration_save | Misc_lane_updates
   | Misc_lane_attach | Misc_lane_inspect | Misc_lane_observe | Misc_lane_slice
   | Misc_lane_detach | Misc_lane_evidence | Misc_lane_act | Misc_lane_action_status
@@ -276,6 +279,7 @@ let misc_tool_name = function
   | Misc_dos_click -> "masc_dos_click"
   | Misc_dos_type -> "masc_dos_type"
   | Misc_dos_peek -> "masc_dos_peek"
+  | Misc_play_room -> "masc_play_room"
   | Misc_dos_pass -> "masc_dos_pass"
   | Misc_dos_save -> "masc_dos_save"
   | Misc_dos_restore -> "masc_dos_restore"
@@ -317,6 +321,7 @@ let misc_registered_schema operation : tool_schema option =
   | Misc_dos_click
   | Misc_dos_type
   | Misc_dos_peek
+  | Misc_play_room
   | Misc_dos_pass
   | Misc_dos_save
   | Misc_dos_restore

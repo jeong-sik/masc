@@ -1605,6 +1605,29 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
               (Server_board_reaction_http.catalog_json ())
               ~extra_headers:cors)
 
+      | `GET, path when path = Server_routes_http_routes_play_room.path ->
+          with_h2_token_permission_auth h2_reqd
+            ~permission:Masc_domain.CanPlayMachine (fun state viewer ->
+              let base_path = (Mcp_server.workspace_config state).base_path in
+              let status, json =
+                Server_routes_http_routes_play_room.read ~base_path httpun_request
+                |> Server_routes_http_routes_play_room.response ~viewer
+              in
+              h2_respond_json_value h2_reqd json
+                ~status:(status :> H2.Status.t) ~extra_headers:cors)
+
+      | `POST, path when path = Server_routes_http_routes_play_room.path ->
+          with_h2_token_permission_auth h2_reqd
+            ~permission:Masc_domain.CanPlayMachine (fun state viewer ->
+              let base_path = (Mcp_server.workspace_config state).base_path in
+              h2_read_body h2_reqd (fun body ->
+                let status, json =
+                  Server_routes_http_routes_play_room.perform ~base_path ~who:viewer body
+                  |> Server_routes_http_routes_play_room.response ~viewer
+                in
+                h2_respond_json_value h2_reqd json
+                  ~status:(status :> H2.Status.t) ~extra_headers:cors))
+
       | `GET, "/api/v1/board/reactions/batch" ->
           with_h2_token_permission_auth
             h2_reqd

@@ -1,0 +1,45 @@
+{
+  "date": "2026-10-09",
+  "parent": "459cb14f448bb462f5fa8d807d71b78d42d803a9",
+  "build": {
+    "command": "opam exec -- dune build --root . -j 4 test/test_process_eio_coverage.exe test/test_process_file_redirects.exe test/test_keeper_execute_output_files.exe",
+    "exit_code": 0,
+    "log": "build.log"
+  },
+  "tests": [
+    {
+      "command": "_build/default/test/test_process_eio_coverage.exe test '^(capture owner|cancellation-propagation|cancellation-grace|timeout-grace)$'",
+      "exit_code": 0,
+      "executed_cases": 30,
+      "log": "coverage.log"
+    },
+    {
+      "command": "_build/default/test/test_process_file_redirects.exe",
+      "exit_code": 0,
+      "executed_cases": 6,
+      "log": "redirects.log"
+    },
+    {
+      "command": "_build/default/test/test_keeper_execute_output_files.exe",
+      "exit_code": 0,
+      "executed_cases": 7,
+      "log": "output-files.log"
+    }
+  ],
+  "unique_cases": 43,
+  "executable_sha256": {
+    "_build/default/test/test_process_eio_coverage.exe": "21c436426b4751d1ff924f6c0cd6c1940b40ea9ec80e4df4b939e268c200fd3b",
+    "_build/default/test/test_process_file_redirects.exe": "7a0d0d6af30fbf06e25cd496ce1543caee230915efdb26c9d77fff5191472321",
+    "_build/default/test/test_keeper_execute_output_files.exe": "65f2ed7d1b05c0efa34c846e1947b802f0ffac7379af53b2a55619679545404d"
+  },
+  "scope": "macOS isolated child fixtures; no Linux runtime/full CI/deployment/live Keeper probes",
+  "intermediate_receipts": {
+    "initial-build.log": "first owner extraction compiled successfully",
+    "intermediate-build.log": "comment/default callback changes compiled; test enhancements during this build are not final evidence",
+    "checked-build.log": "first strengthened capture tests compiled successfully",
+    "pre-pipeline-coverage.log": "29 cases passed before adding normal pipeline scenario",
+    "pipeline-build.log": "normal pipeline scenario compiled successfully before callback arrival-order assertion strengthening",
+    "pipeline.log": "normal pipeline scenario passed on earlier test source"
+  },
+  "redirect_and_publication_identity": "production source and these two test sources/executables unchanged during final coverage test enhancement; final focused build includes all three targets"
+}

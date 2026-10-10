@@ -433,11 +433,12 @@
       "path": "lib/process/process_eio.ml",
       "baseline_lines": 2032,
       "kind": "production",
-      "status": "partial: ignored fallback cwd repaired through foreground directory acquisition; typed backend cwd refusal and direct owner call; remaining process/capture/pipeline responsibilities pending semantic review",
-      "current_lines": 2054,
-      "validation_artifact": "process-fallback-cwd/README.md",
+      "status": "partial: fallback cwd repaired; Eio foreground capture/cleanup owner extracted, duplicate two-stream and pipeline drains removed; runtime acquisition, Unix capture, timeout/refusal and pipeline orchestration assessment remain pending",
+      "current_lines": 1610,
+      "validation_artifact": "eio-capture-owner/README.md",
       "prs": [
-        42003
+        42003,
+        42013
       ]
     },
     {

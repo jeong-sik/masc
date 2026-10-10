@@ -60,19 +60,17 @@ val child_exit_grace_seconds : float
     it, whether because its call timed out, its caller raised, or the switch
     it runs under was cancelled.
 
-    On the cancellation path the wait is for the child to close the pipes
-    this side holds, since its exit status cannot be awaited there; a child
-    that hands a pipe to a grandchild is waited on until the grandchild lets
-    go too, or the grace runs out. A child given no pipe at all -- both
-    streams redirected to files -- gets no wait on that path.
+    When the owning switch is cancelled, cleanup preserves the full grace
+    even if the child closes its output pipes early or both outputs are
+    redirected to files. Pipe EOF alone does not establish child exit. The
+    switch's foreground process-group owner performs the final kill/reap.
 
     On the other path, once the grace has run out and the [SIGKILL] is sent,
     the wait for the exit status is bounded by the same number, and only
     happens while the owning switch is still on; a switch that was cancelled
     during the grace gets no wait, its release hook reaps the child. Every
-    way out of a stopped spawn is therefore bounded by two of these per
-    child; a pipeline stops its stages one after another, so its bound is
-    two per stage. *)
+    explicit await in this helper is bounded by this grace; a pipeline
+    requests cleanup for its stages in order. *)
 
 (** {1 Observability hook (#9632)} *)
 

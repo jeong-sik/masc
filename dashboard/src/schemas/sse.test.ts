@@ -484,6 +484,9 @@ describe('SSEMessageSchema', () => {
   it.each([
     { kind: 'output_observed', byte_count: 1 },
     { kind: 'output_observed', byte_count: 4096 },
+    { kind: 'heartbeat_reported', elapsed_seconds: 0 },
+    { kind: 'heartbeat_reported', elapsed_seconds: 30 },
+    { kind: 'heartbeat_reported', elapsed_seconds: 3 },
     { kind: 'message_reported', message: '' },
     { kind: 'message_reported', message: 'provider progress \n다음' },
   ])('accepts and retains typed native progress: %j', progress => {
@@ -532,6 +535,15 @@ describe('SSEMessageSchema', () => {
       { kind: 'message_reported', message: 'ok', byte_count: 1 },
       { kind: 'message_reported', message: '', extra: true },
       { kind: 'heartbeat', elapsed_seconds: 1 },
+      { kind: 'heartbeat_reported' },
+      { kind: 'heartbeat_reported', elapsed_seconds: null },
+      { kind: 'heartbeat_reported', elapsed_seconds: -1 },
+      { kind: 'heartbeat_reported', elapsed_seconds: 0.5 },
+      { kind: 'heartbeat_reported', elapsed_seconds: '30' },
+      { kind: 'heartbeat_reported', elapsed_seconds: Infinity },
+      { kind: 'heartbeat_reported', elapsed_seconds: Number.MAX_SAFE_INTEGER + 1 },
+      { kind: 'heartbeat_reported', elapsed_seconds: 30, byte_count: 1 },
+      { kind: 'heartbeat_reported', elapsed_seconds: 30, message: 'wrong variant' },
     ]) {
       expect(SSEMessageSchema.safeParse(customEvent('KEEPER_NATIVE_TOOL_PROGRESS', {
         toolStreamScope: 0, toolCallBlockIndex: 0, progress,

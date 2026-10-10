@@ -2952,7 +2952,7 @@ let run_named
                  observe ~runtime_id:attempt_runtime_id ~tools ~transmitted)
               on_request_attribution
           in
-          Keeper_claude_code_runtime.run ?on_native_tool_completion
+          Keeper_claude_code_runtime.run ?on_native_tool_progress ?on_native_tool_completion
             ?on_memory_capacity_refusal
             ?on_tool_execution
             ?composed_context:official_client_composed_context

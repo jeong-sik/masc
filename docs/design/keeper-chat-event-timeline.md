@@ -83,7 +83,7 @@ claim to reconstruct missing scope provenance in those older journals.
 | Runtime | Turn and text events | Thinking | Tools and progress |
 | --- | --- | --- | --- |
 | Codex app-server | `Turn_started` becomes `MessageStart`; agent-message deltas and completed-item suffixes become `TextDelta`; terminal completion becomes `MessageDelta` and `MessageStop`. Item IDs separate messages within a turn. | `item/reasoning/summaryTextDelta` and `item/reasoning/textDelta` become `ThinkingDelta`. The item ID and summary/content index identify each part; completed reasoning contributes only missing suffixes. | Dynamic tools carry call IDs and argument snapshots. Native `item/started` and `item/completed` produce observed start/end with identity and name. Known completed-item status and nullable command exit code remain native metadata. Command output deltas carry byte observations; MCP progress carries a redacted message, attached only to its active native item. File-change output notifications are outside this contract. |
-| Claude Code | Partial SDK text and complete assistant envelopes contribute text once. `message.id` separates responses; the first response opens the normalized turn and the result closes it. | Partial `thinking_delta` and complete thinking blocks become `ThinkingDelta`; complete blocks contribute only missing suffixes. Signatures and redacted payloads are not displayed as text. | MASC MCP callbacks provide dynamic-tool identity/arguments. Assistant `tool_use` and user tool results provide native observed start/end with the tool result’s optional `is_error` flag. `tool_progress` keeps transport activity alive but is not projected as chat progress. |
+| Claude Code | Partial SDK text and complete assistant envelopes contribute text once. `message.id` separates responses; the first response opens the normalized turn and the result closes it. | Partial `thinking_delta` and complete thinking blocks become `ThinkingDelta`; complete blocks contribute only missing suffixes. Signatures and redacted payloads are not displayed as text. | MASC MCP callbacks provide dynamic-tool identity/arguments. Assistant `tool_use` and user tool results provide native observed start/end with the tool result’s optional `is_error` flag. Root `tool_progress` with `heartbeat: true` and matching session, parent scope, tool name and active native invocation becomes `Heartbeat_reported {elapsed_seconds}`. Unsupported or unbound progress does not create a chat row. |
 | Antigravity | Init opens the normalized turn; step text and terminal response reconciliation provide text; result closes the turn. Step index identifies the source. | No typed thinking event exists in this adapter. `Internal` is not established as a reasoning payload. Thinking support is unverified. | MCP callbacks provide dynamic-tool events; tool steps provide native observed start/end using conversation ID and step index. `Done` reports native completion; `Step_error` reports a native error. Neither is a MASC execution receipt. |
 | GLM Coding | The configured `openai-compatible-http` route uses AGENT_CORE SSE parsing with message start/stop, text deltas, and indexed blocks. | Provider reasoning fields accepted by the configured streaming dialect produce `ThinkingDelta` or `ReasoningDetailsDelta`. Absence of a provider reasoning payload produces no invented thinking. | Indexed tool calls carry their IDs, names, and argument deltas. MASC execution receipts determine tool execution results. Official-client native-tool notifications do not apply to this HTTP route. |
 
@@ -254,6 +254,11 @@ successive deltas are separate observations and both count. An MCP message becom
 Messages are full observations, not concatenated fragments: every message remains
 in the journal and the current tool row shows the latest one.
 
+Claude root heartbeats carry a separate nonnegative provider elapsed-seconds
+observation. The latest report may decrease; it is neither a byte count nor a
+local duration or success receipt. Exact invocation and stream-scope checks are
+described in [the Claude heartbeat contract](claude-native-heartbeat.md).
+
 Adapters look up the exact existing native index without allocating a start.
 The direct producer captures its current scope and enqueues the typed observation
 on the same worker FIFO as ordinary content and native completion. The autonomous
@@ -273,9 +278,12 @@ the same strict progress object. Unknown variants, duplicate keys, incompatible
 variant fields and invalid byte counts are unreadable data. The TUI retains the
 last journal/SSE observation timestamp (with receipt-time fallback for unstamped
 local deltas) and elapsed time from the tool's observed start to that update. This
-is observation timing, not provider-reported execution duration. Compact Tools rows
+is local observation timing. `Heartbeat_reported.elapsed_seconds` retains the
+separate provider measurement without replacing either timestamp or local elapsed
+duration. A heartbeat-only row says `heartbeat · provider elapsed Ns`; output and
+message observations retain their own labels. Compact Tools rows
 say `output arriving` while active and `output observed` after the step ends, without
-generated elapsed time; observation elapsed time belongs to Full and byte counts
+generated elapsed time; local observation elapsed belongs to Full and byte counts
 belong to Full/Results detail. MCP
 messages use terminal-safe display. Progress updates do not touch authored speech,
 Thinking/Streaming phase, native completion, or MASC execution identity/outcome.

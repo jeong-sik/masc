@@ -21,6 +21,7 @@ type tool_outcome =
 type native_progress =
   { output_bytes : int option
   ; message : string option
+  ; provider_elapsed_seconds : int option
   ; updated_at : float
   ; elapsed : float option
   }
@@ -201,11 +202,12 @@ let native_activity_summary (activity : tool_activity) =
 
 let native_progress_summary (activity : tool_activity) =
   Option.map (fun progress ->
-    let observation = match progress.message, progress.output_bytes with
-      | Some message, _ -> safe_line message
-      | None, Some _ when activity.outcome=Native_running -> "output arriving"
-      | None, Some _ -> "output observed"
-      | None, None -> "native activity observed" in
+    let observation = match progress.message, progress.output_bytes, progress.provider_elapsed_seconds with
+      | Some message, _, _ -> safe_line message
+      | None, Some _, _ when activity.outcome=Native_running -> "output arriving"
+      | None, Some _, _ -> "output observed"
+      | None, None, Some seconds -> Printf.sprintf "heartbeat · provider elapsed %ds" seconds
+      | None, None, None -> "native activity observed" in
     observation)
     activity.native_progress
 

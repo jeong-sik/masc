@@ -44,6 +44,7 @@ type tool_outcome = Masc_tui_keeper_chat_activity_projection.tool_outcome =
 type native_progress = Masc_tui_keeper_chat_activity_projection.native_progress =
   { output_bytes : int option
   ; message : string option
+  ; provider_elapsed_seconds : int option
   ; updated_at : float
   ; elapsed : float option
   }
@@ -1560,21 +1561,25 @@ let apply_delta ~now t (delta : Live.delta) =
         else
           let previous_bytes = Option.bind call.native_progress (fun previous -> previous.output_bytes) in
           let previous_message = Option.bind call.native_progress (fun previous -> previous.message) in
+          let previous_elapsed = Option.bind call.native_progress (fun previous -> previous.provider_elapsed_seconds) in
           let updated = match progress with
             | Runtime_native_tools.Output_observed {byte_count} ->
                 let previous = Option.value previous_bytes ~default:0 in
                 if byte_count <= 0 || byte_count > max_int - previous then None
-                else Some (Some (previous + byte_count), previous_message)
+                else Some (Some (previous + byte_count), previous_message, previous_elapsed)
             (* A blank message says the tool is active and nothing more. It
                keeps the time current but does not replace a message that
                said something. *)
             | Runtime_native_tools.Message_reported {message} when String.trim message = "" ->
-                Some (previous_bytes, previous_message)
-            | Runtime_native_tools.Message_reported {message} -> Some (previous_bytes, Some message) in
+                Some (previous_bytes, previous_message, previous_elapsed)
+            | Runtime_native_tools.Message_reported {message} -> Some (previous_bytes, Some message, previous_elapsed)
+            | Runtime_native_tools.Heartbeat_reported {elapsed_seconds} ->
+                if elapsed_seconds < 0 then None
+                else Some (previous_bytes, previous_message, Some elapsed_seconds) in
           match updated with
-          | None -> note_unreadable t "native progress byte count is invalid"; call
-          | Some (output_bytes, message) ->
-              {call with native_progress=Some {output_bytes; message; updated_at=now;
+          | None -> note_unreadable t "native progress measurement is invalid"; call
+          | Some (output_bytes, message, provider_elapsed_seconds) ->
+              {call with native_progress=Some {output_bytes; message; provider_elapsed_seconds; updated_at=now;
                 elapsed=(if now >= call.started_at then Some (now -. call.started_at) else None)}}) with
        | Call_updated | Call_ambiguous -> ()
        | Call_missing | Call_conflicting -> note_unreadable t "native progress has no matching provider occurrence")

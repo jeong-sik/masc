@@ -15,6 +15,23 @@ with tempfile.TemporaryDirectory(prefix='masc-play-candidate-') as base:
         try:
             with urllib.request.urlopen(request,timeout=10) as r:return r.status,r.read()
         except urllib.error.HTTPError as e:return e.code,e.read()
+    def mcp_call(endpoint,token,name,arguments):
+        def rpc(payload,session=None):
+            headers={'Content-Type':'application/json','Accept':'application/json, text/event-stream',
+                     'Authorization':'Bearer '+token}
+            if session:headers['Mcp-Session-Id']=session
+            request=urllib.request.Request(origin+endpoint,data=json.dumps(payload).encode(),headers=headers,method='POST')
+            with urllib.request.urlopen(request,timeout=30) as response:
+                raw=response.read().decode()
+                events=[json.loads(line[6:]) for line in raw.splitlines() if line.startswith('data: ')]
+                if events:
+                    return next(event for event in events if event.get('id')==payload['id']),response.headers.get('Mcp-Session-Id')
+                return json.loads(raw),response.headers.get('Mcp-Session-Id')
+        _,session=rpc({'jsonrpc':'2.0','id':1,'method':'initialize','params':{
+            'protocolVersion':'2025-03-26','capabilities':{},'clientInfo':{'name':'public-room-proof','version':'1'}}})
+        answer,_=rpc({'jsonrpc':'2.0','id':2,'method':'tools/call','params':{'name':name,'arguments':arguments}},session)
+        assert 'error' not in answer and not answer.get('result',{}).get('isError'), (name,answer)
+        return answer
     with (out/'candidate-server-startup.log').open('w') as logfile:
         p=subprocess.Popen([str(exe),'start','--base-path',base,'--port',str(port),'--host','127.0.0.1'],env=env,stdout=logfile,stderr=subprocess.STDOUT)
         try:
@@ -62,6 +79,23 @@ with tempfile.TemporaryDirectory(prefix='masc-play-candidate-') as base:
             left=room_post(player,{'action':'leave','client_id':'browser2','machine':'msx'})
             assert 'guestproof' not in [m['name'] for m in left['members']]
             assert b'masc_play_room' in req('/play/agent.md',token=None)[1]
+            if len(sys.argv) == 5:
+                # A tiny original COM program prints HI and waits for a key.
+                # Only this isolated server's machine is loaded.
+                programs=pathlib.Path(base,'.masc','dos','programs');programs.mkdir(parents=True,exist_ok=True)
+                (programs/'room-proof.com').write_bytes(bytes.fromhex('b409ba1101cd21b400cd1609c074f8cd20')+b'HI$')
+                mcp_call('/mcp',admin,'masc_dos_load',{'program':'room-proof.com'})
+                mcp_call('/mcp/play',player,'masc_play_room',{'action':'read','client_id':'agent-proof','machine':'dos'})
+                player_file=pathlib.Path(base,'player-proof.token')
+                admin_file=pathlib.Path(base,'admin-proof.token')
+                for file,value in [(player_file,player),(admin_file,admin)]:
+                    fd=os.open(file,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+                    with os.fdopen(fd,'w') as stream:stream.write(value)
+                try:
+                    subprocess.run(['node',str(pathlib.Path(__file__).with_name('verify-play-room-clients.cjs')),
+                        origin,base,str(player_file),str(admin_file),sys.argv[3],str(out/'clients'),sys.argv[4]],check=True)
+                finally:
+                    player_file.unlink();admin_file.unlink()
             assert req('/api/v1/play/invites',token=player)[0]==403
             assert req('/api/v1/play/invites/guestproof','DELETE',token=player)[0]==403
             assert any(row['name']=='guestproof' for row in json.loads(req('/api/v1/play/invites')[1])['invites'])
@@ -73,7 +107,13 @@ with tempfile.TemporaryDirectory(prefix='masc-play-candidate-') as base:
             public_host=urllib.parse.urlsplit(env['MASC_HTTP_BASE_URL']).netloc
             assert req('/play',token=None,authority=public_host)[0]==200
             assert req('/play',token=None,authority='unconfigured.example.test')[0]==400
-            receipt={'pass':True,'binary_sha256':hashlib.sha256(exe.read_bytes()).hexdigest(),'checks':['ready','anonymous-denied','issue','inventory','candidate-page','player-view','player-admin-denied','revoke','revoked-view-denied','empty-inventory','configured-host-accepted','unconfigured-host-rejected','room-anonymous-denied','room-authenticated-speaker','room-idempotency','room-conflict','room-forgery-denied','room-shared-msx-dos-history','room-pagination','room-multiple-clients','room-revocation','room-agent-guide'],'isolated_workspace':True,'shared_server_changed':False}
+            build=json.loads(req('/health?full=1')[1])['build']
+            receipt={'pass':True,'binary_sha256':hashlib.sha256(exe.read_bytes()).hexdigest(),
+                'binary_commit':build['binary_commit'],'runtime_instance_id':build['runtime_instance_id'],
+                'checks':['ready','anonymous-denied','issue','inventory','candidate-page','player-view','player-admin-denied','revoke','revoked-view-denied','empty-inventory','configured-host-accepted','unconfigured-host-rejected','room-anonymous-denied','room-authenticated-speaker','room-idempotency','room-conflict','room-forgery-denied','room-shared-msx-dos-history','room-pagination','room-multiple-clients','room-revocation','room-agent-guide'],'isolated_workspace':True,'shared_server_changed':False}
+            if len(sys.argv)==5:
+                receipt['checks']+=['real-dos-load-via-mcp','player-room-tool-via-seat-mcp','actual-browser-tui-conversation']
+                receipt['tui_sha256']=hashlib.sha256(pathlib.Path(sys.argv[3]).read_bytes()).hexdigest()
             (out/'candidate-server-receipt.json').write_text(json.dumps(receipt,indent=2));print(json.dumps(receipt))
         finally:
             p.terminate()

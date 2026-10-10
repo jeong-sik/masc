@@ -111,7 +111,7 @@ let shows_sidebar ~cols ~has_activity =
 let picture_cols ~cols ~has_activity =
   if shows_sidebar ~cols ~has_activity then cols - sidebar_cols - sidebar_gap else cols
 
-let sidebar_line entry =
+let activity_line ~width entry =
   Masc_tui_ansi.fit_width
     (match entry with
      | None -> ""
@@ -120,7 +120,9 @@ let sidebar_line entry =
            (Masc_tui_ansi.Terminal_text.clock_timestamp_of_unix e.at)
            (Masc_tui_ansi.Terminal_text.single_line e.who)
            (Masc_tui_ansi.Terminal_text.single_line e.action))
-    sidebar_cols
+    width
+
+let sidebar_line entry = activity_line ~width:sidebar_cols entry
 
 (* An empty cache has two causes and they are not the same news. The server
    answered and said no machine is loaded, or it was not reachable to be asked
@@ -229,7 +231,7 @@ let live_footer () =
    (mode, media, who pressed) still rides the old type; only the picture went
    through the contract. *)
 let draw ~(write : string -> unit) ~title ~footer ~retain ?notice
-    ?(activity = []) (surface : Masc_tui_interactive.frame option) =
+    ?(activity = []) ?room ?room_footer (surface : Masc_tui_interactive.frame option) =
   let dims =
     match surface with
     | Some (Pixels { width; height; rgb }) -> Some (width, height, rgb)
@@ -239,13 +241,25 @@ let draw ~(write : string -> unit) ~title ~footer ~retain ?notice
   let rows = max 1 rows and cols = max 1 cols in
   let notice = if rows >= 4 then notice else None in
   let header_rows = if Option.is_some notice then 2 else 1 in
-  let screen_rows = max 0 (rows - header_rows - 1) in
+  let body_rows = max 0 (rows - header_rows - 1) in
+  let room_side = Option.is_some room && cols >= 80 in
+  let room_width = if room_side then min 48 (cols / 3) else cols in
+  let room_rows = if Option.is_none room then 0 else if room_side then body_rows
+    else min 10 (body_rows / 2) in
+  (* The room and the machine feed share its region vertically. Reserve no
+     empty activity rows, and preserve its heading, one message row and composer
+     before allocating activity. Keep at least half for conversation; the picture
+     keeps its existing width even when DOS activity arrives. *)
+  let room_activity_rows = min (List.length activity)
+      (min (room_rows / 2) (max 0 (room_rows - 3))) in
+  let conversation_rows = room_rows - room_activity_rows in
+  let screen_rows = if room_side then body_rows else body_rows - room_rows in
   let picture_rows =
     min screen_rows (max 1 ((screen_rows * int_of_float (Float.round (!screen_fraction *. 8.0))) / 8))
   in
-  let has_activity = activity <> [] in
+  let has_activity = activity <> [] && Option.is_none room in
   let show_sidebar = shows_sidebar ~cols ~has_activity in
-  let picture_cols = picture_cols ~cols ~has_activity in
+  let picture_cols = if room_side then cols - room_width - 1 else picture_cols ~cols ~has_activity in
   (* [picture_cols], not [cols]: the picture's own column budget is what
      decides its rendered size, and the sidebar toggling on or off changes
      that budget without necessarily changing [cols] itself. *)
@@ -358,8 +372,25 @@ let draw ~(write : string -> unit) ~title ~footer ~retain ?notice
     done;
     Buffer.add_string buf (Printf.sprintf "\027[%d;1H" (header_rows + screen_rows + 1))
   end;
+  (match room with
+   | Some draw_room when room_rows > 0 ->
+       let top = header_rows + 1 + (if room_side then 0 else screen_rows) in
+       let col = if room_side then picture_cols + 2 else 1 in
+       let lines = draw_room ~width:room_width ~height:conversation_rows in
+       for i = 0 to conversation_rows - 1 do
+         Buffer.add_string buf (Printf.sprintf "\027[%d;%dH" (top + i) col);
+         Buffer.add_string buf (fit_line room_width (Option.value ~default:"" (List.nth_opt lines i)))
+       done;
+       for i = 0 to room_activity_rows - 1 do
+         Buffer.add_string buf
+           (Printf.sprintf "\027[%d;%dH" (top + conversation_rows + i) col);
+         Buffer.add_string buf (activity_line ~width:room_width (List.nth_opt activity i))
+       done
+   | Some _ | None -> ());
   if rows > 1 then begin
+    if Option.is_some room then Buffer.add_string buf (Printf.sprintf "\027[%d;1H" rows);
     Buffer.add_string buf "\027[0K";
+    let footer = match room_footer with None | Some "" -> footer | Some hints -> hints in
     Buffer.add_string buf (fit_line cols footer)
   end;
   image_may_exist := !image_may_exist || kitty;
@@ -372,14 +403,14 @@ let draw ~(write : string -> unit) ~title ~footer ~retain ?notice
 
 let render ~(write : string -> unit)
     ~(connection : Masc_tui_types.connection_status) ~live
-    ?(interaction = Masc_tui_types.Observe_machine) ?notice
+    ?(interaction = Masc_tui_types.Observe_machine) ?notice ?room ?room_footer
     (frame : Masc_tui_types.msx_frame option)
     (surface : Masc_tui_interactive.frame option) =
   draw ~write ~title:(title_of ~connection ~live frame) ~footer:(footer interaction)
-    ~retain:(Option.is_some frame) ?notice surface
+    ~retain:(Option.is_some frame) ?notice ?room ?room_footer surface
 
 let render_live ~(write : string -> unit)
-    ~(connection : Masc_tui_types.connection_status) ?(activity = []) source
+    ~(connection : Masc_tui_types.connection_status) ?(activity = []) ?room ?room_footer source
     (live : Live.view) =
   let surface =
     match live with
@@ -388,7 +419,7 @@ let render_live ~(write : string -> unit)
     | Live.Unread | Live.Not_loaded | Live.Failed _ -> None
   in
   draw ~write ~title:(live_title ~connection source live) ~footer:(live_footer ())
-    ~retain:(Option.is_some surface) ~activity surface
+    ~retain:(Option.is_some surface) ~activity ?room ?room_footer surface
 
 (* The last surface a render drew — consume's repaint redraws it. *)
 let last_surface () =

@@ -5971,6 +5971,8 @@ type state = {
   (* Locally retained invite cards, newest first. The selected card remains
      open until the operator closes it; the modal sweep leaves it alone. *)
   mutable collab: Masc_tui_collab.t option;
+  mutable play_room: Masc_tui_play_room.t option;
+  mutable play_room_quarantine: (workspace_input_identity * Masc_tui_play_room.t) option;
   mutable play_invite: play_invite;
   mutable play_invite_quarantine: (workspace_input_identity * play_invite) option;
   mutable play_invite_scroll: int;
@@ -7449,7 +7451,10 @@ let suspend_workspace_readings state =
   state.context_inspector_loading <- false;
   state.prompts_librarian_input_loading <- false;
   state.msx_live_in_flight <- None;
-  state.dos_live_in_flight <- None
+  state.dos_live_in_flight <- None;
+  (* The room's read reply is discarded with this reading; without a release
+     its pending slot would block every later poll. *)
+  state.play_room <- Option.map Masc_tui_play_room.retire_read state.play_room
 
 (* A discarded bundle proves its observation interval was inconsistent,
    even when its last probe sees the original workspace again. Retire that
@@ -9576,14 +9581,33 @@ let withdraw_play_invite_workspace state
       state.play_invite <- {cards = []; shown_name = None}
   | Some workspace ->
       let retained =
-        (* Retained chat can still name this workspace after authority loss
-           already withdrew the live cards into quarantine. *)
-        if previous = Some workspace && state.play_invite.cards <> [] then hidden state.play_invite
-        else match state.play_invite_quarantine with
-          | Some (owner, invite) when owner = workspace -> hidden invite
-          | Some _ | None -> {cards = []; shown_name = None} in
+        (* A retained chat origin may still name this workspace after its
+           live presentation was withdrawn. The sealed copy owns recovery. *)
+        match state.play_invite_quarantine with
+        | Some (owner, invite) when owner = workspace -> hidden invite
+        | Some _ | None ->
+            if previous = Some workspace then hidden state.play_invite
+            else {cards = []; shown_name = None} in
       state.play_invite <- retained;
       state.play_invite_quarantine <- None
+
+let withdraw_play_room_workspace state
+    ~(previous : workspace_input_identity option) ~(current : workspace_input_identity option) =
+  match current with
+  | None ->
+      (match previous, state.play_room with
+       | Some workspace, Some room ->
+           state.play_room_quarantine <- Some (workspace, Masc_tui_play_room.suspend room)
+       | (Some _ | None), None | None, Some _ -> ());
+      state.play_room <- None
+  | Some workspace ->
+      let retained = match state.play_room_quarantine with
+        | Some (owner, room) when owner = workspace -> Some room
+        | Some _ | None ->
+            if previous = Some workspace then Option.map Masc_tui_play_room.suspend state.play_room
+            else None in
+      state.play_room <- retained;
+      state.play_room_quarantine <- None
 
 let play_change_request = function
   | Preparing_invite_change request | Sending_invite_change request | Unknown_invite_change request
@@ -9949,6 +9973,8 @@ let create_state
   dos_live_in_flight = None;
   dos_activity = [];
   collab = None;
+  play_room = None;
+  play_room_quarantine = None;
   play_invite = { cards = []; shown_name = None };
   play_invite_quarantine = None;
   play_invite_scroll = 0;

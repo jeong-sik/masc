@@ -81,6 +81,12 @@ let test_room_routes () = with_gateway (fun ~base_path ~token client ->
   check string "H2 uses the shared viewer projection"
     (Yojson.Safe.to_string expected) (Yojson.Safe.to_string json);
   let body = {|{"action":"say","client_id":"tab-a","machine":"dos","message_id":"once","text":"hello from H2"}|} in
+  let foreign = match Yojson.Safe.from_string body with
+    | `Assoc fields -> Yojson.Safe.to_string (`Assoc (("expected_workspace",
+        `Assoc ["base_path", `String "/foreign"; "masc_root", `String "/foreign/.masc"]) :: fields))
+    | _ -> fail "fixture body" in
+  let refused, _ = request ~token ~meth:`POST ~body:foreign client path in
+  check int "H2 refuses foreign workspace before writing" 409 refused;
   let status, _ = request ~token ~meth:`POST ~body client path in
   check int "room write reaches H2 handler" 200 status;
   let status, _ = request ~token ~meth:`POST ~body client path in

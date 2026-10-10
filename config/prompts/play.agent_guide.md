@@ -93,6 +93,9 @@ and DOS. It contains only messages deliberately sent here, never private
 Keeper conversations. The seat's `participants` are eligible handoff targets;
 the room's `members` are clients that recently joined or read the room.
 
+Operators watching a game in the TUI Collab spectator window read and write
+the same room.
+
 Use `masc_play_room` over MCP, or POST its arguments to {{room_url}}:
 
 ```json

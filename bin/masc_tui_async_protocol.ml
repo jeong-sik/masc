@@ -545,6 +545,7 @@ type async_msg =
   | Preset_saved of preset_sink * (Masc.Tui_decode.preset_manifest, string) result
   | Preset_restored of preset_sink * (Masc.Tui_decode.preset_restore_report, string) result
   | Preset_deleted of preset_sink * (string, string) result
+  | Play_room_received of Masc_tui_play_room.request * (string * Masc.Play_room.snapshot, string) result
   | Play_invites_listed of play_list_sink * (Masc.Tui_decode.play_invite_row list, string) result
   | Play_invite_issued of Masc_tui_types.play_change_request * play_sink * Masc.Tui_decode.play_invite_issued play_mutation
   | Play_invite_revoked of Masc_tui_types.play_change_request * play_sink * string * play_revoke
@@ -650,6 +651,9 @@ let rec workspace_message_is_read = function
     (match action with Masc_tui_queue_inspection.Inspect -> true
      | Pause | Resume | Cancel _ | Move_to_end _ | Edit _
      | Cancel_event _ | Prioritize_event _ -> false)
+  (* A room read is retired with its reading and released by
+     [suspend_workspace_readings]; a send or leave keeps its receipt. *)
+  | Play_room_received (request, _) -> Masc_tui_play_room.is_read request
   (* A roster observation cannot release retained input after its read epoch
      retires. A completed resume POST still owns its mutation receipt. *)
   | Keeper_queue_resume_confirmed (_, _, Owner_already_active) -> true

@@ -38,7 +38,8 @@ let test_legacy_tilde_keys () =
 let test_msx_checkpoint_keys () =
   List.iter (fun (parameters, final, expected) ->
     check_name "checkpoint key reaches binding" expected parameters final)
-    [ "15", '~', "f5"; "15;1", '~', "f5"; "57368;1", 'u', "f5"
+    [ "14", '~', "f4"; "1", 'S', "f4"; "57367;1", 'u', "f4"
+    ; "15", '~', "f5"; "15;1", '~', "f5"; "57368;1", 'u', "f5"
     ; "17", '~', "f6"; "18", '~', "f7"; "19", '~', "f8"
     ; "57371;1", 'u', "f8"
     ; "17;1", '~', "f6"; "18;1", '~', "f7"
@@ -174,7 +175,7 @@ let test_an_unnamed_ss3_final_stays_unnamed () =
         (Printf.sprintf "ESC O %c is not named" final)
         None
         (Masc_tui_csi.name ~parameters:"" ~final))
-    [ 'P'; 'Q'; 'R'; 'S' ]
+    [ 'P'; 'Q'; 'R' ]
 
 let () =
   run "tui_csi"

@@ -41,6 +41,7 @@ let final_name = function
   | 'D' -> Some "left"
   | 'H' -> Some "home"
   | 'F' -> Some "end"
+  | 'S' -> Some "f4"
   | _ -> None
 
 (* [ESC \[ <n> ~] keys, including the MSX checkpoint bindings. *)
@@ -51,6 +52,7 @@ let tilde_name = function
   | "4" -> Some "end"
   | "5" -> Some "pageup"
   | "6" -> Some "pagedown"
+  | "14" -> Some "f4"
   | "15" -> Some "f5"
   | "17" -> Some "f6"
   | "18" -> Some "f7"
@@ -69,6 +71,7 @@ let codepoint_name code =
     | 13 -> Some "enter"
     | 27 -> Some "esc"
     | 127 -> Some "backspace"
+    | 57367 -> Some "f4"
     | 57368 -> Some "f5"
     | 57369 -> Some "f6"
     | 57370 -> Some "f7"

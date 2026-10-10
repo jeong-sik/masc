@@ -152,6 +152,36 @@ let test_other_workspace_discards_quarantined_cards () =
   Types.withdraw_play_invite_workspace state ~previous:(Some a) ~current:(Some b);
   check (list string) "direct A to B also discards A's cards" [] (kept_names state)
 
+let test_retained_chat_origin_restores_room_receipt () =
+  let module Room = Masc_tui_play_room in
+  let state = fresh () in
+  let a = workspace "a" and b = workspace "b" in
+  let room = Room.create () |> fun room -> Room.active room true
+    |> fun room -> Room.paste room "retained room draft" in
+  let room, request = Room.send room ~machine:Masc.Machine_lane.Dos in
+  let request = match request with Some request -> request | None -> fail "send not admitted" in
+  state.Types.play_room <- Some room;
+  Types.withdraw_play_room_workspace state ~previous:(Some a) ~current:None;
+  check bool "unknown workspace hides the room" true (Option.is_none state.Types.play_room);
+  Types.withdraw_play_room_workspace state ~previous:(Some a) ~current:None;
+  Types.withdraw_play_room_workspace state ~previous:(Some a) ~current:(Some a);
+  let room = match state.Types.play_room with Some room -> room | None -> fail "room not restored" in
+  let room = Room.receive room request ~now:1. (Error "late old response") in
+  let _, rows = Room.layout room ~width:80 ~height:8 in
+  (* A send leaves the composer at once; its unknown outcome stays on screen
+     as the receipt being confirmed, not as the next draft. *)
+  check bool "unknown-send receipt survives recovery" true
+    (List.exists (fun row -> String.trim row = "› 전송 확인 중: retained room draft") rows);
+  let _, retry = Room.send (Room.active room true) ~machine:Masc.Machine_lane.Msx in
+  let retry = match retry with Some request -> request | None -> fail "retry not admitted" in
+  check bool "retry preserves original client, message, machine and text" true
+    (Room.request_json request = Room.request_json retry);
+  Types.withdraw_play_room_workspace state ~previous:(Some a) ~current:None;
+  Types.withdraw_play_room_workspace state ~previous:(Some a) ~current:(Some b);
+  check bool "another workspace cannot inherit the draft" true (Option.is_none state.Types.play_room);
+  Types.withdraw_play_room_workspace state ~previous:(Some b) ~current:(Some a);
+  check bool "a confirmed change discarded the sealed draft" true (Option.is_none state.Types.play_room)
+
 let test_retained_chat_origin_recovers_quarantined_cards () =
   let state = fresh () in
   let a = workspace "a" in
@@ -193,6 +223,8 @@ let () =
             test_unknown_workspace_quarantines_cards
         ; test_case "confirmed different workspace discards quarantined cards" `Quick
             test_other_workspace_discards_quarantined_cards
+        ; test_case "retained chat origin restores room draft and receipt" `Quick
+            test_retained_chat_origin_restores_room_receipt
         ; test_case "retained chat origin recovers quarantined cards" `Quick
             test_retained_chat_origin_recovers_quarantined_cards
         ] )

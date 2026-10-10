@@ -673,7 +673,7 @@ let test_departed_generation_recovers_a_late_admitted_move () =
   recovered ~released:true (recover config);
   check (option string) "a late controller is recoverable without token revocation" None (controller ())
 
-let test_participation_is_bound_to_current_credential_generation () =
+let test_participation_survives_credential_renewal () =
   with_machine @@ fun config _ _ ->
   let old_token, _ = renew config in
   participation_ok (participate config old_token Play_participation.Departed);
@@ -682,8 +682,10 @@ let test_participation_is_bound_to_current_credential_generation () =
    | Error Keeper_dos_controller.Credential_changed -> ()
    | Ok () | Error _ -> fail "an old bearer changed the renewed participation");
   let names = auth_ok (Play_seat.participants ~base_path:config.base_path ~keepers:[] ~now:(Time_compat.now ())) in
-  check bool "same-name reissue starts eligible" true (List.mem "player" names);
-  participation_ok (participate config new_token Play_participation.Departed)
+  check bool "a renewed credential keeps its departure until reconnect" false (List.mem "player" names);
+  participation_ok (participate config new_token Play_participation.Connected);
+  let names = auth_ok (Play_seat.participants ~base_path:config.base_path ~keepers:[] ~now:(Time_compat.now ())) in
+  check bool "reconnect under the renewed bearer restores eligibility" true (List.mem "player" names)
 
 let test_unreadable_participation_refuses_handoff_and_reconnect () =
   with_machine @@ fun config _ _ ->
@@ -737,9 +739,10 @@ let test_worker_keeper_has_no_play_session () =
   check (option string) "refused Worker departure preserves the holder" (Some "operator") (controller ());
   ignore (handed (hand_to config "player"));
   check (option string) "handoff to the same-name Keeper moves the holder" (Some "player") (controller ());
-  (* A departure record for this Worker generation is never read. *)
-  auth_ok (Auth.with_credential_transaction config.base_path (fun transaction ->
-    match Play_participation.write ~transaction ~base_path:config.base_path worker Departed with
+  (* set_participation refuses a Worker, so this direct record only probes
+     that [current] resolves the Worker role before touching any file. *)
+  auth_ok (Auth.with_credential_transaction config.base_path (fun _transaction ->
+    match Play_participation.write ~base_path:config.base_path worker Departed with
     | Ok () -> () | Error detail -> fail detail));
   let participation = auth_ok (Auth.with_credential_transaction config.base_path (fun transaction ->
     Play_participation.current ~transaction ~base_path:config.base_path ~name:"player")) in
@@ -775,8 +778,8 @@ let test_independent_departure_recovers_damaged_participation () =
         | Ok meta -> meta | Error detail -> fail detail in
       match Keeper_meta_store.replace_snapshot config meta with
       | Ok () -> () | Error detail -> fail detail);
-    auth_ok (Auth.with_credential_transaction config.base_path (fun transaction ->
-      match Play_participation.write ~transaction ~base_path:config.base_path credential Connected with
+    auth_ok (Auth.with_credential_transaction config.base_path (fun _transaction ->
+      match Play_participation.write ~base_path:config.base_path credential Connected with
       | Ok () -> () | Error detail -> fail detail));
     let directory = Filename.concat (Common.masc_dir_from_base_path ~base_path:config.base_path) "play" in
     Array.iter (fun file -> Out_channel.with_open_bin (Filename.concat directory file)
@@ -837,7 +840,7 @@ let () =
       ; test_case "disconnect precedes racing and future handoffs" `Quick test_disconnect_before_handoff_prevents_future_assignment
       ; test_case "a racing earlier handoff is released before disconnect returns" `Quick test_handoff_before_disconnect_is_released_inside_admission
       ; test_case "late admitted moves cannot strand a departed holder" `Quick test_departed_generation_recovers_a_late_admitted_move
-      ; test_case "participation belongs to the current credential generation" `Quick test_participation_is_bound_to_current_credential_generation
+      ; test_case "renewal keeps a departure until reconnect" `Quick test_participation_survives_credential_renewal
       ; test_case "unreadable participation preserves evidence and ownership" `Quick test_unreadable_participation_refuses_handoff_and_reconnect
       ; test_case "cancelled disconnect changes no authority" `Quick test_cancelled_disconnect_does_not_publish_departure
       ; test_case "other flushers cannot publish an admitted notice" `Quick test_deferred_notice_is_not_available_to_other_flushers

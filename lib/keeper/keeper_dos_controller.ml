@@ -40,9 +40,9 @@ let set_participation ~config ~who ~token participation =
       | Masc_domain.Worker -> Error Not_a_seat
       | Masc_domain.Admin | Masc_domain.Player -> Ok () in
     (* Do not overwrite an unreadable state with an apparently fresh session. *)
-    let* _ = Play_participation.read ~transaction ~base_path:config.base_path credential
+    let* _ = Play_participation.read ~base_path:config.base_path credential
       |> Result.map_error unavailable in
-    let* () = Play_participation.write ~transaction ~base_path:config.base_path credential participation
+    let* () = Play_participation.write ~base_path:config.base_path credential participation
       |> Result.map_error unavailable in
     match participation with
     | Connected -> Ok ()

@@ -3498,6 +3498,13 @@ let test_indexed_timeline_context_matches_the_full_list_functions () =
             && List.mem message.me_request_id member_ids)
           rows
       in
+      List.iter
+        (fun clock ->
+          check int "slot for a bare clock"
+            (Tui_types.chat_block_insertion_index ~member_ids:[]
+               ~bounds:(fun _ -> false) ~request_id ~timeline_at:clock visible)
+            (Tui_types.chat_index_insertion index ~lower_bound:0 ~timeline_at:clock))
+        [ None; Some (-1.); Some 0.; Some 7.; Some 30.5; Some 59.; Some 1000. ];
       let got =
         Tui_types.chat_log_timeline_context index ~member_ids ~request_id ~started_at
       in

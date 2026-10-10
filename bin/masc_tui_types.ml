@@ -1306,7 +1306,18 @@ type chat_timeline_index =
   ; cti_visible_by_request : (string, int * msg_entry * float option) Hashtbl.t
   ; cti_max_at : float option
   ; cti_all_finite : bool
+  ; cti_prefix_max : float array
+        (** running maximum of the moments up to each row; [neg_infinity]
+            before the first one *)
+  ; cti_first_without_moment : int
+  ; cti_first_flagged_without_moment : int
+  ; cti_first_flagged_at : (float, int) Hashtbl.t
+        (** per moment, the first row there that a tied live turn precedes *)
   }
+
+(* A tied live turn precedes unowned and memory rows. *)
+let chat_row_yields_a_tie (row : msg_entry) =
+  row.me_role = Message_memory || String.equal row.me_request_id ""
 
 let chat_timeline_index ~messages ~visible =
   let by_request = Hashtbl.create 64 in
@@ -1326,8 +1337,31 @@ let chat_timeline_index ~messages ~visible =
     | acc, None -> acc
     | Some left, Some right -> Some (Float.max left right)
   in
+  let length = Array.length cti_visible in
+  let prefix_max = Array.make length neg_infinity in
+  let first_without_moment = ref length in
+  let first_flagged_without_moment = ref length in
+  let first_flagged_at = Hashtbl.create 16 in
+  let running = ref neg_infinity in
+  Array.iteri
+    (fun index ((row : msg_entry), at) ->
+      (match at with
+       | Some at ->
+           if at > !running then running := at;
+           if chat_row_yields_a_tie row && not (Hashtbl.mem first_flagged_at at)
+           then Hashtbl.add first_flagged_at at index
+       | None ->
+           if index < !first_without_moment then first_without_moment := index;
+           if chat_row_yields_a_tie row && index < !first_flagged_without_moment
+           then first_flagged_without_moment := index);
+      prefix_max.(index) <- !running)
+    cti_visible;
   { cti_by_request = by_request
   ; cti_visible
+  ; cti_prefix_max = prefix_max
+  ; cti_first_without_moment = !first_without_moment
+  ; cti_first_flagged_without_moment = !first_flagged_without_moment
+  ; cti_first_flagged_at = first_flagged_at
   ; cti_visible_by_request = visible_by_request
   ; cti_max_at = Array.fold_left (fun acc (_, at) -> max_of_some acc at) None cti_visible
   ; cti_all_finite =
@@ -1340,24 +1374,45 @@ let chat_timeline_index ~messages ~visible =
    [timeline_at] precedes, or the row count when none. Same walk as
    [chat_block_insertion_index], over the frame's index. *)
 let chat_index_insertion index ~lower_bound ~timeline_at =
+  let length = Array.length index.cti_visible in
   let live_precedes ((row : msg_entry), row_at) =
     match timeline_at, row_at with
     | Some live_at, Some row_at ->
         let by_time = Float.compare live_at row_at in
-        if by_time <> 0
-        then by_time < 0
-        else row.me_role = Message_memory || String.equal row.me_request_id ""
+        if by_time <> 0 then by_time < 0 else chat_row_yields_a_tie row
     | Some _, None -> true
     | None, Some _ -> false
-    | None, None -> row.me_role = Message_memory || String.equal row.me_request_id ""
+    | None, None -> chat_row_yields_a_tie row
   in
-  let length = Array.length index.cti_visible in
-  let rec find position =
+  let rec walk position =
     if position >= length then length
     else if live_precedes index.cti_visible.(position) then position
-    else find (position + 1)
+    else walk (position + 1)
   in
-  find lower_bound
+  if lower_bound > 0 || not index.cti_all_finite then walk lower_bound
+  else
+    (* From the first row, the answer is the earliest of three kinds of row;
+       the running maximum is non-decreasing, so the later-moment kind is a
+       binary search. *)
+    match timeline_at with
+    | None -> index.cti_first_flagged_without_moment
+    | Some live_at ->
+        let first_later =
+          let rec search low high =
+            if low >= high then low
+            else
+              let middle = (low + high) / 2 in
+              if index.cti_prefix_max.(middle) > live_at
+              then search low middle
+              else search (middle + 1) high
+          in
+          search 0 length
+        in
+        let first_tied =
+          Option.value ~default:length
+            (Hashtbl.find_opt index.cti_first_flagged_at live_at)
+        in
+        min first_later (min first_tied index.cti_first_without_moment)
 ;;
 
 type chat_log_timeline_context =

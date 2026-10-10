@@ -1610,9 +1610,6 @@ let prunes_and_read ~base_path ~keeper_name ?hook ?before_receipt_prune () =
        detail);
   (* The settled receipts of consumed candidates go on the same wake, so the
      partition ledger of a Keeper that never restarts stays bounded too. Like
-     the candidate prune, a failure is observed and retried on the next wake. *)
-  (* The settled receipts of consumed candidates go on the same wake, so the
-     partition ledger of a Keeper that never restarts stays bounded too. Like
      the candidate prune, a failure is observed and retried on the next wake.
      [?before_receipt_prune] fires on the line immediately above this prune,
      so a test can land a settlement in the gap a candidate read placed

@@ -1470,6 +1470,15 @@ let test_owner_settlement_before_the_prunes_does_not_mint_a_ready_root () =
          ())
   in
   Alcotest.(check int) "the hook fired once" 1 !hook_fired;
+  (* The seam's returned list is the wake's ensure_roots input, so assert it
+     directly: with the settlement in the hook, the list must not name X in
+     any status. Every variant that puts the candidate read in front of the
+     prunes hands this list a stale row and fails here — regardless of
+     whether the read sits above or below the hook. *)
+  Alcotest.(check bool) "the list the wake read is post-prune" false
+    (List.exists
+       (fun (c : A.candidate) -> String.equal c.candidate_id kept.candidate_id)
+       candidates);
   ignore
     (ok "mint roots over the list the wake read"
        (P.ensure_roots ~base_path ~keeper_name:"alpha" candidates));

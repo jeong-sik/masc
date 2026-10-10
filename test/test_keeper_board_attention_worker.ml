@@ -1535,6 +1535,93 @@ let test_owner_settlement_before_the_prunes_does_not_mint_a_ready_root () =
     partitions
 ;;
 
+(* A candidate read that sits between the two prunes is post-prune by
+   construction, so the #41506 tripwire above cannot catch a settlement
+   that lands in the OTHER gap: between that read and the settled-receipt
+   prune. This test pins exactly that seam. The [before_receipt_prune] hook
+   lands the owner settlement there: the between-prunes read has already
+   returned the stale list (naming X as Judged), the settlement consumes X
+   and settles X's partition, and minting roots over that stale list raises
+   a fresh Ready root over the settled partition — the same wedge #41506
+   closed, one gap later. *)
+let test_owner_settlement_between_the_prunes_does_not_mint_a_ready_root () =
+  with_temp_base "board-attention-worker-settle-between-prunes" @@ fun base_path ->
+  let kept = record ~base_path (candidate ~id:"candidate-overlap-race-2" ()) in
+  let (selected : A.candidate), completed_judgment = complete_next ~base_path J.Relevant in
+  Alcotest.(check string) "the judged candidate is ours" kept.candidate_id
+    selected.candidate_id;
+  Masc.Keeper_registry.set_board_cursor ~base_path "alpha" 50.0 (Some "cursor-post");
+  let hook_fired = ref 0 in
+  let candidates =
+    ok "drain with the settlement before the receipt prune"
+      (W.For_testing.prunes_and_read
+         ~base_path
+         ~keeper_name:"alpha"
+         ~before_receipt_prune:(fun () ->
+           incr hook_fired;
+           (* Same owner settlement as the first overlap test: consume X,
+              then settle X's partition. The between-prunes read has already
+              returned its list, so the settlement lands after the read and
+              before the receipt prune. *)
+           ignore
+             (delivered
+                "owner settlement consumes X"
+                (A.apply_judgment_and_deliver
+                   ~base_path
+                   ~keeper_name:"alpha"
+                   ~candidate_id:kept.candidate_id
+                   ~judgment:completed_judgment)
+              : A.candidate);
+           ignore
+             (ok "settle X's partition without the worker lock"
+                (W.For_testing.deliver_and_settle_completed
+                   ~base_path
+                   ~keeper_name:"alpha"
+                   (load_one_partition ~base_path))))
+         ())
+  in
+  Alcotest.(check int) "the hook fired once" 1 !hook_fired;
+  ignore
+    (ok "mint roots over the list the wake read"
+       (P.ensure_roots ~base_path ~keeper_name:"alpha" candidates));
+  let candidates, partitions = read_candidate_and_roots ~base_path in
+  let residue =
+    List.filter
+      (fun (c : A.candidate) -> String.equal c.candidate_id kept.candidate_id)
+      candidates
+  in
+  (match residue with
+   | [ candidate ] ->
+     let label =
+       match candidate.status with
+       | A.Pending _ -> "Pending"
+       | A.Judged _ -> "Judged"
+       | A.Consumed _ -> "Consumed"
+       | A.Quarantine _ -> "Quarantine"
+     in
+     (* The settlement landed after the candidate prune, so the shipped
+        order leaves X's row Consumed until the NEXT wake's candidate
+        prune (whose cursor has advanced past it) drops it. A read placed
+        before the settlement hook instead hands the mint a Judged row,
+        which mints the Ready root the check below refuses. *)
+     Alcotest.(check string) "the surviving row is the shipped transient"
+       "Consumed" label
+   | [] ->
+     Alcotest.fail
+       "the candidate prune was expected to leave the consumed row for the \
+        next wake"
+   | _ -> Alcotest.fail "unexpected duplicate rows");
+  List.iter
+    (fun (partition : P.t) ->
+       match partition.state with
+       | P.Settled _ -> ()
+       | _ ->
+         Alcotest.failf
+           "the wake minted a fresh Ready root over the settled partition: %s"
+           partition.partition_id)
+    partitions
+;;
+
 let test_execution_error_preserves_bound_progress_without_hot_retry () =
   with_temp_base "board-attention-worker-execution-error" @@ fun base_path ->
   let persisted = record ~base_path (candidate ()) in
@@ -4336,6 +4423,10 @@ let () =
             "owner settlement before the prunes does not mint a ready root"
             `Quick
             test_owner_settlement_before_the_prunes_does_not_mint_a_ready_root
+        ; Alcotest.test_case
+            "owner settlement between the prunes does not mint a ready root"
+            `Quick
+            test_owner_settlement_between_the_prunes_does_not_mint_a_ready_root
         ; Alcotest.test_case
             "bookkeeping failure keeps its cause and the flow sentence"
             `Quick

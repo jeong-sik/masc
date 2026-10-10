@@ -53,6 +53,7 @@ type exact_action = action_identity * string
 
 type completion_outcome =
   | End_observed
+  | Completion_unrecorded
   | Completion_reported
   | Error_reported
   | Decline_reported
@@ -60,7 +61,11 @@ type completion_outcome =
   | Unrecognized_status of string
 (** Provider facts, never MASC execution receipts. [Completion_reported] does
     not establish exit zero. A Claude result may omit [is_error]; omission is
-    retained rather than manufactured into an explicit success report. *)
+    retained rather than manufactured into an explicit success report.
+    [End_observed] is an end seen live with no status reported.
+    [Completion_unrecorded] is an end whose record carries no completion: an
+    older writer did not keep one, so whether the provider reported a status
+    is not known. It is never read as [End_observed], and it has no exit code. *)
 
 type completion = { outcome : completion_outcome; exit_code : int option }
 type finished = { observation : observation; completion : completion }
@@ -100,6 +105,9 @@ val redact_progress : (string -> string) -> progress -> progress
     elapsed time. A later report may be smaller without being rejected. *)
 
 val end_observed : completion
+val completion_unrecorded : completion
+(** The completion of a native end read from a journal row or a wire event
+    that carries none. *)
 val completion_to_json : completion -> Yojson.Safe.t
 val completion_of_json : Yojson.Safe.t -> (completion, string) result
 (** Strict closed-object decoder: duplicate fields and fields outside the

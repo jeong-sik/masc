@@ -546,13 +546,13 @@ let keeper_chat_event_of_json json =
           let* progress = Runtime_native_tools.progress_of_json (json |> member "progress") in
           Ok (Native_tool_progress (tool, progress))
       | _ ->
-          (* The production writer still emits ends without a completion
-             (11,865 rows in the live keeper_turn_events), so an omitted one
-             reads as end_observed the way the wire does. object_fields above
-             already rejects a duplicate member; a malformed present
-             completion is unreadable. *)
+          (* Rows written before the writer kept a completion have none.
+             Whether the provider reported a status for them is not known, so
+             they read as completion_unrecorded, not as an end seen with no
+             status. object_fields above already rejects a duplicate member;
+             a malformed present completion is unreadable. *)
           let* completion = match List.assoc_opt "completion" fields with
-            | None -> Ok Runtime_native_tools.end_observed
+            | None -> Ok Runtime_native_tools.completion_unrecorded
             | Some value -> Runtime_native_tools.completion_of_json value in
           Ok (Native_tool_end (tool, completion)))
     | "tool_approval_requested" ->

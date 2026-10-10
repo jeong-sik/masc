@@ -73,7 +73,8 @@ refused gesture never takes more than two.
 
 The picker also says where the BiDi host stands, under its choices. A BiDi
 connection is there only while its host runs, and the host is a process the
-operator starts ([how](../design/browser-bidi-live-host.md)). The server
+operator starts, or MASC starts where `runtime.toml` has `[browser.live.bidi]`
+([how](../design/browser-bidi-live-host.md)). The server
 reads the host's own record and sends it with the connection list, so these
 rows change when the list is read again (`r`).
 
@@ -143,6 +144,23 @@ The rows under it:
   none to run or none to trust: a running host, an unreadable record a host
   still holds, a lock that could not be asked, and a report this TUI cannot
   read.
+- Where MASC starts the Keeper Firefox (`[browser.live.bidi]` in
+  `runtime.toml` with the live lane on), MASC's rows take the command's
+  place: MASC starts the Keeper Firefox and its host, whichever is not
+  running, at the next server start or a Keeper's next hover or drag, then
+  the port and `Profile:`. A launcher that is not there is installed first.
+  - What comes before the next host follows MASC's start too. A session
+    left or refused on MASC's port is restarted by MASC's next start when
+    MASC started that Firefox, and quit by the operator first when it did
+    not. A Firefox on another port does not stop MASC's start.
+  - When MASC's last start for that port and profile showed no connection,
+    and ended after what the host record says since, the last rows say when
+    and how it ended, then `Why:`.
+  - With the live lane off in `runtime.toml`, a row before the command says
+    MASC starts nothing. With no `[browser.live.bidi]`, a row after it says
+    the table lets MASC start both.
+  - A refused drag beside a host that never ran points at
+    `b:how MASC starts one` instead of `b:how to attach`.
 - A server that does not report the host draws none of these rows.
 
 The first row of each state is this TUI's own words and fits 80 columns.

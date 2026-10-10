@@ -125,12 +125,35 @@ val firefox_flag : string
 type attach = { launcher : string; arguments : string; standing : launcher_standing }
 
 (** What a reader is told of the BiDi host: the state its record and lock
-    say, how one is attached, and {!message}. *)
+    say, how one is attached, who starts it, and {!message}. *)
 type report =
   { state : Browser_bidi_host_record.state
   ; attach : attach
+  ; keeper : keeper
   ; message : string
   }
+
+(** What is said of MASC's last start beside a host's state. *)
+type last_start_note =
+  | No_note
+  | Failed_start of { at : float; not_attached : Browser_keeper_firefox_starter.not_attached }
+      (** It ended at [at] with no connection listed. *)
+  | Start_record_unreadable of string
+
+(** Where MASC starts the Keeper Firefox, its last start when it showed no
+    connection, was for the configured port and profile
+    ({!Browser_keeper_firefox_start_record.for_configuration}), and ended no
+    earlier than what the state says since: an ended host's end, a dead or
+    running host's attach (its start when it never attached). {!message}
+    says it, and the TUI shows it. *)
+val last_start_note : keeper -> Browser_bidi_host_record.state -> last_start_note
+
+(** Whether the host [entry] names was given an address on [port]. A
+    session held in a Firefox there is in the way of MASC's next start on
+    that port, which restarts the Keeper Firefox MASC is shown to have
+    started; one held on another port is not. An address that names no port
+    is not on it. *)
+val recorded_on_port : Browser_bidi_host_record.entry -> port:int -> bool
 
 val report : observation -> report
 
@@ -142,11 +165,17 @@ val report : observation -> report
     turns on the lock, null otherwise and for a lock that could not be asked)
     and [detail] (why the record or the lock cannot be read, null otherwise). Then [attach], an
     object with exactly [launcher], [arguments] and [launcher_state]
-    ([installed], [not_installed] or [needs_reinstall]), and [message]. *)
+    ([installed], [not_installed] or [needs_reinstall]); [keeper], an object
+    whose [kind] is [masc_starts] (with [port], [profile] and [last_start]:
+    [absent], [recorded] with its [entry], or [unreadable] with its
+    [detail]), [lane_off], [not_configured] or [not_known]; and [message]. *)
 val report_to_json : report -> Yojson.Safe.t
 
 (** Reads what {!report_to_json} wrote. A field more, fewer or twice, in the
-    report or in [attach], is another layout and is refused. The state is
+    report, in [attach], in [keeper] or in its [last_start], is another
+    layout and is refused, as is a kind this reader does not know. The
+    profile, a last start's detail and the message hold no control
+    character. The state is
     worked out again from [record] and [lock_held] by
     {!Browser_bidi_host_record.state_of} and has to be the one [state]
     names. *)

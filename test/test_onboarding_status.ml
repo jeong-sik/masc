@@ -716,6 +716,30 @@ let a_bidi_host_report_reads_back_as_written () =
       , report (Record.Unreadable { detail = "Too many open files"; held = None }) )
     ; "no launcher", report ~launcher:Launcher.Not_installed (Record.Died entry)
     ; "a launcher to reinstall", report ~launcher:Launcher.Undeclared Record.Never_started ];
+  (* Who starts the host is read back as written, with MASC's last start. *)
+  let masc last_start = Status.Masc_starts { port = 9222; profile = "/keeper/profile"; last_start } in
+  let started outcome : Start_record.entry =
+    { at = 1_791_000_100.; port = 9222; profile = "/keeper/profile"; outcome } in
+  let with_keeper keeper record = Status.report (observation ~keeper record) in
+  List.iter (fun (name, keeper) ->
+      check bool name true
+        (Status.report_of_json (Status.report_to_json (with_keeper keeper (Record.Ended (ended, ending))))
+         = Ok (with_keeper keeper (Record.Ended (ended, ending)))))
+    [ "MASC starts, nothing started yet", masc Start_record.Absent
+    ; "MASC starts, the last start attached",
+      masc (Start_record.Recorded (started (Start_record.Attached Starter.Host_only)))
+    ; ( "MASC starts, the last start waits for the operator"
+      , masc (Start_record.Recorded
+                (started (Start_record.Not_attached (Starter.Operator_needed "another Firefox is there")))) )
+    ; ( "MASC starts, the last start failed"
+      , masc (Start_record.Recorded
+                (started (Start_record.Not_attached (Starter.Start_failed "the BiDi host did not start")))) )
+    ; ( "MASC starts, the last start listed no connection"
+      , masc (Start_record.Recorded
+                (started (Start_record.Not_attached (Starter.Not_listed_in_time "not listed after 30 s")))) )
+    ; "MASC starts, the last start cannot be read", masc (Start_record.Unreadable "torn")
+    ; "the lane is off", Status.Lane_off
+    ; "no table", Status.Not_configured ];
   (* Times on disk are not whole seconds; one that was read is written and
      read again as it was. *)
   let on_disk = { entry with started_at = 1_791_000_000.123; attached_at = Some 1_791_000_002.457 } in
@@ -770,7 +794,7 @@ let a_bidi_host_report_reads_back_as_written () =
   refused "a lock that is neither held nor free"
     (with_field running_fields "lock_held" (`String "yes"));
   List.iter (fun name -> refused ("no " ^ name) (without ended_fields name))
-    [ "state"; "record"; "lock_held"; "detail"; "attach"; "message" ];
+    [ "state"; "record"; "lock_held"; "detail"; "attach"; "keeper"; "message" ];
   refused "a message that is no string" (with_field ended_fields "message" (`Int 3));
   (* A field more or a field twice is another layout. *)
   refused "a field this reader does not know" (`Assoc (("since", `Null) :: ended_fields));
@@ -795,6 +819,32 @@ let a_bidi_host_report_reads_back_as_written () =
     (with_attach (with_field attach_fields "arguments" (`String "anything goes")));
   refused "a message with a terminal control character"
     (with_field ended_fields "message" (`String "No BiDi browser host is running.\027"));
+  let masc_fields =
+    match List.assoc "keeper" (fields_of (with_keeper (masc Start_record.Absent) Record.Never_started)) with
+    | `Assoc fields -> fields
+    | _ -> fail "keeper is not an object"
+  in
+  let with_keeper_json keeper = with_field ended_fields "keeper" keeper in
+  let with_masc name value = with_keeper_json (with_field masc_fields name value) in
+  refused "a keeper this reader does not know" (with_keeper_json (`Assoc [ "kind", `String "operator" ]));
+  refused "a keeper that names no kind" (with_keeper_json (`Assoc []));
+  refused "a keeper that is no object" (with_keeper_json (`String "lane_off"));
+  refused "a lane that is off, with a port"
+    (with_keeper_json (`Assoc [ "kind", `String "lane_off"; "port", `Int 9222 ]));
+  List.iter (fun name -> refused ("MASC starts, with no " ^ name) (with_keeper_json (without masc_fields name)))
+    [ "port"; "profile"; "last_start" ];
+  refused "MASC starts, on no port" (with_masc "port" (`Int 0));
+  refused "MASC starts, on a port past the last" (with_masc "port" (`Int 65536));
+  refused "MASC starts, on a port that is text" (with_masc "port" (`String "9222"));
+  refused "MASC starts, with a profile that has a control character" (with_masc "profile" (`String "/a\027b"));
+  refused "a last start this reader does not know" (with_masc "last_start" (`Assoc [ "kind", `String "pending" ]));
+  refused "a last start recorded without its entry" (with_masc "last_start" (`Assoc [ "kind", `String "recorded" ]));
+  refused "a last start recorded with an entry its reader refuses"
+    (with_masc "last_start" (`Assoc [ "kind", `String "recorded"; "entry", `Assoc [] ]));
+  refused "an unreadable last start with a control character"
+    (with_masc "last_start" (`Assoc [ "kind", `String "unreadable"; "detail", `String "torn\n" ]));
+  refused "an absent last start with a detail"
+    (with_masc "last_start" (`Assoc [ "kind", `String "absent"; "detail", `String "torn" ]));
   (* A Keeper is sent the state and the paragraph, not the record. *)
   let ended_observation = observation (Record.Ended (ended, ending)) in
   check bool "the summary is the state and its message" true

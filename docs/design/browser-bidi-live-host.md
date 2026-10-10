@@ -380,6 +380,12 @@ does next:
     is another.
   - `attach`: the host command as `launcher` and `arguments`, and
     `launcher_state` (`installed`, `not_installed`, `needs_reinstall`).
+  - `keeper`: who starts the Keeper Firefox and its host, by `kind`.
+    `masc_starts` carries the configured `port` and `profile`, and
+    `last_start`: `absent`, `recorded` with the `entry` of
+    `keeper-firefox-start.json`, or `unreadable` with its `detail`.
+    `lane_off`, `not_configured` (no `[browser.live.bidi]`) and `not_known`
+    (no configuration was read) carry nothing more.
   - `message`: the paragraph the doctor prints.
 - A Keeper whose hover or drag is refused as `live_transport_unsupported`
   while no connected browser serves it gets `bidiHost` in the answer, with
@@ -388,7 +394,8 @@ does next:
 - The TUI's Browser Lane picker draws it from the server's `bidiHost`:
   whether a host runs and whether the server lists it, why the last one
   ended, what comes before the next, the results the host holds no
-  acknowledgement for, and the command that starts one
+  acknowledgement for, and the command that starts one, or, where MASC
+  starts it, that MASC does and what its last start left
   ([the rows](../guides/tui-browser-lanes.md)).
 
 The doctor, the connection list and the Keeper's answer each read the

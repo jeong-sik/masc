@@ -28,7 +28,7 @@ let host_attach : Status.attach =
   ; arguments = "--bidi-url ws://127.0.0.1:PORT/session"
   ; standing = Status.Launcher_installed }
 let host_report state : Status.report =
-  { state; attach = host_attach; message = "the server's own sentence" }
+  { state; attach = host_attach; keeper = Status.Not_known; message = "the server's own sentence" }
 let host state = Host_reported (host_report state)
 let host_ending ?(reason = "stopped by SIGINT") session : Record.ending =
   { at = 1_791_000_060.; reason; session; because = Record.Reason_only }

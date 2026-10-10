@@ -443,7 +443,7 @@ let test_explicit_departure_and_same_link_reconnect () =
       let connected = read () in
       check bool "reconnect restores eligibility" true (member "participants" connected = Some (`List [`String "minsu"]));
       check bool "reconnect does not take a controller" true (member "controller" connected = Some `Null);
-      detach ())))))))
+      detach ()))))))
 
 let test_ineligible_participation_does_not_hide_active_seats () =
   with_dir "play-ineligible-participation-" (fun base_path ->

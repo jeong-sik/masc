@@ -446,7 +446,8 @@ let execute_tool_eio
                      match owner_keeper_identity with
                      | Some (keeper_name, _) ->
                        Some (Keeper_candle_tools.handle ~operation ~base_path:config.base_path
-                         ~keeper_name ~tool_name:name ~start_time ~args:coerced_args)
+                         ~keeper_name ~keeper_names:(Play_seat.keeper_names config)
+                         ~tool_name:name ~start_time ~args:coerced_args)
                      | None ->
                        Some (Tool_result.make_err ~tool_name:name ~start_time
                          ~class_:Tool_result.Policy_rejection

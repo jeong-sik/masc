@@ -1737,7 +1737,8 @@ let handle_masc_workspace_with_outcome ~(config : Workspace.config) ~(meta : kee
 let handle_masc_misc_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
   let candle operation =
     Some (Keeper_candle_tools.handle ~operation ~base_path:config.base_path
-      ~keeper_name:meta.name ~tool_name:name ~start_time:(Tool_timing.start ()) ~args) in
+      ~keeper_name:meta.name ~keeper_names:(Play_seat.keeper_names config)
+      ~tool_name:name ~start_time:(Tool_timing.start ()) ~args) in
   let ctx : Tool_misc.context =
     { config
     ; agent_name = meta.name

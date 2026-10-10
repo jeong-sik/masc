@@ -691,6 +691,7 @@ let () =
         ~operation:Keeper_candle_tools.Balance
         ~base_path
         ~keeper_name
+        ~keeper_names:(Ok [])
         ~tool_name:"keeper_candle_balance"
         ~start_time:(Tool_timing.start ())
         ~args:(`Assoc [])

@@ -130,7 +130,8 @@ let dispatch
         ~args
     | Mod_misc ->
       let candle operation = Some (Keeper_candle_tools.handle ~operation
-        ~base_path:config.base_path ~keeper_name ~tool_name:name ~start_time ~args) in
+        ~base_path:config.base_path ~keeper_name ~keeper_names:(Play_seat.keeper_names config)
+        ~tool_name:name ~start_time ~args) in
       (match
          Option.bind (Tool_schemas_misc.misc_operation_of_tool_name name)
            Keeper_candle_tools.operation_of_misc

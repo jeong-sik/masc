@@ -294,6 +294,29 @@ let meta name =
        (`Assoc [ "name", `String name; "trace_id", `String ("trace-" ^ name) ]))
 ;;
 
+(* The gift tool checks its target against the Auth keeper roster, the same
+   source the invite flow reads (Play_seat.keeper_names), so a scenario names
+   its keepers by persisting their meta like a booted workspace would. *)
+let register_keeper config name =
+  Fs_compat.save_file
+    (Keeper_types_profile.keeper_meta_path config name)
+    (Yojson.Safe.to_string (Keeper_meta_json.meta_to_json (meta name)))
+;;
+
+(* A configured keeper (keepers/*.toml) joins the same roster the gift tool
+   reads without a meta file, and the discovery name comes from the file
+   content, so a name that differs from a persisted keeper only by case can
+   share the roster even on a case-insensitive file system. *)
+let declare_configured_keeper config name =
+  let dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path
+  in
+  Fs_compat.mkdir_p dir;
+  Fs_compat.save_file
+    (Filename.concat dir "gift-lowercase.toml")
+    (Printf.sprintf "[keeper]\nname = %S\n" name)
+;;
+
 let call config name tool args =
   Keeper_tool_in_process_runtime.handle_masc_misc_with_outcome
     ~config
@@ -320,6 +343,8 @@ let gift config keeper args = call config keeper "keeper_candle_gift" (`Assoc ar
 let test_tool_money_gift_moves_money () =
   with_workspace (fun config ->
     write_config config "";
+    register_keeper config "keeper-a";
+    register_keeper config "keeper-b";
     let granted =
       Candle_grant.grant ~now:Time_compat.now ~base_path:config.Workspace.base_path
         ~keeper:(ok (Keeper_id.Keeper_name.of_string "keeper-a"))
@@ -359,6 +384,8 @@ let test_tool_money_gift_moves_money () =
 let test_tool_item_gift_moves_ownership () =
   with_workspace (fun config ->
     write_config config "\n[shop.prices_milli]\ncrown = 700\n";
+    register_keeper config "keeper-a";
+    register_keeper config "keeper-b";
     let granted =
       Candle_grant.grant ~now:Time_compat.now ~base_path:config.Workspace.base_path
         ~keeper:(ok (Keeper_id.Keeper_name.of_string "keeper-a"))
@@ -393,6 +420,8 @@ let test_tool_item_gift_moves_ownership () =
 let test_tool_gift_refusals () =
   with_workspace (fun config ->
     write_config config "\n[shop.prices_milli]\ncrown = 700\n";
+    register_keeper config "keeper-a";
+    register_keeper config "keeper-b";
     let granted =
       Candle_grant.grant ~now:Time_compat.now ~base_path:config.Workspace.base_path
         ~keeper:(ok (Keeper_id.Keeper_name.of_string "keeper-a"))
@@ -438,6 +467,145 @@ let test_tool_gift_refusals () =
          [ "to", `String "keeper-b"; "amount_milli", `Int 10; "reason", `String "thanks" ]))
 ;;
 
+let test_tool_gift_target_must_be_registered () =
+  with_workspace (fun config ->
+    write_config config "";
+    register_keeper config "keeper-a";
+    register_keeper config "keeper-b";
+    let granted =
+      Candle_grant.grant ~now:Time_compat.now ~base_path:config.Workspace.base_path
+        ~keeper:(ok (Keeper_id.Keeper_name.of_string "keeper-a"))
+        ~amount_milli:1000 ~reason:"seed"
+    in
+    (match granted with
+     | Ok _ -> ()
+     | Error error -> fail (Candle_grant.error_to_string error));
+    (* A mistyped or hallucinated name never reaches the ledger: the tool
+       boundary refuses it, so no wallet is created for a name no keeper
+       holds. *)
+    rejected "unknown_target"
+      (gift config "keeper-a"
+         [ "to", `String "keeper-typo"; "amount_milli", `Int 10; "reason", `String "thanks" ]);
+    (* The same holds for an item gift to an unregistered name. *)
+    rejected "unknown_target"
+      (gift config "keeper-a" [ "to", `String "keeper-c"; "item", `String "crown" ]);
+    let events =
+      match Candle_ledger.read ~base_path:config.Workspace.base_path with
+      | Ok view -> Candle_ledger.events view
+      | Error error -> fail (Candle_ledger.read_error_to_string error)
+    in
+    check int "no gifted row for a refused target" 0
+      (List.length
+         (List.filter_map
+            (fun (event : E.t) ->
+               match event.body with E.Gifted _ | E.Gifted_item _ -> Some () | _ -> None)
+            events));
+    (* A registered name still receives. *)
+    let receipt =
+      gift config "keeper-a"
+        [ "to", `String "keeper-b"; "amount_milli", `Int 10; "reason", `String "thanks" ]
+      |> succeeded
+    in
+    check string "kind" "money" U.(member "kind" receipt |> to_string))
+;;
+
+let test_tool_gift_target_matches_roster_spelling () =
+  with_workspace (fun config ->
+    write_config config "";
+    register_keeper config "keeper-a";
+    (* The roster name holds a capital; the wallet key is that spelling. *)
+    register_keeper config "Minsu";
+    let granted =
+      Candle_grant.grant ~now:Time_compat.now ~base_path:config.Workspace.base_path
+        ~keeper:(ok (Keeper_id.Keeper_name.of_string "keeper-a"))
+        ~amount_milli:1000 ~reason:"seed"
+    in
+    (match granted with
+     | Ok _ -> ()
+     | Error error -> fail (Candle_grant.error_to_string error));
+    (* A lowercase spelling resolves to the roster keeper and credits the
+       roster wallet, not a lowercase wallet the fold would have minted. *)
+    let receipt =
+      gift config "keeper-a"
+        [ "to", `String "minsu"; "amount_milli", `Int 300; "reason", `String "thanks" ]
+      |> succeeded
+    in
+    check string "canonical recipient" "Minsu" U.(member "to_keeper" receipt |> to_string);
+    check string "roster wallet credited" "300"
+      U.(member "to_balance_milli" receipt |> to_string);
+    let receiver =
+      call config "Minsu" "keeper_candle_balance" (`Assoc []) |> succeeded
+    in
+    check string "receiver wallet" "300" U.(member "balance_milli" receiver |> to_string);
+    (* The roster's own spelling works too. *)
+    let receipt =
+      gift config "keeper-a"
+        [ "to", `String "Minsu"; "amount_milli", `Int 100; "reason", `String "again" ]
+      |> succeeded
+    in
+    check string "exact spelling recipient" "Minsu"
+      U.(member "to_keeper" receipt |> to_string);
+    let receiver =
+      call config "Minsu" "keeper_candle_balance" (`Assoc []) |> succeeded
+    in
+    check string "same wallet, not a second one" "400"
+      U.(member "balance_milli" receiver |> to_string);
+    (* The ledger records the canonical spelling. *)
+    let events =
+      match Candle_ledger.read ~base_path:config.Workspace.base_path with
+      | Ok view -> Candle_ledger.events view
+      | Error error -> fail (Candle_ledger.read_error_to_string error)
+    in
+    check bool "gifted rows key the roster wallet" true
+      (List.for_all
+         (fun (event : E.t) ->
+            match event.body with
+            | E.Gifted { to_keeper; _ } -> String.equal to_keeper "Minsu"
+            | _ -> true)
+         events))
+;;
+
+let test_tool_gift_target_ambiguous_spelling_refused () =
+  with_workspace (fun config ->
+    write_config config "";
+    register_keeper config "keeper-a";
+    (* Two roster keepers fold to the same lowercase spelling; picking one
+       would strand the gift in the other keeper's eyes, so every spelling
+       of the ambiguous name is refused. "Minsu" persists as meta while
+       "minsu" is a configured keeper: meta files collide on a
+       case-insensitive file system, the toml discovery name does not. *)
+    register_keeper config "Minsu";
+    declare_configured_keeper config "minsu";
+    let granted =
+      Candle_grant.grant ~now:Time_compat.now ~base_path:config.Workspace.base_path
+        ~keeper:(ok (Keeper_id.Keeper_name.of_string "keeper-a"))
+        ~amount_milli:1000 ~reason:"seed"
+    in
+    (match granted with
+     | Ok _ -> ()
+     | Error error -> fail (Candle_grant.error_to_string error));
+    rejected "unknown_target"
+      (gift config "keeper-a"
+         [ "to", `String "minsu"; "amount_milli", `Int 10; "reason", `String "thanks" ]);
+    rejected "unknown_target"
+      (gift config "keeper-a"
+         [ "to", `String "Minsu"; "amount_milli", `Int 10; "reason", `String "thanks" ]);
+    rejected "unknown_target"
+      (gift config "keeper-a"
+         [ "to", `String "MINSU"; "amount_milli", `Int 10; "reason", `String "thanks" ]);
+    let events =
+      match Candle_ledger.read ~base_path:config.Workspace.base_path with
+      | Ok view -> Candle_ledger.events view
+      | Error error -> fail (Candle_ledger.read_error_to_string error)
+    in
+    check int "no gifted row for an ambiguous target" 0
+      (List.length
+         (List.filter_map
+            (fun (event : E.t) ->
+               match event.body with E.Gifted _ | E.Gifted_item _ -> Some () | _ -> None)
+            events)))
+;;
+
 let () =
   Alcotest.run
     "candle_gift"
@@ -459,6 +627,12 @@ let () =
       , [ Alcotest.test_case "money gift moves money" `Quick test_tool_money_gift_moves_money
         ; Alcotest.test_case "item gift moves ownership" `Quick
             test_tool_item_gift_moves_ownership
+        ; Alcotest.test_case "gift target must be a registered keeper" `Quick
+            test_tool_gift_target_must_be_registered
+        ; Alcotest.test_case "gift target matches the roster spelling" `Quick
+            test_tool_gift_target_matches_roster_spelling
+        ; Alcotest.test_case "gift target with an ambiguous spelling is refused" `Quick
+            test_tool_gift_target_ambiguous_spelling_refused
         ; Alcotest.test_case "gift refusals" `Quick test_tool_gift_refusals
         ] )
     ]

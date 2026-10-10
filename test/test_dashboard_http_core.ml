@@ -3646,7 +3646,7 @@ beanie = 200
   ignore (ok Candle_shop.error_to_string
     (Candle_shop.purchase ~now:(fun () -> 1790640000.) ~base_path ~keeper:owner ~item));
   (match Lib.Keeper_candle_tools.handle ~operation:Lib.Keeper_candle_tools.Equip
-      ~base_path ~keeper_name:keeper ~tool_name:"keeper_candle_equip"
+      ~base_path ~keeper_name:keeper ~keeper_names:(Ok []) ~tool_name:"keeper_candle_equip"
       ~start_time:(Tool_timing.start ())
       ~args:(`Assoc ["slot", `String "head"; "item", `String item_id]) with
    | Tool_result.Completed _ -> ()

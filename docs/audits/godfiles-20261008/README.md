@@ -7,8 +7,8 @@ This campaign covers tracked code files with at least 2,000 lines. The initial
 inventory contains 171 candidates: 75 production source/style/interface files,
 90 tests, 3 tooling files and 3 evidence scripts. `inventory.json` records each
 baseline path and its current audit state. A line count selects candidates; it
-is not a defect verdict or a new build gate. Twenty-five production candidates received
-bounded changes; their other responsibilities remain pending. The other 50
+is not a defect verdict or a new build gate. Twenty-six production candidates received
+bounded changes; their other responsibilities remain pending. The other 49
 production candidates still require semantic review. All 171 candidates remain
 in the campaign until their responsibilities and necessary repairs are assessed.
 
@@ -41,6 +41,8 @@ in the campaign until their responsibilities and necessary repairs are assessed.
 | [#42060](https://github.com/jeong-sik/masc/pull/42060) | Private canonical current-row kinds, schema/identity and strict decoder separated from ledger storage, outbox and evidence caches; public signature preserved | `keeper_reaction_ledger.ml`, private wire owner |
 
 Gate decision projection is tracked in [#42091](https://github.com/jeong-sik/masc/pull/42091): private canonical data and pure JSON/diagnostic projection retain the public API while approval, CAS, audit and recovery effects stay in their owner. See [gate-projection/README.md](gate-projection/README.md).
+
+Event queue transitions and strict current snapshot/receipt encoding are separated in [#42095](https://github.com/jeong-sik/masc/pull/42095). The wire codec shares the canonical immutable admission rules; schedule occurrence projection stays at the public boundary. See [event-queue-wire/README.md](event-queue-wire/README.md).
 
 The declared branch dependencies follow that order, starting at `main`.
 GitHub may group a subset into a native stack; inspect live membership rather

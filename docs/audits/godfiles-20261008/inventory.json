@@ -272,7 +272,11 @@
       "path": "lib/keeper/keeper_board_attention_candidate.ml",
       "baseline_lines": 2450,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; storage, state, compaction, wake and quarantine semantic review pending",
+      "current_lines": 1062,
+      "prs": [
+        42130
+      ]
     },
     {
       "path": "lib/keeper/keeper_board_attention_partition.ml",

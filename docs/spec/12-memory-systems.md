@@ -200,6 +200,10 @@ the observation's scope. Retention and recovery inherit the consumption receipt
 store's snapshot and journal evidence requirements. Actual revision transitions
 are distinguished from unchanged observations; an unchanged observation cannot
 fill a missing transition when proving that a target was never retired.
+The same holds when a binding commits: if Memory moved after the Librarian
+read it, the journal must show every revision written since. A missing line
+refuses the commit, and the input stays pending for a decision on current
+Memory. Search over the current snapshot is not affected.
 
 ## See also
 

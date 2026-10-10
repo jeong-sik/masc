@@ -1436,6 +1436,17 @@ let rec publish_recall_cache path value =
   if not (Atomic.compare_and_set recall_journal_cache before after) then
     publish_recall_cache path value
 
+(* Only a line that rewrote the snapshot covers its revision. An unchanged
+   observation repeats a revision another line wrote, and a line without a
+   commit effect proves neither. *)
+let journal_line_rewrote (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc fields ->
+    (match journal_commit_effect fields with
+     | Ok (Some Rewritten) -> true
+     | Ok (Some Unchanged | None) | Error _ -> false)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
+
 (* Forward projection matches the previous reverse reader's stopping boundary.
    Only snapshot rewrites cover revisions; unchanged observations never fill a
    missing transition. No observation rows are retained in memory. *)
@@ -1448,10 +1459,10 @@ let project_recall_entry ~oldest projection = function
     | Ok (Journal_committed {revision;change;_}) ->
       if revision <= oldest then empty_recall_projection
       else
-        let revisions = match json with
-          | `Assoc fields when journal_commit_effect fields = Ok (Some Rewritten) ->
-            Recall_revision_set.add revision projection.revisions
-          | _ -> projection.revisions in
+        let revisions =
+          if journal_line_rewrote json
+          then Recall_revision_set.add revision projection.revisions
+          else projection.revisions in
         let added = Set_util.StringSet.of_list (List.map memory_id change.added) in
         let retired = List.fold_left (fun retired fact ->
           let id = memory_id fact in
@@ -2054,11 +2065,21 @@ let read_retirement_context ~keepers_dir ~keeper_id ~expected_revision ~current_
    adding back in the same line. Read newest first and stopped at the first
    line at or below [revision], so it costs the commits since the decision,
    not the journal's length. [None] reads every line: the decision saw no
-   snapshot. Caller holds the aggregate and snapshot locks, as for
-   [read_dropped]. *)
-let targets_retired_since ~keepers_dir ~keeper_id ~revision targets =
+   snapshot. [held] is the revision of the snapshot the caller holds locked.
+   Once Memory moved after the decision, an empty set is a proof only if the
+   journal holds a rewriting line for every revision in between: a commit
+   without drop reasons appends its line best-effort, so a lost line can hide
+   a removal that a later line adds back. Revisions restart after a
+   quarantine, so a quarantine in that window ends the proof too. Caller holds
+   the aggregate and snapshot locks, as for [read_dropped]. *)
+let targets_retired_since ~keepers_dir ~keeper_id ~revision ~held targets =
   let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  (* Snapshot revisions start at 1, so 0 stands for no snapshot. *)
+  let decided = Option.value revision ~default:0 in
+  let held = Option.value held ~default:0 in
+  let moved = held > decided in
   let retired = ref Set_util.StringSet.empty in
+  let rewritten = ref Recall_revision_set.empty in
   let newer line_revision = match revision with
     | None -> true
     | Some decided -> line_revision > decided in
@@ -2067,10 +2088,20 @@ let targets_retired_since ~keepers_dir ~keeper_id ~revision targets =
     | Dated_jsonl.Parsed json ->
       match journal_entry_of_json json with
       | Error detail -> Some (Error detail)
-      | Ok (Journal_failed _ | Journal_quarantined _) -> None
+      | Ok (Journal_failed _) -> None
+      | Ok (Journal_quarantined _) ->
+        if moved
+        then Some (Error "a quarantine restarted Memory revisions after the admission decision")
+        else None
       | Ok (Journal_committed { revision = line_revision; change; _ }) ->
         if not (newer line_revision) then Some (Ok ())
+        else if moved && line_revision > held then
+          Some (Error (Printf.sprintf
+            "journal revision %d is ahead of the locked snapshot revision %d"
+            line_revision held))
         else (
+          if line_revision > decided && journal_line_rewrote json then
+            rewritten := Recall_revision_set.add line_revision !rewritten;
           let added = Set_util.StringSet.of_list (List.map memory_id change.added) in
           List.iter (fun fact ->
             let identity = memory_id fact in
@@ -2078,15 +2109,28 @@ let targets_retired_since ~keepers_dir ~keeper_id ~revision targets =
                && not (Set_util.StringSet.mem identity added)
             then retired := Set_util.StringSet.add identity !retired) change.removed;
           None) in
-  match Unix.lstat path with
-  | _ ->
-    (match Dated_jsonl.find_latest_entry_in_file_result path visit with
-     | Ok (None | Some (Ok ())) -> Ok !retired
-     | Ok (Some (Error detail)) -> Error detail
-     | Error error -> Error (Dated_jsonl.read_error_to_string error))
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Set_util.StringSet.empty
-  | exception Unix.Unix_error (code, fn, arg) ->
-    Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code))
+  (* Lines above [held] were refused and the scan stopped at the decision, so
+     the count proves each revision in between. *)
+  let proven () =
+    if (not moved) || Recall_revision_set.cardinal !rewritten = held - decided
+    then Ok !retired
+    else
+      Error (Printf.sprintf
+        "journal lacks a Memory revision between the admission decision %d and the locked snapshot %d"
+        decided held) in
+  if held < decided then
+    Error (Printf.sprintf
+      "the locked snapshot revision %d is behind the admission decision %d" held decided)
+  else
+    match Unix.lstat path with
+    | _ ->
+      (match Dated_jsonl.find_latest_entry_in_file_result path visit with
+       | Ok (None | Some (Ok ())) -> proven ()
+       | Ok (Some (Error detail)) -> Error detail
+       | Error error -> Error (Dated_jsonl.read_error_to_string error))
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> proven ()
+    | exception Unix.Unix_error (code, fn, arg) ->
+      Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code))
 ;;
 
 (* An exact retraction batch: its plan id and the error that reports pending
@@ -2315,15 +2359,18 @@ let update_locked_with_output
             target the keeper retracted and re-added while the decision ran,
             and the binding would be born on the new incarnation after the
             retirement its readers look for. A target retired after the
-            revision the decision read refuses the commit; the input stays
-            pending for a decision on current Memory. *)
+            revision the decision read refuses the commit, and so does a
+            journal that cannot show every revision written since; the input
+            stays pending for a decision on current Memory. *)
          let* () = match admission_recall with
            | None | Some { bindings = []; _ } -> Ok ()
            | Some { decided_at_revision; bindings } ->
              let targets = Set_util.StringSet.of_list
                (List.map (fun binding -> binding.target_memory_id) bindings) in
              (match targets_retired_since ~keepers_dir ~keeper_id
-                      ~revision:decided_at_revision targets with
+                      ~revision:decided_at_revision
+                      ~held:(Option.map (fun (current : t) -> current.revision) previous)
+                      targets with
               | Error detail -> Error (store_error ("recall binding retirement check: " ^ detail))
               | Ok retired when Set_util.StringSet.is_empty retired -> Ok ()
               | Ok _ ->

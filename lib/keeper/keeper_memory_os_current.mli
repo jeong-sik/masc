@@ -548,7 +548,9 @@ val apply_disposition
     every consumed identity. [admission_recall] bindings must name exact consumed
     candidate IDs, prove the canonical candidate-row digest from [source_fact],
     and target identities present in the final snapshot under the same lock
-    that no committed line after [decided_at_revision] retired.
+    that no committed line after [decided_at_revision] retired. When Memory
+    moved after [decided_at_revision], the journal must hold a rewriting line
+    for every revision up to the locked snapshot, or the commit is refused.
     They share the candidate receipt transaction, including no-change commits.
     The store writes a prepared transaction receipt
     before replacing the snapshot and marks it committed afterwards. Preparing

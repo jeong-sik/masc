@@ -2266,6 +2266,47 @@ let test_admission_recall_refuses_a_target_retired_after_the_decision () =
     (List.length (snd (read_recall ~keepers_dir |> require_ok)))
 ;;
 
+(* A replacement without drop reasons appends its journal line best-effort.
+   When that line, the older lines or the whole journal are gone, nothing
+   left shows the retirement between the decision and the re-add. *)
+let test_admission_recall_refuses_a_decision_across_missing_journal_revisions () =
+  List.iter (fun damage ->
+    with_temp_keepers @@ fun keepers_dir ->
+    let target = fact ~claim:"Release R001 through R200 require two approvals." () in
+    ignore (replace ~keepers_dir ~facts:[target] () |> require_ok);
+    (* The decision reads Memory here. *)
+    let decided = current_revision ~keepers_dir in
+    let journal = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+    let decision_journal = Fs_compat.load_file journal in
+    ignore (replace ~keepers_dir ~expected_revision:decided ~facts:[] () |> require_ok);
+    Fs_compat.invalidate_cached_writer journal;
+    (match damage with
+     | `Lost_line -> Fs_compat.save_file journal decision_journal
+     | `Lost_prefix -> Fs_compat.save_file journal ""
+     | `Lost_file -> ());
+    ignore (Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:400.
+      ~source:(source Current.Explicit_write) target |> require_upsert_ok);
+    (match damage with
+     | `Lost_line | `Lost_prefix -> ()
+     | `Lost_file -> Fs_compat.invalidate_cached_writer journal; Sys.remove journal);
+    let snapshot_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+    let before = Fs_compat.load_file snapshot_path in
+    let binding = recall_binding 1 (fact ~claim:"R002 requires two approvals." ()) target in
+    (match commit_recall ~decided_at_revision:decided ~keepers_dir binding [] with
+     | Error _ -> ()
+     | Ok _ -> fail "a journal gap let a binding attach across an unproven retirement");
+    check string "the refused binding changes no current bytes" before
+      (Fs_compat.load_file snapshot_path);
+    check int "the refused binding consumes no candidate" 0
+      (List.length (read_candidates ~keepers_dir binding.candidate_id.queue_generation));
+    (* The gap lies before current Memory, so a decision on it binds and
+       search finds the binding. *)
+    ignore (commit_recall ~keepers_dir binding [] |> require_ok);
+    check bool "a decision on current Memory still binds" true
+      (snd (read_recall ~keepers_dir |> require_ok) = [binding]))
+    [`Lost_line; `Lost_prefix; `Lost_file]
+;;
+
 let test_admission_recall_refuses_unbound_or_mistargeted_payloads () =
   with_temp_keepers @@ fun keepers_dir ->
   let target = fact ~claim:"consolidated target" () in
@@ -3669,6 +3710,8 @@ let () =
             test_admission_recall_refuses_unbound_or_mistargeted_payloads
         ; test_case "admission recall refuses a target retired after the decision" `Quick
             test_admission_recall_refuses_a_target_retired_after_the_decision
+        ; test_case "admission recall refuses a decision across missing journal revisions" `Quick
+            test_admission_recall_refuses_a_decision_across_missing_journal_revisions
         ; test_case "admission recall requires complete later history only for bindings" `Quick
             test_admission_recall_requires_complete_later_history_only_for_bindings
         ; test_case "receipt failure preserves direct snapshot" `Quick

@@ -135,6 +135,10 @@ val run :
 val settle_completed_snapshot :
   base_path:string ->
   keeper_name:string ->
+  ?on_captured:(base_path:string ->
+                keeper_name:string ->
+                completed:Keeper_board_attention_partition.t list -> unit) ->
+  unit ->
   (settlement, string) result
 (** Owner-admission boundary. Capture the ordered completed partitions once,
     then durably settle that finite snapshot, cooperatively yielding between
@@ -185,17 +189,21 @@ module For_testing : sig
       Exposed so a test can drive it without standing up the full Eio worker
       lifecycle. *)
 
-  val captured_snapshot_hook :
-    ( base_path:string
-      -> keeper_name:string
-      -> completed:Keeper_board_attention_partition.t list
-      -> unit )
-    ref
-  (** Fired by every [settle_completed_snapshot] call immediately after it
-      captures the completed list and before any member is settled. A test
-      hook lands new completions in exactly that capture boundary -
-      deterministically, without polling. Production installs the no-op; a
-      test must restore it in its teardown. *)
+  val settle_completed_snapshot :
+    base_path:string ->
+    keeper_name:string ->
+    on_captured:(base_path:string ->
+                 keeper_name:string ->
+                 completed:Keeper_board_attention_partition.t list -> unit)
+                option ->
+    unit ->
+    (settlement, string) result
+  (** Drains exactly the completed list this call captures — completions that
+      arrive while it yields belong to the next admission snapshot. Yields
+      outside each durable transaction so other fibers stay runnable.
+      [?on_captured] fires immediately after the capture and before any
+      member is settled; a test hook lands new completions in exactly that
+      capture boundary, deterministically. Production passes no hook. *)
 
   val drain_outcome_label : drain_outcome -> string
   (** The drain verdict as one token, as logged. Retry_later keeps its reason

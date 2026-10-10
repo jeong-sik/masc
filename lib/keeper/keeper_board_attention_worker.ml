@@ -2129,19 +2129,9 @@ let replay_completed_owner_wake
 (* Only the captured list is drained: workers may complete more partitions
    while this owner yields, but those belong to the next admission snapshot.
    Yield outside each durable transaction so other fibers remain runnable. *)
-(* Test seam for the snapshot-capture boundary: every
-   [settle_completed_snapshot] call fires this right after it has captured
-   the completed list, before settling any member. A test hook lands a new
-   completion in exactly that gap, deterministically. Production installs
-   the no-op; a test must restore it in its teardown. *)
-let captured_snapshot_hook =
-  ref (fun ~base_path:_ ~keeper_name:_ ~completed:_ -> ())
-;;
-
-let settle_completed_snapshot
-      ~base_path
-      ~keeper_name
-  =
+let settle_completed_snapshot ~base_path ~keeper_name
+      ?on_captured
+      () =
   let settle_head partition =
     let* partition =
       confirm_loaded_completed
@@ -2161,11 +2151,12 @@ let settle_completed_snapshot
       settle_snapshot settled rest
   in
   let* completed = completed_in_order ~base_path ~keeper_name in
-  (* Test seam for the snapshot-capture boundary: the captured list is
-     settled from here, so a test hook fires exactly after the capture and
-     can land a new completion deterministically before the walk starts.
-     Production installs the no-op. *)
-  !captured_snapshot_hook ~base_path ~keeper_name ~completed;
+  (* Test seam for the snapshot-capture boundary: fires exactly after the
+     capture, before any member is settled, so a test hook can land a new
+     completion deterministically in that gap. Production passes no hook. *)
+  (match on_captured with
+   | Some hook -> hook ~base_path ~keeper_name ~completed
+   | None -> ());
   match completed with
   | [] -> Ok No_completed_partition
   | first :: _ ->
@@ -2501,7 +2492,12 @@ module For_testing = struct
 
   let deliver_and_settle_completed = deliver_and_settle_completed
   let prunes_and_read = prunes_and_read
-  let captured_snapshot_hook = captured_snapshot_hook
+  let settle_completed_snapshot ~base_path ~keeper_name ~on_captured () =
+    match on_captured with
+    | Some hook ->
+      settle_completed_snapshot ~base_path ~keeper_name ~on_captured:hook ()
+    | None -> settle_completed_snapshot ~base_path ~keeper_name ()
+
   let reconcile_quarantines = reconcile_quarantines
   let process_next = process_next
   let process_next_exact = process_next_exact

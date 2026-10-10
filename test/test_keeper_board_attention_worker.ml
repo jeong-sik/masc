@@ -355,7 +355,7 @@ let test_worker_exact_callback_integration_and_owner_settlement () =
      Alcotest.(check string) "selected opaque slot" third.slot_id observed.slot_id;
      Alcotest.(check (float 0.0)) "completion observes post-execution time" 9.0 completed_at
    | _ -> Alcotest.fail "callback chain did not persist Completed");
-  (match ok "owner settlement" (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha") with
+  (match ok "owner settlement" (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ()) with
    | W.Partition_settled { candidate_id; _ }
      when String.equal candidate_id persisted.candidate_id -> ()
    | W.Partition_settled _ -> Alcotest.fail "a different candidate was settled"
@@ -516,7 +516,7 @@ let test_discards_do_not_hold_the_owner_delivery_slot () =
     admitted.candidate_id
     second;
   (match
-     ok "owner settlement" (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha")
+     ok "owner settlement" (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ())
    with
    | W.Partition_settled { candidate_id; _ } ->
      Alcotest.(check string)
@@ -583,7 +583,7 @@ let test_completed_snapshot_delivers_all_relevant_in_order () =
   in
   List.iter (fun decision -> ignore (complete_next ~base_path decision)) decisions;
   ignore (ok "settle all ready judgments"
-    (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha"));
+    (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ()));
   let expected =
     List.filter_map
       (fun ((candidate : A.candidate), decision) ->
@@ -599,7 +599,7 @@ let test_completed_snapshot_delivers_all_relevant_in_order () =
       | _ -> Alcotest.fail "snapshot member not settled")
     (ok "reload partitions" (P.load ~base_path ~keeper_name:"alpha"));
   (match ok "repeat settlement"
-     (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha") with
+     (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ()) with
    | W.No_completed_partition -> ()
    | _ -> Alcotest.fail "settled snapshot was offered again");
   Alcotest.(check (list string)) "repeat does not duplicate delivery"
@@ -635,7 +635,7 @@ let test_completed_snapshot_failure_preserves_remainder_and_replays () =
   ok "persist conflicting identity"
     (Event_queue_persistence.update_result ~base_path ~keeper_name:"alpha"
        (fun queue -> Event_queue.enqueue queue conflict));
-  (match W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" with
+  (match W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" () with
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "delivery conflict falsely settled the snapshot");
   let candidates = ok "reload failed candidates"
@@ -659,7 +659,7 @@ let test_completed_snapshot_failure_preserves_remainder_and_replays () =
          |> List.filter (fun source -> source <> conflict)
          |> List.fold_left Event_queue.enqueue Event_queue.empty));
   ignore (ok "resume preserved remainder"
-    (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha"));
+    (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ()));
   Alcotest.(check (list string)) "crash replay and retry deliver once in order"
     [ first.candidate_id; failing.candidate_id; last.candidate_id ]
     (delivered_ids ~base_path)
@@ -673,31 +673,39 @@ let test_completed_snapshot_captures_settle_and_continues_waking () =
   ignore (complete_next ~base_path J.Relevant);
   ignore (complete_next ~base_path J.Relevant);
   let added, resolve_added = Eio.Promise.create () in
-  (* The captured snapshot settles only what it captured: the hook lands a
-     new completion in the capture boundary, so the walk below cannot see it
-     in [completed] and must come back with a continuation wake. This pins
-     the comment above [settle_completed_snapshot] — completions that arrive
-     after the capture belong to the next admission snapshot. *)
-  let saved_hook = !W.For_testing.captured_snapshot_hook in
-  W.For_testing.captured_snapshot_hook :=
-    (fun ~base_path ~keeper_name:_ ~completed:_ ->
-       let new_candidate =
-         record ~base_path (candidate ~id:"completed-during-drain" ~recorded_at:3.0 ())
-       in
-       ignore (complete_next ~base_path J.Relevant);
-       Eio.Promise.resolve resolve_added new_candidate);
-  Fun.protect
-    ~finally:(fun () -> W.For_testing.captured_snapshot_hook := saved_hook)
-    (fun () ->
-       (match ok "drain captured snapshot"
-          (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha") with
-        | W.Partition_settled { continuation_wake = Some _; _ } -> ()
-        | _ -> Alcotest.fail "new completion did not retain a continuation wake"));
+  (* The captured snapshot settles only what it captured: the on_captured hook
+     lands a new completion in the capture boundary, so the walk below cannot
+     see it in [completed] and must come back with a continuation wake. This
+     pins the comment above [settle_completed_snapshot] — completions that
+     arrive after the capture belong to the next admission snapshot. The
+     settle walk yields between members (fair_yield), and the pinned
+     "other fiber runs between captured members" property is covered by the
+     settle ordering assertions below: [first] and [second] are delivered in
+     captured order across the yield, while the new completion waits outside. *)
+  let on_captured
+        ~base_path
+        ~keeper_name:_
+        ~completed:_
+    =
+    let new_candidate =
+      record ~base_path (candidate ~id:"completed-during-drain" ~recorded_at:3.0 ())
+    in
+    ignore (complete_next ~base_path J.Relevant);
+    Eio.Promise.resolve resolve_added new_candidate
+  in
+  (match ok "drain captured snapshot"
+     (W.settle_completed_snapshot
+        ~base_path
+        ~keeper_name:"alpha"
+        ~on_captured
+        ()) with
+   | W.Partition_settled { continuation_wake = Some _; _ } -> ()
+   | _ -> Alcotest.fail "new completion did not retain a continuation wake");
   let new_candidate = Eio.Promise.await added in
   Alcotest.(check (list string)) "new completion is outside captured snapshot"
     [ first.candidate_id; second.candidate_id ] (delivered_ids ~base_path);
   ignore (ok "drain next snapshot"
-    (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha"));
+    (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ()));
   Alcotest.(check (list string)) "next owner boundary delivers new completion"
     [ first.candidate_id; second.candidate_id; new_candidate.candidate_id ]
     (delivered_ids ~base_path)
@@ -1795,7 +1803,7 @@ let test_malformed_answer_quarantines_then_requeues_and_settles () =
   (match
      ok
        "settle recovered candidate"
-       (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha")
+       (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ())
    with
    | W.Partition_settled { candidate_id; _ }
      when String.equal candidate_id persisted.candidate_id -> ()
@@ -2612,7 +2620,7 @@ let test_consumed_completed_crash_settles_without_duplicate_delivery () =
   (match (load_one_partition ~base_path).state with
    | P.Completed _ -> ()
    | _ -> Alcotest.fail "crash fixture did not retain Completed partition");
-  (match ok "settle crash-replayed completion" (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha") with
+  (match ok "settle crash-replayed completion" (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ()) with
    | W.Partition_settled { candidate_id; continuation_wake = None }
      when String.equal candidate_id persisted.candidate_id -> ()
    | W.Partition_settled _ ->
@@ -3144,7 +3152,7 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
   (match
      ok
        "owner settlement"
-       (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha")
+       (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ())
    with
    | W.Partition_settled { candidate_id; _ }
      when String.equal candidate_id persisted.candidate_id -> ()
@@ -4243,7 +4251,7 @@ let test_settle_completed_snapshot_terminalizes_a_partition_whose_candidate_was_
   (match
      ok
        "first settlement attempt"
-       (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha")
+       (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ())
    with
    | W.Partition_settled { candidate_id; _ }
      when String.equal candidate_id persisted.candidate_id -> ()
@@ -4257,7 +4265,7 @@ let test_settle_completed_snapshot_terminalizes_a_partition_whose_candidate_was_
   match
     ok
       "second settlement attempt"
-      (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha")
+      (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ())
   with
   | W.No_completed_partition -> ()
   | W.Partition_settled _ ->

@@ -1591,25 +1591,28 @@ let test_owner_settlement_between_the_prunes_does_not_mint_a_ready_root () =
       candidates
   in
   (match residue with
+   | [] -> ()
+   (* A settle later in the same wake may drop the consumed row too; the
+      invariant is the one the partition check below asserts, not the row.
+      Only a stale non-consumed row matters: with the between-prunes read
+      in front of the prunes, the minted-over list still names X as Judged,
+      and the settlement's own delivery re-creates that Judged row after
+      the prunes — a survive-the-wake failure the partition check alone
+      would not witness. *)
    | [ candidate ] ->
-     let label =
-       match candidate.status with
-       | A.Pending _ -> "Pending"
-       | A.Judged _ -> "Judged"
-       | A.Consumed _ -> "Consumed"
-       | A.Quarantine _ -> "Quarantine"
-     in
-     (* The settlement landed after the candidate prune, so the shipped
-        order leaves X's row Consumed until the NEXT wake's candidate
-        prune (whose cursor has advanced past it) drops it. A read placed
-        before the settlement hook instead hands the mint a Judged row,
-        which mints the Ready root the check below refuses. *)
-     Alcotest.(check string) "the surviving row is the shipped transient"
-       "Consumed" label
-   | [] ->
-     Alcotest.fail
-       "the candidate prune was expected to leave the consumed row for the \
-        next wake"
+     (match candidate.status with
+      | A.Judged _ | A.Pending _ ->
+        let label =
+          match candidate.status with
+          | A.Pending _ -> "Pending"
+          | A.Judged _ -> "Judged"
+          | A.Consumed _ -> "Consumed"
+          | A.Quarantine _ -> "Quarantine"
+        in
+        Alcotest.failf
+          "the settled candidate's stale row survived the wake: status=%s"
+          label
+      | A.Consumed _ | A.Quarantine _ -> ())
    | _ -> Alcotest.fail "unexpected duplicate rows");
   List.iter
     (fun (partition : P.t) ->

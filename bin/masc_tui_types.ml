@@ -977,13 +977,11 @@ let order_chat_turn_rows rows =
    [order_chat_turn_rows] is a stable sort, so sorting once over the arrival
    order lands every row where sorting after each arrival did.
 
-   [ctb_user_texts] is what recognises a user line the transcript already
-   holds. Two user rows of one request with the same text are one line
-   submitted twice -- the session copy and the server's persisted copy -- and
-   only one belongs on screen. Within a turn the request id is fixed, so the
-   text alone is the question, and the table answers it without walking the
-   turn. Non-user rows never fold: two tool rows with the same text are two
-   calls. *)
+   USER rows deduplicate only by their typed row identity. Distinct persisted
+   IDs or input positions remain distinct even when their text is identical.
+   Session/persisted aliases are resolved before this assembly, using the
+   exact request input slot, never the message body. Non-user rows keep their
+   existing producer positions. *)
 type chat_turn_key =
   | Typed_execution of Masc_tui_keeper_chat_log.journal_source
   | Legacy_request of string
@@ -994,11 +992,16 @@ let chat_turn_key (row : msg_entry) =
   | None -> Legacy_request row.me_request_id
 ;;
 
+type turn_sequence_evidence =
+  | Sequence_unobserved
+  | Sequence_observed of int
+  | Sequence_conflicting
+
 type chat_turn_builder = {
   ctb_request_id : string;
   mutable ctb_rows_rev : msg_entry list;
-  mutable ctb_turn_sequence : int option;
-  ctb_user_texts : (string, unit) Hashtbl.t;
+  mutable ctb_turn_sequence : turn_sequence_evidence;
+  ctb_user_identities : (msg_identity, unit) Hashtbl.t;
 }
 
 type chat_timeline_slot =
@@ -1015,14 +1018,26 @@ let is_user_row row =
       false
 ;;
 
+(* Legacy history ordinals restart for each page. They identify neither a
+   stored row nor a local input and cannot authorize collapsing observations. *)
+let stable_user_identity row =
+  if not (is_user_row row) then None
+  else match row.me_identity with
+    | (Persisted_row _ | Session_row _) as identity -> Some identity
+    | Persisted_legacy_row _ -> None
+;;
+
 (* Two rows of one turn can disagree about which turn of the conversation it
    was. A disagreement is not a tie to break: the turn stops claiming a
    number rather than picking one of them. *)
 let merge_turn_sequence held arriving =
   match held, arriving with
-  | None, sequence | sequence, None -> sequence
-  | Some left, Some right when Int.equal left right -> Some left
-  | Some _, Some _ -> None
+  | Sequence_conflicting, (None | Some _) -> Sequence_conflicting
+  | Sequence_unobserved, None -> Sequence_unobserved
+  | Sequence_unobserved, Some sequence -> Sequence_observed sequence
+  | Sequence_observed sequence, None -> Sequence_observed sequence
+  | Sequence_observed left, Some right when Int.equal left right -> Sequence_observed left
+  | Sequence_observed _, Some _ -> Sequence_conflicting
 ;;
 
 (* The conversation's rows as turns, journal lines and unowned lines, in the
@@ -1050,22 +1065,23 @@ let chat_timeline_slots rows =
             builder.ctb_turn_sequence <-
               merge_turn_sequence builder.ctb_turn_sequence row.me_turn_sequence;
             let folds =
-              is_user_row row && Hashtbl.mem builder.ctb_user_texts row.me_text
+              Option.exists (Hashtbl.mem builder.ctb_user_identities) (stable_user_identity row)
             in
             if not folds
             then begin
-              if is_user_row row
-              then Hashtbl.replace builder.ctb_user_texts row.me_text ();
+              Option.iter (fun identity -> Hashtbl.replace builder.ctb_user_identities identity ())
+                (stable_user_identity row);
               builder.ctb_rows_rev <- row :: builder.ctb_rows_rev
             end
         | None ->
-            let user_texts = Hashtbl.create 4 in
-            if is_user_row row then Hashtbl.replace user_texts row.me_text ();
+            let user_identities = Hashtbl.create 4 in
+            Option.iter (fun identity -> Hashtbl.replace user_identities identity ()) (stable_user_identity row);
             let builder =
               { ctb_request_id = row.me_request_id
               ; ctb_rows_rev = [ row ]
-              ; ctb_turn_sequence = row.me_turn_sequence
-              ; ctb_user_texts = user_texts
+              ; ctb_turn_sequence = Option.fold ~none:Sequence_unobserved
+                  ~some:(fun sequence -> Sequence_observed sequence) row.me_turn_sequence
+              ; ctb_user_identities = user_identities
               }
             in
             Hashtbl.replace builders (chat_turn_key row) builder;
@@ -1078,7 +1094,9 @@ let chat_timeline_slots rows =
       | Slot_turn builder ->
           Chat_turn
             { ct_request_id = builder.ctb_request_id
-            ; ct_turn_sequence = builder.ctb_turn_sequence
+            ; ct_turn_sequence = (match builder.ctb_turn_sequence with
+                | Sequence_observed sequence -> Some sequence
+                | Sequence_unobserved | Sequence_conflicting -> None)
             ; ct_rows = order_chat_turn_rows (List.rev builder.ctb_rows_rev)
             })
     !slots_rev
@@ -1147,7 +1165,22 @@ let chat_timeline ~loaded ~session ~queued_request_ids =
     List.exists (String.equal request_id) queued_request_ids
   in
   let visible rows = List.filter (fun row -> not (queued row.me_request_id)) rows in
-  { ctl_items = chat_timeline_slots (visible loaded @ visible session) }
+  let loaded = visible loaded in
+  let persisted_user_slots = Hashtbl.create 64 in
+  List.iter (fun (row : msg_entry) ->
+    if is_user_row row && row.me_request_id <> "" then
+      match row.me_identity with
+      | Persisted_row _ ->
+          Hashtbl.replace persisted_user_slots
+            (row.me_keeper_name, row.me_request_id, row.me_turn_phase, row.me_operation_seq) ()
+      | Persisted_legacy_row _ | Session_row _ -> ()) loaded;
+  let session = visible session |> List.filter (fun (row : msg_entry) ->
+    match row.me_identity with
+    | Session_row {request_id; turn_phase; operation_seq} when is_user_row row && request_id <> "" ->
+        not (Hashtbl.mem persisted_user_slots
+          (row.me_keeper_name, request_id, turn_phase, operation_seq))
+    | Session_row _ | Persisted_row _ | Persisted_legacy_row _ -> true) in
+  { ctl_items = chat_timeline_slots (loaded @ session) }
 ;;
 
 (* Which lane a chat row belongs to, asked of the row rather than of where it

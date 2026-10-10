@@ -125,6 +125,7 @@ export type KeeperNativeToolCompletion = { exit_code: number | null } & (
   | { kind: 'end_observed' | 'completion_reported' | 'error_reported' | 'decline_reported' }
   | { kind: 'result_received'; is_error: boolean | null }
   | { kind: 'unrecognized_status'; status: string }
+  | { kind: 'completion_unrecorded'; exit_code: null }
 )
 
 export type KeeperNativeToolProgress =

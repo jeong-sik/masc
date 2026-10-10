@@ -1077,8 +1077,8 @@ let decode_custom_event ~request state fields =
       let* _ = optional_string ~surface:native_surface "toolCallName" native_fields
           |> Result.map_error (fun detail -> Malformed_event detail) in
       (* The wire contract permits an END without a completion: an older
-         sender closes the occurrence without terminal metadata, which reads
-         as end_observed — the same default the live decoder applies. A
+         sender closes the occurrence without terminal metadata, which the
+         live decoder reads as completion_unrecorded. A
          present completion must be exactly one and well-formed; START never
          carries one and the allowed-field list already rejects a START
          that has it. *)

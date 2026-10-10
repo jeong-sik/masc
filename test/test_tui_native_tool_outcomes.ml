@@ -120,11 +120,12 @@ let test_absent_and_malformed_metadata () =
           (wire_with_custom_value ~id:1 event (replace_completion replacement))
         |> List.map (fun (observed : Live.observed_delta) -> observed.delta) in
   let old = `Assoc (List.remove_assoc "completion" fields) in
-  check bool "end without result metadata reads as observed" true
-    (Journal.keeper_chat_event_of_json old = Ok ended);
-  check bool "older SSE end without completion reads as observed" true
+  check bool "end without result metadata reads as unrecorded, not as observed" true
+    (Journal.keeper_chat_event_of_json old
+     = Ok (E.Native_tool_end (native, Native.completion_unrecorded)));
+  check bool "older SSE end without completion reads as unrecorded, not as observed" true
     (match decode_wire None with
-     | [Live.Native_tool_ended {completion; _}] -> completion=Native.end_observed
+     | [Live.Native_tool_ended {completion; _}] -> completion=Native.completion_unrecorded
      | _ -> false);
   List.iter (fun malformed ->
     check bool "present malformed journal metadata is not unknown/success" true
@@ -143,7 +144,8 @@ let test_absent_and_malformed_metadata () =
      `Assoc ["kind",`String "result_received"; "exit_code",`Null;
        "is_error",`Null; "status",`String "failed"];
      `Assoc ["kind",`String "unrecognized_status"; "exit_code",`Null;
-       "status",`String "future-status"; "is_error",`Bool false]]
+       "status",`String "future-status"; "is_error",`Bool false];
+     `Assoc ["kind",`String "completion_unrecorded"; "exit_code",`Int 0]]
 
 let test_http_execution_receipt_is_unchanged () =
   let transcript = Transcript.create ~keeper_name:"fixture" ~request_id:"http" ~started_at:0. in

@@ -33,6 +33,7 @@ type exact_action = action_identity * string
 
 type completion_outcome =
   | End_observed
+  | Completion_unrecorded
   | Completion_reported
   | Error_reported
   | Decline_reported
@@ -132,10 +133,12 @@ let redact_progress redact = function
             {note with agent=agent note.agent; error_category=redact note.error_category})
 
 let end_observed = {outcome=End_observed; exit_code=None}
+let completion_unrecorded = {outcome=Completion_unrecorded; exit_code=None}
 
 let completion_to_json {outcome; exit_code} =
   let kind, fields = match outcome with
     | End_observed -> "end_observed", []
+    | Completion_unrecorded -> "completion_unrecorded", []
     | Completion_reported -> "completion_reported", []
     | Error_reported -> "error_reported", []
     | Decline_reported -> "decline_reported", []
@@ -158,6 +161,7 @@ let completion_of_json = function
       let* () = unique [] fields in
       let* outcome = match List.assoc_opt "kind" fields with
         | Some (`String "end_observed") -> Ok End_observed
+        | Some (`String "completion_unrecorded") -> Ok Completion_unrecorded
         | Some (`String "completion_reported") -> Ok Completion_reported
         | Some (`String "error_reported") -> Ok Error_reported
         | Some (`String "decline_reported") -> Ok Decline_reported
@@ -175,24 +179,28 @@ let completion_of_json = function
       let allowed = ["kind"; "exit_code"] @ (match outcome with
         | Result_received _ -> ["is_error"]
         | Unrecognized_status _ -> ["status"]
-        | End_observed | Completion_reported | Error_reported | Decline_reported -> []) in
+        | End_observed | Completion_unrecorded | Completion_reported | Error_reported
+        | Decline_reported -> []) in
       let* () = match List.find_opt (fun (key, _) -> not (List.mem key allowed)) fields with
         | None -> Ok ()
         | Some (key, _) -> Error ("unsupported native completion field: " ^ key)
       in
-      (match List.assoc_opt "exit_code" fields with
-       | Some `Null -> Ok {outcome; exit_code=None}
-       | Some json ->
+      (match outcome, List.assoc_opt "exit_code" fields with
+       | _, Some `Null -> Ok {outcome; exit_code=None}
+       | Completion_unrecorded, Some _ -> Error "an unrecorded native completion has no exit_code"
+       | ( End_observed | Completion_reported | Error_reported | Decline_reported
+         | Result_received _ | Unrecognized_status _ ), Some json ->
            (match Runtime_json_integer.of_json json with
             | Ok value -> Ok {outcome; exit_code=Some value}
             | Error _ -> Error "native exit_code must be a safe integer or null")
-       | None -> Error "native exit_code must be a safe integer or null")
+       | _, None -> Error "native exit_code must be a safe integer or null")
   | _ -> Error "native completion must be an object"
 
 let redact_completion redact completion =
   match completion.outcome with
   | Unrecognized_status status -> {completion with outcome=Unrecognized_status (redact status)}
-  | End_observed | Completion_reported | Error_reported | Decline_reported | Result_received _ -> completion
+  | End_observed | Completion_unrecorded | Completion_reported | Error_reported | Decline_reported
+  | Result_received _ -> completion
 
 let valid_identity = function
   | Call_id call_id -> String.trim call_id <> ""

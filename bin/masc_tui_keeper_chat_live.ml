@@ -231,10 +231,11 @@ let custom_deltas_unvalidated fields =
                else
                  (* The wire contract permits an END without a completion:
                     an older sender closes the occurrence without terminal
-                    metadata, which reads as end_observed. A present
-                    completion must be exactly one and well-formed. *)
+                    metadata, so whether the provider reported a status is
+                    not known and it reads as completion_unrecorded. A
+                    present completion must be exactly one and well-formed. *)
                  (match List.filter (fun (key, _) -> String.equal key "completion") value with
-                  | [] -> [Native_tool_ended {occurrence; completion = Runtime_native_tools.end_observed}]
+                  | [] -> [Native_tool_ended {occurrence; completion = Runtime_native_tools.completion_unrecorded}]
                   | [_, json] ->
                       (match Runtime_native_tools.completion_of_json json with
                        | Ok completion -> [Native_tool_ended {occurrence; completion}]

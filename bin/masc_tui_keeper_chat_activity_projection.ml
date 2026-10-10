@@ -117,7 +117,7 @@ let native_report_says_failed (completion : Runtime_native_tools.completion opti
       let open Runtime_native_tools in
       (match completion.outcome with
        | Error_reported | Decline_reported | Result_received {is_error=Some true} -> true
-       | End_observed | Completion_reported
+       | End_observed | Completion_unrecorded | Completion_reported
        | Result_received {is_error=None | Some false} | Unrecognized_status _ -> false)
       || Option.fold ~none:false ~some:(fun code -> code <> 0) completion.exit_code
 
@@ -176,6 +176,7 @@ let native_completion_status (completion : Runtime_native_tools.completion) =
   with_native_exit_code completion
     (match completion.outcome with
      | End_observed -> "native ended; outcome not reported"
+     | Completion_unrecorded -> "native ended; outcome not recorded"
      | Completion_reported -> "native completion reported"
      | Error_reported -> "native error reported"
      | Decline_reported -> "native declined"
@@ -191,8 +192,8 @@ let native_completion_summary (completion : Runtime_native_tools.completion) =
   match completion.outcome with
   | Unrecognized_status status ->
       with_native_exit_code completion ("native status unrecognized: " ^ safe_line status)
-  | End_observed | Completion_reported | Error_reported | Decline_reported
-  | Result_received _ -> native_completion_status completion
+  | End_observed | Completion_unrecorded | Completion_reported | Error_reported
+  | Decline_reported | Result_received _ -> native_completion_status completion
 
 let native_activity_summary (activity : tool_activity) =
   match activity.outcome with

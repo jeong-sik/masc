@@ -456,6 +456,14 @@ function validateNativeToolCompletion(payload: unknown): SafeParseResult<true> {
         return fail(`${path}.status`, 'Expected original native status string')
       }
       break
+    case 'completion_unrecorded':
+      // An end whose record kept no completion: nothing is known of the
+      // provider's status, so there is no exit code either.
+      fields = ['kind', 'exit_code']
+      if (payload.exit_code !== null) {
+        return fail(`${path}.exit_code`, 'Expected no exit code for an unrecorded native completion')
+      }
+      break
     default:
       return fail(`${path}.kind`, 'Expected typed native completion kind')
   }

@@ -119,8 +119,8 @@ let check t ~expected =
       | Unrecognized_status status ->
           check bool "provider status word stays out of dressed rows" false
             (Astring.String.is_infix ~affix:status displayed)
-      | End_observed | Completion_reported | Error_reported | Decline_reported
-      | Result_received _ -> ()) expected)
+      | End_observed | Completion_unrecorded | Completion_reported | Error_reported
+      | Decline_reported | Result_received _ -> ()) expected)
     [Transcript.Compact; Transcript.Full]
 
 let check_progress t ~expected ~expected_text ~running =

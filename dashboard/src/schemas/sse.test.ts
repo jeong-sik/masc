@@ -467,6 +467,7 @@ describe('SSEMessageSchema', () => {
     { kind: 'result_received', exit_code: 3, is_error: true },
     { kind: 'unrecognized_status', exit_code: null, status: 'future-provider-status' },
     { kind: 'unrecognized_status', exit_code: null, status: '' },
+    { kind: 'completion_unrecorded', exit_code: null },
   ])('preserves native completion facts without a success inference: %j', completion => {
     const event = customEvent('KEEPER_NATIVE_TOOL_END', {
       toolStreamScope: 2, toolCallBlockIndex: 7, completion,
@@ -538,6 +539,8 @@ describe('SSEMessageSchema', () => {
       { kind: 'unrecognized_status', exit_code: null, status: false },
       { kind: 'unrecognized_status', exit_code: null, status: 'future', is_error: true },
       { kind: 'end_observed', exit_code: null, extra: true },
+      { kind: 'completion_unrecorded', exit_code: 0 },
+      { kind: 'completion_unrecorded' },
     ]) {
       expect(SSEMessageSchema.safeParse(customEvent('KEEPER_NATIVE_TOOL_END', {
         toolStreamScope: 0, toolCallBlockIndex: 0, completion,

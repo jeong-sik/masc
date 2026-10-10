@@ -373,6 +373,7 @@ type client_info = { client_id : client_id; browser : browser; version : string;
 type client = { info : client_info; commands : issued Eio.Stream.t;
   mutex : Eio.Mutex.t;
   waiters : (string, Yojson.Safe.t Eio.Promise.u) Hashtbl.t;
+  mutable last_delivered_result : (string * Yojson.Safe.t) option;
   mutable connected_until : Monotonic_deadline.t; mutable closed : bool }
 type target = Automation | Live_client of client | Stagehand
 let clients : (string, client) Hashtbl.t = Hashtbl.create 4
@@ -580,7 +581,7 @@ let register info =
       Ok client
     | None ->
       let client = {info; commands=Eio.Stream.create 16; mutex=Eio.Mutex.create ();
-        waiters=Hashtbl.create 8; closed=false;
+        waiters=Hashtbl.create 8; last_delivered_result=None; closed=false;
         connected_until=Monotonic_deadline.after ~seconds:lane_connected_window_sec} in
       Hashtbl.add clients key client; Ok client)
 let take_command ~client_info ~window_sec =
@@ -603,12 +604,18 @@ let deliver_result ~client_id ~id ~payload =
   | None -> Error "unknown_client"
   | Some client when not (connected client) -> Error "client_not_connected"
   | Some client ->
-    let waiter = Eio.Mutex.use_rw ~protect:true client.mutex (fun () ->
-      let found = Hashtbl.find_opt client.waiters id in
-      Hashtbl.remove client.waiters id; found) in
-    match waiter with
-    | None -> Error "request_not_owned_by_client"
-    | Some resolver -> Eio.Promise.resolve resolver payload; Ok ()
+    Eio.Mutex.use_rw ~protect:true client.mutex (fun () ->
+      match Hashtbl.find_opt client.waiters id with
+      | Some resolver ->
+        Hashtbl.remove client.waiters id;
+        client.last_delivered_result <- Some (id, payload);
+        Eio.Promise.resolve resolver payload;
+        Ok ()
+      | None ->
+        (match client.last_delivered_result with
+         | Some (last_id, last_payload) when String.equal id last_id && payload = last_payload -> Ok ()
+         | Some (last_id, _) when String.equal id last_id -> Error "result_id_reused_with_different_payload"
+         | None | Some _ -> Error "request_not_owned_by_client"))
 let disconnect_client ~client_id =
   Eio.Mutex.use_rw ~protect:true clients_mutex (fun () ->
     let key = client_id_to_string client_id in

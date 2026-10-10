@@ -343,27 +343,25 @@ let refusal_code body =
      takes nothing from it. *)
   | exception (Eio.Buf_read.Buffer_limit_exceeded | Eio.Io _ | End_of_file) -> None
 
-let post ~clock ~client ~server ~client_id ~info ~token path json =
+let post ?(timeout_sec = http_timeout_sec) ~clock ~client ~server ~client_id ~info ~token path json =
   match
-    within ~clock http_timeout_sec (fun () ->
+    within ~clock timeout_sec (fun () ->
       try
         Eio.Switch.run (fun sw ->
           match
-            Cohttp_eio.Client.post client ~sw
+            Cohttp_eio.Client.call_result client ~sw
               ~headers:(Cohttp.Header.of_list
                 [ "Content-Type", "application/json"; "x-lane", Browser_lane.Lane_name.(to_wire Live); "x-lane-token", token;
                   "x-browser-client-id", Browser_lane.client_id_to_string client_id; "x-browser-name", info.browser;
                   "x-browser-version", info.version; "x-browser-engine-version", info.engine_version;
                   "x-browser-transport", Browser_lane.live_transport_to_string info.transport ])
               ~body:(Cohttp_eio.Body.of_string (Yojson.Safe.to_string json))
-              (endpoint server path)
+              `POST (endpoint server path)
           with
-          (* cohttp-eio reports as [Failure] a peer that closed the connection
-             before a response head, one that sent something that is not a
-             head, and a host name it could not resolve. In each there is no
-             answer from the server, which a status or a body would be. *)
           | exception Failure _ -> Error No_response
-          | response, body ->
+          | Error Cohttp_eio.Client.Connection_closed -> Error No_response
+          | Error (Cohttp_eio.Client.Invalid_response _) -> Error Response_invalid
+          | Ok (response, body) ->
             let status = Cohttp.Response.status response |> Cohttp.Code.code_of_status in
             if status <> 200 then
               (* The status is the answer. A body that does not follow it
@@ -443,8 +441,8 @@ type link =
 let new_link ~clock ~client ~config ~info =
   { clock; client; config; info; server = config.server; client_id = config.client_id; polled = false }
 
-let ask link ~server ~token path json =
-  post ~clock:link.clock ~client:link.client ~server ~client_id:link.client_id ~info:link.info ~token path json
+let ask ?(timeout_sec = http_timeout_sec) link ~server ~token path json =
+  post ~timeout_sec ~clock:link.clock ~client:link.client ~server ~client_id:link.client_id ~info:link.info ~token path json
 
 let ask_lane link origin =
   match read_token link.config.token_file with
@@ -489,11 +487,11 @@ let follow_workspace link =
 (* One attempt to hand a result to the server. *)
 type delivery = Delivered | Undelivered of result_undelivered | Unreached of http_error
 
-let deliver link payload =
+let deliver ?(timeout_sec = http_timeout_sec) link payload =
   match read_token link.config.token_file with
   | Error detail -> Undelivered (Token_unreadable detail)
   | Ok token ->
-      (match ask link ~server:link.server ~token "result" payload with
+      (match ask ~timeout_sec link ~server:link.server ~token "result" payload with
        | Ok (`Assoc fields) when List.assoc_opt "ok" fields = Some (`Bool true) -> Delivered
        | Ok _ -> Undelivered Not_acknowledged
        | Error error ->
@@ -529,7 +527,7 @@ let rec publish ?(resent = false) link payload =
 (* The last result of a host that is ending is offered once: no later poll
    exists for another attempt to come before. *)
 let publish_once link payload =
-  match deliver link payload with
+  match deliver ~timeout_sec:leaving_window_sec link payload with
   | Delivered -> Ok ()
   | Undelivered why -> Error why
   | Unreached error -> Error (Unacknowledged_as_host_ended error)

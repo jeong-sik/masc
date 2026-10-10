@@ -226,7 +226,7 @@ pin-depends: [
   ]
   [
     "cohttp-eio.6.2.1"
-    "git+https://github.com/jeong-sik/ocaml-cohttp.git#45ecbe94b2a6e9a49e5ce11a9f69127833814d46"
+    "git+https://github.com/anyang-keepers/ocaml-cohttp.git#9963da4c028b5681ff96eeeaa9b276d6be60c507"
   ]
   [
   "grpc-direct.0.2.6"

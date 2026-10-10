@@ -60,6 +60,11 @@ jobs:
           python3 test/test_browser_native_host.py _build/default/bin/masc_browser_host.exe 2>&1 | tee proof/native-host-tests.log
           _build/default/test/test_browser_bidi_peer.exe 2>&1 | tee proof/bidi-peer-tests.log
 
+      - name: Exercise BiDi host server restart and shutdown cases
+        run: |
+          set -euo pipefail
+          python3 test/test_browser_bidi_host_link.py _build/default/bin/masc_browser_host.exe 2>&1 | tee proof/bidi-host-link-tests.log
+
       - name: Install Firefox and geckodriver
         run: |
           brew install geckodriver

@@ -1486,7 +1486,9 @@ let test_owner_settlement_before_the_prunes_does_not_mint_a_ready_root () =
      worker records the judgment on the partition, not the ledger) and
      fails here. A read that sits after the candidate prune is a post-prune
      list by construction and cannot fail here — that is the point: the
-     shipped order's list is exactly the post-prune one. *)
+     shipped order's list is exactly the post-prune one. A read between the
+     two prunes is OUT of this tripwire's scope; covering it is tracked in
+     task-2233. *)
   Alcotest.(check bool) "the list the wake read is post-prune" false
     (List.exists
        (fun (c : A.candidate) -> String.equal c.candidate_id kept.candidate_id)

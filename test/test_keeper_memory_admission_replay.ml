@@ -163,25 +163,63 @@ let replay filename () =
     (Fixture.resolver_snapshot ~source:"synthetic admission replay"
        [{Fixture.id="unused-synthetic-slot"; base_url="http://127.0.0.1:1"}])
     : Runtime_exact_output_registry.t);
-  let keeper_id = "synthetic-" ^ String.map (function '_' -> '-' | c -> c) cohort in
-  let trace_id = "synthetic-admission-export" in
+  let state_bundle = member "state_bundle" capture in
+  let restores_state = state_bundle <> `Null in
+  let keeper_id = (if restores_state then json_string "keeper_id" capture
+    else "synthetic-" ^ String.map (function '_' -> '-' | c -> c) cohort)
+    |> Keeper_id.Keeper_name.of_string |> require |> Keeper_id.Keeper_name.to_string in
+  let trace_id = (if restores_state then json_string "trace_id" capture
+    else "synthetic-admission-export")
+    |> Keeper_id.Trace_id.of_string |> require |> Keeper_id.Trace_id.to_string in
+  let absolute_turn = if restores_state then member "absolute_turn" capture
+    |> Yojson.Safe.Util.to_int else 0 in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  (* Captures seed nonempty snapshots at their original fact time. For an
-     explicitly empty snapshot, the first recorded input supplies its clock. *)
-  let initial_time = match initial_facts, candidates with
-    | first :: rest, _ -> List.fold_left (fun stamp (fact : Memory.fact) ->
-        max stamp fact.last_seen) first.last_seen rest
-    | [], candidate :: _ -> candidate.fact.first_seen
-    | [], [] -> fail "missing reconstruction timestamp" in
-  let initial = if initial_present then Some (Current.replace ~keepers_dir ~keeper_id
-      ~expected_revision:None ~now:initial_time
-      ~source:{Current.kind=Current.Explicit_write; trace_id} ~facts:initial_facts () |> require)
-    else None in
-  List.iter (fun (candidate : Queue.candidate) ->
-    let restored = Queue.append ~keepers_dir ~keeper_id ~request_id:candidate.request_id
-      candidate.fact |> require in
-    check bool "original identity, sequence and full provenance restored" true
-      (restored = candidate)) candidates;
+  let initial = if restores_state then (
+    let stores = ["current_snapshot", Current.path_for_keepers_dir ~keepers_dir ~keeper_id;
+      "consumption_and_lookup_receipt", Current.durable_range_receipt_path ~keepers_dir ~keeper_id;
+      "memory_journal", Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id;
+      "pending_queue", Queue.path ~keepers_dir ~keeper_id] in
+    let fields = Yojson.Safe.Util.to_assoc state_bundle in
+    check (list string) "state bundle permits only the four known stores"
+      (List.sort String.compare (List.map fst stores))
+      (List.sort String.compare (List.map fst fields));
+    let decoded = List.map (fun (name,path) ->
+      let entry = List.assoc name fields in
+      let present = member "present" entry |> Yojson.Safe.Util.to_bool in
+      check (list string) (name ^ " has a closed state envelope")
+        (if present then ["bytes";"present";"sha256"] else ["present"])
+        (List.sort String.compare (List.map fst (Yojson.Safe.Util.to_assoc entry)));
+      let bytes = if present then (
+        let bytes = json_string "bytes" entry in
+        check string (name ^ " exact stored bytes digest") (json_string "sha256" entry) (sha256 bytes);
+        Some bytes) else None in
+      name,path,bytes) stores in
+    (* All keys and digests are checked before any restore; no path comes from JSON. *)
+    List.iter (fun (_,path,bytes) -> match bytes with None -> () | Some bytes ->
+      Fs_compat.mkdir_p (Filename.dirname path);
+      Fs_compat.save_file_atomic_strict path bytes |> require) decoded;
+    let snapshot = Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require in
+    check bool "restored snapshot presence equals capture" initial_present (Option.is_some snapshot);
+    check bool "restored snapshot preserves exact captured facts and times" true
+      ((match snapshot with None -> [] | Some snapshot -> snapshot.facts) = initial_facts);
+    List.iter (fun (name,path,bytes) -> check (option string) (name ^ " restores without rewriting")
+      bytes (Fs_compat.load_file_opt path)) decoded;
+    snapshot)
+  else (
+    let initial_time = match initial_facts, candidates with
+      | first :: rest, _ -> List.fold_left (fun stamp (fact : Memory.fact) ->
+          max stamp fact.last_seen) first.last_seen rest
+      | [], candidate :: _ -> candidate.fact.first_seen
+      | [], [] -> fail "missing reconstruction timestamp" in
+    let initial = if initial_present then Some (Current.replace ~keepers_dir ~keeper_id
+        ~expected_revision:None ~now:initial_time
+        ~source:{Current.kind=Current.Explicit_write; trace_id} ~facts:initial_facts () |> require)
+      else None in
+    List.iter (fun (candidate : Queue.candidate) ->
+      let restored = Queue.append ~keepers_dir ~keeper_id ~request_id:candidate.request_id
+        candidate.fact |> require in
+      check bool "original identity, sequence and full provenance restored" true (restored = candidate)) candidates;
+    initial) in
   let admission = match Queue.read_pending ~keepers_dir ~keeper_id |> require with
     | Some batch -> batch | None -> fail "restored queue is absent" in
   let identities = Queue.candidate_ids admission in
@@ -190,6 +228,22 @@ let replay filename () =
   check string "restored candidate bytes match original capture"
     (json_string "candidates_sha256" hashes)
     (hash_json (`List (List.map candidate_json (Queue.candidates admission))));
+  let identity_json (id : Current.explicit_candidate_id) =
+    `Assoc ["queue_generation",`String id.queue_generation;"request_id",`String id.request_id;
+      "sequence",`Int id.sequence;"input_sha256",`String id.input_sha256] in
+  if restores_state then check bool "restored candidate receipt identities are exact" true
+    (Yojson.Safe.equal (`List (List.map identity_json identities)) (member "candidate_receipts" capture));
+  let baseline_receipts = Current.committed_explicit_candidates ~keepers_dir ~keeper_id
+    ~queue_generation:generation |> require in
+  check bool "incoming candidates have no prior consumed receipt" true
+    (List.for_all (fun id -> not (List.mem id baseline_receipts)) identities);
+  let _, baseline_bindings =
+    Current.read_with_admission_recall_for_keepers_dir ~keepers_dir ~keeper_id |> require in
+  let restored_state = `Assoc ["performed",`Bool restores_state;
+    "state_bundle_sha256",(if restores_state then `String (hash_json state_bundle) else `Null);
+    "prior_consumed_candidate_count",`Int (List.length baseline_receipts);
+    "prior_lookup_binding_count",`Int (List.length baseline_bindings);
+    "incoming_candidates",`List (List.map identity_json identities)] in
   let queue_path = Queue.path ~keepers_dir ~keeper_id in
   let current_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
   let queue_before = Fs_compat.load_file queue_path in
@@ -213,9 +267,10 @@ let replay filename () =
     List.iter (fun (fact : Memory.fact) ->
       check bool "seeded claim is retrievable before the saved response" true
         (List.mem fact.claim (recalled_texts recall_before))) initial_facts;
+  let recall_all_before = recall ~source:"all" () in
   let selected_input : Librarian.input =
     {keeper_id=Masc_test_deps.keeper_id_fixture keeper_id; keeper_instructions=instructions;
-     turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:0;
+     turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn;
      current=Option.map (fun (snapshot : Current.t) ->
        ({Librarian.facts=snapshot.facts} : Librarian.current_selection)) initial;
      historical_task_contexts=[]; goal_context=Librarian.No_task;
@@ -252,8 +307,11 @@ let replay filename () =
     | Some request -> request | None -> fail "no replay request captured" in
   check bool "response injected only for exact captured request"
     (matches_capture current_request) !injected;
-  let receipts = Current.committed_explicit_candidates ~keepers_dir ~keeper_id
+  let all_receipts = Current.committed_explicit_candidates ~keepers_dir ~keeper_id
     ~queue_generation:generation |> require in
+  check bool "all predecessor consumption receipts survive replay" true
+    (List.for_all (fun id -> List.mem id all_receipts) baseline_receipts);
+  let receipts = List.filter (fun id -> not (List.mem id baseline_receipts)) all_receipts in
   if !committed = 0 then check bool "no commit has no receipt" true (receipts=[])
   else (
     check int "single snapshot commit" 1 !committed;
@@ -295,11 +353,14 @@ let replay filename () =
     (binding_snapshot = current);
   List.iter (fun (binding : Current.admission_recall_binding) ->
     check bool "lookup provenance belongs to an acknowledged candidate" true
-      (List.mem binding.candidate_id receipts);
+      (List.mem binding.candidate_id all_receipts);
     check bool "lookup provenance preserves the complete original input" true
       (List.exists (fun (candidate : Queue.candidate) ->
         candidate.request_id = binding.candidate_id.request_id
-        && candidate.fact = binding.source_fact) candidates);
+        && candidate.fact = binding.source_fact) candidates
+       || List.exists (fun (prior : Current.admission_recall_binding) ->
+         prior.candidate_id = binding.candidate_id && prior.source_fact = binding.source_fact)
+         baseline_bindings);
     check bool "lookup destination is a current claim" true
       (List.exists (fun fact -> Memory.memory_id fact = binding.target_memory_id)
          current_facts)) recall_bindings;
@@ -485,7 +546,9 @@ let replay filename () =
     "actual_outcome",`String (outcome_label actual_outcome);
     "current_facts",`List (List.map Memory.fact_to_json current_facts);
     "current_snapshot_present",`Bool (Option.is_some current);
+    "restored_state",restored_state;
     "recall_before",`List recall_before;
+    "recall_all_before",`List recall_all_before;
     "recall_after",`List recall_after;
     "storage_after",storage_after;
     "recall_all_after",`List recall_all_after;

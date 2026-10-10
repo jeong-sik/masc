@@ -610,11 +610,236 @@ let test_deferred_notice_is_not_available_to_other_flushers () =
   Machine_addon_events.drain ();
   check (list (pair string string)) "notice publishes after credential admission ends"
     ["operator","deferred handoff fixture"] !delivered
+(* Host-side refusals arrive as worker-call rejections; a departed seat is a
+   client refusal it can correct by reconnecting. *)
+let refused_move = function
+  | Error (Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Rejected _)) -> true
+  | _ -> false
+
+let step_as config who =
+  Machine_addon_host.call_shared ~config ~principal:(Lane_addon_call_context.Host_actor who)
+    ~name:"masc_dos_step" ~arguments:(`Assoc ["steps",`Int 1;"until_ready",`Bool false])
+
+let participation_ok = function
+  | Ok () -> ()
+  | Error Keeper_dos_controller.Credential_changed -> fail "current invitation rejected"
+  | Error Keeper_dos_controller.Not_a_seat -> fail "a seat credential was refused as a Worker"
+  | Error (Keeper_dos_controller.Participation_unavailable detail) -> fail detail
+
+let participate config token state =
+  Keeper_dos_controller.set_participation ~config ~who:"player" ~token state
+
+let test_disconnect_before_handoff_prevents_future_assignment () =
+  with_machine @@ fun config _ _ ->
+  let token, _ = renew config in
+  operator_holds config;
+  let disconnected, passed = interleave config
+      (fun () -> participate config token Play_participation.Departed)
+      (fun () -> hand_to config "player") in
+  participation_ok disconnected;
+  refused_target "a departed target" passed;
+  check (option string) "disconnect preserves another participant's controller"
+    (Some "operator") (controller ());
+  refused_target "a later handoff to the departed target" (hand_to config "player");
+  check string "the original invitation remains valid for reconnect" "player"
+    (auth_ok (Auth.find_static_credential_by_token config.base_path ~token)).agent_name;
+  participation_ok (participate config token Play_participation.Connected);
+  ignore (handed (hand_to config "player"));
+  check (option string) "explicit reconnect restores handoff eligibility"
+    (Some "player") (controller ())
+
+let test_handoff_before_disconnect_is_released_inside_admission () =
+  with_machine @@ fun config _ _ ->
+  let token, _ = renew config in
+  operator_holds config;
+  let passed, disconnected = interleave config
+      (fun () -> hand_to config "player")
+      (fun () -> participate config token Play_participation.Departed) in
+  ignore (handed passed);
+  participation_ok disconnected;
+  check (option string) "the earlier concurrent handoff is released before disconnect returns"
+    None (controller ());
+  refused_target "the later handoff remains refused" (hand_to config "player")
+
+let test_departed_generation_recovers_a_late_admitted_move () =
+  with_machine @@ fun config _ _ ->
+  let token, _ = renew config in
+  participation_ok (participate config token Play_participation.Departed);
+  check bool "new moves by a departed caller require reconnect" true
+    (refused_move (step_as config "player"));
+  (* The lane effect of a request admitted before departure can finish later.
+     It cannot make this otherwise valid credential a permanent holder. *)
+  ignore (dos_ok (Dos_lane.step ~who:"player" ~steps:1 ~until_ready:false));
+  recovered ~released:true (recover config);
+  check (option string) "a late controller is recoverable without token revocation" None (controller ())
+
+let test_participation_is_bound_to_current_credential_generation () =
+  with_machine @@ fun config _ _ ->
+  let old_token, _ = renew config in
+  participation_ok (participate config old_token Play_participation.Departed);
+  let new_token, _ = renew config in
+  (match participate config old_token Play_participation.Departed with
+   | Error Keeper_dos_controller.Credential_changed -> ()
+   | Ok () | Error _ -> fail "an old bearer changed the renewed participation");
+  let names = auth_ok (Play_seat.participants ~base_path:config.base_path ~keepers:[] ~now:(Time_compat.now ())) in
+  check bool "same-name reissue starts eligible" true (List.mem "player" names);
+  participation_ok (participate config new_token Play_participation.Departed)
+
+let test_unreadable_participation_refuses_handoff_and_reconnect () =
+  with_machine @@ fun config _ _ ->
+  let token, _ = renew config in
+  operator_holds config;
+  participation_ok (participate config token Play_participation.Departed);
+  let directory = Filename.concat (Common.masc_dir_from_base_path ~base_path:config.base_path) "play" in
+  let file = Filename.concat directory (List.hd (Array.to_list (Sys.readdir directory))) in
+  Out_channel.with_open_bin file (fun channel -> output_string channel "malformed");
+  (match hand_to config "player" with
+   | Error (Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Unavailable _)) -> ()
+   | Error error -> fail ("unreadable participation must not look absent: " ^ call_failure error)
+   | Ok _ -> fail "unreadable participation must not look absent");
+  (match participate config token Play_participation.Connected with
+   | Error (Keeper_dos_controller.Participation_unavailable _) -> ()
+   | Error (Keeper_dos_controller.Credential_changed | Keeper_dos_controller.Not_a_seat) | Ok () ->
+     fail "reconnect must preserve unreadable evidence");
+  check string "reconnect did not silently repair the store" "malformed"
+    (In_channel.with_open_bin file In_channel.input_all);
+  check (option string) "uncertainty preserves the current holder" (Some "operator") (controller ())
+
+let test_cancelled_disconnect_does_not_publish_departure () =
+  with_machine @@ fun config _ _ ->
+  let token, _ = renew config in
+  let cancelled = auth_ok (Auth.with_credential_transaction config.base_path (fun _ ->
+    Eio.Fiber.first
+      (fun () -> ignore (participate config token Play_participation.Departed); false)
+      (fun () ->
+        let never, _ = Eio.Promise.create () in
+        await_waiter ~base_path:config.base_path never;
+        true))) in
+  check bool "waiting disconnect remains cancellable" true cancelled;
+  let names = auth_ok (Play_seat.participants ~base_path:config.base_path ~keepers:[] ~now:(Time_compat.now ())) in
+  check bool "cancelled admission retains eligibility" true (List.mem "player" names);
+  check (option string) "cancelled admission retains ownership" (Some "player") (controller ())
+
+let test_worker_keeper_has_no_play_session () =
+  with_machine @@ fun config _ _ ->
+  let token, worker = auth_ok (Auth.ensure_keeper_credential config.base_path ~agent_name:"player") in
+  let meta = match Masc_test_deps.meta_of_json_fixture
+      (`Assoc ["name", `String "player"; "trace_id", `String "keeper-participation"]) with
+    | Ok meta -> meta | Error detail -> fail detail in
+  (match Keeper_meta_store.replace_snapshot config meta with
+   | Ok () -> () | Error detail -> fail detail);
+  operator_holds config;
+  (* A Worker credential is not a seat: it cannot leave a play session, so it
+     can neither release a controller nor refuse its same-name Keeper. *)
+  (match participate config token Play_participation.Departed with
+   | Error Keeper_dos_controller.Not_a_seat -> ()
+   | Ok () | Error _ -> fail "a Worker credential changed play participation");
+  check (option string) "refused Worker departure preserves the holder" (Some "operator") (controller ());
+  ignore (handed (hand_to config "player"));
+  check (option string) "handoff to the same-name Keeper moves the holder" (Some "player") (controller ());
+  (* A departure record for this Worker generation is never read. *)
+  auth_ok (Auth.with_credential_transaction config.base_path (fun transaction ->
+    match Play_participation.write ~transaction ~base_path:config.base_path worker Departed with
+    | Ok () -> () | Error detail -> fail detail));
+  let participation = auth_ok (Auth.with_credential_transaction config.base_path (fun transaction ->
+    Play_participation.current ~transaction ~base_path:config.base_path ~name:"player")) in
+  check bool "a Worker credential reads as connected" true (participation = Ok Play_participation.Connected);
+  (match step_as config "player" with
+   | Ok result when result.S.is_error <> Some true -> ()
+   | Ok result -> fail ("the Keeper's own input was refused: " ^ Agent_core.Mcp.text_of_tool_result result)
+   | Error error -> fail ("the Keeper's own input was refused: " ^ call_failure error))
+
+let test_departed_caller_cannot_pass_a_free_controller () =
+  with_machine @@ fun config _ _ ->
+  let token, _ = renew config in
+  ignore (auth_ok (Auth.create_token config.base_path ~agent_name:"operator" ~role:Masc_domain.Admin));
+  participation_ok (participate config token Play_participation.Departed);
+  let pass () = Machine_addon_host.call_shared ~config
+      ~principal:(Lane_addon_call_context.Host_actor "player") ~name:"masc_dos_pass"
+      ~arguments:(`Assoc ["to", `String "operator"]) in
+  check bool "departure is a client refusal, not unreadable authority" true (refused_move (pass ()));
+  check bool "departed move preserves the typed client refusal" true
+    (refused_move (step_as config "player"));
+  check (option string) "free controller remains free" None (controller ());
+  participation_ok (participate config token Play_participation.Connected);
+  ignore (handed (pass ()));
+  check (option string) "reconnected caller can pass" (Some "operator") (controller ())
+
+let test_independent_departure_recovers_damaged_participation () =
+  List.iter (fun stopped_keeper ->
+    with_machine @@ fun config _ credential ->
+    let credential = if stopped_keeper then snd (renew config) else credential in
+    if stopped_keeper then (
+      let meta = match Masc_test_deps.meta_of_json_fixture
+          (`Assoc ["name", `String "player"; "trace_id", `String "stopped-holder"]) with
+        | Ok meta -> meta | Error detail -> fail detail in
+      match Keeper_meta_store.replace_snapshot config meta with
+      | Ok () -> () | Error detail -> fail detail);
+    auth_ok (Auth.with_credential_transaction config.base_path (fun transaction ->
+      match Play_participation.write ~transaction ~base_path:config.base_path credential Connected with
+      | Ok () -> () | Error detail -> fail detail));
+    let directory = Filename.concat (Common.masc_dir_from_base_path ~base_path:config.base_path) "play" in
+    Array.iter (fun file -> Out_channel.with_open_bin (Filename.concat directory file)
+        (fun channel -> output_string channel "malformed")) (Sys.readdir directory);
+    recovered ~released:true (recover config);
+    check (option string) (if stopped_keeper then "stopped Keeper is recoverable" else "expired credential is recoverable")
+      None (controller ())) [false; true]
+
+let test_disconnect_waits_for_an_admitted_move_effect () =
+  with_machine @@ fun config _ _ ->
+  let token, _ = renew config in
+  (* The move is admitted first and holds its credential admission while the
+     disconnect waits on the same lock; the in-flight move runs to completion
+     before the disconnect's admission starts, and the completed disconnect
+     still releases the controller the move left behind. *)
+  let moved, disconnected = interleave config
+      (fun () -> step_as config "player")
+      (fun () -> participate config token Play_participation.Departed) in
+  (match moved with
+   | Ok result when result.S.is_error <> Some true -> ()
+   | Ok result -> fail ("the admitted move was refused: " ^ Agent_core.Mcp.text_of_tool_result result)
+   | Error error -> fail ("the admitted move was refused: " ^ call_failure error));
+  participation_ok disconnected;
+  check (option string) "the completed disconnect releases the admitted controller"
+    None (controller ())
+
+let test_disconnect_refuses_a_following_load_or_restore () =
+  List.iter (fun (name, args) ->
+    with_machine @@ fun config _ _ ->
+    let token, _ = renew config in
+    let before = (dos_ok (Dos_lane.screen ())).Dos_lane.program in
+    participation_ok (participate config token Play_participation.Departed);
+    (match Machine_addon_host.call_shared ~config
+        ~principal:(Lane_addon_call_context.Host_actor "player") ~name ~arguments:args with
+     | Error (Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Rejected detail)) ->
+         let needle = "after disconnect" in
+         let rec seek i = i + String.length needle <= String.length detail
+           && (String.sub detail i (String.length needle) = needle || seek (i + 1)) in
+         check bool "the refusal names the disconnect" true (seek 0)
+     | Error error -> fail (name ^ ": " ^ call_failure error)
+     | Ok result -> fail (name ^ " bypassed the participation admission: "
+         ^ Agent_core.Mcp.text_of_tool_result result));
+    check (option string) "disconnect remains effective" None (controller ());
+    check (option string) "refused commit did not replace the machine" before
+      (dos_ok (Dos_lane.screen ())).Dos_lane.program)
+    [ "masc_dos_load", `Assoc ["program", `String "spin.com"]
+    ; "masc_dos_restore", `Assoc ["slot", `String "autosave"] ]
 
 let () =
   run "play_credential_transaction"
     [ "controller recovery",
-      [ test_case "current discovery follows regular symlinks" `Quick test_current_listing_follows_regular_symlink
+      [ test_case "disconnect refuses a following load or restore" `Quick test_disconnect_refuses_a_following_load_or_restore
+      ; test_case "current discovery follows regular symlinks" `Quick test_current_listing_follows_regular_symlink
+      ; test_case "Worker Keepers have no play session" `Quick test_worker_keeper_has_no_play_session
+      ; test_case "departed callers cannot pass a free controller" `Quick test_departed_caller_cannot_pass_a_free_controller
+      ; test_case "independent stop and expiry survive damaged participation" `Quick test_independent_departure_recovers_damaged_participation
+      ; test_case "disconnect waits for the admitted move effect" `Quick test_disconnect_waits_for_an_admitted_move_effect
+      ; test_case "disconnect precedes racing and future handoffs" `Quick test_disconnect_before_handoff_prevents_future_assignment
+      ; test_case "a racing earlier handoff is released before disconnect returns" `Quick test_handoff_before_disconnect_is_released_inside_admission
+      ; test_case "late admitted moves cannot strand a departed holder" `Quick test_departed_generation_recovers_a_late_admitted_move
+      ; test_case "participation belongs to the current credential generation" `Quick test_participation_is_bound_to_current_credential_generation
+      ; test_case "unreadable participation preserves evidence and ownership" `Quick test_unreadable_participation_refuses_handoff_and_reconnect
+      ; test_case "cancelled disconnect changes no authority" `Quick test_cancelled_disconnect_does_not_publish_departure
       ; test_case "other flushers cannot publish an admitted notice" `Quick test_deferred_notice_is_not_available_to_other_flushers
       ; test_case "target revoke before admitted handoff preserves the holder" `Quick test_target_revoke_before_handoff_refuses_without_moving
       ; test_case "admitted handoff completes before waiting target revoke" `Quick test_handoff_before_target_revoke_completes_inside_admission

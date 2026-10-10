@@ -66,6 +66,18 @@ let invoke_response ~config ~who ~name ~args =
       result_json ~ok ~message:(Agent_core.Mcp.text_of_tool_result result)
         (Option.value ~default:`Null result.structured_content)
 
+(* Every one of these moves what a watcher shows: press, type and step run the
+   machine, and pass changes the holder the capture carries
+   ([Lane_addon_sources.activity_of_misc_operation]). A refusal from the tool
+   wakes watchers too: [Guest_fault] comes back after the machine ran up to the
+   fault. A wake with nothing new costs a watcher one "unchanged" read; a
+   missed one leaves it showing an old frame. A body the schema refused never
+   reached the machine and wakes nothing. *)
+let machine_changed ~config =
+  Eio.Cancel.protect (fun () ->
+    Lane_addon_runtime.notify_activity ~config
+      ~activity:(Lane_addon_sources.Machine_changed Machine_lane.Dos))
+
 let run_response ~config ~who ~route ~body =
   let name = tool_name route in
   let rejected message = `Bad_request, result_json ~ok:false ~message `Null in
@@ -74,13 +86,18 @@ let run_response ~config ~who ~route ~body =
   | args ->
     (match Tool_input_validation.validate_args ~schema:(schema route).Masc_domain.input_schema ~name ~args () with
      | Error refusal -> rejected (Tool_result.message refusal)
-     | Ok args -> invoke_response ~config ~who ~name ~args)
+     | Ok args ->
+       let status, json = invoke_response ~config ~who ~name ~args in
+       machine_changed ~config;
+       status, json)
 
 (* The worker checks the expected program while holding its machine lock. *)
 let press_into ~config ~who ~saves_name ~keys =
-  invoke_response ~config ~who ~name:(tool_name Press)
+  let status, json = invoke_response ~config ~who ~name:(tool_name Press)
     ~args:(`Assoc ["keys", `List (List.map (fun key -> `String key) keys);
-      "expected_program", `String saves_name])
+      "expected_program", `String saves_name]) in
+  machine_changed ~config;
+  status, json
 
 let add_route router route =
   Http.Router.post (path route)

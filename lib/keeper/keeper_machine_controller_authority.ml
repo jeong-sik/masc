@@ -48,7 +48,7 @@ let credential_departure ~transaction ~(config : Workspace.config) ~now holder =
      | Self_declared | Unreadable _ -> None)
 ;;
 
-let holder_left ~transaction ~(config : Workspace.config) ~now holder =
+let keeper_or_credential_left ~transaction ~(config : Workspace.config) ~now holder =
   match Keeper_registry.get_phase ~base_path:config.base_path holder with
   | Some (Paused | Stopped) -> Some Machine_controller_contract.Keeper_stopped
   | Some (Running | Failing | Draining | Restarting | Crashed | Offline) -> None
@@ -59,9 +59,41 @@ let holder_left ~transaction ~(config : Workspace.config) ~now holder =
      | Error _ -> None)
 ;;
 
+let holder_left ~transaction ~(config : Workspace.config) ~now holder =
+  match keeper_or_credential_left ~transaction ~config ~now holder with
+  | Some _ as departure -> departure
+  | None ->
+    (match auth_mode ~config with
+     | Self_declared | Unreadable _ -> None
+     | Enforced ->
+       (match Play_participation.current ~transaction ~base_path:config.base_path ~name:holder with
+        | Ok Play_participation.Departed -> Some Machine_controller_contract.Participant_departed
+        | Ok Play_participation.Connected -> None
+        | Error detail ->
+          Log.Auth.warn "DOS controller participation cannot be read: %s" detail;
+          None))
+;;
+
 type call_refusal =
   | Refused of string
   | Seats_unknown of string
+
+(* A seat that explicitly left through the play-session endpoint stays
+   invitation-valid but cannot move the machine until it reconnects: its
+   input is a client refusal it can correct. Unreadable departure evidence is
+   never read as connected. Principals without a play session (Keepers,
+   operators, Workers) are always connected. *)
+let participation_refusal ~transaction ~(config : Workspace.config) ~who =
+  match auth_mode ~config with
+  | Self_declared -> None
+  | Unreadable _ -> None
+  | Enforced ->
+    (match Play_participation.current ~transaction ~base_path:config.base_path ~name:who with
+     | Ok Play_participation.Connected -> None
+     | Ok Play_participation.Departed ->
+       Some (Refused "DOS input after disconnect; reconnect the play session first")
+     | Error detail -> Some (Seats_unknown ("cannot read play participation: " ^ detail)))
+;;
 
 (* A pass to a name nobody sits under leaves the machine held by no one who
    can move it, so it is refused before anything happens. The caller supplies

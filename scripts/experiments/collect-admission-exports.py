@@ -165,7 +165,8 @@ def main():
         content = raw + "\n"
         if target.exists() and target.read_text() != content:
             raise ValueError(f"refusing to replace a different export: {target}")
-        target.write_text(content)
+    for cohort, raw in exports.items():
+        (args.out / (cohort + ".json")).write_text(raw + "\n")
     print(json.dumps({"verified_exports": len(exports), "cohorts": sorted(exports)}))
 
 

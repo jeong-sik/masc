@@ -25793,7 +25793,7 @@ and is loaded on demand through keeper_skill.
              state.code_history_open <- false
            end
        | Some "d" when state.view = Code && state.code_focus_file = Right_pane
-                       && state.code_history_open ->
+                       && state.code_history_open && not state.repository_changes_open ->
            if not (Masc_tui_render_code.toggle_history_change state) then
              report_action state "error" "Select a Keeper record to expand its recorded change"
        | Some "d" when state.view = Code && state.code_focus_file = Right_pane

@@ -76,6 +76,15 @@ before testing; it does not build the server just to print that recipe. The
 installation lane still tests the embedded recipe through the release CLI.
 The dashboard build helper owns dependency installation, so its caller does not
 install the same dependencies a second time.
+Behavior and Linux installation share the static shim builder recipe and its
+architecture-scoped GitHub Actions image cache. The image contains the compiler
+and dependencies, not a previously built shim: each consumer still builds the
+current source. Full behavior prepares it before the suite so a Docker transport
+test does not occupy a Dune worker while bootstrapping OCaml. Cache misses build
+the same recipe; cache export failure does not change the verification verdict.
+Cold jobs can still prepare concurrently, and cache visibility follows GitHub's
+branch rules. This is reuse of preparation, not measured RC speedup or reuse of
+another commit's release artifact.
 TLA model checks run explicitly through `model-check.yml` when state-machine
 specifications change; they are not a prerequisite for shipping a binary.
 Specialized host and packaging proofs remain manual.

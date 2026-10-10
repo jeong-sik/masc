@@ -1,0 +1,13 @@
+# 3.24 carries OCaml 5.5.0 with the musl signal-stack issue (ocaml/ocaml#14933).
+# Bootstrap the exact repository compiler from the verified 3.23 base instead.
+FROM ocaml/opam:alpine-3.23-ocaml-5.5@sha256:e2917e50faa33fa5a10478ad38aab4e181ee61b7d40c69818cd0fa081b68869d
+ARG OCAML_COMPILER
+# Invalidate dependency resolution when the repository manifest changes.
+ARG SHIM_DEPENDENCY_HASH
+RUN set -eu; \
+    test -n "$SHIM_DEPENDENCY_HASH"; \
+    opam repository set-url default https://opam.ocaml.org; \
+    opam update default; \
+    opam switch create masc-shim "ocaml-base-compiler.$OCAML_COMPILER" -y; \
+    test "$(opam exec --switch=masc-shim -- ocamlc -version)" = "$OCAML_COMPILER"; \
+    opam install --switch=masc-shim -y dune yojson base64

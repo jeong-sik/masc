@@ -3722,6 +3722,106 @@ let test_terminal_safe_text_matches_its_three_passes () =
   check bool "and many of them pass through unchanged" true (!unchanged > 500)
 ;;
 
+(* The journal target selection must answer what the list-scanning versions
+   answered, over generated sessions: held and unavailable keys that overlap
+   the candidates, in-flight reads, owned requests, ended and cut logs, both
+   keepers and a refused-reads session. The references are the versions as
+   they were written. *)
+let test_journal_target_selection_matches_the_list_scanning_versions () =
+  let reference_fetch ~held ~unavailable candidates =
+    let earliest = Hashtbl.create 16 in
+    List.iter
+      (fun (operation_id, at) ->
+        match Hashtbl.find_opt earliest operation_id with
+        | Some seen when seen <= at -> ()
+        | Some _ | None -> Hashtbl.replace earliest operation_id at)
+      candidates;
+    Hashtbl.fold (fun operation_id at acc -> (operation_id, at) :: acc) earliest []
+    |> List.filter (fun (operation_id, _) ->
+           not (List.mem operation_id held || List.mem operation_id unavailable))
+    |> List.stable_sort (fun (id_a, at_a) (id_b, at_b) ->
+           match Float.compare at_b at_a with
+           | 0 -> compare id_a id_b
+           | order -> order)
+  in
+  let reference_unavailable (state : Tui_types.state) keeper_name =
+    state.msg_settled_logs
+    |> List.filter_map (fun log ->
+        let key = Tui_types.turn_log_journal_key log in
+        let journal_unavailable = state.msg_journal_reads_refused
+          || List.mem key state.msg_journal_unavailable in
+        let read_inflight = List.mem key state.msg_journal_inflight in
+        let owned = List.exists (fun (entry : Tui_types.inflight) ->
+          Tui_types.turn_log_journal_key entry.log = key) state.msg_inflight in
+        let terminal = Option.exists Keeper_chat_operation.is_terminal
+          (Log.operation_state log.Tui_types.tl_log) in
+        match Log.source log.Tui_types.tl_log with
+        | Log.Operation operation_id
+          when String.equal (Tui_types.turn_log_keeper_name log) keeper_name
+               && journal_unavailable && not read_inflight && not owned && not terminal
+               && not (Tui_types.turn_log_holds_the_turn log) ->
+            Some operation_id
+        | Log.Operation _ | Log.Autonomous_turn _ -> None)
+    |> List.sort_uniq String.compare
+  in
+  let rng = Random.State.make [| 777 |] in
+  let ids = Array.init 12 (fun i -> Printf.sprintf "op-%02d" i) in
+  let keepers = [| "alpha"; "beta" |] in
+  let pick array = array.(Random.State.int rng (Array.length array)) in
+  let key () =
+    (pick keepers, Log.Operation (pick ids))
+  in
+  let non_empty = ref 0 in
+  for _case = 1 to 300 do
+    let state =
+      Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    in
+    state.msg_settled_logs <-
+      List.init (Random.State.int rng 10) (fun _ ->
+        let keeper_name = pick keepers in
+        let log =
+          Tui_types.turn_log_create ~keeper_name ~request_id:(pick ids)
+            ~started_at:(float_of_int (Random.State.int rng 100))
+        in
+        if Random.State.bool rng then begin
+          ignore (Tui_types.turn_log_add_journaled log
+            [ line 0 1. (E.Run_started { run_id = "r"; thread_id = "keeper:" ^ keeper_name })
+            ; line 1 1.1 (E.Text_delta {text = "x"; stream_scope = None}) ]);
+          if Random.State.bool rng then begin
+            ignore (Tui_types.turn_log_add_journaled log
+              [ line 2 1.2 (journal_reply "x")
+              ; line 3 1.3 (E.Run_finished { run_id = "r" }) ]);
+            Log.commit log.Tui_types.tl_log
+          end
+        end;
+        log);
+    state.msg_inflight <-
+      List.init (Random.State.int rng 3) (fun _ ->
+        inflight_with_log ~keeper_name:(pick keepers) ~started_at:5. [ Live.Run_started ]);
+    state.msg_journal_unavailable <- List.init (Random.State.int rng 6) (fun _ -> key ());
+    state.msg_journal_inflight <- List.init (Random.State.int rng 6) (fun _ -> key ());
+    state.msg_journal_reads_refused <- Random.State.int rng 6 = 0;
+    List.iter
+      (fun keeper_name ->
+        let expected = reference_unavailable state keeper_name in
+        if expected <> [] then incr non_empty;
+        check (list string) "unavailable operation targets" expected
+          (Tui_types.unavailable_journal_operation_targets state keeper_name))
+      [ "alpha"; "beta" ];
+    let candidates =
+      List.init (Random.State.int rng 10) (fun _ ->
+        (key (), float_of_int (Random.State.int rng 20)))
+    in
+    let held = List.init (Random.State.int rng 6) (fun _ -> key ()) in
+    let unavailable = state.msg_journal_unavailable in
+    check (list (pair journal_key_test (float 0.)))
+      "fetch targets"
+      (reference_fetch ~held ~unavailable candidates)
+      (Tui_types.journal_fetch_targets ~held ~unavailable candidates)
+  done;
+  check bool "the generator produced non-empty target sets" true (!non_empty > 20)
+;;
+
 (* A log built from a journal read stands at the journal head's own time,
    not at the moment the read was asked for. *)
 let test_a_journal_built_log_starts_at_the_journal_head () =
@@ -5196,6 +5296,8 @@ let () =
             test_held_turn_block_follows_only_its_own_requests_rows
         ; test_case "terminal_safe_text matches its three passes" `Quick
             test_terminal_safe_text_matches_its_three_passes
+        ; test_case "journal target selection matches the list-scanning versions" `Quick
+            test_journal_target_selection_matches_the_list_scanning_versions
         ; test_case "a journal-built log starts at the journal head" `Quick
             test_a_journal_built_log_starts_at_the_journal_head
         ; test_case "pending input enters transcript on execution evidence" `Quick

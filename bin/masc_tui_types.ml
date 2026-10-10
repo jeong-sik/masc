@@ -3290,10 +3290,14 @@ let journal_fetch_targets ~held ~unavailable
       | Some seen when seen <= at -> ()
       | Some _ | None -> Hashtbl.replace earliest operation_id at)
     candidates;
+  (* One table of the keys not to fetch, instead of two list scans for every
+     candidate: the candidates are a page's worth and [held] is every log the
+     session holds. *)
+  let excluded = Hashtbl.create (List.length held + List.length unavailable + 1) in
+  List.iter (fun key -> Hashtbl.replace excluded key ()) held;
+  List.iter (fun key -> Hashtbl.replace excluded key ()) unavailable;
   Hashtbl.fold (fun operation_id at acc -> (operation_id, at) :: acc) earliest []
-  |> List.filter (fun (operation_id, _) ->
-         not
-           (List.mem operation_id held || List.mem operation_id unavailable))
+  |> List.filter (fun (operation_id, _) -> not (Hashtbl.mem excluded operation_id))
   |> List.stable_sort (fun (id_a, at_a) (id_b, at_b) ->
          match Float.compare at_b at_a with
          | 0 -> compare id_a id_b
@@ -8312,22 +8316,34 @@ let journal_held_keys state keeper_name =
    Autonomous turns have no operation record, and pane-owned requests settle
    through their own subscription. *)
 let unavailable_journal_operation_targets state keeper_name =
+  let table keys =
+    let table = Hashtbl.create (List.length keys + 1) in
+    List.iter (fun key -> Hashtbl.replace table key ()) keys;
+    table
+  in
+  let unavailable = table state.msg_journal_unavailable in
+  let inflight = table state.msg_journal_inflight in
   state.msg_settled_logs
   |> List.filter_map (fun log ->
-      let key = turn_log_journal_key log in
-      let journal_unavailable = state.msg_journal_reads_refused
-        || List.mem key state.msg_journal_unavailable in
-      let read_inflight = List.mem key state.msg_journal_inflight in
-      let owned = List.exists (fun (entry : inflight) ->
-        turn_log_journal_key entry.log = key) state.msg_inflight in
-      let terminal = Option.exists Keeper_chat_operation.is_terminal
-        (Masc_tui_keeper_chat_log.operation_state log.tl_log) in
+      (* The cheap tests that most logs fail come first; each condition is a
+         pure read, so the order changes the cost and not the answer. *)
       match Masc_tui_keeper_chat_log.source log.tl_log with
       | Operation operation_id
-        when String.equal (turn_log_keeper_name log) keeper_name
-             && journal_unavailable && not read_inflight && not owned && not terminal
-             && not (turn_log_holds_the_turn log) ->
-          Some operation_id
+        when String.equal (turn_log_keeper_name log) keeper_name ->
+          let key = turn_log_journal_key log in
+          let journal_unavailable = state.msg_journal_reads_refused
+            || Hashtbl.mem unavailable key in
+          if journal_unavailable
+             && (not (Hashtbl.mem inflight key))
+             && (not
+                   (List.exists (fun (entry : inflight) ->
+                      turn_log_journal_key entry.log = key) state.msg_inflight))
+             && (not
+                   (Option.exists Keeper_chat_operation.is_terminal
+                      (Masc_tui_keeper_chat_log.operation_state log.tl_log)))
+             && not (turn_log_holds_the_turn log)
+          then Some operation_id
+          else None
       | Operation _ | Autonomous_turn _ -> None)
   |> List.sort_uniq String.compare
 ;;

@@ -183,6 +183,52 @@ let test_worker_partial_consumption_wakes_only_new_input () =
 let candidate_names selected =
   List.map (fun (row : Queue.candidate) -> row.request_id) (Queue.candidates selected)
 
+let test_bulk_append_preserves_length_and_order () = with_store (fun keepers_dir ->
+  let count = 2000 in
+  for index = 1 to count do
+    ignore (append keepers_dir (Printf.sprintf "bulk-%d" index) (Printf.sprintf "rule %d" index))
+  done;
+  let rows = Queue.candidates (batch keepers_dir) in
+  check int "every bulk append is retained" count (List.length rows);
+  check (list int) "sequences stay ascending from 1"
+    (List.init count (fun index -> index + 1))
+    (List.map (fun (row : Queue.candidate) -> row.sequence) rows);
+  let retried = append keepers_dir "bulk-1" "rule 1" in
+  check int "retry keeps its original sequence" 1 retried.sequence;
+  check int "retry adds no row" count
+    (List.length (Queue.candidates (batch keepers_dir))))
+
+let test_byte_cap_refuses_append_before_write () = with_store (fun keepers_dir ->
+  ignore (append keepers_dir "one" "first rule");
+  let queue_path = Queue.path ~keepers_dir ~keeper_id:"keeper" in
+  let size_after_one = String.length (Fs_compat.load_file queue_path) in
+  let before = Fs_compat.load_file queue_path in
+  Masc_test_deps.with_process_env
+    Env_config.KeeperMemoryOs.pending_max_bytes_env_key (Some (string_of_int size_after_one))
+  @@ fun () ->
+  (* The current file exactly meets the cap; growing it must be refused. *)
+  (match Queue.append ~keepers_dir ~keeper_id:"keeper" ~request_id:"two" (fact "second rule") with
+   | Ok _ -> fail "append past the byte cap was accepted"
+   | Error detail ->
+     check bool "refusal names the byte cap" true
+       (Astring.String.is_infix ~affix:"byte cap" detail));
+  check string "refusal rewrote no pending bytes" before (Fs_compat.load_file queue_path);
+  check int "refused row is not pending" 1
+    (List.length (Queue.candidates (batch keepers_dir)));
+  (* An idempotent retry of an already-pending identity is not growth and
+     stays allowed at the cap. *)
+  ignore (append keepers_dir "one" "first rule");
+  (* Raising the cap admits the refused request: the refusal never persisted
+     last_sequence, so no sequence was burned. *)
+  Masc_test_deps.with_process_env
+    Env_config.KeeperMemoryOs.pending_max_bytes_env_key
+    (Some (string_of_int (size_after_one * 4)))
+  @@ fun () ->
+  let admitted = append keepers_dir "two" "second rule" in
+  check int "refused sequence is not burned" 2 admitted.sequence;
+  check (list string) "both rows pending in order" ["one"; "two"]
+    (candidate_names (batch keepers_dir)))
+
 let test_capacity_left_uncertainty_does_not_block_right () =
   List.iter (fun append_tail -> with_store (fun keepers_dir ->
     List.iter (fun id -> ignore (append keepers_dir id ("rule " ^ id))) ["a";"b";"c";"d"];
@@ -364,4 +410,6 @@ let () = run "durable explicit admission queue"
     test_case "worker restores committed input before judging" `Quick test_worker_recovers_before_judging;
     test_case "worker retries size refusal without discarding tail" `Quick test_worker_size_refusal_preserves_tail;
     test_case "worker retains uncertainty and requires durable commit" `Quick test_worker_does_not_consume_uncertainty;
-    test_case "corruption cannot reset pending input" `Quick test_corruption_is_not_empty]]
+    test_case "corruption cannot reset pending input" `Quick test_corruption_is_not_empty;
+    test_case "bulk append retains every row in ascending order" `Quick test_bulk_append_preserves_length_and_order;
+    test_case "byte cap refuses append before any write" `Quick test_byte_cap_refuses_append_before_write]]

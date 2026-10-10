@@ -3,6 +3,10 @@ open Keeper_memory_os_types
 let ( let* ) = Result.bind
 let ( let+ ) value f = Result.map f value
 
+(* In memory [pending] is newest-first so an append is O(1); the wire format
+   and every consumer-facing batch stay strictly ascending, enforced by
+   [state_of_json] and produced by reversing only at the serialization and
+   [read_pending] boundaries. *)
 type candidate = { sequence : int; request_id : string; fact : fact }
 type state = { generation : string; last_sequence : int; pending : candidate list }
 type batch = { generation : string; rows : candidate list }
@@ -65,7 +69,7 @@ let state_of_json = function
         let+ rest = decode row.sequence (Set_util.StringSet.add row.request_id seen) (index+1) rest in
         row :: rest in
     let+ pending = decode 0 Set_util.StringSet.empty 0 rows in
-    { generation; last_sequence; pending }
+    { generation; last_sequence; pending = List.rev pending }
   | _ -> wire_here Expected_object
 
 let protect action =
@@ -84,11 +88,25 @@ let read ~keepers_dir ~keeper_id =
        | json -> state_of_json json |> Result.map Option.some |> Result.map_error wire_error_to_string
        | exception Yojson.Json_error detail -> Error detail))
 
+let state_to_json (state : state) =
+  `Assoc ["generation", `String state.generation;
+    "last_sequence", `Int state.last_sequence;
+    "pending", `List (List.rev_map candidate_to_json state.pending)]
+
 let write ~keepers_dir ~keeper_id (state : state) =
   Fs_compat.save_file_atomic_strict (path ~keepers_dir ~keeper_id)
-    (Yojson.Safe.to_string (`Assoc ["generation", `String state.generation;
-      "last_sequence", `Int state.last_sequence;
-      "pending", `List (List.map candidate_to_json state.pending)]))
+    (Yojson.Safe.to_string (state_to_json state))
+
+(* An append that would push the serialized queue past the byte cap is refused
+   before any write: the refusal is an entry denial, not an expiry, so the
+   durable pending input stays byte-exact until a drain makes room. *)
+let append_within_cap ~keepers_dir ~keeper_id state =
+  let cap = Env_config.KeeperMemoryOs.pending_max_bytes () in
+  let bytes = String.length (Yojson.Safe.to_string (state_to_json state)) in
+  if bytes <= cap then write ~keepers_dir ~keeper_id state
+  else Error (Printf.sprintf
+    "pending admission queue byte cap exceeded: appending would write %d bytes over the %d byte cap set by %s; the append was refused before any write and pending input is unchanged"
+    bytes cap Env_config.KeeperMemoryOs.pending_max_bytes_env_key)
 
 let locked ~keepers_dir ~keeper_id action = protect (fun () ->
   Fs_compat.mkdir_p keepers_dir;
@@ -113,14 +131,15 @@ let append ~keepers_dir ~keeper_id ~request_id fact =
       if previous = max_int then Error "pending admission sequence exhausted"
       else
         let row = {sequence = previous+1; request_id; fact} in
-        let+ () = write ~keepers_dir ~keeper_id {state with last_sequence=row.sequence; pending = state.pending @ [row]} in
+        let+ () = append_within_cap ~keepers_dir ~keeper_id
+            {state with last_sequence=row.sequence; pending = row :: state.pending} in
         row)
 
 let read_pending ~keepers_dir ~keeper_id =
   let+ state = read ~keepers_dir ~keeper_id in
   match state with
   | None | Some {pending = []; _} -> None
-  | Some state -> Some {generation = state.generation; rows = state.pending}
+  | Some state -> Some {generation = state.generation; rows = List.rev state.pending}
 
 (* Strictly ascending pending sequences are a subset of 1..last_sequence. Every
    position pending no longer holds was removed by an earlier acknowledgement,

@@ -538,6 +538,7 @@ type holder_departure = Machine_controller_contract.holder_departure =
   | Keeper_stopped
   | Credential_expired
   | No_credential
+  | Participant_departed
 
 let departure_notice holder = function
   | Keeper_stopped ->
@@ -546,6 +547,8 @@ let departure_notice holder = function
     Printf.sprintf "%s 님의 접속 권한이 만료되어 DOS 조종권이 풀렸어요" holder
   | No_credential ->
     Printf.sprintf "%s 님은 접속 권한이 없어서 DOS 조종권이 풀렸어요" holder
+  | Participant_departed ->
+    Printf.sprintf "%s 님이 연결을 끊어서 DOS 조종권이 풀렸어요" holder
 ;;
 
 let free_left_controller ?(announce = announce) ~holder_left ~who () =

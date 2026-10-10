@@ -451,8 +451,8 @@ let execute_tool_eio
                        Some (Tool_result.make_err ~tool_name:name ~start_time
                          ~class_:Tool_result.Policy_rejection
                          "Candle tools require an authenticated Keeper; a supplied caller name is not a wallet identity") in
-                   let dispatch () =
-                     Tool_misc.dispatch
+                   let dispatch ?dos_admission () =
+                     Tool_misc.dispatch ?dos_admission
                        ~lane_access
                        { Tool_misc.config
                        ; agent_name

@@ -301,7 +301,8 @@ let test_expired_credential_releases_controller_on_next_move role () =
           check bool "the holder has left once that second ends" true
             (match holder_left ~now:(expiry_second +. 1.) with
              | Some Machine_controller_contract.Credential_expired -> true
-             | Some (Machine_controller_contract.Keeper_stopped | Machine_controller_contract.No_credential)
+             | Some (Machine_controller_contract.Keeper_stopped | Machine_controller_contract.No_credential
+                    | Machine_controller_contract.Participant_departed)
              | None -> false);
           Auth.save_credential base_path
             { credential with expires_at = Some "2000-01-01T00:00:00Z" };

@@ -115,6 +115,7 @@ let handle_filesystem ctx descriptor args =
   | Tool_skill_publish
   | Tool_workspace_memory_read
   | Tool_memory_search
+  | Tool_memory_select
   | Tool_memory_retract
   | Tool_memory_write
   | Tool_constitution_write
@@ -201,6 +202,7 @@ let handle_shell_ir ctx ~(dispatch : Keeper_shell_tool_command.dispatch) descrip
   | Tool_skill_publish
   | Tool_workspace_memory_read
   | Tool_memory_search
+  | Tool_memory_select
   | Tool_memory_retract
   | Tool_memory_write
   | Tool_constitution_write
@@ -331,6 +333,9 @@ let handle_in_process ctx descriptor args =
          ~args)
   | Tool_workspace_memory_read ->
     Some (Keeper_workspace_memory_read.handle ~base_path:ctx.config.base_path ~args)
+  | Tool_memory_select ->
+    Some (Keeper_memory_select.handle ?turn_ref:ctx.turn_ref ~clock:ctx.clock
+      ~config:ctx.config ~meta:ctx.meta ~args ())
   | Tool_memory_search ->
     Some
       (Keeper_tool_memory_runtime.keeper_memory_search_with_outcome

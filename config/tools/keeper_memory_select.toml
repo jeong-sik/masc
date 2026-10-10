@@ -1,0 +1,22 @@
+name = "keeper_memory_select"
+description = """
+Select this Keeper's ordinary and source-bound current memories for an explicit purpose.
+Evaluates every current identity with its resolved provenance before applying an optional result limit.
+Returns current_decision and comparison roles separately; comparison is not authority for the current event.
+Source files are verified before assessment and publication. Changed, unavailable or uncertain evidence stays
+explicitly unresolved; no selected result is not proof that no relevant memory exists. Full historical
+witnesses remain in the private evaluation journal; results contain current facts and provenance counts.
+Requires typesafeai.workspace_memory_selection_enabled plus the enabled lane and an armed destination;
+Keeper exclusions apply. This tool does not change current ordinary memory or inject results automatically."""
+additional_properties = false
+
+[[params]]
+name = "purpose"
+type = "string"
+required = true
+description = "The question or decision for which these memories would be useful. Preserve event and environment context when known."
+
+[[params]]
+name = "limit"
+type = "integer"
+description = "Optional positive maximum delivered results, applied after all candidates are assessed. Omitted means no result cap. Truncated selections are reported separately from not_needed."

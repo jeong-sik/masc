@@ -5869,4 +5869,4 @@
  (modules test_tui_msx_checkpoint_pending)
  (libraries alcotest unix masc.keeper_operation_identity masc_tui_msx_checkpoint_pending))
 
-
+(include stanzas/test_keeper_memory_select.inc)

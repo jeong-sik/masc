@@ -7,8 +7,8 @@ This campaign covers tracked code files with at least 2,000 lines. The initial
 inventory contains 171 candidates: 75 production source/style/interface files,
 90 tests, 3 tooling files and 3 evidence scripts. `inventory.json` records each
 baseline path and its current audit state. A line count selects candidates; it
-is not a defect verdict or a new build gate. Forty production candidates received
-bounded changes; their other responsibilities remain pending. The other 35
+is not a defect verdict or a new build gate. Forty-one production candidates received
+bounded changes; their other responsibilities remain pending. The other 34
 production candidates still require semantic review. All 171 candidates remain
 in the campaign until their responsibilities and necessary repairs are assessed.
 
@@ -196,3 +196,5 @@ Claude child environment policy is separated from account/path/environment reads
 Canonical Board candidate data, strict codecs and pure projections are separated from persistence/wake in [#42130](https://github.com/jeong-sik/masc/pull/42130). See [board-candidate-wire/README.md](board-candidate-wire/README.md). Remaining lifecycle/effect semantics stay pending after crossing below2000 lines.
 
 Pure Board worker callback/provenance and execution disposition are separated from durable transitions in [#42133](https://github.com/jeong-sik/masc/pull/42133). See [board-worker-disposition/README.md](board-worker-disposition/README.md). Remaining scheduling/state effects require semantic audit.
+
+Official-client context and held-block/resume projection are separated from host effects in [#42136](https://github.com/jeong-sik/masc/pull/42136). See [official-client-context/README.md](official-client-context/README.md). Remaining host/window/session semantics require audit.

@@ -21,8 +21,14 @@ let counterpart_observations_read ?external_after ~base_dir ~keeper_name ~after 
     | Some lower -> ts > lower
   in
   let* user_rows =
-    Keeper_chat_store.load_all_result ~base_dir ~keeper_name
-    |> Result.map_error (fun detail -> Chat_store_unreadable detail)
+    match after with
+    | Some lower when Float.compare lower before >= 0 ->
+      (* An empty chat interval admits no chat row, so the strict store read
+         is skipped: a broken row outside the interval must not fail it. *)
+      Ok []
+    | Some _ | None ->
+      Keeper_chat_store.load_all_result ~base_dir ~keeper_name
+      |> Result.map_error (fun detail -> Chat_store_unreadable detail)
   in
   let user_rows =
     user_rows

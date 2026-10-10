@@ -144,6 +144,8 @@ module KeeperMemoryOs : sig
   val pending_max_bytes_env_key : string
   val category_cap_env_key : string
   val facts_per_category_cap_env_key : string
+  val admission_batch_max_bytes_env_key : string
+  val admission_retirement_match_cap_env_key : string
 
   val category_cap : unit -> int
   val facts_per_category_cap : unit -> int
@@ -163,6 +165,20 @@ module KeeperMemoryOs : sig
       Live explicit-write intake peaked at 2,830 entries/day (2026-10-06,
       docs/audits/2026-10-07-week-audit/C-librarian-memory-skills.md); the
       default is 16 MiB. A malformed explicit value raises Config_error. *)
+
+  val admission_batch_max_bytes : unit -> int
+  (** Estimated rendered-bytes ceiling for the candidate payload of one
+      admission judgment pass. The live explicit-write peak was 2,830
+      candidates/day and a no-change pass already ships ~170 KB of rendered
+      facts, so the default is 64 KiB (~37% of that block). The budget
+      pre-splits the queue before judging; it never drops input. *)
+
+  val admission_retirement_match_cap : unit -> int
+  (** Latest retirement-evidence entries per memory identity included in one
+      admission judgment prompt. Defaults to 1: the judgment weighs a
+      candidate against the most recent removal of its exact identity, and
+      read_dropped already collapses to that. A malformed explicit value
+      raises Config_error. *)
 
   val librarian_config_state : unit -> librarian_config_state
   (** Typed projection of the effective librarian toggle. Blank or absent

@@ -546,6 +546,26 @@ let all =
       ~category:"memory"
       "Ordinary current items per category target; advisory, not a token budget"
   ; setting
+      ~range:(int_range ~min:1 ())
+      ~effective:(Reader (fun () -> display_int (Env_config_keeper.KeeperMemoryOs.admission_batch_max_bytes ())))
+      ~env_name:Env_config_keeper.KeeperMemoryOs.admission_batch_max_bytes_env_key
+      ~exposure:Env_only
+      ~value_kind:Integer
+      ~default:"65536"
+      ~consumers:[ "Keeper_memory_admission_judgment"; "Keeper_memory_admission_worker" ]
+      ~category:"memory"
+      "Estimated admission candidate payload bytes per judgment pass; pre-splits the queue, never drops input"
+  ; setting
+      ~range:(int_range ~min:1 ())
+      ~effective:(Reader (fun () -> display_int (Env_config_keeper.KeeperMemoryOs.admission_retirement_match_cap ())))
+      ~env_name:Env_config_keeper.KeeperMemoryOs.admission_retirement_match_cap_env_key
+      ~exposure:Env_only
+      ~value_kind:Integer
+      ~default:"1"
+      ~consumers:[ "Keeper_memory_admission_judgment" ]
+      ~category:"memory"
+      "Latest retirement evidence entries per memory identity in an admission judgment prompt"
+  ; setting
       ~reload_class:Next_turn
       ~effective:
         (Reader

@@ -81,7 +81,12 @@ let run_with ~keepers_dir ~keeper_name ~judge =
                  if not consumed then
                    Unavailable "admission commit has no matching consumed-input receipt"
                  else evaluate ~committed:true ~pending_reason siblings) in
-      evaluate ~committed:false ~pending_reason:"admission remains pending" [batch]
+      (* Pre-judging keeps the dominant cost — the current-fact block the judge
+         re-injects on every attempt — out of the split loop: parts above the
+         candidate budget are split here so a capacity refusal later never has
+         to halve a whole-queue pass. *)
+      evaluate ~committed:false ~pending_reason:"admission remains pending"
+        (Keeper_memory_admission_judgment.budgeted_parts batch)
 
 let run ~base_path ~keeper_name =
   match Env_config.KeeperMemoryOs.librarian_config_state () with

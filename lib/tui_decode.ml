@@ -4352,7 +4352,13 @@ let keeper_turn_lane_of_string = function
   | "maintenance" -> Some Turn_lane_maintenance
   | _ -> None
 
+type keeper_preview_position = {
+  kpp_generation : int;
+  kpp_start_byte : int;
+}
+
 type keeper_turn_preview = {
+  ktp_text_position : keeper_preview_position;
   ktp_status_text : string;
   ktp_updated_at_unix : float;
   ktp_text_tail : string;
@@ -4425,6 +4431,25 @@ let decode_keeper_turn_row json =
             match Json_util.assoc_member_opt "preview" turn_json with
             | None | Some `Null -> Ok None
             | Some (`Assoc _ as preview_json) ->
+                let* ktp_text_position =
+                  match (match preview_json with
+                    | `Assoc fields -> List.filter_map (fun (key, value) ->
+                        if key = "text_position" then Some value else None) fields
+                    | _ -> []) with
+                  | [`Assoc fields] when List.length fields = 2
+                      && List.length (List.filter (fun (key, _) -> key = "generation") fields) = 1
+                      && List.length (List.filter (fun (key, _) -> key = "start_byte") fields) = 1 ->
+                      let decode name = match List.assoc name fields with
+                        | `Int value when value >= 0 && Int64.of_int value <= 9_007_199_254_740_991L -> Ok value
+                        | `Float value when Float.is_finite value && value >= 0.
+                            && value <= 9_007_199_254_740_991. && value < Float.of_int max_int
+                            && Float.floor value = value -> Ok (Int.of_float value)
+                        | _ -> Error ("turn preview " ^ name ^ " must be a nonnegative exact integer") in
+                      let* kpp_generation = decode "generation" in
+                      let* kpp_start_byte = decode "start_byte" in
+                      Ok {kpp_generation; kpp_start_byte}
+                  | _ -> Error "turn preview text_position requires exactly generation and start_byte"
+                in
                 let* ktp_text_tail =
                   required_string_field preview_json "text_tail"
                 in
@@ -4438,7 +4463,7 @@ let decode_keeper_turn_row json =
                   | Some (`Int value) -> Ok (Float.of_int value)
                   | _ -> Error "turn preview updated_at_unix must be a finite number"
                 in
-                Ok (Some { ktp_text_tail; ktp_last_tool; ktp_status_text; ktp_updated_at_unix })
+                Ok (Some { ktp_text_position; ktp_text_tail; ktp_last_tool; ktp_status_text; ktp_updated_at_unix })
             | Some other ->
                 Error
                   (Printf.sprintf
@@ -7417,7 +7442,7 @@ let play_invite_absent_body body =
   | _ -> false
   | exception Yojson.Json_error _ -> false
 
-let play_revoke_http_error ~status_code ~body =
+let play_revoke_release_failure ~status_code ~body =
   let failure =
     match Yojson.Safe.from_string body with
     | json ->
@@ -7428,9 +7453,8 @@ let play_revoke_http_error ~status_code ~body =
         then Ok detail else Error "not a controller release failure"
     | exception Yojson.Json_error detail -> Error detail in
   match failure with
-  | Ok detail -> Printf.sprintf "%s (HTTP %d: controller release failed)"
-      (Tui_terminal_text.sanitize_terminal_text detail) status_code
-  | Error _ -> http_status_error ~status_code ~body
+  | Ok detail -> Some (Tui_terminal_text.sanitize_terminal_text detail)
+  | Error _ -> None
 
 (* The play routes refuse through [Server_refusal.json]:
    [{error: <sentence>, code: <code>}] plus what is missing ([missing]) or who
@@ -7468,3 +7492,57 @@ let play_invite_refusal ~status_code ~body =
             (if details = [] then "" else " (" ^ String.concat "; " details ^ ")"))
         (text "error")
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None)
+
+
+type msx_checkpoint_receipt =
+  | Checkpoint_pending
+  | Checkpoint_committed of Yojson.Safe.t option
+  | Checkpoint_refused of string
+  | Checkpoint_unknown of string
+
+let decode_msx_checkpoint_receipt ~operation_id ~restore ~slot ~base_path ~masc_root json =
+  let ( let* ) = Result.bind in
+  let invalid () = Error "checkpoint receipt is malformed or belongs to another operation/workspace" in
+  let object_fields = function
+    | `Assoc fields when List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields)) -> Ok fields
+    | _ -> invalid () in
+  let field name fields = match List.assoc_opt name fields with Some value -> Ok value | None -> invalid () in
+  let string name fields = match List.assoc_opt name fields with
+    | Some (`String value) when String.trim value <> "" -> Ok value | _ -> invalid () in
+  let* fields = object_fields json in
+  let* received_id = string "operation_id" fields in
+  let* action = string "checkpoint" fields in
+  let* received_slot = string "slot" fields in
+  let* _epoch = string "epoch" fields in
+  let* workspace = field "workspace" fields in
+  let* workspace = object_fields workspace in
+  let* received_base = string "base_path" workspace in
+  let* received_root = string "masc_root" workspace in
+  let* () = if received_id=operation_id && action=(if restore then "restore" else "save")
+    && received_slot=slot && received_base=base_path && received_root=masc_root
+    then Ok () else invalid () in
+  let* status = string "status" fields in
+  let* ok = field "ok" fields in
+  match status,ok with
+  | "pending",`Bool false -> Ok Checkpoint_pending
+  | "unknown",`Bool false -> let* detail = string "message" fields in Ok (Checkpoint_unknown detail)
+  | "refused",`Bool false ->
+      let* disposition = string "effect_disposition" fields in
+      let* detail = string "message" fields in
+      if disposition="proven_pre_effect" then Ok (Checkpoint_refused detail) else invalid ()
+  | "committed",`Bool true ->
+      let* evidence = field "effect" fields in
+      let* evidence = object_fields evidence in
+      let* _incarnation = string "incarnation" evidence in
+      let* count = field "change_count" evidence in
+      let* () = match count with `Int count when count>=0 -> Ok () | _ -> invalid () in
+      let* digest = string "checkpoint_sha256" evidence in
+      let* () = match Digestif.SHA256.consistent_of_hex_opt digest with
+        | Some parsed when Digestif.SHA256.to_hex parsed=digest -> Ok () | _ -> invalid () in
+      (match List.assoc_opt "live" fields with
+       | None -> Ok (Checkpoint_committed None)
+       | Some live when List.assoc_opt "live_relation" fields=Some (`String "observed_after_completion") ->
+           Ok (Checkpoint_committed (Some live))
+       | Some _ -> invalid ())
+  | _ -> invalid ()
+;;

@@ -335,6 +335,7 @@ let handle_in_process ctx descriptor args =
     Some
       (Keeper_tool_memory_runtime.keeper_memory_search_with_outcome
          ?turn_ref:ctx.turn_ref
+         ?clock:ctx.clock
          ~config:ctx.config
          ~meta:ctx.meta
          ~ctx_work:ctx.ctx_work

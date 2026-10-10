@@ -168,8 +168,28 @@ type memory_pass =
           read, a neutral system row sharing the Memory lane, and every row
           outside it. *)
 
+type heading_boundary = Inherit_heading | Start_heading
+(** [Inherit_heading] keeps ordinary per-turn heading grouping. [Start_heading]
+    explicitly opens an origin heading for this entry, even inside the same
+    request and with the same speaker label. This is presentation metadata,
+    not a new turn or a change to the authored body. *)
+
+type projected_body = Projected_summary | Projected_results | Projected_full
+(** Which projection of typed producer data wrote a body: a tool block's
+    calls, a turn's skill activity, a Gate step's folded argument, or a Memory
+    row's summary. One view stance writes one text; another stance writes a
+    different text from the same data. *)
+
+type body_presentation = Source_body | Thinking_summary | Projected_body of projected_body
+(** Source content, the generated folded-thinking label, and each projected
+    body have distinct semantic identities even when their visible words
+    happen to coincide. A byte offset names a position only within the
+    presentation that wrote it. *)
+
 type entry = {
   style : style;
+  heading_boundary : heading_boundary;
+  body_presentation : body_presentation;
   timestamp : string;
   timeline_bucket : timeline_bucket option;
       (** The civil-hour rail this entry belongs under. [None] is reserved for
@@ -234,6 +254,31 @@ type journal_piece =
     claim's column would be narrower than the lead beside it, the claim wraps
     at the full width under its lead. Each row is its pieces in order. *)
 val journal_rows : width:int -> journal_line list -> (string * journal_piece) list list
+
+type journal_field =
+  | Journal_sign_field | Journal_category_field | Journal_claim_field
+  | Journal_drop_label_field | Journal_memory_id_field | Journal_reason_field
+
+type journal_source_span = {
+  line_index : int;
+  field : journal_field;
+  value : string;
+  row : int;
+  source_ranges : (int * int) list;
+}
+(** Original field bytes retained on a zero-based journal output row. Each
+    pair is a half-open byte range in [value]. Generated column padding and
+    the drop separator have no field; sign/category/drop labels remain typed. *)
+
+type journal_render = {
+  journal_rows : (string * journal_piece) list list;
+  journal_fields : journal_source_span list;
+}
+
+val journal_rows_with_spans : width:int -> journal_line list -> journal_render
+(** Observe the same journal formatter and word-wrap decisions as
+    {!journal_rows}. A caller keeps the entry identity alongside each stable
+    line/field identity; physical row positions may change with width. *)
 
 type metadata =
   | Timeline_break of timeline_bucket
@@ -478,6 +523,12 @@ val cut_mark_cells : int
     the marquee's case, around two -- takes the number from the mark rather
     than writing it. *)
 
+val fitted_source_bytes : string -> int -> int
+(** Length in bytes of the unstyled semantic prefix retained by [fit_width],
+    excluding generated padding and the truncation mark. Input must be unstyled
+    semantic text: this does not translate offsets from an ANSI-styled string.
+    Graphemes are kept whole. *)
+
 val fit_width : string -> int -> string
 (** [fit_width text width] pads [text] to [width] cells, or cuts its tail to
     fit and marks the cut with ["…"] -- the same mark {!fit_middle} uses, so
@@ -588,6 +639,10 @@ val chat_title_row :
 (** Fit a chat navigation title while reserving the complete projection-mode
     suffix first. The opaque title yields width before semantic display state. *)
 
+val entry_body_cells : origin:origin_display -> inner_width:int -> entry -> int
+(** Available body cells after the entry's rail, origin and indentation. A
+    continued origin occupies the same padded width as its opening origin. *)
+
 val chat_role_label_width : pane_cells:int -> int
 (** The badge budget for a pane this wide. It does not read the labels: body
     width is taken from what the badge leaves, so measuring the loaded
@@ -688,6 +743,13 @@ val inbound_indent : entry -> int
     a bar in the sender's colour down that block's left edge. Zero for every
     other style. *)
 
+val rows_of_entry :
+  ?markdown:(entry:entry -> width:int -> string list) ->
+  ?origin:origin_display ->
+  inner_width:int -> previous:entry option -> entry -> row list
+(** The exact physical rows of one entry, including its metadata and body.
+    Search uses these rows so a match inside a long entry is reachable. *)
+
 val visible_rows :
   ?markdown:(entry:entry -> width:int -> string list) ->
   ?origin:origin_display ->
@@ -750,6 +812,20 @@ val clamp_scroll :
     ...)]. It reads only as far back as the answer depends on, so a pane that
     is not scrolled does not pay for the whole conversation on every frame. *)
 
+type body_row_position = {
+  entry_index : int;
+  body_row : int;
+  rows_below : int;
+}
+(** Position within an entry's body and distance from the viewport bottom.
+    Metadata rows do not consume a body ordinal. *)
+
+type scroll_window = {
+  scroll : int;
+  rows : row list;
+  body_positions : body_row_position list;
+}
+
 val clamped_scrolled_rows :
   ?markdown:(entry:entry -> width:int -> string list) ->
   ?origin:origin_display ->
@@ -757,13 +833,24 @@ val clamped_scrolled_rows :
   height:int ->
   requested:int ->
   entry list ->
-  int * row list
+  scroll_window
 (** Clamp [requested] and return that window together.
 
     A positive scroll position is measured and sliced from one newest-to-oldest
     layout pass. Calling {!clamp_scroll} and then {!scrolled_rows} separately
     is still available to independent callers, but a frame that needs both
-    should use this function so the same entry is not rendered twice. *)
+    should use this function so the same entry is not rendered twice.
+    [body_positions] describes the actual selected rows, oldest first, including
+    the live-edge view. Generated gaps and synthesized repeat rows have no
+    original body owner and are omitted. *)
+
+val scroll_for_body_row :
+  ?markdown:(entry:entry -> width:int -> string list) ->
+  ?origin:origin_display ->
+  inner_width:int -> entry_index:int -> body_row:int -> entry list -> int option
+(** Number of physical rows after this body row, using the same layout and
+    cached counts as {!clamped_scrolled_rows}. [None] if the row no longer
+    exists. Counts only the newer suffix, not the entire conversation. *)
 
 val max_scroll :
   ?markdown:(entry:entry -> width:int -> string list) ->

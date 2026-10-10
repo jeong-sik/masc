@@ -8,6 +8,6 @@ Projection and constructor function bodies are unchanged. A four-line record-res
 
 Initial focused build failed with duplicate module Projection after include. Destructive module substitution corrected it. `opam exec -- dune build test/test_tui_keeper_chat_transcript.exe` then completed exit 0. `_build/default/test/test_tui_keeper_chat_transcript.exe --color=never`: 74 PASS, G5ETHO7O, exit 0.
 
-Existing tests exercise in-process timeline/content/trail, tool outcomes and folding, terminal-safe returned text, approval holds, status and attempt transitions. Direct history and render consumers still use the existing transcript API. Seven current source hashes, one executable receipt and the test output are retained. These are returned-data tests, not a physical terminal screen or live provider run.
+Existing tests exercise in-process timeline/content/trail, tool outcomes and folding, terminal-safe returned text, approval holds, status and attempt transitions. Direct history and render consumers still use the existing transcript API. The test output is retained. These are returned-data tests, not a physical terminal screen or live provider run.
 
 Independent final review is pending. Formal GitHub approval, merge, full CI, installation and actual terminal behavior remain unverified. Stream/state, classification and rendering policy/performance audit remains pending; crossing below 2000 lines does not complete this candidate or the 171-file campaign.

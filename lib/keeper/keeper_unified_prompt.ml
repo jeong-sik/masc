@@ -135,31 +135,33 @@ let rejected_digest_input input =
     |> String_util.to_string
 ;;
 
-let format_own_recent_actions_turn (turn : Keeper_own_recent_actions.turn) : string =
+let format_own_recent_actions_turn ~current_task_id (turn : Keeper_own_recent_actions.turn) : string =
   let turn_id = string_of_int turn.turn_id in
   turn.calls
   |> List.map (fun (call : Keeper_own_recent_actions.call) ->
+    let provenance = Keeper_own_recent_actions.provenance_to_json
+      ~current_task_id call.provenance |> Yojson.Safe.to_string in
     match call.outcome with
     | Keeper_own_recent_actions.Ok_call ->
       render_fragment
         Prompt_names.keeper_world_own_recent_actions_turn_ok_row
-        [ "turn_id", turn_id; "tool", call.tool ]
+        [ "provenance", provenance; "turn_id", turn_id; "tool", call.tool ]
     | Keeper_own_recent_actions.Failed_call None ->
       render_fragment
         Prompt_names.keeper_world_own_recent_actions_turn_rejected_row
-        [ "turn_id", turn_id; "tool", call.tool; "input", call.input ]
+        [ "provenance", provenance; "turn_id", turn_id; "tool", call.tool; "input", call.input ]
     | Keeper_own_recent_actions.Failed_call (Some detail) ->
       render_fragment
         Prompt_names.keeper_world_own_recent_actions_turn_rejected_detail_row
-        [ "turn_id", turn_id; "tool", call.tool; "input", call.input; "detail", detail ]
+        [ "provenance", provenance; "turn_id", turn_id; "tool", call.tool; "input", call.input; "detail", detail ]
     | Keeper_own_recent_actions.Deferred_call ->
       render_fragment
         Prompt_names.keeper_world_own_recent_actions_turn_deferred_row
-        [ "turn_id", turn_id; "tool", call.tool ]
+        [ "provenance", provenance; "turn_id", turn_id; "tool", call.tool ]
     | Keeper_own_recent_actions.Unrecorded_call ->
       render_fragment
         Prompt_names.keeper_world_own_recent_actions_turn_unrecorded_row
-        [ "turn_id", turn_id; "tool", call.tool ])
+        [ "provenance", provenance; "turn_id", turn_id; "tool", call.tool ])
   |> String.concat "\n"
 ;;
 
@@ -1215,6 +1217,13 @@ let build_prompt_internal
      | None -> [])
     @ previous_turn_stop_lines previous_turn_stop
   in
+  let current_task_id =
+    match current_task with
+    | Keeper_world_observation_inputs.No_current_task -> None
+    | Current_task task | Recovered_current_task {task; _} -> Some task.Masc_domain.id
+    | Current_task_missing {task_id; _} | Current_task_unavailable {task_id; _} ->
+      Some (Keeper_id.Task_id.to_string task_id)
+  in
   (* A row is a whole turn, and the heading counts turns. *)
   let own_recent_actions_section : string option =
     match observation.own_recent_actions with
@@ -1230,7 +1239,7 @@ let build_prompt_internal
          ^ "\n\n")
     | Ok turns ->
       let failures = Keeper_own_recent_actions.digest_failures turns in
-      let rows = List.map format_own_recent_actions_turn turns in
+      let rows = List.map (format_own_recent_actions_turn ~current_task_id) turns in
       let ubuf = Buffer.create 1024 in
       Buffer.add_string ubuf
         (render_fragment
@@ -1273,13 +1282,16 @@ let build_prompt_internal
                | None -> ""
                | Some detail -> " — " ^ detail
              in
+             let provenance = Keeper_own_recent_actions.provenance_to_json
+               ~current_task_id digest.failure_provenance |> Yojson.Safe.to_string in
              let count = string_of_int digest.failure_count in
              let last_turn = string_of_int digest.failure_last_turn in
              let input = rejected_digest_input digest.failure_input in
              let row =
                render
                  Prompt_names.keeper_observation_rejected_digest_row
-                 [ "tool", digest.failure_tool
+                 [ "provenance", provenance
+                 ; "tool", digest.failure_tool
                  ; "input", input
                  ; "count", count
                  ; "last_turn", last_turn
@@ -1293,6 +1305,7 @@ let build_prompt_internal
                       ; input
                       ; "×" ^ count
                       ; "@" ^ last_turn ^ detail_suffix
+                      ; provenance
                       ])
              in
              Buffer.add_string ubuf (row ^ "\n"))

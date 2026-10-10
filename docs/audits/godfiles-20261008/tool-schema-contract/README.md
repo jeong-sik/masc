@@ -36,10 +36,8 @@ are test diagnostics. Custom field-error vocabulary is unchanged.
 | MCP bridge | JSON schema projection, native MCP schema fields and result handling through fake handlers | Existing MCP suite: 29 PASS |
 | Construction/decoder access boundary | Public validated constructor compiles; public and owner record fabrication fail as private types; public and owner raw decoder access fail as unbound values | Four expected compiler refusals and one constructor success |
 
-[checks.json](checks.json) records the focused four-target build (exit 0), 136
-unique passing consumer scenarios and four executable fingerprints. The source
-fingerprint file covers four changed source/build files and eight inspected
-interface/consumer/test sources. No assertions or behavior test inputs were
+[checks.json](checks.json) records the focused four-target build (exit 0) and 136
+unique passing consumer scenarios. No assertions or behavior test inputs were
 rewritten to accommodate the extraction.
 
 [api-probes/checks.json](api-probes/checks.json) records the exact small compiler

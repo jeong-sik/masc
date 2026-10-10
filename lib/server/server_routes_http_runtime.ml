@@ -474,6 +474,10 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     compute_section ~name:"keeper_board_event_collection" ?section_timings_ref
       keeper_board_event_collection_health_json
   in
+  let keeper_hitl_gate_json =
+    compute_section ~name:"keeper_hitl_gate" ?section_timings_ref
+      keeper_hitl_gate_health_json
+  in
   let execution_snapshot =
     match server_state with
     | Some state ->
@@ -583,6 +587,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     ("keeper_reaction_ledger", reaction_ledger_json);
     ("keeper_owner", keeper_owner_json);
     ("keeper_board_event_collection", board_event_collection_json);
+    ("keeper_hitl_gate", keeper_hitl_gate_json);
     ("keeper_event_queue", keeper_event_queue_json);
     ( "keeper_terminal_effect_policy"
     , Keeper_terminal_effect_policy.matrix_to_yojson () );
@@ -789,6 +794,9 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
     ( "keeper_board_event_collection",
       full_health_component_placeholder ?error ~component_timed_out ~status
         "keeper_board_event_collection" );
+    ( "keeper_hitl_gate",
+      full_health_component_placeholder ?error ~component_timed_out ~status
+        "keeper_hitl_gate" );
     ( "keeper_event_queue",
       `Assoc
         [ ("schema", `String Keeper_event_queue_schema.fleet_health_summary)

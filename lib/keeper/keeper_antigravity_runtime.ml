@@ -250,7 +250,7 @@ type mcp_blocks =
           streamed. *)
   | Streaming
 
-let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action ~on_usage_report
+let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~turn_count ~on_native_action ~on_usage_report
     ~position ~receipts on_event =
     let emit event = Option.iter (fun callback -> callback event) on_event in
     let next_tool_index = ref 1 in
@@ -263,6 +263,28 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
         Log.Runtime_agent.warn
           "Antigravity Keeper stream callback raised (error=%s)"
           (Printexc.to_string exn)
+    in
+    let text_indexes = Hashtbl.create 8 in
+    let closed_content = Hashtbl.create 8 in
+    let first_text = ref true in
+    let last_text_index = ref None in
+    let fresh_text_index () =
+      if !first_text then (first_text := false; 0)
+      else let index = !next_tool_index in incr next_tool_index; index
+    in
+    let text_index step_index =
+      match Hashtbl.find_opt text_indexes step_index with
+      | Some index -> index
+      | None ->
+          let index = fresh_text_index () in
+          Hashtbl.add text_indexes step_index index;
+          index
+    in
+    let stop_content index =
+      if not (Hashtbl.mem closed_content index) then begin
+        Hashtbl.add closed_content index ();
+        emit (Agent_core.Types.ContentBlockStop {index})
+      end
     in
     let mcp_blocks = ref (Held []) in
     let emit_mcp_block event =
@@ -297,9 +319,11 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
                  });
             release_mcp_blocks ()
           | Runtime_antigravity.Text_delta { step_index; text } ->
+            let index = text_index step_index in
+            last_text_index := Some index;
             emit
               (Agent_core.Types.ContentBlockDelta
-                 { index = 0
+                 { index
                  ; delta =
                      Agent_core.Types.TextDelta
                        (Keeper_official_client_text_stream.forward
@@ -307,6 +331,10 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
                           ~message:step_index
                           text)
                  })
+          | Runtime_antigravity.Text_completed {step_index; ending=_} ->
+            (* No fallback to the latest or anonymous block: only the named
+               response that the runtime actually ended may close. *)
+            Option.iter stop_content (Hashtbl.find_opt text_indexes (Some step_index))
           | Runtime_antigravity.Native_tool_started observation ->
             Option.iter
               (fun observe -> Runtime_native_tools.observe_exact_action ~official_turn:turn_count ~observe observation)
@@ -334,7 +362,7 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
                  ; tool_id = Runtime_native_tools.call_id observation
                  ; tool_name = observation.tool_name
                  })
-          | Runtime_antigravity.Native_tool_finished observation ->
+          | Runtime_antigravity.Native_tool_finished {observation; completion} ->
             Host.record_raw_native_tool
               ~keeper_name
               ~raw_trace_run
@@ -344,6 +372,9 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
               (fun identity ->
                  Option.iter
                    (fun index ->
+                      Option.iter (fun finish -> finish ~block_index:index
+                        ~tool_call_id:(Runtime_native_tools.call_id observation) completion)
+                        on_native_tool_completion;
                       Hashtbl.remove native_tool_indexes identity;
                       emit (Agent_core.Types.ContentBlockStop { index }))
                    (Hashtbl.find_opt native_tool_indexes identity))
@@ -367,9 +398,14 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
                    })
               on_usage_report
           | Runtime_antigravity.Turn_finished { text } ->
+            let continuation = Keeper_official_client_text_stream.remainder text_stream ~final_text:text in
             Option.iter (fun remainder ->
+              let index = match continuation, !last_text_index with
+                | Some _, Some index when not (Hashtbl.mem closed_content index) -> index
+                | (Some _ | None), (Some _ | None) -> fresh_text_index () in
               emit (Agent_core.Types.ContentBlockDelta
-                {index=0; delta=Agent_core.Types.TextDelta remainder}))
+                {index; delta=Agent_core.Types.TextDelta remainder});
+              stop_content index)
               (Keeper_official_client_text_stream.finish_response text_stream ~final_text:text);
             emit
               (Agent_core.Types.MessageDelta
@@ -423,7 +459,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted
-    ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
+    ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_completion
     ~on_usage_report ~on_tool_execution ~(config : Runtime_execution.antigravity_cli) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -914,7 +950,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     let process_cwd = Eio.Path.(Eio.Stdenv.fs env / native_cwd) in
     let started_at = Time_compat.now () in
       let stream =
-        stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action
+        stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~turn_count ~on_native_action
           ~on_usage_report
           ~receipts
           ~position:
@@ -1296,6 +1332,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
     ~turn_start
     ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
+    ?on_native_tool_completion
     ?on_native_action
     ?on_usage_report
     ?on_tool_execution
@@ -1333,7 +1370,7 @@ let run ?official_task_reference ?composed_context ~accepts_image_input ?require
         ~context_injector
         ~context
         ~terminal_effect_state
-        ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
+        ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_completion
         ~on_usage_report
         ~on_tool_execution
         ~event_bus
@@ -1362,10 +1399,10 @@ module For_testing = struct
       event
   ;;
 
-  let project_stream events =
+  let project_stream ?on_event ?on_native_tool_completion events =
     let emitted = ref [] in
     let projection =
-      stream_projection
+      stream_projection ?on_native_tool_completion
         ~keeper_name:"test"
         ~raw_trace_run:None
         ~turn_count:1
@@ -1373,7 +1410,7 @@ module For_testing = struct
         ~on_usage_report:None
         ~position:Keeper_usage_resolution.Fresh
         ~receipts:None
-        (Some (fun event -> emitted := event :: !emitted))
+        (Some (fun event -> emitted := event :: !emitted; Option.iter (fun observe -> observe event) on_event))
     in
     List.iter projection.on_runtime_event events;
     List.rev !emitted

@@ -32,9 +32,8 @@ cleanup and fleet responsibilities remain pending in the original inventory.
 | Same API in private dependency graphs | Existing composition cases 5–7: source eviction and repair authority, pending owner replacement refusal, private graph read/save/repair and unauthenticated refusal | 3 passed |
 | Tool and HTTP call sites | Focused build includes editor/composition targets and the HTTP route target | 3 executable builds passed |
 
-[checks.json](checks.json) records exact commands, logs and executable hashes.
-[source-sha256.json](source-sha256.json) records the changed files and relevant
-authority consumers. The HTTP target is compile-only: its machine-live behavior
+[checks.json](checks.json) records exact commands and logs.
+The HTTP target is compile-only: its machine-live behavior
 does not exercise declaration editing and was not run. No new tests mirror the
 deleted parameter or implementation layout.
 

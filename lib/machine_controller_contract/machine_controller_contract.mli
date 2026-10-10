@@ -4,6 +4,7 @@ type holder_departure =
   | Keeper_stopped
   | Credential_expired
   | No_credential
+  | Participant_departed
 
 type admission = {
   observed_holder : string option;

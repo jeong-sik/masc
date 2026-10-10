@@ -28,6 +28,7 @@ val keeper_memory_search_json
 
 val keeper_memory_search_with_outcome
   :  ?turn_ref:Ids.Turn_ref.t
+  -> ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> ctx_work:Keeper_types.working_context
@@ -224,6 +225,9 @@ type memory_retract_validation =
 val validate_memory_retract_args : Yojson.Safe.t -> memory_retract_validation
 
 module For_testing : sig
+  val successor_candidates_for_query : query:string ->
+    Keeper_memory_os_current.successor_recall_candidate list ->
+    Keeper_memory_os_current.successor_recall_candidate list
   val read_current_facts
     :  keepers_dir:string
     -> keeper_id:string

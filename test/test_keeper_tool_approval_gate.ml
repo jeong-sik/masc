@@ -6,6 +6,7 @@ module Events = Masc.Keeper_chat_events
 module Keeper_chat_events_publish = Masc.Keeper_chat_events
 
 let keeper = "keeper.one"
+let workspace = "/tmp/test-workspace"
 
 let invocation ~tool_use_id =
   Agent_core.Tool_contract.Invocation.create ~tool_use_id ~turn:1
@@ -50,7 +51,7 @@ let with_gate ~timeout_sec f =
         Gate.create ~redact_text:Fun.id ~registry
           ~late_approvals:(Masc.Keeper_late_approval.create ())
           ~publish:(Keeper_chat_events_publish.publish events)
-          ~clock ~keeper_name:keeper ~timeout_sec
+          ~clock ~base_path:workspace ~keeper_name:keeper ~timeout_sec
       in
       f ~clock ~registry ~events ~gate)
 

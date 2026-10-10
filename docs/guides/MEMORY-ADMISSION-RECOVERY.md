@@ -101,8 +101,13 @@ cases: exact byte restoration, pending-tail retention, and refusal of changed
 frontier/generation/journal, different snapshots/receipts, unsupported schema and
 unsafe filesystem entries. It makes no native-worker execution claim.
 
-`test_keeper_memory_admission_queue.ml` additionally creates a backup through the
+At the range-v1 layer (#41996), `test_keeper_memory_admission_queue.ml` creates a backup through the
 real Current/Queue APIs, loses the snapshot/receipt, invokes this Python tool, and
 feeds its repaired copy to the real decoder and worker. It asserts that only the
 pending tail reaches judgment. That native regression is source evidence until
 its matching-head test is actually executed under the repository workflow.
+
+At sparse-candidate descendants, the range-v1 native regression is replaced by
+the new queue contract. This tool intentionally refuses that newer store; its
+synthetic unsupported-schema regression remains applicable. Do not use the legacy
+recovery procedure to translate sparse candidate receipts.

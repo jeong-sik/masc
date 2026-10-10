@@ -1,3 +1,4 @@
+import type { KeeperChatStreamEvent } from './lib/keeper-chat-stream-contract'
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   _resetActiveKeeperStreamsForTests,
@@ -58,6 +59,73 @@ describe('Keeper operation stream projection', () => {
     _clearTrackedKeeperChatOperationsForTests()
     keeperThreads.value = {}
     keeperToolApprovals.value = {}
+  })
+
+  it.each(['observed', 'ended'] as const)('keeps content %s metadata outside model progress and body state', state => {
+    assistantEntry()
+    for (const hasBody of [false, true]) {
+      if (hasBody) {
+        applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'authored text' })
+      }
+      const before = keeperThreads.value
+      expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'CUSTOM',
+        name: 'KEEPER_MODEL_CONTENT_ACTIVITY',
+        value: { generation: 17, stream_scope: 0, block_index: 2, channel: 'text', state },
+      })).toBeNull()
+      // This view does not draw the side metadata. It must neither announce
+      // model progress nor finalize a live response or append authored bytes.
+      expect(keeperThreads.value).toBe(before)
+    }
+  })
+
+  it('keeps parsed native observer metadata outside authored text and MASC tool receipts', () => {
+    const operationId = 'native-observer-operation'
+    assistantEntry(operationId)
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_START', ...toolOccurrence(), toolCallId: 'reused-id', toolCallName: 'Read',
+    })
+    // Tool starts move earlier speech into the progress trail. Establish the
+    // current authored body after that existing boundary, before native events.
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'before' })
+    const observation = { ...toolOccurrence(), toolCallId: 'reused-id', toolCallName: 'Read' }
+    const events: KeeperChatStreamEvent[] = [
+      { type: 'CUSTOM', name: 'KEEPER_NATIVE_TOOL_START', value: observation },
+      { type: 'CUSTOM', name: 'KEEPER_NATIVE_TOOL_PROGRESS', value: { ...observation, progress: { kind: 'heartbeat_reported', elapsed_seconds: 30 } } },
+      { type: 'CUSTOM', name: 'KEEPER_NATIVE_TOOL_PROGRESS', value: { ...observation, progress: { kind: 'heartbeat_reported', elapsed_seconds: 3 } } },
+      { type: 'CUSTOM', name: 'KEEPER_NATIVE_TOOL_PROGRESS', value: { ...observation, progress: { kind: 'output_observed', byte_count: 13 } } },
+      { type: 'CUSTOM', name: 'KEEPER_NATIVE_TOOL_PROGRESS', value: { ...observation, progress: { kind: 'message_reported', message: 'not authored text' } } },
+      { type: 'CUSTOM', name: 'KEEPER_NATIVE_TOOL_PROGRESS', value: { ...observation, progress: {
+        kind: 'retry_reported', agent_id: 'child', subagent_type: 'Explore', attempt: 1,
+        max_retries: 3, retry_delay_ms: 1500, error_status: 529, error_category: 'overloaded',
+      } } },
+      { type: 'CUSTOM', name: 'KEEPER_NATIVE_TOOL_PROGRESS', value: { ...observation, progress: {
+        kind: 'retry_cleared', agent_id: 'child', subagent_type: 'Explore',
+      } } },
+      { type: 'CUSTOM', name: 'KEEPER_NATIVE_TOOL_END', value: { ...observation, completion: { kind: 'completion_reported', exit_code: 17 } } },
+      { type: 'CUSTOM', name: 'KEEPER_NATIVE_TOOL_END', value: observation },
+    ]
+    const before = keeperThreads.value
+    for (const event of events) {
+      const wire = { ...event, threadId: 'keeper:sangsu', runId: 'run-1', timestamp: 1_712_000_000 }
+      const parsed = parseSSEMessage({
+        type: 'keeper_chat_operation_event', name: 'sangsu', operation_id: operationId,
+        ag_ui_event: wire,
+      })
+      expect(parsed?.ag_ui_event).toEqual(wire)
+      if (!parsed) throw new Error('valid native observation was rejected')
+      expect(applyKeeperOperationTurnEvent('sangsu', {
+        operationId, event: parsed.ag_ui_event as KeeperChatStreamEvent,
+      })).toBeNull()
+      // No native rows are rendered by this view yet. Even a provider id and
+      // scope/index colliding with a MASC tool must not settle that receipt,
+      // append native progress as speech, or change current model activity.
+      expect(keeperThreads.value).toBe(before)
+    }
+    expect(applyKeeperOperationTurnEvent('sangsu', {
+      operationId, event: { type: 'TEXT_MESSAGE_CONTENT', delta: ' after' },
+    })).toBeNull()
+    expect(keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')?.rawText).toBe('before after')
   })
 
   it('streams text into the selected assistant entry', () => {

@@ -767,12 +767,12 @@ let current_custom_names =
   ; "KEEPER_STREAM_MESSAGE_START"
   ; "KEEPER_STREAM_MESSAGE_DELTA"; "KEEPER_STREAM_MESSAGE_STOP"
   ; "KEEPER_STREAM_PING"; "KEEPER_CONTENT_BLOCK_START"
-  ; "KEEPER_CONTENT_BLOCK_STOP"; "KEEPER_THINKING_DELTA"
+  ; "KEEPER_CONTENT_BLOCK_STOP"; "KEEPER_THINKING_DELTA"; "KEEPER_MODEL_CONTENT_ACTIVITY"
   ; "KEEPER_THINKING_SIGNATURE_DELTA"; "KEEPER_MEDIA_DELTA"
   ; "KEEPER_STREAM_PROTOCOL_ERROR"; "KEEPER_CONTINUATION_CHECKPOINT"
   ; "KEEPER_CHAT_BATCH_BOUND"; "KEEPER_EXTERNAL_EFFECT_COMPLETED"; "KEEPER_TOOL_RESULT_READY"
   ; "KEEPER_TOOL_APPROVAL_REQUESTED"; "KEEPER_TOOL_APPROVAL_SETTLED"
-  ; "KEEPER_NATIVE_TOOL_START"; "KEEPER_NATIVE_TOOL_END"
+  ; "KEEPER_NATIVE_TOOL_START"; "KEEPER_NATIVE_TOOL_END"; "KEEPER_NATIVE_TOOL_PROGRESS"
   ]
 
 let known_custom_names =
@@ -787,6 +787,10 @@ let null_custom_names =
 let validate_custom_value ~name value =
   if String.equal name "KEEPER_CHAT_OPERATION_ACCEPTED" then
     Result.map (fun _ -> ()) (decode_acceptance value)
+  else if String.equal name "KEEPER_MODEL_CONTENT_ACTIVITY" then
+    Masc.Keeper_chat_events.model_content_activity_of_json value
+    |> Result.map (fun _ -> ())
+    |> Result.map_error (fun detail -> Malformed_event detail)
   else if String.equal name "KEEPER_RUNTIME_ATTEMPT_STARTED" then
     match value with
     | `Null -> Ok ()
@@ -818,8 +822,15 @@ let validate_current_custom_name name =
   else Error (Unknown_custom_event name)
 
 let decode_tool_occurrence ~surface fields =
-  let* stream_scope = required_nonnegative_int ~surface "toolStreamScope" fields in
-  let* block_index = required_nonnegative_int ~surface "toolCallBlockIndex" fields in
+  let index field = match List.assoc_opt field fields with
+    | Some json ->
+        (match Runtime_json_integer.of_json json with
+         | Ok value when value >= 0 -> Ok value
+         | Ok _ | Error _ ->
+             Error (Printf.sprintf "%s.%s must be a nonnegative safe integer" surface field))
+    | None -> Error (Printf.sprintf "%s.%s is required" surface field) in
+  let* stream_scope = index "toolStreamScope" in
+  let* block_index = index "toolCallBlockIndex" in
   let* provider_message_id = optional_string ~surface "providerMessageId" fields in
   let* tool_call_id = optional_string ~surface "toolCallId" fields in
   Ok ({ stream_scope; block_index; provider_message_id }, tool_call_id)
@@ -1024,16 +1035,44 @@ let decode_custom_event ~request state fields =
     if String.equal name "KEEPER_CHAT_BATCH_BOUND" then
       let* _ = decode_batch_binding ~expected_request_id:request.request_id value in Ok state
     else if String.equal name "KEEPER_NATIVE_TOOL_START"
-            || String.equal name "KEEPER_NATIVE_TOOL_END" then
+            || String.equal name "KEEPER_NATIVE_TOOL_END"
+            || String.equal name "KEEPER_NATIVE_TOOL_PROGRESS" then
       let native_surface = name ^ ".value" in
       let* native_fields = exact_object_fields ~surface:native_surface
-          ~allowed:["toolStreamScope"; "toolCallBlockIndex"; "providerMessageId";
-                    "toolCallId"; "toolCallName"] value
+          ~allowed:(["toolStreamScope"; "toolCallBlockIndex"; "providerMessageId";
+                    "toolCallId"; "toolCallName"]
+                    @ (if String.equal name "KEEPER_NATIVE_TOOL_END" then ["completion"]
+                       else if String.equal name "KEEPER_NATIVE_TOOL_PROGRESS" then ["progress"] else [])) value
           |> Result.map_error (fun detail -> Malformed_event detail) in
       let* _ = decode_tool_occurrence ~surface:native_surface native_fields
           |> Result.map_error (fun detail -> Malformed_event detail) in
       let* _ = optional_string ~surface:native_surface "toolCallName" native_fields
           |> Result.map_error (fun detail -> Malformed_event detail) in
+      (* The wire contract permits an END without a completion: an older
+         sender closes the occurrence without terminal metadata, which reads
+         as end_observed — the same default the live decoder applies. A
+         present completion must be exactly one and well-formed; START never
+         carries one and the allowed-field list already rejects a START
+         that has it. *)
+      let* () =
+        if String.equal name "KEEPER_NATIVE_TOOL_END" then
+          match List.filter (fun (key, _) -> String.equal key "completion") native_fields with
+          | [] | [_, _] -> Ok ()
+          | _ -> Error (Malformed_event (native_surface ^ ": completion must be unique"))
+        else Ok () in
+      let* () = if String.equal name "KEEPER_NATIVE_TOOL_PROGRESS" then
+          (match List.assoc_opt "progress" native_fields with
+           | None -> Error (Malformed_event (native_surface ^ ": progress is required"))
+           | Some json -> Runtime_native_tools.progress_of_json json |> Result.map (fun _ -> ())
+               |> Result.map_error (fun detail -> Malformed_event (native_surface ^ ": " ^ detail)))
+        else Ok () in
+      let* () = match List.assoc_opt "completion" native_fields with
+        | None -> Ok ()
+        | Some json ->
+            Runtime_native_tools.completion_of_json json
+            |> Result.map (fun _ -> ())
+            |> Result.map_error (fun detail -> Malformed_event (native_surface ^ ": " ^ detail))
+      in
       Ok state
     else if String.equal name "KEEPER_REPLY_DETAILS" then
       match state.reply_details with

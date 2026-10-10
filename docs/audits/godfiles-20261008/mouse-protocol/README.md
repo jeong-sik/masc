@@ -23,8 +23,6 @@ pending; neither decoder nor main TUI is declared fully refactored.
 The build was explicitly authorized by the operator's local-build request.
 Commands and actual successful test counts are in [checks.json](checks.json).
 The build targets only `bin/masc_tui.exe`; it is not a full repository build.
-[source-sha256.json](source-sha256.json) fingerprints the changed implementation,
-interfaces, direct consumers and test consumers.
 
 There is no installed/live-service, real terminal-emulator, Linux, full CI or
 release/deployment claim. No dashboard behavior changes in this unit.

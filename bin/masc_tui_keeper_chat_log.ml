@@ -142,8 +142,9 @@ let add ?at t ~seq (delta : Live.delta) =
     (match delta with
      | Live.Runtime_attempt_started _ -> t.attempt <- t.attempt + 1
      | Live.Run_started | Live.Batch_bound _ | Live.Text _ | Live.Thinking _ | Live.Stream_model_started _
-     | Live.Stream_details _
-     | Live.Native_tool_started _ | Live.Native_tool_ended _
+     | Live.Model_content_activity _
+     | Live.Stream_details _ | Live.Stream_model_stopped
+     | Live.Native_tool_started _ | Live.Native_tool_ended _ | Live.Native_tool_progress _
      | Live.Tool_started _ | Live.Tool_args _ | Live.Tool_ended _ | Live.Tool_result _
      | Live.Stream_protocol_error _ | Live.Approval_requested _
      | Live.Approval_settled _ | Live.Accepted _ | Live.Checkpoint
@@ -234,7 +235,8 @@ let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
     if usage = None && stop_reason = None
     then None
     else Some (Live.Stream_details { usage; stop_reason; stream_scope = Some stream_scope })
-  | E.Agent_core_stream_message_stop
+  | E.Model_content_activity activity -> Some (Live.Model_content_activity activity)
+  | E.Agent_core_stream_message_stop -> Some Live.Stream_model_stopped
   | E.Agent_core_stream_ping
   | E.Agent_core_content_block_start _
   | E.Agent_core_content_block_stop _ -> None
@@ -253,9 +255,12 @@ let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
     Some (Live.Native_tool_started
       { occurrence = occurrence native.occurrence ~tool_call_id:native.tool_call_id
       ; tool_name = native.tool_call_name })
-  | E.Native_tool_end native ->
+  | E.Native_tool_progress (native, progress) ->
+    Some (Live.Native_tool_progress
+      { occurrence = occurrence native.occurrence ~tool_call_id:native.tool_call_id; progress })
+  | E.Native_tool_end (native, completion) ->
     Some (Live.Native_tool_ended
-      { occurrence = occurrence native.occurrence ~tool_call_id:native.tool_call_id })
+      { occurrence = occurrence native.occurrence ~tool_call_id:native.tool_call_id; completion })
   | E.Tool_call_start { occurrence = o; tool_call_id; tool_call_name } ->
     Some
       (Live.Tool_started

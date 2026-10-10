@@ -34,8 +34,7 @@ those owners and their metric/report consumption are unchanged.
 ## Executed checks
 
 The operator authorized narrow local checks. [checks.json](checks.json) records
-commands, terminal exit codes and executable hashes; [source-sha256.json](source-sha256.json)
-records changed source/interfaces and unchanged callers/tests.
+commands and terminal exit codes.
 
 | Changed interface | Actual consumer and verification | Result |
 | --- | --- | --- |

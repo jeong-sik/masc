@@ -48,9 +48,7 @@ or source-shape regression test was introduced.
 ## Executed verification
 
 The operator authorized these narrow local checks. [checks.json](checks.json)
-records commands, terminal exit codes and executable hashes;
-[source-sha256.json](source-sha256.json) fingerprints changed files and real tests,
-shared grammar and the unchanged blob consumer.
+records commands and terminal exit codes.
 
 | Changed contract | Actual verification | Result |
 | --- | --- | --- |
@@ -71,8 +69,7 @@ After publication, the external parent branch was rewritten from
 `747c2d403b637099f15cb2fec02fc019b0024eb9` to
 `d7c2912b045505a0044e04de057f760f70f6e43d` on updated main. This PR's two commits
 were rebased onto that actual parent; its intended diff scope remained intact.
-All thirteen recorded own-source fingerprints stayed identical, and both body
-comparisons hold against the new parent. The selected build and all fifteen
+Both body comparisons hold against the new parent. The selected build and all fifteen
 cases were then rerun successfully on that source; the table and `checks.json`
 refer to those current results. `initial-checks.json` and original build/test
 logs retain the distinct earlier validation and are not asserted as current-head

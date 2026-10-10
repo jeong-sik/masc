@@ -12,7 +12,11 @@ val participants :
 (** [keepers] plus unexpired operator ([Admin]) and invite ([Player])
     credentials, sorted and deduplicated. [Worker]
     credentials are agents' MCP clients, not seats at the machine. Credentials
-    come from current named authority; unavailable storage returns [Error]. *)
+    come from current named authority; explicitly departed credential
+    generations are excluded. Only role/expiry-eligible credentials have their
+    participation read, including credentials matching independently listed
+    Keepers. Unavailable eligible participation or credential storage
+    returns [Error]. *)
 
 val hand_to : Workspace.config -> now:float -> (string list, string) result
 (** The names a pass may hand the controller to: {!participants} over

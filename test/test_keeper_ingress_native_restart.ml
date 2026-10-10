@@ -296,7 +296,7 @@ is-default = true
     let gate = Keeper_tool_approval_gate.create
         ~registry:(Keeper_tool_approval_registry.create ())
         ~late_approvals:(Keeper_late_approval.create ()) ~publish:(fun _ -> ())
-        ~redact_text:Fun.id ~clock:env#clock ~keeper_name
+        ~redact_text:Fun.id ~clock:env#clock ~base_path:root ~keeper_name
         ~timeout_sec:Exact_output_fixture.fixture_wait_seconds in
     let approval_gate = {gate with Keeper_tool_approval_gate.pre_tool_use=(fun ~identity_tool_index event ->
       (match event with

@@ -1,4 +1,14 @@
 (test
+ (name test_tui_play_room)
+ (modules test_tui_play_room)
+ (libraries alcotest yojson masc masc_tui_play_room))
+(include stanzas/test_play_room.inc)
+(include stanzas/test_h2_play_room.inc)
+(test
+ (name test_tui_play_change)
+ (modules test_tui_play_change)
+ (libraries alcotest masc masc_tui_types masc_tui_collab masc_tui_play_card unix))
+(test
  (name test_server_lane_inventory)
  (modules test_server_lane_inventory)
  (libraries masc_test_deps masc.server masc.browser_lane alcotest eio_main unix yojson bigstringaf h2 h2-eio))
@@ -2811,6 +2821,17 @@
 (include stanzas/test_keeper_surface_status.inc)
 
 (include stanzas/test_keeper_memory_admission_judgment.inc)
+(include stanzas/test_keeper_memory_successor_selection.inc)
+
+(include stanzas/test_keeper_memory_resolved_selection_capture.inc)
+
+(include stanzas/test_keeper_memory_resolved_selection_replay.inc)
+
+(include stanzas/test_keeper_memory_successor_branch_capture.inc)
+
+(include stanzas/test_keeper_memory_successor_http_replay.inc)
+(include stanzas/test_keeper_memory_admission_export.inc)
+(include stanzas/test_keeper_memory_admission_replay.inc)
 (include stanzas/test_keeper_memory_admission_queue.inc)
 (include stanzas/test_keeper_memory_write.inc)
 (include stanzas/test_keeper_memory_write_growth_probe.inc)
@@ -2922,6 +2943,7 @@
 (include stanzas/test_keeper_tool_definition_source.inc)
 (include stanzas/test_runtime_codex_app_server.inc)
 (include stanzas/test_runtime_claude_code.inc)
+(include stanzas/test_runtime_claude_input_attribution.inc)
 (include stanzas/test_runtime_antigravity.inc)
 (include stanzas/test_runtime_antigravity_home.inc)
 (include stanzas/test_runtime_antigravity_context.inc)
@@ -3284,7 +3306,7 @@
 (test
  (name test_tui_chat_queue_wiring)
  (modules test_tui_chat_queue_wiring)
- (libraries masc_tui_chat_media masc.keeper_chat_delivery_identity masc.keeper_chat_operations masc_tui_message_input masc_tui_link_preview masc_tui_image_preview
+ (libraries masc_tui_chat_media masc.keeper_chat_delivery_identity masc.runtime masc.keeper_chat_operations masc_tui_message_input masc_tui_link_preview masc_tui_image_preview
   masc_tui_answering
   masc_tui_keys
   masc_tui_fusion_model
@@ -3306,6 +3328,8 @@
   masc_tui_keeper_chat_transcript
   masc_tui_keeper_selection
   masc_tui_message_layout
+  masc_tui_markdown
+  masc_tui_markdown_render_cache
   masc_tui_render_chat
   masc_tui_render_schedule
   masc_tui_frame_presenter
@@ -3315,6 +3339,17 @@
   masc_tui_roster_pane
   unix
   yojson))
+
+(test
+ (name test_tui_chat_search_projection)
+ (modules test_tui_chat_search_projection)
+ (libraries eio eio_main masc.masc_core masc_eio_context alcotest astring agent_core masc masc.masc_types
+  masc_tui_types masc_tui_keeper_chat_live masc_tui_keeper_chat_log
+  masc_tui_keeper_chat_projection masc_tui_keeper_chat_queue
+  masc_tui_keeper_chat_transcript masc_tui_image_preview masc_tui_message_layout
+  masc_tui_message_input masc_tui_chat_search masc_tui_link_preview
+  masc_tui_render_chat masc_tui_render_schedule masc_tui_frame_presenter
+  masc_tui_ansi masc_tui_theme masc_tui_roster_pane masc_tui_markdown))
 
 (test
  (name test_tui_chat_rows_memo)
@@ -3344,7 +3379,7 @@
 (test
  (name test_tui_text_input_target)
  (modules test_tui_text_input_target)
- (libraries masc_tui_account_login masc_tui_message_input masc_tui_identity_model masc_tui_surface_navigation
+ (libraries masc_tui_account_login masc_tui_message_input masc_tui_collab masc_tui_identity_model masc_tui_surface_navigation
   alcotest
   fmt
   masc
@@ -3384,7 +3419,7 @@
 (test
  (name test_tui_keeper_chat_transcript)
  (modules test_tui_keeper_chat_transcript)
- (libraries
+ (libraries masc.runtime
   alcotest
   agent_core
   fmt
@@ -3413,6 +3448,7 @@
  ; masc.
  (libraries
   alcotest
+  masc.string_util
   fmt
   masc
   masc.agent_core
@@ -3481,6 +3517,16 @@
  (name test_keeper_tool_approval_registry)
  (modules test_keeper_tool_approval_registry)
  (libraries alcotest eio eio_main eio.mock fmt masc))
+
+(test
+ (name test_keeper_tool_approval_registry_outcomes)
+ (modules test_keeper_tool_approval_registry_outcomes)
+ (libraries alcotest eio eio_main eio.mock fmt masc))
+
+(test
+ (name test_keeper_hitl_gate_health)
+ (modules test_keeper_hitl_gate_health)
+ (libraries alcotest masc masc_test_deps yojson))
 
 (test
  (name test_tui_keeper_chat_live)
@@ -3587,7 +3633,7 @@
 (test
  (name test_tui_server_identity_refresh)
  (modules test_tui_server_identity_refresh)
- (libraries alcotest masc masc.browser_lane masc_tui_lane_subscriptions masc_tui_lane_addons masc_tui_types masc_workspace masc_tui_fetched masc_tui_keeper_control masc_tui_board_detail masc_tui_message_input masc_tui_lane_installer masc_tui_voice_wizard_session masc_tui_account_login masc.voice_setup masc.voice_wizard unix))
+ (libraries masc_tui_native_tasks alcotest masc masc.browser_lane masc_tui_lane_subscriptions masc_tui_lane_addons masc_tui_types masc_workspace masc_tui_fetched masc_tui_keeper_control masc_tui_board_detail masc_tui_message_input masc_tui_lane_installer masc_tui_voice_wizard_session masc_tui_account_login masc.voice_setup masc.voice_wizard unix))
 
 (test
  (name test_tool_transport_prefix)
@@ -3833,7 +3879,7 @@
 (test
  (name test_tui_markdown)
  (modules test_tui_markdown)
- (libraries alcotest masc_tui_markdown masc_tui_message_layout masc_tui_render_prim)
+ (libraries alcotest masc_tui_code_lexer masc_tui_markdown masc_tui_message_layout masc_tui_render_prim masc_tui_theme)
  (action (setenv MASC_TUI_FORCE_COLOR 1 (run %{test}))))
 
 (test
@@ -4215,7 +4261,7 @@
 (test
  (name test_keeper_turn_preview)
  (modules test_keeper_turn_preview)
- (libraries alcotest astring agent_core masc))
+ (libraries alcotest astring agent_core masc masc.runtime))
 
 (test
  (name test_tui_planning_detail)
@@ -5033,6 +5079,10 @@
 
 (include stanzas/test_keeper_kata_inventory.inc)
 
+(test
+ (name test_tui_collab)
+ (modules test_tui_collab)
+ (libraries alcotest masc masc_tui_collab))
 
 (rule
  (alias runtest-test_install_runtime_setup)
@@ -5708,6 +5758,33 @@
  (modules test_goal_suspension_projection)
  (libraries masc_dashboard masc_goal alcotest yojson))
 
+(library
+ (name native_tool_outcome_fixture)
+ (wrapped false)
+ (modules native_tool_outcome_fixture)
+ (libraries alcotest astring yojson masc masc.runtime masc.agent_core masc.server masc.ag_ui
+  masc_tui_keeper_chat_live masc_tui_keeper_chat_log masc_tui_keeper_chat_transcript))
+
+(test
+ (name test_tui_native_tool_outcomes)
+ (modules test_tui_native_tool_outcomes)
+ (libraries alcotest yojson masc masc.runtime masc.agent_core masc.server masc.ag_ui masc.sse_wire native_tool_outcome_fixture
+  masc_tui_keeper_chat_live masc_tui_keeper_chat_log masc_tui_keeper_chat_transcript))
+
+
+
+(test
+ (name test_tui_native_tool_progress)
+ (modules test_tui_native_tool_progress)
+ (libraries masc.fs_compat astring alcotest yojson unix eio_main masc masc.runtime masc.agent_core masc.server masc.ag_ui masc.sse_wire
+  masc.masc_types native_tool_outcome_fixture masc_tui_keeper_chat_live masc_tui_keeper_chat_log
+  masc_tui_keeper_chat_transcript masc_tui_keeper_chat_projection))
+
+(test
+ (name test_redaction_source_spans)
+ (modules test_redaction_source_spans)
+ (libraries alcotest masc masc.secret_patterns re unix))
+
 ; H2 crash-resume harness: scenario subcommands need orchestrated env
 ; (H2_ROOT, H2_ASYNC_*), so it is an executable, not a (test) — a (test)
 ; stanza would run it with no args under the default runtest alias and exit 2.
@@ -5762,4 +5839,29 @@
  (modules test_tui_models_account_reading)
  (libraries alcotest masc_tui_types masc_tui_render_prim
   masc_tui_runtime_config_view masc_tui_account_login))
+
+(test
+ (name test_tui_model_content_activity)
+ (modules test_tui_model_content_activity)
+ (libraries alcotest astring yojson masc masc.masc_types masc.agent_core masc.runtime masc.server masc.ag_ui
+  native_tool_outcome_fixture masc_tui_keeper_chat_projection
+  masc_tui_keeper_chat_live masc_tui_keeper_chat_log masc_tui_keeper_chat_transcript))
+
+(test
+ (name test_tui_native_tasks)
+ (modules test_tui_native_tasks)
+ (libraries alcotest yojson uri masc masc.runtime masc_tui_native_tasks
+  masc_tui_types masc_tui_render_chat masc_tui_message_layout masc_tui_image_preview))
+
+(test
+ (name test_runtime_native_tasks)
+ (modules test_runtime_native_tasks)
+ (libraries alcotest yojson masc.runtime))
+
+(include stanzas/test_native_task_http.inc)
+
+(test
+ (name test_tui_msx_checkpoint_pending)
+ (modules test_tui_msx_checkpoint_pending)
+ (libraries alcotest unix masc.keeper_operation_identity masc_tui_msx_checkpoint_pending))
 

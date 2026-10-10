@@ -11,9 +11,8 @@
 
 open Tool_args
 
-(* Every failure this module builds is a refusal before the machine is touched:
-   arguments that did not parse, or an [Msx_lane.error], which the lane only
-   answers before anything it keeps has changed (msx_lane.mli). Left
+(* Argument and pre-effect lane failures are refusals. [Effect_unknown]
+   remains a runtime failure with unknown effect disposition. Left
    undeclared, a failure reads as effect-outcome-unknown, and a composition
    that ran this tool ends the Keeper's turn over it instead of handing it
    back: "no MSX machine is loaded" after a server restart failed the whole
@@ -81,6 +80,8 @@ let of_lane ?(extra = []) ?sprites ?metadata ~tool_name ~start_time
     |> Tool_result.with_metadata (`Assoc ["io.github.jeong-sik/masc.machine.errorCode", `String code])
   | Error ((Msx_lane.No_machine | Msx_lane.Invalid_request _) as e) ->
     reject ~tool_name ~start_time (Msx_lane.error_to_string e)
+  | Error (Msx_lane.Effect_unknown message) ->
+    Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time message
   | Error (Msx_lane.Unreadable _ as e) ->
     refuse ~class_:Tool_result.Runtime_failure ~tool_name ~start_time
       (Msx_lane.error_to_string e)
@@ -379,14 +380,29 @@ let checkpoint_slot args =
     else Ok slot
 ;;
 
+let run_checkpoint ~restore ~base_path ~slot =
+  let ledger_dir = msx_dir ~base_path in
+  let path = Filename.concat (Filename.concat ledger_dir "saves") (slot ^ ".json") in
+  if restore then Msx_lane.restore ~path ~ledger_dir else Msx_lane.save ~path
+
+(* The completion travels with the observation: the checkpoint's server-side
+   receipt settles from these fields, and only the worker that ran the
+   checkpoint knows its change mark. *)
 let handle_checkpoint ~restore ~tool_name ~start_time ~base_path args =
   match checkpoint_slot args with
   | Error message -> reject ~tool_name ~start_time message
   | Ok slot ->
-    let ledger_dir = msx_dir ~base_path in
-    let path = Filename.concat (Filename.concat ledger_dir "saves") (slot ^ ".json") in
-    let result = if restore then Msx_lane.restore ~path ~ledger_dir else Msx_lane.save ~path in
-    of_lane ~tool_name ~start_time ~extra:["slot", `String slot] result
+    match run_checkpoint ~restore ~base_path ~slot with
+    | Ok (completed : Msx_lane.checkpoint_effect) ->
+      Tool_result.make_ok ~tool_name ~start_time
+        ~data:(`Assoc (observation_fields completed.observation
+               @ [ "slot", `String slot
+                 ; "change_count", `Int completed.mark.Msx_lane.count
+                 ; "incarnation", `String completed.mark.Msx_lane.incarnation
+                 ; "checkpoint_sha256", `String completed.checkpoint_sha256 ]))
+        ()
+    | Error e ->
+      of_lane ~tool_name ~start_time ~extra:["slot", `String slot] (Error e)
 ;;
 
 (* masc_msx_meta — which core this server linked, as [Msx_lane.core] reports
@@ -442,6 +458,8 @@ let handle_checkpoint_info ~tool_name ~start_time ~base_path args =
         ()
     | Error ((Msx_lane.Invalid_request _ | Msx_lane.No_machine | Msx_lane.Activity_disabled | Msx_lane.Activity_unobserved) as e) ->
       reject ~tool_name ~start_time (Msx_lane.error_to_string e)
+    | Error (Msx_lane.Effect_unknown message) ->
+      Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time message
     | Error (Msx_lane.Unreadable _ as e) ->
       refuse ~class_:Tool_result.Runtime_failure ~tool_name ~start_time
         (Msx_lane.error_to_string e)

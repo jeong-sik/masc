@@ -68,7 +68,6 @@ let apply_disposition
       ?dropped_statements
       ?durable_range_id
       ?official_range_id
-      ?explicit_write_range_id
       ?(absorbed = [])
       ?(revisions = [])
       ?(new_claims = [])
@@ -78,7 +77,6 @@ let apply_disposition
     ?dropped_statements
     ?durable_range_id
     ?official_range_id
-    ?explicit_write_range_id
     ~absorbed
     ~revisions
     ~keepers_dir
@@ -698,6 +696,28 @@ let check_batch_retraction_recovers_exact_reason_evidence ~torn_tail () =
   check int "repeated retry does not duplicate recovered evidence"
     (List.length journal)
     (List.length (read_journal_lines ~keepers_dir))
+;;
+
+let test_retirement_context_rejects_stale_current () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let target = fact ~claim:"retired policy" () in
+  let original = replace ~keepers_dir ~facts:[target] () |> require_ok in
+  (match Current.retract_fact ~keepers_dir ~keeper_id:"keeper" ~now:300.
+      ~source:(source Current.Explicit_retract) ~memory_id:(Types.memory_id target)
+      ~reason:"operator retired this policy before prompt construction" () with
+   | Ok _ -> () | Error _ -> fail "fixture retraction failed");
+  (match Current.read_retirement_context ~keepers_dir ~keeper_id:"keeper"
+      ~expected_revision:(Some original.revision) ~current_facts:original.facts with
+   | Current.Retirement_source_changed -> ()
+   | _ -> fail "stale current facts suppressed committed retirement evidence");
+  let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" |> require_ok
+    |> Option.get in
+  (match Current.read_retirement_context ~keepers_dir ~keeper_id:"keeper"
+      ~expected_revision:(Some current.revision) ~current_facts:current.facts with
+   | Current.Retirement_archive (Ok [archived]) ->
+       check bool "fresh coherent archive retains the retired identity" true
+         (archived.original = target)
+   | _ -> fail "fresh current and retirement evidence are not coherent")
 ;;
 
 let test_batch_retraction_recovers_exact_reason_evidence () =
@@ -1654,20 +1674,6 @@ let official_range_id : Current.official_range_id =
   }
 ;;
 
-let explicit_write_range_id : Current.explicit_write_range_id =
-  { receipt_scope = durable_range_id.receipt_scope
-  ; after_sequence = 0
-  ; through_sequence = 1
-  ; input_sha256 = Digestif.SHA256.(digest_string
-      {|[{"sequence":1,"claim":"queued fact"}]|} |> to_hex)
-  }
-;;
-
-let read_explicit ~keepers_dir ~receipt_scope =
-  Current.committed_explicit_write_range ~keepers_dir ~keeper_id:"keeper" ~receipt_scope
-  |> require_ok
-;;
-
 let read_official ~keepers_dir =
   Current.committed_official_range ~keepers_dir ~keeper_id:"keeper"
     ~receipt_scope:official_range_id.receipt_scope
@@ -2043,128 +2049,756 @@ let test_unchanged_pass_keeps_snapshot_and_commits_range () =
     | Error detail -> fail detail)
 ;;
 
-let test_explicit_write_receipt_commits_no_change_and_survives_retirement () =
-  with_temp_keepers @@ fun keepers_dir ->
-  let commit ?durable_range_id ?official_range_id ~explicit_write_range_id new_claims =
-    Current.apply_disposition ?durable_range_id ?official_range_id ~explicit_write_range_id
-      ~absorbed:[] ~revisions:[] ~keepers_dir ~keeper_id:"keeper" ~now:200.
-      ~source:(source Current.Librarian) ~new_claims () |> require_ok in
-  let target = fact ~claim:"queued fact" () in
-  let initial_gap = {explicit_write_range_id with after_sequence=1; through_sequence=2} in
-  (match apply_disposition ~keepers_dir ~explicit_write_range_id:initial_gap
-      ~new_claims:[target] () with
-   | Error _ -> () | Ok _ -> fail "a new scope skipped its initial input prefix");
-  check bool "initial gap cannot create a snapshot" false
-    (Sys.file_exists (Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"));
-  let first = commit ~durable_range_id ~official_range_id ~explicit_write_range_id [target] in
-  check bool "explicit input joins the actual rewritten snapshot" true
-    (first.commit = Current.Rewritten);
-  let scope = explicit_write_range_id.receipt_scope in
-  check bool "exact explicit input identity is committed" true
-    (read_explicit ~keepers_dir ~receipt_scope:scope = Some explicit_write_range_id);
-  let path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
-  let original = Fs_compat.load_file path in
-  let next = { explicit_write_range_id with after_sequence=1; through_sequence=2;
-    input_sha256=Digestif.SHA256.(digest_string
-      {|[{"sequence":2,"claim":"queued fact"}]|} |> to_hex) } in
-  let no_change = commit ~explicit_write_range_id:next [target] in
-  check bool "a repeated observation can consume without a rewrite" true
-    (no_change.commit = Current.Unchanged);
-  check int "no-change keeps the revision" first.snapshot.revision no_change.snapshot.revision;
-  check string "no-change keeps the exact snapshot bytes" original (Fs_compat.load_file path);
-  check bool "the later explicit receipt replaces only its own scope and kind" true
-    (read_explicit ~keepers_dir ~receipt_scope:scope = Some next);
-  require_official ~keepers_dir;
-  check bool "atom receipt with the same scope remains independent" true
-    (require_committed_range ~keepers_dir "atom receipt missing" = durable_range_id);
-  (match Current.retract_fact ~keepers_dir ~keeper_id:"keeper" ~now:300.
-      ~source:(source Current.Explicit_retract) ~memory_id:(Types.memory_id target)
-      ~reason:"retired after admission" () with
-   | Ok retired -> check int "retirement writes a later revision"
-       (first.snapshot.revision+1) retired.revision
-   | Error _ -> fail "retirement failed");
-  let retired_bytes = Fs_compat.load_file path in
-  let receipt_path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
-  let receipts_before = Fs_compat.load_file receipt_path in
-  List.iter (fun stale ->
-    (match apply_disposition ~keepers_dir ~explicit_write_range_id:stale
-        ~new_claims:[target] () with
-     | Error _ -> () | Ok _ -> fail "stale explicit input resurrected a retired fact");
-    check string "rejected duplicate, old or gapped range leaves snapshot unchanged"
-      retired_bytes (Fs_compat.load_file path);
-    check string "rejected range cannot replace its committed receipt"
-      receipts_before (Fs_compat.load_file receipt_path))
-    [next; explicit_write_range_id;
-     {next with after_sequence=3; through_sequence=4};
-     {next with through_sequence=3}];
-  let other = {explicit_write_range_id with receipt_scope="different-queue-generation"} in
-  ignore (apply_disposition ~keepers_dir ~explicit_write_range_id:other () |> require_ok);
-  check bool "retirement and a different queue generation preserve consumed input" true
-    (read_explicit ~keepers_dir ~receipt_scope:scope = Some next);
-  check bool "other generation keeps its own receipt" true
-    (read_explicit ~keepers_dir ~receipt_scope:other.receipt_scope = Some other);
-  let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
-    |> require_ok |> require_some in
-  check int "receipt recovery never resurrects retired content" 0 (List.length current.facts)
+let candidate_receipt sequence request_id payload : Current.explicit_candidate_id =
+  {queue_generation="candidate-generation"; request_id; sequence;
+   input_sha256=Digestif.SHA256.(digest_string payload |> to_hex)}
 ;;
 
-let test_explicit_write_prepared_receipt_requires_exact_snapshot () =
+let commit_candidates ~keepers_dir ids claims =
+  Current.apply_disposition ~explicit_candidate_ids:ids ~absorbed:[] ~revisions:[]
+    ~keepers_dir ~keeper_id:"keeper" ~now:200. ~source:(source Current.Librarian)
+    ~new_claims:claims ()
+;;
+
+let read_candidates ~keepers_dir generation =
+  Current.committed_explicit_candidates ~keepers_dir ~keeper_id:"keeper"
+    ~queue_generation:generation |> require_ok
+;;
+
+let test_sparse_candidate_receipts_survive_retirement () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let a = candidate_receipt 1 "pending-a" "unresolved A" in
+  let b = candidate_receipt 2 "settled-b" "B" in
+  let c = candidate_receipt 3 "settled-c" "C" in
+  let target = fact ~claim:"B and C establish one durable policy" () in
+  let first = commit_candidates ~keepers_dir [b;c] [target] |> require_ok in
+  check bool "sparse set rewrites one snapshot" true (first.commit=Current.Rewritten);
+  let found = read_candidates ~keepers_dir b.queue_generation in
+  check bool "only B and C have authoritative receipts" true
+    (List.length found=2 && List.mem b found && List.mem c found && not (List.mem a found));
+  let snapshot_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let before = Fs_compat.load_file snapshot_path in
+  let settled_a = commit_candidates ~keepers_dir [a] [] |> require_ok in
+  check bool "later A settlement can keep the snapshot unchanged" true
+    (settled_a.commit=Current.Unchanged);
+  check string "unchanged commit preserves snapshot bytes" before (Fs_compat.load_file snapshot_path);
+  let all = read_candidates ~keepers_dir b.queue_generation in
+  check bool "no-change A receipt preserves B and C" true
+    (List.length all=3 && List.for_all (fun id -> List.mem id all) [a;b;c]);
+  (match Current.retract_fact ~keepers_dir ~keeper_id:"keeper" ~now:300.
+      ~source:(source Current.Explicit_retract) ~memory_id:(Types.memory_id target)
+      ~reason:"policy retired after consumption" () with
+   | Ok _ -> () | Error _ -> fail "target retirement failed");
+  let retired = Fs_compat.load_file snapshot_path in
+  let receipt_path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+  let receipts = Fs_compat.load_file receipt_path in
+  List.iter (fun ids ->
+    (match commit_candidates ~keepers_dir ids [target] with
+     | Error _ -> () | Ok _ -> fail "consumed input resurrected retired knowledge");
+    check string "replay refusal preserves retired snapshot" retired (Fs_compat.load_file snapshot_path);
+    check string "replay refusal preserves receipt ledger" receipts (Fs_compat.load_file receipt_path))
+    [[b]; [b;c]; [candidate_receipt 5 "fresh-during-replay" "new";b]; [{b with input_sha256=(candidate_receipt 2 "settled-b" "changed payload").input_sha256}];
+     [{b with request_id="different-request-same-sequence"}]; [{b with sequence=4}]];
+  check int "retirement does not forget consumed candidates" 3
+    (List.length (read_candidates ~keepers_dir b.queue_generation));
+  let other = {b with queue_generation="another-generation"} in
+  ignore (commit_candidates ~keepers_dir [other] [] |> require_ok);
+  check bool "another generation has an independent receipt" true
+    (read_candidates ~keepers_dir other.queue_generation = [other]);
+  check int "other generation leaves original receipts intact" 3
+    (List.length (read_candidates ~keepers_dir b.queue_generation))
+;;
+
+let test_candidate_receipt_reconciliation_preserves_first_order () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let a = candidate_receipt 1 "first" "A" in
+  let b = candidate_receipt 2 "second" "B" in
+  ignore (commit_candidates ~keepers_dir [a;b] [fact ~claim:"policy" ()] |> require_ok);
+  ignore (apply_disposition ~keepers_dir ~durable_range_id () |> require_ok);
+  let expected = read_candidates ~keepers_dir a.queue_generation in
+  let path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+  let canonical = Fs_compat.load_file path in
+  rewrite_receipts ~keepers_dir (map_field "receipts" (function
+    | `List receipts ->
+        let atom = List.find (fun receipt ->
+          Yojson.Safe.Util.member "range_id" receipt <> `Null) receipts in
+        `List (receipts @ [atom])
+    | _ -> fail "expected candidate and atom receipts"));
+  check bool "dedup preserves the first occurrence order" true
+    (read_candidates ~keepers_dir a.queue_generation = expected);
+  let reconciled = Fs_compat.load_file path in
+  check string "on-disk first-occurrence order is preserved" canonical reconciled;
+  check int "duplicate atom removed without dropping candidates" 3
+    Yojson.Safe.Util.(Yojson.Safe.from_string reconciled |> member "receipts" |> to_list |> List.length);
+  check bool "reconciled reads are idempotent" true
+    (read_candidates ~keepers_dir a.queue_generation = expected);
+  check string "an unchanged receipt set is not rewritten" reconciled
+    (Fs_compat.load_file path)
+;;
+
+let test_candidate_set_conflict_is_atomic () =
+  List.iter (fun colliding ->
+    with_temp_keepers @@ fun keepers_dir ->
+    let b = candidate_receipt 2 "request-b" "B" in
+    let c = candidate_receipt 3 "request-c" "C" in
+    ignore (replace ~keepers_dir ~facts:[fact ~claim:"prior" ()] () |> require_ok);
+    let snapshot_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+    let before = Fs_compat.load_file snapshot_path in
+    (match commit_candidates ~keepers_dir [c;b;colliding b] [fact ~claim:"must not commit" ()] with
+     | Error _ -> () | Ok _ -> fail "conflicting candidate set committed");
+    check string "whole conflicting set leaves snapshot unchanged" before (Fs_compat.load_file snapshot_path);
+    check (list string) "no innocent member acquired a receipt" []
+      (List.map (fun (id : Current.explicit_candidate_id) -> id.request_id)
+        (read_candidates ~keepers_dir b.queue_generation)))
+    [Fun.id; (fun (b : Current.explicit_candidate_id) -> {b with sequence=4});
+     (fun (b : Current.explicit_candidate_id) -> {b with request_id="different-request"});
+     (fun (b : Current.explicit_candidate_id) -> {b with input_sha256=String.make 64 'f'})]
+;;
+
+let test_candidate_prepared_set_recovers_exact_snapshot () =
   List.iter (fun exact ->
     with_temp_keepers @@ fun keepers_dir ->
-    ignore (apply_disposition ~keepers_dir ~explicit_write_range_id
-      ~new_claims:[fact ~claim:"queued fact" ()] () |> require_ok);
+    let b = candidate_receipt 2 "request-b" "B" in
+    let c = candidate_receipt 3 "request-c" "C" in
+    ignore (commit_candidates ~keepers_dir [b;c] [fact ~claim:"settled policy" ()] |> require_ok);
     rewrite_receipts ~keepers_dir (map_receipts (fun receipt ->
       let receipt = map_field "state" (fun _ -> `String "prepared") receipt in
       if exact then receipt
       else map_field "snapshot_sha256" (fun _ -> `String (String.make 64 'f')) receipt));
-    let found = read_explicit ~keepers_dir ~receipt_scope:explicit_write_range_id.receipt_scope in
-    check bool "prepared receipt recovers only against its exact snapshot"
-      true (found = if exact then Some explicit_write_range_id else None);
+    let found = read_candidates ~keepers_dir b.queue_generation in
+    check bool "whole set recovers only for the exact committed snapshot" true
+      (if exact then List.length found=2 && List.mem b found && List.mem c found else found=[]);
     if exact then (
-      let receipt = Yojson.Safe.from_file
+      let json = Yojson.Safe.from_file
         (Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper") in
-      check string "recovery persists the committed state" "committed"
-        Yojson.Safe.Util.(member "receipts" receipt |> to_list |> List.hd
-                         |> member "state" |> to_string))) [true;false]
+      check (list string) "recovery persists both committed states" ["committed";"committed"]
+        Yojson.Safe.Util.(json |> member "receipts" |> to_list
+          |> List.map (fun receipt -> receipt |> member "state" |> to_string)))) [true;false]
 ;;
 
-let test_explicit_write_receipt_rejects_invalid_or_ambiguous_identity () =
-  let invalid =
-    [ {explicit_write_range_id with receipt_scope=""}
-    ; {explicit_write_range_id with receipt_scope=" "}
-    ; {explicit_write_range_id with receipt_scope=" padded "}
-    ; {explicit_write_range_id with after_sequence=(-1)}
-    ; {explicit_write_range_id with through_sequence=0}
-    ; {explicit_write_range_id with input_sha256=String.make 64 'A'}
-    ; {explicit_write_range_id with input_sha256="not-a-digest"} ] in
-  List.iter (fun explicit_write_range_id ->
+let recall_binding sequence source_fact target : Current.admission_recall_binding =
+  let request_id = Printf.sprintf "recall-source-%d" sequence in
+  let row = `Assoc ["sequence",`Int sequence; "request_id",`String request_id;
+    "fact",Types.fact_to_json source_fact] in
+  {candidate_id=candidate_receipt sequence request_id (Yojson.Safe.to_string row);
+   source_fact; target_memory_id=Types.memory_id target}
+;;
+
+let current_revision ~keepers_dir =
+  match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" with
+  | Ok snapshot -> Option.map (fun (current : Current.t) -> current.revision) snapshot
+  | Error detail -> fail detail
+;;
+
+let commit_recall ?decided_at_revision ~keepers_dir binding claims =
+  let decided_at_revision = match decided_at_revision with
+    | Some revision -> revision
+    | None -> current_revision ~keepers_dir in
+  Current.apply_disposition ~explicit_candidate_ids:[binding.Current.candidate_id]
+    ~admission_recall:{decided_at_revision; bindings=[binding]} ~absorbed:[] ~revisions:[]
+    ~keepers_dir ~keeper_id:"keeper" ~now:200. ~source:(source Current.Librarian)
+    ~new_claims:claims ()
+;;
+
+let read_recall ~keepers_dir =
+  Current.read_with_admission_recall_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+;;
+
+let test_admission_recall_commits_recovers_and_expires_on_retirement () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let target = fact ~claim:"Release R001 through R200 require two approvals." () in
+  let evidence = board_fact "p-0123456789abcdef0123456789abcdef" ~claim:"R002 requires two approvals." in
+  let binding = recall_binding 1 evidence target in
+  let first = commit_recall ~keepers_dir binding [target] |> require_ok in
+  let snapshot, found = read_recall ~keepers_dir |> require_ok in
+  check bool "current target and exact Board provenance are read coherently" true
+    (snapshot=Some first.snapshot && found=[binding]);
+  check bool "binding also proves consumption of its original candidate" true
+    (read_candidates ~keepers_dir binding.candidate_id.queue_generation=[binding.candidate_id]);
+  let second = recall_binding 2 (fact ~claim:"R199 requires two approvals." ()) target in
+  let unchanged = commit_recall ~keepers_dir second [] |> require_ok in
+  check int "binding-only admission preserves the current snapshot revision"
+    first.snapshot.revision unchanged.snapshot.revision;
+  rewrite_receipts ~keepers_dir (map_receipts (map_field "state" (fun _ -> `String "prepared")));
+  let _, recovered = read_recall ~keepers_dir |> require_ok in
+  check bool "both source bindings recover against the exact kept snapshot" true
+    (List.length recovered=2 && List.mem binding recovered && List.mem second recovered);
+  (match Current.retract_fact ~keepers_dir ~keeper_id:"keeper" ~now:300.
+    ~source:(source Current.Explicit_retract) ~memory_id:(Types.memory_id target)
+    ~reason:"policy retired" () with
+   | Ok _ -> () | Error _ -> fail "target retirement failed");
+  check int "retired target has no search binding" 0
+    (List.length (snd (read_recall ~keepers_dir |> require_ok)));
+  ignore (Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:400.
+    ~source:(source Current.Explicit_write) target |> require_upsert_ok);
+  check int "readding identical bytes never revives old source bindings" 0
+    (List.length (snd (read_recall ~keepers_dir |> require_ok)));
+  check int "retirement retains the consumed candidate receipts" 2
+    (List.length (read_candidates ~keepers_dir binding.candidate_id.queue_generation))
+;;
+
+let test_admission_recall_refuses_a_target_retired_after_the_decision () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let target = fact ~claim:"Release R001 through R200 require two approvals." () in
+  ignore (replace ~keepers_dir ~facts:[target] () |> require_ok);
+  (* The decision reads Memory here. *)
+  let decided = current_revision ~keepers_dir in
+  (* While the model runs, the keeper retracts the target and adds the same
+     claim back: the same memory_id, a new incarnation. *)
+  (match Current.retract_fact ~keepers_dir ~keeper_id:"keeper" ~now:300.
+    ~source:(source Current.Explicit_retract) ~memory_id:(Types.memory_id target)
+    ~reason:"policy retired" () with
+   | Ok _ -> () | Error _ -> fail "target retirement failed");
+  ignore (Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:400.
+    ~source:(source Current.Explicit_write) target |> require_upsert_ok);
+  let snapshot_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let before = Fs_compat.load_file snapshot_path in
+  let binding = recall_binding 1 (fact ~claim:"R002 requires two approvals." ()) target in
+  (match commit_recall ~decided_at_revision:decided ~keepers_dir binding [] with
+   | Error _ -> ()
+   | Ok _ -> fail "a binding decided before the retirement attached to the new incarnation");
+  check string "the refused binding changes no current bytes" before (Fs_compat.load_file snapshot_path);
+  check int "the refused binding consumes no candidate" 0
+    (List.length (read_candidates ~keepers_dir binding.candidate_id.queue_generation));
+  (* A decision that read the current revision binds the re-added target. *)
+  ignore (commit_recall ~keepers_dir binding [] |> require_ok);
+  check int "a decision on current Memory still binds" 1
+    (List.length (snd (read_recall ~keepers_dir |> require_ok)))
+;;
+
+(* A replacement without drop reasons appends its journal line best-effort.
+   When that line, the older lines or the whole journal are gone, nothing
+   left shows the retirement between the decision and the re-add. *)
+let test_admission_recall_refuses_a_decision_across_missing_journal_revisions () =
+  List.iter (fun damage ->
     with_temp_keepers @@ fun keepers_dir ->
-    ignore (replace ~keepers_dir ~facts:[fact ~claim:"prior" ()] () |> require_ok);
-    let path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
-    let before = Fs_compat.load_file path in
-    (match apply_disposition ~keepers_dir ~explicit_write_range_id
-        ~new_claims:[fact ~claim:"must not enter current memory" ()] () with
-     | Error _ -> () | Ok _ -> fail "invalid explicit input identity committed");
-    check string "invalid input identity cannot change the snapshot" before (Fs_compat.load_file path);
-    check bool "invalid input identity creates no receipt" false
-      (Sys.file_exists (Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper"))) invalid;
-  let add_field key value = function
-    | `Assoc fields -> `Assoc ((key,value)::fields)
-    | _ -> fail "expected receipt object" in
-  List.iter (fun transform ->
+    let target = fact ~claim:"Release R001 through R200 require two approvals." () in
+    ignore (replace ~keepers_dir ~facts:[target] () |> require_ok);
+    (* The decision reads Memory here. *)
+    let decided = current_revision ~keepers_dir in
+    let journal = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+    let decision_journal = Fs_compat.load_file journal in
+    ignore (replace ~keepers_dir ~expected_revision:decided ~facts:[] () |> require_ok);
+    Fs_compat.invalidate_cached_writer journal;
+    (match damage with
+     | `Lost_line -> Fs_compat.save_file journal decision_journal
+     | `Lost_prefix -> Fs_compat.save_file journal ""
+     | `Lost_file -> ());
+    ignore (Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:400.
+      ~source:(source Current.Explicit_write) target |> require_upsert_ok);
+    (match damage with
+     | `Lost_line | `Lost_prefix -> ()
+     | `Lost_file -> Fs_compat.invalidate_cached_writer journal; Sys.remove journal);
+    let snapshot_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+    let before = Fs_compat.load_file snapshot_path in
+    let binding = recall_binding 1 (fact ~claim:"R002 requires two approvals." ()) target in
+    (match commit_recall ~decided_at_revision:decided ~keepers_dir binding [] with
+     | Error _ -> ()
+     | Ok _ -> fail "a journal gap let a binding attach across an unproven retirement");
+    check string "the refused binding changes no current bytes" before
+      (Fs_compat.load_file snapshot_path);
+    check int "the refused binding consumes no candidate" 0
+      (List.length (read_candidates ~keepers_dir binding.candidate_id.queue_generation));
+    (* The gap lies before current Memory, so a decision on it binds and
+       search finds the binding. *)
+    ignore (commit_recall ~keepers_dir binding [] |> require_ok);
+    check bool "a decision on current Memory still binds" true
+      (snd (read_recall ~keepers_dir |> require_ok) = [binding]))
+    [`Lost_line; `Lost_prefix; `Lost_file]
+;;
+
+let test_admission_recall_refuses_unbound_or_mistargeted_payloads () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let target = fact ~claim:"consolidated target" () in
+  let binding = recall_binding 1 (fact ~claim:"original scope R002" ()) target in
+  ignore (replace ~keepers_dir ~facts:[target] () |> require_ok);
+  let snapshot_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let before = Fs_compat.load_file snapshot_path in
+  List.iter (fun (ids, binding) ->
+    (match Current.apply_disposition ~explicit_candidate_ids:ids
+       ~admission_recall:{decided_at_revision=current_revision ~keepers_dir; bindings=[binding]}
+       ~absorbed:[] ~revisions:[] ~keepers_dir ~keeper_id:"keeper" ~now:250.
+       ~source:(source Current.Librarian) ~new_claims:[] () with
+     | Error _ -> () | Ok _ -> fail "invalid recall binding committed");
+    check string "binding refusal changes no current bytes" before (Fs_compat.load_file snapshot_path);
+    check int "binding refusal consumes no candidate" 0
+      (List.length (read_candidates ~keepers_dir binding.candidate_id.queue_generation)))
+    [[],binding;
+     [binding.candidate_id],{binding with source_fact=fact ~claim:"changed candidate" ()};
+     [binding.candidate_id],{binding with target_memory_id=Types.memory_id (fact ~claim:"absent target" ())}]
+;;
+
+let test_admission_recall_requires_complete_later_history_only_for_bindings () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let target = fact ~claim:"current target" () in
+  let binding = recall_binding 1 (fact ~claim:"R002 evidence" ()) target in
+  ignore (commit_recall ~keepers_dir binding [target] |> require_ok);
+  let other = fact ~claim:"unrelated current fact" () in
+  ignore (Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:300.
+    ~source:(source Current.Explicit_write) other |> require_upsert_ok);
+  check bool "unrelated later revision preserves live binding" true
+    (snd (read_recall ~keepers_dir |> require_ok)=[binding]);
+  let journal = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  Fs_compat.invalidate_cached_writer journal;
+  Out_channel.with_open_bin journal (fun out -> output_string out "");
+  (match read_recall ~keepers_dir with
+   | Error _ -> () | Ok _ -> fail "missing intervening history silently revived a binding");
+  (* A keeper with no bound receipts still has its ordinary current reader. *)
+  with_temp_keepers @@ fun unbound_dir ->
+  ignore (replace ~keepers_dir:unbound_dir ~facts:[target] () |> require_ok);
+  let unbound_journal = Current.journal_path_for_keepers_dir ~keepers_dir:unbound_dir ~keeper_id:"keeper" in
+  Fs_compat.invalidate_cached_writer unbound_journal;
+  Out_channel.with_open_bin unbound_journal (fun out -> output_string out "malformed");
+  let current, found = read_recall ~keepers_dir:unbound_dir |> require_ok in
+  check bool "no binding requires no history scan" true (Option.is_some current && found=[])
+;;
+
+let test_admission_receipt_failure_preserves_direct_snapshot () =
+  List.iter (fun unreadable ->
     with_temp_keepers @@ fun keepers_dir ->
-    ignore (apply_disposition ~keepers_dir ~explicit_write_range_id () |> require_ok);
-    rewrite_receipts ~keepers_dir (map_receipts transform);
-    match Current.committed_explicit_write_range ~keepers_dir ~keeper_id:"keeper"
-        ~receipt_scope:explicit_write_range_id.receipt_scope with
-    | Error _ -> () | Ok _ -> fail "malformed explicit receipt was accepted")
-    [ add_field "range_id" `Null
-    ; add_field "official_range_id" `Null
-    ; add_field "explicit_write_range_id" `Null
-    ; map_field "explicit_write_range_id" (add_field "receipt_scope" (`String "duplicate"))
-    ; map_field "explicit_write_range_id" (add_field "unknown" `Null)
-    ; map_field "explicit_write_range_id" (map_field "through_sequence" (fun _ -> `Int 0))
-    ; map_field "explicit_write_range_id" (map_field "input_sha256" (fun _ -> `String "invalid")) ]
+    let target = fact ~claim:"direct current fact survives unavailable recall" () in
+    let committed = replace ~keepers_dir ~facts:[target] () |> require_ok in
+    let path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+    if unreadable then Fs_compat.mkdir_p path
+    else Out_channel.with_open_bin path (fun oc -> output_string oc "not-json");
+    (match Current.read_with_admission_recall_status_for_keepers_dir
+        ~keepers_dir ~keeper_id:"keeper" with
+     | Ok (Some snapshot, Error _) ->
+         check bool "independently decoded snapshot stays available" true
+           (snapshot = committed)
+     | Ok _ | Error _ -> fail "receipt failure hid the direct snapshot or claimed complete aliases");
+    check bool "consumption remains fail-closed" true
+      (Result.is_error (Current.committed_explicit_candidates
+        ~keepers_dir ~keeper_id:"keeper" ~queue_generation:"generation"))) [false;true]
+;;
+
+let test_admission_recall_no_change_cannot_hide_missing_retirement_transition () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let target = fact ~claim:"R002 policy" () in
+  let binding = recall_binding 1 (fact ~claim:"R002 original observation" ()) target in
+  let born = commit_recall ~keepers_dir binding [target] |> require_ok in
+  let journal = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let birth_journal = Fs_compat.load_file journal in
+  (* A replacement without drop reasons has best-effort journal delivery.
+     Restore only the birth bytes to reproduce its missing transition. *)
+  ignore (replace ~keepers_dir ~expected_revision:(Some born.snapshot.revision)
+    ~facts:[] () |> require_ok);
+  Fs_compat.invalidate_cached_writer journal;
+  Fs_compat.save_file journal birth_journal;
+  ignore (apply_disposition ~keepers_dir () |> require_ok);
+  ignore (Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:400.
+    ~source:(source Current.Explicit_write) target |> require_upsert_ok);
+  let rows = Fs_compat.load_jsonl journal in
+  check bool "same-revision observation is explicitly unchanged" true
+    (List.exists (fun json -> Yojson.Safe.Util.member "commit_effect" json = `String "unchanged") rows);
+  (match read_recall ~keepers_dir with
+   | Error _ -> ()
+   | Ok _ -> fail "no-change journal observation concealed a missing retirement transition")
+;;
+
+let revision_evidence ~keepers_dir after_revision =
+  Current.read_with_revision_evidence_for_keepers_dir
+    ~keepers_dir ~keeper_id:"keeper" ~after_revision
+;;
+
+let test_declared_revision_links_survive_journal_failure () =
+  List.iter (fun explicit -> with_temp_keepers @@ fun keepers_dir ->
+    let original = fact ~claim:"original declared policy" () in
+    let successor = fact ~claim:"revised declared policy" () in
+    let seeded = replace ~keepers_dir ~facts:[original] () |> require_ok in
+    let link : Types.revision =
+      {superseded=Types.memory_id original; superseded_by=Types.memory_id successor} in
+    let branch = fact ~claim:"separate verified policy branch" () in
+    let links = if explicit then [link] else
+      [link; {Types.superseded=Types.memory_id original; superseded_by=Types.memory_id branch}] in
+    let journal = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+    let seed_bytes = Fs_compat.load_file journal in
+    Fs_compat.invalidate_cached_writer journal;
+    Sys.remove journal;
+    Unix.mkdir journal 0o700;
+    let committed = if explicit then (
+      match Current.supersede_fact ~keepers_dir ~keeper_id:"keeper" ~now:300.
+        ~source:(source Current.Explicit_write) ~superseded_memory_id:link.superseded successor with
+      | Ok (snapshot, _) -> snapshot | Error _ -> fail "explicit supersession failed")
+      else apply_disposition ~keepers_dir ~revisions:links
+        ~dropped_statements:[{Types.memory_id=Types.memory_id original;
+          reason="verified policy split replaces the original"}]
+        ~new_claims:[successor;branch] () |> require_ok in
+    check int "replacement snapshot committed despite journal failure" (seeded.revision+1) committed.revision;
+    let receipt_path = Current.retraction_plan_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+    let receipt = Yojson.Safe.from_file receipt_path in
+    check int "prepared transaction retains each declared branch" (List.length links)
+      Yojson.Safe.Util.(receipt |> member "revision_links" |> to_list |> List.length);
+    (match revision_evidence ~keepers_dir seeded.revision with
+     | Error _ -> () | Ok _ -> fail "unfinished lineage returned as complete evidence");
+    Unix.rmdir journal;
+    Fs_compat.save_file journal seed_bytes;
+    (* A real subsequent writer recovers the exact committed link first. *)
+    ignore (apply_disposition ~keepers_dir () |> require_ok);
+    check bool "recovery clears prepared transaction" false (Sys.file_exists receipt_path);
+    let current, records = revision_evidence ~keepers_dir seeded.revision |> require_ok in
+    check bool "coherent successor snapshot" true
+      (Option.map (fun (snapshot : Current.t) -> snapshot.facts) current=Some committed.facts);
+    let transitions = List.filter (fun (row : Current.revision_evidence) ->
+      row.commit_effect=Some Current.Rewritten) records in
+    check bool "exact applied link recovered once" true
+      (List.map (fun (row : Current.revision_evidence) -> row.revision_links) transitions=[Some links]);
+    check bool "no-change reports no transition links" true
+      (List.exists (fun (row : Current.revision_evidence) ->
+        row.commit_effect=Some Current.Unchanged && row.revision_links=None) records)) [false;true]
+;;
+
+let test_revision_evidence_never_invents_links () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let original = fact ~claim:"withdrawn exact identity" () in
+  let seeded = replace ~keepers_dir ~facts:[original] () |> require_ok in
+  ignore (replace ~keepers_dir ~expected_revision:(Some seeded.revision) ~facts:[] () |> require_ok);
+  ignore (Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:400.
+    ~source:(source Current.Explicit_write) original |> require_upsert_ok);
+  let _, records = revision_evidence ~keepers_dir seeded.revision |> require_ok in
+  check bool "retire and re-add do not create an inferred successor" true
+    (List.for_all (fun (row : Current.revision_evidence) -> row.revision_links=Some []) records);
+  let journal = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let rows = Fs_compat.load_jsonl journal |> List.map (function
+    | `Assoc fields -> `Assoc (List.remove_assoc "commit_effect" (List.remove_assoc "revision_links" fields))
+    | _ -> fail "fixture expected journal object") in
+  Fs_compat.invalidate_cached_writer journal;
+  Fs_compat.save_file journal (String.concat "\n" (List.map Yojson.Safe.to_string rows) ^ "\n");
+  let _, unmarked = revision_evidence ~keepers_dir seeded.revision |> require_ok in
+  check bool "unrecorded transition and links remain unknown" true
+    (List.for_all (fun (row : Current.revision_evidence) ->
+      row.commit_effect=None && row.revision_links=None) unmarked);
+  (match revision_evidence ~keepers_dir (-1) with
+   | Error _ -> () | Ok _ -> fail "negative evidence frontier accepted")
+;;
+
+let successor_recall ~keepers_dir =
+  Current.read_successor_recall_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" |> require_ok
+;;
+
+let revise_into ~keepers_dir old targets =
+  let revisions = List.map (fun target ->
+    {Types.superseded=Types.memory_id old; superseded_by=Types.memory_id target}) targets in
+  apply_disposition ~keepers_dir ~revisions ~new_claims:targets
+    ~dropped_statements:[{Types.memory_id=Types.memory_id old; reason="verified explicit correction"}] () |> require_ok
+;;
+
+let test_successor_recall_tracks_multistep_split_incarnations () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let a = fact ~claim:"A scope covers R001 to R200" () in
+  let b = fact ~claim:"B corrects R015" () in
+  let c = fact ~claim:"C preserves other release policies" () in
+  let d = fact ~claim:"D verifies R015 correction" () in
+  let binding = recall_binding 1 (fact ~claim:"R015 original policy" ()) a in
+  ignore (commit_recall ~keepers_dir binding [a] |> require_ok);
+  check bool "initial binding remains direct" true
+    ((successor_recall ~keepers_dir).direct_bindings=[binding]);
+  ignore (revise_into ~keepers_dir a [b;c]);
+  ignore (revise_into ~keepers_dir b [d]);
+  let view = successor_recall ~keepers_dir in
+  check int "split has two current path candidates" 2 (List.length view.successor_candidates);
+  check int "retired original is never a direct binding" 0 (List.length view.direct_bindings);
+  check bool "paths retain original target and historical source without adopting them" true
+    (List.for_all (fun (candidate : Current.successor_recall_candidate) ->
+      candidate.binding=binding && candidate.original_target=a) view.successor_candidates);
+  check (list int) "chain follows revision order with no depth cut" [1;2]
+    (List.map (fun (candidate : Current.successor_recall_candidate) -> List.length candidate.path)
+      view.successor_candidates |> List.sort Int.compare);
+  for _ = 1 to 20 do
+    ignore (apply_disposition ~keepers_dir () |> require_ok);
+    let cached = successor_recall ~keepers_dir in
+    check bool "unchanged local observations preserve exact successor paths" true
+      (cached.successor_candidates=view.successor_candidates && cached.unresolved=view.unresolved)
+  done;
+  let current = Option.get view.snapshot in
+  ignore (replace ~keepers_dir ~expected_revision:(Some current.revision) ~facts:[c] () |> require_ok);
+  ignore (Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:500.
+    ~source:(source Current.Explicit_write) d |> require_upsert_ok);
+  let after = successor_recall ~keepers_dir in
+  check (list string) "re-added terminal cannot revive dead branch" [Types.memory_id c]
+    (List.map (fun (candidate : Current.successor_recall_candidate) -> Types.memory_id candidate.target)
+      after.successor_candidates);
+  check bool "conclusive retirement remains distinct from history failure" true
+    (List.exists (fun (item : Current.recall_unresolved) -> match item.reason with
+      | Current.Retired_without_successor _ -> true | _ -> false) after.unresolved)
+;;
+
+let test_successor_recall_preserves_current_on_missing_history () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let a = fact ~claim:"original target" () and b = fact ~claim:"current successor" () in
+  let binding = recall_binding 1 (fact ~claim:"original source" ()) a in
+  ignore (commit_recall ~keepers_dir binding [a] |> require_ok);
+  ignore (revise_into ~keepers_dir a [b]);
+  let journal = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let original = Fs_compat.load_file journal in
+  let rows = Fs_compat.load_jsonl journal in
+  Fs_compat.invalidate_cached_writer journal;
+  let strip keys = rows |> List.map (function
+    | `Assoc fields -> `Assoc (List.filter (fun (key, _) -> not (List.mem key keys)) fields)
+    | json -> json) |> List.map Yojson.Safe.to_string |> String.concat "\n" in
+  List.iter (fun (keys, expect_missing) ->
+    Fs_compat.save_file journal (strip keys ^ "\n");
+    let view = successor_recall ~keepers_dir in
+    check bool "ordinary current facts survive lineage failure" true
+      (Option.map (fun (snapshot : Current.t) -> snapshot.facts) view.snapshot=Some [b]);
+    check int "no invented successor for incomplete evidence" 0 (List.length view.successor_candidates);
+    check bool "unknown transition is distinguished from absent edge evidence" true
+      (List.exists (fun (item : Current.recall_unresolved) -> match item.reason with
+        | Current.Missing_transition _ -> expect_missing
+        | Current.Unrecorded_lineage _ -> not expect_missing
+        | _ -> false) view.unresolved))
+    [["commit_effect";"revision_links"],true; ["revision_links"],false];
+  Fs_compat.save_file journal "broken JSON\n";
+  let broken = successor_recall ~keepers_dir in
+  check bool "unreadable history does not erase ordinary snapshot" true (Option.is_some broken.snapshot);
+  check bool "unreadable evidence is explicit" true
+    (List.exists (fun (item : Current.recall_unresolved) -> match item.reason with
+      | Current.History_unavailable _ -> true | _ -> false) broken.unresolved);
+  Fs_compat.save_file journal original
+;;
+
+let test_successor_recall_rejects_phantom_target_added_later () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let a = fact ~claim:"A original" () and b = fact ~claim:"B unrelated later addition" () in
+  let c = fact ~claim:"C actual revision target" () in
+  let binding = recall_binding 1 (fact ~claim:"source A" ()) a in
+  ignore (commit_recall ~keepers_dir binding [a] |> require_ok);
+  ignore (revise_into ~keepers_dir a [c]);
+  ignore (Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:400.
+    ~source:(source Current.Explicit_write) b |> require_upsert_ok);
+  let journal = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let rows = Fs_compat.load_jsonl journal |> List.map (fun json ->
+    if Yojson.Safe.Util.member "revision" json = `Int 2 then
+      map_field "revision_links" (fun _ -> `List [`Assoc [
+        "superseded",`String (Types.memory_id a); "superseded_by",`String (Types.memory_id b)]]) json
+    else json) in
+  Fs_compat.invalidate_cached_writer journal;
+  Fs_compat.save_file journal (String.concat "\n" (List.map Yojson.Safe.to_string rows) ^ "\n");
+  let view = successor_recall ~keepers_dir in
+  check int "future unrelated addition cannot authorize past edge" 0 (List.length view.successor_candidates);
+  check bool "phantom target has explicit invalid transition evidence" true
+    (List.exists (fun (item : Current.recall_unresolved) ->
+      item.reason=Current.Invalid_transition 2) view.unresolved)
+;;
+
+let test_prepared_receipt_before_revision_links_recovers_with_no_lineage () =
+  with_temp_keepers @@ fun keepers_dir ->
+  (* A receipt written before the [revision_links] field existed must decode:
+     refusing it turns a leftover prepared transaction into a decode failure
+     that blocks archive reads. It decodes with an empty lineage — no link is
+     invented for the old writer — so the reader reports the ordinary
+     pending-finalization state instead. *)
+  let original = fact ~claim:"legacy prepared receipt drop reason" () in
+  let legacy =
+    `Assoc
+      [ "plan_id", `Null
+      ; "state", `String "prepared"
+      ; "prior_revision", `Int 3
+      ; "prior_snapshot_sha256", `String (String.make 64 'a')
+      ; "target_revision", `Int 4
+      ; "target_snapshot_sha256", `String (String.make 64 'b')
+      ; ( "dropped"
+        , `List
+            [ `Assoc
+                [ "memory_id", `String (Types.memory_id original)
+                ; "reason", `String "verified split recorded before lineage"
+                ] ] )
+      ]
+  in
+  let path = Current.retraction_plan_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+  Fs_compat.save_file_atomic_strict path (Yojson.Safe.to_string legacy) |> require_ok;
+  match Current.read_dropped ~keepers_dir ~keeper_id:"keeper" ~current_facts:[] with
+  | Error message ->
+    check bool
+      "legacy receipt reads as pending finalization, not a decode failure" true
+      (String.starts_with
+         ~prefix:"memory archive journal finalization pending keeper=keeper target_revision=4"
+         message)
+  | Ok _ -> fail "legacy prepared receipt read as a settled archive"
+;;
+
+(* An older writer may append its removal line and stop before clearing the
+   receipt. Its line has no [revision_links] (a writer before [commit_effect]
+   has neither key) and its receipt has no [revision_links]. Recovery reads
+   that line as the rewrite and clears the receipt instead of appending the
+   same revision a second time. *)
+let test_legacy_removal_line_clears_legacy_receipt_once () =
+  List.iter (fun missing_keys -> with_temp_keepers @@ fun keepers_dir ->
+    let target = fact ~claim:"removal recorded by an older writer" () in
+    let seeded = replace ~keepers_dir ~facts:[ target ] () |> require_ok in
+    let seeded_hash =
+      match Current.read_with_snapshot_sha256 ~keepers_dir ~keeper_id:"keeper" with
+      | Ok (Some (_, hash)) -> hash
+      | Ok None | Error _ -> fail "seeded snapshot hash is unavailable"
+    in
+    let journal_path =
+      Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+    in
+    let seed_journal = Fs_compat.load_file journal_path in
+    Fs_compat.invalidate_cached_writer journal_path;
+    Sys.remove journal_path;
+    Unix.mkdir journal_path 0o700;
+    let request () =
+      Current.retract_facts
+        ~keepers_dir
+        ~keeper_id:"keeper"
+        ~expected_revision:seeded.revision
+        ~expected_snapshot_sha256:seeded_hash
+        ~now:300.0
+        ~source:{ Current.kind = Current.Explicit_retract; trace_id = "legacy-removal-line" }
+        [ { Current.memory_id = Types.memory_id target
+          ; reason = "an older writer recorded this removal"
+          } ]
+    in
+    (match request () with
+     | Error (Current.Retract_batch_plan_evidence_pending _) -> ()
+     | Error _ | Ok _ -> fail "journal failure did not leave a prepared plan");
+    let receipt_path =
+      Current.retraction_plan_receipt_path ~keepers_dir ~keeper_id:"keeper"
+    in
+    let receipt = Yojson.Safe.from_file receipt_path in
+    Unix.rmdir journal_path;
+    Fs_compat.save_file journal_path seed_journal;
+    (* Recovery appends the exact line once; then the journal and the receipt
+       are rewritten the way the older writer left them. *)
+    (match request () with
+     | Error (Current.Retract_batch_snapshot_conflict _) -> ()
+     | Error _ | Ok _ -> fail "restart reconciliation did not precede stale CAS");
+    let strip = function
+      | `Assoc fields ->
+        `Assoc (List.filter (fun (name, _) -> not (List.mem name missing_keys)) fields)
+      | _ -> fail "fixture expected a JSON object"
+    in
+    let legacy_rows = List.map strip (read_journal_lines ~keepers_dir) in
+    Fs_compat.invalidate_cached_writer journal_path;
+    Fs_compat.save_file journal_path
+      (String.concat "\n" (List.map Yojson.Safe.to_string legacy_rows) ^ "\n");
+    Fs_compat.save_file_atomic_strict receipt_path
+      (Yojson.Safe.to_string (strip receipt)) |> require_ok;
+    (match request () with
+     | Error (Current.Retract_batch_snapshot_conflict _) -> ()
+     | Error _ | Ok _ -> fail "legacy receipt did not reconcile before stale CAS");
+    check bool "legacy receipt is cleared" false (Sys.file_exists receipt_path);
+    check int "legacy removal line is not appended again" (List.length legacy_rows)
+      (List.length (read_journal_lines ~keepers_dir)))
+    [ [ "revision_links" ]; [ "revision_links"; "commit_effect" ] ]
+;;
+
+let test_admission_recall_cache_invalidates_external_prefix_edit_and_growth () =
+  List.iter (fun damage ->
+    with_temp_keepers @@ fun keepers_dir ->
+    let target = fact ~claim:"retained recall target" () in
+    let binding = recall_binding 1 (fact ~claim:"source observation" ()) target in
+    ignore (commit_recall ~keepers_dir binding [target] |> require_ok);
+    ignore (Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:300.
+      ~source:(source Current.Explicit_write) (fact ~claim:"another current fact" ())
+      |> require_upsert_ok);
+    check bool "cold verification retains live binding" true
+      (snd (read_recall ~keepers_dir |> require_ok)=[binding]);
+    for _ = 1 to 20 do
+      ignore (apply_disposition ~keepers_dir () |> require_ok);
+      check bool "known unchanged append preserves verified binding" true
+        (snd (read_recall ~keepers_dir |> require_ok)=[binding])
+    done;
+    let journal = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+    let bytes = Fs_compat.load_file journal in
+    (match damage with
+     | `Malformed_append ->
+       Out_channel.with_open_gen [Open_wronly;Open_append;Open_binary] 0o600 journal
+         (fun oc -> output_string oc "not-json\n")
+     | `Prefix_and_growth ->
+       let rows = String.split_on_char '\n' bytes |> List.filter ((<>) "") in
+       let edited = List.map (fun row ->
+         let json = Yojson.Safe.from_string row in
+         match json with
+         | `Assoc fields when List.assoc_opt "revision" fields = Some (`Int 2) ->
+           `Assoc (List.map (fun (name,value) ->
+             name, if name="commit_effect" then `String "unchanged" else value) fields)
+           |> Yojson.Safe.to_string
+         | _ -> row) rows in
+       (* Same inode plus growth is deliberately not trusted as an append. *)
+       Out_channel.with_open_bin journal (fun oc ->
+         output_string oc (String.concat "\n" (edited @ [List.hd (List.rev edited)]) ^ "\n")));
+    (match read_recall ~keepers_dir with
+     | Error _ -> () | Ok _ -> fail "external journal damage reused cached authority"))
+    [`Malformed_append;`Prefix_and_growth]
+;;
+
+(* The receipt cache keeps a sidecar only once its ctime is more than one
+   second old, so a test that expects a cached read waits longer than that
+   after the last sidecar write. *)
+let settle_receipt_sidecar () = Unix.sleepf 1.2
+
+let receipt_decodes () = Current.For_testing.durable_range_receipt_decodes ()
+
+let recall_bindings ~keepers_dir = snd (read_recall ~keepers_dir |> require_ok)
+
+(* One bound admission, its sidecar settled, and the search that decodes and
+   caches it. *)
+let cached_recall_fixture ~keepers_dir =
+  let target = fact ~claim:"cached receipt target" () in
+  let binding = recall_binding 1 (fact ~claim:"cached receipt source" ()) target in
+  ignore (commit_recall ~keepers_dir binding [target] |> require_ok);
+  settle_receipt_sidecar ();
+  check bool "settled search verifies the sidecar" true
+    (recall_bindings ~keepers_dir = [binding]);
+  target, binding
+;;
+
+let test_receipt_cache_skips_decoding_an_unchanged_sidecar () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let _target, binding = cached_recall_fixture ~keepers_dir in
+  let decoded = receipt_decodes () in
+  for _ = 1 to 3 do
+    check bool "repeated search keeps the binding" true
+      (recall_bindings ~keepers_dir = [binding])
+  done;
+  check int "searches over an unchanged sidecar decode nothing" decoded (receipt_decodes ());
+  ignore (Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:300.
+    ~source:(source Current.Explicit_write) (fact ~claim:"unrelated later fact" ())
+    |> require_upsert_ok);
+  check bool "a later snapshot revision keeps the binding" true
+    (recall_bindings ~keepers_dir = [binding]);
+  check int "a later revision that leaves the sidecar alone decodes nothing" decoded
+    (receipt_decodes ())
+;;
+
+let test_receipt_cache_rereads_an_externally_rewritten_sidecar () =
+  List.iter (fun (label, rewrite) ->
+    with_temp_keepers @@ fun keepers_dir ->
+    let _target, _binding = cached_recall_fixture ~keepers_dir in
+    let path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+    let decoded = receipt_decodes () in
+    rewrite ~keepers_dir path;
+    check int (label ^ ": search reports the rewritten sidecar") 0
+      (List.length (recall_bindings ~keepers_dir));
+    check bool (label ^ ": the rewritten sidecar was decoded") true
+      (receipt_decodes () > decoded))
+    [ "same inode and size", (fun ~keepers_dir path ->
+        let before = Unix.lstat path in
+        (* Same revision, other snapshot bytes: reconcile must drop the binding. *)
+        rewrite_receipts ~keepers_dir (map_receipts (map_field "snapshot_sha256"
+          (fun _ -> `String (String.make 64 'f'))));
+        let after = Unix.lstat path in
+        check int "rewrite keeps the inode" before.Unix.st_ino after.Unix.st_ino;
+        check int "rewrite keeps the size" before.Unix.st_size after.Unix.st_size)
+    ; "different size", (fun ~keepers_dir:_ path ->
+        Fs_compat.save_file path {|{"receipts":[]}|}) ]
+;;
+
+let test_receipt_cache_reflects_this_process_receipt_write () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let target, binding = cached_recall_fixture ~keepers_dir in
+  let second = recall_binding 2 (fact ~claim:"second cached receipt source" ()) target in
+  let decoded = receipt_decodes () in
+  let admitted = commit_recall ~keepers_dir second [] |> require_ok in
+  (* The snapshot keeps its revision and bytes; only the sidecar changes. *)
+  check bool "binding-only admission keeps the snapshot" true
+    (admitted.commit = Current.Unchanged);
+  let found = recall_bindings ~keepers_dir in
+  check bool "search reports both bindings" true
+    (List.length found = 2 && List.mem binding found && List.mem second found);
+  check bool "the rewritten sidecar was decoded" true (receipt_decodes () > decoded)
 ;;
 
 let test_stale_replace_rejects_concurrent_explicit_write () =
@@ -3188,6 +3822,8 @@ let () =
             "batch retraction recovers exact reason evidence"
             `Quick
             test_batch_retraction_recovers_exact_reason_evidence
+        ; test_case "retirement context refuses stale current selection" `Quick
+            test_retirement_context_rejects_stale_current
         ; test_case
             "batch retraction recovers torn journal tail"
             `Quick
@@ -3350,12 +3986,50 @@ let () =
             test_mixed_receipt_prepared_recovery
         ; test_case "official receipt rejects invalid identity" `Quick
             test_official_receipt_rejects_invalid_identity
-        ; test_case "explicit-write receipt consumes no-change and survives retirement" `Quick
-            test_explicit_write_receipt_commits_no_change_and_survives_retirement
-        ; test_case "explicit-write prepared receipt requires exact snapshot" `Quick
-            test_explicit_write_prepared_receipt_requires_exact_snapshot
-        ; test_case "explicit-write receipt rejects invalid or ambiguous identity" `Quick
-            test_explicit_write_receipt_rejects_invalid_or_ambiguous_identity
+        ; test_case "sparse candidate receipts survive no-change and retirement" `Quick
+            test_sparse_candidate_receipts_survive_retirement
+        ; test_case "candidate reconciliation preserves first order" `Quick
+            test_candidate_receipt_reconciliation_preserves_first_order
+        ; test_case "candidate receipt set conflicts refuse the whole transaction" `Quick
+            test_candidate_set_conflict_is_atomic
+        ; test_case "admission recall binds provenance and never revives after retirement" `Quick
+            test_admission_recall_commits_recovers_and_expires_on_retirement
+        ; test_case "admission recall refuses unbound payload or absent target" `Quick
+            test_admission_recall_refuses_unbound_or_mistargeted_payloads
+        ; test_case "admission recall refuses a target retired after the decision" `Quick
+            test_admission_recall_refuses_a_target_retired_after_the_decision
+        ; test_case "admission recall refuses a decision across missing journal revisions" `Quick
+            test_admission_recall_refuses_a_decision_across_missing_journal_revisions
+        ; test_case "admission recall requires complete later history only for bindings" `Quick
+            test_admission_recall_requires_complete_later_history_only_for_bindings
+        ; test_case "receipt failure preserves direct snapshot" `Quick
+            test_admission_receipt_failure_preserves_direct_snapshot
+        ; test_case "recall cache refuses external prefix mutation plus growth" `Quick
+            test_admission_recall_cache_invalidates_external_prefix_edit_and_growth
+        ; test_case "receipt cache skips decoding an unchanged sidecar" `Quick
+            test_receipt_cache_skips_decoding_an_unchanged_sidecar
+        ; test_case "receipt cache rereads an externally rewritten sidecar" `Quick
+            test_receipt_cache_rereads_an_externally_rewritten_sidecar
+        ; test_case "receipt cache reflects this process's receipt write" `Quick
+            test_receipt_cache_reflects_this_process_receipt_write
+        ; test_case "unchanged journal row cannot prove a missing retirement transition" `Quick
+            test_admission_recall_no_change_cannot_hide_missing_retirement_transition
+        ; test_case "declared revision links survive failed journal finalization" `Quick
+            test_declared_revision_links_survive_journal_failure
+        ; test_case "revision evidence does not invent missing links or re-add lineage" `Quick
+            test_revision_evidence_never_invents_links
+        ; test_case "successor recall follows multistep splits without incarnation revival" `Quick
+            test_successor_recall_tracks_multistep_split_incarnations
+        ; test_case "successor lineage failures preserve ordinary current results" `Quick
+            test_successor_recall_preserves_current_on_missing_history
+        ; test_case "successor recall rejects phantom target added in a later revision" `Quick
+            test_successor_recall_rejects_phantom_target_added_later
+        ; test_case "prepared receipt before revision links recovers with no lineage" `Quick
+            test_prepared_receipt_before_revision_links_recovers_with_no_lineage
+        ; test_case "legacy removal line clears its legacy receipt once" `Quick
+            test_legacy_removal_line_clears_legacy_receipt_once
+        ; test_case "prepared candidate receipt set recovers exact snapshot only" `Quick
+            test_candidate_prepared_set_recovers_exact_snapshot
         ; test_case
             "range receipts are scoped per runtime cluster"
             `Quick

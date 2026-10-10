@@ -23,6 +23,8 @@ let delta_to_string : Live.delta -> string = function
         (Option.value ~default:"none" runtime_id)
         (match attempt_index with Some i -> string_of_int i | None -> "none")
   | Live.Stream_model_started { model; _ } -> Printf.sprintf "stream_model_started(%s)" model
+  | Live.Model_content_activity activity -> Yojson.Safe.to_string (Masc.Keeper_chat_events.model_content_activity_to_json activity)
+  | Live.Stream_model_stopped -> "stream_model_stopped"
   | Live.Stream_details { usage; stop_reason; _ } ->
       Printf.sprintf "stream_details(%s,stop=%s)"
         (match usage with
@@ -39,7 +41,9 @@ let delta_to_string : Live.delta -> string = function
   | Live.Native_tool_started { occurrence; tool_name } ->
       Printf.sprintf "native_tool_started(%d/%d,%s)" occurrence.stream_scope
         occurrence.block_index (Option.value ~default:"unnamed" tool_name)
-  | Live.Native_tool_ended { occurrence } ->
+  | Live.Native_tool_progress { occurrence; _ } ->
+      Printf.sprintf "native_tool_progress(%d/%d)" occurrence.stream_scope occurrence.block_index
+  | Live.Native_tool_ended { occurrence; _ } ->
       Printf.sprintf "native_tool_ended(%d/%d)" occurrence.stream_scope occurrence.block_index
   | Live.Tool_started { occurrence; tool_name } ->
       Printf.sprintf "tool_started(%d/%d,%s)" occurrence.stream_scope
@@ -402,6 +406,13 @@ let test_reply_details_is_read_whole () =
     ]
     (feed_whole (sse (custom "KEEPER_REPLY_DETAILS" (reply_details_value ()))))
 
+let test_native_tool_end_without_completion_is_reported () =
+  check bool "a native end without completion is undecodable" true
+    (match feed_whole (sse (custom "KEEPER_NATIVE_TOOL_END"
+       (`Assoc ["toolStreamScope", `Int 0; "toolCallBlockIndex", `Int 1]))) with
+     | [ Live.Undecodable _ ] -> true
+     | _ -> false)
+
 let test_reply_details_short_of_a_field_is_reported () =
   let undecodable body =
     match feed_whole body with
@@ -743,6 +754,26 @@ let test_stream_model_started_is_typed () =
     [ Live.Stream_model_started { stream_scope = Some 4; message_id = Some "pm-1"; model = "claude-3-7-sonnet"; usage = None } ]
     (feed_whole body)
 
+let test_stream_model_stop_reaches_the_view () =
+  let body = sse (custom "KEEPER_STREAM_MESSAGE_STOP" `Null) in
+  List.iter (fun actual ->
+    check (list delta) "provider stop is preserved across chunk boundaries"
+      [Live.Stream_model_stopped] actual)
+    [feed_whole body; feed_in_chunks ~size:1 body];
+  List.iter (fun (label, value) ->
+    let body = sse (event "CUSTOM"
+      (["name", `String "KEEPER_STREAM_MESSAGE_STOP"]
+       @ Option.to_list (Option.map (fun value -> "value", value) value))) in
+    List.iter (fun actual ->
+      match actual with
+      | [Live.Undecodable _] -> ()
+      | _ -> failf "%s stop payload must be undecodable, got %s" label
+          (String.concat ", " (List.map delta_to_string actual)))
+      [feed_whole body; feed_in_chunks ~size:1 body])
+    ["missing", None; "object", Some (`Assoc []); "array", Some (`List []);
+     "string", Some (`String ""); "boolean", Some (`Bool false);
+     "number", Some (`Int 0)]
+
 let test_stream_usage_is_typed () =
   let body =
     sse
@@ -821,6 +852,7 @@ let () =
             test_runtime_attempt_rejects_invalid_payload
         ; test_case "stream message start model is typed" `Quick
             test_stream_model_started_is_typed
+        ; test_case "provider stop reaches the view" `Quick test_stream_model_stop_reaches_the_view
         ; test_case "a turn in flight reports the tokens it has spent" `Quick
             test_stream_usage_is_typed
         ; test_case "a delta that reported only why it stopped is still a row"
@@ -881,6 +913,8 @@ let () =
         ; test_case "reply details is read whole" `Quick test_reply_details_is_read_whole
         ; test_case "reply details short of a field is reported" `Quick
             test_reply_details_short_of_a_field_is_reported
+        ; test_case "native end without completion is reported" `Quick
+            test_native_tool_end_without_completion_is_reported
         ; test_case "unknown custom event is reported" `Quick
             test_unknown_custom_event_is_reported
         ] )

@@ -268,16 +268,38 @@ val owned_regular_file_read_error_to_string
     names come from that final descriptor, never from a second pathname lookup.
     [before_read] runs after the directory is bound, for deterministic consumers
     that exercise replacement races; [after_read] runs before final validation.
-    Changed pathname identities are refused.
+    Changed pathname identities are refused. With [owner_uid], every bound
+    pathname and actual descriptor must have that UID and lack group/other write
+    permission, including empty directories. Those checks repeat during final
+    validation using fresh descriptor/path stats. Omitted [owner_uid] preserves
+    the existing no-follow identity-only behavior.
     Errors contain no file contents; callers must redact host paths at public
     boundaries. Blocking operations use a system thread in Eio contexts. *)
 val read_owned_directory
-  : ?inventory_root:owned_inventory_root
+  : ?owner_uid:int
+  -> ?inventory_root:owned_inventory_root
   -> ?before_read:(string -> unit)
   -> ?after_read:(string -> unit)
   -> ownership_root:string
   -> string
   -> (string list, owned_regular_file_read_error) result
+
+val read_owned_directory_if_present
+  : owner_uid:int
+  -> ?inventory_root:owned_inventory_root
+  -> ?before_read:(string -> unit)
+  -> ?after_read:(string -> unit)
+  -> ownership_root:string
+  -> string
+  -> (string list option, owned_regular_file_read_error) result
+(** Owned optional descendant inventory. [None] is produced only when an
+    initial descriptor-relative child open reports ENOENT and the already bound
+    root/ancestors pass fresh identity, UID and permission validation. The root
+    itself must be bound; missing/replaced root authority is always an error.
+    A missing path or failure after the requested directory was bound, including
+    enumeration/final-validation failure, remains an error. [Some []] is an
+    existing empty directory. Uses the same no-follow descriptors and cleanup
+    contract as {!read_owned_directory}, never a separate pathname preflight. *)
 
 (** Eio-native, deterministically sorted directory inventory. *)
 val read_dir : string -> string list
@@ -1339,6 +1361,19 @@ val append_private_jsonl_durable_stable_result :
   string ->
   string ->
   (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
+
+type private_jsonl_append_observation =
+  { before : Unix.stats; after : Unix.stats; suffix : string }
+
+val append_private_jsonl_durable_observed_result :
+  string -> string ->
+  (Private_jsonl_cursor.t * private_jsonl_append_observation option,
+   private_jsonl_transaction_error) result
+(** Same durable append transaction, with an existing-file observation captured
+    under its stable lock. [None] means a new file was created. [before] precedes
+    any tail recovery; only exact previous identity plus an exact suffix-sized
+    append permits extending a cached projection. Errors never publish an
+    observation, including settlement failures after a committed append. *)
 
 (** Append complete newline-terminated JSONL rows iff [expected] still names
     the exact store identity and end offset observed by the caller. All

@@ -496,6 +496,7 @@ let test_dynamic_tool_callback ?(worker_pool = false) () =
                 { call_id = "call-1"; tool_name = "masc_probe"; arguments }
             ; Dynamic_tool_finished { call_id = "call-1" }
             ; Text_delta {item_id=Some "message-1"; delta="SUBSCRIPTION_OK"}
+            ; Text_completed { item_id = Some "message-1"; source = Item_content }
             ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
             ] ->
             check string
@@ -536,13 +537,14 @@ let test_native_command_events_stay_distinct_from_dynamic_tools () =
                ; origin = Runtime_native_tools.Built_in
                }
            ; Native_tool_finished
-               { identity = Some (Runtime_native_tools.Call_id "native-command-1")
+               { observation = { identity = Some (Runtime_native_tools.Call_id "native-command-1")
                ; tool_name = Some "commandExecution"
                ; origin = Runtime_native_tools.Built_in
-               }
+               }; completion = _ }
            ; Text_delta { item_id = Some "message-1"; delta = "MASC_" }
            ; Text_delta {item_id=Some "message-1"; delta="SUBSCRIPTION_OK"}
-           ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
+           ; Text_completed { item_id = Some "message-1"; source = Item_content }
+            ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
            ] -> ()
          | _ -> fail "Codex native command activity was projected as a MASC tool")
 ;;
@@ -2268,8 +2270,8 @@ let test_usage_frames_report_the_thread_count_before_a_usage_limit_ends_the_turn
     | Runtime_codex_app_server.Usage_reported
         { frame = Runtime_codex_app_server.Context_window_filled _; _ } ->
       fail "a counted frame was read as a fill"
-    | Turn_started _ | Text_delta _ | Thinking_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
-    | Native_tool_started _ | Native_tool_finished _ | Elicitation_cancelled _
+    | Turn_started _ | Text_delta _ | Thinking_delta _ | Text_completed _ | Thinking_completed _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+    | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Elicitation_cancelled _
     | Usage_windows_reported _ | Compaction_observed | Turn_finished _ -> ()
   in
   with_fixture
@@ -2642,11 +2644,12 @@ let test_mcp_item_outlasting_the_idle_window_completes () =
                 ; origin = Runtime_native_tools.Mcp_wrapper
                 }
             ; Native_tool_finished
-                { identity = Some (Runtime_native_tools.Call_id "native-mcp-1")
+                { observation = { identity = Some (Runtime_native_tools.Call_id "native-mcp-1")
                 ; tool_name = Some "fixture/probe"
                 ; origin = Runtime_native_tools.Mcp_wrapper
-                }
+                }; completion = _ }
             ; Text_delta { item_id = Some "message-1"; delta = "MASC_SUBSCRIPTION_OK" }
+            ; Text_completed { item_id = Some "message-1"; source = Item_content }
             ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
             ] -> ()
           | _ -> fail "the MCP call was not observed as a tool item"))
@@ -2672,6 +2675,7 @@ let test_sleep_item_outlasting_the_idle_window_completes () =
          (match List.rev !stream_events with
           | [ Turn_started { turn_id = "turn-1"; model = "gpt-fixture" }
             ; Text_delta { item_id = Some "message-1"; delta = "MASC_SUBSCRIPTION_OK" }
+            ; Text_completed { item_id = Some "message-1"; source = Item_content }
             ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
             ] -> ()
           | _ -> fail "a sleep was projected as a tool"))
@@ -3119,8 +3123,8 @@ let test_rate_limit_updates_are_reported_without_changing_the_turn () =
   let reports = ref [] in
   let on_stream_event = function
     | Runtime_codex_app_server.Usage_windows_reported report -> reports := report :: !reports
-    | Turn_started _ | Text_delta _ | Thinking_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
-    | Native_tool_started _ | Native_tool_finished _ | Elicitation_cancelled _
+    | Turn_started _ | Text_delta _ | Thinking_delta _ | Text_completed _ | Thinking_completed _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+    | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Elicitation_cancelled _
     | Usage_reported _ | Compaction_observed | Turn_finished _ -> ()
   in
   with_fixture
@@ -4243,7 +4247,7 @@ let fixture_trace_with_no_completed_turn = "fixture-trace-no-completed-turn"
 let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projection
     ?on_memory_capacity_refusal
     ?(initial_messages = []) ?base_path ?raw_trace_path ?session_id
-    ?on_event ?on_request_attribution ?(keeper_name = "codex-fixture")
+    ?on_native_tool_progress ?on_native_tool_completion ?on_event ?on_request_attribution ?(keeper_name = "codex-fixture")
     ?(system_prompt = "pre-dispatch fixture system prompt")
     ?(goal = "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools.") ~cli_path
     ~model ?accept () =
@@ -4306,7 +4310,7 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                       ?context
                       ~raw_trace
                       ?session_id
-                      ?on_event
+                      ?on_native_tool_progress ?on_native_tool_completion ?on_event
                       ?on_request_attribution
                       ~sw
                       ~net:(Eio.Stdenv.net env)
@@ -4919,6 +4923,7 @@ let test_keeper_projects_codex_live_stream () =
             ; ContentBlockStop { index = 1 }
             ; ContentBlockDelta
                 { index = 0; delta = TextDelta "SUBSCRIPTION_OK" }
+            ; ContentBlockStop { index = 0 }
             ; MessageDelta { stop_reason = Some EndTurn; usage = None }
             ; MessageStop
             ] ->
@@ -4994,8 +4999,10 @@ let test_keeper_separates_codex_agent_messages () =
          (match events with
           | [ MessageStart { id = "turn-1"; model = "gpt-fixture"; usage = None }
             ; ContentBlockDelta { index = 0; delta = TextDelta "확인할게요." }
-            ; ContentBlockDelta { index = 0; delta = TextDelta "\n\n완" }
-            ; ContentBlockDelta { index = 0; delta = TextDelta "료" }
+            ; ContentBlockStop { index = 0 }
+            ; ContentBlockDelta { index = 1; delta = TextDelta "\n\n완" }
+            ; ContentBlockDelta { index = 1; delta = TextDelta "료" }
+            ; ContentBlockStop { index = 1 }
             ; MessageDelta { stop_reason = Some EndTurn; usage = None }
             ; MessageStop
             ] -> ()
@@ -5042,9 +5049,244 @@ let test_keeper_preserves_codex_reasoning_and_tool_order () =
             let stopped = List.rev !events |> List.filter_map (function
               | Agent_core.Types.ContentBlockStop {index} -> Some index | _ -> None) in
             check (list int) "repeated native start retains its block" [3; 3] native_indices;
-            check (list int) "native end closes the original block" [3] stopped;
+            check (list int) "each model part and native occurrence closes once" [1; 2; 3; 0] stopped;
             check string "reasoning is not the assistant answer" "MASC_SUBSCRIPTION_OK"
               (keeper_response_text result))) [false; true]
+;;
+
+(* Provider item completion closes its own content, even while another item
+   or a background command is open. No newline is needed to observe the end. *)
+let test_keeper_codex_content_boundaries () =
+  let delta id text = Yojson.Safe.to_string (`Assoc ["method", `String "item/agentMessage/delta";
+    "params", `Assoc ["threadId", `String "thread-1"; "turnId", `String "turn-1";
+      "itemId", `String id; "delta", `String text]]) in
+  let complete id text = Yojson.Safe.to_string (`Assoc ["method", `String "item/completed";
+    "params", `Assoc ["threadId", `String "thread-1"; "turnId", `String "turn-1";
+      "item", `Assoc ["type", `String "agentMessage"; "id", `String id;
+        "text", `String text; "phase", `String "commentary"]]]) in
+  let events = ref [] in
+  with_fixture [init_result; account_chatgpt; thread_result; turn_result;
+      commentary_delta; commentary_completed;
+      native_command_started; delta "message-1" "MASC_";
+      native_command_completed; delta "message-1" "SUBSCRIPTION_OK";
+      item_completed;
+      {|{"method":"item/agentMessage/delta","params":{"threadId":"thread-1","turnId":"turn-1","delta":"later"}}|};
+      item_completed;
+      complete "other" "later"; turn_completed]
+    (fun cli_path -> match run_keeper_turn ~cli_path ~model:"gpt-fixture"
+        ~on_event:(fun event -> events := event :: !events) () with
+      | Error error -> fail (Agent_core.Error.to_string error)
+      | Ok _ ->
+          let observed = List.rev !events |> List.filter_map (function
+            | Agent_core.Types.ContentBlockDelta {index; delta=TextDelta text} -> Some (`Text (index,text))
+            | ContentBlockStart {index; content_type="native_tool_use"; _} -> Some (`Tool index)
+            | ContentBlockStop {index} -> Some (`Stop index)
+            | _ -> None) in
+          check bool "exact content and native boundaries preserve producer order" true
+            (observed = [`Text (0,"확인할게요."); `Stop 0; `Tool 1;
+              `Text (2,"\n\nMASC_"); `Stop 1; `Text (2,"SUBSCRIPTION_OK"); `Stop 2;
+              `Text (3,"later"); `Stop 3]))
+;;
+
+let test_codex_content_delta_after_completion_is_rejected () =
+  with_fixture [init_result; account_chatgpt; thread_result; turn_result;
+      item_completed; agent_message_delta; turn_completed]
+    (fun path -> match run_fixture path with
+      | Error (Runtime_codex_app_server.Protocol_error _) -> ()
+      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+      | Ok _ -> fail "a closed provider item accepted a late delta")
+;;
+
+let test_native_completion_reaches_tui () =
+  let open Runtime_native_tools in
+  List.iter (fun (status, exit_code, outcome) ->
+    let completion = {outcome; exit_code} in
+    let completed = `Assoc ["method", `String "item/completed"; "params", `Assoc
+      ["threadId", `String "thread-1"; "turnId", `String "turn-1";
+       "item", `Assoc (["type", `String "commandExecution";
+         "id", `String "native-command-1"]
+         @ Option.to_list (Option.map (fun s -> "status", `String s) status)
+         @ Option.to_list (Option.map (fun n -> "exitCode", `Int n) exit_code))]]
+      |> Yojson.Safe.to_string in
+    let fixture = Native_tool_outcome_fixture.create () in
+    with_fixture
+      [init_result; account_chatgpt; thread_result; turn_result;
+       native_command_started; native_command_started; completed; item_completed; turn_completed]
+      (fun cli_path ->
+        match run_keeper_turn ~cli_path ~model:"gpt-fixture"
+          ~on_event:(Native_tool_outcome_fixture.on_event fixture)
+          ~on_native_tool_completion:(Native_tool_outcome_fixture.on_completion fixture) () with
+        | Error error -> fail (Agent_core.Error.to_string error)
+        | Ok _ -> Native_tool_outcome_fixture.check fixture ~expected:[completion]))
+    [Some "completed", None, Completion_reported;
+     Some "completed", Some 0, Completion_reported;
+     Some "completed", Some 17, Completion_reported;
+     Some "failed", Some 2, Error_reported;
+     Some "declined", None, Decline_reported;
+     Some "interrupted", None, Error_reported;
+     Some "future-status", None, Unrecognized_status "future-status";
+     None, None, End_observed]
+;;
+
+(* An item type this runtime does not model is still shown as a native tool,
+   so the status the provider reports for it reaches the same report. *)
+let test_unclassified_native_item_keeps_its_reported_status () =
+  let open Runtime_native_tools in
+  let item method_ kind status = `Assoc ["method", `String method_; "params", `Assoc
+    ["threadId", `String "thread-1"; "turnId", `String "turn-1";
+     "item", `Assoc (["type", `String kind; "id", `String "native-item-1"]
+       @ Option.to_list (Option.map (fun s -> "status", `String s) status))]]
+    |> Yojson.Safe.to_string in
+  List.iter (fun kind ->
+    List.iter (fun (status, outcome) ->
+      let fixture = Native_tool_outcome_fixture.create () in
+      with_fixture
+        [init_result; account_chatgpt; thread_result; turn_result;
+         item "item/started" kind (Some "inProgress"); item "item/completed" kind status;
+         item_completed; turn_completed]
+        (fun cli_path ->
+          match run_keeper_turn ~cli_path ~model:"gpt-fixture"
+            ~on_event:(Native_tool_outcome_fixture.on_event fixture)
+            ~on_native_tool_completion:(Native_tool_outcome_fixture.on_completion fixture) () with
+          | Error error -> fail (Agent_core.Error.to_string error)
+          | Ok _ ->
+            Native_tool_outcome_fixture.check fixture ~expected:[{outcome; exit_code = None}]))
+      [Some "completed", Completion_reported;
+       Some "failed", Error_reported;
+       Some "declined", Decline_reported;
+       Some "interrupted", Error_reported;
+       Some "future-status", Unrecognized_status "future-status";
+       None, End_observed])
+    ["collabAgentToolCall"; "imageGeneration"; "futureToolItem"]
+;;
+
+let codex_progress_frame ?(thread_id="thread-1") ?(turn_id="turn-1")
+    ~method_ ~item_id ~field payload =
+  `Assoc ["method", `String method_; "params", `Assoc
+    (["threadId", `String thread_id; "turnId", `String turn_id; field,payload]
+     @ Option.to_list (Option.map (fun id -> "itemId", `String id) item_id))]
+  |> Yojson.Safe.to_string
+;;
+
+let test_content_completion_activity_reaches_tui () =
+  let module F = Native_tool_outcome_fixture in
+  let module T = Masc_tui_keeper_chat_transcript in
+  let fixture = F.create () in
+  let before_response_stop = ref 0 and failures = ref [] in
+  let on_event event =
+    F.on_event fixture event;
+    match event with
+    | Agent_core.Types.ContentBlockStop {index=1} ->
+        (* Commentary index 0 has ended, native index 1 just ended, and the
+           official turn is still open. Formerly STREAMING resurfaced here. *)
+        incr before_response_stop;
+        (try
+          let live,replay = F.snapshots fixture in
+          List.iter (fun log ->
+            let t = T.of_log ~now:2000. log in
+            let rows = String.concat "\n" (List.map snd (T.status_rows ~now:2000. t)) in
+            check bool "actual provider content stop clears stale model label" true
+              (Astring.String.is_infix ~affix:"model content ended" rows);
+            check bool "official turn is still open" true (T.phase t=T.Working);
+            check bool "native completion was kept" true
+              (List.exists (fun (call:T.tool_activity) -> call.outcome=T.Native_ended) (T.tool_calls t))) [live;replay]
+         with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn -> failures := exn :: !failures)
+    | _ -> () in
+  with_fixture [init_result;account_chatgpt;thread_result;turn_result;
+    commentary_delta;commentary_completed;native_command_started;native_command_completed;
+    item_completed;turn_completed]
+    (fun cli_path -> match run_keeper_turn ~cli_path ~model:"gpt-fixture"
+      ~on_event ~on_native_tool_completion:(F.on_completion fixture) () with
+      | Error error -> fail (Agent_core.Error.to_string error)
+      | Ok _ ->
+          List.iter raise (List.rev !failures);
+          check int "mid-turn activity assertion actually ran" 1 !before_response_stop)
+;;
+
+let test_native_progress_reaches_tui () =
+  let module F = Native_tool_outcome_fixture in
+  let base_path = temp_workspace "codex-progress-" in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    let secret = "fixture-native-progress-private-token" in
+    let secret_file = Filename.concat base_path "progress-secret" in
+    let channel = open_out_bin secret_file in
+    output_string channel secret; close_out channel;
+    let redaction = Keeper_secret_redaction.snapshot_with_additional_secret_files
+      ~redact_identity_scalars:false ~additional_secret_files:[secret_file] ~base_path
+      ~keeper_name:"codex-fixture" in
+    let redact_text = Keeper_secret_redaction.redact_text redaction in
+    let message = "waiting " ^ secret ^ "\027[31m" in
+    let safe_message = redact_text message in
+    check bool "fixture exercises real secret redaction" false (message=safe_message);
+    let fixture = F.create ~redaction () in
+    let output ?(id=Some "native-command-1") delta = codex_progress_frame
+      ~method_:"item/commandExecution/outputDelta" ~item_id:id ~field:"delta" (`String delta) in
+    let mcp ?(id=Some "native-mcp-1") message = codex_progress_frame
+      ~method_:"item/mcpToolCall/progress" ~item_id:id ~field:"message" (`String message) in
+    let snapshots = ref 0 in
+    let callback_failures = ref [] in
+    let on_progress ~block_index ~tool_call_id progress =
+      F.on_progress fixture ~block_index ~tool_call_id progress;
+      match progress with
+      | Runtime_native_tools.Message_reported {message=received} when received=message ->
+          incr snapshots;
+          (try F.check_progress fixture ~running:true ~expected_text:""
+             ~expected:["native-command-1",Some 9,None; "native-mcp-1",None,Some safe_message]
+           with
+           | Eio.Cancel.Cancelled _ as exn -> raise exn
+           | exn -> callback_failures := exn :: !callback_failures)
+      | Output_observed _ | Message_reported _ | Heartbeat_reported _ | Retry_observed _ -> () in
+    with_fixture
+      [init_result; account_chatgpt; thread_result; turn_result;
+       output "before-start"; mcp "before-start";
+       native_command_started; native_command_started; native_mcp_call_started;
+       output "가"; output "가"; output "  "; output "";
+       output ~id:None "unbound"; output ~id:(Some "") "unbound";
+       mcp ~id:None "unbound"; mcp ~id:(Some "") "unbound";
+       output ~id:(Some "native-mcp-1") "wrong-kind";
+       mcp ~id:(Some "native-command-1") "wrong-kind";
+       agent_message_delta; output "Z"; mcp message;
+       native_command_completed; output "after-end";
+       native_mcp_call_completed; mcp "after-end";
+       item_completed; turn_completed]
+      (fun cli_path -> match run_keeper_turn ~base_path ~cli_path ~model:"gpt-fixture"
+        ~on_event:(F.on_event fixture) ~on_native_tool_progress:on_progress
+        ~on_native_tool_completion:(F.on_completion fixture) () with
+        | Error error -> fail (Agent_core.Error.to_string error)
+        | Ok _ ->
+            (* Runtime callbacks isolate observer failures; do not let a failed
+               mid-turn assertion be mistaken for a passing provider fixture. *)
+            List.iter raise (List.rev !callback_failures);
+            check int "active native progress reaches the pane during the turn" 1 !snapshots;
+            F.check_progress fixture ~running:false ~expected_text:"MASC_SUBSCRIPTION_OK"
+              ~expected:["native-command-1",Some 9,None; "native-mcp-1",None,Some safe_message];
+            let observed = F.events fixture |> List.filter_map (function
+              | Keeper_chat_events.Native_tool_progress (tool, progress) -> Some (tool.tool_call_id, progress)
+              | _ -> None) in
+            check int "empty, unbound, wrong kind, and late events never attach" 5 (List.length observed);
+            let journal = F.events fixture |> List.map Keeper_chat_event_log.keeper_chat_event_to_json
+              |> fun events -> Yojson.Safe.to_string (`List events) in
+            check bool "no secret crosses the journal boundary" false
+              (Astring.String.is_infix ~affix:secret journal);
+            check bool "command output content is not stored as speech or progress text" false
+              (Astring.String.is_infix ~affix:"가" journal)))
+;;
+
+let test_native_progress_rejects_wrong_turn_and_malformed_message () =
+  List.iter (fun (thread_id,turn_id,payload) ->
+    let progress = codex_progress_frame ~thread_id ~turn_id
+      ~method_:"item/mcpToolCall/progress" ~item_id:(Some "native-mcp-1") ~field:"message" payload in
+    with_fixture [init_result;account_chatgpt;thread_result;turn_result;
+      native_mcp_call_started;progress;native_mcp_call_completed;item_completed;turn_completed]
+      (fun path -> match run_fixture path with
+       | Error (Runtime_codex_app_server.Protocol_error _) -> ()
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+       | Ok _ -> fail "foreign or malformed MCP progress was accepted"))
+    ["other-thread","turn-1",`String "message";
+     "thread-1","other-turn",`String "message";
+     "thread-1","turn-1",`Int 3]
 ;;
 
 let test_codex_reasoning_rejects_wrong_turn () =
@@ -5083,6 +5325,7 @@ let test_agent_message_delta_without_item_id_streams () =
           | [ Turn_started _
             ; Text_delta { item_id = None; delta = "MASC_" }
             ; Text_delta { item_id = None; delta = "SUBSCRIPTION_OK" }
+            ; Text_completed { item_id = Some "message-1"; source = Adopted_anonymous_content }
             ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
             ] -> ()
           | _ -> fail "an agentMessage delta without an itemId did not stream unnamed"))
@@ -5098,6 +5341,7 @@ let test_completed_message_streams_without_delta () =
       match List.rev !events with
       | [Runtime_codex_app_server.Turn_started _;
          Text_delta {item_id=Some "message-1"; delta="MASC_SUBSCRIPTION_OK"};
+         Text_completed {item_id=Some "message-1"; source=Item_content};
          Turn_finished {text="MASC_SUBSCRIPTION_OK"}] -> ()
       | _ -> fail "completed assistant item must reach live output before the turn ends")
 ;;
@@ -7554,6 +7798,12 @@ let () =
   run "runtime codex app-server"
     [ ( "reasoning", [test_case "Keeper retains reasoning before native tools and answer" `Quick
             test_keeper_preserves_codex_reasoning_and_tool_order
+        ; test_case "native completion through adapter, journal, SSE and TUI" `Quick test_native_completion_reaches_tui
+        ; test_case "unclassified native item keeps its reported status" `Quick
+            test_unclassified_native_item_keeps_its_reported_status
+        ; test_case "content completion activity through provider and TUI" `Quick test_content_completion_activity_reaches_tui
+        ; test_case "native progress through provider, adapter and TUI" `Quick test_native_progress_reaches_tui
+        ; test_case "native progress validates active turn and payload" `Quick test_native_progress_rejects_wrong_turn_and_malformed_message
         ; test_case "reasoning belongs to the active turn" `Quick test_codex_reasoning_rejects_wrong_turn] )
     ; ( "RPC capacity", [test_case "blank completion closes identity across four messages" `Quick
             test_blank_completion_closes_identity_across_four_messages
@@ -7565,8 +7815,9 @@ let () =
             test_completed_message_streams_without_delta
         ; test_case "structured refusal survives protocol decoding" `Quick test_rpc_input_capacity_data; test_case "prompt uses exact Unicode scalar count" `Quick test_prompt_char_count] )
     ; ( "last projection"
-      , [ test_case "actual capacity refusal reduces whole memory on Codex wire" `Quick
-            test_keeper_reprojects_memory_after_actual_codex_capacity_refusal
+      , [ test_case "actual capacity refusal reduces whole memory on Codex wire" `Quick test_keeper_reprojects_memory_after_actual_codex_capacity_refusal
+        ; test_case "keeper exact content boundaries" `Quick test_keeper_codex_content_boundaries
+        ; test_case "late content delta is rejected" `Quick test_codex_content_delta_after_completion_is_rejected
         ; test_case "empty overflow retry survives the next production turn" `Quick
             test_production_empty_retry_boundary_survives_the_next_turn
         ; test_case "later claim refusal preserves the earlier projection" `Quick

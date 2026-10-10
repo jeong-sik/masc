@@ -40,6 +40,8 @@ let delta_to_string : Live.delta -> string = function
         (Option.value ~default:"none" runtime_id)
         (match attempt_index with Some i -> string_of_int i | None -> "none")
   | Live.Stream_model_started { model; _ } -> Printf.sprintf "stream_model_started(%s)" model
+  | Live.Model_content_activity activity -> Yojson.Safe.to_string (Masc.Keeper_chat_events.model_content_activity_to_json activity)
+  | Live.Stream_model_stopped -> "stream_model_stopped"
   | Live.Stream_details { usage; stop_reason; _ } ->
       Printf.sprintf "stream_details(%s,stop=%s)"
         (match usage with
@@ -56,7 +58,9 @@ let delta_to_string : Live.delta -> string = function
   | Live.Native_tool_started { occurrence; tool_name } ->
       Printf.sprintf "native_tool_started(%s,%s)" (occurrence_to_string occurrence)
         (Option.value ~default:"unnamed" tool_name)
-  | Live.Native_tool_ended { occurrence } ->
+  | Live.Native_tool_progress { occurrence; _ } ->
+      "native_tool_progress(" ^ occurrence_to_string occurrence ^ ")"
+  | Live.Native_tool_ended { occurrence; _ } ->
       Printf.sprintf "native_tool_ended(%s)" (occurrence_to_string occurrence)
   | Live.Tool_started { occurrence; tool_name } ->
       Printf.sprintf "tool_started(%s,%s)" (occurrence_to_string occurrence) tool_name
@@ -389,6 +393,10 @@ let golden : E.keeper_chat_event list =
   ; E.Text_message_start { message_id = "msg-1"; role = E.Assistant }
   ; E.Agent_core_thinking_delta { index = 0; delta = "weighing it" }
   ; E.Agent_core_thinking_signature_delta { index = 0; signature_bytes = 42 }
+  ; E.Model_content_activity {content_generation=0; content_scope=0; content_index=0;
+      content_provider_message_id=None; channel=E.Model_thinking; state=E.Content_observed}
+  ; E.Model_content_activity {content_generation=0; content_scope=0; content_index=0;
+      content_provider_message_id=None; channel=E.Model_thinking; state=E.Content_ended}
   ; E.Agent_core_content_block_stop { index = 0 }
   ; E.Agent_core_stream_ping
   ; E.Text_delta {text="Let me "; stream_scope=None}
@@ -467,7 +475,7 @@ let wire_tagged_deltas events =
       (fun (projection, acc) (seq, event) ->
          let projection, projected =
            Projection.project ~timestamp:(1000.0 +. float_of_int seq)
-             ~redact_text:Fun.id ~redact_json:Fun.id projection event
+             ~redact_text:Fun.id projection event
          in
          ( projection
          , match projected with
@@ -500,7 +508,7 @@ let test_wire_timestamps_match_journal_and_survive_reconnect () =
       (fun (projection, body) (event : Journal.journaled_event) ->
         let projection, projected =
           Projection.project ~timestamp:event.ts ~redact_text:Fun.id
-            ~redact_json:Fun.id projection event.event
+             projection event.event
         in
         ( projection
         , body
@@ -788,7 +796,7 @@ let test_golden_journal_equals_wire_in_chunks () =
         (fun (projection, acc) (seq, event) ->
            let projection, projected =
              Projection.project ~timestamp:(1000.0 +. float_of_int seq)
-               ~redact_text:Fun.id ~redact_json:Fun.id projection event
+               ~redact_text:Fun.id projection event
            in
            ( projection
            , match projected with
@@ -933,6 +941,21 @@ let test_response_boundaries_and_usage_survive_wire_and_replay () =
         (tokens log)) [wire;replay];
     List.iter send Agent_core.Types.[
       MessageDelta {stop_reason=Some StopToolUse;usage=None};MessageStop];
+    let wire,replay,journal = snapshots () in
+    List.iter (fun log ->
+      let t = T.of_log ~now:2000. log in
+      check bool "response stop does not finish the Keeper turn" true (T.phase t = T.Working);
+      check bool "provider stop ends the model response" true
+        (T.model_activity t = Some T.Activity_response_ended);
+      check bool "stopped provider is not still streaming or thinking" false
+        (match T.model_activity t with
+         | Some (T.Activity_answering | T.Activity_reasoning) -> true
+         | Some _ | None -> false);
+      check string "the completed response text stays authored text" "EARLIER_RESPONSE" (T.text t))
+      [wire; replay];
+    let revision = Log.revision replay in
+    ignore (Log.add_journaled replay journal);
+    check int "overlapping replay does not repeat the stop" revision (Log.revision replay);
     (match Accum.close_turn_without_sources accum ~turn:0 with
      | Ok () -> () | Error detail -> fail detail);
     send (start next_model next_initial);
@@ -944,14 +967,22 @@ let test_response_boundaries_and_usage_survive_wire_and_replay () =
         check string "only the absent model label is unavailable"
           "configured: configured-model"
           (T.runtime_identity_text ~keeper_name:"keeper.one"
-             ~configured_runtime:"configured-model" (Some (T.of_log ~now:2000. log)))) [wire;replay];
+             ~configured_runtime:"configured-model" (Some (T.of_log ~now:2000. log)));
+      let activity = T.model_activity (T.of_log ~now:2000. log) in
+      check bool "the next response clears its predecessor's stop" false
+        (activity = Some T.Activity_response_ended);
+      check bool "a response start does not invent reasoning or text" false
+        (match activity with
+         | Some (T.Activity_answering | T.Activity_reasoning) -> true
+         | Some _ | None -> false))
+      [wire; replay];
     List.iter send Agent_core.Types.[
       ContentBlockDelta {index=0;delta=TextDelta "PREFIX"};
       ContentBlockDelta {index=1;delta=ThinkingDelta "REASONING"};
       sparse 9;start next_model next_initial;
       ContentBlockDelta {index=2;delta=TextDelta "SUFFIX"};MessageStop];
     let turn_ref = Ids.Turn_ref.make ~trace_id:"trace" ~absolute_turn:1 in
-    publish (E.Reply_details {terminal_stream_scope = None; reply="SUFFIX";turn_outcome=Outcome.Visible_reply;turn_ref});
+    publish (E.Reply_details {terminal_stream_scope = None; reply="PREFIX\nSUFFIX";turn_outcome=Outcome.Visible_reply;turn_ref});
     publish (E.Run_finished {run_id="run"});
     check int "each new sealed scope publishes one start, even with a reused or absent id" 2
       (List.length (List.filter (function E.Agent_core_stream_message_start _ -> true | _ -> false) !reversed));
@@ -961,7 +992,11 @@ let test_response_boundaries_and_usage_survive_wire_and_replay () =
       let speech = T.drawn t |> List.filter_map (fun (item:T.drawn_item) ->
         match item.drawn with Drawn_text text | Drawn_reply text -> Some text | _ -> None) in
       check (list string) "earlier response and observed stretches stay in place"
-        ["EARLIER_RESPONSE";"PREFIX";"SUFFIX"] speech;
+        ["EARLIER_RESPONSE";"PREFIX";"SUFFIX";"PREFIX\nSUFFIX"] speech;
+      check bool "canonical authority is separate from observed interleaving" true
+        (match List.rev (T.drawn t) with
+         | {response_part=Some T.Final_response;origin=T.Reply_of_segment 0;_} :: _ -> true
+         | _ -> false);
       check (option string) "same provider id in a later sealed scope starts fresh usage"
         (Some "tokens: in 200 · out 9 · cache read 0 · cache write 0") (tokens log);
       check (option string) "later response has usage without the preceding stop reason"

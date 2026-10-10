@@ -171,26 +171,100 @@ let strip_quotes text =
 
 (* [<br>], [<br/>] and [<br />] are Mermaid's line break inside a label; a
    box here is one row tall, so a break is a space. *)
-let replace_breaks text =
+type label_source_range = {
+  start_byte : int;
+  end_byte : int;
+}
+
+type mapped_label = {
+  label_text : string;
+  source_ranges : label_source_range array;
+}
+
+let replace_breaks ?on_span text =
   let out = Buffer.create (String.length text) in
   let n = String.length text in
+  let emit_char i =
+    Buffer.add_char out text.[i];
+    Option.iter (fun emit -> emit {start_byte=i; end_byte=i + 1}) on_span
+  in
   let rec walk i =
     if i >= n then ()
     else if i + 3 <= n && String.sub text i 3 = "<br" then (
       match String.index_from_opt text i '>' with
       | Some close ->
           Buffer.add_char out ' ';
+          Option.iter (fun emit -> emit {start_byte=i; end_byte=close + 1}) on_span;
           walk (close + 1)
       | None ->
-          Buffer.add_substring out text i (n - i))
-    else (
-      Buffer.add_char out text.[i];
-      walk (i + 1))
+          for at = i to n - 1 do emit_char at done)
+    else (emit_char i; walk (i + 1))
   in
   walk 0;
   Buffer.contents out
 
-let label_text raw = replace_breaks (strip_quotes (String.trim raw))
+let normalize_label ?on_span raw =
+  let whitespace = function ' ' | '\t' | '\n' | '\r' | '\012' -> true | _ -> false in
+  let limit = String.length raw in
+  let rec left at = if at < limit && whitespace raw.[at] then left (at + 1) else at in
+  let start = left 0 in
+  let rec right at = if at > start && whitespace raw.[at - 1] then right (at - 1) else at in
+  let stop = right limit in
+  let start, stop = if stop - start >= 2 && raw.[start] = '"' && raw.[stop - 1] = '"'
+    then start + 1, stop - 1 else start, stop in
+  let on_span = Option.map (fun emit span ->
+    emit {start_byte=start + span.start_byte; end_byte=start + span.end_byte}) on_span in
+  replace_breaks ?on_span (String.sub raw start (stop - start))
+
+let label_text raw = normalize_label raw
+
+let label_with_source_ranges raw =
+  let ranges = ref [] in
+  let label_text = normalize_label ~on_span:(fun span -> ranges := span :: !ranges) raw in
+  {label_text; source_ranges=Array.of_list (List.rev !ranges)}
+
+type label_identity =
+  | Node_label of node_id
+  | Edge_label of int
+  | Group_label of int
+  | Participant_label of string
+  | Event_label of int
+  | Event_kind of int
+
+type sourced_label = {
+  identity : label_identity;
+  text : string;
+  ranges : label_source_range array;
+}
+
+type missing_label = { identity : label_identity; text : string }
+
+type source_mapping =
+  | Complete of sourced_label list
+  | Incomplete of { mapped : sourced_label list; missing : missing_label list }
+
+type parsed_with_sources = { diagram : diagram; source_mapping : source_mapping }
+
+let label_at offset raw =
+  let mapped = label_with_source_ranges raw in
+  {mapped with source_ranges=Array.map (fun span ->
+    {start_byte=offset + span.start_byte; end_byte=offset + span.end_byte}) mapped.source_ranges}
+
+let trim_located base text =
+  let whitespace = function ' ' | '\t' | '\n' | '\r' | '\012' -> true | _ -> false in
+  let rec left at = if at < String.length text && whitespace text.[at] then left (at + 1) else at in
+  base + left 0, String.trim text
+
+let literal_at offset text =
+  {label_text=text; source_ranges=Array.init (String.length text)
+    (fun i -> {start_byte=offset + i; end_byte=offset + i + 1})}
+
+let text_at offset raw =
+  let offset, text = trim_located offset raw in
+  let ranges = ref [] in
+  let label_text = replace_breaks ~on_span:(fun span ->
+    ranges := {start_byte=offset + span.start_byte; end_byte=offset + span.end_byte} :: !ranges) text in
+  {label_text; source_ranges=Array.of_list (List.rev !ranges)}
 
 (* An id is ASCII letters, digits and underscore, or any byte of a
    multi-byte UTF-8 scalar: a Korean id is an id. The dash is not, so an
@@ -218,6 +292,8 @@ let openers =
 
 type cursor = {
   text : string;
+  base_byte : int;
+  trace_sources : bool;
   mutable pos : int;
 }
 
@@ -261,7 +337,7 @@ let find_from text from needle =
 type statement_kind =
   | Skipped
   | Statement
-  | Group_open of string  (* the text after [subgraph] *)
+  | Group_open of string * int  (* body and its byte offset after [subgraph] *)
   | Group_close
   | Group_direction of string
 
@@ -270,14 +346,15 @@ type statement_kind =
    them loses nothing that the output could have shown. Grouping is not in
    that class, which is why [subgraph] is read. *)
 let statement_kind line =
-  let word, rest =
+  let word, rest_start, rest =
     match String.index_opt line ' ' with
     | Some i ->
-        (String.sub line 0 i, String.trim (String.sub line (i + 1) (String.length line - i - 1)))
-    | None -> (line, "")
+        let start, rest = trim_located (i + 1) (String.sub line (i + 1) (String.length line - i - 1)) in
+        (String.sub line 0 i, start, rest)
+    | None -> (line, String.length line, "")
   in
   match word with
-  | "subgraph" -> Group_open rest
+  | "subgraph" -> Group_open (rest, rest_start)
   | "end" when rest = "" -> Group_close
   | "direction" -> Group_direction rest
   | "classDef" | "class" | "style" | "linkStyle" | "click" -> Skipped
@@ -286,11 +363,13 @@ let statement_kind line =
 (* [subgraph one], [subgraph one [Title]], [subgraph one ["Title"]]. With no
    bracket the whole text is both the name and the title, as Mermaid reads
    it; such a name may hold spaces, and then no edge can name it. *)
-let parse_group_header text =
+let parse_group_header ?on_source ~source_start text =
   match String.index_opt text '[' with
   | None ->
-      let id = String.trim text in
-      if id = "" then Error "a subgraph with no name" else Ok (id, id)
+      let start, id = trim_located source_start text in
+      if id = "" then Error "a subgraph with no name" else (
+        Option.iter (fun emit -> emit (literal_at start id)) on_source;
+        Ok (id, id))
   | Some i ->
       let id = String.trim (String.sub text 0 i) in
       let rest = String.sub text i (String.length text - i) in
@@ -298,10 +377,15 @@ let parse_group_header text =
       if id = "" then Error "a subgraph with no name"
       else if n < 2 || rest.[n - 1] <> ']' then
         Error ("the title of subgraph " ^ id ^ " is never closed")
-      else Ok (id, label_text (String.sub rest 1 (n - 2)))
+      else
+        let raw = String.sub rest 1 (n - 2) in
+        Option.iter (fun emit -> emit (label_at (source_start + i + 1) raw)) on_source;
+        Ok (id, label_text raw)
 
 type declared = {
   mutable order : node_id list;  (* newest first *)
+  on_label : (label_identity -> mapped_label option -> unit) option;
+  node_sources : (node_id, mapped_label option) Hashtbl.t option;
   table : (node_id, node) Hashtbl.t;
 }
 
@@ -314,21 +398,25 @@ type frame = {
   mutable f_children : group list;  (* reverse source order *)
 }
 
-let declare declared id ~label ~shape ~explicit =
+let declare ?source declared id ~label ~shape ~explicit =
   match Hashtbl.find_opt declared.table id with
   | Some _ when not explicit -> ()
   | Some _ | None ->
       if not (Hashtbl.mem declared.table id) then declared.order <- id :: declared.order;
-      Hashtbl.replace declared.table id { id; label; shape }
+      Hashtbl.replace declared.table id { id; label; shape };
+      Option.iter (fun sources -> Hashtbl.replace sources id source) declared.node_sources;
+      Option.iter (fun emit -> emit (Node_label id) source) declared.on_label
 
 let parse_node c declared =
   skip_spaces c;
+  let id_start = c.pos in
   let id = read_while c is_id_char in
   if id = "" then Error "expected a node id"
   else
     let rec try_openers = function
       | [] ->
-          declare declared (Named id) ~label:id ~shape:Rect ~explicit:false;
+          let source = Option.map (fun _ -> label_at (c.base_byte + id_start) id) declared.on_label in
+          declare ?source declared (Named id) ~label:id ~shape:Rect ~explicit:false;
           Ok (Named id)
       | (opener, closer, shape) :: rest ->
           if starts c opener then (
@@ -350,7 +438,8 @@ let parse_node c declared =
                 | None -> Error (Printf.sprintf "%s after %s is never closed" opener id)
                 | Some stop ->
                     let raw = String.sub c.text start (stop - start) in
-                    declare declared (Named id) ~label:(label_text raw) ~shape ~explicit:true;
+                    let source = Option.map (fun _ -> label_at (c.base_byte + start) raw) declared.on_label in
+                    declare ?source declared (Named id) ~label:(label_text raw) ~shape ~explicit:true;
                     c.pos <- stop + String.length closer;
                     Ok (Named id)))
           else try_openers rest
@@ -361,6 +450,7 @@ type arrow = {
   arrow_style : line_style;
   arrow_directed : bool;
   arrow_label : string option;
+  arrow_source : mapped_label option;
 }
 
 let style_of_run run =
@@ -387,7 +477,8 @@ let parse_arrow c =
         | Some stop ->
             let raw = String.sub c.text start (stop - start) in
             c.pos <- stop + 1;
-            Ok { arrow_style; arrow_directed = head; arrow_label = Some (label_text raw) })
+            Ok { arrow_style; arrow_directed = head; arrow_label = Some (label_text raw);
+                 arrow_source = if c.trace_sources then Some (label_at (c.base_byte + start) raw) else None })
       else if (not head) && length = 2 then (
         (* "-- text -->": the label runs to the next arrow run. *)
         let start = c.pos in
@@ -409,8 +500,9 @@ let parse_arrow c =
                 { arrow_style
                 ; arrow_directed = closing.[closing_length - 1] = '>'
                 ; arrow_label = Some (label_text raw)
+                ; arrow_source = if c.trace_sources then Some (label_at (c.base_byte + start) raw) else None
                 })
-      else Ok { arrow_style; arrow_directed = head; arrow_label = None }
+      else Ok { arrow_style; arrow_directed = head; arrow_label = None; arrow_source = None }
 
 let rec parse_group c declared =
   let* first = parse_node c declared in
@@ -421,8 +513,8 @@ let rec parse_group c declared =
     Ok (first :: rest))
   else Ok [ first ]
 
-let parse_statement text declared edges =
-  let c = { text; pos = 0 } in
+let parse_statement ~source_start ~edge_count text declared edges =
+  let c = { text; pos = 0; base_byte=source_start; trace_sources=Option.is_some declared.on_label } in
   let* sources = parse_group c declared in
   let rec chain sources =
     skip_spaces c;
@@ -434,6 +526,8 @@ let parse_statement text declared edges =
         (fun from_id ->
           List.iter
             (fun to_id ->
+              Option.iter (fun emit -> emit (Edge_label !edge_count) arrow.arrow_source) declared.on_label;
+              incr edge_count;
               edges :=
                 { from_id
                 ; to_id
@@ -452,43 +546,45 @@ let parse_statement text declared edges =
    each line on [;] afterwards; a sequence diagram keeps its lines whole,
    because a message's text may hold one. *)
 let source_lines text =
+  let offset = ref 0 in
   String.split_on_char '\n' text
-  |> List.mapi (fun index line -> (index + 1, line))
-  |> List.filter_map (fun (number, line) ->
-         let line =
-           match String.index_opt line '\r' with
-           | Some i -> String.sub line 0 i
-           | None -> line
-         in
-         let trimmed = String.trim line in
-         if trimmed = "" || (String.length trimmed >= 2 && String.sub trimmed 0 2 = "%%") then None
-         else Some (number, trimmed))
+  |> List.mapi (fun index raw ->
+    let base = !offset in
+    offset := base + String.length raw + 1;
+    let line = match String.index_opt raw '\r' with
+      | Some stop -> String.sub raw 0 stop | None -> raw in
+    let base, line = trim_located base line in
+    index + 1, base, line)
+  |> List.filter (fun (_, _, line) ->
+    line <> "" && not (String.starts_with ~prefix:"%%" line))
 
 let split_statements lines =
-  List.concat_map
-    (fun (number, line) ->
-      String.split_on_char ';' line
-      |> List.map String.trim
-      |> List.filter (fun s -> s <> "")
-      |> List.map (fun s -> (number, s)))
-    lines
+  List.concat_map (fun (number, base, line) ->
+    let offset = ref base in
+    String.split_on_char ';' line |> List.filter_map (fun raw ->
+      let base = !offset in
+      offset := base + String.length raw + 1;
+      let base, statement = trim_located base raw in
+      if statement = "" then None else Some (number, base, statement))) lines
 
 (* A sequence statement. The first word decides: a declaration, a note, a
    block boundary, a line that only styles, or else a message. *)
 type roster = {
+  on_participant : (label_identity -> mapped_label option -> unit) option;
   mutable roster_order : string list;  (* newest first *)
   roster_table : (string, participant) Hashtbl.t;
 }
 
-let enrol roster pid ~alias ~explicit =
+let enrol ?source roster pid ~alias ~explicit =
   match Hashtbl.find_opt roster.roster_table pid with
   | Some _ when not explicit -> ()
   | Some _ | None ->
       if not (Hashtbl.mem roster.roster_table pid) then
         roster.roster_order <- pid :: roster.roster_order;
-      Hashtbl.replace roster.roster_table pid { pid; alias }
+      Hashtbl.replace roster.roster_table pid { pid; alias };
+      Option.iter (fun emit -> emit (Participant_label pid) source) roster.on_participant
 
-let first_word line =
+let first_word_located base line =
   let stop =
     let rec go i =
       if i >= String.length line then i
@@ -496,7 +592,11 @@ let first_word line =
     in
     go 0
   in
-  (String.lowercase_ascii (String.sub line 0 stop), String.trim (String.sub line stop (String.length line - stop)))
+  let rest_start, rest = trim_located (base + stop) (String.sub line stop (String.length line - stop)) in
+  String.lowercase_ascii (String.sub line 0 stop), rest_start, rest
+
+let first_word line =
+  let word, _, rest = first_word_located 0 line in word, rest
 
 let rest_after_colon text =
   match String.index_opt text ':' with
@@ -522,35 +622,41 @@ let sequence_arrow c =
     if starts c "+" || starts c "-" then c.pos <- c.pos + 1;
     Ok (style, head)
 
-let parse_message line roster =
-  let c = { text = line; pos = 0 } in
+let parse_message ~source_start ~event_index line roster =
+  let c = { text = line; pos = 0; base_byte=source_start; trace_sources=Option.is_some roster.on_participant } in
   let from = read_while c is_id_char in
   if from = "" then Error "expected a participant"
   else
     let* () = (skip_spaces c; Ok ()) in
     let* style, head = sequence_arrow c in
     skip_spaces c;
+    let target_start = c.pos in
     let target = read_while c is_id_char in
     if target = "" then Error "expected a participant after the arrow"
     else begin
-      enrol roster from ~alias:from ~explicit:false;
-      enrol roster target ~alias:target ~explicit:false;
+      let source = Option.map (fun _ -> literal_at source_start from) roster.on_participant in
+      enrol ?source roster from ~alias:from ~explicit:false;
+      let source = Option.map (fun _ -> literal_at (source_start + target_start) target) roster.on_participant in
+      enrol ?source roster target ~alias:target ~explicit:false;
       skip_spaces c;
       let text =
-        if starts c ":" then
-          String.trim (String.sub c.text (c.pos + 1) (String.length c.text - c.pos - 1))
+        if starts c ":" then (
+          let raw = String.sub c.text (c.pos + 1) (String.length c.text - c.pos - 1) in
+          Option.iter (fun emit -> emit (Event_label event_index)
+            (Some (text_at (source_start + c.pos + 1) raw))) roster.on_participant;
+          String.trim raw)
         else ""
       in
       Ok (Message { m_from = from; m_to = target; m_text = replace_breaks text; m_style = style; m_head = head })
     end
 
-let parse_note rest roster =
+let parse_note ~source_start ~event_index rest roster =
   (* [over A,B: text], [left of A: text], [right of A: text] *)
   let lowered = String.lowercase_ascii rest in
   let after prefix =
     if String.length lowered >= String.length prefix
        && String.sub lowered 0 (String.length prefix) = prefix
-    then Some (String.sub rest (String.length prefix) (String.length rest - String.length prefix))
+    then Some (source_start + String.length prefix, String.sub rest (String.length prefix) (String.length rest - String.length prefix))
     else None
   in
   let body =
@@ -563,27 +669,34 @@ let parse_note rest roster =
   in
   match body with
   | None -> Error "a note is over, left of or right of a participant"
-  | Some body -> (
+  | Some (body_start, body) -> (
       match String.index_opt body ':' with
       | None -> Error "a note needs a colon before its text"
       | Some colon ->
-          let names =
-            String.sub body 0 colon
-            |> String.split_on_char ','
-            |> List.map String.trim
-            |> List.filter (fun s -> s <> "")
+          let offset = ref body_start in
+          let names = String.sub body 0 colon |> String.split_on_char ','
+            |> List.filter_map (fun raw ->
+              let base = !offset in
+              offset := base + String.length raw + 1;
+              let start, name = trim_located base raw in
+              if name = "" then None else Some (start, name))
           in
           if names = [] then Error "a note names at least one participant"
           else begin
-            List.iter (fun pid -> enrol roster pid ~alias:pid ~explicit:false) names;
-            Ok (Note { n_over = names; n_text = replace_breaks (rest_after_colon body) })
+            List.iter (fun (start, pid) ->
+              let source = Option.map (fun _ -> literal_at start pid) roster.on_participant in
+              enrol ?source roster pid ~alias:pid ~explicit:false) names;
+            Option.iter (fun emit -> emit (Event_label event_index)
+              (Some (text_at (body_start + colon + 1)
+                (String.sub body (colon + 1) (String.length body - colon - 1))))) roster.on_participant;
+            Ok (Note { n_over = List.map snd names; n_text = replace_breaks (rest_after_colon body) })
           end)
 
-let parse_sequence_statement line roster =
-  let word, rest = first_word line in
+let parse_sequence_statement ~source_start ~event_index line roster =
+  let word, rest_start, rest = first_word_located source_start line in
   match word with
   | "participant" | "actor" ->
-      let c = { text = rest; pos = 0 } in
+      let c = { text = rest; pos = 0; base_byte=rest_start; trace_sources=Option.is_some roster.on_participant } in
       let pid = read_while c is_id_char in
       if pid = "" then Error "expected a participant id"
       else begin
@@ -593,34 +706,49 @@ let parse_sequence_statement line roster =
             label_text (String.sub c.text (c.pos + 3) (String.length c.text - c.pos - 3))
           else pid
         in
-        enrol roster pid ~alias ~explicit:true;
+        let source = Option.map (fun _ ->
+          if starts c "as " then label_at (rest_start + c.pos + 3)
+            (String.sub c.text (c.pos + 3) (String.length c.text - c.pos - 3))
+          else literal_at rest_start pid) roster.on_participant in
+        enrol ?source roster pid ~alias ~explicit:true;
         Ok None
       end
   | "note" ->
-      let* note = parse_note rest roster in
+      let* note = parse_note ~source_start:rest_start ~event_index rest roster in
       Ok (Some note)
   | "loop" | "alt" | "opt" | "par" | "critical" | "break" | "rect" | "box" ->
+      Option.iter (fun emit ->
+        emit (Event_kind event_index) (Some (literal_at source_start word));
+        emit (Event_label event_index) (Some (literal_at rest_start rest))) roster.on_participant;
       Ok (Some (Block_open { b_kind = word; b_label = rest }))
-  | "else" | "and" | "option" -> Ok (Some (Block_else rest))
+  | "else" | "and" | "option" ->
+      Option.iter (fun emit ->
+        emit (Event_kind event_index) (Some (if word = "else" then literal_at source_start word
+          else {label_text="else";
+            source_ranges=Array.make 4 {start_byte=source_start; end_byte=source_start + String.length word}}));
+        emit (Event_label event_index) (Some (literal_at rest_start rest))) roster.on_participant;
+      Ok (Some (Block_else rest))
   | "end" -> Ok (Some Block_close)
   | "autonumber" | "activate" | "deactivate" | "title" | "accTitle" | "accDescr" | "links"
   | "link" | "properties" | "details" ->
       Ok None
   | _ ->
-      let* message = parse_message line roster in
+      let* message = parse_message ~source_start ~event_index line roster in
       Ok (Some message)
 
-let parse_sequence lines =
-  let roster = { roster_order = []; roster_table = Hashtbl.create 8 } in
+let parse_sequence ?on_label lines =
+  let roster = { roster_order = []; roster_table = Hashtbl.create 8; on_participant=on_label } in
+  let event_index = ref 0 in
   let events = ref [] in
   let depth = ref 0 in
   let rec go = function
     | [] -> Ok ()
-    | (number, line) :: more -> (
-        match parse_sequence_statement line roster with
+    | (number, source_start, line) :: more -> (
+        match parse_sequence_statement ~source_start ~event_index:!event_index line roster with
         | Error what -> Error (Parse_error { line = number; what })
         | Ok None -> go more
         | Ok (Some event) ->
+            incr event_index;
             (match event with
              | Block_open _ -> incr depth
              | Block_close ->
@@ -647,22 +775,22 @@ let state_arrow = "-->"
 
 (* The names on a line, split at each arrow. One piece means the line holds
    no transition. *)
-let split_on_arrow text =
+let split_on_arrow ~base text =
   let rec collect pos =
     match find_from text pos state_arrow with
-    | None -> [ String.sub text pos (String.length text - pos) ]
-    | Some i -> String.sub text pos (i - pos) :: collect (i + String.length state_arrow)
+    | None -> [ base + pos, String.sub text pos (String.length text - pos) ]
+    | Some i -> (base + pos, String.sub text pos (i - pos)) :: collect (i + String.length state_arrow)
   in
   collect 0
 
 (* A colon ends the names of a statement. What follows it is a transition's
    label or a state's description, and may hold anything, an arrow
    included. *)
-let split_at_colon line =
+let split_at_colon ~base line =
   match String.index_opt line ':' with
   | Some i ->
       ( String.sub line 0 i
-      , Some (String.trim (String.sub line (i + 1) (String.length line - i - 1))) )
+      , Some (trim_located (base + i + 1) (String.sub line (i + 1) (String.length line - i - 1))) )
   | None -> (line, None)
 
 (* A state id is one token of the characters a flowchart node id is made
@@ -682,8 +810,8 @@ let state_ref text ~pseudo =
 
 (* A state named again with no description keeps the one it has, as Mermaid
    keeps it (stateDb.addState adds a description only when one is given). *)
-let declare_state declared id =
-  declare declared id ~label:(node_id_text id) ~shape:Round ~explicit:false
+let declare_state ?source declared id =
+  declare ?source declared id ~label:(node_id_text id) ~shape:Round ~explicit:false
 
 (* [state X <<choice>>], [<<fork>>], [<<join>>]: a state the diagram passes
    through rather than rests in. *)
@@ -699,29 +827,35 @@ let pseudo_state_shape tag =
 (* [state X {] and [state "Title" as X {]: a composite state, whose
    statements up to the matching [}] are its members. Mermaid opens one only
    after [state]; this is the text after that word, brace and all. *)
-let composite_header statement =
-  let word, rest = first_word statement in
+let composite_header ~source_start statement =
+  let word, rest_start, rest = first_word_located source_start statement in
   let length = String.length rest in
-  if String.equal word "state" && length > 0 && rest.[length - 1] = '{' then Some rest else None
+  if String.equal word "state" && length > 0 && rest.[length - 1] = '{' then Some (rest_start, rest) else None
 
 (* The id, and the title when the header gives one. *)
-let parse_composite_state_header header =
-  let rest = String.trim (String.sub header 0 (String.length header - 1)) in
-  let id_before_brace id =
-    match state_id id with
-    | Some id -> Ok id
+let parse_composite_state_header ~source_start ~trace header =
+  let rest_start, rest = trim_located source_start (String.sub header 0 (String.length header - 1)) in
+  let id_before_brace ~base raw =
+    match state_id raw with
+    | Some id ->
+        let start, _ = trim_located base raw in
+        Ok (id, if trace then Some (literal_at start id) else None)
     | None -> Error "expected state id before '{'"
   in
   if rest <> "" && rest.[0] = '"' then
     match String.index_from_opt rest 1 '"' with
     | Some close -> (
         let desc = String.sub rest 1 (close - 1) in
-        let after = String.trim (String.sub rest (close + 1) (String.length rest - close - 1)) in
-        match first_word after with
-        | "as", id -> Result.map (fun id -> (id, Some desc)) (id_before_brace id)
+        let after_start, after = trim_located (rest_start + close + 1)
+          (String.sub rest (close + 1) (String.length rest - close - 1)) in
+        match first_word_located after_start after with
+        | "as", id_start, id ->
+            Result.map (fun (id, source) ->
+              id, Some desc, source, (if trace then Some (literal_at (rest_start + 1) desc) else None))
+              (id_before_brace ~base:id_start id)
         | _ -> Error "expected 'as <id>' after state description")
     | None -> Error "unclosed quote in state description"
-  else Result.map (fun id -> (id, None)) (id_before_brace rest)
+  else Result.map (fun (id, source) -> id, None, source, None) (id_before_brace ~base:rest_start rest)
 
 (* A composite state, [state X {] … [}]. Mermaid keeps one state per id
    (stateDb.ts, dataFetcher.ts), so a block may open on an id the source
@@ -729,6 +863,8 @@ let parse_composite_state_header header =
    box is drawn is decided once the whole source is read. *)
 type composite = {
   cs_id : string;
+  cs_id_source : mapped_label option;
+  mutable cs_title_source : mapped_label option;
   mutable cs_title : string option;  (* from [state "Title" as X {] *)
   mutable cs_direction : direction option;
 }
@@ -758,21 +894,23 @@ type state_step =
   | Read
   | Note_opened
 
-let parse_state_statement stack homes line current_dir declared edges =
+let parse_state_statement ~source_start ~edge_count stack homes line current_dir declared edges =
   let scope =
     match !stack with
     | [] -> Top_level
     | composite :: _ -> Inside composite.cs_id
   in
-  let described id ~label ~shape =
-    declare declared id ~label ~shape ~explicit:true;
+  let described ~source:(start, raw) id ~label ~shape =
+    let source = Option.map (fun _ -> literal_at start raw) declared.on_label in
+    declare ?source declared id ~label ~shape ~explicit:true;
     place !stack homes id
   in
-  let mentioned id =
-    declare_state declared id;
+  let mentioned ~source:(start, raw) id =
+    let source = Option.map (fun _ -> label_at start raw) declared.on_label in
+    declare_state ?source declared id;
     place !stack homes id
   in
-  let word, rest = first_word line in
+  let word, rest_start, rest = first_word_located source_start line in
   match word with
   | "direction" -> (
       match direction_of_word (String.uppercase_ascii rest) with
@@ -804,12 +942,12 @@ let parse_state_statement stack homes line current_dir declared edges =
   (* The text of a note is not drawn. The state it is about is a state all
      the same, as Mermaid reads it. *)
   | "note" -> (
-      let placement, text = split_at_colon rest in
-      let side, placement = first_word placement in
-      let of_word, target = first_word placement in
+      let placement, text = split_at_colon ~base:rest_start rest in
+      let side, placement_start, placement = first_word_located rest_start placement in
+      let of_word, target_start, target = first_word_located placement_start placement in
       match (side, of_word, state_id target) with
       | ("left" | "right"), "of", Some id ->
-          mentioned (Named id);
+          mentioned ~source:(target_start, target) (Named id);
           Ok
             (match text with
              | Some _ -> Read
@@ -826,7 +964,7 @@ let parse_state_statement stack homes line current_dir declared edges =
             let as_word, id = first_word after in
             match (as_word, state_id id) with
             | "as", Some id ->
-                described (Named id) ~label:desc ~shape:Round;
+                described ~source:(rest_start + 1, desc) (Named id) ~label:desc ~shape:Round;
                 Ok Read
             | _ -> Error "expected 'as <id>' after state description")
         | None -> Error "unclosed quote in state description"
@@ -842,51 +980,56 @@ let parse_state_statement stack homes line current_dir declared edges =
                 let trailing = String.trim (String.sub rest after (String.length rest - after)) in
                 match (state_id (String.sub rest 0 opens), pseudo_state_shape tag, trailing) with
                 | Some id, Some shape, "" ->
-                    described (Named id) ~label:id ~shape;
+                    let id_start, _ = trim_located rest_start (String.sub rest 0 opens) in
+                    described ~source:(id_start, id) (Named id) ~label:id ~shape;
                     Ok Read
                 | None, _, _ -> Error ("expected state id before " ^ pseudo_state_open)
                 | Some _, None, _ ->
                     Error ("not a pseudo-state: " ^ pseudo_state_open ^ tag ^ pseudo_state_close)
                 | Some _, Some _, _ -> Error ("text after the pseudo-state: " ^ trailing)))
         | None -> (
-            let name, desc = split_at_colon rest in
+            let name, desc = split_at_colon ~base:rest_start rest in
             match (state_id name, desc) with
-            | Some id, Some desc ->
-                described (Named id) ~label:desc ~shape:Round;
+            | Some id, Some (desc_start, desc) ->
+                described ~source:(desc_start, desc) (Named id) ~label:desc ~shape:Round;
                 Ok Read
             | Some id, None ->
-                mentioned (Named id);
+                mentioned ~source:(rest_start, name) (Named id);
                 Ok Read
             | None, (Some _ | None) -> Error ("not a state id: " ^ name)))
   | _ -> (
-      let names, text = split_at_colon line in
-      match split_on_arrow names with
+      let names, text = split_at_colon ~base:source_start line in
+      match split_on_arrow ~base:source_start names with
       (* A line that is only [[*]] is a start: Mermaid's stateDb names it the
          start of its scope and draws the start shape for it. *)
-      | [ name ] -> (
+      | [ (name_start, name) ] -> (
           match (state_ref name ~pseudo:(Initial scope), text) with
-          | Some (Named id), Some desc ->
-              described (Named id) ~label:desc ~shape:Round;
+          | Some (Named id), Some (desc_start, desc) ->
+              described ~source:(desc_start, desc) (Named id) ~label:desc ~shape:Round;
               Ok Read
           | Some id, None ->
-              mentioned id;
+              mentioned ~source:(name_start, name) id;
               Ok Read
           | Some (Initial _ | Final _), Some _ | None, (Some _ | None) ->
               Error ("not a state statement: " ^ line))
       | ends ->
           let label =
             match text with
-            | Some "" | None -> None
-            | Some text -> Some (label_text text)
+            | Some (_, "") | None -> None
+            | Some (_, text) -> Some (label_text text)
           in
           let rec transitions = function
-            | source :: (target :: _ as more) -> (
+            | (from_start, source) :: ((to_start, target) :: _ as more) -> (
                 match
                   (state_ref source ~pseudo:(Initial scope), state_ref target ~pseudo:(Final scope))
                 with
                 | Some from_id, Some to_id ->
-                    mentioned from_id;
-                    mentioned to_id;
+                    mentioned ~source:(from_start, source) from_id;
+                    mentioned ~source:(to_start, target) to_id;
+                    Option.iter (fun emit ->
+                      let source = Option.map (fun (start, raw) -> label_at start raw) text in
+                      emit (Edge_label !edge_count) source) declared.on_label;
+                    incr edge_count;
                     edges := { from_id; to_id; directed = true; style = Solid; label } :: !edges;
                     transitions more
                 | Some _, None | None, (Some _ | None) ->
@@ -905,9 +1048,11 @@ let closes_note statement =
   let word, rest = first_word statement in
   String.equal word "end" && String.equal (String.lowercase_ascii rest) "note"
 
-let parse_state_diagram ?(initial_dir = Top_down) lines =
-  let declared = { order = []; table = Hashtbl.create 16 } in
+let parse_state_diagram ?on_label ?(initial_dir = Top_down) lines =
+  let node_sources = Option.map (fun _ -> Hashtbl.create 16) on_label in
+  let declared = { order = []; table = Hashtbl.create 16; on_label; node_sources } in
   let edges = ref [] in
+  let edge_count = ref 0 in
   let current_dir = ref initial_dir in
   (* Every composite state by id, and the same records in the order each
      first opened, newest first. *)
@@ -923,16 +1068,16 @@ let parse_state_diagram ?(initial_dir = Top_down) lines =
         | Statements -> Ok ()
         | Note_text opened ->
             Error (Parse_error { line = opened; what = "a note that no end note closes" }))
-    | (number, statement) :: more -> (
+    | (number, source_start, statement) :: more -> (
         let fail what = Error (Parse_error { line = number; what }) in
         match reading with
         | Note_text _ -> go (if closes_note statement then Statements else reading) more
         | Statements -> (
-            match composite_header statement with
-            | Some header -> (
-                match parse_composite_state_header header with
+            match composite_header ~source_start statement with
+            | Some (header_start, header) -> (
+                match parse_composite_state_header ~source_start:header_start ~trace:(Option.is_some on_label) header with
                 | Error what -> fail what
-                | Ok (id, title) ->
+                | Ok (id, title, id_source, title_source) ->
                     if List.exists (fun composite -> String.equal composite.cs_id id) !stack then
                       fail ("state " ^ id ^ " is already open")
                     else
@@ -940,12 +1085,12 @@ let parse_state_diagram ?(initial_dir = Top_down) lines =
                         match Hashtbl.find_opt composites id with
                         | Some composite -> composite
                         | None ->
-                            let composite = { cs_id = id; cs_title = None; cs_direction = None } in
+                            let composite = { cs_id = id; cs_id_source=id_source; cs_title_source=None; cs_title = None; cs_direction = None } in
                             Hashtbl.replace composites id composite;
                             opening_order := composite :: !opening_order;
                             composite
                       in
-                      Option.iter (fun title -> composite.cs_title <- Some title) title;
+                      Option.iter (fun title -> composite.cs_title <- Some title; composite.cs_title_source <- title_source) title;
                       place !stack homes (Named id);
                       stack := composite :: !stack;
                       go Statements more)
@@ -956,7 +1101,7 @@ let parse_state_diagram ?(initial_dir = Top_down) lines =
                     stack := rest;
                     go Statements more)
             | None -> (
-                match parse_state_statement stack homes statement current_dir declared edges with
+                match parse_state_statement ~source_start ~edge_count stack homes statement current_dir declared edges with
                 | Ok Read -> go Statements more
                 | Ok Note_opened -> go (Note_text number) more
                 | Error what -> fail what)))
@@ -1011,27 +1156,37 @@ let parse_state_diagram ?(initial_dir = Top_down) lines =
   | Some composite ->
       Error (Unsupported ("state " ^ composite.cs_id ^ " would be drawn inside itself"))
   | None ->
-      Ok
-        { direction = !current_dir
-        ; nodes = List.filter_map (Hashtbl.find_opt declared.table) states
-        ; edges = List.rev !edges
-        ; groups =
-            List.filter_map
-              (fun composite ->
-                if placed_in None (Named composite.cs_id) then Some (group_of composite) else None)
-              composites_in_order
-        }
+      let groups = List.filter_map (fun composite ->
+        if placed_in None (Named composite.cs_id) then Some (group_of composite) else None) composites_in_order in
+      Option.iter (fun emit ->
+        let index = ref 0 in
+        let rec report group =
+          let composite = Hashtbl.find composites group.group_id in
+          let source = match composite.cs_title with
+            | Some _ -> composite.cs_title_source
+            | None ->
+                (match Hashtbl.find_opt declared.table (Named composite.cs_id) with
+                 | None -> composite.cs_id_source
+                 | Some _ -> Option.bind node_sources (fun sources ->
+                     Option.join (Hashtbl.find_opt sources (Named composite.cs_id)))) in
+          emit (Group_label !index) source;
+          incr index;
+          List.iter report group.group_children in
+        List.iter report groups) on_label;
+      Ok { direction = !current_dir
+         ; nodes = List.filter_map (Hashtbl.find_opt declared.table) states
+         ; edges = List.rev !edges; groups }
 
-let parse text =
+let parse_internal ?on_label text =
   match source_lines text with
   | [] -> Error (Parse_error { line = 1; what = "empty diagram" })
-  | (header_line, header) :: rest -> (
+  | (header_line, header_start, header) :: rest -> (
       let header, rest =
         (* [graph TD; A --> B] puts the first statement on the header line. *)
         match String.index_opt header ';' with
         | Some i ->
             ( String.trim (String.sub header 0 i)
-            , (header_line, String.sub header (i + 1) (String.length header - i - 1)) :: rest )
+            , (header_line, header_start + i + 1, String.sub header (i + 1) (String.length header - i - 1)) :: rest )
         | None -> (header, rest)
       in
       let words = String.split_on_char ' ' header |> List.filter (fun w -> w <> "") in
@@ -1050,8 +1205,10 @@ let parse text =
             | _ ->
                 Error (Parse_error { line = header_line; what = "unreadable header " ^ header })
           in
-          let declared = { order = []; table = Hashtbl.create 16 } in
+          let declared = { order = []; table = Hashtbl.create 16; on_label; node_sources=None } in
           let edges = ref [] in
+          let edge_count = ref 0 in
+          let group_count = ref 0 in
           (* One open [subgraph]. Members are collected until its [end]; a
              nested one closes into its parent's children. *)
           let stack = ref [] in
@@ -1063,7 +1220,7 @@ let parse text =
           in
           let rec statements = function
             | [] -> Ok ()
-            | (number, statement) :: more -> (
+            | (number, source_start, statement) :: more -> (
                 let fail what = Error (Parse_error { line = number; what }) in
                 match statement_kind statement with
                 | Skipped -> statements more
@@ -1079,8 +1236,11 @@ let parse text =
                             frame.f_direction <- Some direction;
                             statements more
                         | None -> fail ("unknown direction " ^ word)))
-                | Group_open text -> (
-                    match parse_group_header text with
+                | Group_open (text, header_start) -> (
+                    let identity = Group_label !group_count in
+                    incr group_count;
+                    let on_source = Option.map (fun emit source -> emit identity (Some source)) on_label in
+                    match parse_group_header ?on_source ~source_start:(source_start + header_start) text with
                     | Error what -> fail what
                     | Ok (id, label) ->
                         if Hashtbl.mem declared.table (Named id) then
@@ -1116,7 +1276,7 @@ let parse text =
                         statements more)
                 | Statement -> (
                     let before = List.length declared.order in
-                    match parse_statement statement declared edges with
+                    match parse_statement ~source_start ~edge_count statement declared edges with
                     | Ok () ->
                         (* [declared.order] is newest first, so the ids this
                            statement added are its first [added] entries. *)
@@ -1139,10 +1299,10 @@ let parse text =
             (Graph
                { direction; nodes; edges = List.rev !edges; groups = List.rev !top_groups })
       | [ "sequenceDiagram" ] ->
-          let* sequence = parse_sequence rest in
+          let* sequence = parse_sequence ?on_label rest in
           Ok (Sequence sequence)
       | [ ("stateDiagram" | "stateDiagram-v2") ] ->
-          let* graph = parse_state_diagram ~initial_dir:Top_down rest in
+          let* graph = parse_state_diagram ?on_label ~initial_dir:Top_down rest in
           Ok (Graph graph)
       | [ ("stateDiagram" | "stateDiagram-v2"); dir_word ] ->
           let* initial_dir =
@@ -1150,7 +1310,7 @@ let parse text =
             | Some d -> Ok d
             | None -> Error (Unsupported ("stateDiagram direction " ^ dir_word))
           in
-          let* graph = parse_state_diagram ~initial_dir rest in
+          let* graph = parse_state_diagram ?on_label ~initial_dir rest in
           Ok (Graph graph)
       | word :: _ -> Error (Unsupported word)
       | [] -> Error (Parse_error { line = header_line; what = "empty header" }))

@@ -10,7 +10,8 @@ type t =
   ; composition_plan_index : Keeper_tool_composition_plan_index.t
   }
 
-let create ~registry ~late_approvals ~publish ~redact_text ~clock ~keeper_name ~timeout_sec =
+let create ~registry ~late_approvals ~publish ~redact_text ~clock ~base_path
+    ~keeper_name ~timeout_sec =
   let composition_plan_index = Keeper_tool_composition_plan_index.create () in
   let pre_tool_use ~identity_tool_index (event : Agent_core.Hooks.hook_event) =
     match event with
@@ -71,8 +72,8 @@ let create ~registry ~late_approvals ~publish ~redact_text ~clock ~keeper_name ~
       match
         (* The registry's wait runs on this same clock, so ages in the store
            are measured against the same clock family. *)
-        Late.take late_approvals ~now:(Eio.Time.now clock) ~keeper_name
-          ~tool_name:request.tool_name ~args:request.input ()
+        Late.take late_approvals ~now:(Eio.Time.now clock) ~base_path
+          ~keeper_name ~tool_name:request.tool_name ~args:request.input ()
       with
       | Some remembered ->
           ( (match remembered with
@@ -104,7 +105,7 @@ let create ~registry ~late_approvals ~publish ~redact_text ~clock ~keeper_name ~
                  late answer is not discarded: it settles the identical call
                  once, whenever that call comes back. *)
               Late.note_timed_out late_approvals ~now:(Eio.Time.now clock)
-                ~keeper_name ~tool_call_id
+                ~base_path ~keeper_name ~tool_call_id
                 ~tool_name:request.tool_name ~args:request.input ();
               (Agent_core.Hooks.Timed_out, "timed_out")
           (* Two waits claimed one call id, so neither answer can be trusted to be

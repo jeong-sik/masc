@@ -69,19 +69,18 @@ type entry = { at_frame : int; who : string; key_name : string; down : bool }
 val entry_json : entry -> Yojson.Safe.t
 (** The native input ledger's record encoding. *)
 
-(** Every [error] is answered before the call changes what the workspace
-    keeps: the machine, its input ledger, a checkpoint's contents. A disk boot
-    or a disk swap that fails ran on a private copy of the machine; a key the
-    matrix has no place for is released before a frame runs; a checkpoint or
-    ledger write that fails leaves the old file, because the new one is
-    renamed into place last. A caller can therefore report any [error] as a
-    refusal that took no effect. An exception is not an [error]: a ledger
-    append that raises mid-press may already have run frames. *)
+(** Errors distinguish refusals from an uncertain persisted effect. A disk boot
+    or a disk swap that fails ran on a private copy of the machine. File
+    failures before replacement are refusable; [Effect_unknown] means a
+    checkpoint/ledger replacement occurred but its durability is unconfirmed.
+    It must never be reported as proven pre-effect or retried automatically.
+    An exception may also follow an effect, such as a mid-press ledger append. *)
 type error =
   | Activity_disabled
   | Activity_unobserved
   | No_machine  (** nothing loaded — [masc_msx_load] first *)
   | Invalid_request of string  (** the caller's arguments *)
+  | Effect_unknown of string  (** replacement happened; durable effect is unknown *)
   | Unreadable of string
       (** a file that is there and will not read: a ROM, a cartridge, a
           checkpoint. A path that does not exist is [Invalid_request] --
@@ -385,11 +384,24 @@ val checkpoint_info : path:string -> (checkpoint_info, error) result
     is disabled. A missing file is [Invalid_request] naming the path; a file
     that is there and will not read is [Unreadable]; bytes that do not
     parse as a checkpoint envelope are [Invalid_request]. *)
-val save : path:string -> (observation, error) result
+type checkpoint_effect = {
+  observation : observation;
+  mark : change_mark;
+  checkpoint_sha256 : string;
+}
+(** Evidence captured by the save/restore producer, with [observation] and
+    [mark] under the machine lock. The digest names the exact bytes saved or
+    decoded for restore, not a subsequent read of a possibly overwritten slot.
+    A later live frame may be from later effects (including another incarnation);
+    this mark describes this operation's completed effect, not current state.
+    This is process-lifetime completion evidence, not a power-loss durability
+    guarantee or an operation receipt by itself. *)
+
+val save : path:string -> (checkpoint_effect, error) result
 (** Atomically replace a named checkpoint with the complete machine and ledger.
     Does not advance or eject the machine. *)
 
-val restore : path:string -> ledger_dir:string -> (observation, error) result
+val restore : path:string -> ledger_dir:string -> (checkpoint_effect, error) result
 (** Restore an independently decoded checkpoint. Invalid files leave the current
     machine and ledger intact; ROM/media bytes come from the checkpoint. *)
 

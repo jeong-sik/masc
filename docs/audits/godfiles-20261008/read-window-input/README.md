@@ -14,7 +14,7 @@ Two new scenarios failed before consumer wiring. A schema-accepted integer
 literal coordinate requesting lines 2 and 3 returned all five file lines. An
 offset of `99999999999999999999999999999999999` returned `ok:true`, `offset:1`
 and the full file head. [before.log](before.log), [before-invalid.log](before-invalid.log)
-and [before.json](before.json) retain the observed output and source identities.
+and [before.json](before.json) retain the observed output.
 At that checkpoint the pure parser and guidance declarations existed but were
 unused; the runtime still used its unchanged coercing parser.
 

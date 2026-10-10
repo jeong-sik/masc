@@ -8,11 +8,23 @@ type tool_outcome =
   | Returned
   | Native_running
   | Native_ended
-      (** The provider ended its native tool step; no MASC result or success
-          receipt was reported. *)
+      (** The provider ended its native tool step; optional native completion
+          metadata is separate from a MASC execution receipt. *)
+  | Native_failed
+      (** The provider's own report says its native tool step did not
+          succeed: an error, a decline or a nonzero exit. A provider
+          observation, not a MASC execution receipt. *)
   | Failed
   | Never_returned
   | Outcome_unrecorded
+
+type native_progress =
+  { output_bytes : int option
+  ; message : string option
+  ; provider_elapsed_seconds : int option
+  ; updated_at : float
+  ; elapsed : float option
+  }
 
 type tool_activity =
   { call_id : string option
@@ -21,6 +33,9 @@ type tool_activity =
   ; args : string
   ; subject : string option
   ; outcome : tool_outcome
+  ; native_completion : Runtime_native_tools.completion option
+  ; native_progress : native_progress option
+  ; native_retry : Runtime_native_tools.retry_observation option
   ; duration : string option
   }
 
@@ -76,7 +91,7 @@ let nonblank = function
   | Some value when String.trim value <> "" -> Some value
   | Some _ | None -> None
 
-let make_tool_activity ?execution_id ~call_id ~tool_name ~args ~outcome
+let make_tool_activity ?native_progress ?native_retry ?native_completion ?execution_id ~call_id ~tool_name ~args ~outcome
     ~duration () =
   let call_id = nonblank call_id in
   let execution_id = nonblank execution_id in
@@ -86,8 +101,25 @@ let make_tool_activity ?execution_id ~call_id ~tool_name ~args ~outcome
   ; args
   ; subject = subject_of ~tool_name ~args
   ; outcome
+  ; native_completion
+  ; native_progress
+  ; native_retry
   ; duration
   }
+
+(* Whether the provider's own report says its native step did not succeed.
+   An absent, unread or unrecognized status says nothing either way, so only
+   a reported error, a reported decline or a nonzero exit counts. *)
+let native_report_says_failed (completion : Runtime_native_tools.completion option) =
+  match completion with
+  | None -> false
+  | Some completion ->
+      let open Runtime_native_tools in
+      (match completion.outcome with
+       | Error_reported | Decline_reported | Result_received {is_error=Some true} -> true
+       | End_observed | Completion_reported
+       | Result_received {is_error=None | Some false} | Unrecognized_status _ -> false)
+      || Option.fold ~none:false ~some:(fun code -> code <> 0) completion.exit_code
 
 let tool_block ?(omitted_steps = 0) activities : tool_block =
   { activities; omitted_steps }
@@ -100,7 +132,7 @@ let marker_of_outcome = function
   | Returned -> finished_marker
   | Native_running -> "◌"
   | Native_ended -> "■"
-  | Failed -> "\xe2\x9c\x97"
+  | Native_failed | Failed -> "\xe2\x9c\x97"
   | Never_returned -> "○"
   | Outcome_unrecorded -> "?"
 
@@ -130,7 +162,91 @@ let display_tool_name name =
    call. A trailer, when a row has one, goes after the subject: it is the
    part only a persisted step knows (how long the call took), and a row
    without one draws exactly as before. *)
-let render_activity_rows (activities : tool_activity list) =
+let with_native_exit_code (completion : Runtime_native_tools.completion) status =
+  match completion.exit_code with
+  | None -> status
+  | Some code -> Printf.sprintf "%s; exit %d" status code
+
+(* Only words this module writes. The compact and full views hand their rows
+   to the phrase dresser, which colours a clause by the words it finds, so a
+   provider's own status word ("not_failed") would be painted as a failure
+   there while the call itself reads as ended. *)
+let native_completion_status (completion : Runtime_native_tools.completion) =
+  let open Runtime_native_tools in
+  with_native_exit_code completion
+    (match completion.outcome with
+     | End_observed -> "native ended; outcome not reported"
+     | Completion_reported -> "native completion reported"
+     | Error_reported -> "native error reported"
+     | Decline_reported -> "native declined"
+     | Result_received {is_error=None} -> "native result received; error flag not reported"
+     | Result_received {is_error=Some false} -> "native result received; no error reported"
+     | Result_received {is_error=Some true} -> "native error reported"
+     | Unrecognized_status _ -> "native status unrecognized")
+
+(* The status plus the provider's word for one the decoder does not know.
+   That word is payload, so only the results view draws it, as plain text. *)
+let native_completion_summary (completion : Runtime_native_tools.completion) =
+  let open Runtime_native_tools in
+  match completion.outcome with
+  | Unrecognized_status status ->
+      with_native_exit_code completion ("native status unrecognized: " ^ safe_line status)
+  | End_observed | Completion_reported | Error_reported | Decline_reported
+  | Result_received _ -> native_completion_status completion
+
+let native_activity_summary (activity : tool_activity) =
+  match activity.outcome with
+  | Native_ended | Native_failed ->
+      Some (native_completion_status
+        (Option.value activity.native_completion ~default:Runtime_native_tools.end_observed))
+  | Started | Awaiting_result | Returned | Native_running | Failed | Never_returned
+  | Outcome_unrecorded -> None
+
+let native_progress_summary (activity : tool_activity) =
+  let progress = Option.map (fun progress ->
+    let observation = match progress.message, progress.output_bytes, progress.provider_elapsed_seconds with
+      | Some message, _, _ -> safe_line message
+      | None, Some _, _ when activity.outcome=Native_running -> "output arriving"
+      | None, Some _, _ -> "output observed"
+      | None, None, Some seconds -> Printf.sprintf "heartbeat · provider elapsed %ds" seconds
+      | None, None, None -> "native activity observed" in
+    observation)
+    activity.native_progress in
+  let retry = Option.map (function
+    | Runtime_native_tools.Retry_cleared agent ->
+        "provider retry notice cleared · " ^ safe_line agent.subagent_type
+    | Runtime_native_tools.Retry_reported note ->
+        Printf.sprintf "%sprovider retry %d/%d · delay %dms · %s · %s%s"
+          (if activity.outcome=Native_running then "" else "last observed ")
+          note.attempt note.max_retries note.retry_delay_ms
+          (safe_line note.agent.subagent_type) (safe_line note.error_category)
+          (Option.fold ~none:"" ~some:(fun code -> Printf.sprintf " · status %d" code) note.error_status))
+    activity.native_retry in
+  match progress, retry with
+  | Some progress, Some retry -> Some (progress ^ " · " ^ retry)
+  | Some _ as value, None | None, (Some _ as value) -> value
+  | None, None -> None
+
+let native_progress_details ?(include_elapsed=false) (activity : tool_activity) =
+  match native_progress_summary activity, activity.native_progress with
+  | Some summary, Some progress ->
+      let summary = match include_elapsed, progress.elapsed with
+        | true, Some elapsed -> summary ^ " · updated +" ^ Masc_tui_message_layout.span_text elapsed
+        | false, _ | true, None -> summary in
+      let bytes = Option.fold ~none:[]
+          ~some:(fun count -> [Printf.sprintf "%d bytes observed" count]) progress.output_bytes in
+      (* Heartbeat-only summaries already name the provider report. When a
+         message or output takes that summary slot, retain the independent
+         provider elapsed fact in the expanded detail as well. *)
+      let provider_elapsed = match progress.provider_elapsed_seconds,
+          progress.message, progress.output_bytes with
+        | Some seconds, Some _, _
+        | Some seconds, None, Some _ -> [Printf.sprintf "provider elapsed %ds" seconds]
+        | None, _, _ | Some _, None, None -> [] in
+      Some (String.concat " · " (summary :: bytes @ provider_elapsed))
+  | summary, _ -> summary
+
+let render_activity_rows ~expanded (activities : tool_activity list) =
   let name_width =
     List.fold_left
       (fun widest (activity : tool_activity) ->
@@ -144,20 +260,30 @@ let render_activity_rows (activities : tool_activity list) =
   List.map
     (fun (activity : tool_activity) ->
       let marker = marker_of_outcome activity.outcome in
+      let progress = if expanded then native_progress_details ~include_elapsed:true activity else native_progress_summary activity in
+      let observation = match native_activity_summary activity, progress with
+        | None, progress -> progress
+        | Some completion, None -> Some completion
+        | Some completion, Some progress -> Some (completion ^ " · " ^ progress) in
+      let trailer = match observation, activity.duration with
+        | None, duration -> duration
+        | Some summary, None -> Some summary
+        | Some summary, Some duration -> Some (summary ^ " · " ^ duration)
+      in
       match activity.subject with
       | None ->
           safe_line
             (with_trailer
                (Printf.sprintf "%s %s" marker
                   (display_tool_name activity.tool_name))
-               activity.duration)
+               trailer)
       | Some subject ->
           safe_line
             (with_trailer
                (Printf.sprintf "%s %s %s" marker
                   (pad_to name_width (display_tool_name activity.tool_name))
                   subject)
-               activity.duration))
+               trailer))
     activities
 
 let omitted_steps_row count =
@@ -173,6 +299,8 @@ let omitted_steps_row count =
 let compact_outcome (activities : tool_activity list) =
   if List.exists (fun activity -> activity.outcome = Failed) activities then
     Failed
+  else if List.exists (fun activity -> activity.outcome = Native_failed) activities
+  then Native_failed
   else if
     List.exists (fun activity -> activity.outcome = Awaiting_result) activities
   then Awaiting_result
@@ -227,7 +355,7 @@ let canonical_tool_name (activity : tool_activity) =
    answer. Only the outcomes someone acts on carry names -- a reader chasing
    a failure needs the tool, a reader seeing 28 successes does not. *)
 let names_its_tools = function
-  | Failed | Never_returned | Awaiting_result -> true
+  | Failed | Native_failed | Never_returned | Awaiting_result -> true
   | Started | Native_running | Returned | Native_ended | Outcome_unrecorded -> false
 ;;
 
@@ -259,6 +387,7 @@ let outcome_label = function
   | Returned -> "returned"
   | Native_running -> "native running"
   | Native_ended -> "native ended"
+  | Native_failed -> "native failed"
   | Failed -> "failed"
   | Never_returned -> "result not seen"
   | Outcome_unrecorded -> "outcome unrecorded"
@@ -268,7 +397,8 @@ let received_marker = "↩"
 (* Every outcome, in the order the rollup lists them: what is still moving
    first, then what finished, then what nothing can be said about. *)
 let all_outcomes =
-  [ Started; Awaiting_result; Returned; Native_running; Native_ended; Failed; Never_returned; Outcome_unrecorded ]
+  [ Started; Awaiting_result; Returned; Native_running; Native_ended; Native_failed; Failed
+  ; Never_returned; Outcome_unrecorded ]
 
 let compact_outcome_parts (activities : tool_activity list) =
   let count outcome =
@@ -277,7 +407,7 @@ let compact_outcome_parts (activities : tool_activity list) =
         if activity.outcome = outcome then total + 1 else total)
       0 activities
   in
-  List.map (fun outcome -> outcome, outcome_label outcome) all_outcomes
+  let ordinary = List.map (fun outcome -> outcome, outcome_label outcome) all_outcomes
   |> List.filter_map (fun (outcome, label) ->
          match count outcome with
          | 0 -> None
@@ -289,6 +419,13 @@ let compact_outcome_parts (activities : tool_activity list) =
              match tools_for_outcome outcome activities with
              | [] -> Some counted
              | names -> Some (counted ^ ": " ^ String.concat ", " names)))
+  in
+  ordinary @ List.filter_map (fun (activity : tool_activity) ->
+    Option.map (fun summary -> display_tool_name activity.tool_name ^ ": " ^ summary)
+      (native_activity_summary activity)) activities
+  @ List.filter_map (fun (activity : tool_activity) ->
+      Option.map (fun summary -> display_tool_name activity.tool_name ^ ": " ^ summary)
+        (native_progress_summary activity)) activities
 ;;
 
 let compact_tool_parts (activities : tool_activity list) =
@@ -447,7 +584,8 @@ let skill_activity_of_tool (activity : tool_activity) =
         | Started | Awaiting_result | Native_running -> Skill_calling
         | Returned -> Skill_served_pending
         | Failed -> Skill_failed
-        | Native_ended | Never_returned | Outcome_unrecorded -> Skill_evidence_missing
+        | Native_ended | Native_failed | Never_returned | Outcome_unrecorded ->
+            Skill_evidence_missing
       in
       (* [activity_kind] admitted the call as a skill on one of two names:
          the read tool, or a composition's own tool. A composition tool is
@@ -534,7 +672,8 @@ let legend =
     | Awaiting_result -> "arguments sent, result not back yet"
     | Returned -> "result came back"
     | Native_running -> "native step running"
-    | Native_ended -> "native step ended; outcome not reported"
+    | Native_ended -> "native step ended; provider report shown when available, not a MASC execution receipt"
+    | Native_failed -> "provider reported an error, a decline or a nonzero exit for its native step; not a MASC execution receipt"
     | Failed -> "the tool answered with a failure"
     | Never_returned ->
         "no result was seen in this view before the attempt ended; this \
@@ -784,7 +923,7 @@ let inventory_row ~outcomes activities =
    calls away, [Full] keeps both. Neither draws a header over a single call --
    a summary of one call is that call, said twice. *)
 let project_tool_block mode (block : tool_block) =
-  let full_activity_rows = render_activity_rows block.activities in
+  let full_activity_rows = render_activity_rows ~expanded:(mode=Full) block.activities in
   let header, activity_rows, hidden_activity_rows, summary_outcome =
     match mode, block.activities with
     | (Full | Compact), ([] | [ _ ]) -> None, full_activity_rows, 0, None
@@ -818,8 +957,10 @@ let project_tool_block mode (block : tool_block) =
                   failed or is still out. A scrollback block of five calls
                   with one missing id would otherwise get a line of its own
                   saying so, on a block where nothing went wrong. *)
-               | Native_ended | Outcome_unrecorded -> true
-               | Started | Native_running | Awaiting_result | Failed | Never_returned -> false)
+               | Native_ended -> true
+               | Outcome_unrecorded -> true
+               | Started | Native_running | Awaiting_result | Native_failed | Failed
+               | Never_returned -> false)
             activities
         in
         (* Splitting costs a row, so it is worth it only while the fold still

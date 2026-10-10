@@ -1,6 +1,5 @@
 {
   "base_sha": "089327606d88bd81f26e193a4fcdbdda55be9560",
-  "binary_sha256": "b376cd9d68a27cca46ceb7256a0eac7434b20028d262f5b959a1530140b45bad",
   "extraction": {
     "loader_before_lines": 2047,
     "loader_after_lines": 1668,

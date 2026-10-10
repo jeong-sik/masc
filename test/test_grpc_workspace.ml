@@ -578,6 +578,51 @@ let subscribe_bytes ~since_seq =
       { agent_name = "resume-probe"; session_id = "s1"; event_types = []; since_seq }
 ;;
 
+let test_subscribe_isolates_runtime_and_subscription_occurrences () =
+  Eio_main.run (fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    with_temp_dir "masc-grpc-runtime-authority" (fun parent ->
+      let base_a = Filename.concat parent "runtime-alpha" in
+      let base_b = Filename.concat parent "runtime-beta" in
+      List.iter Fs_compat.mkdir_p [base_a;base_b];
+      let subscribe base_path =
+        let service = Masc_grpc_service.create_service
+          ~workspace_config:(Workspace_utils.default_config base_path)
+          ~tool_dispatcher:(fun _ _ -> Ok "{}") in
+        match Grpc_eio.Service.get_method service "Subscribe" with
+        | Some {handler=`ServerStreaming handler;_} -> handler (subscribe_bytes ~since_seq:0L)
+        | _ -> Alcotest.fail "Subscribe handler missing" in
+      let first = subscribe base_a in
+      let sibling = subscribe base_a in
+      let foreign = subscribe base_b in
+      Fun.protect ~finally:(fun () ->
+        List.iter Grpc_eio.Stream.close [first;sibling;foreign];
+        ignore (Masc.Sse.reap_dead_external_subscribers ())) (fun () ->
+        List.iter (fun stream -> ignore (Grpc_eio.Stream.take stream)) [first;sibling;foreign];
+        let publish base_path text =
+          let event = Ag_ui.make_event ~thread_id:"keeper:alpha" ~delta:(Some text)
+            Ag_ui.Text_message_content in
+          Masc.Keeper_chat_broadcast.operation_event ~base_path ~keeper_name:"alpha"
+            ~operation_id:"op-X" ~seq:(Some 1) ~event in
+        publish base_a "ROOT_A";
+        Alcotest.(check int) "first same-agent subscription is not replaced" 1
+          (Grpc_eio.Stream.length first);
+        Alcotest.(check int) "same-agent sibling has its own occurrence" 1
+          (Grpc_eio.Stream.length sibling);
+        Alcotest.(check int) "foreign runtime receives no body" 0
+          (Grpc_eio.Stream.length foreign);
+        Grpc_eio.Stream.close first;
+        ignore (Masc.Sse.reap_dead_external_subscribers ());
+        publish base_b "ROOT_B";
+        Alcotest.(check int) "closing one occurrence leaves another root subscribed" 1
+          (Grpc_eio.Stream.length foreign);
+        Alcotest.(check int) "foreign publish leaves same-root sibling untouched" 1
+          (Grpc_eio.Stream.length sibling);
+        publish base_a "ROOT_A_NEXT";
+        Alcotest.(check int) "closing one occurrence leaves its sibling subscribed" 2
+          (Grpc_eio.Stream.length sibling))))
+;;
+
 let test_subscribe_refuses_a_resume_it_cannot_serve () =
   Eio_main.run
   @@ fun env ->
@@ -874,6 +919,8 @@ let () =
             "tool call invalid bytes raise grpc status"
             `Quick
             test_tool_call_handler_invalid_bytes_raise_grpc_status
+        ; Alcotest.test_case "subscribe runtime and occurrence authority" `Quick
+            test_subscribe_isolates_runtime_and_subscription_occurrences
         ; Alcotest.test_case
             "subscribe invalid bytes raise grpc status"
             `Quick

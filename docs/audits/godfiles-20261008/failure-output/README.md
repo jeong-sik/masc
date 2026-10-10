@@ -2,7 +2,6 @@
 
 Issue: [#41857](https://github.com/jeong-sik/masc/issues/41857).
 Parent source: `2c20d1e1fc9bf21052ae6fa3c31066f607477a61`.
-Changed source fingerprints: [source-sha256.json](source-sha256.json).
 
 A history row can contain completed media followed by a failed request terminal.
 The dashboard previously discarded those persisted blocks. The new regression

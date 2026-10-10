@@ -85,6 +85,7 @@ let lanes_of_misc_operation : Tool_schemas_misc.misc_operation -> Lane_id.builti
   | Tool_schemas_misc.Misc_candle_equip
   | Tool_schemas_misc.Misc_candle_gift
   | Tool_schemas_misc.Misc_web_fetch
+  | Tool_schemas_misc.Misc_play_room
   | Tool_schemas_misc.Misc_web_search -> []
   | Tool_schemas_misc.Misc_browser_tabs
   | Tool_schemas_misc.Misc_browser_read

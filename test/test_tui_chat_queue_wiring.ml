@@ -1105,6 +1105,67 @@ let test_unmarked_input_cannot_escape_composer_or_recall_ownership () =
     (Option.is_some (Tui_types.next_authorized_keeper_input state "alpha"))
 ;;
 
+let test_recalled_marked_input_holds_admission_for_its_keeper () =
+  let module Q = Masc_tui_keeper_chat_queue in
+  List.iter (fun coalesce ->
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    let _, item = preflight_input () in
+    state.msg_queued <- Q.restore_unsent Q.empty item;
+    let later = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"later input" () in
+    let other = Keeper_chat.create_request ~keeper_name:"beta" ~message:"other Keeper input" () in
+    List.iter (fun request -> match Q.push state.msg_queued ~submitted_at:2. request with
+      | Ok (queue, _) -> state.msg_queued <- queue
+      | Error detail -> fail detail) [later; other];
+    let generation name = Tui_types.keeper_chat_control_generation state name in
+    state.keeper_interactive_waiting <- List.map (fun request ->
+      request.Keeper_chat.keeper_name, request.request_id,
+      Tui_types.Awaiting_control {generation=generation request.keeper_name; target=None})
+      [item.request; later; other];
+    state.coalesce_queued_input <- coalesce;
+    state.msg_target_keeper_name <- Some "beta";
+    state.msg_recall_replaces <- Some item;
+    let held_queue = Q.waiting state.msg_queued in
+    check string "the emptied editor does not revoke recall ownership" ""
+      (Masc_tui_message_input.contents state.msg_input);
+    check bool "earlier Enter permission cannot send a recalled body or pass it" true
+      (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"));
+    (match Tui_types.next_authorized_keeper_input state "beta" with
+     | Some (ready, _) -> check string "recall does not hold another Keeper"
+         other.request_id ready.request.request_id
+     | None -> fail "another Keeper was held by the recall");
+    check bool "waiting payloads and queue order remain owned locally" true
+      (held_queue = Q.waiting state.msg_queued);
+    state.msg_recall_replaces <- None;
+    (match Tui_types.next_authorized_keeper_input state "alpha" with
+     | Some (ready, _) -> check bool "abandoning edit releases the unchanged original payload" true
+         (ready.request = item.request)
+     | None -> fail "abandoned edit kept its input held")) [false; true]
+;;
+
+let test_recalled_admission_uses_the_explicitly_replaced_payload () =
+  let module Q = Masc_tui_keeper_chat_queue in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let _, item = preflight_input () in
+  state.msg_queued <- Q.restore_unsent Q.empty item;
+  state.msg_recall_replaces <- Some item;
+  state.keeper_interactive_waiting <- ["alpha", item.request.request_id,
+    Tui_types.Awaiting_control {generation=Tui_types.keeper_chat_control_generation state "alpha";
+      target=None}];
+  let edited = {item.request with Keeper_chat.message="아니야 진행해"} in
+  (match Q.replace_request state.msg_queued ~request_id:item.request.request_id edited with
+   | Ok queue -> state.msg_queued <- queue
+   | Error detail -> fail detail);
+  check bool "queue replacement alone does not release the editor's ownership" true
+    (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"));
+  state.msg_recall_replaces <- None;
+  (match Tui_types.next_authorized_keeper_input state "alpha" with
+   | Some (ready, _) ->
+     check bool "explicit edit release dispatches the exact new text and image payload" true
+       (ready.request = edited);
+     check int "replacement preserves the original queue position" item.submission_seq ready.submission_seq
+   | None -> fail "submitted edit did not release its input")
+;;
+
 let test_new_enter_can_bypass_an_explicitly_stopped_input () =
   let module Q = Masc_tui_keeper_chat_queue in
   let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
@@ -1824,28 +1885,6 @@ let test_a_journal_built_log_holds_its_turn_in_the_timeline () =
      |> List.map (fun (row : Tui_types.msg_entry) -> row.me_text))
 ;;
 
-(* Leaving the bottom remembers which settled logs were on screen, so their
-   rows are what the operator anchored to, not rows that arrived since. *)
-let test_the_scroll_pin_remembers_the_settled_logs_on_screen () =
-  let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
-  in
-  state.msg_target_keeper_name <- Some "alpha";
-  state.msg_loaded_keeper <- Some "alpha";
-  state.msg_loaded <- [ chat_entry ~request_id:"op-1" ~role:Tui_types.Message_keeper ~text:"x" ~at:1. () ];
-  let held = journal_log ~request_id:"op-1" ~started_at:1. () in
-  Tui_types.hold_settled_log state held;
-  Tui_types.set_msg_scroll state 5;
-  check bool "the pin holds the logs on screen" true
-    (state.msg_scroll_pin_settled == state.msg_settled_logs);
-  Tui_types.hold_settled_log state (journal_log ~request_id:"op-2" ~started_at:2. ());
-  check bool "a log held later is not among them" false
-    (List.memq (List.nth state.msg_settled_logs 1) state.msg_scroll_pin_settled);
-  Tui_types.set_msg_scroll state 0;
-  check (list string) "back at the bottom, nothing is pinned" []
-    (List.map Tui_types.turn_log_request_id state.msg_scroll_pin_settled)
-;;
-
 (* A settled block goes after its request's last row of any phase before
    output: a failed turn's words sit above its own error row and above the
    turns that ran in between, not below both. The live block still follows
@@ -1978,6 +2017,68 @@ let test_loaded_skill_evidence_is_folded_into_the_held_log () =
       check (option string) "on the same read call" (Some "c1")
         skill.Keeper_chat_transcript.skill_tool_use_id
   | skills -> failf "expected one drawn skill, got %d" (List.length skills)
+;;
+
+(* A failover reuses one turn reference and provider tool id across two
+   runtimes. When both observations name a runtime and the two differ, the
+   loaded row is a distinct invocation and must stay visible; the same
+   runtime, or one side without a runtime, still folds into the live
+   log's observation (#41737 review). *)
+let test_skill_dedup_keeps_a_distinct_runtime_visible () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  let occurrence =
+    { Live.stream_scope = 0; block_index = 1; provider_message_id = None; tool_call_id = Some "c1" }
+  in
+  (* No Run_finished: the log is committed but does not hold the turn, so
+     the loaded row reaches the partial-log dedup instead of being replaced
+     wholesale by the held-turn filter. *)
+  let log =
+    settled_log ~request_id:"op-1"
+      [ Live.Run_started
+      ; Live.Tool_started { occurrence; tool_name = "keeper_skill" }
+      ; Live.Tool_ended { occurrence }
+      ; visible_reply "done"
+      ]
+  in
+  Keeper_chat_transcript.note_skill_activity log.Tui_types.tl_transcript
+    (Keeper_chat_transcript.make_skill_activity
+       ~invocation:Keeper_chat_transcript.Instruction_read ~skill_tool_use_id:"c1"
+       ~turn_ref:"trace-1#1" ~runtime_id:"rt-live" ~skill_name:"ci-red-attribution"
+       ~state:Keeper_chat_transcript.Skill_used ~actions:[] ());
+  state.msg_settled_logs <- [ log ];
+  let loaded_row ?runtime_id () =
+    { (chat_entry ~request_id:"op-1"
+         ~role:(Tui_types.Message_skill Keeper_chat_transcript.Skill_used)
+         ~text:"**ci-red-attribution**" ~at:101. ())
+      with
+      me_skill_block =
+        [ Keeper_chat_transcript.make_skill_activity
+            ~invocation:Keeper_chat_transcript.Instruction_read
+            ~skill_tool_use_id:"c1" ~turn_ref:"trace-1#1" ?runtime_id
+            ~skill_name:"ci-red-attribution"
+            ~state:Keeper_chat_transcript.Skill_used ~actions:[] () ] }
+  in
+  let skill_row_count rows =
+    List.length
+      (List.filter
+         (fun (row : Tui_types.msg_entry) -> row.me_skill_block <> [])
+         rows)
+  in
+  state.msg_loaded_keeper <- Some "alpha";
+  state.msg_loaded <- [ loaded_row ~runtime_id:"rt-other" () ];
+  check int "a different runtime keeps the loaded skill row visible" 1
+    (skill_row_count
+       (Tui_types.compute_chat_rows_for state "alpha" ~queued_request_ids:[]));
+  state.msg_loaded <- [ loaded_row ~runtime_id:"rt-live" () ];
+  check int "the same runtime folds into the live observation" 0
+    (skill_row_count
+       (Tui_types.compute_chat_rows_for state "alpha" ~queued_request_ids:[]));
+  state.msg_loaded <- [ loaded_row () ];
+  check int "an unknown runtime completes the live observation" 0
+    (skill_row_count
+       (Tui_types.compute_chat_rows_for state "alpha" ~queued_request_ids:[]))
 ;;
 
 (* A log whose trail never saw the read -- a cut stream, a gap in the journal
@@ -2649,6 +2750,148 @@ let test_held_tool_results_follow_async_snapshot_changes () =
        && Astring.String.is_infix ~affix:"results stale" stale))
 ;;
 
+let test_thinking_fold_tracks_origin_body_budget () =
+  let module Layout = Masc_tui_message_layout in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let thought = String.make 70 'x' in
+  state.msg_reasoning_visibility <- Tui_types.Reasoning_folded;
+  state.msg_history <- [chat_entry ~request_id:"boundary-thought" ~role:Tui_types.Message_thinking
+      ~text:thought ~at:1. ()];
+  let body origin =
+    state.msg_origin_display <- origin;
+    match Masc_tui_render_chat.keeper_message_layout_entries state ~keeper_name:"alpha" ~chat_cols:80 with
+    | [entry] -> entry.Layout.body
+    | _ -> fail "expected one thinking entry" in
+  check string "one body row needs no fold" thought (body Layout.Origin_row);
+  check bool "inline gutter leaves less room so the same thought folds" false
+    (String.equal thought (body Layout.Origin_inline));
+  check string "returning to row origin invalidates the compact cached body" thought
+    (body Layout.Origin_row)
+;;
+
+let test_formatting_does_not_fold_a_fitting_thought () =
+  let module Layout = Masc_tui_message_layout in
+  List.iter (fun origin ->
+    List.iter (fun decorate ->
+      let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+      state.msg_origin_display <- origin;
+      state.msg_reasoning_visibility <- Tui_types.Reasoning_full;
+      let set text = state.msg_history <- [chat_entry ~request_id:"formatted-thought"
+        ~role:Tui_types.Message_thinking ~text ~at:1. ()] in
+      let entry () = match Masc_tui_render_chat.keeper_message_layout_entries
+          state ~keeper_name:"alpha" ~chat_cols:80 with
+        | [entry] -> entry | _ -> fail "expected one thought" in
+      set "x";
+      let width = Layout.entry_body_cells ~origin ~inner_width:(Masc_tui_ansi.framed_inner_width 80) (entry ()) in
+      let text = decorate (String.make width 'x') in
+      set text;
+      state.msg_reasoning_visibility <- Tui_types.Reasoning_folded;
+      check string "visible one-row Markdown remains readable" text (entry ()).Layout.body)
+      [(fun s -> "**" ^ s ^ "**"); (fun s -> "*" ^ s ^ "*"); (fun s -> "`" ^ s ^ "`")])
+    [Layout.Origin_inline; Origin_row; Origin_bare]
+;;
+
+let test_thinking_previews_do_not_trigger_folding () =
+  let module Layout = Masc_tui_message_layout in
+  let module Render = Masc_tui_render_chat in
+  let module Preview = Masc_tui_link_preview in
+  let url = "https://github.com/jeong-sik/masc/pull/41722" in
+  let preview = Preview.get_preview url in
+  Preview.cache_store { preview with title = Some "A fitting thought's link" };
+  List.iter (fun origin ->
+    List.iter (fun mode ->
+      let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+      state.msg_origin_display <- origin;
+      state.link_previews_mode <- mode;
+      state.msg_reasoning_visibility <- Tui_types.Reasoning_folded;
+      state.msg_history <- [chat_entry ~request_id:"preview-thought"
+        ~role:Tui_types.Message_thinking ~text:url ~at:1. ()];
+      let entry = match Render.keeper_message_layout_entries state
+          ~keeper_name:"alpha" ~chat_cols:140 with
+        | [entry] -> entry | _ -> fail "expected one thought" in
+      check string "fitting source keeps its URL in folded mode" url entry.Layout.body)
+      [`Rich; `Compact])
+    [Layout.Origin_inline; Origin_row; Origin_bare]
+;;
+
+let test_thinking_measurement_keeps_the_growing_draw_cache () =
+  let module Layout = Masc_tui_message_layout in
+  let module Render = Masc_tui_render_chat in
+  let module Cache = Masc_tui_markdown_render_cache in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  state.msg_reasoning_visibility <- Tui_types.Reasoning_full;
+  state.msg_history <- [chat_entry ~request_id:"growing-fold-cache"
+    ~role:Tui_types.Message_thinking ~text:(String.make 300 'x') ~at:1. ()];
+  let initial = match Render.keeper_message_layout_entries state
+      ~keeper_name:"alpha" ~chat_cols:80 with
+    | [entry] -> entry | _ -> fail "expected one thought" in
+  let source = Layout.Markdown_growing
+    {keeper_name="alpha"; request_id="growing-fold-cache"; entry_index=0} in
+  let initial = {initial with Layout.markdown_source=source} in
+  let width = Layout.entry_body_cells ~origin:state.msg_origin_display
+    ~inner_width:(Masc_tui_ansi.framed_inner_width 80) initial in
+  let theme = Masc_tui_ansi.Chat_theme.snapshot () in
+  let context = Masc_tui_ansi.Chat_theme.body_context theme Layout.Thinking in
+  state.msg_reasoning_visibility <- Tui_types.Reasoning_folded;
+  let first = Render.For_testing.fold_thinking_entry state ~chat_cols:80 initial in
+  let drawn = Render.cached_chat_markdown ~link_previews_mode:`Off ~theme ~entry:first ~width in
+  let next = Render.For_testing.fold_thinking_entry state ~chat_cols:80
+    {initial with Layout.body=initial.body ^ " more"} in
+  check string "a growing thought retains the same compact summary" first.body next.body;
+  (* The same production cache key must still own the summary. A renderer
+     call here means measurement replaced it with the growing raw thought. *)
+  let identity : Render.For_testing.chat_markdown_identity =
+    {cmi_style=Layout.Thinking; cmi_keeper_name="alpha";
+     cmi_request_id="growing-fold-cache"; cmi_observed_at=None; cmi_entry_index=0} in
+  let retained = Cache.render_growing Render.For_testing.chat_markdown_cache
+    ~theme_revision:Render.For_testing.chat_markdown_theme_revision
+    ~palette_generation:context.palette_generation ~width ~identity ~text:next.body
+    ~renderer:(fun ~width:_ _ -> fail "fold measurement evicted the drawn summary") in
+  check (list string) "the next draw reuses the retained summary" drawn retained
+;;
+
+let test_fold_measurement_retains_raw_source_height () =
+  let module Layout = Masc_tui_message_layout in
+  let module Render = Masc_tui_render_chat in
+  let module Cache = Masc_tui_markdown_render_cache in
+  let module Markdown = Masc_tui_markdown in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  state.msg_reasoning_visibility <- Tui_types.Reasoning_full;
+  state.msg_history <- [chat_entry ~request_id:"raw-height-owner"
+    ~role:Tui_types.Message_thinking ~text:"alpha\nbeta\ngamma" ~at:1. ()];
+  let initial = match Render.keeper_message_layout_entries state
+      ~keeper_name:"alpha" ~chat_cols:80 with
+    | [entry] -> entry | _ -> fail "expected one thought" in
+  let initial = {initial with Layout.markdown_source=Layout.Markdown_growing
+    {keeper_name="alpha"; request_id="raw-height-owner"; entry_index=0}} in
+  state.msg_reasoning_visibility <- Tui_types.Reasoning_folded;
+  let folded = Render.For_testing.fold_thinking_entry state ~chat_cols:80 initial in
+  let width = Layout.entry_body_cells ~origin:state.msg_origin_display
+    ~inner_width:(Masc_tui_ansi.framed_inner_width 80) initial in
+  let theme = Masc_tui_ansi.Chat_theme.snapshot () in
+  ignore (Render.cached_chat_markdown ~link_previews_mode:`Off ~theme ~entry:folded ~width);
+  let context = Masc_tui_ansi.Chat_theme.body_context theme Layout.Thinking in
+  let identity : Render.For_testing.chat_markdown_identity =
+    {cmi_style=Layout.Thinking; cmi_keeper_name="alpha"; cmi_request_id="raw-height-owner";
+     cmi_observed_at=None; cmi_entry_index=0} in
+  let parsed = ref [] in
+  let text = initial.body ^ " delta" in
+  ignore (Cache.measure_growing Render.For_testing.thinking_height_cache
+    ~theme_revision:Render.For_testing.chat_markdown_theme_revision
+    ~palette_generation:context.palette_generation ~width ~identity ~text
+    ~renderer:(fun ~width text ->
+      parsed := text :: !parsed;
+      Markdown.render_streaming ~palette:Markdown.plain_palette ~width text));
+  check (list string) "a drawn fold leaves the raw-source mutable boundary intact"
+    ["gamma delta"] (List.rev !parsed);
+  let next = Render.For_testing.fold_thinking_entry state ~chat_cols:80
+    {initial with Layout.body=text} in
+  check string "the incremental source still chooses the same physical fold" folded.body next.body;
+  state.msg_reasoning_visibility <- Tui_types.Reasoning_full;
+  check string "unfolding preserves every source byte" text
+    (Render.For_testing.fold_thinking_entry state ~chat_cols:80 {initial with Layout.body=text}).body
+;;
+
 let test_an_observed_running_turn_is_drawn_from_its_journal () =
   let cache = Masc_tui_ansi.terminal_size_cache in
   let previous_size = Masc_tui_ansi.get_terminal_size () in
@@ -2675,7 +2918,7 @@ let test_an_observed_running_turn_is_drawn_from_its_journal () =
     Tui_types.hold_settled_log state running;
     let preview : Tui_decode.keeper_turn_preview =
       { ktp_status_text = "glm · receiving response"; ktp_updated_at_unix = 130.
-      ; ktp_text_tail = "said"; ktp_last_tool = None }
+      ; ktp_text_position={kpp_generation=0; kpp_start_byte=0}; ktp_text_tail = "said"; ktp_last_tool = None }
     in
     state.keeper_turns <-
       [ { Tui_decode.ktr_chat_control_token = None; ktr_keeper_name = "alpha"
@@ -2857,6 +3100,109 @@ let test_checkpoint_activities_have_exact_row_authority () =
     (List.exists (fun (row : Tui_types.msg_entry) -> row.me_text = "FINAL") rows)
 ;;
 
+let test_skill_projection_keeps_distinct_runtime_evidence () =
+  List.iter (fun partial ->
+    List.iter (fun (observed_runtime, durable_runtime, distinct) ->
+      let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+      state.msg_loaded_keeper <- Some "alpha";
+      let request_id = "runtime-skill-evidence" in
+      let occurrence : Live.tool_occurrence = {stream_scope=0;block_index=1;
+        provider_message_id=None;tool_call_id=Some "same-id"} in
+      let log = settled_log ~request_id
+        [Live.Run_started;Live.Tool_started {occurrence;tool_name="keeper_skill"};
+         Live.Tool_ended {occurrence};Live.Tool_result {occurrence;execution_id="skill-exec"};
+         Live.Reply_details {reply=(if partial then "" else "FINAL");
+           turn_outcome=(if partial then Continuation_checkpoint else Visible_reply);
+           turn_ref="same-turn#1"; terminal_stream_scope=None};Live.Run_finished] in
+      let terminal = Keeper_chat_operation.Succeeded {completed_at=150.;outcome_ref="final"} in
+      Log.observe_operation_state log.tl_log (Some terminal);
+      Keeper_chat_transcript.reconcile_operation log.tl_transcript terminal;
+      Tui_types.hold_settled_log state log;
+      let evidence runtime action = Keeper_chat_transcript.make_skill_activity
+        ~skill_tool_use_id:"same-id" ~turn_ref:"same-turn#1" ?runtime_id:runtime
+        ~skill_name:"exact-skill" ~state:Skill_used ~actions:[action] () in
+      Keeper_chat_transcript.note_skill_activity log.tl_transcript
+        (evidence observed_runtime "OBSERVED_ACTION");
+      let durable = { (chat_entry ~request_id ~operation_seq:1 ~at:140.
+        ~role:(Tui_types.Message_skill Skill_used) ~text:"durable evidence" ()) with
+        me_skill_block=[evidence durable_runtime "DURABLE_ACTION"] } in
+      state.msg_loaded <- [durable];
+      Tui_types.enrich_held_logs_from_rows state ~keeper_name:"alpha" state.msg_loaded;
+      let remaining = Tui_types.chat_rows_for state "alpha"
+        |> List.concat_map (fun (row : Tui_types.msg_entry) -> row.me_skill_block) in
+      let drawn = drawn_skills_of log in
+      check int "partial known runtime mismatch remains durable" (if partial && distinct then 1 else 0)
+        (List.length remaining);
+      check int "known invocation evidence survives without an arbitrary unknown assignment"
+        (if distinct then (if partial then 2 else 3) else 1)
+        (List.length drawn + List.length remaining);
+      if distinct then
+        check (list string) "both known runtime authorities stay visible"
+          ["runtime-a";"runtime-b"]
+          (List.filter_map (fun (skill : Keeper_chat_transcript.skill_activity) -> skill.runtime_id)
+            (drawn @ remaining))
+      else
+        check (list (option string)) "unknown metadata is completed with the known runtime"
+          [Some "runtime-a"]
+          (List.map (fun (skill : Keeper_chat_transcript.skill_activity) -> skill.runtime_id) drawn))
+      [Some "runtime-a",Some "runtime-b",true;
+       Some "runtime-a",Some "runtime-a",false;
+       None,Some "runtime-a",false;
+       Some "runtime-a",None,false]) [false;true]
+;;
+
+let test_ambiguous_skill_runtime_input_is_order_independent () =
+  List.iter (fun (partial,staged,runtimes) ->
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    state.msg_loaded_keeper <- Some "alpha";
+    let request_id = "ambiguous-failed-skill" in
+    let occurrence : Live.tool_occurrence = {stream_scope=0;block_index=1;
+      provider_message_id=None;tool_call_id=Some "same-id"} in
+    let log = settled_log ~request_id
+      [Live.Run_started;Live.Tool_started {occurrence;tool_name="keeper_skill"};
+       Live.Tool_ended {occurrence};Live.Tool_result {occurrence;execution_id="failed-exec"};
+       Live.Reply_details {reply=(if partial then "" else "FINAL");
+         turn_outcome=(if partial then Continuation_checkpoint else Visible_reply);turn_ref="same-turn#1"; terminal_stream_scope=None};
+       Live.Run_finished] in
+    ignore (Keeper_chat_transcript.note_tool_outcome log.tl_transcript
+      ~execution_id:"failed-exec" ~outcome:Failed ~duration:None);
+    let terminal = Keeper_chat_operation.Succeeded {completed_at=150.;outcome_ref="final"} in
+    Log.observe_operation_state log.tl_log (Some terminal);
+    Keeper_chat_transcript.reconcile_operation log.tl_transcript terminal;
+    Tui_types.hold_settled_log state log;
+    if not partial then Keeper_chat_transcript.note_skill_activity log.tl_transcript
+      (Keeper_chat_transcript.make_skill_activity ~turn_ref:"same-turn#1"
+        ~skill_tool_use_id:"same-id" ~skill_name:"exact-skill" ~state:Skill_used ~actions:[] ());
+    state.msg_loaded <- List.mapi (fun seq runtime_id ->
+      { (chat_entry ~request_id ~operation_seq:seq ~at:140.
+        ~role:(Tui_types.Message_skill Skill_used) ~text:"durable evidence" ()) with
+        me_skill_block=[Keeper_chat_transcript.make_skill_activity ~runtime_id
+          ~turn_ref:"same-turn#1" ~skill_tool_use_id:"same-id" ~skill_name:"exact-skill"
+          ~state:Skill_used ~actions:[runtime_id ^ " action"] ()] }) runtimes;
+    if staged then (match state.msg_loaded with
+      | [existing;incoming] ->
+          state.msg_loaded <- [existing];
+          Tui_types.enrich_held_logs_from_rows state ~keeper_name:"alpha" [incoming];
+          state.msg_loaded <- [incoming;existing]
+      | _ -> fail "fixture requires two distinct runtime candidates")
+    else Tui_types.enrich_held_logs_from_rows state ~keeper_name:"alpha" state.msg_loaded;
+    let drawn = drawn_skills_of log in
+    (match List.find_opt (fun (skill : Keeper_chat_transcript.skill_activity) -> skill.state=Skill_failed) drawn with
+     | Some failed ->
+         check (option string) "whole candidate snapshot cannot elect either runtime" None failed.runtime_id
+     | None -> fail "ambiguous input replaced the observed failure");
+    let remaining = Tui_types.chat_rows_for state "alpha"
+      |> List.concat_map (fun (row : Tui_types.msg_entry) -> row.me_skill_block) in
+    check int "failure and both distinct receipts remain visible" 3 (List.length drawn + List.length remaining);
+    check (list string) "both runtime records remain in either input order"
+      ["runtime-a";"runtime-b"]
+      (List.filter_map (fun (skill : Keeper_chat_transcript.skill_activity) -> skill.runtime_id) (drawn @ remaining)
+       |> List.sort String.compare))
+    [true,false,["runtime-a";"runtime-b"];true,false,["runtime-b";"runtime-a"];
+     false,false,["runtime-a";"runtime-b"];false,false,["runtime-b";"runtime-a"];
+     true,true,["runtime-a";"runtime-b"];true,true,["runtime-b";"runtime-a"]]
+;;
+
 let test_checkpoint_skill_receipts_stay_in_their_exact_turn () =
   let cache = Masc_tui_ansi.terminal_size_cache in
   let previous_size = Masc_tui_ansi.get_terminal_size () in
@@ -2911,12 +3257,20 @@ let test_checkpoint_skill_receipts_stay_in_their_exact_turn () =
       let frame, _ = Masc_tui_render_chat.render_keeper_message state in
       String.concat "\n" (List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines) in
     let count needle text = List.length (Astring.String.cuts ~sep:needle text) - 1 in
+    let count_skill text =
+      text
+      |> String.split_on_char '\n'
+      |> List.filter (fun line ->
+           Astring.String.is_infix ~affix:"checkpoint-skill" line
+           && not (Astring.String.is_infix ~affix:"checkpoint-skills" line))
+      |> List.length
+    in
     let verify marker_count markers =
       let rendered = screen () in
       (* The request line spells "checkpoint-skills", so the Skill name is
          counted behind its row separator, not as a bare substring. *)
       check int "one Skill per observed or unmatched durable invocation" marker_count
-        (count "\xc2\xb7 checkpoint-skill" rendered);
+        (count_skill rendered);
       List.iter (fun marker -> check int (marker ^ " appears once") 1 (count marker rendered))
         ("EARLIER_PROGRESS" :: "FINAL_HISTORY_REPLY" :: markers) in
     install [first; final];
@@ -3422,7 +3776,7 @@ let test_message_scroll_accepts_the_rendered_clamp () =
     Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
   in
   state.msg_scroll <- 30;
-  Tui_types.apply_clamped_scroll state (Tui_types.Message_scroll 7);
+  Tui_types.apply_clamped_scroll state (Tui_types.Message_scroll {scroll=7; pin=None});
   check int "requested scroll is normalized to the drawn row" 7 state.msg_scroll
 ;;
 
@@ -4468,7 +4822,7 @@ let test_delivery_states_and_observed_work_are_identifiable () =
         {stream_scope=0; block_index=1; provider_message_id=None; tool_call_id=Some "native-read"} in
       Tui_types.turn_log_add ~now:5. entry.log ~seq:(Some 2)
         (Live.Native_tool_started {occurrence; tool_name=Some "Read"});
-      Tui_types.turn_log_add ~now:6. entry.log ~seq:(Some 3) (Live.Native_tool_ended {occurrence});
+      Tui_types.turn_log_add ~now:6. entry.log ~seq:(Some 3) (Live.Native_tool_ended {occurrence; completion=Runtime_native_tools.end_observed});
       Tui_types.turn_log_add ~now:7. entry.log ~seq:(Some 4) (Live.Text {text="OBSERVED_ANSWER"; stream_scope=None});
       check string "display annotations do not alter recall" "아니야 진행해"
         (List.hd state.msg_history).me_text)
@@ -4550,7 +4904,7 @@ let test_speech_keeps_original_words_across_metadata_and_retry () =
           ktr_state=Keeper_turn_running {lane=Turn_lane_maintenance; started_at_unix=120.;
             interrupt_token="preview-stop"; turn_ref=None;
             preview=Some {ktp_status_text="working"; ktp_updated_at_unix=121.;
-              ktp_text_tail="관측 답변 원문"; ktp_last_tool=None}}}];
+              ktp_text_position={kpp_generation=0; kpp_start_byte=0}; ktp_text_tail="관측 답변 원문"; ktp_last_tool=None}}}];
         let preview = Masc_tui_render_chat.polled_turn_output_entries state ~keeper_name:"alpha"
             ~role_label_column:(Layout.chat_role_label_width ~pane_cells:columns) in
         check (list string) "polled speech separates its observation status"
@@ -4592,8 +4946,8 @@ let test_search_measures_original_message_rows () =
           ~at:(100.5 +. float_of_int index) () in
       [{row with Tui_types.me_identity=Persisted_row id};
        {reply with Tui_types.me_identity=Persisted_row (id ^ "-reply")}]) |> List.concat;
-    let find needle = Masc_tui_render_chat.keeper_message_find_scroll state
-      ~keeper_name:"alpha" ~needle ~older_than:None in
+    let find needle = (Masc_tui_render_chat.keeper_message_find_scroll state
+      ~keeper_name:"alpha" ~needle ~older_than:None).match_result in
     let identities = ["search-0"] in
     List.iter (fun needle -> check bool "generated annotations are not searchable message text" true
       (find needle = None)) ["TURN #24"; "입력 반영됨"];
@@ -4601,8 +4955,9 @@ let test_search_measures_original_message_rows () =
     state.msg_origin_display <- Masc_tui_message_layout.Origin_bare;
     List.iter (fun (needle, expected) ->
       match expected, find needle with
-      | Some (_, expected_anchor), Some (_, actual_anchor) ->
-          check bool "bare search retains request identity" true (expected_anchor = actual_anchor)
+      | Some (_, (expected : Tui_types.chat_search_cursor)), Some (_, (actual : Tui_types.chat_search_cursor)) ->
+          check bool "bare search retains request identity" true
+            (expected.matched_anchor = actual.matched_anchor)
       | _ -> fail ("request identity disappeared: " ^ needle)) visible;
     (match find "SEARCH_TARGET" with
      | None -> fail "bare search lost input"
@@ -4614,16 +4969,101 @@ let test_search_measures_original_message_rows () =
       (List.exists (fun line -> Astring.String.is_infix ~affix:"TURN #24"
           (Masc_tui_theme.strip_sgr line)) newest.Masc_tui_frame_presenter.lines);
     match Masc_tui_render_chat.keeper_message_find_scroll state ~keeper_name:"alpha"
-        ~needle:"SEARCH_TARGET" ~older_than:None with
+        ~needle:"SEARCH_TARGET" ~older_than:None |> fun result -> result.match_result with
     | None -> fail "search lost the original input"
-    | Some (scroll, _) ->
-        state.msg_scroll <- scroll;
+    | Some (position, _) ->
+        Tui_types.apply_clamped_scroll state (Tui_types.Message_scroll position);
         let frame, _ = Masc_tui_render_chat.render_keeper_message state in
         check bool "search uses the same original message rows as the frame" true
           (List.exists (fun line -> Astring.String.is_infix ~affix:"SEARCH_TARGET"
               (Masc_tui_theme.strip_sgr line)) frame.Masc_tui_frame_presenter.lines))
       [Masc_tui_message_layout.Origin_inline; Origin_bare; Origin_row])
       [80; 140])
+;;
+
+let test_scroll_pins_follow_live_and_hold_transient_rows () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous = Masc_tui_ansi.get_terminal_size () in
+  let set_size size = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+      cache ~probe:(fun () -> Some size)) in
+  Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
+    set_size (24, 100);
+    let fresh () =
+      let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+      state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+      state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+      state.msg_target_keeper_name <- Some "alpha";
+      state in
+    let draw state =
+      let frame, feedback = Masc_tui_render_chat.render_keeper_message state in
+      Option.iter (Tui_types.apply_clamped_scroll state) feedback;
+      List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines in
+    let history count = List.init count (fun index ->
+      let id = Printf.sprintf "row-%d" index in
+      let row = chat_entry ~request_id:id ~role:Tui_types.Message_keeper
+          ~text:(Printf.sprintf "line-%02d" index) ~at:(100. +. float_of_int index) () in
+      {row with Tui_types.me_identity=Persisted_row id}) in
+    let content rows = List.filter (Astring.String.is_infix ~affix:"line-") rows in
+    let short = fresh () in
+    short.msg_history <- history 1;
+    ignore (draw short);
+    Tui_types.set_msg_scroll short 5;
+    ignore (draw short);
+    check int "short transcript clamps to live edge" 0 short.msg_scroll;
+    short.msg_history <- history 40;
+    let screen = draw short in
+    check int "new messages still follow after a clamped wheel-up" 0 short.msg_scroll;
+    check bool "newest reply remains visible" true
+      (List.exists (Astring.String.is_infix ~affix:"line-39") screen);
+    let original = fresh () in
+    original.msg_history <- history 40;
+    ignore (draw original);
+    Tui_types.set_msg_scroll original 5;
+    let raced = {original with Tui_types.msg_history=original.msg_history} in
+    let expected = content (draw original) in
+    raced.msg_history <- history 45;
+    check (list string) "arrival between the first scroll key and paint preserves reading"
+      expected (content (draw raced));
+    let queued = fresh () in
+    let add_pending state id body =
+      let request = Keeper_chat.create_request ~keeper_name:"alpha" ~message:body () in
+      let request = {request with Keeper_chat.request_id=id} in
+      match Masc_tui_keeper_chat_queue.push state.Tui_types.msg_queued ~submitted_at:200. request with
+      | Error detail -> fail detail
+      | Ok (queue, _) -> state.msg_queued <- queue in
+    let long_body = String.concat "\n" (List.init 40 (Printf.sprintf "line-%02d")) in
+    add_pending queued "pending-first" long_body;
+    ignore (draw queued);
+    Tui_types.set_msg_scroll queued 5;
+    let pending_before = content (draw queued) in
+    check bool "pending-only window has rendered text" true (pending_before <> []);
+    add_pending queued "pending-second" "new pending input below";
+    check (list string) "new pending input does not move transient-only scrollback"
+      pending_before (content (draw queued));
+    let polled = fresh () in
+    let preview text : Tui_decode.keeper_turn_row =
+      {ktr_keeper_name="alpha"; ktr_chat_control_token=None;
+       ktr_state=Keeper_turn_running {lane=Turn_lane_maintenance; started_at_unix=120.;
+         interrupt_token="one-observed-turn"; turn_ref=None;
+         preview=Some {ktp_status_text="working"; ktp_updated_at_unix=121.;
+           ktp_text_position={kpp_generation=0; kpp_start_byte=0}; ktp_text_tail=text; ktp_last_tool=None}}} in
+    polled.keeper_turns <- [preview long_body];
+    ignore (draw polled);
+    Tui_types.set_msg_scroll polled 5;
+    let polled_before = content (draw polled) in
+    polled.keeper_turns <- [preview (long_body ^ "\nnew output below")];
+    check (list string) "same observed turn preserves its scrolled excerpt"
+      polled_before (content (draw polled));
+    let searched = fresh () in
+    searched.msg_history <- history 1;
+    (match Masc_tui_render_chat.keeper_message_find_scroll searched ~keeper_name:"alpha"
+        ~needle:"line-00" ~older_than:None |> fun result -> result.match_result with
+     | None -> fail "short search target missing"
+     | Some (position, _) -> Tui_types.apply_clamped_scroll searched (Message_scroll position));
+    ignore (draw searched);
+    searched.msg_history <- history 40;
+    check bool "explicit search at zero retains its anchor" true
+      (List.exists (Astring.String.is_infix ~affix:"line-00") (draw searched)))
 ;;
 
 let test_empty_post_terminal_replay_is_retained () =
@@ -4669,7 +5109,7 @@ let test_search_finds_a_batched_request_by_its_own_id () =
            && not (Astring.String.is_infix ~affix:request_id entry.body)) entries);
     check bool "search finds the update by the id it was submitted with" true
       (Option.is_some (Masc_tui_render_chat.keeper_message_find_scroll state
-         ~keeper_name:"alpha" ~needle:request_id ~older_than:None)))
+         ~keeper_name:"alpha" ~needle:request_id ~older_than:None).match_result))
     [Masc_tui_message_layout.Origin_bare; Origin_inline; Origin_row]
 ;;
 
@@ -4704,10 +5144,47 @@ let test_history_suppression_preserves_typed_source_collisions () =
     [operation,autonomous;autonomous,operation]
 ;;
 
+let test_interrupted_native_progress_survives_results_projection () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous = Masc_tui_ansi.get_terminal_size () in
+  Fun.protect ~finally:(fun () -> ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+      cache ~probe:(fun () -> Some previous))) (fun () ->
+    ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+      cache ~probe:(fun () -> Some (60,140)));
+    List.iter (fun (label,expected_outcome,terminal) ->
+      let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+      state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+      state.msg_target_keeper_name <- Some "alpha";
+      state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+      state.msg_origin_display <- Masc_tui_message_layout.Origin_bare;
+      state.msg_tool_visibility <- Tui_types.Tools_results;
+      let occurrence : Live.tool_occurrence = {stream_scope=0;block_index=1;
+        provider_message_id=None;tool_call_id=Some "interrupted-native"} in
+      let live = inflight_with_log ~keeper_name:"alpha" ~started_at:1.
+        [Live.Run_started;Live.Native_tool_started {occurrence;tool_name=Some "Execute"}] in
+      Tui_types.turn_log_add ~now:4. live.log ~seq:(Some 2)
+        (Live.Native_tool_progress {occurrence;progress=Runtime_native_tools.Output_observed {byte_count=9}});
+      Tui_types.turn_log_add ~now:5. live.log ~seq:(Some 3)
+        (Live.Native_tool_progress {occurrence;progress=Runtime_native_tools.Message_reported {message="retained provider output"}});
+      Tui_types.turn_log_add ~now:6. live.log ~seq:(Some 4) (terminal occurrence);
+      let activities = Keeper_chat_transcript.tool_calls live.log.tl_transcript in
+      check bool (label ^ " preserves terminal native evidence") true
+        (List.exists (fun (activity : Keeper_chat_transcript.tool_activity) ->
+          Option.is_some activity.native_progress
+          && activity.outcome=expected_outcome) activities))
+      ["cancelled",Keeper_chat_transcript.Never_returned,
+         (fun _ -> Live.Run_failed {message="native runtime cancelled"});
+       "superseded",Keeper_chat_transcript.Never_returned,
+         (fun _ -> Live.Runtime_attempt_started {runtime_id=Some "retry";attempt_index=Some 1});
+       "quarantined",Keeper_chat_transcript.Failed,
+         (fun occurrence -> Live.Stream_protocol_error {
+           quarantined_occurrence=Some occurrence;detail="invalid correlated native event"})])
+;;
+
 let () =
   run
     "tui_chat_queue_wiring"
-    [ ( "expanded diagnostics",
+    [("native progress density", [test_case "interrupted native output remains in Results" `Quick test_interrupted_native_progress_survives_results_projection]); ( "expanded diagnostics",
         [ test_case "search finds a batched request by its own id" `Quick
             test_search_finds_a_batched_request_by_its_own_id ] )
     ; ( "attachment captions", [test_case "journal replacement retains source-owned media" `Quick
@@ -4715,7 +5192,9 @@ let () =
     ; ( "visible delivery",
         [ test_case "pending to observed work" `Quick test_delivery_states_and_observed_work_are_identifiable
         ; test_case "speech preserves original words" `Quick test_speech_keeps_original_words_across_metadata_and_retry
-        ; test_case "search measures original rows" `Quick test_search_measures_original_message_rows ] )
+        ; test_case "search measures original rows" `Quick test_search_measures_original_message_rows
+        ; test_case "scroll pins separate live edge, first key and transient rows" `Quick
+            test_scroll_pins_follow_live_and_hold_transient_rows ] )
     ; ( "rejected input", [test_case "refusal preserves original input" `Quick test_verified_rejection_is_visible_without_mutating_original_input] )
     ; ( "status ownership",
         [ test_case "withdrawal restores only input before the first POST" `Quick test_withdrawal_restores_only_input_before_the_first_post
@@ -4725,6 +5204,8 @@ let () =
         ; test_case "preflight local resume preserves FIFO and server stops" `Quick test_preflight_local_resume_keeps_fifo_and_respects_server_stop
         ; test_case "workspace suspension preserves real stop ownership" `Quick test_workspace_suspension_preserves_real_stop_ownership
         ; test_case "unmarked input respects composer and recall ownership" `Quick test_unmarked_input_cannot_escape_composer_or_recall_ownership
+        ; test_case "recalled marked input holds admission for its Keeper" `Quick test_recalled_marked_input_holds_admission_for_its_keeper
+        ; test_case "recalled admission uses the explicitly replaced payload" `Quick test_recalled_admission_uses_the_explicitly_replaced_payload
         ; test_case "new Enter bypasses an explicit stop hold" `Quick test_new_enter_can_bypass_an_explicitly_stopped_input
         ; test_case "empty composer preserves already queued input order" `Quick test_empty_composer_cannot_reverse_already_queued_input
         ; test_case "preflight restoration preserves submission chronology" `Quick test_preflight_restoration_preserves_submission_chronology
@@ -4797,14 +5278,14 @@ let () =
             test_a_failure_learned_only_from_the_record_keeps_the_log_partial
         ; test_case "a failure the stream reported still stands for the turn" `Quick
             test_a_failure_the_stream_reported_still_stands_for_the_turn
-        ; test_case "the scroll pin remembers the settled logs on screen" `Quick
-            test_the_scroll_pin_remembers_the_settled_logs_on_screen
         ; test_case "a settled block sits before its request's output rows" `Quick
             test_a_settled_block_sits_before_its_requests_output_rows
         ; test_case "loaded tool facts are folded into the held log" `Quick
             test_loaded_tool_facts_are_folded_into_the_held_log
         ; test_case "loaded skill evidence is folded into the held log" `Quick
             test_loaded_skill_evidence_is_folded_into_the_held_log
+        ; test_case "skill dedup keeps a distinct runtime visible" `Quick
+            test_skill_dedup_keeps_a_distinct_runtime_visible
         ; test_case "skill evidence stands for a read the trail missed" `Quick
             test_skill_evidence_stands_for_a_read_the_trail_missed
         ; test_case "a failed skill call keeps its failure" `Quick
@@ -4825,6 +5306,16 @@ let () =
             `Quick test_hold_settled_log_orders_by_start_and_replaces_only_partial_logs
         ; test_case "a journal-built log holds its turn in the timeline" `Quick
             test_a_journal_built_log_holds_its_turn_in_the_timeline
+        ; test_case "formatting does not fold fitting thoughts" `Quick
+            test_formatting_does_not_fold_a_fitting_thought
+        ; test_case "thinking fold follows origin body budget" `Quick
+            test_thinking_fold_tracks_origin_body_budget
+        ; test_case "previews do not make a fitting thought fold" `Quick
+            test_thinking_previews_do_not_trigger_folding
+        ; test_case "fold measurement retains raw height separately from the summary" `Quick
+            test_fold_measurement_retains_raw_source_height
+        ; test_case "fold measurement preserves the growing draw cache" `Quick
+            test_thinking_measurement_keeps_the_growing_draw_cache
         ; test_case "an execute call leads with its exit and output" `Quick
             test_an_execute_call_leads_with_its_exit_and_output
         ; test_case "mismatched rows make results incomplete" `Quick
@@ -4841,6 +5332,10 @@ let () =
             test_observed_history_handoff_keeps_progress_and_one_final_reply
         ; test_case "checkpoint activity rows retain exact source authority" `Quick
             test_checkpoint_activities_have_exact_row_authority
+        ; test_case "ambiguous Skill runtime input is order independent" `Quick
+            test_ambiguous_skill_runtime_input_is_order_independent
+        ; test_case "Skill projection retains distinct invocation runtimes" `Quick
+            test_skill_projection_keeps_distinct_runtime_evidence
         ; test_case "checkpoint Skill receipts retain exact turn scope when ids repeat" `Quick
             test_checkpoint_skill_receipts_stay_in_their_exact_turn
         ; test_case "checkpoint remaining Skill uses its own state" `Quick

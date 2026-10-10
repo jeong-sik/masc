@@ -33,6 +33,10 @@ let on_tool_stream_observation t
     (match Keeper_stream_tool_accum.seal_turn t.accum ~turn ~tool_source_map with
      | Ok () -> ()
      | Error detail -> record_rejection t detail)
+  | Keeper_hooks_agent_core.Child_content_observed _
+  | Keeper_hooks_agent_core.Native_task_observed _
+  | Keeper_hooks_agent_core.Native_tool_progress _
+  | Keeper_hooks_agent_core.Native_tool_completion _ -> ()
   | Keeper_hooks_agent_core.Official_tool_result { block_index; tool_call_id; execution_id } ->
     (match Keeper_stream_tool_accum.record_official_execution_id t.accum
              ~block_index ~tool_call_id ~execution_id with

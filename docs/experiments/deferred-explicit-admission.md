@@ -13,23 +13,25 @@ Admission must improve the former without erasing the latter.
 ## Authority and recovery
 
 `Keeper_memory_admission_queue` stores candidate facts separately from current
-Memory, under the configured Keeper directory. The pending snapshot has a queue
-generation, acknowledged sequence and ordered candidates. A candidate retains
-its request identity and complete proposed fact, including provenance and time.
-Exact retry identity is recognized while pending only; it is not a permanent
-operation-id ledger.
+Memory, under the configured Keeper directory. The pending snapshot has a queue generation, last-assigned sequence and ordered
+candidates. Gaps are valid after partial settlement; append never reuses consumed
+sequence numbers. A candidate retains its request identity and proposed fact,
+including provenance and time. Exact retry identity is recognized while pending
+only; it is not a permanent operation-id ledger.
 
-`Keeper_memory_os_current` binds a consumed explicit range to the same prepared
-and committed receipt protocol as its other inputs. The range names the queue
-generation, prior sequence, final sequence and digest of the complete ordered
-input. A no-change Memory decision can consume candidates without rewriting the
-snapshot. A later retirement does not erase the committed consumption receipt.
+`Keeper_memory_os_current` binds settled candidate identities to one prepared and
+committed snapshot transaction. Each identity contains the queue generation,
+request ID, original sequence and digest of its exact candidate row. A no-change
+decision can consume candidates without rewriting the snapshot. Later retirement
+does not erase consumption against a valid successor snapshot. Receipt recovery
+remains snapshot-backed; store reset or unverifiable snapshot evidence is not an
+independent immutable-ledger guarantee.
 
-Under the store locks, a new range must begin at the committed frontier. Repeated,
-old, overlapping and gapped ranges are refused before constructing a disposition.
-Queue acknowledgement separately verifies the authoritative receipt against its
-exact pending prefix. A concurrently appended tail survives acknowledgement.
-Corruption is an error, not an empty queue or authorization to discard input.
+Under store locks, consumed request IDs or sequence numbers cannot be reused in
+the same generation. Queue acknowledgement verifies every colliding receipt
+against the exact pending payload before a single rewrite. Only matching
+candidates disappear; deferred gaps and concurrently appended tails survive.
+Malformed queue state is an error, not empty state or permission to discard input.
 
 ## Librarian judgment
 
@@ -41,7 +43,7 @@ details need not survive consolidation; distinct incidents and meaningful
 exceptions must remain distinguishable.
 
 The exact-output schema wraps the existing Memory answer in `memory`, alongside
-one `candidates` judgment for every request identity:
+one `candidates` judgment for every request identity and `change_support` request IDs:
 
 | Outcome | Meaning | Required destination |
 |---|---|---|
@@ -52,14 +54,49 @@ one `candidates` judgment for every request identity:
 
 Every judgment carries a nonblank reason. Missing, duplicate or unknown request
 identities reject the answer. Claim strings are exact references to the selected
-destination, not a semantic similarity heuristic. Any deferred candidate leaves
-the whole batch pending with no Memory or working-context effects in this slice.
+destination, not a semantic similarity heuristic. A deferred candidate remains pending while independently settled candidates can
+be consumed. The model still sees all candidates together. Its one Memory
+disposition must depend only on current Memory and settled evidence. Declared
+support must be unique and known, with incorporated/already-represented outcomes;
+mutations require support and every new claim must name an incorporated
+supporting candidate. A declaration naming deferred or not-durable evidence is
+refused. This validates references, not completeness of semantic dependencies.
 
-The absorption judge also receives the explicitly labeled pending proposals.
+The absorption judge receives only the explicitly labeled supporting proposals.
 Before consuming input, the store checks that all promised destinations survived
 the actual disposition, support maintenance and concurrent changes. A missing
 destination refuses the whole commit. Schema validity and reference integrity
 do not prove semantic judgment quality.
+
+## Pending observations after retirement
+
+A pending candidate has not yet acquired a consumed-input receipt. Receipt
+validation prevents replay of an already consumed candidate, but cannot decide whether a
+first-time candidate has become obsolete while waiting:
+
+| Order | Current Memory | Pending candidate |
+|---|---|---|
+| N | A: production policy P-42 requires one approval | A is proposed again |
+| N+1 | A is explicitly retracted with a policy-withdrawal reason | Candidate remains durable |
+| N+2 | A is absent | Librarian evaluates the original candidate |
+
+The admission prompt now supplies committed removal evidence for candidate
+identities found in the dropped archive. It includes the removal time, revision,
+producer and reason, tied to the candidate request ID. Only exact Memory identity
+matches are projected; unrelated archived claim bodies are not injected. This
+adds evidence for the Librarian to distinguish an old observation from a new
+observation supporting reintroduction. It does not automatically reject either.
+Removal reasons and candidate text remain data, not instructions or restoration
+authority. A journal read failure is explicitly unavailable evidence, not a claim
+that no retirement occurred.
+
+This is a prompt-evidence boundary, not a concurrency guard or a semantic lineage
+resolver. Paraphrased candidates with different identities are not connected by
+this lookup. An archive entry requires an explicit removal reason; an empty
+lookup does not prove a memory was never removed. Later re-additions and current
+identities are excluded by the archive reader. A removal after prompt construction
+is not captured by this read. Model quality and these remaining lifecycle cases
+require separate measurement.
 
 ## Evidence and remaining work
 
@@ -76,10 +113,17 @@ nested extra fields at the strict runtime decoder boundary.
 The runtime fixtures use an injected exact-lane runner, not a live provider or
 CLI subprocess.
 
-The worker restores committed ranges before judging input and runs even below
+The worker acknowledges committed candidates before judging input and runs even below
 the current-Memory count targets. Only the runtime's typed range-sizing signal
-permits retrying a smaller prefix of whole candidates; uncertainty retains the
-batch. Successful prefix consumption schedules the remaining tail. Startup
+permits splitting into smaller whole-candidate parts. Successful consumption
+schedules only newly appended input, not already-evaluated deferred gaps.
+An actual size refusal permits disjoint whole-candidate halves. A completed
+semantic deferral or indivisible size refusal preserves that slice and continues
+its unjudged sibling. Provider, schema, dispatch and store failures stop traversal.
+The worker never retries the same deferred slice within a pass. If new input
+arrives while no candidate commits, a separate recheck outcome schedules it
+without claiming a commit. Each sibling judgment reads fresh current Memory;
+capacity partitioning itself does not prove semantic independence. Startup
 also discovers candidate-only files, retaining them if Keeper metadata is absent.
 Whole-Keeper purge owns the queue; checkpoint purge does not discard it.
 

@@ -24,11 +24,3 @@ Focused validation on the current parent and changed source:
 The checks do not establish provider execution, live Keeper/UI behavior,
 installation, deployment, full CI or approval of the parent stack. No tests
 were added to mirror this argument removal.
-
-Validated SHA-256 identities:
-
-| Input | SHA-256 |
-| --- | --- |
-| `lib/keeper/keeper_reaction_ledger.ml` | `b3fada80d5a03de53c8abd29cea0a91a6526adf6e7cc58c4af04585f9c951770` |
-| `lib/keeper/keeper_reaction_ledger.mli` | `29f1d174a3ddde87d69d25a8e62a5c962f5ad82cde2281c3b32acbfeea3fa665` |
-| `_build/default/test/test_keeper_reaction_ledger.exe` | `eb0a62e5e6735b6de273c16828941ecc8bf6812366a77358104b386458b1cc21` |

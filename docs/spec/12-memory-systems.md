@@ -176,6 +176,79 @@ archive row whose successor is not current. Working context has a separate
 revision and does not roll back a memory commit. No threshold, priority score,
 recency rule, or capacity heuristic decides which memories survive.
 
+## Committed revision lineage
+
+A declared revision relates a removed memory identity to a target present in
+the committed snapshot. Applied Librarian revisions and explicit supersedes
+writes record these links in the same recoverable removal transaction as the
+snapshot change. The journal records explicit links on actual rewrites; a
+no-change observation cannot create a revision transition. An unfinished
+journal receipt is an unavailable evidence state until a writer recovers it.
+
+A coherent read exposes the current snapshot and revision evidence after a
+requested revision. Missing link metadata is unrecorded, not an inferred
+relationship. The separate `Revised` events sidecar remains an observation
+surface; its presence alone is not commit proof.
+
+These links establish declared structural succession. They do not establish
+that every historical input remains applicable to every successor. Demand
+retrieval still needs a scope judgment before using a past observation to
+select a revised current claim. Existing candidate consumption receipts stay
+unchanged; a revision does not consume those candidates again.
+
+## Admission lookup provenance
+
+Deferred explicit writes judged `incorporated` or `already_represented` retain
+an original-input-to-current-claim lookup binding. The original fact, its exact
+candidate identity and the selected target identity commit through the same WAL
+transaction as candidate consumption. `not_durable` and `deferred` judgments do
+not create lookup bindings. A binding records the Librarian's declared relation;
+it is not an independent semantic verification of that relation.
+
+Current-memory search can match the original observation while returning the
+current target's text and memory identity. `lookup_evidence` labels the original
+observation as historical admission evidence, not a separate current claim.
+Multiple observations pointing to one target produce one current search result.
+These observations are search data, not an additional automatic prompt block.
+The snapshot and its eligible bindings are read under the same store lock.
+
+Bindings follow only the exact admitted target. A target's removal invalidates
+its old bindings, including if identical text is subsequently re-added. Search
+does not automatically transfer a binding to a replacement or split successor.
+That transfer requires a future semantic decision about which successor retains
+the observation's scope. Retention and recovery inherit the consumption receipt
+store's snapshot and journal evidence requirements. Actual revision transitions
+are distinguished from unchanged observations; an unchanged observation cannot
+fill a missing transition when proving that a target was never retired.
+The same holds when a binding commits: if Memory moved after the Librarian
+read it, the journal must show every revision written since. A missing line
+refuses the commit, and the input stays pending for a decision on current
+Memory. Search over the current snapshot is not affected.
+
+## Demand retrieval across revisions
+
+A historical admission observation can locate a current successor through
+explicitly committed revision edges. The reader follows chronological snapshot
+transitions, including branches and multiple revisions. Missing transition
+evidence is unresolved; retirement followed by unrelated identical-text
+recreation does not revive a path. Structural candidates are not yet answers.
+
+For a requested query, the successor selector judges whether the current target
+addresses the same subject, event and applicable scope as the historical lookup
+source. Corrected facts need not repeat the old content. For example, an old
+owner-approval observation may locate today's two-approval rule for the same
+release. The judgment receives the query, original observation and target,
+committed path and current target. Keeper exclusions and the configured Jev
+lane apply; the absorption feature switch does not control this retrieval.
+
+The request and response are durably recorded before using a judgment. A second
+coherent read must retain the exact candidate witness before publication. Current
+result bodies and identities come from current targets, with historical lookup
+provenance clearly separated. Multiple observations do not duplicate the same
+current target in a result. Model failure, uncertain scope or changed evidence
+leave additional retrieval explicitly unresolved while preserving direct matches;
+they must not turn into an authoritative no-match answer.
+
 ## See also
 
 - [Keeper State Ownership](../KEEPER-STATE-OWNERSHIP.md)

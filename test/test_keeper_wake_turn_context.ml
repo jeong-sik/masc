@@ -253,8 +253,10 @@ let action_turn turn_id calls : Masc.Keeper_own_recent_actions.turn =
   { turn_id; calls }
 ;;
 
-let call ~tool ~input ~outcome : Masc.Keeper_own_recent_actions.call =
-  { Masc.Keeper_own_recent_actions.tool; input; outcome }
+let call ~source_position ~tool ~input ~outcome : Masc.Keeper_own_recent_actions.call =
+  { Masc.Keeper_own_recent_actions.tool; input; outcome;
+    provenance = { task_id=Some "fixture-task"; trace_id=Some "fixture-trace" };
+    source_position }
 ;;
 
 let own_recent_actions_section body =
@@ -279,7 +281,7 @@ let test_successful_call_arguments_are_not_replayed () =
         Ok [ action_turn
             360
             (List.init 20 (fun i ->
-               call
+               call ~source_position:i
                  ~tool:"keeper_tool_execute"
                  ~input:(Printf.sprintf "{\"i\":%d,\"payload\":\"%s\"}" i big)
                  ~outcome:Masc.Keeper_own_recent_actions.Ok_call))
@@ -305,7 +307,7 @@ let test_refused_call_keeps_its_arguments () =
       WO.own_recent_actions =
         Ok [ action_turn
             361
-            [ call
+            [ call ~source_position:0
                 ~tool:"keeper_task_done"
                 ~input:payload
                 ~outcome:(Masc.Keeper_own_recent_actions.Failed_call (Some "not verified"))
@@ -334,7 +336,7 @@ let test_failure_digest_dedupes_and_counts () =
             action_turn
               (370 + i)
               [
-                call
+                call ~source_position:i
                   ~tool:"tool_read_file"
                   ~input:path
                   ~outcome:
@@ -355,13 +357,89 @@ let test_failure_digest_dedupes_and_counts () =
           ~sub:"docker_cat_failed: No such file or directory" section))
 ;;
 
+let test_action_provenance_survives_task_switch () =
+  let module Actions = Masc.Keeper_own_recent_actions in
+  let row ?task ?trace turn =
+    `Assoc (["keeper", `String "me"; "keeper_turn_id", `Int turn;
+             "tool", `String "read_file"; "input", `Assoc ["path", `String "file"];
+             "disposition", `String "failed"; "wire_outcome", `String "error";
+             "output", `String "unavailable"]
+            @ (match task with None -> [] | Some id -> ["task_id", `String id])
+            @ (match trace with None -> [] | Some id -> ["trace_id", `String id])) in
+  let turns = Actions.turns_of_rows ~keeper_name:"me" ~max_turns:10
+      ~window_saturated:false
+      [row ~task:"task-A" ~trace:"trace-A" 100;
+       row ~task:"task-A" ~trace:"trace-A" 101;
+       row ~task:"task-B" ~trace:"trace-B" 1;
+       row ~task:"task-A" ~trace:"trace-C" 1;
+       row 3; row ~task:"" ~trace:"" 4] in
+  check int "same numeric turn in different traces remains distinct" 6 (List.length turns);
+  let digests = Actions.digest_failures turns in
+  check int "different tasks, traces and unattributed turns do not merge" 5 (List.length digests);
+  check (list int) "digest order follows persisted occurrence, not trace-local turn numbers"
+    [4;3;1;1;101] (List.map (fun (d : Actions.failure_digest) -> d.failure_last_turn) digests);
+  let counts = List.map (fun (d : Actions.failure_digest) -> d.failure_count) digests
+    |> List.sort Int.compare in
+  check (list int) "only the same recorded task and trace count together" [1;1;1;1;2] counts;
+  let task id = { (make_task ~task_status:Masc_domain.Todo ()) with id } in
+  let observation = {base_observation with WO.own_recent_actions=Ok turns} in
+  let render id = user_message ~current_task:(task id) observation |> own_recent_actions_section in
+  let a = render "task-A" and b = render "task-B" in
+  let has label text expected = check bool label true
+      (Option.is_some (Astring.String.find_sub ~sub:expected text)) in
+  has "A was selected before the switch" a
+    {|"task_relation":"selected_task","task_id":"task-A","trace_id":"trace-A"|};
+  has "old A stays present with its own attribution" b
+    {|"task_relation":"other_task","task_id":"task-A","trace_id":"trace-A"|};
+  has "B is selected after the switch" b
+    {|"task_relation":"selected_task","task_id":"task-B","trace_id":"trace-B"|};
+  has "missing and blank attribution remain unknown" b
+    {|"task_relation":"unknown_task","task_id":null,"trace_id":null|};
+  check int "rendering does not remove previous task history" 6 (List.length turns)
+;;
+
+let test_action_occurrences_keep_source_order () =
+  let module Actions = Masc.Keeper_own_recent_actions in
+  let row ?trace turn tool =
+    `Assoc (["keeper", `String "me"; "keeper_turn_id", `Int turn;
+      "task_id", `String "task-A"; "tool", `String tool; "input", `Assoc [];
+      "disposition", `String "failed"; "wire_outcome", `String "error"]
+      @ (match trace with None -> [] | Some id -> ["trace_id", `String id])) in
+  let project ~clipped rows = Actions.turns_of_rows ~keeper_name:"me" ~max_turns:10
+      ~window_saturated:clipped rows in
+  let unknown_rows = [row 1 "x"; row 1 "x"; row 2 "y"; row 1 "x"] in
+  let unknown = project ~clipped:false unknown_rows in
+  check (list int) "unknown trace numeric reuse is a new occurrence" [1;2;1]
+    (List.map (fun (t : Actions.turn) -> t.turn_id) unknown);
+  check (list int) "only contiguous unknown calls count together" [1;1;2]
+    (Actions.digest_failures unknown |> List.map (fun (d : Actions.failure_digest) -> d.failure_count));
+  let clipped = project ~clipped:true unknown_rows in
+  check (list int) "clipping the first unknown occurrence preserves later turn 1" [2;1]
+    (List.map (fun (t : Actions.turn) -> t.turn_id) clipped);
+  let newest_tools turns = Actions.digest_failures ~limit:2 turns
+      |> List.map (fun (d : Actions.failure_digest) -> d.failure_tool) in
+  let single_turn = project ~clipped:false
+      [row ~trace:"A" 1 "x"; row ~trace:"A" 1 "y"; row ~trace:"A" 1 "z"] in
+  check (list string) "same-turn digest selection follows actual call order" ["z";"y"]
+    (newest_tools single_turn);
+  let interleaved = project ~clipped:false
+      [row ~trace:"A" 1 "x"; row ~trace:"B" 1 "y"; row ~trace:"A" 1 "x"] in
+  check (list string) "regrouping interleaved turns does not reorder newest refusals" ["x";"y"]
+    (newest_tools interleaved);
+  let same_trace_interleaved = project ~clipped:false
+      [row ~trace:"A" 1 "x"; row ~trace:"A" 2 "x"; row ~trace:"A" 1 "x"] in
+  check (list int) "newest source occurrence supplies the digest turn after regrouping" [1]
+    (Actions.digest_failures same_trace_interleaved
+     |> List.map (fun (d : Actions.failure_digest) -> d.failure_last_turn))
+;;
+
 let test_no_digest_without_failures () =
   let observation =
     { base_observation with
       WO.own_recent_actions =
         Ok [ action_turn
             380
-            [ call
+            [ call ~source_position:0
                 ~tool:"masc_board_list"
                 ~input:"{}"
                 ~outcome:Masc.Keeper_own_recent_actions.Ok_call ]
@@ -404,9 +482,9 @@ let test_small_failed_payloads_remain_retrievable () =
   let reader = artifact_reader ~base_path in
   let payload = "{\"patch\":\"" ^ String.make 32000 'x' ^ "\"}" in
   let detail = "Patch rejected: " ^ String.make 16000 'd' in
-  let failed = call ~tool:"Edit" ~input:payload ~outcome:(Actions.Failed_call (Some detail)) in
-  let success = call ~tool:"Read" ~input:"unchanged-success" ~outcome:Actions.Ok_call in
-  let source = [action_turn 42 [failed; success]; action_turn 43 [failed]] in
+  let failed = call ~source_position:0 ~tool:"Edit" ~input:payload ~outcome:(Actions.Failed_call (Some detail)) in
+  let success = call ~source_position:1 ~tool:"Read" ~input:"unchanged-success" ~outcome:Actions.Ok_call in
+  let source = [action_turn 42 [failed; success]; action_turn 43 [{failed with source_position=2}]] in
   let render turns = user_message {base_observation with WO.own_recent_actions=Ok turns} in
   let original = render source in
   let project ~base_path ~policy ~tools =
@@ -419,7 +497,11 @@ let test_small_failed_payloads_remain_retrievable () =
   let projected_call = match projected with
     | [{Actions.turn_id=42;calls=[call; untouched]}; {turn_id=43;calls=[repeated]}] ->
       check bool "successful call is untouched" true (untouched = success);
-      check bool "identical failures retain identical references" true (call = repeated);
+      check bool "identical failures retain identical payload references" true
+        (call.input = repeated.input && call.outcome = repeated.outcome
+         && call.provenance = repeated.provenance);
+      check (pair int int) "externalization preserves source occurrence positions" (0, 2)
+        (call.source_position, repeated.source_position);
       call
     | _ -> fail "projection changed turn coordinates or call ordering" in
   let reference text = match Tool_output.decode_from_agent_core text with
@@ -1293,6 +1375,10 @@ let () =
             test_small_failed_payloads_remain_retrievable;
           test_case "repeated refusals collapse into one digest row" `Quick
             test_failure_digest_dedupes_and_counts;
+          test_case "unknown occurrences and interleaved failures retain source order" `Quick
+            test_action_occurrences_keep_source_order;
+          test_case "task switch preserves action provenance and separate digests" `Quick
+            test_action_provenance_survives_task_switch;
           test_case "no digest block without refusals" `Quick
             test_no_digest_without_failures;
         ] );

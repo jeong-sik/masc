@@ -19,7 +19,8 @@ type 'identity t
 
 val create : capacity:int -> 'identity t
 (** Create a cache retaining at most [capacity] completed entries and, in a
-    separate bound, at most [capacity] growing entries. Within each kind, an
+    separate bound, at most [capacity] growing entries and [capacity] measured
+    heights. Within each kind, an
     identity owns one result, so a new width, source, theme revision, or palette
     generation replaces its previous result. *)
 
@@ -50,6 +51,30 @@ val render_growing :
     and palette generation. An unchanged snapshot reuses all rows. An appended
     snapshot renders from the previous suffix boundary. A non-prefix snapshot
     or any visual-key change starts again from the complete source. *)
+
+type measurement = { height : int; nonblank_lines : int }
+
+val measure_growing_details :
+  'identity t -> theme_revision:int -> palette_generation:int -> width:int ->
+  renderer:(width:int -> string -> Masc_tui_markdown.streaming_render) ->
+  identity:'identity -> text:string -> measurement
+(** Height plus raw nonblank logical-line count. Appends scan only newly
+    arrived bytes for the logical count, retaining the final line's state. *)
+
+val measure_growing :
+  'identity t ->
+  theme_revision:int ->
+  palette_generation:int ->
+  width:int ->
+  renderer:(width:int -> string -> Masc_tui_markdown.streaming_render) ->
+  identity:'identity ->
+  text:string ->
+  int
+(** Physical body-row height, dropping trailing blank rows and keeping one
+    row for an empty body as Message_layout does. Closed blocks retain counts
+    instead of row lists; only the mutable suffix reaches the renderer after
+    an append. The measurement has its own owner store, so rendering a folded
+    summary cannot replace the raw source's retained boundary. *)
 
 module For_testing : sig
   val retained_entries : 'identity t -> int

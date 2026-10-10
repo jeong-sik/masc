@@ -31,11 +31,23 @@ type tool_outcome = Masc_tui_keeper_chat_activity_projection.tool_outcome =
   | Returned
   | Native_running
   | Native_ended
-      (** The provider ended its native tool step; no MASC result or success
-          receipt was reported. *)
+      (** The provider ended its native tool step; optional native completion
+          metadata is separate from a MASC execution receipt. *)
+  | Native_failed
+      (** The provider's own report says its native tool step did not
+          succeed: an error, a decline or a nonzero exit. A provider
+          observation, not a MASC execution receipt. *)
   | Failed
   | Never_returned
   | Outcome_unrecorded
+
+type native_progress = Masc_tui_keeper_chat_activity_projection.native_progress =
+  { output_bytes : int option
+  ; message : string option
+  ; provider_elapsed_seconds : int option
+  ; updated_at : float
+  ; elapsed : float option
+  }
 
 type tool_activity = Masc_tui_keeper_chat_activity_projection.tool_activity =
   { call_id : string option
@@ -44,6 +56,9 @@ type tool_activity = Masc_tui_keeper_chat_activity_projection.tool_activity =
   ; args : string
   ; subject : string option
   ; outcome : tool_outcome
+  ; native_completion : Runtime_native_tools.completion option
+  ; native_progress : native_progress option
+  ; native_retry : Runtime_native_tools.retry_observation option
   ; duration : string option
   }
 
@@ -93,6 +108,7 @@ type tool_projection = Masc_tui_keeper_chat_activity_projection.tool_projection 
 
 include (Masc_tui_keeper_chat_activity_projection : module type of Masc_tui_keeper_chat_activity_projection
   with type tool_outcome := tool_outcome
+   and type native_progress := native_progress
    and type tool_activity := tool_activity
    and type skill_state := skill_state
    and type skill_invocation := skill_invocation
@@ -128,6 +144,9 @@ type live_tool_call =
   ; tool_name : string
   ; args : string
   ; ended : bool
+  ; native_completion : Runtime_native_tools.completion option
+  ; native_progress : native_progress option
+  ; native_retry : Runtime_native_tools.retry_observation option
   ; result_ready : bool
   ; failed : bool
   ; duration : string option
@@ -209,8 +228,11 @@ type reply =
    the instant it arrived. The row states the word, and once the silence since
    it is long enough to read as a stall, the silence's age beside it. *)
 type model_signal =
+  | Scoped_model_content
   | Model_started_at of float
       (* STREAM_MODEL_STARTED: the endpoint answered; no token yet. *)
+  | Model_response_ended
+      (* Provider response stop; the Keeper turn remains open. *)
   | Reasoning_at of float (* the last THINKING delta *)
   | Answering_at of float (* the last TEXT delta *)
   | Tool_returned_at of string * float
@@ -293,6 +315,12 @@ type t =
         (* The identity carried by the last reported stop reason. A partial
            replay can retain this while losing that response's start; only
            matching observed identities permit terminal reconciliation. *)
+  ; mutable content_scope : (int * int) option
+  ; mutable content_scope_closed : bool
+  ; mutable active_model_content : (int * Masc.Keeper_chat_events.model_content_channel * float option) list
+        (* Most recently observed first; None is a closed occurrence. These
+           tombstones prevent duplicate/late observations reopening an index.
+           An event from an older server scope cannot erase current activity. *)
   ; mutable model_signal : model_signal option
         (* The last thing the model side sent in this attempt, and when.
            Tool calls carry their own pending state; this covers the stretches
@@ -323,7 +351,7 @@ type t =
            moment when it covered a span, and a turn that ran twenty minutes
            sits under rows typed during it carrying an opening clock (the
            2026-09-10 msx-retro-mania misread). *)
-  ; mutable noted_skills : ((string * string) * skill_activity) list
+  ; mutable noted_skills : ((string * string * string option) * skill_activity) list
         (* The exact delivery records [note_skill_activity] took, keyed by
            the read call's (turn_ref, tool-use id), in first-noted order.
            Not a trail node: the stream has no event for a delivery, so
@@ -369,6 +397,9 @@ let create_for_source ~keeper_name ~source ~started_at =
   ; observed_stop_reason = None
   ; response_scope = None
   ; stop_scope = None
+  ; content_scope = None
+  ; content_scope_closed = false
+  ; active_model_content = []
   ; model_signal = None
   ; runtime_named_at = None
   ; reply = None
@@ -551,12 +582,14 @@ let activity_of_live_call (t : t) (call : live_tool_call) =
         | Waiting | Working -> false
         | Stream_ended | Stream_failed _ -> true)
   in
-  make_tool_activity ?execution_id:call.execution_id
+  make_tool_activity ?native_retry:call.native_retry ?native_progress:call.native_progress ?native_completion:call.native_completion ?execution_id:call.execution_id
     ~call_id:call.call_id ~tool_name:call.tool_name
     ~args:call.args
     ~outcome:
       (if call.failed then Failed
-       else if call.authority = Provider_native && call.ended then Native_ended
+       else if call.authority = Provider_native && call.ended then
+         if native_report_says_failed call.native_completion then Native_failed
+         else Native_ended
        else if call.result_ready then Returned
        else if attempt_ended then Never_returned
        else if call.authority = Provider_native then Native_running
@@ -746,21 +779,26 @@ let quiet_after_s = 2.0
 (* The model side's phase as one clause, or [None] before the first byte,
    where the named runtime is the subject instead. *)
 let model_phase_text ~show_timing ~now t =
-  match t.model_signal with
-  | None -> None
-  | Some signal ->
-    let word, since =
-      match signal with
-      | Model_started_at since -> "model started", since
-      | Reasoning_at since -> "THINKING · reasoning", since
-      | Answering_at since -> "STREAMING · answering", since
-      | Tool_returned_at (tool_name, since) -> tool_name ^ " returned", since
-    in
+  let observed ~since word =
     if not show_timing || now -. since < quiet_after_s then Some word
     else
       match Masc_tui_message_layout.age_text ~now ~since with
       | None -> Some word
       | Some age -> Some (Printf.sprintf "%s, nothing back for %s" word age)
+  in
+  match t.model_signal with
+  | None -> None
+  | Some Model_response_ended -> Some "model response ended"
+  | Some Scoped_model_content ->
+      (match List.find_opt (fun (_,_,at) -> Option.is_some at) t.active_model_content with
+       | Some (_,channel,Some since) -> observed ~since
+           (match channel with Masc.Keeper_chat_events.Model_text -> "STREAMING · answering"
+            | Model_thinking -> "THINKING · reasoning")
+       | Some (_,_,None) | None -> Some "model content ended")
+  | Some (Model_started_at since) -> observed ~since "model started"
+  | Some (Reasoning_at since) -> observed ~since "THINKING · reasoning"
+  | Some (Answering_at since) -> observed ~since "STREAMING · answering"
+  | Some (Tool_returned_at (tool_name, since)) -> observed ~since (tool_name ^ " returned")
 ;;
 
 let phase_text ~show_timing ~now t =
@@ -820,7 +858,8 @@ let phase_text ~show_timing ~now t =
                  Option.exists (String.equal awaiting.call_id) call.call_id
                  && (match (activity_of_live_call t call).outcome with
                      | Started | Native_running | Awaiting_result -> true
-                     | Returned | Native_ended | Failed | Never_returned | Outcome_unrecorded -> false))
+                     | Returned | Native_ended | Native_failed | Failed | Never_returned
+                     | Outcome_unrecorded -> false))
                current_calls with
              | [call] -> Some call.local_id
              | _ -> None)
@@ -845,7 +884,8 @@ let phase_text ~show_timing ~now t =
       let has_pending_activity = List.exists
         (fun activity -> match activity.outcome with
           | Started | Native_running | Awaiting_result -> true
-          | Returned | Native_ended | Failed | Never_returned | Outcome_unrecorded -> false)
+          | Returned | Native_ended | Native_failed | Failed | Never_returned
+          | Outcome_unrecorded -> false)
         activities_now in
       let approval_pending = match t.awaiting, has_pending_activity with
         | Some awaiting, false -> "approval pending: " ^ awaiting.tool_name ^ " · "
@@ -859,7 +899,8 @@ let phase_text ~show_timing ~now t =
             Some call.local_id <> awaiting_call
             && (match (activity_of_live_call t call).outcome with
                 | Started | Native_running | Awaiting_result -> true
-                | Returned | Native_ended | Failed | Never_returned | Outcome_unrecorded -> false))
+                | Returned | Native_ended | Native_failed | Failed | Never_returned
+                | Outcome_unrecorded -> false))
           current_calls
           |> List.sort (fun (a : live_tool_call) b -> Float.compare a.started_at b.started_at)
         with
@@ -949,7 +990,10 @@ let phase_text ~show_timing ~now t =
         Printf.sprintf "%s, continued past %d context checkpoint(s)" work
           t.checkpoints
   | Stream_ended -> "stream ended; settling the outcome"
-  | Stream_failed message -> message
+  | Stream_failed message ->
+      (match t.current_runtime_id with
+       | None -> message
+       | Some runtime -> message ^ " · runtime: " ^ runtime)
 
 (* Says what was sent, not what became of the turn. A signalled turn parked in
    an uncancellable section keeps running, and reading the signal as the
@@ -1015,7 +1059,8 @@ let compact_progress_text ~show_timing ~now t =
                 Option.exists (String.equal awaiting.call_id) call.call_id
                 && match (activity_of_live_call t call).outcome with
                    | Started | Awaiting_result | Native_running -> true
-                   | Returned | Native_ended | Failed | Never_returned | Outcome_unrecorded -> false)
+                   | Returned | Native_ended | Native_failed | Failed | Never_returned
+                   | Outcome_unrecorded -> false)
                 current_calls with
                | [call] -> Some call.local_id | _ -> None) in
         let pending = current_calls
@@ -1027,7 +1072,7 @@ let compact_progress_text ~show_timing ~now t =
                | Started -> Some ("preparing " ^ activity.tool_name)
                | Awaiting_result -> Some ("awaiting result: " ^ activity.tool_name)
                | Native_running -> Some ("running " ^ activity.tool_name)
-               | Returned | Native_ended | Failed | Never_returned
+               | Returned | Native_ended | Native_failed | Failed | Never_returned
                | Outcome_unrecorded -> None)
         in
         match t.awaiting, pending with
@@ -1267,6 +1312,9 @@ let start_tool ~now t ~authority ~occurrence ~tool_name =
            ; tool_name
            ; args = ""
            ; ended = false
+           ; native_completion = None
+           ; native_progress = None
+           ; native_retry = None
            ; result_ready = false
            ; failed = false
            ; duration = None
@@ -1287,11 +1335,53 @@ let enter_text_response_scope t scope =
     t.stop_scope <- None
   end
 
+let retire_model_content t =
+  t.active_model_content <- [];
+  t.content_scope_closed <- true
+;;
+
+let apply_model_content ~now t (activity : Masc.Keeper_chat_events.model_content_activity) =
+  let open Masc.Keeper_chat_events in
+  match t.phase with
+  | Stream_ended | Stream_failed _ -> ()
+  | Waiting | Working ->
+    let scope_order = match t.content_scope with
+      | None -> 1
+      | Some scope -> compare (activity.content_generation, activity.content_scope) scope in
+    if scope_order < 0 || (scope_order = 0 && t.content_scope_closed) then ()
+    else match activity.state with
+    | Content_observed ->
+      if scope_order > 0 then begin
+        t.content_scope <- Some (activity.content_generation, activity.content_scope);
+        t.content_scope_closed <- false;
+        t.active_model_content <- []
+      end;
+      (match List.find_opt (fun (index,_,_) -> index=activity.content_index) t.active_model_content with
+       | Some (_,_,None) -> ()
+       | Some (_,channel,Some _) when channel <> activity.channel ->
+           note_unreadable t "model content channel changed within its occurrence"
+       | Some (_,_,Some _) | None ->
+           t.active_model_content <- (activity.content_index,activity.channel,Some now) ::
+             List.filter (fun (index,_,_) -> index<>activity.content_index) t.active_model_content;
+           t.model_signal <- Some Scoped_model_content)
+    | Content_ended ->
+      (* Unknown or older stops provide no authority over the current model
+         signal. In particular a tool/content header alone is not activity. *)
+      if scope_order = 0 then
+        match List.find_opt (fun (index,_,_) -> index=activity.content_index) t.active_model_content with
+        | Some (_,channel,Some _) when channel=activity.channel ->
+            t.active_model_content <- List.map (fun (index,channel,at) ->
+              index,channel,(if index=activity.content_index then None else at)) t.active_model_content
+        | Some (_,_,_) | None -> ()
+;;
+
 let apply_delta ~now t (delta : Live.delta) =
   match delta with
   | Live.Run_started -> (
       if awaiting_continuation t then begin
         t.segment <- t.segment + 1;
+        t.attempt <- 0;
+        t.current_runtime_id <- None;
         t.reversed_trail <- Node_segment_boundary :: t.reversed_trail;
         Buffer.clear t.text_buffer;
         Buffer.clear t.thinking_buffer;
@@ -1301,6 +1391,7 @@ let apply_delta ~now t (delta : Live.delta) =
         t.observed_model <- None;
         t.observed_usage <- None;
         t.observed_stop_reason <- None;
+        retire_model_content t;
         t.model_signal <- None;
         t.runtime_named_at <- None;
         t.response_scope <- None;
@@ -1323,12 +1414,24 @@ let apply_delta ~now t (delta : Live.delta) =
          only answers "why has it not started yet". *)
       t.admission <- Some (admission, queue_length)
   | Live.Runtime_attempt_started { runtime_id; attempt_index } ->
-      (* The per-attempt totals start over; the trail does not. What the
-         earlier attempt produced -- finished stretches and the one still
-         growing -- is folded into one superseded node so the reader keeps
-         what they were reading and can see which attempt it belonged to
-         (RFC-0412 §3.3). Tool evidence stays where it was: the calls remain
-         in [reversed_tool_calls] and the superseded node still names them. *)
+      (match t.phase with
+       | Stream_ended | Stream_failed _ -> ()
+       | Waiting | Working ->
+      let next_attempt = Option.value attempt_index ~default:(t.attempt + 1) in
+      if next_attempt < t.attempt then ()
+      else if next_attempt = t.attempt then begin
+        (* This is a metadata report for the current attempt. It has no
+           authority to supersede bytes, end content, or dismiss approval. *)
+        match t.current_runtime_id, runtime_id with
+        | Some current, Some reported when not (String.equal current reported) ->
+            note_unreadable t "runtime identity conflicts within the current attempt"
+        | None, Some reported ->
+            t.current_runtime_id <- Some reported;
+            if t.runtime_named_at = None then t.runtime_named_at <- Some now
+        | Some _, (None | Some _) | None, None -> ()
+      end else begin
+        (* Only an advancing attempt folds the prior attempt's observed work.
+           Earlier attempts remain visible with their original runtime. *)
       Buffer.clear t.text_buffer;
       Buffer.clear t.thinking_buffer;
       t.response_first_stretch <- t.next_stretch_id;
@@ -1355,30 +1458,22 @@ let apply_delta ~now t (delta : Live.delta) =
                ; nodes
                }
              :: older);
-      let next_attempt = Option.value attempt_index ~default:(t.attempt + 1) in
-      let new_attempt = next_attempt <> t.attempt in
-      t.attempt <- next_attempt;
-      (* Unknown identity belongs to the new attempt. Keeping the previous
-         runtime here also prevents STREAM_MODEL_STARTED from naming the new
-         one. A repeated event for this same attempt adds no missing fact. *)
-      if new_attempt || Option.is_some runtime_id then
+        t.attempt <- next_attempt;
         t.current_runtime_id <- runtime_id;
-      (* The model the stream named belongs to the attempt it was named in;
-         a repeated event for the same attempt keeps it. *)
-      if new_attempt then t.observed_model <- None;
-      if new_attempt then t.observed_usage <- None;
-      if new_attempt then begin
+        t.observed_model <- None;
+        t.observed_usage <- None;
         t.observed_stop_reason <- None;
         t.response_scope <- None;
-        t.stop_scope <- None
-      end;
-      t.model_signal <- None;
-      t.current_stream_scope <- None;
-      t.runtime_named_at <- Some now;
-      t.awaiting <- None;
-      (match t.phase with
-       | Waiting | Working -> t.phase <- Working
-       | Stream_ended | Stream_failed _ -> ())
+        t.stop_scope <- None;
+        retire_model_content t;
+        t.model_signal <- None;
+        t.current_stream_scope <- None;
+        t.runtime_named_at <- Some now;
+        t.awaiting <- None;
+        (match t.phase with
+         | Waiting | Working -> t.phase <- Working
+         | Stream_ended | Stream_failed _ -> ())
+      end)
   | Live.Stream_model_started { model; stream_scope; usage; _ } ->
       (* The bridge can repeat the same MessageStart without opening another
          response. Its allocated stream scope, unlike model names or text,
@@ -1393,6 +1488,7 @@ let apply_delta ~now t (delta : Live.delta) =
       t.response_scope <- stream_scope;
       t.current_stream_scope <- stream_scope;
       begin_response t;
+      retire_model_content t;
       t.observed_usage <- usage;
       t.observed_stop_reason <- None;
       t.stop_scope <- None;
@@ -1411,6 +1507,10 @@ let apply_delta ~now t (delta : Live.delta) =
               ; cache_creation_input_tokens = fill current.cache_creation_input_tokens initial.cache_creation_input_tokens }
         | _, None -> ()
       end
+  | Live.Model_content_activity activity -> apply_model_content ~now t activity
+  | Live.Stream_model_stopped ->
+      retire_model_content t;
+      t.model_signal <- Some Model_response_ended
   | Live.Stream_details { usage; stop_reason; stream_scope } ->
       (* A retained detail can be the first surviving event of a response.
          Its scope retires prior counters before sparse fields are merged. *)
@@ -1436,6 +1536,13 @@ let apply_delta ~now t (delta : Live.delta) =
            t.observed_stop_reason <- Some stop_reason;
            t.stop_scope <- stream_scope
        | None -> ())
+  | Live.Text {text=""; stream_scope} ->
+      (* An empty chunk writes nothing, so it does not move the answer. Its
+         scope is still a response boundary: when the next response's start
+         frame is lost, this chunk is the first thing that says the previous
+         response's model, counters and stop no longer apply. *)
+      Option.iter (enter_text_response_scope t) stream_scope
+  | Live.Thinking "" -> ()
   | Live.Text {text; stream_scope} ->
       Option.iter (enter_text_response_scope t) stream_scope;
       t.model_signal <- Some (Answering_at now);
@@ -1452,9 +1559,40 @@ let apply_delta ~now t (delta : Live.delta) =
         | Some name when String.trim name <> "" -> name
         | Some _ | None -> "native tool" in
       start_tool ~now t ~authority:Provider_native ~occurrence ~tool_name
-  | Live.Native_tool_ended { occurrence } ->
+  | Live.Native_tool_progress {occurrence; progress} ->
       (match update_occurrence t occurrence (fun call ->
-          if call.authority = Provider_native then { call with ended = true }
+        if call.authority <> Provider_native || call.ended || call.segment <> t.segment || call.attempt <> t.attempt
+           || (match t.phase with Stream_ended | Stream_failed _ -> true | Waiting | Working -> false) then
+          (note_unreadable t "native progress has no active provider occurrence"; call)
+        else
+          let previous_bytes = Option.bind call.native_progress (fun previous -> previous.output_bytes) in
+          let previous_message = Option.bind call.native_progress (fun previous -> previous.message) in
+          let previous_elapsed = Option.bind call.native_progress (fun previous -> previous.provider_elapsed_seconds) in
+          let store output_bytes message provider_elapsed_seconds =
+            {call with native_progress=Some {output_bytes;message;provider_elapsed_seconds;updated_at=now;
+              elapsed=(if now >= call.started_at then Some (now -. call.started_at) else None)}} in
+          let invalid () = note_unreadable t "native progress measurement is invalid"; call in
+          match progress with
+          | Runtime_native_tools.Retry_observed retry -> {call with native_retry=Some retry}
+          | Runtime_native_tools.Output_observed {byte_count} ->
+              let previous = Option.value previous_bytes ~default:0 in
+              if byte_count <= 0 || byte_count > max_int - previous then invalid ()
+              else store (Some (previous + byte_count)) previous_message previous_elapsed
+          (* A blank message says the tool is active and nothing more. It
+             keeps the time current but does not replace a message that
+             said something. *)
+          | Runtime_native_tools.Message_reported {message} when String.trim message = "" ->
+              store previous_bytes previous_message previous_elapsed
+          | Runtime_native_tools.Message_reported {message} -> store previous_bytes (Some message) previous_elapsed
+          | Runtime_native_tools.Heartbeat_reported {elapsed_seconds} ->
+              if elapsed_seconds < 0 then invalid ()
+              else store previous_bytes previous_message (Some elapsed_seconds)) with
+       | Call_updated | Call_ambiguous -> ()
+       | Call_missing | Call_conflicting -> note_unreadable t "native progress has no matching provider occurrence")
+  | Live.Native_tool_ended { occurrence; completion } ->
+      (match update_occurrence t occurrence (fun call ->
+          if call.authority = Provider_native then
+            (if call.ended then call else { call with ended = true; native_completion = Some completion })
           else (note_unreadable t "native end names a MASC tool"; call)) with
        | Call_updated | Call_ambiguous -> ()
        | Call_missing | Call_conflicting ->
@@ -1552,12 +1690,6 @@ let apply_delta ~now t (delta : Live.delta) =
   | Live.Run_failed { message } ->
       let message =
         if String.trim message = "" then "cause not reported" else message
-      in
-      let message =
-        match t.current_runtime_id with
-        | Some rid when not (String.contains message '[') ->
-            Printf.sprintf "[%s] %s" rid message
-        | _ -> message
       in
       t.phase <- Stream_failed message;
       t.ending_source <- Ending_heard_in_stream;
@@ -1680,7 +1812,8 @@ let note_tool_outcome t ~execution_id ~outcome ~duration =
         match outcome with
         | Returned -> { call with result_ready = true; ended = true }
         | Failed -> { call with failed = true; ended = true }
-        | Native_running | Native_ended | Started | Awaiting_result | Never_returned | Outcome_unrecorded -> call
+        | Native_running | Native_ended | Native_failed | Started | Awaiting_result
+        | Never_returned | Outcome_unrecorded -> call
       in
       let updated =
         match duration with
@@ -1698,15 +1831,48 @@ let note_tool_outcome t ~execution_id ~outcome ~duration =
    own words, and the two evidence gaps name no read. The record is kept
    whole, not merged field by field, so the row a held turn draws for the
    read says what the loaded row said about it. Keyed by the exact turn and
-   tool-use id: a continuation may reuse a provider id in a different turn.
-   An incomplete identity has nothing to stand over. A later record for the same key
+   tool-use id and invocation runtime: a continuation or failover may reuse a provider id.
+   An incomplete turn/tool identity has nothing to stand over. Runtime is the
+   third key dimension; a later record for the same key
    replaces the earlier one, as a later page replaces the loaded row. *)
 let skill_identity (skill : skill_activity) =
   match skill.turn_ref, skill.skill_tool_use_id with
-  | Some turn_ref, Some use_id -> Some (turn_ref, use_id)
+  | Some turn_ref, Some use_id -> Some (turn_ref, use_id, skill.runtime_id)
   | (None, _) | (_, None) -> None
 
-let note_skill_activity t (evidence : skill_activity) =
+let compatible_skill_identity (left_turn, left_use, left_runtime)
+    (right_turn, right_use, right_runtime) =
+  String.equal left_turn right_turn && String.equal left_use right_use
+  && (match left_runtime, right_runtime with
+      | Some left, Some right -> String.equal left right
+      | None, _ | _, None -> true)
+
+(* Complete an absent runtime only with one compatible observation. Known
+   runtime A and B never match, and an unknown record cannot elect between them. *)
+let matching_skill_note ?(runtime_inventory=[]) key notes =
+  match List.find_opt (fun (noted_key, _) -> noted_key = key) notes with
+  | Some _ as exact -> exact
+  | None ->
+      let turn_ref, use_id, runtime = key in
+      let identities = key :: List.map fst notes
+        @ List.filter_map skill_identity runtime_inventory in
+      let runtimes = List.filter_map (fun (turn, use, runtime) ->
+        if turn=turn_ref && use=use_id then runtime else None) identities
+        |> List.sort_uniq String.compare in
+      match runtimes with
+      | _ :: _ :: _ -> None
+      | [] | [_] ->
+          match List.filter (fun (noted_key, _) -> compatible_skill_identity noted_key
+              (turn_ref,use_id,runtime)) notes with
+          | [note] -> Some note
+          | [] | _ :: _ :: _ -> None
+
+let complete_skill_runtime (known : skill_activity) (incoming : skill_activity) =
+  match incoming.runtime_id with
+  | Some _ -> incoming
+  | None -> {incoming with runtime_id=known.runtime_id}
+
+let note_skill_activity ?(runtime_inventory=[]) t (evidence : skill_activity) =
   match evidence.state with
   | Skill_calling | Skill_served_pending | Skill_failed | Skill_evidence_missing
   | Skill_evidence_unavailable ->
@@ -1715,18 +1881,15 @@ let note_skill_activity t (evidence : skill_activity) =
       match skill_identity evidence with
       | None -> ()
       | Some key ->
-          let known =
-            List.exists (fun (noted_key, _) -> noted_key = key)
-              t.noted_skills
-          in
-          t.noted_skills <-
-            (if known then
-               List.map
-                 (fun (noted_key, noted) ->
-                   if noted_key = key then (noted_key, evidence)
-                   else (noted_key, noted))
-                 t.noted_skills
-             else t.noted_skills @ [ (key, evidence) ]);
+          t.noted_skills <- (match matching_skill_note ~runtime_inventory key t.noted_skills with
+            | None -> t.noted_skills @ [key,evidence]
+            | Some (previous_key, previous) ->
+                let evidence = complete_skill_runtime previous evidence in
+                let turn_ref, use_id, _ = key in
+                let key = turn_ref, use_id, evidence.runtime_id in
+                List.map (fun (noted_key, noted) ->
+                  if noted_key = previous_key then key,evidence else noted_key,noted)
+                  t.noted_skills);
           bump t)
 
 let turn_status_text ~reply ~turn_ref (outcome : Masc.Keeper_turn_outcome.t) =
@@ -1763,8 +1926,11 @@ type drawn_origin =
   | Reply_of_segment of int
   | Error_of_segment of int
 
+type response_part = Observed_response | Final_response
+
 type drawn_item =
   { origin : drawn_origin
+  ; response_part : response_part option
   ; at : float option
   ; segment : int
   ; superseded : int option
@@ -1778,7 +1944,7 @@ type drawn_item =
    cut stream, a gap in the journal -- while the loaded row that carried the
    record is one a held log leaves out of the timeline.
 
-   Only the exact turn and id pair the two. The stream's tool start names its call
+   The exact turn, id and compatible runtime pair the two. The stream's tool start names its call
    (the agent-core stream bridge reports a start without a tool id as a
    protocol error instead), so a skill item without an id is not expected.
    One that came anyway would stay as the stream drew it, and the record
@@ -1797,23 +1963,22 @@ let with_noted_skills noted items =
          a call that failed, and taking it would draw a failed read as a
          finished one. The record is then not drawn at all: its id is on the
          failed item, so nothing appends it either. *)
+      let consumed_keys = ref [] in
       let exact (skill : skill_activity) =
-        match skill.state with
-        | Skill_failed -> skill
-        | Skill_calling | Skill_served_pending | Skill_served_only
-        | Skill_delivered | Skill_used | Skill_evidence_missing
-        | Skill_evidence_unavailable -> (
-            match skill_identity skill with
+        match skill_identity skill with
+        | None -> skill
+        | Some key ->
+            match matching_skill_note key noted with
             | None -> skill
-            | Some key -> (
-                match
-                  List.find_map
-                    (fun (noted_key, note) ->
-                      if noted_key = key then Some note else None)
-                    noted
-                with
-                | Some note -> note
-                | None -> skill))
+            | Some (noted_key, note) ->
+                consumed_keys := noted_key :: !consumed_keys;
+                (* A unique receipt can complete runtime provenance, never
+                   turn an observed failure into successful delivery. *)
+                match skill.state with
+                | Skill_failed -> complete_skill_runtime note skill
+                | Skill_calling | Skill_served_pending | Skill_served_only
+                | Skill_delivered | Skill_used | Skill_evidence_missing
+                | Skill_evidence_unavailable -> complete_skill_runtime skill note
       in
       let skills_of item =
         match item.drawn with
@@ -1842,7 +2007,9 @@ let with_noted_skills noted items =
       let unseen =
         List.filter_map
           (fun (noted_key, note) ->
-            if List.mem noted_key drawn_identities then None
+            (* Resolved drawn identities already include any unique runtime
+               completion. An ambiguous unknown stream cannot suppress A/B. *)
+            if List.mem noted_key !consumed_keys || List.mem noted_key drawn_identities then None
             else Some note)
           noted
       in
@@ -1858,7 +2025,7 @@ type drawn_projection =
 let drawn t =
   let item ?(stream_scope=None) ~segment ~origin ~at drawn =
     [Projected_item
-       ({ origin; at = Some at; segment; superseded = None; superseded_runtime_id = None; drawn }, stream_scope)] in
+       ({ origin; response_part = None; at = Some at; segment; superseded = None; superseded_runtime_id = None; drawn }, stream_scope)] in
   let projected =
     project_trail ~response_boundary:(fun acc -> [Projected_response_boundary] :: acc) t
       ~thinking:(fun ~segment ~origin ~at lines -> item ~segment ~origin:(Thinking_stretch origin) ~at (Drawn_thinking lines))
@@ -1885,6 +2052,7 @@ let drawn t =
     | Text_stretch id, None, Drawn_text _ -> id >= t.response_first_stretch
     | _ -> false
   in
+  let text_count = List.length (List.filter current_text items) in
   (* The flat canonical reply can stand for the last text stretch only. A
      provider message start or tool round ends the preceding response even
      when no later text arrives. Earlier observed stretches keep their places;
@@ -1919,7 +2087,7 @@ let drawn t =
     | [] -> items, last_text
     | skills ->
         let unseen_item =
-          { origin = Unstreamed_skills; at = None; segment = t.segment; superseded = None; superseded_runtime_id = None; drawn = Drawn_skill skills }
+          { origin = Unstreamed_skills; response_part = None; at = None; segment = t.segment; superseded = None; superseded_runtime_id = None; drawn = Drawn_skill skills }
         in
         (* An identified model response that reports its own terminal ending identifies
            its final stretch even if the Skill call itself was omitted. The
@@ -1944,7 +2112,7 @@ let drawn t =
   in
   let items = match t.reply with
   | None -> items
-  | Some { reply_text; reply_outcome = Masc.Keeper_turn_outcome.Visible_reply; _ }
+  | Some { reply_text; reply_at; reply_outcome = Masc.Keeper_turn_outcome.Visible_reply; _ }
     when String.trim reply_text <> "" -> (
       (* Which turn this reply belongs to was decided before it got here, by
          the log this transcript projects: a log is one operation's
@@ -1953,32 +2121,43 @@ let drawn t =
          request's identity, not its words), and a journal is read per
          operation into the log created with that id. So a reply on this
          transcript is this operation's, and the operation records one reply:
-         the terminal response. The
-         record is the store's text for it and stands where its last stretch
-         was, typed as the record -- whatever the stream's copy read. *)
+         the terminal response. One observed text stretch can retain the
+         established in-place presentation. Multiple stretches carry no
+         canonical block mapping, so the final record follows separately. *)
       let reply_item =
         { origin = Reply_of_segment t.segment
-        ; at = t.settled_at
+        ; response_part = None
+        ; at = Some reply_at
         ; segment = t.segment
         ; superseded = None
         ; superseded_runtime_id = None
         ; drawn = Drawn_reply (safe_block reply_text)
         }
       in
-      match last_text with
-      | None ->
-          (* Nothing streamed for the reply: the record is all there is. *)
-          items @ [ reply_item ]
-      | Some last ->
-          List.mapi (fun index item ->
-            if index = last then { reply_item with origin = item.origin; at = item.at }
-            else item) items)
+      if text_count > 1 then
+        (* A flat recorded reply cannot identify which canonical bytes belong
+           at each observed position. Keep the evidence in its original
+           order, and present final authority separately. In particular,
+           A/thinking/B must not become thinking/AB or A/thinking/AB. *)
+        List.map (fun item ->
+          if current_text item then { item with response_part = Some Observed_response }
+          else item) items
+        @ [ { reply_item with response_part = Some Final_response } ]
+      else match last_text with
+        | None ->
+            (* Nothing streamed for the reply: the record is all there is. *)
+            items @ [ reply_item ]
+        | Some last ->
+            List.mapi (fun index item ->
+              if index = last then { reply_item with origin = item.origin; at = item.at }
+              else item) items)
   | Some { reply_text; reply_at; reply_outcome; reply_turn_ref; _ } ->
       (* Nothing is chunked for a control outcome, and a visible reply with
          no text has nothing to chunk: the one row that says how the turn
          ended comes from the recorded reply. *)
       items
       @ [ { origin = Reply_of_segment t.segment
+          ; response_part = None
           ; at = Some reply_at
           ; segment = t.segment
           ; superseded = None
@@ -1995,6 +2174,7 @@ let drawn t =
   | Stream_failed message ->
       items
       @ [ { origin = Error_of_segment t.segment
+          ; response_part = None
           ; at = t.ended_at
           ; segment = t.segment
           ; superseded = None
@@ -2002,3 +2182,25 @@ let drawn t =
           ; drawn = Drawn_error (safe_block message)
           } ]
 ;;
+
+type model_activity =
+  | Activity_model_started
+  | Activity_response_ended
+  | Activity_content_ended
+  | Activity_reasoning
+  | Activity_answering
+  | Activity_tool_returned of string
+
+let model_activity t =
+  match t.model_signal with
+  | None -> None
+  | Some (Model_started_at _) -> Some Activity_model_started
+  | Some Model_response_ended -> Some Activity_response_ended
+  | Some Scoped_model_content ->
+      (match List.find_opt (fun (_,_,at) -> Option.is_some at) t.active_model_content with
+       | Some (_, Masc.Keeper_chat_events.Model_text, Some _) -> Some Activity_answering
+       | Some (_, Masc.Keeper_chat_events.Model_thinking, Some _) -> Some Activity_reasoning
+       | Some (_, _, None) | None -> Some Activity_content_ended)
+  | Some (Reasoning_at _) -> Some Activity_reasoning
+  | Some (Answering_at _) -> Some Activity_answering
+  | Some (Tool_returned_at (tool_name, _)) -> Some (Activity_tool_returned tool_name)

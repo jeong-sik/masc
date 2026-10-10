@@ -215,10 +215,75 @@ let test_growing_keys_and_non_prefix_snapshots_reset () =
     [ source; source; source; source; "replacement" ]
     (List.rev !calls)
 
+let trimmed_height rows =
+  let rec trim = function
+    | row :: rest when String.trim row = "" -> trim rest
+    | rows -> Int.max 1 (List.length rows) in
+  trim (List.rev rows)
+
+let test_measured_height_matches_full_render () =
+  List.iter (fun width ->
+    let cache = Cache.create ~capacity:4 in
+    let source = Buffer.create 256 in
+    let calls = ref [] in
+    List.iter (fun chunk ->
+      Buffer.add_string source chunk;
+      let text = Buffer.contents source in
+      let actual = Cache.measure_growing cache ~theme_revision:1 ~palette_generation:0
+          ~width ~renderer:(growing_renderer calls) ~identity:"thought" ~text in
+      check int "incremental trimmed height equals unfolded Markdown"
+        (trimmed_height (full_markdown ~width text)) actual)
+      [ ""; "alpha\n"; "beta\n"; "gamma"; " delta"; "\n\n";
+        "```ocaml\n"; "let value = "; "1\n```\n";
+        "| name | value |\n"; "| -- | -- |\n"; "| 한글 | **bold** |\n"; "\n" ])
+    [18; 40; 72]
+
+let test_height_measurement_reuses_closed_blocks_and_resets_owners () =
+  let cache = Cache.create ~capacity:4 in
+  let calls = ref [] in
+  let measure ?(width = 40) ?(theme_revision = 1) ?(palette_generation = 0)
+      ?(identity = "thought-a") text =
+    Cache.measure_growing cache ~theme_revision ~palette_generation ~width
+      ~renderer:(growing_renderer calls) ~identity ~text in
+  ignore (measure "alpha\n");
+  ignore (measure "alpha\nbeta\n");
+  ignore (measure "alpha\nbeta\ngamma");
+  ignore (measure "alpha\nbeta\ngamma delta");
+  ignore (measure "alpha\nbeta\ngamma delta");
+  check (list string) "measuring appends parses only mutable blocks, not closed thought"
+    ["alpha\n"; "alpha\nbeta\n"; "beta\ngamma"; "gamma delta"] (List.rev !calls);
+  calls := [];
+  let source = "alpha\nbeta\ngamma delta" in
+  ignore (measure ~width:18 source);
+  ignore (measure ~width:18 ~theme_revision:2 source);
+  ignore (measure ~width:18 ~theme_revision:2 ~palette_generation:2 source);
+  ignore (measure ~identity:"thought-b" source);
+  ignore (measure "replacement");
+  check (list string) "width, theme, palette, owner and replacement each remeasure exact source"
+    [source;source;source;source;"replacement"] (List.rev !calls)
+
+let test_logical_line_count_tracks_appends_and_replacement () =
+  let cache = Cache.create ~capacity:4 and calls = ref [] in
+  let measure text = Cache.measure_growing_details cache ~theme_revision:1
+    ~palette_generation:0 ~width:40 ~renderer:(growing_renderer calls)
+    ~identity:"thought" ~text in
+  List.iter (fun (text, expected) ->
+    let measured = measure text in
+    check int "nonblank logical lines survive split whitespace and newline chunks"
+      expected measured.nonblank_lines;
+    check int "count and physical height share the exact source"
+      (trimmed_height (full_markdown ~width:40 text)) measured.height)
+    ["",0; " \t",0; " \talpha",1; " \talpha beta",1;
+     " \talpha beta\n \r",1; " \talpha beta\n \rnext",2;
+     " \talpha beta\n \rnext\n\012\n",2;
+     "replacement",1; "replacement\nnew",2; "",0]
+
 let () =
   run "tui_markdown_render_cache"
     [ ( "cache"
-      , [ test_case "same complete source renders once" `Quick
+      , [ test_case "logical lines follow appended source and reset" `Quick
+            test_logical_line_count_tracks_appends_and_replacement
+        ; test_case "same complete source renders once" `Quick
             test_same_complete_source_renders_once
         ; test_case "all render inputs invalidate" `Quick
             test_every_render_input_invalidates
@@ -228,6 +293,10 @@ let () =
             test_retention_is_bounded_and_recent
         ; test_case "every chunk matches the full renderer" `Quick
             test_every_chunk_matches_the_canonical_full_render
+        ; test_case "measured thought height equals full Markdown" `Quick
+            test_measured_height_matches_full_render
+        ; test_case "height measurement retains closed blocks and invalidates ownership" `Quick
+            test_height_measurement_reuses_closed_blocks_and_resets_owners
         ; test_case "closed blocks are not rendered again" `Quick
             test_closed_blocks_are_not_rendered_again
         ; test_case "unchanged growing snapshot is not parsed again" `Quick

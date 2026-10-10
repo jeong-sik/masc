@@ -1801,6 +1801,10 @@ let run_named
     ?official_task_reference
     ?official_client_composed_context
     ?on_official_client_tool_boundary
+    ?on_child_content_observation
+    ?on_native_task_observation
+    ?on_native_tool_progress
+    ?on_native_tool_completion
     ?on_tool_execution
     ?on_official_client_result_handoff
     ?on_official_client_native_action
@@ -2557,7 +2561,7 @@ let run_named
                  observe ~runtime_id:attempt_runtime_id ~tools ~transmitted)
               on_request_attribution
           in
-          Keeper_codex_runtime.run
+          Keeper_codex_runtime.run ?on_native_tool_completion ?on_native_tool_progress
             ?on_memory_capacity_refusal
             ?on_tool_execution
             ~context_window:(Some (Runtime_instance.max_context_of_runtime runtime))
@@ -2701,7 +2705,7 @@ let run_named
                  observe ~runtime_id:attempt_runtime_id ~tools ~transmitted)
               on_request_attribution
           in
-          Keeper_antigravity_runtime.run
+          Keeper_antigravity_runtime.run ?on_native_tool_completion
             ?on_tool_execution
             ?composed_context:official_client_composed_context
             ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime)
@@ -2950,8 +2954,16 @@ let run_named
                  observe ~runtime_id:attempt_runtime_id ~tools ~transmitted)
               on_request_attribution
           in
-          Keeper_claude_code_runtime.run
+          let native_attempt : Runtime_native_tasks.attempt =
+            { routing_run_id; runtime_id = attempt_runtime_id; lane_attempt_index = idx } in
+          Keeper_claude_code_runtime.run ?on_native_tool_progress ?on_native_tool_completion
             ?on_memory_capacity_refusal
+            ?on_child_content_observation:(Option.map
+              (fun observe observation -> observe ~attempt:native_attempt observation)
+              on_child_content_observation)
+            ?on_native_task_observation:(Option.map
+              (fun observe bound -> observe ~attempt:native_attempt bound)
+              on_native_task_observation)
             ?on_tool_execution
             ?composed_context:official_client_composed_context
             ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime)

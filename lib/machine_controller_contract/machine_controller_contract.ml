@@ -2,6 +2,7 @@ type holder_departure =
   | Keeper_stopped
   | Credential_expired
   | No_credential
+  | Participant_departed
 
 type admission = {
   observed_holder : string option;
@@ -16,7 +17,8 @@ let admission_to_json admission =
     "release", (match admission.release with
       | None -> `Null | Some Keeper_stopped -> `String "keeper_stopped"
       | Some Credential_expired -> `String "credential_expired"
-      | Some No_credential -> `String "no_credential");
+      | Some No_credential -> `String "no_credential"
+      | Some Participant_departed -> `String "participant_departed");
     "handoff_target", nullable_name admission.handoff_target]
 let ( let* ) = Result.bind
 let name = function
@@ -33,6 +35,7 @@ let admission_of_json = function
         | `String "keeper_stopped" -> Ok (Some Keeper_stopped)
         | `String "credential_expired" -> Ok (Some Credential_expired)
         | `String "no_credential" -> Ok (Some No_credential)
+        | `String "participant_departed" -> Ok (Some Participant_departed)
         | _ -> Error "invalid controller departure" in
       if release <> None && observed_holder = None then
         Error "controller release requires an observed holder"
@@ -46,4 +49,5 @@ let admission_schema = `Assoc [
     "observed_holder", `Assoc ["type", `List [`String "string"; `String "null"]];
     "handoff_target", `Assoc ["type", `List [`String "string"; `String "null"]];
     "release", `Assoc ["enum", `List [`Null; `String "keeper_stopped";
-      `String "credential_expired"; `String "no_credential"]]]]
+      `String "credential_expired"; `String "no_credential";
+      `String "participant_departed"]]]]

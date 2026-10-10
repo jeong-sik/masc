@@ -57,3 +57,12 @@ val package_preview_payload : Mcp_server.server_state -> (string * string) list 
   (Yojson.Safe.t, string) result
 (** Shared H1/H2 payloads. The transport applies its read-auth gate before
     calling these filesystem readers. *)
+
+val live_workspace_precondition :
+  config:Workspace.config -> (string * string) list ->
+  ((string * string) list, [ `Bad_request | `Conflict ] * string) result
+(** The optional [expected_base_path] and [expected_masc_root] pair of a live
+    read. Absent, the fields are returned unchanged. Present and equal to this
+    workspace, they are removed. A different workspace is a [`Conflict] and a
+    lone or malformed one a [`Bad_request]; the read is not served in either
+    case. *)

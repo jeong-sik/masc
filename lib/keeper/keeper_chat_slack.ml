@@ -734,6 +734,7 @@ let adapter_loop_with_transport
     | Agent_core_stream_message_stop
     | Agent_core_stream_ping
     | Agent_core_content_block_start _
+    | Model_content_activity _
     | Agent_core_content_block_stop _
     | Agent_core_thinking_delta _
     | Agent_core_thinking_signature_delta _
@@ -771,6 +772,7 @@ let adapter_loop_with_transport
        than left to a catch-all so a future surface has to make the same
        decision deliberately. *)
     | Tool_call_args _ | Tool_call_args_snapshot _ | Tool_call_end _
+    | Native_tool_progress _
     | Native_tool_end _
     | Tool_approval_requested _ | Tool_approval_settled _
     | Tool_result_ready _ ->

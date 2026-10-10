@@ -221,6 +221,8 @@ type elicitation_cancel_reason = Host_input_unavailable
 
 type reasoning_part = Summary of int | Content of int
 
+type text_completion_source = Item_content | Adopted_anonymous_content
+
 type stream_event =
   | Turn_started of
       { turn_id : string
@@ -235,6 +237,8 @@ type stream_event =
       ; part : reasoning_part
       ; delta : string
       }
+  | Text_completed of { item_id : string option; source : text_completion_source }
+  | Thinking_completed of { item_id : string; part : reasoning_part }
   | Dynamic_tool_started of
       { call_id : string
       ; tool_name : string
@@ -242,7 +246,8 @@ type stream_event =
       }
   | Dynamic_tool_finished of { call_id : string }
   | Native_tool_started of Runtime_native_tools.observation
-  | Native_tool_finished of Runtime_native_tools.observation
+  | Native_tool_finished of Runtime_native_tools.finished
+  | Native_tool_progress of { item_id : string; progress : Runtime_native_tools.progress }
   | Compaction_observed
   | Elicitation_cancelled of
       { server_name : string
@@ -1083,6 +1088,35 @@ let active_turn_item ~stage ~thread_id ~turn_id params =
   else required_member stage "item" fields
 ;;
 
+let native_completion_of_item ~stage ~kind item =
+  let* fields = assoc_at stage item in
+  let* outcome = match kind with
+    (* [tool_item_of_item] projects an unclassified item as a native tool, so
+       the status the provider reports for it is read like a modelled one. *)
+    | Command_execution | File_change | Mcp_tool_call | Unclassified_item _ ->
+        (match List.assoc_opt "status" fields with
+         | None | Some `Null -> Ok Runtime_native_tools.End_observed
+         | Some (`String "completed") -> Ok Runtime_native_tools.Completion_reported
+         | Some (`String "failed") -> Ok Runtime_native_tools.Error_reported
+         | Some (`String "declined") -> Ok Runtime_native_tools.Decline_reported
+         (* Codex reports an interrupted collaboration as a terminal status;
+            it did not complete, so it is a failure, not a neutral end. *)
+         | Some (`String "interrupted") -> Ok Runtime_native_tools.Error_reported
+         | Some (`String status) -> Ok (Runtime_native_tools.Unrecognized_status status)
+         | Some _ -> protocol_error stage "native item status must be a string")
+    | Sleep | Model_item | Reasoning_item | Compaction_item | Dynamic_tool_item ->
+        Ok Runtime_native_tools.End_observed
+  in
+  let* exit_code = match kind, List.assoc_opt "exitCode" fields with
+    | Command_execution, Some (`Int code) -> Ok (Some code)
+    | Command_execution, (None | Some `Null) -> Ok None
+    | Command_execution, Some _ -> protocol_error stage "command exitCode must be an integer or null"
+    | (File_change | Mcp_tool_call | Sleep | Model_item | Reasoning_item
+      | Compaction_item | Dynamic_tool_item | Unclassified_item _), _ -> Ok None
+  in
+  Ok ({outcome; exit_code} : Runtime_native_tools.completion)
+;;
+
 let messages_of_items ~stage = function
   | `List items ->
     let rec loop final fallback completed = function
@@ -1286,11 +1320,10 @@ let item_delta_notification ~method_ ~thread_id ~turn_id params =
   else Ok delta
 ;;
 
-(* The agentMessage item an [item/agentMessage/delta] belongs to. It only
-   tells two assistant messages of one turn apart in the live stream, so it
-   stays optional for the reason [item_delta_notification] gives: a frame
-   that omits it or sends it blank streams its delta and names no item. *)
-let agent_message_item_id params =
+(* Optional item correlation at the notification boundary. Assistant deltas
+   may still stream without it (#28010); native progress cannot attach to a
+   tool without an exact item id and matching active item kind. *)
+let notification_item_id params =
   match params with
   | `Assoc fields ->
     (match List.assoc_opt "itemId" fields with
@@ -1475,6 +1508,12 @@ let with_scheduling_handoff io ~await_handoff ~handoff ~thread_id ~turn_id run =
 type streamed_texts =
   { buffers : (string option, Buffer.t) Hashtbl.t
   ; reasoning_buffers : (string * reasoning_part, Buffer.t) Hashtbl.t
+  ; completed_texts : (string, unit) Hashtbl.t
+  ; completed_reasoning : (string * reasoning_part, unit) Hashtbl.t
+  ; completed_reasoning_items : (string, unit) Hashtbl.t
+  ; native_items : (string, item_kind) Hashtbl.t
+      (* Native start/completion lifetime, independent of [open_tool_call_ids]
+         which tracks the idle receive phase and clears when the model speaks. *)
   ; mutable current_item : string option
   ; mutable assistant_message_completed : bool
   }
@@ -1501,14 +1540,35 @@ let complete_reasoning_item ~stage ~on_stream_event streamed_texts item =
       let prefix = Buffer.contents buffer in
       if String.starts_with ~prefix text then begin
         let delta = String.sub text (String.length prefix) (String.length text - String.length prefix) in
+        if (Hashtbl.mem streamed_texts.completed_reasoning key
+            || Hashtbl.mem streamed_texts.completed_reasoning_items item_id) && delta <> "" then
+          protocol_error stage "completed reasoning changed after its content boundary"
+        else begin
         Buffer.add_string buffer delta;
         if delta <> "" then emit_stream_event on_stream_event (Thinking_delta {item_id; part; delta});
+        if not (Hashtbl.mem streamed_texts.completed_reasoning key) then begin
+          Hashtbl.add streamed_texts.completed_reasoning key ();
+          emit_stream_event on_stream_event (Thinking_completed {item_id; part})
+        end;
         Ok ()
+        end
       end else protocol_error stage "completed reasoning conflicts with streamed content")
       (Ok ()) (List.mapi (fun index value -> index, value) parts)
   in
   let* () = complete_parts "summary" (fun index -> Summary index) in
-  complete_parts "content" (fun index -> Content index)
+  let* () = complete_parts "content" (fun index -> Content index) in
+  (* The item closes every observed part, including one whose full text the
+     completion payload does not restate. Sort to keep closure deterministic. *)
+  Hashtbl.to_seq_keys streamed_texts.reasoning_buffers |> List.of_seq
+  |> List.filter (fun (id, _) -> id = item_id)
+  |> List.sort compare
+  |> List.iter (fun ((_, part) as key) ->
+       if not (Hashtbl.mem streamed_texts.completed_reasoning key) then begin
+         Hashtbl.add streamed_texts.completed_reasoning key ();
+         emit_stream_event on_stream_event (Thinking_completed {item_id; part})
+       end);
+  Hashtbl.replace streamed_texts.completed_reasoning_items item_id ();
+  Ok ()
 ;;
 
 let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id ~model ~seen_final
@@ -1572,10 +1632,14 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
     Error (Unsupported_server_request method_)
   | Notification { method_ = "item/agentMessage/delta" as method_; params } ->
     let* delta = item_delta_notification ~method_ ~thread_id ~turn_id params in
-    let item_id = agent_message_item_id params in
+    let item_id = notification_item_id params in
     let key = match item_id with
       | Some _ -> item_id
       | None -> streamed_texts.current_item in
+    let* () = match key with
+      | Some id when Hashtbl.mem streamed_texts.completed_texts id ->
+          protocol_error method_ "text delta arrived after item completion"
+      | Some _ | None -> Ok () in
     let buffer = match Hashtbl.find_opt streamed_texts.buffers key with
       | Some buffer -> buffer
       | None ->
@@ -1619,6 +1683,9 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
           let* index = required_count method_ "summaryIndex" fields in Ok (Summary index)
       | _ -> let* index = required_count method_ "contentIndex" fields in Ok (Content index) in
     let key = item_id, part in
+    let* () = if Hashtbl.mem streamed_texts.completed_reasoning_items item_id then
+      protocol_error method_ "reasoning delta arrived after item completion"
+      else Ok () in
     let buffer = match Hashtbl.find_opt streamed_texts.reasoning_buffers key with
       | Some buffer -> buffer
       | None -> let buffer = Buffer.create 256 in
@@ -1642,30 +1709,36 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
       ~seen_usage
       ~open_tool_call_ids:[]
       ~streamed_texts ~on_stream_event
-  | Notification
-      { method_ =
-          (( "item/commandExecution/outputDelta" | "item/fileChange/outputDelta" ) as method_)
-      ; params
-      } ->
-    (* Output of a running tool item: the item is still running, so the
-       phase stays where it is; the read itself already counted as activity. *)
+  | Notification {method_="item/commandExecution/outputDelta" as method_; params} ->
+    let* delta = item_delta_notification ~method_ ~thread_id ~turn_id params in
+    (match notification_item_id params with
+     | Some item_id when Hashtbl.find_opt streamed_texts.native_items item_id = Some Command_execution
+                         && delta <> "" ->
+         emit_stream_event on_stream_event (Native_tool_progress
+           {item_id; progress=Runtime_native_tools.Output_observed {byte_count=String.length delta}})
+     | Some _ | None -> ());
+    continue ()
+  | Notification {method_="item/mcpToolCall/progress" as method_; params} ->
+    let* fields = assoc_at method_ params in
+    let* notification_thread = required_string method_ "threadId" fields in
+    let* notification_turn = required_string method_ "turnId" fields in
+    let* message = required_string_any method_ "message" fields in
+    let* () = if notification_thread <> thread_id || notification_turn <> turn_id
+      then protocol_error method_ "MCP progress identity does not match the active turn" else Ok () in
+    (match notification_item_id params with
+     | Some item_id when Hashtbl.find_opt streamed_texts.native_items item_id = Some Mcp_tool_call ->
+         emit_stream_event on_stream_event (Native_tool_progress
+           {item_id; progress=Runtime_native_tools.Message_reported {message}})
+     | Some _ | None -> ());
+    continue ()
+  | Notification {method_="item/fileChange/outputDelta" as method_; params} ->
     let* (_ : string) = item_delta_notification ~method_ ~thread_id ~turn_id params in
-    await_turn_terminal
-      io ~handoff ~terminal_tools_closed
-      ~tools
-      ~tool_call_count ~tool_effect_attempted ~model_context_window
-      ~thread_id
-      ~turn_id
-      ~model
-      ~seen_final
-      ~seen_fallback
-      ~seen_usage
-      ~open_tool_call_ids
-      ~streamed_texts ~on_stream_event
+    continue ()
   | Notification { method_ = "item/started"; params } ->
     let stage = "item/started" in
     let* item = active_turn_item ~stage ~thread_id ~turn_id params in
     let* tool_item = tool_item_of_item ~stage item in
+    let* kind = item_kind_of_item ~stage item in
     let open_tool_call_ids =
       match tool_item with
       | None ->
@@ -1675,6 +1748,8 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
         io.set_receive_phase Model_turn;
         []
       | Some { call_id; observation } ->
+        if not (Hashtbl.mem streamed_texts.native_items call_id) then
+          Hashtbl.add streamed_texts.native_items call_id kind;
         Option.iter
           (fun observation ->
              tool_effect_attempted := true;
@@ -1699,16 +1774,18 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
      | Command_execution | File_change | Mcp_tool_call | Sleep | Model_item
      | Dynamic_tool_item | Unclassified_item _ -> Ok () in
     let* tool_item = tool_item_of_item ~stage item in
+    let* completion = native_completion_of_item ~stage ~kind item in
     let open_tool_call_ids =
       match tool_item with
       | None ->
         io.set_receive_phase Model_turn;
         []
       | Some { call_id; observation } ->
+        Hashtbl.remove streamed_texts.native_items call_id;
         Option.iter
           (fun observation ->
              tool_effect_attempted := true;
-             emit_stream_event on_stream_event (Native_tool_finished observation))
+             emit_stream_event on_stream_event (Native_tool_finished {observation; completion}))
           observation;
         let still_open =
           List.filter (fun open_id -> not (String.equal open_id call_id)) open_tool_call_ids
@@ -1727,18 +1804,30 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
           let* item_fields = assoc_at stage item in
           let* item_id = optional_string stage "id" item_fields in
           let key = match item_id with Some _ -> item_id | None -> streamed_texts.current_item in
-          let prefix = match Hashtbl.find_opt streamed_texts.buffers key with
-            | Some buffer -> Buffer.contents buffer
+          let prefix, source = match Hashtbl.find_opt streamed_texts.buffers key with
+            | Some buffer -> Buffer.contents buffer, Item_content
             | None ->
                 (* A wire delta may omit itemId; the completed item supplies
                    it. Consume that unnamed prefix once at this boundary. *)
                 (match Hashtbl.find_opt streamed_texts.buffers None with
-                 | Some buffer -> Hashtbl.remove streamed_texts.buffers None; Buffer.contents buffer
-                 | None -> "") in
+                 | Some buffer ->
+                     Hashtbl.remove streamed_texts.buffers None;
+                     Buffer.contents buffer, Adopted_anonymous_content
+                 | None -> "", Item_content) in
           if String.starts_with ~prefix text then begin
             let delta = String.sub text (String.length prefix)
                 (String.length text - String.length prefix) in
+            let already_completed = match key with
+              | Some id -> Hashtbl.mem streamed_texts.completed_texts id
+              | None -> false in
+            let* () = if already_completed && delta <> "" then
+              protocol_error stage "completed text changed after its content boundary"
+              else Ok () in
             if delta <> "" then emit_stream_event on_stream_event (Text_delta {item_id; delta});
+            if not already_completed then begin
+              Option.iter (fun id -> Hashtbl.replace streamed_texts.completed_texts id ()) key;
+              emit_stream_event on_stream_event (Text_completed {item_id=key; source})
+            end;
             if streamed_texts.current_item = key then streamed_texts.current_item <- None;
             (match key with
              | None -> Hashtbl.remove streamed_texts.buffers None
@@ -2183,7 +2272,10 @@ let run_protocol io (config : config) ~await_handoff ~protocol_cwd ~dynamic_tool
       ~seen_fallback:None
       ~seen_usage:None
       ~open_tool_call_ids:[]
-      ~streamed_texts:{buffers=Hashtbl.create 8; reasoning_buffers=Hashtbl.create 8; current_item=None; assistant_message_completed=false}
+      ~streamed_texts:{buffers=Hashtbl.create 8; reasoning_buffers=Hashtbl.create 8;
+        completed_texts=Hashtbl.create 8; completed_reasoning=Hashtbl.create 8;
+        completed_reasoning_items=Hashtbl.create 8;
+        native_items=Hashtbl.create 8; current_item=None; assistant_message_completed=false}
       ~on_stream_event)
   in
   emit_stream_event on_stream_event (Turn_finished { text });

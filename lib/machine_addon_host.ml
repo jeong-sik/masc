@@ -22,10 +22,11 @@ let mediation ~config ~principal ~arguments ~handoff ~release_controller:_ ~snap
   | Keeper who | Authenticated_agent who | Host_actor who ->
       let admitted = Auth.with_credential_transaction config.Workspace.base_path (fun transaction ->
         let target = if handoff then pass_target arguments else Ok None in
+        let admission = Authority.participation_refusal ~transaction ~config ~who in
         let refused = if handoff then Authority.pass_refusal ~transaction ~config ~target else None in
-        match refused with
-        | Some reason -> Error (refusal reason)
-        | None ->
+        match admission, refused with
+        | Some reason, _ | None, Some reason -> Error (refusal reason)
+        | None, None ->
             match snapshot () with
             | Error detail -> Error (refusal (Authority.Seats_unknown detail))
             | Ok observed_holder ->

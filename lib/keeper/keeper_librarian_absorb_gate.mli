@@ -270,9 +270,11 @@ val run_result_to_yojson : run_result -> Yojson.Safe.t
     the existing [actual_input]. The existing exact-run HTTP detail requires
     CanAdmin; this payload is not a public or secret-free projection. *)
 
-val failure_shows_size : run_result -> bool
-(** True only for a typed pre-dispatch input-capacity failure. The runtime
-    exposes this to its existing source-range narrowing path. *)
+val failure_kind : run_result -> failure_kind option
+(** The kind of a failed judgment, [None] when the run judged or skipped.
+    [Input_capacity_exceeded] is the typed pre-dispatch refusal the runtime
+    reads as input-capacity evidence for the admission batch and as its
+    source-range narrowing hint. *)
 
 val failure_detail
   :  absorbed:Keeper_memory_os_types.absorbed_statement list

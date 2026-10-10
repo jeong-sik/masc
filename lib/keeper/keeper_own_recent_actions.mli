@@ -23,6 +23,15 @@ type outcome =
           refusal: rendering it as either tells the keeper something the
           record does not. *)
 
+type provenance = { task_id : string option; trace_id : string option }
+(** Missing, blank or malformed attribution remains [None], never inferred. *)
+
+type task_relation = Selected_task | Other_task | Unknown_task
+
+val task_relation : current_task_id:string option -> provenance -> task_relation
+val provenance_to_json : current_task_id:string option -> provenance -> Yojson.Safe.t
+(** Relation is to the turn's selected task identity, not task lifecycle status. *)
+
 type call =
   { tool : string
   ; input : string
@@ -30,6 +39,10 @@ type call =
           on a refusal only: recognising the call it got refused for is what
           the keeper needs it for, and on a success the fact that the call
           landed is the whole of what this section is there to say. *)
+  ; provenance : provenance
+  ; source_position : int
+      (** Original zero-based row position within this read window, not a
+          global journal identity. Preserved when calls are grouped into turns. *)
   ; outcome : outcome
   }
 
@@ -45,7 +58,9 @@ val turns_of_rows
   -> Yojson.Safe.t list
   -> turn list
 (** Groups already-read log rows into the newest [max_turns] turns belonging to
-    [keeper_name], oldest turn first. Rows without a turn id are dropped: they
+    [keeper_name], oldest turn first. A turn identity includes the persisted
+    trace id, so equal turn numbers in different executions stay separate.
+    With no trace id, only contiguous equal-number rows form an occurrence. Rows without a turn id are dropped: they
     cannot be attributed to a turn the keeper would recognise.
 
     [window_saturated] states that the caller's read filled its window, which
@@ -71,13 +86,15 @@ type failure_digest =
   ; failure_count : int
   ; failure_detail : string option
         (** The newest occurrence's refusal text, [None] when unexplained. *)
+  ; failure_provenance : provenance
   ; failure_last_turn : int
   }
 
 val digest_failures : ?limit:int -> turn list -> failure_digest list
 (** Collapses the window's refusals into one row per distinct rejected
-    (tool, input), counted, newest occurrence first, capped at [limit]
-    (default 8). Pure. Empty when every call in the window succeeded. *)
+    (tool, input, task, trace), counted, newest occurrence first, capped at [limit]
+    (default 8). Unknown task or trace identities are separated by turn occurrence, rather than
+    assumed to be the same execution. Pure. Empty when every call in the window succeeded. *)
 
 val externalize_failures :
   base_path:string -> keeper_name:string -> policy:Keeper_input_policy.t ->

@@ -27,7 +27,7 @@ type layer_id =
    after [Active_goals]: the claimed task is standing context that changes on
    claim/release, not per cycle. [Own_board_posts] changes only when the
    keeper itself publishes, so it sits just ahead of the per-cycle reactive
-   [Board_activity]. [Own_recent_actions] is a window that slides every turn,
+   [Board_activity]. [Own_recent_actions] is a window that advances with recorded tool-call turns,
    so it cannot hold a stable prefix and sits behind the sections that can.
    [Fleet_messages] carries any keeper's broadcast, so it is the most
    fleet-volatile section and sits last. *)

@@ -2721,6 +2721,10 @@ let render_keeper_message (state : state) =
     let member_ids_of =
       Masc_tui_types.chat_execution_member_index state ~keeper_name
     in
+    let timeline_index =
+      Masc_tui_types.chat_timeline_index ~messages:committed_timeline_messages
+        ~visible:committed_visible_timeline
+    in
     let failure_in_live_status turn_log =
       Option.exists (fun live -> live == turn_log) live_status_log
     in
@@ -2728,35 +2732,13 @@ let render_keeper_message (state : state) =
       let transcript = turn_log.tl_transcript in
       let request_id = Masc_tui_types.turn_log_execution_id turn_log in
       let member_ids = member_ids_of ~execution_id:request_id in
-      let committed_error =
-        List.exists
-          (fun (message : Masc_tui_types.msg_entry) ->
-            message.me_role = Message_error
-            && Masc_tui_types.string_mem message.me_request_id member_ids)
-          committed_timeline_messages
-      in
-      let request_label = request_id in
       let started_at = Keeper_chat_transcript.started_at transcript in
-      let bounds_request (message : Masc_tui_types.msg_entry) =
-        (not (Masc_tui_types.string_mem message.me_request_id member_ids))
-        || message.me_turn_phase = Turn_input
-      in
-      let request_messages =
-        List.filter bounds_request committed_timeline_messages
-      in
-      let bounded_timeline =
-        List.filter
-          (fun ((message : Masc_tui_types.msg_entry), _) -> bounds_request message)
-          committed_visible_timeline
-      in
-      let timeline_at =
-        chat_live_timeline_at ~member_ids ~request_id ~started_at ~request_messages
-          bounded_timeline
-      in
-      let insertion =
-        chat_block_insertion_index ~member_ids
-          ~bounds:(fun row -> row.me_turn_phase = Turn_input)
-          ~request_id ~timeline_at committed_visible_timeline
+      let request_label = request_id in
+      let { Masc_tui_types.clt_committed_error = committed_error
+          ; clt_timeline_at = timeline_at
+          ; clt_insertion = insertion } =
+        Masc_tui_types.chat_log_timeline_context timeline_index ~member_ids
+          ~request_id ~started_at
       in
       let keeper_label =
         Keeper_chat.terminal_safe_text

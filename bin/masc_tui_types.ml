@@ -1296,6 +1296,142 @@ let chat_block_insertion_index ~member_ids ~bounds ~request_id ~timeline_at
   find 0 positioned_messages
 ;;
 
+(* One frame's committed rows indexed by request id, so a held log finds its
+   own rows without walking every row. [chat_log_timeline_context] returns what
+   [chat_live_timeline_at] and [chat_block_insertion_index] return for the same
+   log on the full lists; the test compares the two on generated rows. *)
+type chat_timeline_index =
+  { cti_by_request : (string, int * msg_entry) Hashtbl.t
+  ; cti_visible : (msg_entry * float option) array
+  ; cti_visible_by_request : (string, int * msg_entry * float option) Hashtbl.t
+  ; cti_max_at : float option
+  ; cti_all_finite : bool
+  }
+
+let chat_timeline_index ~messages ~visible =
+  let by_request = Hashtbl.create 64 in
+  List.iteri
+    (fun position (message : msg_entry) ->
+      Hashtbl.add by_request message.me_request_id (position, message))
+    messages;
+  let cti_visible = Array.of_list visible in
+  let visible_by_request = Hashtbl.create 64 in
+  Array.iteri
+    (fun index ((message : msg_entry), at) ->
+      Hashtbl.add visible_by_request message.me_request_id (index, message, at))
+    cti_visible;
+  let max_of_some acc at =
+    match acc, at with
+    | None, at -> at
+    | acc, None -> acc
+    | Some left, Some right -> Some (Float.max left right)
+  in
+  { cti_by_request = by_request
+  ; cti_visible
+  ; cti_visible_by_request = visible_by_request
+  ; cti_max_at = Array.fold_left (fun acc (_, at) -> max_of_some acc at) None cti_visible
+  ; cti_all_finite =
+      Array.for_all
+        (fun (_, at) -> match at with None -> true | Some at -> Float.is_finite at)
+        cti_visible
+  }
+
+type chat_log_timeline_context =
+  { clt_committed_error : bool
+  ; clt_timeline_at : float option
+  ; clt_insertion : int
+  }
+
+let chat_log_timeline_context index ~member_ids ~request_id ~started_at =
+  let ids = List.sort_uniq String.compare (request_id :: member_ids) in
+  let own_messages =
+    List.concat_map (fun id -> Hashtbl.find_all index.cti_by_request id) ids
+    |> List.sort (fun (left, _) (right, _) -> Int.compare left right)
+    |> List.map snd
+  in
+  let clt_committed_error =
+    List.exists
+      (fun (message : msg_entry) ->
+        message.me_role = Message_error && string_mem message.me_request_id member_ids)
+      own_messages
+  in
+  let request_messages =
+    List.filter (fun (message : msg_entry) -> message.me_turn_phase = Turn_input) own_messages
+  in
+  let clt_timeline_at =
+    match chat_request_timeline_at ~member_ids ~request_id request_messages with
+    | Some _ as at -> at
+    | None ->
+        let valid at = Float.is_finite at && at > 0. in
+        let started_at = if valid started_at then Some started_at else None in
+        let has_committed_request =
+          List.exists
+            (fun (message : msg_entry) -> String.equal message.me_request_id request_id)
+            request_messages
+        in
+        if not has_committed_request
+        then started_at
+        else
+          let excluded_at =
+            List.concat_map (fun id -> Hashtbl.find_all index.cti_visible_by_request id)
+              (List.sort_uniq String.compare member_ids)
+            |> List.filter (fun (_, (message : msg_entry), _) ->
+                 message.me_turn_phase <> Turn_input)
+          in
+          let others_max =
+            let scan () =
+              Array.fold_left
+                (fun latest ((message : msg_entry), at) ->
+                  if string_mem message.me_request_id member_ids
+                     && message.me_turn_phase <> Turn_input
+                  then latest
+                  else
+                    match latest, at with
+                    | None, at -> at
+                    | at, None -> at
+                    | Some latest, Some at -> Some (Float.max latest at))
+                None index.cti_visible
+            in
+            if excluded_at = [] && index.cti_all_finite then index.cti_max_at
+            else if index.cti_all_finite
+                    && not (List.exists (fun (_, _, at) -> at = index.cti_max_at) excluded_at)
+            then index.cti_max_at
+            else scan ()
+          in
+          (match started_at, others_max with
+           | started_at, None -> started_at
+           | None, at -> at
+           | Some started_at, Some at -> Some (Float.max started_at at))
+  in
+  let lower_bound =
+    List.concat_map (fun id -> Hashtbl.find_all index.cti_visible_by_request id) ids
+    |> List.fold_left
+         (fun lower_bound (position, (message : msg_entry), _) ->
+           if message.me_turn_phase = Turn_input
+           then max lower_bound (position + 1)
+           else lower_bound)
+         0
+  in
+  let live_precedes ((row : msg_entry), row_at) =
+    match clt_timeline_at, row_at with
+    | Some live_at, Some row_at ->
+        let by_time = Float.compare live_at row_at in
+        if by_time <> 0
+        then by_time < 0
+        else row.me_role = Message_memory || String.equal row.me_request_id ""
+    | Some _, None -> true
+    | None, Some _ -> false
+    | None, None -> row.me_role = Message_memory || String.equal row.me_request_id ""
+  in
+  let length = Array.length index.cti_visible in
+  let rec find position =
+    if position >= length then length
+    else if live_precedes index.cti_visible.(position) then position
+    else find (position + 1)
+  in
+  { clt_committed_error; clt_timeline_at; clt_insertion = find lower_bound }
+;;
+
 let chat_live_insertion_index ?(member_ids = []) ~request_id ~timeline_at positioned_messages =
   chat_block_insertion_index ~member_ids ~bounds:(fun _ -> true) ~request_id ~timeline_at
     positioned_messages

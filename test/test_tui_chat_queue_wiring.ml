@@ -3436,6 +3436,80 @@ let test_selected_source_logs_keep_first_order_and_prefer_the_whole_log () =
     (List.map Tui_types.turn_log_request_id many) (ids ())
 ;;
 
+(* The indexed per-log timeline context must answer exactly what the
+   full-list functions answer for the same log: its request-owned rows, its
+   live timeline moment and its insertion slot. Generated rows cover repeated
+   request ids, rows without a moment, every phase and started_at values the
+   live fallback rejects. [request_id] is always one of [member_ids], as the
+   renderer builds them. *)
+let test_indexed_timeline_context_matches_the_full_list_functions () =
+  let pool = [| ""; "r0"; "r1"; "r2"; "r3"; "r4" |] in
+  let roles =
+    [| Tui_types.Message_user (Tui_types.Sent_by_operator {surface=None})
+     ; Tui_types.Message_keeper; Tui_types.Message_error; Tui_types.Message_status
+     ; Tui_types.Message_memory; Tui_types.Message_tool |]
+  in
+  let rng = Random.State.make [| 20261010 |] in
+  let checked = ref 0 in
+  for _case = 1 to 400 do
+    let rows =
+      List.init (Random.State.int rng 40) (fun _ ->
+        let request_id = pool.(Random.State.int rng (Array.length pool)) in
+        let role = roles.(Random.State.int rng (Array.length roles)) in
+        let entry =
+          chat_entry ~request_id ~role ~text:"x"
+            ~at:(float_of_int (Random.State.int rng 60)) ()
+        in
+        if Random.State.int rng 5 = 0
+        then { entry with Tui_types.me_timestamp = ""; me_submitted_at = None }
+        else entry)
+    in
+    let visible = List.combine rows (Tui_types.chat_projected_timeline_ats rows) in
+    let index = Tui_types.chat_timeline_index ~messages:rows ~visible in
+    for _log = 1 to 6 do
+      let request_id = pool.(1 + Random.State.int rng (Array.length pool - 1)) in
+      let member_ids =
+        request_id
+        :: List.filter (fun _ -> Random.State.bool rng) (Array.to_list pool)
+        |> List.sort_uniq String.compare
+      in
+      let started_at = [| -1.; 0.; 5.; 25.; 100. |].(Random.State.int rng 5) in
+      let bounds_request (message : Tui_types.msg_entry) =
+        (not (List.mem message.me_request_id member_ids))
+        || message.me_turn_phase = Tui_types.Turn_input
+      in
+      let request_messages = List.filter bounds_request rows in
+      let bounded =
+        List.filter (fun ((message : Tui_types.msg_entry), _) -> bounds_request message) visible
+      in
+      let timeline_at =
+        Tui_types.chat_live_timeline_at ~member_ids ~request_id ~started_at
+          ~request_messages bounded
+      in
+      let insertion =
+        Tui_types.chat_block_insertion_index ~member_ids
+          ~bounds:(fun row -> row.Tui_types.me_turn_phase = Tui_types.Turn_input)
+          ~request_id ~timeline_at visible
+      in
+      let committed_error =
+        List.exists
+          (fun (message : Tui_types.msg_entry) ->
+            message.me_role = Tui_types.Message_error
+            && List.mem message.me_request_id member_ids)
+          rows
+      in
+      let got =
+        Tui_types.chat_log_timeline_context index ~member_ids ~request_id ~started_at
+      in
+      incr checked;
+      check (option (float 0.)) "timeline moment" timeline_at got.clt_timeline_at;
+      check int "insertion slot" insertion got.clt_insertion;
+      check bool "committed error" committed_error got.clt_committed_error
+    done
+  done;
+  check bool "the generator exercised many logs" true (!checked >= 2000)
+;;
+
 (* A log built from a journal read stands at the journal head's own time,
    not at the moment the read was asked for. *)
 let test_a_journal_built_log_starts_at_the_journal_head () =
@@ -4900,6 +4974,8 @@ let () =
             test_journal_tracking_keeps_keeper_and_source_identity
         ; test_case "selected source logs keep first order and prefer the whole log" `Quick
             test_selected_source_logs_keep_first_order_and_prefer_the_whole_log
+        ; test_case "indexed timeline context matches the full-list functions" `Quick
+            test_indexed_timeline_context_matches_the_full_list_functions
         ; test_case "a journal-built log starts at the journal head" `Quick
             test_a_journal_built_log_starts_at_the_journal_head
         ; test_case "pending input enters transcript on execution evidence" `Quick

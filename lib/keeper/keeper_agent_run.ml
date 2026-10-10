@@ -1047,7 +1047,15 @@ let run_turn
      turn whose checkpoint version was superseded says so after the first stage
      save the store accepts ([checkpoint_sink] below). *)
   let restart_notice_after_first_save =
-    match Turn_helpers.restart_notice history_at_start ctx.saved_history with
+    let stated =
+      match history_at_start with
+      | Keeper_turn_boundaries.Fresh_history ->
+        Turn_helpers.history_stated_by_log ~config ~keeper_name:meta.name ~trace_id
+      | Keeper_turn_boundaries.Continued_history
+      | Keeper_turn_boundaries.Continued_history_from _ ->
+        Keeper_turn_boundaries.History_may_hold_atoms
+    in
+    match Turn_helpers.restart_notice history_at_start ctx.saved_history stated with
     | Turn_helpers.No_restart_notice -> Atomic.make false
     | Turn_helpers.Notice_at_turn_start ->
       Turn_helpers.record_history_restart

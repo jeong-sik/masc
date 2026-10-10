@@ -476,6 +476,38 @@ let restarts_history ~trace_id (record : record) =
       } -> false
 ;;
 
+type history_stated = History_may_hold_atoms | History_stated_empty
+
+(* The latest line of [trace_id] decides. A line that cannot be decoded may
+   have been a line of this trace that stated atoms, so it is
+   [History_may_hold_atoms] until a later readable line of the trace says
+   otherwise. [Stale_noop] left the store's own checkpoint in place, whose atoms
+   the line does not state. [No_atom_history] says the turn saved nothing, not
+   that the history is empty: a turn that started from atoms and saved nothing
+   left them, so only a turn that also started fresh states an empty one. *)
+let history_stated ~trace_id lines =
+  List.fold_left
+    (fun stated (_line, decoded) ->
+       match decoded with
+       | Error (_ : read_error) -> History_may_hold_atoms
+       | Ok record ->
+         (match record.event with
+          | History_restarted { trace_id = restarted } ->
+            if String.equal restarted trace_id then History_stated_empty else stated
+          | Turn_ended { turn_ref; history_at_start; position } ->
+            if not (String.equal (Ids.Turn_ref.trace_id turn_ref) trace_id)
+            then stated
+            else (
+              match position, history_at_start with
+              | Empty_atom_history, (Fresh_history | Continued_history | Continued_history_from _)
+              | No_atom_history, Fresh_history -> History_stated_empty
+              | No_atom_history, (Continued_history | Continued_history_from _)
+              | (Atom_history _ | Stale_noop), (Fresh_history | Continued_history | Continued_history_from _)
+                -> History_may_hold_atoms)))
+    History_may_hold_atoms
+    lines
+;;
+
 let witness_line ?through ~trace_id ~end_atom ~last_atom_digest lines =
   let ended_at, started_at =
     List.fold_left

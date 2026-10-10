@@ -125,6 +125,86 @@ let batch_response questions choice =
   let answer = snd (List.hd result.Types.answers) in
   {result with Types.answers=List.map (fun (id,_) -> id,answer) questions}
 
+let test_resolved_sources_are_present_before_any_omission () =
+  let rows = List.map (fun (id,event) ->
+    ({Selection.id;summary="Consolidated release policy"} : Selection.candidate),
+    `Assoc ["historical_event",`String event;"current_target",`String "review required";
+            "committed_revision_path",`List [`String "original-to-current"]])
+    ["same-event","E18";"comparison","E17"] in
+  let calls = ref 0 in
+  let evaluate ~state ~questions =
+    incr calls;
+    Alcotest.(check bool) "purpose remains frozen" true
+      (Yojson.Safe.Util.member "current_purpose" state = purpose);
+    let candidates = Yojson.Safe.Util.(state |> member "candidates" |> to_list) in
+    let answers = List.map (fun (id,_) ->
+      let row = List.find (fun row -> Yojson.Safe.Util.member "question_id" row = `String id) candidates in
+      let detail = Yojson.Safe.Util.member "source_detail" row in
+      let choice = if detail=`Null then "not_needed" else (
+        Alcotest.(check bool) "complete original evidence is assessed" true
+          (detail = List.assoc id (List.map (fun (c,d) -> c.Selection.id,d) rows));
+        match Yojson.Safe.Util.member "historical_event" detail with
+        | `String "E18" -> "current_decision"
+        | `String "E17" -> "comparison"
+        | _ -> Alcotest.fail "unexpected fixture source") in
+      id,snd (List.hd (response choice).Types.answers)) questions in
+    Ok {Types.model="fixture";usage=None;answers} in
+  let resolve ~id:_ = Alcotest.fail "summary-only rejection does not resolve" in
+  let omitted = Selection.select_many ~evaluate ~resolve ~purpose (List.map fst rows) in
+  Alcotest.(check bool) "summary-only control would omit both candidates" true
+    (List.for_all (function Selection.Not_needed _ -> true | _ -> false) omitted);
+  calls := 0;
+  (match Selection.select_resolved_many ~evaluate ~purpose rows with
+   | [Selected {use=For_current_decision;source_detail=first;_};
+      Selected {use=For_comparison;source_detail=second;_}] ->
+     Alcotest.(check bool) "selected results preserve both full witnesses" true
+       ([first;second] = List.map snd rows)
+   | _ -> Alcotest.fail "first judgment must see full event evidence");
+  Alcotest.(check int) "resolved sources need one assessment, no preliminary rejection" 1 !calls
+
+let test_resolved_partial_answers_and_inspection_stay_deferred () =
+  let rows = List.map (fun id -> {candidate with id},source) ["selected";"inspect";"missing"] in
+  let calls = ref 0 in
+  let evaluate ~state:_ ~questions:_ =
+    incr calls;
+    let answer choice = snd (List.hd (response choice).Types.answers) in
+    Ok {Types.model="fixture";usage=None;
+        answers=["inspect",answer "inspect_source";"selected",answer "comparison"]} in
+  (match Selection.select_resolved_many ~evaluate ~purpose rows with
+   | [Selected {use=For_comparison;_};Deferred {reason=Applicability_unresolved;_};
+      Deferred {reason=Invalid_answer _;_}] -> ()
+   | _ -> Alcotest.fail "missing scope evidence and missing answers are not absence");
+  Alcotest.(check int) "source inspection is deferred without a private loop" 1 !calls;
+  let unavailable ~state:_ ~questions:_ = incr calls; Error (Selection.Unavailable "offline") in
+  let results = Selection.select_resolved_many ~evaluate:unavailable ~purpose rows in
+  Alcotest.(check int) "provider outage is one request, no split" 2 !calls;
+  Alcotest.(check bool) "outage preserves all candidate uncertainty" true
+    (List.for_all (function Selection.Deferred {reason=Evaluation_failed "offline";_} -> true
+      | _ -> false) results)
+
+let test_resolved_capacity_split_keeps_full_details () =
+  let rows = List.map (fun id -> {candidate with id},`Assoc ["original",`String id])
+      ["left";"oversized";"right"] in
+  let attempts = ref [] in
+  let evaluate ~state ~questions =
+    let ids = List.map fst questions in
+    attempts := ids :: !attempts;
+    Alcotest.(check bool) "split keeps exact purpose" true
+      (Yojson.Safe.Util.member "current_purpose" state = purpose);
+    Yojson.Safe.Util.(state |> member "candidates" |> to_list) |> List.iter (fun row ->
+      let id = Yojson.Safe.Util.(row |> member "question_id" |> to_string) in
+      Alcotest.(check bool) "full detail survives each provider-capacity partition" true
+        (Yojson.Safe.Util.member "source_detail" row = `Assoc ["original",`String id]));
+    if List.length ids > 1 || ids=["oversized"] then Error (Selection.Capacity_refused "fixture")
+    else Ok (batch_response questions "current_decision") in
+  (match Selection.select_resolved_many ~evaluate ~purpose rows with
+   | [Selected {candidate={id="left";_};_};
+      Deferred {candidate={id="oversized";_};reason=Capacity_unresolved _};
+      Selected {candidate={id="right";_};_}] -> ()
+   | _ -> Alcotest.fail "capacity failure must preserve unresolved singleton and valid peers");
+  Alcotest.(check int) "refused singleton is not retried" 1
+    (List.length (List.filter ((=) ["oversized"]) !attempts))
+
 let host_inventory hash = `Assoc
   ["status",`String "available";"ledger_sha256",`String hash;
    "claims",`List [`Assoc ["id",`String candidate.id;"text",`String candidate.summary;
@@ -403,6 +483,12 @@ let test_provider_capacity_projection_keeps_whole_records_and_receipts () =
 
 let () = Alcotest.run "purpose-specific workspace memory selection"
   ["selection",[
+    Alcotest.test_case "resolved first assessment sees full lineage" `Quick
+      test_resolved_sources_are_present_before_any_omission;
+    Alcotest.test_case "resolved inspection and partial answers remain unresolved" `Quick
+      test_resolved_partial_answers_and_inspection_stay_deferred;
+    Alcotest.test_case "resolved capacity partition preserves full sources" `Quick
+      test_resolved_capacity_split_keeps_full_details;
     Alcotest.test_case "resolved source changes selection use" `Quick test_source_can_change_how_a_memory_is_used;
     Alcotest.test_case "unrelated purpose avoids source read" `Quick test_unrelated_memory_does_not_fetch_sources;
     Alcotest.test_case "source failure is not irrelevance" `Quick test_source_failure_is_not_a_negative_relevance_vote;

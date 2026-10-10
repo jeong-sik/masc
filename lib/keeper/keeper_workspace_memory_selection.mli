@@ -51,3 +51,14 @@ val select_many :
     duplicate candidate IDs are rejected before dispatch. Explicit capacity refusals
     split the rejected batch into smaller batches with unchanged purpose and rows.
     A refused singleton stays deferred intact. Other failures never trigger splitting. *)
+
+val select_resolved_many :
+  evaluate:evaluate -> purpose:Yojson.Safe.t ->
+  (candidate * Yojson.Safe.t) list -> outcome list
+(** Assess already-resolved authoritative sources on the first request, without
+    a summary-only omission before lineage is visible. Outcomes preserve input
+    order and selected entries retain their exact supplied detail. A request for
+    further source inspection stays [Deferred Applicability_unresolved].
+    Uses the same batch identity, partial-answer and capacity-refusal contracts
+    as [select_many]. The caller owns frozen source authority and revalidation
+    before publication; this function does not establish freshness or truth. *)

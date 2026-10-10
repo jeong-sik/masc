@@ -31,10 +31,16 @@ flowchart LR
 ## Repository strategy
 
 - Work in stacked PRs. The bottom PR targets `main`; each later PR targets the
-  preceding branch. Give each PR one concrete outcome and land the stack bottom first.
+  preceding branch. Give each PR one concrete outcome.
+- **Land a native stack whole, once, through its top PR. Never merge it layer by
+  layer from the bottom**, including `merge-async` on a lower PR. Each partial
+  merge moves `main` and makes the remaining layers, and other stacks, conflict again.
+- When a stack conflicts with `main`, run `gh stack rebase` over the whole stack
+  and push every layer once. Never push a fix to the bottom layer alone. Report
+  conflicts per stack, not per bottom PR.
 - Keep concurrent changes in separate worktrees. Task claims coordinate who is
   doing the work; they do not lock files or authorize editing another checkout.
-- For GitHub Native Stacks, inspect REST `stack` metadata and follow [Native GitHub Stacks](NATIVE-GITHUB-STACKS.md). Merging a selected PR includes its open downstack PRs; a non-main direct base is not a parent-merge blocker. Review the whole included scope.
+- For GitHub Native Stacks, inspect REST `stack` metadata and follow [Native GitHub Stacks](NATIVE-GITHUB-STACKS.md). Merge the top PR so the whole stack lands at once; a non-main direct base is not a parent-merge blocker. Review every PR in the stack.
 - Document the feature where readers look for it. README introduces the product,
   CONTRIBUTING starts development, manuals explain use, specs define interfaces,
   and RFCs record design proposals. Source and measured behavior support claims.

@@ -34,9 +34,9 @@ or parent landing that changes the diff requires independent re-review.
 Head-only approvals supply no evidence of the reviewed diff and are not
 backfilled. Use `--check` for a read-only admission probe. A source-reviewed child may be
 approved while its parent is still open. Inspect the REST PR's `stack` metadata
-and ordered stack membership before choosing the merge scope. For a native
-stack, merging a selected PR includes every open downstack PR through it; do
-not require separate parent merges or manually retarget it. For a confirmed
+and ordered stack membership before choosing the merge scope. **Merge a native
+stack whole, once, through its top PR; never merge it layer by layer from the
+bottom.** Do not require separate parent merges or manually retarget it. For a confirmed
 non-native branch chain, land the parent first and inspect the changed diff
 before landing the child. See the [Native GitHub Stacks guide](../../docs/guides/NATIVE-GITHUB-STACKS.md).
 
@@ -47,7 +47,7 @@ head/base identities before admission. Check output names the validated
 merge target: a native stack can land into another feature branch, whose PR
 is outside this stack scope. That is not main integration. It does not call Actions
 for an ordinary head. External coding agents use this read-only check before submitting a native
-stack via `PUT /repos/O/R/pulls/N/merge-async`; for a non-native PR, use
+stack via `PUT /repos/O/R/pulls/TOP_PR/merge-async`; for a non-native PR, use
 `gh pr merge --match-head-commit SHA`. The asynchronous receipt labels only the preflight target, since GitHub accepts
 only the selected head SHA as a precondition; its accepted destination remains
 unconfirmed until the result is read. The receipt is acceptance,

@@ -32,7 +32,7 @@ boundary. Existing stalled-job and runner hang guards are separate resource
 safeguards. Incomplete or skipped coverage is never a successful build or test
 result.
 
-Native GitHub Stacks use REST `stack` metadata and the [stack workflow](guides/NATIVE-GITHUB-STACKS.md). The asynchronous merge endpoint includes all open downstack PRs through the selected PR. Inspect and approve every included head; do not treat a non-main direct base as a blocker or manually retarget a native stack. A leaf source-review PASS does not certify its downstack.
+Native GitHub Stacks use REST `stack` metadata and the [stack workflow](guides/NATIVE-GITHUB-STACKS.md). Merge a native stack whole, once, through its top PR; never merge it layer by layer from the bottom. The asynchronous merge endpoint on the top PR includes every open PR below it. Inspect and approve every included head; do not treat a non-main direct base as a blocker or manually retarget a native stack. A leaf source-review PASS does not certify its downstack.
 
 `pr-check.yml` offers optional explicit `workflow_dispatch` source/config syntax
 and committed-credential checks. It has no PR, push or scheduled trigger and does

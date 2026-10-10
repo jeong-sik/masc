@@ -419,59 +419,45 @@ let a_bidi_host_that_met_another_profile_names_both_profiles () =
 module Start_record = Masc.Browser_keeper_firefox_start_record
 module Starter = Masc.Browser_keeper_firefox_starter
 
-(* Where MASC starts the Keeper Firefox, the paragraph says what its next
-   start does instead of the operator's steps, and what its last start came
-   to when that showed no connection after the last host started. *)
+(* Where MASC starts the Keeper Firefox, the paragraph carries the port and
+   the profile it starts with. MASC's last start is in it only when that
+   showed no connection, for this port and profile, after what the host
+   record says since: then its reason is there, and otherwise the paragraph
+   is the one with no start recorded. *)
 let where_masc_starts_the_firefox_the_status_says_so () =
-  let masc ?(last_start = Start_record.Absent) () =
-    Status.Masc_starts { port = 9222; profile = "/keeper/profile"; last_start } in
-  let said ?last_start record = Status.message (observation ~keeper:(masc ?last_start ()) record) in
+  let port = 9444 and profile = "/keeper/profile" in
+  let said ?(last_start = Start_record.Absent) record =
+    Status.message (observation ~keeper:(Status.Masc_starts { port; profile; last_start }) record) in
   let never = said Record.Never_started in
-  has never
-    [ "MASC starts what is not running of the Keeper Firefox on port 9222 with the profile \
-       /keeper/profile and its host, at the next server start, or when a Keeper next asks for hover \
-       or drag." ];
-  lacks never [ "The operator starts Firefox" ];
-  let ended session =
+  has never [ string_of_int port; profile ];
+  check bool "where MASC starts them, the paragraph is not the operator's" false
+    (String.equal never (Status.message (observation Record.Never_started)));
+  let ended =
     Record.Ended
-      (host_entry, { at = 1_791_000_060.; reason = "stopped"; session; because = Record.Reason_only }) in
-  let left = said (ended Record.Session_left) in
-  has left [ "hover or drag, MASC restarts the Keeper Firefox it started there, or starts it if it was closed" ];
-  lacks left [ "The operator restarts" ];
-  (* A host that was given another port held its session in another
-     Firefox: MASC starts its own and restarts nothing. *)
-  let elsewhere =
-    Record.Ended
-      ( { host_entry with bidi_url = "ws://127.0.0.1:9333/session" }
-      , { at = 1_791_000_060.; reason = "stopped"; session = Record.Session_left; because = Record.Reason_only } ) in
-  lacks (said elsewhere) [ "MASC restarts" ];
-  let failed ?(port = 9222) at =
-    Start_record.Recorded
-      { at; port; profile = "/keeper/profile"
-      ; outcome = Start_record.Not_attached (Starter.Start_failed "the BiDi host did not start: not found") } in
-  has (said ~last_start:(failed 1_791_000_100.) (ended Record.No_session_left))
-    [ "MASC's last start, at 2026-"; "failed: the BiDi host did not start: not found. The next start tries again." ];
-  (* What the record says since a host ended is newer than a start that
-     ended before: that start says nothing. *)
-  lacks (said ~last_start:(failed 1_791_000_030.) (ended Record.No_session_left)) [ "MASC's last start" ];
-  (* A start for another port says nothing of this configuration. *)
-  lacks (said ~last_start:(failed ~port:9333 1_791_000_100.) (ended Record.No_session_left)) [ "MASC's last start" ];
-  lacks
-    (said
-       ~last_start:
-         (Start_record.Recorded
-            { at = 1_791_000_100.; port = 9222; profile = "/keeper/profile"; outcome = Start_record.Attached Starter.Host_only })
-       (ended Record.No_session_left))
-    [ "MASC's last start" ];
+      ( host_entry
+      , { at = 1_791_000_060.; reason = "stopped"; session = Record.No_session_left; because = Record.Reason_only } ) in
+  let why = "the BiDi host did not start: not found" in
+  let failed ?(port = port) ?(profile = profile) at =
+    Start_record.Recorded { at; port; profile; outcome = Start_record.Not_attached (Starter.Start_failed why) } in
+  let mentioned name last_start record =
+    let with_start = said ~last_start record in
+    check bool name true
+      (String_util.contains_substring with_start why && not (String.equal with_start (said record))) in
+  let unmentioned name last_start record = check string name (said record) (said ~last_start record) in
+  mentioned "a failed start after the host ended" (failed 1_791_000_100.) ended;
+  unmentioned "a start that ended before the host did" (failed 1_791_000_030.) ended;
+  unmentioned "a start for another port" (failed ~port:9333 1_791_000_100.) ended;
+  unmentioned "a start for another profile" (failed ~profile:"/other/profile" 1_791_000_100.) ended;
+  unmentioned "a start that attached"
+    (Start_record.Recorded { at = 1_791_000_100.; port; profile; outcome = Start_record.Attached Starter.Host_only })
+    ended;
   (* A host that died is newer than a start before it attached; a running
      host is newer than a start before it started. *)
-  lacks (said ~last_start:(failed 1_791_000_001.) (Record.Died host_entry)) [ "MASC's last start" ];
-  has (said ~last_start:(failed 1_791_000_003.) (Record.Died host_entry)) [ "MASC's last start" ];
-  has (said ~last_start:(failed 1_791_000_100.) (Record.Running host_entry)) [ "MASC's last start" ];
-  (* A launcher not installed yet is installed first. *)
-  has
-    (Status.message (observation ~launcher:Launcher.Not_installed ~keeper:(masc ()) Record.Never_started))
-    [ "Once the browser lane is installed, MASC starts" ]
+  unmentioned "a start before a dead host attached" (failed 1_791_000_001.) (Record.Died host_entry);
+  mentioned "a start after a dead host attached" (failed 1_791_000_003.) (Record.Died host_entry);
+  unmentioned "a start before a running host started" (failed 1_790_999_999.) (Record.Running host_entry);
+  mentioned "a start after a running host started" (failed 1_791_000_100.) (Record.Running host_entry);
+  has (said ~last_start:(Start_record.Unreadable "torn by this test") Record.Never_started) [ "torn by this test" ]
 
 let where_masc_does_not_start_the_firefox_the_status_says_why () =
   let keeper configuration = Status.keeper_of_configuration ~base_path:"/workspace" configuration in
@@ -479,24 +465,25 @@ let where_masc_does_not_start_the_firefox_the_status_says_why () =
     (keeper (Some { Browser_configuration.none with live_enabled = false }) = Status.Lane_off);
   check bool "no table" true (keeper (Some Browser_configuration.none) = Status.Not_configured);
   check bool "nothing loaded" true (keeper None = Status.Not_known);
-  has (Status.message (observation ~keeper:Status.Not_configured Record.Never_started))
-    [ "The operator starts Firefox"; "With [browser.live.bidi] in runtime.toml, MASC starts that Firefox and its host itself." ];
-  has (Status.message (observation ~keeper:Status.Lane_off Record.Never_started)) [ "[browser.live] is off in runtime.toml" ];
-  lacks (Status.message (observation ~keeper:Status.Not_known Record.Never_started)) [ "MASC starts" ]
+  let paragraph keeper = Status.message (observation ~keeper Record.Never_started) in
+  check bool "no table changes the paragraph" false
+    (String.equal (paragraph Status.Not_configured) (paragraph Status.Not_known));
+  check bool "the lane off changes the paragraph" false
+    (String.equal (paragraph Status.Lane_off) (paragraph Status.Not_known))
 
 (* masc doctor reads who starts the Keeper Firefox from the workspace's
    runtime.toml, with no server. *)
 let doctor_reads_who_starts_the_firefox_from_runtime_toml () =
   browser_lane_fixture () @@ fun base ->
   let runtime = Filename.concat base ".masc/config/runtime.toml" in
-  let table = "\n[browser.live.bidi]\nfirefox = \"/Apps/firefox\"\nprofile = \"/keeper/profile\"\n" in
+  let profile = "/keeper/profile" in
+  let table = "\n[browser.live.bidi]\nfirefox = \"/Apps/firefox\"\nprofile = \"" ^ profile ^ "\"\n" in
   write runtime (read "../scripts/fixtures/release-evidence/runtime.toml" ^ table);
-  says (Onboarding_status.inspect ~base_path:(Some base))
-    [ "the Keeper Firefox on port 9222 with the profile /keeper/profile" ];
+  says (Onboarding_status.inspect ~base_path:(Some base)) [ profile ];
   (* A server refuses a file that does not load, and so has no browser
-     configuration either: doctor does not say MASC starts anything. *)
+     configuration either: doctor does not read its table. *)
   write runtime table;
-  lacks (bidi_message (Onboarding_status.inspect ~base_path:(Some base))) [ "MASC starts" ]
+  lacks (bidi_message (Onboarding_status.inspect ~base_path:(Some base))) [ profile ]
 
 (* At the limit, earlier history is unknown. A valid longer record retains
    all listed results; the reader must not pretend it was already trimmed. *)

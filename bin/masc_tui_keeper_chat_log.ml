@@ -23,6 +23,10 @@ type t =
   ; source : journal_source
   ; started_at : float
   ; mutable reversed_entries : entry list
+  ; mutable run_started : bool
+        (* Whether an entry holds [Run_started]: asked for every held log on
+           every frame, so it is kept rather than found by walking the
+           entries. *)
   ; held_seqs : (int, unit) Hashtbl.t
   ; mutable resume_position : Journal.replay_position
         (* After the highest seq held; the whole turn while none is. *)
@@ -39,6 +43,7 @@ let create_for_source ~keeper_name ~source ~started_at =
   ; source
   ; started_at
   ; reversed_entries = []
+  ; run_started = false
   ; held_seqs = Hashtbl.create 64
   ; resume_position = Journal.Whole_turn
   ; attempt = 0
@@ -56,6 +61,8 @@ let keeper_name t = t.keeper_name
 let request_id t = t.request_id
 let started_at t = t.started_at
 let entries t = List.rev t.reversed_entries
+let has_entries t = match t.reversed_entries with [] -> false | _ :: _ -> true
+let run_started t = t.run_started
 let resume_position t = t.resume_position
 let attempt t = t.attempt
 let committed t = t.committed
@@ -155,6 +162,7 @@ let add ?at t ~seq (delta : Live.delta) =
        t.resume_position <- Journal.replay_position_advance t.resume_position seq
      | None -> ());
     t.reversed_entries <- { seq; at; attempt = t.attempt; delta } :: t.reversed_entries;
+    (match delta with Live.Run_started -> t.run_started <- true | _ -> ());
     bump t;
     true
   end

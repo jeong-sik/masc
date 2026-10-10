@@ -19,6 +19,37 @@ module Journal = Masc.Keeper_chat_event_log
 module Outcome = Masc.Keeper_turn_outcome
 module Projection = Server_keeper_chat_agui_projection
 
+(* [has_entries] and [run_started] are kept, not computed from the entries;
+   they must agree with the entries after every add, including a duplicate
+   seq that is dropped and a run start that arrives late. *)
+let test_has_entries_and_run_started_follow_the_entries () =
+  let log = Log.create ~keeper_name:"keeper.one" ~request_id:"req-1" ~started_at:1. in
+  let agrees label =
+    let entries = Log.entries log in
+    check bool (label ^ ": has_entries") (entries <> []) (Log.has_entries log);
+    check bool (label ^ ": run_started")
+      (List.exists
+         (fun (entry : Log.entry) ->
+           match entry.delta with Live.Run_started -> true | _ -> false)
+         entries)
+      (Log.run_started log)
+  in
+  agrees "empty";
+  check bool "text first" true
+    (Log.add log ~seq:(Some 1) (Live.Text {text = "a"; stream_scope = None}));
+  agrees "after text";
+  check bool "no run start yet" false (Log.run_started log);
+  check bool "the same seq again is dropped" false
+    (Log.add log ~seq:(Some 1) Live.Run_started);
+  agrees "after a duplicate";
+  check bool "run start" true (Log.add log ~seq:(Some 2) Live.Run_started);
+  agrees "after the run start";
+  check bool "a start is remembered" true (Log.run_started log);
+  check bool "more text" true
+    (Log.add log ~seq:(Some 3) (Live.Text {text = "b"; stream_scope = None}));
+  agrees "after later text"
+;;
+
 let position =
   testable
     (fun formatter position ->
@@ -1089,5 +1120,9 @@ let () =
             test_golden_journal_equals_wire_in_chunks
         ; test_case "a journal page fills the log like the wire does" `Quick
             test_a_journal_page_fills_the_log_like_the_wire_does
+        ] )
+    ; ( "kept answers"
+      , [ test_case "has_entries and run_started follow the entries" `Quick
+            test_has_entries_and_run_started_follow_the_entries
         ] )
     ]

@@ -8471,7 +8471,7 @@ let receive_journal_result state ~keeper_name ~source ~started_at journal =
       in
       let accepted = turn_log_add_journaled log lines in
       Masc_tui_keeper_chat_log.commit log.tl_log;
-      if lines <> [] || Masc_tui_keeper_chat_log.entries log.tl_log <> []
+      if lines <> [] || Masc_tui_keeper_chat_log.has_entries log.tl_log
       then hold_settled_log state log;
       Ok (log, accepted)
   | Error error ->
@@ -8812,7 +8812,7 @@ let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
    executable so the decision is linkable by a test. *)
 let settle_turn_log state (entry : inflight) =
   Masc_tui_keeper_chat_log.commit entry.log.tl_log;
-  if Masc_tui_keeper_chat_log.entries entry.log.tl_log <> [] then
+  if Masc_tui_keeper_chat_log.has_entries entry.log.tl_log then
     hold_settled_log state entry.log;
   match state.msg_live with
   | Some visible
@@ -10694,10 +10694,7 @@ let keeper_message_waiting_requests (state : state) ~keeper_name =
   let remember_started executions log =
     if not (String.equal (turn_log_keeper_name log) keeper_name) then executions
     else
-      let started = List.exists (fun (entry : Masc_tui_keeper_chat_log.entry) ->
-          match entry.delta with
-          | Masc_tui_keeper_chat_live.Run_started -> true
-          | _ -> false) (Masc_tui_keeper_chat_log.entries log.tl_log) in
+      let started = Masc_tui_keeper_chat_log.run_started log.tl_log in
       if started then Executions.add (turn_log_execution_id log) executions else executions
   in
   (* A batch's watchers receive its journal independently. A sibling's run

@@ -70,6 +70,12 @@ val delta_of_journaled :
 
 val entries : t -> entry list  (** Insertion order. *)
 
+val has_entries : t -> bool
+(** [entries t <> []], without building the list. *)
+
+val run_started : t -> bool
+(** Whether an entry holds [Run_started], without walking the entries. *)
+
 val resume_position : t -> Masc.Keeper_chat_event_log.replay_position
 (** Where a resume of this turn starts: after the highest seq held, or the
     whole turn while none is. A journal page holds every line's seq, drawn

@@ -307,12 +307,15 @@ let direct_message_of_request payload = payload.direct_message
 
 (* How long a held tool call waits for an operator.
 
-   Long enough to read the question and decide -- an operator glancing away
-   should not come back to a denied call. Short enough that a turn does not
-   sit on a provider connection all afternoon when the reader has walked
-   away: the chat stream's own silence bound is the same order, and a wait
-   outliving it would hold a turn whose reader is already gone. *)
-let keeper_tool_approval_timeout_sec = 180.0
+   The value lives in [Keeper_config
+   .keeper_tool_approval_timeout_sec] (env
+   MASC_KEEPER_TOOL_APPROVAL_TIMEOUT_SEC, clamp [5.0, 3600.0], design D3
+   task-1665). The historical inline default was 180.0 and is NOT a
+   measured value: the keeper_hitl_gate health section's answered/
+   timed_out counters are accumulating the evidence a future typed
+   condition ("wait only while an operator pane holds the stream") will
+   need to replace the constant. A wait that times out is not lost --
+   the durable late-approval journal carries a later operator answer. *)
 
 (* Answer a held tool call.
 
@@ -393,7 +396,7 @@ let handle_keeper_tool_approval ~actor state request reqd =
             match
               Keeper_late_approval.remember_late
                 (Keeper_late_approval.shared ())
-                ~keeper_name ~tool_call_id ~actor decision ()
+                ~base_path ~keeper_name ~tool_call_id ~actor decision ()
             with
             | Keeper_late_approval.Remembered _ -> true
             | Keeper_late_approval.No_matching_ask -> false
@@ -497,15 +500,7 @@ let handle_keeper_turns_list state request reqd =
               | None -> `Null
               | Some (preview : Keeper_turn_preview.t) when preview.updated_at < turn.started_at -> `Null
               | Some (preview : Keeper_turn_preview.t) ->
-                `Assoc
-                  [ ("status_text", `String (Keeper_turn_preview.status_text preview))
-                  ; ("text_tail", `String preview.text_tail)
-                  ; ( "last_tool"
-                    , match preview.last_tool with
-                      | None -> `Null
-                      | Some tool_name -> `String tool_name )
-                  ; ("updated_at_unix", `Float preview.updated_at)
-                  ]
+                Keeper_turn_preview.to_json preview
             in
             `Assoc
               [ ("lane", `String (Keeper_owner.turn_lane_to_string turn.lane))
@@ -1646,6 +1641,8 @@ type keeper_stream_worker_event =
       * string
       * int
   | Stream_event of int * Agent_core.Types.sse_event
+  | Stream_native_tool_progress of int * int * string option * Runtime_native_tools.progress
+  | Stream_native_tool_completion of int * int * string option * Runtime_native_tools.completion
   | Stream_chat_event of Keeper_chat_events.keeper_chat_event
   | Stream_client_disconnected
   | Stream_terminal of
@@ -1747,7 +1744,7 @@ type translated_keeper_stream_event =
   ; chat_events : Keeper_chat_events.keeper_chat_event list
   }
 
-let empty_keeper_stream_bridge_state () = Keeper_chat_agent_core_stream_bridge.empty_state ()
+let empty_keeper_stream_bridge_state ~generation () = Keeper_chat_agent_core_stream_bridge.empty_state ~generation ()
 let translate_agent_core_stream_event = Keeper_chat_agent_core_stream_bridge.translate
 
 (* Provider events that already passed the request's
@@ -1778,8 +1775,14 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
     Keeper_secret_redaction.snapshot ~base_path ~keeper_name:payload.name
   in
   let redact_text = Keeper_secret_redaction.redact_text redaction in
-  Keeper_chat_events.publish events
-    (Run_started { run_id; thread_id });
+  let task_source = match submission with
+    | Owner_operation {operation_id; _} -> Keeper_native_task_journal.Operation operation_id in
+  let child_journal = Keeper_child_content_journal.create ~base_path
+      ~keeper_name:payload.name ~source:task_source ~redact_text in
+  let task_journal = Keeper_native_task_journal.create ~base_path
+      ~keeper_name:payload.name ~source:task_source ~redact_text in
+  let content_generation = Keeper_chat_events.publish_with_sequence events
+    (Run_started { run_id; thread_id }) in
   Option.iter (fun (operation_id, execution_id) ->
     Keeper_chat_events.publish events (Batch_bound {operation_id; execution_id})) batch_binding;
   Keeper_chat_events.publish events
@@ -1860,7 +1863,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
       Atomic.set client_disconnected true;
       let (_ : bool) = Eio.Promise.try_resolve client_disconnect_resolver () in
       ()
-    | (Stream_runtime_attempt_started _ | Stream_event _ | Stream_chat_event _) as event ->
+    | (Stream_runtime_attempt_started _ | Stream_event _ | Stream_native_tool_progress _ | Stream_native_tool_completion _ | Stream_chat_event _) as event ->
         if !closed
         then observe_stream_event_cutoff "writer_closed"
         else if Atomic.get terminal_pushed
@@ -1969,14 +1972,12 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
   in
   let append_queued_assistant_once ~content ?(tool_calls = []) ?blocks ?turn_ref () =
     persist_operation_attempt
-      ~settlement:(Server_keeper_operation_transcript.Terminal
-        {content; kind=Keeper_chat_store.Row_kind.Utterance})
+      ~settlement:(Server_keeper_operation_transcript.Reply content)
       ~tool_calls ?blocks ?turn_ref ~stream_lifecycle:completed_stream_lifecycle ()
   in
-  let append_queued_transport_failure_once ?(tool_calls = []) ?blocks ?turn_ref content =
+  let append_queued_request_failure_once ?(tool_calls = []) ?blocks ?turn_ref content =
     persist_operation_attempt
-      ~settlement:(Server_keeper_operation_transcript.Terminal
-        {content; kind=Keeper_chat_store.Row_kind.Transport_failure})
+      ~settlement:(Server_keeper_operation_transcript.Request_failed content)
       ~tool_calls ?blocks ?turn_ref ~stream_lifecycle:errored_stream_lifecycle ()
   in
   let append_queued_tool_calls_once ?turn_ref tool_calls =
@@ -2037,6 +2038,27 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
       | Keeper_hooks_agent_core.Turn_collected { turn; tool_source_map } ->
         Keeper_stream_tool_accum.seal_turn worker_tool_accum ~turn
           ~tool_source_map
+      | Keeper_hooks_agent_core.Child_content_observed {attempt; observation} ->
+          (* Received child snapshots commit independently of worker queue,
+             client disconnect and root lifecycle closure. No chat-bus publish. *)
+          Eio.Cancel.protect (fun () ->
+            Keeper_child_content_journal.observe child_journal ~attempt observation
+            |> Keeper_child_content_journal.report ~keeper_name:payload.name);
+          Ok ()
+      | Keeper_hooks_agent_core.Native_task_observed {attempt; bound} ->
+          (* Independent receiver journal, including after root stream closure.
+             Persistence failure is not a tool occurrence mapping failure. *)
+          Keeper_native_task_journal.observe task_journal ~attempt bound
+          |> Keeper_native_task_journal.report ~keeper_name:payload.name;
+          Ok ()
+      | Keeper_hooks_agent_core.Native_tool_progress {block_index; tool_call_id; progress} ->
+        push_worker_event (Stream_native_tool_progress
+          (Keeper_stream_tool_accum.current_stream_scope worker_tool_accum, block_index, tool_call_id, progress));
+        Ok ()
+      | Keeper_hooks_agent_core.Native_tool_completion {block_index; tool_call_id; completion} ->
+        push_worker_event (Stream_native_tool_completion
+          (Keeper_stream_tool_accum.current_stream_scope worker_tool_accum, block_index, tool_call_id, completion));
+        Ok ()
       | Keeper_hooks_agent_core.Official_tool_result { block_index; tool_call_id; execution_id } ->
         (match Keeper_stream_tool_accum.record_official_execution_id worker_tool_accum
                  ~block_index ~tool_call_id ~execution_id with
@@ -2105,8 +2127,9 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
       ~publish:(fun event -> push_worker_event (Stream_chat_event event))
       ~redact_text
       ~clock
+      ~base_path
       ~keeper_name:payload.name
-      ~timeout_sec:keeper_tool_approval_timeout_sec
+      ~timeout_sec:(Keeper_config.keeper_tool_approval_timeout_sec ())
   in
   let accumulated_media_blocks () =
     match
@@ -2139,7 +2162,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
       Keeper_stream_tool_accum.to_tool_calls_for_failure worker_tool_accum
     in
     let persisted =
-      append_queued_transport_failure_once ~tool_calls ?blocks ?turn_ref content
+      append_queued_request_failure_once ~tool_calls ?blocks ?turn_ref content
     in
     Result.iter
       (fun () ->
@@ -2763,6 +2786,19 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
         in
         List.iter (Keeper_chat_events.publish events) translated.chat_events;
         consume_worker_events translated.bridge_state
+    | `Worker_event (Stream_native_tool_progress (stream_scope, block_index, tool_call_id, progress)) ->
+        (* Native side observations are not model-content boundaries. Publishing
+           one must not finalize a possibly incomplete secret held by [stream_text]. *)
+        let translated = Keeper_chat_agent_core_stream_bridge.progress_native_tool
+          ~redact_text ~stream_scope ~block_index ~tool_call_id progress bridge_state in
+        List.iter (Keeper_chat_events.publish events) translated.chat_events;
+        consume_worker_events translated.bridge_state
+    | `Worker_event (Stream_native_tool_completion (stream_scope, block_index, tool_call_id, completion)) ->
+        let translated = Keeper_chat_agent_core_stream_bridge.finish_native_tool
+          ~redact_text ~stream_scope ~block_index ~tool_call_id completion
+          bridge_state in
+        List.iter (Keeper_chat_events.publish events) translated.chat_events;
+        consume_worker_events translated.bridge_state
     | `Worker_event (Stream_chat_event event) ->
         let bridge_state =
           match event with
@@ -2891,7 +2927,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
               (Event_error { message });
             Some (Failed { kind = Stream_projection_failed; detail = message }))
   in
-  match consume_worker_events (empty_keeper_stream_bridge_state ()) with
+  match consume_worker_events (empty_keeper_stream_bridge_state ~generation:content_generation ()) with
   | outcome ->
       signal_stream_projection_done ();
       outcome
@@ -3061,7 +3097,6 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                      ~keeper_name
                  in
                  let redact_text = Keeper_secret_redaction.redact_text redaction in
-                 let redact_json = Keeper_secret_redaction.redact_json redaction in
                  let rec loop ~terminal_seen projections =
                    match Keeper_chat_events.subscribe_published events with
                    | Keeper_chat_events.Closed ->
@@ -3070,11 +3105,11 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                    let projections = List.map (fun (member_id, projection) ->
                      let member_event = Keeper_chat_operation_batch.event_for_member ~operation_id:member_id event in
                      let projection, projected = Server_keeper_chat_agui_projection.project
-                       ~timestamp:ts ~redact_text ~redact_json projection member_event in
+                       ~timestamp:ts ~redact_text projection member_event in
                      Option.iter (fun event ->
                        let operation_id = Keeper_chat_operation.Operation_id.to_string member_id in
                        note_operation_wire_event ~base_path ~keeper_name ~operation_id event;
-                       Keeper_chat_broadcast.operation_event ~keeper_name ~operation_id ~seq:(Some seq) ~event;
+                       Keeper_chat_broadcast.operation_event ~base_path ~keeper_name ~operation_id ~seq:(Some seq) ~event;
                        publish_operation_live_event ~base_path ~keeper_name ~operation_id ~seq:(Some seq) event) projected;
                      member_id, projection) projections in
                    let is_terminal = Server_keeper_chat_agui_projection.is_terminal event in
@@ -3333,7 +3368,7 @@ let synthesize_wire_terminal_on_settle ~base_path ~keeper_name ~operation_id ~ex
        (match wire with
         | Some Wire_started -> note_operation_wire_event ~base_path ~keeper_name ~operation_id event
         | Some Wire_terminal_sent | None -> ());
-       Keeper_chat_broadcast.operation_event ~keeper_name ~operation_id ~seq ~event;
+       Keeper_chat_broadcast.operation_event ~base_path ~keeper_name ~operation_id ~seq ~event;
        publish_operation_live_event ~base_path ~keeper_name ~operation_id ~seq event)
   | Keeper_owner.Operation_deferred -> ()
   | Keeper_owner.Operation_succeeded _ ->
@@ -3464,7 +3499,6 @@ let journal_replay_frames ~base_path ~keeper_name ~operation_id ~since_seq =
        let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
        Server_keeper_chat_replay.replay
          ~redact_text:(Keeper_secret_redaction.redact_text redaction)
-         ~redact_json:(Keeper_secret_redaction.redact_json redaction)
          ~since_seq
          entries
      with

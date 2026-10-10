@@ -26,18 +26,17 @@ let addressed ?(ts = 1.0) ?speaker_name ?speaker_id ?surface
    normally see. [owner] is the operator's own, which is what these cases are
    about; the one row that lacks it falls to unresolved, which is the case
    below. *)
-let row ?(ts = 1.0) ~role ?kind ?tool_call_id ?execution_id ?tool_call_name
+let row ?(id = "row") ?(ts = 1.0) ~role ?tool_call_id ?execution_id ?tool_call_name
     ?delivery_key ?transcript_slot ?turn_ref ?(speaker_authority = "owner")
     content =
   `Assoc
-    ([ "id", `String "row"
+    ([ "id", `String id
      ; "role", `String role
      ; "content", `String content
      ; "ts", `Float ts
      ]
      @ (if role = "user" then [ "speaker_authority", `String speaker_authority ]
         else [])
-     @ (match kind with None -> [] | Some k -> [ "kind", `String k ])
      @ (match delivery_key with None -> [] | Some json -> [ "delivery_key", json ])
      @ (match transcript_slot with
         | None -> []
@@ -298,7 +297,7 @@ let test_roles_map_to_what_the_pane_draws () =
       (`List
          [ row ~ts:1.0 ~role:"user" "고쳐줘"
          ; row ~ts:2.0 ~role:"assistant" "고쳤어요"
-         ; row ~ts:3.0 ~role:"assistant" ~kind:"transport_failure" "slack 5xx"
+         ; row ~ts:3.0 ~role:"request_failure" "slack 5xx"
          ; row ~ts:4.0 ~role:"system"
              ~delivery_key:
                (`Assoc
@@ -343,14 +342,14 @@ let test_a_failed_turn_names_the_request_it_came_from () =
   let decoded =
     decode
       (`List
-         [ row ~ts:1.0 ~role:"assistant" ~kind:"transport_failure"
+         [ row ~ts:1.0 ~role:"request_failure"
              ~delivery_key:(operation_key "tui-28e58beb") "provider closed the connection"
-         ; row ~ts:2.0 ~role:"assistant" ~kind:"transport_failure"
+         ; row ~ts:2.0 ~role:"request_failure"
              ~delivery_key:
                (`Assoc
                   [ "kind", `String "fusion_run"; "request_id", `String "fusion-1" ])
              "provider closed the connection"
-         ; row ~ts:3.0 ~role:"assistant" ~kind:"transport_failure"
+         ; row ~ts:3.0 ~role:"request_failure"
              "provider closed the connection"
          ])
   in
@@ -420,7 +419,7 @@ let test_runtime_interruption_becomes_a_recovered_lifecycle () =
     decode
       (`List
          [ row ~ts:1.0 ~role:"user" "brief me"
-         ; row ~ts:2.0 ~role:"assistant" ~kind:"transport_failure" failure
+         ; row ~ts:2.0 ~role:"request_failure" failure
          ; autonomous_turn ~ts:3.0 ~content:(`String "briefing complete") []
          ])
   in
@@ -442,7 +441,7 @@ let test_runtime_interruption_becomes_a_recovered_lifecycle () =
 let test_stdout_close_stays_pending_without_a_later_reply () =
   let failure = fenced_masc_failure connection_closed in
   let decoded =
-    decode (`List [ row ~ts:2.0 ~role:"assistant" ~kind:"transport_failure" failure ])
+    decode (`List [ row ~ts:2.0 ~role:"request_failure" failure ])
   in
   match decoded.History.rows with
   | [ { History.kind = History.Delivery_failed { recovered_at; _ }; text; _ } ] ->
@@ -491,7 +490,7 @@ let test_an_unfenced_stop_is_marked_recovered_by_a_later_reply () =
     decode
       (`List
          [ row ~ts:1.0 ~role:"user" "brief me"
-         ; row ~ts:2.0 ~role:"assistant" ~kind:"transport_failure"
+         ; row ~ts:2.0 ~role:"request_failure"
              (persisted_failure_row connection_closed)
          ; autonomous_turn ~ts:3.0 ~content:(`String "briefing complete") []
          ])
@@ -527,7 +526,7 @@ let test_unrelated_failure_is_not_marked_recovered () =
   let decoded =
     decode
       (`List
-         [ row ~ts:1.0 ~role:"assistant" ~kind:"transport_failure"
+         [ row ~ts:1.0 ~role:"request_failure"
              "Keeper request failed: auth denied"
          ; row ~ts:2.0 ~role:"assistant" "a later reply"
          ])
@@ -552,7 +551,7 @@ let test_rows_retain_the_exact_turn_identity () =
              ~transcript_slot:(tool_transcript_slot "exec-1" 0)
              ~tool_call_name:"Read" "{}"
          ; row ~role:"assistant" ~delivery_key:key
-             ~transcript_slot:(transcript_slot "terminal_assistant") "done"
+             ~transcript_slot:(transcript_slot "terminal_result") "done"
          ])
   in
   check (list (option string)) "every row keeps the producer's operation id"
@@ -574,10 +573,10 @@ let test_rows_carry_the_operation_id_only_for_direct_turns () =
              ~transcript_slot:(tool_transcript_slot "exec-1" 0)
              ~tool_call_name:"Read" "{}"
          ; row ~role:"assistant" ~delivery_key:key
-             ~transcript_slot:(transcript_slot "terminal_assistant") "done"
+             ~transcript_slot:(transcript_slot "terminal_result") "done"
            (* A failure row carries no transcript slot. Its operation key
               still owns both journal lookup and conversation grouping. *)
-         ; row ~role:"assistant" ~kind:"transport_failure" ~delivery_key:key
+         ; row ~role:"request_failure" ~delivery_key:key
              "the wire dropped"
          ; autonomous_turn ~turn_ref:"trace-1#54" [ reason "look"; tool "Read" ]
          ; row ~role:"user"
@@ -592,8 +591,40 @@ let test_rows_carry_the_operation_id_only_for_direct_turns () =
     (List.map (fun row -> row.History.operation_id) decoded.History.rows);
   check (list (option string)) "turn identity includes the operation's failure"
     [ Some "tui-turn-42"; Some "tui-turn-42"; Some "tui-turn-42"; Some "tui-turn-42"
-    ; Some "trace-1#54"; Some "trace-1#54"; Some "fr-1" ]
+    ; Some "trace-1#54"; Some "trace-1#54"; None ]
     (List.map (fun row -> row.History.turn_id) decoded.History.rows)
+;;
+
+let test_delivery_keys_do_not_invent_turn_ownership () =
+  let keys = [
+    `Assoc ["kind",`String "workspace_message";"request_id",`String "shared-id"];
+    `Assoc ["kind",`String "fusion_run";"request_id",`String "shared-id"];
+    `Assoc ["kind",`String "approval_lifecycle";"approval_id",`String "shared-id"]] in
+  List.iter (fun key ->
+    let decoded = decode (`List [
+      row ~id:"context-row" ~role:"user" ~delivery_key:key
+        ~transcript_slot:(transcript_slot "accepted_user") "delivered context";
+      row ~id:"tool-row" ~role:"tool" ~delivery_key:key ~turn_ref:"trace-1#54"
+        ~transcript_slot:(tool_transcript_slot "approval-exec" 0)
+        ~tool_call_name:"Read" "{}";
+      row ~id:"assistant-row" ~role:"assistant" ~delivery_key:key ~turn_ref:"trace-1#54"
+        ~transcript_slot:(transcript_slot "terminal_assistant") "done";
+      row ~id:"operator-row" ~role:"user" ~delivery_key:(operation_key "shared-id")
+        ~transcript_slot:(transcript_slot "accepted_user") "operator request"])
+    in
+    check (list (option string)) "delivery alone is unowned; explicit turn wins for nonoperations"
+      [None;Some "trace-1#54";Some "trace-1#54";Some "shared-id"]
+      (List.map (fun r -> r.History.turn_id) decoded.History.rows);
+    check (list (option string)) "only the actual operation names its journal"
+      [None;None;None;Some "shared-id"]
+      (List.map (fun r -> r.History.operation_id) decoded.History.rows);
+    List.iter (fun (r:History.row) -> check bool "append row identity remains available" true
+      (Option.is_some r.structural_id)) decoded.History.rows;
+    let context = List.hd decoded.History.rows
+    and operator = List.nth decoded.History.rows 3 in
+    check bool "same string from separate delivery namespaces is not the same row" true
+      (context.structural_id <> operator.structural_id)
+  ) keys
 ;;
 
 let test_native_continuation_rows_keep_the_original_operation () =
@@ -1716,7 +1747,7 @@ let test_a_sized_row_decodes_its_pixels () =
           Alcotest.(check (option int)) "width" (Some 3456) att.History.att_width;
           Alcotest.(check (option int)) "height" (Some 2168) att.History.att_height;
           (match att.History.att_image with
-           | Masc_tui_image_preview.Unavailable_attachment "shot.png" -> ()
+           | Masc_tui_image_preview.Unavailable_image { name = "shot.png"; _ } -> ()
            | _ -> Alcotest.fail "hash-only history has no readable payload")
         | other ->
           Alcotest.failf "expected one attachment, got %d" (List.length other))
@@ -1840,6 +1871,8 @@ let () =
             test_unrelated_failure_is_not_marked_recovered
         ; test_case "rows carry the operation id only for direct turns" `Quick
             test_rows_carry_the_operation_id_only_for_direct_turns
+        ; test_case "delivery keys do not invent turn ownership" `Quick
+            test_delivery_keys_do_not_invent_turn_ownership
         ; test_case "native continuation keeps original operation" `Quick
             test_native_continuation_rows_keep_the_original_operation
         ; test_case "rows retain the exact turn identity" `Quick

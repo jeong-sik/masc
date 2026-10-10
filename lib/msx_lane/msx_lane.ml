@@ -27,6 +27,7 @@ type error =
   | Activity_unobserved
   | No_machine
   | Invalid_request of string
+  | Effect_unknown of string
   | Unreadable of string
 
 let error_to_string = function
@@ -34,7 +35,7 @@ let error_to_string = function
   | Activity_unobserved -> "Machine activity configuration is unavailable"
   | No_machine -> "no MSX machine is loaded: call masc_msx_load first"
   | Invalid_request message -> message
-  | Unreadable message -> message
+  | Unreadable message | Effect_unknown message -> message
 ;;
 
 let ( let* ) = Result.bind
@@ -797,12 +798,38 @@ let ram_diff () =
       Ok (go 0 [] 0))
 ;;
 
+let sync_checkpoint_directory path =
+  let fd = Unix.openfile path [Unix.O_RDONLY; Unix.O_CLOEXEC] 0 in
+  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd)
+
+let rec mkdir_checkpoint_directory dir =
+  if not (Sys.file_exists dir) then begin
+    mkdir_checkpoint_directory (Filename.dirname dir);
+    Unix.mkdir dir 0o755;
+    sync_checkpoint_directory (Filename.dirname dir)
+  end
+
 let atomic_write path contents =
-  mkdir_p (Filename.dirname path);
-  let tmp, oc = Filename.open_temp_file ~temp_dir:(Filename.dirname path) ".msx-" ".tmp" in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc; if Sys.file_exists tmp then Sys.remove tmp)
-    (fun () -> output_string oc contents; close_out oc; Sys.rename tmp path)
+  let replaced = ref false in
+  let failure message = Error (if !replaced then Effect_unknown message else Unreadable message) in
+  try
+    mkdir_checkpoint_directory (Filename.dirname path);
+    let tmp, oc = Filename.open_temp_file ~temp_dir:(Filename.dirname path) ".msx-" ".tmp" in
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr oc; if Sys.file_exists tmp then Sys.remove tmp)
+      (fun () ->
+        output_string oc contents;
+        flush oc;
+        Unix.fsync (Unix.descr_of_out_channel oc);
+        close_out oc;
+        Sys.rename tmp path;
+        replaced := true;
+        sync_checkpoint_directory (Filename.dirname path);
+        Ok ())
+  with
+  | Sys_error message -> failure message
+  | Unix.Unix_error (error, operation, path) ->
+      failure (operation ^ " " ^ path ^ ": " ^ Unix.error_message error)
 ;;
 
 let checkpoint_json (st : machine) =
@@ -819,15 +846,28 @@ let checkpoint_json (st : machine) =
     ]
 ;;
 
+type checkpoint_effect = {
+  observation : observation;
+  mark : change_mark;
+  checkpoint_sha256 : string;
+}
+
 let save ~path =
   locked (fun () ->
     match !state with
     | None -> Error No_machine
     | Some st ->
       try
-        atomic_write path (Yojson.Safe.to_string (checkpoint_json st));
-        Ok (observe st)
-      with Sys_error message -> Error (Unreadable message))
+        let contents = Yojson.Safe.to_string (checkpoint_json st) in
+        let checkpoint_sha256 = Digestif.SHA256.(to_hex (digest_string contents)) in
+        let* () = atomic_write path contents in
+        Ok { observation = observe st;
+             mark = { count = !change_count; incarnation = st.incarnation };
+             checkpoint_sha256 }
+      with
+      | Sys_error message -> Error (Unreadable message)
+      | Unix.Unix_error (error, operation, path) ->
+          Error (Unreadable (operation ^ " " ^ path ^ ": " ^ Unix.error_message error)))
 ;;
 
 let decode_checkpoint json =
@@ -892,24 +932,34 @@ let restore ~path ~ledger_dir =
   then Error (Invalid_request ("no MSX checkpoint at " ^ path))
   else
   let decoded =
-    try decode_checkpoint (Yojson.Safe.from_string (read_file path)) with
+    try
+      let contents = read_file path in
+      let checkpoint_sha256 = Digestif.SHA256.(to_hex (digest_string contents)) in
+      Result.map (fun decoded -> decoded, checkpoint_sha256)
+        (decode_checkpoint (Yojson.Safe.from_string contents))
+    with
     | Sys_error message -> Error (Unreadable message)
     | Yojson.Json_error message -> Error (Invalid_request ("invalid MSX checkpoint JSON: " ^ message)) in
   match decoded with
   | Error e -> Error e
-  | Ok (m, frame, cart, disk, disk_id, media, entries) ->
+  | Ok ((m, frame, cart, disk, disk_id, media, entries), checkpoint_sha256) ->
     locked (fun () ->
       let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
       try
         let ledger_bytes = String.concat "" (List.map (fun e -> Yojson.Safe.to_string (entry_json e) ^ "\n") entries) in
-        atomic_write ledger_path ledger_bytes;
+        let* () = atomic_write ledger_path ledger_bytes in
         let st = {m; incarnation = fresh_incarnation (); pixels = None; frame;
                   cart; disk; disk_id; media; ledger_path; entries = List.rev entries;
                   input_count = List.length entries} in
         state := Some st;
         mark_change ();
-        Ok (observe st)
-      with Sys_error message -> Error (Unreadable message))
+        Ok { observation = observe st;
+             mark = { count = !change_count; incarnation = st.incarnation };
+             checkpoint_sha256 }
+      with
+      | Sys_error message -> Error (Unreadable message)
+      | Unix.Unix_error (error, operation, path) ->
+          Error (Unreadable (operation ^ " " ^ path ^ ": " ^ Unix.error_message error)))
 ;;
 
 let change_disk ~path ~backup_path =
@@ -929,13 +979,16 @@ let change_disk ~path ~backup_path =
           match Msx.change_disk m target_bytes with
           | Error message -> Error (Invalid_request message)
           | Ok () ->
-            atomic_write backup_path (Yojson.Safe.to_string (checkpoint_json st));
+            let* () = atomic_write backup_path (Yojson.Safe.to_string (checkpoint_json st)) in
             let next = {st with m; pixels = None; disk = Some (Filename.basename path); disk_id = Some target_id; media = List.remove_assoc target_id media} in
             state := Some next;
             mark_change ();
             Ok (observe next)))
       | _ -> Error (Invalid_request "load a disk game before changing disks"))
-  with Sys_error message -> Error (Unreadable message)
+  with
+  | Sys_error message -> Error (Unreadable message)
+  | Unix.Unix_error (error, operation, path) ->
+      Error (Unreadable (operation ^ " " ^ path ^ ": " ^ Unix.error_message error))
 ;;
 
 (* The digest ocaml-msx reports for the sources at OCAML_MSX_SHA in
@@ -1072,4 +1125,71 @@ let checkpoint_info ~path =
           ; byte_length
           ; sha256
           }
+;;
+
+type disk_export = {
+  filename : string;
+  byte_length : int;
+  sha256 : string;
+  source_disk : string option;
+  frame : int;
+}
+
+let export_disk ~catalog_dir ~filename =
+  let extension = Filename.extension filename in
+  let stem = Filename.remove_extension filename in
+  let valid_name = extension = ".dsk"
+    && String.length stem >= 1 && String.length stem <= 64
+    && String.for_all (function
+      | 'a'..'z' | 'A'..'Z' | '0'..'9' | '_' | '-' -> true
+      | _ -> false) stem in
+  let rec real_directories path =
+    if (Unix.lstat path).Unix.st_kind <> Unix.S_DIR then
+      Error (Invalid_request "disk catalog ancestors must be real directories")
+    else let parent = Filename.dirname path in
+      if parent = path then Ok () else real_directories parent in
+  if not valid_name then
+    Error (Invalid_request "filename must be 1..64 letters, digits, underscores or hyphens plus .dsk")
+  else if Filename.is_relative catalog_dir then
+    Error (Invalid_request "disk catalog must be absolute")
+  else locked (fun () ->
+    match !state with
+    | None -> Error No_machine
+    | Some st ->
+      match Msx.disk_image st.m with
+      | None -> Error (Invalid_request "no floppy is mounted")
+      | Some bytes ->
+        let receipt = {filename; byte_length = String.length bytes;
+          sha256 = media_id bytes; source_disk = st.disk; frame = st.frame} in
+        (* Keep the cleanup outside the refusal handler. An exception after
+           link has published the destination is an unknown outcome, not a
+           claim that the operation left no effect. *)
+        let prepared =
+          try
+            match real_directories catalog_dir with
+            | Error _ as e -> e
+            | Ok () -> Ok (Filename.open_temp_file ~temp_dir:catalog_dir ".msx-export-" ".tmp")
+          with
+          | Sys_error message -> Error (Unreadable message)
+          | Unix.Unix_error (error, fn, arg) ->
+            Error (Unreadable (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error))) in
+        match prepared with
+        | Error _ as e -> e
+        | Ok (temporary, channel) ->
+          Fun.protect
+            ~finally:(fun () -> close_out_noerr channel; Sys.remove temporary)
+            (fun () ->
+              try
+                output_string channel bytes;
+                flush channel;
+                Unix.fsync (Unix.descr_of_out_channel channel);
+                close_out channel;
+                Unix.link temporary (Filename.concat catalog_dir filename);
+                Ok receipt
+              with
+              | Unix.Unix_error (Unix.EEXIST, _, _) ->
+                Error (Invalid_request "export destination already exists; choose a new filename")
+              | Sys_error message -> Error (Unreadable message)
+              | Unix.Unix_error (error, fn, arg) ->
+                Error (Unreadable (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error)))))
 ;;

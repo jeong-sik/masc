@@ -1171,7 +1171,13 @@ type keeper_turn_lane =
   | Turn_lane_chat_operation
   | Turn_lane_maintenance
 
+type keeper_preview_position = {
+  kpp_generation : int;
+  kpp_start_byte : int;
+}
+
 type keeper_turn_preview = {
+  ktp_text_position : keeper_preview_position;
   ktp_status_text : string;
   ktp_updated_at_unix : float;
   ktp_text_tail : string;
@@ -2031,47 +2037,6 @@ val tool_envelope_outcome : Yojson.Safe.t -> (string, string) result
 val verification_verdict_outcome :
   Yojson.Safe.t -> (string * bool, string) result
 
-(** Which way a wheel notch turned. *)
-type wheel_direction =
-  | Wheel_up
-  | Wheel_down
-
-(** The key a notch becomes for a surface's scroll binding: [wheel-up] /
-    [wheel-down], its own rather than the arrow's. *)
-val wheel_key : wheel_direction -> string
-
-(** Decode one SGR mouse report into a wheel notch and its [(row, column)],
-    1-based as the terminal reports it, or [None] for reports nothing consumes
-    (clicks, releases, horizontal wheel). The position is what lets the loop
-    give the notch to the Activity pane under it and every other notch to the
-    surface. [parameters] is the raw CSI parameter span (["<64;10;5"]),
-    [final] the CSI final byte. *)
-val sgr_wheel_report : string -> char -> (wheel_direction * int * int) option
-
-(** Decode one SGR mouse report into the [(row, column)] of an unmodified
-    left-button press (button [0], final [M]), 1-based as the terminal
-    reports it. Releases, modifier chords, drags and wheel reports return
-    [None] — acting on those would double-fire or claim a gesture nobody
-    meant. *)
-val sgr_left_press : string -> char -> (int * int) option
-
-(** A legacy X10 mouse report, read into the events an SGR report gives.
-    Positions are 1-based and row/column ordered. [X10_other_press] is a
-    middle, right or modified press, which no surface reads. [X10_release] is
-    X10's one release code, which does not say which button went up. *)
-type x10_mouse =
-  | X10_wheel of wheel_direction * int * int
-  | X10_left_press of int * int
-  | X10_other_press
-  | X10_release of int * int
-
-(** Decode the three raw bytes after [CSI M]: button, column, row, each offset
-    by 32. Terminals without SGR ([?1006]) support answer the tracking request
-    in this shape; Apple Terminal, the macOS default, is one. Motion reports,
-    the horizontal wheel and a position below 1 are [None]; the caller consumes
-    the bytes either way. *)
-val x10_mouse_report :
-  button:char -> column:char -> row:char -> x10_mouse option
 val required_display_any_field :
   Yojson.Safe.t -> string list -> (string, string) result
 val optional_body_field : Yojson.Safe.t -> (string, string) result
@@ -2419,9 +2384,6 @@ type async_request_observation =
 val decode_async_request_observation :
   Yojson.Safe.t -> (async_request_observation, string) result
 
-val sgr_left_release : string -> char -> (int * int) option
-(** Plain SGR left release position for screenshot click/drag gestures. *)
-
 val keeper_of_declaration : Keeper_declared_roster.t -> keeper
 
 type schedule_hold_reason =
@@ -2536,8 +2498,10 @@ val play_invite_absent_body : string -> bool
 (** True only for the revoke route's [no_such_invite] refusal [code].
     A malformed body or another refusal cannot prove the invite absent. *)
 
-val play_revoke_http_error : status_code:int -> body:string -> string
-(** Preserve the release failure detail from the revoke endpoint's 500 reply. *)
+val play_revoke_release_failure : status_code:int -> body:string -> string option
+(** The release error of the revoke endpoint's typed [500 release_failed]
+    reply: the invite was already gone and the server answered, but the DOS
+    controller it held could not be released. [None] for any other reply. *)
 
 val play_invite_refusal : status_code:int -> body:string -> string option
 (** The sentence for a client refusal the play routes answered through
@@ -2546,3 +2510,15 @@ val play_invite_refusal : status_code:int -> body:string -> string option
     Every part is made terminal-safe. [None] for a 401 or 403, which are about
     the credential the client sent and are worded where that is known, for a
     status that is not a 4xx, and for a body with no [error] sentence. *)
+
+type msx_checkpoint_receipt =
+  | Checkpoint_pending
+  | Checkpoint_committed of Yojson.Safe.t option
+  | Checkpoint_refused of string
+  | Checkpoint_unknown of string
+val decode_msx_checkpoint_receipt :
+  operation_id:string -> restore:bool -> slot:string -> base_path:string -> masc_root:string ->
+  Yojson.Safe.t -> (msx_checkpoint_receipt,string) result
+(** Validate exact operation, action, slot and same-response workspace binding.
+    A committed response may include a later live observation; its pixels still
+    require the machine-live decoder. Legacy [ok:true] is not a receipt. *)

@@ -41,11 +41,25 @@ an earlier segment's text. Autonomous journals end at their own turn boundary ev
 when their outcome is a continuation checkpoint for a later turn.
 
 Provider message starts, tool rounds, retries, and continuation segments open a
-new response window. A flat canonical reply replaces only the last text stretch
-in that window, retaining its source origin. Earlier observed text and reasoning
-keep their positions. A flat reply cannot map canonical content back to multiple
-original text blocks: the text/reasoning/text duplication case remains unresolved
-until response provenance or a separate canonical presentation is available.
+new response window. When only one text stretch was observed in that window,
+a flat canonical reply replaces it while retaining its source origin. When more
+than one was observed, their text and reasoning stay at their original positions,
+marked `SAYING` in the gutter; a separate `FINAL` row carries the recorded reply
+at its actual reply-event time. These labels are outside the authored body. Thus
+A/thinking/B stays intact, and canonical AB is never substituted for just B or
+moved ahead of the original thinking. Hidden reasoning does not change this choice.
+The layout entry carries an explicit heading boundary for these speech sections,
+so metadata-row mode retains their labels without parsing speaker text. All
+ordinary entries inherit existing turn headings, including anonymous replies and
+retry labels; the new sections do not alter request identities or turn rails.
+
+`Reply_details` currently contains flat canonical text, not a correspondence to
+provider content blocks. Official-client adapters may already flatten their
+content, and finalization can normalize the body again. This fallback therefore
+preserves observations and final authority separately. A producer with canonical
+blocks must retain their original message/block provenance through finalization
+before an in-place multi-block reconciliation can be introduced; string prefixes,
+positions in the final string and reconstructed block indices cannot supply it.
 Text and reasoning origins are allocated across the whole operation, without
 resetting at retry or continuation. Tool groups use their first local call's
 identity; records without streamed text have explicit synthetic origins. Rendering
@@ -68,10 +82,135 @@ claim to reconstruct missing scope provenance in those older journals.
 
 | Runtime | Turn and text events | Thinking | Tools and progress |
 | --- | --- | --- | --- |
-| Codex app-server | `Turn_started` becomes `MessageStart`; agent-message deltas and completed-item suffixes become `TextDelta`; terminal completion becomes `MessageDelta` and `MessageStop`. Item IDs separate messages within a turn. | `item/reasoning/summaryTextDelta` and `item/reasoning/textDelta` become `ThinkingDelta`. The item ID and summary/content index identify each part; completed reasoning contributes only missing suffixes. | Dynamic tools carry call IDs and argument snapshots. Native `item/started` and `item/completed` produce observed start/end with identity and name. Command/file output deltas and MCP progress messages are not projected as chat progress. |
-| Claude Code | Partial SDK text and complete assistant envelopes contribute text once. `message.id` separates responses; the first response opens the normalized turn and the result closes it. | Partial `thinking_delta` and complete thinking blocks become `ThinkingDelta`; complete blocks contribute only missing suffixes. Signatures and redacted payloads are not displayed as text. | MASC MCP callbacks provide dynamic-tool identity/arguments. Assistant `tool_use` and user tool results provide native observed start/end. `tool_progress` keeps transport activity alive but is not projected as chat progress. |
-| Antigravity | Init opens the normalized turn; step text and terminal response reconciliation provide text; result closes the turn. Step index identifies the source. | No typed thinking event exists in this adapter. `Internal` is not established as a reasoning payload. Thinking support is unverified. | MCP callbacks provide dynamic-tool events; tool steps provide native observed start/end using conversation ID and step index. `Done` and `Step_error` currently collapse to the same native end event. |
+| Codex app-server | `Turn_started` becomes `MessageStart`; agent-message deltas and completed-item suffixes become `TextDelta`; terminal completion becomes `MessageDelta` and `MessageStop`. Item IDs separate messages within a turn. | `item/reasoning/summaryTextDelta` and `item/reasoning/textDelta` become `ThinkingDelta`. The item ID and summary/content index identify each part; completed reasoning contributes only missing suffixes. | Dynamic tools carry call IDs and argument snapshots. Native `item/started` and `item/completed` produce observed start/end with identity and name. Known completed-item status and nullable command exit code remain native metadata. Command output deltas carry byte observations; MCP progress carries a redacted message, attached only to its active native item. File-change output notifications are outside this contract. |
+| Claude Code | SDK main-session partial text (provider contract) and complete root assistant envelopes contribute text once. `message.id` separates responses; the first response opens the normalized turn and the result closes it. | SDK main-session partial `thinking_delta` (provider contract) and complete root thinking blocks become `ThinkingDelta`; complete blocks contribute only missing suffixes. Signatures and redacted payloads are not displayed as text. | MASC MCP callbacks provide dynamic-tool identity/arguments. Assistant `tool_use` and user tool results provide native observed start/end with the tool result’s optional `is_error` flag. Root `tool_progress` with `heartbeat: true` and matching session, parent scope, tool name and active native invocation becomes `Heartbeat_reported {elapsed_seconds}`. Unsupported or unbound progress does not create a chat row. |
+| Antigravity | Init opens the normalized turn; step text and terminal response reconciliation provide text; result closes the turn. Step index identifies the source. | No typed thinking event exists in this adapter. `Internal` is not established as a reasoning payload. Thinking support is unverified. | MCP callbacks provide dynamic-tool events; tool steps provide native observed start/end using conversation ID and step index. `Done` reports native completion; `Step_error` reports a native error. Neither is a MASC execution receipt. |
 | GLM Coding | The configured `openai-compatible-http` route uses AGENT_CORE SSE parsing with message start/stop, text deltas, and indexed blocks. | Provider reasoning fields accepted by the configured streaming dialect produce `ThinkingDelta` or `ReasoningDetailsDelta`. Absence of a provider reasoning payload produces no invented thinking. | Indexed tool calls carry their IDs, names, and argument deltas. MASC execution receipts determine tool execution results. Official-client native-tool notifications do not apply to this HTTP route. |
+
+Claude assistant body and metadata have separate root and child authority. The
+required `parent_tool_use_id` is null for a root response and a nonblank call ID
+for a child response; missing, malformed, or duplicate fields are rejected for
+complete assistant envelopes. In that complete-envelope path, only root model
+responses update root model/latest-request input usage and contribute root
+text/thinking or root reply fallback. Partial events rely on the SDK's
+main-session-only stream contract: the existing partial parser validates the
+session and event shape without independently checking parent scope. The result
+frame still supplies the turn's aggregate spend. Child tool envelopes retain
+native start/end and effect observations without replacing root metadata.
+
+Accepted complete child model text and thinking produce `Child_content_observed`
+snapshots with the literal parent call ID, message ID/absence, reported child
+model, original envelope UUID and observed content-array ordinal, channel and
+supplied body. Redacted payloads are omitted without compressing later ordinals.
+A single-content-block SDK envelope can have ordinal zero even when it shares a
+message ID with another envelope; this ordinal is not an API streaming index.
+Complete child-envelope body never becomes root `TextDelta`/`ThinkingDelta`, root reply fallback or
+root response-emitted evidence. API diagnostic child body publishes no body
+observation. [SDK output streaming](https://code.claude.com/docs/en/agent-sdk/streaming-output)
+provides main-session partial deltas and attributes subagent output through
+complete messages; this separation does not invent child token streaming.
+
+Each child snapshot optionally carries a private `native_agent_parent_witness`.
+The existing invocation native-call registry is its only authority: under
+`Native_full`, an unambiguous root built-in `Agent` call retains its original
+actual invocation ticket, call ID, envelope UUID and observed array ordinal
+while open and after native return. The registry captures the immutable ticket
+already minted before the runtime's user write and emitted by Prepared input
+observation; it does not generate another invocation identifier or duplicate the
+session field. No task registration is required. Unknown, ambiguous, nested,
+non-Agent, MCP-wrapper or unadmitted parents yield `None`, preserving body
+provenance. Neither task/run nor consumed-input attribution is inferred. The
+witness certifies the original native call and its actual receiving invocation;
+a downstream input join must compare its whole ticket (receiver generation,
+session and client UUID) with the actual Prepared ticket before owner-cache
+access. The existing native task owner carries the same invocation ticket.
+`bind_task` and `bind_parent` use one owner-joining function: foreign
+session/invocation is refused before current owner-cache access, and failed-first
+evidence is keyed by exact invocation and SDK occurrence. Parent-before-task and
+task-before-parent use the same original evidence decision, including after
+native return and across a later input in another envelope. A contradiction in
+the same assistant envelope refuses subsequent bindings of both kinds without
+mutating earlier delivered values. An exact provider-ID replay in another
+resumed invocation cannot reuse the old input proof.
+
+`bind_parent` returns private `bound_parent {ticket; evidence; parent}` for the
+original Agent call and its exact input evidence. It does not assert that child
+body consumed that input group, authenticate body/parent pairing, create Task/run
+ownership, or authorize public child transport/persistence. A downstream child
+join must separately compare the child's literal parent ID with the witness call
+ID. A captured parent witness alone does not certify separately supplied body
+provenance or pairing.
+The host wrapper connects the private complete-child producer through a
+separate optional `on_child_content_observation` callback. Runtime
+`complete_child_content` binds the accepted complete envelope's literal parent,
+body, original block identity, reported model, current registry witness (if any)
+and actual immutable invocation ticket in one private value. It also carries
+one host-minted `observation_id` per accepted complete Child model envelope,
+shared by its blocks. An earlier unknown and later known reception of the same
+provider envelope therefore remain distinct observed facts. The provider UUID,
+original ordinal and channel are retained exactly; observation ID is not a
+commit/delivery receipt, clock or inference from body content. It cannot be
+constructed by recombining a captured witness with arbitrary public text. The
+binder's private `bound_child {parent_input; content}` factory receives that
+value alone, checks actual invocation and literal parent, and reuses the same
+parent/task owner evidence cache. It certifies observed child provenance and
+the original Agent call's input evidence; it does not infer that child consumed
+that group, mint Task/run ownership, or authorize publication/persistence.
+
+Task or Child subscription creates one binder per actual CLI invocation. Both
+subscriptions share it. Child-only subscription does not require a root event
+observer. `Child_rejected` retains actual private content and a typed reason,
+including an unknown parent, without input/Task/root authority. Replaying an old
+unknown observation into another invocation is refused by its retained ticket.
+Complete API-error diagnostic child envelopes do not publish child body. The
+callback emits no root Agent Core text/thinking/lifecycle, usage, native
+completion, receipt or content index. It does not flush root redaction state;
+a separate child sink must redact before display or persistence.
+
+`child_observation` is a private closed bound/rejected decision made only by
+`observe_child` from the actual private content and existing shared binder.
+A caller cannot replace its typed refusal reason around a captured body.
+`Keeper_child_content.prepare` alone creates an abstract publication from that
+sealed decision and the caller's captured Keeper/source/attempt. It retains only
+validated redacted body/model view, never raw body or private input member list.
+The view preserves actual invocation, accepted observation and original child
+block identities, optional provider message ID (including an actual empty
+string), original parent occurrence if observed, and historical original-parent
+input evidence kind/command stamp or exact typed refusal. These are not claims
+that Child consumed an input group or owns a Task/run.
+
+The shared closed codec decodes an unprivileged public view, not a private
+publication or runtime/input witness. Read serialization can redact the body
+and model leaves again while preserving every protocol identity and evidence
+fact. This is per complete field/body snapshot; it provides no streaming-secret
+guarantee across Child blocks or repeated snapshots. Authenticated
+read/wire transport and TUI integration remain pending. Existing live worker
+cutoff discards ordinary queued events after disconnect; the received Child sink
+commits already observed content independently of that cutoff, with its own
+atomic sequence/commit ownership.
+
+The witness is a fact at observation time. A later call-ID collision makes
+subsequent child observations unknown; earlier witness values remain historical
+snapshots and prove neither current authority nor cancellation. Later witnesses
+cannot retroactively certify earlier unknown snapshots. Separate child display
+and authenticated read/TUI integration remain pending. The actual Driver and
+Agent-run forward the sealed callback to independent interactive/autonomous
+Child stores, including received callbacks after root closure or client cutoff.
+See [received Child durability](child-content-journal.md) for scoped receipts,
+local health coverage and the remaining read/UI boundary. The Keeper
+adapter supplies the bound/rejected callback while excluding child body from
+root projection. Native task metadata
+journals do not receive child body or user input from this event. Public native
+task transport and SQLite journal shapes are unchanged. This new-capture proof
+does not reconstruct original invocation evidence for historical stored rows or
+validate past display behavior.
+
+The recorded Claude Code 2.1.292 observation established child tool-use/result
+envelopes with their own model and usage even when `forwardSubagentText` was
+false. That is historical producer evidence. The runtime command and initialize
+builders in this source do not enable that option; accepting typed complete
+child body or attaching a parent witness does not change the flag and does not
+claim current default CLI child-body exposure.
 
 ## Source boundaries
 
@@ -109,11 +248,282 @@ active steps through runtime parsing, the Keeper adapter, and the chat bridge,
 checking one native occurrence and one observed end for either done or error.
 These cases require execution in the normal
 verification environment; syntax parsing alone does not establish their behavior.
-Response-boundary and usage coverage also includes the server's SSE projection
-and journal replay in `test_tui_keeper_chat_log.ml` and boundary/origin fixtures in
+Response-boundary and usage coverage also includes raw Agent Core content blocks
+through the Keeper bridge, server SSE projection and journal replay in
+`test_tui_keeper_chat_log.ml`, and boundary/origin fixtures in
 `test_tui_keeper_chat_transcript.ml`.
 
-Provider-internal subturns are not fabricated as completed Keeper turns. Native
-progress payloads, native success/failure outcomes, and Antigravity reasoning remain
-separate missing capabilities. Provider omissions and opaque signatures cannot be
+Provider-internal subturns are not fabricated as completed Keeper turns. Claude and
+Antigravity native progress and Antigravity reasoning remain separate capabilities. Provider omissions and opaque signatures cannot be
 recovered by a renderer.
+
+Keeper operation events and autonomous journal notifications carry a typed runtime
+audience in the SSE delivery record. The audience is built from the canonical
+workspace base path, using the same resolver as Keeper registry identity. SSE
+registration retains its authenticated root; live delivery and replay require that
+root to match. External subscribers without a root receive only unscoped events.
+WebSocket upgrades bind their root before subscribing, and dashboard authentication
+cannot change it. gRPC subscriptions use the service's workspace root and a unique
+subscription occurrence id, independent of agent name or wall-clock time. Other
+global broadcast categories retain their existing audience contracts.
+
+The two-runtime fixtures in `test_sse_stream.ml` exercise the actual operation and
+autonomous publishers, live SSE, replay, and external subscribers with identical
+Keeper/operation identities. `test_ws_transport.ml` checks the upgrade/hello root
+binding; `test_grpc_workspace.ml` opens actual Subscribe handlers for the same
+agent in two roots and verifies sibling subscriptions survive another's closure.
+These are source-added regression cases, not a claim that this change was executed
+in a local application or deployment.
+
+## Native completion reports
+
+`Runtime_native_tools.completion` retains provider completion evidence separately
+from a physical MASC tool execution. A native report never emits `Tool_result_ready`,
+never invents `execution_id`, and never changes a native row to MASC `Returned` or
+`Failed`. Compact/full rows and the result detail show the same typed observation.
+Reported errors, declines and nonzero exit codes remain in the compact trouble
+row when the block is large enough to fold into separate inventory/trouble rows.
+
+| Source field | Typed observation | Meaning on the pane |
+| --- | --- | --- |
+| Codex known tool `status=completed` | `Completion_reported` | Native completion reported; no inferred successful exit. |
+| Codex `status=failed` / `declined` | `Error_reported` / `Decline_reported` | Provider error / decline reported. |
+| Codex command `exitCode` | `exit_code : int option` | Retain explicit zero, nonzero, negative, or absence independently of status. |
+| Claude tool result `is_error=true` / `false` | `Result_received {is_error=Some ...}` | Error reported / no error reported. This does not establish that execution occurred. |
+| Claude tool result without `is_error` | `Result_received {is_error=None}` | Result received; error flag not reported. This is a normal optional field, not malformed input. |
+| Antigravity `Done` / `Step_error` | `Completion_reported` / `Error_reported` | Native completion / native error reported. |
+| Generic block stop or absent provider status | `End_observed` | End observed; outcome not reported. |
+| Unrecognized Codex status string | `Unrecognized_status` | Preserve the reported status, without assigning success or failure. |
+
+Codex evidence is its installed 0.160.1 app-server contract:
+[ThreadItem](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/app-server-protocol/schema/typescript/v2/ThreadItem.ts)
+and [CommandExecutionStatus](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/app-server-protocol/schema/typescript/v2/CommandExecutionStatus.ts).
+Claude Code 2.1.292's installed `tool_result` schema makes `is_error` optional;
+[Anthropic's tool-result contract](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls)
+also gives successful examples omitting it. The installed CLI documents that an
+error flag can accompany rejection, permission denial, interruption or cancellation,
+so no native error becomes proof of an executed MASC tool.
+
+The Keeper adapter calls the typed completion observer at the original native
+block index before its generic block stop. The chat producer stamps the current
+stream scope immediately and transports the report on the same worker FIFO.
+Autonomous turns process both callbacks under the existing stream mutex. The
+bridge requires an already-open native occurrence at that scope/index with matching
+optional call ID; mismatched scope, ID, or MASC authority publishes a mapping error.
+A matching report closes the native row once; subsequent generic stops and repeated
+reports cannot create another end. No completion guesses identity from a name or
+from tool text. Missing starts/identity are not repaired by creating synthetic tools.
+
+The journal and `KEEPER_NATIVE_TOOL_END` custom event carry the same `completion`
+object. End events with no such member mean `End_observed`; a present
+malformed object is a decode error, including duplicate keys and fields outside
+the selected outcome variant. Unknown status text goes through redaction and
+terminal text sanitization. This unit does not preserve native output/progress,
+result content, elapsed duration, or a vendor-native execution receipt. Muse retains
+its existing unknown completion semantics; GLM Coding HTTP argument ends still wait
+for the actual MASC execution callback.
+
+Actual Codex command items, Claude assistant/tool-result envelopes, and Antigravity
+step fixtures pass through their runtime parsers and adapters into
+[`native_tool_outcome_fixture.ml`](../../test/native_tool_outcome_fixture.ml). That
+helper uses the production bridge, journal codec, server SSE encoder, live decoder,
+log and transcript projection to compare reports and display. Additional cases in
+[`test_tui_native_tool_outcomes.ml`](../../test/test_tui_native_tool_outcomes.ml)
+cover unknown ends, duplicate stops, wrong scope/ID/authority, absent versus malformed
+metadata, and unchanged HTTP execution receipts. These tests are authored, not
+locally executed; syntax parsing is not type checking or runtime proof.
+
+## Provider response and Keeper turn status
+
+The TUI retains `KEEPER_STREAM_MESSAGE_STOP` in both live and journal projections.
+It ends the model activity label (`STREAMING` or `THINKING`) while the Keeper turn
+can remain in progress, including pending tool work or final-response persistence.
+A new provider response, retry, or continuation establishes its own activity.
+Empty text/thinking chunks do not resume activity. Provider stop does not erase
+speech, settle tool receipts, or complete the Keeper turn.
+
+## Codex native progress
+
+The Codex 0.160.1 app-server contract carries exact thread, turn and item identity
+in [CommandExecutionOutputDeltaNotification](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/app-server-protocol/schema/typescript/v2/CommandExecutionOutputDeltaNotification.ts)
+and [McpToolCallProgressNotification](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/app-server-protocol/schema/typescript/v2/McpToolCallProgressNotification.ts).
+The runtime retains the active item's typed kind from start to completion,
+independently of idle-window tracking, which can clear while background tools
+continue. Command deltas attach only to a command item; MCP messages attach only
+to an MCP item. Missing/blank item identity, unstarted items, wrong item kinds and
+completed items cannot create a new row or update another one. Thread/turn identity
+and payload type are validated before projection.
+
+Nonempty command deltas become `Output_observed {byte_count}`. This is the UTF-8
+byte length of the decoded delta, not a token count, total process output size,
+execution receipt or success. Whitespace counts; an empty delta has no output
+bytes and emits no output observation. The delta body is then discarded. Equal
+successive deltas are separate observations and both count. An MCP message becomes
+`Message_reported {message}` after whole-value secret redaction at the bridge.
+Messages are full observations, not concatenated fragments: every message remains
+in the journal and the current tool row shows the latest one.
+
+Claude root heartbeats carry a separate nonnegative provider elapsed-seconds
+observation. The latest report may decrease; it is neither a byte count nor a
+local duration or success receipt. Exact invocation and stream-scope checks are
+described in [the Claude heartbeat contract](claude-native-heartbeat.md).
+
+Adapters look up the exact existing native index without allocating a start.
+The direct producer captures its current scope and enqueues the typed observation
+on the same worker FIFO as ordinary content and native completion. The autonomous
+producer applies it under the existing stream mutex. Progress is an observation
+on an existing native row, not a model-content boundary: it never flushes the text
+redactor. An earlier model-text fragment may remain safely withheld while progress
+is published, just as with a ping. Journal sequence is safe-publication order;
+it does not reconstruct the provider's original chunk reception order. Authored
+text retains its own order, and progress adds no speech/tool-start row or origin.
+The bridge accepts only a currently active native occurrence with the
+same scope/index/call ID; ended, stopped, cancelled, superseded and MASC-owned
+occurrences cannot be changed by progress. Repeated journal sequences deduplicate
+in the log, while distinct progress sequences remain distinct observations.
+
+`KEEPER_NATIVE_TOOL_PROGRESS` and the journal `native_tool_progress` event carry
+the same strict progress object. Unknown variants, duplicate keys, incompatible
+variant fields and invalid byte counts are unreadable data. The TUI retains the
+last journal/SSE observation timestamp (with receipt-time fallback for unstamped
+local deltas) and elapsed time from the tool's observed start to that update. This
+is local observation timing. `Heartbeat_reported.elapsed_seconds` retains the
+separate provider measurement without replacing either timestamp or local elapsed
+duration. A heartbeat-only row says `heartbeat · provider elapsed Ns`; output and
+message observations retain their own labels. Compact Tools rows
+say `output arriving` while active and `output observed` after the step ends, without
+generated elapsed time; local observation elapsed belongs to Full and byte counts
+belong to Full/Results detail. MCP
+messages use terminal-safe display. Progress updates do not touch authored speech,
+Thinking/Streaming phase, native completion, or MASC execution identity/outcome.
+
+The actual Codex protocol fixture in `test_runtime_codex_app_server.ml` passes
+command/MCP notifications through the runtime receiver and Keeper adapter into
+`native_tool_outcome_fixture`, which runs the production scoped text redactor,
+bridge, journal codec,
+server SSE encoder, live decoder, replay log and Tools projection. It includes
+repeated UTF-8 deltas, whitespace/empty chunks, interleaved assistant text, absent
+and wrong item IDs/kinds, late events and redacted/control-bearing MCP messages.
+`test_tui_native_tool_progress.ml` covers duplicate replay sequence, exact scope and
+ID reuse, cancelled/stopped occurrences, strict nested payloads, stable model phase,
+and the actual autonomous callbacks and on-disk journal. The direct serving worker
+FIFO is source-inspected; the shared helper does not execute that HTTP worker and
+is not evidence of a complete direct-route run. No local build or tests were run.
+
+This unit does not retain raw command output, expose native result bodies, infer
+progress percentages, or introduce provider subagent relationships. The installed
+version's [FileChangeOutputDeltaNotification](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/app-server-protocol/schema/typescript/v2/FileChangeOutputDeltaNotification.ts)
+contract says the server no longer emits that notification, so it is not promoted
+to a progress source. Claude parent/child progress and Antigravity progress need
+separate source contracts. GLM HTTP execution tools and their receipts are unchanged.
+
+Progress redaction regression cases configure an exact Keeper secret, stream its
+prefix, publish native progress, and only then stream its suffix and newline.
+The prefix must remain unpublished at the progress observation. After the complete
+record is available, both direct Scoped projection and the actual autonomous
+on-disk journal must contain redacted text; concatenating their text events must
+not reconstruct the secret. The same check includes streamed Thinking. Native
+completion and ordinary block start/stop remain separate content boundaries;
+this progress repair does not redesign those existing redaction boundaries.
+
+
+## Activity ends with its content occurrence
+
+`KEEPER_MODEL_CONTENT_ACTIVITY` is side metadata. Its strict shared codec carries
+`generation` (the actual `Run_started` journal sequence), `stream_scope`,
+`block_index`, optional `provider_message_id`, `channel` (`text` or `thinking`),
+and `state` (`observed` or `ended`). The generation is returned by the same
+single-publisher bus call that publishes the run start. Direct operation workers
+and autonomous workers pass it to the bridge. A continued operation may create
+another worker with scope zero; its later run-start sequence keeps that worker's
+content distinct. Provider message ids are correlation only and may be reused.
+
+Only an accepted, nonempty model payload publishes `observed`, after its unchanged
+body event. A header, signature, native progress update, or argument chunk does
+not establish model activity. A matching indexed content stop publishes `ended`
+only for an observed active model block. Duplicate/unknown/tool stops do not end
+model content. Authoritative response stops close all remaining observed blocks.
+The bridge rejects deltas or headers that try to reopen an already closed model
+block before projecting body text; the protocol error remains visible.
+
+The TUI retains each occurrence's active state in causal arrival order. When the
+latest one closes, another still-active occurrence supplies the activity label.
+Wall-clock values describe silence age and never choose the current occurrence.
+When all observed content closes, the label is `model content ended`; only the
+separate provider message stop says `model response ended`. Neither event ends a
+native tool, supplies a MASC execution receipt, or settles the Keeper turn.
+Response/attempt boundaries retire the old occurrence set; newer generations or
+scopes can reuse indices, and older stops cannot erase their activity. Old flat
+Text/Thinking records without metadata retain their last-observed signal: an
+unrelated content stop cannot prove that unscoped text ended.
+
+Schema/consumer checklist: Keeper_chat_events ML/MLI and shared codec; durable
+Keeper_chat_event_log; AG-UI server projection; strict TUI projection and live
+reader; journal-to-live fold and seq dedup; transcript and turn-log dispatch;
+Slack/Discord metadata-ignore arms; Dashboard custom-name vocabulary, typed event
+union, exact payload field table and validator. The Dashboard accepts this side
+metadata through its existing no-view handler without changing body, progress,
+or response state; no new Dashboard UI is introduced. Schema fixtures cover
+required nonnegative indices, optional nonblank provider correlation and closed
+channel/state vocabulary. Golden event and live/journal fixtures include
+the new variant. `test_tui_model_content_activity` targets overlapping channels,
+backwards timestamps, closed deltas, unknown/late stops, response/retry boundaries,
+reused provider ids/indices, fresh workers appending to one journal, malformed
+metadata, and scoped redactor → production bridge → journal/SSE → TUI parity.
+The actual Codex app-server fixture asserts content ended after a native command
+completes but before the official turn ends. These are authored fixtures, not a
+claim that they have run locally.
+
+The GLM/OpenAI-compatible HTTP adapter's missing MessageStart metadata is a
+separate unresolved audit finding; this unit does not synthesize that prelude.
+At baseline `3623434008`, the Dashboard's closed custom vocabulary and payload
+contracts also omit `KEEPER_NATIVE_TOOL_START`, `KEEPER_NATIVE_TOOL_END`, and
+`KEEPER_NATIVE_TOOL_PROGRESS`; that separate gap remains, so this unit does not
+claim complete Dashboard/server wire parity.
+
+
+## Dashboard native observation contract
+
+The Dashboard schema now admits `KEEPER_NATIVE_TOOL_START`,
+`KEEPER_NATIVE_TOOL_END`, and `KEEPER_NATIVE_TOOL_PROGRESS`. Before this repair,
+the operation observer's closed event-name list rejected these valid server
+frames and `malformedKeeperOperationProjection` converted that rejection to
+`RUN_ERROR`. The typed union, exact outer field table, and nested validators now
+follow `Server_keeper_chat_agui_projection.native_tool_to_json` and
+`Runtime_native_tools.completion_of_json` / `progress_of_json`.
+
+All three payloads require nonnegative integral `toolStreamScope` and
+`toolCallBlockIndex`. Optional provider message id, call id and tool name remain
+absent when unknown; supplied values must be nonblank strings. START carries no
+completion or progress fields. END may omit `completion` for the existing
+end-observed-only contract; a present null or malformed object is rejected.
+PROGRESS requires its typed `progress` object. Unknown outer keys, including a
+fabricated execution receipt, are rejected.
+
+Completion preserves the six closed kinds: `end_observed`,
+`completion_reported`, `error_reported`, `decline_reported`, `result_received`,
+and `unrecognized_status`. Every completion requires `exit_code` as an integer
+or null; negative codes remain negative. `result_received` additionally requires
+`is_error` as boolean or null, and `unrecognized_status` requires the original
+`status` string, including an empty string. Fields from another variant are not
+accepted. Neither a completion nor zero exit status is converted into MASC tool
+success or an execution receipt. Progress is either `output_observed` with a
+strictly positive integral `byte_count`, or `message_reported` with a string
+`message`, including an empty string. It never supplies assistant body text.
+JavaScript numeric fields retain the existing safe-integer validation policy.
+
+The existing Dashboard no-view handler accepts these side observations without
+adding native tool rows, changing model activity, finalizing the response, or
+settling a MASC tool with coincident provider identifiers. This is wire contract
+support, not native tool rendering. TUI behavior and the OCaml codecs are
+unchanged by this unit. Focused schema and operation-observer fixtures cover
+valid encoder shapes, malformed required fields, incompatible variant fields,
+absent END metadata, retained provider facts, and delivery of subsequent authored
+text after native metadata.
+
+Scope of parity: this repairs the native event names and decoded-object payload
+contracts. The Dashboard transport calls `JSON.parse` before these validators;
+repeated raw JSON keys have already collapsed by that boundary. This unit does
+not replace that parser or claim the OCaml decoder's duplicate-key rejection for
+raw Dashboard JSON. GLM's missing streamed MessageStart remains the separate
+provider-boundary unit recorded above.

@@ -55,6 +55,19 @@ type tool_stream_occurrence =
     live row authority. Provider message/call ids are optional correlation
     data and may be blank or reused. *)
 
+type model_content_channel = Model_text | Model_thinking
+
+type model_content_state = Content_observed | Content_ended
+
+type model_content_activity =
+  { content_generation : int
+  ; content_scope : int
+  ; content_index : int
+  ; content_provider_message_id : string option
+  ; channel : model_content_channel
+  ; state : model_content_state
+  }
+
 type stream_protocol_error = {
   kind : stream_protocol_error_kind;
   quarantined_occurrence : tool_stream_occurrence option;
@@ -70,6 +83,9 @@ type stream_protocol_error = {
 
 type reply_details =
   { reply : string
+        (** Canonical terminal body after finalization. This flat string does
+            not identify provider content blocks or authorize distributing
+            its bytes over separate observed text stretches. *)
   ; turn_outcome : Keeper_turn_outcome.t
   ; turn_ref : Ids.Turn_ref.t
   ; terminal_stream_scope : int option
@@ -137,6 +153,7 @@ type keeper_chat_event =
       ; tool_call_name : string option
       }
   | Agent_core_content_block_stop of { index : int }
+  | Model_content_activity of model_content_activity
   | Agent_core_thinking_delta of { index : int; delta : string }
   | Agent_core_thinking_signature_delta of { index : int; signature_bytes : int }
   | Agent_core_media_delta of
@@ -169,9 +186,12 @@ type keeper_chat_event =
       }
       (** Provider argument streaming ended. This is not execution completion. *)
   | Native_tool_start of native_tool
-  | Native_tool_end of native_tool
-      (** The provider reported the native step's end. No success/failure or
-          canonical execution result is implied by this observation. *)
+  | Native_tool_end of native_tool * Runtime_native_tools.completion
+      (** The provider reported the native step's end and its available outcome
+          metadata. This observation does not establish a MASC execution result. *)
+  | Native_tool_progress of native_tool * Runtime_native_tools.progress
+      (** Update an existing native row without closing a content channel or
+          providing a MASC execution result. *)
   | Tool_approval_requested of
       { tool_call_id : string
       ; tool_call_name : string
@@ -250,6 +270,13 @@ type 'a next =
     and the publish-time clock reading. The journal line for this event (via
     [on_publish]) and every live projection of it carry the same [seq] and
     [ts], so a journal replay reproduces the live wire bytes. *)
+val redact_content :
+  redact_text:(string -> string) -> keeper_chat_event -> keeper_chat_event
+(** Redact human content leaves while preserving protocol keys, discriminants,
+    typed states and correlation identities. Shared by live AG-UI and durable
+    journal HTTP serialization. Arbitrary argument JSON has its separate
+    recursive key/value redaction boundary before becoming event content. *)
+
 type published =
   { seq : int
   ; ts : float
@@ -345,3 +372,19 @@ val stream_protocol_error_kind_of_string :
   string -> stream_protocol_error_kind option
 val stream_protocol_error_summary : stream_protocol_error -> string
 val stream_protocol_error_to_json : stream_protocol_error -> Yojson.Safe.t
+
+(** Exact run generation, server stream scope and content index own model activity. Provider
+    message ids are optional correlation only. Observed requires a nonempty
+    accepted payload; Ended closes only that occurrence, not the response,
+    tool, or Keeper turn. The strict shared codec rejects duplicate/unknown
+    keys, invalid indices and unknown channels/states. Generation, scope and
+    index are nonnegative JSON safe integers via {!Runtime_json_integer.of_json},
+    so browser and server consumers share the same exact numeric identity. *)
+val model_content_activity_to_json : model_content_activity -> Yojson.Safe.t
+val model_content_activity_of_json : Yojson.Safe.t -> (model_content_activity, string) result
+
+(** Publish and return the actual sequence assigned to this event. The same
+    single-publisher/backpressure contract as [publish] applies. Run publishers
+    use their Run_started sequence as the content generation, so worker-local
+    scope counters can restart without colliding in an appended journal. *)
+val publish_with_sequence : t -> keeper_chat_event -> int

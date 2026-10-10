@@ -903,7 +903,12 @@ let test_unprojectable_task_skill_is_a_typed_row () =
        | Keeper_skill_catalog.Body_too_large_to_read { skill = "huge"; _ } -> true
        | _ -> false);
     check (list string) "the left-out list the renderers draw names the row"
-      [ Keeper_task_skill_turn.unprojectable_to_string row ]
+      [ Printf.sprintf "%s: %s"
+          (Skill_catalog_snapshot.identity_to_yojson huge.Skill_reference.identity
+           |> Yojson.Safe.to_string)
+          (Keeper_skill_catalog.error_to_string row.error)
+      ; Keeper_task_skill_turn.unprojectable_to_string row
+      ]
       surface.skills_left_out;
     let open Yojson.Safe.Util in
     (match
@@ -1105,11 +1110,109 @@ let test_frozen_selection_carries_the_shadowed_exact_reference () =
          control.Keeper_effective_tool_surface.instruction_skills)
 ;;
 
+let addon_descriptor name =
+  let tool = match Mcp_protocol.Mcp_types.tool_of_yojson
+    (`Assoc [ "name", `String name;
+              "inputSchema", `Assoc [ "type", `String "object" ] ]) with
+    | Ok tool -> tool
+    | Error detail -> fail detail in
+  Keeper_lane_addon_descriptor.create
+    (Lane_addon_tool_export.create ~instance_id:"composition-worker" ~tool)
+;;
+
+let test_addon_plan_preserves_factory_authority () =
+  let module Plan = Keeper_tool_plan in
+  let module Descriptor = Keeper_tool_descriptor in
+  let canonical = addon_descriptor "fixture_machine_input" in
+  let id = match Plan.Node_id.make "input" with
+    | Ok id -> id | Error _ -> fail "invalid fixture node id" in
+  let node = Plan.node ~id ~tool_name:canonical.public_name
+    ~input:(Plan.Json_template.literal (`Assoc [])) () in
+  (match Plan.create ~descriptors:[canonical] [node] with
+   | Error error -> fail (Plan.error_to_string error)
+   | Ok plan -> check bool "plan retains the frozen execution object" true
+       (match Plan.descriptor plan id with Some found -> found == canonical | None -> false));
+  List.iter (fun forged ->
+    match Plan.create ~descriptors:[forged] [node] with
+    | Error (Plan.Unknown_descriptor_id _) -> ()
+    | Error error -> fail (Plan.error_to_string error)
+    | Ok _ -> fail "copied Add-on authority was accepted")
+    [ { canonical with Descriptor.execution = Descriptor.Ordinary Descriptor.Concurrent }
+    ; { canonical with Descriptor.input_schema = `Assoc ["type", `String "string"] }
+    ; { canonical with Descriptor.policy = { canonical.policy with readonly_of_input = (fun _ -> Some true) } }
+    ];
+  let collision = addon_descriptor "keeper_lane_status" in
+  match Plan.create ~descriptors:[collision]
+    [Plan.node ~id ~tool_name:collision.public_name
+       ~input:(Plan.Json_template.literal (`Assoc [])) ()] with
+  | Error (Plan.Duplicate_tool_name "keeper_lane_status") -> ()
+  | Error error -> fail (Plan.error_to_string error)
+  | Ok _ -> fail "Add-on shadowed a static name absent from the supplied subset"
+;;
+
+let test_addon_composition_diagnostics_follow_frozen_authority () =
+  ignore (Masc_test_deps.init_unified_tool_registry ());
+  let source = {|---
+name: machine-command
+description: Call the attached machine.
+---
+```toml composition
+[[compositions]]
+name = "machine-command"
+description = "Call the attached machine."
+execution = "inline"
+[[compositions.nodes]]
+id = "input"
+tool = "fixture_machine_input"
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+```
+|} in
+  let snapshot = configured_snapshot ~source_id:"machine-skills" ~anchor:"absolute"
+    ~path:"/srv/machine-skills"
+    [ "machine-command", source
+    ; "snapshot", composition_skill ~name:"snapshot" ~execution:"async" ] in
+  let project_with descriptors =
+    let selection = match Keeper_task_skill_turn.with_descriptors ~descriptors
+      ~snapshot Keeper_task_skill_turn.empty with
+      | Ok selection -> selection
+      | Error error -> fail (Keeper_task_skill_turn.error_to_string error) in
+    match Keeper_effective_tool_surface.For_testing.project
+      ~keeper_name:"fixture" ~runtime_id:"fixture.runtime" ~skills_left_out:[]
+      ~official_client_kind:"agent_core"
+      ~tool_delivery:Keeper_effective_tool_surface.Tools_delivered
+      ~native_posture:None ~tool_deny:[] ~sandbox_profile:Keeper_types_profile.Docker
+      ~skill_names:None ~current_task_id:None ~task_skill_references:[]
+      ~task_selection:(Some selection) ~skill_snapshot:snapshot with
+    | Ok surface -> surface
+    | Error error -> fail (Keeper_task_skill_turn.error_to_string error) in
+  let static = Keeper_tool_descriptor.all_descriptors () in
+  let attached = project_with (static @ [addon_descriptor "fixture_machine_input"]) in
+  check bool "attached machine composition is callable" true
+    (List.mem "keeper_compose_machine-command" (names attached));
+  check bool "unrelated static composition remains callable with Add-on present" true
+    (List.mem "keeper_compose_snapshot" (names attached));
+  check (list string) "attached composition is not falsely reported unavailable" []
+    attached.skills_left_out;
+  let detached = project_with static in
+  check bool "new detached projection omits machine composition" false
+    (List.mem "keeper_compose_machine-command" (names detached));
+  check bool "new detached projection reports missing tool" true
+    (detached.skills_left_out <> []);
+  check bool "frozen attached surface retains its original view" true
+    (List.mem "keeper_compose_machine-command" (names attached))
+;;
+
 let () =
   Alcotest.run
     "keeper effective tool surface"
     [ ( "projection"
-      , [ test_case "names equal turn setup authority" `Quick
+      , [ test_case "Add-on plans preserve factory authority" `Quick
+            test_addon_plan_preserves_factory_authority
+        ; test_case "Add-on composition diagnostics follow frozen authority" `Quick
+            test_addon_composition_diagnostics_follow_frozen_authority
+        ; test_case "names equal turn setup authority" `Quick
             test_projection_names_equal_turn_surface_authority
         ; test_case "Skill names filter Task and expose unavailable" `Quick
             test_skill_name_selection_is_structured_and_filters_task

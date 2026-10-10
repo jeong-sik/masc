@@ -71,7 +71,7 @@ let test_transcript_slot_roundtrip () =
         ; ordinal = 2
         }
     ; Identity.Tool_delivery { ordinal = 3 }
-    ; Identity.Terminal_assistant
+    ; Identity.Terminal_result
     ; Identity.Approval_resolution
     ; Identity.Approval_replay
     ; Identity.Approval_replay_correction

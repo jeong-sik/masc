@@ -29,7 +29,9 @@ type translated_event = {
 }
 (** Result of translating one typed AGENT_CORE stream event. *)
 
-val empty_state : unit -> state
+(** [generation] is the seq of this run's Run_started, assigned by its single
+    journal publisher. The default 0 is for an isolated standalone stream. *)
+val empty_state : ?generation:int -> unit -> state
 
 val start_runtime_attempt
   :  ?runtime_id:string
@@ -46,6 +48,19 @@ val start_runtime_attempt
 val record_tool_result : state -> Keeper_chat_events.tool_stream_occurrence -> state
 (** Preserve this committed result against outer cancellation/fallback, without
     exempting it from actual block/delta protocol conflicts. *)
+
+val progress_native_tool :
+  redact_text:(string -> string) -> stream_scope:int -> block_index:int ->
+  tool_call_id:string option -> Runtime_native_tools.progress -> state -> translated_event
+(** Attach only to the exact active native occurrence. Late/wrong-scope/MASC
+    progress is diagnosed and cannot reopen, close or commit a tool. *)
+
+val finish_native_tool :
+  redact_text:(string -> string) -> stream_scope:int -> block_index:int ->
+  tool_call_id:string option -> Runtime_native_tools.completion -> state -> translated_event
+(** Finish only the native occurrence already opened at this exact scope and
+    index. The following AGENT_CORE block stop cannot emit a second end.
+    A native report never commits or updates a MASC execution receipt. *)
 
 val fail_stream : state -> reason:string -> translated_event
 (** Quarantine every tool occurrence in the current provider scope when the

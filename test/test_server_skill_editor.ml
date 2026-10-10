@@ -82,6 +82,25 @@ let setup base_path ~access =
   skill_path, source_text, reference, refresh
 ;;
 
+let test_unavailable_authority_does_not_write () =
+  with_workspace @@ fun base_path ->
+  let skill_path, original, reference, refresh = setup base_path ~access:"read-write" in
+  let descriptors = Error "attached tool catalog unavailable" in
+  let source_text = skill_text "Edited" "New body" in
+  check bool "preview fails closed" true
+    (Result.is_error (Editor.preview ~descriptors ~base_path reference ~source_text));
+  check bool "save fails closed" true
+    (Result.is_error (Editor.save ~descriptors ~base_path ~reference ~source_text ~refresh));
+  let source_id = match Skill_source_config.source_id_of_string "workspace" with
+    | Ok id -> id | Error detail -> fail detail in
+  check bool "create fails closed" true
+    (Result.is_error (Editor.create ~descriptors ~base_path ~source_id ~package_id:"new-skill"
+      ~source_text:(named_skill_text "new-skill" "New skill" "Body") ~refresh));
+  check string "existing source unchanged" original (In_channel.with_open_bin skill_path In_channel.input_all);
+  check bool "new package was not created" false
+    (Sys.file_exists (Filename.concat base_path "skills/new-skill"))
+;;
+
 let test_load_preview_and_publish () =
   with_workspace @@ fun base_path ->
   let skill_path, original, reference, refresh =
@@ -91,16 +110,23 @@ let test_load_preview_and_publish () =
    | Error error -> fail (Editor.error_to_string error)
    | Ok loaded ->
      check string "exact source" original loaded.source_text;
-     check string "write access" "read_write" (Editor.access_to_string loaded.access));
+     check string "write access" "read_write" (Editor.access_to_string loaded.access);
+     (match Masc_tui_editor_wire.decode_skill_editor_loaded (Editor.loaded_to_yojson loaded) with
+      | Ok client ->
+        check bool "client keeps writable source access" true
+          (client.sel_access = Skill_source_config.Read_write);
+        check bool "client keeps exact reference" true
+          (Skill_reference.equal reference client.sel_reference)
+      | Error detail -> fail detail));
   let edited = skill_text "Edited description." "# Edited" in
-  (match Editor.preview ~base_path reference ~source_text:edited with
+  (match Editor.preview ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ())) ~base_path reference ~source_text:edited with
    | Error error -> fail (Editor.error_to_string error)
    | Ok preview ->
      check string "instruction profile" "instruction" preview.profile.kind;
      check int "body remains deferred" 0 preview.profile.eager_body_bytes;
      check bool "candidate revision changes" false
        (Skill_reference.equal reference preview.profile.reference));
-  (match Editor.save ~base_path ~reference ~source_text:edited ~refresh with
+  (match Editor.save ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ())) ~base_path ~reference ~source_text:edited ~refresh with
    | Error error -> fail (Editor.error_to_string error)
    | Ok (Editor.Saved_and_published { preview; _ }) ->
      check bool "new exact reference" false
@@ -127,7 +153,7 @@ let test_near_miss_fence_is_diagnosed_in_preview () =
       "Meant composition."
       "```TOML Composition\n[[compositions]]\nname = \"sample\"\n```"
   in
-  match Editor.preview ~base_path reference ~source_text:candidate with
+  match Editor.preview ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ())) ~base_path reference ~source_text:candidate with
   | Error error -> fail (Editor.error_to_string error)
   | Ok preview ->
     check string "candidate stays an instruction" "instruction" preview.profile.kind;
@@ -162,11 +188,11 @@ let test_invalid_candidate_is_never_written () =
   in
   List.iter
     (fun (label, invalid) ->
-       (match Editor.preview ~base_path reference ~source_text:invalid with
+       (match Editor.preview ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ())) ~base_path reference ~source_text:invalid with
         | Error (Editor.Validation_failed _) -> ()
         | Error error -> fail (label ^ ": wrong preview error: " ^ Editor.error_to_string error)
         | Ok _ -> fail (label ^ ": invalid Skill passed preview"));
-       (match Editor.save ~base_path ~reference ~source_text:invalid ~refresh with
+       (match Editor.save ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ())) ~base_path ~reference ~source_text:invalid ~refresh with
         | Error (Editor.Validation_failed _) -> ()
         | Error error -> fail (label ^ ": wrong save error: " ^ Editor.error_to_string error)
         | Ok _ -> fail (label ^ ": invalid Skill was written"));
@@ -192,7 +218,7 @@ let test_invalid_new_skill_is_never_created () =
     "---\nname: different-name\ndescription: The package and name disagree.\n---\nBody\n"
   in
   (match
-     Editor.create
+     Editor.create ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ()))
        ~base_path
        ~source_id
        ~package_id:"not-created"
@@ -210,7 +236,7 @@ let test_invalid_new_skill_is_never_created () =
   ;
   let whitespace_package = "alpha " in
   (match
-     Editor.create
+     Editor.create ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ()))
        ~base_path
        ~source_id
        ~package_id:whitespace_package
@@ -252,7 +278,7 @@ value = {}
 ```
 |}
   in
-  match Editor.preview ~base_path reference ~source_text with
+  match Editor.preview ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ())) ~base_path reference ~source_text with
   | Error error -> fail (Editor.error_to_string error)
   | Ok preview ->
     (match preview.profile.flow with
@@ -268,7 +294,7 @@ let test_external_edit_causes_revision_conflict () =
   let external_text = skill_text "External edit." "# External" in
   write_file skill_path external_text;
   let candidate = skill_text "TUI edit." "# TUI" in
-  (match Editor.save ~base_path ~reference ~source_text:candidate ~refresh with
+  (match Editor.save ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ())) ~base_path ~reference ~source_text:candidate ~refresh with
    | Error (Editor.Revision_conflict _) -> ()
    | Error error -> fail ("wrong error: " ^ Editor.error_to_string error)
    | Ok _ -> fail "stale editor overwrote an external edit");
@@ -284,8 +310,15 @@ let test_external_edit_causes_revision_conflict () =
 let test_read_only_source_rejects_save () =
   with_workspace @@ fun base_path ->
   let _, _, reference, refresh = setup base_path ~access:"read-only" in
+  (match Editor.load ~base_path reference with
+   | Error error -> fail (Editor.error_to_string error)
+   | Ok loaded ->
+     (match Masc_tui_editor_wire.decode_skill_editor_loaded (Editor.loaded_to_yojson loaded) with
+      | Ok client -> check bool "client keeps read-only source access" true
+          (client.sel_access = Skill_source_config.Read_only)
+      | Error detail -> fail detail));
   let candidate = skill_text "Edited." "# Edited" in
-  match Editor.save ~base_path ~reference ~source_text:candidate ~refresh with
+  match Editor.save ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ())) ~base_path ~reference ~source_text:candidate ~refresh with
   | Error Editor.Source_read_only -> ()
   | Error error -> fail ("wrong error: " ^ Editor.error_to_string error)
   | Ok _ -> fail "read-only source accepted a write"
@@ -299,7 +332,7 @@ let test_oversized_candidate_is_never_written () =
   let oversized =
     skill_text "Oversized." (String.make (1_048_576 + 1) 'x')
   in
-  (match Editor.save ~base_path ~reference ~source_text:oversized ~refresh with
+  (match Editor.save ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ())) ~base_path ~reference ~source_text:oversized ~refresh with
    | Error (Editor.Source_too_large _) -> ()
    | Error error -> fail ("wrong error: " ^ Editor.error_to_string error)
    | Ok _ -> fail "oversized Skill was written");
@@ -323,7 +356,7 @@ let test_unreadable_body_is_never_written () =
   let unreadable =
     skill_text "Too long to read." (String.make (Common.max_tool_result_wire_bytes + 1) 'x')
   in
-  (match Editor.save ~base_path ~reference ~source_text:unreadable ~refresh with
+  (match Editor.save ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ())) ~base_path ~reference ~source_text:unreadable ~refresh with
    | Error (Editor.Validation_failed _) -> ()
    | Error error -> fail ("wrong error: " ^ Editor.error_to_string error)
    | Ok _ -> fail "a body no Keeper can read was written");
@@ -341,7 +374,7 @@ let test_saved_but_unpublished_is_explicit () =
   let skill_path, _, reference, _ = setup base_path ~access:"read-write" in
   let edited = skill_text "Edited description." "# Edited" in
   let refresh () = Error "injected publication failure" in
-  (match Editor.save ~base_path ~reference ~source_text:edited ~refresh with
+  (match Editor.save ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ())) ~base_path ~reference ~source_text:edited ~refresh with
    | Ok (Editor.Saved_but_unpublished { reason; _ }) ->
      check string "failure is preserved" "injected publication failure" reason
    | Error error -> fail (Editor.error_to_string error)
@@ -377,7 +410,7 @@ let test_create_publishes_without_host_path_input () =
    | Ok _ -> fail "expected one writable source"
    | Error error -> fail (Editor.error_to_string error));
   (match
-     Editor.create
+     Editor.create ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ()))
        ~base_path
        ~source_id
        ~package_id:"generated"
@@ -392,7 +425,7 @@ let test_create_publishes_without_host_path_input () =
   let persisted = Filename.concat base_path "skills/generated/SKILL.md" in
   check bool "created package" true (Sys.file_exists persisted);
   (match
-     Editor.create
+     Editor.create ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ()))
        ~base_path
        ~source_id
        ~package_id:"generated"
@@ -454,7 +487,7 @@ let test_create_behind_an_earlier_source_names_the_winner () =
     | Error detail -> fail detail
   in
   let create package_id =
-    Editor.create
+    Editor.create ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ()))
       ~base_path
       ~source_id
       ~package_id
@@ -578,7 +611,7 @@ let test_delete_removes_empty_package_and_id_is_reusable () =
   in
   let recreated = skill_text "Recreated." "# Recreated" in
   (match
-     Editor.create
+     Editor.create ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ()))
        ~base_path
        ~source_id
        ~package_id:"sample"
@@ -644,7 +677,7 @@ let test_delete_stale_published_revision_does_not_mutate () =
   with_workspace @@ fun base_path ->
   let skill_path, _, reference, refresh = setup base_path ~access:"read-write" in
   let replacement = skill_text "Published replacement." "# Replacement" in
-  (match Editor.save ~base_path ~reference ~source_text:replacement ~refresh with
+  (match Editor.save ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ())) ~base_path ~reference ~source_text:replacement ~refresh with
    | Ok (Editor.Saved_and_published _) -> ()
    | Error error -> fail (Editor.error_to_string error)
    | Ok (Unchanged _ | Saved_but_unpublished _) ->
@@ -1203,12 +1236,41 @@ let test_server_skill_snapshot_runtime_refresh () =
        fail "unexpected workspace retired")
 ;;
 
+let test_client_read_contract () =
+  with_workspace @@ fun base_path ->
+  let _, original, reference, _ = setup base_path ~access:"read-write" in
+  let fields =
+    match Editor.load ~base_path reference with
+    | Error error -> fail (Editor.error_to_string error)
+    | Ok loaded ->
+      (match Editor.loaded_to_yojson loaded with
+       | `Assoc fields -> fields
+       | _ -> fail "server read response must be an object")
+  in
+  let without_snapshot = List.remove_assoc "snapshot_revision" fields in
+  (match Masc_tui_editor_wire.decode_skill_editor_loaded (`Assoc without_snapshot) with
+   | Ok client ->
+     check string "read text does not depend on unused snapshot metadata" original client.sel_source_text;
+     check bool "read reference remains exact without metadata" true
+       (Skill_reference.equal reference client.sel_reference)
+   | Error detail -> fail detail);
+  let rejects label field value =
+    let json = `Assoc ((field, value) :: List.remove_assoc field fields) in
+    check bool label true
+      (Result.is_error (Masc_tui_editor_wire.decode_skill_editor_loaded json))
+  in
+  rejects "unknown permission cannot become read-only" "access" (`String "future_access");
+  rejects "non-string permission is refused" "access" (`Bool true);
+  rejects "invalid exact reference is refused" "reference" `Null
+;;
+
 let () =
   Eio_main.run @@ fun _env ->
   run
     "server Skill editor"
     [ ( "editor"
-      , [ test_case "load preview and publish" `Quick test_load_preview_and_publish
+      , [ test_case "unavailable tool authority does not write" `Quick test_unavailable_authority_does_not_write
+        ; test_case "load preview and publish" `Quick test_load_preview_and_publish
         ; test_case "near-miss fence is diagnosed in preview" `Quick
             test_near_miss_fence_is_diagnosed_in_preview
         ; test_case "invalid candidate is never written" `Quick test_invalid_candidate_is_never_written
@@ -1269,6 +1331,8 @@ let () =
             test_deleted_but_unpublished_is_explicit
         ; test_case "server skill snapshot runtime refresh from observation" `Quick
             test_server_skill_snapshot_runtime_refresh
+        ; test_case "client read contract rejects unknown authority" `Quick
+            test_client_read_contract
         ] )
     ]
 ;;

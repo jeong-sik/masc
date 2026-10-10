@@ -1,0 +1,25 @@
+{
+  "base_sha": "d7c2912b045505a0044e04de057f760f70f6e43d",
+  "builds": [
+    {
+      "command": "opam exec -- dune build --root . -j 4 test/test_fs_compat.exe test/test_tool_blob_store.exe",
+      "exit_code": 0
+    }
+  ],
+  "tests": [
+    {
+      "command": "_build/default/test/test_fs_compat.exe test save_file_atomic",
+      "exit_code": 0,
+      "executed": 14
+    },
+    {
+      "command": "_build/default/test/test_tool_blob_store.exe test 'blob store basic' 3",
+      "exit_code": 0,
+      "executed": 1
+    }
+  ],
+  "atomic_write_lines_before": 2640,
+  "atomic_write_lines_after": 2396,
+  "ordinary_owner_lines": 245,
+  "scope": "revalidated on rewritten current parent; focused compilation and fourteen writer/one cold-file-ingestion cases, no all-target build/full suite or deployment"
+}

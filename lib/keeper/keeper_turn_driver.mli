@@ -328,6 +328,18 @@ val run_named :
     (unit -> Keeper_official_client_host.composed_context option) ->
   ?on_official_client_tool_boundary:
     (unit -> (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result) ->
+  ?on_child_content_observation:
+    (attempt:Runtime_native_tasks.attempt -> Keeper_claude_task_binding.child_observation -> unit) ->
+  (* Actual sealed Child decision, with frozen materialized dispatch. It is
+     independent of root stream scope, current input or active native blocks. *)
+  ?on_native_task_observation:
+    (attempt:Runtime_native_tasks.attempt -> Keeper_claude_task_binding.bound -> unit) ->
+  (* Frozen materialized dispatch and original input/native ownership. This
+     callback is independent of active tool blocks and root stream scopes. *)
+  ?on_native_tool_progress:
+    (block_index:int -> tool_call_id:string option -> Runtime_native_tools.progress -> unit) ->
+  ?on_native_tool_completion:
+    (block_index:int -> tool_call_id:string option -> Runtime_native_tools.completion -> unit) ->
   ?on_tool_execution:
     (block_index:int -> tool_call_id:string -> execution_id:Ids.Execution_id.t -> unit) ->
   ?on_official_client_result_handoff:
@@ -450,28 +462,6 @@ module For_testing : sig
     failure:Agent_core.Error.t ->
     deferred_runtime_lane
 
-  type provider_attempt_outcomes
-
-  val produced_checkpoint : provider_attempt_outcomes -> Agent_core.Checkpoint.t option
-
-  val project_provider_attempt_result :
-    ?checkpoint_after:Agent_core.Checkpoint.t ->
-    replay_prefix_projection:Keeper_replay_prefix.projection ->
-    (Runtime_agent.run_result, Agent_core.Error.t) result ->
-    provider_attempt_outcomes
-
-  val canonical_checkpoint_sink :
-    replay_prefix_projection:Keeper_replay_prefix.projection ->
-    Agent_core.Agent.checkpoint_sink -> Agent_core.Agent.checkpoint_sink
-
-  val provider_result :
-    provider_attempt_outcomes ->
-    (Runtime_agent.run_result, Agent_core.Error.t) result
-
-  val turn_result :
-    provider_attempt_outcomes ->
-    (Runtime_agent.run_result, Agent_core.Error.t) result
-
   val checkpoint_after_attempt :
     ?agent_before_attempt:Agent_core.Agent.t ->
     ?session_id:string -> ?working_context:Yojson.Safe.t ->
@@ -556,6 +546,10 @@ module For_testing : sig
     runtime_id:string -> (string * int) list -> Yojson.Safe.t
 
   val project_input_for_attempt :
+    ?project_media:
+      (needs_projection:(Keeper_media_reading.kind -> bool) ->
+       Agent_core.Types.content_block list ->
+       Agent_core.Types.content_block list * (string * int) list) ->
     project_images:
       (mode:Keeper_vision_ingest.mode ->
        Agent_core.Types.content_block list -> Keeper_vision_ingest.image_projection) ->

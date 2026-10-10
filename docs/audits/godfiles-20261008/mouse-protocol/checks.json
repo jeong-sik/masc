@@ -1,0 +1,50 @@
+[
+  {
+    "command": [
+      "opam",
+      "exec",
+      "--",
+      "dune",
+      "exec",
+      "-j4",
+      "test/test_tui_input_decoder.exe",
+      "--",
+      "test",
+      "mouse"
+    ],
+    "log": "input-decoder.log",
+    "result": "Test Successful",
+    "tests_run": 4
+  },
+  {
+    "command": [
+      "opam",
+      "exec",
+      "--",
+      "dune",
+      "exec",
+      "-j4",
+      "test/test_tui_decode.exe",
+      "--",
+      "test",
+      "sgr_mouse|x10_mouse"
+    ],
+    "log": "grammar.log",
+    "result": "Test Successful",
+    "tests_run": 13
+  },
+  {
+    "command": [
+      "opam",
+      "exec",
+      "--",
+      "dune",
+      "exec",
+      "-j4",
+      "test/test_tui_wheel_reader.exe"
+    ],
+    "log": "wheel-reader.log",
+    "result": "Test Successful",
+    "tests_run": 6
+  }
+]

@@ -1,0 +1,32 @@
+{
+  "date": "2026-10-09",
+  "base": "d2c318d470b5d388fb04848606c8af5527271833",
+  "builds": [
+    {
+      "command": "opam exec -- dune build --root . -j 4 test/test_hitl_summary_worker.exe",
+      "exit_code": 0,
+      "log": "initial-build.log",
+      "scope": "initial extraction; section-comment relocation followed while this build ran"
+    },
+    {
+      "command": "opam exec -- dune build --root . -j 4 test/test_hitl_summary_worker.exe",
+      "exit_code": 0,
+      "log": "build.log",
+      "scope": "final source before executing the selected cases"
+    }
+  ],
+  "tests": [
+    {
+      "command": "_build/default/test/test_hitl_summary_worker.exe test domain 0-15",
+      "exit_code": 0,
+      "executed_cases": 16,
+      "log": "domain.log"
+    },
+    {
+      "command": "_build/default/test/test_hitl_summary_worker.exe test cli_lane_slots 1-4",
+      "exit_code": 0,
+      "executed_cases": 4,
+      "log": "cli.log"
+    }
+  ]
+}

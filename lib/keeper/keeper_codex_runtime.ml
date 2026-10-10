@@ -305,7 +305,7 @@ let api_usage_of_token_usage (usage : Runtime_codex_app_server.token_usage)
 (* Always installed so usage-window reports and the thread's usage counts are
    recorded. A turn nobody streams, traces or observes gets only those; its
    other events are ignored as before. *)
-let codex_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
+let codex_stream_callback ?on_native_tool_progress ?on_native_tool_completion ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
     ~on_usage_report ~position on_event =
   (* The thread's running count, reported under the app-server turn id (the
      identity the completion hook also writes for a Codex turn) and the
@@ -334,37 +334,65 @@ let codex_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~tu
            })
       on_usage_report
   in
-  match on_event, raw_trace_run, on_native_action, receipts with
-  | None, None, None, None ->
+  match on_event, raw_trace_run, on_native_action, receipts, on_native_tool_completion, on_native_tool_progress with
+  | None, None, None, None, None, None ->
     Some
       (function
         | Runtime_codex_app_server.Usage_windows_reported report ->
           record_usage_windows ~quota_scope report
         | Runtime_codex_app_server.Usage_reported { thread_id; turn_id; model; frame } ->
           report_usage ~thread_id ~turn_id ~model frame
-        | Turn_started _ | Text_delta _ | Thinking_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
-        | Native_tool_started _ | Native_tool_finished _ | Elicitation_cancelled _
+        | Turn_started _ | Text_delta _ | Thinking_delta _ | Text_completed _ | Thinking_completed _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+        | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Elicitation_cancelled _
         | Compaction_observed | Turn_finished _ -> ())
   | _ ->
     let emit event = Option.iter (fun callback -> callback event) on_event in
     let next_tool_index = ref 1 in
     let thinking_indexes = Hashtbl.create 8 in
+    let text_indexes = Hashtbl.create 8 in
+    let closed_content = Hashtbl.create 8 in
+    let first_text = ref true in
+    let current_text = ref None in
+    let last_text_index = ref None in
+    let fresh_text_index () =
+      if !first_text then (first_text := false; 0)
+      else let index = !next_tool_index in incr next_tool_index; index
+    in
+    let text_index item_id =
+      let key = match item_id with Some _ -> item_id | None -> !current_text in
+      let index = match Hashtbl.find_opt text_indexes key with
+        | Some index -> index
+        | None ->
+            let index = match key, Hashtbl.find_opt text_indexes None with
+              | Some _, Some index when not (Hashtbl.mem closed_content index) ->
+                  Hashtbl.remove text_indexes None; index
+              | _ -> fresh_text_index () in
+            Hashtbl.replace text_indexes key index; index in
+      current_text := key;
+      last_text_index := Some index;
+      index
+    in
+    let stop_content index =
+      if not (Hashtbl.mem closed_content index) then begin
+        Hashtbl.add closed_content index ();
+        emit (Agent_core.Types.ContentBlockStop {index})
+      end
+    in
     let tool_indexes = Hashtbl.create 8 in
     let native_tool_indexes = Hashtbl.create 8 in
     (* Each agentMessage item is one assistant message; a commentary item and
        the final answer after it are two. *)
     let text_stream = Keeper_official_client_text_stream.create ~equal:String.equal () in
-    let emit_text text =
-      emit
-        (Agent_core.Types.ContentBlockDelta
-           { index = 0; delta = Agent_core.Types.TextDelta text })
+    let emit_text ~index text =
+      emit (Agent_core.Types.ContentBlockDelta
+        { index; delta = Agent_core.Types.TextDelta text })
     in
     Some
       (function
         | Runtime_codex_app_server.Turn_started { turn_id; model } ->
           emit (Agent_core.Types.MessageStart { id = turn_id; model; usage = None })
         | Runtime_codex_app_server.Text_delta { item_id; delta } ->
-          emit_text
+          emit_text ~index:(text_index item_id)
             (Keeper_official_client_text_stream.forward text_stream ~message:item_id delta)
         | Runtime_codex_app_server.Thinking_delta { item_id; part; delta } ->
           let key = item_id, part in
@@ -377,6 +405,22 @@ let codex_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~tu
                 index in
           emit (Agent_core.Types.ContentBlockDelta
             { index; delta = Agent_core.Types.ThinkingDelta delta })
+        | Runtime_codex_app_server.Text_completed {item_id; source} ->
+          let key = match item_id with Some _ -> item_id | None -> !current_text in
+          let index = match Hashtbl.find_opt text_indexes key with
+            | Some _ as found -> found
+            | None when source = Runtime_codex_app_server.Adopted_anonymous_content ->
+                let found = Hashtbl.find_opt text_indexes None in
+                Option.iter (fun index ->
+                  Hashtbl.remove text_indexes None;
+                  Hashtbl.replace text_indexes key index) found;
+                found
+            | None -> None in
+          Option.iter stop_content index;
+          if key = !current_text then current_text := None;
+          if key = None then Hashtbl.remove text_indexes None
+        | Runtime_codex_app_server.Thinking_completed {item_id; part} ->
+          Option.iter stop_content (Hashtbl.find_opt thinking_indexes (item_id, part))
         | Runtime_codex_app_server.Dynamic_tool_started
             { call_id; tool_name; arguments } ->
           Keeper_official_client_text_stream.tool_row text_stream;
@@ -434,7 +478,12 @@ let codex_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~tu
                ; tool_id = Runtime_native_tools.call_id observation
                ; tool_name = observation.tool_name
                })
-        | Runtime_codex_app_server.Native_tool_finished observation ->
+        | Runtime_codex_app_server.Native_tool_progress {item_id; progress} ->
+          Option.iter (fun index ->
+            Option.iter (fun observe -> observe ~block_index:index ~tool_call_id:(Some item_id) progress)
+              on_native_tool_progress)
+            (Hashtbl.find_opt native_tool_indexes (Runtime_native_tools.Call_id item_id))
+        | Runtime_codex_app_server.Native_tool_finished {observation; completion} ->
           Host.record_raw_native_tool
             ~keeper_name
             ~raw_trace_run
@@ -444,6 +493,9 @@ let codex_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~tu
             (fun identity ->
                Option.iter
                  (fun index ->
+                    Option.iter (fun finish -> finish ~block_index:index
+                      ~tool_call_id:(Runtime_native_tools.call_id observation) completion)
+                      on_native_tool_completion;
                     Hashtbl.remove native_tool_indexes identity;
                     emit (Agent_core.Types.ContentBlockStop { index }))
                  (Hashtbl.find_opt native_tool_indexes identity))
@@ -460,8 +512,12 @@ let codex_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~tu
         | Runtime_codex_app_server.Compaction_observed ->
           Log.Keeper.info ~keeper_name "Codex context compaction completed"
         | Runtime_codex_app_server.Turn_finished { text } ->
-          Option.iter
-            emit_text
+          Option.iter (fun remainder ->
+            let index = match !last_text_index with
+              | Some index when not (Hashtbl.mem closed_content index) -> index
+              | Some _ | None -> fresh_text_index () in
+            emit_text ~index remainder;
+            stop_content index)
             (Keeper_official_client_text_stream.remainder text_stream ~final_text:text);
           emit
             (Agent_core.Types.MessageDelta
@@ -783,7 +839,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted ~observe_successful_tool_completion ~observe_transport_uncertain
-    ~on_tool_execution ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
+    ~on_tool_execution ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_completion ~on_native_tool_progress
     ~on_usage_report ~(config : Runtime_execution.codex_app_server) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -1328,7 +1384,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     let turn_result =
       try
         let observe_stream =
-          codex_stream_callback ?receipts
+          codex_stream_callback ?receipts ?on_native_tool_completion ?on_native_tool_progress
           ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
           ~on_usage_report
           ~position:
@@ -1352,7 +1408,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
               | Runtime_codex_app_server.Counted { last = Context_estimate _; _ }
               | Context_window_filled _ -> settled_held_context := []
               | Counted { last = Request_usage _; _ } -> ())
-           | Turn_started _ | Text_delta _ | Thinking_delta _ | Dynamic_tool_started _
+           | Native_tool_progress _ | Turn_started _ | Text_delta _ | Thinking_delta _ | Text_completed _ | Thinking_completed _ | Dynamic_tool_started _
            | Dynamic_tool_finished _ | Elicitation_cancelled _
            | Usage_windows_reported _ | Turn_finished _ -> ());
           Option.iter (fun observe -> observe event) observe_stream
@@ -1673,6 +1729,8 @@ let run ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~
     ?on_official_client_tool_boundary
     ?on_tool_execution
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
+    ?on_native_tool_progress
+    ?on_native_tool_completion
     ?on_native_action
     ?on_usage_report
     ~event_bus ~raw_trace ~on_event ~(config : Runtime_execution.codex_app_server) () =
@@ -1789,7 +1847,7 @@ let run ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~
           ~context_injector
           ~context
           ~terminal_effect_state
-        ~on_tool_execution ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
+        ~on_tool_execution ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_completion ~on_native_tool_progress
           ~on_usage_report
           ~event_bus
           ~raw_trace

@@ -60,6 +60,8 @@ type identity_login_started =
           declaration is free to change. *)
   ; ils_label : string
   ; ils_url : string
+  ; ils_expires_at : float
+  ; ils_attempt_id : string
   }
 
 type identity_login_result =
@@ -67,6 +69,8 @@ type identity_login_result =
       { provider_id : string
       ; label : string
       ; url : string
+      ; expires_at : float
+      ; attempt_id : string
       }
   | Login_attached of string
   | Login_failed of string
@@ -119,3 +123,13 @@ val identity_login_landed
   :  providers:identity_provider list
   -> login:identity_login_started
   -> bool
+
+val decode_identity_login
+  : provider_id:string -> label:string -> now:float -> Yojson.Safe.t
+  -> identity_login_result
+
+type identity_login_status =
+  | Consent_waiting of float | Callback_in_progress
+  | Credentials_published of (int, unit) result
+  | Login_exchange_failed | Consent_expired | Consent_superseded | Attempt_unavailable
+val decode_identity_login_status : Yojson.Safe.t -> (identity_login_status, string) result

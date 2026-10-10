@@ -2339,6 +2339,8 @@ let add_routes ~sw ~clock router =
                in
                (match
                   Server_skill_editor.create
+                    ~descriptors:(Server_skill_editor.authoring_descriptors
+                      ~config:(Mcp_server.workspace_config state) ~access:Lane_addon_sources.Operator_configuration)
                     ~base_path
                     ~source_id
                     ~package_id
@@ -2457,6 +2459,8 @@ let add_routes ~sw ~clock router =
              | Ok { reference; source_text = Some source_text; confirmed = _ } ->
                (match
                   Server_skill_editor.preview
+                    ~descriptors:(Server_skill_editor.authoring_descriptors
+                      ~config:(Mcp_server.workspace_config state) ~access:Lane_addon_sources.Operator_configuration)
                     ~base_path:(Mcp_server.workspace_config state).base_path
                     reference
                     ~source_text
@@ -2499,6 +2503,8 @@ let add_routes ~sw ~clock router =
                in
                (match
                   Server_skill_editor.save
+                    ~descriptors:(Server_skill_editor.authoring_descriptors
+                      ~config:(Mcp_server.workspace_config state) ~access:Lane_addon_sources.Operator_configuration)
                     ~base_path
                     ~reference
                     ~source_text
@@ -3710,6 +3716,27 @@ let add_routes ~sw ~clock router =
              Keeper_shutdown_reconciliation.handle_get state req reqd target)
            request reqd
        | None ->
+       if Http.Request.path request = Server_dashboard_http_hitl_recover.uncertain_path then
+         with_token_permission_auth ~permission:Server_dashboard_http_hitl_recover.permission
+           (fun state _actor req reqd -> Server_dashboard_http_hitl_recover.handle_uncertain_get state req reqd)
+           request reqd
+       else
+       match Server_dashboard_http_keeper_child_content.route (Http.Request.path request) with
+       | Some route ->
+         with_token_permission_auth
+           ~permission:Server_dashboard_http_keeper_child_content.permission
+           (fun state _agent_name req reqd ->
+             Server_dashboard_http_keeper_child_content.handle_get state req reqd route)
+           request reqd
+       | None ->
+       match Server_dashboard_http_keeper_native_tasks.route (Http.Request.path request) with
+       | Some route ->
+         with_token_permission_auth
+           ~permission:Server_dashboard_http_keeper_native_tasks.permission
+           (fun state _agent_name req reqd ->
+             Server_dashboard_http_keeper_native_tasks.handle_get state req reqd route)
+           request reqd
+       | None ->
        match Keeper_chat_operations.get_route (Http.Request.path request) with
        | Some route ->
          with_token_permission_auth
@@ -3798,6 +3825,23 @@ let add_routes ~sw ~clock router =
 
   (* Keeper POST sub-routes. *)
   |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->
+       match
+         Server_dashboard_http_hitl_recover.route (Http.Request.path request)
+       with
+       | Some approval_id ->
+         with_token_permission_auth
+           ~permission:Server_dashboard_http_hitl_recover.permission
+           (fun state actor req reqd ->
+              Http.Request.read_body_async reqd (fun body ->
+                Server_dashboard_http_hitl_recover.handle_post
+                  state
+                  ~actor
+                  ~approval_id
+                  req
+                  reqd
+                  body))
+            request reqd
+       | None ->
        match Keeper_shutdown_reconciliation.route (Http.Request.path request) with
        | Some target ->
          with_token_permission_auth ~permission:Keeper_shutdown_reconciliation.permission

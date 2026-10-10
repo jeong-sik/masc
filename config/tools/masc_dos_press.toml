@@ -2,13 +2,15 @@ name = "masc_dos_press"
 description = """
 Press keys on the shared DOS machine.
 
-Each key enters the BIOS ring (no hold time) and the machine runs until it is \
-ready again, so ["down", "down", "return"] walks a menu in one call; a key \
-that leaves the program busy ends the sequence there. Names: \
+Each key enters the BIOS ring (no hold time). By default, execution stops \
+at an empty keyboard poll with unchanged sampled screen memory; settled \
+does not prove a game's next prompt. until_ready=false injects only the first \
+key and runs the requested steps unless the program exits; remaining keys \
+are unsent. Read the screen before another input. Names: \
 up down left right home end pgup pgdn insert delete enter return esc space \
 tab backtab backspace f1-f10, or one character; an unknown name is refused \
 before anything is pressed. Recorded in the ledger. A call stops at 4000000 \
-instructions; keys_pressed says how many landed."""
+machine steps; keys_pressed says how many landed."""
 additional_properties = false
 
 defer_loading = true
@@ -25,10 +27,16 @@ description = "Keys in order, e.g. [\"down\", \"return\"] or [\"y\"]."
 [[params]]
 name = "steps"
 type = "integer"
-description = "Instruction budget per key. Default 4000000."
+description = "Machine-step budget per key. Default 4000000."
 minimum = 1
 maximum = 4000000
 default = 4000000
+
+[[params]]
+name = "until_ready"
+type = "boolean"
+description = "Stop at the empty-poll/unchanged-screen observation. False sends only the first key, then runs steps without early settling. Default true."
+default = true
 
 [[params]]
 name = "expected_program"

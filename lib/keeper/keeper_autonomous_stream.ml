@@ -9,6 +9,8 @@ type t =
   ; turn_ref : Ids.Turn_ref.t
   ; events : Events.t option
   ; accum : Accum.t
+  ; child_journal : Keeper_child_content_journal.t
+  ; task_journal : Keeper_native_task_journal.t
   ; text : Keeper_stream_text_redaction.Scoped.t
   ; redact_text : string -> string
   ; mutex : Eio.Mutex.t
@@ -41,7 +43,8 @@ let create ~base_path ~keeper_name ~turn_ref = Eio.Cancel.protect (fun () ->
     (* A notification names the canonical journal cursor. Readers fetch the
        journal rather than racing live frames against replay or exposing
        reasoning on a general observer connection. *)
-    (try Sse.broadcast_to Sse.Observers
+    (try Sse.broadcast_to
+       (Sse.Runtime_observers (Sse.runtime_authority_exn ~base_path))
        (`Assoc [ "type", `String "keeper_turn_stream_event";
          "name", `String keeper_name;
          "turn_ref", `String (Ids.Turn_ref.to_string turn_ref);
@@ -52,17 +55,27 @@ let create ~base_path ~keeper_name ~turn_ref = Eio.Cancel.protect (fun () ->
   (* This producer has no channel adapter: its only reader is the authenticated
      journal endpoint. Disable queue backpressure while retaining the hook. *)
   Option.iter Events.reader_gone events;
+  let run_id = Ids.Turn_ref.to_string turn_ref in
+  let content_generation = match events with
+    | Some events -> Events.publish_with_sequence events
+        (Events.Run_started {run_id; thread_id="keeper:" ^ keeper_name})
+    | None -> 0 (* No journal or publication exists in this branch. *) in
   let t =
     { base_path; keeper_name; turn_ref; events; accum = Accum.create ();
       text = Keeper_stream_text_redaction.Scoped.create redaction;
+      child_journal = Keeper_child_content_journal.create ~base_path ~keeper_name
+        ~source:(Keeper_native_task_journal.Autonomous_turn turn_ref)
+        ~redact_text:(Keeper_secret_redaction.redact_text redaction);
+      task_journal = Keeper_native_task_journal.create ~base_path ~keeper_name
+        ~source:(Keeper_native_task_journal.Autonomous_turn turn_ref)
+        ~redact_text:(Keeper_secret_redaction.redact_text redaction);
       redact_text = Keeper_secret_redaction.redact_text redaction;
-      mutex = Eio.Mutex.create (); bridge = Bridge.empty_state (); closed = false }
+      mutex = Eio.Mutex.create (); bridge = Bridge.empty_state
+        ~generation:content_generation (); closed = false }
   in
   Option.iter (fun _ -> with_current (fun () ->
     Hashtbl.replace current_turns (base_path, keeper_name) turn_ref)) events;
-  let run_id = Ids.Turn_ref.to_string turn_ref in
   Option.iter (fun events ->
-    Events.publish events (Events.Run_started { run_id; thread_id = "keeper:" ^ keeper_name });
     Events.publish events (Events.Text_message_start { message_id = run_id ^ ":assistant"; role = Events.Assistant })) events;
   t)
 
@@ -106,7 +119,17 @@ let on_event t event = with_stream t (fun () ->
   forward t (Keeper_stream_text_redaction.Scoped.on_event t.text ~stream_scope event);
   ignore (Accum.take_protocol_errors t.accum))
 
-let on_tool_stream_observation t observation = with_stream t (fun () -> match observation with
+let on_tool_stream_observation t observation =
+  let protect_observation = match observation with
+    | Keeper_hooks_agent_core.Child_content_observed _
+    | Keeper_hooks_agent_core.Native_task_observed _ ->
+        (* Preserve admitted persistence through its health/report outcome,
+           without holding the unrelated root publication mutex. *)
+        Eio.Cancel.protect
+    | Runtime_attempt_started _ | Turn_collected _ | Turn_closed_without_sources _
+    | Native_tool_progress _ | Native_tool_completion _ | Official_tool_result _ ->
+        with_stream t in
+  protect_observation (fun () -> match observation with
   | Keeper_hooks_agent_core.Runtime_attempt_started {runtime_id; lane_attempt_index; _} ->
       flush t;
       let previous_scope = Accum.start_runtime_attempt t.accum in
@@ -118,6 +141,23 @@ let on_tool_stream_observation t observation = with_stream t (fun () -> match ob
   | Keeper_hooks_agent_core.Turn_closed_without_sources {turn} ->
       (match Accum.close_turn_without_sources t.accum ~turn with
        | Ok () -> () | Error detail -> mapping_failed t detail)
+  | Keeper_hooks_agent_core.Child_content_observed {attempt; observation} ->
+      Keeper_child_content_journal.observe t.child_journal ~attempt observation
+      |> Keeper_child_content_journal.report ~keeper_name:t.keeper_name
+  | Keeper_hooks_agent_core.Native_task_observed {attempt; bound} ->
+      Keeper_native_task_journal.observe t.task_journal ~attempt bound
+      |> Keeper_native_task_journal.report ~keeper_name:t.keeper_name
+  | Keeper_hooks_agent_core.Native_tool_progress {block_index; tool_call_id; progress} ->
+      (* This observation updates an existing native row. It is not a model
+         content boundary: keep any partial secret held across later deltas. *)
+      if not t.closed then begin
+        apply t (Bridge.progress_native_tool ~redact_text:t.redact_text
+          ~stream_scope:(Accum.current_stream_scope t.accum) ~block_index ~tool_call_id progress t.bridge)
+      end
+  | Keeper_hooks_agent_core.Native_tool_completion {block_index; tool_call_id; completion} ->
+      if not t.closed then
+        apply t (Bridge.finish_native_tool ~redact_text:t.redact_text
+          ~stream_scope:(Accum.current_stream_scope t.accum) ~block_index ~tool_call_id completion t.bridge)
   | Keeper_hooks_agent_core.Official_tool_result {block_index; tool_call_id; execution_id} ->
       result_ready t ~tool_call_id:(Some tool_call_id) ~execution_id
         (Accum.record_official_execution_id t.accum ~block_index ~tool_call_id ~execution_id))
@@ -153,3 +193,7 @@ let finish t ending =
         | Completed _ -> Events.Run_finished {run_id = Ids.Turn_ref.to_string t.turn_ref}
         | Failed message -> Events.Event_error {message = t.redact_text message}
         | Cancelled -> Events.Event_error {message = "Autonomous turn cancelled"}))))
+
+let task_journal_health t = Keeper_native_task_journal.health t.task_journal
+
+let child_journal_health t = Keeper_child_content_journal.health t.child_journal

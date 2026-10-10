@@ -117,6 +117,9 @@ type 'a config_lock_receipt = private
   ; warnings : config_lock_warning list
   }
 
+val config_source_revision_of_text : string -> config_source_revision
+(** Pure identity of the source text, independent of its storage path. *)
+
 val config_observation : path:string -> string -> config_observation
 (** Pure source identity used inside callers' locked config edits. *)
 

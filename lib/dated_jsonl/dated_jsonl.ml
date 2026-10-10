@@ -1695,7 +1695,7 @@ let appended_read_changed path =
 (* Consume only the captured extent of an already verified handle. Keep the
    boundary before an incomplete last line, even if the writer appends while
    this read is running. Callback errors are deliberately outside I/O catches. *)
-let fold_captured_lines_result channel ~path ~from ~until ~init ~f =
+let fold_captured_entries_result channel ~path ~from ~until ~init ~f =
   let rec drive acc boundary position fragment =
     if position >= until then Ok (acc, boundary)
     else
@@ -1718,9 +1718,8 @@ let fold_captured_lines_result channel ~path ~from ~until ~init ~f =
             let line = Buffer.contents fragment in
             Buffer.clear fragment;
             next_boundary := position + index + 1;
-            (match recent_entry_of_line ~path line with
-             | Parsed row -> value := f !value row
-             | Malformed_json _ -> ())
+            if String.trim line <> "" then
+              value := f !value (recent_entry_of_line ~path line)
           | character -> Buffer.add_char fragment character
         done;
         drive !value !next_boundary (position + length) fragment
@@ -1769,8 +1768,9 @@ let fold_range_appended_result t ~since ~until ~cursor ~init ~f =
             | None -> 0
           in
           let* value, boundary =
-            fold_captured_lines_result channel ~path ~from
-              ~until:captured.Unix.st_size ~init:acc ~f
+            fold_captured_entries_result channel ~path ~from
+              ~until:captured.Unix.st_size ~init:acc
+              ~f:(fun acc -> function Parsed row -> f acc row | Malformed_json _ -> acc)
           in
           Ok (value, (path, captured, boundary)))
     in
@@ -1793,6 +1793,36 @@ let fold_range_appended_result t ~since ~until ~cursor ~init ~f =
     in
     if stable then Ok (Appended (value, next))
     else Error (appended_read_changed t.base_dir)
+;;
+
+let fold_file_appended_entries_result path ~cursor ~init ~f =
+  let ( let* ) = Result.bind in
+  let* captured = inspect_path_result path in
+  let* () = match non_regular_file_kind_of_stats captured with
+    | Some kind -> Error (Non_regular_file {path;kind}) | None -> Ok () in
+  let previous = match cursor with None -> [] | Some cursor -> cursor in
+  match previous with
+  | (_ :: _ :: _) -> Ok Cursor_invalidated
+  | [(prior_path, prior, _)] when prior_path <> path || not (append_only_successor prior captured) ->
+      Ok Cursor_invalidated
+  | [] | [_] ->
+    let* channel = open_regular_input_result path in
+    Fun.protect ~finally:(fun () -> close_in_noerr channel) (fun () ->
+      let* opened = match Unix.fstat (Unix.descr_of_in_channel channel) with
+        | stats -> Ok stats
+        | exception Unix.Unix_error (error, _, _) ->
+            Error (Io_error {operation=Inspect;path;detail=Unix.error_message error}) in
+      if not (append_only_successor captured opened) then Error (appended_read_changed path)
+      else
+        let from = match previous with [] -> 0 | (_,_,offset) :: _ -> offset in
+        let* value, boundary = fold_captured_entries_result channel ~path ~from
+          ~until:captured.Unix.st_size ~init ~f in
+        let* () = if boundary = captured.Unix.st_size then Ok ()
+          else Error (Io_error {operation=Read_file;path;detail="incomplete trailing JSONL row"}) in
+        let* after = inspect_path_result path in
+        if append_only_successor captured after then
+          Ok (Appended (value, [(path,captured,boundary)]))
+        else Error (appended_read_changed path))
 ;;
 
 (* Like [read_range] but bounded to the [n] most recent entries within

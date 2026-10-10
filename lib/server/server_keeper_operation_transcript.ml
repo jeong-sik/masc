@@ -1,6 +1,7 @@
 type settlement =
   | Runtime_deferred
-  | Terminal of { content : string; kind : Keeper_chat_store.Row_kind.t }
+  | Reply of string
+  | Request_failed of string
 
 let persist ~base_dir ~keeper_name ~operation_id ~resumed_from ~settlement
     ~tool_calls ?surface ?conversation_id ?blocks ?turn_ref ?stream_lifecycle () =
@@ -25,13 +26,14 @@ let persist ~base_dir ~keeper_name ~operation_id ~resumed_from ~settlement
     | _ -> Keeper_chat_store.append_tool_calls_once ~base_dir ~keeper_name
         ~delivery_key:tool_delivery_key ~tool_calls ?surface ?conversation_id ?turn_ref ()
         |> Result.map (fun _ -> ()) in
-  match settlement with
-  | Runtime_deferred -> tools_only ()
-  | Terminal {content; kind} ->
+  let terminal append content =
     let* terminal_tools = match resumed_from with
       | None -> Ok tool_calls
       | Some _ -> let* () = tools_only () in Ok [] in
-    Keeper_chat_store.append_assistant_message_once ~base_dir ~keeper_name
-      ~delivery_key ~content ~assistant_kind:kind ~tool_calls:terminal_tools
-      ?surface ?conversation_id ?blocks ?turn_ref ?stream_lifecycle ()
-    |> Result.map (fun _ -> ())
+    append ~base_dir ~keeper_name ~delivery_key ~content
+      ?surface ?conversation_id ?tool_calls:(Some terminal_tools) ?blocks ?turn_ref ?stream_lifecycle ()
+    |> Result.map (fun _ -> ()) in
+  match settlement with
+  | Runtime_deferred -> tools_only ()
+  | Reply content -> terminal Keeper_chat_store.append_assistant_message_once content
+  | Request_failed content -> terminal Keeper_chat_store.append_request_failure_once content

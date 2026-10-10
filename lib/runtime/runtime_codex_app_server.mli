@@ -203,6 +203,8 @@ type elicitation_cancel_reason = Host_input_unavailable
 
 type reasoning_part = Summary of int | Content of int
 
+type text_completion_source = Item_content | Adopted_anonymous_content
+
 type stream_event =
   | Turn_started of
       { turn_id : string
@@ -223,6 +225,13 @@ type stream_event =
       }
       (** Provider-exposed reasoning text, identified by item and summary/content
           part. Completed items contribute only the suffix not already streamed. *)
+  | Text_completed of { item_id : string option; source : text_completion_source }
+  | Thinking_completed of { item_id : string; part : reasoning_part }
+      (** The matching model item/part completed, after its final missing
+          suffix. [Adopted_anonymous_content] means the runtime reconciled an
+          unnamed prefix against the completed item's text. Only that source
+          may bind an unnamed adapter block to this completed item.
+          A tool completion never produces these boundaries. *)
   | Dynamic_tool_started of
       { call_id : string
       ; tool_name : string
@@ -230,7 +239,8 @@ type stream_event =
       }
   | Dynamic_tool_finished of { call_id : string }
   | Native_tool_started of Runtime_native_tools.observation
-  | Native_tool_finished of Runtime_native_tools.observation
+  | Native_tool_finished of Runtime_native_tools.finished
+  | Native_tool_progress of { item_id : string; progress : Runtime_native_tools.progress }
   | Compaction_observed
       (** An active turn's [contextCompaction] item completed. Previously
           delivered context may have been replaced, independently of usage

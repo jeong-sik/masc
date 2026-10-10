@@ -48,7 +48,7 @@ let test_file_rotation_keeps_exact_original_bytes () = with_store (fun dir store
     "evidence", `List [`Assoc ["uri", `String external_uri; "sha256", `Null]]]] in
   let bytes = "  \n" ^ Yojson.Safe.pretty_to_string input ^ "\n\n" in
   write path bytes;
-  let result = require (Sources.acquire ~access:Sources.Operator_configuration ~resolve_lane_output:(fun ~installation_id:_ -> Error "no configured upstream") ~store ~package:(package dir 16384)
+  let result = require (Sources.acquire ~access:Sources.Operator_configuration ~resolve_machine_output:(fun _ -> Error "no attached machine fixture") ~resolve_lane_output:(fun ~installation_id:_ -> Error "no configured upstream") ~store ~package:(package dir 16384)
     ~binding:(binding [file_source "deployment" path])) |> list |> List.hd in
   let reference = own_reference (member "snapshot_evidence" result) in
   check string "raw whitespace bytes retained" bytes (require (Store.read_blob store reference));
@@ -75,7 +75,7 @@ let test_duplicate_snapshot_keys_cannot_replace_host_evidence () = with_store (f
     write path (Yojson.Safe.to_string input);
     let source = require (Sources.acquire
       ~access:Sources.Operator_configuration
-      ~resolve_lane_output:(fun ~installation_id:_ -> Error "no configured upstream")
+      ~resolve_machine_output:(fun _ -> Error "no attached machine fixture") ~resolve_lane_output:(fun ~installation_id:_ -> Error "no configured upstream")
       ~store ~package:(package dir 16384)
       ~binding:(binding [file_source "deployment" path])) |> list |> List.hd in
     check bool "ambiguous source remains incomplete" false
@@ -93,7 +93,7 @@ let test_combined_ingress_marks_omitted_sources () = with_store (fun dir store -
     write path (Yojson.Safe.to_string value);
     file_source id path) in
   let cap = 2048 in
-  let result = require (Sources.acquire ~access:Sources.Operator_configuration ~resolve_lane_output:(fun ~installation_id:_ -> Error "no configured upstream") ~store ~package:(package dir cap) ~binding:(binding sources)) in
+  let result = require (Sources.acquire ~access:Sources.Operator_configuration ~resolve_machine_output:(fun _ -> Error "no attached machine fixture") ~resolve_lane_output:(fun ~installation_id:_ -> Error "no configured upstream") ~store ~package:(package dir cap) ~binding:(binding sources)) in
   check bool "whole source array fits ingress envelope" true (String.length (Yojson.Safe.to_string result) <= cap);
   let rows = list result in
   check int "both source coverage entries survive" 2 (List.length rows);
@@ -119,7 +119,7 @@ let test_browser_identity_and_unknown_coverage () = with_store (fun dir store ->
     Browser_lane.install_automation_document_observer (Some (fun ~tab_id ->
       check int "explicit existing tab requested" 4 tab_id; Browser_lane.Answered !response));
     Eio.Switch.on_release sw (fun () -> Browser_lane.install_automation_document_observer previous);
-    let read () = require (Sources.acquire ~access:Sources.Operator_configuration ~resolve_lane_output:(fun ~installation_id:_ -> Error "no configured upstream") ~store ~package:(package dir 16384)
+    let read () = require (Sources.acquire ~access:Sources.Operator_configuration ~resolve_machine_output:(fun _ -> Error "no attached machine fixture") ~resolve_lane_output:(fun ~installation_id:_ -> Error "no configured upstream") ~store ~package:(package dir 16384)
       ~binding:(binding [browser_source])) |> list |> List.hd in
     let source = read () in
     let observation = member "observations" source |> list |> List.hd in
@@ -154,7 +154,7 @@ let test_completed_port_refresh_identity_preserves_status_and_output () = with_s
     observation_seq=1;output={rows=[row];coverage=[status]};status} : Sources.lane_output) in
   let interest = require (Sources.refresh_interest binding) in
   let acquire () = require (Sources.acquire ~access:Sources.Operator_configuration ~store ~package:(package dir 16384)
-    ~resolve_lane_output:(fun ~installation_id:_ -> Ok !producer) ~binding) in
+    ~resolve_machine_output:(fun _ -> Error "no attached machine fixture") ~resolve_lane_output:(fun ~installation_id:_ -> Ok !producer) ~binding) in
   let fingerprint value = require (Sources.refresh_fingerprint interest value) in
   let first = acquire () in
   let first_key = fingerprint first in
@@ -198,7 +198,7 @@ let test_named_port_uses_exact_instance_and_keeps_coverage () = with_store (fun 
     outputs=["frames",Types.Selected_lanes ["msx/frame"];"empty",Types.Selected_lanes ["absent"];
       "all",Types.All_lanes];observation_seq=7;output;status={coverage with complete=true;detail=None}} in
   let read ?(complete=false) selector = require (Sources.acquire ~access:Sources.Operator_configuration ~store ~package:(package dir 16384)
-    ~resolve_lane_output:(fun ~installation_id ->
+    ~resolve_machine_output:(fun _ -> Error "no attached machine fixture") ~resolve_lane_output:(fun ~installation_id ->
       check string "stable declaration requested" "producer" installation_id;
       Ok {captured with output={output with coverage=[{coverage with complete}]}})
     ~binding:(binding [`Assoc (["source_id",`String "upstream";"kind",`String "lane_output";
@@ -233,6 +233,49 @@ let test_named_port_uses_exact_instance_and_keeps_coverage () = with_store (fun 
       (member "output" observed |> member "rows" |> list |> List.length))
     [[];["output_id",`String "all"]])
 
+(* Source fixtures provide already retained worker rows. Emulator setup below
+   produces test data only; the source adapter cannot call an emulator. *)
+let retained_machine_output ~store ~machine ~incarnation ~count ~entries ~fields ~width ~height ~rgb =
+  let image = `Assoc ["format",`String "rgb8";"width",`Int width;"height",`Int height;
+    "rgb_base64",`String (Base64.encode_string rgb)] in
+  let live = `Assoc ["source_kind",`String (Sources.kind_to_string (Sources.kind_of_machine machine));
+    "state",`String "changed";"incarnation",`String incarnation;"screen",image] in
+  let live_ref = require (Store.write_blob store (Yojson.Safe.to_string live)) in
+  let ledger = require (Store.retain_jsonl store ~history:("fixture/" ^ incarnation)
+    ~entry_count:count ~newest_first:entries ~encode:(fun json -> Yojson.Safe.to_string json ^ "\n")) in
+  let evidence = Types.evidence_to_json in
+  let row : Types.row = {id="fixture/screen";lane_id="fixture/screen";kind=Value;
+    title="Worker capture";observed_at=1.;subject_id=incarnation;clock=None;actor=None;
+    related_ids=[];evidence=[live_ref;ledger.reference];
+    fields=("machine_live",evidence live_ref)::("input_ledger",`Assoc [
+      "format",`String "machine-input-jsonl-sequence";"entry_count",`Int count;
+      "evidence",evidence ledger.reference])::fields} in
+  {Sources.worker_instance="fixture-worker";worker_seq=1;worker_max_bytes=4194304;
+    worker_output={Types.rows=[row];coverage=[]}}
+
+let test_machine_source_requires_current_worker () = with_store (fun dir store ->
+  let snapshot = retained_machine_output ~store ~machine:Masc.Machine_lane.Msx
+    ~incarnation:"load-1" ~count:0 ~entries:[] ~fields:["frame",`Int 7]
+    ~width:1 ~height:1 ~rgb:"\000\001\002" in
+  let acquire resolve_machine_output = require (Sources.acquire ~access:Sources.Operator_configuration
+    ~resolve_machine_output ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
+    ~store ~package:(package dir 16384)
+    ~binding:(binding [`Assoc ["kind",`String "msx_capture";"source_id",`String "screen"]]))
+    |> list |> List.hd in
+  let assert_unavailable label source = check bool label true
+    (member "complete" source = `Bool false && member "observations" source = `List []) in
+  assert_unavailable "no worker means no machine context" (acquire (fun _ -> Error "not attached"));
+  let source = acquire (fun _ -> Ok snapshot) in
+  check bool "completed worker capture supplies context" true (member "complete" source = `Bool true);
+  List.iter (fun replacement ->
+    let reads = ref 0 in
+    assert_unavailable "detach or replacement during artifact read cannot publish old context"
+      (acquire (fun _ -> incr reads; if !reads=1 then Ok snapshot else replacement)))
+    [Error "detached";Ok {snapshot with worker_instance="replacement"};Ok {snapshot with worker_seq=2}];
+  let wrong = {snapshot with worker_output={snapshot.worker_output with
+    rows=List.map (fun (row : Types.row) -> {row with subject_id="different-load"}) snapshot.worker_output.rows}} in
+  assert_unavailable "screen and input history must share an incarnation" (acquire (fun _ -> Ok wrong)))
+
 let test_native_input_history_is_frozen_with_capture () = with_store (fun dir store ->
   let msx = function Ok value -> value | Error error -> fail (Msx_lane.error_to_string error) in
   let ledger_dir = Filename.concat dir "machine" in
@@ -242,7 +285,11 @@ let test_native_input_history_is_frozen_with_capture () = with_store (fun dir st
     Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
     ignore (msx (Msx_lane.load ~ledger_dir ~roms_dir:None ~cart_path:None ~disk_path:None));
     let capture () =
-      require (Sources.acquire ~access:Sources.Operator_configuration ~resolve_lane_output:(fun ~installation_id:_ -> Error "no upstream")
+      let c = msx (Msx_lane.capture_with_identity ()) in
+      let snapshot = retained_machine_output ~store ~machine:Masc.Machine_lane.Msx
+        ~incarnation:c.incarnation ~count:c.input_count ~entries:(List.map Msx_lane.entry_json c.input_ledger)
+        ~fields:["frame",`Int c.frame.number] ~width:c.frame.width ~height:c.frame.height ~rgb:c.frame.rgb in
+      require (Sources.acquire ~access:Sources.Operator_configuration ~resolve_machine_output:(fun _ -> Ok snapshot) ~resolve_lane_output:(fun ~installation_id:_ -> Error "no upstream")
         ~store ~package:(package dir 16384)
         ~binding:(binding [`Assoc ["kind",`String "msx_capture";"source_id",`String "native"]]))
       |> list |> List.hd |> member "observations" |> list |> List.hd in
@@ -302,12 +349,19 @@ let test_dos_capture_retains_the_machines_history () = with_store (fun dir store
     Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
     load ();
     let capture () =
-      require (Sources.acquire ~access:Sources.Operator_configuration ~resolve_lane_output:(fun ~installation_id:_ -> Error "no upstream")
+      let c = dos (Dos_lane.capture_with_identity ()) in
+      let snapshot = retained_machine_output ~store ~machine:Masc.Machine_lane.Dos
+        ~incarnation:c.incarnation ~count:c.input_count ~entries:(List.map Dos_lane.entry_json c.input_ledger)
+        ~fields:["steps",`Int c.observation.steps;
+          "controller",Option.fold ~none:`Null ~some:(fun name -> `String name) c.observation.controller;
+          "program",Option.fold ~none:`Null ~some:(fun name -> `String name) c.observation.program]
+        ~width:c.frame.width ~height:c.frame.height ~rgb:c.frame.rgb in
+      require (Sources.acquire ~access:Sources.Operator_configuration ~resolve_machine_output:(fun _ -> Ok snapshot) ~resolve_lane_output:(fun ~installation_id:_ -> Error "no upstream")
         ~store ~package:(package dir 2_000_000)
         ~binding:(binding [`Assoc ["kind",`String "dos_capture";"source_id",`String "dos"]]))
       |> list |> List.hd |> member "observations" |> list |> List.hd in
     let reference observation = member "input_ledger" observation |> member "evidence" |> own_reference in
-    ignore (dos (Dos_lane.press ~who:"keeper-A" ~keys:["x"] ~steps:100_000));
+    ignore (dos (Dos_lane.press ~until_ready:true ~who:"keeper-A" ~keys:["x"] ~steps:100_000));
     let before = dos (Dos_lane.capture_with_identity ()) in
     let observed = capture () in
     let after = dos (Dos_lane.capture_with_identity ()) in
@@ -442,14 +496,14 @@ let test_fusion_capture_retains_exact_state_across_terminal_change () =
           ~keeper:"fixture" ~preset:"default" ~roster:Fusion_types.preset_roster
           ~topology:Fusion_types.Simple ~started_at:1.;
         let read () = require (Sources.acquire ~access:(Sources.Keeper "fixture") ~store ~package:(package dir 16384)
-          ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
+          ~resolve_machine_output:(fun _ -> Error "no attached machine fixture") ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
           ~binding:(binding [`Assoc ["source_id",`String "fusion";
             "kind",`String "fusion_run";"run_id",`String run_id]]))
           |> list |> List.hd |> member "observations" |> list |> List.hd in
         List.iter (fun access ->
         let denied = require (Sources.acquire ~access
           ~store ~package:(package dir 16384)
-          ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
+          ~resolve_machine_output:(fun _ -> Error "no attached machine fixture") ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
           ~binding:(binding [`Assoc ["source_id",`String "fusion";
             "kind",`String "fusion_run";"run_id",`String run_id]]))
           |> list |> List.hd in
@@ -472,7 +526,7 @@ let test_fusion_capture_retains_exact_state_across_terminal_change () =
         let rejected = require (Sources.acquire ~access:(Sources.Keeper "fixture")
           ~store:rejected_store ~package:(package dir
             (String.length (Yojson.Safe.to_string (`List [member "detail" first]))))
-          ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
+          ~resolve_machine_output:(fun _ -> Error "no attached machine fixture") ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
           ~binding:(binding [`Assoc ["source_id",`String "fusion";
             "kind",`String "fusion_run";"run_id",`String run_id]]))
           |> list |> List.hd in
@@ -533,7 +587,7 @@ let test_fusion_capture_retains_exact_state_across_terminal_change () =
             ~topology:Fusion_types.Simple ~started_at:2.;
           let captured = require (Sources.acquire ~access:(Sources.Keeper "fixture")
             ~store ~package:(package dir 16384)
-            ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
+            ~resolve_machine_output:(fun _ -> Error "no attached machine fixture") ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
             ~binding:(binding [`Assoc ["source_id",`String "fusion";
               "kind",`String "fusion_run";"run_id",`String reused_run]])) |> list |> List.hd in
           check bool "foreign Board provenance refuses host capture" false
@@ -566,7 +620,7 @@ let test_fusion_binding_targets_only_exact_run () =
   check bool "unknown run is unavailable, not fabricated" true
     (with_store (fun dir store ->
        let sources = require (Sources.acquire ~access:Sources.Operator_configuration ~store ~package:(package dir 16384)
-         ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
+         ~resolve_machine_output:(fun _ -> Error "no attached machine fixture") ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
          ~binding:(binding [source "definitely-unregistered-fusion-run"])) in
        match list sources with
        | [captured] -> member "complete" captured = `Bool false
@@ -597,7 +651,7 @@ let test_fusion_envelope_overflow_does_not_retain_or_remove_blobs () =
         let read cap = require (Sources.acquire ~access:(Sources.Keeper "fixture")
           ~store ~package:(package dir cap)
 
-          ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
+          ~resolve_machine_output:(fun _ -> Error "no attached machine fixture") ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
           ~binding:(binding [`Assoc ["source_id",`String "fusion";
             "kind",`String "fusion_run";"run_id",`String run_id]])) in
         let admitted = read 16384 |> list |> List.hd in
@@ -631,6 +685,7 @@ let test_fusion_envelope_overflow_does_not_retain_or_remove_blobs () =
             (require (Store.read_blob store reference))) ['a';'b';'c']))
 
 let () = run "Lane source provenance" ["acquisition", [
+  test_case "machine sources require a current attached worker" `Quick test_machine_source_requires_current_worker;
   test_case "completed input identity preserves output, mapping and failure" `Quick
     test_completed_port_refresh_identity_preserves_status_and_output;
   test_case "Fusion envelope overflow creates no orphan and preserves existing evidence" `Quick

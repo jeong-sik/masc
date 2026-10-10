@@ -50,6 +50,63 @@ type exact_action = action_identity * string
     MCP wrapper steps are observed but their canonical MASC invocation is the
     action authority; the admitting projection stays internal to
     [observe_exact_action]. *)
+
+type completion_outcome =
+  | End_observed
+  | Completion_reported
+  | Error_reported
+  | Decline_reported
+  | Result_received of { is_error : bool option }
+  | Unrecognized_status of string
+(** Provider facts, never MASC execution receipts. [Completion_reported] does
+    not establish exit zero. A Claude result may omit [is_error]; omission is
+    retained rather than manufactured into an explicit success report. *)
+
+type completion = { outcome : completion_outcome; exit_code : int option }
+type finished = { observation : observation; completion : completion }
+
+type retry_agent = { agent_id : string; subagent_type : string }
+type retry_note =
+  { agent : retry_agent
+  ; attempt : int
+  ; max_retries : int
+  ; retry_delay_ms : int
+  ; error_status : int option
+  ; error_category : string
+  }
+type retry_observation =
+  | Retry_reported of retry_note
+  | Retry_cleared of retry_agent
+(** A provider's Agent retry notice, or explicit clearing of that notice.
+    Clearing proves neither success nor resumed model content. Agent identity
+    names the child; the owning native occurrence separately names its call. *)
+
+type progress =
+  | Output_observed of { byte_count : int }
+  | Message_reported of { message : string }
+  | Heartbeat_reported of { elapsed_seconds : int }
+  | Retry_observed of retry_observation
+
+val progress_to_json : progress -> Yojson.Safe.t
+(** Numeric progress fields use {!Runtime_json_integer.of_json}: byte counts
+    are positive and heartbeat seconds are nonnegative JSON safe integers.
+    Retry integers retain signed safe integer provider values; no range is
+    inferred from an attempt, delay or status field name. *)
+val progress_of_json : Yojson.Safe.t -> (progress, string) result
+val redact_progress : (string -> string) -> progress -> progress
+(** Progress is provider observation, not output content or a completion.
+    Output bytes count each received delta; equal deltas are separate observations.
+    Heartbeat seconds are a nonnegative provider report, independent of local
+    elapsed time. A later report may be smaller without being rejected. *)
+
+val end_observed : completion
+val completion_to_json : completion -> Yojson.Safe.t
+val completion_of_json : Yojson.Safe.t -> (completion, string) result
+(** Strict closed-object decoder: duplicate fields and fields outside the
+    selected outcome variant are errors, including contradictory reports.
+    A non-null exit code uses {!Runtime_json_integer.of_json}; negative safe
+    integers remain valid provider facts. *)
+val redact_completion : (string -> string) -> completion -> completion
 val observe_exact_action :
   official_turn:int ->
   observe:(official_turn:int -> identity:action_identity -> tool_name:string -> unit) ->

@@ -1,8 +1,0 @@
-{
-  "dashboard/src/components/chat/primitives.ts": "64be7b590d09e63d73152d67c887073a5f1e40dddd2263aee763c489b40a54b3",
-  "dashboard/src/components/chat/failure-message.ts": "346e470edc8b4ef7c4026ef706b1d967e43d5c07a5e73f59ac40e4d52f22e790",
-  "dashboard/src/keeper-state.ts": "c5832ac1d9cb6f77caf00a8066c82261daf74eccb410884aef151c34e7068e13",
-  "lib/keeper/keeper_chat_store.ml": "4b011c42980d0f68c753aeb57987f17be1f2dd8af76d716509c00246106060d1",
-  "test/test_keeper_chat_store.ml": "378990e9056ed85a4fa0a3415e19154d14b032fb0cd33d82c37695def623237d",
-  "dashboard/src/components/chat/primitives.test.ts": "746254ffbead127c9df47ed1012be0274d2f3c42e237f2d8e46a6b1286e2abed"
-}

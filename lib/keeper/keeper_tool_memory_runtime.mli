@@ -28,6 +28,7 @@ val keeper_memory_search_json
 
 val keeper_memory_search_with_outcome
   :  ?turn_ref:Ids.Turn_ref.t
+  -> ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> ctx_work:Keeper_types.working_context
@@ -49,9 +50,10 @@ val keeper_context_status_json
 
 (** Explicit memory write surface.
 
-    Without [source_path], atomically adds a durable claim to the ordinary
-    current Memory OS snapshot. With [source_path], writes only the
-    source-bound current store.
+    An observed claim without [source_path] or [supersedes] is durably queued
+    for Librarian admission; it is not current Memory yet. Derived and
+    superseding ordinary claims still write the current Memory OS snapshot.
+    With [source_path], writes only the source-bound current store.
     Body is stored as [**title** content] when [title] is non-empty.
 
     Args (JSON object):
@@ -64,7 +66,12 @@ val keeper_context_status_json
       derived conclusion. Premises are exact ordinary Memory OS identities.
 
     Returns a JSON string with [{ok, error_kind, ...}]:
-    - On success: [ok=true], [rows_written], [outcome], [store].
+    - On success: [ok=true], [rows_written], [outcome], [store]. Pending
+      admission returns [request_id], [sequence] and enqueue [recorded_at], with
+      no current identity, revision or disposition. This confirms persistence
+      for admission, not its current processing status.
+      A fresh call creates a fresh request; replay across consumption is not
+      idempotent.
     - On validation or persistence failure: [ok=false] with the
       corresponding explicit [error_kind]. *)
 val keeper_memory_write_with_outcome
@@ -72,19 +79,18 @@ val keeper_memory_write_with_outcome
   -> meta:Keeper_meta_contract.keeper_meta
   -> args:Yojson.Safe.t
   -> Keeper_tool_execution.t
-(** Validate and atomically upsert an explicit fact in the Keeper's
-    Memory OS snapshot. The write stays inside MASC and never enters the
+(** Validate and persist an explicit candidate or current claim according to
+    its typed provenance and operation. The write stays inside MASC and never enters the
     external-effect Gate or approval replay path. *)
 
 (** The answer of a [keeper_memory_write] receipt for the repeat guard: the
     fields that say what the write did ([memory_id], [identity_disposition],
     [outcome], the source of a source-bound write, the error of a refused one),
-    without the snapshot [revision] and [recorded_at] that change on every
-    write. [None] for output that is not a receipt object. *)
+    without snapshot [revision], [recorded_at], or pending [request_id] and
+    [sequence] that change on repeated calls. [None] for output that is not a receipt object. *)
 val memory_write_answer_of_output : string -> Yojson.Safe.t option
 
-(** The two stores an explicit memory write reaches: the ordinary current
-    Memory OS snapshot, or the source-bound store a [source_path] selects. *)
+(** Current fact stores. The pending admission queue is not a fact store. *)
 type fact_store =
   | Ordinary_current
   | Source_bound_current
@@ -151,6 +157,9 @@ type memory_write_error_kind =
   | Supersedes_premise_of_successor
       (** The new claim is derived and one of its missing premises is the
           fact [supersedes] removes. *)
+  | Pending_admission_persistence_failed
+      (** Queue append outcome is unknown; the receipt names its request_id.
+          Current search cannot prove absence from the pending queue. *)
   | Persistence_failed of fact_store
       (** The store did not answer; which store decides what a repeat write
           does. *)
@@ -216,6 +225,9 @@ type memory_retract_validation =
 val validate_memory_retract_args : Yojson.Safe.t -> memory_retract_validation
 
 module For_testing : sig
+  val successor_candidates_for_query : query:string ->
+    Keeper_memory_os_current.successor_recall_candidate list ->
+    Keeper_memory_os_current.successor_recall_candidate list
   val read_current_facts
     :  keepers_dir:string
     -> keeper_id:string

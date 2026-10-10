@@ -53,7 +53,7 @@ if mode != 'missing':
     mcp(5,'tools/call',{'name':'report_review_verdict','arguments':{'verdict':'APPROVE','reason':'read-only fixture receipt'}})
 if mode == 'duplicate':
     mcp(6,'tools/call',{'name':'report_review_verdict','arguments':{'verdict':'REJECT','reason':'duplicate'}})
-emit({'type':'assistant','session_id':session,'uuid':'assistant','message':{'role':'assistant','model':'verifier-fixture','content':[{'type':'text','text':'APPROVE (prose is not a verdict)'}]}})
+emit({'type':'assistant','parent_tool_use_id':None,'session_id':session,'uuid':'assistant','message':{'role':'assistant','model':'verifier-fixture','content':[{'type':'text','text':'APPROVE (prose is not a verdict)'}]}})
 emit({'type':'result','subtype':'success','is_error':False,'session_id':session,'uuid':'result','result':'APPROVE (prose is not a verdict)','api_error_status':None})
 for line in sys.stdin:
     pass

@@ -1,0 +1,38 @@
+{
+  "date": "2026-10-09",
+  "parent": "806af2dc0d541ce4bf8b5dc21ecba1fd8526215f",
+  "build": {
+    "command": "opam exec -- dune build --root . -j 4 test/keeper_event_queue/test_fleet_projection.exe test/test_keeper_event_queue_owner_lock.exe test/test_keeper_event_queue_health_actionable.exe",
+    "exit_code": 0,
+    "log": "build.log"
+  },
+  "tests": [
+    {
+      "command": "_build/default/test/keeper_event_queue/test_fleet_projection.exe --color=never",
+      "exit_code": 0,
+      "executed_cases": 1,
+      "log": "fleet.log"
+    },
+    {
+      "command": "_build/default/test/test_keeper_event_queue_owner_lock.exe",
+      "exit_code": 0,
+      "executed_scenarios": 4,
+      "runner": "plain sequential assert scenarios, final OK only after all four return",
+      "scenario_names": [
+        "canonical owner and cross-context isolation",
+        "cancelled waiter does not leak owner lock",
+        "exception does not poison owner or other lane",
+        "fleet summary serializes with owner commit"
+      ],
+      "log": "owner-lock.log"
+    },
+    {
+      "command": "_build/default/test/test_keeper_event_queue_health_actionable.exe --color=never",
+      "exit_code": 0,
+      "executed_cases": 13,
+      "log": "health.log"
+    }
+  ],
+  "executed_scope": "14 Alcotest cases plus four existing plain assertion scenarios; no skipped cases counted",
+  "scope": "Focused macOS compilation, actual isolated queue storage and adjacent fixture-based health projection; no provider/live Keeper/browser/CI/installation/deployment or whole-stack proof."
+}

@@ -57,7 +57,43 @@ profile = "/Users/you/masc-keeper-firefox-profile"
   says which profile it found. So a port that answers because the everyday
   Firefox was started with `--remote-debugging-port` does not give a Keeper
   that profile; it gets a session that is ended at once.
-- `[browser.live] enabled = false` starts nothing.
+- The server records the Firefox it starts in
+  `.masc/browser-lane/keeper-firefox.json` right away, before waiting for
+  its port: its process group, when its first process started, the profile
+  and the port. A Firefox it cannot record is stopped, and no host is
+  started for it. The record is removed when that Firefox is stopped or
+  ends before its port answers. A server starts no Firefox over a record
+  whose group may still run, or over a record it cannot read: a server
+  that ended while its Firefox was opening the port leaves one, and a
+  second Firefox on the same profile would end at once and take that
+  record with it.
+- While the server runs, a Keeper's hover or drag that no listed connection
+  serves has the server start what is missing the same way, one start at a
+  time, and wait up to 15 seconds for the BiDi connection. The request
+  itself is not sent there; the answer names the connection and what was
+  started (`bidiConnection`) and asks the Keeper to list its tabs and
+  observe again, or says why none was shown and what a retry does
+  (`bidiStartFailed`: `operator_needed`, `start_failed`,
+  `not_listed_in_time`). Reads, clicks and scrolls start nothing. A host
+  that ends before its connection is listed has the Firefox started for it
+  stopped, at a server start as at a request.
+- A start whose port answers, after a last host that ended on that port
+  with its session `left` or `refused`, restarts that Firefox when the
+  record shows it is the one MASC started and it started no later than that
+  host ended: Firefox refuses every new host while it holds that session.
+  The profile keeps the operator's logins. The new Firefox is started once
+  the stopped one's group is empty and its port no longer answers. Any
+  other Firefox is left running, the server log says why, and a host is
+  started for it all the same.
+- `[browser.live] enabled = false`, or a `runtime.toml` without the table,
+  starts nothing, and stops the Firefox that record names when it is shown
+  to be the one MASC started: the process its group is numbered after still
+  runs, started when the recorded one started, in that group. Anything else
+  is left running and the server log says why; the operator closes it. The
+  host ends with its Firefox. A server that could not load `runtime.toml`
+  stops nothing. Before each signal the server checks again that the
+  number still names that group, and a group whose processes it may not
+  signal is never taken for gone.
 - The operator still logs in once, in that Firefox, to the sites a Keeper
   works on; the profile keeps the login.
 - A Firefox that exits before its port answers, leaving nothing in its process

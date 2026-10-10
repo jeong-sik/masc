@@ -4,7 +4,8 @@ open Masc_tui_types
    [quit_key_allowed_for] so that adding a field breaks both: the list in the
    code decides, and this list is the reader that notices. *)
 let every_text_target =
-  [ ("account login", Text_account_login)
+  [ ("Collab form", Text_collab_form)
+  ; ("account login", Text_account_login)
   ; ("browser url", Text_browser_url)
   ; ("ask answer", Text_ask_answer)
   ; ("fusion launch", Text_fusion_launch)
@@ -50,9 +51,9 @@ let test_with_no_field_open_the_quit_key_is_a_quit_key () =
    before it goes on measuring all of them rather than a subset someone
    trimmed. *)
 let test_the_list_covers_every_target_this_build_has () =
-  Alcotest.(check int) "fields counted" 18 (List.length every_text_target);
+  Alcotest.(check int) "fields counted" 19 (List.length every_text_target);
   let spelled = List.map fst every_text_target in
-  Alcotest.(check int) "and none of them is listed twice" 18
+  Alcotest.(check int) "and none of them is listed twice" 19
     (List.length (List.sort_uniq String.compare spelled))
 
 let () =

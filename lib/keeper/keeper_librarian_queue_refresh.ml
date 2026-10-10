@@ -90,6 +90,9 @@ let merge_not_committed earlier (outcome : Keeper_librarian_runtime.not_committe
       Keeper_librarian_runtime.walk_shows_size =
         earlier.Keeper_librarian_runtime.walk_shows_size
         || outcome.Keeper_librarian_runtime.walk_shows_size
+    ; smaller_range_meets_same_failure =
+        earlier.Keeper_librarian_runtime.smaller_range_meets_same_failure
+        || outcome.Keeper_librarian_runtime.smaller_range_meets_same_failure
     }
 ;;
 
@@ -613,7 +616,23 @@ let run_memory_cleanup ~base_path ~keeper_name =
     Log.Keeper.warn ~keeper_name "Librarian memory count cleanup unavailable: %s" detail
 ;;
 
+let run_explicit_admission ~base_path ~keeper_name =
+  match Keeper_memory_admission_worker.run ~base_path ~keeper_name with
+  | Disabled | Idle -> ()
+  | Recheck_new_input ->
+    Log.Keeper.info ~keeper_name "Librarian explicit admission remains pending; new input arrived during judgment";
+    Keeper_librarian_queue_signal.changed ~base_path ~keeper_name
+  | Settled {has_more} ->
+    Log.Keeper.info ~keeper_name "Librarian explicit admission committed and acknowledged";
+    if has_more then Keeper_librarian_queue_signal.changed ~base_path ~keeper_name
+  | Pending detail ->
+    Log.Keeper.info ~keeper_name "Librarian explicit admission remains pending: %s" detail
+  | Unavailable detail ->
+    Log.Keeper.warn ~keeper_name "Librarian explicit admission unavailable: %s" detail
+;;
+
 let run ~base_path ~keeper_name =
+  run_explicit_admission ~base_path ~keeper_name;
   run_with_readers
     ~durable:(fun () -> run_durable ~base_path ~keeper_name)
     ~continuity:(fun () -> run_continuity ~base_path ~keeper_name ())
@@ -637,6 +656,7 @@ let install () =
 let submit_durable ~base_path ~keeper_name =
   let (_ : Keeper_memory_lane.outcome) =
     Keeper_memory_lane.submit ~base_path ~keeper_name (fun () ->
+      run_explicit_admission ~base_path ~keeper_name;
       run_durable ~base_path ~keeper_name;
       run_continuity ~base_path ~keeper_name ();
       run_memory_cleanup ~base_path ~keeper_name)
@@ -666,6 +686,14 @@ let unlaunched_keeper_names ~persisted ~launched =
 ;;
 
 let submit_durable_for_unlaunched ~base_path ~persisted ~launched =
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let queued = match Domain_pool_ref.submit_io_or_inline (fun () ->
+    Keeper_memory_admission_queue.list_keeper_ids ~keepers_dir) with
+    | Ok names -> names
+    | Error detail ->
+      Log.Keeper.warn "explicit admission startup discovery failed: %s" detail;
+      [] in
+  let persisted = List.sort_uniq String.compare (persisted @ queued) in
   let names = unlaunched_keeper_names ~persisted ~launched in
   List.iter (fun keeper_name -> submit_durable ~base_path ~keeper_name) names;
   names

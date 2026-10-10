@@ -21,8 +21,8 @@ let test_readers_with_a_wheel_of_their_own_are_left_alone () =
       Alcotest.(check bool) "no reader step" true
         (Option.is_none
            (reader_after_wheel (clamped_scroll_now state drawn)
-              Masc.Tui_decode.Wheel_down)))
-    [ Message_scroll 0; Board_read (0, 0); Keeper_detail 0 ]
+              Masc.Tui_mouse_protocol.Wheel_down)))
+    [ Message_scroll {scroll=0; pin=None}; Board_read (0, 0); Keeper_detail 0 ]
 
 let () =
   Alcotest.run "tui_wheel_reader"

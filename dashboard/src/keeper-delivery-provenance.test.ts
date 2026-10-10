@@ -39,7 +39,7 @@ describe('keeper chat delivery provenance', () => {
     [{ kind: 'operation', operation_id: 'kmsg-1' }, { kind: 'accepted_user' }],
     [checkpointKey, { kind: 'tool_call', execution_id: 'exec-3', ordinal: 0 }],
     [nativeKey, { kind: 'tool_delivery', ordinal: 2 }],
-    [{ kind: 'fusion_run', request_id: 'fusion-1' }, { kind: 'terminal_assistant' }],
+    [{ kind: 'fusion_run', request_id: 'fusion-1' }, { kind: 'terminal_result' }],
     [{ kind: 'workspace_message', request_id: 'workspace-message-1' }, {
       kind: 'tool_call',
       execution_id: 'exec-1',
@@ -50,7 +50,7 @@ describe('keeper chat delivery provenance', () => {
       ordinal: 1,
     }],
     [{ kind: 'approval_lifecycle', approval_id: 'approval-1' }, { kind: 'approval_request' }],
-    [goalNotificationKey, { kind: 'terminal_assistant' }],
+    [goalNotificationKey, { kind: 'terminal_result' }],
   ])('decodes every backend delivery-key variant with its transcript slot', (deliveryKey, slot) => {
     const decoded = decodeKeeperChatDeliveryProvenance(deliveryKey, slot)
     expect(decoded.status).toBe('valid')
@@ -100,15 +100,15 @@ describe('keeper chat delivery provenance', () => {
 
   it('uses the complete pair for equality', () => {
     const user = operationDeliveryProvenance('kmsg-1', 'accepted_user')
-    const assistant = operationDeliveryProvenance('kmsg-1', 'terminal_assistant')
+    const assistant = operationDeliveryProvenance('kmsg-1', 'terminal_result')
     expect(sameDeliveryProvenance(user, assistant)).toBe(false)
     expect(sameDeliveryProvenance(user, { ...user })).toBe(true)
     expect(isOperationDeliveryProvenance(user, 'kmsg-1', 'accepted_user')).toBe(true)
-    expect(isOperationDeliveryProvenance(user, 'kmsg-1', 'terminal_assistant')).toBe(false)
+    expect(isOperationDeliveryProvenance(user, 'kmsg-1', 'terminal_result')).toBe(false)
   })
 
   it('compares every field of a multi-field delivery key', () => {
-    const slot = { kind: 'terminal_assistant' } as const
+    const slot = { kind: 'terminal_result' } as const
     const decode = (deliveryKey: unknown) => {
       const decoded = decodeKeeperChatDeliveryProvenance(deliveryKey, slot)
       if (decoded.status !== 'valid') throw new Error(`fixture did not decode: ${JSON.stringify(deliveryKey)}`)
@@ -125,7 +125,7 @@ describe('keeper chat delivery provenance', () => {
   })
 
   it('derives a tool slot without changing the parent delivery key', () => {
-    const parent = operationDeliveryProvenance('kmsg-1', 'terminal_assistant')
+    const parent = operationDeliveryProvenance('kmsg-1', 'terminal_result')
     expect(toolCallDeliveryProvenance(parent, 'exec-2', 1)).toEqual({
       delivery_key: parent.delivery_key,
       transcript_slot: { kind: 'tool_call', execution_id: 'exec-2', ordinal: 1 },
@@ -133,7 +133,7 @@ describe('keeper chat delivery provenance', () => {
   })
 
   it('keeps a pre-result tool slot delivery-only and ordinal-specific', () => {
-    const parent = operationDeliveryProvenance('kmsg-1', 'terminal_assistant')
+    const parent = operationDeliveryProvenance('kmsg-1', 'terminal_result')
     const first = toolDeliveryProvenance(parent, 0)
     const second = toolDeliveryProvenance(parent, 1)
     expect(first).toEqual({

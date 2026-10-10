@@ -31,6 +31,7 @@ let machine_publication_label = function
   | No_screen -> "no screen published"
   | Stable -> "screen stable"
   | Running -> "machine running"
+  | Publication_unavailable -> "worker observation unavailable"
 let row_summary (row : row) = match row.state with
   | Exact_state (Disabled _) -> "off; candidates retained"
   | Exact_state (Unconfigured _) -> "unconfigured"

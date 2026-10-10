@@ -1,0 +1,20 @@
+{
+  "command": [
+    "opam",
+    "exec",
+    "--",
+    "dune",
+    "exec",
+    "-j4",
+    "test/test_keeper_tool_read_window.exe",
+    "--",
+    "test",
+    "read-line-window",
+    "0-1"
+  ],
+  "exit_code": 1,
+  "tests_run": 2,
+  "failures": 2,
+  "base": "da579cd105c15a4d3d62ad150adf5ea00fb79dbf",
+  "scope": "new scenarios before runtime consumer wiring; unused pure parser and guidance declarations already present"
+}

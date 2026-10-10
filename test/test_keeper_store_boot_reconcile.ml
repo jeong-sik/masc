@@ -524,6 +524,40 @@ let test_preparation_refuses_then_moves_aside_with_the_flag () =
            (B.keeper_persistence_prepare_error_to_string error))
 ;;
 
+let test_preflight_reads_admission_queue_without_consuming () =
+  with_workspace @@ fun config ->
+  let module Queue = Keeper_memory_admission_queue in
+  let base_path = config.Workspace.base_path in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let scan = match D.reader D.Id.Memory_admission_queue with
+    | D.Preflight_only scan -> scan
+    | D.Refuse_boot _ | D.Degrade_typed _ -> fail "admission queue is preflight-only" in
+  let fact : Keeper_memory_os_types.fact =
+    { claim = "Keep deployment context separate."; category = Fact;
+      first_seen = 1.; last_seen = 1.;
+      origin = {kind = Authored; trace_id = "admission-preflight"};
+      basis = Observed Transcript } in
+  (match Queue.append ~keepers_dir ~keeper_id:"pending" ~request_id:"request" fact with
+   | Ok _ -> () | Error detail -> fail detail);
+  let path = Queue.path ~keepers_dir ~keeper_id:"pending" in
+  let before = Fs_compat.load_file path in
+  (match D.run scan ~base_path with
+   | Ok {D.rows = 1; refused = 0; _} -> ()
+   | Ok _ -> fail "pending queue was not decoded" | Error detail -> fail detail);
+  check string "preflight never acknowledges pending input" before (Fs_compat.load_file path);
+  write_bytes path {|{"generation":"queue","last_sequence":0,"pending":{}}|};
+  let malformed = Fs_compat.load_file path in
+  (match D.run scan ~base_path with
+   | Ok {D.rows = 1; refused = 1; first_refusal = Some detail} ->
+     check bool "refusal identifies the keeper" true (String.starts_with ~prefix:"pending: " detail)
+   | Ok _ -> fail "malformed queue silently passed" | Error detail -> fail detail);
+  check string "refused input remains intact" malformed (Fs_compat.load_file path);
+  write_bytes path {|{"generation":"queue","last_sequence":0,"pending":[]}|};
+  (match D.run scan ~base_path with
+   | Ok {D.rows = 1; refused = 0; _} -> ()
+   | Ok _ -> fail "empty existing queue was not decoded" | Error detail -> fail detail)
+;;
+
 (* The deploy preflight and boot read one list (Keeper_durable_store). For a
    store boot refuses on, both must refuse the same file: a build that boot
    refuses would otherwise have passed the preflight, or the reverse. The
@@ -1289,6 +1323,8 @@ let () =
     ; ( "one list"
       , [ test_case "the preflight refuses what boot names" `Quick
             test_preflight_refuses_what_boot_names
+        ; test_case "admission preflight decodes and preserves pending input" `Quick
+            test_preflight_reads_admission_queue_without_consuming
         ; test_case "the preflight names the transcript line appends refuse" `Quick
             test_preflight_names_the_transcript_line_appends_refuse
         ; test_case "transcript inventory failures cannot pass as empty" `Quick

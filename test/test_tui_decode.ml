@@ -1,5 +1,35 @@
 open Masc
 
+let test_checkpoint_receipt_identity_and_completion () =
+  let fields = ["ok",`Bool true;"operation_id",`String "op-1";
+    "checkpoint",`String "restore";"slot",`String "quick";"epoch",`String "server-a";
+    "status",`String "committed";
+    "workspace",`Assoc ["base_path",`String "/workspace";"masc_root",`String "/workspace/.masc"];
+    "effect",`Assoc ["change_count",`Int 2;"incarnation",`String "restored";
+                    "checkpoint_sha256",`String (String.make 64 'a')]] in
+  let decode fields = Tui_decode.decode_msx_checkpoint_receipt ~operation_id:"op-1"
+    ~restore:true ~slot:"quick" ~base_path:"/workspace" ~masc_root:"/workspace/.masc" (`Assoc fields) in
+  Alcotest.(check bool) "exact committed operation is known without inventing pixels" true
+    (decode fields = Ok (Tui_decode.Checkpoint_committed None));
+  let replace key value = (key,value)::List.remove_assoc key fields in
+  List.iter (fun changed -> Alcotest.(check bool) "unbound or legacy evidence cannot settle" true
+    (Result.is_error (decode changed)))
+    [["ok",`Bool true];replace "operation_id" (`String "other");
+     replace "checkpoint" (`String "save");replace "slot" (`String "other");
+     replace "workspace" (`Assoc ["base_path",`String "/foreign";"masc_root",`String "/foreign/.masc"]);
+     ("operation_id",`String "op-1")::fields;
+     replace "effect" (`Assoc ["change_count",`Int (-1);"incarnation",`String "restored";
+       "checkpoint_sha256",`String (String.make 64 'a')]);
+     ("live",`Assoc [])::fields];
+  let pending = ("ok",`Bool false)::("status",`String "pending")::
+    List.remove_assoc "ok" (List.remove_assoc "status" fields) in
+  Alcotest.(check bool) "pending never becomes committed from other metadata" true
+    (decode pending = Ok Tui_decode.Checkpoint_pending);
+  let later = ("live",`Assoc [])::("live_relation",`String "observed_after_completion")::fields in
+  Alcotest.(check bool) "later raw pixels still require machine decoder" true
+    (decode later = Ok (Tui_decode.Checkpoint_committed (Some (`Assoc []))))
+;;
+
 let test_play_invite_responses_preserve_recovery_facts () =
   let json = Yojson.Safe.from_string in
   (match Tui_decode.decode_play_invites
@@ -417,6 +447,53 @@ let test_decode_keeper_zero_last_turn_is_empty () =
       Alcotest.(check string) "zero timestamp becomes empty" ""
         activity.k_last_turn_ts
   | Error err -> Alcotest.fail err
+
+let test_terminal_lines_source_mapping () =
+  let module Terminal = Masc.Tui_terminal_text in
+  let check input expected expected_positions =
+    let mapped = Terminal.sanitize_terminal_lines_with_source input in
+    Alcotest.(check string) "mapped output preserves actual sanitizer contract" expected
+      (Terminal.mapped_text mapped);
+    Alcotest.(check string) "both public APIs use the same whole-line decisions"
+      (Terminal.sanitize_terminal_lines input) (Terminal.mapped_text mapped);
+    let observed = List.init (String.length expected) (fun at ->
+      Option.get (Terminal.source_byte_at mapped at)) in
+    Alcotest.(check (list int)) "every output byte has its true original owner"
+      expected_positions observed;
+    Alcotest.(check (option int)) "negative output position absent" None
+      (Terminal.source_byte_at mapped (-1));
+    Alcotest.(check (option int)) "end is not an output byte" None
+      (Terminal.source_byte_at mapped (String.length expected));
+    List.iteri (fun at owner ->
+      let first = let rec find index = function
+        | [] -> Alcotest.fail "source owner missing"
+        | current :: rest -> if current=owner then index else find (index+1) rest in
+      find 0 expected_positions in
+      Alcotest.(check (option int)) "reverse returns first output of exact source owner"
+        (Some first) (Terminal.output_byte_at_source mapped owner);
+      Alcotest.(check bool) "source order never moves backwards" true
+        (at=0 || List.nth expected_positions (at-1) <= owner)) observed in
+  check "" "" [];
+  check "A\027가\194\128\n\226\128\174Z\255"
+    "A\\x1B가\\u0080\n\\u202EZ\\xFF"
+    ([0] @ List.init 4 (fun _ -> 1) @ [2;3;4]
+     @ List.init 6 (fun _ -> 5) @ [7] @ List.init 6 (fun _ -> 8)
+     @ [11] @ List.init 4 (fun _ -> 12));
+  (* Neighbour-sensitive emoji and subdivision-flag admission must survive
+     intact; escaping each character separately would change this output. *)
+  let emoji = "👩🏽‍💻" in
+  let flag = "\240\159\143\180\243\160\129\167\243\160\129\162\243\160\129\179\243\160\129\163\243\160\129\180\243\160\129\191" in
+  let visible = emoji ^ "\n" ^ flag in
+  check visible visible (List.init (String.length visible) Fun.id);
+  check "a\239\184\143\n❤\239\184\143"
+    "a\\uFE0F\n❤\239\184\143"
+    ([0] @ List.init 6 (fun _ -> 1) @ [4;5;6;7;8;9;10]);
+  let composed = Terminal.sanitize_terminal_lines_with_source "\027\226\128\174" in
+  Alcotest.(check (option int)) "invisible scalar continuation is not separately emitted"
+    None (Terminal.output_byte_at_source composed 2);
+  Alcotest.(check (option int)) "second-pass escape composes first-pass expansion map"
+    (Some 4) (Terminal.output_byte_at_source composed 1)
+;;
 
 let test_terminal_text_escapes_control_sequences () =
   let payload = "safe\027]0;owned\007\n\t\194\128done" in
@@ -2690,8 +2767,8 @@ let test_tool_envelope_outcome_rejects_unexpected_shapes () =
    to the pane under the pointer. *)
 let sgr_wheel_key params final =
   Option.map
-    (fun (direction, _, _) -> Tui_decode.wheel_key direction)
-    (Tui_decode.sgr_wheel_report params final)
+    (fun (direction, _, _) -> Masc.Tui_mouse_protocol.wheel_key direction)
+    (Masc.Tui_mouse_protocol.sgr_wheel_report params final)
 
 let test_sgr_wheel_up_is_its_own_key () =
   match sgr_wheel_key "<64;10;5" 'M' with
@@ -2706,8 +2783,8 @@ let test_sgr_wheel_down_is_its_own_key () =
   | None -> Alcotest.fail "wheel down should claim a key"
 
 let test_sgr_wheel_report_carries_its_position () =
-  match Tui_decode.sgr_wheel_report "<64;10;5" 'M' with
-  | Some (Tui_decode.Wheel_up, 5, 10) -> ()
+  match Masc.Tui_mouse_protocol.sgr_wheel_report "<64;10;5" 'M' with
+  | Some (Masc.Tui_mouse_protocol.Wheel_up, 5, 10) -> ()
   | Some (_, row, column) ->
       Alcotest.failf "expected row 5 column 10, got %d;%d" row column
   | None -> Alcotest.fail "a wheel notch should report where it happened"
@@ -2715,7 +2792,7 @@ let test_sgr_wheel_report_carries_its_position () =
 let test_sgr_wheel_report_needs_a_whole_position () =
   List.iter
     (fun (params, final) ->
-       match Tui_decode.sgr_wheel_report params final with
+       match Masc.Tui_mouse_protocol.sgr_wheel_report params final with
        | None -> ()
        | Some (_, row, column) ->
            Alcotest.failf "report %S should stay unclaimed, got %d;%d" params row
@@ -2737,38 +2814,38 @@ let test_sgr_click_and_horizontal_wheel_stay_unclaimed () =
    offset by 32. Reading only the button kept the notch and dropped where it
    happened, so a press never reached what it was on. *)
 let x10 ~button ~column ~row =
-  Tui_decode.x10_mouse_report ~button:(Char.chr (32 + button))
+  Masc.Tui_mouse_protocol.x10_mouse_report ~button:(Char.chr (32 + button))
     ~column:(Char.chr (32 + column)) ~row:(Char.chr (32 + row))
 
 let x10_mouse =
   Alcotest.testable
     (fun formatter -> function
-      | Tui_decode.X10_wheel (direction, row, column) ->
-          Format.fprintf formatter "%s %d,%d" (Tui_decode.wheel_key direction) row column
-      | Tui_decode.X10_left_press (row, column) ->
+      | Masc.Tui_mouse_protocol.X10_wheel (direction, row, column) ->
+          Format.fprintf formatter "%s %d,%d" (Masc.Tui_mouse_protocol.wheel_key direction) row column
+      | Masc.Tui_mouse_protocol.X10_left_press (row, column) ->
           Format.fprintf formatter "press %d,%d" row column
-      | Tui_decode.X10_other_press -> Format.fprintf formatter "other press"
-      | Tui_decode.X10_release (row, column) ->
+      | Masc.Tui_mouse_protocol.X10_other_press -> Format.fprintf formatter "other press"
+      | Masc.Tui_mouse_protocol.X10_release (row, column) ->
           Format.fprintf formatter "release %d,%d" row column)
     ( = )
 
 let test_x10_wheel_carries_its_position () =
   Alcotest.(check (option x10_mouse)) "wheel up at column 10, row 5"
-    (Some (Tui_decode.X10_wheel (Tui_decode.Wheel_up, 5, 10)))
+    (Some (Masc.Tui_mouse_protocol.X10_wheel (Masc.Tui_mouse_protocol.Wheel_up, 5, 10)))
     (x10 ~button:64 ~column:10 ~row:5);
   Alcotest.(check (option x10_mouse)) "wheel down"
-    (Some (Tui_decode.X10_wheel (Tui_decode.Wheel_down, 5, 10)))
+    (Some (Masc.Tui_mouse_protocol.X10_wheel (Masc.Tui_mouse_protocol.Wheel_down, 5, 10)))
     (x10 ~button:65 ~column:10 ~row:5)
 
 let test_x10_left_press_and_release_carry_their_position () =
   Alcotest.(check (option x10_mouse)) "a plain left press"
-    (Some (Tui_decode.X10_left_press (3, 4)))
+    (Some (Masc.Tui_mouse_protocol.X10_left_press (3, 4)))
     (x10 ~button:0 ~column:4 ~row:3);
   Alcotest.(check (option x10_mouse)) "the one release code"
-    (Some (Tui_decode.X10_release (3, 4)))
+    (Some (Masc.Tui_mouse_protocol.X10_release (3, 4)))
     (x10 ~button:3 ~column:4 ~row:3);
   Alcotest.(check (option x10_mouse)) "a release with shift held"
-    (Some (Tui_decode.X10_release (3, 4)))
+    (Some (Masc.Tui_mouse_protocol.X10_release (3, 4)))
     (x10 ~button:(3 + 4) ~column:4 ~row:3)
 
 (* Middle and right presses and shift/meta/ctrl chords are presses no surface
@@ -2777,7 +2854,7 @@ let test_x10_other_presses_are_named_so_their_release_is_not_left () =
   List.iter
     (fun button ->
       Alcotest.(check (option x10_mouse)) (Printf.sprintf "button %d" button)
-        (Some Tui_decode.X10_other_press) (x10 ~button ~column:4 ~row:3))
+        (Some Masc.Tui_mouse_protocol.X10_other_press) (x10 ~button ~column:4 ~row:3))
     [ 1; 2; 4; 8; 16 ]
 
 (* Motion reports and the horizontal wheel are gestures no surface reads. *)
@@ -2800,9 +2877,9 @@ let test_x10_and_sgr_agree () =
   List.iter
     (fun (button, params) ->
       let sgr =
-        match Tui_decode.sgr_wheel_report params 'M', Tui_decode.sgr_left_press params 'M' with
-        | Some (direction, row, column), _ -> Some (Tui_decode.X10_wheel (direction, row, column))
-        | None, Some (row, column) -> Some (Tui_decode.X10_left_press (row, column))
+        match Masc.Tui_mouse_protocol.sgr_wheel_report params 'M', Masc.Tui_mouse_protocol.sgr_left_press params 'M' with
+        | Some (direction, row, column), _ -> Some (Masc.Tui_mouse_protocol.X10_wheel (direction, row, column))
+        | None, Some (row, column) -> Some (Masc.Tui_mouse_protocol.X10_left_press (row, column))
         | None, None -> None
       in
       Alcotest.(check (option x10_mouse)) (Printf.sprintf "button %d" button) sgr
@@ -2814,10 +2891,10 @@ let test_x10_and_sgr_agree () =
    chord or drag is a gesture, not a choice. *)
 let test_sgr_left_press_reports_the_row_and_column () =
   Alcotest.check Alcotest.bool "release reaches screenshot gesture handling" true
-    (Tui_decode.sgr_left_release "<0;10;5" 'm' = Some (5,10));
+    (Masc.Tui_mouse_protocol.sgr_left_release "<0;10;5" 'm' = Some (5,10));
   Alcotest.check Alcotest.bool "press cannot also become release" true
-    (Tui_decode.sgr_left_release "<0;10;5" 'M' = None);
-  match Tui_decode.sgr_left_press "<0;10;5" 'M' with
+    (Masc.Tui_mouse_protocol.sgr_left_release "<0;10;5" 'M' = None);
+  match Masc.Tui_mouse_protocol.sgr_left_press "<0;10;5" 'M' with
   | Some (5, 10) -> ()
   | Some (row, column) ->
       Alcotest.failf "expected row 5 column 10, got %d;%d" row column
@@ -2834,7 +2911,7 @@ let test_sgr_left_press_ignores_releases_chords_and_wheel () =
   in
   List.iter
     (fun (params, final) ->
-       match Tui_decode.sgr_left_press params final with
+       match Masc.Tui_mouse_protocol.sgr_left_press params final with
        | None -> ()
        | Some (row, column) ->
            Alcotest.failf "report %S should stay unclaimed, got %d;%d" params
@@ -8204,7 +8281,8 @@ let test_decode_keeper_turns_reads_the_preview () =
                       ; ("started_at_unix", `Float 1.0)
                       ; ( "preview"
                         , `Assoc
-                            [ ("text_tail", `String "PR body \xeb\xa7\x88\xeb\xac\xb4\xeb\xa6\xac")
+                            [ ("text_position", `Assoc ["generation", `Int 0; "start_byte", `Int 0])
+                            ; ("text_tail", `String "PR body \xeb\xa7\x88\xeb\xac\xb4\xeb\xa6\xac")
                             ; ("status_text", `String "last observed tool: Execute")
                             ; ("last_tool", `String "Execute")
                             ; ("updated_at_unix", `Float 2.0)
@@ -8222,6 +8300,20 @@ let test_decode_keeper_turns_reads_the_preview () =
      Alcotest.(check (option string)) "last observed tool rides" (Some "Execute")
        p.Tui_decode.ktp_last_tool
    | Ok _ -> Alcotest.fail "preview did not decode as running+Some");
+  let rec replace_position position = function
+    | `Assoc fields -> `Assoc (List.map (fun (key, value) ->
+        key, (if key="text_position" then position else replace_position position value)) fields)
+    | `List values -> `List (List.map (replace_position position) values)
+    | value -> value in
+  List.iter (fun position ->
+    Alcotest.(check bool) "malformed source position rejected" true
+      (Result.is_error (Tui_decode.decode_keeper_turns (replace_position position with_preview))))
+    [`Null; `Assoc ["generation", `Int 0];
+     `Assoc ["generation", `Int 0; "generation", `Int 1; "start_byte", `Int 0];
+     `Assoc ["generation", `Int 0; "start_byte", `Int (-1)];
+     `Assoc ["generation", `Int 0; "start_byte", `Float 0.5];
+     `Assoc ["generation", `Int 0; "start_byte", `Float 9_007_199_254_740_992.];
+     `Assoc ["generation", `Int 0; "start_byte", `Int 0; "unknown", `Null]];
   (* An older server sends no preview field at all: running still decodes. *)
   match Tui_decode.decode_keeper_turns keeper_turns_json with
   | Error err -> Alcotest.fail err
@@ -12633,18 +12725,16 @@ let test_keeper_usage_unread_turns_remain_partial () =
   Alcotest.(check bool) "negative unread count is rejected" true (Result.is_error (decode (-1)))
 
 let test_play_revoke_failure_detail () =
-  Alcotest.(check string) "500 preserves actual controller failure"
-    "controller busy (HTTP 500: controller release failed)"
-    (Tui_decode.play_revoke_http_error ~status_code:500
+  Alcotest.(check (option string)) "a typed 500 is an answered release failure"
+    (Some "controller busy")
+    (Tui_decode.play_revoke_release_failure ~status_code:500
       ~body:{|{"error":"guest1 holds the DOS controller and it could not be released: controller busy","code":"release_failed","name":"guest1","released_controller":false,"release_error":"controller busy"}|});
-  Alcotest.(check string) "other failures show the server's sentence, not its code"
-    "HTTP 503: no keepers dir"
-    (Tui_decode.play_revoke_http_error ~status_code:503
+  Alcotest.(check (option string)) "another server failure is not a release failure" None
+    (Tui_decode.play_revoke_release_failure ~status_code:503
        ~body:{|{"error":"no keepers dir","code":"keepers_unreadable"}|});
   List.iter (fun body ->
-    Alcotest.(check string) "malformed release details use ordinary HTTP error projection"
-      (Tui_decode.http_status_error ~status_code:500 ~body)
-      (Tui_decode.play_revoke_http_error ~status_code:500 ~body))
+    Alcotest.(check (option string)) "malformed release details are not a release failure" None
+      (Tui_decode.play_revoke_release_failure ~status_code:500 ~body))
     [{|{"error":"x","code":"release_failed","released_controller":false,"release_error":42}|};
      {|{"error":"x","code":"release_failed","released_controller":true,"release_error":"busy"}|};
      {|{"error":"x","code":"release_failed","released_controller":false}|};
@@ -13175,7 +13265,9 @@ let () =
           test_decode_fleet_safety_rejects_a_body_without_the_section;
       ] );
     ( "terminal_text",
-      [ Alcotest.test_case "escapes control sequences" `Quick
+      [ Alcotest.test_case "whole-line sanitizer retains exact source positions" `Quick
+          test_terminal_lines_source_mapping
+      ; Alcotest.test_case "escapes control sequences" `Quick
           test_terminal_text_escapes_control_sequences
       ; Alcotest.test_case "preserves printable UTF-8" `Quick
           test_terminal_text_preserves_printable_utf8
@@ -13544,6 +13636,10 @@ let () =
           test_keeper_usage_rejects_unrenderable_generated_at;
         Alcotest.test_case "Keeper usage unread turns remain partial" `Quick
           test_keeper_usage_unread_turns_remain_partial ] );
+    ( "checkpoint disposition"
+    , [ Alcotest.test_case "operation receipt requires exact identity and terminal evidence" `Quick
+          test_checkpoint_receipt_identity_and_completion
+ ] );
     ( "play invites"
     , [ Alcotest.test_case "preserves partial revoke and rejects unreadable links"
           `Quick test_play_invite_responses_preserve_recovery_facts

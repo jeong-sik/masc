@@ -276,7 +276,11 @@ let execute_keeper_tool_descriptor_with_authority
   with
   | Error error -> frozen_surface_admission_error_to_execution error
   | Ok () ->
-  match Keeper_tool_descriptor.find_id descriptor.id with
+  let canonical = match capability_authority with
+    | Keeper_tool_runtime.Frozen_surface surface ->
+        Keeper_capability_surface.find_descriptor_by_id surface descriptor.id
+    | Keeper_tool_runtime.Compatibility_meta -> Keeper_tool_descriptor.find_id descriptor.id in
+  match canonical with
   | Some canonical when canonical == descriptor ->
     let context =
       runtime_context
@@ -385,9 +389,16 @@ let execute_keeper_tool_call_with_authority
        in
        let descriptor_dispatch =
          match
-           Keeper_tool_descriptor_resolution.validated_descriptor_and_input_for_tool_call
-             ~tool_name:name
-             ~input:args
+           (match capability_authority with
+            | Keeper_tool_runtime.Compatibility_meta ->
+                Keeper_tool_descriptor_resolution.validated_descriptor_and_input_for_tool_call
+                  ~tool_name:name ~input:args
+            | Keeper_tool_runtime.Frozen_surface surface ->
+                Option.map (fun descriptor ->
+                  Keeper_tool_descriptor_resolution.prepare_model_input_for_descriptor
+                    ~tool_name:name descriptor ~input:args
+                  |> Result.map (fun input -> descriptor, input))
+                  (Keeper_capability_surface.find_descriptor_by_name surface name))
          with
          | Some (Ok (descriptor, translated_args)) ->
            Descriptor_route

@@ -158,3 +158,13 @@ let select_many ~evaluate ~resolve ~purpose candidates =
       (* assess_batch returns one result per submitted row. *)
       invalid_arg "memory selection batch result cardinality" in
   finish staged answers
+
+let select_resolved_many ~evaluate ~purpose rows =
+  let answers = assess_batch ~evaluate ~purpose
+      (List.map (fun (candidate,detail) -> candidate,Some detail) rows) in
+  List.map2 (fun (candidate,source_detail) answer ->
+    match answer with
+    | Error reason -> Deferred {candidate;reason}
+    | Ok Omit -> Not_needed candidate
+    | Ok Inspect_source -> Deferred {candidate;reason=Applicability_unresolved}
+    | Ok (Include use) -> Selected {candidate;use;source_detail}) rows answers

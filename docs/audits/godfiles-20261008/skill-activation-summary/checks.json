@@ -1,0 +1,33 @@
+{
+  "parent": "f4fd7e5ca4f4ff72f3e872da403a8ad140f14365",
+  "build": {
+    "command": "opam exec -- dune build --root . -j 4 test/test_keeper_skill_activation_ledger.exe test/test_keeper_skill_activation_projection.exe",
+    "exit_code": 0
+  },
+  "tests": [
+    {
+      "command": "../_build/default/test/test_keeper_skill_activation_ledger.exe --color=never",
+      "cwd": "test",
+      "exit_code": 0,
+      "cases": 35,
+      "run": "GQTVGN4R",
+      "log": "ledger-test-cwd.log"
+    },
+    {
+      "command": "_build/default/test/test_keeper_skill_activation_projection.exe --color=never",
+      "cwd": ".",
+      "exit_code": 0,
+      "cases": 10,
+      "run": "FSC5GEU2",
+      "log": "projection.log"
+    }
+  ],
+  "initial_execution": {
+    "command": "_build/default/test/test_keeper_skill_activation_ledger.exe --color=never",
+    "cwd": ".",
+    "exit_code": 1,
+    "run": "PMBGQHVU",
+    "cause": "Missing test-cwd fixtures/skill-ledger-revision.json",
+    "log": "ledger.log"
+  }
+}

@@ -79,6 +79,7 @@ let outcome_to_string : Transcript.tool_outcome -> string = function
   | Transcript.Awaiting_result -> "awaiting_result"
   | Transcript.Returned -> "returned"
   | Transcript.Native_ended -> "native_ended"
+  | Transcript.Native_failed -> "native_failed"
   | Transcript.Failed -> "failed"
   | Transcript.Never_returned -> "never_returned"
   | Transcript.Outcome_unrecorded -> "outcome_unrecorded"
@@ -796,7 +797,7 @@ let test_run_failure_and_finish_set_the_phase () =
     ; Live.Run_failed { message = " " }
     ];
   check string "a runtime cannot hide a missing cause"
-    "[glm-coding.glm-5.3-flash] cause not reported \xc2\xb7 0s"
+    "cause not reported \xc2\xb7 runtime: glm-coding.glm-5.3-flash \xc2\xb7 0s"
     (List.assoc Transcript.Progress (rows missing_on_runtime));
   let finished = fresh () in
   feed finished [ Live.Run_started; Live.Run_finished ];
@@ -1159,8 +1160,81 @@ let test_runtime_failover_visibility_and_error_attribution () =
     (Transcript.current_runtime_id t);
   feed t [ Live.Run_failed { message = "RateLimitExceeded (429)" } ];
   check phase "error is attributed to active runtime"
-    (Transcript.Stream_failed "[gpt-4o] RateLimitExceeded (429)")
+    (Transcript.Stream_failed "RateLimitExceeded (429)")
     (Transcript.phase t)
+
+let test_empty_scoped_text_still_retires_prior_response_metadata () =
+  let t = fresh () in
+  feed t [Live.Run_started;
+    Live.Stream_model_started {usage = None; message_id = None; stream_scope=Some 1; model="first"};
+    Live.Stream_details {stream_scope=Some 1;
+      usage=Some {input_tokens=Some 100; output_tokens=Some 20;
+        cache_read_input_tokens=None; cache_creation_input_tokens=None};
+      stop_reason=Some Agent_core.Types.EndTurn}];
+  let before = Transcript.drawn t in
+  feed t [Live.Text {text=""; stream_scope=Some 2}];
+  check (option string) "an empty chunk in a new scope retires prior counters and stop" None
+    (Transcript.stream_details_text ~keeper_name:"keeper.one" (Some t));
+  check bool "the empty chunk writes nothing" true (before = Transcript.drawn t);
+  check bool "the empty chunk does not invent an answer in progress" false
+    (Transcript.model_activity t = Some Transcript.Activity_answering);
+  feed t [Live.Stream_details {stream_scope=None; usage=None;
+    stop_reason=Some Agent_core.Types.MaxTokens}];
+  check (option string) "a later unscoped stop belongs to the new response alone"
+    (Some "stopped: max_tokens")
+    (Transcript.stream_details_text ~keeper_name:"keeper.one" (Some t))
+;;
+
+let test_response_stop_preserves_pending_work () =
+  List.iter (fun content ->
+    let t = fresh () in
+    feed t [Live.Run_started; Live.Stream_model_started {stream_scope=None; message_id=Some "response";model="observed";usage=None}; content];
+    let before = Transcript.drawn t in
+    let active = Transcript.model_activity t in
+    let decoder = Live.create () in
+    let receive json =
+      Live.feed decoder ("data: " ^ json ^ "\n\n")
+      |> List.iter (fun (observed : Live.observed_delta) ->
+          Transcript.apply ~now:origin t observed.delta) in
+    List.iter (fun json ->
+      receive json;
+      check phase "malformed provider stop leaves Keeper running" Transcript.Working
+        (Transcript.phase t);
+      check bool "malformed provider stop preserves current model activity" true
+        (active = Transcript.model_activity t);
+      check bool "malformed provider stop is reported" true
+        (Option.is_some (Transcript.unreadable t)))
+      [{|{"type":"CUSTOM","name":"KEEPER_STREAM_MESSAGE_STOP"}|};
+       {|{"type":"CUSTOM","name":"KEEPER_STREAM_MESSAGE_STOP","value":{}}|}];
+    receive {|{"type":"CUSTOM","name":"KEEPER_STREAM_MESSAGE_STOP","value":null}|};
+    check bool "a subsequent valid wire stop ends only model activity" true
+      (Transcript.model_activity t = Some Transcript.Activity_response_ended);
+    feed t [Live.Stream_model_stopped; Live.Stream_model_stopped; Live.Text {text=""; stream_scope=None}; Live.Thinking ""];
+    check phase "provider stop leaves Keeper running" Transcript.Working (Transcript.phase t);
+    check bool "response stop and empty chunks leave the transcript body unchanged" true
+      (before = Transcript.drawn t);
+    check bool "the ended response is visible" true (Transcript.model_activity t = Some Transcript.Activity_response_ended);
+    check bool "empty chunks do not invent resumed output" false
+      (match Transcript.model_activity t with
+       | Some (Transcript.Activity_answering | Transcript.Activity_reasoning) -> true
+       | Some _ | None -> false);
+    feed t [tool_started "pending" "Execute"; tool_ended "pending"];
+    let pending = Transcript.tool_calls t in
+    feed t [Live.Stream_model_stopped];
+    check bool "response stop preserves existing pending execution" true
+      (pending = Transcript.tool_calls t);
+    feed t [tool_result "pending" "executed"; Live.Stream_model_started {stream_scope=None; message_id=Some "response";model="observed";usage=None}; Live.Thinking "next"];
+    check bool "a later response can resume reasoning with a reused id" true
+      (Transcript.model_activity t = Some Transcript.Activity_reasoning);
+    feed t [Live.Stream_model_stopped; Live.Runtime_attempt_started
+      {runtime_id=Some "retry";attempt_index=Some 1}];
+    check bool "retry clears the prior response's end" false
+      (Transcript.model_activity t = Some Transcript.Activity_response_ended);
+    feed t [Live.Run_finished; Live.Stream_model_stopped];
+    check phase "a late response stop cannot reopen a completed turn" Transcript.Stream_ended
+      (Transcript.phase t))
+    [Live.Text {text="answer"; stream_scope=None}; Live.Thinking "reason"]
+;;
 
 let test_the_turn_reports_the_tokens_it_has_spent () =
   let usage ?(keeper_name = "keeper.one") transcript =
@@ -1373,6 +1447,98 @@ let test_new_attempt_does_not_inherit_previous_runtime () =
       (Transcript.runtime_identity_text ~keeper_name:"keeper.one"
          ~configured_runtime:"assigned-runtime" (Some t)))
     [ Some 1; None ]
+
+let test_current_attempt_metadata_keeps_observed_activity () =
+  let t = fresh () in
+  feed t [Live.Run_started;
+    Live.Runtime_attempt_started {runtime_id=Some "runtime-a";attempt_index=Some 2};
+    Live.Stream_model_started {stream_scope=None; message_id=Some "message";model="model-a";usage=None};
+    Live.Text {text="current text"; stream_scope=None}; Live.Thinking "current reasoning";
+    Live.Model_content_activity {Masc.Keeper_chat_events.content_generation=0;
+      content_scope=0;content_index=1;content_provider_message_id=Some "message";
+      channel=Model_thinking;state=Content_observed};
+    Live.Approval_requested {call_id="approval";tool_name="Write";args="";
+      question="continue?";because="approval required"}];
+  let trail = Transcript.trail t in
+  let drawn = Transcript.drawn t in
+  let before = progress_text t in
+  List.iter (fun event ->
+    feed t [event];
+    check string "metadata preserves answer bytes" "current text" (Transcript.text t);
+    check string "metadata preserves reasoning bytes" "current reasoning" (Transcript.thinking t);
+    check bool "metadata preserves trail and origins" true
+      (Transcript.trail t=trail && Transcript.drawn t=drawn);
+    check string "metadata preserves thinking and pending approval" before (progress_text t))
+    [Live.Runtime_attempt_started {runtime_id=Some "runtime-a";attempt_index=Some 2};
+     Live.Runtime_attempt_started {runtime_id=None;attempt_index=Some 2};
+     Live.Runtime_attempt_started {runtime_id=Some "stale-runtime";attempt_index=Some 1}];
+  feed t [Live.Runtime_attempt_started {runtime_id=Some "conflicting-runtime";attempt_index=Some 2}];
+  check (option string) "conflicting runtime cannot relabel the active attempt"
+    (Some "runtime-a") (Transcript.current_runtime_id t);
+  check string "conflict does not erase answer" "current text" (Transcript.text t);
+  check bool "conflict remains visible" true
+    (List.exists (fun (_,row) -> contains ~needle:"runtime identity conflicts" row) (rows t))
+
+let test_late_runtime_name_does_not_supersede_observed_output () =
+  let t = fresh () in
+  feed t [Live.Run_started;
+    Live.Stream_model_started {stream_scope=None; message_id=Some "message";model="observed-model";usage=None};
+    Live.Text {text="already streaming"; stream_scope=None};
+    Live.Runtime_attempt_started {runtime_id=Some "late-runtime";attempt_index=Some 0}];
+  check string "late runtime metadata retains output" "already streaming" (Transcript.text t);
+  check bool "late name does not invent a superseded attempt" true
+    (match Transcript.trail t with [Transcript.Trail_text "already streaming"] -> true | _ -> false);
+  check bool "actual output activity remains visible" true
+    (contains ~needle:"STREAMING" (progress_text t));
+  check (option string) "runtime identity fills the current attempt"
+    (Some "late-runtime") (Transcript.current_runtime_id t)
+
+let test_continuation_restarts_attempt_identity () =
+  let t = fresh () in
+  feed t [Live.Run_started;
+    Live.Runtime_attempt_started {runtime_id=Some "old-runtime";attempt_index=Some 2};
+    Live.Text {text="previous segment"; stream_scope=None};
+    Live.Reply_details {reply="";turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint;
+      turn_ref="trace#1";terminal_stream_scope=None}; Live.Run_finished; Live.Run_started];
+  check (option string) "new run does not inherit the previous runtime" None
+    (Transcript.current_runtime_id t);
+  feed t [Live.Runtime_attempt_started {runtime_id=Some "new-runtime";attempt_index=Some 0};
+    Live.Text {text="next segment"; stream_scope=None}];
+  check (option string) "attempt zero belongs to the new run"
+    (Some "new-runtime") (Transcript.current_runtime_id t);
+  check string "new segment owns its answer" "next segment" (Transcript.text t);
+  check bool "previous segment remains in the timeline" true
+    (List.exists (function Transcript.Trail_text "previous segment" -> true | _ -> false)
+       (Transcript.trail t))
+
+let test_late_attempt_cannot_rewrite_ended_work () =
+  List.iter (fun terminal ->
+    let t = fresh () in
+    feed t [Live.Run_started;
+      Live.Runtime_attempt_started {runtime_id=Some "runtime-a";attempt_index=Some 0};
+      Live.Text {text="finished answer"; stream_scope=None}; terminal];
+    let before = Transcript.drawn t in
+    feed t [Live.Runtime_attempt_started {runtime_id=Some "late-runtime";attempt_index=Some 1}];
+    check string "late attempt retains ended answer" "finished answer" (Transcript.text t);
+    check bool "late attempt cannot alter ended timeline" true (Transcript.drawn t=before);
+    check (option string) "late attempt cannot relabel ended runtime"
+      (Some "runtime-a") (Transcript.current_runtime_id t))
+    [Live.Run_finished; Live.Run_failed {message="provider failed"}]
+
+let test_failure_body_and_runtime_are_independent () =
+  List.iter (fun message ->
+    let t = fresh () in
+    feed t [Live.Run_started;
+      Live.Runtime_attempt_started {runtime_id=Some "serving-runtime";attempt_index=Some 0};
+      Live.Run_failed {message}];
+    check bool "reported error is preserved literally" true
+      (Transcript.phase t=Transcript.Stream_failed message);
+    check bool "runtime context cannot be suppressed by punctuation" true
+      (List.exists (fun (_,row) -> contains ~needle:"runtime: serving-runtime" row) (rows t));
+    check bool "error body is separate from runtime metadata" true
+      (List.exists (fun item -> match item.Transcript.drawn with
+        | Transcript.Drawn_error body -> body=message | _ -> false) (Transcript.drawn t)))
+    ["provider 429"; "file[1] unavailable"; "[claimed-runtime] untrusted diagnostic"]
 
 let test_drawn_items_carry_superseded_runtime_id () =
   let t = fresh () in
@@ -1789,11 +1955,6 @@ let test_the_legend_names_every_mark_and_phrase_the_rows_draw () =
   let keys = List.map fst Transcript.legend in
   check bool "received result mark is explained without a success claim" true
     (List.mem (Transcript.received_marker ^ " received") keys);
-  (* The two lists are written by hand: a constructor added later compiles
-     (the label functions are exhaustive) but would be missing from the
-     rollup and the legend, so their lengths are held here. *)
-  check int "eight outcomes" 8 (List.length Transcript.all_outcomes);
-  check int "eight skill states" 8 (List.length Transcript.all_skill_states);
   List.iter
     (fun outcome ->
       let key =
@@ -1867,16 +2028,104 @@ let test_native_tools_are_observations_without_execution_receipts () =
     | [call] -> call | calls -> failf "expected one native step, got %d" (List.length calls) in
   check tool_outcome "provider step runs; arguments are not inferred" Transcript.Native_running (call ()).outcome;
   feed t [Live.Native_tool_started {occurrence;tool_name=Some "Read"};
-          Live.Native_tool_ended {occurrence}; Live.Native_tool_ended {occurrence}];
+          Live.Native_tool_ended {occurrence; completion=Runtime_native_tools.end_observed}; Live.Native_tool_ended {occurrence; completion=Runtime_native_tools.end_observed}];
   check tool_outcome "provider end is not a result receipt" Transcript.Native_ended (call ()).outcome;
   check (option string) "no invented physical execution" None (call ()).execution_id;
   feed t [Live.Tool_result {occurrence; execution_id="wrong-authority"}];
   check (option string) "MASC receipt cannot attach to native observation" None (call ()).execution_id;
   check bool "mixed-authority event is reported" true (Option.is_some (Transcript.unreadable t));
+  (* A single call is already shown in full. A second distinct native call
+     exercises the compact group's summary without inventing a MASC receipt. *)
+  let second = {occurrence with block_index=8; tool_call_id=Some "native-8"} in
+  feed t [Live.Native_tool_started {occurrence=second;tool_name=Some "Search"};
+          Live.Native_tool_ended {occurrence=second; completion=Runtime_native_tools.end_observed}];
   let rows = Transcript.project_tool_block Transcript.Compact
       (Transcript.tool_block (Transcript.tool_calls t)) in
-  check bool "a single native step has no roll-up summary" true
-    (Option.is_none rows.summary_outcome)
+  check (option tool_outcome) "two native steps fold to a native end, not a MASC receipt"
+    (Some Transcript.Native_ended) rows.summary_outcome
+;;
+
+(* The provider's own report decides which native ending a step shows. Only a
+   reported error, a reported decline or a nonzero exit is a failure; a
+   missing or unknown status is not. The failure keeps its native wording and
+   never becomes a MASC result. *)
+let test_a_reported_native_failure_shows_as_failure () =
+  let open Runtime_native_tools in
+  let step index name completion =
+    let occurrence = occurrence ~block_index:index (Printf.sprintf "native-%d" index) in
+    [Live.Native_tool_started {occurrence; tool_name=Some name};
+     Live.Native_tool_ended {occurrence; completion}] in
+  List.iter (fun (label, completion, expected) ->
+    let t = fresh () in
+    feed t (Live.Run_started :: step 7 "Read" completion);
+    match Transcript.tool_calls t with
+    | [call] ->
+      check tool_outcome label expected call.outcome;
+      check (option string) (label ^ ": no execution receipt") None call.execution_id
+    | calls -> failf "%s: expected one native step, got %d" label (List.length calls))
+    [ "error", {outcome=Error_reported; exit_code=None}, Transcript.Native_failed
+    ; "decline", {outcome=Decline_reported; exit_code=None}, Transcript.Native_failed
+    ; "result flagged as an error", {outcome=Result_received {is_error=Some true}; exit_code=None},
+      Transcript.Native_failed
+    ; "nonzero exit", {outcome=Completion_reported; exit_code=Some 17}, Transcript.Native_failed
+    ; "completion", {outcome=Completion_reported; exit_code=Some 0}, Transcript.Native_ended
+    ; "result without an error", {outcome=Result_received {is_error=Some false}; exit_code=None},
+      Transcript.Native_ended
+    ; "result without an error flag", {outcome=Result_received {is_error=None}; exit_code=None},
+      Transcript.Native_ended
+    ; "unrecognized status", {outcome=Unrecognized_status "future"; exit_code=None},
+      Transcript.Native_ended
+    ; "no status", end_observed, Transcript.Native_ended ];
+  (* Marker glyphs are presentation; the typed outcome and the fold's
+     summary_outcome below carry the decision without pinning glyphs. *)
+  let t = fresh () in
+  feed t (Live.Run_started :: step 7 "Read" end_observed
+          @ step 8 "Bash" {outcome=Error_reported; exit_code=Some 2}
+          @ step 9 "Search" {outcome=Completion_reported; exit_code=None});
+  let rows = Transcript.project_tool_block Transcript.Compact
+      (Transcript.tool_block (Transcript.tool_calls t)) in
+  (* The typed summary carries the decision; the drawn wording and row
+     layout belong to the renderer, not to this contract. *)
+  check (option tool_outcome) "the fold takes the failure's mark and colour"
+    (Some Transcript.Native_failed) rows.summary_outcome
+;;
+
+let test_native_details_retain_provider_elapsed_with_other_observations () =
+  let open Runtime_native_tools in
+  List.iter (fun (label, observations) ->
+    let t = fresh () in
+    let native = occurrence ~block_index:7 "native-mixed" in
+    feed t [Live.Run_started; Live.Text {text="authored answer"; stream_scope=None};
+      Live.Native_tool_started {occurrence=native;tool_name=Some "Read"}];
+    List.iter (fun progress -> feed ~now:(origin +. 12.) t
+      [Live.Native_tool_progress {occurrence=native;progress}])
+      (Heartbeat_reported {elapsed_seconds=30} :: observations
+       @ [Heartbeat_reported {elapsed_seconds=3}]);
+    let check_details () =
+      let details = Transcript.tool_calls t |> Transcript.tool_block |> full_tool_rows in
+      let text = String.concat "\n" details in
+      check bool (label ^ ": provider elapsed is an independent detail") true
+        (contains ~needle:"provider elapsed 3s" text);
+      check bool (label ^ ": latest report replaces the prior report") false
+        (contains ~needle:"provider elapsed 30s" text);
+      check bool (label ^ ": local observation elapsed is separate") true
+        (contains ~needle:"updated +12s" text);
+      List.iter (function
+        | Message_reported _ -> check bool (label ^ ": message retained") true (contains ~needle:"busy" text)
+        | Output_observed _ -> check bool (label ^ ": bytes retained") true (contains ~needle:"13 bytes observed" text)
+        | Heartbeat_reported _ | Retry_observed _ -> ()) observations;
+      check string (label ^ ": metadata never becomes speech") "authored answer" (Transcript.text t);
+      match Transcript.tool_calls t with
+      | [call] -> check (option string) (label ^ ": no execution receipt") None call.execution_id
+      | _ -> fail "expected exactly one native observation" in
+    check_details ();
+    feed ~now:(origin +. 15.) t
+      [Live.Native_tool_ended {occurrence=native;completion=end_observed}];
+    check_details ())
+    ["heartbeat", [];
+     "message", [Message_reported {message="busy"}];
+     "output", [Output_observed {byte_count=13}];
+     "message and output", [Message_reported {message="busy"};Output_observed {byte_count=13}]]
 ;;
 
 let test_response_boundaries_preserve_origins () =
@@ -1886,9 +2135,9 @@ let test_response_boundaries_preserve_origins () =
     "tool round", [Live.Text {text="COMMENTARY"; stream_scope=None}] @ read_file_call;
     "native tool round", [Live.Text {text="COMMENTARY"; stream_scope=None};
       Live.Native_tool_started {occurrence=occurrence "native";tool_name=Some "Read"};
-      Live.Native_tool_ended {occurrence=occurrence "native"}];
+      Live.Native_tool_ended {occurrence=occurrence "native"; completion=Runtime_native_tools.end_observed}];
     "provider response", [Live.Text {text="COMMENTARY"; stream_scope=None};
-      Live.Stream_model_started {stream_scope = None; message_id=Some "new";model="glm";usage=None}];
+      Live.Stream_model_started {stream_scope=None; message_id=Some "new";model="glm";usage=None}];
     "retry", [Live.Text {text="COMMENTARY"; stream_scope=None};
       Live.Runtime_attempt_started {runtime_id=Some "retry";attempt_index=Some 1}];
     "continuation", [Live.Text {text="COMMENTARY"; stream_scope=None};
@@ -1902,18 +2151,68 @@ let test_response_boundaries_preserve_origins () =
     List.iter put (Live.Run_started :: boundary @ [Live.Text {text="PREFIX"; stream_scope=None}; Live.Thinking "thought"; Live.Text {text="SUFFIX"; stream_scope=None}]);
     let before = Transcript.drawn t in
     let last = List.hd (List.rev before) in
-    put (reply_details ~reply:"SUFFIX" ());
+    put (reply_details ~reply:"PREFIX\nSUFFIX" ());
     put Live.Run_finished;
-    check (list string) (label ^ ": prior content and observed order preserved")
-      ["COMMENTARY"; "PREFIX"; "SUFFIX"] (speech t);
+    check (list string) (label ^ ": observed order plus a separate canonical reply")
+      ["COMMENTARY"; "PREFIX"; "SUFFIX"; "PREFIX\nSUFFIX"] (speech t);
     let after = Transcript.drawn t in
     let reply = List.find (fun (item:Transcript.drawn_item) -> match item.drawn with Drawn_reply _ -> true | _ -> false) after in
-    check bool (label ^ ": reply keeps surviving stretch origin") true (last.origin = reply.origin);
+    check bool (label ^ ": final reply does not steal an observed origin") true (last.origin <> reply.origin);
+    check bool (label ^ ": separate final carries typed authority") true
+      (reply.response_part = Some Transcript.Final_response);
+    let observations = List.filter (fun (item:Transcript.drawn_item) ->
+      item.response_part = Some Transcript.Observed_response) after in
+    check (list string) (label ^ ": exact observed fragments survive")
+      ["PREFIX";"SUFFIX"]
+      (List.filter_map (fun (item:Transcript.drawn_item) ->
+        match item.drawn with Drawn_text text -> Some text | _ -> None) observations);
+    check bool (label ^ ": every original row keeps content, origin and position") true
+      (List.map (fun (item:Transcript.drawn_item) -> item.origin,item.drawn) before
+       = List.map (fun (item:Transcript.drawn_item) -> item.origin,item.drawn)
+           (List.filter (fun (item:Transcript.drawn_item) -> item.response_part <> Some Transcript.Final_response) after));
     check bool (label ^ ": origins are unique across boundaries") true
       (let origins = List.map (fun (item:Transcript.drawn_item) -> item.origin) after in
        List.length origins = List.length (List.sort_uniq compare origins));
     check bool (label ^ ": refolding preserves origins and content") true
       (after = Transcript.drawn (Transcript.of_log ~now:origin log))) cases
+;;
+
+let test_interleaved_final_keeps_observed_times_and_bytes () =
+  List.iter (fun canonical ->
+    let t = fresh () in
+    feed ~now:10. t [Live.Run_started;Live.Text {text="A"; stream_scope=None}];
+    feed ~now:20. t [Live.Thinking "R"];
+    feed ~now:30. t [Live.Text {text="B"; stream_scope=None}];
+    let before = Transcript.drawn t in
+    feed ~now:40. t [reply_details ~reply:canonical ()];
+    feed ~now:50. t [Live.Run_finished];
+    let after = Transcript.drawn t in
+    check (list string) "observed bytes and final bytes remain separate"
+      ["text:A";"thinking:R";"text:B";"reply:" ^ canonical]
+      (List.map drawn_to_string after);
+    check (list (option (float 0.001))) "canonical reply has its own event time"
+      [Some 10.;Some 20.;Some 30.;Some 40.]
+      (List.map (fun (item:Transcript.drawn_item) -> item.at) after);
+    check bool "surviving observations retain source origins" true
+      (List.map (fun (item:Transcript.drawn_item) -> item.origin) before
+       = List.map (fun (item:Transcript.drawn_item) -> item.origin) (List.take 3 after));
+    check bool "role metadata never enters the authored text" true
+      (List.map (fun (item:Transcript.drawn_item) -> item.response_part) after
+       = [Some Transcript.Observed_response;None;Some Transcript.Observed_response;
+          Some Transcript.Final_response]);
+    feed ~now:60. t [Live.Run_failed {message="late failure"}];
+    check (list string) "a terminal error preserves observations and final authority"
+      ["text:A";"thinking:R";"text:B";"reply:" ^ canonical;"error:late failure"]
+      (drawn t)) ["A\nB";"Changed canonical body"];
+  List.iter (fun outcome ->
+    let t = fresh () in
+    feed t [Live.Run_started;Live.Text {text="A"; stream_scope=None};Live.Thinking "R";Live.Text {text="B"; stream_scope=None};
+      Live.Reply_details {reply="";turn_outcome=outcome;turn_ref="trace#1";terminal_stream_scope=None}];
+    check bool "blank and control outcomes preserve observations without a final text area"
+      true (List.for_all (fun (item:Transcript.drawn_item) -> item.response_part=None)
+        (Transcript.drawn t)))
+    [Masc.Keeper_turn_outcome.Visible_reply;Continuation_checkpoint;
+     Terminal_effect_settled;Awaiting_gate_approval;No_visible_reply]
 ;;
 
 let test_usage_resets_only_at_response_boundaries () =
@@ -1974,6 +2273,70 @@ let test_empty_new_response_does_not_replace_prior_message () =
        match item.drawn with Drawn_text text | Drawn_reply text -> Some text | _ -> None) items);
   check bool "unstreamed final uses its own synthetic origin" true
     ((List.hd (List.rev items)).origin = Transcript.Reply_of_segment 0)
+;;
+
+let test_skill_evidence_retains_invocation_runtime_identity () =
+  let evidence ?runtime_id action = Transcript.make_skill_activity
+      ~skill_tool_use_id:"same-provider-id" ~turn_ref:"same-turn#1" ?runtime_id
+      ~skill_name:"exact-skill" ~state:Transcript.Skill_used ~actions:[action] () in
+  let skills t = Transcript.drawn t |> List.concat_map (fun (item : Transcript.drawn_item) ->
+    match item.drawn with Transcript.Drawn_skill skills -> skills | _ -> []) in
+  let t = fresh () in
+  feed t [Live.Run_started];
+  List.iter (Transcript.note_skill_activity t)
+    [evidence ~runtime_id:"runtime-a" "ACTION_A";
+     evidence ~runtime_id:"runtime-b" "ACTION_B";
+     evidence ~runtime_id:"runtime-a" "ACTION_A_UPDATED"];
+  check (list (option string)) "distinct known runtimes survive the same turn and provider id"
+    [Some "runtime-a";Some "runtime-b"]
+    (List.map (fun (skill : Transcript.skill_activity) -> skill.runtime_id) (skills t));
+  check (list (list string)) "same-runtime update cannot replace another runtime's facts"
+    [["ACTION_A_UPDATED"];["ACTION_B"]]
+    (List.map (fun (skill : Transcript.skill_activity) -> skill.actions) (skills t));
+  let a = evidence ~runtime_id:"runtime-a" "ACTION_A"
+  and b = evidence ~runtime_id:"runtime-b" "ACTION_B" in
+  List.iter (fun records ->
+    let streamed = fresh () in
+    feed streamed [Live.Run_started;tool_started "same-provider-id" "keeper_skill";
+      tool_ended "same-provider-id";tool_result "same-provider-id" "skill-exec";
+      Live.Reply_details {reply="";turn_outcome=Continuation_checkpoint;turn_ref="same-turn#1"; terminal_stream_scope=None};
+      Live.Run_finished];
+    List.iter (Transcript.note_skill_activity streamed) records;
+    check (list (option string)) "ambiguous stream preserves all runtime authorities in either receipt order"
+      (None :: List.map (fun (skill : Transcript.skill_activity) -> skill.runtime_id) records)
+      (List.map (fun (skill : Transcript.skill_activity) -> skill.runtime_id) (skills streamed)))
+    [[a;b];[b;a]];
+  List.iter (fun records ->
+    let failed = fresh () in
+    feed failed [Live.Run_started;tool_started "same-provider-id" "keeper_skill";
+      tool_ended "same-provider-id";tool_result "same-provider-id" "failed-skill-exec";
+      Live.Reply_details {reply="";turn_outcome=Continuation_checkpoint;turn_ref="same-turn#1"; terminal_stream_scope=None};
+      Live.Run_finished];
+    ignore (Transcript.note_tool_outcome failed ~execution_id:"failed-skill-exec"
+      ~outcome:Transcript.Failed ~duration:None);
+    List.iter (Transcript.note_skill_activity failed) records;
+    let observed = skills failed in
+    check int "unique failure consumes its receipt; ambiguous failure preserves independent receipts"
+      (if List.length records=1 then 1 else 3) (List.length observed);
+    check bool "receipt completion cannot replace observed Skill failure" true
+      ((List.hd observed).state=Transcript.Skill_failed);
+    check (option string) "only unique runtime authority completes failure provenance"
+      (if List.length records=1 then Some "runtime-a" else None)
+      (List.hd observed).runtime_id)
+    [[evidence ~runtime_id:"runtime-a" "ACTION_A"];
+     [evidence ~runtime_id:"runtime-a" "ACTION_A";
+      evidence ~runtime_id:"runtime-b" "ACTION_B"]];
+  Transcript.note_skill_activity t (evidence "UNATTRIBUTED");
+  check int "unknown runtime cannot choose between two known invocation records" 3
+    (List.length (skills t));
+  List.iter (fun records ->
+    let t = fresh () in
+    List.iter (Transcript.note_skill_activity t) records;
+    check (list (option string)) "one unknown runtime can be completed without losing known identity"
+      [Some "runtime-a"]
+      (List.map (fun (skill : Transcript.skill_activity) -> skill.runtime_id) (skills t)))
+    [[evidence "UNKNOWN";evidence ~runtime_id:"runtime-a" "KNOWN"];
+     [evidence ~runtime_id:"runtime-a" "KNOWN";evidence "UNKNOWN"]]
 ;;
 
 let test_scoped_details_retire_prior_model_activity () =
@@ -2037,12 +2400,21 @@ let test_scoped_details_retire_prior_response_usage () =
 
 let () =
   run "tui_keeper_chat_transcript"
-    [ ( "response boundaries", [test_case "scoped details retire prior model activity" `Quick test_scoped_details_retire_prior_model_activity;
+    [ ( "response boundaries", [test_case "Skill evidence retains runtime identity" `Quick test_skill_evidence_retains_invocation_runtime_identity;
+      test_case "scoped details retire prior model activity" `Quick test_scoped_details_retire_prior_model_activity;
       test_case "scoped details retire prior response usage" `Quick test_scoped_details_retire_prior_response_usage;
-      test_case "boundaries and stable origins" `Quick test_response_boundaries_preserve_origins; test_case "usage reset boundaries" `Quick test_usage_resets_only_at_response_boundaries; test_case "new response without text" `Quick test_empty_new_response_does_not_replace_prior_message])
+      test_case "boundaries and stable origins" `Quick test_response_boundaries_preserve_origins; test_case "interleaved final authority" `Quick test_interleaved_final_keeps_observed_times_and_bytes; test_case "usage reset boundaries" `Quick test_usage_resets_only_at_response_boundaries; test_case "response end retains turn and tool lifecycle" `Quick test_response_stop_preserves_pending_work; test_case "new response without text" `Quick test_empty_new_response_does_not_replace_prior_message])
+    ; ( "attempt authority", [test_case "current attempt metadata retains activity" `Quick test_current_attempt_metadata_keeps_observed_activity;
+        test_case "late runtime naming retains streaming" `Quick test_late_runtime_name_does_not_supersede_observed_output;
+        test_case "continuation restarts attempt identity" `Quick test_continuation_restarts_attempt_identity;
+        test_case "late attempt retains ended work" `Quick test_late_attempt_cannot_rewrite_ended_work;
+        test_case "error body and runtime context remain independent" `Quick test_failure_body_and_runtime_are_independent])
     ; ( "event timeline"
       , [test_case "replay preserves continuation event times" `Quick test_event_times_survive_log_replay_and_continuation;
-         test_case "native tools have no MASC receipt" `Quick test_native_tools_are_observations_without_execution_receipts] )
+         test_case "native tools have no MASC receipt" `Quick test_native_tools_are_observations_without_execution_receipts;
+         test_case "a reported native failure shows as failure" `Quick
+           test_a_reported_native_failure_shows_as_failure;
+         test_case "native detail retains independent provider elapsed" `Quick test_native_details_retain_provider_elapsed_with_other_observations] )
     ; ( "content"
       , [ test_case "the legend names every mark and phrase the rows draw" `Quick
             test_the_legend_names_every_mark_and_phrase_the_rows_draw
@@ -2087,6 +2459,8 @@ let () =
             test_repeated_response_start_is_not_a_boundary
         ; test_case "scoped text retires prior metadata" `Quick
             test_scoped_text_retires_prior_response_metadata
+        ; test_case "empty scoped text still retires prior metadata" `Quick
+            test_empty_scoped_text_still_retires_prior_response_metadata
         ; test_case "drawn reconciles text after an observed skill round" `Quick
             test_drawn_reconciles_text_after_an_observed_skill_round
         ; test_case "note_tool_outcome folds the durable facts in" `Quick

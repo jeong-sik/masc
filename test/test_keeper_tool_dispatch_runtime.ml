@@ -1487,25 +1487,15 @@ let test_manual_gate_does_not_defer_internal_memory_write () =
          "Manual Gate memory write outcome"
          "success"
          (outcome_label result.KTE.disposition);
-       check bool
-         "Manual Gate memory write created its snapshot"
-         true
+       check bool "Manual Gate pending write does not create current Memory" false
          (Sys.file_exists memory_path);
-       (match
-          Masc.Keeper_memory_os_current.read_for_keepers_dir
-            ~keepers_dir
-            ~keeper_id:meta.name
-        with
-        | Ok (Some { facts = [ fact ]; _ }) ->
-          check string
-            "internal memory write persisted the exact claim"
-            "**internal memory** persists without external Gate approval"
-            fact.claim
-        | Ok (Some snapshot) ->
-          failf
-            "internal memory write persisted %d facts instead of one"
-            (List.length snapshot.facts)
-        | Ok None -> fail "internal memory write persisted no snapshot"
+       (match Masc.Keeper_memory_admission_queue.read_pending ~keepers_dir ~keeper_id:meta.name with
+        | Ok (Some batch) ->
+          (match Masc.Keeper_memory_admission_queue.candidates batch with
+           | [candidate] -> check string "internal write preserves exact pending claim"
+               "**internal memory** persists without external Gate approval" candidate.fact.claim
+           | _ -> fail "expected one pending observation")
+        | Ok None -> fail "internal memory write omitted pending input"
         | Error detail -> fail detail);
        (match
           Masc.Keeper_approval_queue.list_pending_entries_for_workspace
@@ -4767,6 +4757,20 @@ let test_memory_calls_in_a_mixed_batch_answer_the_model_whatever_they_committed 
        failed_naming Tool_result.Proven_pre_effect "the missing retraction"
          (first "retract-missing");
        succeeded "lane status beside memory calls" (first "lane-first");
+       let module Admission = Masc.Keeper_memory_admission_queue in
+       let module Current = Masc.Keeper_memory_os_current in
+       let pending = match Admission.read_pending ~keepers_dir ~keeper_id:meta.name with
+         | Ok (Some batch) -> batch | _ -> fail "successful write omitted pending input" in
+       check string "batch reports pending admission" "persisted_pending_admission"
+         Yojson.Safe.Util.((parse_json (first "write-kept").content) |> member "outcome" |> to_string);
+       (match Current.apply_disposition ~explicit_candidate_ids:(Admission.candidate_ids pending)
+          ~keepers_dir ~keeper_id:meta.name ~now:(Unix.gettimeofday ())
+          ~source:{Current.kind=Current.Librarian;trace_id="fixture-admission"}
+          ~absorbed:[] ~revisions:[]
+          ~new_claims:(List.map (fun (row : Admission.candidate) -> row.fact) (Admission.candidates pending)) () with
+        | Ok _ -> () | Error detail -> fail detail);
+       (match Admission.acknowledge_committed ~keepers_dir ~keeper_id:meta.name with
+        | Ok () -> () | Error detail -> fail detail);
        let kept_id =
          match
            Masc.Keeper_memory_os_current.read_for_keepers_dir
@@ -4779,8 +4783,8 @@ let test_memory_calls_in_a_mixed_batch_answer_the_model_whatever_they_committed 
          | Ok None -> fail "the claim persisted no snapshot"
          | Error detail -> fail detail
        in
-       (* A directory where the snapshot file belongs: the next write and
-          retraction fail inside the store, whatever user the test runs as. *)
+       (* Unreadable queue and current paths independently reject the pending
+          write and retraction, whatever user the test runs as. *)
        let snapshot_path =
          Masc.Keeper_memory_os_current.path_for_keepers_dir
            ~keepers_dir
@@ -4788,6 +4792,9 @@ let test_memory_calls_in_a_mixed_batch_answer_the_model_whatever_they_committed 
        in
        Unix.unlink snapshot_path;
        Unix.mkdir snapshot_path 0o755;
+       let queue_path = Admission.path ~keepers_dir ~keeper_id:meta.name in
+       Unix.unlink queue_path;
+       Unix.mkdir queue_path 0o755;
        let second =
          run_batch
            "store failure batch"
@@ -5883,7 +5890,7 @@ value = { query = "must-not-queue" }
    document, fixture or shipped, becomes the catalog [make_tools] reads. The
    directory has to match the frontmatter name, which has to match the
    composition's own name; that is what decides the [keeper_compose_*] tool. *)
-let skill_catalog_of_document ~name document =
+let skill_catalog_of_document ?descriptors ~name document =
   let config_text =
     {|[skills]
 resource-read-max-bytes = 16384
@@ -5924,7 +5931,7 @@ access = "read-write"
     | Ok snapshot -> snapshot
     | Error _ -> fail "composition Skill snapshot fixture was rejected"
   in
-  match Masc.Keeper_skill_catalog.of_snapshot snapshot with
+  match Masc.Keeper_skill_catalog.of_snapshot ?descriptors snapshot with
   | catalog, [] -> catalog
   | _, diagnostic :: _ ->
     failf
@@ -5935,8 +5942,8 @@ access = "read-write"
 
 (* The fixtures here are composition TOML, wrapped in the skill document that
    carries a composition to the bundle. *)
-let skill_catalog_of_composition ~name toml =
-  skill_catalog_of_document
+let skill_catalog_of_composition ?descriptors ~name toml =
+  skill_catalog_of_document ?descriptors
     ~name
     (Printf.sprintf
        "---\nname: %s\ndescription: %s\n---\n\nComposition fixture.\n\n```toml composition\n%s```\n"
@@ -6270,9 +6277,15 @@ let test_compositions_share_closed_turn_descriptor_set () =
   with_exec_fixture "composition-closed-turn-descriptors"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
        let lane_descriptor = composition_descriptor "keeper_lane_status" in
-       let descriptors =
-         [ { lane_descriptor with description = "forged descriptor description" } ]
-       in
+       let forged = { lane_descriptor with description = "forged descriptor description" } in
+       (match
+          Masc.Keeper_tools_agent_core_bundle.For_testing.make_tools_for_descriptors
+            ~config ~meta ~publication_recovery ~ctx_snapshot:ctx_work
+            ~descriptors:[forged] ~skill_catalog:Masc.Keeper_skill_catalog.empty ()
+        with
+        | _ -> fail "bundle admitted a copied descriptor outside canonical authority"
+        | exception Invalid_argument _ -> ());
+       let descriptors = [lane_descriptor] in
        let tools_for ~name composition =
          let skill_catalog = skill_catalog_of_composition ~name composition in
          Masc.Keeper_tools_agent_core_bundle.For_testing.make_tools_for_descriptors
@@ -6300,7 +6313,7 @@ let test_compositions_share_closed_turn_descriptor_set () =
          | None -> fail "closed descriptor set lost keeper_lane_status"
        in
        check string
-         "bundle resolves supplied descriptor to canonical authority"
+         "bundle preserves the admitted canonical descriptor"
          lane_descriptor.description
          lane_tool.schema.description;
        let assert_deterministic_refusal
@@ -7852,6 +7865,25 @@ let test_composition_over_an_empty_msx_lane_returns_the_refusal ?(break_evidence
      then "composition-empty-msx-lane-unpublished-evidence"
      else "composition-empty-msx-lane")
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let sw = match Eio_context.get_switch_opt () with Some sw -> sw | None -> fail "missing fixture switch" in
+       let clock = match Eio_context.get_clock_opt () with Some clock -> clock | None -> fail "missing fixture clock" in
+       let previous_runtime = Runtime.For_testing.snapshot () in
+       Fun.protect ~finally:(fun () -> Runtime.For_testing.restore previous_runtime) (fun () ->
+       let runtime_path = Filename.concat config.base_path "machine-runtime.toml" in
+       Out_channel.with_open_bin runtime_path (fun channel -> output_string channel {|[providers.local]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+[models.sample]
+api-name = "sample"
+max-context = 1024
+[local.sample]
+[runtime]
+default = "local.sample"
+|});
+       (match Runtime.init_default ~config_path:runtime_path with Ok () -> () | Error detail -> fail detail);
+       Masc.Lane_addon_runtime.For_testing.reset ();
+       Eio.Time.with_timeout_exn clock 30. (fun () ->
+       Machine_worker_fixture.with_msx ~clock ~sw ~base_path:config.base_path (fun ~invoke:_ ~detach ->
        ignore (Msx_lane.eject () : (unit, Msx_lane.error) result);
        (* A file where the evidence directory belongs makes the recovery
           record unpublishable. Evidence fences a turn because it is the record
@@ -7863,18 +7895,32 @@ let test_composition_over_an_empty_msx_lane_returns_the_refusal ?(break_evidence
            Filename.concat (Masc.Workspace.masc_root_dir config) "skill-composition-evidence-v1"
          in
          Out_channel.with_open_bin path (fun channel -> output_string channel "occupied"));
-       let skill_catalog =
-         skill_catalog_of_composition
-           ~name:"msx-end-command"
-           sangokushi_end_command_composition
-       in
+       let lane_addon_exports = (Masc.Keeper_lane_addon_runtime.snapshot ~config ~keeper_name:meta.name).exports in
+       let tool_descriptors = Masc.Keeper_tool_descriptor.all_descriptors ()
+         @ List.map Masc.Keeper_lane_addon_descriptor.create lane_addon_exports in
+       let authored_source =
+         "---\nname: msx-end-command\ndescription: End the MSX command.\n---\n```toml composition\n"
+         ^ sangokushi_end_command_composition ^ "\n```\n" in
+       let validate descriptors =
+         Masc.Keeper_skill_catalog.validate_authored_source ~descriptors
+           ~directory:"msx-end-command" authored_source in
+       check bool "authoring sees attached MSX tools" true
+         (Result.is_ok (validate tool_descriptors));
+       let skill_catalog = skill_catalog_of_composition ~descriptors:tool_descriptors
+         ~name:"msx-end-command" sangokushi_end_command_composition in
+       let capability_surface = Masc.Keeper_capability_surface.create_with_descriptors
+         ~tool_descriptors ~tool_deny:[] ~sandbox_profile:meta.sandbox_profile ~skill_names:None
+         ~global_skill_catalog:skill_catalog
+         ~skill_inventory:(Masc.Keeper_skill_inventory.of_snapshot ~descriptors:tool_descriptors
+           (Skill_catalog_snapshot.config_unreadable ~detail:"fixture supplies its composition directly"))
+         ~task_skills:[] in
        let bundle =
          Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
            ~config
            ~meta
            ~publication_recovery
            ~ctx_snapshot:ctx_work
-           ~skill_catalog
+           ~skill_catalog ~capability_surface
            ()
        in
        Fun.protect
@@ -7917,7 +7963,13 @@ let test_composition_over_an_empty_msx_lane_returns_the_refusal ?(break_evidence
             in
             let result = tool.call ~call_id:"empty-msx-lane-composition" (`Assoc []) in
             check bool "the refusal is visible" false result.success;
-            let failure_payload = parse_json result.content in
+            let envelope = parse_json result.content in
+            check string "the metadata-bearing result is a failed tool envelope"
+              "failed"
+              Yojson.Safe.Util.(member "masc.tool_disposition" envelope |> to_string);
+            let failure_payload =
+              Yojson.Safe.Util.(member "message" envelope |> to_string) |> parse_json
+            in
             check string
               "the lane touched nothing, and the composition says so"
               "proven_pre_effect"
@@ -7945,7 +7997,13 @@ let test_composition_over_an_empty_msx_lane_returns_the_refusal ?(break_evidence
             check bool
               "the provider turn stays open so the Keeper can load or restore"
               true
-              (Option.is_none result.abort_turn)))
+              (Option.is_none result.abort_turn));
+       detach ();
+       let detached_exports = (Masc.Keeper_lane_addon_runtime.snapshot ~config ~keeper_name:meta.name).exports in
+       let detached_descriptors = Masc.Keeper_tool_descriptor.all_descriptors ()
+         @ List.map Masc.Keeper_lane_addon_descriptor.create detached_exports in
+       check bool "new authoring validation refuses detached MSX tools" true
+         (Result.is_error (validate detached_descriptors))))))
 ;;
 
 let test_terminal_composition_unknown_write_failure_closes_official_client_loop () =
@@ -8543,7 +8601,7 @@ let test_composition_terminal_requires_terminal_outer_invocation () =
            ()
        with
        | Error
-           { settled = []
+           ({ settled = []
            ; cause =
                Masc.Keeper_tool_plan_executor.Outer_completion_mismatch
                  { expected =
@@ -8552,7 +8610,36 @@ let test_composition_terminal_requires_terminal_outer_invocation () =
                  ; actual = Agent_core.Tool_contract.Continue_after_success
                  }
            ; effect_disposition = Tool_result.Proven_pre_effect
-           } -> ()
+           } as failure) ->
+         let assert_aggregate_refusal execution =
+           match Masc.Keeper_tool_composition_surface.For_testing.result_of_execution
+             ~tool_name:"keeper_compose_refusal"
+             ~tool_kind:Masc.Keeper_tool_descriptor.Composition_tool
+             ~start_time:(Tool_timing.start ()) execution with
+           | Tool_result.Failed { effect_disposition = Tool_result.Proven_pre_effect; _ } -> ()
+           | Tool_result.Failed _ | Tool_result.Completed _ | Tool_result.Deferred _ ->
+             fail "composition result lost the aggregate pre-effect proof"
+         in
+         assert_aggregate_refusal (Error failure);
+         let descriptor = composition_descriptor "keeper_lane_status" in
+         let node = Masc.Keeper_tool_plan.node
+           ~id:(composition_node_id "refusal") ~tool_name:"keeper_lane_status"
+           ~input:(Masc.Keeper_tool_plan.Json_template.literal (`Assoc [])) () in
+         let plan = match Masc.Keeper_tool_plan.create ~descriptors:[ descriptor ] [ node ] with
+           | Ok plan -> plan | Error _ -> fail "refusal fixture plan was rejected" in
+         let execution = Masc.Keeper_tool_plan_executor.execute ~plan
+           ~run_id:(Masc.Keeper_tool_plan.Run_id.fresh ())
+           ~dispatch:(fun ~tool_use_id:_ ~node:_ ~descriptor:_ ~schedule:_ ~input:_ ->
+             Masc.Keeper_tool_plan_executor.dispatch_result
+               ~failure_effect_disposition:Tool_result.Proven_pre_effect
+               (Tool_result.make_err ~tool_name:"keeper_lane_status"
+                  ~class_:Tool_result.Runtime_failure
+                  ~effect_disposition:Tool_result.Proven_pre_effect
+                  ~start_time:(Tool_timing.start ()) "fixture refusal")) () in
+         (match execution with
+          | Error { cause = Masc.Keeper_tool_plan_executor.Tool_did_not_complete _; _ } ->
+            assert_aggregate_refusal execution
+          | Error _ | Ok _ -> fail "fixture did not exercise a refused composition node")
        | Error _ | Ok _ ->
          fail "terminal composition accepted an ordinary outer invocation")
 ;;
@@ -8635,16 +8722,6 @@ let composable_output_probes =
       ~needs_sandbox:true
       "keeper_spawn"
       (`Assoc [ "argv", `List [ `String "/bin/echo"; `String "probe" ] ])
-  ; { tool_name = "masc_msx_screen"
-    ; needs_sandbox = false
-    ; prepare = (fun ~config ~meta:_ ->
-        (match Msx_lane.load
-           ~ledger_dir:(Filename.concat config.Masc.Workspace.base_path "msx-probe")
-           ~roms_dir:None ~cart_path:None ~disk_path:None with
-         | Ok _ -> ()
-         | Error error -> fail (Msx_lane.error_to_string error));
-        `Assoc [])
-    }
   ; probe "keeper_lane_status" (`Assoc [])
   ; probe "keeper_portrait_read" (`Assoc [ "size", `Int 96 ])
   ; { tool_name = "keeper_tasks_list"

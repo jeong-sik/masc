@@ -1,3 +1,4 @@
+import type { KeeperChatStreamEvent } from './lib/keeper-chat-stream-contract'
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   _resetActiveKeeperStreamsForTests,
@@ -44,7 +45,7 @@ function assistantEntry(operationId?: string): void {
     delivery: 'sending',
     streamState: 'opening',
     ...(operationId
-      ? { deliveryProvenance: operationDeliveryProvenance(operationId, 'terminal_assistant') }
+      ? { deliveryProvenance: operationDeliveryProvenance(operationId, 'terminal_result') }
       : {}),
     details: null,
   })
@@ -58,6 +59,73 @@ describe('Keeper operation stream projection', () => {
     _clearTrackedKeeperChatOperationsForTests()
     keeperThreads.value = {}
     keeperToolApprovals.value = {}
+  })
+
+  it.each(['observed', 'ended'] as const)('keeps content %s metadata outside model progress and body state', state => {
+    assistantEntry()
+    for (const hasBody of [false, true]) {
+      if (hasBody) {
+        applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'authored text' })
+      }
+      const before = keeperThreads.value
+      expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'CUSTOM',
+        name: 'KEEPER_MODEL_CONTENT_ACTIVITY',
+        value: { generation: 17, stream_scope: 0, block_index: 2, channel: 'text', state },
+      })).toBeNull()
+      // This view does not draw the side metadata. It must neither announce
+      // model progress nor finalize a live response or append authored bytes.
+      expect(keeperThreads.value).toBe(before)
+    }
+  })
+
+  it('keeps parsed native observer metadata outside authored text and MASC tool receipts', () => {
+    const operationId = 'native-observer-operation'
+    assistantEntry(operationId)
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_START', ...toolOccurrence(), toolCallId: 'reused-id', toolCallName: 'Read',
+    })
+    // Tool starts move earlier speech into the progress trail. Establish the
+    // current authored body after that existing boundary, before native events.
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'before' })
+    const observation = { ...toolOccurrence(), toolCallId: 'reused-id', toolCallName: 'Read' }
+    const events: KeeperChatStreamEvent[] = [
+      { type: 'CUSTOM', name: 'KEEPER_NATIVE_TOOL_START', value: observation },
+      { type: 'CUSTOM', name: 'KEEPER_NATIVE_TOOL_PROGRESS', value: { ...observation, progress: { kind: 'heartbeat_reported', elapsed_seconds: 30 } } },
+      { type: 'CUSTOM', name: 'KEEPER_NATIVE_TOOL_PROGRESS', value: { ...observation, progress: { kind: 'heartbeat_reported', elapsed_seconds: 3 } } },
+      { type: 'CUSTOM', name: 'KEEPER_NATIVE_TOOL_PROGRESS', value: { ...observation, progress: { kind: 'output_observed', byte_count: 13 } } },
+      { type: 'CUSTOM', name: 'KEEPER_NATIVE_TOOL_PROGRESS', value: { ...observation, progress: { kind: 'message_reported', message: 'not authored text' } } },
+      { type: 'CUSTOM', name: 'KEEPER_NATIVE_TOOL_PROGRESS', value: { ...observation, progress: {
+        kind: 'retry_reported', agent_id: 'child', subagent_type: 'Explore', attempt: 1,
+        max_retries: 3, retry_delay_ms: 1500, error_status: 529, error_category: 'overloaded',
+      } } },
+      { type: 'CUSTOM', name: 'KEEPER_NATIVE_TOOL_PROGRESS', value: { ...observation, progress: {
+        kind: 'retry_cleared', agent_id: 'child', subagent_type: 'Explore',
+      } } },
+      { type: 'CUSTOM', name: 'KEEPER_NATIVE_TOOL_END', value: { ...observation, completion: { kind: 'completion_reported', exit_code: 17 } } },
+      { type: 'CUSTOM', name: 'KEEPER_NATIVE_TOOL_END', value: observation },
+    ]
+    const before = keeperThreads.value
+    for (const event of events) {
+      const wire = { ...event, threadId: 'keeper:sangsu', runId: 'run-1', timestamp: 1_712_000_000 }
+      const parsed = parseSSEMessage({
+        type: 'keeper_chat_operation_event', name: 'sangsu', operation_id: operationId,
+        ag_ui_event: wire,
+      })
+      expect(parsed?.ag_ui_event).toEqual(wire)
+      if (!parsed) throw new Error('valid native observation was rejected')
+      expect(applyKeeperOperationTurnEvent('sangsu', {
+        operationId, event: parsed.ag_ui_event as KeeperChatStreamEvent,
+      })).toBeNull()
+      // No native rows are rendered by this view yet. Even a provider id and
+      // scope/index colliding with a MASC tool must not settle that receipt,
+      // append native progress as speech, or change current model activity.
+      expect(keeperThreads.value).toBe(before)
+    }
+    expect(applyKeeperOperationTurnEvent('sangsu', {
+      operationId, event: { type: 'TEXT_MESSAGE_CONTENT', delta: ' after' },
+    })).toBeNull()
+    expect(keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')?.rawText).toBe('before after')
   })
 
   it('streams text into the selected assistant entry', () => {
@@ -342,7 +410,7 @@ describe('Keeper operation stream projection', () => {
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
     expect(entry?.delivery).toBe('queued')
     expect(entry?.deliveryProvenance).toEqual(
-      operationDeliveryProvenance('kmsg-operation-1', 'terminal_assistant'),
+      operationDeliveryProvenance('kmsg-operation-1', 'terminal_result'),
     )
   })
 
@@ -394,7 +462,7 @@ describe('Keeper operation stream projection', () => {
         timestamp: null,
         deliveryProvenance: operationDeliveryProvenance(
           operationId,
-          'terminal_assistant',
+          'terminal_result',
         ),
         delivery: 'queued',
         streamState: null,
@@ -411,12 +479,12 @@ describe('Keeper operation stream projection', () => {
     expect(entries.find(entry => isOperationDeliveryProvenance(
       entry.deliveryProvenance,
       'kmsg-operation-1',
-      'terminal_assistant',
+      'terminal_result',
     ))?.text).toBe('')
     expect(entries.find(entry => isOperationDeliveryProvenance(
       entry.deliveryProvenance,
       'kmsg-operation-2',
-      'terminal_assistant',
+      'terminal_result',
     ))?.text).toBe('second')
   })
 
@@ -438,7 +506,7 @@ describe('Keeper operation stream projection', () => {
       timestamp: null,
       deliveryProvenance: operationDeliveryProvenance(
         'kmsg-operation-1',
-        'terminal_assistant',
+        'terminal_result',
       ),
       delivery: 'streaming',
       streamState: 'streaming',
@@ -478,7 +546,7 @@ describe('Keeper operation stream projection', () => {
       timestamp: null,
       deliveryProvenance: operationDeliveryProvenance(
         'kmsg-opening',
-        'terminal_assistant',
+        'terminal_result',
       ),
       delivery: 'sending',
       streamState: 'opening',
@@ -511,7 +579,7 @@ describe('Keeper operation stream projection', () => {
       timestamp: null,
       deliveryProvenance: operationDeliveryProvenance(
         'kmsg-interrupted',
-        'terminal_assistant',
+        'terminal_result',
       ),
       delivery: 'interrupted',
       streamState: null,
@@ -612,7 +680,7 @@ describe('Keeper operation stream projection', () => {
       timestamp: null,
       deliveryProvenance: operationDeliveryProvenance(
         'kmsg-operation-1',
-        'terminal_assistant',
+        'terminal_result',
       ),
       delivery: 'streaming',
       streamState: 'streaming',
@@ -679,7 +747,7 @@ describe('Keeper operation stream projection', () => {
         timestamp: null,
         deliveryProvenance: operationDeliveryProvenance(
           operationId,
-          'terminal_assistant',
+          'terminal_result',
         ),
         delivery: 'streaming',
         streamState: 'thinking',
@@ -724,6 +792,70 @@ describe('Keeper operation stream projection', () => {
   })
 })
 
+
+  it('a persisted request failure terminal keeps a late operation event from reopening the operation', () => {
+    // keeper-state normalizes a persisted request_failure row to a
+    // system-role entry with terminal_result provenance. The operation it
+    // terminated is finished: a delayed broadcast for the same operation
+    // must be ignored, not appended as a fresh assistant bubble.
+    const operationId = 'late-event-after-failure'
+    appendThreadEntry('sangsu', {
+      id: 'persisted-failure',
+      role: 'system',
+      source: 'direct_assistant',
+      label: 'sangsu',
+      text: 'REQUEST_FAILURE_DIAGNOSTIC',
+      rawText: 'REQUEST_FAILURE_DIAGNOSTIC',
+      timestamp: new Date().toISOString(),
+      delivery: 'request_failure',
+      deliveryProvenance: operationDeliveryProvenance(operationId, 'terminal_result'),
+      details: null,
+    })
+    const before = [...(keeperThreads.value.sangsu ?? [])]
+    const applied = applyKeeperOperationTurnEvent('sangsu', {
+      operationId,
+      event: { type: 'TEXT_MESSAGE_CONTENT', delta: 'late fragment' },
+    })
+    const after = keeperThreads.value.sangsu ?? []
+    expect(applied).toBe(null)
+    expect(after.length).toBe(before.length)
+    expect(after.every(entry => entry.role !== 'assistant' || entry.delivery !== 'sending'))
+      .toBe(true)
+    expect(after.some(entry => entry.id === 'persisted-failure'
+      && entry.delivery === 'request_failure')).toBe(true)
+  })
+
+  it('a persisted request failure terminal keeps a late operation event from reopening the operation', () => {
+    // keeper-state normalizes a persisted request_failure row to a
+    // system-role entry with terminal_result provenance. The operation it
+    // terminated is finished: a delayed broadcast for the same operation
+    // must be ignored, not appended as a fresh assistant bubble.
+    const operationId = 'late-event-after-failure'
+    appendThreadEntry('sangsu', {
+      id: 'persisted-failure',
+      role: 'system',
+      source: 'direct_assistant',
+      label: 'sangsu',
+      text: 'REQUEST_FAILURE_DIAGNOSTIC',
+      rawText: 'REQUEST_FAILURE_DIAGNOSTIC',
+      timestamp: new Date().toISOString(),
+      delivery: 'request_failure',
+      deliveryProvenance: operationDeliveryProvenance(operationId, 'terminal_result'),
+      details: null,
+    })
+    const before = [...(keeperThreads.value.sangsu ?? [])]
+    const applied = applyKeeperOperationTurnEvent('sangsu', {
+      operationId,
+      event: { type: 'TEXT_MESSAGE_CONTENT', delta: 'late fragment' },
+    })
+    const after = keeperThreads.value.sangsu ?? []
+    expect(applied).toBe(null)
+    expect(after.length).toBe(before.length)
+    expect(after.every(entry => entry.role !== 'assistant' || entry.delivery !== 'sending'))
+      .toBe(true)
+    expect(after.some(entry => entry.id === 'persisted-failure'
+      && entry.delivery === 'request_failure')).toBe(true)
+  })
 
 describe('applyKeeperStreamEvent tool calls', () => {
   beforeEach(() => {

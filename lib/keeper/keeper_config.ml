@@ -113,6 +113,32 @@ let keeper_hitl_max_concurrent_per_keeper_rp =
 let keeper_hitl_max_concurrent_per_keeper () : int =
   Runtime_params.get keeper_hitl_max_concurrent_per_keeper_rp
 
+(* How long a held tool call waits for an operator before the gate times it
+   out (design D3, task-1665). Moved verbatim from the inline literal at
+   [server_routes_http_keeper_stream.ml] so operators can tune it without a
+   rebuild; the product default stays 180.0.
+
+   180.0 is NOT a measured value: it predates any answered/timed-out
+   observation. The keeper_hitl_gate health section now accumulates those
+   counters, and the decision to replace the constant with a typed condition
+   (e.g. "wait only while an operator pane holds the stream") is deferred
+   until that evidence exists. The [5.0, 3600.0] clamp is likewise a
+   misuse guard, not a measured bound -- the floor keeps a typo from
+   denying every held call instantly, the ceiling keeps a typo from
+   pinning a provider connection for an afternoon. *)
+let keeper_tool_approval_timeout_sec_rp =
+  _rp_float ~key:"keeper.hitl.tool_approval_timeout_sec"
+    ~default:(fun () ->
+      float_of_env_default "MASC_KEEPER_TOOL_APPROVAL_TIMEOUT_SEC"
+        ~default:180.0 ~min_v:5.0 ~max_v:3600.0)
+    ~min_v:5.0 ~max_v:3600.0
+    ~description:
+      "How long a held tool call waits for an operator before timing out \
+       (seconds); not a measured value, see keeper_hitl_gate counters"
+    ()
+let keeper_tool_approval_timeout_sec () : float =
+  Runtime_params.get keeper_tool_approval_timeout_sec_rp
+
 let keeper_board_own_recent_max_rp =
   _rp_int ~key:"keeper.board.own_recent.max"
     ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOARD_OWN_RECENT_MAX"

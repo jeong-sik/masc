@@ -48,7 +48,6 @@ let chat_message
     ?(content = "")
     ?(ts = 100.2)
     ?execution_id
-    ?(kind = Store.Row_kind.Utterance)
     ?turn_ref
     ?stream_lifecycle
     ?delivery_provenance
@@ -71,7 +70,6 @@ let chat_message
   ; audio = None
   ; blocks = None
   ; mentions = []
-  ; kind
   ; turn_ref
   ; stream_lifecycle
   ; approval_lifecycle = None
@@ -104,7 +102,7 @@ let assistant_row ~delivery_key =
     ~stream_lifecycle:ok_lifecycle
     ~delivery_provenance:
       { Delivery.delivery_key = delivery_key
-      ; transcript_slot = Delivery.Terminal_assistant
+      ; transcript_slot = Delivery.Terminal_result
       }
     ()
 

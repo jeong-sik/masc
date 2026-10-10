@@ -33,6 +33,7 @@ val create :
   publish:(Keeper_chat_events.keeper_chat_event -> unit) ->
   redact_text:(string -> string) ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  base_path:string ->
   keeper_name:string ->
   timeout_sec:float ->
   t

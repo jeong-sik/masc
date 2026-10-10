@@ -171,6 +171,36 @@ val official_range_id_of_json : Yojson.Safe.t -> (official_range_id, Keeper_memo
 (** Canonical receipt identities, also used to recover the external read cursor
     from the same committed Memory transaction. *)
 
+(** One explicit input, independent of a contiguous range. Generation and
+    request ID are nonblank canonical strings; sequence is positive and input
+    SHA-256 is lowercase hexadecimal. The caller binds the digest to the exact
+    candidate payload. Neither request IDs nor sequence numbers may be reused
+    within a generation, including with a changed digest. *)
+type explicit_candidate_id =
+  { queue_generation : string
+  ; request_id : string
+  ; sequence : int
+  ; input_sha256 : string
+  }
+
+type admission_recall_binding =
+  { candidate_id : explicit_candidate_id
+  ; source_fact : Keeper_memory_os_types.fact
+  ; target_memory_id : string
+  }
+(** A consumed candidate's direct provenance pointing to its admitted current
+    identity. The source is search evidence, not another current fact. *)
+
+type admission_recall =
+  { decided_at_revision : int option
+        (** The Memory revision the admission decision read; [None] when it
+            read no snapshot. *)
+  ; bindings : admission_recall_binding list
+  }
+(** Recall bindings travel with the revision their decision read, so a commit
+    can refuse a target retired after that revision even when an identical
+    claim was added back. *)
+
 (** Why a librarian pass produced no snapshot. The journal is the only place
     this reaches disk, so the set is closed here rather than at the call site:
     a new failure mode has to name itself before it can be recorded, and
@@ -324,6 +354,19 @@ val read_dropped :
     drop reasons remain best-effort, so absence is not proof that a fact was
     never stored or removed. *)
 
+type retirement_context =
+  | Retirement_source_changed
+  | Retirement_source_unavailable of string
+  | Retirement_archive of (archived_fact list, string) result
+
+val read_retirement_context :
+  keepers_dir:string -> keeper_id:string -> expected_revision:int option ->
+  current_facts:Keeper_memory_os_types.fact list -> retirement_context
+(** Validate the prompt's current snapshot and read retirement evidence while
+    holding the aggregate and snapshot locks. A changed source must be retried
+    before provider dispatch. An undecodable store with no prior selected
+    snapshot remains ordinary recovery work with unavailable archive evidence. *)
+
 val source_kind_to_string : source_kind -> string
 
 (** Dashboard projection of the last [limit] lines. Every row carries a
@@ -412,12 +455,122 @@ type disposition =
     the store did. The two absorption lists together hold every absorption
     passed in. *)
 
+val committed_explicit_candidates :
+  keepers_dir:string -> keeper_id:string -> queue_generation:string ->
+  (explicit_candidate_id list, string) result
+(** Recover once under the store locks and return every committed candidate for
+    this generation, ordered by sequence. These receipts authorize no queue
+    acknowledgement by themselves: a consumer must match the original payload.
+    Candidate receipts survive later valid snapshot revisions and retirement.
+    As with range receipts, missing or unverifiable snapshot evidence invalidates
+    them; this is not a separate immutable consumption ledger. *)
+
+type revision_evidence =
+  { snapshot_revision : int
+  ; recorded_at : float
+  ; source : source
+  ; commit_effect : commit_effect option
+  ; revision_links : Keeper_memory_os_types.revision list option
+  ; removed_memory_ids : string list
+  ; added_memory_ids : string list
+  }
+
+val read_with_revision_evidence_for_keepers_dir :
+  keepers_dir:string -> keeper_id:string -> after_revision:int ->
+  ((t option * revision_evidence list), string) result
+(** Coherent current snapshot and actual committed journal records newer than
+    [after_revision], in journal order. Missing link/transition fields remain
+    [None], never inferred from text, timing or co-occurring removals/additions.
+    This is evidence only: it follows no graph and transfers no recall bindings.
+    An unfinished removal receipt or unreadable history is an error. The journal
+    can have missing transitions; returned records do not assert completeness. *)
+
+val read_with_admission_recall_status_for_keepers_dir :
+  keepers_dir:string -> keeper_id:string ->
+  ((t option * (admission_recall_binding list, string) result), string) result
+(** Read the snapshot and assess lookup provenance under the same store locks.
+    An inner error withholds all uncertain bindings while preserving a valid
+    current snapshot. Consumers must expose this incomplete lookup coverage;
+    it is not evidence that a query has no matching memory. Outer errors still
+    mean the snapshot or store lock could not be read safely. Receipt decoding
+    and reconciliation failures are inner errors: direct current facts remain
+    available, while consumption-ledger callers still receive a hard error.
+    The decoded receipt sidecar is kept per path while its file identity
+    (device, inode, size, mtime, ctime) is unchanged and its ctime is more than
+    one second old; a reconcile that left it unchanged is not repeated until the
+    snapshot is missing, older, or the same revision with other bytes. Any
+    change to the file, and every receipt write by this process, makes the next
+    read decode and reconcile it again. *)
+
+val read_with_admission_recall_for_keepers_dir :
+  keepers_dir:string -> keeper_id:string ->
+  ((t option * admission_recall_binding list), string) result
+(** Coherent snapshot and live bindings under the same store locks. A binding
+    must target an active exact identity and have no intervening retirement.
+    Later re-addition does not revive it; successors are not followed. When a
+    live binding needs later history, only explicitly marked snapshot rewrites
+    prove transitions. Unchanged observations and absent markers cannot fill a
+    missing revision; incomplete or unreadable evidence returns an error.
+    No bindings means no journal scan. Verified history is cached as an immutable
+    transition projection. Only a normal local append witnessed under the
+    stable writer lock may advance its exact file identity; any unexpected
+    metadata change requires full verification, including external growth. *)
+
+type recall_unresolved_reason =
+  | History_unavailable of string
+  | Missing_transition of int
+  | Invalid_transition of int
+  | Unrecorded_lineage of int
+  | Retired_without_successor of int
+
+type recall_unresolved =
+  { binding : admission_recall_binding
+  ; reason : recall_unresolved_reason
+  }
+
+type successor_recall_candidate =
+  { binding : admission_recall_binding
+  ; born_revision : int
+  ; original_target : Keeper_memory_os_types.fact
+  ; target : Keeper_memory_os_types.fact
+  ; path : revision_evidence list
+  }
+
+type successor_recall =
+  { receipt_verification : (unit, string) result
+  ; snapshot : t option
+  ; direct_bindings : admission_recall_binding list
+  ; successor_candidates : successor_recall_candidate list
+  ; unresolved : recall_unresolved list
+  }
+
+val revision_evidence_to_json : revision_evidence -> Yojson.Safe.t
+val recall_unresolved_reason_to_string : recall_unresolved_reason -> string
+val recall_unresolved_reason_to_json : recall_unresolved_reason -> Yojson.Safe.t
+
+val read_successor_recall_for_keepers_dir :
+  keepers_dir:string -> keeper_id:string -> (successor_recall, string) result
+(** Coherent current facts and historical-source successor candidates. Receipt
+    failures retain direct snapshot facts with [receipt_verification = Error _]
+    and no unverified aliases. Consumers must report incomplete lookup even
+    when no candidate can be recovered. Only
+    complete marked snapshot transitions and explicit applied revision edges
+    are followed, in revision order, with no depth limit. Split paths remain
+    separate evidence. A later same-identity addition cannot resurrect a dead
+    path. Candidates have not passed semantic relevance/preservation judgment.
+    Lineage failures are returned separately without discarding current facts.
+    [Retired_without_successor] is conclusive retirement, not unreadable history.
+    No bindings means no journal scan. No receipts or bindings are retargeted. *)
+
 val apply_disposition
   :  ?on_committed:(disposition -> unit)
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?dropped_statements:Keeper_memory_os_types.dropped_statement list
   -> ?durable_range_id:durable_range_id
   -> ?official_range_id:official_range_id
+  -> ?explicit_candidate_ids:explicit_candidate_id list
+  -> ?admission_recall:admission_recall
+  -> ?required_memory_ids:string list
   -> absorbed:Keeper_memory_os_types.absorbed_statement list
   -> revisions:Keeper_memory_os_types.revision list
   -> keepers_dir:string
@@ -451,15 +604,39 @@ val apply_disposition
     once under the store locks and must only update caller-owned in-memory
     state: no I/O, yielding or exceptions. It is not a scheduling callback.
 
-    [durable_range_id] and [official_range_id] join this disposition to the
-    atom and official-client ranges that produced it. When both are present,
-    both identities share the same snapshot revision and SHA-256. Each source
-    kind retains its latest receipt per runtime scope. The store writes a prepared transaction receipt
-    before replacing the snapshot and marks it committed afterwards. Recovery
+    [durable_range_id] and [official_range_id] join this disposition to its
+    atom and official-client inputs.
+    [explicit_candidate_ids] binds a sparse settled subset to the same commit;
+    duplicate request IDs or sequences in a generation, either within this set
+    or in recovered receipts, are refused under the write lock before mutation.
+    All supplied identities share the same snapshot revision and SHA-256. Each
+    range kind retains its latest receipt per scope; candidate receipts retain
+    every consumed identity. [admission_recall] bindings must name exact consumed
+    candidate IDs, prove the canonical candidate-row digest from [source_fact],
+    and target identities present in the final snapshot under the same lock
+    that no committed line after [decided_at_revision] retired. When Memory
+    moved after [decided_at_revision], the journal must hold a rewriting line
+    for every revision up to the locked snapshot, or the commit is refused.
+    They share the candidate receipt transaction, including no-change commits.
+    The store writes a prepared transaction receipt
+    before replacing the snapshot and marks it committed afterwards. Preparing
+    the next transaction retains the prior committed receipt until the new
+    snapshot is verified, so a failed snapshot write cannot erase its frontier.
+    Recovery
     compares a prepared receipt with the exact snapshot SHA-256, so neither
     side of a process interruption is guessed. An [Unchanged] commit replaces
     nothing, so its ranges are recorded committed at once, bound to the kept
     snapshot's revision and SHA-256.
+
+    Candidate consumption has no contiguous sequence frontier: pending identities
+    may remain between settled ones. A stale duplicate is an error rather than
+    a successful no-op, so it cannot resurrect a retired fact. The consumer
+    rereads authoritative candidate receipts before acknowledging already-
+    consumed input.
+
+    [required_memory_ids] names the destinations promised by an explicit
+    admission decision. Every destination must survive the actual locked
+    disposition and support maintenance, or the entire commit is refused.
 
     An [absorbed] fact that is still current leaves the snapshot too, and its
     row is appended to {!Keeper_memory_absorbed} under the lock, after the next
@@ -645,3 +822,9 @@ val merge_basis
   :  Keeper_memory_os_types.basis
   -> Keeper_memory_os_types.basis
   -> Keeper_memory_os_types.basis
+
+module For_testing : sig
+  val durable_range_receipt_decodes : unit -> int
+  (** How many times this process has decoded receipt sidecar bytes. A read
+      answered from the verified receipt cache does not count. *)
+end

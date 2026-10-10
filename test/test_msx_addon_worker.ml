@@ -60,7 +60,9 @@ let test_stdio_machine_lifecycle () =
                 ~clock:(Eio.Stdenv.clock env) () in
               ignore (unwrap (Client.initialize client ~client_name:"worker-fixture" ~client_version:"1"));
               let tools = unwrap (Client.list_tools_all client) in
-              check int "machine tools and private control ports" 16 (List.length tools);
+              check int "machine tools and private control ports" 17 (List.length tools);
+              check bool "disk export is discovered through the worker protocol" true
+                (List.exists (fun (tool : S.tool) -> tool.name = "masc_msx_export_disk") tools);
               let call name arguments =
                 let name, arguments = if String.equal name "lane_observe" then name, arguments
                   else Lane_addon_call_context.tool_name,
@@ -80,6 +82,11 @@ let test_stdio_machine_lifecycle () =
                 (Yojson.Safe.Util.member "carts" inventory = `List [`String "fixture.rom"]);
               check bool "inventory read does not load a machine" true
                 (Yojson.Safe.Util.member "loaded" inventory = `Bool false);
+              let absent_export = call "masc_msx_export_disk" (`Assoc ["filename", `String "new-data.dsk"]) in
+              check bool "export before loading is refused through caller-context port" true
+                (absent_export.is_error = Some true);
+              check bool "refused export creates no file" false
+                (Sys.file_exists (Filename.concat carts "new-data.dsk"));
               let loaded = call "masc_msx_load" (`Assoc ["roms_dir", `String ""]) in
               check bool "load succeeds without external media" false (loaded.is_error = Some true);
               let before = frame loaded in

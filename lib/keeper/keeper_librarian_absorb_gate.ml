@@ -755,10 +755,9 @@ let request_shas evaluations =
        evaluations)
 ;;
 
-let failure_shows_size = function
-  | Evaluated { outcome = Failed { kind = Input_capacity_exceeded; _ }; _ } -> true
-  | Evaluated { outcome = Failed { kind = Evaluation_failed; _ }; _ }
-  | Evaluated { outcome = Judged _; _ } | Skipped _ -> false
+let failure_kind = function
+  | Evaluated { outcome = Failed { kind; _ }; _ } -> Some kind
+  | Evaluated { outcome = Judged _; _ } | Skipped _ -> None
 ;;
 
 let failure_detail ~absorbed = function

@@ -1,0 +1,13 @@
+{
+  "command": [
+    "opam",
+    "exec",
+    "--",
+    "dune",
+    "exec",
+    "-j4",
+    "test/test_owned_read_cwd.exe"
+  ],
+  "exit_code": 0,
+  "elapsed_seconds": 52.513
+}

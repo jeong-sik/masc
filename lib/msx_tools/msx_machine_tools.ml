@@ -11,9 +11,8 @@
 
 open Tool_args
 
-(* Every failure this module builds is a refusal before the machine is touched:
-   arguments that did not parse, or an [Msx_lane.error], which the lane only
-   answers before anything it keeps has changed (msx_lane.mli). Left
+(* Argument and pre-effect lane failures are refusals. [Effect_unknown]
+   remains a runtime failure with unknown effect disposition. Left
    undeclared, a failure reads as effect-outcome-unknown, and a composition
    that ran this tool ends the Keeper's turn over it instead of handing it
    back: "no MSX machine is loaded" after a server restart failed the whole
@@ -81,6 +80,8 @@ let of_lane ?(extra = []) ?sprites ?metadata ~tool_name ~start_time
     |> Tool_result.with_metadata (`Assoc ["io.github.jeong-sik/masc.machine.errorCode", `String code])
   | Error ((Msx_lane.No_machine | Msx_lane.Invalid_request _) as e) ->
     reject ~tool_name ~start_time (Msx_lane.error_to_string e)
+  | Error (Msx_lane.Effect_unknown message) ->
+    Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time message
   | Error (Msx_lane.Unreadable _ as e) ->
     refuse ~class_:Tool_result.Runtime_failure ~tool_name ~start_time
       (Msx_lane.error_to_string e)
@@ -379,14 +380,29 @@ let checkpoint_slot args =
     else Ok slot
 ;;
 
+let run_checkpoint ~restore ~base_path ~slot =
+  let ledger_dir = msx_dir ~base_path in
+  let path = Filename.concat (Filename.concat ledger_dir "saves") (slot ^ ".json") in
+  if restore then Msx_lane.restore ~path ~ledger_dir else Msx_lane.save ~path
+
+(* The completion travels with the observation: the checkpoint's server-side
+   receipt settles from these fields, and only the worker that ran the
+   checkpoint knows its change mark. *)
 let handle_checkpoint ~restore ~tool_name ~start_time ~base_path args =
   match checkpoint_slot args with
   | Error message -> reject ~tool_name ~start_time message
   | Ok slot ->
-    let ledger_dir = msx_dir ~base_path in
-    let path = Filename.concat (Filename.concat ledger_dir "saves") (slot ^ ".json") in
-    let result = if restore then Msx_lane.restore ~path ~ledger_dir else Msx_lane.save ~path in
-    of_lane ~tool_name ~start_time ~extra:["slot", `String slot] result
+    match run_checkpoint ~restore ~base_path ~slot with
+    | Ok (completed : Msx_lane.checkpoint_effect) ->
+      Tool_result.make_ok ~tool_name ~start_time
+        ~data:(`Assoc (observation_fields completed.observation
+               @ [ "slot", `String slot
+                 ; "change_count", `Int completed.mark.Msx_lane.count
+                 ; "incarnation", `String completed.mark.Msx_lane.incarnation
+                 ; "checkpoint_sha256", `String completed.checkpoint_sha256 ]))
+        ()
+    | Error e ->
+      of_lane ~tool_name ~start_time ~extra:["slot", `String slot] (Error e)
 ;;
 
 (* masc_msx_meta — which core this server linked, as [Msx_lane.core] reports
@@ -442,6 +458,8 @@ let handle_checkpoint_info ~tool_name ~start_time ~base_path args =
         ()
     | Error ((Msx_lane.Invalid_request _ | Msx_lane.No_machine | Msx_lane.Activity_disabled | Msx_lane.Activity_unobserved) as e) ->
       reject ~tool_name ~start_time (Msx_lane.error_to_string e)
+    | Error (Msx_lane.Effect_unknown message) ->
+      Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time message
     | Error (Msx_lane.Unreadable _ as e) ->
       refuse ~class_:Tool_result.Runtime_failure ~tool_name ~start_time
         (Msx_lane.error_to_string e)
@@ -464,6 +482,28 @@ let handle_change_disk ~tool_name ~start_time ~base_path args =
         (Msx_lane.change_disk ~path ~backup_path))
 ;;
 
+let handle_export_disk ~tool_name ~start_time ~base_path args =
+  match args with
+  | `Assoc ["filename", `String filename] ->
+    let catalog =
+      try Ok (carts_dir ~base_path:(Unix.realpath base_path))
+      with Unix.Unix_error (error, fn, arg) ->
+        Error (Msx_lane.Unreadable
+          (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error))) in
+    let result = Result.bind catalog (fun catalog_dir ->
+      Msx_lane.export_disk ~catalog_dir ~filename) in
+    (match result with
+     | Ok (receipt : Msx_lane.disk_export) ->
+       Tool_result.make_ok ~tool_name ~start_time ~data:(`Assoc [
+         "filename", `String receipt.filename;
+         "byte_length", `Int receipt.byte_length;
+         "sha256", `String receipt.sha256;
+         "source_disk", (match receipt.source_disk with None -> `Null | Some name -> `String name);
+         "frame", `Int receipt.frame]) ()
+     | Error error -> of_lane ~tool_name ~start_time (Error error))
+  | _ -> reject ~tool_name ~start_time "filename must name one new catalog .dsk image"
+;;
+
 let dispatch ~relay ~base_path ~agent ~name ~arguments =
   let tool_name = name and start_time = Tool_timing.start () in
   match name with
@@ -471,6 +511,7 @@ let dispatch ~relay ~base_path ~agent ~name ~arguments =
   | "masc_msx_eject" -> Some (handle_eject ~relay ~tool_name ~start_time ~agent_name:agent arguments)
   | "masc_msx_save" -> Some (handle_checkpoint ~restore:false ~tool_name ~start_time ~base_path arguments)
   | "masc_msx_restore" -> Some (handle_checkpoint ~restore:true ~tool_name ~start_time ~base_path arguments)
+  | "masc_msx_export_disk" -> Some (handle_export_disk ~tool_name ~start_time ~base_path arguments)
   | "masc_msx_change_disk" -> Some (handle_change_disk ~tool_name ~start_time ~base_path arguments)
   | "masc_msx_meta" -> Some (handle_meta ~tool_name ~start_time
       ?inventory_base_path:(if get_bool arguments "include_inventory" false then Some base_path else None) ())

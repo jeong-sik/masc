@@ -283,20 +283,20 @@ let save_file (path : string) (content : string) : unit =
 ;;
 
 let save_file_atomic path content =
-  Atomic_write.save_file_atomic ~save_file:save_file_blocking path content
+  Atomic_replace.save_file_atomic ~save_file:save_file_blocking path content
 ;;
 
 let save_file_atomic_rename_only path content =
-  Atomic_write.save_file_atomic_rename_only ~save_file:save_file_blocking path content
+  Atomic_replace.save_file_atomic_rename_only ~save_file:save_file_blocking path content
 ;;
 
 type atomic_replace_failure_stage =
-  Atomic_write.atomic_replace_failure_stage =
+  Atomic_replace.atomic_replace_failure_stage =
   | Before_rename
   | After_rename
 
 type atomic_replace_failure =
-  Atomic_write.atomic_replace_failure =
+  Atomic_replace.atomic_replace_failure =
   { path : string
   ; stage : atomic_replace_failure_stage
   ; exception_ : exn
@@ -304,28 +304,28 @@ type atomic_replace_failure =
   }
 
 let atomic_replace_failure_to_string =
-  Atomic_write.atomic_replace_failure_to_string
+  Atomic_replace.atomic_replace_failure_to_string
 ;;
 
 let save_file_atomic_strict_staged path content =
-  Atomic_write.save_file_atomic_strict_staged ~save_file:save_file_blocking path content
+  Atomic_replace.save_file_atomic_strict_staged ~save_file:save_file_blocking path content
 ;;
 
 let write_file_atomic_strict_staged_blocking path ~write =
-  Atomic_write.write_file_atomic_strict_staged_blocking path ~write
+  Atomic_replace.write_file_atomic_strict_staged_blocking path ~write
 ;;
 
 let write_file_atomic_strict_staged path ~write =
-  Atomic_write.write_file_atomic_strict_staged path ~write
+  Atomic_replace.write_file_atomic_strict_staged path ~write
 ;;
 
 let save_file_atomic_strict path content =
-  Atomic_write.save_file_atomic_strict ~save_file:save_file_blocking path content
+  Atomic_replace.save_file_atomic_strict ~save_file:save_file_blocking path content
 ;;
 
 module Atomic_replace_for_testing = struct
   let save_file_atomic_strict_staged ?sync_file ~sync_parent path content =
-    Atomic_write.Atomic_replace_for_testing.save_file_atomic_strict_staged
+    Atomic_replace.For_testing.save_file_atomic_strict_staged
       ?sync_file
       ~sync_parent
       ~save_file:save_file_blocking
@@ -334,7 +334,7 @@ module Atomic_replace_for_testing = struct
   ;;
 
   let write_file_atomic_strict_staged ?sync_file ~sync_parent path ~write =
-    Atomic_write.Atomic_replace_for_testing.write_file_atomic_strict_staged
+    Atomic_replace.For_testing.write_file_atomic_strict_staged
       ?sync_file
       ~sync_parent
       path
@@ -343,7 +343,7 @@ module Atomic_replace_for_testing = struct
 end
 
 let open_atomic_temp_file ~temp_dir () =
-  Atomic_write.open_atomic_temp_file ~temp_dir ()
+  Atomic_replace.open_atomic_temp_file ~temp_dir ()
 ;;
 
 let is_capability_leaf = Capability_leaf.is_valid
@@ -567,8 +567,8 @@ let capability_directory_sync_error_to_string =
   Atomic_write.capability_directory_sync_error_to_string
 ;;
 
-let is_atomic_orphan_name = Atomic_write.is_atomic_orphan_name
-type atomic_orphan_cleanup_operation = Atomic_write.atomic_orphan_cleanup_operation =
+let is_atomic_orphan_name = Atomic_temp_name.is_name
+type atomic_orphan_cleanup_operation = Atomic_orphan_cleanup.atomic_orphan_cleanup_operation =
   | Inspect_cleanup_root
   | Read_cleanup_directory
   | Inspect_orphan
@@ -583,7 +583,7 @@ type atomic_orphan_cleanup_operation = Atomic_write.atomic_orphan_cleanup_operat
   | Sync_source_directory
   | Close_cleanup_descriptor
 
-type atomic_orphan_cleanup_cause = Atomic_write.atomic_orphan_cleanup_cause =
+type atomic_orphan_cleanup_cause = Atomic_orphan_cleanup.atomic_orphan_cleanup_cause =
   | Unix_failure of Unix.error * string * string
   | Sys_failure of string
   | Unexpected_file_kind of Unix.file_kind
@@ -591,13 +591,13 @@ type atomic_orphan_cleanup_cause = Atomic_write.atomic_orphan_cleanup_cause =
   | Identity_changed
   | Other_failure of exn
 
-type atomic_orphan_cleanup_failure = Atomic_write.atomic_orphan_cleanup_failure =
+type atomic_orphan_cleanup_failure = Atomic_orphan_cleanup.atomic_orphan_cleanup_failure =
   { operation : atomic_orphan_cleanup_operation
   ; path : string
   ; cause : atomic_orphan_cleanup_cause
   }
 
-type atomic_orphan_cleanup_report = Atomic_write.atomic_orphan_cleanup_report =
+type atomic_orphan_cleanup_report = Atomic_orphan_cleanup.atomic_orphan_cleanup_report =
   { inspected : int
   ; deleted : int
   ; preserved : int
@@ -605,11 +605,11 @@ type atomic_orphan_cleanup_report = Atomic_write.atomic_orphan_cleanup_report =
   }
 
 let atomic_orphan_cleanup_failure_to_string =
-  Atomic_write.atomic_orphan_cleanup_failure_to_string
+  Atomic_orphan_cleanup.atomic_orphan_cleanup_failure_to_string
 ;;
 
 let cleanup_atomic_orphans ~ownership_root ~base_path () =
-  Atomic_write.cleanup_atomic_orphans ~ownership_root ~base_path ()
+  Atomic_orphan_cleanup.cleanup_atomic_orphans ~ownership_root ~base_path ()
 ;;
 
 (** Append string to file.
@@ -1089,7 +1089,15 @@ let with_owned_inventory_root path fn =
   | cause -> owned_file_operation_error ~path Read_contents cause
 ;;
 
-let read_owned_directory_blocking ?inventory_root ~before_read ~after_read ~ownership_root path =
+exception Owned_directory_read_rejected of owned_regular_file_read_failure
+exception Owned_directory_descendant_missing of exn
+
+type owned_directory_listing =
+  | Owned_directory_absent of owned_regular_file_read_error
+  | Owned_directory_entries of string list
+
+let read_owned_directory_blocking ?owner_uid ?inventory_root ~allow_initial_absence
+    ~before_read ~after_read ~ownership_root path =
   match owned_directory_paths ~ownership_root path with
   | Error rejection ->
     owned_file_error (Ownership_boundary_rejected { path; rejection })
@@ -1104,49 +1112,99 @@ let read_owned_directory_blocking ?inventory_root ~before_read ~after_read ~owne
           if !close_failure = None then close_failure := Some ex) !descriptors;
       !close_failure
     in
+    let check_owner directory (stat : Unix.stats) =
+      match owner_uid with
+      | None -> ()
+      | Some expected_uid ->
+          if stat.st_uid <> expected_uid then
+            raise (Owned_directory_read_rejected (Owned_path_owner_mismatch
+              {path=directory; expected_uid; actual_uid=stat.st_uid}));
+          if stat.st_perm land 0o022 <> 0 then
+            raise (Owned_directory_read_rejected (Owned_path_writable_by_others
+              {path=directory; permissions=stat.st_perm land 0o7777})) in
+    let current () =
+      List.for_all (fun (directory, fd, descriptor) ->
+        let observed = Unix.lstat directory in
+        check_owner directory observed;
+        let descriptor_current = match owner_uid with
+          | None -> descriptor
+          | Some _ ->
+              let current = Unix.fstat fd in
+              check_owner directory current;
+              current in
+        observed.Unix.st_kind = Unix.S_DIR
+        && same_file_identity observed descriptor
+        && same_file_identity descriptor_current descriptor) !opened
+    in
     let result =
       try
-        let bind directory open_fd =
-          let before = Unix.lstat directory in
-          let fd = open_fd () in
+        let bind ~allow_absence directory open_fd =
+          let before = match Unix.lstat directory with
+            | stat -> Some stat
+            | exception Unix.Unix_error (Unix.ENOENT, _, _) when allow_absence -> None in
+          Option.iter (check_owner directory) before;
+          let fd = try open_fd () with
+            | (Unix.Unix_error (Unix.ENOENT, _, _) as cause) when allow_absence ->
+                raise (Owned_directory_descendant_missing cause) in
           descriptors := fd :: !descriptors;
           let stat = Unix.fstat fd in
           opened := (directory, fd, stat) :: !opened;
-          if before.Unix.st_kind <> Unix.S_DIR || not (same_file_identity before stat)
-          then raise (Unix.Unix_error (Unix.EAGAIN, "directory identity", directory));
+          (match before with
+           | None -> raise (Owned_directory_read_rejected (Filesystem_identity_changed {path=directory}))
+           | Some before ->
+               if before.Unix.st_kind <> Unix.S_DIR || not (same_file_identity before stat)
+               then raise (Unix.Unix_error (Unix.EAGAIN, "directory identity", directory)));
+          check_owner directory stat;
           fd
         in
         let root_fd = match inventory_root with
-          | None -> bind ownership_root (fun () -> open_owned_directory_root ownership_root)
+          | None -> bind ~allow_absence:false ownership_root (fun () -> open_owned_directory_root ownership_root)
           | Some root ->
             if not (String.equal root.inventory_path ownership_root)
                || not (inventory_root_current root)
             then raise (Unix.Unix_error (Unix.EAGAIN, "inventory root identity", path));
+            check_owner ownership_root root.inventory_stat;
             opened := (ownership_root, root.inventory_fd, root.inventory_stat) :: !opened;
             root.inventory_fd
         in
         let fd = List.fold_left (fun parent directory ->
-          bind directory (fun () ->
+          bind ~allow_absence:allow_initial_absence directory (fun () ->
             open_owned_directory_child parent (Filename.basename directory))) root_fd descendants in
-        let current () =
-          List.for_all (fun (directory, _, descriptor) ->
-            let observed = Unix.lstat directory in
-            observed.Unix.st_kind = Unix.S_DIR
-            && same_file_identity observed descriptor) !opened
-        in
         if not (current ()) then owned_file_error (Filesystem_identity_changed { path })
         else begin
           before_read path;
           let names = owned_directory_names fd in
           after_read path;
           if current () then
-            Ok (List.sort String.compare
-              (List.filter (fun name -> name <> "." && name <> "..") names))
+            Ok (Owned_directory_entries (List.sort String.compare
+              (List.filter (fun name -> name <> "." && name <> "..") names)))
           else owned_file_error (Filesystem_identity_changed { path })
         end
       with
       | Eio.Cancel.Cancelled _ as cancellation ->
         ignore (close_all ()); reraise_current cancellation
+      | Owned_directory_read_rejected failure -> owned_file_error failure
+      | Owned_directory_descendant_missing cause ->
+          (try
+             if current () then Ok (Owned_directory_absent
+               {failure=Owned_file_operation_failed {path; operation=Read_contents; cause}; close_failure=None})
+             else owned_file_error (Filesystem_identity_changed {path})
+           with
+           | Eio.Cancel.Cancelled _ as cancellation ->
+               ignore (close_all ()); reraise_current cancellation
+           | Owned_directory_read_rejected failure -> owned_file_error failure
+           | cause -> owned_file_operation_error ~path Read_contents cause)
+      | (Unix.Unix_error (Unix.ENOENT, _, _) as cause) when Option.is_some owner_uid ->
+          (* Before reporting a missing descendant, revalidate every parent
+             already bound. Missing is not permission to trust an unsafe parent. *)
+          (try
+             if current () then owned_file_operation_error ~path Read_contents cause
+             else owned_file_error (Filesystem_identity_changed {path})
+           with
+           | Eio.Cancel.Cancelled _ as cancellation ->
+               ignore (close_all ()); reraise_current cancellation
+           | Owned_directory_read_rejected failure -> owned_file_error failure
+           | cause -> owned_file_operation_error ~path Read_contents cause)
       | cause -> owned_file_operation_error ~path Read_contents cause
     in
     match close_all (), result with
@@ -1155,15 +1213,35 @@ let read_owned_directory_blocking ?inventory_root ~before_read ~after_read ~owne
     | Some cause, Error error -> Error { error with close_failure = Some cause }
 ;;
 
-let read_owned_directory ?inventory_root ?(before_read = fun _ -> ()) ?(after_read = fun _ -> ()) ~ownership_root path =
+let read_owned_directory_listing ?owner_uid ?inventory_root
+    ?(before_read = fun _ -> ()) ?(after_read = fun _ -> ())
+    ~allow_initial_absence ~ownership_root path =
   with_fs_or_fallback ~path
-    ~fallback:(fun () -> read_owned_directory_blocking ?inventory_root ~before_read ~after_read ~ownership_root path)
+    ~fallback:(fun () -> read_owned_directory_blocking ?owner_uid ?inventory_root
+      ~allow_initial_absence ~before_read ~after_read ~ownership_root path)
     (fun _fs ->
       let result = Eio_unix.run_in_systhread
         ~label:(labelled "fs-compat-read-owned-directory" path)
-        (fun () -> read_owned_directory_blocking ?inventory_root ~before_read ~after_read ~ownership_root path) in
+        (fun () -> read_owned_directory_blocking ?owner_uid ?inventory_root
+          ~allow_initial_absence ~before_read ~after_read ~ownership_root path) in
       Eio.Fiber.check ();
       result)
+;;
+
+let read_owned_directory ?owner_uid ?inventory_root ?before_read ?after_read ~ownership_root path =
+  match read_owned_directory_listing ?owner_uid ?inventory_root ?before_read ?after_read
+      ~allow_initial_absence:false ~ownership_root path with
+  | Ok (Owned_directory_entries names) -> Ok names
+  | Ok (Owned_directory_absent error) -> Error error
+  | Error _ as error -> error
+;;
+
+let read_owned_directory_if_present ~owner_uid ?inventory_root ?before_read ?after_read ~ownership_root path =
+  read_owned_directory_listing ~owner_uid ?inventory_root ?before_read ?after_read
+    ~allow_initial_absence:true ~ownership_root path
+  |> Result.map (function
+    | Owned_directory_entries names -> Some names
+    | Owned_directory_absent _ -> None)
 ;;
 
 type owned_regular_file_prefix =
@@ -3384,7 +3462,7 @@ let private_jsonl_remove_rewrite_stage temp_path =
 
 let private_jsonl_replace_locked ~dir path content =
   match private_jsonl_capture Create_rewrite_stage (fun () ->
-    (* Open_binary for the same reason as [Atomic_write.open_atomic_temp_file]:
+    (* Open_binary for the same reason as [Atomic_replace.open_atomic_temp_file]:
        the stage file holds the replacement bytes verbatim. *)
     Filename.open_temp_file
       ~mode:[ Open_binary ]
@@ -3467,7 +3545,10 @@ let private_jsonl_replace_locked ~dir path content =
                         { cursor = Some cursor; failure }))))))
 ;;
 
-let append_private_jsonl_durable_stable_with_io ~io path ~expected suffix =
+type private_jsonl_append_observation =
+  { before : Unix.stats; after : Unix.stats; suffix : string }
+
+let append_private_jsonl_durable_stable_with_io ?(observe=ignore) ~io path ~expected suffix =
   if String.equal suffix ""
      || not (Char.equal suffix.[String.length suffix - 1] '\n')
   then Error Invalid_transaction_suffix
@@ -3537,12 +3618,22 @@ let append_private_jsonl_durable_stable_with_io ~io path ~expected suffix =
              |> Result.map_error (fun error -> Transaction_append_failed error)
            in
            let* committed_stats = capture Inspect_transaction_data (fun () -> Unix.fstat fd) in
-           private_jsonl_cursor_of_stats committed_stats)
+           let* cursor = private_jsonl_cursor_of_stats committed_stats in
+           observe {before=stats;after=committed_stats;suffix};
+           Ok cursor)
 ;;
 
 let append_private_jsonl_durable_stable_result path suffix =
   append_private_jsonl_durable_stable_with_io
     ~io:private_jsonl_transaction_unix_io path ~expected:None suffix
+;;
+
+let append_private_jsonl_durable_observed_result path suffix =
+  let observation = ref None in
+  append_private_jsonl_durable_stable_with_io
+    ~observe:(fun value -> observation := Some value)
+    ~io:private_jsonl_transaction_unix_io path ~expected:None suffix
+  |> Result.map (fun cursor -> cursor, !observation)
 ;;
 
 let append_private_jsonl_durable_locked_at_cursor_result path ~expected suffix =

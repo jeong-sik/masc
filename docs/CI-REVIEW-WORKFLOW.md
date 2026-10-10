@@ -71,6 +71,28 @@ each of the four native targets still builds and verifies its shipped binaries
 and installation. Native files are uploaded after installation validation;
 early unverified duplicates and the separate fixture-preview bundle are omitted.
 The release behavior selection uses isolated fixtures; full regression builds its own sandbox image where required.
+The behavior lane prepares its sandbox image directly from the checked-in recipe
+before testing; it does not build the server just to print that recipe. BuildKit
+reuses the sandbox's document/media package layers through an architecture-scoped
+GitHub Actions cache. Recipe or resolved base-image changes rebuild affected
+layers; `pull` checks the base tag on every run. The full lane reuses its shim
+Buildx builder, while targeted non-minimal runs set one up without preparing the
+shim. Minimal runs prepare neither image.
+Native PDF, presentation and video suites still need host tools. Those packages
+are installed separately with `--no-install-recommends`; this omits optional
+packages, not required dependencies. All real media checks remain enabled. The
+installation lane still tests the embedded recipe through the release CLI.
+The dashboard build helper owns dependency installation, so its caller does not
+install the same dependencies a second time.
+Behavior and Linux installation share the static shim builder recipe and its
+architecture-scoped GitHub Actions image cache. The image contains the compiler
+and dependencies, not a previously built shim: each consumer still builds the
+current source. Full behavior prepares it before the suite so a Docker transport
+test does not occupy a Dune worker while bootstrapping OCaml. Cache misses build
+the same recipe; cache export failure does not change the verification verdict.
+Cold jobs can still prepare concurrently, and cache visibility follows GitHub's
+branch rules. This is reuse of preparation, not measured RC speedup or reuse of
+another commit's release artifact.
 TLA model checks run explicitly through `model-check.yml` when state-machine
 specifications change; they are not a prerequisite for shipping a binary.
 Specialized host and packaging proofs remain manual.

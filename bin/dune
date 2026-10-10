@@ -433,7 +433,7 @@
  (name masc_tui_keeper_chat_projection)
  (wrapped false)
  (modules masc_tui_keeper_chat_projection)
- (libraries
+ (libraries masc.runtime
   masc.sse_wire
   masc
   masc.string_util
@@ -464,7 +464,7 @@
  (name masc_tui_keeper_chat_live)
  (wrapped false)
  (modules masc_tui_keeper_chat_live)
- (libraries masc masc.masc_types masc.agent_core masc_tui_keeper_chat_projection
+ (libraries masc.runtime masc masc.masc_types masc.agent_core masc_tui_keeper_chat_projection
   masc.sse_wire yojson))
 
 (library
@@ -528,6 +528,12 @@
  (libraries masc yojson))
 
 (library
+ (name masc_tui_play_pending)
+ (wrapped false)
+ (modules masc_tui_play_pending)
+ (libraries masc.fs_compat yojson unix))
+
+(library
  (name masc_tui_lane_broadcast_pending)
  (wrapped false)
  (modules masc_tui_lane_broadcast_pending)
@@ -587,14 +593,28 @@
 ;; rows an operator sees. The QR is drawn by the portraits' half-block mosaic in
 ;; two colours of its own.
 (library
+ (name masc_tui_collab)
+ (wrapped false)
+ (modules masc_tui_collab)
+ (libraries masc masc.masc_types))
+
+(library
+ (name masc_tui_play_room)
+ (wrapped false)
+ (modules masc_tui_play_room)
+ (libraries masc yojson masc.masc_random_id masc_tui_message_layout))
+
+(library
  (name masc_tui_play_card)
  (wrapped false)
  (modules masc_tui_play_card)
  (libraries
   masc
+  masc.config
   masc_tui_image_mosaic
   masc_tui_terminal_palette
   masc_tui_theme
+  uri
   qrc))
 
 (library
@@ -618,6 +638,12 @@
  (libraries masc_tui_keeper_chat_projection))
 
 (library
+ (name masc_tui_chat_media)
+ (wrapped false)
+ (modules masc_tui_chat_media)
+ (libraries masc masc_tui_image_preview uri yojson))
+
+(library
  (name masc_tui_keeper_chat_history)
  (wrapped false)
  (modules masc_tui_keeper_chat_history)
@@ -625,6 +651,7 @@
   masc_tui_keeper_chat_log
   masc_tui_message_layout
   masc_tui_image_preview
+  masc_tui_chat_media
   masc
   ;; The Gate phase is Keeper_approval_lifecycle's closed sum, parsed once at
   ;; decode. implicit_transitive_deps is false, so naming masc alone does not
@@ -643,10 +670,18 @@
   yojson))
 
 (library
+ (name masc_tui_native_tasks)
+ (wrapped false)
+ (modules masc_tui_native_tasks)
+ (libraries masc masc.runtime uri yojson))
+
+(library
  (name masc_tui_keeper_chat_transcript)
  (wrapped false)
- (modules masc_tui_keeper_chat_transcript)
- (libraries masc.keeper_chat_operations
+ (modules masc_tui_keeper_chat_transcript masc_tui_keeper_chat_activity_projection)
+ (private_modules masc_tui_keeper_chat_activity_projection)
+ (libraries masc.runtime
+  masc.keeper_chat_operations
   masc
   masc.agent_core
   masc.keeper_tool_name
@@ -919,7 +954,8 @@
 (library
  (name masc_tui_message_layout)
  (wrapped false)
- (modules masc_tui_message_layout)
+ (modules masc_tui_message_layout masc_tui_grapheme_segmentation)
+ (private_modules masc_tui_grapheme_segmentation)
  (libraries uucp uuseg))
 
 (library
@@ -952,6 +988,12 @@
   masc_tui_keeper_chat_transcript
   masc_tui_markdown
   masc_tui_message_layout))
+
+(library
+ (name masc_tui_chat_search)
+ (wrapped false)
+ (modules masc_tui_chat_search)
+ (libraries masc_tui_markdown masc_tui_link_preview masc_tui_message_layout masc_tui_theme uucp))
 
 (library
  (name masc_tui_markdown_render_cache)
@@ -1211,7 +1253,8 @@
 (library
  (name masc_tui_mermaid)
  (wrapped false)
- (modules masc_tui_mermaid)
+ (modules masc_tui_mermaid masc_tui_mermaid_grammar)
+ (private_modules masc_tui_mermaid_grammar)
  (libraries masc_tui_message_layout))
 
 (library
@@ -1427,9 +1470,11 @@
  (wrapped false)
  (modules masc_tui_types)
  (libraries
+  masc_tui_native_tasks
+  masc_tui_chat_search
   ;; workspace identity composes the local masc root from the cluster
   ;; selection with the function the server reports its own root from.
-  masc.config masc.keeper_chat_operations masc_tui_message_input
+  masc.config masc.keeper_chat_operations masc_tui_message_input masc_tui_play_room masc_tui_collab
   masc_tui_machine_activity masc.machine_configuration masc_tui_exact_activity masc_tui_browser_activity masc_tui_memory_usage masc_tui_lane_inventory masc_tui_runtime_config_edit masc_tui_runtime_config_receipt masc_tui_runtime_evidence masc.masc_core masc.masc_candle masc_tui_identity_model masc_tui_voice_wizard_session masc.keeper_registry masc_tui_config masc_tui_account_login digestif mtime.clock.os masc_tui_command masc_tui_play_card masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
   ;; [threshold_cols] is the width two panes need: the Board read layout is
   ;; decided here so the footer and the frame cannot disagree about it.
@@ -1449,6 +1494,8 @@
   ;; [tools_evidence_reference] is a [Skill_reference.t].
   masc_skill_reference
   masc_tui_lane_broadcast_pending
+  masc_tui_play_pending
+  masc.masc_random_id
   masc_tui_fusion_launch
   masc_tui_queue_inspection
   masc_tui_lane_declaration
@@ -1488,6 +1535,7 @@
   masc_tui_memo
   masc_tui_keeper_chat_projection
   masc_tui_keeper_chat_history
+  masc_tui_chat_media
   masc_tui_keeper_chat_queue
   masc_tui_keeper_chat_diff
   masc_tui_keeper_chat_live
@@ -1614,6 +1662,13 @@
   masc_tui_runtime_config_edit masc_tui_runtime_config_receipt))
 
 (library
+ (name masc_tui_editor_wire)
+ (wrapped false)
+ (modules masc_tui_editor_wire)
+ (libraries masc.runtime masc.masc_core masc.string_util masc.skill_config masc.skill_reference
+  masc_tui_runtime_config_edit yojson))
+
+(library
  (name masc_tui_runtime_config_edit)
  (wrapped false)
  (modules masc_tui_runtime_config_edit))
@@ -1734,6 +1789,12 @@
   masc_tui_theme))
 
 (library
+ (name masc_tui_msx_checkpoint_pending)
+ (wrapped false)
+ (modules masc_tui_msx_checkpoint_pending)
+ (libraries masc.keeper_operation_identity masc.machine_checkpoint masc.masc_process yojson unix))
+
+(library
  (name masc_tui_msx_tick)
  (wrapped false)
  (modules masc_tui_msx_tick)
@@ -1839,7 +1900,10 @@
  (name masc_tui_render_chat)
  (wrapped false)
  (modules masc_tui_render_chat)
- (libraries masc_tui_message_input
+ (libraries masc.runtime masc_tui_native_tasks masc_tui_chat_search masc_tui_message_input
+  eio
+  masc_core
+  masc_tui_async_read
   masc.masc_types
   masc_tui_keeper_chat_live
   masc.keeper_portrait
@@ -1942,6 +2006,8 @@
   masc_tui_resources_requests
   masc_tui_identity_requests
   masc_tui_github_requests
+  masc_tui_image_requests
+  masc_tui_schedule_decode
   masc_tui_render
   masc_tui_render_board
   masc_tui_render_code
@@ -1952,7 +2018,7 @@
   masc_tui_http)
  (public_name masc-tui)
  (package masc)
- (libraries masc.keeper_chat_operations masc_tui_message_input masc_tui_memory_usage masc_tui_approvals_window masc_tui_machine_activity masc.machine_configuration masc_tui_exact_activity masc_tui_browser_activity masc_tui_lane_inventory masc_tui_runtime_evidence masc_tui_render_github masc_tui_github_ui masc_tui_identity_input masc_tui_render_identity masc_tui_identity_model masc_tui_identity_updates masc_tui_resources_updates masc_tui_board_updates masc_tui_surface_search masc_tui_fusion_model masc_tui_fusion_updates masc_tui_home masc_tui_approvals_model masc_tui_surface_navigation
+ (libraries masc_tui_editor_wire masc.skill_config masc_tui_native_tasks masc.keeper_chat_operations masc_tui_message_input masc_tui_play_room masc_tui_collab masc_tui_memory_usage masc_tui_approvals_window masc_tui_machine_activity masc.machine_configuration masc_tui_exact_activity masc_tui_browser_activity masc_tui_lane_inventory masc_tui_runtime_evidence masc_tui_render_github masc_tui_github_ui masc_tui_identity_input masc_tui_render_identity masc_tui_identity_model masc_tui_identity_updates masc_tui_resources_updates masc_tui_board_updates masc_tui_surface_search masc_tui_fusion_model masc_tui_fusion_updates masc_tui_home masc_tui_approvals_model masc_tui_surface_navigation
   masc_tui_palette
   masc_tui_candle
   masc.masc_candle
@@ -2046,6 +2112,8 @@
   masc_tui_interactive
   masc_tui_msx
   masc_tui_msx_tick
+  masc_tui_msx_checkpoint_pending
+  masc.keeper_operation_identity
   masc_tui_machine_live
   masc_tui_terminal_profile
   masc_tui_terminal_title
@@ -2094,6 +2162,7 @@
   masc_tui_frame_presenter
   masc_tui_keeper_activity
   masc_tui_keeper_chat_history
+  masc_tui_chat_media
   masc_tui_keeper_chat_live
   masc_tui_keeper_chat_log
   masc_tui_keeper_chat_projection
@@ -2257,7 +2326,7 @@
  (name masc_tui_image_preview)
  (wrapped false)
  (modules masc_tui_image_preview)
- (libraries masc_tui_keeper_chat_projection masc_tui_image_ref masc.masc_tool_blob_store base64 digestif yojson))
+ (libraries masc_tui_keeper_chat_projection masc_tui_image_ref masc.masc_tool_blob_store base64 digestif yojson uri))
 
 (library
  (name masc_tui_link_label)
@@ -2450,7 +2519,7 @@
  (name masc_tui_identity_model)
  (wrapped false)
  (modules masc_tui_identity_model)
- (libraries masc_tui_pick_list masc_tui_message_layout))
+ (libraries masc_tui_pick_list masc_tui_message_layout yojson))
 
 (library
  (name masc_tui_render_identity)

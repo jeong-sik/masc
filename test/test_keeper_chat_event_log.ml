@@ -97,6 +97,10 @@ let all_events : E.keeper_chat_event list =
       }
   ; E.Agent_core_content_block_start
       { index = 1; content_type = "text"; tool_call_id = None; tool_call_name = None }
+  ; E.Model_content_activity {content_generation=0; content_scope=0; content_index=0;
+      content_provider_message_id=None; channel=E.Model_thinking; state=E.Content_observed}
+  ; E.Model_content_activity {content_generation=0; content_scope=0; content_index=0;
+      content_provider_message_id=None; channel=E.Model_thinking; state=E.Content_ended}
   ; E.Agent_core_content_block_stop { index = 0 }
   ; E.Agent_core_thinking_delta { index = 3; delta = "pondering" }
   ; E.Agent_core_thinking_signature_delta { index = 3; signature_bytes = 42 }
@@ -116,9 +120,9 @@ let all_events : E.keeper_chat_event list =
       { occurrence; tool_call_id = None; snapshot = "{\"path\":\"/tmp\"}" }
   ; E.Tool_call_end { occurrence; tool_call_id = Some "tc-1" }
   ; E.Native_tool_start { occurrence; tool_call_id = Some "native-1"; tool_call_name = Some "Read" }
-  ; E.Native_tool_end { occurrence; tool_call_id = Some "native-1"; tool_call_name = Some "Read" }
+  ; E.Native_tool_end ({ occurrence; tool_call_id = Some "native-1"; tool_call_name = Some "Read" }, Runtime_native_tools.end_observed)
   ; E.Native_tool_start { occurrence = occurrence_anon; tool_call_id = None; tool_call_name = None }
-  ; E.Native_tool_end { occurrence = occurrence_anon; tool_call_id = None; tool_call_name = None }
+  ; E.Native_tool_end ({ occurrence = occurrence_anon; tool_call_id = None; tool_call_name = None }, Runtime_native_tools.end_observed)
   ; E.Tool_approval_requested
       { tool_call_id = "tc-2"
       ; tool_call_name = "bash"
@@ -186,6 +190,22 @@ let test_codec_round_trip_all_constructors () =
         Alcotest.(check (option (float 1e-9))) "delta charge and authoritative zero round-trip"
           (Some charge) usage.cost_usd
     | Ok _ | Error _ -> Alcotest.fail "charged delta must decode") [0.001; 0.0]
+
+(* The production writer still emits native ends without a completion
+   (11,865 rows in the live keeper_turn_events on 2026-10-10), so a record
+   without one reads as end_observed. A repeated completion is refused. *)
+let test_native_tool_end_reads_an_omitted_completion_as_observed () =
+  let ended = E.Native_tool_end
+      ({ occurrence; tool_call_id = Some "native-1"; tool_call_name = Some "Read" },
+       Runtime_native_tools.end_observed) in
+  let fields = match L.keeper_chat_event_to_json ended with
+    | `Assoc fields -> fields
+    | _ -> Alcotest.fail "native end must encode as an object" in
+  Alcotest.(check bool) "an omitted completion reads as end_observed" true
+    (L.keeper_chat_event_of_json (`Assoc (List.remove_assoc "completion" fields)) = Ok ended);
+  Alcotest.(check bool) "a repeated completion is refused" true
+    (Result.is_error (L.keeper_chat_event_of_json
+       (`Assoc (fields @ [ "completion", List.assoc "completion" fields ]))))
 
 let test_envelope_round_trip () =
   let entry : L.journaled_event =
@@ -352,7 +372,7 @@ let test_journal_skips_non_finite_floats () =
                shared serializer must still produce valid JSON and retain
                the other reported counters. *)
             let _, projected = Projection.project ~timestamp:1_762_300_001.0
-                ~redact_text:Fun.id ~redact_json:Fun.id Projection.initial event in
+                ~redact_text:Fun.id Projection.initial event in
             let json = match projected with
               | Some event -> Ag_ui.event_to_json event
               | None -> Alcotest.fail "usage delta did not project" in
@@ -370,7 +390,7 @@ let test_journal_skips_non_finite_floats () =
                ; stop_reason = None
                ; usage = Some { delta_usage_partial with cost_usd = Some charge } } in
            let _, projected = Projection.project ~timestamp:1_762_300_001.0
-               ~redact_text:Fun.id ~redact_json:Fun.id Projection.initial event in
+               ~redact_text:Fun.id Projection.initial event in
            let json = match projected with
              | Some event -> Ag_ui.event_to_json event
              | None -> Alcotest.fail "finite usage delta did not project" in
@@ -959,7 +979,7 @@ let projected_sse_bytes timed_events =
            Projection.project
              ~timestamp:ts
              ~redact_text:Fun.id
-             ~redact_json:Fun.id
+
              projection
              event
          in
@@ -1082,7 +1102,7 @@ let test_continued_short_reply_uses_monotonic_journal_ids () =
     Alcotest.(check int) "short final answer survives old cursor" (List.length final_events) (List.length replay);
     let frames entries =
       let _, frames = List.fold_left (fun (state, frames) (entry : L.journaled_event) ->
-        let state, event = Projection.project ~timestamp:entry.ts ~redact_text:Fun.id ~redact_json:Fun.id state entry.event in
+        let state, event = Projection.project ~timestamp:entry.ts ~redact_text:Fun.id state entry.event in
         state, (match event with None -> frames | Some event -> Ag_ui.event_to_sse ~id:entry.seq event :: frames))
         (Projection.initial, []) entries in
       String.concat "" (List.rev frames) in
@@ -1129,7 +1149,7 @@ let test_native_activity_survives_bridge_journal_and_projection () =
     let native = List.filter_map (fun (entry : L.journaled_event) ->
       match entry.event with
       | E.Native_tool_start tool -> Some (true, tool)
-      | E.Native_tool_end tool -> Some (false, tool)
+      | E.Native_tool_end (tool, _) -> Some (false, tool)
       | _ -> None) entries in
     Alcotest.(check (list (pair bool int))) "one ordered observation per actual boundary"
       [true, 1; false, 1; true, 2; false, 2; true, 3]
@@ -1140,7 +1160,7 @@ let test_native_activity_survives_bridge_journal_and_projection () =
          | _ -> false) entries);
     let _, projected = List.fold_left (fun (projection, result) (entry : L.journaled_event) ->
       let projection, event = Projection.project ~timestamp:entry.ts ~redact_text:Fun.id
-          ~redact_json:Fun.id projection entry.event in
+           projection entry.event in
       let result = match entry.event, event with
         | (E.Native_tool_start _ | E.Native_tool_end _), Some event -> Ag_ui.event_to_json event :: result
         | (E.Native_tool_start _ | E.Native_tool_end _), None -> Alcotest.fail "native activity vanished on wire"
@@ -1221,7 +1241,7 @@ let test_autonomous_turn_journal_is_live_and_replayable () =
         (Sys.file_exists (L.journal_path ~base_dir ~keeper_name:"k" ~operation_id:(Ids.Turn_ref.to_string turn_ref)));
       let page = {L.events=entries;has_more=false;next_offset=123} in
       let body = Server_dashboard_http_keeper_chat_operations.turn_events_page ~turn_ref
-          ~since_seq:L.Whole_turn ~redact_json:Fun.id page in
+          ~since_seq:L.Whole_turn ~redact_text:Fun.id page in
       let open Yojson.Safe.Util in
       Alcotest.(check string) "typed autonomous wire schema" "masc.keeper_turn_events.v1"
         (body |> member "schema" |> to_string);
@@ -1245,6 +1265,33 @@ let test_text_scope_codec () =
      ["stream_scope", `Int 2; "stream_scope", `Int 3]]
 ;;
 
+let test_native_journal_rejects_ambiguous_identity () =
+  let occurrence : E.tool_stream_occurrence =
+    {stream_scope=0; block_index=1; provider_message_id=None} in
+  let native : E.native_tool = {occurrence; tool_call_id=Some "call"; tool_call_name=Some "Read"} in
+  let fields = match L.keeper_chat_event_to_json (E.Native_tool_start native) with
+    | `Assoc fields -> fields | _ -> Alcotest.fail "expected event object" in
+  let reject label json = Alcotest.(check bool) label true
+      (Result.is_error (L.keeper_chat_event_of_json json)) in
+  reject "duplicate discriminant is ambiguous"
+    (`Assoc (("type",`String "native_tool_end")::fields));
+  List.iter (fun value -> reject "present invalid identity is not absent"
+    (`Assoc (("tool_call_id",value)::List.remove_assoc "tool_call_id" fields)))
+    [`Null; `Int 1; `String " "];
+  reject "unknown native fields cannot hide a conflicting completion"
+    (`Assoc (("completion",Runtime_native_tools.completion_to_json Runtime_native_tools.end_observed)::fields));
+  reject "negative occurrence has no matching live identity"
+    (`Assoc (("occurrence",`Assoc ["stream_scope",`Int (-1); "block_index",`Int 1])
+      ::List.remove_assoc "occurrence" fields));
+  let valid = L.journaled_event_to_json {seq=0; ts=1.; event=E.Native_tool_start native} in
+  let envelope = match valid with `Assoc fields -> fields | _ -> Alcotest.fail "expected envelope" in
+  List.iter (fun invalid -> Alcotest.(check bool) "journal envelope is unambiguous" true
+    (Result.is_error (L.journaled_event_of_json invalid)))
+    [`Assoc (("seq",`Int 2)::envelope);
+     `Assoc (("seq",`Int (-1))::List.remove_assoc "seq" envelope);
+     `Assoc (("ts",`Float infinity)::List.remove_assoc "ts" envelope)]
+;;
+
 let () =
   Alcotest.run
     "keeper_chat_event_log"
@@ -1256,6 +1303,8 @@ let () =
             `Quick
             test_codec_round_trip_all_constructors
         ; Alcotest.test_case "envelope round trip" `Quick test_envelope_round_trip
+        ; Alcotest.test_case "native end reads an omitted completion as observed" `Quick
+            test_native_tool_end_reads_an_omitted_completion_as_observed
         ; Alcotest.test_case
             "envelope rejects unknown version"
             `Quick
@@ -1333,7 +1382,9 @@ let () =
             test_reader_gone_releases_every_parked_publisher
         ] )
     ; ( "integration"
-      , [ Alcotest.test_case "native tool observations survive journal and wire" `Quick
+      , [ Alcotest.test_case "native journal rejects ambiguous identity" `Quick
+            test_native_journal_rejects_ambiguous_identity
+        ; Alcotest.test_case "native tool observations survive journal and wire" `Quick
             test_native_activity_survives_bridge_journal_and_projection
         ; Alcotest.test_case "native content cannot enter assistant channels" `Quick
             test_native_content_cannot_become_assistant_text

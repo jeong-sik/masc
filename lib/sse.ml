@@ -90,10 +90,21 @@ type session_kind = Transport_metrics.sse_session_kind =
   | Presence [@tla.symbol "presence"]    (** Ephemeral liveness / awareness channel *)
 [@@deriving tla]
 
+type runtime_authority = Runtime_authority of string
+
+let runtime_authority_exn ~base_path =
+  match Config_dir_resolver.canonical_base_path base_path with
+  | Ok canonical -> Runtime_authority canonical
+  | Error error -> invalid_arg (Config_dir_resolver.canonical_base_path_error_to_string error)
+
+let equal_runtime_authority (Runtime_authority left) (Runtime_authority right) =
+  String.equal left right
+
 (** Broadcast targeting selector. *)
 type broadcast_target =
   | All          (** Every connected session (backward-compatible default) *)
   | Observers    (** Only [Observer] sessions *)
+  | Runtime_observers of runtime_authority
   | Presence_only (** Only [Presence] sessions; never replay-buffered *)
 
 type delivery_audience =
@@ -140,6 +151,7 @@ let stream_capacity =
 type client = {
   id: int;
   kind: session_kind;
+  runtime_authority: runtime_authority;
   event_stream: delivery Eio.Stream.t;
   last_event_id: int Atomic.t;
   created_at: float;
@@ -356,7 +368,7 @@ let buffer_event delivery =
     in
     { next_state = { events_by_id; count; evicted_through }; result = () })
 
-let session_kind_matches_target target ~jsonrpc_payload kind =
+let session_kind_matches_target target ~runtime_authority ~jsonrpc_payload kind =
   match target with
   | All -> (
       match kind with
@@ -364,9 +376,11 @@ let session_kind_matches_target target ~jsonrpc_payload kind =
       | Agent_stream -> jsonrpc_payload
       | Presence -> false)
   | Observers -> kind = Observer
+  | Runtime_observers authority ->
+      kind = Observer && Option.exists (equal_runtime_authority authority) runtime_authority
   | Presence_only -> kind = Presence
 
-let event_matches_session ~session_id ~kind event =
+let event_matches_session ~runtime_authority ~session_id ~kind event =
   match event.audience with
   | Session_audience target_session_id ->
     kind = Agent_stream && String.equal target_session_id session_id
@@ -379,7 +393,7 @@ let event_matches_session ~session_id ~kind event =
     let jsonrpc_payload =
       Sse_jsonrpc_filter.jsonrpc_message_for_agent_stream event.payload
     in
-    session_kind_matches_target target ~jsonrpc_payload kind
+    session_kind_matches_target target ~runtime_authority ~jsonrpc_payload kind
 
 (** Get events after given ID for replay (MCP spec MUST) *)
 let get_events_after_raw last_id =
@@ -397,12 +411,12 @@ type replay = { deliveries : delivery list; continuity : replay_continuity }
 
 (* One snapshot answers both: read apart, an eviction in between could drop
    an event from the deliveries while the continuity still said none was. *)
-let replay_after_for_session ~session_id ~kind last_id =
+let replay_after_for_session ?runtime_authority ~session_id ~kind last_id =
   let state = Atomic.get event_buffer in
   let _older_or_equal, _at_last_id, newer = IntMap.split last_id state.events_by_id in
   let deliveries =
     newer |> IntMap.bindings |> List.map snd
-    |> List.filter (event_matches_session ~session_id ~kind)
+    |> List.filter (event_matches_session ~runtime_authority ~session_id ~kind)
   in
   let continuity =
     if state.evicted_through > last_id
@@ -586,6 +600,7 @@ let register ?(kind = Agent_stream) ?on_disconnect ~(auth : registration_auth) s
   match validate_registration ~auth session_id with
   | Error e -> Error e
   | Ok _credential ->
+  let runtime_authority = runtime_authority_exn ~base_path:auth.config in
   let client_id = Atomic.fetch_and_add client_id_counter 1 + 1 in
   (* Ids only grow within one process, so a cursor above the last id handed
      out came from an earlier one: MCP sessions outlive a restart, the counter
@@ -598,6 +613,7 @@ let register ?(kind = Agent_stream) ?on_disconnect ~(auth : registration_auth) s
   let base_client = {
     id = client_id;
     kind;
+    runtime_authority;
     event_stream;
     last_event_id;
     created_at = 0.0;
@@ -741,7 +757,8 @@ let touch session_id =
   | None -> ()
 
 let client_matches_target target ~jsonrpc_payload (client : client) =
-  session_kind_matches_target target ~jsonrpc_payload client.kind
+  session_kind_matches_target target ~runtime_authority:(Some client.runtime_authority)
+    ~jsonrpc_payload client.kind
 
 (** {1 External Subscriber Hook}
 
@@ -769,6 +786,7 @@ type external_event = {
 
 type external_subscriber = {
   sub_id: string;
+  runtime_authority: runtime_authority option;
   callback: external_event -> unit;
   is_alive: unit -> bool;
   (** Returns false if the subscriber should be removed.
@@ -803,8 +821,8 @@ let current_external_subscriber_count_with_prefix prefix =
     [is_alive] is called before each delivery; returning [false] triggers
     automatic unsubscription, preventing resource leaks when the consumer
     disconnects without an explicit [unsubscribe_external] call. *)
-let subscribe_external ~id ~callback ?(is_alive = fun () -> true) () =
-  let subscriber = { sub_id = id; callback; is_alive } in
+let subscribe_external ?runtime_authority ~id ~callback ?(is_alive = fun () -> true) () =
+  let subscriber = { sub_id = id; runtime_authority; callback; is_alive } in
   let replaced, count =
     Lockfree_atomic.update_with_commit external_subscribers (fun state ->
       let replaced = SMap.mem id state.subscribers in
@@ -883,7 +901,13 @@ let remove_external_subscribers ids =
 (** Fan out an event to all external subscribers.
     Dead subscribers (where [is_alive] returns [false]) are automatically
     removed during iteration, preventing resource leaks. *)
-let notify_external_subscribers event =
+let external_matches_target target (subscriber : external_subscriber) =
+  match target with
+  | Runtime_observers authority ->
+      Option.exists (equal_runtime_authority authority) subscriber.runtime_authority
+  | All | Observers | Presence_only -> true
+
+let notify_external_subscribers ~target event =
   let t0 = Time_compat.now () in
   let record_duration () =
     Transport_metrics.observe_external_subscriber_fanout_duration
@@ -903,7 +927,7 @@ let notify_external_subscribers event =
       (fun _ (sub : external_subscriber) ->
         if not (sub.is_alive ())
         then dead := sub.sub_id :: !dead
-        else
+        else if external_matches_target target sub then
           try sub.callback event with
           | Eio.Cancel.Cancelled _ as e -> raise e
           | exn ->
@@ -1003,13 +1027,14 @@ let broadcast_is_unobservable target ~buffer ~notify_external =
             (fun _ (client : client) ->
               session_kind_matches_target
                 target
+                ~runtime_authority:(Some client.runtime_authority)
                 ~jsonrpc_payload:false
                 client.kind)
             state.entries)
   (* Not skipped: these arms need [jsonrpc_payload], which costs a filter pass
      over the payload, so the check would no longer be the O(1) it has to be on
      this path. *)
-  | All | Observers -> false
+  | All | Observers | Runtime_observers _ -> false
 
 (* What a broadcast carries: a value to encode in the frame, or a value encoded
    already, whose text the frame is written from. *)
@@ -1029,7 +1054,7 @@ let broadcast_deliver ~buffer ~notify_external ~event_type target payload =
   in
   let target_label = match target with
     | All -> "all"
-    | Observers -> "observers"
+    | Observers | Runtime_observers _ -> "observers"
     | Presence_only -> "presence"
   in
   let delivery, failed =
@@ -1122,7 +1147,7 @@ let broadcast_deliver ~buffer ~notify_external ~event_type target payload =
   (* Notify external subscribers (gRPC streams, etc.) for durable broadcast
      traffic only. Presence is intentionally live-only and bufferless. *)
   if notify_external then
-    notify_external_subscribers
+    notify_external_subscribers ~target
       { ext_frame = delivery.frame
       ; ext_payload = delivery.payload
       ; ext_event_id = delivery.event_id

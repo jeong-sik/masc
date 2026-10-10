@@ -18,9 +18,9 @@ let show = function
   | D.Key name -> "key " ^ name
   | D.Paste { Masc_tui_paste.text; dropped } ->
       Printf.sprintf "paste %S dropped=%d" text dropped
-  | D.Mouse_wheel (Masc.Tui_decode.Wheel_up, row, column) ->
+  | D.Mouse_wheel (Masc.Tui_mouse_protocol.Wheel_up, row, column) ->
       Printf.sprintf "wheel-up %d,%d" row column
-  | D.Mouse_wheel (Masc.Tui_decode.Wheel_down, row, column) ->
+  | D.Mouse_wheel (Masc.Tui_mouse_protocol.Wheel_down, row, column) ->
       Printf.sprintf "wheel-down %d,%d" row column
   | D.Mouse_left_press (row, column) -> Printf.sprintf "press %d,%d" row column
   | D.Mouse_left_release (row, column) ->

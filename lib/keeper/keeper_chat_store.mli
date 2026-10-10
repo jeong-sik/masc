@@ -46,24 +46,10 @@ type tool_call = Keeper_chat_types.tool_call = {
   args : string;
 }
 
-(** Lane line role as a closed sum (RFC-0232 P1). Parsed once at the
-    read boundary; a line whose persisted label is none of
-    ["user"] / ["assistant"] / ["system"] / ["tool"] is reported as a persistence
-    read drop and excluded — it can participate in no lane semantics
-    (watermark, pending, rendering). On-disk labels are unchanged. *)
+(** Closed transcript row classification. Assistant is Keeper speech;
+    Request_failure is a server-owned request result and cannot acknowledge
+    input or enter conversation memory. Unknown labels are refused. *)
 module Role = Keeper_chat_types.Role
-
-(** What an assistant line {e is}, declared by the writer at append.
-    [Utterance] is something the keeper actually said.
-    [Transport_failure] is the server persisting a failed request
-    terminal (["Keeper request failed: ..."]) so the operator still sees
-    the failure after a reload — it is {e not} a self reply: it does not
-    advance the lane watermark, so the user line it failed to answer
-    stays pending until the keeper's next real utterance, and
-    observation never quotes it back as the keeper's own words.
-    Persisted as ["kind"]; the field is absent for utterances, so rows
-    written before it existed read unchanged. *)
-module Row_kind = Keeper_chat_types.Row_kind
 
 (** Closed, durable names for AG-UI lifecycle events recorded by the direct
     Keeper chat stream. This is server lifecycle provenance, not a
@@ -223,10 +209,6 @@ type chat_message = Keeper_chat_types.chat_message = {
           and rows written before P4 (the offline backfill tool stamps
           those).  Malformed persisted entries are reported as
           persistence read drops and skipped; the row stays valid. *)
-  kind : Row_kind.t;
-      (** Absent persisted kind means [Utterance]. A present field must
-          name a known kind; malformed values are reported and the row is
-          rejected, so unknown input cannot acknowledge keeper speech. *)
   turn_ref : Ids.Turn_ref.t option;
       (** RFC-0233 §7: ["<trace_id>#<absolute_turn>"] join key for the turn
           that produced this row.  Stamped by {!append_turn} /
@@ -322,9 +304,9 @@ val approval_request_call_summary :
     identifies the user-line author and is written on the user line
     only. [conversation_id] identifies the external conversation/thread
     coordinate and is written on all lines of the turn; [external_message_id]
-    belongs to the inbound user line only. [assistant_kind] declares what
-    the assistant line is (default [Utterance]); the failed-request
-    persistence path passes [Transport_failure]. Failures are logged but
+    belongs to the inbound user line only. The assistant line is Keeper
+    speech. Server-owned failures use {!append_request_failure_once}.
+    Write failures are logged but
     never raised except for {!Eio.Cancel.Cancelled}. *)
 
 val append_turn :
@@ -338,7 +320,6 @@ val append_turn :
   ?external_message_id:string ->
   ?speaker:speaker ->
   ?extra_mentions:Keeper_identity.Keeper_id.t list ->
-  ?assistant_kind:Row_kind.t ->
   ?blocks:chat_block list ->
   ?turn_ref:Ids.Turn_ref.t ->
   ?stream_lifecycle:stream_lifecycle_event list ->
@@ -386,7 +367,6 @@ val append_assistant_message_result :
   ?surface:Surface_ref.t ->
   ?conversation_id:string ->
   ?audio:audio_clip ->
-  ?assistant_kind:Row_kind.t ->
   ?blocks:chat_block list ->
   ?turn_ref:Ids.Turn_ref.t ->
   ?stream_lifecycle:stream_lifecycle_event list ->
@@ -406,12 +386,22 @@ val append_assistant_message_once :
   content:string ->
   ?surface:Surface_ref.t ->
   ?conversation_id:string ->
-  ?assistant_kind:Row_kind.t ->
   ?tool_calls:tool_call list ->
   ?blocks:chat_block list ->
   ?turn_ref:Ids.Turn_ref.t ->
   ?stream_lifecycle:stream_lifecycle_event list ->
   unit ->
+  (append_once_result, string) result
+
+(** Append a server-owned failed-request result exactly once. It shares the
+    terminal result slot with an assistant reply, preserves completed output,
+    and never acknowledges an input or becomes Keeper conversation memory. *)
+val append_request_failure_once :
+  base_dir:string -> keeper_name:string ->
+  delivery_key:Keeper_chat_delivery_identity.delivery_key -> content:string ->
+  ?surface:Surface_ref.t -> ?conversation_id:string -> ?tool_calls:tool_call list ->
+  ?blocks:chat_block list -> ?turn_ref:Ids.Turn_ref.t ->
+  ?stream_lifecycle:stream_lifecycle_event list -> unit ->
   (append_once_result, string) result
 
 (** Idempotently append the ordered tool-call rows for a durable request that
@@ -525,7 +515,7 @@ val load_all_result :
   base_dir:string -> keeper_name:string -> (chat_message list, string) result
 (** Fail-closed whole-transcript reader for consumers whose durable cursor
     advances past the returned rows. Unlike {!load_all}, one unreadable row,
-    a [surface] that does not decode, an invalid [kind], an unknown typed [speaker_authority],
+    a [surface] that does not decode, an invalid row contract, an unknown typed [speaker_authority],
     speaker identity without its authority, an incomplete final row, or a
     store read failure is an error rather than a silently shorter history.
     Missing authority remains valid only for rows written without any speaker
@@ -594,5 +584,5 @@ val turn_transcript_to_json :
 (** [turn_transcript_to_json ~keeper ~turn_ref t] renders the dashboard
     turn-transcript payload: [keeper], [turn_ref], [found] (false when
     both line lists are empty), [source], and the [user]/[assistant]
-    line arrays. Each line carries [role]/[content]/[ts] and, for
-    non-utterance assistant rows, the writer-declared [kind]. *)
+    line arrays. Each line carries [role]/[content]/[ts]; failed requests
+    have the server-owned [request_failure] role. *)

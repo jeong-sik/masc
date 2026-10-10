@@ -1617,6 +1617,9 @@ let test_unknown_deny_tool_refuses_load () =
   check (list string) "unknown_deny_tools keeps only the unnamed entry"
     [ "no-such-tool" ]
     (KTP.unknown_deny_tools [ known; "no-such-tool" ]);
+  check (list string) "qualified detached Add-on deny stays valid; empty selector does not"
+    [ "addon:" ]
+    (KTP.unknown_deny_tools [ "addon:machine_press"; "addon:" ]);
   let snapshot = KTP.read_keeper_profile_snapshot ~base_path in
   (match KTP.snapshot_profile_defaults snapshot "denier" with
    | Ok _ -> fail "snapshot admitted the unnamed deny entry"
@@ -2001,19 +2004,8 @@ let test_health_json_build_exposes_runtime_binary_identity () =
   check bool "build repo_root field present" true
     (match build |> member "repo_root" with `Null | `String _ -> true | _ -> false)
   ;
-  (* The DOS core is part of what a build is: one masc commit can link the
-     vendored core or an older opam one, and only this field differs. *)
-  let core = build |> member "ocaml_dos_core" in
-  check string "build names the linked DOS core"
-    (Yojson.Safe.to_string
-       (Masc.Build_identity.to_yojson (Masc.Build_identity.current ()) |> member "ocaml_dos_core"))
-    (Yojson.Safe.to_string core);
-  check int "the core digest is a 32-character hex digest" 32
-    (String.length (core |> member "source_digest" |> to_string));
-  check int "so is the pinned one" 32
-    (String.length (core |> member "pinned_source_digest" |> to_string));
-  check bool "the pin comparison is a flag, not text" true
-    (match core |> member "matches_pin" with `Bool _ -> true | _ -> false)
+  check bool "host build identity does not claim the separately loaded worker core" true
+    (build |> member "ocaml_dos_core" = `Null)
 
 (* ================================================================ *)
 (* Test suite                                                        *)

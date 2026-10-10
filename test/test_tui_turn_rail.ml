@@ -14,7 +14,9 @@ module Layout = Masc_tui_message_layout
 
 let entry ?(turn_rail = Layout.Rail_none) ?(style = Layout.Keeper)
     ?(role = "keeper.one") body : Layout.entry =
-  { style
+  { delivery_state = None; style
+  ; heading_boundary = Layout.Inherit_heading
+  ; body_presentation = Layout.Source_body
   ; timestamp = "01:41:00"
   ; timeline_bucket = None
   ; diagnostics = []
@@ -31,7 +33,7 @@ let entry ?(turn_rail = Layout.Rail_none) ?(style = Layout.Keeper)
 ;;
 
 let body_rows ?(inner_width = 60) entry =
-  Layout.visible_rows ~origin:Layout.Origin_bare ~inner_width ~height:40
+  Layout.visible_rows ~origin:Layout.Origin_inline ~inner_width ~height:40
     [ entry ]
   |> List.filter (fun (row : Layout.row) -> row.kind = Layout.Body)
 ;;

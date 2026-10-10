@@ -26,7 +26,10 @@ type retained_frame = {
   pixels : Masc_tui_interactive.frame option;
 }
 let retained : retained_frame option ref = ref None
-let invalidate () = retained := None
+let rendered_menu_selection : (int * int * Masc_tui_types.msx_menu_entry) option ref = ref None
+let invalidate () =
+  retained := None;
+  rendered_menu_selection := None
 let image_may_exist = ref false
 let image_id = Masc_tui_graphics.image_id Masc_tui_graphics.Msx_screen
 let placement_id = 1
@@ -34,6 +37,8 @@ let synchronized_output = ref false
 let set_synchronized_output enabled = synchronized_output := enabled
 let delete_image = Masc_tui_graphics.delete_image ~image_id
 let write_batch ~write payload =
+  (* A full-width sidebar/footer must not leave a pending automatic wrap. *)
+  let payload = "\027[?7l" ^ payload ^ "\027[?7h" in
   if !synchronized_output then write ("\027[?2026h" ^ payload ^ "\027[?2026l")
   else write payload
 
@@ -57,8 +62,7 @@ let set_cell_pixels px = cell_pixels := px
    available width allows at the frame's own shape; the row count is that
    height in whole cells, rounded down so the last row is not a partial one.
 
-   Without a cell size there is nothing to compute with, and the caller keeps
-   the rows it asked for. *)
+   Without a cell size the caller uses the bounded cell mosaic. *)
 let rows_that_fit ~cols ~rows ~frame_width ~frame_height =
   match !cell_pixels with
   | Some (cell_width, cell_height)
@@ -70,7 +74,16 @@ let rows_that_fit ~cols ~rows ~frame_width ~frame_height =
       max 1 (min rows (height / cell_height))
   | Some _ | None -> rows
 
-let fit_line width s = String.sub s 0 (min (String.length s) (max width 1))
+let fit_line width s =
+  Masc_tui_ansi.fit_width (Masc_tui_ansi.Terminal_text.single_line s) (max width 0)
+
+(* Boxed TUI surfaces reserve four columns in their shared geometry cache.
+   This full-screen viewport has no borders: preserve the actual tty width,
+   including one-column windows, rather than printing beyond its edge. *)
+let viewport_size () =
+  match Masc_tui_ansi.probe_terminal_size () with
+  | Some size -> size
+  | None -> Masc_tui_ansi.get_terminal_size ()
 
 (* The activity sidebar (RFC machine-spectating-goes-through-lanes §2.1's
    [activity] field, drawn here for the first time): a fixed-width column of
@@ -98,7 +111,7 @@ let shows_sidebar ~cols ~has_activity =
 let picture_cols ~cols ~has_activity =
   if shows_sidebar ~cols ~has_activity then cols - sidebar_cols - sidebar_gap else cols
 
-let sidebar_line entry =
+let activity_line ~width entry =
   Masc_tui_ansi.fit_width
     (match entry with
      | None -> ""
@@ -107,7 +120,9 @@ let sidebar_line entry =
            (Masc_tui_ansi.Terminal_text.clock_timestamp_of_unix e.at)
            (Masc_tui_ansi.Terminal_text.single_line e.who)
            (Masc_tui_ansi.Terminal_text.single_line e.action))
-    sidebar_cols
+    width
+
+let sidebar_line entry = activity_line ~width:sidebar_cols entry
 
 (* An empty cache has two causes and they are not the same news. The server
    answered and said no machine is loaded, or it was not reachable to be asked
@@ -197,9 +212,13 @@ let step_fraction d =
    machine (RFC-0439 3.3), and the size keys are intercepted before that. *)
 let adjust_size d = step_fraction d
 
-let footer () =
-  Printf.sprintf " Esc: back  +/-: %d%%  F6: save quick  F7: restore quick  F8: disk"
-    (int_of_float (!screen_fraction *. 100.0))
+let footer interaction =
+  let mode = match interaction with
+    | Masc_tui_types.Observe_machine -> "Watching only · F5: control"
+    | Control_machine -> "Controlling · F5: watch  F6: save quick  F7: restore quick  F8: disk"
+  in
+  Printf.sprintf " Esc: back  +/-: %d%%  %s"
+    (int_of_float (!screen_fraction *. 100.0)) mode
 
 (* A watched machine other than MSX takes no keys from this screen: only
    leaving and sizing. *)
@@ -212,28 +231,44 @@ let live_footer () =
    (mode, media, who pressed) still rides the old type; only the picture went
    through the contract. *)
 let draw ~(write : string -> unit) ~title ~footer ~retain ?notice
-    ?(activity = []) (surface : Masc_tui_interactive.frame option) =
+    ?(activity = []) ?room ?room_footer (surface : Masc_tui_interactive.frame option) =
   let dims =
     match surface with
     | Some (Pixels { width; height; rgb }) -> Some (width, height, rgb)
     | None -> None
   in
-  let rows, cols = Masc_tui_ansi.get_terminal_size () in
+  let rows, cols = viewport_size () in
+  let rows = max 1 rows and cols = max 1 cols in
+  let notice = if rows >= 4 then notice else None in
   let header_rows = if Option.is_some notice then 2 else 1 in
-  let screen_rows = max 4 (rows - header_rows - 1) in
+  let body_rows = max 0 (rows - header_rows - 1) in
+  let room_side = Option.is_some room && cols >= 80 in
+  let room_width = if room_side then min 48 (cols / 3) else cols in
+  let room_rows = if Option.is_none room then 0 else if room_side then body_rows
+    else min 10 (body_rows / 2) in
+  (* The room and the machine feed share its region vertically. Reserve no
+     empty activity rows, and preserve its heading, one message row and composer
+     before allocating activity. Keep at least half for conversation; the picture
+     keeps its existing width even when DOS activity arrives. *)
+  let room_activity_rows = min (List.length activity)
+      (min (room_rows / 2) (max 0 (room_rows - 3))) in
+  let conversation_rows = room_rows - room_activity_rows in
+  let screen_rows = if room_side then body_rows else body_rows - room_rows in
   let picture_rows =
-    max 2 ((screen_rows * int_of_float (Float.round (!screen_fraction *. 8.0))) / 8)
+    min screen_rows (max 1 ((screen_rows * int_of_float (Float.round (!screen_fraction *. 8.0))) / 8))
   in
-  let has_activity = activity <> [] in
+  let has_activity = activity <> [] && Option.is_none room in
   let show_sidebar = shows_sidebar ~cols ~has_activity in
-  let picture_cols = picture_cols ~cols ~has_activity in
+  let picture_cols = if room_side then cols - room_width - 1 else picture_cols ~cols ~has_activity in
   (* [picture_cols], not [cols]: the picture's own column budget is what
      decides its rendered size, and the sidebar toggling on or off changes
      that budget without necessarily changing [cols] itself. *)
   let geometry = (rows, picture_cols, header_rows, picture_rows, !cell_pixels) in
-  let kitty = match dims, !graphics_protocol with
-    | Some (width, height, rgb), Masc_tui_graphics.Kitty_protocol ->
-        width > 0 && height > 0 && String.length rgb = width * height * 3
+  let kitty = match dims, !graphics_protocol, !cell_pixels with
+    | Some (width, height, rgb), Masc_tui_graphics.Kitty_protocol, Some (cw, ch) ->
+        cw > 0 && ch > 0 && screen_rows > 0
+        && width > 0 && height > 0 && String.length rgb = width * height * 3
+        && ch * width <= picture_cols * cw * height
     | _ -> false
   in
   let previous = !retained in
@@ -261,9 +296,15 @@ let draw ~(write : string -> unit) ~title ~footer ~retain ?notice
     if kitty || !image_may_exist then Buffer.add_string buf delete_image;
     Buffer.add_string buf "\027[2J\027[H"
   end;
+  (* With DECAWM disabled the cursor stays on the last printed cell. Clear
+     each row before writing it, otherwise EL would erase that final cell. *)
+  Buffer.add_string buf "\027[0K";
   Buffer.add_string buf (fit_line cols title);
-  Buffer.add_string buf "\027[0K\r\n";
-  Option.iter (fun message -> Buffer.add_string buf (fit_line cols (" " ^ message)); Buffer.add_string buf "\027[0K\r\n") notice;
+  if rows > 1 then Buffer.add_string buf "\r\n";
+  Option.iter (fun message ->
+    Buffer.add_string buf "\027[0K";
+    Buffer.add_string buf (fit_line cols (" " ^ message));
+    Buffer.add_string buf "\r\n") notice;
   let blank_row () = Buffer.add_string buf "\027[0K\r\n" in
   (match dims with
    | Some (width, height, rgb) when kitty ->
@@ -286,7 +327,7 @@ let draw ~(write : string -> unit) ~title ~footer ~retain ?notice
        Buffer.add_string buf escape;
        Buffer.add_string buf (Printf.sprintf "\027[%d;1H" (header_rows + screen_rows + 1))
    | Some (width, height, rgb)
-     when width > 0 && height > 0 && String.length rgb >= width * height * 3 ->
+     when screen_rows > 0 && width > 0 && height > 0 && String.length rgb >= width * height * 3 ->
        (* The machine's frame has a shape of its own -- 256x192 from the
           server's screen -- and the terminal has another. Fitting the grid to
           the terminal alone drew that shape stretched to whatever the window
@@ -307,22 +348,23 @@ let draw ~(write : string -> unit) ~title ~footer ~retain ?notice
        for _ = 1 to above do blank_row () done;
        List.iter
          (fun line ->
+           Buffer.add_string buf "\027[0K";
            Buffer.add_string buf left;
            Buffer.add_string buf line;
-           blank_row ())
+           Buffer.add_string buf "\r\n")
          lines;
        for _ = 1 to screen_rows - drawn - above do blank_row () done
    | Some _ | None ->
        (* Nothing to draw: clear the body so a stale frame does not linger. *)
        for _ = 1 to screen_rows do blank_row () done);
   (* Drawn after the picture, never before: the picture's own rows erase to
-     the true right edge of the terminal (["\027[0K"] on a mosaic or blank
+     the true right edge of the terminal (["\027[0K"] before a mosaic or blank
      row, the whole screen on a kitty redraw), which would wipe this column
      out again if it went first. Every path above leaves the cursor
      somewhere other than the footer row, so this always ends by parking it
      there explicitly -- the one thing every path used to get for free by
      writing the footer immediately next in sequence. *)
-  if show_sidebar then begin
+  if show_sidebar && screen_rows > 0 then begin
     let sidebar_col = picture_cols + sidebar_gap + 1 in
     for i = 0 to screen_rows - 1 do
       Buffer.add_string buf (Printf.sprintf "\027[%d;%dH" (header_rows + 1 + i) sidebar_col);
@@ -330,8 +372,27 @@ let draw ~(write : string -> unit) ~title ~footer ~retain ?notice
     done;
     Buffer.add_string buf (Printf.sprintf "\027[%d;1H" (header_rows + screen_rows + 1))
   end;
-  Buffer.add_string buf (fit_line cols footer);
-  Buffer.add_string buf "\027[0K";
+  (match room with
+   | Some draw_room when room_rows > 0 ->
+       let top = header_rows + 1 + (if room_side then 0 else screen_rows) in
+       let col = if room_side then picture_cols + 2 else 1 in
+       let lines = draw_room ~width:room_width ~height:conversation_rows in
+       for i = 0 to conversation_rows - 1 do
+         Buffer.add_string buf (Printf.sprintf "\027[%d;%dH" (top + i) col);
+         Buffer.add_string buf (fit_line room_width (Option.value ~default:"" (List.nth_opt lines i)))
+       done;
+       for i = 0 to room_activity_rows - 1 do
+         Buffer.add_string buf
+           (Printf.sprintf "\027[%d;%dH" (top + conversation_rows + i) col);
+         Buffer.add_string buf (activity_line ~width:room_width (List.nth_opt activity i))
+       done
+   | Some _ | None -> ());
+  if rows > 1 then begin
+    if Option.is_some room then Buffer.add_string buf (Printf.sprintf "\027[%d;1H" rows);
+    Buffer.add_string buf "\027[0K";
+    let footer = match room_footer with None | Some "" -> footer | Some hints -> hints in
+    Buffer.add_string buf (fit_line cols footer)
+  end;
   image_may_exist := !image_may_exist || kitty;
   write_batch ~write (Buffer.contents buf);
   image_may_exist := kitty;
@@ -341,14 +402,15 @@ let draw ~(write : string -> unit) ~title ~footer ~retain ?notice
 ;;
 
 let render ~(write : string -> unit)
-    ~(connection : Masc_tui_types.connection_status) ~live ?notice
+    ~(connection : Masc_tui_types.connection_status) ~live
+    ?(interaction = Masc_tui_types.Observe_machine) ?notice ?room ?room_footer
     (frame : Masc_tui_types.msx_frame option)
     (surface : Masc_tui_interactive.frame option) =
-  draw ~write ~title:(title_of ~connection ~live frame) ~footer:(footer ())
-    ~retain:(Option.is_some frame) ?notice surface
+  draw ~write ~title:(title_of ~connection ~live frame) ~footer:(footer interaction)
+    ~retain:(Option.is_some frame) ?notice ?room ?room_footer surface
 
 let render_live ~(write : string -> unit)
-    ~(connection : Masc_tui_types.connection_status) ?(activity = []) source
+    ~(connection : Masc_tui_types.connection_status) ?(activity = []) ?room ?room_footer source
     (live : Live.view) =
   let surface =
     match live with
@@ -357,7 +419,7 @@ let render_live ~(write : string -> unit)
     | Live.Unread | Live.Not_loaded | Live.Failed _ -> None
   in
   draw ~write ~title:(live_title ~connection source live) ~footer:(live_footer ())
-    ~retain:(Option.is_some surface) ~activity surface
+    ~retain:(Option.is_some surface) ~activity ?room ?room_footer surface
 
 (* The last surface a render drew — consume's repaint redraws it. *)
 let last_surface () =
@@ -378,19 +440,22 @@ let server_key = function
   | _ -> None
 ;;
 
+let close ~(write : string -> unit) (state : Masc_tui_types.state) =
+  invalidate ();
+  if !image_may_exist then write_batch ~write delete_image;
+  image_may_exist := false;
+  state.msx_open <- false
+
 let consume ~(write : string -> unit) (state : Masc_tui_types.state) key =
   if String.equal key "esc" then begin
-    invalidate ();
-    if !image_may_exist then write_batch ~write delete_image;
-    image_may_exist := false;
-    state.msx_open <- false;
+    close ~write state;
     false
   end
   else begin
     (* Any other key just repaints the latest frame the poll cached: a
        spectator does not drive the machine. *)
     render ~write ?notice:state.msx_notice ~connection:state.Masc_tui_types.connection_status
-      ~live:state.msx_live state.msx_frame (last_surface ());
+      ~live:state.msx_live ~interaction:state.machine_interaction state.msx_frame (last_surface ());
     true
   end
 
@@ -506,61 +571,64 @@ let entry_label (state : Masc_tui_types.state) = function
 
 let render_menu ~(write : string -> unit) ?status (state : Masc_tui_types.state) =
   invalidate ();
-  let rows, cols = Masc_tui_ansi.get_terminal_size () in
+  let rows, cols = viewport_size () in
+  let rows = max 1 rows and cols = max 1 cols in
   let entries = menu_entries state in
   settle_selection state entries;
   let buf = Buffer.create 1024 in
   if !image_may_exist then Buffer.add_string buf delete_image;
   Buffer.add_string buf "\027[2J\027[H";
-  Buffer.add_string buf (fit_line cols (match state.msx_menu_mode with
+  let row = ref 1 in
+  let line text =
+    Buffer.add_string buf "\027[0K";
+    Buffer.add_string buf text;
+    if !row < rows then Buffer.add_string buf "\r\n";
+    incr row
+  in
+  line (fit_line cols (match state.msx_menu_mode with
     | Masc_tui_types.Boot_game -> menu_title
     | Change_disk -> " MSX — change disk (no reboot)"));
-  Buffer.add_string buf "\027[0K\r\n";
+  let body_rows = max 0 (rows - 2) in
   let status_rows =
     match status with
-    | Some s ->
-        Buffer.add_string buf (fit_line cols (" " ^ s));
-        Buffer.add_string buf "\027[0K\r\n";
+    | Some s when body_rows > 0 ->
+        line (fit_line cols (" " ^ s));
         1
-    | None -> 0
+    | Some _ | None -> 0
   in
-  (match entries with
-   | [] ->
-       Buffer.add_string buf
-         (fit_line cols
-            " no cartridges yet \xe2\x80\x94 an operator fills .masc/msx/carts/ with ROM or .dsk images");
-       Buffer.add_string buf "\027[0K\r\n"
-   | _ ->
+  let entry_rows = body_rows - status_rows in
+  let displayed_selection = ref None in
+  (match entries, entry_rows with
+   | _, 0 -> ()
+   | [], _ ->
+       line (fit_line cols
+         " no cartridges yet \xe2\x80\x94 an operator fills .masc/msx/carts/ with ROM or .dsk images")
+   | _, _ ->
+       let selected = match state.msx_menu_selected with
+         | Some entry -> Option.value (index_in entries entry 0) ~default:0
+         | None -> 0 in
+       let start = max 0 (selected - entry_rows + 1) in
+       let visible = List.take entry_rows (List.drop start entries) in
        List.iter
          (fun entry ->
+           if is_selected state entry then displayed_selection := Some entry;
            let label = entry_label state entry in
-           let line =
+           let text =
              if is_selected state entry then
                "\027[7m" ^ fit_line (max 1 (cols - 1)) (" " ^ label) ^ "\027[0m"
              else fit_line cols (" " ^ label)
            in
-           Buffer.add_string buf line;
-           Buffer.add_string buf "\027[0K\r\n")
-         entries);
-  (* Pad the body so a previously longer list leaves no ghost rows behind, put
-     the keys on the bottom row, and write no newline there. A newline written
-     on the last row scrolls the screen by one, and the row that scrolls off is
-     the first -- the title. Measured at 150x44 with no cartridges: the screen
-     held two lines, the sentence about the empty directory and a blank, and
-     nothing said how to leave. *)
-  let drawn = 1 + status_rows + max 1 (List.length entries) in
-  let last_row = max 4 (rows - 1) in
-  for row = drawn to last_row do
-    if row = last_row then
-      Buffer.add_string buf
-        ("\027[2m"
-         ^ fit_line cols
-             (" " ^ menu_hints state.msx_menu_mode ~has_entries:(entries <> []))
-         ^ "\027[0m");
-    Buffer.add_string buf "\027[0K";
-    if row < last_row then Buffer.add_string buf "\r\n"
-  done;
+           line text)
+         visible);
+  (* Even one- and two-row windows keep all output inside the viewport. Only
+     body rows scroll through the list; the title and available footer stay. *)
+  while !row < rows do line "" done;
+  if rows > 1 then
+    line ("\027[2m"
+      ^ fit_line cols (" " ^ menu_hints state.msx_menu_mode ~has_entries:(Option.is_some !displayed_selection))
+      ^ "\027[0m");
   write_batch ~write (Buffer.contents buf);
+  rendered_menu_selection := Option.map (fun entry -> rows, cols, entry) !displayed_selection;
   image_may_exist := false
 
 let open_menu ~(write : string -> unit) ?(mode = Masc_tui_types.Boot_game) (state : Masc_tui_types.state) =
@@ -573,7 +641,7 @@ let open_menu ~(write : string -> unit) ?(mode = Masc_tui_types.Boot_game) (stat
 let menu_consume ~(write : string -> unit) (state : Masc_tui_types.state) key :
     menu_action =
   match key with
-  | "esc" -> Closed
+  | "esc" -> invalidate (); Closed
   | "up" | "k" ->
       move_selection state (-1);
       render_menu ~write state;
@@ -583,11 +651,16 @@ let menu_consume ~(write : string -> unit) (state : Masc_tui_types.state) key :
       render_menu ~write state;
       Stay
   | "\r" | "\n" | "enter" | "return" | " " | "space" -> (
-      (* Enter picks the highlighted row only while it is on screen. *)
-      match state.msx_menu_selected with
-      | Some selected when List.exists (same_entry selected) (menu_entries state) ->
+      (* Only a successfully painted choice in the current viewport can act.
+         A tiny/error-only frame or failed write grants no hidden admission. *)
+      match !rendered_menu_selection, state.msx_menu_selected with
+      | Some (rows, cols, displayed), Some selected
+        when state.msx_open && state.msx_menu_open
+          && viewport_size () = (rows, cols)
+          && same_entry displayed selected
+          && List.exists (same_entry selected) (menu_entries state) ->
           action_of_entry selected
-      | Some _ | None ->
+      | (Some _ | None), (Some _ | None) ->
           render_menu ~write state;
           Stay)
   | _ ->

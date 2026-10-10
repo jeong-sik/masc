@@ -234,6 +234,31 @@ let test_purge_removes_memory_events () =
     [ "trace-after" ] (trace_ids ())
 ;;
 
+let test_purge_removes_only_the_owned_admission_queue () =
+  with_clusters @@ fun a _b ->
+  let module Queue = Masc.Keeper_memory_admission_queue in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:a.base_path in
+  Fs_compat.mkdir_p (Filename.dirname
+    (Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:a.base_path));
+  let fact : Masc.Keeper_memory_os_types.fact =
+    { claim = "Retain pending deployment context."; category = Fact;
+      first_seen = 1.; last_seen = 1.;
+      origin = {kind = Authored; trace_id = "purge-admission"};
+      basis = Observed Transcript } in
+  List.iter (fun keeper_id ->
+    match Queue.append ~keepers_dir ~keeper_id ~request_id:"request" fact with
+    | Ok _ -> () | Error detail -> fail detail) [keeper_name; "other-keeper"];
+  let other = Queue.path ~keepers_dir ~keeper_id:"other-keeper" in
+  let before = Fs_compat.load_file other in
+  (match Server_dashboard_http_delete_actions.For_testing.purge_keeper_artifacts
+    a ~keeper_name ~remove_configuration:false
+    { Masc.Keeper_shutdown_types.requested_name = keeper_name } with
+   | Ok () -> () | Error detail -> fail detail);
+  check bool "whole Keeper purge removes pending inputs in config scope" false
+    (Sys.file_exists (Queue.path ~keepers_dir ~keeper_id:keeper_name));
+  check string "another Keeper's pending input survives" before (Fs_compat.load_file other)
+;;
+
 let test_reads_do_not_create_runtime_directories () =
   with_clusters @@ fun a _b ->
   let root = Workspace.keepers_runtime_dir a in
@@ -255,6 +280,8 @@ let () =
             test_purge_stops_the_running_librarian_unit_first
         ; test_case "purge removes memory events" `Quick
             test_purge_removes_memory_events
+        ; test_case "whole Keeper purge removes only its pending admission input" `Quick
+            test_purge_removes_only_the_owned_admission_queue
         ; test_case "reading absent stores creates no directories" `Quick
             test_reads_do_not_create_runtime_directories
         ]

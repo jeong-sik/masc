@@ -974,6 +974,40 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
             h2_respond_json_value h2_reqd json
               ~status:`Gone ~extra_headers:cors)
 
+      | `GET, p when p = Server_dashboard_http_hitl_recover.uncertain_path ->
+          with_h2_token_permission_auth h2_reqd
+            ~permission:Server_dashboard_http_hitl_recover.permission (fun state _actor ->
+              let status, body = Server_dashboard_http_hitl_recover.uncertain_response state in
+              h2_respond_json_value h2_reqd body ~status:(status :> H2.Status.t) ~extra_headers:cors)
+
+      | `GET, p when Option.is_some (Server_dashboard_http_keeper_child_content.route p) ->
+          (match Server_dashboard_http_keeper_child_content.route p with
+           | None -> h2_respond_json_value h2_reqd
+               (`Assoc ["error", `String "invalid_child_content_route"])
+               ~status:`Bad_request ~extra_headers:cors
+           | Some route ->
+               with_h2_token_permission_auth h2_reqd
+                 ~permission:Server_dashboard_http_keeper_child_content.permission
+                 (fun state _agent_name ->
+                   let status, json = Server_dashboard_http_keeper_child_content.response
+                     state httpun_request route in
+                   h2_respond_json_value h2_reqd json
+                     ~status:(status :> H2.Status.t) ~extra_headers:cors))
+
+      | `GET, p when Option.is_some (Server_dashboard_http_keeper_native_tasks.route p) ->
+          (match Server_dashboard_http_keeper_native_tasks.route p with
+           | None -> h2_respond_json_value h2_reqd
+               (`Assoc ["error", `String "invalid_native_task_route"])
+               ~status:`Bad_request ~extra_headers:cors
+           | Some route ->
+               with_h2_token_permission_auth h2_reqd
+                 ~permission:Server_dashboard_http_keeper_native_tasks.permission
+                 (fun state _agent_name ->
+                   let status, json = Server_dashboard_http_keeper_native_tasks.response
+                     state httpun_request route in
+                   h2_respond_json_value h2_reqd json
+                     ~status:(status :> H2.Status.t) ~extra_headers:cors))
+
       | `GET, "/api/v1/dashboard/shell" ->
           with_h2_public_read h2_reqd (fun state ->
             let light =
@@ -1570,6 +1604,28 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
               h2_reqd
               (Server_board_reaction_http.catalog_json ())
               ~extra_headers:cors)
+
+      | `GET, path when path = Server_routes_http_routes_play_room.path ->
+          with_h2_token_permission_auth h2_reqd
+            ~permission:Masc_domain.CanPlayMachine (fun state viewer ->
+              let base_path = (Mcp_server.workspace_config state).base_path in
+              let status, json =
+                Server_routes_http_routes_play_room.read ~base_path httpun_request
+                |> Server_routes_http_routes_play_room.response ~viewer
+              in
+              h2_respond_json_value h2_reqd json
+                ~status:(status :> H2.Status.t) ~extra_headers:cors)
+
+      | `POST, path when path = Server_routes_http_routes_play_room.path ->
+          with_h2_token_permission_auth h2_reqd
+            ~permission:Masc_domain.CanPlayMachine (fun state viewer ->
+              let config = Mcp_server.workspace_config state in
+              h2_read_body h2_reqd (fun body ->
+                let status, json =
+                  Server_routes_http_routes_play_room.perform_bound ~config ~who:viewer body
+                in
+                h2_respond_json_value h2_reqd json
+                  ~status:(status :> H2.Status.t) ~extra_headers:cors))
 
       | `GET, "/api/v1/board/reactions/batch" ->
           with_h2_token_permission_auth

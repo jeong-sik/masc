@@ -1,23 +1,21 @@
-(* DOS lane tools — the lane's tools through Tool_misc.dispatch.
+(* DOS lane tools — the lane's tools through the shared worker implementation.
 
    The machine needs no image from outside: the tests assemble a COM program
    of their own, so CI carries no game. What they pin: the no-machine
    refusal, the inventory listing, that a loaded program's screen text comes
-   back readable, that waiting_for_key marks the turn, that a key reaches the
+   back readable, that empty keyboard polling is observed, that a key reaches the
    guest and lands in the ledger under the caller's name, that a key name the
    machine has no key for is refused before anything is pressed, the per-call
    step cap, memory reads, and the read-only classification. *)
 
 open Alcotest
 open Masc
+module Dos_tools = Dos_machine_tools.Make (Machine_dos_host_events)
 
 let dispatch ~base_path ?(agent = "dos-test") name assoc =
-  let ctx : Tool_misc.context =
-    { config = Workspace.default_config base_path; agent_name = agent; help_schemas = [] }
-  in
-  match Tool_misc.dispatch ctx ~name ~args:(`Assoc assoc) with
+  match Dos_tools.dispatch ~base_path ~agent ~name ~arguments:(`Assoc assoc) with
   | Some result -> result
-  | None -> fail (name ^ " is not dispatched by the misc tool owner")
+  | None -> fail (name ^ " is not dispatched by the machine worker")
 ;;
 
 (* Ejects whatever machine is there, as whoever holds it: the machine is
@@ -380,7 +378,7 @@ let test_inventory_directory_replacement_hides_child_names () =
         let moved = root ^ ".moved" in
         let replaced = ref false in
         let result =
-          Tool_misc_dos_lane.handle_inventory_with_read_hooks
+          Dos_tools.handle_inventory_with_read_hooks
             ~before_program:(fun _ -> ())
             ~after_read:(fun _ -> ())
             ~before_read:(fun real ->
@@ -445,7 +443,7 @@ let test_inventory_temporary_swap_cannot_publish_foreign_names () =
       Fun.protect ~finally:(fun () -> Fs_compat.remove_tree outside) (fun () ->
         write_file (Filename.concat outside "private-outside.exe") "private";
         let swapped = ref false in
-        let result = Tool_misc_dos_lane.handle_inventory_with_read_hooks
+        let result = Dos_tools.handle_inventory_with_read_hooks
             ~before_program:(fun _ -> ())
           ~before_read:(fun directory ->
             if String.equal directory target then begin
@@ -482,7 +480,7 @@ let test_inventory_root_replacement_between_reads_is_refused () =
       mkdir_p (Filename.concat outside "game");
       write_file (Filename.concat outside "game/private-outside.com") "foreign";
       let replaced = ref false in
-      let result = Tool_misc_dos_lane.handle_inventory_with_read_hooks
+      let result = Dos_tools.handle_inventory_with_read_hooks
         ~before_program:(fun canonical ->
           Unix.rename canonical moved;
           Unix.symlink outside canonical;
@@ -1033,15 +1031,51 @@ let with_holder ~base_path state name f =
     f
 ;;
 
+(* Keeper calls below cross the real attached SDK worker. Direct handler
+   helpers elsewhere in this file exercise the worker library itself. *)
+let with_attached_workspace f =
+  with_workspace (fun base_path ->
+    Eio_main.run (fun env ->
+      let previous_runtime = Runtime.For_testing.snapshot () in
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Fun.protect ~finally:(fun () ->
+        Runtime.For_testing.restore previous_runtime;
+        Fs_compat.clear_fs ()) (fun () ->
+        Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 30. (fun () ->
+          Eio.Switch.run (fun sw ->
+            Eio_context.with_test_env ~sw ~net:(Eio.Stdenv.net env)
+              ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
+              let runtime_path = Filename.concat base_path "runtime.toml" in
+              Out_channel.with_open_bin runtime_path (fun channel -> output_string channel {|[providers.local]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+[models.sample]
+api-name = "sample"
+max-context = 1024
+[local.sample]
+[runtime]
+default = "local.sample"
+|});
+              (match Runtime.init_default ~config_path:runtime_path with
+               | Ok () -> () | Error detail -> fail detail);
+              Lane_addon_runtime.For_testing.reset ();
+              Machine_worker_fixture.with_dos ~clock:(Eio.Stdenv.clock env) ~sw ~base_path
+                (fun ~invoke:_ ~detach -> let value = f base_path in detach (); value)))))))
+;;
+
+let keeper_call ~base_path who name arguments =
+  let config = Workspace.default_config base_path in
+  let exports = (Keeper_lane_addon_runtime.snapshot ~config ~keeper_name:who).exports in
+  let export = List.find (fun (export : Lane_addon_tool_export.t) -> export.tool.name=name) exports in
+  Keeper_lane_addon_runtime.call ~config ~keeper_name:who ~export ~arguments
+;;
+
 let keeper_press ~base_path who key =
-  let execution =
-    Keeper_tool_in_process_runtime.handle_masc_misc_with_outcome
-      ~config:(Workspace.default_config base_path) ~meta:(keeper_meta who)
-      ~name:"masc_dos_press" ~args:(`Assoc [ ("keys", `List [ `String key ]) ])
-  in
+  let execution = keeper_call ~base_path who "masc_dos_press"
+    (`Assoc ["keys", `List [`String key]]) in
   match execution.disposition with
-  | Tool_result.Failed _ -> false
-  | _ -> true
+  | Tool_result.Completed () -> true
+  | Tool_result.Failed _ | Tool_result.Deferred _ -> false
 ;;
 
 let current_controller () =
@@ -1053,7 +1087,7 @@ let current_controller () =
 let test_a_stopped_holders_controller_is_let_go () =
   List.iter
     (fun (state, label, released) ->
-      with_workspace (fun base_path ->
+      with_attached_workspace (fun base_path ->
         install_program ~base_path "hello.com" hello_com;
         with_holder ~base_path state "cao-cao" (fun () ->
           boot ~agent:"cao-cao" ~base_path "hello.com";
@@ -1061,7 +1095,10 @@ let test_a_stopped_holders_controller_is_let_go () =
             (keeper_press ~base_path "liu-bei" "a");
           check (option string) (label ^ ": holder")
             (Some (if released then "liu-bei" else "cao-cao"))
-            (current_controller ()))))
+            (current_controller ());
+          check (list string) (label ^ ": only admitted Keeper input reaches the ledger")
+            (if released then ["liu-bei"] else [])
+            (List.map (fun entry -> entry.Dos_lane.who) (Dos_lane.ledger ())))))
     [ (Stopped_and_gone, "a stopped Keeper", true)
     ; (Running, "a running Keeper", false)
     ; (Launching, "a launching Keeper", false)
@@ -1075,7 +1112,7 @@ let test_a_stopped_holders_controller_is_let_go () =
    own credential, which has no expiry. The next move reads that like an agent
    coming back, so the shutdown that removes it lets the controller go. *)
 let test_a_removed_keeper_lets_its_controller_go () =
-  with_workspace (fun base_path ->
+  with_attached_workspace (fun base_path ->
     let config = Workspace.default_config base_path in
     install_program ~base_path "hello.com" hello_com;
     (match Auth.create_token base_path ~agent_name:"cao-cao" ~role:Masc_domain.Worker with
@@ -1085,18 +1122,18 @@ let test_a_removed_keeper_lets_its_controller_go () =
       boot ~agent:"cao-cao" ~base_path "hello.com";
       let departure =
         match Auth.with_credential_transaction base_path (fun transaction ->
-          Keeper_dos_controller.holder_left ~transaction ~config
+          Keeper_machine_controller_authority.holder_left ~transaction ~config
             ~now:(Unix.gettimeofday ()) "cao-cao") with
         | Ok departure -> departure
         | Error error -> fail (Masc_domain.masc_error_to_string error)
       in
       check bool "the next move cannot see that a removed Keeper left" true
         (Option.is_none departure);
-      check (result unit string) "removing a Keeper that holds nothing" (Ok ())
-        (Keeper_dos_controller.release_retired ~keeper_name:"liu-bei" ~by:"operator");
+      check (result unit string) "removing a Keeper that holds nothing succeeds" (Ok ())
+        (Keeper_dos_controller.release_retired ~config ~keeper_name:"liu-bei" ~by:"operator");
       check (option string) "leaves the holder" (Some "cao-cao") (current_controller ());
-      check (result unit string) "removing the holder" (Ok ())
-        (Keeper_dos_controller.release_retired ~keeper_name:"cao-cao" ~by:"operator");
+      check (result unit string) "removing the holder succeeds" (Ok ())
+        (Keeper_dos_controller.release_retired ~config ~keeper_name:"cao-cao" ~by:"operator");
       check (option string) "frees the controller" None (current_controller ());
       check bool "and the next Keeper moves" true (keeper_press ~base_path "liu-bei" "a")))
 ;;
@@ -1110,15 +1147,16 @@ let test_a_holder_departs_with_its_credential () =
     let config = Workspace.default_config base_path in
     let departure name at =
       match Auth.with_credential_transaction base_path (fun transaction ->
-        Keeper_dos_controller.holder_left ~transaction ~config ~now:at name) with
+        Keeper_machine_controller_authority.holder_left ~transaction ~config ~now:at name) with
       | Ok departure -> departure
       | Error error -> fail (Masc_domain.masc_error_to_string error)
     in
     let reason = function
       | None -> "still here"
-      | Some Tool_misc_dos_lane.Keeper_stopped -> "keeper stopped"
-      | Some Tool_misc_dos_lane.Credential_expired -> "credential expired"
-      | Some Tool_misc_dos_lane.No_credential -> "no credential"
+      | Some Machine_controller_contract.Keeper_stopped -> "keeper stopped"
+      | Some Machine_controller_contract.Credential_expired -> "credential expired"
+      | Some Machine_controller_contract.No_credential -> "no credential"
+      | Some Machine_controller_contract.Participant_departed -> "participant departed"
     in
     let token name role =
       match Auth.create_token base_path ~agent_name:name ~role with
@@ -1166,15 +1204,13 @@ let test_a_holder_departs_with_its_credential () =
     check string "expiry with unreadable auth config does not release the holder" "still here"
       (reason (departure "visiting-operator" later));
     let config = Workspace.default_config base_path in
-    (match
-       Keeper_dos_controller.execute ~config ~who:"minsu" ~name:"masc_dos_pass"
-         ~args:(`Assoc [ ("to", `String "operator") ])
-         ~run:(fun () -> fail "unreadable auth must refuse before the supplied operation")
-     with
-     | Error (Keeper_dos_controller.Seats_unknown _) -> ()
-     | Error (Keeper_dos_controller.Refused message) ->
-       failf "an unreadable auth config is not the caller's fault: %s" message
-     | Ok _ -> fail "a pass went through with the auth config unreadable"))
+    (match Auth.with_credential_transaction base_path (fun transaction ->
+       Keeper_machine_controller_authority.pass_refusal ~transaction ~config ~target:(Ok (Some "operator"))) with
+     | Ok (Some (Keeper_machine_controller_authority.Seats_unknown _)) -> ()
+     | Ok (Some (Keeper_machine_controller_authority.Refused message)) ->
+         failf "an unreadable auth config is not the caller's fault: %s" message
+     | Ok None -> fail "handoff admission ignored unreadable auth"
+     | Error error -> fail (Masc_domain.masc_error_to_string error)))
 ;;
 
 (* A credential listing that fails is not an empty list: nobody can say who
@@ -1186,28 +1222,25 @@ let test_a_pass_is_refused_when_the_credentials_do_not_list () =
     if Sys.file_exists agents then Fs_compat.remove_tree agents;
     Fs_compat.mkdir_p (Filename.dirname agents);
     Out_channel.with_open_bin agents (fun oc -> output_string oc "not a directory");
-    match
-      Keeper_dos_controller.execute ~config:(Workspace.default_config base_path)
-        ~who:"operator" ~name:"masc_dos_pass" ~args:(`Assoc [ ("to", `String "minsu") ])
-        ~run:(fun () -> fail "unlisted credentials must refuse before the supplied operation")
-    with
-    | Error (Keeper_dos_controller.Seats_unknown _) -> ()
-    | Error (Keeper_dos_controller.Refused message) ->
-      failf "a listing that failed is not the caller's fault: %s" message
-    | Ok _ -> fail "a pass went through with the credentials unlisted")
+    match Auth.with_credential_transaction base_path (fun transaction ->
+      Keeper_machine_controller_authority.pass_refusal ~transaction
+        ~config:(Workspace.default_config base_path) ~target:(Ok (Some "minsu"))) with
+    | Ok (Some (Keeper_machine_controller_authority.Seats_unknown _)) -> ()
+    | Ok (Some (Keeper_machine_controller_authority.Refused message)) ->
+        failf "a listing that failed is not the caller's fault: %s" message
+    | Ok None -> fail "handoff admission ignored unreadable credentials"
+    | Error error -> fail (Masc_domain.masc_error_to_string error))
 ;;
 
 let keeper_pass ~base_path who target =
-  Keeper_tool_in_process_runtime.handle_masc_misc_with_outcome
-    ~config:(Workspace.default_config base_path) ~meta:(keeper_meta who)
-    ~name:"masc_dos_pass" ~args:(`Assoc [ ("to", `String target) ])
+  keeper_call ~base_path who "masc_dos_pass" (`Assoc ["to", `String target])
 ;;
 
 (* RFC play-link-for-the-shared-machine §2.8 on a Keeper's own call: a pass
    goes only to someone at the machine. A name nobody sits under would leave
    the controller with no one who can move the machine. *)
 let test_a_keeper_passes_only_to_someone_at_the_machine () =
-  with_workspace (fun base_path ->
+  with_attached_workspace (fun base_path ->
     install_program ~base_path "hello.com" hello_com;
     with_holder ~base_path Running "cao-cao" (fun () ->
       with_holder ~base_path Running "liu-bei" (fun () ->
@@ -1361,10 +1394,10 @@ let test_every_tool_is_declared () =
       match Tool_schemas_misc.misc_operation_of_tool_name name with
       | None -> fail (name ^ " has no misc operation")
       | Some op ->
-        (match Tool_schemas_misc.misc_registered_schema op with
-         | Some (schema : Masc_domain.tool_schema) ->
-           check string "schema name" name schema.name
-         | None -> fail (name ^ " registers no schema")))
+        check bool (name ^ " is not statically registered") true
+          (Tool_schemas_misc.misc_registered_schema op = None);
+        check bool (name ^ " remains a packaged worker schema") true
+          (Option.is_some (Embedded_config.read ("tools/" ^ name ^ ".toml"))))
     [ "masc_dos_load"; "masc_dos_meta"; "masc_dos_inventory"; "masc_dos_eject"; "masc_dos_screen"; "masc_dos_step";
       "masc_dos_press"; "masc_dos_click"; "masc_dos_type"; "masc_dos_peek";
       "masc_dos_pass"; "masc_dos_save"; "masc_dos_restore" ]
@@ -1379,6 +1412,128 @@ let test_every_tool_is_declared () =
    org 0x100: wait: mov ah,0 / int 16h / or ax,ax / jz wait
               mov dl,al / mov ah,2 / int 21h / jmp wait *)
 let echo_com = "\xb4\x00\xcd\x16\x09\xc0\x74\xf8\x88\xc2\xb4\x02\xcd\x21\xeb\xf0"
+
+(* Disable IRQ delivery, wait for one key, poll an empty keyboard 65535 times
+   without changing the screen, print N, then echo subsequent input. CLI
+   makes the guest LOOP's instruction count independent of timer interrupts.
+   Early settling can return before N; an explicit run allowance must advance
+   through that same observation. *)
+let delayed_prompt_com =
+  "\xfa\xb4\x00\xcd\x16\x09\xc0\x74\xf8\xb9\xff\xff\
+   \xb4\x01\xcd\x16\xe2\xfa\xb2\x4e\xb4\x02\xcd\x21" ^ echo_com
+
+let test_attached_input_can_run_past_a_settling_observation () =
+  with_attached_workspace (fun base_path ->
+    let who = "input-reader" in
+    with_holder ~base_path Running who (fun () ->
+      install_program ~base_path "delayed.com" delayed_prompt_com;
+      let call name fields =
+        let execution = keeper_call ~base_path who name (`Assoc fields) in
+        match execution.disposition, execution.data with
+        | Tool_result.Completed (), Some wire ->
+            (match member "structuredContent" wire with
+             | Some data -> data
+             | None -> fail "attached worker omitted structured observation")
+        | _ -> fail execution.raw_output
+      in
+      let number key data = Yojson.Safe.Util.(data |> member key |> to_int) in
+      let screen data = Yojson.Safe.Util.(data |> member "screen_text" |> to_string) in
+      let load () = call "masc_dos_load" ["program", `String "delayed.com"] in
+      ignore (load ());
+      let ordinary = call "masc_dos_press" ["keys", `List [`String "a"]] in
+      check bool "default keeps the existing settling observation" true
+        (member "settled" ordinary = Some (`Bool true));
+      check bool "settling is not the delayed guest prompt" false
+        (contains "N" (screen ordinary));
+      (* The guest's delay takes three instructions per LOOP iteration.
+         Four per iteration leaves room to print and return to the echo loop. *)
+      let steps = 4 * 65535 in
+      List.iter (fun (name, arguments, activity) ->
+        let before = load () in
+        let result = call name (("until_ready", `Bool false) :: ("steps", `Int steps) :: arguments) in
+        check int "full allowance actually executes" steps (number "steps_run" result);
+        check int "absolute execution clock matches the receipt" steps
+          (number "steps" result - number "steps" before);
+        check bool "full allowance does not report readiness" true
+          (member "settled" result = Some (`Bool false));
+        check bool "empty polling did not stop execution" true (number "input_requests" result > 0);
+        check bool "the delayed guest output is now observed" true (contains "N" (screen result));
+        check int "only the first key was injected" 1 (number "keys_pressed" result);
+        check (list string) "the unsent suffix is absent from the ledger" ["a"]
+          (List.map (fun (entry : Dos_lane.entry) -> entry.key_name) (Dos_lane.ledger ()));
+        (match Dos_lane.recent_activity () with
+         | (entry : Machine_action_feed.entry) :: _ ->
+             check string "activity describes only delivered input" activity entry.action
+         | [] -> fail "input activity was not recorded");
+        check bool "the unsent suffix was not consumed by the guest" false
+          (contains "b" (screen result));
+        let after = call "masc_dos_step" ["steps", `Int 1000; "until_ready", `Bool false] in
+        check bool "the unsent suffix was not left queued in the BIOS ring" false
+          (contains "b" (screen after)))
+        [ "masc_dos_press", ["keys", `List [`String "a"; `String "b"]], "press a"
+        ; "masc_dos_press", ["keys", `List [`String "a"; `String "b"];
+            "expected_program", `String "delayed.com"], "press a"
+        ; "masc_dos_type", ["text", `String "ab"], "type 1 chars" ]))
+;;
+
+(* A blocking BIOS read must retain its guest continuation. IRQ0 is masked
+   here so an idle interval has no guest interrupt instructions to count. *)
+let blocking_read_com =
+  "\xfa\xb0\x01\xe6\x21\xb4\x00\xcd\x16\xb2\x58\xb4\x02\xcd\x21\xb8\x00\x4c\xcd\x21"
+
+let test_attached_blocking_read_and_execution_clock () =
+  with_attached_workspace (fun base_path ->
+    let who = "blocking-reader" in
+    with_holder ~base_path Running who (fun () ->
+      install_program ~base_path "blocking.com" blocking_read_com;
+      let call name fields =
+        let execution = keeper_call ~base_path who name (`Assoc fields) in
+        match execution.disposition, execution.data with
+        | Tool_result.Completed (), Some wire ->
+            (match member "structuredContent" wire with
+             | Some data -> data
+             | None -> fail "attached worker omitted structured observation")
+        | _ -> fail execution.raw_output
+      in
+      let number key data = Yojson.Safe.Util.(data |> member key |> to_int) in
+      let screen data = Yojson.Safe.Util.(data |> member "screen_text" |> to_string) in
+      let loaded = call "masc_dos_load" ["program", `String "blocking.com"] in
+      check bool "empty BIOS read cannot reach exit" true
+        (member "exited" loaded = Some (`Bool false));
+      check bool "empty BIOS read cannot print its following marker" false
+        (contains "X" (screen loaded));
+      let budget = 1_000 in
+      let waited = call "masc_dos_step"
+        ["steps", `Int budget; "until_ready", `Bool false] in
+      check int "idle time consumes the bounded execution budget" budget
+        (number "steps_run" waited);
+      check int "idle time preserves the input ledger clock" budget
+        (number "steps" waited - number "steps" loaded);
+      check int "idle time is not guest instructions" 0
+        (number "instructions_run" waited);
+      check bool "idle clocks advance" true (number "elapsed_cycles" waited > 0);
+      check bool "no-key execution still cannot print the marker" false
+        (contains "X" (screen waited));
+      ignore (call "masc_dos_save" ["slot", `String "blocking-input"]);
+      let complete () =
+        let result = call "masc_dos_press"
+          ["keys", `List [`String "a"; `String "b"];
+           "steps", `Int budget; "until_ready", `Bool false] in
+        check int "one supplied key completes the blocking read" 1
+          (number "keys_pressed" result);
+        check bool "guest instructions resume" true
+          (number "instructions_run" result > 0);
+        check bool "the marker is reached after input" true
+          (contains "X" (screen result));
+        check bool "the guest exits after the completed read" true
+          (member "exited" result = Some (`Bool true));
+        check (list string) "the unused suffix never enters the ledger" ["a"]
+          (List.map (fun (entry : Dos_lane.entry) -> entry.key_name) (Dos_lane.ledger ()))
+      in
+      complete ();
+      ignore (call "masc_dos_restore" ["slot", `String "blocking-input"]);
+      complete ()))
+;;
 
 let save_as ?(agent = "dos-test") ~base_path slot =
   dispatch ~base_path ~agent "masc_dos_save" [ ("slot", `String slot) ]
@@ -1828,6 +1983,127 @@ let test_activity_refusal_is_proven_pre_effect () =
     [Machine_configuration.Disabled; Unobserved]
 ;;
 
+let test_prepared_load_rejects_changed_save_snapshot () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    let prepared = match Dos_lane.prepare_load
+        ~ledger_dir:(Dos_tools.dos_dir ~base_path)
+        ~saves_dir:(Dos_tools.saves_dir ~base_path "echo.com")
+        ~checkpoint_dir:(checkpoints_dir ~base_path)
+        ~program_name:"echo.com" ~program_bytes:echo_com ~files:[] with
+      | Ok value -> value | Error error -> fail (Dos_lane.error_to_string error) in
+    ignore (dispatch ~base_path "masc_dos_step" ["steps", `Int 1; "until_ready", `Bool false]);
+    let before = mark () in
+    (match Dos_lane.commit_load ~who:"dos-test" prepared ~announce:ignore with
+     | Error (Dos_lane.Invalid_request _) -> ()
+     | Error error -> fail (Dos_lane.error_to_string error)
+     | Ok _ -> fail "a changed save snapshot was installed");
+    check int "refused preparation leaves current screen unchanged" before.count (mark ()).count)
+;;
+
+let restore_stages ~base_path =
+  let dir = Dos_tools.dos_dir ~base_path in
+  Sys.readdir dir |> Array.to_list
+  |> List.filter (fun name -> String.starts_with ~prefix:".restore-ledger-" name)
+  |> List.map (Filename.concat dir)
+
+let prepare_restore_fixture ~base_path slot =
+  Dos_lane.prepare_restore ~dir:(checkpoints_dir ~base_path) ~slot
+    ~ledger_dir:(Dos_tools.dos_dir ~base_path)
+    ~saves_dir_of:(Dos_tools.saves_dir ~base_path)
+
+let test_restore_stages_before_admission_and_cleans_refusal () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    check bool "fixture writes a nonempty input ledger" true
+      (Tool_result.is_success (dispatch ~base_path "masc_dos_press" ["keys",`List [`String "a"]]));
+    ignore (save_as ~base_path "staged");
+    let ledger = Filename.concat (Dos_tools.dos_dir ~base_path) "ledger.jsonl" in
+    let original = In_channel.with_open_bin ledger In_channel.input_all in
+    check bool "staged fixture ledger has input bytes" true (String.length original > 0);
+    let before = mark () in
+    (match prepare_restore_fixture ~base_path (Machine_checkpoint.slot_of_string "staged"
+       |> function Ok slot -> slot | Error detail -> fail detail) with
+     | Ok prepared ->
+        (match restore_stages ~base_path with
+         | [path] -> check string "full ledger is already staged before credential admission"
+             original (In_channel.with_open_bin path In_channel.input_all)
+         | _ -> fail "expected one owned staging file");
+        (* The admission the commit would run under refused, so the caller
+           discards the preparation instead of committing it. *)
+        Dos_lane.discard_prepared_restore prepared
+     | Error error -> fail (Dos_lane.error_to_string error));
+    check (list string) "refusal discards staged ledger" [] (restore_stages ~base_path);
+    check string "installed ledger retained" original (In_channel.with_open_bin ledger In_channel.input_all);
+    check int "refusal leaves machine untouched" before.count (mark ()).count)
+;;
+
+let test_prepared_restore_uses_snapshot_and_rechecks_controller () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    ignore (save_as ~base_path "prepared");
+    let slot = match Machine_checkpoint.slot_of_string "prepared" with
+      | Ok slot -> slot | Error detail -> fail detail in
+    let prepared = match Dos_lane.prepare_restore ~dir:(checkpoints_dir ~base_path) ~slot
+        ~ledger_dir:(Dos_tools.dos_dir ~base_path)
+        ~saves_dir_of:(Dos_tools.saves_dir ~base_path) with
+      | Ok value -> value | Error error -> fail (Dos_lane.error_to_string error) in
+    Fun.protect ~finally:(fun () -> Dos_lane.discard_prepared_restore prepared) (fun () ->
+    check int "preparation owns one unique staging file" 1 (List.length (restore_stages ~base_path));
+    write_file (Machine_checkpoint.path ~dir:(checkpoints_dir ~base_path) slot) "replaced after preparation";
+    (match Dos_lane.commit_restore ~who:"other" prepared ~announce:ignore with
+     | Error (Dos_lane.Held_by _) -> ()
+     | Error error -> fail (Dos_lane.error_to_string error)
+     | Ok _ -> fail "prepared restore ignored current controller");
+    (match Dos_lane.commit_restore ~who:"dos-test" prepared ~announce:ignore with
+     | Ok _ -> () | Error error -> fail (Dos_lane.error_to_string error));
+    let after = mark () in
+    (match Dos_lane.commit_restore ~who:"dos-test" prepared ~announce:ignore with
+     | Error (Dos_lane.Invalid_request _) -> ()
+     | Error error -> fail (Dos_lane.error_to_string error)
+     | Ok _ -> fail "prepared mutable guest was installed twice");
+    check int "consumed preparation cannot replace current screen" after.count (mark ()).count;
+    Dos_lane.discard_prepared_restore prepared;
+    Dos_lane.discard_prepared_restore prepared;
+    check (list string) "commit/discard never leaves or removes installed ledger" [] (restore_stages ~base_path);
+    check bool "installed ledger survives repeated cleanup" true
+      (Sys.file_exists (Filename.concat (Dos_tools.dos_dir ~base_path) "ledger.jsonl"))))
+;;
+
+let test_prepared_restore_refuses_a_slot_saved_again () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    ignore (save_as ~base_path "raced");
+    let slot = match Machine_checkpoint.slot_of_string "raced" with
+      | Ok slot -> slot | Error detail -> fail detail in
+    let prepare () = match prepare_restore_fixture ~base_path slot with
+      | Ok value -> value | Error error -> fail (Dos_lane.error_to_string error) in
+    let raced = prepare () in
+    Fun.protect ~finally:(fun () -> Dos_lane.discard_prepared_restore raced) (fun () ->
+      (* A lane save lands on the prepared slot between preparation and commit:
+         installing the older prepared bytes would fit neither serial order. *)
+      check bool "concurrent save of the same slot succeeds" true
+        (Tool_result.is_success (save_as ~base_path "raced"));
+      let before = mark () in
+      (match Dos_lane.commit_restore ~who:"dos-test" raced ~announce:ignore with
+       | Error (Dos_lane.Invalid_request _) -> ()
+       | Error error -> fail (Dos_lane.error_to_string error)
+       | Ok _ -> fail "a restore installed bytes older than its slot");
+      check int "refused restore leaves the current machine" before.count (mark ()).count;
+      check (list string) "refused restore leaves no stage" [] (restore_stages ~base_path));
+    let other = prepare () in
+    Fun.protect ~finally:(fun () -> Dos_lane.discard_prepared_restore other) (fun () ->
+      check bool "a save to another slot succeeds" true
+        (Tool_result.is_success (save_as ~base_path "elsewhere"));
+      match Dos_lane.commit_restore ~who:"dos-test" other ~announce:ignore with
+      | Ok _ -> ()
+      | Error error -> fail ("another slot's save refused the restore: " ^ Dos_lane.error_to_string error)))
+;;
+
 let () =
   run "dos-lane-tools"
     [ ( "tools"
@@ -1865,6 +2141,10 @@ let () =
         ; test_case "boot inside a directory" `Quick
             test_boot_names_the_program_inside_a_directory
         ; test_case "one ceiling" `Quick test_a_sequence_spends_one_ceiling_not_one_per_key
+        ; test_case "attached input runs past a settling observation" `Quick
+            test_attached_input_can_run_past_a_settling_observation
+        ; test_case "attached blocking read and execution clock" `Quick
+            test_attached_blocking_read_and_execution_clock
         ; test_case "sequence length" `Quick test_a_sequence_has_a_length
         ; test_case "case collision" `Quick test_two_names_that_differ_only_in_case_are_refused
         ; test_case "save outlives machine" `Quick test_a_save_outlives_its_machine
@@ -1897,6 +2177,9 @@ let () =
         ; test_case "peek" `Quick test_peek_reads_the_text_page
         ; test_case "read-only" `Quick test_read_only_classification
         ; test_case "declared" `Quick test_every_tool_is_declared
+        ; test_case "prepared load detects concurrent guest changes" `Quick test_prepared_load_rejects_changed_save_snapshot
+        ; test_case "prepared restore snapshots bytes and rechecks ownership" `Quick test_prepared_restore_uses_snapshot_and_rechecks_controller
+        ; test_case "prepared restore refuses a slot saved again" `Quick test_prepared_restore_refuses_a_slot_saved_again
         ; test_case "checkpoint round trip" `Quick
             test_a_restored_machine_plays_on_as_if_never_stopped
         ; test_case "restore needs the controller" `Quick test_restore_needs_the_controller
@@ -1920,6 +2203,8 @@ let () =
         ; test_case "no machine names the autosave" `Quick
             test_no_machine_names_the_autosave_after_an_eject
         ; test_case "inventory names the autosave" `Quick test_inventory_names_the_autosave
+        ; test_case "restore stages before admission and cleans refusal" `Quick
+            test_restore_stages_before_admission_and_cleans_refusal
         ; test_case "activity refusal is proven pre-effect" `Quick test_activity_refusal_is_proven_pre_effect
         ; test_case "a damaged autosave is named" `Quick test_a_damaged_autosave_is_named_not_hidden
         ] )

@@ -250,6 +250,86 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
 
+type content_block =
+  | Partial_block of { message_id : string; index : int }
+  | Assistant_block of { uuid : string; ordinal : int }
+
+type content_channel = Text_content | Thinking_content
+
+type native_task_status = Runtime_native_tasks.status =
+  | Task_pending | Task_running | Task_completed | Task_failed | Task_killed | Task_paused
+
+type native_task_terminal = Runtime_native_tasks.terminal = Task_completed_notice | Task_failed_notice | Task_stopped_notice
+type native_task_reason = Runtime_native_tasks.reason = Worker_restart
+type native_task_boundary = Runtime_native_tasks.boundary = Task_terminal_unobserved | Task_terminal_observed
+
+type native_task_usage = Runtime_native_tasks.usage =
+  { total_tokens : int; tool_uses : int; duration_ms : int }
+(** Provider task observations, never the root model's usage. [duration_ms]
+    preserves the signed safe integer reported by the provider's wall-clock
+    subtraction; a negative value neither fails nor terminates the task. *)
+
+type native_task_event = Runtime_native_tasks.event =
+  | Task_registered of
+      { subagent_type : string option; is_backgrounded : bool option
+      ; skip_transcript : bool option; ambient : bool option }
+      (** Registration declares no task status. [None] means not reported. *)
+  | Task_patched of
+      { status : native_task_status option; is_backgrounded : bool option
+      ; end_time : int option; total_paused_ms : int option }
+      (** [total_paused_ms] retains signed safe integers; absence is
+          unreported, not zero. [end_time] admission retains the separate
+          nonnegative timestamp check. *)
+  | Task_progress_reported of
+      { usage : native_task_usage; last_tool_name : string option }
+  | Task_terminal_reported of
+      { outcome : native_task_terminal; reason : native_task_reason option
+      ; usage : native_task_usage option; skip_transcript : bool option
+      ; ambient : bool option }
+
+type native_task_owner =
+  { invocation : Runtime_claude_input_attribution.ticket
+  ; task_id : string; run_id : string; call_id : string
+  ; call_envelope_uuid : string; call_ordinal : int }
+(** Exact root Agent occurrence that registered this task run. The call may
+    already have returned an async launch result. [run_id] is opaque except
+    for the provider-declared lexical ordering of runs of the same task. *)
+
+type native_task_observation =
+  { owner : native_task_owner; uuid : string; event : native_task_event
+  ; boundary : native_task_boundary }
+(** Invocation-local observations: explicit session/run identity, Native_full,
+    unambiguous Root_response/Built_in Agent and provider root spawn depth.
+    No ownership is inferred for run-less, unknown or child task frames.
+    Raw prompt, summary, description, error and output-file bodies are excluded.
+    Task termination does not terminate the native call, model response or turn.
+    This client still returns on the first root result; post-result receiving
+    requires a separate process/session lifetime implementation. *)
+
+type native_agent_parent_witness =
+  { invocation : Runtime_claude_input_attribution.ticket
+  ; call_id : string
+  ; call_envelope_uuid : string
+  ; call_ordinal : int
+  }
+
+type complete_child_content =
+  { invocation : Runtime_claude_input_attribution.ticket
+  ; observation_id : string
+  ; parent_tool_use_id : string
+  ; parent_occurrence : native_agent_parent_witness option
+  ; message_id : string option
+  ; model : string
+  ; block : content_block
+  ; channel : content_channel
+  ; text : string
+  }
+
+type complete_content_scope =
+  | Root_model_content
+  | Child_model_content of { parent_tool_use_id : string; observation_id : string }
+  | Diagnostic_content
+
 type stream_event =
   | Turn_started of
       { turn_id : string
@@ -257,12 +337,16 @@ type stream_event =
       }
   | Text_delta of
       { message_id : string option
+      ; block : content_block
       ; text : string
       }
   | Thinking_delta of
       { message_id : string option
+      ; block : content_block
       ; text : string
       }
+  | Child_content_observed of complete_child_content
+  | Content_block_stopped of { block : content_block; channel : content_channel }
   | Dynamic_tool_started of
       { call_id : string
       ; tool_name : string
@@ -270,7 +354,12 @@ type stream_event =
       }
   | Dynamic_tool_finished of { call_id : string }
   | Native_tool_started of Runtime_native_tools.observation
-  | Native_tool_finished of Runtime_native_tools.observation
+  | Native_tool_finished of Runtime_native_tools.finished
+  | Native_tool_progress of
+      { identity : Runtime_native_tools.action_identity
+      ; progress : Runtime_native_tools.progress
+      }
+  | Native_task_observed of native_task_observation
   | Usage_windows_reported of Runtime_provider_usage_window.report
   | Conversation_compacted
   | Usage_reported of
@@ -433,12 +522,13 @@ open Shared_json
 
 module Stderr = Runtime_official_client_json.Stderr
 
+let parse_json_value ~stage text =
+  try Ok (Yojson.Safe.from_string text) with
+  | Yojson.Json_error detail -> protocol_error stage ("invalid JSON: " ^ detail)
+;;
+
 let parse_json ~stage text =
-  let parsed =
-    try Ok (Yojson.Safe.from_string text) with
-    | Yojson.Json_error detail -> protocol_error stage ("invalid JSON: " ^ detail)
-  in
-  let* json = parsed in
+  let* json = parse_json_value ~stage text in
   let* () = validate_unique_object_keys ~stage ~path:"$" json in
   Ok json
 ;;
@@ -470,56 +560,13 @@ let text_value stage fields =
    silently paying for the whole surface -- a runtime failure the lane can
    fail over from. Documented at https://code.claude.com/docs/en/mcp
    ("Configure tool search"). *)
-let tool_search_setting = "ENABLE_TOOL_SEARCH=true"
-
 let client_environment account_home =
   (* A selected CLI home isolates Claude's own credential store. HOME and XDG
      remain available for OS facilities, so settings under those shared paths
      can still influence more than one selected home. *)
-  let base_names =
-    [ "HOME"
-    ; "USER"
-    ; "PATH"
-    ; "TMPDIR"
-    ; "XDG_CONFIG_HOME"
-    ; "XDG_DATA_HOME"
-    ; "XDG_CACHE_HOME"
-    ; "SSL_CERT_FILE"
-    ; "SSL_CERT_DIR"
-    ; "LANG"
-    ; "LC_ALL"
-    ; "LC_CTYPE"
-    ; "TERM"
-    ; "NO_COLOR"
-    ]
-  in
-  let inherited_names =
-    base_names @
-    [ "CLAUDE_CONFIG_DIR"
-    ; "ANTHROPIC_API_KEY"; "ANTHROPIC_AUTH_TOKEN"; "ANTHROPIC_BASE_URL"
-    ; "ANTHROPIC_CUSTOM_HEADERS"; "ANTHROPIC_MODEL"
-    ; "ANTHROPIC_DEFAULT_OPUS_MODEL"; "ANTHROPIC_DEFAULT_SONNET_MODEL"
-    ; "ANTHROPIC_DEFAULT_HAIKU_MODEL"; "ANTHROPIC_SMALL_FAST_MODEL"
-    ; "CLAUDE_CODE_OAUTH_TOKEN"
-    ; "CLAUDE_CODE_USE_BEDROCK"; "CLAUDE_CODE_USE_VERTEX"
-    ; "CLAUDE_CODE_USE_FOUNDRY"; "CLAUDE_CODE_USE_MANTLE"
-    ; "ANTHROPIC_BEDROCK_BASE_URL"; "ANTHROPIC_VERTEX_BASE_URL"
-    ; "ANTHROPIC_VERTEX_PROJECT_ID"; "CLOUD_ML_REGION"
-    ; "CLAUDE_CODE_SKIP_BEDROCK_AUTH"; "CLAUDE_CODE_SKIP_VERTEX_AUTH"
-    ; "CLAUDE_CODE_SKIP_FOUNDRY_AUTH"
-    ; "AWS_ACCESS_KEY_ID"; "AWS_SECRET_ACCESS_KEY"; "AWS_SESSION_TOKEN"
-    ; "AWS_REGION"; "AWS_DEFAULT_REGION"; "AWS_PROFILE"
-    ; "AWS_CONFIG_FILE"; "AWS_SHARED_CREDENTIALS_FILE"; "AWS_BEARER_TOKEN_BEDROCK"
-    ; "GOOGLE_APPLICATION_CREDENTIALS"; "GOOGLE_CLOUD_PROJECT"
-    ; "ANTHROPIC_FOUNDRY_API_KEY"; "ANTHROPIC_FOUNDRY_RESOURCE"
-    ; "ANTHROPIC_FOUNDRY_BASE_URL"; "AZURE_TENANT_ID"; "AZURE_CLIENT_ID"; "AZURE_CLIENT_SECRET"
-    ]
-  in
-  inherited_names
-  |> List.filter (fun name ->
-    match account_home with
-    | None -> true
-    | Some _ -> List.mem name base_names)
+  let inherited =
+    Runtime_claude_environment_projection.inherited_names
+      ~explicit_account:(Option.is_some account_home)
   |> List.filter_map (fun name ->
     let value =
       match name, account_home with
@@ -531,21 +578,8 @@ let client_environment account_home =
       | _ -> Sys.getenv_opt name
     in
     Option.map (fun value -> name ^ "=" ^ value) value)
-  |> fun inherited ->
-  (* Claude Code loads the auto-memory index kept for its working directory
-     (~/.claude/projects/<cwd>/memory/MEMORY.md) into every session. A Keeper
-     runs with the operator's base path as its working directory, so without
-     this it read the operator's own memory index -- notes from unrelated
-     work and personal details -- on every session. --setting-sources ""
-     does not cover this; the environment switch does (measured with Claude
-     Code 2.1.282: the `instructions` attachment carrying MEMORY.md is gone). *)
-  ("CLAUDE_CODE_ENTRYPOINT=masc"
-   :: "CLAUDE_AGENT_SDK_VERSION=masc-ocaml"
-   :: "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1"
-   :: tool_search_setting
-   :: (match account_home with None -> inherited
-       | Some home -> ("CLAUDE_CONFIG_DIR=" ^ home) :: inherited))
-  |> Array.of_list
+  in
+  Runtime_claude_environment_projection.of_inherited ~account_home inherited
 ;;
 
 let parse_subscription json =
@@ -841,7 +875,83 @@ let handle_control_request
     Error (Unsupported_control_request unsupported)
 ;;
 
-let parse_wire_line line = parse_json ~stage:"stream-json message" line
+(* The candidate boundary and strict decoder share the producer's field set. *)
+let agent_retry_fields =
+  [ "type"; "tool_use_id"; "tool_name"; "parent_tool_use_id"
+  ; "elapsed_time_seconds"; "uuid"; "session_id"; "subagent_type"; "subagent_retry"
+  ]
+;;
+
+type task_frame_kind = Task_start | Task_update | Task_progress | Task_notification
+
+let task_kind = function
+  | "task_started" -> Some Task_start | "task_updated" -> Some Task_update
+  | "task_progress" -> Some Task_progress | "task_notification" -> Some Task_notification
+  | _ -> None
+;;
+
+let task_fields kind =
+  ["type"; "subtype"; "task_id"; "run_id"; "uuid"; "session_id"]
+  @ match kind with
+    | Task_start -> ["tool_use_id"; "description"; "subagent_type"; "is_backgrounded";
+        "spawn_depth"; "parent_task_id"; "task_type"; "workflow_name"; "prompt";
+        "skip_transcript"; "ambient"; "owned_by_subagent"; "awaited"]
+    | Task_update -> ["patch"]
+    | Task_progress -> ["tool_use_id"; "description"; "subagent_type"; "usage";
+        "last_tool_name"; "summary"; "workflow_progress"]
+    | Task_notification -> ["tool_use_id"; "status"; "reason"; "output_file"; "summary";
+        "usage"; "resource_links"; "handback"; "handback_report"; "skip_transcript"; "ambient"]
+;;
+
+let task_observation_candidate fields =
+  let subtypes = List.filter_map
+    (fun (key,value) -> if key="subtype" then Some value else None) fields in
+  (* Duplicate task discriminators are malformed telemetry too. Every value
+     must identify task telemetry; mixed root/system frames still fail closed. *)
+  let kinds = List.filter_map (function
+    | `String subtype -> task_kind subtype | _ -> None) subtypes in
+  kinds <> [] && List.length kinds = List.length subtypes
+  && List.for_all (fun (key,_) ->
+    List.exists (fun kind -> List.mem key (task_fields kind)) kinds) fields
+;;
+
+let parse_wire_line line =
+  let stage = "stream-json message" in
+  let* json = parse_json_value ~stage line in
+  (* Only positively identified provider observations reach their own strict
+     decoder when malformed. Agent retry/clear has its own exact discriminant;
+     this does not admit arbitrary non-heartbeat progress or relax auth JSON. *)
+  let progress_observation =
+    match json with
+    | `Assoc fields ->
+      let type_values =
+        List.filter_map
+          (fun (name, value) -> if name = "type" then Some value else None)
+          fields
+      in
+      let heartbeat_values =
+        List.filter_map
+          (fun (name, value) -> if name = "heartbeat" then Some value else None)
+          fields
+      in
+      (match type_values with
+       | [ `String "tool_progress" ] ->
+         List.exists (function `Bool true -> true | _ -> false) heartbeat_values
+         || (heartbeat_values = []
+             && List.exists (function "tool_name", `String "Agent" -> true | _ -> false) fields
+             && List.mem_assoc "subagent_type" fields
+             && List.for_all (fun (key,_) -> List.mem key agent_retry_fields) fields)
+       | [ `String "system" ] -> task_observation_candidate fields
+       | _ -> false)
+    | _ -> false
+  in
+  if progress_observation
+  then Ok json
+  else
+    let* () = validate_unique_object_keys ~stage ~path:"$" json in
+    Ok json
+;;
+
 
 let wire_fields json =
   let stage = "stream-json message" in
@@ -940,18 +1050,6 @@ let image_block (image : image_input) =
     ]
 ;;
 
-let user_message ~images prompt =
-  let blocks =
-    List.map image_block images @ [ `Assoc [ "type", `String "text"; "text", `String prompt ] ]
-  in
-  `Assoc
-    [ "type", `String "user"
-    ; "message", `Assoc [ "role", `String "user"; "content", `List blocks ]
-    ; "parent_tool_use_id", `Null
-    ; "session_id", `String "default"
-    ]
-;;
-
 let parse_rate_limit ~expected_session_id fields =
   let stage = "rate_limit_event" in
   let* session_id = required_string stage "session_id" fields in
@@ -994,6 +1092,20 @@ type assistant_origin =
   | Model_response
   | Api_error_diagnostic
 
+type assistant_scope = Root_response | Child_response of string
+
+(* Claude Code 2.1.292 forwards child tool envelopes even when child text
+   forwarding is disabled. Their session id is the root session's, while
+   this required field distinguishes whose model request the envelope carries. *)
+let assistant_scope ~stage fields =
+  match List.filter (fun (key, _) -> key = "parent_tool_use_id") fields with
+  | [_, `Null] -> Ok Root_response
+  | [_, `String parent] when String.trim parent <> "" -> Ok (Child_response parent)
+  | [] -> protocol_error stage "field \"parent_tool_use_id\" is required"
+  | [_] -> protocol_error stage "field \"parent_tool_use_id\" must be null or a nonblank string"
+  | _ -> protocol_error stage "field \"parent_tool_use_id\" is duplicated"
+;;
+
 (* Claude Code 2.1.263's assistant envelope declares this optional boolean;
    its producer maps isApiErrorMessage=true to is_api_error_message=true.
    The text of an API diagnostic is not a model response. Only the terminal
@@ -1010,6 +1122,423 @@ let non_blank = function
   | Some _ | None -> None
 ;;
 
+(* Native observations have the same parent scope as their SDK envelope.
+   Retain closed/ambiguous identities for this invocation so replay cannot
+   reopen an ended call or attach a heartbeat to a reused provider id. *)
+type native_call_owner =
+  { observation : Runtime_native_tools.observation
+  ; scope : assistant_scope
+  ; envelope_uuid : string
+  ; ordinal : int
+  }
+
+type native_call_state =
+  | Native_open of native_call_owner
+  | Native_closed of native_call_owner
+  | Native_ambiguous
+
+type heartbeat =
+  { uuid : string
+  ; progress_id : string
+  ; parent_id : string
+  ; tool_name : string
+  ; elapsed_seconds : int
+  }
+
+type agent_retry_frame =
+  { retry_uuid : string
+  ; progress_id : string
+  ; parent_id : string
+  ; subagent_type : string
+  ; note : Runtime_native_tools.retry_note option
+  }
+
+type task_frame =
+  { task_uuid : string; task_id : string; run_id : string option
+  ; tool_use_id : string option; root_registration : bool
+  ; task_event : native_task_event }
+
+type observed_progress =
+  | Heartbeat_frame of heartbeat
+  | Agent_retry_frame of agent_retry_frame
+  | Task_frame of task_frame
+
+type task_binding =
+  | Task_unowned
+  | Task_owned of
+      { owner : native_task_owner; registration : native_task_event
+      ; mutable boundary : native_task_boundary }
+
+type task_run = { run_id : string; mutable binding : task_binding }
+
+type retry_binding =
+  { progress_id : string; agent : Runtime_native_tools.retry_agent; mutable pending : bool }
+
+type native_call_registry =
+  { invocation : Runtime_claude_input_attribution.ticket
+  ; calls : (string, native_call_state) Hashtbl.t
+  ; progress_uuids : (string, observed_progress) Hashtbl.t
+  ; retry_bindings : (string, retry_binding) Hashtbl.t
+  ; task_runs : (string, task_run) Hashtbl.t
+  ; native_posture : Runtime_native_tools.posture
+  }
+
+type native_start =
+  | Native_start_new
+  | Native_start_active_replay
+  | Native_start_closed_replay
+  | Native_start_conflict
+
+let same_native_owner left right =
+  left.scope=right.scope && left.envelope_uuid=right.envelope_uuid
+  && left.ordinal=right.ordinal && left.observation=right.observation
+;;
+
+let same_heartbeat left right =
+  left.uuid=right.uuid && left.progress_id=right.progress_id
+  && left.parent_id=right.parent_id && left.tool_name=right.tool_name
+  && left.elapsed_seconds=right.elapsed_seconds
+;;
+
+let observe_native_start registry ~scope ~uuid ~ordinal observation =
+  match Runtime_native_tools.call_id observation with
+  | None -> Native_start_new
+  | Some id ->
+    let owner = {observation; scope; envelope_uuid=uuid; ordinal} in
+    match Hashtbl.find_opt registry.calls id with
+    | None -> Hashtbl.add registry.calls id (Native_open owner); Native_start_new
+    | Some (Native_open previous) when same_native_owner previous owner -> Native_start_active_replay
+    | Some (Native_closed previous) when same_native_owner previous owner -> Native_start_closed_replay
+    | Some (Native_open _ | Native_closed _ | Native_ambiguous) ->
+        Hashtbl.replace registry.calls id Native_ambiguous;
+        Native_start_conflict
+;;
+
+let finish_native_call registry ~scope id =
+  match Hashtbl.find_opt registry.calls id with
+  | Some (Native_open owner) when scope=Some owner.scope ->
+      Hashtbl.replace registry.calls id (Native_closed owner);
+      Some owner.observation
+  | Some (Native_open _) when scope=None ->
+      (* An unattributed result cannot certify which call ended, and the
+         remaining open row no longer has authority to receive heartbeats. *)
+      Hashtbl.replace registry.calls id Native_ambiguous;
+      None
+  | Some (Native_open _ | Native_closed _ | Native_ambiguous) | None -> None
+;;
+
+let root_native_agent_parent registry ~call_id : native_agent_parent_witness option =
+  match registry.native_posture, Hashtbl.find_opt registry.calls call_id with
+  | Runtime_native_tools.Native_full,
+    Some (Native_open {scope=Root_response;envelope_uuid;ordinal;
+            observation={origin=Built_in;tool_name=Some "Agent";_}}
+        | Native_closed {scope=Root_response;envelope_uuid;ordinal;
+            observation={origin=Built_in;tool_name=Some "Agent";_}}) ->
+      Some {invocation=registry.invocation;call_id;
+        call_envelope_uuid=envelope_uuid;call_ordinal=ordinal}
+  | (Native_full | Native_read | Native_none),
+    (Some (Native_open _ | Native_closed _ | Native_ambiguous) | None) -> None
+;;
+
+type heartbeat_ignored =
+  | Not_heartbeat
+  | Malformed_heartbeat
+  | Other_session
+  | Replayed_heartbeat
+  | Conflicting_heartbeat
+  | No_active_root_call
+
+type heartbeat_projection =
+  | Heartbeat_observed of Runtime_native_tools.action_identity * int
+  | Heartbeat_ignored of heartbeat_ignored
+
+let parse_native_heartbeat ~expected_session_id fields =
+  let ( let* ) = Result.bind in
+  let malformed = Error Malformed_heartbeat in
+  let unique key = match List.filter (fun (name,_) -> name=key) fields with
+    | [_,value] -> Ok value
+    | [] | _::_ -> malformed in
+  let string key =
+    let* value = unique key in
+    match value with `String value when String.trim value <> "" -> Ok value
+    | _ -> malformed in
+  match List.assoc_opt "heartbeat" fields with
+  | None -> Error Not_heartbeat
+  | Some _ ->
+    let* heartbeat = unique "heartbeat" in
+    let* () = match heartbeat with
+      | `Bool true -> Ok () | `Bool false -> Error Not_heartbeat | _ -> malformed in
+    let* session = string "session_id" in
+    let* () = if session=expected_session_id then Ok () else Error Other_session in
+    let* uuid = string "uuid" in
+    let* progress_id = string "tool_use_id" in
+    let* parent_id = string "parent_tool_use_id" in
+    let* tool_name = string "tool_name" in
+    let* elapsed = unique "elapsed_time_seconds" in
+    let* elapsed_seconds = match Runtime_json_integer.of_json elapsed with
+      | Ok seconds when seconds >= 0 -> Ok seconds | Ok _ | Error _ -> malformed in
+    Ok {uuid; progress_id; parent_id; tool_name; elapsed_seconds}
+;;
+
+let project_native_heartbeat registry ~expected_session_id fields =
+  match parse_native_heartbeat ~expected_session_id fields with
+  | Error reason -> Heartbeat_ignored reason
+  | Ok heartbeat ->
+    match Hashtbl.find_opt registry.progress_uuids heartbeat.uuid with
+    | Some (Heartbeat_frame previous) when same_heartbeat previous heartbeat -> Heartbeat_ignored Replayed_heartbeat
+    | Some _ -> Heartbeat_ignored Conflicting_heartbeat
+    | None ->
+      Hashtbl.add registry.progress_uuids heartbeat.uuid (Heartbeat_frame heartbeat);
+      match Hashtbl.find_opt registry.calls heartbeat.parent_id with
+      | Some (Native_open {scope=Root_response;
+          observation={origin=Runtime_native_tools.Built_in; tool_name=Some name; _}; _})
+        when name=heartbeat.tool_name ->
+          Heartbeat_observed (Runtime_native_tools.Call_id heartbeat.parent_id, heartbeat.elapsed_seconds)
+      | Some (Native_open _ | Native_closed _ | Native_ambiguous) | None ->
+          Heartbeat_ignored No_active_root_call
+;;
+
+type retry_projection =
+  | Retry_observed of Runtime_native_tools.action_identity * Runtime_native_tools.retry_observation
+  | Retry_ignored
+
+let parse_agent_retry ~expected_session_id fields =
+  let ( let* ) = Option.bind in
+  let unique key = match List.filter (fun (name,_) -> name=key) fields with
+    | [_,value] -> Some value | [] | _::_ -> None in
+  let string key = let* value = unique key in
+    match value with `String value when String.trim value <> "" -> Some value | _ -> None in
+  let* name = string "tool_name" in
+  let* session = string "session_id" in
+  if name <> "Agent" || session <> expected_session_id || List.mem_assoc "heartbeat" fields
+     || not (List.for_all (fun (key,_) -> List.mem key agent_retry_fields) fields) then None
+  else
+    let* elapsed = unique "elapsed_time_seconds" in
+    let* () = match Runtime_json_integer.of_json elapsed with Ok 0 -> Some () | Ok _ | Error _ -> None in
+    let* retry_uuid = string "uuid" in
+    let* progress_id = string "tool_use_id" in
+    let* parent_id = string "parent_tool_use_id" in
+    let* subagent_type = string "subagent_type" in
+    let* note = match List.filter (fun (key,_) -> key="subagent_retry") fields with
+      | [] -> Some None
+      | [_,`Assoc note_fields] ->
+          (match Runtime_native_tools.progress_of_json
+            (`Assoc (("kind",`String "retry_reported")::("subagent_type",`String subagent_type)::note_fields)) with
+           | Ok (Runtime_native_tools.Retry_observed (Retry_reported note)) -> Some (Some note)
+           | Ok _ | Error _ -> None)
+      | [_] | _::_ -> None in
+    Some {retry_uuid;progress_id;parent_id;subagent_type;note}
+;;
+
+let project_agent_retry registry ~expected_session_id fields =
+  match parse_agent_retry ~expected_session_id fields with
+  | None -> Retry_ignored
+  | Some frame ->
+      (* Like heartbeat, valid but unowned UUIDs stay observed so later call
+         starts cannot adopt their replay. Malformed/foreign frames claim none. *)
+      if Hashtbl.mem registry.progress_uuids frame.retry_uuid then Retry_ignored
+      else begin
+        Hashtbl.add registry.progress_uuids frame.retry_uuid (Agent_retry_frame frame);
+        match registry.native_posture, Hashtbl.find_opt registry.calls frame.parent_id with
+        | Runtime_native_tools.Native_full, Some (Native_open
+            {scope=Root_response;observation={origin=Built_in;tool_name=Some "Agent";_};_}) ->
+            let binding = Hashtbl.find_opt registry.retry_bindings frame.parent_id in
+            let matches (binding : retry_binding) = binding.progress_id=frame.progress_id
+              && binding.agent.subagent_type=frame.subagent_type in
+            let report observation = Retry_observed (Runtime_native_tools.Call_id frame.parent_id, observation) in
+            (match frame.note, binding with
+             | Some note, None ->
+                 Hashtbl.add registry.retry_bindings frame.parent_id
+                   {progress_id=frame.progress_id;agent=note.agent;pending=true};
+                 report (Runtime_native_tools.Retry_reported note)
+             | Some note, Some binding when binding.agent=note.agent ->
+                 Hashtbl.replace registry.retry_bindings frame.parent_id
+                   {progress_id=frame.progress_id;agent=note.agent;pending=true};
+                 report (Runtime_native_tools.Retry_reported note)
+             | None, Some binding when matches binding && binding.pending ->
+                 binding.pending <- false; report (Runtime_native_tools.Retry_cleared binding.agent)
+             | Some _, Some _ | None, (Some _ | None) -> Retry_ignored)
+        | (Native_full | Native_read | Native_none), _ -> Retry_ignored
+      end
+;;
+
+let parse_task_frame ~expected_session_id fields =
+  let ( let* ) = Option.bind in
+  (* The narrowly admitted observation still receives the shared recursive
+     duplicate-key check. Malformed telemetry is dropped, not a turn error. *)
+  let* () = Result.to_option (validate_unique_object_keys
+      ~stage:"task observation" ~path:"$" (`Assoc fields)) in
+  let string = function `String value -> Some value | _ -> None in
+  let identity = function
+    | `String value when String.trim value <> "" -> Some value
+    | _ -> None in
+  let bool = function `Bool value -> Some value | _ -> None in
+  let int value = Result.to_option (Runtime_json_integer.of_json value) in
+  let nonnegative_int value =
+    Option.bind (int value) (fun value -> if value >= 0 then Some value else None) in
+  let required parse key fields = Option.bind (List.assoc_opt key fields) parse in
+  let optional parse key fields = match List.assoc_opt key fields with
+    | None -> Some None | Some value -> Option.map Option.some (parse value) in
+  let string_field key = required string key fields in
+  let* subtype = string_field "subtype" in
+  let* kind = task_kind subtype in
+  let* () = if List.for_all (fun (key,_) -> List.mem key (task_fields kind)) fields
+    then Some () else None in
+  let* session_id = required identity "session_id" fields in
+  let* () = if session_id=expected_session_id then Some () else None in
+  let* task_uuid = required identity "uuid" fields in
+  let* task_id = required identity "task_id" fields in
+  let* run_id = optional identity "run_id" fields in
+  let* tool_use_id = optional identity "tool_use_id" fields in
+  let usage = function
+    | `Assoc counts when List.for_all (fun (key,_) ->
+        List.mem key ["total_tokens";"tool_uses";"duration_ms"]) counts ->
+        let* total_tokens = required nonnegative_int "total_tokens" counts in
+        let* tool_uses = required nonnegative_int "tool_uses" counts in
+        let* duration_ms = required int "duration_ms" counts in
+        Some {total_tokens;tool_uses;duration_ms}
+    | _ -> None in
+  let status = function
+    | `String "pending" -> Some Task_pending | `String "running" -> Some Task_running
+    | `String "completed" -> Some Task_completed | `String "failed" -> Some Task_failed
+    | `String "killed" -> Some Task_killed | `String "paused" -> Some Task_paused
+    | _ -> None in
+  let* task_event, root_registration = match kind with
+    | Task_start ->
+        let* _description = string_field "description" in
+        let* _prompt = optional string "prompt" fields in
+        let* _workflow = optional string "workflow_name" fields in
+        let* subagent_type = optional string "subagent_type" fields in
+        let* is_backgrounded = optional bool "is_backgrounded" fields in
+        (* Claude 2.1.294 marks resumed tasks awaited by their caller.
+           This scheduling observation does not prove spawning ownership. *)
+        let* _awaited = optional bool "awaited" fields in
+        let* skip_transcript = optional bool "skip_transcript" fields in
+        let* ambient = optional bool "ambient" fields in
+        let* task_type = optional string "task_type" fields in
+        let* spawn_depth = optional int "spawn_depth" fields in
+        let* parent_task_id = optional identity "parent_task_id" fields in
+        let* owned_by_subagent = optional bool "owned_by_subagent" fields in
+        (* SDK 2.1.292 defines depth 1 as top-level. An absent parent alone
+           cannot prove root origin: untracked/workflow launchers lack it too. *)
+        let root = task_type=Some "local_agent" && spawn_depth=Some 1
+          && parent_task_id=None && owned_by_subagent<>Some true in
+        Some (Task_registered {subagent_type;is_backgrounded;skip_transcript;ambient}, root)
+    | Task_update ->
+        let* patch = match List.assoc_opt "patch" fields with
+          | Some (`Assoc patch) when List.for_all (fun (key,_) -> List.mem key
+              ["status";"description";"end_time";"total_paused_ms";"error";"is_backgrounded"]) patch -> Some patch
+          | _ -> None in
+        let* _description = optional string "description" patch in
+        let* _error = optional string "error" patch in
+        let* status = optional status "status" patch in
+        let* is_backgrounded = optional bool "is_backgrounded" patch in
+        let* end_time = optional nonnegative_int "end_time" patch in
+        let* total_paused_ms = optional int "total_paused_ms" patch in
+        Some (Task_patched {status;is_backgrounded;end_time;total_paused_ms}, false)
+    | Task_progress ->
+        let* _description = string_field "description" in
+        let* _summary = optional string "summary" fields in
+        let* _subagent_type = optional string "subagent_type" fields in
+        let* usage = required usage "usage" fields in
+        let* last_tool_name = optional string "last_tool_name" fields in
+        Some (Task_progress_reported {usage;last_tool_name}, false)
+    | Task_notification ->
+        let* _summary = string_field "summary" in
+        let* _output_file = string_field "output_file" in
+        let* outcome = match List.assoc_opt "status" fields with
+          | Some (`String "completed") -> Some Task_completed_notice
+          | Some (`String "failed") -> Some Task_failed_notice
+          | Some (`String "stopped") -> Some Task_stopped_notice
+          | _ -> None in
+        let* reason = optional (function `String "worker_restart" -> Some Worker_restart
+          | _ -> None) "reason" fields in
+        let* () = match reason,outcome with
+          | Some Worker_restart,(Task_completed_notice|Task_failed_notice) -> None
+          | None,_ | Some Worker_restart,Task_stopped_notice -> Some () in
+        let* usage = optional usage "usage" fields in
+        let* skip_transcript = optional bool "skip_transcript" fields in
+        let* ambient = optional bool "ambient" fields in
+        Some (Task_terminal_reported {outcome;reason;usage;skip_transcript;ambient}, false) in
+  Some {task_uuid;task_id;run_id;tool_use_id;root_registration;task_event}
+;;
+
+let project_native_task registry ~expected_session_id fields =
+  let ( let* ) = Option.bind in
+  let* frame = parse_task_frame ~expected_session_id fields in
+  if Hashtbl.mem registry.progress_uuids frame.task_uuid then None else begin
+    (* Valid unowned identities stay seen across all metadata kinds. A replay
+       cannot acquire a native owner that happened to appear later. *)
+    Hashtbl.add registry.progress_uuids frame.task_uuid (Task_frame frame);
+    let* run_id = frame.run_id in
+    let emit owner boundary = Some {owner;uuid=frame.task_uuid;event=frame.task_event;boundary} in
+    let register () =
+      let binding =
+        match frame.root_registration, frame.tool_use_id with
+        | true, Some call_id ->
+            (match root_native_agent_parent registry ~call_id with
+             | Some parent ->
+                 Task_owned {owner={invocation=parent.invocation;task_id=frame.task_id;
+                     run_id;call_id=parent.call_id;call_envelope_uuid=parent.call_envelope_uuid;
+                     call_ordinal=parent.call_ordinal};
+                   registration=frame.task_event;boundary=Task_terminal_unobserved}
+             | None -> Task_unowned)
+        | false, (Some _ | None) | true, None -> Task_unowned in
+      Hashtbl.replace registry.task_runs frame.task_id {run_id;binding};
+      match binding with Task_owned {owner;boundary;_} -> emit owner boundary | Task_unowned -> None in
+    match frame.task_event, Hashtbl.find_opt registry.task_runs frame.task_id with
+    | Task_registered _, None -> register ()
+    | Task_registered _, Some previous when String.compare run_id previous.run_id > 0 ->
+        (* This ordering is the provider's declared per-task run contract.
+           The opaque run string is never parsed as a timestamp or prefix. *)
+        register ()
+    | Task_registered _, Some previous when run_id=previous.run_id ->
+        (match previous.binding with
+         | Task_owned held when frame.root_registration
+             && frame.tool_use_id=Some held.owner.call_id
+             && frame.task_event=held.registration -> ()
+         | Task_owned _ -> previous.binding <- Task_unowned
+         | Task_unowned -> ());
+        None
+    | Task_registered _, Some _ -> None
+    | (Task_patched _ | Task_progress_reported _ | Task_terminal_reported _), Some current
+        when run_id=current.run_id ->
+        (match current.binding with
+         | Task_unowned -> None
+         | Task_owned held ->
+             if Option.exists (fun call_id -> call_id<>held.owner.call_id) frame.tool_use_id
+             then None else
+             match frame.task_event, held.boundary with
+             | Task_patched {status;_}, Task_terminal_unobserved ->
+                 (match status with
+                  | Some (Task_completed | Task_failed | Task_killed) -> held.boundary <- Task_terminal_observed
+                  | Some (Task_pending | Task_running | Task_paused) | None -> ());
+                 emit held.owner held.boundary
+             | Task_patched {status=(None | Some (Task_completed | Task_failed | Task_killed));_},
+                 Task_terminal_observed ->
+                 (* End-time/background metadata can change after a terminal
+                    observation. Retain the patch without reopening the run. *)
+                 emit held.owner held.boundary
+             | Task_progress_reported _, Task_terminal_unobserved -> emit held.owner held.boundary
+             | Task_terminal_reported _, (Task_terminal_unobserved | Task_terminal_observed) ->
+                 (* The SDK allows a later notification to replace the task's
+                    report. Its fresh UUID is another observation, not a reopen. *)
+                 held.boundary <- Task_terminal_observed; emit held.owner held.boundary
+             | (Task_patched {status=Some (Task_pending | Task_running | Task_paused);_}
+                 | Task_progress_reported _), Task_terminal_observed
+             | Task_registered _, (Task_terminal_unobserved | Task_terminal_observed) -> None)
+    | (Task_patched _ | Task_progress_reported _ | Task_terminal_reported _), previous ->
+        (* Losing a registration cannot make a later call with the same ID
+           own the preceding task edge. Retain its exact run as unowned. *)
+        (match previous with
+         | None -> Hashtbl.add registry.task_runs frame.task_id {run_id;binding=Task_unowned}
+         | Some old when String.compare run_id old.run_id > 0 ->
+             Hashtbl.replace registry.task_runs frame.task_id {run_id;binding=Task_unowned}
+         | Some _ -> ());
+        None
+  end
+;;
+
 let allowed_tool_name (tool : dynamic_tool) =
   Printf.sprintf "mcp__%s__%s" mcp_server_name tool.name
 ;;
@@ -1017,14 +1546,14 @@ let allowed_tool_name (tool : dynamic_tool) =
 let assistant_blocks ~stage ~mcp_tool_names content =
   match content with
   | `List blocks ->
-    let rec loop parsed = function
+    let rec loop ordinal parsed = function
       | [] -> Ok (List.rev parsed)
       | `Assoc fields :: rest ->
         let* type_ = required_string stage "type" fields in
         (match type_ with
          | "text" ->
            let* text = text_value stage fields in
-           loop (Assistant_text text :: parsed) rest
+           loop (ordinal + 1) ((ordinal, Assistant_text text) :: parsed) rest
          | "tool_use" ->
            let* call_id = optional_string stage "id" fields in
            let* tool_name = optional_string stage "name" fields in
@@ -1035,30 +1564,34 @@ let assistant_blocks ~stage ~mcp_tool_names content =
                Runtime_native_tools.Mcp_wrapper
              | Some _ | None -> Runtime_native_tools.Built_in
            in
-           loop
-             (Assistant_native_tool
+           loop (ordinal + 1)
+             ((ordinal, Assistant_native_tool
                 { identity =
                     Option.map
                       (fun call_id -> Runtime_native_tools.Call_id call_id)
                       (non_blank call_id)
                 ; tool_name
                 ; origin
-                }
+                })
               :: parsed)
              rest
          | "thinking" ->
            let* thinking = required_member stage "thinking" fields in
            (match thinking with
-            | `String text -> loop (Assistant_thinking text :: parsed) rest
+            | `String text ->
+                loop (ordinal + 1) ((ordinal, Assistant_thinking text) :: parsed) rest
             | _ -> protocol_error stage "thinking must be a string")
-         | "redacted_thinking" -> loop parsed rest
+         | "redacted_thinking" ->
+             (* Omit opaque payloads, but retain every wire position in the
+                identities of later public body and native call blocks. *)
+             loop (ordinal + 1) parsed rest
          | other ->
            protocol_error
              stage
              (Printf.sprintf "unsupported assistant content type %S" other))
       | _ :: _ -> protocol_error stage "assistant content block must be an object"
     in
-    loop [] blocks
+    loop 0 [] blocks
   | _ -> protocol_error stage "assistant content must be an array"
 ;;
 
@@ -1140,6 +1673,7 @@ let parse_assistant ~expected_session_id ~tools fields =
   if session_id <> expected_session_id
   then protocol_error stage "session_id does not match the active Claude session"
   else
+    let* scope = assistant_scope ~stage fields in
     let* origin = assistant_origin ~stage fields in
     let* uuid = required_string stage "uuid" fields in
     let* message = required_member stage "message" fields in
@@ -1158,10 +1692,10 @@ let parse_assistant ~expected_session_id ~tools fields =
         ~mcp_tool_names:(List.map allowed_tool_name tools)
         content
     in
-    Ok (origin, uuid, model, blocks, message_id, usage)
+    Ok (scope, origin, uuid, model, blocks, message_id, usage)
 ;;
 
-let native_tool_result_ids ~expected_session_id fields =
+let native_tool_results ~expected_session_id fields =
   let stage = "user message" in
   let* session_id = optional_string stage "session_id" fields in
   let* () =
@@ -1174,14 +1708,21 @@ let native_tool_result_ids ~expected_session_id fields =
   | Some (`Assoc message_fields) ->
     (match List.assoc_opt "content" message_fields with
      | Some (`List blocks) ->
-       let rec loop ids = function
-         | [] -> Ok (List.rev ids)
+       let rec loop results = function
+         | [] -> Ok (List.rev results)
          | `Assoc block_fields :: rest ->
            (match List.assoc_opt "type" block_fields with
             | Some (`String "tool_result") ->
               let* call_id = optional_string stage "tool_use_id" block_fields in
-              loop (Option.to_list (non_blank call_id) @ ids) rest
-            | Some (`String _) | None -> loop ids rest
+              let* is_error = match List.assoc_opt "is_error" block_fields with
+                | None -> Ok None
+                | Some (`Bool value) -> Ok (Some value)
+                | Some _ -> protocol_error stage "tool_result is_error must be a boolean"
+              in
+              let completion : Runtime_native_tools.completion =
+                {outcome=Result_received {is_error}; exit_code=None} in
+              loop (Option.to_list (Option.map (fun id -> id, completion) (non_blank call_id)) @ results) rest
+            | Some (`String _) | None -> loop results rest
             | Some _ -> protocol_error stage "content block type must be a string")
          | _ :: _ -> protocol_error stage "user content block must be an object"
        in
@@ -1337,38 +1878,45 @@ let parse_result ~rate_limit ~tool_effect_attempted ~response_emitted ~turn_id ~
 (* Partial SDK frames precede the complete assistant block. Keep the current
    text block so its later complete envelope contributes only missing bytes.
    Complete blocks remain the source for terminal text and usage accounting. *)
-type partial_stream =
-  { mutable message_id : string option
-  ; mutable text_blocks : (string * int * Buffer.t) list
-  ; mutable thinking_blocks : (string * int * Buffer.t) list
+type partial_phase = Streaming | Wire_stopped | Envelope_complete | Content_closed
+
+type partial_block =
+  { identity : content_block
+  ; message_id : string
+  ; index : int
+  ; channel : content_channel
+  ; buffer : Buffer.t
+  ; mutable phase : partial_phase
   }
 
-type partial_channel = Text | Thinking
+type partial_stream =
+  { mutable message_id : string option
+  ; mutable blocks : partial_block list
+  ; completed_envelopes : ((string * int), (content_channel * string)) Hashtbl.t
+  }
 
-let partial_blocks partial = function
-  | Text -> partial.text_blocks
-  | Thinking -> partial.thinking_blocks
+let emit_content ~on_stream_event ~response_emitted ~message_id ~block channel text =
+  if text <> "" then match channel with
+  | Text_content ->
+      response_emitted := true;
+      emit_stream_event on_stream_event (Text_delta {message_id; block; text})
+  | Thinking_content ->
+      emit_stream_event on_stream_event (Thinking_delta {message_id; block; text})
 ;;
 
-let set_partial_blocks partial channel blocks =
-  match channel with
-  | Text -> partial.text_blocks <- blocks
-  | Thinking -> partial.thinking_blocks <- blocks
-;;
-
-let emit_partial_text ~on_stream_event ~response_emitted ~message_id channel text =
-  if text <> "" then
-    match channel with
-    | Text ->
-        response_emitted := true;
-        emit_stream_event on_stream_event (Text_delta {message_id; text})
-    | Thinking -> emit_stream_event on_stream_event (Thinking_delta {message_id; text})
+let close_partial ~on_stream_event block =
+  if block.phase <> Content_closed then begin
+    block.phase <- Content_closed;
+    Buffer.clear block.buffer;
+    emit_stream_event on_stream_event
+      (Content_block_stopped {block=block.identity; channel=block.channel})
+  end
 ;;
 
 let partial_text_value stage channel fields =
   match channel with
-  | Text -> text_value stage fields
-  | Thinking ->
+  | Text_content -> text_value stage fields
+  | Thinking_content ->
       let* value = required_member stage "thinking" fields in
       (match value with
        | `String text -> Ok text
@@ -1383,7 +1931,7 @@ let partial_block_index stage fields =
 ;;
 
 let partial_stream_event ~expected_session_id ~stream_started ~response_emitted
-    ~on_stream_event partial fields =
+    ~on_stream_event (partial : partial_stream) fields =
   let stage = "partial stream event" in
   let* session_id = required_string stage "session_id" fields in
   if session_id <> expected_session_id then
@@ -1411,21 +1959,22 @@ let partial_stream_event ~expected_session_id ~stream_started ~response_emitted
         let* kind = required_string stage "type" block in
         (match kind with
          | ("text" | "thinking") as kind ->
-             let channel = if kind = "text" then Text else Thinking in
+             let channel = if kind = "text" then Text_content else Thinking_content in
              let* text = partial_text_value stage channel block in
-             let buffer = Buffer.create 256 in
-             Buffer.add_string buffer text;
              let* message_id = match partial.message_id with
                | Some id -> Ok id
                | None -> protocol_error stage "content block has no message start" in
-             if List.exists (fun (id, held_index, _) -> id = message_id && held_index = index)
-                 (partial.text_blocks @ partial.thinking_blocks) then
+             if List.exists (fun (held : partial_block) -> held.message_id = message_id && held.index = index)
+                 partial.blocks then
                protocol_error stage "content block index already started"
              else begin
-               set_partial_blocks partial channel
-                 (partial_blocks partial channel @ [message_id, index, buffer]);
-               emit_partial_text ~on_stream_event ~response_emitted
-                 ~message_id:partial.message_id channel text;
+               let buffer = Buffer.create 256 in
+               Buffer.add_string buffer text;
+               let identity = Partial_block {message_id; index} in
+               partial.blocks <- partial.blocks @
+                 [{identity; message_id; index; channel; buffer; phase=Streaming}];
+               emit_content ~on_stream_event ~response_emitted
+                 ~message_id:partial.message_id ~block:identity channel text;
                Ok ()
              end
          | "tool_use" | "redacted_thinking" -> Ok ()
@@ -1437,53 +1986,162 @@ let partial_stream_event ~expected_session_id ~stream_started ~response_emitted
         let* kind = required_string stage "type" delta in
         (match kind with
          | ("text_delta" | "thinking_delta") as kind ->
-             let channel = if kind = "text_delta" then Text else Thinking in
+             let channel = if kind = "text_delta" then Text_content else Thinking_content in
              let* text = partial_text_value stage channel delta in
-             let held = List.find_opt (fun (id, held_index, _) ->
-               Some id = partial.message_id && held_index = index) (partial_blocks partial channel) in
+             let held = List.find_opt (fun (held : partial_block) ->
+               Some held.message_id = partial.message_id && held.index = index
+               && held.channel = channel) partial.blocks in
              (match held with
-              | Some (_, _, buffer) ->
-                  Buffer.add_string buffer text;
-                  emit_partial_text ~on_stream_event ~response_emitted
-                    ~message_id:partial.message_id channel text;
+              | Some held when held.phase = Streaming ->
+                  Buffer.add_string held.buffer text;
+                  emit_content ~on_stream_event ~response_emitted
+                    ~message_id:partial.message_id ~block:held.identity channel text;
                   Ok ()
-              | _ -> protocol_error stage "content delta has no matching message/channel block")
+              | _ -> protocol_error stage "content delta has no matching open message/channel block")
          | "input_json_delta" | "signature_delta" | "citations_delta" -> Ok ()
          | other -> protocol_error stage ("unsupported content delta type " ^ other))
     | "content_block_stop" ->
         let* index = partial_block_index stage event in
-        (* Empty blocks have no complete assistant envelope. Retain nonempty
-           stopped blocks until their per-block or aggregate envelope lands. *)
-        List.iter (fun channel ->
-          set_partial_blocks partial channel
-            (List.filter (fun (id, held_index, buffer) ->
-              not (Some id = partial.message_id && held_index = index && Buffer.length buffer = 0))
-              (partial_blocks partial channel))) [Text; Thinking];
+        List.iter (fun (held : partial_block) ->
+          if Some held.message_id = partial.message_id && held.index = index then begin
+            (* Empty blocks have no complete assistant envelope. Nonempty
+               blocks close only after reconciliation, including a late suffix. *)
+            match held.phase with
+            | Streaming when Buffer.length held.buffer = 0 -> close_partial ~on_stream_event held
+            | Streaming -> held.phase <- Wire_stopped
+            | Envelope_complete -> close_partial ~on_stream_event held
+            | Wire_stopped | Content_closed -> ()
+          end) partial.blocks;
         Ok ()
     | "message_delta" | "message_stop" | "ping" -> Ok ()
     | other -> protocol_error stage ("unsupported partial event type " ^ other)
 ;;
 
-let complete_partial_text partial ~channel ~message_id text =
-  if String.equal text "" then Ok text
-  else match List.find_opt (fun (id, _, buffer) ->
-      Some id = message_id && Buffer.length buffer > 0) (partial_blocks partial channel) with
-  | Some (id, index, buffer) ->
-      let prefix = Buffer.contents buffer in
-      if String.starts_with ~prefix text then begin
-        set_partial_blocks partial channel
-          (List.filter (fun (held_id, held_index, _) ->
-             held_id <> id || held_index <> index) (partial_blocks partial channel));
-        Ok (String.sub text (String.length prefix) (String.length text - String.length prefix))
-      end else protocol_error "assistant content" "complete block conflicts with streamed content"
-  | None -> Ok text
+(* A partial frame stamped with a child's [parent_tool_use_id] carries that
+   child's model output. The complete [Child_response] envelope publishes the
+   same body once as [Child_content_observed]; the partial copy must not open,
+   extend, or close root blocks, nor count as root response evidence. Frames
+   without the field keep the root reading this parser has always given them. *)
+let partial_stream_scope fields =
+  match List.assoc_opt "parent_tool_use_id" fields with
+  | None -> Ok Root_response
+  | Some _ -> assistant_scope ~stage:"partial stream event" fields
+;;
+
+let child_partial_stream_event ~expected_session_id fields =
+  let stage = "partial stream event" in
+  let* session_id = required_string stage "session_id" fields in
+  if session_id <> expected_session_id then
+    protocol_error stage "session_id does not match the active Claude session"
+  else Ok ()
+;;
+
+let complete_partial_text (partial : partial_stream) ~on_stream_event ~response_emitted
+    ~channel ~message_id ~uuid ~ordinal text =
+  let envelope = uuid, ordinal in
+  match Hashtbl.find_opt partial.completed_envelopes envelope with
+  | Some previous when previous = (channel, text) -> Ok ()
+  | Some _ -> protocol_error "assistant content" "replayed complete block changed"
+  | None ->
+      let held = List.find_opt (fun (held : partial_block) ->
+        Some held.message_id = message_id && held.channel = channel
+        && (match held.phase with Streaming | Wire_stopped -> true
+             | Envelope_complete | Content_closed -> false)
+        && (if text = "" then Buffer.length held.buffer = 0
+            else Buffer.length held.buffer > 0)) partial.blocks in
+      let* () = match held with
+      | Some held ->
+          let prefix = Buffer.contents held.buffer in
+          if not (String.starts_with ~prefix text) then
+            protocol_error "assistant content" "complete block conflicts with streamed content"
+          else begin
+            let remaining = String.sub text (String.length prefix)
+                (String.length text - String.length prefix) in
+            emit_content ~on_stream_event ~response_emitted ~message_id
+              ~block:held.identity channel remaining;
+            Buffer.add_string held.buffer remaining;
+            (match held.phase with
+             | Streaming -> held.phase <- Envelope_complete
+             | Wire_stopped -> close_partial ~on_stream_event held
+             | Envelope_complete | Content_closed -> ());
+            Ok ()
+          end
+      | None ->
+          let block = Assistant_block {uuid; ordinal} in
+          emit_content ~on_stream_event ~response_emitted ~message_id ~block channel text;
+          if text <> "" then emit_stream_event on_stream_event
+            (Content_block_stopped {block; channel});
+          Ok () in
+      Hashtbl.add partial.completed_envelopes envelope (channel, text);
+      Ok ()
+;;
+
+module Input_attribution = Runtime_claude_input_attribution
+
+type input_observer =
+  { input_state : Input_attribution.t
+  ; on_input_observation : (Input_attribution.observation -> unit) option
+  }
+
+let emit_input_observation observer observation =
+  match observer.on_input_observation with
+  | None -> ()
+  | Some emit ->
+      (try emit observation with
+       | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn -> Log.Runtime_agent.warn "Claude Code input observation callback raised (error=%s)"
+           (Printexc.to_string exn))
+;;
+
+let observe_input observer ~session_id ~frame fields =
+  match observer.on_input_observation with
+  | None -> ()
+  | Some _ ->
+      Option.iter (emit_input_observation observer)
+        (Input_attribution.observe observer.input_state ~session_id ~frame fields)
+;;
+
+let input_frame_uuid fields =
+  match List.assoc_opt "uuid" fields with Some (`String value) -> Some value | _ -> None
+;;
+
+let observe_partial_input observer ~session_id fields =
+  match observer.on_input_observation with
+  | None -> ()
+  | Some _ ->
+  let uuid = input_frame_uuid fields in
+  let frame = match List.assoc_opt "event" fields with
+    | Some (`Assoc event) ->
+        (match List.assoc_opt "type" event with
+         | Some (`String "message_start") ->
+             (match List.assoc_opt "message" event with
+              | Some (`Assoc message) ->
+                  (match List.assoc_opt "id" message with
+                   | Some (`String message_id) -> Some (Input_attribution.Partial_start {uuid;message_id})
+                   | _ -> None)
+              | _ -> None)
+         | Some (`String "message_stop") -> Some (Input_attribution.Partial_stop {uuid})
+         | Some (`String "ping") -> None
+         | Some (`String _) -> Some (Input_attribution.Partial_fragment {uuid})
+         | _ -> None)
+    | _ -> None in
+  (* Root ownership is explicit in the SDK envelope. The older content parser
+     accepts unscoped partial starts; those cannot leave an old root cursor
+     alive for the next unstamped fragment. No authored bytes are changed. *)
+  match assistant_scope ~stage:"input attribution scope" fields, frame with
+  | Ok Root_response, Some frame -> observe_input observer ~session_id ~frame fields
+  | (Ok (Child_response _) | Error _), Some (Input_attribution.Partial_start {message_id;_}) ->
+      Input_attribution.unowned_response_start observer.input_state ~message_id
+  | (Ok (Child_response _) | Error _), Some (Partial_fragment _ | Partial_stop _ | Assistant _ | Result _)
+  | (Ok Root_response | Ok (Child_response _) | Error _), None -> ()
 ;;
 
 let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     ~expected_session_id
     ~subscription ~resumed ~rate_limit ~assistant_model ~assistant_texts
     ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
-    ~partial_stream ~stream_started ~response_emitted =
+    ~input_observer ~partial_stream ~stream_started ~response_emitted =
   let* json = io.receive () in
   let* type_, fields = wire_fields json in
   match type_ with
@@ -1503,25 +2161,35 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
-      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~partial_stream ~stream_started
+      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
   | "control_response" ->
     protocol_error "turn" "received an unsolicited control response"
   | "stream_event" ->
-    let* () = partial_stream_event ~expected_session_id ~stream_started ~response_emitted
-        ~on_stream_event partial_stream fields in
+    let* scope = partial_stream_scope fields in
+    let* () = match scope with
+      | Root_response ->
+          partial_stream_event ~expected_session_id ~stream_started ~response_emitted
+            ~on_stream_event partial_stream fields
+      | Child_response _ -> child_partial_stream_event ~expected_session_id fields in
+    observe_partial_input input_observer ~session_id:expected_session_id fields;
     await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~expected_session_id ~subscription ~resumed ~rate_limit ~assistant_model
       ~assistant_texts ~native_tool_calls ~native_tool_attempted ~on_turn_started
-      ~on_stream_event ~partial_stream ~stream_started ~response_emitted
+      ~on_stream_event ~input_observer ~partial_stream ~stream_started ~response_emitted
   | "assistant" ->
-    let* origin, uuid, model, blocks, message_id, usage =
+    let* scope, origin, uuid, model, blocks, message_id, usage =
       parse_assistant ~expected_session_id ~tools fields
     in
+    (match scope with
+     | Root_response -> observe_input input_observer ~session_id:expected_session_id
+         ~frame:(Input_attribution.Assistant {uuid=Some uuid;message_id}) fields
+     | Child_response _ -> ());
     let assistant_model =
-      match origin with
-      | Api_error_diagnostic -> assistant_model
-      | Model_response ->
+      match scope, origin with
+      | (Root_response | Child_response _), Api_error_diagnostic
+      | Child_response _, Model_response -> assistant_model
+      | Root_response, Model_response ->
         observe_assistant_usage assistant_usage ~message_id usage;
         if not !stream_started
         then (
@@ -1529,32 +2197,48 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
           emit_stream_event on_stream_event (Turn_started { turn_id = uuid; model }));
         Some model
     in
+    let content_scope = match scope, origin with
+      | (Root_response | Child_response _), Api_error_diagnostic -> Diagnostic_content
+      | Root_response, Model_response -> Root_model_content
+      | Child_response parent_tool_use_id, Model_response ->
+          Child_model_content {parent_tool_use_id; observation_id=Random_id.hex ~bytes:16} in
     let texts_rev = ref [] in
-    let* () = List.fold_left (fun result block ->
+    let* () = List.fold_left (fun result (ordinal, block) ->
       let* () = result in
       match block with
       | Assistant_text text ->
-          (match origin with
-           | Api_error_diagnostic -> Ok ()
-           | Model_response ->
+          (match content_scope with
+           | Diagnostic_content -> Ok ()
+           | Root_model_content ->
                texts_rev := text :: !texts_rev;
-               let* remaining = complete_partial_text partial_stream ~channel:Text ~message_id text in
-               if remaining <> "" then emit_stream_event on_stream_event
-               (Text_delta {message_id; text=remaining});
+               complete_partial_text partial_stream ~on_stream_event ~response_emitted
+                 ~channel:Text_content ~message_id ~uuid ~ordinal text
+           | Child_model_content {parent_tool_use_id; observation_id} ->
+               let parent_occurrence = root_native_agent_parent native_tool_calls
+                 ~call_id:parent_tool_use_id in
+               emit_stream_event on_stream_event
+                 (Child_content_observed {invocation=native_tool_calls.invocation; observation_id; parent_tool_use_id; parent_occurrence; message_id; model;
+                   block=Assistant_block {uuid; ordinal}; channel=Text_content; text});
                Ok ())
       | Assistant_thinking text ->
-          (match origin with
-           | Api_error_diagnostic -> Ok ()
-           | Model_response ->
-               let* remaining = complete_partial_text partial_stream ~channel:Thinking ~message_id text in
-               if remaining <> "" then emit_stream_event on_stream_event
-                 (Thinking_delta {message_id; text=remaining});
+          (match content_scope with
+           | Diagnostic_content -> Ok ()
+           | Root_model_content ->
+               complete_partial_text partial_stream ~on_stream_event ~response_emitted
+                 ~channel:Thinking_content ~message_id ~uuid ~ordinal text
+           | Child_model_content {parent_tool_use_id; observation_id} ->
+               let parent_occurrence = root_native_agent_parent native_tool_calls
+                 ~call_id:parent_tool_use_id in
+               emit_stream_event on_stream_event
+                 (Child_content_observed {invocation=native_tool_calls.invocation; observation_id; parent_tool_use_id; parent_occurrence; message_id; model;
+                   block=Assistant_block {uuid; ordinal}; channel=Thinking_content; text});
                Ok ())
       | Assistant_native_tool observation ->
           native_tool_attempted := true;
-          Option.iter (fun call_id -> Hashtbl.replace native_tool_calls call_id observation)
-            (Runtime_native_tools.call_id observation);
-          emit_stream_event on_stream_event (Native_tool_started observation);
+          (match observe_native_start native_tool_calls ~scope ~uuid ~ordinal observation with
+           | Native_start_new ->
+               emit_stream_event on_stream_event (Native_tool_started observation)
+           | Native_start_active_replay | Native_start_closed_replay | Native_start_conflict -> ());
           Ok ()) (Ok ()) blocks in
     let texts = List.rev !texts_rev in
     if List.exists (fun text -> String.length text > 0) texts then response_emitted := true;
@@ -1564,7 +2248,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~rate_limit ~assistant_model
       ~assistant_texts:(assistant_texts @ texts)
       ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
-      ~partial_stream ~stream_started ~response_emitted
+      ~input_observer ~partial_stream ~stream_started ~response_emitted
   | "rate_limit_event" ->
     let* rate_limit = parse_rate_limit ~expected_session_id fields in
     (* The usage windows ride the same event. They are an observation for
@@ -1582,7 +2266,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~subscription ~resumed
       ~rate_limit:(Some rate_limit) ~assistant_model ~assistant_texts
       ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
-      ~partial_stream ~stream_started ~response_emitted
+      ~input_observer ~partial_stream ~stream_started ~response_emitted
   | "result" ->
     (* The result frame is the only place the turn's spend is reported, and
        it arrives on failures too (a quota refusal, a provider error after
@@ -1615,6 +2299,13 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
         ~usage
         fields
     in
+    let outcome = match parsed_result with
+      | Ok _ -> Some Input_attribution.Provider_success
+      | Error (Quota_blocked _ | Context_window_exceeded _
+          | Turn_failed _ | Turn_failed_with_observation _) -> Some Input_attribution.Provider_error
+      | Error _ -> None in
+    observe_input input_observer ~session_id:expected_session_id
+      ~frame:(Input_attribution.Result {uuid=Some turn_id;outcome}) fields;
     let* turn_id, result, usage =
       match parsed_result with
       | Error
@@ -1673,47 +2364,56 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ; usage
       }
   | "user" ->
-    let* finished_ids = native_tool_result_ids ~expected_session_id fields in
-    List.iter
-      (fun call_id ->
-         match Hashtbl.find_opt native_tool_calls call_id with
-         | None -> ()
-         | Some observation ->
-           Hashtbl.remove native_tool_calls call_id;
-           emit_stream_event on_stream_event (Native_tool_finished observation))
-      finished_ids;
+    let* finished = native_tool_results ~expected_session_id fields in
+    let scope = Result.to_option (assistant_scope ~stage:"native result scope" fields) in
+    List.iter (fun (call_id, completion) ->
+      Option.iter (fun observation ->
+        emit_stream_event on_stream_event (Native_tool_finished {observation; completion}))
+        (finish_native_call native_tool_calls ~scope call_id)) finished;
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~native_tool_calls
-      ~native_tool_attempted ~on_turn_started ~on_stream_event ~partial_stream ~stream_started
+      ~native_tool_attempted ~on_turn_started ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
   | "system" ->
     (* [compact_boundary] is the client's own record that it summarised the
        conversation: what the session held as sent before it is now a
-       summary. Other system frames are informational. *)
+       summary. Exact task edge kinds have their own observation registry;
+       other system frames remain informational. *)
     let* subtype = optional_string "system message" "subtype" fields in
     (match subtype with
      | Some "compact_boundary" -> emit_stream_event on_stream_event Conversation_compacted
+     | Some value when Option.is_some (task_kind value) ->
+         Option.iter (fun observation ->
+           emit_stream_event on_stream_event (Native_task_observed observation))
+           (project_native_task native_tool_calls ~expected_session_id fields)
      | Some _ | None -> ());
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
-      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~partial_stream ~stream_started
+      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
   | "tool_progress" ->
-    (* Claude Code emits [tool_progress] while a built-in tool is still
-       running.  It is observation-only: tool ownership and completion still
-       arrive through assistant/user messages.  Consume it as stream activity
-       without treating an in-flight tool as a protocol failure. How many of
-       these a turn carries says nothing about its health; the declared idle
-       deadline only bounds silence between messages. *)
+    (* An observation cannot fail a healthy turn. Only the exact open root
+       call owns this heartbeat; the progress id is opaque, not a call id. *)
+    (match project_native_heartbeat native_tool_calls ~expected_session_id fields with
+     | Heartbeat_observed (identity, elapsed_seconds) ->
+       emit_stream_event on_stream_event (Native_tool_progress
+         {identity; progress=Runtime_native_tools.Heartbeat_reported {elapsed_seconds}})
+     | Heartbeat_ignored (Not_heartbeat | Malformed_heartbeat | Other_session
+         | Replayed_heartbeat | Conflicting_heartbeat | No_active_root_call) -> ());
+    (match project_agent_retry native_tool_calls ~expected_session_id fields with
+     | Retry_observed (identity, retry) ->
+         emit_stream_event on_stream_event (Native_tool_progress
+           {identity;progress=Runtime_native_tools.Retry_observed retry})
+     | Retry_ignored -> ());
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
-      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~partial_stream ~stream_started
+      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
   | other ->
     protocol_error
@@ -1885,9 +2585,9 @@ let terminate_spawned_process ~clock proc stdin_w =
           (Printexc.to_string exn))
 ;;
 
-let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
+let run_protocol io ~native_posture ~dynamic_tools ~subscription ~session_mode ~session_id
     ~prompt ~images ~on_session_ready ~on_turn_starting ~on_turn_started ~on_prompt_sent
-    ~on_stream_event ~turn_admitted =
+    ~on_stream_event ~on_input_observation ~turn_admitted =
   let tool_call_count = ref 0 in
   let assistant_usage = new_assistant_usage () in
   let mcp_session = Runtime_official_client_mcp.create_session () in
@@ -1911,9 +2611,25 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
     invoke_state_callback ~stage:"turn starting callback" (fun () ->
       on_turn_starting ~session_id)
   in
+  let input_observer =
+    { input_state = Input_attribution.create
+        ~receiver_generation:(Random_id.uuid_v7 ()) ~session_id
+        ~client_uuid:(Random_id.uuid_v7 ())
+    ; on_input_observation } in
+  emit_input_observation input_observer (Input_attribution.prepared input_observer.input_state);
+  let failed_write exn =
+    (* No rejection or claim that the child read zero bytes, even on cancel. *)
+    emit_input_observation input_observer (Input_attribution.write_unknown input_observer.input_state);
+    raise exn in
   let* () =
     try
-      io.send (user_message ~images prompt);
+      (try io.send (Input_attribution.user_message input_observer.input_state
+          ~content:(List.map image_block images @
+            [`Assoc ["type", `String "text"; "text", `String prompt]]))
+       with
+       | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> failed_write exn
+       | Eio.Cancel.Cancelled _ as exn -> failed_write exn
+       | exn -> failed_write exn);
       turn_admitted := true;
       Ok ()
     with
@@ -1929,6 +2645,7 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
            ; detail = Printexc.to_string exn
            })
   in
+  emit_input_observation input_observer (Input_attribution.written input_observer.input_state);
   let* () = invoke_state_callback ~stage:"prompt sent callback" (fun () ->
     on_prompt_sent (); Ok ()) in
   await_terminal
@@ -1946,11 +2663,14 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
     ~rate_limit:None
     ~assistant_model:None
     ~assistant_texts:[]
-    ~native_tool_calls:(Hashtbl.create 8)
+    ~native_tool_calls:{invocation=Input_attribution.ticket input_observer.input_state;
+      calls=Hashtbl.create 8;progress_uuids=Hashtbl.create 8;
+      retry_bindings=Hashtbl.create 8;task_runs=Hashtbl.create 8;native_posture}
     ~native_tool_attempted:(ref false)
     ~on_turn_started
     ~on_stream_event
-    ~partial_stream:{message_id=None; text_blocks=[]; thinking_blocks=[]}
+    ~input_observer
+    ~partial_stream:{message_id=None; blocks=[]; completed_envelopes=Hashtbl.create 8}
     ~stream_started:(ref false)
     ~response_emitted:(ref false)
 ;;
@@ -1977,7 +2697,8 @@ let with_system_prompt_file prompt use = match prompt with
 
 let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
     ~reasoning_effort ~session_mode ~session_id ~subscription ~prompt ~images
-    ~on_session_ready ~on_turn_starting ~on_turn_started ~on_prompt_sent ~on_stream_event =
+    ~on_session_ready ~on_turn_starting ~on_turn_started ~on_prompt_sent ~on_stream_event
+    ~on_input_observation =
   let turn_admitted = ref false in
   try
     with_system_prompt_file config.system_prompt (fun system_prompt_file ->
@@ -2057,6 +2778,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
         in
         run_protocol
           { send; receive }
+          ~native_posture:config.native
           ~dynamic_tools
           ~subscription
           ~session_mode
@@ -2071,6 +2793,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
             with_admission_timeout (fun () -> on_turn_started ~session_id ~turn_id))
           ~on_prompt_sent
           ~on_stream_event
+          ~on_input_observation
           ~turn_admitted)))
   with
   | Idle_timeout seconds -> Error (Timeout seconds)
@@ -2201,7 +2924,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
     ?admitted_subscription ?on_spawned ?(on_prompt_sent = fun () -> ()) ~mgr ~clock ~cwd
     ?(on_session_ready = fun ~session_id:_ -> Ok ())
     ?(on_turn_starting = fun ~session_id:_ -> Ok ())
-    ?(on_turn_started = fun ~session_id:_ ~turn_id:_ -> Ok ()) ?on_stream_event config
+    ?(on_turn_started = fun ~session_id:_ ~turn_id:_ -> Ok ()) ?on_stream_event ?on_input_observation config
     ~prompt ~images =
   let result =
     let* () = validate_turn ~dynamic_tools ~session_mode config ~prompt ~images in
@@ -2244,6 +2967,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
         ~on_turn_started
         ~on_prompt_sent
         ~on_stream_event
+        ~on_input_observation
     with
     | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
     | Eio.Cancel.Cancelled _ as exn -> raise exn

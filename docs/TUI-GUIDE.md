@@ -63,10 +63,23 @@ The MASC server must be running to fetch these records.
 
 ## MSX
 
-`&` (also `:` then `go MSX`) takes the terminal over with the workspace MSX
+Open Collab with `&` or `:` then `go Collab`. `m` watches MSX and `d` watches
+DOS directly, including an empty machine's status. `Esc` returns to Collab.
+Observation reads the shared screen without advancing the machine or sending
+keys. MSX's `F5` explicitly switches between observation and control; only
+control sends game keys, advances frames, or offers checkpoint/disk actions.
+Control and game changes require a verified server matching the TUI's local
+workspace. Losing that authority closes the machine view and clears control;
+returning to the same workspace requires a new explicit control action.
+Reopening the MSX view starts its own read even if a previous view is still
+waiting for a response.
+
+`g` in Collab (also `:` then `go MSX`) takes the terminal over with the workspace MSX
 machine (RFC-0439): a load menu first, listing the cartridge images in
 `<base-path>/.masc/msx/carts/`, then the screen of the game a Keeper or you
-loaded. `Esc` returns. The directory starts empty;
+loaded. Entering this picker resets to observation, so `Esc` back to a loaded
+screen does not resume earlier control. The `F8` disk picker keeps the current
+control mode. The directory starts empty;
 `scripts/msx-fetch-homebrew-carts.sh` fills it with open-source games, and
 the [MSX cartridges runbook](operations/msx-carts-runbook.md) says what the
 machine accepts and where the images come from.
@@ -79,13 +92,40 @@ resize it; game input and turn changes go through the server's controller.
 
 ## Shared DOS play invites
 
-Select a Keeper chat to use the TUI composer. `/play invites` lists invites, `/play invite <name>
+In Collab, `n` asks for a player name and expiry hours, then issues a link.
+`j`/`k` select an invite, Enter opens its locally retained QR/link, `x` asks
+to revoke the selected invite, and `r` refreshes the inventory. This needs
+no selected Keeper. `:` then `go Play links` opens the same screen.
+`q` or `Esc` closes Collab. Closing and reopening it keeps this workspace's
+issued links; pending mutations still refresh the reopened inventory when
+their replies arrive. Losing workspace authority closes Collab and hides its
+retained links. They return when the same workspace is confirmed again; a
+confirmed different workspace clears them before its invite names can be used.
+Issue and revoke requests run one at a time across Collab and chat, including
+while their originating view is closed, so delayed replies cannot replace a
+newer credential's card.
+Invite forms and writes require the server to match the TUI's local workspace.
+Observation and inventory reads remain available when it does not match.
+If a request loses its response or workspace authority, its outcome remains
+unknown for its original workspace. Returning to that workspace does not
+permit another issue or revoke, and refreshing inventory does not unlock it.
+The TUI durably records the origin and request before dispatch in the local
+workspace's `.masc/tui-play-pending.jsonl`; restarting retains unresolved
+changes as unknown. No invitation token is stored in this journal. An unreadable
+recovery journal refuses further changes instead of assuming none are pending.
+
+The Keeper chat composer also accepts `/play invites` to list invites, `/play invite <name>
 <hours>` issues one, `/play link` reopens the latest link issued in this TUI
 session, `/play link <name>` reopens an earlier link issued in this TUI
 session, and `/play revoke <name>` removes it. Issuance requires
 an admin operator credential, token-required authentication and
 `MASC_HTTP_BASE_URL`. A refusal shows the server's own sentence and what it
 says is missing, for example when auth is off or `require_token` is false.
+The server's default address is local. A link beginning with `localhost`,
+`127.*`, `::1`, or an IPv4-mapped loopback address works only on that computer; the card explains this before
+sharing. For another device, configure the server launch's `MASC_HTTP_BASE_URL`
+to an address it can reach through the listener or an authenticated reverse
+proxy. Changing the TUI connection address does not change issued links.
 
 The server shows the link once, so it goes on a card with a QR code and
 nowhere else: not the chat, not the footer, not the session log. `y` copies
@@ -104,11 +144,16 @@ taller than the window scrolls with `j`/`k`, the arrow keys or the mouse wheel,
 and `g`/`G` jump to its top and its end, so a long link can be read to its last
 byte.
 
-If the issue request has no trustworthy answer, inspect the invite list and
-revoke that name before retrying because the original link cannot be recovered.
-If revocation reports a controller release failure or an unknown outcome,
-repeat `/play revoke <name>`: a second request can release a controller even
-after the invite credential was deleted.
+For an unknown outcome, first establish that the original server request
+cannot still finish later: inspect its completion in server logs, or stop that
+server process before restarting and inspecting the final invite state. An
+inventory read alone can race a delayed write and is not completion evidence.
+Then open Collab, press `u`, and explicitly confirm that check to permit further
+changes. Restarting the TUI does not bypass this check. If an issue's one-time
+link was lost, revoke its confirmed final invite before issuing another.
+A definitive revoke reply reporting controller-release failure may be retried
+with `/play revoke <name>`; a second request can release a controller after the
+invite credential was deleted.
 
 The invited person opens the link in a browser to watch and play the shared
 DOS machine. The link can also go to an AI agent (Claude Code, Codex, Hermes,
@@ -293,6 +338,19 @@ keeper's declared instructions with its effective system prompt, and its
 GitHub CLI identity observation. On the GitHub tab, `L` starts the gh
 device-flow login and streams its (redacted) output into the pane; when
 the stream ends the pane re-reads the identity observation.
+
+A browser consent started on the Identity tab keeps checking its Keeper even
+on another surface. The consent URL and the background wait end separately.
+The URL leaves the pane when the provider attaches or when the server's
+`expires_at` deadline passes. The wait ends when the server reports how the
+attempt ended (completed, failed, expired, superseded by a newer login, or no
+longer known to this server), when the provider leaves the inventory, or when
+the Keeper disappears from a successfully read roster. A callback the server
+admitted just before `expires_at` can still be publishing credentials after
+the URL is gone, so wait for its result instead of starting a second login.
+A failed roster read or unreadable provider declaration does not imply deletion.
+Workspace recovery keeps the waits that belong to the recovered workspace, but
+does not bring back their consent URLs.
 
 Reading a board post on a wide terminal keeps the post list beside it.
 `Ctrl-W` toggles focus; `h` selects the list and `l` selects the post. `j`/`k`
@@ -587,17 +645,16 @@ footer for twelve seconds and stays in the event log.
 Every keeper under `.masc/keepers/`, sorted by name.
 
 ```
- MASC Keepers (10)  10:55:25
-    HEALTH       KEEPER             A P S   TURN LIFECYCLE / RUNTIME             TASK
- >  ● healthy    adm-race-cf-001    A P D  4m12s running anthropic.claude-opus-5 task-471
-    ● idle       analyst            A - M  2h08m paused kimi.kimi-k2.5           task-464
-   OPERATIONS  lifecycle running · turn executing · idle 7m · last done · deepseek-v4 · running_fiber_alive
-  j/k move  p pause  w wake  s shutdown  x delete  g yolo  c chat  right/enter detail
+ MASC Keepers (10)
+    KEEPER             HEALTH       Mode S   TURN LIFECYCLE / RUNTIME             TASK
 ```
 
-`A` is autoboot, `P` is autonomous turns, and `S` is the sandbox profile as a
-letter — `D` docker, `M` microvm, `L` local — because a sandbox is a name, not
-an on/off. `TURN` is the time since the keeper's last turn (the lifetime turn
+`Mode` is how the keeper is started — `M` manual, `D` on demand, `A`
+autonomous — and `S` is the sandbox profile as a letter — `D` docker, `M`
+microvm, `L` local — because a sandbox is a name, not an on/off. `Mode S` and
+`LIFECYCLE / RUNTIME` are shown only when the pane has room for them. A keeper
+whose tool gate is YOLO draws its name in red; the stance has no column of its
+own. `TURN` is the time since the keeper's last turn (the lifetime turn
 count moved to the detail pane; a keeper that never turned shows a dash). The
 metadata list needs no server, so names, last-turn times, and tasks stay
 readable while the runtime is down. `HEALTH`, `LIFECYCLE / RUNTIME`, and lifecycle
@@ -625,12 +682,13 @@ malformed or mismatched identities before applying any directive. Clients may
 omit the precondition entirely; the TUI always sends both components. On 409,
 refresh identity before issuing a new command; retained input stays local.
 
-The fixed `OPERATIONS` line follows the selected Keeper. It comes from
-`GET /api/v1/keepers/composite` and keeps the current lifecycle, turn step,
-idle age, last runtime/model outcome, and producer diagnosis together on the
-surface that owns Keeper operations. A failed refresh preserves the previous
-typed reading and marks it unavailable rather than replacing it with guessed
-zeros.
+Execution facts are not on the list. Open the selected Keeper's detail
+(`right`/`enter`); its Info tab shows `Lifecycle`, `Turn`, `Idle` and
+`Last outcome`, read from
+`GET /api/v1/keepers/composite`. When a refresh fails after an earlier
+reading, Info keeps that reading and puts `stale · refresh failed: <reason>`
+above it; when there was no earlier reading it says `unavailable` with the
+reason instead of guessing zeros.
 
 `g` toggles the selected Keeper's tool gate. The footer names the action that
 will happen next: `g yolo` from the approval policy and `g auto` while YOLO is
@@ -957,36 +1015,31 @@ switched away or left and returned is discarded instead of replacing the
 newer transcript. The shortcut is withdrawn while a turn is in flight or the
 roster cannot be read.
 
-The speaker is a reverse-video badge for conversation sources: operator
-sources are cyan, Keepers blue, status yellow, and errors red. Tool and
-reasoning stretches are subordinate activity, so they use a quiet gray section
-label instead of competing with the people speaking. Ordinary operator and
-Keeper prose uses the terminal's default foreground so Markdown, code, links,
-and emphasis keep their own hierarchy. Connector and agent origins remain in
-the badge label (`vincent · slack`, `taskmaster · agent`) instead of being
-inferred from row position.
+Chat opens in a conversation layout: a small `›` marks your message, `●`
+marks the Keeper, and `◀` marks another sender. Other senders keep their name
+and origin above their message. Prose starts at one column, wraps within a
+100-cell reading width, and has a blank line between messages. Tool calls keep
+their own name and result mark without a second TOOLS label. Operator and Keeper
+prose uses the terminal foreground; tools and reasoning remain subdued.
 
-A line someone else wrote -- another keeper, another person, a connector --
-steps in two cells and reads behind a solid bar in the sender's colour, where
-the journal's rows carry a dotted one. The operator's lines, the keeper's
-replies and its work rows stay at the conversation's edge.
+`Ctrl-F` cycles conversation → inline metadata → full origin headings →
+conversation. Inline metadata includes the minute clock, aligned speaker labels
+and turn rails; full headings give origins a row of their own. Technical request identity is available in expanded diagnostics after the body;
+metadata modes never insert turn numbers or receipt claims into speech.
+The header labels only expanded modes (`metadata:inline`, `metadata:full`).
+Font size, letter spacing and line height come from your terminal settings.
 
-Chat opens without timestamps, hourly separators or generated
-progress timers (request age, call age and model silence).
-`Ctrl-F` adds a short clock (`metadata:inline`), then full timestamp headings
-(`metadata:full`), then returns to the default. The short clock appears only
-where the minute moved. An open request between continuation segments has no
-progress banner or growing wait timer; progress returns when its next run starts.
-Approval prompts and diagnostics remain available. In compact and
-results modes, one quiet status below the history summarizes current work,
-your waiting messages, and their observed delivery or priority receipts.
-Waiting for confirmation and confirmed acceptance remain distinct. If a priority
-reply is unavailable, the status says confirmation is unavailable and retains
-the diagnostic detail; it does not claim the priority change was refused. Full mode
-(`Ctrl-D` twice from compact, or `/tools full`) shows execution IDs, elapsed
-time and priority receipt details. Each pending input already shows its own
-delivery state in the default view. Failures, approval
-requests, and explicit stop targets remain visible in the concise modes.
+The input area shows progress for the current conversation. Other Keepers' running
+requests remain in Keepers and Activity, without extra interrupt commands beside
+the composer. The default progress row shows the current activity without generated
+progress timers (request age, call age and model silence); those timers,
+runtime identity and cumulative tool details are available in the metadata views.
+An open request between continuation segments has no progress row or growing
+wait timer; progress returns when its next run starts.
+Pending inputs retain their delivery state. Failures, unconfirmed delivery,
+interrupt outcomes and approval requests stay visible. `Ctrl-S:details` opens
+folded approval records. `Ctrl-D` expands tool details independently of metadata.
+
 Auto-next requests priority for your message; current work continues until it
 finishes or yields. Use the explicit interrupt controls to stop current work.
 When
@@ -1013,9 +1066,47 @@ input names its request there too.
 Working means the turn is in progress. The progress row says `THINKING` or
 `STREAMING` only after receiving the corresponding signal.
 
+`/find <text>` searches the conversation that is drawn, including replies and
+activity retained in live or settled journals. `/find` repeats toward older
+matches using record identity, so incoming messages and history backfill do
+not restart the search. Hidden reasoning is excluded. Editable pending inputs
+and replaceable polled excerpts contribute to scroll positioning but are not
+conversation search candidates.
+
+Search lands on the physical body row containing the match, including inside
+a long or wrapped answer. It searches rendered words, so `foo bar` also finds
+`foo **bar**`. A line break in the source is an optional boundary: words on
+either side of it match with or without a space in the query. Width wrapping
+is not: it changes where rows break, not the searched text, so a space the
+author wrote still has to be in the query (`foobar` does not find `foo bar`
+however the terminal wraps it). A wrapped phrase lands with its last row
+visible.
+
+While reading back, the pane pins projected history or journal origins and
+their physical body-row positions. Incoming input, broadcasts, streamed text,
+and settled journals therefore do not pull the view toward the tail. This also
+works when no raw history rows have been loaded. The canonical reply's typed
+alias keeps the same anchor when history and journal representations replace
+one another. Search installs its pin before the next frame. If output arrives
+before that frame, the reading-back notice and command menu already reflect the
+restored position, so their row heights do not move the match on the next paint.
+Returning to the bottom releases the pin and resumes following output.
+
+A pin on a source row keeps that row's exact source byte, so a terminal resize
+or an origin-gutter change that reflows the anchored entry brings back the same
+words, on whichever physical row they now occupy. A generated row, or a
+transient row whose source has no stable byte map, has no source byte and
+saves no pin point. If every saved point is gone, the view returns to the
+bottom instead of holding a numeric row distance.
+
 The pane opens on the keeper's durable transcript. A turn the keeper ran on
 its own is drawn as what it did. Reasoning starts folded with a `THINKING`
 label; tool calls start as a compact activity row labelled `TOOLS`.
+Folded reasoning summarizes a thought only when the summary uses fewer displayed
+rows than its source Markdown at the available message-body width, with the same
+trailing-blank trimming used by the transcript. Short notes stay visible, and
+link-preview cards do not make a fitting thought fold.
+Resizing or changing the origin display recalculates that fold.
 `Ctrl-R` cycles reasoning through folded, full, and hidden; `Ctrl-D` cycles
 tool details through compact, results, and full, so
 full arguments and unfolded Gate history are two presses from compact. Results
@@ -1051,12 +1142,11 @@ how long the turn has run and which tool it last touched; the `Latest
 output:` tail it used to carry is left out while the pane draws that text.
 A turn whose stream the TUI opened and lost is followed the same way.
 
-Memory journal rows open in summary mode, using producer-owned compact text
-instead of reconstructing a summary from rendered prose. The footer's
-`Ctrl-N:journal` or `/memory`
-cycles those rows through summary, full, and hidden; the header names the two
-non-default states as `journal:full` and `journal:off`. Neutral system rows that
-share the journal lane have no summary projection and therefore remain whole.
+Memory journal rows start hidden. `Ctrl-N` or `/memory` cycles hidden → summary
+→ full → hidden. The header names the expanded modes as `journal:summary` and
+`journal:full`; the default needs no badge. Summary uses producer-owned compact
+text. Neutral system rows with no summary projection remain whole when the
+journal is shown. The help sheet lists the journal and metadata shortcuts.
 
 A failed Librarian pass is not a row in summary mode. While the passes after
 the last commit keep failing, the header's second row names the run once, in

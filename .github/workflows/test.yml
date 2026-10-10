@@ -108,7 +108,14 @@ jobs:
           # running the suite needs: dune-project gates alcotest,
           # qcheck-core, qcheck-alcotest and bisect_ppx behind :with-test.
           install-flags: --with-test
-          os-packages: ${{ inputs.minimal && 'jq ripgrep' || 'jq ripgrep poppler-utils ffmpeg libreoffice-impress python3-venv' }}
+          os-packages: jq ripgrep
+
+      # Real PDF, presentation and video inspection run on the host. Keep
+      # their dependencies separate from opam and omit optional apt recommends.
+      # The preceding dependency action has already refreshed the apt index.
+      - name: Install native media verification tools
+        if: inputs.minimal == false
+        run: sudo apt-get install -y --no-install-recommends poppler-utils ffmpeg libreoffice-impress python3-venv
 
       - name: Prepare managed presentation verification inputs
         if: inputs.minimal == false
@@ -124,6 +131,36 @@ jobs:
       - name: Make pnpm available to the suites that read a dashboard PATH
         if: inputs.minimal == false
         run: corepack enable && corepack prepare pnpm@10.31.0 --activate
+
+      - name: Prepare static shim compiler outside the test workers
+        if: inputs.minimal == false && inputs.suite == ''
+        uses: ./.github/actions/prepare-shim-builder
+        with:
+          arch: amd64
+
+      # Full suites already selected a Buildx builder while preparing the shim.
+      # Targeted non-minimal suites also need one for the sandbox image cache.
+      - name: Set up image cache for targeted suites
+        if: inputs.minimal == false && inputs.suite != ''
+        uses: docker/setup-buildx-action@v4
+
+      # The release lane exercises the embedded recipe through the shipped CLI.
+      # Behavior only needs the same checked-in image; preparing it must not
+      # force a separate server build before Dune schedules the full suite.
+      - name: Prepare Keeper sandbox image
+        if: inputs.minimal == false
+        uses: docker/build-push-action@v7
+        env:
+          DOCKER_BUILD_SUMMARY: 'false'
+          DOCKER_BUILD_RECORD_UPLOAD: 'false'
+        with:
+          context: ./sandbox-images/base
+          file: ./sandbox-images/base/Dockerfile
+          tags: masc-sandbox-test:ci
+          load: true
+          pull: true
+          cache-from: type=gha,scope=masc-keeper-sandbox-${{ runner.arch }}
+          cache-to: type=gha,scope=masc-keeper-sandbox-${{ runner.arch }},mode=min,ignore-error=true
 
       - name: Test
         id: tests
@@ -183,18 +220,7 @@ jobs:
         # to find config/ and prompts/ from inside _build.
         run: |
           set -euo pipefail
-          # Four suites read a file through a Keeper's sandbox, and on this
-          # runner the read answers "image_not_found: keeper sandbox image
-          # masc-sandbox-test:ci is not available" -- 14 assertions counted
-          # as red for an image nothing here builds. The binary embeds
-          # sandbox-images/base/Dockerfile so that `masc sandbox-image` works
-          # on a host with no checkout, and --print writes that embedded copy.
-          # The general image includes repository and creative-document
-          # tools; its build is shared by full and targeted lanes.
           if [ "${MINIMAL_CHECK}" != true ]; then
-            opam exec -- dune build --root . bin/main_eio.exe
-            ./_build/default/bin/main_eio.exe sandbox-image --print \
-              | docker build -t masc-sandbox-test:ci -
             # Building the image is half of what a sandboxed suite needs. A
             # fixture whose keeper runs a command starts a persistent
             # container through the turn sandbox factory, and

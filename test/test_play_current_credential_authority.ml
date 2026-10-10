@@ -259,7 +259,88 @@ let test_waiting_invite_listing_is_cancellable ~invalid_expiry () =
   | true, Error (Invite.Invalid_expiry (D.Credential_expiry.Invalid_timestamp "invalid-expiry")) -> ()
   | _ -> fail "the next listing must retain the authoritative invite or expiry refusal"
 
+(* The invite list names the workspace the terminal confirmed. A server swapped
+   onto the same port answers 409 before any credential is listed. *)
+let test_invite_listing_is_bound_to_the_expected_workspace () =
+  with_workspace @@ fun base_path state operator ->
+  let config = Masc.Workspace.default_config base_path in
+  let masc_root = Masc.Workspace.masc_root_dir config in
+  let other = Filename.temp_dir "play-invites-other-" "" in
+  let path = Server_routes_http_routes_play.invites_path in
+  let bound base root = Printf.sprintf "%s?expected_base_path=%s&expected_masc_root=%s" path base root in
+  let get target = dispatch ~state ~token:operator ~meth:"GET" ~target ~body:"" in
+  let code response = match member "code" (json response) with
+    | Some (`String code) -> Some code | _ -> None in
+  check int "an unbound listing is served" 200 (status (get path));
+  check int "this workspace is served" 200
+    (status (get (bound (Unix.realpath base_path) (Unix.realpath masc_root))));
+  let conflict = get (bound (Unix.realpath other) (Unix.realpath other)) in
+  check int "another workspace is a conflict" 409 (status conflict);
+  check (option string) "the conflict names the precondition" (Some "workspace_precondition_failed")
+    (code conflict);
+  let partial = get (path ^ "?expected_base_path=" ^ Unix.realpath base_path) in
+  check int "one field alone is a bad request" 400 (status partial);
+  Fs_compat.remove_tree other
+
+type controller_holder = Live_holder | Expired_holder | Removed_holder | Stopped_keeper
+
+let test_seat_reports_controller_recovery holder =
+  with_workspace @@ fun base_path state operator ->
+  let _, guest, _ = seed_guest base_path D.Player in
+  ignore (dos_ok (Dos_lane.pass ~who:"operator" ~to_:(Some "guest") ~announce:ignore));
+  (match holder with
+   | Live_holder -> ()
+   | Expired_holder ->
+     Auth.save_credential base_path { guest with expires_at = Some "2000-01-01T00:00:00Z" }
+   | Removed_holder -> Auth.delete_credential base_path "guest"
+   | Stopped_keeper ->
+     let meta = match Masc_test_deps.meta_of_json_fixture
+       (`Assoc [ "name", `String "guest"; "activation_mode", `String "manual" ]) with
+       | Ok meta -> meta | Error error -> fail error in
+     (match Masc.Keeper_meta_store.replace_snapshot (Masc.Mcp_server.workspace_config state) meta with
+      | Ok () -> () | Error error -> fail error));
+  let recoverable = match holder with
+    | Live_holder -> false
+    | Expired_holder | Removed_holder | Stopped_keeper -> true in
+  let answer = dispatch ~state ~token:operator ~meth:"GET"
+    ~target:Server_routes_http_routes_play_page.seat_path ~body:"" in
+  check int "the current seat can be observed" 200 (status answer);
+  check bool "departure is reported from authoritative holder state" true
+    (member "controller_recoverable" (json answer) = Some (`Bool recoverable));
+  check (option string) "observing departure never releases the controller" (Some "guest") (controller ());
+  let moved = dispatch ~state ~token:operator ~meth:"POST" ~target:"/api/v1/dos/step"
+    ~body:{|{"steps":1,"until_ready":false}|} in
+  check int "only an actual move can recover a departed controller" (if recoverable then 200 else 400) (status moved);
+  check (option string) "the authoritative move retains or recovers the expected holder"
+    (Some (if recoverable then "operator" else "guest")) (controller ())
+
+let test_recovery_eligibility_is_rechecked_before_move () =
+  with_workspace @@ fun base_path state operator ->
+  let _, guest, _ = seed_guest base_path D.Player in
+  ignore (dos_ok (Dos_lane.pass ~who:"operator" ~to_:(Some "guest") ~announce:ignore));
+  Auth.save_credential base_path { guest with expires_at = Some "2000-01-01T00:00:00Z" };
+  let answer = dispatch ~state ~token:operator ~meth:"GET"
+    ~target:Server_routes_http_routes_play_page.seat_path ~body:"" in
+  check int "the departed holder can be observed" 200 (status answer);
+  check bool "the observed controller can be recovered" true
+    (member "controller_recoverable" (json answer) = Some (`Bool true));
+  Auth.save_credential base_path guest;
+  let moved = dispatch ~state ~token:operator ~meth:"POST" ~target:"/api/v1/dos/step"
+    ~body:{|{"steps":1,"until_ready":false}|} in
+  check int "a renewed holder rejects the move despite an older recoverable seat" 400 (status moved);
+  check (option string) "the renewed holder keeps the controller" (Some "guest") (controller ())
+
 let () = run "Play current named authority" [ "routes", [
+  test_case "a newer credential invalidates observed recovery eligibility" `Quick
+    test_recovery_eligibility_is_rechecked_before_move;
+  test_case "seat keeps a live holder observation-only" `Quick
+    (fun () -> test_seat_reports_controller_recovery Live_holder);
+  test_case "seat exposes expired-holder recovery without mutating it" `Quick
+    (fun () -> test_seat_reports_controller_recovery Expired_holder);
+  test_case "seat exposes revoked-holder recovery without mutating it" `Quick
+    (fun () -> test_seat_reports_controller_recovery Removed_holder);
+  test_case "seat exposes stopped-Keeper recovery without mutating it" `Quick
+    (fun () -> test_seat_reports_controller_recovery Stopped_keeper);
   test_case "listing completes after credential publication in Eio" `Quick test_invite_listing_completes_after_credential_publication;
   test_case "current-owner listing admission is cancellable" `Quick
     (test_waiting_invite_listing_is_cancellable ~invalid_expiry:false);
@@ -274,4 +355,5 @@ let () = run "Play current named authority" [ "routes", [
   test_case "dangling current binding refuses listing and pass" `Quick (fun () -> test_unknown_current_binding Dangling);
   test_case "foreign current binding refuses listing and pass" `Quick (fun () -> test_unknown_current_binding Foreign);
   test_case "unresolved ownerless data does not disable healthy seats" `Quick test_unresolved_data_does_not_hide_healthy_current_owners;
+  test_case "invite listing is bound to the expected workspace" `Quick test_invite_listing_is_bound_to_the_expected_workspace;
 ] ]

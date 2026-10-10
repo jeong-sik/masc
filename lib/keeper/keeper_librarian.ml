@@ -432,6 +432,7 @@ type parse_error =
   | Top_level_not_object
   | Working_context_invalid of string
   | Working_state_invalid of string
+  | Admission_invalid of string
   | Unexpected_field of string
   | Duplicate_field of string
   | Missing_required_fields
@@ -450,6 +451,7 @@ let parse_error_to_string = function
   | Top_level_not_object -> "top_level_not_object"
   | Working_context_invalid detail -> "working_context_invalid: " ^ detail
   | Working_state_invalid detail -> "working_state_invalid: " ^ detail
+  | Admission_invalid detail -> "admission_invalid: " ^ detail
   | Unexpected_field field -> "unexpected_field: " ^ field
   | Duplicate_field field -> "duplicate_field: " ^ field
   | Missing_required_fields -> "missing_required_fields"

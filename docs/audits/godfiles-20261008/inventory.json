@@ -12,37 +12,78 @@
       "path": "bin/masc_tui.ml",
       "baseline_lines": 27845,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: mouse grammar and retained media projection separated; image acquisition moved to its effect owner; remaining responsibilities pending semantic review",
+      "current_lines": 28921,
+      "validation_artifact": "mouse-protocol/README.md",
+      "prs": [
+        41915,
+        41955,
+        42148
+      ],
+      "validation_artifacts": [
+        "mouse-protocol/README.md",
+        "tui-output-media/README.md",
+        "skill-read-contract/README.md"
+      ]
     },
     {
       "path": "bin/masc_tui_http.ml",
       "baseline_lines": 3516,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; credential, request, response and editor semantics pending",
+      "current_lines": 3429,
+      "prs": [
+        42141,
+        42148
+      ],
+      "validation_artifact": "tui-editor-wire/README.md",
+      "validation_artifacts": [
+        "tui-editor-wire/README.md",
+        "skill-read-contract/README.md"
+      ]
     },
     {
       "path": "bin/masc_tui_keeper_chat_transcript.ml",
       "baseline_lines": 2608,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; stream state, classification and rendering semantic review pending",
+      "current_lines": 1882,
+      "prs": [
+        42139
+      ],
+      "validation_artifact": "chat-activity-projection/README.md"
     },
     {
       "path": "bin/masc_tui_loader.ml",
       "baseline_lines": 2047,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: pure schedule snapshot and wake decoding extracted; remaining local-store/cache, board projection and HTTP loading responsibilities pending semantic review",
+      "current_lines": 1668,
+      "prs": [
+        41962
+      ],
+      "validation_artifact": "tui-schedule-decode/README.md"
     },
     {
       "path": "bin/masc_tui_mermaid.ml",
       "baseline_lines": 2134,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; parser, layout correctness and performance semantic review pending",
+      "current_lines": 1118,
+      "prs": [
+        42137
+      ]
     },
     {
       "path": "bin/masc_tui_message_layout.ml",
       "baseline_lines": 2418,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; segmentation, frame cache and layout semantic review pending",
+      "current_lines": 2109,
+      "prs": [
+        42138
+      ],
+      "validation_artifact": "tui-grapheme-segmentation/README.md"
     },
     {
       "path": "bin/masc_tui_render.ml",
@@ -60,7 +101,12 @@
       "path": "bin/masc_tui_render_prim.ml",
       "baseline_lines": 5153,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: terminal mouse grammar owner and direct consumers updated; remaining responsibilities pending semantic review",
+      "current_lines": 5153,
+      "validation_artifact": "mouse-protocol/README.md",
+      "prs": [
+        41915
+      ]
     },
     {
       "path": "bin/masc_tui_render_schedule.ml",
@@ -102,7 +148,7 @@
       "path": "dashboard/src/components/chat/primitives.ts",
       "baseline_lines": 5481,
       "kind": "production",
-      "status": "failure card extracted; persisted media loss repaired and locally verified; other responsibilities pending"
+      "status": "shared chat row contract updated; remaining responsibilities pending semantic review"
     },
     {
       "path": "dashboard/src/components/connector-status.ts",
@@ -190,7 +236,13 @@
       "path": "lib/fs_compat/atomic_write.ml",
       "baseline_lines": 3327,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: orphan effects, ordinary replacement owner and shared grammar separated; duplicate report copies removed; capability publication/recovery and test injection remain pending",
+      "current_lines": 2396,
+      "prs": [
+        41969,
+        41972,
+        41974
+      ]
     },
     {
       "path": "lib/fs_compat/capability_recovery_obligation.ml",
@@ -202,49 +254,82 @@
       "path": "lib/fs_compat/fs_compat.ml",
       "baseline_lines": 4265,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: public orphan and ordinary replacement APIs bind directly to separate effect owners; other bridges/filesystem operations remain pending",
+      "current_lines": 4265,
+      "prs": [
+        41969,
+        41974
+      ]
     },
     {
       "path": "lib/keeper/hitl_summary_worker.ml",
       "baseline_lines": 2066,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: judgment request projection and domain parser moved to a direct owner; host/config acquisition separated from pure projection; remaining exact-output execution, durability, CLI and lifecycle responsibilities pending semantic review",
+      "current_lines": 1883,
+      "validation_artifact": "hitl-request-context/README.md",
+      "prs": [
+        41992
+      ]
     },
     {
       "path": "lib/keeper/keeper_agent_run.ml",
       "baseline_lines": 2649,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: pure response normalization moved to a direct owner; ignored history argument and testing forwarders removed; remaining orchestration responsibilities pending semantic review",
+      "current_lines": 2612,
+      "validation_artifact": "turn-response-contract/README.md",
+      "prs": [
+        41987
+      ]
     },
     {
       "path": "lib/keeper/keeper_approval_queue.ml",
       "baseline_lines": 3182,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: approval chat effects consolidated in existing projection owner; pure continuation readiness separated from durable acquisition; remaining queue/storage/orchestration responsibilities pending semantic review",
+      "current_lines": 3010,
+      "prs": [
+        42021
+      ],
+      "validation_artifact": "approval-chat-projection/README.md"
     },
     {
       "path": "lib/keeper/keeper_board_attention_candidate.ml",
       "baseline_lines": 2450,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; storage, state, compaction, wake and quarantine semantic review pending",
+      "current_lines": 1062,
+      "prs": [
+        42130
+      ]
     },
     {
       "path": "lib/keeper/keeper_board_attention_partition.ml",
       "baseline_lines": 2123,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: private canonical data and pure strict wire/ledger framing separated; public private/opaque API and entropy effect boundary preserved; indexed-view/cache/storage/transition responsibilities pending semantic review",
+      "current_lines": 1329,
+      "prs": [
+        42036
+      ],
+      "validation_artifact": "board-partition-wire/README.md"
     },
     {
       "path": "lib/keeper/keeper_board_attention_worker.ml",
       "baseline_lines": 2438,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; scheduler, state, quarantine, durability and control-loop semantic review pending",
+      "current_lines": 2165,
+      "prs": [
+        42133
+      ]
     },
     {
       "path": "lib/keeper/keeper_chat_store.ml",
       "baseline_lines": 3324,
       "kind": "production",
-      "status": "partial: types and pure projection separated; invalid-kind acknowledgement fixed",
+      "status": "shared chat row contract updated; remaining responsibilities pending semantic review",
       "prs": [
         41868,
         41871
@@ -255,25 +340,41 @@
       "path": "lib/keeper/keeper_gate.ml",
       "baseline_lines": 2386,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; authority lifecycle and worker recovery remain pending",
+      "current_lines": 2031,
+      "prs": [
+        42091
+      ]
     },
     {
       "path": "lib/keeper/keeper_memory_os_current.ml",
       "baseline_lines": 3300,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; snapshot codec, receipt/journal recovery and persistence effects remain pending",
+      "current_lines": 2868,
+      "prs": [
+        42098
+      ]
     },
     {
       "path": "lib/keeper/keeper_msg_async.ml",
       "baseline_lines": 3115,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; worker ownership, lane admission, persistence and recovery remain pending",
+      "current_lines": 2349,
+      "prs": [
+        42100
+      ]
     },
     {
       "path": "lib/keeper/keeper_official_client_host.ml",
       "baseline_lines": 2365,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; host, librarian, window, session and effect orchestration semantic review pending",
+      "current_lines": 2068,
+      "prs": [
+        42136
+      ]
     },
     {
       "path": "lib/keeper/keeper_owner.ml",
@@ -285,25 +386,45 @@
       "path": "lib/keeper/keeper_reaction_ledger.ml",
       "baseline_lines": 2171,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: private canonical current-row kinds, schema/identity and strict decoder separated; public interface and storage/outbox/cache effect boundaries preserved; storage/cache/operator projection responsibilities pending semantic review",
+      "current_lines": 1645,
+      "prs": [
+        42060,
+        42087
+      ],
+      "validation_artifact": "reaction-ledger-wire/README.md"
     },
     {
       "path": "lib/keeper/keeper_sandbox_microvm.ml",
       "baseline_lines": 2597,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; remaining semantic review pending",
+      "current_lines": 2497,
+      "prs": [
+        42118,
+        42120
+      ]
     },
     {
       "path": "lib/keeper/keeper_skill_activation_ledger.ml",
       "baseline_lines": 2609,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: canonical immutable evidence and pure total/scoped summaries separated; public private/abstract contracts and codec/replay/storage/revision effects preserved; remaining codec/replay/storage and repeated-scan performance audit pending",
+      "current_lines": 2253,
+      "prs": [
+        42089
+      ],
+      "validation_artifact": "skill-activation-summary/README.md"
     },
     {
       "path": "lib/keeper/keeper_tool_composition_surface.ml",
       "baseline_lines": 2266,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; remaining semantic review pending",
+      "current_lines": 1921,
+      "prs": [
+        42113
+      ]
     },
     {
       "path": "lib/keeper/keeper_tool_descriptor.ml",
@@ -315,29 +436,44 @@
       "path": "lib/keeper/keeper_tool_filesystem_runtime.ml",
       "baseline_lines": 3315,
       "kind": "production",
-      "status": "partial: pure line-window projection separated",
+      "status": "partial: pure line-window slicing and strict coordinate decoding separated; path/read effects sequenced after decode; other responsibilities pending",
       "prs": [
-        41879
+        41879,
+        41932
       ],
-      "current_lines": 3210
+      "current_lines": 3188,
+      "validation_artifact": "read-window-input/README.md"
     },
     {
       "path": "lib/keeper/keeper_tool_in_process_runtime.ml",
       "baseline_lines": 2636,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; remaining semantic review pending",
+      "current_lines": 2446,
+      "prs": [
+        42114
+      ]
     },
     {
       "path": "lib/keeper/keeper_tool_memory_runtime.ml",
       "baseline_lines": 2345,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; search, source reads, storage and event effects remain pending",
+      "current_lines": 1828,
+      "prs": [
+        42110
+      ]
     },
     {
       "path": "lib/keeper/keeper_turn_driver.ml",
       "baseline_lines": 3290,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: checkpoint adaptation and callback validation moved to their owner; unused copied provider result and testing forwarders removed; remaining lane/input/provider dispatch responsibilities pending semantic review",
+      "current_lines": 3234,
+      "prs": [
+        41963
+      ],
+      "validation_artifact": "attempt-checkpoint/README.md"
     },
     {
       "path": "lib/keeper/keeper_turn_driver_try_provider.ml",
@@ -349,13 +485,21 @@
       "path": "lib/keeper/keeper_turn_sandbox_runtime.ml",
       "baseline_lines": 3012,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; remaining semantic review pending",
+      "current_lines": 3015,
+      "prs": [
+        42118
+      ]
     },
     {
       "path": "lib/keeper/keeper_unified_prompt.ml",
       "baseline_lines": 2226,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; catalog/config acquisition, context assembly and metrics remain pending",
+      "current_lines": 1922,
+      "prs": [
+        42106
+      ]
     },
     {
       "path": "lib/keeper_chat_operations/keeper_chat_operation_store.ml",
@@ -367,43 +511,76 @@
       "path": "lib/keeper_runtime/keeper_event_queue_persistence.ml",
       "baseline_lines": 2107,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: pure fleet observation projection separated from durable discovery, acquisition and diagnostics; storage/WAL/cache/quarantine/transition responsibilities pending semantic review",
+      "current_lines": 1791,
+      "prs": [
+        42024
+      ],
+      "validation_artifact": "event-queue-fleet-projection/README.md"
     },
     {
       "path": "lib/keeper_runtime/keeper_event_queue_state.ml",
       "baseline_lines": 2280,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; state transition and strict codec semantic audit remain pending",
+      "current_lines": 155,
+      "prs": [
+        42095
+      ]
     },
     {
       "path": "lib/lane_addon/lane_addon_runtime.ml",
       "baseline_lines": 2100,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: ignored declaration caller labels and access-forwarding helper removed with typed host authority preserved; worker/configuration/retained-record/cleanup/fleet responsibilities pending semantic review",
+      "current_lines": 2097,
+      "prs": [
+        42027
+      ],
+      "validation_artifact": "lane-declaration-access/README.md"
     },
     {
       "path": "lib/process/process_eio.ml",
       "baseline_lines": 2032,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: fallback cwd repaired; Eio foreground capture/cleanup owner extracted, duplicate two-stream and pipeline drains removed; runtime acquisition, Unix capture, timeout/refusal and pipeline orchestration assessment remain pending",
+      "current_lines": 1610,
+      "validation_artifact": "eio-capture-owner/README.md",
+      "prs": [
+        42003,
+        42013
+      ]
     },
     {
       "path": "lib/runtime/runtime.ml",
       "baseline_lines": 4157,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; materialization, storage, cache and config semantics pending",
+      "current_lines": 4154,
+      "prs": [
+        42141
+      ],
+      "validation_artifact": "tui-editor-wire/README.md"
     },
     {
       "path": "lib/runtime/runtime_claude_code.ml",
       "baseline_lines": 2292,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; protocol, event, subprocess and configuration semantic review pending",
+      "current_lines": 2236,
+      "prs": [
+        42126
+      ]
     },
     {
       "path": "lib/runtime/runtime_codex_app_server.ml",
       "baseline_lines": 2778,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; protocol, subprocess and configuration semantic review pending",
+      "current_lines": 2730,
+      "prs": [
+        42121
+      ]
     },
     {
       "path": "lib/runtime/runtime_toml.ml",
@@ -425,19 +602,27 @@
       "path": "lib/server/server_dashboard_http_keeper_api.ml",
       "baseline_lines": 2231,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; cache, storage, chat enrichment and API semantic review pending",
+      "current_lines": 2189,
+      "prs": [
+        42124
+      ]
     },
     {
       "path": "lib/server/server_dashboard_http_runtime_info.ml",
       "baseline_lines": 2700,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; probes, cache and runtime resolution semantic review pending",
+      "current_lines": 2406,
+      "prs": [
+        42122
+      ]
     },
     {
       "path": "lib/server/server_routes_http_keeper_stream.ml",
       "baseline_lines": 4060,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "shared chat row contract updated; remaining responsibilities pending semantic review"
     },
     {
       "path": "lib/server/server_routes_http_routes_dashboard.ml",
@@ -455,13 +640,23 @@
       "path": "lib/tui_decode.ml",
       "baseline_lines": 7548,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: terminal mouse grammar owner and direct consumers updated; remaining responsibilities pending semantic review",
+      "current_lines": 7426,
+      "validation_artifact": "mouse-protocol/README.md",
+      "prs": [
+        41915
+      ]
     },
     {
       "path": "lib/tui_decode.mli",
       "baseline_lines": 2532,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: terminal mouse grammar owner and direct consumers updated; remaining responsibilities pending semantic review",
+      "current_lines": 2488,
+      "validation_artifact": "mouse-protocol/README.md",
+      "prs": [
+        41915
+      ]
     },
     {
       "path": "packages/agent_core/lib/execution_event_store.ml",
@@ -503,7 +698,12 @@
       "path": "packages/agent_core/lib/llm_provider/types.ml",
       "baseline_lines": 2027,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: pure tool-schema validation/projection/construction contract isolated with unchanged public signature; remaining message, provenance, hashing, telemetry and streaming responsibilities need full semantic assessment",
+      "current_lines": 1252,
+      "validation_artifact": "tool-schema-contract/README.md",
+      "prs": [
+        42016
+      ]
     },
     {
       "path": "packages/agent_core/test/test_backend_openai_codec.ml",
@@ -617,7 +817,11 @@
       "path": "test/test_fs_compat_publication_reconciliation.ml",
       "baseline_lines": 2057,
       "kind": "test",
-      "status": "pending semantic review"
+      "status": "partial: canonical report assertions replace copied kinds; 14 existing recovery evidence cases passed; incremental inventory/concurrency and full test responsibility review remain pending",
+      "current_lines": 2062,
+      "prs": [
+        41972
+      ]
     },
     {
       "path": "test/test_gate_keeper_backend.ml",
@@ -641,7 +845,12 @@
       "path": "test/test_hitl_summary_worker.ml",
       "baseline_lines": 3395,
       "kind": "test",
-      "status": "pending semantic review"
+      "status": "partial: request projection and domain parser tests call the canonical owner; existing context, HTTP and CLI consumer checks selected; remaining concurrency, recovery and lifecycle fixtures pending semantic review",
+      "current_lines": 3396,
+      "validation_artifact": "hitl-request-context/README.md",
+      "prs": [
+        41992
+      ]
     },
     {
       "path": "test/test_install_runtime_setup.py",
@@ -743,7 +952,12 @@
       "path": "test/test_keeper_muse_runtime.ml",
       "baseline_lines": 2684,
       "kind": "test",
-      "status": "pending semantic review"
+      "status": "partial: selected cases initialize source prompt assets before direct execution; remaining fixture and lifecycle responsibilities pending semantic review",
+      "current_lines": 2651,
+      "validation_artifact": "turn-response-contract/README.md",
+      "prs": [
+        41987
+      ]
     },
     {
       "path": "test/test_keeper_mutex_coverage.ml",
@@ -827,7 +1041,12 @@
       "path": "test/test_keeper_turn_driver_failover.ml",
       "baseline_lines": 6683,
       "kind": "test",
-      "status": "pending semantic review"
+      "status": "partial: checkpoint consumers use the actual owner and selected existing scenarios passed; remaining scenarios pending semantic review",
+      "current_lines": 6684,
+      "prs": [
+        41963
+      ],
+      "validation_artifact": "attempt-checkpoint/README.md"
     },
     {
       "path": "test/test_keeper_turn_up_args.ml",
@@ -917,7 +1136,11 @@
       "path": "test/test_tool_blob_store.ml",
       "baseline_lines": 2223,
       "kind": "test",
-      "status": "pending semantic review"
+      "status": "partial: existing binary/file-ingestion case uses a cold separate file store and passed; other storage/maintenance/concurrency responsibilities remain pending",
+      "current_lines": 2225,
+      "prs": [
+        41974
+      ]
     },
     {
       "path": "test/test_tool_board_coverage.ml",
@@ -953,7 +1176,12 @@
       "path": "test/test_tui_decode.ml",
       "baseline_lines": 13682,
       "kind": "test",
-      "status": "pending semantic review"
+      "status": "partial: terminal mouse grammar owner and direct consumers updated; remaining responsibilities pending semantic review",
+      "current_lines": 13682,
+      "validation_artifact": "mouse-protocol/README.md",
+      "prs": [
+        41915
+      ]
     },
     {
       "path": "test/test_tui_keeper_chat_history.ml",

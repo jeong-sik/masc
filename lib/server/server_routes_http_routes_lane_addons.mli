@@ -41,10 +41,12 @@ val answer_from_publication :
 (** Both machine kinds use the same rule: [Running] always needs a locked read,
     even when its last published mark equals [since]. *)
 
-val live_from_published_mark : Machine_lane.t -> since:since option -> live_answer
-(** The first step of [GET /api/v1/lane-addons/live]. It reads the machine's
-    published state without taking the machine lock and never suspends.
-    [Running] goes to the locked read to observe the completed run. *)
+val live_json : config:Workspace.config -> Machine_lane.t -> since:since option ->
+  (Yojson.Safe.t, string) result
+(** Last completed shared-worker screen. No worker RPC is issued. Pending
+    observations carry [refreshing=true] and never claim an unchanged frame.
+    No attached shared worker returns [Error]; an attached worker may publish
+    a successful [no_machine] observation when no program is loaded. *)
 
 val query_fields : Httpun.Request.t -> (string * string) list
 (** Preserve repeated query values so both transports reject duplicates. *)
@@ -55,3 +57,12 @@ val package_preview_payload : Mcp_server.server_state -> (string * string) list 
   (Yojson.Safe.t, string) result
 (** Shared H1/H2 payloads. The transport applies its read-auth gate before
     calling these filesystem readers. *)
+
+val live_workspace_precondition :
+  config:Workspace.config -> (string * string) list ->
+  ((string * string) list, [ `Bad_request | `Conflict ] * string) result
+(** The optional [expected_base_path] and [expected_masc_root] pair of a live
+    read. Absent, the fields are returned unchanged. Present and equal to this
+    workspace, they are removed. A different workspace is a [`Conflict] and a
+    lone or malformed one a [`Bad_request]; the read is not served in either
+    case. *)

@@ -362,6 +362,67 @@ let test_idle_session_is_not_hot ~auth () =
       in
       Alcotest.(check int) "idle sessions are not hot" 0 (List.length hot_sessions))
 
+let test_runtime_observer_authority ~auth () =
+  reset ();
+  let base_a = auth.Sse.config in
+  let base_b = Filename.concat base_a "runtime-beta" in
+  Fs_compat.mkdir_p (Filename.concat base_b Common.masc_dirname);
+  let auth_b = Masc_test_deps.make_sse_auth base_b "sse-same-agent" in
+  let authority_a = Sse.runtime_authority_exn ~base_path:base_a in
+  let authority_b = Sse.runtime_authority_exn ~base_path:base_b in
+  Alcotest.(check bool) "canonical .masc spelling uses the same runtime authority" true
+    (Sse.equal_runtime_authority authority_a
+      (Sse.runtime_authority_exn ~base_path:(Filename.concat base_a Common.masc_dirname)));
+  let first_id = Sse.current_id () in
+  ignore (register_exn ~auth ~kind:Sse.Observer "runtime-observer-a" ~last_event_id:first_id);
+  ignore (register_exn ~auth:auth_b ~kind:Sse.Observer "runtime-observer-b" ~last_event_id:first_id);
+  let external_a = ref [] and external_b = ref [] and unscoped = ref [] in
+  Sse.subscribe_external ~runtime_authority:authority_a ~id:"runtime-external-a"
+    ~callback:(fun event -> external_a := event :: !external_a) ();
+  Sse.subscribe_external ~runtime_authority:authority_b ~id:"runtime-external-b"
+    ~callback:(fun event -> external_b := event :: !external_b) ();
+  Sse.subscribe_external ~id:"runtime-external-unscoped"
+    ~callback:(fun event -> unscoped := event :: !unscoped) ();
+  Fun.protect ~finally:(fun () ->
+    List.iter Sse.unsubscribe_external ["runtime-external-a";"runtime-external-b";"runtime-external-unscoped"];
+    List.iter Sse.unregister ["runtime-observer-a";"runtime-observer-b"]) (fun () ->
+    let publish base_path text =
+      let event = Ag_ui.make_event ~thread_id:"keeper:alpha" ~delta:(Some text)
+          Ag_ui.Text_message_content in
+      Keeper_chat_broadcast.operation_event ~base_path ~keeper_name:"alpha"
+        ~operation_id:"op-X" ~seq:(Some 1) ~event in
+    publish base_a "ROOT_A_BODY";
+    Alcotest.(check bool) "same-root live SSE receives the operation" true
+      (Option.is_some (Sse.try_pop "runtime-observer-a"));
+    Alcotest.(check bool) "other-root TUI cannot be sent an invalid journal reference" true
+      (Option.is_none (Sse.try_pop "runtime-observer-b"));
+    Alcotest.(check int) "same-root external receives body" 1 (List.length !external_a);
+    Alcotest.(check int) "other-root external receives no body" 0 (List.length !external_b);
+    Alcotest.(check int) "unbound external receives no scoped body" 0 (List.length !unscoped);
+    publish base_b "ROOT_B_BODY";
+    Alcotest.(check bool) "same keeper/id in B is independent" true
+      (Option.is_some (Sse.try_pop "runtime-observer-b"));
+    Alcotest.(check bool) "B cannot leak back into A" true
+      (Option.is_none (Sse.try_pop "runtime-observer-a"));
+    let replay authority id = (Sse.replay_after_for_session ~runtime_authority:authority
+      ~session_id:id ~kind:Sse.Observer first_id).deliveries in
+    Alcotest.(check int) "A replay contains only A" 1 (List.length (replay authority_a "runtime-observer-a"));
+    Alcotest.(check int) "B replay contains only B" 1 (List.length (replay authority_b "runtime-observer-b"));
+    Alcotest.(check int) "unbound replay receives no scoped body" 0
+      (List.length (Sse.replay_after_for_session ~session_id:"unbound" ~kind:Sse.Observer first_id).deliveries);
+    let turn_ref = Ids.Turn_ref.make ~trace_id:"same-turn" ~absolute_turn:1 in
+    let autonomous = Keeper_autonomous_stream.create ~base_path:base_a ~keeper_name:"alpha" ~turn_ref in
+    Keeper_autonomous_stream.finish autonomous (Completed {reply="done";turn_outcome=Keeper_turn_outcome.Visible_reply});
+    Alcotest.(check bool) "autonomous notices reach their runtime" true
+      (List.length !external_a > 1);
+    Alcotest.(check int) "autonomous notices cannot cross roots" 1 (List.length !external_b);
+    Alcotest.(check bool) "autonomous notices do not reach foreign SSE" true
+      (Option.is_none (Sse.try_pop "runtime-observer-b"));
+    Alcotest.(check int) "autonomous notices do not enter foreign replay" 1
+      (List.length (replay authority_b "runtime-observer-b"));
+    Alcotest.(check int) "unbound callbacks stay outside runtime traffic" 0 (List.length !unscoped))
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -404,6 +465,8 @@ let () =
             ] );
           ( "broadcast_to_targeting",
             [
+              Alcotest.test_case "runtime authority live, replay and external" `Quick
+                (test_runtime_observer_authority ~auth);
               Alcotest.test_case "observers only" `Quick (test_broadcast_to_observers_only ~auth);
               Alcotest.test_case "all targets" `Quick (test_broadcast_to_all ~auth);
               Alcotest.test_case "broadcast = broadcast_to All" `Quick (test_broadcast_equals_broadcast_to_all ~auth);

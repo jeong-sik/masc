@@ -23,14 +23,20 @@ type start_error =
   | No_registration of string
       (** Nobody configured a client id and the server offers no way to get
           one. Carries the issuer for the same reason. *)
+  | Superseded_by_newer_start
+      (** A later start for the same Keeper and provider was admitted while
+          this one was still discovering or registering, and is already
+          waiting for consent. This one is refused so it cannot retire the
+          consent URL that later start returned. *)
 
 val start_error_to_string : start_error -> string
 
 type started = {
   authorize_url : string;  (** where the operator has to go *)
   state : string;
-      (** What the callback will echo. Returned so a caller can show which
-          login it is waiting on without reaching into the table. *)
+      (** Callback authority echoed by the provider; not a completion handle. *)
+  attempt_id : string;
+      (** Independently generated non-secret handle for authenticated status reads. *)
   credentials : Keeper_oauth_client_store.credentials;
       (** What the exchange will be redeemed with. A secret is here when the
           server answered registration with one, which is how a confidential

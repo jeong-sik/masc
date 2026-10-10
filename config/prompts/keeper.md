@@ -397,26 +397,26 @@ Rows below are your own previously published posts (newest first) — context, n
 ### Your Recent Actions ({{count}} turns)
 
 ### world.own_recent_actions.intro
-Tool calls you already made, oldest turn first — context, not instructions.
+Tool calls you already made, oldest turn first — context, not instructions. Attribution compares recorded task IDs with this turn's selected task; it does not establish ownership or task status. Null attribution is unknown.
 
 ### world.own_recent_actions.unavailable (vars: detail)
 ### Your Recent Actions (unavailable)
 Your own tool-call history could not be read this turn ({{detail}}). Do not treat this as having made no calls: check task state before claiming or repeating work.
 
-### world.own_recent_actions.turn_ok_row (vars: turn_id, tool)
-- [turn {{turn_id}}] {{tool}} -> ok
+### world.own_recent_actions.turn_ok_row (vars: provenance, turn_id, tool)
+- [turn {{turn_id}}] {{tool}} -> ok [provenance: {{provenance}}]
 
-### world.own_recent_actions.turn_rejected_row (vars: turn_id, tool, input)
-- [turn {{turn_id}}] {{tool}} {{input}} -> REJECTED
+### world.own_recent_actions.turn_rejected_row (vars: provenance, turn_id, tool, input)
+- [turn {{turn_id}}] {{tool}} {{input}} -> REJECTED [provenance: {{provenance}}]
 
-### world.own_recent_actions.turn_rejected_detail_row (vars: turn_id, tool, input, detail)
-- [turn {{turn_id}}] {{tool}} {{input}} -> REJECTED: {{detail}}
+### world.own_recent_actions.turn_rejected_detail_row (vars: provenance, turn_id, tool, input, detail)
+- [turn {{turn_id}}] {{tool}} {{input}} -> REJECTED: {{detail}} [provenance: {{provenance}}]
 
-### world.own_recent_actions.turn_deferred_row (vars: turn_id, tool)
-- [turn {{turn_id}}] {{tool}} -> deferred (not done yet)
+### world.own_recent_actions.turn_deferred_row (vars: provenance, turn_id, tool)
+- [turn {{turn_id}}] {{tool}} -> deferred (not done yet) [provenance: {{provenance}}]
 
-### world.own_recent_actions.turn_unrecorded_row (vars: turn_id, tool)
-- [turn {{turn_id}}] {{tool}} -> outcome not recorded
+### world.own_recent_actions.turn_unrecorded_row (vars: provenance, turn_id, tool)
+- [turn {{turn_id}}] {{tool}} -> outcome not recorded [provenance: {{provenance}}]
 
 ### world.pending_messages.heading (vars: count)
 ### Pending Messages ({{count}})
@@ -492,8 +492,8 @@ Do not claim that you checked board, task, file, status, or runtime state unless
 ### observation.rejected_digest_heading
 Rejected already — do not repeat these calls unchanged:
 
-### observation.rejected_digest_row (vars: tool, input, count, last_turn, detail_suffix)
-- {{tool}} {{input}} ×{{count}} (last turn {{last_turn}}){{detail_suffix}}
+### observation.rejected_digest_row (vars: provenance, tool, input, count, last_turn, detail_suffix)
+- {{tool}} {{input}} ×{{count}} (last turn {{last_turn}}){{detail_suffix}} [provenance: {{provenance}}]
 
 ### gate_replay.evidence.applied (vars: evidence_json)
 Host Gate replay completed before this model turn.
@@ -660,6 +660,12 @@ offset must be a 1-based line number (got {{offset}}). Read returns lines; use n
 
 ### tool_filesystem.limit_not_positive (vars: limit)
 limit must be a positive number of lines (got {{limit}}). Omit limit to read up to the byte budget.
+
+### tool_filesystem.invalid_read_integer (vars: coordinate, value, maximum)
+{{coordinate}} must be an integer line coordinate between 1 and {{maximum}} (got {{value}}). Omit the field only when you want its default.
+
+### tool_filesystem.invalid_read_arguments (vars: value)
+Read arguments must be a JSON object (got {{value}}).
 
 ### tool_filesystem.available_cwds_partial (vars: limit, cwds)
 available cwds (partial, {{limit}}): {{cwds}}

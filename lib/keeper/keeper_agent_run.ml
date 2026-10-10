@@ -32,39 +32,6 @@ let progress_keeper_tool_names_for_contract =
   Contract_helpers.progress_keeper_tool_names_for_contract
 ;;
 
-
-let normalize_response_text_for_finalization
-      ~runtime_id
-      ~initial_messages:_
-      ~(run_result : Runtime_agent.run_result)
-      ~text
-      ~tool_names
-      ()
-  =
-  match run_result.stop_reason with
-  | Runtime_agent.Yielded_to_operation_queued _
-  | Runtime_agent.Yielded_to_durable_stimulus _
-  | Runtime_agent.Yielded_after_repeated_tool_call _
-  | Runtime_agent.Yielded_after_repeated_assistant_text _
-  | Runtime_agent.Completed
-  | Runtime_agent.InputRequired _ ->
-  if
-    Keeper_agent_run_response_text.stop_reason_suppresses_visible_response
-      run_result.stop_reason
-  then Ok ""
-  else
-    match Keeper_tooling.Response.normalize_response_text ~text ~tool_names () with
-  | Ok response_text -> Ok response_text
-  | Error _ ->
-    (* Finalization exposes the typed accept-rejected response itself. Tool
-       execution history stays in the AGENT_CORE checkpoint; it is not projected into
-       a read/mutating behavioral classification. *)
-    Error
-      (Keeper_turn_driver_try_provider.accept_rejected_error
-         ~runtime_id
-         ~response:run_result.response)
-;;
-
 (* AGENT_CORE raw-trace sink for keeper turns: parsed Run_started / Assistant_block /
    Tool_execution / Run_finished records written to a fresh per-turn JSONL
    under [Keeper_types_support.keeper_raw_trace_dir]. Passing the sink into
@@ -761,8 +728,6 @@ module For_testing = struct
   let registry_progress_on_event = Turn_helpers.registry_progress_on_event
   let progress_keeper_tool_names_for_contract =
     Contract_helpers.progress_keeper_tool_names_for_contract
-  let normalize_response_text_for_finalization =
-    normalize_response_text_for_finalization
   let keeper_raw_trace_sink = keeper_raw_trace_sink
   let raw_trace_for_dispatch = raw_trace_for_dispatch
   let prune_raw_traces_after_turn_record = prune_raw_traces_after_turn_record
@@ -2015,6 +1980,30 @@ let run_turn
                                      ~messages:provider_content
                                  | Some (Error _) | None ->
                                    Keeper_projection_change.Request_not_digested))
+                      ?on_child_content_observation:
+                        (Option.map
+                           (fun observe ~attempt observation ->
+                              observe (Keeper_hooks_agent_core.Child_content_observed
+                                {attempt; observation}))
+                           on_tool_stream_observation)
+                      ?on_native_task_observation:
+                        (Option.map
+                           (fun observe ~attempt bound ->
+                              observe (Keeper_hooks_agent_core.Native_task_observed
+                                {attempt; bound}))
+                           on_tool_stream_observation)
+                      ?on_native_tool_progress:
+                        (Option.map
+                           (fun observe ~block_index ~tool_call_id progress ->
+                              observe (Keeper_hooks_agent_core.Native_tool_progress
+                                {block_index; tool_call_id; progress}))
+                           on_tool_stream_observation)
+                      ?on_native_tool_completion:
+                        (Option.map
+                           (fun observe ~block_index ~tool_call_id completion ->
+                              observe (Keeper_hooks_agent_core.Native_tool_completion
+                                {block_index; tool_call_id; completion}))
+                           on_tool_stream_observation)
                       ?on_tool_execution:
                         (Option.map
                            (fun observe ~block_index ~tool_call_id ~execution_id ->
@@ -2157,9 +2146,8 @@ let run_turn
                          (Keeper_contract_classifier.of_keeper_world_observation obs))
                      world_observation;
                      (match
-                        normalize_response_text_for_finalization
+                        Keeper_turn_response_contract.normalize_response_text_for_finalization
                           ~runtime_id:selected_runtime_id
-                          ~initial_messages:history_messages
                           ~run_result:result
                           ~text
                           ~tool_names:actual_keeper_tool_names

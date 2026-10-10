@@ -379,9 +379,7 @@ type tool_visibility =
   | Tools_results
   | Tools_full
 
-(* How much of the Librarian/Memory journal the chat pane draws. Summary is
-   the resting state: one header line per journal pass, so the conversation
-   keeps the pane and the change itself stays one keypress away. *)
+(* Journal activity is opt-in; it never interrupts the default conversation. *)
 type memory_visibility =
   | Memory_hidden
   | Memory_summary
@@ -405,9 +403,7 @@ let memory_visibility_to_string = function
   | Memory_full -> "full"
 ;;
 
-(* From the resting summary toward more, then none, then back: the first
-   press answers "what changed exactly", the second clears the lane, the
-   third restores the default. *)
+(* Hidden -> summary -> full -> hidden, through Ctrl-N. *)
 let next_memory_visibility = function
   | Memory_summary -> Memory_full
   | Memory_full -> Memory_hidden
@@ -420,30 +416,13 @@ let origin_display_to_string = function
   | Masc_tui_message_layout.Origin_bare -> "off"
 ;;
 
-(* The chat modes worth a place in the header.
-
-   Reasoning starts folded, tools compact, and the memory journal at its
-   one-line summary, so the answer remains the strongest level in the pane.
-   At rest those defaults say nothing unusual and therefore cost no header
-   width.
-
-   So only a mode away from its default appears. That is exactly when the
-   operator needs reminding: reasoning is missing from the pane because they
-   hid it, not because the keeper stopped thinking. At rest the header is what
-   it was before any of these modes existed.
-
-   Discovery lives in the footer and the help overlay, which name Ctrl-R,
-   Ctrl-D, Ctrl-N, and Ctrl-F whether or not a mode is on. *)
+(* Name only modes the operator expanded; the resting chat needs no badges. *)
 let chat_visibility_summary ~memory ~reasoning ~tools ~origin =
   let parts =
     List.filter_map Fun.id
       [ (match memory with
-         | Memory_summary -> None
-         (* Named for the rows it governs, which the pane labels JOURNAL and
-            the footer reaches with Ctrl-N:journal. It read "memory" here and
-            "journal" there, so pressing the key and looking for what moved
-            meant knowing the two words were one axis. *)
-         | Memory_hidden -> Some "journal:off"
+         | Memory_hidden -> None
+         | Memory_summary -> Some "journal:summary"
          | Memory_full -> Some "journal:full")
       ; (match origin with
          | Masc_tui_message_layout.Origin_bare -> None
@@ -468,8 +447,7 @@ let next_reasoning_visibility = function
   | Reasoning_full -> Reasoning_hidden
 ;;
 
-(* Start without clocks; Ctrl-F adds the short clock, then full headings,
-   then returns to the reading layout. *)
+(* Conversation -> inline metadata -> full origin heading -> conversation. *)
 let next_origin_display = function
   | Masc_tui_message_layout.Origin_bare -> Masc_tui_message_layout.Origin_inline
   | Masc_tui_message_layout.Origin_inline -> Masc_tui_message_layout.Origin_row
@@ -587,6 +565,9 @@ type msg_entry = {
           timestamps never move rows; phase then this sequence is the order. *)
   me_text: string;
   me_image: Masc_tui_image_preview.preview;
+  me_media: Masc_tui_chat_media.t list;
+      (** Original decoded output metadata. A journal may replace the prose,
+          but does not own these durable media records or their image action. *)
   me_memory_summary: string option;
       (** Producer-built compact text for a Memory journal row. [None] for
           ordinary conversation and neutral system rows; renderers never
@@ -879,6 +860,86 @@ type msg_anchor =
           Other rows remain identity-only anchors. *)
   }
 
+(* Search and scroll pins use the same projected history and journal rows.
+   A surviving journal stretch keeps its origin when reasoning is folded or
+   a final reply replaces its streamed text. *)
+type chat_search_anchor =
+  | Search_history of {
+      row_anchor : msg_anchor;
+      reply_source : Masc_tui_keeper_chat_log.journal_source option;
+        (** Only a durable terminal reply slot may be replaced by a journal's
+            canonical reply. Progress/tool rows do not acquire this alias. *)
+    }
+  | Search_journal of {
+      source : Masc_tui_keeper_chat_log.journal_source;
+      origin : Masc_tui_keeper_chat_transcript.drawn_origin;
+      canonical_reply : bool;
+    }
+
+type chat_search_cursor = {
+  search_workspace : workspace_authority;
+  search_keeper : string;
+  matched_anchor : chat_search_anchor;
+  matched_position : Masc_tui_chat_search.position;
+    (** Original body/field position, independent of wrapping, clipping and
+        diagram/source representation. *)
+  older_anchors : chat_search_anchor list;
+    (** Nearest older first. If reconciliation removes the matched stretch,
+        continue at a surviving older row instead of restarting at the tail. *)
+}
+
+type polled_scroll_part = Polled_status | Polled_speech
+
+type chat_scroll_anchor =
+  | Scroll_durable of chat_search_anchor
+  | Scroll_pending of string
+  | Scroll_polled of string * int * polled_scroll_part
+
+type chat_pin_mode = Follow_live | Hold_scroll | Hold_search
+(** [Follow_live] is the last frame's structural snapshot, activated by a
+    scroll key before asynchronous arrivals. It never stops tail following. *)
+
+type chat_source_position =
+  | Durable_position of Masc_tui_chat_search.position
+  | Polled_body_byte of { offset : int; sanitizer_expansion : int; semantic_expansion : int }
+
+(* A polled absolute byte is owned by the generation in Scroll_polled.
+   Sanitizer escape and semantic normalization expansions retain separate
+   identities, so distinct emitted bytes cannot collide by scalar addition. *)
+type chat_scroll_point = {
+  scroll_anchor : chat_scroll_anchor;
+  body_row : int;
+  source_position : chat_source_position option;
+    (** Exact semantic byte retained across physical reflow. [None] is a
+        generated or transient row whose source has no stable byte map. *)
+  rows_below : int;
+    (** Physical body-row ordinal within the projected entry, and its distance
+        from the viewport bottom. Neither field is a text/clock identity. *)
+}
+
+type held_polled_excerpt = {
+  held_anchor : chat_scroll_anchor;
+  held_preview : Tui_decode.keeper_turn_preview;
+  held_entry : Masc_tui_message_layout.entry;
+}
+
+type chat_scroll_pin = {
+  pin_workspace : workspace_authority;
+  pin_keeper : string;
+  pin_scroll : int;
+  pin_mode : chat_pin_mode;
+  held_transients : held_polled_excerpt list;
+  pin_points : chat_scroll_point list;
+    (** Drawn origins, oldest first. If a folded or replaced stretch disappears,
+        a surviving origin can still hold the reader's position. A viewport
+        containing only transient rows may retain an origin outside it. *)
+}
+
+type chat_scroll_position = {
+  scroll : int;
+  pin : chat_scroll_pin option;
+}
+
 let chat_turn_phase_of_role = function
   | Message_user _ -> Turn_input
   | Message_status | Message_thinking | Message_memory | Message_skill _ ->
@@ -916,13 +977,11 @@ let order_chat_turn_rows rows =
    [order_chat_turn_rows] is a stable sort, so sorting once over the arrival
    order lands every row where sorting after each arrival did.
 
-   [ctb_user_texts] is what recognises a user line the transcript already
-   holds. Two user rows of one request with the same text are one line
-   submitted twice -- the session copy and the server's persisted copy -- and
-   only one belongs on screen. Within a turn the request id is fixed, so the
-   text alone is the question, and the table answers it without walking the
-   turn. Non-user rows never fold: two tool rows with the same text are two
-   calls. *)
+   USER rows deduplicate only by their typed row identity. Distinct persisted
+   IDs or input positions remain distinct even when their text is identical.
+   Session/persisted aliases are resolved before this assembly, using the
+   exact request input slot, never the message body. Non-user rows keep their
+   existing producer positions. *)
 type chat_turn_key =
   | Typed_execution of Masc_tui_keeper_chat_log.journal_source
   | Legacy_request of string
@@ -933,11 +992,16 @@ let chat_turn_key (row : msg_entry) =
   | None -> Legacy_request row.me_request_id
 ;;
 
+type turn_sequence_evidence =
+  | Sequence_unobserved
+  | Sequence_observed of int
+  | Sequence_conflicting
+
 type chat_turn_builder = {
   ctb_request_id : string;
   mutable ctb_rows_rev : msg_entry list;
-  mutable ctb_turn_sequence : int option;
-  ctb_user_texts : (string, unit) Hashtbl.t;
+  mutable ctb_turn_sequence : turn_sequence_evidence;
+  ctb_user_identities : (msg_identity, unit) Hashtbl.t;
 }
 
 type chat_timeline_slot =
@@ -954,14 +1018,26 @@ let is_user_row row =
       false
 ;;
 
+(* Legacy history ordinals restart for each page. They identify neither a
+   stored row nor a local input and cannot authorize collapsing observations. *)
+let stable_user_identity row =
+  if not (is_user_row row) then None
+  else match row.me_identity with
+    | (Persisted_row _ | Session_row _) as identity -> Some identity
+    | Persisted_legacy_row _ -> None
+;;
+
 (* Two rows of one turn can disagree about which turn of the conversation it
    was. A disagreement is not a tie to break: the turn stops claiming a
    number rather than picking one of them. *)
 let merge_turn_sequence held arriving =
   match held, arriving with
-  | None, sequence | sequence, None -> sequence
-  | Some left, Some right when Int.equal left right -> Some left
-  | Some _, Some _ -> None
+  | Sequence_conflicting, (None | Some _) -> Sequence_conflicting
+  | Sequence_unobserved, None -> Sequence_unobserved
+  | Sequence_unobserved, Some sequence -> Sequence_observed sequence
+  | Sequence_observed sequence, None -> Sequence_observed sequence
+  | Sequence_observed left, Some right when Int.equal left right -> Sequence_observed left
+  | Sequence_observed _, Some _ -> Sequence_conflicting
 ;;
 
 (* The conversation's rows as turns, journal lines and unowned lines, in the
@@ -989,22 +1065,23 @@ let chat_timeline_slots rows =
             builder.ctb_turn_sequence <-
               merge_turn_sequence builder.ctb_turn_sequence row.me_turn_sequence;
             let folds =
-              is_user_row row && Hashtbl.mem builder.ctb_user_texts row.me_text
+              Option.exists (Hashtbl.mem builder.ctb_user_identities) (stable_user_identity row)
             in
             if not folds
             then begin
-              if is_user_row row
-              then Hashtbl.replace builder.ctb_user_texts row.me_text ();
+              Option.iter (fun identity -> Hashtbl.replace builder.ctb_user_identities identity ())
+                (stable_user_identity row);
               builder.ctb_rows_rev <- row :: builder.ctb_rows_rev
             end
         | None ->
-            let user_texts = Hashtbl.create 4 in
-            if is_user_row row then Hashtbl.replace user_texts row.me_text ();
+            let user_identities = Hashtbl.create 4 in
+            Option.iter (fun identity -> Hashtbl.replace user_identities identity ()) (stable_user_identity row);
             let builder =
               { ctb_request_id = row.me_request_id
               ; ctb_rows_rev = [ row ]
-              ; ctb_turn_sequence = row.me_turn_sequence
-              ; ctb_user_texts = user_texts
+              ; ctb_turn_sequence = Option.fold ~none:Sequence_unobserved
+                  ~some:(fun sequence -> Sequence_observed sequence) row.me_turn_sequence
+              ; ctb_user_identities = user_identities
               }
             in
             Hashtbl.replace builders (chat_turn_key row) builder;
@@ -1017,7 +1094,9 @@ let chat_timeline_slots rows =
       | Slot_turn builder ->
           Chat_turn
             { ct_request_id = builder.ctb_request_id
-            ; ct_turn_sequence = builder.ctb_turn_sequence
+            ; ct_turn_sequence = (match builder.ctb_turn_sequence with
+                | Sequence_observed sequence -> Some sequence
+                | Sequence_unobserved | Sequence_conflicting -> None)
             ; ct_rows = order_chat_turn_rows (List.rev builder.ctb_rows_rev)
             })
     !slots_rev
@@ -1086,7 +1165,22 @@ let chat_timeline ~loaded ~session ~queued_request_ids =
     List.exists (String.equal request_id) queued_request_ids
   in
   let visible rows = List.filter (fun row -> not (queued row.me_request_id)) rows in
-  { ctl_items = chat_timeline_slots (visible loaded @ visible session) }
+  let loaded = visible loaded in
+  let persisted_user_slots = Hashtbl.create 64 in
+  List.iter (fun (row : msg_entry) ->
+    if is_user_row row && row.me_request_id <> "" then
+      match row.me_identity with
+      | Persisted_row _ ->
+          Hashtbl.replace persisted_user_slots
+            (row.me_keeper_name, row.me_request_id, row.me_turn_phase, row.me_operation_seq) ()
+      | Persisted_legacy_row _ | Session_row _ -> ()) loaded;
+  let session = visible session |> List.filter (fun (row : msg_entry) ->
+    match row.me_identity with
+    | Session_row {request_id; turn_phase; operation_seq} when is_user_row row && request_id <> "" ->
+        not (Hashtbl.mem persisted_user_slots
+          (row.me_keeper_name, request_id, turn_phase, operation_seq))
+    | Session_row _ | Persisted_row _ | Persisted_legacy_row _ -> true) in
+  { ctl_items = chat_timeline_slots (loaded @ session) }
 ;;
 
 (* Which lane a chat row belongs to, asked of the row rather than of where it
@@ -2648,13 +2742,14 @@ type identity_login_request = {
 (* Login-completion expectation, held across a transient authority loss.
    Where [identity_login_started] is the consent the pane presents, this is
    only what the tick polls on: the workspace that admitted the login and
-   which Keeper/provider is still waiting. No URL is carried, so an old
+   which Keeper/provider/attempt is still waiting. No URL is carried, so an old
    consent is never resurrected, and the expectation alone cannot attach
    anyone to anything. *)
 type identity_login_expectation = {
   ile_origin: Tui_decode.server_identity;
   ile_keeper: string;
   ile_provider: string;
+  ile_attempt_id: string;
 }
 
 (** Where [Esc] returns after the chat pane was opened. Keeping only the legal
@@ -3045,7 +3140,7 @@ let turn_log_add ~now turn_log ~seq (delta : Masc_tui_keeper_chat_live.delta) =
   | Masc_tui_keeper_chat_live.Batch_bound _
   | Masc_tui_keeper_chat_live.Run_started | Masc_tui_keeper_chat_live.Text _
   | Masc_tui_keeper_chat_live.Thinking _ | Masc_tui_keeper_chat_live.Tool_started _
-  | Masc_tui_keeper_chat_live.Native_tool_started _ | Masc_tui_keeper_chat_live.Native_tool_ended _
+  | Masc_tui_keeper_chat_live.Native_tool_started _ | Masc_tui_keeper_chat_live.Native_tool_ended _ | Masc_tui_keeper_chat_live.Native_tool_progress _
   | Masc_tui_keeper_chat_live.Tool_args _ | Masc_tui_keeper_chat_live.Tool_ended _
   | Masc_tui_keeper_chat_live.Tool_result _
   | Masc_tui_keeper_chat_live.Stream_protocol_error _
@@ -3057,6 +3152,8 @@ let turn_log_add ~now turn_log ~seq (delta : Masc_tui_keeper_chat_live.delta) =
   | Masc_tui_keeper_chat_live.Runtime_attempt_started _
   | Masc_tui_keeper_chat_live.Stream_model_started _
   | Masc_tui_keeper_chat_live.Stream_details _
+  | Masc_tui_keeper_chat_live.Model_content_activity _
+  | Masc_tui_keeper_chat_live.Stream_model_stopped
   | Masc_tui_keeper_chat_live.Undecodable _ ->
       if Masc_tui_keeper_chat_log.add ~at:now turn_log.tl_log ~seq delta
       then Masc_tui_keeper_chat_transcript.apply ~now turn_log.tl_transcript delta
@@ -5319,6 +5416,7 @@ type runtime_config_edit_session = {
 (* One MSX frame as the server hands it over (RFC-0439 §3.7): native-resolution
    RGB plus what to title it. The spectator downsamples the pixels itself. *)
 type msx_menu_mode = Boot_game | Change_disk
+type machine_interaction = Observe_machine | Control_machine
 
 (* One row of the MSX load menu. The highlight is kept as the row itself, not
    its position: rows come and go while the menu is open (the DOS watch row
@@ -5524,6 +5622,21 @@ type play_invite =
   { cards : Masc_tui_play_card.t list
   ; shown_name : string option
   }
+
+type play_change_kind = Masc_tui_play_pending.kind = Issue_invite of string | Revoke_invite of string
+type play_change_request = {
+  change_ticket : unit ref;
+  change_id : string;
+  change_workspace : workspace_input_identity;
+  change_kind : play_change_kind;
+}
+type play_change = Preparing_invite_change of play_change_request
+  | Sending_invite_change of play_change_request | Unknown_invite_change of play_change_request
+  (* Sent by this process, then settled in the journal by another TUI that
+     verified it finished. It owns only its response: an issue response
+     carries the only copy of the invite link. *)
+  | Detached_invite_change of play_change_request
+type play_change_outcome = Change_confirmed | Change_unknown
 
 type keeper_priority_control = {
   priority_generation : int;
@@ -5841,6 +5954,7 @@ type state = {
   mutable msx_last_poll_ns: int64;
   (* Which machine the spectator shows. The menu picks it. *)
   mutable machine_source: Masc.Machine_lane.t;
+  mutable machine_interaction: machine_interaction;
   (* The last live read of each machine. [msx_live] is [Showing] the picture
      [msx_frame] holds, with its change mark, whether a live read or a tick
      answer drew it: the tick returns its picture and mark from one snapshot,
@@ -5856,10 +5970,15 @@ type state = {
   mutable dos_activity: Masc_tui_machine_live.activity_entry list;
   (* Locally retained invite cards, newest first. The selected card remains
      open until the operator closes it; the modal sweep leaves it alone. *)
+  mutable collab: Masc_tui_collab.t option;
+  mutable play_room: Masc_tui_play_room.t option;
+  mutable play_room_quarantine: (workspace_input_identity * Masc_tui_play_room.t) option;
   mutable play_invite: play_invite;
+  mutable play_invite_quarantine: (workspace_input_identity * play_invite) option;
   mutable play_invite_scroll: int;
-  (* Serialize issue requests so their one-time answers arrive in order. *)
-  mutable play_invite_inflight: bool;
+  (* Serialize issue and revoke across chat/Collab owners, including a closed
+     view: a delayed receipt must not revive or erase a reissued card. *)
+  mutable play_changes: play_change list;
   (* The load menu (RFC-0439 §3.7): the human picks a game from the cartridge
      inventory to plug into the shared machine. It is an overlay on the MSX
      screen -- while [msx_menu_open] the keyboard drives the picker, not the
@@ -6366,7 +6485,9 @@ type state = {
       (** What [/find] was last given on this pane, or [""] before it is used.
           Kept so the arg-less form continues the same search instead of
           asking for the text again. *)
-  mutable msg_find_at: msg_anchor option;
+  msg_search_generation: int Atomic.t;
+      (** Async search admission generation; shared target reset retires old jobs. *)
+  mutable msg_find_at: chat_search_cursor option;
       (** Structural identity of the message [/find] last landed on. The next
           search resolves it in the current causal timeline and starts
           strictly older. An index cannot survive a broadcast or Journal
@@ -6466,6 +6587,7 @@ type state = {
   mutable schedule_form_refusal: schedule_form_refusal option;
   mutable lanes: Tui_decode.keeper_lanes_snapshot option;
   mutable keeper_lanes_inflight: bool;
+  mutable keeper_lanes_reread_pending: bool;
   mutable keeper_lanes_resume: bool;
   mutable lane_inventory: Masc.Tui_decode_lane_inventory.snapshot option;
   mutable standalone_lanes: Tui_decode.standalone_lanes_snapshot option;
@@ -6987,16 +7109,11 @@ type state = {
   mutable msg_copy_generation: int;
   mutable chat_command_reads: (unit ref * unit ref * string) list;
   mutable msg_copy_pending: (int * string * unit ref) option;
-  (* The newest row [msg_scroll] counts back from, by causal row identity, while the
-     operator is reading back. Counting from whatever is newest right now made
-     the count mean something different every time a reply landed: the new rows
-     go on that end, so the same count lands further down and the window slides
-     toward text nobody asked to see. Pinned when they scroll off the bottom
-     and released when they return to it, which is also how they get back to
-     following the turn. *)
-  mutable msg_scroll_pin: msg_anchor option;
-  (* How many rows above the newest the chat pane is showing. 0 is the bottom,
-     where the pane follows a running turn. Held rather than derived: an
+  (* Actual projected body rows on the last scrolled frame. History and journal
+     origins share the same pin, including their canonical reply aliases. *)
+  mutable msg_scroll_pin: chat_scroll_pin option;
+  (* How many rows above the newest the chat pane is showing. 0 without an
+     explicit search pin follows the running turn. Held rather than derived: an
      operator reading back should stay where they are while the keeper keeps
      talking. *)
   mutable msg_scroll: int;
@@ -7056,6 +7173,9 @@ type state = {
   (* Journal sources a fiber is reading right now, so a load that
      arrives before the read returns does not start a second one. *)
   mutable msg_journal_inflight: journal_key list;
+  mutable msg_native_tasks: (string * Masc_tui_native_tasks.t) list;
+  mutable msg_native_tasks_inflight: string list;
+  mutable msg_native_tasks_audit_pending: string list;
   (* Journal sources a stream frame named while their journal was being read,
      with the highest journal seq the frames named: the read in flight may
      have stopped short of that line, so when it lands another read starts
@@ -7065,10 +7185,6 @@ type state = {
   (* The server refused this client's credential for the journal endpoint.
      Said once; no journal is asked for again this session. *)
   mutable msg_journal_reads_refused: bool;
-  (* The settled logs held when [msg_scroll_pin] was taken. Their rows were on
-     the screen the operator anchored, so they are not rows that arrived
-     since; a log held later is. *)
-  mutable msg_scroll_pin_settled: turn_log list;
   mutable detail_scroll: int;
   workspace: string;
   port: int;
@@ -7213,8 +7329,15 @@ let suspend_voice_wizard_read state =
 (* Observation receipts have a shorter lifetime than admitted operations.
    Retire their owners without cancelling a write or erasing its outcome,
    the rows already shown, navigation, or the operator's draft. *)
+let retire_keeper_message_search state =
+  Atomic.incr state.msg_search_generation
+
 let suspend_workspace_readings state =
+  retire_keeper_message_search state;
   state.workspace_read_authority <- ref ();
+  (* Retired completions cannot release these slots. Keep observations and
+     explicit audit intent for a confirmed read in the successor epoch. *)
+  state.msg_native_tasks_inflight <- [];
   let cancellations = state.workspace_observation_cancellations in
   state.workspace_observation_cancellations <- [];
   List.iter (fun (_, cancel) -> cancel ()) cancellations;
@@ -7283,8 +7406,12 @@ let suspend_workspace_readings state =
   state.gate_snapshot_read <- Snapshot_read.invalidate state.gate_snapshot_read;
   state.schedules_read <- Snapshot_read.invalidate state.schedules_read;
   state.keeper_sandbox_logs_inflight <- None;
-  state.keeper_lanes_resume <- state.keeper_lanes_resume || state.keeper_lanes_inflight;
+  (* A reread queued behind the retired read is satisfied by the replacement
+     read that reconfirmation launches; keep only its demand. *)
+  state.keeper_lanes_resume <-
+    state.keeper_lanes_resume || state.keeper_lanes_inflight || state.keeper_lanes_reread_pending;
   state.keeper_lanes_inflight <- false;
+  state.keeper_lanes_reread_pending <- false;
   state.connectors_inflight <- false;
   state.connectors_reload_after_inflight <- false;
   state.memory_health_inflight <- false;
@@ -7324,7 +7451,10 @@ let suspend_workspace_readings state =
   state.context_inspector_loading <- false;
   state.prompts_librarian_input_loading <- false;
   state.msx_live_in_flight <- None;
-  state.dos_live_in_flight <- None
+  state.dos_live_in_flight <- None;
+  (* The room's read reply is discarded with this reading; without a release
+     its pending slot would block every later poll. *)
+  state.play_room <- Option.map Masc_tui_play_room.retire_read state.play_room
 
 (* A discarded bundle proves its observation interval was inconsistent,
    even when its last probe sees the original workspace again. Retire that
@@ -7478,7 +7608,7 @@ let identity_logins_for_keeper (state : state) keeper_name =
 
 (* A recovered provider read may still be pending browser consent. Continue
    the existing cadence without resurrecting the withdrawn consent URL. *)
-let identity_login_pending_for_keeper (state : state) keeper_name =
+let identity_login_pending_for_keeper (state : state) ~now:_ keeper_name =
   server_authority_ready state
   && List.exists (fun expectation ->
        String.equal expectation.ile_keeper keeper_name
@@ -7489,10 +7619,10 @@ let identity_login_pending_for_keeper (state : state) keeper_name =
    after each one from any surface: an operator who consented in a browser
    and then left the Identity tab, or opened another Keeper, still sees the
    login land. *)
-let identity_login_pending_keepers (state : state) =
+let identity_login_pending_keepers (state : state) ~now =
   state.identity_login_expectations
   |> List.filter_map (fun expectation ->
-       if identity_login_pending_for_keeper state expectation.ile_keeper
+       if identity_login_pending_for_keeper state ~now expectation.ile_keeper
        then Some expectation.ile_keeper
        else None)
   |> List.sort_uniq String.compare
@@ -7553,27 +7683,62 @@ let remember_identity_login (state : state) login =
   (match state.server_identity with
    | Some origin when server_authority_ready state ->
        remember_identity_login_expectation state
-         { ile_origin=origin; ile_keeper=login.ils_keeper; ile_provider=login.ils_provider }
+         { ile_origin=origin; ile_keeper=login.ils_keeper; ile_provider=login.ils_provider;
+           ile_attempt_id=login.ils_attempt_id }
    | _ -> ())
 
-let retire_identity_logins (state : state) ~keeper_name ~providers =
-  (* The wait ends when consent lands (attached) or when it never can (the
-     provider is no longer declared). A provider removed mid-consent left
-     its wait polling for the life of the process before the inventory's
-     absence counted as an answer. *)
+(* A terminal observation retires both the browser URL and its background
+   wait. Only disappearance invalidates an in-flight replacement request:
+   expiry of the previous consent does not expire the replacement. *)
+type identity_login_retirement =
+  | Login_provider_inventory of string * identity_provider list
+  | Login_keeper_inventory of string list
+  | Login_deadline of float
+
+let retire_identity_login_state (state : state) retirement =
+  let disappeared ~keeper ~provider =
+    match retirement with
+    | Login_provider_inventory (name, providers) ->
+        String.equal keeper name
+        && not (identity_provider_declared ~providers ~provider_id:provider)
+    | Login_keeper_inventory names -> not (List.mem keeper names)
+    | Login_deadline _ -> false
+  in
+  let keep ~keeper ~provider ~expires_at =
+    not (disappeared ~keeper ~provider)
+    && (match retirement with
+       (* The catalog only says the provider is attached, not which attempt
+          attached it: on a re-login the previous credentials still report
+          attached and would drop the fresh consent URL before its attempt
+          ended. An inventory retire therefore keeps consent URLs; the
+          attempt's own terminal status or its deadline ends them. *)
+       | Login_provider_inventory _ -> true
+       | Login_keeper_inventory _ -> true
+       | Login_deadline now -> expires_at > now)
+  in
   state.identity_login_expectations <- List.filter
-    (fun expectation ->
-      let provider_id = expectation.ile_provider in
-      not (String.equal expectation.ile_keeper keeper_name
-           && (identity_provider_attached ~providers ~provider_id
-               || not (identity_provider_declared ~providers ~provider_id))))
+    (fun held -> not (disappeared ~keeper:held.ile_keeper ~provider:held.ile_provider))
     state.identity_login_expectations;
-  state.identity_logins <-
-    List.filter
-      (fun login ->
-        not (String.equal login.ils_keeper keeper_name
-             && identity_login_landed ~providers ~login))
-      state.identity_logins
+  state.identity_logins <- List.filter
+    (fun login -> keep ~keeper:login.ils_keeper ~provider:login.ils_provider
+       ~expires_at:login.ils_expires_at) state.identity_logins;
+  state.identity_login_requests <- List.filter
+    (fun request -> not (disappeared ~keeper:request.ilr_keeper
+       ~provider:request.ilr_provider)) state.identity_login_requests
+
+let retire_identity_logins state ~keeper_name ~providers =
+  retire_identity_login_state state (Login_provider_inventory (keeper_name, providers))
+
+let reconcile_identity_login_keepers state ~keeper_names ~error =
+  (* A partial/error roster is not evidence that a Keeper was deleted. *)
+  match error with
+  | Some _ -> ()
+  | None -> retire_identity_login_state state (Login_keeper_inventory keeper_names)
+
+let expire_identity_logins state ~now =
+  let displayed = List.length state.identity_logins in
+  retire_identity_login_state state (Login_deadline now);
+  List.length state.identity_logins <> displayed
 
 (* A workspace rework rerun keeps the workspace but ends every login it had
    admitted, so every expectation retires with it. Nothing here runs for a
@@ -7786,6 +7951,7 @@ let reconcile_fusion_launch (state : state) =
   state.view <> Fusion && abandon_fusion_launch state
 
 type text_input_target =
+  | Text_collab_form
   | Text_account_login
   | Text_browser_url
   | Text_ask_answer
@@ -7841,7 +8007,11 @@ let text_input_target (state : state) ~compact_viewport =
     && state.detail_tab = Detail_github
     && not compact_viewport
   in
-  if Option.is_some state.account_login && not compact_viewport then Some Text_account_login
+  if Option.is_some state.collab then
+    (match state.collab with
+     | Some view when not compact_viewport && Masc_tui_collab.text_input_active view -> Some Text_collab_form
+     | Some _ | None -> None)
+  else if Option.is_some state.account_login && not compact_viewport then Some Text_account_login
   else if state.keeper_deletions_open then None
   (* A drop reason takes every key on the goal detail it was opened on, so
      its letters never reach the lifecycle keys under it. *)
@@ -7928,7 +8098,7 @@ let text_input_target (state : state) ~compact_viewport =
    function exists to stop. *)
 let quit_key_allowed_for = function
   | Some
-      ( Text_account_login | Text_browser_url | Text_ask_answer | Text_fusion_launch
+      ( Text_collab_form | Text_account_login | Text_browser_url | Text_ask_answer | Text_fusion_launch
       | Text_preset_name | Text_runtime_lane_name | Text_runtime_param
       | Text_runtime_account_form | Text_runtime_model_form
       | Text_voice_wizard | Text_palette | Text_row_search
@@ -8460,13 +8630,25 @@ let log_draws_row (held : held_turn) (row : msg_entry) =
 (* The committed rows the pane still draws once these turns are held by
    settled logs: a turn has one source, and for a held turn that is the log.
    The same list when nothing is held, so the memo above it can tell. *)
+let media_remainder (row : msg_entry) =
+  match row.me_role, row.me_media with
+  | (Message_keeper | Message_autonomous), (_ :: _ as media) ->
+      Some {row with me_text =
+        Masc_tui_chat_media.append_text ~text:"" media
+        |> Masc_tui_keeper_chat_projection.terminal_safe_text ~preserve_newlines:true}
+  | (Message_keeper | Message_autonomous), []
+  | (Message_tool | Message_skill _ | Message_thinking | Message_user _
+    | Message_status | Message_local | Message_error | Message_memory), _ -> None
+;;
+
 let rows_the_logs_do_not_draw ~held rows =
   match held with
   | [] -> rows
   | held ->
-      List.filter
+      List.filter_map
         (fun (row : msg_entry) ->
-          not (List.exists (fun turn -> log_draws_row turn row) held))
+          if List.exists (fun turn -> log_draws_row turn row) held
+          then media_remainder row else Some row)
         rows
 ;;
 
@@ -8478,6 +8660,31 @@ let rows_the_logs_do_not_draw ~held rows =
    about those calls and reads. A skill evidence gap on a loaded row
    (missing, unreadable) names no read and is not carried over. Run where
    loaded rows arrive and where a journal log is held. *)
+let same_skill_invocation ~inventory
+    (left : Masc_tui_keeper_chat_transcript.skill_activity)
+    (right : Masc_tui_keeper_chat_transcript.skill_activity) =
+  Option.is_some left.turn_ref && Option.is_some left.skill_tool_use_id
+  && left.turn_ref = right.turn_ref
+  && left.skill_tool_use_id = right.skill_tool_use_id
+  && (match left.runtime_id, right.runtime_id with
+      | Some left, Some right -> String.equal left right
+      | None, _ | _, None ->
+          let runtimes = left :: right :: inventory
+            |> List.filter_map (fun (candidate : Masc_tui_keeper_chat_transcript.skill_activity) ->
+              if candidate.turn_ref=left.turn_ref && candidate.skill_tool_use_id=left.skill_tool_use_id
+              then candidate.runtime_id else None)
+            |> List.sort_uniq String.compare in
+          match runtimes with [] | [_] -> true | _ :: _ :: _ -> false)
+
+let skills_drawn_by_items items =
+  List.concat_map (fun (item : Masc_tui_keeper_chat_transcript.drawn_item) ->
+    match item.drawn with Drawn_skill skills -> skills | _ -> []) items
+
+let skills_in_source_rows ~keeper_name source rows =
+  List.concat_map (fun (row : msg_entry) ->
+    if String.equal row.me_keeper_name keeper_name && row.me_execution_source=source
+    then row.me_skill_block else []) rows
+
 let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
   List.iter
     (fun turn_log ->
@@ -8502,23 +8709,22 @@ let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
       (* The stream has no event for a delivery, so without this the log's
          skill row stays at what the read call alone says while the loaded
          row that knew better is left out of the timeline (#36882). *)
+      (* Freeze candidates before any row is enriched, so nullable runtime
+         completion cannot depend on which durable record arrives first. *)
+      let observed_skills = skills_drawn_by_items
+        (Masc_tui_keeper_chat_transcript.drawn turn_log.tl_transcript) in
+      let inventory = observed_skills @ skills_in_source_rows ~keeper_name (Some execution_source)
+        (rows @ state.msg_loaded @ state.msg_history) in
       List.iter
         (fun (row : msg_entry) ->
-          if row.me_execution_source = Some execution_source then
+          if String.equal row.me_keeper_name keeper_name
+             && row.me_execution_source = Some execution_source then
             List.iter (fun (skill : Masc_tui_keeper_chat_transcript.skill_activity) ->
-              let observed =
-                Option.is_some skill.turn_ref && Option.is_some skill.skill_tool_use_id
-                && List.exists (fun (item : Masc_tui_keeper_chat_transcript.drawn_item) ->
-                  match item.drawn with
-                  | Drawn_skill skills -> List.exists
-                      (fun (shown : Masc_tui_keeper_chat_transcript.skill_activity) ->
-                        shown.turn_ref = skill.turn_ref
-                        && shown.skill_tool_use_id = skill.skill_tool_use_id) skills
-                  | Drawn_tools _ | Drawn_thinking _ | Drawn_text _ | Drawn_reply _
-                  | Drawn_status _ | Drawn_error _ -> false)
-                    (Masc_tui_keeper_chat_transcript.drawn turn_log.tl_transcript) in
+              let observed = List.exists (fun shown ->
+                same_skill_invocation ~inventory shown skill) observed_skills in
               if turn_log_holds_the_turn turn_log || observed then
-                Masc_tui_keeper_chat_transcript.note_skill_activity turn_log.tl_transcript skill)
+                Masc_tui_keeper_chat_transcript.note_skill_activity ~runtime_inventory:inventory
+                  turn_log.tl_transcript skill)
               row.me_skill_block)
         rows)
     (selected_source_logs_for_keeper state keeper_name)
@@ -8934,8 +9140,8 @@ let pending_detail_read (state : state) ~tab ~keeper =
 (* The tick may reopen a provider read only after the old response settles and
    the same workspace confirms the waiting Keeper's login. The expectation
    carries no consent URL or authorization; it only keeps the read alive. *)
-let identity_login_recovery_poll_ready (state : state) keeper_name =
-  identity_login_pending_for_keeper state keeper_name
+let identity_login_recovery_poll_ready (state : state) ~now keeper_name =
+  identity_login_pending_for_keeper state ~now keeper_name
   && Option.is_none (pending_detail_read state ~tab:Detail_identity ~keeper:keeper_name)
 
 let detail_read_started state ~tab ~keeper =
@@ -9249,6 +9455,13 @@ let composing_for_keeper (state : state) keeper_name =
   && Masc_tui_message_input.length state.msg_input > 0
   && Option.exists (String.equal keeper_name) state.msg_target_keeper_name
 
+(* Recall owns this Keeper's queued input until the edit is submitted or
+   abandoned. Earlier Enter/control authorization cannot send its old body. *)
+let recalling_for_keeper (state : state) keeper_name =
+  match state.msg_recall_replaces with
+  | Some editing -> String.equal editing.request.keeper_name keeper_name
+  | None -> false
+
 (* A fresh Enter may bypass input held by an explicit stop. A refused
    preflight keeps its place until local resume; unmarked input remains owned
    by the generic drainer and its composer/recall checks. *)
@@ -9264,7 +9477,8 @@ let next_authorized_keeper_input state keeper_name =
       | Some (_, _, Retained_before_dispatch) -> None
       | Some (_, _, (Awaiting_control _ | Retained_after_stop)) | None -> ready rest
   in
-  ready (Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued ~keeper_name)
+  if recalling_for_keeper state keeper_name then None
+  else ready (Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued ~keeper_name)
 
 (** The next target both the input path and footer agree is safe to select.
     A pending request or live transcript stays pinned to its Keeper until that
@@ -9353,6 +9567,231 @@ let play_invite_forget current name =
        | Some _ | None -> current.shown_name)
   }
 
+let withdraw_play_invite_workspace state
+    ~(previous : workspace_input_identity option) ~(current : workspace_input_identity option) =
+  let hidden invite = {invite with shown_name = None} in
+  match current with
+  | None ->
+      (* Losing a health response removes display/action authority, not the
+         only copy of a credential. Keep it sealed under its confirmed origin. *)
+      (match previous, state.play_invite.cards with
+       | Some workspace, _ :: _ ->
+           state.play_invite_quarantine <- Some (workspace, hidden state.play_invite)
+       | (Some _ | None), [] | None, _ :: _ -> ());
+      state.play_invite <- {cards = []; shown_name = None}
+  | Some workspace ->
+      let retained =
+        (* A retained chat origin may still name this workspace after its
+           live presentation was withdrawn. The sealed copy owns recovery. *)
+        match state.play_invite_quarantine with
+        | Some (owner, invite) when owner = workspace -> hidden invite
+        | Some _ | None ->
+            if previous = Some workspace then hidden state.play_invite
+            else {cards = []; shown_name = None} in
+      state.play_invite <- retained;
+      state.play_invite_quarantine <- None
+
+let withdraw_play_room_workspace state
+    ~(previous : workspace_input_identity option) ~(current : workspace_input_identity option) =
+  match current with
+  | None ->
+      (match previous, state.play_room with
+       | Some workspace, Some room ->
+           state.play_room_quarantine <- Some (workspace, Masc_tui_play_room.suspend room)
+       | (Some _ | None), None | None, Some _ -> ());
+      state.play_room <- None
+  | Some workspace ->
+      let retained = match state.play_room_quarantine with
+        | Some (owner, room) when owner = workspace -> Some room
+        | Some _ | None ->
+            if previous = Some workspace then Option.map Masc_tui_play_room.suspend state.play_room
+            else None in
+      state.play_room <- retained;
+      state.play_room_quarantine <- None
+
+let play_change_request = function
+  | Preparing_invite_change request | Sending_invite_change request | Unknown_invite_change request
+  | Detached_invite_change request -> request
+
+let workspace_change_origin state =
+  match state.workspace_identity, workspace_input_identity_of_server state.server_identity with
+  | Workspace_identity_match, Some origin -> Ok origin
+  | ( Workspace_identity_unread
+    | Workspace_identity_mismatch _
+    (* An unconfirmed read is not a fresh match, and an invite change is a
+       write: refuse it until a read says match again. *)
+    | Workspace_identity_match_unconfirmed _ )
+    , _
+  | Workspace_identity_match, None ->
+      Error "Invite changes require a verified server matching this TUI's local workspace."
+
+let current_play_change state origin =
+  List.find_opt (fun change -> (play_change_request change).change_workspace = origin) state.play_changes
+
+let play_pending_path state =
+  Filename.concat (Common.masc_dir_from_base_path ~base_path:state.local_base_path)
+    "tui-play-pending.jsonl"
+
+let play_pending_entry request : Masc_tui_play_pending.entry =
+  {id=request.change_id; base_path=request.change_workspace.wi_base_path;
+   masc_root=request.change_workspace.wi_masc_root; kind=request.change_kind}
+
+let read_play_changes state =
+  if state.local_base_path = "" then Error "The local workspace for Play recovery is unavailable."
+  else Result.map (fun pending ->
+    let journal = List.map (fun (entry : Masc_tui_play_pending.entry) ->
+      match List.find_opt (fun held -> play_pending_entry (play_change_request held) = entry) state.play_changes with
+      | Some held -> held
+      | None -> Unknown_invite_change {change_ticket=ref (); change_id=entry.id;
+          change_workspace={wi_base_path=entry.base_path; wi_masc_root=entry.masc_root};
+          change_kind=entry.kind}) pending in
+    (* Another TUI may settle a request this process sent before its response
+       is consumed. Keep that request as the owner of its response. *)
+    let detached = List.filter_map (function
+      | (Sending_invite_change request | Detached_invite_change request)
+        when not (List.mem (play_pending_entry request) pending) -> Some (Detached_invite_change request)
+      | Preparing_invite_change _ | Sending_invite_change _ | Unknown_invite_change _
+      | Detached_invite_change _ -> None) state.play_changes in
+    state.play_changes <- journal @ detached)
+    (Masc_tui_play_pending.read ~path:(play_pending_path state))
+
+let play_change_pending_notice = "An invite change is still pending; wait for its result."
+let play_change_unknown_notice request =
+  let action, name = match request.change_kind with
+    | Issue_invite name -> "issue", name | Revoke_invite name -> "revoke", name in
+  Printf.sprintf "Invite %s for %s has an unknown outcome. Further changes are blocked; open Collab and use u only after verifying the original server request has finished."
+    action (Masc.Tui_terminal_text.sanitize_terminal_text name)
+
+let play_change_access state =
+  match workspace_change_origin state with
+  | Error detail -> Masc_tui_collab.Read_only detail
+  | Ok origin ->
+      match read_play_changes state with
+      | Error detail -> Masc_tui_collab.Read_only ("Play recovery unavailable: " ^ detail)
+      | Ok () -> match current_play_change state origin with
+      | None -> Masc_tui_collab.Writable
+      | Some (Preparing_invite_change _ | Sending_invite_change _ | Detached_invite_change _) ->
+          Masc_tui_collab.Pending play_change_pending_notice
+      | Some (Unknown_invite_change request) -> Masc_tui_collab.Uncertain
+          {request_id=request.change_id; notice=play_change_unknown_notice request}
+
+let begin_play_change state kind =
+  match workspace_change_origin state with
+  | Error detail -> Error detail
+  | Ok origin ->
+      let ( let* ) = Result.bind in
+      let* () = read_play_changes state in
+      match current_play_change state origin with
+      | Some (Preparing_invite_change _ | Sending_invite_change _ | Detached_invite_change _) ->
+          Error play_change_pending_notice
+      | Some (Unknown_invite_change request) -> Error (play_change_unknown_notice request)
+      | None ->
+          let request = {change_ticket = ref (); change_id=Random_id.uuid_v7 ();
+            change_workspace = origin; change_kind = kind} in
+          let* () = Masc_tui_play_pending.prepare ~path:(play_pending_path state) (play_pending_entry request) in
+          state.play_changes <- Preparing_invite_change request :: state.play_changes;
+          Ok request
+
+(* Only the HTTP call boundary advances a prepared request. Cancellation while
+   verifying authority has not sent a mutation and can release its journal. *)
+let dispatch_play_change state request =
+  let admitted = ref false in
+  state.play_changes <- List.map (function
+    | Preparing_invite_change held when held.change_ticket == request.change_ticket ->
+        admitted := true; Sending_invite_change held
+    | change -> change) state.play_changes;
+  !admitted
+
+let play_change_dispatched state request =
+  List.exists (function
+    | Sending_invite_change held | Unknown_invite_change held | Detached_invite_change held ->
+        held.change_ticket == request.change_ticket
+    | Preparing_invite_change _ -> false) state.play_changes
+
+let finish_play_change state request outcome =
+  let matches change = (play_change_request change).change_ticket == request.change_ticket in
+  let owns = List.exists matches state.play_changes in
+  (* The journal already settled a detached request; its response only
+     leaves this process. *)
+  let detached = List.exists (function
+    | Detached_invite_change held -> held.change_ticket == request.change_ticket
+    | Preparing_invite_change _ | Sending_invite_change _ | Unknown_invite_change _ -> false)
+    state.play_changes in
+  let settled = owns && not detached && (match outcome with
+    | Change_unknown -> false
+    | Change_confirmed ->
+        (match Masc_tui_play_pending.settle ~path:(play_pending_path state) (play_pending_entry request) with
+         | Ok settled -> settled | Error _ -> false)) in
+  if owns then state.play_changes <- List.filter_map (fun change ->
+    if not (matches change) then Some change
+    else if detached then None
+    else match outcome with
+    | Change_confirmed when settled -> None
+    | Change_confirmed | Change_unknown -> Some (Unknown_invite_change request)) state.play_changes;
+  owns
+
+let withdraw_play_changes state =
+  List.iter (function
+    | Preparing_invite_change request -> ignore (finish_play_change state request Change_confirmed)
+    | Sending_invite_change _ | Unknown_invite_change _ | Detached_invite_change _ -> ()) state.play_changes;
+  state.play_changes <- List.filter_map (function
+    | Preparing_invite_change request | Sending_invite_change request -> Some (Unknown_invite_change request)
+    | Unknown_invite_change _ as change -> Some change
+    (* The journal already settled a detached request, and withdrawal cancels
+       the fiber its response would come back on. Kept, it would block every
+       later invite change with nothing left to finish it. *)
+    | Detached_invite_change _ -> None) state.play_changes
+
+(* An issue response queued before withdrawal is refused by [Workspace_scoped],
+   yet it proves its request finished and holds the only copy of a one-time
+   link. While the request is still this process's, it settles like any
+   confirmed answer, and the card is kept closed under the workspace that
+   issued it, by the rule [withdraw_play_invite_workspace] applies to the live
+   cards: with them while that workspace is served, sealed while no server is
+   read, and dropped once a different one is. *)
+let retain_withdrawn_play_invite state (request : play_change_request) card =
+  let origin = request.change_workspace in
+  let closed invite = {(play_invite_store invite card) with shown_name = invite.shown_name} in
+  if finish_play_change state request Change_confirmed then
+    match workspace_input_identity_of_server state.server_identity with
+    | Some current when current = origin -> state.play_invite <- closed state.play_invite
+    | Some _ -> ()
+    | None ->
+        (match state.play_invite_quarantine with
+         | Some (owner, invite) when owner = origin ->
+             state.play_invite_quarantine <- Some (owner, closed invite)
+         | None ->
+             state.play_invite_quarantine <- Some (origin, closed {cards = []; shown_name = None})
+         (* A confirmed read clears the quarantine, and a request needs one,
+            so the slot cannot hold another workspace's cards here. *)
+         | Some _ -> ())
+
+let resolve_play_change state ~request_id =
+  match workspace_change_origin state with
+  | Error detail -> Error detail
+  | Ok origin ->
+      let ( let* ) = Result.bind in
+      let* () = read_play_changes state in
+      match current_play_change state origin with
+      | Some (Unknown_invite_change request) when request.change_id = request_id ->
+          let* settled = Masc_tui_play_pending.settle ~path:(play_pending_path state) (play_pending_entry request) in
+          let* () = read_play_changes state in
+          if settled then Ok ()
+          else Error "The invite request changed; inspect the current request before resolving it."
+      | Some (Unknown_invite_change _) ->
+          Error "The invite request changed; inspect the current request before resolving it."
+      | Some (Preparing_invite_change _ | Sending_invite_change _ | Detached_invite_change _) ->
+          Error play_change_pending_notice
+      | None -> Error "There is no unknown invite change in this workspace."
+
+let withdraw_machine_control state =
+  state.machine_interaction <- Observe_machine;
+  state.msx_open <- false;
+  state.msx_menu_open <- false;
+  state.msx_live <- Masc_tui_machine_live.Unread;
+  state.msx_frame <- None;
+  state.msx_live_in_flight <- None
+
 (* The overlays that take every key while they are open. Each answers its own
    keys and swallows the rest in its dispatch arm, so nothing drawn under it --
    the composer, a surface binding, a press on a row -- may act first. Every
@@ -9365,6 +9804,7 @@ let modal_owns_keys (state : state) =
   || (state.view = Lanes && Option.is_some state.browser_activity_open)
   || (state.view = Lanes && Option.is_some state.machine_activity_open)
   || Option.is_some state.client_detail
+  || Option.is_some state.collab
   || Option.is_some (play_card_shown state)
 
 let close_context_inspector (state : state) =
@@ -9394,6 +9834,7 @@ let close_key_modals (state : state) =
   state.keeper_deletions_open <- false;
   state.client_detail <- None;
   state.client_detail_scroll <- 0;
+  state.collab <- None;
   state.exact_activity_open <- None;
   state.browser_activity_open <- None;
   state.machine_activity_open <- None;
@@ -9525,14 +9966,19 @@ let create_state
   msx_frame = None;
   msx_last_poll_ns = 0L;
   machine_source = Masc.Machine_lane.Msx;
+  machine_interaction = Observe_machine;
   msx_live = Masc_tui_machine_live.Unread;
   dos_live = Masc_tui_machine_live.Unread;
   msx_live_in_flight = None;
   dos_live_in_flight = None;
   dos_activity = [];
+  collab = None;
+  play_room = None;
+  play_room_quarantine = None;
   play_invite = { cards = []; shown_name = None };
+  play_invite_quarantine = None;
   play_invite_scroll = 0;
-  play_invite_inflight = false;
+  play_changes = [];
   msx_menu_open = false;
   msx_notice = None;
   msx_menu_mode = Boot_game;
@@ -9778,6 +10224,7 @@ let create_state
   board_list_reading = Board_list_unread;
   board_cursor = 0;
   msg_find = "";
+  msg_search_generation = Atomic.make 0;
   msg_find_at = None;
   board_sort = Board_hot;
   board_hearth = None;
@@ -9824,6 +10271,7 @@ let create_state
   schedule_form_refusal = None;
   lanes = None;
   keeper_lanes_inflight = false;
+  keeper_lanes_reread_pending = false;
   keeper_lanes_resume = false;
   lane_inventory = None;
   standalone_lanes = None;
@@ -10093,7 +10541,7 @@ let create_state
   msg_file_changes_refresh_pending = false;
   msg_file_changes_error = None;
   msg_file_changes_generation = 0;
-  msg_memory_visibility = Memory_summary;
+  msg_memory_visibility = Memory_hidden;
   msg_memory_error = None;
   msg_memory_dropped = 0;
   msg_history_load_generation = 0;
@@ -10121,9 +10569,11 @@ let create_state
   msg_settled_logs = [];
   msg_journal_unavailable = [];
   msg_journal_inflight = [];
+  msg_native_tasks = [];
+  msg_native_tasks_inflight = [];
+  msg_native_tasks_audit_pending = [];
   msg_journal_wanted = [];
   msg_journal_reads_refused = false;
-  msg_scroll_pin_settled = [];
   detail_scroll = 0;
   workspace;
   port;
@@ -10366,6 +10816,7 @@ let restore_keeper_chat_page (state : state) keeper_name =
        in
        state.msg_loaded_pages <-
          (loaded_keeper, page) :: List.remove_assoc loaded_keeper state.msg_loaded_pages);
+  retire_keeper_message_search state;
   (* Requests that belonged to the outgoing page cannot publish into a page
      restored during A -> B -> A, even before the next GET starts. *)
   state.msg_history_load_generation <- state.msg_history_load_generation + 1;
@@ -10505,12 +10956,13 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
          else None)
   in
   let without_partial_replies rows =
-    List.filter
+    List.filter_map
       (fun (row : msg_entry) ->
         match row.me_role with
-        | Message_keeper | Message_autonomous ->
-            not (List.exists (fun source -> row.me_execution_source = Some source) partial_replies)
-        | _ -> true)
+        | Message_keeper | Message_autonomous
+          when List.exists (fun source -> row.me_execution_source = Some source) partial_replies ->
+            media_remainder row
+        | _ -> Some row)
       rows
   in
   (* Partial selected logs own the exact activities already drawn, even
@@ -10539,14 +10991,13 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
              else Some {row with me_tool_block=Some (Transcript.tool_block
                ~omitted_steps:block.omitted_steps activities)})
     | Message_skill _ when row.me_skill_block <> [] ->
-        let observed = List.concat_map (fun (item : Transcript.drawn_item) ->
-          match item.drawn with Drawn_skill skills -> skills | _ -> []) drawn in
+        let observed = skills_drawn_by_items drawn in
+        let inventory = observed @ skills_in_source_rows ~keeper_name row.me_execution_source (loaded @ session) in
+        (* A missing runtime can be completed by the other observation, but
+           two known runtimes belong to distinct invocations. *)
         let skills = List.filter (fun (skill : Transcript.skill_activity) ->
           not (List.exists (fun (shown : Transcript.skill_activity) ->
-            Option.is_some skill.skill_tool_use_id
-            && skill.skill_tool_use_id = shown.skill_tool_use_id
-            && skill.turn_ref = shown.turn_ref
-            && skill.runtime_id = shown.runtime_id) observed)) row.me_skill_block in
+            same_skill_invocation ~inventory skill shown) observed)) row.me_skill_block in
         if skills = [] then None
         else Some {row with me_skill_block=skills;
           me_role=Message_skill (Transcript.skill_block_state skills)}
@@ -10672,25 +11123,25 @@ let merge_paged_history ~(paged : msg_entry list) ~(fresh : msg_entry list) =
     (held @ fresh)
 
 let set_msg_scroll (state : state) rows =
+  (* Every caller is a reader's move: a scroll key, the wheel, End, Ctrl-E,
+     sending, switching Keeper or leaving the pane. A /find still running
+     would otherwise land later and pull the view back to its match, so the
+     move retires it. The search applies its own result without coming
+     through here. *)
+  retire_keeper_message_search state;
   let rows = max 0 rows in
-  if rows = 0 then begin
-    state.msg_scroll <- 0;
-    state.msg_scroll_pin <- None;
-    state.msg_scroll_pin_settled <- []
-  end
-  else begin
-    if state.msg_scroll = 0 then begin
-      state.msg_scroll_pin <-
-        (match state.msg_target_keeper_name with
-         | None -> None
-         | Some keeper_name ->
-           (match List.rev (chat_rows_for state keeper_name) with
-            | newest :: _ -> Some (msg_anchor newest)
-            | [] -> None));
-      state.msg_scroll_pin_settled <- state.msg_settled_logs
-    end;
-    state.msg_scroll <- rows
-  end
+  (* A painted empty projection has no speech position to hold. Do not let a
+     wheel/Home request become a deferred scroll against future arrivals. *)
+  let rows = match state.msg_scroll_pin with
+    | Some {pin_mode=Follow_live;pin_points=[];_} -> 0
+    | Some _ | None -> rows in
+  state.msg_scroll <- rows;
+  state.msg_scroll_pin <- Option.map (fun pin ->
+    if rows = 0 then
+      {pin with pin_mode=Follow_live; pin_scroll=0; held_transients=[];
+        pin_points=List.map (fun point ->
+          {point with rows_below=point.rows_below + pin.pin_scroll}) pin.pin_points}
+    else {pin with pin_mode=Hold_scroll}) state.msg_scroll_pin
 
 (* Rows the composer needs beyond its first. Folded into the status-row count
    because that one number already sets both the history height and the cursor
@@ -10716,7 +11167,7 @@ let composer_extra_rows (state : state) =
 type clamped_scroll =
   | Task_detail of int
   | Board_read of (int * int)
-  | Message_scroll of int
+  | Message_scroll of chat_scroll_position
   | Schedule_detail_scroll of int
   | Keeper_detail of int
   | Keeper_calls of int
@@ -10818,7 +11269,9 @@ let apply_clamped_scroll (state : state) = function
       state.board_scroll <- body;
       state.board_comment_scroll <- comments;
       state.board_comment_landing <- None
-  | Message_scroll value -> set_msg_scroll state value
+  | Message_scroll { scroll; pin } ->
+      state.msg_scroll <- max 0 scroll;
+      state.msg_scroll_pin <- pin
   | Schedule_detail_scroll value -> state.schedule_scroll <- value
   | Keeper_detail value -> state.detail_scroll <- value
   | Keeper_calls value -> state.keeper_calls_scroll <- value
@@ -13252,8 +13705,13 @@ let conversation_urls (state : state) : string list =
 
    The fact itself used to live in the footer alone, seventh of nine hints,
    and the footer drops hints from its tail on a narrow terminal: the one
-   thing that changes what the arrow keys do was among the first to go. *)
-let keeper_message_reading_back (state : state) = state.msg_scroll > 0
+   thing that changes what the arrow keys do was among the first to go.
+
+   A frame passes its restored pin position through [scroll] before feedback
+   stores that position. Its chrome must budget and draw against that same
+   position even when an arrival changed it since the previous paint. *)
+let keeper_message_reading_back ?scroll (state : state) =
+  Option.value scroll ~default:state.msg_scroll > 0
 
 type keeper_message_pending_preview_row =
   | Pending_preview_item of int * Masc_tui_keeper_chat_queue.item
@@ -13312,6 +13770,7 @@ let keeper_message_timing_visible (state : state) =
 
 let keeper_message_unfolded_status_rows (state : state) live ~now =
   Masc_tui_keeper_chat_transcript.status_rows
+    ~compact:(state.msg_origin_display = Masc_tui_message_layout.Origin_bare)
     ~show_timing:(keeper_message_timing_visible state) ~now live
 
 (* The most recently submitted input can be queued behind the execution that
@@ -13363,7 +13822,10 @@ let keeper_message_visible_status_rows (state : state) live ~now =
   if state.msg_turn_folded then
     List.filter
       (fun (kind, _) ->
-        Masc_tui_keeper_chat_transcript.status_row_survives_folding kind)
+        match kind with
+        | Masc_tui_keeper_chat_transcript.Attention
+          when state.msg_origin_display = Masc_tui_message_layout.Origin_bare -> true
+        | _ -> Masc_tui_keeper_chat_transcript.status_row_survives_folding kind)
       rows
   else rows
 
@@ -13374,6 +13836,16 @@ let keeper_message_folded_status_count (state : state) live ~now =
   else
     List.length (keeper_message_unfolded_status_rows state live ~now)
     - List.length (keeper_message_visible_status_rows state live ~now)
+
+let keeper_message_standalone_details_hint (state : state) live ~now =
+  keeper_message_folded_status_count state live ~now > 0
+  && not (List.exists
+    (fun (kind, _) -> kind = Masc_tui_keeper_chat_transcript.Progress)
+    (keeper_message_visible_status_rows state live ~now))
+
+let keeper_message_counted_status_rows state live ~now =
+  List.length (keeper_message_visible_status_rows state live ~now)
+  + if keeper_message_standalone_details_hint state live ~now then 1 else 0
 
 let keeper_observed_turn (state : state) keeper_name =
   if Option.is_some state.keeper_turns_error then None
@@ -13582,6 +14054,17 @@ let keeper_message_activity_rows (state : state) =
   | (Tools_compact | Tools_results), None -> []
   | (Tools_compact | Tools_results), Some keeper_name ->
       let waiting = keeper_message_waiting_requests state ~keeper_name in
+      (* The progress row speaks for one execution. Only that execution's
+         phase is a duplicate here; another request of this Keeper -- one that
+         is still finalising while a newer one leads the progress row -- keeps
+         its own clause. *)
+      let progress_execution =
+        Option.map turn_log_execution_id (keeper_message_status_log state) in
+      let shown_by_progress entry =
+        progress_execution = Some (turn_log_execution_id entry.log) in
+      (* A running turn the server reports but no request here owns is named
+         only when no progress row is drawn at all. *)
+      let has_progress = Option.is_some progress_execution in
       let clauses = ref [] and urgent = ref [] in
       let add text = clauses := text :: !clauses in
       let attention text = urgent := text :: !urgent in
@@ -13602,12 +14085,18 @@ let keeper_message_activity_rows (state : state) =
         attention "메시지 전송 확인 중";
       let has_working = any_phase (fun transcript ->
         Masc_tui_keeper_chat_transcript.phase transcript = Working) in
-      if has_working then add "기존 작업 처리 중";
-      if any_phase (fun transcript -> Masc_tui_keeper_chat_transcript.phase transcript = Stream_ended) then
+      let unshown_phase phase = List.exists (fun entry ->
+          not (shown_by_progress entry) && phase entry.log.tl_transcript) own in
+      if unshown_phase (fun transcript ->
+          Masc_tui_keeper_chat_transcript.phase transcript = Working) then
+        add "기존 작업 처리 중";
+      if unshown_phase (fun transcript ->
+          Masc_tui_keeper_chat_transcript.phase transcript = Stream_ended) then
         add "응답 마무리 중";
       List.iter (fun (admission, text) ->
           if List.exists (fun entry ->
-              entry.phase = Turn_streaming
+              not (shown_by_progress entry)
+              && entry.phase = Turn_streaming
               && Masc_tui_keeper_chat_transcript.phase entry.log.tl_transcript = Waiting
               && not (Masc_tui_keeper_chat_transcript.awaiting_continuation entry.log.tl_transcript)
               && Option.map fst (Masc_tui_keeper_chat_transcript.admission entry.log.tl_transcript) = admission) own
@@ -13621,7 +14110,8 @@ let keeper_message_activity_rows (state : state) =
          | None -> List.iter (fun (row : Tui_decode.keeper_turn_row) ->
              if String.equal row.ktr_keeper_name keeper_name then
                match row.ktr_state with
-               | Keeper_turn_running _ -> add "기존 작업 처리 중"
+               | Keeper_turn_running _ ->
+                   if not has_progress then add "기존 작업 처리 중"
                | Keeper_turn_unavailable _ -> attention "현재 작업 확인 불가"
                | Keeper_turn_idle -> ()) state.keeper_turns);
       if waiting <> [] then begin
@@ -13656,15 +14146,10 @@ let keeper_message_activity_rows (state : state) =
       else if List.exists (fun (name, _, intervention) ->
           String.equal name keeper_name && intervention = Retained_before_dispatch)
           state.keeper_interactive_waiting then attention "전송 전 보관 중 · /queue resume";
-      let folded = match keeper_message_status_log state with
-        | Some live when String.equal (turn_log_keeper_name live) keeper_name ->
-            keeper_message_folded_status_count state live.tl_transcript ~now:(Unix.gettimeofday ())
-        | Some _ | None -> 0 in
       let keys =
-        (match keeper_observed_stop_hint state with None -> "" | Some _ -> " · Esc:중단")
-        ^ (if folded > 0 then Printf.sprintf " · +%d" folded else "") in
+        match keeper_observed_stop_hint state with None -> "" | Some _ -> " · Esc:중단" in
       match List.rev !urgent @ List.rev !clauses with
-      | [] when folded = 0 -> []
+      | [] -> []
       | parts -> [{ Masc_tui_answering.lead = String.concat " · " parts;
           rest = ""; keys }]
 ;;
@@ -13719,10 +14204,12 @@ let keeper_message_inflight_drawn (state : state) =
         state.msg_inflight
     | Some _ | None -> state.msg_inflight
   in
+  (* Background Keepers are visible in the roster and Activity pane. Only
+     this conversation's diagnostic requests belong beside its composer. *)
   let uncovered = match state.msg_tool_visibility with
-    | Tools_full -> uncovered
-    | Tools_compact | Tools_results -> List.filter (fun entry ->
-        state.msg_target_keeper_name <> Some entry.sent_request.keeper_name) uncovered in
+    | Tools_full -> List.filter (fun entry ->
+        state.msg_target_keeper_name = Some entry.sent_request.keeper_name) uncovered
+    | Tools_compact | Tools_results -> [] in
   List.fold_left
     (fun groups entry ->
       let execution_id = turn_log_execution_id entry.log in
@@ -13753,11 +14240,9 @@ let keeper_message_inflight_drawn (state : state) =
         @ [ { representative = entry; count = 1; reconciling_count = reconciling } ])
     [] uncovered
 
-(* Foreign turns keep the complete stop command ahead of their descriptive
-   status. Count these physical rows with the same pane width as rendering;
-   otherwise wrapping a long Keeper name would cover the composer below. *)
-let keeper_message_inflight_rows (state : state) ~chat_cols ~now =
-  let width = Masc_tui_frame.inner_width ~cols:chat_cols in
+(* The current conversation's extra request diagnostics, shared by the
+   renderer and its row budget. Background work stays on the Activity pane. *)
+let keeper_message_inflight_rows (state : state) ~chat_cols:_ ~now =
   let batch_label group =
     if group.count = 1 then ""
     else Printf.sprintf "%d messages in one turn · " group.count
@@ -13788,21 +14273,10 @@ let keeper_message_inflight_rows (state : state) ~chat_cols ~now =
       (Masc_tui_keeper_chat_projection.compact_request_id
          (turn_log_execution_id group.representative.log)) age
   in
-  let mine, others = List.partition
-      (fun group -> state.msg_target_keeper_name =
-          Some group.representative.sent_request.keeper_name)
-      (keeper_message_inflight_drawn state) in
-  List.map (fun group -> true, summary group) mine
-  @ List.concat_map (fun group ->
-      let name = Masc.Tui_terminal_text.sanitize_terminal_text
-          group.representative.sent_request.keeper_name in
-      let command_rows =
-        Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - 2))
-          ("/interrupt " ^ name)
-        |> List.map (fun line -> false, "  " ^ line) in
-      command_rows @ [false, summary group]) others
+  List.map (fun group -> true, summary group)
+    (keeper_message_inflight_drawn state)
 
-let keeper_message_status_rows (state : state) ~terminal_cols =
+let keeper_message_status_rows ?scroll (state : state) ~terminal_cols =
   let chat_cols = Masc_tui_roster_pane.content_cols
       ~hidden:(roster_pane_hidden state) ~cols:terminal_cols in
   let unavailable_target =
@@ -13827,9 +14301,8 @@ let keeper_message_status_rows (state : state) ~terminal_cols =
             different number of rows than the pane draws. The age in the
             progress row changes the text, never the row count, so the
             two clock reads cannot disagree on the number. *)
-         List.length
-           (keeper_message_visible_status_rows state live.tl_transcript
-              ~now:(Unix.gettimeofday ())))
+         keeper_message_counted_status_rows state live.tl_transcript
+           ~now:(Unix.gettimeofday ()))
   (* The promoted line and the queued ones are entries in the history now --
      the chat pane appends them to the same stream it scrolls, so the
      conversation holds one time axis. Nothing is reserved for them here:
@@ -13851,26 +14324,25 @@ let keeper_message_status_rows (state : state) ~terminal_cols =
          1
      | Some _ | None -> 0)
   + (if Option.is_some state.msg_loaded_error then 1 else 0)
-  + (if state.msg_memory_visibility <> Memory_hidden
-        && Option.is_some state.msg_memory_error then 1 else 0)
-  + (if state.msg_memory_visibility <> Memory_hidden
-        && state.msg_memory_dropped > 0 then 1 else 0)
+  + (if Option.is_some state.msg_memory_error then 1 else 0)
+  + (if state.msg_memory_dropped > 0 then 1 else 0)
   + (if state.msg_loaded_dropped > 0 then 1 else 0)
   + (if state.msg_older_loading || Option.is_some state.msg_older_error then 1
      else 0)
-  + (if keeper_message_reading_back state then 1 else 0)
+  + (if keeper_message_reading_back ?scroll state then 1 else 0)
   + composer_extra_rows state
 
-let keeper_message_command_window state ~terminal_rows ~terminal_cols =
+let keeper_message_command_window ?scroll state ~terminal_rows ~terminal_cols =
   match state.view, state.keeper_message_focus, state.voice_capture,
         state.msg_recall_replaces with
-  | Keepers Keeper_message, Right_pane, None, None when state.msg_scroll = 0 ->
+  | Keepers Keeper_message, Right_pane, None, None
+    when not (keeper_message_reading_back ?scroll state) ->
     let keeper_names = List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers in
     (match Masc_tui_command.menu ~keeper_names ~state:state.msg_command_menu
         (Masc_tui_message_input.contents state.msg_input) with
      | None -> None
      | Some menu ->
-       let status_rows = keeper_message_status_rows state ~terminal_cols + 1 in
+       let status_rows = keeper_message_status_rows ?scroll state ~terminal_cols + 1 in
        let chat_cols = Masc_tui_roster_pane.content_cols
            ~hidden:(roster_pane_hidden state) ~cols:terminal_cols in
        let history_rows = Masc_tui_message_layout.message_history_height
@@ -13887,8 +14359,8 @@ let keeper_message_command_window state ~terminal_rows ~terminal_cols =
    At the live edge, reserve that possible row only for the support threshold;
    once reading back, it is already part of [keeper_message_status_rows]. The
    rendered history still uses the exact rows it currently draws. *)
-let keeper_message_support_status_rows state ~status_rows =
-  status_rows + if keeper_message_reading_back state then 0 else 1
+let keeper_message_support_status_rows ?scroll state ~status_rows =
+  status_rows + if keeper_message_reading_back ?scroll state then 0 else 1
 
 
 (* The Code pane asks the server for at most this many entries per directory

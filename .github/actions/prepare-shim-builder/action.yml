@@ -1,0 +1,33 @@
+name: Prepare static shim builder
+description: Reuse the compiler image across RC behavior and installation jobs.
+inputs:
+  arch:
+    description: Native Linux architecture (amd64 or arm64)
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Resolve builder identity
+      id: builder
+      shell: bash
+      env:
+        SHIM_ARCH: ${{ inputs.arch }}
+      run: scripts/remote-ssh/build-shim.sh --arch "$SHIM_ARCH" --print-builder-config >> "$GITHUB_OUTPUT"
+    - name: Set up image cache
+      uses: docker/setup-buildx-action@v4
+    - name: Load cached compiler image
+      uses: docker/build-push-action@v7
+      env:
+        DOCKER_BUILD_SUMMARY: 'false'
+        DOCKER_BUILD_RECORD_UPLOAD: 'false'
+      with:
+        context: ./scripts/remote-ssh
+        file: ./scripts/remote-ssh/Dockerfile.shim-builder
+        platforms: linux/${{ inputs.arch }}
+        build-args: |
+          OCAML_COMPILER=${{ steps.builder.outputs.compiler }}
+          SHIM_DEPENDENCY_HASH=${{ steps.builder.outputs.dependency_hash }}
+        tags: ${{ steps.builder.outputs.tag }}
+        load: true
+        cache-from: type=gha,scope=masc-shim-builder-${{ inputs.arch }}
+        cache-to: type=gha,scope=masc-shim-builder-${{ inputs.arch }},mode=min,ignore-error=true

@@ -49,7 +49,7 @@ let valid_memory_search_source_strings =
 
 (* --- Durable fact search (Memory OS store) --- *)
 
-type fact_store =
+type fact_store = Keeper_tool_memory_validation.fact_store =
   | Ordinary_current
   | Source_bound_current
 
@@ -73,6 +73,8 @@ type fact_match =
   ; category : string
   ; basis : Keeper_memory_os_types.basis
   ; store : fact_store
+  ; lookup_evidence : Keeper_memory_os_current.admission_recall_binding option
+  ; successor_evidence : Keeper_memory_os_current.successor_recall_candidate option
   }
 
 (* The durable stores a search reads. Either failing is the store, not the
@@ -119,6 +121,12 @@ let read_current_facts ~keepers_dir ~keeper_id =
   | Ok None -> Ok []
   | Ok (Some snapshot) -> Ok snapshot.facts
   | Error detail -> Error (Snapshot_read_failed detail)
+;;
+
+let fact_match_lookup_text (matched : fact_match) =
+  match matched.lookup_evidence with
+  | None -> matched.claim
+  | Some binding -> binding.source_fact.claim
 ;;
 
 (* Set by the first ranking failure {!answering} logs. *)
@@ -183,6 +191,7 @@ let search_durable_facts
       ~(keepers_dir : string)
       ~(meta : keeper_meta)
       ~(facts : Keeper_memory_os_types.fact list)
+      ~(recall_bindings : Keeper_memory_os_current.admission_recall_binding list)
       ~(query : string)
       ~(limit : int option)
   : (fact_match list * int * Keeper_memory_source_current.file_source list * (unit -> string),
@@ -216,11 +225,18 @@ let search_durable_facts
         not (StringSet.mem fact.source.path unverified_paths))
       source_projection.facts in
   let total_candidates = List.length facts + List.length source_projection.facts in
+  let ordinary_entries = List.map (fun fact -> fact, None) facts in
+  let by_id = List.fold_left (fun indexed (fact : Keeper_memory_os_types.fact) ->
+    StringMap.add (Keeper_memory_os_types.memory_id fact) fact indexed) StringMap.empty facts in
+  let lookup_entries = if query = "" then [] else
+    List.filter_map (fun (binding : Keeper_memory_os_current.admission_recall_binding) ->
+      Option.map (fun target -> target, Some binding)
+        (StringMap.find_opt binding.target_memory_id by_id)) recall_bindings in
   let ordinary_whole, ordinary_fragments =
-    answering
-      ~claim_of:(fun (fact : Keeper_memory_os_types.fact) -> fact.claim)
-      ~query
-      facts
+    answering ~query ~claim_of:(fun ((fact : Keeper_memory_os_types.fact),
+        (evidence : Keeper_memory_os_current.admission_recall_binding option)) ->
+      match evidence with None -> fact.claim | Some binding -> binding.source_fact.claim)
+      (ordinary_entries @ lookup_entries)
   in
   (* Keep the query's ranked order without building a second index. A
      concurrently rewritten claim is not the selected claim, even if its
@@ -240,7 +256,7 @@ let search_durable_facts
         else None) (source_whole @ source_fragments) in
   let source_whole = List.filter still_current source_whole in
   let source_fragments = List.filter still_current source_fragments in
-  let ordinary_match (fact : Keeper_memory_os_types.fact) : fact_match =
+  let ordinary_match ((fact : Keeper_memory_os_types.fact), lookup_evidence) : fact_match =
     { claim = fact.claim
     ; identity =
         Ordinary_memory_id
@@ -248,6 +264,8 @@ let search_durable_facts
     ; category = Keeper_memory_os_types.category_to_string fact.category
     ; basis = fact.basis
     ; store = Ordinary_current
+    ; lookup_evidence
+    ; successor_evidence = None
     }
   in
   let source_match (fact : Keeper_memory_source_current.fact) : fact_match =
@@ -256,13 +274,23 @@ let search_durable_facts
     ; category = "fact"
     ; basis = Keeper_memory_os_types.Observed Keeper_memory_os_types.Transcript
     ; store = Source_bound_current
+    ; lookup_evidence = None
+    ; successor_evidence = None
     }
   in
+  let deduplicate_targets matches =
+    let _, reversed = List.fold_left (fun (seen, kept) (matched : fact_match) ->
+      match matched.identity with
+      | Source_sha256 _ -> seen, matched :: kept
+      | Ordinary_memory_id {memory_id; _} ->
+        if StringSet.mem memory_id seen then seen, kept
+        else StringSet.add memory_id seen, matched :: kept) (StringSet.empty, []) matches in
+    List.rev reversed in
   Ok
-    ( (let matches = List.map ordinary_match ordinary_whole
+    ( (let matches = deduplicate_targets (List.map ordinary_match ordinary_whole
            @ List.map source_match source_whole
            @ List.map ordinary_match ordinary_fragments
-           @ List.map source_match source_fragments in
+           @ List.map source_match source_fragments) in
        match limit with None -> matches | Some limit -> take limit matches)
     , total_candidates
     , deferred_sources
@@ -280,6 +308,75 @@ let search_durable_facts
            ])) )
 ;;
 
+let successor_candidates_for_query ~query candidates =
+  if query="" then [] else
+  let whole,fragments = answering ~query
+    ~claim_of:(fun (candidate : Keeper_memory_os_current.successor_recall_candidate) ->
+      candidate.binding.source_fact.claim) candidates in
+  whole @ fragments
+;;
+
+let search_current_with_successors ~clock ~config ~keepers_dir ~(meta : keeper_meta) ~query ~limit =
+  let module Current = Keeper_memory_os_current in
+  let module Selector = Keeper_memory_successor_selection in
+  match Domain_pool_ref.submit_io_or_inline (fun () ->
+      Current.read_successor_recall_for_keepers_dir ~keepers_dir ~keeper_id:meta.name) with
+  | Error detail -> Error (Snapshot_read_failed detail)
+  | Ok state ->
+    let relevant claim_of rows = if query="" then [] else
+      let whole,fragments = answering ~claim_of ~query rows in whole @ fragments in
+    let candidates = successor_candidates_for_query ~query state.successor_candidates in
+    let judged = Selector.run ~clock ~config ~keepers_dir ~keeper_id:meta.name ~query
+      ~snapshot:state.snapshot candidates in
+    let fresh = if candidates=[] then Ok state else
+      Domain_pool_ref.submit_io_or_inline (fun () ->
+        Current.read_successor_recall_for_keepers_dir ~keepers_dir ~keeper_id:meta.name) in
+    (match fresh with
+    | Error detail -> Error (Snapshot_read_failed detail)
+    | Ok fresh ->
+    let judged = Selector.revalidate ~snapshot:state.snapshot ~candidates ~current:fresh judged in
+    let facts = match fresh.snapshot with None -> [] | Some snapshot -> snapshot.Current.facts in
+    let history_unresolved = relevant (fun (row : Current.recall_unresolved) ->
+      row.binding.source_fact.claim) fresh.unresolved
+      |> List.filter (fun (row : Current.recall_unresolved) -> match row.reason with
+        | Current.Retired_without_successor _ -> false
+        | History_unavailable _ | Missing_transition _ | Invalid_transition _ | Unrecorded_lineage _ -> true) in
+    let unresolved = List.map (fun ((candidate : Current.successor_recall_candidate),issue) -> `Assoc
+      ["request_id",`String candidate.Current.binding.candidate_id.request_id;
+       "issue",Selector.issue_to_json issue]) judged.unresolved
+      @ List.map (fun (row : Current.recall_unresolved) -> `Assoc
+        ["request_id",`String row.binding.candidate_id.request_id;
+         "issue",Current.recall_unresolved_reason_to_json row.reason]) history_unresolved in
+    let unresolved = match fresh.receipt_verification with
+      | Ok () -> unresolved
+      | Error detail -> `Assoc ["issue", `Assoc
+          ["kind", `String "receipt_unavailable"; "detail", `String detail]] :: unresolved in
+    let extra_fields = if unresolved=[] then [] else
+      ["successor_recall",`Assoc ["status",`String "incomplete";"unresolved",`List unresolved;
+        "guidance",`String "Some historical lookup paths could not be resolved. Existing direct results remain usable; absence of further results is not evidence that no current successor exists."]] in
+    (* Keep direct results even when judging a successor fails. Deduplication
+       and the caller's limit happen only after merging both query tiers. *)
+    match search_durable_facts ~config ~keepers_dir ~meta ~facts
+      ~recall_bindings:fresh.direct_bindings ~query ~limit with
+    | Error _ as error -> error
+    | Ok (direct,total,deferred,corpus_revision) ->
+      let successors = List.map (fun (candidate : Current.successor_recall_candidate) ->
+        let fact = candidate.target in
+        {identity=Ordinary_memory_id {memory_id=Keeper_memory_os_types.memory_id fact;origin=fact.origin.kind};
+         claim=fact.claim;category=Keeper_memory_os_types.category_to_string fact.category;
+         basis=fact.basis;store=Ordinary_current;lookup_evidence=Some candidate.binding;
+         successor_evidence=Some candidate}) judged.selected in
+      let whole,fragments = if successors=[] then direct,[] else
+        answering ~claim_of:fact_match_lookup_text ~query (direct @ successors) in
+      let _,rev = List.fold_left (fun (seen,kept) (matched : fact_match) -> match matched.identity with
+        | Source_sha256 _ -> seen,matched::kept
+        | Ordinary_memory_id {memory_id;_} -> if StringSet.mem memory_id seen then seen,kept
+          else StringSet.add memory_id seen,matched::kept) (StringSet.empty,[]) (whole @ fragments) in
+      let merged = List.rev rev in
+      let merged = match limit with None -> merged | Some limit -> take limit merged in
+      Ok (facts,merged,total,deferred,extra_fields,unresolved<>[],corpus_revision))
+;;
+
 let fact_match_to_json (m : fact_match) : Yojson.Safe.t =
   `Assoc
     ([ "text", `String m.claim
@@ -287,6 +384,22 @@ let fact_match_to_json (m : fact_match) : Yojson.Safe.t =
      ; "basis", Keeper_memory_os_types.basis_to_json m.basis
      ; "store", `String (fact_store_to_string m.store)
      ]
+     @ (match m.successor_evidence with
+        | None -> []
+        | Some evidence -> ["successor_lookup_evidence", `Assoc
+            ["kind",`String "historical_source_with_judged_committed_successor";
+             "evidence",Keeper_memory_successor_selection.candidate_to_json evidence;
+             "guidance",`String "Historical lookup provenance only. Returned text and memory_id describe the current target, whose policy may differ from the historical source."]])
+     @ (match m.lookup_evidence, m.successor_evidence with
+        | None, _ | Some _, Some _ -> []
+        | Some binding, None ->
+          [ "lookup_evidence", `Assoc
+              [ "kind", `String "historical_admission_source"
+              ; "request_id", `String binding.candidate_id.request_id
+              ; "source_fact", Keeper_memory_os_types.fact_to_json binding.source_fact
+              ; "target_memory_id", `String binding.target_memory_id
+              ; "guidance", `String "Historical observation used to locate the current target. The returned text and memory_id describe current Memory; this evidence is not a separate current claim."
+              ] ])
      @
      match m.identity with
      | Ordinary_memory_id { memory_id; origin } ->
@@ -648,7 +761,7 @@ type all_search_match =
   | All_history of string
 
 let all_search_match_text = function
-  | All_fact match_ -> match_.claim
+  | All_fact match_ -> fact_match_lookup_text match_
   | All_absorbed match_ -> match_.row.fact.claim
   | All_dropped match_ -> match_.original.claim
   | All_history message -> message
@@ -759,6 +872,7 @@ let current_page_cursor ~revision ~offset =
 
 let keeper_memory_search_with_outcome
       ?turn_ref
+      ?clock
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(ctx_work : working_context)
@@ -891,52 +1005,51 @@ let keeper_memory_search_with_outcome
             ; "guidance", `String "Query-matching stored claims could not be verified and were withheld. Retry relevant retrieval before drawing a negative conclusion; no claim body is supplied."
             ] ] in
     let current_stores cursor =
-      match read_current_facts ~keepers_dir ~keeper_id:meta.name with
+      match search_current_with_successors ~clock ~config ~keepers_dir ~meta ~query ~limit:None with
       | Error _ as error -> error
-      | Ok facts ->
-        (* Rank the complete current answer before slicing. The per-page
-           bound must not discard the facts later pages need. *)
-        (match search_durable_facts ~config ~keepers_dir ~meta ~facts ~query ~limit:None with
+      | Ok (_facts, matches, fact_total, deferred_sources, successor_fields, successor_incomplete, corpus_revision) ->
+        (* Rank the complete current answer, successors included, before
+           slicing. The per-page bound must not discard the facts later
+           pages need. *)
+        let revision = Snapshot_protocol.revision_of_json
+            ~namespace:"keeper-current-memory-search-page"
+            (`Assoc [ "corpus", `String (corpus_revision ())
+                    ; "keeper", `String meta.name
+                    ; "workspace", `String config.base_path
+                    ; "query", `String query
+                    ; "matches", `List (List.map fact_match_to_json matches) ]) in
+        (match current_page_offset ~revision ~count:(List.length matches) cursor with
          | Error _ as error -> error
-         | Ok (matches, fact_total, deferred_sources, corpus_revision) ->
-           let revision = Snapshot_protocol.revision_of_json
-               ~namespace:"keeper-current-memory-search-page"
-               (`Assoc [ "corpus", `String (corpus_revision ())
-                       ; "keeper", `String meta.name
-                       ; "workspace", `String config.base_path
-                       ; "query", `String query
-                       ; "matches", `List (List.map fact_match_to_json matches) ]) in
-           (match current_page_offset ~revision ~count:(List.length matches) cursor with
-            | Error _ as error -> error
-            | Ok offset ->
-              let fact_matches = take limit (List.drop offset matches) in
-              let next_offset = offset + List.length fact_matches in
-              let truncated = next_offset < List.length matches in
-              let page_fields =
-                [ "truncated", `Bool truncated; "revision", `String revision ]
-                @ (if truncated then
-                     [ "next_cursor", `String (current_page_cursor ~revision ~offset:next_offset) ]
-                   else []) in
-              Ok
-                { output =
-                    durable_json
-                      ~fact_jsons:(List.map fact_match_to_json fact_matches)
-                      ~fact_total
-                      ~total_matches:(List.length fact_matches)
-                      ~extra_matches:[]
-                      ~read_errors:(deferred_sources <> [])
-                      ~read_error_fields:(page_fields @ source_verification_fields deferred_sources)
-                ; match_count = List.length fact_matches
-                ; durable_candidates = Some fact_total
-                ; read_errors = deferred_sources <> []
-                ; matched_memory_ids =
-                    List.filter_map
-                      (fun (matched : fact_match) ->
-                         match matched.identity with
-                         | Ordinary_memory_id { memory_id; _ } -> Some memory_id
-                         | Source_sha256 _ -> None)
-                      fact_matches
-                }))
+         | Ok offset ->
+           let fact_matches = take limit (List.drop offset matches) in
+           let next_offset = offset + List.length fact_matches in
+           let truncated = next_offset < List.length matches in
+           let page_fields =
+             [ "truncated", `Bool truncated; "revision", `String revision ]
+             @ (if truncated then
+                  [ "next_cursor", `String (current_page_cursor ~revision ~offset:next_offset) ]
+                else []) in
+           Ok
+             { output =
+                 durable_json
+                   ~fact_jsons:(List.map fact_match_to_json fact_matches)
+                   ~fact_total
+                   ~total_matches:(List.length fact_matches)
+                   ~extra_matches:[]
+                   ~read_errors:(deferred_sources <> [] || successor_incomplete)
+                   ~read_error_fields:(page_fields @ source_verification_fields deferred_sources
+                      @ successor_fields)
+             ; match_count = List.length fact_matches
+             ; durable_candidates = Some fact_total
+             ; read_errors = deferred_sources <> [] || successor_incomplete
+             ; matched_memory_ids =
+                 List.filter_map
+                   (fun (matched : fact_match) ->
+                      match matched.identity with
+                      | Ordinary_memory_id { memory_id; _ } -> Some memory_id
+                      | Source_sha256 _ -> None)
+                   fact_matches
+             })
     in
     (* Source=all combines current facts, absorbed/dropped rows, and history. The match
        tier before the store order ({!answering}): a weaker current fact does
@@ -945,12 +1058,10 @@ let keeper_memory_search_with_outcome
        never silently widens into absorbed history. Only ordinary current facts are
        retrievals (RFC-0418); an absorbed row leaves no Retrieved event. *)
     let all_stores () =
-      match read_current_facts ~keepers_dir ~keeper_id:meta.name with
+      match search_current_with_successors ~clock ~config ~keepers_dir ~meta ~query ~limit:(Some limit) with
       | Error _ as error -> error
-      | Ok facts ->
-        (match search_durable_facts ~config ~keepers_dir ~meta ~facts ~query ~limit:(Some limit) with
-         | Error _ as error -> error
-         | Ok (fact_matches, fact_total, deferred_sources, _corpus_revision) ->
+      | Ok (facts, fact_matches, fact_total, deferred_sources, successor_fields, successor_incomplete, _corpus_revision) ->
+        (
            (* A librarian made one claim of the rows it absorbed (RFC-0456
               §4.2). When that claim answers this search too, the rows say
               the same thing again and are left out, so the claim is not
@@ -964,8 +1075,8 @@ let keeper_memory_search_with_outcome
                (fun ids (m : fact_match) ->
                   match m.identity with
                   | Ordinary_memory_id { memory_id; _ }
-                    when String_util.contains_query_term_ci m.claim query
-                         || String_util.contains_all_query_terms_ci m.claim query ->
+                    when String_util.contains_query_term_ci (fact_match_lookup_text m) query
+                         || String_util.contains_all_query_terms_ci (fact_match_lookup_text m) query ->
                     StringSet.add memory_id ids
                   | Ordinary_memory_id _ | Source_sha256 _ -> ids)
                StringSet.empty
@@ -1005,6 +1116,7 @@ let keeper_memory_search_with_outcome
            let selected = take limit (whole_query @ fragments) in
            let read_errors =
              deferred_sources <> []
+             || successor_incomplete
              || history_has_read_errors history
              || absorbed.unreadable <> []
              || absorbed.unreadable_events <> []
@@ -1029,7 +1141,8 @@ let keeper_memory_search_with_outcome
                                ; "detail", `String (durable_search_error_detail error) ] ])
                       @ absorbed_fields ~absorbed ~unavailable
                       @ history_read_error_fields history
-                      @ source_verification_fields deferred_sources)
+                      @ source_verification_fields deferred_sources
+                      @ successor_fields)
              ; match_count = List.length selected
              ; durable_candidates = Some (fact_total + absorbed.candidates + dropped_total)
              ; read_errors
@@ -1278,460 +1391,8 @@ let keeper_context_status_json
 
 (* --- Explicit memory write surface ------------------------------- *)
 
-(** Which half of a derivation arrived without the other. *)
-type derivation_half =
-  | Rule_id_without_premise_ids
-  | Premise_ids_without_rule_id
-
-(** Why the [rule_id] and [premise_ids] this call carried cannot name a
-    derivation. Closed and produced only by {!validate_memory_write_args}, so a
-    new refusal has to say what to change before it can be made.
-    [Keeper_memory_os_types.is_memory_id] stays the single premise grammar;
-    this type only records which element broke it and where. *)
-type derivation_rejection =
-  | Rule_id_not_a_string
-  | Premise_ids_not_an_array
-  | Rule_id_blank
-  | Premise_ids_empty
-  | Premise_not_a_string of { index : int }
-  | Premise_repeated of
-      { index : int
-      ; premise_id : string
-      }
-  | Premise_not_a_memory_id of
-      { index : int
-      ; premise_id : string
-      }
-
-(** Pure validation result for a [keeper_memory_write] call. Splitting
-    this from the persistence step lets tests pin the error_kind
-    taxonomy without constructing a [Workspace.config]. *)
-type memory_write_error_kind =
-  | Content_empty
-  | Source_path_invalid
-  | Source_read_failed of Keeper_memory_source_current.source_read_failure
-  | Derivation_incomplete of derivation_half
-  | Derivation_invalid of derivation_rejection
-  | Derived_source_path_unsupported
-  | Board_ref_invalid
-  | Board_comment_without_post
-  | Board_ref_with_derivation_unsupported
-  | Board_ref_with_source_path_unsupported
-  | Unsupported_derivation
-  | Supersedes_invalid
-  | Supersedes_with_source_path_unsupported
-  | Supersedes_self
-  | Supersedes_not_current
-  | Supersedes_not_authored
-  | Supersedes_premise_of_successor
-  | Persistence_failed of fact_store
-  | Commit_receipt_inconsistent
-  | No_memory_write_error
-
-let memory_write_error_kind_to_string = function
-  | Content_empty -> "content_empty"
-  | Source_path_invalid -> "source_path_invalid"
-  | Source_read_failed _ -> "source_read_failed"
-  | Derivation_incomplete _ -> "derivation_incomplete"
-  | Derivation_invalid _ -> "derivation_invalid"
-  | Derived_source_path_unsupported -> "derived_source_path_unsupported"
-  | Board_ref_invalid -> "board_ref_invalid"
-  | Board_comment_without_post -> "board_comment_without_post"
-  | Board_ref_with_derivation_unsupported -> "board_ref_with_derivation_unsupported"
-  | Board_ref_with_source_path_unsupported -> "board_ref_with_source_path_unsupported"
-  | Unsupported_derivation -> "unsupported_derivation"
-  | Supersedes_invalid -> "supersedes_invalid"
-  | Supersedes_with_source_path_unsupported -> "supersedes_with_source_path_unsupported"
-  | Supersedes_self -> "supersedes_self"
-  | Supersedes_not_current -> "supersedes_not_current"
-  | Supersedes_not_authored -> "supersedes_not_authored"
-  | Supersedes_premise_of_successor -> "supersedes_premise_of_successor"
-  | Persistence_failed (Ordinary_current | Source_bound_current) -> "persistence_failed"
-  | Commit_receipt_inconsistent -> "commit_receipt_inconsistent"
-  | No_memory_write_error -> ""
-;;
-
-(* What the model does next depends on which side failed. Input the caller
-   can correct is a policy rejection; a store or source file that could not
-   be read or written is a dependency the arguments never reached; the
-   "no error" kind never travels with ok=false, so reaching it here is a
-   producer bug. *)
-let class_of_memory_write_error_kind = function
-  | Content_empty
-  | Source_path_invalid
-  | Derivation_incomplete _
-  | Derivation_invalid _
-  | Derived_source_path_unsupported
-  | Board_ref_invalid
-  | Board_comment_without_post
-  | Board_ref_with_derivation_unsupported
-  | Board_ref_with_source_path_unsupported
-  | Unsupported_derivation
-  | Supersedes_invalid
-  | Supersedes_with_source_path_unsupported
-  | Supersedes_self
-  | Supersedes_not_authored
-  | Supersedes_premise_of_successor
-  | Source_read_failed
-      ( Keeper_memory_source_current.Source_path_rejected _
-      | Keeper_memory_source_current.Source_missing
-      | Keeper_memory_source_current.Source_not_a_regular_file
-      | Keeper_memory_source_current.Source_too_large _
-      | Keeper_memory_source_current.Source_over_limit _ ) ->
-    Tool_result.Policy_rejection
-  (* Like a retraction of an absent fact: the store moved on since the id was
-     read, which a fresh search answers. *)
-  | Supersedes_not_current -> Tool_result.Workflow_rejection
-  | Source_read_failed
-      ( Keeper_memory_source_current.Source_io_failed _
-      | Keeper_memory_source_current.Source_endpoint_unanswered _ )
-  | Persistence_failed (Ordinary_current | Source_bound_current) ->
-    Tool_result.Dependency_unavailable
-  (* The store committed and then did not show what it committed: a
-     producer bug, not a dependency that can answer on a later turn. *)
-  | Commit_receipt_inconsistent | No_memory_write_error -> Tool_result.Runtime_failure
-;;
-
-(* What a failed write committed, and the same fact told to the model, both
-   follow from why it failed, so one match on the kind decides them and no
-   failure site states either.
-
-   A refusal means this claim was not committed. It does not mean the store
-   wrote nothing: the ordinary store moves a snapshot this build cannot decode
-   aside, goes on from empty state, and a derivation can then find its
-   premises gone.
-
-   What a repeat write does depends on the store, so a store failure names
-   it. In the ordinary store the same title and content are the same fact
-   (keyed by their SHA-256). In the source-bound store the path is the key: a
-   write for the same path replaces that path's claim. Either store commits
-   another revision for every write. *)
-let memory_write_failure_effect = function
-  | Content_empty
-  | Source_path_invalid
-  | Source_read_failed _
-  | Derivation_incomplete _
-  | Derivation_invalid _
-  | Derived_source_path_unsupported
-  | Board_ref_invalid
-  | Board_comment_without_post
-  | Board_ref_with_derivation_unsupported
-  | Board_ref_with_source_path_unsupported
-  | Unsupported_derivation
-  | Supersedes_invalid
-  | Supersedes_with_source_path_unsupported
-  | Supersedes_self ->
-    Tool_result.Proven_pre_effect, "The claim was not committed."
-  | Supersedes_not_current | Supersedes_not_authored | Supersedes_premise_of_successor ->
-    ( Tool_result.Proven_pre_effect
-    , "The claim was not committed and no fact was removed." )
-  | Commit_receipt_inconsistent ->
-    ( Tool_result.Proven_post_effect
-    , "A new snapshot revision was committed, but this claim is not in it. Search \
-       memory for the claim before writing it again." )
-  | Persistence_failed Ordinary_current ->
-    ( Tool_result.Effect_outcome_unknown
-    , "The claim may or may not have been committed. Search memory for it before \
-       writing it again: the same title and content make the same fact, but each \
-       write commits another revision." )
-  | Persistence_failed Source_bound_current ->
-    ( Tool_result.Effect_outcome_unknown
-    , "The claim may or may not have been committed. Search memory for it before \
-       writing it again: a write for the same source_path replaces that path's \
-       claim, and each write commits another revision." )
-  (* The "no error" kind reaching a failure is a producer bug; it proves
-     nothing about the store. *)
-  | No_memory_write_error ->
-    ( Tool_result.Effect_outcome_unknown
-    , "The claim may or may not have been committed. Search memory for it before \
-       writing it again." )
-;;
-
-(* A memory identity is the one argument a model cannot guess, and the
-   refusals show it guessing: across 2026-09-01..15 every one of the 20
-   derivation_invalid calls broke on a premise that was not a memory identity.
-   19 had no "sha256:" prefix at all ("mem_01K4Z5...", "c-c6ba9d...",
-   "fact-20260911154720", bare 40-digit hex, "7") and one was a digit too long.
-   So the sentence that rejects one also names the shape and the two tools that
-   hand a real one out. *)
-let premise_id_expectation =
-  Printf.sprintf
-    "A memory identity is %s. keeper_memory_search returns one as memory_id for \
-     each match it finds, and a successful keeper_memory_write returns the \
-     memory_id it committed."
-    Keeper_memory_os_types.memory_id_shape
-;;
-
-(* What to change to make this exact call pass, at the field that failed.
-
-   A refusal that names only its kind leaves the model to pick a field, and
-   the pick it made was to drop the derivation: of the 54 derivation refusals
-   in 2026-09-01..15, one was later written again with rule_id and premise_ids
-   intact. The same keeper's next successful write carried neither in the other
-   53, ten of them with the refused content. Naming the field and what it takes
-   is the answer [Keeper_invocation_contract.exact_fields] already gives for an
-   unknown field.
-
-   The kinds answering [] already carry their own coordinates: a source read
-   failure reports the path and the operation, and the rest name a single field
-   in their own tag. *)
-let memory_write_rejection_fields error_kind =
-  let at field expected = [ "rejected_field", `String field; "expected", `String expected ] in
-  let at_premise index expected =
-    at (Printf.sprintf "premise_ids[%d]" index) expected
-  in
-  match error_kind with
-  | Derivation_incomplete Rule_id_without_premise_ids ->
-    at
-      "premise_ids"
-      ("rule_id names a rule, so premise_ids has to name what the rule was \
-        applied to. " ^ premise_id_expectation)
-  | Derivation_incomplete Premise_ids_without_rule_id ->
-    at
-      "rule_id"
-      "premise_ids names premises, so rule_id has to name the rule that drew \
-       this claim from them."
-  | Derivation_invalid Rule_id_not_a_string -> at "rule_id" "rule_id is a string."
-  | Derivation_invalid Premise_ids_not_an_array ->
-    at
-      "premise_ids"
-      ("premise_ids is an array of memory identity strings. " ^ premise_id_expectation)
-  | Derivation_invalid Rule_id_blank ->
-    at "rule_id" "rule_id names the rule that drew this claim from its premises."
-  | Derivation_invalid Premise_ids_empty ->
-    at
-      "premise_ids"
-      ("A derived claim rests on at least one premise, each a memory identity. "
-       ^ premise_id_expectation)
-  | Derivation_invalid (Premise_not_a_string { index }) ->
-    at_premise
-      index
-      ("Each premise is a memory identity string. " ^ premise_id_expectation)
-  | Derivation_invalid (Premise_repeated { index; premise_id }) ->
-    at_premise
-      index
-      (Printf.sprintf
-         "%S is already named earlier in premise_ids. Each premise is named once."
-         premise_id)
-  | Derivation_invalid (Premise_not_a_memory_id { index; premise_id }) ->
-    at_premise
-      index
-      (Printf.sprintf
-         "%S is not a memory identity. %s"
-         premise_id
-         premise_id_expectation)
-  (* The store holds no fact under these identities, so this claim cannot rest
-     on them yet. Writing a premise returns the memory_id to cite. *)
-  | Unsupported_derivation ->
-    at
-      "premise_ids"
-      "The ids under missing_premise_ids name no fact in the store. Write those \
-       premises first and cite the memory_id each write returns, or write this \
-       claim without rule_id and premise_ids as the observation it is."
-  | Supersedes_invalid ->
-    at
-      "supersedes"
-      ("supersedes is the memory identity of your own earlier fact this claim \
-        replaces. " ^ premise_id_expectation)
-  | Supersedes_with_source_path_unsupported ->
-    at
-      "supersedes"
-      "A source-bound claim is replaced by writing the same source_path again. \
-       Drop supersedes, or drop source_path to write an ordinary claim."
-  | Supersedes_self ->
-    at
-      "supersedes"
-      "This claim has the same bytes as the fact it names, so it is already \
-       current. Drop supersedes, or change the claim."
-  | Supersedes_not_current ->
-    at
-      "supersedes"
-      "No current fact of yours has this memory_id. When supersedes_removed is \
-       present it names the commit that removed it; a superseded_by reason \
-       names the fact that replaced it. Otherwise search memory for the fact \
-       you mean to replace and pass the memory_id it returns."
-  | Supersedes_premise_of_successor ->
-    at
-      "premise_ids"
-      "A premise under missing_premise_ids is the fact supersedes removes, and a \
-       claim cannot rest on the fact it replaces. Drop that premise, or drop \
-       supersedes to keep both facts."
-  | Supersedes_not_authored ->
-    at
-      "supersedes"
-      "This fact is current but you did not write it with keeper_memory_write, \
-       so it cannot be superseded here. Drop supersedes to write the claim \
-       alongside it."
-  | Content_empty
-  | Source_path_invalid
-  | Source_read_failed _
-  | Derived_source_path_unsupported
-  | Board_ref_invalid
-  | Board_comment_without_post
-  | Board_ref_with_derivation_unsupported
-  | Board_ref_with_source_path_unsupported
-  | Persistence_failed (Ordinary_current | Source_bound_current)
-  | Commit_receipt_inconsistent
-  | No_memory_write_error -> []
-;;
-
-let memory_write_error_effect_disposition error_kind =
-  fst (memory_write_failure_effect error_kind)
-;;
-
-type memory_write_validation =
-  | Memory_write_ok of
-      { body : string
-      ; source_path : string option
-      ; basis : Keeper_memory_os_types.basis
-      ; supersedes : string option
-      }
-  | Memory_write_invalid of
-      { error_kind : memory_write_error_kind
-      ; extras : (string * Yojson.Safe.t) list
-      }
-
-let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation =
-  let title = Safe_ops.json_string ~default:"" "title" args |> String.trim in
-  let content = Safe_ops.json_string ~default:"" "content" args |> String.trim in
-  let source_path =
-    match Safe_ops.safe_member "source_path" args with
-    | `Null -> Ok None
-    | `String raw ->
-      let path = String.trim raw in
-      if
-        String.equal path ""
-        || String.contains path '\n'
-        || String.contains path '\r'
-      then Error Source_path_invalid
-      else Ok (Some path)
-    | _ -> Error Source_path_invalid
-  in
-  (* A Board reference is an observation source: the claim was read from a
-     post, optionally from one of its comments. The ids are parsed by the
-     Board's own grammar; whether the post still exists is not checked at
-     write time and no reader checks it yet (RFC-0402 piece 2). *)
-  let board_ref =
-    let optional_string key =
-      match Safe_ops.safe_member key args with
-      | `Null -> Ok None
-      | `String raw ->
-        let value = String.trim raw in
-        if String.equal value "" then Error Board_ref_invalid else Ok (Some value)
-      | _ -> Error Board_ref_invalid
-    in
-    match optional_string "board_post_id", optional_string "board_comment_id" with
-    | Error error, _ | _, Error error -> Error error
-    | Ok None, Ok None -> Ok None
-    | Ok None, Ok (Some _) -> Error Board_comment_without_post
-    | Ok (Some post_id), Ok comment_id ->
-      (match Keeper_memory_os_types.board_ref_of_ids ~post_id ~comment_id with
-       | Ok board -> Ok (Some board)
-       | Error _ -> Error Board_ref_invalid)
-  in
-  let derivation =
-    match Safe_ops.safe_member "rule_id" args, Safe_ops.safe_member "premise_ids" args with
-    | `Null, `Null ->
-      (match board_ref with
-       | Ok (Some board) ->
-         Ok (Keeper_memory_os_types.Observed (Keeper_memory_os_types.Board board))
-       | Ok None | Error _ ->
-         Ok (Keeper_memory_os_types.Observed Keeper_memory_os_types.Transcript))
-    | `String raw_rule_id, `List premise_values ->
-      let rule_id = String.trim raw_rule_id in
-      (* Each arm names the element and the constraint it broke, because the
-         caller can only correct the premise it actually got wrong. The rule is
-         checked before the premises so a call wrong in both is not refused
-         twice. *)
-      let rec premise_ids index seen acc = function
-        | [] ->
-          (match acc with
-           | [] -> Error (Derivation_invalid Premise_ids_empty)
-           | _ :: _ ->
-             Ok
-               (Keeper_memory_os_types.Derived
-                  [ { rule_id; premise_ids = List.rev acc } ]))
-        | `String premise_id :: rest ->
-          if StringSet.mem premise_id seen
-          then Error (Derivation_invalid (Premise_repeated { index; premise_id }))
-          else if not (Keeper_memory_os_types.is_memory_id premise_id)
-          then Error (Derivation_invalid (Premise_not_a_memory_id { index; premise_id }))
-          else
-            premise_ids
-              (index + 1)
-              (StringSet.add premise_id seen)
-              (premise_id :: acc)
-              rest
-        | _ -> Error (Derivation_invalid (Premise_not_a_string { index }))
-      in
-      if String.equal rule_id ""
-      then Error (Derivation_invalid Rule_id_blank)
-      else premise_ids 0 StringSet.empty [] premise_values
-    | `Null, _ -> Error (Derivation_incomplete Premise_ids_without_rule_id)
-    | _, `Null -> Error (Derivation_incomplete Rule_id_without_premise_ids)
-    | `String _, _ -> Error (Derivation_invalid Premise_ids_not_an_array)
-    | _, _ -> Error (Derivation_invalid Rule_id_not_a_string)
-  in
-  (* The id is taken as sent: [is_memory_id] is the one grammar, and a padded
-     id is not the id a search returned. *)
-  let supersedes =
-    match Safe_ops.safe_member "supersedes" args with
-    | `Null -> Ok None
-    | `String memory_id when Keeper_memory_os_types.is_memory_id memory_id ->
-      Ok (Some memory_id)
-    | _ -> Error Supersedes_invalid
-  in
-  match source_path, derivation, board_ref, supersedes with
-  | Error error_kind, _, _, _
-  | _, Error error_kind, _, _
-  | _, _, Error error_kind, _
-  | _, _, _, Error error_kind ->
-    Memory_write_invalid { error_kind; extras = [] }
-  | Ok source_path, Ok basis, Ok board_ref, Ok supersedes ->
-    if Option.is_some supersedes && Option.is_some source_path
-    then
-      Memory_write_invalid
-        { error_kind = Supersedes_with_source_path_unsupported; extras = [] }
-    else if
-      Option.is_some source_path
-      && (match basis with
-          | Keeper_memory_os_types.Observed _ -> false
-          | Keeper_memory_os_types.Derived _ -> true)
-    then
-      Memory_write_invalid
-        { error_kind = Derived_source_path_unsupported; extras = [] }
-    else if
-      Option.is_some board_ref
-      && (match basis with
-          | Keeper_memory_os_types.Observed _ -> false
-          | Keeper_memory_os_types.Derived _ -> true)
-    then
-      Memory_write_invalid
-        { error_kind = Board_ref_with_derivation_unsupported; extras = [] }
-    else if Option.is_some board_ref && Option.is_some source_path
-    then
-      Memory_write_invalid
-        { error_kind = Board_ref_with_source_path_unsupported; extras = [] }
-    else if content = ""
-    then Memory_write_invalid { error_kind = Content_empty; extras = [] }
-    else
-      let body =
-        if title = "" then content else Printf.sprintf "**%s** %s" title content
-      in
-      Memory_write_ok { body; source_path; basis; supersedes }
-;;
-
-(* The observed arms echo the stored wire shape; the derived arm reports a
-   count instead of the derivations. *)
-let memory_write_basis_receipt = function
-  | Keeper_memory_os_types.Observed _ as basis ->
-    Keeper_memory_os_types.basis_to_json basis
-  | Keeper_memory_os_types.Derived derivations ->
-    `Assoc
-      [ "kind", `String "derived"
-      ; "proof_count", `Int (List.length derivations)
-      ]
-;;
+include (Keeper_tool_memory_validation :
+  module type of Keeper_tool_memory_validation with type fact_store := fact_store)
 
 (* An explicit write is a claim a later turn reads back; the current Memory OS
    snapshot is the only store it reaches.
@@ -1872,7 +1533,7 @@ let support_invalidation_receipt
    answer ([memory_write_answer_of_output]) keeps exactly [answer], so the two
    cannot drift apart without the compiler seeing it. Snapshot stamps
    ([revision], [recorded_at]), counts and prose ([rows_written],
-   [what_committed]) are not answer keys. *)
+   [what_committed]) and pending request_id/sequence are not answer keys. *)
 module Write_receipt_key = struct
   let ok = "ok"
   let error_kind = "error_kind"
@@ -2027,8 +1688,52 @@ let keeper_memory_write_with_outcome
       Config_dir_resolver.keepers_dir_for_base_path
         ~base_path:config.Workspace.base_path
     in
-    (match source_path with
-     | Some source_path ->
+    (match source_path, basis, supersedes with
+     (* The Librarian admission queue only moves while the Librarian runs;
+        with the switch off (or invalid) nobody drains it, and a plain
+        observation would sit pending forever behind an ok:true receipt.
+        Those writes take the direct current-snapshot path below instead. *)
+     | None, Keeper_memory_os_types.Observed _, None
+       when Env_config.KeeperMemoryOs.librarian_config_state ()
+            = Env_config.KeeperMemoryOs.Enabled ->
+       let request_id = Random_id.prefixed ~prefix:"memory-admission-" ~bytes:16 in
+       let now = Time_compat.now () in
+       let fact : Keeper_memory_os_types.fact =
+         { claim = body; category = Keeper_memory_os_types.Fact;
+           first_seen = now; last_seen = now;
+           origin = { kind = Keeper_memory_os_types.Authored;
+             trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id };
+           basis } in
+       let saved =
+         try Keeper_memory_admission_queue.append ~keepers_dir
+             ~keeper_id:meta.name ~request_id fact with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn -> Error (Printexc.to_string exn) in
+       (match saved with
+        | Error detail ->
+          Log.Keeper.warn "pending memory admission write failed keeper=%s request_id=%s: %s"
+            meta.name request_id detail;
+          respond ~ok:false ~error_kind:Pending_admission_persistence_failed
+            [ "request_id", `String request_id;
+              Write_receipt_key.store, `String "pending_memory_admission";
+              Write_receipt_key.detail, `String detail ]
+        | Ok candidate ->
+          (* Notification failure cannot turn the committed queue append into
+             a failed save. The signal logs recoverable failures; startup and
+             subsequent wakes can discover this same pending candidate. *)
+          Keeper_librarian_queue_signal.changed
+            ~base_path:config.Workspace.base_path ~keeper_name:meta.name;
+          respond ~ok:true ~error_kind:No_memory_write_error
+            [ Write_receipt_key.outcome, `String "persisted_pending_admission";
+              Write_receipt_key.store, `String "pending_memory_admission";
+              "request_id", `String candidate.request_id;
+              "sequence", `Int candidate.sequence;
+              "recorded_at", `String (Masc_domain.iso8601_of_unix_seconds candidate.fact.last_seen);
+              "rows_written", `Int 1;
+              Write_receipt_key.basis, memory_write_basis_receipt candidate.fact.basis;
+              "what_committed", `String
+                "The candidate was persisted for Librarian admission. This receipt acknowledges pending input and does not confirm admission or a current Memory identity; the worker may already have processed it. This request_id is not a memory_id and cannot be a premise or supersedes target. Search current Memory for an admitted premise identity; supersedes additionally requires origin authored." ])
+     | Some source_path, _, _ ->
        (match
           Keeper_memory_source_current.upsert_file_fact
             ~ordinary_facts:(fun () ->
@@ -2107,7 +1812,8 @@ let keeper_memory_write_with_outcome
             meta.name
             detail;
           respond ~ok:false ~error_kind:(Persistence_failed Source_bound_current) [ Write_receipt_key.detail, `String detail ])
-     | None ->
+     | None, _, Some _ | None, Keeper_memory_os_types.Derived _, None
+     | None, Keeper_memory_os_types.Observed _, None ->
     (match upsert_explicit_fact ~keepers_dir ~meta ~body ~basis ~supersedes with
      | Ok (snapshot, supersession) ->
        let written_fact =
@@ -2242,71 +1948,6 @@ let keeper_memory_write_with_outcome
 
 (* --- Explicit memory retraction surface -------------------------- *)
 
-type memory_retract_error_kind =
-  | Memory_id_invalid
-  | Reason_empty
-  | Fact_not_found
-  | Retract_persistence_failed
-  | No_memory_retract_error
-
-let memory_retract_error_kind_to_string = function
-  | Memory_id_invalid -> "memory_id_invalid"
-  | Reason_empty -> "reason_empty"
-  | Fact_not_found -> "fact_not_found"
-  | Retract_persistence_failed -> "persistence_failed"
-  | No_memory_retract_error -> ""
-;;
-
-let class_of_memory_retract_error_kind = function
-  | Memory_id_invalid | Reason_empty -> Tool_result.Policy_rejection
-  | Fact_not_found -> Tool_result.Workflow_rejection
-  | Retract_persistence_failed -> Tool_result.Dependency_unavailable
-  | No_memory_retract_error -> Tool_result.Runtime_failure
-;;
-
-(* As for a write, one match on the kind decides what committed and what the
-   model is told. A refusal means the retraction was not committed; the store
-   may still have moved aside a snapshot it could not decode, which also
-   leaves the fact absent.
-
-   A fact the snapshot does not hold is the answer for an id that was never
-   current, for one an earlier retraction already removed (including one whose
-   result said it may or may not have committed), and for one that was in a
-   snapshot the store set aside. The model is told all three, so a retry's
-   refusal is not read as proof that the first attempt did nothing. *)
-let memory_retract_failure_effect = function
-  | Memory_id_invalid | Reason_empty ->
-    Tool_result.Proven_pre_effect, "The retraction was not committed."
-  | Fact_not_found ->
-    ( Tool_result.Proven_pre_effect
-    , "The retraction was not committed: this memory_id is not in the current \
-       snapshot. It may never have been current, an earlier retraction may have \
-       removed it (even one whose result said it may or may not have committed), \
-       or it may have been in a snapshot the store could not read and set aside." )
-  | Retract_persistence_failed | No_memory_retract_error ->
-    ( Tool_result.Effect_outcome_unknown
-    , "The retraction may or may not have been committed. Search memory for this \
-       fact before retracting it again: if it is gone, this attempt committed and \
-       a second retraction answers fact_not_found." )
-;;
-
-type memory_retract_validation =
-  | Memory_retract_ok of
-      { memory_id : string
-      ; reason : string
-      }
-  | Memory_retract_invalid of memory_retract_error_kind
-
-let validate_memory_retract_args (args : Yojson.Safe.t) =
-  let memory_id = Safe_ops.json_string ~default:"" "memory_id" args in
-  let reason = Safe_ops.json_string ~default:"" "reason" args |> String.trim in
-  if not (Keeper_memory_os_types.is_memory_id memory_id)
-  then Memory_retract_invalid Memory_id_invalid
-  else if String.equal reason ""
-  then Memory_retract_invalid Reason_empty
-  else Memory_retract_ok { memory_id; reason }
-;;
-
 let keeper_memory_retract_with_outcome
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -2426,6 +2067,7 @@ let keeper_memory_retract_with_outcome
 ;;
 
 module For_testing = struct
+  let successor_candidates_for_query = successor_candidates_for_query
   let read_current_facts ~keepers_dir ~keeper_id =
     Result.map_error
       durable_search_error_detail

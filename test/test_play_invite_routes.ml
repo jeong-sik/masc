@@ -19,6 +19,37 @@ let with_dir prefix f =
   let dir = Filename.temp_dir prefix "" in
   Fun.protect ~finally:(fun () -> remove_tree dir) (fun () -> f dir)
 
+(* Only process/container creation is replaced; HTTP effects use the attached
+   worker's SDK transport and host controller admission. *)
+let with_worker ~base_path f =
+  Eio_main.run (fun env ->
+    let previous_runtime = Runtime.For_testing.snapshot () in
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    Fun.protect ~finally:(fun () ->
+      Runtime.For_testing.restore previous_runtime;
+      Server_auth.clear_server_state ();
+      Fs_compat.clear_fs ()) (fun () ->
+      Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 30. (fun () ->
+        Eio.Switch.run (fun sw ->
+          Eio_context.with_test_env ~sw ~net:(Eio.Stdenv.net env)
+            ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
+            let runtime_path = Filename.concat base_path "runtime.toml" in
+            Out_channel.with_open_bin runtime_path (fun channel -> output_string channel {|[providers.local]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+[models.sample]
+api-name = "sample"
+max-context = 1024
+[local.sample]
+[runtime]
+default = "local.sample"
+|});
+            (match Runtime.init_default ~config_path:runtime_path with
+             | Ok () -> () | Error detail -> fail detail);
+            Masc.Lane_addon_runtime.For_testing.reset ();
+            Machine_worker_fixture.with_dos ~clock:(Eio.Stdenv.clock env) ~sw ~base_path
+              (fun ~invoke:_ ~detach -> f ~detach))))))
+
 let loopback_request_authority () =
   match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
   | Ok authority -> authority
@@ -115,12 +146,14 @@ let test_invite_routes () =
     let worker = token_for base_path ~agent_name:"codex" ~role:Masc_domain.Worker in
     let state = Masc.Mcp_server.For_testing.create_state ~base_path in
     Masc_test_deps.with_process_env "MASC_HTTP_BASE_URL" (Some "http://127.0.0.1:8935") (fun () ->
-      Eio_main.run (fun env ->
-        Masc_test_deps.init_eio_clock env;
+      with_worker ~base_path (fun ~detach ->
         let call ?(body = "") ~token meth target = dispatch ~state ~meth ~target ~token ~body in
         let invites = Routes.invites_path in
         let issue_body = {|{"name":"minsu","hours":2}|} in
         check int "a worker cannot issue" 403 (status_of (call ~token:worker "POST" invites ~body:issue_body));
+        let foreign_issue = {|{"name":"minsu","hours":2,"expected_workspace":{"base_path":"/foreign","masc_root":"/foreign/.masc"}}|} in
+        check int "foreign workspace cannot issue credential" 409
+          (status_of (call ~token:operator "POST" invites ~body:foreign_issue));
         let issued = call ~token:operator "POST" invites ~body:issue_body in
         check int "the operator issues" 201 (status_of issued);
         let issued = body_of issued in
@@ -131,6 +164,9 @@ let test_invite_routes () =
         let player = String.sub link (String.length prefix) (String.length link - String.length prefix) in
         check int "a player cannot issue" 403 (status_of (call ~token:player "POST" invites ~body:issue_body));
         check int "a player cannot list" 403 (status_of (call ~token:player "GET" invites));
+        check int "foreign workspace cannot revoke issued credential" 409
+          (status_of (call ~token:operator "DELETE"
+            (invites ^ "/minsu?expected_base_path=%2Fforeign&expected_masc_root=%2Fforeign%2F.masc")));
         let again = call ~token:operator "POST" invites ~body:issue_body in
         check int "the same name again is a conflict" 409 (status_of again);
         check string "because a credential has it" "credential" (string_member "taken_by" (body_of again));
@@ -207,7 +243,8 @@ let test_invite_routes () =
             check (option string) "nobody holds the controller" None (controller ()));
         let not_invite = call ~token:operator "DELETE" (invites ^ "/codex") in
         check int "a worker's credential is not an invite" 409 (status_of not_invite);
-        check bool "and the worker keeps it" true (Option.is_some (Auth.load_credential base_path "codex")))))
+        check bool "and the worker keeps it" true (Option.is_some (Auth.load_credential base_path "codex"));
+        detach ())))
 
 let test_invalid_persisted_invite_is_unavailable () =
   with_dir "play-invalid-expiry-route-" (fun base_path ->

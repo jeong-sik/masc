@@ -1388,11 +1388,31 @@ let test_private_jsonl_transaction_lock_contention_is_typed () =
          | Ok _ -> fail "cross-process stable-lock contention was accepted")
 ;;
 
+let test_private_jsonl_observed_append_matches_locked_bytes () =
+  List.iter (fun original ->
+    with_temp_jsonl original @@ fun path ->
+    let before = Unix.stat path in
+    let suffix = "{\"row\":3}\n" in
+    match Fs_compat.append_private_jsonl_durable_observed_result path suffix with
+    | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+    | Ok (_, None) -> fail "existing file lost its append observation"
+    | Ok (_, Some observation) ->
+      check int "before length includes any torn bytes" before.Unix.st_size observation.before.Unix.st_size;
+      check int "before inode is exact" before.Unix.st_ino observation.before.Unix.st_ino;
+      check string "observation identifies exact appended bytes" suffix observation.suffix;
+      check int "after length names persisted result" (String.length (Fs_compat.load_file path)) observation.after.Unix.st_size;
+      check bool "tail recovery cannot claim a pure append" (String.ends_with ~suffix:"\n" original)
+        (observation.after.Unix.st_size-observation.before.Unix.st_size=String.length suffix))
+    ["{\"row\":1}\n";"{\"row\":1}\n{\"row\":2"]
+;;
+
 let () =
   run
     "fs_compat durable append"
     [ ( "durable_append"
-      , [ test_case "success fsyncs" `Quick test_success_fsyncs
+      , [ test_case "observed append preserves exact locked before/after identity" `Quick
+            test_private_jsonl_observed_append_matches_locked_bytes;
+          test_case "success fsyncs" `Quick test_success_fsyncs
         ; test_case
             "partial ENOSPC rolls back and fsyncs"
             `Quick

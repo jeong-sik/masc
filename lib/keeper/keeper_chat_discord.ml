@@ -448,6 +448,7 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
     | Agent_core_stream_message_stop
     | Agent_core_stream_ping
     | Agent_core_content_block_start _
+    | Model_content_activity _
     | Agent_core_content_block_stop _
     | Agent_core_thinking_delta _
     | Agent_core_thinking_signature_delta _
@@ -466,6 +467,7 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
     | Tool_call_args _
     | Tool_call_args_snapshot _
     | Tool_call_end _
+    | Native_tool_progress _
     | Native_tool_end _
     (* An approval prompt has no operator on a connector channel: nobody is
        sitting there to answer y/n, and posting the question would ask a room

@@ -6,4 +6,4 @@
  (name test_mcp_seat_profile)
  (modules test_mcp_seat_profile)
  (action (run %{test}))
- (libraries masc_test_deps alcotest yojson unix eio eio_main httpun mirage-crypto-rng.unix masc.masc_core masc.server masc.dos_lane))
+ (libraries machine_worker_fixture mcp_protocol masc_test_deps alcotest yojson unix eio eio_main httpun mirage-crypto-rng.unix masc.masc_core masc.server masc.dos_lane))

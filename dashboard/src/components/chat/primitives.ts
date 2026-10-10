@@ -420,8 +420,8 @@ function deliveryLabel(entry: KeeperConversationEntry): string {
       return 'no reply'
     case 'error':
       return 'error'
-    case 'transport_failure':
-      return 'transport failure'
+    case 'request_failure':
+      return 'request failure'
     case 'interrupted':
       return 'interrupted'
     case 'history':
@@ -2784,13 +2784,13 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   const liveLabel = liveMessageLabel(entry)
   const messageText = liveLabel ? '' : entry.text || '(empty reply)'
   const messageLength = messageText.length
-  // keeper-state.ts maps the writer-declared kind=transport_failure to its own
+  // keeper-state.ts maps the server-owned request_failure role to its own
   // closed delivery variant; only that durable row renders the typed
   // failure card, because its reassurance ("보낸 메시지는 사라지지 않았습니다")
   // holds only when the keeper never answered. interrupted/timeout keep any
   // partial text and render as prose plus the diagnostic banner below.
   const isFailureMessage =
-    entry.delivery === 'transport_failure' && !!entry.error?.trim()
+    entry.delivery === 'request_failure'
   const richTextRole = entry.role === 'assistant' || entry.role === 'system'
   const hasRealText = !liveLabel && !!entry.text && entry.text.trim().length > 0
   const traceOwnsIntermediateText = !hasRealText && (entry.traceSteps?.length ?? 0) > 0
@@ -3061,8 +3061,8 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
               ? html`<${ApprovalLifecycleCard} lifecycle=${entry.approvalLifecycle} />`
               : isFailureMessage
               ? html`<${ChatFailureCard}
-                  diagnostic=${entry.error?.trim() ? entry.error : messageText}
-                  onCopy=${() => copyWithToast(entry.error?.trim() ? entry.error : messageText, '오류 내용을 복사했습니다')}
+                  diagnostic=${entry.error ?? entry.text}
+                  onCopy=${() => copyWithToast(entry.error ?? entry.text, '오류 내용을 복사했습니다')}
                 >
                   ${hasEffectiveBlocks ? html`
                     <section data-chat-retained-output aria-label="실패 전에 생성된 결과">
@@ -3782,6 +3782,8 @@ function ToolTraceCard({
   const canMarkMissingForEntry = (entry: KeeperConversationEntry): boolean =>
     turnComplete && coverageStateForEntry(entry) === 'covered'
   const hasChatResponse = assistant !== null
+    && assistant.role === 'assistant'
+    && assistant.delivery !== 'request_failure'
     && assistant.delivery !== 'no_reply'
     && assistant.text.trim().length > 0
   const ordered = hasChatResponse && assistant
@@ -4298,8 +4300,11 @@ export function buildChatRenderUnits(
       if (!canAppendToolToRun(run, entry)) flush()
       run.push(entry)
     } else {
+      // Both speech and a server failure can terminate completed work. The
+      // row retains its author/type when rendered inside the work bundle.
+      const ownsWork = entry.role === 'assistant' || entry.delivery === 'request_failure'
       if (
-        entry.role === 'assistant'
+        ownsWork
         && (run.length > 0 || (entry.traceSteps?.length ?? 0) > 0)
         && canBundleToolsWithAssistant(run, entry)
       ) {
@@ -4313,7 +4318,7 @@ export function buildChatRenderUnits(
         continue
       }
       flush()
-      if (entry.role === 'assistant' && (entry.traceSteps?.length ?? 0) > 0) {
+      if (ownsWork && (entry.traceSteps?.length ?? 0) > 0) {
         units.push({
           kind: 'turnBundle',
           id: `turn-${entry.id}`,

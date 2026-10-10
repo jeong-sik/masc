@@ -348,10 +348,12 @@ val tool_help_index_header : string
     execution path only picks the variant and supplies the data. *)
 
 (** keeper.tool_filesystem.* — Keeper filesystem tool-result wording
-    ([keeper_tool_filesystem_runtime.fs_guidance]). *)
+    ([Keeper_tool_filesystem_guidance.t]). *)
 
 val keeper_tool_filesystem_offset_not_1_based : string
 val keeper_tool_filesystem_limit_not_positive : string
+val keeper_tool_filesystem_invalid_read_integer : string
+val keeper_tool_filesystem_invalid_read_arguments : string
 val keeper_tool_filesystem_available_cwds_partial : string
 val keeper_tool_filesystem_checkout_scan_failed : string
 val keeper_tool_filesystem_offset_beyond_window : string

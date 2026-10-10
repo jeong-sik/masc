@@ -429,6 +429,32 @@ let test_deletion_inventory_waits_for_reconfirmed_workspace () =
     (state.keeper_deletions = Some (Ok refreshed));
   Alcotest.(check int) "selection follows its operation after reorder" 0 state.keeper_deletions_cursor
 
+(* An Info refresh queued behind an in-flight Keeper lanes read belongs to
+   that read's authority. Suspension retires the read; the replacement read
+   launched after reconfirmation leaves later than the queued request, so it
+   satisfies it. A flag left behind would start a second, redundant read
+   when the replacement answers, and that read's failure would overwrite the
+   recovered reading with a stale error. *)
+let test_suspension_folds_queued_lanes_reread_into_resume () =
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
+      ~port:0 ~refresh_interval:0. () in
+  state.keeper_lanes_inflight <- true;
+  state.keeper_lanes_reread_pending <- true;
+  suspend_workspace_readings state;
+  Alcotest.(check bool) "in-flight read released" false state.keeper_lanes_inflight;
+  Alcotest.(check bool) "queued reread retired with its authority" false
+    state.keeper_lanes_reread_pending;
+  Alcotest.(check bool) "replacement read still requested" true state.keeper_lanes_resume;
+  (* A queued reread whose read was already released (not run) still asks
+     for a replacement after reconfirmation. *)
+  state.keeper_lanes_resume <- false;
+  state.keeper_lanes_reread_pending <- true;
+  suspend_workspace_readings state;
+  Alcotest.(check bool) "queued reread retired without an in-flight read" false
+    state.keeper_lanes_reread_pending;
+  Alcotest.(check bool) "its demand carried into resume" true state.keeper_lanes_resume
+
 let test_uncertain_identity_retires_reads_not_admitted_operations () =
   let open Masc_tui_types in
   let module Detail = Masc_tui_board_detail in
@@ -813,10 +839,38 @@ let test_effect_observations_resume_without_repeating_effects () =
   Alcotest.(check bool) "old save cannot replace newer panel read" false
     (retain_operation_observation state (Lane_subscriptions_observation 9))
 
+let test_native_task_read_epoch_retirement () =
+  let open Masc_tui_types in
+  let state=create_state ~workspace:"a" ~local_base_path:"/workspace/a"
+      ~port:0 ~refresh_interval:0. () in
+  state.server_identity <- Some (identity "/workspace/a");
+  state.workspace_identity <- Workspace_identity_match;
+  let authority=state.workspace_authority in
+  let reading=Some state.workspace_read_authority in
+  Alcotest.(check bool) "current read completion is admitted" true
+    (workspace_reply_admitted state ~authority ~reading ~kind:Workspace_observation);
+  let cached=["alpha",Masc_tui_native_tasks.empty] in
+  state.msg_native_tasks <- cached;
+  state.msg_native_tasks_inflight <- ["alpha"];
+  state.msg_native_tasks_audit_pending <- ["alpha"];
+  suspend_workspace_readings state;
+  Alcotest.(check (list string)) "retired native slot releases" [] state.msg_native_tasks_inflight;
+  Alcotest.(check bool) "cached task evidence survives" true (state.msg_native_tasks==cached);
+  Alcotest.(check (list string)) "manual audit intent survives same workspace suspension"
+    ["alpha"] state.msg_native_tasks_audit_pending;
+  state.msg_native_tasks_inflight <- ["alpha"];
+  Alcotest.(check bool) "old completion cannot release successor slot" false
+    (workspace_reply_admitted state ~authority ~reading ~kind:Workspace_observation);
+  Alcotest.(check bool) "successor read is admitted" true
+    (workspace_reply_admitted state ~authority
+       ~reading:(Some state.workspace_read_authority) ~kind:Workspace_observation)
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "unsent resource and log intents survive reconfirmation" `Quick
+      , [ Alcotest.test_case "native observations retire without losing queued audit" `Quick
+            test_native_task_read_epoch_retirement
+        ; Alcotest.test_case "unsent resource and log intents survive reconfirmation" `Quick
             test_unsent_resource_and_log_intents_survive_reconfirmation
         ; Alcotest.test_case "effect observations resume without repeating effects" `Quick
             test_effect_observations_resume_without_repeating_effects
@@ -868,5 +922,7 @@ let () =
             test_deletion_inventory_waits_for_reconfirmed_workspace
         ; Alcotest.test_case "uncertainty retires reads while admitted operations survive" `Quick
             test_uncertain_identity_retires_reads_not_admitted_operations
+        ; Alcotest.test_case "suspension folds a queued lanes reread into resume" `Quick
+            test_suspension_folds_queued_lanes_reread_into_resume
         ] )
     ]

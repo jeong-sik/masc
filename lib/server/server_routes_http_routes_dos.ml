@@ -11,11 +11,9 @@
     (another player holds the controller, no machine is loaded, an unknown
     key), as [POST /api/v1/msx/load] answers.
 
-    Each call uses the controller execution boundary a Keeper's call uses
-    ([Keeper_dos_controller.execute]): before a move, a controller whose
-    Keeper stopped or whose credential expired or is gone is let go, and a
-    pass to a name not at the machine is a 400 (a 503 when who sits there
-    cannot be read) and nothing runs. *)
+    Each call resolves an attached shared DOS worker. Host credential policy
+    and worker serialization cover controller admission and execution. A missing
+    worker is unavailable; no process-local emulator is used as a fallback. *)
 
 open Server_auth
 module Http = Http_server_eio
@@ -51,6 +49,23 @@ let moves = List.map (fun route -> path route, schema route) all_routes
 let result_json ~ok ~message data =
   `Assoc [ ("ok", `Bool ok); ("message", `String message); ("data", data) ]
 
+let invoke_response ~config ~who ~name ~args =
+  match Machine_addon_host.call_shared ~config
+    ~principal:(Lane_addon_call_context.Host_actor who) ~name ~arguments:args with
+  | Error (Lane_addon_runtime.Unavailable message
+          | Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Unavailable message)) ->
+      `Service_unavailable, result_json ~ok:false ~message `Null
+  | Error (Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Rejected message | Activity_disabled message | Activity_unobserved message)) ->
+      `Bad_request, result_json ~ok:false ~message `Null
+  | Error (Lane_addon_runtime.Outcome_unknown message) ->
+      `Service_unavailable, result_json ~ok:false
+        ~message:(message ^ "; inspect the current machine before retrying") `Null
+  | Ok result ->
+      let ok = result.Mcp_protocol.Mcp_types.is_error <> Some true in
+      (if ok then `OK else `Bad_request),
+      result_json ~ok ~message:(Agent_core.Mcp.text_of_tool_result result)
+        (Option.value ~default:`Null result.structured_content)
+
 (* Every one of these moves what a watcher shows: press, type and step run the
    machine, and pass changes the holder the capture carries
    ([Lane_addon_sources.activity_of_misc_operation]). A refusal from the tool
@@ -72,41 +87,17 @@ let run_response ~config ~who ~route ~body =
     (match Tool_input_validation.validate_args ~schema:(schema route).Masc_domain.input_schema ~name ~args () with
      | Error refusal -> rejected (Tool_result.message refusal)
      | Ok args ->
-       let ctx : Tool_misc.context =
-         { config; agent_name = who; help_schemas = Config.raw_all_tool_schemas } in
-       (match Keeper_dos_controller.execute ~config ~who ~name ~args
-           ~run:(fun () -> Tool_misc.dispatch ctx ~name ~args) with
-        | Error (Keeper_dos_controller.Refused message) -> rejected message
-        | Error (Keeper_dos_controller.Seats_unknown message) ->
-          `Service_unavailable, result_json ~ok:false ~message `Null
-        | Ok None -> `Internal_server_error, result_json ~ok:false ~message:(name ^ " is not dispatched") `Null
-        | Ok (Some result) ->
-          let ok = Tool_result.is_success result in
-          machine_changed ~config;
-          ( (if ok then `OK else `Bad_request)
-          , result_json ~ok ~message:(Tool_result.message result) (Tool_result.data result) )))
+       let status, json = invoke_response ~config ~who ~name ~args in
+       machine_changed ~config;
+       status, json)
 
-(* A press for a caller that chose the keys from one program's layout (the
-   masc pad). It takes [POST /api/v1/dos/press]'s steps -- the departed-holder
-   release, the tool's lane call and answer, the watchers -- with the lane's
-   [press_into] in place of [press], so the keys go in only while that
-   program is still loaded. The keys come from a parsed layout, whose every
-   name was checked when it was read, so there is no body to check against
-   the tool's schema. *)
+(* The worker checks the expected program while holding its machine lock. *)
 let press_into ~config ~who ~saves_name ~keys =
-  match Keeper_dos_controller.before_move ~config ~who with
-  | Error error ->
-    `Service_unavailable,
-    result_json ~ok:false ~message:(Masc_domain.masc_error_to_string error) `Null
-  | Ok () ->
-  let result =
-    Tool_misc_dos_lane.press_into ~tool_name:(tool_name Press) ~start_time:(Tool_timing.start ())
-      ~base_path:config.Workspace.base_path ~who ~saves_name ~keys
-  in
+  let status, json = invoke_response ~config ~who ~name:(tool_name Press)
+    ~args:(`Assoc ["keys", `List (List.map (fun key -> `String key) keys);
+      "expected_program", `String saves_name]) in
   machine_changed ~config;
-  let ok = Tool_result.is_success result in
-  ( (if ok then `OK else `Bad_request)
-  , result_json ~ok ~message:(Tool_result.message result) (Tool_result.data result) )
+  status, json
 
 let add_route router route =
   Http.Router.post (path route)

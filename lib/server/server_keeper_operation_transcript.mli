@@ -2,7 +2,8 @@
     retries cannot consume the original request's terminal assistant slot. *)
 type settlement =
   | Runtime_deferred
-  | Terminal of { content : string; kind : Keeper_chat_store.Row_kind.t }
+  | Reply of string
+  | Request_failed of string
 val persist : base_dir:string -> keeper_name:string ->
   operation_id:Keeper_chat_delivery_identity.Request_id.t ->
   resumed_from:Keeper_semantic_execution.gate_checkpoint option -> settlement:settlement ->

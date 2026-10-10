@@ -1,10 +1,22 @@
-(** Pure line-coordinate slicing of bytes already read by a filesystem backend.
+(** Pure Read coordinate decoding and slicing of bytes acquired by a filesystem backend.
     This module does not resolve paths, read files, or render prompt guidance. *)
 
 type read_line_window =
   { start_line : int (* 1-based first line to return *)
   ; max_lines : int option (* cap on returned lines; None = to EOF *)
   }
+
+type coordinate = Offset | Limit
+
+type argument_error =
+  | Invalid_integer of { coordinate : coordinate; value : Yojson.Safe.t }
+  | Below_one of { coordinate : coordinate; value : int }
+  | Not_an_object of Yojson.Safe.t
+
+val of_args : Yojson.Safe.t -> (read_line_window, argument_error) result
+(** Only absent coordinates use defaults. JSON integers, including integer
+    literals and integral finite numbers, must fit the native index type.
+    Present malformed or out-of-range values are errors, never absence. *)
 
 type read_window_slice =
   { window_content : string

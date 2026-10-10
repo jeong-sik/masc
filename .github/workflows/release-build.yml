@@ -18,7 +18,6 @@ jobs:
       - name: Build production dashboard once
         run: |
           corepack enable && corepack prepare pnpm@10.31.0 --activate
-          (cd dashboard && pnpm install --frozen-lockfile)
           scripts/build-dashboard-if-needed.sh --force
       - uses: actions/upload-artifact@v7
         with:
@@ -366,6 +365,12 @@ jobs:
       # probed once here: a shim that cannot answer --probe is not an asset.
       # It is built before the installer smoke so the smoke can stage it and
       # check that install.sh places it with its sha256 sidecar (B-2).
+      - name: Prepare static shim compiler
+        if: matrix.shim-arch != ''
+        uses: ./.github/actions/prepare-shim-builder
+        with:
+          arch: ${{ matrix.shim-arch }}
+
       - name: Build exec shim (static ${{ matrix.shim-arch }})
         if: matrix.shim-arch != ''
         run: |

@@ -1,6 +1,6 @@
 ---
 name: tui-chat-design
-description: "MASC TUI 채팅의 기본 대화 레이아웃, 상세 보기, 저널, 입력·진행 정보 배치 규칙. 채팅의 문구·폭·밀도·기호를 바꾸기 전에 읽는다. 실제 실행 검증은 tui-pty-scenario 를 따른다."
+description: "MASC TUI 채팅의 기본 대화 레이아웃, 상세 보기, 저널, 입력·진행 정보 배치 규칙. 채팅의 문구·폭·밀도·기호를 바꾸기 전에 읽는다."
 ---
 
 # 대화를 먼저 읽는 채팅
@@ -77,9 +77,8 @@ description: "MASC TUI 채팅의 기본 대화 레이아웃, 상세 보기, 저�
 렌더러와 row budget은 같은 projection을 사용한다. 검색·스크롤·화면 너비·메모 캐시도
 같은 origin mode와 실제 행을 사용해야 한다. 복사는 원본 응답에서 한다.
 
-폭·기호·기본 모드를 바꾸면 기존 unit/PTY 기대값도 함께 갱신한다. 좁은 화면의 첫/마지막
+폭·기호·기본 모드를 바꾸면 기존 unit 기대값도 함께 갱신한다. 좁은 화면의 첫/마지막
 본문, 외부 발신자 이름, 한글·이모지 줄바꿈, 전송 결과 미확인·중단 실패를 확인한다.
 
-`tui-pty-scenario`에 따라 실제 바이너리를 띄운 결과만 PTY 증거라고 부른다.
 소스 projection 미리보기와 실제 TUI 실행 화면은 구분한다. 로컬 Dune 빌드와 CI 실행 시점은
 constitution의 execution_protocol을 따른다.

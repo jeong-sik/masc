@@ -65,7 +65,72 @@ let parent_invocation () =
     ~completion:Agent_core.Tool_contract.Continue_after_success
 ;;
 
-let test_latest_exact_reference_replaces_prior_publication () =
+let evidence_with_recorded_at timestamp evidence =
+  match Keeper_skill_composition_evidence.to_yojson evidence with
+  | `Assoc fields ->
+    `Assoc
+      (("recorded_at", `Float timestamp)
+       :: List.remove_assoc "recorded_at" fields)
+    |> Keeper_skill_composition_evidence.of_yojson
+    |> Result.get_ok
+  | _ -> Alcotest.fail "expected evidence object"
+;;
+
+let make_evidence
+      reference
+      settlements
+      composition_run_id
+      ~recorded_at
+  =
+  let result =
+    Tool_result.make_ok
+      ~tool_name:"keeper_compose_indexed-proof"
+      ~start_time:(Tool_timing.start ())
+      ~data:(`Assoc [ "actions", `List settlements ])
+      ()
+  in
+  Keeper_skill_composition_evidence.make
+    ~reference
+    ~composition_run_id
+    ~parent_invocation:(parent_invocation ())
+    ~request_id:None
+    ~keeper_name:"delta"
+    ~composition_tool:"keeper_compose_indexed-proof"
+    ~composition_execution:Keeper_tool_composition_catalog.Inline
+    ~result
+    ~executor_settlements:settlements
+  |> Result.get_ok
+  |> evidence_with_recorded_at recorded_at
+;;
+
+let settlements_fixture () =
+  [ node ~node_id:"first"
+      ~schedule:
+        { planned_index = 0; batch_index = 0; batch_size = 1
+        ; execution_mode = Agent_core.Tool_contract.Serial }
+      ()
+  ; node ~node_id:"second"
+      ~schedule:
+        { planned_index = 1; batch_index = 1; batch_size = 1
+        ; execution_mode = Agent_core.Tool_contract.Serial }
+      ()
+  ; node ~node_id:"left"
+      ~schedule:
+        { planned_index = 2; batch_index = 2; batch_size = 2
+        ; execution_mode = Agent_core.Tool_contract.Concurrent }
+      ()
+  ; node ~node_id:"right"
+      ~schedule:
+        { planned_index = 3; batch_index = 2; batch_size = 2
+        ; execution_mode = Agent_core.Tool_contract.Concurrent }
+      ()
+  ]
+;;
+
+(* The stale-writer boundary: with an append-only store the run that started
+   earlier but finished later can no longer clobber the newer record, so
+   selection must follow recorded_at rather than write order. *)
+let test_latest_selects_newest_recorded_at () =
   let base_path =
     Filename.temp_file "masc_skill_composition_evidence" ""
   in
@@ -76,58 +141,16 @@ let test_latest_exact_reference_replaces_prior_publication () =
     (fun () ->
        let config = Workspace.default_config base_path in
        let reference = make_reference "indexed-proof" 'a' in
-       let settlements =
-         [ node ~node_id:"first"
-             ~schedule:
-               { planned_index = 0; batch_index = 0; batch_size = 1
-               ; execution_mode = Agent_core.Tool_contract.Serial }
-             ()
-         ; node ~node_id:"second"
-             ~schedule:
-               { planned_index = 1; batch_index = 1; batch_size = 1
-               ; execution_mode = Agent_core.Tool_contract.Serial }
-             ()
-         ; node ~node_id:"left"
-             ~schedule:
-               { planned_index = 2; batch_index = 2; batch_size = 2
-               ; execution_mode = Agent_core.Tool_contract.Concurrent }
-             ()
-         ; node ~node_id:"right"
-             ~schedule:
-               { planned_index = 3; batch_index = 2; batch_size = 2
-               ; execution_mode = Agent_core.Tool_contract.Concurrent }
-             ()
-         ]
-       in
-       let save composition_run_id =
-         let result =
-           Tool_result.make_ok
-             ~tool_name:"keeper_compose_indexed-proof"
-             ~start_time:(Tool_timing.start ())
-             ~data:(`Assoc [ "actions", `List settlements ])
-             ()
-         in
-         let evidence =
-           Keeper_skill_composition_evidence.make
-             ~reference
-             ~composition_run_id
-             ~parent_invocation:(parent_invocation ())
-             ~request_id:None
-             ~keeper_name:"delta"
-             ~composition_tool:"keeper_compose_indexed-proof"
-             ~composition_execution:Keeper_tool_composition_catalog.Inline
-             ~result
-             ~executor_settlements:settlements
-           |> Result.get_ok
-         in
+       let settlements = settlements_fixture () in
+       let save evidence =
          Keeper_skill_composition_evidence.save_latest config evidence
          |> Result.get_ok
          |> ignore
        in
        let first = Keeper_tool_plan.Composition_run_id.fresh () in
        let second = Keeper_tool_plan.Composition_run_id.fresh () in
-       save first;
-       save second;
+       save (make_evidence reference settlements second ~recorded_at:200.0);
+       save (make_evidence reference settlements first ~recorded_at:100.0);
        let loaded =
          Keeper_skill_composition_evidence.load_latest config reference
          |> Result.get_ok
@@ -136,7 +159,7 @@ let test_latest_exact_reference_replaces_prior_publication () =
        in
        let open Yojson.Safe.Util in
        Alcotest.(check string)
-         "latest run"
+         "newest run wins even when the older run wrote later"
          (Keeper_tool_plan.Composition_run_id.to_string second)
          (loaded |> member "composition_run_id" |> to_string);
        Alcotest.(check string) "blank provider id remains opaque" ""
@@ -153,6 +176,134 @@ let test_latest_exact_reference_replaces_prior_publication () =
             (make_reference "other-proof" 'b')
           |> Result.get_ok
           |> Option.is_none))
+;;
+
+let store_dir config =
+  Filename.concat (Workspace.masc_root_dir config) "skill-composition-evidence-v1"
+;;
+
+let partition reference =
+  Skill_reference.to_yojson reference
+  |> Yojson.Safe.to_string
+  |> Digestif.SHA256.digest_string
+  |> Digestif.SHA256.to_hex
+;;
+
+let test_same_reference_runs_do_not_overlap () =
+  let base_path =
+    Filename.temp_file "masc_skill_composition_evidence" ""
+  in
+  Sys.remove base_path;
+  Unix.mkdir base_path 0o755;
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Workspace.default_config base_path in
+       let reference = make_reference "indexed-proof" 'a' in
+       let settlements = settlements_fixture () in
+       let save evidence =
+         Keeper_skill_composition_evidence.save_latest config evidence
+         |> Result.get_ok
+         |> ignore
+       in
+       let first = Keeper_tool_plan.Composition_run_id.fresh () in
+       let second = Keeper_tool_plan.Composition_run_id.fresh () in
+       save (make_evidence reference settlements first ~recorded_at:100.0);
+       save (make_evidence reference settlements second ~recorded_at:200.0);
+       let partition_dirs =
+         Sys.readdir (store_dir config)
+         |> Array.to_list
+         |> List.filter (fun name ->
+              Sys.is_directory (Filename.concat (store_dir config) name))
+       in
+       Alcotest.(check int) "one partition directory per exact reference" 1
+         (List.length partition_dirs);
+       let run_files =
+         Sys.readdir (Filename.concat (store_dir config) (List.hd partition_dirs))
+         |> Array.to_list
+       in
+       Alcotest.(check int) "both runs remain stored side by side" 2
+         (List.length run_files);
+       Alcotest.(check bool) "run files are named by their run id" true
+         (List.exists
+            (fun name ->
+               String.equal
+                 name
+                 (Keeper_tool_plan.Composition_run_id.to_string first ^ ".json"))
+            run_files
+          && List.exists
+               (fun name ->
+                  String.equal
+                    name
+                    (Keeper_tool_plan.Composition_run_id.to_string second
+                     ^ ".json"))
+               run_files);
+       let loaded =
+         Keeper_skill_composition_evidence.load_latest config reference
+         |> Result.get_ok
+         |> Option.get
+         |> Keeper_skill_composition_evidence.to_yojson
+       in
+       let open Yojson.Safe.Util in
+       Alcotest.(check string) "latest still selects the newest run"
+         (Keeper_tool_plan.Composition_run_id.to_string second)
+         (loaded |> member "composition_run_id" |> to_string))
+;;
+
+(* Records written by the pre-append layout (a single [<partition>.json] per
+   reference) must remain readable, and lose only to a strictly newer run. *)
+let test_legacy_single_file_remains_a_candidate () =
+  let base_path =
+    Filename.temp_file "masc_skill_composition_evidence" ""
+  in
+  Sys.remove base_path;
+  Unix.mkdir base_path 0o755;
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Workspace.default_config base_path in
+       let reference = make_reference "legacy-proof" 'c' in
+       let settlements = settlements_fixture () in
+       let legacy_run = Keeper_tool_plan.Composition_run_id.fresh () in
+       let legacy =
+         make_evidence reference settlements legacy_run ~recorded_at:100.0
+       in
+       let evidence_json =
+         Keeper_skill_composition_evidence.to_yojson legacy
+         |> Yojson.Safe.to_string
+       in
+       Fs_compat.mkdir_p (store_dir config);
+       Out_channel.with_open_bin
+         (Filename.concat (store_dir config) (partition reference ^ ".json"))
+         (fun channel -> output_string channel evidence_json);
+       let load () =
+         Keeper_skill_composition_evidence.load_latest config reference
+         |> Result.get_ok
+         |> Option.get
+         |> Keeper_skill_composition_evidence.to_yojson
+       in
+       let open Yojson.Safe.Util in
+       Alcotest.(check string) "legacy record remains readable"
+         (Keeper_tool_plan.Composition_run_id.to_string legacy_run)
+         (load () |> member "composition_run_id" |> to_string);
+       let older_run = Keeper_tool_plan.Composition_run_id.fresh () in
+       (Keeper_skill_composition_evidence.save_latest
+          config
+          (make_evidence reference settlements older_run ~recorded_at:50.0)
+        |> Result.get_ok
+        |> ignore);
+       Alcotest.(check string) "legacy record still wins over a strictly older run"
+         (Keeper_tool_plan.Composition_run_id.to_string legacy_run)
+         (load () |> member "composition_run_id" |> to_string);
+       let newer_run = Keeper_tool_plan.Composition_run_id.fresh () in
+       (Keeper_skill_composition_evidence.save_latest
+          config
+          (make_evidence reference settlements newer_run ~recorded_at:150.0)
+        |> Result.get_ok
+        |> ignore);
+       Alcotest.(check string) "a strictly newer run wins over the legacy record"
+         (Keeper_tool_plan.Composition_run_id.to_string newer_run)
+         (load () |> member "composition_run_id" |> to_string))
 ;;
 
 let test_canonical_failed_results () =
@@ -220,9 +371,17 @@ let () =
     [ ( "latest authority"
       , [ Alcotest.test_case "canonical failed results and storage refusal" `Quick test_canonical_failed_results
         ; Alcotest.test_case
-            "replaces only the exact reference"
+            "newest recorded_at wins regardless of write order"
             `Quick
-            test_latest_exact_reference_replaces_prior_publication
+            test_latest_selects_newest_recorded_at
+        ; Alcotest.test_case
+            "same-reference runs stay side by side"
+            `Quick
+            test_same_reference_runs_do_not_overlap
+        ; Alcotest.test_case
+            "legacy single file remains a candidate"
+            `Quick
+            test_legacy_single_file_remains_a_candidate
         ] )
     ]
 ;;

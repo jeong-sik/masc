@@ -6,6 +6,7 @@
  (private_modules
   keeper_board_attention_partition_types
   keeper_board_attention_partition_wire
+  keeper_reaction_ledger_wire
   keeper_fs_durable_directory
   keeper_runtime_trust_snapshot_core)
  (libraries

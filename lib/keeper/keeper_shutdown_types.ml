@@ -72,6 +72,9 @@ type dashboard_purge_artifact =
   | Keeper_board_attention_candidates_artifact
   | Keeper_board_attention_partitions_artifact
   | Agent_artifact_bundle of string list
+  | Keeper_antigravity_home_artifact of string
+  | Keeper_antigravity_prepare_lock_artifact of string
+  | Keeper_muse_home_artifact of string
 
 type completion_receipt =
   | Completion_not_requested
@@ -668,6 +671,13 @@ let dashboard_purge_artifact_plan ~keeper_name context =
   ; Keeper_board_attention_candidates_artifact
   ; Keeper_board_attention_partitions_artifact
   ; Agent_artifact_bundle agent_aliases
+    (* The official-client owner homes (Antigravity keeper HOME plus its
+       prepare lock, and the Muse managed workspace identity directory) are
+       not listed here: their paths hash the Keeper name with an OAuth
+       source or account home that lives in runtime.toml, which the
+       quiesced purge itself removes the keeper assignment from. The
+       consumer derives and appends them before the removal loop, and
+       omits an entry it can no longer derive. *)
   ]
 ;;
 

@@ -6047,6 +6047,64 @@ let install_suite_watchdog () =
   end
 ;;
 
+(* F-06 / D6-11: the 24h maintenance block runs one archive-first workspace
+   GC pass at the schedule-prune cadence, so the backlog shrinks without an
+   operator running the manual masc_gc tool. The pass archives terminal
+   tasks past the retention window and must leave recent completions and
+   non-terminal obligations untouched. *)
+let test_periodic_task_gc_archives_only_stale_terminal_tasks () =
+  with_temp_dir "periodic-task-gc" (fun dir ->
+    let config = Workspace.default_config dir in
+    ignore (Workspace.init config ~agent_name:None);
+    let ancient = "2020-01-01T00:00:00Z" in
+    let recent =
+      Masc_domain.iso8601_of_unix_seconds (Time_compat.now ())
+    in
+    let stale_done =
+      make_task
+        ~id:"task-701"
+        ~status:(Types.Done { assignee = "claude"; completed_at = ancient; notes = None })
+        ()
+    in
+    let fresh_done =
+      make_task
+        ~id:"task-702"
+        ~status:(Types.Done { assignee = "claude"; completed_at = recent; notes = None })
+        ()
+    in
+    let stale_open =
+      make_task
+        ~id:"task-703"
+        ~status:(Types.InProgress { assignee = "claude"; started_at = ancient })
+        ()
+    in
+    Workspace.write_backlog config
+      { Types.tasks = [ stale_done; fresh_done; stale_open ]
+      ; task_deletion_receipts = []
+      ; pending_completion_approvals = []
+      ; pending_completion_rejections = []
+      ; last_updated = recent
+      ; version = 2
+      };
+    Server_bootstrap_maintenance.run_periodic_task_gc config ~days:30;
+    let backlog_ids =
+      List.map (fun (t : Types.task) -> t.id) (Workspace.read_backlog config).tasks
+    in
+    let archive_ids = Workspace.read_archive_task_ids config in
+    Alcotest.(check bool) "stale done task left the live backlog"
+      false (List.mem "task-701" backlog_ids);
+    Alcotest.(check bool) "stale done task reached the archive"
+      true (List.mem 701 archive_ids);
+    Alcotest.(check bool) "recent completion stays in the live backlog"
+      true (List.mem "task-702" backlog_ids);
+    Alcotest.(check bool) "recent completion is not archived"
+      false (List.mem 702 archive_ids);
+    Alcotest.(check bool) "old non-terminal task stays in the live backlog"
+      true (List.mem "task-703" backlog_ids);
+    Alcotest.(check bool) "old non-terminal task is never archived"
+      false (List.mem 703 archive_ids))
+;;
+
 let () =
   install_suite_watchdog ();
   Eio_main.run @@ fun env ->
@@ -6054,6 +6112,10 @@ let () =
   Eio_guard.enable ();
   Alcotest.run "Server_runtime_bootstrap"
     [
+      ( "periodic task gc",
+        [ Alcotest.test_case "archives only stale terminal tasks" `Quick
+            test_periodic_task_gc_archives_only_stale_terminal_tasks
+        ] );
       ( "manual configuration health",
         let configuration = Keeper_registry.Turn_configuration_error
             { code = "synthetic-config"; field = None; detail = "synthetic configuration error" } in

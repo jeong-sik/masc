@@ -282,6 +282,24 @@ let project_keeper_transition_outbox_page
 
 let latest_keeper_msg_recovery = Atomic.make None
 
+(* One archive-first workspace GC pass on the 24h maintenance cadence
+   (audit 2026-10-07 F-06 / D6-11). Terminal tasks older than the retention
+   window move to tasks-archive.json; the window is a preservation policy,
+   not a wall-clock kill — non-terminal tasks are never archived and the
+   archive holds the task before the backlog commit drops it, so a verdict
+   or release obligation on a live task cannot be stranded by this pass.
+   The only other production caller is the manual masc_gc admin tool; a
+   failure here is logged and never cancels the cleanup loop. *)
+let run_periodic_task_gc config ~days =
+  try
+    let summary = Workspace.gc config ~days () in
+    Log.Server.info "periodic task gc: retention=%dd: %s" days summary
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Log.Server.error "periodic task gc failed: %s" (Printexc.to_string exn)
+
+
 let latest_keeper_msg_recovery_observation () =
   Atomic.get latest_keeper_msg_recovery
 ;;
@@ -895,7 +913,17 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
               | Error err ->
                 Log.Server.warn
                   "periodic schedule prune failed: %s"
-                  (Schedule_service.service_error_to_string err))
+                  (Schedule_service.service_error_to_string err));
+             (* Task archive on the same 24h cadence (F-06 / D6-11): the
+                backlog only shrank when an operator ran the manual masc_gc
+                tool, so terminal tasks accumulated unbounded — 95% of
+                backlog.json bytes at the 2026-10-07 audit. Archive-first
+                and lock-serialised (#40427/#40571), so automating it is
+                safe; the retention window is a runtime setting, not a
+                wall-clock kill. *)
+             run_periodic_task_gc
+               (Mcp_server.workspace_config state)
+               ~days:(Runtime_params.get Runtime_settings.task_archive_retention_days)
            with
            | Eio.Cancel.Cancelled _ as e -> raise e
            | exn ->

@@ -27,11 +27,6 @@
     }
   ],
   "unique_cases": 43,
-  "executable_sha256": {
-    "_build/default/test/test_process_eio_coverage.exe": "21c436426b4751d1ff924f6c0cd6c1940b40ea9ec80e4df4b939e268c200fd3b",
-    "_build/default/test/test_process_file_redirects.exe": "7a0d0d6af30fbf06e25cd496ce1543caee230915efdb26c9d77fff5191472321",
-    "_build/default/test/test_keeper_execute_output_files.exe": "65f2ed7d1b05c0efa34c846e1947b802f0ffac7379af53b2a55619679545404d"
-  },
   "scope": "macOS isolated child fixtures; no Linux runtime/full CI/deployment/live Keeper probes",
   "intermediate_receipts": {
     "initial-build.log": "first owner extraction compiled successfully",

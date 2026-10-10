@@ -36,9 +36,8 @@ semantic source review and actual consumer checks; line counts are not proof.
 | Adjacent native approval journal | Existing direct Gate wait/restart/session and refusal scenarios; this is journal evidence, not the native receipt writer test | 13 |
 
 All 45 distinct cases passed. The three existing targets and the new standalone
-target compiled successfully. [checks.json](checks.json) records commands,
-terminal exit codes and executable hashes; [source-sha256.json](source-sha256.json)
-records changed inputs and direct consumers. The new scenario leaves the original
+target compiled successfully. [checks.json](checks.json) records commands and
+terminal exit codes. The new scenario leaves the original
 Godfile test unchanged and executes no tool/provider effect.
 
 The first direct queue invocation had one failure: its process had no

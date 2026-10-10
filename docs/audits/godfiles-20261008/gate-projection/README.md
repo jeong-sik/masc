@@ -1,6 +1,6 @@
 # Gate decision projection evidence
 
-PR #42091. [sha256.txt](sha256.txt) identifies the sources and executables the evidence below ran on.
+PR #42091.
 
 Focused command `opam exec -- dune build test/test_keeper_gate_replay.exe test/test_keeper_gate_auto_judge_labels.exe` completed exit 0.
 

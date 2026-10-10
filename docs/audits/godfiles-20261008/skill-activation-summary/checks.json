@@ -29,9 +29,5 @@
     "run": "PMBGQHVU",
     "cause": "Missing test-cwd fixtures/skill-ledger-revision.json",
     "log": "ledger.log"
-  },
-  "executable_sha256": {
-    "_build/default/test/test_keeper_skill_activation_ledger.exe": "1fc85c52ee1aa8f459a060b64ce32cd7c18102df18d3f5f60475a0dc7e6a6c3c",
-    "_build/default/test/test_keeper_skill_activation_projection.exe": "21bc32cf4a293346ba193c9a6096d175d9c6ad1c957006c014a72f35e631e57d"
   }
 }

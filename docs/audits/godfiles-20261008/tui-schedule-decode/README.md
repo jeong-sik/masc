@@ -19,8 +19,7 @@ this initial candidate from the campaign.
 
 ## Executed evidence
 
-[checks.json](checks.json) records the current binary, commands, exits and scope.
-[source-sha256.json](source-sha256.json) fingerprints the changed source.
+[checks.json](checks.json) records commands, exits and scope.
 
 | Direct consumer | Actual check | Result |
 | --- | --- | --- |

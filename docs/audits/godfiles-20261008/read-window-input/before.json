@@ -15,8 +15,6 @@
   "exit_code": 1,
   "tests_run": 2,
   "failures": 2,
-  "runtime_sha256": "6adc990b3f55f1a4ea9d5101c9a58030c60beebfeb813fe4bd5cd8e25f35d27d",
-  "test_sha256": "86a38bea3378e7260d107389eb727cb70b376ed085fcb936bf51dd1e6b2e9a4e",
   "base": "da579cd105c15a4d3d62ad150adf5ea00fb79dbf",
   "scope": "new scenarios before runtime consumer wiring; unused pure parser and guidance declarations already present"
 }

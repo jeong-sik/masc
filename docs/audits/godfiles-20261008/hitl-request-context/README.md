@@ -33,8 +33,6 @@ queue settlement and worker lifecycle stay in the existing execution owner.
 helpers and domain parser match exactly, request projection matches after lifting
 the two acquisition calls and changing its signature, and remaining worker
 matches after declared extraction/direct-call/forwarder/comment edits.
-[source-sha256.json](source-sha256.json) fingerprints the five changed source
-files and six unchanged helpers/interfaces inspected for acquisition and decoding.
 
 ## Direct checks
 
@@ -45,8 +43,8 @@ files and six unchanged helpers/interfaces inspected for acquisition and decodin
 | Worker flow preparation and HTTP success validation | Context-less admission, closed schema, actual canonical request over a loopback fixture server | Domain cases 13-15 passed |
 | Prepared request and CLI validation | Catalog exhaustion, CLI-only flow, malformed HTTP response fallback, domain-invalid CLI advancement with durable dispatch identities | CLI cases 1-4 passed |
 
-[checks.json](checks.json) records terminal exit codes, exact selections and the
-executable SHA256. The final focused build succeeded. An initial focused build
+[checks.json](checks.json) records terminal exit codes and exact selections.
+The final focused build succeeded. An initial focused build
 also succeeded; the final build incorporated a section-comment relocation made
 while the initial build was running. Both are scoped to the one direct-consumer
 executable and compile its necessary dependencies, not all Dune targets.

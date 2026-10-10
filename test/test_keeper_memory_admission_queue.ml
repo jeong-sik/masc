@@ -648,10 +648,6 @@ let () = run "durable explicit admission queue"
     test_case "missing receipt before acknowledgement remains explicit scope limitation" `Quick test_missing_receipt_before_acknowledgement_is_unresolved_authority;
     test_case "contiguous pending recovers without sparse authority" `Quick test_contiguous_pending_recovers_without_sparse_authority;
     test_case "lost sparse authority refuses judgment without retiring evidence" `Quick test_sparse_authority_loss_refuses_judgment;
-  ["pre-judgment batch budget", [
-    test_case "over-budget batch is pre-split before the first judgment" `Quick test_worker_presplits_batch_over_budget;
-    test_case "oversized single row defers whole through the refusal path" `Quick test_worker_presplit_oversized_row_defers_whole];
-   "storage boundaries", [
     test_case "new input during semantic deferral is recheck, not commit" `Quick test_semantic_deferral_with_new_tail_is_not_commit;
     test_case "capacity siblings continue past semantic uncertainty" `Quick test_capacity_left_uncertainty_does_not_block_right;
     test_case "capacity sibling traversal stops on provider outage" `Quick test_capacity_outage_stops_before_sibling;
@@ -672,4 +668,8 @@ let () = run "durable explicit admission queue"
     test_case "worker retains uncertainty and requires durable commit" `Quick test_worker_does_not_consume_uncertainty;
     test_case "corruption cannot reset pending input" `Quick test_corruption_is_not_empty;
     test_case "bulk append retains every row in ascending order" `Quick test_bulk_append_preserves_length_and_order;
-    test_case "byte cap refuses append before any write" `Quick test_byte_cap_refuses_append_before_write]]
+    test_case "byte cap refuses append before any write" `Quick test_byte_cap_refuses_append_before_write];
+   "pre-judgment batch budget", [
+    test_case "over-budget batch is pre-split before the first judgment" `Quick test_worker_presplits_batch_over_budget;
+    test_case "oversized single row defers whole through the refusal path" `Quick test_worker_presplit_oversized_row_defers_whole]
+  ]

@@ -555,7 +555,11 @@
       "path": "lib/server/server_dashboard_http_keeper_api.ml",
       "baseline_lines": 2231,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; cache, storage, chat enrichment and API semantic review pending",
+      "current_lines": 2189,
+      "prs": [
+        42124
+      ]
     },
     {
       "path": "lib/server/server_dashboard_http_runtime_info.ml",

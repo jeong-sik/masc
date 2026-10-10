@@ -7,8 +7,8 @@ This campaign covers tracked code files with at least 2,000 lines. The initial
 inventory contains 171 candidates: 75 production source/style/interface files,
 90 tests, 3 tooling files and 3 evidence scripts. `inventory.json` records each
 baseline path and its current audit state. A line count selects candidates; it
-is not a defect verdict or a new build gate. Thirty-six production candidates received
-bounded changes; their other responsibilities remain pending. The other 39
+is not a defect verdict or a new build gate. Thirty-seven production candidates received
+bounded changes; their other responsibilities remain pending. The other 38
 production candidates still require semantic review. All 171 candidates remain
 in the campaign until their responsibilities and necessary repairs are assessed.
 
@@ -188,3 +188,5 @@ Pure microVM build-link paths, scan decisions and action/target selection have a
 Codex child environment projection is separated from environment/config/path acquisition in [#42121](https://github.com/jeong-sik/masc/pull/42121). See [codex-environment-projection/README.md](codex-environment-projection/README.md). Protocol, subprocess and remaining configuration semantics are still pending audit.
 
 Declared runtime settings and capability JSON are separated from live acquisition in [#42122](https://github.com/jeong-sik/masc/pull/42122). See [runtime-declaration-projection/README.md](runtime-declaration-projection/README.md). Remaining probe/cache/resolution policies require semantic audit.
+
+Keeper state-diagram evidence acquisition and redacted projection are separated in [#42124](https://github.com/jeong-sik/masc/pull/42124). See [keeper-state-evidence/README.md](keeper-state-evidence/README.md). Remaining API responsibilities are pending audit.

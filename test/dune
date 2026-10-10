@@ -3567,9 +3567,11 @@
  (modules test_tui_play_card)
  (libraries
   alcotest
+  masc.config
   masc_tui_play_card
   masc_tui_terminal_palette
-  qrc)
+  qrc
+  uri)
  (action (setenv MASC_TUI_FORCE_COLOR 1 (run %{test}))))
 
 (test

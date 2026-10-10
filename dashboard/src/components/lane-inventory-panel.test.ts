@@ -34,6 +34,17 @@ describe('operator Lane inventory', () => {
     expect(detail.queryByRole('switch')).toBeNull()
     expect(api.fetchLaneInventory).toHaveBeenCalledTimes(1)
   })
+  it('names the machine publication unavailable when the worker observation cannot be read', async () => {
+    const raw = structuredClone(fixture)
+    Object.assign(raw.rows.find(item => item.id === 'machine/msx')!.state, { activity: 'on', publication: 'unavailable' })
+    api.fetchLaneInventory.mockResolvedValue(parseLaneInventory(raw))
+    const screen = render(html`<${LaneInventoryPanel} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Inspect MSX' }))
+    const detail = within(screen.getByRole('region', { name: 'Details for MSX' }))
+    expect(detail.getByText('New execution and input enabled')).toBeTruthy()
+    expect(detail.getByText('Worker observation unavailable')).toBeTruthy()
+    expect(api.fetchLaneInventory).toHaveBeenCalledTimes(1)
+  })
   it('shows browser off and unavailable without losing executor or live observations', async () => {
     const raw = structuredClone(fixture)
     const automation = raw.rows.find(item => item.id === 'browser/automation')!

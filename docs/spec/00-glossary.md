@@ -262,7 +262,8 @@ status: reference
   허가를 받고, 줄면 쓰는 요청 수가 새 칸 수 아래로 내려갈 때까지 새 허가를 내주지 않는다.
   줄을 선 요청은 기다림이 끝날 때 `masc.provider_admission.waited` 이벤트를 하나 남긴다.
   기다림은 제공자가 보낸 429 관측인 Runtime Rate Limit이나 후보 실패 분류의
-  `Binding Admission`과 다른 단계다.
+  `Binding Admission`과 다른 단계다. 코드에서 이 허용량은 `allowance`라 부르며
+  `Slot_scheduler`가 관리한다.
   → [Provider_admission](../../packages/agent_core/lib/llm_provider/provider_admission.mli) ·
   [Provider_config](../../packages/agent_core/lib/llm_provider/provider_config.mli)
 
@@ -1267,9 +1268,35 @@ status: reference
   exact-output 작업의 경로이고, chat lane은 Keeper에게 대화가 들어오고 결과가
   배달되는 표면이다. **Official Client Lane**(공식 클라이언트 실행 경로)과도
   다르다. heartbeat가 여는 자율 turn과 함께 Keeper turn을 시작하는 두 진입
-  경로를 이룬다(RFC-0225).
+  경로를 이룬다(RFC-0225). 다른 축: Play Room 공용 대화는 Keeper chat store에
+  남지 않는다.
   → [Keeper_chat_store](../../lib/keeper/keeper_chat_store.mli),
   [Keeper_msg_async](../../lib/keeper/keeper_msg_async.mli)
+
+**Play Room (플레이 룸)**
+: 작업공간 하나당 하나의 공용 게임 관전 대화 표면(`Masc.Play_room`). MSX·DOS
+  관전자, 초대된 플레이어, 운영자, Keeper가 같은 대화 기록을 공유하고 비공개
+  transcript는 읽히지 않는다. 메시지는 `.masc/play/room.sqlite3`(SQLite,
+  full synchronous durability)에 남아 프로세스 재시작을 견디며, 발신자는
+  인증된 요청·도구 principal(`CanPlayMachine` bearer 또는 검증된 Keeper
+  principal)이고 본문이 화자 이름을 지정할 수 없다. `join`·`read`·`say`·
+  `leave` 네 동작과 60초 presence만 있고, 별도 Keeper turn을 열지 않는다.
+  - **Play Seat**: 공용 기계의 자리, 즉 컨트롤러를 넘겨받을 수 있는 자격 명단.
+    `Play_seat.participants`는 Keeper에 유효한 운영자(`Admin`)·초대(`Player`)
+    자격을 더한 핸드오프 명단(`hand_to`)을 만들고 `masc_dos_pass`는 이 명단의
+    이름만 받는다. Worker 자격은 MCP 클라이언트라 자리가 아니다. 이 명단은
+    온라인 존재재가 아니라 자격 명단이고, 컨트롤러 정책이 허용하는 게스트만
+    DOS 조작이 가능하다 — 관전 중인 사람도 대화(say)는 할 수 있다.
+  - **Keeper chat store와의 경계**: 공용 대화는 Keeper chat store
+    (`.masc/keeper_chat/<name>.jsonl`)에 남지 않는다. 의도된 room 메시지만
+    공유되고 Keeper transcript·워크스페이스 브로드캐스트·비공개 지시·초대
+    자격은 이 표면에 복사되지 않는다(→ Chat Lane의 경계 줄).
+  - **DOS 활동 기록**: 최근 DOS Keeper 활동이 Play room 대화 아래, 배정된
+    room 열이나 좁은 터미널 스트립 안에 표시된다(#41789).
+  → [Play_room](../../lib/play/play_room.mli) ·
+  [Masc_tui_play_room](../../bin/masc_tui_play_room.mli) ·
+  [Play_seat](../../lib/play/play_seat.mli) ·
+  [PLAY-ROOM guide](../guides/PLAY-ROOM.md)
 
 **Runtime Candidate Order (런타임 후보 순서)**
 : Keeper turn이 배정된 runtime이 실패했을 때 시도할 runtime 후보의 순서 있는 목록.
@@ -3307,11 +3334,11 @@ status: reference
 : Workspace Curator가 변경된 Keeper 사실을 기존 주장·충돌에 합류시키거나 새 항목을 만들고, 제외 이유를 기록한 원장의 행 하나(`workspace_memory_ledger`의 `claim_id`가 가리키는 것). 다른 Keeper의 가까운 사실은 판정 맥락이고 선택된 변경 사실만 분류한다. 원장은 Keeper Memory OS를 바꾸지 않으며, 모델 분류가 의미 검증이나 사실 승격을 뜻하지 않는다. Keeper는 주장·충돌 목록을 본 뒤 ID별로 현재 원문 상태를 읽는다. 스토어를 읽지 못한 사실은 사라진 사실로 단정하지 않는다. 행의 `claim_id`는 Fact의 문장 필드 `claim`(→ Fact)과 다른 것이다 — 원장 행의 식별자다.
   → [workspace_memory_ledger](../../lib/workspace_memory/workspace_memory_ledger.mli) · [workspace_memory_request](../../lib/workspace_memory/workspace_memory_request.mli) · [workspace_memory_ledger_view](../../lib/workspace_memory/workspace_memory_ledger_view.mli)
 
-**World Curator / Workspace Curator (공유 맥락 합성)**
+**Workspace Curator (공유 맥락 합성)**
 : 여러 Keeper가 같은 원문을 반복해서 읽지 않도록 공유 맥락을 합성하는 단독 모델 레인. 코드의 `Workspace_curator`는 Keeper Memory의 변경 사실을 공유 주장·충돌로 분류한 뒤, 그 본문을 의미를 보존한 공유 요약으로 합성한다. 새 사실은 이전 요약에 합치고, 삭제·수정된 사실이나 합성 프롬프트 변경이 있으면 현재 자료로 다시 만든다. 동일한 자료의 완성본은 Keeper들이 재사용한다. 요약은 현재 작업공간의 모든 운영 상태나 검증된 사실을 뜻하지 않으며, 원본 Memory를 덮어쓰지 않는다.
 
 **Shared Briefing (공유 요약 / 브리핑 글)**
-: World Curator가 작업공간 기억 원장(`ledger.json`)에 기록된 모든 주장과 충돌 텍스트(`Ledger.briefing_sources`)를 모델로 종합 요약한 자연어 글.
+: Workspace_curator가 작업공간 기억 원장(`ledger.json`)에 기록된 모든 주장과 충돌 텍스트(`Ledger.briefing_sources`)를 모델로 종합 요약한 자연어 글.
   - **저장 위치**: `.masc/workspace-memory/briefing.json` (스키마 `workspace.memory.briefing.v1`).
   - **전달과 조회**: 기본 턴 문맥의 `## Shared workspace memory ledger` 구획에는 원장 메타데이터(`Current ledger SHA-256`, `Classified facts`, `Shared claims`, `Conflicts`), 브리핑의 현재·갱신 대기 상태, 조회 경로를 전달한다. 브리핑 본문은 미리 주입하지 않으며, 넓은 작업공간 요약이 필요할 때 `keeper_workspace_memory_read`의 `{"view":"briefing"}`으로 읽는다. 조회 경로는 실제 요청에서 바로 호출 가능, 도구 검색으로 로드 가능, 사용 불가를 구분한다.
   - **원장과의 구별 및 명칭 주의**:

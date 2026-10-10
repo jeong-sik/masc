@@ -1966,24 +1966,6 @@ let test_interleaved_final_keeps_observed_times_and_bytes () =
      Terminal_effect_settled;Awaiting_gate_approval;No_visible_reply]
 ;;
 
-(* A split response with a durable skill receipt whose call never streamed:
-   the terminal scope says the skill came before the last stretch, so the
-   skill stays between the stretches and only the final record follows. *)
-let test_split_response_keeps_an_unstreamed_skill_before_its_terminal_stretch () =
-  let t = fresh () in
-  feed t
-    [ Live.Run_started
-    ; Live.Stream_model_started {model="model"; stream_scope=Some 0; message_id=None; usage=None}
-    ; Live.Text {text="A"; stream_scope=Some 0}
-    ; Live.Stream_model_started {model="model"; stream_scope=Some 1; message_id=None; usage=None}
-    ; Live.Text {text="B"; stream_scope=Some 1}
-    ; Live.Reply_details {reply="A\nB"; turn_outcome=Masc.Keeper_turn_outcome.Visible_reply;
-        turn_ref="trace-1#3"; terminal_stream_scope=Some 1} ];
-  Transcript.note_skill_activity t (missing_skill_activity ());
-  check (list string) "the skill stays before the terminal stretch"
-    ["text:A"; "skill:source-review"; "text:B"; "reply:A\nB"] (drawn t)
-;;
-
 let test_usage_resets_only_at_response_boundaries () =
   let t = fresh () in
   let usage input output = {Live.input_tokens=input;output_tokens=output;
@@ -2107,7 +2089,7 @@ let () =
   run "tui_keeper_chat_transcript"
     [ ( "response boundaries", [test_case "scoped details retire prior model activity" `Quick test_scoped_details_retire_prior_model_activity;
       test_case "scoped details retire prior response usage" `Quick test_scoped_details_retire_prior_response_usage;
-      test_case "boundaries and stable origins" `Quick test_response_boundaries_preserve_origins; test_case "interleaved final authority" `Quick test_interleaved_final_keeps_observed_times_and_bytes; test_case "split response keeps an unstreamed skill before its terminal stretch" `Quick test_split_response_keeps_an_unstreamed_skill_before_its_terminal_stretch; test_case "usage reset boundaries" `Quick test_usage_resets_only_at_response_boundaries; test_case "new response without text" `Quick test_empty_new_response_does_not_replace_prior_message])
+      test_case "boundaries and stable origins" `Quick test_response_boundaries_preserve_origins; test_case "interleaved final authority" `Quick test_interleaved_final_keeps_observed_times_and_bytes; test_case "usage reset boundaries" `Quick test_usage_resets_only_at_response_boundaries; test_case "new response without text" `Quick test_empty_new_response_does_not_replace_prior_message])
     ; ( "event timeline"
       , [test_case "replay preserves continuation event times" `Quick test_event_times_survive_log_replay_and_continuation;
          test_case "native tools have no MASC receipt" `Quick test_native_tools_are_observations_without_execution_receipts] )

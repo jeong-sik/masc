@@ -52,6 +52,16 @@ val prompt_suffix : batch:Keeper_memory_admission_queue.batch -> string
 (** Describes the separate candidate authority and strict response wrapper,
     carrying original candidate payloads as untrusted proposed data. *)
 
+val budgeted_parts : Keeper_memory_admission_queue.batch -> Keeper_memory_admission_queue.batch list
+(** Split a pending batch into contiguous parts whose estimated rendered
+    candidate payload fits the configured budget, so the first judgment pass
+    of a burst never carries the whole queue at once. The estimate is the
+    exact candidate JSON {!prompt_suffix} renders. A single candidate above
+    the budget still forms its own part: the budget refuses entry, it never
+    truncates or drops input; the worker's capacity-refusal path defers such
+    a candidate whole. Current Memory is added by the caller per part and is
+    deliberately outside this estimate. *)
+
 type retirement_evidence =
   | Available of Keeper_memory_os_current.archived_fact list
   | Unavailable of string

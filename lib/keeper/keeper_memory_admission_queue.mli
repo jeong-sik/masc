@@ -11,6 +11,9 @@ type candidate =
 type batch
 
 val candidates : batch -> candidate list
+val with_candidates : batch -> candidate list -> batch
+(** Same queue generation and pending read, a contiguous sub-range of rows.
+    Every row must come from the source batch so receipts stay valid. *)
 val candidate_ids : batch -> Keeper_memory_os_current.explicit_candidate_id list
 (** One receipt identity per candidate in input order. Each digest covers the
     exact candidate JSON object (sequence, request ID, full fact/provenance),

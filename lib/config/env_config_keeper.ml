@@ -340,6 +340,22 @@ module KeeperMemoryOs = struct
   let facts_max_bytes_env_key = "MASC_KEEPER_MEMORY_OS_FACTS_MAX_BYTES"
   let category_cap_env_key = "MASC_KEEPER_MEMORY_CATEGORY_CAP"
   let facts_per_category_cap_env_key = "MASC_KEEPER_MEMORY_FACTS_PER_CATEGORY_CAP"
+  (* Live measurement (docs/audits/2026-10-07-week-audit/C-librarian-memory-skills.md):
+     explicit-write intake peaked at 2,830 candidates/day (2026-10-06), and a
+     no-change Librarian pass already ships ~170 KB of rendered current facts.
+     Judgment injects that fact block on every retry, so a whole-queue burst
+     must be pre-split by the part of the input the queue controls. 64 KiB is
+     ~37% of the measured 170 KB block: sub-parts stay a bounded minority of
+     the prompt even if a capacity refusal keeps halving inside one part. *)
+  let admission_batch_max_bytes_default = 64 * 1024
+  let admission_batch_max_bytes_env_key = "MASC_KEEPER_MEMORY_OS_ADMISSION_BATCH_MAX_BYTES"
+  (* A judgment weighs a candidate against the most recent retirement of its
+     exact identity; older removals of the same identity are superseded
+     knowledge. read_dropped already collapses to the latest removal per
+     identity, so the default of 1 pins that contract at the prompt boundary
+     against an archive that ever returns more per identity. *)
+  let admission_retirement_match_cap_default = 1
+  let admission_retirement_match_cap_env_key = "MASC_KEEPER_MEMORY_OS_ADMISSION_RETIREMENT_MATCH_CAP"
 
   let positive_count name ~default =
     match Env_config_memory.env_opt name with
@@ -366,6 +382,14 @@ module KeeperMemoryOs = struct
          raise
            (Env_config_core.Config_error
               (facts_max_bytes_env_key ^ " must be a positive integer")))
+  ;;
+
+  let admission_batch_max_bytes () =
+    positive_count admission_batch_max_bytes_env_key
+      ~default:admission_batch_max_bytes_default
+  let admission_retirement_match_cap () =
+    positive_count admission_retirement_match_cap_env_key
+      ~default:admission_retirement_match_cap_default
   ;;
 
   let get_bool_logged ?(invalid = Env_config_memory.Default) name ~default =

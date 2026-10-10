@@ -2732,13 +2732,13 @@ let render_keeper_message (state : state) =
         List.exists
           (fun (message : Masc_tui_types.msg_entry) ->
             message.me_role = Message_error
-            && List.mem message.me_request_id member_ids)
+            && Masc_tui_types.string_mem message.me_request_id member_ids)
           committed_timeline_messages
       in
       let request_label = request_id in
       let started_at = Keeper_chat_transcript.started_at transcript in
       let bounds_request (message : Masc_tui_types.msg_entry) =
-        (not (List.mem message.me_request_id member_ids))
+        (not (Masc_tui_types.string_mem message.me_request_id member_ids))
         || message.me_turn_phase = Turn_input
       in
       let request_messages =
@@ -3122,14 +3122,14 @@ let render_keeper_message (state : state) =
       let request_of = function
         | Tagged_row (message : Masc_tui_types.msg_entry) ->
             (match List.find_opt (fun block ->
-                List.mem message.me_request_id block.lb_member_ids) blocks with
+                Masc_tui_types.string_mem message.me_request_id block.lb_member_ids) blocks with
              | Some block -> block.lb_request_id
              | None -> message.me_request_id)
         | Tagged_block log -> Masc_tui_types.turn_log_execution_id log
       in
       let edges = Hashtbl.create 16 in
       let close_run ~at_tail request_id indices =
-        let remains_open = at_tail && List.mem request_id open_request_ids in
+        let remains_open = at_tail && Masc_tui_types.string_mem request_id open_request_ids in
         match List.rev indices with
         | [] -> ()
         | [only] -> Hashtbl.replace edges only (if remains_open then Turn_opens else Turn_alone)
@@ -3155,7 +3155,7 @@ let render_keeper_message (state : state) =
         (fun index ((tag, (entry : Message_layout.entry)) as item) ->
           let request_id = request_of tag in
           match Hashtbl.find_opt edges index with
-          | Some edge when List.mem request_id block_requests ->
+          | Some edge when Masc_tui_types.string_mem request_id block_requests ->
               let siding =
                 match tag with
                 | Tagged_row message -> siding_of_message message

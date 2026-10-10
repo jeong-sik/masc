@@ -1213,12 +1213,17 @@ let chat_timeline_rows timeline =
   |> List.map (fun projected -> projected.pcr_row)
 ;;
 
+(* String membership without polymorphic compare. Request ids are strings and
+   these lookups run per message per held log on every frame. *)
+let string_mem needle haystack = List.exists (String.equal needle) haystack
+;;
+
 let chat_request_timeline_at ?(member_ids = []) ~request_id messages =
   let request_rows =
     List.filter
       (fun (message : msg_entry) ->
         String.equal message.me_request_id request_id
-        || List.mem message.me_request_id member_ids)
+        || string_mem message.me_request_id member_ids)
       messages
   in
   match List.rev (chat_projected_timeline_ats request_rows) with
@@ -1263,7 +1268,7 @@ let chat_block_insertion_index ~member_ids ~bounds ~request_id ~timeline_at
     List.fold_left
       (fun (index, lower_bound) ((row : msg_entry), _) ->
         ( index + 1
-        , if (String.equal row.me_request_id request_id || List.mem row.me_request_id member_ids) && bounds row
+        , if (String.equal row.me_request_id request_id || string_mem row.me_request_id member_ids) && bounds row
           then index + 1
           else lower_bound ))
       (0, 0) positioned_messages
@@ -8001,11 +8006,14 @@ type execution_source_key =
   | Operation_key of string
   | Autonomous_turn_key of string * int
 
-let turn_log_execution_source_key log =
-  match turn_log_execution_source log with
+let execution_source_key_of_source : Masc_tui_keeper_chat_log.journal_source -> execution_source_key =
+  function
   | Operation id -> Operation_key id
   | Autonomous_turn turn_ref ->
     Autonomous_turn_key (Ids.Turn_ref.trace_id turn_ref, Ids.Turn_ref.absolute_turn turn_ref)
+
+let turn_log_execution_source_key log =
+  execution_source_key_of_source (turn_log_execution_source log)
 
 (* One log per execution source, in the order each source first appeared.
    A later log for a seen source takes that first position when
@@ -8490,9 +8498,23 @@ let rows_the_logs_do_not_draw ~held rows =
   match held with
   | [] -> rows
   | held ->
+      (* A log draws only rows of its own execution source, so each row is
+         tested against the held turns that share its source, not all of
+         them. *)
+      let by_source : (execution_source_key, held_turn) Hashtbl.t = Hashtbl.create 16 in
+      List.iter
+        (fun (turn : held_turn) ->
+          Hashtbl.add by_source (execution_source_key_of_source turn.ht_source) turn)
+        held;
       List.filter_map
         (fun (row : msg_entry) ->
-          if List.exists (fun turn -> log_draws_row turn row) held
+          let candidates =
+            match row.me_execution_source with
+            | None -> []
+            | Some source ->
+              Hashtbl.find_all by_source (execution_source_key_of_source source)
+          in
+          if List.exists (fun turn -> log_draws_row turn row) candidates
           then media_remainder row else Some row)
         rows
 ;;

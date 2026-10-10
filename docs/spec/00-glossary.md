@@ -3289,6 +3289,21 @@ status: reference
   → [Keeper_memory_os_current](../../lib/keeper/keeper_memory_os_current.mli) ·
   [Keeper_memory_os_types](../../lib/keeper/keeper_memory_os_types.mli)
 
+**Committed Revision Lineage (확정된 리비전 계보)**
+: Memory OS에서 지워진 기억의 Memory ID와 그 스냅샷 안의 대상을 잇는 선언된 리비전 링크(`Keeper_memory_os_types.revision`의 `superseded`·`superseded_by` 쌍). Librarian 정리(`revisions`)와 명시적 `supersedes` 쓰기는 스냅샷 교체와 같은 복구 가능한 제거 트랜잭션에 이 링크를 `revision_links`로 기록한다. 저널은 실제로 내용이 바뀐 커밋에만 링크를 싣고, 변화 없는 재관측은 리비전 전이를 만들지 못한다. 미완성 저널 영수증은 쓰기자가 복구할 때까지 증거를 읽을 수 없는 상태다. 빠진 링크 메타데이터는 추론된 관계가 아니라 기록되지 않은 것이다. 별도 `Revised` 이벤트 사이드카는 관측 표면일 뿐 그 존재만으로 커밋 증명이 되지 않는다. 이 링크는 선언된 구조적 계보일 뿐이며, 과거 입력이 후속 기억에도 그대로 적용됨을 뜻하지 않는다 — 후속 기억을 답으로 쓰려면 별도의 범위 판정(→ Demand Retrieval across Revisions)이 필요하다.
+  → [Keeper_memory_os_current](../../lib/keeper/keeper_memory_os_current.mli) ·
+  [12-memory-systems](12-memory-systems.md)
+
+**Demand Retrieval across Revisions (리비전을 넘는 요청 시 검색)**
+: 과거 admission 관측이 확정된 리비전 계보를 따라 현재 후속 기억을 찾아내는 `keeper_memory_search`의 경로(#42029·#42054·#42055). 세 단계가 분리되어 있다.
+  1. **Admission Lookup Binding**: Librarian이 `incorporated`/`already_represented`로 판정한 미룬 명시 쓰기는 원본 관측·후보 식별자·선택된 대상의 조회 결속(`admission_recall_binding`)을 후보 소비와 같은 WAL 트랜잭션으로 커밋한다. `not_durable`·`deferred` 판정은 결속을 만들지 않는다. 결속은 Librarian이 선언한 관계를 기록할 뿐 그 관계를 독립 검증한 것이 아니다.
+  2. **구조적 후보 수집**: `read_successor_recall_for_keepers_dir`가 커밋된 스냅샷 전이와 리비전 링크만 리비전 순서로 깊이 제한 없이 따라간다. 전이 증거가 빠지면 미해결이고, 철회 뒤 무관하게 같은 글이 다시 추가돼도 끊긴 경로를 되살리지 않는다. 구조적 후보는 아직 답이 아니다.
+  3. **범위 판정**: 후속 선택기(`Keeper_memory_successor_selection`)가 쿼리·원본 관측·대상·커밋된 경로를 보고 현재 대상이 같은 주제·사건·적용 범위를 다루는지 판정한다. 모델 실패·불확실한 범위·바뀐 증거는 미해결로 남기며 직접 일치 결과는 그대로 보존한다 — 권위 있는 "일치 없음" 답으로 바꾸지 않는다.
+  결과의 본문과 Memory ID는 현재 대상 것이고 과거 조회 출처(`lookup_evidence`·`successor_lookup_evidence`)는 별도로 표시된다. 여러 관측이 같은 현재 대상을 가리켜도 결과는 하나다.
+  → [Keeper_memory_successor_selection](../../lib/keeper/keeper_memory_successor_selection.mli) ·
+  [Keeper_memory_os_current.read_successor_recall_for_keepers_dir](../../lib/keeper/keeper_memory_os_current.mli) ·
+  [12-memory-systems](12-memory-systems.md)
+
 **Workspace Memory Ledger (작업공간 기억 원장)**
 : 작업공간 내 모든 Keeper의 자기 기억에서 새로 추가되거나 변경된 사실만 뽑아 분류해 기록한 공용 분류 장부.
   - **저장 위치**: `.masc/workspace-memory/ledger.json` (스키마 `workspace.memory.ledger.v1`).

@@ -437,7 +437,12 @@
       "path": "lib/lane_addon/lane_addon_runtime.ml",
       "baseline_lines": 2100,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: ignored declaration caller labels and access-forwarding helper removed with typed host authority preserved; worker/configuration/retained-record/cleanup/fleet responsibilities pending semantic review",
+      "current_lines": 2097,
+      "prs": [
+        42027
+      ],
+      "validation_artifact": "lane-declaration-access/README.md"
     },
     {
       "path": "lib/process/process_eio.ml",

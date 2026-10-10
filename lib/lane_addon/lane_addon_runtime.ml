@@ -175,8 +175,6 @@ let visibility_of_fields fields =
   | ["kind", `String "operator"] -> Ok Operator_only
   | ["keeper", `String keeper; "kind", `String "keeper"] when String.trim keeper <> "" -> Ok (Keeper_only keeper)
   | _ -> Error "invalid retained read visibility"
-let caller_access ?access _caller =
-  Option.value access ~default:Lane_addon_sources.Unauthenticated
 let can_read access = function
   | Shared -> true
   | Operator_only -> (match access with Lane_addon_sources.Operator_configuration -> true
@@ -1485,10 +1483,10 @@ let authorize_document m ~access (document : Lane_addon_declaration.document) =
       require_read access visibility
         |> Result.map_error (fun message -> {Lane_addon_declaration.code=Invalid_request;message;current=None})
 
-let read_declaration ?caller ?access ~config json = Eio_context.run_on_owner_domain (fun () ->
+let read_declaration ?(access = Lane_addon_sources.Unauthenticated) ~config json = Eio_context.run_on_owner_domain (fun () ->
   let* source_path = Lane_addon_declaration.read_request json in
   let* directory = edit_directory config in
-  let m = manager config in let access = caller_access ?access caller in
+  let m = manager config in
   Eio.Mutex.use_ro m.configuration_mutex (fun () ->
     let denied = {Lane_addon_declaration.code=Invalid_request;
       message="Lane declaration is unavailable to this caller";current=None} in
@@ -1503,12 +1501,12 @@ let read_declaration ?caller ?access ~config json = Eio_context.run_on_owner_dom
     Ok (Lane_addon_declaration.document_to_json document)))
 
 let declaration_writer_key = Eio.Fiber.create_key ()
-let save_declaration ?caller ?access ~config json = Eio_context.run_on_owner_domain (fun () ->
+let save_declaration ?(access = Lane_addon_sources.Unauthenticated) ~config json = Eio_context.run_on_owner_domain (fun () ->
   let write = Option.value ~default:Lane_addon_declaration.write
     (Eio.Fiber.get declaration_writer_key) in
   let* request = Lane_addon_declaration.write_request json in
   let* directory = edit_directory config in
-  let m = manager config in let access = caller_access ?access caller in
+  let m = manager config in
   Eio.Mutex.use_ro m.configuration_mutex (fun () ->
     let* current = match offload (fun () -> Lane_addon_declaration.read ~directory
       ~source_path:(Filename.concat directory request.file_name)) with
@@ -1877,7 +1875,7 @@ let prepare_broadcast m ~base_path ~caller ~access ~instance_id ~request_id ~row
           ~instance_id ~request_id:broadcast_id record) in
         Ok (broadcast_id, evidence))
 
-let dispatch ?caller ?access ~config ~operation json = Eio_context.run_on_owner_domain (fun () ->
+let dispatch ?caller ?(access = Lane_addon_sources.Unauthenticated) ~config ~operation json = Eio_context.run_on_owner_domain (fun () ->
   let* args = request_result (object_ json) in
   let allowed = match operation with
     | Attach -> ["manifest_path"; "run_id"; "binding"]
@@ -1892,7 +1890,6 @@ let dispatch ?caller ?access ~config ~operation json = Eio_context.run_on_owner_
     || List.exists (fun name -> not (List.mem name allowed)) names
     then Error (Request_rejected "duplicate or unknown Lane request field") else Ok () in
   let m = manager config in
-  let access = caller_access ?access caller in
   (* A durable delivery retry must authorize its saved caller before this
      lookup: its original source binding may already be gone. *)
   let* () = match operation with

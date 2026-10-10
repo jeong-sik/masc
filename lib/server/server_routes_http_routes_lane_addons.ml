@@ -323,14 +323,14 @@ let respond_declaration request reqd = function
 let read_declaration request reqd =
   with_tool_actor_auth ~tool_name:"masc_lane_declaration_read" (fun state caller _request reqd ->
     let args = `Assoc (List.map (fun (key,value) -> key,`String value) (query_fields request)) in
-    respond_declaration request reqd (Runtime.read_declaration ~caller ~access:(source_access state request caller) ~config:(Mcp_server.workspace_config state) args)) request reqd
+    respond_declaration request reqd (Runtime.read_declaration ~access:(source_access state request caller) ~config:(Mcp_server.workspace_config state) args)) request reqd
 
 let save_declaration request reqd =
   with_tool_actor_auth ~tool_name:"masc_lane_declaration_save" (fun state caller _request reqd ->
     Http.Request.read_body_async reqd (fun body ->
       let result = match decode_body body with
         | Error message -> Error {Lane_addon_declaration.code=Invalid_request;message;current=None}
-        | Ok args -> Runtime.save_declaration ~caller ~access:(source_access state request caller) ~config:(Mcp_server.workspace_config state) args in
+        | Ok args -> Runtime.save_declaration ~access:(source_access state request caller) ~config:(Mcp_server.workspace_config state) args in
       respond_declaration request reqd result)) request reqd
 
 let register_delivery ~sw ~clock =

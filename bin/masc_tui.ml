@@ -1558,6 +1558,76 @@ type msx_poll_state = Poll_ready of Masc_tui_msx_tick.poll_policy
   | Poll_observing of msx_poll_request * Masc_tui_msx_tick.refusal
 let msx_pending_poll = ref (Poll_ready Advancing)
 let invalidate_msx_poll () = msx_poll_view := ref ()
+type pending_msx_checkpoint = {
+  checkpoint_operation_id : string;
+  checkpoint_restore : bool;
+  checkpoint_slot : string;
+  checkpoint_workspace : Tui_decode.server_identity;
+}
+module Checkpoint_pending = Masc_tui_msx_checkpoint_pending
+let pending_msx_checkpoints : pending_msx_checkpoint list ref = ref []
+let checkpoint_storage_errors : (string, string) Hashtbl.t = Hashtbl.create 4
+let checkpoint_root workspace = Masc_tui_types.canonical_path workspace.Tui_decode.sid_masc_root
+let checkpoint_binding pending =
+  Result.map (fun operation_id ->
+    {Checkpoint_pending.operation_id; restore=pending.checkpoint_restore; slot=pending.checkpoint_slot;
+     base_path=Masc_tui_types.canonical_path pending.checkpoint_workspace.sid_base_path;
+     masc_root=checkpoint_root pending.checkpoint_workspace})
+    (Keeper_operation_id.of_string pending.checkpoint_operation_id)
+let recover_checkpoints state workspace =
+  let root = checkpoint_root workspace in
+  let base_path = Masc_tui_types.canonical_path workspace.Tui_decode.sid_base_path in
+  (* Other TUI processes can publish an unresolved intent after our first read.
+     Read the shared inventory on every write-admission check. *)
+  if Result.is_ok (Masc_tui_types.workspace_change_origin state) then
+    match Checkpoint_pending.load ~masc_root:root with
+    | Error detail ->
+        Hashtbl.replace checkpoint_storage_errors root detail;
+        state.msx_notice <- Some ("Checkpoint intent storage unavailable; machine changes blocked: " ^ detail)
+    | Ok bindings ->
+        let recovered = List.map (fun (binding : Checkpoint_pending.binding) ->
+          {checkpoint_operation_id=Keeper_operation_id.to_string binding.operation_id;
+           checkpoint_restore=binding.restore; checkpoint_slot=binding.slot;
+           checkpoint_workspace={workspace with sid_base_path=binding.base_path; sid_masc_root=binding.masc_root}})
+          (List.filter (fun (binding : Checkpoint_pending.binding) -> binding.base_path=base_path) bindings) in
+        pending_msx_checkpoints := recovered @ List.filter (fun pending ->
+          Masc_tui_types.canonical_path pending.checkpoint_workspace.sid_base_path <> base_path
+          || checkpoint_root pending.checkpoint_workspace <> root) !pending_msx_checkpoints;
+        Hashtbl.remove checkpoint_storage_errors root;
+        if recovered <> [] then
+          state.msx_notice <- Some "Unresolved checkpoint recovered; F5 inspects its original receipt before machine control resumes."
+let checkpoint_for_workspace state =
+  match state.server_identity with
+  | None -> None
+  | Some workspace ->
+      recover_checkpoints state workspace;
+      List.find_opt (fun pending ->
+        Masc_tui_types.canonical_path pending.checkpoint_workspace.sid_base_path =
+          Masc_tui_types.canonical_path workspace.sid_base_path
+        && checkpoint_root pending.checkpoint_workspace = checkpoint_root workspace)
+        !pending_msx_checkpoints
+let remember_checkpoint pending =
+  let root = checkpoint_root pending.checkpoint_workspace in
+  match checkpoint_binding pending with
+  | Error detail -> Error detail
+  | Ok binding ->
+      (match Checkpoint_pending.remember ~masc_root:root binding with
+       | Error detail -> Error detail
+       | Ok () -> pending_msx_checkpoints := pending :: !pending_msx_checkpoints; Ok ())
+let forget_checkpoint pending =
+  let root = checkpoint_root pending.checkpoint_workspace in
+  match Result.bind (checkpoint_binding pending) (Checkpoint_pending.forget ~masc_root:root) with
+  | Error detail -> Hashtbl.replace checkpoint_storage_errors root detail
+  | Ok () ->
+      Hashtbl.remove checkpoint_storage_errors root;
+      pending_msx_checkpoints := List.filter (fun held ->
+        held.checkpoint_operation_id <> pending.checkpoint_operation_id
+        || checkpoint_root held.checkpoint_workspace <> root) !pending_msx_checkpoints
+let machine_changes_allowed state =
+  Result.is_ok (Masc_tui_types.workspace_change_origin state)
+  && Option.is_none (checkpoint_for_workspace state)
+  && not (Option.exists (fun workspace -> Hashtbl.mem checkpoint_storage_errors (checkpoint_root workspace)) state.server_identity)
+let machine_change_refusal = "MSX control requires a verified server matching this TUI's local workspace."
 type lane_addons_slice_source = Cached_snapshot | Fresh_inventory
 let decode_play_mutation decode = function
   | Masc_tui_http.Post_answered json -> Play_answered (decode json)
@@ -1665,6 +1735,80 @@ let workspace_check_sequence state ~mailbox ~authority ~identity ~host ~port =
 let capture_workspace_check state ~mailbox =
   workspace_check_sequence state ~mailbox ~authority:state.workspace_authority
     ~identity:state.server_identity ~host:server_peer_host ~port:state.port
+
+(* The cached identity only describes the last read. A machine mutation
+   revalidates its captured endpoint immediately before dispatch, and its
+   completion owns only the view and authority that requested it. *)
+let run_machine_change ?(checkpoint_boundary=false) state ~mailbox ~refused ~unknown ~deliver write =
+  let authority = state.workspace_authority in
+  let view = ref !msx_poll_view in
+  let port = state.port in
+  let identity = state.server_identity in
+  let check = capture_workspace_check state ~mailbox in
+  let current () =
+    authority = state.workspace_authority && !view == !msx_poll_view && port = state.port
+  in
+  (* The identity the check confirmed is the one the request carries, so the
+     server compares it again at the moment it applies the change. *)
+  let admission =
+    try
+      if not (machine_changes_allowed state) then Error machine_change_refusal
+      else match identity, check () with
+      | _, Error detail -> Error detail
+      | None, Ok () -> Error "Workspace identity unavailable; MSX change withdrawn"
+      | Some expected, Ok () when current () && machine_changes_allowed state -> Ok expected
+      | Some _, Ok () -> Error "MSX control view or workspace authority withdrawn"
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printexc.to_string exn)
+  in
+  match admission with
+  | Error detail when current () ->
+      state.machine_interaction <- Observe_machine;
+      deliver None (Error (refused detail))
+  | Error _ -> ()
+  | Ok expected_workspace ->
+      let result =
+        try
+            let unsettled_tick = match !msx_pending_poll with
+              | Poll_pending _ | Poll_ready Outcome_unknown -> true
+              | Poll_ready (Advancing | Observing _) | Poll_observing _ -> false in
+            if checkpoint_boundary && unsettled_tick then
+              Error (refused "An MSX tick is still unsettled; no checkpoint was sent.")
+            else begin
+              if checkpoint_boundary then begin
+                invalidate_msx_poll ();
+                view := !msx_poll_view;
+                state.msx_live_in_flight <- None;
+                (match !msx_pending_poll with
+                 | Poll_observing (_,refusal) -> msx_pending_poll := Poll_ready (Observing refusal)
+                 | Poll_pending _ | Poll_ready _ -> ())
+              end;
+              (* No yield separates retirement from the checkpoint callback,
+                 which records its pending identity before sending HTTP. *)
+              write ~port ~expected_workspace
+            end
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (unknown (Printexc.to_string exn))
+      in
+      if current () then begin
+        (* Only an explicit, freshly admitted successful control action can
+           retire a workspace refusal. Retire any old observation token too;
+           an activity answer alone cannot grant control. *)
+        if Result.is_ok result then begin
+          match !msx_pending_poll with
+          | Poll_ready (Observing Workspace_changed)
+          | Poll_observing (_, Workspace_changed) ->
+              msx_pending_poll := Poll_ready Advancing;
+              state.msx_notice <- None
+          | Poll_ready (Advancing | Observing (Off | Activity_unobserved) | Outcome_unknown)
+          | Poll_pending _ | Poll_observing (_, (Off | Activity_unobserved)) -> ()
+        end;
+        deliver (Some expected_workspace) result
+      end
+
+;;
 
 (* Retire the cancellation context synchronously at the authority boundary,
    including while a request is connecting. Completion stamps also reject a
@@ -2695,28 +2839,41 @@ let launch_voice_config_load state ~mailbox =
 ;;
 
 let launch_msx_live_read (state : Masc_tui_types.state) ~mailbox =
-  if server_authority_ready state then begin
-  let request = { live_view = !msx_poll_view; live_port = state.port } in
-  state.msx_live_in_flight <- Some request;
-  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-    ~deliver:(fun result -> Msx_live_loaded (request, result))
-    (fun () -> Masc_tui_http.fetch_machine_live ~host:server_peer_host
-      ~port:request.live_port Masc.Machine_lane.Msx ~since:None)
-  end
+  if not (server_authority_ready state) || Option.is_some (checkpoint_for_workspace state) then () else
+  match state.msx_live_in_flight with
+  | Some pending
+    when pending.live_view == !msx_poll_view && pending.live_port = state.port -> ()
+  | Some _ | None ->
+    let request = { live_view = !msx_poll_view; live_port = state.port } in
+    let since = Masc_tui_machine_live.since state.msx_live in
+    let expected_workspace = state.server_identity in
+    state.msx_live_in_flight <- Some request;
+    launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+      ~deliver:(fun result -> Msx_live_loaded (request, result))
+      (fun () -> Masc_tui_http.fetch_machine_live ?expected_workspace ~host:server_peer_host
+        ~port:request.live_port Masc.Machine_lane.Msx ~since)
 ;;
 
 let rec launch_msx_poll (state : Masc_tui_types.state) ~mailbox =
-  if server_authority_ready state then begin
+  if not (server_authority_ready state) || Option.is_some (checkpoint_for_workspace state) then () else
   match state.msx_live, state.msx_live_in_flight with
-  | _, Some _ | Masc_tui_machine_live.Unread, None -> ()
-  | Failed _, None -> launch_msx_live_read state ~mailbox
-  | (Not_loaded | Showing _), None ->
+  | _, Some pending
+    when pending.live_view == !msx_poll_view && pending.live_port = state.port -> ()
+  (* F5 can replace the view while its first observation is still pending.
+     Obtain a frame for the new owner without waiting for the old read before
+     enabling its clock; Unread must not become a permanent idle state. *)
+  | (Masc_tui_machine_live.Unread | Failed _), (Some _ | None) -> launch_msx_live_read state ~mailbox
+  | (Not_loaded | Showing _), (Some _ | None) ->
   match !msx_pending_poll with
   | Poll_observing (request,refusal) when request.poll_view != !msx_poll_view
       || request.poll_port <> state.port || request.poll_authority <> state.workspace_authority ->
       msx_pending_poll := Poll_ready (Observing refusal);
       launch_msx_poll state ~mailbox
   | Poll_pending _ | Poll_observing _ | Poll_ready Outcome_unknown -> ()
+  | Poll_ready (Observing Workspace_changed) ->
+      (* The typed refusal already proved this endpoint is another workspace.
+         Do not read its screen while a health refresh is still in flight. *)
+      state.msx_notice <- Some (Masc_tui_msx_tick.refusal_notice Workspace_changed)
   | Poll_ready (Observing refusal) ->
       let request = { poll_view = !msx_poll_view; poll_port = state.port; poll_authority = state.workspace_authority; poll_reading = state.workspace_read_authority } in
       let since = Masc_tui_machine_live.since state.msx_live in
@@ -2727,27 +2884,53 @@ let rec launch_msx_poll (state : Masc_tui_types.state) ~mailbox =
           Result.map (fun activity -> activity,
             Masc_tui_http.fetch_machine_live ~host:server_peer_host ~port:request.poll_port Masc.Machine_lane.Msx ~since)
             (Masc_tui_http.fetch_msx_activity ~host:server_peer_host ~port:request.poll_port))
+  | Poll_ready Advancing when not (machine_changes_allowed state) ->
+      state.machine_interaction <- Observe_machine;
+      state.msx_notice <- Some machine_change_refusal;
+      launch_msx_live_read state ~mailbox
   | Poll_ready Advancing ->
       let request = { poll_view = !msx_poll_view; poll_port = state.port; poll_authority = state.workspace_authority; poll_reading = state.workspace_read_authority } in
       msx_pending_poll := Poll_pending request;
+      let check = capture_workspace_check state ~mailbox in
+      let identity = state.server_identity in
       let run () =
-        let frame =
-          try Masc_tui_http.tick_msx ~host:server_peer_host ~port:request.poll_port with
+        let admission =
+          try match identity, check () with
+          | _, Error detail -> Error detail
+          | None, Ok () -> Error "Workspace identity unavailable; MSX tick withdrawn"
+          | Some expected, Ok () ->
+            if request.poll_authority <> state.workspace_authority
+               || request.poll_view != !msx_poll_view || request.poll_port <> state.port
+               || not (machine_changes_allowed state)
+               || not state.msx_open || state.msx_menu_open
+               || state.machine_source <> Masc.Machine_lane.Msx
+               || state.machine_interaction <> Control_machine
+            then Error "MSX control view or workspace authority withdrawn"
+            else Ok expected
+
+          with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn ->
-              Error (Printexc.to_string exn)
+          | exn -> Error (Printexc.to_string exn)
         in
-        enqueue_async mailbox (Msx_frame_loaded (request, frame))
+        match admission with
+        | Error detail -> enqueue_async mailbox (Msx_tick_withdrawn (request, detail))
+        | Ok expected_workspace ->
+          let frame =
+            try Masc_tui_http.tick_msx ~expected_workspace ~host:server_peer_host ~port:request.poll_port with
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn -> Error (Printexc.to_string exn)
+          in
+          enqueue_async mailbox (Msx_frame_loaded (request, frame))
       in
       (try
          match Eio_context.get_switch_opt () with
          | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
-         | None -> enqueue_async mailbox (Msx_frame_loaded (request, Error "Eio switch is unavailable"))
+         | None -> enqueue_async mailbox (Msx_tick_withdrawn (request, "Eio switch is unavailable"))
        with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn -> enqueue_async mailbox
-           (Msx_frame_loaded (request, Error (Printexc.to_string exn))))
-  end
+           (Msx_tick_withdrawn (request, Printexc.to_string exn)))
+
 ;;
 
 let launch_dos_live_poll (state : Masc_tui_types.state) ~mailbox =
@@ -8384,6 +8567,105 @@ let chat_notice state ~keeper_name ~kind text =
               me_at = Unix.gettimeofday ();
             } ]
 
+let update_collab state owner update =
+  match state.collab with
+  | Some view when Masc_tui_collab.owner view == owner -> state.collab <- Some (update view)
+  | Some _ | None -> ()
+
+let collab_notice state owner ~kind text =
+  update_collab state owner (fun view -> Masc_tui_collab.notice view text);
+  report_action state (match kind with Notice_reply -> "play" | Notice_failure -> "error")
+    (Terminal_text.single_line text)
+
+let play_notice state ~sink ~kind text =
+  match sink with
+  | Play_chat keeper_name -> chat_notice state ~keeper_name ~kind text
+  | Play_collab {owner; _} -> collab_notice state owner ~kind text
+
+let settle_play_mutation state = function
+  | Play_chat _ -> ()
+  | Play_collab {owner; mutation} ->
+      update_collab state owner (fun view -> Masc_tui_collab.settled view mutation)
+
+let sync_collab_access state =
+  state.collab <- Option.map (fun view ->
+    Masc_tui_collab.write_access view (Masc_tui_types.play_change_access state)) state.collab
+
+let refresh_collab state ~mailbox owner =
+  match state.collab with
+  | Some view when Masc_tui_collab.owner view == owner ->
+      let view, read = Masc_tui_collab.loading view in
+      state.collab <- Some view;
+      let expected_workspace = state.server_identity in
+      launch_preset_call state ~mailbox
+        ~call:(Masc_tui_http.list_play_invites ~expected_workspace)
+        ~wrap:(fun result -> Play_invites_listed (Play_collab_list read,
+          Result.bind result Tui_decode.decode_play_invites))
+  | Some _ | None -> ()
+
+let refresh_current_collab state ~mailbox =
+  Option.iter (fun view -> refresh_collab state ~mailbox (Masc_tui_collab.owner view)) state.collab
+
+let open_collab state ~mailbox =
+  let view = Masc_tui_collab.write_access (Masc_tui_collab.create ())
+    (Masc_tui_types.play_change_access state) in
+  state.collab <- Some view;
+  refresh_collab state ~mailbox (Masc_tui_collab.owner view)
+
+let play_request_failure state request detail =
+  if Masc_tui_types.play_change_dispatched state request then Play_unanswered detail
+  else Play_not_dispatched detail
+
+let launch_play_issue state ~mailbox ~sink ~name ~hours =
+  match Masc_tui_types.begin_play_change state (Issue_invite name) with
+  | Error detail ->
+      settle_play_mutation state sink;
+      play_notice state ~sink ~kind:Notice_failure detail;
+      false
+  | Ok request ->
+      sync_collab_access state;
+      launch_preset_call state ~mailbox
+        ~call:(fun ~host ~port ->
+          match Masc_tui_types.workspace_change_origin state with
+          | Ok origin when origin = request.change_workspace
+              && Masc_tui_types.dispatch_play_change state request ->
+              Ok (Masc_tui_http.issue_play_invite
+                ~expected_base_path:request.change_workspace.wi_base_path
+                ~expected_masc_root:request.change_workspace.wi_masc_root ~host ~port ~name ~hours)
+          | Ok _ | Error _ -> Ok (Masc_tui_http.Post_refused "Local workspace authority changed before dispatch"))
+        ~wrap:(fun result -> Play_invite_issued (request, sink,
+          match result with
+          | Ok outcome -> decode_play_mutation Tui_decode.decode_play_invite_issued outcome
+          | Error detail -> play_request_failure state request detail));
+      true
+
+let launch_play_revoke state ~mailbox ~sink ~name =
+  match Masc_tui_types.begin_play_change state (Revoke_invite name) with
+  | Error detail ->
+      settle_play_mutation state sink;
+      play_notice state ~sink ~kind:Notice_failure detail;
+      false
+  | Ok request ->
+      sync_collab_access state;
+      launch_preset_call state ~mailbox
+        ~call:(fun ~host ~port ->
+          match Masc_tui_types.workspace_change_origin state with
+          | Ok origin when origin = request.change_workspace
+              && Masc_tui_types.dispatch_play_change state request ->
+              Ok (Masc_tui_http.revoke_play_invite
+                ~expected_base_path:request.change_workspace.wi_base_path
+                ~expected_masc_root:request.change_workspace.wi_masc_root ~host ~port ~name)
+          | Ok _ | Error _ -> Ok (Masc_tui_http.Revoke_other
+              (Masc_tui_http.Post_refused "Local workspace authority changed before dispatch")))
+        ~wrap:(fun result -> Play_invite_revoked (request, sink, name,
+          match result with
+          | Ok Masc_tui_http.Revoke_absent -> Play_revoke_absent
+          | Ok (Masc_tui_http.Revoke_release_failed detail) -> Play_revoke_release_failed detail
+          | Ok (Masc_tui_http.Revoke_other outcome) ->
+              Play_revoke_result (decode_play_mutation Tui_decode.decode_play_invite_revoked outcome)
+          | Error detail -> Play_revoke_result (play_request_failure state request detail)));
+      true
+
 let settle_retired_queue_inspections state =
   let retired, current = List.partition
       (fun (_, reading) -> reading != state.workspace_read_authority)
@@ -8666,6 +8948,7 @@ let render_spectator (state : Masc_tui_types.state) =
   match state.machine_source with
   | Masc.Machine_lane.Msx ->
       Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
+        ~interaction:state.machine_interaction
         ~connection:state.connection_status ~live:state.msx_live state.msx_frame
         (msx_surface_current ())
   | Masc.Machine_lane.Dos ->
@@ -8712,14 +8995,24 @@ let observe_msx_carts state ~mailbox =
     (fun () -> Masc_tui_http.fetch_msx_carts ~host:server_peer_host ~port:state.port)
     (fun carts -> state.msx_carts <- carts)
 
-let observe_msx_frame ?(clear_notice = false) (state : Masc_tui_types.state) ~mailbox =
+let observe_msx_frame ?(clear_notice = false) ?expected_workspace
+    ?(current = fun () -> true) (state : Masc_tui_types.state) ~mailbox =
+  if Option.is_some (checkpoint_for_workspace state) then () else
+  let captured_view = !msx_poll_view in
+  (* The read that follows a change the server admitted for [expected_workspace]
+     carries that workspace, and the server that answers it compares it with
+     its own. A server swapped in at any point, including A -> B -> A, answers
+     409 and its picture never reaches this view. *)
   with_msx_observation state ~mailbox (fun () ->
     (* The decoder has checked that MSX has no activity feed. Only its
        picture answer is needed by the MSX view. *)
     Result.map fst
-      (Masc_tui_http.fetch_machine_live ~host:server_peer_host ~port:state.port
-         Masc.Machine_lane.Msx ~since:(Masc_tui_machine_live.since state.msx_live)))
+      (Masc_tui_http.fetch_machine_live ?expected_workspace ~host:server_peer_host
+         ~port:state.port Masc.Machine_lane.Msx
+         ~since:(Masc_tui_machine_live.since state.msx_live)))
     (fun result ->
+  if current () && captured_view == !msx_poll_view
+     && Option.is_none (checkpoint_for_workspace state) then begin
   (match Masc_tui_machine_live.advance state.msx_live result with
    | None -> ()
    | Some view ->
@@ -8736,7 +9029,48 @@ let observe_msx_frame ?(clear_notice = false) (state : Masc_tui_types.state) ~ma
   | Poll_ready Outcome_unknown when Result.is_ok result && Option.is_some state.msx_frame ->
       msx_pending_poll := Poll_ready Advancing;
       if clear_notice then state.msx_notice <- None
-  | Poll_ready _ | Poll_pending _ | Poll_observing _ -> ())
+  | Poll_ready _ | Poll_pending _ | Poll_observing _ -> ()
+  end)
+;;
+
+(* The response binds workspace and operation together; health samples around
+   an unrelated live read cannot establish either completion or pixel identity. *)
+let inspect_pending_msx_checkpoint (state : Masc_tui_types.state) pending =
+  let authority = state.workspace_authority and view = !msx_poll_view and port = state.port in
+  let current () = authority=state.workspace_authority && view == !msx_poll_view && port=state.port in
+  let result = Masc_tui_http.inspect_msx_checkpoint
+    ~expected_workspace:pending.checkpoint_workspace
+    ~operation_id:pending.checkpoint_operation_id ~host:server_peer_host ~port
+    ~restore:pending.checkpoint_restore ~slot:pending.checkpoint_slot in
+  if current () then
+    match result with
+    | Error detail -> state.msx_notice <- Some ("Checkpoint inspection failed; retained screen: " ^ detail)
+    | Ok Tui_decode.Checkpoint_pending -> state.msx_notice <- Some "Checkpoint is still pending; F5 inspects its receipt."
+    | Ok (Checkpoint_unknown detail) -> state.msx_notice <- Some ("Checkpoint remains unknown: " ^ detail)
+    | Ok (Checkpoint_refused detail) ->
+        forget_checkpoint pending;
+        state.msx_notice <- Some ("Checkpoint refused: " ^ detail)
+    | Ok (Checkpoint_committed _) when not pending.checkpoint_restore ->
+        forget_checkpoint pending;
+        state.msx_notice <- Some "Saved quick checkpoint; operation receipt verified."
+    | Ok (Checkpoint_committed None) ->
+        state.msx_notice <- Some "Restore completed; awaiting its workspace-bound current screen."
+    | Ok (Checkpoint_committed (Some json)) ->
+        let decoded = Eio_guard.run_in_systhread ~label:"tui-checkpoint-live-decode"
+          (fun () -> Masc_tui_machine_live.decode Masc.Machine_lane.Msx json) in
+        if current () then (match decoded with
+         | Error detail -> state.msx_notice <- Some ("Restore completed; retained screen because inspection failed: " ^ detail)
+         | Ok (Unchanged _, _) -> state.msx_notice <- Some "Restore completed; inspection omitted the requested current pixels."
+         | Ok ((No_machine | Picture _) as answer, _) ->
+             (* Only valid receipt-bound pixels replace cached pixels. No old
+                tick token can survive admission across this checkpoint. *)
+             Option.iter (fun live ->
+               let live,frame = msx_frame_of_live ~previous_live:state.msx_live
+                 ~previous_frame:state.msx_frame live in
+               state.msx_live <- live; state.msx_frame <- frame; msx_surface_frame := frame)
+               (Masc_tui_machine_live.advance state.msx_live (Ok answer));
+             forget_checkpoint pending;
+             state.msx_notice <- Some "Restore completed; showing workspace state observed afterwards.")
 ;;
 
 (* The MSX door opens on the load menu (RFC-0439 3.7): the human picks a game
@@ -8745,11 +9079,11 @@ let observe_msx_frame ?(clear_notice = false) (state : Masc_tui_types.state) ~ma
    Both are bounded loopback calls; the overlay then owns the terminal until a
    game is chosen or [esc].
 
-   The menu, not the spectator, is what this opens. The [&] key and the
-   palette's "go MSX" both land here, so the two doors stay one door -- which
-   is why the menu goes in the function rather than at the key. *)
+   Collab's [g] action and the palette's "go MSX" both open this media picker.
+   [&] opens Collab, whose watch actions go directly to observation. *)
 let open_msx_screen (state : Masc_tui_types.state) ~mailbox =
   invalidate_msx_poll ();
+  state.machine_interaction <- Observe_machine;
   (* The spectator takes ownership from any image preview. A pending async
      preview must not keep its old surface alive underneath the game. *)
   state.image_request_generation <- state.image_request_generation + 1;
@@ -8768,9 +9102,10 @@ let open_msx_screen (state : Masc_tui_types.state) ~mailbox =
   launch_dos_live_poll state ~mailbox
 
 (* An inventory row names the shared machine itself. Opening it observes the
-   current screen; the separate [&] door keeps the media selection menu. *)
+   current screen; Collab's [g] action opens the separate media selection menu. *)
 let open_msx_spectator (state : Masc_tui_types.state) ~mailbox =
   invalidate_msx_poll ();
+  state.machine_interaction <- Observe_machine;
   state.image_request_generation <- state.image_request_generation + 1;
   state.browser_viewport <- None;
   if state.image_open then begin
@@ -8808,6 +9143,35 @@ let open_dos_screen (state : Masc_tui_types.state) ~mailbox =
   state.msx_last_poll_ns <- 0L;
   render_spectator state;
   launch_dos_live_poll state ~mailbox
+
+let handle_collab_action state ~mailbox view action =
+  let owner = Masc_tui_collab.owner view in
+  match action with
+  | Masc_tui_collab.Stay -> ()
+  | Close -> state.collab <- None; state.quit_armed <- false
+  | Watch Masc.Machine_lane.Msx -> open_msx_spectator state ~mailbox
+  | Watch Masc.Machine_lane.Dos -> open_dos_screen state ~mailbox
+  | Game_menu -> open_msx_screen state ~mailbox
+  | Refresh -> refresh_collab state ~mailbox (Masc_tui_collab.owner view)
+  | Resolve_unknown request_id ->
+      (match Masc_tui_types.resolve_play_change state ~request_id with
+       | Ok () ->
+           collab_notice state owner ~kind:Notice_reply
+             "Operator confirmed the original request finished; refreshing current invite status.";
+           sync_collab_access state;
+           refresh_current_collab state ~mailbox
+       | Error detail -> collab_notice state owner ~kind:Notice_failure detail)
+  | Open_link name ->
+      (match Masc_tui_types.play_invite_find state name with
+       | Some _ -> state.play_invite <- {state.play_invite with shown_name = Some name}; state.play_invite_scroll <- 0
+       | None -> collab_notice state owner ~kind:Notice_reply
+           "The one-time link is not retained in this session. Revoke this invite and issue a new one to obtain a link.")
+  | Issue (mutation, name, hours) ->
+      let sink = Play_collab {owner; mutation} in
+      ignore (launch_play_issue state ~mailbox ~sink ~name ~hours)
+  | Revoke (mutation, name) ->
+      let sink = Play_collab {owner; mutation} in
+      ignore (launch_play_revoke state ~mailbox ~sink ~name)
 
 (* Where a reference lands, and what it opens when it gets there.
 
@@ -10288,10 +10652,11 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       notice ~kind:Notice_failure reason
   | Masc_tui_command.Play_invites ->
       Masc_tui_message_input.clear state.msg_input;
+      let expected_workspace = state.server_identity in
       launch_chat_command_read state ~mailbox ~label:"/play invites"
-        ~call:Masc_tui_http.list_play_invites
+        ~call:(Masc_tui_http.list_play_invites ~expected_workspace)
         ~wrap:(fun result ->
-          Play_invites_listed (target, Result.bind result Tui_decode.decode_play_invites))
+          Play_invites_listed (Play_chat_list target, Result.bind result Tui_decode.decode_play_invites))
   | Masc_tui_command.Play_link requested_name ->
       Masc_tui_message_input.clear state.msg_input;
       (* The cards carry names made safe to draw, so the name typed is
@@ -10315,35 +10680,11 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
              { state.play_invite with shown_name = Some (Masc_tui_play_card.name card) };
            state.play_invite_scroll <- 0)
   | Masc_tui_command.Play_invite { name; hours } ->
-      if state.play_invite_inflight then
-        notice ~kind:Notice_failure
-          "An invite request is still waiting for the server; wait for its card"
-      else begin
-        Masc_tui_message_input.clear state.msg_input;
-        state.play_invite_inflight <- true;
-        launch_preset_call state ~mailbox
-          ~call:(fun ~host ~port ->
-            Ok (Masc_tui_http.issue_play_invite ~host ~port ~name ~hours))
-          ~wrap:(fun result ->
-            Play_invite_issued (target,
-              decode_play_mutation Tui_decode.decode_play_invite_issued
-                (match result with
-                 | Ok outcome -> outcome
-                 | Error detail -> Masc_tui_http.Post_unanswered detail)))
-      end
+      if launch_play_issue state ~mailbox ~sink:(Play_chat target) ~name ~hours then
+        Masc_tui_message_input.clear state.msg_input
   | Masc_tui_command.Play_revoke name ->
-      Masc_tui_message_input.clear state.msg_input;
-      launch_preset_call state ~mailbox
-        ~call:(fun ~host ~port ->
-          Ok (Masc_tui_http.revoke_play_invite ~host ~port ~name))
-        ~wrap:(fun result ->
-          Play_invite_revoked (target, name,
-            match result with
-            | Ok Masc_tui_http.Revoke_absent -> Play_revoke_absent
-            | Ok (Masc_tui_http.Revoke_other outcome) ->
-                Play_revoke_result
-                  (decode_play_mutation Tui_decode.decode_play_invite_revoked outcome)
-            | Error detail -> Play_revoke_result (Play_unanswered detail)))
+      if launch_play_revoke state ~mailbox ~sink:(Play_chat target) ~name then
+        Masc_tui_message_input.clear state.msg_input
   | Masc_tui_command.Unknown word ->
       report_action state "error"
         (Printf.sprintf
@@ -11135,6 +11476,18 @@ let withdraw_currency_authority state =
    just stopped serving. *)
 let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigation =
   withdraw_voice_capture state;
+  (* Retire action authority immediately. A missing identity quarantines its
+     cards; only a confirmed different workspace discards them. Old replies
+     are independently rejected by Workspace_scoped. *)
+  state.collab <- None;
+  invalidate_msx_poll ();
+  Masc_tui_msx.close ~write:write_to_terminal state;
+  msx_surface_frame := None;
+  Masc_tui_types.withdraw_machine_control state;
+  Masc_tui_types.withdraw_play_invite_workspace state ~previous
+    ~current:(workspace_input_identity_of_server state.server_identity);
+  state.play_invite_scroll <- 0;
+  Masc_tui_types.withdraw_play_changes state;
   (* A decision receipt states what one workspace's Keeper answered; the
      next workspace's screens must not carry it. *)
   state.home_decision_receipt <- None;
@@ -11251,7 +11604,6 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.sent_image_read <- None;
   state.msg_copy_pending <- None;
   state.chat_command_reads <- [];
-  state.play_invite_inflight <- false;
   reset_verification_rows state;
   state.verification <- None;
   state.verification_error <- None;
@@ -14652,6 +15004,15 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
           ignore (Eio.Promise.try_resolve acknowledge false)
         | Keeper_chat_done (_, _, _, acknowledge) ->
           ignore (Eio.Promise.try_resolve acknowledge ())
+        | Play_invite_issued (request, _, Play_answered (Ok invite)) ->
+          (match
+             Masc_tui_play_card.make
+               ~project:Masc_tui_play_card.project_for_terminal
+               ~name:invite.Tui_decode.pii_name
+               ~expires_at:invite.pii_expires_at ~link:invite.pii_link
+           with
+           | Ok card -> Masc_tui_types.retain_withdrawn_play_invite state request card
+           | Error _ -> ())
         | _ -> ())
   | Chat_command_read_completed (ticket, message) ->
       if List.exists (fun (pending, _, _) -> pending == ticket) state.chat_command_reads then begin
@@ -15945,12 +16306,17 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
            report_action state "error" ("preset delete: " ^ detail);
            launch_presets_load state ~mailbox)
   | Play_invites_listed (target, result) ->
-      (match result with
+      (match target with
+       | Play_collab_list read ->
+           state.collab <- Option.map (fun view -> Masc_tui_collab.listed view read result) state.collab
+       | Play_chat_list keeper ->
+         let target = Play_chat keeper in
+         (match result with
        | Error detail ->
-           chat_notice state ~keeper_name:target ~kind:Notice_failure
+           play_notice state ~sink:target ~kind:Notice_failure
              ("play invites: " ^ detail)
        | Ok [] ->
-           chat_notice state ~keeper_name:target ~kind:Notice_reply
+           play_notice state ~sink:target ~kind:Notice_reply
              "No shared DOS play invites"
        | Ok invites ->
            let row invite =
@@ -15963,10 +16329,14 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
              ^ (if invite.pi_expired then " · expired" else "")
              ^ (if invite.pi_holds_controller then " · controlling" else "")
            in
-           chat_notice state ~keeper_name:target ~kind:Notice_reply
-             ("Shared DOS play invites:\n" ^ String.concat "\n" (List.map row invites)))
-  | Play_invite_issued (target, result) ->
-      state.play_invite_inflight <- false;
+           play_notice state ~sink:target ~kind:Notice_reply
+             ("Shared DOS play invites:\n" ^ String.concat "\n" (List.map row invites))))
+  | Play_invite_issued (request, target, result) ->
+      let outcome = match result with
+        | Play_answered (Ok _) | Play_refused _ | Play_not_dispatched _ -> Change_confirmed
+        | Play_answered (Error _) | Play_unanswered _ -> Change_unknown in
+      if Masc_tui_types.finish_play_change state request outcome then begin
+      settle_play_mutation state target;
       (match result with
        | Play_answered (Ok invite) ->
            (* The link is a credential the server will not show again. It goes
@@ -15982,39 +16352,55 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                 let stored = Masc_tui_types.play_invite_store state.play_invite card in
                 state.play_invite <- stored;
                 state.play_invite_scroll <- 0;
-                chat_notice state ~keeper_name:target ~kind:Notice_reply
+                play_notice state ~sink:target ~kind:Notice_reply
                   (Masc_tui_play_card.issued_notice card
                      ~retained:(Masc_tui_types.play_invite_holds_earlier stored))
             | Error reason ->
                 (* The link is the server's public base URL and a hex token,
                    so a link the card refuses names the base URL. The reason is
                    the card's own sentence and carries no part of the link. *)
-                chat_notice state ~keeper_name:target ~kind:Notice_failure
+                play_notice state ~sink:target ~kind:Notice_failure
                   ("play invite may exist, but its link cannot be shown: " ^ reason
                    ^ "; check MASC_HTTP_BASE_URL, then list and revoke it before retrying"))
        | Play_answered (Error _) ->
-           chat_notice state ~keeper_name:target ~kind:Notice_failure
-             "play invite may exist, but its one-time link was unreadable; list and revoke it before retrying"
+           play_notice state ~sink:target ~kind:Notice_failure
+             ("Play invite response unreadable. " ^ Masc_tui_types.play_change_unknown_notice request)
        | Play_refused detail ->
-           chat_notice state ~keeper_name:target ~kind:Notice_failure
+           play_notice state ~sink:target ~kind:Notice_failure
              ("play invite refused: " ^ detail)
+       | Play_not_dispatched detail ->
+           play_notice state ~sink:target ~kind:Notice_failure
+             ("play invite was not sent: " ^ detail)
        | Play_unanswered detail ->
-           chat_notice state ~keeper_name:target ~kind:Notice_failure
-             ("play invite outcome unknown (" ^ detail ^ "); list and revoke before retrying"))
-  | Play_invite_revoked (target, requested_name, result) ->
+           play_notice state ~sink:target ~kind:Notice_failure
+             (detail ^ ". " ^ Masc_tui_types.play_change_unknown_notice request));
+      sync_collab_access state;
+      refresh_current_collab state ~mailbox
+      end
+  | Play_invite_revoked (request, target, requested_name, result) ->
+      let outcome = match result with
+        | Play_revoke_absent | Play_revoke_release_failed _
+        | Play_revoke_result (Play_answered (Ok _) | Play_refused _ | Play_not_dispatched _) -> Change_confirmed
+        | Play_revoke_result (Play_answered (Error _) | Play_unanswered _) -> Change_unknown in
+      if Masc_tui_types.finish_play_change state request outcome then begin
+      settle_play_mutation state target;
       let retry reason =
         Printf.sprintf "retry /play revoke %s — %s" requested_name reason
       in
       (match result with
        | Play_revoke_absent ->
            forget_play_invite state ~name:requested_name;
-           chat_notice state ~keeper_name:target ~kind:Notice_reply
+           play_notice state ~sink:target ~kind:Notice_reply
              ("Play invite " ^ requested_name ^ " is absent (no invite has that name)")
+       | Play_revoke_release_failed detail ->
+           forget_play_invite state ~name:requested_name;
+           play_notice state ~sink:target ~kind:Notice_failure
+             (retry (detail ^ " (invite already absent; controller release failed)"))
        | Play_revoke_result (Play_answered (Ok revoked)) ->
            forget_play_invite state ~name:revoked.Tui_decode.pir_name;
            (match revoked.pir_release_error with
             | Some detail ->
-                chat_notice state ~keeper_name:target ~kind:Notice_failure
+                play_notice state ~sink:target ~kind:Notice_failure
                   (retry
                      (detail
                       ^ (if revoked.pir_revoked then
@@ -16022,20 +16408,26 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                          else
                            " (invite already absent; controller release failed)")))
             | None ->
-                chat_notice state ~keeper_name:target ~kind:Notice_reply
+                play_notice state ~sink:target ~kind:Notice_reply
                   (Printf.sprintf "Play invite %s: %s%s"
                      revoked.pir_name
                      (if revoked.pir_revoked then "revoked" else "already absent")
                      (if revoked.pir_released_controller then "; controller released" else "")))
        | Play_revoke_result (Play_answered (Error detail)) ->
-           chat_notice state ~keeper_name:target ~kind:Notice_failure
-             (retry (detail ^ " (play revoke response unreadable)"))
+           play_notice state ~sink:target ~kind:Notice_failure
+             (detail ^ ". " ^ Masc_tui_types.play_change_unknown_notice request)
        | Play_revoke_result (Play_refused detail) ->
-           chat_notice state ~keeper_name:target ~kind:Notice_failure
+           play_notice state ~sink:target ~kind:Notice_failure
              ("play revoke refused: " ^ detail)
+       | Play_revoke_result (Play_not_dispatched detail) ->
+           play_notice state ~sink:target ~kind:Notice_failure
+             ("play revoke was not sent: " ^ detail)
        | Play_revoke_result (Play_unanswered detail) ->
-           chat_notice state ~keeper_name:target ~kind:Notice_failure
-             (retry (detail ^ " (play revoke outcome unknown)")))
+           play_notice state ~sink:target ~kind:Notice_failure
+             (detail ^ ". " ^ Masc_tui_types.play_change_unknown_notice request));
+      sync_collab_access state;
+      refresh_current_collab state ~mailbox
+      end
   | Librarian_input_loaded (prompt_key, result) ->
       if state.prompts_librarian_input_requested = Some prompt_key then
         state.prompts_librarian_input_requested <- None;
@@ -16748,6 +17140,21 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                notice ~kind:Notice_failure
                  (Printf.sprintf "image %s: %s; browser: %s" title e opener_err)))
       end
+  | Msx_tick_withdrawn (request, detail) ->
+      (match !msx_pending_poll with
+       | Poll_pending pending when pending == request ->
+           (* No POST was attempted, so this receipt releases the pending
+              token without inventing an unknown server outcome. A later
+              control view still needs its own fresh identity admission. *)
+           msx_pending_poll := Poll_ready Advancing;
+           if request.poll_authority = state.workspace_authority
+              && request.poll_view == !msx_poll_view && request.poll_port = state.port
+              && state.msx_open && not state.msx_menu_open then begin
+             state.machine_interaction <- Observe_machine;
+             state.msx_notice <- Some ("No MSX tick sent: " ^ detail);
+             render_spectator state
+           end
+       | Poll_pending _ | Poll_ready _ | Poll_observing _ -> ())
   | Msx_frame_loaded (request, result) ->
       (match !msx_pending_poll with
        | Poll_pending pending when pending == request ->
@@ -18305,12 +18712,14 @@ let drain_async_messages state ~base_path ~http_refresh_inflight
             "async result waited %.0f ms in the mailbox before the loop applied it"
             (Masc_tui_http.ms_of_ns waited_ns);
         let image_was_open = state.image_open in
+        let machine_was_open = state.msx_open in
         apply_async_message state ~base_path ~http_refresh_inflight
           ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox msg;
         (* The image renderer cleared the text screen outside the presenter.
            If an async failure dismisses it, cached unchanged rows must also
            be restored, just as they are after a keyboard dismissal. *)
-        if image_was_open && not state.image_open then (
+        if (image_was_open && not state.image_open)
+           || (machine_was_open && not state.msx_open) then (
           Frame_presenter.invalidate frame_presenter;
           Render_schedule.request render_schedule Render_schedule.Force);
         loop true
@@ -20661,12 +21070,13 @@ and is loaded on demand through keeper_skill.
           >= 0
         then begin
           state.msx_last_poll_ns <- now_ns;
-          (* The MSX poll advances the machine a step and reads the frame it
-             lands on (RFC-0439 §3.2): a game flows while it is watched, even
-             when no keeper is pressing. The DOS screen is only read, with the
-             counter of the picture already drawn. *)
+          (* Observation must not advance the shared machine. Only an explicit
+             controlling view owns the MSX clock and input. *)
           match state.machine_source with
-          | Masc.Machine_lane.Msx -> launch_msx_poll state ~mailbox:async_messages
+          | Masc.Machine_lane.Msx ->
+              (match state.machine_interaction with
+               | Observe_machine -> launch_msx_live_read state ~mailbox:async_messages
+               | Control_machine -> launch_msx_poll state ~mailbox:async_messages)
           | Masc.Machine_lane.Dos -> launch_dos_live_poll state ~mailbox:async_messages
         end
       end;
@@ -20909,14 +21319,22 @@ and is loaded on demand through keeper_skill.
          when state.msx_menu_open -> invalidate_msx_poll ()
        | Some "esc", (Masc.Machine_lane.Msx | Masc.Machine_lane.Dos) ->
            invalidate_msx_poll ()
-       | Some ("f6" | "f7" | "f8"), Masc.Machine_lane.Msx -> invalidate_msx_poll ()
-       | Some name, Masc.Machine_lane.Msx when Option.is_some (Masc_tui_msx.server_key name) ->
+       | Some "f5", Masc.Machine_lane.Msx -> invalidate_msx_poll ()
+       | Some ("f6" | "f7" | "f8"), Masc.Machine_lane.Msx
+         when state.machine_interaction = Control_machine -> invalidate_msx_poll ()
+       | Some name, Masc.Machine_lane.Msx
+         when state.machine_interaction = Control_machine
+              && Option.is_some (Masc_tui_msx.server_key name) ->
            invalidate_msx_poll ()
        | Some _, (Masc.Machine_lane.Msx | Masc.Machine_lane.Dos)
        | None, (Masc.Machine_lane.Msx | Masc.Machine_lane.Dos) -> ());
-      let check_msx_write = capture_workspace_check state ~mailbox:async_messages in
       (match msx_key with
       | None -> ()
+      | Some ("f5" | "f6" | "f7") when state.machine_source = Masc.Machine_lane.Msx
+          && Option.is_some (checkpoint_for_workspace state) ->
+          Option.iter (inspect_pending_msx_checkpoint state) (checkpoint_for_workspace state);
+          state.machine_interaction <- Observe_machine;
+          render_spectator state
       | Some name when state.msx_menu_open -> (
           (* The load menu owns the keyboard: the lib navigates the picker and
              names the choice, and the I/O it cannot reach -- the load POST, the
@@ -20946,53 +21364,119 @@ and is loaded on demand through keeper_skill.
               end
           | Watch source ->
               state.msx_menu_open <- false;
+              state.machine_interaction <- Observe_machine;
               state.machine_source <- source;
               (* Poll at once so the spectator opens on a fresh frame. *)
               state.msx_last_poll_ns <- 0L;
               render_spectator state
-          | (Load cart | Swap_disk cart) as choice -> (
-              state.msx_notice <- None;
-              match
-                Result.bind (check_msx_write ()) (fun () ->
-                  match choice with
-                  | Swap_disk _ -> Masc_tui_http.post_msx_change_disk
-                      ~host:server_peer_host ~port:state.port ~disk:cart
-                  | _ -> Masc_tui_http.post_msx_load ~host:server_peer_host ~port:state.port ~cart)
-              with
-              | Ok () ->
-                  (match choice with Swap_disk _ -> state.msx_notice <- Some "Disk changed; backup: before-disk-change" | _ -> ());
-                  state.msx_menu_open <- false;
-                  state.machine_source <- Masc.Machine_lane.Msx;
-                  observe_msx_frame state ~mailbox:async_messages;
-                  state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-                  render_spectator state
-              | Error message ->
-                  (* Stay in the menu and say why, so the human can pick again. *)
-                  Masc_tui_msx.render_menu ~write:write_to_terminal
-                    ~status:((match choice with Swap_disk _ -> "disk change failed: " | _ -> "load failed: ") ^ message) state))
+          | (Load cart | Swap_disk cart) as choice ->
+              let swapping = match choice with
+                | Swap_disk _ -> true
+                | Load _ | Stay | Closed | Watch _ -> false
+              in
+              run_machine_change state ~mailbox:async_messages ~refused:Fun.id ~unknown:Fun.id
+                ~deliver:(fun expected_workspace -> function
+                  | Ok () ->
+                      state.msx_notice <- (if swapping
+                        then Some "Disk changed; backup: before-disk-change" else None);
+                      state.machine_interaction <- Control_machine;
+                      state.msx_menu_open <- false;
+                      state.machine_source <- Masc.Machine_lane.Msx;
+                      observe_msx_frame ?expected_workspace state ~mailbox:async_messages;
+                      state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
+                      render_spectator state
+                  | Error message ->
+                      Masc_tui_msx.render_menu ~write:write_to_terminal
+                        ~status:((if swapping then "disk change failed: " else "load failed: ")
+                          ^ message) state)
+                (fun ~port ~expected_workspace ->
+                  if swapping then Masc_tui_http.post_msx_change_disk
+                    ~expected_workspace ~host:server_peer_host ~port ~disk:cart
+                  else Masc_tui_http.post_msx_load ~expected_workspace
+                    ~host:server_peer_host ~port ~cart))
+      | Some name when state.machine_source = Masc.Machine_lane.Msx
+          && not (machine_changes_allowed state)
+          && (List.mem name ["f5"; "f6"; "f7"; "f8"]
+              || (state.machine_interaction = Control_machine
+                  && Option.is_some (Masc_tui_msx.server_key name))) ->
+          state.machine_interaction <- Observe_machine;
+          state.msx_notice <- Some machine_change_refusal;
+          render_spectator state
       | Some name
         when (match state.machine_source with
               | Masc.Machine_lane.Dos -> true
-              | Masc.Machine_lane.Msx -> false)
+              | Masc.Machine_lane.Msx ->
+                  state.machine_interaction = Observe_machine && name <> "f5")
              && not (List.mem name [ "esc"; "+"; "="; "-"; "_" ]) ->
           (* The DOS screen is watched, not driven: a key that is not the
              spectator's own (leave, size) repaints and never reaches the MSX
              machine -- not as a game key, a checkpoint or a disk change. *)
           render_spectator state
+      | Some "f5" ->
+          (match state.machine_interaction with
+           | Control_machine ->
+               state.machine_interaction <- Observe_machine;
+               state.msx_last_poll_ns <- 0L;
+               render_spectator state
+           | Observe_machine ->
+               run_machine_change state ~mailbox:async_messages ~refused:Fun.id ~unknown:Fun.id
+                 ~deliver:(fun _expected_workspace result ->
+                   (match result with
+                    | Ok () -> state.machine_interaction <- Control_machine
+                    | Error detail -> state.msx_notice <- Some detail);
+                   state.msx_last_poll_ns <- 0L;
+                   render_spectator state)
+                 (fun ~port:_ ~expected_workspace:_ -> Ok ()))
       | Some "f8" ->
           observe_msx_carts state ~mailbox:async_messages;
           Masc_tui_msx.open_menu ~write:write_to_terminal ~mode:Masc_tui_types.Change_disk state
       | Some (("f6" | "f7") as name) ->
-          let restore = name = "f7" in
-          let result = Result.bind (check_msx_write ()) (fun () ->
-              Masc_tui_http.post_msx_checkpoint
-                ~host:server_peer_host ~port:state.port ~restore ~slot:"quick") in
-          state.msx_notice <- Some (match result with
-            | Ok () -> if restore then "Restored quick checkpoint" else "Saved quick checkpoint"
-            | Error message -> "Checkpoint failed: " ^ message);
-          observe_msx_frame state ~mailbox:async_messages;
-          state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-          render_spectator state
+          (* A presentation token is not a mutation barrier. Never start a
+             checkpoint while our earlier tick may still be running. *)
+          (match !msx_pending_poll with
+           | Poll_pending _ | Poll_ready Outcome_unknown ->
+               state.msx_notice <- Some "Wait for the outstanding MSX tick to settle before checkpointing.";
+               render_spectator state
+           | Poll_ready (Advancing | Observing _) | Poll_observing _ ->
+               let restore = name="f7" in
+               let requested = ref None in
+               run_machine_change ~checkpoint_boundary:true state ~mailbox:async_messages
+                 ~refused:(fun detail -> Masc_tui_http.Checkpoint_refused detail)
+                 ~unknown:(fun detail -> Masc_tui_http.Checkpoint_outcome_unknown detail)
+                 ~deliver:(fun _expected_workspace result ->
+                   state.msx_notice <- Some (match result with
+                     | Ok () -> if restore then "Restore completed; inspecting current workspace screen." else "Saved quick checkpoint."
+                     | Error (Masc_tui_http.Checkpoint_refused detail) -> "Checkpoint refused: " ^ detail
+                     | Error (Masc_tui_http.Checkpoint_outcome_unknown detail) -> "Checkpoint outcome unknown: " ^ detail);
+                   (match !requested with
+                    | None -> ()
+                    | Some pending ->
+                        (match result with
+                         | Error (Checkpoint_refused _) -> forget_checkpoint pending
+                         | Ok () when not restore -> forget_checkpoint pending
+                         | Ok () | Error (Checkpoint_outcome_unknown _) ->
+                             state.machine_interaction <- Observe_machine;
+                             inspect_pending_msx_checkpoint state pending));
+                   state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
+                   render_spectator state)
+                 (fun ~port ~expected_workspace ->
+                   let pending = {checkpoint_operation_id=Random_id.uuid_v7 ();
+                     checkpoint_restore=restore;checkpoint_slot="quick";
+                     checkpoint_workspace=expected_workspace} in
+                   match remember_checkpoint pending with
+                   | Error detail -> Error (Masc_tui_http.Checkpoint_refused
+                       ("Cannot durably retain checkpoint intent: " ^ detail))
+                   | Ok () ->
+                   requested := Some pending;
+                   let result = Masc_tui_http.post_msx_checkpoint ~expected_workspace
+                     ~operation_id:pending.checkpoint_operation_id ~host:server_peer_host ~port ~restore ~slot:"quick" in
+                   (* Knowledge of this operation survives a presentation scope
+                      change; never strand a proven refusal behind an old view. *)
+                   (match result with
+                    | Error (Checkpoint_refused _) -> forget_checkpoint pending
+                    | Ok () when not restore -> forget_checkpoint pending
+                    | Ok () | Error (Checkpoint_outcome_unknown _) -> ());
+                   result))
       | Some "esc" ->
           (* esc closes the spectator; consume returns false and owes a repaint. *)
           if not (Masc_tui_msx.consume ~write:write_to_terminal state "esc")
@@ -21012,15 +21496,15 @@ and is loaded on demand through keeper_skill.
              (e.g. deliberate non-key input) just repaints the cache. *)
           match Masc_tui_msx.server_key name with
           | Some server_key ->
-              (match
-                 Result.bind (check_msx_write ()) (fun () ->
-                   Masc_tui_http.post_msx_press ~host:server_peer_host
-                     ~port:state.port ~keys:[ server_key ])
-               with
-               | Ok _ -> observe_msx_frame ~clear_notice:true state ~mailbox:async_messages
-               | Error detail -> state.msx_notice <- Some detail);
-              state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-              render_spectator state
+              run_machine_change state ~mailbox:async_messages ~refused:Fun.id ~unknown:Fun.id
+                ~deliver:(fun expected_workspace result ->
+                  (match result with
+                   | Ok _ -> observe_msx_frame ~clear_notice:true ?expected_workspace state ~mailbox:async_messages
+                   | Error detail -> state.msx_notice <- Some detail);
+                  state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
+                  render_spectator state)
+                (fun ~port ~expected_workspace -> Masc_tui_http.post_msx_press
+                  ~expected_workspace ~host:server_peer_host ~port ~keys:[ server_key ])
           (* See Masc_tui_msx.consume: a non-game key only repaints, always open. *)
           | None -> ignore (Masc_tui_msx.consume ~write:write_to_terminal state name)));
       (* Async agenda state can change the usable row budget after the last
@@ -21119,6 +21603,15 @@ and is loaded on demand through keeper_skill.
           draft that goes to a Keeper on the next Enter. It is first, above the
           overlays the card is drawn over. *)
        | Some (Pasted _) when Option.is_some (Masc_tui_types.play_card_shown state) -> ()
+       | Some (Pasted paste) when Option.is_some state.collab ->
+           (* The whole Collab overlay owns paste. Only its visible form may
+              receive text; browsing, confirmation and compact frames never
+              forward it to a draft or attachment handler underneath. *)
+           if text_target = Some Text_collab_form then
+             state.collab <- Option.map (fun view ->
+               Masc_tui_collab.paste view
+                 (Masc_tui_identity_model.identity_field_paste paste.Masc_tui_paste.text))
+               state.collab
        | Some (Pasted _) when exact_activity_on_screen () || browser_activity_on_screen () || machine_activity_on_screen () -> ()
        | Some (Pasted paste) when Option.is_some state.lane_addons && not state.palette_open ->
            (match state.lane_addons with
@@ -21156,7 +21649,7 @@ and is loaded on demand through keeper_skill.
            in
            (match text_target with
             | None -> ()
-            | Some Text_account_login -> ()
+            | Some Text_collab_form | Some Text_account_login -> ()
             | Some Text_ask_answer ->
                 edit_ask_text state (fun draft ->
                   draft ^ Keeper_chat.terminal_safe_text ~preserve_newlines:true
@@ -21381,6 +21874,7 @@ and is loaded on demand through keeper_skill.
                yielding there would leave the operator on a terminal they
                cannot read with no way out but Ctrl-C. *)
             (not state.about_open)
+            && Option.is_none state.collab
             && (compact_viewport
                || quit_key_allowed_for (text_input_target state ~compact_viewport))
             && Render_schedule.Input_shortcut.is_quit ~message_mode k
@@ -21560,6 +22054,14 @@ and is loaded on demand through keeper_skill.
             | "g", Some _ -> state.play_invite_scroll <- 0
             | "G", Some _ -> state.play_invite_scroll <- Masc_tui_types.clamped_scroll_end
             | _, _ -> ())
+       | Some key when Option.is_some state.collab ->
+           (match state.collab with
+            | Some view when not compact_viewport || key = "esc" ->
+                let view = Masc_tui_collab.write_access view (Masc_tui_types.play_change_access state) in
+                let view, action = Masc_tui_collab.key view key in
+                state.collab <- Some view;
+                handle_collab_action state ~mailbox:async_messages view action
+            | Some _ | None -> ())
        | Some key when Option.is_some state.account_login ->
            (match state.account_login with
             | Some view ->
@@ -23265,6 +23767,8 @@ and is loaded on demand through keeper_skill.
                 (match chosen with
                  | Some (_, Masc_tui_palette.Palette_hide_browser_lane) ->
                      hide_browser_lane state
+                 | Some (_, Masc_tui_palette.Palette_collab) ->
+                     open_collab state ~mailbox:async_messages
                  | Some (_, Masc_tui_palette.Palette_msx) ->
                      open_msx_screen state ~mailbox:async_messages
                  | Some (_, Masc_tui_palette.Palette_dos) ->
@@ -24932,7 +25436,7 @@ and is loaded on demand through keeper_skill.
        | Some "?" ->
            state.help_open <- true;
            state.help_scroll <- 0
-      | Some "&" -> open_msx_screen state ~mailbox:async_messages
+      | Some "&" -> open_collab state ~mailbox:async_messages
        | Some ";" ->
            state.agenda_open <- true;
            state.agenda_scroll <- 0;

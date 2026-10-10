@@ -151,6 +151,9 @@ let test_invite_routes () =
         let invites = Routes.invites_path in
         let issue_body = {|{"name":"minsu","hours":2}|} in
         check int "a worker cannot issue" 403 (status_of (call ~token:worker "POST" invites ~body:issue_body));
+        let foreign_issue = {|{"name":"minsu","hours":2,"expected_workspace":{"base_path":"/foreign","masc_root":"/foreign/.masc"}}|} in
+        check int "foreign workspace cannot issue credential" 409
+          (status_of (call ~token:operator "POST" invites ~body:foreign_issue));
         let issued = call ~token:operator "POST" invites ~body:issue_body in
         check int "the operator issues" 201 (status_of issued);
         let issued = body_of issued in
@@ -161,6 +164,9 @@ let test_invite_routes () =
         let player = String.sub link (String.length prefix) (String.length link - String.length prefix) in
         check int "a player cannot issue" 403 (status_of (call ~token:player "POST" invites ~body:issue_body));
         check int "a player cannot list" 403 (status_of (call ~token:player "GET" invites));
+        check int "foreign workspace cannot revoke issued credential" 409
+          (status_of (call ~token:operator "DELETE"
+            (invites ^ "/minsu?expected_base_path=%2Fforeign&expected_masc_root=%2Fforeign%2F.masc")));
         let again = call ~token:operator "POST" invites ~body:issue_body in
         check int "the same name again is a conflict" 409 (status_of again);
         check string "because a credential has it" "credential" (string_member "taken_by" (body_of again));

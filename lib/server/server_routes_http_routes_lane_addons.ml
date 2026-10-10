@@ -294,9 +294,35 @@ let live_json ~config source ~since =
 
 (* An invited Player holds CanPlayMachine and no CanReadState: it watches
    the machine here and reads nothing else. Workers and Admins hold both. *)
+(* A terminal that just changed the machine names the workspace it read, so a
+   server swapped onto the same port between the change and this read answers
+   409 instead of handing its picture to the wrong view. Both fields or neither;
+   the live query decoder never sees them. *)
+let live_workspace_precondition ~config fields =
+  let names = ["expected_base_path"; "expected_masc_root"] in
+  let expected, rest = List.partition (fun (name, _) -> List.mem name names) fields in
+  match expected with
+  | [] -> Ok rest
+  | _ ->
+    (match List.assoc_opt "expected_base_path" expected, List.assoc_opt "expected_masc_root" expected with
+     | Some base, Some root when List.length expected = 2 ->
+       let precondition =
+         `Assoc [ "expected_workspace", `Assoc [ "base_path", `String base; "masc_root", `String root ] ] in
+       (match Workspace.validate_expected_workspace ~config precondition with
+        | Ok _ -> Ok rest
+        | Error Workspace.Invalid_workspace_precondition ->
+          Error (`Bad_request, "invalid expected_workspace precondition")
+        | Error Workspace.Workspace_precondition_failed ->
+          Error (`Conflict, "workspace precondition failed"))
+     | _ -> Error (`Bad_request, "live takes expected_base_path and expected_masc_root together"))
+
 let get_live request reqd =
   with_permission_auth ~permission:Masc_domain.CanPlayMachine (fun state _request reqd ->
-    match decode_live_query (query_fields request) with
+    match live_workspace_precondition ~config:(Mcp_server.workspace_config state) (query_fields request) with
+    | Error (status, detail) ->
+        respond_json_value_with_cors ~status request reqd (error_json detail)
+    | Ok fields ->
+    match decode_live_query fields with
     | Error detail -> respond request reqd (Error detail)
     | Ok (source, since) ->
         (match live_json ~config:(Mcp_server.workspace_config state) source ~since with

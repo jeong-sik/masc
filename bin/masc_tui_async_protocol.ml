@@ -73,6 +73,10 @@ type http_refresh_outcome =
         approval_ticket : Masc_tui_operator_projection.Listing_order.ticket option
       }
 
+type play_sink = Play_chat of string option
+  | Play_collab of { owner : unit ref; mutation : Masc_tui_collab.mutation }
+type play_list_sink = Play_chat_list of string option | Play_collab_list of Masc_tui_collab.read
+
 type preset_sink =
   | Preset_to_chat of string option
   | Preset_to_pane
@@ -100,10 +104,14 @@ type lane_addons_reply = {
 type 'a play_mutation =
   | Play_answered of ('a, string) result
   | Play_refused of string
+  | Play_not_dispatched of string
   | Play_unanswered of string
 
 type play_revoke =
   | Play_revoke_absent
+  | Play_revoke_release_failed of string
+      (** The invite was already gone; the server answered that the DOS
+          controller it held could not be released. *)
   | Play_revoke_result of Masc.Tui_decode.play_invite_revoked play_mutation
 
 type currency_authority_request = {
@@ -142,6 +150,7 @@ type async_msg =
   | Lane_declaration_loaded of int * Masc_tui_lane_declaration.request * bool * string option
       * (Masc_tui_lane_declaration.response, string) result
   | Keeper_deletions_loaded of int * (Masc_tui_keeper_control.deletion_inventory, string) result
+  | Msx_tick_withdrawn of msx_poll_request * string
   | Keeper_deletion_retry_done of string * (unit, string) result
   | Msx_frame_loaded of msx_poll_request
       * (Masc_tui_msx_tick.response, string) result
@@ -536,9 +545,9 @@ type async_msg =
   | Preset_saved of preset_sink * (Masc.Tui_decode.preset_manifest, string) result
   | Preset_restored of preset_sink * (Masc.Tui_decode.preset_restore_report, string) result
   | Preset_deleted of preset_sink * (string, string) result
-  | Play_invites_listed of string option * (Masc.Tui_decode.play_invite_row list, string) result
-  | Play_invite_issued of string option * Masc.Tui_decode.play_invite_issued play_mutation
-  | Play_invite_revoked of string option * string * play_revoke
+  | Play_invites_listed of play_list_sink * (Masc.Tui_decode.play_invite_row list, string) result
+  | Play_invite_issued of Masc_tui_types.play_change_request * play_sink * Masc.Tui_decode.play_invite_issued play_mutation
+  | Play_invite_revoked of Masc_tui_types.play_change_request * play_sink * string * play_revoke
   | Librarian_input_loaded of string * (string list, string) result
   | Resources_listed of (Masc_tui_mcp.resource list, string) result
   (* The scope travels with the directory. Without it a reply names a
@@ -755,6 +764,10 @@ let rec workspace_message_is_read = function
     -> true
   | Voice_wizard_saved _
   | Msx_frame_loaded _
+  (* A withdrawn tick attempted no POST and changes no server state; it only
+     releases the pending poll token, so it stays an observation, not an
+     operation outcome. *)
+  | Msx_tick_withdrawn _
   | Voice_agent_voice_saved _
   | Voice_level _
   | Voice_transcribed _

@@ -2498,8 +2498,10 @@ val play_invite_absent_body : string -> bool
 (** True only for the revoke route's [no_such_invite] refusal [code].
     A malformed body or another refusal cannot prove the invite absent. *)
 
-val play_revoke_http_error : status_code:int -> body:string -> string
-(** Preserve the release failure detail from the revoke endpoint's 500 reply. *)
+val play_revoke_release_failure : status_code:int -> body:string -> string option
+(** The release error of the revoke endpoint's typed [500 release_failed]
+    reply: the invite was already gone and the server answered, but the DOS
+    controller it held could not be released. [None] for any other reply. *)
 
 val play_invite_refusal : status_code:int -> body:string -> string option
 (** The sentence for a client refusal the play routes answered through
@@ -2508,3 +2510,15 @@ val play_invite_refusal : status_code:int -> body:string -> string option
     Every part is made terminal-safe. [None] for a 401 or 403, which are about
     the credential the client sent and are worded where that is known, for a
     status that is not a 4xx, and for a body with no [error] sentence. *)
+
+type msx_checkpoint_receipt =
+  | Checkpoint_pending
+  | Checkpoint_committed of Yojson.Safe.t option
+  | Checkpoint_refused of string
+  | Checkpoint_unknown of string
+val decode_msx_checkpoint_receipt :
+  operation_id:string -> restore:bool -> slot:string -> base_path:string -> masc_root:string ->
+  Yojson.Safe.t -> (msx_checkpoint_receipt,string) result
+(** Validate exact operation, action, slot and same-response workspace binding.
+    A committed response may include a later live observation; its pixels still
+    require the machine-live decoder. Legacy [ok:true] is not a receipt. *)

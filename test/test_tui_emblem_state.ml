@@ -122,6 +122,53 @@ let test_the_palette_is_not_one_of_them () =
   state.Types.palette_open <- true;
   check bool "the palette" false (Types.modal_owns_keys state)
 
+let workspace name : Types.workspace_input_identity =
+  {wi_base_path = "/fixture/" ^ name; wi_masc_root = "/fixture/" ^ name ^ "/.masc"}
+
+let test_unknown_workspace_quarantines_cards () =
+  let state = fresh () in
+  let a = workspace "a" in
+  store state "minsu";
+  Types.withdraw_play_invite_workspace state ~previous:(Some a) ~current:None;
+  check (list string) "unknown identity hides all usable cards" [] (kept_names state);
+  check (option string) "unknown identity closes the displayed card" None (shown_name state);
+  check bool "links cannot be reopened while identity is unknown" true
+    (Option.is_none (Types.play_invite_find state "minsu"));
+  Types.withdraw_play_invite_workspace state ~previous:None ~current:None;
+  Types.withdraw_play_invite_workspace state ~previous:None ~current:(Some a);
+  check (list string) "same confirmed workspace recovers its only link" ["minsu"] (kept_names state);
+  check (option string) "recovery does not unexpectedly open the card" None (shown_name state)
+
+let test_other_workspace_discards_quarantined_cards () =
+  let state = fresh () in
+  let a = workspace "a" and b = workspace "b" in
+  store state "minsu";
+  Types.withdraw_play_invite_workspace state ~previous:(Some a) ~current:None;
+  Types.withdraw_play_invite_workspace state ~previous:None ~current:(Some b);
+  check (list string) "B cannot reopen A's same-named link" [] (kept_names state);
+  Types.withdraw_play_invite_workspace state ~previous:(Some b) ~current:(Some a);
+  check (list string) "a confirmed different workspace discarded the quarantine" [] (kept_names state);
+  store state "minsu";
+  Types.withdraw_play_invite_workspace state ~previous:(Some a) ~current:(Some b);
+  check (list string) "direct A to B also discards A's cards" [] (kept_names state)
+
+let test_retained_chat_origin_recovers_quarantined_cards () =
+  let state = fresh () in
+  let a = workspace "a" in
+  store state "minsu";
+  store state "reviewer";
+  Types.withdraw_play_invite_workspace state ~previous:(Some a) ~current:None;
+  (* A retained chat supplies A as [previous] both while health is unread and
+     when A is confirmed again, even though live cards have been withdrawn. *)
+  Types.withdraw_play_invite_workspace state ~previous:(Some a) ~current:None;
+  check (list string) "unread identity keeps the live store empty" [] (kept_names state);
+  Types.withdraw_play_invite_workspace state ~previous:(Some a) ~current:(Some a);
+  check (list string) "chat retention cannot erase either one-time card"
+    ["reviewer"; "minsu"] (kept_names state);
+  check (option string) "reconfirmation leaves restored cards closed" None (shown_name state);
+  check bool "restored cards leave no second quarantine copy" true
+    (Option.is_none state.Types.play_invite_quarantine)
+
 let test_moving_marks_share_one_pace () =
   check (float 1e-9) "not started" 0.0 (Types.motion_elapsed_seconds (-1));
   check (float 1e-9) "the first step" 0.0 (Types.motion_elapsed_seconds 0);
@@ -142,6 +189,12 @@ let () =
             test_issued_cards_are_kept_by_name
         ; test_case "a reissued name replaces its card" `Quick
             test_a_reissued_name_replaces_its_card
+        ; test_case "unknown workspace quarantines one-time cards" `Quick
+            test_unknown_workspace_quarantines_cards
+        ; test_case "confirmed different workspace discards quarantined cards" `Quick
+            test_other_workspace_discards_quarantined_cards
+        ; test_case "retained chat origin recovers quarantined cards" `Quick
+            test_retained_chat_origin_recovers_quarantined_cards
         ] )
     ; ( "motion"
       , [ test_case "moving marks share one pace" `Quick test_moving_marks_share_one_pace ] )

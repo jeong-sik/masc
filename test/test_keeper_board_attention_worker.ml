@@ -1482,12 +1482,12 @@ let test_owner_settlement_before_the_prunes_does_not_mint_a_ready_root () =
   (* The seam's returned list is the wake's ensure_roots input, so assert it
      directly: with the settlement in the hook, the list must not name X in
      any status. Every variant that puts the candidate read in front of the
-     candidate prune hands this list a stale row (Pending, because the
-     worker records the judgment on the partition, not the ledger) and
-     fails here. A read that sits after the candidate prune is a post-prune
-     list by construction and cannot fail here — that is the point: the
-     shipped order's list is exactly the post-prune one. A read between the
-     two prunes is OUT of this tripwire's scope; covering it is tracked in
+     candidate prune hands this list a stale row (Pending or Consumed,
+     depending on whether the hook's delivery ran before the read) and fails
+     here. A read that sits after the candidate prune is a post-prune list
+     by construction and cannot fail here — that is the point: the shipped
+     order's list is exactly the post-prune one. A read between the two
+     prunes is OUT of this tripwire's scope; covering it is tracked in
      task-2233. *)
   Alcotest.(check bool) "the list the wake read is post-prune" false
     (List.exists
@@ -1499,9 +1499,10 @@ let test_owner_settlement_before_the_prunes_does_not_mint_a_ready_root () =
   (* The ledger read, after the seam: X's row and settled receipt are gone
      from the store, because the settlement in the hook consumed X behind a
      cursor the wake had already passed and both prunes then ran. A revert
-     that moved the read before the candidate prune leaves the ledger
-     intact at this point (nothing to prune: the hook consumed behind the
-     passed cursor), so the residue check below also fails for it. *)
+     that moved the read before the candidate prune keeps the ledger
+     unchanged at this point — the hook consumed X behind the passed cursor,
+     so the candidate prune (now after the read) still finds and removes the
+     row, which is what the residue check below catches. *)
   let candidates, partitions = read_candidate_and_roots ~base_path in
   (* The prunes (which ran after the hook's settlement) dropped X's consumed
      row and its settled receipt: the ledger keeps no row naming X, and root

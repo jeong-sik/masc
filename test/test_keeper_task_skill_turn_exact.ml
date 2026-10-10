@@ -364,9 +364,10 @@ let test_oversized_task_skill_is_unavailable_not_a_failed_turn () =
   let reason =
     match selection.Selection.unprojectable with
     | [ { Selection.reference
-        ; error =
-            (Masc.Keeper_skill_catalog.Body_too_large_to_read
-               { skill; bytes; max_bytes } as error)
+        ; reason =
+            (Selection.Catalog_entry_unprojectable
+               (Masc.Keeper_skill_catalog.Body_too_large_to_read
+                  { skill; bytes; max_bytes }) as reason)
         ; task_ids
         }
       ] ->
@@ -377,7 +378,7 @@ let test_oversized_task_skill_is_unavailable_not_a_failed_turn () =
         Common.max_tool_result_wire_bytes max_bytes;
       check bool "the refused body is over that boundary" true (bytes > max_bytes);
       check (list string) "the row keeps the Task that pinned it" [ "task-held" ] task_ids;
-      Masc.Keeper_skill_catalog.error_to_string error
+      Selection.unavailable_reason_to_string reason
     | _ -> fail "the oversized Task Skill was not kept as one typed unavailable row"
   in
   let surfaces =
@@ -911,36 +912,143 @@ let test_resource_is_read_only_when_exact_file_is_requested () =
          boundary_output)
 ;;
 
-let test_revision_mismatch_is_typed_before_tool_projection () =
+(* A Task pins a Skill by exact content revision. Editing or deleting that
+   Skill afterwards must not stop the turn: the pin is a known Skill that is
+   unavailable this turn, shown as such, while the Task's other Skills and the
+   Keeper's other Tasks keep working. *)
+let stale_revision =
+  match Reference.content_revision_of_string (String.make 64 'f') with
+  | Ok revision -> revision
+  | Error _ -> fail "stale revision fixture is invalid"
+;;
+
+let two_skill_snapshot () =
   let config = config (source_row ~id:"only" ~path:"skills") in
   let snapshot =
-    snapshot config [ [ "guide", document ~name:"guide" ~description:"guide" "BODY" ] ]
+    snapshot
+      config
+      [ [ "guide", document ~name:"guide" ~description:"guide" "BODY"
+        ; "other", document ~name:"other" ~description:"other" "OTHER"
+        ]
+      ]
   in
   let source_id =
     match config.sources with
     | [ source ] -> source.id
     | _ -> fail "expected one source"
   in
-  let current = exact_reference snapshot ~source_id ~package_id:"guide" ~name:"guide" in
-  let stale_revision =
-    match Reference.content_revision_of_string (String.make 64 'f') with
-    | Ok revision -> revision
-    | Error _ -> fail "stale revision fixture is invalid"
+  let reference name =
+    exact_reference snapshot ~source_id ~package_id:name ~name
   in
-  let stale = Reference.make ~identity:current.identity ~content_revision:stale_revision in
-  match Selection.resolve ~snapshot [ stale ] with
-  | Error
-      (Selection.Reference_resolution_failed
-         { error = Snapshot.Content_revision_mismatch _; _ } as typed) ->
-    check string
-      "typed code"
+  snapshot, reference "guide", reference "other"
+;;
+
+let resolve_ok ~snapshot ~task_id references =
+  match Selection.resolve_for_task ~snapshot ~task_id references with
+  | Ok selection -> selection
+  | Error error ->
+    failf "a stale pin failed the turn's Task Skill resolution: %s"
+      (Selection.error_to_string error)
+;;
+
+let test_stale_revision_pin_does_not_stop_resolution () =
+  let snapshot, guide, other = two_skill_snapshot () in
+  let stale = Reference.make ~identity:guide.identity ~content_revision:stale_revision in
+  let selection = resolve_ok ~snapshot ~task_id:"task-1" [ stale; other ] in
+  check (list string) "the other pinned Skill stays selected" [ "other" ]
+    (List.map (fun (s : Selection.selected) -> s.skill.name) selection.Selection.selected);
+  match selection.Selection.unprojectable with
+  | [ row ] ->
+    check bool "the unavailable row is the stale pin" true
+      (Reference.equal row.Selection.reference stale);
+    check (list string) "the row keeps the Task that pinned it" [ "task-1" ]
+      row.Selection.task_ids;
+    (match row.Selection.reason with
+     | Selection.Pin_unresolved
+         (Snapshot.Content_revision_mismatch { requested; observed; _ }) ->
+       check bool "the row names the pinned revision" true
+         (Reference.equal_content_revision requested stale_revision);
+       check bool "the row names the current revision" true
+         (Reference.equal_content_revision observed guide.content_revision)
+     | Selection.Pin_unresolved (Snapshot.Identity_not_found _)
+     | Selection.Catalog_entry_unprojectable _ ->
+       fail "a stale revision pin was not a content revision mismatch");
+    check string "the wire code names the mismatch"
       "task_skill_content_revision_mismatch"
-      (Selection.error_code typed);
-    (match Selection.of_core_error (Selection.core_error typed) with
-     | Some recovered -> check string "typed carrier" (Selection.error_code typed) (Selection.error_code recovered)
-     | None -> fail "typed error carrier was lost")
-  | Error error -> failf "wrong typed error: %s" (Selection.error_to_string error)
-  | Ok _ -> fail "stale reference resolved"
+      (Selection.unavailable_reason_code row.Selection.reason)
+  | rows -> failf "expected one unavailable row, got %d" (List.length rows)
+;;
+
+let test_current_pin_still_projects () =
+  let snapshot, guide, _ = two_skill_snapshot () in
+  let selection = resolve_ok ~snapshot ~task_id:"task-1" [ guide ] in
+  check int "no unavailable row for a current pin" 0
+    (List.length selection.Selection.unprojectable);
+  check int "the current pin is selected" 1
+    (List.length selection.Selection.selected)
+;;
+
+let test_stale_pin_is_listed_unavailable_on_the_prompt_surface () =
+  let snapshot, guide, other = two_skill_snapshot () in
+  let stale = Reference.make ~identity:guide.identity ~content_revision:stale_revision in
+  let held_task_skills =
+    [ { Inputs.held_task_id = "task-held"; held_skills = [ stale; other ] } ]
+  in
+  let selection =
+    match
+      Selection.resolve_observations
+        ~snapshot
+        ~current_task:Inputs.No_current_task
+        ~held_task_skills
+    with
+    | Ok selection -> selection
+    | Error error ->
+      failf "a stale pin failed the turn's Task Skill resolution: %s"
+        (Selection.error_to_string error)
+  in
+  let surfaces =
+    match
+      Selection.exact_task_surfaces
+        ~snapshot
+        ~tool_deny:[]
+        ~sandbox_profile:Masc.Keeper_types_profile.Docker
+        ~skill_names:None
+        ~selection
+        ~current_task:Inputs.No_current_task
+        ~held_task_skills
+    with
+    | [ ("task-held", surfaces) ] -> surfaces
+    | tasks -> failf "expected one held Task surface, got %d" (List.length tasks)
+  in
+  let availability_of reference =
+    List.find_map
+      (fun (surface : Masc.Keeper_skill_catalog.exact_surface) ->
+         if Reference.equal surface.reference reference
+         then Some surface.availability
+         else None)
+      surfaces
+  in
+  (match availability_of other with
+   | Some Masc.Keeper_skill_catalog.Instruction_tool -> ()
+   | Some _ | None -> fail "the current pin is not offered through keeper_skill");
+  match availability_of stale with
+  | Some (Masc.Keeper_skill_catalog.Exact_unavailable _) -> ()
+  | Some _ | None -> fail "the stale pin is not listed as unavailable"
+;;
+
+let test_deleted_skill_pin_does_not_stop_resolution () =
+  let _, guide, other = two_skill_snapshot () in
+  let config = config (source_row ~id:"only" ~path:"skills") in
+  let after_delete =
+    snapshot config [ [ "other", document ~name:"other" ~description:"other" "OTHER" ] ]
+  in
+  let selection = resolve_ok ~snapshot:after_delete ~task_id:"task-1" [ guide; other ] in
+  check int "the surviving Skill stays selected" 1
+    (List.length selection.Selection.selected);
+  match selection.Selection.unprojectable with
+  | [ { Selection.reason = Selection.Pin_unresolved (Snapshot.Identity_not_found _); _ } ] ->
+    ()
+  | _ -> fail "the deleted Skill is not one identity-not-found row"
 ;;
 
 let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
@@ -1185,8 +1293,14 @@ let () =
             test_resource_is_read_only_when_exact_file_is_requested
         ; test_case "JEV advice reaches model without changing selection" `Quick
             test_jev_advice_reaches_the_model_without_selecting_or_authorizing
-        ; test_case "revision mismatch remains typed" `Quick
-            test_revision_mismatch_is_typed_before_tool_projection
+        ; test_case "stale revision pin does not stop resolution" `Quick
+            test_stale_revision_pin_does_not_stop_resolution
+        ; test_case "current pin still projects" `Quick
+            test_current_pin_still_projects
+        ; test_case "stale pin is listed unavailable on the prompt surface" `Quick
+            test_stale_pin_is_listed_unavailable_on_the_prompt_surface
+        ; test_case "deleted Skill pin does not stop resolution" `Quick
+            test_deleted_skill_pin_does_not_stop_resolution
         ] )
     ]
 ;;

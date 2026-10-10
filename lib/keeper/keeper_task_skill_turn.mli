@@ -1,15 +1,6 @@
 (** Frozen Task Skill selection for one Keeper turn. *)
 
-type error =
-  | Tool_surface_unavailable of string
-  | Reference_resolution_failed of
-      { reference : Skill_reference.t
-      ; error : Skill_catalog_snapshot.reference_resolution_error
-      }
-      (** The exact reference does not resolve in
-          the frozen snapshot. No entry has its identity
-          ([Identity_not_found]), or the entry that does has another content
-          revision ([Content_revision_mismatch]). *)
+type error = Tool_surface_unavailable of string
 
 type selected = private
   { reference : Skill_reference.t
@@ -18,15 +9,25 @@ type selected = private
   ; task_ids : string list
   }
 
+type unavailable_reason =
+  | Catalog_entry_unprojectable of Keeper_skill_catalog.error
+      (** The snapshot holds the entry but the catalog cannot project it
+          ({!Keeper_skill_catalog.Entry_unavailable}), such as an instruction
+          body over the inline read boundary. *)
+  | Pin_unresolved of Skill_catalog_snapshot.reference_resolution_error
+      (** The pinned exact reference no longer resolves: no entry has its
+          identity ([Identity_not_found]), or the entry that does has another
+          content revision ([Content_revision_mismatch]). The Skill was
+          deleted or edited after the Task pinned it. *)
+
 type unprojectable = private
   { reference : Skill_reference.t
-  ; error : Keeper_skill_catalog.error
+  ; reason : unavailable_reason
   ; task_ids : string list
   }
-(** A Task reference that resolved to a snapshot entry the catalog cannot
-    project ({!Keeper_skill_catalog.Entry_unavailable}), such as an
-    instruction body over the inline read boundary. The Skill is known, so it
-    is shown unavailable with [error] as its reason; the turn still runs. *)
+(** A Task reference the turn cannot offer. The turn still runs: the Skill is
+    shown unavailable with [reason], and the Task's other Skills and the
+    Keeper's other Tasks are unaffected. *)
 
 type t = private
   { selected : selected list
@@ -79,12 +80,14 @@ val merge : t list -> t
 (** Preserve Task order while deduplicating identical exact references, in
     both [selected] and [unprojectable]. *)
 
+val unavailable_reason_code : unavailable_reason -> string
+val unavailable_reason_to_string : unavailable_reason -> string
+
 val unprojectable_to_string : unprojectable -> string
-(** One line naming the reference, the Tasks that pinned it, and the catalog
-    error. *)
+(** One line naming the reference, the Tasks that pinned it, and the reason. *)
 
 val unprojectable_to_yojson : unprojectable -> Yojson.Safe.t
-(** [reference], [task_ids], the catalog [error_code] and its [detail]. *)
+(** [reference], [task_ids], the reason [error_code] and its [detail]. *)
 
 val error_code : error -> string
 val error_to_string : error -> string
@@ -123,5 +126,4 @@ val exact_task_surfaces :
     {!Keeper_capability_surface.create}, which builds this projection too, so
     prompt, bundle, and preview consumers share one computation without
     breaking the turn-boundary freeze. Each task's [unprojectable] references
-    follow its projected ones as unavailable rows carrying their catalog
-    error. *)
+    follow its projected ones as unavailable rows carrying their reason. *)

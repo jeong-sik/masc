@@ -821,9 +821,9 @@ let error_to_string = function
       skill
 ;;
 
-(* A Task reference the snapshot holds whose entry [project_entry_or_fallback]
-   could not project is listed with the rest of that Task's Skills, as
-   unavailable, and the catalog error is the reason the model reads. *)
-let unprojectable_exact_surface reference error =
-  { reference; availability = Exact_unavailable { diagnostic = error_to_string error } }
+(* A Task reference the turn cannot offer is listed with the rest of that
+   Task's Skills, as unavailable, and [diagnostic] is the reason the model
+   reads. *)
+let unprojectable_exact_surface reference ~diagnostic =
+  { reference; availability = Exact_unavailable { diagnostic } }
 ;;

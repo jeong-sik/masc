@@ -246,10 +246,11 @@ val exact_surfaces : turn_projection -> task:skill list -> exact_surface list
 (** Render every Task-selected exact reference from the same turn projection
     that builds executable tools. *)
 
-val unprojectable_exact_surface : Skill_reference.t -> error -> exact_surface
-(** An exact Task reference the snapshot holds but
-    {!project_entry_or_fallback} answered [Entry_unavailable] for: listed as
-    unavailable, with [error] rendered as its diagnostic. *)
+val unprojectable_exact_surface :
+  Skill_reference.t -> diagnostic:string -> exact_surface
+(** An exact Task reference the turn cannot offer: the snapshot holds it but
+    {!project_entry_or_fallback} answered [Entry_unavailable], or its pin no
+    longer resolves. Listed as unavailable, with [diagnostic] as the reason. *)
 
 val exact_is_executable : turn_projection -> Skill_reference.t -> bool
 (** Whether one exact reference is present in the executable turn catalog. *)

@@ -6011,7 +6011,7 @@ let test_keeper_context_lifecycle_three_settled_turns () =
     source |> member "source_span_indices" |> to_list |> List.filter_map (fun index ->
       let span = List.nth spans (to_int index) |> member "source" in
       if member "kind" span=`String "block" then Some (member "block" span |> to_string) else None) in
-  let attempts = ref [] in
+  let attempts = ref [] and settled_thread = ref None in
   List.iter (fun (ordinal,issued,expected_sent,expected_held) ->
     let capture = Filename.concat base_path (Printf.sprintf "wire-%d.jsonl" ordinal) in
     let trace = Filename.concat base_path (Printf.sprintf "trace-%d.jsonl" ordinal) in
@@ -6095,8 +6095,33 @@ let test_keeper_context_lifecycle_three_settled_turns () =
           Digestif.SHA256.(digest_string captured |> to_hex)
           (member "ipc_json_sha256" observed |> to_string));
     let session_method = if ordinal=1 then "thread/start" else "thread/resume" in
-    check int "one actual Start or Resume per settled turn" 1
-      (List.length (List.filter (fun row -> member "method" row=`String session_method) calls));
+    let session_requests = List.filter (fun row -> member "method" row=`String session_method) calls in
+    check int "one actual Start or Resume per settled turn" 1 (List.length session_requests);
+    let session_params = List.hd session_requests |> member "params" in
+    (* The fixture answers thread-1 to any requested id, so only the captured
+       request shows which vendor thread this turn continued. *)
+    check (option string) "Resume names the previously settled vendor thread; Start names none"
+      !settled_thread (member "threadId" session_params |> to_string_option);
+    settled_thread := Some settlement.session_id;
+    (* thread/resume is a context-bearing RPC too. The vendor thread already
+       holds every issued block and the turn text carries only the changed one,
+       so no issued block, raw or codec-framed, may reach its developer
+       instructions. Read from the captured bytes, not the attribution binding. *)
+    if ordinal > 1 then (
+      let codec_framed text =
+        let quoted = Yojson.Safe.to_string (`String text) in
+        String.sub quoted 1 (String.length quoted - 2) in
+      match member "developerInstructions" session_params |> to_string_option with
+      | None -> ()
+      | Some developer ->
+        List.iter (fun (block, text) ->
+          List.iter (fun form ->
+            check bool
+              (Printf.sprintf "Resume developer instructions omit issued %s"
+                 (Prompt_block_id.to_string block))
+              false (String_util.contains_substring developer form))
+            [text; codec_framed text])
+          issued.blocks);
     check int "settled Resume never resends history" 0
       (List.length (List.filter (fun row -> member "method" row=`String "thread/inject_items") calls));
     let raw = List.find (fun line -> Yojson.Safe.from_string line |> member "id" = member "request_id" submission) written in

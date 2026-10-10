@@ -160,6 +160,18 @@ module For_testing : sig
       so a test can reproduce the owner settlement's exact write path without
       standing up the full worker lifecycle. *)
 
+  val prunes_and_read :
+    base_path:string ->
+    keeper_name:string ->
+    ?hook:(unit -> unit) ->
+    unit ->
+    (Keeper_board_attention_candidate.candidate list, string) result
+  (** The wake's two prunes followed by the candidate-list read, as one
+      seam. [?hook] fires immediately before the first prune, so a test can
+      land an owner settlement (which runs without the worker lock) in
+      exactly the gap the read position defines — the prune/settlement
+      overlap of #41506. Production passes no hook. *)
+
   val reconcile_quarantines :
     now:float ->
     worker_epoch:Keeper_board_attention_partition.Worker_epoch.t ->

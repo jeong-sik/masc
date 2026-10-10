@@ -1845,22 +1845,12 @@ let reconcile_quarantines ~now ~worker_epoch ~base_path ~keeper_name =
   loop initial_candidates partitions
 ;;
 
-let process_next_with_claim_ready_exact_current
-      ~claim_ready_exact
-      ~now
-      ~worker_epoch
-      ~base_path
-      ~keeper_name
-      ~prepare
-      ~execute
-  =
-  (* #41422: drop consumed rows the replay gate can never re-mint before
-     roots are ensured, so a long-lived keeper's candidate ledger stays
-     bounded by its unresolved attention instead of its board history. The
-     cursor is the same coordinate the world-observation scanner replays
-     against; the default (0.0, None) of an unregistered keeper keeps every
-     row. A prune failure must not stop judgment work, so it is observed and
-     retried on the next wake. *)
+(* The prunes-plus-read body the wake shares, so a test can re-run the
+   whole seam with the candidate read moved back in front of the prunes
+   (the pre-#41506 order). [?]hook fires immediately before the first
+   prune; production leaves it as no-op. *)
+let prunes_and_read ~base_path ~keeper_name ?hook () =
+  (match hook with Some hook -> hook () | None -> ());
   let cursor_ts, cursor_post_id =
     Keeper_registry.get_board_cursor ~base_path keeper_name
   in
@@ -1881,9 +1871,6 @@ let process_next_with_claim_ready_exact_current
        "board_attention_candidate_prune_failed keeper=%s detail=%s"
        keeper_name
        detail);
-  (* The settled receipts of consumed candidates go on the same wake, so the
-     partition ledger of a Keeper that never restarts stays bounded too. Like
-     the candidate prune, a failure is observed and retried on the next wake. *)
   (match Partition.prune_settled_receipts ~base_path ~keeper_name with
    | Ok 0 -> ()
    | Ok removed ->
@@ -1904,7 +1891,22 @@ let process_next_with_claim_ready_exact_current
      "candidate ledger lacks partition member" forever because only [Settled]
      receipts are pruned. Receipts are dropped only above this read, so a
      candidate consumed after it still has its [Settled] receipt. *)
-  let* candidates = Candidate.load_candidates ~base_path ~keeper_name in
+  Candidate.load_candidates ~base_path ~keeper_name
+;;
+
+let process_next_with_claim_ready_exact_current
+      ~claim_ready_exact
+      ~now
+      ~worker_epoch
+      ~base_path
+      ~keeper_name
+      ~prepare
+      ~execute
+  =
+  (* The prunes and the candidate read run as one seam; a test can install
+     a hook that fires immediately before the first prune, landing an owner
+     settlement in exactly the gap the read position defines. *)
+  let* candidates = prunes_and_read ~base_path ~keeper_name () in
   let* (_ : int) = Partition.ensure_roots ~base_path ~keeper_name candidates in
   let selected_generation_is_ready ~partition_id ~generation =
     let* partitions = Partition.load ~base_path ~keeper_name in
@@ -2470,6 +2472,8 @@ module For_testing = struct
   type nonrec rearm_scheduler = rearm_scheduler
   type nonrec deferred_rearm_scheduler = deferred_rearm_scheduler
 
+  let deliver_and_settle_completed = deliver_and_settle_completed
+  let prunes_and_read = prunes_and_read
   let reconcile_quarantines = reconcile_quarantines
   let process_next = process_next
   let process_next_exact = process_next_exact

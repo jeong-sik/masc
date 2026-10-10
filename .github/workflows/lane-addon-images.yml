@@ -1,32 +1,73 @@
 name: Lane Add-on package images
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Optional full commit SHA to build; defaults to the workflow commit
+        type: string
+        required: false
+      mode:
+        description: Build container images or local macOS worker executables
+        type: choice
+        options: [images, macos_workers]
+        default: images
+      scope:
+        description: Package set to build
+        type: choice
+        options: [all, machines]
+        default: all
 permissions:
   contents: read
 jobs:
   packages:
+    if: inputs.mode != 'macos_workers'
     runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.discover.outputs.matrix }}
+      source_sha: ${{ steps.discover.outputs.source_sha }}
     steps:
+      - name: Validate selected source identity
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          python3 - <<'PY_VALIDATE'
+          import os, re
+          value = os.environ['SOURCE_SHA']
+          if value and re.fullmatch(r'[0-9a-fA-F]{40}', value) is None:
+              raise SystemExit('source_sha must be a full Git commit SHA')
+          PY_VALIDATE
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ inputs.source_sha || github.sha }}
           persist-credentials: false
       - name: Test package protocols
         run: python3 -m unittest discover -s addons/tests -p 'test_*.py' -v
       - id: discover
+        env:
+          PACKAGE_SCOPE: ${{ inputs.scope }}
         run: |
           python3 - <<'PY'
-          import json, os
+          import json, os, subprocess
           from pathlib import Path
           packages = [p.parent.name for p in sorted(Path('addons').glob('*/lane.toml'))
                       if (p.parent / 'Dockerfile').is_file()]
-          matrix = {'include': [dict(package=package, arch=arch, runner=runner)
+          workers = {
+              'msx-machine': ('bin/masc_msx_addon_worker.exe', 'masc-msx-addon-worker'),
+              'dos-machine': ('bin/masc_dos_addon_worker.exe', 'masc-dos-addon-worker'),
+          }
+          if os.environ['PACKAGE_SCOPE'] == 'machines':
+              packages = [package for package in packages if package in workers]
+              if set(packages) != set(workers):
+                  raise SystemExit('selected source must contain both machine packages')
+          source_sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          matrix = {'include': [dict(package=package, arch=arch, runner=runner,
+              worker_target=workers.get(package, ('', ''))[0],
+              worker_binary=workers.get(package, ('', ''))[1])
               for package in packages for arch, runner in
               [('amd64', 'ubuntu-24.04'), ('arm64', 'ubuntu-24.04-arm')]]}
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write('matrix=' + json.dumps(matrix) + '\n')
+              output.write('source_sha=' + source_sha + '\n')
           PY
   image:
     needs: packages
@@ -37,12 +78,28 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ needs.packages.outputs.source_sha }}
           persist-credentials: false
+      - uses: ./.github/actions/setup-ocaml-toolchain
+        if: matrix.worker_target != ''
+      - uses: ./.github/actions/pin-ocaml-deps
+        if: matrix.worker_target != ''
+      - uses: ./.github/actions/install-ocaml-deps
+        if: matrix.worker_target != ''
+      - name: Build the package's native worker
+        if: matrix.worker_target != ''
+        env:
+          WORKER_TARGET: ${{ matrix.worker_target }}
+          WORKER_BINARY: ${{ matrix.worker_binary }}
+        run: |
+          set -euo pipefail
+          opam exec -- dune build "$WORKER_TARGET"
+          install -m 755 "_build/default/$WORKER_TARGET" "addons/$WORKER_BINARY"
       - name: Build package image and retain identity
         env:
           PACKAGE_NAME: ${{ matrix.package }}
           PACKAGE_ARCH: ${{ matrix.arch }}
+          WORKER_BINARY: ${{ matrix.worker_binary }}
         run: |
           python3 - <<'PY'
           import gzip, hashlib, json, os, shutil, subprocess, tomllib
@@ -59,6 +116,16 @@ jobs:
           (proof / 'image-inspect.json').write_bytes(raw)
           inspected, = json.loads(raw)
           assert inspected['Architecture'] == os.environ['PACKAGE_ARCH']
+          worker_binary = os.environ['WORKER_BINARY']
+          worker_receipt = None
+          if worker_binary:
+              binary = Path('addons') / worker_binary
+              worker_receipt = {'binary': worker_binary,
+                  'sha256': hashlib.sha256(binary.read_bytes()).hexdigest()}
+              # Execute the packaged ELF in the final runtime image. This checks
+              # its loader/libraries, not MCP behavior or emulator correctness.
+              subprocess.run(['docker', 'run', '--rm', '--network', 'none',
+                  image, '/usr/local/bin/' + worker_binary, '--help'], check=True)
           archive = proof / 'image.tar.gz'
           with gzip.open(archive, 'wb') as output:
               process = subprocess.Popen(['docker', 'save', image], stdout=subprocess.PIPE)
@@ -75,12 +142,93 @@ jobs:
               'image_id': inspected['Id'], 'architecture': inspected['Architecture'],
               'manifest_sha256': hashlib.sha256(manifest_bytes).hexdigest(),
               'archive_sha256': archive_sha256,
-              'workflow_run_id': os.environ['GITHUB_RUN_ID']}
+              'workflow_run_id': os.environ['GITHUB_RUN_ID'],
+              'workflow_commit': os.environ['GITHUB_SHA']}
+          if worker_receipt is not None:
+              receipt['worker'] = worker_receipt
           (proof / 'receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
           PY
-      - uses: actions/upload-artifact@v7
+      - uses: actions/checkout@v7
+        if: matrix.worker_target != ''
         with:
-          name: lane-addon-image-${{ matrix.package }}-${{ matrix.arch }}-${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.sha }}
+          path: .image-ci
+          persist-credentials: false
+      - name: Verify machine stdio and persistent checkpoint replacement
+        if: matrix.worker_target != ''
+        run: python3 .image-ci/scripts/ci/verify-machine-worker-image.py image-proof
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: lane-addon-image-${{ matrix.package }}-${{ matrix.arch }}-${{ needs.packages.outputs.source_sha }}
           path: image-proof/
           compression-level: 0
+          if-no-files-found: error
+
+  macos-workers:
+    if: inputs.mode == 'macos_workers'
+    runs-on: macos-14
+    steps:
+      - name: Validate selected source identity
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          python3 - <<'PY_VALIDATE'
+          import os, re
+          value = os.environ['SOURCE_SHA']
+          if value and re.fullmatch(r'[0-9a-fA-F]{40}', value) is None:
+              raise SystemExit('source_sha must be a full Git commit SHA')
+          PY_VALIDATE
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-ocaml-toolchain
+      - name: System libraries
+        run: |
+          brew install coreutils flock gmp libpq openssl@3 zstd ripgrep
+          echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
+          libpq_prefix="$(brew --prefix libpq)"
+          openssl_prefix="$(brew --prefix openssl@3)"
+          echo "$libpq_prefix/bin" >> "$GITHUB_PATH"
+          echo "$openssl_prefix/bin" >> "$GITHUB_PATH"
+          {
+            echo "PKG_CONFIG_PATH=$openssl_prefix/lib/pkgconfig:$libpq_prefix/lib/pkgconfig"
+            echo "CPATH=$openssl_prefix/include"
+            echo "LIBRARY_PATH=$openssl_prefix/lib"
+            echo "CPPFLAGS=-I$openssl_prefix/include"
+            echo "LDFLAGS=-L$openssl_prefix/lib"
+          } >> "$GITHUB_ENV"
+      - uses: ./.github/actions/pin-ocaml-deps
+      - name: Install worker build dependencies
+        run: opam install ./masc.opam --deps-only --locked --yes
+      - name: Build local worker executables and record dependencies
+        run: |
+          opam exec -- dune build bin/masc_msx_addon_worker.exe bin/masc_dos_addon_worker.exe
+          python3 - <<'PY_PACKAGE'
+          import hashlib, json, os, platform, shutil, subprocess, tarfile
+          from pathlib import Path
+          root = Path('worker-proof'); root.mkdir()
+          commit = subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip()
+          receipt = {'source_commit':commit, 'workflow_commit':os.environ['GITHUB_SHA'],
+                     'architecture':platform.machine(), 'system':platform.system(),
+                     'workflow_run_id':os.environ['GITHUB_RUN_ID'], 'workers':[]}
+          for machine in ('msx','dos'):
+              binary = root / ('masc-'+machine+'-addon-worker')
+              shutil.copy2('_build/default/bin/masc_'+machine+'_addon_worker.exe', binary)
+              binary.chmod(0o755)
+              subprocess.run([str(binary.resolve()),'--help'],check=True)
+              dependencies = subprocess.check_output(['otool','-L',str(binary)],text=True)
+              (root / (machine+'-dependencies.txt')).write_text(dependencies)
+              receipt['workers'].append({'name':binary.name,
+                  'sha256':hashlib.sha256(binary.read_bytes()).hexdigest()})
+          (root/'receipt.json').write_text(json.dumps(receipt,indent=2)+'\n')
+          (root/'README.txt').write_text('Local macOS development workers. External dylib paths are listed in *-dependencies.txt; this is not a relocatable release. Run with --base-path pointing to a separate workspace. Game media is not included.\n')
+          with tarfile.open('machine-workers-macos.tar.gz','w:gz') as archive:
+              archive.add(root,arcname='machine-workers')
+          PY_PACKAGE
+      - uses: actions/upload-artifact@v7
+        with:
+          name: machine-workers-macos-${{ inputs.source_sha || github.sha }}
+          path: machine-workers-macos.tar.gz
           if-no-files-found: error

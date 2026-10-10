@@ -1,12 +1,14 @@
 type t = Connected | Departed
 
+(* The file key is the agent name, never the token: renewing a credential
+   issues a new token, and a token-keyed name would orphan the departure
+   record and read back as Connected. [Common.safe_filename] matches the
+   credential store's file naming. *)
 let path ~base_path (credential : Masc_domain.agent_credential) =
-  let generation = Digestif.SHA256.(digest_string
-    (credential.agent_name ^ "\000" ^ credential.token) |> to_hex) in
   Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path) "play")
-    ("participation-" ^ generation ^ ".state")
+    ("participation-" ^ Common.safe_filename credential.agent_name ^ ".state")
 
-let read ~transaction:_ ~base_path credential =
+let read ~base_path credential =
   Eio_guard.run_in_systhread ~label:"play-participation-read" (fun () ->
     let file = path ~base_path credential in
     try
@@ -20,7 +22,7 @@ let read ~transaction:_ ~base_path credential =
     | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Connected
     | (Unix.Unix_error _ | Sys_error _) as exn -> Error (Printexc.to_string exn))
 
-let write ~transaction:_ ~base_path credential state =
+let write ~base_path credential state =
   Eio_guard.run_in_systhread ~label:"play-participation-write" (fun () ->
     let file = path ~base_path credential in
     try
@@ -40,4 +42,4 @@ let current ~transaction ~base_path ~name =
      depart. Its Keeper's input authority is the Keeper registry's. *)
   | Some { Masc_domain.role = Masc_domain.Worker; _ } -> Ok Connected
   | Some ({ Masc_domain.role = Masc_domain.Admin | Masc_domain.Player; _ } as credential) ->
-    read ~transaction ~base_path credential
+    read ~base_path credential

@@ -460,9 +460,9 @@ let test_ineligible_participation_does_not_hide_active_seats () =
           ~agent_name:"worker" ~role:Masc_domain.Worker) in
       ignore (auth_ok (Auth.create_token_without_expiry base_path
           ~agent_name:"active" ~role:Masc_domain.Player));
-      auth_ok (Auth.with_credential_transaction base_path (fun transaction ->
+      auth_ok (Auth.with_credential_transaction base_path (fun _transaction ->
         List.iter (fun credential ->
-          match Masc.Play_participation.write ~transaction ~base_path credential Connected with
+          match Masc.Play_participation.write ~base_path credential Connected with
           | Ok () -> ()
           | Error detail -> fail detail) [expired; worker]));
       let directory = Filename.concat (Common.masc_dir_from_base_path ~base_path) "play" in

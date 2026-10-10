@@ -30,7 +30,7 @@ let connected_credentials ~transaction ~base_path credentials =
   let rec collect found departed = function
     | [] -> Ok (List.rev found, departed)
     | credential :: rest ->
-        let* participation = Play_participation.read ~transaction ~base_path credential
+        let* participation = Play_participation.read ~base_path credential
           |> Result.map_error (fun detail -> Masc_domain.System (Masc_domain.System_error.IoError detail)) in
         (match participation with
          | Connected -> collect (credential :: found) departed rest

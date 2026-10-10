@@ -419,6 +419,15 @@ let test_explicit_departure_and_same_link_reconnect () =
     let state = Masc.Mcp_server.For_testing.create_state ~base_path in
     Eio_main.run (fun env ->
       Masc_test_deps.init_eio_clock env;
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 30. (fun () ->
+      Eio.Switch.run (fun sw ->
+      Eio_context.with_test_env ~sw ~net:(Eio.Stdenv.net env)
+        ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
+      Masc.Lane_addon_runtime.For_testing.reset ();
+      (* The seat read comes from the attached DOS worker and is 503 without
+         one (test_the_seat); attendance itself needs no worker. *)
+      with_dos_worker ~env ~sw ~base_path (fun ~invoke:_ ~detach ->
       let change token body = dispatch ~body:(Some body) ~state ~target:Page.session_path ~token in
       check int "anonymous departure is forbidden" 401 (status_of (change None {|{"connected":false}|}));
       check int "unknown session fields are refused" 400
@@ -433,7 +442,8 @@ let test_explicit_departure_and_same_link_reconnect () =
       check int "the same invitation explicitly reconnects" 200 (status_of (change (Some token) {|{"connected":true}|}));
       let connected = read () in
       check bool "reconnect restores eligibility" true (member "participants" connected = Some (`List [`String "minsu"]));
-      check bool "reconnect does not take a controller" true (member "controller" connected = Some `Null)))
+      check bool "reconnect does not take a controller" true (member "controller" connected = Some `Null);
+      detach ())))))))
 
 let test_ineligible_participation_does_not_hide_active_seats () =
   with_dir "play-ineligible-participation-" (fun base_path ->

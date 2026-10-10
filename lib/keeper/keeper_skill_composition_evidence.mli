@@ -1,6 +1,10 @@
-(** Durable latest composition evidence, partitioned by exact immutable Skill
-    reference. The producer writes the typed executor settlement directly;
-    readers never scan the fleet tool-call log. *)
+(** Durable composition evidence, partitioned by exact immutable Skill
+    reference and appended per composition run: each run is stored under its
+    own [composition_run_id], so concurrent runs never overwrite each other
+    and [load_latest] selects the record with the greatest [recorded_at].
+    The producer writes the typed executor settlement directly; readers never
+    scan the fleet tool-call log. Records written by the pre-append layout
+    (a single file per reference) remain readable load candidates. *)
 
 type t
 

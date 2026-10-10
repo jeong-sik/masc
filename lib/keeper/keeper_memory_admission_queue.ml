@@ -119,6 +119,24 @@ let read_pending ~keepers_dir ~keeper_id =
   | None | Some {pending = []; _} -> None
   | Some state -> Some {generation = state.generation; rows = state.pending}
 
+(* Strictly ascending pending sequences are a subset of 1..last_sequence. Every
+   position pending no longer holds was removed by an earlier acknowledgement,
+   which required its committed receipt, and candidate receipts are retained
+   per candidate. So each removed position must still be named by a receipt;
+   one that is not (a restored older receipt file, a rolled-back snapshot) is
+   input nothing proves was consumed. The scan returns the first such position. *)
+let first_unproven_consumed (state : state)
+    (receipts : Keeper_memory_os_current.explicit_candidate_id list) =
+  let covered = Hashtbl.create (List.length state.pending + List.length receipts) in
+  List.iter (fun (row : candidate) -> Hashtbl.replace covered row.sequence ()) state.pending;
+  List.iter (fun (receipt : Keeper_memory_os_current.explicit_candidate_id) ->
+    Hashtbl.replace covered receipt.sequence ()) receipts;
+  let rec scan sequence =
+    if sequence > state.last_sequence then None
+    else if Hashtbl.mem covered sequence then scan (sequence + 1)
+    else Some sequence in
+  scan 1
+
 let acknowledge_committed ~keepers_dir ~keeper_id =
   let* initial = read ~keepers_dir ~keeper_id in
   match initial with
@@ -126,19 +144,20 @@ let acknowledge_committed ~keepers_dir ~keeper_id =
   | Some initial ->
     (* Receipt recovery owns the aggregate lock. Take this observation first,
        then revalidate the queue generation and every matching payload under
-       its lock. A later receipt is consumed by a subsequent acknowledgement. *)
+       its lock. A later receipt is consumed by a subsequent acknowledgement.
+       Positions already missing from [initial] were removed before these
+       receipts were read, so they are checked against them here. Rows another
+       acknowledgement removes after this read carry receipts this observation
+       may not contain, so the locked rewrite does not repeat the check. *)
     let* receipts = Keeper_memory_os_current.committed_explicit_candidates
       ~keepers_dir ~keeper_id ~queue_generation:initial.generation in
-    (* Strictly ascending pending sequences are a subset of 1..last_sequence.
-       Missing positions are already-consumed input, even though sparse state
-       no longer stores the parent's contiguous acknowledged frontier. *)
-    match receipts with
-    | [] when initial.last_sequence > List.length initial.pending ->
+    match first_unproven_consumed initial receipts, receipts with
+    | Some unproven_sequence, _ ->
       Error (Printf.sprintf
-        "admission receipt recovery required: generation=%s consumed_sequence_count=%d; recovery needs an independently attested exact backup that this product does not create — without one this state is unrecoverable and the queue stays blocked (docs/guides/MEMORY-ADMISSION-RECOVERY.md); pending input is unchanged"
-        initial.generation (initial.last_sequence - List.length initial.pending))
-    | [] -> Ok ()
-    | _ :: _ -> locked ~keepers_dir ~keeper_id (fun () ->
+        "admission receipt recovery required: generation=%s unproven_sequence=%d consumed_sequence_count=%d; recovery needs an independently attested exact backup that this product does not create — without one this state is unrecoverable and the queue stays blocked (docs/guides/MEMORY-ADMISSION-RECOVERY.md); pending input is unchanged"
+        initial.generation unproven_sequence (initial.last_sequence - List.length initial.pending))
+    | None, [] -> Ok ()
+    | None, _ :: _ -> locked ~keepers_dir ~keeper_id (fun () ->
       let* current = read ~keepers_dir ~keeper_id in
       match current with
       | None -> Error "pending admission queue disappeared before acknowledgement"

@@ -143,7 +143,15 @@ let export cohort () = with_workspace @@ fun ~base_path ->
     | [capture] -> capture | _ -> fail "expected one complete production-rendered request" in
   let candidate_rows = `List (List.map candidate_json candidates) in
   let initial_rows = `List (List.map Memory.fact_to_json initial_facts) in
-  let receipts = Queue.candidate_ids admission in
+  (* Identities computed from the pending batch. The capture defers every
+     candidate, so none of them is a committed consumption receipt. *)
+  let identities = Queue.candidate_ids admission in
+  let generation = match identities with
+    | (first : Current.explicit_candidate_id) :: _ -> first.queue_generation
+    | [] -> fail "pending batch produced no candidate identity" in
+  check int "capture commits no candidate receipt" 0
+    (List.length (Current.committed_explicit_candidates ~keepers_dir ~keeper_id
+       ~queue_generation:generation |> require));
   let scenario_input = `Assoc ["cohort",`String cohort.name;
     "keeper_instructions",`String instructions;
     "initial_claims",`List (List.map (fun s -> `String s) cohort.initial_claims);
@@ -159,7 +167,7 @@ let export cohort () = with_workspace @@ fun ~base_path ->
     "keeper_instructions",`String instructions;
     "candidate_receipts",`List (List.map (fun (id : Current.explicit_candidate_id) ->
       `Assoc ["queue_generation",`String id.queue_generation; "request_id",`String id.request_id;
-              "sequence",`Int id.sequence; "input_sha256",`String id.input_sha256]) receipts);
+              "sequence",`Int id.sequence; "input_sha256",`String id.input_sha256]) identities);
     "input_hashes",`Assoc ["scenario_input_sha256",`String (hash_json scenario_input);
       "prompt_sha256",`String (sha256 prompt);
       "system_prompt_sha256",`String (sha256 system_prompt);

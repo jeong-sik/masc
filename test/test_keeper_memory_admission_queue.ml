@@ -202,9 +202,39 @@ let test_sparse_lost_receipts_keeps_queue_blocked () =
     check string "lost receipt never rewrites pending bytes or order" before
       (Fs_compat.load_file queue_path))) [false;true]
 
+let test_partially_lost_receipts_keep_queue_blocked () = with_store (fun keepers_dir ->
+  List.iter (fun id -> ignore (append keepers_dir id ("rule " ^ id))) ["a";"b";"c"];
+  let ids = Queue.candidate_ids (batch keepers_dir) in
+  let id_of request_id =
+    List.find (fun (id : Current.explicit_candidate_id) -> id.request_id = request_id) ids in
+  ignore (commit keepers_dir [id_of "a"] [fact "rule a"]);
+  acknowledge keepers_dir;
+  let receipt_path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+  let receipts_naming_only_a = Fs_compat.load_file receipt_path in
+  ignore (commit keepers_dir [id_of "b"] [fact "rule b"]);
+  acknowledge keepers_dir;
+  check (list int) "a and b consumed, c pending" [3]
+    (List.map (fun (row : Queue.candidate) -> row.sequence) (Queue.candidates (batch keepers_dir)));
+  (* An older but valid receipt file comes back: sequence 1 still has its
+     receipt, nothing names consumed sequence 2. *)
+  Fs_compat.save_file_atomic_strict receipt_path receipts_naming_only_a |> require;
+  let queue_path = Queue.path ~keepers_dir ~keeper_id:"keeper" in
+  let before = Fs_compat.load_file queue_path in
+  (match Queue.acknowledge_committed ~keepers_dir ~keeper_id:"keeper" with
+   | Ok () -> fail "a consumed sequence without its receipt was admitted"
+   | Error _ -> ());
+  check string "partial receipt loss never rewrites pending bytes" before
+    (Fs_compat.load_file queue_path);
+  (match Worker.For_testing.run_with ~keepers_dir ~keeper_name:"keeper"
+     ~judge:(fun _ -> fail "pending input judged past unproven consumption") with
+   | Worker.Unavailable _ -> ()
+   | Worker.Disabled | Worker.Idle | Worker.Settled _ | Worker.Pending _ ->
+     fail "worker continued past a consumed sequence without its receipt"))
+
 let () = run "durable explicit admission queue"
   ["storage boundaries", [
     test_case "lost sparse receipts preserve the unrecoverable queue boundary" `Quick test_sparse_lost_receipts_keeps_queue_blocked;
+    test_case "partially lost sparse receipts keep the queue blocked" `Quick test_partially_lost_receipts_keep_queue_blocked;
     test_case "sparse receipt recovery preserves deferred gap and new append" `Quick test_sparse_consumption_retains_gap_and_append;
     test_case "partial worker wakes only newly unjudged input" `Quick test_worker_partial_consumption_wakes_only_new_input;
     test_case "pending is distinct from current Memory" `Quick test_pending_is_not_current;

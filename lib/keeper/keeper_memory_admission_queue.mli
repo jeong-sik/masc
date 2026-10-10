@@ -36,6 +36,10 @@ val acknowledge_committed :
     generation and exact ID/sequence/payload matches before removing those rows.
     Deferred gaps and concurrently appended rows survive. Any receipt collision
     refuses the entire rewrite. No success flag authorizes consumption.
+    Every sequence up to last_sequence that pending no longer holds must be
+    named by a committed receipt of the generation; otherwise this returns a
+    recovery-required error and leaves the queue unchanged, whether all or only
+    some of those receipts are missing.
     The persisted last_sequence is never reduced, even when pending is empty. *)
 
 val path : keepers_dir:string -> keeper_id:string -> string

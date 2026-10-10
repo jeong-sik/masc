@@ -2396,6 +2396,185 @@ let test_admission_recall_no_change_cannot_hide_missing_retirement_transition ()
    | Ok _ -> fail "no-change journal observation concealed a missing retirement transition")
 ;;
 
+let revision_evidence ~keepers_dir after_revision =
+  Current.read_with_revision_evidence_for_keepers_dir
+    ~keepers_dir ~keeper_id:"keeper" ~after_revision
+;;
+
+let test_declared_revision_links_survive_journal_failure () =
+  List.iter (fun explicit -> with_temp_keepers @@ fun keepers_dir ->
+    let original = fact ~claim:"original declared policy" () in
+    let successor = fact ~claim:"revised declared policy" () in
+    let seeded = replace ~keepers_dir ~facts:[original] () |> require_ok in
+    let link : Types.revision =
+      {superseded=Types.memory_id original; superseded_by=Types.memory_id successor} in
+    let branch = fact ~claim:"separate verified policy branch" () in
+    let links = if explicit then [link] else
+      [link; {Types.superseded=Types.memory_id original; superseded_by=Types.memory_id branch}] in
+    let journal = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+    let seed_bytes = Fs_compat.load_file journal in
+    Fs_compat.invalidate_cached_writer journal;
+    Sys.remove journal;
+    Unix.mkdir journal 0o700;
+    let committed = if explicit then (
+      match Current.supersede_fact ~keepers_dir ~keeper_id:"keeper" ~now:300.
+        ~source:(source Current.Explicit_write) ~superseded_memory_id:link.superseded successor with
+      | Ok (snapshot, _) -> snapshot | Error _ -> fail "explicit supersession failed")
+      else apply_disposition ~keepers_dir ~revisions:links
+        ~dropped_statements:[{Types.memory_id=Types.memory_id original;
+          reason="verified policy split replaces the original"}]
+        ~new_claims:[successor;branch] () |> require_ok in
+    check int "replacement snapshot committed despite journal failure" (seeded.revision+1) committed.revision;
+    let receipt_path = Current.retraction_plan_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+    let receipt = Yojson.Safe.from_file receipt_path in
+    check int "prepared transaction retains each declared branch" (List.length links)
+      Yojson.Safe.Util.(receipt |> member "revision_links" |> to_list |> List.length);
+    (match revision_evidence ~keepers_dir seeded.revision with
+     | Error _ -> () | Ok _ -> fail "unfinished lineage returned as complete evidence");
+    Unix.rmdir journal;
+    Fs_compat.save_file journal seed_bytes;
+    (* A real subsequent writer recovers the exact committed link first. *)
+    ignore (apply_disposition ~keepers_dir () |> require_ok);
+    check bool "recovery clears prepared transaction" false (Sys.file_exists receipt_path);
+    let current, records = revision_evidence ~keepers_dir seeded.revision |> require_ok in
+    check bool "coherent successor snapshot" true
+      (Option.map (fun (snapshot : Current.t) -> snapshot.facts) current=Some committed.facts);
+    let transitions = List.filter (fun (row : Current.revision_evidence) ->
+      row.commit_effect=Some Current.Rewritten) records in
+    check bool "exact applied link recovered once" true
+      (List.map (fun (row : Current.revision_evidence) -> row.revision_links) transitions=[Some links]);
+    check bool "no-change reports no transition links" true
+      (List.exists (fun (row : Current.revision_evidence) ->
+        row.commit_effect=Some Current.Unchanged && row.revision_links=None) records)) [false;true]
+;;
+
+let test_revision_evidence_never_invents_links () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let original = fact ~claim:"withdrawn exact identity" () in
+  let seeded = replace ~keepers_dir ~facts:[original] () |> require_ok in
+  ignore (replace ~keepers_dir ~expected_revision:(Some seeded.revision) ~facts:[] () |> require_ok);
+  ignore (Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:400.
+    ~source:(source Current.Explicit_write) original |> require_upsert_ok);
+  let _, records = revision_evidence ~keepers_dir seeded.revision |> require_ok in
+  check bool "retire and re-add do not create an inferred successor" true
+    (List.for_all (fun (row : Current.revision_evidence) -> row.revision_links=Some []) records);
+  let journal = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let rows = Fs_compat.load_jsonl journal |> List.map (function
+    | `Assoc fields -> `Assoc (List.remove_assoc "commit_effect" (List.remove_assoc "revision_links" fields))
+    | _ -> fail "fixture expected journal object") in
+  Fs_compat.invalidate_cached_writer journal;
+  Fs_compat.save_file journal (String.concat "\n" (List.map Yojson.Safe.to_string rows) ^ "\n");
+  let _, unmarked = revision_evidence ~keepers_dir seeded.revision |> require_ok in
+  check bool "unrecorded transition and links remain unknown" true
+    (List.for_all (fun (row : Current.revision_evidence) ->
+      row.commit_effect=None && row.revision_links=None) unmarked);
+  (match revision_evidence ~keepers_dir (-1) with
+   | Error _ -> () | Ok _ -> fail "negative evidence frontier accepted")
+;;
+
+let test_prepared_receipt_before_revision_links_recovers_with_no_lineage () =
+  with_temp_keepers @@ fun keepers_dir ->
+  (* A receipt written before the [revision_links] field existed must decode:
+     refusing it turns a leftover prepared transaction into a decode failure
+     that blocks archive reads. It decodes with an empty lineage — no link is
+     invented for the old writer — so the reader reports the ordinary
+     pending-finalization state instead. *)
+  let original = fact ~claim:"legacy prepared receipt drop reason" () in
+  let legacy =
+    `Assoc
+      [ "plan_id", `Null
+      ; "state", `String "prepared"
+      ; "prior_revision", `Int 3
+      ; "prior_snapshot_sha256", `String (String.make 64 'a')
+      ; "target_revision", `Int 4
+      ; "target_snapshot_sha256", `String (String.make 64 'b')
+      ; ( "dropped"
+        , `List
+            [ `Assoc
+                [ "memory_id", `String (Types.memory_id original)
+                ; "reason", `String "verified split recorded before lineage"
+                ] ] )
+      ]
+  in
+  let path = Current.retraction_plan_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+  Fs_compat.save_file_atomic_strict path (Yojson.Safe.to_string legacy) |> require_ok;
+  match Current.read_dropped ~keepers_dir ~keeper_id:"keeper" ~current_facts:[] with
+  | Error message ->
+    check bool
+      "legacy receipt reads as pending finalization, not a decode failure" true
+      (String.starts_with
+         ~prefix:"memory archive journal finalization pending keeper=keeper target_revision=4"
+         message)
+  | Ok _ -> fail "legacy prepared receipt read as a settled archive"
+;;
+
+(* An older writer may append its removal line and stop before clearing the
+   receipt. Its line has no [revision_links] (a writer before [commit_effect]
+   has neither key) and its receipt has no [revision_links]. Recovery reads
+   that line as the rewrite and clears the receipt instead of appending the
+   same revision a second time. *)
+let test_legacy_removal_line_clears_legacy_receipt_once () =
+  List.iter (fun missing_keys -> with_temp_keepers @@ fun keepers_dir ->
+    let target = fact ~claim:"removal recorded by an older writer" () in
+    let seeded = replace ~keepers_dir ~facts:[ target ] () |> require_ok in
+    let seeded_hash =
+      match Current.read_with_snapshot_sha256 ~keepers_dir ~keeper_id:"keeper" with
+      | Ok (Some (_, hash)) -> hash
+      | Ok None | Error _ -> fail "seeded snapshot hash is unavailable"
+    in
+    let journal_path =
+      Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+    in
+    let seed_journal = Fs_compat.load_file journal_path in
+    Fs_compat.invalidate_cached_writer journal_path;
+    Sys.remove journal_path;
+    Unix.mkdir journal_path 0o700;
+    let request () =
+      Current.retract_facts
+        ~keepers_dir
+        ~keeper_id:"keeper"
+        ~expected_revision:seeded.revision
+        ~expected_snapshot_sha256:seeded_hash
+        ~now:300.0
+        ~source:{ Current.kind = Current.Explicit_retract; trace_id = "legacy-removal-line" }
+        [ { Current.memory_id = Types.memory_id target
+          ; reason = "an older writer recorded this removal"
+          } ]
+    in
+    (match request () with
+     | Error (Current.Retract_batch_plan_evidence_pending _) -> ()
+     | Error _ | Ok _ -> fail "journal failure did not leave a prepared plan");
+    let receipt_path =
+      Current.retraction_plan_receipt_path ~keepers_dir ~keeper_id:"keeper"
+    in
+    let receipt = Yojson.Safe.from_file receipt_path in
+    Unix.rmdir journal_path;
+    Fs_compat.save_file journal_path seed_journal;
+    (* Recovery appends the exact line once; then the journal and the receipt
+       are rewritten the way the older writer left them. *)
+    (match request () with
+     | Error (Current.Retract_batch_snapshot_conflict _) -> ()
+     | Error _ | Ok _ -> fail "restart reconciliation did not precede stale CAS");
+    let strip = function
+      | `Assoc fields ->
+        `Assoc (List.filter (fun (name, _) -> not (List.mem name missing_keys)) fields)
+      | _ -> fail "fixture expected a JSON object"
+    in
+    let legacy_rows = List.map strip (read_journal_lines ~keepers_dir) in
+    Fs_compat.invalidate_cached_writer journal_path;
+    Fs_compat.save_file journal_path
+      (String.concat "\n" (List.map Yojson.Safe.to_string legacy_rows) ^ "\n");
+    Fs_compat.save_file_atomic_strict receipt_path
+      (Yojson.Safe.to_string (strip receipt)) |> require_ok;
+    (match request () with
+     | Error (Current.Retract_batch_snapshot_conflict _) -> ()
+     | Error _ | Ok _ -> fail "legacy receipt did not reconcile before stale CAS");
+    check bool "legacy receipt is cleared" false (Sys.file_exists receipt_path);
+    check int "legacy removal line is not appended again" (List.length legacy_rows)
+      (List.length (read_journal_lines ~keepers_dir)))
+    [ [ "revision_links" ]; [ "revision_links"; "commit_effect" ] ]
+;;
+
 let test_admission_recall_cache_invalidates_external_prefix_edit_and_growth () =
   List.iter (fun damage ->
     with_temp_keepers @@ fun keepers_dir ->
@@ -3726,6 +3905,14 @@ let () =
             test_receipt_cache_reflects_this_process_receipt_write
         ; test_case "unchanged journal row cannot prove a missing retirement transition" `Quick
             test_admission_recall_no_change_cannot_hide_missing_retirement_transition
+        ; test_case "declared revision links survive failed journal finalization" `Quick
+            test_declared_revision_links_survive_journal_failure
+        ; test_case "revision evidence does not invent missing links or re-add lineage" `Quick
+            test_revision_evidence_never_invents_links
+        ; test_case "prepared receipt before revision links recovers with no lineage" `Quick
+            test_prepared_receipt_before_revision_links_recovers_with_no_lineage
+        ; test_case "legacy removal line clears its legacy receipt once" `Quick
+            test_legacy_removal_line_clears_legacy_receipt_once
         ; test_case "prepared candidate receipt set recovers exact snapshot only" `Quick
             test_candidate_prepared_set_recovers_exact_snapshot
         ; test_case

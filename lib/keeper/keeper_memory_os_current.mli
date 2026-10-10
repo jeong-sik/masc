@@ -465,6 +465,26 @@ val committed_explicit_candidates :
     As with range receipts, missing or unverifiable snapshot evidence invalidates
     them; this is not a separate immutable consumption ledger. *)
 
+type revision_evidence =
+  { snapshot_revision : int
+  ; recorded_at : float
+  ; source : source
+  ; commit_effect : commit_effect option
+  ; revision_links : Keeper_memory_os_types.revision list option
+  ; removed_memory_ids : string list
+  ; added_memory_ids : string list
+  }
+
+val read_with_revision_evidence_for_keepers_dir :
+  keepers_dir:string -> keeper_id:string -> after_revision:int ->
+  ((t option * revision_evidence list), string) result
+(** Coherent current snapshot and actual committed journal records newer than
+    [after_revision], in journal order. Missing link/transition fields remain
+    [None], never inferred from text, timing or co-occurring removals/additions.
+    This is evidence only: it follows no graph and transfers no recall bindings.
+    An unfinished removal receipt or unreadable history is an error. The journal
+    can have missing transitions; returned records do not assert completeness. *)
+
 val read_with_admission_recall_status_for_keepers_dir :
   keepers_dir:string -> keeper_id:string ->
   ((t option * (admission_recall_binding list, string) result), string) result

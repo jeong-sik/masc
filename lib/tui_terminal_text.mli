@@ -20,6 +20,13 @@ val escape_invisible : string -> string
     reader would see of them. {!sanitize_terminal_text} and the Keeper chat
     boundary both route through here, so the rule lives in one place. *)
 
+val is_plain_scalar : int -> bool
+(** Printable ASCII and the Hangul syllables U+AC00-U+D7A3: scalars that
+    {!escape_invisible} copies without consulting Unicode properties because
+    none of them is default-ignorable, a variation selector, extended
+    pictographic or an emoji modifier. Exposed so a test can hold the set to
+    those four properties. *)
+
 val sanitize_terminal_text : string -> string
 (** Escape C0, DEL, raw C1 bytes, UTF-8 encoded C1 code points, malformed
     UTF-8 bytes, and the invisible code points {!escape_invisible} names, so

@@ -3604,6 +3604,70 @@ let test_settled_logs_are_the_selected_logs_the_session_holds_settled () =
     ; "cut log beside its whole", [ cut_c; settled_b ], [ shared ] ]
 ;;
 
+(* A held turn's block follows its own request's committed rows. Rows of
+   other requests arriving leave it where it was; a row of its own request
+   moves it after that row. The block is remembered between frames, so the
+   second and third frame prove the remembered block is not stale. *)
+let test_held_turn_block_follows_only_its_own_requests_rows () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous = Masc_tui_ansi.get_terminal_size () in
+  let set_size size = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+      cache ~probe:(fun () -> Some size)) in
+  Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
+    set_size (65, 140);
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+    state.msg_target_keeper_name <- Some "alpha";
+    state.msg_origin_display <- Masc_tui_message_layout.Origin_inline;
+    state.msg_loaded_keeper <- Some "alpha";
+    let user request_id at =
+      chat_entry ~request_id
+        ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator {surface=None}))
+        ~text:("input " ^ request_id) ~at () in
+    let log =
+      let log = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id:"op-held" ~started_at:20. in
+      let _ = Tui_types.turn_log_add_journaled log
+        [ line 0 20. (E.Run_started { run_id = "r"; thread_id = "keeper:alpha" })
+        ; line 1 20.1 (E.Text_delta {text = "said held"; stream_scope = None})
+        ; line 2 20.2 (journal_reply "said held")
+        ; line 3 20.3 (E.Run_finished { run_id = "r" }) ] in
+      Log.commit log.Tui_types.tl_log;
+      log
+    in
+    state.msg_settled_logs <- [ log ];
+    let screen () =
+      let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+      String.concat "\n"
+        (List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines)
+    in
+    let position screen marker =
+      match Astring.String.find_sub ~sub:marker screen with
+      | Some index -> index
+      | None -> fail ("missing from the frame: " ^ marker)
+    in
+    let before screen left right =
+      check bool (left ^ " precedes " ^ right) true
+        (position screen left < position screen right)
+    in
+    state.msg_loaded <- [ user "q0" 10.; user "q2" 50. ];
+    let first = screen () in
+    before first "input q0" "said held";
+    before first "said held" "input q2";
+    (* An unrelated row between them: the held block stays between q0 and q2. *)
+    state.msg_loaded <- [ user "q0" 10.; user "q1" 30.; user "q2" 50. ];
+    let second = screen () in
+    before second "input q0" "said held";
+    before second "said held" "input q1";
+    before second "input q1" "input q2";
+    (* A row of its own request at a later moment moves the block after it. *)
+    state.msg_loaded <- [ user "q0" 10.; user "q1" 30.; user "op-held" 40.; user "q2" 50. ];
+    let third = screen () in
+    before third "input q1" "input op-held";
+    before third "input op-held" "said held";
+    before third "said held" "input q2")
+;;
+
 (* A log built from a journal read stands at the journal head's own time,
    not at the moment the read was asked for. *)
 let test_a_journal_built_log_starts_at_the_journal_head () =
@@ -5074,6 +5138,8 @@ let () =
             test_held_turn_blocks_merge_among_committed_rows_by_clock
         ; test_case "settled logs are the selected logs held settled" `Quick
             test_settled_logs_are_the_selected_logs_the_session_holds_settled
+        ; test_case "held turn block follows only its own requests rows" `Quick
+            test_held_turn_block_follows_only_its_own_requests_rows
         ; test_case "a journal-built log starts at the journal head" `Quick
             test_a_journal_built_log_starts_at_the_journal_head
         ; test_case "pending input enters transcript on execution evidence" `Quick

@@ -1888,6 +1888,7 @@
   test_set_util
  test_board_core_payload)
  (libraries
+  uucp
   masc.toml_line_editor
   masc.browser_lane
   ; The fallback descendant fixture uses the monotonic deadline owner.

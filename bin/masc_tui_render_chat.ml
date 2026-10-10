@@ -2696,14 +2696,18 @@ let render_keeper_message (state : state) =
     let projected_tool_rows =
       keeper_message_tool_rows state ~keeper_name ~chat_cols
     in
+    let rows_started = Masc_tui_frame_timing.start_stage () in
     let committed_timeline_messages = chat_rows_for state keeper_name in
     let committed_visible_timeline =
       keeper_message_visible_timeline state ~keeper_name
     in
     let committed_messages = List.map fst committed_visible_timeline in
+    Masc_tui_frame_timing.finish_stage ~name:"chat.rows" rows_started;
+    let entries_started = Masc_tui_frame_timing.start_stage () in
     let committed_layout_entries =
       keeper_message_layout_entries state ~keeper_name ~chat_cols
     in
+    Masc_tui_frame_timing.finish_stage ~name:"chat.layout_entries" entries_started;
     (* Rows for the turns this session holds as logs: every settled turn of
        this keeper that its log stands for, then the one still streaming. Each
        block follows the committed rows of its own request rather than
@@ -2970,6 +2974,7 @@ let render_keeper_message (state : state) =
     (* A block with nothing to draw -- every row hidden reasoning, or a log
        of bookkeeping frames only -- is no block: it would move its request's
        corners onto rows that never close. *)
+    let blocks_started = Masc_tui_frame_timing.start_stage () in
     let settled_blocks =
       Masc_tui_types.settled_logs_for_keeper state keeper_name
       |> List.filter Masc_tui_types.turn_log_holds_the_turn
@@ -3022,6 +3027,7 @@ let render_keeper_message (state : state) =
       |> List.map (held_projection ~committed:false)
       |> List.filter (fun block -> block.lb_entries <> [])
     in
+    Masc_tui_frame_timing.finish_stage ~name:"chat.blocks" blocks_started;
     let blocks =
       settled_blocks @ observed_blocks @ other_live_blocks
       |> List.stable_sort (fun left right ->
@@ -3190,6 +3196,7 @@ let render_keeper_message (state : state) =
           | Some _ | None -> item)
         merged
     in
+    let merge_started = Masc_tui_frame_timing.start_stage () in
     let tagged_layout_entries, layout_entries =
       match blocks, open_blocks with
       | [], _ -> (
@@ -3236,6 +3243,7 @@ let render_keeper_message (state : state) =
       @ polled_turn_output_entries state ~keeper_name ~role_label_column
       @ chat_tail_entries state ~keeper_name ~role_label_column
     in
+    Masc_tui_frame_timing.finish_stage ~name:"chat.merge" merge_started;
     let inner_width = max 1 (framed_inner_width chat_cols) in
     (* Clamped here rather than where the key is handled: the limit depends on
        the terminal width and the pane's height, and a resize changes both
@@ -3323,11 +3331,13 @@ let render_keeper_message (state : state) =
                Message_layout.total_rows ~markdown
                  ~origin:state.msg_origin_display ?previous ~inner_width arrived)
     in
+    let window_started = Masc_tui_frame_timing.start_stage () in
     let scroll, visible_rows =
       Message_layout.clamped_scrolled_rows ~markdown
         ~origin:state.msg_origin_display ~inner_width ~height:history_height
         ~requested:(state.msg_scroll + rows_since_pin) layout_entries
     in
+    Masc_tui_frame_timing.finish_stage ~name:"chat.window" window_started;
 
     (* The chat buffer starts below the one-row tab strip, which is added by
        [finish_frame_beside_acting_pane]. Mouse reports count from the terminal's

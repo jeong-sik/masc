@@ -112,6 +112,16 @@ let escape_text code =
    the walk below copies an all-ASCII text unchanged. A frame sanitises
    every cell it draws, and most cells -- names, ids, counts, key hints --
    are only ASCII, so such a text is returned as it came. *)
+(* Scalars the walk below copies and then forgets: printable ASCII and the
+   Hangul syllables are not Default_Ignorable, not variation selectors, not
+   extended pictographic and not emoji modifiers, so for them the walk's
+   verdict is always "copy, base is this scalar, no pictograph in progress".
+   [is_plain_scalar] names exactly that set; the test enumerates it against
+   the four Unicode properties. Skipping the property lookups matters for
+   Korean text, where every scalar would otherwise take about five. *)
+let is_plain_scalar code =
+  (code >= 0x20 && code <= 0x7E) || (code >= 0xAC00 && code <= 0xD7A3)
+
 let escape_invisible text =
   if String.for_all (fun byte -> byte < '\x80') text then text
   else
@@ -140,6 +150,11 @@ let escape_invisible text =
       let scalar = Uchar.utf_decode_uchar decoded in
       let valid = Uchar.utf_decode_is_valid decoded in
       let code = Uchar.to_int scalar in
+      if valid && is_plain_scalar code
+      then (
+        Buffer.add_substring output text index step;
+        walk (index + step) ~after_pictograph:false ~base:(Some scalar))
+      else
       let flag_tags =
         if valid && code = waving_black_flag
         then tag_sequence_bytes text (index + step)

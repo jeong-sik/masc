@@ -225,6 +225,7 @@ type reply =
    the instant it arrived. The row states the word, and once the silence since
    it is long enough to read as a stall, the silence's age beside it. *)
 type model_signal =
+  | Scoped_model_content
   | Model_started_at of float
       (* STREAM_MODEL_STARTED: the endpoint answered; no token yet. *)
   | Model_response_ended
@@ -311,6 +312,12 @@ type t =
         (* The identity carried by the last reported stop reason. A partial
            replay can retain this while losing that response's start; only
            matching observed identities permit terminal reconciliation. *)
+  ; mutable content_scope : (int * int) option
+  ; mutable content_scope_closed : bool
+  ; mutable active_model_content : (int * Masc.Keeper_chat_events.model_content_channel * float option) list
+        (* Most recently observed first; None is a closed occurrence. These
+           tombstones prevent duplicate/late observations reopening an index.
+           An event from an older server scope cannot erase current activity. *)
   ; mutable model_signal : model_signal option
         (* The last thing the model side sent in this attempt, and when.
            Tool calls carry their own pending state; this covers the stretches
@@ -387,6 +394,9 @@ let create_for_source ~keeper_name ~source ~started_at =
   ; observed_stop_reason = None
   ; response_scope = None
   ; stop_scope = None
+  ; content_scope = None
+  ; content_scope_closed = false
+  ; active_model_content = []
   ; model_signal = None
   ; runtime_named_at = None
   ; reply = None
@@ -776,6 +786,12 @@ let model_phase_text ~show_timing ~now t =
   match t.model_signal with
   | None -> None
   | Some Model_response_ended -> Some "model response ended"
+  | Some Scoped_model_content ->
+      (match List.find_opt (fun (_,_,at) -> Option.is_some at) t.active_model_content with
+       | Some (_,channel,Some since) -> observed ~since
+           (match channel with Masc.Keeper_chat_events.Model_text -> "STREAMING · answering"
+            | Model_thinking -> "THINKING · reasoning")
+       | Some (_,_,None) | None -> Some "model content ended")
   | Some (Model_started_at since) -> observed ~since "model started"
   | Some (Reasoning_at since) -> observed ~since "THINKING · reasoning"
   | Some (Answering_at since) -> observed ~since "STREAMING · answering"
@@ -1312,11 +1328,53 @@ let enter_text_response_scope t scope =
     t.stop_scope <- None
   end
 
+let retire_model_content t =
+  t.active_model_content <- [];
+  t.content_scope_closed <- true
+;;
+
+let apply_model_content ~now t (activity : Masc.Keeper_chat_events.model_content_activity) =
+  let open Masc.Keeper_chat_events in
+  match t.phase with
+  | Stream_ended | Stream_failed _ -> ()
+  | Waiting | Working ->
+    let scope_order = match t.content_scope with
+      | None -> 1
+      | Some scope -> compare (activity.content_generation, activity.content_scope) scope in
+    if scope_order < 0 || (scope_order = 0 && t.content_scope_closed) then ()
+    else match activity.state with
+    | Content_observed ->
+      if scope_order > 0 then begin
+        t.content_scope <- Some (activity.content_generation, activity.content_scope);
+        t.content_scope_closed <- false;
+        t.active_model_content <- []
+      end;
+      (match List.find_opt (fun (index,_,_) -> index=activity.content_index) t.active_model_content with
+       | Some (_,_,None) -> ()
+       | Some (_,channel,Some _) when channel <> activity.channel ->
+           note_unreadable t "model content channel changed within its occurrence"
+       | Some (_,_,Some _) | None ->
+           t.active_model_content <- (activity.content_index,activity.channel,Some now) ::
+             List.filter (fun (index,_,_) -> index<>activity.content_index) t.active_model_content;
+           t.model_signal <- Some Scoped_model_content)
+    | Content_ended ->
+      (* Unknown or older stops provide no authority over the current model
+         signal. In particular a tool/content header alone is not activity. *)
+      if scope_order = 0 then
+        match List.find_opt (fun (index,_,_) -> index=activity.content_index) t.active_model_content with
+        | Some (_,channel,Some _) when channel=activity.channel ->
+            t.active_model_content <- List.map (fun (index,channel,at) ->
+              index,channel,(if index=activity.content_index then None else at)) t.active_model_content
+        | Some (_,_,_) | None -> ()
+;;
+
 let apply_delta ~now t (delta : Live.delta) =
   match delta with
   | Live.Run_started -> (
       if awaiting_continuation t then begin
         t.segment <- t.segment + 1;
+        t.attempt <- 0;
+        t.current_runtime_id <- None;
         t.reversed_trail <- Node_segment_boundary :: t.reversed_trail;
         Buffer.clear t.text_buffer;
         Buffer.clear t.thinking_buffer;
@@ -1326,6 +1384,7 @@ let apply_delta ~now t (delta : Live.delta) =
         t.observed_model <- None;
         t.observed_usage <- None;
         t.observed_stop_reason <- None;
+        retire_model_content t;
         t.model_signal <- None;
         t.runtime_named_at <- None;
         t.response_scope <- None;
@@ -1348,12 +1407,24 @@ let apply_delta ~now t (delta : Live.delta) =
          only answers "why has it not started yet". *)
       t.admission <- Some (admission, queue_length)
   | Live.Runtime_attempt_started { runtime_id; attempt_index } ->
-      (* The per-attempt totals start over; the trail does not. What the
-         earlier attempt produced -- finished stretches and the one still
-         growing -- is folded into one superseded node so the reader keeps
-         what they were reading and can see which attempt it belonged to
-         (RFC-0412 §3.3). Tool evidence stays where it was: the calls remain
-         in [reversed_tool_calls] and the superseded node still names them. *)
+      (match t.phase with
+       | Stream_ended | Stream_failed _ -> ()
+       | Waiting | Working ->
+      let next_attempt = Option.value attempt_index ~default:(t.attempt + 1) in
+      if next_attempt < t.attempt then ()
+      else if next_attempt = t.attempt then begin
+        (* This is a metadata report for the current attempt. It has no
+           authority to supersede bytes, end content, or dismiss approval. *)
+        match t.current_runtime_id, runtime_id with
+        | Some current, Some reported when not (String.equal current reported) ->
+            note_unreadable t "runtime identity conflicts within the current attempt"
+        | None, Some reported ->
+            t.current_runtime_id <- Some reported;
+            if t.runtime_named_at = None then t.runtime_named_at <- Some now
+        | Some _, (None | Some _) | None, None -> ()
+      end else begin
+        (* Only an advancing attempt folds the prior attempt's observed work.
+           Earlier attempts remain visible with their original runtime. *)
       Buffer.clear t.text_buffer;
       Buffer.clear t.thinking_buffer;
       t.response_first_stretch <- t.next_stretch_id;
@@ -1380,30 +1451,22 @@ let apply_delta ~now t (delta : Live.delta) =
                ; nodes
                }
              :: older);
-      let next_attempt = Option.value attempt_index ~default:(t.attempt + 1) in
-      let new_attempt = next_attempt <> t.attempt in
-      t.attempt <- next_attempt;
-      (* Unknown identity belongs to the new attempt. Keeping the previous
-         runtime here also prevents STREAM_MODEL_STARTED from naming the new
-         one. A repeated event for this same attempt adds no missing fact. *)
-      if new_attempt || Option.is_some runtime_id then
+        t.attempt <- next_attempt;
         t.current_runtime_id <- runtime_id;
-      (* The model the stream named belongs to the attempt it was named in;
-         a repeated event for the same attempt keeps it. *)
-      if new_attempt then t.observed_model <- None;
-      if new_attempt then t.observed_usage <- None;
-      if new_attempt then begin
+        t.observed_model <- None;
+        t.observed_usage <- None;
         t.observed_stop_reason <- None;
         t.response_scope <- None;
-        t.stop_scope <- None
-      end;
-      t.model_signal <- None;
-      t.current_stream_scope <- None;
-      t.runtime_named_at <- Some now;
-      t.awaiting <- None;
-      (match t.phase with
-       | Waiting | Working -> t.phase <- Working
-       | Stream_ended | Stream_failed _ -> ())
+        t.stop_scope <- None;
+        retire_model_content t;
+        t.model_signal <- None;
+        t.current_stream_scope <- None;
+        t.runtime_named_at <- Some now;
+        t.awaiting <- None;
+        (match t.phase with
+         | Waiting | Working -> t.phase <- Working
+         | Stream_ended | Stream_failed _ -> ())
+      end)
   | Live.Stream_model_started { model; stream_scope; usage; _ } ->
       (* The bridge can repeat the same MessageStart without opening another
          response. Its allocated stream scope, unlike model names or text,
@@ -1418,6 +1481,7 @@ let apply_delta ~now t (delta : Live.delta) =
       t.response_scope <- stream_scope;
       t.current_stream_scope <- stream_scope;
       begin_response t;
+      retire_model_content t;
       t.observed_usage <- usage;
       t.observed_stop_reason <- None;
       t.stop_scope <- None;
@@ -1436,7 +1500,9 @@ let apply_delta ~now t (delta : Live.delta) =
               ; cache_creation_input_tokens = fill current.cache_creation_input_tokens initial.cache_creation_input_tokens }
         | _, None -> ()
       end
+  | Live.Model_content_activity activity -> apply_model_content ~now t activity
   | Live.Stream_model_stopped ->
+      retire_model_content t;
       t.model_signal <- Some Model_response_ended
   | Live.Stream_details { usage; stop_reason; stream_scope } ->
       (* A retained detail can be the first surviving event of a response.
@@ -2115,6 +2181,7 @@ let drawn t =
 type model_activity =
   | Activity_model_started
   | Activity_response_ended
+  | Activity_content_ended
   | Activity_reasoning
   | Activity_answering
   | Activity_tool_returned of string
@@ -2124,6 +2191,11 @@ let model_activity t =
   | None -> None
   | Some (Model_started_at _) -> Some Activity_model_started
   | Some Model_response_ended -> Some Activity_response_ended
+  | Some Scoped_model_content ->
+      (match List.find_opt (fun (_,_,at) -> Option.is_some at) t.active_model_content with
+       | Some (_, Masc.Keeper_chat_events.Model_text, Some _) -> Some Activity_answering
+       | Some (_, Masc.Keeper_chat_events.Model_thinking, Some _) -> Some Activity_reasoning
+       | Some (_, _, None) | None -> Some Activity_content_ended)
   | Some (Reasoning_at _) -> Some Activity_reasoning
   | Some (Answering_at _) -> Some Activity_answering
   | Some (Tool_returned_at (tool_name, _)) -> Some (Activity_tool_returned tool_name)

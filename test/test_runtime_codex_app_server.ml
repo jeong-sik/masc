@@ -5168,6 +5168,43 @@ let codex_progress_frame ?(thread_id="thread-1") ?(turn_id="turn-1")
   |> Yojson.Safe.to_string
 ;;
 
+let test_content_completion_activity_reaches_tui () =
+  let module F = Native_tool_outcome_fixture in
+  let module T = Masc_tui_keeper_chat_transcript in
+  let fixture = F.create () in
+  let before_response_stop = ref 0 and failures = ref [] in
+  let on_event event =
+    F.on_event fixture event;
+    match event with
+    | Agent_core.Types.ContentBlockStop {index=1} ->
+        (* Commentary index 0 has ended, native index 1 just ended, and the
+           official turn is still open. Formerly STREAMING resurfaced here. *)
+        incr before_response_stop;
+        (try
+          let live,replay = F.snapshots fixture in
+          List.iter (fun log ->
+            let t = T.of_log ~now:2000. log in
+            let rows = String.concat "\n" (List.map snd (T.status_rows ~now:2000. t)) in
+            check bool "actual provider content stop clears stale model label" true
+              (Astring.String.is_infix ~affix:"model content ended" rows);
+            check bool "official turn is still open" true (T.phase t=T.Working);
+            check bool "native completion was kept" true
+              (List.exists (fun (call:T.tool_activity) -> call.outcome=T.Native_ended) (T.tool_calls t))) [live;replay]
+         with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn -> failures := exn :: !failures)
+    | _ -> () in
+  with_fixture [init_result;account_chatgpt;thread_result;turn_result;
+    commentary_delta;commentary_completed;native_command_started;native_command_completed;
+    item_completed;turn_completed]
+    (fun cli_path -> match run_keeper_turn ~cli_path ~model:"gpt-fixture"
+      ~on_event ~on_native_tool_completion:(F.on_completion fixture) () with
+      | Error error -> fail (Agent_core.Error.to_string error)
+      | Ok _ ->
+          List.iter raise (List.rev !failures);
+          check int "mid-turn activity assertion actually ran" 1 !before_response_stop)
+;;
+
 let test_native_progress_reaches_tui () =
   let module F = Native_tool_outcome_fixture in
   let base_path = temp_workspace "codex-progress-" in
@@ -7764,6 +7801,7 @@ let () =
         ; test_case "native completion through adapter, journal, SSE and TUI" `Quick test_native_completion_reaches_tui
         ; test_case "unclassified native item keeps its reported status" `Quick
             test_unclassified_native_item_keeps_its_reported_status
+        ; test_case "content completion activity through provider and TUI" `Quick test_content_completion_activity_reaches_tui
         ; test_case "native progress through provider, adapter and TUI" `Quick test_native_progress_reaches_tui
         ; test_case "native progress validates active turn and payload" `Quick test_native_progress_rejects_wrong_turn_and_malformed_message
         ; test_case "reasoning belongs to the active turn" `Quick test_codex_reasoning_rejects_wrong_turn] )

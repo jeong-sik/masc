@@ -394,6 +394,7 @@ val phase : t -> phase
 type model_activity =
   | Activity_model_started
   | Activity_response_ended
+  | Activity_content_ended
   | Activity_reasoning
   | Activity_answering
   | Activity_tool_returned of string

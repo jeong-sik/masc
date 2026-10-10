@@ -308,3 +308,58 @@ on-disk journal must contain redacted text; concatenating their text events must
 not reconstruct the secret. The same check includes streamed Thinking. Native
 completion and ordinary block start/stop remain separate content boundaries;
 this progress repair does not redesign those existing redaction boundaries.
+
+
+## Activity ends with its content occurrence
+
+`KEEPER_MODEL_CONTENT_ACTIVITY` is side metadata. Its strict shared codec carries
+`generation` (the actual `Run_started` journal sequence), `stream_scope`,
+`block_index`, optional `provider_message_id`, `channel` (`text` or `thinking`),
+and `state` (`observed` or `ended`). The generation is returned by the same
+single-publisher bus call that publishes the run start. Direct operation workers
+and autonomous workers pass it to the bridge. A continued operation may create
+another worker with scope zero; its later run-start sequence keeps that worker's
+content distinct. Provider message ids are correlation only and may be reused.
+
+Only an accepted, nonempty model payload publishes `observed`, after its unchanged
+body event. A header, signature, native progress update, or argument chunk does
+not establish model activity. A matching indexed content stop publishes `ended`
+only for an observed active model block. Duplicate/unknown/tool stops do not end
+model content. Authoritative response stops close all remaining observed blocks.
+The bridge rejects deltas or headers that try to reopen an already closed model
+block before projecting body text; the protocol error remains visible.
+
+The TUI retains each occurrence's active state in causal arrival order. When the
+latest one closes, another still-active occurrence supplies the activity label.
+Wall-clock values describe silence age and never choose the current occurrence.
+When all observed content closes, the label is `model content ended`; only the
+separate provider message stop says `model response ended`. Neither event ends a
+native tool, supplies a MASC execution receipt, or settles the Keeper turn.
+Response/attempt boundaries retire the old occurrence set; newer generations or
+scopes can reuse indices, and older stops cannot erase their activity. Old flat
+Text/Thinking records without metadata retain their last-observed signal: an
+unrelated content stop cannot prove that unscoped text ended.
+
+Schema/consumer checklist: Keeper_chat_events ML/MLI and shared codec; durable
+Keeper_chat_event_log; AG-UI server projection; strict TUI projection and live
+reader; journal-to-live fold and seq dedup; transcript and turn-log dispatch;
+Slack/Discord metadata-ignore arms; Dashboard custom-name vocabulary, typed event
+union, exact payload field table and validator. The Dashboard accepts this side
+metadata through its existing no-view handler without changing body, progress,
+or response state; no new Dashboard UI is introduced. Schema fixtures cover
+required nonnegative indices, optional nonblank provider correlation and closed
+channel/state vocabulary. Golden event and live/journal fixtures include
+the new variant. `test_tui_model_content_activity` targets overlapping channels,
+backwards timestamps, closed deltas, unknown/late stops, response/retry boundaries,
+reused provider ids/indices, fresh workers appending to one journal, malformed
+metadata, and scoped redactor → production bridge → journal/SSE → TUI parity.
+The actual Codex app-server fixture asserts content ended after a native command
+completes but before the official turn ends. These are authored fixtures, not a
+claim that they have run locally.
+
+The GLM/OpenAI-compatible HTTP adapter's missing MessageStart metadata is a
+separate unresolved audit finding; this unit does not synthesize that prelude.
+At baseline `3623434008`, the Dashboard's closed custom vocabulary and payload
+contracts also omit `KEEPER_NATIVE_TOOL_START`, `KEEPER_NATIVE_TOOL_END`, and
+`KEEPER_NATIVE_TOOL_PROGRESS`; that separate gap remains, so this unit does not
+claim complete Dashboard/server wire parity.

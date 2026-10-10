@@ -239,7 +239,12 @@
       "path": "lib/keeper/hitl_summary_worker.ml",
       "baseline_lines": 2066,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: judgment request projection and domain parser moved to a direct owner; host/config acquisition separated from pure projection; remaining exact-output execution, durability, CLI and lifecycle responsibilities pending semantic review",
+      "current_lines": 1883,
+      "validation_artifact": "hitl-request-context/README.md",
+      "prs": [
+        41992
+      ]
     },
     {
       "path": "lib/keeper/keeper_agent_run.ml",
@@ -698,7 +703,12 @@
       "path": "test/test_hitl_summary_worker.ml",
       "baseline_lines": 3395,
       "kind": "test",
-      "status": "pending semantic review"
+      "status": "partial: request projection and domain parser tests call the canonical owner; existing context, HTTP and CLI consumer checks selected; remaining concurrency, recovery and lifecycle fixtures pending semantic review",
+      "current_lines": 3396,
+      "validation_artifact": "hitl-request-context/README.md",
+      "prs": [
+        41992
+      ]
     },
     {
       "path": "test/test_install_runtime_setup.py",

@@ -46,6 +46,8 @@ type delta =
   | Thinking of string
   | Native_tool_started of
       { occurrence : tool_occurrence; tool_name : string option }
+  | Native_tool_progress of
+      { occurrence : tool_occurrence; progress : Runtime_native_tools.progress }
   | Native_tool_ended of
       { occurrence : tool_occurrence; completion : Runtime_native_tools.completion }
   | Tool_started of
@@ -206,7 +208,7 @@ let tool_start_deltas fields =
 let custom_deltas_unvalidated fields =
   match string_field fields "name" with
   | None -> [ Undecodable "CUSTOM has no name" ]
-  | Some ("KEEPER_NATIVE_TOOL_START" | "KEEPER_NATIVE_TOOL_END" as event) ->
+  | Some ("KEEPER_NATIVE_TOOL_START" | "KEEPER_NATIVE_TOOL_END" | "KEEPER_NATIVE_TOOL_PROGRESS" as event) ->
       (match object_field fields "value" with
        | None -> [Undecodable (event ^ " value is not an object")]
        | Some value ->
@@ -215,6 +217,12 @@ let custom_deltas_unvalidated fields =
            | Ok occurrence ->
                if event = "KEEPER_NATIVE_TOOL_START" then
                  [Native_tool_started {occurrence; tool_name = string_field value "toolCallName"}]
+               else if event = "KEEPER_NATIVE_TOOL_PROGRESS" then
+                 (match List.assoc_opt "progress" value with
+                  | None -> [Undecodable (event ^ ": progress is required")]
+                  | Some json -> (match Runtime_native_tools.progress_of_json json with
+                      | Ok progress -> [Native_tool_progress {occurrence; progress}]
+                      | Error detail -> [Undecodable (event ^ ": " ^ detail)]))
                else
                  (* The wire contract permits an END without a completion:
                     an older sender closes the occurrence without terminal

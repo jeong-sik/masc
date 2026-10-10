@@ -771,6 +771,7 @@ let adapter_loop_with_transport
        than left to a catch-all so a future surface has to make the same
        decision deliberately. *)
     | Tool_call_args _ | Tool_call_args_snapshot _ | Tool_call_end _
+    | Native_tool_progress _
     | Native_tool_end _
     | Tool_approval_requested _ | Tool_approval_settled _
     | Tool_result_ready _ ->

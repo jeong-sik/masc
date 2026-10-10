@@ -772,7 +772,7 @@ let current_custom_names =
   ; "KEEPER_STREAM_PROTOCOL_ERROR"; "KEEPER_CONTINUATION_CHECKPOINT"
   ; "KEEPER_CHAT_BATCH_BOUND"; "KEEPER_EXTERNAL_EFFECT_COMPLETED"; "KEEPER_TOOL_RESULT_READY"
   ; "KEEPER_TOOL_APPROVAL_REQUESTED"; "KEEPER_TOOL_APPROVAL_SETTLED"
-  ; "KEEPER_NATIVE_TOOL_START"; "KEEPER_NATIVE_TOOL_END"
+  ; "KEEPER_NATIVE_TOOL_START"; "KEEPER_NATIVE_TOOL_END"; "KEEPER_NATIVE_TOOL_PROGRESS"
   ]
 
 let known_custom_names =
@@ -1024,12 +1024,14 @@ let decode_custom_event ~request state fields =
     if String.equal name "KEEPER_CHAT_BATCH_BOUND" then
       let* _ = decode_batch_binding ~expected_request_id:request.request_id value in Ok state
     else if String.equal name "KEEPER_NATIVE_TOOL_START"
-            || String.equal name "KEEPER_NATIVE_TOOL_END" then
+            || String.equal name "KEEPER_NATIVE_TOOL_END"
+            || String.equal name "KEEPER_NATIVE_TOOL_PROGRESS" then
       let native_surface = name ^ ".value" in
       let* native_fields = exact_object_fields ~surface:native_surface
           ~allowed:(["toolStreamScope"; "toolCallBlockIndex"; "providerMessageId";
                     "toolCallId"; "toolCallName"]
-                    @ (if String.equal name "KEEPER_NATIVE_TOOL_END" then ["completion"] else [])) value
+                    @ (if String.equal name "KEEPER_NATIVE_TOOL_END" then ["completion"]
+                       else if String.equal name "KEEPER_NATIVE_TOOL_PROGRESS" then ["progress"] else [])) value
           |> Result.map_error (fun detail -> Malformed_event detail) in
       let* _ = decode_tool_occurrence ~surface:native_surface native_fields
           |> Result.map_error (fun detail -> Malformed_event detail) in
@@ -1046,6 +1048,12 @@ let decode_custom_event ~request state fields =
           match List.filter (fun (key, _) -> String.equal key "completion") native_fields with
           | [] | [_, _] -> Ok ()
           | _ -> Error (Malformed_event (native_surface ^ ": completion must be unique"))
+        else Ok () in
+      let* () = if String.equal name "KEEPER_NATIVE_TOOL_PROGRESS" then
+          (match List.assoc_opt "progress" native_fields with
+           | None -> Error (Malformed_event (native_surface ^ ": progress is required"))
+           | Some json -> Runtime_native_tools.progress_of_json json |> Result.map (fun _ -> ())
+               |> Result.map_error (fun detail -> Malformed_event (native_surface ^ ": " ^ detail)))
         else Ok () in
       let* () = match List.assoc_opt "completion" native_fields with
         | None -> Ok ()

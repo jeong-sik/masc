@@ -5748,6 +5748,13 @@
   masc_tui_keeper_chat_live masc_tui_keeper_chat_log masc_tui_keeper_chat_transcript))
 
 
+(test
+ (name test_tui_native_tool_progress)
+ (modules test_tui_native_tool_progress)
+ (libraries masc.fs_compat astring alcotest yojson unix eio_main masc masc.runtime masc.agent_core masc.server masc.ag_ui
+  masc.masc_types native_tool_outcome_fixture masc_tui_keeper_chat_live masc_tui_keeper_chat_log
+  masc_tui_keeper_chat_transcript))
+
 ; H2 crash-resume harness: scenario subcommands need orchestrated env
 ; (H2_ROOT, H2_ASYNC_*), so it is an executable, not a (test) — a (test)
 ; stanza would run it with no args under the default runtest alias and exit 2.

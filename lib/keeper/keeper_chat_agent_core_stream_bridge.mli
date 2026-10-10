@@ -47,6 +47,12 @@ val record_tool_result : state -> Keeper_chat_events.tool_stream_occurrence -> s
 (** Preserve this committed result against outer cancellation/fallback, without
     exempting it from actual block/delta protocol conflicts. *)
 
+val progress_native_tool :
+  redact_text:(string -> string) -> stream_scope:int -> block_index:int ->
+  tool_call_id:string option -> Runtime_native_tools.progress -> state -> translated_event
+(** Attach only to the exact active native occurrence. Late/wrong-scope/MASC
+    progress is diagnosed and cannot reopen, close or commit a tool. *)
+
 val finish_native_tool :
   redact_text:(string -> string) -> stream_scope:int -> block_index:int ->
   tool_call_id:string option -> Runtime_native_tools.completion -> state -> translated_event

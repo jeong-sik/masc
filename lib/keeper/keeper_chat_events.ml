@@ -136,6 +136,7 @@ type keeper_chat_event =
       }
   | Native_tool_start of native_tool
   | Native_tool_end of native_tool * Runtime_native_tools.completion
+  | Native_tool_progress of native_tool * Runtime_native_tools.progress
   | Tool_approval_requested of
       { tool_call_id : string
       ; tool_call_name : string

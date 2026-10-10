@@ -482,13 +482,31 @@ let test_current_nonterminal_event_set () =
           ; "toolCallId", `String "tool-1"
           ; "executionId", `String "exec-1"
           ]
-      else if String.equal name "KEEPER_NATIVE_TOOL_START"
-              || String.equal name "KEEPER_NATIVE_TOOL_END" then
+      else if String.equal name "KEEPER_NATIVE_TOOL_START" then
         `Assoc
           [ "toolStreamScope", `Int 0
           ; "toolCallBlockIndex", `Int 0
           ; "toolCallId", `String "tool-1"
           ; "toolCallName", `String "read"
+          ]
+      else if String.equal name "KEEPER_NATIVE_TOOL_END" then
+        (* END carries exactly the completion the strict decoder requires. *)
+        `Assoc
+          [ "toolStreamScope", `Int 0
+          ; "toolCallBlockIndex", `Int 0
+          ; "toolCallId", `String "tool-1"
+          ; "toolCallName", `String "read"
+          ; "completion", `Assoc ["kind", `String "end_observed"; "exit_code", `Null]
+          ]
+      else if String.equal name "KEEPER_NATIVE_TOOL_PROGRESS" then
+        (* The strict decoder expects the occurrence object and a valid
+           progress object; a Null falls through and is rejected. *)
+        `Assoc
+          [ "toolStreamScope", `Int 0
+          ; "toolCallBlockIndex", `Int 0
+          ; "toolCallId", `String "tool-1"
+          ; "toolCallName", `String "read"
+          ; "progress", `Assoc ["kind", `String "output_observed"; "byte_count", `Int 1]
           ]
       else if String.equal name "KEEPER_CHAT_BATCH_BOUND" then
         `Assoc ["operation_id", `String request.request_id; "execution_id", `String "shared-execution"]

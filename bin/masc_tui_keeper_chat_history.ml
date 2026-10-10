@@ -124,8 +124,19 @@ type decoded =
   ; dropped : int
   }
 
+(* The first value under [key], like [List.assoc_opt] but comparing the keys
+   as strings: this runs for every field of every row of a history page, and
+   the polymorphic comparison it replaces was the largest single cost of
+   decoding one. *)
+let assoc_opt (key : string) (fields : (string * 'a) list) =
+  let rec find = function
+    | [] -> None
+    | (name, value) :: rest -> if String.equal name key then Some value else find rest
+  in
+  find fields
+
 let string_field fields name =
-  match List.assoc_opt name fields with
+  match assoc_opt name fields with
   | Some (`String value) -> Some value
   | Some _ | None -> None
 
@@ -280,7 +291,7 @@ let present_delivery_failure ?recovered_at text =
 ;;
 
 let float_field fields name =
-  match List.assoc_opt name fields with
+  match assoc_opt name fields with
   | Some (`Float value) -> Some value
   | Some (`Int value) -> Some (float_of_int value)
   | Some _ | None -> None
@@ -405,17 +416,17 @@ type parsed =
       }
 
 let int_field fields name =
-  match List.assoc_opt name fields with
+  match assoc_opt name fields with
   | Some (`Int value) -> Some value
   | Some _ | None -> None
 
 let bool_field fields name =
-  match List.assoc_opt name fields with
+  match assoc_opt name fields with
   | Some (`Bool value) -> value
   | Some _ | None -> false
 
 let bool_field_opt fields name =
-  match List.assoc_opt name fields with
+  match assoc_opt name fields with
   | Some (`Bool value) -> Some value
   | Some _ | None -> None
 
@@ -431,7 +442,7 @@ let bool_field_opt fields name =
    turns apart. 108 of those rows carried a trace, which is where the tool
    calls are. *)
 let autonomous_turn_id_of_fields fields =
-  match List.assoc_opt "autonomous_turn" fields with
+  match assoc_opt "autonomous_turn" fields with
   | Some (`Assoc marker) -> string_field marker "turn_id"
   | Some _ | None -> None
 
@@ -547,7 +558,7 @@ let text_with_attachments ~format_bytes ~text ~notes =
       text ^ separator ^ files
 
 let attachment_notes_of fields =
-  match List.assoc_opt "attachments" fields with
+  match assoc_opt "attachments" fields with
   | Some (`List items) ->
       List.filter_map
         (function
@@ -575,7 +586,7 @@ let attachment_notes_of fields =
   | Some _ | None -> []
 
 let list_field (fields : (string * Yojson.Safe.t) list) name =
-  match List.assoc_opt name fields with
+  match assoc_opt name fields with
   | Some (`List values) -> Some values
   | Some _ | None -> None
 
@@ -617,7 +628,7 @@ let journal_line_text = function
       Printf.sprintf "drop %s \xe2\x80\x94 %s" memory_id reason
 
 let memory_source_label (fields : (string * Yojson.Safe.t) list) =
-  match List.assoc_opt "source" fields with
+  match assoc_opt "source" fields with
   | Some (`Assoc source) ->
       (match string_field source "kind" with
        | Some "librarian" -> "Librarian"
@@ -655,7 +666,7 @@ let memory_committed_row (fields : (string * Yojson.Safe.t) list) =
   match
     float_field fields "recorded_at",
     int_field fields "revision",
-    List.assoc_opt "change" fields
+    assoc_opt "change" fields
   with
   | Some at, Some revision, Some (`Assoc change) ->
       (match
@@ -804,7 +815,7 @@ let memory_row_of_json = function
 
 let memory_rows_of_json = function
   | `Assoc fields ->
-      (match List.assoc_opt "entries" fields with
+      (match assoc_opt "entries" fields with
        | Some (`List entries) ->
            let rows = List.map memory_row_of_json entries in
            Ok
@@ -874,7 +885,7 @@ let add_trace_step summary (step : Yojson.Safe.t) =
           | None -> { summary with omitted = summary.omitted + 1 }
           | Some tool_name ->
               let args =
-                match List.assoc_opt "args" fields with
+                match assoc_opt "args" fields with
                 | None | Some `Null -> ""
                 | Some json -> Yojson.Safe.to_string json
               in
@@ -897,7 +908,7 @@ let add_trace_block summary (block : Yojson.Safe.t) =
       match string_field fields "t" with
       | Some "trace" ->
           let steps =
-            match List.assoc_opt "trace" fields with
+            match assoc_opt "trace" fields with
             | Some (`List steps) -> steps
             | Some _ | None -> []
           in
@@ -923,7 +934,7 @@ let add_trace_block summary (block : Yojson.Safe.t) =
       summary
 
 let trace_summary_of fields =
-  match List.assoc_opt "blocks" fields with
+  match assoc_opt "blocks" fields with
   | Some (`List blocks) ->
       let summary = List.fold_left add_trace_block empty_trace blocks in
       { summary with
@@ -939,7 +950,7 @@ let trace_summary_of fields =
    the same way the dashboard's block normalizer requires it -- without it the
    pointer has nothing to point at. *)
 let fusion_conclusions_of fields =
-  match List.assoc_opt "blocks" fields with
+  match assoc_opt "blocks" fields with
   | Some (`List blocks) ->
       List.filter_map
         (fun block ->
@@ -992,7 +1003,7 @@ let decode_skill_activation = function
   | `Assoc fields ->
       let ( let* ) = Result.bind in
       let* identity =
-        match List.assoc_opt "identity" fields with
+        match assoc_opt "identity" fields with
         | Some (`Assoc identity) -> Ok identity
         | Some _ | None -> Error "Skill activation identity is not an object"
       in
@@ -1002,7 +1013,7 @@ let decode_skill_activation = function
       let* content_revision = required_string fields "content_revision" in
       let* runtime_id = required_string fields "runtime_id" in
       let* actions =
-        match List.assoc_opt "actions" fields with
+        match assoc_opt "actions" fields with
         | Some (`List actions) ->
             List.fold_left
               (fun result action ->
@@ -1014,7 +1025,7 @@ let decode_skill_activation = function
         | Some _ | None -> Error "Skill activation actions is not a list"
       in
       let* delivered =
-        match List.assoc_opt "delivery" fields with
+        match assoc_opt "delivery" fields with
         | Some `Null -> Ok false
         | Some (`Assoc _) -> Ok true
         | Some _ | None -> Error "Skill activation delivery is invalid"
@@ -1023,7 +1034,7 @@ let decode_skill_activation = function
          invocation_to_yojson]): a kind it does not write is a row this
          build cannot read, not a read. *)
       let* invocation =
-        match List.assoc_opt "invocation" fields with
+        match assoc_opt "invocation" fields with
         | Some (`Assoc invocation) -> (
             match string_field invocation "kind" with
             | Some "instruction" -> Ok Transcript.Instruction_read
@@ -1047,7 +1058,7 @@ let decode_skill_activation = function
       Error "Skill activation is not an object"
 
 let skill_projection_of_fields fields =
-  match List.assoc_opt "skill_activations" fields with
+  match assoc_opt "skill_activations" fields with
   | None | Some `Null -> no_skill_projection
   | Some (`Assoc projection) ->
       let schema = string_field projection "schema" in
@@ -1061,7 +1072,7 @@ let skill_projection_of_fields fields =
       else
         (match status with
          | Some "available" ->
-             (match List.assoc_opt "activations" projection with
+             (match assoc_opt "activations" projection with
               | Some (`List activations) ->
                   let decoded = List.map decode_skill_activation activations in
                   let activities =
@@ -1325,13 +1336,13 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
                    Absent or unrecognised authority stays unresolved rather
                    than defaulting to the reader: calling someone else "you"
                    is the one wrong answer with no way back. *)
-                (match List.assoc_opt "speaker_authority" fields with
+                (match assoc_opt "speaker_authority" fields with
                  | Some (`String "owner") -> Operator
                  | Some (`String _) | Some _ | None ->
                      Unresolved { id = speaker_id })
           in
           let surface =
-            match List.assoc_opt "surface" fields with
+            match assoc_opt "surface" fields with
             | None | Some `Null -> None
             | Some json -> surface_of_json json
           in
@@ -1355,7 +1366,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
              dispatched; the other producers get [None] rather than a
              borrowed id. *)
           let origin_request_id =
-            match List.assoc_opt "delivery_key" fields with
+            match assoc_opt "delivery_key" fields with
             | Some (`Assoc key_fields) -> (
                 match string_field key_fields "kind" with
                 | Some "operation" -> string_field key_fields "operation_id"
@@ -1384,7 +1395,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
                    | None -> Option.map (fun id -> Masc_tui_keeper_chat_log.Operation id) origin_request_id)
               ; kind = Delivery_failed { origin_request_id; recovered_at = None }
               ; text = content
-              ; media = (match List.assoc_opt "blocks" fields with
+              ; media = (match assoc_opt "blocks" fields with
                   | Some blocks -> Masc_tui_chat_media.of_json blocks | None -> [])
               ; attachments = attachment_notes_of fields
               }
@@ -1405,7 +1416,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
              -- but its calls are already in the transcript as
              [role: "tool"] rows, and reading both drew every call twice. *)
           let autonomous =
-            match List.assoc_opt "autonomous_turn" fields with
+            match assoc_opt "autonomous_turn" fields with
             | Some (`Assoc _) -> true
             | Some _ | None -> false
           in
@@ -1448,7 +1459,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
                   ~operation_id ~execution_source at skill_projection
               , [] )
           in
-          let media = match List.assoc_opt "blocks" fields with
+          let media = match assoc_opt "blocks" fields with
             | Some blocks -> Masc_tui_chat_media.of_json blocks | None -> [] in
           let said =
             (* An autonomous turn that wrote nothing has nothing to say.
@@ -1508,7 +1519,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
              -- is an undecodable row and is dropped and counted like any
              other, never filed under Memory where it would hide. *)
           let kind =
-            match List.assoc_opt "approval_lifecycle" fields with
+            match assoc_opt "approval_lifecycle" fields with
             | None ->
                 Some
                   (Memory_activity
@@ -1723,7 +1734,7 @@ type page =
 let page_of_json (payload : Yojson.Safe.t) =
   match payload with
   | `Assoc fields -> (
-      match List.assoc_opt "messages" fields with
+      match assoc_opt "messages" fields with
       | Some (`List _ as messages) -> (
           match rows_of_json messages with
           | Error _ as error -> error
@@ -1734,11 +1745,11 @@ let page_of_json (payload : Yojson.Safe.t) =
                      leave the pane offering a page the server never promised,
                      and every request for it would come back empty. *)
                   has_more =
-                    (match List.assoc_opt "has_more" fields with
+                    (match assoc_opt "has_more" fields with
                      | Some (`Bool value) -> value
                      | Some _ | None -> false)
                 ; next_before =
-                    (match List.assoc_opt "next_before" fields with
+                    (match assoc_opt "next_before" fields with
                      | Some (`Float value) -> Some value
                      | Some (`Int value) -> Some (float_of_int value)
                      | Some _ | None -> None)

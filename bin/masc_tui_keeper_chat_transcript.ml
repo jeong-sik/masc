@@ -2509,8 +2509,19 @@ let note_tool_outcome t ~execution_id ~outcome ~duration =
         | Some _ -> { updated with duration }
         | None -> updated
       in
-      update_local_call t call.local_id (fun _ -> updated);
-      bump t;
+      (* The same facts arrive again with every page of rows, and a held
+         block is redrawn whenever the revision moves, so a repeat that says
+         nothing new leaves it alone. *)
+      let changed =
+        updated.ended <> call.ended
+        || updated.result_ready <> call.result_ready
+        || updated.failed <> call.failed
+        || updated.duration <> call.duration
+      in
+      if changed then begin
+        update_local_call t call.local_id (fun _ -> updated);
+        bump t
+      end;
       true
 
 (* What the durable record knows about a skill read that the wire has no
@@ -2541,15 +2552,24 @@ let note_skill_activity t (evidence : skill_activity) =
             List.exists (fun (noted_key, _) -> noted_key = key)
               t.noted_skills
           in
-          t.noted_skills <-
-            (if known then
-               List.map
-                 (fun (noted_key, noted) ->
-                   if noted_key = key then (noted_key, evidence)
-                   else (noted_key, noted))
-                 t.noted_skills
-             else t.noted_skills @ [ (key, evidence) ]);
-          bump t)
+          (* Replaying the record already held changes nothing a held block
+             draws, so the revision stays where it was. *)
+          let repeat =
+            List.exists
+              (fun (noted_key, noted) -> noted_key = key && noted = evidence)
+              t.noted_skills
+          in
+          if not repeat then begin
+            t.noted_skills <-
+              (if known then
+                 List.map
+                   (fun (noted_key, noted) ->
+                     if noted_key = key then (noted_key, evidence)
+                     else (noted_key, noted))
+                   t.noted_skills
+               else t.noted_skills @ [ (key, evidence) ]);
+            bump t
+          end)
 
 let turn_status_text ~reply ~turn_ref (outcome : Masc.Keeper_turn_outcome.t) =
   match outcome with

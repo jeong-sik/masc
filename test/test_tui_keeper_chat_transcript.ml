@@ -155,6 +155,38 @@ let test_drawn_follows_every_mutation_of_the_transcript () =
   same "after a noted skill delivery" reference
 ;;
 
+let test_a_repeated_note_leaves_the_revision_alone () =
+  let t = fresh () in
+  feed t (Live.Run_started :: read_file_call);
+  let moved label f expected =
+    let before = Transcript.revision t in
+    f ();
+    check bool label expected (Transcript.revision t <> before)
+  in
+  let outcome duration () =
+    ignore
+      (Transcript.note_tool_outcome t ~execution_id:"exec-c1"
+         ~outcome:Transcript.Returned ~duration:(Some duration)
+       : bool)
+  in
+  moved "a new outcome moves the revision" (outcome "1.5s") true;
+  moved "the same outcome again does not" (outcome "1.5s") false;
+  moved "a different duration does" (outcome "2s") true;
+  let skill = missing_skill_activity () in
+  moved "a new skill delivery moves the revision"
+    (fun () -> Transcript.note_skill_activity t skill) true;
+  moved "the same delivery again does not"
+    (fun () -> Transcript.note_skill_activity t skill) false;
+  moved "a changed record does"
+    (fun () ->
+      Transcript.note_skill_activity t
+        (Transcript.make_skill_activity ~invocation:Transcript.Instruction_read
+           ~skill_name:"source-review" ~skill_tool_use_id:"missing-read"
+           ~turn_ref:"trace-1#3" ~state:Transcript.Skill_delivered
+           ~actions:[ "read" ] ()))
+    true
+;;
+
 let test_text_and_thinking_accumulate () =
   let t = fresh () in
   feed t
@@ -2241,6 +2273,8 @@ let () =
             test_new_attempt_does_not_inherit_previous_runtime
         ; test_case "drawn items carry superseded runtime id" `Quick
             test_drawn_items_carry_superseded_runtime_id
+        ; test_case "a repeated note leaves the revision alone" `Quick
+            test_a_repeated_note_leaves_the_revision_alone
         ; test_case "drawn follows every mutation of the transcript" `Quick
             test_drawn_follows_every_mutation_of_the_transcript
         ] )

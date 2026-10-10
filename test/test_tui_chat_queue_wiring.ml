@@ -4319,6 +4319,61 @@ let test_batch_watchers_render_one_shared_settled_turn () =
     "unrelated-request" (Tui_types.turn_log_execution_id invalid)
 ;;
 
+let test_older_page_keeps_the_blocks_it_did_not_change () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous = Masc_tui_ansi.get_terminal_size () in
+  let set_size size = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+      cache ~probe:(fun () -> Some size)) in
+  Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
+    set_size (65, 140);
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+    state.msg_target_keeper_name <- Some "alpha";
+    state.msg_origin_display <- Masc_tui_message_layout.Origin_inline;
+    state.msg_loaded_keeper <- Some "alpha";
+    let row i =
+      chat_entry ~request_id:(Printf.sprintf "req-%03d" (i / 2))
+        ~role:(if i mod 2 = 0
+               then Tui_types.Message_user (Tui_types.Sent_by_operator {surface=None})
+               else Tui_types.Message_keeper)
+        ~text:(Printf.sprintf "row %d" i) ~at:(100. +. float_of_int i) () in
+    let newer = List.init 6 (fun i -> row (i + 10)) in
+    let older = List.init 10 row in
+    let log = Tui_types.turn_log_create ~keeper_name:"alpha"
+        ~request_id:"req-013" ~started_at:113.5 in
+    Tui_types.turn_log_add ~now:113.5 log ~seq:(Some 0) Live.Run_started;
+    Tui_types.turn_log_add ~now:114. log ~seq:(Some 1) (visible_reply "BLOCK_ANSWER");
+    Tui_types.turn_log_add ~now:114. log ~seq:(Some 2) Live.Run_finished;
+    Log.commit log.Tui_types.tl_log;
+    (* A turn with no recorded moment and no committed row of its own is
+       placed by position alone, which is what an older page moves. *)
+    let unplaced = Tui_types.turn_log_create ~keeper_name:"alpha"
+        ~request_id:"req-unplaced" ~started_at:0. in
+    Tui_types.turn_log_add ~now:0. unplaced ~seq:(Some 0) Live.Run_started;
+    Tui_types.turn_log_add ~now:0. unplaced ~seq:(Some 1) (visible_reply "UNPLACED_ANSWER");
+    Tui_types.turn_log_add ~now:0. unplaced ~seq:(Some 2) Live.Run_finished;
+    Log.commit unplaced.Tui_types.tl_log;
+    state.msg_settled_logs <- [unplaced; log];
+    let screen () =
+      let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+      List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines in
+    state.msg_loaded <- newer;
+    let before = screen () in
+    check bool "block is drawn" true
+      (List.exists (Astring.String.is_infix ~affix:"BLOCK_ANSWER") before);
+    state.msg_loaded <- older @ newer;
+    let shifted = screen () in
+    (* A different width misses every memo; the first width again rebuilds
+       the block with nothing carried. *)
+    set_size (65, 141);
+    ignore (screen ());
+    set_size (65, 140);
+    let fresh = screen () in
+    check bool "block is still drawn after the page" true
+      (List.exists (Astring.String.is_infix ~affix:"BLOCK_ANSWER") shifted);
+    check (list string) "carried block draws what a rebuild draws" fresh shifted)
+
 let test_older_page_keeps_the_entries_it_moved_down () =
   let cache = Masc_tui_ansi.terminal_size_cache in
   let previous = Masc_tui_ansi.get_terminal_size () in
@@ -5211,6 +5266,7 @@ let () =
         ; test_case "history and renderer share inflight candidates" `Quick
             test_history_and_renderer_share_all_inflight_candidates
         ; test_case "batch watchers render one shared turn" `Quick test_batch_watchers_render_one_shared_settled_turn
+        ; test_case "older page keeps the blocks it did not change" `Quick test_older_page_keeps_the_blocks_it_did_not_change
         ; test_case "older page keeps the entries it moved down" `Quick test_older_page_keeps_the_entries_it_moved_down
         ; test_case "batch reply follows all original inputs" `Quick test_batch_reply_follows_all_original_inputs
         ; test_case "observed checkpoint retains earlier output" `Quick test_observed_checkpoint_retains_earlier_output

@@ -2495,8 +2495,8 @@ type settled_block_memo = {
   sbm_failure_in_live_status : bool;
   sbm_revision : int;
   sbm_member_ids : string list;
-  sbm_timeline : (Masc_tui_types.msg_entry * float option) list;
-  sbm_messages : Masc_tui_types.msg_entry list;
+  sbm_timeline_at : float option;
+  sbm_committed_error : bool;
   sbm_reasoning : reasoning_visibility;
   sbm_tools : tool_visibility;
   sbm_calls_keeper : string option;
@@ -2982,6 +2982,19 @@ let render_keeper_message (state : state) =
         member_ids_of ~execution_id:(Masc_tui_types.turn_log_execution_id turn_log)
       in
       let revision = Keeper_chat_transcript.revision turn_log.tl_transcript in
+      (* What the committed rows say about this log is the moment it sits at
+         and whether one of them is its error. The block's rows read those two
+         and nothing else of the conversation; where the block goes
+         ([insertion]) is a position, and an older page moving every row down
+         moves it too without touching a row of the block. Keyed on the two
+         values, a page landing keeps every block it did not change. *)
+      let { Masc_tui_types.clt_committed_error = committed_error
+          ; clt_timeline_at = timeline_at
+          ; clt_insertion = insertion } =
+        Masc_tui_types.chat_log_timeline_context timeline_index ~member_ids
+          ~request_id:(Masc_tui_types.turn_log_execution_id turn_log)
+          ~started_at:(Keeper_chat_transcript.started_at turn_log.tl_transcript)
+      in
       let palette_generation =
         Masc_tui_terminal_palette.snapshot_generation
           (Masc_tui_terminal_palette.snapshot ())
@@ -2993,8 +3006,8 @@ let render_keeper_message (state : state) =
              && memo.sbm_failure_in_live_status = failure_in_live_status turn_log
              && memo.sbm_revision = revision
              && memo.sbm_member_ids = member_ids
-             && memo.sbm_timeline == committed_visible_timeline
-             && memo.sbm_messages == committed_timeline_messages
+             && Option.equal Float.equal memo.sbm_timeline_at timeline_at
+             && Bool.equal memo.sbm_committed_error committed_error
              && memo.sbm_reasoning = state.msg_reasoning_visibility
              && memo.sbm_tools = state.msg_tool_visibility
              && memo.sbm_calls_keeper = state.keeper_calls_keeper
@@ -3005,7 +3018,13 @@ let render_keeper_message (state : state) =
              && memo.sbm_file_change_index == state.msg_file_change_index
              && memo.sbm_palette_generation = palette_generation
              && memo.sbm_chat_cols = chat_cols ->
-          memo.sbm_block
+          if memo.sbm_block.lb_insertion = insertion then memo.sbm_block
+          else begin
+            let block = { memo.sbm_block with lb_insertion = insertion } in
+            Hashtbl.replace settled_block_memo key
+              { memo with sbm_block = block };
+            block
+          end
       | Some _ | None ->
           let block = log_projection ~committed turn_log in
           Hashtbl.replace settled_block_memo key
@@ -3014,8 +3033,8 @@ let render_keeper_message (state : state) =
               sbm_failure_in_live_status = failure_in_live_status turn_log;
               sbm_revision = revision;
               sbm_member_ids = member_ids;
-              sbm_timeline = committed_visible_timeline;
-              sbm_messages = committed_timeline_messages;
+              sbm_timeline_at = timeline_at;
+              sbm_committed_error = committed_error;
               sbm_reasoning = state.msg_reasoning_visibility;
               sbm_tools = state.msg_tool_visibility;
               sbm_calls_keeper = state.keeper_calls_keeper;

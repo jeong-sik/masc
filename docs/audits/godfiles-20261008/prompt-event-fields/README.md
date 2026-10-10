@@ -15,7 +15,7 @@ Focused builds completed exit 0:
 Wake-turn context was compiled only; its suite was not run.
 
 Delegate executable `--color=never`: 10 PASS, run HNV97B24, exit 0.
-Initial surface executable (with MASC_CONFIG_DIR pointing at the checkout's config): 25 PASS/18 FAIL, run 2JT7M23M, exit 1. Prompt_defaults.init obtains the effective Prompt_registry directory, which can resolve an explicit registration or the Dune source-root fallback. This direct execution had no effective directory supplying the templates; the fixture did not register its assets. MASC_CONFIG_DIR alone did not register them. The failing overview is retained in surface-initial.output; the historical executable hash was not captured.
+Initial surface executable (with MASC_CONFIG_DIR pointing at the checkout's config): 25 PASS/18 FAIL, run 2JT7M23M, exit 1. Prompt_defaults.init obtains the effective Prompt_registry directory, which can resolve an explicit registration or the Dune source-root fallback. This direct execution had no effective directory supplying the templates; the fixture did not register its assets. MASC_CONFIG_DIR alone did not register them. The failing overview is retained in surface-initial.output.
 
 The fixture now unpacks Embedded_config prompts into a new temporary directory with Managed_asset_sync.No_edit_layer, checks installation failures, explicitly registers that directory, initializes the catalog and cleans the temporary assets at exit. It matches actual catalog bootstrap and uses no live prompt overrides or Keeper state. Production rendering and test assertions were unchanged.
 

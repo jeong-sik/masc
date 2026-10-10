@@ -16,10 +16,6 @@
       "executed": 6
     }
   ],
-  "executables": {
-    "_build/default/test/test_keeper_turn_driver_accept.exe": "3b07695a19104a951cfaf9b876c8a90e571b4fe5d41bfa9acb49766987980d11",
-    "_build/default/test/test_keeper_turn_driver_failover.exe": "bf62764b66d5f93069e9b614130ea5f932ccd7ebdc388776791b0d979fe0f513"
-  },
   "driver_lines_before": 3290,
   "driver_lines_after": 3234,
   "scope": "focused compilation and selected existing scenarios, including loopback-refusal driver dispatch; no live provider or deployment"

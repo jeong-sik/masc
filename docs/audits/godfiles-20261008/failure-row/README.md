@@ -2,7 +2,6 @@
 
 Parent source: `e4ef766db26ef86065b37f6a2105404e60bba495` (#41890).
 Issue: [#41857](https://github.com/jeong-sik/masc/issues/41857).
-Submitted source: [source-sha256.json](source-sha256.json).
 
 Keeper speech is an `assistant` row. A failed request is a server-owned
 `request_failure` row. There is no independent row `kind`, `Row_kind` module,
@@ -33,7 +32,7 @@ queue, operation or running process.
 | Dashboard history, rendering, transport schema and delivery state | Five focused Vitest files | 540 passed; final renderer subset 11 passed |
 | Dashboard action/provenance consumers | Two focused Vitest files | 81 passed |
 | TypeScript contracts | `pnpm --dir dashboard typecheck` | passed |
-| Current TUI executable | focused Dune build | [tui-build.json](tui-build.json) records command, exit and binary SHA256 |
+| Current TUI executable | focused Dune build | [tui-build.json](tui-build.json) records command and exit |
 | Dashboard rendering | production component browser fixture | default workspace visibility filter applied; image decoded, audio played, failure displayed as System, diagnostics expanded/collapsed/copied; [browser.json](browser.json) |
 
 Raw logs are in this directory. The browser receipt and

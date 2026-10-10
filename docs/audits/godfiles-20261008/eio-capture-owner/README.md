@@ -52,9 +52,7 @@ was strengthened. Redirect/publication production and test inputs, and their
 executables, were unchanged during that test-only enhancement; the final build
 includes all three targets. Earlier builds and 29-case/one-case runs are labeled
 intermediate receipts, not substituted for current coverage evidence. Stored logs
-normalize trailing whitespace. [source-sha256.json](source-sha256.json) records six
-changed source/build files and five inspected direct consumer/dependency sources;
-checks record the three executable identities.
+normalize trailing whitespace.
 
 [extraction-comparison.json](extraction-comparison.json) records eleven bounded
 helper comparisons against the parent. Comment/whitespace normalization is explicit;

@@ -35,7 +35,6 @@
   ],
   "unique_cases": 27,
   "total_executions": 27,
-  "executable_sha256": "6d166d7efbb4f0c753aa4d019f1ad1e56db76c57a21244b2b59c0d74824792ef",
   "intermediate_builds": [
     {
       "log": "red-build.log",
@@ -86,7 +85,6 @@
     ],
     "unique_cases": 27,
     "total_executions": 28,
-    "executable_sha256": "45c864f443c53f1d0c202a987b2712274dc55f478c2ef74ff570300f6d9f7a30",
     "logs_prefix": "pre-review-"
   },
   "review_reproduction": {

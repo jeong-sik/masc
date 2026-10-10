@@ -36,8 +36,7 @@ candidate's view/cache/storage/transition audit.
 | Partition types → exact-flow/worker consumer | Focused exact-flow target compilation | Compiled; adapter/provider-flow cases were not executed |
 
 Both focused executables compiled. [checks.json](checks.json) records terminal
-results, commands and executable hashes; [source-sha256.json](source-sha256.json)
-records changed files and direct consumer/codec context. Compiler sources and
+results and commands. Compiler sources and
 diagnostics are in [api-probes/checks.json](api-probes/checks.json). Those probes
 use built CMIs including internal paths: they establish public nominal/private
 boundaries, not private namespace exclusion or library installation.
@@ -47,8 +46,7 @@ No tests were added to mirror the extraction or implementation layout.
 
 The parent branch was externally rewritten while this slice was being published.
 Its tree delta is limited to TUI retained-media/input code and related fixtures;
-the partition source/interface and all 12 recorded source/context hashes are
-unchanged. The two local slice commits were preserved on a checkpoint branch
+the partition source/interface is unchanged. The two local slice commits were preserved on a checkpoint branch
 and rebased onto the actual parent. Original validation receipts remain recorded
 separately from focused checks on the new combined inputs.
 

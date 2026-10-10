@@ -23,8 +23,7 @@
     },
     {
       "command": "opam exec -- dune build --root . -j 4 bin/masc_tui.exe",
-      "exit_code": 0,
-      "binary_sha256": "d93b635b43f0a33bfc16db2c6b60484c2689524fee5470cb1030420e969dcf08"
+      "exit_code": 0
     }
   ]
 }

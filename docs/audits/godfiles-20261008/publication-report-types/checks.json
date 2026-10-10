@@ -11,9 +11,6 @@
       "executed": 14
     }
   ],
-  "executables": {
-    "_build/default/test/test_fs_compat_publication_reconciliation.exe": "a30de342449343525d5d748fad256183ceb5a8b90926ef2584e47851f528bff6"
-  },
   "atomic_write_lines_before": 2773,
   "atomic_write_lines_after": 2640,
   "scope": "focused compilation and existing isolated recovery evidence scenarios; other groups, full CI and live runtime remain unverified"

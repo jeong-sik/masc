@@ -25,10 +25,5 @@
     "target": "_build/default/test/test_lane_addon_live_route.exe",
     "reason": "Compiles the changed HTTP route consumer. Its live machine route scenarios do not exercise declaration read/save and were not run."
   },
-  "executable_sha256": {
-    "_build/default/test/test_lane_addon_declaration.exe": "5c683f934c5eca22279081cfd4ca669a56425796bfec6d8e7f9cefef336081e1",
-    "_build/default/test/test_lane_addon_composition.exe": "143095ab5870a5be13620320dd866620e0e3fdf107870a426f26cb33c0f50027",
-    "_build/default/test/test_lane_addon_live_route.exe": "d3bd93c2a0bdb2c326cdb8e40f5df0165e3c6cd34a103b9433cbf06300cd6826"
-  },
   "scope": "Focused macOS compilation and isolated real TOML/ownership/CAS flows with fake external workers; no live Keeper/provider, HTTP behavior execution, UI, CI, installation or deployment proof."
 }

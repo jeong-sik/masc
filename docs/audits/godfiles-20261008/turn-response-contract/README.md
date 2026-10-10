@@ -25,7 +25,7 @@ history.
 | Response normalization | `run_turn` after provider result; accept suite | 43 passed |
 | Muse source prompt assets | Muse runtime suite | 59 passed |
 
-[checks.json](checks.json) records the commands, exit codes and executable hashes.
+[checks.json](checks.json) records the commands and exit codes.
 The full-tree `@check` build passed at this commit.
 
 ## Muse fixture preparation
@@ -40,8 +40,6 @@ prompt directory. It now uses `Masc_test_deps.source_path` and
 
 ## Scope
 
-[source-sha256.json](source-sha256.json) fingerprints the changed source and the
-unchanged response/error helpers consulted for purity and semantics. Full test
-suites other than the two above, CI, deployment and live runtime are unverified
-here. Other orchestration, transcript admission, hook, trace and checkpoint
-responsibilities remain pending.
+Full test suites other than the two above, CI, deployment and live runtime are
+unverified here. Other orchestration, transcript admission, hook, trace and
+checkpoint responsibilities remain pending.

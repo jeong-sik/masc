@@ -35,8 +35,7 @@ The final path is:
 
 The public `Fs_compat.Publication_recovery` surface, authoritative reconciler,
 structured JSON/diagnostic projection, codecs, stored evidence, and recovery
-mutation implementations are unchanged. Their source fingerprints are recorded
-alongside the changed files in [source-sha256.json](source-sha256.json).
+mutation implementations are unchanged.
 
 The operator authorized these narrow local checks:
 
@@ -45,8 +44,8 @@ The operator authorized these narrow local checks:
 | Removed internal variants/projections and test-support exports | focused build of `test_fs_compat_publication_reconciliation.exe` | Exit 0; [build.log](build.log), empty successful output |
 | Canonical row and diagnostic consumer | existing `recovery evidence preservation` group | 14 cases passed; [recovery.log](recovery.log) |
 
-[checks.json](checks.json) records commands, terminal exit codes, base SHA and
-executable hash. The 14 cases cover prepared and bound recovery, root mismatch,
+[checks.json](checks.json) records commands, terminal exit codes and base SHA.
+The 14 cases cover prepared and bound recovery, root mismatch,
 forensic record round-tripping, corrupt/invalid records, transition failure,
 unavailable inventory, preserved lane residue, unchanged directory permissions,
 and corrupt payload/privacy evidence. Skipped incremental inventory cases are

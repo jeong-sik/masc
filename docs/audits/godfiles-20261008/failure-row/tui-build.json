@@ -10,6 +10,5 @@
     "bin/masc_tui.exe"
   ],
   "exit_code": 0,
-  "elapsed_seconds": 15.54,
-  "binary_sha256": "152391075a63d5e1fbd6576abe25a72d4aab5ee1e7589bd9e5fb3a732aa75bd3"
+  "elapsed_seconds": 15.54
 }

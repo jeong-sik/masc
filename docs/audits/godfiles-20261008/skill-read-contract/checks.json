@@ -1,7 +1,6 @@
 {
   "code_head": "60ee82980a21cc6038ae70dea48461fe9add02cc",
   "base": "aa503fd160f2c2ba5f3405756412bd5120c33c3a",
-  "source_diff": "504abac49f22bcf1a8abd24a91115746d6b1481943b6606d390e91abf762515e",
   "initial_build_error": "Unbound module Skill_source_config in masc_tui_http; added direct masc.skill_config dependency to the TUI executable",
   "build": {
     "command": "opam exec -- dune build bin/.masc_tui.eobjs/byte/dune__exe__Masc_tui_http.cmo bin/.masc_tui.eobjs/byte/dune__exe__Masc_tui.cmo test/test_server_skill_editor.exe",

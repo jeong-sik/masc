@@ -16,8 +16,7 @@ The driver and affected tests call the actual owner directly. The old
 only reader tested that the already-held input was copied into the output.
 The provider-result parameter remains necessary to compute the turn result.
 Provider observations are emitted by `Keeper_turn_driver_try_provider` before
-it returns to the driver's replay adaptation; that path is unchanged and is
-included in the fingerprints.
+it returns to the driver's replay adaptation; that path is unchanged.
 
 The private result contains only the turn result and a separately produced valid
 checkpoint, which remains useful even on provider failure. Successful response
@@ -29,8 +28,7 @@ responsibilities and the full initial inventory remain pending.
 
 ## Executed checks
 
-[checks.json](checks.json) records the exact commands, exits, test counts and
-binary fingerprints. [source-sha256.json](source-sha256.json) records the source.
+[checks.json](checks.json) records the exact commands, exits and test counts.
 
 | Boundary | Actual target | Result |
 | --- | --- | --- |

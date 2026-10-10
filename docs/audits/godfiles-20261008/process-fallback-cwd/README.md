@@ -50,10 +50,10 @@ Eio error. The existing cancellation cleanup/reraise branch remains in place.
 | Foreground ownership and refusal | Existing fallback cases 2-14 and 16-19, including descendants, unrelated sibling, exit status and exceptional cleanup | 17 existing cases passed |
 | Shared C Eio branch and existing execution paths | Existing cancellation-propagation cases 0-4 and 8-9: cancellation, native cwd, stdin/streaming | 7 existing cases passed |
 
-[checks.json](checks.json) records exact commands, terminal results and executable
-identity. Final focused build succeeded. Twenty-seven unique cases passed in
+[checks.json](checks.json) records exact commands and terminal results.
+Final focused build succeeded. Twenty-seven unique cases passed in
 27 executions. The earlier pre-review selection executed new case 2 twice;
-its 28 executions and earlier executable identity are retained separately.
+its 28 executions are retained separately.
 Skipped cases are not counted. The initial red check contains two failures; the third
 bind-fallback scenario and exact errno assertions were added before final checking.
 The strengthened refusal case directly verifies NUL and permission denial on
@@ -65,8 +65,6 @@ cancellation branch, and another caught the test manager's abstract platform tag
 Both were corrected before the final build and all passing selections. An earlier
 successful intermediate build does not certify the final source.
 Stored terminal logs normalize trailing whitespace; diagnostic content is retained.
-[source-sha256.json](source-sha256.json) fingerprints all six changed source files
-and three unchanged dependencies inspected for the effect boundary.
 
 ## Remaining scope
 

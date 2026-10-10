@@ -35,17 +35,15 @@ below 2,000 lines does not finish the remaining responsibility audit.
 
 Both focused executables compiled. Other queue cases were skipped by selection;
 this is not a whole queue-suite result. [checks.json](checks.json) records terminal
-commands and executable hashes; [source-sha256.json](source-sha256.json) records
-11 source/context inputs. [extraction-comparison.json](extraction-comparison.json)
+commands. [extraction-comparison.json](extraction-comparison.json)
 records body/public-interface equivalence. No tests were added to mirror the
 implementation or extraction layout.
 
-The first compile failed on record-label inference. Its terminal receipt, log
-and inputs are retained separately in [initial-checks.json](initial-checks.json)
-and [initial-source-sha256.json](initial-source-sha256.json). The focused compile
+The first compile failed on record-label inference. Its terminal receipt and log
+are retained separately in [initial-checks.json](initial-checks.json). The focused compile
 and all 33 executed cases succeeded after the annotation repair. A subsequent
-EOF blank-line cleanup was compiled against both targets; both executable hashes
-were identical to the tested binaries, so those cases were not rerun.
+EOF blank-line cleanup was compiled against both targets; those cases were not
+rerun.
 
 ## Scope
 

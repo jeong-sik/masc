@@ -33,8 +33,7 @@ candidate's storage, WAL, discovery, quarantine, cache and transition audit.
 | Queue JSON → health actionability | Existing fixture-based health consumer: unavailable, operator standing decisions, lifecycle classes and read-error reasons | 13 Alcotest cases passed |
 
 All three executables built successfully. [checks.json](checks.json) records exact
-commands, terminal results and executable hashes. [source-sha256.json](source-sha256.json)
-records changed inputs and the direct consumer/purity context. The health fixtures
+commands and terminal results. The health fixtures
 verify its policy separately; they are not a deployed end-to-end health check.
 The old root `test/test_keeper_event_queue.ml` fleet snippets were consulted but
 are not a registered current target and were not executed.

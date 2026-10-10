@@ -7,8 +7,8 @@ This campaign covers tracked code files with at least 2,000 lines. The initial
 inventory contains 171 candidates: 75 production source/style/interface files,
 90 tests, 3 tooling files and 3 evidence scripts. `inventory.json` records each
 baseline path and its current audit state. A line count selects candidates; it
-is not a defect verdict or a new build gate. Seventeen production candidates received
-bounded changes; their other responsibilities remain pending. The other 58
+is not a defect verdict or a new build gate. Eighteen production candidates received
+bounded changes; their other responsibilities remain pending. The other 57
 production candidates still require semantic review. All 171 candidates remain
 in the campaign until their responsibilities and necessary repairs are assessed.
 
@@ -33,6 +33,7 @@ in the campaign until their responsibilities and necessary repairs are assessed.
 | [#41992](https://github.com/jeong-sik/masc/pull/41992) | HITL request/domain owner with explicit host/config acquisition before pure projection; shared HTTP/CLI captured bundle and direct test consumers | `hitl_summary_worker.ml/.mli`, HITL fixture |
 | [#42003](https://github.com/jeong-sik/masc/pull/42003) | Ignored fallback cwd repaired through owned directory FD; native/Eio refusal authority, shared path rule and redundant spawn forwarder removal | `process_eio.ml/.mli`, foreground owner and shared spawn C |
 | [#42013](https://github.com/jeong-sik/masc/pull/42013) | Eio foreground capture/cleanup effect owner; duplicate two-stream and pipeline drains removed; callback dispatch simplified and grace docs corrected | `process_eio.ml/.mli`, Eio capture owner, direct consumers |
+| [#42016](https://github.com/jeong-sik/masc/pull/42016) | Pure tool-schema contract owns strict decoding, projection and private construction; public signature and direct provider/MCP consumers preserved | `llm_provider/types.ml`, schema contract owner |
 
 The declared branch dependencies follow that order, starting at `main`.
 GitHub may group a subset into a native stack; inspect live membership rather
@@ -100,6 +101,9 @@ The Core check requires an approved leader-selected candidate under the current
 execution protocol; no selection receipt or approval is fabricated here.
 
 ## Next work
+
+Pure tool-schema contract ownership and decoder/wire/API-boundary evidence are
+recorded in [tool-schema-contract/README.md](tool-schema-contract/README.md).
 
 Eio foreground capture/cleanup ownership, shared drains and direct child-output
 checks are recorded in [eio-capture-owner/README.md](eio-capture-owner/README.md).

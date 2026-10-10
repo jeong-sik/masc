@@ -1,0 +1,113 @@
+{
+  "scope": "ocamlc consumes built CMIs including internal byte directory; not Dune installation evidence. Namespace alias probe is informational and does not force the private CMI.",
+  "probes": [
+    {
+      "case": "constructor",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "ocamlc",
+        "-I",
+        "/Users/dancer/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/_build/default/packages/agent_core/lib/llm_provider/.llm_provider.objs/byte",
+        "-I",
+        "/Users/dancer/.opam/5.5.1/lib/yojson",
+        "-c",
+        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schema-api-fst_nhzx/constructor.ml"
+      ],
+      "exit_code": 0,
+      "source": "let schema = Llm_provider.Types.tool_schema_of_params ~name:\"probe\" ~description:\"\" ~parameters:[] ()\n",
+      "log": "constructor.log"
+    },
+    {
+      "case": "fabricated",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "ocamlc",
+        "-I",
+        "/Users/dancer/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/_build/default/packages/agent_core/lib/llm_provider/.llm_provider.objs/byte",
+        "-I",
+        "/Users/dancer/.opam/5.5.1/lib/yojson",
+        "-c",
+        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schema-api-fst_nhzx/fabricated.ml"
+      ],
+      "exit_code": 2,
+      "source": "let schema : Llm_provider.Types.tool_schema = { name=\"probe\"; description=\"\"; parameters=[]; strict=None; input_schema=None }\n",
+      "log": "fabricated.log"
+    },
+    {
+      "case": "raw_decoder",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "ocamlc",
+        "-I",
+        "/Users/dancer/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/_build/default/packages/agent_core/lib/llm_provider/.llm_provider.objs/byte",
+        "-I",
+        "/Users/dancer/.opam/5.5.1/lib/yojson",
+        "-c",
+        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schema-api-fst_nhzx/raw_decoder.ml"
+      ],
+      "exit_code": 2,
+      "source": "let decode = Llm_provider.Types.tool_schema_of_yojson_fields\n",
+      "log": "raw_decoder.log"
+    },
+    {
+      "case": "private_namespace",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "ocamlc",
+        "-I",
+        "/Users/dancer/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/_build/default/packages/agent_core/lib/llm_provider/.llm_provider.objs/byte",
+        "-I",
+        "/Users/dancer/.opam/5.5.1/lib/yojson",
+        "-c",
+        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schema-api-fst_nhzx/private_namespace.ml"
+      ],
+      "exit_code": 0,
+      "source": "module Bypass = Llm_provider.Tool_schema_contract\n",
+      "log": "private_namespace.log"
+    },
+    {
+      "case": "owner_raw_decoder",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "ocamlc",
+        "-I",
+        "/Users/dancer/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/_build/default/packages/agent_core/lib/llm_provider/.llm_provider.objs/byte",
+        "-I",
+        "/Users/dancer/.opam/5.5.1/lib/yojson",
+        "-c",
+        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schema-api-fst_nhzx/owner_raw_decoder.ml"
+      ],
+      "exit_code": 2,
+      "source": "let decode = Llm_provider.Tool_schema_contract.tool_schema_of_yojson_fields\n",
+      "log": "owner_raw_decoder.log"
+    },
+    {
+      "case": "owner_fabricated",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "ocamlc",
+        "-I",
+        "/Users/dancer/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/_build/default/packages/agent_core/lib/llm_provider/.llm_provider.objs/byte",
+        "-I",
+        "/Users/dancer/.opam/5.5.1/lib/yojson",
+        "-c",
+        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schema-api-fst_nhzx/owner_fabricated.ml"
+      ],
+      "exit_code": 2,
+      "source": "let schema : Llm_provider.Tool_schema_contract.tool_schema = { name=\"probe\"; description=\"\"; parameters=[]; strict=None; input_schema=None }\n",
+      "log": "owner_fabricated.log"
+    }
+  ]
+}

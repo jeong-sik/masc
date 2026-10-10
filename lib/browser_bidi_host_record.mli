@@ -44,10 +44,21 @@ type session =
           ends it or that Firefox is restarted: the record does not say
           whether it is there now. *)
 
+(** Why the host left, where what the operator does next turns on it. *)
+type ended_because =
+  | Profile_not_kept of { expected : string; found : string option }
+      (** The host was started to keep a session only with a Firefox on the
+          profile [expected], and Firefox gave it one on [found], or did not
+          say which ([None]): the host ended that session. That port is
+          taken by another Firefox, which is closed before a Firefox on
+          [expected] can open it. Both paths are written as [reason] is. *)
+  | Reason_only  (** No next step turns on why; [reason] says it. *)
+
 type ending =
   { at : float
   ; reason : string
   ; session : session
+  ; because : ended_because
   }
 
 (** What became of a command whose result the host holds no acknowledgement
@@ -229,9 +240,11 @@ val unacknowledged_limit : int
 
 val note_unacknowledged : held -> unacknowledged -> (unit, write_failure) result
 
-(** The host is leaving in order. [reason] is written as printable ASCII: any
-    other byte as [\xNN], and what passes 512 bytes left out and marked. *)
-val ended : held -> reason:string -> session:session -> now:float -> (unit, write_failure) result
+(** The host is leaving in order. [reason], and each path [because] names,
+    is written as printable ASCII: any other byte as [\xNN], and what passes
+    512 bytes left out and marked. *)
+val ended :
+  held -> reason:string -> session:session -> because:ended_because -> now:float -> (unit, write_failure) result
 
 (** Gives the workspace up. A host does this as it leaves; the kernel does it
     for one that dies. Nothing is written through [held] afterwards. The
@@ -242,11 +255,12 @@ val release : held -> (unit, string) result
 (** Times are written to the nearest millisecond. *)
 val entry_to_json : entry -> Yojson.Safe.t
 
-(** Takes the fields of this layout and no others, with these three in the
-    form a host writes them: an address as it is recorded, a client ID the
-    lane takes, and a reason in printable ASCII, with [\xNN] only for a byte
-    a host does not write as it is, that is within the length a host keeps
-    or cut there and marked. That bounds what a reader passes on to one line of known
-    bytes; it does not judge what the line says. A time a host wrote is
-    written back as the same text. *)
+(** Takes the fields of this layout and no others, with these in the form a
+    host writes them: an address as it is recorded, a client ID the lane
+    takes, and a reason and each path an ending's [because] names in
+    printable ASCII, with [\xNN] only for a byte a host does not write as it
+    is, that is within the length a host keeps or cut there and marked. That
+    bounds what a reader passes on to one line of known bytes; it does not
+    judge what the line says. A time a host wrote is written back as the same
+    text. *)
 val entry_of_json : Yojson.Safe.t -> (entry, string) result

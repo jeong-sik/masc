@@ -91,7 +91,7 @@ let entry : Record.entry =
   }
 
 let ending : Record.ending =
-  { at = 1_791_000_060.; reason = "stopped by SIGINT"; session = Record.No_session_left }
+  { at = 1_791_000_060.; reason = "stopped by SIGINT"; session = Record.No_session_left; because = Record.Reason_only }
 
 let test_an_entry_reads_back_as_written () =
   List.iter
@@ -106,6 +106,15 @@ let test_an_entry_reads_back_as_written () =
       , { entry with ended = Some { ending with session = Session_unknown } } )
     ; ( "ended because Firefox refused it a session"
       , { entry with attached_at = None; ended = Some { ending with session = Session_refused } } )
+    ; ( "ended a session on another profile"
+      , { entry with
+          attached_at = None
+        ; ended =
+            Some { ending with because = Profile_not_kept { expected = "/keeper/profile"; found = Some "/everyday" } } } )
+    ; ( "ended a session on a Firefox that did not say its profile"
+      , { entry with
+          attached_at = None
+        ; ended = Some { ending with because = Profile_not_kept { expected = "/keeper/profile"; found = None } } } )
     ; ( "with results nothing acknowledged"
       , { entry with
           unacknowledged =
@@ -164,10 +173,10 @@ let test_a_layout_this_reader_does_not_know_is_refused () =
   (* Another layout is named as that, whatever fields it has. *)
   List.iter
     (fun (name, other) ->
-      check string name "written as layout 2; this reader knows 1" (refusal name (`Assoc other)))
-    [ "another layout with these fields", replaced "schema" (`Int 2) fields
+      check string name "written as layout 1; this reader knows 2" (refusal name (`Assoc other)))
+    [ "another layout with these fields", replaced "schema" (`Int 1) fields
     ; ( "another layout with other fields"
-      , ("heartbeat_at", `Null) :: List.remove_assoc "pid" (replaced "schema" (`Int 2) fields) )
+      , ("heartbeat_at", `Null) :: List.remove_assoc "pid" (replaced "schema" (`Int 1) fields) )
     ];
   let noted_fields =
     match List.assoc "unacknowledged" fields with
@@ -192,6 +201,17 @@ let test_a_layout_this_reader_does_not_know_is_refused () =
   refused "a session fate this reader does not know"
     (with_ending (replaced "session_in_firefox" (`String "closed")));
   refused "an ending that says whether, not what" (with_ending (replaced "session_in_firefox" (`Bool true)));
+  refused "an ending that does not say why" (with_ending (List.remove_assoc "because"));
+  let because json = with_ending (replaced "because" json) in
+  refused "a cause this reader does not know" (because (`Assoc [ "kind", `String "crashed" ]));
+  refused "a cause with a field its kind has not"
+    (because (`Assoc [ "kind", `String "reason_only"; "expected", `String "/keeper/profile" ]));
+  refused "another profile without the one expected"
+    (because (`Assoc [ "kind", `String "profile_not_kept"; "found", `String "/everyday" ]));
+  refused "a profile path a host never writes"
+    (because
+       (`Assoc [ "kind", `String "profile_not_kept"; "expected", `String "/keeper/profile"
+               ; "found", `String "/everyday\n\027[2J" ]));
   (* What a host never writes is not read as its word: the reason goes on to
      an operator and to a model, the address and the client ID to a screen. *)
   List.iter
@@ -388,7 +408,7 @@ let test_a_reader_follows_a_host_from_start_to_death () =
       check bool "without a server it does not claim the host polls one" true
         (String_util.contains_substring message "not observed here"));
      check bool "the observation every reader answers from carries the same state" true
-       (match (Status.observe ~base_path:base).record with
+       (match (Status.observe ~base_path:base ~configuration:None).record with
         | Record.Running _ -> true
         | Record.Never_started | Record.Record_missing_but_locked | Record.Ended _ | Record.Died _ | Record.Unreadable _ -> false);
      (* Asking needs no leave to write the lock file. *)
@@ -499,12 +519,12 @@ let test_a_host_writes_its_ending_and_the_next_replaces_it () =
   written (Record.note_unacknowledged first noted);
   written (Record.note_unacknowledged first later);
   written
-    (Record.ended first ~reason:"stopped by SIGINT" ~session:Record.Session_left ~now:1_791_000_060.);
+    (Record.ended first ~because:Record.Reason_only ~reason:"stopped by SIGINT" ~session:Record.Session_left ~now:1_791_000_060.);
   let record = on_disk lane in
   check bool "the ID it polled as last" true (record.client_id = renewed_client);
   check bool "its ending" true
     (record.ended
-     = Some { at = 1_791_000_060.; reason = "stopped by SIGINT"; session = Record.Session_left });
+     = Some { at = 1_791_000_060.; reason = "stopped by SIGINT"; session = Record.Session_left; because = Record.Reason_only });
   check bool "the results nothing acknowledged, oldest first" true (record.unacknowledged = [ noted; later ]);
   check state "an ending is read as one while its host still holds the lock"
     (Record.Ended (record, Option.get record.ended)) (Record.observe ~base_path:base);
@@ -523,7 +543,7 @@ let test_a_reason_is_written_as_printable_ascii () =
   with_workspace @@ fun ~base ~lane ->
   let reason_of said =
     let held = taken ~pid:100 base in
-    written (Record.ended held ~reason:said ~session:Record.No_session_left ~now:1_791_000_060.);
+    written (Record.ended held ~because:Record.Reason_only ~reason:said ~session:Record.No_session_left ~now:1_791_000_060.);
     released held;
     let raw = In_channel.with_open_bin (Filename.concat lane "bidi-host.json") In_channel.input_all in
     String.iter (fun byte -> if byte > '~' then failf "the record holds the byte %C" byte) raw;
@@ -537,6 +557,22 @@ let test_a_reason_is_written_as_printable_ascii () =
   let escaped = reason_of (String.make 600 '\xff') in
   check string "and is cut between bytes, not inside one" (String.concat "" (List.init 128 (fun _ -> "\\xFF")) ^ "...")
     escaped
+
+(* The profile paths of a cause come from the host's argument and from
+   Firefox, and go to the same readers as the reason. *)
+let test_a_causes_paths_are_written_as_the_reason_is () =
+  with_workspace @@ fun ~base ~lane ->
+  let held = taken ~pid:100 base in
+  written
+    (Record.ended held ~reason:"this Firefox runs the profile elsewhere" ~session:Record.No_session_left
+       ~because:(Record.Profile_not_kept { expected = "/keeper/profile"; found = Some "/every\xffday\n" })
+       ~now:1_791_000_060.);
+  released held;
+  match (Option.get (on_disk lane).ended).because with
+  | Record.Profile_not_kept { expected; found } ->
+    check string "the expected path" "/keeper/profile" expected;
+    check (option string) "the found path, its other bytes named" (Some "/every\\xFFday\\x0A") found
+  | Record.Reason_only -> fail "the cause was not kept"
 
 let test_the_address_is_kept_without_what_it_could_carry () =
   with_workspace @@ fun ~base ~lane ->
@@ -592,7 +628,7 @@ let test_a_lock_that_cannot_be_asked_costs_only_what_turns_on_it () =
      | Record.Unreadable { held = None; _ } -> ()
      | other -> failf "a record without an ending, its lock unasked, reads as %s" (said other));
     let again = taken ~pid:100 base in
-    written (Record.ended again ~reason:"stopped by SIGINT" ~session:Record.No_session_left ~now:1_791_000_060.);
+    written (Record.ended again ~because:Record.Reason_only ~reason:"stopped by SIGINT" ~session:Record.No_session_left ~now:1_791_000_060.);
     released again;
     (match unasked () with
      | Record.Ended (_, { reason; _ }) -> check string "the ending is read all the same" "stopped by SIGINT" reason
@@ -610,7 +646,7 @@ let test_a_host_that_cannot_write_its_record_leaves_the_last_one () =
     with_workspace @@ fun ~base ~lane ->
     let first = taken ~pid:100 base in
     written (Record.note_unacknowledged first noted);
-    written (Record.ended first ~reason:"stopped by SIGINT" ~session:Record.No_session_left ~now:1_791_000_060.);
+    written (Record.ended first ~because:Record.Reason_only ~reason:"stopped by SIGINT" ~session:Record.No_session_left ~now:1_791_000_060.);
     released first;
     let left = on_disk lane in
     Unix.chmod lane 0o500;
@@ -729,7 +765,7 @@ let test_a_host_that_cannot_archive_them_does_not_take_the_workspace () =
   with_workspace @@ fun ~base ~lane ->
   let first = taken ~pid:100 base in
   written (Record.note_unacknowledged first noted);
-  written (Record.ended first ~reason:"stopped by SIGINT" ~session:Record.No_session_left ~now:1_791_000_060.);
+  written (Record.ended first ~because:Record.Reason_only ~reason:"stopped by SIGINT" ~session:Record.No_session_left ~now:1_791_000_060.);
   released first;
   let left = on_disk lane in
   let archive = Record.unacknowledged_archive_path ~base_path:base in
@@ -841,6 +877,8 @@ let () =
               test_a_host_writes_its_ending_and_the_next_replaces_it
           ; test_case "a reason is written as printable ASCII" `Quick
               test_a_reason_is_written_as_printable_ascii
+          ; test_case "a cause's paths are written as the reason is" `Quick
+              test_a_causes_paths_are_written_as_the_reason_is
           ; test_case "a lock that cannot be asked costs only what turns on it" `Quick
               test_a_lock_that_cannot_be_asked_costs_only_what_turns_on_it
           ; test_case "the address is kept without what it could carry" `Quick

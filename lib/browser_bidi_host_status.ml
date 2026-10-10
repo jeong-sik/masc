@@ -1,20 +1,43 @@
 module Launcher = Browser_lane_launcher
 module Record = Browser_bidi_host_record
+module Start_record = Browser_keeper_firefox_start_record
+module Starter = Browser_keeper_firefox_starter
 
-type observation = { lane : Launcher.t; record : Record.state }
+type keeper =
+  | Masc_starts of { port : int; profile : string; last_start : Start_record.read }
+  | Lane_off
+  | Not_configured
+  | Not_known
 
-(* Reading the record and the launcher's files can let other fibers run.
-   The server is asked after both, so its connection list is the newest
+(* The live lane being off is said first, table or not: nothing starts
+   either way. *)
+let keeper_of_configuration ~base_path = function
+  | Some { Browser_configuration.live_enabled = false; _ } -> Lane_off
+  | Some { Browser_configuration.live_bidi = Some config; live_enabled = true; _ } ->
+      Masc_starts { port = config.port; profile = config.profile; last_start = Start_record.read ~base_path }
+  | Some { Browser_configuration.live_bidi = None; live_enabled = true; _ } -> Not_configured
+  | None -> Not_known
+
+type observation = { lane : Launcher.t; record : Record.state; keeper : keeper }
+
+(* Reading the records and the launcher's files can let other fibers run.
+   The server is asked after them, so its connection list is the newest
    thing in the observation: a host that attached during the reads is in
    it. *)
-let observe ~base_path =
+let observe ~base_path ~configuration =
   let record = Record.observe ~base_path in
+  let keeper = keeper_of_configuration ~base_path configuration in
   let lane = Launcher.observe ~base_path ~server:Launcher.Not_serving in
-  { lane = { lane with server = Launcher.current_server () }; record }
+  { lane = { lane with server = Launcher.current_server () }; record; keeper }
+
+let without_last_start observation =
+  match observation.keeper with
+  | Masc_starts started -> { observation with keeper = Masc_starts { started with last_start = Start_record.Absent } }
+  | Lane_off | Not_configured | Not_known -> observation
 
 (* A process that bound no listener was not asked for its connections, so
    they are listed here: once, either way. *)
-let listed_clients { lane; record = _ } =
+let listed_clients { lane; _ } =
   match lane.server with
   | Launcher.Serving { polling; _ } -> polling
   | Launcher.Not_serving -> Browser_lane.active_clients ()
@@ -114,7 +137,7 @@ let poll_of (t : Launcher.t) (entry : Record.entry) =
 
 type verdict = Host_absent | Host_serving | Host_unverified | Host_not_running | Host_unreadable
 
-let verdict { lane; record } =
+let verdict { lane; record; _ } =
   match record, lane.launcher with
   | Record.Never_started, Launcher.Not_installed -> Host_absent
   | ( Record.Never_started
@@ -195,14 +218,46 @@ let unacknowledged (t : Launcher.t) (entry : Record.entry) =
       in
       listed (Printf.sprintf "%d results" count) "for each " trim
 
+(* What the operator does once another Firefox holds the port a host was
+   given: the host ends a session on any other profile, so a Firefox on the
+   one kept for this cannot open that port until the other is closed. A host
+   given that profile is the one MASC starts for [browser.live.bidi]. *)
+let other_firefox_there t (entry : Record.entry) ~expected ~found =
+  let holder =
+    match found with
+    | Some found ->
+        Printf.sprintf
+          " The Firefox at that address runs the profile %s, and this host keeps a session only \
+           with a Firefox on %s, so it did not keep one there. Another Firefox holds that port: \
+           the operator quits it."
+          found expected
+    | None ->
+        Printf.sprintf
+          " The Firefox at that address did not say which profile it runs, and this host keeps a \
+           session only with a Firefox on %s, so it did not keep one there. Unless that Firefox is \
+           the one on %s, another Firefox holds that port, and the operator quits it."
+          expected expected
+  in
+  holder
+  ^ Printf.sprintf
+      " Then a server start, or a Keeper's next hover or drag, starts the Keeper Firefox and its \
+       host when runtime.toml has [browser.live.bidi] and [browser.live] is on; otherwise the \
+       operator starts Firefox with %s, then %s %s %s."
+      (firefox_at entry.bidi_url) (run_host t ~address:(Some entry.bidi_url)) firefox_profile_flag
+      (Filename.quote expected)
+
 (* What became of the last host's session decides what the operator does
    before the next one. A Firefox that holds a session refuses every host
    until that session's host ends it or the Firefox is restarted; one that
    holds none takes the next host as it is. A host that never got a session
-   left none, and what kept it from one is still there for the next. *)
+   left none, and what kept it from one is still there for the next. A host
+   that ended for a cause the next step turns on says that cause first. *)
 let next_host t (entry : Record.entry) (ending : Record.ending) =
   let run = run_host t ~address:(Some entry.bidi_url) in
   let firefox = firefox_at entry.bidi_url in
+  match ending.because with
+  | Record.Profile_not_kept { expected; found } -> other_firefox_there t entry ~expected ~found
+  | Record.Reason_only ->
   match entry.attached_at, ending.session with
   | Some _, No_session_left ->
       Printf.sprintf
@@ -242,7 +297,8 @@ let next_host t (entry : Record.entry) (ending : Record.ending) =
    apart by quotes, and a quote in it is marked. *)
 let quoted text = "\"" ^ String.concat "\\\"" (String.split_on_char '"' text) ^ "\""
 
-let message { lane = t; record } =
+(* The paragraph for a workspace whose operator starts Firefox and the host. *)
+let by_operator t record =
   match record with
   | Record.Never_started ->
       Printf.sprintf
@@ -308,15 +364,189 @@ let message { lane = t; record } =
       Printf.sprintf
         "Whether a BiDi browser host runs for this workspace could not be checked (%s)." detail
 
+(* When MASC's next start comes, where it starts them: at every server
+   start, and for every hover or drag a Keeper asks for that no listed
+   connection serves (RFC-browser-keeper-firefox §3.5). *)
+let next_start = "at the next server start, or when a Keeper next asks for hover or drag"
+
+(* MASC starts what is not running: the host alone for a port that
+   already answers. A launcher that is not there yet is installed first, as
+   {!steps} says. *)
+let masc_starts t ~port ~profile =
+  let starts =
+    Printf.sprintf
+      "MASC starts what is not running of the Keeper Firefox on port %d with the profile %s and its \
+       host, %s"
+      port profile next_start
+  in
+  match (attach_for t).standing with
+  | Launcher_installed -> starts
+  | Launcher_not_installed | Launcher_needs_reinstall -> "Once the browser lane is installed, " ^ starts
+
+(* MASC restarts only the Keeper Firefox it is shown to have started
+   (§3.5.4). *)
+let masc_restarts =
+  Printf.sprintf
+    "%s, MASC restarts the Keeper Firefox it started there, or starts it if it was closed, and starts \
+     its host; a Firefox MASC is not shown to have started, the operator quits first"
+    (String.capitalize_ascii next_start)
+
+let refused_then_restarted =
+  "when Firefox refuses that host a session, the start after it restarts the Keeper Firefox \
+   MASC is shown to have started"
+
+(* What the host record says since: an ended host's end, a dead or running
+   host's attach (its start, when it never attached). *)
+let since_of = function
+  | Record.Never_started | Record.Record_missing_but_locked | Record.Unreadable _ -> None
+  | Record.Ended (_, ending) -> Some ending.at
+  | Record.Died entry | Record.Running entry ->
+      Some (Option.value entry.attached_at ~default:entry.started_at)
+
+type last_start_note =
+  | No_note
+  | Failed_start of { at : float; not_attached : Starter.not_attached }
+  | Start_record_unreadable of string
+
+(* A start for another port or profile says nothing of this configuration,
+   and one that ended before what the record says since nothing of it. *)
+let last_start_note keeper state =
+  match keeper with
+  | Lane_off | Not_configured | Not_known -> No_note
+  | Masc_starts { port; profile; last_start } ->
+      (match last_start with
+       | Start_record.Absent | Start_record.Recorded { outcome = Start_record.Attached _; _ } ->
+           No_note
+       | Start_record.Unreadable detail -> Start_record_unreadable detail
+       | Start_record.Recorded ({ at; outcome = Start_record.Not_attached not_attached; _ } as entry) ->
+           let older = match since_of state with Some after -> at < after | None -> false in
+           if older || not (Start_record.for_configuration ~port ~profile entry) then No_note
+           else Failed_start { at; not_attached })
+
+let last_start_sentence ~base_path = function
+  | No_note -> ""
+  | Start_record_unreadable detail ->
+      Printf.sprintf " The record of MASC's last start, %s, cannot be read (%s)."
+        (Start_record.record_path ~base_path) detail
+  | Failed_start { at = ended; not_attached } ->
+      let sentence why = if String.ends_with ~suffix:"." why then why else why ^ "." in
+      (match not_attached with
+       | Starter.Operator_needed why ->
+           Printf.sprintf " MASC's last start, at %s, waits for the operator: %s" (at ended) (sentence why)
+       | Starter.Start_failed why ->
+           Printf.sprintf " MASC's last start, at %s, failed: %s The next start tries again." (at ended)
+             (sentence why)
+       | Starter.Not_listed_in_time why ->
+           Printf.sprintf " MASC's last start, at %s, showed no connection in time: %s" (at ended)
+             (sentence why))
+
+let recorded_on_port (entry : Record.entry) ~port =
+  match Browser_bidi_downloads.endpoint entry.bidi_url with
+  | Ok (_, recorded_port, _) -> recorded_port = port
+  | Error _ -> false
+
+(* What comes before the next host where MASC starts it, by what became of
+   the last host's session, as {!next_host} says for the operator. A session
+   held in a Firefox on another port than the configured one is not MASC's
+   to restart: it starts its own on its port. *)
+let next_host_by_masc t (entry : Record.entry) (ending : Record.ending) ~port ~profile =
+  let starts = masc_starts t ~port ~profile in
+  let held_there = if recorded_on_port entry ~port then masc_restarts else starts in
+  match ending.because with
+  | Record.Profile_not_kept { expected; found } -> other_firefox_there t entry ~expected ~found
+  | Record.Reason_only ->
+  match entry.attached_at, ending.session with
+  | Some _, No_session_left ->
+      Printf.sprintf " It ended its BiDi session, so the Firefox at that address takes the next host. %s."
+        starts
+  | None, No_session_left ->
+      Printf.sprintf " It ended before Firefox gave it a session and left none there. %s." starts
+  | (Some _ | None), Session_left ->
+      Printf.sprintf
+        " Firefox did not confirm that its BiDi session ended, and while it holds that session it \
+         refuses the next host. %s."
+        held_there
+  | (Some _ | None), Session_refused ->
+      Printf.sprintf
+        " Firefox refused it a BiDi session, which it does while it holds one: that of a host \
+         attached from another workspace, or one a host that died left there. %s."
+        held_there
+  | (Some _ | None), Session_unknown ->
+      Printf.sprintf
+        " Its connection to Firefox was gone before it could end its BiDi session. A Firefox that \
+         exited took the session along; one that still runs holds it. %s; %s."
+        starts refused_then_restarted
+
+(* The paragraph for a workspace where MASC starts Firefox and the host:
+   the operator's steps give way to what MASC's next start does. A last
+   start is said beside what the record says since: since a host ended, or
+   a dead or running host attached (or started, when it never attached). *)
+let by_masc t record ~port ~profile ~last_start =
+  let last =
+    last_start_sentence ~base_path:t.Launcher.base_path
+      (last_start_note (Masc_starts { port; profile; last_start }) record) in
+  let starts = masc_starts t ~port ~profile in
+  match record with
+  | Record.Never_started ->
+      Printf.sprintf
+        "No BiDi browser host has run for this workspace. Hover and drag on the live lane need \
+         one. %s.%s%s%s"
+        starts last (listed_beside t) (steps t)
+  | Record.Ended (entry, ending) ->
+      Printf.sprintf
+        "No BiDi browser host is running. The last one (pid %d, given %s) ended at %s with this \
+         reason: %s.%s%s%s%s%s"
+        entry.pid entry.bidi_url (at ending.at) (quoted ending.reason)
+        (unacknowledged t entry) (next_host_by_masc t entry ending ~port ~profile)
+        last (listed_beside t) (steps t)
+  | Record.Died entry ->
+      Printf.sprintf
+        "No BiDi browser host is running. The last one (pid %d, given %s, started at %s) left no \
+         reason for ending: it was killed or crashed, or could not write one.%s Its BiDi session \
+         may be left in the Firefox at that address. %s; %s.%s%s%s"
+        entry.pid entry.bidi_url (at entry.started_at) (unacknowledged t entry) starts
+        refused_then_restarted
+        last (listed_beside t) (steps t)
+  | Record.Unreadable { detail; held = Some false } ->
+      Printf.sprintf
+        "The BiDi browser host's record cannot be read (%s). No host holds this workspace's \
+         lock, so none is running. The next host keeps a copy of a record it read and cannot \
+         load beside it and writes a new one in its place. It does not start while the record \
+         cannot be read at all, or a new one cannot be written. %s.%s%s%s"
+        detail starts last (listed_beside t) (steps t)
+  | Record.Running _ -> by_operator t record ^ last
+  | Record.Record_missing_but_locked | Record.Unreadable { held = Some true | None; _ } ->
+      by_operator t record ^ last
+
+(* Where the operator starts them, the paragraph says how they are started
+   for a workspace with no table: by the table. *)
+let unless_configured = function
+  | Record.Never_started | Record.Ended _ | Record.Died _ | Record.Unreadable { held = Some false; _ } ->
+      " With [browser.live.bidi] in runtime.toml, MASC starts that Firefox and its host itself."
+  | Record.Record_missing_but_locked | Record.Running _
+  | Record.Unreadable { held = Some true | None; _ } -> ""
+
+let message { lane = t; record; keeper } =
+  match keeper with
+  | Masc_starts { port; profile; last_start } -> by_masc t record ~port ~profile ~last_start
+  | Lane_off ->
+      "[browser.live] is off in runtime.toml, so the live lane serves nothing, and MASC starts no \
+       Firefox or host. "
+      ^ by_operator t record
+  | Not_configured -> by_operator t record ^ unless_configured record
+  | Not_known -> by_operator t record
+
 type report =
   { state : Record.state
   ; attach : attach
+  ; keeper : keeper
   ; message : string
   }
 
 let report observation =
   { state = observation.record
   ; attach = attach_for observation.lane
+  ; keeper = observation.keeper
   ; message = message observation
   }
 
@@ -339,13 +569,28 @@ let launcher_standing_of_wire = function
   | "needs_reinstall" -> Some Launcher_needs_reinstall
   | _ -> None
 
-let report_fields = [ "state"; "record"; "lock_held"; "detail"; "attach"; "message" ]
+let report_fields = [ "state"; "record"; "lock_held"; "detail"; "attach"; "keeper"; "message" ]
+
+let keeper_to_json = function
+  | Masc_starts { port; profile; last_start } ->
+      `Assoc
+        [ "kind", `String "masc_starts"; "port", `Int port; "profile", `String profile
+        ; ( "last_start"
+          , match last_start with
+            | Start_record.Absent -> `Assoc [ "kind", `String "absent" ]
+            | Start_record.Recorded entry ->
+                `Assoc [ "kind", `String "recorded"; "entry", Start_record.entry_to_json entry ]
+            | Start_record.Unreadable detail ->
+                `Assoc [ "kind", `String "unreadable"; "detail", `String detail ] ) ]
+  | Lane_off -> `Assoc [ "kind", `String "lane_off" ]
+  | Not_configured -> `Assoc [ "kind", `String "not_configured" ]
+  | Not_known -> `Assoc [ "kind", `String "not_known" ]
 let attach_fields = [ "launcher"; "arguments"; "launcher_state" ]
 
 (* The state is written as what it was read from: the record and whether
    the lock was held. [lock_held] is null where the state does not turn on
    it, and for a lock that could not be asked. *)
-let report_to_json { state; attach; message } =
+let report_to_json { state; attach; keeper; message } =
   let entry_json = Record.entry_to_json in
   let record, lock_held, detail =
     match state with
@@ -369,6 +614,7 @@ let report_to_json { state; attach; message } =
           ; "arguments", `String attach.arguments
           ; "launcher_state", `String (launcher_standing_to_wire attach.standing)
           ] )
+    ; "keeper", keeper_to_json keeper
     ; "message", `String message
     ]
 
@@ -380,19 +626,75 @@ let summary_to_json observation =
     ; "message", `String (message observation)
     ]
 
+(* Exactly the fields the writer writes: one more, one fewer or one twice
+   is another layout, and is refused rather than read around. *)
+let exactly ~what ~names = function
+  | `Assoc fields ->
+      if List.equal String.equal
+           (List.sort String.compare names)
+           (List.sort String.compare (List.map fst fields))
+      then Ok fields
+      else Error (what ^ " does not have exactly the fields this reader knows")
+  | _ -> Error (what ^ " is not an object")
+
+(* Text a reader draws on a terminal holds no control character. *)
+let drawable text =
+  String.for_all (fun ch -> let code = Char.code ch in code >= 0x20 && code <> 0x7f) text
+
+let drawable_text ~what fields name =
+  match List.assoc name fields with
+  | `String text when drawable text -> Ok text
+  | `String _ -> Error (what ^ "'s " ^ name ^ " contains a control character")
+  | _ -> Error (what ^ "'s " ^ name ^ " is not a string")
+
+let kind_of ~what = function
+  | `Assoc fields ->
+      (match List.assoc_opt "kind" fields with
+       | Some (`String kind) -> Ok kind
+       | Some _ | None -> Error (what ^ " does not name its kind"))
+  | _ -> Error (what ^ " is not an object")
+
+let last_start_of_json json =
+  let ( let* ) = Result.bind in
+  let what = "the BiDi host report's last start" in
+  let* kind = kind_of ~what json in
+  match kind with
+  | "absent" -> Result.map (fun _ -> Start_record.Absent) (exactly ~what ~names:[ "kind" ] json)
+  | "recorded" ->
+      let* fields = exactly ~what ~names:[ "kind"; "entry" ] json in
+      Result.map
+        (fun entry -> Start_record.Recorded entry)
+        (Start_record.entry_of_json (List.assoc "entry" fields))
+  | "unreadable" ->
+      let* fields = exactly ~what ~names:[ "kind"; "detail" ] json in
+      Result.map
+        (fun detail -> Start_record.Unreadable detail)
+        (drawable_text ~what fields "detail")
+  | _ -> Error (what ^ " is of a kind this reader does not know")
+
+let keeper_of_json json =
+  let ( let* ) = Result.bind in
+  let what = "the BiDi host report's keeper" in
+  let only keeper = Result.map (fun _ -> keeper) (exactly ~what ~names:[ "kind" ] json) in
+  let* kind = kind_of ~what json in
+  match kind with
+  | "masc_starts" ->
+      let* fields = exactly ~what ~names:[ "kind"; "port"; "profile"; "last_start" ] json in
+      let* port =
+        match List.assoc "port" fields with
+        | `Int port when port > 0 && port < 65536 -> Ok port
+        | _ -> Error (what ^ "'s port is not a port")
+      in
+      let* profile = drawable_text ~what fields "profile" in
+      let* last_start = last_start_of_json (List.assoc "last_start" fields) in
+      Ok (Masc_starts { port; profile; last_start })
+  | "lane_off" -> only Lane_off
+  | "not_configured" -> only Not_configured
+  | "not_known" -> only Not_known
+  | _ -> Error (what ^ " is of a kind this reader does not know")
+
 let report_of_json json =
   let ( let* ) = Result.bind in
-  (* Exactly the fields the writer writes: one more, one fewer or one twice
-     is another layout, and is refused rather than read around. *)
-  let exactly ~what ~names = function
-    | `Assoc fields ->
-        if List.equal String.equal
-             (List.sort String.compare names)
-             (List.sort String.compare (List.map fst fields))
-        then Ok fields
-        else Error (what ^ " does not have exactly the fields this reader knows")
-    | _ -> Error (what ^ " is not an object")
-  in
   let text fields name =
     match List.assoc name fields with
     | `String text -> Ok text
@@ -462,14 +764,6 @@ let report_of_json json =
     in
     Ok { launcher; arguments; standing }
   in
-  let* message = text fields "message" in
-  let printable =
-    String.for_all
-      (fun ch -> let code = Char.code ch in code >= 0x20 && code <> 0x7f)
-      message
-  in
-  let* () =
-    if printable then Ok ()
-    else Error "the BiDi host report's message contains a control character"
-  in
-  Ok { state; attach; message }
+  let* keeper = keeper_of_json (List.assoc "keeper" fields) in
+  let* message = drawable_text ~what:"the BiDi host report" fields "message" in
+  Ok { state; attach; keeper; message }

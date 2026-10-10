@@ -408,6 +408,10 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
             assert "was not ended" not in another_profile, another_profile
             elsewhere = json.loads((root / ".masc/browser-lane/bidi-host.json").read_text())["ended"]
             assert "runs the profile" in elsewhere["reason"] and elsewhere["session_in_firefox"] == "none", elsewhere
+            assert elsewhere["because"]["kind"] == "profile_not_kept", elsewhere
+            assert elsewhere["because"]["expected"] == str(evidence / "another-profile"), elsewhere
+            # Firefox names its profile as it was given with --profile.
+            assert elsewhere["because"]["found"] == str(root / "profile"), elsewhere
             # Firefox reports the profile path as it was given; a link to
             # the same directory is the same profile.
             (root / "profile-link").symlink_to(root / "profile")

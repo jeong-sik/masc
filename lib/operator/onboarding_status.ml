@@ -202,8 +202,19 @@ let browser_bidi_host_check host =
 (* The browser tools read the same observation when no browser answers, so an
    operator and a Keeper are told the same cause. One observation answers both
    checks, so they say of one launcher and one list of connections. *)
-let browser_lane_check base_path =
-  let host = Browser_bidi_host_status.observe ~base_path in
+(* The browser tables of the workspace's runtime.toml, for a reader with no
+   server: only when the whole file loads, as a server loads it, since a
+   server that refuses the file has no browser configuration either. [None]
+   otherwise: who starts the Keeper Firefox is then not known. *)
+let browser_configuration config_path =
+  if not (Sys.file_exists config_path) then None
+  else
+    match Runtime.load_list ~config_path with
+    | Error _ -> None
+    | Ok _ -> Result.to_option (Browser_configuration.of_file config_path)
+
+let browser_lane_check ~configuration base_path =
+  let host = Browser_bidi_host_status.observe ~base_path ~configuration in
   let observation = host.lane in
   let message = Browser_lane_launcher.message observation in
   (match Browser_lane_launcher.verdict observation with
@@ -215,7 +226,7 @@ let browser_lane_check base_path =
    | Browser_lane_launcher.Misconfigured -> [check Browser_lane Invalid message [Inspect_configuration]])
   @ browser_bidi_host_check host
 
-let inspect ~base_path =
+let inspected ~browser ~base_path =
   match base_path with
   | None ->
     { base_path = None; selected_runtime = None; selected_model = None;
@@ -235,7 +246,11 @@ let inspect ~base_path =
       { base_path = Some base_path; selected_runtime; selected_model;
         checks = check Workspace Satisfied "Workspace found." [Choose_workspace]
           :: (models @ keeper_checks base_path @ [persistence_check base_path]
-              @ browser_lane_check base_path) }
+              @ browser_lane_check ~configuration:(browser config_path) base_path) }
+
+let inspect ~base_path = inspected ~browser:browser_configuration ~base_path
+
+let inspect_loaded ~configuration ~base_path = inspected ~browser:(fun _ -> configuration) ~base_path
 
 let optional_string = function None -> `Null | Some value -> `String value
 

@@ -4,18 +4,45 @@
     connection list the TUI reads and the browser tools answer from this one
     observation. *)
 
+(** Who starts the Keeper Firefox and its host, from the workspace's
+    configuration (RFC-browser-keeper-firefox §3.7). *)
+type keeper =
+  | Masc_starts of
+      { port : int
+      ; profile : string
+      ; last_start : Browser_keeper_firefox_start_record.read
+          (** What MASC's last start came to. *)
+      }
+      (** [runtime.toml] has [\[browser.live.bidi\]] and the live lane is on:
+          MASC starts them at a server start and for a Keeper's hover or
+          drag. *)
+  | Lane_off  (** The table is there and [\[browser.live\] enabled = false]. *)
+  | Not_configured  (** No [\[browser.live.bidi\]]: the operator starts them. *)
+  | Not_known  (** No configuration was given to read it from. *)
+
+(** [None]: no configuration was loaded or read. A start's record is read
+    only where MASC starts them. *)
+val keeper_of_configuration : base_path:string -> Browser_configuration.t option -> keeper
+
 type observation =
   { lane : Browser_lane_launcher.t
         (** The launcher, and the server with the connections it listed. *)
   ; record : Browser_bidi_host_record.state
         (** What the host's record and its lock say. It is read from disk, so
             it is known without a server. *)
+  ; keeper : keeper
   }
 
-(** Reads the record and the launcher, then asks this process's server.
-    Reading can let other fibers run, so the server is asked last: a host
-    that attached during the reads is in the list the observation holds. *)
-val observe : base_path:string -> observation
+(** Reads the record, the launcher and, where MASC starts them, its last
+    start, then asks this process's server. Reading can let other fibers
+    run, so the server is asked last: a host that attached during the reads
+    is in the list the observation holds. [configuration] is the one this
+    process loaded, or the workspace's [runtime.toml] read for it. *)
+val observe : base_path:string -> configuration:Browser_configuration.t option -> observation
+
+(** The observation with no last start, for an answer that already says
+    what the start it asked for came to. *)
+val without_last_start : observation -> observation
 
 (** The lane's connections an answer lists beside what it says of the host:
     the list the observation was made from, so the two say of one list. A
@@ -45,6 +72,9 @@ val verdict : observation -> verdict
 (** Whether a host runs and is attached, when and why the last one ended,
     and what the operator does next. That step follows what became of the
     last host's session:
+    - ended because the Firefox there ran another profile, or did not say
+      which: that Firefox is quit first, so one on the kept profile can open
+      the port;
     - ended, or never given: the Firefox takes the next host as it is; a
       host that never got one needs a Firefox that answers at its address
       first;
@@ -56,6 +86,12 @@ val verdict : observation -> verdict
     observed it also says whether that server lists a running host's client,
     and when it lists a BiDi connection that is not the host the record
     names.
+
+    Where MASC starts them ({!Masc_starts}), the operator's steps give way
+    to what MASC's next start does, and a last start that showed no
+    connection, and did not come before the last host started, is said with
+    when and why. A lane turned off, and a workspace with no table, add a
+    sentence to the paragraph that says so.
 
     A path, an address and the reason for ending come from files and from
     the host. In a command the operator runs, a path and an address are
@@ -89,12 +125,35 @@ val firefox_flag : string
 type attach = { launcher : string; arguments : string; standing : launcher_standing }
 
 (** What a reader is told of the BiDi host: the state its record and lock
-    say, how one is attached, and {!message}. *)
+    say, how one is attached, who starts it, and {!message}. *)
 type report =
   { state : Browser_bidi_host_record.state
   ; attach : attach
+  ; keeper : keeper
   ; message : string
   }
+
+(** What is said of MASC's last start beside a host's state. *)
+type last_start_note =
+  | No_note
+  | Failed_start of { at : float; not_attached : Browser_keeper_firefox_starter.not_attached }
+      (** It ended at [at] with no connection listed. *)
+  | Start_record_unreadable of string
+
+(** Where MASC starts the Keeper Firefox, its last start when it showed no
+    connection, was for the configured port and profile
+    ({!Browser_keeper_firefox_start_record.for_configuration}), and ended no
+    earlier than what the state says since: an ended host's end, a dead or
+    running host's attach (its start when it never attached). {!message}
+    says it, and the TUI shows it. *)
+val last_start_note : keeper -> Browser_bidi_host_record.state -> last_start_note
+
+(** Whether the host [entry] names was given an address on [port]. A
+    session held in a Firefox there is in the way of MASC's next start on
+    that port, which restarts the Keeper Firefox MASC is shown to have
+    started; one held on another port is not. An address that names no port
+    is not on it. *)
+val recorded_on_port : Browser_bidi_host_record.entry -> port:int -> bool
 
 val report : observation -> report
 
@@ -106,11 +165,17 @@ val report : observation -> report
     turns on the lock, null otherwise and for a lock that could not be asked)
     and [detail] (why the record or the lock cannot be read, null otherwise). Then [attach], an
     object with exactly [launcher], [arguments] and [launcher_state]
-    ([installed], [not_installed] or [needs_reinstall]), and [message]. *)
+    ([installed], [not_installed] or [needs_reinstall]); [keeper], an object
+    whose [kind] is [masc_starts] (with [port], [profile] and [last_start]:
+    [absent], [recorded] with its [entry], or [unreadable] with its
+    [detail]), [lane_off], [not_configured] or [not_known]; and [message]. *)
 val report_to_json : report -> Yojson.Safe.t
 
 (** Reads what {!report_to_json} wrote. A field more, fewer or twice, in the
-    report or in [attach], is another layout and is refused. The state is
+    report, in [attach], in [keeper] or in its [last_start], is another
+    layout and is refused, as is a kind this reader does not know. The
+    profile, a last start's detail and the message hold no control
+    character. The state is
     worked out again from [record] and [lock_held] by
     {!Browser_bidi_host_record.state_of} and has to be the one [state]
     names. *)

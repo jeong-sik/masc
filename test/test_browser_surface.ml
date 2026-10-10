@@ -781,7 +781,7 @@ let test_keeper_hears_which_connection_serves_the_work () =
       let ids key data =
         U.(data |> member key |> to_list |> List.map (fun client -> client |> member "clientId" |> to_string)) in
       let held = take bidi in
-      written (Record.ended held ~reason:"BiDi command rejected: session not created"
+      written (Record.ended held ~because:Record.Reason_only ~reason:"BiDi command rejected: session not created"
                  ~session:Record.Session_refused ~now:1_791_000_060.);
       released held;
       let data = interact extension hover in
@@ -867,7 +867,7 @@ let test_keeper_hears_why_the_bidi_host_is_gone () =
                 ~client_id:host_client_id ~now:1_791_000_000. with
         | Ok { held; not_synced = _ } -> held
         | Error refusal -> fail (Record.refusal_message refusal) in
-      (match Record.ended held
+      (match Record.ended held ~because:Record.Reason_only
                ~reason:"BiDi connection ended: browser metadata frame write timed out"
                ~session:Record.Session_unknown ~now:1_791_000_042. with
        | Ok () -> () | Error failure -> fail (Record.write_failure_message failure));

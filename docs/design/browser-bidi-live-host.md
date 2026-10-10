@@ -85,6 +85,22 @@ profile = "/Users/you/masc-keeper-firefox-profile"
   the stopped one's group is empty and its port no longer answers. Any
   other Firefox is left running, the server log says why, and a host is
   started for it all the same.
+- Each start that ends, at a server start or for a Keeper's request, is
+  written to `.masc/browser-lane/keeper-firefox-start.json`: when, and
+  whether a connection was listed (with what was started) or why not
+  (`operator_needed`, `start_failed` or `not_listed_in_time`, with the
+  message, kept as one printable line of at most 1024 bytes), for the port
+  and profile it was started for. Only the status sentences read it.
+- Where `runtime.toml` has the table and the live lane is on, `masc doctor`,
+  the connection list and a Keeper's rejection say that MASC starts the
+  Keeper Firefox and its host at the next server start or the next hover or
+  drag, in place of the operator's steps, and name the last start's failure
+  for the same port and profile when it is newer than what the host record
+  says since (a host's end, a dead host's attach, a running host's start).
+  With no table they add that writing one makes MASC start both; with the
+  live lane off they say first that MASC starts nothing. The server reads
+  the configuration it loaded; `masc doctor` reads the workspace's
+  `runtime.toml` and uses it only when the whole file loads.
 - `[browser.live] enabled = false`, or a `runtime.toml` without the table,
   starts nothing, and stops the Firefox that record names when it is shown
   to be the one MASC started: the process its group is numbered after still
@@ -268,13 +284,17 @@ server:
     in memory for the next write; it does not undo a committed archive.
     The archive and snapshot together carry the metadata; archived entries
     are diagnostic receipts and are never replayed as commands.
-  - Readers report the actual snapshot count, including longer schema-1
-    records. Reaching 64 alone does not prove whether older entries exist
+  - Readers report the actual snapshot count, including a longer record
+    from another writer. Reaching 64 alone does not prove whether older entries exist
     or archival succeeded; the status names the archive without claiming
     that it exists or succeeded from the count alone.
-  - A host that leaves in order adds `ended`: when, why, and
-    `session_in_firefox`. A host that could not attach leaves its reason the
-    same way.
+  - A host that leaves in order adds `ended`: when, why,
+    `session_in_firefox`, and `because`. A host that could not attach leaves
+    its reason the same way. `because` is the cause a next step turns on:
+    `profile_not_kept` with `expected`, the profile the host was given with
+    `--firefox-profile`, and `found`, the one Firefox said it runs or null
+    when it did not say, for a host that ended a session on another profile;
+    `reason_only` otherwise. Its paths are written as the reason is.
     - `none`: nothing of this host's is left. Firefox confirmed the end or
       said the connection has no session (`invalid session id`), the host
       never got as far as asking for one, or Firefox answered its request
@@ -360,6 +380,12 @@ does next:
     is another.
   - `attach`: the host command as `launcher` and `arguments`, and
     `launcher_state` (`installed`, `not_installed`, `needs_reinstall`).
+  - `keeper`: who starts the Keeper Firefox and its host, by `kind`.
+    `masc_starts` carries the configured `port` and `profile`, and
+    `last_start`: `absent`, `recorded` with the `entry` of
+    `keeper-firefox-start.json`, or `unreadable` with its `detail`.
+    `lane_off`, `not_configured` (no `[browser.live.bidi]`) and `not_known`
+    (no configuration was read) carry nothing more.
   - `message`: the paragraph the doctor prints.
 - A Keeper whose hover or drag is refused as `live_transport_unsupported`
   while no connected browser serves it gets `bidiHost` in the answer, with
@@ -368,7 +394,8 @@ does next:
 - The TUI's Browser Lane picker draws it from the server's `bidiHost`:
   whether a host runs and whether the server lists it, why the last one
   ended, what comes before the next, the results the host holds no
-  acknowledgement for, and the command that starts one
+  acknowledgement for, and the command that starts one, or, where MASC
+  starts it, that MASC does and what its last start left
   ([the rows](../guides/tui-browser-lanes.md)).
 
 The doctor, the connection list and the Keeper's answer each read the

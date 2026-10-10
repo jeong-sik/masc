@@ -48,3 +48,8 @@ val default_live_bidi_port : int
 val none : t
 
 val parse : Otoml.t -> (t, string) result
+
+(** {!parse} of the runtime.toml at [path], for a reader with no runtime
+    configuration loaded, such as [masc doctor]. [Error] says why the file
+    cannot be read or its tables do not parse. *)
+val of_file : string -> (t, string) result

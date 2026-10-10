@@ -37,16 +37,14 @@ let test_a_session_runs_the_expected_profile () =
     check (option string) "as Firefox reported it" (Some link) (Peer.profile (session (Some link)));
     List.iter
       (fun (name, reported, expected) ->
-        check (result unit string) name (Ok ()) (Peer.runs_profile (session (Some reported)) ~expected))
+        check bool name true (Peer.runs_profile (session (Some reported)) ~expected = Ok ()))
       [ "the same directory", profile, profile; "reported through a link", link, profile
       ; "expected through a link", profile, link ];
-    let refused name reported ~mentions =
-      match Peer.runs_profile (session reported) ~expected:profile with
-      | Error detail -> check bool (name ^ ": " ^ detail) true (String_util.contains_substring detail mentions)
-      | Ok () -> fail (name ^ " was taken")
-    in
-    refused "another profile" (Some "/Users/someone/Firefox/Profiles/x.default") ~mentions:"x.default";
-    refused "a Firefox that did not say" None ~mentions:"moz:profile")
+    let other = "/Users/someone/Firefox/Profiles/x.default" in
+    check bool "another profile, as Firefox named it" true
+      (Peer.runs_profile (session (Some other)) ~expected:profile = Error (Peer.Runs_profile other));
+    check bool "a Firefox that did not say" true
+      (Peer.runs_profile (session None) ~expected:profile = Error Peer.Profile_unsaid))
 
 let script_value json = obj ["type",`String "success";"result",obj ["type",`String "string";"value",`String (Yojson.Safe.to_string json)]]
 let test_context_identity () =

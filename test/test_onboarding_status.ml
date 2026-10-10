@@ -247,9 +247,9 @@ let repeat_note held n = for _ = 1 to n do written (Record.note_unacknowledged h
 (* An observation as a caller holds it, for what no workspace on disk and no
    server in this process can be made to say. *)
 let observation ?(base_path = "/workspace") ?(launcher = Launcher.Follows_workspace)
-    ?(server = Launcher.Not_serving) record
+    ?(server = Launcher.Not_serving) ?(keeper = Status.Not_known) record
   : Status.observation =
-  { lane = { base_path; launcher; workspace_port = Ok 8935; server }; record }
+  { lane = { base_path; launcher; workspace_port = Ok 8935; server }; record; keeper }
 
 let launcher_of base = Filename.quote (Filename.concat base ".masc/browser-lane/host/launch")
 
@@ -292,7 +292,7 @@ let a_launcher_that_cannot_be_run_as_it_is_is_installed_first () =
   (with_workspace @@ fun base ->
    let held = take_record base in
    written (Record.attached held ~now:1_791_000_002.);
-   written (Record.ended held ~reason:"stopped by SIGINT" ~session:Record.No_session_left
+   written (Record.ended held ~because:Record.Reason_only ~reason:"stopped by SIGINT" ~session:Record.No_session_left
               ~now:1_791_000_060.);
    released held;
    says (Onboarding_status.inspect ~base_path:(Some base))
@@ -326,7 +326,7 @@ let a_bidi_host_that_ended_says_why_and_what_comes_first () =
   let held = take_record base in
   written (Record.attached held ~now:1_791_000_002.);
   let ended_with ~reason session =
-    written (Record.ended held ~reason ~session ~now:1_791_000_060.);
+    written (Record.ended held ~because:Record.Reason_only ~reason ~session ~now:1_791_000_060.);
     Onboarding_status.inspect ~base_path:(Some base)
   in
   let run = run_again base in
@@ -398,6 +398,119 @@ let a_bidi_host_that_ended_says_why_and_what_comes_first () =
   lacks (bidi_message two) [ "snapshot window" ];
   released held
 
+(* A host that ended a session on another profile got that session: what
+   holds the port is another Firefox. The paragraph carries the profiles the
+   record names, and the next host is started with the kept one. *)
+let a_bidi_host_that_met_another_profile_names_both_profiles () =
+  browser_lane_fixture ~connection_port:"64850" () @@ fun base ->
+  let expected = "/keeper/profile" and found = "/Users/someone/Firefox/Profiles/x.default" in
+  let ended_on found =
+    let held = take_record base in
+    written
+      (Record.ended held ~reason:"this Firefox runs the profile elsewhere" ~session:Record.No_session_left
+         ~because:(Record.Profile_not_kept { expected; found }) ~now:1_791_000_060.);
+    released held;
+    Onboarding_status.inspect ~base_path:(Some base)
+  in
+  let next_host = Status.firefox_profile_flag ^ " " ^ Filename.quote expected in
+  says (ended_on (Some found)) [ found; expected; next_host ];
+  says (ended_on None) [ expected; next_host ]
+
+module Start_record = Masc.Browser_keeper_firefox_start_record
+module Starter = Masc.Browser_keeper_firefox_starter
+
+(* Where MASC starts the Keeper Firefox, the paragraph carries the port and
+   the profile it starts with. MASC's last start is in it only when that
+   showed no connection, for this port and profile, after what the host
+   record says since: then its reason is there, and otherwise the paragraph
+   is the one with no start recorded. *)
+let where_masc_starts_the_firefox_the_status_says_so () =
+  let port = 9444 and profile = "/keeper/profile" in
+  let said ?(last_start = Start_record.Absent) record =
+    Status.message (observation ~keeper:(Status.Masc_starts { port; profile; last_start }) record) in
+  let never = said Record.Never_started in
+  has never [ string_of_int port; profile ];
+  check bool "where MASC starts them, the paragraph is not the operator's" false
+    (String.equal never (Status.message (observation Record.Never_started)));
+  let ended =
+    Record.Ended
+      ( host_entry
+      , { at = 1_791_000_060.; reason = "stopped"; session = Record.No_session_left; because = Record.Reason_only } ) in
+  let why = "the BiDi host did not start: not found" in
+  let failed ?(port = port) ?(profile = profile) at =
+    Start_record.Recorded { at; port; profile; outcome = Start_record.Not_attached (Starter.Start_failed why) } in
+  let mentioned name last_start record =
+    let with_start = said ~last_start record in
+    check bool name true
+      (String_util.contains_substring with_start why && not (String.equal with_start (said record))) in
+  let unmentioned name last_start record = check string name (said record) (said ~last_start record) in
+  mentioned "a failed start after the host ended" (failed 1_791_000_100.) ended;
+  unmentioned "a start that ended before the host did" (failed 1_791_000_030.) ended;
+  unmentioned "a start for another port" (failed ~port:9333 1_791_000_100.) ended;
+  unmentioned "a start for another profile" (failed ~profile:"/other/profile" 1_791_000_100.) ended;
+  unmentioned "a start that attached"
+    (Start_record.Recorded { at = 1_791_000_100.; port; profile; outcome = Start_record.Attached Starter.Host_only })
+    ended;
+  (* A host that died is newer than a start before it attached; a running
+     host is newer than a start before it started. *)
+  unmentioned "a start before a dead host attached" (failed 1_791_000_001.) (Record.Died host_entry);
+  mentioned "a start after a dead host attached" (failed 1_791_000_003.) (Record.Died host_entry);
+  (* A host that connected after a start gave up on it is newer than that
+     start. *)
+  unmentioned "a start before a running host attached" (failed 1_791_000_001.) (Record.Running host_entry);
+  mentioned "a start after a running host attached" (failed 1_791_000_003.) (Record.Running host_entry);
+  mentioned "a start before a host that is still connecting, after it started" (failed 1_791_000_001.)
+    (Record.Running { host_entry with attached_at = None });
+  has (said ~last_start:(Start_record.Unreadable "torn by this test") Record.Never_started) [ "torn by this test" ];
+  (* The record writes a profile as one printable line, and a start for a
+     profile outside printable ASCII is still that profile's. *)
+  let wide = "/Users/someone/문서/keeper" in
+  let wide_start =
+    Start_record.Recorded
+      { at = 1_791_000_100.; port; profile = Masc.Printable_line.write ~limit:Start_record.message_limit_bytes wide
+      ; outcome = Start_record.Not_attached (Starter.Start_failed why) } in
+  let with_wide last_start =
+    Status.message (observation ~keeper:(Status.Masc_starts { port; profile = wide; last_start }) ended) in
+  check bool "a start for a profile outside printable ASCII is said" true
+    (String_util.contains_substring (with_wide wide_start) why
+     && not (String.equal (with_wide wide_start) (with_wide Start_record.Absent)))
+
+let where_masc_does_not_start_the_firefox_the_status_says_why () =
+  let keeper configuration = Status.keeper_of_configuration ~base_path:"/workspace" configuration in
+  check bool "the live lane off, with no table, starts nothing" true
+    (keeper (Some { Browser_configuration.none with live_enabled = false }) = Status.Lane_off);
+  check bool "no table" true (keeper (Some Browser_configuration.none) = Status.Not_configured);
+  check bool "nothing loaded" true (keeper None = Status.Not_known);
+  let paragraph keeper = Status.message (observation ~keeper Record.Never_started) in
+  check bool "no table changes the paragraph" false
+    (String.equal (paragraph Status.Not_configured) (paragraph Status.Not_known));
+  check bool "the lane off changes the paragraph" false
+    (String.equal (paragraph Status.Lane_off) (paragraph Status.Not_known))
+
+(* A session held in a Firefox on MASC's port is in the way of MASC's next
+   start there; one on another port, or at an address that names none, is
+   not. *)
+let a_host_address_is_on_a_port_or_not () =
+  let given bidi_url = { host_entry with bidi_url } in
+  check bool "on the port it names" true (Status.recorded_on_port (given "ws://127.0.0.1:9222/session") ~port:9222);
+  check bool "on another port" false (Status.recorded_on_port (given "ws://127.0.0.1:9333/session") ~port:9222);
+  check bool "an address with no port" false (Status.recorded_on_port (given "ws://127.0.0.1/session") ~port:9222);
+  check bool "no address" false (Status.recorded_on_port (given "not an address") ~port:9222)
+
+(* masc doctor reads who starts the Keeper Firefox from the workspace's
+   runtime.toml, with no server. *)
+let doctor_reads_who_starts_the_firefox_from_runtime_toml () =
+  browser_lane_fixture () @@ fun base ->
+  let runtime = Filename.concat base ".masc/config/runtime.toml" in
+  let profile = "/keeper/profile" in
+  let table = "\n[browser.live.bidi]\nfirefox = \"/Apps/firefox\"\nprofile = \"" ^ profile ^ "\"\n" in
+  write runtime (read "../scripts/fixtures/release-evidence/runtime.toml" ^ table);
+  says (Onboarding_status.inspect ~base_path:(Some base)) [ profile ];
+  (* A server refuses a file that does not load, and so has no browser
+     configuration either: doctor does not read its table. *)
+  write runtime table;
+  lacks (bidi_message (Onboarding_status.inspect ~base_path:(Some base))) [ profile ]
+
 (* At the limit, earlier history is unknown. A valid longer record retains
    all listed results; the reader must not pretend it was already trimmed. *)
 let a_record_at_the_limit_says_the_newest_are_kept () =
@@ -425,7 +538,7 @@ let a_record_at_the_limit_says_the_newest_are_kept () =
 let a_bidi_host_that_never_got_a_session_says_what_the_next_one_needs () =
   browser_lane_fixture ~connection_port:"64850" () @@ fun base ->
   let held = take_record base in
-  written (Record.ended held ~reason:"BiDi connection failed: Connection refused"
+  written (Record.ended held ~because:Record.Reason_only ~reason:"BiDi connection failed: Connection refused"
              ~session:Record.No_session_left ~now:1_791_000_060.);
   released held;
   let observed = Onboarding_status.inspect ~base_path:(Some base) in
@@ -559,7 +672,7 @@ let a_running_host_is_rated_by_the_server_that_lists_it () =
   (* The record says no host runs and the server lists a BiDi connection:
      the two are told apart and neither is taken for the other. *)
   let ending : Record.ending =
-    { at = 1_791_000_060.; reason = "stopped by SIGINT"; session = Record.No_session_left }
+    { at = 1_791_000_060.; reason = "stopped by SIGINT"; session = Record.No_session_left; because = Record.Reason_only }
   in
   List.iter (fun record ->
       has (Status.message (observation ~server:listing record))
@@ -590,10 +703,10 @@ let a_running_host_is_rated_by_the_server_that_lists_it () =
 let a_bidi_host_report_reads_back_as_written () =
   let entry = { host_entry with unacknowledged = [ unacknowledged ] } in
   let ending : Record.ending =
-    { at = 1_791_000_060.; reason = "stopped by SIGINT"; session = Record.Session_unknown }
+    { at = 1_791_000_060.; reason = "stopped by SIGINT"; session = Record.Session_unknown; because = Record.Reason_only }
   in
   let ended = { entry with ended = Some ending } in
-  let refused_ending = { ending with session = Record.Session_refused } in
+  let refused_ending = { ending with session = Record.Session_refused; because = Record.Reason_only } in
   let report ?launcher record = Status.report (observation ?launcher record) in
   List.iter (fun (name, written) ->
       check bool name true (Status.report_of_json (Status.report_to_json written) = Ok written))
@@ -613,6 +726,33 @@ let a_bidi_host_report_reads_back_as_written () =
       , report (Record.Unreadable { detail = "Too many open files"; held = None }) )
     ; "no launcher", report ~launcher:Launcher.Not_installed (Record.Died entry)
     ; "a launcher to reinstall", report ~launcher:Launcher.Undeclared Record.Never_started ];
+  (* Who starts the host is read back as written, with MASC's last start. *)
+  let masc last_start = Status.Masc_starts { port = 9222; profile = "/keeper/profile"; last_start } in
+  let started outcome : Start_record.entry =
+    { at = 1_791_000_100.; port = 9222; profile = "/keeper/profile"; outcome } in
+  let with_keeper keeper record = Status.report (observation ~keeper record) in
+  List.iter (fun (name, keeper) ->
+      List.iter (fun (state, record) ->
+          let written = with_keeper keeper record in
+          check bool (name ^ ", " ^ state) true (Status.report_of_json (Status.report_to_json written) = Ok written))
+        [ "never started", Record.Never_started; "attached", Record.Running entry
+        ; "ended", Record.Ended (ended, ending); "died", Record.Died entry
+        ; "unreadable, no host", Record.Unreadable { detail = "torn"; held = Some false } ])
+    [ "MASC starts, nothing started yet", masc Start_record.Absent
+    ; "MASC starts, the last start attached",
+      masc (Start_record.Recorded (started (Start_record.Attached Starter.Host_only)))
+    ; ( "MASC starts, the last start waits for the operator"
+      , masc (Start_record.Recorded
+                (started (Start_record.Not_attached (Starter.Operator_needed "another Firefox is there")))) )
+    ; ( "MASC starts, the last start failed"
+      , masc (Start_record.Recorded
+                (started (Start_record.Not_attached (Starter.Start_failed "the BiDi host did not start")))) )
+    ; ( "MASC starts, the last start listed no connection"
+      , masc (Start_record.Recorded
+                (started (Start_record.Not_attached (Starter.Not_listed_in_time "not listed after 30 s")))) )
+    ; "MASC starts, the last start cannot be read", masc (Start_record.Unreadable "torn")
+    ; "the lane is off", Status.Lane_off
+    ; "no table", Status.Not_configured ];
   (* Times on disk are not whole seconds; one that was read is written and
      read again as it was. *)
   let on_disk = { entry with started_at = 1_791_000_000.123; attached_at = Some 1_791_000_002.457 } in
@@ -667,7 +807,7 @@ let a_bidi_host_report_reads_back_as_written () =
   refused "a lock that is neither held nor free"
     (with_field running_fields "lock_held" (`String "yes"));
   List.iter (fun name -> refused ("no " ^ name) (without ended_fields name))
-    [ "state"; "record"; "lock_held"; "detail"; "attach"; "message" ];
+    [ "state"; "record"; "lock_held"; "detail"; "attach"; "keeper"; "message" ];
   refused "a message that is no string" (with_field ended_fields "message" (`Int 3));
   (* A field more or a field twice is another layout. *)
   refused "a field this reader does not know" (`Assoc (("since", `Null) :: ended_fields));
@@ -692,6 +832,35 @@ let a_bidi_host_report_reads_back_as_written () =
     (with_attach (with_field attach_fields "arguments" (`String "anything goes")));
   refused "a message with a terminal control character"
     (with_field ended_fields "message" (`String "No BiDi browser host is running.\027"));
+  let masc_fields =
+    match List.assoc "keeper" (fields_of (with_keeper (masc Start_record.Absent) Record.Never_started)) with
+    | `Assoc fields -> fields
+    | _ -> fail "keeper is not an object"
+  in
+  let with_keeper_json keeper = with_field ended_fields "keeper" keeper in
+  let with_masc name value = with_keeper_json (with_field masc_fields name value) in
+  refused "a keeper this reader does not know" (with_keeper_json (`Assoc [ "kind", `String "operator" ]));
+  refused "a keeper that names no kind" (with_keeper_json (`Assoc []));
+  refused "a keeper that is no object" (with_keeper_json (`String "lane_off"));
+  refused "a lane that is off, with a port"
+    (with_keeper_json (`Assoc [ "kind", `String "lane_off"; "port", `Int 9222 ]));
+  List.iter (fun name -> refused ("MASC starts, with no " ^ name) (with_keeper_json (without masc_fields name)))
+    [ "port"; "profile"; "last_start" ];
+  refused "MASC starts, on no port" (with_masc "port" (`Int 0));
+  refused "MASC starts, on a port past the last" (with_masc "port" (`Int 65536));
+  refused "MASC starts, on a port that is text" (with_masc "port" (`String "9222"));
+  refused "MASC starts, with a profile that has a control character" (with_masc "profile" (`String "/a\027b"));
+  refused "a last start this reader does not know" (with_masc "last_start" (`Assoc [ "kind", `String "pending" ]));
+  refused "a last start recorded without its entry" (with_masc "last_start" (`Assoc [ "kind", `String "recorded" ]));
+  refused "a last start recorded with an entry its reader refuses"
+    (with_masc "last_start" (`Assoc [ "kind", `String "recorded"; "entry", `Assoc [] ]));
+  refused "an unreadable last start with a control character"
+    (with_masc "last_start" (`Assoc [ "kind", `String "unreadable"; "detail", `String "torn\n" ]));
+  refused "an absent last start with a detail"
+    (with_masc "last_start" (`Assoc [ "kind", `String "absent"; "detail", `String "torn" ]));
+  refused "a keeper field written twice" (with_keeper_json (`Assoc (masc_fields @ [ "port", `Int 9222 ])));
+  refused "a last start field written twice"
+    (with_masc "last_start" (`Assoc [ "kind", `String "absent"; "kind", `String "absent" ]));
   (* A Keeper is sent the state and the paragraph, not the record. *)
   let ended_observation = observation (Record.Ended (ended, ending)) in
   check bool "the summary is the state and its message" true
@@ -852,6 +1021,15 @@ let () = run "Onboarding observations"
                    a_launcher_that_cannot_be_run_as_it_is_is_installed_first;
                  test_case "a BiDi host that ended says why and what comes first" `Quick
                    a_bidi_host_that_ended_says_why_and_what_comes_first;
+                 test_case "a BiDi host that met another profile names both profiles" `Quick
+                   a_bidi_host_that_met_another_profile_names_both_profiles;
+                 test_case "where MASC starts the Firefox, the status says so" `Quick
+                   where_masc_starts_the_firefox_the_status_says_so;
+                 test_case "where MASC does not start the Firefox, the status says why" `Quick
+                   where_masc_does_not_start_the_firefox_the_status_says_why;
+                 test_case "a host address is on a port or not" `Quick a_host_address_is_on_a_port_or_not;
+                 test_case "doctor reads who starts the Firefox from runtime.toml" `Quick
+                   doctor_reads_who_starts_the_firefox_from_runtime_toml;
                  test_case "a record at the limit says the newest are kept" `Quick
                    a_record_at_the_limit_says_the_newest_are_kept;
                  test_case "a BiDi host that never got a session says what the next one needs" `Quick

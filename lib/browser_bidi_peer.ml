@@ -79,13 +79,19 @@ let profile t = t.profile
    a link (2026-10-09), so both paths are resolved before they are compared.
    A path that cannot be resolved is compared as written. *)
 let resolved path = match Unix.realpath path with resolved -> resolved | exception Unix.Unix_error _ -> path
+type profile_refusal = Profile_unsaid | Runs_profile of string
+
 let runs_profile t ~expected =
   match t.profile with
-  | None ->
-    Error (Printf.sprintf "Firefox did not say which profile it runs (moz:profile), so it cannot be \
-                           told to run %s" expected)
+  | None -> Error Profile_unsaid
   | Some actual when String.equal (resolved actual) (resolved expected) -> Ok ()
-  | Some actual -> Error (Printf.sprintf "this Firefox runs the profile %s, not %s" actual expected)
+  | Some actual -> Error (Runs_profile actual)
+
+let profile_refusal_message ~expected = function
+  | Profile_unsaid ->
+    Printf.sprintf "Firefox did not say which profile it runs (moz:profile), so it cannot be told to run %s"
+      expected
+  | Runs_profile actual -> Printf.sprintf "this Firefox runs the profile %s, not %s" actual expected
 (* The socket takes one message of at most this many bytes; a larger one ends
    the connection, and with it this client. *)
 let reply_limit_bytes = 8 * 1024 * 1024

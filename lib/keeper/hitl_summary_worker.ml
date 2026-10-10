@@ -1296,6 +1296,7 @@ let execute_prepared_flow_with_queue_ops_current
       ~net
       ~clock
       ~on_summary
+      ?on_usage
       (prepared : prepared_flow)
   =
   let bound_candidate = ref None in
@@ -1352,6 +1353,9 @@ let execute_prepared_flow_with_queue_ops_current
     Runtime_exact_lane_backpressure.observe ~resolved flow;
     match flow with
     | Ok success ->
+      (match on_usage with
+       | Some observe -> observe (Exact_output.flow_success_output success.transport_success).usage
+       | None -> ());
       handle_validated_success
         ~queue_ops
         prepared
@@ -1530,6 +1534,7 @@ let execute_prepared_flow_with_queue_ops
       ~net
       ~clock
       ~on_summary
+      ?on_usage
       (prepared : prepared_flow)
   =
   execute_prepared_flow_with_queue_ops_current
@@ -1538,6 +1543,7 @@ let execute_prepared_flow_with_queue_ops
     ~net
     ~clock
     ~on_summary
+    ?on_usage
     prepared
 ;;
 
@@ -1669,7 +1675,8 @@ let spawn_with
                  Keeper_approval_queue_rules_types.observed_refusal_to_yojson refusal
                | None -> `Null )
            ]));
-    let complete outcome output =
+    let observed_usage = ref None in
+    let complete ?usage outcome output =
       match
         Exact_lane_run_registry.mark_completed
           registry
@@ -1677,7 +1684,9 @@ let spawn_with
           ~outcome
           ~elapsed_s:(Time_compat.now () -. started_at)
           ~selected_slot:!selected_slot
+          ?usage
           ~output
+          ()
       with
       | Ok () -> ()
       | Error error ->
@@ -1699,6 +1708,9 @@ let spawn_with
             ~net
             ~clock
             ~on_summary
+            ~on_usage:(fun usage ->
+               observed_usage :=
+                 Option.map Exact_lane_run_registry.usage_of_api_usage usage)
             prepared
         with
         | Executed -> `Completed
@@ -1741,7 +1753,7 @@ let spawn_with
       let outcome, output = run_outcome_of_observed_summary
           ~last_outcome:!observed_outcome
           !observed_summary in
-      complete outcome output;
+      complete ?usage:!observed_usage outcome output;
       on_finish Conclusive_terminalization
     | `Cancelled (cancellation, cancellation_backtrace) ->
       complete Exact_lane_run_registry.Cancelled `Null;

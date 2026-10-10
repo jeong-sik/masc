@@ -138,17 +138,26 @@ val settle_completed_snapshot :
   ?on_captured:(base_path:string ->
                 keeper_name:string ->
                 completed:Keeper_board_attention_partition.t list -> unit) ->
+  ?yield:(unit -> unit) ->
   unit ->
   (settlement, string) result
 (** Owner-admission boundary. Capture the ordered completed partitions once,
     then durably settle that finite snapshot, cooperatively yielding between
-    records. Newly completed judgments remain for a continuation wake. Stop at
-    the first failed transition and leave later members untouched. A delivery
-    failure retains its evidence without consuming the candidate; if delivery
-    committed before partition settlement failed, replay preserves that effect.
-    The returned candidate id is the last settled member. A sync-unconfirmed
-    completion must pass explicit confirmation before delivery. This function never invokes
-    AGENT_CORE. *)
+    records — the between-members point runs [?yield], [Eio_guard.fair_yield]
+    by default, so other fibers remain runnable while the walk holds the
+    owner turn. Newly completed judgments remain for a continuation wake.
+    Stop at the first failed transition and leave later members untouched. A
+    delivery failure retains its evidence without consuming the candidate; if
+    delivery committed before partition settlement failed, replay preserves
+    that effect. The returned candidate id is the last settled member. A
+    sync-unconfirmed completion must pass explicit confirmation before
+    delivery. This function never invokes AGENT_CORE.
+    [?on_captured] fires exactly once, immediately after the capture and
+    before any member is settled, so a test can land a new completion or
+    observe the walk in that gap deterministically. [?yield] is the test seam
+    for the between-members cooperative point: a test passes a counting
+    substitute so the walk's fairness contract is observable without timing.
+    Production passes no hooks. *)
 
 module For_testing : sig
   type rearm_scheduler
@@ -194,22 +203,6 @@ module For_testing : sig
       [Durable_partition_invariant] reason instead of failing the pass.
       Exposed so a test can drive it without standing up the full Eio worker
       lifecycle. *)
-
-  val settle_completed_snapshot :
-    base_path:string ->
-    keeper_name:string ->
-    on_captured:(base_path:string ->
-                 keeper_name:string ->
-                 completed:Keeper_board_attention_partition.t list -> unit)
-                option ->
-    unit ->
-    (settlement, string) result
-  (** Drains exactly the completed list this call captures — completions that
-      arrive while it yields belong to the next admission snapshot. Yields
-      outside each durable transaction so other fibers stay runnable.
-      [?on_captured] fires immediately after the capture and before any
-      member is settled; a test hook lands new completions in exactly that
-      capture boundary, deterministically. Production passes no hook. *)
 
   val drain_outcome_label : drain_outcome -> string
   (** The drain verdict as one token, as logged. Retry_later keeps its reason

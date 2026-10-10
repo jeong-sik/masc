@@ -101,3 +101,25 @@ val recorded_firefox :
   leader_group:(int, string) result ->
   group_has_members:bool ->
   recorded_firefox
+
+(** When the last host ended, if it left its BiDi session in the Firefox on
+    [port] ([Session_left]) or that Firefox refused it one because it held
+    one ([Session_refused]): that Firefox refuses the next host too until it
+    is restarted (RFC-browser-keeper-firefox §3.5.4). [None] for a host that
+    served another port, one that ended with no session left, and one that
+    died or lost its connection before it could end its session: whether
+    that one's session is left is not known, and the next host finds out. *)
+val session_held_since : port:int -> Browser_bidi_host_status.report -> float option
+
+(** Whether the Firefox on a port is restarted for the session held in it. *)
+type restart =
+  | Restart
+  | Not_restarted of string  (** Why not, for the server log. *)
+
+(** [Restart] only for the Keeper Firefox MASC started on [port] that started
+    no later than [since]: one started after that host ended does not hold
+    its session. [recorded] is what {!recorded_firefox} found of [entry]. The
+    two times are wall-clock times of this machine; a clock set back between
+    them can make a later Firefox read as the older one. *)
+val restart_for_held_session :
+  Browser_keeper_firefox_record.entry -> port:int -> since:float -> recorded_firefox -> restart

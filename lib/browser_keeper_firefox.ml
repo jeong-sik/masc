@@ -157,3 +157,34 @@ let recorded_firefox (entry : Browser_keeper_firefox_record.entry) ~leader_start
           unproven
             (Printf.sprintf "which process group process %d is in cannot be told: %s" entry.group
                detail)))
+
+let session_held_since ~port (report : Browser_bidi_host_status.report) =
+  match report.state with
+  | Browser_bidi_host_record.Ended
+      (entry, { session = Browser_bidi_host_record.(Session_left | Session_refused); at; _ }) ->
+    (match running_host ~port entry.bidi_url with
+     | Host_running -> Some at
+     | Host_on_another_port _ | Host_address_unknown | Start_host _ | Launcher_not_ready _ -> None)
+  | Browser_bidi_host_record.Ended
+      (_, { session = Browser_bidi_host_record.(No_session_left | Session_unknown); _ })
+  | Browser_bidi_host_record.Never_started
+  | Browser_bidi_host_record.Record_missing_but_locked
+  | Browser_bidi_host_record.Running _
+  | Browser_bidi_host_record.Died _
+  | Browser_bidi_host_record.Unreadable _ -> None
+
+type restart = Restart | Not_restarted of string
+
+let restart_for_held_session (entry : Browser_keeper_firefox_record.entry) ~port ~since recorded =
+  if entry.port <> port then
+    Not_restarted
+      (Printf.sprintf "the Keeper Firefox MASC started is recorded on port %d, not this one" entry.port)
+  else
+    match recorded with
+    | Unproven why -> Not_restarted why
+    | Gone -> Not_restarted "the Keeper Firefox MASC started has ended, so another Firefox answers"
+    | Started_here when entry.started_at > since ->
+      Not_restarted
+        "the Keeper Firefox MASC started on it started after that host ended, so it does not hold \
+         that host's session"
+    | Started_here -> Restart

@@ -131,6 +131,12 @@ let recorded_firefox (entry : Firefox_record.entry) =
     ~leader_group:(Posix_spawn_detached.group_of_pid entry.group)
     ~group_has_members:(Posix_spawn_detached.group_id_has_members entry.group)
 
+(* For a group {!recorded_firefox} found [Started_here]: each signal goes
+   only while its number still names that group. *)
+let stop_recorded_group ~clock (entry : Firefox_record.entry) =
+  Posix_spawn_detached.stop_group ~clock ~grace_s:firefox_stop_grace_s
+    ~same_group:(same_group ~leader:entry.leader entry.group) entry.group
+
 (* A record names the only Keeper Firefox MASC knows it started. A second
    one is not started over a record whose group may still run: that would
    take the first one's only name, and Firefox refuses a profile another
@@ -238,9 +244,6 @@ let start_firefox ~sw ~net ~clock ~ready_timeout_s ~base_path (config : Browser_
     let firefox, leader = started in
     Result.map (fun how -> started, how) (await_port ~net ~clock ~ready_timeout_s ~base_path config ~leader firefox)
 
-let host_step ~base_path (config : Browser_configuration.live_bidi) =
-  Keeper_firefox.host_step ~port:config.port (Host_status.report (Host_status.observe ~base_path))
-
 (* A host that leaves in order writes its ending, then gives the lock up as
    it exits; a host started in between would be refused at the lock and
    end, leaving none. So the lock is waited for, this long at most. *)
@@ -282,6 +285,9 @@ type firefox =
   | Undetermined of string
   | Earlier_firefox of string
   | Failed of Keeper_firefox.firefox_failure * Posix_spawn_detached.stopped option
+  | Still_held of string
+      (** The Keeper Firefox MASC started, stopped to be started again, is not
+          shown to have let go of its group or its port; this says which. *)
 
 (* What one start did. The server log says it as it happens; a Keeper's
    request that asked for the start is answered from it
@@ -327,24 +333,105 @@ let started_firefox ~sw ~net ~clock ~ready_timeout_s ~base_path (config : Browse
     Ready None
   | Error (failure, stop) -> Failed (failure, stop)
 
+(* The Firefox on the port holds the session the last host left there, or
+   refused that host one because it held one, as of [since], when that host
+   ended; it refuses a host started now as well (RFC-browser-keeper-firefox
+   §3.5.4). Only the Keeper Firefox MASC started is restarted for it. *)
+let restart_target ~base_path (config : Browser_configuration.live_bidi) ~since =
+  match Firefox_record.read ~base_path with
+  | Firefox_record.Absent -> Error "MASC did not start it"
+  | Firefox_record.Unreadable detail ->
+    Error
+      (Printf.sprintf "the record of the Keeper Firefox MASC started, %s, cannot be read (%s)"
+         (Firefox_record.record_path ~base_path) detail)
+  | Firefox_record.Recorded entry ->
+    (match Keeper_firefox.restart_for_held_session entry ~port:config.port ~since (recorded_firefox entry) with
+     | Keeper_firefox.Restart -> Ok entry
+     | Keeper_firefox.Not_restarted why -> Error why)
+
+(* On Darwin a group reads empty once every member is a zombie or exiting
+   (Process_group_members), and an exiting process may not have closed its
+   descriptors yet: the listening port and the profile lock among them. So
+   the port of a Firefox stopped to be started again is waited for, this
+   long at most. Not measured; the wait ends at the first refused connect. *)
+let stopped_port_wait_s = 5.
+
+let await_port_closed ~net ~clock ~port =
+  let deadline = Monotonic_deadline.after ~seconds:stopped_port_wait_s in
+  let rec wait () =
+    match port_state ~net ~clock ~port with
+    | Nothing_listens -> Ok ()
+    | Answers when Monotonic_deadline.passed deadline ->
+      Error (Printf.sprintf "port %d still answers %.0f s after its group was empty" port stopped_port_wait_s)
+    | Unknown detail when Monotonic_deadline.passed deadline ->
+      Error (Printf.sprintf "whether port %d still answers cannot be told: %s" port detail)
+    | Answers | Unknown _ -> Eio.Time.sleep clock group_poll_s; wait ()
+  in
+  wait ()
+
+let fresh_firefox ~sw ~net ~clock ~ready_timeout_s ~base_path (config : Browser_configuration.live_bidi) =
+  match earlier_firefox ~base_path with
+  | Error why -> Earlier_firefox why
+  | Ok () -> started_firefox ~sw ~net ~clock ~ready_timeout_s ~base_path config
+
+(* Its profile is kept, so the operator's logins stay. A group that keeps
+   processes after the stop keeps its record. *)
+let restarted ~sw ~net ~clock ~ready_timeout_s ~base_path (config : Browser_configuration.live_bidi)
+    (entry : Firefox_record.entry) =
+  let stopped = stop_recorded_group ~clock entry in
+  Log.Server.info
+    "browser-lane: the last BiDi host ended with a session held in the Keeper Firefox MASC started \
+     on port %d (process group %d), which refuses the next host while it holds it, so that Firefox \
+     is stopped, to be started again. %s"
+    config.port entry.group (stop_message stopped);
+  let still_held why =
+    Still_held
+      (Printf.sprintf "the Keeper Firefox MASC started on port %d was stopped to be started again, and %s. %s"
+         config.port why (stop_message stopped)) in
+  if Posix_spawn_detached.group_id_has_members entry.group then
+    still_held (Printf.sprintf "process group %d still has processes" entry.group)
+  else (
+    forget ~base_path;
+    match await_port_closed ~net ~clock ~port:config.port with
+    | Error why -> still_held why
+    | Ok () -> fresh_firefox ~sw ~net ~clock ~ready_timeout_s ~base_path config)
+
+(* [held]: when the last host ended with a session held in the Firefox on
+   the port. A Firefox that is not restarted for it is left running, and a
+   host is started for it all the same: that Firefox may have started after
+   the record was written, and a host it refuses writes so. *)
+let firefox_for ~sw ~net ~clock ~ready_timeout_s ~base_path ~held (config : Browser_configuration.live_bidi) =
+  match port_state ~net ~clock ~port:config.port, held with
+  | Answers, None ->
+    Log.Server.info "browser-lane: port %d already answers, so no Keeper Firefox is started; %s"
+      config.port answering_port_line;
+    Ready None
+  | Answers, Some since ->
+    (match restart_target ~base_path config ~since with
+     | Error why ->
+       Log.Server.warn
+         "browser-lane: port %d answers, and the last BiDi host ended with a session held in the \
+          Firefox there, which refuses the next host while it holds it. That Firefox is not \
+          restarted, since %s. A host is started for it all the same; if that host is refused too, \
+          close that Firefox."
+         config.port why;
+       Ready None
+     | Ok entry -> restarted ~sw ~net ~clock ~ready_timeout_s ~base_path config entry)
+  | Unknown detail, (Some _ | None) -> Undetermined detail
+  | Nothing_listens, (Some _ | None) -> fresh_firefox ~sw ~net ~clock ~ready_timeout_s ~base_path config
+
+let host_report ~base_path = Host_status.report (Host_status.observe ~base_path)
+
 let start_both ~sw ~env ~ready_timeout_s ~ending_host_wait_s ~base_path ~launcher
     (config : Browser_configuration.live_bidi) =
   let net = Eio.Stdenv.net env and clock = Eio.Stdenv.clock env in
   match await_free_lock ~clock ~wait_s:ending_host_wait_s ~base_path with
   | Error why -> neither attempt why
   | Ok () ->
-    let firefox =
-      match port_state ~net ~clock ~port:config.port with
-      | Answers ->
-        Log.Server.info "browser-lane: port %d already answers, so no Keeper Firefox is started; %s"
-          config.port answering_port_line;
-        Ready None
-      | Unknown detail -> Undetermined detail
-      | Nothing_listens ->
-        (match earlier_firefox ~base_path with
-         | Error why -> Earlier_firefox why
-         | Ok () -> started_firefox ~sw ~net ~clock ~ready_timeout_s ~base_path config)
-    in
+    (* Read once the lock is free: a host that ended or started during the
+       wait is the last host now. *)
+    let held = Keeper_firefox.session_held_since ~port:config.port (host_report ~base_path) in
+    let firefox = firefox_for ~sw ~net ~clock ~ready_timeout_s ~base_path ~held config in
     (match firefox with
      | Ready started_here ->
        (match start_host ~sw ~base_path ~launcher config with
@@ -359,6 +446,7 @@ let start_both ~sw ~env ~ready_timeout_s ~ending_host_wait_s ~base_path ~launche
                   forget_once_empty ~base_path started.pid;
                   " The Keeper Firefox started for it is left with no host. " ^ stop_message stopped)))
      | Earlier_firefox why -> neither operator why
+     | Still_held why -> neither attempt why
      | Undetermined detail ->
        not_started
          (attempt @@ Printf.sprintf
@@ -399,7 +487,7 @@ let leave_running ~env (config : Browser_configuration.live_bidi) =
 (* Firefox opens a port any local process may drive (RFC-browser-keeper-firefox
    §5), so it is started only when a host is started with it. *)
 let bring_up ~sw ~env ~ready_timeout_s ~ending_host_wait_s ~base_path (config : Browser_configuration.live_bidi) =
-  match host_step ~base_path config with
+  match Keeper_firefox.host_step ~port:config.port (host_report ~base_path) with
   | Keeper_firefox.Launcher_not_ready missing -> neither operator (Keeper_firefox.launcher_missing_message missing)
   | Keeper_firefox.Host_on_another_port address ->
     neither operator (Keeper_firefox.host_on_another_port_message ~port:config.port address)
@@ -424,10 +512,7 @@ let stop_recorded ~env ~base_path ~why =
   | Firefox_record.Recorded entry ->
     (match recorded_firefox entry with
      | Keeper_firefox.Started_here ->
-       let stopped =
-         Posix_spawn_detached.stop_group ~clock:(Eio.Stdenv.clock env) ~grace_s:firefox_stop_grace_s
-           ~same_group:(same_group ~leader:entry.leader entry.group) entry.group
-       in
+       let stopped = stop_recorded_group ~clock:(Eio.Stdenv.clock env) entry in
        Log.Server.info
          "browser-lane: %s, so the Keeper Firefox MASC started on port %d (process group %d) is \
           stopped. %s"

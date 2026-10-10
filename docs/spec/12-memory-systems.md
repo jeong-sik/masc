@@ -225,6 +225,30 @@ read it, the journal must show every revision written since. A missing line
 refuses the commit, and the input stays pending for a decision on current
 Memory. Search over the current snapshot is not affected.
 
+## Demand retrieval across revisions
+
+A historical admission observation can locate a current successor through
+explicitly committed revision edges. The reader follows chronological snapshot
+transitions, including branches and multiple revisions. Missing transition
+evidence is unresolved; retirement followed by unrelated identical-text
+recreation does not revive a path. Structural candidates are not yet answers.
+
+For a requested query, the successor selector judges whether the current target
+addresses the same subject, event and applicable scope as the historical lookup
+source. Corrected facts need not repeat the old content. For example, an old
+owner-approval observation may locate today's two-approval rule for the same
+release. The judgment receives the query, original observation and target,
+committed path and current target. Keeper exclusions and the configured Jev
+lane apply; the absorption feature switch does not control this retrieval.
+
+The request and response are durably recorded before using a judgment. A second
+coherent read must retain the exact candidate witness before publication. Current
+result bodies and identities come from current targets, with historical lookup
+provenance clearly separated. Multiple observations do not duplicate the same
+current target in a result. Model failure, uncertain scope or changed evidence
+leave additional retrieval explicitly unresolved while preserving direct matches;
+they must not turn into an authoritative no-match answer.
+
 ## See also
 
 - [Keeper State Ownership](../KEEPER-STATE-OWNERSHIP.md)

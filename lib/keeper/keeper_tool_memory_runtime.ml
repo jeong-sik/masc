@@ -74,6 +74,7 @@ type fact_match =
   ; basis : Keeper_memory_os_types.basis
   ; store : fact_store
   ; lookup_evidence : Keeper_memory_os_current.admission_recall_binding option
+  ; successor_evidence : Keeper_memory_os_current.successor_recall_candidate option
   }
 
 (* The durable stores a search reads. Either failing is the store, not the
@@ -119,14 +120,6 @@ let read_current_facts ~keepers_dir ~keeper_id =
   with
   | Ok None -> Ok []
   | Ok (Some snapshot) -> Ok snapshot.facts
-  | Error detail -> Error (Snapshot_read_failed detail)
-;;
-
-let read_current_with_recall ~keepers_dir ~keeper_id =
-  match Domain_pool_ref.submit_io_or_inline (fun () ->
-    Keeper_memory_os_current.read_with_admission_recall_status_for_keepers_dir ~keepers_dir ~keeper_id) with
-  | Ok (snapshot, bindings) ->
-    Ok ((match snapshot with None -> [] | Some snapshot -> snapshot.facts), bindings)
   | Error detail -> Error (Snapshot_read_failed detail)
 ;;
 
@@ -272,6 +265,7 @@ let search_durable_facts
     ; basis = fact.basis
     ; store = Ordinary_current
     ; lookup_evidence
+    ; successor_evidence = None
     }
   in
   let source_match (fact : Keeper_memory_source_current.fact) : fact_match =
@@ -281,6 +275,7 @@ let search_durable_facts
     ; basis = Keeper_memory_os_types.Observed Keeper_memory_os_types.Transcript
     ; store = Source_bound_current
     ; lookup_evidence = None
+    ; successor_evidence = None
     }
   in
   let deduplicate_targets matches =
@@ -313,6 +308,68 @@ let search_durable_facts
            ])) )
 ;;
 
+let search_current_with_successors ~clock ~config ~keepers_dir ~(meta : keeper_meta) ~query ~limit =
+  let module Current = Keeper_memory_os_current in
+  let module Selector = Keeper_memory_successor_selection in
+  match Domain_pool_ref.submit_io_or_inline (fun () ->
+      Current.read_successor_recall_for_keepers_dir ~keepers_dir ~keeper_id:meta.name) with
+  | Error detail -> Error (Snapshot_read_failed detail)
+  | Ok state ->
+    let relevant claim_of rows = if query="" then [] else
+      let whole,fragments = answering ~claim_of ~query rows in whole @ fragments in
+    let candidates = relevant (fun (candidate : Current.successor_recall_candidate) ->
+      candidate.binding.source_fact.claim) state.successor_candidates in
+    let judged = Selector.run ~clock ~config ~keepers_dir ~keeper_id:meta.name ~query
+      ~snapshot:state.snapshot candidates in
+    let fresh = if candidates=[] then Ok state else
+      Domain_pool_ref.submit_io_or_inline (fun () ->
+        Current.read_successor_recall_for_keepers_dir ~keepers_dir ~keeper_id:meta.name) in
+    (match fresh with
+    | Error detail -> Error (Snapshot_read_failed detail)
+    | Ok fresh ->
+    let judged = Selector.revalidate ~snapshot:state.snapshot ~candidates ~current:fresh judged in
+    let facts = match fresh.snapshot with None -> [] | Some snapshot -> snapshot.Current.facts in
+    let history_unresolved = relevant (fun (row : Current.recall_unresolved) ->
+      row.binding.source_fact.claim) fresh.unresolved
+      |> List.filter (fun (row : Current.recall_unresolved) -> match row.reason with
+        | Current.Retired_without_successor _ -> false
+        | History_unavailable _ | Missing_transition _ | Invalid_transition _ | Unrecorded_lineage _ -> true) in
+    let unresolved = List.map (fun ((candidate : Current.successor_recall_candidate),issue) -> `Assoc
+      ["request_id",`String candidate.Current.binding.candidate_id.request_id;
+       "issue",Selector.issue_to_json issue]) judged.unresolved
+      @ List.map (fun (row : Current.recall_unresolved) -> `Assoc
+        ["request_id",`String row.binding.candidate_id.request_id;
+         "issue",Current.recall_unresolved_reason_to_json row.reason]) history_unresolved in
+    let unresolved = match fresh.receipt_verification with
+      | Ok () -> unresolved
+      | Error detail -> `Assoc ["issue", `Assoc
+          ["kind", `String "receipt_unavailable"; "detail", `String detail]] :: unresolved in
+    let extra_fields = if unresolved=[] then [] else
+      ["successor_recall",`Assoc ["status",`String "incomplete";"unresolved",`List unresolved;
+        "guidance",`String "Some historical lookup paths could not be resolved. Existing direct results remain usable; absence of further results is not evidence that no current successor exists."]] in
+    (* Keep direct results even when judging a successor fails. Deduplication
+       and the caller's limit happen only after merging both query tiers. *)
+    match search_durable_facts ~config ~keepers_dir ~meta ~facts
+      ~recall_bindings:fresh.direct_bindings ~query ~limit with
+    | Error _ as error -> error
+    | Ok (direct,total,deferred,corpus_revision) ->
+      let successors = List.map (fun (candidate : Current.successor_recall_candidate) ->
+        let fact = candidate.target in
+        {identity=Ordinary_memory_id {memory_id=Keeper_memory_os_types.memory_id fact;origin=fact.origin.kind};
+         claim=fact.claim;category=Keeper_memory_os_types.category_to_string fact.category;
+         basis=fact.basis;store=Ordinary_current;lookup_evidence=Some candidate.binding;
+         successor_evidence=Some candidate}) judged.selected in
+      let whole,fragments = if successors=[] then direct,[] else
+        answering ~claim_of:fact_match_lookup_text ~query (direct @ successors) in
+      let _,rev = List.fold_left (fun (seen,kept) (matched : fact_match) -> match matched.identity with
+        | Source_sha256 _ -> seen,matched::kept
+        | Ordinary_memory_id {memory_id;_} -> if StringSet.mem memory_id seen then seen,kept
+          else StringSet.add memory_id seen,matched::kept) (StringSet.empty,[]) (whole @ fragments) in
+      let merged = List.rev rev in
+      let merged = match limit with None -> merged | Some limit -> take limit merged in
+      Ok (facts,merged,total,deferred,extra_fields,unresolved<>[],corpus_revision))
+;;
+
 let fact_match_to_json (m : fact_match) : Yojson.Safe.t =
   `Assoc
     ([ "text", `String m.claim
@@ -320,9 +377,15 @@ let fact_match_to_json (m : fact_match) : Yojson.Safe.t =
      ; "basis", Keeper_memory_os_types.basis_to_json m.basis
      ; "store", `String (fact_store_to_string m.store)
      ]
-     @ (match m.lookup_evidence with
+     @ (match m.successor_evidence with
         | None -> []
-        | Some binding ->
+        | Some evidence -> ["successor_lookup_evidence", `Assoc
+            ["kind",`String "historical_source_with_judged_committed_successor";
+             "evidence",Keeper_memory_successor_selection.candidate_to_json evidence;
+             "guidance",`String "Historical lookup provenance only. Returned text and memory_id describe the current target, whose policy may differ from the historical source."]])
+     @ (match m.lookup_evidence, m.successor_evidence with
+        | None, _ | Some _, Some _ -> []
+        | Some binding, None ->
           [ "lookup_evidence", `Assoc
               [ "kind", `String "historical_admission_source"
               ; "request_id", `String binding.candidate_id.request_id
@@ -802,6 +865,7 @@ let current_page_cursor ~revision ~offset =
 
 let keeper_memory_search_with_outcome
       ?turn_ref
+      ?clock
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(ctx_work : working_context)
@@ -933,64 +997,52 @@ let keeper_memory_search_with_outcome
                           "source_sha256", `String source.sha256]) sources)
             ; "guidance", `String "Query-matching stored claims could not be verified and were withheld. Retry relevant retrieval before drawing a negative conclusion; no claim body is supplied."
             ] ] in
-    let recall_verification_fields = function
-      | Ok _ -> []
-      | Error detail ->
-        [ "admission_lookup_verification", `Assoc
-            [ "status", `String "incomplete"
-            ; "detail", `String detail
-            ; "guidance", `String "Historical admission aliases could not be verified and were withheld. Direct current and source-bound claims were searched; do not infer absence from an unmatched historical alias."
-            ] ] in
-    let recall_bindings = function Ok bindings -> bindings | Error _ -> [] in
     let current_stores cursor =
-      match read_current_with_recall ~keepers_dir ~keeper_id:meta.name with
+      match search_current_with_successors ~clock ~config ~keepers_dir ~meta ~query ~limit:None with
       | Error _ as error -> error
-      | Ok (facts, recall_status) ->
-        (* Rank the complete current answer before slicing. The per-page
-           bound must not discard the facts later pages need. *)
-        (match search_durable_facts ~config ~keepers_dir ~meta ~facts
-                 ~recall_bindings:(recall_bindings recall_status) ~query ~limit:None with
+      | Ok (_facts, matches, fact_total, deferred_sources, successor_fields, successor_incomplete, corpus_revision) ->
+        (* Rank the complete current answer, successors included, before
+           slicing. The per-page bound must not discard the facts later
+           pages need. *)
+        let revision = Snapshot_protocol.revision_of_json
+            ~namespace:"keeper-current-memory-search-page"
+            (`Assoc [ "corpus", `String (corpus_revision ())
+                    ; "keeper", `String meta.name
+                    ; "workspace", `String config.base_path
+                    ; "query", `String query
+                    ; "matches", `List (List.map fact_match_to_json matches) ]) in
+        (match current_page_offset ~revision ~count:(List.length matches) cursor with
          | Error _ as error -> error
-         | Ok (matches, fact_total, deferred_sources, corpus_revision) ->
-           let revision = Snapshot_protocol.revision_of_json
-               ~namespace:"keeper-current-memory-search-page"
-               (`Assoc [ "corpus", `String (corpus_revision ())
-                       ; "keeper", `String meta.name
-                       ; "workspace", `String config.base_path
-                       ; "query", `String query
-                       ; "matches", `List (List.map fact_match_to_json matches) ]) in
-           (match current_page_offset ~revision ~count:(List.length matches) cursor with
-            | Error _ as error -> error
-            | Ok offset ->
-              let fact_matches = take limit (List.drop offset matches) in
-              let next_offset = offset + List.length fact_matches in
-              let truncated = next_offset < List.length matches in
-              let page_fields =
-                [ "truncated", `Bool truncated; "revision", `String revision ]
-                @ (if truncated then
-                     [ "next_cursor", `String (current_page_cursor ~revision ~offset:next_offset) ]
-                   else []) in
-              Ok
-                { output =
-                    durable_json
-                      ~fact_jsons:(List.map fact_match_to_json fact_matches)
-                      ~fact_total
-                      ~total_matches:(List.length fact_matches)
-                      ~extra_matches:[]
-                      ~read_errors:(deferred_sources <> [] || Result.is_error recall_status)
-                      ~read_error_fields:(page_fields @ source_verification_fields deferred_sources
-                         @ recall_verification_fields recall_status)
-                ; match_count = List.length fact_matches
-                ; durable_candidates = Some fact_total
-                ; read_errors = deferred_sources <> [] || Result.is_error recall_status
-                ; matched_memory_ids =
-                    List.filter_map
-                      (fun (matched : fact_match) ->
-                         match matched.identity with
-                         | Ordinary_memory_id { memory_id; _ } -> Some memory_id
-                         | Source_sha256 _ -> None)
-                      fact_matches
-                }))
+         | Ok offset ->
+           let fact_matches = take limit (List.drop offset matches) in
+           let next_offset = offset + List.length fact_matches in
+           let truncated = next_offset < List.length matches in
+           let page_fields =
+             [ "truncated", `Bool truncated; "revision", `String revision ]
+             @ (if truncated then
+                  [ "next_cursor", `String (current_page_cursor ~revision ~offset:next_offset) ]
+                else []) in
+           Ok
+             { output =
+                 durable_json
+                   ~fact_jsons:(List.map fact_match_to_json fact_matches)
+                   ~fact_total
+                   ~total_matches:(List.length fact_matches)
+                   ~extra_matches:[]
+                   ~read_errors:(deferred_sources <> [] || successor_incomplete)
+                   ~read_error_fields:(page_fields @ source_verification_fields deferred_sources
+                      @ successor_fields)
+             ; match_count = List.length fact_matches
+             ; durable_candidates = Some fact_total
+             ; read_errors = deferred_sources <> [] || successor_incomplete
+             ; matched_memory_ids =
+                 List.filter_map
+                   (fun (matched : fact_match) ->
+                      match matched.identity with
+                      | Ordinary_memory_id { memory_id; _ } -> Some memory_id
+                      | Source_sha256 _ -> None)
+                   fact_matches
+             })
     in
     (* Source=all combines current facts, absorbed/dropped rows, and history. The match
        tier before the store order ({!answering}): a weaker current fact does
@@ -999,13 +1051,10 @@ let keeper_memory_search_with_outcome
        never silently widens into absorbed history. Only ordinary current facts are
        retrievals (RFC-0418); an absorbed row leaves no Retrieved event. *)
     let all_stores () =
-      match read_current_with_recall ~keepers_dir ~keeper_id:meta.name with
+      match search_current_with_successors ~clock ~config ~keepers_dir ~meta ~query ~limit:(Some limit) with
       | Error _ as error -> error
-      | Ok (facts, recall_status) ->
-        (match search_durable_facts ~config ~keepers_dir ~meta ~facts
-                 ~recall_bindings:(recall_bindings recall_status) ~query ~limit:(Some limit) with
-         | Error _ as error -> error
-         | Ok (fact_matches, fact_total, deferred_sources, _corpus_revision) ->
+      | Ok (facts, fact_matches, fact_total, deferred_sources, successor_fields, successor_incomplete, _corpus_revision) ->
+        (
            (* A librarian made one claim of the rows it absorbed (RFC-0456
               §4.2). When that claim answers this search too, the rows say
               the same thing again and are left out, so the claim is not
@@ -1060,7 +1109,7 @@ let keeper_memory_search_with_outcome
            let selected = take limit (whole_query @ fragments) in
            let read_errors =
              deferred_sources <> []
-             || Result.is_error recall_status
+             || successor_incomplete
              || history_has_read_errors history
              || absorbed.unreadable <> []
              || absorbed.unreadable_events <> []
@@ -1086,7 +1135,7 @@ let keeper_memory_search_with_outcome
                       @ absorbed_fields ~absorbed ~unavailable
                       @ history_read_error_fields history
                       @ source_verification_fields deferred_sources
-                      @ recall_verification_fields recall_status)
+                      @ successor_fields)
              ; match_count = List.length selected
              ; durable_candidates = Some (fact_total + absorbed.candidates + dropped_total)
              ; read_errors

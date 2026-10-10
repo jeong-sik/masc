@@ -1460,6 +1460,7 @@ type recall_journal_projection =
   { revisions : Recall_revision_set.t
   ; retired : int Identity_map.t
   ; highest : int
+  ; rewrites_rev : Yojson.Safe.t list
   ; invalid : string option
   }
 
@@ -1471,7 +1472,7 @@ type recall_journal_cache =
 
 let recall_journal_cache = Atomic.make Identity_map.empty
 let empty_recall_projection =
-  {revisions=Recall_revision_set.empty;retired=Identity_map.empty;highest=0;invalid=None}
+  {revisions=Recall_revision_set.empty;retired=Identity_map.empty;highest=0;rewrites_rev=[];invalid=None}
 
 let rec publish_recall_cache path value =
   let before = Atomic.get recall_journal_cache in
@@ -1504,10 +1505,12 @@ let project_recall_entry ~oldest projection = function
     | Ok (Journal_committed {revision;change;_}) ->
       if revision <= oldest then empty_recall_projection
       else
+        let rewrote = journal_line_rewrote json in
         let revisions =
-          if journal_line_rewrote json
-          then Recall_revision_set.add revision projection.revisions
+          if rewrote then Recall_revision_set.add revision projection.revisions
           else projection.revisions in
+        let rewrites_rev =
+          if rewrote then json :: projection.rewrites_rev else projection.rewrites_rev in
         let added = Set_util.StringSet.of_list (List.map memory_id change.added) in
         let retired = List.fold_left (fun retired fact ->
           let id = memory_id fact in
@@ -1515,7 +1518,7 @@ let project_recall_entry ~oldest projection = function
           else Identity_map.update id
             (function None -> Some revision | Some prior -> Some (max prior revision)) retired)
           projection.retired change.removed in
-        {projection with revisions;retired;highest=max projection.highest revision}
+        {projection with revisions;retired;rewrites_rev;highest=max projection.highest revision}
 
 let observe_recall_append path (observation : Fs_compat.private_jsonl_append_observation) json =
   match Identity_map.find_opt path (Atomic.get recall_journal_cache) with
@@ -2894,22 +2897,13 @@ let committed_explicit_candidates ~keepers_dir ~keeper_id ~queue_generation =
 (* Bindings are only recalled in the incarnation they were committed against.
    The snapshot hash proves the binding's birth; complete later journal revisions
    prove no intervening retirement, even if the exact claim was re-added. *)
-let live_admission_bindings ~keepers_dir ~keeper_id (snapshot : t) bindings =
-  let current_ids = Set_util.StringSet.of_list (List.map memory_id snapshot.facts) in
-  let applicable = List.filter (fun (_, binding) ->
-    Set_util.StringSet.mem binding.target_memory_id current_ids) bindings in
-  let oldest = List.fold_left (fun oldest (revision, _) -> min oldest revision)
-    snapshot.revision applicable in
-  if oldest = snapshot.revision then Ok (List.map snd applicable)
-  else
-    Domain_pool_ref.submit_io_or_inline (fun () ->
-      let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+let read_recall_journal_projection ~path ~oldest =
       let inspect () =
         try Ok (Unix.lstat path) with
         | Unix.Unix_error (error, _, _) -> Error (Unix.error_message error) in
       let* before = inspect () in
       let cached = Identity_map.find_opt path (Atomic.get recall_journal_cache) in
-      let* projection = match cached with
+      match cached with
         | Some cached when cached.oldest=oldest && same_file_identity cached.identity before ->
           Ok cached.projection
         | Some _ | None ->
@@ -2928,7 +2922,20 @@ let live_admission_bindings ~keepers_dir ~keeper_id (snapshot : t) bindings =
             Error "admission recall journal changed during full verification"
           else (
             publish_recall_cache path (Some {oldest;identity=after;projection});
-            Ok projection) in
+            Ok projection)
+;;
+
+let live_admission_bindings ~keepers_dir ~keeper_id (snapshot : t) bindings =
+  let current_ids = Set_util.StringSet.of_list (List.map memory_id snapshot.facts) in
+  let applicable = List.filter (fun (_, binding) ->
+    Set_util.StringSet.mem binding.target_memory_id current_ids) bindings in
+  let oldest = List.fold_left (fun oldest (revision, _) -> min oldest revision)
+    snapshot.revision applicable in
+  if oldest = snapshot.revision then Ok (List.map snd applicable)
+  else
+    Domain_pool_ref.submit_io_or_inline (fun () ->
+      let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+      let* projection = read_recall_journal_projection ~path ~oldest in
       let* () = match projection.invalid with None -> Ok () | Some detail -> Error detail in
       if projection.highest > snapshot.revision then
         Error "admission recall journal is ahead of the current snapshot"
@@ -2959,6 +2966,187 @@ let read_with_admission_recall_for_keepers_dir ~keepers_dir ~keeper_id =
     read_with_admission_recall_status_for_keepers_dir ~keepers_dir ~keeper_id in
   let+ bindings = bindings in
   snapshot, bindings
+;;
+
+type recall_unresolved_reason =
+  | History_unavailable of string
+  | Missing_transition of int
+  | Invalid_transition of int
+  | Unrecorded_lineage of int
+  | Retired_without_successor of int
+
+type recall_unresolved =
+  { binding : admission_recall_binding
+  ; reason : recall_unresolved_reason
+  }
+
+type successor_recall_candidate =
+  { binding : admission_recall_binding
+  ; born_revision : int
+  ; original_target : Keeper_memory_os_types.fact
+  ; target : Keeper_memory_os_types.fact
+  ; path : revision_evidence list
+  }
+
+type successor_recall =
+  { receipt_verification : (unit, string) result
+  ; snapshot : t option
+  ; direct_bindings : admission_recall_binding list
+  ; successor_candidates : successor_recall_candidate list
+  ; unresolved : recall_unresolved list
+  }
+
+let revision_evidence_to_json (row : revision_evidence) =
+  `Assoc ["snapshot_revision", `Int row.snapshot_revision; "recorded_at", `Float row.recorded_at;
+    "source", source_to_json row.source;
+    "commit_effect", (match row.commit_effect with None -> `Null
+      | Some Rewritten -> `String "rewritten" | Some Unchanged -> `String "unchanged");
+    "revision_links", (match row.revision_links with None -> `Null | Some links -> revision_links_to_json links);
+    "removed_memory_ids", `List (List.map (fun id -> `String id) row.removed_memory_ids);
+    "added_memory_ids", `List (List.map (fun id -> `String id) row.added_memory_ids)]
+;;
+
+let recall_unresolved_reason_to_string = function
+  | History_unavailable detail -> "history unavailable: " ^ detail
+  | Missing_transition revision -> Printf.sprintf "missing transition at revision %d" revision
+  | Invalid_transition revision -> Printf.sprintf "invalid transition at revision %d" revision
+  | Unrecorded_lineage revision -> Printf.sprintf "lineage unrecorded at revision %d" revision
+  | Retired_without_successor revision -> Printf.sprintf "retired without successor at revision %d" revision
+;;
+
+let recall_unresolved_reason_to_json reason =
+  let kind, fields = match reason with
+    | History_unavailable detail -> "history_unavailable", ["detail", `String detail]
+    | Missing_transition revision -> "missing_transition", ["revision", `Int revision]
+    | Invalid_transition revision -> "invalid_transition", ["revision", `Int revision]
+    | Unrecorded_lineage revision -> "unrecorded_lineage", ["revision", `Int revision]
+    | Retired_without_successor revision -> "retired_without_successor", ["revision", `Int revision] in
+  `Assoc (("kind", `String kind) :: fields)
+;;
+
+type recall_transition = { evidence : revision_evidence; removed : fact list }
+
+let read_recall_transitions ~keepers_dir ~keeper_id ~after_revision ~through_revision =
+  let* pending = read_retraction_plan_receipt ~keepers_dir ~keeper_id in
+  match pending with
+  | Some _ -> Error "successor recall journal finalization is pending"
+  | None ->
+    Domain_pool_ref.submit_io_or_inline (fun () ->
+      let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+      let* projection = read_recall_journal_projection ~path ~oldest:after_revision in
+      let* () = match projection.invalid with None -> Ok () | Some detail -> Error detail in
+      if projection.highest > through_revision then Error "journal exceeds current revision"
+      else
+        (* Keep every actual rewrite, including duplicate revisions: the pure
+           validator must still distinguish equal replay from conflicting
+           transition evidence. Unchanged observations cannot supply edges. *)
+        let rec decode acc = function
+          | [] -> Ok (List.rev acc)
+          | json :: rest ->
+            let* entry = journal_entry_of_json json in
+            match entry, json with
+            | Journal_committed {revision;recorded_at;source;change;_}, `Assoc fields ->
+              let* commit_effect = journal_commit_effect fields in
+              let* revision_links = journal_revision_links fields in
+              let row = {evidence={snapshot_revision=revision;recorded_at;source;commit_effect;
+                revision_links;removed_memory_ids=List.map memory_id change.removed;
+                added_memory_ids=List.map memory_id change.added};removed=change.removed} in
+              decode (row::acc) rest
+            | _ -> Error "cached rewrite is not a committed journal record" in
+        decode [] (List.rev projection.rewrites_rev))
+;;
+
+(* Pure chronological projection. Each path follows one incarnation; only a
+   declared edge at its retirement can continue it. Unrelated later additions
+   cannot restart a path that was removed from the frontier. *)
+let project_successor_recall (current : t) bindings history =
+  let transitions = match history with
+    | Error _ -> []
+    | Ok rows -> List.filter (fun row -> row.evidence.commit_effect=Some Rewritten) rows in
+  (* Reconstruct each transition's after-state from current identities. A
+     later unrelated addition must not make an earlier phantom edge live. *)
+  let after_states = Hashtbl.create 16 in
+  let active = ref (Set_util.StringSet.of_list (List.map memory_id current.facts)) in
+  List.rev transitions |> List.iter (fun row ->
+    let revision = row.evidence.snapshot_revision in
+    if not (Hashtbl.mem after_states revision) then (
+      Hashtbl.add after_states revision !active;
+      let before_additions = List.fold_left (fun ids id -> Set_util.StringSet.remove id ids)
+        !active row.evidence.added_memory_ids in
+      active := List.fold_left (fun ids id -> Set_util.StringSet.add id ids)
+        before_additions row.evidence.removed_memory_ids));
+  let direct = ref [] and candidates = ref [] and unresolved = ref [] in
+  List.iter (fun (born_revision, (binding : admission_recall_binding)) ->
+    let note reason = unresolved := {binding; reason} :: !unresolved in
+    let later = List.filter (fun row -> row.evidence.snapshot_revision > born_revision) transitions in
+    let rec validate expected acc = function
+      | [] -> if expected = current.revision then Ok (List.rev acc)
+        else Error (Missing_transition (expected+1))
+      | row :: rest ->
+        let revision = row.evidence.snapshot_revision in
+        if revision = expected then
+          (match acc with
+           | prior :: _ when prior = row -> validate expected acc rest
+           | _ -> Error (Invalid_transition revision))
+        else if revision <> expected+1 then Error (Missing_transition (expected+1))
+        else validate revision (row::acc) rest in
+    let coverage = if born_revision=current.revision then Ok [] else
+      match history with Error detail -> Error (History_unavailable detail)
+      | Ok _ -> validate born_revision [] later in
+    match coverage with
+    | Error reason -> note reason
+    | Ok rows ->
+      let frontier = List.fold_left (fun frontier row ->
+        List.concat_map (fun (identity, original, path) ->
+          if not (List.mem identity row.evidence.removed_memory_ids)
+             || List.mem identity row.evidence.added_memory_ids then [identity, original, path]
+          else
+            match List.find_opt (fun fact -> memory_id fact=identity) row.removed with
+            | None -> note (Invalid_transition row.evidence.snapshot_revision); []
+            | Some removed ->
+              match row.evidence.revision_links with
+              | None -> note (Unrecorded_lineage row.evidence.snapshot_revision); []
+              | Some links ->
+                let successors = List.filter (fun (link : revision) -> link.superseded=identity) links in
+                if successors=[] then (note (Retired_without_successor row.evidence.snapshot_revision); [])
+                else List.filter_map (fun (link : revision) ->
+                  let after = Hashtbl.find after_states row.evidence.snapshot_revision in
+                  if Set_util.StringSet.mem identity after
+                     || not (Set_util.StringSet.mem link.superseded_by after) then (
+                    note (Invalid_transition row.evidence.snapshot_revision); None)
+                  else Some (link.superseded_by,
+                    (match original with None -> Some removed | Some _ -> original),
+                    row.evidence::path)) successors) frontier
+        |> List.sort_uniq compare) [binding.target_memory_id,None,[]] rows in
+      List.iter (fun (identity, original, path) ->
+        match List.find_opt (fun fact -> memory_id fact=identity) current.facts with
+        | None -> note (Invalid_transition current.revision)
+        | Some target ->
+          match original, path with
+          | None, [] -> direct := binding :: !direct
+          | Some original_target, _ :: _ ->
+            candidates := {binding; born_revision; original_target; target; path=List.rev path} :: !candidates
+          | None, _ :: _ | Some _, [] -> note (Invalid_transition current.revision)) frontier) bindings;
+  {receipt_verification=Ok (); snapshot=Some current; direct_bindings=List.rev !direct;
+   successor_candidates=List.rev !candidates; unresolved=List.sort_uniq compare !unresolved}
+;;
+
+let read_successor_recall_for_keepers_dir ~keepers_dir ~keeper_id =
+  with_receipt_status ~strict_snapshot:true ~keepers_dir ~keeper_id (fun snapshot receipts ->
+    match snapshot, receipts with
+    | snapshot, Error detail -> Ok {receipt_verification=Error detail; snapshot;
+        direct_bindings=[]; successor_candidates=[]; unresolved=[]}
+    | None, Ok _ -> Ok {receipt_verification=Ok (); snapshot=None; direct_bindings=[]; successor_candidates=[]; unresolved=[]}
+    | Some current, Ok receipts ->
+      let bindings = List.filter_map (function
+        | Committed {range_id=Explicit_candidate_with_recall binding; snapshot_revision; _} ->
+          Some (snapshot_revision,binding)
+        | Committed _ | Prepared _ -> None) receipts in
+      let oldest = List.fold_left (fun earliest (revision, _) -> min earliest revision)
+        current.revision bindings in
+      let history = if oldest=current.revision then Ok [] else
+        read_recall_transitions ~keepers_dir ~keeper_id ~after_revision:oldest ~through_revision:current.revision in
+      Ok (project_successor_recall current bindings history))
 ;;
 
 let committed_durable_range ~keepers_dir ~keeper_id ~receipt_scope =

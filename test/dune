@@ -2811,6 +2811,7 @@
 (include stanzas/test_keeper_surface_status.inc)
 
 (include stanzas/test_keeper_memory_admission_judgment.inc)
+(include stanzas/test_keeper_memory_successor_selection.inc)
 (include stanzas/test_keeper_memory_admission_export.inc)
 (include stanzas/test_keeper_memory_admission_replay.inc)
 (include stanzas/test_keeper_memory_admission_queue.inc)

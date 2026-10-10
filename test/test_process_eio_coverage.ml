@@ -199,7 +199,7 @@ let test_or_refusal_names_the_missing_cwd_eio () =
       ~cwd:"/definitely/missing/process-eio-cwd"
       [ "/bin/sh"; "-c"; "exit 0" ]
   with
-  | Error (Process_eio.Cwd_unavailable { cwd; error = Eio.Fs.Not_found _ }) ->
+  | Error (Process_eio.Cwd_unavailable { cwd; error = Process_eio.Eio_cwd_error (Eio.Fs.E (Eio.Fs.Not_found _)) }) ->
     check bool "the refusal names the directory" true
       (contains cwd "definitely/missing/process-eio-cwd")
   | Error refusal ->
@@ -612,6 +612,130 @@ let test_run_argv_with_status_cwd_override () =
   (* /tmp may resolve to /private/tmp on macOS *)
   check bool "cwd is /tmp or /private/tmp"
     (trimmed = "/tmp" || trimmed = "/private/tmp") true
+
+let with_fallback_cwd_fixture f =
+  Process_eio.reset_for_testing ();
+  let root = Filename.temp_file ~temp_dir:(Sys.getcwd ()) "process-cwd-" "" in
+  Sys.remove root;
+  Unix.mkdir root 0o700;
+  let first = Filename.concat root "first directory" in
+  let second = Filename.concat root "second" in
+  Unix.mkdir first 0o700;
+  Unix.mkdir second 0o700;
+  let ordinary_file = Filename.concat root "ordinary-file" in
+  Out_channel.with_open_bin ordinary_file (fun out -> output_string out "file");
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.chmod first 0o700;
+      Unix.rmdir first;
+      Unix.rmdir second;
+      Sys.remove ordinary_file;
+      Unix.rmdir root;
+      Process_eio.reset_for_testing ())
+    (fun () -> f ~first ~second ~ordinary_file)
+
+let test_fallback_cwd_applies_to_each_execution_path () =
+  with_fallback_cwd_fixture @@ fun ~first ~second ~ordinary_file:_ ->
+  let parent_cwd = Sys.getcwd () in
+  let expected = Unix.realpath first in
+  let check_output label (status, stdout, stderr) expected =
+    check bool (label ^ " exits successfully") true (status = Unix.WEXITED 0);
+    check string (label ^ " stderr") "" stderr;
+    check string (label ^ " cwd/output") expected (String.trim stdout)
+  in
+  (* Entering a directory requires search permission, not listing permission. *)
+  Unix.chmod first 0o111;
+  check_output "status"
+    (Process_eio.run_argv_with_status_split ~cwd:first [ "/bin/pwd" ]) expected;
+  let relative = Filename.concat (Filename.basename (Filename.dirname first))
+      (Filename.basename first) in
+  (match Process_eio.run_argv_with_status_split_or_refusal ~cwd:relative [ "/bin/pwd" ] with
+   | Error refusal -> fail (Process_eio.spawn_refusal_to_string refusal)
+   | Ok output -> check_output "relative typed runner" output expected);
+  check_output "stdin"
+    (Process_eio.run_argv_with_stdin_and_status_split ~cwd:first
+       ~stdin_content:"body\n" [ "/bin/sh"; "-c"; "pwd; cat" ])
+    (expected ^ "\nbody");
+  let chunks = Buffer.create 64 in
+  check_output "streaming fallback"
+    (Process_eio.run_argv_with_status_split_streaming ~cwd:first
+       ~on_stdout_chunk:(Buffer.add_string chunks)
+       ~on_stderr_chunk:(fun text -> fail text) [ "/bin/pwd" ]) expected;
+  check string "completion callback receives cwd output" (expected ^ "\n")
+    (Buffer.contents chunks);
+  let stages =
+    [ Process_eio.plumbed_stage ~argv:[ "/bin/pwd" ] ~env:None ~cwd:(Some first)
+    ; Process_eio.plumbed_stage ~argv:[ "/bin/sh"; "-c"; "cat; pwd" ]
+        ~env:None ~cwd:(Some second) ]
+  in
+  (match Process_eio.run_argv_pipeline_with_status_split stages with
+   | Error detail -> fail detail
+   | Ok output -> check_output "per-stage cwd" output (expected ^ "\n" ^ Unix.realpath second));
+  check string "parent cwd is unchanged" parent_cwd (Sys.getcwd ())
+
+let test_fallback_unavailable_cwd_refuses_before_execution () =
+  with_fallback_cwd_fixture @@ fun ~first ~second:_ ~ordinary_file ->
+  let check_refusal (cwd, expected_error) =
+      match Process_eio.run_argv_with_status_split_or_refusal ~cwd
+          [ "/bin/echo"; "must not execute" ] with
+      | Error (Process_eio.Cwd_unavailable { cwd = reported; error = Native_cwd_error error }) ->
+        check string "refusal names requested directory" cwd reported;
+        check bool "refusal preserves directory errno" true (error = expected_error)
+      | Error refusal -> fail (Process_eio.spawn_refusal_to_string refusal)
+      | Ok (_, stdout, _) -> failf "invalid cwd allowed execution: %S" stdout
+  in
+  List.iter check_refusal
+    [ Filename.concat first "missing", Unix.ENOENT;
+      ordinary_file, Unix.ENOTDIR;
+      first ^ "\000/missing", Unix.ENOENT ];
+  (* A privileged process can enter mode 000 directories. Only assert denial
+     when this fixture runs without that privilege. *)
+  if Unix.geteuid () <> 0 then (
+    Unix.chmod first 0o000;
+    check_refusal (first, Unix.EACCES);
+    Unix.chmod first 0o700);
+  match Process_eio.run_argv_with_status_split_or_refusal ~cwd:first [ missing_program ] with
+  | Error (Process_eio.Executable_not_found named) ->
+    check string "valid cwd preserves executable refusal" missing_program named
+  | Error refusal -> fail (Process_eio.spawn_refusal_to_string refusal)
+  | Ok _ -> fail "missing executable ran"
+
+let test_bind_fallback_keeps_initialized_cwd_and_capability () =
+  with_fallback_cwd_fixture @@ fun ~first ~second ~ordinary_file:_ ->
+  Eio_main.run @@ fun env ->
+  let calls = Atomic.make 0 in
+  let original_mgr = Eio.Stdenv.process_mgr env in
+  let module Base = Eio_unix.Process.Make_mgr (struct
+    type t = unit
+    let spawn_unix () ~sw ?cwd ~env ~fds ~executable args =
+      Eio_unix.Process.spawn_unix ~sw ?cwd ~env ~fds ~executable original_mgr args
+  end) in
+  let module Failing = struct
+    include Base
+    let pipe _ ~sw:_ =
+      Atomic.incr calls;
+      raise (Unix.Unix_error (Unix.EADDRINUSE, "bind", "fixture pipe"))
+  end in
+  let proc_mgr = Eio.Resource.T ((), Eio_unix.Process.Pi.mgr_unix (module Failing)) in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Path.(Eio.Stdenv.fs env / first) in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  let check_pwd ?cwd expected =
+    match Process_eio.run_argv_with_status_split_or_refusal ?cwd [ "/bin/pwd" ] with
+    | Error refusal -> fail (Process_eio.spawn_refusal_to_string refusal)
+    | Ok (status, stdout, stderr) ->
+      check bool "fallback command completes" true (status = Unix.WEXITED 0);
+      check string "fallback stderr" "" stderr;
+      check string "fallback resolves initialized cwd" expected (String.trim stdout)
+  in
+  check_pwd (Unix.realpath first);
+  check_pwd ~cwd:"../second" (Unix.realpath second);
+  Process_eio.init ~cwd_default:(Eio.Stdenv.cwd env) ~proc_mgr ~clock;
+  (match Process_eio.run_argv_with_status_split_or_refusal ~cwd:first [ "/bin/echo"; "must not execute" ] with
+   | Error (Process_eio.Cwd_unavailable { error = Eio_cwd_error _; _ }) -> ()
+   | Error refusal -> fail (Process_eio.spawn_refusal_to_string refusal)
+   | Ok (_, stdout, _) -> failf "fallback bypassed cwd capability: %S" stdout);
+  check int "every execution reached the failing Eio pipe boundary" 3 (Atomic.get calls)
 
 let test_run_argv_with_status_includes_stderr_on_failure () =
   Eio_main.run @@ fun env ->
@@ -1288,6 +1412,13 @@ let test_run_argv_with_stdin_held_open_preserves_open_pipe () =
 let () =
   run "Process_eio coverage"
     [
+      ( "fallback cwd",
+        [ test_case "each execution path uses its requested directory" `Quick
+            test_fallback_cwd_applies_to_each_execution_path;
+          test_case "unavailable directory refuses before execution" `Quick
+            test_fallback_unavailable_cwd_refuses_before_execution;
+          test_case "bind fallback keeps initialized cwd and capability" `Quick
+            test_bind_fallback_keeps_initialized_cwd_and_capability ] );
       ( "fallback",
         [
           test_case "retry-on-bind-eaddrinuse" `Quick

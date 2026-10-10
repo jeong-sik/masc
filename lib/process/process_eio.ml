@@ -149,6 +149,10 @@ let get_cwd_default () =
   | Some runtime -> Ok runtime.cwd_default
   | None -> Error "Process_eio.get_cwd_default: init not called"
 
+let effective_cwd default_cwd = function
+  | None -> default_cwd
+  | Some dir -> Eio.Path.(default_cwd / dir)
+
 (** ── Unix fallback for tests (when Eio not initialized) ──────────── *)
 
 let default_env = function
@@ -213,11 +217,6 @@ let close_quietly fd =
   try Unix.close fd with
   | Unix.Unix_error _ -> () (* intentional: best-effort cleanup *)
 
-let create_process_env owner prog argv env stdin_fd stdout_fd stderr_fd =
-  (* The synchronous fallback preserves its documented no-cwd behavior and
-     libc PATH lookup, but owns the foreground group before exec begins. *)
-  Unix_foreground_process.spawn owner prog argv env stdin_fd stdout_fd stderr_fd
-
 (* Everything the two spawn paths can raise before a child process exists,
    read from the sources rather than guessed:
 
@@ -257,6 +256,10 @@ let create_process_env owner prog argv env stdin_fd stdout_fd stderr_fd =
      a [Unix_error] there before the spawn is [Spawn_failed] too.
    Without [posix_spawn] the fallback's child exits 127 (spawn.c:91); no
    target of this repo builds that way. *)
+type cwd_error =
+  | Native_cwd_error of Unix.error
+  | Eio_cwd_error of Eio.Exn.err
+
 type spawn_refusal =
   | Empty_argv
   | Executable_not_found of string
@@ -270,7 +273,7 @@ type spawn_refusal =
       }
   | Cwd_unavailable of
       { cwd : string
-      ; error : Eio.Fs.error
+      ; error : cwd_error
       }
 
 let spawn_refusal_to_string = function
@@ -283,7 +286,9 @@ let spawn_refusal_to_string = function
       Printf.sprintf "child for %S could not start: %s" executable detail
   | Cwd_unavailable { cwd; error } ->
       Printf.sprintf "cwd %s could not be opened: %s" cwd
-        (Format.asprintf "%a" Eio.Exn.pp_err (Eio.Fs.E error))
+        (match error with
+         | Native_cwd_error error -> Unix.error_message error
+         | Eio_cwd_error error -> Format.asprintf "%a" Eio.Exn.pp_err error)
 
 (* True while the child does not exist yet. [phase_ref] moves to [Command]
    right after [Eio.Process.spawn] returns, so an exception seen in [Spawn]
@@ -295,11 +300,24 @@ let in_spawn_phase phase_ref =
 
 let empty_argv_exn = Invalid_argument "Process_eio: argv is empty"
 
-(* Raised at the one [create_process_env] call in [with_unix_capture] so the
+(* Raised at the foreground spawn boundary in [with_unix_capture] so the
    handler at its bottom can route the refusal without inspecting the
    [Unix_error] function-name string. The original exception rides along for
    the callers that still render it as text. *)
 exception Refused_at_spawn of spawn_refusal * exn
+
+let fallback_cwd cwd =
+  match Atomic.get runtime_state with
+  | None -> cwd
+  | Some runtime ->
+      let path = effective_cwd runtime.cwd_default cwd in
+      match Eio.Path.with_open_dir path (fun _ -> Eio.Path.native_exn path) with
+      | native -> Some native
+      | exception (Eio.Io (error, _) as exn) ->
+          raise (Refused_at_spawn
+            (Cwd_unavailable
+               { cwd = Format.asprintf "%a" Eio.Path.pp path
+               ; error = Eio_cwd_error error }, exn))
 
 let output_for_status = Process_eio_stderr.output_for_status
 let process_error_output = Process_eio_stderr.process_error_output
@@ -334,7 +352,7 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
      | Some refuse -> refuse Empty_argv empty_argv_exn
      | None -> on_error "empty argv" "")
   | prog :: _ ->
-    (* Set once [create_process_env] has returned a pid. A [Unix_error]
+    (* Set once the foreground owner has spawned its child. A [Unix_error]
        before that is a refusal; after it the child is running and the error
        is the capture's. *)
     let spawned = ref false in
@@ -398,7 +416,14 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
          | None -> Unix.stdin
        in
        let () =
-         try create_process_env owner prog argv env stdin_fd stdout_w stderr_fd with
+         try
+           let cwd = fallback_cwd cwd in
+           Unix_foreground_process.spawn ?cwd owner prog argv env stdin_fd stdout_w stderr_fd
+         with
+         | Unix_foreground_process.Directory_unavailable { cwd; error } ->
+             raise (Refused_at_spawn
+               (Cwd_unavailable { cwd; error = Native_cwd_error error },
+                Unix.Unix_error (error, "open process cwd", cwd)))
          | Unix.Unix_error (Unix.ENOENT, _, _) as exn ->
              raise (Refused_at_spawn (Executable_not_found prog, exn))
        in
@@ -1075,10 +1100,6 @@ let stage_holds_a_file { stdin; stdout; stderr; _ } =
   source_is_a_file || sink_is_a_file stdout || sink_is_a_file stderr
 ;;
 
-let effective_cwd default_cwd = function
-  | None -> default_cwd
-  | Some dir -> Eio.Path.(default_cwd / dir)
-
 (* The single place a caller's [cwd] string becomes a path. [Spawn_registry]
    needs the rule the run/capture paths already use -- an absolute path
    replaces the default, a relative one appends to it -- and a second copy of
@@ -1612,7 +1633,8 @@ let run_argv_with_status_split_resolving ?timeout_sec ?env ?cwd
             | Eio.Io (Eio.Fs.E error, _) as exn when in_spawn_phase phase_ref ->
                 Error
                   ( Cwd_unavailable
-                      { cwd = Format.asprintf "%a" Eio.Path.pp effective_cwd; error }
+                      { cwd = Format.asprintf "%a" Eio.Path.pp effective_cwd
+                      ; error = Eio_cwd_error (Eio.Fs.E error) }
                   , exn )
             | Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (error, _, _)), _) as exn
               when in_spawn_phase phase_ref ->

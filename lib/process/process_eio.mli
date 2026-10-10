@@ -196,7 +196,8 @@ val cwd_path : string option -> (Eio.Fs.dir_ty Eio.Path.t, string) result
            pass [Eio.Stdenv.fs] and reach anywhere, while a test harness
            passing [Eio.Stdenv.cwd] gets "Capabilities insufficient" outside
            its own root.
-           Ignored when falling back to Unix process execution.
+           Unix fallback applies the same initialized default when available;
+           without initialization, relative paths use the parent's directory.
     @since 2.45.0 *)
 val run_argv_with_status : ?timeout_sec:float -> ?env:string array -> ?cwd:string -> string list -> (Unix.process_status * string)
 
@@ -221,6 +222,12 @@ val run_argv_with_status_split :
 (** Everything either spawn path can fail with before a child process exists.
     The set is read from eio 1.3 and OCaml 5.5 sources; the implementation
     cites the lines. *)
+type cwd_error =
+  | Native_cwd_error of Unix.error
+  | Eio_cwd_error of Eio.Exn.err
+(** The backend's original directory error, without guessing an executable
+    failure from a directory that could not be opened. *)
+
 type spawn_refusal =
   | Empty_argv  (** No program to run. *)
   | Executable_not_found of string
@@ -247,11 +254,10 @@ type spawn_refusal =
           text. [detail] is that text, carried, not parsed. *)
   | Cwd_unavailable of
       { cwd : string
-      ; error : Eio.Fs.error
+      ; error : cwd_error
       }
-      (** Eio path only: the working directory the caller asked for could
-          not be opened before the fork ([Not_found], [Permission_denied]).
-          The Unix fallback ignores [?cwd], so it never reports this. *)
+      (** The requested directory could not be opened before spawn. Both
+          execution paths preserve the backend's directory error here. *)
 
 val spawn_refusal_to_string : spawn_refusal -> string
 

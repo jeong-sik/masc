@@ -484,6 +484,10 @@ type build_link_plan =
   | Link_retarget of string
   | Link_already_correct
   | Link_refused_real_directory
+  | Link_refused_invalid_path of { detail : string; state : build_link_state }
+      (** The checkout's path names no build target ({!build_link_target}'s
+          [Error] is [detail]). [state] is what the scan found, so a real
+          [_build] the next boot removes is still reported. *)
 
 val build_link_target : playground_relative:string -> (string, string) result
 (** The checkout's [_build] target inside {!build_volume_guest_root}: the
@@ -600,6 +604,12 @@ val build_link_refusal_message : checkout:string -> string
     {!Link_refused_real_directory}: a real [_build] the live guest keeps
     until the next boot's helper removes it, unless the checkout holds
     {!build_keep_marker}. *)
+
+val build_link_invalid_path_message :
+  checkout:string -> detail:string -> build_link_state -> string
+(** The message a caller reports for {!Link_refused_invalid_path}. A real
+    [_build] adds its next-boot removal, since the refused path is never
+    linked but the boot helper still removes the directory. *)
 
 val build_link_actions : build_link_row list -> (string * string) list
 (** The [(checkout, target)] pairs that actually need a guest command --

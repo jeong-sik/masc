@@ -159,7 +159,11 @@ val descriptor_to_yojson : descriptor option -> Yojson.Safe.t
     ["input_schema"] when the schema carries one, and a definition holding both
     is rejected on the way out
     ([Backend_openai_serialize.tool_definition_of_json]). Callers that build a
-    request rather than a checkpoint need this function. *)
+    request rather than a checkpoint need this function.
+
+    Memoized on physical schema identity: a schema is immutable, so two calls
+    on the same schema return the same value — the second call does not
+    rebuild the tree. *)
 val wire_json_of_schema : Types.tool_schema -> Yojson.Safe.t
 
 val wire_bytes_of_schema : Types.tool_schema -> int

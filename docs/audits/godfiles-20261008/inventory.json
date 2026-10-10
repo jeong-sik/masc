@@ -405,7 +405,11 @@
       "path": "lib/keeper/keeper_tool_in_process_runtime.ml",
       "baseline_lines": 2636,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; remaining semantic review pending",
+      "current_lines": 2446,
+      "prs": [
+        42114
+      ]
     },
     {
       "path": "lib/keeper/keeper_tool_memory_runtime.ml",

@@ -4,6 +4,7 @@
  (flags :standard)
  (public_name masc)
  (private_modules
+  keeper_connector_post_replay
   keeper_tool_composition_projection
   keeper_tool_memory_validation
   keeper_unified_prompt_event_fields

@@ -1,7 +1,7 @@
 name = "masc_play_room"
 description = """
 Join the public MSX/DOS game room, read its conversation, say something to everyone there, or leave.
-This tool and the authenticated room API share this public conversation. Never put private Keeper context or secrets here.
+This is the same conversation Play link guests see in their browser. Never put private Keeper context or secrets here.
 Use a stable client_id for your participation. join/read/say renew presence for 60 seconds; read again while participating.
 say requires a new message_id; retry an uncertain send with exactly the same id and text to avoid duplicates.
 read returns the latest 100 messages; before=<oldest id> reads the preceding page. The room works even without a loaded machine.

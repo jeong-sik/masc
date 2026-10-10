@@ -533,10 +533,11 @@ type page = { messages : chat_message list; has_more : bool }
     Legacy rows without [ts] are unreachable through paging (the tail
     window still serves them).
 
-    [max_total] caps the window's rows, at most the default of 400. A smaller
-    window keeps the default's share of user/assistant messages (a quarter), so
-    the same history takes more, smaller pages; [has_more] and the cursor are
-    unchanged. *)
+    [max_total] caps the window's rows, at most the default of 400. It scales
+    only the user/assistant share (a quarter of it); the budget for tool rows
+    and receipts stays at the default's, so a smaller page never drops a tool
+    row that no later page reads. The same history takes more, smaller pages;
+    [has_more] and the cursor are unchanged. *)
 val load_page :
   base_dir:string -> keeper_name:string -> ?before:float -> ?max_total:int ->
   unit -> page

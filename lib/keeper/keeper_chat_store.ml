@@ -2145,12 +2145,15 @@ let find_cut ~path ~size ~before : int =
   !hi
 
 let load_page ~base_dir ~keeper_name ?before ?(max_total = max_total_lines) () : page =
-  (* A smaller window keeps the same share of conversation to tool rows as the
-     full one: [max_history] of [max_total_lines] are user/assistant messages,
-     and the rest of the budget is for everything else. *)
+  (* [max_total] scales only the user/assistant share of the window. The
+     budget for tool rows and receipts stays at its full size: paging runs
+     backwards and a row pushed out of one page by that budget is older than
+     nothing the next page reads (its cursor is the oldest row returned), so a
+     smaller tool budget would drop those rows from every page. A small page
+     therefore narrows the conversation, never the tool rows a turn kept. *)
   let max_total = max 1 (min max_total max_total_lines) in
   let window_history = max 1 (max_history * max_total / max_total_lines) in
-  let window_secondary = max 0 (max_total - window_history) in
+  let window_secondary = max_total_lines - max_history in
   let path = chat_path ~base_dir ~keeper_name in
   if not (Sys.file_exists path) then { messages = []; has_more = false }
   else

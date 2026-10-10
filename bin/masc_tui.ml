@@ -12068,7 +12068,18 @@ let apply_confirmed_server_identity_reading state reading =
       state.keeper_roster_error <- None
     end
   | Masc_tui_types.Workspace_identity_match ->
-    load_from_masc_dir state state.local_base_path;
+    (* The same workspace read as a match again leaves the keeper rows and
+       tasks as the cadence tick last loaded them, a refresh ago. A reload
+       here ran the whole directory read on the UI thread a second time for
+       the same answer. A workspace that just changed, or one that was not
+       a match a moment ago, has had its rows put away above and needs it. *)
+    (match previous with
+     | Masc_tui_types.Workspace_identity_match when same_workspace -> ()
+     | Masc_tui_types.Workspace_identity_match
+     | Masc_tui_types.Workspace_identity_unread
+     | Masc_tui_types.Workspace_identity_match_unconfirmed _
+     | Masc_tui_types.Workspace_identity_mismatch _ ->
+         load_from_masc_dir state state.local_base_path);
     let input_workspace = workspace_input_identity_of_server state.server_identity in
     (match List.assoc_opt input_workspace state.suspended_keeper_inputs with
      | None -> ()
@@ -12250,6 +12261,46 @@ let load_local_workspace_if_safe state base_path =
   | Masc_tui_types.Workspace_identity_match_unconfirmed _
   | Masc_tui_types.Workspace_identity_mismatch _ -> ()
 ;;
+
+(* One read of the .masc directory in flight at a time. The cadence tick asks
+   again two seconds later, so a read that is still running is simply not
+   duplicated. *)
+let local_workspace_read_inflight = ref false
+
+(* The cadence tick's reload. The directory read (the backlog, goal links,
+   archive, keeper metadata) takes about 20ms and used to run on the UI thread
+   every tick, which is 20ms that a keypress could not be answered in. It runs
+   on the shared domain pool now and the result comes back as a mailbox
+   message; the apply that changes state stays on the UI thread. A system
+   thread would not do: the stores under the read take guarded mutexes, which
+   raise [Non_eio_mutex_context] anywhere but an Eio fiber. *)
+let launch_local_workspace_read state ~mailbox base_path =
+  match state.workspace_identity with
+  | Masc_tui_types.Workspace_identity_match ->
+      if not !local_workspace_read_inflight then begin
+        match Eio_context.get_switch_opt () with
+        | None -> load_from_masc_dir state base_path
+        | Some sw ->
+            local_workspace_read_inflight := true;
+            Eio.Fiber.fork_daemon ~sw (fun () ->
+              (match
+                 Domain_pool_ref.submit_io_or_inline
+                   (fun () -> Masc_tui_loader.read_local_workspace base_path)
+               with
+               | reading ->
+                   enqueue_async mailbox (Local_workspace_read (base_path, reading))
+               | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+               | exception exn ->
+                   local_workspace_read_inflight := false;
+                   Log.Transport.info "local workspace read failed: %s"
+                     (Printexc.to_string exn));
+              `Stop_daemon)
+      end
+  | Masc_tui_types.Workspace_identity_unread
+  | Masc_tui_types.Workspace_identity_match_unconfirmed _
+  | Masc_tui_types.Workspace_identity_mismatch _ -> ()
+;;
+
 
 let load_live_context_if_safe state base_path keeper =
   match state.workspace_identity with
@@ -18669,6 +18720,18 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
           (* The previous list stays: a failed reload must not make the queue
              look empty, which reads as "nothing is waiting". *)
           state.verification_error <- Some detail)
+  | Local_workspace_read (base_path, reading) ->
+      local_workspace_read_inflight := false;
+      (* A reading that left before the identity moved off Match, or for
+         another base path, describes a directory this pane no longer shows. *)
+      (match state.workspace_identity with
+       | Masc_tui_types.Workspace_identity_match
+         when String.equal base_path state.local_base_path ->
+           Masc_tui_loader.apply_local_workspace state base_path reading
+       | Masc_tui_types.Workspace_identity_match
+       | Masc_tui_types.Workspace_identity_unread
+       | Masc_tui_types.Workspace_identity_match_unconfirmed _
+       | Masc_tui_types.Workspace_identity_mismatch _ -> ())
   | Keeper_chat_older_loaded (generation, keeper_name, before, result) ->
       (* A page that arrived for a keeper the pane has since left, or after a
          reload moved the cursor, is dropped: prepending it would put rows
@@ -29331,7 +29394,7 @@ and is loaded on demand through keeper_skill.
         (* The armed approval survives the tick: the snapshot apply already
            disarms it when its token leaves the list, so clearing here only
            made the second press race a two-second clock. *)
-        load_local_workspace_if_safe state base_path;
+        launch_local_workspace_read state ~mailbox:async_messages base_path;
         let host = server_peer_host in
         let port = state.port in
         (* The retry a closed feed waits for. *)

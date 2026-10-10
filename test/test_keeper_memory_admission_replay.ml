@@ -75,6 +75,14 @@ let schema_bytes encoding schema = match encoding with
   | Wire_bytes -> Yojson.Safe.to_string schema
   | Output_schema_file -> output_schema_file_bytes schema
 
+(* model_metadata.export_sha256 digests the export file that
+   scripts/experiments/collect-admission-exports.py wrote: the exporter's
+   compact Yojson capture line plus a newline. Re-serializing the parsed
+   capture reproduces that line, as the per-field wire digests below also
+   rely on. It covers every capture field, including ones no per-field digest
+   names, such as [measurement] and [semantic_judgment_performed]. *)
+let capture_export_sha256 capture = sha256 (Yojson.Safe.to_string capture ^ "\n")
+
 let replay filename () =
   let envelope = Yojson.Safe.from_file (Masc_test_deps.source_path
       (Filename.concat fixture_dir filename)) in
@@ -92,6 +100,8 @@ let replay filename () =
     (metadata_string "response_sha256") (sha256 response_raw);
   check string "model metadata names the captured prompt bytes"
     (json_string "prompt_sha256" hashes) (metadata_string "prompt_sha256");
+  check string "model metadata names the stored capture export"
+    (metadata_string "export_sha256") (capture_export_sha256 capture);
   let model_schema_encoding =
     let schema = member "schema" capture and digest = metadata_string "schema_sha256" in
     match List.find_opt (fun encoding -> String.equal digest (sha256 (schema_bytes encoding schema)))
@@ -249,6 +259,21 @@ let replay filename () =
     List.iter (fun (old : Memory.fact) ->
       check bool "superseded identity is absent from current Memory" false
         (List.exists (fun (fact : Memory.fact) -> Memory.memory_id fact = Memory.memory_id old) current_facts)) initial_facts;
+    (* Leaving current Memory is half of a replacement. The saved answer drops
+       each seeded claim with a reason, so the store must keep the complete
+       original and that reason as recoverable history. *)
+    let drop_reasons = Yojson.Safe.from_string response_raw |> member "memory"
+      |> json_list "dropped" |> List.map (json_string "reason") in
+    let archived = Current.read_dropped ~keepers_dir ~keeper_id ~current_facts |> require in
+    check (list string) "superseded identities are archived, not lost"
+      (List.map Memory.memory_id initial_facts)
+      (List.map (fun (row : Current.archived_fact) -> Memory.memory_id row.original) archived);
+    check bool "archive keeps each complete superseded original" true
+      (List.for_all2 (fun (old : Memory.fact) (row : Current.archived_fact) -> row.original = old)
+         initial_facts archived);
+    check (list (option string)) "archive keeps the saved answer's drop reason"
+      (List.map Option.some drop_reasons)
+      (List.map (fun (row : Current.archived_fact) -> row.removal.drop_reason) archived);
     let after = recall () in
     check bool "replacement is retrievable by the fixture query" true
       (List.exists (fun result ->

@@ -3306,7 +3306,7 @@
 (test
  (name test_tui_chat_queue_wiring)
  (modules test_tui_chat_queue_wiring)
- (libraries masc_tui_chat_media masc.keeper_chat_delivery_identity masc.runtime masc.keeper_chat_operations masc_tui_message_input masc_tui_link_preview masc_tui_image_preview
+ (libraries masc_tui_chat_media masc.keeper_chat_delivery_identity masc.runtime masc.keeper_chat_operations masc.server masc.ag_ui masc_tui_message_input masc_tui_link_preview masc_tui_image_preview
   masc_tui_answering
   masc_tui_keys
   masc_tui_fusion_model
@@ -5773,6 +5773,7 @@
 
 
 
+
 (test
  (name test_tui_native_tool_progress)
  (modules test_tui_native_tool_progress)
@@ -5864,4 +5865,5 @@
  (name test_tui_msx_checkpoint_pending)
  (modules test_tui_msx_checkpoint_pending)
  (libraries alcotest unix masc.keeper_operation_identity masc_tui_msx_checkpoint_pending))
+
 

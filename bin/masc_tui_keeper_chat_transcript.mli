@@ -415,6 +415,10 @@ val awaiting_continuation : t -> bool
 val admission : t -> (Masc_tui_keeper_chat_live.admission * int) option
 (** Server acceptance and queue length observed at acceptance, if received.
     This remains historical after the run starts; inspect [phase] alongside it. *)
+
+val note_priority_unavailable : t -> unit
+(** The local priority intent found this request already Running/Settled;
+    include its feedback in the request's admission prelude. *)
 val interrupt : t -> interrupt
 val text : t -> string
 val thinking : t -> string
@@ -544,12 +548,15 @@ type drawn =
           text stretch, or has a separate final row when multiple stretches
           cannot be mapped back from the canonical flat body. *)
   | Drawn_status of string
-      (** How a turn without visible reply text ended, from the recorded
-          reply through {!turn_status_text}. *)
+      (** Request admission feedback, or how a turn without visible reply
+          text ended, from the recorded reply through {!turn_status_text}. *)
   | Drawn_error of string
       (** The terminal stream failure, after any partial text and tools. *)
 
 type drawn_origin =
+  | Admission_of_request of string
+      (** An HTTP receipt owned by the full request id, outside execution
+          segments. It never establishes that the input was consumed. *)
   | Text_stretch of int
   | Thinking_stretch of int
   | Tool_stretch of int
@@ -585,6 +592,10 @@ type drawn_item =
         (** The runtime_id that served this superseded row, if known. *)
   ; drawn : drawn
   }
+
+val admission_prelude : t -> drawn_item option
+(** The first request receipt's notice, if any. Independent of execution,
+    retries and continuation segments; a replay cannot replace it. *)
 
 val drawn : t -> drawn_item list
 (** The trail flattened -- a superseded block's rows in place, tagged with

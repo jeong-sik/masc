@@ -10118,6 +10118,7 @@ let withdraw_machine_control state =
 let modal_owns_keys (state : state) =
   state.help_open || state.keeper_deletions_open || state.agenda_open
   || state.context_inspector_open || state.about_open
+  || state.repository_changes_open
   || (state.view = Lanes && Option.is_some state.exact_activity_open)
   || (state.view = Lanes && Option.is_some state.browser_activity_open)
   || (state.view = Lanes && Option.is_some state.machine_activity_open)
@@ -10140,6 +10141,23 @@ let close_agenda (state : state) =
   state.agenda_navigation <- Agenda_read_rows;
   state.agenda_selected <- Masc_tui_agenda.Nowhere
 
+(* Closed the way the overlay's own Esc closes it, so a handoff chat that
+   clears the key modals never leaves the overlay's half-read state behind. *)
+let close_repository_changes (state : state) =
+  state.repository_changes_open <- false;
+  state.repository_changes_return_chat <- false;
+  state.repository_changes_scope <- None;
+  state.repository_changes <- None;
+  state.repository_changes_error <- None;
+  state.repository_changes_cursor <- 0;
+  state.repository_changes_scroll <- 0;
+  state.repository_changes_diff <- None;
+  state.repository_changes_diff_error <- None;
+  state.repository_changes_diff_path <- None;
+  state.repository_changes_diff_hscroll <- 0;
+  state.repository_changes_diff_max_width <- 0;
+  state.repository_changes_diff_scroll <- 0
+
 (* Every overlay [modal_owns_keys] names, closed the way its own Esc closes
    it, except the invite card: an unrelated event that clears the screen must
    not take the only copy of a link with it. The inspector and the agenda are
@@ -10157,7 +10175,8 @@ let close_key_modals (state : state) =
   state.browser_activity_open <- None;
   state.machine_activity_open <- None;
   if state.agenda_open then close_agenda state;
-  if state.context_inspector_open then close_context_inspector state
+  if state.context_inspector_open then close_context_inspector state;
+  if state.repository_changes_open then close_repository_changes state
 
 let create_state
     ?(reasoning_visibility = Reasoning_folded)

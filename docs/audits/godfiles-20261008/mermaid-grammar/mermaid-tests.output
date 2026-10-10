@@ -1,0 +1,35 @@
+Testing `tui mermaid'.
+This run has ID `K1DZOHA2'.
+
+  [OK]          sequence           0   reads declarations and skips styling.
+  [OK]          sequence           1   refuses a line that is not a message.
+  [OK]          refusals           0   another kind names itself.
+  [OK]          refusals           1   an unreadable line names its line.
+  [OK]          refusals           2   an unknown direction is refused on the...
+  [OK]          refusals           3   wider than the pane says how wide.
+  [OK]          refusals           4   too wide says which way would fit.
+  [OK]          refusals           5   turning is not offered when it does no...
+  [OK]          refusals           6   a self edge is refused.
+  [OK]          refusals           7   an edge that crosses a subgraph bounda...
+  [OK]          refusals           8   an end with no subgraph is refused.
+  [OK]          refusals           9   a subgraph with no end is refused.
+  [OK]          subgraphs          0   a subgraph too wide counts its border ...
+  [OK]          reading            0   statements split on semicolons and ski...
+  [OK]          reading            1   both label spellings read the same.
+  [OK]          reading            2   strokes, heads and shapes are read.
+  [OK]          reading            3   styling statements change nothing.
+  [OK]          reading            4   node shapes database subroutine stadiu...
+  [OK]          state              0   keeper fsm parses.
+  [OK]          state              1   skips classdef and notes.
+  [OK]          state              2   a composite state may open on a state ...
+  [OK]          state              3   a state named in a composite state is ...
+  [OK]          state              4   a composite state drawn inside itself ...
+  [OK]          state              5   composite state has its own start and ...
+  [OK]          state              6   unclosed composite state is refused.
+  [OK]          state              7   a note with no end note is refused.
+  [OK]          state              8   an arrow in text is text.
+  [OK]          state              9   a line that names no state is refused.
+  [OK]          state             10   reads lines as mermaid does.
+
+Full test results in `/private/tmp/masc-godfile-top/_build/_tests/tui mermaid'.
+Test Successful in 0.008s. 29 tests run.

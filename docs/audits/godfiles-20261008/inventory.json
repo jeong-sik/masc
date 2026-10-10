@@ -51,7 +51,11 @@
       "path": "bin/masc_tui_mermaid.ml",
       "baseline_lines": 2134,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; parser, layout correctness and performance semantic review pending",
+      "current_lines": 1118,
+      "prs": [
+        42137
+      ]
     },
     {
       "path": "bin/masc_tui_message_layout.ml",

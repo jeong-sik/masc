@@ -399,25 +399,22 @@ let a_bidi_host_that_ended_says_why_and_what_comes_first () =
   released held
 
 (* A host that ended a session on another profile got that session: what
-   holds the port is another Firefox, which is quit first. The step is not
-   the one for a host Firefox never gave a session. *)
-let a_bidi_host_that_met_another_profile_says_to_quit_that_firefox () =
+   holds the port is another Firefox. The paragraph carries the profiles the
+   record names, and the next host is started with the kept one. *)
+let a_bidi_host_that_met_another_profile_names_both_profiles () =
   browser_lane_fixture ~connection_port:"64850" () @@ fun base ->
+  let expected = "/keeper/profile" and found = "/Users/someone/Firefox/Profiles/x.default" in
   let ended_on found =
     let held = take_record base in
     written
       (Record.ended held ~reason:"this Firefox runs the profile elsewhere" ~session:Record.No_session_left
-         ~because:(Record.Profile_not_kept { expected = "/keeper/profile"; found }) ~now:1_791_000_060.);
+         ~because:(Record.Profile_not_kept { expected; found }) ~now:1_791_000_060.);
     released held;
     Onboarding_status.inspect ~base_path:(Some base)
   in
-  let elsewhere = ended_on (Some "/Users/someone/Firefox/Profiles/x.default") in
-  says elsewhere
-    [ "The Firefox at that address runs the profile /Users/someone/Firefox/Profiles/x.default"
-    ; "only with a Firefox on /keeper/profile"; "the operator quits it"; "[browser.live.bidi]"
-    ; "--firefox-profile '/keeper/profile'" ];
-  lacks (bidi_message elsewhere) [ "ended before Firefox gave it a session" ];
-  says (ended_on None) [ "did not say which profile it runs" ]
+  let next_host = Status.firefox_profile_flag ^ " " ^ Filename.quote expected in
+  says (ended_on (Some found)) [ found; expected; next_host ];
+  says (ended_on None) [ expected; next_host ]
 
 (* At the limit, earlier history is unknown. A valid longer record retains
    all listed results; the reader must not pretend it was already trimmed. *)
@@ -873,8 +870,8 @@ let () = run "Onboarding observations"
                    a_launcher_that_cannot_be_run_as_it_is_is_installed_first;
                  test_case "a BiDi host that ended says why and what comes first" `Quick
                    a_bidi_host_that_ended_says_why_and_what_comes_first;
-                 test_case "a BiDi host that met another profile says to quit that Firefox" `Quick
-                   a_bidi_host_that_met_another_profile_says_to_quit_that_firefox;
+                 test_case "a BiDi host that met another profile names both profiles" `Quick
+                   a_bidi_host_that_met_another_profile_names_both_profiles;
                  test_case "a record at the limit says the newest are kept" `Quick
                    a_record_at_the_limit_says_the_newest_are_kept;
                  test_case "a BiDi host that never got a session says what the next one needs" `Quick

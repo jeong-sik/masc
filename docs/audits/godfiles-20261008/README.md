@@ -7,8 +7,8 @@ This campaign covers tracked code files with at least 2,000 lines. The initial
 inventory contains 171 candidates: 75 production source/style/interface files,
 90 tests, 3 tooling files and 3 evidence scripts. `inventory.json` records each
 baseline path and its current audit state. A line count selects candidates; it
-is not a defect verdict or a new build gate. Twenty-seven production candidates received
-bounded changes; their other responsibilities remain pending. The other 48
+is not a defect verdict or a new build gate. Twenty-eight production candidates received
+bounded changes; their other responsibilities remain pending. The other 47
 production candidates still require semantic review. All 171 candidates remain
 in the campaign until their responsibilities and necessary repairs are assessed.
 
@@ -45,6 +45,8 @@ Gate decision projection is tracked in [#42091](https://github.com/jeong-sik/mas
 Event queue transitions and strict current snapshot/receipt encoding are separated in [#42095](https://github.com/jeong-sik/masc/pull/42095). The wire codec shares the canonical immutable admission rules; schedule occurrence projection stays at the public boundary. See [event-queue-wire/README.md](event-queue-wire/README.md).
 
 Memory OS support maintenance and snapshot calculation are separated from storage and recovery in [#42098](https://github.com/jeong-sik/masc/pull/42098). Shared canonical data keeps the strict decoder and pure calculation aligned. See [memory-support-core/README.md](memory-support-core/README.md).
+
+Async request strict records and client projection are separated from worker/storage authority in [#42100](https://github.com/jeong-sik/masc/pull/42100). Pending elapsed time acquires its timestamp at the boundary; completed entries keep their clock-free path. See [msg-async-wire/README.md](msg-async-wire/README.md).
 
 The declared branch dependencies follow that order, starting at `main`.
 GitHub may group a subset into a native stack; inspect live membership rather

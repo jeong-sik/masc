@@ -326,7 +326,11 @@
       "path": "lib/keeper/keeper_msg_async.ml",
       "baseline_lines": 3115,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; worker ownership, lane admission, persistence and recovery remain pending",
+      "current_lines": 2349,
+      "prs": [
+        42100
+      ]
     },
     {
       "path": "lib/keeper/keeper_official_client_host.ml",

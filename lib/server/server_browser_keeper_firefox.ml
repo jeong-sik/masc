@@ -362,7 +362,12 @@ let await_port_closed ~net ~clock ~port =
     match port_state ~net ~clock ~port with
     | Nothing_listens -> Ok ()
     | Answers when Monotonic_deadline.passed deadline ->
-      Error (Printf.sprintf "port %d still answers %.0f s after its group was empty" port stopped_port_wait_s)
+      Error
+        (Printf.sprintf
+           "port %d still answers %.0f s after its group was empty. What holds the port is not in \
+            that group, so there is no Firefox window to close: `lsof -nP -iTCP:%d -sTCP:LISTEN` \
+            names that process, and the operator stops it"
+           port stopped_port_wait_s port)
     | Unknown detail when Monotonic_deadline.passed deadline ->
       Error (Printf.sprintf "whether port %d still answers cannot be told: %s" port detail)
     | Answers | Unknown _ -> Eio.Time.sleep clock group_poll_s; wait ()
@@ -374,8 +379,11 @@ let fresh_firefox ~sw ~net ~clock ~ready_timeout_s ~base_path (config : Browser_
   | Error why -> Earlier_firefox why
   | Ok () -> started_firefox ~sw ~net ~clock ~ready_timeout_s ~base_path config
 
-(* Its profile is kept, so the operator's logins stay. A group that keeps
-   processes after the stop keeps its record. *)
+(* Its profile is kept, so the operator's logins stay. The record goes only
+   once the group is empty and the port no longer answers, just before the
+   new Firefox starts: until then it names the Firefox this start stopped,
+   and a later start reads it as that one, ended, not as a Firefox MASC
+   never started. *)
 let restarted ~sw ~net ~clock ~ready_timeout_s ~base_path (config : Browser_configuration.live_bidi)
     (entry : Firefox_record.entry) =
   let stopped = stop_recorded_group ~clock entry in
@@ -390,11 +398,12 @@ let restarted ~sw ~net ~clock ~ready_timeout_s ~base_path (config : Browser_conf
          config.port why (stop_message stopped)) in
   if Posix_spawn_detached.group_id_has_members entry.group then
     still_held (Printf.sprintf "process group %d still has processes" entry.group)
-  else (
-    forget ~base_path;
+  else
     match await_port_closed ~net ~clock ~port:config.port with
     | Error why -> still_held why
-    | Ok () -> fresh_firefox ~sw ~net ~clock ~ready_timeout_s ~base_path config)
+    | Ok () ->
+      forget ~base_path;
+      fresh_firefox ~sw ~net ~clock ~ready_timeout_s ~base_path config
 
 (* [held]: when the last host ended with a session held in the Firefox on
    the port. A Firefox that is not restarted for it is left running, and a

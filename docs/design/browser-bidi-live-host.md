@@ -82,7 +82,8 @@ profile = "/Users/you/masc-keeper-firefox-profile"
   record shows it is the one MASC started and it started no later than that
   host ended: Firefox refuses every new host while it holds that session.
   The profile keeps the operator's logins. The new Firefox is started once
-  the stopped one's group is empty and its port no longer answers. Any
+  the stopped one's group is empty and its port no longer answers; until
+  then the record keeps naming the stopped one. Any
   other Firefox is left running, the server log says why, and a host is
   started for it all the same.
 - `[browser.live] enabled = false`, or a `runtime.toml` without the table,

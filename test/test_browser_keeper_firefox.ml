@@ -1293,7 +1293,9 @@ let a_restart_whose_firefox_cannot_start_leaves_no_record () =
       check bool "no host for a Firefox that is not there" false (Sys.file_exists host_marker)))
 
 (* A port still held once the stopped group is empty gets no new Firefox:
-   it would meet that port, or that profile, still taken. *)
+   it would meet that port, or that profile, still taken. The record keeps
+   naming the stopped one, so a later start does not read it as a Firefox
+   MASC never started. *)
 let a_restart_whose_port_stays_open_starts_nothing () =
   with_workspace (fun base ->
     let firefox_marker, host_marker = markers base in
@@ -1310,7 +1312,8 @@ let a_restart_whose_port_stays_open_starts_nothing () =
         (match first_pid (firefox_marker ^ ".listener") with Some pid -> runs_under base pid | None -> false);
       check bool "no second Firefox" false (started_again (Keeper_firefox.firefox_log_path ~base_path:base));
       check bool "no host" false (Sys.file_exists host_marker);
-      check bool "the record of that empty group is gone" true (recorded base = None)))
+      check bool "the record still names the stopped one" true
+        (Option.map (fun (entry : Firefox_record.entry) -> entry.group) (recorded base) = Some first)))
 
 (* The Firefox runs on, still recorded, and a host is started for it. *)
 let a_firefox_that_holds_no_such_session_is_not_restarted () =

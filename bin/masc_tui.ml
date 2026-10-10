@@ -18725,11 +18725,27 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
             (* The cursor is kept so the same page can be asked for again;
                what is on screen is untouched. *)
             state.msg_older_error <- Some detail)
-let drain_async_messages state ~base_path ~http_refresh_inflight
+(* How long one pass of the loop applies queued results before it goes back
+   to read a key. Results arrive in bursts (a history page, then a journal
+   read for each turn on it), and applying all of them in one pass held a
+   keypress behind 30-60ms of work. The rest stay in the mailbox in order and
+   are applied on the next pass; a single result longer than this still runs
+   whole. About one frame, so the loop comes back to the keyboard at frame
+   rate. *)
+let async_drain_budget_ns = 4_000_000L
+
+let drain_async_messages ?budget_ns state ~base_path ~http_refresh_inflight
     ~http_scoped_refresh_inflight ~scoped_refresh_followup
     ~frame_presenter ~render_schedule mailbox =
+  let started_ns = Mtime_clock.elapsed_ns () in
+  let over_budget () =
+    match budget_ns with
+    | None -> false
+    | Some budget ->
+        Int64.compare (Int64.sub (Mtime_clock.elapsed_ns ()) started_ns) budget >= 0
+  in
   let rec loop changed =
-    match Eio.Stream.take_nonblocking mailbox with
+    match if changed && over_budget () then None else Eio.Stream.take_nonblocking mailbox with
     | None ->
         (match state.keeper_creation_awaiting_roster with
          | Some keeper when keeper_available_for_new_message state keeper ->
@@ -21055,7 +21071,8 @@ and is loaded on demand through keeper_skill.
        | Masc_tui_exit_signals.Continue -> None
       in
       if
-        drain_async_messages state ~base_path ~http_refresh_inflight
+        drain_async_messages ~budget_ns:async_drain_budget_ns state ~base_path
+          ~http_refresh_inflight
           ~http_scoped_refresh_inflight ~scoped_refresh_followup
           ~frame_presenter ~render_schedule async_messages
       then Render_schedule.request render_schedule Render_schedule.Background;
@@ -29213,7 +29230,8 @@ and is loaded on demand through keeper_skill.
 
       Eio.Fiber.yield ();
       if
-        drain_async_messages state ~base_path ~http_refresh_inflight
+        drain_async_messages ~budget_ns:async_drain_budget_ns state ~base_path
+          ~http_refresh_inflight
           ~http_scoped_refresh_inflight ~scoped_refresh_followup
           ~frame_presenter ~render_schedule async_messages
       then Render_schedule.request render_schedule Render_schedule.Background;

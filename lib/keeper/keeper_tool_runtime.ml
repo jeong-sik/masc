@@ -334,7 +334,7 @@ let handle_in_process ctx descriptor args =
   | Tool_workspace_memory_read ->
     Some (Keeper_workspace_memory_read.handle ~base_path:ctx.config.base_path ~args)
   | Tool_memory_select ->
-    Some (Keeper_memory_select.handle ?turn_ref:ctx.turn_ref ?clock:ctx.clock
+    Some (Keeper_memory_select.handle ?turn_ref:ctx.turn_ref ~clock:ctx.clock
       ~config:ctx.config ~meta:ctx.meta ~args ())
   | Tool_memory_search ->
     Some

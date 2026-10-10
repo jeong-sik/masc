@@ -255,6 +255,87 @@ let test_policy_revoked_during_judgment () =
   check bool "policy change is explicit" true
     (List.for_all (fun row -> text "kind" row="selection_policy_changed") (rows "deferred" output))
 
+(* An endpoint that accepts the selection request and never answers. The
+   dispatch context's clock must reach the evaluation IO and end that request
+   at the HTTP request timeout; without it the tool call never returns. The
+   context gets a mock clock that is moved past any request timeout until the
+   call returns, and a real-time guard fails the test instead of hanging it. *)
+let far_past_any_request_timeout = 1e6
+let real_time_guard_seconds = 10.0
+
+let test_stalled_endpoint_ends_at_the_turn_clock () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  let net=Eio.Stdenv.net env and real_clock=Eio.Stdenv.clock env in
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio_context.with_test_env ~net ~clock:real_clock ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw @@ fun () ->
+  Masc_http_client.with_scoped_pool ~sw ~env @@ fun () ->
+  let base_path=Filename.temp_dir "memory-select-stalled-" "" in
+  Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree base_path);
+  Masc_test_deps.with_process_env Env_config_core.base_path_env_key (Some base_path) @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_core.config_dir_env_key (Some (Filename.concat base_path "config")) @@ fun () ->
+  Config_dir_resolver.reset ();
+  Fun.protect ~finally:Config_dir_resolver.reset @@ fun () ->
+  let capture=fixture_capture () in
+  let keeper_id=text "keeper_id" capture in
+  let meta=Masc_test_deps.meta_of_json_fixture (`Assoc ["name",`String keeper_id;
+    "trace_id",`String "selection-stalled-fixture"]) |> require in
+  let config=Masc.Workspace.default_config base_path in
+  let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  restore ~keepers_dir ~keeper_id capture;
+  let socket=Eio.Net.listen net ~sw ~backlog:4 ~reuse_addr:true
+    (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0)) in
+  let port=match Eio.Net.listening_addr socket with
+    | `Tcp (_, port) -> port | _ -> fail "stalled endpoint has no TCP port" in
+  let accepted,accept=Eio.Promise.create () in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    let _held=Eio.Net.accept ~sw socket in
+    Eio.Promise.resolve accept ();
+    Eio.Fiber.await_cancel ());
+  let key="MASC_TEST_MEMORY_SELECT_STALLED_KEY" in
+  Masc_test_deps.with_process_env key (Some "synthetic-stalled-key") @@ fun () ->
+  Masc_test_deps.with_typesafeai_policy
+    {Runtime_schema.default_typesafeai with lane_enabled=true;workspace_memory_selection_enabled=true;
+      excluded_keepers=[];
+      destinations=({Runtime_schema.endpoint=Printf.sprintf "http://127.0.0.1:%d/evaluate" port;
+                     model="fixture";api_key_env=key},[])} @@ fun () ->
+  let clock=Eio_mock.Clock.make () in
+  let context : Dispatch.context =
+    {config;meta;publication_recovery={provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider;keeper_name=keeper_id};
+     ctx_work=Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"test";
+     turn_sandbox_factory=None;sw=Some sw;
+     clock=Some (clock :> float Eio.Time.clock_ty Eio.Resource.t);proc_mgr=None;net=Some net;
+     mcp_session_id=None;continuation_channel=None;gate_context=None;
+     turn_ref=Some (Ids.Turn_ref.make ~trace_id:"selection-stalled-fixture" ~absolute_turn:1);
+     gate_grant=None;tool_use_id=None;trace_id=None;result_projection=None;capability_authority=Compatibility_meta} in
+  let descriptor=match Dispatch.descriptor_for_internal "keeper_memory_select" with
+    | Some descriptor -> descriptor | None -> fail "registered selection descriptor missing" in
+  let args=`Assoc ["purpose",`String "Distinguish E17 and E18 approval policy scopes."] in
+  let dispatched=Eio.Fiber.fork_promise ~sw (fun () -> Dispatch.handle context ~descriptor ~args) in
+  Eio.Time.with_timeout_exn real_clock real_time_guard_seconds (fun () ->
+    Eio.Promise.await accepted;
+    (* The request timeout's watcher registers its sleep at an unknown point
+       after the request starts; keep moving the clock until it has fired. *)
+    let rec push () =
+      if not (Eio.Promise.is_resolved dispatched) then begin
+        Eio_mock.Clock.set_time clock (Eio.Time.now clock +. far_past_any_request_timeout);
+        Eio.Time.sleep real_clock 0.05;
+        push ()
+      end in
+    push ());
+  (match Eio.Promise.await_exn dispatched with
+   | Some _ -> () | None -> fail "descriptor dispatch did not handle memory selection");
+  let journal=Filename.concat (Filename.concat (Masc.Workspace.keepers_runtime_dir config) keeper_id)
+    "memory-selection-evaluations.jsonl" in
+  let statuses=match Fs_compat.load_file_opt journal with
+    | None -> []
+    | Some contents -> String.split_on_char '\n' contents
+      |> List.filter (fun line -> String.trim line <> "")
+      |> List.map (fun line -> text "status" (Yojson.Safe.from_string line)) in
+  check (list string) "the stalled request ended as a provider failure"
+    ["started"; "provider_failed"]
+    (List.filter (fun status -> List.mem status ["started"; "provider_failed"; "response_received"; "cancelled"])
+       statuses)
+
 let () = run "personal memory select descriptor HTTP"
   ["selection",[
     test_case "full grouped witnesses produce compact current roles" `Quick (test_grouped_sources_and_compact_results ~limited:false);
@@ -269,4 +350,5 @@ let () = run "personal memory select descriptor HTTP"
     test_case "unreadable source is withheld and remains unresolved" `Quick test_source_read_failure;
     test_case "policy revoked during HTTP prevents publication" `Quick test_policy_revoked_during_judgment;
     test_case "undurable request cannot dispatch or publish" `Quick test_undurable_selection_never_dispatches;
-    test_case "malformed provider answer remains unresolved" `Quick test_malformed_answer]]
+    test_case "malformed provider answer remains unresolved" `Quick test_malformed_answer;
+    test_case "a stalled endpoint ends at the turn clock" `Quick test_stalled_endpoint_ends_at_the_turn_clock]]

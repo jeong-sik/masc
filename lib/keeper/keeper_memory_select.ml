@@ -77,7 +77,7 @@ let parse = function
       | None -> Ok None | Some (`Int value) when value>0 -> Ok (Some value)
       | _ -> Error "limit must be a positive integer when supplied." in Ok (purpose,limit)
   | _ -> Error "Expected an argument object."
-let handle ?turn_ref ?clock ~config ~(meta : Keeper_meta_contract.keeper_meta) ~args () =
+let handle ?turn_ref ~clock ~config ~(meta : Keeper_meta_contract.keeper_meta) ~args () =
   match parse args with
   | Error detail -> Keeper_tool_execution.failure_data ~class_:Tool_result.Policy_rejection ~message:detail
       (`Assoc ["error",`String detail])

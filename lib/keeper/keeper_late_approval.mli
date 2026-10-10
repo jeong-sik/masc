@@ -75,6 +75,23 @@ val bind_to_journal :
     so tests can restore with a fixed clock, matching the other
     operations. *)
 
+val restore : ?now:float -> base_path:string -> t -> unit
+(** The explicit un-fence the fencing contract names: the same synchronous
+    rebind-and-re-restore {!bind_to_journal} performs at boot, callable while
+    the store is up. The operator-facing surface for this is the CanAdmin
+    journal-restore endpoint (design D4); corrupt rows are never rewritten or
+    skipped by the library — a moved-aside journal file is what a successful
+    restore reads after {b Corrupt_journal}, and an again-readable journal is
+    what it reads after {b Journal_unavailable}. *)
+
+val journal_stats : t -> (int64 * int) option
+(** [(bytes, rows)] of the bound journal file, read from the actual file so a
+    fenced store still reports its size, or [None] when the store is unbound
+    or the file cannot be stat'd. The bounded-boot-read observation the
+    design's D4a promises: the fence never hides how big the journal has
+    grown, so growth without a working lane is visible before the next boot
+    pays for it. *)
+
 type journal_error = Corrupt_journal of string | Journal_unavailable of string
 val journal_error : t -> journal_error option
 (** A restore error fences all journal mutations; no uncertain count establishes health. *)

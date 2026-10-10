@@ -31,6 +31,8 @@ val aggregate :
   answered_total:int ->
   timed_out_total:int ->
   late_uncertain:int ->
+  ?journal_stats:(int64 * int) option ->
+  unit ->
   Yojson.Safe.t
 (** The section for a readable queue.
 
@@ -52,6 +54,12 @@ val aggregate :
     [unread_entries] counts pending rows the queue could not read. A
     non-zero value makes the counts a lower bound: [counts_complete] is
     false and the section asks for an operator.
+
+    [journal_stats] is [(bytes, rows)] of the late-approval journal file
+    (design D4a's bounded-boot-read observation): growth without a working
+    lane is visible here before the next boot pays for reading it. Absent
+    fields mean the store is unbound or the file could not be stat'd —
+    never zero.
 
     [oldest] is [null] when nothing is open. Otherwise it is the open ask
     with the smallest timestamp across both sources: a live wait carries its

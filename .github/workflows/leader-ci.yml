@@ -28,6 +28,7 @@ on:
 permissions:
   contents: read
   pull-requests: read
+  statuses: write
 
 concurrency:
   group: leader-ci-${{ github.run_id }}
@@ -75,6 +76,38 @@ jobs:
           name: approved-selection-${{ inputs.candidate }}-${{ github.run_attempt }}
           path: verified-selection.json
           if-no-files-found: error
+      - name: Pin selected member heads with a pending leader-selected-ci status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          from pathlib import Path
+          members = json.loads(Path('verified-selection.json').read_text())['members']
+          token = os.environ['GH_TOKEN']
+          repo = os.environ['REPOSITORY']
+          url = os.environ['RUN_URL'] + '?pr='
+          for member in members:
+              head = member['head']
+              target = os.environ['RUN_URL']
+              body = json.dumps({
+                  'state': 'pending',
+                  'context': 'leader-selected-ci',
+                  'target_url': url,
+                  'description': 'leader-selected CI in progress (run ' +
+                                 os.environ['GITHUB_RUN_ID'] + ')'}).encode()
+              request = urllib.request.Request(
+                  f'https://api.github.com/repos/{repo}/commits/{head}/statuses',
+                  data=body, method='POST',
+                  headers={'Authorization': f'token {token}',
+                           'Accept': 'application/vnd.github+json'})
+              with urllib.request.urlopen(request) as response:
+                  if response.status != 201:
+                      raise SystemExit(f'status answer failed for {head}: {response.status}')
+                  print(f'pinned {member["pr"]}@{head[:12]}')
+          PY
 
   compile:
     needs: selection
@@ -136,4 +169,45 @@ jobs:
           import json
           from pathlib import Path
           raise SystemExit(0 if json.loads(Path('leader-ci-results.json').read_text())['checks_passed'] else 1)
+          PY
+      - name: Settle the leader-selected-ci statuses on member heads
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          from pathlib import Path
+          # The run has finished by definition here (this job runs with
+          # if: always()), so the pending pin is resolved either way: a
+          # failed or cancelled run must not leave a pending status that
+          # would block merging forever.
+          receipt_path = Path('leader-ci-results.json')
+          if receipt_path.exists():
+              checks_passed = json.loads(receipt_path.read_text())['checks_passed']
+          else:
+              checks_passed = False
+          members = json.loads(Path('verified-selection.json').read_text())['members']
+          token = os.environ['GH_TOKEN']
+          repo = os.environ['REPOSITORY']
+          state = 'success' if checks_passed else 'failure'
+          for member in members:
+              head = member['head']
+              body = json.dumps({
+                  'state': state,
+                  'context': 'leader-selected-ci',
+                  'target_url': os.environ['RUN_URL'],
+                  'description': 'leader-selected CI ' + state + ' (run ' +
+                                 os.environ['GITHUB_RUN_ID'] + ')'}).encode()
+              request = urllib.request.Request(
+                  f'https://api.github.com/repos/{repo}/commits/{head}/statuses',
+                  data=body, method='POST',
+                  headers={'Authorization': f'token {token}',
+                           'Accept': 'application/vnd.github+json'})
+              with urllib.request.urlopen(request) as response:
+                  if response.status != 201:
+                      raise SystemExit(f'status settle failed for {head}: {response.status}')
+                  print(f'settled {member["pr"]}@{head[:12]} -> {state}')
           PY

@@ -298,25 +298,65 @@ let search_chat_markdown ~link_previews_mode ~theme ~preview ~(entry : Message_l
    Markdown colours. *)
 (* How many reasoning lines a folded block stands for. The count is the
    non-blank lines, matching what the unfolded block draws. *)
-let folded_thinking_body body =
-  let lines =
-    String.split_on_char '\n' body
-    |> List.filter (fun line -> String.trim line <> "")
-  in
-  match lines with
-  (* A fold summary is itself one line, so folding one line hides nothing and
-     saves nothing. It also promised an expansion: every committed reasoning
-     block is the withheld-step count alone, and Ctrl-R on it redrew the same
-     sentence. A block with nothing to fold draws as itself. *)
-  | [] | [ _ ] -> body, Message_layout.Source_body
-  (* A turn that reasons between every call draws this once a round, eight
-     rounds a turn. At 61 cells the sentence was the widest thing in the pane
-     and said the same "or /thinking to expand" each time; the key stays, the
-     footer and /help carry the rest. Two lines or more, so always plural. *)
-  | lines ->
-      Printf.sprintf "Reasoning · %d lines folded · Ctrl-R" (List.length lines),
-      Message_layout.Thinking_summary
+type thinking_fold = Keep_source | Use_thinking_summary of string
 
+let folded_thinking_summary ~line_count ~source_height ~summary_height =
+  if line_count = 0 then Keep_source
+  else
+      let count = line_count in
+      let summary = Printf.sprintf "Reasoning · %d %s folded · Ctrl-R"
+        count (if count = 1 then "line" else "lines") in
+      (* Formatting syntax is not visible width, and the summary can wrap
+         too. Folding is useful only when it actually saves terminal rows. *)
+      if summary_height summary < source_height ()
+      then Use_thinking_summary summary
+      else Keep_source
+
+
+let thinking_height_cache = Markdown_cache.create ~capacity:chat_markdown_cache_capacity
+
+let fold_thinking_entry (state : state) ~chat_cols (entry : Message_layout.entry) =
+  if entry.style = Message_layout.Thinking && state.msg_reasoning_visibility = Reasoning_folded then
+    let context = Chat_theme.body_context (Chat_theme.snapshot ()) entry.style in
+    let width = Message_layout.entry_body_cells ~origin:state.msg_origin_display
+      ~inner_width:(max 1 (framed_inner_width chat_cols)) entry in
+    (* Both bodies share this entry's heading, span clock and gutter, so only
+       their trimmed Markdown body heights decide whether folding saves rows.
+       Measurement owns raw-source counts separately from the drawn summary. *)
+    let trimmed_height rows =
+      let rec trim = function
+        | row :: rest when String.trim row = "" -> trim rest
+        | rows -> Int.max 1 (List.length rows) in
+      trim (List.rev rows) in
+    let logical_lines () = String.split_on_char '\n' entry.body
+      |> List.fold_left (fun count line -> if String.trim line = "" then count else count + 1) 0 in
+    let source_height, line_count =
+      match entry.markdown_source with
+      | Message_layout.Markdown_growing { keeper_name; request_id; entry_index } ->
+        let measured = Markdown_cache.measure_growing_details thinking_height_cache
+          ~theme_revision:chat_markdown_theme_revision
+          ~palette_generation:context.palette_generation ~width
+          ~renderer:(chat_markdown_streaming ~context)
+          ~identity:{ cmi_style=entry.style; cmi_keeper_name=keeper_name;
+            cmi_request_id=request_id; cmi_observed_at=None; cmi_entry_index=entry_index }
+          ~text:entry.body in
+        (fun () -> measured.height), measured.nonblank_lines
+      | Message_layout.Markdown_stable { keeper_name; request_id; observed_at; entry_index } ->
+        (fun () -> Markdown_cache.render thinking_height_cache
+          ~theme_revision:chat_markdown_theme_revision
+          ~palette_generation:context.palette_generation ~width
+          ~renderer:(chat_markdown ~context)
+          ~identity:{ cmi_style=entry.style; cmi_keeper_name=keeper_name;
+            cmi_request_id=request_id; cmi_observed_at=Some observed_at; cmi_entry_index=entry_index }
+          ~text:entry.body |> trimmed_height), logical_lines ()
+      | Message_layout.Markdown_streaming ->
+        (fun () -> chat_markdown ~context ~width entry.body |> trimmed_height), logical_lines () in
+    let summary_height body = chat_markdown ~context ~width body |> trimmed_height in
+    match folded_thinking_summary ~line_count ~source_height ~summary_height with
+    | Keep_source -> {entry with body_presentation=Message_layout.Source_body}
+    | Use_thinking_summary body ->
+        {entry with body;body_presentation=Message_layout.Thinking_summary}
+  else entry
 
 let tool_projection_mode (state : state) =
   match state.msg_tool_visibility with
@@ -1848,9 +1888,6 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name ~request_
            stance writes for the same row. *)
         let body, body_presentation =
           match message.me_role with
-          | Message_thinking
-            when state.msg_reasoning_visibility = Reasoning_folded ->
-              folded_thinking_body message.me_text
           | Message_skill _ -> (
               match message.me_skill_block with
               | [] -> message.me_text, Message_layout.Source_body
@@ -1914,6 +1951,7 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name ~request_
               message.me_text, Message_layout.Source_body
         in
         ({ delivery_state = None; style;
+             heading_boundary = Message_layout.Inherit_heading;
              body_presentation;
              timestamp =
                Option.fold ~none:message.me_timestamp
@@ -1962,7 +2000,8 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name ~request_
                     Message_layout.Action_unfold_argument
                 | _ -> Message_layout.Action_none);
            }
-            : Message_layout.entry))
+            : Message_layout.entry)
+        |> fold_thinking_entry state ~chat_cols)
       visible_entries
   in
   layout_entries
@@ -1999,6 +2038,7 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
        local mark, not the arrow that means a submitted conversation row. *)
     let style = Message_layout.Local in
     ({ delivery_state = Some label; style
+     ; heading_boundary = Message_layout.Inherit_heading
      ; body_presentation = Message_layout.Source_body
      ; timestamp = keeper_message_clock at
      ; timeline_bucket = Some (keeper_message_timeline_bucket at)
@@ -2126,6 +2166,7 @@ let polled_turn_output_with_anchors (state : state) ~keeper_name ~role_label_col
           | Some _ -> "마지막 관측, 갱신 실패"
         in
         let speech = ({ delivery_state = None; style
+           ; heading_boundary = Message_layout.Inherit_heading
            ; body_presentation = Message_layout.Source_body
            ; timestamp = keeper_message_clock preview.ktp_updated_at_unix
            ; timeline_bucket = Some (keeper_message_timeline_bucket preview.ktp_updated_at_unix)
@@ -2199,7 +2240,7 @@ let polled_turn_output_entries state ~keeper_name ~role_label_column =
      in the visible list, so an append to an open turn flips the edge of
      the turn's previous last row; the walk compares the edge by value at
      every position, and a flipped edge ends the sharing there;
-   - the keeper, the pane width, and the memory/reasoning/tool visibility
+   - the keeper, pane width, origin mode, and memory/reasoning/tool visibility
      readings, compared by value. The width decides the badge column and
      the tool-row wrap; the visibilities decide the folded thinking body,
      the journal summary body, and the compact/full tool projection (memory
@@ -2215,8 +2256,9 @@ let polled_turn_output_entries state ~keeper_name ~role_label_column =
      resolved colours into their text and a palette that arrived after
      start-up must not keep drawing the previous answer's escapes.
 
-   Deliberately not inputs: the scroll position and the origin-display mode
-   act after the entries exist ([rows_of_entry] takes them), the live turn
+   Origin mode also determines the body budget for one-line thinking folds.
+   Deliberately not inputs: the scroll position acts after the entries exist
+   ([rows_of_entry] takes it), the live turn
    is built where it is drawn, and [keeper_message_clock]'s timezone is the
    process's own for its whole life -- the assumption the whole-list memo
    already made.
@@ -2251,6 +2293,7 @@ type layout_entries_memo = {
   lem_preview_generation : int;
   lem_memory : memory_visibility;
   lem_reasoning : reasoning_visibility;
+  lem_origin : Message_layout.origin_display;
   lem_tools : tool_visibility;
   lem_file_changes_keeper : string option;
   lem_file_change_index : Keeper_chat_diff.index;
@@ -2328,6 +2371,7 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
     && memo.lem_preview_generation = preview_generation
     && memo.lem_memory = state.msg_memory_visibility
     && memo.lem_reasoning = state.msg_reasoning_visibility
+    && memo.lem_origin = state.msg_origin_display
     && memo.lem_tools = state.msg_tool_visibility
     && Option.equal String.equal memo.lem_file_changes_keeper
          state.msg_file_changes_keeper
@@ -2399,6 +2443,7 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
             lem_preview_generation = preview_generation;
             lem_memory = state.msg_memory_visibility;
             lem_reasoning = state.msg_reasoning_visibility;
+            lem_origin = state.msg_origin_display;
             lem_tools = state.msg_tool_visibility;
             lem_file_changes_keeper = state.msg_file_changes_keeper;
             lem_file_change_index = state.msg_file_change_index;
@@ -2454,6 +2499,7 @@ type settled_block_memo = {
   sbm_timeline : (Masc_tui_types.msg_entry * float option) list;
   sbm_messages : Masc_tui_types.msg_entry list;
   sbm_reasoning : reasoning_visibility;
+  sbm_origin : Message_layout.origin_display;
   sbm_tools : tool_visibility;
   sbm_calls_keeper : string option;
   sbm_calls_loading : bool;
@@ -2628,7 +2674,8 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                 Message_layout.Markdown_growing
                   { keeper_name; request_id; entry_index }
               in
-              let entry ?(speaker : string option) ?(body_presentation=Message_layout.Source_body) style role_label body =
+              let entry ?(speaker : string option)
+                  ?(heading_boundary = Message_layout.Inherit_heading) ?(body_presentation=Message_layout.Source_body) style role_label body =
                 (* One alignment, on the label the row actually carries.
                    Aligning the continuation mark and then aligning the
                    result again pays the badge's width twice, so the second
@@ -2659,6 +2706,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                       | Drawn_text _ | Drawn_thinking _ | Drawn_tools _
                       | Drawn_skill _ | Drawn_status _ | Drawn_error _ -> false);
                     le_entry = ({ delivery_state = None; style;
+                     heading_boundary;
                      body_presentation;
                      timestamp = keeper_message_clock (Option.value timeline_at ~default:started_at);
                      timeline_bucket;
@@ -2685,7 +2733,8 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                         there is no argument here to unfold. *)
                      action = Message_layout.Action_none;
                    }
-                    : Message_layout.entry) }
+                    : Message_layout.entry)
+                    |> fold_thinking_entry state ~chat_cols }
               in
               match item.drawn with
               | Keeper_chat_transcript.Drawn_thinking _
@@ -2694,12 +2743,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                           state.msg_reasoning_visibility) ->
                   None
               | Keeper_chat_transcript.Drawn_thinking lines ->
-                  let body, body_presentation =
-                    if state.msg_reasoning_visibility = Reasoning_folded
-                    then folded_thinking_body (String.concat "\n" lines)
-                    else String.concat "\n" lines, Message_layout.Source_body
-                  in
-                  entry ~body_presentation Message_layout.Thinking (label "THINKING") body
+                  entry Message_layout.Thinking (label "THINKING") (String.concat "\n" lines)
               | Keeper_chat_transcript.Drawn_tools block ->
                   let projection =
                     Keeper_chat_transcript.project_tool_block
@@ -2725,8 +2769,14 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
               | Keeper_chat_transcript.Drawn_reply text ->
                   (* No name on the heading, as on the committed rows:
                      this is the keeper's own pane. *)
-                  entry ~speaker:(label "") Message_layout.Keeper
-                    (label keeper_label) text
+                  let speaker, role, heading_boundary = match item.response_part with
+                    | None -> "", keeper_label, Message_layout.Inherit_heading
+                    | Some Keeper_chat_transcript.Observed_response ->
+                        "SAYING", "SAYING", Message_layout.Start_heading
+                    | Some Keeper_chat_transcript.Final_response ->
+                        "FINAL", "FINAL", Message_layout.Start_heading in
+                  entry ~speaker:(label speaker) ~heading_boundary Message_layout.Keeper
+                    (label role) text
               | Keeper_chat_transcript.Drawn_status text ->
                   entry Message_layout.Status (label "STATUS") text
               | Keeper_chat_transcript.Drawn_error _
@@ -2768,6 +2818,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
            && memo.sbm_timeline == committed_visible_timeline
            && memo.sbm_messages == committed_timeline_messages
            && memo.sbm_reasoning = state.msg_reasoning_visibility
+           && memo.sbm_origin = state.msg_origin_display
            && memo.sbm_tools = state.msg_tool_visibility
            && memo.sbm_calls_keeper = state.keeper_calls_keeper
            && memo.sbm_calls_loading = state.keeper_calls_loading
@@ -2789,6 +2840,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
             sbm_timeline = committed_visible_timeline;
             sbm_messages = committed_timeline_messages;
             sbm_reasoning = state.msg_reasoning_visibility;
+            sbm_origin = state.msg_origin_display;
             sbm_tools = state.msg_tool_visibility;
             sbm_calls_keeper = state.keeper_calls_keeper;
             sbm_calls_loading = state.keeper_calls_loading;
@@ -2832,6 +2884,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
               (* The status row is not the entry it was copied from, so it
                  names none of that entry's request or attempt. *)
               [{ last with le_origin = None; le_is_reply = false; le_entry = { last.le_entry with delivery_state = None; style; speaker = "STATUS";
+                 heading_boundary = Message_layout.Inherit_heading;
                  body_presentation = Message_layout.Source_body;
                  diagnostics = [];
                  role_label = Message_layout.align_role_label
@@ -4750,7 +4803,21 @@ let render_keeper_message (state : state) =
       ~rows ~cols buf
     end
 
+(* Regression access to the real draw cache: measuring a thought must not
+   evict its displayed summary. Keep cache internals out of the normal API. *)
 module For_testing = struct
+  type nonrec chat_markdown_identity = chat_markdown_identity =
+  { cmi_style : Message_layout.style;
+    cmi_keeper_name : string;
+    cmi_request_id : string;
+    cmi_observed_at : float option;
+    cmi_entry_index : int;
+  }
+  let chat_markdown = chat_markdown
+  let fold_thinking_entry = fold_thinking_entry
+  let thinking_height_cache = thinking_height_cache
+  let chat_markdown_cache = chat_markdown_cache
+  let chat_markdown_theme_revision = chat_markdown_theme_revision
   let source_index_build_count () = !source_index_builds
   let source_url_discovery_count () = !source_url_discoveries
   let search_candidate_build_count () = !search_candidate_builds

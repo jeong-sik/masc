@@ -111,6 +111,8 @@ type memory_pass =
   | Pass_failed of { kind : string }
   | No_pass
 
+type heading_boundary = Inherit_heading | Start_heading
+
 type projected_body = Projected_summary | Projected_results | Projected_full
 (** Which projection of typed producer data wrote a body: a tool block's
     calls, a turn's skill activity, a Gate step's folded argument, or a Memory
@@ -125,6 +127,7 @@ type body_presentation = Source_body | Thinking_summary | Projected_body of proj
 
 type entry = {
   style : style;
+  heading_boundary : heading_boundary;
   body_presentation : body_presentation;
   timestamp : string;
   timeline_bucket : timeline_bucket option;
@@ -1273,9 +1276,12 @@ let short_clock timestamp =
    same second have nothing left to say, so they get no heading and read as
    the one message they look like. *)
 let continues_previous ~(previous : entry option) (entry : entry) =
-  match previous with
-  | None -> false
-  | Some previous ->
+  (* An explicit boundary opens its own heading in every origin layout, not
+     only Origin_row: two stretches of one response that sit side by side
+     once reasoning is hidden stay two sections. *)
+  match entry.heading_boundary, previous with
+  | Start_heading, _ | Inherit_heading, None -> false
+  | Inherit_heading, Some previous ->
       previous.style = entry.style
       (* [role_label] is [speaker] cut to the gutter column, so two long names
          can share it. Only the whole name says it is the same speaker. *)
@@ -1324,8 +1330,11 @@ let metadata_row ~(previous : entry option) ~inner_width ~indent (entry : entry)
     | Some previous -> continues_turn ~previous entry
     | None -> false
   in
+  let starts_heading = match entry.heading_boundary with
+    | Inherit_heading -> false
+    | Start_heading -> true in
   let metadata =
-    if not (within_turn || continues_previous ~previous entry) then
+    if starts_heading || not (within_turn || continues_previous ~previous entry) then
       Some
         ( Origin
             { clock; speaker = entry.speaker; role_label = entry.role_label }

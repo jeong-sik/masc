@@ -41,11 +41,25 @@ an earlier segment's text. Autonomous journals end at their own turn boundary ev
 when their outcome is a continuation checkpoint for a later turn.
 
 Provider message starts, tool rounds, retries, and continuation segments open a
-new response window. A flat canonical reply replaces only the last text stretch
-in that window, retaining its source origin. Earlier observed text and reasoning
-keep their positions. A flat reply cannot map canonical content back to multiple
-original text blocks: the text/reasoning/text duplication case remains unresolved
-until response provenance or a separate canonical presentation is available.
+new response window. When only one text stretch was observed in that window,
+a flat canonical reply replaces it while retaining its source origin. When more
+than one was observed, their text and reasoning stay at their original positions,
+marked `SAYING` in the gutter; a separate `FINAL` row carries the recorded reply
+at its actual reply-event time. These labels are outside the authored body. Thus
+A/thinking/B stays intact, and canonical AB is never substituted for just B or
+moved ahead of the original thinking. Hidden reasoning does not change this choice.
+The layout entry carries an explicit heading boundary for these speech sections,
+so metadata-row mode retains their labels without parsing speaker text. All
+ordinary entries inherit existing turn headings, including anonymous replies and
+retry labels; the new sections do not alter request identities or turn rails.
+
+`Reply_details` currently contains flat canonical text, not a correspondence to
+provider content blocks. Official-client adapters may already flatten their
+content, and finalization can normalize the body again. This fallback therefore
+preserves observations and final authority separately. A producer with canonical
+blocks must retain their original message/block provenance through finalization
+before an in-place multi-block reconciliation can be introduced; string prefixes,
+positions in the final string and reconstructed block indices cannot supply it.
 Text and reasoning origins are allocated across the whole operation, without
 resetting at retry or continuation. Tool groups use their first local call's
 identity; records without streamed text have explicit synthetic origins. Rendering
@@ -109,8 +123,9 @@ active steps through runtime parsing, the Keeper adapter, and the chat bridge,
 checking one native occurrence and one observed end for either done or error.
 These cases require execution in the normal
 verification environment; syntax parsing alone does not establish their behavior.
-Response-boundary and usage coverage also includes the server's SSE projection
-and journal replay in `test_tui_keeper_chat_log.ml` and boundary/origin fixtures in
+Response-boundary and usage coverage also includes raw Agent Core content blocks
+through the Keeper bridge, server SSE projection and journal replay in
+`test_tui_keeper_chat_log.ml`, and boundary/origin fixtures in
 `test_tui_keeper_chat_transcript.ml`.
 
 Provider-internal subturns are not fabricated as completed Keeper turns. Native

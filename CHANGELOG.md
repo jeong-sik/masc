@@ -2,6 +2,70 @@
 
 ## [Unreleased]
 
+## [0.51.0] - 2026-10-10
+
+### Upgrade notes
+
+1. **Keeper chat transcripts need fresh state (#41899).** Transcripts written by v0.50.0 hold a `terminal_assistant` slot that this version no longer reads, so Keeper replies are not saved (`transcript_persist_failed: ... unsupported transcript slot kind "terminal_assistant"`) and the server starts without a warning when installed with `scripts/install-local-build.sh`. Restarting the server does not clear it. Stop the server, back up and remove `<base-path>/.masc/keeper_chat/*.jsonl` (the path does not depend on `MASC_CLUSTER_NAME`; `<name>.jsonl.lock` files may stay and are recreated on the next write), then start the new server. All Keeper conversation history is removed. If `keeper_chat_events/` is kept, `chat-journal-audit ... Missing_terminal_row` errors may be logged for up to a few hours after the reset; they do not block saving. `scripts/deploy.sh` refuses to continue on old transcripts; `scripts/install-local-build.sh` does not check, so remove them before installing. Going back to an older binary has not been verified; back up and reset before going back as well.
+2. **DOS checkpoints from earlier builds cannot be restored (#42145, #42147).** The DOS snapshot format version rises; restore refuses older checkpoints, typed and untouched. Keep the old worker beside checkpoints you still need, or use the game's own saves with the new worker.
+3. **`claude-opus-5` is removed from the model catalog (#41880).** A `runtime.toml` that still binds `claude-opus-5` has that runtime disabled at boot. Switch the binding to `claude-opus-5-5` or delete it. Opus 5 through OpenRouter (`anthropic/claude-opus-5`) is unchanged.
+4. **Authoritative recall pins are retired (#41837).** An offline preparation and rollback procedure for existing pins ships with the change; follow `docs/guides/RECALL-PIN-PUBLICATION-UPGRADE.md` before deploying.
+5. **`[browser.live.bidi]` (#42125).** Write the table only after deploying a server that reads it.
+6. **BiDi host shutdown (#42043).** A SIGTERM that arrives after another handled signal now ends a BiDi host immediately; the Firefox session may be left behind and need a restart before it can be attached again.
+
+### Added
+
+- The MSX Lane Add-on can export the mounted guest-written floppy to a new catalog `.dsk`, preserving the original media and returning a byte-count/SHA-256 receipt, for game saves loaded after a fresh boot (#42026). Exercised with one Sangokushi II save, export and fresh-boot reload.
+- DOS press and type can run an explicit instruction allowance after one input, preserving the unsent suffix and reporting delivered activity accurately (#42097). Exercised with one input followed by an explicit allowance on a Sangokushi III checkpoint.
+
+### Experimental
+
+Not yet exercised end to end on a user path; the condition for promotion is on each line.
+
+- **Keeper Firefox.** The server starts the dedicated-profile Firefox and its BiDi host when `runtime.toml` has `[browser.live.bidi]`, records it in `.masc/browser-lane/keeper-firefox.json`, and starts it on demand for a Keeper's hover or drag (#42125, #42151, #42170, #42178, RFC #42108). A host it starts also ends any session with a Firefox on another profile (#42151). When the last host on the port ended leaving its BiDi session in Firefox (or Firefox refuses a new one), and `.masc/browser-lane/keeper-firefox.json` shows MASC started that Firefox, the server restarts it before starting a host; the profile is kept so logins stay, but open tabs are closed. Any other Firefox on the port is left running and the server log says why (#42186). Fixes in the same bundle: #42119, #42150. Promotion needs a real-Firefox run from server start through hover/drag, and a refusal of a Firefox on another profile.
+- **MSX/DOS Lane.** Attachable MSX/DOS Lane packages with play and observation skills, and a local JSON command driver (#42002, #42018, #41993). Verified so far: a fake worker and fixtures. Not verified: server attach, a real Docker install, continuous play of a real game. Promotion needs attach, skill exposure and detach recorded, and one real worker session.
+- **Librarian admission for memory writes.** Ordinary observed memory writes enter durable Librarian admission before current recall; with the Librarian switch off they take the direct path (#41996). Admission requests can be exported in isolation and collected with hash verification for retention experiments, without provider calls or Memory consumption (#42005). The admission queue file format is expected to change in the next release. Promotion needs a log of an observation write passing admission into current Memory on a real server.
+- **Host selector (#41909).** Carried over from v0.50.0: not yet run through a real Keeper path.
+### Changed
+
+- Keeper chat opens with compact speaker marks, aligned prose and opt-in metadata; background Keeper activity no longer occupies the composer (#41685). Shared TUI footers keep current actions and warnings while System owns server identity (#41703). Keeper names lead the roster; Info fields wrap and keep stale readings visible (#41712). Dashboard places decisions before passive summaries (#41723).
+- Server-owned Keeper request failures are distinct transcript rows; the redundant row `kind` is removed (#41899).
+- TUI chat history retains image, SVG, file and voice output, including media-only autonomous turns (#41955).
+- Board attention ledgers no longer grow with consumed work (#41506).
+- Lane tools are discovered through attached workers in MCP and Keeper; colliding export names are quarantined with typed diagnostics (#41999). HTTP machine input and screens route through attached workers (#42001).
+- Codex input-too-large refusals use the context-shrink retry (#42039).
+- World constitution render ceiling raised from 8192 to 12288 bytes (#42194).
+
+### Removed
+
+- Claude Opus 5 (`claude-opus-5`) from the model catalog, Claude Code seed bindings and release evidence list (#41880).
+- The 181 Python PTY scenarios that drove `masc_tui` by waiting for screen text, with their harness, dune rules and CI capture steps (#42155).
+- 48 OCaml TUI test files and 1,452 of 4,143 cases that checked only drawn text, layout, width, row order, scroll offset or colour (#42165).
+- The `compare_tui` mode of `bench-tests.yml` and the `tui-pty-scenario` agent skill (#42182).
+
+### Fixed
+
+- Chat journals: partial journals keep being observed until terminal events arrive and are isolated by Keeper and source (#41688, #41727, #41828, #41831); usage and transcript origins survive sparse stream updates (#41691, #41825); live subscribers are isolated by runtime base, Keeper and request ID (#41695).
+- Completed images and audio are retained when failed Keeper history reloads (#41890); failed server results stay visible under the default dashboard filter (#41899).
+- Claude catalog rows match what the Messages API accepts: no `temperature`/`top_p`/`top_k` for five rows, Fable 5.1 refuses forced `tool_choice` locally, Sonnet 5.5 cache reads priced at 0.05x (#41862). Non-reasoning Ollama models are no longer forced to enable thinking (#41758).
+- Memory search returns cursor pages so matches beyond the page limit stay reachable (#41782). Audio and document attachments keep meaning and provenance on text-only failover (#41983).
+- Board: purge under stable locks (#41778), external attention dedup under the reader lock (#41784), batched discoverable posts (#41806). Workspace Activity includes every repository change from the last 24 hours (#41959).
+- TUI: a hidden Overview Keeper list no longer animates, and enhanced-keyboard Tab dismisses Keeper navigation (#41721).
+- The `keeper_up` handler consumes `create_only` at admission, and the configuration parser rejects it when called directly, so an accepted argument is never silently discarded (#41729). Persisted chat rows with unknown, blank or non-string kinds are rejected so a malformed assistant row cannot acknowledge unanswered user input (#41871). microVM build-link checks keep the reason for an invalid path instead of reporting a real build directory (#42118).
+- `Read` rejects malformed offset/limit before filesystem access (#41932). Owned Unix process fallback honours requested working directories (#42003).
+- BiDi: missing host record reported as unverified (#42045); unacknowledged results archived before a host replaces its record (#42150); `install-local-build.sh` no longer stops a workspace's BiDi host (#42119).
+- DOS: pending BIOS input reads and console continuations persist across tool calls and save/restore (#42145, #42147); Sangokushi III war instructions include commander selection (#42116).
+- Schedule tool descriptions: a wake carries no notes and a recurring message repeats unchanged (#41948).
+
+### Known issues
+
+- A Board verdict completion may reach a Keeper one heartbeat cycle late. The completion record is not lost and is applied on the next cycle, so a Keeper that does not react right after a verdict is not an error. (task-2232)
+- A Task Skill pin whose Skill was edited or deleted makes every turn of the Keeper that holds the Task fail at setup. The fix (#42208) is not in this release. (S-1)
+
+### Complete change record
+
+- All 129 folded fragments, including Internal and Documentation entries, are preserved in [v0.51.0 full changelog](https://github.com/jeong-sik/masc/blob/v0.51.0/docs/releases/v0.51.0-full-changelog.md).
+
 ## [0.50.0] - 2026-10-09
 
 ### Upgrade notes

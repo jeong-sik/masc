@@ -10,6 +10,9 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _gh_merge_base import merge_base
+
 
 _NO_LAZY_FETCH: bool | None = None
 
@@ -58,23 +61,14 @@ def diff_identity(repo: str, base: str, head: str, root: Path) -> str:
         raise ValueError("invalid repository")
     # GitHub supplies the PR's three-dot merge base; shallow local history must
     # not invent a different one. Exact objects are sufficient after this read.
-    merge_base = subprocess.check_output(
-        [
-            os.environ.get("GUARD_GH", "gh"),
-            "api",
-            f"repos/{repo}/compare/{base}...{head}",
-            "--jq",
-            ".merge_base_commit.sha",
-        ],
-        text=True,
-    ).strip()
-    if re.fullmatch(r"[0-9a-f]{40}", merge_base) is None:
-        raise ValueError("GitHub did not return a complete merge base")
+    # The comparison is read without interpreting file patches, whose bytes can
+    # break whole-response JSON parsing (see _gh_merge_base.py).
+    base_commit = merge_base(os.environ.get("GUARD_GH", "gh"), repo, base, head)
     git_flags = ["--no-replace-objects"]
     if _supports_no_lazy_fetch():
         git_flags.append("--no-lazy-fetch")
     git = ["git", *git_flags, "-C", str(root)]
-    commits = (merge_base, head)
+    commits = (base_commit, head)
     has_promisor = _has_promisor_remotes(root)
     # When --no-lazy-fetch is unsupported and the caller repository has promisor
     # remotes (partial clone), probing caller trees would trigger implicit
@@ -110,10 +104,10 @@ def diff_identity(repo: str, base: str, head: str, root: Path) -> str:
                          "GIT_ASKPASS": "false", "SSH_ASKPASS": "false",
                          "GCM_INTERACTIVE": "Never"}, check=True,
                 )
-        return raw_identity(git, merge_base, head)
+        return raw_identity(git, base_commit, head)
 
 
-def raw_identity(git, merge_base, head):
+def raw_identity(git, base_commit, head):
     # -z preserves arbitrary filenames. Disable rename guessing, external
     # drivers, text conversions and abbreviated blob IDs. Binary, mode-only,
     # symlink and submodule changes retain their complete object identities.
@@ -129,7 +123,7 @@ def raw_identity(git, merge_base, head):
             "--no-textconv",
             "--no-relative",
             "--ignore-submodules=none",
-            merge_base,
+            base_commit,
             head,
             "--",
         ],

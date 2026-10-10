@@ -667,7 +667,7 @@ let journaled_event_payload_of_json json =
   let open Yojson.Safe.Util in
   let ( let* ) = Result.bind in
   try
-    let* _ = object_fields ~label:"journaled_event" ~allowed:["v"; "seq"; "ts"; "event"] json in
+    let* _ = object_fields ~label:"journaled_event" ~allowed:["v"; "seq"; "ts"; "event"; "restart_settlement"] json in
     let* seq = Runtime_json_integer.of_json (json |> member "seq") in
     let* () = if seq >= 0 then Ok () else Error "journaled_event: negative seq" in
     let ts = json |> member "ts" |> to_float in

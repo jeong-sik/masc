@@ -3062,12 +3062,24 @@ let render_keeper_message (state : state) =
     (* Blocks sharing an insertion slot follow their causal timeline clocks.
        Equal clocks preserve source order; unknown clocks follow known ones. *)
     let merge_blocks () =
+      (* The slot a clock maps to depends only on the clock and the rows, so
+         entries that share one share the walk. *)
+      let slot_by_clock = Hashtbl.create 16 in
+      let slot_for_clock timeline_at =
+        match Hashtbl.find_opt slot_by_clock timeline_at with
+        | Some slot -> slot
+        | None ->
+            let slot =
+              Masc_tui_types.chat_index_insertion timeline_index ~lower_bound:0
+                ~timeline_at
+            in
+            Hashtbl.add slot_by_clock timeline_at slot;
+            slot
+      in
       let placed =
         List.concat_map (fun block ->
           List.map (fun item ->
-            let by_time = chat_block_insertion_index ~member_ids:[]
-                ~bounds:(fun _ -> false) ~request_id:block.lb_request_id
-                ~timeline_at:item.le_at committed_visible_timeline in
+            let by_time = slot_for_clock item.le_at in
             let insertion = max block.lb_insertion by_time in
             insertion, item.le_at, (Tagged_block block.lb_log, item.le_entry))
             block.lb_entries) blocks
@@ -3082,7 +3094,14 @@ let render_keeper_message (state : state) =
         match committed with
         | [] -> List.map (fun (_, _, item) -> item) placed
         | item :: rest ->
-            let due, later = List.partition (fun (at, _, _) -> at <= index) placed in
+            (* [placed] is sorted by slot, so the entries due at [index] are
+               its leading run. *)
+            let rec split due = function
+              | ((at, _, _) as entry) :: remaining when at <= index ->
+                  split (entry :: due) remaining
+              | later -> List.rev due, later
+            in
+            let due, later = split [] placed in
             List.map (fun (_, _, item) -> item) due @ (item :: merge (index + 1) rest later)
       in
       let merged = once_per_identity (merge 0 committed_tagged placed) in
@@ -3101,11 +3120,22 @@ let render_keeper_message (state : state) =
       let open_request_ids =
         List.map (fun block -> block.lb_request_id) open_blocks
       in
+      (* The first block that lists a request id among its members owns it. *)
+      let block_of_member = Hashtbl.create 16 in
+      List.iter
+        (fun block ->
+          List.iter
+            (fun member_id ->
+              if not (Hashtbl.mem block_of_member member_id)
+              then Hashtbl.add block_of_member member_id block.lb_request_id)
+            block.lb_member_ids)
+        blocks;
+      let block_request_set = Hashtbl.create 16 in
+      List.iter (fun id -> Hashtbl.replace block_request_set id ()) block_requests;
       let request_of = function
         | Tagged_row (message : Masc_tui_types.msg_entry) ->
-            (match List.find_opt (fun block ->
-                Masc_tui_types.string_mem message.me_request_id block.lb_member_ids) blocks with
-             | Some block -> block.lb_request_id
+            (match Hashtbl.find_opt block_of_member message.me_request_id with
+             | Some request_id -> request_id
              | None -> message.me_request_id)
         | Tagged_block log -> Masc_tui_types.turn_log_execution_id log
       in
@@ -3117,9 +3147,10 @@ let render_keeper_message (state : state) =
         | [only] -> Hashtbl.replace edges only (if remains_open then Turn_opens else Turn_alone)
         | first :: rest ->
             Hashtbl.replace edges first Turn_opens;
+            let last = List.length rest - 1 in
             List.iteri (fun i index ->
               Hashtbl.replace edges index
-                (if i = List.length rest - 1 && not remains_open then Turn_closes else Turn_continues)) rest
+                (if i = last && not remains_open then Turn_closes else Turn_continues)) rest
       in
       let current = ref None and indices = ref [] in
       List.iteri (fun index (tag, _) ->
@@ -3137,7 +3168,7 @@ let render_keeper_message (state : state) =
         (fun index ((tag, (entry : Message_layout.entry)) as item) ->
           let request_id = request_of tag in
           match Hashtbl.find_opt edges index with
-          | Some edge when Masc_tui_types.string_mem request_id block_requests ->
+          | Some edge when Hashtbl.mem block_request_set request_id ->
               let siding =
                 match tag with
                 | Tagged_row message -> siding_of_message message

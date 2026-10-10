@@ -3510,6 +3510,64 @@ let test_indexed_timeline_context_matches_the_full_list_functions () =
   check bool "the generator exercised many logs" true (!checked >= 2000)
 ;;
 
+(* Held turns that have no committed row of their own are placed among the
+   committed rows by their clocks: each block goes after the last committed
+   row older than it and before the next, and blocks sharing a gap keep
+   their clock order. *)
+let test_held_turn_blocks_merge_among_committed_rows_by_clock () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous = Masc_tui_ansi.get_terminal_size () in
+  let set_size size = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+      cache ~probe:(fun () -> Some size)) in
+  Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
+    set_size (65, 140);
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+    state.msg_target_keeper_name <- Some "alpha";
+    state.msg_origin_display <- Masc_tui_message_layout.Origin_inline;
+    state.msg_loaded_keeper <- Some "alpha";
+    let user request_id at =
+      chat_entry ~request_id
+        ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator {surface=None}))
+        ~text:("input " ^ request_id) ~at () in
+    state.msg_loaded <- [ user "q0" 10.; user "q1" 30.; user "q2" 50. ];
+    let saying request_id started_at =
+      let log = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id ~started_at in
+      let _ = Tui_types.turn_log_add_journaled log
+        [ line 0 started_at (E.Run_started { run_id = "r"; thread_id = "keeper:alpha" })
+        ; line 1 (started_at +. 0.1) (E.Text_delta {text = "said " ^ request_id; stream_scope = None})
+        ; line 2 (started_at +. 0.2) (journal_reply ("said " ^ request_id))
+        ; line 3 (started_at +. 0.3) (E.Run_finished { run_id = "r" }) ] in
+      Log.commit log.Tui_types.tl_log;
+      log
+    in
+    state.msg_settled_logs <-
+      [ saying "op-late" 60.; saying "op-b2" 41.; saying "op-b" 40.
+      ; saying "op-a" 20.; saying "op-early" 5. ];
+    let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+    let screen =
+      String.concat "\n"
+        (List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines)
+    in
+    let first_of marker =
+      match Astring.String.find_sub ~sub:marker screen with
+      | Some index -> index
+      | None -> fail ("missing from the frame: " ^ marker)
+    in
+    let before left right =
+      check bool (left ^ " precedes " ^ right) true (first_of left < first_of right)
+    in
+    let user id = "input " ^ id and said id = "said " ^ id in
+    before (said "op-early") (user "q0");
+    before (user "q0") (said "op-a");
+    before (said "op-a") (user "q1");
+    before (user "q1") (said "op-b");
+    before (said "op-b") (said "op-b2");
+    before (said "op-b2") (user "q2");
+    before (user "q2") (said "op-late"))
+;;
+
 (* A log built from a journal read stands at the journal head's own time,
    not at the moment the read was asked for. *)
 let test_a_journal_built_log_starts_at_the_journal_head () =
@@ -4976,6 +5034,8 @@ let () =
             test_selected_source_logs_keep_first_order_and_prefer_the_whole_log
         ; test_case "indexed timeline context matches the full-list functions" `Quick
             test_indexed_timeline_context_matches_the_full_list_functions
+        ; test_case "held turn blocks merge among committed rows by clock" `Quick
+            test_held_turn_blocks_merge_among_committed_rows_by_clock
         ; test_case "a journal-built log starts at the journal head" `Quick
             test_a_journal_built_log_starts_at_the_journal_head
         ; test_case "pending input enters transcript on execution evidence" `Quick

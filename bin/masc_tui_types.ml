@@ -1336,6 +1336,30 @@ let chat_timeline_index ~messages ~visible =
         cti_visible
   }
 
+(* The first visible row at or after [lower_bound] that a live turn at
+   [timeline_at] precedes, or the row count when none. Same walk as
+   [chat_block_insertion_index], over the frame's index. *)
+let chat_index_insertion index ~lower_bound ~timeline_at =
+  let live_precedes ((row : msg_entry), row_at) =
+    match timeline_at, row_at with
+    | Some live_at, Some row_at ->
+        let by_time = Float.compare live_at row_at in
+        if by_time <> 0
+        then by_time < 0
+        else row.me_role = Message_memory || String.equal row.me_request_id ""
+    | Some _, None -> true
+    | None, Some _ -> false
+    | None, None -> row.me_role = Message_memory || String.equal row.me_request_id ""
+  in
+  let length = Array.length index.cti_visible in
+  let rec find position =
+    if position >= length then length
+    else if live_precedes index.cti_visible.(position) then position
+    else find (position + 1)
+  in
+  find lower_bound
+;;
+
 type chat_log_timeline_context =
   { clt_committed_error : bool
   ; clt_timeline_at : float option
@@ -1412,24 +1436,10 @@ let chat_log_timeline_context index ~member_ids ~request_id ~started_at =
            else lower_bound)
          0
   in
-  let live_precedes ((row : msg_entry), row_at) =
-    match clt_timeline_at, row_at with
-    | Some live_at, Some row_at ->
-        let by_time = Float.compare live_at row_at in
-        if by_time <> 0
-        then by_time < 0
-        else row.me_role = Message_memory || String.equal row.me_request_id ""
-    | Some _, None -> true
-    | None, Some _ -> false
-    | None, None -> row.me_role = Message_memory || String.equal row.me_request_id ""
-  in
-  let length = Array.length index.cti_visible in
-  let rec find position =
-    if position >= length then length
-    else if live_precedes index.cti_visible.(position) then position
-    else find (position + 1)
-  in
-  { clt_committed_error; clt_timeline_at; clt_insertion = find lower_bound }
+  { clt_committed_error
+  ; clt_timeline_at
+  ; clt_insertion = chat_index_insertion index ~lower_bound ~timeline_at:clt_timeline_at
+  }
 ;;
 
 let chat_live_insertion_index ?(member_ids = []) ~request_id ~timeline_at positioned_messages =

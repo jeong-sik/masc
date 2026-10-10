@@ -19900,9 +19900,9 @@ and is loaded on demand through keeper_skill.
            Masc_tui_http.post_skill_editor_read ~host ~port profile.esp_reference)
        with
        | Error detail -> report_action state "error" ("Skill read failed: " ^ detail)
-       | Ok loaded when not (String.equal loaded.sel_access "read_write") ->
+       | Ok { Masc_tui_http.sel_access = Skill_source_config.Read_only; _ } ->
          report_action state "error" (name ^ " belongs to a read-only Skill source")
-       | Ok loaded ->
+       | Ok ({ Masc_tui_http.sel_access = Skill_source_config.Read_write; _ } as loaded) ->
          (match Masc_tui_editor.editor_command () with
           | None ->
             report_action state "error" "no $EDITOR set; export EDITOR to edit Skills"

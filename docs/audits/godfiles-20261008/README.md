@@ -206,3 +206,5 @@ Pure grapheme segmentation is separated from frame-cache mutation and message la
 Immutable tool and Skill activity projection is separated from stream mutation in [#42139](https://github.com/jeong-sik/masc/pull/42139). See [chat-activity-projection/README.md](chat-activity-projection/README.md). Remaining state and classification/rendering policies require semantic audit.
 
 Editor wire contracts are separated from HTTP effects and unused revision-path plumbing is removed through the canonical runtime text identity in [#42141](https://github.com/jeong-sik/masc/pull/42141). See [tui-editor-wire/README.md](tui-editor-wire/README.md). Both candidates retain remaining semantic audit scope.
+
+Skill read access uses the canonical closed type and the unused client loaded snapshot field is removed in [#42148](https://github.com/jeong-sik/masc/pull/42148). The real server producer and client decoder share an isolated fixture. See [skill-read-contract/README.md](skill-read-contract/README.md). Production counts remain 46 partially improved and 29 pending.

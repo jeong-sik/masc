@@ -13,15 +13,17 @@
       "baseline_lines": 27845,
       "kind": "production",
       "status": "partial: mouse grammar and retained media projection separated; image acquisition moved to its effect owner; remaining responsibilities pending semantic review",
-      "current_lines": 27838,
+      "current_lines": 28921,
       "validation_artifact": "mouse-protocol/README.md",
       "prs": [
         41915,
-        41955
+        41955,
+        42148
       ],
       "validation_artifacts": [
         "mouse-protocol/README.md",
-        "tui-output-media/README.md"
+        "tui-output-media/README.md",
+        "skill-read-contract/README.md"
       ]
     },
     {
@@ -29,11 +31,16 @@
       "baseline_lines": 3516,
       "kind": "production",
       "status": "partially improved; credential, request, response and editor semantics pending",
-      "current_lines": 3430,
+      "current_lines": 3429,
       "prs": [
-        42141
+        42141,
+        42148
       ],
-      "validation_artifact": "tui-editor-wire/README.md"
+      "validation_artifact": "tui-editor-wire/README.md",
+      "validation_artifacts": [
+        "tui-editor-wire/README.md",
+        "skill-read-contract/README.md"
+      ]
     },
     {
       "path": "bin/masc_tui_keeper_chat_transcript.ml",

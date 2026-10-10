@@ -31,8 +31,7 @@ let runtime_config_conflict_document body =
 type skill_editor_loaded =
   { sel_reference : Skill_reference.t
   ; sel_source_text : string
-  ; sel_access : string
-  ; sel_snapshot_revision : string
+  ; sel_access : Skill_source_config.access
   }
 
 type skill_editor_save_status =
@@ -58,26 +57,26 @@ let skill_editor_body reference source_text =
 
 let decode_skill_editor_loaded = function
   | `Assoc fields ->
-    (match
-       List.assoc_opt "reference" fields,
-       List.assoc_opt "source_text" fields,
-       List.assoc_opt "access" fields,
-       List.assoc_opt "snapshot_revision" fields
-     with
-     | Some reference_json, Some (`String source_text), Some (`String access),
-       Some (`String snapshot_revision) ->
-       (match Skill_reference.of_yojson reference_json with
-        | Ok reference ->
-          Ok
-            { sel_reference = reference
-            ; sel_source_text = source_text
-            ; sel_access = access
-            ; sel_snapshot_revision = snapshot_revision
-            }
-        | Error _ -> Error "Skill editor returned an invalid exact reference")
+    let ( let* ) = Result.bind in
+    (match List.assoc_opt "reference" fields,
+           List.assoc_opt "source_text" fields,
+           List.assoc_opt "access" fields with
+     | Some reference_json, Some (`String source_text), Some (`String access) ->
+       let* sel_reference =
+         Skill_reference.of_yojson reference_json
+         |> Result.map_error (fun _ -> "Skill editor returned an invalid exact reference")
+       in
+       let* sel_access =
+         match access with
+         | "read_only" -> Ok Skill_source_config.Read_only
+         | "read_write" -> Ok Skill_source_config.Read_write
+         | _ -> Error "Skill editor returned an unknown access mode"
+       in
+       Ok { sel_reference; sel_source_text = source_text; sel_access }
      | _ -> Error "Skill editor read response is incomplete")
   | _ -> Error "Skill editor read response must be an object"
 ;;
+
 let decode_skill_editor_save_receipt = function
   | `Assoc fields ->
     let snapshot_revision =

@@ -81,6 +81,8 @@ let operation_of_misc : Tool_schemas_misc.misc_operation -> operation option = f
 type failure =
   | Bad_arguments of string
   | Invalid_keeper of string
+  | Unknown_target of string
+  | Keepers_unreadable of string
   | Shop_failed of Candle_shop.error
   | Equip_failed of Candle_equipment.error
   | Gift_failed of Candle_gift.error
@@ -123,7 +125,7 @@ let optional_int ~context key fields =
   optional_field ~context key as_non_negative_int fields
 ;;
 
-let run ~operation ~base_path ~keeper_name ~args =
+let run ~operation ~base_path ~keeper_name ~keeper_names ~args =
   let* keeper =
     Keeper_id.Keeper_name.of_string keeper_name
     |> Result.map_error (fun detail -> Invalid_keeper detail)
@@ -182,9 +184,23 @@ let run ~operation ~base_path ~keeper_name ~args =
     let* item_id, fields = input (optional_string ~context "item" fields) in
     let* reason, fields = input (optional_string ~context "reason" fields) in
     let* () = input (Candle_json.finish ~context fields) in
+    (* The balance fold creates a wallet for any name it has never seen, and
+       there is no clawback, so a mistyped or hallucinated target would strand
+       the gift forever. The roster is the same source the invite flow checks
+       against (Play_invite over Play_seat.keeper_names); the transfer keys
+       the wallet by the roster's own spelling, so a keeper gifting "minsu"
+       to the roster keeper "Minsu" lands in Minsu's wallet. *)
+    let* keepers =
+      match keeper_names with
+      | Ok keepers -> Ok keepers
+      | Error detail -> Error (Keepers_unreadable detail)
+    in
     let* to_keeper =
-      Keeper_id.Keeper_name.of_string to_name
-      |> Result.map_error (fun detail -> Invalid_keeper detail)
+      match Play_invite.resolve_keeper_name ~keepers to_name with
+      | None -> Error (Unknown_target to_name)
+      | Some canonical ->
+        Keeper_id.Keeper_name.of_string canonical
+        |> Result.map_error (fun detail -> Invalid_keeper detail)
     in
     let* kind =
       match amount_milli, item_id, reason with
@@ -231,6 +247,11 @@ let run ~operation ~base_path ~keeper_name ~args =
 let error_info = function
   | Bad_arguments detail -> "invalid_arguments", Tool_result.Workflow_rejection, detail
   | Invalid_keeper detail -> "invalid_keeper", Tool_result.Policy_rejection, detail
+  | Unknown_target detail ->
+    "unknown_target", Tool_result.Workflow_rejection,
+    Printf.sprintf "no keeper is named %s; gifts only reach registered keepers" detail
+  | Keepers_unreadable detail ->
+    "keepers_unreadable", Tool_result.Dependency_unavailable, detail
   | Equip_failed error ->
     let code, class_ = match error with
       | Candle_equipment.Unavailable _ -> "equipment_unavailable", Tool_result.Dependency_unavailable
@@ -305,8 +326,8 @@ let error_info = function
     code, class_, Candle_gift.error_to_string error
 ;;
 
-let handle ~operation ~base_path ~keeper_name ~tool_name ~start_time ~args =
-  match run ~operation ~base_path ~keeper_name ~args with
+let handle ~operation ~base_path ~keeper_name ~keeper_names ~tool_name ~start_time ~args =
+  match run ~operation ~base_path ~keeper_name ~keeper_names ~args with
   | Ok data -> Tool_result.make_ok ~tool_name ~start_time ~data ()
   | Error error ->
     let code, class_, detail = error_info error in

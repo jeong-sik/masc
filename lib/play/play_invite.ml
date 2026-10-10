@@ -74,8 +74,26 @@ let readiness ~(auth_config : Masc_domain.auth_config) ~public_base_url =
    which lowercases, and keeper names may hold capitals. "Minsu" and "minsu"
    share agents/minsu.json, so the keeper booting later would overwrite the
    invite's credential. Compared as file names, not as strings. *)
-let is_keeper_name ~keepers name =
+let is_keeper_name_string ~keepers name =
   List.exists (fun keeper -> String.equal (Common.safe_filename keeper) name) keepers
+
+let is_keeper_name ~keepers (name : Name.t) = is_keeper_name_string ~keepers name
+
+(* A gift target is a wallet key, not a credential file name, so it must
+   match a roster name exactly apart from case: the balance fold opens a
+   wallet for a spelling no keeper holds, and the gift would sit in it
+   forever. Returns the roster's own spelling, which is the wallet key the
+   fold reads, or [None] when no name matches or the case-fold is
+   ambiguous. *)
+let resolve_keeper_name ~keepers name =
+  let folded = String.lowercase_ascii name in
+  match
+    List.filter
+      (fun keeper -> String.equal (String.lowercase_ascii keeper) folded)
+      keepers
+  with
+  | [ keeper ] -> Some keeper
+  | _ -> None
 
 let issue ~base_path ~public_base_url ~keeper_names ~name ~hours =
   let ( let* ) = Result.bind in

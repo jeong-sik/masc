@@ -157,3 +157,42 @@ candle 경로에서 준수 확인.
 - `verification-runs.jsonl` 옛 `operator_routed` 행이 compaction 차단 — 데이터 정리 필요.
 - 수동 백업(`backups-*`, `keeper_chat.backup-*`, `.masc/backups` 45개) 보존 기간 결정.
 - `autonomy_stats.jsonl` 고아 파일 삭제.
+
+## 8. 운영자 결정 요청 (제품 방향)
+
+### 8-1. quiet-final 수락 정책 (P2-4)
+
+빈 최종 텍스트로 끝나는 턴을 "정상 종료"로 받을지 여부가 5개 레인에 비대칭 적용 중
+(Codex만 수락, 나머지는 전 후보 소진 후 실패 — `keeper_turn_driver.ml:2664-2685` vs
+`keeper_turn_driver_try_provider.ml:600-606`).
+
+- **(a) 전 레인 typed 헬퍼로 수락 통일 (권장)**: #41747이 만든 `Allow_quiet_final` 타입 정책을
+  공통 헬퍼로 복원해 5개 레인에 동일 적용. 근거: 조용한 자율 웨이크(할 일 없음)는 유효한
+  프로토콜 종료이며, tool-only 턴을 이미 수락하는 계약과도 일관. 비용: 레인이 조용히
+  끝나는 실패를 즉시 알기 어려움(관측으로 보완).
+- **(b) 전 레인 엄격 수락**: Codex 특례도 제거. 근거: "빈 응답 = 문제"를 항상 드러내기.
+  비용: 빈 최종 텍스트 하나가 후보 수 × 풀 요청 비용으로 번식, schedule 웨이크 노이즈.
+
+### 8-2. native terminal acknowledge 소비 (P2-1)
+
+`Terminal_unacknowledged → No_native_call` 유일 전이(`Acknowledge`)의 호출부가 없어
+Retire 종말 작업이 "awaiting Owner acknowledgement"로 영구 남음
+(`keeper_direct_native_continuation.ml:382-393`, `keeper_turn.ml:536`).
+
+- **(b) 죽은 계약 정리 (권장)**: acknowledge·관련 export·오류 문구를 함께 삭제하고
+  "terminal, cannot be dispatched again"으로 교정. 근거: 소비 단계를 만든 #41655 계약의
+  소비자가 0건 — 미출시 제품에서 미연결 계약은 삭제가 원칙(헌법 legacy_residue).
+- **(a) acknowledge 연결**: 결과 전달 완료 경로에서 호출. 근거: durable 상태를 N tick에
+  닫는 계약 자체는 유효. 비용: 새 전달 경로 설계·테스트.
+
+## 9. 후속 확인 사항 (이번 감사 이후 발견)
+
+- **#41784 회귀 → #42274 수정**: 빈 시간 구간의 strict 채팅 로드 회귀를 조사로 확정하고
+  수정 PR까지 연결. "검토 없는 조합 변경"이 만든 이번 주 3번째 실제 회귀
+  (#41793+#41730 조합 → #42255, #41784 → #42274, 이전 #42243 컴파일 P0는 리뷰 선제 차단).
+- **P2-10 전제 정정**: "월드 브리핑 full text가 매 턴 주입"은 옛 것 — 현재 본문은
+  `keeper_workspace_memory_read` 도구로 지연 주입. 남는 것은 크기 관측 부재뿐 → #42276
+  (브리핑 바이트·claim 수 게이지)로 보강.
+- **실패 테스트 3종 조정**: curator_lane 29/34·candle 27건·absorb_gate 5건은 전부
+  `dune exec` CWD 아티팩트 — 표준 runtest 전부 통과, 코드 결함 아님. 선택적 하드닝
+  (프롬프트 디렉터리 미해결 시 fail-fast)은 미착수.

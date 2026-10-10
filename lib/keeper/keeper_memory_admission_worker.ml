@@ -1,12 +1,22 @@
 module Queue = Keeper_memory_admission_queue
 module Current = Keeper_memory_os_current
 
-type judgment_result = Committed | Deferred of string | Input_size_refused of string
+type judgment_result = Committed | Awaiting_evidence | Deferred of string | Input_size_refused of string
 type outcome =
-  | Disabled | Idle | Settled of {has_more : bool}
+  | Disabled | Idle | Recheck_new_input | Settled of {has_more : bool}
   | Pending of string | Unavailable of string
 
 let io = Domain_pool_ref.submit_io_or_inline
+
+(* The runtime's typed range-sizing decision, not a candidate-count threshold
+   or a prose error match. Splitting is recursive, so a walk that also met a
+   failure a smaller range meets the same way (a quota, an outage, an operator
+   refusal) is deferred whole rather than sending that slot one request per
+   part. *)
+let judgment_of_not_committed (reason : Keeper_librarian_runtime.not_committed) =
+  if reason.walk_shows_size && not reason.smaller_range_meets_same_failure
+  then Input_size_refused reason.detail
+  else Deferred reason.detail
 
 let run_with ~keepers_dir ~keeper_name ~judge =
   let read () = io (fun () -> Queue.read_pending ~keepers_dir ~keeper_id:keeper_name) in
@@ -18,35 +28,48 @@ let run_with ~keepers_dir ~keeper_name ~judge =
     | Error detail -> Unavailable detail
     | Ok None -> Idle
     | Ok (Some batch) ->
-      let rec evaluate batch =
-        match judge batch with
-        | Deferred detail -> Pending detail
-        | Input_size_refused detail ->
-          (match Queue.smaller_prefix batch with
-           | None -> Pending detail
-           | Some prefix -> evaluate prefix)
-        | Committed ->
-          (match acknowledge () with
-           | Error detail -> Unavailable detail
-           | Ok () ->
-             match read () with
+      let original_through = List.fold_left (fun highest (row : Queue.candidate) ->
+        max highest row.sequence) 0 (Queue.candidates batch) in
+      let finish ~committed ~pending_reason =
+        match read () with
+        | Error detail -> Unavailable detail
+        | Ok remaining ->
+          let has_more = match remaining with
+            | None -> false
+            | Some remaining -> List.exists (fun (row : Queue.candidate) ->
+                row.sequence > original_through) (Queue.candidates remaining) in
+          if committed then Settled {has_more}
+          else if has_more then Recheck_new_input
+          else Pending pending_reason in
+      let rec evaluate ~committed ~pending_reason = function
+        | [] -> finish ~committed ~pending_reason
+        | part :: siblings ->
+          match judge part with
+          | Deferred detail -> Pending detail
+          | Awaiting_evidence ->
+            evaluate ~committed ~pending_reason:"admission awaits further evidence" siblings
+          | Input_size_refused detail ->
+            (match Queue.split part with
+             | None -> evaluate ~committed ~pending_reason:detail siblings
+             | Some (left, right) ->
+               evaluate ~committed ~pending_reason (left :: right :: siblings))
+          | Committed ->
+            (match acknowledge () with
              | Error detail -> Unavailable detail
-             | Ok None -> Settled {has_more=false}
-             | Ok (Some remaining) ->
-               let evaluated = Queue.candidates batch in
-               let pending = Queue.candidates remaining in
-               let pending_ids = List.fold_left (fun ids (row : Queue.candidate) ->
-                 Set_util.StringSet.add row.request_id ids) Set_util.StringSet.empty pending in
-               let consumed = List.exists (fun (row : Queue.candidate) ->
-                 not (Set_util.StringSet.mem row.request_id pending_ids)) evaluated in
-               if not consumed then
-                 Unavailable "admission commit has no matching consumed-input receipt"
-               else
-                 let evaluated_through = List.fold_left (fun sequence (row : Queue.candidate) ->
-                   max sequence row.sequence) 0 evaluated in
-                 Settled {has_more=List.exists (fun (row : Queue.candidate) ->
-                   row.sequence > evaluated_through) pending}) in
-      evaluate batch
+             | Ok () ->
+               match read () with
+               | Error detail -> Unavailable detail
+               | Ok remaining ->
+                 let pending = match remaining with
+                   | None -> [] | Some remaining -> Queue.candidates remaining in
+                 let pending_ids = List.fold_left (fun ids (row : Queue.candidate) ->
+                   Set_util.StringSet.add row.request_id ids) Set_util.StringSet.empty pending in
+                 let consumed = List.exists (fun (row : Queue.candidate) ->
+                   not (Set_util.StringSet.mem row.request_id pending_ids)) (Queue.candidates part) in
+                 if not consumed then
+                   Unavailable "admission commit has no matching consumed-input receipt"
+                 else evaluate ~committed:true ~pending_reason siblings) in
+      evaluate ~committed:false ~pending_reason:"admission remains pending" [batch]
 
 let run ~base_path ~keeper_name =
   match Env_config.KeeperMemoryOs.librarian_config_state () with
@@ -78,11 +101,8 @@ let run ~base_path ~keeper_name =
           let outcome = ref (Deferred "Librarian admission did not commit") in
           Keeper_librarian_runtime.run_best_effort ~write_scope:Memory_maintenance ~admission
             ~on_memory_committed:(fun () -> committed := true)
-            ~on_not_committed:(fun reason ->
-              (* This is the runtime's existing typed range-sizing decision,
-                 not a candidate-count threshold or a prose error match. *)
-              outcome := if reason.Keeper_librarian_runtime.walk_shows_size
-                then Input_size_refused reason.detail else Deferred reason.detail)
+            ~on_admission_deferred:(fun () -> outcome := Awaiting_evidence)
+            ~on_not_committed:(fun reason -> outcome := judgment_of_not_committed reason)
             ~base_path ~keepers_dir ~keeper_id:keeper_name
             ~expected_revision:(Option.map (fun (value : Current.t) -> value.revision) snapshot)
             input;
@@ -91,4 +111,5 @@ let run ~base_path ~keeper_name =
 
 module For_testing = struct
   let run_with = run_with
+  let judgment_of_not_committed = judgment_of_not_committed
 end

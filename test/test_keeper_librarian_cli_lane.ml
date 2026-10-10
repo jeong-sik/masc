@@ -646,7 +646,7 @@ let test_incomplete_reply_exposes_typed_body_deadline () =
   | Ok _ | Error _ -> fail "expected HTTP200 headers followed by typed total body deadline"
 ;;
 
-let test_explicit_admission_envelope ~deferred () =
+let test_explicit_admission_envelope ?(transport_failure=false) ~deferred () =
   with_eio @@ fun ~sw:_ ~net:_ ~clock:_ ~base_path ->
   Fixture.with_official_client_runtimes @@ fun () ->
   let module Queue = Masc.Keeper_memory_admission_queue in
@@ -673,6 +673,7 @@ let test_explicit_admission_envelope ~deferred () =
   let admission = match Queue.read_pending ~keepers_dir ~keeper_id |> require with
     | Some batch -> batch | None -> fail "missing candidate" in
   let requests = ref 0 in
+  let held = deferred || transport_failure in
   let runner ~runtime_id:_ ~system_prompt:_ ~output_schema ~prompt =
     incr requests;
     let properties = Yojson.Safe.Util.member "properties" output_schema in
@@ -682,26 +683,30 @@ let test_explicit_admission_envelope ~deferred () =
       (Astring.String.is_infix ~affix:request_id prompt);
     let outcome, memory_claim = if deferred then "deferred", `Null
       else "already_represented", `String current_a.claim in
-    Ok (Yojson.Safe.to_string (`Assoc ["memory",(if deferred then unchanged_memory_json else valid_selection_json);
+    if transport_failure then Error (Masc.Fusion_official_client.Setup_failure "synthetic transport unavailable")
+    else Ok (Yojson.Safe.to_string (`Assoc ["memory",(if deferred then unchanged_memory_json else valid_selection_json);
       "change_support",`List (if deferred then [] else [`String request_id]);
       "candidates",`List [`Assoc ["request_id",`String request_id;
         "outcome",`String outcome; "memory_claim",memory_claim;
         "reason",`String "same event; judgment fixture"]]])) in
-  let committed = ref 0 and retained = ref 0 in
+  let committed = ref 0 and retained = ref 0 and awaiting_evidence = ref 0 in
   Runtime.run_best_effort ~write_scope:Runtime.Memory_maintenance ~admission
     ~cli_runner:runner ~on_memory_committed:(fun () -> incr committed)
     ~on_not_committed:(fun _ -> incr retained)
+    ~on_admission_deferred:(fun () -> incr awaiting_evidence)
     ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some initial.revision) (input ());
   check int "one actual exact-lane dispatch" 1 !requests;
-  check int "only settled answer commits" (if deferred then 0 else 1) !committed;
-  check int "uncertainty is explicitly retained" (if deferred then 1 else 0) !retained;
+  check int "only settled answer commits" (if held then 0 else 1) !committed;
+  check int "uncertainty is explicitly retained" (if held then 1 else 0) !retained;
+  check int "only validated semantic deferral emits evidence-wait signal"
+    (if deferred && not transport_failure then 1 else 0) !awaiting_evidence;
   Queue.acknowledge_committed ~keepers_dir ~keeper_id |> require;
-  check bool "queue consumption follows the Memory receipt" deferred
+  check bool "queue consumption follows the Memory receipt" held
     (Option.is_some (Queue.read_pending ~keepers_dir ~keeper_id |> require));
   let after = match Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require with
     | Some value -> value | None -> fail "snapshot absent" in
   check (list string) "deferred answer has no Memory effects"
-    (if deferred then [current_a.claim;current_b.claim] else [current_a.claim])
+    (if held then [current_a.claim;current_b.claim] else [current_a.claim])
     (List.map (fun (f : Memory.fact) -> f.claim) after.facts)
 ;;
 
@@ -1010,6 +1015,8 @@ let () =
             (test_explicit_admission_envelope ~deferred:false)
         ; test_case "deferred explicit candidates leave Memory and queue intact" `Quick
             (test_explicit_admission_envelope ~deferred:true)
+        ; test_case "transport failure is not a completed evidence deferral" `Quick
+            (test_explicit_admission_envelope ~transport_failure:true ~deferred:false)
         ; test_case "settled B commits while preceding A stays deferred" `Quick
             (test_mixed_admission ~depends_on_deferred:false)
         ; test_case "change depending on deferred A has no effects" `Quick

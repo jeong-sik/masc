@@ -16,9 +16,10 @@ val candidate_ids : batch -> Keeper_memory_os_current.explicit_candidate_id list
     exact candidate JSON object (sequence, request ID, full fact/provenance),
     not an array. Original sparse sequence numbers are preserved. *)
 
-val smaller_prefix : batch -> batch option
-(** After a size refusal, select the first half of complete candidates. A
-    singleton has no smaller nonempty prefix. Nothing is consumed or clipped. *)
+val split : batch -> (batch * batch) option
+(** After an actual size refusal, partition into two nonempty disjoint halves
+    of complete candidates in original order. A singleton cannot split. This
+    neither consumes input nor establishes semantic independence of the halves. *)
 
 val append :
   keepers_dir:string -> keeper_id:string -> request_id:string ->

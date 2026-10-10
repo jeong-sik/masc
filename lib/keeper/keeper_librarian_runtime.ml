@@ -45,7 +45,9 @@ type outward_effect =
 
 type exact_execution_error =
   { outward_effect : outward_effect
+  ; invalid_output : bool
   ; walk_shows_size : bool
+  ; smaller_range_meets_same_failure : bool
   ; detail : string
   }
 
@@ -514,8 +516,9 @@ let cause_shows_size (cause : Exact_output.execution_error_cause) =
   (* An answer that came back unusable is a refused output, which §4.3 counts
      among the failures reading less answers. *)
   | Output_limit_reached | Incomplete_output | Missing_output | Ambiguous_output _
-  | Unexpected_output_content | Invalid_json_output
+  | Unexpected_output_content
   | Response_body_deadline_exceeded -> true
+  | Invalid_json_output -> false
   | Completion_failed { error; dispatch } -> completion_failure_shows_size ~dispatch error
 ;;
 
@@ -564,9 +567,53 @@ let flow_evidence_and_final_verdict = function
    so the same set of causes answers the same way whatever order the slots
    were tried in. A semantic rejection the validator raised never reaches the
    walk's advances, so the caller adds it. *)
+let flow_has_invalid_output error =
+  let evidence, _ = flow_evidence_and_final_verdict error in
+  let invalid_json = function Exact_output.Invalid_json_output -> true | _ -> false in
+  let invalid_advance (receipt : Exact_output.flow_advance_receipt) =
+    match receipt.failed with
+    | Exact_output.Flow_advance_execution_failed { cause; _ } -> invalid_json cause
+    | Exact_output.Flow_advance_candidate_rejected _ -> false in
+  let invalid_final = match error with
+    | Exact_output.Flow_exact_execution_failed { cause; _ } -> invalid_json cause.Exact_output.cause
+    | _ -> false in
+  invalid_final || List.exists invalid_advance evidence.Exact_output.advances
+;;
+
+(* Whether a visit of the walk failed for a reason a smaller range meets the
+   same way: an execution failure whose cause does not show size and is not
+   invalid output, which has its own veto. A candidate the flow turned away
+   before dispatch is not counted: no provider was asked. *)
+let flow_has_size_independent_failure error =
+  let evidence, _ = flow_evidence_and_final_verdict error in
+  let independent (cause : Exact_output.execution_error_cause) =
+    match cause with
+    | Invalid_json_output -> false
+    | Provider_response_refused _ | Output_limit_reached | Incomplete_output
+    | Missing_output | Ambiguous_output _ | Unexpected_output_content
+    | Response_body_deadline_exceeded | Completion_failed _ ->
+      not (cause_shows_size cause) in
+  let failed_advance (receipt : Exact_output.flow_advance_receipt) =
+    match receipt.failed with
+    | Exact_output.Flow_advance_execution_failed { cause; _ } -> independent cause
+    | Exact_output.Flow_advance_candidate_rejected _ -> false in
+  let failed_final = match error with
+    | Exact_output.Flow_exact_execution_failed { cause; _ } -> independent cause.Exact_output.cause
+    | Exact_output.Flow_attempt_already_started _
+    | Exact_output.Flow_attempt_start_failed _
+    | Exact_output.Flow_measurement_start_failed _
+    | Exact_output.Flow_before_measurement_dispatch_callback_failed _
+    | Exact_output.Flow_measurement_terminal_callback_failed _
+    | Exact_output.Flow_before_dispatch_callback_failed _
+    | Exact_output.Flow_before_advance_callback_failed _
+    | Exact_output.Flow_candidates_exhausted _ -> false in
+  failed_final || List.exists failed_advance evidence.Exact_output.advances
+;;
+
 let walk_shows_size_flow error =
   let evidence, final = flow_evidence_and_final_verdict error in
-  final || List.exists advance_shows_size evidence.Exact_output.advances
+  not (flow_has_invalid_output error)
+  && (final || List.exists advance_shows_size evidence.Exact_output.advances)
 ;;
 
 (* What a pass that did not commit hands back: the cause for its caller's
@@ -574,6 +621,7 @@ let walk_shows_size_flow error =
 type not_committed =
   { detail : string
   ; walk_shows_size : bool
+  ; smaller_range_meets_same_failure : bool
   }
 
 (* Only typed input-capacity evidence makes an execution failure about size.
@@ -581,7 +629,7 @@ type not_committed =
 let cli_failure_shows_size (failure : Keeper_lane_cli_oneshot.failure) =
   match failure with
   | Keeper_lane_cli_oneshot.Invalid_json_output _
-  | Keeper_lane_cli_oneshot.Invalid_domain_output _ -> true
+  | Keeper_lane_cli_oneshot.Invalid_domain_output _ -> false
   | Keeper_lane_cli_oneshot.Unknown_runtime _
   | Keeper_lane_cli_oneshot.Not_an_official_client _ -> false
   | Keeper_lane_cli_oneshot.Execution_failed _ ->
@@ -599,19 +647,65 @@ let cli_failure_shows_size (failure : Keeper_lane_cli_oneshot.failure) =
    The official-client tail keeps the API failure that sent the walk to it, and
    both are asked: reading only the tail would answer a size refusal one way
    when CLI slots were declared and the other way when they were not. *)
-let rec extraction_shows_size = function
-  | Exact_execution_failed error -> error.walk_shows_size
+let rec extraction_has_invalid_output = function
+  | Exact_execution_failed error -> error.invalid_output
   | Domain_output_invalid _ -> true
   | Cli_slots_exhausted { prior_error; failures } ->
-    List.exists cli_failure_shows_size failures
-    || (match prior_error with
-        | Some error -> extraction_shows_size error
-        | None -> false)
+    List.exists (function
+      | Keeper_lane_cli_oneshot.Invalid_json_output _
+      | Keeper_lane_cli_oneshot.Invalid_domain_output _ -> true
+      | _ -> false) failures
+    || Option.fold ~none:false ~some:extraction_has_invalid_output prior_error
+  | Cli_prompt_unavailable { prior_error } ->
+    Option.fold ~none:false ~some:extraction_has_invalid_output prior_error
+  | Prompt_render_failed _ | Exact_setup_failed _
+  | No_transport_declared | Memory_snapshot_write_failed _
+  | Absorb_judgment_failed _ -> false
+;;
+
+let rec extraction_shows_size = function
+  | Exact_execution_failed error -> error.walk_shows_size
+  | Domain_output_invalid _ -> false
+  | Cli_slots_exhausted { prior_error; failures } ->
+    let invalid_output = List.exists (function
+      | Keeper_lane_cli_oneshot.Invalid_json_output _
+      | Keeper_lane_cli_oneshot.Invalid_domain_output _ -> true
+      | Keeper_lane_cli_oneshot.Unknown_runtime _
+      | Keeper_lane_cli_oneshot.Not_an_official_client _
+      | Keeper_lane_cli_oneshot.Execution_failed _ -> false) failures in
+    not (invalid_output || Option.fold ~none:false ~some:extraction_has_invalid_output prior_error)
+    && (List.exists cli_failure_shows_size failures
+        || (match prior_error with
+            | Some error -> extraction_shows_size error
+            | None -> false))
   | Cli_prompt_unavailable { prior_error = Some error } -> extraction_shows_size error
   | Cli_prompt_unavailable { prior_error = None } -> false
   | Prompt_render_failed _ | Exact_setup_failed _
   | No_transport_declared | Memory_snapshot_write_failed _ -> false
   | Absorb_judgment_failed { walk_shows_size; _ } -> walk_shows_size
+;;
+
+(* Whether the walk also met a failure a smaller range meets the same way,
+   asked of every part of the walk as [extraction_shows_size] is. A CLI slot
+   that ran and failed without naming its input capacity counts. Invalid
+   output has its own veto, a slot this process could not run never reached
+   a provider, and the absorb judge reports only its size verdict. *)
+let rec extraction_meets_same_failure = function
+  | Exact_execution_failed error -> error.smaller_range_meets_same_failure
+  | Cli_slots_exhausted { prior_error; failures } ->
+    List.exists (fun (failure : Keeper_lane_cli_oneshot.failure) ->
+      match failure with
+      | Keeper_lane_cli_oneshot.Execution_failed _ -> not (cli_failure_shows_size failure)
+      | Keeper_lane_cli_oneshot.Invalid_json_output _
+      | Keeper_lane_cli_oneshot.Invalid_domain_output _
+      | Keeper_lane_cli_oneshot.Unknown_runtime _
+      | Keeper_lane_cli_oneshot.Not_an_official_client _ -> false) failures
+    || Option.fold ~none:false ~some:extraction_meets_same_failure prior_error
+  | Cli_prompt_unavailable { prior_error } ->
+    Option.fold ~none:false ~some:extraction_meets_same_failure prior_error
+  | Prompt_render_failed _ | Exact_setup_failed _ | No_transport_declared
+  | Domain_output_invalid _ | Memory_snapshot_write_failed _
+  | Absorb_judgment_failed _ -> false
 ;;
 
 (* Only a CLI slot reports a limit this process can fit against: its refusal
@@ -693,9 +787,12 @@ let exact_execution_error
       error
   in
   { outward_effect
+  ; invalid_output = flow_has_invalid_output error || semantic_rejections <> []
   ; walk_shows_size =
-      walk_shows_size_flow error
-      || (match semantic_rejections with [] -> false | _ :: _ -> true)
+      (match semantic_rejections with
+       | [] -> walk_shows_size_flow error
+       | _ :: _ -> false)
+  ; smaller_range_meets_same_failure = flow_has_size_independent_failure error
   ; detail
   }
 ;;
@@ -929,11 +1026,9 @@ let execute_answer
     in
     Ok (success.accepted, Api_slot selected_slot)
   | Error (Exact_output.Flow_execution_terminal { cause; prior_rejections }) ->
-    (* A rejection the validator raised on an answer that arrived never enters
-       the walk's advances, so the walk alone would answer differently
-       depending on where in the order that answer came. A refused output is
-       what RFC-librarian-lifecycle §4.3 counts as a size cause, so one is
-       enough. *)
+    (* A semantic rejection does not enter the walk's advances. Preserve it
+       separately so a later capacity failure cannot turn invalid output
+       into permission to split an admission partition. *)
     let terminal () =
       Error
         (Exact_execution_failed
@@ -1222,6 +1317,7 @@ let run_best_effort
       ?(on_memory_committed = fun () -> ())
       ?(on_cli_input_limit = fun _ -> ())
       ?(on_not_committed = fun _ -> ())
+      ?(on_admission_deferred = fun () -> ())
       ?(on_continuity_committed = fun ~served_by:_ _ -> ())
       ?(on_context_committed = fun _ -> ())
       ?durable_range_id
@@ -1239,7 +1335,8 @@ let run_best_effort
     | Some _, _, _, _, _ -> false in
   if not admission_mode_valid then
     on_not_committed {detail = "explicit admission requires a standalone Memory maintenance pass";
-                      walk_shows_size = false}
+                      walk_shows_size = false;
+                      smaller_range_meets_same_failure = false}
   else
     try
       match Eio_context.get_net_opt (), Eio_context.get_clock_opt () with
@@ -1252,7 +1349,7 @@ let run_best_effort
         (match acquired with
          | Error (Exact_setup_failed (Exact_lane_unavailable (Exact_lane_off _))) ->
            let detail = "Librarian is off; pending input remains unconsumed" in
-           on_not_committed {detail; walk_shows_size=false};
+           on_not_committed {detail; walk_shows_size=false; smaller_range_meets_same_failure=false};
            Log.Keeper.info ~keeper_name:keeper_id "%s" detail
          | Ok _ | Error _ ->
         let registry = Exact_lane_run_registry.global () in
@@ -1602,14 +1699,15 @@ let run_best_effort
                    (* A snapshot that did not commit -- a CAS the history moved
                       under, a disk error -- is not the range's size, so the
                       caller keeps the width and logs this cause. *)
-                   on_not_committed { detail = reason; walk_shows_size = false };
+                   on_not_committed { detail = reason; walk_shows_size = false; smaller_range_meets_same_failure = false };
                    Log.Keeper.warn ~keeper_name:keeper_id "%s" reason;
                    Continuity_not_committed reason)
              in
              match answer with
              | Admission_deferred_answer ->
                let detail = "explicit admission remains pending: Librarian deferred every candidate" in
-               on_not_committed {detail; walk_shows_size = false};
+               on_not_committed {detail; walk_shows_size = false;
+                                 smaller_range_meets_same_failure = false};
                Ok (`Admission_deferred (exact_output, selected_slot))
              | Working_context_answer proposed ->
                organize_working_context proposed;
@@ -1787,6 +1885,7 @@ let run_best_effort
              complete ~selected_slot Exact_lane_run_registry.Succeeded
                (`Assoc ["memory_write", `String "pending_explicit_admission";
                         "exact_output", exact_output]);
+             on_admission_deferred ();
              Eio.Fiber.check ()
            | Ok (`Context_organized (exact_output, selected_slot)) ->
              complete ~selected_slot Exact_lane_run_registry.Succeeded
@@ -1837,6 +1936,7 @@ let run_best_effort
              on_not_committed
                { detail
                ; walk_shows_size = extraction_shows_size error
+               ; smaller_range_meets_same_failure = extraction_meets_same_failure error
                };
              complete
                ?selected_slot:(selected_slot_of_extraction_error error)
@@ -1951,7 +2051,7 @@ let run_best_effort
         in
         (* No request was composed, so nothing here says the range's size
            stopped the pass. *)
-        on_not_committed { detail; walk_shows_size = false };
+        on_not_committed { detail; walk_shows_size = false; smaller_range_meets_same_failure = false };
         record_failure
           ~keepers_dir
           ~keeper_id
@@ -1970,6 +2070,7 @@ let run_best_effort
       on_not_committed
         { detail = "librarian raised: " ^ Printexc.to_string exn
         ; walk_shows_size = false
+        ; smaller_range_meets_same_failure = false
         };
       record_failure
         ~keepers_dir

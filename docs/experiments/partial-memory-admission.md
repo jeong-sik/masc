@@ -73,9 +73,16 @@ Injected runtime tests cover partial settlement and refusal when declared suppor
 names a deferred candidate. Queue tests cover sparse acknowledgement and wake
 behavior. These tests do not establish real-model semantic independence.
 
-Remaining: when an actual capacity refusal forces a smaller prefix and that
-prefix is entirely deferred, an unjudged suffix may still be postponed. Existing
-captured model responses are replayed only if their request hashes match the
+Capacity handling first tries the full pending set. A typed size refusal permits
+disjoint halves; completed semantic deferral and indivisible size refusal retain
+their input while traversal continues through unjudged siblings. Ordinary
+provider/schema/store failures stop traversal. Each successful part is consumed
+only through its receipts. Previously evaluated leftovers do not schedule an
+immediate retry; new concurrent input does, with a separate no-commit recheck
+outcome when nothing was stored. Partitioning is a resource recovery mechanism,
+not proof that two parts are unrelated or that cross-part meaning is preserved.
+
+Existing captured model responses are replayed only if their request hashes match the
 current contract; otherwise the harness records capture_not_current without
 injecting the response. Schema evolution is not a new semantic success. Live
 model quality and deployment remain unverified.

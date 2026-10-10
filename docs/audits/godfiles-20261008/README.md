@@ -7,8 +7,8 @@ This campaign covers tracked code files with at least 2,000 lines. The initial
 inventory contains 171 candidates: 75 production source/style/interface files,
 90 tests, 3 tooling files and 3 evidence scripts. `inventory.json` records each
 baseline path and its current audit state. A line count selects candidates; it
-is not a defect verdict or a new build gate. Eighteen production candidates received
-bounded changes; their other responsibilities remain pending. The other 57
+is not a defect verdict or a new build gate. Nineteen production candidates received
+bounded changes; their other responsibilities remain pending. The other 56
 production candidates still require semantic review. All 171 candidates remain
 in the campaign until their responsibilities and necessary repairs are assessed.
 
@@ -34,6 +34,7 @@ in the campaign until their responsibilities and necessary repairs are assessed.
 | [#42003](https://github.com/jeong-sik/masc/pull/42003) | Ignored fallback cwd repaired through owned directory FD; native/Eio refusal authority, shared path rule and redundant spawn forwarder removal | `process_eio.ml/.mli`, foreground owner and shared spawn C |
 | [#42013](https://github.com/jeong-sik/masc/pull/42013) | Eio foreground capture/cleanup effect owner; duplicate two-stream and pipeline drains removed; callback dispatch simplified and grace docs corrected | `process_eio.ml/.mli`, Eio capture owner, direct consumers |
 | [#42016](https://github.com/jeong-sik/masc/pull/42016) | Pure tool-schema contract owns strict decoding, projection and private construction; public signature and direct provider/MCP consumers preserved | `llm_provider/types.ml`, schema contract owner |
+| [#42021](https://github.com/jeong-sik/masc/pull/42021) | Existing approval projection owner receives chat writes, replay reconciliation, broadcasts and failed logs; pure readiness and distinct native admission preserved | `keeper_approval_queue.ml/.mli`, projection/result owners |
 
 The declared branch dependencies follow that order, starting at `main`.
 GitHub may group a subset into a native stack; inspect live membership rather
@@ -101,6 +102,9 @@ The Core check requires an approved leader-selected candidate under the current
 execution protocol; no selection receipt or approval is fabricated here.
 
 ## Next work
+
+Approval chat ownership, distinct native receipt authority and isolated consumer
+checks are recorded in [approval-chat-projection/README.md](approval-chat-projection/README.md).
 
 Pure tool-schema contract ownership and decoder/wire/API-boundary evidence are
 recorded in [tool-schema-contract/README.md](tool-schema-contract/README.md).

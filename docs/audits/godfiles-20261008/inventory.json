@@ -261,7 +261,12 @@
       "path": "lib/keeper/keeper_approval_queue.ml",
       "baseline_lines": 3182,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: approval chat effects consolidated in existing projection owner; pure continuation readiness separated from durable acquisition; remaining queue/storage/orchestration responsibilities pending semantic review",
+      "current_lines": 3010,
+      "prs": [
+        42021
+      ],
+      "validation_artifact": "approval-chat-projection/README.md"
     },
     {
       "path": "lib/keeper/keeper_board_attention_candidate.ml",

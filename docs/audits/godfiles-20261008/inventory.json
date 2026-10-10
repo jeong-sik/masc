@@ -210,10 +210,11 @@
       "path": "lib/fs_compat/atomic_write.ml",
       "baseline_lines": 3327,
       "kind": "production",
-      "status": "partial: orphan inventory/preservation effects and shared temp-name grammar separated; capability recovery/publication and ordinary replacement remain pending",
-      "current_lines": 2773,
+      "status": "partial: orphan effects/shared filename grammar separated and redundant report copies/projections removed; capability publication/recovery and test injection remain pending",
+      "current_lines": 2640,
       "prs": [
-        41969
+        41969,
+        41972
       ]
     },
     {
@@ -662,7 +663,11 @@
       "path": "test/test_fs_compat_publication_reconciliation.ml",
       "baseline_lines": 2057,
       "kind": "test",
-      "status": "pending semantic review"
+      "status": "partial: canonical report assertions replace copied kinds; 14 existing recovery evidence cases passed; incremental inventory/concurrency and full test responsibility review remain pending",
+      "current_lines": 2062,
+      "prs": [
+        41972
+      ]
     },
     {
       "path": "test/test_gate_keeper_backend.ml",

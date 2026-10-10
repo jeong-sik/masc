@@ -436,7 +436,11 @@
       "path": "lib/keeper/keeper_unified_prompt.ml",
       "baseline_lines": 2226,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; catalog/config acquisition, context assembly and metrics remain pending",
+      "current_lines": 1922,
+      "prs": [
+        42106
+      ]
     },
     {
       "path": "lib/keeper_chat_operations/keeper_chat_operation_store.ml",

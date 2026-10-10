@@ -4,6 +4,7 @@
  (flags :standard)
  (public_name masc)
  (private_modules
+  keeper_unified_prompt_event_fields
   keeper_msg_async_types
   keeper_msg_async_record
   keeper_memory_os_current_types

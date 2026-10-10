@@ -926,7 +926,8 @@
 (library
  (name masc_tui_message_layout)
  (wrapped false)
- (modules masc_tui_message_layout)
+ (modules masc_tui_message_layout masc_tui_grapheme_segmentation)
+ (private_modules masc_tui_grapheme_segmentation)
  (libraries uucp uuseg))
 
 (library

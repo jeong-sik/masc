@@ -61,7 +61,12 @@
       "path": "bin/masc_tui_message_layout.ml",
       "baseline_lines": 2418,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; segmentation, frame cache and layout semantic review pending",
+      "current_lines": 2109,
+      "prs": [
+        42138
+      ],
+      "validation_artifact": "tui-grapheme-segmentation/README.md"
     },
     {
       "path": "bin/masc_tui_render.ml",

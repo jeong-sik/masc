@@ -303,6 +303,122 @@ let replay filename () =
     check bool "lookup destination is a current claim" true
       (List.exists (fun fact -> Memory.memory_id fact = binding.target_memory_id)
          current_facts)) recall_bindings;
+  let runs = Runs.list_runs (Runs.global ()) |> List.filter (fun (run : Runs.run) ->
+    not (List.exists (fun (prior : Runs.run) -> String.equal prior.run_id run.run_id) prior_runs)) in
+  let exact_run = match runs with
+    | [run] -> run | _ -> fail "replay did not produce one exact-run observation" in
+  if String.equal filename "verified_replacement.json" && !injected then
+    (match exact_run.status with
+     | Runs.Completed {outcome=Runs.Succeeded; _} -> ()
+     | Running | Completed _ | Completion_persistence_failed _ ->
+         fail "verified replacement must complete its exact run successfully");
+  let followup_proposals = match member "followup_proposals" envelope with
+    | `Null -> [] | json -> Yojson.Safe.Util.to_list json |> List.map Yojson.Safe.Util.to_string in
+  if String.equal filename "independent_200.json" then
+    (* The capture claims to be the R-015-only experiment, so the input is
+       pinned to that single correction here rather than accepted as any
+       nonempty proposal list. *)
+    check (list string) "independent-200 fixture carries the single R-015 correction"
+      [ "Verified owner-approved policy change: production release R-015 now requires two independent \
+         approvals, replacing its prior owner-approval requirement. Production releases R-001 through \
+         R-200 other than R-015 retain their existing owner-approval requirement. This change does not \
+         change any staging policy." ]
+      followup_proposals;
+  if followup_proposals <> [] then (
+    check bool "followup starts from an actual committed predecessor" true
+      (!injected && receipts <> [] && pending = []);
+    (* A binding comparison against the same incomplete subset on both sides
+       would pass while the predecessor had already lost addresses, so the
+       coverage is established before anything is compared. *)
+    check int "every scenario candidate was settled" (List.length candidates) (List.length receipts);
+    check int "predecessor recall bound every settled receipt" (List.length receipts)
+      (List.length recall_bindings);
+    List.iter (fun claim ->
+      let result = Masc.Keeper_tool_memory_runtime.keeper_memory_write_with_outcome
+        ~config ~meta ~args:(`Assoc ["content",`String claim]) in
+      check string "followup enters through the real deferred producer" "persisted_pending_admission"
+        (json_string "outcome" (Yojson.Safe.from_string result.raw_output))) followup_proposals;
+    let followup_snapshot, followup_bindings =
+      Current.read_with_admission_recall_for_keepers_dir ~keepers_dir ~keeper_id |> require in
+    check bool "producer preserves predecessor snapshot and lookup provenance" true
+      (followup_snapshot = current && followup_bindings = recall_bindings);
+    let followup = match Queue.read_pending ~keepers_dir ~keeper_id |> require with
+      | Some batch -> batch | None -> fail "followup candidate missing" in
+    let followup_candidates = Queue.candidates followup in
+    let prior_sequence = List.fold_left (fun highest (id : Current.explicit_candidate_id) ->
+      max highest id.sequence) 0 receipts in
+    check int "one queued candidate per proposal" (List.length followup_proposals)
+      (List.length followup_candidates);
+    List.iteri (fun offset (candidate : Queue.candidate) ->
+      check string "followup queues the proposed correction verbatim"
+        (List.nth followup_proposals offset) candidate.fact.claim;
+      check int "followup preserves the existing queue sequence" (prior_sequence + offset + 1)
+        candidate.sequence) followup_candidates;
+    let followup_ids = Queue.candidate_ids followup in
+    List.iter (fun (id : Current.explicit_candidate_id) ->
+      check string "followup keeps original queue generation" generation id.queue_generation) followup_ids;
+    let stores = ["current_snapshot", current_path;
+      "consumption_and_lookup_receipt", Current.durable_range_receipt_path ~keepers_dir ~keeper_id;
+      "memory_journal", Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id;
+      "pending_queue", queue_path] in
+    let before = List.map (fun (name,path) -> name, Fs_compat.load_file_opt path) stores in
+    let state_bundle = `Assoc (List.map (fun (name,bytes) -> name,
+      match bytes with None -> `Assoc ["present",`Bool false]
+      | Some bytes -> `Assoc ["present",`Bool true;"bytes",`String bytes;
+          "sha256",`String (sha256 bytes)]) before) in
+    let captured = ref [] and followup_commits = ref 0 and deferred = ref 0 in
+    let runner ~runtime_id ~system_prompt ~output_schema ~prompt =
+      captured := (runtime_id,system_prompt,output_schema,prompt) :: !captured;
+      Ok (Yojson.Safe.to_string (`Assoc ["memory",`Assoc ["working_contexts",`List [];
+        "new_claims",`List [];"dropped",`List []];"change_support",`List [];
+        "candidates",`List (List.map (fun (candidate : Queue.candidate) ->
+          `Assoc ["request_id",`String candidate.request_id;"outcome",`String "deferred";
+            "memory_claim",`Null;"reason",`String "Capture only; no semantic judgment performed."])
+          followup_candidates)])) in
+    let prior_followup_runs = Runs.list_runs (Runs.global ()) in
+    let captured_at = Time_compat.now () in
+    Runtime.run_best_effort ~write_scope:Runtime.Memory_maintenance ~admission:followup ~cli_runner:runner
+      ~on_memory_committed:(fun () -> incr followup_commits)
+      ~on_admission_deferred:(fun () -> incr deferred)
+      ~base_path ~keepers_dir ~keeper_id
+      ~expected_revision:(Option.map (fun (snapshot : Current.t) -> snapshot.revision) current)
+      {selected_input with current=Option.map (fun (snapshot : Current.t) ->
+         ({Librarian.facts=snapshot.facts} : Librarian.current_selection)) current};
+    check int "capture-only followup commits nothing" 0 !followup_commits;
+    check int "capture response reaches valid all-deferred branch" 1 !deferred;
+    let followup_runs = Runs.list_runs (Runs.global ()) |> List.filter (fun (run : Runs.run) ->
+      not (List.exists (fun (prior : Runs.run) -> prior.run_id = run.run_id) prior_followup_runs)) in
+    (match followup_runs with [ {status=Runs.Completed {outcome=Runs.Succeeded; _}; _} ] -> ()
+      | _ -> fail "followup capture must complete the real decoder");
+    Queue.acknowledge_committed ~keepers_dir ~keeper_id |> require;
+    List.iter (fun (name,path) -> check (option string) (name ^ " unchanged by capture")
+      (List.assoc name before) (Fs_compat.load_file_opt path)) stores;
+    let runtime_id,system_prompt,schema,prompt = match !captured with
+      | [request] -> request | _ -> fail "expected one followup request" in
+    let candidate_rows = `List (List.map candidate_json followup_candidates) in
+    let initial_rows = `List (List.map Memory.fact_to_json current_facts) in
+    let scenario_input = `Assoc ["predecessor_fixture",`String filename;
+      "predecessor_response_sha256",`String (sha256 response_raw);
+      "proposed_claims",`List (List.map (fun claim -> `String claim) followup_proposals)] in
+    let export = `Assoc ["cohort",`String (cohort ^ "_followup");
+      "measurement",`String "production_rendered_synthetic_followup_capture";
+      "semantic_judgment_performed",`Bool false;"captured_at",`Float captured_at;
+      "phase",`String "after_predecessor_recall_and_followup_enqueue_before_retirement";
+      "predecessor_fixture",`String filename;"predecessor_response_sha256",`String (sha256 response_raw);
+      "keeper_id",`String keeper_id;"trace_id",`String trace_id;"absolute_turn",`Int 0;
+      "runtime_id",`String runtime_id;"system_prompt",`String system_prompt;"prompt",`String prompt;
+      "schema",schema;"candidates",candidate_rows;"initial_current_facts",initial_rows;
+      "initial_snapshot_present",`Bool (Option.is_some current);"scenario_input",scenario_input;
+      "keeper_instructions",`String instructions;"state_bundle",state_bundle;
+      "candidate_receipts",`List (List.map (fun (id : Current.explicit_candidate_id) ->
+        `Assoc ["queue_generation",`String id.queue_generation;"request_id",`String id.request_id;
+          "sequence",`Int id.sequence;"input_sha256",`String id.input_sha256]) followup_ids);
+      "input_hashes",`Assoc ["scenario_input_sha256",`String (hash_json scenario_input);
+        "prompt_sha256",`String (sha256 prompt);"system_prompt_sha256",`String (sha256 system_prompt);
+        "schema_sha256",`String (hash_json schema);"candidates_sha256",`String (hash_json candidate_rows);
+        "initial_current_facts_sha256",`String (hash_json initial_rows);
+        "keeper_instructions_sha256",`String (sha256 instructions)]] in
+    Printf.printf "MEMORY_ADMISSION_FOLLOWUP_EXPORT %s\n%!" (Yojson.Safe.to_string export));
   (* An identical claim created later is a new admission. Old candidate
      provenance must not attach itself to that new incarnation. This uses
      the real replacement path after the measured replay, not a sidecar edit. *)
@@ -357,15 +473,6 @@ let replay filename () =
         "bindings_after_retirement",`Int (List.length retired_bindings);
         "bindings_after_identical_readd",`Int (List.length readded_bindings)]
     | None, _ | Some _, [] -> `Assoc ["performed",`Bool false] in
-  let runs = Runs.list_runs (Runs.global ()) |> List.filter (fun (run : Runs.run) ->
-    not (List.exists (fun (prior : Runs.run) -> String.equal prior.run_id run.run_id) prior_runs)) in
-  let exact_run = match runs with
-    | [run] -> run | _ -> fail "replay did not produce one exact-run observation" in
-  if String.equal filename "verified_replacement.json" && !injected then
-    (match exact_run.status with
-     | Runs.Completed {outcome=Runs.Succeeded; _} -> ()
-     | Running | Completed _ | Completion_persistence_failed _ ->
-         fail "verified replacement must complete its exact run successfully");
   let actual_outcome = if not !injected then Capture_not_current
     else if receipts<>[] then Committed_and_acknowledged else Not_committed in
   let payload = `Assoc ["fixture",`String filename; "cohort",`String cohort;
@@ -461,6 +568,8 @@ let () =
     json_string "file" entry, outcome_of_label (json_string "expected_outcome" entry)) in
   let filenames = List.map fst entries in
   if filenames = [] then fail "replay manifest must contain actual response fixtures";
+  check bool "replay manifest includes the required followup scenario" true
+    (List.mem "independent_200.json" filenames);
   check bool "replay manifest includes the required verified replacement" true
     (List.mem "verified_replacement.json" filenames);
   List.iter (fun name ->

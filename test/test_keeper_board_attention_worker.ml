@@ -673,11 +673,11 @@ let test_completed_snapshot_captures_settle_and_continues_waking () =
   ignore (complete_next ~base_path J.Relevant);
   ignore (complete_next ~base_path J.Relevant);
   let added, resolve_added = Eio.Promise.create () in
-  (* The hook only exists to prove the new completion survives a settle that
-     had already captured its snapshot: it lands in the gap right after the
-     capture, so the settle below cannot see it in [completed] and must come
-     back with a continuation wake. No polling, no yield-ordering assumption -
-     the hook fires before the walk starts. *)
+  (* The captured snapshot settles only what it captured: the hook lands a
+     new completion in the capture boundary, so the walk below cannot see it
+     in [completed] and must come back with a continuation wake. This pins
+     the comment above [settle_completed_snapshot] — completions that arrive
+     after the capture belong to the next admission snapshot. *)
   let saved_hook = !W.For_testing.captured_snapshot_hook in
   W.For_testing.captured_snapshot_hook :=
     (fun ~base_path ~keeper_name:_ ~completed:_ ->

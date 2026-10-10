@@ -1884,9 +1884,6 @@ let prunes_and_read ~base_path ~keeper_name ?hook () =
   (* The settled receipts of consumed candidates go on the same wake, so the
      partition ledger of a Keeper that never restarts stays bounded too. Like
      the candidate prune, a failure is observed and retried on the next wake. *)
-  (* MEASUREMENT-ONLY REVERT (uncommitted): candidate read between the two
-     prunes, for the tripwire measurement. *)
-  let* candidates = Candidate.load_candidates ~base_path ~keeper_name in
   (match Partition.prune_settled_receipts ~base_path ~keeper_name with
    | Ok 0 -> ()
    | Ok removed ->
@@ -1899,7 +1896,15 @@ let prunes_and_read ~base_path ~keeper_name ?hook () =
        "board_attention_settled_receipt_prune_failed keeper=%s detail=%s"
        keeper_name
        detail);
-  Ok candidates
+  (* The candidate list is read only after both prunes. A list read before
+     them can still hold a candidate that an owner settlement (which runs
+     without this lock) consumed meanwhile; once the prune dropped that
+     candidate's settled receipt, [ensure_roots] would mint a fresh [Ready]
+     root that no candidate row backs, and the worker would block on
+     "candidate ledger lacks partition member" forever because only [Settled]
+     receipts are pruned. Receipts are dropped only above this read, so a
+     candidate consumed after it still has its [Settled] receipt. *)
+  Candidate.load_candidates ~base_path ~keeper_name
 ;;
 
 let process_next_with_claim_ready_exact_current

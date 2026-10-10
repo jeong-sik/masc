@@ -3945,6 +3945,43 @@ let test_journal_tracking_keeps_keeper_and_source_identity () =
      |> List.length)
 ;;
 
+(* One log per execution source, in the order each source first appeared. A
+   later log for a seen source takes the first one's place only when it holds
+   more of the turn; a cut log never displaces a whole one. *)
+let test_selected_source_logs_keep_first_order_and_prefer_the_whole_log () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  let ids () =
+    List.map Tui_types.turn_log_request_id
+      (Tui_types.selected_source_logs_for_keeper state "alpha")
+  in
+  let cut_a = journal_log ~request_id:"op-a" ~started_at:1. ~finished:false () in
+  let whole_b = journal_log ~request_id:"op-b" ~started_at:2. () in
+  let whole_a = journal_log ~request_id:"op-a" ~started_at:3. () in
+  state.msg_settled_logs <- [ cut_a; whole_b; whole_a ];
+  check (list string) "the whole log takes the first source's position"
+    [ "op-a"; "op-b" ] (ids ());
+  check bool "and it is the whole log that stands there" true
+    (List.memq whole_a (Tui_types.selected_source_logs_for_keeper state "alpha")
+     && not (List.memq cut_a (Tui_types.selected_source_logs_for_keeper state "alpha")));
+  state.msg_settled_logs <- [ whole_a; whole_b; cut_a ];
+  check bool "a cut log does not displace the whole one" true
+    (List.memq whole_a (Tui_types.selected_source_logs_for_keeper state "alpha")
+     && not (List.memq cut_a (Tui_types.selected_source_logs_for_keeper state "alpha")));
+  check (list string) "the order stays the first appearance" [ "op-a"; "op-b" ] (ids ());
+  check (list string) "another keeper holds none of them" []
+    (List.map Tui_types.turn_log_request_id
+       (Tui_types.selected_source_logs_for_keeper state "beta"));
+  let many =
+    List.init 300 (fun i ->
+      journal_log ~request_id:(Printf.sprintf "op-%03d" i) ~started_at:(float_of_int i) ())
+  in
+  state.msg_settled_logs <- many @ many;
+  check (list string) "a repeated pool of 300 sources keeps one log each, in order"
+    (List.map Tui_types.turn_log_request_id many) (ids ())
+;;
+
 (* A log built from a journal read stands at the journal head's own time,
    not at the moment the read was asked for. *)
 let test_a_journal_built_log_starts_at_the_journal_head () =
@@ -5553,6 +5590,8 @@ let () =
             test_journal_endpoints_preserve_terminal_and_failure_boundaries
         ; test_case "journal tracking keeps keeper and source identity" `Quick
             test_journal_tracking_keeps_keeper_and_source_identity
+        ; test_case "selected source logs keep first order and prefer the whole log" `Quick
+            test_selected_source_logs_keep_first_order_and_prefer_the_whole_log
         ; test_case "a journal-built log starts at the journal head" `Quick
             test_a_journal_built_log_starts_at_the_journal_head
         ; test_case "pending input enters transcript on execution evidence" `Quick

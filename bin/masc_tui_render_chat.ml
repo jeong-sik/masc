@@ -2702,9 +2702,13 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
      read, and the merged list is reused whole while no block is live. That
      is what keeps an idle pane holding settled turns at the same per-frame
      cost it had before they were logs. *)
+  (* Both are fixed for the frame; asking per log rescanned every held log. *)
+  let live_status_log = Masc_tui_types.keeper_message_status_log state in
+  let member_ids_of =
+    Masc_tui_types.chat_execution_member_index state ~keeper_name
+  in
   let failure_in_live_status turn_log =
-    Option.exists (fun live -> live == turn_log)
-      (Masc_tui_types.keeper_message_status_log state)
+    Option.exists (fun live -> live == turn_log) live_status_log
   in
   (* Every request keeps its own receipt even when a sibling's journal is
      selected to draw their shared execution. Receipt timestamps need not
@@ -2727,8 +2731,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
   let log_projection ~committed:_ ~preludes (turn_log : Masc_tui_types.turn_log) =
     let transcript = turn_log.tl_transcript in
     let request_id = Masc_tui_types.turn_log_execution_id turn_log in
-    let member_ids = Masc_tui_types.chat_execution_member_ids state
-        ~keeper_name ~execution_id:request_id in
+    let member_ids = member_ids_of ~execution_id:request_id in
     let committed_error =
       List.exists
         (fun (message : Masc_tui_types.msg_entry) ->
@@ -2954,8 +2957,9 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
       ( Masc_tui_types.turn_log_keeper_name turn_log
       , Masc_tui_types.turn_log_request_id turn_log )
     in
-    let member_ids = Masc_tui_types.chat_execution_member_ids state
-        ~keeper_name ~execution_id:(Masc_tui_types.turn_log_execution_id turn_log) in
+    let member_ids =
+      member_ids_of ~execution_id:(Masc_tui_types.turn_log_execution_id turn_log)
+    in
     let revision = Keeper_chat_transcript.revision turn_log.tl_transcript in
     let preludes = admission_preludes turn_log in
     let palette_generation =

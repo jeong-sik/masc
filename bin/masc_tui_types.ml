@@ -8230,16 +8230,21 @@ let selected_source_logs_for_keeper state keeper_name =
 (* Batch watchers keep their original request identities. All inputs bound to
    one execution must precede its output, even if a follower's more complete
    journal is the selected source. Never join by message text. *)
+let chat_execution_member_index state ~keeper_name =
+  let by_execution : (string, string) Hashtbl.t = Hashtbl.create 16 in
+  state.msg_settled_logs
+  @ List.map (fun (entry : inflight) -> entry.log) state.msg_inflight
+  @ Option.to_list state.msg_live
+  |> List.iter (fun log ->
+      if turn_log_keeper_name log = keeper_name then
+        Hashtbl.add by_execution (turn_log_execution_id log) (turn_log_request_id log));
+  fun ~execution_id ->
+    execution_id :: Hashtbl.find_all by_execution execution_id
+    |> List.sort_uniq String.compare
+;;
+
 let chat_execution_member_ids state ~keeper_name ~execution_id =
-  execution_id ::
-  (state.msg_settled_logs
-   @ List.map (fun (entry : inflight) -> entry.log) state.msg_inflight
-   @ Option.to_list state.msg_live
-   |> List.filter_map (fun log ->
-       if turn_log_keeper_name log = keeper_name
-          && turn_log_execution_id log = execution_id
-       then Some (turn_log_request_id log) else None))
-  |> List.sort_uniq String.compare
+  chat_execution_member_index state ~keeper_name ~execution_id
 ;;
 
 (* Existing consumers ask for held sources, but selection must also account

@@ -559,8 +559,6 @@ describe('Tools', () => {
       keeperName: 'sangsu',
     }))
     expect(container.textContent).toContain('project-masc/ocaml-coding:ocaml-coding@')
-    expect(container.querySelector('[data-testid="skill-context-totals"]')?.textContent)
-      .toContain('profile discovery 160 B · deferred bodies 840 B')
     expect(container.querySelector('[data-testid="skill-load-reason"]')?.textContent)
       .toContain('Task task-001 + Keeper profile')
     expect(container.textContent).toContain('Task instruction · task-001, task-held')

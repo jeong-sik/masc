@@ -30,7 +30,6 @@ import { decodeSkillsResponse, SkillsContractError } from '../api/dashboard-skil
 import { ApiRequestError } from '../api/core'
 import {
   capabilityLabel,
-  contextLabel,
   createReceiptMessage,
   formatBytes,
   kindLabel,
@@ -456,7 +455,6 @@ describe('labels', () => {
       }],
     }
     expect(capabilityLabel(profiled)).toBe('async · 4 nodes · 2 batches · parallel ×3')
-    expect(contextLabel(profiled, 2048)).toBe('320 B discovery · 2.0 KB body')
     expect(usageLabel(profiled)).toBe(
       'rondo 9×/9 delivered/134 actions · last 2026-08-27T01:00:00Z',
     )

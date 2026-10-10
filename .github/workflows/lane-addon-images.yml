@@ -7,9 +7,9 @@ on:
         type: string
         required: false
       mode:
-        description: Build container images or local macOS worker executables
+        description: Build images, local macOS workers, or verify the actual machine host lifecycle
         type: choice
-        options: [images, macos_workers]
+        options: [images, macos_workers, host_lifecycle]
         default: images
       scope:
         description: Package set to build
@@ -20,7 +20,7 @@ permissions:
   contents: read
 jobs:
   packages:
-    if: inputs.mode != 'macos_workers'
+    if: inputs.mode == 'images'
     runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.discover.outputs.matrix }}
@@ -232,3 +232,57 @@ jobs:
           name: machine-workers-macos-${{ inputs.source_sha || github.sha }}
           path: machine-workers-macos.tar.gz
           if-no-files-found: error
+
+  host-lifecycle:
+    if: inputs.mode == 'host_lifecycle'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require an explicit lifecycle source
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          python3 - <<'PY_SOURCE'
+          import os, re
+          if re.fullmatch(r'[0-9a-f]{40}', os.environ['SOURCE_SHA']) is None:
+              raise SystemExit('host_lifecycle requires an explicit full lowercase source SHA')
+          PY_SOURCE
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-ocaml-toolchain
+      - uses: ./.github/actions/pin-ocaml-deps
+      - uses: ./.github/actions/install-ocaml-deps
+      - name: Build host and both native workers once
+        run: |
+          opam exec -- dune build bin/main_eio.exe bin/masc_msx_addon_worker.exe bin/masc_dos_addon_worker.exe
+          install -m 755 _build/default/bin/masc_msx_addon_worker.exe addons/masc-msx-addon-worker
+          install -m 755 _build/default/bin/masc_dos_addon_worker.exe addons/masc-dos-addon-worker
+      - name: Build only the two runtime images
+        run: |
+          python3 - <<'PY_IMAGES'
+          import subprocess, tomllib
+          from pathlib import Path
+          source = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          for machine in ('msx', 'dos'):
+              package = Path('addons') / (machine + '-machine')
+              manifest = tomllib.loads((package / 'lane.toml').read_text())
+              subprocess.run(['docker', 'build', '--label',
+                  'org.opencontainers.image.revision=' + source,
+                  '-f', str(package / 'Dockerfile'), '-t', manifest['image'], 'addons'], check=True)
+          PY_IMAGES
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: .host-ci
+          persist-credentials: false
+      - name: Verify actual host attachment, tools and active context
+        env:
+          EXPECTED_SOURCE: ${{ inputs.source_sha }}
+        run: python3 .host-ci/scripts/ci/verify-machine-host-lifecycle.py --source . --expected-source "$EXPECTED_SOURCE" --artifact host-proof
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: machine-host-lifecycle-${{ inputs.source_sha }}
+          path: host-proof/
+          if-no-files-found: warn

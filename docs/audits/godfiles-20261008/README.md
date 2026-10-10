@@ -7,8 +7,8 @@ This campaign covers tracked code files with at least 2,000 lines. The initial
 inventory contains 171 candidates: 75 production source/style/interface files,
 90 tests, 3 tooling files and 3 evidence scripts. `inventory.json` records each
 baseline path and its current audit state. A line count selects candidates; it
-is not a defect verdict or a new build gate. Forty-three production candidates received
-bounded changes; their other responsibilities remain pending. The other 32
+is not a defect verdict or a new build gate. Forty-four production candidates received
+bounded changes; their other responsibilities remain pending. The other 31
 production candidates still require semantic review. All 171 candidates remain
 in the campaign until their responsibilities and necessary repairs are assessed.
 
@@ -202,3 +202,5 @@ Official-client context and held-block/resume projection are separated from host
 Mermaid grammar/canonical diagram data and canvas/layout are separated in [#42137](https://github.com/jeong-sik/masc/pull/42137). See [mermaid-grammar/README.md](mermaid-grammar/README.md). Remaining correctness/performance audit stays pending after crossing below2000 lines.
 
 Pure grapheme segmentation is separated from frame-cache mutation and message layout in [#42138](https://github.com/jeong-sik/masc/pull/42138). See [tui-grapheme-segmentation/README.md](tui-grapheme-segmentation/README.md). Remaining policy and performance audit stays pending.
+
+Immutable tool and Skill activity projection is separated from stream mutation in [#42139](https://github.com/jeong-sik/masc/pull/42139). See [chat-activity-projection/README.md](chat-activity-projection/README.md). Remaining state and classification/rendering policies require semantic audit.

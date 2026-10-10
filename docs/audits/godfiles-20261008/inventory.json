@@ -34,7 +34,12 @@
       "path": "bin/masc_tui_keeper_chat_transcript.ml",
       "baseline_lines": 2608,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; stream state, classification and rendering semantic review pending",
+      "current_lines": 1882,
+      "prs": [
+        42139
+      ],
+      "validation_artifact": "chat-activity-projection/README.md"
     },
     {
       "path": "bin/masc_tui_loader.ml",

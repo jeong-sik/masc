@@ -130,6 +130,75 @@ let test_closed_delta_cannot_reopen_activity () =
         (if thinking then T.thinking t else T.text t);
       check bool "late closed payload remains a visible protocol defect" true (Option.is_some (T.unreadable t))) [live;replay]) [false;true]
 
+let test_poisoned_scope_retires_observed_activity () =
+  let open Agent_core.Types in
+  let failures = [
+    SSEError {message="provider failed";error_type=Some "provider_error";
+      provider_status=None;report=Provider_stated;raw="{}"};
+    NDJSONError {message="provider failed";error_type=None;raw="{}"};
+    SSEParseFailed {raw="broken";reason="invalid JSON"};
+    NDJSONParseFailed {raw="broken";reason="invalid JSON"};
+    Timeout "provider timeout";
+    SSEUnknownEventType {event_type="unknown";raw="{}"};
+    SSEUnsupportedPart {provider_kind=Agent_core.Llm_provider.Provider_kind.Gemini;
+      part="unsupported";raw="{}"};
+    SSEUnsupportedResponse {provider_kind=Agent_core.Llm_provider.Provider_kind.Gemini;
+      response="unsupported";raw="{}"}] in
+  List.iter (fun failure -> List.iter (fun with_tool ->
+    let f = F.create () in
+    let send = F.on_event f in
+    F.start_runtime_attempt f ~runtime_id:"first-runtime" ~attempt_index:0;
+    send (MessageStart {id="poisoned-response";model="fixture";usage=None});
+    send (ContentBlockDelta {index=0;delta=TextDelta "answer\n"});
+    send (ContentBlockDelta {index=1;delta=ThinkingDelta "reasoning\n"});
+    if with_tool then send (ContentBlockStart {index=2;content_type="tool_use";
+      tool_id=Some "pending-tool";tool_name=Some "Read"});
+    send failure;
+    let ended = List.filter_map (function
+      | E.Model_content_activity activity when activity.state=E.Content_ended ->
+          Some (activity.content_scope,activity.content_index,activity.channel)
+      | _ -> None) (F.events f) in
+    check bool "only actually observed blocks retire in their scope" true
+      (ended=[0,0,E.Model_text;0,1,E.Model_thinking]);
+    check bool "poison is not provider response or Keeper turn completion" false
+      (List.exists (function E.Agent_core_stream_message_stop | E.Run_finished _ -> true | _ -> false) (F.events f));
+    send (ContentBlockDelta {index=0;delta=TextDelta "late\n"});
+    send (ContentBlockDelta {index=1;delta=ThinkingDelta "late\n"});
+    let live,replay = F.snapshots f in
+    List.iter (fun log ->
+      let t = T.of_log ~now:2000. log in
+      assert_signal t "model content ended";
+      check bool "actual provider failure remains visible" true (Option.is_some (T.unreadable t));
+      check string "authored answer preserved, late poisoned bytes rejected" "answer\n" (T.text t);
+      check string "observed reasoning preserved" "reasoning\n" (T.thinking t)) [live;replay];
+    check bool "live and durable failure activity agree" true
+      (T.status_rows ~now:2000. (T.of_log ~now:2000. live)=T.status_rows ~now:2000. (T.of_log ~now:2000. replay));
+    F.start_runtime_attempt f ~runtime_id:"retry-runtime" ~attempt_index:1;
+    send (MessageStart {id="retry-response";model="fixture";usage=None});
+    send (ContentBlockDelta {index=0;delta=TextDelta "retry\n"});
+    let live,replay = F.snapshots f in
+    List.iter (fun log -> assert_signal (T.of_log ~now:2000. log) "STREAMING") [live;replay]
+  ) [false;true]) failures
+
+let test_cut_scope_still_accepts_observed_content () =
+  let open Agent_core.Types in
+  List.iter (fun with_tool ->
+    let f = F.create () in
+    F.on_event f (ContentBlockDelta {index=0;delta=TextDelta "before\n"});
+    if with_tool then F.on_event f (ContentBlockStart {index=2;content_type="tool_use";
+      tool_id=Some "pending-tool";tool_name=Some "Read"});
+    F.on_event f (StreamIncomplete {reason="max_output_tokens"});
+    check bool "a cut scope can still accept its legal terminal sequence" false
+      (List.exists (function E.Model_content_activity a when a.state=E.Content_ended -> true | _ -> false) (F.events f));
+    F.on_event f (ContentBlockDelta {index=0;delta=TextDelta "after\n"});
+    F.on_event f (ContentBlockStop {index=0});
+    let live,replay = F.snapshots f in
+    List.iter (fun log ->
+      let t = T.of_log ~now:2000. log in
+      assert_signal t "model content ended";
+      check string "cut scope retains subsequent valid content" "before\nafter\n" (T.text t)) [live;replay]
+  ) [false;true]
+
 let test_fresh_worker_generation_in_same_journal () =
   let reversed = ref [] in
   let bus = E.create ~first_seq:17 ~on_publish:(fun ~seq ~ts event ->
@@ -223,5 +292,7 @@ let () = run "model content activity"
     test_case "production bridge through SSE and durable replay" `Quick test_bridge_live_and_journal;
     test_case "stop reason closes content only" `Quick test_stop_reason_closes_content_without_turn_completion;
     test_case "closed delta cannot reopen activity" `Quick test_closed_delta_cannot_reopen_activity;
+    test_case "poisoned scope retires only observed activity" `Quick test_poisoned_scope_retires_observed_activity;
+    test_case "cut scope keeps its activity until legal close" `Quick test_cut_scope_still_accepts_observed_content;
     test_case "fresh workers in the same journal" `Quick test_fresh_worker_generation_in_same_journal;
     test_case "strict shared codec" `Quick test_strict_shared_codec]]

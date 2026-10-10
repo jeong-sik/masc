@@ -436,29 +436,28 @@ let autonomous_turn_id_of_fields fields =
   | Some _ | None -> None
 
 let turn_id_of_fields fields =
+  let explicit_turn () = match string_field fields "turn_ref" with
+    | Some _ as turn_ref -> turn_ref
+    | None -> autonomous_turn_id_of_fields fields in
   match Delivery_identity.delivery_provenance_of_fields fields with
   | Ok (Some provenance) ->
-      let request_id =
-        match provenance.Delivery_identity.delivery_key with
-        | Delivery_identity.Operation_native {operation_id=request_id; _}
-        | Delivery_identity.Operation_checkpoint {operation_id=request_id; _}
-        | Delivery_identity.Operation request_id
-        | Delivery_identity.Fusion_run request_id
-        | Delivery_identity.Workspace_message request_id
-        | Delivery_identity.Approval_lifecycle request_id ->
-            request_id
-      in
-      Some (Delivery_identity.Request_id.to_string request_id)
-  | Ok None | Error _ -> (
-      match string_field fields "turn_ref" with
-      | Some _ as turn_ref -> turn_ref
-      | None -> autonomous_turn_id_of_fields fields)
+      (match provenance.Delivery_identity.delivery_key with
+       | Delivery_identity.Operation_native {operation_id=request_id; _}
+       | Delivery_identity.Operation_checkpoint {operation_id=request_id; _}
+       | Delivery_identity.Operation request_id ->
+           Some (Delivery_identity.Request_id.to_string request_id)
+       | Delivery_identity.Fusion_run _
+       | Delivery_identity.Workspace_message _
+       | Delivery_identity.Approval_lifecycle _ ->
+           (* A delivery key proves append identity, not which turn read it.
+              Passive broadcasts have no turn. Approval-continuation tools
+              carry an explicit turn_ref distinct from their approval key. *)
+           explicit_turn ())
+  | Ok None | Error _ -> explicit_turn ()
 
-(* The operation a direct turn ran as, and nothing else: an autonomous turn's
-   [turn_ref] and the other delivery keys are turn identity ([turn_id]) but
-   not an operation, and the journal endpoint is keyed by operation. Typed
-   here so a reader does not have to guess which of [turn_id]'s shapes it is
-   looking at. *)
+(* Only an Operation key owns the operation journal endpoint. Autonomous
+   rows use their explicit turn_ref; other delivery keys retain append
+   identity without acquiring an operation or inventing turn ownership. *)
 let operation_id_of_fields fields =
   match Delivery_identity.delivery_provenance_of_fields fields with
   | Ok

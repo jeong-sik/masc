@@ -812,7 +812,10 @@ let message_display_at row =
    are created and dropped inside the call, so this is still a map from rows
    to moments and nothing outside sees them. *)
 let chat_projected_timeline_ats messages =
-  let first_known_by_request = Hashtbl.create 64 in
+  (* A held log asks for the moments of its own few rows; a 64-bucket table
+     per call is what that costs when the list is small. *)
+  let table_size = if List.compare_length_with messages 16 <= 0 then 8 else 64 in
+  let first_known_by_request = Hashtbl.create table_size in
   List.iter
     (fun (row : msg_entry) ->
       let request_id = row.me_request_id in
@@ -825,7 +828,7 @@ let chat_projected_timeline_ats messages =
         | Some at -> Hashtbl.replace first_known_by_request request_id at
         | None -> ())
     messages;
-  let floors = Hashtbl.create 64 in
+  let floors = Hashtbl.create table_size in
   let rec project reversed = function
     | [] -> List.rev reversed
     | (row : msg_entry) :: rest ->

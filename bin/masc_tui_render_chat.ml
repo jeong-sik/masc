@@ -886,15 +886,14 @@ let keeper_message_identity ~max_cells state keeper_name =
 
 
 (** Render message input/conversation view *)
-let keeper_message_clock at =
-  let time = Unix.localtime at in
+(* The clock text and the bucket of one moment read the same local time; an
+   entry that needs both converts it once. *)
+let clock_of_local_time (time : Unix.tm) =
   Printf.sprintf "%02d:%02d:%02d" time.Unix.tm_hour time.Unix.tm_min
     time.Unix.tm_sec
-
 ;;
 
-let keeper_message_timeline_bucket at =
-  let time = Unix.localtime at in
+let bucket_of_local_time (time : Unix.tm) =
   ({ tb_year = time.Unix.tm_year + 1900;
      tb_month = time.Unix.tm_mon + 1;
      tb_day = time.Unix.tm_mday;
@@ -902,7 +901,12 @@ let keeper_message_timeline_bucket at =
      tb_is_dst = time.Unix.tm_isdst;
    }
     : Message_layout.timeline_bucket)
+;;
 
+let keeper_message_clock at = clock_of_local_time (Unix.localtime at)
+;;
+
+let keeper_message_timeline_bucket at = bucket_of_local_time (Unix.localtime at)
 ;;
 
 type keeper_call_association =
@@ -1833,13 +1837,12 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name ~request_
           | Message_status | Message_local | Message_error ->
               message.me_text
         in
+        let local_time = Option.map Unix.localtime timeline_at in
         ({ delivery_state = None; style;
              timestamp =
                Option.fold ~none:message.me_timestamp
-                 ~some:keeper_message_clock timeline_at;
-             timeline_bucket =
-               Option.map keeper_message_timeline_bucket
-                 timeline_at;
+                 ~some:clock_of_local_time local_time;
+             timeline_bucket = Option.map bucket_of_local_time local_time;
              diagnostics = committed_request_diagnostics
                ~tools:state.msg_tool_visibility ~request_id:message.me_request_id
                ~execution_id:(request_owner request_owners message.me_request_id) ~edge;
@@ -1917,9 +1920,10 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
     (* Pending input has not entered the conversation. It uses the composer's
        local mark, not the arrow that means a submitted conversation row. *)
     let style = Message_layout.Local in
+    let local_time = Unix.localtime at in
     ({ delivery_state = Some label; style
-     ; timestamp = keeper_message_clock at
-     ; timeline_bucket = Some (keeper_message_timeline_bucket at)
+     ; timestamp = clock_of_local_time local_time
+     ; timeline_bucket = Some (bucket_of_local_time local_time)
      (* A pending input has no execution yet, so its request is its only
         identity. The activity rows name requests by this id. *)
      ; diagnostics =

@@ -571,8 +571,12 @@ let test_disable_before_ledger_decision_preserves_the_obligation () =
 
 let test_cumulative_overflow_refuses_the_real_settlement () =
   with_workspace @@ fun env config ->
-  let historical_amount = max_int / 1000 in
-  let history = List.concat (List.init 1000 (fun i ->
+  (* Two complete historical payouts leave one milli below the public integer
+     limit. This tests cumulative overflow, not the worker's large-ledger scan
+     cost: a thousand unrelated obligations can exhaust the scheduling bound
+     before the appraiser is reached on CI. *)
+  let historical_amount = max_int / 2 in
+  let history = List.concat (List.init 2 (fun i ->
     let payment = Candle_payment.make ~distribution:{Candle_math.share_rounding=Candle_math.Largest_remainder;tie_break=Candle_math.Name_ascending;deduction_rounding=Candle_math.Floor}
       ~identity:{A.goal_id="past-" ^ string_of_int i;request_id="past-request";verification_run_id="past-run"}
       ~grade:(Option.get (Candle_grade.of_string "epic")) ~total_milli:historical_amount
@@ -592,7 +596,7 @@ let test_cumulative_overflow_refuses_the_real_settlement () =
   check int "the new payment was not appended" 0 (List.length (paid config waiting.goal_id));
   let balance = match Candle_balance.of_events ~at:(ok (Candle_stamp.at ~now)) (events config) with
     | Ok balance -> balance | Error error -> fail (Candle_balance.error_to_string error) in
-  check int "prior money stays exact" (historical_amount * 1000)
+  check int "prior money stays exact" (max_int - 1)
     (Candle_balance.balance balance ~keeper:"keeper-a");
   check int "no other recipient receives a partial credit" 0 (Candle_balance.balance balance ~keeper:"keeper-b");
   (match Candle_payout.state ~goal_id:waiting.goal_id (events config) with

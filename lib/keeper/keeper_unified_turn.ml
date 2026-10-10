@@ -832,7 +832,8 @@ let run_keeper_cycle
                    ~base_path:config.base_path
                in
                let task_skill_selection =
-                 Keeper_task_skill_turn.resolve_observations
+                 Keeper_task_skill_turn.resolve_live_observations
+                  ~config:config ~keeper_name:meta.name
                    ~snapshot:skill_snapshot
                    ~current_task
                    ~held_task_skills:observation.held_task_skills

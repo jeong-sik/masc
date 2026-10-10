@@ -7,6 +7,7 @@ module Q = Masc.Keeper_approval_queue
 module QT = Keeper_approval_queue_rules_types
 module Schema = Masc.Keeper_structured_output_schema
 module Worker = Masc.Hitl_summary_worker
+module Request = Masc.Hitl_summary_request
 let http_flow_evidence prepared =
   match Worker.For_testing.flow_evidence prepared with
   | Some evidence -> evidence
@@ -287,7 +288,7 @@ let test_parse_typed_judgments () =
     (fun (wire, expected) ->
        let summary =
          match
-           Worker.For_testing.parse_summary
+           Request.parse_summary
              ~generated_at:1780587600.0
              ~model_run_id:"run"
              (judgment_json wire)
@@ -301,7 +302,7 @@ let test_parse_typed_judgments () =
 
 let test_invalid_judgment_fails_loud () =
   match
-    Worker.For_testing.parse_summary
+    Request.parse_summary
       ~generated_at:1780587600.0
       ~model_run_id:"run"
       (judgment_json "maybe")
@@ -366,7 +367,7 @@ let test_the_judge_is_not_shown_the_keepers_reasoning () =
   install_queue base_path;
   let entry = pending_entry ~base_path () in
   let bundle =
-    Worker.For_testing.build_context_bundle
+    Request.capture_context_bundle
       ~entry:{ entry with request_context = Some context_with_thinking }
   in
   let open Yojson.Safe.Util in
@@ -381,7 +382,7 @@ let test_a_turn_without_reasoning_reports_nothing_cut () =
   with_temp_dir "hitl-no-thinking" @@ fun base_path ->
   install_queue base_path;
   let entry = pending_entry ~base_path () in
-  let bundle = Worker.For_testing.build_context_bundle ~entry in
+  let bundle = Request.capture_context_bundle ~entry in
   let open Yojson.Safe.Util in
   check yojson "nothing was cut" (`Int 0)
     (bundle |> member "thinking_blocks_omitted")
@@ -401,12 +402,12 @@ let test_the_judge_sees_what_the_box_refused () =
   in
   let open Yojson.Safe.Util in
   let boxed =
-    Worker.For_testing.build_context_bundle ~entry:{ entry with observation = Some refusal }
+    Request.capture_context_bundle ~entry:{ entry with observation = Some refusal }
   in
   check yojson "the refusal travels whole"
     (QT.observed_refusal_to_yojson refusal)
     (boxed |> member "observation");
-  let unboxed = Worker.For_testing.build_context_bundle ~entry in
+  let unboxed = Request.capture_context_bundle ~entry in
   check yojson "no box run, no field" `Null (unboxed |> member "observation")
 ;;
 
@@ -418,7 +419,7 @@ let test_a_context_of_another_shape_is_carried_through () =
   let entry = pending_entry ~base_path () in
   let foreign = `Assoc [ "something_else", `List [ `String "kept" ] ] in
   let bundle =
-    Worker.For_testing.build_context_bundle
+    Request.capture_context_bundle
       ~entry:{ entry with request_context = Some foreign }
   in
   let open Yojson.Safe.Util in
@@ -458,7 +459,7 @@ let test_the_newest_reasoning_can_be_kept () =
   let entry = pending_entry ~base_path () in
   with_thinking_blocks_kept 1 @@ fun () ->
   let bundle =
-    Worker.For_testing.build_context_bundle
+    Request.capture_context_bundle
       ~entry:{ entry with request_context = Some context_with_thinking }
   in
   let open Yojson.Safe.Util in
@@ -494,7 +495,7 @@ let test_the_budget_keeps_the_newest_not_the_first () =
   in
   with_thinking_blocks_kept 1 @@ fun () ->
   let bundle =
-    Worker.For_testing.build_context_bundle
+    Request.capture_context_bundle
       ~entry:{ entry with request_context = Some context }
   in
   let open Yojson.Safe.Util in
@@ -517,7 +518,7 @@ let test_context_bundle_is_exact () =
   with_temp_dir "hitl-context" @@ fun base_path ->
   install_queue base_path;
   let entry = pending_entry ~base_path () in
-  let bundle = Worker.For_testing.build_context_bundle ~entry in
+  let bundle = Request.capture_context_bundle ~entry in
   let open Yojson.Safe.Util in
   check yojson "exact input" entry.input (bundle |> member "input");
   check yojson
@@ -581,7 +582,7 @@ let test_host_context_identifies_registered_clone_and_destination_state () =
     |> List.hd
     |> member "catalog_match"
   in
-  let first = Worker.For_testing.build_context_bundle ~entry in
+  let first = Request.capture_context_bundle ~entry in
   check string "host provenance" "host_observed"
     (host_context first |> member "provenance" |> to_string);
   check string "durable task link" "task-636"
@@ -616,7 +617,7 @@ let test_host_context_identifies_registered_clone_and_destination_state () =
      |> member "state"
      |> to_string);
   Fs_compat.mkdir_p (Filename.concat cwd "repos/masc");
-  let after_create = Worker.For_testing.build_context_bundle ~entry in
+  let after_create = Request.capture_context_bundle ~entry in
   check string "the same resolved destination is now present" "present"
     (host_context after_create
      |> member "execution"
@@ -646,7 +647,7 @@ let test_host_context_reads_repositories_from_remote_syntax_and_gh_repo_flag () 
       ; input = execute_gate_input ~cwd argv
       }
     in
-    Worker.For_testing.build_context_bundle ~entry
+    Request.capture_context_bundle ~entry
     |> member "host_context"
     |> member "execution"
     |> member "repository_references"
@@ -728,7 +729,7 @@ let test_host_context_reports_a_missing_durable_task_link () =
        let entry = pending_entry ~base_path ~keeper_name:"fixture-keeper" () in
        let open Yojson.Safe.Util in
        let task_link =
-         Worker.For_testing.build_context_bundle ~entry
+         Request.capture_context_bundle ~entry
          |> member "host_context"
          |> member "task_link"
        in
@@ -744,7 +745,7 @@ let test_missing_context_is_reported_as_partial () =
   install_queue base_path;
   let entry = pending_entry ~base_path () in
   let bundle =
-    Worker.For_testing.build_context_bundle
+    Request.capture_context_bundle
       ~entry:{ entry with request_context = None }
   in
   let open Yojson.Safe.Util in
@@ -2717,14 +2718,14 @@ turn-timeout-s = 0
 
 [claude_code."claude-sonnet-5"]
 
-[models."claude-opus-5"]
-api-name = "claude-opus-5"
+[models."claude-opus-5-5"]
+api-name = "claude-opus-5-5"
 max-context = 1000000
 tools-support = true
 streaming = true
 turn-timeout-s = 0
 
-[claude_code."claude-opus-5"]
+[claude_code."claude-opus-5-5"]
 
 [providers.agy]
 protocol = "antigravity-cli"
@@ -2740,7 +2741,7 @@ max-context = 128000
 ;;
 
 let cli_primary = "claude_code.claude-sonnet-5"
-let cli_secondary = "claude_code.claude-opus-5"
+let cli_secondary = "claude_code.claude-opus-5-5"
 
 let with_cli_runtimes f =
   let path = Filename.temp_file "hitl-cli-runtime" ".toml" in

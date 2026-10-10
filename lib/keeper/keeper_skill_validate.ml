@@ -44,7 +44,7 @@ let source_identity ~filename source_text =
     ]
 ;;
 
-let handle ~config ~args =
+let handle ~descriptors ~config ~args =
   match request args with
   | Error message ->
     failure ~class_:Tool_result.Policy_rejection ~code:"invalid_skill_validation_request"
@@ -64,7 +64,7 @@ let handle ~config ~args =
          ; "validation", `String "static"
          ]
        in
-       match Keeper_skill_catalog.validate_authored_source ~directory source_text with
+       match Keeper_skill_catalog.validate_authored_source ~descriptors ~directory source_text with
        | Error (Source_too_large { bytes; max_bytes }) ->
          failure ~class_:Tool_result.Policy_rejection ~code:"source_too_large"
            ~message:(Printf.sprintf "Skill source is %d bytes; maximum is %d bytes" bytes max_bytes)

@@ -96,6 +96,7 @@ type input_translation =
       }
 
 type runtime_handler =
+  | Tool_lane_addon of Lane_addon_tool_export.t
   | Tool_execute
   | Tool_search_files
   | Tool_read_file

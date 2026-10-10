@@ -1,0 +1,11 @@
+Testing `[1mTUI retained output[0m'.
+[2mThis run has ID `AVBOLVLZ'.
+
+[0m  [32m[OK][0m          [36mhistory[0m          0   media-only autonomous turn.
+  [32m[OK][0m          [36mhistory[0m          1   failure retains completed outputs.
+  [32m[OK][0m          [36mhistory[0m          2   prose and unknown block.
+  [32m[OK][0m          [36mhistory[0m          3   source authority.
+  [32m[OK][0m          [36mhistory[0m          4   image attachment and SVG.
+
+Full test results in `[36m~/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/_build/_tests/TUI retained output[0m'.
+[32mTest Successful[0m in 0.001s. 5 tests run.

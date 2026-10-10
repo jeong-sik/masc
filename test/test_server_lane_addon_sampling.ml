@@ -417,18 +417,18 @@ max_reply_bytes=4194304
         ~invoke:(fun ~route:_ ~request:_ _params ->
           incr invocations; Error "fixture forbids provider invocation") ()) in
   let backend : Lane_addon_runtime.For_testing.backend = {
-    start=(fun ~sw ~instance_id ~package ~binding ~on_created ->
+    start=(fun ~sw ~state_owner:_ ~instance_id ~package ~binding ~on_created ->
       let _handler = require (factory ~sw ~store ~instance_id ~package ~binding) in
       starts := instance_id :: !starts;
       let connection : Lane_addon_runtime.For_testing.connection = {
-        container_id=Store.digest instance_id; action_schema=(fun () -> None);
+        container_id=Store.digest instance_id; exported_tools = (fun () -> []); call_exported_tool = (fun ~on_result:_ ~authorize:_ ~principal:_ ~name:_ ~arguments:_ -> Error (Lane_addon_call_context.Transport_error "no exported tools")); action_schema=(fun () -> None);
         act=(fun ~arguments:_ -> Error "read-only fixture");
         observe=(fun ~binding:_ ~sources:_ -> Ok {Lane_addon_types.rows=[];coverage=[]});
         stop=(fun () -> Ok ())} in
       on_created connection; Ok connection);
-    acquire=(fun ~access:_ ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
+    acquire=(fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
     image_ready=(fun ~package:_ -> Ok ());
-    recover_stop=(fun ~instance_id:_ ~container_id:_ -> Ok ())} in
+    recover_stop=(fun ~state_owner:_ ~instance_id:_ ~container_id:_ -> Ok ())} in
   Lane_addon_runtime.For_testing.with_backend backend (fun () ->
     let reconcile () = require (Lane_addon_runtime.reconcile_configuration ~config ~directory) in
     let inspect () = Lane_addon_runtime.dispatch ~config ~operation:Lane_addon_runtime.Inspect (`Assoc [])

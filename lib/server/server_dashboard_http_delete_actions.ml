@@ -365,6 +365,13 @@ let keeper_artifact_path config keeper_name artifact =
            (Config_dir_resolver.keepers_dir_for_base_path
               ~base_path:config.Workspace.base_path)
          ~keeper_id:keeper_name)
+  | Keeper_memory_admission_queue_artifact ->
+    Some
+      (Keeper_memory_admission_queue.path
+         ~keepers_dir:
+           (Config_dir_resolver.keepers_dir_for_base_path
+              ~base_path:config.Workspace.base_path)
+         ~keeper_id:keeper_name)
   | Keeper_librarian_range_receipt_artifact ->
     Some
       (Keeper_memory_os_current.durable_range_receipt_path
@@ -433,6 +440,9 @@ let keeper_artifact_path config keeper_name artifact =
       (Keeper_librarian_progress.path_for_keepers_dir
          ~keepers_dir:(Workspace.keepers_runtime_dir config)
          ~keeper_id:keeper_name)
+  | Keeper_external_read_cursor_artifact ->
+    Some (Keeper_external_read_cursor.path_for_keepers_dir
+      ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name)
   | Keeper_librarian_official_progress_artifact ->
     Some
       (Keeper_librarian_official_progress.path_for_keepers_dir
@@ -561,6 +571,16 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
          with
          | Error _ as error -> error
          | Ok () -> remove rest)
+      | Keeper_board_attention_candidates_artifact :: rest ->
+        (match Keeper_board_attention_candidate.purge
+           ~base_path:config.Workspace.base_path ~keeper_name with
+         | Error _ as error -> error
+         | Ok () -> remove rest)
+      | Keeper_board_attention_partitions_artifact :: rest ->
+        (match Keeper_board_attention_partition.purge
+           ~base_path:config.Workspace.base_path ~keeper_name with
+         | Error _ as error -> error
+         | Ok () -> remove rest)
       | artifact :: rest ->
         (match keeper_artifact_path config keeper_name artifact with
          | None ->
@@ -585,6 +605,7 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
             | Keeper_runtime_directory_artifact
             | Keeper_memory_current_artifact
             | Keeper_librarian_range_receipt_artifact
+            | Keeper_memory_admission_queue_artifact
             | Keeper_memory_retraction_plan_artifact
             | Keeper_memory_source_current_artifact
             | Keeper_working_context_recall_artifact
@@ -593,6 +614,7 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
             | Keeper_memory_absorbed_artifact
             | Keeper_turn_boundaries_artifact
             | Keeper_librarian_progress_artifact
+            | Keeper_external_read_cursor_artifact
             | Keeper_librarian_official_progress_artifact
             | Keeper_playground_bundles_artifact
             | Keeper_runtime_configuration_artifact
@@ -617,6 +639,7 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
                | Keeper_root_logs_artifact
                | Keeper_memory_current_artifact
                | Keeper_librarian_range_receipt_artifact
+               | Keeper_memory_admission_queue_artifact
                | Keeper_memory_retraction_plan_artifact
                | Keeper_memory_source_current_artifact
                | Keeper_working_context_recall_artifact
@@ -627,7 +650,8 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
                | Keeper_memory_events_artifact
                | Keeper_turn_boundaries_artifact
                | Keeper_librarian_progress_artifact
-               | Keeper_librarian_official_progress_artifact
+               | Keeper_external_read_cursor_artifact
+            | Keeper_librarian_official_progress_artifact
                | Keeper_playground_bundles_artifact
                | Keeper_runtime_configuration_artifact
                | Keeper_configuration_artifact

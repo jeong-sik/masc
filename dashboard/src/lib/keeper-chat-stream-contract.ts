@@ -247,7 +247,12 @@ type KeeperChatCustomEvent =
   | {
       type: 'CUSTOM'
       name: 'KEEPER_REPLY_DETAILS'
-      value: { reply?: string; turn_outcome?: KeeperTurnOutcome; turn_ref?: string }
+      value: {
+        reply?: string
+        turn_outcome?: KeeperTurnOutcome
+        turn_ref?: string
+        terminal_stream_scope?: number
+      }
     }
 
 type KeeperChatStreamEventBase = {

@@ -24,3 +24,8 @@ val group_has_no_live_member : int -> bool
 (** {!no_live_member} for the group led by this process's own child [pgid],
     from the kernel's member snapshot. [false] when there is no snapshot,
     which is every platform but Darwin. *)
+
+val live_member_left : int -> bool option
+(** Whether group [pgid] holds a member that is neither a zombie nor exiting,
+    from the kernel's member snapshot, whoever started it. [None] when there
+    is no snapshot, which is every platform but Darwin. *)

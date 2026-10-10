@@ -1487,7 +1487,9 @@ let prepare_next_ready
     List.filter
       (fun (partition : Partition.t) ->
          match partition.state with
-         | Partition.Ready -> true
+         | Partition.Ready ->
+             not (Keeper_board_attention_admission.blocked ~base_path
+                    ~candidate_id:partition.candidate_id)
          | Partition.Running _
          | Partition.Completed _
          | Partition.Settled _
@@ -1500,7 +1502,7 @@ let prepare_next_ready
       | Needs_lane candidate -> Either.Right (partition, candidate))
   in
   let selected (partition : Partition.t) prepared =
-    Ok (Some (partition.partition_id, partition.generation, prepared))
+    Ok (Some (partition.partition_id, partition.generation, partition.candidate_id, prepared))
   in
   match ready with
   | partition :: _, _ -> selected partition None
@@ -1852,6 +1854,56 @@ let process_next_with_claim_ready_exact_current
       ~prepare
       ~execute
   =
+  (* #41422: drop consumed rows the replay gate can never re-mint before
+     roots are ensured, so a long-lived keeper's candidate ledger stays
+     bounded by its unresolved attention instead of its board history. The
+     cursor is the same coordinate the world-observation scanner replays
+     against; the default (0.0, None) of an unregistered keeper keeps every
+     row. A prune failure must not stop judgment work, so it is observed and
+     retried on the next wake. *)
+  let cursor_ts, cursor_post_id =
+    Keeper_registry.get_board_cursor ~base_path keeper_name
+  in
+  (match
+     Candidate.prune_consumed_behind_cursor
+       ~base_path
+       ~keeper_name
+       (cursor_ts, cursor_post_id)
+   with
+   | Ok 0 -> ()
+   | Ok removed ->
+     Log.Keeper.info
+       "board_attention_candidate_pruned keeper=%s removed=%d"
+       keeper_name
+       removed
+   | Error detail ->
+     Log.Keeper.warn
+       "board_attention_candidate_prune_failed keeper=%s detail=%s"
+       keeper_name
+       detail);
+  (* The settled receipts of consumed candidates go on the same wake, so the
+     partition ledger of a Keeper that never restarts stays bounded too. Like
+     the candidate prune, a failure is observed and retried on the next wake. *)
+  (match Partition.prune_settled_receipts ~base_path ~keeper_name with
+   | Ok 0 -> ()
+   | Ok removed ->
+     Log.Keeper.info
+       "board_attention_settled_receipts_pruned keeper=%s removed=%d"
+       keeper_name
+       removed
+   | Error detail ->
+     Log.Keeper.warn
+       "board_attention_settled_receipt_prune_failed keeper=%s detail=%s"
+       keeper_name
+       detail);
+  (* The candidate list is read only after both prunes. A list read before
+     them can still hold a candidate that an owner settlement (which runs
+     without this lock) consumed meanwhile; once the prune dropped that
+     candidate's settled receipt, [ensure_roots] would mint a fresh [Ready]
+     root that no candidate row backs, and the worker would block on
+     "candidate ledger lacks partition member" forever because only [Settled]
+     receipts are pruned. Receipts are dropped only above this read, so a
+     candidate consumed after it still has its [Settled] receipt. *)
   let* candidates = Candidate.load_candidates ~base_path ~keeper_name in
   let* (_ : int) = Partition.ensure_roots ~base_path ~keeper_name candidates in
   let selected_generation_is_ready ~partition_id ~generation =
@@ -1911,7 +1963,7 @@ let process_next_with_claim_ready_exact_current
   in
   match selected with
   | None -> Ok Idle
-  | Some (partition_id, generation, prepared) ->
+  | Some (partition_id, generation, candidate_id, prepared) ->
     let rec claim_selected attempts_remaining =
       let* claimed =
         claim_ready_exact
@@ -1934,7 +1986,11 @@ let process_next_with_claim_ready_exact_current
         then claim_selected (attempts_remaining - 1)
         else Ok (Contended { keeper_name; partition_id; generation })
     in
-    claim_selected 3
+    (match Keeper_board_attention_admission.acquire_singleton ~base_path ~candidate_id with
+     | None -> Ok (Rescan_later { keeper_name; partition_id; generation })
+     | Some token ->
+         Fun.protect ~finally:(fun () -> Keeper_board_attention_admission.release token)
+           (fun () -> claim_selected 3))
 ;;
 
 let process_next_with_claim_ready_exact

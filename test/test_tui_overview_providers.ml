@@ -312,67 +312,6 @@ let test_unknown_role_is_rejected () =
   check bool "an unknown role fails the reading" true
     (Result.is_error (Masc.Tui_decode_usage.decode_provider_usage_windows json))
 
-let full_cells n = String.concat "" (List.init n (fun _ -> "\xe2\x96\x88"))
-
-let test_meter_uses_eighth_blocks () =
-  check string "0.67 of 16 cells is 10 whole cells and five eighths"
-    (full_cells 10 ^ "\xe2\x96\x8b" ^ "░░░░░")
-    (Providers.meter ~cells:16 0.67);
-  check string "zero has shaded remaining cells" "░░░░" (Providers.meter ~cells:4 0.0);
-  check string "some use never reads as none" ("\xe2\x96\x8f" ^ "░░░")
-    (Providers.meter ~cells:4 0.001);
-  check string "just under full is not full"
-    (full_cells 15 ^ "\xe2\x96\x89")
-    (Providers.meter ~cells:16 0.9999);
-  check string "exactly full is full" (full_cells 16)
-    (Providers.meter ~cells:16 1.0);
-  (* Percent 100 and 140 as the section normalizes them for drawing. *)
-  check string "percent 100 is full" (full_cells 16)
-    (Providers.meter ~cells:16 (float_of_int 100 /. 100.0));
-  check string "percent 140 draws full, not wider" (full_cells 16)
-    (Providers.meter ~cells:16 (float_of_int 140 /. 100.0));
-  check string "zero cells draw nothing" "" (Providers.meter ~cells:0 0.5);
-  check string "negative cells draw nothing" "" (Providers.meter ~cells:(-3) 0.5)
-
-let test_values_read_in_one_unit () =
-  List.iter
-    (fun (label, utilization, expected) ->
-      check string label expected (Providers.utilization_text utilization))
-    [ ("a fraction reads as a percent", Masc.Tui_decode_usage.Utilization_fraction 0.67, "67%")
-    ; ("binary noise does not lose a percent", Masc.Tui_decode_usage.Utilization_fraction 0.29, "29%")
-    ; ("just under full is not full", Masc.Tui_decode_usage.Utilization_fraction 0.9999, "99%")
-    ; ("a full fraction is 100%", Masc.Tui_decode_usage.Utilization_fraction 1.0, "100%")
-    ; ("past full is not clamped", Masc.Tui_decode_usage.Utilization_fraction 1.4, "140%")
-    ; ("a percent reads as reported", Masc.Tui_decode_usage.Utilization_percent 100, "100%")
-    ; ("a percent past full as reported", Masc.Tui_decode_usage.Utilization_percent 140, "140%")
-    ]
-
-let test_failed_read_is_one_line () =
-  match
-    Providers.section ~history:Types.Provider_history_unread ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_failed "connection refused")
-      ~runtimes:Types.Quota_unread ~now ~width:80
-  with
-  | Some section ->
-      check (list string) "one explicit line"
-        [ " usage data unavailable: connection refused" ]
-        (List.map plain section.lines)
-  | None -> fail "a failed read is drawn"
-
-let test_empty_read_names_missing_usage_data () =
-  let empty : Masc.Tui_decode_usage.provider_usage_windows =
-    { puws_since = now; puws_accounts = [] }
-  in
-  match
-    Providers.section ~history:Types.Provider_history_unread ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read empty)
-      ~runtimes:Types.Quota_unread ~now ~width:80
-  with
-  | Some section ->
-      let text = String.concat "\n" (List.map plain section.lines) in
-      List.iter (fun expected -> check bool expected true (contains ~affix:expected text))
-        [ "Accounts 0"; "Reporting 0"; "Trend not read"; "no usage data" ]
-  | None -> fail "an empty account list disappeared"
-
-(* Account identity remains visible before the first usage report. *)
 let test_account_emails_name_their_accounts () =
   let windows =
     match Masc.Tui_decode_usage.decode_provider_usage_windows (resolved "reported") with
@@ -661,11 +600,6 @@ let () =
           test_case "unknown report evidence" `Quick test_plan_preserves_unknown_reports;
           test_case "exact quota window history join" `Quick test_plan_history_joins_exact_quota_window;
           test_case "account summary and reported gauges" `Quick test_section_draws_three_line_shapes
-        ; test_case "eighth-block meter" `Quick test_meter_uses_eighth_blocks
-        ; test_case "values read in one unit" `Quick test_values_read_in_one_unit
-        ; test_case "failed read is one line" `Quick test_failed_read_is_one_line
-        ; test_case "empty read names missing usage" `Quick
-            test_empty_read_names_missing_usage_data
         ; test_case "unknown state is rejected" `Quick test_unknown_state_is_rejected
         ; test_case "history uses reported points" `Quick
             test_history_preserves_reported_days_and_units

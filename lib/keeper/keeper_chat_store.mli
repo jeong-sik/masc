@@ -19,7 +19,7 @@
 
 (** {1 Types} *)
 
-type attachment = {
+type attachment = Keeper_chat_types.attachment = {
   id : string;
   att_type : string;
   name : string;
@@ -36,7 +36,7 @@ type attachment = {
 
 (** One executed tool call within a turn. [args] holds the accumulated
     argument JSON; empty arguments are persisted as ["{}"]. *)
-type tool_call = {
+type tool_call = Keeper_chat_types.tool_call = {
   call_id : string;
   execution_id : Ids.Execution_id.t option;
       (** Canonical execution identity after the tool-call log commit. [None]
@@ -46,45 +46,15 @@ type tool_call = {
   args : string;
 }
 
-(** Lane line role as a closed sum (RFC-0232 P1). Parsed once at the
-    read boundary; a line whose persisted label is none of
-    ["user"] / ["assistant"] / ["system"] / ["tool"] is reported as a persistence
-    read drop and excluded — it can participate in no lane semantics
-    (watermark, pending, rendering). On-disk labels are unchanged. *)
-module Role : sig
-  type t =
-    | User
-    | Assistant
-    | System
-    | Tool
-
-  val to_label : t -> string
-  val equal : t -> t -> bool
-end
-
-(** What an assistant line {e is}, declared by the writer at append.
-    [Utterance] is something the keeper actually said.
-    [Transport_failure] is the server persisting a failed request
-    terminal (["Keeper request failed: ..."]) so the operator still sees
-    the failure after a reload — it is {e not} a self reply: it does not
-    advance the lane watermark, so the user line it failed to answer
-    stays pending until the keeper's next real utterance, and
-    observation never quotes it back as the keeper's own words.
-    Persisted as ["kind"]; the field is absent for utterances, so rows
-    written before it existed read unchanged. *)
-module Row_kind : sig
-  type t =
-    | Utterance
-    | Transport_failure
-
-  val to_label : t -> string
-  val equal : t -> t -> bool
-end
+(** Closed transcript row classification. Assistant is Keeper speech;
+    Request_failure is a server-owned request result and cannot acknowledge
+    input or enter conversation memory. Unknown labels are refused. *)
+module Role = Keeper_chat_types.Role
 
 (** Closed, durable names for AG-UI lifecycle events recorded by the direct
     Keeper chat stream. This is server lifecycle provenance, not a
     client-delivery receipt. *)
-type stream_lifecycle_event =
+type stream_lifecycle_event = Keeper_chat_types.stream_lifecycle_event =
   | Run_started
   | Text_message_start
   | Text_message_end
@@ -95,7 +65,7 @@ type stream_lifecycle_event =
     ({!Keeper_approval_lifecycle.approval_lifecycle_phase}). The store keeps
     and reads these rows; the phase vocabulary and its labels live in the
     HITL contract. *)
-type approval_lifecycle =
+type approval_lifecycle = Keeper_chat_types.approval_lifecycle =
   { approval_id : string
   ; tool_name : string option
   ; phase : Keeper_approval_lifecycle.approval_lifecycle_phase
@@ -111,14 +81,14 @@ type approval_lifecycle =
             nothing or no request row exists to copy from. *)
   }
 
-type append_once_result =
+type append_once_result = Keeper_chat_types.append_once_result =
   | Appended of { row_id : string }
   | Already_present of { row_id : string }
 
 (** Exact ownership of the accepted user transcript row. This provenance is
     shared by direct and queued delivery, while lifecycle authority remains in
     the owning request or queue store. *)
-type user_row_origin =
+type user_row_origin = Keeper_chat_types.user_row_origin =
   | Needs_append
   | Already_persisted_upstream
 
@@ -130,7 +100,7 @@ type user_row_origin =
     with the Keeper's id in [speaker_id] (RFC-0468 §3.2). Persisted as
     ["owner"] / ["external"] / ["keeper"] in [speaker_authority]
     (RFC-0223 §3). *)
-type speaker_authority =
+type speaker_authority = Keeper_chat_types.speaker_authority =
   | Owner
   | External
   | Keeper
@@ -141,12 +111,12 @@ val authority_of_label : string -> speaker_authority option
 (** Rich chat block produced by the backend parser. Mirrors the dashboard's
     [ChatBlock] union so the server can own parsing and the dashboard can
     render server-provided blocks verbatim. *)
-type chat_block = Keeper_chat_blocks.chat_block
+type chat_block = Keeper_chat_types.chat_block
 
 (** Identity of the user-line author. [speaker_id] / [speaker_name] are
     absent when the route supplies none (the dashboard is a single
     authenticated operator and carries no per-user identity). *)
-type audio_clip = {
+type audio_clip = Keeper_chat_types.audio_clip = {
   token : string;
   audio_url : string option;
   mime : string;
@@ -178,7 +148,7 @@ val audio_clip_of_synthesized_file :
     MP3 while being WAVE. [expired] is [false] by construction; a clip is
     only reaped later. *)
 
-type speaker = {
+type speaker = Keeper_chat_types.speaker = {
   speaker_id : string option;
   speaker_name : string option;
   speaker_authority : speaker_authority;
@@ -191,7 +161,7 @@ val keeper_speaker : Keeper_identity.Keeper_id.t -> speaker
     [speaker_name] both carry the Keeper id, since a Keeper has exactly one
     name (RFC-0393). *)
 
-type chat_message = {
+type chat_message = Keeper_chat_types.chat_message = {
   id : string;
       (** R3: producer-assigned stable message id, minted once at append by
           the sole writer ({!encode_line}) and read back verbatim, so the
@@ -239,12 +209,6 @@ type chat_message = {
           and rows written before P4 (the offline backfill tool stamps
           those).  Malformed persisted entries are reported as
           persistence read drops and skipped; the row stays valid. *)
-  kind : Row_kind.t;
-      (** Declared by the writer at append.  Absent persisted field
-          (every row written before it existed) reads as [Utterance];
-          an unknown label is reported as a persistence read drop and
-          reads as [Utterance] — the conservative arm: the row renders
-          and advances the watermark like any reply. *)
   turn_ref : Ids.Turn_ref.t option;
       (** RFC-0233 §7: ["<trace_id>#<absolute_turn>"] join key for the turn
           that produced this row.  Stamped by {!append_turn} /
@@ -340,9 +304,9 @@ val approval_request_call_summary :
     identifies the user-line author and is written on the user line
     only. [conversation_id] identifies the external conversation/thread
     coordinate and is written on all lines of the turn; [external_message_id]
-    belongs to the inbound user line only. [assistant_kind] declares what
-    the assistant line is (default [Utterance]); the failed-request
-    persistence path passes [Transport_failure]. Failures are logged but
+    belongs to the inbound user line only. The assistant line is Keeper
+    speech. Server-owned failures use {!append_request_failure_once}.
+    Write failures are logged but
     never raised except for {!Eio.Cancel.Cancelled}. *)
 
 val append_turn :
@@ -356,7 +320,6 @@ val append_turn :
   ?external_message_id:string ->
   ?speaker:speaker ->
   ?extra_mentions:Keeper_identity.Keeper_id.t list ->
-  ?assistant_kind:Row_kind.t ->
   ?blocks:chat_block list ->
   ?turn_ref:Ids.Turn_ref.t ->
   ?stream_lifecycle:stream_lifecycle_event list ->
@@ -404,7 +367,6 @@ val append_assistant_message_result :
   ?surface:Surface_ref.t ->
   ?conversation_id:string ->
   ?audio:audio_clip ->
-  ?assistant_kind:Row_kind.t ->
   ?blocks:chat_block list ->
   ?turn_ref:Ids.Turn_ref.t ->
   ?stream_lifecycle:stream_lifecycle_event list ->
@@ -424,12 +386,22 @@ val append_assistant_message_once :
   content:string ->
   ?surface:Surface_ref.t ->
   ?conversation_id:string ->
-  ?assistant_kind:Row_kind.t ->
   ?tool_calls:tool_call list ->
   ?blocks:chat_block list ->
   ?turn_ref:Ids.Turn_ref.t ->
   ?stream_lifecycle:stream_lifecycle_event list ->
   unit ->
+  (append_once_result, string) result
+
+(** Append a server-owned failed-request result exactly once. It shares the
+    terminal result slot with an assistant reply, preserves completed output,
+    and never acknowledges an input or becomes Keeper conversation memory. *)
+val append_request_failure_once :
+  base_dir:string -> keeper_name:string ->
+  delivery_key:Keeper_chat_delivery_identity.delivery_key -> content:string ->
+  ?surface:Surface_ref.t -> ?conversation_id:string -> ?tool_calls:tool_call list ->
+  ?blocks:chat_block list -> ?turn_ref:Ids.Turn_ref.t ->
+  ?stream_lifecycle:stream_lifecycle_event list -> unit ->
   (append_once_result, string) result
 
 (** Idempotently append the ordered tool-call rows for a durable request that
@@ -543,7 +515,7 @@ val load_all_result :
   base_dir:string -> keeper_name:string -> (chat_message list, string) result
 (** Fail-closed whole-transcript reader for consumers whose durable cursor
     advances past the returned rows. Unlike {!load_all}, one unreadable row,
-    a [surface] that does not decode, an unknown typed [speaker_authority],
+    a [surface] that does not decode, an invalid row contract, an unknown typed [speaker_authority],
     speaker identity without its authority, an incomplete final row, or a
     store read failure is an error rather than a silently shorter history.
     Missing authority remains valid only for rows written without any speaker
@@ -589,7 +561,7 @@ val to_json_array :
     rows are excluded — their full I/O is surfaced by the tool-call store keyed
     on [execution_id]. Both lists are empty when no persisted row carries the
     requested [turn_ref] (old rows, redacted, or outside the retained window). *)
-type turn_transcript = {
+type turn_transcript = Keeper_chat_projection.turn_transcript = {
   user : chat_message list;
   assistant : chat_message list;
 }
@@ -612,5 +584,5 @@ val turn_transcript_to_json :
 (** [turn_transcript_to_json ~keeper ~turn_ref t] renders the dashboard
     turn-transcript payload: [keeper], [turn_ref], [found] (false when
     both line lists are empty), [source], and the [user]/[assistant]
-    line arrays. Each line carries [role]/[content]/[ts] and, for
-    non-utterance assistant rows, the writer-declared [kind]. *)
+    line arrays. Each line carries [role]/[content]/[ts]; failed requests
+    have the server-owned [request_failure] role. *)

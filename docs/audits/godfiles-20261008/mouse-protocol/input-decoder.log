@@ -1,0 +1,34 @@
+Testing `[1mtui_input_decoder[0m'.
+[2mThis run has ID `SSFPFY4W'.
+
+[0m  [33m[SKIP][0m        [36mkeys[0m             0   plain keys.
+  [33m[SKIP][0m        [36mkeys[0m             1   split character waits.
+  [33m[SKIP][0m        [36mkeys[0m             2   malformed character keeps next byte.
+  [33m[SKIP][0m        [36mkeys[0m             3   lone escape on idle.
+  [33m[SKIP][0m        [36mkeys[0m             4   alt-backspace.
+  [33m[SKIP][0m        [36mkeys[0m             5   escape keeps following byte.
+  [33m[SKIP][0m        [36mkeys[0m             6   CSI keys.
+  [33m[SKIP][0m        [36mkeys[0m             7   SS3 arrow.
+  [33m[SKIP][0m        [36mkeys[0m             8   CSI overflow.
+  [33m[SKIP][0m        [36mpaste[0m            0   CSI waits across idle.
+  [33m[SKIP][0m        [36mpaste[0m            1   reply-looking bytes stay text.
+  [33m[SKIP][0m        [36mpaste[0m            2   line breaks.
+  [33m[SKIP][0m        [36mpaste[0m            3   cancel leaves a paste.
+  [33m[SKIP][0m        [36mpaste[0m            4   recover drains the tail.
+  [33m[SKIP][0m        [36mpaste[0m            5   abandon draining.
+  [33m[SKIP][0m        [36mpaste[0m            6   recover outside a paste.
+  [33m[SKIP][0m        [36mreplies[0m          0   replies.
+  [33m[SKIP][0m        [36mreplies[0m          1   not a reply is a key.
+  [33m[SKIP][0m        [36mreplies[0m          2   unasked OSC.
+  [33m[SKIP][0m        [36mreplies[0m          3   oversized graphics reply.
+  [33m[SKIP][0m        [36mreplies[0m          4   split graphics reply within a burst.
+  [33m[SKIP][0m        [36mreplies[0m          5   body with a gap is dropped.
+  [33m[SKIP][0m        [36mreplies[0m          6   Alt+] is escape then keys.
+  [32m[OK][0m          [36mmouse[0m            0   SGR.
+  [32m[OK][0m          [36mmouse[0m            1   X10.
+  [32m[OK][0m          [36mmouse[0m            2   X10 short on idle.
+  [32m[OK][0m          [36mmouse[0m            3   X10 release after overlap is no button's...
+  [33m[SKIP][0m        [36mcancel[0m           0   drops a held sequence.
+
+Full test results in `[36m~/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/_build/_tests/tui_input_decoder[0m'.
+[32mTest Successful[0m in 0.001s. 4 tests run.

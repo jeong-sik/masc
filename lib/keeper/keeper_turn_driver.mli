@@ -450,28 +450,6 @@ module For_testing : sig
     failure:Agent_core.Error.t ->
     deferred_runtime_lane
 
-  type provider_attempt_outcomes
-
-  val produced_checkpoint : provider_attempt_outcomes -> Agent_core.Checkpoint.t option
-
-  val project_provider_attempt_result :
-    ?checkpoint_after:Agent_core.Checkpoint.t ->
-    replay_prefix_projection:Keeper_replay_prefix.projection ->
-    (Runtime_agent.run_result, Agent_core.Error.t) result ->
-    provider_attempt_outcomes
-
-  val canonical_checkpoint_sink :
-    replay_prefix_projection:Keeper_replay_prefix.projection ->
-    Agent_core.Agent.checkpoint_sink -> Agent_core.Agent.checkpoint_sink
-
-  val provider_result :
-    provider_attempt_outcomes ->
-    (Runtime_agent.run_result, Agent_core.Error.t) result
-
-  val turn_result :
-    provider_attempt_outcomes ->
-    (Runtime_agent.run_result, Agent_core.Error.t) result
-
   val checkpoint_after_attempt :
     ?agent_before_attempt:Agent_core.Agent.t ->
     ?session_id:string -> ?working_context:Yojson.Safe.t ->
@@ -556,6 +534,10 @@ module For_testing : sig
     runtime_id:string -> (string * int) list -> Yojson.Safe.t
 
   val project_input_for_attempt :
+    ?project_media:
+      (needs_projection:(Keeper_media_reading.kind -> bool) ->
+       Agent_core.Types.content_block list ->
+       Agent_core.Types.content_block list * (string * int) list) ->
     project_images:
       (mode:Keeper_vision_ingest.mode ->
        Agent_core.Types.content_block list -> Keeper_vision_ingest.image_projection) ->

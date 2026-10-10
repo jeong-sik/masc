@@ -537,6 +537,49 @@ describe('SSEMessageSchema', () => {
     expect(r.success).toBe(false)
   })
 
+  // terminal_stream_scope rides KEEPER_REPLY_DETAILS as an optional field the
+  // server omits entirely when None (json_opt -> []). lib/keeper/
+  // keeper_chat_event_log.ml optional_stream_scope accepts absence and a
+  // nonnegative integer and rejects everything else, including null.
+  const replyDetails = (value: Record<string, unknown>) =>
+    customEvent('KEEPER_REPLY_DETAILS', value)
+
+  const validReplyDetails = {
+    reply: 'Done.',
+    turn_outcome: 'visible_reply',
+    turn_ref: 'turn-7',
+  }
+
+  it('accepts a reply details event with a terminal stream scope', () => {
+    expect(
+      SSEMessageSchema.safeParse(
+        replyDetails({ ...validReplyDetails, terminal_stream_scope: 2 }),
+      ).success,
+    ).toBe(true)
+  })
+
+  it('accepts reply details without the terminal stream scope key', () => {
+    expect(SSEMessageSchema.safeParse(replyDetails(validReplyDetails)).success).toBe(true)
+  })
+
+  it.each([0, 1, 3, 7])('accepts a nonnegative terminal stream scope: %s', scope => {
+    expect(
+      SSEMessageSchema.safeParse(replyDetails({ ...validReplyDetails, terminal_stream_scope: scope }))
+        .success,
+    ).toBe(true)
+  })
+
+  it.each([-1, '1', null, 1.5, Number.MAX_SAFE_INTEGER + 1])(
+    'rejects a malformed terminal stream scope: %s',
+    scope => {
+      expect(
+        SSEMessageSchema.safeParse(
+          replyDetails({ ...validReplyDetails, terminal_stream_scope: scope }),
+        ).success,
+      ).toBe(false)
+    },
+  )
+
   it('accepts a settled tool approval', () => {
     const r = SSEMessageSchema.safeParse(
       customEvent('KEEPER_TOOL_APPROVAL_SETTLED', {

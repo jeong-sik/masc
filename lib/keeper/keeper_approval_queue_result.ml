@@ -95,6 +95,22 @@ type approved_resolution_delivery =
   ; replay_outcome : resolution_replay_outcome option
   }
 
+type continuation_readiness =
+  | Continuation_waiting_for_replay
+  | Continuation_ready of string option
+
+let continuation_readiness_of_delivery (delivery : approved_resolution_delivery) =
+  match delivery.state, delivery.replay_outcome with
+  | Resolution_consumed, Some _ ->
+    Continuation_ready (Some delivery.request.tool_name)
+  | Resolution_unconsumed, (None | Some _)
+  | Resolution_consumed, None -> Continuation_waiting_for_replay
+;;
+
+type continuation_projection_result =
+  | Continuation_projection_recorded
+  | Continuation_projection_not_ready
+
 type grant_consumption =
   | Consumption_committed of Keeper_approval.Audit.receipt
   | Consumption_already_committed

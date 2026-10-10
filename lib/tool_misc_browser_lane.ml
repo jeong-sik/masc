@@ -101,13 +101,57 @@ let no_client_retry host =
    but its model-facing raw output uses the error message. No tab command runs
    until resolution succeeds, including when a formerly pinned client vanished,
    and a browser that leaves after resolution is answered the same way. *)
-let selection_error ~base_path ~tool_name ~start_time error =
+(* What the server's start of the Keeper's BiDi connection did for this
+   request (RFC-browser-keeper-firefox §3.5): the connection it shows, with
+   a retry that starts from that connection's own tabs, or why it shows
+   none, with a retry that says what retrying does. A start nobody asks for
+   here changes nothing in the answer. *)
+let bidi_start_fields =
+  let module Starter = Browser_keeper_firefox_starter in
+  let from_its_tabs =
+    " Its tab IDs are its own: list its tabs and observe the page again with its clientId, then \
+     retry. No browser command was dispatched." in
+  function
+  | None | Some Starter.Not_asked_for -> None, []
+  | Some (Starter.Attached { client; started }) ->
+    let what, done_ = match started with
+      | Starter.Firefox_and_host ->
+        "firefox_and_host", "MASC started this workspace's Keeper Firefox and its BiDi host."
+      | Starter.Host_only ->
+        "host_only", "MASC started the BiDi host for this workspace's Keeper Firefox."
+      | Starter.Nothing -> "nothing", "The Keeper's BiDi connection is listed now." in
+    let connection = match Browser_lane.client_json client with
+      | `Assoc fields -> `Assoc (fields @ [ "started", `String what ])
+      | other -> other in
+    Some (done_ ^ " The connection in bidiConnection serves this work." ^ from_its_tabs),
+    [ "bidiConnection", connection ]
+  | Some (Starter.Not_attached reason) ->
+    let kind, why, retry = match reason with
+      | Starter.Operator_needed why -> "operator_needed", why, None
+      | Starter.Start_failed why ->
+        "start_failed", why,
+        Some "MASC tried to start the Keeper's BiDi connection and could not, as bidiStartFailed \
+              says. A retry tries again. No browser command was dispatched."
+      | Starter.Not_listed_in_time why ->
+        "not_listed_in_time", why,
+        Some "MASC started the Keeper's BiDi connection, and it was not listed in time, as \
+              bidiStartFailed says. A retry after a short wait may find it listed. No browser \
+              command was dispatched." in
+    retry, [ "bidiStartFailed", `Assoc [ "kind", `String kind; "message", `String why ] ]
+
+let selection_error ?bidi_start ~base_path ~tool_name ~start_time error =
   let clients () = Browser_lane.active_clients () |> List.map Browser_lane.client_json in
+  let started_retry, started_fields = bidi_start_fields bidi_start in
   (* [deciding] are the short fields that say what was refused and what to do
      next; [listing] are the connection lists, which grow with the number of
      browsers. The lists go last because several readers of a recorded
      rejection keep only its beginning. *)
   let rejection ~deciding ~listing =
+    let deciding =
+      (match started_retry with
+       | None -> deciding
+       | Some retry -> List.map (function "retry", _ -> "retry", `String retry | field -> field) deciding)
+      @ started_fields in
     let data =
       `Assoc ((("error", `String (Browser_lane.selection_error_code error)) :: deciding) @ listing) in
     Tool_result.make_err ~tool_name ~start_time
@@ -133,6 +177,7 @@ let selection_error ~base_path ~tool_name ~start_time error =
        whatever it would have said. *)
     let running = match observation.record with
       | Browser_bidi_host_record.Running _
+      | Browser_bidi_host_record.Record_missing_but_locked
       | Browser_bidi_host_record.Unreadable { held = Some true; _ } -> true
       | Browser_bidi_host_record.Unreadable { held = Some false | None; _ }
       | Browser_bidi_host_record.Never_started
@@ -459,6 +504,31 @@ let handle_act_with_phase ?upload_paths ~base_path ~tool_name ~start_time args =
 let handle_act ~base_path ~tool_name ~start_time args =
   fst (handle_act_with_phase ~base_path ~tool_name ~start_time args)
 
+(* Work only a BiDi connection serves, refused because no listed connection
+   serves it, has the server start the Keeper's BiDi connection
+   (RFC-browser-keeper-firefox §3.5): with none listed, with the chosen one
+   gone or of another transport, or with several to choose from when none of
+   them serves it. The request itself is not sent there: its tab and point
+   were observed on another connection, or on none. *)
+let bidi_start_for verb (error : Browser_lane.selection_error) =
+  match Browser_lane.live_capability verb with
+  | None -> None
+  | Some capability ->
+    let bidi_only =
+      List.equal ( = ) (Browser_lane.live_transports_serving capability) [ Browser_lane.Webdriver_bidi ] in
+    let wanting_a_connection =
+      match error with
+      | Browser_lane.No_live_client | Browser_lane.Selected_client_disconnected _
+      | Browser_lane.Transport_unsupported _ | Browser_lane.Ambiguous_clients _ -> true
+      | Browser_lane.Activity_rejected _ -> false in
+    let served () =
+      List.exists
+        (fun (info : Browser_lane.client_info) -> Browser_lane.live_transport_serves info.transport capability)
+        (Browser_lane.active_clients ()) in
+    if bidi_only && wanting_a_connection && not (served ()) then
+      Some (Browser_keeper_firefox_starter.bring_up ())
+    else None
+
 let handle_interact_with_phase ~base_path ~tool_name ~start_time args =
   match Browser_interaction.parse args with
   | Error error -> make_input_err ~tool_name ~start_time error, Tool_result.Proven_pre_effect
@@ -471,7 +541,7 @@ let handle_interact_with_phase ~base_path ~tool_name ~start_time args =
       |> Result.map (fun answer -> target, answer)) in
     (match issued with
      | Error error ->
-       selection_error ~base_path ~tool_name ~start_time error,
+       selection_error ?bidi_start:(bidi_start_for verb error) ~base_path ~tool_name ~start_time error,
        Tool_result.Proven_pre_effect
      | Ok (target, answer) ->
        let phase = match answer with

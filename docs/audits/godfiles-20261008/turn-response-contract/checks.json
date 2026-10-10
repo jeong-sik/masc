@@ -1,0 +1,24 @@
+{
+  "date": "2026-10-09",
+  "base": "ae4af3e52e5965fc5e32629c4cb7dac699fe8627",
+  "build": {
+    "command": "dune build --root . @check ./test/test_keeper_turn_driver_accept.exe ./test/test_keeper_muse_runtime.exe -j 8",
+    "exit_code": 0
+  },
+  "tests": [
+    {
+      "command": "cd test && DUNE_SOURCEROOT=<worktree> ../_build/default/test/test_keeper_turn_driver_accept.exe",
+      "exit_code": 0,
+      "executed_cases": 43,
+      "executable_sha256": "4713428a9d3801084b942a3ede0b03646de4ee7d2a94c4dc7d9ab69678211fe2",
+      "log": "accept.log"
+    },
+    {
+      "command": "cd test && DUNE_SOURCEROOT=<worktree> ../_build/default/test/test_keeper_muse_runtime.exe",
+      "exit_code": 0,
+      "executed_cases": 59,
+      "executable_sha256": "019d0847977e24755fee571f8cd6cc0c584040a752d6007fe9b9d4f931cc55a7",
+      "log": "muse.log"
+    }
+  ]
+}

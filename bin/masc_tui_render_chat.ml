@@ -24,14 +24,12 @@ open Masc_tui_render_prim
 module Context_state = Masc_tui_context_state
 module Frame_presenter = Masc_tui_frame_presenter
 module Keeper_chat = Masc_tui_keeper_chat_projection
-module Keeper_chat_log = Masc_tui_keeper_chat_log
 module Keeper_chat_diff = Masc_tui_keeper_chat_diff
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Keeper_control = Masc_tui_keeper_control
 module Markdown = Masc_tui_markdown
 module Markdown_cache = Masc_tui_markdown_render_cache
 module Message_layout = Masc_tui_message_layout
-module Live = Masc_tui_keeper_chat_live
 module Observation_layout = Masc_tui_observation_layout
 module Tool_detail = Masc_tui_tool_detail
 
@@ -498,13 +496,26 @@ let origin_heading buf cols ~plain ~styled ~clock =
   in
   box_line buf cols (lead ^ rule ^ tail)
 
-let render_chat_row ~theme ~tool_visibility buf cols (row : Message_layout.row) =
+let render_chat_row ~theme ~origin ~tool_visibility buf cols (row : Message_layout.row) =
   match row.kind with
+  | Message_layout.Spacing -> box_empty buf cols
   | Message_layout.Viewport_gap { hidden_rows = _ } ->
       (* The glyph survives NO_COLOR; the adaptive recede keeps the separator
          visible without competing with the message above and below it. *)
       box_line_styled buf cols ~style:(Theme.recede ()) row.text
-  | Message_layout.Body ->
+  | Message_layout.Body | Message_layout.Metadata Message_layout.Sender ->
+      (* A bare view's sender piece is drawn like a body row: the layout gave
+         it the body's gutter and one piece of the name as its text. Building
+         an origin heading from it instead repeated the mark and the whole
+         name on every wrapped piece. Only the name's colour differs. *)
+      let sender =
+        match row.kind with
+        | Message_layout.Metadata Message_layout.Sender -> true
+        | Message_layout.Body | Message_layout.Spacing | Message_layout.Viewport_gap _
+        | Message_layout.Metadata
+            ( Message_layout.Timeline_break _ | Message_layout.Origin _
+            | Message_layout.Diagnostic | Message_layout.Continued_at _ ) -> false
+      in
       (* The two cells reserved by the layout separate the activity column from
          its body. The semantic lead lives with the origin label, so wrapped
          prose starts at one stable column without drawing a rail on every row.
@@ -615,11 +626,18 @@ let render_chat_row ~theme ~tool_visibility buf cols (row : Message_layout.row) 
               Printf.sprintf "%s┊%s " (Chat_theme.origin row.style) Ansi.reset
           | Message_layout.Inbound, _ -> snd (arrival_bar row.style)
           | _, Message_layout.Shade_none -> "  "
+          | _, Message_layout.Shade_quoted when origin = Message_layout.Origin_bare -> "  "
           | _, Message_layout.Shade_quoted ->
               Printf.sprintf "%s\xe2\x94\x82%s " (Theme.recede ()) Ansi.reset
         in
-        let body_style = context.opening in
-        if context.ambient_background && not is_tool then
+        let body_style =
+          if sender then context.opening ^ Chat_theme.origin row.style ^ Ansi.bold
+          else context.opening
+        in
+        if context.ambient_background && origin = Message_layout.Origin_bare then
+          box_line buf cols
+            (margin ^ context.opening ^ "  " ^ dress rest ^ Ansi.reset)
+        else if context.ambient_background && not is_tool then
           box_line_styled buf cols ~style:context.opening
             (Printf.sprintf "%s  %s" margin (dress rest))
         else
@@ -629,6 +647,10 @@ let render_chat_row ~theme ~tool_visibility buf cols (row : Message_layout.row) 
       else
         (* [rows_of_entry] prefixes every body chunk with the two spaces the guard matches, so this arm stays as a safety net. *)
         box_line_styled buf cols ~style:context.opening (dress text)
+  | Message_layout.Metadata Message_layout.Diagnostic ->
+      (* The layout puts a diagnostic in its entry's body column and carries
+         the turn's rail past it; both are in the gutter. *)
+      box_line_styled buf cols ~style:(Theme.recede ()) (row.gutter ^ row.text)
   | Message_layout.Metadata (Message_layout.Timeline_break _) ->
       (* The hour rail is a scrollbar landmark, not content: it stays, but
          recedes instead of holding the pane's brightest slot. *)
@@ -801,7 +823,18 @@ let keeper_message_identity ~max_cells state keeper_name =
           ; stance
           ]
       in
-      (match runtime with
+      if state.msg_origin_display = Message_layout.Origin_bare then
+        let compact_status = match reading.Keeper_control.liveness with
+          | Keeper_control.Absent ->
+              (match keeper.k_origin with
+               | Tui_decode.Declared_keeper _ -> "아직 시작하지 않음"
+               (* [status] is the only place the bare header carries the
+                  Keeper's AUTO/YOLO mode and gate, so the absent label keeps
+                  that stance. *)
+               | Persisted_keeper | Remote_keeper -> "absent" ^ stance)
+          | Keeper_control.Unobserved | Keeper_control.Invalid _ | Keeper_control.Present _ -> status in
+        fit_identity (compact_status ^ Ansi.reset)
+      else (match runtime with
        | None ->
            let detail = match keeper.k_origin with
              | Tui_decode.Declared_keeper requirements ->
@@ -1571,7 +1604,47 @@ let turn_rail_of ~siding ~(edge : Masc_tui_types.turn_edge)
         ~speech:Message_layout.Rail_says style
 
 
-let compute_keeper_message_layout_entries (state : state) ~keeper_name
+module Request_owners = Map.Make (String)
+
+let request_owner owners request_id =
+  Option.value (Request_owners.find_opt request_id owners) ~default:request_id
+
+let request_diagnostics ~tools ~request_id ~execution_id =
+  match tools with
+  | Tools_compact | Tools_results -> []
+  | Tools_full when String.equal request_id "" -> []
+  | Tools_full ->
+      let safe = Keeper_chat.terminal_safe_text in
+      ["request " ^ safe request_id]
+      @ if String.equal request_id execution_id then []
+        else ["execution " ^ safe execution_id]
+
+let committed_request_diagnostics ~tools ~request_id ~execution_id ~edge =
+  match edge with
+  | Turn_opens | Turn_alone | Turn_outside ->
+      request_diagnostics ~tools ~request_id ~execution_id
+  | Turn_continues | Turn_closes -> []
+
+let chat_request_owners (state : state) ~keeper_name =
+  (* All watchers retain their validated request-to-execution binding, even
+     when the selected journal has no visible output. Self identities add no
+     alias and cannot overwrite a sibling's confirmed binding. *)
+  state.msg_settled_logs
+  @ List.map (fun (entry : Masc_tui_types.inflight) -> entry.log) state.msg_inflight
+  @ Option.to_list state.msg_live
+  |> List.filter_map (fun log ->
+      let request_id = Masc_tui_types.turn_log_request_id log in
+      let execution_id = Masc_tui_types.turn_log_execution_id log in
+      if String.equal (Masc_tui_types.turn_log_keeper_name log) keeper_name
+         && not (String.equal request_id execution_id)
+      then Some (request_id, execution_id) else None)
+  |> List.sort_uniq compare
+  |> fun aliases ->
+     (* Keep the existing first sorted binding if two watchers disagree. *)
+     List.fold_right (fun (request_id, execution_id) owners ->
+       Request_owners.add request_id execution_id owners) aliases Request_owners.empty
+
+let compute_keeper_message_layout_entries (state : state) ~keeper_name ~request_owners
     ~chat_cols ~start_index visible_entries =
   (* Bound before the labels because one of them is fitted to it: a row from
      someone else names them, and adds the surface they came in by only when
@@ -1610,9 +1683,8 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
     | Message_thinking -> "THINKING"
     | Message_memory -> "JOURNAL"
   in
-  (* The role label identifies the speaker or activity lane. Request and turn
-     headings are added after transcript rows join the committed timeline, so
-     one contiguous request group receives one identity heading. *)
+  (* Role labels identify speakers and activity lanes. Request identity stays
+     in the grouping field; it is never inserted into speech. *)
   (* Who asked for a turn is one fact per turn, not one per row. It was the
      speaker label on every autonomous row, so the same keeper answered as
      itself when a person asked and as AUTO when nobody did -- two speakers for
@@ -1689,7 +1761,9 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
               | Masc_tui_types.Turn_continues | Masc_tui_types.Turn_closes
               | Masc_tui_types.Turn_outside ->
                   "")
-          | Message_user _ | Message_status | Message_local | Message_memory
+          | Message_user (Sent_by_other { speaker; surface }) ->
+              Message_layout.fit_speaker ~column:chat_cols ~speaker ~surface ()
+          | Message_user (Sent_by_operator _) | Message_status | Message_local | Message_memory
           | Message_error | Message_tool | Message_skill _ | Message_thinking ->
               grouped_role_label
         in
@@ -1759,21 +1833,22 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
           | Message_status | Message_local | Message_error ->
               message.me_text
         in
-        ({ style;
+        ({ delivery_state = None; style;
              timestamp =
                Option.fold ~none:message.me_timestamp
                  ~some:keeper_message_clock timeline_at;
              timeline_bucket =
                Option.map keeper_message_timeline_bucket
                  timeline_at;
-             span_clock = None;
+             diagnostics = committed_request_diagnostics
+               ~tools:state.msg_tool_visibility ~request_id:message.me_request_id
+               ~execution_id:(request_owner request_owners message.me_request_id) ~edge;
              speaker;
              role_label;
              role_label_mark_cells =
                Message_layout.role_label_mark_cells
                  ~column:role_label_column ~style ();
-             request_label =
-               Keeper_chat.compact_request_id message.me_request_id;
+             request_label = request_owner request_owners message.me_request_id;
              body;
              journal =
                (match message.me_role, state.msg_memory_visibility with
@@ -1828,27 +1903,35 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
    to a turn that has not opened one yet; RFC chat-turn-rail-and-side-lanes
    decides later what a turn's own opening looks like. *)
 let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
-  (* The state goes in the body, not in [request_label]. That field rides the
-     metadata row, which every origin mode but [Origin_row] folds away -- so a
-     line saying where it stands would have said it only to a reader who had
-     already pressed Ctrl-F. The body is drawn whatever the mode. *)
-  let entry ~at ~request_id ~label ~note ~body =
+  (* Delivery state belongs to the gutter/header. The pending text is exactly
+     the submitted body; changing delivery state never rewrites its words. *)
+  let delivery_label = function
+    | Local_pending -> "전송 대기"
+    | Awaiting_receipt -> "전송 중"
+    | Keeper_queued -> "처리 대기"
+    | Rechecking_delivery -> "전송 확인 중"
+  in
+  (* Pending and committed speech use the same column. A narrow gutter fits
+     the state label; Origin_row keeps the complete label in its heading. *)
+  let entry ~at ~request_id ~label ~body =
     (* Pending input has not entered the conversation. It uses the composer's
        local mark, not the arrow that means a submitted conversation row. *)
     let style = Message_layout.Local in
-    ({ style
+    ({ delivery_state = Some label; style
      ; timestamp = keeper_message_clock at
      ; timeline_bucket = Some (keeper_message_timeline_bucket at)
-     ; span_clock = None
+     (* A pending input has no execution yet, so its request is its only
+        identity. The activity rows name requests by this id. *)
+     ; diagnostics =
+         request_diagnostics ~tools:state.msg_tool_visibility ~request_id
+           ~execution_id:request_id
      ; speaker = label
      ; role_label =
          Message_layout.align_role_label ~column:role_label_column ~style label
      ; role_label_mark_cells =
          Message_layout.role_label_mark_cells ~column:role_label_column ~style ()
      ; request_label = request_id
-     ; body = "YOU · " ^ note ^ " · 요청 "
-         ^ Keeper_chat.terminal_safe_text (Keeper_chat.compact_request_id request_id) ^ "\n"
-         ^ Keeper_chat.terminal_safe_text ~preserve_newlines:true body
+     ; body = Keeper_chat.terminal_safe_text ~preserve_newlines:true body
      ; journal = []
      ; markdown_source = Message_layout.Markdown_streaming
      ; turn_rail = Message_layout.Rail_none
@@ -1870,19 +1953,16 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
             | Some item -> item.submitted_at
             | None -> Unix.gettimeofday ()
       in
-      let label, note = match delivery with
-        | Local_pending -> "대기", "전송 대기 · 아직 보내지 않음"
-        | Awaiting_receipt -> "전송 중", "전송 중 · 서버 접수 확인 전"
-        | Keeper_queued -> "접수됨", "서버 접수됨 · 턴 반영 대기"
-        | Rechecking_delivery -> "미확인", "전달 확인 중 · 결과 미확인"
-      in
-      entry ~at ~request_id:request.Keeper_chat.request_id ~label ~note
+      let label = delivery_label delivery in
+      entry ~at ~request_id:request.Keeper_chat.request_id ~label
         ~body:request.Keeper_chat.message) requests in
   match entries with
   | [] -> []
   | first :: _ ->
       let style = Message_layout.Status in
-      { first with style; timestamp = ""; timeline_bucket = None;
+      (* The heading is not the input it was copied from. *)
+      { first with delivery_state = None; style; timestamp = ""; timeline_bucket = None;
+          diagnostics = [];
           speaker = "대기 입력";
           role_label = Message_layout.align_role_label
             ~column:role_label_column ~style "대기 입력";
@@ -1944,24 +2024,31 @@ let polled_turn_output_entries (state : state) ~keeper_name ~role_label_column =
           | None -> "진행 중"
           | Some _ -> "마지막 관측, 갱신 실패"
         in
-        [ ({ style
+        let speech = ({ delivery_state = None; style
            ; timestamp = keeper_message_clock preview.ktp_updated_at_unix
            ; timeline_bucket = Some (keeper_message_timeline_bucket preview.ktp_updated_at_unix)
-           ; span_clock = None
+           ; diagnostics = []
            ; speaker = label
            ; role_label =
                Message_layout.align_role_label ~column:role_label_column ~style label
            ; role_label_mark_cells =
                Message_layout.role_label_mark_cells ~column:role_label_column ~style ()
            ; request_label = ""
-           ; body = Printf.sprintf "%s · %s · 최근 출력 발췌\n%s"
-               note (Masc_tui_answering.lane_word lane)
-               (Masc.Tui_terminal_text.sanitize_terminal_lines preview.ktp_text_tail)
+           ; body = Masc.Tui_terminal_text.sanitize_terminal_lines preview.ktp_text_tail
            ; journal = []
            ; markdown_source = Message_layout.Markdown_streaming
            ; turn_rail = Message_layout.Rail_none
            ; action = Message_layout.Action_none
-           } : Message_layout.entry) ]
+           } : Message_layout.entry) in
+        let status_style = Message_layout.Status in
+        [ speech
+        ; { speech with style = status_style; speaker = "STATUS";
+            role_label = Message_layout.align_role_label
+              ~column:role_label_column ~style:status_style "STATUS";
+            role_label_mark_cells = Message_layout.role_label_mark_cells
+              ~column:role_label_column ~style:status_style ();
+            body = Printf.sprintf "%s · %s · 최근 출력 발췌"
+              note (Masc_tui_answering.lane_word lane) } ]
     | Some _ | None -> []
 
 (* One conversation's layout entries, reused per message across a change of
@@ -2012,6 +2099,9 @@ let polled_turn_output_entries (state : state) ~keeper_name ~role_label_column =
      the journal summary body, and the compact/full tool projection (memory
      and reasoning also decide which rows the visible timeline holds at
      all, which the position comparison then sees);
+   - validated request-to-execution aliases, indexed once by request. Alias
+     changes update only the affected entry's grouping and diagnostics; they
+     do not rebuild unrelated historical bodies;
    - this keeper's file-change index and durable-call snapshot readings,
      replaced wholesale when a load lands, so physical identity says whether
      they moved; the tool detail rows read both;
@@ -2049,6 +2139,7 @@ let polled_turn_output_entries (state : state) ~keeper_name ~role_label_column =
    mutation site. *)
 type layout_entries_memo = {
   lem_keeper_name : string;
+  lem_request_owners : string Request_owners.t;
   lem_chat_cols : int;
   lem_preview_mode : [ `Rich | `Compact | `Off ];
   lem_preview_generation : int;
@@ -2092,7 +2183,7 @@ let keeper_message_visible_entries visible_timeline =
    every position above them. The suffix goes back as the tail cell it was
    found at, so a caller can tell "nothing shared" by physical identity
    rather than by measuring. *)
-let rec shared_layout_entry_prefix reversed old_visible old_entries
+let rec shared_layout_entry_prefix ~refresh_owner reversed old_visible old_entries
     new_visible =
   match old_visible, old_entries, new_visible with
   | (old_message, old_at, old_edge) :: old_visible_rest,
@@ -2101,7 +2192,8 @@ let rec shared_layout_entry_prefix reversed old_visible old_entries
     when old_message == message
          && Option.equal Float.equal old_at timeline_at
          && old_edge = edge ->
-      shared_layout_entry_prefix (entry :: reversed) old_visible_rest
+      let entry = refresh_owner message edge entry in
+      shared_layout_entry_prefix ~refresh_owner (entry :: reversed) old_visible_rest
         old_entries_rest new_visible_rest
   | _ -> List.rev reversed, new_visible
 
@@ -2122,6 +2214,7 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
       (Masc_tui_terminal_palette.snapshot ())
   in
   let preview_generation = Masc_tui_link_preview.cache_generation () in
+  let request_owners = chat_request_owners state ~keeper_name in
   let same_inputs (memo : layout_entries_memo) =
     String.equal memo.lem_keeper_name keeper_name
     && memo.lem_chat_cols = chat_cols
@@ -2143,28 +2236,43 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
   in
   match !layout_entries_memo with
   | Some memo
-    when same_inputs memo && memo.lem_visible_timeline == visible_timeline ->
+    when same_inputs memo && memo.lem_visible_timeline == visible_timeline
+         && Request_owners.equal String.equal memo.lem_request_owners request_owners ->
       memo.lem_entries
   | Some memo when same_inputs memo ->
       let visible_entries = keeper_message_visible_entries visible_timeline in
+      let owner_changed = ref false in
+      let refresh_owner message edge (entry : Message_layout.entry) =
+        let execution_id = request_owner request_owners message.me_request_id in
+        if String.equal entry.request_label execution_id then entry
+        else (
+          owner_changed := true;
+          { entry with request_label = execution_id;
+            diagnostics = committed_request_diagnostics
+              ~tools:state.msg_tool_visibility ~request_id:message.me_request_id
+              ~execution_id ~edge })
+      in
       let prefix, suffix =
-        shared_layout_entry_prefix [] memo.lem_visible_entries
+        shared_layout_entry_prefix ~refresh_owner [] memo.lem_visible_entries
           memo.lem_entries visible_entries
       in
       let entries =
         match suffix with
+        | [] when not !owner_changed
+                  && List.length prefix = List.length memo.lem_entries -> memo.lem_entries
         | [] -> prefix
         | _ when suffix == visible_entries ->
-            compute_keeper_message_layout_entries state ~keeper_name
+            compute_keeper_message_layout_entries state ~keeper_name ~request_owners
               ~chat_cols ~start_index:0 visible_entries
         | _ ->
             prefix
-            @ compute_keeper_message_layout_entries state ~keeper_name
+            @ compute_keeper_message_layout_entries state ~keeper_name ~request_owners
                 ~chat_cols ~start_index:(List.length prefix) suffix
       in
       layout_entries_memo :=
         Some
           { memo with
+            lem_request_owners = request_owners;
             lem_visible_timeline = visible_timeline;
             lem_visible_entries = visible_entries;
             lem_entries = entries;
@@ -2173,12 +2281,13 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
   | Some _ | None ->
       let visible_entries = keeper_message_visible_entries visible_timeline in
       let entries =
-        compute_keeper_message_layout_entries state ~keeper_name ~chat_cols
+        compute_keeper_message_layout_entries state ~keeper_name ~request_owners ~chat_cols
           ~start_index:0 visible_entries
       in
       layout_entries_memo :=
         Some
           { lem_keeper_name = keeper_name;
+            lem_request_owners = request_owners;
             lem_chat_cols = chat_cols;
             lem_preview_mode = state.link_previews_mode;
             lem_preview_generation = preview_generation;
@@ -2203,97 +2312,6 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
 type tagged_row =
   | Tagged_row of Masc_tui_types.msg_entry
   | Tagged_block of Masc_tui_types.turn_log
-
-(* Bookkeeping belongs to the source logs even when they have no visible
-   transcript block. Keep every watcher: an unselected sibling can hold the
-   Run_started that proves a batch's inputs entered the execution. *)
-let identity_source_logs (state : state) ~keeper_name =
-  state.msg_settled_logs
-  @ List.map (fun (entry : Masc_tui_types.inflight) -> entry.log) state.msg_inflight
-  @ Option.to_list state.msg_live
-  |> List.filter (fun log -> String.equal (Masc_tui_types.turn_log_keeper_name log) keeper_name)
-  |> List.fold_left (fun logs log ->
-      if List.exists (( == ) log) logs then logs else log :: logs) []
-  |> List.rev
-
-let identity_source_revisions logs =
-  List.map (fun log ->
-    log, Keeper_chat_log.revision log.tl_log,
-    Keeper_chat_transcript.revision log.tl_transcript) logs
-
-let same_identity_source_revisions =
-  List.equal (fun (held, log_revision, transcript_revision)
-      (current, current_log_revision, current_transcript_revision) ->
-    held == current && log_revision = current_log_revision
-    && transcript_revision = current_transcript_revision)
-
-(* One pure decoration pass for both the frame and search's row measurement.
-   Only a row's own turn sequence or an autonomous journal's typed identity
-   supplies TURN: the latest Reply_details cannot label earlier continuations. *)
-let identify_chat_entries ~source_logs tagged_entries =
-  let owners = Hashtbl.create 16 and started = Hashtbl.create 16 in
-  List.iter (fun log ->
-    let request_id = Masc_tui_types.turn_log_request_id log in
-    let execution_id = Masc_tui_types.turn_log_execution_id log in
-    (* The transcript validates a binding's request and immutable execution
-       identity. A watcher still awaiting that binding cannot replace a
-       sibling's validated mapping with its initial self identity. *)
-    if not (String.equal request_id execution_id) then
-      Hashtbl.replace owners request_id execution_id) source_logs;
-  let owner id = Option.value (Hashtbl.find_opt owners id) ~default:id in
-  List.iter (fun log ->
-    if List.exists (fun (event : Keeper_chat_log.entry) ->
-        match event.delta with Live.Run_started -> true | _ -> false)
-        (Keeper_chat_log.entries log.tl_log)
-    then Hashtbl.replace started
-      (Masc_tui_types.turn_log_execution_id log) ()) source_logs;
-  let input_counts = Hashtbl.create 16 in
-  List.iter (fun (tag, _) -> match tag with
-    | Tagged_row message when message.me_turn_phase = Turn_input ->
-        let id = owner message.me_request_id in
-        let count = Option.value (Hashtbl.find_opt input_counts id) ~default:0 in
-        Hashtbl.replace input_counts id (count + 1)
-    | _ -> ()) tagged_entries;
-  let previous_request = ref None and previous_turn = ref None in
-  List.map (fun (tag, (entry : Message_layout.entry)) ->
-    let request_id, turn_sequence, reflected = match tag with
-      | Tagged_row message ->
-          let request_id = owner message.me_request_id in
-          let reflected = match message.me_role, message.me_identity with
-            | Message_user (Sent_by_operator _), Persisted_row _ -> true
-            | Message_user (Sent_by_operator _), (Session_row _ | Persisted_legacy_row _) ->
-                Hashtbl.mem started request_id
-            | _ -> false in
-          request_id, message.me_turn_sequence, reflected
-      | Tagged_block log ->
-          let sequence = match Keeper_chat_log.source log.tl_log with
-            | Operation _ -> None
-            | Autonomous_turn turn_ref -> Some (Ids.Turn_ref.absolute_turn turn_ref) in
-          Masc_tui_types.turn_log_execution_id log, sequence, false
-    in
-    let opens = request_id <> "" && !previous_request <> Some request_id in
-    if opens then previous_turn := None;
-    let names_turn = Option.exists (fun sequence ->
-        !previous_turn <> Some (request_id, sequence)) turn_sequence in
-    Option.iter (fun sequence -> previous_turn := Some (request_id, sequence)) turn_sequence;
-    if request_id <> "" then previous_request := Some request_id;
-    let heading =
-      if not (opens || names_turn) then []
-      else
-        let identity = Keeper_chat.terminal_safe_text
-            (Keeper_chat.compact_request_id request_id) in
-        let turn = match turn_sequence with
-          | Some sequence -> Printf.sprintf "TURN #%d · " sequence
-          | None -> "" in
-        let inputs = Option.value (Hashtbl.find_opt input_counts request_id) ~default:0 in
-        [turn ^ "요청 " ^ identity
-         ^ (if inputs > 1 then Printf.sprintf " · 입력 %d건" inputs else "")]
-    in
-    tag, {entry with request_label = request_id;
-      body = String.concat "\n"
-        (heading @ (if reflected then ["입력 반영됨"] else []) @ [entry.body])})
-    tagged_entries
-
 
 (* Where the pane has to scroll to put a message holding [query] on screen, and
    which message that is.
@@ -2337,10 +2355,6 @@ let keeper_message_find_scroll (state : state) ~keeper_name ~needle ~older_than 
     let messages = keeper_message_visible_messages state ~keeper_name in
     let entries =
       keeper_message_layout_entries state ~keeper_name ~chat_cols
-      |> List.combine messages
-      |> List.map (fun (message, entry) -> Tagged_row message, entry)
-      |> identify_chat_entries ~source_logs:(identity_source_logs state ~keeper_name)
-      |> List.map snd
     in
     let count = List.length entries in
     let ceiling =
@@ -2350,12 +2364,26 @@ let keeper_message_find_scroll (state : state) ~keeper_name ~needle ~older_than 
           Option.value ~default:count
             (msg_index_of_anchor messages anchor)
     in
+    (* [request_label] is the execution an aliased request was folded into,
+       so a batched update's own request id survives only on its message.
+       Entries and messages share positions; the result below reads
+       [List.nth messages at] on the same assumption. *)
+    let request_ids =
+      Array.of_list
+        (List.map (fun (message : msg_entry) -> message.me_request_id) messages)
+    in
+    let request_id_matches index =
+      index < Array.length request_ids
+      && Masc_tui_pick_list.lowercase_contains ~needle request_ids.(index)
+    in
     let matched =
       List.filteri (fun index _ -> index < ceiling) entries
       |> List.mapi (fun index (entry : Message_layout.entry) -> (index, entry))
       |> List.rev
-      |> List.find_opt (fun (_, (entry : Message_layout.entry)) ->
-             Masc_tui_pick_list.lowercase_contains ~needle entry.body)
+      |> List.find_opt (fun (index, (entry : Message_layout.entry)) ->
+             Masc_tui_pick_list.lowercase_contains ~needle entry.body
+             || Masc_tui_pick_list.lowercase_contains ~needle entry.request_label
+             || request_id_matches index)
     in
     match matched with
     | None -> None
@@ -2430,20 +2458,10 @@ type merged_blocks_memo = {
   mbm_committed : Message_layout.entry list;
   mbm_blocks : log_block list;
   mbm_merged : (tagged_row * Message_layout.entry) list;
+  mbm_entries : Message_layout.entry list;
 }
 
 let merged_blocks_memo : merged_blocks_memo option ref = ref None
-
-type identified_entries_memo = {
-  iem_committed : Message_layout.entry list;
-  iem_blocks : log_block list;
-  iem_sources : (Masc_tui_types.turn_log * int * int) list;
-  iem_tagged : (tagged_row * Message_layout.entry) list;
-  iem_entries : Message_layout.entry list;
-}
-
-let identified_entries_memo : identified_entries_memo option ref = ref None
-
 
 let render_keeper_message (state : state) =
   (* The chat draws its own composer and footer instead of taking the shared
@@ -2563,7 +2581,8 @@ let render_keeper_message (state : state) =
        the width needed to identify the runtime the composer will address. *)
     let telemetry_cells = max 0 (cols - 1) in
     let telemetry_keeper =
-      Masc_tui_theme.tone Masc_tui_theme.Accent
+      if state.msg_origin_display = Message_layout.Origin_bare then ""
+      else Masc_tui_theme.tone Masc_tui_theme.Accent
       ^ fit_runtime_id (telemetry_cells / 3) display_keeper_name ^ Ansi.reset ^ " · "
     in
     let telemetry_identity_cells =
@@ -2581,7 +2600,9 @@ let render_keeper_message (state : state) =
         with
         | Some { observation = Some observation; error = None } ->
             Observation_layout.context_header_item
-              ~max_cells:(min 48 (telemetry_identity_cells / 2))
+              ~max_cells:(min
+                (if state.msg_origin_display = Message_layout.Origin_bare then 24 else 48)
+                (telemetry_identity_cells / 2))
               ~inspect_key:Masc_tui_keys.context_inspector_label observation
         | Some {error = Some _; _} -> Some "Context unavailable"
         | Some _ | None -> Some "Context —"
@@ -2711,7 +2732,7 @@ let render_keeper_message (state : state) =
             && List.mem message.me_request_id member_ids)
           committed_timeline_messages
       in
-      let request_label = Keeper_chat.compact_request_id request_id in
+      let request_label = request_id in
       let started_at = Keeper_chat_transcript.started_at transcript in
       let bounds_request (message : Masc_tui_types.msg_entry) =
         (not (List.mem message.me_request_id member_ids))
@@ -2764,9 +2785,11 @@ let render_keeper_message (state : state) =
          Every row is built as a continuation; the corners are set once the
          blocks are merged with the committed rows, where a turn's first and
          last row are known. *)
-      (* The gutter follows the block's causal timeline position. The body
-         span separately preserves dispatch and settlement times. *)
+      (* The gutter follows the block's causal timeline position. Speech
+         remains the recorded text without a turn clock prepended to it. *)
       let frontier = ref timeline_at in
+      let request_shown = ref false in
+      let shown_attempts = ref [] in
       let entries =
         List.filter_map Fun.id
         @@ List.mapi
@@ -2783,52 +2806,39 @@ let render_keeper_message (state : state) =
                       Printf.sprintf "%s \xe2\x86\xba%d" text (attempt + 1)
                   | None -> text
                 in
-                let annotate_body body =
-                  match item.superseded_runtime_id with
-                  | Some rid when String.trim rid <> "" ->
-                      let attempt_num =
-                        match item.superseded with
-                        | Some a -> a + 1
-                        | None -> 1
-                      in
-                      let prefix =
-                        Printf.sprintf "*(attempt %d: `%s`)*" attempt_num (String.trim rid)
-                      in
-                      if body = "" then prefix else prefix ^ "\n" ^ body
-                  | _ -> body
-                in
                 let markdown_source =
                   Message_layout.Markdown_growing
                     { keeper_name; request_id; entry_index }
-                in
-                let span_clock =
-                  (* The dispatch-to-settlement span
-                     ("16:38→" running, "16:38→16:41" settled) rides in the
-                     entry's [span_clock], which the layout folds into the
-                     body *before* wrapping: it consumes body budget like any
-                     other word, so no row exceeds the block's wrap width and
-                     nothing truncates on a tight pane. A span in the gutter
-                     would have wrapped this block's body narrower than the
-                     rows around it. The transcript records the settle instant
-                     (settled_at). The 2026-09-10 misread it answers: a 16:38
-                     turn drawn under a 16:41 reply read as out-of-order. *)
-                  let start = keeper_message_clock started_at in
-                  match Keeper_chat_transcript.settled_at transcript with
-                  | Some settled ->
-                      let finish = keeper_message_clock settled in
-                      Some (Printf.sprintf "%s→%s" start finish)
-                  | None -> Some (Printf.sprintf "%s→" start)
                 in
                 let entry ?(speaker : string option) style role_label body =
                   (* One alignment, on the label the row actually carries.
                      Aligning the continuation mark and then aligning the
                      result again pays the badge's width twice, so the second
                      call trims what the first had already fitted. *)
+                  let diagnostics =
+                    let request =
+                      if !request_shown then []
+                      else request_diagnostics ~tools:state.msg_tool_visibility
+                        ~request_id:(Masc_tui_types.turn_log_request_id turn_log)
+                        ~execution_id:request_id in
+                    request_shown := true;
+                    let attempt = match state.msg_tool_visibility, item.superseded_runtime_id with
+                      | Tools_full, Some runtime_id when String.trim runtime_id <> "" ->
+                          let number = Option.value item.superseded ~default:0 + 1 in
+                          let key = (number, runtime_id) in
+                          if List.mem key !shown_attempts then []
+                          else (
+                            shown_attempts := key :: !shown_attempts;
+                            [Printf.sprintf "attempt %d: %s" number
+                               (Keeper_chat.terminal_safe_text runtime_id)])
+                      | _ -> [] in
+                    request @ attempt
+                  in
                   Some
-                    { le_at = timeline_at; le_entry = ({ style;
+                    { le_at = timeline_at; le_entry = ({ delivery_state = None; style;
                        timestamp = keeper_message_clock (Option.value timeline_at ~default:started_at);
                        timeline_bucket;
-                       span_clock;
+                       diagnostics;
                        speaker = Option.value speaker ~default:role_label;
                        role_label =
                          Message_layout.align_role_label
@@ -2865,14 +2875,14 @@ let render_keeper_message (state : state) =
                       then folded_thinking_summary (String.concat "\n" lines)
                       else String.concat "\n" lines
                     in
-                    entry Message_layout.Thinking (label "THINKING") (annotate_body body)
+                    entry Message_layout.Thinking (label "THINKING") body
                 | Keeper_chat_transcript.Drawn_tools block ->
                     let projection =
                       Keeper_chat_transcript.project_tool_block
                         (tool_projection_mode state) block
                     in
                     let body = String.concat "\n" (projected_tool_rows projection) in
-                    entry (tool_block_style projection) (label "TOOLS") (annotate_body body)
+                    entry (tool_block_style projection) (label "TOOLS") body
                 | Keeper_chat_transcript.Drawn_skill skills ->
                     entry
                       (Message_layout.Skill
@@ -2891,7 +2901,7 @@ let render_keeper_message (state : state) =
                     (* No name on the heading, as on the committed rows:
                        this is the keeper's own pane. *)
                     entry ~speaker:(label "") Message_layout.Keeper
-                      (label keeper_label) (annotate_body text)
+                      (label keeper_label) text
                 | Keeper_chat_transcript.Drawn_status text ->
                     entry Message_layout.Status (label "STATUS") text
                 | Keeper_chat_transcript.Drawn_error _
@@ -2988,18 +2998,16 @@ let render_keeper_message (state : state) =
           let ended = Masc_tui_types.observed_log_has_ended state log in
           let unavailable = Masc_tui_types.observed_log_is_unavailable state log in
           let block = held_projection ~committed:(ended || unavailable) log in
-          let entries =
-            if ended || unavailable then
-              List.map (fun item ->
-                { item with le_entry = { item.le_entry with span_clock = None } }) block.lb_entries
-            else block.lb_entries
-          in
+          let entries = block.lb_entries in
           let entries =
             match unavailable, List.rev entries with
             | true, last :: _ ->
                 let style = Message_layout.Status in
                 entries @
-                [{ last with le_entry = { last.le_entry with style; speaker = "STATUS";
+                (* The status row is not the entry it was copied from, so it
+                   names none of that entry's request or attempt. *)
+                [{ last with le_entry = { last.le_entry with delivery_state = None; style; speaker = "STATUS";
+                   diagnostics = [];
                    role_label = Message_layout.align_role_label
                      ~column:role_label_column ~style "STATUS";
                    role_label_mark_cells = Message_layout.role_label_mark_cells
@@ -3042,6 +3050,29 @@ let render_keeper_message (state : state) =
       List.combine committed_messages committed_layout_entries
       |> List.map (fun (message, entry) -> Tagged_row message, entry)
     in
+    (* Persisted inputs and their projected log share exact request metadata.
+       Keep each identity once in drawn order without parsing speech or
+       removing attempt diagnostics. Shared batch execution IDs follow the
+       same rule even when more than one committed request names them. An
+       entry that keeps all of its diagnostics is returned as it came. *)
+    let once_per_identity tagged =
+      let seen_diagnostics = Hashtbl.create 16 in
+      let request_owners = chat_request_owners state ~keeper_name in
+      List.map (fun (tag, (entry : Message_layout.entry)) ->
+        let request_id, execution_id = match tag with
+          | Tagged_row message -> message.me_request_id,
+              request_owner request_owners message.me_request_id
+          | Tagged_block log -> Masc_tui_types.turn_log_request_id log,
+              Masc_tui_types.turn_log_execution_id log in
+        let identities = request_diagnostics ~tools:state.msg_tool_visibility
+            ~request_id ~execution_id in
+        let diagnostics = List.filter (fun text ->
+          if not (List.mem text identities) then true
+          else if Hashtbl.mem seen_diagnostics text then false
+          else (Hashtbl.add seen_diagnostics text (); true)) entry.diagnostics in
+        if diagnostics = entry.diagnostics then tag, entry
+        else tag, {entry with diagnostics}) tagged
+    in
     (* Blocks sharing an insertion slot follow their causal timeline clocks.
        Equal clocks preserve source order; unknown clocks follow known ones. *)
     let merge_blocks () =
@@ -3068,7 +3099,7 @@ let render_keeper_message (state : state) =
             let due, later = List.partition (fun (at, _, _) -> at <= index) placed in
             List.map (fun (_, _, item) -> item) due @ (item :: merge (index + 1) rest later)
       in
-      let merged = merge 0 committed_tagged placed in
+      let merged = once_per_identity (merge 0 committed_tagged placed) in
       (* A turn opens once and closes once, wherever its rows ended up: the
          corners of every request a block belongs to are set here, over the
          merged order, so a block placed before its request's failure row
@@ -3091,18 +3122,6 @@ let render_keeper_message (state : state) =
              | Some block -> block.lb_request_id
              | None -> message.me_request_id)
         | Tagged_block log -> Masc_tui_types.turn_log_execution_id log
-      in
-      (* Transcript projections own dispatch and settlement times. Move their
-         span to the final opening row, which may be a committed input whose
-         pre-merge edge was Turn_alone. History alone has no running span. *)
-      let request_spans =
-        List.filter_map
-          (fun block ->
-            Option.map (fun span -> block.lb_request_id, span)
-              (List.find_map
-                 (fun item -> item.le_entry.span_clock)
-                 block.lb_entries))
-          blocks
       in
       let edges = Hashtbl.create 16 in
       let close_run ~at_tail request_id indices =
@@ -3128,14 +3147,11 @@ let render_keeper_message (state : state) =
           indices := index :: !indices
         end) merged;
       Option.iter (fun id -> close_run ~at_tail:true id !indices) !current;
-      let span_seen = Hashtbl.create 8 in
       List.mapi
         (fun index ((tag, (entry : Message_layout.entry)) as item) ->
           let request_id = request_of tag in
           match Hashtbl.find_opt edges index with
           | Some edge when List.mem request_id block_requests ->
-              let opens = not (Hashtbl.mem span_seen request_id) in
-              Hashtbl.replace span_seen request_id ();
               let siding =
                 match tag with
                 | Tagged_row message -> siding_of_message message
@@ -3143,55 +3159,49 @@ let render_keeper_message (state : state) =
               in
               ( tag
               , { entry with
-                  Message_layout.turn_rail =
+                  Message_layout.request_label = request_id;
+                  turn_rail =
                     turn_rail_of ~siding ~edge
-                      ~style:entry.Message_layout.style;
-                  span_clock =
-                    if opens then List.assoc_opt request_id request_spans
-                    else None
+                      ~style:entry.Message_layout.style
                 } )
           | Some _ | None -> item)
         merged
     in
-    let tagged_layout_entries =
+    let tagged_layout_entries, layout_entries =
       match blocks, open_blocks with
-      | [], _ -> committed_tagged
-      | _ :: _, _ :: _ -> merge_blocks ()
+      | [], _ -> (
+          (* No block to merge is not no identity to repeat: a batch's inputs
+             share one execution before any of its output is drawable. Only
+             expanded tools draw identities, and an untouched list keeps the
+             committed entries' own layout memo. *)
+          match state.msg_tool_visibility with
+          | Tools_compact | Tools_results -> committed_tagged, committed_layout_entries
+          | Tools_full ->
+              let tagged = once_per_identity committed_tagged in
+              if List.for_all2 (fun (_, kept) (_, came) -> kept == came) tagged committed_tagged
+              then committed_tagged, committed_layout_entries
+              else tagged, List.map snd tagged)
+      | _ :: _, _ :: _ ->
+          let merged = merge_blocks () in
+          merged, List.map snd merged
       | _ :: _, [] -> (
           match !merged_blocks_memo with
           | Some memo
             when memo.mbm_committed == committed_layout_entries
                  && List.length memo.mbm_blocks = List.length blocks
                  && List.for_all2 ( == ) memo.mbm_blocks blocks ->
-              memo.mbm_merged
+              memo.mbm_merged, memo.mbm_entries
           | Some _ | None ->
               let merged = merge_blocks () in
+              let entries = List.map snd merged in
               merged_blocks_memo :=
                 Some
                   { mbm_committed = committed_layout_entries;
                     mbm_blocks = blocks;
                     mbm_merged = merged;
+                    mbm_entries = entries;
                   };
-              merged)
-    in
-    let identity_sources = identity_source_logs state ~keeper_name in
-    let identity_revisions = identity_source_revisions identity_sources in
-    (* Preserve list identity while the sources are unchanged: the viewport
-       reuses its measured rows on idle repaints. *)
-    let tagged_layout_entries, layout_entries =
-      match !identified_entries_memo with
-      | Some memo when memo.iem_committed == committed_layout_entries
-          && List.length memo.iem_blocks = List.length blocks
-          && List.for_all2 ( == ) memo.iem_blocks blocks
-          && same_identity_source_revisions memo.iem_sources identity_revisions ->
-          memo.iem_tagged, memo.iem_entries
-      | Some _ | None ->
-          let tagged = identify_chat_entries ~source_logs:identity_sources tagged_layout_entries in
-          let entries = List.map snd tagged in
-          identified_entries_memo := Some {iem_committed = committed_layout_entries;
-            iem_blocks = blocks; iem_sources = identity_revisions;
-            iem_tagged = tagged; iem_entries = entries};
-          tagged, entries
+              merged, entries)
     in
     (* The operator's unsettled lines sit at the end of the same stream, not
        in a slot below it. Appended after [tagged_layout_entries] on purpose:
@@ -3314,7 +3324,8 @@ let render_keeper_message (state : state) =
       done
     end else begin
       List.iter
-        (render_chat_row ~theme:chat_theme ~tool_visibility:state.msg_tool_visibility
+        (render_chat_row ~theme:chat_theme ~origin:state.msg_origin_display
+           ~tool_visibility:state.msg_tool_visibility
            chat_buf chat_cols)
         visible_rows;
       (* Fill remaining space *)
@@ -3382,14 +3393,12 @@ let render_keeper_message (state : state) =
          (Printf.sprintf
             "  %d saved row(s) could not be read and are not shown"
             state.msg_loaded_dropped));
-    (match state.msg_memory_visibility, state.msg_memory_error with
-     | Memory_hidden, _ -> ()
-     | (Memory_summary | Memory_full), None -> ()
-     | (Memory_summary | Memory_full), Some _ ->
+    (match state.msg_memory_error with
+     | None -> ()
+     | Some _ ->
          box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
            "  Memory load failed · /errors");
-    (if state.msg_memory_visibility <> Memory_hidden
-        && state.msg_memory_dropped > 0 then
+    (if state.msg_memory_dropped > 0 then
        box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
          (Printf.sprintf
             "  %d memory journal row(s) could not be read and are not shown"
@@ -3534,14 +3543,28 @@ let render_keeper_message (state : state) =
                " · " ^ String.concat " · " parts ^ " · "
                ^ Masc_tui_keys.expand_turn_label
          in
+         let status_rows = Masc_tui_types.keeper_message_visible_status_rows state live ~now in
+         if Masc_tui_types.keeper_message_standalone_details_hint state live ~now
+         then box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
+           (Printf.sprintf "  +%d · %s:details" folded_away Masc_tui_keys.expand_turn_label);
          List.iter
            (fun (kind, text) ->
              (match kind with
               | Keeper_chat_transcript.Progress ->
-                  box_line_styled chat_buf chat_cols ~style:(Masc_tui_theme.tone Masc_tui_theme.Accent)
-                    ("  " ^ running_mark ^ " " ^ Ansi.bold ^ progress_heading
-                     ^ Ansi.reset ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)
-                     ^ " · " ^ text ^ queue_hint ^ fold_suffix)
+                  if state.msg_origin_display = Message_layout.Origin_bare then
+                    box_line_styled chat_buf chat_cols
+                      ~style:(match Keeper_chat_transcript.phase live with
+                        | Stream_failed _ -> Theme.bad ()
+                        | Waiting | Working | Stream_ended -> Theme.recede ())
+                      ("  " ^ running_mark ^ " " ^ text
+                       ^ (if folded_away > 0 then
+                            " · " ^ Masc_tui_keys.expand_turn_label ^ ":details"
+                          else ""))
+                  else
+                    box_line_styled chat_buf chat_cols ~style:(Masc_tui_theme.tone Masc_tui_theme.Accent)
+                      ("  " ^ running_mark ^ " " ^ Ansi.bold ^ progress_heading
+                       ^ Ansi.reset ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                       ^ " · " ^ text ^ queue_hint ^ fold_suffix)
               (* The gate and this row describe the same held call, so the
                  note rides the row that asks -- which is this one by its
                  kind now, rather than by being first among the Attention
@@ -3562,7 +3585,7 @@ let render_keeper_message (state : state) =
                     | Keeper_chat_transcript.Approval_other _ -> Theme.warn ()
                   in
                   box_line_styled chat_buf chat_cols ~style ("  " ^ text)))
-           (Masc_tui_types.keeper_message_visible_status_rows state live ~now)
+           status_rows
      | Some _ | None -> ());
     (* Effects this Keeper is not waiting on. A deferral returns successfully
        and the Keeper carries on, so the tool row reads as a plain return and
@@ -3842,6 +3865,18 @@ let render_keeper_message (state : state) =
       | None ->
       if state.keeper_message_focus = Left_pane then
         "Up/Down:move  Enter:open  Right/Esc:chat"
+      else if state.msg_origin_display = Message_layout.Origin_bare then
+        let context_hints = match disposition, state.msg_recall_replaces with
+          | Updates _, Some _ -> ["Enter:replace"; "^U:leave queued"]
+          | Updates _, None when pending_count > 0 ->
+              ["Enter:update"; "^T:queue"; "^K:cancel"; "^P:edit"]
+          | Updates _, None -> ["Enter:update"]
+          | Sends, _ -> [] in
+        (match context_hints with
+         | [] -> Masc_tui_footer.minimal_chat_hints ~max_cells:(max 0 (chat_cols - 4))
+             ~enter_hint ~escape_hint
+         | _ :: _ -> Masc_tui_footer.minimal_context_chat_hints ~max_cells:(max 0 (chat_cols - 4))
+             ~context_hints ~escape_hint)
       else if chat_cols < 120 then
         let compact_enter_hint =
           match disposition with

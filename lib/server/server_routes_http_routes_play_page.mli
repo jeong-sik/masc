@@ -19,7 +19,10 @@
     whether a machine is loaded, who holds the DOS controller ([null] when
     free), the loaded program's saves name (the pad layout's key), and
     every keeper, operator and unexpired invite ({!Play_seat.participants}).
-    A fleet that does not list answers [503 {code: "keepers_unreadable"}]. *)
+    Seat state is read from the attached shared DOS Add-on. A missing or
+    unreadable worker answers [503 {code: "machine_unavailable"}]; a worker
+    with no loaded machine reports [machine=false]. A fleet that does not
+    list answers [503 {code: "keepers_unreadable"}]. *)
 
 val seat_path : string
 

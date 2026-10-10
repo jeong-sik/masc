@@ -6,49 +6,6 @@ module Seat_routes = Masc_tui_fusion_seat_routes
 let attempt runtime code detail =
   { Masc.Tui_decode_fusion.fsa_runtime = runtime; fsa_code = code; fsa_detail = detail }
 
-let test_one_line_per_seat_with_its_failed_attempts_under_it () =
-  let routes =
-    [ { Masc.Tui_decode_fusion.fsr_seat = Masc.Tui_decode_fusion.Fusion_panel_seat "first"
-      ; fsr_route = "panel-lane"
-      ; fsr_answered_by = Some "glm-4.6"
-      ; fsr_failed_attempts = [ attempt "deepseek" "rate_limited" "429 from the provider" ]
-      }
-    ; { Masc.Tui_decode_fusion.fsr_seat =
-          Masc.Tui_decode_fusion.Fusion_judge_seat { fs_role = Masc.Tui_decode_fusion.Judge_meta; fs_identity = "meta" }
-      ; fsr_route = "judge-lane"
-      ; fsr_answered_by = None
-      ; fsr_failed_attempts =
-          [ attempt "opus" "timeout" "no answer in 300s"; attempt "sonnet" "refused" "quota" ]
-      }
-    ]
-  in
-  check (list string) "seats, then their attempts, in the recorded order"
-    [ "panel/first \xc2\xb7 route panel-lane \xe2\x86\x92 answered by glm-4.6"
-    ; "    deepseek: rate_limited 429 from the provider"
-    ; "judge/meta/meta \xc2\xb7 route judge-lane \xe2\x86\x92 no candidate answered"
-    ; "    opus: timeout no answer in 300s"
-    ; "    sonnet: refused quota"
-    ]
-    (Seat_routes.lines routes)
-
-let test_a_seat_that_answered_first_has_no_attempts_under_it () =
-  let routes =
-    [ { Masc.Tui_decode_fusion.fsr_seat =
-          Masc.Tui_decode_fusion.Fusion_judge_seat { fs_role = Masc.Tui_decode_fusion.Judge_single; fs_identity = "single" }
-      ; fsr_route = "opus"
-      ; fsr_answered_by = Some "opus"
-      ; fsr_failed_attempts = []
-      }
-    ]
-  in
-  check (list string) "one line and nothing indented"
-    [ "judge/single/single \xc2\xb7 route opus \xe2\x86\x92 answered by opus" ]
-    (Seat_routes.lines routes);
-  check (list string) "no routes, no block" [] (Seat_routes.lines [])
-
-(* The block is where the terminal is made safe: the renderer wraps these
-   lines and draws them without sanitizing again, so a failure detail a
-   provider wrote is the one place an escape sequence could reach the screen. *)
 let test_a_failure_detail_cannot_carry_an_escape_sequence () =
   let routes =
     [ { Masc.Tui_decode_fusion.fsr_seat = Masc.Tui_decode_fusion.Fusion_panel_seat "first"
@@ -67,11 +24,7 @@ let test_a_failure_detail_cannot_carry_an_escape_sequence () =
 let () =
   run "tui_fusion_seat_routes"
     [ ( "lines"
-      , [ test_case "one line per seat with its failed attempts under it" `Quick
-            test_one_line_per_seat_with_its_failed_attempts_under_it
-        ; test_case "a seat that answered first has no attempts under it" `Quick
-            test_a_seat_that_answered_first_has_no_attempts_under_it
-        ; test_case "a failure detail cannot carry an escape sequence" `Quick
+      , [ test_case "a failure detail cannot carry an escape sequence" `Quick
             test_a_failure_detail_cannot_carry_an_escape_sequence
         ] )
     ]

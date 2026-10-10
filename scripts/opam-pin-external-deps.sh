@@ -176,7 +176,7 @@ readonly OCAML_MSX_SHA="ab17a2bcd82a3c1cee44121d65e50ccb313e6f22"
 # it fails with the new digest in its message until the two agree. A build that
 # says "Library ocaml-dos.core-identity not found" is linking an ocaml-dos older
 # than #32: re-run this script with --install, or vendor the pinned core.
-readonly OCAML_DOS_SHA="a7b1ad660b2780e6b03c15db0ffbbd68af9eaa36"
+readonly OCAML_DOS_SHA="323609dd3c4d9f4f9d678290b36e88a8b9b8f488"
 # cohttp-eio 6.2.1 carries the partial body read fix and typed response-head
 # errors. The latter lets browser-host distinguish peer EOF (retryable) from
 # malformed HTTP (answered, do not replay). Keep this pin until both changes

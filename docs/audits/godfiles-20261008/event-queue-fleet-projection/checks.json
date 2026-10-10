@@ -1,0 +1,43 @@
+{
+  "date": "2026-10-09",
+  "parent": "806af2dc0d541ce4bf8b5dc21ecba1fd8526215f",
+  "build": {
+    "command": "opam exec -- dune build --root . -j 4 test/keeper_event_queue/test_fleet_projection.exe test/test_keeper_event_queue_owner_lock.exe test/test_keeper_event_queue_health_actionable.exe",
+    "exit_code": 0,
+    "log": "build.log"
+  },
+  "tests": [
+    {
+      "command": "_build/default/test/keeper_event_queue/test_fleet_projection.exe --color=never",
+      "exit_code": 0,
+      "executed_cases": 1,
+      "log": "fleet.log"
+    },
+    {
+      "command": "_build/default/test/test_keeper_event_queue_owner_lock.exe",
+      "exit_code": 0,
+      "executed_scenarios": 4,
+      "runner": "plain sequential assert scenarios, final OK only after all four return",
+      "scenario_names": [
+        "canonical owner and cross-context isolation",
+        "cancelled waiter does not leak owner lock",
+        "exception does not poison owner or other lane",
+        "fleet summary serializes with owner commit"
+      ],
+      "log": "owner-lock.log"
+    },
+    {
+      "command": "_build/default/test/test_keeper_event_queue_health_actionable.exe --color=never",
+      "exit_code": 0,
+      "executed_cases": 13,
+      "log": "health.log"
+    }
+  ],
+  "executed_scope": "14 Alcotest cases plus four existing plain assertion scenarios; no skipped cases counted",
+  "executable_sha256": {
+    "_build/default/test/keeper_event_queue/test_fleet_projection.exe": "e32cc23f580950d4a61735a98b46380618e49fd44f48cfe81c64cc8d660088cf",
+    "_build/default/test/test_keeper_event_queue_owner_lock.exe": "03c2d4ed9a0b626d42d80dc58f631f76c63d17d1b07f27784e25a2c9408be078",
+    "_build/default/test/test_keeper_event_queue_health_actionable.exe": "85c94c67dd8716dc3d36d1765f945e781a54122ef1c731c307ad0349bebe0089"
+  },
+  "scope": "Focused macOS compilation, actual isolated queue storage and adjacent fixture-based health projection; no provider/live Keeper/browser/CI/installation/deployment or whole-stack proof."
+}

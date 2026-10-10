@@ -112,6 +112,10 @@ let run base_path prompt_root =
    | Workspace.FileSystem _ -> ()
    | Workspace.Memory _ -> failwith "probe requires a FileSystem workspace backend");
   ignore (Workspace.init config ~agent_name:(Some "board-probe-operator") : string);
+  (* The call ledger is initialized by the server bootstrap, which this probe
+     does not run; a production turn does not start without it
+     (activate_repetition_boundary). *)
+  Keeper_tool_call_log.init ~base_path ();
   require (String.equal (Unix.realpath config.base_path) base_path) "Workspace escaped probe base";
   save (Filename.concat base_path "filesystem-proof.txt") "isolated FileSystem\n";
   require (Eio.Path.load Eio.Path.(env#fs / base_path / "filesystem-proof.txt")

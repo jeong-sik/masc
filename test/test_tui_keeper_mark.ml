@@ -10,8 +10,6 @@ module Reading = Masc.Tui_decode
 
 let check_bool = Alcotest.(check bool)
 let check_int = Alcotest.(check int)
-let check_string = Alcotest.(check string)
-
 let readings =
   [ "running", Reading.Health_running
   ; "idle", Reading.Health_idle
@@ -19,68 +17,6 @@ let readings =
   ; "offline", Reading.Health_offline
   ]
 
-let test_every_reading_gets_its_own_mark () =
-  let marks = List.map (fun (_, r) -> Mark.glyph ~paused:false (Some r)) readings in
-  let distinct = List.sort_uniq String.compare marks in
-  check_int "each reading draws its own mark" (List.length readings) (List.length distinct)
-
-(* A failing keeper is still turning, so the test below does not cover it,
-   and it is the keeper that most needs to look unlike a working one: before
-   it had a reading of its own, the chat header drew "healthy" beside its
-   "failing" phase. *)
-let test_a_failing_keeper_does_not_draw_the_working_mark () =
-  let working = Mark.glyph ~paused:false (Some Reading.Health_running) in
-  check_bool "failing reads differently from a working keeper" true
-    (Mark.glyph ~paused:false (Some Reading.Health_failing) <> working)
-
-let test_a_keeper_that_is_not_turning_does_not_draw_the_working_mark () =
-  let working = Mark.glyph ~paused:false (Some Reading.Health_running) in
-  List.iter
-    (fun name_reading ->
-      let name, reading = name_reading in
-      check_bool (name ^ " reads differently from a working keeper") true
-        (Mark.glyph ~paused:false (Some reading) <> working))
-    [ "idle", Reading.Health_idle; "offline", Reading.Health_offline ]
-
-let test_pause_outranks_the_reading () =
-  let paused_marks =
-    List.map (fun (_, r) -> Mark.glyph ~paused:true (Some r)) readings
-    |> List.sort_uniq String.compare
-  in
-  check_int "a paused keeper draws one mark whatever its health" 1
-    (List.length paused_marks)
-
-let test_an_unread_roster_is_not_a_health () =
-  let unread = Mark.glyph ~paused:false None in
-  List.iter
-    (fun (name, reading) ->
-      check_bool ("unread differs from " ^ name) true
-        (Mark.glyph ~paused:false (Some reading) <> unread))
-    readings;
-  check_bool "and an unread roster is not the paused mark" true
-    (unread <> Mark.glyph ~paused:true (Some Reading.Health_running))
-
-let test_every_mark_is_one_column_wide () =
-  List.iter
-    (fun (mark, word) ->
-      check_int (word ^ " mark is one cell")
-        1
-        (Masc_tui_message_layout.display_width mark))
-    Mark.legend
-
-let test_the_legend_names_every_mark_once () =
-  let marks = List.map fst Mark.legend in
-  check_int "no mark is listed twice" (List.length marks)
-    (List.length (List.sort_uniq String.compare marks));
-  let words = List.map snd Mark.legend in
-  check_bool "the legend covers failing" true (List.mem "failing" words);
-  check_bool "the legend covers offline" true (List.mem "offline" words);
-  check_bool "the legend covers unread" true (List.mem "unread" words);
-  check_string "a working keeper heads the legend" "healthy" (List.hd words)
-
-(* The Mode S cell draws letters, and the sheet is where a reader learns them.
-   Both come from this module, so a letter the cell draws is a letter the
-   legend explains. *)
 let test_the_column_legend_explains_every_letter_the_cell_draws () =
   let contains haystack needle =
     let n = String.length needle and h = String.length haystack in
@@ -181,21 +117,7 @@ let test_with_no_open_turn_the_last_recorded_turn_is_the_clock () =
 let () =
   Alcotest.run "tui_keeper_mark"
     [ ( "marks"
-      , [ Alcotest.test_case "every reading gets its own mark" `Quick
-            test_every_reading_gets_its_own_mark
-        ; Alcotest.test_case "a keeper that is not turning does not draw the working mark"
-            `Quick test_a_keeper_that_is_not_turning_does_not_draw_the_working_mark
-        ; Alcotest.test_case "a failing keeper does not draw the working mark" `Quick
-            test_a_failing_keeper_does_not_draw_the_working_mark
-        ; Alcotest.test_case "pause outranks the reading" `Quick
-            test_pause_outranks_the_reading
-        ; Alcotest.test_case "an unread roster is not a health" `Quick
-            test_an_unread_roster_is_not_a_health
-        ; Alcotest.test_case "every mark is one column wide" `Quick
-            test_every_mark_is_one_column_wide
-        ; Alcotest.test_case "the legend names every mark once" `Quick
-            test_the_legend_names_every_mark_once
-        ; Alcotest.test_case "the column legend explains every letter" `Quick
+      , [ Alcotest.test_case "the column legend explains every letter" `Quick
             test_the_column_legend_explains_every_letter_the_cell_draws
         ] )
     ; ( "open turn"

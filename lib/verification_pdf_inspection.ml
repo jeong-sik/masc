@@ -107,9 +107,32 @@ let max_page_pixels = 2048
 let max_pages = 64
 let max_total_image_bytes = 24 * 1024 * 1024
 
-let inspect_with_budget ~poppler_budget_sec ?(max_pages = max_pages) ?(max_total_image_bytes = max_total_image_bytes)
-      ?(max_extracted_bytes = max_extracted_bytes)
-      ~base_path ~max_image_bytes ~bytes () =
+(* One Poppler call under a shared wall clock. Shared by [inspect] and
+   [extract_text]; [budget_sec] is only what the budget error reports. *)
+let make_runner ~deadline ~budget_sec ~root ~diagnostics =
+  fun program arguments ->
+    let remaining = Monotonic_deadline.remaining_seconds deadline in
+    if remaining <= 0.0 then
+      Error (Poppler_budget_spent {program;budget_sec})
+    else
+    let status, _stdout, stderr = Process_eio.run_argv_with_status_split
+        ~timeout_sec:remaining
+        ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
+        ~cwd:root (program :: arguments) in
+    let detail = String.trim stderr in
+    match Process_eio.exit_reason_of_status status with
+    | Process_eio.Completed 0 ->
+      if detail <> "" then diagnostics := (program ^ ": " ^ detail) :: !diagnostics;
+      Ok ()
+    | Process_eio.Timed_out ->
+      Error (Poppler_budget_spent {program;budget_sec})
+    | Process_eio.Completed _ | Process_eio.Signaled _ | Process_eio.Stopped _ ->
+      Error (Command_failed {program;status;detail})
+
+(* The owned private directory holding one immutable copy of the PDF. It is
+   removed when the switch releases, whether [f] answers, fails or is
+   cancelled. *)
+let with_source ~base_path ~bytes f =
   let* () = if String.length bytes > max_source_bytes then
     Error (Payload_budget_exceeded { bytes = String.length bytes; limit = max_source_bytes })
     else Ok () in
@@ -126,72 +149,78 @@ let inspect_with_budget ~poppler_budget_sec ?(max_pages = max_pages) ?(max_total
       let source = Filename.concat root "source.pdf" in
       Auth.save_private_text_file source bytes;
       Unix.chmod source 0o400;
-      let diagnostics = ref [] in
-      (* One budget for the whole inspection, not one per call. A corrupt or
-         adversarial document can hang either Poppler tool, and the page count
-         comes from the document, so a per-call budget multiplied by the pages
-         would bound nothing. A completion review holds one of the four global
-         review slots while this runs, so an unbounded child starves the other
-         three. *)
-      let deadline = Monotonic_deadline.after ~seconds:poppler_budget_sec in
-      let run program arguments =
-        let remaining = Monotonic_deadline.remaining_seconds deadline in
-        if remaining <= 0.0 then
-          Error (Poppler_budget_spent {program;budget_sec=poppler_budget_sec})
-        else
-        let status, _stdout, stderr = Process_eio.run_argv_with_status_split
-            ~timeout_sec:remaining
-            ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
-            ~cwd:root (program :: arguments) in
-        let detail = String.trim stderr in
-        match Process_eio.exit_reason_of_status status with
-        | Process_eio.Completed 0 ->
-          if detail <> "" then diagnostics := (program ^ ": " ^ detail) :: !diagnostics;
-          Ok ()
-        | Process_eio.Timed_out ->
-          Error (Poppler_budget_spent {program;budget_sec=poppler_budget_sec})
-        | Process_eio.Completed _ | Process_eio.Signaled _ | Process_eio.Stopped _ ->
-          Error (Command_failed {program;status;detail}) in
-      let xml_path = Filename.concat root "pages.xhtml" in
-      let* () = run "pdftotext" ["-bbox-layout";"-enc";"UTF-8";source;xml_path] in
-      let* xml = read_bounded_owned root xml_path ~max_bytes:max_extracted_bytes in
-      let* descriptions = parsed_pages xml in
-      let page_count = List.length descriptions in
-      let* () =
-        if page_count > max_pages
-        then Error (Too_many_pages {pages=page_count;limit=max_pages})
-        else Ok () in
-      let rec render number total acc = function
-        | [] -> Ok (List.rev acc)
-        | (width_points,height_points,text) :: rest ->
-          let prefix = Filename.concat root (Printf.sprintf "page-%d" number) in
-          (* Explicit single-page output gives the page its declared index,
-             avoiding filename/count guesses and preserving all PDF pages. *)
-          let* () = run "pdftoppm"
-            ["-png";"-scale-to";string_of_int max_page_pixels;"-singlefile";"-f";string_of_int number;"-l";string_of_int number;source;prefix] in
-          let* png = read_owned root (prefix ^ ".png") in
-          let size = String.length png in
-          let* () = if size > max_image_bytes then
-              Error (Image_policy_rejected {page=number;bytes=size;limit=max_image_bytes})
-            else match Keeper_vision_tool.sniff_image_media_type png with
-              | Ok "image/png" -> Ok ()
-              | Ok _ | Error _ -> Error (Invalid_output "Poppler page rendering is not a PNG") in
-          let total = total + size in
-          let* () =
-            if total > max_total_image_bytes
-            then Error (Rendered_bytes_exceeded
-                          {pages=page_count;bytes=total;limit=max_total_image_bytes})
-            else Ok () in
-          render (number + 1) total ({number;width_points;height_points;text;png} :: acc) rest in
-      let* pages = render 1 0 [] descriptions in
-      let* retained = read_owned root source in
-      if not (String.equal retained bytes) then Error (Invalid_output "captured PDF changed during inspection")
-      else Ok {source_bytes=String.length bytes;source_sha256=Digestif.SHA256.(digest_string bytes |> to_hex);
-               pages;diagnostics=List.rev !diagnostics}
+      f ~root ~source
     with
     | Sys_error detail -> Error (Storage_failed detail)
     | Unix.Unix_error (code,operation,_) ->
       Error (Storage_failed (operation ^ ": " ^ Unix.error_message code))
+
+let inspect_with_budget ~poppler_budget_sec ?(max_pages = max_pages) ?(max_total_image_bytes = max_total_image_bytes)
+      ?(max_extracted_bytes = max_extracted_bytes)
+      ~base_path ~max_image_bytes ~bytes () =
+  with_source ~base_path ~bytes @@ fun ~root ~source ->
+  let diagnostics = ref [] in
+  (* One budget for the whole inspection, not one per call. A corrupt or
+     adversarial document can hang either Poppler tool, and the page count
+     comes from the document, so a per-call budget multiplied by the pages
+     would bound nothing. A completion review holds one of the four global
+     review slots while this runs, so an unbounded child starves the other
+     three. *)
+  let deadline = Monotonic_deadline.after ~seconds:poppler_budget_sec in
+  let run = make_runner ~deadline ~budget_sec:poppler_budget_sec ~root ~diagnostics in
+  let xml_path = Filename.concat root "pages.xhtml" in
+  let* () = run "pdftotext" ["-bbox-layout";"-enc";"UTF-8";source;xml_path] in
+  let* xml = read_bounded_owned root xml_path ~max_bytes:max_extracted_bytes in
+  let* descriptions = parsed_pages xml in
+  let page_count = List.length descriptions in
+  let* () =
+    if page_count > max_pages
+    then Error (Too_many_pages {pages=page_count;limit=max_pages})
+    else Ok () in
+  let rec render number total acc = function
+    | [] -> Ok (List.rev acc)
+    | (width_points,height_points,text) :: rest ->
+      let prefix = Filename.concat root (Printf.sprintf "page-%d" number) in
+      (* Explicit single-page output gives the page its declared index,
+         avoiding filename/count guesses and preserving all PDF pages. *)
+      let* () = run "pdftoppm"
+        ["-png";"-scale-to";string_of_int max_page_pixels;"-singlefile";"-f";string_of_int number;"-l";string_of_int number;source;prefix] in
+      let* png = read_owned root (prefix ^ ".png") in
+      let size = String.length png in
+      let* () = if size > max_image_bytes then
+          Error (Image_policy_rejected {page=number;bytes=size;limit=max_image_bytes})
+        else match Keeper_vision_tool.sniff_image_media_type png with
+          | Ok "image/png" -> Ok ()
+          | Ok _ | Error _ -> Error (Invalid_output "Poppler page rendering is not a PNG") in
+      let total = total + size in
+      let* () =
+        if total > max_total_image_bytes
+        then Error (Rendered_bytes_exceeded
+                      {pages=page_count;bytes=total;limit=max_total_image_bytes})
+        else Ok () in
+      render (number + 1) total ({number;width_points;height_points;text;png} :: acc) rest in
+  let* pages = render 1 0 [] descriptions in
+  let* retained = read_owned root source in
+  if not (String.equal retained bytes) then Error (Invalid_output "captured PDF changed during inspection")
+  else Ok {source_bytes=String.length bytes;source_sha256=Digestif.SHA256.(digest_string bytes |> to_hex);
+           pages;diagnostics=List.rev !diagnostics}
+
+(* The text half of [inspect] with no rendering, no image policy and no review
+   slot. The caller owns the deadline: one deadline serves every Poppler call
+   of this extraction, and nothing here starts a new clock. *)
+let extract_text ?(max_pages = max_pages) ?(max_extracted_bytes = max_extracted_bytes)
+    ~deadline ~budget_sec ~base_path ~bytes () =
+  with_source ~base_path ~bytes @@ fun ~root ~source ->
+  let diagnostics = ref [] in
+  let run = make_runner ~deadline ~budget_sec ~root ~diagnostics in
+  let xml_path = Filename.concat root "pages.xhtml" in
+  let* () = run "pdftotext" ["-bbox-layout";"-enc";"UTF-8";source;xml_path] in
+  let* xml = read_bounded_owned root xml_path ~max_bytes:max_extracted_bytes in
+  let* descriptions = parsed_pages xml in
+  let page_count = List.length descriptions in
+  if page_count > max_pages
+  then Error (Too_many_pages {pages=page_count;limit=max_pages})
+  else Ok (List.map (fun (_, _, text) -> text) descriptions)
 
 let inspect ?max_pages ?max_total_image_bytes ?max_extracted_bytes
     ~base_path ~max_image_bytes ~bytes () =

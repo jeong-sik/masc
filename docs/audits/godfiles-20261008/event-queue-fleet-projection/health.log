@@ -1,0 +1,20 @@
+[2026-10-09 05:27:54] [INFO] [MCP] Tag registry initialized: 195 tools registered
+Testing `Keeper event queue health actionability'.
+This run has ID `QDEW1EFJ'.
+
+  [OK]          schema                              0   unavailable health.
+  [OK]          operator_intended                   0   paused_dead.
+  [OK]          operator_intended                   1   retained_disabled.
+  [OK]          operator_intended                   2   stays visible.
+  [OK]          operator_intended                   3   status stays ok.
+  [OK]          both verdict fields                 0   per backlog kind.
+  [OK]          actionable                          0   recoverable.
+  [OK]          actionable                          1   shutdown_fenced.
+  [OK]          actionable                          2   unclassified.
+  [OK]          actionable                          3   mixed.
+  [OK]          reasons behind the verdict          0   exclude the operator'...
+  [OK]          reasons behind the verdict          1   empty when nothing ne...
+  [OK]          reasons behind the verdict          2   a storage read error ...
+
+Full test results in `~/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/_build/_tests/Keeper event queue health actionability'.
+Test Successful in 0.002s. 13 tests run.

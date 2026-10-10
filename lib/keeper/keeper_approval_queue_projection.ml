@@ -1,5 +1,6 @@
 (** Approval audit and presentation effects, separate from queue persistence. *)
 open Keeper_approval_queue_rules_types
+open Keeper_approval_queue_result
 
 let approval_sse_pending_event = "approval:pending"
 let approval_sse_resolved_event = "approval:resolved"
@@ -244,4 +245,163 @@ let resolve_entry
        ~event_type:(Keeper_approval.Audit.event_to_string Keeper_approval.Audit.Resolved)
        exn);
   audit_receipt
+;;
+
+(* Every phase row after the request copies the request row's line. The
+   producer stated it once, on the Gate request, and only [record_pending] had
+   it in hand; a resolution, replay, or continuation writer has the approval id
+   and nothing of the producer, so it reads the stored statement back rather
+   than deriving one from the input. [None] when the request row is absent or
+   carried none. *)
+let requested_call_summary ~base_path ~keeper_name ~approval_id =
+  Keeper_chat_store.approval_request_call_summary
+    ~base_dir:base_path
+    ~keeper_name
+    ~approval_id
+;;
+
+let ensure_resolution_chat_projection
+      ~base_path
+      ~keeper_name
+      ~approval_id
+      ~tool_name
+      ~decision
+  =
+  let phase =
+    match decision with
+    | Decision.Approve -> Keeper_approval_lifecycle.Approval_resolved_approved
+    | Decision.Reject _ -> Keeper_approval_lifecycle.Approval_resolved_rejected
+  in
+  append_chat_projection
+    ~base_path
+    ~keeper_name
+    { Keeper_chat_store.approval_id
+    ; tool_name
+    ; phase
+    ; artifact_ref = None
+    ; call_summary = requested_call_summary ~base_path ~keeper_name ~approval_id
+    }
+;;
+
+let ensure_replay_chat_projection
+      ~base_path
+      ~keeper_name
+      ~approval_id
+      ~tool_name
+      ~outcome
+  =
+  let call_summary = requested_call_summary ~base_path ~keeper_name ~approval_id in
+  let phase, artifact_ref =
+    match outcome with
+    | Replay_applied artifact_ref ->
+      Keeper_approval_lifecycle.Approval_replay_applied, artifact_ref
+    | Replay_applied_with_warning artifact_ref ->
+      Keeper_approval_lifecycle.Approval_replay_applied_with_warning, artifact_ref
+    | Replay_failed artifact_ref ->
+      Keeper_approval_lifecycle.Approval_replay_failed, artifact_ref
+    | Replay_indeterminate artifact_ref ->
+      Keeper_approval_lifecycle.Approval_replay_indeterminate, artifact_ref
+  in
+  Keeper_chat_store.reconcile_approval_replay_lifecycle_once
+    ~base_dir:base_path
+    ~keeper_name
+    ~lifecycle:
+      { Keeper_chat_store.approval_id
+      ; tool_name
+      ; phase
+      ; artifact_ref = Some artifact_ref
+      ; call_summary
+      }
+  |> publish_chat_projection_append ~keeper_name
+;;
+
+let continuation_settled_chat_projection_present
+      ~base_path
+      ~keeper_name
+      ~approval_id
+  =
+  Keeper_chat_store.approval_continuation_settled
+    ~base_dir:base_path
+    ~keeper_name
+    ~approval_id
+;;
+
+type continuation_projection_append =
+  | Continuation_appended of Keeper_chat_store.append_once_result
+  | Continuation_not_ready
+
+let project_settled_continuation
+      ~base_path
+      ~keeper_name
+      ~approval_id
+      ~readiness
+      ~phase
+  =
+  match readiness with
+  | Continuation_waiting_for_replay -> Ok Continuation_not_ready
+  | Continuation_ready tool_name ->
+    Result.map
+      (fun result -> Continuation_appended result)
+      (Keeper_chat_store.append_approval_lifecycle_once
+         ~base_dir:base_path
+         ~keeper_name
+         ~lifecycle:
+           { Keeper_chat_store.approval_id
+           ; tool_name
+           ; phase
+           ; artifact_ref = None
+           ; call_summary =
+               requested_call_summary ~base_path ~keeper_name ~approval_id
+           })
+;;
+
+let publish_settled_continuation ~keeper_name = function
+  | Error _ as error -> error
+  | Ok Continuation_not_ready -> Ok Continuation_projection_not_ready
+  | Ok (Continuation_appended result) ->
+    Result.map
+      (fun () -> Continuation_projection_recorded)
+      (publish_chat_projection_append ~keeper_name (Ok result))
+;;
+
+let record_settled_continuation ~base_path ~keeper_name ~approval_id ~readiness =
+  project_settled_continuation
+    ~base_path ~keeper_name ~approval_id ~readiness
+    ~phase:Keeper_approval_lifecycle.Approval_continuation_recorded
+  |> publish_settled_continuation ~keeper_name
+;;
+
+(* #32956: the turn that received the replay failed after the provider
+   answered, so the model has already seen the evidence. The receipt settles
+   the continuation slot as failed; the intake then retires the queued wake
+   instead of carrying the same evidence into every later cycle. The WARN is
+   written once, when the row is appended, and names the route, so a fleet
+   grep counts failed continuations by route rather than calls. *)
+let record_failed_continuation
+      ~base_path
+      ~keeper_name
+      ~approval_id
+      ~readiness
+      ~(route : Keeper_runtime_failure_route.route)
+  =
+  let projected =
+    project_settled_continuation
+      ~base_path
+      ~keeper_name
+      ~approval_id
+      ~readiness
+      ~phase:Keeper_approval_lifecycle.Approval_continuation_failed
+  in
+  (match projected with
+   | Ok (Continuation_appended (Keeper_chat_store.Appended _)) ->
+     Log.Keeper.warn
+       "HITL_APPROVAL_CONTINUATION_FAILED: id=%s keeper=%s route=%s class=%s"
+       approval_id
+       keeper_name
+       (Keeper_runtime_failure_route.route_kind_label route)
+       (Keeper_runtime_failure_route.route_class_label route)
+   | Ok (Continuation_appended (Keeper_chat_store.Already_present _))
+   | Ok Continuation_not_ready
+   | Error _ -> ());
+  publish_settled_continuation ~keeper_name projected
 ;;

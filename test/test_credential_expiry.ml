@@ -142,36 +142,17 @@ let test_malformed_expiry_denies_a_known_bearer_and_bootstrap () =
       (List.length (Inventory.expired ~now:(Time_compat.now ()) [ invalid ])))
     invalid_expiries
 
-let test_malformed_expiry_keeps_the_controller () =
+let test_malformed_expiry_does_not_authorize_release () =
   List.iter (fun stamp ->
-  with_workspace @@ fun base_path _ ->
-  let _, credential = auth_ok (Auth.create_token_without_expiry base_path
-      ~agent_name:"operator" ~role:Masc_domain.Admin) in
-  let dos_ok = function
-    | Ok value -> value
-    | Error error -> fail (Dos_lane.error_to_string error) in
-  Fun.protect
-    (* See fixture cleanup: eject best effort after assertions, with no shared announcements. *)
-    ~finally:(fun () ->
-      Dos_lane.install_activity_observer None;
-      ignore (Dos_lane.eject ~who:"operator" ~announce:ignore ()))
-    (fun () ->
-      Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
-      (* Loading establishes the holder; its observation is unused. *)
-      ignore (dos_ok (Dos_lane.load ~who:"operator"
-        ~ledger_dir:(Filename.concat base_path "ledger") ~saves_dir:(Filename.concat base_path "saves")
-        ~checkpoint_dir:(Filename.concat base_path "checkpoints") ~program_name:"spin.com"
-        ~program_bytes:"\xeb\xfe" ~files:[] ~announce:ignore));
-      Auth.save_credential base_path { credential with expires_at = Some stamp };
-      auth_ok (Masc.Keeper_dos_controller.before_move
-        ~config:(Masc.Workspace.default_config base_path) ~who:"visitor");
-      check (option string) "invalid expiry is not proof that the holder left" (Some "operator")
-        (dos_ok (Dos_lane.screen ())).controller;
-      match Dos_lane.step ~who:"visitor" ~steps:1 ~until_ready:false with
-      | Error (Dos_lane.Held_by _) -> ()
-      | Error error -> fail (Dos_lane.error_to_string error)
-      | Ok _ -> fail "an unknown expiry cannot free the controller for another caller"))
-    invalid_expiries
+    with_workspace (fun base_path _ ->
+      let _, credential = auth_ok (Auth.create_token_without_expiry base_path
+        ~agent_name:"operator" ~role:Masc_domain.Admin) in
+      Auth.save_credential base_path {credential with expires_at=Some stamp};
+      let departure = auth_ok (Auth.with_credential_transaction base_path (fun transaction ->
+        Masc.Keeper_machine_controller_authority.holder_left ~transaction
+          ~config:(Masc.Workspace.default_config base_path) ~now:(Time_compat.now ()) "operator")) in
+      check bool "invalid expiry cannot authorize releasing the worker controller" true
+        (Option.is_none departure))) invalid_expiries
 
 let test_persisted_invalid_invite_reaches_diagnostic_projections () =
   List.iter (fun use_uuid ->
@@ -351,5 +332,5 @@ let () =
           test_representations_share_auth_and_prune_boundary
       ; test_case "malformed expiry denies a known bearer and live OAuth bootstrap" `Quick
           test_malformed_expiry_denies_a_known_bearer_and_bootstrap
-      ; test_case "malformed expiry preserves the controller" `Quick
-          test_malformed_expiry_keeps_the_controller ] ]
+      ; test_case "malformed expiry cannot authorize controller release" `Quick
+          test_malformed_expiry_does_not_authorize_release ] ]

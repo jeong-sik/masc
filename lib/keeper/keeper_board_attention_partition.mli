@@ -189,6 +189,14 @@ val ensure_roots :
     while unavailable detail is not fabricated. Existing live membership must
     remain one-to-one. *)
 
+(** Restore only candidates still present with exactly the observed value.
+    The durable candidate read and root append share the partition mutation
+    lock, so candidate-then-partition purge cannot be undone by an earlier
+    recovery request's snapshot. *)
+val ensure_current_roots :
+  base_path:string -> keeper_name:string -> Candidate.candidate list ->
+  (int, string) result
+
 val recover_for_process_start :
   now:float -> base_path:string -> keeper_name:string -> (int, string) result
 (** Canonically compact the append ledger. Every [Running] root returns to
@@ -198,6 +206,16 @@ val recover_for_process_start :
     else. The return value is the number of Running roots released.
     Old schema rows and non-tail malformed JSON are rejected without migration.
     A torn final append is truncated under the ledger lock. *)
+
+val prune_settled_receipts :
+  base_path:string -> keeper_name:string -> (int, string) result
+(** Drop the [Settled] receipts whose candidate is [Consumed] or gone from
+    the candidate ledger, with the same gate as [recover_for_process_start]:
+    an unreadable candidate ledger, or one holding rows the decoder refused,
+    keeps every receipt. Other states are kept as they are; [Running] roots
+    are not released. Returns the number of receipts dropped. The rewrite is
+    fenced on the ledger cursor, so a concurrent append fails it and the next
+    drain retries. *)
 
 val claim_ready_exact :
   now:float ->
@@ -325,6 +343,10 @@ val abandon :
     [Abandoned] is returned unchanged. *)
 
 val ledger_path : base_path:string -> keeper_name:string -> string
+
+(** Purge the ledger and its cached view under the existing mutation and
+    stable-file locks. Lock identities remain available to queued writers. *)
+val purge : base_path:string -> keeper_name:string -> (unit, string) result
 (** The Keeper's partition ledger file. A Keeper purge removes it with the
     Keeper, so a later Keeper of the same name starts without its roots. *)
 

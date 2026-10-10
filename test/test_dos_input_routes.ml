@@ -23,6 +23,37 @@ let with_dir prefix f =
   let dir = Filename.temp_dir prefix "" in
   Fun.protect ~finally:(fun () -> remove_tree dir) (fun () -> f dir)
 
+(* Only process/container creation is replaced; HTTP effects use the attached
+   worker's SDK transport and host controller admission. *)
+let with_worker ~base_path f =
+  Eio_main.run (fun env ->
+    let previous_runtime = Runtime.For_testing.snapshot () in
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    Fun.protect ~finally:(fun () ->
+      Runtime.For_testing.restore previous_runtime;
+      Server_auth.clear_server_state ();
+      Fs_compat.clear_fs ()) (fun () ->
+      Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 30. (fun () ->
+        Eio.Switch.run (fun sw ->
+          Eio_context.with_test_env ~sw ~net:(Eio.Stdenv.net env)
+            ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
+            let runtime_path = Filename.concat base_path "runtime.toml" in
+            Out_channel.with_open_bin runtime_path (fun channel -> output_string channel {|[providers.local]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+[models.sample]
+api-name = "sample"
+max-context = 1024
+[local.sample]
+[runtime]
+default = "local.sample"
+|});
+            (match Runtime.init_default ~config_path:runtime_path with
+             | Ok () -> () | Error detail -> fail detail);
+            Masc.Lane_addon_runtime.For_testing.reset ();
+            Machine_worker_fixture.with_dos ~clock:(Eio.Stdenv.clock env) ~sw ~base_path
+              (fun ~invoke:_ ~detach -> f ~detach))))))
+
 let loopback_request_authority () =
   match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
   | Ok authority -> authority
@@ -140,8 +171,7 @@ let test_a_person_plays_in_turn () =
     let operator = token_for base_path ~agent_name:"operator" ~role:Masc_domain.Admin in
     let player = token_for base_path ~agent_name:"minsu" ~role:Masc_domain.Player in
     let state = Masc.Mcp_server.For_testing.create_state ~base_path in
-    Eio_main.run (fun env ->
-      Masc_test_deps.init_eio_clock env;
+    with_worker ~base_path (fun ~detach ->
       let post ?token target body = dispatch ~state ~target ~token ~body in
       let dir = Filename.temp_dir "dos-input-machine-" "" in
       Fun.protect
@@ -198,7 +228,12 @@ let test_a_person_plays_in_turn () =
             (status_of (post ~token:operator "/api/v1/dos/press" {|{"keys":["x"]}|}));
           check int "the invite passes back" 200
             (status_of (post ~token:player "/api/v1/dos/pass" {|{"to":"operator"}|}));
-          check (option string) "the operator holds it again" (Some "operator") (controller ()))))
+          check (option string) "the operator holds it again" (Some "operator") (controller ());
+          let before_detach = change_count () in
+          detach ();
+          check int "detached worker input is unavailable" 503
+            (status_of (post ~token:operator "/api/v1/dos/step" {|{"steps":1}|}));
+          check int "host does not fall back to the process-local machine" before_detach (change_count ()))))
 
 let test_expired_credential_releases_controller_on_next_move role () =
   with_dir "dos-expired-credential-" (fun base_path ->
@@ -211,8 +246,7 @@ let test_expired_credential_releases_controller_on_next_move role () =
       | Error error -> fail (Masc_domain.masc_error_to_string error)
     in
     let state = Masc.Mcp_server.For_testing.create_state ~base_path in
-    Eio_main.run (fun env ->
-      Masc_test_deps.init_eio_clock env;
+    with_worker ~base_path (fun ~detach ->
       let post ~token target body = dispatch ~state ~target ~token:(Some token) ~body in
       let dir = Filename.temp_dir "dos-expired-machine-" "" in
       Fun.protect
@@ -257,7 +291,7 @@ let test_expired_credential_releases_controller_on_next_move role () =
           in
           let holder_left ~now =
             match Auth.with_credential_transaction base_path (fun transaction ->
-              Masc.Keeper_dos_controller.holder_left ~transaction
+              Masc.Keeper_machine_controller_authority.holder_left ~transaction
                 ~config:(Masc.Mcp_server.workspace_config state) ~now "minsu") with
             | Ok departure -> departure
             | Error error -> fail (Masc_domain.masc_error_to_string error)
@@ -266,8 +300,8 @@ let test_expired_credential_releases_controller_on_next_move role () =
             (Option.is_none (holder_left ~now:(expiry_second +. 0.5)));
           check bool "the holder has left once that second ends" true
             (match holder_left ~now:(expiry_second +. 1.) with
-             | Some Masc.Tool_misc_dos_lane.Credential_expired -> true
-             | Some (Masc.Tool_misc_dos_lane.Keeper_stopped | Masc.Tool_misc_dos_lane.No_credential)
+             | Some Machine_controller_contract.Credential_expired -> true
+             | Some (Machine_controller_contract.Keeper_stopped | Machine_controller_contract.No_credential)
              | None -> false);
           Auth.save_credential base_path
             { credential with expires_at = Some "2000-01-01T00:00:00Z" };
@@ -287,7 +321,8 @@ let test_expired_credential_releases_controller_on_next_move role () =
                (fun entry ->
                  String.equal entry.Machine_action_feed.who "minsu"
                  && String.equal entry.Machine_action_feed.action "released (idle)")
-               (Dos_lane.recent_activity ())))))
+               (Dos_lane.recent_activity ()));
+          detach ())))
 
 let () =
   run "dos-input-routes"

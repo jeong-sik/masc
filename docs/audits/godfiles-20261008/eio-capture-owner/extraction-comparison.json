@@ -1,0 +1,70 @@
+{
+  "parent": "459cb14f448bb462f5fa8d807d71b78d42d803a9",
+  "scope": "bounded source extraction comparison; not a behavior test or independent review",
+  "functions": [
+    {
+      "function": "close_flow_best_effort",
+      "equal_after_comment_whitespace_normalization": true,
+      "parent_normalized_sha256": "b7ba7e38f0032d9f4df0a5b74873def28966e3edbcbdd659b4af1ec45a457df2",
+      "current_normalized_sha256": "b7ba7e38f0032d9f4df0a5b74873def28966e3edbcbdd659b4af1ec45a457df2"
+    },
+    {
+      "function": "is_downstream_pipe_closed",
+      "equal_after_comment_whitespace_normalization": true,
+      "parent_normalized_sha256": "62ee8d31befd793cb2c0afe79a384ce4d84d54935dcb15cc6d85aff3750d610d",
+      "current_normalized_sha256": "62ee8d31befd793cb2c0afe79a384ce4d84d54935dcb15cc6d85aff3750d610d"
+    },
+    {
+      "function": "reap_proc_with_clock",
+      "equal_after_comment_whitespace_normalization": true,
+      "parent_normalized_sha256": "c2a5a0721f6d2c213b605769517d11578c316b1086eb83f67eaf2fca0489f055",
+      "current_normalized_sha256": "c2a5a0721f6d2c213b605769517d11578c316b1086eb83f67eaf2fca0489f055"
+    },
+    {
+      "function": "discard_to_eof",
+      "equal_after_comment_whitespace_normalization": true,
+      "parent_normalized_sha256": "631950bbd9393a74836f12934174b031c81e563af6db1ec5801176bd05c2417c",
+      "current_normalized_sha256": "631950bbd9393a74836f12934174b031c81e563af6db1ec5801176bd05c2417c"
+    },
+    {
+      "function": "wait_for_child_to_let_go",
+      "equal_after_comment_whitespace_normalization": true,
+      "parent_normalized_sha256": "2e78d9c3d9e4d8ce8a1feebb1ee8c6ae51a846579cd0d79729179fef4de2844a",
+      "current_normalized_sha256": "2e78d9c3d9e4d8ce8a1feebb1ee8c6ae51a846579cd0d79729179fef4de2844a"
+    },
+    {
+      "function": "finalize_spawned_proc",
+      "equal_after_comment_whitespace_normalization": true,
+      "parent_normalized_sha256": "76fb629e584cdee695c2df82278f1fb0bb32029ef7662862c7a8fa8092a9e8e1",
+      "current_normalized_sha256": "76fb629e584cdee695c2df82278f1fb0bb32029ef7662862c7a8fa8092a9e8e1"
+    },
+    {
+      "function": "invoke_output_chunk_callback",
+      "equal_after_comment_whitespace_normalization": true,
+      "parent_normalized_sha256": "e2ec39af65f102d0c39cf4ec1879ba22e6acdc612147e320c05f59952681d49b",
+      "current_normalized_sha256": "e2ec39af65f102d0c39cf4ec1879ba22e6acdc612147e320c05f59952681d49b"
+    },
+    {
+      "function": "drain_into",
+      "equal_after_comment_whitespace_normalization": true,
+      "parent_normalized_sha256": "5548798792a7e61c9eeea5ee67c7a1a26c51b8ccb94d726de66618523cc6160b",
+      "current_normalized_sha256": "5548798792a7e61c9eeea5ee67c7a1a26c51b8ccb94d726de66618523cc6160b"
+    },
+    {
+      "function": "spawn_and_drain_stdout",
+      "equal_after_comment_whitespace_normalization": true,
+      "parent_normalized_sha256": "e2c13bc86b533fc2e26996317e45d24128c211c58de6815957c08546bb323f1a",
+      "current_normalized_sha256": "e2c13bc86b533fc2e26996317e45d24128c211c58de6815957c08546bb323f1a"
+    },
+    {
+      "function": "spawn_and_drain_both",
+      "equal_after_declared_callback_generalization": true,
+      "current_normalized_sha256": "4659e4b3f5c061075140971f9761881f3798c4d6126a049b7b212ed0771cffbb"
+    },
+    {
+      "function": "spawn_and_drain_both_with_stdin_held_open",
+      "equal_after_declared_optional_callback_defaults": true,
+      "current_normalized_sha256": "6ccc0ad5b9461455467955f720bcaff918ec1c895fac5b759f903346bfdd9515"
+    }
+  ]
+}

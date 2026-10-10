@@ -2506,6 +2506,8 @@ let test_keeper_stream_bridge_terminal_text_state_is_message_scoped () =
   in
   check bool "intermediate narration is not terminal text" false
     (Keeper_chat_agent_core_stream_bridge.terminal_message_had_text no_final_text);
+  check (option int) "no terminal text has no identified scope" None
+    (Keeper_chat_agent_core_stream_bridge.terminal_text_scope no_final_text);
   let _, open_final_text =
     translate_agent_core_stream
       [ message_start "terminal-open"
@@ -2515,6 +2517,8 @@ let test_keeper_stream_bridge_terminal_text_state_is_message_scoped () =
   in
   check bool "open terminal message text is observable" true
     (Keeper_chat_agent_core_stream_bridge.terminal_message_had_text open_final_text);
+  check (option int) "the open terminal text carries its scope" (Some 0)
+    (Keeper_chat_agent_core_stream_bridge.terminal_text_scope open_final_text);
   let open_final_without_text =
     translate_scoped
       [ 0, message_start "intermediate"
@@ -2530,12 +2534,12 @@ let test_keeper_stream_bridge_terminal_text_state_is_message_scoped () =
        open_final_without_text);
   let final_text =
     translate_scoped
-      [ 0, message_start "intermediate"
+      [ 0, message_start "reused-provider-id"
       ; 0, text_start
       ; 0, ContentBlockDelta { index = 0; delta = TextDelta "working" }
       ; 0, terminal
       ; 0, MessageStop
-      ; 1, message_start "terminal"
+      ; 1, message_start "reused-provider-id"
       ; 1, text_start
       ; 1, ContentBlockDelta { index = 0; delta = TextDelta "approved" }
       ; 1, terminal
@@ -2543,7 +2547,9 @@ let test_keeper_stream_bridge_terminal_text_state_is_message_scoped () =
       ]
   in
   check bool "terminal message text suppresses terminal resend" true
-    (Keeper_chat_agent_core_stream_bridge.terminal_message_had_text final_text)
+    (Keeper_chat_agent_core_stream_bridge.terminal_message_had_text final_text);
+  check (option int) "a reused provider ID does not reuse the terminal stream scope" (Some 1)
+    (Keeper_chat_agent_core_stream_bridge.terminal_text_scope final_text)
 
 let test_keeper_stream_bridge_preserves_typed_media_source () =
   let open Agent_core.Types in

@@ -36,6 +36,10 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
   | Operator_remote
   | Seat
 
+val is_seat_tool : string -> bool
+(** Whether host-owned permission metadata grants the machine-player surface.
+    This also filters dynamically attached tool exports. *)
+
 (** {1 Profile-specific instructions}
 
     Operator-managed prompt assets served as the [instructions] field on each

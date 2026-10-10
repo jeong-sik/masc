@@ -49,17 +49,37 @@ let media_degrade_manifest_decision ~(runtime_id : string)
         ("media_dropped_counts", `String summary);
       ])
 
+(* H5: audio/document that the candidate cannot take were not dropped but
+   projected to attachment readings or unavailable markers. Same routing action
+   and reason as a drop (the turn still reaches the runtime as text), with the
+   projected counts named separately so an operator can tell the two apart. *)
+let media_projection_manifest_decision ~(runtime_id : string)
+    (projected : (string * int) list) =
+  Keeper_runtime_manifest.with_payload_role
+    ~payload_role:Keeper_runtime_manifest.Operator_evidence
+    (`Assoc
+      [
+        ("routing_action", `String "media_degraded_to_text");
+        ( "routing_reason",
+          `String "no_configured_runtime_accepts_required_media" );
+        ("degraded_runtime_id", `String runtime_id);
+        ("media_dropped_total", `Int 0);
+        ("media_projected_total", `Int (modality_counts_total projected));
+        ("media_projected_counts", `String (modality_counts_summary projected));
+      ])
+
+(* One wall-clock deadline for every attachment a lane walk reads, built from
+   the operator's existing [turn.provider_call_deadline_sec]. That setting is
+   the per-attempt no-progress ceiling of a provider call; here it only caps
+   the pre-provider reading step, once per walk. It is not a turn-wide
+   deadline and reserves nothing for the fallback provider call. Attachments
+   and candidates share it, so the total wait does not grow with their
+   number. *)
+let media_reading_deadline () =
+  Monotonic_deadline.after ~seconds:(Keeper_runtime_resolved.provider_call_deadline_sec ())
+
 type output_contract = Provider_default | Tool_verdict
 
-
-type provider_run_result =
-  (Runtime_agent.run_result, Agent_core.Error.t) result
-
-type provider_attempt_outcomes =
-  { provider_result : provider_run_result
-  ; turn_result : provider_run_result
-  ; checkpoint_after : Agent_core.Checkpoint.t option
-  }
 
 type named_run_result =
   { run_result : Runtime_agent.run_result
@@ -523,46 +543,6 @@ let restore_deferred_runtime_lane ~assignment_id ~failed_runtime_id
   ; later_runtime_ids
   ; failure
   }
-;;
-
-let canonical_checkpoint_sink ~replay_prefix_projection sink
-    (snapshot : Agent_core.Agent.checkpoint_snapshot) =
-  match Keeper_replay_prefix.restore_checkpoint replay_prefix_projection snapshot.checkpoint with
-  | Error error -> Error (Keeper_replay_prefix.restore_error_to_string error)
-  | Ok checkpoint -> sink { snapshot with checkpoint }
-;;
-
-let project_provider_attempt_result ?checkpoint_after ~replay_prefix_projection provider_result =
-  let turn_result =
-    match provider_result with
-    | Error _ as error -> error
-    | Ok run_result ->
-      (match run_result.Runtime_agent.checkpoint with
-       | None -> Ok run_result
-       | Some checkpoint ->
-         (match
-            Keeper_replay_prefix.restore_checkpoint
-              replay_prefix_projection
-              checkpoint
-          with
-          | Ok checkpoint ->
-            Ok
-              { run_result with
-                Runtime_agent.checkpoint = Some checkpoint
-              }
-          | Error error ->
-            Error
-              (Agent_core.Error.Internal
-                 (Keeper_replay_prefix.restore_error_to_string error))))
-  in
-  let turn_result, checkpoint_after = match checkpoint_after with
-    | None -> turn_result, None
-    | Some checkpoint ->
-      (match Keeper_replay_prefix.restore_checkpoint replay_prefix_projection checkpoint with
-       | Ok checkpoint -> turn_result, Some checkpoint
-       | Error error -> Error (Agent_core.Error.Internal
-           (Keeper_replay_prefix.restore_error_to_string error)), None) in
-  { provider_result; turn_result; checkpoint_after }
 ;;
 
 let runtime_attempt_decision ~idx ~runtime_id =
@@ -1345,6 +1325,7 @@ type attempt_input =
    media strip. A failed vision head must not make a text fallback forget the
    picture. Other unsupported media retain the explicit degrade contract. *)
 let project_input_for_attempt
+    ?project_media
     ~project_images
     ~keeper_name
     ~(emit_runtime_manifest :
@@ -1431,6 +1412,60 @@ let project_input_for_attempt
                ; "image_occurrences", `Int delegated_images
                ]))
         Keeper_runtime_manifest.Runtime_routed);
+    (* H5: audio and documents this candidate cannot take become
+       attachment-bound readings (or an explicit unavailable marker) before the
+       generic strip, so a text fallback keeps the fact and its provenance. *)
+    let needs_media_projection = function
+      | Keeper_media_reading.Audio -> not caps.supports_audio_input
+      | Keeper_media_reading.Document -> not caps.supports_multimodal_inputs
+    in
+    let project_media =
+      match project_media with
+      | Some project -> project
+      | None ->
+        (* No reader is wired for a caller that supplied none: attachments are
+           marked unavailable rather than read. The production walk in
+           [run_named] passes one projector with the real readers for the
+           whole walk. *)
+        let projector =
+          Keeper_media_reading.projector
+            ~keeper_name
+            ~start_deadline:media_reading_deadline
+            ~read:(fun ~deadline:_ ~kind:_ ~media_type:_ ~bytes:_ -> Error "no_reader")
+            ()
+        in
+        Keeper_media_reading.project projector
+    in
+    let media_projected = ref [] in
+    let project_media_blocks blocks =
+      let projected, counts =
+        project_media ~needs_projection:needs_media_projection blocks
+      in
+      media_projected := Runtime_agent.merge_modality_counts !media_projected counts;
+      projected
+    in
+    let projected_goal =
+      { projected_goal with blocks = project_media_blocks projected_goal.blocks }
+    in
+    let projected_initial =
+      List.map
+        (fun (message : Agent_core.Types.message) ->
+          { message with content = project_media_blocks message.content })
+        projected_initial
+    in
+    let projected_checkpoint =
+      match projected_checkpoint with
+      | None -> None
+      | Some (checkpoint : Agent_core.Checkpoint.t) ->
+        Some
+          { checkpoint with
+            messages =
+              List.map
+                (fun (message : Agent_core.Types.message) ->
+                  { message with content = project_media_blocks message.content })
+                checkpoint.messages
+          }
+    in
     let stripped_goal, goal_dropped =
       Runtime_agent.strip_unsupported_modality_blocks caps projected_goal.blocks
     in
@@ -1454,7 +1489,7 @@ let project_input_for_attempt
         checkpoint_dropped
     in
     (match Runtime_agent.media_degrade_note ~runtime_id dropped with
-     | None when delegated_images = 0 ->
+     | None when delegated_images = 0 && !media_projected = [] ->
        (* [required] is non-empty -- that is why the decision was
           [No_capable_runtime] -- yet nothing was strippable, so there is no
           text-only turn to offer and the provider capability floor will reject
@@ -1492,6 +1527,17 @@ let project_input_for_attempt
          Keeper_runtime_manifest.Runtime_routed;
        unchanged
      | note ->
+       (match note, !media_projected with
+        | None, (_ :: _ as projected) ->
+          Log.Keeper.info
+            "%s: media projected on %s -- %s become attachment readings or \
+             unavailable markers, continuing text-only"
+            keeper_name runtime_id (modality_counts_summary projected);
+          emit_runtime_manifest
+            ~status:"degraded"
+            ~decision:(media_projection_manifest_decision ~runtime_id projected)
+            Keeper_runtime_manifest.Runtime_routed
+        | _ -> ());
        Option.iter
          (fun _ ->
            Log.Keeper.warn
@@ -2184,6 +2230,20 @@ let run_named
         | Tool_verdict -> Keeper_vision_ingest.Store_only in
       project ~mode blocks
   in
+  (* H5: audio and document readings, like [project_images], belong to the
+     walk. Every text-only candidate of this walk reuses what an earlier one
+     read or failed to read, under one reading deadline. *)
+  let media_projector =
+    Keeper_media_reading.projector
+      ~base_path
+      ~keeper_name
+      ~start_deadline:media_reading_deadline
+      ~read:
+        (Keeper_media_reading.production_reader
+           ~base_path
+           ~budget_sec:(Keeper_runtime_resolved.provider_call_deadline_sec ()))
+      ()
+  in
   (* Sequential candidate attempt loop. On failure we record a manifest row and
      move to the next candidate; on success we record completion and return. *)
   attempt_runtime_candidates
@@ -2341,6 +2401,7 @@ let run_named
            attempt_agent_core_checkpoint=agent_core_checkpoint;
            attempt_replay_prefix_projection=Keeper_replay_prefix.unchanged}
         | None, None -> project_input_for_attempt
+          ~project_media:(Keeper_media_reading.project media_projector)
           ~project_images
           ~keeper_name
           ~emit_runtime_manifest
@@ -3176,7 +3237,7 @@ let run_named
             ; cache_system_prompt
             ; checkpoint_sink =
                 Option.map
-                  (canonical_checkpoint_sink ~replay_prefix_projection)
+                  (Keeper_attempt_checkpoint.canonical_sink ~projection:replay_prefix_projection)
                   checkpoint_sink
             ; checkpoint_progress
             ; context_injector
@@ -3213,21 +3274,19 @@ let run_named
                 (if continue_from_checkpoint then agent_core_checkpoint else None)
               try_provider_ctx candidate
           in
-          let outcomes =
-            project_provider_attempt_result ?checkpoint_after
-              ~replay_prefix_projection provider_result in
-          ( selected_runtime_result runtime ~lane_attempt_index:idx outcomes.turn_result
-          , outcomes.checkpoint_after
+          let { Keeper_attempt_checkpoint.turn_result; checkpoint_after } =
+            Keeper_attempt_checkpoint.project ?checkpoint_after
+              ~projection:replay_prefix_projection provider_result in
+          ( selected_runtime_result runtime ~lane_attempt_index:idx turn_result
+          , checkpoint_after
           , Keeper_provider_attempt_effect.No_effect_observed
           , provider_attempt_dispatch ~request_serialized:!request_serialized
-              outcomes.turn_result ))))
+              turn_result ))))
        ))))
     attempt_candidates
 
 
 module For_testing = struct
-  type nonrec provider_attempt_outcomes = provider_attempt_outcomes
-
   let official_client_turn_start = official_client_turn_start
 
   let run_result_answered = run_result_answered
@@ -3238,11 +3297,6 @@ module For_testing = struct
       ~next_runtime_id ~later_runtime_ids ~failure
   ;;
 
-  let produced_checkpoint (outcomes : provider_attempt_outcomes) = outcomes.checkpoint_after
-  let project_provider_attempt_result = project_provider_attempt_result
-  let canonical_checkpoint_sink = canonical_checkpoint_sink
-  let provider_result outcomes = outcomes.provider_result
-  let turn_result outcomes = outcomes.turn_result
   let checkpoint_after_attempt = checkpoint_after_attempt
   let success_selected_model_raw = success_selected_model_raw
   let apply_accept = Keeper_turn_driver_try_provider.For_testing.apply_accept

@@ -26,10 +26,15 @@ let verdict_because = function
 
    Spelled out per group rather than defaulted, so a group added later stops
    the build here instead of inheriting "runs without asking". *)
-let descriptor_for tool_name =
-  match Descriptor.descriptors_for_internal tool_name with
-  | descriptor :: _ -> Some descriptor
-  | [] -> Descriptor.find_public tool_name
+let descriptor_for ?composition_plan_index tool_name =
+  match Option.bind composition_plan_index Keeper_tool_composition_plan_index.descriptors with
+  | Some descriptors ->
+      List.find_opt (fun descriptor ->
+        List.mem tool_name (Descriptor.registered_names descriptor)) descriptors
+  | None ->
+      match Descriptor.descriptors_for_internal tool_name with
+      | descriptor :: _ -> Some descriptor
+      | [] -> Descriptor.find_public tool_name
 
 type authorization_owner = Execution_gate | Filesystem_boundary
 
@@ -48,7 +53,7 @@ let owner_reason = function
   | Filesystem_boundary -> "the filesystem producer authorizes this call with its resolved capability and Gate"
 
 let rec verdict_for ~identity_tool_index ~composition_plan_index ~tool_name ~input =
-  match descriptor_for tool_name with
+  match descriptor_for ?composition_plan_index tool_name with
   | None -> verdict_for_undescribed ~identity_tool_index ~composition_plan_index ~tool_name ~input
   | Some descriptor -> (
       match producer_authorization_owner descriptor with
@@ -93,8 +98,8 @@ let rec verdict_for ~identity_tool_index ~composition_plan_index ~tool_name ~inp
    Today no descriptor's answer would differ ([Grep] is the only one carrying
    [readonly_of_input] and it ignores the argument), so this is the same
    verdict by a route that stays right when that stops being true. *)
-and node_asks_for_approval node =
-  match descriptor_for node with
+and node_asks_for_approval ~composition_plan_index node =
+  match descriptor_for ?composition_plan_index node with
   (* Unreachable through dispatch: a plan node is validated against the
      descriptor list before the plan is built. Asked rather than assumed,
      because "no descriptor" is exactly the case this whole arm exists for. *)
@@ -151,8 +156,8 @@ and undescribed_kind ~identity_tool_index ?composition_plan_index tool_name =
        | Some read_only -> Attached_service read_only
        | None -> Unknown)
 
-and verdict_of_nodes node_tools =
-  match List.find_map node_asks_for_approval node_tools with
+and verdict_of_nodes ~composition_plan_index node_tools =
+  match List.find_map (node_asks_for_approval ~composition_plan_index) node_tools with
   | Some (node, because) ->
     Ask { because = Printf.sprintf "node %s: %s" node because }
   | None ->
@@ -186,7 +191,7 @@ and verdict_for_undescribed ~identity_tool_index ~composition_plan_index ~tool_n
           "the service did not say whether this tool only reads; the \
            durable Gate treats that silence as a write and defers it"
       }
-  | Composition node_tools -> verdict_of_nodes node_tools
+  | Composition node_tools -> verdict_of_nodes ~composition_plan_index node_tools
   | Unknown ->
     (* Not a safe tool -- one this build cannot classify. Running it unasked
        would make "no descriptor" the quietest way past the gate. *)
@@ -194,7 +199,7 @@ and verdict_for_undescribed ~identity_tool_index ~composition_plan_index ~tool_n
 ;;
 
 let classifies ~identity_tool_index ~composition_plan_index ~tool_name =
-  match descriptor_for tool_name with
+  match descriptor_for ?composition_plan_index tool_name with
   | Some _ -> true
   | None ->
     (match undescribed_kind ~identity_tool_index ?composition_plan_index tool_name with

@@ -34,7 +34,7 @@ let match_events =
   ; E.Tool_result_ready
       { occurrence; tool_call_id = Some "tc-1"; execution_id }
   ; E.Reply_details
-      { reply = "done"; turn_outcome = Outcome.Visible_reply; turn_ref }
+      { terminal_stream_scope = None; reply = "done"; turn_outcome = Outcome.Visible_reply; turn_ref }
   ; E.Text_message_end
   ; E.Run_finished { run_id = "run-1" }
   ]
@@ -48,7 +48,6 @@ let chat_message
     ?(content = "")
     ?(ts = 100.2)
     ?execution_id
-    ?(kind = Store.Row_kind.Utterance)
     ?turn_ref
     ?stream_lifecycle
     ?delivery_provenance
@@ -71,7 +70,6 @@ let chat_message
   ; audio = None
   ; blocks = None
   ; mentions = []
-  ; kind
   ; turn_ref
   ; stream_lifecycle
   ; approval_lifecycle = None
@@ -104,7 +102,7 @@ let assistant_row ~delivery_key =
     ~stream_lifecycle:ok_lifecycle
     ~delivery_provenance:
       { Delivery.delivery_key = delivery_key
-      ; transcript_slot = Delivery.Terminal_assistant
+      ; transcript_slot = Delivery.Terminal_result
       }
     ()
 

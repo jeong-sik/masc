@@ -317,6 +317,10 @@ val load_candidates_with_rejections
     only after an explicit repair leaves a fully readable ledger. *)
 
 val ledger_path : base_path:string -> keeper_name:string -> string
+
+(** Purge the ledger and its cached view under the existing mutation and
+    stable-file locks. Lock identities remain available to queued writers. *)
+val purge : base_path:string -> keeper_name:string -> (unit, string) result
 (** The Keeper's candidate ledger file. A Keeper purge removes it with the
     Keeper, so a later Keeper of the same name starts without its candidates
     or quarantines. *)
@@ -403,3 +407,17 @@ val record_and_wake :
     The durable row is authoritative: an unregistered worker is a typed,
     successful deferral recovered by worker startup drain. A consumed duplicate
     needs no wake. This function never invokes the model judge. *)
+
+val prune_consumed_behind_cursor :
+  base_path:string ->
+  keeper_name:string ->
+  float * string option ->
+  (int, string) result
+(** Rewrite the ledger without the Consumed rows whose Board signal the
+    keeper's Board cursor has already passed — the same token the replay gate
+    compares (signal kind and creation coordinate), so a removed row can never
+    be re-minted by replay. Consumed rows ahead of the cursor, rows without a
+    replay coordinate (reactions, votes), and every other status stay. A
+    ledger with rejected rows is never rewritten. Returns the number of
+    removed rows, [0] when nothing changed. *)
+

@@ -598,18 +598,9 @@ wizard-default = true
 # encoding a control. One model row per level is the whole mechanism: the rows
 # below bind each model once per level, and a keeper is assigned the level the
 # work deserves. Claude Code rejects "none" and "minimal"; Codex takes both.
-[models.claude-code-opus-high]
-api-name = "claude-opus-5"
-max-context = 1000000
-tools-support = true
-streaming = true
-reasoning-effort = "high"
-turn-timeout-s = 600.0
-
-[claude_code.claude-code-opus-high]
-
-# The rest of the Claude Code ladder: Fable 5.1, Opus 5, Opus 5.5, Sonnet 5.5 and
-# Haiku 5.5 at every level the CLI takes (low..max), and Haiku 4.5.
+#
+# The Claude Code ladder: Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5 at
+# every level the CLI takes (low..max), and Haiku 4.5.
 # Haiku 4.5 carries no level, so the CLI picks; its window is 200K
 # (OpenRouter /models anthropic/claude-haiku-4.5, 2026-09-22), and it
 # answered `claude -p --model claude-haiku-4-5` the same day.
@@ -673,57 +664,9 @@ supports-image-input = true
 
 [claude_code.claude-code-sonnet-max]
 
-[models.claude-code-opus-low]
-api-name = "claude-opus-5"
-max-context = 1000000
-tools-support = true
-streaming = true
-reasoning-effort = "low"
-
-[models.claude-code-opus-low.capabilities]
-supports-image-input = true
-
-[claude_code.claude-code-opus-low]
-
-[models.claude-code-opus-medium]
-api-name = "claude-opus-5"
-max-context = 1000000
-tools-support = true
-streaming = true
-reasoning-effort = "medium"
-
-[models.claude-code-opus-medium.capabilities]
-supports-image-input = true
-
-[claude_code.claude-code-opus-medium]
-
-[models.claude-code-opus-xhigh]
-api-name = "claude-opus-5"
-max-context = 1000000
-tools-support = true
-streaming = true
-reasoning-effort = "xhigh"
-
-[models.claude-code-opus-xhigh.capabilities]
-supports-image-input = true
-
-[claude_code.claude-code-opus-xhigh]
-
-[models.claude-code-opus-max]
-api-name = "claude-opus-5"
-max-context = 1000000
-tools-support = true
-streaming = true
-reasoning-effort = "max"
-
-[models.claude-code-opus-max.capabilities]
-supports-image-input = true
-
-[claude_code.claude-code-opus-max]
-
 # Opus 5.5 (released 2026-09-22) serves on the subscription already: it
 # answered `claude-subscription -p --model claude-opus-5-5` on 2026-09-23.
-# Ladder low..max and window 1M as opus-5 (platform model page, checked
+# Ladder low..max and window 1M (platform model page, checked
 # 2026-09-23). The API refuses forced tool use on this model; MASC never
 # sends it from the Claude Code lane.
 [models.claude-code-opus-5-5-low]

@@ -51,6 +51,16 @@ type session_failure = Session_refused of string | Session_failed of string
 val session_failure_message : session_failure -> string
 (** Asks the browser for a BiDi session and answers the browser's version. *)
 val metadata : t -> (string, session_failure) result
+
+(** The profile directory Firefox reported with its session
+    ([moz:profile]), as it was given that path. [None] before {!metadata}
+    succeeded, and when Firefox did not say. *)
+val profile : t -> string option
+
+(** Whether the session's Firefox runs the profile at [expected]. The two
+    paths are resolved first, so a link and the directory it names are the
+    same profile. [Error] says what it runs, or that it did not say. *)
+val runs_profile : t -> expected:string -> (unit, string) result
 (** Ends the session {!metadata} asked for; [Ok ()] when there is none to
     end, which is also what Firefox's "invalid session id" says of a session
     that was asked for and never confirmed. There is one to end from the

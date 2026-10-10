@@ -305,12 +305,12 @@ val save_file_atomic : string -> string -> (unit, string) Result.t
 val save_file_atomic_rename_only : string -> string -> (unit, string) Result.t
 
 type atomic_replace_failure_stage =
-  Atomic_write.atomic_replace_failure_stage =
+  Atomic_replace.atomic_replace_failure_stage =
   | Before_rename
   | After_rename
 
 type atomic_replace_failure =
-  Atomic_write.atomic_replace_failure =
+  Atomic_replace.atomic_replace_failure =
   { path : string
   ; stage : atomic_replace_failure_stage
   ; exception_ : exn
@@ -328,7 +328,9 @@ val save_file_atomic_strict_staged
     successfully. This supports process-restart recovery, not hardware or
     power-loss persistence, and does not use Darwin [F_FULLFSYNC]. Transaction
     owners must converge any dependent in-memory publication before
-    propagating an [After_rename] failure. *)
+    propagating an [After_rename] failure. Cancellation is re-raised with its
+    original exception and backtrace after staging cleanup. A target already
+    published by rename remains in place. *)
 
 val write_file_atomic_strict_staged_blocking
   : string
@@ -346,8 +348,9 @@ val write_file_atomic_strict_staged
     binary channel and runs synchronously inside the blocking replacement job
     (a system thread when called from Eio). It must not perform Eio effects,
     close the channel, or retain it. The channel is closed before payload sync
-    and rename. Callback exceptions, including cancellation, preserve the
-    original exception and backtrace in a [Before_rename] failure. *)
+    and rename. Ordinary callback failures preserve the original exception
+    and backtrace in a [Before_rename] failure. Cancellation is re-raised with
+    its original exception and backtrace after staging cleanup. *)
 
 (** Atomic replacement whose payload and parent-directory fsyncs are mandatory. *)
 val save_file_atomic_strict : string -> string -> (unit, string) Result.t
@@ -809,9 +812,9 @@ val atomic_orphan_cleanup_failure_to_string
 (** No-follow orphan cleanup, bounded by the named staging inventory: it
     scans exactly [base_path]. Every failed mutation or unexpected
     orphan-shaped entry is returned in the typed report. The caller must own
-    stable directory identities and quiesce the matching temp namespace; see
-    {!Atomic_write.cleanup_atomic_orphans} for the OCaml 5.4 dirfd
-    limitation. *)
+    stable directory identities and quiesce the matching temp namespace.
+    Portable [Unix] operations validate inode identity before mutation but
+    cannot make replacement of intermediate path components atomic. *)
 val cleanup_atomic_orphans
   :  ownership_root:string
   -> base_path:string
@@ -1063,6 +1066,8 @@ type private_jsonl_transaction_operation =
   | Remove_rewrite_stage
   | Truncate_transaction_data
   | Sync_transaction_data
+  | Remove_transaction_data
+  | Sync_removal_parent
 
 type private_jsonl_operation_failure =
   { operation : private_jsonl_transaction_operation
@@ -1250,6 +1255,14 @@ val private_jsonl_transaction_error_to_string :
     store may be in use. *)
 val private_jsonl_lock_path : string -> string
 
+(** Remove a store under its stable sibling lock and fsync its parent. Success
+    returns [Missing], including an already absent store. The stable lock is
+    retained so existing waiters and a successor store share one lock identity.
+    Non-regular or aliased data and lock contention fail closed. A parent-sync
+    failure may follow unlink and must not be treated as completed removal. *)
+val purge_private_jsonl_durable_locked_result :
+  string -> (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
+
 (** Read a private JSONL store under its stable sibling lock. [after = None]
     returns the full store. [after = Some cursor] returns only bytes appended
     after that exact file identity and offset. A replacement, truncation, or
@@ -1279,6 +1292,10 @@ type private_jsonl_transaction_io_for_testing =
   { before_sync_parent : string -> unit
   ; close_fd : Unix.file_descr -> unit
   }
+
+val purge_private_jsonl_durable_locked_with_io_for_testing :
+  io:private_jsonl_transaction_io_for_testing ->
+  string -> (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
 
 (** Same non-creating shared-lock read with injected descriptor settlement. *)
 val read_private_jsonl_rows_locked_with_io_for_testing :
@@ -1389,6 +1406,17 @@ val durable_append_error_to_string : durable_append_error -> string
 val update_private_file_durable_locked_result :
   ?create:bool ->
   string ->
+  (string -> string option * 'a) ->
+  ('a, durable_append_error) private_file_transaction_outcome
+
+(** Bounded-tail admission transaction using the same path mutex and descriptor
+    lock as the strict JSONL readers and appenders. [decide] receives at most
+    [max_bytes] of the existing suffix, dropping the first boundary fragment, while
+    the append and rollback still use the full file's original length.
+    The callback runs under the lock and must not perform Eio effects. *)
+val update_private_file_tail_durable_locked_result :
+  string ->
+  max_bytes:int ->
   (string -> string option * 'a) ->
   ('a, durable_append_error) private_file_transaction_outcome
 

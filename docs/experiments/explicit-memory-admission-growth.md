@@ -18,7 +18,9 @@ not read. The probe verifies the resolved store path before writing.
 The executable emits `MEMORY_WRITE_GROWTH` JSON rows after writes 1, 29, 30, 31,
 100 and 200. Each row records the complete input-sequence hash, current fact
 count, revision, serialized fact-array bytes, cumulative write-receipt outcomes
-and effective category limits. These are 18 samples across the three cohorts.
+and effective category limits. Version2 additionally records pending candidate
+count and their serialized fact-array bytes, so an empty current snapshot cannot
+masquerade as consolidation. These are 18 samples across the three cohorts.
 
 A passing test establishes that the experiment ran and its write receipts were
 successful. It does not establish semantic deduplication or enforce today's
@@ -26,8 +28,8 @@ observed fact counts as expected behavior. This lets the same inputs measure a
 future pending-admission implementation without making immediate admission a
 regression contract.
 
-`serialized_fact_bytes` is neither provider tokens nor total disk use. Pending
-queue storage, source-bound writes, replacement/retraction, concurrent Librarian
+`serialized_fact_bytes` is neither provider tokens nor total disk use. The pending-byte measure counts proposed facts only, excluding queue metadata,
+receipt files and historical records. Source-bound writes, replacement/retraction, concurrent Librarian
 work and full prompt construction are outside this probe. A count above the
 configured working-set target describes immediate write behavior without a
 cleanup worker; it does not prove that a running Keeper never consolidates.
@@ -78,3 +80,38 @@ shows that exact-byte identity alone does not consolidate this repetition at the
 write boundary. The independent-rule cohort must remain a separate comparison:
 count reduction alone cannot establish that useful knowledge was preserved.
 Deferred admission is not implemented by this experiment.
+
+
+## Deferred-write comparison protocol
+
+Retain the same cohort inputs and input-sequence hashes. Record both current
+facts and pending candidates. With no worker running, all ordinary observations
+may remain pending; zero current facts then proves separation of admission, not
+semantic compression, lower total storage or better recall. After the worker is
+connected, measure which candidates were consumed and which useful claims
+survived. Repeated receipts should consolidate without collapsing independent
+release rules. Retain deferred and failed outcomes separately.
+
+
+## Measured pending-write boundary
+
+[Run37810272063](https://github.com/jeong-sik/masc/actions/runs/37810272063)
+at `03c63c6de89bd34838d9dd85b01f96c2a1b33c49` emitted all18 v2 samples.
+Every cohort/checkpoint input hash matches the baseline. At write200:
+
+| Cohort | Current facts before | Current facts after | Pending candidates after | Pending fact-array bytes |
+|---|---:|---:|---:|---:|
+| Exact reobservation | 1 | 0 | 200 | 50,765 |
+| Repeated receipts | 200 | 0 | 200 | 62,851 |
+| Independent rules | 200 | 0 | 200 | 52,049 |
+
+Each cohort returned 200 `persisted_pending_admission` receipts. No current
+snapshot was created; revision is null and the empty serialized fact array is
+two bytes. The worker and providers were not started in this experiment.
+
+This proves admission separation, not consolidation. In particular, exact
+reobservation has higher pending storage than its prior single current fact.
+The required next measurement is post-Librarian retained knowledge, consumed
+input and still-pending candidates under the same inputs. Candidate-byte counts
+exclude queue identity/frontier metadata and other files; they are not total
+storage or provider tokens.

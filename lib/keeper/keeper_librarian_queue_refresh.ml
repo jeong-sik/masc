@@ -242,15 +242,22 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
       (0, 0, [], [], []) (P.source_spans unit) in
     {base with messages=List.rev messages; tool_observations=List.rev observations;
       historical_task_contexts=List.rev contexts} in
+  let runtime_keepers_dir = Workspace.keepers_runtime_dir config in
+  let external_capture = ref None in
   let memory_input (base : Keeper_librarian.input) unit =
     let ( let* ) = Result.bind in
     let input = source_input ~include_observations:true base unit in
     let* counterpart_observations = match P.turn_window unit with
-      | None -> Ok []
+      | None -> external_capture := None; Ok []
       | Some { P.after; through } ->
-        Keeper_librarian_input_sources.counterpart_observations_between
+        let* cursor = Keeper_external_read_cursor.read ~memory_keepers_dir:keepers_dir
+          ~runtime_keepers_dir ~keeper_name in
+        let* observations, through = Keeper_librarian_input_sources.counterpart_observations_from
+          ~external_after:(Keeper_external_read_cursor.offset cursor)
           ~base_dir:base_path ~keeper_name ~after ~before:through
-        |> Result.map_error Keeper_librarian_input_sources.read_error_to_string in
+          |> Result.map_error Keeper_librarian_input_sources.read_error_to_string in
+        external_capture := Some (cursor,through);
+        Ok observations in
     Ok { input with counterpart_observations } in
   let rec next () =
     observe O.Checking;
@@ -347,6 +354,12 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
       let* input =
         if memory_committed then Ok (source_input ~include_observations:false input selected)
         else memory_input input selected in
+      let* () = if memory_committed then Ok () else
+        match !external_capture with
+        | None -> Ok ()
+        | Some (cursor,through) ->
+          Keeper_external_read_cursor.prepare ~memory_keepers_dir:keepers_dir ~runtime_keepers_dir ~keeper_name cursor
+            ~through ~atom:(Some range_id) ~official:None in
       Ok (current, memory_committed, range_id, selected, input)) in
     match inputs with
     | Error detail -> report O.Input_unavailable detail
@@ -600,7 +613,20 @@ let run_memory_cleanup ~base_path ~keeper_name =
     Log.Keeper.warn ~keeper_name "Librarian memory count cleanup unavailable: %s" detail
 ;;
 
+let run_explicit_admission ~base_path ~keeper_name =
+  match Keeper_memory_admission_worker.run ~base_path ~keeper_name with
+  | Disabled | Idle -> ()
+  | Settled {has_more} ->
+    Log.Keeper.info ~keeper_name "Librarian explicit admission committed and acknowledged";
+    if has_more then Keeper_librarian_queue_signal.changed ~base_path ~keeper_name
+  | Pending detail ->
+    Log.Keeper.info ~keeper_name "Librarian explicit admission remains pending: %s" detail
+  | Unavailable detail ->
+    Log.Keeper.warn ~keeper_name "Librarian explicit admission unavailable: %s" detail
+;;
+
 let run ~base_path ~keeper_name =
+  run_explicit_admission ~base_path ~keeper_name;
   run_with_readers
     ~durable:(fun () -> run_durable ~base_path ~keeper_name)
     ~continuity:(fun () -> run_continuity ~base_path ~keeper_name ())
@@ -624,6 +650,7 @@ let install () =
 let submit_durable ~base_path ~keeper_name =
   let (_ : Keeper_memory_lane.outcome) =
     Keeper_memory_lane.submit ~base_path ~keeper_name (fun () ->
+      run_explicit_admission ~base_path ~keeper_name;
       run_durable ~base_path ~keeper_name;
       run_continuity ~base_path ~keeper_name ();
       run_memory_cleanup ~base_path ~keeper_name)
@@ -653,6 +680,14 @@ let unlaunched_keeper_names ~persisted ~launched =
 ;;
 
 let submit_durable_for_unlaunched ~base_path ~persisted ~launched =
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let queued = match Domain_pool_ref.submit_io_or_inline (fun () ->
+    Keeper_memory_admission_queue.list_keeper_ids ~keepers_dir) with
+    | Ok names -> names
+    | Error detail ->
+      Log.Keeper.warn "explicit admission startup discovery failed: %s" detail;
+      [] in
+  let persisted = List.sort_uniq String.compare (persisted @ queued) in
   let names = unlaunched_keeper_names ~persisted ~launched in
   List.iter (fun keeper_name -> submit_durable ~base_path ~keeper_name) names;
   names

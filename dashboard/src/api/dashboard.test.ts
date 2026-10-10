@@ -1161,7 +1161,7 @@ describe('fetchKeeperTurnTranscript', () => {
         user: [{ role: 'user', content: 'request A', ts: 10 }],
         assistant: [
           { role: 'assistant', content: 'reply A', ts: 11 },
-          { role: 'assistant', content: 'failed', ts: 12, kind: 'transport_failure' },
+          { role: 'request_failure', content: 'failed', ts: 12 },
         ],
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
     ))
@@ -1176,7 +1176,7 @@ describe('fetchKeeperTurnTranscript', () => {
     expect(result.found).toBe(true)
     expect(result.user[0]?.content).toBe('request A')
     expect(result.assistant[0]?.content).toBe('reply A')
-    expect(result.assistant[1]?.kind).toBe('transport_failure')
+    expect(result.assistant[1]?.role).toBe('request_failure')
   })
 
   it('decodes explicit absence (found=false) without fabricating lines', async () => {

@@ -548,6 +548,32 @@ let test_purge_removes_both_board_attention_ledgers () =
     (Sys.file_exists (A.ledger_path ~base_path ~keeper_name:"alpha"))
 ;;
 
+let test_purge_invalidates_cached_candidates_and_retains_lock () =
+  with_temp_base "board-attention-candidate-purge" @@ fun base_path ->
+  let first = candidate (signal "purge-candidate-before") in
+  ignore (record ~base_path first);
+  ignore (ok "warm candidate cache" (A.load_candidates ~base_path ~keeper_name:"alpha"));
+  let path = A.ledger_path ~base_path ~keeper_name:"alpha" in
+  let lock_path = Fs_compat.private_jsonl_lock_path path in
+  (match A.purge ~base_path ~keeper_name:"alpha" with
+   | Ok () -> ()
+   | Error detail -> Alcotest.failf "candidate purge failed: %s" detail);
+  Alcotest.(check bool) "candidate data is gone" false (Sys.file_exists path);
+  Alcotest.(check bool) "candidate stable lock remains" true (Sys.file_exists lock_path);
+  Alcotest.(check (list string))
+    "candidate cache is empty after purge"
+    []
+    (List.map (fun (candidate : A.candidate) -> candidate.candidate_id)
+       (ok "load after candidate purge" (A.load_candidates ~base_path ~keeper_name:"alpha")));
+  let successor = candidate (signal "purge-candidate-after") in
+  ignore (record ~base_path successor);
+  Alcotest.(check (list string))
+    "same-name successor starts from an empty candidate ledger"
+    [ successor.candidate_id ]
+    (List.map (fun (candidate : A.candidate) -> candidate.candidate_id)
+       (ok "load successor candidate" (A.load_candidates ~base_path ~keeper_name:"alpha")))
+;;
+
 let test_edit_candidates_preserve_revision_identity () =
   with_temp_base "board-edit-candidates" @@ fun base_path ->
   let edited at =
@@ -1263,6 +1289,130 @@ let test_fibers_on_one_domain_share_the_ledger_lock () =
        !read_answers)
 ;;
 
+(* A comment's replay coordinate pairs its creation time with the parent post
+   id, as signal_after_cursor does. At an equal timestamp the parent post
+   decides: a comment on a post after the cursor stays even when its own
+   comment id sorts before the cursor's post id. *)
+let test_prune_compares_comment_by_parent_post_id () =
+  with_temp_base "board-attention-candidate-prune-comment" @@ fun base_path ->
+  let consumed_comment ~post_id =
+    let base = signal post_id in
+    let comment_signal =
+      { base with
+        updated_at = Some 10.0
+      ; kind =
+          Masc.Board_dispatch.Board_comment_added
+            { comment_id = comment_id "c-00000000000000000000000000000001"
+            ; parent_id = None
+            }
+      }
+    in
+    { (candidate comment_signal) with
+      status =
+        A.Consumed
+          { judgment = judgment J.Not_relevant
+          ; delivery = A.Not_relevant
+          ; consumed_at = 11.0
+          }
+    }
+  in
+  let behind = consumed_comment ~post_id:"post-a" in
+  let ahead = consumed_comment ~post_id:"post-z" in
+  List.iter (fun one -> ignore (record ~base_path one : A.candidate)) [ behind; ahead ];
+  Alcotest.(check int)
+    "only the comment whose parent post is at or before the cursor is pruned"
+    1
+    (ok
+       "prune"
+       (A.prune_consumed_behind_cursor ~base_path ~keeper_name:"alpha" (10.0, Some "post-m")));
+  Alcotest.(check bool)
+    "the comment on the later post survives"
+    true
+    (ok "load" (A.load_candidates ~base_path ~keeper_name:"alpha") = [ ahead ])
+;;
+
+(* #41422: the prune is the replay gate mirrored — it removes a Consumed row
+   exactly when the replay gate (signal_after_cursor's strict token compare)
+   can never re-mint its signal: post_created with its creation coordinate,
+   comments with the comment's creation coordinate, at or before the
+   cursor. Ahead of the cursor, without a replay coordinate (reactions,
+   votes), and in every non-terminal status the row stays. The rewrite
+   happens even below the append-vs-rewrite compaction bound, and a
+   rejected row blocks it. *)
+let test_prune_consumed_behind_cursor () =
+  with_temp_base "board-attention-candidate-prune" @@ fun base_path ->
+  let consumed ~post_id ~ts status =
+    let signal = { (signal post_id) with updated_at = Some ts } in
+    { (candidate signal) with status }
+  in
+  let judged = judgment J.Not_relevant in
+  let behind =
+    consumed
+      ~post_id:"prune-behind"
+      ~ts:10.0
+      (A.Consumed
+         { judgment = judged
+         ; delivery = A.Not_relevant
+         ; consumed_at = 11.0
+         })
+  in
+  let ahead =
+    consumed
+      ~post_id:"prune-ahead"
+      ~ts:99.0
+      (A.Consumed
+         { judgment = judged
+         ; delivery = A.Not_relevant
+         ; consumed_at = 100.0
+         })
+  in
+  let pending = candidate (signal "prune-pending") in
+  let without_coordinate =
+    let base = signal "prune-vote" in
+    let vote_signal =
+      { base with
+        kind =
+          Masc.Board_dispatch.Board_vote_cast
+            { target = Masc.Board_dispatch.Vote_on_post "prune-vote"
+            ; target_author = "external-author"
+            ; voter = "external-author"
+            ; direction = Masc.Board.Up
+            }
+      }
+    in
+    { (candidate vote_signal) with
+      status =
+        A.Consumed
+          { judgment = judged
+          ; delivery = A.Not_relevant
+          ; consumed_at = 11.0
+          }
+    }
+  in
+  List.iter
+    (fun one -> ignore (record ~base_path one : A.candidate))
+    [ behind; ahead; pending; without_coordinate ];
+  let pruned =
+    ok "prune behind cursor" (A.prune_consumed_behind_cursor ~base_path ~keeper_name:"alpha" (50.0, None))
+  in
+  Alcotest.(check int) "one consumed row behind the cursor was pruned" 1 pruned;
+  let survivors =
+    ok "load after prune" (A.load_candidates ~base_path ~keeper_name:"alpha")
+  in
+  Alcotest.(check bool)
+    "ahead, pending, and coordinate-less rows survive"
+    true
+    (survivors = [ ahead; pending; without_coordinate ]);
+  Alcotest.(check int)
+    "the prune rewrote the store even below the compaction bound"
+    3
+    (List.length (ledger_rows ~base_path));
+  Alcotest.(check int)
+    "pruning again changes nothing"
+    0
+    (ok "idempotent prune" (A.prune_consumed_behind_cursor ~base_path ~keeper_name:"alpha" (50.0, None)))
+;;
+
 let () =
   Alcotest.run
     "keeper_board_attention_candidate"
@@ -1275,6 +1425,10 @@ let () =
             "a keeper purge removes both Board attention ledgers"
             `Quick
             test_purge_removes_both_board_attention_ledgers
+        ; Alcotest.test_case
+            "candidate purge invalidates cache and retains stable lock"
+            `Quick
+            test_purge_invalidates_cached_candidates_and_retains_lock
         ; Alcotest.test_case
             "codec and context identity are strict"
             `Quick
@@ -1371,6 +1525,14 @@ let () =
             "fibers on one domain share the ledger lock"
             `Quick
             test_fibers_on_one_domain_share_the_ledger_lock
+        ; Alcotest.test_case
+            "prune removes consumed rows the replay gate cannot re-mint"
+            `Quick
+            test_prune_consumed_behind_cursor
+        ; Alcotest.test_case
+            "prune compares a comment by its parent post id"
+            `Quick
+            test_prune_compares_comment_by_parent_post_id
         ] )
     ]
 ;;

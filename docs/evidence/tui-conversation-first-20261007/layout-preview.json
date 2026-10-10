@@ -1,0 +1,387 @@
+[
+  {
+    "width": 60,
+    "before": [
+      {
+        "kind": "user",
+        "text": "     19:30 ▶ YOU       채팅 화면을 더 간결하게 정리해"
+      },
+      {
+        "kind": "user",
+        "text": "                       줘. 필요한 내용만 읽고 싶어."
+      },
+      {
+        "kind": "tool",
+        "text": "           ■ TOOLS     ✓ Read masc_tui_render_chat.ml ·"
+      },
+      {
+        "kind": "tool",
+        "text": "                       16ms"
+      },
+      {
+        "kind": "keeper",
+        "text": "           ● alpha     대화 본문을 먼저 읽을 수 있도록"
+      },
+      {
+        "kind": "keeper",
+        "text": "                       정리하겠습니다."
+      },
+      {
+        "kind": "keeper",
+        "text": "                       "
+      },
+      {
+        "kind": "keeper",
+        "text": "                       저널과 요청 식별자는 상세 보기로"
+      },
+      {
+        "kind": "keeper",
+        "text": "                       옮기고, 도구 호출은 이름과 결과만"
+      },
+      {
+        "kind": "keeper",
+        "text": "                       남깁니다. 다른 Keeper의 실행"
+      },
+      {
+        "kind": "keeper",
+        "text": "                       상태는 목록과 Activity에서 확인할"
+      },
+      {
+        "kind": "keeper",
+        "text": "                       수 있습니다."
+      },
+      {
+        "kind": "journal",
+        "text": "           ◈ JOURNAL   Librarian · revision 205 · +0 −0"
+      },
+      {
+        "kind": "journal",
+        "text": "                       · 52 retained"
+      },
+      {
+        "kind": "inbound",
+        "text": "             ◀ re…dcast  좁은 화면에서도 마지막 답변과"
+      },
+      {
+        "kind": "inbound",
+        "text": "                         발신자 이름이 보이는지"
+      },
+      {
+        "kind": "inbound",
+        "text": "                         확인했습니다."
+      },
+      {
+        "kind": "user",
+        "text": "           ▶ YOU       좋아. 오류나 전송 결과 미확인은"
+      },
+      {
+        "kind": "user",
+        "text": "                       계속 보여 줘."
+      },
+      {
+        "kind": "keeper",
+        "text": "           ● alpha     네. 중단 실패, 승인 요청, 전달"
+      },
+      {
+        "kind": "keeper",
+        "text": "                       미확인은 기본 화면에서도 보이게"
+      },
+      {
+        "kind": "keeper",
+        "text": "                       유지합니다."
+      }
+    ],
+    "after": [
+      {
+        "kind": "user",
+        "text": "›  채팅 화면을 더 간결하게 정리해 줘. 필요한 내용만 읽고"
+      },
+      {
+        "kind": "user",
+        "text": "   싶어."
+      },
+      {
+        "kind": "meta",
+        "text": ""
+      },
+      {
+        "kind": "tool",
+        "text": "   ✓ Read masc_tui_render_chat.ml · 16ms"
+      },
+      {
+        "kind": "keeper",
+        "text": "●  대화 본문을 먼저 읽을 수 있도록 정리하겠습니다."
+      },
+      {
+        "kind": "keeper",
+        "text": "   "
+      },
+      {
+        "kind": "keeper",
+        "text": "   저널과 요청 식별자는 상세 보기로 옮기고, 도구 호출은"
+      },
+      {
+        "kind": "keeper",
+        "text": "   이름과 결과만 남깁니다. 다른 Keeper의 실행 상태는"
+      },
+      {
+        "kind": "keeper",
+        "text": "   목록과 Activity에서 확인할 수 있습니다."
+      },
+      {
+        "kind": "meta",
+        "text": ""
+      },
+      {
+        "kind": "inbound",
+        "text": "◀  reviewer · broadcast"
+      },
+      {
+        "kind": "inbound",
+        "text": "   좁은 화면에서도 마지막 답변과 발신자 이름이 보이는지"
+      },
+      {
+        "kind": "inbound",
+        "text": "   확인했습니다."
+      },
+      {
+        "kind": "meta",
+        "text": ""
+      },
+      {
+        "kind": "user",
+        "text": "›  좋아. 오류나 전송 결과 미확인은 계속 보여 줘."
+      },
+      {
+        "kind": "meta",
+        "text": ""
+      },
+      {
+        "kind": "keeper",
+        "text": "●  네. 중단 실패, 승인 요청, 전달 미확인은 기본"
+      },
+      {
+        "kind": "keeper",
+        "text": "   화면에서도 보이게 유지합니다."
+      }
+    ]
+  },
+  {
+    "width": 96,
+    "before": [
+      {
+        "kind": "user",
+        "text": "     19:30 ▶ YOU             채팅 화면을 더 간결하게 정리해 줘. 필요한 내용만 읽고 싶어."
+      },
+      {
+        "kind": "tool",
+        "text": "           ■ TOOLS           ✓ Read masc_tui_render_chat.ml · 16ms"
+      },
+      {
+        "kind": "keeper",
+        "text": "           ● alpha           대화 본문을 먼저 읽을 수 있도록 정리하겠습니다."
+      },
+      {
+        "kind": "keeper",
+        "text": "                             "
+      },
+      {
+        "kind": "keeper",
+        "text": "                             저널과 요청 식별자는 상세 보기로 옮기고, 도구 호출은 이름과"
+      },
+      {
+        "kind": "keeper",
+        "text": "                             결과만 남깁니다. 다른 Keeper의 실행 상태는 목록과 Activity에서"
+      },
+      {
+        "kind": "keeper",
+        "text": "                             확인할 수 있습니다."
+      },
+      {
+        "kind": "journal",
+        "text": "           ◈ JOURNAL         Librarian · revision 205 · +0 −0 · 52 retained"
+      },
+      {
+        "kind": "inbound",
+        "text": "             ◀ revi…broadcast  좁은 화면에서도 마지막 답변과 발신자 이름이 보이는지"
+      },
+      {
+        "kind": "inbound",
+        "text": "                               확인했습니다."
+      },
+      {
+        "kind": "user",
+        "text": "           ▶ YOU             좋아. 오류나 전송 결과 미확인은 계속 보여 줘."
+      },
+      {
+        "kind": "keeper",
+        "text": "           ● alpha           네. 중단 실패, 승인 요청, 전달 미확인은 기본 화면에서도 보이게"
+      },
+      {
+        "kind": "keeper",
+        "text": "                             유지합니다."
+      }
+    ],
+    "after": [
+      {
+        "kind": "user",
+        "text": "›  채팅 화면을 더 간결하게 정리해 줘. 필요한 내용만 읽고 싶어."
+      },
+      {
+        "kind": "meta",
+        "text": ""
+      },
+      {
+        "kind": "tool",
+        "text": "   ✓ Read masc_tui_render_chat.ml · 16ms"
+      },
+      {
+        "kind": "keeper",
+        "text": "●  대화 본문을 먼저 읽을 수 있도록 정리하겠습니다."
+      },
+      {
+        "kind": "keeper",
+        "text": "   "
+      },
+      {
+        "kind": "keeper",
+        "text": "   저널과 요청 식별자는 상세 보기로 옮기고, 도구 호출은 이름과 결과만 남깁니다. 다른"
+      },
+      {
+        "kind": "keeper",
+        "text": "   Keeper의 실행 상태는 목록과 Activity에서 확인할 수 있습니다."
+      },
+      {
+        "kind": "meta",
+        "text": ""
+      },
+      {
+        "kind": "inbound",
+        "text": "◀  reviewer · broadcast"
+      },
+      {
+        "kind": "inbound",
+        "text": "   좁은 화면에서도 마지막 답변과 발신자 이름이 보이는지 확인했습니다."
+      },
+      {
+        "kind": "meta",
+        "text": ""
+      },
+      {
+        "kind": "user",
+        "text": "›  좋아. 오류나 전송 결과 미확인은 계속 보여 줘."
+      },
+      {
+        "kind": "meta",
+        "text": ""
+      },
+      {
+        "kind": "keeper",
+        "text": "●  네. 중단 실패, 승인 요청, 전달 미확인은 기본 화면에서도 보이게 유지합니다."
+      }
+    ]
+  },
+  {
+    "width": 144,
+    "before": [
+      {
+        "kind": "user",
+        "text": "     19:30 ▶ YOU                 채팅 화면을 더 간결하게 정리해 줘. 필요한 내용만 읽고 싶어."
+      },
+      {
+        "kind": "tool",
+        "text": "           ■ TOOLS               ✓ Read masc_tui_render_chat.ml · 16ms"
+      },
+      {
+        "kind": "keeper",
+        "text": "           ● alpha               대화 본문을 먼저 읽을 수 있도록 정리하겠습니다."
+      },
+      {
+        "kind": "keeper",
+        "text": "                                 "
+      },
+      {
+        "kind": "keeper",
+        "text": "                                 저널과 요청 식별자는 상세 보기로 옮기고, 도구 호출은 이름과 결과만 남깁니다. 다른 Keeper의 실행 상태는"
+      },
+      {
+        "kind": "keeper",
+        "text": "                                 목록과 Activity에서 확인할 수 있습니다."
+      },
+      {
+        "kind": "journal",
+        "text": "           ◈ JOURNAL             Librarian · revision 205 · +0 −0 · 52 retained"
+      },
+      {
+        "kind": "inbound",
+        "text": "             ◀ revie… · broadcast  좁은 화면에서도 마지막 답변과 발신자 이름이 보이는지 확인했습니다."
+      },
+      {
+        "kind": "user",
+        "text": "           ▶ YOU                 좋아. 오류나 전송 결과 미확인은 계속 보여 줘."
+      },
+      {
+        "kind": "keeper",
+        "text": "           ● alpha               네. 중단 실패, 승인 요청, 전달 미확인은 기본 화면에서도 보이게 유지합니다."
+      }
+    ],
+    "after": [
+      {
+        "kind": "user",
+        "text": "›  채팅 화면을 더 간결하게 정리해 줘. 필요한 내용만 읽고 싶어."
+      },
+      {
+        "kind": "meta",
+        "text": ""
+      },
+      {
+        "kind": "tool",
+        "text": "   ✓ Read masc_tui_render_chat.ml · 16ms"
+      },
+      {
+        "kind": "keeper",
+        "text": "●  대화 본문을 먼저 읽을 수 있도록 정리하겠습니다."
+      },
+      {
+        "kind": "keeper",
+        "text": "   "
+      },
+      {
+        "kind": "keeper",
+        "text": "   저널과 요청 식별자는 상세 보기로 옮기고, 도구 호출은 이름과 결과만 남깁니다. 다른 Keeper의 실행"
+      },
+      {
+        "kind": "keeper",
+        "text": "   상태는 목록과 Activity에서 확인할 수 있습니다."
+      },
+      {
+        "kind": "meta",
+        "text": ""
+      },
+      {
+        "kind": "inbound",
+        "text": "◀  reviewer · broadcast"
+      },
+      {
+        "kind": "inbound",
+        "text": "   좁은 화면에서도 마지막 답변과 발신자 이름이 보이는지 확인했습니다."
+      },
+      {
+        "kind": "meta",
+        "text": ""
+      },
+      {
+        "kind": "user",
+        "text": "›  좋아. 오류나 전송 결과 미확인은 계속 보여 줘."
+      },
+      {
+        "kind": "meta",
+        "text": ""
+      },
+      {
+        "kind": "keeper",
+        "text": "●  네. 중단 실패, 승인 요청, 전달 미확인은 기본 화면에서도 보이게 유지합니다."
+      }
+    ]
+  }
+]

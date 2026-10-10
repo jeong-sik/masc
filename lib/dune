@@ -4,6 +4,18 @@
  (flags :standard)
  (public_name masc)
  (private_modules
+  keeper_unified_prompt_event_fields
+  keeper_msg_async_types
+  keeper_msg_async_record
+  keeper_memory_os_current_types
+  keeper_memory_os_support_core
+  keeper_gate_types
+  keeper_gate_projection
+  keeper_skill_activation_types
+  keeper_skill_activation_summary
+  keeper_board_attention_partition_types
+  keeper_board_attention_partition_wire
+  keeper_reaction_ledger_wire
   keeper_fs_durable_directory
   keeper_runtime_trust_snapshot_core)
  (libraries
@@ -73,8 +85,9 @@
   masc.slack_lane
   masc.machine_live_publication
   masc.machine_configuration
-  masc.msx_lane
-  masc.dos_lane
+  masc.lane_addon_tool_result masc.lane_addon_call_context
+  masc.tool_input_contract
+  masc.machine_input_history masc.machine_controller_contract
   masc.machine_checkpoint
   masc.tool_metrics_store
   masc.crypto_rng

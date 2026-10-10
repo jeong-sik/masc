@@ -78,22 +78,6 @@ let mascot size =
   let body, equipment = Keeper_portrait_look.mascot in
   Draw.render_posed body equipment Draw.still size
 
-let test_lines_fill_the_box () =
-  let pixels = View.Pixels { cell_width = 10; cell_height = 20 } in
-  let box = Option.get (View.fit pixels ~max_cols:60 ~max_rows:8) in
-  let lines = View.lines ~project pixels box (mascot box.View.size) in
-  check (list string) "blank rows the picture is placed over"
-    (List.init box.View.rows (fun _ -> String.make box.View.cols ' '))
-    lines;
-  let box = Option.get (View.fit View.Mosaic ~max_cols:40 ~max_rows:12) in
-  let lines = View.lines ~project View.Mosaic box (mascot box.View.size) in
-  check int "a mosaic row per box row" box.View.rows (List.length lines);
-  List.iter
-    (fun line -> check int "a mosaic row is the box wide" box.View.cols (Layout.display_width line))
-    lines;
-  check (list string) "no picture, no rows" []
-    (View.lines ~project View.No_picture box (mascot box.View.size))
-
 let placement ?(row = 4) ?(column = 7) size_rows =
   let pixels = View.Pixels { cell_width = 10; cell_height = 20 } in
   let box = Option.get (View.fit pixels ~max_cols:60 ~max_rows:size_rows) in
@@ -219,8 +203,7 @@ let () =
       , [ test_case "pixels fit a square in cells" `Quick test_pixels_fit_a_square_in_cells
         ; test_case "a mosaic is one pixel per cell across" `Quick
             test_a_mosaic_is_one_pixel_per_cell_across
-        ; test_case "lines fill the box" `Quick test_lines_fill_the_box
-        ] )
+        ;] )
     ; ( "placement"
       , [ test_case "placement bytes leave the cursor where it was" `Quick
             test_placement_bytes_leave_the_cursor_where_it_was

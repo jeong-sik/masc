@@ -365,19 +365,19 @@ turn-timeout-s = 0
 
 [claude_code."claude-sonnet-5"]
 
-[models."claude-opus-5"]
-api-name = "claude-opus-5"
+[models."claude-opus-5-5"]
+api-name = "claude-opus-5-5"
 max-context = 1000000
 tools-support = true
 streaming = true
 turn-timeout-s = 0
 
-[claude_code."claude-opus-5"]
+[claude_code."claude-opus-5-5"]
 |}
 ;;
 
 let cli_primary_runtime = "claude_code.claude-sonnet-5"
-let cli_secondary_runtime = "claude_code.claude-opus-5"
+let cli_secondary_runtime = "claude_code.claude-opus-5-5"
 
 let with_official_client_runtimes f =
   let path = Filename.temp_file "cli-lane-runtime" ".toml" in

@@ -1162,6 +1162,19 @@ let fetch_lsp_question ?keeper ?repo ~(host : string) ~(port : int)
           Error ("lsp question was not JSON: " ^ detail)
       | json -> Masc.Tui_decode.decode_lsp_answer json)
 
+let fetch_repository_activity ~(host : string) ~(port : int) ~repo_id ~window_hours =
+  let path = Printf.sprintf "/api/v1/ide/repository-activity?repo_id=%s&window_hours=%g"
+      (percent_encode_path_segment repo_id) window_hours in
+  match http_get ~host ~port ~path with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
+      Error (named_refusal "repository activity" ~status ~body)
+  | Ok (_, body) ->
+      (match Yojson.Safe.from_string body with
+       | json -> Masc.Tui_decode.decode_repository_activity_snapshot
+           (Yojson.Safe.Util.member "data" json)
+       | exception Yojson.Json_error detail -> Error ("repository activity was not JSON: " ^ detail))
+
 let fetch_keeper_file_changes ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(window_hours : float) :
     (Masc.Tui_decode.file_change_snapshot, string) result =

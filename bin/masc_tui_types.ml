@@ -379,9 +379,7 @@ type tool_visibility =
   | Tools_results
   | Tools_full
 
-(* How much of the Librarian/Memory journal the chat pane draws. Summary is
-   the resting state: one header line per journal pass, so the conversation
-   keeps the pane and the change itself stays one keypress away. *)
+(* Journal activity is opt-in; it never interrupts the default conversation. *)
 type memory_visibility =
   | Memory_hidden
   | Memory_summary
@@ -405,9 +403,7 @@ let memory_visibility_to_string = function
   | Memory_full -> "full"
 ;;
 
-(* From the resting summary toward more, then none, then back: the first
-   press answers "what changed exactly", the second clears the lane, the
-   third restores the default. *)
+(* Hidden -> summary -> full -> hidden, through Ctrl-N. *)
 let next_memory_visibility = function
   | Memory_summary -> Memory_full
   | Memory_full -> Memory_hidden
@@ -420,30 +416,13 @@ let origin_display_to_string = function
   | Masc_tui_message_layout.Origin_bare -> "off"
 ;;
 
-(* The chat modes worth a place in the header.
-
-   Reasoning starts folded, tools compact, and the memory journal at its
-   one-line summary, so the answer remains the strongest level in the pane.
-   At rest those defaults say nothing unusual and therefore cost no header
-   width.
-
-   So only a mode away from its default appears. That is exactly when the
-   operator needs reminding: reasoning is missing from the pane because they
-   hid it, not because the keeper stopped thinking. At rest the header is what
-   it was before any of these modes existed.
-
-   Discovery lives in the footer and the help overlay, which name Ctrl-R,
-   Ctrl-D, Ctrl-N, and Ctrl-F whether or not a mode is on. *)
+(* Name only modes the operator expanded; the resting chat needs no badges. *)
 let chat_visibility_summary ~memory ~reasoning ~tools ~origin =
   let parts =
     List.filter_map Fun.id
       [ (match memory with
-         | Memory_summary -> None
-         (* Named for the rows it governs, which the pane labels JOURNAL and
-            the footer reaches with Ctrl-N:journal. It read "memory" here and
-            "journal" there, so pressing the key and looking for what moved
-            meant knowing the two words were one axis. *)
-         | Memory_hidden -> Some "journal:off"
+         | Memory_hidden -> None
+         | Memory_summary -> Some "journal:summary"
          | Memory_full -> Some "journal:full")
       ; (match origin with
          | Masc_tui_message_layout.Origin_bare -> None
@@ -468,8 +447,7 @@ let next_reasoning_visibility = function
   | Reasoning_full -> Reasoning_hidden
 ;;
 
-(* Start without clocks; Ctrl-F adds the short clock, then full headings,
-   then returns to the reading layout. *)
+(* Conversation -> inline metadata -> full origin heading -> conversation. *)
 let next_origin_display = function
   | Masc_tui_message_layout.Origin_bare -> Masc_tui_message_layout.Origin_inline
   | Masc_tui_message_layout.Origin_inline -> Masc_tui_message_layout.Origin_row
@@ -587,6 +565,9 @@ type msg_entry = {
           timestamps never move rows; phase then this sequence is the order. *)
   me_text: string;
   me_image: Masc_tui_image_preview.preview;
+  me_media: Masc_tui_chat_media.t list;
+      (** Original decoded output metadata. A journal may replace the prose,
+          but does not own these durable media records or their image action. *)
   me_memory_summary: string option;
       (** Producer-built compact text for a Memory journal row. [None] for
           ordinary conversation and neutral system rows; renderers never
@@ -614,6 +595,7 @@ type msg_entry = {
   me_timestamp: string;
   me_keeper_name: string;
   me_request_id: string;
+  me_execution_source: Masc_tui_keeper_chat_log.journal_source option;
   (* Producer observation time. Conversation and auxiliary rows share one
      chronological surface. Within a request, later phases clamp to the latest
      earlier-phase clock before the rows merge with parallel lanes. *)
@@ -922,6 +904,16 @@ let order_chat_turn_rows rows =
    text alone is the question, and the table answers it without walking the
    turn. Non-user rows never fold: two tool rows with the same text are two
    calls. *)
+type chat_turn_key =
+  | Typed_execution of Masc_tui_keeper_chat_log.journal_source
+  | Legacy_request of string
+
+let chat_turn_key (row : msg_entry) =
+  match row.me_execution_source with
+  | Some source -> Typed_execution source
+  | None -> Legacy_request row.me_request_id
+;;
+
 type chat_turn_builder = {
   ctb_request_id : string;
   mutable ctb_rows_rev : msg_entry list;
@@ -962,7 +954,7 @@ let merge_turn_sequence held arriving =
    slots keep the order the walk found. *)
 let chat_timeline_slots rows =
   let slots_rev = ref [] in
-  let builders : (string, chat_turn_builder) Hashtbl.t = Hashtbl.create 64 in
+  let builders : (chat_turn_key, chat_turn_builder) Hashtbl.t = Hashtbl.create 64 in
   List.iter
     (fun (row : msg_entry) ->
       if row.me_role = Message_memory
@@ -970,7 +962,7 @@ let chat_timeline_slots rows =
       else if String.equal row.me_request_id ""
       then slots_rev := Slot_unowned row :: !slots_rev
       else
-        match Hashtbl.find_opt builders row.me_request_id with
+        match Hashtbl.find_opt builders (chat_turn_key row) with
         | Some builder ->
             (* The sequence is merged even when the row itself folds into a
                line already held: a duplicate still carries what it knows
@@ -996,7 +988,7 @@ let chat_timeline_slots rows =
               ; ctb_user_texts = user_texts
               }
             in
-            Hashtbl.replace builders row.me_request_id builder;
+            Hashtbl.replace builders (chat_turn_key row) builder;
             slots_rev := Slot_turn builder :: !slots_rev)
     rows;
   List.rev_map
@@ -1092,7 +1084,7 @@ let chat_timeline ~loaded ~session ~queued_request_ids =
    ({!chat_timeline_slots}); this is the same question asked of one row, so a
    renderer can draw the boundary without rebuilding the timeline. *)
 type chat_row_lane =
-  | Lane_turn of string
+  | Lane_turn of chat_turn_key
       (** Produced inside the turn with this request id. *)
   | Lane_unowned
       (** No request owns it: another agent's broadcast, a system line. It
@@ -1106,7 +1098,7 @@ type chat_row_lane =
 let chat_row_lane (row : msg_entry) =
   if row.me_role = Message_memory then Lane_memory
   else if String.equal row.me_request_id "" then Lane_unowned
-  else Lane_turn row.me_request_id
+  else Lane_turn (chat_turn_key row)
 
 (* Where a row sits in its turn, for a renderer drawing the turn's edges. *)
 type turn_edge =
@@ -1169,7 +1161,7 @@ let mark_turn_edges rows =
         | Lane_turn request_id ->
             if
               match running with
-              | Some current -> String.equal current request_id
+              | Some current -> current = request_id
               | None -> false
             then walk running (index :: run) tl
             else (
@@ -3073,11 +3065,15 @@ let turn_log_request_id turn_log = Masc_tui_keeper_chat_log.request_id turn_log.
 let turn_log_execution_id turn_log = Masc_tui_keeper_chat_transcript.execution_id turn_log.tl_transcript
 let turn_log_started_at turn_log = Masc_tui_keeper_chat_log.started_at turn_log.tl_log
 
-(* Fetch each journal identity once, newest first by its earliest history row.
-   Held and unavailable sources are excluded; the source-aware caller keeps
-   operation and autonomous endpoint routing separate from these display keys. *)
+type journal_key = string * Masc_tui_keeper_chat_log.journal_source
+
+let turn_log_journal_key log : journal_key =
+  turn_log_keeper_name log, Masc_tui_keeper_chat_log.source log.tl_log
+
+(* Fetch each scoped journal once, newest first by its earliest history row.
+   Display strings never decide whether two sources are the same journal. *)
 let journal_fetch_targets ~held ~unavailable
-    (candidates : (string * float) list) =
+    (candidates : (journal_key * float) list) =
   let earliest = Hashtbl.create 16 in
   List.iter
     (fun (operation_id, at) ->
@@ -3088,29 +3084,21 @@ let journal_fetch_targets ~held ~unavailable
   Hashtbl.fold (fun operation_id at acc -> (operation_id, at) :: acc) earliest []
   |> List.filter (fun (operation_id, _) ->
          not
-           (List.exists (String.equal operation_id) held
-           || List.exists (String.equal operation_id) unavailable))
+           (List.mem operation_id held || List.mem operation_id unavailable))
   |> List.stable_sort (fun (id_a, at_a) (id_b, at_b) ->
          match Float.compare at_b at_a with
-         | 0 -> String.compare id_a id_b
+         | 0 -> compare id_a id_b
          | order -> order)
 ;;
 
 let journal_source_of_history (row : Masc_tui_keeper_chat_history.row) =
-  match row.operation_id, row.turn_sequence, row.turn_id with
-  | Some operation_id, _, _ -> Some (Masc_tui_keeper_chat_log.Operation operation_id)
-  | None, Some _, Some turn_id ->
-      Option.map (fun turn_ref -> Masc_tui_keeper_chat_log.Autonomous_turn turn_ref)
-        (Ids.Turn_ref.of_string turn_id)
-  | None, _, _ -> None
+  row.execution_source
 ;;
 
-let journal_source_fetch_targets ~held ~unavailable candidates =
-  let keyed = List.map (fun (source, at) -> Masc_tui_keeper_chat_log.source_key source, at) candidates in
+let journal_source_fetch_targets ~keeper_name ~held ~unavailable candidates =
+  let keyed = List.map (fun (source, at) -> (keeper_name, source), at) candidates in
   journal_fetch_targets ~held ~unavailable keyed
-  |> List.filter_map (fun (key, at) ->
-      List.find_map (fun (source, _) ->
-        if Masc_tui_keeper_chat_log.source_key source = key then Some (source, at) else None) candidates)
+  |> List.map (fun ((_, source), at) -> source, at)
 ;;
 
 let autonomous_journal_candidates ~keeper_name rows =
@@ -3156,6 +3144,18 @@ let turn_log_holds_the_turn turn_log =
   | Masc_tui_keeper_chat_transcript.Waiting
   | Masc_tui_keeper_chat_transcript.Working ->
       false
+;;
+
+(* History or operation records may close progress before the journal tail.
+   A heard terminal event or a successful replay after a terminal operation
+   retires replay; a checkpoint's Run_finished leaves the fold Waiting. *)
+let turn_log_has_ended turn_log =
+  match Masc_tui_keeper_chat_transcript.ending_source turn_log.tl_transcript,
+        Masc_tui_keeper_chat_transcript.phase turn_log.tl_transcript with
+  | Ending_heard_in_stream, (Stream_ended | Stream_failed _) -> true
+  | Ending_heard_in_stream, (Waiting | Working) -> false
+  | Ending_read_from_record, (Waiting | Working | Stream_ended | Stream_failed _) ->
+      Masc_tui_keeper_chat_log.terminal_replay turn_log.tl_log = Masc_tui_keeper_chat_log.Replayed_after_terminal
 ;;
 
 type inflight_phase =
@@ -4091,6 +4091,9 @@ module Browser_lane_view = struct
          | Never_started ->
              [host_line "BiDi host: none has run for this workspace"]
              @ host_connection_note t @ attach ~address:None
+         | Record_missing_but_locked ->
+             [host_line "BiDi host: one holds the workspace lock, but its record is missing";
+              host_line "Do not start another host · inspect the existing process"]
          | Running entry ->
              (* The first row is the one a short screen keeps, so it says
                 where the host stands beside the list, not only that it runs. *)
@@ -4200,6 +4203,8 @@ module Browser_lane_view = struct
     | Host_reported report ->
         Some (match report.state with
           | Never_started -> "BiDi host: none has run for this workspace · b:how to attach"
+          | Record_missing_but_locked ->
+              "BiDi host: lock held, record missing · b:inspect the existing process"
           (* A gesture is refused for want of a listed BiDi connection, so a
              host that runs is one this server does not list. *)
           | Running { attached_at = Some _; pid; _ } ->
@@ -4249,6 +4254,7 @@ module Browser_lane_view = struct
     | Host_reported report ->
         (match report.state with
          | Never_started -> false
+         | Record_missing_but_locked -> true
          | Running _ | Ended _ | Died _ | Unreadable _ -> true)
   (* The rows of a host report a short screen reads first: where the host
      stands, and what that asks of the operator. *)
@@ -5273,11 +5279,7 @@ let browser_lane_url_line ~cols draft =
   let safe = Masc_tui_keeper_chat_projection.terminal_safe_text draft in
   "  URL> " ^ Masc_tui_message_layout.input_viewport ~max_cells:(max 1 (cols - 12)) safe ^ "▏"
 
-type workspace_activity_read = {
-  war_at : float;
-  war_hours : float;
-  war_keepers : (string * (Tui_decode.file_change_snapshot, string) result) list;
-}
+type workspace_activity_read = Tui_decode.repository_activity_snapshot
 
 type runtime_config_reading = {
   rcv_path : string;
@@ -6445,6 +6447,7 @@ type state = {
   mutable schedule_form_refusal: schedule_form_refusal option;
   mutable lanes: Tui_decode.keeper_lanes_snapshot option;
   mutable keeper_lanes_inflight: bool;
+  mutable keeper_lanes_reread_pending: bool;
   mutable keeper_lanes_resume: bool;
   mutable lane_inventory: Masc.Tui_decode_lane_inventory.snapshot option;
   mutable standalone_lanes: Tui_decode.standalone_lanes_snapshot option;
@@ -7031,16 +7034,16 @@ type state = {
      pruned, or unreadable -- so a refresh does not ask for them again this
      session. A request that never got an answer is not here: the next
      refresh asks again. *)
-  mutable msg_journal_unavailable: string list;
+  mutable msg_journal_unavailable: journal_key list;
   (* Journal sources a fiber is reading right now, so a load that
      arrives before the read returns does not start a second one. *)
-  mutable msg_journal_inflight: string list;
+  mutable msg_journal_inflight: journal_key list;
   (* Journal sources a stream frame named while their journal was being read,
      with the highest journal seq the frames named: the read in flight may
      have stopped short of that line, so when it lands another read starts
      from where it stopped -- unless it reached the line, which ends the
-     chain. One entry per operation, however many frames arrived. *)
-  mutable msg_journal_wanted: (string * int option) list;
+     chain. One entry per Keeper and typed source, however many frames arrived. *)
+  mutable msg_journal_wanted: (journal_key * int option) list;
   (* The server refused this client's credential for the journal endpoint.
      Said once; no journal is asked for again this session. *)
   mutable msg_journal_reads_refused: bool;
@@ -7262,8 +7265,12 @@ let suspend_workspace_readings state =
   state.gate_snapshot_read <- Snapshot_read.invalidate state.gate_snapshot_read;
   state.schedules_read <- Snapshot_read.invalidate state.schedules_read;
   state.keeper_sandbox_logs_inflight <- None;
-  state.keeper_lanes_resume <- state.keeper_lanes_resume || state.keeper_lanes_inflight;
+  (* A reread queued behind the retired read is satisfied by the replacement
+     read that reconfirmation launches; keep only its demand. *)
+  state.keeper_lanes_resume <-
+    state.keeper_lanes_resume || state.keeper_lanes_inflight || state.keeper_lanes_reread_pending;
   state.keeper_lanes_inflight <- false;
+  state.keeper_lanes_reread_pending <- false;
   state.connectors_inflight <- false;
   state.connectors_reload_after_inflight <- false;
   state.memory_health_inflight <- false;
@@ -7947,12 +7954,22 @@ let live_for_keeper state keeper_name =
 (* Scoped by keeper like every other reading of the settled logs: a request
    id is minted per send, but the rule that one turn has one source is a
    rule per keeper's conversation. *)
-let settled_log_for_request state ~keeper_name request_id =
+let settled_log_for_source state ~keeper_name source =
   List.find_opt
     (fun turn_log ->
       String.equal (turn_log_keeper_name turn_log) keeper_name
-      && String.equal (turn_log_request_id turn_log) request_id)
+      && Masc_tui_keeper_chat_log.source turn_log.tl_log = source)
     state.msg_settled_logs
+;;
+
+let settled_log_for_request state ~keeper_name request_id =
+  settled_log_for_source state ~keeper_name (Masc_tui_keeper_chat_log.Operation request_id)
+;;
+
+let turn_log_execution_source log =
+  match Masc_tui_keeper_chat_log.source log.tl_log with
+  | Operation _ -> Masc_tui_keeper_chat_log.Operation (turn_log_execution_id log)
+  | Autonomous_turn _ as source -> source
 ;;
 
 (* Choose one execution source before classifying it as settled or observed.
@@ -7984,11 +8001,11 @@ let selected_source_logs_for_keeper state keeper_name =
    @ Option.to_list state.msg_live)
   |> List.filter (fun log -> String.equal (turn_log_keeper_name log) keeper_name)
   |> List.fold_left (fun selected log ->
-    let execution_id = turn_log_execution_id log in
-    match List.find_opt (fun prior -> turn_log_execution_id prior = execution_id) selected with
+    let execution = turn_log_execution_source log in
+    match List.find_opt (fun prior -> turn_log_execution_source prior = execution) selected with
     | None -> selected @ [log]
     | Some prior when turn_log_preferred ~candidate:log ~held:prior ->
-      List.map (fun prior -> if turn_log_execution_id prior = execution_id then log else prior) selected
+      List.map (fun prior -> if turn_log_execution_source prior = execution then log else prior) selected
     | Some _ -> selected) []
 ;;
 
@@ -8014,22 +8031,24 @@ let settled_logs_for_keeper state keeper_name =
   |> List.filter (fun log -> List.exists (( == ) log) state.msg_settled_logs)
 ;;
 
-(* The requests a history load for [keeper_name] reads no journal for: every
-   settled log that stands for its turn, every request still in flight, and
+(* The sources a history load for [keeper_name] reads no journal for: every
+   log with a terminal event, every request still in flight, and
    every journal already being read. The settled logs are not
    {!settled_logs_for_keeper}, which keeps one log per execution for drawing:
    the other requests of a batch are held too, and leaving them out asked for
    their journals again on every history load, so the server decoded each of
    those journals whole on every refresh. *)
-let journal_held_request_ids state keeper_name =
+let journal_held_keys state keeper_name =
   List.filter_map
     (fun log ->
-      if String.equal (turn_log_keeper_name log) keeper_name && turn_log_holds_the_turn log
-      then Some (turn_log_request_id log)
+      if String.equal (turn_log_keeper_name log) keeper_name && turn_log_has_ended log
+      then Some (turn_log_journal_key log)
       else None)
     state.msg_settled_logs
-  @ List.map (fun entry -> entry.sent_request.request_id) state.msg_inflight
-  @ state.msg_journal_inflight
+  @ List.filter_map (fun entry ->
+      if String.equal entry.sent_request.keeper_name keeper_name
+      then Some (turn_log_journal_key entry.log) else None) state.msg_inflight
+  @ List.filter (fun (keeper, _) -> String.equal keeper keeper_name) state.msg_journal_inflight
 ;;
 
 (* A journal's permanent failure says nothing about the exact operation
@@ -8041,12 +8060,12 @@ let journal_held_request_ids state keeper_name =
 let unavailable_journal_operation_targets state keeper_name =
   state.msg_settled_logs
   |> List.filter_map (fun log ->
-      let request_id = turn_log_request_id log in
+      let key = turn_log_journal_key log in
       let journal_unavailable = state.msg_journal_reads_refused
-        || List.mem request_id state.msg_journal_unavailable in
-      let read_inflight = List.mem request_id state.msg_journal_inflight in
+        || List.mem key state.msg_journal_unavailable in
+      let read_inflight = List.mem key state.msg_journal_inflight in
       let owned = List.exists (fun (entry : inflight) ->
-        String.equal entry.sent_request.request_id request_id) state.msg_inflight in
+        turn_log_journal_key entry.log = key) state.msg_inflight in
       let terminal = Option.exists Keeper_chat_operation.is_terminal
         (Masc_tui_keeper_chat_log.operation_state log.tl_log) in
       match Masc_tui_keeper_chat_log.source log.tl_log with
@@ -8071,10 +8090,10 @@ let unavailable_journal_operation_targets state keeper_name =
    value, or the memo keeps answering with the loaded rows the log now
    draws. *)
 let hold_settled_log state turn_log =
-  let request_id = turn_log_request_id turn_log in
+  let source = Masc_tui_keeper_chat_log.source turn_log.tl_log in
   let keeper_name = turn_log_keeper_name turn_log in
   let replaceable =
-    match settled_log_for_request state ~keeper_name request_id with
+    match settled_log_for_source state ~keeper_name source with
     | Some existing -> existing == turn_log || not (turn_log_holds_the_turn existing)
     | None -> true
   in
@@ -8092,40 +8111,40 @@ let hold_settled_log state turn_log =
            (fun held ->
              not
                (String.equal (turn_log_keeper_name held) keeper_name
-               && String.equal (turn_log_request_id held) request_id))
+               && Masc_tui_keeper_chat_log.source held.tl_log = source))
            state.msg_settled_logs)
   end
 ;;
 
-let remember_journal_unavailable state operation_id =
-  if not (List.exists (String.equal operation_id) state.msg_journal_unavailable)
-  then state.msg_journal_unavailable <- operation_id :: state.msg_journal_unavailable
+let remember_journal_unavailable state key =
+  if not (List.mem key state.msg_journal_unavailable)
+  then state.msg_journal_unavailable <- key :: state.msg_journal_unavailable
 ;;
 
-let journal_read_started state operation_id =
-  if not (List.exists (String.equal operation_id) state.msg_journal_inflight)
-  then state.msg_journal_inflight <- operation_id :: state.msg_journal_inflight
+let journal_read_started state key =
+  if not (List.mem key state.msg_journal_inflight)
+  then state.msg_journal_inflight <- key :: state.msg_journal_inflight
 ;;
 
-let journal_read_finished state operation_id =
+let journal_read_finished state key =
   state.msg_journal_inflight <-
     List.filter
-      (fun inflight -> not (String.equal inflight operation_id))
+      (fun inflight -> inflight <> key)
       state.msg_journal_inflight
 ;;
 
 (* The highest seq named wins; a frame with no seq (the settle terminal)
    never lowers what an earlier frame named. *)
-let journal_read_wanted state operation_id seq =
+let journal_read_wanted state key seq =
   let highest =
-    match List.assoc_opt operation_id state.msg_journal_wanted, seq with
+    match List.assoc_opt key state.msg_journal_wanted, seq with
     | Some (Some held), Some seq -> Some (max held seq)
     | Some (Some held), None -> Some held
     | Some None, seq | None, seq -> seq
   in
   state.msg_journal_wanted <-
-    (operation_id, highest)
-    :: List.remove_assoc operation_id state.msg_journal_wanted
+    (key, highest)
+    :: List.remove_assoc key state.msg_journal_wanted
 ;;
 
 type journal_wanted =
@@ -8135,11 +8154,11 @@ type journal_wanted =
 (* Whether a read was wanted for this operation while one was in flight, and
    the fact taken: the caller decides the read it stands for, against the
    seq the frames named. *)
-let take_journal_wanted state operation_id =
-  match List.assoc_opt operation_id state.msg_journal_wanted with
+let take_journal_wanted state key =
+  match List.assoc_opt key state.msg_journal_wanted with
   | Some highest_seq ->
       state.msg_journal_wanted <-
-        List.remove_assoc operation_id state.msg_journal_wanted;
+        List.remove_assoc key state.msg_journal_wanted;
       Wanted { highest_seq }
   | None -> Not_wanted
 ;;
@@ -8159,12 +8178,47 @@ let journal_log_started_at ~fallback
   | _ :: _ | [] -> fallback
 ;;
 
+(* The mailbox's journal-result transition. A valid partial read remains
+   followable even when a separate history GET already contains the answer.
+   Availability is evidence from the endpoint, never inferred from history. *)
+let record_terminal_replay state log replay =
+  Masc_tui_keeper_chat_log.observe_terminal_replay log.tl_log replay;
+  if Masc_tui_keeper_chat_log.terminal_replay log.tl_log =
+       Masc_tui_keeper_chat_log.Replayed_after_terminal then
+    hold_settled_log state log
+;;
 
-(* Where a journal read starts for this operation: after what a held log of
+let receive_journal_result state ~keeper_name ~source ~started_at journal =
+  let key = keeper_name, source in
+  journal_read_finished state key;
+  match journal with
+  | Ok lines ->
+      let log =
+        match settled_log_for_source state ~keeper_name source with
+        | Some held -> held
+        | None -> turn_log_create_for_source ~keeper_name ~source
+            ~started_at:(journal_log_started_at ~fallback:started_at lines)
+      in
+      let accepted = turn_log_add_journaled log lines in
+      Masc_tui_keeper_chat_log.commit log.tl_log;
+      if lines <> [] || Masc_tui_keeper_chat_log.entries log.tl_log <> []
+      then hold_settled_log state log;
+      Ok (log, accepted)
+  | Error error ->
+      (match error with
+       | Masc_tui_keeper_chat_log.Unknown_operation | Journal_pruned | Journal_missing
+       | Journal_unavailable _ | Events_denied _ | Events_undecodable _ ->
+           remember_journal_unavailable state key
+       | Cursor_refused _ | Events_refused _ | Events_transport _ -> ());
+      Error error
+;;
+
+
+(* Where a journal read starts for this source: after what a held log of
    it already has (a cut live stream's partial log, or an earlier read of a
    turn still running), or the whole journal. *)
-let journal_resume_position state ~keeper_name operation_id =
-  match settled_log_for_request state ~keeper_name operation_id with
+let journal_resume_position state ~keeper_name source =
+  match settled_log_for_source state ~keeper_name source with
   | Some held when not (turn_log_holds_the_turn held) ->
       Masc_tui_keeper_chat_log.resume_position held.tl_log
   | Some _ | None -> Masc.Keeper_chat_event_log.Whole_turn
@@ -8200,29 +8254,29 @@ type journal_follow =
           announced, so another starts when it lands. *)
 
 let journal_follow_for_source state ~keeper_name ~source ~seq ~at =
-  let request_id = Masc_tui_keeper_chat_log.source_key source in
+  let key = keeper_name, source in
   let own_request =
     List.exists
-      (fun entry -> String.equal entry.sent_request.request_id request_id)
+      (fun entry -> turn_log_journal_key entry.log = key)
       state.msg_inflight
   in
-  let held = settled_log_for_request state ~keeper_name request_id in
+  let held = settled_log_for_source state ~keeper_name source in
   if own_request
      || state.msg_journal_reads_refused
-     || List.exists (String.equal request_id) state.msg_journal_unavailable
+     || List.mem key state.msg_journal_unavailable
   then Follow_nothing
   else
     match held with
-    | Some held when turn_log_holds_the_turn held -> Follow_nothing
+    | Some held when turn_log_has_ended held -> Follow_nothing
     | held ->
-        let since_seq = journal_resume_position state ~keeper_name request_id in
+        let since_seq = journal_resume_position state ~keeper_name source in
         let already_held =
           match seq with
           | Some seq -> not (Masc.Keeper_chat_event_log.seq_is_after since_seq seq)
           | None -> false
         in
         if already_held then Follow_nothing
-        else if List.exists (String.equal request_id) state.msg_journal_inflight
+        else if List.mem key state.msg_journal_inflight
         then Follow_read_after_inflight
         else
           Follow_read
@@ -8234,15 +8288,13 @@ let journal_follow_for_source state ~keeper_name ~source ~seq ~at =
             }
 ;;
 
-(* Whether the loaded transcript says this turn is over: the keeper's reply,
-   or a failure, is on record. A journal that still cannot stand for such a
-   turn has nothing more coming -- the settle-time failure is never journaled
-   (#33108) -- so it is not worth asking for again. *)
-let loaded_turn_has_ended state ~keeper_name request_id =
+(* A recorded output can replace the polled text preview. It does not prove
+   the journal ended: persistence and terminal publication are separate. *)
+let loaded_turn_has_output state ~keeper_name source =
   Option.exists (String.equal keeper_name) state.msg_loaded_keeper
   && List.exists
        (fun (row : msg_entry) ->
-         String.equal row.me_request_id request_id
+         row.me_execution_source = Some source
          &&
          match row.me_role with
          | Message_keeper | Message_autonomous | Message_error -> true
@@ -8278,25 +8330,30 @@ let loaded_turn_has_ended state ~keeper_name request_id =
    ([hold_settled_log]), which is how a cut stream's turn is followed to its
    end. Answered per frame from the same list the settled blocks come from,
    so a log that comes to hold its turn leaves here the frame it does. *)
+(* Visual progress may close from an authoritative operation record while
+   its partial journal remains eligible for replay. History rows and journal
+   availability do not settle the transcript's phase. *)
 let observed_log_has_ended state log =
-  loaded_turn_has_ended state ~keeper_name:(turn_log_keeper_name log)
-    (turn_log_execution_id log)
-  || match Masc_tui_keeper_chat_transcript.phase log.tl_transcript with
-     | Masc_tui_keeper_chat_transcript.Stream_ended
-     | Masc_tui_keeper_chat_transcript.Stream_failed _ -> true
-     | Masc_tui_keeper_chat_transcript.Waiting
-     | Masc_tui_keeper_chat_transcript.Working -> false
+  match Masc_tui_keeper_chat_transcript.phase log.tl_transcript with
+  | Stream_ended | Stream_failed _ -> true
+  | Waiting | Working ->
+      (* An autonomous final row has no operation record to poll. It closes
+         visual progress only; the transcript and replay cursor stay open. *)
+      match turn_log_execution_source log with
+      | Masc_tui_keeper_chat_log.Operation _ -> false
+      | Masc_tui_keeper_chat_log.Autonomous_turn _ as source ->
+          loaded_turn_has_output state ~keeper_name:(turn_log_keeper_name log) source
 ;;
 
 let observed_log_is_unavailable state log =
-  List.exists (String.equal (turn_log_request_id log)) state.msg_journal_unavailable
+  List.mem (turn_log_journal_key log) state.msg_journal_unavailable
 ;;
 
 let observed_logs_for_keeper state keeper_name =
   let in_flight log =
     List.exists
       (fun entry ->
-        String.equal entry.sent_request.request_id (turn_log_request_id log))
+        turn_log_journal_key entry.log = turn_log_journal_key log)
       state.msg_inflight
   in
   settled_logs_for_keeper state keeper_name
@@ -8338,7 +8395,9 @@ let observed_turn_text_drawn state keeper_name =
     (observed_logs_for_keeper state keeper_name
      |> List.filter (fun log ->
           not (observed_log_has_ended state log)
-          && not (observed_log_is_unavailable state log)))
+          && not (observed_log_is_unavailable state log)
+          && not (loaded_turn_has_output state
+              ~keeper_name:(turn_log_keeper_name log) (turn_log_execution_source log))))
 ;;
 
 (* Whether a reasoning row is drawn at all under this visibility. The
@@ -8355,12 +8414,12 @@ let reasoning_drawn = function
    durable trace row -- "N reasoning steps, content withheld" -- as the only
    record that the keeper thought at all, and that row stays. *)
 type held_turn =
-  { ht_request_id : string
+  { ht_source : Masc_tui_keeper_chat_log.journal_source
   ; ht_reasoning : bool
   }
 
 let held_turn_of_log turn_log =
-  { ht_request_id = turn_log_execution_id turn_log
+  { ht_source = turn_log_execution_source turn_log
   ; ht_reasoning =
       Masc_tui_keeper_chat_transcript.thinking_lines turn_log.tl_transcript <> []
   }
@@ -8374,7 +8433,7 @@ let held_turn_of_log turn_log =
    pane said, and a failure stay in the committed rows. The renderer uses a
    log's failure only when no committed error row names that operation. *)
 let log_draws_row (held : held_turn) (row : msg_entry) =
-  String.equal row.me_request_id held.ht_request_id
+  row.me_execution_source = Some held.ht_source
   &&
   match row.me_role with
   | Message_keeper | Message_autonomous | Message_tool | Message_skill _ -> true
@@ -8387,13 +8446,25 @@ let log_draws_row (held : held_turn) (row : msg_entry) =
 (* The committed rows the pane still draws once these turns are held by
    settled logs: a turn has one source, and for a held turn that is the log.
    The same list when nothing is held, so the memo above it can tell. *)
+let media_remainder (row : msg_entry) =
+  match row.me_role, row.me_media with
+  | (Message_keeper | Message_autonomous), (_ :: _ as media) ->
+      Some {row with me_text =
+        Masc_tui_chat_media.append_text ~text:"" media
+        |> Masc_tui_keeper_chat_projection.terminal_safe_text ~preserve_newlines:true}
+  | (Message_keeper | Message_autonomous), []
+  | (Message_tool | Message_skill _ | Message_thinking | Message_user _
+    | Message_status | Message_local | Message_error | Message_memory), _ -> None
+;;
+
 let rows_the_logs_do_not_draw ~held rows =
   match held with
   | [] -> rows
   | held ->
-      List.filter
+      List.filter_map
         (fun (row : msg_entry) ->
-          not (List.exists (fun turn -> log_draws_row turn row) held))
+          if List.exists (fun turn -> log_draws_row turn row) held
+          then media_remainder row else Some row)
         rows
 ;;
 
@@ -8408,11 +8479,11 @@ let rows_the_logs_do_not_draw ~held rows =
 let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
   List.iter
     (fun turn_log ->
-      let request_id = turn_log_execution_id turn_log in
+      let execution_source = turn_log_execution_source turn_log in
       List.iter
         (fun (row : msg_entry) ->
           match row.me_tool_block with
-          | Some block when String.equal row.me_request_id request_id ->
+          | Some block when row.me_execution_source = Some execution_source ->
               List.iter
                 (fun (activity : Masc_tui_keeper_chat_transcript.tool_activity) ->
                   match activity.execution_id with
@@ -8431,7 +8502,7 @@ let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
          row that knew better is left out of the timeline (#36882). *)
       List.iter
         (fun (row : msg_entry) ->
-          if String.equal row.me_request_id request_id then
+          if row.me_execution_source = Some execution_source then
             List.iter (fun (skill : Masc_tui_keeper_chat_transcript.skill_activity) ->
               let observed =
                 Option.is_some skill.turn_ref && Option.is_some skill.skill_tool_use_id
@@ -8976,15 +9047,12 @@ let workspace_activity_rows (state : state) =
       match Masc_tui_fetched.value (Masc_tui_fetched.view_for ~equal:String.equal state.workspace_activity ~key:repo_id) with
       | None -> []
       | Some reading ->
-          List.concat_map (fun (_, result) -> match result with
-            | Error _ -> []
-            | Ok (snapshot : Tui_decode.file_change_snapshot) ->
-                List.filter_map (fun (change : Tui_decode.file_change) ->
-                  match change.fc_location with
-                  | Tui_decode.Fc_in_repo location when String.equal location.repo_id repo_id ->
-                      Some (change, location.relative_path)
-                  | Tui_decode.Fc_in_repo _ | Tui_decode.Fc_in_bundle _ | Tui_decode.Fc_at_absolute_path _ -> None)
-                  snapshot.fcs_changes) reading.war_keepers
+          List.filter_map (fun (change : Tui_decode.file_change) ->
+            match change.fc_location with
+            | Tui_decode.Fc_in_repo location when String.equal location.repo_id repo_id ->
+                Some (change, location.relative_path)
+            | Tui_decode.Fc_in_repo _ | Tui_decode.Fc_in_bundle _ | Tui_decode.Fc_at_absolute_path _ -> None)
+            reading.Tui_decode.ras_changes
           |> List.sort (fun ((a : Tui_decode.file_change), _) ((b : Tui_decode.file_change), _) ->
               Float.compare b.fc_at a.fc_at)
 
@@ -9754,6 +9822,7 @@ let create_state
   schedule_form_refusal = None;
   lanes = None;
   keeper_lanes_inflight = false;
+  keeper_lanes_reread_pending = false;
   keeper_lanes_resume = false;
   lane_inventory = None;
   standalone_lanes = None;
@@ -10023,7 +10092,7 @@ let create_state
   msg_file_changes_refresh_pending = false;
   msg_file_changes_error = None;
   msg_file_changes_generation = 0;
-  msg_memory_visibility = Memory_summary;
+  msg_memory_visibility = Memory_hidden;
   msg_memory_error = None;
   msg_memory_dropped = 0;
   msg_history_load_generation = 0;
@@ -10409,13 +10478,6 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
       (fun entry -> String.equal entry.me_keeper_name keeper_name)
       state.msg_history
   in
-  let session = List.map (fun (row : msg_entry) ->
-      if is_user_row row
-         && Option.is_some (Option.bind
-              (settled_log_for_request state ~keeper_name row.me_request_id)
-              (fun log -> Masc_tui_keeper_chat_transcript.rejection log.tl_transcript))
-      then { row with me_text = "전송 거절됨\n" ^ row.me_text }
-      else row) session in
   let held =
     selected_source_logs_for_keeper state keeper_name
     |> List.filter turn_log_holds_the_turn
@@ -10438,16 +10500,17 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
                | Masc_tui_keeper_chat_transcript.Drawn_reply _ -> true
                | _ -> false)
              (Masc_tui_keeper_chat_transcript.drawn log.tl_transcript)
-         then Some (turn_log_execution_id log)
+         then Some (turn_log_execution_source log)
          else None)
   in
   let without_partial_replies rows =
-    List.filter
+    List.filter_map
       (fun (row : msg_entry) ->
         match row.me_role with
-        | Message_keeper | Message_autonomous ->
-            not (List.exists (String.equal row.me_request_id) partial_replies)
-        | _ -> true)
+        | Message_keeper | Message_autonomous
+          when List.exists (fun source -> row.me_execution_source = Some source) partial_replies ->
+            media_remainder row
+        | _ -> Some row)
       rows
   in
   (* Partial selected logs own the exact activities already drawn, even
@@ -10458,7 +10521,7 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
   let remaining_activity (row : msg_entry) =
     let module Transcript = Masc_tui_keeper_chat_transcript in
     let drawn = partial_logs
-      |> List.filter (fun log -> String.equal row.me_request_id (turn_log_execution_id log))
+      |> List.filter (fun log -> row.me_execution_source = Some (turn_log_execution_source log))
       |> List.concat_map (fun log -> Transcript.drawn log.tl_transcript) in
     if drawn = [] then Some row else match row.me_role with
     | Message_tool ->
@@ -13249,6 +13312,7 @@ let keeper_message_timing_visible (state : state) =
 
 let keeper_message_unfolded_status_rows (state : state) live ~now =
   Masc_tui_keeper_chat_transcript.status_rows
+    ~compact:(state.msg_origin_display = Masc_tui_message_layout.Origin_bare)
     ~show_timing:(keeper_message_timing_visible state) ~now live
 
 (* The most recently submitted input can be queued behind the execution that
@@ -13300,7 +13364,10 @@ let keeper_message_visible_status_rows (state : state) live ~now =
   if state.msg_turn_folded then
     List.filter
       (fun (kind, _) ->
-        Masc_tui_keeper_chat_transcript.status_row_survives_folding kind)
+        match kind with
+        | Masc_tui_keeper_chat_transcript.Attention
+          when state.msg_origin_display = Masc_tui_message_layout.Origin_bare -> true
+        | _ -> Masc_tui_keeper_chat_transcript.status_row_survives_folding kind)
       rows
   else rows
 
@@ -13311,6 +13378,16 @@ let keeper_message_folded_status_count (state : state) live ~now =
   else
     List.length (keeper_message_unfolded_status_rows state live ~now)
     - List.length (keeper_message_visible_status_rows state live ~now)
+
+let keeper_message_standalone_details_hint (state : state) live ~now =
+  keeper_message_folded_status_count state live ~now > 0
+  && not (List.exists
+    (fun (kind, _) -> kind = Masc_tui_keeper_chat_transcript.Progress)
+    (keeper_message_visible_status_rows state live ~now))
+
+let keeper_message_counted_status_rows state live ~now =
+  List.length (keeper_message_visible_status_rows state live ~now)
+  + if keeper_message_standalone_details_hint state live ~now then 1 else 0
 
 let keeper_observed_turn (state : state) keeper_name =
   if Option.is_some state.keeper_turns_error then None
@@ -13519,6 +13596,17 @@ let keeper_message_activity_rows (state : state) =
   | (Tools_compact | Tools_results), None -> []
   | (Tools_compact | Tools_results), Some keeper_name ->
       let waiting = keeper_message_waiting_requests state ~keeper_name in
+      (* The progress row speaks for one execution. Only that execution's
+         phase is a duplicate here; another request of this Keeper -- one that
+         is still finalising while a newer one leads the progress row -- keeps
+         its own clause. *)
+      let progress_execution =
+        Option.map turn_log_execution_id (keeper_message_status_log state) in
+      let shown_by_progress entry =
+        progress_execution = Some (turn_log_execution_id entry.log) in
+      (* A running turn the server reports but no request here owns is named
+         only when no progress row is drawn at all. *)
+      let has_progress = Option.is_some progress_execution in
       let clauses = ref [] and urgent = ref [] in
       let add text = clauses := text :: !clauses in
       let attention text = urgent := text :: !urgent in
@@ -13536,20 +13624,26 @@ let keeper_message_activity_rows (state : state) =
                   && Masc_tui_keeper_chat_projection.same_request_identity
                     request entry.sent_request) waiting)
           | Turn_preflight _ | Turn_streaming -> false) own then
-        attention "메시지 전달 재확인 중";
+        attention "메시지 전송 확인 중";
       let has_working = any_phase (fun transcript ->
         Masc_tui_keeper_chat_transcript.phase transcript = Working) in
-      if has_working then add "기존 작업 처리 중";
-      if any_phase (fun transcript -> Masc_tui_keeper_chat_transcript.phase transcript = Stream_ended) then
+      let unshown_phase phase = List.exists (fun entry ->
+          not (shown_by_progress entry) && phase entry.log.tl_transcript) own in
+      if unshown_phase (fun transcript ->
+          Masc_tui_keeper_chat_transcript.phase transcript = Working) then
+        add "기존 작업 처리 중";
+      if unshown_phase (fun transcript ->
+          Masc_tui_keeper_chat_transcript.phase transcript = Stream_ended) then
         add "응답 마무리 중";
       List.iter (fun (admission, text) ->
           if List.exists (fun entry ->
-              entry.phase = Turn_streaming
+              not (shown_by_progress entry)
+              && entry.phase = Turn_streaming
               && Masc_tui_keeper_chat_transcript.phase entry.log.tl_transcript = Waiting
               && not (Masc_tui_keeper_chat_transcript.awaiting_continuation entry.log.tl_transcript)
               && Option.map fst (Masc_tui_keeper_chat_transcript.admission entry.log.tl_transcript) = admission) own
           then add text)
-        [None, "메시지 접수 확인 중";
+        [None, "메시지 전송 확인 중";
          Some Masc_tui_keeper_chat_live.Running, "응답 시작 중";
          Some Settled, "완료된 응답을 다시 읽는 중"];
       if not has_working then
@@ -13558,7 +13652,8 @@ let keeper_message_activity_rows (state : state) =
          | None -> List.iter (fun (row : Tui_decode.keeper_turn_row) ->
              if String.equal row.ktr_keeper_name keeper_name then
                match row.ktr_state with
-               | Keeper_turn_running _ -> add "기존 작업 처리 중"
+               | Keeper_turn_running _ ->
+                   if not has_progress then add "기존 작업 처리 중"
                | Keeper_turn_unavailable _ -> attention "현재 작업 확인 불가"
                | Keeper_turn_idle -> ()) state.keeper_turns);
       if waiting <> [] then begin
@@ -13566,8 +13661,8 @@ let keeper_message_activity_rows (state : state) =
         let count delivery = List.length (List.filter (fun (_, kind) -> kind = delivery) waiting) in
         List.iter (fun (delivery, text) -> let n = count delivery in
           if n > 0 then add (Printf.sprintf "%d건 %s" n text))
-          [Local_pending, "전송 전"; Awaiting_receipt, "접수 확인 중";
-           Rechecking_delivery, "전달 재확인 중"];
+          [Local_pending, "전송 대기"; Awaiting_receipt, "전송 중";
+           Rechecking_delivery, "전송 확인 중"];
         let requests = List.map fst waiting in
         let holds request = List.exists
           (Masc_tui_keeper_chat_projection.same_request_identity request) requests in
@@ -13583,9 +13678,9 @@ let keeper_message_activity_rows (state : state) =
         else if List.for_all (fun request -> List.exists (fun (received, result) ->
             Masc_tui_keeper_chat_projection.same_request_identity request received
             && Result.is_ok result) receipts) requests then
-          add "다음 순서로 접수됨"
-        else if receipts <> [] then add "일부 메시지 다음 순서로 접수됨"
-        else if count Keeper_queued > 0 then add "접수됨"
+          add "다음 순서로 전달 대기"
+        else if receipts <> [] then add "일부 메시지 다음 순서로 전달 대기"
+        else if count Keeper_queued > 0 then add "처리 대기"
       end;
       if List.exists (fun (name, _, intervention) ->
           String.equal name keeper_name && intervention = Retained_after_stop)
@@ -13593,15 +13688,10 @@ let keeper_message_activity_rows (state : state) =
       else if List.exists (fun (name, _, intervention) ->
           String.equal name keeper_name && intervention = Retained_before_dispatch)
           state.keeper_interactive_waiting then attention "전송 전 보관 중 · /queue resume";
-      let folded = match keeper_message_status_log state with
-        | Some live when String.equal (turn_log_keeper_name live) keeper_name ->
-            keeper_message_folded_status_count state live.tl_transcript ~now:(Unix.gettimeofday ())
-        | Some _ | None -> 0 in
       let keys =
-        (match keeper_observed_stop_hint state with None -> "" | Some _ -> " · Esc:중단")
-        ^ (if folded > 0 then Printf.sprintf " · +%d" folded else "") in
+        match keeper_observed_stop_hint state with None -> "" | Some _ -> " · Esc:중단" in
       match List.rev !urgent @ List.rev !clauses with
-      | [] when folded = 0 -> []
+      | [] -> []
       | parts -> [{ Masc_tui_answering.lead = String.concat " · " parts;
           rest = ""; keys }]
 ;;
@@ -13656,10 +13746,12 @@ let keeper_message_inflight_drawn (state : state) =
         state.msg_inflight
     | Some _ | None -> state.msg_inflight
   in
+  (* Background Keepers are visible in the roster and Activity pane. Only
+     this conversation's diagnostic requests belong beside its composer. *)
   let uncovered = match state.msg_tool_visibility with
-    | Tools_full -> uncovered
-    | Tools_compact | Tools_results -> List.filter (fun entry ->
-        state.msg_target_keeper_name <> Some entry.sent_request.keeper_name) uncovered in
+    | Tools_full -> List.filter (fun entry ->
+        state.msg_target_keeper_name = Some entry.sent_request.keeper_name) uncovered
+    | Tools_compact | Tools_results -> [] in
   List.fold_left
     (fun groups entry ->
       let execution_id = turn_log_execution_id entry.log in
@@ -13690,11 +13782,9 @@ let keeper_message_inflight_drawn (state : state) =
         @ [ { representative = entry; count = 1; reconciling_count = reconciling } ])
     [] uncovered
 
-(* Foreign turns keep the complete stop command ahead of their descriptive
-   status. Count these physical rows with the same pane width as rendering;
-   otherwise wrapping a long Keeper name would cover the composer below. *)
-let keeper_message_inflight_rows (state : state) ~chat_cols ~now =
-  let width = Masc_tui_frame.inner_width ~cols:chat_cols in
+(* The current conversation's extra request diagnostics, shared by the
+   renderer and its row budget. Background work stays on the Activity pane. *)
+let keeper_message_inflight_rows (state : state) ~chat_cols:_ ~now =
   let batch_label group =
     if group.count = 1 then ""
     else Printf.sprintf "%d messages in one turn · " group.count
@@ -13725,19 +13815,8 @@ let keeper_message_inflight_rows (state : state) ~chat_cols ~now =
       (Masc_tui_keeper_chat_projection.compact_request_id
          (turn_log_execution_id group.representative.log)) age
   in
-  let mine, others = List.partition
-      (fun group -> state.msg_target_keeper_name =
-          Some group.representative.sent_request.keeper_name)
-      (keeper_message_inflight_drawn state) in
-  List.map (fun group -> true, summary group) mine
-  @ List.concat_map (fun group ->
-      let name = Masc.Tui_terminal_text.sanitize_terminal_text
-          group.representative.sent_request.keeper_name in
-      let command_rows =
-        Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - 2))
-          ("/interrupt " ^ name)
-        |> List.map (fun line -> false, "  " ^ line) in
-      command_rows @ [false, summary group]) others
+  List.map (fun group -> true, summary group)
+    (keeper_message_inflight_drawn state)
 
 let keeper_message_status_rows (state : state) ~terminal_cols =
   let chat_cols = Masc_tui_roster_pane.content_cols
@@ -13764,9 +13843,8 @@ let keeper_message_status_rows (state : state) ~terminal_cols =
             different number of rows than the pane draws. The age in the
             progress row changes the text, never the row count, so the
             two clock reads cannot disagree on the number. *)
-         List.length
-           (keeper_message_visible_status_rows state live.tl_transcript
-              ~now:(Unix.gettimeofday ())))
+         keeper_message_counted_status_rows state live.tl_transcript
+           ~now:(Unix.gettimeofday ()))
   (* The promoted line and the queued ones are entries in the history now --
      the chat pane appends them to the same stream it scrolls, so the
      conversation holds one time axis. Nothing is reserved for them here:
@@ -13788,10 +13866,8 @@ let keeper_message_status_rows (state : state) ~terminal_cols =
          1
      | Some _ | None -> 0)
   + (if Option.is_some state.msg_loaded_error then 1 else 0)
-  + (if state.msg_memory_visibility <> Memory_hidden
-        && Option.is_some state.msg_memory_error then 1 else 0)
-  + (if state.msg_memory_visibility <> Memory_hidden
-        && state.msg_memory_dropped > 0 then 1 else 0)
+  + (if Option.is_some state.msg_memory_error then 1 else 0)
+  + (if state.msg_memory_dropped > 0 then 1 else 0)
   + (if state.msg_loaded_dropped > 0 then 1 else 0)
   + (if state.msg_older_loading || Option.is_some state.msg_older_error then 1
      else 0)

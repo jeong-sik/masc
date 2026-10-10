@@ -2534,6 +2534,9 @@ let test_attached_mcp_approvals_are_exact () =
 ;;
 
 let () =
+  (* The Muse start prompt uses the shared Antigravity framing assets. Pin
+     their source directory so selected cases also run outside Dune. *)
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   run
     "keeper_muse_runtime"
     [ ( "stream"

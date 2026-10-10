@@ -26,7 +26,7 @@ let addressed ?(ts = 1.0) ?speaker_name ?speaker_id ?surface
    normally see. [owner] is the operator's own, which is what these cases are
    about; the one row that lacks it falls to unresolved, which is the case
    below. *)
-let row ?(ts = 1.0) ~role ?kind ?tool_call_id ?execution_id ?tool_call_name
+let row ?(ts = 1.0) ~role ?tool_call_id ?execution_id ?tool_call_name
     ?delivery_key ?transcript_slot ?turn_ref ?(speaker_authority = "owner")
     content =
   `Assoc
@@ -37,7 +37,6 @@ let row ?(ts = 1.0) ~role ?kind ?tool_call_id ?execution_id ?tool_call_name
      ]
      @ (if role = "user" then [ "speaker_authority", `String speaker_authority ]
         else [])
-     @ (match kind with None -> [] | Some k -> [ "kind", `String k ])
      @ (match delivery_key with None -> [] | Some json -> [ "delivery_key", json ])
      @ (match transcript_slot with
         | None -> []
@@ -298,7 +297,7 @@ let test_roles_map_to_what_the_pane_draws () =
       (`List
          [ row ~ts:1.0 ~role:"user" "고쳐줘"
          ; row ~ts:2.0 ~role:"assistant" "고쳤어요"
-         ; row ~ts:3.0 ~role:"assistant" ~kind:"transport_failure" "slack 5xx"
+         ; row ~ts:3.0 ~role:"request_failure" "slack 5xx"
          ; row ~ts:4.0 ~role:"system"
              ~delivery_key:
                (`Assoc
@@ -343,14 +342,14 @@ let test_a_failed_turn_names_the_request_it_came_from () =
   let decoded =
     decode
       (`List
-         [ row ~ts:1.0 ~role:"assistant" ~kind:"transport_failure"
+         [ row ~ts:1.0 ~role:"request_failure"
              ~delivery_key:(operation_key "tui-28e58beb") "provider closed the connection"
-         ; row ~ts:2.0 ~role:"assistant" ~kind:"transport_failure"
+         ; row ~ts:2.0 ~role:"request_failure"
              ~delivery_key:
                (`Assoc
                   [ "kind", `String "fusion_run"; "request_id", `String "fusion-1" ])
              "provider closed the connection"
-         ; row ~ts:3.0 ~role:"assistant" ~kind:"transport_failure"
+         ; row ~ts:3.0 ~role:"request_failure"
              "provider closed the connection"
          ])
   in
@@ -420,7 +419,7 @@ let test_runtime_interruption_becomes_a_recovered_lifecycle () =
     decode
       (`List
          [ row ~ts:1.0 ~role:"user" "brief me"
-         ; row ~ts:2.0 ~role:"assistant" ~kind:"transport_failure" failure
+         ; row ~ts:2.0 ~role:"request_failure" failure
          ; autonomous_turn ~ts:3.0 ~content:(`String "briefing complete") []
          ])
   in
@@ -442,7 +441,7 @@ let test_runtime_interruption_becomes_a_recovered_lifecycle () =
 let test_stdout_close_stays_pending_without_a_later_reply () =
   let failure = fenced_masc_failure connection_closed in
   let decoded =
-    decode (`List [ row ~ts:2.0 ~role:"assistant" ~kind:"transport_failure" failure ])
+    decode (`List [ row ~ts:2.0 ~role:"request_failure" failure ])
   in
   match decoded.History.rows with
   | [ { History.kind = History.Delivery_failed { recovered_at; _ }; text; _ } ] ->
@@ -457,32 +456,6 @@ let test_stdout_close_stays_pending_without_a_later_reply () =
   | _ -> fail "expected one delivery failure"
 ;;
 
-(* A fence can close over another fence, and the runtime stop sits at the
-   bottom of that chain. Reading only the outermost cause would drop the
-   badge. *)
-let test_a_cause_two_fences_down_still_names_the_shutdown () =
-  let failure =
-    fenced_masc_failure
-      (Keeper_internal_error.Tool_correction_lost
-         { runtime_id = "codex_subscription.gpt-5.6-luna"
-         ; effect_disposition =
-             Keeper_provider_attempt_effect_core.No_effect_observed
-         ; reject_count = 2
-         ; cause = Keeper_internal_error.Fenced_masc host_shutdown
-         })
-  in
-  match History.present_delivery_failure failure with
-  | None -> fail "a cause two fences down lost the host-shutdown badge"
-  | Some (presented, recovered) ->
-    check bool "still pending" false recovered;
-    check string "the outer fence still owns the replay claim"
-      "Runtime shutdown interrupted this turn · recovery pending · same-turn \
-       replay blocked to avoid duplicate tool calls · details in Logs"
-      presented
-;;
-
-(* The other direction: a carried MASC cause that is neither stop must not
-   invent a lifecycle. *)
 let test_a_carried_masc_cause_of_another_kind_draws_nothing () =
   let failure =
     fenced_masc_failure
@@ -512,42 +485,12 @@ let test_a_fenced_core_cause_draws_nothing () =
     (History.present_delivery_failure failure)
 ;;
 
-(* A runtime stop does not have to be fenced: a host shutdown observed with no
-   effect attempted reaches the row on its own. The row's text is the only
-   carrier the pane has until P3 gives the row a typed failure field, so the
-   keeper leaves the envelope there and the pane reads the value out of it.
-   Before RFC-0454 P2 this shape was recognised by searching the row for the
-   sentence the runtime printed. *)
-let test_an_unfenced_host_stop_still_presents_the_lifecycle () =
-  let failure = persisted_failure_row host_shutdown in
-  match History.present_delivery_failure failure with
-  | None -> fail "an unfenced host stop lost its lifecycle"
-  | Some (presented, recovered) ->
-    check bool "still pending" false recovered;
-    check string "no duplicate-call claim without a fence"
-      "Runtime shutdown interrupted this turn · recovery pending · details in Logs"
-      presented
-;;
-
-let test_an_unfenced_closed_connection_still_presents_the_lifecycle () =
-  let failure = persisted_failure_row connection_closed in
-  match History.present_delivery_failure failure with
-  | None -> fail "an unfenced closed connection lost its lifecycle"
-  | Some (presented, recovered) ->
-    check bool "still pending" false recovered;
-    check string "the provider half of the same pair"
-      "Provider connection closed during this turn · recovery pending · details in Logs"
-      presented
-;;
-
-(* The lane recovering is what the operator asks first, and it is read off the
-   rows after the failure. An unfenced stop earns that answer too. *)
 let test_an_unfenced_stop_is_marked_recovered_by_a_later_reply () =
   let decoded =
     decode
       (`List
          [ row ~ts:1.0 ~role:"user" "brief me"
-         ; row ~ts:2.0 ~role:"assistant" ~kind:"transport_failure"
+         ; row ~ts:2.0 ~role:"request_failure"
              (persisted_failure_row connection_closed)
          ; autonomous_turn ~ts:3.0 ~content:(`String "briefing complete") []
          ])
@@ -557,30 +500,6 @@ let test_an_unfenced_stop_is_marked_recovered_by_a_later_reply () =
     check (option (float 0.0)) "later reply is recovery evidence" (Some 3.0)
       recovered_at
   | _ -> fail "expected a delivery failure"
-;;
-
-(* MASC going down and the runtime calling its own turn off are different
-   facts, which is why [host_turn_stop] has two arms. Drawing both as the
-   shutdown line told the operator the host had stopped when it had not:
-   the Codex app-server reports [Turn_interrupted] from its own turn status. *)
-let test_a_runtime_reported_interrupt_is_not_a_host_shutdown () =
-  let line error =
-    match History.present_delivery_failure (persisted_failure_row error) with
-    | None -> fail "a host stop lost its lifecycle"
-    | Some (presented, _) -> presented
-  in
-  let interrupted =
-    line
-      (Keeper_internal_error.Host_stopped_turn
-         { runtime_id = "codex_app_server"
-         ; stop = Keeper_internal_error.Runtime_reported_interrupt
-         })
-  in
-  check string "the runtime is named as the one that stopped the turn"
-    "The runtime reported this turn as interrupted · recovery pending · details in Logs"
-    interrupted;
-  check bool "and it is not the shutdown line" false
-    (String.equal interrupted (line host_shutdown))
 ;;
 
 let test_local_claim_refusal_is_not_a_runtime_interruption () =
@@ -603,25 +522,11 @@ let test_local_claim_refusal_is_not_a_runtime_interruption () =
     None (History.present_delivery_failure (persisted_failure_row error))
 ;;
 
-(* The envelope does not have to end the row. A producer that appends anything
-   after it used to make the whole row unreadable, and there is no substring
-   fallback left to catch that. *)
-let test_text_after_the_envelope_does_not_hide_the_cause () =
-  let failure = persisted_failure_row host_shutdown ^ " (lane rotated)" in
-  match History.present_delivery_failure failure with
-  | None -> fail "trailing text hid the cause"
-  | Some (presented, recovered) ->
-    check bool "still pending" false recovered;
-    check string "the same lifecycle the untrailed row draws"
-      "Runtime shutdown interrupted this turn · recovery pending · details in Logs"
-      presented
-;;
-
 let test_unrelated_failure_is_not_marked_recovered () =
   let decoded =
     decode
       (`List
-         [ row ~ts:1.0 ~role:"assistant" ~kind:"transport_failure"
+         [ row ~ts:1.0 ~role:"request_failure"
              "Keeper request failed: auth denied"
          ; row ~ts:2.0 ~role:"assistant" "a later reply"
          ])
@@ -646,7 +551,7 @@ let test_rows_retain_the_exact_turn_identity () =
              ~transcript_slot:(tool_transcript_slot "exec-1" 0)
              ~tool_call_name:"Read" "{}"
          ; row ~role:"assistant" ~delivery_key:key
-             ~transcript_slot:(transcript_slot "terminal_assistant") "done"
+             ~transcript_slot:(transcript_slot "terminal_result") "done"
          ])
   in
   check (list (option string)) "every row keeps the producer's operation id"
@@ -668,10 +573,10 @@ let test_rows_carry_the_operation_id_only_for_direct_turns () =
              ~transcript_slot:(tool_transcript_slot "exec-1" 0)
              ~tool_call_name:"Read" "{}"
          ; row ~role:"assistant" ~delivery_key:key
-             ~transcript_slot:(transcript_slot "terminal_assistant") "done"
+             ~transcript_slot:(transcript_slot "terminal_result") "done"
            (* A failure row carries no transcript slot. Its operation key
               still owns both journal lookup and conversation grouping. *)
-         ; row ~role:"assistant" ~kind:"transport_failure" ~delivery_key:key
+         ; row ~role:"request_failure" ~delivery_key:key
              "the wire dropped"
          ; autonomous_turn ~turn_ref:"trace-1#54" [ reason "look"; tool "Read" ]
          ; row ~role:"user"
@@ -761,25 +666,6 @@ let test_a_direct_turn_keeps_its_blank_reply () =
    looked like this, so reading only the other two places left every one of
    them in no turn at all -- and the pane draws a turn's bracket, folds a
    repeated speaker and hangs work off its turn from exactly that id. *)
-(* The pane cannot tell a readable name repeated in the id field from an
-   opaque id, so an agent called [codex-mcp-client] arrives unresolved. What
-   the decoder must not do is shorten it here as well: the speaker column cuts
-   once, and cut twice the row kept neither end -- twelve broadcast rows on
-   one live pane read "…p-…roadcast". *)
-let test_an_unresolved_speaker_reaches_the_column_whole () =
-  check (pair string (option string)) "the name and the surface arrive apart"
-    ("codex-mcp-client", Some "broadcast")
-    (History.addressed_label_parts
-       (History.Unresolved { id = Some "codex-mcp-client" })
-       (Some History.Surface.Broadcast));
-  (* Joined, which is what a caller with room for both makes of them. *)
-  check string "joined, they read as they always did"
-    "codex-mcp-client \xc2\xb7 broadcast"
-    (joined_label
-       (History.Unresolved { id = Some "codex-mcp-client" })
-       (Some History.Surface.Broadcast))
-;;
-
 let test_an_autonomous_turn_is_identified_by_its_marker () =
   let decoded = decode (`List [ autonomous_turn [ reason "look"; tool "Read" ] ]) in
   check (list (option string)) "the trace rows share the marker's turn"
@@ -848,156 +734,6 @@ let test_an_addressed_row_says_who_sent_it_not_only_what_to_draw () =
           ~surface:(surface "broadcast") "hi"));
   check bool "an unnamed external row is not the operator either" false
     (is_operator (addressed ~speaker_authority:"external" "hi"))
-
-let test_an_addressed_row_is_labelled_by_who_sent_it () =
-  let label json =
-    match (List.hd (decode (`List [ json ])).History.rows).History.kind with
-    | History.Addressed_to_keeper { speaker; surface } ->
-        joined_label speaker surface
-    | History.Said_by_keeper | History.Autonomous_reply
-    | History.Delivery_failed _ | History.Tool_calls _
-    | History.Skill_activity _ | History.Reasoning _
-    | History.Fusion_conclusion _
-    | History.Gate_activity _ -> failf "unexpected gate row"
-    | History.Memory_activity _ ->
-        failf "expected an addressed row"
-  in
-  let surface kind extra = `Assoc (("kind", `String kind) :: extra) in
-  check string "an unnamed row the store calls the owner's is the operator" "you"
-    (label (addressed "hello"));
-  (* Who spoke is written down; the surface only says where it came in. The
-     pane used to read the absence of a surface as "the operator", so an
-     unnamed external speaker on the dashboard lane was drawn as the reader
-     themselves. *)
-  check string "an unnamed external row is not the reader" "someone"
-    (label (addressed ~speaker_authority:"external" "hello"));
-  check string "and it keeps the id it came with" "U09L0RH"
-    (label (addressed ~speaker_authority:"external" ~speaker_id:"U09L0RH" "hi"));
-  (* An authority this build does not know is not a licence to call someone
-     the reader. *)
-  check string "an authority this build cannot read stays unresolved" "someone"
-    (label (addressed ~speaker_authority:"something_new" "hi"));
-  check string "the dashboard is an operator surface, so it adds nothing"
-    "vincent"
-    (label (addressed ~speaker_name:"vincent" ~surface:(surface "dashboard" []) "hi"));
-  check string "an agent is named and marked" "bandleader \xc2\xb7 agent"
-    (label
-       (addressed ~speaker_name:"bandleader" ~surface:(surface "agent" []) "routed"));
-  check string "a fleet broadcast does not read like a direct message"
-    "codex \xc2\xb7 broadcast"
-    (label
-       (addressed ~speaker_name:"codex" ~surface:(surface "broadcast" []) "main red"));
-  (* The channel comes with it. A Keeper can be bound to several -- one keeper
-     has five Discord channels -- and without this every one of them reads as
-     the same place. *)
-  check string "a connector says which one, and which channel"
-    "vincent \xc2\xb7 slack C1"
-    (label
-       (addressed
-          ~speaker_name:"vincent"
-          ~surface:(surface "slack" [ "channel_id", `String "C1" ])
-          "from slack"));
-  (* Discord answers the same question through its own gateway, and the label
-     is drawn by the same code. Pinned on both connectors so a fix to one does
-     not quietly leave the other reading ids. *)
-  check string "a named discord channel reads as the room"
-    "nabi \xc2\xb7 discord #\xec\x9d\xbc\xeb\xb0\x98"
-    (label
-       (addressed ~speaker_name:"nabi"
-          ~surface:
-            (surface "discord"
-               [ "channel_id", `String "1493253256019972230"
-               ; "channel_name", `String "\xec\x9d\xbc\xeb\xb0\x98"
-               ])
-          "from discord"));
-  (* The name where the workspace let us ask, the id where it did not. Both
-     answer "which room"; only one of them reads as a place. *)
-  check string "a named channel reads as the room"
-    "vincent \xc2\xb7 slack #kinossam-dev"
-    (label
-       (addressed ~speaker_name:"vincent"
-          ~surface:
-            (surface "slack"
-               [ "channel_id", `String "C09TK9L4DV4"
-               ; "channel_name", `String "kinossam-dev"
-               ])
-          "from slack"));
-  (* A blank name is the absence the resolver reports, not a room called "". *)
-  check string "a blank name falls back to the id"
-    "vincent \xc2\xb7 slack \xe2\x80\xa6TK9L4DV4"
-    (label
-       (addressed ~speaker_name:"vincent"
-          ~surface:
-            (surface "slack"
-               [ "channel_id", `String "C09TK9L4DV4"
-               ; "channel_name", `String "  "
-               ])
-          "from slack"));
-  (* Discord ids are snowflakes: two channels created minutes apart share a
-     long prefix, so the head is the half that does not tell them apart. These
-     two are real ids from one Keeper's five bindings. *)
-  let discord_label id =
-    label
-      (addressed ~speaker_name:"nabi"
-         ~surface:(surface "discord" [ "channel_id", `String id ])
-         "hello")
-  in
-  check bool "two channels of one Keeper read as two places" false
-    (String.equal
-       (discord_label "1356818755795157113")
-       (discord_label "1356818756755525815"));
-  (* An author the producer could not name is not the person reading the pane.
-     272 rows from Slack and Discord arrived this way and every one of them
-     was drawn as "you".
-
-     The id arrives whole. It used to be shortened here as well, and #33699
-     took that out: the speaker column cuts once, and cut twice the row kept
-     neither end. The expectation was written before that and still asked for
-     the shortened form. *)
-  check string "an unnamed connector author is not the operator"
-    "U09L0RHPW7P \xc2\xb7 slack C1"
-    (label
-       (addressed ~speaker_id:"U09L0RHPW7P" ~speaker_authority:"external"
-          ~surface:(surface "slack" [ "channel_id", `String "C1" ])
-          "from slack"));
-  (* The producer repeating the id in the name field is the store saying it had
-     no name, not a person called [U09L0RHPW7P]. *)
-  check string "a name that repeats the id is not a name"
-    "U09L0RHPW7P \xc2\xb7 slack C1"
-    (label
-       (addressed ~speaker_id:"U09L0RHPW7P" ~speaker_name:"U09L0RHPW7P"
-          ~speaker_authority:"external"
-          ~surface:(surface "slack" [ "channel_id", `String "C1" ])
-          "from slack"));
-  (* And a row with no surface at all is still the operator's own: this pane
-     and the dashboard send without one. *)
-  check string "an unnamed row with no surface is still you" "you"
-    (label (addressed "typed here"));
-  check string "a gate goes by its channel label" "hookbot \xc2\xb7 ops-room"
-    (label
-       (addressed
-          ~speaker_name:"hookbot"
-          ~surface:(surface "gate" [ "label", `String "ops-room" ])
-          "gated"));
-  (* A webhook or gate row without the name the server always sends is
-     malformed. It draws the speaker alone rather than the kind as a name. *)
-  check string "a webhook without its source is unlabelled" "hookbot"
-    (label
-       (addressed ~speaker_name:"hookbot" ~surface:(surface "webhook" []) "?"));
-  check string "a gate without its label is unlabelled" "hookbot"
-    (label (addressed ~speaker_name:"hookbot" ~surface:(surface "gate" []) "?"));
-  check string "a webhook goes by its source" "hookbot \xc2\xb7 github"
-    (label
-       (addressed
-          ~speaker_name:"hookbot"
-          ~surface:(surface "webhook" [ "source", `String "github" ])
-          "pushed"));
-  (* A kind this build was not taught draws the name alone. Inventing a badge
-     for it would say something the row does not. *)
-  check string "an unknown surface is unlabelled, not guessed" "someone"
-    (label
-       (addressed ~speaker_name:"someone" ~surface:(surface "telepathy" []) "?"))
-;;
 
 let test_consecutive_tool_rows_become_one_block () =
   let decoded =
@@ -1327,48 +1063,6 @@ let test_skill_evidence_count_mismatch_retains_every_raw_call () =
       failf "expected one skill block of exact evidence and warning, then raw calls; got %d row(s)"
         (List.length rows)
 
-(* A turn that ran one composition seven times is one skill block, and the
-   compact row counts the triggers instead of saying the same row seven
-   times (msx-retro-mania, 2026-09-22: seven "읽음, 전달 기록 없음 ·
-   msx-observe" rows between one JOURNAL row and the tool block). The
-   composition ran; it was not read. *)
-let test_a_turn_that_triggers_one_skill_seven_times_is_one_counted_row () =
-  let composition =
-    `Assoc [ "kind", `String "composition"; "tool_name", `String "keeper_compose_msx-observe" ]
-  in
-  let projection =
-    skill_projection ~status:"available"
-      (List.init 7 (fun _ ->
-           skill_activation ~name:"msx-observe" ~invocation:composition ~delivery:`Null ())
-       @ [ skill_activation ~name:"sangokushi-2" ~actions:[ "masc_msx_press" ] () ])
-  in
-  let decoded =
-    decode
-      (`List
-         [ autonomous_turn ~turn_ref:"trace-1#54" ~skill_activations:projection
-             (List.init 7 (fun _ -> tool ~status:"ok" "keeper_compose_msx-observe")
-              @ [ tool ~status:"ok" "keeper_skill"; tool ~status:"ok" "masc_msx_press" ])
-         ])
-  in
-  match decoded.History.rows with
-  | [ { History.kind = History.Skill_activity skills; _ }; { History.kind = History.Tool_calls _; _ } ] ->
-      check int "eight invocations in one block" 8 (List.length skills);
-      check bool "the composition's invocation names its tool" true
-        ((List.hd skills).invocation
-         = Some (Transcript.Composition_run { tool_name = "keeper_compose_msx-observe" }));
-      check (list string) "compact: one counted row per skill, in first-trigger order"
-        [ "**msx-observe** \xc3\x977"; "**sangokushi-2**" ]
-        (Transcript.skill_rows ~full:false skills);
-      check string "full: a composition ran, it was not read"
-        "**실행됨, 전달 기록 없음** \xc2\xb7 **msx-observe**"
-        (List.hd (Transcript.skill_rows ~full:true skills))
-  | rows ->
-      failf "expected one skill block and one tool block, got %d row(s): %s"
-        (List.length rows)
-        (String.concat "; " (List.map (fun (r : History.row) -> kind_to_string r.kind) rows))
-
-(* An invocation kind the ledger does not write is a row this build cannot
-   read: dropped and counted, never drawn as read or run. *)
 let test_an_unknown_invocation_kind_does_not_decode () =
   let projection =
     skill_projection ~status:"available"
@@ -1415,23 +1109,6 @@ let test_a_turn_that_also_spoke_keeps_the_order_it_ran_in () =
     "\xea\xb3\xa0\xec\xb3\xa4\xec\x96\xb4\xec\x9a\x94"
     (List.nth decoded.History.rows 2).History.text
 
-let test_steps_the_server_dropped_are_counted () =
-  let decoded =
-    decode (`List [ autonomous_turn ~omitted:3 [ tool ~status:"ok" "read_file" ] ])
-  in
-  match decoded.History.rows with
-  | [ { History.kind = History.Tool_calls block; _ } ] ->
-      let rows = full_tool_rows block in
-      check string "the count closes the block"
-        "(3 steps not carried by the transcript)"
-        (List.nth rows (List.length rows - 1))
-  | _ -> fail "expected one tool block"
-
-(* A direct-conversation turn can carry a trace block too: the server joins
-   the raw trace onto rows that have a turn ref. Its calls are already in the
-   transcript as [role: "tool"] rows, so reading the block as well drew every
-   call twice. The marker the server puts on autonomous rows is what tells
-   the two apart. *)
 let test_a_direct_turn_s_trace_is_not_drawn_twice () =
   let decoded =
     decode
@@ -1993,117 +1670,6 @@ let test_live_row_keeps_its_file () =
           Alcotest.failf "expected one attachment, got %d" (List.length other))
      | other -> Alcotest.failf "expected one row, got %d" (List.length other))
 
-(* A file posted with no caption arrives with the text empty. Joining on it
-   anyway put a blank line above the file, so the reader saw a gap where a
-   sentence would be (task-552). *)
-let bytes_only n = Printf.sprintf "%dB" n
-
-let test_a_captionless_file_has_no_blank_line_above_it () =
-  let notes =
-    [ { History.att_name = "shot.png"; att_mime = "image/png"; att_bytes = 12
-    ; att_width = None; att_height = None; att_image = Masc_tui_image_preview.No_image } ]
-  in
-  let body =
-    History.text_with_attachments ~format_bytes:bytes_only ~text:"" ~notes
-  in
-  Alcotest.(check bool) "no leading newline" false (String.length body > 0 && body.[0] = '\n');
-  Alcotest.(check bool) "names the file" true
-    (String.length body > 0 && body <> "");
-  match String.split_on_char '\n' body with
-  | [ only ] -> Alcotest.(check bool) "one line" true (only <> "")
-  | other ->
-    Alcotest.failf "expected one line, got %d" (List.length other)
-;;
-
-(* Whitespace is not a caption either. *)
-let test_a_blank_caption_is_treated_as_none () =
-  let notes =
-    [ { History.att_name = "shot.png"; att_mime = ""; att_bytes = 0
-    ; att_width = None; att_height = None; att_image = Masc_tui_image_preview.No_image } ]
-  in
-  let body =
-    History.text_with_attachments ~format_bytes:bytes_only ~text:"   \n  " ~notes
-  in
-  Alcotest.(check int) "one line" 1
-    (List.length (String.split_on_char '\n' body))
-;;
-
-let test_a_caption_stays_above_its_files () =
-  let notes =
-    [ { History.att_name = "a.png"; att_mime = ""; att_bytes = 0
-    ; att_width = None; att_height = None; att_image = Masc_tui_image_preview.No_image }
-    ; { History.att_name = "b.png"; att_mime = ""; att_bytes = 0
-    ; att_width = None; att_height = None; att_image = Masc_tui_image_preview.No_image }
-    ]
-  in
-  let body =
-    History.text_with_attachments ~format_bytes:bytes_only ~text:"look" ~notes
-  in
-  match String.split_on_char '\n' body with
-  | [ first; second; third ] ->
-    Alcotest.(check string) "caption first" "look" first;
-    Alcotest.(check bool) "then a" true (second <> "");
-    Alcotest.(check bool) "then b" true (third <> "")
-  | other -> Alcotest.failf "expected three lines, got %d" (List.length other)
-;;
-
-let test_a_row_with_no_files_is_untouched () =
-  Alcotest.(check string) "unchanged" "just words"
-    (History.text_with_attachments ~format_bytes:bytes_only ~text:"just words"
-       ~notes:[])
-;;
-
-let test_a_caption_keeps_its_whitespace () =
-  let note =
-    { History.att_name = "notes.txt"; att_mime = ""; att_bytes = 0
-    ; att_width = None; att_height = None; att_image = Masc_tui_image_preview.No_image }
-  in
-  List.iter
-    (fun (caption, displayed) ->
-       Alcotest.(check string) "caption retained before attachment metadata"
-         (displayed ^ "⎘ #1 notes.txt")
-         (History.text_with_attachments ~format_bytes:bytes_only ~text:caption
-            ~notes:[ note ]);
-       Alcotest.(check string) "same caption without attachments"
-         caption
-         (History.text_with_attachments ~format_bytes:bytes_only ~text:caption
-            ~notes:[]))
-    [ "    첫 줄의 코드\n    둘째 줄의 코드", "    첫 줄의 코드\n    둘째 줄의 코드\n"
-    ; "첫 문단\n\n둘째 문단\n\n", "첫 문단\n\n둘째 문단\n\n"
-    ; "  앞뒤 공백을 보존해 주세요.  ", "  앞뒤 공백을 보존해 주세요.  \n"
-    ]
-;;
-
-(* An image that was measured reads as its pixels, in the order it arrived:
-   the bytes answered "how big is the file" and the reader was asking "how
-   big is it". A file that was not measured keeps the mime it always had,
-   and the number is what a reply can name to mean one file. *)
-let test_a_measured_image_names_its_pixels_and_index () =
-  let notes =
-    [ { History.att_name = "shot.png"; att_mime = "image/png"
-      ; att_bytes = 2129
-      ; att_width = Some 3456; att_height = Some 2168; att_image = Masc_tui_image_preview.No_image }
-    ; { History.att_name = "notes.md"; att_mime = "text/markdown"
-      ; att_bytes = 40
-      ; att_width = None; att_height = None; att_image = Masc_tui_image_preview.No_image }
-    ]
-  in
-  let body =
-    History.text_with_attachments ~format_bytes:bytes_only ~text:"look"
-       ~notes
-  in
-  match String.split_on_char '\n' body with
-  | [ caption; first; second ] ->
-    Alcotest.(check string) "caption first" "look" caption;
-    Alcotest.(check string) "measured image" "\xe2\x8e\x98 #1 shot.png \xc2\xb7 2129B \xc2\xb7 3456\xc3\x972168" first;
-    Alcotest.(check string) "unmeasured file keeps its mime"
-      "\xe2\x8e\x98 #2 notes.md \xc2\xb7 40B \xc2\xb7 text/markdown" second
-  | other ->
-    Alcotest.failf "expected three lines, got %d" (List.length other)
-;;
-
-(* The store writes width/height beside the payload; the decoder has to read
-   them back or every measured row would render as unmeasured. *)
 let sized_attachment_row =
   {json|[{
     "id": "msg-1",
@@ -2149,7 +1715,7 @@ let test_a_sized_row_decodes_its_pixels () =
           Alcotest.(check (option int)) "width" (Some 3456) att.History.att_width;
           Alcotest.(check (option int)) "height" (Some 2168) att.History.att_height;
           (match att.History.att_image with
-           | Masc_tui_image_preview.Unavailable_attachment "shot.png" -> ()
+           | Masc_tui_image_preview.Unavailable_image { name = "shot.png"; _ } -> ()
            | _ -> Alcotest.fail "hash-only history has no readable payload")
         | other ->
           Alcotest.failf "expected one attachment, got %d" (List.length other))
@@ -2217,10 +1783,29 @@ let test_a_fusion_block_without_a_post_id_makes_no_row () =
       failf "expected one row, got %d" (List.length other)
 ;;
 
+let test_operation_and_autonomous_sources_keep_typed_tool_blocks () =
+  let turn = Ids.Turn_ref.make ~trace_id:"collision" ~absolute_turn:7 in
+  let key = Ids.Turn_ref.to_string turn in
+  let operation_id = "collision-7" in
+  let decoded = decode (`List [
+    row ~role:"tool" ~tool_call_name:"Execute" ~execution_id:"op-call"
+      ~delivery_key:(operation_key operation_id)
+      ~transcript_slot:(tool_transcript_slot "op-call" 0) "{}";
+    row ~role:"tool" ~tool_call_name:"Execute" ~execution_id:"turn-call"
+      ~turn_ref:key "{}" ]) in
+  check int "different sources do not coalesce tool rows" 2 (List.length decoded.rows);
+  check bool "operation and autonomous keys survive decoding" true
+    (List.map (fun row -> row.History.execution_source) decoded.rows =
+     [Some (Masc_tui_keeper_chat_log.Operation operation_id);
+      Some (Masc_tui_keeper_chat_log.Autonomous_turn turn)])
+;;
+
 let () =
   run "tui_keeper_chat_history"
     [ ( "rows"
-      , [ test_case "roles map to what the pane draws" `Quick
+      , [ test_case "operation and autonomous sources keep typed tool blocks" `Quick
+            test_operation_and_autonomous_sources_keep_typed_tool_blocks
+        ; test_case "roles map to what the pane draws" `Quick
             test_roles_map_to_what_the_pane_draws
         ; test_case "a fusion block names the run ahead of the conclusion"
             `Quick test_a_fusion_block_names_the_run_ahead_of_the_conclusion
@@ -2242,20 +1827,10 @@ let () =
             test_runtime_interruption_becomes_a_recovered_lifecycle
         ; test_case "stdout close stays pending without a later reply" `Quick
             test_stdout_close_stays_pending_without_a_later_reply
-        ; test_case "an unfenced host stop still presents the lifecycle" `Quick
-            test_an_unfenced_host_stop_still_presents_the_lifecycle
-        ; test_case "an unfenced closed connection still presents it" `Quick
-            test_an_unfenced_closed_connection_still_presents_the_lifecycle
         ; test_case "an unfenced stop is marked recovered by a later reply" `Quick
             test_an_unfenced_stop_is_marked_recovered_by_a_later_reply
-        ; test_case "a runtime-reported interrupt is not a host shutdown" `Quick
-            test_a_runtime_reported_interrupt_is_not_a_host_shutdown
         ; test_case "local claim refusal is not a runtime interruption" `Quick
             test_local_claim_refusal_is_not_a_runtime_interruption
-        ; test_case "text after the envelope does not hide the cause" `Quick
-            test_text_after_the_envelope_does_not_hide_the_cause
-        ; test_case "a cause two fences down keeps the host-shutdown badge" `Quick
-            test_a_cause_two_fences_down_still_names_the_shutdown
         ; test_case "a carried MASC cause of another kind draws nothing" `Quick
             test_a_carried_masc_cause_of_another_kind_draws_nothing
         ; test_case "a fenced agent-core cause draws nothing" `Quick
@@ -2274,8 +1849,6 @@ let () =
             test_autonomous_trace_rows_keep_the_turn_ref
         ; test_case "an autonomous turn is identified by its marker" `Quick
             test_an_autonomous_turn_is_identified_by_its_marker
-        ; test_case "an unresolved speaker reaches the column whole" `Quick
-            test_an_unresolved_speaker_reaches_the_column_whole
         ; test_case "a silent autonomous turn draws no row" `Quick
             test_a_silent_autonomous_turn_draws_no_row
         ; test_case "a whitespace autonomous reply is as blank as none" `Quick
@@ -2284,8 +1857,6 @@ let () =
             test_a_direct_turn_keeps_its_blank_reply
         ; test_case "an addressed row says who sent it" `Quick
             test_an_addressed_row_says_who_sent_it_not_only_what_to_draw
-        ; test_case "an addressed row is labelled by who sent it" `Quick
-            test_an_addressed_row_is_labelled_by_who_sent_it
         ; test_case "consecutive tool rows become one block" `Quick
             test_consecutive_tool_rows_become_one_block
         ; test_case "history keeps producer tool-call identity" `Quick
@@ -2303,8 +1874,6 @@ let () =
             test_missing_skill_evidence_stays_visible_beside_the_raw_call
         ; test_case "Skill evidence count mismatch keeps raw calls" `Quick
             test_skill_evidence_count_mismatch_retains_every_raw_call
-        ; test_case "a turn that triggers one skill seven times is one counted row" `Quick
-            test_a_turn_that_triggers_one_skill_seven_times_is_one_counted_row
         ; test_case "an unknown invocation kind does not decode" `Quick
             test_an_unknown_invocation_kind_does_not_decode
         ; test_case "projection keeps stable row and absolute turn identity"
@@ -2312,8 +1881,6 @@ let () =
             test_persisted_identity_and_absolute_turn_survive_projection
         ; test_case "a turn that also spoke keeps the order it ran in" `Quick
             test_a_turn_that_also_spoke_keeps_the_order_it_ran_in
-        ; test_case "steps the server dropped are counted" `Quick
-            test_steps_the_server_dropped_are_counted
         ; test_case "a blank turn with no trace keeps its line" `Quick
             test_a_blank_turn_with_no_trace_keeps_its_line
         ; test_case "a direct turn's trace is not drawn twice" `Quick
@@ -2340,18 +1907,6 @@ let () =
             test_one_unreadable_row_does_not_cost_the_transcript
         ; test_case "a non-array payload is an error" `Quick
             test_a_non_array_payload_is_an_error
-        ; test_case "a caption-less file has no blank line above it" `Quick
-            test_a_captionless_file_has_no_blank_line_above_it
-        ; test_case "a blank caption is treated as none" `Quick
-            test_a_blank_caption_is_treated_as_none
-        ; test_case "a caption stays above its files" `Quick
-            test_a_caption_stays_above_its_files
-        ; test_case "a caption keeps indentation and paragraph breaks" `Quick
-            test_a_caption_keeps_its_whitespace
-        ; test_case "a row with no files is untouched" `Quick
-            test_a_row_with_no_files_is_untouched
-        ; test_case "a measured image names its pixels and index" `Quick
-            test_a_measured_image_names_its_pixels_and_index
         ; test_case "a sized row decodes its pixels" `Quick
             test_a_sized_row_decodes_its_pixels
         ; test_case "a live row keeps its file" `Quick

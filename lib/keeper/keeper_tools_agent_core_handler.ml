@@ -42,7 +42,12 @@ let make_keeper_tool_handler_with_authority
     match descriptor with
     | None -> input_schema
     | Some supplied ->
-      (match Keeper_tool_descriptor.find_id supplied.Keeper_tool_descriptor.id with
+      let canonical = match capability_authority with
+        | Keeper_tool_runtime.Frozen_surface surface ->
+            Keeper_capability_surface.find_descriptor_by_id surface supplied.Keeper_tool_descriptor.id
+        | Keeper_tool_runtime.Compatibility_meta ->
+            Keeper_tool_descriptor.find_id supplied.Keeper_tool_descriptor.id in
+      (match canonical with
        | Some canonical
          when canonical == supplied
               && String.equal name canonical.Keeper_tool_descriptor.internal_name ->

@@ -69,54 +69,22 @@ let test_cold_open_discovery () =
     (List.length (Types.autonomous_journal_candidates ~keeper_name:"other" [running]));
   let json = `List [`Assoc ["role", `String "assistant";
     "autonomous_turn", `Assoc ["turn_id", `String (Ids.Turn_ref.to_string turn_ref)];
-    "content", `String "done"; "ts", `Float 12.;
-    "turn_ref", `String (Ids.Turn_ref.to_string turn_ref)]] in
+    "content", `String "done"; "ts", `Float 12. ]] in
   (match Masc_tui_keeper_chat_history.rows_of_json json with
    | Error detail -> fail detail
    | Ok decoded ->
        check bool "history names its autonomous journal" true
          (List.mem source (List.filter_map Types.journal_source_of_history decoded.rows)));
   check int "held source not fetched twice" 0
-    (List.length (Types.journal_source_fetch_targets ~held:[Log.source_key source]
+    (List.length (Types.journal_source_fetch_targets ~keeper_name:"alpha" ~held:["alpha", source]
        ~unavailable:[] [source, 10.; source, 12.]))
-
-let test_poll_excerpt_defers_only_to_exact_journal_text () =
-  let check_case ~journal_turn ~delta ~expected =
-    let state = Types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
-    state.view <- Types.Keepers Types.Keeper_message;
-    state.msg_target_keeper_name <- Some "alpha";
-    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
-    state.keeper_turns <- [{Masc.Tui_decode.ktr_keeper_name="alpha"; ktr_chat_control_token=None;
-      ktr_state=Keeper_turn_running {lane=Turn_lane_autonomous; started_at_unix=10.;
-        interrupt_token="stop-token"; turn_ref=Some turn_ref;
-        preview=Some {ktp_status_text="working"; ktp_updated_at_unix=12.;
-          ktp_text_tail="latest answer"; ktp_last_tool=None}}}];
-    let log = Types.turn_log_create_for_source ~keeper_name:"alpha"
-        ~source:(Log.Autonomous_turn journal_turn) ~started_at:10. in
-    Types.turn_log_add ~now:10. log ~seq:(Some 0) Masc_tui_keeper_chat_live.Run_started;
-    Types.turn_log_add ~now:11. log ~seq:(Some 1) delta;
-    Types.hold_settled_log state log;
-    let frame, _ = Masc_tui_render_chat.render_keeper_message state in
-    check bool "polled excerpt respects exact turn identity and text availability" (expected = 1)
-      (List.exists (Astring.String.is_infix ~affix:"최근 출력 발췌") frame.Masc_tui_frame_presenter.lines)
-  in
-  let cache = Masc_tui_ansi.terminal_size_cache in
-  let previous = Masc_tui_ansi.get_terminal_size () in
-  let set_size size = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
-      cache ~probe:(fun () -> Some size)) in
-  Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
-    set_size (50, 120);
-    check_case ~journal_turn:turn_ref ~delta:(Masc_tui_keeper_chat_live.Text {text="latest answer"; stream_scope=None}) ~expected:0;
-    check_case ~journal_turn:(Ids.Turn_ref.make ~trace_id:"other-trace" ~absolute_turn:7)
-      ~delta:(Masc_tui_keeper_chat_live.Text {text="another turn"; stream_scope=None}) ~expected:1;
-    check_case ~journal_turn:turn_ref ~delta:(Masc_tui_keeper_chat_live.Thinking "considering") ~expected:1)
 
 let test_autonomous_checkpoint_closes_its_source () =
   let state = Types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
   let log = Types.turn_log_create_for_source ~keeper_name:"alpha" ~source ~started_at:10. in
   Types.turn_log_add ~now:10. log ~seq:(Some 0) Masc_tui_keeper_chat_live.Run_started;
   Types.turn_log_add ~now:11. log ~seq:(Some 1)
-    (Masc_tui_keeper_chat_live.Reply_details {reply="";
+    (Masc_tui_keeper_chat_live.Reply_details {terminal_stream_scope = None; reply="";
       turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint;
       turn_ref=Ids.Turn_ref.to_string turn_ref});
   Types.turn_log_add ~now:12. log ~seq:(Some 2) Masc_tui_keeper_chat_live.Run_finished;
@@ -132,10 +100,43 @@ let test_autonomous_checkpoint_closes_its_source () =
    | Types.Follow_nothing -> ()
    | _ -> fail "ended autonomous checkpoint requested another journal read")
 
+let test_history_closes_only_matching_autonomous_progress () =
+  let state = Types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let log = Types.turn_log_create_for_source ~keeper_name:"alpha" ~source ~started_at:10. in
+  Types.turn_log_add ~now:10. log ~seq:(Some 0) Masc_tui_keeper_chat_live.Run_started;
+  Types.hold_settled_log state log;
+  let raw = Ids.Turn_ref.to_string turn_ref in
+  let row : Types.msg_entry = {
+    me_keeper_name="alpha"; me_role=Message_autonomous;
+    me_identity=Persisted_row "autonomous-final"; me_turn_phase=Turn_output;
+    me_turn_sequence=None; me_operation_seq=0; me_text="done";
+    me_image=Masc_tui_image_preview.No_image; me_media=[]; me_memory_summary=None;
+    me_journal=[]; me_memory_pass=Masc_tui_message_layout.No_pass;
+    me_gate=None; me_submitted_at=None; me_tool_block=None; me_skill_block=[];
+    me_timestamp=""; me_request_id=raw; me_execution_source=Some (Log.Operation raw);
+    me_at=12. } in
+  state.msg_loaded_keeper <- Some "alpha";
+  state.msg_loaded <- [row];
+  check bool "equal display id from another source cannot close progress" false
+    (Types.observed_log_has_ended state log);
+  state.msg_loaded <- [{row with me_execution_source=Some source}];
+  check bool "durable autonomous output closes visual progress" true
+    (Types.observed_log_has_ended state log);
+  check bool "history never settles the partial journal" false (Types.turn_log_holds_the_turn log);
+  (match Types.journal_follow_for_source state ~keeper_name:"alpha" ~source ~seq:(Some 2) ~at:13. with
+   | Types.Follow_read _ -> ()
+   | _ -> fail "visual closure retired journal replay");
+  let direct = {row with me_role=Message_keeper} in
+  let autonomous = {row with me_execution_source=Some source} in
+  check int "same serialized ids retain separate timeline turns" 2
+    (List.length (Types.chat_timeline_slots [direct; autonomous]));
+  check bool "distinct sources do not share a rail" true
+    (List.map snd (Types.mark_turn_edges [direct; autonomous]) = [Types.Turn_alone; Types.Turn_alone])
+
 let () =
   run "TUI autonomous journal"
-    ["consumer", [test_case "typed sources select separate routes" `Quick test_source_routes_and_decodes;
+    ["consumer", [test_case "typed history closes visuals without retiring replay" `Quick test_history_closes_only_matching_autonomous_progress;
+      test_case "typed sources select separate routes" `Quick test_source_routes_and_decodes;
       test_case "observer only triggers ordered journal reads" `Quick test_notification_only_triggers_journal_read;
       test_case "cold open discovers current and historical journals" `Quick test_cold_open_discovery;
-      test_case "polled excerpt yields only to exact journal text" `Quick test_poll_excerpt_defers_only_to_exact_journal_text;
       test_case "autonomous checkpoint closes its journal source" `Quick test_autonomous_checkpoint_closes_its_source]]

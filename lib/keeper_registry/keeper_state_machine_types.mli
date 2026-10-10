@@ -22,7 +22,6 @@ type conditions = {
   stop_requested : bool;
   restart_requested : bool;
   drain_complete : bool;
-  credential_archived : bool;
 }
 val default_conditions : conditions
 type context_actions = {

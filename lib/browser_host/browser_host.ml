@@ -680,7 +680,7 @@ let unacknowledged_cause : result_undelivered -> Masc.Browser_bidi_host_record.c
    whose socket closed and takes one at a time, so a host that left its
    session behind could only be attached again after restarting that
    Firefox. *)
-let run_bidi env config url ~stop =
+let run_bidi env config url ~firefox_profile ~stop =
   let clock = Eio.Stdenv.clock env in
   let client = Cohttp_eio.Client.make ~https:None (Eio.Stdenv.net env) in
   let module Record = Masc.Browser_bidi_host_record in
@@ -887,6 +887,15 @@ let run_bidi env config url ~stop =
                      | Masc.Browser_bidi_peer.Session_failed _ -> ());
                     Error (Masc.Browser_bidi_peer.session_failure_message failure)
                 | None -> Error "BiDi metadata deadline exceeded" in
+              (* A host started for the Keeper's Firefox keeps no session
+                 with a Firefox on another profile, which a port taken by
+                 the operator's everyday Firefox would give it. Leaving this
+                 scope ends that session. *)
+              let* () =
+                match firefox_profile with
+                | None -> Ok ()
+                | Some expected -> Masc.Browser_bidi_peer.runs_profile peer ~expected
+              in
               let info =
                 { browser = "firefox"; version; engine_version = version
                 ; transport = Browser_lane.Webdriver_bidi } in

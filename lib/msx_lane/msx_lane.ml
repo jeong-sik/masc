@@ -1073,3 +1073,70 @@ let checkpoint_info ~path =
           ; sha256
           }
 ;;
+
+type disk_export = {
+  filename : string;
+  byte_length : int;
+  sha256 : string;
+  source_disk : string option;
+  frame : int;
+}
+
+let export_disk ~catalog_dir ~filename =
+  let extension = Filename.extension filename in
+  let stem = Filename.remove_extension filename in
+  let valid_name = extension = ".dsk"
+    && String.length stem >= 1 && String.length stem <= 64
+    && String.for_all (function
+      | 'a'..'z' | 'A'..'Z' | '0'..'9' | '_' | '-' -> true
+      | _ -> false) stem in
+  let rec real_directories path =
+    if (Unix.lstat path).Unix.st_kind <> Unix.S_DIR then
+      Error (Invalid_request "disk catalog ancestors must be real directories")
+    else let parent = Filename.dirname path in
+      if parent = path then Ok () else real_directories parent in
+  if not valid_name then
+    Error (Invalid_request "filename must be 1..64 letters, digits, underscores or hyphens plus .dsk")
+  else if Filename.is_relative catalog_dir then
+    Error (Invalid_request "disk catalog must be absolute")
+  else locked (fun () ->
+    match !state with
+    | None -> Error No_machine
+    | Some st ->
+      match Msx.disk_image st.m with
+      | None -> Error (Invalid_request "no floppy is mounted")
+      | Some bytes ->
+        let receipt = {filename; byte_length = String.length bytes;
+          sha256 = media_id bytes; source_disk = st.disk; frame = st.frame} in
+        (* Keep the cleanup outside the refusal handler. An exception after
+           link has published the destination is an unknown outcome, not a
+           claim that the operation left no effect. *)
+        let prepared =
+          try
+            match real_directories catalog_dir with
+            | Error _ as e -> e
+            | Ok () -> Ok (Filename.open_temp_file ~temp_dir:catalog_dir ".msx-export-" ".tmp")
+          with
+          | Sys_error message -> Error (Unreadable message)
+          | Unix.Unix_error (error, fn, arg) ->
+            Error (Unreadable (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error))) in
+        match prepared with
+        | Error _ as e -> e
+        | Ok (temporary, channel) ->
+          Fun.protect
+            ~finally:(fun () -> close_out_noerr channel; Sys.remove temporary)
+            (fun () ->
+              try
+                output_string channel bytes;
+                flush channel;
+                Unix.fsync (Unix.descr_of_out_channel channel);
+                close_out channel;
+                Unix.link temporary (Filename.concat catalog_dir filename);
+                Ok receipt
+              with
+              | Unix.Unix_error (Unix.EEXIST, _, _) ->
+                Error (Invalid_request "export destination already exists; choose a new filename")
+              | Sys_error message -> Error (Unreadable message)
+              | Unix.Unix_error (error, fn, arg) ->
+                Error (Unreadable (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error)))))
+;;

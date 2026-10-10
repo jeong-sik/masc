@@ -1,11 +1,12 @@
 (** Frozen Task Skill selection for one Keeper turn. *)
 
 type error =
+  | Tool_surface_unavailable of string
   | Reference_resolution_failed of
       { reference : Skill_reference.t
       ; error : Skill_catalog_snapshot.reference_resolution_error
       }
-      (** The only admission error: the exact reference does not resolve in
+      (** The exact reference does not resolve in
           the frozen snapshot. No entry has its identity
           ([Identity_not_found]), or the entry that does has another content
           revision ([Content_revision_mismatch]). *)
@@ -30,6 +31,7 @@ type unprojectable = private
 type t = private
   { selected : selected list
   ; unprojectable : unprojectable list
+  ; descriptor_authority : Keeper_tool_descriptor.t list option
   }
 
 type partition = private
@@ -57,6 +59,20 @@ val resolve_observations :
   (t, error) result
 (** Resolve current and held Task references exactly once from one observed turn
     state, retaining every Task identity on shared references. *)
+
+val with_descriptors : descriptors:Keeper_tool_descriptor.t list ->
+  snapshot:Skill_catalog_snapshot.t -> t -> (t, error) result
+(** Reproject only already selected exact references from the same frozen snapshot;
+    preserve Task provenance and bind the descriptor objects used by the turn. *)
+val descriptors : t -> Keeper_tool_descriptor.t list option
+(** [None] means no runtime Tool authority has been captured yet. *)
+val resolve_live_observations :
+  config:Workspace.config -> keeper_name:string ->
+  snapshot:Skill_catalog_snapshot.t ->
+  current_task:Keeper_world_observation_inputs.current_task_observation ->
+  held_task_skills:Keeper_world_observation_inputs.held_task_skills list ->
+  (t, error) result
+(** Capture authorized Add-on descriptors once for both prompt and execution. *)
 
 val empty : t
 val merge : t list -> t

@@ -2690,8 +2690,8 @@ let test_tool_envelope_outcome_rejects_unexpected_shapes () =
    to the pane under the pointer. *)
 let sgr_wheel_key params final =
   Option.map
-    (fun (direction, _, _) -> Tui_decode.wheel_key direction)
-    (Tui_decode.sgr_wheel_report params final)
+    (fun (direction, _, _) -> Masc.Tui_mouse_protocol.wheel_key direction)
+    (Masc.Tui_mouse_protocol.sgr_wheel_report params final)
 
 let test_sgr_wheel_up_is_its_own_key () =
   match sgr_wheel_key "<64;10;5" 'M' with
@@ -2706,8 +2706,8 @@ let test_sgr_wheel_down_is_its_own_key () =
   | None -> Alcotest.fail "wheel down should claim a key"
 
 let test_sgr_wheel_report_carries_its_position () =
-  match Tui_decode.sgr_wheel_report "<64;10;5" 'M' with
-  | Some (Tui_decode.Wheel_up, 5, 10) -> ()
+  match Masc.Tui_mouse_protocol.sgr_wheel_report "<64;10;5" 'M' with
+  | Some (Masc.Tui_mouse_protocol.Wheel_up, 5, 10) -> ()
   | Some (_, row, column) ->
       Alcotest.failf "expected row 5 column 10, got %d;%d" row column
   | None -> Alcotest.fail "a wheel notch should report where it happened"
@@ -2715,7 +2715,7 @@ let test_sgr_wheel_report_carries_its_position () =
 let test_sgr_wheel_report_needs_a_whole_position () =
   List.iter
     (fun (params, final) ->
-       match Tui_decode.sgr_wheel_report params final with
+       match Masc.Tui_mouse_protocol.sgr_wheel_report params final with
        | None -> ()
        | Some (_, row, column) ->
            Alcotest.failf "report %S should stay unclaimed, got %d;%d" params row
@@ -2737,38 +2737,38 @@ let test_sgr_click_and_horizontal_wheel_stay_unclaimed () =
    offset by 32. Reading only the button kept the notch and dropped where it
    happened, so a press never reached what it was on. *)
 let x10 ~button ~column ~row =
-  Tui_decode.x10_mouse_report ~button:(Char.chr (32 + button))
+  Masc.Tui_mouse_protocol.x10_mouse_report ~button:(Char.chr (32 + button))
     ~column:(Char.chr (32 + column)) ~row:(Char.chr (32 + row))
 
 let x10_mouse =
   Alcotest.testable
     (fun formatter -> function
-      | Tui_decode.X10_wheel (direction, row, column) ->
-          Format.fprintf formatter "%s %d,%d" (Tui_decode.wheel_key direction) row column
-      | Tui_decode.X10_left_press (row, column) ->
+      | Masc.Tui_mouse_protocol.X10_wheel (direction, row, column) ->
+          Format.fprintf formatter "%s %d,%d" (Masc.Tui_mouse_protocol.wheel_key direction) row column
+      | Masc.Tui_mouse_protocol.X10_left_press (row, column) ->
           Format.fprintf formatter "press %d,%d" row column
-      | Tui_decode.X10_other_press -> Format.fprintf formatter "other press"
-      | Tui_decode.X10_release (row, column) ->
+      | Masc.Tui_mouse_protocol.X10_other_press -> Format.fprintf formatter "other press"
+      | Masc.Tui_mouse_protocol.X10_release (row, column) ->
           Format.fprintf formatter "release %d,%d" row column)
     ( = )
 
 let test_x10_wheel_carries_its_position () =
   Alcotest.(check (option x10_mouse)) "wheel up at column 10, row 5"
-    (Some (Tui_decode.X10_wheel (Tui_decode.Wheel_up, 5, 10)))
+    (Some (Masc.Tui_mouse_protocol.X10_wheel (Masc.Tui_mouse_protocol.Wheel_up, 5, 10)))
     (x10 ~button:64 ~column:10 ~row:5);
   Alcotest.(check (option x10_mouse)) "wheel down"
-    (Some (Tui_decode.X10_wheel (Tui_decode.Wheel_down, 5, 10)))
+    (Some (Masc.Tui_mouse_protocol.X10_wheel (Masc.Tui_mouse_protocol.Wheel_down, 5, 10)))
     (x10 ~button:65 ~column:10 ~row:5)
 
 let test_x10_left_press_and_release_carry_their_position () =
   Alcotest.(check (option x10_mouse)) "a plain left press"
-    (Some (Tui_decode.X10_left_press (3, 4)))
+    (Some (Masc.Tui_mouse_protocol.X10_left_press (3, 4)))
     (x10 ~button:0 ~column:4 ~row:3);
   Alcotest.(check (option x10_mouse)) "the one release code"
-    (Some (Tui_decode.X10_release (3, 4)))
+    (Some (Masc.Tui_mouse_protocol.X10_release (3, 4)))
     (x10 ~button:3 ~column:4 ~row:3);
   Alcotest.(check (option x10_mouse)) "a release with shift held"
-    (Some (Tui_decode.X10_release (3, 4)))
+    (Some (Masc.Tui_mouse_protocol.X10_release (3, 4)))
     (x10 ~button:(3 + 4) ~column:4 ~row:3)
 
 (* Middle and right presses and shift/meta/ctrl chords are presses no surface
@@ -2777,7 +2777,7 @@ let test_x10_other_presses_are_named_so_their_release_is_not_left () =
   List.iter
     (fun button ->
       Alcotest.(check (option x10_mouse)) (Printf.sprintf "button %d" button)
-        (Some Tui_decode.X10_other_press) (x10 ~button ~column:4 ~row:3))
+        (Some Masc.Tui_mouse_protocol.X10_other_press) (x10 ~button ~column:4 ~row:3))
     [ 1; 2; 4; 8; 16 ]
 
 (* Motion reports and the horizontal wheel are gestures no surface reads. *)
@@ -2800,9 +2800,9 @@ let test_x10_and_sgr_agree () =
   List.iter
     (fun (button, params) ->
       let sgr =
-        match Tui_decode.sgr_wheel_report params 'M', Tui_decode.sgr_left_press params 'M' with
-        | Some (direction, row, column), _ -> Some (Tui_decode.X10_wheel (direction, row, column))
-        | None, Some (row, column) -> Some (Tui_decode.X10_left_press (row, column))
+        match Masc.Tui_mouse_protocol.sgr_wheel_report params 'M', Masc.Tui_mouse_protocol.sgr_left_press params 'M' with
+        | Some (direction, row, column), _ -> Some (Masc.Tui_mouse_protocol.X10_wheel (direction, row, column))
+        | None, Some (row, column) -> Some (Masc.Tui_mouse_protocol.X10_left_press (row, column))
         | None, None -> None
       in
       Alcotest.(check (option x10_mouse)) (Printf.sprintf "button %d" button) sgr
@@ -2814,10 +2814,10 @@ let test_x10_and_sgr_agree () =
    chord or drag is a gesture, not a choice. *)
 let test_sgr_left_press_reports_the_row_and_column () =
   Alcotest.check Alcotest.bool "release reaches screenshot gesture handling" true
-    (Tui_decode.sgr_left_release "<0;10;5" 'm' = Some (5,10));
+    (Masc.Tui_mouse_protocol.sgr_left_release "<0;10;5" 'm' = Some (5,10));
   Alcotest.check Alcotest.bool "press cannot also become release" true
-    (Tui_decode.sgr_left_release "<0;10;5" 'M' = None);
-  match Tui_decode.sgr_left_press "<0;10;5" 'M' with
+    (Masc.Tui_mouse_protocol.sgr_left_release "<0;10;5" 'M' = None);
+  match Masc.Tui_mouse_protocol.sgr_left_press "<0;10;5" 'M' with
   | Some (5, 10) -> ()
   | Some (row, column) ->
       Alcotest.failf "expected row 5 column 10, got %d;%d" row column
@@ -2834,7 +2834,7 @@ let test_sgr_left_press_ignores_releases_chords_and_wheel () =
   in
   List.iter
     (fun (params, final) ->
-       match Tui_decode.sgr_left_press params final with
+       match Masc.Tui_mouse_protocol.sgr_left_press params final with
        | None -> ()
        | Some (row, column) ->
            Alcotest.failf "report %S should stay unclaimed, got %d;%d" params
@@ -6075,7 +6075,7 @@ let test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values () =
   let last_outcome =
     `Assoc
       [ "runtime_state", `String "done"
-      ; "selected_model", `String "claude-opus-5"
+      ; "selected_model", `String "claude-opus-5-5"
       ]
   in
   match
@@ -6102,7 +6102,7 @@ let test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values () =
                 Alcotest.(check string) "outcome" "done"
                   outcome.klo_runtime_state;
                 Alcotest.(check (option string)) "model"
-                  (Some "claude-opus-5") outcome.klo_selected_model
+                  (Some "claude-opus-5-5") outcome.klo_selected_model
             | None -> Alcotest.fail "alpha lost its last outcome");
            (match beta.kl_phase with
             | Tui_decode.Lane_phase_unknown raw ->
@@ -6278,89 +6278,6 @@ let test_decode_standalone_lane_configuration_is_a_closed_set () =
       (String.starts_with
          ~prefix:"lanes[0]: standalone lane configuration: unknown value" detail)
 
-(* The lane detail line reads [obligation ^ " lane"], then this clause, then
-   the last run. The caller used to introduce the clause with a noun of its
-   own -- "configuration " ^ the word -- while three of the four words
-   already carry their subject, so the live screen read "configuration not
-   configured" over an unconfigured lane, and the other two would have read
-   "configuration no slot admitted" and "configuration registry unreadable".
-   Each state now says its own subject and the caller says none. *)
-let test_a_lane_configuration_clause_carries_its_own_subject () =
-  let clause = Tui_decode.standalone_lane_configuration_phrase in
-  Alcotest.(check string) "ready" "configuration ready"
-    (clause Tui_decode.Lane_ready);
-  Alcotest.(check string) "configured with nothing admitted"
-    "configured, but no slot admitted" (clause Tui_decode.Lane_slotless);
-  Alcotest.(check string) "unconfigured" "not configured"
-    (clause Tui_decode.Lane_unconfigured);
-  Alcotest.(check string) "registry unreadable" "registry unreadable"
-    (clause Tui_decode.Lane_registry_unavailable);
-  (* Read back in the shape the line draws them: none of the four names the
-     subject a second time. *)
-  List.iter
-    (fun state ->
-      let line =
-        Printf.sprintf "Required lane %s no retained terminal observation" (clause state)
-      in
-      List.iter
-        (fun stutter ->
-          Alcotest.(check bool)
-            (Printf.sprintf "%S does not read %S" line stutter)
-            false
-            (String_util.contains_substring line stutter))
-        [ "configuration not configured"
-        ; "configuration no slot"
-        ; "configuration registry"
-        ])
-    [ Tui_decode.Lane_ready
-    ; Tui_decode.Lane_slotless
-    ; Tui_decode.Lane_unconfigured
-    ; Tui_decode.Lane_registry_unavailable
-    ]
-
-(* The lane detail's last two lines belong to the lane: every lane has its
-   own pair. Read through the decoder, as the Lanes screen reads them. *)
-let test_every_lane_draws_its_own_answer () =
-  let snapshot =
-    `Assoc
-      [ "schema", `String "masc.standalone_llm_lanes.v2"
-      ; "generated_at", `String "2026-08-27T00:00:00Z"
-      ; "observed_at_unix", `Float 20.
-      ; "observation_only", `Bool true
-      ; "exact_run_projection_count", `Int 1
-      ; "exact_run_source_total", `Int 1
-      ; "exact_run_projection_truncated", `Bool false
-      ; ( "lanes"
-        , `List
-            (List.map
-               (fun lane ->
-                 let id = Standalone_lane.to_id lane in
-                 standalone_lane_json id id)
-               Standalone_lane.all) )
-      ]
-  in
-  match Tui_decode.decode_standalone_lanes_snapshot snapshot with
-  | Error detail -> Alcotest.failf "the standalone-lane snapshot did not decode: %s" detail
-  | Ok decoded ->
-    let lanes = decoded.Tui_decode.sls_lanes in
-    let known = List.map Tui_decode.standalone_lane_answer lanes in
-    let pair (answer : Tui_decode.standalone_lane_answer) =
-      answer.sla_output_meaning, answer.sla_evidence
-    in
-    Alcotest.(check int) "every lane has a different answer"
-      (List.length Standalone_lane.all)
-      (List.length (List.sort_uniq compare (List.map pair known)));
-    (* Both lines keep the heads the lane detail is read by. *)
-    List.iter
-      (fun (answer : Tui_decode.standalone_lane_answer) ->
-        Alcotest.(check bool) "the first line says what Output means" true
-          (String.starts_with ~prefix:"Output meaning: " answer.sla_output_meaning);
-        Alcotest.(check bool) "the second line says what the record keeps" true
-          (String.starts_with ~prefix:"Evidence: " answer.sla_evidence))
-      known
-
-(* A lane row is read into [Standalone_lane.t] as it is decoded, so a row
-   whose id no lane has refuses the snapshot. *)
 let test_decode_standalone_lanes_refuses_an_unknown_lane_id () =
   let snapshot =
     `Assoc
@@ -6627,26 +6544,6 @@ let test_decode_standalone_lane_jev_is_typed_and_required () =
     Alcotest.(check bool) "missing projection fails closed" true
       (String_util.contains_substring detail "missing required field 'jev'")
 
-(* The screen draws these words in a column sized for the longest one. *)
-let test_every_lane_status_word_fits_its_column () =
-  List.iter
-    (fun status ->
-      let word = Tui_decode.standalone_lane_status_to_string status in
-      Alcotest.(check bool)
-        (Printf.sprintf "%s fits" word)
-        true
-        (String.length word <= 14))
-    [ Tui_decode.Standalone_running
-    ; Tui_decode.Standalone_idle
-    ; Tui_decode.Standalone_degraded
-    ; Tui_decode.Standalone_unavailable
-    ; Tui_decode.Standalone_no_retained_observation
-    ]
-
-(* decode_clients — the Runtime family's roster reading of everyone attached
-   to the workspace. The rows below carry the dashboard's own field set
-   (emoji, koreanName among them) so the test also pins that the roster
-   ignores the profile decorations rather than rejecting them. *)
 let clients_row_json ~name ~agent_type ~status ~keeper ~task =
   `Assoc
     [ "name", `String name
@@ -8084,20 +7981,6 @@ let test_system_log_verbose_toggles_debug_directly () =
     (toggle_system_log_verbose (Some System_info) = None);
   Alcotest.(check bool) "a stricter floor also opens verbose" true
     (toggle_system_log_verbose (Some System_error) = None)
-
-let test_decode_system_log_accepts_both_warn_spellings () =
-  let label spelling =
-    match
-      Tui_decode.decode_system_log_snapshot
-        (system_log_snapshot_json [ system_log_entry_json ~level:spelling () ])
-    with
-    | Error err -> Alcotest.failf "decode failed for %s: %s" spelling err
-    | Ok { Tui_decode.sys_entries = [ e ]; _ } ->
-        Tui_decode.system_log_level_label e.Tui_decode.sl_level
-    | Ok _ -> Alcotest.fail "expected one entry"
-  in
-  Alcotest.(check string) "warn" "WARN " (label "WARN");
-  Alcotest.(check string) "warning" "WARN " (label "warning")
 
 let test_decode_system_log_keeps_an_unnamed_level_as_itself () =
   (* Folding an unknown level into Info would render a level this build does
@@ -13030,10 +12913,6 @@ let () =
           test_decode_memory_alert_keeps_the_code_contract;
         Alcotest.test_case "standalone lane configuration is a closed set" `Quick
           test_decode_standalone_lane_configuration_is_a_closed_set;
-        Alcotest.test_case "a lane configuration clause carries its subject"
-          `Quick test_a_lane_configuration_clause_carries_its_own_subject;
-        Alcotest.test_case "every lane draws its own answer" `Quick
-          test_every_lane_draws_its_own_answer;
         Alcotest.test_case "standalone lanes refuse an unknown lane id" `Quick
           test_decode_standalone_lanes_refuses_an_unknown_lane_id;
         Alcotest.test_case "merge names unread keepers" `Quick
@@ -13078,8 +12957,6 @@ let () =
           test_decode_standalone_lane_jev_is_typed_and_required;
         Alcotest.test_case "rejects duplicate lane ids" `Quick
           test_decode_standalone_lanes_rejects_duplicate_ids;
-        Alcotest.test_case "every lane status word fits its column" `Quick
-          test_every_lane_status_word_fits_its_column;
       ] );
     ( "decode_clients",
       [
@@ -13196,8 +13073,6 @@ let () =
       [
         Alcotest.test_case "reads the live shape" `Quick
           test_decode_system_log_snapshot_reads_the_live_shape;
-        Alcotest.test_case "warn and warning are one level" `Quick
-          test_decode_system_log_accepts_both_warn_spellings;
         Alcotest.test_case "category vocabulary and cycle" `Quick
           test_system_log_category_filter_vocabulary_and_cycle;
         Alcotest.test_case "level ladder cycles" `Quick

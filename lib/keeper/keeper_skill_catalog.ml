@@ -167,8 +167,8 @@ let composition_info_near_misses body =
          else None))
 ;;
 
-let composition_of_block ~skill block =
-  match Catalog.parse block.Keeper_skill_body_ast.body with
+let composition_of_block ~descriptors ~skill block =
+  match Catalog.parse ~descriptors block.Keeper_skill_body_ast.body with
   | Error error -> Error (Composition_rejected { skill; error })
   | Ok catalog ->
     (match Catalog.entries catalog with
@@ -203,7 +203,7 @@ let readable_instruction (skill : skill) =
     else Ok skill
 ;;
 
-let parse_document (document : Agent_core.Skill_document.t) =
+let parse_document ~descriptors (document : Agent_core.Skill_document.t) =
   let { Agent_core.Skill_document.name
       ; description
       ; body
@@ -225,7 +225,7 @@ let parse_document (document : Agent_core.Skill_document.t) =
          ; surface = Instruction
          }
      | Ok [ block ] ->
-       (match composition_of_block ~skill:name block with
+       (match composition_of_block ~descriptors ~skill:name block with
         | Error _ as error -> error
         | Ok entry ->
           Ok
@@ -243,23 +243,23 @@ let parse_document (document : Agent_core.Skill_document.t) =
             { skill = name; count = List.length blocks })
 ;;
 
-let parse_skill ~directory content =
+let parse_skill ?(descriptors = Keeper_tool_descriptor.all_descriptors ()) ~directory content =
   match Agent_core.Skill_document.decode ~directory_name:directory content with
   | Unloadable diagnostics -> Error (Definition_rejected { directory; diagnostics })
-  | Loaded document -> parse_document document
+  | Loaded document -> parse_document ~descriptors document
 ;;
 
 type authored_source_error =
   | Source_too_large of { bytes : int; max_bytes : int }
   | Invalid_document of error
 
-let validate_authored_source ~directory source_text =
+let validate_authored_source ~descriptors ~directory source_text =
   (* The existing Editor authoring limit, shared with artifact validation. *)
   let max_bytes = 1_048_576 in
   let bytes = String.length source_text in
   if bytes > max_bytes
   then Error (Source_too_large { bytes; max_bytes })
-  else parse_skill ~directory source_text |> Result.map_error (fun error -> Invalid_document error)
+  else parse_skill ~descriptors ~directory source_text |> Result.map_error (fun error -> Invalid_document error)
 ;;
 
 let empty = []
@@ -341,8 +341,8 @@ let composition_projection_failed = function
     false
 ;;
 
-let project_entry snapshot (entry : Skill_catalog_snapshot.entry) =
-  parse_document entry.document
+let project_entry ~descriptors snapshot (entry : Skill_catalog_snapshot.entry) =
+  parse_document ~descriptors entry.document
   |> Result.map (fun skill ->
     { skill with
       reference = Some (Skill_catalog_snapshot.entry_reference entry)
@@ -350,8 +350,8 @@ let project_entry snapshot (entry : Skill_catalog_snapshot.entry) =
     })
 ;;
 
-let entry_projection_of snapshot (entry : Skill_catalog_snapshot.entry) =
-  match project_entry snapshot entry with
+let entry_projection_of ~descriptors snapshot (entry : Skill_catalog_snapshot.entry) =
+  match project_entry ~descriptors snapshot entry with
   | Ok skill -> Projected skill
   | Error diagnostic when composition_projection_failed diagnostic ->
     (* The fallback is served through [keeper_skill], so it meets the same
@@ -375,8 +375,8 @@ type projected_entry =
   ; advisories : projection_diagnostic list
   }
 
-let projected_entry_of snapshot (entry : Skill_catalog_snapshot.entry) =
-  let projection = entry_projection_of snapshot entry in
+let projected_entry_of ~descriptors snapshot (entry : Skill_catalog_snapshot.entry) =
+  let projection = entry_projection_of ~descriptors snapshot entry in
   let advisories =
     match projection with
     | Projected ({ surface = Instruction; _ } as skill) ->
@@ -397,8 +397,9 @@ let projected_entry_of snapshot (entry : Skill_catalog_snapshot.entry) =
 ;;
 
 (* A published snapshot is never changed: publishing replaces it with a new
-   value. Projecting an entry reads only the snapshot and the fixed tool
-   descriptor table, so one snapshot always projects to the same entries.
+   value. Projecting an entry reads the snapshot and its frozen tool descriptor
+   authority. Reusing a snapshot after attach/detach or with another Keeper
+   must never reuse a plan bound to different descriptor objects.
    Keeper turns, the skill inventory and the skills route project the
    current snapshot several times between two publications, so its entries
    are projected once and kept with the snapshot they came from. One
@@ -409,32 +410,35 @@ let projected_entry_of snapshot (entry : Skill_catalog_snapshot.entry) =
    keeps runs apart. *)
 type projected_snapshot =
   { snapshot : Skill_catalog_snapshot.t
+  ; descriptors : Keeper_tool_descriptor.t list
   ; entries : projected_entry list
   }
 
 let last_projected_snapshot : projected_snapshot option Atomic.t = Atomic.make None
 
-let projected_entries snapshot =
+let projected_entries ~descriptors snapshot =
   match Atomic.get last_projected_snapshot with
-  | Some projected when projected.snapshot == snapshot -> projected.entries
+  | Some projected when projected.snapshot == snapshot
+      && List.length projected.descriptors = List.length descriptors
+      && List.for_all2 ( == ) projected.descriptors descriptors -> projected.entries
   | Some _ | None ->
     let entries =
-      List.map (projected_entry_of snapshot) (Skill_catalog_snapshot.entries snapshot)
+      List.map (projected_entry_of ~descriptors snapshot) (Skill_catalog_snapshot.entries snapshot)
     in
-    Atomic.set last_projected_snapshot (Some { snapshot; entries });
+    Atomic.set last_projected_snapshot (Some { snapshot; descriptors; entries });
     entries
 ;;
 
 (* An entry resolved from [snapshot] is one of its entries, so its kept
    projection answers. An entry from elsewhere is projected on the spot. *)
-let project_entry_or_fallback snapshot (entry : Skill_catalog_snapshot.entry) =
+let project_entry_or_fallback ?(descriptors = Keeper_tool_descriptor.all_descriptors ()) snapshot (entry : Skill_catalog_snapshot.entry) =
   match
     List.find_opt
       (fun (projected : projected_entry) -> projected.snapshot_entry == entry)
-      (projected_entries snapshot)
+      (projected_entries ~descriptors snapshot)
   with
   | Some projected -> projected.projection
-  | None -> entry_projection_of snapshot entry
+  | None -> entry_projection_of ~descriptors snapshot entry
 ;;
 
 let catalog_of_projected_entries projected_entries =
@@ -453,14 +457,14 @@ let catalog_of_projected_entries projected_entries =
   |> fun (catalog, diagnostics) -> List.rev catalog, List.rev diagnostics
 ;;
 
-let of_snapshot snapshot =
-  projected_entries snapshot
+let of_snapshot ?(descriptors = Keeper_tool_descriptor.all_descriptors ()) snapshot =
+  projected_entries ~descriptors snapshot
   |> List.filter (fun (projected : projected_entry) -> projected.effective)
   |> catalog_of_projected_entries
 ;;
 
-let all_entries_of_snapshot snapshot =
-  catalog_of_projected_entries (projected_entries snapshot)
+let all_entries_of_snapshot ?(descriptors = Keeper_tool_descriptor.all_descriptors ()) snapshot =
+  catalog_of_projected_entries (projected_entries ~descriptors snapshot)
 ;;
 
 let same_exact_reference (left : skill) (right : skill) =

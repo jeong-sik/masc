@@ -40,52 +40,71 @@ let ihdr_size png =
 
 let eject () = match Dos_lane.eject ~who:"operator" ~announce:ignore () with Ok () | Error _ -> ()
 
-let call_screen () =
+let with_worker f =
   let base_path = Filename.temp_dir "mcp-dos-screen-" "" in
+  eject ();
+  Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
   Fun.protect
-    ~finally:(fun () -> remove_tree base_path)
-    (fun () ->
-      Eio_main.run (fun env ->
-        Fs_compat.set_fs (Eio.Stdenv.fs env);
-        Masc_test_deps.init_eio_clock env;
-        let clock = Eio.Stdenv.clock env in
+    ~finally:(fun () ->
+      eject ();
+      Dos_lane.install_activity_observer None;
+      Fs_compat.clear_fs ();
+      remove_tree base_path)
+    (fun () -> Eio_main.run (fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let clock = Eio.Stdenv.clock env in
+      Eio.Time.with_timeout_exn clock 30. (fun () ->
         Eio.Switch.run (fun sw ->
-          let state = Mcp_eio.For_testing.create_state ~base_path () in
-          Mcp_eio.handle_request ~clock ~sw state
-            {|{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"masc_dos_screen","arguments":{}}}|})))
+          Eio_context.with_test_env ~sw ~net:(Eio.Stdenv.net env)
+            ~clock ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
+            Masc.Lane_addon_runtime.For_testing.reset ();
+            let config = Masc.Workspace.default_config base_path in
+            let programs = Filename.concat (Masc.Workspace.masc_dir config) "dos/programs" in
+            Fs_compat.mkdir_p programs;
+            Out_channel.with_open_bin (Filename.concat programs "game.com")
+              (fun channel -> output_string channel hello_com);
+            let state = Mcp_eio.For_testing.create_state ~base_path () in
+            let screen () = Mcp_eio.handle_request ~clock ~sw state
+              {|{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"masc_dos_screen","arguments":{}}}|} in
+            let unavailable label =
+              let response = screen () in
+              let rejected = match member "error" response with
+                | Some (`Assoc _) -> true
+                | _ -> Option.bind (member "result" response) (member "isError") = Some (`Bool true) in
+              check bool label true rejected;
+              let content = Option.bind (member "result" response) (member "content") in
+              check bool "unavailable tool cannot return a cached image" false
+                (match content with Some (`List items) ->
+                  List.exists (fun item -> string_member "type" item = Some "image") items
+                 | _ -> false) in
+            unavailable "screen unavailable before attachment";
+            Machine_worker_fixture.with_dos ~clock ~sw ~base_path
+              (fun ~invoke ~detach ->
+                let load () =
+                  match invoke ~principal:(Lane_addon_call_context.Host_actor "operator")
+                    ~controller:(Some {Machine_controller_contract.observed_holder=None;
+                      release=None;handoff_target=None})
+                    ~name:"masc_dos_load" ~arguments:(`Assoc ["program",`String "game.com"]) with
+                  | Ok result -> check bool "worker loaded program" false (result.is_error=Some true)
+                  | Error detail -> fail detail in
+                f ~screen ~load;
+                detach ();
+                unavailable "screen unavailable after detachment"))))))
 
 let content_of response =
   match Option.bind (member "result" response) (member "content") with
   | Some (`List items) -> items
   | _ -> failf "no content in %s" (Yojson.Safe.to_string response)
 
-let with_machine f =
-  let dir = Filename.temp_dir "mcp-dos-screen-machine-" "" in
-  eject ();
-  Fun.protect
-    ~finally:(fun () ->
-      Dos_lane.install_activity_observer None;
-      eject ();
-      remove_tree dir)
-    (fun () ->
-      Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
-      (match
-         Dos_lane.load ~who:"operator" ~ledger_dir:(Filename.concat dir "ledger")
-           ~saves_dir:(Filename.concat dir "saves") ~checkpoint_dir:(Filename.concat dir "checkpoints")
-           ~program_name:"game.com" ~program_bytes:hello_com ~files:[] ~announce:ignore
-       with
-       | Ok _ -> ()
-       | Error e -> fail ("load: " ^ Dos_lane.error_to_string e));
-      f ())
-
 let test_the_screen_answer_carries_the_frame () =
-  with_machine (fun () ->
+  with_worker (fun ~screen ~load ->
+    load ();
     let frame_width, frame_height =
       match Dos_lane.capture () with
       | Ok (_, { Dos_lane.width; height; _ }) -> width, height
       | Error e -> fail ("capture: " ^ Dos_lane.error_to_string e)
     in
-    let response = call_screen () in
+    let response = screen () in
     match content_of response with
     | [ text; image ] ->
       check (option string) "the observation comes first, as text" (Some "text") (string_member "type" text);
@@ -106,10 +125,14 @@ let test_the_screen_answer_carries_the_frame () =
     | items -> failf "expected text then image, got %d items" (List.length items))
 
 let test_no_machine_is_text_only () =
-  eject ();
-  let items = content_of (call_screen ()) in
-  check (list (option string)) "only the refusal's text" [ Some "text" ]
-    (List.map (string_member "type") items)
+  with_worker (fun ~screen ~load:_ ->
+    let response = screen () in
+    check (option bool) "unloaded worker reports tool failure" (Some true)
+      (match Option.bind (member "result" response) (member "isError") with
+       | Some (`Bool value) -> Some value | _ -> None);
+    let items = content_of response in
+    check (list (option string)) "only the refusal's text" [ Some "text" ]
+      (List.map (string_member "type") items))
 
 let () =
   run "mcp_dos_screen_image"

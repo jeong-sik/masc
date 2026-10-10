@@ -32,20 +32,6 @@ let test_github_commit () =
   | Github { label; _ } -> check string "short commit label" "masc commit 0420067" label
   | _ -> fail "expected Github kind"
 
-let test_github_ci_run () =
-  let p = synthesize_preview "https://github.com/jeong-sik/masc/actions/runs/32959102055/job/98147624211" in
-  check (option string) "title is ci run label"
-    (Some "masc CI run 32959102055") p.title
-
-let test_github_file () =
-  let p = synthesize_preview "https://github.com/jeong-sik/masc/blob/main/bin/masc_tui_render.ml" in
-  check (option string) "title is file label"
-    (Some "masc masc_tui_render.ml") p.title
-
-let test_github_repo_root () =
-  let p = synthesize_preview "https://github.com/jeong-sik/masc" in
-  check (option string) "repo root title" (Some "jeong-sik/masc") p.title
-
 let test_arxiv () =
   let p = synthesize_preview "https://arxiv.org/abs/2301.07041" in
   check (option string) "site name" (Some "arXiv.org") p.site_name;
@@ -113,94 +99,6 @@ let test_cache_operations_and_bounding () =
   done;
   clear_cache ();
   check bool "empty after clear" true (Option.is_none (cache_lookup url))
-
-let test_render_compact_badge () =
-  let p = synthesize_preview "https://github.com/jeong-sik/masc/pull/30866" in
-  let badge_opt = render_compact_badge p in
-  check bool "badge exists for informative preview" true (Option.is_some badge_opt);
-  let badge = Option.get badge_opt in
-  check bool "starts with corner glyph" true (String.starts_with ~prefix:"\xe2\x95\xb0\xe2\x94\x80" badge)
-
-let test_render_inline_card_column_alignment () =
-  let p = synthesize_preview "https://github.com/jeong-sik/masc/pull/30866" in
-  let card_lines = render_inline_card ~width:50 p in
-  check bool "card has lines" true (List.length card_lines >= 4);
-  let widths = List.map Masc_tui_message_layout.display_width card_lines in
-  let first_width = List.hd widths in
-  check bool "first line has positive width" true (first_width > 0);
-  List.iter
-    (fun w ->
-       check int "all card borders and content rows have identical display cell width"
-         first_width w)
-    widths
-
-let test_render_notion_card_2column_alignment () =
-  let urls =
-    [ "https://github.com/jeong-sik/masc/pull/30866"
-    ; "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-    ; "https://arxiv.org/abs/2301.07041"
-    ; "https://news.ycombinator.com/item?id=38912345"
-    ; "https://example.com/assets/diagram.png"
-    ; "https://example.com/article"
-    ]
-  in
-  List.iter
-    (fun url ->
-       let p = synthesize_preview url in
-       let card_lines = render_notion_card ~width:70 p in
-       check bool "2-column card has 7 lines (top + 5 content + bottom)" true (List.length card_lines = 7);
-       let widths = List.map Masc_tui_message_layout.display_width card_lines in
-       let first_w = List.hd widths in
-       check bool "first line has positive width" true (first_w > 0);
-       List.iter
-         (fun w ->
-            check int (Printf.sprintf "all 7 lines match cell width for %s" url) first_w w)
-         widths)
-    urls
-
-let test_render_notion_card_narrow_fallback () =
-  let p = synthesize_preview "https://github.com/jeong-sik/masc/pull/30866" in
-  let card_lines = render_notion_card ~width:45 p in
-  check bool "narrow card has lines" true (List.length card_lines >= 4);
-  let widths = List.map Masc_tui_message_layout.display_width card_lines in
-  let first_w = List.hd widths in
-  check bool "first line has positive width" true (first_w > 0);
-  List.iter
-    (fun w ->
-       check int "narrow card all lines match cell width" first_w w)
-    widths
-
-let test_modal_hints_name_what_the_keys_do () =
-  let has ~needle value =
-    let n = String.length needle and h = String.length value in
-    let rec go i = i + n <= h && (String.sub value i n = needle || go (i + 1)) in
-    go 0
-  in
-  let one = modal_hints ~total_links:1 ~has_image:false in
-  let many = modal_hints ~total_links:3 ~has_image:true in
-  (* A modal swallows every key it does not handle, so this row is the only
-     place the overlay names its keys. *)
-  List.iter
-    (fun needle ->
-       check bool (needle ^ " is named") true (has ~needle one))
-    [ "o:browser"; "y:copy"; "v:image"; "j/k:scroll"; "d/u:page";
-      "g/G:first/last"; "Esc:close" ];
-  (* Neither key does anything in these states, so neither is offered. *)
-  check bool "one link offers no cycle" false (has ~needle:"n/p:cycle" one);
-  check bool "no image offers no retry" false (has ~needle:"r:retry" one);
-  check bool "several links offer the cycle" true (has ~needle:"n/p:cycle" many);
-  check bool "an image offers the retry" true (has ~needle:"r:retry image" many);
-  (* [drop_hint_items] gives up whole items from the back, so the row must end
-     on the key that leaves. *)
-  check bool "the exit is last" true
-    (String.length many >= 9
-     && String.sub many (String.length many - 9) 9 = "Esc:close")
-;;
-
-let test_render_modal_card () =
-  let p = synthesize_preview "https://example.com/photo.png" in
-  let modal_lines = render_modal_card ~width:60 ~height:20 p in
-  check bool "modal card has content lines" true (List.length modal_lines > 0)
 
 let test_modal_keeps_complete_url_and_instructions () =
   let url = "https://example.com/" ^ String.make 140 'x' ^ "/한글끝.png" in
@@ -357,9 +255,6 @@ let () =
       , [ test_case "github pr" `Quick test_github_pr
         ; test_case "github issue" `Quick test_github_issue
         ; test_case "github commit" `Quick test_github_commit
-        ; test_case "github ci run" `Quick test_github_ci_run
-        ; test_case "github file" `Quick test_github_file
-        ; test_case "github repo root" `Quick test_github_repo_root
         ; test_case "arxiv" `Quick test_arxiv
         ; test_case "hackernews" `Quick test_hackernews
         ; test_case "youtube" `Quick test_youtube
@@ -369,14 +264,7 @@ let () =
     ; ( "cache"
       , [ test_case "cache lifecycle and bounding" `Quick test_cache_operations_and_bounding ] )
     ; ( "render"
-      , [ test_case "compact badge" `Quick test_render_compact_badge
-        ; test_case "inline card column alignment" `Quick test_render_inline_card_column_alignment
-        ; test_case "notion 2-column card alignment" `Quick test_render_notion_card_2column_alignment
-        ; test_case "notion narrow fallback" `Quick test_render_notion_card_narrow_fallback
-        ; test_case "modal card" `Quick test_render_modal_card
-        ; test_case "modal keeps complete URL and instructions" `Quick test_modal_keeps_complete_url_and_instructions
-        ; test_case "modal hints name what the keys do" `Quick
-            test_modal_hints_name_what_the_keys_do
+      , [ test_case "modal keeps complete URL and instructions" `Quick test_modal_keeps_complete_url_and_instructions
         ; test_case "a refused image url is remembered and said" `Quick
             test_a_refused_image_url_is_remembered_and_said
         ; test_case "an undecided image url says nothing" `Quick

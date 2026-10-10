@@ -37,7 +37,7 @@ type instance = {
 }
 type browser_activity = Browser_enabled | Browser_disabled | Browser_unobserved
 type machine_activity = Machine_enabled | Machine_disabled | Machine_unobserved
-type machine_publication = No_screen | Stable | Running
+type machine_publication = No_screen | Stable | Running | Publication_unavailable
 type state =
   | Exact_state of configuration
   | Browser_clients of browser_activity * int

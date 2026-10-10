@@ -40,6 +40,7 @@ module Id : sig
     | Memory_current
     | Goal_store
     | Librarian_range_receipts
+    | Memory_admission_queue
     | Memory_source_current
     | Disposition_receipts
     | Board_posts
@@ -47,6 +48,7 @@ module Id : sig
     | Turn_records
     | Turn_boundaries
     | Librarian_progress
+    | Librarian_external_cursor
     | Librarian_official_progress
     | Turn_fragments
     | Memory_absorbed

@@ -109,6 +109,7 @@ type misc_operation =
   | Misc_browser_instruct
   | Misc_msx_load
   | Misc_msx_eject
+  | Misc_msx_export_disk
   | Misc_msx_save
   | Misc_msx_restore
   | Misc_msx_change_disk

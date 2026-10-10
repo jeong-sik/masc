@@ -118,6 +118,8 @@ type resume_confirmation =
   | Owner_already_active
 
 type async_msg =
+  | Chat_search_finished of int * bool * Masc_tui_render_chat.chat_search_plan
+      * (Masc_tui_render_chat.chat_search_work * Masc_tui_render_chat.chat_search_match, string) result
   | Workspace_scoped of workspace_authority * unit ref option * async_msg
   | Workspace_operation of async_msg
   | Chat_command_read_completed of unit ref * async_msg

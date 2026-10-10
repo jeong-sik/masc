@@ -1824,28 +1824,6 @@ let test_a_journal_built_log_holds_its_turn_in_the_timeline () =
      |> List.map (fun (row : Tui_types.msg_entry) -> row.me_text))
 ;;
 
-(* Leaving the bottom remembers which settled logs were on screen, so their
-   rows are what the operator anchored to, not rows that arrived since. *)
-let test_the_scroll_pin_remembers_the_settled_logs_on_screen () =
-  let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
-  in
-  state.msg_target_keeper_name <- Some "alpha";
-  state.msg_loaded_keeper <- Some "alpha";
-  state.msg_loaded <- [ chat_entry ~request_id:"op-1" ~role:Tui_types.Message_keeper ~text:"x" ~at:1. () ];
-  let held = journal_log ~request_id:"op-1" ~started_at:1. () in
-  Tui_types.hold_settled_log state held;
-  Tui_types.set_msg_scroll state 5;
-  check bool "the pin holds the logs on screen" true
-    (state.msg_scroll_pin_settled == state.msg_settled_logs);
-  Tui_types.hold_settled_log state (journal_log ~request_id:"op-2" ~started_at:2. ());
-  check bool "a log held later is not among them" false
-    (List.memq (List.nth state.msg_settled_logs 1) state.msg_scroll_pin_settled);
-  Tui_types.set_msg_scroll state 0;
-  check (list string) "back at the bottom, nothing is pinned" []
-    (List.map Tui_types.turn_log_request_id state.msg_scroll_pin_settled)
-;;
-
 (* A settled block goes after its request's last row of any phase before
    output: a failed turn's words sit above its own error row and above the
    turns that ran in between, not below both. The live block still follows
@@ -2675,7 +2653,7 @@ let test_an_observed_running_turn_is_drawn_from_its_journal () =
     Tui_types.hold_settled_log state running;
     let preview : Tui_decode.keeper_turn_preview =
       { ktp_status_text = "glm · receiving response"; ktp_updated_at_unix = 130.
-      ; ktp_text_tail = "said"; ktp_last_tool = None }
+      ; ktp_text_position={kpp_generation=0; kpp_start_byte=0}; ktp_text_tail = "said"; ktp_last_tool = None }
     in
     state.keeper_turns <-
       [ { Tui_decode.ktr_chat_control_token = None; ktr_keeper_name = "alpha"
@@ -3422,7 +3400,7 @@ let test_message_scroll_accepts_the_rendered_clamp () =
     Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
   in
   state.msg_scroll <- 30;
-  Tui_types.apply_clamped_scroll state (Tui_types.Message_scroll 7);
+  Tui_types.apply_clamped_scroll state (Tui_types.Message_scroll {scroll=7; pin=None});
   check int "requested scroll is normalized to the drawn row" 7 state.msg_scroll
 ;;
 
@@ -4550,7 +4528,7 @@ let test_speech_keeps_original_words_across_metadata_and_retry () =
           ktr_state=Keeper_turn_running {lane=Turn_lane_maintenance; started_at_unix=120.;
             interrupt_token="preview-stop"; turn_ref=None;
             preview=Some {ktp_status_text="working"; ktp_updated_at_unix=121.;
-              ktp_text_tail="관측 답변 원문"; ktp_last_tool=None}}}];
+              ktp_text_position={kpp_generation=0; kpp_start_byte=0}; ktp_text_tail="관측 답변 원문"; ktp_last_tool=None}}}];
         let preview = Masc_tui_render_chat.polled_turn_output_entries state ~keeper_name:"alpha"
             ~role_label_column:(Layout.chat_role_label_width ~pane_cells:columns) in
         check (list string) "polled speech separates its observation status"
@@ -4592,8 +4570,8 @@ let test_search_measures_original_message_rows () =
           ~at:(100.5 +. float_of_int index) () in
       [{row with Tui_types.me_identity=Persisted_row id};
        {reply with Tui_types.me_identity=Persisted_row (id ^ "-reply")}]) |> List.concat;
-    let find needle = Masc_tui_render_chat.keeper_message_find_scroll state
-      ~keeper_name:"alpha" ~needle ~older_than:None in
+    let find needle = (Masc_tui_render_chat.keeper_message_find_scroll state
+      ~keeper_name:"alpha" ~needle ~older_than:None).match_result in
     let identities = ["search-0"] in
     List.iter (fun needle -> check bool "generated annotations are not searchable message text" true
       (find needle = None)) ["TURN #24"; "입력 반영됨"];
@@ -4601,8 +4579,9 @@ let test_search_measures_original_message_rows () =
     state.msg_origin_display <- Masc_tui_message_layout.Origin_bare;
     List.iter (fun (needle, expected) ->
       match expected, find needle with
-      | Some (_, expected_anchor), Some (_, actual_anchor) ->
-          check bool "bare search retains request identity" true (expected_anchor = actual_anchor)
+      | Some (_, (expected : Tui_types.chat_search_cursor)), Some (_, (actual : Tui_types.chat_search_cursor)) ->
+          check bool "bare search retains request identity" true
+            (expected.matched_anchor = actual.matched_anchor)
       | _ -> fail ("request identity disappeared: " ^ needle)) visible;
     (match find "SEARCH_TARGET" with
      | None -> fail "bare search lost input"
@@ -4614,16 +4593,101 @@ let test_search_measures_original_message_rows () =
       (List.exists (fun line -> Astring.String.is_infix ~affix:"TURN #24"
           (Masc_tui_theme.strip_sgr line)) newest.Masc_tui_frame_presenter.lines);
     match Masc_tui_render_chat.keeper_message_find_scroll state ~keeper_name:"alpha"
-        ~needle:"SEARCH_TARGET" ~older_than:None with
+        ~needle:"SEARCH_TARGET" ~older_than:None |> fun result -> result.match_result with
     | None -> fail "search lost the original input"
-    | Some (scroll, _) ->
-        state.msg_scroll <- scroll;
+    | Some (position, _) ->
+        Tui_types.apply_clamped_scroll state (Tui_types.Message_scroll position);
         let frame, _ = Masc_tui_render_chat.render_keeper_message state in
         check bool "search uses the same original message rows as the frame" true
           (List.exists (fun line -> Astring.String.is_infix ~affix:"SEARCH_TARGET"
               (Masc_tui_theme.strip_sgr line)) frame.Masc_tui_frame_presenter.lines))
       [Masc_tui_message_layout.Origin_inline; Origin_bare; Origin_row])
       [80; 140])
+;;
+
+let test_scroll_pins_follow_live_and_hold_transient_rows () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous = Masc_tui_ansi.get_terminal_size () in
+  let set_size size = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+      cache ~probe:(fun () -> Some size)) in
+  Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
+    set_size (24, 100);
+    let fresh () =
+      let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+      state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+      state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+      state.msg_target_keeper_name <- Some "alpha";
+      state in
+    let draw state =
+      let frame, feedback = Masc_tui_render_chat.render_keeper_message state in
+      Option.iter (Tui_types.apply_clamped_scroll state) feedback;
+      List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines in
+    let history count = List.init count (fun index ->
+      let id = Printf.sprintf "row-%d" index in
+      let row = chat_entry ~request_id:id ~role:Tui_types.Message_keeper
+          ~text:(Printf.sprintf "line-%02d" index) ~at:(100. +. float_of_int index) () in
+      {row with Tui_types.me_identity=Persisted_row id}) in
+    let content rows = List.filter (Astring.String.is_infix ~affix:"line-") rows in
+    let short = fresh () in
+    short.msg_history <- history 1;
+    ignore (draw short);
+    Tui_types.set_msg_scroll short 5;
+    ignore (draw short);
+    check int "short transcript clamps to live edge" 0 short.msg_scroll;
+    short.msg_history <- history 40;
+    let screen = draw short in
+    check int "new messages still follow after a clamped wheel-up" 0 short.msg_scroll;
+    check bool "newest reply remains visible" true
+      (List.exists (Astring.String.is_infix ~affix:"line-39") screen);
+    let original = fresh () in
+    original.msg_history <- history 40;
+    ignore (draw original);
+    Tui_types.set_msg_scroll original 5;
+    let raced = {original with Tui_types.msg_history=original.msg_history} in
+    let expected = content (draw original) in
+    raced.msg_history <- history 45;
+    check (list string) "arrival between the first scroll key and paint preserves reading"
+      expected (content (draw raced));
+    let queued = fresh () in
+    let add_pending state id body =
+      let request = Keeper_chat.create_request ~keeper_name:"alpha" ~message:body () in
+      let request = {request with Keeper_chat.request_id=id} in
+      match Masc_tui_keeper_chat_queue.push state.Tui_types.msg_queued ~submitted_at:200. request with
+      | Error detail -> fail detail
+      | Ok (queue, _) -> state.msg_queued <- queue in
+    let long_body = String.concat "\n" (List.init 40 (Printf.sprintf "line-%02d")) in
+    add_pending queued "pending-first" long_body;
+    ignore (draw queued);
+    Tui_types.set_msg_scroll queued 5;
+    let pending_before = content (draw queued) in
+    check bool "pending-only window has rendered text" true (pending_before <> []);
+    add_pending queued "pending-second" "new pending input below";
+    check (list string) "new pending input does not move transient-only scrollback"
+      pending_before (content (draw queued));
+    let polled = fresh () in
+    let preview text : Tui_decode.keeper_turn_row =
+      {ktr_keeper_name="alpha"; ktr_chat_control_token=None;
+       ktr_state=Keeper_turn_running {lane=Turn_lane_maintenance; started_at_unix=120.;
+         interrupt_token="one-observed-turn"; turn_ref=None;
+         preview=Some {ktp_status_text="working"; ktp_updated_at_unix=121.;
+           ktp_text_position={kpp_generation=0; kpp_start_byte=0}; ktp_text_tail=text; ktp_last_tool=None}}} in
+    polled.keeper_turns <- [preview long_body];
+    ignore (draw polled);
+    Tui_types.set_msg_scroll polled 5;
+    let polled_before = content (draw polled) in
+    polled.keeper_turns <- [preview (long_body ^ "\nnew output below")];
+    check (list string) "same observed turn preserves its scrolled excerpt"
+      polled_before (content (draw polled));
+    let searched = fresh () in
+    searched.msg_history <- history 1;
+    (match Masc_tui_render_chat.keeper_message_find_scroll searched ~keeper_name:"alpha"
+        ~needle:"line-00" ~older_than:None |> fun result -> result.match_result with
+     | None -> fail "short search target missing"
+     | Some (position, _) -> Tui_types.apply_clamped_scroll searched (Message_scroll position));
+    ignore (draw searched);
+    searched.msg_history <- history 40;
+    check bool "explicit search at zero retains its anchor" true
+      (List.exists (Astring.String.is_infix ~affix:"line-00") (draw searched)))
 ;;
 
 let test_empty_post_terminal_replay_is_retained () =
@@ -4669,7 +4733,7 @@ let test_search_finds_a_batched_request_by_its_own_id () =
            && not (Astring.String.is_infix ~affix:request_id entry.body)) entries);
     check bool "search finds the update by the id it was submitted with" true
       (Option.is_some (Masc_tui_render_chat.keeper_message_find_scroll state
-         ~keeper_name:"alpha" ~needle:request_id ~older_than:None)))
+         ~keeper_name:"alpha" ~needle:request_id ~older_than:None).match_result))
     [Masc_tui_message_layout.Origin_bare; Origin_inline; Origin_row]
 ;;
 
@@ -4715,7 +4779,9 @@ let () =
     ; ( "visible delivery",
         [ test_case "pending to observed work" `Quick test_delivery_states_and_observed_work_are_identifiable
         ; test_case "speech preserves original words" `Quick test_speech_keeps_original_words_across_metadata_and_retry
-        ; test_case "search measures original rows" `Quick test_search_measures_original_message_rows ] )
+        ; test_case "search measures original rows" `Quick test_search_measures_original_message_rows
+        ; test_case "scroll pins separate live edge, first key and transient rows" `Quick
+            test_scroll_pins_follow_live_and_hold_transient_rows ] )
     ; ( "rejected input", [test_case "refusal preserves original input" `Quick test_verified_rejection_is_visible_without_mutating_original_input] )
     ; ( "status ownership",
         [ test_case "withdrawal restores only input before the first POST" `Quick test_withdrawal_restores_only_input_before_the_first_post
@@ -4797,8 +4863,6 @@ let () =
             test_a_failure_learned_only_from_the_record_keeps_the_log_partial
         ; test_case "a failure the stream reported still stands for the turn" `Quick
             test_a_failure_the_stream_reported_still_stands_for_the_turn
-        ; test_case "the scroll pin remembers the settled logs on screen" `Quick
-            test_the_scroll_pin_remembers_the_settled_logs_on_screen
         ; test_case "a settled block sits before its request's output rows" `Quick
             test_a_settled_block_sits_before_its_requests_output_rows
         ; test_case "loaded tool facts are folded into the held log" `Quick

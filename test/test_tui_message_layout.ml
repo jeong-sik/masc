@@ -4,10 +4,19 @@ module Layout = Masc_tui_message_layout
 module Frame = Masc_tui_frame
 module Markdown_cache = Masc_tui_markdown_render_cache
 
+let holds text needle =
+  let n = String.length needle in
+  let rec seek i =
+    i + n <= String.length text
+    && (String.sub text i n = needle || seek (i + 1))
+  in
+  n = 0 || seek 0
+
 let entry ?(timestamp = "12:34:56") ?timeline_bucket ?speaker
     ?(markdown_source = Layout.Markdown_streaming) style role request_label body :
     Layout.entry =
   { delivery_state = None; style
+  ; body_presentation = Layout.Source_body
   ; timestamp
   ; timeline_bucket
   ; diagnostics = []
@@ -90,6 +99,7 @@ let test_word_delete_removes_blanks_then_word () =
 let transcript count =
   List.init count (fun index ->
       { Layout.delivery_state = None; Layout.style = Layout.Keeper;
+        body_presentation = Layout.Source_body;
         timestamp = Printf.sprintf "12:%02d:00" (index mod 60);
         timeline_bucket = None;
         diagnostics = [];
@@ -156,7 +166,7 @@ let test_one_frame_renders_each_completed_entry_once_beyond_cache_capacity () =
     Layout.scrolled_rows ~markdown:uncached_markdown ~inner_width ~height
       ~from_bottom:expected_scroll entries
   in
-  let scroll, rows =
+  let {Layout.scroll; rows; _} =
     Layout.clamped_scrolled_rows ~markdown ~inner_width ~height ~requested entries
   in
   check int "combined scroll matches the separate clamp" expected_scroll scroll;
@@ -186,7 +196,7 @@ let test_a_second_walk_pays_for_what_it_newly_reaches () =
   in
   let walk requested =
     laid_out := 0;
-    let scroll, rows =
+    let {Layout.scroll; rows; _} =
       Layout.clamped_scrolled_rows ~markdown ~inner_width ~height ~requested
         entries
     in
@@ -207,7 +217,7 @@ let test_a_second_walk_pays_for_what_it_newly_reaches () =
   ignore
     (Layout.clamped_scrolled_rows ~markdown ~inner_width:(inner_width + 6)
        ~height ~requested:93 entries
-      : int * Layout.row list);
+      : Layout.scroll_window);
   check bool "a new width measures again" true (!laid_out > second_cost)
 
 let escape_control_bytes text =
@@ -259,6 +269,23 @@ let timeline_bucket ?(is_dst = false) hour : Layout.timeline_bucket =
   ; tb_is_dst = is_dst
   }
 ;;
+
+let test_live_edge_positions_belong_to_actual_selected_rows () =
+  let entries=[entry Layout.Keeper "keeper" "live-edge"
+    (String.concat "\n" (List.init 100 (fun n -> Printf.sprintf "ROW_%03d" n)))] in
+  let window=Layout.clamped_scrolled_rows ~origin:Layout.Origin_row
+    ~inner_width:60 ~height:6 ~requested:0 entries in
+  check bool "actual producer exposes hidden middle" true
+    (List.exists (fun (row : Layout.row) -> match row.kind with Layout.Viewport_gap _ -> true | _ -> false) window.rows);
+  (match List.rev window.body_positions with
+   | position::_ ->
+       check int "last visible owner is original final body row" 99 position.body_row;
+       check int "tail owner is at actual viewport bottom" 0 position.rows_below
+   | [] -> fail "visible live-edge tail has no body owner");
+  let heading_only=Layout.clamped_scrolled_rows ~origin:Layout.Origin_row
+    ~inner_width:60 ~height:1 ~requested:0 entries in
+  check int "a heading-only viewport has no invented source position" 0
+    (List.length heading_only.body_positions)
 
 let test_a_text_laid_out_again_keeps_its_layout () =
   let texts =
@@ -337,6 +364,29 @@ let test_an_ascii_text_is_not_kept () =
     (Printf.sprintf "laying it out again allocates the same (%.0f then %.0f bytes)" first again)
     true (Float.equal first again)
 
+let test_journal_source_spans () =
+  let lines = [
+    Layout.Journal_fact {sign=Journal_added;category="fact";tone=Tone_fact;claim="  foo bar foobar  longwordlongword"};
+    Layout.Journal_drop {memory_id="memory-id";reason="same reason 한글 words"};
+    Layout.Journal_fact {sign=Journal_removed;category="learning";tone=Tone_learning;claim=""}
+  ] in
+  let stable=ref [] in
+  List.iter (fun width ->
+    let mapped=Layout.journal_rows_with_spans ~width lines in
+    check bool "journal mapping preserves exact existing rows" true
+      (mapped.journal_rows=Layout.journal_rows ~width lines);
+    let identities=List.map (fun (span : Layout.journal_source_span) -> span.line_index,span.field,span.value)
+      mapped.journal_fields |> List.sort_uniq compare in
+    if !stable=[] then stable:=identities else
+      check bool "field identities survive hanging-column switch" true (!stable=identities);
+    List.iter (fun (span : Layout.journal_source_span) ->
+      let row=List.nth mapped.journal_rows span.row |> List.map fst |> String.concat "" in
+      List.iter (fun (a,b) ->
+        check bool "source range lies in original field" true (a>=0 && a<b && b<=String.length span.value);
+        check bool "mapped source occurs on actual formatter row" true
+          (holds row (String.sub span.value a (b-a)))) span.source_ranges) mapped.journal_fields
+  ) [5;16;38;100]
+
 let () =
   run "tui_message_layout"
     [
@@ -372,5 +422,8 @@ let () =
     ; ( "composer"
       , [] )
     ; ( "scrollback"
-      , [] )
+      , [ test_case "journal source spans" `Quick test_journal_source_spans
+        ; test_case "live-edge positions own actual selected rows" `Quick
+            test_live_edge_positions_belong_to_actual_selected_rows
+        ] )
     ]

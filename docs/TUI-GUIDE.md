@@ -1008,6 +1008,39 @@ input names its request there too.
 Working means the turn is in progress. The progress row says `THINKING` or
 `STREAMING` only after receiving the corresponding signal.
 
+`/find <text>` searches the conversation that is drawn, including replies and
+activity retained in live or settled journals. `/find` repeats toward older
+matches using record identity, so incoming messages and history backfill do
+not restart the search. Hidden reasoning is excluded. Editable pending inputs
+and replaceable polled excerpts contribute to scroll positioning but are not
+conversation search candidates.
+
+Search lands on the physical body row containing the match, including inside
+a long or wrapped answer. It searches rendered words, so `foo bar` also finds
+`foo **bar**`. A line break in the source is an optional boundary: words on
+either side of it match with or without a space in the query. Width wrapping
+is not: it changes where rows break, not the searched text, so a space the
+author wrote still has to be in the query (`foobar` does not find `foo bar`
+however the terminal wraps it). A wrapped phrase lands with its last row
+visible.
+
+While reading back, the pane pins projected history or journal origins and
+their physical body-row positions. Incoming input, broadcasts, streamed text,
+and settled journals therefore do not pull the view toward the tail. This also
+works when no raw history rows have been loaded. The canonical reply's typed
+alias keeps the same anchor when history and journal representations replace
+one another. Search installs its pin before the next frame. If output arrives
+before that frame, the reading-back notice and command menu already reflect the
+restored position, so their row heights do not move the match on the next paint.
+Returning to the bottom releases the pin and resumes following output.
+
+A pin on a source row keeps that row's exact source byte, so a terminal resize
+or an origin-gutter change that reflows the anchored entry brings back the same
+words, on whichever physical row they now occupy. A generated row, or a
+transient row whose source has no stable byte map, has no source byte and
+saves no pin point. If every saved point is gone, the view returns to the
+bottom instead of holding a numeric row distance.
+
 The pane opens on the keeper's durable transcript. A turn the keeper ran on
 its own is drawn as what it did. Reasoning starts folded with a `THINKING`
 label; tool calls start as a compact activity row labelled `TOOLS`.

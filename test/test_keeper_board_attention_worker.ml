@@ -677,11 +677,11 @@ let test_completed_snapshot_captures_settle_and_continues_waking () =
      lands a new completion in the capture boundary, so the walk below cannot
      see it in [completed] and must come back with a continuation wake. This
      pins the comment above [settle_completed_snapshot] — completions that
-     arrive after the capture belong to the next admission snapshot. The
-     settle walk yields between members (fair_yield), and the pinned
-     "other fiber runs between captured members" property is covered by the
-     settle ordering assertions below: [first] and [second] are delivered in
-     captured order across the yield, while the new completion waits outside. *)
+     arrive after the capture belong to the next admission snapshot. This
+     test does NOT check that the settle walk yields between members: with
+     the walk's inter-member [fair_yield] removed it still passes (measured
+     on the pushed head, 2026-10-10). Yielding is covered by nothing here;
+     watching it is tracked in task-2233's follow-up scope. *)
   let on_captured
         ~base_path
         ~keeper_name:_

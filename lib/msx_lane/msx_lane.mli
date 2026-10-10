@@ -45,6 +45,8 @@ type observation = {
   mode : string;  (** {!Msx.display_mode_to_string} *)
   pc : int;
   halted : bool;
+  ppi_a : int;  (** Primary-slot selection register, as read from PPI port A. *)
+  slot3_sel : int;  (** Stored subslot byte; hardware reads address FFFFh inverted. *)
   screen_text : string;
       (** name table as characters — meaningful when the pattern set is a font.
           Empty in bitmap modes ({!is_bitmap_mode}): there the name table is
@@ -325,20 +327,24 @@ val ram_diff : unit -> (ram_diff, error) result
     survives machine swaps — a reload after a peek reads as wholesale change,
     which it is. *)
 
-(** {b Core identity} — which ocaml-msx build this lane linked, the way
-    {!Dos_lane.core} does for the DOS lane. [binary_commit] names only the
-    masc sources: two builds of one commit can link different cores — the
-    vendored copy or an older opam install — and only this field tells
-    them apart. *)
+(** {b Core identity} — the linked ocaml-msx source digest and exact source
+    commit embedded by the linked core build, the exact commit at the build-time
+    CI pin, and whether the linked digest matches that pin. *)
 
 type core = {
   source_digest : string;
       (** the linked ocaml-msx core's own identity: a digest of its [lib/]
-          sources, computed by its build ([Msx_core_identity]). Not a
-          commit — an opam install has no history to ask. *)
+          sources, computed by its build ([Msx_core_identity]). *)
+  source_commit : string option;
+      (** the exact commit embedded by the linked core build, or [None] when
+          that build saw no clean Git checkout: dirty or archive builds, and
+          the opam-pinned install that CI uses. *)
   pinned_source_digest : string;
       (** the digest of the core at the CI pin, [OCAML_MSX_SHA] in
           [scripts/opam-pin-external-deps.sh]. *)
+  pinned_source_commit : string;
+      (** the ocaml-msx commit declared by the CI pin, not an observation of
+          the linked core's commit. *)
   matches_pin : bool;
       (** the two digests are equal. [false] means this server runs a
           different core from the one CI builds against — an older opam
@@ -357,14 +363,21 @@ val core_to_yojson : core -> Yojson.Safe.t
     campaign to ask a question. *)
 
 type checkpoint_info = {
-  version : int;  (** the checkpoint format version, currently 1 *)
+  exists : bool;
+      (** true for a successfully inspected slot; missing slots return a typed error. *)
+  version : int;  (** the checkpoint envelope version, currently 1 *)
+  state_format_version : int option;
+      (** the embedded format version after the core validates its state
+          envelope and checksum; [None] when the core rejects that envelope.
+          This does not deserialize or validate the complete machine payload. *)
   frame : int option;
       (** the saved frame counter. Checkpoint version 1 does not record it —
           reading it would mean decoding the machine — so [None] until a
           format that carries it. *)
   saved_at_unix : float option;
-      (** the checkpoint file's modification time: the moment the slot was
-          written. Absent when the file cannot be stat'ed. *)
+      (** compatibility field for the checkpoint file's modification time. *)
+  mtime_utc : string;
+      (** the checkpoint file's modification time in UTC ISO-8601 form. *)
   core_sha : string option;
       (** the [Msx_core_identity.source_digest] of the core that saved the
           checkpoint. Checkpoints saved before the field existed read as

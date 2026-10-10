@@ -46,6 +46,8 @@ let observation_fields ?(sprites = false) (o : Msx_lane.observation) =
   ; ("mode", `String o.mode)
   ; ("pc", `String (Printf.sprintf "%04x" o.pc))
   ; ("halted", `Bool o.halted)
+  ; ("ppi_a", `Int o.ppi_a)
+  ; ("slot3_sel", `Int o.slot3_sel)
   ; ("cartridge", match o.cartridge with Some c -> `String c | None -> `Null)
   ; ("disk", match o.disk with Some d -> `String d | None -> `Null)
   ; ("screen_text", `String o.screen_text)
@@ -423,10 +425,14 @@ let handle_checkpoint_info ~tool_name ~start_time ~base_path args =
         ~data:
           (`Assoc
             ([ ("slot", `String slot)
+             ; ("exists", `Bool info.exists)
              ; ("version", `Int info.version)
+             ; ( "state_format_version"
+               , match info.state_format_version with Some v -> `Int v | None -> `Null )
              ; ("frame", match info.frame with Some f -> `Int f | None -> `Null)
              ; ( "saved_at_unix"
                , match info.saved_at_unix with Some t -> `Float t | None -> `Null )
+             ; ("mtime_utc", `String info.mtime_utc)
              ; ("core_sha", match info.core_sha with Some s -> `String s | None -> `Null)
              ; ( "core_matches_current"
                , match info.core_sha with

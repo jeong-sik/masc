@@ -175,6 +175,22 @@ let test_load_and_clock () =
   check int "step moves the clock" (Msx_lane.boot_frames + 10) (frame_of r);
   let r = dispatch ~base_path "masc_msx_screen" [] in
   check int "screen does not move the clock" (Msx_lane.boot_frames + 10) (frame_of r);
+  let byte_field name result =
+    match member name (Tool_result.data result) with
+    | Some (`Int value) when 0 <= value && value <= 255 -> Some value
+    | _ -> None in
+  check bool "screen reports both slot-selection bytes" true
+    (Option.is_some (byte_field "ppi_a" r)
+     && Option.is_some (byte_field "slot3_sel" r));
+  let incarnation_before = incarnation () in
+  let reread = dispatch ~base_path "masc_msx_screen" [] in
+  let slots_are_stable =
+    member "ppi_a" (Tool_result.data r) = member "ppi_a" (Tool_result.data reread)
+    && member "slot3_sel" (Tool_result.data r) = member "slot3_sel" (Tool_result.data reread) in
+  check bool "screen reads preserve slot-selection bytes" true slots_are_stable;
+  check string "screen reads preserve machine incarnation"
+    incarnation_before (incarnation ());
+  check int "repeated screen read does not move the clock" (frame_of r) (frame_of reread);
   let r = dispatch ~base_path "masc_msx_step" [ ("frames", `Int 301) ] in
   check bool "a step over the cap is refused" true (rejected r);
   let r = dispatch ~base_path "masc_msx_step" [ ("frames", `Int 0) ] in
@@ -1104,6 +1120,18 @@ let test_core_identity_matches_pin () =
   check bool "matches_pin agrees with the two digests"
     core.matches_pin (String.equal core.source_digest core.pinned_source_digest);
   check string "the linked core is the one at the CI pin" core.pinned_source_digest core.source_digest;
+  (* CI installs the core through the opam pin, and that build embeds no
+     commit (run 38011093213). The digest check above already binds the linked
+     core to the pin; a build that does embed a commit must name the pinned one. *)
+  (match core.source_commit with
+   | Some sha ->
+     check string "an embedded commit is the commit at the CI pin"
+       core.pinned_source_commit sha
+   | None -> ());
+  check bool "commit is surfaced in runtime metadata" true
+    (match Msx_lane.core_to_yojson core with
+     | `Assoc fields -> List.mem_assoc "source_commit" fields
+     | _ -> fail "core metadata must be an object");
   check bool "digest is 32 lowercase hex characters"
     (String.length core.source_digest = 32
     && String.for_all (fun c -> (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) core.source_digest)
@@ -1132,6 +1160,9 @@ let test_pin_table_names_the_same_core () =
        && String.for_all (fun c -> (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) sha
      | None -> false)
     (match script_sha with Some sha -> String.length sha = 40 | None -> false);
+  check string "runtime core commit matches the pin script"
+    (match script_sha with Some sha -> sha | None -> "")
+    Msx_lane.core.pinned_source_commit;
   let lock = In_channel.with_open_text "../masc.opam.locked" In_channel.input_all in
   check bool "lock file names the same pin commit" true
     (match script_sha with
@@ -1170,6 +1201,20 @@ let test_checkpoint_info_reads_without_restoring () =
   check bool "checkpoint saved" true (is_completed save);
   let info = call "masc_msx_checkpoint_info" ["slot", `String "info-slot"] in
   check bool "info completes" true (is_completed info);
+  check bool "successful checkpoint inspection reports existence" true
+    (member "exists" (Tool_result.data info) = Some (`Bool true));
+  let saved_mtime =
+    match member "saved_at_unix" (Tool_result.data info) with
+    | Some (`Float timestamp) -> timestamp
+    | _ -> fail "checkpoint mtime is missing" in
+  let tm = Unix.gmtime saved_mtime in
+  check string "checkpoint mtime is UTC ISO-8601"
+    (Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+       (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+       tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec)
+    (match member "mtime_utc" (Tool_result.data info) with
+     | Some (`String timestamp) -> timestamp
+     | _ -> "");
   check bool "no media names on a BIOS-only save" true
     (match (member "cartridge" (Tool_result.data info), member "disk" (Tool_result.data info)) with
      | Some `Null, Some `Null -> true
@@ -1191,6 +1236,36 @@ let test_checkpoint_info_reads_without_restoring () =
   let dir = Filename.concat (Filename.concat base_path ".masc") "msx" in
   let path = Filename.concat (Filename.concat dir "saves") "info-slot.json" in
   let payload = In_channel.with_open_bin path In_channel.input_all in
+  check bool "pinned core writes state format 3" true
+    (member "state_format_version" (Tool_result.data info) = Some (`Int 3));
+  let saved_fields, machine = match Yojson.Safe.from_string payload with
+    | `Assoc fields ->
+      (match List.assoc_opt "machine" fields with
+       | Some (`String encoded) ->
+         (match Base64.decode encoded with
+          | Ok bytes -> fields, bytes
+          | Error (`Msg detail) -> fail detail)
+       | _ -> fail "saved checkpoint machine missing")
+    | _ -> fail "saved checkpoint must be an object" in
+  let corrupted = Bytes.of_string machine in
+  let last = Bytes.length corrupted - 1 in
+  Bytes.set corrupted last (Char.chr (Char.code (Bytes.get corrupted last) lxor 1));
+  List.iter (fun (label, bytes) ->
+    let fields = ("machine", `String (Base64.encode_string bytes))
+      :: List.remove_assoc "machine" saved_fields in
+    Out_channel.with_open_bin path (fun oc ->
+      output_string oc (Yojson.Safe.to_string (`Assoc fields)));
+    let inspected = call "masc_msx_checkpoint_info" ["slot", `String "info-slot"] in
+    check bool (label ^ " keeps inspection available") true (is_completed inspected);
+    check bool (label ^ " cannot claim an embedded format version") true
+      (member "state_format_version" (Tool_result.data inspected) = Some `Null);
+    check string (label ^ " leaves the running machine untouched") before_incarnation
+      (match Msx_lane.capture_with_identity () with
+       | Ok captured -> captured.incarnation
+       | Error error -> fail (Msx_lane.error_to_string error)))
+    ["truncated header", String.sub machine 0 1;
+     "corrupted checksum", Bytes.to_string corrupted];
+  Out_channel.with_open_bin path (fun oc -> output_string oc payload);
   check int "checkpoint byte length reported" (String.length payload)
     (match member "byte_length" (Tool_result.data info) with
      | Some (`Int n) -> n

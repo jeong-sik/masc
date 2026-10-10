@@ -12,6 +12,8 @@ type observation = {
   mode : string;
   pc : int;
   halted : bool;
+  ppi_a : int;
+  slot3_sel : int;
   screen_text : string;
   screen_view : string;
   tiles : string list;
@@ -298,6 +300,8 @@ let observe st =
   ; mode = Msx.display_mode_to_string mode
   ; pc = Msx.dump_pc st.m
   ; halted = Msx.cpu_halted st.m
+  ; ppi_a = Msx.ppi_a st.m
+  ; slot3_sel = Msx.slot3_sel st.m
   ; screen_text = (if is_bitmap_mode mode then "" else Msx.screen_text st.m)
   ; tiles = tiles_of st.m mode
   ; sprites = sprites_of st.m mode
@@ -939,32 +943,38 @@ let change_disk ~path ~backup_path =
 ;;
 
 (* The digest ocaml-msx reports for the sources at OCAML_MSX_SHA in
-   scripts/opam-pin-external-deps.sh. Bump the two together: CI links the
-   pinned core, and test_msx_tools checks that the linked digest equals this
-   one, so a SHA bumped alone turns that test red with the new digest in its
-   message. Read the digest of a commit from its build:
-   _build/default/lib/identity/msx_core_identity.ml. The digest covers only
-   lib/ top-level (dune plus *.ml/*.mli, by base name), so an additive-only
-   core change in a subdirectory keeps the value. *)
+   scripts/opam-pin-external-deps.sh. CI tests compare both the linked
+   core's embedded commit and digest with this table; a declared pin cannot
+   stand in for the linked build identity. *)
 let pinned_core_source_digest = "cc6489f2ddae4a48596b4879b3c0e368"
+let pinned_core_source_commit = "b3808bccf376c54bf7d78b176d4d178022a1487b"
 
 type core = {
   source_digest : string;
+  source_commit : string option;
   pinned_source_digest : string;
+  pinned_source_commit : string;
   matches_pin : bool;
 }
 [@@deriving yojson]
 
 let core =
+  let matches_pin =
+    String.equal Msx_core_identity.source_digest pinned_core_source_digest in
   { source_digest = Msx_core_identity.source_digest
+  ; source_commit = Msx_core_identity.source_commit
   ; pinned_source_digest = pinned_core_source_digest
-  ; matches_pin = String.equal Msx_core_identity.source_digest pinned_core_source_digest
+  ; pinned_source_commit = pinned_core_source_commit
+  ; matches_pin
   }
 
 type checkpoint_info = {
+  exists : bool;
   version : int;
+  state_format_version : int option;
   frame : int option;
   saved_at_unix : float option;
+  mtime_utc : string;
   core_sha : string option;
   cartridge : string option;
   disk : string option;
@@ -972,6 +982,12 @@ type checkpoint_info = {
   byte_length : int;
   sha256 : string;
 }
+
+let mtime_to_utc timestamp =
+  let tm = Unix.gmtime timestamp in
+  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
 
 let checkpoint_info ~path =
   (* Inspection stays available when execution is disabled, so this is the
@@ -981,11 +997,23 @@ let checkpoint_info ~path =
   then Error (Invalid_request ("no MSX checkpoint at " ^ path))
   else
     let contents =
-      try Ok (read_file path) with
-      | Sys_error message -> Error (Unreadable message) in
+      try
+        Ok
+          (In_channel.with_open_bin path (fun ic ->
+             let contents = In_channel.input_all ic in
+             (* Saves replace this path atomically; stat the opened inode so its
+                mtime cannot come from a different checkpoint than [contents]. *)
+             let stats = Unix.fstat (Unix.descr_of_in_channel ic) in
+             contents, stats.Unix.st_mtime))
+      with
+      | Sys_error message -> Error (Unreadable message)
+      | Unix.Unix_error (error, fn, arg) ->
+        Error
+          (Unreadable
+             (Printf.sprintf "%s: %s (%s)" fn (Unix.error_message error) arg)) in
     match contents with
     | Error e -> Error e
-    | Ok contents ->
+    | Ok (contents, mtime_unix) ->
       let byte_length = String.length contents in
       let sha256 = Digestif.SHA256.(to_hex (digest_string contents)) in
       let json =
@@ -1042,11 +1070,18 @@ let checkpoint_info ~path =
       let* version = required_int "version" in
       let* machine = required_string "machine" in
       let* ledger = required_list "ledger" in
-      let machine_is_encoded =
+      let decoded_machine =
         match Base64.decode machine with
-        | Ok bytes -> bytes <> ""
-        | Error _ -> false in
-      if not machine_is_encoded
+        | Ok bytes when bytes <> "" -> Some bytes
+        | Ok _ | Error _ -> None in
+      let state_format_version =
+        match decoded_machine with
+        | Some bytes ->
+          (match State_codec.reader bytes with
+           | reader -> Some (State_codec.version reader)
+           | exception State_codec.Invalid_state _ -> None)
+        | None -> None in
+      if Option.is_none decoded_machine
       then invalid "machine must be nonempty base64"
       else if not (List.for_all valid_ledger_entry ledger)
       then invalid "ledger contains a malformed entry"
@@ -1057,14 +1092,14 @@ let checkpoint_info ~path =
         let* core_sha = optional_string "core_sha" in
         let* cartridge = optional_string "cartridge" in
         let* disk = optional_string "disk" in
-        let saved_at_unix =
-          match Unix.stat path with
-          | exception _ -> None
-          | stats -> Some stats.st_mtime in
+        let saved_at_unix = Some mtime_unix in
         Ok
-          { version
+          { exists = true
+          ; version
+          ; state_format_version
           ; frame
           ; saved_at_unix
+          ; mtime_utc = mtime_to_utc mtime_unix
           ; core_sha
           ; cartridge
           ; disk

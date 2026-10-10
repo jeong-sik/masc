@@ -510,20 +510,18 @@ let keeper_chat_event_of_json json =
       in
       if String.equal tag "native_tool_start" then Ok (Native_tool_start tool)
       else
-        (* The writer always records the completion; a record without one is
-           truncated or malformed, not an older generic end. *)
+        (* The production writer still emits ends without a completion
+           (11,865 rows in the live keeper_turn_events), so an omitted one
+           reads as end_observed the way the wire does; a duplicate or
+           malformed present completion is unreadable. *)
         let* completion =
           match json with
           | `Assoc fields ->
-              (* A duplicate top-level completion member is malformed:
-                 selecting one would silently discard the other's
-                 contradictory report. *)
-              let completions =
-                List.length (List.filter (fun (key, _) -> String.equal key "completion") fields) in
-              if completions <> 1
-              then Error (Printf.sprintf "native_tool_end has %d completion members" completions)
-              else Runtime_native_tools.completion_of_json (json |> member "completion")
-          | _ -> Error "native_tool_end has no completion"
+              (match List.filter (fun (key, _) -> String.equal key "completion") fields with
+               | [] -> Ok Runtime_native_tools.end_observed
+               | [_, json] -> Runtime_native_tools.completion_of_json json
+               | _ -> Error "native_tool_end has duplicate completion members")
+          | _ -> Ok Runtime_native_tools.end_observed
         in
         Ok (Native_tool_end (tool, completion))
     | "tool_approval_requested" ->

@@ -99,7 +99,7 @@ function SurfaceReceipt({ surface }: { surface: DashboardEffectiveKeeperSurface 
       <div class="grid gap-1" data-testid="skill-context-totals">
         <span class="text-xs">Skill context footprint</span>
         <code class="text-3xs break-all text-[var(--color-fg-muted)]">
-          profile discovery ${surface.skill_discovery_bytes} B · eager ${surface.skill_eager_body_bytes} B · deferred bodies ${surface.skill_body_bytes} B · skill tool schema ${surface.skill_tool_surface_bytes}/${surface.tool_surface_bytes} B all tool schema
+          profile discovery ${surface.skill_discovery_bytes} B · deferred bodies ${surface.skill_body_bytes} B · skill tool schema ${surface.skill_tool_surface_bytes}/${surface.tool_surface_bytes} B all tool schema
         </code>
       </div>
       ${surface.tool_delivery.status === 'suppressed'
@@ -134,7 +134,7 @@ function SurfaceReceipt({ surface }: { surface: DashboardEffectiveKeeperSurface 
               <div key=${referenceLabel(profile.reference)} class="grid gap-0.5 rounded-[var(--r-1)] border border-[var(--color-border-subtle)] p-2">
                 <code class="text-3xs break-all">${referenceLabel(profile.reference)}</code>
                 <span class="text-3xs text-[var(--color-fg-muted)]">
-                  ${profile.kind} · ${profile.execution} · discovery ${profile.context.discovery_bytes} B · eager ${profile.context.eager_body_bytes} B · deferred ${profile.context.body_bytes} B
+                  ${profile.kind} · ${profile.execution} · discovery ${profile.context.discovery_bytes} B · deferred ${profile.context.body_bytes} B
                 </span>
                 <span class="text-3xs" data-testid="skill-load-reason">
                   why loaded: ${profile.load_reasons.map(loadReasonLabel).join(' + ') || 'unattributed'}

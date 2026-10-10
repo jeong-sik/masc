@@ -96,7 +96,6 @@ function surfaceProfile(
     },
     context: {
       body_bytes: 100,
-      eager_body_bytes: 0,
       discovery_bytes: 40,
       tool_schema_bytes: null,
     },
@@ -435,7 +434,6 @@ describe('labels', () => {
         },
         context: {
           body_bytes: 2048,
-          eager_body_bytes: 0,
           discovery_bytes: 320,
           tool_schema_bytes: 320,
         },
@@ -458,7 +456,7 @@ describe('labels', () => {
       }],
     }
     expect(capabilityLabel(profiled)).toBe('async · 4 nodes · 2 batches · parallel ×3')
-    expect(contextLabel(profiled, 2048)).toBe('320 B discovery · 0 B eager · 2.0 KB body')
+    expect(contextLabel(profiled, 2048)).toBe('320 B discovery · 2.0 KB body')
     expect(usageLabel(profiled)).toBe(
       'rondo 9×/9 delivered/134 actions · last 2026-08-27T01:00:00Z',
     )
@@ -615,7 +613,6 @@ const editorProfile = {
   },
   context: {
     body_bytes: 100,
-    eager_body_bytes: 0,
     discovery_bytes: 40,
     tool_schema_bytes: null,
   },

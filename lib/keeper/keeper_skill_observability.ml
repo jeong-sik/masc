@@ -32,7 +32,6 @@ type profile =
   ; activation_tool : string
   ; execution : string
   ; body_bytes : int
-  ; eager_body_bytes : int
   ; discovery_bytes : int
   ; tool_schema_bytes : int option
   ; node_count : int
@@ -205,7 +204,6 @@ let of_skill_with_reference reference (skill : Keeper_skill_catalog.skill) =
          ; activation_tool = Keeper_tool_composition_catalog.skill_tool_name
          ; execution = "on_demand"
          ; body_bytes
-         ; eager_body_bytes = 0
          ; discovery_bytes = instruction_discovery_bytes reference skill.description
          ; tool_schema_bytes = None
          ; node_count = 0
@@ -227,7 +225,6 @@ let of_skill_with_reference reference (skill : Keeper_skill_catalog.skill) =
          ; execution =
              Keeper_tool_composition_catalog.execution_mode_to_string entry.execution
          ; body_bytes
-         ; eager_body_bytes = 0
          ; discovery_bytes = Option.value ~default:0 tool_schema_bytes
          ; tool_schema_bytes
          ; node_count = List.length (Keeper_tool_plan.nodes entry.plan)
@@ -315,7 +312,6 @@ let to_yojson profile =
     ; ( "context"
       , `Assoc
           [ "body_bytes", `Int profile.body_bytes
-          ; "eager_body_bytes", `Int profile.eager_body_bytes
           ; "discovery_bytes", `Int profile.discovery_bytes
           ; ( "tool_schema_bytes"
             , match profile.tool_schema_bytes with

@@ -46,9 +46,33 @@ val redact_text : t -> string -> string
     with [\[REDACTED\]], preserving message length semantics except for
     the replacements themselves. *)
 
+val redact_text_mapped : t -> string -> Secret_patterns.source_piece list
+(** Same policy as {!redact_text}, with half-open original input byte spans.
+    No output-text comparison is used to recover replacement positions. *)
+
 type stream_state
 
 val create_stream_state : t -> stream_state
+
+type stream_release =
+  { pieces : Secret_patterns.source_piece list
+  ; consumed : int
+  }
+(** [consumed] is the absolute, exclusive safe-consumed source byte watermark
+    since this stream state was created, not the rendered output length.
+    [pieces] cover exactly the newly consumed range, in those same absolute
+    coordinates. An empty release leaves the watermark unchanged. A replacement
+    crossing input chunks is one [Masked] span; consumers place it only at its
+    first source-byte owner. [Copied] spans may cross input chunk boundaries,
+    including a boundary inside a UTF-8 code point. Do not split their output
+    into invalid UTF-8 when assigning it back to source chunks. *)
+
+val redact_stream_chunk_mapped : stream_state -> string -> stream_release
+val redact_stream_finish_mapped : stream_state -> stream_release
+(** Mapped forms of the string APIs below. A bounded release uses the actual
+    consumed cursor, which can extend past the nominal cut to cover an entire
+    exact secret. Repeated finish calls return no pieces and the same cursor. *)
+
 val redact_stream_chunk : stream_state -> string -> string
 val redact_stream_finish : stream_state -> string
 (** Boundary-safe streaming redaction. Newline and carriage-return records are

@@ -1411,11 +1411,11 @@ let test_drain_then_settle_does_not_mint_a_ready_root () =
    the gap the seam's hook defines: immediately before the wake's first
    prune. The settlement consumes X and settles X's partition; the prunes
    that follow drop X's row and its settled receipt, so the seam's returned
-   list is post-prune and minting over it appends nothing. Under the
-   pre-#41506 order (the candidate read moved in front of the prunes) the
-   same hook position still lets the prunes drop the row and receipt, but
-   the list minted over is the stale pre-prune read: it still names X, and
-   [ensure_roots] over a Pending candidate whose partition just settled
+   list is post-prune and minting over it appends nothing. With the
+   candidate read reverted in front of the prunes — the pre-#41506 order —
+   the same hook position still lets the prunes drop the row and receipt,
+   but the list minted over is the stale pre-prune read: it still names X,
+   and [ensure_roots] over a Pending candidate whose partition just settled
    re-creates the Ready root the settled receipt no longer authorizes —
    the wedge #41506 closed. This test is the tripwire for that revert. *)
 let test_owner_settlement_before_the_prunes_does_not_mint_a_ready_root () =

@@ -1846,12 +1846,12 @@ let reconcile_quarantines ~now ~worker_epoch ~base_path ~keeper_name =
 ;;
 
 (* The prunes-plus-read body the wake shares, so a test can re-run the
-   whole seam with the candidate read moved back in front of the prunes
-   (the pre-#41506 order). [?hook] fires on the line immediately above the
-   first prune — not earlier: leaving even the cursor read between the hook
-   and the prune lets a refactor move the candidate read below the hook
-   (and above the prunes) while the test stays green, which would pin
-   nothing. Production leaves the hook as no-op. *)
+   whole seam while landing an owner settlement in the overlap through
+   [?hook]. The hook fires on the line immediately above the first prune —
+   not earlier: leaving even the cursor read between the hook and the prune
+   lets a refactor move the candidate read below the hook (and above the
+   prunes) while the test stays green, which would pin nothing. Production
+   leaves the hook as no-op. *)
 let prunes_and_read ~base_path ~keeper_name ?hook () =
   let cursor_ts, cursor_post_id =
     Keeper_registry.get_board_cursor ~base_path keeper_name

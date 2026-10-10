@@ -247,9 +247,9 @@ let repeat_note held n = for _ = 1 to n do written (Record.note_unacknowledged h
 (* An observation as a caller holds it, for what no workspace on disk and no
    server in this process can be made to say. *)
 let observation ?(base_path = "/workspace") ?(launcher = Launcher.Follows_workspace)
-    ?(server = Launcher.Not_serving) record
+    ?(server = Launcher.Not_serving) ?(keeper = Status.Not_known) record
   : Status.observation =
-  { lane = { base_path; launcher; workspace_port = Ok 8935; server }; record }
+  { lane = { base_path; launcher; workspace_port = Ok 8935; server }; record; keeper }
 
 let launcher_of base = Filename.quote (Filename.concat base ".masc/browser-lane/host/launch")
 
@@ -415,6 +415,54 @@ let a_bidi_host_that_met_another_profile_names_both_profiles () =
   let next_host = Status.firefox_profile_flag ^ " " ^ Filename.quote expected in
   says (ended_on (Some found)) [ found; expected; next_host ];
   says (ended_on None) [ expected; next_host ]
+
+module Start_record = Masc.Browser_keeper_firefox_start_record
+module Starter = Masc.Browser_keeper_firefox_starter
+
+(* Where MASC starts the Keeper Firefox, the paragraph says what its next
+   start does instead of the operator's steps, and what its last start came
+   to when that showed no connection after the last host started. *)
+let where_masc_starts_the_firefox_the_status_says_so () =
+  let masc ?(last_start = Start_record.Absent) () =
+    Status.Masc_starts { port = 9222; profile = "/keeper/profile"; last_start } in
+  let said ?last_start record = Status.message (observation ~keeper:(masc ?last_start ()) record) in
+  let never = said Record.Never_started in
+  has never
+    [ "MASC starts the Keeper Firefox on port 9222 with the profile /keeper/profile, and its host, at \
+       the next server start, or when a Keeper next asks for hover or drag." ];
+  lacks never [ "The operator starts Firefox" ];
+  let ended session =
+    Record.Ended
+      (host_entry, { at = 1_791_000_060.; reason = "stopped"; session; because = Record.Reason_only }) in
+  let left = said (ended Record.Session_left) in
+  has left [ "MASC restarts the Keeper Firefox it started there, or starts it if it was closed" ];
+  lacks left [ "The operator restarts" ];
+  let failed at =
+    Start_record.Recorded
+      { at; outcome = Start_record.Not_attached (Starter.Start_failed "the BiDi host did not start: not found") } in
+  has (said ~last_start:(failed 1_791_000_100.) (ended Record.No_session_left))
+    [ "MASC's last start, at 2026-"; "failed: the BiDi host did not start: not found. The next start tries again." ];
+  (* A start that ended before that host started says nothing of it. *)
+  lacks (said ~last_start:(failed 1_790_000_000.) (ended Record.No_session_left)) [ "MASC's last start" ];
+  lacks
+    (said ~last_start:(Start_record.Recorded { at = 1_791_000_100.; outcome = Start_record.Attached Starter.Host_only })
+       (ended Record.No_session_left))
+    [ "MASC's last start" ]
+
+let where_masc_does_not_start_the_firefox_the_status_says_why () =
+  has (Status.message (observation ~keeper:Status.Not_configured Record.Never_started))
+    [ "The operator starts Firefox"; "With [browser.live.bidi] in runtime.toml, MASC starts that Firefox and its host itself." ];
+  has (Status.message (observation ~keeper:Status.Lane_off Record.Never_started)) [ "[browser.live] is off in runtime.toml" ];
+  lacks (Status.message (observation ~keeper:Status.Not_known Record.Never_started)) [ "MASC starts" ]
+
+(* masc doctor reads who starts the Keeper Firefox from the workspace's
+   runtime.toml, with no server. *)
+let doctor_reads_who_starts_the_firefox_from_runtime_toml () =
+  browser_lane_fixture () @@ fun base ->
+  write (Filename.concat base ".masc/config/runtime.toml")
+    "[browser.live.bidi]\nfirefox = \"/Apps/firefox\"\nprofile = \"/keeper/profile\"\n";
+  says (Onboarding_status.inspect ~base_path:(Some base))
+    [ "MASC starts the Keeper Firefox on port 9222 with the profile /keeper/profile" ]
 
 (* At the limit, earlier history is unknown. A valid longer record retains
    all listed results; the reader must not pretend it was already trimmed. *)
@@ -872,6 +920,12 @@ let () = run "Onboarding observations"
                    a_bidi_host_that_ended_says_why_and_what_comes_first;
                  test_case "a BiDi host that met another profile names both profiles" `Quick
                    a_bidi_host_that_met_another_profile_names_both_profiles;
+                 test_case "where MASC starts the Firefox, the status says so" `Quick
+                   where_masc_starts_the_firefox_the_status_says_so;
+                 test_case "where MASC does not start the Firefox, the status says why" `Quick
+                   where_masc_does_not_start_the_firefox_the_status_says_why;
+                 test_case "doctor reads who starts the Firefox from runtime.toml" `Quick
+                   doctor_reads_who_starts_the_firefox_from_runtime_toml;
                  test_case "a record at the limit says the newest are kept" `Quick
                    a_record_at_the_limit_says_the_newest_are_kept;
                  test_case "a BiDi host that never got a session says what the next one needs" `Quick

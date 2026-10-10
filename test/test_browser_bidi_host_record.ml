@@ -408,7 +408,7 @@ let test_a_reader_follows_a_host_from_start_to_death () =
       check bool "without a server it does not claim the host polls one" true
         (String_util.contains_substring message "not observed here"));
      check bool "the observation every reader answers from carries the same state" true
-       (match (Status.observe ~base_path:base).record with
+       (match (Status.observe ~base_path:base ~configuration:None).record with
         | Record.Running _ -> true
         | Record.Never_started | Record.Record_missing_but_locked | Record.Ended _ | Record.Died _ | Record.Unreadable _ -> false);
      (* Asking needs no leave to write the lock file. *)

@@ -4,18 +4,41 @@
     connection list the TUI reads and the browser tools answer from this one
     observation. *)
 
+(** Who starts the Keeper Firefox and its host, from the workspace's
+    configuration (RFC-browser-keeper-firefox §3.7). *)
+type keeper =
+  | Masc_starts of
+      { port : int
+      ; profile : string
+      ; last_start : Browser_keeper_firefox_start_record.read
+          (** What MASC's last start came to. *)
+      }
+      (** [runtime.toml] has [\[browser.live.bidi\]] and the live lane is on:
+          MASC starts them at a server start and for a Keeper's hover or
+          drag. *)
+  | Lane_off  (** The table is there and [\[browser.live\] enabled = false]. *)
+  | Not_configured  (** No [\[browser.live.bidi\]]: the operator starts them. *)
+  | Not_known  (** No configuration was given to read it from. *)
+
+(** [None]: no configuration was loaded or read. A start's record is read
+    only where MASC starts them. *)
+val keeper_of_configuration : base_path:string -> Browser_configuration.t option -> keeper
+
 type observation =
   { lane : Browser_lane_launcher.t
         (** The launcher, and the server with the connections it listed. *)
   ; record : Browser_bidi_host_record.state
         (** What the host's record and its lock say. It is read from disk, so
             it is known without a server. *)
+  ; keeper : keeper
   }
 
-(** Reads the record and the launcher, then asks this process's server.
-    Reading can let other fibers run, so the server is asked last: a host
-    that attached during the reads is in the list the observation holds. *)
-val observe : base_path:string -> observation
+(** Reads the record, the launcher and, where MASC starts them, its last
+    start, then asks this process's server. Reading can let other fibers
+    run, so the server is asked last: a host that attached during the reads
+    is in the list the observation holds. [configuration] is the one this
+    process loaded, or the workspace's [runtime.toml] read for it. *)
+val observe : base_path:string -> configuration:Browser_configuration.t option -> observation
 
 (** The lane's connections an answer lists beside what it says of the host:
     the list the observation was made from, so the two say of one list. A
@@ -59,6 +82,12 @@ val verdict : observation -> verdict
     observed it also says whether that server lists a running host's client,
     and when it lists a BiDi connection that is not the host the record
     names.
+
+    Where MASC starts them ({!Masc_starts}), the operator's steps give way
+    to what MASC's next start does, and a last start that showed no
+    connection, and did not come before the last host started, is said with
+    when and why. A lane turned off, and a workspace with no table, add a
+    sentence to the paragraph that says so.
 
     A path, an address and the reason for ending come from files and from
     the host. In a command the operator runs, a path and an address are

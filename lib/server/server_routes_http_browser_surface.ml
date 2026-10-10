@@ -48,7 +48,7 @@ let goto = function
    own list. The BiDi host's state is that host's record on disk, which also
    says why a host that is not in the list ended. *)
 let clients_listing ~base_path =
-  let host = Browser_bidi_host_status.observe ~base_path in
+  let host = Browser_bidi_host_status.observe ~base_path ~configuration:(Runtime.browser_configuration ()) in
   (* The list the report was made from, so the two say of one list. *)
   `Assoc
     [ "clients"

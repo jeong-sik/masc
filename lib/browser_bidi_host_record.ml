@@ -185,40 +185,12 @@ let nullable read = function
 (* How much of a reason the record keeps. The longest the host writes itself
    is under 200 bytes; the rest of the room is for a peer's own words. *)
 let reason_limit_bytes = 512
-let cut_mark = "..."
-(* The bytes a reason keeps as they are: printable ASCII. Any other byte,
-   and the backslash that marks one, is written as [\xNN]. *)
-let written_as_is byte = byte >= ' ' && byte <= '~' && byte <> '\\'
 
-let hex_value byte =
-  if byte >= '0' && byte <= '9' then Some (Char.code byte - Char.code '0')
-  else if byte >= 'A' && byte <= 'F' then Some (Char.code byte - Char.code 'A' + 10)
-  else None
-
-(* The pieces the writer leaves: a byte written as it is, and [\xNN] with
-   two upper-case hex digits for one that is not. A cut falls between
-   pieces, so the mark after it is three more bytes written as they are. *)
-let rec written_pieces raw index =
-  if index = String.length raw then true
-  else if raw.[index] = '\\' then
-    index + 4 <= String.length raw
-    && raw.[index + 1] = 'x'
-    && (match hex_value raw.[index + 2], hex_value raw.[index + 3] with
-        | Some high, Some low -> not (written_as_is (Char.chr ((16 * high) + low)))
-        | Some _, None | None, (Some _ | None) -> false)
-    && written_pieces raw (index + 4)
-  else written_as_is raw.[index] && written_pieces raw (index + 1)
-
-(* Text in the bytes and at the length the writer leaves it: its pieces,
-   within the limit, or cut there and marked. The reader takes no other, so
-   that what it passes on to a screen is one bounded line, and a backslash
-   in it never runs into a quote set around it. *)
+(* Text in the bytes and at the length the writer leaves it. The reader
+   takes no other (Printable_line). *)
 let written_text name json =
   let* raw = string_of name json in
-  let length = String.length raw in
-  let cut = length <= reason_limit_bytes + String.length cut_mark && String.ends_with ~suffix:cut_mark raw in
-  if (length <= reason_limit_bytes || cut) && written_pieces raw 0
-  then Ok raw
+  if Printable_line.written ~limit:reason_limit_bytes raw then Ok raw
   else Error (name ^ " is not what a host writes")
 
 let because_of_json json =
@@ -636,27 +608,9 @@ let note_unacknowledged held noted =
        | Error failure -> Error (Not_written (detail ^ "; snapshot "
                                               ^ write_failure_message failure))))
 
-(* A reason can quote bytes a peer sent. The record stays ASCII that a reader
-   in any language loads: a byte outside printable ASCII, and the backslash
-   that marks one, is written as [\xNN]. What would pass the limit is left
-   out, whole bytes at a time, and marked. *)
-let printable reason =
-  let written = Buffer.create (String.length reason) in
-  let rec add index =
-    if index = String.length reason then Buffer.contents written
-    else (
-      let byte = reason.[index] in
-      let piece =
-        if written_as_is byte then String.make 1 byte
-        else Printf.sprintf "\\x%02X" (Char.code byte)
-      in
-      if Buffer.length written + String.length piece > reason_limit_bytes
-      then Buffer.contents written ^ cut_mark
-      else (
-        Buffer.add_string written piece;
-        add (index + 1)))
-  in
-  add 0
+(* A reason can quote bytes a peer sent, and a path is what a host or
+   Firefox named: each is kept as one printable line. *)
+let printable text = Printable_line.write ~limit:reason_limit_bytes text
 
 let ended held ~reason ~session ~because ~now =
   let because =

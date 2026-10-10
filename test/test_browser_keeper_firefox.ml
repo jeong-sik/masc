@@ -138,7 +138,7 @@ let install_lane ?(declared = true) ?(host_ends = false) ?ending base ~marker =
          (`Assoc [ "destination", `String "workspace_connection";
                    "launcher_sha256", `String Digestif.SHA256.(to_hex (digest_string script)) ]))
 
-let host_step ?(port = 9333) base = Keeper_firefox.host_step ~port (Status.report (Status.observe ~base_path:base))
+let host_step ?(port = 9333) base = Keeper_firefox.host_step ~port (Status.report (Status.observe ~base_path:base ~configuration:None))
 
 let take ?(port = 9333) base =
   match
@@ -1203,6 +1203,100 @@ let an_earlier_hosts_profile_is_not_this_ones () =
         | Starter.Not_attached (Starter.Operator_needed _ | Starter.Not_listed_in_time _)
         | Starter.Attached _ | Starter.Not_asked_for -> fail "a host that ended for its own reason is a failed start")))
 
+(* --- the last start ---------------------------------------------------------- *)
+
+module Start_record = Masc.Browser_keeper_firefox_start_record
+
+let outcomes =
+  [ Start_record.Attached Starter.Firefox_and_host; Start_record.Attached Starter.Host_only
+  ; Start_record.Attached Starter.Nothing
+  ; Start_record.Not_attached (Starter.Operator_needed "the browser lane is not installed")
+  ; Start_record.Not_attached (Starter.Start_failed "the BiDi host did not start")
+  ; Start_record.Not_attached (Starter.Not_listed_in_time "no BiDi connection was listed within 15 s") ]
+
+let a_last_start_reads_back_as_written () =
+  List.iter
+    (fun outcome ->
+      let entry = { Start_record.at = 1_791_000_060.; outcome } in
+      check bool "the same entry" true (Start_record.entry_of_json (Start_record.entry_to_json entry) = Ok entry))
+    outcomes
+
+let a_last_start_from_another_writer_is_not_read () =
+  let written outcome = Start_record.entry_to_json { Start_record.at = 1_791_000_060.; outcome } in
+  let fields = function `Assoc fields -> fields | _ -> fail "an object" in
+  let replaced name value json = `Assoc ((name, value) :: List.remove_assoc name (fields json)) in
+  let failed = written (Start_record.Not_attached (Starter.Start_failed "x")) in
+  let outcome_of json = List.assoc "outcome" (fields json) in
+  List.iter
+    (fun (what, json) ->
+      match Start_record.entry_of_json json with
+      | Ok _ -> fail (what ^ " was read")
+      | Error _ -> ())
+    [ "another layout", replaced "schema" (`Int 2) failed
+    ; "a field this layout has not", replaced "pid" (`Int 1) failed
+    ; "an outcome this reader does not know", replaced "outcome" (`Assoc [ "kind", `String "maybe" ]) failed
+    ; ( "a failed start without its message"
+      , replaced "outcome" (`Assoc [ "kind", `String "start_failed" ]) failed )
+    ; ( "an attached start with a message"
+      , replaced "outcome"
+          (replaced "message" (`String "x") (outcome_of (written (Start_record.Attached Starter.Nothing))))
+          failed )
+    ; ( "a message a server never writes"
+      , replaced "outcome" (replaced "message" (`String "line\nbreak \027[2J") (outcome_of failed)) failed ) ]
+
+let a_last_starts_message_is_one_printable_line () =
+  with_workspace (fun base ->
+    let said message =
+      (match
+         Start_record.write ~base_path:base
+           { Start_record.at = 1_791_000_060.; outcome = Start_record.Not_attached (Starter.Start_failed message) }
+       with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      match Start_record.read ~base_path:base with
+      | Start_record.Recorded { outcome = Start_record.Not_attached (Starter.Start_failed message); _ } -> message
+      | Start_record.Recorded _ | Start_record.Absent | Start_record.Unreadable _ -> fail "not read back" in
+    check string "bytes that are not printable ASCII are named" "a\\x0Ab\\xFF" (said "a\nb\xff");
+    check string "a long message is cut and marked"
+      (String.make Start_record.message_limit_bytes 'a' ^ "...") (said (String.make 3000 'a')))
+
+(* Each start that ended is written down; a request where none is asked for
+   starts nothing and writes nothing. *)
+let each_start_that_ended_is_recorded () =
+  let recorded base =
+    match Start_record.read ~base_path:base with
+    | Start_record.Recorded { outcome; _ } -> Some outcome
+    | Start_record.Absent -> None
+    | Start_record.Unreadable detail -> fail detail in
+  with_workspace (fun base ->
+    let firefox_marker, host_marker = markers base in
+    install_lane base ~marker:host_marker;
+    let firefox = fake_firefox base ~marker:firefox_marker Listens in
+    with_children ~base [ firefox_marker; host_marker ] (fun () ->
+      requested ~base ~configuration:(configured ~firefox ~port:(free_port ()) base) (fun ~sw ~clock request ->
+        let client = bidi_client 7 in
+        Eio.Fiber.fork ~sw (fun () -> await_file_in_eio ~clock host_marker; attach ~sw client);
+        ignore (request () : Starter.outcome));
+      check bool "an attached start" true (recorded base = Some (Start_record.Attached Starter.Firefox_and_host))));
+  with_workspace (fun base ->
+    let firefox_marker, _ = markers base in
+    let firefox = fake_firefox base ~marker:firefox_marker Listens in
+    with_children ~base [ firefox_marker ] (fun () ->
+      requested ~base ~configuration:(configured ~firefox ~port:(free_port ()) base) (fun ~sw:_ ~clock:_ request ->
+        ignore (request () : Starter.outcome));
+      check bool "a start that needs the operator" true
+        (match recorded base with
+         | Some (Start_record.Not_attached (Starter.Operator_needed _)) -> true
+         | Some (Start_record.Attached _ | Start_record.Not_attached (Starter.Start_failed _ | Starter.Not_listed_in_time _))
+         | None -> false)));
+  with_workspace (fun base ->
+    let firefox_marker, host_marker = markers base in
+    install_lane base ~marker:host_marker;
+    let firefox = fake_firefox base ~marker:firefox_marker Listens in
+    requested ~base ~configuration:(configured ~live_enabled:false ~firefox ~port:(free_port ()) base)
+      (fun ~sw:_ ~clock:_ request -> ignore (request () : Starter.outcome));
+    check bool "none asked for, none written" true (recorded base = None))
+
 (* A request that comes while the server start's own start runs is answered
    with it, connection included: a host just started holds neither the lock
    nor a record yet, and a start then would start a second host. *)
@@ -1257,7 +1351,7 @@ let host_ended ?(port = 9333) base ~session ~now =
    | Error failure -> fail (Record.write_failure_message failure));
   released held
 
-let held_since ~port base = Keeper_firefox.session_held_since ~port (Status.report (Status.observe ~base_path:base))
+let held_since ~port base = Keeper_firefox.session_held_since ~port (Status.report (Status.observe ~base_path:base ~configuration:None))
 
 let a_held_session_is_read_from_the_last_hosts_end () =
   List.iter
@@ -1518,8 +1612,13 @@ let () =
         ; test_case "a host that ends at once" `Quick a_host_that_ends_at_once_stops_its_firefox
         ; test_case "a host that met another profile" `Quick a_host_that_met_another_profile_is_the_operators
         ; test_case "an earlier host's profile" `Quick an_earlier_hosts_profile_is_not_this_ones
+        ; test_case "each start that ended is recorded" `Quick each_start_that_ended_is_recorded
         ; test_case "during the server start" `Quick a_request_during_the_server_start_waits_for_it
         ; test_case "while the host comes up" `Quick a_request_while_the_host_comes_up_waits_for_it ] )
+    ; ( "the last start"
+      , [ test_case "reads back as written" `Quick a_last_start_reads_back_as_written
+        ; test_case "another writer's record" `Quick a_last_start_from_another_writer_is_not_read
+        ; test_case "its message is one printable line" `Quick a_last_starts_message_is_one_printable_line ] )
     ; ( "a session left in Firefox"
       , [ test_case "read from the last host's end" `Quick a_held_session_is_read_from_the_last_hosts_end
         ; test_case "only the one MASC started before that end" `Quick

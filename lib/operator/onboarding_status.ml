@@ -202,8 +202,15 @@ let browser_bidi_host_check host =
 (* The browser tools read the same observation when no browser answers, so an
    operator and a Keeper are told the same cause. One observation answers both
    checks, so they say of one launcher and one list of connections. *)
-let browser_lane_check base_path =
-  let host = Browser_bidi_host_status.observe ~base_path in
+(* The browser tables of the workspace's runtime.toml, parsed as the server
+   parses them. [None] when the file is not there, cannot be read, or its
+   tables do not parse: who starts the Keeper Firefox is then not known. *)
+let browser_configuration config_path =
+  if not (Sys.file_exists config_path) then None
+  else Result.to_option (Browser_configuration.of_file config_path)
+
+let browser_lane_check ~config_path base_path =
+  let host = Browser_bidi_host_status.observe ~base_path ~configuration:(browser_configuration config_path) in
   let observation = host.lane in
   let message = Browser_lane_launcher.message observation in
   (match Browser_lane_launcher.verdict observation with
@@ -235,7 +242,7 @@ let inspect ~base_path =
       { base_path = Some base_path; selected_runtime; selected_model;
         checks = check Workspace Satisfied "Workspace found." [Choose_workspace]
           :: (models @ keeper_checks base_path @ [persistence_check base_path]
-              @ browser_lane_check base_path) }
+              @ browser_lane_check ~config_path base_path) }
 
 let optional_string = function None -> `Null | Some value -> `String value
 

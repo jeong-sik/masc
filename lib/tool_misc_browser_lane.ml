@@ -191,7 +191,8 @@ let selection_error ?bidi_start ~base_path ~tool_name ~start_time error =
      connections: the record is read first and the server asked last, so the
      list an answer shows is the one its host paragraph was written from. *)
   let observe () =
-    let observation = Browser_bidi_host_status.observe ~base_path in
+    let observation =
+      Browser_bidi_host_status.observe ~base_path ~configuration:(Runtime.browser_configuration ()) in
     let clients =
       Browser_bidi_host_status.listed_clients observation |> List.map Browser_lane.client_json in
     observation, clients in
@@ -229,7 +230,7 @@ let selection_error ?bidi_start ~base_path ~tool_name ~start_time error =
        that attached meanwhile is in it, offered and not reported on. *)
     let host =
       if List.mem Browser_lane.Webdriver_bidi serving_transports
-      then Some (Browser_bidi_host_status.observe ~base_path)
+      then Some (Browser_bidi_host_status.observe ~base_path ~configuration:(Runtime.browser_configuration ()))
       else None in
     let listed =
       match host with

@@ -1,6 +1,7 @@
 module Keeper_firefox = Browser_keeper_firefox
 module Starter = Browser_keeper_firefox_starter
 module Firefox_record = Browser_keeper_firefox_record
+module Start_record = Browser_keeper_firefox_start_record
 module Host_status = Browser_bidi_host_status
 
 (* One attempt to reach a loopback port. A refused connect is the answer
@@ -420,7 +421,9 @@ let firefox_for ~sw ~net ~clock ~ready_timeout_s ~base_path ~held (config : Brow
   | Unknown detail, (Some _ | None) -> Undetermined detail
   | Nothing_listens, (Some _ | None) -> fresh_firefox ~sw ~net ~clock ~ready_timeout_s ~base_path config
 
-let host_report ~base_path = Host_status.report (Host_status.observe ~base_path)
+(* Read for the start's own steps, which turn on the record alone, not on
+   the sentence the report carries. *)
+let host_report ~base_path = Host_status.report (Host_status.observe ~base_path ~configuration:None)
 
 let start_both ~sw ~env ~ready_timeout_s ~ending_host_wait_s ~base_path ~launcher
     (config : Browser_configuration.live_bidi) =
@@ -664,6 +667,23 @@ let stopping_answer = Starter.Not_attached (Starter.Start_failed "the server is 
    answered with that start (RFC-browser-keeper-firefox §3.5 step 3). The
    server start's own start, run beside it, answers the requests that come
    meanwhile. *)
+(* Each start that ended is written down for the status sentences
+   (RFC-browser-keeper-firefox §3.7); one that did not end, because the
+   server is stopping, is not. *)
+let remembered ~clock ~base_path answer =
+  let write outcome =
+    match Start_record.write ~base_path { Start_record.at = Eio.Time.now clock; outcome } with
+    | Ok () -> ()
+    | Error detail ->
+      Log.Server.warn "browser-lane: the record of the last Keeper Firefox start, %s, is %s"
+        (Start_record.record_path ~base_path) detail
+  in
+  (match answer with
+   | Starter.Attached { started; client = _ } -> write (Start_record.Attached started)
+   | Starter.Not_attached reason -> write (Start_record.Not_attached reason)
+   | Starter.Not_asked_for -> ());
+  answer
+
 let serve ~sw ~env ~ready_timeout_s ~ending_host_wait_s ~host_attach_wait_s ~base_path ~configuration
     ~boot requests =
   let rec waiting asked =
@@ -684,13 +704,15 @@ let serve ~sw ~env ~ready_timeout_s ~ending_host_wait_s ~host_attach_wait_s ~bas
    | None -> ()
    | Some brought ->
      answer_all []
-       (guarded (fun () -> attached_after ~clock:(Eio.Stdenv.clock env) ~host_attach_wait_s ~base_path brought)));
+       (remembered ~clock:(Eio.Stdenv.clock env) ~base_path
+          (guarded (fun () -> attached_after ~clock:(Eio.Stdenv.clock env) ~host_attach_wait_s ~base_path brought))));
   let rec loop () =
     let first = Eio.Stream.take requests in
     let answer =
-      guarded (fun () ->
-        for_request ~sw ~env ~ready_timeout_s ~ending_host_wait_s ~host_attach_wait_s ~base_path
-          (configuration ()))
+      remembered ~clock:(Eio.Stdenv.clock env) ~base_path
+        (guarded (fun () ->
+           for_request ~sw ~env ~ready_timeout_s ~ending_host_wait_s ~host_attach_wait_s ~base_path
+             (configuration ())))
     in
     answer_all [ first ] answer;
     loop ()

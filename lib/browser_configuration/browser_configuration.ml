@@ -109,3 +109,8 @@ let parse toml =
   let* automation_enabled = enabled ~path:automation_path (fields automation_table) in
   let* stagehand_enabled = enabled ~path:stagehand_path (fields stagehand_table) in
   Ok { automation; stagehand; live_bidi; live_enabled; automation_enabled; stagehand_enabled }
+
+let of_file path =
+  match Otoml.Parser.from_file_result path with
+  | Error detail -> Error detail
+  | Ok toml -> parse toml

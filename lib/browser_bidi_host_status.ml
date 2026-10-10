@@ -1,20 +1,36 @@
 module Launcher = Browser_lane_launcher
 module Record = Browser_bidi_host_record
+module Start_record = Browser_keeper_firefox_start_record
+module Starter = Browser_keeper_firefox_starter
 
-type observation = { lane : Launcher.t; record : Record.state }
+type keeper =
+  | Masc_starts of { port : int; profile : string; last_start : Start_record.read }
+  | Lane_off
+  | Not_configured
+  | Not_known
 
-(* Reading the record and the launcher's files can let other fibers run.
-   The server is asked after both, so its connection list is the newest
+let keeper_of_configuration ~base_path = function
+  | Some { Browser_configuration.live_bidi = Some config; live_enabled = true; _ } ->
+      Masc_starts { port = config.port; profile = config.profile; last_start = Start_record.read ~base_path }
+  | Some { Browser_configuration.live_bidi = Some _; live_enabled = false; _ } -> Lane_off
+  | Some { Browser_configuration.live_bidi = None; _ } -> Not_configured
+  | None -> Not_known
+
+type observation = { lane : Launcher.t; record : Record.state; keeper : keeper }
+
+(* Reading the records and the launcher's files can let other fibers run.
+   The server is asked after them, so its connection list is the newest
    thing in the observation: a host that attached during the reads is in
    it. *)
-let observe ~base_path =
+let observe ~base_path ~configuration =
   let record = Record.observe ~base_path in
+  let keeper = keeper_of_configuration ~base_path configuration in
   let lane = Launcher.observe ~base_path ~server:Launcher.Not_serving in
-  { lane = { lane with server = Launcher.current_server () }; record }
+  { lane = { lane with server = Launcher.current_server () }; record; keeper }
 
 (* A process that bound no listener was not asked for its connections, so
    they are listed here: once, either way. *)
-let listed_clients { lane; record = _ } =
+let listed_clients { lane; _ } =
   match lane.server with
   | Launcher.Serving { polling; _ } -> polling
   | Launcher.Not_serving -> Browser_lane.active_clients ()
@@ -114,7 +130,7 @@ let poll_of (t : Launcher.t) (entry : Record.entry) =
 
 type verdict = Host_absent | Host_serving | Host_unverified | Host_not_running | Host_unreadable
 
-let verdict { lane; record } =
+let verdict { lane; record; _ } =
   match record, lane.launcher with
   | Record.Never_started, Launcher.Not_installed -> Host_absent
   | ( Record.Never_started
@@ -274,7 +290,8 @@ let next_host t (entry : Record.entry) (ending : Record.ending) =
    apart by quotes, and a quote in it is marked. *)
 let quoted text = "\"" ^ String.concat "\\\"" (String.split_on_char '"' text) ^ "\""
 
-let message { lane = t; record } =
+(* The paragraph for a workspace whose operator starts Firefox and the host. *)
+let by_operator t record =
   match record with
   | Record.Never_started ->
       Printf.sprintf
@@ -339,6 +356,130 @@ let message { lane = t; record } =
   | Record.Unreadable { detail; held = None } ->
       Printf.sprintf
         "Whether a BiDi browser host runs for this workspace could not be checked (%s)." detail
+
+(* When MASC's next start comes, where it starts them: at every server
+   start, and for every hover or drag a Keeper asks for that no listed
+   connection serves (RFC-browser-keeper-firefox §3.5). *)
+let next_start = "at the next server start, or when a Keeper next asks for hover or drag"
+
+let masc_starts ~port ~profile =
+  Printf.sprintf "MASC starts the Keeper Firefox on port %d with the profile %s, and its host, %s" port
+    profile next_start
+
+(* MASC restarts only the Keeper Firefox it started (§3.5.4). *)
+let masc_restarts =
+  Printf.sprintf
+    "%s MASC restarts the Keeper Firefox it started there, or starts it if it was closed, and starts \
+     its host; a Firefox MASC did not start, the operator quits first"
+    (String.capitalize_ascii next_start)
+
+let refused_then_restarted =
+  "when Firefox refuses that host a session, the start after it restarts the Keeper Firefox MASC \
+   started"
+
+(* What MASC's last start came to, when it showed no connection. A start
+   that ended before the last host started says nothing of that host. *)
+let last_start_said ~base_path ~since = function
+  | Start_record.Absent -> ""
+  | Start_record.Unreadable detail ->
+      Printf.sprintf " The record of MASC's last start, %s, cannot be read (%s)."
+        (Start_record.record_path ~base_path) detail
+  | Start_record.Recorded { outcome = Start_record.Attached _; _ } -> ""
+  | Start_record.Recorded { at = ended; outcome = Start_record.Not_attached _ }
+    when (match since with Some started -> ended < started | None -> false) -> ""
+  | Start_record.Recorded { at = ended; outcome = Start_record.Not_attached not_attached } ->
+      let sentence why = if String.ends_with ~suffix:"." why then why else why ^ "." in
+      (match not_attached with
+       | Starter.Operator_needed why ->
+           Printf.sprintf " MASC's last start, at %s, waits for the operator: %s" (at ended) (sentence why)
+       | Starter.Start_failed why ->
+           Printf.sprintf " MASC's last start, at %s, failed: %s The next start tries again." (at ended)
+             (sentence why)
+       | Starter.Not_listed_in_time why ->
+           Printf.sprintf " MASC's last start, at %s, showed no connection in time: %s" (at ended)
+             (sentence why))
+
+(* What comes before the next host where MASC starts it, by what became of
+   the last host's session, as {!next_host} says for the operator. *)
+let next_host_by_masc t (entry : Record.entry) (ending : Record.ending) ~port ~profile =
+  let starts = masc_starts ~port ~profile in
+  match ending.because with
+  | Record.Profile_not_kept { expected; found } -> other_firefox_there t entry ~expected ~found
+  | Record.Reason_only ->
+  match entry.attached_at, ending.session with
+  | Some _, No_session_left ->
+      Printf.sprintf " It ended its BiDi session, so the Firefox at that address takes the next host. %s."
+        starts
+  | None, No_session_left ->
+      Printf.sprintf " It ended before Firefox gave it a session and left none there. %s." starts
+  | (Some _ | None), Session_left ->
+      Printf.sprintf
+        " Firefox did not confirm that its BiDi session ended, and while it holds that session it \
+         refuses the next host. %s."
+        masc_restarts
+  | (Some _ | None), Session_refused ->
+      Printf.sprintf
+        " Firefox refused it a BiDi session, which it does while it holds one: that of a host \
+         attached from another workspace, or one a host that died left there. %s."
+        masc_restarts
+  | (Some _ | None), Session_unknown ->
+      Printf.sprintf
+        " Its connection to Firefox was gone before it could end its BiDi session. A Firefox that \
+         exited took the session along; one that still runs holds it. %s; %s."
+        starts refused_then_restarted
+
+(* The paragraph for a workspace where MASC starts Firefox and the host:
+   the operator's steps give way to what MASC's next start does. *)
+let by_masc t record ~port ~profile ~last_start =
+  let last = last_start_said ~base_path:t.Launcher.base_path last_start in
+  match record with
+  | Record.Never_started ->
+      Printf.sprintf
+        "No BiDi browser host has run for this workspace. Hover and drag on the live lane need \
+         one. %s.%s%s%s"
+        (masc_starts ~port ~profile) (last ~since:None) (listed_beside t) (steps t)
+  | Record.Ended (entry, ending) ->
+      Printf.sprintf
+        "No BiDi browser host is running. The last one (pid %d, given %s) ended at %s with this \
+         reason: %s.%s%s%s%s%s"
+        entry.pid entry.bidi_url (at ending.at) (quoted ending.reason)
+        (unacknowledged t entry) (next_host_by_masc t entry ending ~port ~profile)
+        (last ~since:(Some entry.started_at)) (listed_beside t) (steps t)
+  | Record.Died entry ->
+      Printf.sprintf
+        "No BiDi browser host is running. The last one (pid %d, given %s, started at %s) left no \
+         reason for ending: it was killed or crashed, or could not write one.%s Its BiDi session \
+         may be left in the Firefox at that address. %s; %s.%s%s%s"
+        entry.pid entry.bidi_url (at entry.started_at) (unacknowledged t entry)
+        (masc_starts ~port ~profile) refused_then_restarted (last ~since:(Some entry.started_at))
+        (listed_beside t) (steps t)
+  | Record.Unreadable { detail; held = Some false } ->
+      Printf.sprintf
+        "The BiDi browser host's record cannot be read (%s). No host holds this workspace's \
+         lock, so none is running. The next host keeps a copy of a record it read and cannot \
+         load beside it and writes a new one in its place. It does not start while the record \
+         cannot be read at all, or a new one cannot be written. %s.%s%s%s"
+        detail (masc_starts ~port ~profile) (last ~since:None) (listed_beside t) (steps t)
+  | Record.Record_missing_but_locked | Record.Running _
+  | Record.Unreadable { held = Some true | None; _ } -> by_operator t record
+
+(* Where the operator starts them, the paragraph says how they are started
+   for a workspace with no table: by the table. *)
+let unless_configured = function
+  | Record.Never_started | Record.Ended _ | Record.Died _ | Record.Unreadable { held = Some false; _ } ->
+      " With [browser.live.bidi] in runtime.toml, MASC starts that Firefox and its host itself."
+  | Record.Record_missing_but_locked | Record.Running _
+  | Record.Unreadable { held = Some true | None; _ } -> ""
+
+let message { lane = t; record; keeper } =
+  match keeper with
+  | Masc_starts { port; profile; last_start } -> by_masc t record ~port ~profile ~last_start
+  | Lane_off ->
+      by_operator t record
+      ^ " [browser.live] is off in runtime.toml, so the live lane serves nothing, and MASC starts \
+         no Firefox or host."
+  | Not_configured -> by_operator t record ^ unless_configured record
+  | Not_known -> by_operator t record
 
 type report =
   { state : Record.state

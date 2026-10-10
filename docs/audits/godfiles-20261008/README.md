@@ -7,8 +7,8 @@ This campaign covers tracked code files with at least 2,000 lines. The initial
 inventory contains 171 candidates: 75 production source/style/interface files,
 90 tests, 3 tooling files and 3 evidence scripts. `inventory.json` records each
 baseline path and its current audit state. A line count selects candidates; it
-is not a defect verdict or a new build gate. Twenty-nine production candidates received
-bounded changes; their other responsibilities remain pending. The other 46
+is not a defect verdict or a new build gate. Thirty production candidates received
+bounded changes; their other responsibilities remain pending. The other 45
 production candidates still require semantic review. All 171 candidates remain
 in the campaign until their responsibilities and necessary repairs are assessed.
 
@@ -49,6 +49,8 @@ Memory OS support maintenance and snapshot calculation are separated from storag
 Async request strict records and client projection are separated from worker/storage authority in [#42100](https://github.com/jeong-sik/masc/pull/42100). Pending elapsed time acquires its timestamp at the boundary; completed entries keep their clock-free path. See [msg-async-wire/README.md](msg-async-wire/README.md).
 
 Unified prompt event fields and schedule grouping are separated from catalog/assembly effects in [#42106](https://github.com/jeong-sik/masc/pull/42106). Its direct rendering fixture now initializes isolated embedded prompt assets. See [prompt-event-fields/README.md](prompt-event-fields/README.md).
+
+Memory tool mutation argument validation and typed failure/effect policy are separated from execution in [#42110](https://github.com/jeong-sik/masc/pull/42110). A checked type re-export retains one shared store vocabulary. See [memory-tool-validation/README.md](memory-tool-validation/README.md).
 
 The declared branch dependencies follow that order, starting at `main`.
 GitHub may group a subset into a native stack; inspect live membership rather

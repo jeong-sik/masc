@@ -111,8 +111,21 @@ type memory_pass =
   | Pass_failed of { kind : string }
   | No_pass
 
+type projected_body = Projected_summary | Projected_results | Projected_full
+(** Which projection of typed producer data wrote a body: a tool block's
+    calls, a turn's skill activity, a Gate step's folded argument, or a Memory
+    row's summary. One view stance writes one text; another stance writes a
+    different text from the same data. *)
+
+type body_presentation = Source_body | Thinking_summary | Projected_body of projected_body
+(** Source content, the generated folded-thinking label, and each projected
+    body have distinct semantic identities even when their visible words
+    happen to coincide. A byte offset names a position only within the
+    presentation that wrote it. *)
+
 type entry = {
   style : style;
+  body_presentation : body_presentation;
   timestamp : string;
   timeline_bucket : timeline_bucket option;
   speaker : string;
@@ -422,6 +435,11 @@ let compact_count n =
 
 let cut_mark = "…"
 let cut_mark_cells = display_width cut_mark
+
+let fitted_source_bytes text width =
+  if width <= 0 then 0
+  else if display_width text <= width then String.length text
+  else String.length (take_cells text (Int.max 0 (width - cut_mark_cells)))
 
 let fit_width text width =
   if width <= 0 then ""
@@ -971,14 +989,18 @@ let split_styled_cells ~max_cells text =
    (pinned in the layout tests). A row carrying an escape therefore measures
    itself whole, the way this used to for every word of every row -- which
    made a row cost grow with the square of the words in it. *)
-let wrap_words ~max_cells text =
+let wrap_words_internal ?on_row ~max_cells text =
   let max_cells = Int.max 1 max_cells in
   let current = Buffer.create 128 in
   let current_cells = ref 0 in
   let current_holds_escape = ref false in
+  let source_byte=ref 0 and ranges=ref [] in
+  let record start length = if length>0 then Option.iter (fun _ -> ranges:=(start,start+length):: !ranges) on_row in
   let holds_escape word = String.contains word '\x1B' in
   let take_row () =
     let row = Buffer.contents current in
+    Option.iter (fun emit -> emit row (List.rev !ranges)) on_row;
+    ranges:=[];
     Buffer.clear current;
     current_cells := 0;
     current_holds_escape := false;
@@ -998,6 +1020,9 @@ let wrap_words ~max_cells text =
           else !current_cells + display_width addition
         in
         if candidate_cells <= max_cells then begin
+          if Buffer.length current>0 then record (!source_byte-1) 1;
+          record !source_byte (String.length word);
+          source_byte:= !source_byte + String.length word + 1;
           Buffer.add_string current addition;
           current_cells := candidate_cells;
           if holds_escape word then current_holds_escape := true;
@@ -1007,18 +1032,26 @@ let wrap_words ~max_cells text =
         else
           let chunks = split_cells ~max_cells word in
           (match List.rev chunks with
-           | [] -> loop rows rest
+           | [] -> source_byte:= !source_byte + String.length word + 1; loop rows rest
            | last :: reversed_completed ->
                let completed = List.rev reversed_completed in
                let rows =
-                 List.fold_left (fun rows chunk -> chunk :: rows) rows completed
+                 List.fold_left (fun rows chunk ->
+                   let ending= !source_byte+String.length chunk in
+                   Option.iter (fun emit -> emit chunk [!source_byte,ending]) on_row;
+                   source_byte:=ending;
+                   chunk :: rows) rows completed
                in
+               record !source_byte (String.length last);
+               source_byte:= !source_byte + String.length last + 1;
                Buffer.add_string current last;
                current_cells := display_width last;
                current_holds_escape := holds_escape last;
                loop rows rest)
   in
   loop [] (String.split_on_char ' ' text)
+
+let wrap_words ~max_cells text = wrap_words_internal ~max_cells text
 
 (* The rows a box body spends on [content] at inner width [inner]: one row per
    server line, plus the rows a line longer than the body wraps to. The box
@@ -1119,7 +1152,24 @@ let journal_sign_text = function
    itself. A blank row between lines, since each one is a paragraph read on
    its own. Where the claim's column would be narrower than the lead beside
    it, the claim wraps at the full width under its lead instead. *)
-let journal_rows ~width lines =
+type journal_field =
+  | Journal_sign_field | Journal_category_field | Journal_claim_field
+  | Journal_drop_label_field | Journal_memory_id_field | Journal_reason_field
+
+type journal_source_span = {
+  line_index : int;
+  field : journal_field;
+  value : string;
+  row : int;
+  source_ranges : (int * int) list;
+}
+
+type journal_render = {
+  journal_rows : (string * journal_piece) list list;
+  journal_fields : journal_source_span list;
+}
+
+let journal_rows_internal ?on_field ~width lines =
   let width = Int.max 1 width in
   let label = function
     | Journal_fact { category; _ } -> category
@@ -1132,7 +1182,8 @@ let journal_rows ~width lines =
   let lead_cells = sign_cells + 1 + label_cells + journal_column_gap in
   let claim_cells = width - lead_cells in
   let hangs = claim_cells >= lead_cells in
-  let rows_of_line line =
+  let first_row=ref 0 in
+  let rows_of_line line_index line =
     let sign, label_piece, text, text_piece =
       match line with
       | Journal_fact { sign; tone; claim; category = _ } ->
@@ -1154,22 +1205,50 @@ let journal_rows ~width lines =
       [ sign; (" ", Journal_piece_space); (label_text, label_piece);
         (pad, Journal_piece_space) ]
     in
-    if hangs then
+    let text_fields, lead_fields = match line with
+      | Journal_fact {sign; category; claim; _} ->
+          [Journal_claim_field,claim,0],
+          [Journal_sign_field,journal_sign_text sign; Journal_category_field,category]
+      | Journal_drop {memory_id; reason} ->
+          [Journal_memory_id_field,memory_id,0; Journal_reason_field,reason,String.length memory_id+String.length " \xe2\x80\x94 "],
+          [Journal_drop_label_field,journal_drop_label] in
+    Option.iter (fun emit -> List.iter (fun (field,value) ->
+      emit {line_index;field;value;row= !first_row;source_ranges=[0,String.length value]}) lead_fields) on_field;
+    let body_row=ref (!first_row + if hangs then 0 else 1) in
+    let on_row=Option.map (fun emit _ ranges ->
+      List.iter (fun (field,value,start) ->
+        let ending=start+String.length value in
+        let source_ranges=List.filter_map (fun (first,last) ->
+          let a=max first start and b=min last ending in
+          if a<b then Some(a-start,b-start) else None) ranges in
+        if source_ranges<>[] then emit {line_index;field;value;row= !body_row;source_ranges}) text_fields;
+      incr body_row) on_field in
+    let rows = if hangs then
       let indent = (String.make lead_cells ' ', Journal_piece_space) in
-      match wrap_words ~max_cells:claim_cells text with
+      match wrap_words_internal ?on_row ~max_cells:claim_cells text with
       | [] -> [ lead ]
       | first :: rest ->
           (lead @ [ (first, text_piece) ])
           :: List.map (fun chunk -> [ indent; (chunk, text_piece) ]) rest
     else
-      lead :: List.map (fun chunk -> [ (chunk, text_piece) ]) (wrap_words ~max_cells:width text)
+      lead :: List.map (fun chunk -> [ (chunk, text_piece) ]) (wrap_words_internal ?on_row ~max_cells:width text)
+    in
+    first_row:= !first_row + List.length rows + 1;
+    rows
   in
   let rec join = function
     | [] -> []
     | [ rows ] -> rows
     | rows :: rest -> rows @ ([] :: join rest)
   in
-  join (List.map rows_of_line lines)
+  join (List.mapi rows_of_line lines)
+
+let journal_rows ~width lines = journal_rows_internal ~width lines
+
+let journal_rows_with_spans ~width lines =
+  let fields=ref [] in
+  let journal_rows=journal_rows_internal ~on_field:(fun field -> fields:=field :: !fields) ~width lines in
+  {journal_rows; journal_fields=List.rev !fields}
 
 (* [HH:MM:SS] cut to the minute for the inline margin. Seconds earn their
    width on a row of their own; in a margin they are paid for once per message.
@@ -1550,23 +1629,35 @@ let inbound_indent (entry : entry) =
   | Inbound -> inbound_indent_cells
   | User | Keeper | Status | Local | Journal | Error | Tool | Skill _ | Thinking -> 0
 
+(* The body column rows_of_entry draws in. Measuring an entry
+   (entry_body_cells) and drawing it read this one function, so search and
+   source pins map bytes through the width the rows were actually wrapped at. *)
+let body_cells_after_gutter ~origin ~inner_width gutter =
+  let gutter_width = match gutter with
+    | None -> 0
+    | Some (text, rail_cells, _, _) -> rail_cells + display_width text in
+  let body_width = Int.max min_body_cells (inner_width - 2 - gutter_width) in
+  (* A reading column, in terminal cells. Wide panes keep breathing room
+     instead of stretching prose across the whole display. *)
+  if origin = Origin_bare then min 100 body_width else body_width
+
+(* Bare origin draws inbound rows flush with the pane. *)
+let entry_indent ~origin entry = if origin = Origin_bare then 0 else inbound_indent entry
+
+let entry_body_cells ~origin ~inner_width entry =
+  let inner_width = inner_width - entry_indent ~origin entry in
+  let gutter = origin_gutter ~origin ~previous:None ~inner_width entry in
+  body_cells_after_gutter ~origin ~inner_width gutter
+
 let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry =
   (* Everything after the indent is laid out in the column that is left, so
      the origin, the heading and the body fit the column rather than the
      pane. *)
-  let indent = if origin = Origin_bare then 0 else inbound_indent entry in
+  let indent = entry_indent ~origin entry in
   let pane_width = inner_width in
   let inner_width = pane_width - indent in
   let gutter = origin_gutter ~origin ~previous ~inner_width entry in
-  let gutter_width =
-    match gutter with
-    | None -> 0
-    | Some (text, rail_cells, _, _) -> rail_cells + display_width text
-  in
-  let body_width = Int.max min_body_cells (inner_width - 2 - gutter_width) in
-  (* A reading column, in terminal cells. Wide panes keep breathing room
-     instead of stretching prose across the whole display. *)
-  let body_width = if origin = Origin_bare then min 100 body_width else body_width in
+  let body_width = body_cells_after_gutter ~origin ~inner_width gutter in
   (* Keepers write markdown. Rendering it is the caller's to supply, so this
      module keeps no terminal vocabulary; without it the body is wrapped as the
      plain text it always was. *)
@@ -1878,26 +1969,44 @@ let newest_entry_window ~inner_width ~height rows =
       in
       start @ (gap :: tail)
 
-let visible_rows ?markdown ?origin ~inner_width ~height entries =
+type body_row_position = {
+  entry_index : int;
+  body_row : int;
+  rows_below : int;
+}
+
+(* Positions belong to the actual immutable rows selected by this producer.
+   Generated gaps and rows synthesized by repeat collapse have no original
+   row owner and cannot acquire a body position by matching their text. *)
+let visible_rows_with_positions ?markdown ?origin ~inner_width ~height entries =
   let inner_width = Int.max 1 inner_width in
   let height = Int.max 0 height in
-  let rec collect remaining selected = function
-    | [] -> selected
-    | _ when remaining = 0 -> selected
+  let rec collect entry_index remaining selected positions = function
+    | [] -> selected, positions
+    | _ when remaining = 0 -> selected, positions
     | entry :: older ->
-        let rows =
-          rows_of_entry ?markdown ?origin ~inner_width
-            ~previous:(List.nth_opt older 0) entry
-        in
+        let rows = rows_of_entry ?markdown ?origin ~inner_width
+          ~previous:(List.nth_opt older 0) entry in
         let chosen =
           if List.length rows <= remaining then rows
-          else if selected = [] then
-            newest_entry_window ~inner_width ~height:remaining rows
-          else take_last remaining rows
-        in
-        collect (remaining - List.length chosen) (chosen @ selected) older
+          else if selected = [] then newest_entry_window ~inner_width ~height:remaining rows
+          else take_last remaining rows in
+        let _, owners = List.fold_left (fun (body_row, owners) row ->
+          match row.kind with
+          | Body -> body_row+1, (row,body_row)::owners
+          | Metadata _ | Spacing | Viewport_gap _ -> body_row,owners) (0,[]) rows in
+        let below = List.length selected in
+        let count = List.length chosen in
+        let owned = List.mapi (fun index row ->
+          Option.map (fun body_row -> {entry_index;body_row;
+            rows_below=below+count-index-1}) (List.assq_opt row owners)) chosen
+          |> List.filter_map Fun.id in
+        collect (entry_index-1) (remaining-count) (chosen @ selected) (owned @ positions) older
   in
-  collect height [] (List.rev entries)
+  collect (List.length entries-1) height [] [] (List.rev entries)
+
+let visible_rows ?markdown ?origin ~inner_width ~height entries =
+  fst (visible_rows_with_positions ?markdown ?origin ~inner_width ~height entries)
 
 let total_rows ?markdown ?origin ?previous ~inner_width entries =
   let inner_width = Int.max 1 inner_width in
@@ -2045,9 +2154,17 @@ let count_rows_until held ?markdown ~wanted () =
    the numbering the window is expressed in. Entry [index] -- counting from
    the newest -- holds the rows [total - before - count] up to
    [total - before], where [before] is what the entries newer than it take. *)
+
+type scroll_window = {
+  scroll : int;
+  rows : row list;
+  body_positions : body_row_position list;
+}
+
 let clamped_scrolled_rows ?markdown ?origin ~inner_width ~height ~requested entries =
   if requested <= 0 then
-    requested, visible_rows ?markdown ?origin ~inner_width ~height entries
+    let rows, body_positions = visible_rows_with_positions ?markdown ?origin ~inner_width ~height entries in
+    { scroll = requested; rows; body_positions }
   else begin
     let inner_width = Int.max 1 inner_width in
     let origin = Option.value origin ~default:Origin_row in
@@ -2060,32 +2177,72 @@ let clamped_scrolled_rows ?markdown ?origin ~inner_width ~height ~requested entr
     let from_bottom = Int.min requested (Int.max 0 (total - bound_height)) in
     let bottom = Int.max 0 (total - from_bottom) in
     let first = Int.max 0 (bottom - window_height) in
-    let rec gather index before selected =
-      if index >= visited then selected
+    let rec gather index before (selected, positions) =
+      if index >= visited then selected, positions
       else begin
         let count = held.rc_counts.(index) in
         let low = total - before - count in
         let high = total - before in
-        let selected =
-          if high <= first || low >= bottom then selected
+        let selected, positions =
+          if high <= first || low >= bottom then selected, positions
           else begin
             let rows = entry_rows_at held ?markdown index in
             let take_from = Int.max first low and take_to = Int.min bottom high in
-            let chosen =
-              List.filteri
-                (fun offset _ ->
+            let _, _, chosen, chosen_positions =
+              List.fold_left
+                (fun (offset, body_row, chosen, positions) row ->
                   let position = low + offset in
-                  position >= take_from && position < take_to)
-                rows
+                  let is_body = match row.kind with Body -> true | Metadata _ | Spacing | Viewport_gap _ -> false in
+                  let chosen, positions =
+                    if position < take_from || position >= take_to then chosen, positions
+                    else row :: chosen,
+                      (if is_body then
+                         { entry_index = Array.length held.rc_newest_first - index - 1;
+                           body_row; rows_below = bottom - position - 1 } :: positions
+                       else positions)
+                  in
+                  offset + 1, (if is_body then body_row + 1 else body_row), chosen, positions)
+                (0, 0, [], []) rows
             in
-            chosen @ selected
+            List.rev_append chosen selected, List.rev_append chosen_positions positions
           end
         in
-        gather (index + 1) (before + count) selected
+        gather (index + 1) (before + count) (selected, positions)
       end
     in
-    (from_bottom, gather 0 0 [])
+    let rows, body_positions = gather 0 0 ([], []) in
+    { scroll = from_bottom; rows; body_positions }
   end
+
+(* Resolve a physical body row against this exact layout, measuring only its
+   newer suffix. This is shared by search and by the next frame's origin pin. *)
+let scroll_for_body_row ?markdown ?(origin = Origin_row) ~inner_width
+    ~entry_index ~body_row entries =
+  let held = row_counts_for entries ~inner_width:(Int.max 1 inner_width) ~origin in
+  let index = Array.length held.rc_newest_first - entry_index - 1 in
+  if index < 0 || index >= Array.length held.rc_newest_first || body_row < 0 then None
+  else
+    let rec newer at total =
+      if at = index then total
+      else begin
+        if at >= held.rc_filled then begin
+          held.rc_counts.(at) <- List.length (entry_rows_at held ?markdown at);
+          held.rc_filled <- at + 1
+        end;
+        newer (at + 1) (total + held.rc_counts.(at))
+      end
+    in
+    let suffix = newer 0 0 in
+    let rows = entry_rows_at held ?markdown index in
+    let rec locate offset ordinal = function
+      | [] -> None
+      | row :: rest ->
+          match row.kind with
+          | Body when ordinal = body_row -> Some (suffix + List.length rows - offset - 1)
+          | Body -> locate (offset + 1) (ordinal + 1) rest
+          | Metadata _ | Spacing | Viewport_gap _ -> locate (offset + 1) ordinal rest
+    in
+    locate 0 0 rows
 
 let last_page_start ~height row_costs =
   let costs = Array.of_list row_costs in

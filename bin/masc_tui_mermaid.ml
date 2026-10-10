@@ -121,6 +121,44 @@ type failure = Masc_tui_mermaid_grammar.failure =
       turning_it_fits : direction option;
     }
 
+type label_source_range = Masc_tui_mermaid_grammar.label_source_range = {
+  start_byte : int;
+  end_byte : int;
+}
+
+type mapped_label = Masc_tui_mermaid_grammar.mapped_label = {
+  label_text : string;
+  source_ranges : label_source_range array;
+}
+
+type label_identity = Masc_tui_mermaid_grammar.label_identity =
+  | Node_label of node_id
+  | Edge_label of int
+  | Group_label of int
+  | Participant_label of string
+  | Event_label of int
+  | Event_kind of int
+
+type sourced_label = Masc_tui_mermaid_grammar.sourced_label = {
+  identity : label_identity;
+  text : string;
+  ranges : label_source_range array;
+}
+
+type missing_label = Masc_tui_mermaid_grammar.missing_label = {
+  identity : label_identity;
+  text : string;
+}
+
+type source_mapping = Masc_tui_mermaid_grammar.source_mapping =
+  | Complete of sourced_label list
+  | Incomplete of { mapped : sourced_label list; missing : missing_label list }
+
+type parsed_with_sources = Masc_tui_mermaid_grammar.parsed_with_sources = {
+  diagram : diagram;
+  source_mapping : source_mapping;
+}
+
 include
   (Masc_tui_mermaid_grammar :
     module type of Masc_tui_mermaid_grammar
@@ -139,7 +177,53 @@ include
        and type sequence := sequence
        and type diagram := diagram
        and type failure := failure
+       and type label_source_range := label_source_range
+       and type mapped_label := mapped_label
+       and type label_identity := label_identity
+       and type sourced_label := sourced_label
+       and type missing_label := missing_label
+       and type source_mapping := source_mapping
+       and type parsed_with_sources := parsed_with_sources
 )
+
+
+let parse text = parse_internal text
+
+let parse_with_source_labels text =
+  let known = Hashtbl.create 16 in
+  let* diagram = parse_internal ~on_label:(fun identity source -> Hashtbl.replace known identity source) text in
+  let labels = ref [] in
+  let add identity text = if text <> "" then labels := (identity, text) :: !labels in
+  (match diagram with
+   | Graph graph ->
+       List.iter (fun node -> match node.id, node.shape with
+         | Named _, (Rect | Round | Diamond | Subroutine | Database | Stadium | Circle) ->
+             add (Node_label node.id) node.label
+         | Named _, Bar | (Initial _ | Final _), _ -> ()) graph.nodes;
+       List.iteri (fun index edge -> Option.iter (add (Edge_label index)) edge.label) graph.edges;
+       let group_index = ref 0 in
+       let rec collect_group item =
+         add (Group_label !group_index) item.group_label;
+         incr group_index;
+         List.iter collect_group item.group_children in
+       List.iter collect_group graph.groups
+   | Sequence sequence ->
+       List.iter (fun participant -> add (Participant_label participant.pid) participant.alias) sequence.participants;
+       List.iteri (fun index -> function
+         | Message {m_text; _} -> add (Event_label index) m_text
+         | Note {n_text; _} -> add (Event_label index) n_text
+         | Block_open {b_kind; b_label} -> add (Event_kind index) b_kind; add (Event_label index) b_label
+         | Block_else label -> add (Event_kind index) "else"; add (Event_label index) label
+         | Block_close -> ()) sequence.events);
+  let mapped, missing = List.fold_left (fun (mapped, missing) (identity, value) ->
+    match Option.join (Hashtbl.find_opt known identity) with
+    | Some source when String.equal source.label_text value ->
+        ({identity; text=value; ranges=source.source_ranges} :: mapped), missing
+    | Some _ | None -> mapped, ({identity; text=value} :: missing)) ([], []) (List.rev !labels) in
+  let source_mapping = match missing with
+    | [] -> Complete (List.rev mapped)
+    | _ -> Incomplete {mapped=List.rev mapped; missing=List.rev missing} in
+  Ok {diagram; source_mapping}
 
 (* ── Canvas ────────────────────────────────────────────────────────────── *)
 
@@ -170,13 +254,18 @@ type cell =
   | Text of string
   | Skip  (* the second cell of a two-cell glyph *)
 
+type semantic_position = { identity : label_identity; byte : int }
+
 type canvas = {
   rows : int;
   cols : int;
   cells : cell array array;
+  source_cells : semantic_position option array option array array option;
 }
 
-let make_canvas ~rows ~cols = { rows; cols; cells = Array.make_matrix rows cols Empty }
+let make_canvas ~trace ~rows ~cols =
+  {rows; cols; cells=Array.make_matrix rows cols Empty;
+   source_cells=(if trace then Some (Array.make_matrix rows cols None) else None)}
 
 let inside canvas r c = r >= 0 && r < canvas.rows && c >= 0 && c < canvas.cols
 
@@ -196,7 +285,9 @@ let add_bits canvas r c ~style bits ~round =
              }
        | (Text _ | Skip) as kept -> kept)
 
-let put_text canvas r c text =
+let put_text ?source canvas r c text =
+  let sources offset length = Array.init length (fun i ->
+    Option.bind source (fun at -> at (offset + i))) in
   let n = String.length text in
   let rec walk offset col =
     if offset < n then (
@@ -208,17 +299,42 @@ let put_text canvas r c text =
         (* A combining mark joins the cell before it. *)
         (if inside canvas r (col - 1) then
            match canvas.cells.(r).(col - 1) with
-           | Text previous -> canvas.cells.(r).(col - 1) <- Text (previous ^ glyph)
+           | Text previous ->
+               canvas.cells.(r).(col - 1) <- Text (previous ^ glyph);
+               Option.iter (fun cells ->
+                 let before = match cells.(r).(col - 1) with
+                   | Some positions -> positions
+                   | None -> invalid_arg "Masc_tui_mermaid.put_text: untraced text cell" in
+                 cells.(r).(col - 1) <- Some (Array.append before (sources offset length))) canvas.source_cells
            | Empty | Line _ | Skip -> ());
         walk (offset + length) col)
       else (
-        if inside canvas r col then canvas.cells.(r).(col) <- Text glyph;
+        if inside canvas r col then begin
+          canvas.cells.(r).(col) <- Text glyph;
+          Option.iter (fun cells -> cells.(r).(col) <- Some (sources offset length)) canvas.source_cells
+        end;
         for extra = 1 to width - 1 do
-          if inside canvas r (col + extra) then canvas.cells.(r).(col + extra) <- Skip
+          if inside canvas r (col + extra) then begin
+            canvas.cells.(r).(col + extra) <- Skip;
+            Option.iter (fun cells -> cells.(r).(col + extra) <- None) canvas.source_cells
+          end
         done;
         walk (offset + length) (col + width)))
   in
   walk 0 c
+
+let put_parts canvas row col parts =
+  let text = String.concat "" (List.map snd parts) in
+  let source = match canvas.source_cells with
+    | None -> None
+    | Some _ ->
+        let positions = Array.concat (List.map (fun (identity, text) ->
+          Array.init (String.length text) (fun byte -> Option.map (fun identity -> {identity; byte}) identity)) parts) in
+        Some (fun byte -> positions.(byte)) in
+  put_text ?source canvas row col text
+
+let put_label canvas row col identity text =
+  put_parts canvas row col [identity, text]
 
 (* A straight run between two cells on one row or one column. Each cell
    gets the bits toward its neighbours on the run, so the ends carry one
@@ -309,6 +425,55 @@ let rows_of_canvas canvas =
          let rec trim i = if i > 0 && text.[i - 1] = ' ' then trim (i - 1) else i in
          String.sub text 0 (trim (String.length text)))
 
+let sources_of_canvas canvas rows =
+  Option.map (fun sources ->
+    Array.of_list (List.mapi (fun row text ->
+      let pieces = Array.to_list (Array.mapi (fun col -> function
+        | Empty -> [|None|]
+        | Line {mask; style; round} -> Array.make (String.length (glyph_of_line ~mask ~style ~round)) None
+        | Text _ -> (match sources.(row).(col) with
+            | Some positions -> positions
+            | None -> invalid_arg "Masc_tui_mermaid.sources_of_canvas: untraced text cell")
+        | Skip -> [||]) canvas.cells.(row)) in
+      let positions = Array.concat pieces in
+      Array.sub positions 0 (String.length text)) rows)) canvas.source_cells
+
+module Edge_sources = Hashtbl.Make (struct
+  type t = edge
+  let equal = ( == )
+  let hash = Hashtbl.hash
+end)
+module Group_sources = Hashtbl.Make (struct
+  type t = group
+  let equal = ( == )
+  let hash = Hashtbl.hash
+end)
+
+type graph_trace = {
+  edge_identity : edge -> label_identity;
+  group_identity : group -> label_identity;
+}
+
+(* Partitioning and DAG layering retain the original edge/group records. A
+   segment carries its origin before dummy nodes or reversed routing are added.
+   Strict lookups reject a future copied record instead of losing its source. *)
+let graph_trace graph =
+  let edges = Edge_sources.create (List.length graph.edges) in
+  List.iteri (fun index edge -> Edge_sources.add edges edge (Edge_label index)) graph.edges;
+  let groups = Group_sources.create 8 in
+  let index = ref 0 in
+  let rec collect group =
+    Group_sources.add groups group (Group_label !index);
+    incr index;
+    List.iter collect group.group_children in
+  List.iter collect graph.groups;
+  {edge_identity=Edge_sources.find edges; group_identity=Group_sources.find groups}
+
+type canvas_render = {
+  canvas_rows : string list;
+  canvas_sources : semantic_position option array array option;
+}
+
 (* ── Layout ────────────────────────────────────────────────────────────── *)
 
 let box_height = 3
@@ -335,6 +500,7 @@ let box_width node = Layout.display_width (shown_label node) + (2 * box_pad)
 type cluster = {
   c_group : group;
   c_rows : string list;
+  c_sources : semantic_position option array array option;
   c_width : int;
   c_height : int;
 }
@@ -371,6 +537,7 @@ type segment = {
   head_at_to : bool;
   head_at_from : bool;
   seg_label : string option;
+  seg_identity : label_identity option;
 }
 
 let along_flow direction =
@@ -451,15 +618,15 @@ let partition_edges ~nodes ~groups ~edges =
    down, and its drawing then stands in the scope above as a single box.
    Returns the rows and the size they take, which is what the scope above
    needs in order to place that box. *)
-let rec layout_scope ~cols ~direction ~node_of ~nodes ~groups ~edges =
+let rec layout_scope ~trace ~cols ~direction ~node_of ~nodes ~groups ~edges =
   let* here, inner_edges = partition_edges ~nodes ~groups ~edges in
   let* clusters =
     map_result
       (fun group ->
         let* members = map_result node_of group.group_nodes in
-        let* rows, width, height =
+        let* rows, source_rows, width, height =
           match
-            layout_scope
+            layout_scope ~trace
               ~cols:(max 1 (cols - cluster_pad))
               ~direction:(Option.value group.group_direction ~default:direction)
               ~node_of ~nodes:members ~groups:group.group_children
@@ -472,7 +639,7 @@ let rec layout_scope ~cols ~direction ~node_of ~nodes ~groups ~edges =
               Error (Too_wide { cells = cells + cluster_pad; cols; turning_it_fits })
           | (Ok _ | Error (Unsupported _ | Parse_error _)) as answer -> answer
         in
-        Ok (Cluster { c_group = group; c_rows = rows; c_width = width; c_height = height }))
+        Ok (Cluster { c_group = group; c_rows = rows; c_sources=source_rows; c_width = width; c_height = height }))
       groups
   in
   (* Source order within each kind, nodes before subgraphs. The ordering
@@ -617,6 +784,7 @@ let rec layout_scope ~cols ~direction ~node_of ~nodes ~groups ~edges =
                 ; head_at_to = head_forward && k = last
                 ; head_at_from = head_backward && k = 0
                 ; seg_label = (if k = 0 then edge.label else None)
+                ; seg_identity = Option.map (fun trace -> trace.edge_identity edge) trace
                 }
                 :: !segments)
             steps)
@@ -742,7 +910,7 @@ let rec layout_scope ~cols ~direction ~node_of ~nodes ~groups ~edges =
       in
       if cols_needed > cols then Error (Too_wide { cells = cols_needed; cols; turning_it_fits = None })
       else
-        let canvas = make_canvas ~rows ~cols:cols_needed in
+        let canvas = make_canvas ~trace:(Option.is_some trace) ~rows ~cols:cols_needed in
         (* (flow, cross) to (row, col), the flow axis reversed for the two
            directions that read against it. *)
         let rc (f, c) =
@@ -781,7 +949,10 @@ let rec layout_scope ~cols ~direction ~node_of ~nodes ~groups ~edges =
                     add_bits canvas r lft ~style:line ~round:false (up lor down);
                     add_bits canvas r rgt ~style:line ~round:false (up lor down)
                   done;
-                  put_text canvas (top + 1) (lft + 2) (shown_label node)
+                  let identity = match node.id with Named _ -> Some (Node_label node.id)
+                    | Initial _ | Final _ -> None in
+                  let prefix, suffix = if node.shape=Diamond then "⟨", "⟩" else "", "" in
+                  put_parts canvas (top + 1) (lft + 2) [None,prefix;identity,node.label;None,suffix]
                 in
                 match node.shape with
                 (* One thick run, one cell deep, in the stroke a thick edge
@@ -812,9 +983,12 @@ let rec layout_scope ~cols ~direction ~node_of ~nodes ~groups ~edges =
                 done;
                 (* The title rides the top edge, which is what tells a box
                    holding other boxes apart from a node's box. *)
-                put_text canvas top (lft + 2) (" " ^ c.c_group.group_label ^ " ");
+                let identity = Option.map (fun trace -> trace.group_identity c.c_group) trace in
+                put_parts canvas top (lft + 2) [None," ";identity,c.c_group.group_label;None," "];
                 (* The drawing was laid out already; it goes in whole. *)
-                List.iteri (fun i row -> put_text canvas (top + 1 + i) (lft + 1) row) c.c_rows)
+                List.iteri (fun i row ->
+                  let source = Option.map (fun rows byte -> rows.(i).(byte)) c.c_sources in
+                  put_text ?source canvas (top + 1 + i) (lft + 1) row) c.c_rows)
           items;
         (* Dummies: a straight run through their band. *)
         Array.iteri
@@ -850,7 +1024,7 @@ let rec layout_scope ~cols ~direction ~node_of ~nodes ~groups ~edges =
                 match flow_axis with
                 | `Rows ->
                     let r, c = rc (fs + 1, cs + 2) in
-                    put_text canvas r c label
+                    put_label canvas r c seg.seg_identity label
                 | `Cols ->
                     let width = Layout.display_width label in
                     let f_start =
@@ -859,11 +1033,13 @@ let rec layout_scope ~cols ~direction ~node_of ~nodes ~groups ~edges =
                       | Right_left -> fs + 1 + width
                     in
                     let r, c = rc (f_start, cs - 1) in
-                    put_text canvas r c label))
+                    put_label canvas r c seg.seg_identity label))
           segments;
-        Ok (rows_of_canvas canvas, cols_needed, rows)
+        let rendered = rows_of_canvas canvas in
+        Ok (rendered, sources_of_canvas canvas rendered, cols_needed, rows)
 
-let render_graph ~cols graph =
+let render_graph_internal ~trace ~cols graph =
+  let trace = if trace then Some (graph_trace graph) else None in
   let node_of_table = Hashtbl.create 16 in
   List.iter (fun node -> Hashtbl.replace node_of_table node.id node) graph.nodes;
   let grouped = Hashtbl.create 16 in
@@ -894,11 +1070,11 @@ let render_graph ~cols graph =
         | None ->
             Error (Unsupported ("a subgraph member no statement declared: " ^ node_id_text id))
       in
-      let* rows, _, _ =
-        layout_scope ~cols ~direction:graph.direction ~node_of ~nodes:free ~groups:graph.groups
+      let* rows, source_rows, _, _ =
+        layout_scope ~trace ~cols ~direction:graph.direction ~node_of ~nodes:free ~groups:graph.groups
           ~edges:graph.edges
       in
-      Ok rows
+      Ok {canvas_rows=rows;canvas_sources=source_rows}
 
 (* ── Sequence layout ───────────────────────────────────────────────────── *)
 
@@ -912,10 +1088,10 @@ let event_rows = function
   | Note _ -> 3
   | Block_open _ | Block_else _ | Block_close -> 1
 
-let render_sequence ~cols (seq : sequence) =
+let render_sequence_internal ~trace ~cols (seq : sequence) =
   let participants = Array.of_list seq.participants in
   let n = Array.length participants in
-  if n = 0 then Ok []
+  if n = 0 then Ok {canvas_rows=[]; canvas_sources=(if trace then Some [||] else None)}
   else
     let index_of =
       let table = Hashtbl.create 8 in
@@ -987,7 +1163,7 @@ let render_sequence ~cols (seq : sequence) =
     let rows = header_rows + body_rows + 1 in
     if width > cols then Error (Too_wide { cells = width; cols; turning_it_fits = None })
     else
-      let canvas = make_canvas ~rows ~cols:width in
+      let canvas = make_canvas ~trace ~rows ~cols:width in
       let col i = margin + centre x i in
       (* Participant boxes. *)
       Array.iteri
@@ -1004,7 +1180,7 @@ let render_sequence ~cols (seq : sequence) =
           done;
           add_bits canvas 1 lft ~style:Border_solid ~round:false (up lor down);
           add_bits canvas 1 rgt ~style:Border_solid ~round:false (up lor down);
-          put_text canvas 1 (lft + 2) p.alias)
+          put_label canvas 1 (lft + 2) (Some (Participant_label p.pid)) p.alias)
         participants;
       (* Lifelines, from under each box to the last row. *)
       for i = 0 to n - 1 do
@@ -1020,8 +1196,8 @@ let render_sequence ~cols (seq : sequence) =
         | Head_cross, _ -> "x"
       in
       let row = ref header_rows in
-      List.iter
-        (fun event ->
+      List.iteri
+        (fun event_index event ->
           let r = !row in
           (match event with
            | Message { m_from; m_to; m_text; m_style; m_head } ->
@@ -1029,14 +1205,14 @@ let render_sequence ~cols (seq : sequence) =
                let m_bstyle = border_of_line_style m_style in
                if a = b then (
                  let c = col a in
-                 put_text canvas r (c + self_loop_cells) m_text;
+                 put_label canvas r (c + self_loop_cells) (Some (Event_label event_index)) m_text;
                  draw_line canvas ~style:m_bstyle (r + 1, c) (r + 1, c + 3);
                  draw_line canvas ~style:m_bstyle (r + 1, c + 3) (r + 2, c + 3);
                  draw_line canvas ~style:m_bstyle (r + 2, c + 1) (r + 2, c + 3);
                  put_text canvas (r + 2) (c + 1) (head_glyph m_head ~rightward:false))
                else (
                  let cf = col a and ct = col b in
-                 put_text canvas r (min cf ct + 2) m_text;
+                 put_label canvas r (min cf ct + 2) (Some (Event_label event_index)) m_text;
                  draw_line canvas ~style:m_bstyle (r + 1, cf) (r + 1, ct);
                  if ct > cf then put_text canvas (r + 1) (ct - 1) (head_glyph m_head ~rightward:true)
                  else put_text canvas (r + 1) (ct + 1) (head_glyph m_head ~rightward:false))
@@ -1060,7 +1236,7 @@ let render_sequence ~cols (seq : sequence) =
                border_row r "\xe2\x94\x8c" "\xe2\x94\x80" "\xe2\x94\x90";
                border_row (r + 1) "\xe2\x94\x82" " " "\xe2\x94\x82";
                border_row (r + 2) "\xe2\x94\x94" "\xe2\x94\x80" "\xe2\x94\x98";
-               put_text canvas (r + 1) (lft + 2) n_text
+               put_label canvas (r + 1) (lft + 2) (Some (Event_label event_index)) n_text
            | Block_open { b_kind; b_label } ->
                if not (String.equal b_kind "box") then (
                  let d = !depth in
@@ -1070,16 +1246,20 @@ let render_sequence ~cols (seq : sequence) =
                  draw_line canvas ~style:Border_solid (r, l) (r, rt);
                  add_bits canvas r l ~style:Border_solid ~round:false down;
                  add_bits canvas r rt ~style:Border_solid ~round:false down;
-                 put_text canvas r (l + 2)
-                   (" " ^ b_kind ^ (if b_label = "" then "" else " " ^ b_label) ^ " "))
+                 put_parts canvas r (l + 2)
+                   ([None, " "; Some (Event_kind event_index), b_kind]
+                    @ (if b_label = "" then [] else [None, " "; Some (Event_label event_index), b_label])
+                    @ [None, " "]))
                else frames := (-1, r) :: !frames
            | Block_else label -> (
                match !frames with
                | (d, _) :: _ when d >= 0 ->
                    let l = d and rt = width - 1 - d in
                    draw_line canvas ~style:Border_dotted (r, l) (r, rt);
-                   put_text canvas r (l + 2)
-                     (" else" ^ (if label = "" then "" else " " ^ label) ^ " ")
+                   put_parts canvas r (l + 2)
+                     ([None, " "; Some (Event_kind event_index), "else"]
+                      @ (if label = "" then [] else [None, " "; Some (Event_label event_index), label])
+                      @ [None, " "])
                | (_, _) :: _ | [] -> ())
            | Block_close -> (
                match !frames with
@@ -1094,25 +1274,45 @@ let render_sequence ~cols (seq : sequence) =
                | [] -> ()));
           row := r + event_rows event)
         seq.events;
-      Ok (rows_of_canvas canvas)
+      let rows = rows_of_canvas canvas in
+      Ok {canvas_rows=rows; canvas_sources=sources_of_canvas canvas rows}
 
-let render ~cols text =
-  let* diagram = parse text in
+let render_diagram_internal ~trace ~cols diagram =
   match diagram with
   | Graph graph -> (
     (* render_graph reports the width it needed; only here, holding the graph,
        can we also answer whether the other axis would have fit. One extra
        layout, on the refusal path only. *)
-    match render_graph ~cols graph with
+    match render_graph_internal ~trace ~cols graph with
     | Error (Too_wide { cells; cols; turning_it_fits = _ }) ->
       let turning_it_fits =
         match turned graph.direction with
         | None -> None
         | Some direction -> (
-          match render_graph ~cols { graph with direction } with
+          match render_graph_internal ~trace:false ~cols { graph with direction } with
           | Ok _ -> Some direction
           | Error (Too_wide _ | Unsupported _ | Parse_error _) -> None)
       in
       Error (Too_wide { cells; cols; turning_it_fits })
     | (Ok _ | Error (Unsupported _ | Parse_error _)) as answer -> answer)
-  | Sequence sequence -> render_sequence ~cols sequence
+  | Sequence sequence -> render_sequence_internal ~trace ~cols sequence
+
+
+let render ~cols text =
+  let* diagram = parse text in
+  Result.map (fun rendered -> rendered.canvas_rows)
+    (render_diagram_internal ~trace:false ~cols diagram)
+
+type rendered_with_sources = {
+  rendered_rows : string list;
+  rendered_positions : semantic_position option array array;
+  labels : source_mapping;
+}
+
+let render_with_source_labels ~cols text =
+  let* parsed = parse_with_source_labels text in
+  let* rendered = render_diagram_internal ~trace:true ~cols parsed.diagram in
+  match rendered.canvas_sources with
+  | None -> invalid_arg "Masc_tui_mermaid.render_with_source_labels: tracing disabled"
+  | Some rendered_positions ->
+      Ok {rendered_rows=rendered.canvas_rows; rendered_positions; labels=parsed.source_mapping}

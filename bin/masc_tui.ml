@@ -829,6 +829,8 @@ let forget_recall (state : state) =
   state.msg_recall_draft <- ("", [], [], None)
 
 let clear_keeper_history_projection state =
+  retire_keeper_message_search state;
+  state.msg_find_at <- None;
   state.msg_history_load_generation <- state.msg_history_load_generation + 1;
   state.msg_history_inflight <- None;
   state.msg_copy_generation <- state.msg_copy_generation + 1;
@@ -848,6 +850,7 @@ let clear_keeper_history_projection state =
 let open_message_for_keeper ?(return_to = Keeper_chat_return_detail)
     ?(remember_home_chat = true) state
     keeper_name ~drain_queue =
+  retire_keeper_message_search state;
   state.keeper_navigation_open <- false;
   (* The paste goes back into the draft before the draft is put away. A spill
      lives with the composer; a saved draft has to stand on its own, and a
@@ -9355,41 +9358,32 @@ let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
 
 (* [/find] and its arg-less repeat, which differ only in where the walk starts.
 
-   The pane is moved by [set_msg_scroll], the one seam that also pins the row
-   the scroll counts back from -- a search that wrote [msg_scroll] directly
-   would leave the pin unset and the position would drift under the next
-   message that arrived.
+   Search returns the projected body-row pin together with its scroll. The
+   frame and search use the same feedback seam, so arrivals between the command
+   and the next frame cannot move the matched row out of view.
 
    Every outcome says something. A search that silently did nothing and a key
    that did nothing look the same, which is the failure this surface keeps
    having; and running out of older matches is a different fact from having
    none at all, because only one of the two is fixed by starting over. *)
-let seek_in_chat state ~target ~restart =
-  let notice = chat_notice state ~keeper_name:target in
-  match target with
-  | None ->
-      notice ~kind:Notice_failure "/find needs a Keeper selected on the roster"
-  | Some keeper_name -> (
-      let older_than = if restart then None else state.msg_find_at in
-      (* Normalised here, at the door the operator's text comes through.
-         [msg_find] keeps what they typed, because that is what the pane
-         echoes back to them. *)
-      match
-        keeper_message_find_scroll state ~keeper_name
-          ~needle:(String.trim state.msg_find)
-          ~older_than
-      with
-      | Some (scroll, anchor) ->
+let apply_chat_search_result state ~target ~restart ~needle result =
+  let notice=chat_notice state ~keeper_name:target in
+      let partial=if result.unavailable_entries=0 then "" else
+        Printf.sprintf " — search unavailable for %d entry(s); results may be incomplete" result.unavailable_entries in
+      match result.match_result with
+      | Some (position, anchor) ->
           state.msg_find_at <- Some anchor;
-          set_msg_scroll state scroll;
+          apply_clamped_scroll state (Message_scroll position);
           notice ~kind:Notice_reply
             (Printf.sprintf "/find %s \xe2\x80\x94 %d row(s) back (/find repeats)"
-               state.msg_find scroll)
+               needle position.scroll ^ partial)
+      | None when result.unavailable_entries>0 ->
+          notice ~kind:Notice_failure ("/find" ^ partial)
       | None ->
           if restart then
             notice ~kind:Notice_reply
               (Printf.sprintf "/find %s \xe2\x80\x94 nothing in this conversation"
-                 state.msg_find)
+                 needle)
           else
             (* The walk is over, not empty. Said apart from the case above
                because starting again is what fixes this one and not that
@@ -9397,7 +9391,29 @@ let seek_in_chat state ~target ~restart =
             notice ~kind:Notice_reply
               (Printf.sprintf
                  "/find %s \xe2\x80\x94 no older match; /find %s starts again"
-                 state.msg_find state.msg_find))
+                 needle needle)
+
+
+let seek_in_chat state ~mailbox ~target ~restart =
+  let notice=chat_notice state ~keeper_name:target in
+  match target with
+  | None -> notice ~kind:Notice_failure "/find needs a Keeper selected on the roster"
+  | Some keeper_name ->
+      let needle=String.trim state.msg_find in
+      let older_than=if restart then None else state.msg_find_at in
+      retire_keeper_message_search state;
+      let generation=Atomic.get state.msg_search_generation in
+      (* The plan only reads state. Candidates are rendered after this
+         handler returns, so the notice is drawn before that work starts. It
+         goes to the action footer, not into [msg_history]: a row appended
+         there after the plan froze its projection would make an empty
+         search look like a changed conversation, and a later search could
+         match the row itself. *)
+      let plan=plan_keeper_message_search state ~keeper_name ~needle ~older_than in
+      report_action state "system"
+        (Terminal_text.single_line ("/find " ^ needle ^ " — searching conversation"));
+      launch_keeper_message_search state plan ~deliver:(fun result ->
+        enqueue_async mailbox (Chat_search_finished (generation,restart,plan,result)))
 
 (* The Activity pane's cycle, narrow to wide to hidden, shared by Ctrl-L
    and [/activity]. Measured
@@ -10168,13 +10184,13 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       Masc_tui_message_input.clear state.msg_input;
       state.msg_find <- String.trim query;
       state.msg_find_at <- None;
-      seek_in_chat state ~target ~restart:true
+      seek_in_chat state ~mailbox ~target ~restart:true
   | Masc_tui_command.Find_next ->
       Masc_tui_message_input.clear state.msg_input;
       if String.equal state.msg_find "" then
         notice ~kind:Notice_failure
           "/find needs text the first time; /find on its own repeats it"
-      else seek_in_chat state ~target ~restart:false
+      else seek_in_chat state ~mailbox ~target ~restart:false
   | Masc_tui_command.Copy_latest_reply ->
       Masc_tui_message_input.clear state.msg_input;
       (match target with
@@ -15386,6 +15402,20 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox
+  | Chat_search_finished (generation,restart,plan,result) ->
+      if generation=Atomic.get state.msg_search_generation then begin
+        let authority,keeper,needle=keeper_message_search_identity plan in
+        if authority=state.workspace_authority && keeper_message_search_owned state plan
+           && String.trim state.msg_find=needle then
+          let notice=chat_notice state ~keeper_name:(Some keeper) in
+          match result with
+          | Error detail -> notice ~kind:Notice_failure detail
+          | Ok (work,matched) ->
+              (match admit_keeper_message_search state work matched with
+               | Some result -> apply_chat_search_result state ~target:(Some keeper) ~restart ~needle result
+               | None -> notice ~kind:Notice_reply
+                   "/find source changed while searching; repeat /find to search the current conversation")
+      end
   | Surface_composer_released ->
       drain_queued_message state ~base_path ~mailbox
   | Http_scoped_refresh_done (authority, currency_authority, results) ->
@@ -28894,6 +28924,8 @@ let run_with_eio_context f =
               ~cwd_default:(Eio.Stdenv.cwd env)
               ~proc_mgr:(Eio.Stdenv.process_mgr env)
               ~clock:(Eio.Stdenv.clock env);
+            let cpu_pool=Domain_pool.create ~sw (Eio.Stdenv.domain_mgr env) in
+            Domain_pool_ref.set cpu_pool;
             Eio_context.set_env env;
             Eio_context.set_switch sw;
             Eio_context.set_net (Eio.Stdenv.net env);

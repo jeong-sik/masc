@@ -963,6 +963,12 @@
   masc_tui_message_layout))
 
 (library
+ (name masc_tui_chat_search)
+ (wrapped false)
+ (modules masc_tui_chat_search)
+ (libraries masc_tui_markdown masc_tui_link_preview masc_tui_message_layout masc_tui_theme uucp))
+
+(library
  (name masc_tui_markdown_render_cache)
  (wrapped false)
  (modules masc_tui_markdown_render_cache)
@@ -1437,6 +1443,7 @@
  (wrapped false)
  (modules masc_tui_types)
  (libraries
+  masc_tui_chat_search
   ;; workspace identity composes the local masc root from the cluster
   ;; selection with the function the server reports its own root from.
   masc.config masc.keeper_chat_operations masc_tui_message_input
@@ -1857,7 +1864,10 @@
  (name masc_tui_render_chat)
  (wrapped false)
  (modules masc_tui_render_chat)
- (libraries masc_tui_message_input
+ (libraries masc_tui_chat_search masc_tui_message_input
+  eio
+  masc_core
+  masc_tui_async_read
   masc.masc_types
   masc_tui_keeper_chat_live
   masc.keeper_portrait

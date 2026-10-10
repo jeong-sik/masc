@@ -100,6 +100,23 @@ let test_cache_operations_and_bounding () =
   clear_cache ();
   check bool "empty after clear" true (Option.is_none (cache_lookup url))
 
+let test_compact_badge_source_spans () =
+  let base=synthesize_preview "https://github.com/owner/repository" in
+  let preview={base with site_name=Some "[Site] 한글"; title=Some "**foo** bar foobar"} in
+  match render_compact_badge_with_spans preview with
+  | None -> fail "informative compact preview must map"
+  | Some mapped ->
+      check (option string) "mapped compact output is identical"
+        (render_compact_badge preview) (Some (String.concat "\n" mapped.rows));
+      check int "site and title both retain field identity" 2 (List.length mapped.fields);
+      List.iter (fun (span : card_source_span) ->
+        check string "compact field exact original placement" span.value
+          (String.sub (List.nth mapped.rows span.row) span.row_start_byte
+             (span.source_end_byte-span.source_start_byte))) mapped.fields;
+      let silent={base with title=None;description=None;image_url=None;site_name=None;has_metadata=false} in
+      check bool "compact observer preserves silence" (Option.is_none (render_compact_badge silent))
+        (Option.is_none (render_compact_badge_with_spans silent))
+
 let test_modal_keeps_complete_url_and_instructions () =
   let url = "https://example.com/" ^ String.make 140 'x' ^ "/한글끝.png" in
   List.iter (fun width ->
@@ -249,6 +266,47 @@ let test_parse_collapses_newlines () =
   check (option string) "newlines/tabs/space-runs collapsed"
     (Some "Line one. Line two. Tabbed spaced") p.description
 
+let test_card_source_spans () =
+  let samples = List.map synthesize_preview [
+    "https://github.com/owner/long-repository-name-for-truncation";
+    "https://arxiv.org/abs/2401.12345";
+    "https://www.youtube.com/watch?v=fixture";
+    "https://news.ycombinator.com/item?id=42";
+    "https://example.test/image.png";
+    "https://example.test/article"] in
+  List.iter (fun preview ->
+    let preview = {preview with title=Some "**foo** bar foobar 가나다";
+      description=Some "Description with repeated foo and long source text";
+      site_name=Some "Example Site"; image_url=Some "https://example.test/image.png"} in
+    List.iter (fun width ->
+      let mapped = render_inline_card_with_spans ~width preview in
+      check (list string) "mapping preserves actual card bytes"
+        (render_inline_card ~width preview) mapped.rows;
+      List.iter (fun (span : card_source_span) ->
+        let length = span.source_end_byte - span.source_start_byte in
+        let row = List.nth mapped.rows span.row in
+        check string "mapped field bytes occur exactly at formatter-owned placement"
+          (String.sub span.value span.source_start_byte length)
+          (String.sub row span.row_start_byte length)) mapped.fields;
+      let physical = List.sort (fun (left : card_source_span) right ->
+        compare (left.row,left.row_start_byte) (right.row,right.row_start_byte)) mapped.fields in
+      let rec check_order = function
+        | left :: (right :: _ as rest) ->
+            check bool "typed source sequence follows actual interleaved fields" true
+              (compare (left.order,left.field) (right.order,right.field) < 0);
+            check_order rest
+        | [] | [_] -> () in
+      check_order physical
+    ) [12;40;54;55;80;140];
+    let title width =
+      let mapped = render_inline_card_with_spans ~width preview in
+      List.find (fun (span : card_source_span) -> span.field=Card_title) mapped.fields in
+    let narrow = title 40 and wide = title 80 in
+    check string "title has the same original source across layout switch" narrow.value wide.value;
+    check bool "title logical order survives narrow/wide reflow" true (narrow.order=wide.order);
+    check int "title's original start does not depend on clipping" 0 narrow.source_start_byte;
+    check int "wide title keeps original start too" 0 wide.source_start_byte) samples
+
 let () =
   run "tui link preview"
     [ ( "synthesizer"
@@ -265,6 +323,8 @@ let () =
       , [ test_case "cache lifecycle and bounding" `Quick test_cache_operations_and_bounding ] )
     ; ( "render"
       , [ test_case "modal keeps complete URL and instructions" `Quick test_modal_keeps_complete_url_and_instructions
+        ; test_case "compact badge source spans" `Quick test_compact_badge_source_spans
+        ; test_case "formatter-owned card source spans" `Quick test_card_source_spans
         ; test_case "a refused image url is remembered and said" `Quick
             test_a_refused_image_url_is_remembered_and_said
         ; test_case "an undecided image url says nothing" `Quick

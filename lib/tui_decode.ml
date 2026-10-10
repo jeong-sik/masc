@@ -4352,7 +4352,13 @@ let keeper_turn_lane_of_string = function
   | "maintenance" -> Some Turn_lane_maintenance
   | _ -> None
 
+type keeper_preview_position = {
+  kpp_generation : int;
+  kpp_start_byte : int;
+}
+
 type keeper_turn_preview = {
+  ktp_text_position : keeper_preview_position;
   ktp_status_text : string;
   ktp_updated_at_unix : float;
   ktp_text_tail : string;
@@ -4425,6 +4431,25 @@ let decode_keeper_turn_row json =
             match Json_util.assoc_member_opt "preview" turn_json with
             | None | Some `Null -> Ok None
             | Some (`Assoc _ as preview_json) ->
+                let* ktp_text_position =
+                  match (match preview_json with
+                    | `Assoc fields -> List.filter_map (fun (key, value) ->
+                        if key = "text_position" then Some value else None) fields
+                    | _ -> []) with
+                  | [`Assoc fields] when List.length fields = 2
+                      && List.length (List.filter (fun (key, _) -> key = "generation") fields) = 1
+                      && List.length (List.filter (fun (key, _) -> key = "start_byte") fields) = 1 ->
+                      let decode name = match List.assoc name fields with
+                        | `Int value when value >= 0 && Int64.of_int value <= 9_007_199_254_740_991L -> Ok value
+                        | `Float value when Float.is_finite value && value >= 0.
+                            && value <= 9_007_199_254_740_991. && value < Float.of_int max_int
+                            && Float.floor value = value -> Ok (Int.of_float value)
+                        | _ -> Error ("turn preview " ^ name ^ " must be a nonnegative exact integer") in
+                      let* kpp_generation = decode "generation" in
+                      let* kpp_start_byte = decode "start_byte" in
+                      Ok {kpp_generation; kpp_start_byte}
+                  | _ -> Error "turn preview text_position requires exactly generation and start_byte"
+                in
                 let* ktp_text_tail =
                   required_string_field preview_json "text_tail"
                 in
@@ -4438,7 +4463,7 @@ let decode_keeper_turn_row json =
                   | Some (`Int value) -> Ok (Float.of_int value)
                   | _ -> Error "turn preview updated_at_unix must be a finite number"
                 in
-                Ok (Some { ktp_text_tail; ktp_last_tool; ktp_status_text; ktp_updated_at_unix })
+                Ok (Some { ktp_text_position; ktp_text_tail; ktp_last_tool; ktp_status_text; ktp_updated_at_unix })
             | Some other ->
                 Error
                   (Printf.sprintf

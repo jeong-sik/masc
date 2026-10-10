@@ -500,15 +500,7 @@ let handle_keeper_turns_list state request reqd =
               | None -> `Null
               | Some (preview : Keeper_turn_preview.t) when preview.updated_at < turn.started_at -> `Null
               | Some (preview : Keeper_turn_preview.t) ->
-                `Assoc
-                  [ ("status_text", `String (Keeper_turn_preview.status_text preview))
-                  ; ("text_tail", `String preview.text_tail)
-                  ; ( "last_tool"
-                    , match preview.last_tool with
-                      | None -> `Null
-                      | Some tool_name -> `String tool_name )
-                  ; ("updated_at_unix", `Float preview.updated_at)
-                  ]
+                Keeper_turn_preview.to_json preview
             in
             `Assoc
               [ ("lane", `String (Keeper_owner.turn_lane_to_string turn.lane))

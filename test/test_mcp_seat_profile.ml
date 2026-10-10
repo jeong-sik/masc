@@ -26,9 +26,26 @@ let member name = function
   | `Assoc fields -> List.assoc_opt name fields
   | _ -> None
 
+(* The machine tools come from the attached worker. The room is one
+   workspace-wide conversation (Play_room) that the HTTP door also serves
+   without a machine, so the seat offers it whether or not one is attached. *)
+let room_tools = [ "masc_play_room" ]
+
 let seat_tools =
   [ "masc_dos_pass"; "masc_dos_press"; "masc_dos_screen"; "masc_dos_step"; "masc_dos_type"
   ; "masc_play_room" ]
+
+let tool_names response =
+  match Option.bind (member "result" response) (member "tools") with
+  | Some (`List tools) ->
+    List.filter_map
+      (fun tool ->
+        match member "name" tool with
+        | Some (`String name) -> Some name
+        | _ -> None)
+      tools
+    |> List.sort String.compare
+  | _ -> failf "no tools in %s" (Yojson.Safe.to_string response)
 
 let request ?(params = `Assoc []) ?(notification = false) method_ =
   Yojson.Safe.to_string
@@ -98,21 +115,20 @@ default = "local.sample"
               let handle ?(profile = Mcp_eio.Seat) ?auth_token body =
                 let auth_token = match auth_token with Some token -> Some token | None -> player in
                 Mcp_eio.handle_request ~clock ~sw ~profile ?auth_token state body in
-              let check_absent label =
-                let response = handle (request "tools/list") in
-                check bool label true
-                  (Option.bind (member "result" response) (member "tools") = Some (`List []));
+              let check_unattached label =
+                check (list string) label room_tools
+                  (tool_names (handle (request "tools/list")));
                 let call = handle (request "tools/call" ~params:(`Assoc [
                   "name", `String "masc_dos_screen"; "arguments", `Assoc []])) in
                 check bool "unavailable seat tool is refused before dispatch" true
                   (Option.bind (member "error" call) (member "code") =
                     Some (`Int (Masc.Mcp_error_code.to_wire_code Masc.Mcp_error_code.Method_not_found))) in
-              check_absent "seat has no tools before machine attachment";
+              check_unattached "before machine attachment the seat offers only the room";
               Machine_worker_fixture.with_dos ~clock ~sw ~base_path
                 (fun ~invoke:_ ~detach ->
                   f ~base_path handle;
                   detach ();
-                  check_absent "detachment withdraws seat tools")))))))
+                  check_unattached "detachment withdraws the machine tools and keeps the room")))))))
 
 let error_code response =
   match member "error" response with
@@ -123,18 +139,6 @@ let error_code response =
   | None -> None
 
 let method_not_found = Masc.Mcp_error_code.to_wire_code Masc.Mcp_error_code.Method_not_found
-
-let tool_names response =
-  match Option.bind (member "result" response) (member "tools") with
-  | Some (`List tools) ->
-    List.filter_map
-      (fun tool ->
-        match member "name" tool with
-        | Some (`String name) -> Some name
-        | _ -> None)
-      tools
-    |> List.sort String.compare
-  | _ -> failf "no tools in %s" (Yojson.Safe.to_string response)
 
 let test_the_seat_lists_only_the_play_tools () =
   with_state (fun ~base_path:_ handle ->

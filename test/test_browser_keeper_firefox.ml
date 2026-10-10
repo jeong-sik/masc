@@ -1263,6 +1263,26 @@ let a_last_starts_message_is_one_printable_line () =
     check string "a long message is cut and marked"
       (String.make Start_record.message_limit_bytes 'a' ^ "...") (said (String.make 3000 'a')))
 
+(* A record names the configuration it was a start for, also where the
+   profile is written in another form than it is configured. *)
+let a_last_start_names_its_own_configuration () =
+  with_workspace (fun base ->
+    let profile = "/Users/someone/문서/keeper profile" in
+    (match
+       Start_record.write ~base_path:base
+         { Start_record.at = 1_791_000_060.; port = 9222; profile
+         ; outcome = Start_record.Not_attached (Starter.Start_failed "x") }
+     with
+     | Ok () -> ()
+     | Error detail -> fail detail);
+    match Start_record.read ~base_path:base with
+    | Start_record.Recorded entry ->
+        check bool "its own port and profile" true (Start_record.for_configuration ~port:9222 ~profile entry);
+        check bool "another port" false (Start_record.for_configuration ~port:9333 ~profile entry);
+        check bool "another profile" false
+          (Start_record.for_configuration ~port:9222 ~profile:"/Users/someone/문서/other" entry)
+    | Start_record.Absent | Start_record.Unreadable _ -> fail "not read back")
+
 (* Each start that ended is written down; a request where none is asked for
    starts nothing and writes nothing. *)
 let each_start_that_ended_is_recorded () =
@@ -1634,7 +1654,8 @@ let () =
     ; ( "the last start"
       , [ test_case "reads back as written" `Quick a_last_start_reads_back_as_written
         ; test_case "another writer's record" `Quick a_last_start_from_another_writer_is_not_read
-        ; test_case "its message is one printable line" `Quick a_last_starts_message_is_one_printable_line ] )
+        ; test_case "its message is one printable line" `Quick a_last_starts_message_is_one_printable_line
+        ; test_case "it names its own configuration" `Quick a_last_start_names_its_own_configuration ] )
     ; ( "a session left in Firefox"
       , [ test_case "read from the last host's end" `Quick a_held_session_is_read_from_the_last_hosts_end
         ; test_case "only the one MASC started before that end" `Quick

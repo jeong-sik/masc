@@ -455,9 +455,25 @@ let where_masc_starts_the_firefox_the_status_says_so () =
      host is newer than a start before it started. *)
   unmentioned "a start before a dead host attached" (failed 1_791_000_001.) (Record.Died host_entry);
   mentioned "a start after a dead host attached" (failed 1_791_000_003.) (Record.Died host_entry);
-  unmentioned "a start before a running host started" (failed 1_790_999_999.) (Record.Running host_entry);
-  mentioned "a start after a running host started" (failed 1_791_000_100.) (Record.Running host_entry);
-  has (said ~last_start:(Start_record.Unreadable "torn by this test") Record.Never_started) [ "torn by this test" ]
+  (* A host that connected after a start gave up on it is newer than that
+     start. *)
+  unmentioned "a start before a running host attached" (failed 1_791_000_001.) (Record.Running host_entry);
+  mentioned "a start after a running host attached" (failed 1_791_000_003.) (Record.Running host_entry);
+  mentioned "a start before a host that is still connecting, after it started" (failed 1_791_000_001.)
+    (Record.Running { host_entry with attached_at = None });
+  has (said ~last_start:(Start_record.Unreadable "torn by this test") Record.Never_started) [ "torn by this test" ];
+  (* The record writes a profile as one printable line, and a start for a
+     profile outside printable ASCII is still that profile's. *)
+  let wide = "/Users/someone/문서/keeper" in
+  let wide_start =
+    Start_record.Recorded
+      { at = 1_791_000_100.; port; profile = Masc.Printable_line.write ~limit:Start_record.message_limit_bytes wide
+      ; outcome = Start_record.Not_attached (Starter.Start_failed why) } in
+  let with_wide last_start =
+    Status.message (observation ~keeper:(Status.Masc_starts { port; profile = wide; last_start }) ended) in
+  check bool "a start for a profile outside printable ASCII is said" true
+    (String_util.contains_substring (with_wide wide_start) why
+     && not (String.equal (with_wide wide_start) (with_wide Start_record.Absent)))
 
 let where_masc_does_not_start_the_firefox_the_status_says_why () =
   let keeper configuration = Status.keeper_of_configuration ~base_path:"/workspace" configuration in

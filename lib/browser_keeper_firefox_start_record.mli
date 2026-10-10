@@ -11,7 +11,7 @@ type outcome =
 type entry =
   { at : float  (** When the start ended. *)
   ; port : int  (** The [\[browser.live.bidi\]] port it started for. *)
-  ; profile : string  (** And the profile, as configured. *)
+  ; profile : string  (** And the profile, as {!write} writes it. *)
   ; outcome : outcome
   }
 
@@ -25,6 +25,12 @@ val message_limit_bytes : int
 (** Writes [entry], its message and profile each as one printable line. [Error] says why it
     was not, or that it was and its directory entry was not flushed. *)
 val write : base_path:string -> entry -> (unit, string) result
+
+(** Whether [entry] was a start for [port] and [profile] as configured. The
+    record holds the profile as {!write} writes it, so [profile] is compared
+    in that form: a path with bytes outside printable ASCII still names its
+    own starts. *)
+val for_configuration : port:int -> profile:string -> entry -> bool
 
 type read = Absent | Recorded of entry | Unreadable of string
 

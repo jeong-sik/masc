@@ -404,9 +404,9 @@ let last_start_said ~base_path ~port ~profile ~since = function
       Printf.sprintf " The record of MASC's last start, %s, cannot be read (%s)."
         (Start_record.record_path ~base_path) detail
   | Start_record.Recorded { outcome = Start_record.Attached _; _ } -> ""
-  | Start_record.Recorded { at = ended; port = started_port; profile = started_profile; outcome = Start_record.Not_attached _ }
+  | Start_record.Recorded ({ at = ended; outcome = Start_record.Not_attached _; _ } as entry)
     when (match since with Some after -> ended < after | None -> false)
-         || started_port <> port || not (String.equal started_profile profile) -> ""
+         || not (Start_record.for_configuration ~port ~profile entry) -> ""
   | Start_record.Recorded { at = ended; outcome = Start_record.Not_attached not_attached; _ } ->
       let sentence why = if String.ends_with ~suffix:"." why then why else why ^ "." in
       (match not_attached with
@@ -458,8 +458,8 @@ let next_host_by_masc t (entry : Record.entry) (ending : Record.ending) ~port ~p
 
 (* The paragraph for a workspace where MASC starts Firefox and the host:
    the operator's steps give way to what MASC's next start does. A last
-   start is said beside what the record says since: since a host ended, a
-   dead host attached or started, a running host started. *)
+   start is said beside what the record says since: since a host ended, or
+   a dead or running host attached (or started, when it never attached). *)
 let by_masc t record ~port ~profile ~last_start =
   let last ~since = last_start_said ~base_path:t.Launcher.base_path ~port ~profile ~since last_start in
   let starts = masc_starts t ~port ~profile in
@@ -492,7 +492,8 @@ let by_masc t record ~port ~profile ~last_start =
          load beside it and writes a new one in its place. It does not start while the record \
          cannot be read at all, or a new one cannot be written. %s.%s%s%s"
         detail starts (last ~since:None) (listed_beside t) (steps t)
-  | Record.Running entry -> by_operator t record ^ last ~since:(Some entry.started_at)
+  | Record.Running entry ->
+      by_operator t record ^ last ~since:(Some (Option.value entry.attached_at ~default:entry.started_at))
   | Record.Record_missing_but_locked | Record.Unreadable { held = Some true | None; _ } ->
       by_operator t record ^ last ~since:None
 

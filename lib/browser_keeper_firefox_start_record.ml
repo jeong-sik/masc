@@ -149,6 +149,10 @@ let printable_outcome = function
        | Starter.Start_failed message -> Starter.Start_failed (line message)
        | Starter.Not_listed_in_time message -> Starter.Not_listed_in_time (line message))
 
+let for_configuration ~port ~profile (entry : entry) =
+  entry.port = port
+  && String.equal entry.profile (Printable_line.write ~limit:message_limit_bytes profile)
+
 let write ~base_path { at; port; profile; outcome } =
   match Fs_compat.mkdir_p (directory base_path) with
   | exception Sys_error detail -> Error detail

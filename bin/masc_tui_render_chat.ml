@@ -3011,12 +3011,14 @@ let render_keeper_message (state : state) =
     in
     (* Classify the same selected pool that history suppression reads. *)
     let other_live_blocks =
-      Masc_tui_types.selected_source_logs_for_keeper state keeper_name
-      |> List.filter (fun log ->
-          not (Masc_tui_types.turn_log_holds_the_turn log)
-          && (not (List.exists (( == ) log) state.msg_settled_logs)
-              || List.exists (fun (entry : Masc_tui_types.inflight) -> entry.log == log)
-                   state.msg_inflight))
+      Masc_tui_types.selected_source_logs_with_origin state keeper_name
+      |> List.filter_map (fun (log, settled) ->
+          if not (Masc_tui_types.turn_log_holds_the_turn log)
+             && (not settled
+                 || List.exists (fun (entry : Masc_tui_types.inflight) -> entry.log == log)
+                      state.msg_inflight)
+          then Some log
+          else None)
       |> List.map (held_projection ~committed:false)
       |> List.filter (fun block -> block.lb_entries <> [])
     in

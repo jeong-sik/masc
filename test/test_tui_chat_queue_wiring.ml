@@ -3575,6 +3575,35 @@ let test_held_turn_blocks_merge_among_committed_rows_by_clock () =
     before (user "q2") (said "op-late"))
 ;;
 
+(* The settled subset of the selection is the selected logs the session holds
+   as settled, including a log that is also an in-flight entry's log. *)
+let test_settled_logs_are_the_selected_logs_the_session_holds_settled () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  let settled_a = journal_log ~request_id:"op-a" ~started_at:1. () in
+  let settled_b = journal_log ~request_id:"op-b" ~started_at:2. () in
+  let cut_c = journal_log ~request_id:"op-c" ~started_at:3. ~finished:false () in
+  let streaming =
+    inflight_with_log ~keeper_name:"alpha" ~started_at:4. [ Live.Run_started ]
+  in
+  let shared = { streaming with log = settled_a } in
+  List.iter
+    (fun (label, settled, inflight) ->
+      state.msg_settled_logs <- settled;
+      state.msg_inflight <- inflight;
+      let selected = Tui_types.selected_source_logs_for_keeper state "alpha" in
+      let expected = List.filter (fun log -> List.memq log state.msg_settled_logs) selected in
+      let got = Tui_types.settled_logs_for_keeper state "alpha" in
+      check int (label ^ ": same count") (List.length expected) (List.length got);
+      check bool (label ^ ": same logs in the same order") true
+        (List.for_all2 ( == ) expected got))
+    [ "settled only", [ settled_a; settled_b; cut_c ], []
+    ; "one also streaming", [ settled_a; settled_b ], [ shared ]
+    ; "streaming only", [], [ streaming ]
+    ; "cut log beside its whole", [ cut_c; settled_b ], [ shared ] ]
+;;
+
 (* A log built from a journal read stands at the journal head's own time,
    not at the moment the read was asked for. *)
 let test_a_journal_built_log_starts_at_the_journal_head () =
@@ -5043,6 +5072,8 @@ let () =
             test_indexed_timeline_context_matches_the_full_list_functions
         ; test_case "held turn blocks merge among committed rows by clock" `Quick
             test_held_turn_blocks_merge_among_committed_rows_by_clock
+        ; test_case "settled logs are the selected logs held settled" `Quick
+            test_settled_logs_are_the_selected_logs_the_session_holds_settled
         ; test_case "a journal-built log starts at the journal head" `Quick
             test_a_journal_built_log_starts_at_the_journal_head
         ; test_case "pending input enters transcript on execution evidence" `Quick

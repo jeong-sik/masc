@@ -8224,25 +8224,38 @@ let turn_log_execution_source_key log =
    [turn_log_preferred] says it holds more of the turn. Linear in the number
    of logs: this runs for every drawn frame, so the pairwise search it replaces
    grew with the square of the transcript. *)
-let selected_source_logs_for_keeper state keeper_name =
-  let slots : (execution_source_key, turn_log ref) Hashtbl.t = Hashtbl.create 16 in
+let selected_source_logs_with_origin state keeper_name =
+  let slots : (execution_source_key, (turn_log * bool) ref) Hashtbl.t =
+    Hashtbl.create 16
+  in
+  (* Whether a log is one the session holds as settled, decided once per
+     candidate: settled candidates are in that list by construction, and the
+     few streaming ones are looked up in it. *)
+  let from_settled = List.map (fun log -> log, true) state.msg_settled_logs in
+  let streaming =
+    List.map (fun (entry : inflight) -> entry.log) (List.rev state.msg_inflight)
+    @ Option.to_list state.msg_live
+    |> List.map (fun log -> log, List.memq log state.msg_settled_logs)
+  in
   let first_seen_newest_first =
-    (state.msg_settled_logs
-     @ List.map (fun (entry : inflight) -> entry.log) (List.rev state.msg_inflight)
-     @ Option.to_list state.msg_live)
-    |> List.filter (fun log -> String.equal (turn_log_keeper_name log) keeper_name)
-    |> List.fold_left (fun order log ->
+    from_settled @ streaming
+    |> List.filter (fun (log, _) -> String.equal (turn_log_keeper_name log) keeper_name)
+    |> List.fold_left (fun order ((log, _) as candidate) ->
       let key = turn_log_execution_source_key log in
       match Hashtbl.find_opt slots key with
       | None ->
-        let slot = ref log in
+        let slot = ref candidate in
         Hashtbl.add slots key slot;
         slot :: order
       | Some slot ->
-        if turn_log_preferred ~candidate:log ~held:!slot then slot := log;
+        if turn_log_preferred ~candidate:log ~held:(fst !slot) then slot := candidate;
         order) []
   in
   List.rev_map (fun slot -> !slot) first_seen_newest_first
+;;
+
+let selected_source_logs_for_keeper state keeper_name =
+  List.map fst (selected_source_logs_with_origin state keeper_name)
 ;;
 
 (* Batch watchers keep their original request identities. All inputs bound to
@@ -8268,8 +8281,8 @@ let chat_execution_member_ids state ~keeper_name ~execution_id =
 (* Existing consumers ask for held sources, but selection must also account
    for every subscription that the renderer can draw. *)
 let settled_logs_for_keeper state keeper_name =
-  selected_source_logs_for_keeper state keeper_name
-  |> List.filter (fun log -> List.exists (( == ) log) state.msg_settled_logs)
+  selected_source_logs_with_origin state keeper_name
+  |> List.filter_map (fun (log, settled) -> if settled then Some log else None)
 ;;
 
 (* The sources a history load for [keeper_name] reads no journal for: every

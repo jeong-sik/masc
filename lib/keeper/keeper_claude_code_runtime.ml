@@ -154,7 +154,7 @@ let api_usage_of_turn_usage (usage : Runtime_claude_code.turn_usage) =
 (* Always installed so usage-window and turn usage reports are recorded. A
    turn nobody streams, traces or observes gets only those; its other events
    are ignored as before. *)
-let claude_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~turn_count
+let claude_stream_callback ?on_native_tool_completion ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~turn_count
     ~on_native_action ~on_usage_report ~position ~on_compacted on_event =
   (* The result frame's uuid is the response identity the completion hook
      also writes for a Claude Code turn; the session is the conversation. *)
@@ -173,8 +173,8 @@ let claude_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~t
            })
       on_usage_report
   in
-  match on_event, raw_trace_run, on_native_action, receipts with
-  | None, None, None, None ->
+  match on_event, raw_trace_run, on_native_action, receipts, on_native_tool_completion with
+  | None, None, None, None, None ->
     Some
       (function
         | Runtime_claude_code.Usage_windows_reported report ->
@@ -275,7 +275,7 @@ let claude_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~t
                ; tool_id = Runtime_native_tools.call_id observation
                ; tool_name = observation.tool_name
                })
-        | Runtime_claude_code.Native_tool_finished observation ->
+        | Runtime_claude_code.Native_tool_finished {observation; completion} ->
           Host.record_raw_native_tool
             ~keeper_name
             ~raw_trace_run
@@ -285,6 +285,9 @@ let claude_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~t
             (fun identity ->
                Option.iter
                  (fun index ->
+                    Option.iter (fun finish -> finish ~block_index:index
+                      ~tool_call_id:(Runtime_native_tools.call_id observation) completion)
+                      on_native_tool_completion;
                     Hashtbl.remove native_tool_indexes identity;
                     emit (Agent_core.Types.ContentBlockStop { index }))
                  (Hashtbl.find_opt native_tool_indexes identity))
@@ -583,7 +586,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event ~effect_disposition
     ~context_overflow_retry_safe
-    ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
+    ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_completion
     ~on_usage_report ~on_tool_execution ~(config : Runtime_execution.claude_code) =
   context_overflow_retry_safe := false;
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
@@ -1169,7 +1172,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     in
     let turn_result =
       let on_stream_event =
-        claude_stream_callback ?receipts
+        claude_stream_callback ?receipts ?on_native_tool_completion
           ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
           ~on_usage_report
           ~position:
@@ -1431,6 +1434,7 @@ let run ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~
     ~turn_start
     ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
+    ?on_native_tool_completion
     ?on_native_action
     ?on_usage_report
     ?on_tool_execution
@@ -1537,7 +1541,7 @@ let run ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~
             ~on_event
             ~effect_disposition
             ~context_overflow_retry_safe
-        ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
+        ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_completion
             ~on_usage_report
             ~on_tool_execution
             ~config)

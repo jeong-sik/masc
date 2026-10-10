@@ -50,6 +50,27 @@ type exact_action = action_identity * string
     MCP wrapper steps are observed but their canonical MASC invocation is the
     action authority; the admitting projection stays internal to
     [observe_exact_action]. *)
+
+type completion_outcome =
+  | End_observed
+  | Completion_reported
+  | Error_reported
+  | Decline_reported
+  | Result_received of { is_error : bool option }
+  | Unrecognized_status of string
+(** Provider facts, never MASC execution receipts. [Completion_reported] does
+    not establish exit zero. A Claude result may omit [is_error]; omission is
+    retained rather than manufactured into an explicit success report. *)
+
+type completion = { outcome : completion_outcome; exit_code : int option }
+type finished = { observation : observation; completion : completion }
+
+val end_observed : completion
+val completion_to_json : completion -> Yojson.Safe.t
+val completion_of_json : Yojson.Safe.t -> (completion, string) result
+(** Strict closed-object decoder: duplicate fields and fields outside the
+    selected outcome variant are errors, including contradictory reports. *)
+val redact_completion : (string -> string) -> completion -> completion
 val observe_exact_action :
   official_turn:int ->
   observe:(official_turn:int -> identity:action_identity -> tool_name:string -> unit) ->

@@ -1027,13 +1027,33 @@ let decode_custom_event ~request state fields =
             || String.equal name "KEEPER_NATIVE_TOOL_END" then
       let native_surface = name ^ ".value" in
       let* native_fields = exact_object_fields ~surface:native_surface
-          ~allowed:["toolStreamScope"; "toolCallBlockIndex"; "providerMessageId";
-                    "toolCallId"; "toolCallName"] value
+          ~allowed:(["toolStreamScope"; "toolCallBlockIndex"; "providerMessageId";
+                    "toolCallId"; "toolCallName"]
+                    @ (if String.equal name "KEEPER_NATIVE_TOOL_END" then ["completion"] else [])) value
           |> Result.map_error (fun detail -> Malformed_event detail) in
       let* _ = decode_tool_occurrence ~surface:native_surface native_fields
           |> Result.map_error (fun detail -> Malformed_event detail) in
       let* _ = optional_string ~surface:native_surface "toolCallName" native_fields
           |> Result.map_error (fun detail -> Malformed_event detail) in
+      (* The wire contract permits an END without a completion: an older
+         sender closes the occurrence without terminal metadata, which reads
+         as end_observed — the same default the live decoder applies. A
+         present completion must be exactly one and well-formed; START never
+         carries one and the allowed-field list already rejects a START
+         that has it. *)
+      let* () =
+        if String.equal name "KEEPER_NATIVE_TOOL_END" then
+          match List.filter (fun (key, _) -> String.equal key "completion") native_fields with
+          | [] | [_, _] -> Ok ()
+          | _ -> Error (Malformed_event (native_surface ^ ": completion must be unique"))
+        else Ok () in
+      let* () = match List.assoc_opt "completion" native_fields with
+        | None -> Ok ()
+        | Some json ->
+            Runtime_native_tools.completion_of_json json
+            |> Result.map (fun _ -> ())
+            |> Result.map_error (fun detail -> Malformed_event (native_surface ^ ": " ^ detail))
+      in
       Ok state
     else if String.equal name "KEEPER_REPLY_DETAILS" then
       match state.reply_details with

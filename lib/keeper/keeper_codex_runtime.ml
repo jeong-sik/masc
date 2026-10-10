@@ -305,7 +305,7 @@ let api_usage_of_token_usage (usage : Runtime_codex_app_server.token_usage)
 (* Always installed so usage-window reports and the thread's usage counts are
    recorded. A turn nobody streams, traces or observes gets only those; its
    other events are ignored as before. *)
-let codex_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
+let codex_stream_callback ?on_native_tool_completion ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
     ~on_usage_report ~position on_event =
   (* The thread's running count, reported under the app-server turn id (the
      identity the completion hook also writes for a Codex turn) and the
@@ -334,8 +334,8 @@ let codex_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~tu
            })
       on_usage_report
   in
-  match on_event, raw_trace_run, on_native_action, receipts with
-  | None, None, None, None ->
+  match on_event, raw_trace_run, on_native_action, receipts, on_native_tool_completion with
+  | None, None, None, None, None ->
     Some
       (function
         | Runtime_codex_app_server.Usage_windows_reported report ->
@@ -434,7 +434,7 @@ let codex_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~tu
                ; tool_id = Runtime_native_tools.call_id observation
                ; tool_name = observation.tool_name
                })
-        | Runtime_codex_app_server.Native_tool_finished observation ->
+        | Runtime_codex_app_server.Native_tool_finished {observation; completion} ->
           Host.record_raw_native_tool
             ~keeper_name
             ~raw_trace_run
@@ -444,6 +444,9 @@ let codex_stream_callback ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~tu
             (fun identity ->
                Option.iter
                  (fun index ->
+                    Option.iter (fun finish -> finish ~block_index:index
+                      ~tool_call_id:(Runtime_native_tools.call_id observation) completion)
+                      on_native_tool_completion;
                     Hashtbl.remove native_tool_indexes identity;
                     emit (Agent_core.Types.ContentBlockStop { index }))
                  (Hashtbl.find_opt native_tool_indexes identity))
@@ -783,7 +786,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted ~observe_successful_tool_completion ~observe_transport_uncertain
-    ~on_tool_execution ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
+    ~on_tool_execution ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_completion
     ~on_usage_report ~(config : Runtime_execution.codex_app_server) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -1328,7 +1331,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     let turn_result =
       try
         let observe_stream =
-          codex_stream_callback ?receipts
+          codex_stream_callback ?receipts ?on_native_tool_completion
           ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
           ~on_usage_report
           ~position:
@@ -1673,6 +1676,7 @@ let run ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~
     ?on_official_client_tool_boundary
     ?on_tool_execution
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
+    ?on_native_tool_completion
     ?on_native_action
     ?on_usage_report
     ~event_bus ~raw_trace ~on_event ~(config : Runtime_execution.codex_app_server) () =
@@ -1789,7 +1793,7 @@ let run ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~
           ~context_injector
           ~context
           ~terminal_effect_state
-        ~on_tool_execution ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action
+        ~on_tool_execution ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_completion
           ~on_usage_report
           ~event_bus
           ~raw_trace

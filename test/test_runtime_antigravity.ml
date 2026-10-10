@@ -620,13 +620,13 @@ let test_stream_events_preserve_exact_native_tool_steps () =
                ; origin = Runtime_native_tools.Built_in
                }
            ; Native_tool_finished
-               { identity =
+               { observation = { identity =
                    Some
                      (Runtime_native_tools.Provider_step
                         { conversation_id = "conversation-1"; step_index = 7 })
                ; tool_name = Some "run_command"
                ; origin = Runtime_native_tools.Built_in
-               }
+               }; completion = _ }
            ; Text_delta { step_index = None; text = "MASC_ANTIGRAVITY_OK\n" }
            ; Usage_reported
                { model = "gemini-fixture"
@@ -652,16 +652,18 @@ let test_repeated_active_native_step_keeps_one_chat_occurrence () =
         match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
         | Error error -> fail (Runtime_antigravity.error_to_string error)
         | Ok _ ->
-            let stream = Keeper_antigravity_runtime.For_testing.project_stream (List.rev !events) in
-            let module Bridge = Keeper_chat_agent_core_stream_bridge in
-            let _, chat = List.fold_left (fun (state, all) event ->
-              let translated = Bridge.translate ~redact_text:Fun.id
-                  ~base_dir:(Filename.dirname path) ~stream_scope:0 state event in
-              translated.bridge_state, all @ translated.chat_events)
-              (Bridge.empty_state (), []) stream in
+            let fixture = Native_tool_outcome_fixture.create () in
+            ignore (Keeper_antigravity_runtime.For_testing.project_stream
+              ~on_event:(Native_tool_outcome_fixture.on_event fixture)
+              ~on_native_tool_completion:(Native_tool_outcome_fixture.on_completion fixture)
+              (List.rev !events));
+            let outcome = if terminal_state = "DONE" then Runtime_native_tools.Completion_reported
+              else Runtime_native_tools.Error_reported in
+            Native_tool_outcome_fixture.check fixture ~expected:[{outcome; exit_code=None}];
+            let chat = Native_tool_outcome_fixture.events fixture in
             let native = List.filter_map (function
               | Keeper_chat_events.Native_tool_start tool -> Some (true, tool.occurrence.block_index)
-              | Native_tool_end tool -> Some (false, tool.occurrence.block_index)
+              | Native_tool_end (tool, _) -> Some (false, tool.occurrence.block_index)
               | _ -> None) chat in
             check (list (pair bool int)) "repeated active frames open one row and terminal step closes it"
               [true, 1; false, 1] native;

@@ -276,9 +276,10 @@ let keeper_chat_event_to_json event =
       ([ "occurrence", occurrence_to_json tool.occurrence ]
        @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool.tool_call_id)
        @ json_opt "tool_call_name" (Option.map (fun value -> `String value) tool.tool_call_name))
-  | Native_tool_end tool ->
+  | Native_tool_end (tool, completion) ->
     type_tag "native_tool_end"
-      ([ "occurrence", occurrence_to_json tool.occurrence ]
+      ([ "occurrence", occurrence_to_json tool.occurrence;
+         "completion", Runtime_native_tools.completion_to_json completion ]
        @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool.tool_call_id)
        @ json_opt "tool_call_name" (Option.map (fun value -> `String value) tool.tool_call_name))
   | Tool_approval_requested { tool_call_id; tool_call_name; args; question; because } ->
@@ -507,7 +508,22 @@ let keeper_chat_event_of_json json =
         ; tool_call_name = json |> member "tool_call_name" |> to_string_option
         }
       in
-      Ok (if String.equal tag "native_tool_start" then Native_tool_start tool else Native_tool_end tool)
+      if String.equal tag "native_tool_start" then Ok (Native_tool_start tool)
+      else
+        (* The production writer still emits ends without a completion
+           (11,865 rows in the live keeper_turn_events), so an omitted one
+           reads as end_observed the way the wire does; a duplicate or
+           malformed present completion is unreadable. *)
+        let* completion =
+          match json with
+          | `Assoc fields ->
+              (match List.filter (fun (key, _) -> String.equal key "completion") fields with
+               | [] -> Ok Runtime_native_tools.end_observed
+               | [_, json] -> Runtime_native_tools.completion_of_json json
+               | _ -> Error "native_tool_end has duplicate completion members")
+          | _ -> Ok Runtime_native_tools.end_observed
+        in
+        Ok (Native_tool_end (tool, completion))
     | "tool_approval_requested" ->
       Ok
         (Tool_approval_requested

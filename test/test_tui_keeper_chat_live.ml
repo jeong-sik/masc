@@ -39,7 +39,7 @@ let delta_to_string : Live.delta -> string = function
   | Live.Native_tool_started { occurrence; tool_name } ->
       Printf.sprintf "native_tool_started(%d/%d,%s)" occurrence.stream_scope
         occurrence.block_index (Option.value ~default:"unnamed" tool_name)
-  | Live.Native_tool_ended { occurrence } ->
+  | Live.Native_tool_ended { occurrence; _ } ->
       Printf.sprintf "native_tool_ended(%d/%d)" occurrence.stream_scope occurrence.block_index
   | Live.Tool_started { occurrence; tool_name } ->
       Printf.sprintf "tool_started(%d/%d,%s)" occurrence.stream_scope
@@ -401,6 +401,13 @@ let test_reply_details_is_read_whole () =
         }
     ]
     (feed_whole (sse (custom "KEEPER_REPLY_DETAILS" (reply_details_value ()))))
+
+let test_native_tool_end_without_completion_is_reported () =
+  check bool "a native end without completion is undecodable" true
+    (match feed_whole (sse (custom "KEEPER_NATIVE_TOOL_END"
+       (`Assoc ["toolStreamScope", `Int 0; "toolCallBlockIndex", `Int 1]))) with
+     | [ Live.Undecodable _ ] -> true
+     | _ -> false)
 
 let test_reply_details_short_of_a_field_is_reported () =
   let undecodable body =
@@ -881,6 +888,8 @@ let () =
         ; test_case "reply details is read whole" `Quick test_reply_details_is_read_whole
         ; test_case "reply details short of a field is reported" `Quick
             test_reply_details_short_of_a_field_is_reported
+        ; test_case "native end without completion is reported" `Quick
+            test_native_tool_end_without_completion_is_reported
         ; test_case "unknown custom event is reported" `Quick
             test_unknown_custom_event_is_reported
         ] )

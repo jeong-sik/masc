@@ -345,7 +345,7 @@ let content_of_wire_message raw =
 let fixture_trace_with_no_completed_turn = "fixture-trace-no-completed-turn"
 
 let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = []) ?event_bus
-    ?event_capture ?on_event ?agent_core_checkpoint ?runtime_manifest_context
+    ?event_capture ?on_native_tool_completion ?on_event ?agent_core_checkpoint ?runtime_manifest_context
     ?runtime_manifest_append ?raw_trace ?on_official_client_native_action
     ?on_official_client_usage_report
     ?(system_prompt = "pre-dispatch fixture system prompt")
@@ -390,7 +390,7 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
                            ~initial_messages
                            ?context
                            ?event_bus
-                           ?on_event
+                           ?on_native_tool_completion ?on_event
                            ?agent_core_checkpoint
                            ?runtime_manifest_context
                            ?runtime_manifest_append
@@ -1550,6 +1550,34 @@ let test_keeper_preserves_claude_thinking_before_tools () =
                 MessageDelta _; MessageStop] -> ()
              | _ -> fail "thinking, native tool, and answer lost their order or separate indices");
             check string "thinking does not enter final response" "Answer" (keeper_response_text turn)))
+;;
+
+let test_native_completion_reaches_tui () =
+  List.iter (fun is_error ->
+    let base_path = temp_workspace () in
+    let fixture = Native_tool_outcome_fixture.create () in
+    let native_result = `Assoc ["type", `String "user";
+      "session_id", `String "__SESSION__"; "uuid", `String "native-result";
+      "message", `Assoc ["role", `String "user"; "content", `List [
+        `Assoc (["type", `String "tool_result"; "tool_use_id", `String "native-call";
+          "content", `String "provider observation"]
+          @ Option.to_list (Option.map (fun b -> "is_error", `Bool b) is_error))]]]
+      |> Yojson.Safe.to_string in
+    Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+      with_fixture
+        [Emit (response_native_tool ~turn_id:"native-turn" ~message_id:"native-message"
+          ~call_id:"native-call" ~tool_name:"Read");
+         Emit native_result;
+         Emit (response_text ~turn_id:"native-turn" ~message_id:"answer-message" "Answer");
+         Emit (result_text ~turn_id:"native-turn" "Answer")]
+        (fun cli_path ->
+          match run_keeper_turn ~base_path ~cli_path ~goal:"OBSERVE_NATIVE"
+            ~on_event:(Native_tool_outcome_fixture.on_event fixture)
+            ~on_native_tool_completion:(Native_tool_outcome_fixture.on_completion fixture) () with
+          | Error error -> fail (Agent_core.Error.to_string error)
+          | Ok _ -> Native_tool_outcome_fixture.check fixture
+              ~expected:[{Runtime_native_tools.outcome=Result_received {is_error}; exit_code=None}])))
+    [None; Some false; Some true]
 ;;
 
 let test_keeper_streams_two_claude_responses_apart () =
@@ -3966,6 +3994,7 @@ let () =
             test_keeper_streams_two_claude_responses_apart
         ; test_case "thinking stays ahead of tools and outside answer text" `Quick
             test_keeper_preserves_claude_thinking_before_tools
+        ; test_case "native completion through adapter, journal, SSE and TUI" `Quick test_native_completion_reaches_tui
         ; test_case
             "no break across a MASC tool row"
             `Quick

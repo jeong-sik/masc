@@ -78,7 +78,15 @@ type extraction_error =
       }
   | No_transport_declared
   | Domain_output_invalid of string
-  | Absorb_judgment_failed of { reason : string; selected_slot : string; walk_shows_size : bool }
+  | Absorb_judgment_failed of
+      { reason : string
+      ; selected_slot : string
+      ; failure_kind : Keeper_librarian_absorb_gate.failure_kind option
+            (** The gate's own kind. [Input_capacity_exceeded] is its refusal
+                before any request because the pass's source observations and
+                Memory do not fit one; a smaller admission range carries fewer
+                observations. *)
+      }
   | Memory_snapshot_write_failed of
       { detail : string
       ; selected_slot : string
@@ -163,7 +171,7 @@ let rec extraction_error_to_string = function
     "lane declares no API or official-client slots"
   | Domain_output_invalid detail ->
     "domain output invalid: " ^ detail
-  | Absorb_judgment_failed { reason; selected_slot = _; walk_shows_size = _ } ->
+  | Absorb_judgment_failed { reason; selected_slot = _; failure_kind = _ } ->
     "absorb judgment failed; current memory unchanged: " ^ reason
   | Memory_snapshot_write_failed { detail; selected_slot = _ } ->
     "current snapshot write failed: " ^ detail
@@ -718,6 +726,15 @@ let rec extraction_has_invalid_output = function
   | Absorb_judgment_failed _ -> false
 ;;
 
+(* The gate refuses before any request when the pass's source observations
+   and Memory do not fit one. Supporting admission candidates are among those
+   observations, so a smaller admission range is that batch's exit. Its other
+   failures happened to a sent request or never measured the input. *)
+let absorb_failure_input_capacity = function
+  | Some Keeper_librarian_absorb_gate.Input_capacity_exceeded -> Input_capacity_refused
+  | Some Keeper_librarian_absorb_gate.Evaluation_failed | None -> No_input_capacity_refusal
+;;
+
 let rec extraction_shows_size = function
   | Exact_execution_failed error -> error.walk_shows_size
   | Domain_output_invalid _ -> false
@@ -737,7 +754,8 @@ let rec extraction_shows_size = function
   | Cli_prompt_unavailable { prior_error = None } -> false
   | Prompt_render_failed _ | Exact_setup_failed _
   | No_transport_declared | Memory_snapshot_write_failed _ -> false
-  | Absorb_judgment_failed { walk_shows_size; _ } -> walk_shows_size
+  | Absorb_judgment_failed { failure_kind; _ } ->
+    absorb_failure_input_capacity failure_kind = Input_capacity_refused
 ;;
 
 let cli_refuses_input_capacity failure =
@@ -784,8 +802,9 @@ let rec extraction_observed_input_capacity = function
     else (match prior_error with Some error -> extraction_observed_input_capacity error
           | None -> No_input_capacity_refusal)
   | Cli_prompt_unavailable {prior_error=Some error} -> extraction_observed_input_capacity error
+  | Absorb_judgment_failed {failure_kind; _} -> absorb_failure_input_capacity failure_kind
   | Cli_prompt_unavailable {prior_error=None} | Prompt_render_failed _ | Exact_setup_failed _
-  | No_transport_declared | Domain_output_invalid _ | Absorb_judgment_failed _
+  | No_transport_declared | Domain_output_invalid _
   | Memory_snapshot_write_failed _ -> No_input_capacity_refusal
 ;;
 
@@ -1919,7 +1938,7 @@ let run_best_effort
                    absorb_gate
                with
                | Some reason -> Error (Absorb_judgment_failed { reason; selected_slot;
-                   walk_shows_size = Keeper_librarian_absorb_gate.failure_shows_size absorb_gate })
+                   failure_kind = Keeper_librarian_absorb_gate.failure_kind absorb_gate })
                | None -> Ok ()
              in
              let applied_absorbed = Keeper_librarian_absorb_gate.absorbed_of_run absorb_gate in

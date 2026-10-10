@@ -21,7 +21,10 @@ let judgment_of_not_committed (reason : Keeper_librarian_runtime.not_committed) 
 (* One pass can report [not_committed] more than once: the runtime reports the
    failure it saw and a later raise in the same pass reports again with no
    cause. A confirmed capacity refusal is evidence about the input, not about
-   the last report, so a later report without that evidence cannot retract it. *)
+   the last report, so a later report without that evidence cannot retract it.
+   That includes a later report of a quota or outage: the batch still splits,
+   and if that failure persists its first part defers the pass, so the cost is
+   one or two more requests, not a loop. *)
 let keep_strongest_judgment current reason =
   match current, judgment_of_not_committed reason with
   | Input_size_refused _, Deferred _ -> current

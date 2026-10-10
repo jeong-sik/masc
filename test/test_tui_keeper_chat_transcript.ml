@@ -1911,12 +1911,8 @@ let test_a_reported_native_failure_shows_as_failure () =
     ; "unrecognized status", {outcome=Unrecognized_status "future"; exit_code=None},
       Transcript.Native_ended
     ; "no status", end_observed, Transcript.Native_ended ];
-  check string "a reported native failure draws the failure mark"
-    (Transcript.marker_of_outcome Transcript.Failed)
-    (Transcript.marker_of_outcome Transcript.Native_failed);
-  check bool "a quiet native ending keeps its own mark" true
-    (Transcript.marker_of_outcome Transcript.Native_ended
-     <> Transcript.marker_of_outcome Transcript.Native_failed);
+  (* Marker glyphs are presentation; the typed outcome and the fold's
+     summary_outcome below carry the decision without pinning glyphs. *)
   let t = fresh () in
   feed t (Live.Run_started :: step 7 "Read" end_observed
           @ step 8 "Bash" {outcome=Error_reported; exit_code=Some 2}

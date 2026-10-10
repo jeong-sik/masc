@@ -567,8 +567,8 @@ let capability_directory_sync_error_to_string =
   Atomic_write.capability_directory_sync_error_to_string
 ;;
 
-let is_atomic_orphan_name = Atomic_write.is_atomic_orphan_name
-type atomic_orphan_cleanup_operation = Atomic_write.atomic_orphan_cleanup_operation =
+let is_atomic_orphan_name = Atomic_temp_name.is_name
+type atomic_orphan_cleanup_operation = Atomic_orphan_cleanup.atomic_orphan_cleanup_operation =
   | Inspect_cleanup_root
   | Read_cleanup_directory
   | Inspect_orphan
@@ -583,7 +583,7 @@ type atomic_orphan_cleanup_operation = Atomic_write.atomic_orphan_cleanup_operat
   | Sync_source_directory
   | Close_cleanup_descriptor
 
-type atomic_orphan_cleanup_cause = Atomic_write.atomic_orphan_cleanup_cause =
+type atomic_orphan_cleanup_cause = Atomic_orphan_cleanup.atomic_orphan_cleanup_cause =
   | Unix_failure of Unix.error * string * string
   | Sys_failure of string
   | Unexpected_file_kind of Unix.file_kind
@@ -591,13 +591,13 @@ type atomic_orphan_cleanup_cause = Atomic_write.atomic_orphan_cleanup_cause =
   | Identity_changed
   | Other_failure of exn
 
-type atomic_orphan_cleanup_failure = Atomic_write.atomic_orphan_cleanup_failure =
+type atomic_orphan_cleanup_failure = Atomic_orphan_cleanup.atomic_orphan_cleanup_failure =
   { operation : atomic_orphan_cleanup_operation
   ; path : string
   ; cause : atomic_orphan_cleanup_cause
   }
 
-type atomic_orphan_cleanup_report = Atomic_write.atomic_orphan_cleanup_report =
+type atomic_orphan_cleanup_report = Atomic_orphan_cleanup.atomic_orphan_cleanup_report =
   { inspected : int
   ; deleted : int
   ; preserved : int
@@ -605,11 +605,11 @@ type atomic_orphan_cleanup_report = Atomic_write.atomic_orphan_cleanup_report =
   }
 
 let atomic_orphan_cleanup_failure_to_string =
-  Atomic_write.atomic_orphan_cleanup_failure_to_string
+  Atomic_orphan_cleanup.atomic_orphan_cleanup_failure_to_string
 ;;
 
 let cleanup_atomic_orphans ~ownership_root ~base_path () =
-  Atomic_write.cleanup_atomic_orphans ~ownership_root ~base_path ()
+  Atomic_orphan_cleanup.cleanup_atomic_orphans ~ownership_root ~base_path ()
 ;;
 
 (** Append string to file.

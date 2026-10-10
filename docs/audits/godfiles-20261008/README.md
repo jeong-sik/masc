@@ -7,8 +7,8 @@ This campaign covers tracked code files with at least 2,000 lines. The initial
 inventory contains 171 candidates: 75 production source/style/interface files,
 90 tests, 3 tooling files and 3 evidence scripts. `inventory.json` records each
 baseline path and its current audit state. A line count selects candidates; it
-is not a defect verdict or a new build gate. Twelve production candidates received
-bounded changes; their other responsibilities remain pending. The other 63
+is not a defect verdict or a new build gate. Fourteen production candidates received
+bounded changes; their other responsibilities remain pending. The other 61
 production candidates still require semantic review. All 171 candidates remain
 in the campaign until their responsibilities and necessary repairs are assessed.
 
@@ -26,6 +26,7 @@ in the campaign until their responsibilities and necessary repairs are assessed.
 | [#41955](https://github.com/jeong-sik/masc/pull/41955) | Canonical retained media projection; image acquisition effects separated from rendering; media-only autonomous and failure rows keep output | main TUI and history consumers |
 | [#41962](https://github.com/jeong-sik/masc/pull/41962) | Pure schedule snapshot/wake readers separated from HTTP/store effects; private parser helpers | `masc_tui_loader.ml` |
 | [#41963](https://github.com/jeong-sik/masc/pull/41963) | Attempt checkpoint projection and validated sink boundary owned separately; unused result copy and testing forwarders removed | `keeper_turn_driver.ml/.mli` |
+| [#41969](https://github.com/jeong-sik/masc/pull/41969) | Blocking orphan inventory/preservation owned separately; pure writer/sweep filename grammar shared; existing public API bound directly | `atomic_write.ml`, `fs_compat.ml` |
 
 The declared branch dependencies follow that order, starting at `main`.
 GitHub may group a subset into a native stack; inspect live membership rather
@@ -61,6 +62,8 @@ Schedule projection extraction and its existing PTY consumer checks are recorded
 in [tui-schedule-decode/README.md](tui-schedule-decode/README.md).
 Attempt checkpoint ownership and selected existing scenarios are recorded in
 [attempt-checkpoint/README.md](attempt-checkpoint/README.md).
+Atomic orphan ownership and its existing isolated filesystem checks are recorded
+in [atomic-orphan-owner/README.md](atomic-orphan-owner/README.md).
 
 `validation.log` records successful OCaml 5.5.1 parse-only checks on the changed
 source/interface files, combined diff whitespace checking, and validation of

@@ -210,7 +210,11 @@
       "path": "lib/fs_compat/atomic_write.ml",
       "baseline_lines": 3327,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: orphan inventory/preservation effects and shared temp-name grammar separated; capability recovery/publication and ordinary replacement remain pending",
+      "current_lines": 2773,
+      "prs": [
+        41969
+      ]
     },
     {
       "path": "lib/fs_compat/capability_recovery_obligation.ml",
@@ -222,7 +226,11 @@
       "path": "lib/fs_compat/fs_compat.ml",
       "baseline_lines": 4265,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: existing public orphan API binds directly to its effect owner and shared matcher; other bridges and filesystem operations remain pending",
+      "current_lines": 4265,
+      "prs": [
+        41969
+      ]
     },
     {
       "path": "lib/keeper/hitl_summary_worker.ml",

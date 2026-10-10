@@ -1,0 +1,26 @@
+Testing `keeper_tool_composition_catalog'.
+This run has ID `HNPDICP5'.
+
+  [OK]          catalog          0   builds executable typed plan.
+  [OK]          catalog          1   rejects unknown fields.
+  [OK]          catalog          2   reads defer_loading.
+  [OK]          catalog          3   rejects malformed pointer.
+  [OK]          catalog          4   rejects duplicate names.
+  [OK]          catalog          5   requires explicit execution mode.
+  [OK]          catalog          6   accepts async statically read-only plan.
+  [OK]          catalog          7   rejects async effectful tool.
+  [OK]          catalog          8   projects stable tool name and path.
+  [OK]          catalog          9   rejects unsupported name characters.
+  [OK]          catalog         10   rejects name beyond provider limit.
+  [OK]          catalog         11   rejects unknown tools.
+  [OK]          catalog         12   params generate the input schema and bin...
+  [OK]          catalog         13   zero-param instantiation revalidates the...
+  [OK]          catalog         14   param declaration mismatches are rejected.
+  [OK]          catalog         15   an enum param projects its members and b...
+  [OK]          catalog         16   enum param declarations are checked at l...
+  [OK]          catalog         17   a composition tool names its skill file.
+  [OK]          catalog         18   other tool names resolve to none.
+  [OK]          catalog         19   a failed composition keeps its cause whe...
+
+Full test results in `~/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/_build/_tests/keeper_tool_composition_catalog'.
+Test Successful in 0.006s. 20 tests run.

@@ -196,3 +196,7 @@ Retire 종말 작업이 "awaiting Owner acknowledgement"로 영구 남음
 - **실패 테스트 3종 조정**: curator_lane 29/34·candle 27건·absorb_gate 5건은 전부
   `dune exec` CWD 아티팩트 — 표준 runtest 전부 통과, 코드 결함 아님. 선택적 하드닝
   (프롬프트 디렉터리 미해결 시 fail-fast)은 미착수.
+- **클린 체크아웃 기본 빌드 브레이크 → #42281 수정**: plain `dune build`가 클린
+  checkout에서 100% 실패(`ocaml-msx` 패키지에 스탠자 0 — vendor/가 gitignore).
+  browser_host·cohttp-eio 핀 어긋남(#41914)이 머지 후 미발견된 구조적 원인이었음.
+  `allow_empty`으로 처방. 로컬 환경 핀도 locked 상태로 복구 완료(2026-10-11).

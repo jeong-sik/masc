@@ -2135,6 +2135,51 @@ let test_loaded_tool_facts_are_folded_into_the_held_log () =
   | other -> failf "expected one call, got %d" (List.length other)
 ;;
 
+(* A journal that just fed one log changed nothing for the others, so its
+   result enriches that log alone. *)
+let test_enrichment_can_be_limited_to_one_log () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  let held request_id execution_id =
+    let occurrence =
+      { Live.stream_scope = 0; block_index = 1; provider_message_id = None; tool_call_id = Some "c1" }
+    in
+    settled_log ~request_id
+      [ Live.Run_started
+      ; Live.Tool_started { occurrence; tool_name = "read_file" }
+      ; Live.Tool_ended { occurrence }
+      ; Live.Tool_result { occurrence; execution_id }
+      ; visible_reply "done"
+      ; Live.Run_finished
+      ]
+  in
+  let first = held "op-1" "exec-1" and second = held "op-2" "exec-2" in
+  state.msg_settled_logs <- [ first; second ];
+  let row request_id execution_id duration =
+    let durable =
+      Keeper_chat_transcript.tool_block
+        [ Keeper_chat_transcript.make_tool_activity ~execution_id
+            ~call_id:(Some "c1") ~tool_name:"read_file" ~args:"{}"
+            ~outcome:Keeper_chat_transcript.Failed ~duration:(Some duration) () ]
+    in
+    { (chat_entry ~request_id ~role:Tui_types.Message_tool ~text:"read_file" ~at:101. ())
+      with me_tool_block = Some durable }
+  in
+  let rows = [ row "op-1" "exec-1" "32ms"; row "op-2" "exec-2" "40ms" ] in
+  let duration (log : Tui_types.turn_log) =
+    match Keeper_chat_transcript.tool_calls log.Tui_types.tl_transcript with
+    | [ activity ] -> activity.Keeper_chat_transcript.duration
+    | other -> failf "expected one call, got %d" (List.length other)
+  in
+  Tui_types.enrich_held_logs_from_rows ~only:first state ~keeper_name:"alpha" rows;
+  check (option string) "the named log is enriched" (Some "32ms") (duration first);
+  check (option string) "the other log is left alone" None (duration second);
+  Tui_types.enrich_held_logs_from_rows state ~keeper_name:"alpha" rows;
+  check (option string) "without a limit every log is enriched" (Some "40ms")
+    (duration second)
+;;
+
 let drawn_skills_of (log : Tui_types.turn_log) =
   List.concat_map
     (fun (item : Keeper_chat_transcript.drawn_item) ->
@@ -5941,6 +5986,7 @@ let () =
         ; test_case "batch watchers render one shared turn" `Quick test_batch_watchers_render_one_shared_settled_turn
         ; test_case "older page keeps the blocks it did not change" `Quick test_older_page_keeps_the_blocks_it_did_not_change
         ; test_case "older page keeps the entries it moved down" `Quick test_older_page_keeps_the_entries_it_moved_down
+        ; test_case "enrichment can be limited to one log" `Quick test_enrichment_can_be_limited_to_one_log
         ; test_case "batch reply follows all original inputs" `Quick test_batch_reply_follows_all_original_inputs
         ; test_case "observed checkpoint retains earlier output" `Quick test_observed_checkpoint_retains_earlier_output
         ; test_case "every request of a held batch is held for journal reads" `Quick

@@ -401,6 +401,28 @@ let schedule_terminal_retention_days =
             min_value = Some (`Int 1); max_value = Some (`Int 365); choices = [] }
     ()
 
+(* ── task archive retention surface ──────────────────────────── *)
+
+(* How long a terminal task stays in the live backlog before the periodic
+   archive pass moves it to tasks-archive.json. [Workspace_gc.gc] deliberately
+   has no default retention policy — the caller owns the horizon — so the
+   default lives here at the composition root, next to the schedule
+   retention surface the same maintenance block already reads. Aligned with
+   MASC_JSONL_RETENTION_DAYS (30d). *)
+let task_archive_retention_days =
+  register_int
+    ~key:"task.archive_retention_days"
+    ~default:(fun () -> 30)
+    ~min:1 ~max:365
+    ~meta:{ description =
+              "끝난 작업을 라이브 백로그에 며칠 더 두는지. 그 기간이 지나면 \
+               유지보수 주기가 그 작업을 tasks-archive.json으로 옮기고, \
+               라이브 백로그에서는 사라진다. 삭제가 아니라 아카이브이며, \
+               끝나지 않은 작업은 이 기간과 무관하게 백로그에 남는다";
+            value_type = "int";
+            min_value = Some (`Int 1); max_value = Some (`Int 365); choices = [] }
+    ()
+
 (* ── surface catalog ─────────────────────────────────────────── *)
 
 type surface = {
@@ -521,6 +543,15 @@ let surfaces =
       description = "How long a finished schedule stays in the ledger";
       param_keys = [
         "schedule.terminal_retention_days";
+      ];
+    };
+    {
+      id = "task_retention";
+      description =
+        "How long a finished task stays in the live backlog before the \
+         periodic archive pass moves it to the archive";
+      param_keys = [
+        "task.archive_retention_days";
       ];
     };
     {

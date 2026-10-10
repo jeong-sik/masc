@@ -18,6 +18,13 @@ val run_schedule_runner_tick :
     the last successful tick, and the result is the one the next tick compares
     against; a tick that fails returns [previously_held] unchanged. *)
 
+val run_periodic_task_gc : Workspace.config -> days:int -> unit
+(** One archive-first workspace GC pass (audit 2026-10-07 F-06 / D6-11),
+    run from the 24h maintenance block at the same cadence as the schedule
+    retention prune. Terminal tasks older than [days] move to
+    [tasks-archive.json]; non-terminal tasks are never archived. Failures
+    are logged here and never propagate to the cleanup loop. *)
+
 val recover_keeper_msg_requests_on_startup :
   base_path:string -> Keeper_msg_async.recovery_report
 (** Settle durable async request rows that cannot have a live owner after a

@@ -2,4 +2,4 @@
 (test
  (name test_msx_routes)
  (modules test_msx_routes)
- (libraries machine_worker_fixture masc.msx_tools masc.machine_configuration masc_test_deps alcotest yojson base64 bigstringaf unix eio eio_main masc.masc_core masc.msx_lane masc.server))
+ (libraries sqlite3 masc.keeper_operation_identity machine_worker_fixture masc.msx_tools masc.machine_configuration masc_test_deps alcotest yojson base64 bigstringaf unix eio eio_main masc.masc_core masc.msx_lane masc.server))

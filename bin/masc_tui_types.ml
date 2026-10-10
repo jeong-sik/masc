@@ -5416,6 +5416,7 @@ type runtime_config_edit_session = {
 (* One MSX frame as the server hands it over (RFC-0439 §3.7): native-resolution
    RGB plus what to title it. The spectator downsamples the pixels itself. *)
 type msx_menu_mode = Boot_game | Change_disk
+type machine_interaction = Observe_machine | Control_machine
 
 (* One row of the MSX load menu. The highlight is kept as the row itself, not
    its position: rows come and go while the menu is open (the DOS watch row
@@ -5621,6 +5622,21 @@ type play_invite =
   { cards : Masc_tui_play_card.t list
   ; shown_name : string option
   }
+
+type play_change_kind = Masc_tui_play_pending.kind = Issue_invite of string | Revoke_invite of string
+type play_change_request = {
+  change_ticket : unit ref;
+  change_id : string;
+  change_workspace : workspace_input_identity;
+  change_kind : play_change_kind;
+}
+type play_change = Preparing_invite_change of play_change_request
+  | Sending_invite_change of play_change_request | Unknown_invite_change of play_change_request
+  (* Sent by this process, then settled in the journal by another TUI that
+     verified it finished. It owns only its response: an issue response
+     carries the only copy of the invite link. *)
+  | Detached_invite_change of play_change_request
+type play_change_outcome = Change_confirmed | Change_unknown
 
 type keeper_priority_control = {
   priority_generation : int;
@@ -5938,6 +5954,7 @@ type state = {
   mutable msx_last_poll_ns: int64;
   (* Which machine the spectator shows. The menu picks it. *)
   mutable machine_source: Masc.Machine_lane.t;
+  mutable machine_interaction: machine_interaction;
   (* The last live read of each machine. [msx_live] is [Showing] the picture
      [msx_frame] holds, with its change mark, whether a live read or a tick
      answer drew it: the tick returns its picture and mark from one snapshot,
@@ -5953,10 +5970,13 @@ type state = {
   mutable dos_activity: Masc_tui_machine_live.activity_entry list;
   (* Locally retained invite cards, newest first. The selected card remains
      open until the operator closes it; the modal sweep leaves it alone. *)
+  mutable collab: Masc_tui_collab.t option;
   mutable play_invite: play_invite;
+  mutable play_invite_quarantine: (workspace_input_identity * play_invite) option;
   mutable play_invite_scroll: int;
-  (* Serialize issue requests so their one-time answers arrive in order. *)
-  mutable play_invite_inflight: bool;
+  (* Serialize issue and revoke across chat/Collab owners, including a closed
+     view: a delayed receipt must not revive or erase a reissued card. *)
+  mutable play_changes: play_change list;
   (* The load menu (RFC-0439 §3.7): the human picks a game from the cartridge
      inventory to plug into the shared machine. It is an overlay on the MSX
      screen -- while [msx_menu_open] the keyboard drives the picker, not the
@@ -7926,6 +7946,7 @@ let reconcile_fusion_launch (state : state) =
   state.view <> Fusion && abandon_fusion_launch state
 
 type text_input_target =
+  | Text_collab_form
   | Text_account_login
   | Text_browser_url
   | Text_ask_answer
@@ -7981,7 +8002,11 @@ let text_input_target (state : state) ~compact_viewport =
     && state.detail_tab = Detail_github
     && not compact_viewport
   in
-  if Option.is_some state.account_login && not compact_viewport then Some Text_account_login
+  if Option.is_some state.collab then
+    (match state.collab with
+     | Some view when not compact_viewport && Masc_tui_collab.text_input_active view -> Some Text_collab_form
+     | Some _ | None -> None)
+  else if Option.is_some state.account_login && not compact_viewport then Some Text_account_login
   else if state.keeper_deletions_open then None
   (* A drop reason takes every key on the goal detail it was opened on, so
      its letters never reach the lifecycle keys under it. *)
@@ -8068,7 +8093,7 @@ let text_input_target (state : state) ~compact_viewport =
    function exists to stop. *)
 let quit_key_allowed_for = function
   | Some
-      ( Text_account_login | Text_browser_url | Text_ask_answer | Text_fusion_launch
+      ( Text_collab_form | Text_account_login | Text_browser_url | Text_ask_answer | Text_fusion_launch
       | Text_preset_name | Text_runtime_lane_name | Text_runtime_param
       | Text_runtime_account_form | Text_runtime_model_form
       | Text_voice_wizard | Text_palette | Text_row_search
@@ -9537,6 +9562,212 @@ let play_invite_forget current name =
        | Some _ | None -> current.shown_name)
   }
 
+let withdraw_play_invite_workspace state
+    ~(previous : workspace_input_identity option) ~(current : workspace_input_identity option) =
+  let hidden invite = {invite with shown_name = None} in
+  match current with
+  | None ->
+      (* Losing a health response removes display/action authority, not the
+         only copy of a credential. Keep it sealed under its confirmed origin. *)
+      (match previous, state.play_invite.cards with
+       | Some workspace, _ :: _ ->
+           state.play_invite_quarantine <- Some (workspace, hidden state.play_invite)
+       | (Some _ | None), [] | None, _ :: _ -> ());
+      state.play_invite <- {cards = []; shown_name = None}
+  | Some workspace ->
+      let retained =
+        (* Retained chat can still name this workspace after authority loss
+           already withdrew the live cards into quarantine. *)
+        if previous = Some workspace && state.play_invite.cards <> [] then hidden state.play_invite
+        else match state.play_invite_quarantine with
+          | Some (owner, invite) when owner = workspace -> hidden invite
+          | Some _ | None -> {cards = []; shown_name = None} in
+      state.play_invite <- retained;
+      state.play_invite_quarantine <- None
+
+let play_change_request = function
+  | Preparing_invite_change request | Sending_invite_change request | Unknown_invite_change request
+  | Detached_invite_change request -> request
+
+let workspace_change_origin state =
+  match state.workspace_identity, workspace_input_identity_of_server state.server_identity with
+  | Workspace_identity_match, Some origin -> Ok origin
+  | ( Workspace_identity_unread
+    | Workspace_identity_mismatch _
+    (* An unconfirmed read is not a fresh match, and an invite change is a
+       write: refuse it until a read says match again. *)
+    | Workspace_identity_match_unconfirmed _ )
+    , _
+  | Workspace_identity_match, None ->
+      Error "Invite changes require a verified server matching this TUI's local workspace."
+
+let current_play_change state origin =
+  List.find_opt (fun change -> (play_change_request change).change_workspace = origin) state.play_changes
+
+let play_pending_path state =
+  Filename.concat (Common.masc_dir_from_base_path ~base_path:state.local_base_path)
+    "tui-play-pending.jsonl"
+
+let play_pending_entry request : Masc_tui_play_pending.entry =
+  {id=request.change_id; base_path=request.change_workspace.wi_base_path;
+   masc_root=request.change_workspace.wi_masc_root; kind=request.change_kind}
+
+let read_play_changes state =
+  if state.local_base_path = "" then Error "The local workspace for Play recovery is unavailable."
+  else Result.map (fun pending ->
+    let journal = List.map (fun (entry : Masc_tui_play_pending.entry) ->
+      match List.find_opt (fun held -> play_pending_entry (play_change_request held) = entry) state.play_changes with
+      | Some held -> held
+      | None -> Unknown_invite_change {change_ticket=ref (); change_id=entry.id;
+          change_workspace={wi_base_path=entry.base_path; wi_masc_root=entry.masc_root};
+          change_kind=entry.kind}) pending in
+    (* Another TUI may settle a request this process sent before its response
+       is consumed. Keep that request as the owner of its response. *)
+    let detached = List.filter_map (function
+      | (Sending_invite_change request | Detached_invite_change request)
+        when not (List.mem (play_pending_entry request) pending) -> Some (Detached_invite_change request)
+      | Preparing_invite_change _ | Sending_invite_change _ | Unknown_invite_change _
+      | Detached_invite_change _ -> None) state.play_changes in
+    state.play_changes <- journal @ detached)
+    (Masc_tui_play_pending.read ~path:(play_pending_path state))
+
+let play_change_pending_notice = "An invite change is still pending; wait for its result."
+let play_change_unknown_notice request =
+  let action, name = match request.change_kind with
+    | Issue_invite name -> "issue", name | Revoke_invite name -> "revoke", name in
+  Printf.sprintf "Invite %s for %s has an unknown outcome. Further changes are blocked; open Collab and use u only after verifying the original server request has finished."
+    action (Masc.Tui_terminal_text.sanitize_terminal_text name)
+
+let play_change_access state =
+  match workspace_change_origin state with
+  | Error detail -> Masc_tui_collab.Read_only detail
+  | Ok origin ->
+      match read_play_changes state with
+      | Error detail -> Masc_tui_collab.Read_only ("Play recovery unavailable: " ^ detail)
+      | Ok () -> match current_play_change state origin with
+      | None -> Masc_tui_collab.Writable
+      | Some (Preparing_invite_change _ | Sending_invite_change _ | Detached_invite_change _) ->
+          Masc_tui_collab.Pending play_change_pending_notice
+      | Some (Unknown_invite_change request) -> Masc_tui_collab.Uncertain
+          {request_id=request.change_id; notice=play_change_unknown_notice request}
+
+let begin_play_change state kind =
+  match workspace_change_origin state with
+  | Error detail -> Error detail
+  | Ok origin ->
+      let ( let* ) = Result.bind in
+      let* () = read_play_changes state in
+      match current_play_change state origin with
+      | Some (Preparing_invite_change _ | Sending_invite_change _ | Detached_invite_change _) ->
+          Error play_change_pending_notice
+      | Some (Unknown_invite_change request) -> Error (play_change_unknown_notice request)
+      | None ->
+          let request = {change_ticket = ref (); change_id=Random_id.uuid_v7 ();
+            change_workspace = origin; change_kind = kind} in
+          let* () = Masc_tui_play_pending.prepare ~path:(play_pending_path state) (play_pending_entry request) in
+          state.play_changes <- Preparing_invite_change request :: state.play_changes;
+          Ok request
+
+(* Only the HTTP call boundary advances a prepared request. Cancellation while
+   verifying authority has not sent a mutation and can release its journal. *)
+let dispatch_play_change state request =
+  let admitted = ref false in
+  state.play_changes <- List.map (function
+    | Preparing_invite_change held when held.change_ticket == request.change_ticket ->
+        admitted := true; Sending_invite_change held
+    | change -> change) state.play_changes;
+  !admitted
+
+let play_change_dispatched state request =
+  List.exists (function
+    | Sending_invite_change held | Unknown_invite_change held | Detached_invite_change held ->
+        held.change_ticket == request.change_ticket
+    | Preparing_invite_change _ -> false) state.play_changes
+
+let finish_play_change state request outcome =
+  let matches change = (play_change_request change).change_ticket == request.change_ticket in
+  let owns = List.exists matches state.play_changes in
+  (* The journal already settled a detached request; its response only
+     leaves this process. *)
+  let detached = List.exists (function
+    | Detached_invite_change held -> held.change_ticket == request.change_ticket
+    | Preparing_invite_change _ | Sending_invite_change _ | Unknown_invite_change _ -> false)
+    state.play_changes in
+  let settled = owns && not detached && (match outcome with
+    | Change_unknown -> false
+    | Change_confirmed ->
+        (match Masc_tui_play_pending.settle ~path:(play_pending_path state) (play_pending_entry request) with
+         | Ok settled -> settled | Error _ -> false)) in
+  if owns then state.play_changes <- List.filter_map (fun change ->
+    if not (matches change) then Some change
+    else if detached then None
+    else match outcome with
+    | Change_confirmed when settled -> None
+    | Change_confirmed | Change_unknown -> Some (Unknown_invite_change request)) state.play_changes;
+  owns
+
+let withdraw_play_changes state =
+  List.iter (function
+    | Preparing_invite_change request -> ignore (finish_play_change state request Change_confirmed)
+    | Sending_invite_change _ | Unknown_invite_change _ | Detached_invite_change _ -> ()) state.play_changes;
+  state.play_changes <- List.filter_map (function
+    | Preparing_invite_change request | Sending_invite_change request -> Some (Unknown_invite_change request)
+    | Unknown_invite_change _ as change -> Some change
+    (* The journal already settled a detached request, and withdrawal cancels
+       the fiber its response would come back on. Kept, it would block every
+       later invite change with nothing left to finish it. *)
+    | Detached_invite_change _ -> None) state.play_changes
+
+(* An issue response queued before withdrawal is refused by [Workspace_scoped],
+   yet it proves its request finished and holds the only copy of a one-time
+   link. While the request is still this process's, it settles like any
+   confirmed answer, and the card is kept closed under the workspace that
+   issued it, by the rule [withdraw_play_invite_workspace] applies to the live
+   cards: with them while that workspace is served, sealed while no server is
+   read, and dropped once a different one is. *)
+let retain_withdrawn_play_invite state (request : play_change_request) card =
+  let origin = request.change_workspace in
+  let closed invite = {(play_invite_store invite card) with shown_name = invite.shown_name} in
+  if finish_play_change state request Change_confirmed then
+    match workspace_input_identity_of_server state.server_identity with
+    | Some current when current = origin -> state.play_invite <- closed state.play_invite
+    | Some _ -> ()
+    | None ->
+        (match state.play_invite_quarantine with
+         | Some (owner, invite) when owner = origin ->
+             state.play_invite_quarantine <- Some (owner, closed invite)
+         | None ->
+             state.play_invite_quarantine <- Some (origin, closed {cards = []; shown_name = None})
+         (* A confirmed read clears the quarantine, and a request needs one,
+            so the slot cannot hold another workspace's cards here. *)
+         | Some _ -> ())
+
+let resolve_play_change state ~request_id =
+  match workspace_change_origin state with
+  | Error detail -> Error detail
+  | Ok origin ->
+      let ( let* ) = Result.bind in
+      let* () = read_play_changes state in
+      match current_play_change state origin with
+      | Some (Unknown_invite_change request) when request.change_id = request_id ->
+          let* settled = Masc_tui_play_pending.settle ~path:(play_pending_path state) (play_pending_entry request) in
+          let* () = read_play_changes state in
+          if settled then Ok ()
+          else Error "The invite request changed; inspect the current request before resolving it."
+      | Some (Unknown_invite_change _) ->
+          Error "The invite request changed; inspect the current request before resolving it."
+      | Some (Preparing_invite_change _ | Sending_invite_change _ | Detached_invite_change _) ->
+          Error play_change_pending_notice
+      | None -> Error "There is no unknown invite change in this workspace."
+
+let withdraw_machine_control state =
+  state.machine_interaction <- Observe_machine;
+  state.msx_open <- false;
+  state.msx_menu_open <- false;
+  state.msx_live <- Masc_tui_machine_live.Unread;
+  state.msx_frame <- None;
+  state.msx_live_in_flight <- None
+
 (* The overlays that take every key while they are open. Each answers its own
    keys and swallows the rest in its dispatch arm, so nothing drawn under it --
    the composer, a surface binding, a press on a row -- may act first. Every
@@ -9549,6 +9780,7 @@ let modal_owns_keys (state : state) =
   || (state.view = Lanes && Option.is_some state.browser_activity_open)
   || (state.view = Lanes && Option.is_some state.machine_activity_open)
   || Option.is_some state.client_detail
+  || Option.is_some state.collab
   || Option.is_some (play_card_shown state)
 
 let close_context_inspector (state : state) =
@@ -9578,6 +9810,7 @@ let close_key_modals (state : state) =
   state.keeper_deletions_open <- false;
   state.client_detail <- None;
   state.client_detail_scroll <- 0;
+  state.collab <- None;
   state.exact_activity_open <- None;
   state.browser_activity_open <- None;
   state.machine_activity_open <- None;
@@ -9709,14 +9942,17 @@ let create_state
   msx_frame = None;
   msx_last_poll_ns = 0L;
   machine_source = Masc.Machine_lane.Msx;
+  machine_interaction = Observe_machine;
   msx_live = Masc_tui_machine_live.Unread;
   dos_live = Masc_tui_machine_live.Unread;
   msx_live_in_flight = None;
   dos_live_in_flight = None;
   dos_activity = [];
+  collab = None;
   play_invite = { cards = []; shown_name = None };
+  play_invite_quarantine = None;
   play_invite_scroll = 0;
-  play_invite_inflight = false;
+  play_changes = [];
   msx_menu_open = false;
   msx_notice = None;
   msx_menu_mode = Boot_game;

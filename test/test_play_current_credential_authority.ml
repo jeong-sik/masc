@@ -259,6 +259,29 @@ let test_waiting_invite_listing_is_cancellable ~invalid_expiry () =
   | true, Error (Invite.Invalid_expiry (D.Credential_expiry.Invalid_timestamp "invalid-expiry")) -> ()
   | _ -> fail "the next listing must retain the authoritative invite or expiry refusal"
 
+(* The invite list names the workspace the terminal confirmed. A server swapped
+   onto the same port answers 409 before any credential is listed. *)
+let test_invite_listing_is_bound_to_the_expected_workspace () =
+  with_workspace @@ fun base_path state operator ->
+  let config = Masc.Workspace.default_config base_path in
+  let masc_root = Masc.Workspace.masc_root_dir config in
+  let other = Filename.temp_dir "play-invites-other-" "" in
+  let path = Server_routes_http_routes_play.invites_path in
+  let bound base root = Printf.sprintf "%s?expected_base_path=%s&expected_masc_root=%s" path base root in
+  let get target = dispatch ~state ~token:operator ~meth:"GET" ~target ~body:"" in
+  let code response = match member "code" (json response) with
+    | Some (`String code) -> Some code | _ -> None in
+  check int "an unbound listing is served" 200 (status (get path));
+  check int "this workspace is served" 200
+    (status (get (bound (Unix.realpath base_path) (Unix.realpath masc_root))));
+  let conflict = get (bound (Unix.realpath other) (Unix.realpath other)) in
+  check int "another workspace is a conflict" 409 (status conflict);
+  check (option string) "the conflict names the precondition" (Some "workspace_precondition_failed")
+    (code conflict);
+  let partial = get (path ^ "?expected_base_path=" ^ Unix.realpath base_path) in
+  check int "one field alone is a bad request" 400 (status partial);
+  Fs_compat.remove_tree other
+
 let () = run "Play current named authority" [ "routes", [
   test_case "listing completes after credential publication in Eio" `Quick test_invite_listing_completes_after_credential_publication;
   test_case "current-owner listing admission is cancellable" `Quick
@@ -274,4 +297,5 @@ let () = run "Play current named authority" [ "routes", [
   test_case "dangling current binding refuses listing and pass" `Quick (fun () -> test_unknown_current_binding Dangling);
   test_case "foreign current binding refuses listing and pass" `Quick (fun () -> test_unknown_current_binding Foreign);
   test_case "unresolved ownerless data does not disable healthy seats" `Quick test_unresolved_data_does_not_hide_healthy_current_owners;
+  test_case "invite listing is bound to the expected workspace" `Quick test_invite_listing_is_bound_to_the_expected_workspace;
 ] ]

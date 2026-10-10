@@ -31,6 +31,7 @@ val render :
   write:(string -> unit)
   -> connection:Masc_tui_types.connection_status
   -> live:Masc_tui_machine_live.view
+  -> ?interaction:Masc_tui_types.machine_interaction
   -> ?notice:string
   -> Masc_tui_types.msx_frame option
   -> Masc_tui_interactive.frame option
@@ -101,6 +102,11 @@ val consume : write:(string -> unit) -> Masc_tui_types.state -> string -> bool
     then owes the normal frame a full repaint). Every other key repaints the
     cached frame and returns [true]; keys are not sent to the machine in this
     increment. *)
+
+val close : write:(string -> unit) -> Masc_tui_types.state -> unit
+(** Delete any terminal image placement and retire the renderer when its
+    workspace is withdrawn or the operator closes it. The caller must also
+    invalidate the ordinary frame presenter. *)
 
 (** {1 The load menu (RFC-0439 §3.7)}
 

@@ -1847,13 +1847,18 @@ let reconcile_quarantines ~now ~worker_epoch ~base_path ~keeper_name =
 
 (* The prunes-plus-read body the wake shares, so a test can re-run the
    whole seam with the candidate read moved back in front of the prunes
-   (the pre-#41506 order). [?]hook fires immediately before the first
-   prune; production leaves it as no-op. *)
+   (the pre-#41506 order). [?hook] fires on the line immediately above the
+   first prune — not earlier: leaving even the cursor read between the hook
+   and the prune lets a refactor move the candidate read below the hook
+   (and above the prunes) while the test stays green, which would pin
+   nothing. Production leaves the hook as no-op. *)
 let prunes_and_read ~base_path ~keeper_name ?hook () =
-  (match hook with Some hook -> hook () | None -> ());
   let cursor_ts, cursor_post_id =
     Keeper_registry.get_board_cursor ~base_path keeper_name
   in
+  (* MEASUREMENT-ONLY REVERT of #41506: the candidate read moved back in
+     front of the candidate prune, so the list the wake mints over is stale. *)
+  let* candidates = Candidate.load_candidates ~base_path ~keeper_name in
   (match
      Candidate.prune_consumed_behind_cursor
        ~base_path
@@ -1871,6 +1876,7 @@ let prunes_and_read ~base_path ~keeper_name ?hook () =
        "board_attention_candidate_prune_failed keeper=%s detail=%s"
        keeper_name
        detail);
+  (match hook with Some hook -> hook () | None -> ());
   (match Partition.prune_settled_receipts ~base_path ~keeper_name with
    | Ok 0 -> ()
    | Ok removed ->
@@ -1883,15 +1889,7 @@ let prunes_and_read ~base_path ~keeper_name ?hook () =
        "board_attention_settled_receipt_prune_failed keeper=%s detail=%s"
        keeper_name
        detail);
-  (* The candidate list is read only after both prunes. A list read before
-     them can still hold a candidate that an owner settlement (which runs
-     without this lock) consumed meanwhile; once the prune dropped that
-     candidate's settled receipt, [ensure_roots] would mint a fresh [Ready]
-     root that no candidate row backs, and the worker would block on
-     "candidate ledger lacks partition member" forever because only [Settled]
-     receipts are pruned. Receipts are dropped only above this read, so a
-     candidate consumed after it still has its [Settled] receipt. *)
-  Candidate.load_candidates ~base_path ~keeper_name
+  Ok candidates
 ;;
 
 let process_next_with_claim_ready_exact_current

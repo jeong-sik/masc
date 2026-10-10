@@ -1330,16 +1330,9 @@ let test_drain_drops_the_settled_receipt_of_a_consumed_candidate () =
     (List.length (ok "load partitions" (P.load ~base_path ~keeper_name:"alpha")))
 ;;
 
-(* PR #41506 moved the candidate-list read after both prunes so that a
-   settlement racing the wake cannot leave the pruned ledger one [Ready]
-   root short of its ledger: with the read first, [ensure_roots] mints a
-   fresh [Ready] root on the partition whose settled receipt the prune
-   just dropped, and the worker blocks on "candidate ledger lacks
-   partition member" forever because only [Settled] receipts are pruned.
-   These tests pin that order. The helpers below run the reads the way
-   the worker does -- after both prunes, and inside the process call --
-   so a refactor that moves the read back to the front still satisfies
-   every open-code assertion below and fails only here. *)
+(* Helpers for the two overlap tests below. The first reads the ledger
+   pair the way the wake does after its two prunes; the second re-runs the
+   wake's two prunes plus the candidate read as one seam. *)
 
 let read_candidate_and_roots ~base_path =
   (* Read both ledgers back-to-back, exactly the way
@@ -1373,11 +1366,11 @@ let drain ~base_path =
             Alcotest.fail "an empty ledger dispatched a judgment")))
 ;;
 
-(* The wake's own ordering property, read directly: after a full
-   consume/drain/settle overlap the post-prune read sees an empty ledger
-   over a settled receipt, and root minting over that pair appends
-   nothing. This is what the fixed order produces — not a #41506
-   regression tripwire (see the next test for the tripwire). *)
+(* The wake's ordering property after a full consume/drain/settle overlap:
+   the post-prune read sees an empty candidate ledger over a settled
+   receipt, and root minting over that pair appends nothing. This pins the
+   shipped order's outcome directly (the #41506 tripwire lives in the next
+   test, which drives the settlement through the seam's hook). *)
 let test_drain_then_settle_does_not_mint_a_ready_root () =
   with_temp_base "board-attention-worker-drain-then-settle" @@ fun base_path ->
   let kept = record ~base_path (candidate ~id:"candidate-overlap-judged" ()) in
@@ -1414,19 +1407,18 @@ let test_drain_then_settle_does_not_mint_a_ready_root () =
     partitions
 ;;
 
-(* The task's second overlap case, driven through the prunes_and_read hook:
-   the owner settlement (deliver + consume + settle, without the worker
-   lock) lands immediately before the wake's first prune — the only gap in
-   which the prune then drops X's settled receipt. The wake's candidate
-   read runs after both prunes, so it sees an empty ledger and its
-   ensure_roots mints nothing over X's settled partition. Under the
-   pre-#41506 order the read sat in front of the prunes: it saw X, the
-   prunes then dropped X's row and settled receipt, and ensure_roots over
-   that stale list minted a fresh Ready root X's settled partition no
-   longer authorized — the #41506 wedge. The consume must replay the exact
-   judgment the wake recorded (same provenance, judged_at), so the
-   settlement's delivery matches the row it consumes. *)
-let test_settlement_between_reads_and_roots_mints_no_root () =
+(* The owner settlement, which runs without the worker lock, is landed in
+   the gap the seam's hook defines: immediately before the wake's first
+   prune. The settlement consumes X and settles X's partition; the prunes
+   that follow drop X's row and its settled receipt, so the seam's returned
+   list is post-prune and minting over it appends nothing. Under the
+   pre-#41506 order (the candidate read moved in front of the prunes) the
+   same hook position still lets the prunes drop the row and receipt, but
+   the list minted over is the stale pre-prune read: it still names X, and
+   [ensure_roots] over a Pending candidate whose partition just settled
+   re-creates the Ready root the settled receipt no longer authorizes —
+   the wedge #41506 closed. This test is the tripwire for that revert. *)
+let test_owner_settlement_before_the_prunes_does_not_mint_a_ready_root () =
   with_temp_base "board-attention-worker-settle-between-read-and-roots" @@ fun base_path ->
   let kept = record ~base_path (candidate ~id:"candidate-overlap-race" ()) in
   let (selected : A.candidate), completed_judgment = complete_next ~base_path J.Relevant in
@@ -1436,19 +1428,41 @@ let test_settlement_between_reads_and_roots_mints_no_root () =
      (50.0, "cursor-post") sorts after it, so X's consumed row is removable
      behind the cursor as soon as the settlement consumes it. *)
   Masc.Keeper_registry.set_board_cursor ~base_path "alpha" 50.0 (Some "cursor-post");
+  (* The seam's hook fires immediately before the first prune. The owner
+     settlement in the hook consumes X (the wake recorded the judgment on
+     the partition's Completed item, not the candidate ledger, so the row
+     is still Pending until the settlement consumes it) and settles X's
+     partition. *)
   let hook_fired = ref 0 in
   (* The wake body: the seam's returned list feeds [ensure_roots] exactly as
      [process_next_with_claim_ready_exact_current] does. The stale list (read
-     before the prunes) is the whole difference between the two orders. *)
+     before the prunes) is the whole difference between the two orders: the
+     hook fires immediately before the first prune, so under the shipped
+     order the read that follows the prunes cannot name X, while under the
+     pre-#41506 order the read sits before them and the list still does. *)
   let candidates =
-    ok "drain with the settlement in the pre-prune gap"
+    ok "drain with the settlement before the candidate prune"
       (W.For_testing.prunes_and_read
          ~base_path
          ~keeper_name:"alpha"
          ~hook:(fun () ->
            incr hook_fired;
+           (* The delivery replays the exact judgment the wake recorded. The
+              worker records the judgment on the partition's Completed item,
+              not the candidate ledger, so the candidate row is still Pending
+              here: consume it first (what the owner's delivery does), then
+              settle the partition over it. *)
            ignore
-             (ok "owner settlement before the prunes"
+             (delivered
+                "owner settlement consumes X"
+                (A.apply_judgment_and_deliver
+                   ~base_path
+                   ~keeper_name:"alpha"
+                   ~candidate_id:kept.candidate_id
+                   ~judgment:completed_judgment)
+              : A.candidate);
+           ignore
+             (ok "settle X's partition without the worker lock"
                 (W.For_testing.deliver_and_settle_completed
                    ~base_path
                    ~keeper_name:"alpha"
@@ -1459,6 +1473,11 @@ let test_settlement_between_reads_and_roots_mints_no_root () =
   ignore
     (ok "mint roots over the list the wake read"
        (P.ensure_roots ~base_path ~keeper_name:"alpha" candidates));
+  (* The ledger read: under the shipped order the prunes ran after the
+     settlement, so X's row and settled receipt are gone. Under the reverted
+     order the stale list held X (Pending at read time), the mint ran over
+     it, and the receipt prune inside the seam dropped the settled receipt —
+     the assertions below name exactly that residue. *)
   let candidates, partitions = read_candidate_and_roots ~base_path in
   (* The prunes (which ran after the hook's settlement) dropped X's consumed
      row and its settled receipt: the ledger keeps no row naming X, and root
@@ -4285,13 +4304,13 @@ let () =
             `Quick
             test_drain_drops_the_settled_receipt_of_a_consumed_candidate
         ; Alcotest.test_case
-            "drain then settle does not mint a ready root"
+            "drain then settle leaves a settled receipt without a live row"
             `Quick
             test_drain_then_settle_does_not_mint_a_ready_root
         ; Alcotest.test_case
-            "settlement between reads and roots mints no root"
+            "owner settlement before the prunes does not mint a ready root"
             `Quick
-            test_settlement_between_reads_and_roots_mints_no_root
+            test_owner_settlement_before_the_prunes_does_not_mint_a_ready_root
         ; Alcotest.test_case
             "bookkeeping failure keeps its cause and the flow sentence"
             `Quick

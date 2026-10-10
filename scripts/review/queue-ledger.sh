@@ -63,7 +63,7 @@ while IFS=$'\t' read -r pr author base head branch draft; do
               if [ "$(printf '%s' "$accepted_scope" | jq -r '.stack != null')" = true ]; then
                 waits="merge native stack through #$pr into $target"
               else waits="merge into $target"; fi
-            else waits="native stack review or changed scope"; fi
+            else waits="native stack review, changed scope, or a layer below the stack's top PR"; fi
           elif [ "$base" != main ]; then
             parent=$(printf '%s\n' "$rows" | awk -F '\t' -v base="$base" '$5==base {print $1; exit}')
             waits="parent ${parent:+#}${parent:-$base}"

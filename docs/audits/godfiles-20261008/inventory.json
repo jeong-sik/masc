@@ -316,7 +316,11 @@
       "path": "lib/keeper/keeper_memory_os_current.ml",
       "baseline_lines": 3300,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; snapshot codec, receipt/journal recovery and persistence effects remain pending",
+      "current_lines": 2868,
+      "prs": [
+        42098
+      ]
     },
     {
       "path": "lib/keeper/keeper_msg_async.ml",

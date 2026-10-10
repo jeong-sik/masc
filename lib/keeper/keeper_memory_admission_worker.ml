@@ -8,15 +8,27 @@ type outcome =
 
 let io = Domain_pool_ref.submit_io_or_inline
 
-(* The runtime's typed range-sizing decision, not a candidate-count threshold
-   or a prose error match. Splitting is recursive, so a walk that also met a
-   failure a smaller range meets the same way (a quota, an outage, an operator
-   refusal) is deferred whole rather than sending that slot one request per
-   part. *)
+(* The runtime's typed capacity evidence, not a candidate-count threshold or a
+   prose error match. A walk that also met a failure a smaller range meets the
+   same way (a quota, an outage, an operator refusal) is deferred whole rather
+   than splitting it into one request per part. *)
 let judgment_of_not_committed (reason : Keeper_librarian_runtime.not_committed) =
-  if reason.walk_shows_size && not reason.smaller_range_meets_same_failure
-  then Input_size_refused reason.detail
-  else Deferred reason.detail
+  match reason.input_capacity_evidence with
+  | Keeper_librarian_runtime.Input_capacity_refused
+    when not reason.smaller_range_meets_same_failure -> Input_size_refused reason.detail
+  | Input_capacity_refused | No_input_capacity_refusal -> Deferred reason.detail
+
+(* One pass can report [not_committed] more than once: the runtime reports the
+   failure it saw and a later raise in the same pass reports again with no
+   cause. A confirmed capacity refusal is evidence about the input, not about
+   the last report, so a later report without that evidence cannot retract it.
+   That includes a later report of a quota or outage: the batch still splits,
+   and if that failure persists its first part defers the pass, so the cost is
+   one or two more requests, not a loop. *)
+let keep_strongest_judgment current reason =
+  match current, judgment_of_not_committed reason with
+  | Input_size_refused _, Deferred _ -> current
+  | _, next -> next
 
 let run_with ~keepers_dir ~keeper_name ~judge =
   let read () = io (fun () -> Queue.read_pending ~keepers_dir ~keeper_id:keeper_name) in
@@ -102,7 +114,8 @@ let run ~base_path ~keeper_name =
           Keeper_librarian_runtime.run_best_effort ~write_scope:Memory_maintenance ~admission
             ~on_memory_committed:(fun () -> committed := true)
             ~on_admission_deferred:(fun () -> outcome := Awaiting_evidence)
-            ~on_not_committed:(fun reason -> outcome := judgment_of_not_committed reason)
+            ~on_not_committed:(fun reason ->
+              outcome := keep_strongest_judgment !outcome reason)
             ~base_path ~keepers_dir ~keeper_id:keeper_name
             ~expected_revision:(Option.map (fun (value : Current.t) -> value.revision) snapshot)
             input;
@@ -110,6 +123,7 @@ let run ~base_path ~keeper_name =
     run_with ~keepers_dir ~keeper_name ~judge
 
 module For_testing = struct
-  let run_with = run_with
   let judgment_of_not_committed = judgment_of_not_committed
+  let keep_strongest_judgment = keep_strongest_judgment
+  let run_with = run_with
 end

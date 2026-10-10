@@ -28,11 +28,13 @@ val run : base_path:string -> keeper_name:string -> outcome
     receipt-backed commit. Partitioning does not prove semantic independence. *)
 
 module For_testing : sig
+  val judgment_of_not_committed : Keeper_librarian_runtime.not_committed -> judgment_result
+  val keep_strongest_judgment :
+    judgment_result -> Keeper_librarian_runtime.not_committed -> judgment_result
   val run_with :
     keepers_dir:string -> keeper_name:string ->
     judge:(Keeper_memory_admission_queue.batch -> judgment_result) -> outcome
 
-  val judgment_of_not_committed : Keeper_librarian_runtime.not_committed -> judgment_result
   (** [Input_size_refused] only when the walk shows size and met no failure a
       smaller range meets the same way; [Deferred] otherwise. *)
 end

@@ -328,17 +328,22 @@ let test_partially_lost_receipts_keep_queue_blocked () = with_store (fun keepers
      fail "worker continued past a consumed sequence without its receipt"))
 
 let test_size_with_a_same_failure_is_deferred_whole () =
-  let reason ~size ~same : Masc.Keeper_librarian_runtime.not_committed =
-    { detail = "walk"; walk_shows_size = size; smaller_range_meets_same_failure = same } in
+  let reason ~capacity ~same : Masc.Keeper_librarian_runtime.not_committed =
+    { detail = "walk"; walk_shows_size = capacity;
+      input_capacity_evidence =
+        (if capacity then Masc.Keeper_librarian_runtime.Input_capacity_refused
+         else Masc.Keeper_librarian_runtime.No_input_capacity_refusal);
+      smaller_range_meets_same_failure = same } in
   let name = function
     | Worker.Input_size_refused _ -> "split" | Worker.Deferred _ -> "defer"
     | Worker.Committed -> "committed" | Worker.Awaiting_evidence -> "awaiting" in
-  List.iter (fun (label, size, same, expected) ->
-    check string label expected (name (Worker.For_testing.judgment_of_not_committed (reason ~size ~same))))
-    [ "size alone splits", true, false, "split"
-    ; "size with a quota in the same walk is deferred whole", true, true, "defer"
-    ; "no size defers", false, false, "defer"
-    ; "a quota without size defers", false, true, "defer" ]
+  List.iter (fun (label, capacity, same, expected) ->
+    check string label expected
+      (name (Worker.For_testing.judgment_of_not_committed (reason ~capacity ~same))))
+    [ "a capacity refusal alone splits", true, false, "split"
+    ; "a capacity refusal with a quota in the same walk is deferred whole", true, true, "defer"
+    ; "no capacity refusal defers", false, false, "defer"
+    ; "a quota without a capacity refusal defers", false, true, "defer" ]
 
 let () = run "durable explicit admission queue"
   ["storage boundaries", [

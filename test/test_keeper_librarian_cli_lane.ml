@@ -646,6 +646,142 @@ let test_incomplete_reply_exposes_typed_body_deadline () =
   | Ok _ | Error _ -> fail "expected HTTP200 headers followed by typed total body deadline"
 ;;
 
+let test_admission_worker_requires_actual_input_capacity () =
+  with_eio @@ fun ~sw:_ ~net:_ ~clock:_ ~base_path ->
+  Fixture.with_official_client_runtimes @@ fun () ->
+  let module Queue = Masc.Keeper_memory_admission_queue in
+  let module Worker = Masc.Keeper_memory_admission_worker in
+  let require = function Ok value -> value | Error detail -> fail detail in
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+  let keeper_id = "cli-lane-keeper" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let initial = Current.replace ~keepers_dir ~keeper_id ~expected_revision:None
+    ~now:1_000_000. ~source:{Current.kind=Current.Explicit_write; trace_id="seed"}
+    ~facts:[current_a;current_b] () |> require in
+  List.iter (fun id -> ignore (Queue.append ~keepers_dir ~keeper_id ~request_id:id
+    (fact ~claim:("candidate " ^ id)) |> require)) ["a";"b";"c";"d"];
+  let queue_before = Fs_compat.load_file (Queue.path ~keepers_dir ~keeper_id) in
+  let current_before = Fs_compat.load_file (Current.path_for_keepers_dir ~keepers_dir ~keeper_id) in
+  let attempt ~answers ~expected_calls ~expected_partition_sizes =
+    publish_unreachable_lane ~cli_only:true ~cli_slot_ids:(List.map fst answers)
+      ~source:"admission capacity evidence fixture" ();
+    let calls = ref 0 and sizes = ref [] and reports = ref [] in
+    let runner ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+      incr calls; List.assoc runtime_id answers in
+    let judge admission =
+      sizes := List.length (Queue.candidates admission) :: !sizes;
+      let outcome = ref (Worker.Deferred "missing runtime callback") in
+      Runtime.run_best_effort ~write_scope:Runtime.Memory_maintenance ~admission ~cli_runner:runner
+        ~on_memory_committed:(fun () -> outcome := Worker.Committed)
+        ~on_admission_deferred:(fun () -> outcome := Worker.Awaiting_evidence)
+        ~on_not_committed:(fun reason -> reports := reason :: !reports;
+          outcome := Worker.For_testing.judgment_of_not_committed reason)
+        ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some initial.revision) (input ());
+      !outcome in
+    (match Worker.For_testing.run_with ~keepers_dir ~keeper_name:keeper_id ~judge with
+     | Worker.Pending _ -> () | _ -> fail "failed candidate batch must remain pending");
+    check int "actual runtime runner calls" expected_calls !calls;
+    check (list int) "actual worker partition traversal" expected_partition_sizes (List.rev !sizes);
+    check string "failure leaves queue unchanged" queue_before
+      (Fs_compat.load_file (Queue.path ~keepers_dir ~keeper_id));
+    check string "failure leaves current facts unchanged" current_before
+      (Fs_compat.load_file (Current.path_for_keepers_dir ~keepers_dir ~keeper_id));
+    !reports in
+  List.iter (fun answer ->
+    let reports = attempt ~answers:[Fixture.cli_primary_runtime,answer] ~expected_calls:1 ~expected_partition_sizes:[4] in
+    check bool "output and transport failure provide no admission capacity evidence" true
+      (List.for_all (fun (r : Runtime.not_committed) ->
+        r.input_capacity_evidence=Runtime.No_input_capacity_refusal) reports))
+    [Ok "not-json"; Ok "{}"; Error (Masc.Fusion_official_client.Setup_failure "offline")];
+  let capacity_answer = Error (Masc.Fusion_official_client.Codex_failure
+    (Runtime_codex_app_server.Context_window_exceeded
+      {message="fixture explicit input refusal"; tool_effect_attempted=false})) in
+  let reports = attempt ~answers:[Fixture.cli_primary_runtime,capacity_answer]
+      ~expected_calls:7 ~expected_partition_sizes:[4;2;1;1;2;1;1] in
+  check bool "typed input refusal alone authorizes partition traversal" true
+    (List.for_all (fun (r : Runtime.not_committed) ->
+      r.input_capacity_evidence=Runtime.Input_capacity_refused) reports);
+  List.iter (fun (first,second) ->
+    let reports = attempt
+        ~answers:[Fixture.cli_primary_runtime,first;Fixture.cli_secondary_runtime,second]
+        ~expected_calls:2 ~expected_partition_sizes:[4] in
+    check bool "invalid output vetoes capacity evidence in either slot order" true
+      (List.for_all (fun (r : Runtime.not_committed) ->
+        r.input_capacity_evidence=Runtime.No_input_capacity_refusal) reports))
+    [Ok "{}",capacity_answer;capacity_answer,Ok "not-json"]
+;;
+
+(* The absorb gate refuses before any request when the pass's observations
+   and Memory do not fit one. The supporting candidates are among those
+   observations: four of them overflow a request and two fit, so the worker
+   splits the batch instead of sending it whole on every wake. The judgment
+   endpoint is closed, so the fitting half fails its sent request and the
+   pass stays pending. *)
+let test_absorb_gate_capacity_refusal_splits_the_admission_batch () =
+  with_eio @@ fun ~sw:_ ~net:_ ~clock:_ ~base_path ->
+  Fixture.with_official_client_runtimes @@ fun () ->
+  Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-jev-key") @@ fun () ->
+  Masc_test_deps.with_typesafeai_policy
+    { Runtime_schema.default_typesafeai with
+      lane_enabled = true
+    ; absorb_gate = true
+    ; destinations =
+        ( { Runtime_schema.endpoint = "http://127.0.0.1:1/evaluate"; model = "jev-fixture"
+          ; api_key_env = "TYPESAFEAI_API_KEY" }
+        , [] )
+    } @@ fun () ->
+  let module Queue = Masc.Keeper_memory_admission_queue in
+  let module Worker = Masc.Keeper_memory_admission_worker in
+  let require = function Ok value -> value | Error detail -> fail detail in
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+  publish_unreachable_lane ~cli_only:true ~cli_slot_ids:[Fixture.cli_primary_runtime]
+    ~source:"absorb gate capacity fixture" ();
+  let keeper_id = "cli-lane-keeper" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let initial = Current.replace ~keepers_dir ~keeper_id ~expected_revision:None
+    ~now:1_000_000. ~source:{Current.kind=Current.Explicit_write; trace_id="seed"}
+    ~facts:[current_a;current_b] () |> require in
+  let request_ids = List.map (fun id -> "capacity-candidate-" ^ id) ["a";"b";"c";"d"] in
+  let candidate_bytes = Masc.Keeper_librarian_absorb_gate.request_bytes_limit * 9 / 32 in
+  List.iter (fun request_id -> ignore (Queue.append ~keepers_dir ~keeper_id ~request_id
+    (fact ~claim:(request_id ^ " " ^ String.make candidate_bytes 'x')) |> require)) request_ids;
+  let merged = "keep A together with B" in
+  let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt =
+    let present = List.filter (fun affix -> Astring.String.is_infix ~affix prompt) request_ids in
+    Ok (Yojson.Safe.to_string (`Assoc
+      [ "memory", `Assoc
+          [ "working_contexts", `List []
+          ; Librarian.wire_field_new_claims, `List
+              [ `Assoc [ "claim", `String merged; "category", `String "fact"
+                       ; "absorbs", `List [`String "m1"; `String "m2"] ] ]
+          ; Librarian.wire_field_dropped, `List [] ]
+      ; "change_support", `List (List.map (fun id -> `String id) present)
+      ; "candidates", `List (List.map (fun id -> `Assoc
+          [ "request_id", `String id; "outcome", `String "incorporated"
+          ; "memory_claim", `String merged; "reason", `String "capacity fixture" ]) present) ])) in
+  let sizes = ref [] and reports = ref [] in
+  let judge admission =
+    sizes := List.length (Queue.candidates admission) :: !sizes;
+    let outcome = ref (Worker.Deferred "missing runtime callback") in
+    Runtime.run_best_effort ~write_scope:Runtime.Memory_maintenance ~admission ~cli_runner:runner
+      ~on_memory_committed:(fun () -> outcome := Worker.Committed)
+      ~on_admission_deferred:(fun () -> outcome := Worker.Awaiting_evidence)
+      ~on_not_committed:(fun reason -> reports := reason :: !reports;
+        outcome := Worker.For_testing.judgment_of_not_committed reason)
+      ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some initial.revision) (input ());
+    !outcome in
+  (match Worker.For_testing.run_with ~keepers_dir ~keeper_name:keeper_id ~judge with
+   | Worker.Pending _ -> () | _ -> fail "the half whose judgment request failed must stay pending");
+  (match List.rev !reports with
+   | (whole : Runtime.not_committed) :: _ ->
+     check bool "the whole batch met the gate's pre-request capacity refusal" true
+       whole.walk_shows_size;
+     check bool "that refusal is admission input capacity evidence" true
+       (whole.input_capacity_evidence = Runtime.Input_capacity_refused)
+   | [] -> fail "the gate refusal produced no report");
+  check (list int) "the gate's capacity refusal splits the batch" [4;2] (List.rev !sizes)
+;;
+
 let test_explicit_admission_envelope ?(transport_failure=false) ~deferred () =
   with_eio @@ fun ~sw:_ ~net:_ ~clock:_ ~base_path ->
   Fixture.with_official_client_runtimes @@ fun () ->
@@ -943,6 +1079,22 @@ let test_mixed_admission ~depends_on_deferred () =
       (Fs_compat.load_file queue_path))
 ;;
 
+let test_a_later_report_without_capacity_evidence_keeps_the_refusal () =
+  let report evidence : Runtime.not_committed =
+    { input_capacity_evidence = evidence; detail = "fixture"; walk_shows_size = false;
+      smaller_range_meets_same_failure = false } in
+  let refused = report Runtime.Input_capacity_refused in
+  let silent = report Runtime.No_input_capacity_refusal in
+  let module Worker = Masc.Keeper_memory_admission_worker in
+  let keep = Worker.For_testing.keep_strongest_judgment in
+  let first = keep (Worker.Deferred "no report yet") refused in
+  check bool "a capacity refusal is recorded" true
+    (match first with Worker.Input_size_refused _ -> true | _ -> false);
+  check bool "a later report with no evidence cannot retract it" true
+    (match keep first silent with Worker.Input_size_refused _ -> true | _ -> false);
+  check bool "without a refusal the later report stands" true
+    (match keep (Worker.Deferred "earlier") silent with Worker.Deferred _ -> true | _ -> false)
+
 let () =
   run
     "keeper_librarian_cli_lane"
@@ -1011,6 +1163,10 @@ let () =
               ~cli_slot_ids:[Fixture.cli_primary_runtime] ~answer:(Ok "{}")
               ~failure:(Some (invalid_domain_failure ()))
               ~kind:Current.Exact_execution_failure ~calls:1 ())
+        ; test_case "admission worker partitions only actual input capacity refusals" `Quick
+            test_admission_worker_requires_actual_input_capacity
+        ; test_case "absorb gate capacity refusal splits the admission batch" `Quick
+            test_absorb_gate_capacity_refusal_splits_the_admission_batch
         ; test_case "settled explicit candidates commit through exact lane and receipt" `Quick
             (test_explicit_admission_envelope ~deferred:false)
         ; test_case "deferred explicit candidates leave Memory and queue intact" `Quick
@@ -1027,6 +1183,8 @@ let () =
             (test_admission_retirement_evidence ~reobserved:true)
         ; test_case "unavailable retirement history remains explicit and deferred" `Quick
             test_admission_unavailable_retirement_history
+        ; test_case "a later report without capacity evidence keeps the refusal" `Quick
+            test_a_later_report_without_capacity_evidence_keeps_the_refusal
         ; test_case
             "CLI prompt drift remains distinct from no CLI declaration"
             `Quick

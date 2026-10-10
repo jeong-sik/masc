@@ -2448,7 +2448,6 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
     String.equal memo.lem_keeper_name keeper_name
     && memo.lem_chat_cols = chat_cols
     && memo.lem_preview_mode = state.link_previews_mode
-    && memo.lem_preview_generation = preview_generation
     && memo.lem_memory = state.msg_memory_visibility
     && memo.lem_reasoning = state.msg_reasoning_visibility
     && memo.lem_origin = state.msg_origin_display
@@ -2464,6 +2463,18 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
     && memo.lem_calls == state.keeper_calls
     && memo.lem_palette_generation = palette_generation
   in
+  (* A link preview landing changes how tall a row with a link is, and nothing
+     in the entry: the card is added to the body where the row is drawn. So the
+     entries stay and the list is a new one, which is what makes the row counts
+     kept against the old list ask again. It used to rebuild every entry, about
+     9ms for a long history on each preview that finished loading. *)
+  (match !layout_entries_memo with
+   | Some memo when memo.lem_preview_generation <> preview_generation ->
+       layout_entries_memo :=
+         Some { memo with
+                lem_preview_generation = preview_generation;
+                lem_entries = List.map Fun.id memo.lem_entries }
+   | Some _ | None -> ());
   match !layout_entries_memo with
   | Some memo
     when same_inputs memo && memo.lem_visible_timeline == visible_timeline

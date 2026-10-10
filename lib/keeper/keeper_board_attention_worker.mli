@@ -168,13 +168,19 @@ module For_testing : sig
     base_path:string ->
     keeper_name:string ->
     ?hook:(unit -> unit) ->
+    ?before_receipt_prune:(unit -> unit) ->
     unit ->
     (Keeper_board_attention_candidate.candidate list, string) result
   (** The wake's two prunes followed by the candidate-list read, as one
       seam. [?hook] fires immediately before the first prune, so a test can
       land an owner settlement (which runs without the worker lock) in
       exactly the gap the read position defines — the prune/settlement
-      overlap of #41506. Production passes no hook. *)
+      overlap of #41506. [?before_receipt_prune] fires immediately before
+      the settled-receipt prune, covering a candidate read that sits between
+      the two prunes: a settlement landed there consumed X while the read
+      between the prunes already ran, so the stale list names X as Judged
+      and minting roots over it raises a fresh Ready root over the settled
+      partition. Production passes no hooks. *)
 
   val reconcile_quarantines :
     now:float ->

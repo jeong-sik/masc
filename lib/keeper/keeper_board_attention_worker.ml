@@ -1579,7 +1579,7 @@ let reconcile_quarantines ~now ~worker_epoch ~base_path ~keeper_name =
    lets a refactor move the candidate read below the hook (and above the
    prunes) while the test stays green, which would pin nothing. Production
    leaves the hook as no-op. *)
-let prunes_and_read ~base_path ~keeper_name ?hook () =
+let prunes_and_read ~base_path ~keeper_name ?hook ?before_receipt_prune () =
   let cursor_ts, cursor_post_id =
     Keeper_registry.get_board_cursor ~base_path keeper_name
   in
@@ -1610,7 +1610,11 @@ let prunes_and_read ~base_path ~keeper_name ?hook () =
        detail);
   (* The settled receipts of consumed candidates go on the same wake, so the
      partition ledger of a Keeper that never restarts stays bounded too. Like
-     the candidate prune, a failure is observed and retried on the next wake. *)
+     the candidate prune, a failure is observed and retried on the next wake.
+     [?before_receipt_prune] fires on the line immediately above this prune,
+     so a test can land a settlement in the gap a candidate read placed
+     between the two prunes defines. Production leaves it as no-op. *)
+  (match before_receipt_prune with Some hook -> hook () | None -> ());
   (match Partition.prune_settled_receipts ~base_path ~keeper_name with
    | Ok 0 -> ()
    | Ok removed ->

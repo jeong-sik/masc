@@ -200,18 +200,28 @@ let unacknowledged (t : Launcher.t) (entry : Record.entry) =
    one kept for this cannot open that port until the other is closed. A host
    given that profile is the one MASC starts for [browser.live.bidi]. *)
 let other_firefox_there t (entry : Record.entry) ~expected ~found =
-  let said =
+  let holder =
     match found with
-    | Some found -> Printf.sprintf "runs the profile %s" found
-    | None -> "did not say which profile it runs"
+    | Some found ->
+        Printf.sprintf
+          " The Firefox at that address runs the profile %s, and this host keeps a session only \
+           with a Firefox on %s, so it did not keep one there. Another Firefox holds that port: \
+           the operator quits it."
+          found expected
+    | None ->
+        Printf.sprintf
+          " The Firefox at that address did not say which profile it runs, and this host keeps a \
+           session only with a Firefox on %s, so it did not keep one there. Unless that Firefox is \
+           the one on %s, another Firefox holds that port, and the operator quits it."
+          expected expected
   in
-  Printf.sprintf
-    " The Firefox at that address %s, and this host keeps a session only with a Firefox on %s, so \
-     it ended that session. Unless the Firefox there is on %s, another Firefox holds that port, \
-     and the operator quits it. Then a server start, or a Keeper's next hover or drag, starts the \
-     Keeper Firefox and its host when runtime.toml has [browser.live.bidi]; without that table, \
-     the operator starts Firefox with %s, then %s."
-    said expected expected (firefox_at entry.bidi_url) (run_host t ~address:(Some entry.bidi_url))
+  holder
+  ^ Printf.sprintf
+      " Then a server start, or a Keeper's next hover or drag, starts the Keeper Firefox and its \
+       host when runtime.toml has [browser.live.bidi] and [browser.live] is on; otherwise the \
+       operator starts Firefox with %s, then %s %s %s."
+      (firefox_at entry.bidi_url) (run_host t ~address:(Some entry.bidi_url)) firefox_profile_flag
+      (Filename.quote expected)
 
 (* What became of the last host's session decides what the operator does
    before the next one. A Firefox that holds a session refuses every host

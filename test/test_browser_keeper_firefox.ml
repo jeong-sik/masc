@@ -108,15 +108,29 @@ let sleeper_command name = Printf.sprintf "python3 -c 'import time; time.sleep(3
 (* What install-host.sh leaves, with a launcher that records what it was
    given. [declared:false] leaves out launch.json, which reads as a launcher
    to install again. *)
-let install_lane ?(declared = true) ?(host_ends = false) base ~marker =
+(* The pid a host record written for a launcher names, which that launcher
+   replaces with its own as it writes it. *)
+let ending_pid_mark = 424_242_424
+
+(* [ending]: the launcher writes this host record under its own pid, as a
+   host that ended does, then exits. *)
+let install_lane ?(declared = true) ?(host_ends = false) ?ending base ~marker =
   List.iter (fun dir -> Unix.mkdir dir 0o700)
     [ Filename.concat base ".masc"; lane base; Filename.concat (lane base) "host" ];
+  let tail =
+    match ending, host_ends with
+    | Some record, (true | false) ->
+      let template = Filename.concat base "host-ending.json" in
+      write template (Yojson.Safe.to_string record);
+      Printf.sprintf "sed \"s/%d/$$/\" %s > %s\nexit 3" ending_pid_mark (Filename.quote template)
+        (Filename.quote (Filename.concat (lane base) "bidi-host.json"))
+    | None, true -> "exit 3"
+    | None, false -> "exec " ^ sleeper_command marker in
   let script =
     Printf.sprintf
       "#!/bin/sh\nprintf '%%s\\n' \"${MASC_HTTP_PORT-unset} ${MASC_HTTP_BASE_URL-unset}\" > %s.env\n\
        printf '%%s\\n' \"$$\" \"$@\" > %s\n%s\n"
-      (Filename.quote marker) (Filename.quote marker)
-      (if host_ends then "exit 3" else "exec " ^ sleeper_command marker) in
+      (Filename.quote marker) (Filename.quote marker) tail in
   write ~mode:0o700 (launcher base) script;
   if declared then
     write (Filename.concat (lane base) "host/launch.json")
@@ -1144,6 +1158,51 @@ let a_host_that_ends_at_once_stops_its_firefox () =
       check bool "the Firefox started for it is stopped" true (not_running ~base firefox_marker);
       check bool "and not recorded" true (recorded base = None)))
 
+(* A host record that ended on another profile, for the Firefox on [port]. *)
+let ended_on_another_profile ~port =
+  match Browser_lane.client_id_of_string "0199c0de-0000-7000-8000-000000000001" with
+  | Error detail -> fail detail
+  | Ok client_id ->
+    Record.entry_to_json
+      { pid = ending_pid_mark; started_at = 1_791_000_000.; bidi_url = Printf.sprintf "ws://127.0.0.1:%d/session" port
+      ; client_id; attached_at = None; unacknowledged = []
+      ; ended =
+          Some
+            { at = 1_791_000_060.; reason = "this Firefox runs the profile /everyday, not /keeper/profile"
+            ; session = Record.No_session_left
+            ; because = Record.Profile_not_kept { expected = "/keeper/profile"; found = Some "/everyday" } } }
+
+(* The Firefox on the port runs another profile, so every retry meets it
+   again until the operator quits it. *)
+let a_host_that_met_another_profile_is_the_operators () =
+  with_workspace (fun base ->
+    let firefox_marker, host_marker = markers base in
+    let port = free_port () in
+    install_lane ~ending:(ended_on_another_profile ~port) base ~marker:host_marker;
+    let firefox = fake_firefox base ~marker:firefox_marker Listens in
+    with_children ~base [ firefox_marker; host_marker ] (fun () ->
+      requested ~base ~configuration:(configured ~firefox ~port base) (fun ~sw:_ ~clock:_ request ->
+        match request () with
+        | Starter.Not_attached (Starter.Operator_needed why) ->
+          check bool ("names the profile there: " ^ why) true (String_util.contains_substring why "/everyday")
+        | Starter.Not_attached (Starter.Start_failed _ | Starter.Not_listed_in_time _)
+        | Starter.Attached _ | Starter.Not_asked_for -> fail "another profile's Firefox is the operator's to quit")))
+
+(* An earlier host's ending is not the reason the one just started ended. *)
+let an_earlier_hosts_profile_is_not_this_ones () =
+  with_workspace (fun base ->
+    let firefox_marker, host_marker = markers base in
+    let port = free_port () in
+    install_lane ~host_ends:true base ~marker:host_marker;
+    write (Record.record_path ~base_path:base) (Yojson.Safe.to_string (ended_on_another_profile ~port));
+    let firefox = fake_firefox base ~marker:firefox_marker Listens in
+    with_children ~base [ firefox_marker; host_marker ] (fun () ->
+      requested ~base ~configuration:(configured ~firefox ~port base) (fun ~sw:_ ~clock:_ request ->
+        match request () with
+        | Starter.Not_attached (Starter.Start_failed _) -> ()
+        | Starter.Not_attached (Starter.Operator_needed _ | Starter.Not_listed_in_time _)
+        | Starter.Attached _ | Starter.Not_asked_for -> fail "a host that ended for its own reason is a failed start")))
+
 (* A request that comes while the server start's own start runs is answered
    with it, connection included: a host just started holds neither the lock
    nor a record yet, and a start then would start a second host. *)
@@ -1457,6 +1516,8 @@ let () =
         ; test_case "why nothing started" `Quick a_request_hears_why_nothing_started
         ; test_case "a connection that never shows" `Quick a_connection_that_never_shows_is_reported
         ; test_case "a host that ends at once" `Quick a_host_that_ends_at_once_stops_its_firefox
+        ; test_case "a host that met another profile" `Quick a_host_that_met_another_profile_is_the_operators
+        ; test_case "an earlier host's profile" `Quick an_earlier_hosts_profile_is_not_this_ones
         ; test_case "during the server start" `Quick a_request_during_the_server_start_waits_for_it
         ; test_case "while the host comes up" `Quick a_request_while_the_host_comes_up_waits_for_it ] )
     ; ( "a session left in Firefox"

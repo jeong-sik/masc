@@ -4088,11 +4088,13 @@ module Browser_lane_view = struct
   let host_session_lines (entry : Masc.Browser_bidi_host_record.entry)
       (ending : Masc.Browser_bidi_host_record.ending) =
     match ending.because with
-    | Profile_not_kept { expected = _; found } ->
-        host_line "Another Firefox holds that port · quit it so the Keeper one can open it"
-        :: (match found with
-            | Some found -> [{ lead = "It runs: "; said = found; breaks = At_slashes }]
-            | None -> [host_line "It did not say which profile it runs"])
+    | Profile_not_kept { expected; found = Some found } ->
+        [host_line "Another Firefox holds that port · quit it so one on the kept profile can open it";
+         { lead = "It runs: "; said = found; breaks = At_slashes };
+         { lead = "Kept: "; said = expected; breaks = At_slashes }]
+    | Profile_not_kept { expected; found = None } ->
+        [host_line "The Firefox there did not say its profile · quit it unless it runs the kept one";
+         { lead = "Kept: "; said = expected; breaks = At_slashes }]
     | Reason_only ->
     List.map host_line
       (match entry.attached_at, ending.session with

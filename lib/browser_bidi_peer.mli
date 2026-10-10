@@ -67,7 +67,9 @@ type profile_refusal =
     same profile. *)
 val runs_profile : t -> expected:string -> (unit, profile_refusal) result
 
+(** What a refusal says, naming [expected], the profile asked for. *)
 val profile_refusal_message : expected:string -> profile_refusal -> string
+
 (** Ends the session {!metadata} asked for; [Ok ()] when there is none to
     end, which is also what Firefox's "invalid session id" says of a session
     that was asked for and never confirmed. There is one to end from the

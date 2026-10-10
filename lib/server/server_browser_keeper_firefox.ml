@@ -571,10 +571,41 @@ let host_ended ~clock ~base_path (host : Posix_spawn_detached.t) firefox =
       let stopped = stop_started ~clock ~leader started in
       forget_once_empty ~base_path started.pid;
       " The Keeper Firefox started for it is left with no host. " ^ stop_message stopped in
+  let ended_before = Printf.sprintf "the BiDi host (pid %d) ended before its connection was listed" host.pid in
+  (* Its own record says why. A host that met another profile's Firefox on
+     the port meets it again on every retry, until the operator quits that
+     Firefox. *)
   let reason =
-    attempt
-      (Printf.sprintf "the BiDi host (pid %d) ended before its connection was listed; %s says why.%s"
-         host.pid (Keeper_firefox.host_log_path ~base_path) left) in
+    match Browser_bidi_host_record.observe ~base_path with
+    | Browser_bidi_host_record.Ended
+        (entry, { because = Browser_bidi_host_record.Profile_not_kept { expected; found }; _ })
+      when entry.pid = host.pid ->
+      let holder =
+        match found with
+        | Some found ->
+          Printf.sprintf
+            "the Firefox on that port runs the profile %s, not %s, the profile kept for the Keeper. \
+             Another Firefox holds that port"
+            found expected
+        | None ->
+          Printf.sprintf
+            "the Firefox on that port did not say which profile it runs, so it is not taken to run \
+             %s, the profile kept for the Keeper. Unless it is the Keeper Firefox, another Firefox \
+             holds that port"
+            expected
+      in
+      operator
+        (Printf.sprintf "%s: %s; the operator quits it, and the next start opens the Keeper Firefox.%s"
+           ended_before holder left)
+    | Browser_bidi_host_record.Ended (_, { because = Browser_bidi_host_record.(Profile_not_kept _ | Reason_only); _ })
+    | Browser_bidi_host_record.Never_started
+    | Browser_bidi_host_record.Record_missing_but_locked
+    | Browser_bidi_host_record.Running _
+    | Browser_bidi_host_record.Died _
+    | Browser_bidi_host_record.Unreadable _ ->
+      attempt
+        (Printf.sprintf "%s; %s says why.%s" ended_before (Keeper_firefox.host_log_path ~base_path) left)
+  in
   ignore (not_started reason : brought_up);
   reason
 

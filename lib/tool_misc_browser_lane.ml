@@ -256,9 +256,11 @@ let selection_error ?bidi_start ~base_path ~tool_name ~start_time error =
        serves the work makes that beside the point: the Keeper retries
        there. The state and the paragraph sit with the fields that decide.
        The paragraph does not grow with what a host has done. Its length
-       follows the workspace path, the address the last host was given and
-       the reason for ending, which a host writes in at most 515 bytes; the
-       address has no limit of its own. The record itself is not sent: its
+       follows the workspace path, the address the last host was given, the
+       reason for ending and, for a host that met another profile, the two
+       profile paths: a host writes each of those in at most 515 bytes, and
+       the expected path is named twice. The address has no limit of its
+       own. The record itself is not sent: its
        list of results grows while a host runs. *)
     let bidi_host =
       match serving_clients, host with

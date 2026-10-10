@@ -414,7 +414,8 @@ let a_bidi_host_that_met_another_profile_says_to_quit_that_firefox () =
   let elsewhere = ended_on (Some "/Users/someone/Firefox/Profiles/x.default") in
   says elsewhere
     [ "The Firefox at that address runs the profile /Users/someone/Firefox/Profiles/x.default"
-    ; "only with a Firefox on /keeper/profile"; "the operator quits it"; "[browser.live.bidi]" ];
+    ; "only with a Firefox on /keeper/profile"; "the operator quits it"; "[browser.live.bidi]"
+    ; "--firefox-profile '/keeper/profile'" ];
   lacks (bidi_message elsewhere) [ "ended before Firefox gave it a session" ];
   says (ended_on None) [ "did not say which profile it runs" ]
 

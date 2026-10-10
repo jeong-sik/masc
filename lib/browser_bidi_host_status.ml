@@ -392,8 +392,8 @@ let masc_restarts =
     (String.capitalize_ascii next_start)
 
 let refused_then_restarted =
-  "when Firefox refuses that host a session, the start after it restarts the Keeper Firefox MASC \
-   started"
+  "when Firefox refuses that host a session, the start after it restarts the Keeper Firefox \
+   MASC is shown to have started"
 
 (* What the host record says since: an ended host's end, a dead or running
    host's attach (its start, when it never attached). *)

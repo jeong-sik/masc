@@ -4085,9 +4085,10 @@ module Browser_lane_view = struct
      one now, so the next host is tried before a restart. A host that ended
      a session on another profile says so first: another Firefox holds that
      port, and the Keeper one cannot open it until that one is quit. Where
-     MASC starts the Keeper Firefox, its next start restarts the one it is
-     shown to have started on its port, and the operator quits any other
-     there first; a session on another port is not in its way. *)
+     MASC starts the Keeper Firefox, its next start restarts a Firefox on its
+     port only when MASC's record shows MASC started it, and the operator
+     quits any other there first; a session on another port is not in its
+     way. *)
   type host_restart = Operator_restarts | Masc_restarts_there | Masc_starts_elsewhere
   let host_restart (keeper : Masc.Browser_bidi_host_status.keeper)
       (entry : Masc.Browser_bidi_host_record.entry) =
@@ -4096,16 +4097,25 @@ module Browser_lane_view = struct
         if Masc.Browser_bidi_host_status.recorded_on_port entry ~port then Masc_restarts_there
         else Masc_starts_elsewhere
     | Lane_off | Not_configured | Not_known -> Operator_restarts
-  let masc_refused_line = "If Firefox refuses the next host, MASC restarts the Firefox it started"
+  let not_in_the_way_of_masc =
+    "That Firefox is not on MASC's port, so it does not stop MASC's start"
+  (* Where a session is held there: what MASC's next start does about it. *)
+  let masc_held_lines = function
+    | Operator_restarts -> []
+    | Masc_restarts_there ->
+        ["MASC restarts that Firefox only if MASC's record shows MASC started it";
+         "Otherwise the operator quits it first"]
+    | Masc_starts_elsewhere -> [not_in_the_way_of_masc]
+  (* Where a session may be held there: what MASC's start after a refusal
+     does about it. *)
+  let masc_maybe_held_lines = function
+    | Operator_restarts -> []
+    | Masc_restarts_there ->
+        ["If Firefox refuses the next host, the start after restarts that Firefox";
+         "only if MASC's record shows MASC started it · or the operator quits it"]
+    | Masc_starts_elsewhere -> [not_in_the_way_of_masc]
   let host_session_lines restart (entry : Masc.Browser_bidi_host_record.entry)
       (ending : Masc.Browser_bidi_host_record.ending) =
-    let held_there = match restart with
-      | Operator_restarts -> []
-      | Masc_restarts_there ->
-          ["MASC's next start restarts that Firefox if MASC started it";
-           "Quit it first if MASC did not start it"]
-      | Masc_starts_elsewhere ->
-          ["That Firefox is not on MASC's port, so it does not stop MASC's start"] in
     match ending.because with
     | Profile_not_kept { expected; found = Some found } ->
         [host_line "Another Firefox holds that port · quit it so one on the kept profile can open it";
@@ -4130,20 +4140,20 @@ module Browser_lane_view = struct
                 ["Session end not confirmed · restart that Firefox before attaching"]
             | Masc_restarts_there | Masc_starts_elsewhere ->
                 "Session end not confirmed · that Firefox refuses hosts while it holds it"
-                :: held_there)
+                :: masc_held_lines restart)
        | (Some _ | None), Session_unknown ->
            (match restart with
             | Operator_restarts ->
                 ["Could not ask Firefox to end the session · restart it if it still runs"]
             | Masc_restarts_there | Masc_starts_elsewhere ->
-                ["Could not ask Firefox to end the session · it holds it if it still runs";
-                 masc_refused_line])
+                "Could not ask Firefox to end the session · it holds it if it still runs"
+                :: masc_maybe_held_lines restart)
        | (Some _ | None), Session_refused ->
            "Firefox refused this host a session · it held one then"
            :: (match restart with
                | Operator_restarts ->
                    ["Stop a host still attached there · restart that Firefox if refused again"]
-               | Masc_restarts_there | Masc_starts_elsewhere -> held_there))
+               | Masc_restarts_there | Masc_starts_elsewhere -> masc_held_lines restart))
   (* The results the host holds no acknowledgement for: how many, and the
      last one. Without an acknowledgement the server may still have taken it,
      so the cause is said only when it settles that. *)
@@ -4245,9 +4255,7 @@ module Browser_lane_view = struct
           match report.keeper with
           | Masc_starts { port; profile; last_start = _ } ->
               host_masc_lines ~port ~profile report.attach.standing
-          | Lane_off ->
-              host_line "Live lane off in runtime.toml · it serves nothing, MASC starts nothing"
-              :: host_attach_lines ~address report.attach
+          | Lane_off -> host_attach_lines ~address report.attach
           | Not_configured ->
               host_attach_lines ~address report.attach
               @ [host_line "With [browser.live.bidi] in runtime.toml, MASC starts Firefox and host"]
@@ -4296,8 +4304,8 @@ module Browser_lane_view = struct
                  (match host_restart report.keeper entry with
                   | Operator_restarts ->
                       ["Its session may be left in Firefox · restart Firefox if a host is refused"]
-                  | Masc_restarts_there | Masc_starts_elsewhere ->
-                      ["Its session may be left in Firefox"; masc_refused_line])
+                  | (Masc_restarts_there | Masc_starts_elsewhere) as restart ->
+                      "Its session may be left in Firefox" :: masc_maybe_held_lines restart)
              @ host_connection_note t
              @ host_unacknowledged_lines entry
              @ attach ~address:(Some entry.bidi_url)
@@ -4315,6 +4323,11 @@ module Browser_lane_view = struct
               host_said "Detail: " detail])
         @ host_last_start_lines
             (Masc.Browser_bidi_host_status.last_start_note report.keeper report.state)
+        (* A lane that is off serves no host, whatever the host's state. *)
+        @ (match report.keeper with
+           | Lane_off ->
+               [host_line "Live lane off in runtime.toml · it serves nothing, MASC starts nothing"]
+           | Masc_starts _ | Not_configured | Not_known -> [])
   (* A path on rows of [max_cells], broken before a slash so each name
      stays whole. A single name longer than a row has nowhere better to
      break and is cut where the row ends, with every cell of it kept: a

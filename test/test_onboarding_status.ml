@@ -487,6 +487,16 @@ let where_masc_does_not_start_the_firefox_the_status_says_why () =
   check bool "the lane off changes the paragraph" false
     (String.equal (paragraph Status.Lane_off) (paragraph Status.Not_known))
 
+(* A session held in a Firefox on MASC's port is in the way of MASC's next
+   start there; one on another port, or at an address that names none, is
+   not. *)
+let a_host_address_is_on_a_port_or_not () =
+  let given bidi_url = { host_entry with bidi_url } in
+  check bool "on the port it names" true (Status.recorded_on_port (given "ws://127.0.0.1:9222/session") ~port:9222);
+  check bool "on another port" false (Status.recorded_on_port (given "ws://127.0.0.1:9333/session") ~port:9222);
+  check bool "an address with no port" false (Status.recorded_on_port (given "ws://127.0.0.1/session") ~port:9222);
+  check bool "no address" false (Status.recorded_on_port (given "not an address") ~port:9222)
+
 (* masc doctor reads who starts the Keeper Firefox from the workspace's
    runtime.toml, with no server. *)
 let doctor_reads_who_starts_the_firefox_from_runtime_toml () =
@@ -722,9 +732,12 @@ let a_bidi_host_report_reads_back_as_written () =
     { at = 1_791_000_100.; port = 9222; profile = "/keeper/profile"; outcome } in
   let with_keeper keeper record = Status.report (observation ~keeper record) in
   List.iter (fun (name, keeper) ->
-      check bool name true
-        (Status.report_of_json (Status.report_to_json (with_keeper keeper (Record.Ended (ended, ending))))
-         = Ok (with_keeper keeper (Record.Ended (ended, ending)))))
+      List.iter (fun (state, record) ->
+          let written = with_keeper keeper record in
+          check bool (name ^ ", " ^ state) true (Status.report_of_json (Status.report_to_json written) = Ok written))
+        [ "never started", Record.Never_started; "attached", Record.Running entry
+        ; "ended", Record.Ended (ended, ending); "died", Record.Died entry
+        ; "unreadable, no host", Record.Unreadable { detail = "torn"; held = Some false } ])
     [ "MASC starts, nothing started yet", masc Start_record.Absent
     ; "MASC starts, the last start attached",
       masc (Start_record.Recorded (started (Start_record.Attached Starter.Host_only)))
@@ -845,6 +858,9 @@ let a_bidi_host_report_reads_back_as_written () =
     (with_masc "last_start" (`Assoc [ "kind", `String "unreadable"; "detail", `String "torn\n" ]));
   refused "an absent last start with a detail"
     (with_masc "last_start" (`Assoc [ "kind", `String "absent"; "detail", `String "torn" ]));
+  refused "a keeper field written twice" (with_keeper_json (`Assoc (masc_fields @ [ "port", `Int 9222 ])));
+  refused "a last start field written twice"
+    (with_masc "last_start" (`Assoc [ "kind", `String "absent"; "kind", `String "absent" ]));
   (* A Keeper is sent the state and the paragraph, not the record. *)
   let ended_observation = observation (Record.Ended (ended, ending)) in
   check bool "the summary is the state and its message" true
@@ -1011,6 +1027,7 @@ let () = run "Onboarding observations"
                    where_masc_starts_the_firefox_the_status_says_so;
                  test_case "where MASC does not start the Firefox, the status says why" `Quick
                    where_masc_does_not_start_the_firefox_the_status_says_why;
+                 test_case "a host address is on a port or not" `Quick a_host_address_is_on_a_port_or_not;
                  test_case "doctor reads who starts the Firefox from runtime.toml" `Quick
                    doctor_reads_who_starts_the_firefox_from_runtime_toml;
                  test_case "a record at the limit says the newest are kept" `Quick

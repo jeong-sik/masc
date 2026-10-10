@@ -149,18 +149,29 @@ The rows under it:
   place: MASC starts the Keeper Firefox and its host, whichever is not
   running, at the next server start or a Keeper's next hover or drag, then
   the port and `Profile:`. A launcher that is not there is installed first.
-  - What comes before the next host follows MASC's start too. A session
-    left or refused on MASC's port is restarted by MASC's next start when
-    MASC started that Firefox, and quit by the operator first when it did
-    not. A Firefox on another port does not stop MASC's start.
+  - What comes before the next host follows MASC's start too. MASC restarts
+    a Firefox on its port only when MASC's record shows MASC started it;
+    the operator quits any other there first. A Firefox on another port
+    does not stop MASC's start.
+  - Session left or refused on MASC's port: the row after the state says
+    MASC restarts that Firefox only if MASC's record shows MASC started it,
+    then `Otherwise the operator quits it first`.
+  - A host that left no reason, or whose connection was gone before it
+    could ask: a session may be held, so the rows say that if Firefox
+    refuses the next host, the start after restarts that Firefox on the same
+    condition.
+  - A host that never got a session: `It got no session and left none in
+    Firefox`, with nothing for the operator to check first.
   - When MASC's last start for that port and profile showed no connection,
-    and ended after what the host record says since, the last rows say when
-    and how it ended, then `Why:`.
-  - With the live lane off in `runtime.toml`, a row before the command says
-    MASC starts nothing. With no `[browser.live.bidi]`, a row after it says
-    the table lets MASC start both.
-  - A refused drag beside a host that never ran points at
-    `b:how MASC starts one` instead of `b:how to attach`.
+    and ended no earlier than what the host record says since, the last
+    rows say when and how it ended, then `Why:`. When that start's record
+    cannot be read, they say so, then `Detail:`.
+- With the live lane off in `runtime.toml`, the last row says the lane
+  serves nothing and MASC starts nothing, whatever the host's state. With
+  no `[browser.live.bidi]`, a row after the command says the table lets
+  MASC start both.
+- A refused drag beside a host that never ran points at
+  `b:how MASC starts one` instead of `b:how to attach` where MASC starts it.
 - A server that does not report the host draws none of these rows.
 
 The first row of each state is this TUI's own words and fits 80 columns.

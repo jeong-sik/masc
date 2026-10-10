@@ -28,7 +28,12 @@
       "path": "bin/masc_tui_http.ml",
       "baseline_lines": 3516,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; credential, request, response and editor semantics pending",
+      "current_lines": 3430,
+      "prs": [
+        42141
+      ],
+      "validation_artifact": "tui-editor-wire/README.md"
     },
     {
       "path": "bin/masc_tui_keeper_chat_transcript.ml",
@@ -543,7 +548,12 @@
       "path": "lib/runtime/runtime.ml",
       "baseline_lines": 4157,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partially improved; materialization, storage, cache and config semantics pending",
+      "current_lines": 4154,
+      "prs": [
+        42141
+      ],
+      "validation_artifact": "tui-editor-wire/README.md"
     },
     {
       "path": "lib/runtime/runtime_claude_code.ml",

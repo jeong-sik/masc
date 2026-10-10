@@ -1619,6 +1619,12 @@ status: reference
   [Browser_host](../../lib/browser_host/browser_host.mli) ·
   [browser-bidi-live-host 설계](../../docs/design/browser-bidi-live-host.md)
 
+**Keeper Firefox Start Record (Keeper Firefox 시작 기록)**
+: `runtime.toml`의 `[browser.live.bidi]`로 live lane이 켜져 있으면 MASC가 다음 서버 시작 또는 Keeper의 다음 hover·drag 때 Keeper Firefox와 그 BiDi host를 직접 시작한다. 이때 시작이 어떻게 끝났는지를 `<base>/.masc/browser-lane/keeper-firefox-start.json`에 한 entry로 통째로 갈아 쓰는 기록(RFC-browser-keeper-firefox §3.7, #42235·#42250). entry는 끝난 시각·포트·프로필·결과(`Attached`/`Not_attached`)를 담고, `Not_attached`의 사유는 한 줄짜리 인쇄 가능 문자열 최대 1024바이트(`message_limit_bytes`)로 잘린다. 경계가 세 군데 있다. (1) 이 기록은 상태 문장만 읽는다 — 시작을 막는 장치가 아니다. (2) MASC는 자기 기록이 "MASC가 시작했다"고 말하는 Firefox만 재시작을 약속한다. 다른 경로로 띄운 Firefox는 운영자가 먼저 종료한다. (3) 다른 포트의 Firefox는 이 시작을 막지 않는다. 상태 표의 `keeper` 행은 시작 주체를 `kind`로 말하고 `masc_starts`는 설정된 포트·프로필과 `last_start`(`absent`/`recorded`/`unreadable`)를 실는다.
+  → [Browser_keeper_firefox_start_record](../../lib/browser_keeper_firefox_start_record.mli) ·
+  [Browser_bidi_host_status](../../lib/browser_bidi_host_status.mli) ·
+  [RFC-browser-keeper-firefox](../../docs/rfc/RFC-browser-keeper-firefox.md)
+
 **Machine Change Mark (기계 변경 표식)**
 : MSX Lane·DOS Lane 기계의 화면이 바뀌었는지 싸게 묻기 위한 표식. 변경 횟수(`count`)와
   기계 정체(`incarnation`)의 한 쌍이다(`change_mark`). 관전자는 지난번에 읽은 쌍을

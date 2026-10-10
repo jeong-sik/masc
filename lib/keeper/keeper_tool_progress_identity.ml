@@ -106,14 +106,41 @@ let disposition_of_json = function
     None
 ;;
 
-let memory_identity ~tool_name ~input ~output_text =
+(* What one output says, read once for both the memory identity and the output
+   fingerprint. A stored marker yields the tool's answer only through verified
+   blob bytes ({!Keeper_tool_answer.verified_stored_answer}); otherwise it keeps
+   the blob's own identity. An inline output yields the tool's answer, or the
+   whole output for a tool that reads no answer. Reading both identities from
+   this one value keeps a stored receipt and its inline form on the same
+   identity. *)
+type output_evidence =
+  | Tool_answer of Yojson.Safe.t
+  | Stored_blob of { sha256 : string; bytes : int; mime : string }
+  | Inline_output of string
+
+let output_evidence ?base_path ~tool_name output_text =
+  match Tool_output.decode_from_agent_core output_text with
+  | Tool_output.Decoded { sha256; bytes; mime; _ } ->
+    (match Option.bind base_path (fun base_path ->
+         Keeper_tool_answer.verified_stored_answer ~base_path ~tool_name ~output_text) with
+     | Some answer -> Tool_answer answer
+     | None -> Stored_blob { sha256; bytes; mime })
+  | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
+    (match Keeper_tool_answer.answer ~tool_name ~output_text with
+     | Some answer -> Tool_answer answer
+     | None -> Inline_output output_text)
+;;
+
+let memory_identity ~tool_name ~input ~evidence =
   match Keeper_tool_answer.resolve tool_name with
   | Keeper_tool_answer.Keeper_handler Keeper_tool_descriptor.Tool_memory_write ->
-    Option.bind (Keeper_tool_answer.answer ~tool_name ~output_text) (fun answer ->
-      Option.map
-        (fun memory_id ->
-          Memory_write { disposition = disposition_of_json answer; memory_id })
-        (memory_id_of_json answer))
+    (match evidence with
+     | Tool_answer answer ->
+       Option.map
+         (fun memory_id ->
+           Memory_write { disposition = disposition_of_json answer; memory_id })
+         (memory_id_of_json answer)
+     | Stored_blob _ | Inline_output _ -> None)
   | Keeper_tool_answer.Keeper_handler Keeper_tool_descriptor.Tool_memory_retract ->
     Option.map (fun memory_id -> Memory_retract memory_id)
       (memory_id_of_json input)
@@ -171,30 +198,21 @@ let inline_output_fingerprint value =
     Some (sha256_hex text)
 ;;
 
-let output_fingerprint ?base_path ~tool_name output_text =
-  match Tool_output.decode_from_agent_core output_text with
-  | Tool_output.Decoded { sha256; bytes; mime; _ } ->
-    (match Option.bind base_path (fun base_path ->
-         Keeper_tool_answer.verified_stored_answer ~base_path ~tool_name ~output_text) with
-     | Some answer -> Some (digest_json answer)
-     | None -> Some (digest_json (stored_output_identity_json ~sha256 ~bytes ~mime)))
-  | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
-    (match Keeper_tool_answer.answer ~tool_name ~output_text with
-     | Some answer -> Some (digest_json answer)
-     | None -> inline_output_fingerprint output_text)
-;;
-
-let digest_tool_output ?base_path ~tool_name output_text =
-  output_fingerprint ?base_path ~tool_name output_text
+let evidence_fingerprint = function
+  | Tool_answer answer -> Some (digest_json answer)
+  | Stored_blob { sha256; bytes; mime } ->
+    Some (digest_json (stored_output_identity_json ~sha256 ~bytes ~mime))
+  | Inline_output output_text -> inline_output_fingerprint output_text
 ;;
 
 let compute_tool_io ~base_path ~tool_name ~input ~output_text =
-  match memory_identity ~tool_name ~input ~output_text with
+  let evidence = output_evidence ?base_path ~tool_name output_text in
+  match memory_identity ~tool_name ~input ~evidence with
   | Some identity ->
     let fingerprint = memory_identity_fingerprint identity in
     Some { input_fingerprint = fingerprint; output_fingerprint = fingerprint }
   | None ->
-    (match digest_tool_input ~tool_name input, digest_tool_output ?base_path ~tool_name output_text with
+    (match digest_tool_input ~tool_name input, evidence_fingerprint evidence with
      | Some input_fingerprint, Some output_fingerprint ->
        Some { input_fingerprint; output_fingerprint }
      | None, _ | _, None -> None)

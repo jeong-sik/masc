@@ -256,6 +256,111 @@ let test_memory_identity_survives_changing_inputs () =
        (call ~tool_name:"keeper_memory_retract" ~memory_id:"sha256:aa"
           ~content:"10:02Z" ~revision:2).P.input_fingerprint)
 
+(* A memory write receipt too large to travel inline reaches the model as a
+   blob marker. Read from verified blob bytes, it must name the same claim its
+   inline form names, so a rewrite loop with a changing request reaches the
+   repeated-call yield either way. *)
+let test_a_stored_memory_rewrite_keeps_memory_identity () =
+  let base_path = Filename.temp_file "masc-memory-write-identity" "" in
+  Sys.remove base_path;
+  Unix.mkdir base_path 0o700;
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) @@ fun () ->
+  let ceiling = O.inline_ceiling_bytes O.default_model_projection in
+  let removed =
+    List.init (ceiling / 64 + 1) (fun i -> `String (Printf.sprintf "sha256:%064d" i))
+  in
+  let receipt ~memory_id ~revision ~at =
+    `Assoc
+      [ "ok", `Bool true
+      ; "error_kind", `String ""
+      ; "identity_disposition", `String "reobserved"
+      ; "what_committed", `String "w"
+      ; "rows_written", `Int 1
+      ; "revision", `Int revision
+      ; "recorded_at", `String at
+      ; "outcome", `String "persisted_current_snapshot"
+      ; "store", `String "current_memory_snapshot"
+      ; "memory_id", `String memory_id
+      ; "basis", `Assoc [ "kind", `String "observed" ]
+      ; "removed_memory_ids", `List removed
+      ]
+  in
+  let stored value =
+    check bool "the receipt exceeds the inline ceiling" true
+      (String.length (Yojson.Safe.to_string value) > ceiling);
+    let result =
+      Tool_result.make_ok ~tool_name:"keeper_memory_write"
+        ~start_time:(Tool_timing.start ()) ~data:value ()
+    in
+    match
+      Masc.Tool_bridge.to_agent_core_typed_result ~base_path
+        ~answer_reader:(fun output_text ->
+          A.answer ~tool_name:"keeper_memory_write" ~output_text)
+        result
+    with
+    | Error error -> fail error.Agent_core.Types.message
+    | Ok typed ->
+      let content = typed.Agent_core.Types.content in
+      (match O.decode_from_agent_core content with
+       | O.Decoded _ -> content
+       | O.Not_marker | O.Invalid_marker _ -> fail "the bridge must store this receipt")
+  in
+  let input at =
+    `Assoc [ "content", `String "Two approvals required"; "observed_at", `String at ]
+  in
+  let io ?base_path ~at output_text =
+    match
+      P.digest_tool_io ?base_path ~tool_name:"keeper_memory_write" ~input:(input at)
+        ~output_text ()
+    with
+    | Some io -> io
+    | None -> fail "digest_tool_io returned no fingerprints"
+  in
+  let stored_io ~memory_id ~revision ~at =
+    io ~base_path ~at (stored (receipt ~memory_id ~revision ~at))
+  in
+  let detail fingerprints : Masc.Keeper_agent_result.tool_call_detail =
+    { tool_name = "keeper_memory_write"
+    ; provider = "test"
+    ; execution_outcome = Tool_result.Ok
+    ; typed_outcome = None
+    ; latency_ms = 1.
+    ; task_id = None
+    ; route_evidence = None
+    ; input_fingerprint = Some fingerprints.P.input_fingerprint
+    ; output_fingerprint = Some fingerprints.P.output_fingerprint
+    }
+  in
+  let first = receipt ~memory_id:"sha256:aa" ~revision:1 ~at:"10:01Z" in
+  let first_stored = stored first in
+  let inline = io ~at:"10:01Z" (Yojson.Safe.to_string first) in
+  let stored_first = io ~base_path ~at:"10:01Z" first_stored in
+  check string "a stored receipt names the claim its inline form names (input)"
+    inline.P.input_fingerprint stored_first.P.input_fingerprint;
+  check string "a stored receipt names the claim its inline form names (output)"
+    inline.P.output_fingerprint stored_first.P.output_fingerprint;
+  check (option (pair string int)) "stored rewrites with a changing request yield"
+    (Some ("keeper_memory_write", 3))
+    (Masc.Keeper_agent_run.For_testing.repeated_exact_tool_call ~threshold:3
+       [ detail (stored_io ~memory_id:"sha256:aa" ~revision:3 ~at:"10:03Z")
+       ; detail (stored_io ~memory_id:"sha256:aa" ~revision:2 ~at:"10:02Z")
+       ; detail stored_first
+       ]);
+  check bool "a stored receipt for another claim keeps its own identity" false
+    (String.equal stored_first.P.input_fingerprint
+       (stored_io ~memory_id:"sha256:bb" ~revision:2 ~at:"10:02Z").P.input_fingerprint);
+  check bool "without the owned store the marker does not name a claim" false
+    (String.equal inline.P.input_fingerprint
+       (io ~at:"10:01Z" first_stored).P.input_fingerprint);
+  let pair : P.history_pair =
+    { tool_name = "keeper_memory_write"; input = input "10:01Z"; output_text = first_stored }
+  in
+  check (list (option string)) "history replay names the same claim"
+    [ Some inline.P.input_fingerprint ]
+    (List.map
+       (Option.map (fun (io : P.io_fingerprints) -> io.input_fingerprint))
+       (P.digest_history_pairs ~base_path (P.History_memo.create ()) [ pair ]))
+
 let selection_fact claim =
   Masc.Keeper_memory_os_types.observed ~claim ~category:Masc.Keeper_memory_os_types.Fact
     ~now:100. ~origin:{kind=Masc.Keeper_memory_os_types.Authored;trace_id="selection-fixture"}
@@ -473,6 +578,8 @@ let () =
             test_a_third_memory_rewrite_stops_the_turn
         ; test_case "memory identity survives changing inputs" `Quick
             test_memory_identity_survives_changing_inputs
+        ; test_case "a stored memory rewrite keeps memory identity" `Quick
+            test_a_stored_memory_rewrite_keeps_memory_identity
         ; test_case "a changed answer changes identity" `Quick
             test_a_changed_answer_changes_identity
         ; test_case "field order does not name identity" `Quick

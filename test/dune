@@ -3283,7 +3283,7 @@
 (test
  (name test_tui_chat_queue_wiring)
  (modules test_tui_chat_queue_wiring)
- (libraries masc.keeper_chat_operations masc_tui_message_input masc_tui_link_preview masc_tui_image_preview
+ (libraries masc_tui_chat_media masc.keeper_chat_delivery_identity masc.keeper_chat_operations masc_tui_message_input masc_tui_link_preview masc_tui_image_preview
   masc_tui_answering
   masc_tui_keys
   masc_tui_fusion_model
@@ -3448,6 +3448,12 @@
   masc_tui_keeper_chat_history
   masc_tui_keeper_chat_transcript
   yojson))
+
+(test
+ (name test_tui_chat_media)
+ (modules test_tui_chat_media)
+ (libraries alcotest masc masc_tui_chat_media masc_tui_image_preview
+  masc_tui_keeper_chat_history yojson))
 
 (test
  (name test_tui_keeper_chat_queue)

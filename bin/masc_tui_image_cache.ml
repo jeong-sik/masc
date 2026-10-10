@@ -232,3 +232,21 @@ let prepare_png ~run ~cache_dir url =
         match convert_to_png ~run ~cache_dir input with
         | Ok path -> read_bytes path
         | Error failures -> Error (conversion_failure_text failures)
+
+let prepare_payload ~run ~cache_dir bytes =
+  match verdict_of_bytes bytes with
+  | Empty -> Error "image payload is empty"
+  | Known_image { media_type = "image/png" } -> Ok bytes
+  | Known_image _ | Unknown_signature ->
+    let input = input_path ~cache_dir ("payload:" ^ bytes) in
+    let saved =
+      Result.bind (attempt_path ~cache_dir ~prefix:"payload_attempt_" ~suffix:".img")
+        (fun attempt ->
+          match Out_channel.with_open_bin attempt (fun oc -> Out_channel.output_string oc bytes) with
+          | () -> publish ~attempt ~target:input
+          | exception Sys_error detail -> discard attempt; Error detail)
+    in
+    Result.bind saved (fun input ->
+      match convert_to_png ~run ~cache_dir input with
+      | Ok path -> read_bytes path
+      | Error failures -> Error (conversion_failure_text failures))

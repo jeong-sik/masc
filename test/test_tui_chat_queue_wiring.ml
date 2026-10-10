@@ -45,6 +45,7 @@ let entry_at ?(id = "") at : Tui_types.msg_entry =
   ; me_operation_seq = 0
   ; me_text = Printf.sprintf "row at %.0f" at
   ; me_image = Masc_tui_image_preview.No_image
+  ; me_media = []
   ; me_memory_summary = None
   ; me_journal = []
   ; me_memory_pass = Masc_tui_message_layout.No_pass
@@ -73,6 +74,7 @@ let chat_entry ?turn_phase ?turn_sequence ?(operation_seq = 0) ?memory_summary
   ; me_operation_seq = operation_seq
   ; me_text = text
   ; me_image = Masc_tui_image_preview.No_image
+  ; me_media = []
   ; me_memory_summary = memory_summary
   ; me_journal = []
   ; me_memory_pass = Masc_tui_message_layout.No_pass
@@ -1688,6 +1690,69 @@ let journal_log ~request_id ~started_at ?(finished = true) () =
     else []) in
   Log.commit log.Tui_types.tl_log;
   log
+;;
+
+(* Media belongs to the decoded durable row, while exact journal ownership
+   replaces its prose. Exercise the composed frame, not only history decode. *)
+let test_journal_replacement_retains_history_media () =
+  let module Media = Masc_tui_chat_media in
+  let module History = Masc_tui_keeper_chat_history in
+  let module Delivery = Keeper_chat_delivery_identity in
+  List.iter (fun (autonomous,finished,reply_text) ->
+      let turn_ref = "media#1" in
+      let provenance = if autonomous then [] else
+        Delivery.delivery_provenance_fields {delivery_key=Delivery.Operation
+          (Delivery.Request_id.of_string "media-operation" |> Result.get_ok);
+          transcript_slot=Delivery.Terminal_result} in
+      let blocks = `List [
+        `Assoc ["t",`String "image";"src",`String "/api/v1/media/image";"cap",`String "MEDIA_IMAGE"];
+        `Assoc ["t",`String "voice";"secs",`Float 2.5;"transcript",`String "MEDIA_VOICE"];
+        `Assoc ["t",`String "attach";"name",`String "MEDIA_FILE";"src",`String "/api/v1/media/file"];
+        `Assoc ["t",`String "svg";"cap",`String "MEDIA_SVG";"svg",`String "<svg/>"]] in
+      let wire = `Assoc (provenance @ ["id",`String "media-row";"role",`String "assistant";
+        "content",`String reply_text;"ts",`Float 2.;"turn_ref",`String turn_ref;
+        "autonomous_turn",(if autonomous then `Assoc ["turn_id",`String turn_ref] else `Null);
+        "blocks",blocks]) in
+      let history = match History.rows_of_json (`List [wire]) with
+        | Ok {rows=[row];dropped=0} -> row
+        | _ -> fail "typed media history did not retain exactly one row" in
+      check int "all original decoded media survive" 4 (List.length history.media);
+      let source = match Tui_types.journal_source_of_history history with
+        | Some source -> source | None -> fail "fixture must select its actual operation/autonomous journal" in
+      let request_id=Log.source_key source in
+      let image=Media.newest_image history.media |> Option.get in
+      let row = { (chat_entry ~request_id ~role:(if autonomous then Tui_types.Message_autonomous else Message_keeper)
+          ~text:(Media.append_text ~text:history.text history.media) ~at:2. ()) with
+        me_identity=Tui_types.Persisted_row (Option.get history.structural_id);
+        me_media=history.media;me_image=image;
+        me_turn_sequence=history.turn_sequence } in
+      let state=Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+      state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+      state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+      state.msg_target_keeper_name <- Some "alpha";
+      state.msg_loaded_keeper <- Some "alpha";
+      state.msg_loaded <- [row];
+      let log=Tui_types.turn_log_create_for_source ~keeper_name:"alpha" ~source ~started_at:1. in
+      let events=[line 0 1. (E.Run_started {run_id="media-run";thread_id="keeper:alpha"});
+        line 1 1.1 (E.Reply_details {reply=reply_text;turn_outcome=Masc.Keeper_turn_outcome.Visible_reply;
+          turn_ref=Ids.Turn_ref.make ~trace_id:"media" ~absolute_turn:1;
+          terminal_stream_scope=None})] @
+        (if finished then [line 2 1.2 (E.Run_finished {run_id="media-run"})] else []) in
+      ignore (Tui_types.turn_log_add_journaled log events);
+      Log.commit log.tl_log;
+      Tui_types.hold_settled_log state log;
+      check bool "fixture exercises held versus partial ownership" finished
+        (Tui_types.turn_log_holds_the_turn log);
+      let projected=Tui_types.chat_rows_for state "alpha" in
+      (match projected with
+       | [remaining] ->
+           check bool "remainder keeps durable source identity" true (remaining.me_identity=row.me_identity);
+           check bool "remainder keeps original image action" true (remaining.me_image=image);
+           check string "only media remains when journal owns prose"
+             (Media.append_text ~text:"" history.media) remaining.me_text
+       | _ -> fail "media remainder was dropped or duplicated");
+      check bool "canonical history row is unchanged" true (List.hd state.msg_loaded == row))
+    [false,true,"MEDIA_REPLY";false,false,"MEDIA_REPLY";true,true,""]
 ;;
 
 (* A journal read starts where the session's record of the turn ends: after a
@@ -4645,7 +4710,8 @@ let () =
     [ ( "expanded diagnostics",
         [ test_case "search finds a batched request by its own id" `Quick
             test_search_finds_a_batched_request_by_its_own_id ] )
-    ; ( "attachment captions", [] )
+    ; ( "attachment captions", [test_case "journal replacement retains source-owned media" `Quick
+          test_journal_replacement_retains_history_media] )
     ; ( "visible delivery",
         [ test_case "pending to observed work" `Quick test_delivery_states_and_observed_work_are_identifiable
         ; test_case "speech preserves original words" `Quick test_speech_keeps_original_words_across_metadata_and_retry

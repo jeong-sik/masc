@@ -1715,7 +1715,7 @@ let test_a_sized_row_decodes_its_pixels () =
           Alcotest.(check (option int)) "width" (Some 3456) att.History.att_width;
           Alcotest.(check (option int)) "height" (Some 2168) att.History.att_height;
           (match att.History.att_image with
-           | Masc_tui_image_preview.Unavailable_attachment "shot.png" -> ()
+           | Masc_tui_image_preview.Unavailable_image { name = "shot.png"; _ } -> ()
            | _ -> Alcotest.fail "hash-only history has no readable payload")
         | other ->
           Alcotest.failf "expected one attachment, got %d" (List.length other))

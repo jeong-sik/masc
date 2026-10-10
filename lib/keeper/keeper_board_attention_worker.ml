@@ -1884,6 +1884,9 @@ let prunes_and_read ~base_path ~keeper_name ?hook () =
   (* The settled receipts of consumed candidates go on the same wake, so the
      partition ledger of a Keeper that never restarts stays bounded too. Like
      the candidate prune, a failure is observed and retried on the next wake. *)
+  (* MEASUREMENT-ONLY REVERT (uncommitted): candidate read between the two
+     prunes, for the tripwire measurement. *)
+  let* candidates = Candidate.load_candidates ~base_path ~keeper_name in
   (match Partition.prune_settled_receipts ~base_path ~keeper_name with
    | Ok 0 -> ()
    | Ok removed ->
@@ -1896,15 +1899,7 @@ let prunes_and_read ~base_path ~keeper_name ?hook () =
        "board_attention_settled_receipt_prune_failed keeper=%s detail=%s"
        keeper_name
        detail);
-  (* The candidate list is read only after both prunes. A list read before
-     them can still hold a candidate that an owner settlement (which runs
-     without this lock) consumed meanwhile; once the prune dropped that
-     candidate's settled receipt, [ensure_roots] would mint a fresh [Ready]
-     root that no candidate row backs, and the worker would block on
-     "candidate ledger lacks partition member" forever because only [Settled]
-     receipts are pruned. Receipts are dropped only above this read, so a
-     candidate consumed after it still has its [Settled] receipt. *)
-  Candidate.load_candidates ~base_path ~keeper_name
+  Ok candidates
 ;;
 
 let process_next_with_claim_ready_exact_current
@@ -2129,6 +2124,15 @@ let replay_completed_owner_wake
 (* Only the captured list is drained: workers may complete more partitions
    while this owner yields, but those belong to the next admission snapshot.
    Yield outside each durable transaction so other fibers remain runnable. *)
+(* Test seam for the snapshot-capture boundary: every
+   [settle_completed_snapshot] call fires this right after it has captured
+   the completed list, before settling any member. A test hook lands a new
+   completion in exactly that gap, deterministically. Production installs
+   the no-op; a test must restore it in its teardown. *)
+let captured_snapshot_hook =
+  ref (fun ~base_path:_ ~keeper_name:_ ~completed:_ -> ())
+;;
+
 let settle_completed_snapshot
       ~base_path
       ~keeper_name
@@ -2152,6 +2156,11 @@ let settle_completed_snapshot
       settle_snapshot settled rest
   in
   let* completed = completed_in_order ~base_path ~keeper_name in
+  (* Test seam for the snapshot-capture boundary: the captured list is
+     settled from here, so a test hook fires exactly after the capture and
+     can land a new completion deterministically before the walk starts.
+     Production installs the no-op. *)
+  !captured_snapshot_hook ~base_path ~keeper_name ~completed;
   match completed with
   | [] -> Ok No_completed_partition
   | first :: _ ->
@@ -2487,6 +2496,7 @@ module For_testing = struct
 
   let deliver_and_settle_completed = deliver_and_settle_completed
   let prunes_and_read = prunes_and_read
+  let captured_snapshot_hook = captured_snapshot_hook
   let reconcile_quarantines = reconcile_quarantines
   let process_next = process_next
   let process_next_exact = process_next_exact

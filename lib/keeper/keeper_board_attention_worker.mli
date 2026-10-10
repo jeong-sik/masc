@@ -178,12 +178,18 @@ module For_testing : sig
     base_path:string ->
     keeper_name:string ->
     (unit, string) result
-  (** The process-start quarantine reconciliation pass [run] performs, under
-      the epoch of the worker that owns the pass. A Ready partition its
-      candidate's quarantine contradicts is claimed and blocked with a
-      [Durable_partition_invariant] reason instead of failing the pass.
-      Exposed so a test can drive it without standing up the full Eio worker
-      lifecycle. *)
+
+  val captured_snapshot_hook :
+    ( base_path:string
+      -> keeper_name:string
+      -> completed:Keeper_board_attention_partition.t list
+      -> unit )
+    ref
+  (** Fired by every [settle_completed_snapshot] call immediately after it
+      captures the completed list and before any member is settled. A test
+      hook lands new completions in exactly that capture boundary -
+      deterministically, without polling. Production installs the no-op; a
+      test must restore it in its teardown. *)
 
   val drain_outcome_label : drain_outcome -> string
   (** The drain verdict as one token, as logged. Retry_later keeps its reason

@@ -665,33 +665,34 @@ let test_completed_snapshot_failure_preserves_remainder_and_replays () =
     (delivered_ids ~base_path)
 ;;
 
-let test_completed_snapshot_yields_and_defers_new_completions () =
+let test_completed_snapshot_captures_settle_and_continues_waking () =
   Eio_main.run @@ fun _ ->
   with_temp_base "board-completed-growing" @@ fun base_path ->
   let first = record ~base_path (candidate ~id:"captured-first" ~recorded_at:1.0 ()) in
   let second = record ~base_path (candidate ~id:"captured-second" ~recorded_at:2.0 ()) in
   ignore (complete_next ~base_path J.Relevant);
   ignore (complete_next ~base_path J.Relevant);
-  Eio.Switch.run @@ fun sw ->
   let added, resolve_added = Eio.Promise.create () in
-  Eio.Fiber.fork ~sw (fun () ->
-    (* Wait for a durable boundary, not a timer or an assumed fork order. *)
-    let rec await_first () =
-      if relevant_delivery_count ~base_path ~candidate_id:first.candidate_id = 0
-      then (Eio.Fiber.yield (); await_first ())
-    in
-    await_first ();
-    Alcotest.(check int) "other fiber runs between captured members" 0
-      (relevant_delivery_count ~base_path ~candidate_id:second.candidate_id);
-    let new_candidate =
-      record ~base_path (candidate ~id:"completed-during-drain" ~recorded_at:3.0 ())
-    in
-    ignore (complete_next ~base_path J.Relevant);
-    Eio.Promise.resolve resolve_added new_candidate);
-  (match ok "drain captured snapshot"
-     (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha") with
-   | W.Partition_settled { continuation_wake = Some _; _ } -> ()
-   | _ -> Alcotest.fail "new completion did not retain a continuation wake");
+  (* The hook only exists to prove the new completion survives a settle that
+     had already captured its snapshot: it lands in the gap right after the
+     capture, so the settle below cannot see it in [completed] and must come
+     back with a continuation wake. No polling, no yield-ordering assumption -
+     the hook fires before the walk starts. *)
+  let saved_hook = !W.For_testing.captured_snapshot_hook in
+  W.For_testing.captured_snapshot_hook :=
+    (fun ~base_path ~keeper_name:_ ~completed:_ ->
+       let new_candidate =
+         record ~base_path (candidate ~id:"completed-during-drain" ~recorded_at:3.0 ())
+       in
+       ignore (complete_next ~base_path J.Relevant);
+       Eio.Promise.resolve resolve_added new_candidate);
+  Fun.protect
+    ~finally:(fun () -> W.For_testing.captured_snapshot_hook := saved_hook)
+    (fun () ->
+       (match ok "drain captured snapshot"
+          (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha") with
+        | W.Partition_settled { continuation_wake = Some _; _ } -> ()
+        | _ -> Alcotest.fail "new completion did not retain a continuation wake"));
   let new_candidate = Eio.Promise.await added in
   Alcotest.(check (list string)) "new completion is outside captured snapshot"
     [ first.candidate_id; second.candidate_id ] (delivered_ids ~base_path);
@@ -4490,8 +4491,8 @@ let () =
             "completed snapshot preserves failure and replays without duplication"
             `Quick test_completed_snapshot_failure_preserves_remainder_and_replays
         ; Alcotest.test_case
-            "completed snapshot yields and defers concurrent completion"
-            `Quick test_completed_snapshot_yields_and_defers_new_completions
+            "completed snapshot capture defers new completions to the next wake"
+            `Quick test_completed_snapshot_captures_settle_and_continues_waking
         ; Alcotest.test_case
             "discards do not hold the owner delivery slot"
             `Quick

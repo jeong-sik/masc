@@ -392,6 +392,57 @@ let replay filename () =
      | Runs.Completed {outcome=Runs.Succeeded; _} -> ()
      | Running | Completed _ | Completion_persistence_failed _ ->
          fail "verified replacement must complete its exact run successfully");
+  let successor_queries = match member "successor_probe_queries" envelope with
+    | `Null -> [] | json -> Yojson.Safe.Util.to_list json |> List.map Yojson.Safe.Util.to_string in
+  if successor_queries <> [] then (
+    check bool "successor capture requires an actual committed response" true (!injected && receipts<>[]);
+    let stores = ["current_snapshot",current_path;
+      "consumption_and_lookup_receipt",Current.durable_range_receipt_path ~keepers_dir ~keeper_id;
+      "memory_journal",Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id;
+      "pending_queue",queue_path] in
+    let before = List.map (fun (name,path) -> name,Fs_compat.load_file_opt path) stores in
+    let state_bundle = `Assoc (List.map (fun (name,bytes) -> name, match bytes with
+      | None -> `Assoc ["present",`Bool false]
+      | Some bytes -> `Assoc ["present",`Bool true;"bytes",`String bytes;
+          "sha256",`String (sha256 bytes)]) before) in
+    let state = Current.read_successor_recall_for_keepers_dir ~keepers_dir ~keeper_id |> require in
+    check bool "captured successor state is the measured corrected snapshot" true (state.snapshot=current);
+    let query_exports = List.mapi (fun index query ->
+      let candidates = Masc.Keeper_tool_memory_runtime.For_testing.successor_candidates_for_query
+        ~query state.successor_candidates in
+      let requests = ref [] in
+      let evaluate ~state ~questions =
+        let request_body = Masc.Typesafeai_types.request_to_yojson
+          ~model:"jev-latest" ~state ~questions |> Yojson.Safe.to_string in
+        let questions = `Assoc (List.map (fun (id,question) ->
+          id,Masc.Typesafeai_types.question_to_yojson question) questions) in
+        requests := `Assoc ["request_index",`Int (List.length !requests);
+          "model",`String "jev-latest";"request_body",`String request_body;
+          "request_body_sha256",`String (sha256 request_body);
+          "state",state;"questions",questions;"state_sha256",`String (hash_json state);
+          "questions_sha256",`String (hash_json questions)] :: !requests;
+        Error (Masc.Keeper_workspace_memory_selection.Unavailable "capture only") in
+      let result = Masc.Keeper_memory_successor_selection.select_with_evaluate
+        ~evaluate ~query candidates in
+      check int "capture emits one real question per matched pair" (List.length candidates)
+        (List.length !requests);
+      check int "capture cannot select a successor" 0 (List.length result.selected);
+      check int "every capture-only pair remains unresolved" (List.length candidates)
+        (List.length result.unresolved);
+      `Assoc ["query_id",`String (Printf.sprintf "query-%03d" (index+1));
+        "query",`String query;"matched_candidate_count",`Int (List.length candidates);
+        "requests",`List (List.rev !requests)]) successor_queries in
+    List.iter (fun (name,path) -> check (option string) (name ^ " unchanged by successor capture")
+      (List.assoc name before) (Fs_compat.load_file_opt path)) stores;
+    let export = `Assoc ["measurement",`String "production_successor_judgment_capture";
+      "semantic_judgment_performed",`Bool false;"captured_at",`Float (Time_compat.now ());
+      "phase",`String "after_actual_correction_and_recall_before_retirement";
+      "predecessor_fixture",`String filename;"predecessor_response_sha256",`String (sha256 response_raw);
+      "predecessor_capture_sha256",`String (hash_json capture);
+      "keeper_id",`String keeper_id;"trace_id",`String trace_id;"absolute_turn",`Int absolute_turn;
+      "state_bundle",state_bundle;"state_bundle_sha256",`String (hash_json state_bundle);
+      "queries",`List query_exports] in
+    Printf.printf "MEMORY_SUCCESSOR_JUDGMENT_EXPORT %s\n%!" (Yojson.Safe.to_string export));
   let followup_proposals = match member "followup_proposals" envelope with
     | `Null -> [] | json -> Yojson.Safe.Util.to_list json |> List.map Yojson.Safe.Util.to_string in
   if String.equal filename "independent_200.json" then

@@ -1155,21 +1155,20 @@ let test_a_restart_forgets_the_width () =
 
 (* A continuity answer that leaves out the working state never reaches
    publication: validate_selection refuses it as Domain_output_invalid, and
-   RFC-librarian-lifecycle §4.3 counts a refused output among the failures
-   reading less answers. *)
+   invalid output does not establish that the input exceeded capacity. *)
 let answer_without_state =
   Exact_output_fixture.openai_response
     (Yojson.Safe.from_string
        {|{"new_claims":[],"dropped":[],"working_contexts":[],"working_state":null}|})
 
-let test_an_answer_without_a_working_state_reads_less () =
+let test_an_answer_without_a_working_state_keeps_width () =
   narrowing_fixture ~slot_count:1
     ~answer:(fun _index _body -> `OK, answer_without_state)
   @@ fun ~bodies ~pass ~coverage ~hide_source:_ ~restart:_ ~config:_ ->
   pass ();
   pass ();
-  check bool "an answer without a working state reads less next time" true
-    (List.nth !bodies 1 < List.nth !bodies 0);
+  check bool "an invalid domain answer preserves the request width" true
+    (List.nth !bodies 1 = List.nth !bodies 0);
   check (option int) "and commits no continuity" None (coverage ())
 
 (* The answer validated and only the snapshot failed to land. That is not the
@@ -1213,9 +1212,8 @@ let test_a_size_refusal_anywhere_in_the_walk_narrows () =
     (List.nth !bodies 2 < List.nth !bodies 0);
   check (option int) "a walk of refusals commits nothing" None (coverage ())
 
-(* An answer the validator refused and a quota refusal, in either order. The
-   refused answer is size evidence wherever the walk met it, so both orders
-   read less. *)
+(* An invalid domain answer and a quota refusal, in either order, do not
+   establish that a smaller source range would produce a valid answer. *)
 let walk_of_two ~first ~second =
   narrowing_fixture ~slot_count:2
     ~answer:(fun index _body -> if index mod 2 = 0 then first () else second ())
@@ -1223,7 +1221,8 @@ let walk_of_two ~first ~second =
   pass ();
   check int "the walk tried both slots" 2 (List.length !bodies);
   pass ();
-  check bool "the next pass reads less" true (List.nth !bodies 2 < List.nth !bodies 0);
+  check bool "invalid output veto preserves width across both slot orders" true
+    (List.nth !bodies 2 = List.nth !bodies 0);
   check (option int) "and nothing is committed" None (coverage ())
 
 let quota () = `Too_many_requests, refused "rate_limit_error"
@@ -1281,10 +1280,10 @@ let test_an_api_commit_releases_the_cli_limit () =
   check int "the CLI is not asked again" 3 !cli_calls
 let no_state () = `OK, answer_without_state
 
-let test_a_refused_answer_then_a_quota_reads_less () =
+let test_a_refused_answer_then_a_quota_keeps_width () =
   walk_of_two ~first:no_state ~second:quota
 
-let test_a_quota_then_a_refused_answer_reads_less () =
+let test_a_quota_then_a_refused_answer_keeps_width () =
   walk_of_two ~first:quota ~second:no_state
 
 let test_reports_in_one_pass_keep_any_size_verdict () =
@@ -1336,14 +1335,14 @@ let () = run "production continuity pair"
     test_case "a size refusal anywhere in the walk narrows" `Quick test_a_size_refusal_anywhere_in_the_walk_narrows;
     test_case "an unreadable source keeps the width" `Quick test_an_unreadable_source_keeps_the_width;
     test_case "a restart forgets the width" `Quick test_a_restart_forgets_the_width;
-    test_case "an answer without a working state reads less" `Quick
-      test_an_answer_without_a_working_state_reads_less;
+    test_case "an answer without a working state keeps width" `Quick
+      test_an_answer_without_a_working_state_keeps_width;
     test_case "a snapshot that fails to commit keeps the width" `Quick
       test_a_snapshot_that_fails_to_commit_keeps_the_width;
-    test_case "a refused answer then a quota reads less" `Quick
-      test_a_refused_answer_then_a_quota_reads_less;
-    test_case "a quota then a refused answer reads less" `Quick
-      test_a_quota_then_a_refused_answer_reads_less;
+    test_case "a refused answer then a quota keeps width" `Quick
+      test_a_refused_answer_then_a_quota_keeps_width;
+    test_case "a quota then a refused answer keeps width" `Quick
+      test_a_quota_then_a_refused_answer_keeps_width;
     test_case "reports in one pass keep any size verdict" `Quick
       test_reports_in_one_pass_keep_any_size_verdict;
     test_case "normal witnessed coverage" `Quick test_ordinary_witnessed_coverage;

@@ -109,23 +109,6 @@ let fingerprint_of (args : Yojson.Safe.t) =
    behavior: the server binds the shared store at boot, and tests that
    exercise durability bind their own temp-dir store. *)
 
-(* Entries older than the TTL leave on every write and every read, so the
-   lists cannot grow on nothing but time: an unattended keeper whose asks
-   keep timing out leaves entries that the next operation reaps, and a
-   remembered answer nobody's retry ever claims does not outlive its
-   moment. The journal is deliberately left alone: it is the crash
-   history, and the store re-derives its view from it at boot (the design's
-   "the journal is never cleaned"). Under the mutex; callers already hold
-   it. *)
-let reap_locked t ~now =
-  let fresh noted_at = now -. noted_at <= ttl_sec in
-  t.expired <-
-    List.filter
-      (fun ask -> fresh ask.expired_noted_at)
-      t.expired;
-  t.remembered <-
-    List.filter (fun entry -> fresh entry.remembered_answered_at) t.remembered
-
 let validate_records records =
   let attempts = Hashtbl.create 16 in
   let bad detail = raise (Yojson.Json_error detail) in
@@ -162,6 +145,23 @@ let validate_records records =
          | Some (expected, false) when expected = identity -> Hashtbl.replace attempts id (identity, true)
          | _ -> bad "closure does not name an open exact consume")
     | _ -> bad "unknown journal operation") records
+
+(* Entries older than the TTL leave on every write and every read, so the
+   lists cannot grow on nothing but time: an unattended keeper whose asks
+   keep timing out leaves entries that the next operation reaps, and a
+   remembered answer nobody's retry ever claims does not outlive its
+   moment. The journal is deliberately left alone: it is the crash
+   history, and the store re-derives its view from it at boot (the design's
+   "the journal is never cleaned"). Under the mutex; callers already hold
+   it. *)
+let reap_locked t ~now =
+  let fresh noted_at = now -. noted_at <= ttl_sec in
+  t.expired <-
+    List.filter
+      (fun ask -> fresh ask.expired_noted_at)
+      t.expired;
+  t.remembered <-
+    List.filter (fun entry -> fresh entry.remembered_answered_at) t.remembered
 
 let bind_to_journal ?now ~base_path t =
   let path = Keeper_gate_path.late_approval_log ~base_path in
@@ -421,23 +421,6 @@ let append_record_locked t record =
           t.journal_error <- Some (Journal_unavailable
             (Fs_compat.private_jsonl_transaction_error_to_string error));
           Error ())
-
-(* Entries older than the TTL leave on every write and every read, so the
-   lists cannot grow on nothing but time: an unattended keeper whose asks
-   keep timing out leaves entries that the next operation reaps, and a
-   remembered answer nobody's retry ever claims does not outlive its
-   moment. The journal is deliberately left alone: it is the crash
-   history, and the store re-derives its view from it at boot (the design's
-   "the journal is never cleaned"). Under the mutex; callers already hold
-   it. *)
-let reap_locked t ~now =
-  let fresh noted_at = now -. noted_at <= ttl_sec in
-  t.expired <-
-    List.filter
-      (fun ask -> fresh ask.expired_noted_at)
-      t.expired;
-  t.remembered <-
-    List.filter (fun entry -> fresh entry.remembered_answered_at) t.remembered
 
 (* NDT-OK: wall-clock default at this boundary; the gate passes its own
    clock's reading so ages are measured against the same clock family the

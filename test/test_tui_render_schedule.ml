@@ -287,7 +287,19 @@ let test_wake_readings_stay_four_separate_answers () =
      = Schedule.Wake_history_failed "boom")
 ;;
 
+let test_terminal_size_retains_raw_resize_signal () =
+  let cache = Schedule.Terminal_size_cache.create ~fallback:(24,80) in
+  List.iter (fun cols ->
+    check bool "tiny raw width change repaints even with same safe layout width" true
+      (Schedule.Terminal_size_cache.refresh cache ~probe:(fun () -> Some (24,cols))
+       = Schedule.Terminal_size_cache.Changed (24,4));
+    check bool "same raw width stays idle" true
+      (Schedule.Terminal_size_cache.refresh cache ~probe:(fun () -> Some (24,cols))
+       = Schedule.Terminal_size_cache.Unchanged (24,4))) [1;2;3;4;2;1]
+
 let () =
+  test_terminal_size_retains_raw_resize_signal ();
+  test_terminal_size_retains_raw_resize_signal ();
   run "tui_render_schedule"
     [ ( "render scheduling"
       , [ test_case "idle performs no render work" `Quick

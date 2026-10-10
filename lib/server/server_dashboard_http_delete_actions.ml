@@ -470,7 +470,83 @@ let keeper_artifact_path config keeper_name artifact =
       (Keeper_board_attention_partition.ledger_path
          ~base_path:config.Workspace.base_path
          ~keeper_name)
+  | Keeper_antigravity_home_artifact path -> Some path
+  | Keeper_antigravity_prepare_lock_artifact path -> Some path
+  | Keeper_muse_home_artifact path -> Some path
   | Agent_artifact_bundle _ -> None
+;;
+
+(* The official-client owner homes are named by a hash of the Keeper name and
+   an OAuth source (Antigravity) or account home (Muse) that lives in
+   runtime.toml. Derive the paths before the removal loop commits keeper
+   removal, which deletes the assignment this resolution reads; an
+   unresolvable configuration omits the entry rather than failing the purge,
+   since a same-name successor cannot re-derive the leaf either way. *)
+let official_client_purge_artifacts config ~keeper_name =
+  let open Keeper_shutdown_types in
+  let runtime_root = Common.masc_dir_from_base_path ~base_path:config.Workspace.base_path in
+  let runtime_toml =
+    Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:config.Workspace.base_path
+  in
+  match Runtime_toml.parse_file runtime_toml with
+  | Error _ -> []
+  | Ok cfg ->
+    let entry_runtime_id route =
+      match route with
+      | None -> None
+      | Some id ->
+        (match
+           List.find_opt
+             (fun (lane : Runtime_schema.lane_decl) -> String.equal lane.id id)
+             cfg.lane_decls
+         with
+         | Some lane ->
+           (match lane.candidate_ids with
+            | first :: _ -> Some first
+            | [] -> None)
+         | None -> Some id)
+    in
+    (match entry_runtime_id (List.assoc_opt keeper_name cfg.keeper_assignments) with
+     | None -> []
+     | Some runtime_id ->
+       (match
+          List.find_opt
+            (fun (binding : Runtime_schema.binding) ->
+               String.equal (Runtime_schema.binding_key binding) runtime_id)
+            cfg.bindings
+        with
+        | None -> []
+        | Some binding ->
+          (match Runtime_schema.provider_of_id cfg binding.provider_id with
+           | None -> []
+           | Some provider ->
+             (match provider.api_format with
+              | Runtime_schema.Antigravity_cli_runtime ->
+                (match provider.credentials with
+                 | Some (Runtime_schema.File oauth_source) ->
+                   let owner_leaf =
+                     Runtime_antigravity_home.keeper_owner_leaf ~keeper_name ~oauth_source
+                   in
+                   [ Keeper_antigravity_home_artifact
+                       (Runtime_antigravity_home.keeper_home_dir ~runtime_root ~owner_leaf)
+                   ; Keeper_antigravity_prepare_lock_artifact
+                       (Runtime_antigravity_home.keeper_prepare_lock_path ~runtime_root ~owner_leaf)
+                   ]
+                 | Some (Runtime_schema.Env _ | Runtime_schema.Inline _) | None -> [])
+              | Runtime_schema.Muse_serve_runtime ->
+                (match provider.account_home with
+                 | None -> []
+                 | Some account_home ->
+                   [ Keeper_muse_home_artifact
+                       (Runtime_muse_home.keeper_identity_dir ~runtime_root ~keeper_name ~account_home)
+                   ])
+              | Runtime_schema.Codex_app_server_runtime
+              | Runtime_schema.Claude_code_runtime
+              | Runtime_schema.Messages_api
+              | Runtime_schema.Chat_completions_api
+              | Runtime_schema.Ollama_api
+              | Runtime_schema.Gemini_api
+              | Runtime_schema.Vertex_gemini_api -> []))))
 ;;
 
 let keeper_playground_paths config keeper_name =
@@ -538,6 +614,7 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
       Keeper_shutdown_types.dashboard_purge_artifact_plan
         ~keeper_name:keeper_name
         context
+      @ official_client_purge_artifacts config ~keeper_name
     in
     let rec remove = function
       | [] -> Ok ()
@@ -622,6 +699,9 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
             | Keeper_chat_store_artifact
             | Keeper_board_attention_candidates_artifact
             | Keeper_board_attention_partitions_artifact
+            | Keeper_antigravity_home_artifact _
+            | Keeper_antigravity_prepare_lock_artifact _
+            | Keeper_muse_home_artifact _
             | Agent_artifact_bundle _ -> ());
            (match (match artifact with
              | Keeper_configuration_artifact ->
@@ -658,6 +738,9 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
                | Keeper_chat_store_artifact
                | Keeper_board_attention_candidates_artifact
                | Keeper_board_attention_partitions_artifact
+               | Keeper_antigravity_home_artifact _
+               | Keeper_antigravity_prepare_lock_artifact _
+               | Keeper_muse_home_artifact _
                | Agent_artifact_bundle _ -> ());
               Log.Keeper.debug
                 "dashboard Keeper purge artifact: keeper=%s path=%s outcome=%s"

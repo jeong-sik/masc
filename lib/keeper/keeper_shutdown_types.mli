@@ -56,6 +56,22 @@ type dashboard_purge_artifact =
   | Keeper_board_attention_candidates_artifact
   | Keeper_board_attention_partitions_artifact
   | Agent_artifact_bundle of string list
+  | Keeper_antigravity_home_artifact of string
+      (** Purged path of the Keeper's Antigravity owner HOME below
+          [official-clients/antigravity]. The path embeds a SHA-256 of the
+          Keeper name and its OAuth source, so the consumer derives it from
+          the runtime configuration before the quiesced purge removes the
+          assignment; once that configuration is gone the leaf is
+          uncomputable and this entry is omitted, leaving any home a
+          previous purge missed in place. *)
+  | Keeper_antigravity_prepare_lock_artifact of string
+      (** Sibling [antigravity-<leaf>.prepare.lock] of the owner HOME. Same
+          derivation and omission limit as the home entry. *)
+  | Keeper_muse_home_artifact of string
+      (** Purged path of the Keeper's managed Muse workspace below
+          [official-clients/muse/<identity>], where the identity hashes the
+          Keeper name and the configured account home. Omitted when the
+          runtime configuration no longer names the account home. *)
 
 type completion_receipt =
   | Completion_not_requested

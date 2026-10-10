@@ -2983,6 +2983,7 @@
 
 (include stanzas/test_keeper_shutdown_ownerless_admission_release.inc)
 (include stanzas/test_keeper_shutdown_reconciliation_http.inc)
+(include stanzas/test_keeper_shutdown_official_client_purge.inc)
 (include stanzas/test_keeper_portrait_http.inc)
 
 (include stanzas/test_log_file_sink_self_heal.inc)

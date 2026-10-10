@@ -1,6 +1,13 @@
 (** Frozen Task Skill selection for one Keeper turn. *)
 
-type error = Tool_surface_unavailable of string
+type error =
+  | Tool_surface_unavailable of string
+  | Skill_config_rejected of { diagnostics : Skill_source_config.diagnostic list }
+  | Skill_config_unreadable of { detail : string }
+      (** The snapshot's Skill configuration was rejected or could not be
+          read, so it holds no entries and no pin can be told apart from a
+          deleted Skill. Resolution fails when any Task pins a Skill; a stale
+          pin against a configured snapshot is an {!unprojectable} row. *)
 
 type selected = private
   { reference : Skill_reference.t

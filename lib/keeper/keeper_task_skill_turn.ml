@@ -1,4 +1,7 @@
-type error = Tool_surface_unavailable of string
+type error =
+  | Tool_surface_unavailable of string
+  | Skill_config_rejected of { diagnostics : Skill_source_config.diagnostic list }
+  | Skill_config_unreadable of { detail : string }
 
 type selected =
   { reference : Skill_reference.t
@@ -30,9 +33,25 @@ type partition =
 
 type Agent_core.Error.carrier += Task_skill_resolution_error of error
 
-(* A pinned reference the frozen snapshot cannot give back is a Skill that is
-   unavailable this turn, never a setup failure (docs/SKILLS-FLOW.md section
-   2a). Two cases: the snapshot holds the identity but the catalog cannot
+(* A snapshot whose Skill configuration was rejected or unreadable holds no
+   entries, so every pin would read as deleted. That is a configuration
+   problem, not a stale pin, and it stops setup: the Task's procedure is not
+   known to be unavailable, it is unknown. The service publishes such a
+   snapshot over the last good one and a workspace without a published
+   revision is captured as unreadable, so it does reach turns. With no
+   reference there is nothing to misreport and no failure. *)
+let require_configured snapshot references =
+  match references, Skill_catalog_snapshot.config_state snapshot with
+  | [], _ -> Ok ()
+  | _ :: _, Skill_catalog_snapshot.Configured _ -> Ok ()
+  | _ :: _, Config_rejected { diagnostics; _ } ->
+    Error (Skill_config_rejected { diagnostics })
+  | _ :: _, Config_unreadable { detail } -> Error (Skill_config_unreadable { detail })
+;;
+
+(* Against a configured snapshot, a pinned reference it cannot give back is a
+   Skill that is unavailable this turn, never a setup failure
+   (docs/SKILLS-FLOW.md section 2a). Two cases: the snapshot holds the identity but the catalog cannot
    project the entry (an instruction body over the inline read boundary,
    #39138), and the pin no longer resolves because the Skill was edited or
    deleted after the Task pinned it. Failing setup for either would stop every
@@ -71,7 +90,8 @@ let resolve_with_task_ids ?descriptors ~snapshot ~task_ids references =
                :: unprojectable)
               rest))
   in
-  loop [] [] references
+  Result.bind (require_configured snapshot references) (fun () ->
+    loop [] [] references)
 ;;
 
 let resolve ~snapshot references =
@@ -219,10 +239,17 @@ let unprojectable_to_yojson (row : unprojectable) =
 
 let error_code = function
   | Tool_surface_unavailable _ -> "lane_addon_surface_unavailable"
+  | Skill_config_rejected _ -> "task_skill_config_rejected"
+  | Skill_config_unreadable _ -> "task_skill_config_unreadable"
 ;;
 
 let error_to_string = function
   | Tool_surface_unavailable detail -> "Lane Add-on tool surface unavailable: " ^ detail
+  | Skill_config_rejected { diagnostics } ->
+    "Skill configuration is rejected, so Task Skills cannot be resolved: "
+    ^ String.concat "; " (List.map Skill_source_config.diagnostic_to_string diagnostics)
+  | Skill_config_unreadable { detail } ->
+    "Skill configuration is unreadable, so Task Skills cannot be resolved: " ^ detail
 ;;
 
 let core_error error =

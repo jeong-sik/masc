@@ -1051,6 +1051,47 @@ let test_deleted_skill_pin_does_not_stop_resolution () =
   | _ -> fail "the deleted Skill is not one identity-not-found row"
 ;;
 
+(* The same pin under a snapshot whose configuration is unreadable or
+   rejected is not a stale pin: that snapshot has no entries, so the pin would
+   read as deleted. Resolution fails, unlike the stale-revision case above. *)
+let test_unusable_skill_config_stops_resolution_unlike_a_stale_pin () =
+  let _, guide, _ = two_skill_snapshot () in
+  let expect_error ~label ~snapshot check_error =
+    match Selection.resolve_for_task ~snapshot ~task_id:"task-1" [ guide ] with
+    | Error error -> check_error error
+    | Ok selection ->
+      failf "%s: resolution kept going with %d unavailable row(s)" label
+        (List.length selection.Selection.unprojectable)
+  in
+  expect_error
+    ~label:"unreadable"
+    ~snapshot:(Snapshot.config_unreadable ~detail:"disk gone")
+    (function
+      | Selection.Skill_config_unreadable { detail } ->
+        check string "the unreadable detail is carried" "disk gone" detail
+      | Selection.Skill_config_rejected _ | Selection.Tool_surface_unavailable _ ->
+        fail "unreadable configuration was not the unreadable error");
+  expect_error
+    ~label:"rejected"
+    ~snapshot:(Snapshot.config_rejected ~source_text:"not toml" ~diagnostics:[])
+    (function
+      | Selection.Skill_config_rejected _ -> ()
+      | Selection.Skill_config_unreadable _ | Selection.Tool_surface_unavailable _ ->
+        fail "rejected configuration was not the rejected error");
+  (match
+     Selection.resolve_for_task
+       ~snapshot:(Snapshot.config_unreadable ~detail:"disk gone")
+       ~task_id:"task-1"
+       []
+   with
+   | Ok selection ->
+     check int "no pin, nothing to misreport" 0
+       (List.length selection.Selection.unprojectable)
+   | Error error ->
+     failf "a Task with no pin failed on an unreadable configuration: %s"
+       (Selection.error_to_string error))
+;;
+
 let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
   let open Masc in
   Eio_main.run @@ fun env ->
@@ -1301,6 +1342,8 @@ let () =
             test_stale_pin_is_listed_unavailable_on_the_prompt_surface
         ; test_case "deleted Skill pin does not stop resolution" `Quick
             test_deleted_skill_pin_does_not_stop_resolution
+        ; test_case "unusable Skill configuration stops resolution, a stale pin does not" `Quick
+            test_unusable_skill_config_stops_resolution_unlike_a_stale_pin
         ] )
     ]
 ;;

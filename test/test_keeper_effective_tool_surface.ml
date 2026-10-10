@@ -735,8 +735,10 @@ let test_turn_admission_covers_held_tasks_beyond_current () =
          | Ok meta -> { meta with current_task_id }
          | Error detail -> fail detail
        in
-       (* A held Task's Skill the snapshot cannot give back is an unavailable
-          row for that Task, not a turn failure. *)
+       (* A snapshot whose configuration is unreadable holds no entries, so a
+          held Task's pin is not known to be deleted. Resolution fails with
+          the typed configuration error rather than listing the pin as an
+          unavailable Skill and letting the turn run without it. *)
        (match
           resolve_observed_task_skills
             ~config
@@ -744,17 +746,12 @@ let test_turn_admission_covers_held_tasks_beyond_current () =
             ~skill_snapshot:
               (Skill_catalog_snapshot.config_unreadable ~detail:"fixture")
         with
-        | Error error -> fail (Agent_core.Error.to_string error)
-        | Ok selection ->
-          check int "nothing is selectable from the unreadable snapshot" 0
-            (List.length selection.selected);
-          (match selection.unprojectable with
-           | [ row ] ->
-             check bool "the held exact skill is the unavailable row" true
-               (Skill_reference.equal guide_reference row.reference);
-             check (list string) "the row names the held Task" [ task_b ] row.task_ids
-           | rows ->
-             failf "expected one unavailable row, got %d" (List.length rows)));
+        | Ok _ -> fail "an unreadable Skill configuration did not stop resolution"
+        | Error error ->
+          (match Keeper_task_skill_turn.of_core_error error with
+           | Some (Keeper_task_skill_turn.Skill_config_unreadable { detail }) ->
+             check string "the unreadable detail is carried" "fixture" detail
+           | Some _ | None -> fail "the failure is not the typed unreadable error"));
        (match
           validate_observed_task_skills
             ~config ~meta:(meta ()) ~skill_snapshot:snapshot

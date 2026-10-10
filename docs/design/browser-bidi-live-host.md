@@ -89,16 +89,18 @@ profile = "/Users/you/masc-keeper-firefox-profile"
   written to `.masc/browser-lane/keeper-firefox-start.json`: when, and
   whether a connection was listed (with what was started) or why not
   (`operator_needed`, `start_failed` or `not_listed_in_time`, with the
-  message, kept as one printable line of at most 1024 bytes). Only the
-  status sentences read it.
+  message, kept as one printable line of at most 1024 bytes), for the port
+  and profile it was started for. Only the status sentences read it.
 - Where `runtime.toml` has the table and the live lane is on, `masc doctor`,
   the connection list and a Keeper's rejection say that MASC starts the
   Keeper Firefox and its host at the next server start or the next hover or
   drag, in place of the operator's steps, and name the last start's failure
-  when it came after the last host started. With no table they add that
-  writing one makes MASC start both; with the live lane off, that MASC
-  starts nothing. The server reads the configuration it loaded; `masc
-  doctor` reads the workspace's `runtime.toml`.
+  for the same port and profile when it is newer than what the host record
+  says since (a host's end, a dead host's attach, a running host's start).
+  With no table they add that writing one makes MASC start both; with the
+  live lane off they say first that MASC starts nothing. The server reads
+  the configuration it loaded; `masc doctor` reads the workspace's
+  `runtime.toml` and uses it only when the whole file loads.
 - `[browser.live] enabled = false`, or a `runtime.toml` without the table,
   starts nothing, and stops the Firefox that record names when it is shown
   to be the one MASC started: the process its group is numbered after still

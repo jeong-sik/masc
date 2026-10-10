@@ -10,6 +10,8 @@ type outcome =
 
 type entry =
   { at : float  (** When the start ended. *)
+  ; port : int  (** The [\[browser.live.bidi\]] port it started for. *)
+  ; profile : string  (** And the profile, as configured. *)
   ; outcome : outcome
   }
 
@@ -20,7 +22,7 @@ val record_path : base_path:string -> string
     path, so it gets more room than a host's reason. *)
 val message_limit_bytes : int
 
-(** Writes [entry], its message as one printable line. [Error] says why it
+(** Writes [entry], its message and profile each as one printable line. [Error] says why it
     was not, or that it was and its directory entry was not flushed. *)
 val write : base_path:string -> entry -> (unit, string) result
 

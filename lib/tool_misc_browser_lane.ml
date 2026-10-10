@@ -190,9 +190,17 @@ let selection_error ?bidi_start ~base_path ~tool_name ~start_time error =
   (* One observation answers for the launcher, the host's record and the
      connections: the record is read first and the server asked last, so the
      list an answer shows is the one its host paragraph was written from. *)
-  let observe () =
+  (* An answer that carries what the start it asked for came to says it
+     there, in bidiStartFailed or bidiConnection, and not again in the host
+     paragraph. *)
+  let observed () =
     let observation =
       Browser_bidi_host_status.observe ~base_path ~configuration:(Runtime.browser_configuration ()) in
+    match bidi_start with
+    | Some _ -> Browser_bidi_host_status.without_last_start observation
+    | None -> observation in
+  let observe () =
+    let observation = observed () in
     let clients =
       Browser_bidi_host_status.listed_clients observation |> List.map Browser_lane.client_json in
     observation, clients in
@@ -230,7 +238,7 @@ let selection_error ?bidi_start ~base_path ~tool_name ~start_time error =
        that attached meanwhile is in it, offered and not reported on. *)
     let host =
       if List.mem Browser_lane.Webdriver_bidi serving_transports
-      then Some (Browser_bidi_host_status.observe ~base_path ~configuration:(Runtime.browser_configuration ()))
+      then Some (observed ())
       else None in
     let listed =
       match host with
@@ -260,8 +268,11 @@ let selection_error ?bidi_start ~base_path ~tool_name ~start_time error =
        follows the workspace path, the address the last host was given, the
        reason for ending and, for a host that met another profile, the two
        profile paths: a host writes each of those in at most 515 bytes, and
-       the expected path is named twice. The address has no limit of its
-       own. The record itself is not sent: its
+       the expected path is named twice. Where MASC starts the Keeper
+       Firefox it also names that profile and, unless this answer carries
+       the start it asked for, the last start's message, kept in at most
+       1027 bytes. The address has no limit of its own. The record itself
+       is not sent: its
        list of results grows while a host runs. *)
     let bidi_host =
       match serving_clients, host with

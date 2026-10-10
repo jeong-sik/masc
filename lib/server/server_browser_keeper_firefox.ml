@@ -528,12 +528,20 @@ let stop_recorded ~env ~base_path ~why =
           Close that Firefox if it is still open."
          why entry.port detail)
 
-(* [Some]: what the start did, for the requests that came while it ran.
-   [None]: the workspace does not ask for a Keeper Firefox. *)
+(* The Keeper Firefox a workspace asks for, if it asks for one. *)
+let asked_for = function
+  | Some { Browser_configuration.live_bidi = Some config; live_enabled = true; _ } -> Some config
+  | Some { Browser_configuration.live_bidi = Some _; live_enabled = false; _ }
+  | Some { Browser_configuration.live_bidi = None; _ }
+  | None -> None
+
+(* [Some]: what the start did, with what it started for, for the requests
+   that came while it ran. [None]: the workspace does not ask for a Keeper
+   Firefox. *)
 let boot_start ~sw ~env ~ready_timeout_s ~ending_host_wait_s ~base_path configuration =
   match configuration with
   | Some { Browser_configuration.live_bidi = Some config; live_enabled = true; _ } ->
-    Some (bring_up ~sw ~env ~ready_timeout_s ~ending_host_wait_s ~base_path config)
+    Some (config, bring_up ~sw ~env ~ready_timeout_s ~ending_host_wait_s ~base_path config)
   | Some { Browser_configuration.live_bidi = Some _; live_enabled = false; _ } ->
     stop_recorded ~env ~base_path ~why:"[browser.live] is off";
     None
@@ -546,7 +554,8 @@ let boot_start ~sw ~env ~ready_timeout_s ~ending_host_wait_s ~base_path configur
 
 let work ~sw ~env ~ready_timeout_s ~ending_host_wait_s ~base_path ~configuration () =
   ignore
-    (boot_start ~sw ~env ~ready_timeout_s ~ending_host_wait_s ~base_path configuration : brought_up option)
+    (boot_start ~sw ~env ~ready_timeout_s ~ending_host_wait_s ~base_path configuration
+      : (Browser_configuration.live_bidi * brought_up) option)
 
 (* How long a start has to show its BiDi connection in the server's list:
    from Firefox's start to the host's first poll took 1.75-5.68 s
@@ -670,18 +679,21 @@ let stopping_answer = Starter.Not_attached (Starter.Start_failed "the server is 
 (* Each start that ended is written down for the status sentences
    (RFC-browser-keeper-firefox §3.7); one that did not end, because the
    server is stopping, is not. *)
-let remembered ~clock ~base_path answer =
-  let write outcome =
-    match Start_record.write ~base_path { Start_record.at = Eio.Time.now clock; outcome } with
+let remembered ~clock ~base_path ~(config : Browser_configuration.live_bidi option) answer =
+  let write (config : Browser_configuration.live_bidi) outcome =
+    match
+      Start_record.write ~base_path
+        { Start_record.at = Eio.Time.now clock; port = config.port; profile = config.profile; outcome }
+    with
     | Ok () -> ()
     | Error detail ->
       Log.Server.warn "browser-lane: the record of the last Keeper Firefox start, %s, is %s"
         (Start_record.record_path ~base_path) detail
   in
-  (match answer with
-   | Starter.Attached { started; client = _ } -> write (Start_record.Attached started)
-   | Starter.Not_attached reason -> write (Start_record.Not_attached reason)
-   | Starter.Not_asked_for -> ());
+  (match config, answer with
+   | Some config, Starter.Attached { started; client = _ } -> write config (Start_record.Attached started)
+   | Some config, Starter.Not_attached reason -> write config (Start_record.Not_attached reason)
+   | Some _, Starter.Not_asked_for | None, (Starter.Attached _ | Starter.Not_attached _ | Starter.Not_asked_for) -> ());
   answer
 
 let serve ~sw ~env ~ready_timeout_s ~ending_host_wait_s ~host_attach_wait_s ~base_path ~configuration
@@ -702,17 +714,17 @@ let serve ~sw ~env ~ready_timeout_s ~ending_host_wait_s ~host_attach_wait_s ~bas
   in
   (match Eio.Promise.await boot with
    | None -> ()
-   | Some brought ->
+   | Some (config, brought) ->
      answer_all []
-       (remembered ~clock:(Eio.Stdenv.clock env) ~base_path
+       (remembered ~clock:(Eio.Stdenv.clock env) ~base_path ~config:(Some config)
           (guarded (fun () -> attached_after ~clock:(Eio.Stdenv.clock env) ~host_attach_wait_s ~base_path brought))));
   let rec loop () =
     let first = Eio.Stream.take requests in
+    let wanted = configuration () in
     let answer =
-      remembered ~clock:(Eio.Stdenv.clock env) ~base_path
+      remembered ~clock:(Eio.Stdenv.clock env) ~base_path ~config:(asked_for wanted)
         (guarded (fun () ->
-           for_request ~sw ~env ~ready_timeout_s ~ending_host_wait_s ~host_attach_wait_s ~base_path
-             (configuration ())))
+           for_request ~sw ~env ~ready_timeout_s ~ending_host_wait_s ~host_attach_wait_s ~base_path wanted))
     in
     answer_all [ first ] answer;
     loop ()
@@ -743,13 +755,12 @@ let serving ~sw ~env ~ready_timeout_s ~ending_host_wait_s ~host_attach_wait_s ~b
   let boot, booted = Eio.Promise.create () in
   if boot_start_wanted then
     Eio.Fiber.fork ~sw (fun () ->
+      let wanted = configuration () in
       let brought =
-        match
-          boot_start ~sw ~env ~ready_timeout_s ~ending_host_wait_s ~base_path (configuration ())
-        with
+        match boot_start ~sw ~env ~ready_timeout_s ~ending_host_wait_s ~base_path wanted with
         | brought -> brought
         | exception (Eio.Cancel.Cancelled _ as cancelled) -> Eio.Promise.resolve booted None; raise cancelled
-        | exception exn -> Some (Not_started (unexpected exn))
+        | exception exn -> Option.map (fun config -> config, Not_started (unexpected exn)) (asked_for wanted)
       in
       Eio.Promise.resolve booted brought)
   else Eio.Promise.resolve booted None;

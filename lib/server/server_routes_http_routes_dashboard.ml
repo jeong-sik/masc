@@ -2201,7 +2201,9 @@ let add_routes ~sw ~clock router =
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state _agent_name req reqd ->
            let config = Mcp_server.workspace_config state in
-           let observed = Onboarding_status.inspect ~base_path:(Some config.base_path) in
+           let observed =
+             Onboarding_status.inspect_loaded ~configuration:(Runtime.browser_configuration ())
+               ~base_path:(Some config.base_path) in
            Http.Response.json_value ~request:req (Onboarding_status.to_json observed) reqd)
          request reqd)
   |> Http.Router.get "/api/v1/dashboard/runtime-probe" (fun request reqd ->

@@ -40,6 +40,10 @@ type observation =
     process loaded, or the workspace's [runtime.toml] read for it. *)
 val observe : base_path:string -> configuration:Browser_configuration.t option -> observation
 
+(** The observation with no last start, for an answer that already says
+    what the start it asked for came to. *)
+val without_last_start : observation -> observation
+
 (** The lane's connections an answer lists beside what it says of the host:
     the list the observation was made from, so the two say of one list. A
     process that bound no listener was not asked for one, and its lane is

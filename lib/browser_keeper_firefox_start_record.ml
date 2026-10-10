@@ -4,7 +4,7 @@ let ( let* ) = Result.bind
 
 type outcome = Attached of Starter.started | Not_attached of Starter.not_attached
 
-type entry = { at : float; outcome : outcome }
+type entry = { at : float; port : int; profile : string; outcome : outcome }
 
 let record_name = "keeper-firefox-start.json"
 let file_permissions = 0o600
@@ -47,8 +47,10 @@ let outcome_to_json = function
     in
     `Assoc [ "kind", `String kind; "message", `String message ]
 
-let entry_to_json { at; outcome } =
-  `Assoc [ "schema", `Int schema; "at", time at; "outcome", outcome_to_json outcome ]
+let entry_to_json { at; port; profile; outcome } =
+  `Assoc
+    [ "schema", `Int schema; "at", time at; "port", `Int port; "profile", `String profile
+    ; "outcome", outcome_to_json outcome ]
 
 (* Exactly these fields, once each. *)
 let fields_of ~names = function
@@ -95,7 +97,7 @@ let outcome_of_json json =
   | _ -> Error "outcome.kind is not one this reader knows"
 
 let entry_of_json json =
-  let* fields = fields_of ~names:[ "schema"; "at"; "outcome" ] json in
+  let* fields = fields_of ~names:[ "schema"; "at"; "port"; "profile"; "outcome" ] json in
   let* () =
     match List.assoc_opt "schema" fields with
     | Some (`Int version) when version = schema -> Ok ()
@@ -109,8 +111,19 @@ let entry_of_json json =
     | Ok _ -> Error "at is not a time"
     | Error detail -> Error detail
   in
+  let* port =
+    match field fields "port" with
+    | Ok (`Int port) when port > 0 && port < 65536 -> Ok port
+    | Ok _ -> Error "port is not a port"
+    | Error detail -> Error detail
+  in
+  let* profile =
+    let* raw = Result.bind (field fields "profile") (string_of "profile") in
+    if Printable_line.written ~limit:message_limit_bytes raw then Ok raw
+    else Error "profile is not what a server writes"
+  in
   let* outcome = Result.bind (field fields "outcome") outcome_of_json in
-  Ok { at; outcome }
+  Ok { at; port; profile; outcome }
 
 type read = Absent | Recorded of entry | Unreadable of string
 
@@ -136,12 +149,13 @@ let printable_outcome = function
        | Starter.Start_failed message -> Starter.Start_failed (line message)
        | Starter.Not_listed_in_time message -> Starter.Not_listed_in_time (line message))
 
-let write ~base_path { at; outcome } =
+let write ~base_path { at; port; profile; outcome } =
   match Fs_compat.mkdir_p (directory base_path) with
   | exception Sys_error detail -> Error detail
   | exception Unix.Unix_error (error, call, _) -> Error (Printf.sprintf "%s: %s" call (Unix.error_message error))
   | () ->
-    let text = Yojson.Safe.pretty_to_string (entry_to_json { at; outcome = printable_outcome outcome }) in
+    let profile = Printable_line.write ~limit:message_limit_bytes profile in
+    let text = Yojson.Safe.pretty_to_string (entry_to_json { at; port; profile; outcome = printable_outcome outcome }) in
     (match
        Fs_compat.write_file_atomic_strict_staged (record_path ~base_path) ~write:(fun channel ->
          Unix.fchmod (Unix.descr_of_out_channel channel) file_permissions;

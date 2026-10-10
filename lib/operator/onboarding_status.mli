@@ -50,6 +50,12 @@ type t =
     does not establish model, sandbox or running health. *)
 val inspect : base_path:string option -> t
 
+(** {!inspect} for a running server: who starts the Keeper Firefox is read
+    from the browser configuration it loaded, which its other answers use,
+    and not from the file. {!inspect} reads the workspace's [runtime.toml]
+    and uses its browser tables only when the whole file loads. *)
+val inspect_loaded : configuration:Browser_configuration.t option -> base_path:string option -> t
+
 (** The wire name of a check, as serialized in [id]. *)
 val check_id_name : check_id -> string
 

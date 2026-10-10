@@ -263,21 +263,27 @@ BiDi 가 아니어도 되는 요청(읽기, 클릭, 스크롤)은 BiDi 연결이
 ### 3.7 마지막 켜기와 상태 문장 (4단계)
 
 - `<base>/.masc/browser-lane/keeper-firefox-start.json`: 서버가 켜기(서버 시작, Keeper 요청)를 마칠 때마다 통째로 다시 쓴다.
-  - 필드는 `schema`, `at`(마친 시각), `outcome` 이다. `outcome` 은 `attached`(+ `started`: `firefox_and_host` / `host_only` / `nothing`)이거나
+  - 필드는 `schema`, `at`(마친 시각), `port`·`profile`(그 켜기가 쓴 설정), `outcome` 이다. `outcome` 은 `attached`(+ `started`: `firefox_and_host` / `host_only` / `nothing`)이거나
     `operator_needed`·`start_failed`·`not_listed_in_time`(+ `message`)이다. 갈래는 Keeper 답의 `bidiConnection`·`bidiStartFailed` 와 같다.
   - `message` 는 host 기록의 `reason` 과 같은 규칙으로 쓴다. 출력 가능한 ASCII 로, 다른 바이트는 `\xNN` 으로 쓰고, 상한을 넘으면 자르고 표시한다.
     상한은 1024바이트다. 서버 문장에는 경로가 둘 이상 들어가기도 해서, 512바이트인 `reason` 보다 길게 둔다.
   - 이 기록은 켜기를 막지 않는다. 읽는 곳은 문장뿐이다. 읽을 수 없으면 문장이 그렇게 말한다.
   - 쓰지 못하면 서버 로그에 경고를 남기고 켜기의 답은 그대로 준다.
-- 상태 문장은 그 워크스페이스의 설정을 함께 받는다. 서버는 불러 둔 설정을, `masc doctor` 는 그 워크스페이스의 `runtime.toml` 을 읽는다.
-  - 표가 있고 lane 이 켜져 있으면, 운영자가 Firefox 를 띄우고 host 를 실행하라는 문장 대신
-    "다음 서버 시작이나 Keeper 의 다음 hover·drag 때 MASC 가 port N, 프로필 P 로 Keeper Firefox 와 host 를 켠다"고 말한다.
-    - 지난 host 가 세션을 남겼거나(`left`) 거절당했으면(`refused`), MASC 가 띄운 Firefox 는 그 켜기가 다시 띄우고(§3.5 의 4),
-      MASC 가 띄우지 않은 Firefox 는 운영자가 다시 띄운다고 말한다.
-    - 마지막 켜기가 연결을 보이지 못했으면 그 시각과 까닭을 말한다. 지금 host 기록이 그 켜기보다 나중에 시작했으면 말하지 않는다.
-  - 표가 있고 lane 이 꺼져 있으면, 지금 문장에 "lane 이 꺼져 있어 MASC 는 아무것도 켜지 않는다"를 더한다.
-  - 표가 없으면 지금 문장에 "`[browser.live.bidi]` 를 적으면 MASC 가 켠다"를 더한다.
-  - 설정을 받지 못하면(불러 둔 설정이 없거나 `runtime.toml` 을 읽을 수 없음) 지금 문장 그대로다.
+- 상태 문장은 그 워크스페이스의 설정을 함께 받는다.
+  - 서버(연결 목록, Keeper 답, setup 상태)는 불러 둔 설정을 쓴다.
+  - `masc doctor` 는 그 워크스페이스의 `runtime.toml` 을 읽고, 파일 전체가 불러질 때만 쓴다. 서버도 불러지지 않는 파일에서는 browser 설정이 없기 때문이다.
+- `[browser.live] enabled = false` 이면, 표가 있든 없든 문장 맨 앞에 "lane 이 꺼져 있어 MASC 는 아무것도 켜지 않는다"를 둔다.
+- 표가 있고 lane 이 켜져 있으면, 운영자가 Firefox 를 띄우고 host 를 실행하라는 문장 대신
+  "다음 서버 시작이나 Keeper 의 다음 hover·drag 때 MASC 가 port N, 프로필 P 의 Keeper Firefox 와 host 중 돌지 않는 것을 켠다"고 말한다.
+  lane 이 설치되지 않았으면 "lane 을 설치하면" 을 붙인다.
+  - 지난 host 가 이 포트에서 세션을 남겼거나(`left`) 거절당했으면(`refused`), MASC 가 띄운 것으로 확인된 Firefox 는 그 켜기가 다시 띄우고(§3.5 의 4),
+    확인되지 않은 Firefox 는 운영자가 먼저 닫는다고 말한다. 지난 host 가 다른 포트였으면 다시 띄우지 않으므로 그냥 켠다고 말한다.
+  - 마지막 켜기가 연결을 보이지 못했으면 그 시각과 까닭을 말한다. 다만 같은 설정(port, 프로필)의 켜기여야 하고,
+    host 기록이 그 뒤로 말하는 것보다 나중이어야 한다: 끝난 host 는 끝난 시각, 죽은 host 는 붙은 시각(없으면 시작 시각),
+    도는 host 는 시작 시각 뒤의 켜기만 말한다.
+  - Keeper 거절 답은 그 요청의 켜기 결과를 `bidiStartFailed`·`bidiConnection` 에 싣으므로, `bidiHost` 문장에는 마지막 켜기를 다시 쓰지 않는다.
+- 표가 없으면 지금 문장에 "`[browser.live.bidi]` 를 적으면 MASC 가 켠다"를 더한다.
+- 설정을 받지 못하면 지금 문장 그대로다.
 - TUI 의 host 줄은 같은 것을 짧게 말한다(4단계의 둘째 PR).
 
 ## 4. 하지 않는 것

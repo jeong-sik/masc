@@ -1217,12 +1217,12 @@ let outcomes =
 let a_last_start_reads_back_as_written () =
   List.iter
     (fun outcome ->
-      let entry = { Start_record.at = 1_791_000_060.; outcome } in
+      let entry = { Start_record.at = 1_791_000_060.; port = 9222; profile = "/keeper/profile"; outcome } in
       check bool "the same entry" true (Start_record.entry_of_json (Start_record.entry_to_json entry) = Ok entry))
     outcomes
 
 let a_last_start_from_another_writer_is_not_read () =
-  let written outcome = Start_record.entry_to_json { Start_record.at = 1_791_000_060.; outcome } in
+  let written outcome = Start_record.entry_to_json { Start_record.at = 1_791_000_060.; port = 9222; profile = "/keeper/profile"; outcome } in
   let fields = function `Assoc fields -> fields | _ -> fail "an object" in
   let replaced name value json = `Assoc ((name, value) :: List.remove_assoc name (fields json)) in
   let failed = written (Start_record.Not_attached (Starter.Start_failed "x")) in
@@ -1234,6 +1234,8 @@ let a_last_start_from_another_writer_is_not_read () =
       | Error _ -> ())
     [ "another layout", replaced "schema" (`Int 2) failed
     ; "a field this layout has not", replaced "pid" (`Int 1) failed
+    ; "a port that is no port", replaced "port" (`Int 0) failed
+    ; "a profile a server never writes", replaced "profile" (`String "/keeper\nprofile") failed
     ; "an outcome this reader does not know", replaced "outcome" (`Assoc [ "kind", `String "maybe" ]) failed
     ; ( "a failed start without its message"
       , replaced "outcome" (`Assoc [ "kind", `String "start_failed" ]) failed )
@@ -1249,7 +1251,8 @@ let a_last_starts_message_is_one_printable_line () =
     let said message =
       (match
          Start_record.write ~base_path:base
-           { Start_record.at = 1_791_000_060.; outcome = Start_record.Not_attached (Starter.Start_failed message) }
+           { Start_record.at = 1_791_000_060.; port = 9222; profile = "/keeper/profile"
+           ; outcome = Start_record.Not_attached (Starter.Start_failed message) }
        with
        | Ok () -> ()
        | Error detail -> fail detail);
@@ -1278,6 +1281,19 @@ let each_start_that_ended_is_recorded () =
         Eio.Fiber.fork ~sw (fun () -> await_file_in_eio ~clock host_marker; attach ~sw client);
         ignore (request () : Starter.outcome));
       check bool "an attached start" true (recorded base = Some (Start_record.Attached Starter.Firefox_and_host))));
+  (* The server start's own start is written the same way. *)
+  with_workspace (fun base ->
+    let firefox_marker, host_marker = markers base in
+    install_lane base ~marker:host_marker;
+    let firefox = fake_firefox base ~marker:firefox_marker Listens in
+    with_children ~base [ firefox_marker; host_marker ] (fun () ->
+      requested ~boot:true ~base ~configuration:(configured ~firefox ~port:(free_port ()) base)
+        (fun ~sw ~clock request ->
+          let client = bidi_client 8 in
+          Eio.Fiber.fork ~sw (fun () -> await_file_in_eio ~clock host_marker; attach ~sw client);
+          ignore (request () : Starter.outcome));
+      check bool "the server start's start" true
+        (recorded base = Some (Start_record.Attached Starter.Firefox_and_host))));
   with_workspace (fun base ->
     let firefox_marker, _ = markers base in
     let firefox = fake_firefox base ~marker:firefox_marker Listens in

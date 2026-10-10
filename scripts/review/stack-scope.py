@@ -3,6 +3,7 @@
 
 The REST stack order, not branch names, defines downstack membership. Already
 merged members remain in the snapshot; closed unmerged prerequisites block it.
+A native stack lands whole, so the selected PR must be its top open layer.
 """
 import json
 import os
@@ -52,6 +53,11 @@ def snapshot(repo, selected, expected_head):
             live['base']['ref'] == stack['base']['ref'] and
             len(members) == stack['size'] and members.index(selected) + 1 == stack['position'],
             'stack membership changed or inconsistent')
+    above = live['pull_requests'][members.index(selected) + 1:]
+    require(all(item['state'] in ('open', 'closed') for item in above), 'unknown member state')
+    upper = [item['number'] for item in above if item['state'] == 'open']
+    require(not upper, f"#{selected} sits below open stack layers "
+            f"{' '.join(f'#{n}' for n in upper)}; merge the whole stack through its top PR")
     scope = []
     for position, member in enumerate(live['pull_requests'][:members.index(selected) + 1], 1):
         require(member['state'] in ('open', 'closed'), 'unknown member state')

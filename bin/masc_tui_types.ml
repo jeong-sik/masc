@@ -7995,18 +7995,42 @@ let turn_log_preferred ~candidate ~held =
       && turn_log_request_id held <> turn_log_execution_id held
 ;;
 
+(* The execution source as plain data, so a hash table can hold it.
+   [Ids.Turn_ref.t] is abstract; its [equal] compares exactly these two fields. *)
+type execution_source_key =
+  | Operation_key of string
+  | Autonomous_turn_key of string * int
+
+let turn_log_execution_source_key log =
+  match turn_log_execution_source log with
+  | Operation id -> Operation_key id
+  | Autonomous_turn turn_ref ->
+    Autonomous_turn_key (Ids.Turn_ref.trace_id turn_ref, Ids.Turn_ref.absolute_turn turn_ref)
+
+(* One log per execution source, in the order each source first appeared.
+   A later log for a seen source takes that first position when
+   [turn_log_preferred] says it holds more of the turn. Linear in the number
+   of logs: this runs for every drawn frame, so the pairwise search it replaces
+   grew with the square of the transcript. *)
 let selected_source_logs_for_keeper state keeper_name =
-  (state.msg_settled_logs
-   @ List.map (fun (entry : inflight) -> entry.log) (List.rev state.msg_inflight)
-   @ Option.to_list state.msg_live)
-  |> List.filter (fun log -> String.equal (turn_log_keeper_name log) keeper_name)
-  |> List.fold_left (fun selected log ->
-    let execution = turn_log_execution_source log in
-    match List.find_opt (fun prior -> turn_log_execution_source prior = execution) selected with
-    | None -> selected @ [log]
-    | Some prior when turn_log_preferred ~candidate:log ~held:prior ->
-      List.map (fun prior -> if turn_log_execution_source prior = execution then log else prior) selected
-    | Some _ -> selected) []
+  let slots : (execution_source_key, turn_log ref) Hashtbl.t = Hashtbl.create 16 in
+  let first_seen_newest_first =
+    (state.msg_settled_logs
+     @ List.map (fun (entry : inflight) -> entry.log) (List.rev state.msg_inflight)
+     @ Option.to_list state.msg_live)
+    |> List.filter (fun log -> String.equal (turn_log_keeper_name log) keeper_name)
+    |> List.fold_left (fun order log ->
+      let key = turn_log_execution_source_key log in
+      match Hashtbl.find_opt slots key with
+      | None ->
+        let slot = ref log in
+        Hashtbl.add slots key slot;
+        slot :: order
+      | Some slot ->
+        if turn_log_preferred ~candidate:log ~held:!slot then slot := log;
+        order) []
+  in
+  List.rev_map (fun slot -> !slot) first_seen_newest_first
 ;;
 
 (* Batch watchers keep their original request identities. All inputs bound to

@@ -41,6 +41,29 @@ def top_level_raw_fields(text):
             raise ValueError("invalid object separator")
 
 
+def raw_array_items(text):
+    decoder = json.JSONDecoder()
+    if not text.startswith("["):
+        raise ValueError("candidate rows must be an array")
+    pos, rows = 1, []
+    while True:
+        while text[pos].isspace():
+            pos += 1
+        if text[pos] == "]":
+            if text[pos+1:].strip():
+                raise ValueError("trailing candidate bytes")
+            return rows
+        start = pos
+        _, pos = decoder.raw_decode(text, pos)
+        rows.append(text[start:pos])
+        while text[pos].isspace():
+            pos += 1
+        if text[pos] == ",":
+            pos += 1
+        elif text[pos] != "]":
+            raise ValueError("invalid candidate separator")
+
+
 def sha256(text):
     return hashlib.sha256(text.encode()).hexdigest()
 
@@ -70,8 +93,24 @@ def main():
         for field in ("schema", "candidates", "initial_current_facts", "scenario_input"):
             if sha256(raw_fields[field]) != value["input_hashes"][field + "_sha256"]:
                 raise ValueError(f"{cohort}: {field} wire hash mismatch")
-        if sha256(raw_fields["candidates"]) != value["range"]["input_sha256"]:
-            raise ValueError(f"{cohort}: consumed-input digest mismatch")
+        candidate_rows = raw_array_items(raw_fields["candidates"])
+        receipts = value["candidate_receipts"]
+        if len(candidate_rows) != len(receipts):
+            raise ValueError(f"{cohort}: candidate receipt coverage mismatch")
+        generations, requests, sequences = set(), set(), set()
+        for row, receipt in zip(candidate_rows, receipts):
+            candidate = json.loads(row)
+            if (receipt["request_id"] != candidate["request_id"]
+                    or receipt["sequence"] != candidate["sequence"]
+                    or receipt["input_sha256"] != sha256(row)):
+                raise ValueError(f"{cohort}: candidate receipt identity mismatch")
+            if receipt["request_id"] in requests or receipt["sequence"] in sequences:
+                raise ValueError(f"{cohort}: duplicate candidate identity")
+            generations.add(receipt["queue_generation"])
+            requests.add(receipt["request_id"])
+            sequences.add(receipt["sequence"])
+        if len(generations) != 1 or not next(iter(generations)):
+            raise ValueError(f"{cohort}: invalid queue generation")
         exports[cohort] = raw
     if set(exports) != expected:
         raise ValueError(f"missing cohorts: {sorted(expected - set(exports))}")

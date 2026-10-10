@@ -169,6 +169,10 @@ type accepted =
   ; continuity_answer : continuity_answer
   ; required_memory_ids : string list
       (** Admission destinations that must survive the locked disposition. *)
+  ; explicit_candidate_ids : Keeper_memory_os_current.explicit_candidate_id list
+      (** Independently settled candidate identities bound to the disposition. *)
+  ; admission_support : string list
+      (** Declared candidate support exposed to the absorption judge. *)
   }
 
 module For_testing : sig

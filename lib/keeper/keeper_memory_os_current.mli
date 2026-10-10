@@ -164,26 +164,13 @@ type official_range_id =
   ; turns : (int * Ids.Turn_ref.t) list
   }
 
-(** Ordered explicit-write candidates consumed by one Memory decision, not
-    conversation atoms. [receipt_scope] is nonblank and has no surrounding
-    whitespace; the consumer must bind it to its queue generation.
-    [after_sequence] is nonnegative and [through_sequence] is strictly larger.
-    [input_sha256] is the lowercase SHA-256 of the exact ordered input payloads.
-    The store checks the range against the last committed sequence under its
-    write lock; the consumer owns verification of the actual input digest. *)
-type explicit_write_range_id =
-  { receipt_scope : string
-  ; after_sequence : int
-  ; through_sequence : int
-  ; input_sha256 : string
-  }
-
 val durable_range_id_to_json : durable_range_id -> Yojson.Safe.t
 val official_range_id_to_json : official_range_id -> Yojson.Safe.t
 val durable_range_id_of_json : Yojson.Safe.t -> (durable_range_id, Keeper_memory_os_types.wire_error) result
 val official_range_id_of_json : Yojson.Safe.t -> (official_range_id, Keeper_memory_os_types.wire_error) result
 (** Canonical receipt identities, also used to recover the external read cursor
     from the same committed Memory transaction. *)
+
 (** One explicit input, independent of a contiguous range. Generation and
     request ID are nonblank canonical strings; sequence is positive and input
     SHA-256 is lowercase hexadecimal. The caller binds the digest to the exact
@@ -422,16 +409,6 @@ val committed_official_range
 (** Same snapshot proof as [committed_durable_range], independently retained
     for official-client input in the shared receipt sidecar. *)
 
-val committed_explicit_write_range
-  :  keepers_dir:string
-  -> keeper_id:string
-  -> receipt_scope:string
-  -> (explicit_write_range_id option, string) result
-(** Same snapshot proof, independently retained for explicit-write candidates.
-    Later retirement of an admitted fact does not erase the consumed range.
-    Consumers may read it to acknowledge a commit after interrupted delivery.
-    [apply_disposition] atomically refuses repeated, old or gapped ranges. *)
-
 type disposition =
   { snapshot : t
         (** the current snapshot after the pass: the one written, or for an
@@ -476,7 +453,6 @@ val apply_disposition
   -> ?dropped_statements:Keeper_memory_os_types.dropped_statement list
   -> ?durable_range_id:durable_range_id
   -> ?official_range_id:official_range_id
-  -> ?explicit_write_range_id:explicit_write_range_id
   -> ?explicit_candidate_ids:explicit_candidate_id list
   -> ?required_memory_ids:string list
   -> absorbed:Keeper_memory_os_types.absorbed_statement list
@@ -512,8 +488,8 @@ val apply_disposition
     once under the store locks and must only update caller-owned in-memory
     state: no I/O, yielding or exceptions. It is not a scheduling callback.
 
-    [durable_range_id], [official_range_id] and [explicit_write_range_id] join
-    this disposition to its atom, official-client and explicit-write inputs.
+    [durable_range_id] and [official_range_id] join this disposition to its
+    atom and official-client inputs.
     [explicit_candidate_ids] binds a sparse settled subset to the same commit;
     duplicate request IDs or sequences in a generation, either within this set
     or in recovered receipts, are refused under the write lock before mutation.
@@ -529,12 +505,11 @@ val apply_disposition
     nothing, so its ranges are recorded committed at once, bound to the kept
     snapshot's revision and SHA-256.
 
-    An explicit-write range must start at zero when its scope has no committed
-    receipt, otherwise at that receipt's [through_sequence], and advance it.
-    This check runs under the store locks after receipt recovery and before
-    building the disposition. A stale duplicate cannot resurrect a retired
-    fact. A conflict is an error, not a successful no-op; the consumer can reread
-    the authoritative receipt before acknowledging already-consumed input.
+    Candidate consumption has no contiguous sequence frontier: pending identities
+    may remain between settled ones. A stale duplicate is an error rather than
+    a successful no-op, so it cannot resurrect a retired fact. The consumer
+    rereads authoritative candidate receipts before acknowledging already-
+    consumed input.
 
     [required_memory_ids] names the destinations promised by an explicit
     admission decision. Every destination must survive the actual locked

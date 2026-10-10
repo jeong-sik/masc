@@ -32,7 +32,7 @@ let rows =
    row "two" "already_represented" (`String alpha);
    row "three" "not_durable" `Null;
    row "four" "incorporated" (`String beta)]
-let envelope candidates = `Assoc ["memory",memory; "candidates",`List candidates]
+let envelope candidates = `Assoc ["memory",memory; "candidates",`List candidates; "change_support",`List []]
 let field name value = function
   | `Assoc fields -> `Assoc (List.map (fun (key,prior) -> key, if key=name then value else prior) fields)
   | _ -> fail "fixture expected object"
@@ -43,7 +43,7 @@ let refused label = function
   | Error _ -> () | Ok _ -> fail (label ^ " was accepted")
 
 let test_complete_judgment_preserves_memory_and_references () = with_batch (fun batch ->
-  let original, judgments = Judgment.unwrap ~batch (envelope (List.rev rows)) |> require in
+  let original, judgments, support = Judgment.unwrap ~batch (envelope (List.rev rows)) |> require in
   check bool "original Memory object passes through unchanged" true (original = memory);
   check (list string) "candidate results return in the authoritative input order"
     ["one";"two";"three";"four"]
@@ -54,8 +54,9 @@ let test_complete_judgment_preserves_memory_and_references () = with_batch (fun 
        [alpha;alpha;beta] [a;b;c]
    | _ -> fail "wrong typed candidate outcomes");
   Judgment.verify ~facts:[fact alpha;fact beta] judgments |> require;
-  check bool "every settled outcome allows the whole batch to proceed" true
-    (Judgment.settled judgments))
+  check (list string) "all settled requests are eligible for consumption"
+    ["one";"two";"three";"four"] (Judgment.settled_requests judgments);
+  check (list string) "empty support is preserved" [] support)
 
 let test_candidate_coverage_and_strict_fields () = with_batch (fun batch ->
   List.iter (fun (label,json) ->
@@ -66,6 +67,9 @@ let test_candidate_coverage_and_strict_fields () = with_batch (fun batch ->
      "extra wrapper field", add "claims" (`List []) (envelope rows);
      "duplicate wrapper field", add "memory" memory (envelope rows);
      "missing wrapper field", `Assoc ["memory",memory];
+     "missing change support", `Assoc ["memory",memory; "candidates",`List rows];
+     "nonarray support", field "change_support" `Null (envelope rows);
+     "nonstrings in support", field "change_support" (`List [`Int 1]) (envelope rows);
      "nonobject Memory", field "memory" `Null (envelope rows);
      "nonarray candidates", field "candidates" `Null (envelope rows);
      "unknown outcome", envelope (field "outcome" (`String "mergeable") (List.hd rows) :: List.tl rows);
@@ -80,22 +84,39 @@ let test_claim_requirements_and_final_selection () = with_batch (fun batch ->
     ["incorporated",`Null; "incorporated",`String " ";
      "already_represented",`Null; "already_represented",`String "";
      "not_durable",`String alpha; "deferred",`String alpha];
-  let _, judgments = Judgment.unwrap ~batch (envelope rows) |> require in
+  let _, judgments, _ = Judgment.unwrap ~batch (envelope rows) |> require in
   Judgment.verify ~facts:[fact alpha] judgments |> refused "absent incorporated destination";
-  let _, represented = Judgment.unwrap ~batch
+  let _, represented, _ = Judgment.unwrap ~batch
     (envelope (row "one" "not_durable" `Null :: List.tl rows)) |> require in
   Judgment.verify ~facts:[fact beta] represented |> refused "absent already-represented destination";
   Judgment.verify ~facts:[fact (alpha ^ " Different scope."); fact beta] judgments
     |> refused "similar wording is not the exact named final claim")
 
-let test_deferred_prevents_whole_batch_settlement () = with_batch (fun batch ->
+let test_partial_settlement_and_change_support () = with_batch (fun batch ->
   let response = envelope (List.take 3 rows @ [row "four" "deferred" `Null]) in
-  let _, judgments = Judgment.unwrap ~batch response |> require in
+  let response = field "change_support" (`List [`String "one"]) response in
+  let _, judgments, support = Judgment.unwrap ~batch response |> require in
+  check (list string) "declared support survives decoding" ["one"] support;
   Judgment.verify ~facts:[fact alpha] judgments |> require;
-  check bool "one unresolved candidate keeps the whole batch pending" false
-    (Judgment.settled judgments);
-  check bool "deferred candidate cannot be hidden by response ordering" false
-    (Judgment.settled (List.rev judgments)))
+  check (list string) "deferred Beta cannot block settled Alpha and transient input"
+    ["one";"two";"three"] (Judgment.settled_requests judgments);
+  let verify support claims changes = Judgment.verify_support ~new_claims:claims
+    ~has_changes:changes ~change_support:support judgments in
+  verify ["one"] [fact alpha] true |> require;
+  verify ["two"] [] true |> require;
+  verify [] [] false |> require;
+  List.iter (fun (label,support) -> verify support [fact alpha] true |> refused label)
+    ["unknown support",["outside"]; "duplicate support",["one";"one"];
+     "deferred support",["four"]; "not-durable support",["three"];
+     "mutation without support",[]];
+  verify ["two"] [fact alpha] true |> refused "new claim supported only by already-represented outcome";
+  verify ["one"] [fact beta] true |> refused "new claim not linked to its incorporated support";
+  let all_deferred = List.map (fun id -> row id "deferred" `Null) ["one";"two";"three";"four"] in
+  let _, deferred, _ = Judgment.unwrap ~batch (envelope all_deferred) |> require in
+  check (list string) "all deferred consumes nothing" [] (Judgment.settled_requests deferred);
+  Judgment.verify_support ~new_claims:[] ~has_changes:false ~change_support:[] deferred |> require;
+  Judgment.verify_support ~new_claims:[fact alpha] ~has_changes:true ~change_support:[] deferred
+    |> refused "all deferred cannot authorize a Memory mutation")
 
 let test_structured_output_schema_accepts_the_envelope () = with_batch (fun batch ->
   let schema = Judgment.output_schema
@@ -122,5 +143,5 @@ let () = run "explicit memory admission judgment"
       test_complete_judgment_preserves_memory_and_references;
     test_case "candidate coverage and strict fields" `Quick test_candidate_coverage_and_strict_fields;
     test_case "claim requirements and final destinations" `Quick test_claim_requirements_and_final_selection;
-    test_case "deferred blocks whole batch settlement" `Quick test_deferred_prevents_whole_batch_settlement;
+    test_case "partial settlement keeps deferred independent work out of change support" `Quick test_partial_settlement_and_change_support;
     test_case "structured output accepts the wrapped Memory answer" `Quick test_structured_output_schema_accepts_the_envelope]]

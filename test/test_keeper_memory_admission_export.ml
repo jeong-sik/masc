@@ -115,6 +115,7 @@ let export cohort () = with_workspace @@ fun ~base_path ->
     captured := (runtime_id,system_prompt,output_schema,prompt) :: !captured;
     Ok (Yojson.Safe.to_string (`Assoc [
       "memory", `Assoc ["working_contexts",`List []; "new_claims",`List []; "dropped",`List []];
+      "change_support", `List [];
       "candidates", `List (List.map (fun (candidate : Queue.candidate) ->
         `Assoc ["request_id",`String candidate.request_id; "outcome",`String "deferred";
                 "memory_claim",`Null; "reason",`String "Capture-only fixture; no semantic judgment was performed."])
@@ -142,7 +143,15 @@ let export cohort () = with_workspace @@ fun ~base_path ->
     | [capture] -> capture | _ -> fail "expected one complete production-rendered request" in
   let candidate_rows = `List (List.map candidate_json candidates) in
   let initial_rows = `List (List.map Memory.fact_to_json initial_facts) in
-  let range = Queue.range_id admission in
+  (* Identities computed from the pending batch. The capture defers every
+     candidate, so none of them is a committed consumption receipt. *)
+  let identities = Queue.candidate_ids admission in
+  let generation = match identities with
+    | (first : Current.explicit_candidate_id) :: _ -> first.queue_generation
+    | [] -> fail "pending batch produced no candidate identity" in
+  check int "capture commits no candidate receipt" 0
+    (List.length (Current.committed_explicit_candidates ~keepers_dir ~keeper_id
+       ~queue_generation:generation |> require));
   let scenario_input = `Assoc ["cohort",`String cohort.name;
     "keeper_instructions",`String instructions;
     "initial_claims",`List (List.map (fun s -> `String s) cohort.initial_claims);
@@ -156,9 +165,9 @@ let export cohort () = with_workspace @@ fun ~base_path ->
     "initial_snapshot_present",`Bool (Option.is_some initial);
     "scenario_input",scenario_input;
     "keeper_instructions",`String instructions;
-    "range",`Assoc ["receipt_scope",`String range.receipt_scope;
-      "after_sequence",`Int range.after_sequence; "through_sequence",`Int range.through_sequence;
-      "input_sha256",`String range.input_sha256];
+    "candidate_receipts",`List (List.map (fun (id : Current.explicit_candidate_id) ->
+      `Assoc ["queue_generation",`String id.queue_generation; "request_id",`String id.request_id;
+              "sequence",`Int id.sequence; "input_sha256",`String id.input_sha256]) identities);
     "input_hashes",`Assoc ["scenario_input_sha256",`String (hash_json scenario_input);
       "prompt_sha256",`String (sha256 prompt);
       "system_prompt_sha256",`String (sha256 system_prompt);

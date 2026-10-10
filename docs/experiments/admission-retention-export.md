@@ -13,10 +13,13 @@ current Memory. The fixture verifies real decoder completion and exact current
 and pending bytes after receipt recovery.
 
 Each `MEMORY_ADMISSION_EXPORT` JSON record includes the rendered user/system
-prompts, output schema, complete candidate identities and facts, initial facts
-and snapshot presence, source scenario, consumed range and hashes. Scenario
-hashes exclude random IDs and timestamps; delivery hashes bind their actual
-values. Initial observations use the current clock, avoiding an unrelated old
+prompts, output schema, complete candidate rows and facts, initial facts and
+snapshot presence, source scenario, `candidate_receipts` and hashes. Each entry
+is the receipt the queue issued for one candidate (queue generation, request
+id, sequence and input SHA-256). The capture defers every candidate, so no
+settle consumes them; they are not consumption evidence. Scenario hashes
+exclude random IDs and timestamps; delivery hashes bind their actual values.
+Initial observations use the current clock, avoiding an unrelated old
 timestamp as a semantic cue.
 
 Request only the exporter in CI:

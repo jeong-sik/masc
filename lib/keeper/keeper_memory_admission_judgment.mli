@@ -43,3 +43,17 @@ val output_schema : memory_schema:Yojson.Safe.t -> Yojson.Safe.t
 val prompt_suffix : batch:Keeper_memory_admission_queue.batch -> string
 (** Describes the separate candidate authority and strict response wrapper,
     carrying original candidate payloads as untrusted proposed data. *)
+
+type retirement_evidence =
+  | Available of Keeper_memory_os_current.archived_fact list
+  | Unavailable of string
+(** Read-only historical evidence; unavailable history is never an empty archive. *)
+
+val retirement_prompt_suffix :
+  batch:Keeper_memory_admission_queue.batch -> retirement_evidence -> string
+(** Include only originals with the exact memory identity of a pending candidate,
+    linked to its request IDs. No matching originals produces the empty string.
+    The archive omits current identities, later re-additions or absorptions and
+    removals without explicit reasons. Absence proves no historical negative.
+    This evidence neither authorizes restoration nor rejects a candidate. It is
+    a pre-call observation and does not protect against retirement after reading. *)

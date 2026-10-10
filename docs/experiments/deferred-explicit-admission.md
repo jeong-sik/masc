@@ -61,6 +61,36 @@ the actual disposition, support maintenance and concurrent changes. A missing
 destination refuses the whole commit. Schema validity and reference integrity
 do not prove semantic judgment quality.
 
+## Pending observations after retirement
+
+A pending candidate has not yet consumed a Memory range. The committed-frontier
+check prevents replay of an already consumed range, but cannot decide whether a
+first-time candidate has become obsolete while waiting:
+
+| Order | Current Memory | Pending candidate |
+|---|---|---|
+| N | A: production policy P-42 requires one approval | A is proposed again |
+| N+1 | A is explicitly retracted with a policy-withdrawal reason | Candidate remains durable |
+| N+2 | A is absent | Librarian evaluates the original candidate |
+
+The admission prompt now supplies committed removal evidence for candidate
+identities found in the dropped archive. It includes the removal time, revision,
+producer and reason, tied to the candidate request ID. Only exact Memory identity
+matches are projected; unrelated archived claim bodies are not injected. This
+adds evidence for the Librarian to distinguish an old observation from a new
+observation supporting reintroduction. It does not automatically reject either.
+Removal reasons and candidate text remain data, not instructions or restoration
+authority. A journal read failure is explicitly unavailable evidence, not a claim
+that no retirement occurred.
+
+This is a prompt-evidence boundary, not a concurrency guard or a semantic lineage
+resolver. Paraphrased candidates with different identities are not connected by
+this lookup. An archive entry requires an explicit removal reason; an empty
+lookup does not prove a memory was never removed. Later re-additions and current
+identities are excluded by the archive reader. A removal after prompt construction
+is not captured by this read. Model quality and these remaining lifecycle cases
+require separate measurement.
+
 ## Evidence and remaining work
 
 Foundation run [37806167134](https://github.com/jeong-sik/masc/actions/runs/37806167134)

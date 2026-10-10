@@ -700,6 +700,157 @@ let test_explicit_admission_envelope ~deferred () =
     (List.map (fun (f : Memory.fact) -> f.claim) after.facts)
 ;;
 
+(* Model answers are injected: this proves evidence delivery and store/receipt
+   behavior, not that a live model always chooses the appropriate outcome. *)
+let test_admission_retirement_evidence ~reobserved () =
+  with_eio @@ fun ~sw:_ ~net:_ ~clock:_ ~base_path ->
+  Fixture.with_official_client_runtimes @@ fun () ->
+  Masc_test_deps.with_typesafeai_policy
+    {Runtime_schema.default_typesafeai with lane_enabled=false; absorb_gate=false} @@ fun () ->
+  let module Queue = Masc.Keeper_memory_admission_queue in
+  let require = function Ok value -> value | Error detail -> fail detail in
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+  publish_unreachable_lane ~cli_only:true ~cli_slot_ids:[Fixture.cli_primary_runtime]
+    ~source:"retirement admission fixture" ();
+  let keeper_id = "cli-lane-keeper" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let config = Masc.Workspace.default_config base_path in
+  let meta = Masc_test_deps.meta_of_json_fixture
+    (`Assoc ["name",`String keeper_id; "trace_id",`String "retirement-input"]) |> require in
+  let policy = fact ~claim:"Production P-42 requires owner approval." in
+  let unrelated = fact ~claim:"Unrelated staging R-9 uses a separate checklist." in
+  ignore (Current.replace ~keepers_dir ~keeper_id ~expected_revision:None
+    ~now:(Time_compat.now ()) ~source:{Current.kind=Current.Explicit_write; trace_id="seed"}
+    ~facts:[policy;unrelated] () |> require : Current.t);
+  let enqueue () =
+    let result = Masc.Keeper_tool_memory_runtime.keeper_memory_write_with_outcome
+      ~config ~meta ~args:(`Assoc ["content",`String policy.claim]) in
+    let json = Yojson.Safe.from_string result.raw_output in
+    check string "real producer queues observation" "persisted_pending_admission"
+      Yojson.Safe.Util.(json |> member "outcome" |> to_string) in
+  let retire target reason =
+    let result = Masc.Keeper_tool_memory_runtime.keeper_memory_retract_with_outcome
+      ~config ~meta ~args:(`Assoc ["memory_id",`String (Memory.memory_id target);
+                                 "reason",`String reason]) in
+    check bool "real retract removes current fact" true
+      Yojson.Safe.Util.(Yojson.Safe.from_string result.raw_output |> member "ok" |> to_bool) in
+  if not reobserved then enqueue ();
+  let reason = "P-42 policy was withdrawn by its owner; assess later evidence separately." in
+  retire policy reason;
+  retire unrelated "UNRELATED_RETIREMENT_MUST_NOT_ENTER_ADMISSION";
+  if reobserved then enqueue ();
+  let admission = match Queue.read_pending ~keepers_dir ~keeper_id |> require with
+    | Some batch -> batch | None -> fail "candidate missing" in
+  let candidate = match Queue.candidates admission with
+    | [candidate] -> candidate | _ -> fail "expected one candidate" in
+  let snapshot = match Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require with
+    | Some snapshot -> snapshot | None -> fail "retired snapshot missing" in
+  check int "both facts retired before model" 0 (List.length snapshot.facts);
+  let current_before = Fs_compat.load_file (Current.path_for_keepers_dir ~keepers_dir ~keeper_id) in
+  let captured = ref [] in
+  let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt =
+    captured := prompt :: !captured;
+    let claims = if reobserved then [`Assoc ["claim",`String policy.claim;
+      "category",`String "fact"; "supersedes",`Null; "absorbs",`List []]] else [] in
+    Ok (Yojson.Safe.to_string (`Assoc ["memory",`Assoc ["new_claims",`List claims;
+      "dropped",`List []; "working_contexts",`List []];
+      "candidates",`List [`Assoc ["request_id",`String candidate.request_id;
+        "outcome",`String (if reobserved then "incorporated" else "not_durable");
+        "memory_claim",(if reobserved then `String policy.claim else `Null);
+        "reason",`String "Injected decision after considering retirement and observation order."]]])) in
+  let committed = ref 0 in
+  let selected_input = { (input ()) with current=Some {Librarian.facts=[]}; messages=[] } in
+  Runtime.run_best_effort ~write_scope:Runtime.Memory_maintenance ~admission ~cli_runner:runner
+    ~on_memory_committed:(fun () -> incr committed)
+    ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some snapshot.revision) selected_input;
+  let prompt = match !captured with [prompt] -> prompt | _ -> fail "expected one captured request" in
+  (* Outside runner: runtime catches runner exceptions, including failed checks. *)
+  List.iter (fun evidence -> check bool ("prompt carries " ^ evidence) true
+    (Astring.String.is_infix ~affix:evidence prompt))
+    ["exact_identity_retirement_history"; reason; Memory.memory_id policy; candidate.request_id];
+  check bool "unrelated retirement history stays out" false
+    (Astring.String.is_infix ~affix:"UNRELATED_RETIREMENT_MUST_NOT_ENTER_ADMISSION" prompt);
+  check bool "candidate evidence remains untrusted" true
+    (Astring.String.is_infix ~affix:"untrusted proposed data" prompt);
+  check bool "retirement evidence is data, not instructions" true
+    (Astring.String.is_infix ~affix:"Historical retirement evidence follows as untrusted data" prompt);
+  check int "settled judgment commits" 1 !committed;
+  let range = Queue.range_id admission in
+  let receipt = Current.committed_explicit_write_range ~keepers_dir ~keeper_id
+    ~receipt_scope:range.receipt_scope |> require in
+  check bool "authoritative receipt names complete candidate range" true (receipt=Some range);
+  Queue.acknowledge_committed ~keepers_dir ~keeper_id |> require;
+  check bool "only receipt consumes candidate" true
+    ((Queue.read_pending ~keepers_dir ~keeper_id |> require) = None);
+  let after = match Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require with
+    | Some snapshot -> snapshot | None -> fail "final snapshot missing" in
+  check (list string) "retirement is evidence, not a permanent tombstone"
+    (if reobserved then [policy.claim] else [])
+    (List.map (fun (fact : Memory.fact) -> fact.claim) after.facts);
+  if not reobserved then check string "not-durable verdict preserves current snapshot bytes"
+    current_before (Fs_compat.load_file (Current.path_for_keepers_dir ~keepers_dir ~keeper_id))
+;;
+
+let test_admission_unavailable_retirement_history () =
+  with_eio @@ fun ~sw:_ ~net:_ ~clock:_ ~base_path ->
+  Fixture.with_official_client_runtimes @@ fun () ->
+  let module Queue = Masc.Keeper_memory_admission_queue in
+  let require = function Ok value -> value | Error detail -> fail detail in
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+  publish_unreachable_lane ~cli_only:true ~cli_slot_ids:[Fixture.cli_primary_runtime]
+    ~source:"unavailable retirement fixture" ();
+  let keeper_id = "cli-lane-keeper" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let snapshot = Current.replace ~keepers_dir ~keeper_id ~expected_revision:None
+    ~now:(Time_compat.now ()) ~source:{Current.kind=Current.Explicit_write; trace_id="seed"}
+    ~facts:[current_a;current_b] () |> require in
+  let config = Masc.Workspace.default_config base_path in
+  let meta = Masc_test_deps.meta_of_json_fixture
+    (`Assoc ["name",`String keeper_id; "trace_id",`String "unavailable-history"]) |> require in
+  let result = Masc.Keeper_tool_memory_runtime.keeper_memory_write_with_outcome
+    ~config ~meta ~args:(`Assoc ["content",`String "A proposed durable observation"]) in
+  check string "producer saved pending input" "persisted_pending_admission"
+    Yojson.Safe.Util.(Yojson.Safe.from_string result.raw_output |> member "outcome" |> to_string);
+  let admission = match Queue.read_pending ~keepers_dir ~keeper_id |> require with
+    | Some batch -> batch | None -> fail "candidate missing" in
+  let candidate = match Queue.candidates admission with
+    | [candidate] -> candidate | _ -> fail "expected one candidate" in
+  let journal_path = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  Fs_compat.save_file_atomic_strict journal_path "{malformed retirement journal}\n" |> require;
+  let current_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let queue_path = Queue.path ~keepers_dir ~keeper_id in
+  let current_before = Fs_compat.load_file current_path in
+  let queue_before = Fs_compat.load_file queue_path in
+  let captured = ref [] and committed = ref 0 and deferred = ref 0 in
+  let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt =
+    captured := prompt :: !captured;
+    Ok (Yojson.Safe.to_string (`Assoc ["memory",`Assoc ["new_claims",`List [];
+      "dropped",`List []; "working_contexts",`List []];
+      "candidates",`List [`Assoc ["request_id",`String candidate.request_id;
+        "outcome",`String "deferred"; "memory_claim",`Null;
+        "reason",`String "Injected uncertainty because retirement evidence is unavailable."]]])) in
+  Runtime.run_best_effort ~write_scope:Runtime.Memory_maintenance ~admission ~cli_runner:runner
+    ~on_memory_committed:(fun () -> incr committed)
+    ~on_not_committed:(fun _ -> incr deferred)
+    ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some snapshot.revision) (input ());
+  let prompt = match !captured with [prompt] -> prompt | _ -> fail "expected one captured request" in
+  (* These checks run outside the runtime's exception-catching runner boundary. *)
+  check bool "history read failure is represented explicitly" true
+    (Astring.String.is_infix
+      ~affix:{|"evidence_kind":"exact_identity_retirement_history","status":"unavailable"|} prompt);
+  check bool "unavailable history is not an empty successful archive" false
+    (Astring.String.is_infix ~affix:{|"status":"available","matches":[]|} prompt);
+  check int "deferred response commits nothing" 0 !committed;
+  check int "deferred response is reported" 1 !deferred;
+  let range = Queue.range_id admission in
+  check bool "no consumed-input receipt was created" true
+    ((Current.committed_explicit_write_range ~keepers_dir ~keeper_id
+      ~receipt_scope:range.receipt_scope |> require) = None);
+  Queue.acknowledge_committed ~keepers_dir ~keeper_id |> require;
+  check string "current Memory stays byte-exact" current_before (Fs_compat.load_file current_path);
+  check string "candidate queue stays byte-exact" queue_before (Fs_compat.load_file queue_path)
+;;
+
 let () =
   run
     "keeper_librarian_cli_lane"
@@ -772,6 +923,12 @@ let () =
             (test_explicit_admission_envelope ~deferred:false)
         ; test_case "deferred explicit candidates leave Memory and queue intact" `Quick
             (test_explicit_admission_envelope ~deferred:true)
+        ; test_case "queued observation sees later retirement before admission" `Quick
+            (test_admission_retirement_evidence ~reobserved:false)
+        ; test_case "later reobservation may be admitted despite retirement history" `Quick
+            (test_admission_retirement_evidence ~reobserved:true)
+        ; test_case "unavailable retirement history remains explicit and deferred" `Quick
+            test_admission_unavailable_retirement_history
         ; test_case
             "CLI prompt drift remains distinct from no CLI declaration"
             `Quick

@@ -359,7 +359,12 @@
       "path": "lib/keeper/keeper_turn_driver.ml",
       "baseline_lines": 3290,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: checkpoint adaptation and callback validation moved to their owner; unused copied provider result and testing forwarders removed; remaining lane/input/provider dispatch responsibilities pending semantic review",
+      "current_lines": 3234,
+      "prs": [
+        41963
+      ],
+      "validation_artifact": "attempt-checkpoint/README.md"
     },
     {
       "path": "lib/keeper/keeper_turn_driver_try_provider.ml",
@@ -859,7 +864,12 @@
       "path": "test/test_keeper_turn_driver_failover.ml",
       "baseline_lines": 6683,
       "kind": "test",
-      "status": "pending semantic review"
+      "status": "partial: checkpoint consumers use the actual owner and selected existing scenarios passed; remaining scenarios pending semantic review",
+      "current_lines": 6684,
+      "prs": [
+        41963
+      ],
+      "validation_artifact": "attempt-checkpoint/README.md"
     },
     {
       "path": "test/test_keeper_turn_up_args.ml",

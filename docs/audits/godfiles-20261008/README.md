@@ -7,8 +7,8 @@ This campaign covers tracked code files with at least 2,000 lines. The initial
 inventory contains 171 candidates: 75 production source/style/interface files,
 90 tests, 3 tooling files and 3 evidence scripts. `inventory.json` records each
 baseline path and its current audit state. A line count selects candidates; it
-is not a defect verdict or a new build gate. Eleven production candidates received
-bounded changes; their other responsibilities remain pending. The other 64
+is not a defect verdict or a new build gate. Twelve production candidates received
+bounded changes; their other responsibilities remain pending. The other 63
 production candidates still require semantic review. All 171 candidates remain
 in the campaign until their responsibilities and necessary repairs are assessed.
 
@@ -25,6 +25,7 @@ in the campaign until their responsibilities and necessary repairs are assessed.
 | [#41932](https://github.com/jeong-sik/masc/pull/41932) | Strict pure Read coordinate decoding; effects sequenced after successful decode; private duplicate guidance variant removed | `keeper_tool_filesystem_runtime.ml` |
 | [#41955](https://github.com/jeong-sik/masc/pull/41955) | Canonical retained media projection; image acquisition effects separated from rendering; media-only autonomous and failure rows keep output | main TUI and history consumers |
 | [#41962](https://github.com/jeong-sik/masc/pull/41962) | Pure schedule snapshot/wake readers separated from HTTP/store effects; private parser helpers | `masc_tui_loader.ml` |
+| [#41963](https://github.com/jeong-sik/masc/pull/41963) | Attempt checkpoint projection and validated sink boundary owned separately; unused result copy and testing forwarders removed | `keeper_turn_driver.ml/.mli` |
 
 The declared branch dependencies follow that order, starting at `main`.
 GitHub may group a subset into a native stack; inspect live membership rather
@@ -58,6 +59,8 @@ TUI retained media, canonical history and image acquisition checks are recorded
 in [tui-output-media/README.md](tui-output-media/README.md).
 Schedule projection extraction and its existing PTY consumer checks are recorded
 in [tui-schedule-decode/README.md](tui-schedule-decode/README.md).
+Attempt checkpoint ownership and selected existing scenarios are recorded in
+[attempt-checkpoint/README.md](attempt-checkpoint/README.md).
 
 `validation.log` records successful OCaml 5.5.1 parse-only checks on the changed
 source/interface files, combined diff whitespace checking, and validation of

@@ -81,15 +81,6 @@ let media_reading_deadline () =
 type output_contract = Provider_default | Tool_verdict
 
 
-type provider_run_result =
-  (Runtime_agent.run_result, Agent_core.Error.t) result
-
-type provider_attempt_outcomes =
-  { provider_result : provider_run_result
-  ; turn_result : provider_run_result
-  ; checkpoint_after : Agent_core.Checkpoint.t option
-  }
-
 type named_run_result =
   { run_result : Runtime_agent.run_result
   ; official_client_settlement : Keeper_official_client_session_store.t option
@@ -552,46 +543,6 @@ let restore_deferred_runtime_lane ~assignment_id ~failed_runtime_id
   ; later_runtime_ids
   ; failure
   }
-;;
-
-let canonical_checkpoint_sink ~replay_prefix_projection sink
-    (snapshot : Agent_core.Agent.checkpoint_snapshot) =
-  match Keeper_replay_prefix.restore_checkpoint replay_prefix_projection snapshot.checkpoint with
-  | Error error -> Error (Keeper_replay_prefix.restore_error_to_string error)
-  | Ok checkpoint -> sink { snapshot with checkpoint }
-;;
-
-let project_provider_attempt_result ?checkpoint_after ~replay_prefix_projection provider_result =
-  let turn_result =
-    match provider_result with
-    | Error _ as error -> error
-    | Ok run_result ->
-      (match run_result.Runtime_agent.checkpoint with
-       | None -> Ok run_result
-       | Some checkpoint ->
-         (match
-            Keeper_replay_prefix.restore_checkpoint
-              replay_prefix_projection
-              checkpoint
-          with
-          | Ok checkpoint ->
-            Ok
-              { run_result with
-                Runtime_agent.checkpoint = Some checkpoint
-              }
-          | Error error ->
-            Error
-              (Agent_core.Error.Internal
-                 (Keeper_replay_prefix.restore_error_to_string error))))
-  in
-  let turn_result, checkpoint_after = match checkpoint_after with
-    | None -> turn_result, None
-    | Some checkpoint ->
-      (match Keeper_replay_prefix.restore_checkpoint replay_prefix_projection checkpoint with
-       | Ok checkpoint -> turn_result, Some checkpoint
-       | Error error -> Error (Agent_core.Error.Internal
-           (Keeper_replay_prefix.restore_error_to_string error)), None) in
-  { provider_result; turn_result; checkpoint_after }
 ;;
 
 let runtime_attempt_decision ~idx ~runtime_id =
@@ -3286,7 +3237,7 @@ let run_named
             ; cache_system_prompt
             ; checkpoint_sink =
                 Option.map
-                  (canonical_checkpoint_sink ~replay_prefix_projection)
+                  (Keeper_attempt_checkpoint.canonical_sink ~projection:replay_prefix_projection)
                   checkpoint_sink
             ; checkpoint_progress
             ; context_injector
@@ -3323,21 +3274,19 @@ let run_named
                 (if continue_from_checkpoint then agent_core_checkpoint else None)
               try_provider_ctx candidate
           in
-          let outcomes =
-            project_provider_attempt_result ?checkpoint_after
-              ~replay_prefix_projection provider_result in
-          ( selected_runtime_result runtime ~lane_attempt_index:idx outcomes.turn_result
-          , outcomes.checkpoint_after
+          let { Keeper_attempt_checkpoint.turn_result; checkpoint_after } =
+            Keeper_attempt_checkpoint.project ?checkpoint_after
+              ~projection:replay_prefix_projection provider_result in
+          ( selected_runtime_result runtime ~lane_attempt_index:idx turn_result
+          , checkpoint_after
           , Keeper_provider_attempt_effect.No_effect_observed
           , provider_attempt_dispatch ~request_serialized:!request_serialized
-              outcomes.turn_result ))))
+              turn_result ))))
        ))))
     attempt_candidates
 
 
 module For_testing = struct
-  type nonrec provider_attempt_outcomes = provider_attempt_outcomes
-
   let official_client_turn_start = official_client_turn_start
 
   let run_result_answered = run_result_answered
@@ -3348,11 +3297,6 @@ module For_testing = struct
       ~next_runtime_id ~later_runtime_ids ~failure
   ;;
 
-  let produced_checkpoint (outcomes : provider_attempt_outcomes) = outcomes.checkpoint_after
-  let project_provider_attempt_result = project_provider_attempt_result
-  let canonical_checkpoint_sink = canonical_checkpoint_sink
-  let provider_result outcomes = outcomes.provider_result
-  let turn_result outcomes = outcomes.turn_result
   let checkpoint_after_attempt = checkpoint_after_attempt
   let success_selected_model_raw = success_selected_model_raw
   let apply_accept = Keeper_turn_driver_try_provider.For_testing.apply_accept

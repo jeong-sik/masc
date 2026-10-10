@@ -469,24 +469,36 @@ let free_port () =
     Unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback, 0));
     match Unix.getsockname socket with Unix.ADDR_INET (_, port) -> port | Unix.ADDR_UNIX _ -> fail "port")
 
-(* Opens [port] and writes its own pid to [pidfile], so a case can stop it. *)
-let listener_command =
-  "python3 -c 'import os,socket,sys,time\n\
-   open(sys.argv[2], \"w\").write(str(os.getpid()))\n\
-   s=socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n\
-   s.bind((\"127.0.0.1\", int(sys.argv[1]))); s.listen(4); time.sleep(30)'"
+(* Opens [port] for thirty seconds and writes its own pid to [pidfile], so a
+   case can stop it. It takes and closes each connection, as Firefox answers
+   one, so checks of the port never fill its backlog. [own_group]: first it
+   leaves the process group it was started in. *)
+let listener ~own_group =
+  Printf.sprintf
+    "python3 -c 'import os,select,socket,sys,time\n\
+     %sopen(sys.argv[2], \"w\").write(str(os.getpid()))\n\
+     s=socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n\
+     s.bind((\"127.0.0.1\", int(sys.argv[1]))); s.listen(4); end=time.time()+30\n\
+     while time.time() < end: r=select.select([s],[],[],1)[0]; r and s.accept()[0].close()'"
+    (if own_group then "os.setpgid(0, 0)\n" else "")
 
-type fake = Listens | Exits | Relaunches | Never_listens
+let listener_command = listener ~own_group:false
+
+type fake = Listens | Listens_apart | Exits | Relaunches | Never_listens
 
 (* A Firefox that records its pid and what it was given, then behaves as
    [fake] says: [Exits] at once, as Firefox does on a profile another
    Firefox holds; [Relaunches], leaving a process in its group that opens
-   the port half a second later, as a Firefox applying an update does. *)
+   the port half a second later, as a Firefox applying an update does;
+   [Listens_apart], running on while a process it started holds the port
+   from a group of its own, which a stop of its group does not reach. *)
 let fake_firefox base ~marker fake =
   let path = Filename.concat base "firefox" in
   let pidfile = Filename.quote (marker ^ ".listener") in
   let tail = match fake with
     | Listens -> Printf.sprintf "exec %s \"$port\" %s\n" listener_command pidfile
+    | Listens_apart ->
+      Printf.sprintf "%s \"$port\" %s &\nexec %s\n" (listener ~own_group:true) pidfile (sleeper_command marker)
     | Exits -> "exit 0\n"
     | Relaunches -> Printf.sprintf "( sleep 0.5; exec %s \"$port\" %s ) &\nexit 0\n" listener_command pidfile
     | Never_listens -> Printf.sprintf "exec %s\n" (sleeper_command marker) in
@@ -1175,6 +1187,213 @@ let a_request_while_the_host_comes_up_waits_for_it () =
           [ attached_id first; Option.bind !late attached_id ]);
       check bool "one host" false (started_again (Keeper_firefox.host_log_path ~base_path:base))))
 
+(* --- a session the last host left in Firefox ---------------------------------- *)
+
+(* The last host's record: it ended at [now] with [session] in the Firefox
+   on [port]. *)
+let host_ended ?(port = 9333) base ~session ~now =
+  let held = take ~port base in
+  (match Record.ended held ~reason:"stopped by SIGTERM" ~session ~now with
+   | Ok () -> ()
+   | Error failure -> fail (Record.write_failure_message failure));
+  released held
+
+let held_since ~port base = Keeper_firefox.session_held_since ~port (Status.report (Status.observe ~base_path:base))
+
+let a_held_session_is_read_from_the_last_hosts_end () =
+  List.iter
+    (fun (what, session, expected) ->
+      with_workspace (fun base ->
+        install_lane base ~marker:"/unused";
+        host_ended base ~session ~now:1_791_000_060.;
+        check (option (float 0.001)) what expected (held_since ~port:9333 base)))
+    [ "left", Record.Session_left, Some 1_791_000_060.
+    ; "refused", Record.Session_refused, Some 1_791_000_060.
+    ; "none left", Record.No_session_left, None
+    ; "lost before it could end it", Record.Session_unknown, None ];
+  with_workspace (fun base ->
+    install_lane base ~marker:"/unused";
+    host_ended ~port:9444 base ~session:Record.Session_left ~now:1_791_000_060.;
+    check (option (float 0.001)) "a host that served another port" None (held_since ~port:9333 base));
+  with_workspace (fun base ->
+    install_lane base ~marker:"/unused";
+    let held = take base in
+    Fun.protect ~finally:(fun () -> released held) (fun () ->
+      check (option (float 0.001)) "a host that runs" None (held_since ~port:9333 base)))
+
+let only_the_firefox_masc_started_before_that_end_is_restarted () =
+  let restart ?(port = 9222) ~since recorded =
+    match Keeper_firefox.restart_for_held_session (entry ()) ~port ~since recorded with
+    | Keeper_firefox.Restart -> "restart"
+    | Keeper_firefox.Not_restarted _ -> "not restarted" in
+  let ended_after = 1_791_000_060. and ended_before = 1_790_999_000. in
+  check string "ours, started before that host ended" "restart" (restart ~since:ended_after Keeper_firefox.Started_here);
+  check string "ours, started as it ended" "restart" (restart ~since:1_791_000_000. Keeper_firefox.Started_here);
+  check string "ours, started after it ended" "not restarted" (restart ~since:ended_before Keeper_firefox.Started_here);
+  check string "ours, on another port" "not restarted"
+    (restart ~port:9333 ~since:ended_after Keeper_firefox.Started_here);
+  check string "ended" "not restarted" (restart ~since:ended_after Keeper_firefox.Gone);
+  check string "not shown to be ours" "not restarted" (restart ~since:ended_after (Keeper_firefox.Unproven "why"))
+
+(* The Keeper Firefox MASC started, with its host, and the host then gone as
+   one that ended with [session] at [now] (the wall clock when not given).
+   Its marker goes with it, so the next host's shows when that one starts.
+   That Firefox's pid is kept in [first_marker], since the next Firefox
+   writes over its marker, and a case that fails to stop it still does. *)
+let first_marker base = Filename.concat base "first-firefox"
+
+let started_then_host_ended ?now base ~session ~configuration ~port ~firefox_marker ~host_marker =
+  started ~base ~configuration ();
+  await_file host_marker;
+  Option.iter stop (first_pid host_marker);
+  Sys.remove host_marker;
+  host_ended ~port base ~session ~now:(match now with Some now -> now | None -> Unix.gettimeofday ());
+  match first_pid firefox_marker with
+  | Some pid -> write (first_marker base) (string_of_int pid ^ "\n"); pid
+  | None -> fail "no Firefox"
+
+let the_firefox_masc_started_is_restarted_for_a_held_session () =
+  List.iter
+    (fun (what, session) ->
+      with_workspace (fun base ->
+        let firefox_marker, host_marker = markers base in
+        install_lane base ~marker:host_marker;
+        let port = free_port () in
+        let firefox = fake_firefox base ~marker:firefox_marker Listens in
+        let configuration = configured ~firefox ~port base in
+        with_children ~base [ firefox_marker; host_marker; first_marker base ] (fun () ->
+          let first = started_then_host_ended base ~session ~configuration ~port ~firefox_marker ~host_marker in
+          started ~base ~configuration ();
+          await_file host_marker;
+          check bool (what ^ ": the first Firefox is stopped") false (runs_under base first);
+          check bool (what ^ ": another is started and recorded") true
+            (match first_pid firefox_marker, recorded base with
+             | Some again, Some (entry : Firefox_record.entry) -> again <> first && entry.group = again
+             | (Some _ | None), (Some _ | None) -> false);
+          check bool (what ^ ": with a host") true (started_again (Keeper_firefox.host_log_path ~base_path:base)))))
+    [ "left", Record.Session_left; "refused", Record.Session_refused ]
+
+(* The stopped Firefox's record goes once its group is empty, whether or not
+   another one then starts. *)
+let a_restart_whose_firefox_cannot_start_leaves_no_record () =
+  with_workspace (fun base ->
+    let firefox_marker, host_marker = markers base in
+    install_lane base ~marker:host_marker;
+    let port = free_port () in
+    let firefox = fake_firefox base ~marker:firefox_marker Listens in
+    let configuration = configured ~firefox ~port base in
+    with_children ~base [ firefox_marker; host_marker; first_marker base ] (fun () ->
+      let first =
+        started_then_host_ended base ~session:Record.Session_left ~configuration ~port ~firefox_marker ~host_marker in
+      (* Its content is what it was; it can no longer be run. *)
+      Unix.chmod firefox 0o600;
+      started ~base ~configuration ();
+      check bool "the first Firefox is stopped" false (runs_under base first);
+      check bool "and no longer recorded" true (recorded base = None);
+      check bool "no host for a Firefox that is not there" false (Sys.file_exists host_marker)))
+
+(* A port still held once the stopped group is empty gets no new Firefox:
+   it would meet that port, or that profile, still taken. *)
+let a_restart_whose_port_stays_open_starts_nothing () =
+  with_workspace (fun base ->
+    let firefox_marker, host_marker = markers base in
+    install_lane base ~marker:host_marker;
+    let port = free_port () in
+    let firefox = fake_firefox base ~marker:firefox_marker Listens_apart in
+    let configuration = configured ~firefox ~port base in
+    with_children ~base [ firefox_marker; host_marker; first_marker base ] (fun () ->
+      let first =
+        started_then_host_ended base ~session:Record.Session_left ~configuration ~port ~firefox_marker ~host_marker in
+      started ~base ~configuration ();
+      check bool "the first Firefox's group is stopped" false (runs_under base first);
+      check bool "the port's holder runs on" true
+        (match first_pid (firefox_marker ^ ".listener") with Some pid -> runs_under base pid | None -> false);
+      check bool "no second Firefox" false (started_again (Keeper_firefox.firefox_log_path ~base_path:base));
+      check bool "no host" false (Sys.file_exists host_marker);
+      check bool "the record of that empty group is gone" true (recorded base = None)))
+
+(* The Firefox runs on, still recorded, and a host is started for it. *)
+let a_firefox_that_holds_no_such_session_is_not_restarted () =
+  List.iter
+    (fun (what, session, now) ->
+      with_workspace (fun base ->
+        let firefox_marker, host_marker = markers base in
+        install_lane base ~marker:host_marker;
+        let port = free_port () in
+        let firefox = fake_firefox base ~marker:firefox_marker Listens in
+        let configuration = configured ~firefox ~port base in
+        with_children ~base [ firefox_marker; host_marker ] (fun () ->
+          let first = started_then_host_ended ?now base ~session ~configuration ~port ~firefox_marker ~host_marker in
+          started ~base ~configuration ();
+          await_file host_marker;
+          check bool (what ^ ": the Firefox runs on") true (runs_under base first);
+          check bool (what ^ ": still recorded") true
+            (Option.map (fun (entry : Firefox_record.entry) -> entry.group) (recorded base) = Some first);
+          check bool (what ^ ": no second Firefox") false
+            (started_again (Keeper_firefox.firefox_log_path ~base_path:base));
+          check bool (what ^ ": a host is started for it") true
+            (started_again (Keeper_firefox.host_log_path ~base_path:base)))))
+    [ "none left", Record.No_session_left, None
+    ; "lost before it could end it", Record.Session_unknown, None
+    ; "left before this Firefox started", Record.Session_left, Some 1_791_000_060. ]
+
+(* A Firefox MASC is not shown to have started answers on the port: no
+   record, or one whose number another process has, or one whose start was
+   not read. Nothing is stopped, and a host is started for that Firefox. *)
+let a_firefox_masc_did_not_start_is_not_restarted () =
+  List.iter
+    (fun (what, leader_of) ->
+      with_workspace (fun base ->
+        let firefox_marker, host_marker = markers base in
+        install_lane base ~marker:host_marker;
+        let firefox = fake_firefox base ~marker:firefox_marker Listens in
+        let other = detached_sleeper base "other" in
+        Fun.protect ~finally:(fun () -> stop other) (fun () ->
+          with_children ~base [ firefox_marker; host_marker ] (fun () ->
+            Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+              let listener =
+                Eio.Net.listen (Eio.Stdenv.net env) ~sw ~reuse_addr:true ~backlog:4
+                  (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0)) in
+              let port = match Eio.Net.listening_addr listener with `Tcp (_, port) -> port | `Unix _ -> fail "tcp" in
+              Option.iter
+                (fun leader -> write_record base { (entry ~group:other ~leader ()) with port })
+                leader_of;
+              host_ended ~port base ~session:Record.Session_left ~now:(Unix.gettimeofday ());
+              match
+                Eio.Promise.await
+                  (Server_browser_keeper_firefox.For_testing.start
+                     ~ready_timeout_s:Keeper_firefox.firefox_ready_timeout_s ~sw ~env ~base_path:base
+                     ~configuration:(configured ~firefox ~port base) ())
+              with
+              | Ok () -> ()
+              | Error exn -> raise exn));
+            await_file host_marker;
+            check bool (what ^ ": no Firefox of MASC's") false (firefox_started base);
+            check bool (what ^ ": the recorded number's process runs on") true (runs_under base other)))))
+    [ "no record", None
+    ; "another process under the recorded number", Some (Firefox_record.Started_at "proc:another:1")
+    ; "a start that was not read", Some Firefox_record.Start_unreadable ]
+
+(* The Keeper's request is answered once the restarted Firefox's host shows
+   its connection. *)
+let a_request_restarts_the_firefox_holding_a_session () =
+  with_workspace (fun base ->
+    let firefox_marker, host_marker = markers base in
+    install_lane base ~marker:host_marker;
+    let port = free_port () in
+    let firefox = fake_firefox base ~marker:firefox_marker Listens in
+    let configuration = configured ~firefox ~port base in
+    with_children ~base [ firefox_marker; host_marker; first_marker base ] (fun () ->
+      let first =
+        started_then_host_ended base ~session:Record.Session_left ~configuration ~port ~firefox_marker ~host_marker in
+      requested ~base ~configuration (fun ~sw ~clock request ->
+        let client = bidi_client 6 in
+        Eio.Fiber.fork ~sw (fun () -> await_file_in_eio ~clock host_marker; attach ~sw client);
+        let answer = request () in
+        check (option string) "the new connection" (Some (id_of client)) (attached_id answer);
+        check string "said to have started both" "firefox and host" (what_started answer));
+      check bool "the first Firefox is stopped" false (runs_under base first)))
+
 let () =
   run "browser_keeper_firefox"
     [ ( "configuration"
@@ -1239,4 +1458,17 @@ let () =
         ; test_case "a connection that never shows" `Quick a_connection_that_never_shows_is_reported
         ; test_case "a host that ends at once" `Quick a_host_that_ends_at_once_stops_its_firefox
         ; test_case "during the server start" `Quick a_request_during_the_server_start_waits_for_it
-        ; test_case "while the host comes up" `Quick a_request_while_the_host_comes_up_waits_for_it ] ) ]
+        ; test_case "while the host comes up" `Quick a_request_while_the_host_comes_up_waits_for_it ] )
+    ; ( "a session left in Firefox"
+      , [ test_case "read from the last host's end" `Quick a_held_session_is_read_from_the_last_hosts_end
+        ; test_case "only the one MASC started before that end" `Quick
+            only_the_firefox_masc_started_before_that_end_is_restarted
+        ; test_case "the Firefox MASC started is restarted" `Quick
+            the_firefox_masc_started_is_restarted_for_a_held_session
+        ; test_case "a restart whose Firefox cannot start" `Quick
+            a_restart_whose_firefox_cannot_start_leaves_no_record
+        ; test_case "a restart whose port stays open" `Quick a_restart_whose_port_stays_open_starts_nothing
+        ; test_case "one that holds no such session is not" `Quick
+            a_firefox_that_holds_no_such_session_is_not_restarted
+        ; test_case "one MASC did not start is not" `Quick a_firefox_masc_did_not_start_is_not_restarted
+        ; test_case "a Keeper's request restarts it" `Quick a_request_restarts_the_firefox_holding_a_session ] ) ]

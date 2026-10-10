@@ -245,7 +245,12 @@
       "path": "lib/keeper/keeper_agent_run.ml",
       "baseline_lines": 2649,
       "kind": "production",
-      "status": "pending semantic review"
+      "status": "partial: pure response normalization moved to a direct owner; ignored history argument and testing forwarders removed; remaining orchestration responsibilities pending semantic review",
+      "current_lines": 2612,
+      "validation_artifact": "turn-response-contract/README.md",
+      "prs": [
+        41987
+      ]
     },
     {
       "path": "lib/keeper/keeper_approval_queue.ml",
@@ -795,7 +800,12 @@
       "path": "test/test_keeper_muse_runtime.ml",
       "baseline_lines": 2684,
       "kind": "test",
-      "status": "pending semantic review"
+      "status": "partial: selected cases initialize source prompt assets before direct execution; remaining fixture and lifecycle responsibilities pending semantic review",
+      "current_lines": 2651,
+      "validation_artifact": "turn-response-contract/README.md",
+      "prs": [
+        41987
+      ]
     },
     {
       "path": "test/test_keeper_mutex_coverage.ml",

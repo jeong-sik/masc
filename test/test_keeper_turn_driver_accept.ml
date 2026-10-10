@@ -774,9 +774,8 @@ let test_reject_reason_describes_thinking_only_response () =
 
 let test_finalization_blank_response_is_typed_accept_rejection () =
   let result =
-    Masc.Keeper_agent_run.For_testing.normalize_response_text_for_finalization
+    Masc.Keeper_turn_response_contract.normalize_response_text_for_finalization
       ~runtime_id:"ollama.gemma4-26b-a4b-qat"
-      ~initial_messages:[]
       ~run_result:(run_result ())
       ~text:""
       ~tool_names:[]
@@ -826,9 +825,8 @@ let test_finalization_does_not_surface_hidden_reasoning () =
       ()
   in
   let finalize tool_names =
-    Masc.Keeper_agent_run.For_testing.normalize_response_text_for_finalization
+    Masc.Keeper_turn_response_contract.normalize_response_text_for_finalization
       ~runtime_id:"runtime.reasoning-model"
-      ~initial_messages:[]
       ~run_result:response
       ~text:""
       ~tool_names

@@ -1572,15 +1572,18 @@ let reconcile_quarantines ~now ~worker_epoch ~base_path ~keeper_name =
   loop initial_candidates partitions
 ;;
 
-let process_next_with_claim_ready_exact_current
-      ~claim_ready_exact
-      ~now
-      ~worker_epoch
-      ~base_path
-      ~keeper_name
-      ~prepare
-      ~execute
-  =
+(* The prunes-plus-read body the wake shares, so a test can re-run the
+   whole seam while landing an owner settlement in the overlap through
+   [?hook]. The hook fires on the line immediately above the first prune —
+   not earlier: leaving even the cursor read between the hook and the prune
+   lets a refactor move the candidate read below the hook (and above the
+   prunes) while the test stays green, which would pin nothing. Production
+   leaves the hook as no-op. *)
+let prunes_and_read ~base_path ~keeper_name ?hook () =
+  let cursor_ts, cursor_post_id =
+    Keeper_registry.get_board_cursor ~base_path keeper_name
+  in
+  (match hook with Some hook -> hook () | None -> ());
   (* #41422: drop consumed rows the replay gate can never re-mint before
      roots are ensured, so a long-lived keeper's candidate ledger stays
      bounded by its unresolved attention instead of its board history. The
@@ -1588,9 +1591,6 @@ let process_next_with_claim_ready_exact_current
      against; the default (0.0, None) of an unregistered keeper keeps every
      row. A prune failure must not stop judgment work, so it is observed and
      retried on the next wake. *)
-  let cursor_ts, cursor_post_id =
-    Keeper_registry.get_board_cursor ~base_path keeper_name
-  in
   (match
      Candidate.prune_consumed_behind_cursor
        ~base_path
@@ -1631,7 +1631,22 @@ let process_next_with_claim_ready_exact_current
      "candidate ledger lacks partition member" forever because only [Settled]
      receipts are pruned. Receipts are dropped only above this read, so a
      candidate consumed after it still has its [Settled] receipt. *)
-  let* candidates = Candidate.load_candidates ~base_path ~keeper_name in
+  Candidate.load_candidates ~base_path ~keeper_name
+;;
+
+let process_next_with_claim_ready_exact_current
+      ~claim_ready_exact
+      ~now
+      ~worker_epoch
+      ~base_path
+      ~keeper_name
+      ~prepare
+      ~execute
+  =
+  (* The prunes and the candidate read run as one seam; a test can install
+     a hook that fires immediately before the first prune, landing an owner
+     settlement in exactly the gap the read position defines. *)
+  let* candidates = prunes_and_read ~base_path ~keeper_name () in
   let* (_ : int) = Partition.ensure_roots ~base_path ~keeper_name candidates in
   let selected_generation_is_ready ~partition_id ~generation =
     let* partitions = Partition.load ~base_path ~keeper_name in
@@ -1841,10 +1856,9 @@ let replay_completed_owner_wake
 (* Only the captured list is drained: workers may complete more partitions
    while this owner yields, but those belong to the next admission snapshot.
    Yield outside each durable transaction so other fibers remain runnable. *)
-let settle_completed_snapshot
-      ~base_path
-      ~keeper_name
-  =
+let settle_completed_snapshot ~base_path ~keeper_name
+      ?on_captured
+      () =
   let settle_head partition =
     let* partition =
       confirm_loaded_completed
@@ -1864,6 +1878,12 @@ let settle_completed_snapshot
       settle_snapshot settled rest
   in
   let* completed = completed_in_order ~base_path ~keeper_name in
+  (* Test seam for the snapshot-capture boundary: fires exactly after the
+     capture, before any member is settled, so a test hook can land a new
+     completion deterministically in that gap. Production passes no hook. *)
+  (match on_captured with
+   | Some hook -> hook ~base_path ~keeper_name ~completed
+   | None -> ());
   match completed with
   | [] -> Ok No_completed_partition
   | first :: _ ->
@@ -2196,6 +2216,14 @@ let run
 module For_testing = struct
   type nonrec rearm_scheduler = rearm_scheduler
   type nonrec deferred_rearm_scheduler = deferred_rearm_scheduler
+
+  let deliver_and_settle_completed = deliver_and_settle_completed
+  let prunes_and_read = prunes_and_read
+  let settle_completed_snapshot ~base_path ~keeper_name ~on_captured () =
+    match on_captured with
+    | Some hook ->
+      settle_completed_snapshot ~base_path ~keeper_name ~on_captured:hook ()
+    | None -> settle_completed_snapshot ~base_path ~keeper_name ()
 
   let reconcile_quarantines = reconcile_quarantines
   let process_next = process_next

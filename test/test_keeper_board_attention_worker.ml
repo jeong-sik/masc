@@ -355,7 +355,7 @@ let test_worker_exact_callback_integration_and_owner_settlement () =
      Alcotest.(check string) "selected opaque slot" third.slot_id observed.slot_id;
      Alcotest.(check (float 0.0)) "completion observes post-execution time" 9.0 completed_at
    | _ -> Alcotest.fail "callback chain did not persist Completed");
-  (match ok "owner settlement" (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha") with
+  (match ok "owner settlement" (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ()) with
    | W.Partition_settled { candidate_id; _ }
      when String.equal candidate_id persisted.candidate_id -> ()
    | W.Partition_settled _ -> Alcotest.fail "a different candidate was settled"
@@ -516,7 +516,7 @@ let test_discards_do_not_hold_the_owner_delivery_slot () =
     admitted.candidate_id
     second;
   (match
-     ok "owner settlement" (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha")
+     ok "owner settlement" (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ())
    with
    | W.Partition_settled { candidate_id; _ } ->
      Alcotest.(check string)
@@ -583,7 +583,7 @@ let test_completed_snapshot_delivers_all_relevant_in_order () =
   in
   List.iter (fun decision -> ignore (complete_next ~base_path decision)) decisions;
   ignore (ok "settle all ready judgments"
-    (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha"));
+    (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ()));
   let expected =
     List.filter_map
       (fun ((candidate : A.candidate), decision) ->
@@ -599,7 +599,7 @@ let test_completed_snapshot_delivers_all_relevant_in_order () =
       | _ -> Alcotest.fail "snapshot member not settled")
     (ok "reload partitions" (P.load ~base_path ~keeper_name:"alpha"));
   (match ok "repeat settlement"
-     (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha") with
+     (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ()) with
    | W.No_completed_partition -> ()
    | _ -> Alcotest.fail "settled snapshot was offered again");
   Alcotest.(check (list string)) "repeat does not duplicate delivery"
@@ -635,7 +635,7 @@ let test_completed_snapshot_failure_preserves_remainder_and_replays () =
   ok "persist conflicting identity"
     (Event_queue_persistence.update_result ~base_path ~keeper_name:"alpha"
        (fun queue -> Event_queue.enqueue queue conflict));
-  (match W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" with
+  (match W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" () with
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "delivery conflict falsely settled the snapshot");
   let candidates = ok "reload failed candidates"
@@ -659,44 +659,53 @@ let test_completed_snapshot_failure_preserves_remainder_and_replays () =
          |> List.filter (fun source -> source <> conflict)
          |> List.fold_left Event_queue.enqueue Event_queue.empty));
   ignore (ok "resume preserved remainder"
-    (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha"));
+    (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ()));
   Alcotest.(check (list string)) "crash replay and retry deliver once in order"
     [ first.candidate_id; failing.candidate_id; last.candidate_id ]
     (delivered_ids ~base_path)
 ;;
 
-let test_completed_snapshot_yields_and_defers_new_completions () =
+let test_completed_snapshot_captures_settle_and_continues_waking () =
   Eio_main.run @@ fun _ ->
   with_temp_base "board-completed-growing" @@ fun base_path ->
   let first = record ~base_path (candidate ~id:"captured-first" ~recorded_at:1.0 ()) in
   let second = record ~base_path (candidate ~id:"captured-second" ~recorded_at:2.0 ()) in
   ignore (complete_next ~base_path J.Relevant);
   ignore (complete_next ~base_path J.Relevant);
-  Eio.Switch.run @@ fun sw ->
   let added, resolve_added = Eio.Promise.create () in
-  Eio.Fiber.fork ~sw (fun () ->
-    (* Wait for a durable boundary, not a timer or an assumed fork order. *)
-    let rec await_first () =
-      if relevant_delivery_count ~base_path ~candidate_id:first.candidate_id = 0
-      then (Eio.Fiber.yield (); await_first ())
-    in
-    await_first ();
-    Alcotest.(check int) "other fiber runs between captured members" 0
-      (relevant_delivery_count ~base_path ~candidate_id:second.candidate_id);
+  (* The captured snapshot settles only what it captured: the on_captured hook
+     lands a new completion in the capture boundary, so the walk below cannot
+     see it in [completed] and must come back with a continuation wake. This
+     pins the comment above [settle_completed_snapshot] — completions that
+     arrive after the capture belong to the next admission snapshot. This
+     test does NOT check that the settle walk yields between members: with
+     the walk's inter-member [fair_yield] removed it still passes (measured
+     on the pushed head, 2026-10-10). Yielding is covered by nothing here;
+     watching it is tracked in task-2233's follow-up scope. *)
+  let on_captured
+        ~base_path
+        ~keeper_name:_
+        ~completed:_
+    =
     let new_candidate =
       record ~base_path (candidate ~id:"completed-during-drain" ~recorded_at:3.0 ())
     in
     ignore (complete_next ~base_path J.Relevant);
-    Eio.Promise.resolve resolve_added new_candidate);
+    Eio.Promise.resolve resolve_added new_candidate
+  in
   (match ok "drain captured snapshot"
-     (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha") with
+     (W.settle_completed_snapshot
+        ~base_path
+        ~keeper_name:"alpha"
+        ~on_captured
+        ()) with
    | W.Partition_settled { continuation_wake = Some _; _ } -> ()
    | _ -> Alcotest.fail "new completion did not retain a continuation wake");
   let new_candidate = Eio.Promise.await added in
   Alcotest.(check (list string)) "new completion is outside captured snapshot"
     [ first.candidate_id; second.candidate_id ] (delivered_ids ~base_path);
   ignore (ok "drain next snapshot"
-    (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha"));
+    (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ()));
   Alcotest.(check (list string)) "next owner boundary delivers new completion"
     [ first.candidate_id; second.candidate_id; new_candidate.candidate_id ]
     (delivered_ids ~base_path)
@@ -1330,6 +1339,202 @@ let test_drain_drops_the_settled_receipt_of_a_consumed_candidate () =
     (List.length (ok "load partitions" (P.load ~base_path ~keeper_name:"alpha")))
 ;;
 
+(* Helpers for the two overlap tests below. The first reads the ledger
+   pair the way the wake does after its two prunes; the second re-runs the
+   wake's two prunes plus the candidate read as one seam. *)
+
+let read_candidate_and_roots ~base_path =
+  (* Read both ledgers back-to-back, exactly the way
+     [process_next_with_claim_ready_exact_current] does after its two
+     prunes, so the assertions below read the same pair that root
+     minting saw. *)
+  let candidates =
+    ok "load candidates for roots" (A.load_candidates ~base_path ~keeper_name:"alpha")
+  in
+  let partitions = ok "load partitions for roots" (P.load ~base_path ~keeper_name:"alpha") in
+  (candidates, partitions)
+;;
+
+(* Both prunes plus the post-prune ledger read, with no work to do: the
+   exact seam of a wake that drains the ledgers the way the worker does.
+   Runs the two prunes even when the ledger is empty, so the helper
+   exercises the same path the overlap tests need. *)
+let drain ~base_path =
+  ignore
+    (ok "drain with nothing to do"
+       (W.For_testing.process_next_with_claim_ready_exact
+          ~claim_ready_exact:(fun ~now:_ ~worker_epoch:_ ~base_path:_ ~keeper_name:_
+                                ~partition_id:_ ~generation:_ ->
+            Ok None)
+          ~now:(fun () -> 3.0)
+          ~worker_epoch:(P.Worker_epoch.generate ())
+          ~base_path
+          ~keeper_name:"alpha"
+          ~prepare:(fun candidate -> Ok candidate)
+          ~execute:(fun ~before_dispatch:_ ~before_advance:_ _candidate ->
+            Alcotest.fail "an empty ledger dispatched a judgment")))
+;;
+
+(* The wake's ordering property after a full consume/drain/settle overlap:
+   the post-prune read sees an empty candidate ledger over a settled
+   receipt, and root minting over that pair appends nothing. This pins the
+   shipped order's outcome directly (the #41506 tripwire lives in the next
+   test, which drives the settlement through the seam's hook). *)
+let test_drain_then_settle_does_not_mint_a_ready_root () =
+  with_temp_base "board-attention-worker-drain-then-settle" @@ fun base_path ->
+  let kept = record ~base_path (candidate ~id:"candidate-overlap-judged" ()) in
+  let (selected : A.candidate), completed_judgment = complete_next ~base_path J.Relevant in
+  Alcotest.(check string) "the judged candidate is ours" kept.candidate_id
+    selected.candidate_id;
+  ignore
+    (delivered
+       "deliver the judged candidate's Relevant verdict"
+       (A.apply_judgment_and_deliver
+          ~base_path
+          ~keeper_name:"alpha"
+          ~candidate_id:kept.candidate_id
+          ~judgment:completed_judgment)
+      : A.candidate);
+  Masc.Keeper_registry.set_board_cursor ~base_path "alpha" 50.0 (Some "cursor-post");
+  drain ~base_path;
+  ignore
+    (ok "settle the completed snapshot"
+       (W.For_testing.deliver_and_settle_completed
+          ~base_path
+          ~keeper_name:"alpha"
+          (load_one_partition ~base_path)));
+  let candidates, partitions = read_candidate_and_roots ~base_path in
+  ignore
+    (ok "mint roots after settlement"
+       (P.ensure_roots ~base_path ~keeper_name:"alpha" candidates));
+  Alcotest.(check int) "the consumed row was pruned" 0 (List.length candidates);
+  List.iter
+    (fun (partition : P.t) ->
+       match partition.state with
+       | P.Settled _ -> ()
+       | _ -> Alcotest.fail "the settlement minted a fresh Ready partition")
+    partitions
+;;
+
+(* The owner settlement, which runs without the worker lock, is landed in
+   the gap the seam's hook defines: immediately before the wake's first
+   prune. The settlement consumes X and settles X's partition; the prunes
+   that follow drop X's row and its settled receipt, so the seam's returned
+   list is post-prune and minting over it appends nothing. With the
+   candidate read reverted in front of the prunes — the pre-#41506 order —
+   the same hook position still lets the prunes drop the row and receipt,
+   but the list minted over is the stale pre-prune read: it still names X,
+   and [ensure_roots] over a Pending candidate whose partition just settled
+   re-creates the Ready root the settled receipt no longer authorizes —
+   the wedge #41506 closed. This test is the tripwire for that revert. *)
+let test_owner_settlement_before_the_prunes_does_not_mint_a_ready_root () =
+  with_temp_base "board-attention-worker-settle-between-read-and-roots" @@ fun base_path ->
+  let kept = record ~base_path (candidate ~id:"candidate-overlap-race" ()) in
+  let (selected : A.candidate), completed_judgment = complete_next ~base_path J.Relevant in
+  Alcotest.(check string) "the judged candidate is ours" kept.candidate_id
+    selected.candidate_id;
+  (* X's signal token is (42.0, "candidate-overlap-race") and the cursor
+     (50.0, "cursor-post") sorts after it, so X's consumed row is removable
+     behind the cursor as soon as the settlement consumes it. *)
+  Masc.Keeper_registry.set_board_cursor ~base_path "alpha" 50.0 (Some "cursor-post");
+  (* The seam's hook fires immediately before the first prune. The owner
+     settlement in the hook consumes X (the wake recorded the judgment on
+     the partition's Completed item, not the candidate ledger, so the row
+     is still Pending until the settlement consumes it) and settles X's
+     partition. *)
+  let hook_fired = ref 0 in
+  (* The wake body: the seam's returned list feeds [ensure_roots] exactly as
+     [process_next_with_claim_ready_exact_current] does. The stale list (read
+     before the prunes) is the whole difference between the two orders: the
+     hook fires immediately before the first prune, so under the shipped
+     order the read that follows the prunes cannot name X, while under the
+     pre-#41506 order the read sits before them and the list still does. *)
+  let candidates =
+    ok "drain with the settlement before the candidate prune"
+      (W.For_testing.prunes_and_read
+         ~base_path
+         ~keeper_name:"alpha"
+         ~hook:(fun () ->
+           incr hook_fired;
+           (* The delivery replays the exact judgment the wake recorded. The
+              worker records the judgment on the partition's Completed item,
+              not the candidate ledger, so the candidate row is still Pending
+              here: consume it first (what the owner's delivery does), then
+              settle the partition over it. *)
+           ignore
+             (delivered
+                "owner settlement consumes X"
+                (A.apply_judgment_and_deliver
+                   ~base_path
+                   ~keeper_name:"alpha"
+                   ~candidate_id:kept.candidate_id
+                   ~judgment:completed_judgment)
+              : A.candidate);
+           ignore
+             (ok "settle X's partition without the worker lock"
+                (W.For_testing.deliver_and_settle_completed
+                   ~base_path
+                   ~keeper_name:"alpha"
+                   (load_one_partition ~base_path))))
+         ())
+  in
+  Alcotest.(check int) "the hook fired once" 1 !hook_fired;
+  (* The seam's returned list is the wake's ensure_roots input, so assert it
+     directly: with the settlement in the hook, the list must not name X in
+     any status. Every variant that puts the candidate read in front of the
+     candidate prune hands this list a stale row (Pending or Consumed,
+     depending on whether the hook's delivery ran before the read) and fails
+     here. A read that sits after the candidate prune is a post-prune list
+     by construction and cannot fail here — that is the point: the shipped
+     order's list is exactly the post-prune one. A read between the two
+     prunes is OUT of this tripwire's scope; covering it is tracked in
+     task-2233. *)
+  Alcotest.(check bool) "the list the wake read is post-prune" false
+    (List.exists
+       (fun (c : A.candidate) -> String.equal c.candidate_id kept.candidate_id)
+       candidates);
+  ignore
+    (ok "mint roots over the list the wake read"
+       (P.ensure_roots ~base_path ~keeper_name:"alpha" candidates));
+  (* The ledger read, after the seam: X's row and settled receipt are gone
+     from the store, because the settlement in the hook consumed X behind a
+     cursor the wake had already passed and both prunes then ran. A revert
+     that moved the read before the candidate prune keeps the ledger
+     unchanged at this point — the hook consumed X behind the passed cursor,
+     so the candidate prune (now after the read) still finds and removes the
+     row, which is what the residue check below catches. *)
+  let candidates, partitions = read_candidate_and_roots ~base_path in
+  (* The prunes (which ran after the hook's settlement) dropped X's consumed
+     row and its settled receipt: the ledger keeps no row naming X, and root
+     minting over the settled partition appends nothing. *)
+  let residue =
+    List.filter
+      (fun (c : A.candidate) -> String.equal c.candidate_id kept.candidate_id)
+      candidates
+  in
+  (match residue with
+   | [] -> ()
+   | [ candidate ] ->
+     let label =
+       match candidate.status with
+       | A.Pending _ -> "Pending"
+       | A.Judged _ -> "Judged"
+       | A.Consumed _ -> "Consumed"
+       | A.Quarantine _ -> "Quarantine"
+     in
+     Alcotest.failf "the pruned candidate's row survived the wake: status=%s" label
+   | _ -> Alcotest.fail "unexpected duplicate rows");
+  List.iter
+    (fun (partition : P.t) ->
+       match partition.state with
+       | P.Settled _ -> ()
+       | _ ->
+         Alcotest.failf
+           "the wake minted a fresh Ready root over the settled partition: %s"
+           partition.partition_id)
+    partitions
+;;
+
 let test_execution_error_preserves_bound_progress_without_hot_retry () =
   with_temp_base "board-attention-worker-execution-error" @@ fun base_path ->
   let persisted = record ~base_path (candidate ()) in
@@ -1601,7 +1806,7 @@ let test_malformed_answer_quarantines_then_requeues_and_settles () =
   (match
      ok
        "settle recovered candidate"
-       (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha")
+       (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ())
    with
    | W.Partition_settled { candidate_id; _ }
      when String.equal candidate_id persisted.candidate_id -> ()
@@ -2418,7 +2623,7 @@ let test_consumed_completed_crash_settles_without_duplicate_delivery () =
   (match (load_one_partition ~base_path).state with
    | P.Completed _ -> ()
    | _ -> Alcotest.fail "crash fixture did not retain Completed partition");
-  (match ok "settle crash-replayed completion" (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha") with
+  (match ok "settle crash-replayed completion" (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ()) with
    | W.Partition_settled { candidate_id; continuation_wake = None }
      when String.equal candidate_id persisted.candidate_id -> ()
    | W.Partition_settled _ ->
@@ -2950,7 +3155,7 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
   (match
      ok
        "owner settlement"
-       (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha")
+       (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ())
    with
    | W.Partition_settled { candidate_id; _ }
      when String.equal candidate_id persisted.candidate_id -> ()
@@ -4049,7 +4254,7 @@ let test_settle_completed_snapshot_terminalizes_a_partition_whose_candidate_was_
   (match
      ok
        "first settlement attempt"
-       (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha")
+       (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ())
    with
    | W.Partition_settled { candidate_id; _ }
      when String.equal candidate_id persisted.candidate_id -> ()
@@ -4063,7 +4268,7 @@ let test_settle_completed_snapshot_terminalizes_a_partition_whose_candidate_was_
   match
     ok
       "second settlement attempt"
-      (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha")
+      (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ())
   with
   | W.No_completed_partition -> ()
   | W.Partition_settled _ ->
@@ -4123,6 +4328,14 @@ let () =
             "drain drops the settled receipt of a consumed candidate"
             `Quick
             test_drain_drops_the_settled_receipt_of_a_consumed_candidate
+        ; Alcotest.test_case
+            "drain then settle leaves a settled receipt without a live row"
+            `Quick
+            test_drain_then_settle_does_not_mint_a_ready_root
+        ; Alcotest.test_case
+            "owner settlement before the prunes does not mint a ready root"
+            `Quick
+            test_owner_settlement_before_the_prunes_does_not_mint_a_ready_root
         ; Alcotest.test_case
             "bookkeeping failure keeps its cause and the flow sentence"
             `Quick
@@ -4289,8 +4502,8 @@ let () =
             "completed snapshot preserves failure and replays without duplication"
             `Quick test_completed_snapshot_failure_preserves_remainder_and_replays
         ; Alcotest.test_case
-            "completed snapshot yields and defers concurrent completion"
-            `Quick test_completed_snapshot_yields_and_defers_new_completions
+            "completed snapshot capture defers new completions to the next wake"
+            `Quick test_completed_snapshot_captures_settle_and_continues_waking
         ; Alcotest.test_case
             "discards do not hold the owner delivery slot"
             `Quick

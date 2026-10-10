@@ -135,6 +135,10 @@ val run :
 val settle_completed_snapshot :
   base_path:string ->
   keeper_name:string ->
+  ?on_captured:(base_path:string ->
+                keeper_name:string ->
+                completed:Keeper_board_attention_partition.t list -> unit) ->
+  unit ->
   (settlement, string) result
 (** Owner-admission boundary. Capture the ordered completed partitions once,
     then durably settle that finite snapshot, cooperatively yielding between
@@ -150,6 +154,28 @@ module For_testing : sig
   type rearm_scheduler
   type deferred_rearm_scheduler
 
+  val deliver_and_settle_completed :
+    base_path:string ->
+    keeper_name:string ->
+    Keeper_board_attention_partition.t ->
+    (Keeper_board_attention_partition.t, string) result
+  (** The settlement half of [signal_completion]: durably delivers the
+      completed judgment to the candidate and settles the partition. Exposed
+      so a test can reproduce the owner settlement's exact write path without
+      standing up the full worker lifecycle. *)
+
+  val prunes_and_read :
+    base_path:string ->
+    keeper_name:string ->
+    ?hook:(unit -> unit) ->
+    unit ->
+    (Keeper_board_attention_candidate.candidate list, string) result
+  (** The wake's two prunes followed by the candidate-list read, as one
+      seam. [?hook] fires immediately before the first prune, so a test can
+      land an owner settlement (which runs without the worker lock) in
+      exactly the gap the read position defines — the prune/settlement
+      overlap of #41506. Production passes no hook. *)
+
   val reconcile_quarantines :
     now:float ->
     worker_epoch:Keeper_board_attention_partition.Worker_epoch.t ->
@@ -162,6 +188,22 @@ module For_testing : sig
       [Durable_partition_invariant] reason instead of failing the pass.
       Exposed so a test can drive it without standing up the full Eio worker
       lifecycle. *)
+
+  val settle_completed_snapshot :
+    base_path:string ->
+    keeper_name:string ->
+    on_captured:(base_path:string ->
+                 keeper_name:string ->
+                 completed:Keeper_board_attention_partition.t list -> unit)
+                option ->
+    unit ->
+    (settlement, string) result
+  (** Drains exactly the completed list this call captures — completions that
+      arrive while it yields belong to the next admission snapshot. Yields
+      outside each durable transaction so other fibers stay runnable.
+      [?on_captured] fires immediately after the capture and before any
+      member is settled; a test hook lands new completions in exactly that
+      capture boundary, deterministically. Production passes no hook. *)
 
   val drain_outcome_label : drain_outcome -> string
   (** The drain verdict as one token, as logged. Retry_later keeps its reason

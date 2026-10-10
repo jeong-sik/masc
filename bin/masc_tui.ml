@@ -17911,7 +17911,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
           then launch_keeper_calls_load ~force:true state ~mailbox keeper_name;
           (match state.msg_loaded_keeper with
             | Some loaded_keeper when String.equal loaded_keeper keeper_name ->
-                enrich_held_logs_from_rows state ~keeper_name state.msg_loaded
+                enrich_held_logs_from_rows ~only:log state ~keeper_name state.msg_loaded
             | Some _ | None -> ())
       | Error (Keeper_chat_log.Unknown_operation | Keeper_chat_log.Journal_pruned | Keeper_chat_log.Journal_missing) ->
           (* Nothing to reload, now or later this session: the v1 rows are

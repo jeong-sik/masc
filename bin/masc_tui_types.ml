@@ -9001,7 +9001,7 @@ let skills_in_source_rows ~keeper_name source rows =
     if String.equal row.me_keeper_name keeper_name && row.me_execution_source=source
     then row.me_skill_block else []) rows
 
-let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
+let enrich_held_logs_from_rows ?only state ~keeper_name (rows : msg_entry list) =
   List.iter
     (fun turn_log ->
       let execution_source = turn_log_execution_source turn_log in
@@ -9043,7 +9043,9 @@ let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
                   turn_log.tl_transcript skill)
               row.me_skill_block)
         rows)
-    (selected_source_logs_for_keeper state keeper_name)
+    (match only with
+     | Some turn_log -> [ turn_log ]
+     | None -> selected_source_logs_for_keeper state keeper_name)
 ;;
 
 (* Settling a turn: its log is committed and, when it has anything to draw,

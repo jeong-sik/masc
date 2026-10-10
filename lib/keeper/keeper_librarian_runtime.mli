@@ -192,6 +192,8 @@ type accepted =
       (** Independently settled candidate identities bound to the disposition. *)
   ; admission_support : string list
       (** Declared candidate support exposed to the absorption judge. *)
+  ; admission_recall_bindings : Keeper_memory_os_current.admission_recall_binding list
+      (** Original admitted observations bound to their selected current targets. *)
   }
 
 module For_testing : sig

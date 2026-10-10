@@ -199,11 +199,11 @@ let replay filename () =
     (`Assoc ["name",`String keeper_id; "trace_id",`String trace_id]) |> require in
   let recall_queries = json_list "recall_queries" envelope |> List.map Yojson.Safe.Util.to_string in
   if recall_queries = [] then fail "replay must declare its recall probes";
-  let recall () = List.map (fun query ->
+  let recall ?(source="current") () = List.map (fun query ->
     let response = Masc.Keeper_tool_memory_runtime.keeper_memory_search_json
       ~config ~meta
       ~ctx_work:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
-      ~args:(`Assoc ["query",`String query;"source",`String "current"])
+      ~args:(`Assoc ["query",`String query;"source",`String source])
       |> Yojson.Safe.from_string in
     `Assoc ["query",`String query;"response",response]) recall_queries in
   let recall_before = recall () in
@@ -281,10 +281,31 @@ let replay filename () =
        if List.mem id receipts then None else Some id.request_id) identities);
   let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require in
   let current_facts = match current with None -> [] | Some snapshot -> snapshot.Current.facts in
-  let runs = Runs.list_runs (Runs.global ()) |> List.filter (fun (run : Runs.run) ->
-    not (List.exists (fun (prior : Runs.run) -> String.equal prior.run_id run.run_id) prior_runs)) in
-  let exact_run = match runs with
-    | [run] -> run | _ -> fail "replay did not produce one exact-run observation" in
+  let file_bytes path = match Fs_compat.load_file_opt path with
+    | None -> 0 | Some bytes -> String.length bytes in
+  let storage_after = `Assoc ["current_snapshot_bytes",`Int (file_bytes current_path);
+    "consumption_and_lookup_receipt_bytes",`Int (file_bytes
+      (Current.durable_range_receipt_path ~keepers_dir ~keeper_id));
+    "pending_queue_bytes",`Int (file_bytes queue_path)] in
+  let recall_after = recall () in
+  let recall_all_after = recall ~source:"all" () in
+  let binding_snapshot, recall_bindings =
+    Current.read_with_admission_recall_for_keepers_dir ~keepers_dir ~keeper_id |> require in
+  check bool "recall bindings and current snapshot share one recovered read" true
+    (binding_snapshot = current);
+  List.iter (fun (binding : Current.admission_recall_binding) ->
+    check bool "lookup provenance belongs to an acknowledged candidate" true
+      (List.mem binding.candidate_id receipts);
+    check bool "lookup provenance preserves the complete original input" true
+      (List.exists (fun (candidate : Queue.candidate) ->
+        candidate.request_id = binding.candidate_id.request_id
+        && candidate.fact = binding.source_fact) candidates);
+    check bool "lookup destination is a current claim" true
+      (List.exists (fun fact -> Memory.memory_id fact = binding.target_memory_id)
+         current_facts)) recall_bindings;
+  (* An identical claim created later is a new admission. Old candidate
+     provenance must not attach itself to that new incarnation. This uses
+     the real replacement path after the measured replay, not a sidecar edit. *)
   if String.equal filename "verified_replacement.json" && !injected then (
     let replacement = "Owner-approved policy revision replaces the prior production P-42 rule: deployment now requires two independent approvals." in
     check (list string) "replacement is the sole current claim" [replacement]
@@ -311,8 +332,37 @@ let replay filename () =
     check bool "replacement is retrievable by the fixture query" true
       (List.exists (fun result ->
         json_list "matches" (member "response" result)
-        |> List.exists (fun matched -> json_string "text" matched = replacement)) after);
-    match exact_run.status with
+        |> List.exists (fun matched -> json_string "text" matched = replacement)) after));
+  let retirement_probe = match current, recall_bindings with
+    | Some snapshot, _ :: _ ->
+      let source = {Current.kind=Current.Explicit_write; trace_id="synthetic-retirement-probe"} in
+      let retired = Current.replace ~keepers_dir ~keeper_id
+        ~expected_revision:(Some snapshot.revision) ~now:(Time_compat.now ())
+        ~source ~facts:[] () |> require in
+      let _, retired_bindings =
+        Current.read_with_admission_recall_for_keepers_dir ~keepers_dir ~keeper_id |> require in
+      check int "retired target exposes no current lookup binding" 0 (List.length retired_bindings);
+      let recalled_retired = recall () in
+      List.iter (fun result -> check int "retired current memory cannot answer"
+        0 (member "response" result |> member "match_count" |> Yojson.Safe.Util.to_int))
+        recalled_retired;
+      ignore (Current.replace ~keepers_dir ~keeper_id
+        ~expected_revision:(Some retired.revision) ~now:(Time_compat.now ())
+        ~source ~facts:current_facts () |> require : Current.t);
+      let _, readded_bindings =
+        Current.read_with_admission_recall_for_keepers_dir ~keepers_dir ~keeper_id |> require in
+      check int "identical re-add cannot revive old admission bindings" 0
+        (List.length readded_bindings);
+      `Assoc ["performed",`Bool true; "binding_count_before",`Int (List.length recall_bindings);
+        "bindings_after_retirement",`Int (List.length retired_bindings);
+        "bindings_after_identical_readd",`Int (List.length readded_bindings)]
+    | None, _ | Some _, [] -> `Assoc ["performed",`Bool false] in
+  let runs = Runs.list_runs (Runs.global ()) |> List.filter (fun (run : Runs.run) ->
+    not (List.exists (fun (prior : Runs.run) -> String.equal prior.run_id run.run_id) prior_runs)) in
+  let exact_run = match runs with
+    | [run] -> run | _ -> fail "replay did not produce one exact-run observation" in
+  if String.equal filename "verified_replacement.json" && !injected then
+    (match exact_run.status with
      | Runs.Completed {outcome=Runs.Succeeded; _} -> ()
      | Running | Completed _ | Completion_persistence_failed _ ->
          fail "verified replacement must complete its exact run successfully");
@@ -329,13 +379,80 @@ let replay filename () =
     "current_facts",`List (List.map Memory.fact_to_json current_facts);
     "current_snapshot_present",`Bool (Option.is_some current);
     "recall_before",`List recall_before;
-    "recall_after",`List (recall ());
+    "recall_after",`List recall_after;
+    "storage_after",storage_after;
+    "recall_all_after",`List recall_all_after;
+    "retirement_probe",retirement_probe;
     "pending",`List (List.map candidate_json pending);
     "not_committed",`List (List.rev_map (fun (reason : Runtime.not_committed) ->
       `Assoc ["detail",`String reason.detail; "walk_shows_size",`Bool reason.walk_shows_size]) !refusals);
     "exact_run",Runs.run_to_yojson exact_run] in
   Printf.printf "MEMORY_ADMISSION_REPLAY %s\n%!" (Yojson.Safe.to_string payload);
   actual_outcome
+
+type lookup_failure_fixture = Journal_gap | Malformed_receipts | Unreadable_receipts
+
+let test_incomplete_lookup_keeps_direct_search_with failure () =
+  with_workspace @@ fun ~base_path ->
+  let keeper_id = "lookup-gap" and trace_id = "lookup-gap-test" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let fact claim : Memory.fact =
+    { claim; category=Memory.Constraint; first_seen=100.; last_seen=100.;
+      origin={kind=Memory.Authored; trace_id}; basis=Memory.Observed Memory.Transcript } in
+  let target = fact "Current consolidated policy" in
+  let evidence = fact "UNIQUE-HISTORICAL-ALIAS" in
+  ignore (Queue.append ~keepers_dir ~keeper_id ~request_id:"lookup-gap-input" evidence
+    |> require : Queue.candidate);
+  let batch = match Queue.read_pending ~keepers_dir ~keeper_id |> require with
+    | Some batch -> batch | None -> fail "missing candidate" in
+  let candidate_id = match Queue.candidate_ids batch with
+    | [id] -> id | _ -> fail "expected one candidate" in
+  let binding : Current.admission_recall_binding =
+    {candidate_id; source_fact=evidence; target_memory_id=Memory.memory_id target} in
+  let born = Current.apply_disposition ~explicit_candidate_ids:[candidate_id]
+    ~admission_recall:{decided_at_revision=None; bindings=[binding]} ~absorbed:[] ~revisions:[]
+    ~keepers_dir ~keeper_id ~now:200. ~source:{Current.kind=Current.Librarian;trace_id}
+    ~new_claims:[target] () |> require in
+  ignore (Current.replace ~keepers_dir ~keeper_id ~expected_revision:(Some born.snapshot.revision) ~now:300.
+    ~source:{Current.kind=Current.Explicit_write;trace_id}
+    ~facts:[target;fact "UNRELATED-CURRENT-FACT"] () |> require : Current.t);
+  (match failure with
+   | Journal_gap ->
+       let journal = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+       Fs_compat.invalidate_cached_writer journal;
+       Fs_compat.save_file journal ""
+   | Malformed_receipts | Unreadable_receipts ->
+       let path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id in
+       Sys.remove path;
+       (match failure with
+        | Malformed_receipts -> Fs_compat.save_file path "not-json"
+        | Unreadable_receipts -> Fs_compat.mkdir_p path
+        | Journal_gap -> fail "unexpected journal fixture"));
+  let snapshot, coverage =
+    Current.read_with_admission_recall_status_for_keepers_dir ~keepers_dir ~keeper_id |> require in
+  check bool "healthy snapshot survives unavailable alias proof" true (Option.is_some snapshot);
+  check bool "missing provenance remains an explicit error" true (Result.is_error coverage);
+  check bool "strict recall still refuses uncertain aliases" true
+    (Result.is_error (Current.read_with_admission_recall_for_keepers_dir ~keepers_dir ~keeper_id));
+  let config = Masc.Workspace.default_config base_path in
+  let meta = Masc_test_deps.meta_of_json_fixture
+    (`Assoc ["name",`String keeper_id;"trace_id",`String trace_id]) |> require in
+  List.iter (fun source ->
+    let search query =
+      Masc.Keeper_tool_memory_runtime.keeper_memory_search_json ~config ~meta
+        ~ctx_work:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
+        ~args:(`Assoc ["source",`String source;"query",`String query])
+      |> Yojson.Safe.from_string in
+    let direct = search "UNRELATED-CURRENT-FACT" in
+    check int "unrelated current fact remains searchable" 1
+      (member "match_count" direct |> Yojson.Safe.Util.to_int);
+    let alias = search "UNIQUE-HISTORICAL-ALIAS" in
+    check int "unverifiable historical alias is withheld" 0
+      (member "match_count" alias |> Yojson.Safe.Util.to_int);
+    check bool "incomplete lookup never asserts absence" true (member "no_match" alias = `Null);
+    List.iter (fun result -> check string "lookup gap is model-visible" "incomplete"
+      (member "admission_lookup_verification" result |> json_string "status")) [direct;alias])
+    ["current";"all"]
 
 let () =
   let manifest = Yojson.Safe.from_file (Masc_test_deps.source_path
@@ -354,4 +471,10 @@ let () =
     ["responses",List.map (fun (name, expected_outcome) ->
       test_case name `Quick (fun () ->
         check outcome_testable "replay reaches the manifest's expected outcome"
-          expected_outcome (replay name ()))) entries]
+          expected_outcome (replay name ()))) entries;
+     "lookup coverage",[test_case "incomplete provenance preserves direct search" `Quick
+       (test_incomplete_lookup_keeps_direct_search_with Journal_gap);
+       test_case "malformed receipts preserve direct search" `Quick
+         (test_incomplete_lookup_keeps_direct_search_with Malformed_receipts);
+       test_case "unreadable receipts preserve direct search" `Quick
+         (test_incomplete_lookup_keeps_direct_search_with Unreadable_receipts)]]

@@ -3545,7 +3545,10 @@ let private_jsonl_replace_locked ~dir path content =
                         { cursor = Some cursor; failure }))))))
 ;;
 
-let append_private_jsonl_durable_stable_with_io ~io path ~expected suffix =
+type private_jsonl_append_observation =
+  { before : Unix.stats; after : Unix.stats; suffix : string }
+
+let append_private_jsonl_durable_stable_with_io ?(observe=ignore) ~io path ~expected suffix =
   if String.equal suffix ""
      || not (Char.equal suffix.[String.length suffix - 1] '\n')
   then Error Invalid_transaction_suffix
@@ -3615,12 +3618,22 @@ let append_private_jsonl_durable_stable_with_io ~io path ~expected suffix =
              |> Result.map_error (fun error -> Transaction_append_failed error)
            in
            let* committed_stats = capture Inspect_transaction_data (fun () -> Unix.fstat fd) in
-           private_jsonl_cursor_of_stats committed_stats)
+           let* cursor = private_jsonl_cursor_of_stats committed_stats in
+           observe {before=stats;after=committed_stats;suffix};
+           Ok cursor)
 ;;
 
 let append_private_jsonl_durable_stable_result path suffix =
   append_private_jsonl_durable_stable_with_io
     ~io:private_jsonl_transaction_unix_io path ~expected:None suffix
+;;
+
+let append_private_jsonl_durable_observed_result path suffix =
+  let observation = ref None in
+  append_private_jsonl_durable_stable_with_io
+    ~observe:(fun value -> observation := Some value)
+    ~io:private_jsonl_transaction_unix_io path ~expected:None suffix
+  |> Result.map (fun cursor -> cursor, !observation)
 ;;
 
 let append_private_jsonl_durable_locked_at_cursor_result path ~expected suffix =

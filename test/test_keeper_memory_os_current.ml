@@ -2176,6 +2176,343 @@ let test_candidate_prepared_set_recovers_exact_snapshot () =
           |> List.map (fun receipt -> receipt |> member "state" |> to_string)))) [true;false]
 ;;
 
+let recall_binding sequence source_fact target : Current.admission_recall_binding =
+  let request_id = Printf.sprintf "recall-source-%d" sequence in
+  let row = `Assoc ["sequence",`Int sequence; "request_id",`String request_id;
+    "fact",Types.fact_to_json source_fact] in
+  {candidate_id=candidate_receipt sequence request_id (Yojson.Safe.to_string row);
+   source_fact; target_memory_id=Types.memory_id target}
+;;
+
+let current_revision ~keepers_dir =
+  match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" with
+  | Ok snapshot -> Option.map (fun (current : Current.t) -> current.revision) snapshot
+  | Error detail -> fail detail
+;;
+
+let commit_recall ?decided_at_revision ~keepers_dir binding claims =
+  let decided_at_revision = match decided_at_revision with
+    | Some revision -> revision
+    | None -> current_revision ~keepers_dir in
+  Current.apply_disposition ~explicit_candidate_ids:[binding.Current.candidate_id]
+    ~admission_recall:{decided_at_revision; bindings=[binding]} ~absorbed:[] ~revisions:[]
+    ~keepers_dir ~keeper_id:"keeper" ~now:200. ~source:(source Current.Librarian)
+    ~new_claims:claims ()
+;;
+
+let read_recall ~keepers_dir =
+  Current.read_with_admission_recall_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+;;
+
+let test_admission_recall_commits_recovers_and_expires_on_retirement () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let target = fact ~claim:"Release R001 through R200 require two approvals." () in
+  let evidence = board_fact "p-0123456789abcdef0123456789abcdef" ~claim:"R002 requires two approvals." in
+  let binding = recall_binding 1 evidence target in
+  let first = commit_recall ~keepers_dir binding [target] |> require_ok in
+  let snapshot, found = read_recall ~keepers_dir |> require_ok in
+  check bool "current target and exact Board provenance are read coherently" true
+    (snapshot=Some first.snapshot && found=[binding]);
+  check bool "binding also proves consumption of its original candidate" true
+    (read_candidates ~keepers_dir binding.candidate_id.queue_generation=[binding.candidate_id]);
+  let second = recall_binding 2 (fact ~claim:"R199 requires two approvals." ()) target in
+  let unchanged = commit_recall ~keepers_dir second [] |> require_ok in
+  check int "binding-only admission preserves the current snapshot revision"
+    first.snapshot.revision unchanged.snapshot.revision;
+  rewrite_receipts ~keepers_dir (map_receipts (map_field "state" (fun _ -> `String "prepared")));
+  let _, recovered = read_recall ~keepers_dir |> require_ok in
+  check bool "both source bindings recover against the exact kept snapshot" true
+    (List.length recovered=2 && List.mem binding recovered && List.mem second recovered);
+  (match Current.retract_fact ~keepers_dir ~keeper_id:"keeper" ~now:300.
+    ~source:(source Current.Explicit_retract) ~memory_id:(Types.memory_id target)
+    ~reason:"policy retired" () with
+   | Ok _ -> () | Error _ -> fail "target retirement failed");
+  check int "retired target has no search binding" 0
+    (List.length (snd (read_recall ~keepers_dir |> require_ok)));
+  ignore (Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:400.
+    ~source:(source Current.Explicit_write) target |> require_upsert_ok);
+  check int "readding identical bytes never revives old source bindings" 0
+    (List.length (snd (read_recall ~keepers_dir |> require_ok)));
+  check int "retirement retains the consumed candidate receipts" 2
+    (List.length (read_candidates ~keepers_dir binding.candidate_id.queue_generation))
+;;
+
+let test_admission_recall_refuses_a_target_retired_after_the_decision () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let target = fact ~claim:"Release R001 through R200 require two approvals." () in
+  ignore (replace ~keepers_dir ~facts:[target] () |> require_ok);
+  (* The decision reads Memory here. *)
+  let decided = current_revision ~keepers_dir in
+  (* While the model runs, the keeper retracts the target and adds the same
+     claim back: the same memory_id, a new incarnation. *)
+  (match Current.retract_fact ~keepers_dir ~keeper_id:"keeper" ~now:300.
+    ~source:(source Current.Explicit_retract) ~memory_id:(Types.memory_id target)
+    ~reason:"policy retired" () with
+   | Ok _ -> () | Error _ -> fail "target retirement failed");
+  ignore (Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:400.
+    ~source:(source Current.Explicit_write) target |> require_upsert_ok);
+  let snapshot_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let before = Fs_compat.load_file snapshot_path in
+  let binding = recall_binding 1 (fact ~claim:"R002 requires two approvals." ()) target in
+  (match commit_recall ~decided_at_revision:decided ~keepers_dir binding [] with
+   | Error _ -> ()
+   | Ok _ -> fail "a binding decided before the retirement attached to the new incarnation");
+  check string "the refused binding changes no current bytes" before (Fs_compat.load_file snapshot_path);
+  check int "the refused binding consumes no candidate" 0
+    (List.length (read_candidates ~keepers_dir binding.candidate_id.queue_generation));
+  (* A decision that read the current revision binds the re-added target. *)
+  ignore (commit_recall ~keepers_dir binding [] |> require_ok);
+  check int "a decision on current Memory still binds" 1
+    (List.length (snd (read_recall ~keepers_dir |> require_ok)))
+;;
+
+(* A replacement without drop reasons appends its journal line best-effort.
+   When that line, the older lines or the whole journal are gone, nothing
+   left shows the retirement between the decision and the re-add. *)
+let test_admission_recall_refuses_a_decision_across_missing_journal_revisions () =
+  List.iter (fun damage ->
+    with_temp_keepers @@ fun keepers_dir ->
+    let target = fact ~claim:"Release R001 through R200 require two approvals." () in
+    ignore (replace ~keepers_dir ~facts:[target] () |> require_ok);
+    (* The decision reads Memory here. *)
+    let decided = current_revision ~keepers_dir in
+    let journal = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+    let decision_journal = Fs_compat.load_file journal in
+    ignore (replace ~keepers_dir ~expected_revision:decided ~facts:[] () |> require_ok);
+    Fs_compat.invalidate_cached_writer journal;
+    (match damage with
+     | `Lost_line -> Fs_compat.save_file journal decision_journal
+     | `Lost_prefix -> Fs_compat.save_file journal ""
+     | `Lost_file -> ());
+    ignore (Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:400.
+      ~source:(source Current.Explicit_write) target |> require_upsert_ok);
+    (match damage with
+     | `Lost_line | `Lost_prefix -> ()
+     | `Lost_file -> Fs_compat.invalidate_cached_writer journal; Sys.remove journal);
+    let snapshot_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+    let before = Fs_compat.load_file snapshot_path in
+    let binding = recall_binding 1 (fact ~claim:"R002 requires two approvals." ()) target in
+    (match commit_recall ~decided_at_revision:decided ~keepers_dir binding [] with
+     | Error _ -> ()
+     | Ok _ -> fail "a journal gap let a binding attach across an unproven retirement");
+    check string "the refused binding changes no current bytes" before
+      (Fs_compat.load_file snapshot_path);
+    check int "the refused binding consumes no candidate" 0
+      (List.length (read_candidates ~keepers_dir binding.candidate_id.queue_generation));
+    (* The gap lies before current Memory, so a decision on it binds and
+       search finds the binding. *)
+    ignore (commit_recall ~keepers_dir binding [] |> require_ok);
+    check bool "a decision on current Memory still binds" true
+      (snd (read_recall ~keepers_dir |> require_ok) = [binding]))
+    [`Lost_line; `Lost_prefix; `Lost_file]
+;;
+
+let test_admission_recall_refuses_unbound_or_mistargeted_payloads () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let target = fact ~claim:"consolidated target" () in
+  let binding = recall_binding 1 (fact ~claim:"original scope R002" ()) target in
+  ignore (replace ~keepers_dir ~facts:[target] () |> require_ok);
+  let snapshot_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let before = Fs_compat.load_file snapshot_path in
+  List.iter (fun (ids, binding) ->
+    (match Current.apply_disposition ~explicit_candidate_ids:ids
+       ~admission_recall:{decided_at_revision=current_revision ~keepers_dir; bindings=[binding]}
+       ~absorbed:[] ~revisions:[] ~keepers_dir ~keeper_id:"keeper" ~now:250.
+       ~source:(source Current.Librarian) ~new_claims:[] () with
+     | Error _ -> () | Ok _ -> fail "invalid recall binding committed");
+    check string "binding refusal changes no current bytes" before (Fs_compat.load_file snapshot_path);
+    check int "binding refusal consumes no candidate" 0
+      (List.length (read_candidates ~keepers_dir binding.candidate_id.queue_generation)))
+    [[],binding;
+     [binding.candidate_id],{binding with source_fact=fact ~claim:"changed candidate" ()};
+     [binding.candidate_id],{binding with target_memory_id=Types.memory_id (fact ~claim:"absent target" ())}]
+;;
+
+let test_admission_recall_requires_complete_later_history_only_for_bindings () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let target = fact ~claim:"current target" () in
+  let binding = recall_binding 1 (fact ~claim:"R002 evidence" ()) target in
+  ignore (commit_recall ~keepers_dir binding [target] |> require_ok);
+  let other = fact ~claim:"unrelated current fact" () in
+  ignore (Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:300.
+    ~source:(source Current.Explicit_write) other |> require_upsert_ok);
+  check bool "unrelated later revision preserves live binding" true
+    (snd (read_recall ~keepers_dir |> require_ok)=[binding]);
+  let journal = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  Fs_compat.invalidate_cached_writer journal;
+  Out_channel.with_open_bin journal (fun out -> output_string out "");
+  (match read_recall ~keepers_dir with
+   | Error _ -> () | Ok _ -> fail "missing intervening history silently revived a binding");
+  (* A keeper with no bound receipts still has its ordinary current reader. *)
+  with_temp_keepers @@ fun unbound_dir ->
+  ignore (replace ~keepers_dir:unbound_dir ~facts:[target] () |> require_ok);
+  let unbound_journal = Current.journal_path_for_keepers_dir ~keepers_dir:unbound_dir ~keeper_id:"keeper" in
+  Fs_compat.invalidate_cached_writer unbound_journal;
+  Out_channel.with_open_bin unbound_journal (fun out -> output_string out "malformed");
+  let current, found = read_recall ~keepers_dir:unbound_dir |> require_ok in
+  check bool "no binding requires no history scan" true (Option.is_some current && found=[])
+;;
+
+let test_admission_receipt_failure_preserves_direct_snapshot () =
+  List.iter (fun unreadable ->
+    with_temp_keepers @@ fun keepers_dir ->
+    let target = fact ~claim:"direct current fact survives unavailable recall" () in
+    let committed = replace ~keepers_dir ~facts:[target] () |> require_ok in
+    let path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+    if unreadable then Fs_compat.mkdir_p path
+    else Out_channel.with_open_bin path (fun oc -> output_string oc "not-json");
+    (match Current.read_with_admission_recall_status_for_keepers_dir
+        ~keepers_dir ~keeper_id:"keeper" with
+     | Ok (Some snapshot, Error _) ->
+         check bool "independently decoded snapshot stays available" true
+           (snapshot = committed)
+     | Ok _ | Error _ -> fail "receipt failure hid the direct snapshot or claimed complete aliases");
+    check bool "consumption remains fail-closed" true
+      (Result.is_error (Current.committed_explicit_candidates
+        ~keepers_dir ~keeper_id:"keeper" ~queue_generation:"generation"))) [false;true]
+;;
+
+let test_admission_recall_no_change_cannot_hide_missing_retirement_transition () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let target = fact ~claim:"R002 policy" () in
+  let binding = recall_binding 1 (fact ~claim:"R002 original observation" ()) target in
+  let born = commit_recall ~keepers_dir binding [target] |> require_ok in
+  let journal = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let birth_journal = Fs_compat.load_file journal in
+  (* A replacement without drop reasons has best-effort journal delivery.
+     Restore only the birth bytes to reproduce its missing transition. *)
+  ignore (replace ~keepers_dir ~expected_revision:(Some born.snapshot.revision)
+    ~facts:[] () |> require_ok);
+  Fs_compat.invalidate_cached_writer journal;
+  Fs_compat.save_file journal birth_journal;
+  ignore (apply_disposition ~keepers_dir () |> require_ok);
+  ignore (Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:400.
+    ~source:(source Current.Explicit_write) target |> require_upsert_ok);
+  let rows = Fs_compat.load_jsonl journal in
+  check bool "same-revision observation is explicitly unchanged" true
+    (List.exists (fun json -> Yojson.Safe.Util.member "commit_effect" json = `String "unchanged") rows);
+  (match read_recall ~keepers_dir with
+   | Error _ -> ()
+   | Ok _ -> fail "no-change journal observation concealed a missing retirement transition")
+;;
+
+let test_admission_recall_cache_invalidates_external_prefix_edit_and_growth () =
+  List.iter (fun damage ->
+    with_temp_keepers @@ fun keepers_dir ->
+    let target = fact ~claim:"retained recall target" () in
+    let binding = recall_binding 1 (fact ~claim:"source observation" ()) target in
+    ignore (commit_recall ~keepers_dir binding [target] |> require_ok);
+    ignore (Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:300.
+      ~source:(source Current.Explicit_write) (fact ~claim:"another current fact" ())
+      |> require_upsert_ok);
+    check bool "cold verification retains live binding" true
+      (snd (read_recall ~keepers_dir |> require_ok)=[binding]);
+    for _ = 1 to 20 do
+      ignore (apply_disposition ~keepers_dir () |> require_ok);
+      check bool "known unchanged append preserves verified binding" true
+        (snd (read_recall ~keepers_dir |> require_ok)=[binding])
+    done;
+    let journal = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+    let bytes = Fs_compat.load_file journal in
+    (match damage with
+     | `Malformed_append ->
+       Out_channel.with_open_gen [Open_wronly;Open_append;Open_binary] 0o600 journal
+         (fun oc -> output_string oc "not-json\n")
+     | `Prefix_and_growth ->
+       let rows = String.split_on_char '\n' bytes |> List.filter ((<>) "") in
+       let edited = List.map (fun row ->
+         let json = Yojson.Safe.from_string row in
+         match json with
+         | `Assoc fields when List.assoc_opt "revision" fields = Some (`Int 2) ->
+           `Assoc (List.map (fun (name,value) ->
+             name, if name="commit_effect" then `String "unchanged" else value) fields)
+           |> Yojson.Safe.to_string
+         | _ -> row) rows in
+       (* Same inode plus growth is deliberately not trusted as an append. *)
+       Out_channel.with_open_bin journal (fun oc ->
+         output_string oc (String.concat "\n" (edited @ [List.hd (List.rev edited)]) ^ "\n")));
+    (match read_recall ~keepers_dir with
+     | Error _ -> () | Ok _ -> fail "external journal damage reused cached authority"))
+    [`Malformed_append;`Prefix_and_growth]
+;;
+
+(* The receipt cache keeps a sidecar only once its ctime is more than one
+   second old, so a test that expects a cached read waits longer than that
+   after the last sidecar write. *)
+let settle_receipt_sidecar () = Unix.sleepf 1.2
+
+let receipt_decodes () = Current.For_testing.durable_range_receipt_decodes ()
+
+let recall_bindings ~keepers_dir = snd (read_recall ~keepers_dir |> require_ok)
+
+(* One bound admission, its sidecar settled, and the search that decodes and
+   caches it. *)
+let cached_recall_fixture ~keepers_dir =
+  let target = fact ~claim:"cached receipt target" () in
+  let binding = recall_binding 1 (fact ~claim:"cached receipt source" ()) target in
+  ignore (commit_recall ~keepers_dir binding [target] |> require_ok);
+  settle_receipt_sidecar ();
+  check bool "settled search verifies the sidecar" true
+    (recall_bindings ~keepers_dir = [binding]);
+  target, binding
+;;
+
+let test_receipt_cache_skips_decoding_an_unchanged_sidecar () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let _target, binding = cached_recall_fixture ~keepers_dir in
+  let decoded = receipt_decodes () in
+  for _ = 1 to 3 do
+    check bool "repeated search keeps the binding" true
+      (recall_bindings ~keepers_dir = [binding])
+  done;
+  check int "searches over an unchanged sidecar decode nothing" decoded (receipt_decodes ());
+  ignore (Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:300.
+    ~source:(source Current.Explicit_write) (fact ~claim:"unrelated later fact" ())
+    |> require_upsert_ok);
+  check bool "a later snapshot revision keeps the binding" true
+    (recall_bindings ~keepers_dir = [binding]);
+  check int "a later revision that leaves the sidecar alone decodes nothing" decoded
+    (receipt_decodes ())
+;;
+
+let test_receipt_cache_rereads_an_externally_rewritten_sidecar () =
+  List.iter (fun (label, rewrite) ->
+    with_temp_keepers @@ fun keepers_dir ->
+    let _target, _binding = cached_recall_fixture ~keepers_dir in
+    let path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+    let decoded = receipt_decodes () in
+    rewrite ~keepers_dir path;
+    check int (label ^ ": search reports the rewritten sidecar") 0
+      (List.length (recall_bindings ~keepers_dir));
+    check bool (label ^ ": the rewritten sidecar was decoded") true
+      (receipt_decodes () > decoded))
+    [ "same inode and size", (fun ~keepers_dir path ->
+        let before = Unix.lstat path in
+        (* Same revision, other snapshot bytes: reconcile must drop the binding. *)
+        rewrite_receipts ~keepers_dir (map_receipts (map_field "snapshot_sha256"
+          (fun _ -> `String (String.make 64 'f'))));
+        let after = Unix.lstat path in
+        check int "rewrite keeps the inode" before.Unix.st_ino after.Unix.st_ino;
+        check int "rewrite keeps the size" before.Unix.st_size after.Unix.st_size)
+    ; "different size", (fun ~keepers_dir:_ path ->
+        Fs_compat.save_file path {|{"receipts":[]}|}) ]
+;;
+
+let test_receipt_cache_reflects_this_process_receipt_write () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let target, binding = cached_recall_fixture ~keepers_dir in
+  let second = recall_binding 2 (fact ~claim:"second cached receipt source" ()) target in
+  let decoded = receipt_decodes () in
+  let admitted = commit_recall ~keepers_dir second [] |> require_ok in
+  (* The snapshot keeps its revision and bytes; only the sidecar changes. *)
+  check bool "binding-only admission keeps the snapshot" true
+    (admitted.commit = Current.Unchanged);
+  let found = recall_bindings ~keepers_dir in
+  check bool "search reports both bindings" true
+    (List.length found = 2 && List.mem binding found && List.mem second found);
+  check bool "the rewritten sidecar was decoded" true (receipt_decodes () > decoded)
+;;
+
 let test_stale_replace_rejects_concurrent_explicit_write () =
   with_temp_keepers @@ fun keepers_dir ->
   let initial = fact ~claim:"initial" () in
@@ -3367,6 +3704,28 @@ let () =
             test_candidate_receipt_reconciliation_preserves_first_order
         ; test_case "candidate receipt set conflicts refuse the whole transaction" `Quick
             test_candidate_set_conflict_is_atomic
+        ; test_case "admission recall binds provenance and never revives after retirement" `Quick
+            test_admission_recall_commits_recovers_and_expires_on_retirement
+        ; test_case "admission recall refuses unbound payload or absent target" `Quick
+            test_admission_recall_refuses_unbound_or_mistargeted_payloads
+        ; test_case "admission recall refuses a target retired after the decision" `Quick
+            test_admission_recall_refuses_a_target_retired_after_the_decision
+        ; test_case "admission recall refuses a decision across missing journal revisions" `Quick
+            test_admission_recall_refuses_a_decision_across_missing_journal_revisions
+        ; test_case "admission recall requires complete later history only for bindings" `Quick
+            test_admission_recall_requires_complete_later_history_only_for_bindings
+        ; test_case "receipt failure preserves direct snapshot" `Quick
+            test_admission_receipt_failure_preserves_direct_snapshot
+        ; test_case "recall cache refuses external prefix mutation plus growth" `Quick
+            test_admission_recall_cache_invalidates_external_prefix_edit_and_growth
+        ; test_case "receipt cache skips decoding an unchanged sidecar" `Quick
+            test_receipt_cache_skips_decoding_an_unchanged_sidecar
+        ; test_case "receipt cache rereads an externally rewritten sidecar" `Quick
+            test_receipt_cache_rereads_an_externally_rewritten_sidecar
+        ; test_case "receipt cache reflects this process's receipt write" `Quick
+            test_receipt_cache_reflects_this_process_receipt_write
+        ; test_case "unchanged journal row cannot prove a missing retirement transition" `Quick
+            test_admission_recall_no_change_cannot_hide_missing_retirement_transition
         ; test_case "prepared candidate receipt set recovers exact snapshot only" `Quick
             test_candidate_prepared_set_recovers_exact_snapshot
         ; test_case

@@ -176,6 +176,35 @@ archive row whose successor is not current. Working context has a separate
 revision and does not roll back a memory commit. No threshold, priority score,
 recency rule, or capacity heuristic decides which memories survive.
 
+## Admission lookup provenance
+
+Deferred explicit writes judged `incorporated` or `already_represented` retain
+an original-input-to-current-claim lookup binding. The original fact, its exact
+candidate identity and the selected target identity commit through the same WAL
+transaction as candidate consumption. `not_durable` and `deferred` judgments do
+not create lookup bindings. A binding records the Librarian's declared relation;
+it is not an independent semantic verification of that relation.
+
+Current-memory search can match the original observation while returning the
+current target's text and memory identity. `lookup_evidence` labels the original
+observation as historical admission evidence, not a separate current claim.
+Multiple observations pointing to one target produce one current search result.
+These observations are search data, not an additional automatic prompt block.
+The snapshot and its eligible bindings are read under the same store lock.
+
+Bindings follow only the exact admitted target. A target's removal invalidates
+its old bindings, including if identical text is subsequently re-added. Search
+does not automatically transfer a binding to a replacement or split successor.
+That transfer requires a future semantic decision about which successor retains
+the observation's scope. Retention and recovery inherit the consumption receipt
+store's snapshot and journal evidence requirements. Actual revision transitions
+are distinguished from unchanged observations; an unchanged observation cannot
+fill a missing transition when proving that a target was never retired.
+The same holds when a binding commits: if Memory moved after the Librarian
+read it, the journal must show every revision written since. A missing line
+refuses the commit, and the input stays pending for a decision on current
+Memory. Search over the current snapshot is not affected.
+
 ## See also
 
 - [Keeper State Ownership](../KEEPER-STATE-OWNERSHIP.md)

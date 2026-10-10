@@ -1362,6 +1362,19 @@ val append_private_jsonl_durable_stable_result :
   string ->
   (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
 
+type private_jsonl_append_observation =
+  { before : Unix.stats; after : Unix.stats; suffix : string }
+
+val append_private_jsonl_durable_observed_result :
+  string -> string ->
+  (Private_jsonl_cursor.t * private_jsonl_append_observation option,
+   private_jsonl_transaction_error) result
+(** Same durable append transaction, with an existing-file observation captured
+    under its stable lock. [None] means a new file was created. [before] precedes
+    any tail recovery; only exact previous identity plus an exact suffix-sized
+    append permits extending a cached projection. Errors never publish an
+    observation, including settlement failures after a committed append. *)
+
 (** Append complete newline-terminated JSONL rows iff [expected] still names
     the exact store identity and end offset observed by the caller. All
     participants must use this stable-lock transaction family for [path]; the

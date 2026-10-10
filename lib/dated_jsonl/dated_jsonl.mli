@@ -306,6 +306,16 @@ val fold_range_appended_result :
     authorizes retaining the returned cursor. Malformed JSON rows are skipped
     as in {!fold_range_appended}; callback exceptions propagate unchanged. *)
 
+val fold_file_appended_entries_result :
+  string -> cursor:append_cursor option -> init:'a ->
+  f:('a -> recent_entry -> 'a) -> ('a appended_read, read_error) result
+(** Strict single-file counterpart to {!fold_range_appended_result}. It reports
+    malformed complete lines to [f] instead of skipping them. An incomplete final
+    row is an error. A removed file is
+    an error; rotation, shrinkage and same-size edits invalidate the cursor.
+    Appended bytes are read only once. The same append-only contract applies:
+    in-place prefix edits combined with growth are outside that contract. *)
+
 val read_range : t -> since:string -> until:string -> Yojson.Safe.t list
 (** [read_range t ~since ~until] returns entries whose day-file falls
     within [[since, until]] (inclusive, format ["YYYY-MM-DD"]).

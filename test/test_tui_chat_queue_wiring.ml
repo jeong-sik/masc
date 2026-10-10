@@ -3982,6 +3982,392 @@ let test_selected_source_logs_keep_first_order_and_prefer_the_whole_log () =
     (List.map Tui_types.turn_log_request_id many) (ids ())
 ;;
 
+(* The indexed per-log timeline context must answer exactly what the
+   full-list functions answer for the same log: its request-owned rows, its
+   live timeline moment and its insertion slot. Generated rows cover repeated
+   request ids, rows without a moment, every phase and started_at values the
+   live fallback rejects. [request_id] is always one of [member_ids], as the
+   renderer builds them. *)
+let test_indexed_timeline_context_matches_the_full_list_functions () =
+  let pool = [| ""; "r0"; "r1"; "r2"; "r3"; "r4" |] in
+  let roles =
+    [| Tui_types.Message_user (Tui_types.Sent_by_operator {surface=None})
+     ; Tui_types.Message_keeper; Tui_types.Message_error; Tui_types.Message_status
+     ; Tui_types.Message_memory; Tui_types.Message_tool |]
+  in
+  let rng = Random.State.make [| 20261010 |] in
+  let checked = ref 0 in
+  for _case = 1 to 400 do
+    let rows =
+      List.init (Random.State.int rng 40) (fun _ ->
+        let request_id = pool.(Random.State.int rng (Array.length pool)) in
+        let role = roles.(Random.State.int rng (Array.length roles)) in
+        let entry =
+          chat_entry ~request_id ~role ~text:"x"
+            ~at:(float_of_int (Random.State.int rng 60)) ()
+        in
+        if Random.State.int rng 5 = 0
+        then { entry with Tui_types.me_timestamp = ""; me_submitted_at = None }
+        else entry)
+    in
+    let visible = List.combine rows (Tui_types.chat_projected_timeline_ats rows) in
+    let index = Tui_types.chat_timeline_index ~messages:rows ~visible in
+    for _log = 1 to 6 do
+      let request_id = pool.(1 + Random.State.int rng (Array.length pool - 1)) in
+      let member_ids =
+        request_id
+        :: List.filter (fun _ -> Random.State.bool rng) (Array.to_list pool)
+        |> List.sort_uniq String.compare
+      in
+      let started_at = [| -1.; 0.; 5.; 25.; 100. |].(Random.State.int rng 5) in
+      let bounds_request (message : Tui_types.msg_entry) =
+        (not (List.mem message.me_request_id member_ids))
+        || message.me_turn_phase = Tui_types.Turn_input
+      in
+      let request_messages = List.filter bounds_request rows in
+      let bounded =
+        List.filter (fun ((message : Tui_types.msg_entry), _) -> bounds_request message) visible
+      in
+      let timeline_at =
+        Tui_types.chat_live_timeline_at ~member_ids ~request_id ~started_at
+          ~request_messages bounded
+      in
+      let insertion =
+        Tui_types.chat_block_insertion_index ~member_ids
+          ~bounds:(fun row -> row.Tui_types.me_turn_phase = Tui_types.Turn_input)
+          ~request_id ~timeline_at visible
+      in
+      let committed_error =
+        List.exists
+          (fun (message : Tui_types.msg_entry) ->
+            message.me_role = Tui_types.Message_error
+            && List.mem message.me_request_id member_ids)
+          rows
+      in
+      List.iter
+        (fun clock ->
+          check int "slot for a bare clock"
+            (Tui_types.chat_block_insertion_index ~member_ids:[]
+               ~bounds:(fun _ -> false) ~request_id ~timeline_at:clock visible)
+            (Tui_types.chat_index_insertion index ~lower_bound:0 ~timeline_at:clock))
+        [ None; Some (-1.); Some 0.; Some 7.; Some 30.5; Some 59.; Some 1000. ];
+      let got =
+        Tui_types.chat_log_timeline_context index ~member_ids ~request_id ~started_at
+      in
+      incr checked;
+      check (option (float 0.)) "timeline moment" timeline_at got.clt_timeline_at;
+      check int "insertion slot" insertion got.clt_insertion;
+      check bool "committed error" committed_error got.clt_committed_error
+    done
+  done;
+  check bool "the generator exercised many logs" true (!checked >= 2000)
+;;
+
+(* Held turns that have no committed row of their own are placed among the
+   committed rows by their clocks: each block goes after the last committed
+   row older than it and before the next, and blocks sharing a gap keep
+   their clock order. *)
+let test_held_turn_blocks_merge_among_committed_rows_by_clock () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous = Masc_tui_ansi.get_terminal_size () in
+  let set_size size = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+      cache ~probe:(fun () -> Some size)) in
+  Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
+    set_size (65, 140);
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+    state.msg_target_keeper_name <- Some "alpha";
+    state.msg_origin_display <- Masc_tui_message_layout.Origin_inline;
+    state.msg_loaded_keeper <- Some "alpha";
+    let user request_id at =
+      chat_entry ~request_id
+        ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator {surface=None}))
+        ~text:("input " ^ request_id) ~at () in
+    state.msg_loaded <- [ user "q0" 10.; user "q1" 30.; user "q2" 50. ];
+    let saying request_id started_at =
+      let log = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id ~started_at in
+      let _ = Tui_types.turn_log_add_journaled log
+        [ line 0 started_at (E.Run_started { run_id = "r"; thread_id = "keeper:alpha" })
+        ; line 1 (started_at +. 0.1) (E.Text_delta {text = "said " ^ request_id; stream_scope = None})
+        ; line 2 (started_at +. 0.2) (journal_reply ("said " ^ request_id))
+        ; line 3 (started_at +. 0.3) (E.Run_finished { run_id = "r" }) ] in
+      Log.commit log.Tui_types.tl_log;
+      log
+    in
+    state.msg_settled_logs <-
+      [ saying "op-late" 60.; saying "op-b2" 41.; saying "op-b" 40.
+      ; saying "op-a" 20.; saying "op-early" 5. ];
+    let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+    let screen =
+      String.concat "\n"
+        (List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines)
+    in
+    let first_of marker =
+      match Astring.String.find_sub ~sub:marker screen with
+      | Some index -> index
+      | None -> fail ("missing from the frame: " ^ marker)
+    in
+    let before left right =
+      check bool (left ^ " precedes " ^ right) true (first_of left < first_of right)
+    in
+    let user id = "input " ^ id and said id = "said " ^ id in
+    before (said "op-early") (user "q0");
+    before (user "q0") (said "op-a");
+    before (said "op-a") (user "q1");
+    before (user "q1") (said "op-b");
+    before (said "op-b") (said "op-b2");
+    before (said "op-b2") (user "q2");
+    before (user "q2") (said "op-late"))
+;;
+
+(* The settled subset of the selection is the selected logs the session holds
+   as settled, including a log that is also an in-flight entry's log. *)
+let test_settled_logs_are_the_selected_logs_the_session_holds_settled () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  let settled_a = journal_log ~request_id:"op-a" ~started_at:1. () in
+  let settled_b = journal_log ~request_id:"op-b" ~started_at:2. () in
+  let cut_c = journal_log ~request_id:"op-c" ~started_at:3. ~finished:false () in
+  let streaming =
+    inflight_with_log ~keeper_name:"alpha" ~started_at:4. [ Live.Run_started ]
+  in
+  let shared = { streaming with log = settled_a } in
+  List.iter
+    (fun (label, settled, inflight) ->
+      state.msg_settled_logs <- settled;
+      state.msg_inflight <- inflight;
+      let selected = Tui_types.selected_source_logs_for_keeper state "alpha" in
+      let expected = List.filter (fun log -> List.memq log state.msg_settled_logs) selected in
+      let got = Tui_types.settled_logs_for_keeper state "alpha" in
+      check int (label ^ ": same count") (List.length expected) (List.length got);
+      check bool (label ^ ": same logs in the same order") true
+        (List.for_all2 ( == ) expected got))
+    [ "settled only", [ settled_a; settled_b; cut_c ], []
+    ; "one also streaming", [ settled_a; settled_b ], [ shared ]
+    ; "streaming only", [], [ streaming ]
+    ; "cut log beside its whole", [ cut_c; settled_b ], [ shared ] ]
+;;
+
+(* A held turn's block follows its own request's committed rows. Rows of
+   other requests arriving leave it where it was; a row of its own request
+   moves it after that row. The block is remembered between frames, so the
+   second and third frame prove the remembered block is not stale. *)
+let test_held_turn_block_follows_only_its_own_requests_rows () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous = Masc_tui_ansi.get_terminal_size () in
+  let set_size size = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+      cache ~probe:(fun () -> Some size)) in
+  Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
+    set_size (65, 140);
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+    state.msg_target_keeper_name <- Some "alpha";
+    state.msg_origin_display <- Masc_tui_message_layout.Origin_inline;
+    state.msg_loaded_keeper <- Some "alpha";
+    let user request_id at =
+      chat_entry ~request_id
+        ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator {surface=None}))
+        ~text:("input " ^ request_id) ~at () in
+    let log =
+      let log = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id:"op-held" ~started_at:20. in
+      let _ = Tui_types.turn_log_add_journaled log
+        [ line 0 20. (E.Run_started { run_id = "r"; thread_id = "keeper:alpha" })
+        ; line 1 20.1 (E.Text_delta {text = "said held"; stream_scope = None})
+        ; line 2 20.2 (journal_reply "said held")
+        ; line 3 20.3 (E.Run_finished { run_id = "r" }) ] in
+      Log.commit log.Tui_types.tl_log;
+      log
+    in
+    state.msg_settled_logs <- [ log ];
+    let screen () =
+      let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+      String.concat "\n"
+        (List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines)
+    in
+    let position screen marker =
+      match Astring.String.find_sub ~sub:marker screen with
+      | Some index -> index
+      | None -> fail ("missing from the frame: " ^ marker)
+    in
+    let before screen left right =
+      check bool (left ^ " precedes " ^ right) true
+        (position screen left < position screen right)
+    in
+    state.msg_loaded <- [ user "q0" 10.; user "q2" 50. ];
+    let first = screen () in
+    before first "input q0" "said held";
+    before first "said held" "input q2";
+    (* An unrelated row between them: the held block stays between q0 and q2. *)
+    state.msg_loaded <- [ user "q0" 10.; user "q1" 30.; user "q2" 50. ];
+    let second = screen () in
+    before second "input q0" "said held";
+    before second "said held" "input q1";
+    before second "input q1" "input q2";
+    (* A row of its own request at a later moment moves the block after it. *)
+    state.msg_loaded <- [ user "q0" 10.; user "q1" 30.; user "op-held" 40.; user "q2" 50. ];
+    let third = screen () in
+    before third "input q1" "input op-held";
+    before third "input op-held" "said held";
+    before third "said held" "input q2")
+;;
+
+(* [terminal_safe_text] has a path for a text that its first two passes would
+   not change. It must answer exactly what the three passes answer, for valid
+   and invalid UTF-8, every control, C1 scalars, invisible characters and both
+   newline modes. The reference is the three passes as they were written. *)
+let test_terminal_safe_text_matches_its_three_passes () =
+  let reference ?(preserve_newlines = false) text =
+    let text = Safe_ops.sanitize_text_utf8 text in
+    let output = Buffer.create (String.length text) in
+    let rec loop offset =
+      if offset < String.length text then begin
+        let decoded = String.get_utf_8_uchar text offset in
+        let length = Uchar.utf_decode_length decoded in
+        let scalar = Uchar.utf_decode_uchar decoded in
+        let code = Uchar.to_int scalar in
+        if code = 0x0a && preserve_newlines then Buffer.add_char output '\n'
+        else if code < 0x20 || (code >= 0x7f && code <= 0x9f) then
+          Buffer.add_char output ' '
+        else Buffer.add_utf_8_uchar output scalar;
+        loop (offset + length)
+      end
+    in
+    loop 0;
+    Masc.Tui_terminal_text.escape_invisible (Buffer.contents output)
+  in
+  let pieces =
+    [| "a"; "plain words"; "안녕하세요"; "한글 텍스트"; "·→…"; "\n"; "\r"; "\t"; "\x00";
+       "\x1b[31m"; "\x7f"; "\xc2\x80"; "\xc2\x9f"; "\xc2\xa0"; "\xe2\x80\x8b";
+       "\xe2\x80\xae"; "\xe2\x80\x8d"; "\xf0\x9f\x98\x80"; "\xf0\x9f\x91\xa8\xe2\x80\x8d\xf0\x9f\x91\xa9";
+       "\xff"; "\xc3"; "\xe2\x82"; "\xed\xa0\x80"; "\xef\xbb\xbf" |]
+  in
+  let rng = Random.State.make [| 4242 |] in
+  let compared = ref 0 in
+  let unchanged = ref 0 in
+  for _case = 1 to 4000 do
+    let count = Random.State.int rng 8 in
+    let text =
+      String.concat ""
+        (List.init count (fun _ -> pieces.(Random.State.int rng (Array.length pieces))))
+    in
+    List.iter
+      (fun preserve_newlines ->
+        incr compared;
+        let expected = reference ~preserve_newlines text in
+        if String.equal expected text then incr unchanged;
+        check string
+          (Printf.sprintf "text %S preserve=%b" text preserve_newlines)
+          expected
+          (Keeper_chat.terminal_safe_text ~preserve_newlines text))
+      [ false; true ]
+  done;
+  check bool "the generator covered many texts" true (!compared = 8000);
+  check bool "and many of them pass through unchanged" true (!unchanged > 500)
+;;
+
+(* The journal target selection must answer what the list-scanning versions
+   answered, over generated sessions: held and unavailable keys that overlap
+   the candidates, in-flight reads, owned requests, ended and cut logs, both
+   keepers and a refused-reads session. The references are the versions as
+   they were written. *)
+let test_journal_target_selection_matches_the_list_scanning_versions () =
+  let reference_fetch ~held ~unavailable candidates =
+    let earliest = Hashtbl.create 16 in
+    List.iter
+      (fun (operation_id, at) ->
+        match Hashtbl.find_opt earliest operation_id with
+        | Some seen when seen <= at -> ()
+        | Some _ | None -> Hashtbl.replace earliest operation_id at)
+      candidates;
+    Hashtbl.fold (fun operation_id at acc -> (operation_id, at) :: acc) earliest []
+    |> List.filter (fun (operation_id, _) ->
+           not (List.mem operation_id held || List.mem operation_id unavailable))
+    |> List.stable_sort (fun (id_a, at_a) (id_b, at_b) ->
+           match Float.compare at_b at_a with
+           | 0 -> compare id_a id_b
+           | order -> order)
+  in
+  let reference_unavailable (state : Tui_types.state) keeper_name =
+    state.msg_settled_logs
+    |> List.filter_map (fun log ->
+        let key = Tui_types.turn_log_journal_key log in
+        let journal_unavailable = state.msg_journal_reads_refused
+          || List.mem key state.msg_journal_unavailable in
+        let read_inflight = List.mem key state.msg_journal_inflight in
+        let owned = List.exists (fun (entry : Tui_types.inflight) ->
+          Tui_types.turn_log_journal_key entry.log = key) state.msg_inflight in
+        let terminal = Option.exists Keeper_chat_operation.is_terminal
+          (Log.operation_state log.Tui_types.tl_log) in
+        match Log.source log.Tui_types.tl_log with
+        | Log.Operation operation_id
+          when String.equal (Tui_types.turn_log_keeper_name log) keeper_name
+               && journal_unavailable && not read_inflight && not owned && not terminal
+               && not (Tui_types.turn_log_holds_the_turn log) ->
+            Some operation_id
+        | Log.Operation _ | Log.Autonomous_turn _ -> None)
+    |> List.sort_uniq String.compare
+  in
+  let rng = Random.State.make [| 777 |] in
+  let ids = Array.init 12 (fun i -> Printf.sprintf "op-%02d" i) in
+  let keepers = [| "alpha"; "beta" |] in
+  let pick array = array.(Random.State.int rng (Array.length array)) in
+  let key () =
+    (pick keepers, Log.Operation (pick ids))
+  in
+  let non_empty = ref 0 in
+  for _case = 1 to 300 do
+    let state =
+      Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    in
+    state.msg_settled_logs <-
+      List.init (Random.State.int rng 10) (fun _ ->
+        let keeper_name = pick keepers in
+        let log =
+          Tui_types.turn_log_create ~keeper_name ~request_id:(pick ids)
+            ~started_at:(float_of_int (Random.State.int rng 100))
+        in
+        if Random.State.bool rng then begin
+          ignore (Tui_types.turn_log_add_journaled log
+            [ line 0 1. (E.Run_started { run_id = "r"; thread_id = "keeper:" ^ keeper_name })
+            ; line 1 1.1 (E.Text_delta {text = "x"; stream_scope = None}) ]);
+          if Random.State.bool rng then begin
+            ignore (Tui_types.turn_log_add_journaled log
+              [ line 2 1.2 (journal_reply "x")
+              ; line 3 1.3 (E.Run_finished { run_id = "r" }) ]);
+            Log.commit log.Tui_types.tl_log
+          end
+        end;
+        log);
+    state.msg_inflight <-
+      List.init (Random.State.int rng 3) (fun _ ->
+        inflight_with_log ~keeper_name:(pick keepers) ~started_at:5. [ Live.Run_started ]);
+    state.msg_journal_unavailable <- List.init (Random.State.int rng 6) (fun _ -> key ());
+    state.msg_journal_inflight <- List.init (Random.State.int rng 6) (fun _ -> key ());
+    state.msg_journal_reads_refused <- Random.State.int rng 6 = 0;
+    List.iter
+      (fun keeper_name ->
+        let expected = reference_unavailable state keeper_name in
+        if expected <> [] then incr non_empty;
+        check (list string) "unavailable operation targets" expected
+          (Tui_types.unavailable_journal_operation_targets state keeper_name))
+      [ "alpha"; "beta" ];
+    let candidates =
+      List.init (Random.State.int rng 10) (fun _ ->
+        (key (), float_of_int (Random.State.int rng 20)))
+    in
+    let held = List.init (Random.State.int rng 6) (fun _ -> key ()) in
+    let unavailable = state.msg_journal_unavailable in
+    check (list (pair journal_key_test (float 0.)))
+      "fetch targets"
+      (reference_fetch ~held ~unavailable candidates)
+      (Tui_types.journal_fetch_targets ~held ~unavailable candidates)
+  done;
+  check bool "the generator produced non-empty target sets" true (!non_empty > 20)
+;;
+
 (* A log built from a journal read stands at the journal head's own time,
    not at the moment the read was asked for. *)
 let test_a_journal_built_log_starts_at_the_journal_head () =
@@ -4478,6 +4864,105 @@ let test_batch_watchers_render_one_shared_settled_turn () =
   check string "mismatched binding cannot hide another request"
     "unrelated-request" (Tui_types.turn_log_execution_id invalid)
 ;;
+
+let test_older_page_keeps_the_blocks_it_did_not_change () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous = Masc_tui_ansi.get_terminal_size () in
+  let set_size size = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+      cache ~probe:(fun () -> Some size)) in
+  Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
+    set_size (65, 140);
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+    state.msg_target_keeper_name <- Some "alpha";
+    state.msg_origin_display <- Masc_tui_message_layout.Origin_inline;
+    state.msg_loaded_keeper <- Some "alpha";
+    let row i =
+      chat_entry ~request_id:(Printf.sprintf "req-%03d" (i / 2))
+        ~role:(if i mod 2 = 0
+               then Tui_types.Message_user (Tui_types.Sent_by_operator {surface=None})
+               else Tui_types.Message_keeper)
+        ~text:(Printf.sprintf "row %d" i) ~at:(100. +. float_of_int i) () in
+    let newer = List.init 6 (fun i -> row (i + 10)) in
+    let older = List.init 10 row in
+    let log = Tui_types.turn_log_create ~keeper_name:"alpha"
+        ~request_id:"req-013" ~started_at:113.5 in
+    Tui_types.turn_log_add ~now:113.5 log ~seq:(Some 0) Live.Run_started;
+    Tui_types.turn_log_add ~now:114. log ~seq:(Some 1) (visible_reply "BLOCK_ANSWER");
+    Tui_types.turn_log_add ~now:114. log ~seq:(Some 2) Live.Run_finished;
+    Log.commit log.Tui_types.tl_log;
+    (* A turn with no recorded moment and no committed row of its own is
+       placed by position alone, which is what an older page moves. *)
+    let unplaced = Tui_types.turn_log_create ~keeper_name:"alpha"
+        ~request_id:"req-unplaced" ~started_at:0. in
+    Tui_types.turn_log_add ~now:0. unplaced ~seq:(Some 0) Live.Run_started;
+    Tui_types.turn_log_add ~now:0. unplaced ~seq:(Some 1) (visible_reply "UNPLACED_ANSWER");
+    Tui_types.turn_log_add ~now:0. unplaced ~seq:(Some 2) Live.Run_finished;
+    Log.commit unplaced.Tui_types.tl_log;
+    state.msg_settled_logs <- [unplaced; log];
+    let screen () =
+      let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+      List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines in
+    state.msg_loaded <- newer;
+    let before = screen () in
+    check bool "block is drawn" true
+      (List.exists (Astring.String.is_infix ~affix:"BLOCK_ANSWER") before);
+    state.msg_loaded <- older @ newer;
+    let shifted = screen () in
+    (* A different width misses every memo; the first width again rebuilds
+       the block with nothing carried. *)
+    set_size (65, 141);
+    ignore (screen ());
+    set_size (65, 140);
+    let fresh = screen () in
+    check bool "block is still drawn after the page" true
+      (List.exists (Astring.String.is_infix ~affix:"BLOCK_ANSWER") shifted);
+    check (list string) "carried block draws what a rebuild draws" fresh shifted)
+
+let test_older_page_keeps_the_entries_it_moved_down () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous = Masc_tui_ansi.get_terminal_size () in
+  let set_size size = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+      cache ~probe:(fun () -> Some size)) in
+  Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
+    set_size (65, 140);
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+    state.msg_target_keeper_name <- Some "alpha";
+    state.msg_origin_display <- Masc_tui_message_layout.Origin_inline;
+    state.msg_loaded_keeper <- Some "alpha";
+    let row i =
+      chat_entry ~request_id:(Printf.sprintf "req-%03d" (i / 2))
+        ~role:(if i mod 2 = 0
+               then Tui_types.Message_user (Tui_types.Sent_by_operator {surface=None})
+               else Tui_types.Message_keeper)
+        ~text:(Printf.sprintf "row %d" i) ~at:(100. +. float_of_int i) () in
+    let newer = List.init 20 (fun i -> row (i + 10)) in
+    let older = List.init 10 row in
+    let layouts () = Masc_tui_render_chat.keeper_message_layout_entries state
+        ~keeper_name:"alpha" ~chat_cols:140 in
+    state.msg_loaded <- newer;
+    let before = layouts () in
+    check int "newer rows alone" 20 (List.length before);
+    state.msg_loaded <- older @ newer;
+    let shifted = layouts () in
+    (* Another width forces a full recompute; asking for the first width again
+       recomputes once more, with no entry to carry. *)
+    ignore (Masc_tui_render_chat.keeper_message_layout_entries state
+              ~keeper_name:"alpha" ~chat_cols:141);
+    let fresh = layouts () in
+    check int "page rows plus the rows it moved down" 30 (List.length shifted);
+    check bool "shifted entries equal a full recompute" true (shifted = fresh);
+    check bool "the full recompute shares nothing with the shifted list" false
+      (shifted == fresh);
+    let moved = List.filteri (fun i _ -> i >= 10) shifted in
+    List.iter2
+      (fun (old_entry : Masc_tui_message_layout.entry)
+           (entry : Masc_tui_message_layout.entry) ->
+        check string "body is carried over" old_entry.body entry.body)
+      before moved)
 
 let test_batch_reply_follows_all_original_inputs () =
   let cache = Masc_tui_ansi.terminal_size_cache in
@@ -5454,6 +5939,8 @@ let () =
         ; test_case "history and renderer share inflight candidates" `Quick
             test_history_and_renderer_share_all_inflight_candidates
         ; test_case "batch watchers render one shared turn" `Quick test_batch_watchers_render_one_shared_settled_turn
+        ; test_case "older page keeps the blocks it did not change" `Quick test_older_page_keeps_the_blocks_it_did_not_change
+        ; test_case "older page keeps the entries it moved down" `Quick test_older_page_keeps_the_entries_it_moved_down
         ; test_case "batch reply follows all original inputs" `Quick test_batch_reply_follows_all_original_inputs
         ; test_case "observed checkpoint retains earlier output" `Quick test_observed_checkpoint_retains_earlier_output
         ; test_case "every request of a held batch is held for journal reads" `Quick
@@ -5592,6 +6079,18 @@ let () =
             test_journal_tracking_keeps_keeper_and_source_identity
         ; test_case "selected source logs keep first order and prefer the whole log" `Quick
             test_selected_source_logs_keep_first_order_and_prefer_the_whole_log
+        ; test_case "indexed timeline context matches the full-list functions" `Quick
+            test_indexed_timeline_context_matches_the_full_list_functions
+        ; test_case "held turn blocks merge among committed rows by clock" `Quick
+            test_held_turn_blocks_merge_among_committed_rows_by_clock
+        ; test_case "settled logs are the selected logs held settled" `Quick
+            test_settled_logs_are_the_selected_logs_the_session_holds_settled
+        ; test_case "held turn block follows only its own requests rows" `Quick
+            test_held_turn_block_follows_only_its_own_requests_rows
+        ; test_case "terminal_safe_text matches its three passes" `Quick
+            test_terminal_safe_text_matches_its_three_passes
+        ; test_case "journal target selection matches the list-scanning versions" `Quick
+            test_journal_target_selection_matches_the_list_scanning_versions
         ; test_case "a journal-built log starts at the journal head" `Quick
             test_a_journal_built_log_starts_at_the_journal_head
         ; test_case "pending input enters transcript on execution evidence" `Quick

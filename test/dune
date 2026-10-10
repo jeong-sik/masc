@@ -1899,6 +1899,7 @@
   test_set_util
  test_board_core_payload)
  (libraries
+  uucp
   masc.toml_line_editor
   masc.browser_lane
   ; The fallback descendant fixture uses the monotonic deadline owner.
@@ -3306,7 +3307,7 @@
 (test
  (name test_tui_chat_queue_wiring)
  (modules test_tui_chat_queue_wiring)
- (libraries masc_tui_chat_media masc.keeper_chat_delivery_identity masc.runtime masc.keeper_chat_operations masc.server masc.ag_ui masc_tui_message_input masc_tui_link_preview masc_tui_image_preview
+ (libraries masc.masc_core masc_tui_chat_media masc.keeper_chat_delivery_identity masc.runtime masc.keeper_chat_operations masc.server masc.ag_ui masc_tui_message_input masc_tui_link_preview masc_tui_image_preview
   masc_tui_answering
   masc_tui_keys
   masc_tui_fusion_model

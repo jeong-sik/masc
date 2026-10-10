@@ -43,7 +43,7 @@ let test_operation_event_has_singular_identity () =
 ;;
 
 let project state event =
-  P.project ~timestamp:12.0 ~redact_text:Fun.id ~redact_json:Fun.id state event
+  P.project ~timestamp:12.0 ~redact_text:Fun.id state event
 
 let projected_exn = function
   | _, Some event -> event
@@ -173,6 +173,46 @@ let test_operation_event_carries_seq_when_given () =
     (List.assoc_opt "seq" fields)
 ;;
 
+let test_projection_redacts_content_without_rewriting_protocol () =
+  let path = Filename.temp_file "keeper-projection-secrets" ".txt" in
+  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
+    let output = open_out_bin path in
+    Fun.protect ~finally:(fun () -> close_out output) (fun () ->
+      output_string output "heartbeat_reported\nelapsed_seconds\ncall-secret\nprivate-note\n");
+    let redaction = Masc.Keeper_secret_redaction.snapshot_with_additional_secret_files
+      ~redact_identity_scalars:false ~additional_secret_files:[path]
+      ~base_path:(Filename.dirname path) ~keeper_name:"projection-fixture" in
+    let redact_text = Masc.Keeper_secret_redaction.redact_text redaction in
+    let tool : E.native_tool =
+      { occurrence = {stream_scope=2; block_index=3; provider_message_id=Some "call-secret"}
+      ; tool_call_id=Some "call-secret"; tool_call_name=Some "Read" } in
+    let value event =
+      let projected = P.project ~timestamp:12.0 ~redact_text P.initial event |> projected_exn in
+      Ag_ui.event_to_json projected |> Yojson.Safe.Util.member "value" in
+    let heartbeat = value (E.Native_tool_progress
+      (tool, Runtime_native_tools.Heartbeat_reported {elapsed_seconds=30})) in
+    Alcotest.(check yojson_testable) "typed heartbeat remains decodable despite secret collisions"
+      (`Assoc ["kind",`String "heartbeat_reported"; "elapsed_seconds",`Int 30])
+      (Yojson.Safe.Util.member "progress" heartbeat);
+    Alcotest.(check yojson_testable) "correlation identity remains stable"
+      (`String "call-secret") (Yojson.Safe.Util.member "toolCallId" heartbeat);
+    let message = value (E.Native_tool_progress
+      (tool, Runtime_native_tools.Message_reported {message="private-note"})) in
+    Alcotest.(check yojson_testable) "human progress remains redacted"
+      (`String "[REDACTED]")
+      (message |> Yojson.Safe.Util.member "progress" |> Yojson.Safe.Util.member "message");
+    let thinking = value (E.Agent_core_thinking_delta {index=3; delta="private-note"}) in
+    Alcotest.(check yojson_testable) "reasoning content remains redacted"
+      (`String "[REDACTED]") (Yojson.Safe.Util.member "delta" thinking);
+    let diagnostic = value (E.Agent_core_stream_protocol_error
+      {kind=E.Sse_error; quarantined_occurrence=Some tool.occurrence; index=None;
+       tool_call_id=tool.tool_call_id; event_type=Some "private-note"; reason=None; raw_bytes=None}) in
+    Alcotest.(check yojson_testable) "provider diagnostic is content, not a closed enum"
+      (`String "[REDACTED]") (Yojson.Safe.Util.member "event_type" diagnostic);
+    Alcotest.(check yojson_testable) "closed error kind survives content redaction"
+      (`String "sse_error") (Yojson.Safe.Util.member "kind" diagnostic))
+;;
+
 let () =
   Alcotest.run "keeper_chat_broadcast"
     [ ( "turn_event"
@@ -184,6 +224,8 @@ let () =
             test_projection_preserves_stream_identity
         ; Alcotest.test_case "projection covers thinking and tool args" `Quick
             test_projection_covers_thinking_and_tool_args
+        ; Alcotest.test_case "protocol identity survives exact secret collisions" `Quick
+            test_projection_redacts_content_without_rewriting_protocol
         ; Alcotest.test_case "tool result readiness preserves exact identity" `Quick
             test_tool_result_ready_projection_has_exact_identity
         ] )

@@ -132,6 +132,10 @@ export type KeeperNativeToolProgress =
   | { kind: 'message_reported'; message: string }
   // Provider-reported elapsed seconds, independent of local arrival timers.
   | { kind: 'heartbeat_reported'; elapsed_seconds: number }
+  | { kind: 'retry_reported'; agent_id: string; subagent_type: string;
+      attempt: number; max_retries: number; retry_delay_ms: number;
+      error_status: number | null; error_category: string }
+  | { kind: 'retry_cleared'; agent_id: string; subagent_type: string }
 
 type KeeperQuarantinedToolOccurrence = {
   toolStreamScope: number

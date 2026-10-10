@@ -7118,6 +7118,9 @@ type state = {
   (* Journal sources a fiber is reading right now, so a load that
      arrives before the read returns does not start a second one. *)
   mutable msg_journal_inflight: journal_key list;
+  mutable msg_native_tasks: (string * Masc_tui_native_tasks.t) list;
+  mutable msg_native_tasks_inflight: string list;
+  mutable msg_native_tasks_audit_pending: string list;
   (* Journal sources a stream frame named while their journal was being read,
      with the highest journal seq the frames named: the read in flight may
      have stopped short of that line, so when it lands another read starts
@@ -7277,6 +7280,9 @@ let retire_keeper_message_search state =
 let suspend_workspace_readings state =
   retire_keeper_message_search state;
   state.workspace_read_authority <- ref ();
+  (* Retired completions cannot release these slots. Keep observations and
+     explicit audit intent for a confirmed read in the successor epoch. *)
+  state.msg_native_tasks_inflight <- [];
   let cancellations = state.workspace_observation_cancellations in
   state.workspace_observation_cancellations <- [];
   List.iter (fun (_, cancel) -> cancel ()) cancellations;
@@ -9386,6 +9392,13 @@ let composing_for_keeper (state : state) keeper_name =
   && Masc_tui_message_input.length state.msg_input > 0
   && Option.exists (String.equal keeper_name) state.msg_target_keeper_name
 
+(* Recall owns this Keeper's queued input until the edit is submitted or
+   abandoned. Earlier Enter/control authorization cannot send its old body. *)
+let recalling_for_keeper (state : state) keeper_name =
+  match state.msg_recall_replaces with
+  | Some editing -> String.equal editing.request.keeper_name keeper_name
+  | None -> false
+
 (* A fresh Enter may bypass input held by an explicit stop. A refused
    preflight keeps its place until local resume; unmarked input remains owned
    by the generic drainer and its composer/recall checks. *)
@@ -9401,7 +9414,8 @@ let next_authorized_keeper_input state keeper_name =
       | Some (_, _, Retained_before_dispatch) -> None
       | Some (_, _, (Awaiting_control _ | Retained_after_stop)) | None -> ready rest
   in
-  ready (Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued ~keeper_name)
+  if recalling_for_keeper state keeper_name then None
+  else ready (Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued ~keeper_name)
 
 (** The next target both the input path and footer agree is safe to select.
     A pending request or live transcript stays pinned to its Keeper until that
@@ -10260,6 +10274,9 @@ let create_state
   msg_settled_logs = [];
   msg_journal_unavailable = [];
   msg_journal_inflight = [];
+  msg_native_tasks = [];
+  msg_native_tasks_inflight = [];
+  msg_native_tasks_audit_pending = [];
   msg_journal_wanted = [];
   msg_journal_reads_refused = false;
   detail_scroll = 0;

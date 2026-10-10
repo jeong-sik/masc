@@ -206,6 +206,110 @@ type content_block =
 
 type content_channel = Text_content | Thinking_content
 
+type native_task_status = Runtime_native_tasks.status =
+  | Task_pending | Task_running | Task_completed | Task_failed | Task_killed | Task_paused
+
+type native_task_terminal = Runtime_native_tasks.terminal = Task_completed_notice | Task_failed_notice | Task_stopped_notice
+type native_task_reason = Runtime_native_tasks.reason = Worker_restart
+type native_task_boundary = Runtime_native_tasks.boundary = Task_terminal_unobserved | Task_terminal_observed
+(** Whether this run has supplied terminal evidence, not whether it is running.
+    A resumed run needs a fresh registration and a newer provider run_id. *)
+
+type native_task_usage = Runtime_native_tasks.usage =
+  { total_tokens : int; tool_uses : int; duration_ms : int }
+(** Provider task observations, never the root model's usage. [duration_ms]
+    preserves the signed safe integer reported by the provider's wall-clock
+    subtraction; a negative value neither fails nor terminates the task. *)
+
+type native_task_event = Runtime_native_tasks.event =
+  | Task_registered of
+      { subagent_type : string option; is_backgrounded : bool option
+      ; skip_transcript : bool option; ambient : bool option }
+      (** Registration declares no task status. [None] means not reported. *)
+  | Task_patched of
+      { status : native_task_status option; is_backgrounded : bool option
+      ; end_time : int option; total_paused_ms : int option }
+      (** [total_paused_ms] retains signed safe integers; absence is
+          unreported, not zero. [end_time] admission retains the separate
+          nonnegative timestamp check. *)
+  | Task_progress_reported of
+      { usage : native_task_usage; last_tool_name : string option }
+  | Task_terminal_reported of
+      { outcome : native_task_terminal; reason : native_task_reason option
+      ; usage : native_task_usage option; skip_transcript : bool option
+      ; ambient : bool option }
+
+type native_task_owner = private
+  { invocation : Runtime_claude_input_attribution.ticket
+  ; task_id : string; run_id : string; call_id : string
+  ; call_envelope_uuid : string; call_ordinal : int }
+(** Exact root Agent occurrence that registered this task run. The call may
+    already have returned an async launch result. [run_id] is opaque except
+    for the provider-declared lexical ordering of runs of the same task.
+    [invocation] is the actual ticket minted before this runtime invocation's
+    user write, also emitted by its Prepared input observation. Replayed SDK
+    IDs cannot replace this invocation identity. It proves the receiving
+    invocation, not the native envelope's consumed-input attribution. *)
+
+type native_task_observation = private
+  { owner : native_task_owner; uuid : string; event : native_task_event
+  ; boundary : native_task_boundary }
+(** Invocation-local observations: explicit session/run identity, Native_full,
+    unambiguous Root_response/Built_in Agent and provider root spawn depth.
+    No ownership is inferred for run-less, unknown or child task frames.
+    Raw prompt, summary, description, error and output-file bodies are excluded.
+    [boundary] is the registry's post-event fact. Later terminal notices and
+    metadata-only patches preserve it; they cannot reopen a sealed run.
+    Task termination does not terminate the native call, model response or turn.
+    This client still returns on the first root result; post-result receiving
+    requires a separate process/session lifetime implementation. *)
+
+type native_agent_parent_witness = private
+  { invocation : Runtime_claude_input_attribution.ticket
+  ; call_id : string
+  ; call_envelope_uuid : string
+  ; call_ordinal : int
+  }
+(** Invocation-registry witness to an unambiguous Root_response/Built_in Agent
+    call admitted under Native_full. An open or returned native call retains
+    the same original envelope UUID and its observed content-array ordinal;
+    this is not an API streaming index. [invocation] refers to the actual
+    immutable Prepared ticket captured once by that runtime's native registry,
+    not a copied provider session or a newly generated identifier. No task/run,
+    consumed-input attribution or publication authority is inferred. A later
+    input join must compare the whole ticket, including receiver generation and
+    client UUID, before reading or changing its owner evidence cache.
+    Later call-ID reuse can make
+    the registry ambiguous and subsequent child observations unknown; an
+    earlier witness remains its immutable historical snapshot, not current
+    authority or cancellation evidence. It certifies only the original
+    native call, not a separately supplied body's authenticity or parent pairing.
+    [complete_child_content] retains the actual accepted body/parent together;
+    a downstream input join also compares its literal parent with [call_id]. *)
+
+type complete_child_content = private
+  { invocation : Runtime_claude_input_attribution.ticket
+  ; observation_id : string
+  ; parent_tool_use_id : string
+  ; parent_occurrence : native_agent_parent_witness option
+  ; message_id : string option
+  ; model : string
+  ; block : content_block
+  ; channel : content_channel
+  ; text : string
+  }
+(** Validated complete-frame child model content from the actual runtime
+    invocation. Only the producer can construct this record; capturing a genuine
+    parent witness cannot attach a different body or literal parent to it.
+    [invocation] is the native registry's actual immutable Prepared ticket,
+    even when the parent is unknown. [observation_id] is minted once per actual
+    accepted complete child model envelope and shared by its body blocks. It is
+    distinct across repeated accepted provider envelopes, including an unknown
+    observation before its parent and a later known snapshot. It is an opaque
+    observation identity, not a delivery/commit receipt or ordering clock.
+    This proves observed provider provenance,
+    not child consumption of a parent input group or Task/run ownership. *)
+
 type stream_event =
   | Turn_started of
       { turn_id : string
@@ -221,14 +325,42 @@ type stream_event =
           [message.id]. The CLI writes each content block of a response as
           its own frame under the same id, so blocks sharing an id are one
           assistant message and a new id is the next one. [None] when the
-          frame carries no id. *)
+          frame carries no id. Complete-envelope body isolation admits only
+          root model responses here. Partial events rely on the SDK's
+          main-session-only contract; their parser checks the session and
+          event shape without independently validating parent scope. *)
   | Thinking_delta of
       { message_id : string option
       ; block : content_block
       ; text : string
       }
       (** Provider-exposed thinking text from partial or complete assistant
-          blocks. Opaque signatures and redacted payloads are not text. *)
+          blocks. Complete child envelopes use [Child_content_observed];
+          partial attribution relies on the SDK main-session-only contract
+          described on [Text_delta]. Opaque signatures and redacted payloads
+          are not text. *)
+  | Child_content_observed of complete_child_content
+      (** Provider-exposed text or thinking from a complete child assistant
+          envelope, retaining its literal parent call and [Assistant_block]
+          UUID/content ordinal. [None] means the envelope has no message id.
+          [model] is the child envelope's reported model, never a root model.
+          Each accepted envelope reports a body snapshot, including empty
+          text. The host observation ID distinguishes actual accepted frames,
+          including repeated provider UUIDs; its original ordinal/channel owns
+          each body. Redelivery of that observation can be applied idempotently;
+          a separate accepted replay is not agreement of changed replay bodies. The
+          parent call is provenance, not an inferred task owner.
+          [parent_occurrence] is the registry's fact when this body is observed,
+          even before task registration or after native return. [None] means
+          the parent is unknown, ambiguous, not a root built-in Agent, or not
+          admitted under Native_full. It preserves the supplied body and parent
+          ID and never retroactively upgrades an earlier unknown observation.
+          A later observation is not certification of the earlier binding. Child
+          content cannot supply the root reply, root response-emitted evidence,
+          model or usage. This is separate from root partial reconciliation.
+          Keeper can deliver private content through its separate bound/rejected
+          observation callback. Driver sinks, child display and persistence are
+          not yet connected. *)
   | Content_block_stopped of { block : content_block; channel : content_channel }
       (** Published once after a partial block's stop and complete-envelope
           reconciliation, in either wire order. A late complete suffix precedes
@@ -246,9 +378,12 @@ type stream_event =
       { identity : Runtime_native_tools.action_identity
       ; progress : Runtime_native_tools.progress
       }
-      (** A UUID-deduplicated root heartbeat matched to the literal parent call
+      (** A UUID-deduplicated root heartbeat or Agent retry notice matched to the literal parent call
           in this invocation. Invalid/unowned observations neither publish a
-          tool row nor fail a healthy turn. No progress-id prefix is parsed. *)
+          tool row nor fail a healthy turn. Agent retry requires Native_full;
+          clear matches an earlier notice's opaque progress id and agent type.
+          No progress-id prefix is parsed. *)
+  | Native_task_observed of native_task_observation
   | Usage_windows_reported of Runtime_provider_usage_window.report
       (** The windows a [rate_limit_event] reported, for the operator
           projection only; nothing that routes or retries reads it. *)
@@ -400,6 +535,9 @@ val run_turn :
   ?on_turn_starting:(session_id:string -> (unit, string) result) ->
   ?on_turn_started:(session_id:string -> turn_id:string -> (unit, string) result) ->
   ?on_stream_event:(stream_event -> unit) ->
+  ?on_input_observation:(Runtime_claude_input_attribution.observation -> unit) ->
+  (* Optional invocation-local ticket/write/response metadata, separate from
+     authored content and native tasks. It does not extend receiver lifetime. *)
   config ->
   prompt:string ->
   images:image_input list ->

@@ -50,32 +50,49 @@ let occurrence_to_json (o : tool_stream_occurrence) =
          (Option.map (fun value -> `String value) o.provider_message_id))
 ;;
 
-let occurrence_of_json json =
-  let open Yojson.Safe.Util in
-  try
-    Ok
-      { stream_scope = json |> member "stream_scope" |> to_int
-      ; provider_message_id = json |> member "provider_message_id" |> to_string_option
-      ; block_index = json |> member "block_index" |> to_int
-      }
-  with
-  | Type_error (message, _) -> Error ("tool_stream_occurrence: " ^ message)
+let object_fields ~label ?allowed = function
+  | `Assoc fields ->
+      let names = List.map fst fields in
+      if List.length names <> List.length (List.sort_uniq String.compare names)
+      then Error (label ^ ": duplicate field")
+      else (match allowed with
+        | Some names when List.exists (fun (name, _) -> not (List.mem name names)) fields ->
+            Error (label ^ ": unknown field")
+        | None | Some _ -> Ok fields)
+  | _ -> Error (label ^ ": expected object")
 ;;
 
-(* Decode-side companion for the occurrence nested inside
-   [stream_protocol_error_to_json], whose shape is the AG-UI wire shape
-   (camelCase) — the encoder is reused verbatim, so this decoder must match
-   it. *)
-let occurrence_of_wire_json json =
-  let open Yojson.Safe.Util in
-  try
-    Ok
-      { stream_scope = json |> member "toolStreamScope" |> to_int
-      ; provider_message_id = json |> member "providerMessageId" |> to_string_option
-      ; block_index = json |> member "toolCallBlockIndex" |> to_int
-      }
-  with
-  | Type_error (message, _) -> Error ("tool_stream_occurrence(wire): " ^ message)
+let optional_identity ~label name fields =
+  match List.assoc_opt name fields with
+  | None -> Ok None
+  | Some (`String value) when String.trim value <> "" -> Ok (Some value)
+  | Some _ -> Error (label ^ ": " ^ name ^ " must be a non-empty string")
+;;
+
+let occurrence_of_fields ~scope ~index ~provider json =
+  let ( let* ) = Result.bind in
+  let label = "tool_stream_occurrence" in
+  let* fields = object_fields ~label ~allowed:[scope; index; provider] json in
+  let nonnegative name =
+    match List.assoc_opt name fields with
+    | None -> Error (label ^ ": missing " ^ name)
+    | Some json ->
+        let* value = Runtime_json_integer.of_json json in
+        if value >= 0 then Ok value else Error (label ^ ": negative " ^ name)
+  in
+  let* stream_scope = nonnegative scope in
+  let* block_index = nonnegative index in
+  let* provider_message_id = optional_identity ~label provider fields in
+  Ok { stream_scope; block_index; provider_message_id }
+;;
+
+let occurrence_of_json =
+  occurrence_of_fields ~scope:"stream_scope" ~index:"block_index" ~provider:"provider_message_id"
+;;
+
+(* Protocol errors use the wire occurrence encoder. Decode its exact names. *)
+let occurrence_of_wire_json =
+  occurrence_of_fields ~scope:"toolStreamScope" ~index:"toolCallBlockIndex" ~provider:"providerMessageId"
 ;;
 
 (* [api_usage_to_json] writes a derived [total_tokens]; decoding recomputes it
@@ -349,6 +366,7 @@ let keeper_chat_event_of_json json =
   let open Yojson.Safe.Util in
   let ( let* ) = Result.bind in
   try
+    let* _ = object_fields ~label:"keeper_chat_event" json in
     let tag = json |> member "type" |> to_string in
     match tag with
     | "run_started" ->
@@ -512,32 +530,31 @@ let keeper_chat_event_of_json json =
            ; tool_call_id = json |> member "tool_call_id" |> to_string_option
            })
     | ("native_tool_start" | "native_tool_end" | "native_tool_progress") as tag ->
+      let extra = match tag with
+        | "native_tool_start" -> []
+        | "native_tool_progress" -> ["progress"]
+        | _ -> ["completion"] in
+      let* fields = object_fields ~label:"native_tool"
+          ~allowed:(["type"; "occurrence"; "tool_call_id"; "tool_call_name"] @ extra) json in
       let* occurrence = occurrence_of_json (json |> member "occurrence") in
-      let tool =
-        { occurrence
-        ; tool_call_id = json |> member "tool_call_id" |> to_string_option
-        ; tool_call_name = json |> member "tool_call_name" |> to_string_option
-        }
-      in
-      if String.equal tag "native_tool_start" then Ok (Native_tool_start tool)
-      else if String.equal tag "native_tool_progress" then
-        let* progress = Runtime_native_tools.progress_of_json (json |> member "progress") in
-        Ok (Native_tool_progress (tool, progress))
-      else
-        (* The production writer still emits ends without a completion
-           (11,865 rows in the live keeper_turn_events), so an omitted one
-           reads as end_observed the way the wire does; a duplicate or
-           malformed present completion is unreadable. *)
-        let* completion =
-          match json with
-          | `Assoc fields ->
-              (match List.filter (fun (key, _) -> String.equal key "completion") fields with
-               | [] -> Ok Runtime_native_tools.end_observed
-               | [_, json] -> Runtime_native_tools.completion_of_json json
-               | _ -> Error "native_tool_end has duplicate completion members")
-          | _ -> Ok Runtime_native_tools.end_observed
-        in
-        Ok (Native_tool_end (tool, completion))
+      let* tool_call_id = optional_identity ~label:"native_tool" "tool_call_id" fields in
+      let* tool_call_name = optional_identity ~label:"native_tool" "tool_call_name" fields in
+      let tool = { occurrence; tool_call_id; tool_call_name } in
+      (match tag with
+      | "native_tool_start" -> Ok (Native_tool_start tool)
+      | "native_tool_progress" ->
+          let* progress = Runtime_native_tools.progress_of_json (json |> member "progress") in
+          Ok (Native_tool_progress (tool, progress))
+      | _ ->
+          (* The production writer still emits ends without a completion
+             (11,865 rows in the live keeper_turn_events), so an omitted one
+             reads as end_observed the way the wire does. object_fields above
+             already rejects a duplicate member; a malformed present
+             completion is unreadable. *)
+          let* completion = match List.assoc_opt "completion" fields with
+            | None -> Ok Runtime_native_tools.end_observed
+            | Some value -> Runtime_native_tools.completion_of_json value in
+          Ok (Native_tool_end (tool, completion)))
     | "tool_approval_requested" ->
       Ok
         (Tool_approval_requested
@@ -648,7 +665,13 @@ let journaled_event_to_json { seq; ts; event } =
 
 let journaled_event_payload_of_json json =
   let open Yojson.Safe.Util in
+  let ( let* ) = Result.bind in
   try
+    let* _ = object_fields ~label:"journaled_event" ~allowed:["v"; "seq"; "ts"; "event"] json in
+    let* seq = Runtime_json_integer.of_json (json |> member "seq") in
+    let* () = if seq >= 0 then Ok () else Error "journaled_event: negative seq" in
+    let ts = json |> member "ts" |> to_float in
+    let* () = if Float.is_finite ts then Ok () else Error "journaled_event: non-finite ts" in
     let version = json |> member "v" |> to_int in
     if version <> codec_version
     then
@@ -660,8 +683,8 @@ let journaled_event_payload_of_json json =
     else
       Result.map
         (fun event ->
-           { seq = json |> member "seq" |> to_int
-           ; ts = json |> member "ts" |> to_float
+           { seq
+           ; ts
            ; event
            })
         (keeper_chat_event_of_json (json |> member "event"))

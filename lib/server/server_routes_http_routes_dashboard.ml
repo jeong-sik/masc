@@ -3721,6 +3721,22 @@ let add_routes ~sw ~clock router =
            (fun state _actor req reqd -> Server_dashboard_http_hitl_recover.handle_uncertain_get state req reqd)
            request reqd
        else
+       match Server_dashboard_http_keeper_child_content.route (Http.Request.path request) with
+       | Some route ->
+         with_token_permission_auth
+           ~permission:Server_dashboard_http_keeper_child_content.permission
+           (fun state _agent_name req reqd ->
+             Server_dashboard_http_keeper_child_content.handle_get state req reqd route)
+           request reqd
+       | None ->
+       match Server_dashboard_http_keeper_native_tasks.route (Http.Request.path request) with
+       | Some route ->
+         with_token_permission_auth
+           ~permission:Server_dashboard_http_keeper_native_tasks.permission
+           (fun state _agent_name req reqd ->
+             Server_dashboard_http_keeper_native_tasks.handle_get state req reqd route)
+           request reqd
+       | None ->
        match Keeper_chat_operations.get_route (Http.Request.path request) with
        | Some route ->
          with_token_permission_auth

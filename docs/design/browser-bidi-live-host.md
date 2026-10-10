@@ -67,6 +67,16 @@ profile = "/Users/you/masc-keeper-firefox-profile"
   that ended while its Firefox was opening the port leaves one, and a
   second Firefox on the same profile would end at once and take that
   record with it.
+- While the server runs, a Keeper's hover or drag that no listed connection
+  serves has the server start what is missing the same way, one start at a
+  time, and wait up to 15 seconds for the BiDi connection. The request
+  itself is not sent there; the answer names the connection and what was
+  started (`bidiConnection`) and asks the Keeper to list its tabs and
+  observe again, or says why none was shown and what a retry does
+  (`bidiStartFailed`: `operator_needed`, `start_failed`,
+  `not_listed_in_time`). Reads, clicks and scrolls start nothing. A host
+  that ends before its connection is listed has the Firefox started for it
+  stopped, at a server start as at a request.
 - `[browser.live] enabled = false`, or a `runtime.toml` without the table,
   starts nothing, and stops the Firefox that record names when it is shown
   to be the one MASC started: the process its group is numbered after still

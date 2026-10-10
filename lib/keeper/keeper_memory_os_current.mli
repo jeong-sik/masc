@@ -164,13 +164,26 @@ type official_range_id =
   ; turns : (int * Ids.Turn_ref.t) list
   }
 
+(** Ordered explicit-write candidates consumed by one Memory decision, not
+    conversation atoms. [receipt_scope] is nonblank and has no surrounding
+    whitespace; the consumer must bind it to its queue generation.
+    [after_sequence] is nonnegative and [through_sequence] is strictly larger.
+    [input_sha256] is the lowercase SHA-256 of the exact ordered input payloads.
+    The store checks the range against the last committed sequence under its
+    write lock; the consumer owns verification of the actual input digest. *)
+type explicit_write_range_id =
+  { receipt_scope : string
+  ; after_sequence : int
+  ; through_sequence : int
+  ; input_sha256 : string
+  }
+
 val durable_range_id_to_json : durable_range_id -> Yojson.Safe.t
 val official_range_id_to_json : official_range_id -> Yojson.Safe.t
 val durable_range_id_of_json : Yojson.Safe.t -> (durable_range_id, Keeper_memory_os_types.wire_error) result
 val official_range_id_of_json : Yojson.Safe.t -> (official_range_id, Keeper_memory_os_types.wire_error) result
 (** Canonical receipt identities, also used to recover the external read cursor
     from the same committed Memory transaction. *)
-
 (** Why a librarian pass produced no snapshot. The journal is the only place
     this reaches disk, so the set is closed here rather than at the call site:
     a new failure mode has to name itself before it can be recorded, and
@@ -384,6 +397,16 @@ val committed_official_range
 (** Same snapshot proof as [committed_durable_range], independently retained
     for official-client input in the shared receipt sidecar. *)
 
+val committed_explicit_write_range
+  :  keepers_dir:string
+  -> keeper_id:string
+  -> receipt_scope:string
+  -> (explicit_write_range_id option, string) result
+(** Same snapshot proof, independently retained for explicit-write candidates.
+    Later retirement of an admitted fact does not erase the consumed range.
+    Consumers may read it to acknowledge a commit after interrupted delivery.
+    [apply_disposition] atomically refuses repeated, old or gapped ranges. *)
+
 type disposition =
   { snapshot : t
         (** the current snapshot after the pass: the one written, or for an
@@ -418,6 +441,8 @@ val apply_disposition
   -> ?dropped_statements:Keeper_memory_os_types.dropped_statement list
   -> ?durable_range_id:durable_range_id
   -> ?official_range_id:official_range_id
+  -> ?explicit_write_range_id:explicit_write_range_id
+  -> ?required_memory_ids:string list
   -> absorbed:Keeper_memory_os_types.absorbed_statement list
   -> revisions:Keeper_memory_os_types.revision list
   -> keepers_dir:string
@@ -451,15 +476,29 @@ val apply_disposition
     once under the store locks and must only update caller-owned in-memory
     state: no I/O, yielding or exceptions. It is not a scheduling callback.
 
-    [durable_range_id] and [official_range_id] join this disposition to the
-    atom and official-client ranges that produced it. When both are present,
-    both identities share the same snapshot revision and SHA-256. Each source
-    kind retains its latest receipt per runtime scope. The store writes a prepared transaction receipt
-    before replacing the snapshot and marks it committed afterwards. Recovery
+    [durable_range_id], [official_range_id] and [explicit_write_range_id] join
+    this disposition to its atom, official-client and explicit-write inputs.
+    All supplied identities share the same snapshot revision and SHA-256. Each
+    source kind retains its latest receipt per scope. The store writes a prepared transaction receipt
+    before replacing the snapshot and marks it committed afterwards. Preparing
+    the next transaction retains the prior committed receipt until the new
+    snapshot is verified, so a failed snapshot write cannot erase its frontier.
+    Recovery
     compares a prepared receipt with the exact snapshot SHA-256, so neither
     side of a process interruption is guessed. An [Unchanged] commit replaces
     nothing, so its ranges are recorded committed at once, bound to the kept
     snapshot's revision and SHA-256.
+
+    An explicit-write range must start at zero when its scope has no committed
+    receipt, otherwise at that receipt's [through_sequence], and advance it.
+    This check runs under the store locks after receipt recovery and before
+    building the disposition. A stale duplicate cannot resurrect a retired
+    fact. A conflict is an error, not a successful no-op; the consumer can reread
+    the authoritative receipt before acknowledging already-consumed input.
+
+    [required_memory_ids] names the destinations promised by an explicit
+    admission decision. Every destination must survive the actual locked
+    disposition and support maintenance, or the entire commit is refused.
 
     An [absorbed] fact that is still current leaves the snapshot too, and its
     row is appended to {!Keeper_memory_absorbed} under the lock, after the next

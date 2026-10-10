@@ -68,6 +68,7 @@ let apply_disposition
       ?dropped_statements
       ?durable_range_id
       ?official_range_id
+      ?explicit_write_range_id
       ?(absorbed = [])
       ?(revisions = [])
       ?(new_claims = [])
@@ -77,6 +78,7 @@ let apply_disposition
     ?dropped_statements
     ?durable_range_id
     ?official_range_id
+    ?explicit_write_range_id
     ~absorbed
     ~revisions
     ~keepers_dir
@@ -1652,6 +1654,20 @@ let official_range_id : Current.official_range_id =
   }
 ;;
 
+let explicit_write_range_id : Current.explicit_write_range_id =
+  { receipt_scope = durable_range_id.receipt_scope
+  ; after_sequence = 0
+  ; through_sequence = 1
+  ; input_sha256 = Digestif.SHA256.(digest_string
+      {|[{"sequence":1,"claim":"queued fact"}]|} |> to_hex)
+  }
+;;
+
+let read_explicit ~keepers_dir ~receipt_scope =
+  Current.committed_explicit_write_range ~keepers_dir ~keeper_id:"keeper" ~receipt_scope
+  |> require_ok
+;;
+
 let read_official ~keepers_dir =
   Current.committed_official_range ~keepers_dir ~keeper_id:"keeper"
     ~receipt_scope:official_range_id.receipt_scope
@@ -2025,6 +2041,130 @@ let test_unchanged_pass_keeps_snapshot_and_commits_range () =
     | Ok (Some _) -> ()
     | Ok None -> fail "a later rewrite dropped the committed range"
     | Error detail -> fail detail)
+;;
+
+let test_explicit_write_receipt_commits_no_change_and_survives_retirement () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let commit ?durable_range_id ?official_range_id ~explicit_write_range_id new_claims =
+    Current.apply_disposition ?durable_range_id ?official_range_id ~explicit_write_range_id
+      ~absorbed:[] ~revisions:[] ~keepers_dir ~keeper_id:"keeper" ~now:200.
+      ~source:(source Current.Librarian) ~new_claims () |> require_ok in
+  let target = fact ~claim:"queued fact" () in
+  let initial_gap = {explicit_write_range_id with after_sequence=1; through_sequence=2} in
+  (match apply_disposition ~keepers_dir ~explicit_write_range_id:initial_gap
+      ~new_claims:[target] () with
+   | Error _ -> () | Ok _ -> fail "a new scope skipped its initial input prefix");
+  check bool "initial gap cannot create a snapshot" false
+    (Sys.file_exists (Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"));
+  let first = commit ~durable_range_id ~official_range_id ~explicit_write_range_id [target] in
+  check bool "explicit input joins the actual rewritten snapshot" true
+    (first.commit = Current.Rewritten);
+  let scope = explicit_write_range_id.receipt_scope in
+  check bool "exact explicit input identity is committed" true
+    (read_explicit ~keepers_dir ~receipt_scope:scope = Some explicit_write_range_id);
+  let path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let original = Fs_compat.load_file path in
+  let next = { explicit_write_range_id with after_sequence=1; through_sequence=2;
+    input_sha256=Digestif.SHA256.(digest_string
+      {|[{"sequence":2,"claim":"queued fact"}]|} |> to_hex) } in
+  let no_change = commit ~explicit_write_range_id:next [target] in
+  check bool "a repeated observation can consume without a rewrite" true
+    (no_change.commit = Current.Unchanged);
+  check int "no-change keeps the revision" first.snapshot.revision no_change.snapshot.revision;
+  check string "no-change keeps the exact snapshot bytes" original (Fs_compat.load_file path);
+  check bool "the later explicit receipt replaces only its own scope and kind" true
+    (read_explicit ~keepers_dir ~receipt_scope:scope = Some next);
+  require_official ~keepers_dir;
+  check bool "atom receipt with the same scope remains independent" true
+    (require_committed_range ~keepers_dir "atom receipt missing" = durable_range_id);
+  (match Current.retract_fact ~keepers_dir ~keeper_id:"keeper" ~now:300.
+      ~source:(source Current.Explicit_retract) ~memory_id:(Types.memory_id target)
+      ~reason:"retired after admission" () with
+   | Ok retired -> check int "retirement writes a later revision"
+       (first.snapshot.revision+1) retired.revision
+   | Error _ -> fail "retirement failed");
+  let retired_bytes = Fs_compat.load_file path in
+  let receipt_path = Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+  let receipts_before = Fs_compat.load_file receipt_path in
+  List.iter (fun stale ->
+    (match apply_disposition ~keepers_dir ~explicit_write_range_id:stale
+        ~new_claims:[target] () with
+     | Error _ -> () | Ok _ -> fail "stale explicit input resurrected a retired fact");
+    check string "rejected duplicate, old or gapped range leaves snapshot unchanged"
+      retired_bytes (Fs_compat.load_file path);
+    check string "rejected range cannot replace its committed receipt"
+      receipts_before (Fs_compat.load_file receipt_path))
+    [next; explicit_write_range_id;
+     {next with after_sequence=3; through_sequence=4};
+     {next with through_sequence=3}];
+  let other = {explicit_write_range_id with receipt_scope="different-queue-generation"} in
+  ignore (apply_disposition ~keepers_dir ~explicit_write_range_id:other () |> require_ok);
+  check bool "retirement and a different queue generation preserve consumed input" true
+    (read_explicit ~keepers_dir ~receipt_scope:scope = Some next);
+  check bool "other generation keeps its own receipt" true
+    (read_explicit ~keepers_dir ~receipt_scope:other.receipt_scope = Some other);
+  let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+    |> require_ok |> require_some in
+  check int "receipt recovery never resurrects retired content" 0 (List.length current.facts)
+;;
+
+let test_explicit_write_prepared_receipt_requires_exact_snapshot () =
+  List.iter (fun exact ->
+    with_temp_keepers @@ fun keepers_dir ->
+    ignore (apply_disposition ~keepers_dir ~explicit_write_range_id
+      ~new_claims:[fact ~claim:"queued fact" ()] () |> require_ok);
+    rewrite_receipts ~keepers_dir (map_receipts (fun receipt ->
+      let receipt = map_field "state" (fun _ -> `String "prepared") receipt in
+      if exact then receipt
+      else map_field "snapshot_sha256" (fun _ -> `String (String.make 64 'f')) receipt));
+    let found = read_explicit ~keepers_dir ~receipt_scope:explicit_write_range_id.receipt_scope in
+    check bool "prepared receipt recovers only against its exact snapshot"
+      true (found = if exact then Some explicit_write_range_id else None);
+    if exact then (
+      let receipt = Yojson.Safe.from_file
+        (Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper") in
+      check string "recovery persists the committed state" "committed"
+        Yojson.Safe.Util.(member "receipts" receipt |> to_list |> List.hd
+                         |> member "state" |> to_string))) [true;false]
+;;
+
+let test_explicit_write_receipt_rejects_invalid_or_ambiguous_identity () =
+  let invalid =
+    [ {explicit_write_range_id with receipt_scope=""}
+    ; {explicit_write_range_id with receipt_scope=" "}
+    ; {explicit_write_range_id with receipt_scope=" padded "}
+    ; {explicit_write_range_id with after_sequence=(-1)}
+    ; {explicit_write_range_id with through_sequence=0}
+    ; {explicit_write_range_id with input_sha256=String.make 64 'A'}
+    ; {explicit_write_range_id with input_sha256="not-a-digest"} ] in
+  List.iter (fun explicit_write_range_id ->
+    with_temp_keepers @@ fun keepers_dir ->
+    ignore (replace ~keepers_dir ~facts:[fact ~claim:"prior" ()] () |> require_ok);
+    let path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+    let before = Fs_compat.load_file path in
+    (match apply_disposition ~keepers_dir ~explicit_write_range_id
+        ~new_claims:[fact ~claim:"must not enter current memory" ()] () with
+     | Error _ -> () | Ok _ -> fail "invalid explicit input identity committed");
+    check string "invalid input identity cannot change the snapshot" before (Fs_compat.load_file path);
+    check bool "invalid input identity creates no receipt" false
+      (Sys.file_exists (Current.durable_range_receipt_path ~keepers_dir ~keeper_id:"keeper"))) invalid;
+  let add_field key value = function
+    | `Assoc fields -> `Assoc ((key,value)::fields)
+    | _ -> fail "expected receipt object" in
+  List.iter (fun transform ->
+    with_temp_keepers @@ fun keepers_dir ->
+    ignore (apply_disposition ~keepers_dir ~explicit_write_range_id () |> require_ok);
+    rewrite_receipts ~keepers_dir (map_receipts transform);
+    match Current.committed_explicit_write_range ~keepers_dir ~keeper_id:"keeper"
+        ~receipt_scope:explicit_write_range_id.receipt_scope with
+    | Error _ -> () | Ok _ -> fail "malformed explicit receipt was accepted")
+    [ add_field "range_id" `Null
+    ; add_field "official_range_id" `Null
+    ; add_field "explicit_write_range_id" `Null
+    ; map_field "explicit_write_range_id" (add_field "receipt_scope" (`String "duplicate"))
+    ; map_field "explicit_write_range_id" (add_field "unknown" `Null)
+    ; map_field "explicit_write_range_id" (map_field "through_sequence" (fun _ -> `Int 0))
+    ; map_field "explicit_write_range_id" (map_field "input_sha256" (fun _ -> `String "invalid")) ]
 ;;
 
 let test_stale_replace_rejects_concurrent_explicit_write () =
@@ -3210,6 +3350,12 @@ let () =
             test_mixed_receipt_prepared_recovery
         ; test_case "official receipt rejects invalid identity" `Quick
             test_official_receipt_rejects_invalid_identity
+        ; test_case "explicit-write receipt consumes no-change and survives retirement" `Quick
+            test_explicit_write_receipt_commits_no_change_and_survives_retirement
+        ; test_case "explicit-write prepared receipt requires exact snapshot" `Quick
+            test_explicit_write_prepared_receipt_requires_exact_snapshot
+        ; test_case "explicit-write receipt rejects invalid or ambiguous identity" `Quick
+            test_explicit_write_receipt_rejects_invalid_or_ambiguous_identity
         ; test_case
             "range receipts are scoped per runtime cluster"
             `Quick

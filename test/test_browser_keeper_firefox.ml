@@ -108,14 +108,15 @@ let sleeper_command name = Printf.sprintf "python3 -c 'import time; time.sleep(3
 (* What install-host.sh leaves, with a launcher that records what it was
    given. [declared:false] leaves out launch.json, which reads as a launcher
    to install again. *)
-let install_lane ?(declared = true) base ~marker =
+let install_lane ?(declared = true) ?(host_ends = false) base ~marker =
   List.iter (fun dir -> Unix.mkdir dir 0o700)
     [ Filename.concat base ".masc"; lane base; Filename.concat (lane base) "host" ];
   let script =
     Printf.sprintf
       "#!/bin/sh\nprintf '%%s\\n' \"${MASC_HTTP_PORT-unset} ${MASC_HTTP_BASE_URL-unset}\" > %s.env\n\
-       printf '%%s\\n' \"$$\" \"$@\" > %s\nexec %s\n"
-      (Filename.quote marker) (Filename.quote marker) (sleeper_command marker) in
+       printf '%%s\\n' \"$$\" \"$@\" > %s\n%s\n"
+      (Filename.quote marker) (Filename.quote marker)
+      (if host_ends then "exit 3" else "exec " ^ sleeper_command marker) in
   write ~mode:0o700 (launcher base) script;
   if declared then
     write (Filename.concat (lane base) "host/launch.json")
@@ -977,6 +978,203 @@ let a_record_that_cannot_be_read_is_kept () =
     started ~base ~configuration:(Some Browser_configuration.none) ();
     check string "left as it was" "{" (read path))
 
+(* --- a Keeper's request ----------------------------------------------------- *)
+
+module Starter = Masc.Browser_keeper_firefox_starter
+
+let bidi_client n : Browser_lane.client_info =
+  match Browser_lane.client_id_of_string (Printf.sprintf "70000000-0000-4000-8000-%012d" n) with
+  | Ok client_id ->
+    { client_id; browser = Browser_lane.Firefox; version = "fixture"; engine_version = "fixture"
+    ; transport = Browser_lane.Webdriver_bidi }
+  | Error detail -> fail detail
+
+(* Lists [client] as a host's first poll does, until the switch ends. *)
+let attach ~sw (client : Browser_lane.client_info) =
+  ignore (Browser_lane.take_command ~client_info:client ~window_sec:0.001);
+  Eio.Switch.on_release sw (fun () -> ignore (Browser_lane.disconnect_client ~client_id:client.client_id))
+
+(* [await_file] without holding up the fibers that serve the start. *)
+let await_file_in_eio ~clock path =
+  let deadline = Unix.gettimeofday () +. 10. in
+  let rec wait () =
+    if Sys.file_exists path && String.trim (read path) <> "" then ()
+    else if Unix.gettimeofday () > deadline then fail (path ^ " was not written")
+    else (Eio.Time.sleep clock 0.05; wait ()) in
+  wait ()
+
+let requested ?(host_attach_wait_s = 10.) ?(boot = false) ~base ~configuration f =
+  Eio_main.run (fun env ->
+    Time_compat.set_clock (Eio.Stdenv.clock env);
+    Eio.Switch.run (fun sw ->
+      let request =
+        Server_browser_keeper_firefox.For_testing.serve ~boot ~ready_timeout_s:Keeper_firefox.firefox_ready_timeout_s
+          ~host_attach_wait_s ~sw ~env ~base_path:base ~configuration:(fun () -> configuration) () in
+      f ~sw ~clock:(Eio.Stdenv.clock env) request))
+
+let attached_id = function
+  | Starter.Attached { client; _ } -> Some (Browser_lane.client_id_to_string client.client_id)
+  | Starter.Not_attached _ | Starter.Not_asked_for -> None
+
+let what_started = function
+  | Starter.Attached { started = Starter.Firefox_and_host; _ } -> "firefox and host"
+  | Starter.Attached { started = Starter.Host_only; _ } -> "host only"
+  | Starter.Attached { started = Starter.Nothing; _ } -> "nothing"
+  | Starter.Not_attached _ | Starter.Not_asked_for -> "no connection"
+
+let started_again path = Sys.file_exists (Keeper_firefox.previous_log_path path)
+
+let id_of (client : Browser_lane.client_info) = Browser_lane.client_id_to_string client.client_id
+
+(* The host attaches once it runs: here, as its launcher writes its marker. *)
+let a_request_starts_both_and_waits_for_the_connection () =
+  with_workspace (fun base ->
+    let firefox_marker, host_marker = markers base in
+    install_lane base ~marker:host_marker;
+    let firefox = fake_firefox base ~marker:firefox_marker Listens in
+    with_children ~base [ firefox_marker; host_marker ] (fun () ->
+      requested ~base ~configuration:(configured ~firefox ~port:(free_port ()) base) (fun ~sw ~clock request ->
+        let client = bidi_client 1 in
+        Eio.Fiber.fork ~sw (fun () -> await_file_in_eio ~clock host_marker; attach ~sw client);
+        let answer = request () in
+        check (option string) "the connection the start showed" (Some (id_of client)) (attached_id answer);
+        check string "said to have started both" "firefox and host" (what_started answer));
+      check bool "Firefox and its host were started" true (firefox_started base && host_started base)))
+
+(* Firefox opens a profile once, so a second start would only fail; and a
+   request that comes during a start waits for that one. *)
+let requests_at_once_share_one_start () =
+  with_workspace (fun base ->
+    let firefox_marker, host_marker = markers base in
+    install_lane base ~marker:host_marker;
+    let firefox = fake_firefox base ~marker:firefox_marker Listens in
+    with_children ~base [ firefox_marker; host_marker ] (fun () ->
+      requested ~base ~configuration:(configured ~firefox ~port:(free_port ()) base) (fun ~sw ~clock request ->
+        let client = bidi_client 2 in
+        Eio.Fiber.fork ~sw (fun () -> await_file_in_eio ~clock host_marker; attach ~sw client);
+        let first, second = Eio.Fiber.pair request request in
+        check (list (option string)) "both see the connection" [ Some (id_of client); Some (id_of client) ]
+          [ attached_id first; attached_id second ]);
+      check bool "one Firefox" false (started_again (Keeper_firefox.firefox_log_path ~base_path:base));
+      check bool "one host" false (started_again (Keeper_firefox.host_log_path ~base_path:base))))
+
+let a_listed_connection_starts_nothing () =
+  with_workspace (fun base ->
+    let firefox_marker, host_marker = markers base in
+    install_lane base ~marker:host_marker;
+    let firefox = fake_firefox base ~marker:firefox_marker Listens in
+    with_children ~base [ firefox_marker; host_marker ] (fun () ->
+      requested ~base ~configuration:(configured ~firefox ~port:(free_port ()) base) (fun ~sw ~clock:_ request ->
+        let client = bidi_client 3 in
+        attach ~sw client;
+        let answer = request () in
+        check (option string) "that connection" (Some (id_of client)) (attached_id answer);
+        check string "said to have started nothing" "nothing" (what_started answer));
+      check bool "nothing started" false (firefox_started base || host_started base)))
+
+let a_request_where_none_is_asked_for_starts_nothing () =
+  with_workspace (fun base ->
+    let firefox_marker, host_marker = markers base in
+    install_lane base ~marker:host_marker;
+    let firefox = fake_firefox base ~marker:firefox_marker Listens in
+    with_children ~base [ firefox_marker; host_marker ] (fun () ->
+      List.iter
+        (fun (what, configuration) ->
+          requested ~base ~configuration (fun ~sw:_ ~clock:_ request ->
+            check bool what true (request () = Starter.Not_asked_for)))
+        [ "no table", Some Browser_configuration.none
+        ; "the lane off", configured ~live_enabled:false ~firefox ~port:(free_port ()) base
+        ; "no configuration loaded", None ];
+      check bool "nothing started" false (firefox_started base || host_started base)))
+
+let a_request_hears_why_nothing_started () =
+  with_workspace (fun base ->
+    let firefox_marker, _ = markers base in
+    let firefox = fake_firefox base ~marker:firefox_marker Listens in
+    with_children ~base [ firefox_marker ] (fun () ->
+      requested ~base ~configuration:(configured ~firefox ~port:(free_port ()) base) (fun ~sw:_ ~clock:_ request ->
+        match request () with
+        | Starter.Not_attached (Starter.Operator_needed why) ->
+          check bool ("the operator's step is named: " ^ why) true (String_util.contains_substring why "neither")
+        | Starter.Not_attached (Starter.Start_failed _ | Starter.Not_listed_in_time _)
+        | Starter.Attached _ | Starter.Not_asked_for -> fail "a start without a launcher is the operator's")))
+
+let a_connection_that_never_shows_is_reported () =
+  with_workspace (fun base ->
+    let firefox_marker, host_marker = markers base in
+    install_lane base ~marker:host_marker;
+    let firefox = fake_firefox base ~marker:firefox_marker Listens in
+    with_children ~base [ firefox_marker; host_marker ] (fun () ->
+      requested ~host_attach_wait_s:0.5 ~base ~configuration:(configured ~firefox ~port:(free_port ()) base)
+        (fun ~sw:_ ~clock:_ request ->
+          match request () with
+          | Starter.Not_attached (Starter.Not_listed_in_time why) ->
+            check bool ("the host's log is named: " ^ why) true (String_util.contains_substring why "bidi-host.log")
+          | Starter.Not_attached (Starter.Operator_needed _ | Starter.Start_failed _)
+          | Starter.Attached _ | Starter.Not_asked_for -> fail "a connection that never polled")))
+
+(* A host that ends before its connection is listed leaves the Firefox
+   started for it with an open port and no host: that Firefox is stopped,
+   and the answer says a retry starts again. *)
+let a_host_that_ends_at_once_stops_its_firefox () =
+  with_workspace (fun base ->
+    let firefox_marker, host_marker = markers base in
+    install_lane ~host_ends:true base ~marker:host_marker;
+    let firefox = fake_firefox base ~marker:firefox_marker Listens in
+    with_children ~base [ firefox_marker; host_marker ] (fun () ->
+      requested ~base ~configuration:(configured ~firefox ~port:(free_port ()) base) (fun ~sw:_ ~clock:_ request ->
+        match request () with
+        | Starter.Not_attached (Starter.Start_failed why) ->
+          check bool ("the host's end is named: " ^ why) true (String_util.contains_substring why "ended before")
+        | Starter.Not_attached (Starter.Operator_needed _ | Starter.Not_listed_in_time _)
+        | Starter.Attached _ | Starter.Not_asked_for -> fail "a host that ended is a failed start");
+      check bool "the host ran" true (Sys.file_exists host_marker);
+      check bool "the Firefox started for it is stopped" true (not_running ~base firefox_marker);
+      check bool "and not recorded" true (recorded base = None)))
+
+(* A request that comes while the server start's own start runs is answered
+   with it, connection included: a host just started holds neither the lock
+   nor a record yet, and a start then would start a second host. *)
+let a_request_during_the_server_start_waits_for_it () =
+  with_workspace (fun base ->
+    let firefox_marker, host_marker = markers base in
+    install_lane base ~marker:host_marker;
+    let firefox = fake_firefox base ~marker:firefox_marker Listens in
+    with_children ~base [ firefox_marker; host_marker ] (fun () ->
+      requested ~boot:true ~base ~configuration:(configured ~firefox ~port:(free_port ()) base)
+        (fun ~sw ~clock request ->
+          let client = bidi_client 4 in
+          Eio.Fiber.fork ~sw (fun () ->
+            await_file_in_eio ~clock host_marker; Eio.Time.sleep clock 0.5; attach ~sw client);
+          let answer = request () in
+          check (option string) "the server start's connection" (Some (id_of client)) (attached_id answer);
+          check string "and what it started" "firefox and host" (what_started answer));
+      check bool "one Firefox" false (started_again (Keeper_firefox.firefox_log_path ~base_path:base));
+      check bool "one host" false (started_again (Keeper_firefox.host_log_path ~base_path:base))))
+
+(* A request that comes after a host was started, and before its connection
+   is listed, waits for that start instead of starting another. *)
+let a_request_while_the_host_comes_up_waits_for_it () =
+  with_workspace (fun base ->
+    let firefox_marker, host_marker = markers base in
+    install_lane base ~marker:host_marker;
+    let firefox = fake_firefox base ~marker:firefox_marker Listens in
+    with_children ~base [ firefox_marker; host_marker ] (fun () ->
+      requested ~base ~configuration:(configured ~firefox ~port:(free_port ()) base) (fun ~sw ~clock request ->
+        let client = bidi_client 5 in
+        let late = ref None in
+        Eio.Fiber.fork ~sw (fun () ->
+          await_file_in_eio ~clock host_marker;
+          Eio.Fiber.fork ~sw (fun () -> late := Some (request ()));
+          Eio.Time.sleep clock 1.;
+          attach ~sw client);
+        let first = request () in
+        let deadline = Unix.gettimeofday () +. 10. in
+        while Option.is_none !late && Unix.gettimeofday () < deadline do Eio.Time.sleep clock 0.05 done;
+        check (list (option string)) "both see the connection" [ Some (id_of client); Some (id_of client) ]
+          [ attached_id first; Option.bind !late attached_id ]);
+      check bool "one host" false (started_again (Keeper_firefox.host_log_path ~base_path:base))))
+
 let () =
   run "browser_keeper_firefox"
     [ ( "configuration"
@@ -1031,4 +1229,14 @@ let () =
         ; test_case "a group not shown to be ours" `Quick a_group_not_shown_to_be_ours_is_not_stopped
         ; test_case "another process under the number" `Quick another_process_under_the_number_is_not_stopped
         ; test_case "a record that names nothing" `Quick a_record_that_names_nothing_is_forgotten
-        ; test_case "a record that cannot be read" `Quick a_record_that_cannot_be_read_is_kept ] ) ]
+        ; test_case "a record that cannot be read" `Quick a_record_that_cannot_be_read_is_kept ] )
+    ; ( "a Keeper's request"
+      , [ test_case "starts both and waits for the connection" `Quick a_request_starts_both_and_waits_for_the_connection
+        ; test_case "requests at once share one start" `Quick requests_at_once_share_one_start
+        ; test_case "a listed connection starts nothing" `Quick a_listed_connection_starts_nothing
+        ; test_case "nothing asked for, nothing started" `Quick a_request_where_none_is_asked_for_starts_nothing
+        ; test_case "why nothing started" `Quick a_request_hears_why_nothing_started
+        ; test_case "a connection that never shows" `Quick a_connection_that_never_shows_is_reported
+        ; test_case "a host that ends at once" `Quick a_host_that_ends_at_once_stops_its_firefox
+        ; test_case "during the server start" `Quick a_request_during_the_server_start_waits_for_it
+        ; test_case "while the host comes up" `Quick a_request_while_the_host_comes_up_waits_for_it ] ) ]

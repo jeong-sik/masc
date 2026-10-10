@@ -642,6 +642,64 @@ let test_incomplete_reply_exposes_typed_body_deadline () =
   | Ok _ | Error _ -> fail "expected HTTP200 headers followed by typed total body deadline"
 ;;
 
+let test_explicit_admission_envelope ~deferred () =
+  with_eio @@ fun ~sw:_ ~net:_ ~clock:_ ~base_path ->
+  Fixture.with_official_client_runtimes @@ fun () ->
+  let module Queue = Masc.Keeper_memory_admission_queue in
+  let require = function Ok value -> value | Error detail -> fail detail in
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+  publish_unreachable_lane ~cli_only:true ~cli_slot_ids:[Fixture.cli_primary_runtime]
+    ~source:"explicit admission fixture" ();
+  let keeper_id = "cli-lane-keeper" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let initial = Current.replace ~keepers_dir ~keeper_id ~expected_revision:None
+    ~now:1_000_000. ~source:{Current.kind=Current.Explicit_write; trace_id="seed"}
+    ~facts:[current_a;current_b] () |> require in
+  let config = Masc.Workspace.default_config base_path in
+  let meta = Masc_test_deps.meta_of_json_fixture
+    (`Assoc ["name",`String keeper_id;"trace_id",`String "admission-producer"]) |> require in
+  let written = Masc.Keeper_tool_memory_runtime.keeper_memory_write_with_outcome
+    ~config ~meta ~args:(`Assoc ["content",`String "A was confirmed again"]) in
+  let receipt = Yojson.Safe.from_string written.raw_output in
+  check string "actual producer returns pending outcome" "persisted_pending_admission"
+    Yojson.Safe.Util.(receipt |> member "outcome" |> to_string);
+  check bool "pending receipt has no current identity" true
+    (Yojson.Safe.Util.member "memory_id" receipt = `Null);
+  let request_id = Yojson.Safe.Util.(receipt |> member "request_id" |> to_string) in
+  let admission = match Queue.read_pending ~keepers_dir ~keeper_id |> require with
+    | Some batch -> batch | None -> fail "missing candidate" in
+  let requests = ref 0 in
+  let runner ~runtime_id:_ ~system_prompt:_ ~output_schema ~prompt =
+    incr requests;
+    let properties = Yojson.Safe.Util.member "properties" output_schema in
+    check bool "provider schema requires candidate judgments" true
+      (Yojson.Safe.Util.member "candidates" properties <> `Null);
+    check bool "actual prompt includes pending candidate identity" true
+      (Astring.String.is_infix ~affix:request_id prompt);
+    let outcome, memory_claim = if deferred then "deferred", `Null
+      else "already_represented", `String current_a.claim in
+    Ok (Yojson.Safe.to_string (`Assoc ["memory",valid_selection_json;
+      "candidates",`List [`Assoc ["request_id",`String request_id;
+        "outcome",`String outcome; "memory_claim",memory_claim;
+        "reason",`String "same event; judgment fixture"]]])) in
+  let committed = ref 0 and retained = ref 0 in
+  Runtime.run_best_effort ~write_scope:Runtime.Memory_maintenance ~admission
+    ~cli_runner:runner ~on_memory_committed:(fun () -> incr committed)
+    ~on_not_committed:(fun _ -> incr retained)
+    ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some initial.revision) (input ());
+  check int "one actual exact-lane dispatch" 1 !requests;
+  check int "only settled answer commits" (if deferred then 0 else 1) !committed;
+  check int "uncertainty is explicitly retained" (if deferred then 1 else 0) !retained;
+  Queue.acknowledge_committed ~keepers_dir ~keeper_id |> require;
+  check bool "queue consumption follows the Memory receipt" deferred
+    (Option.is_some (Queue.read_pending ~keepers_dir ~keeper_id |> require));
+  let after = match Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require with
+    | Some value -> value | None -> fail "snapshot absent" in
+  check (list string) "deferred answer has no Memory effects"
+    (if deferred then [current_a.claim;current_b.claim] else [current_a.claim])
+    (List.map (fun (f : Memory.fact) -> f.claim) after.facts)
+;;
+
 let () =
   run
     "keeper_librarian_cli_lane"
@@ -710,6 +768,10 @@ let () =
               ~cli_slot_ids:[Fixture.cli_primary_runtime] ~answer:(Ok "{}")
               ~failure:(Some (invalid_domain_failure ()))
               ~kind:Current.Exact_execution_failure ~calls:1 ())
+        ; test_case "settled explicit candidates commit through exact lane and receipt" `Quick
+            (test_explicit_admission_envelope ~deferred:false)
+        ; test_case "deferred explicit candidates leave Memory and queue intact" `Quick
+            (test_explicit_admission_envelope ~deferred:true)
         ; test_case
             "CLI prompt drift remains distinct from no CLI declaration"
             `Quick

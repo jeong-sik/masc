@@ -537,6 +537,121 @@ let test_keeper_hears_why_no_browser_is_connected () =
    word, with no way to learn that a BiDi connection would take the same
    request. The rejection names the work, the connections that serve it and
    which connected browser, if any, to retry on. *)
+(* With no listed connection that serves hover or drag, the request has the
+   server start the Keeper's BiDi connection (RFC-browser-keeper-firefox
+   §3.5), and is not sent there: its tab and point were observed elsewhere.
+   Work another connection serves asks for no start. *)
+let test_keeper_request_starts_the_bidi_connection () =
+  let workspace = Filename.temp_dir "masc-browser-surface-start-" "" in
+  let module Starter = Masc.Browser_keeper_firefox_starter in
+  let rec remove path =
+    if Sys.is_directory path then (Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path); Sys.rmdir path)
+    else Sys.remove path in
+  Fun.protect ~finally:(fun () -> Starter.install None; remove workspace) @@ fun () ->
+  Eio_main.run (fun env ->
+    Time_compat.set_clock (Eio.Stdenv.clock env);
+    Eio.Switch.run (fun sw ->
+      let module Lane = Browser_lane in
+      let module Tools = Masc.Tool_misc_browser_lane in
+      let module U = Yojson.Safe.Util in
+      let info n transport : Lane.client_info =
+        let raw = Printf.sprintf "61000000-0000-4000-8000-%012d" n in
+        let client_id = match Lane.client_id_of_string raw with
+          | Ok id -> id | Error detail -> fail detail in
+        {client_id;browser=Lane.Firefox;version="fixture";transport;engine_version="fixture"} in
+      let connect client =
+        ignore (Lane.take_command ~client_info:client ~window_sec:0.001);
+        Eio.Switch.on_release sw (fun () -> ignore (Lane.disconnect_client ~client_id:client.Lane.client_id)) in
+      let leave (client : Lane.client_info) = ignore (Lane.disconnect_client ~client_id:client.client_id) in
+      let id (client : Lane.client_info) = Lane.client_id_to_string client.client_id in
+      let viewport = `Assoc ["documentId",`String "observed";"width",`Int 800;"height",`Int 600;
+        "scrollX",`Int 0;"scrollY",`Int 0] in
+      let point = `Assoc ["x",`Float 0.5;"y",`Float 0.5] in
+      let interact ?client fields =
+        let chosen = match client with None -> [] | Some client -> ["clientId",`String (id client)] in
+        let result, phase = Tools.handle_interact_with_phase ~base_path:workspace ~tool_name:"BrowserInteract"
+          ~start_time:(Tool_timing.start ())
+          (`Assoc (["lane",`String "live";"tabId",`Int 1;"expectedUrl",`String "https://example.org/"]
+                   @ chosen @ fields)) in
+        check bool "nothing is sent" true (phase = Tool_result.Proven_pre_effect);
+        Tool_result.data result in
+      let hover = ["action",`String "hover_at";"point",point;"viewport",viewport] in
+      let click = ["action",`String "click_at";"point",point;"viewport",viewport] in
+      let asked = ref 0 in
+      let starts answer = Starter.install (Some (fun () -> incr asked; answer ())) in
+      let has key data = List.mem_assoc key U.(data |> to_assoc) in
+      (* No connection at all: the start shows one. *)
+      let bidi = info 1 Lane.Webdriver_bidi in
+      starts (fun () -> connect bidi; Starter.Attached { client = bidi; started = Starter.Firefox_and_host });
+      let data = interact hover in
+      check int "the start was asked" 1 !asked;
+      check string "the request is still refused" "no_live_client" U.(data |> member "error" |> to_string);
+      check string "with the connection the start showed" (id bidi)
+        U.(data |> member "bidiConnection" |> member "clientId" |> to_string);
+      check string "and what it started" "firefox_and_host"
+        U.(data |> member "bidiConnection" |> member "started" |> to_string);
+      let retry = U.(data |> member "retry" |> to_string) in
+      check bool "a retry from that connection's own tabs" true (String_util.contains_substring retry "list its tabs");
+      check bool "that says what was started" true
+        (String_util.contains_substring retry "started this workspace's Keeper Firefox and its BiDi host");
+      check (list string) "which is listed" [id bidi]
+        U.(data |> member "clients" |> to_list |> List.map (fun client -> client |> member "clientId" |> to_string));
+      leave bidi;
+      (* Work an extension serves asks for no start, even with no connection. *)
+      let data = interact click in
+      check string "refused for want of any connection" "no_live_client" U.(data |> member "error" |> to_string);
+      check int "with no start asked" 1 !asked;
+      (* An extension only: the start is asked, and says why it showed none. *)
+      let extension = info 2 Lane.Web_extension in
+      connect extension;
+      starts (fun () -> Starter.Not_attached (Starter.Start_failed "a reason the server gave"));
+      let data = interact ~client:extension hover in
+      check int "the start was asked again" 2 !asked;
+      check string "refused for its transport" "live_transport_unsupported" U.(data |> member "error" |> to_string);
+      check (pair string string) "with why no connection was shown, and of which kind"
+        ("start_failed", "a reason the server gave")
+        U.(data |> member "bidiStartFailed" |> member "kind" |> to_string,
+           data |> member "bidiStartFailed" |> member "message" |> to_string);
+      check bool "a retry tries again" true
+        (String_util.contains_substring U.(data |> member "retry" |> to_string) "A retry tries again");
+      check bool "and no connection named" false (has "bidiConnection" data);
+      starts (fun () -> Starter.Not_attached (Starter.Not_listed_in_time "not yet"));
+      let data = interact ~client:extension hover in
+      check bool "a connection not listed in time may be by a later retry" true
+        (String_util.contains_substring U.(data |> member "retry" |> to_string) "after a short wait");
+      starts (fun () -> Starter.Not_attached (Starter.Operator_needed "install the lane"));
+      let data = interact ~client:extension hover in
+      check string "the operator's part" "operator_needed"
+        U.(data |> member "bidiStartFailed" |> member "kind" |> to_string);
+      check bool "keeps the operator's remedy as the retry" true
+        (String_util.contains_substring U.(data |> member "retry" |> to_string) "docs/design/browser-bidi-live-host.md");
+      check int "each asked" 4 !asked;
+      (* A listed BiDi connection serves the work: the retry goes there. *)
+      let listed = info 4 Lane.Webdriver_bidi in
+      connect listed;
+      let data = interact ~client:extension hover in
+      check int "no start while a BiDi connection is listed" 4 !asked;
+      check bool "and none named" false (has "bidiConnection" data || has "bidiStartFailed" data);
+      (* Several to choose from, one of which serves it: the choice is the remedy. *)
+      let other = info 3 Lane.Web_extension in
+      connect other;
+      let data = interact hover in
+      check string "a choice is the remedy" "ambiguous_browser_clients" U.(data |> member "error" |> to_string);
+      check int "with a serving one among them, no start" 4 !asked;
+      leave listed;
+      (* Several, none of which serves it: a choice cannot help, so a start is asked. *)
+      starts (fun () -> Starter.Not_attached (Starter.Start_failed "none here"));
+      let data = interact hover in
+      check string "still the choice's refusal" "ambiguous_browser_clients" U.(data |> member "error" |> to_string);
+      check int "with none serving, a start" 5 !asked;
+      check bool "and why it showed none" true (has "bidiStartFailed" data);
+      (* A server where none is asked for leaves the answer as it was. *)
+      starts (fun () -> Starter.Not_asked_for);
+      let data = interact ~client:extension hover in
+      check bool "no start fields" false (has "bidiConnection" data || has "bidiStartFailed" data);
+      check bool "and the operator's remedy stays" true
+        (String_util.contains_substring U.(data |> member "retry" |> to_string) "docs/design/browser-bidi-live-host.md")))
+
 let test_keeper_hears_which_connection_serves_the_work () =
   (* The answer reads the BiDi host's record under the workspace, so this
      case has a workspace of its own that nothing else writes to. *)
@@ -968,4 +1083,5 @@ let () = run "browser surface" ["behavior",[
   test_case "Keeper hears why no browser is connected" `Quick test_keeper_hears_why_no_browser_is_connected;
   test_case "Keeper hears why the BiDi host is gone" `Quick test_keeper_hears_why_the_bidi_host_is_gone;
   test_case "Keeper hears which connection serves the work" `Quick test_keeper_hears_which_connection_serves_the_work;
+  test_case "Keeper's request starts the BiDi connection" `Quick test_keeper_request_starts_the_bidi_connection;
   test_case "live read pins client across both hops" `Quick test_live_read_pins_client_between_hops]]

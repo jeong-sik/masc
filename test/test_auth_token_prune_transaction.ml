@@ -161,14 +161,24 @@ let test_read_failure_aborts_before_any_delete () =
     (Sys.file_exists (Auth.credential_file base_path "aaa"))
 
 (* A real FIFO with no writer made the old prune block in open while holding
-   the credential transaction. Isolate the entire product call in a child;
-   the parent deadline guards CI even when the regression is reintroduced. *)
+   the credential transaction. Guard each prune/publisher call in a child;
+   durable fixture setup and cleanup are outside those hang watchdogs. *)
 let test_fifo_refusal_releases_publishers () =
   let base_path = Filename.temp_dir "token-prune-fifo-" "" in
-  let finished_read, finished_write = Unix.pipe ~cloexec:true () in
   match Unix.fork () with
   | 0 ->
-      Unix.close finished_read;
+      let guarded label f =
+        let previous = Sys.signal Sys.sigalrm
+            (Sys.Signal_handle (fun _ ->
+               prerr_endline ("FIFO scenario blocked during " ^ label);
+               Unix._exit 3)) in
+        ignore (Unix.alarm 10 : int);
+        Fun.protect
+          ~finally:(fun () ->
+            ignore (Unix.alarm 0 : int);
+            Sys.set_signal Sys.sigalrm previous)
+          f
+      in
       (try
          with_workspace_at base_path (fun base_path ->
            let _expired_token = make_expired base_path "aaa" in
@@ -176,47 +186,38 @@ let test_fifo_refusal_releases_publishers () =
            let before = In_channel.with_open_bin canary In_channel.input_all in
            let fifo = Auth.credential_file base_path "zzz" in
            Unix.mkfifo fifo 0o600;
-           List.iter (fun mode ->
-             match prune ~mode base_path with
+           List.iter (fun (label, mode) ->
+             match guarded label (fun () -> prune ~mode base_path) with
              | Error _ -> ()
              | Ok _ -> fail "a FIFO credential must refuse the entire plan")
-             [Prune.Preview; Prune.Retire];
+             ["preview", Prune.Preview; "retire", Prune.Retire];
            check bool "the FIFO is retained" true ((Unix.lstat fifo).st_kind = Unix.S_FIFO);
            check string "no earlier candidate was deleted" before
              (In_channel.with_open_bin canary In_channel.input_all);
            Unix.unlink fifo;
-           let token, _ = mint base_path "publisher" Masc_domain.Admin in
+           let token, _ = guarded "following publisher" (fun () ->
+             mint base_path "publisher" Masc_domain.Admin) in
            check_live base_path token;
-           (match auth_ok (prune base_path) with
+           (match auth_ok (guarded "regular retirement" (fun () -> prune base_path)) with
             | [{Prune.agent_name="aaa"; reason=Prune.Expired; outcome=Prune.Retired}] -> ()
             | _ -> fail "regular credential reads must still permit retirement"));
-         ignore (Unix.write_substring finished_write "x" 0 1 : int);
-         Unix.close finished_write;
          Unix._exit 0
        with
        | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
        | error ->
            prerr_endline (Printexc.to_string error);
-           Unix.close finished_write;
            Unix._exit 2)
   | child ->
-      Unix.close finished_write;
       let reaped = ref false in
       Fun.protect
         ~finally:(fun () ->
-          Unix.close finished_read;
           if not !reaped then (
             (try Unix.kill child Sys.sigkill with Unix.Unix_error (Unix.ESRCH, _, _) -> ());
             ignore (waitpid child));
           Fs_compat.remove_tree base_path)
         (fun () ->
-          let ready, _, _ = Unix.select [finished_read] [] [] 10.0 in
-          if ready = [] then fail "FIFO prune or the following publisher blocked";
-          let completed = Bytes.create 1 in
-          let bytes = Unix.read finished_read completed 0 1 in
           let _, status = waitpid child in
           reaped := true;
-          check int "child completed its actual prune and publisher controls" 1 bytes;
           match status with
           | Unix.WEXITED 0 -> ()
           | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->

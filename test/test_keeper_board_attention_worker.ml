@@ -1234,6 +1234,102 @@ let test_reset_during_wake_error_suppresses_old_generation_rearm () =
     (List.length !tasks)
 ;;
 
+(* #41422: the drain entry prunes consumed candidate rows the replay gate
+   cannot re-mint, before roots are ensured. A prune failure must never stop
+   judgment work, so an injected failure would only be logged and the wake
+   would proceed; this fixture exercises the successful prune. *)
+let test_drain_prunes_consumed_rows_behind_the_board_cursor () =
+  with_temp_base "board-attention-worker-prune-on-drain" @@ fun base_path ->
+  let consumed_status =
+    A.Consumed
+      { judgment = judgment (provenance "prune") J.Not_relevant
+      ; delivery = A.Not_relevant
+      ; consumed_at = 11.0
+      }
+  in
+  let consumed_row =
+    let row = candidate ~id:"candidate-prune" ~recorded_at:1.0 () in
+    { row with
+      signal = { row.signal with updated_at = Some 10.0 }
+    ; status = consumed_status
+    }
+  in
+  let prepare candidate = Ok candidate in
+  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+    Alcotest.fail "a ledger with only consumed rows dispatched a judgment"
+  in
+  (* Without a cursor the replay gate could re-mint the signal at any time,
+     so the drain keeps the row and runs out of work without dispatching. *)
+  ignore (record ~base_path consumed_row : A.candidate);
+  (match
+     ok
+       "drain without a cursor keeps the consumed row"
+       (process ~base_path ~prepare ~execute)
+   with
+   | W.Idle -> ()
+   | W.Contended _ | W.Rescan_later _
+   | W.Judgment_completed _ | W.Candidate_already_consumed _
+   | W.Judgment_deferred _ | W.Partition_blocked _ ->
+     Alcotest.fail "a consumed-only ledger produced partition work");
+  let kept =
+    ok "load without cursor" (A.load_candidates ~base_path ~keeper_name:"alpha")
+  in
+  Alcotest.(check bool) "no cursor keeps every row" true (kept = [ consumed_row ]);
+  (* The keeper's board cursor has passed the signal coordinate, so the
+     replay gate can never re-mint it: the same drain now removes the row. *)
+  Masc.Keeper_registry.set_board_cursor ~base_path "alpha" 50.0 (Some "cursor-post");
+  (match
+     ok
+       "drain behind the cursor prunes"
+       (process ~base_path ~prepare ~execute)
+   with
+   | W.Idle -> ()
+   | W.Contended _ | W.Rescan_later _
+   | W.Judgment_completed _ | W.Candidate_already_consumed _
+   | W.Judgment_deferred _ | W.Partition_blocked _ ->
+     Alcotest.fail "a pruned ledger produced partition work");
+  let remaining =
+    ok "load after pruned drain" (A.load_candidates ~base_path ~keeper_name:"alpha")
+  in
+  Alcotest.(check int) "the consumed row behind the cursor was pruned" 0 (List.length remaining)
+;;
+
+(* A Keeper that stays up must not keep one settled receipt per judgment until
+   its next restart. The wake after a Not_relevant judgment settled drops the
+   receipt of the now-Consumed candidate. *)
+let test_drain_drops_the_settled_receipt_of_a_consumed_candidate () =
+  with_temp_base "board-attention-worker-settled-prune-on-drain" @@ fun base_path ->
+  let discarded = record ~base_path (candidate ~id:"candidate-settled-prune" ()) in
+  let judged = ref 0 in
+  let execute ~before_dispatch ~before_advance:_ prepared =
+    incr judged;
+    let attempt = provenance ("attempt-" ^ A.(prepared.candidate_id)) in
+    ok "bind" (before_dispatch attempt);
+    Ok (judgment attempt J.Not_relevant)
+  in
+  let prepare candidate = Ok candidate in
+  (match ok "judge the discard" (process ~base_path ~prepare ~execute) with
+   | W.Judgment_completed { candidate_id; _ }
+     when String.equal candidate_id discarded.candidate_id -> ()
+   | W.Judgment_completed _ | W.Idle | W.Contended _ | W.Rescan_later _
+   | W.Candidate_already_consumed _ | W.Judgment_deferred _ | W.Partition_blocked _ ->
+     Alcotest.fail "fixture did not complete the discard's judgment");
+  (match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
+   | A.Consumed _, P.Settled _ -> ()
+   | (A.Pending _ | A.Judged _ | A.Consumed _ | A.Quarantine _), _ ->
+     Alcotest.fail "fixture did not settle the consumed candidate");
+  (match ok "next wake" (process ~base_path ~prepare ~execute) with
+   | W.Idle -> ()
+   | W.Contended _ | W.Rescan_later _ | W.Judgment_completed _
+   | W.Candidate_already_consumed _ | W.Judgment_deferred _ | W.Partition_blocked _ ->
+     Alcotest.fail "a settled-only ledger produced partition work");
+  Alcotest.(check int) "the candidate was judged once" 1 !judged;
+  Alcotest.(check int)
+    "the consumed candidate's settled receipt is gone"
+    0
+    (List.length (ok "load partitions" (P.load ~base_path ~keeper_name:"alpha")))
+;;
+
 let test_execution_error_preserves_bound_progress_without_hot_retry () =
   with_temp_base "board-attention-worker-execution-error" @@ fun base_path ->
   let persisted = record ~base_path (candidate ()) in
@@ -1623,10 +1719,16 @@ let test_a_spent_lane_defers_and_the_next_drain_judges_the_candidate () =
    | W.Drained { judgments = 1; steps = 1 } -> ()
    | W.Drained _ | W.Lane_deferred _ | W.Retry_later _ ->
      Alcotest.fail "the next drain did not judge the deferred candidate");
-  match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
-  | A.Consumed { delivery = A.Not_relevant; _ }, P.Settled _ -> ()
-  | (A.Pending _ | A.Judged _ | A.Consumed _ | A.Quarantine _), _ ->
-    Alcotest.fail "the deferred candidate was not judged and consumed"
+  (match (load_one_candidate ~base_path).status with
+   | A.Consumed { delivery = A.Not_relevant; _ } -> ()
+   | A.Pending _ | A.Judged _ | A.Consumed _ | A.Quarantine _ ->
+     Alcotest.fail "the deferred candidate was not judged and consumed");
+  (* The drain's next wake drops the settled receipt of the consumed
+     candidate, so no partition is left behind. *)
+  Alcotest.(check int)
+    "the consumed candidate's settled receipt is gone"
+    0
+    (List.length (ok "load partitions" (P.load ~base_path ~keeper_name:"alpha")))
 ;;
 
 (* A 402 on the last HTTP slot of a lane that declares no CLI slot. AGENT_CORE
@@ -1742,9 +1844,12 @@ let test_a_root_that_needs_no_lane_is_not_held_behind_a_spent_one () =
     |> List.find_opt (fun (partition : P.t) -> String.equal partition.candidate_id candidate_id)
     |> Option.map (fun (partition : P.t) -> partition.state)
   in
+  (* Settled on the first step; the second step's wake then drops the
+     receipt because its candidate is Consumed. Either way it did not wait. *)
   (match state_of consumed.candidate_id with
-   | Some (P.Settled _) -> ()
-   | Some _ | None -> Alcotest.fail "the lane-free root waited behind the spent one");
+   | Some (P.Settled _) | None -> ()
+   | Some (P.Ready | P.Running _ | P.Completed _ | P.Abandoned _ | P.Blocked _) ->
+     Alcotest.fail "the lane-free root waited behind the spent one");
   match state_of waiting.candidate_id with
   | Some P.Ready -> ()
   | Some _ | None -> Alcotest.fail "the spent root is not Ready"
@@ -4010,6 +4115,14 @@ let () =
             "execution error preserves bound progress"
             `Quick
             test_execution_error_preserves_bound_progress_without_hot_retry
+        ; Alcotest.test_case
+            "drain prunes consumed rows behind the board cursor"
+            `Quick
+            test_drain_prunes_consumed_rows_behind_the_board_cursor
+        ; Alcotest.test_case
+            "drain drops the settled receipt of a consumed candidate"
+            `Quick
+            test_drain_drops_the_settled_receipt_of_a_consumed_candidate
         ; Alcotest.test_case
             "bookkeeping failure keeps its cause and the flow sentence"
             `Quick

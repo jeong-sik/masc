@@ -71,7 +71,43 @@ terminal palettes supply the neutral sidebar band.
 These are presentation roles. Existing keyboard bindings, actor attribution,
 mutation confirmation, data ownership and paging semantics remain authoritative.
 
+## Working footer
+
+Working surfaces show their controls, action outcomes and actionable warnings.
+They do not repeat other Keepers' activity or passive connection diagnostics at
+the bottom of each screen. System's identity row contains the server version,
+commit, port, age and workspace paths. Workspace/build disagreements and armed
+or running operator actions remain global warnings.
+
+The [consistency ledger](CONSISTENCY-PROGRESS.md) tracks the remaining surfaces
+and separates source changes from observed executable behavior.
+
+## Keeper list and Info
+
+The roster leads with the Keeper name, followed by its typed health and turn
+age. Its title keeps connection identity; search belongs to the working footer.
+The repeated Health tally, wall clock, table rules and selected OPERATIONS
+footer are removed. Fleet capacity, stale or incomplete observations and
+configuration failures retain their own readings above the list.
+
+Info owns lifecycle, turn phase, idle age and last outcome as separate Runtime
+Stats fields, beside the existing runtime target. These fields follow the same
+entry, refresh and retry lifecycle as their view. A failed refresh marks a
+retained reading stale. Muted labels give the values the foreground; long labels
+and values wrap into counted rows instead of being shortened to fit a cell.
+
 ## Implementation scope
+
+Dashboard begins with decisions and continuation destinations. Opening notices
+and the last decision receipt stay ahead of the actions they affect; passive
+health, completed-work and Candle summaries follow using spare rows. The same
+typed selection and cursor window determine which requests remain visible.
+Candle uses either full rows or one compact reading, without repeating both.
+
+Work uses the same wrapped Goal/Backlog summary rows at every width. Extra width
+does not add framed statistics cards. The baseline/current snapshot timestamps
+and change since baseline remain together; they are measured source times,
+distinct from the wall clock removed from Dashboard, Work and Task titles.
 
 `sidebar_line`, `sidebar_rule` and `sidebar_heading` in
 `bin/masc_tui_render_prim.ml` are now shared by the Keeper rail and

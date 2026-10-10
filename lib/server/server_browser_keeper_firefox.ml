@@ -422,8 +422,8 @@ let firefox_for ~sw ~net ~clock ~ready_timeout_s ~base_path ~held (config : Brow
          "browser-lane: port %d answers, and the last BiDi host ended with a session held in the \
           Firefox there, which refuses the next host while it holds it. That Firefox is not \
           restarted, since %s. A host is started for it all the same; if that host is refused too, \
-          close that Firefox."
-         config.port why;
+          the operator stops what holds the port, which `lsof -nP -iTCP:%d -sTCP:LISTEN` names."
+         config.port why config.port;
        Ready None
      | Ok entry -> restarted ~sw ~net ~clock ~ready_timeout_s ~base_path config entry)
   | Unknown detail, (Some _ | None) -> Undetermined detail

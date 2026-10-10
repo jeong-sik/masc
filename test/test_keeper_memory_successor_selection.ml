@@ -83,9 +83,73 @@ let test_negative_judgment_cannot_survive_changed_successor () =
     ~current:changed result in
   check int "second publication check does not duplicate unresolved evidence" 1
     (List.length checked_again.unresolved)
+(* An endpoint that accepts the judgment request and never answers. The turn
+   clock passed to [run] must end that request at the HTTP request timeout;
+   without it the search never returns. The mock clock is moved past any
+   request timeout until the call returns, and a real-time guard fails the
+   test instead of hanging it. *)
+let far_past_any_request_timeout = 1e6
+let real_time_guard_seconds = 10.0
+
+let test_a_stalled_endpoint_ends_at_the_turn_clock () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  let net = Eio.Stdenv.net env and real_clock = Eio.Stdenv.clock env in
+  Eio_context.with_test_env ~net ~clock:real_clock ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw @@ fun () ->
+  Masc_http_client.with_scoped_pool ~sw ~env @@ fun () ->
+  let base_path = Filename.temp_dir "successor-stalled-endpoint-" "" in
+  Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree base_path);
+  let socket = Eio.Net.listen net ~sw ~backlog:4 ~reuse_addr:true
+    (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0)) in
+  let port = match Eio.Net.listening_addr socket with
+    | `Tcp (_, port) -> port | _ -> fail "stalled endpoint has no TCP port" in
+  let accepted, accept = Eio.Promise.create () in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    let _held = Eio.Net.accept ~sw socket in
+    Eio.Promise.resolve accept ();
+    Eio.Fiber.await_cancel ());
+  let key = "MASC_TEST_SUCCESSOR_STALLED_KEY" in
+  Masc_test_deps.with_process_env key (Some "synthetic-stalled-key") @@ fun () ->
+  Masc_test_deps.with_typesafeai_policy
+    {Runtime_schema.default_typesafeai with lane_enabled=true; absorb_gate=false; excluded_keepers=[];
+     destinations=({Runtime_schema.endpoint=Printf.sprintf "http://127.0.0.1:%d/evaluate" port;
+                    model="jev-fixture"; api_key_env=key},[])} @@ fun () ->
+  let config = Masc.Workspace.default_config base_path in
+  let keeper_id = "successor-stalled-keeper" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let clock = Eio_mock.Clock.make () in
+  let judged = Eio.Fiber.fork_promise ~sw (fun () ->
+    Selection.run ~clock:(Some clock) ~config ~keepers_dir ~keeper_id ~query:"R-015"
+      ~snapshot:None [candidate]) in
+  Eio.Time.with_timeout_exn real_clock real_time_guard_seconds (fun () ->
+    Eio.Promise.await accepted;
+    (* The request timeout's watcher registers its sleep at an unknown point
+       after the request starts; keep moving the clock until it has fired. *)
+    let rec push () =
+      if not (Eio.Promise.is_resolved judged) then begin
+        Eio_mock.Clock.set_time clock (Eio.Time.now clock +. far_past_any_request_timeout);
+        Eio.Time.sleep real_clock 0.05;
+        push ()
+      end in
+    push ());
+  (match Eio.Promise.await_exn judged with
+   | {Selection.selected=[]; unresolved=[_, _]} -> ()
+   | _ -> fail "a stalled judgment must leave its candidate unresolved");
+  let journal = Filename.concat (Filename.concat (Masc.Workspace.keepers_runtime_dir config) keeper_id)
+    "memory-selection-evaluations.jsonl" in
+  let statuses = match Fs_compat.load_file_opt journal with
+    | None -> []
+    | Some text -> String.split_on_char '\n' text
+      |> List.filter (fun line -> String.trim line <> "")
+      |> List.map (fun line -> Yojson.Safe.(from_string line |> Util.member "status" |> Util.to_string)) in
+  check (list string) "the stalled request ended as a provider failure"
+    ["started"; "provider_failed"]
+    (List.filter (fun status -> List.mem status ["started"; "provider_failed"; "response_received"; "cancelled"])
+       statuses)
+
 let () = run "successor scope selection"
   ["judgment",[test_case "corrected truth preserves identity not old wording" `Quick test_corrected_truth_uses_current_target;
     test_case "different scope and uncertainty remain distinct" `Quick test_other_scope_and_uncertainty_are_distinct;
     test_case "one failed assessment does not erase another" `Quick test_one_provider_failure_preserves_other_judgments;
     test_case "extra answers cannot publish" `Quick test_extra_answers_never_publish;
-    test_case "negative decision becomes unresolved when successor changes" `Quick test_negative_judgment_cannot_survive_changed_successor]]
+    test_case "negative decision becomes unresolved when successor changes" `Quick test_negative_judgment_cannot_survive_changed_successor;
+    test_case "a stalled endpoint ends at the turn clock" `Quick test_a_stalled_endpoint_ends_at_the_turn_clock]]

@@ -28,6 +28,7 @@ val keeper_memory_search_json
 
 val keeper_memory_search_with_outcome
   :  ?turn_ref:Ids.Turn_ref.t
+  -> ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> ctx_work:Keeper_types.working_context

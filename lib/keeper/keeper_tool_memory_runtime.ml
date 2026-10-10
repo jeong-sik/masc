@@ -308,7 +308,7 @@ let search_durable_facts
            ])) )
 ;;
 
-let search_current_with_successors ~config ~keepers_dir ~(meta : keeper_meta) ~query ~limit =
+let search_current_with_successors ~clock ~config ~keepers_dir ~(meta : keeper_meta) ~query ~limit =
   let module Current = Keeper_memory_os_current in
   let module Selector = Keeper_memory_successor_selection in
   match Domain_pool_ref.submit_io_or_inline (fun () ->
@@ -319,7 +319,7 @@ let search_current_with_successors ~config ~keepers_dir ~(meta : keeper_meta) ~q
       let whole,fragments = answering ~claim_of ~query rows in whole @ fragments in
     let candidates = relevant (fun (candidate : Current.successor_recall_candidate) ->
       candidate.binding.source_fact.claim) state.successor_candidates in
-    let judged = Selector.run ~config ~keepers_dir ~keeper_id:meta.name ~query
+    let judged = Selector.run ~clock ~config ~keepers_dir ~keeper_id:meta.name ~query
       ~snapshot:state.snapshot candidates in
     let fresh = if candidates=[] then Ok state else
       Domain_pool_ref.submit_io_or_inline (fun () ->
@@ -865,6 +865,7 @@ let current_page_cursor ~revision ~offset =
 
 let keeper_memory_search_with_outcome
       ?turn_ref
+      ?clock
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(ctx_work : working_context)
@@ -997,7 +998,7 @@ let keeper_memory_search_with_outcome
             ; "guidance", `String "Query-matching stored claims could not be verified and were withheld. Retry relevant retrieval before drawing a negative conclusion; no claim body is supplied."
             ] ] in
     let current_stores cursor =
-      match search_current_with_successors ~config ~keepers_dir ~meta ~query ~limit:None with
+      match search_current_with_successors ~clock ~config ~keepers_dir ~meta ~query ~limit:None with
       | Error _ as error -> error
       | Ok (_facts, matches, fact_total, deferred_sources, successor_fields, successor_incomplete, corpus_revision) ->
         (* Rank the complete current answer, successors included, before
@@ -1050,7 +1051,7 @@ let keeper_memory_search_with_outcome
        never silently widens into absorbed history. Only ordinary current facts are
        retrievals (RFC-0418); an absorbed row leaves no Retrieved event. *)
     let all_stores () =
-      match search_current_with_successors ~config ~keepers_dir ~meta ~query ~limit:(Some limit) with
+      match search_current_with_successors ~clock ~config ~keepers_dir ~meta ~query ~limit:(Some limit) with
       | Error _ as error -> error
       | Ok (facts, fact_matches, fact_total, deferred_sources, successor_fields, successor_incomplete, _corpus_revision) ->
         (

@@ -29,6 +29,10 @@ val revalidate : snapshot:Keeper_memory_os_current.t option ->
   current:Keeper_memory_os_current.successor_recall -> selection -> selection
 (** Revalidate all assessed witnesses, including negative decisions. A changed
     snapshot or witness becomes unresolved exactly once. No I/O is performed. *)
-val run : config:Workspace.config -> keepers_dir:string -> keeper_id:string ->
+val run : clock:[> float Eio.Time.clock_ty ] Eio.Resource.t option ->
+  config:Workspace.config -> keepers_dir:string -> keeper_id:string ->
   query:string -> snapshot:Keeper_memory_os_current.t option ->
   Keeper_memory_os_current.successor_recall_candidate list -> selection
+(** [clock] bounds each judgment request with the HTTP client's request
+    timeout. Without one, an endpoint that accepts the request and never
+    answers holds the caller with no time limit. *)

@@ -67,7 +67,7 @@ let revalidate ~snapshot ~candidates ~(current : Current.successor_recall) judge
     unresolved=List.filter (fun (candidate,_) -> not (List.mem candidate changed)) judged.unresolved
       @ List.map (fun candidate -> candidate,Evidence_changed) changed }
 
-let run ~config ~keepers_dir ~keeper_id ~query ~snapshot candidates =
+let run ~clock ~config ~keepers_dir ~keeper_id ~query ~snapshot candidates =
   let reject issue = {selected=[];unresolved=List.map (fun candidate -> candidate,issue) candidates} in
   if candidates=[] then {selected=[];unresolved=[]} else
   let destinations = if Typesafeai_config.is_excluded ~keeper_id
@@ -76,7 +76,7 @@ let run ~config ~keepers_dir ~keeper_id ~query ~snapshot candidates =
   | Error reason -> reject (Route_unavailable reason)
   | Ok destinations ->
     let io = Io.create ~config ~keeper_id ~destinations in
-    let judged = select_with_evaluate ~evaluate:(Io.evaluate io) ~query candidates in
+    let judged = select_with_evaluate ~evaluate:(Io.evaluate ?clock io) ~query candidates in
     let checked = match Current.read_successor_recall_for_keepers_dir ~keepers_dir ~keeper_id with
       | Error detail -> reject (Evidence_read_failed detail)
       | Ok current -> revalidate ~snapshot ~candidates ~current judged in

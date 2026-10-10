@@ -7,8 +7,8 @@ This campaign covers tracked code files with at least 2,000 lines. The initial
 inventory contains 171 candidates: 75 production source/style/interface files,
 90 tests, 3 tooling files and 3 evidence scripts. `inventory.json` records each
 baseline path and its current audit state. A line count selects candidates; it
-is not a defect verdict or a new build gate. Twenty-three production candidates received
-bounded changes; their other responsibilities remain pending. The other 52
+is not a defect verdict or a new build gate. Twenty-four production candidates received
+bounded changes; their other responsibilities remain pending. The other 51
 production candidates still require semantic review. All 171 candidates remain
 in the campaign until their responsibilities and necessary repairs are assessed.
 
@@ -106,6 +106,10 @@ The Core check requires an approved leader-selected candidate under the current
 execution protocol; no selection receipt or approval is fabricated here.
 
 ## Next work
+
+Skill activation immutable data and pure summary ownership:
+[#42089](https://github.com/jeong-sik/masc/pull/42089),
+[skill-activation-summary/README.md](skill-activation-summary/README.md).
 
 The follow-up removes ignored summary helper inputs while retaining the actual
 storage read limit: [#42087](https://github.com/jeong-sik/masc/pull/42087),

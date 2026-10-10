@@ -101,7 +101,8 @@ type entry_class =
   | Finalizable
   | Residual
 
-let classify_entry (entry : Keeper_approval_queue_rules_types.pending_approval)
+let classify_entry ~is_live
+    (entry : Keeper_approval_queue_rules_types.pending_approval)
     =
   let module Q = Keeper_approval_queue_rules_types in
   let exact_proof_of_completion = function
@@ -123,23 +124,34 @@ let classify_entry (entry : Keeper_approval_queue_rules_types.pending_approval)
        | Q.Exact_bound _ ) ->
        Residual)
   | Q.Summary_attempt_in_flight ->
-    if exact_proof_of_completion entry.exact_attempt
+    (* The judgment call itself: [bind] writes the exact attempt as
+       [Exact_dispatch_uncertain], which is no proof of completion, for the
+       whole provider call. The row is the live finalizer's own work exactly
+       while this process holds the admission for it; the same row without
+       that admission is what a restart strands, and only then is it a
+       residual. *)
+    if exact_proof_of_completion entry.exact_attempt || is_live entry
     then Finalizable
     else Residual
+  | Q.Summary_attempt_pre_worker_unavailable
+      { reason_code = Q.Summary_pre_worker_start_reserved; _ } ->
+    (* A start reservation is held before any exact attempt is bound, so the
+       codec only admits it over [Exact_unbound]. A live reservation is the
+       finalizer's claim; an orphaned one is reclaimed by boot recovery
+       without an operator. Both are [Pending_start]. *)
+    (match entry.exact_attempt with
+     | Q.Exact_unbound -> Pending_start
+     | Q.Exact_bound _ -> Residual)
   | ( Q.Summary_attempt_identity_unbound
     | Q.Summary_attempt_persistence_uncertain
-    | Q.Summary_attempt_pre_worker_unavailable _ ) ->
+    | Q.Summary_attempt_pre_worker_unavailable
+        { reason_code =
+            ( Q.Summary_pre_worker_auto_judge_unavailable
+            | Q.Summary_pre_worker_mode_state_invalid )
+        ; _
+        } ) ->
     if exact_proof_of_completion entry.exact_attempt
-    then
-      (* A held start reservation is the finalizer's own claim on this row,
-         not an orphan: live processes count it with [Pending_start], so
-         the projection does too. No reservation — a restart would leave
-         the row exactly here. *)
-      (match entry.summary_attempt_disposition with
-       | Q.Summary_attempt_pre_worker_unavailable
-           { reason_code = Q.Summary_pre_worker_start_reserved; _ } ->
-         Pending_start
-       | _ -> Finalizable)
+    then Finalizable
     else Residual
   | Q.Summary_attempt_settled ->
     if exact_proof_of_completion entry.exact_attempt
@@ -156,8 +168,8 @@ type counts =
 
 let zero_counts = { not_requested = 0; pending = 0; pending_start = 0; finalizable = 0; residual = 0 }
 
-let fold_entry counts entry =
-  match classify_entry entry with
+let fold_entry ~is_live counts entry =
+  match classify_entry ~is_live entry with
   | Not_requested -> { counts with not_requested = counts.not_requested + 1 }
   | Pending -> { counts with pending = counts.pending + 1 }
   | Pending_start -> { counts with pending_start = counts.pending_start + 1 }
@@ -166,8 +178,8 @@ let fold_entry counts entry =
 
 let section_fields ~counts_complete ~status ~status_reasons
     ~operator_action_required ~operator_action_reasons ~waits ~entries
-    ~answered_total ~timed_out_total ~late_uncertain ~now =
-  let counts = List.fold_left fold_entry zero_counts entries in
+    ~answered_total ~timed_out_total ~late_uncertain ~is_live ~now =
+  let counts = List.fold_left (fold_entry ~is_live) zero_counts entries in
   let oldest =
     match
       List.map candidate_of_wait waits @ List.map candidate_of_entry entries
@@ -205,22 +217,34 @@ let section_fields ~counts_complete ~status ~status_reasons
    threshold for a live wait (age over timeout_sec * 2) cannot fire: a wait
    that outlives its budget is no longer in the registry at all, so live
    waits never drive attention — the durable residual does. *)
-let aggregate ~now ~waits ~entries ~answered_total ~timed_out_total
-    ~late_uncertain =
-  let counts = List.fold_left fold_entry zero_counts entries in
+let aggregate ~now ~is_live ~waits ~entries ~unread_entries ~answered_total
+    ~timed_out_total ~late_uncertain =
+  let counts = List.fold_left (fold_entry ~is_live) zero_counts entries in
+  (* Each reason is an operator-only condition: a residual row, a consumed
+     late answer whose delivery is unknown, and rows the queue could not
+     read (their counts are a lower bound, not a total). *)
   let attention =
-    if counts.residual > 0 then
-      [ Printf.sprintf "exact_bound_residual=%d" counts.residual ]
+    (if counts.residual > 0 then
+       [ Printf.sprintf "exact_bound_residual=%d" counts.residual ]
+     else [])
+    @ (if late_uncertain > 0 then
+         [ Printf.sprintf "late_uncertain=%d" late_uncertain ]
+       else [])
+    @
+    if unread_entries > 0 then
+      [ Printf.sprintf "pending_rows_unreadable=%d" unread_entries ]
     else []
   in
   let status = if attention <> [] then "warning" else "ok" in
-  section_fields ~counts_complete:true ~status ~status_reasons:attention
+  section_fields ~counts_complete:(unread_entries = 0) ~status
+    ~status_reasons:attention
     ~operator_action_required:(attention <> [])
     ~operator_action_reasons:attention
-    ~waits ~entries ~answered_total ~timed_out_total ~late_uncertain ~now
+    ~waits ~entries ~answered_total ~timed_out_total ~late_uncertain ~is_live
+    ~now
 
-let no_workspace_json ~waits ~answered_total ~timed_out_total ~late_uncertain
-    () =
+let no_workspace_json ~now ~waits ~answered_total ~timed_out_total
+    ~late_uncertain () =
   (* No workspace state: the live-wait side stays real, the durable side is
      not zero but unread, and snapshot_not_ready is the grade that says so
      without demanding an operator. *)
@@ -228,7 +252,8 @@ let no_workspace_json ~waits ~answered_total ~timed_out_total ~late_uncertain
     ~status_reasons:[ "workspace_state_not_ready" ]
     ~operator_action_required:false ~operator_action_reasons:[]
     ~waits ~entries:[] ~answered_total ~timed_out_total ~late_uncertain
-    ~now:0.0
+    ~is_live:(fun _ -> false)
+    ~now
 
 let queue_unreadable_json ~error =
   (* An unread authority is not an empty gate. Reporting counts here would
@@ -254,4 +279,19 @@ let queue_unreadable_json ~error =
     ; ( "status_reasons"
       , `List
           [ `String (Printf.sprintf "approval_queue_unreadable: %s" error) ] )
+    ]
+
+let late_journal_unavailable_json ~error =
+  (* The late-approval journal fences every late-answer write while it is
+     unreadable, so an operator must act; a bare status would drop out of
+     the rollup's operator_action_reasons. *)
+  `Assoc
+    [ ("schema", `String schema)
+    ; ("status", `String "unavailable")
+    ; ("counts_complete", `Bool false)
+    ; ("operator_action_required", `Bool true)
+    ; ("operator_action_reasons", `List [ `String "late_approval_journal_unavailable" ])
+    ; ( "status_reasons"
+      , `List
+          [ `String (Printf.sprintf "late_approval_journal_unavailable: %s" error) ] )
     ]

@@ -288,10 +288,23 @@ let rearm_json ~base_path ~requested_by ~approval_id ~input_hash ~sequence
     Error (`Not_found, "pending approval not found: " ^ approval_id)
   | Error (Retry_row_lookup_failed _) ->
     Error (`Unavailable, "approval queue is unavailable")
+  | Error (Retry_drain_failed detail) ->
+    (* The CAS has already committed: the latch is consumed and the Gate
+       durably re-blocked the row as auto_judge_unavailable. Answering 503
+       would invite a repeat that can only hit a 409 on a row nothing
+       sweeps again, so the answer names the state and the way forward. *)
+    Error
+      ( `Rearmed_start_blocked
+      , Printf.sprintf
+          "the rearm was recorded but the summary could not start (%s); \
+           the restart latch is consumed and the row is blocked as \
+           auto_judge_unavailable. Resume it with POST \
+           /api/v1/dashboard/gate/retry; repeating this rearm will answer \
+           409."
+          detail )
   | Error
       (( Retry_mode_unreadable _
-       | Retry_cas_rejected _
-       | Retry_drain_failed _ ) as error) ->
+       | Retry_cas_rejected _ ) as error) ->
     Error
       ( `Unavailable
       , Keeper_gate.auto_judge_retry_error_to_string error )
@@ -368,6 +381,9 @@ let handle_post state ~actor ~approval_id request reqd body =
             | Ok json -> respond request reqd json
             | Error (`Status_conflict, detail) ->
               respond_error request reqd ~status:`Conflict ~code:"status_conflict" detail
+            | Error (`Rearmed_start_blocked, detail) ->
+              respond_error request reqd ~status:`Conflict
+                ~code:"rearmed_start_blocked" detail
             | Error (`Not_found, detail) ->
               respond_error request reqd ~status:`Not_found
                 ~code:"approval_not_found" detail

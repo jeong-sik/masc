@@ -313,6 +313,12 @@ val decide_external_service :
 val resume_persisted_auto_judges :
   base_path:string -> auto_judge_resume_report
 
+val auto_judge_entry_claimed :
+  Keeper_approval_queue_rules_types.pending_approval -> bool
+(** Whether this process holds the live in-memory admission for the entry.
+    The set starts empty with the process, so an in-flight row without an
+    admission is one a restart stranded. *)
+
 val retry_blocked_auto_judge :
   base_path:string ->
   requested_by:string ->

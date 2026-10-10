@@ -24,8 +24,10 @@ val schema : string
 
 val aggregate :
   now:float ->
+  is_live:(Keeper_approval_queue_rules_types.pending_approval -> bool) ->
   waits:Keeper_tool_approval_registry.pending list ->
   entries:Keeper_approval_queue_rules_types.pending_approval list ->
+  unread_entries:int ->
   answered_total:int ->
   timed_out_total:int ->
   late_uncertain:int ->
@@ -36,10 +38,20 @@ val aggregate :
     serves it; [entries] is the durable queue read for the asking
     workspace. [answered_total]/[timed_out_total] are the registry's
     process-lifetime outcome counters (design D3's measurement source).
-    [late_uncertain] counts consume-without-deliver records the approval
-    journal (design D2) will surface; the journal has no producer yet, so
-    today's caller passes 0 — the field exists so D2 wires a count, not a
-    new shape.
+    [late_uncertain] counts the asking workspace's consume-without-deliver
+    records in the late-approval journal (design D2). The outcome of those
+    calls is unknown, so a non-zero count is an operator-attention reason:
+    status [warning] with [operator_action_required].
+
+    [is_live] answers whether this process holds the live admission for an
+    entry. An in-flight judgment carries an exact attempt that is
+    dispatch-uncertain by construction, so durable state alone cannot tell
+    the finalizer's own work from what a restart stranded; the admission
+    does. Only an in-flight row without it is a residual.
+
+    [unread_entries] counts pending rows the queue could not read. A
+    non-zero value makes the counts a lower bound: [counts_complete] is
+    false and the section asks for an operator.
 
     [oldest] is [null] when nothing is open. Otherwise it is the open ask
     with the smallest timestamp across both sources: a live wait carries its
@@ -52,6 +64,7 @@ val aggregate :
     are what can go stale, so they are what the status reads. *)
 
 val no_workspace_json :
+  now:float ->
   waits:Keeper_tool_approval_registry.pending list ->
   answered_total:int ->
   timed_out_total:int ->
@@ -67,3 +80,9 @@ val queue_unreadable_json : error:string -> Yojson.Safe.t
     authority is not an empty gate: status is unavailable and the section
     demands an operator, rather than reporting counts that would silently
     read as "nothing pending". *)
+
+val late_journal_unavailable_json : error:string -> Yojson.Safe.t
+(** The section when the late-approval journal is fenced (corrupt or
+    unavailable). Every late-answer write is refused meanwhile, so the
+    section is unavailable and demands an operator through
+    [operator_action_required], which the rollup reads. *)

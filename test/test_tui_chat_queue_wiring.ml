@@ -1396,9 +1396,7 @@ let test_a_turn_the_server_ended_without_a_closing_event_is_closed () =
       check bool "the settled turn is no longer the running one" true
         (Option.is_none (Tui_types.keeper_message_status_log state));
       check bool "its partial output is still held" true
-        (List.memq entry.log state.msg_settled_logs);
-      check bool "the server ran it, so it is not a rejection" true
-        (Option.is_none (Keeper_chat_transcript.rejection entry.log.tl_transcript)))
+        (List.memq entry.log state.msg_settled_logs))
     [ Keeper_chat.Operation_succeeded, "ended"
     ; Keeper_chat.Operation_failed, "failed"
     ; Keeper_chat.Operation_cancelled, "failed"

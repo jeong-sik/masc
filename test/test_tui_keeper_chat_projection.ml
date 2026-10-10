@@ -472,9 +472,42 @@ let test_runtime_attempt_payload_contract () =
 ;;
 
 let test_current_nonterminal_event_set () =
+  (* The fields the server writes for a native tool observation
+     ([Server_keeper_chat_agui_projection.native_tool_to_json]). *)
+  let native_tool extra =
+    `Assoc
+      ([ "toolStreamScope", `Int 0
+       ; "toolCallBlockIndex", `Int 1
+       ; "toolCallId", `String "native-1"
+       ; "toolCallName", `String "Bash"
+       ]
+       @ extra)
+  in
   let custom name =
     let value =
-      if String.equal name "KEEPER_TOOL_RESULT_READY"
+      if String.equal name "KEEPER_MODEL_CONTENT_ACTIVITY" then
+        Masc.Keeper_chat_events.(
+          model_content_activity_to_json
+            { content_generation = 0
+            ; content_scope = 0
+            ; content_index = 0
+            ; content_provider_message_id = None
+            ; channel = Model_text
+            ; state = Content_observed
+            })
+      else if String.equal name "KEEPER_NATIVE_TOOL_START" then native_tool []
+      else if String.equal name "KEEPER_NATIVE_TOOL_PROGRESS" then
+        native_tool
+          [ ( "progress"
+            , Runtime_native_tools.progress_to_json
+                (Runtime_native_tools.Heartbeat_reported { elapsed_seconds = 1 }) )
+          ]
+      else if String.equal name "KEEPER_NATIVE_TOOL_END" then
+        native_tool
+          [ ( "completion"
+            , Runtime_native_tools.completion_to_json Runtime_native_tools.end_observed )
+          ]
+      else if String.equal name "KEEPER_TOOL_RESULT_READY"
       then
         `Assoc
           [ "toolStreamScope", `Int 0

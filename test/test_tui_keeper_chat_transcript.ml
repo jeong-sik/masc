@@ -797,7 +797,7 @@ let test_run_failure_and_finish_set_the_phase () =
     ; Live.Run_failed { message = " " }
     ];
   check string "a runtime cannot hide a missing cause"
-    "[glm-coding.glm-5.3-flash] cause not reported \xc2\xb7 0s"
+    "cause not reported \xc2\xb7 runtime: glm-coding.glm-5.3-flash \xc2\xb7 0s"
     (List.assoc Transcript.Progress (rows missing_on_runtime));
   let finished = fresh () in
   feed finished [ Live.Run_started; Live.Run_finished ];
@@ -1160,7 +1160,7 @@ let test_runtime_failover_visibility_and_error_attribution () =
     (Transcript.current_runtime_id t);
   feed t [ Live.Run_failed { message = "RateLimitExceeded (429)" } ];
   check phase "error is attributed to active runtime"
-    (Transcript.Stream_failed "[gpt-4o] RateLimitExceeded (429)")
+    (Transcript.Stream_failed "RateLimitExceeded (429)")
     (Transcript.phase t)
 
 let test_empty_scoped_text_still_retires_prior_response_metadata () =
@@ -1524,6 +1524,21 @@ let test_late_attempt_cannot_rewrite_ended_work () =
     check (option string) "late attempt cannot relabel ended runtime"
       (Some "runtime-a") (Transcript.current_runtime_id t))
     [Live.Run_finished; Live.Run_failed {message="provider failed"}]
+
+let test_failure_body_and_runtime_are_independent () =
+  List.iter (fun message ->
+    let t = fresh () in
+    feed t [Live.Run_started;
+      Live.Runtime_attempt_started {runtime_id=Some "serving-runtime";attempt_index=Some 0};
+      Live.Run_failed {message}];
+    check bool "reported error is preserved literally" true
+      (Transcript.phase t=Transcript.Stream_failed message);
+    check bool "runtime context cannot be suppressed by punctuation" true
+      (List.exists (fun (_,row) -> contains ~needle:"runtime: serving-runtime" row) (rows t));
+    check bool "error body is separate from runtime metadata" true
+      (List.exists (fun item -> match item.Transcript.drawn with
+        | Transcript.Drawn_error body -> body=message | _ -> false) (Transcript.drawn t)))
+    ["provider 429"; "file[1] unavailable"; "[claimed-runtime] untrusted diagnostic"]
 
 let test_drawn_items_carry_superseded_runtime_id () =
   let t = fresh () in
@@ -2392,7 +2407,8 @@ let () =
     ; ( "attempt authority", [test_case "current attempt metadata retains activity" `Quick test_current_attempt_metadata_keeps_observed_activity;
         test_case "late runtime naming retains streaming" `Quick test_late_runtime_name_does_not_supersede_observed_output;
         test_case "continuation restarts attempt identity" `Quick test_continuation_restarts_attempt_identity;
-        test_case "late attempt retains ended work" `Quick test_late_attempt_cannot_rewrite_ended_work])
+        test_case "late attempt retains ended work" `Quick test_late_attempt_cannot_rewrite_ended_work;
+        test_case "error body and runtime context remain independent" `Quick test_failure_body_and_runtime_are_independent])
     ; ( "event timeline"
       , [test_case "replay preserves continuation event times" `Quick test_event_times_survive_log_replay_and_continuation;
          test_case "native tools have no MASC receipt" `Quick test_native_tools_are_observations_without_execution_receipts;

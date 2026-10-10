@@ -125,6 +125,13 @@ jobs:
         if: inputs.minimal == false
         run: corepack enable && corepack prepare pnpm@10.31.0 --activate
 
+      # The release lane exercises the embedded recipe through the shipped CLI.
+      # Behavior only needs the same checked-in image; preparing it must not
+      # force a separate server build before Dune schedules the full suite.
+      - name: Prepare Keeper sandbox image
+        if: inputs.minimal == false
+        run: docker build -t masc-sandbox-test:ci - < sandbox-images/base/Dockerfile
+
       - name: Test
         id: tests
         env:
@@ -183,18 +190,7 @@ jobs:
         # to find config/ and prompts/ from inside _build.
         run: |
           set -euo pipefail
-          # Four suites read a file through a Keeper's sandbox, and on this
-          # runner the read answers "image_not_found: keeper sandbox image
-          # masc-sandbox-test:ci is not available" -- 14 assertions counted
-          # as red for an image nothing here builds. The binary embeds
-          # sandbox-images/base/Dockerfile so that `masc sandbox-image` works
-          # on a host with no checkout, and --print writes that embedded copy.
-          # The general image includes repository and creative-document
-          # tools; its build is shared by full and targeted lanes.
           if [ "${MINIMAL_CHECK}" != true ]; then
-            opam exec -- dune build --root . bin/main_eio.exe
-            ./_build/default/bin/main_eio.exe sandbox-image --print \
-              | docker build -t masc-sandbox-test:ci -
             # Building the image is half of what a sandboxed suite needs. A
             # fixture whose keeper runs a command starts a persistent
             # container through the turn sandbox factory, and

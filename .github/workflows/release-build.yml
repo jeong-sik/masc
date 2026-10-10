@@ -18,7 +18,6 @@ jobs:
       - name: Build production dashboard once
         run: |
           corepack enable && corepack prepare pnpm@10.31.0 --activate
-          (cd dashboard && pnpm install --frozen-lockfile)
           scripts/build-dashboard-if-needed.sh --force
       - uses: actions/upload-artifact@v7
         with:

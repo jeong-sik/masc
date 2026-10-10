@@ -1473,8 +1473,11 @@ let test_owner_settlement_before_the_prunes_does_not_mint_a_ready_root () =
   (* The seam's returned list is the wake's ensure_roots input, so assert it
      directly: with the settlement in the hook, the list must not name X in
      any status. Every variant that puts the candidate read in front of the
-     prunes hands this list a stale row and fails here — regardless of
-     whether the read sits above or below the hook. *)
+     candidate prune hands this list a stale row (Pending, because the
+     worker records the judgment on the partition, not the ledger) and
+     fails here. A read that sits after the candidate prune is a post-prune
+     list by construction and cannot fail here — that is the point: the
+     shipped order's list is exactly the post-prune one. *)
   Alcotest.(check bool) "the list the wake read is post-prune" false
     (List.exists
        (fun (c : A.candidate) -> String.equal c.candidate_id kept.candidate_id)
@@ -1482,11 +1485,12 @@ let test_owner_settlement_before_the_prunes_does_not_mint_a_ready_root () =
   ignore
     (ok "mint roots over the list the wake read"
        (P.ensure_roots ~base_path ~keeper_name:"alpha" candidates));
-  (* The ledger read: under the shipped order the prunes ran after the
-     settlement, so X's row and settled receipt are gone. Under the reverted
-     order the stale list held X (Pending at read time), the mint ran over
-     it, and the receipt prune inside the seam dropped the settled receipt —
-     the assertions below name exactly that residue. *)
+  (* The ledger read, after the seam: X's row and settled receipt are gone
+     from the store, because the settlement in the hook consumed X behind a
+     cursor the wake had already passed and both prunes then ran. A revert
+     that moved the read before the candidate prune leaves the ledger
+     intact at this point (nothing to prune: the hook consumed behind the
+     passed cursor), so the residue check below also fails for it. *)
   let candidates, partitions = read_candidate_and_roots ~base_path in
   (* The prunes (which ran after the hook's settlement) dropped X's consumed
      row and its settled receipt: the ledger keeps no row naming X, and root

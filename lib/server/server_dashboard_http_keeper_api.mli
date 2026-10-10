@@ -96,7 +96,8 @@ val keeper_chat_history_json : Workspace.config -> string -> Yojson.Safe.t
     the dashboard history schema silently drops rows without one. *)
 
 val keeper_chat_history_page_json :
-  Workspace.config -> string -> before:float option -> Yojson.Safe.t
+  ?max_total:int -> Workspace.config -> string -> before:float option ->
+  Yojson.Safe.t
 (** Body for [GET /chat/history/page]: direct-conversation rows older than
     [before], newest window when [before] is [None].
 

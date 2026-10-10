@@ -1462,6 +1462,51 @@ let test_load_page_walks_backward_small_file () =
       Alcotest.(check int) "empty page" 0 (List.length p4.K.messages);
       Alcotest.(check bool) "empty page exhausted" false p4.K.has_more)
 
+(* A smaller window takes fewer rows at the same user/assistant share, walks
+   the same history in more pages, and the default is untouched. *)
+let test_load_page_max_total_scales_the_window_and_walks_the_same_history () =
+  let base_dir = temp_base_path "keeper-chat-store-page-limit" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-page-limit" in
+      write_numbered_lane
+        ~path:(chat_path ~base_dir ~keeper_name)
+        ~total:300 ~pad_bytes:0;
+      let default_page = K.load_page ~base_dir ~keeper_name ~before:250.0 () in
+      let explicit_default =
+        K.load_page ~base_dir ~keeper_name ~before:250.0 ~max_total:400 ()
+      in
+      Alcotest.(check (list string)) "an explicit 400 is the default window"
+        (List.map (fun (m : K.chat_message) -> m.K.id) default_page.K.messages)
+        (List.map (fun (m : K.chat_message) -> m.K.id) explicit_default.K.messages);
+      let above = K.load_page ~base_dir ~keeper_name ~before:250.0 ~max_total:9999 () in
+      Alcotest.(check int) "a limit above the window is the window" 100
+        (List.length above.K.messages);
+      (* 100 rows of a primaries-only lane: a quarter of the budget is the
+         primary bound, so 25 rows come back. *)
+      let small = K.load_page ~base_dir ~keeper_name ~before:250.0 ~max_total:100 () in
+      Alcotest.(check int) "a 100-row budget keeps 25 primaries" 25
+        (List.length small.K.messages);
+      Alcotest.(check int) "it is the newest 25 before the cursor" 225
+        (content_no (List.hd small.K.messages));
+      Alcotest.(check bool) "older rows remain" true small.K.has_more;
+      let tiny = K.load_page ~base_dir ~keeper_name ~before:250.0 ~max_total:0 () in
+      Alcotest.(check int) "a zero limit still returns one row" 1
+        (List.length tiny.K.messages);
+      (* Walking with the small window reaches every row, once. *)
+      let rec walk before acc =
+        let page = K.load_page ~base_dir ~keeper_name ~before ~max_total:100 () in
+        match page.K.messages with
+        | [] -> acc
+        | first :: _ as messages ->
+            let acc = List.map content_no messages @ acc in
+            if page.K.has_more then walk first.K.ts acc else acc
+      in
+      let seen = walk 301.0 [] |> List.sort compare in
+      Alcotest.(check (list int)) "every row once, none repeated"
+        (List.init 300 (fun i -> i + 1)) seen)
+
 let test_load_page_binary_search_large_file () =
   let base_dir = temp_base_path "keeper-chat-store-page-large" in
   Fun.protect
@@ -3621,6 +3666,8 @@ let () =
         [
           Alcotest.test_case "load_page walks backward (small file)" `Quick
             test_load_page_walks_backward_small_file;
+          Alcotest.test_case "load_page max_total scales the window" `Quick
+            test_load_page_max_total_scales_the_window_and_walks_the_same_history;
           Alcotest.test_case "load_page binary search (large file)" `Quick
             test_load_page_binary_search_large_file;
         ] );

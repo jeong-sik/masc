@@ -130,7 +130,14 @@ let test_balance_duplicate_refused () =
        ~reason:"thanks again"
    with
    | Ok _ -> ()
-   | Error error -> fail ("a second reason was refused: " ^ Candle_balance.error_to_string error))
+   | Error error -> fail ("a second reason was refused: " ^ Candle_balance.error_to_string error));
+  (* Reusing the same reason with a different amount is also a new gift. *)
+  (match
+     Candle_balance.gift after ~at ~from_keeper:"alpha" ~to_keeper:"beta" ~amount_milli:20
+       ~reason:"thanks"
+   with
+   | Ok more -> check int "receiver credited twice" 50 (Candle_balance.balance more ~keeper:"beta")
+   | Error error -> fail ("a new amount was refused: " ^ Candle_balance.error_to_string error))
 ;;
 
 let test_balance_money_refusals () =
@@ -448,7 +455,7 @@ let () =
         ] )
     ; ( "balance"
       , [ Alcotest.test_case "transfer moves money, not supply" `Quick test_balance_transfer
-        ; Alcotest.test_case "duplicate refused, new reason pays" `Quick
+        ; Alcotest.test_case "duplicate refused, new reason or amount pays" `Quick
             test_balance_duplicate_refused
         ; Alcotest.test_case "money refusals" `Quick test_balance_money_refusals
         ; Alcotest.test_case "item moves ownership" `Quick test_balance_item_moves_ownership

@@ -8,13 +8,19 @@ module Grant_key = struct
     | order -> order
 end
 module Grants = Set.Make (Grant_key)
+(* The amount is part of the key so reusing a reason with a different
+   amount is a new gift; an exact replay of the same row stays refused. *)
 module Gift_key = struct
-  type t = string * string * string
-  let compare (from_keeper, to_keeper, reason) (from_keeper', to_keeper', reason') =
+  type t = string * string * string * int
+  let compare (from_keeper, to_keeper, reason, amount_milli)
+      (from_keeper', to_keeper', reason', amount_milli') =
     match String.compare from_keeper from_keeper' with
     | 0 ->
       (match String.compare to_keeper to_keeper' with
-       | 0 -> String.compare reason reason'
+       | 0 ->
+         (match String.compare reason reason' with
+          | 0 -> Int.compare amount_milli amount_milli'
+          | order -> order)
        | order -> order)
     | order -> order
 end
@@ -242,7 +248,7 @@ let gift state ~at ~from_keeper ~to_keeper ~amount_milli ~reason =
   let current = balance state ~keeper:to_keeper in
   if amount_milli <= 0
   then Error (Invalid_gift { from_keeper; to_keeper; amount_milli })
-  else if Gifts.mem (from_keeper, to_keeper, reason) state.gifts
+  else if Gifts.mem (from_keeper, to_keeper, reason, amount_milli) state.gifts
   then Error (Duplicate_gift { from_keeper; to_keeper; reason })
   else if amount_milli > available_milli
   then
@@ -258,7 +264,7 @@ let gift state ~at ~from_keeper ~to_keeper ~amount_milli ~reason =
           Names.add to_keeper (current + amount_milli)
             (Names.add from_keeper (available_milli - amount_milli) state.balances)
       ; last_at = Names.add to_keeper at (Names.add from_keeper at state.last_at)
-      ; gifts = Gifts.add (from_keeper, to_keeper, reason) state.gifts
+      ; gifts = Gifts.add (from_keeper, to_keeper, reason, amount_milli) state.gifts
       }
 ;;
 

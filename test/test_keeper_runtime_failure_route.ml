@@ -890,10 +890,59 @@ let test_route_factors_through_candidate_fault () =
     []
     splits
 
+let test_model_absent_classifier () =
+  (* The classifier and the route must agree: model-absence is the typed
+     NotFound family on either side of the provider boundary. *)
+  let api_not_found =
+    Agent_core.Error.Api (Llm_provider.Retry.NotFound { message = "glm-5.1 was retired at 2026-09-25" })
+  in
+  let provider_not_found =
+    Agent_core.Error.Provider
+      (Llm_provider.Error.NotFound { provider = "ollama_cloud"; detail = "model not found" })
+  in
+  Alcotest.(check bool) "API NotFound is model absence" true
+    (KFR.core_error_is_model_absent api_not_found);
+  Alcotest.(check bool) "provider NotFound is model absence" true
+    (KFR.core_error_is_model_absent provider_not_found);
+  check_route
+    "API NotFound rotates as model_unavailable"
+    (KFR.Rotate_now { rotate = KFR.Model_unavailable })
+    api_not_found;
+  check_route
+    "provider NotFound rotates as model_unavailable"
+    (KFR.Rotate_now { rotate = KFR.Model_unavailable })
+    provider_not_found;
+  (* The live retirement shape: a 400 refusal whose body carries the
+     retirement fact as free-form prose. No machine-readable signal names it,
+     so the classifier deliberately says [false] — prose is never matched.
+     It stays out of retry candidacy through Error.is_retryable instead. *)
+  Alcotest.(check bool)
+    "a 400 refusal with retirement prose is not typed model-absence"
+    false
+    (KFR.core_error_is_model_absent
+       (Agent_core.Error.Api
+          (Llm_provider.Retry.InvalidRequest
+             { message = "glm-5.1 was retired at 2026-09-25"
+             ; reason = Llm_provider.Retry.Unknown_invalid_request
+             })));
+  Alcotest.(check bool) "rate limit is not model absence" false
+    (KFR.core_error_is_model_absent
+       (Agent_core.Error.Api
+          (Llm_provider.Retry.RateLimited { retry_after = None; message = "slow down" })));
+  Alcotest.(check bool) "hard quota is not model absence" false
+    (KFR.core_error_is_model_absent
+       (Agent_core.Error.Api (Llm_provider.Retry.PaymentRequired { message = "402" })))
+
 let () =
   Alcotest.run
     "keeper_runtime_failure_route"
-    [ ( "api"
+    [ ( "model_absent"
+      , [ Alcotest.test_case
+            "typed not-found is model absence"
+            `Quick
+            test_model_absent_classifier
+        ] )
+    ; ( "api"
       , [ Alcotest.test_case "rate limited hint" `Quick test_api_rate_limited_threads_hint
         ; Alcotest.test_case
             "quota prose stays rate limited"

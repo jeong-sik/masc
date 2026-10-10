@@ -222,6 +222,7 @@ type stub_behavior =
   | Stub_malformed (* no verdict tool call *)
   | Stub_unavailable
   | Stub_permanent
+  | Stub_model_absent (* a typed retired/unknown-model refusal (404 family) *)
 
 let recording_reviewer ?(before_verdict = fun _prompt -> ()) calls behaviors =
   fun ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_
@@ -254,6 +255,14 @@ let recording_reviewer ?(before_verdict = fun _prompt -> ()) calls behaviors =
         (Agent_core.Error.Api
            (Agent_core.Retry.ServerError
               { status = 503; message = "test evaluator unavailable" }))
+    | Some Stub_model_absent ->
+      (* The typed model-absence family a provider's 404 maps to; the live
+         ollama-cloud retirement that reached the verifier as a 400 with
+         free-form prose is intentionally not string-matched anywhere. *)
+      Error
+        (Agent_core.Error.Api
+           (Agent_core.Retry.NotFound
+              { message = "glm-5.1 was retired at 2026-09-25" }))
     | None ->
       Error (Agent_core.Error.Internal ("unexpected evaluator slot " ^ evaluator_runtime))
 ;;
@@ -1669,6 +1678,123 @@ let test_deferred_review_is_announced_and_waits_for_a_request () =
   check string "the requested review committed" "awaiting_confirmation" (stored_phase config goal_id)
 ;;
 
+(* A candidate that refuses with a typed model-absence error (a retired or
+   unknown model) is a permanent failure for the unchanged request: the
+   deferral names it in [model_absent_runtimes], keeps it out of
+   [retryable_runtimes], and the daemon arms no retry. The live shape of this
+   refusal was a 400 whose retirement fact is free-form prose; prose is never
+   matched, so this test pins the typed 404 family the classifier does
+   recognize (2026-10-07 audit F-02). *)
+let test_retired_model_candidate_arms_no_retry () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Verifier candidate retired" in
+  ignore (must_succeed "initial request" (transition ctx goal_id "request_complete"));
+  let request_id = pending_request_id config goal_id in
+  let registry = Goal_verification_run_registry.global () in
+  let calls = ref [] in
+  let deferred_once, resolve_deferred_once = Eio.Promise.create () in
+  let committed, resolve_committed = Eio.Promise.create () in
+  let saved_observer = Atomic.get Goal_verification_run_registry.change_observer_fn in
+  let observer () =
+    List.iter (fun (run : Goal_verification_run_registry.run) ->
+      match run.status with
+      | Goal_verification_run_registry.Completed
+          { outcome = Goal_verification_run_registry.Deferred _; _ } ->
+        ignore (Eio.Promise.try_resolve resolve_deferred_once ())
+      | Goal_verification_run_registry.Completed
+          { outcome = Goal_verification_run_registry.Committed; _ } ->
+        ignore (Eio.Promise.try_resolve resolve_committed ())
+      | Goal_verification_run_registry.Completed _
+      | Goal_verification_run_registry.Running -> ())
+      (reviews_of_goal registry goal_id)
+  in
+  let clock () = match !workspace_clock with
+    | Some clock -> clock
+    | None -> fail "test setup: with_workspace did not record its clock" in
+  let await_within label promise =
+    match Eio.Time.with_timeout (clock ()) hung_review_wait_s (fun () ->
+        Eio.Promise.await promise; Ok ()) with
+    | Ok () -> ()
+    | Error `Timeout -> fail (Printf.sprintf "%s did not happen within %.0fs" label hung_review_wait_s)
+  in
+  Fun.protect ~finally:(fun () -> Atomic.set Goal_verification_run_registry.change_observer_fn saved_observer)
+    (fun () ->
+      Atomic.set Goal_verification_run_registry.change_observer_fn observer;
+      with_lane_and_reviewer ~slots:(fun () -> Ok ["verifier-a"])
+        ~reviewer:(recording_reviewer calls ["verifier-a", Stub_model_absent])
+        (fun () ->
+          Eio.Switch.run (fun sw ->
+            Goal_verification_agent.start ~sw ~clock:(Option.get !workspace_clock) ~config;
+            await_within "the boot scan's deferral" deferred_once;
+            check bool "the daemon armed no retry for a permanent refusal" false
+              (Agent.retry_pending ~goal_id);
+            let runs = reviews_of_goal registry goal_id in
+            check int "one review ran" 1 (List.length runs);
+            check int "one candidate was called" 1 (List.length !calls);
+            (match runs with
+             | [ run ] ->
+               (match run.status with
+                | Goal_verification_run_registry.Completed
+                    { outcome = Goal_verification_run_registry.Deferred { detail }; _ } ->
+                  check bool "the run row names the model-absent candidate" true
+                    (String_util.string_contains_substring
+                       ~needle:"model_absent=verifier-a" detail)
+                | _ -> fail "the single run must be deferred")
+             | _ -> fail "expected exactly one run");
+            for _ = 1 to idle_ticks_after_deferral do Eio.Time.sleep (clock ()) idle_tick_s done;
+            check int "idle ticks start no review" 1 (List.length (reviews_of_goal registry goal_id));
+            check int "idle ticks call no candidate" 1 (List.length !calls);
+            check string "the Goal waits in verifying" "verifying" (stored_phase config goal_id);
+            Atomic.set AR.run_llm_reviewer_fn
+              (recording_reviewer calls ["verifier-a", Stub_approve "replacement serves the review"]);
+            ignore (must_succeed "a request after the operator fixes the lane"
+              (transition ctx goal_id "request_complete"));
+            check string "asking again keeps the same request" request_id
+              (pending_request_id config goal_id);
+            await_within "the requested review's commit" committed)));
+  check string "the requested review committed" "awaiting_confirmation" (stored_phase config goal_id)
+;;
+
+(* A lane holding both a retired candidate and a transiently unavailable one
+   keeps them apart: the transient candidate alone owns the deferral's retry
+   candidacy, the retired one names the permanent set, and the walk still
+   tries every slot exactly once. *)
+let test_retired_model_is_filtered_from_retry_candidates () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Mixed verifier lane" in
+  ignore (must_succeed "initial request" (transition ctx goal_id "request_complete"));
+  let calls = ref [] in
+  with_lane_and_reviewer
+    ~slots:(fun () -> Ok ["verifier-a"; "verifier-b"])
+    ~reviewer:(recording_reviewer calls
+                 ["verifier-a", Stub_model_absent; "verifier-b", Stub_unavailable])
+    (fun () ->
+      let deferral =
+        match Agent.process_pending_work config { goal_id } with
+        | Agent.Deferred deferral -> deferral
+        | Agent.Committed | Agent.Superseded -> fail "no verdict was producible"
+      in
+      match deferral with
+      | Agent.Not_reviewed { retryable_runtimes; model_absent_runtimes; _ } ->
+        check (list string) "the transient slot alone is retryable"
+          ["verifier-b"] retryable_runtimes;
+        check (list string) "the retired slot names the permanent set"
+          ["verifier-a"] model_absent_runtimes;
+        (* The record's [detail] field stays the last candidate's own reason;
+           the rendered detail (WARN line, run-ledger row) adds the
+           model-absent names. *)
+        check bool "the rendered detail names the retired candidate" true
+          (String_util.string_contains_substring
+             ~needle:"model_absent=verifier-a" (Agent.deferral_detail deferral));
+        check (list string) "the walk tried every slot once"
+          ["verifier-a"; "verifier-b"] !calls
+      | Agent.Review_not_bound _ | Agent.Proof_lookup_unavailable _
+      | Agent.Verdict_without_reason | Agent.Commit_refused _ ->
+        fail "expected a Not_reviewed deferral")
+;;
+
 (* A real daemon keeps the same durable proof while the provider recovers.
    Only the injected clock advances; no new request_complete triggers retry. *)
 let test_transient_goal_retry ~drop () =
@@ -1942,6 +2068,12 @@ let () =
     ; ( "transient retry"
       , [test_case "provider recovery needs no new submission" `Quick (test_transient_goal_retry ~drop:false)
         ; test_case "drop invalidates an old retry" `Quick (test_transient_goal_retry ~drop:true)] )
+    ; ( "permanent refusal"
+      , [ test_case "retired model candidate arms no retry" `Quick
+            test_retired_model_candidate_arms_no_retry
+        ; test_case "retired model is filtered from retry candidates" `Quick
+            test_retired_model_is_filtered_from_retry_candidates
+        ] )
     ; ( "re-arm"
       , [ test_case
             "committed proven proof reconciles without review"

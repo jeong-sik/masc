@@ -48,6 +48,7 @@ module For_testing : sig
         ; detail : string
         ; evaluator_runtime : string option
       ; retryable_runtimes : string list
+      ; model_absent_runtimes : string list
         }
     | Verdict_without_reason
     | Commit_refused of { detail : string }

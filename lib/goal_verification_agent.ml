@@ -38,6 +38,12 @@ type deferral =
       ; detail : string
       ; evaluator_runtime : string option
       ; retryable_runtimes : string list
+      ; model_absent_runtimes : string list
+          (** Candidates whose typed refusal was model-absence (a retired or
+              unknown model). Permanent for the unchanged request: excluded
+              from [retryable_runtimes], so they can arm no retry; named here
+              so the deferral records per-candidate outcomes, not only the
+              last candidate's error (2026-10-07 audit F-02). *)
       }
   | Verdict_without_reason
   | Commit_refused of { detail : string }
@@ -59,9 +65,15 @@ let deferral_gate = function
 ;;
 
 let deferral_detail = function
+  | Not_reviewed { detail; model_absent_runtimes; _ } ->
+    (* Display-only suffix: names the permanently refused candidates so the
+       WARN line and the run-ledger row carry per-candidate outcomes, not only
+       the last candidate's error. Never matched. *)
+    if model_absent_runtimes = []
+    then detail
+    else Printf.sprintf "%s | model_absent=%s" detail (String.concat "," model_absent_runtimes)
   | Review_not_bound { detail }
   | Proof_lookup_unavailable { detail }
-  | Not_reviewed { detail; _ }
   | Commit_refused { detail } -> detail
   | Verdict_without_reason ->
     "verdict without a stated reason is not a judgment; the pending row stays \
@@ -408,7 +420,10 @@ let process_pending_work_inner
                | None -> Task.Anti_rationalization.gate_to_string result.gate
              in
              (* The unchanged pending request retains transient candidate
-                identities for the daemon's retry scheduler. *)
+                identities for the daemon's retry scheduler; permanently
+                refused candidates (model-absence) are named separately so the
+                deferral records every candidate's outcome, not only the last
+                one's error. *)
              defer
                ~goal_id:work.goal_id
                (Not_reviewed
@@ -416,6 +431,7 @@ let process_pending_work_inner
                   ; detail
                   ; evaluator_runtime = Some result.evaluator_runtime
                   ; retryable_runtimes = result.retryable_runtimes
+                  ; model_absent_runtimes = result.model_absent_runtimes
                   })
            | Some review_verdict ->
              let evidence =
@@ -690,6 +706,10 @@ let schedule_retry (runtime : runtime) ~goal_id ~request_id deferral =
   then Verification_protocol.No_retry_armed
   else match deferral with
   | Not_reviewed {retryable_runtimes = _ :: _ as runtimes; _} ->
+    (* [runtimes] is built at the walk: model-absence refusals (retired or
+       unknown models) are classified permanent there and can never appear in
+       it, so this arms only while a candidate that reported a typed transient
+       failure could serve again. *)
     let key = goal_id, request_id, Random_id.uuid_v7 () in
     let rec admit () =
       let current = Atomic.get runtime.retries in
@@ -937,6 +957,12 @@ module For_testing = struct
       ; detail : string
       ; evaluator_runtime : string option
       ; retryable_runtimes : string list
+      ; model_absent_runtimes : string list
+          (** Candidates whose typed refusal was model-absence (a retired or
+              unknown model). Permanent for the unchanged request: excluded
+              from [retryable_runtimes], so they can arm no retry; named here
+              so the deferral records per-candidate outcomes, not only the
+              last candidate's error (2026-10-07 audit F-02). *)
       }
     | Verdict_without_reason
     | Commit_refused of { detail : string }

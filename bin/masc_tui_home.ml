@@ -21,9 +21,9 @@ let home_decision_rows (state : state) =
         | Keeper_tool_row held ->
             list_is_read reading.held_calls, held.kta_keeper, held.kta_question, "Held call", held.kta_tool_call_id
         | Gate_row pending ->
-            list_is_read reading.gate_queue, pending.gp_keeper, pending.gp_display_tool, "Approval", pending.gp_id
+            list_is_read reading.gate_queue, pending.gp_keeper, pending.gp_display_tool, "Gate approval", pending.gp_id
         | Operator_row item ->
-            list_is_read reading.confirm_queue, item.ap_actor, item.ap_summary, "Approval", item.ap_token
+            list_is_read reading.confirm_queue, item.ap_actor, item.ap_summary, "Confirm", item.ap_token
       in
       if current && approval_item_needs_person row then
         Some (Home_request (home_request_of_approval row),

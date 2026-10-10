@@ -1,9 +1,5 @@
-(** Every surface footer ends with the same status facts.
-
-    Before Masc_tui_footer each of the 21 footers spelled [Port: %d] into its
-    own format string, so a screen could carry a different spelling, a
-    different separator, or no port at all and nothing would say so. These
-    tests pin the shared tail. *)
+(** Working footers keep decisions and warnings. Explicit diagnostic callers
+    may still project connection facts through the same bounded fitter. *)
 
 let check_string = Alcotest.(check string)
 let check_bool = Alcotest.(check bool)

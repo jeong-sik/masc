@@ -1832,177 +1832,34 @@ let deliver_resolution ~base_path (entry : pending_approval) decision =
     ~channel:entry.continuation_channel
 ;;
 
-(* Every phase row after the request copies the request row's line. The
-   producer stated it once, on the Gate request, and only [record_pending] had
-   it in hand; a resolution, replay, or continuation writer has the approval id
-   and nothing of the producer, so it reads the stored statement back rather
-   than deriving one from the input. [None] when the request row is absent or
-   carried none. *)
-let requested_call_summary ~base_path ~keeper_name ~approval_id =
-  Keeper_chat_store.approval_request_call_summary
-    ~base_dir:base_path
-    ~keeper_name
-    ~approval_id
-;;
-
-let ensure_resolution_chat_projection
-      ~base_path
-      ~keeper_name
-      ~approval_id
-      ~tool_name
-      ~decision
-  =
-  let phase =
-    match decision with
-    | Decision.Approve -> Keeper_approval_lifecycle.Approval_resolved_approved
-    | Decision.Reject _ -> Keeper_approval_lifecycle.Approval_resolved_rejected
-  in
-  append_chat_projection
-    ~base_path
-    ~keeper_name
-    { Keeper_chat_store.approval_id
-    ; tool_name
-    ; phase
-    ; artifact_ref = None
-    ; call_summary = requested_call_summary ~base_path ~keeper_name ~approval_id
-    }
-;;
-
-let ensure_replay_chat_projection
-      ~base_path
-      ~keeper_name
-      ~approval_id
-      ~tool_name
-      ~outcome
-  =
-  let call_summary = requested_call_summary ~base_path ~keeper_name ~approval_id in
-  let phase, artifact_ref =
-    match outcome with
-    | Replay_applied artifact_ref ->
-      Keeper_approval_lifecycle.Approval_replay_applied, artifact_ref
-    | Replay_applied_with_warning artifact_ref ->
-      Keeper_approval_lifecycle.Approval_replay_applied_with_warning, artifact_ref
-    | Replay_failed artifact_ref ->
-      Keeper_approval_lifecycle.Approval_replay_failed, artifact_ref
-    | Replay_indeterminate artifact_ref ->
-      Keeper_approval_lifecycle.Approval_replay_indeterminate, artifact_ref
-  in
-  Keeper_chat_store.reconcile_approval_replay_lifecycle_once
-    ~base_dir:base_path
-    ~keeper_name
-    ~lifecycle:
-      { Keeper_chat_store.approval_id
-      ; tool_name
-      ; phase
-      ; artifact_ref = Some artifact_ref
-      ; call_summary
-      }
-  |> publish_chat_projection_append ~keeper_name
-;;
-
-let continuation_settled_chat_projection_present
-      ~base_path
-      ~keeper_name
-      ~approval_id
-  =
-  Keeper_chat_store.approval_continuation_settled
-    ~base_dir:base_path
-    ~keeper_name
-    ~approval_id
-;;
+let ensure_resolution_chat_projection =
+  Keeper_approval_queue_projection.ensure_resolution_chat_projection
+let ensure_replay_chat_projection =
+  Keeper_approval_queue_projection.ensure_replay_chat_projection
+let continuation_settled_chat_projection_present =
+  Keeper_approval_queue_projection.continuation_settled_chat_projection_present
 
 type continuation_projection_result =
+  Keeper_approval_queue_result.continuation_projection_result =
   | Continuation_projection_recorded
   | Continuation_projection_not_ready
 
-(* The tool name a continuation receipt names, once the turn had the
-   resolution's outcome to show the model: a rejection needs no replay; an
-   approval needs its one-shot grant consumed and a durable replay outcome.
-   [Ok None] is "not yet": an unconsumed grant, or a consumed grant without
-   its outcome, means the effect has not been reported into a turn, so no
-   receipt of either phase may settle it. *)
-let settled_continuation_tool_name
-      ~base_path
-      ~(resolution : Keeper_event_queue.hitl_resolution)
-  =
+let settled_continuation_readiness
+      ~base_path ~(resolution : Keeper_event_queue.hitl_resolution) =
   match resolution.decision with
-  | Keeper_event_queue.Hitl_rejected _ -> Ok (Some None)
+  | Keeper_event_queue.Hitl_rejected _ -> Ok (Continuation_ready None)
   | Keeper_event_queue.Hitl_approved ->
-    (match
-       approved_resolution_delivery ~base_path ~id:resolution.approval_id
-     with
-     | Ok
-         { request
-         ; state = Resolution_consumed
-         ; replay_outcome = Some _
-         } ->
-       Ok (Some (Some request.tool_name))
-     | Ok
-         { state = (Resolution_unconsumed | Resolution_consumed)
-         ; replay_outcome = None
-         ; _
-         }
-     | Ok
-         { state = Resolution_unconsumed
-         ; replay_outcome = Some _
-         ; _
-         } ->
-       Ok None
+    (match approved_resolution_delivery ~base_path ~id:resolution.approval_id with
+     | Ok delivery -> Ok (continuation_readiness_of_delivery delivery)
      | Error error -> Error (grant_error_to_string error))
 ;;
 
-(* The store's answer before it is published: whether the row was appended
-   now or was already there decides what the caller logs. *)
-type continuation_projection_append =
-  | Continuation_appended of Keeper_chat_store.append_once_result
-  | Continuation_not_ready
-
-let project_settled_continuation
-      ~base_path
-      ~keeper_name
-      ~(resolution : Keeper_event_queue.hitl_resolution)
-      ~phase
-  =
-  match settled_continuation_tool_name ~base_path ~resolution with
-  | Error _ as error -> error
-  | Ok None -> Ok Continuation_not_ready
-  | Ok (Some tool_name) ->
-    let approval_id = resolution.approval_id in
-    Result.map
-      (fun result -> Continuation_appended result)
-      (Keeper_chat_store.append_approval_lifecycle_once
-         ~base_dir:base_path
-         ~keeper_name
-         ~lifecycle:
-           { Keeper_chat_store.approval_id
-           ; tool_name
-           ; phase
-           ; artifact_ref = None
-           ; call_summary =
-               requested_call_summary ~base_path ~keeper_name ~approval_id
-           })
-;;
-
-let publish_settled_continuation ~keeper_name = function
-  | Error _ as error -> error
-  | Ok Continuation_not_ready -> Ok Continuation_projection_not_ready
-  | Ok (Continuation_appended result) ->
-    Result.map
-      (fun () -> Continuation_projection_recorded)
-      (publish_chat_projection_append ~keeper_name (Ok result))
-;;
-
 let ensure_settled_continuation_chat_projection
-      ~base_path
-      ~keeper_name
-      ~(resolution : Keeper_event_queue.hitl_resolution)
-  =
-  project_settled_continuation
-    ~base_path
-    ~keeper_name
-    ~resolution
-    ~phase:Keeper_approval_lifecycle.Approval_continuation_recorded
-  |> publish_settled_continuation ~keeper_name
+      ~base_path ~keeper_name ~(resolution : Keeper_event_queue.hitl_resolution) =
+  Result.bind (settled_continuation_readiness ~base_path ~resolution)
+    (fun readiness ->
+      Keeper_approval_queue_projection.record_settled_continuation
+        ~base_path ~keeper_name ~approval_id:resolution.approval_id ~readiness)
 ;;
 
 let record_native_continuation_delivery ~base_path ~keeper_name
@@ -2014,48 +1871,19 @@ let record_native_continuation_delivery ~base_path ~keeper_name
        | Ok {request; _} when request.keeper_name = keeper_name -> Ok (Some request.tool_name)
        | Ok _ -> Error "native continuation belongs to another Keeper"
        | Error error -> Error (grant_error_to_string error)) in
-  match tool_name with
-  | Error detail -> Error detail
-  | Ok tool_name ->
-    Keeper_chat_store.append_approval_lifecycle_once ~base_dir:base_path ~keeper_name
-      ~lifecycle:{ Keeper_chat_store.approval_id=resolution.approval_id; tool_name;
-        phase=Keeper_approval_lifecycle.Approval_continuation_recorded; artifact_ref=None;
-        call_summary=requested_call_summary ~base_path ~keeper_name ~approval_id:resolution.approval_id }
-    |> Result.map (fun appended -> Continuation_appended appended)
-    |> publish_settled_continuation ~keeper_name
+  Result.bind tool_name (fun tool_name ->
+    Keeper_approval_queue_projection.record_settled_continuation
+      ~base_path ~keeper_name ~approval_id:resolution.approval_id
+      ~readiness:(Continuation_ready tool_name))
 ;;
 
-(* #32956: the turn that received the replay failed after the provider
-   answered, so the model has already seen the evidence. The receipt settles
-   the continuation slot as failed; the intake then retires the queued wake
-   instead of carrying the same evidence into every later cycle. The WARN is
-   written once, when the row is appended, and names the route, so a fleet
-   grep counts failed continuations by route rather than calls. *)
 let ensure_failed_continuation_chat_projection
-      ~base_path
-      ~keeper_name
-      ~(resolution : Keeper_event_queue.hitl_resolution)
-      ~(route : Keeper_runtime_failure_route.route)
-  =
-  let projected =
-    project_settled_continuation
-      ~base_path
-      ~keeper_name
-      ~resolution
-      ~phase:Keeper_approval_lifecycle.Approval_continuation_failed
-  in
-  (match projected with
-   | Ok (Continuation_appended (Keeper_chat_store.Appended _)) ->
-     Log.Keeper.warn
-       "HITL_APPROVAL_CONTINUATION_FAILED: id=%s keeper=%s route=%s class=%s"
-       resolution.approval_id
-       keeper_name
-       (Keeper_runtime_failure_route.route_kind_label route)
-       (Keeper_runtime_failure_route.route_class_label route)
-   | Ok (Continuation_appended (Keeper_chat_store.Already_present _))
-   | Ok Continuation_not_ready
-   | Error _ -> ());
-  publish_settled_continuation ~keeper_name projected
+      ~base_path ~keeper_name ~(resolution : Keeper_event_queue.hitl_resolution)
+      ~(route : Keeper_runtime_failure_route.route) =
+  Result.bind (settled_continuation_readiness ~base_path ~resolution)
+    (fun readiness ->
+      Keeper_approval_queue_projection.record_failed_continuation
+        ~base_path ~keeper_name ~approval_id:resolution.approval_id ~readiness ~route)
 ;;
 
 (* ── Nonblocking submission ───────────────────────────────── *)

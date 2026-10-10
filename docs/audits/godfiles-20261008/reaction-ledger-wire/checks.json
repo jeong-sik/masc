@@ -1,0 +1,42 @@
+{
+  "date": "2026-10-09",
+  "parent": "3bca54d25f1f04c47623408888f87cf54995b718",
+  "build": {
+    "command": "opam exec -- dune build --root . -j 4 test/test_keeper_reaction_ledger.exe test/test_keeper_event_queue_state_v2.exe",
+    "exit_code": 0,
+    "log": "build.log"
+  },
+  "tests": [
+    {
+      "command": [
+        "_build/default/test/test_keeper_reaction_ledger.exe",
+        "--color=never"
+      ],
+      "exit_code": 0,
+      "log": "ledger.log",
+      "executed_cases": 31
+    },
+    {
+      "command": [
+        "_build/default/test/test_keeper_event_queue_state_v2.exe",
+        "test",
+        "persistence",
+        "9-10",
+        "--color=never"
+      ],
+      "exit_code": 0,
+      "log": "ack-projection.log",
+      "executed_cases": 2
+    }
+  ],
+  "executable_sha256": {
+    "_build/default/test/test_keeper_reaction_ledger.exe": "ee80ab0e75df5982d271bf86aa4f82686df2e0fd72682a5571111bd2452e603e",
+    "_build/default/test/test_keeper_event_queue_state_v2.exe": "a68daca029e8a24bfd44857c989a2ef364cfd136cbe2719a2506e1fa7b373f19"
+  },
+  "initial_validation": "initial-checks.json",
+  "scope": "Focused macOS compilation and existing isolated real ledger/evidence/cache/ACK projection scenarios. No provider/live Keeper/UI/full CI/installation/deployment or whole-stack proof.",
+  "final_blank_line_cleanup": {
+    "build_exit_code": 0,
+    "executables_identical_to_tested": true
+  }
+}

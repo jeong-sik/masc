@@ -544,8 +544,17 @@ let prepare_agent_setup
            ~dynamic_context)
   in
   let agent_name = meta.name in
+  let* tool_descriptors = match Keeper_task_skill_turn.descriptors task_skill_selection with
+    | Some descriptors -> Ok descriptors
+    | None ->
+        let snapshot = Keeper_lane_addon_runtime.snapshot ~config ~keeper_name:meta.name in
+        Ok (Keeper_tool_descriptor.all_descriptors ()
+          @ List.map Keeper_lane_addon_descriptor.create snapshot.exports) in
+  let* task_skill_selection = Keeper_task_skill_turn.with_descriptors
+      ~descriptors:tool_descriptors ~snapshot:skill_snapshot task_skill_selection
+    |> Result.map_error Keeper_task_skill_turn.core_error in
   let global_skill_catalog, skill_projection_diagnostics =
-    Keeper_skill_catalog.of_snapshot skill_snapshot
+    Keeper_skill_catalog.of_snapshot ~descriptors:tool_descriptors skill_snapshot
   in
   let snapshot_rev =
     Skill_catalog_snapshot.snapshot_revision_to_string
@@ -584,12 +593,13 @@ let prepare_agent_setup
          (Keeper_skill_catalog.error_to_string row.error))
     task_skill_selection.unprojectable;
   let capability_surface =
-    Keeper_capability_surface.create
+    Keeper_capability_surface.create_with_descriptors
+      ~tool_descriptors
       ~tool_deny:profile_defaults.Keeper_types_profile.tool_deny
       ~sandbox_profile:meta.sandbox_profile
       ~skill_names
       ~global_skill_catalog
-      ~skill_inventory:(Keeper_skill_inventory.of_snapshot skill_snapshot)
+      ~skill_inventory:(Keeper_skill_inventory.of_snapshot ~descriptors:tool_descriptors skill_snapshot)
       ~task_skills:(Keeper_task_skill_turn.skills task_skill_selection)
   in
   (* A deny entry that names nothing is refused where the profile is loaded

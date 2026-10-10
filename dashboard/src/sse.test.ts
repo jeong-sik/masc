@@ -26,7 +26,7 @@ describe('Keeper operation server push', () => {
       streamState: null,
       deliveryProvenance: operationDeliveryProvenance(
         operationId,
-        'terminal_assistant',
+        'terminal_result',
       ),
       details: null,
     })

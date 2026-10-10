@@ -145,17 +145,9 @@ let recent_direct_conversation_of_messages
           ; content
           }
       | Keeper_chat_store.Role.Assistant ->
-        (match m.kind with
-         | Keeper_chat_store.Row_kind.Transport_failure -> None
-         | Keeper_chat_store.Row_kind.Utterance ->
-           (match m.audio with
-            | Some _ -> None
-            | None ->
-              Some
-                { role = Assistant
-                ; speaker_label = None
-                ; content
-                }))
+        (match m.audio with
+         | Some _ -> None
+         | None -> Some { role = Assistant; speaker_label = None; content })
       | Keeper_chat_store.Role.Tool ->
         (match m.tool_call_name with
          | None -> None
@@ -168,7 +160,7 @@ let recent_direct_conversation_of_messages
                ; speaker_label = None
                ; content = name
                })
-      | Keeper_chat_store.Role.System -> None)
+      | Keeper_chat_store.Role.System | Keeper_chat_store.Role.Request_failure -> None)
   |> take_last limit
 ;;
 
@@ -261,46 +253,26 @@ let utterance_spoke (message : Keeper_chat_store.chat_message) =
 let acknowledged_turn_refs messages =
   List.fold_left
     (fun refs (message : Keeper_chat_store.chat_message) ->
-      match message.role, message.kind, message.turn_ref with
-      | Keeper_chat_store.Role.Assistant,
-        Keeper_chat_store.Row_kind.Utterance,
-        Some turn_ref ->
+      match message.role, message.turn_ref with
+      | Keeper_chat_store.Role.Assistant, Some turn_ref ->
         if utterance_spoke message
-        then StringSet.add (Ids.Turn_ref.to_string turn_ref) refs
-        else refs
-      | Keeper_chat_store.Role.Assistant,
-        Keeper_chat_store.Row_kind.Transport_failure,
-        _
-      | Keeper_chat_store.Role.Assistant,
-        Keeper_chat_store.Row_kind.Utterance,
-        None
-      | Keeper_chat_store.Role.User, _, _
-      | Keeper_chat_store.Role.System, _, _
-      | Keeper_chat_store.Role.Tool, _, _ -> refs)
-    StringSet.empty
-    messages
+        then StringSet.add (Ids.Turn_ref.to_string turn_ref) refs else refs
+      | Keeper_chat_store.Role.Assistant, None
+      | (Keeper_chat_store.Role.User | Keeper_chat_store.Role.System
+        | Keeper_chat_store.Role.Tool | Keeper_chat_store.Role.Request_failure), _ -> refs)
+    StringSet.empty messages
 ;;
 
 let answered_delivery_keys messages =
   List.filter_map
     (fun (message : Keeper_chat_store.chat_message) ->
-      match message.role, message.kind, message.delivery_provenance with
-      | Keeper_chat_store.Role.Assistant,
-        Keeper_chat_store.Row_kind.Utterance,
-        Some provenance ->
+      match message.role, message.delivery_provenance with
+      | Keeper_chat_store.Role.Assistant, Some provenance ->
         if utterance_spoke message
-        then Some provenance.Keeper_chat_delivery_identity.delivery_key
-        else None
-      | Keeper_chat_store.Role.Assistant,
-        Keeper_chat_store.Row_kind.Transport_failure,
-        _
-      | Keeper_chat_store.Role.Assistant,
-        Keeper_chat_store.Row_kind.Utterance,
-        None
-      | Keeper_chat_store.Role.User, _, _
-      | Keeper_chat_store.Role.System, _, _
-      | Keeper_chat_store.Role.Tool, _, _ ->
-        None)
+        then Some provenance.Keeper_chat_delivery_identity.delivery_key else None
+      | Keeper_chat_store.Role.Assistant, None
+      | (Keeper_chat_store.Role.User | Keeper_chat_store.Role.System
+        | Keeper_chat_store.Role.Tool | Keeper_chat_store.Role.Request_failure), _ -> None)
     messages
 ;;
 
@@ -343,6 +315,7 @@ let pending_user_lines ?ack_id (messages : Keeper_chat_store.chat_message list) 
            answered_deliveries
            message.delivery_provenance)
     | Keeper_chat_store.Role.Assistant, _
+    | Keeper_chat_store.Role.Request_failure, _
     | Keeper_chat_store.Role.System, _
     | Keeper_chat_store.Role.Tool, _ -> false)
 ;;
@@ -465,6 +438,7 @@ let fleet_messages_of_messages
             | Surface_ref.Gate _ ) )
       | Keeper_chat_store.Role.User, None
       | Keeper_chat_store.Role.Assistant, _
+      | Keeper_chat_store.Role.Request_failure, _
       | Keeper_chat_store.Role.System, _
       | Keeper_chat_store.Role.Tool, _ -> false)
     |> List.rev

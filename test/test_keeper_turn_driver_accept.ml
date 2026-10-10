@@ -256,7 +256,7 @@ let test_open_terminal_state_keeps_empty_response_rejection () =
          (Agent_core.Error.to_string error))
   | Ok _ -> Alcotest.fail "ordinary empty response was incorrectly accepted"
 
-let test_replay_projection_failure_preserves_provider_success () =
+let test_replay_projection_failure_rejects_completed_attempt () =
   let open Agent_core.Types in
   let canonical_prefix =
     [ message
@@ -271,20 +271,14 @@ let test_replay_projection_failure_preserves_provider_success () =
     checkpoint_with_messages [ message ~role:User [ Text "unrelated history" ] ]
   in
   let outcomes =
-    Masc.Keeper_turn_driver.For_testing.project_provider_attempt_result
-      ~replay_prefix_projection:
+    Masc.Keeper_attempt_checkpoint.project
+      ~projection:
         (Masc.Keeper_replay_prefix.media_degraded
            ~canonical_prefix
            ~dispatch_prefix)
       (Ok (run_result ~checkpoint:drifted_checkpoint ()))
   in
-  (match Masc.Keeper_turn_driver.For_testing.provider_result outcomes with
-   | Ok _ -> ()
-   | Error error ->
-     Alcotest.failf
-       "provider success source was overwritten: %s"
-       (Agent_core.Error.to_string error));
-  match Masc.Keeper_turn_driver.For_testing.turn_result outcomes with
+  match outcomes.Masc.Keeper_attempt_checkpoint.turn_result with
   | Error (Agent_core.Error.Internal detail) ->
     Alcotest.(check bool)
       "local replay-prefix drift fails the turn explicitly"
@@ -780,9 +774,8 @@ let test_reject_reason_describes_thinking_only_response () =
 
 let test_finalization_blank_response_is_typed_accept_rejection () =
   let result =
-    Masc.Keeper_agent_run.For_testing.normalize_response_text_for_finalization
+    Masc.Keeper_turn_response_contract.normalize_response_text_for_finalization
       ~runtime_id:"ollama.gemma4-26b-a4b-qat"
-      ~initial_messages:[]
       ~run_result:(run_result ())
       ~text:""
       ~tool_names:[]
@@ -832,9 +825,8 @@ let test_finalization_does_not_surface_hidden_reasoning () =
       ()
   in
   let finalize tool_names =
-    Masc.Keeper_agent_run.For_testing.normalize_response_text_for_finalization
+    Masc.Keeper_turn_response_contract.normalize_response_text_for_finalization
       ~runtime_id:"runtime.reasoning-model"
-      ~initial_messages:[]
       ~run_result:response
       ~text:""
       ~tool_names
@@ -1619,9 +1611,9 @@ let () =
             `Quick
             test_open_terminal_state_keeps_empty_response_rejection;
           Alcotest.test_case
-            "replay projection failure preserves provider success"
+            "replay projection failure rejects completed attempt"
             `Quick
-            test_replay_projection_failure_preserves_provider_success;
+            test_replay_projection_failure_rejects_completed_attempt;
           Alcotest.test_case
             "strict tool_choice is relaxed to auto"
             `Quick

@@ -1,0 +1,6 @@
+{
+  "parent": "3bca54d25f1f04c47623408888f87cf54995b718",
+  "root_retained_bodies_identical_except_explicit_transition_source_annotation": true,
+  "public_interface_byte_identical": true,
+  "all_extracted_bodies_byte_identical_ignoring_final_blank_line": true
+}

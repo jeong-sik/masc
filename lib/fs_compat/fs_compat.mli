@@ -305,12 +305,12 @@ val save_file_atomic : string -> string -> (unit, string) Result.t
 val save_file_atomic_rename_only : string -> string -> (unit, string) Result.t
 
 type atomic_replace_failure_stage =
-  Atomic_write.atomic_replace_failure_stage =
+  Atomic_replace.atomic_replace_failure_stage =
   | Before_rename
   | After_rename
 
 type atomic_replace_failure =
-  Atomic_write.atomic_replace_failure =
+  Atomic_replace.atomic_replace_failure =
   { path : string
   ; stage : atomic_replace_failure_stage
   ; exception_ : exn
@@ -328,7 +328,9 @@ val save_file_atomic_strict_staged
     successfully. This supports process-restart recovery, not hardware or
     power-loss persistence, and does not use Darwin [F_FULLFSYNC]. Transaction
     owners must converge any dependent in-memory publication before
-    propagating an [After_rename] failure. *)
+    propagating an [After_rename] failure. Cancellation is re-raised with its
+    original exception and backtrace after staging cleanup. A target already
+    published by rename remains in place. *)
 
 val write_file_atomic_strict_staged_blocking
   : string
@@ -346,8 +348,9 @@ val write_file_atomic_strict_staged
     binary channel and runs synchronously inside the blocking replacement job
     (a system thread when called from Eio). It must not perform Eio effects,
     close the channel, or retain it. The channel is closed before payload sync
-    and rename. Callback exceptions, including cancellation, preserve the
-    original exception and backtrace in a [Before_rename] failure. *)
+    and rename. Ordinary callback failures preserve the original exception
+    and backtrace in a [Before_rename] failure. Cancellation is re-raised with
+    its original exception and backtrace after staging cleanup. *)
 
 (** Atomic replacement whose payload and parent-directory fsyncs are mandatory. *)
 val save_file_atomic_strict : string -> string -> (unit, string) Result.t
@@ -809,9 +812,9 @@ val atomic_orphan_cleanup_failure_to_string
 (** No-follow orphan cleanup, bounded by the named staging inventory: it
     scans exactly [base_path]. Every failed mutation or unexpected
     orphan-shaped entry is returned in the typed report. The caller must own
-    stable directory identities and quiesce the matching temp namespace; see
-    {!Atomic_write.cleanup_atomic_orphans} for the OCaml 5.4 dirfd
-    limitation. *)
+    stable directory identities and quiesce the matching temp namespace.
+    Portable [Unix] operations validate inode identity before mutation but
+    cannot make replacement of intermediate path components atomic. *)
 val cleanup_atomic_orphans
   :  ownership_root:string
   -> base_path:string

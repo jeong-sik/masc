@@ -22,14 +22,15 @@ type tool_call = {
   args : string;
 }
 
-(* RFC-0232 P1: the lane role is a closed sum parsed once at the read
-   boundary; consumers match exhaustively instead of comparing role
-   strings. On-disk labels are unchanged ("user"/"assistant"/"tool"). *)
+(** Closed transcript row classification. Assistant is Keeper speech;
+    Request_failure is a server-owned request result and cannot acknowledge
+    input or enter conversation memory. Unknown labels are refused. *)
 module Role = struct
   type t =
     | User
     | Assistant
     | System
+    | Request_failure
     | Tool
 
   let to_label = function
@@ -37,47 +38,21 @@ module Role = struct
     | Assistant -> "assistant"
     | System -> "system"
     | Tool -> "tool"
+    | Request_failure -> "request_failure"
 
   let of_label = function
     | "user" -> Some User
     | "assistant" -> Some Assistant
     | "system" -> Some System
     | "tool" -> Some Tool
+    | "request_failure" -> Some Request_failure
     | _ -> None
 
   let equal a b =
     match a, b with
     | User, User | Assistant, Assistant | System, System | Tool, Tool -> true
-    | (User | Assistant | System | Tool), _ -> false
-end
-
-(* What an assistant line *is*, declared by the writer at append time.
-   [Utterance] is something the keeper actually said; [Transport_failure]
-   is the server persisting a failed request terminal ("Keeper request
-   failed: ...") so the operator still sees the failure after a reload.
-   Readers branch on the type: a transport failure is not a self reply —
-   it does not advance the lane watermark, so the user line it failed to
-   answer stays pending until the keeper's next real utterance — and it
-   is never quoted back as the keeper's own words. On disk the field is
-   ["kind"], absent for utterances so pre-existing rows read unchanged. *)
-module Row_kind = struct
-  type t =
-    | Utterance
-    | Transport_failure
-
-  let to_label = function
-    | Utterance -> "utterance"
-    | Transport_failure -> "transport_failure"
-
-  let of_label = function
-    | "utterance" -> Some Utterance
-    | "transport_failure" -> Some Transport_failure
-    | _ -> None
-
-  let equal a b =
-    match a, b with
-    | Utterance, Utterance | Transport_failure, Transport_failure -> true
-    | (Utterance | Transport_failure), _ -> false
+    | Request_failure, Request_failure -> true
+    | (User | Assistant | System | Tool | Request_failure), _ -> false
 end
 
 type stream_lifecycle_event =
@@ -179,19 +154,14 @@ type chat_message = {
   speaker : speaker option;
   audio : audio_clip option;
   blocks : Keeper_chat_blocks.chat_block list option;
-      (* RFC-0235 P3: rich chat blocks parsed from assistant reply text.
-         Persisted server-side so the dashboard can prefer backend blocks
-         over its local parser. [None] on rows written before this field
-         and on non-assistant rows. *)
+      (* Completed rich output persisted by the producer. Assistant speech
+         has a default text projection; server failure records retain only
+         explicitly completed output. None means no persisted blocks. *)
   mentions : Keeper_identity.Keeper_id.t list;
       (* RFC-0232 §3.3: parsed once at append from the persisted content
          (plus connector-provided explicit mentions); [] = none.  Rows
          written before P4 lack the field and read as []; the offline
          backfill tool stamps them. *)
-  kind : Row_kind.t;
-      (* Absent kind means an utterance. A present kind must decode to a
-         known label; invalid labels or values invalidate the row, so they
-         cannot acknowledge pending input as keeper speech. *)
   turn_ref : Ids.Turn_ref.t option;
       (* RFC-0233 §7: "<trace_id>#<absolute_turn>" join key for the turn
          that produced this row.  Stamped by [append_turn] /

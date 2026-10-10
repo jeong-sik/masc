@@ -34,7 +34,7 @@ const row = Schema.Union(
     state: Schema.Struct({ kind: Schema.Literal('browser_executor'), activity: Schema.Literal('on', 'off', 'unobserved'), registered: Schema.Boolean }) }),
   Schema.Struct({ ...common, selection: Schema.Struct({ kind: Schema.Literal('machine'), machine: Schema.Literal('msx', 'dos') }),
     state: Schema.Struct({ kind: Schema.Literal('machine'), activity: Schema.Literal('on', 'off', 'unobserved'),
-      publication: Schema.Literal('no_screen', 'stable', 'running') }) }),
+      publication: Schema.Literal('no_screen', 'stable', 'running', 'unavailable') }) }),
   Schema.Struct({ ...common, selection: Schema.Struct({ kind: Schema.Literal('declaration'), source_path: text }),
     state: Schema.Struct({ kind: Schema.Literal('package'), declaration, instances: Schema.Array(instance) }) }),
   Schema.Struct({ ...common, selection: Schema.Struct({ kind: Schema.Literal('manual_instance'), instance_id: text, incarnation: text }),

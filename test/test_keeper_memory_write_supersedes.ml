@@ -90,6 +90,17 @@ let with_env f =
   f { config; keepers_dir }
 ;;
 
+(* Supersession tests start from an already admitted authored fact. *)
+let seed_current env (meta : Masc.Keeper_meta_contract.keeper_meta) claim =
+  let now = Unix.gettimeofday () in
+  let fact = Types.observed ~claim ~category:Types.Fact ~now
+    ~origin:{kind=Types.Authored; trace_id="fixture"} in
+  match Current.upsert_fact ~keepers_dir:env.keepers_dir ~keeper_id:meta.name ~now
+      ~source:{Current.kind=Current.Explicit_write; trace_id="fixture"} fact with
+  | Ok _ -> Types.memory_id fact
+  | Error _ -> Alcotest.fail "current fixture admission failed"
+;;
+
 let write env meta ?supersedes ?derivation content =
   let args =
     `Assoc
@@ -149,9 +160,7 @@ let test_supersede_replaces_the_earlier_claim () =
   @@ fun env ->
   let meta = make_meta "supersede-a" in
   let keeper_id = meta.name in
-  let first = write env meta "position: stage 1, checkpoint 3" in
-  check_ok "first write" first;
-  let first_id = string_field "memory_id" first in
+  let first_id = seed_current env meta "position: stage 1, checkpoint 3" in
   let second = write env meta ~supersedes:first_id "position: stage 2, checkpoint 1" in
   check_ok "superseding write" second;
   let second_id = string_field "memory_id" second in
@@ -212,7 +221,7 @@ let test_supersede_reports_the_derived_facts_it_invalidates () =
   @@ fun env ->
   let meta = make_meta "supersede-cascade" in
   let keeper_id = meta.name in
-  let premise_id = string_field "memory_id" (write env meta "the build is green") in
+  let premise_id = seed_current env meta "the build is green" in
   let derived = write env meta ~derivation:("green_means_ready", [ premise_id ]) "ready to release" in
   check_ok "derived write" derived;
   let derived_id = string_field "memory_id" derived in
@@ -245,7 +254,7 @@ let test_successor_cannot_rest_on_the_fact_it_replaces () =
   @@ fun env ->
   let meta = make_meta "supersede-own-premise" in
   let keeper_id = meta.name in
-  let premise_id = string_field "memory_id" (write env meta "stage 1 cleared") in
+  let premise_id = seed_current env meta "stage 1 cleared" in
   let before_ids = current_ids ~keepers_dir:env.keepers_dir ~keeper_id in
   let before_revision = revision ~keepers_dir:env.keepers_dir ~keeper_id in
   let label = "successor rests on the target" in
@@ -337,9 +346,8 @@ let test_refusals_write_nothing () =
   let meta = make_meta "supersede-refusals" in
   let other = make_meta "supersede-other" in
   let keeper_id = meta.name in
-  let own = write env meta "position: stage 1" in
-  let own_id = string_field "memory_id" own in
-  let others_id = string_field "memory_id" (write env other "someone else's claim") in
+  let own_id = seed_current env meta "position: stage 1" in
+  let others_id = seed_current env other "someone else's claim" in
   let before_ids = current_ids ~keepers_dir:env.keepers_dir ~keeper_id in
   let before_revision = revision ~keepers_dir:env.keepers_dir ~keeper_id in
   let before_events = List.length (events_for ~keepers_dir:env.keepers_dir ~keeper_id) in
@@ -427,9 +435,7 @@ let test_librarian_dropped_target_still_writes_the_claim () =
   @@ fun env ->
   let meta = make_meta "supersede-dropped" in
   let keeper_id = meta.name in
-  let first = write env meta "position: stage 1, checkpoint 3" in
-  check_ok "first write" first;
-  let first_id = string_field "memory_id" first in
+  let first_id = seed_current env meta "position: stage 1, checkpoint 3" in
   let reason = "transient position; the save file holds it" in
   let dropping_revision =
     match
@@ -527,7 +533,7 @@ let test_own_superseded_target_is_refused_with_its_removal () =
   @@ fun env ->
   let meta = make_meta "supersede-twice" in
   let keeper_id = meta.name in
-  let first_id = string_field "memory_id" (write env meta "position: stage 1") in
+  let first_id = seed_current env meta "position: stage 1" in
   let second = write env meta ~supersedes:first_id "position: stage 2" in
   check_ok "first supersession" second;
   let second_id = string_field "memory_id" second in
@@ -551,9 +557,7 @@ let test_own_superseded_target_is_refused_with_its_removal () =
 ;;
 
 let drop_authored_target env meta =
-  let first = write env meta "the earlier authored claim" in
-  check_ok "authored fixture write" first;
-  let memory_id = string_field "memory_id" first in
+  let memory_id = seed_current env meta "the earlier authored claim" in
   let keeper_id = meta.name in
   (match Current.replace
       ~dropped_statements:[ { Types.memory_id; reason = "Librarian retired the claim" } ]
@@ -614,7 +618,7 @@ let test_latest_explicit_retraction_overrules_an_older_librarian_drop () =
   let meta = make_meta "supersede-latest-removal" in
   let keeper_id = meta.name in
   let memory_id = drop_authored_target env meta in
-  check_ok "restore the same authored identity" (write env meta "the earlier authored claim");
+  ignore (seed_current env meta "the earlier authored claim");
   (match Current.retract_fact ~keepers_dir:env.keepers_dir ~keeper_id
       ~now:(Unix.gettimeofday ())
       ~source:{ Current.kind = Current.Explicit_retract; trace_id = "operator-cleanup" }
@@ -639,7 +643,7 @@ let test_readded_target_is_replaced_despite_an_older_removal_observation () =
    | Current.Removed _ -> ()
    | Current.No_removal_recorded | Current.Journal_unreadable _ ->
      Alcotest.fail "expected a readable earlier removal");
-  check_ok "another write restores the target" (write env meta "the earlier authored claim");
+  ignore (seed_current env meta "the earlier authored claim");
   let response = write env meta ~supersedes:memory_id "the proposed successor" in
   check_ok "the current snapshot wins over the old observation" response;
   Alcotest.(check string) "the restored target was actually superseded" memory_id
@@ -657,7 +661,7 @@ let test_search_names_each_current_match_origin () =
   @@ fun env ->
   let meta = make_meta "supersede-origin" in
   let keeper_id = meta.name in
-  let authored_id = string_field "memory_id" (write env meta "harbor status: authored note") in
+  let authored_id = seed_current env meta "harbor status: authored note" in
   let injected : Types.fact =
     Types.observed
       ~claim:"harbor status: librarian summary"

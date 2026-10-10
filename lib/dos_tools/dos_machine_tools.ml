@@ -16,11 +16,9 @@ module Make (Host : HOST) = struct
 
     The observation is text: a DOS text page is characters, and this lane
     hands them over as UTF-8 with code page 437 kept, so a keeper with no
-    vision runtime reads the game directly (RFC-0414). What makes the lane
-    playable is [settled]: the guest asked for a key {e and} the screen
-    stopped moving. [waiting_for_key] alone is not that — a program in its
-    own loop asks again 631 instructions after taking a key, with its
-    repaint half-written. *)
+    vision runtime reads the game directly (RFC-0414). [settled] samples empty keyboard polls and unchanged screen memory;
+    it does not establish a final prompt. Machine-step budget consumption,
+    actual guest instructions, and emulated clocks are reported separately. *)
 
 open Tool_args
 
@@ -63,6 +61,8 @@ let autosave_fields = function
 
 let ran_fields (r : Dos_lane.ran) =
   [ ("steps_run", `Int r.Dos_lane.steps_run)
+  ; ("instructions_run", `Int r.Dos_lane.instructions_run)
+  ; ("elapsed_cycles", `Int r.Dos_lane.elapsed_cycles)
   ; ("settled", `Bool r.Dos_lane.settled)
   ; ("input_requests", `Int r.Dos_lane.input_requests)
   ; ("keys_pressed", `Int r.Dos_lane.keys_pressed)
@@ -71,7 +71,7 @@ let ran_fields (r : Dos_lane.ran) =
   @ autosave_fields r.Dos_lane.autosave
 ;;
 
-(* A call runs up to [Dos_lane.max_steps_per_call] instructions under the
+(* A call runs up to [Dos_lane.max_steps_per_call] machine steps under the
    lane's stdlib lock, a noticeable fraction of a second. On a system thread
    the server's other fibers keep running meanwhile; a fiber that reaches
    the lock waits on its own thread too, since every lane call goes through
@@ -889,10 +889,9 @@ let handle_screen ~tool_name ~start_time ~base_path _args =
       (Ok observation)
 ;;
 
-(* The whole per-call ceiling: a call that settles stops early, so a large
-   default costs a quick program nothing, while a game whose screen change
-   takes a few million instructions (삼국지3's transitions take 3-4 million)
-   settles in one call instead of coming back busy. *)
+(* The existing per-call resource ceiling. Settling observations may stop
+   earlier; an explicit [until_ready=false] call runs this allowance without
+   treating an empty keyboard poll as a finished game transition. *)
 let default_steps = Dos_lane.max_steps_per_call
 
 let handle_step ~tool_name ~start_time ~base_path ~who args =
@@ -909,9 +908,10 @@ let handle_press ~tool_name ~start_time ~base_path ~who args =
     (off_domain @@ fun () ->
       let keys = get_string_list args "keys" in
       let steps = get_int args "steps" default_steps in
+      let until_ready = get_bool args "until_ready" true in
       match get_string_opt args "expected_program" with
-      | None -> Dos_lane.press ~who ~keys ~steps
-      | Some saves_name -> Dos_lane.press_into ~saves_name ~who ~keys ~steps)
+      | None -> Dos_lane.press ~who ~keys ~steps ~until_ready
+      | Some saves_name -> Dos_lane.press_into ~saves_name ~who ~keys ~steps ~until_ready)
 
 ;;
 
@@ -921,7 +921,7 @@ let handle_press ~tool_name ~start_time ~base_path ~who args =
 let press_into ~tool_name ~start_time ~base_path ~who ~saves_name ~keys =
   after_announcing @@
   of_lane_run ~base_path ~tool_name ~start_time
-    (off_domain @@ fun () -> Dos_lane.press_into ~saves_name ~who ~keys ~steps:default_steps)
+    (off_domain @@ fun () -> Dos_lane.press_into ~saves_name ~who ~keys ~steps:default_steps ~until_ready:true)
 ;;
 
 let handle_click ~tool_name ~start_time ~base_path ~who args =
@@ -938,7 +938,8 @@ let handle_type ~tool_name ~start_time ~base_path ~who args =
   after_announcing @@
   of_lane_run ~base_path ~tool_name ~start_time
     (off_domain @@ fun () -> Dos_lane.type_text ~who ~text:(get_string args "text" "")
-       ~steps:(get_int args "steps" default_steps))
+       ~steps:(get_int args "steps" default_steps)
+       ~until_ready:(get_bool args "until_ready" true))
 ;;
 
 (* Addresses arrive as hex strings ("b8000", "0xB8000") because that is how

@@ -5,90 +5,8 @@ open Result.Syntax
 
 let suffix = ".memory-current.json"
 
-type source_kind =
-  | Librarian
-  | Explicit_write
-  | Explicit_retract
-
-type source =
-  { kind : source_kind
-  ; trace_id : string
-  }
-
-(* schema-compat: [removal] moved here verbatim from below
-   [read_journal_tail] (#39289); this revision otherwise rewrites match arms
-   and adds error constructors. No persisted field, wire label, or decoder
-   changed, so no store version bump or migration. *)
-type removal =
-  { removed_in_revision : int
-  ; removed_at : float
-  ; removed_by : source
-  ; removed_origin : Keeper_memory_os_types.origin_kind
-  ; drop_reason : string option
-  }
-
-type supersession =
-  | Superseded_current
-  | Target_already_dropped of removal
-
-type support_invalidation =
-  { fact : fact
-  ; missing_premise_ids : string list
-  }
-
-type change =
-  { added : fact list
-  ; removed : fact list
-  ; retained : int
-  ; invalidated : support_invalidation list
-  }
-
-type upsert_error =
-  | Unsupported_derivation of support_invalidation
-  | Upsert_persistence_failed of string
-
-type retract_error =
-  | Retract_memory_id_invalid
-  | Retract_reason_empty
-  | Retract_fact_not_found of string
-  | Retract_persistence_failed of string
-
-type supersede_error =
-  | Supersede_memory_id_invalid
-  | Supersede_self
-  | Supersede_target_not_current of string
-  | Supersede_target_removed of removal
-  | Supersede_target_not_authored of string
-  | Supersede_successor_rests_on_target of support_invalidation
-  | Supersede_unsupported_derivation of support_invalidation
-  | Supersede_journal_unreadable of string
-  | Supersede_persistence_failed of string
-
-type retraction =
-  { memory_id : string
-  ; reason : string
-  }
-
-type retract_batch_error =
-  | Retract_batch_empty
-  | Retract_batch_memory_id_invalid of { index : int }
-  | Retract_batch_reason_empty of { index : int }
-  | Retract_batch_duplicate_memory_id of string
-  | Retract_batch_snapshot_sha256_invalid
-  | Retract_batch_snapshot_conflict of
-      { expected_revision : int
-      ; observed_revision : int option
-      ; expected_snapshot_sha256 : string
-      ; observed_snapshot_sha256 : string option
-      }
-  | Retract_batch_fact_not_found of string
-  | Retract_batch_plan_evidence_pending of
-      { plan_id : string
-      ; snapshot_revision : int
-      ; snapshot_sha256 : string
-      ; detail : string
-      }
-  | Retract_batch_persistence_failed of string
+include Keeper_memory_os_current_types
+open Keeper_memory_os_support_core
 
 let upsert_error_to_string = function
   | Unsupported_derivation invalidation ->
@@ -99,50 +17,7 @@ let upsert_error_to_string = function
   | Upsert_persistence_failed detail -> detail
 ;;
 
-type t =
-  { revision : int
-  ; updated_at : float
-  ; source : source
-  ; facts : fact list
-  ; change : change
-  }
-
-type commit_effect =
-  | Rewritten
-  | Unchanged
-
-type librarian_failure_kind =
-  | Prompt_render_failure
-  | Execution_clock_unavailable
-  | Exact_setup_failure
-  | Exact_execution_failure
-  | Domain_output_invalid
-  | Absorb_judgment_failure
-  | Memory_snapshot_write_failure
-  | Runtime_context_unavailable
-  | Lane_cancelled
-  | Unhandled_exception
-
-type journal_entry =
-  | Journal_committed of
-      { recorded_at : float
-      ; revision : int
-      ; source : source
-      ; change : change
-      ; dropped : Keeper_memory_os_types.dropped_statement list option
-      }
-  | Journal_failed of
-      { recorded_at : float
-      ; trace_id : string
-      ; kind : librarian_failure_kind
-      ; detail : string
-      ; snapshot_present : bool
-      }
-  | Journal_quarantined of
-      { recorded_at : float
-      ; rejection : string
-      ; rejected_path : string
-      }
+let merge_basis = Keeper_memory_os_support_core.merge_basis
 
 let path_for_keepers_dir ~keepers_dir ~keeper_id =
   Filename.concat keepers_dir (keeper_id ^ suffix)
@@ -183,9 +58,17 @@ type official_range_id =
   ; turns : (int * Ids.Turn_ref.t) list
   }
 
+type explicit_write_range_id =
+  { receipt_scope : string
+  ; after_sequence : int
+  ; through_sequence : int
+  ; input_sha256 : string
+  }
+
 type consumed_range =
   | Atom_range of durable_range_id
   | Official_range of official_range_id
+  | Explicit_write_range of explicit_write_range_id
 
 type durable_range_receipt =
   | Prepared of
@@ -344,11 +227,42 @@ let official_range_id_of_json = function
   | _ -> wire_here Expected_object
 ;;
 
-(* schema-compat: atom receipts retain their exact [range_id] wire shape.
-   Official receipts name a distinct, mutually exclusive identity field. *)
+let explicit_write_range_id_to_json (range : explicit_write_range_id) =
+  `Assoc [ "receipt_scope", `String range.receipt_scope
+         ; "after_sequence", `Int range.after_sequence
+         ; "through_sequence", `Int range.through_sequence
+         ; "input_sha256", `String range.input_sha256 ]
+;;
+
+let explicit_write_range_id_of_json = function
+  | `Assoc fields ->
+    let* () = exact_field_names_result
+      ["receipt_scope"; "after_sequence"; "through_sequence"; "input_sha256"] fields in
+    let* receipt_scope = wire_string_field "receipt_scope" fields in
+    let* after_sequence = wire_int_field "after_sequence" fields in
+    let* through_sequence = wire_int_field "through_sequence" fields in
+    let* input_sha256 = wire_string_field "input_sha256" fields in
+    let* () =
+      if String.trim receipt_scope = "" then wire_fail [Wire_field "receipt_scope"] Blank_string
+      else if receipt_scope <> String.trim receipt_scope then
+        wire_fail [Wire_field "receipt_scope"] (Unknown_token receipt_scope)
+      else Ok () in
+    let* () = if after_sequence < 0 then wire_fail [Wire_field "after_sequence"] Negative
+      else Ok () in
+    let* () = if through_sequence <= after_sequence then
+        wire_fail [Wire_field "through_sequence"] Not_ascending
+      else Ok () in
+    let+ () = if String_util.is_lowercase_sha256_hex input_sha256 then Ok ()
+      else wire_fail [Wire_field "input_sha256"] (Unknown_token input_sha256) in
+    {receipt_scope; after_sequence; through_sequence; input_sha256}
+  | _ -> wire_here Expected_object
+;;
+
+(* Each source kind names its own mutually exclusive receipt identity field. *)
 let consumed_range_field = function
   | Atom_range range -> "range_id", durable_range_id_to_json range
   | Official_range range -> "official_range_id", official_range_id_to_json range
+  | Explicit_write_range range -> "explicit_write_range_id", explicit_write_range_id_to_json range
 ;;
 
 let durable_range_receipt_to_json = function
@@ -377,13 +291,20 @@ let durable_range_receipt_of_json = function
         let* json = wire_json_field key fields in
         Result.map wrap (wire_at (Wire_field key) (parse json))
       in
-      match List.mem_assoc "range_id" fields, List.mem_assoc "official_range_id" fields with
-      | true, false -> decode "range_id" durable_range_id_of_json (fun range -> Atom_range range)
-      | false, true -> decode "official_range_id" official_range_id_of_json (fun range -> Official_range range)
-      | true, true -> wire_here (Field_set_mismatch
+      match List.mem_assoc "range_id" fields, List.mem_assoc "official_range_id" fields,
+            List.mem_assoc "explicit_write_range_id" fields with
+      | true, false, false -> decode "range_id" durable_range_id_of_json (fun range -> Atom_range range)
+      | false, true, false -> decode "official_range_id" official_range_id_of_json (fun range -> Official_range range)
+      | false, false, true -> decode "explicit_write_range_id" explicit_write_range_id_of_json
+          (fun range -> Explicit_write_range range)
+      | true, true, false -> wire_here (Field_set_mismatch
           { missing = []; unexpected = [ "official_range_id" ] })
-      | false, false -> wire_here (Field_set_mismatch
-          { missing = [ "range_id or official_range_id" ]; unexpected = [] })
+      | (true, false, true | false, true, true) -> wire_here (Field_set_mismatch
+          { missing = []; unexpected = [ "explicit_write_range_id" ] })
+      | true, true, true -> wire_here (Field_set_mismatch
+          { missing = []; unexpected = [ "official_range_id"; "explicit_write_range_id" ] })
+      | false, false, false -> wire_here (Field_set_mismatch
+          { missing = [ "range_id or official_range_id or explicit_write_range_id" ]; unexpected = [] })
     in
     let* state = wire_string_field "state" fields in
     let* snapshot_revision = wire_int_field "snapshot_revision" fields in
@@ -491,11 +412,16 @@ let receipt_range_id = function
 let range_key = function
   | Atom_range range -> range.receipt_scope, `Atom
   | Official_range range -> range.receipt_scope, `Official
+  | Explicit_write_range range -> range.receipt_scope, `Explicit_write
 ;;
 
 let upsert_durable_range_receipt receipts receipt =
   let key = range_key (receipt_range_id receipt) in
-  receipt :: List.filter (fun prior -> range_key (receipt_range_id prior) <> key) receipts
+  receipt :: List.filter (fun prior ->
+    range_key (receipt_range_id prior) <> key
+    || (match receipt, prior with
+        | Prepared _, Committed _ -> true
+        | Prepared _, Prepared _ | Committed _, _ -> false)) receipts
 ;;
 
 let reconcile_durable_range_receipts
@@ -524,6 +450,10 @@ let reconcile_durable_range_receipts
              Some (Committed committed)
            | None | Some _ -> None))
       receipts
+    |> List.fold_left (fun kept receipt ->
+         let key = range_key (receipt_range_id receipt) in
+         if List.exists (fun prior -> range_key (receipt_range_id prior) = key) kept
+         then kept else kept @ [receipt]) []
   in
   if receipts = reconciled
   then Ok reconciled
@@ -652,85 +582,6 @@ let facts_of_json = function
 
 let facts_to_json facts =
   `List (List.map fact_to_json facts)
-;;
-
-module Identity_map = Map.Make (String)
-
-let fact_payload fact =
-  fact_to_json fact |> Yojson.Safe.to_string
-;;
-
-let derivations_supported current_ids derivations =
-  List.exists
-    (fun derivation ->
-       List.for_all
-         (fun premise_id -> Set_util.StringSet.mem premise_id current_ids)
-         derivation.premise_ids)
-    derivations
-;;
-
-let missing_premises_for current_ids derivations =
-  List.fold_left
-    (fun missing derivation ->
-       List.fold_left
-         (fun missing premise_id ->
-            if Set_util.StringSet.mem premise_id current_ids
-            then missing
-            else Set_util.StringSet.add premise_id missing)
-         missing
-         derivation.premise_ids)
-    Set_util.StringSet.empty
-    derivations
-  |> Set_util.StringSet.elements
-;;
-
-let support_closure_ids facts =
-  let rules =
-    List.concat_map
-      (fun fact ->
-         match fact.basis with
-         | Observed _ -> []
-         | Derived derivations ->
-           List.map
-             (fun derivation -> memory_id fact, derivation.premise_ids)
-             derivations)
-      facts
-    |> Array.of_list
-  in
-  let remaining = Array.map (fun (_, premise_ids) -> List.length premise_ids) rules in
-  let dependents = Hashtbl.create (Array.length rules) in
-  Array.iteri
-    (fun rule_index (_, premise_ids) ->
-       List.iter
-         (fun premise_id ->
-            let current = Hashtbl.find_opt dependents premise_id |> Option.value ~default:[] in
-            Hashtbl.replace dependents premise_id (rule_index :: current))
-         premise_ids)
-    rules;
-  let current = ref Set_util.StringSet.empty in
-  let pending = Queue.create () in
-  let activate identity =
-    if not (Set_util.StringSet.mem identity !current)
-    then (
-      current := Set_util.StringSet.add identity !current;
-      Queue.add identity pending)
-  in
-  List.iter
-    (fun fact ->
-       match fact.basis with
-       | Observed _ -> activate (memory_id fact)
-       | Derived _ -> ())
-    facts;
-  while not (Queue.is_empty pending) do
-    let identity = Queue.take pending in
-    Hashtbl.find_opt dependents identity
-    |> Option.value ~default:[]
-    |> List.iter (fun rule_index ->
-      remaining.(rule_index) <- remaining.(rule_index) - 1;
-      if remaining.(rule_index) = 0
-      then activate (fst rules.(rule_index)))
-  done;
-  !current
 ;;
 
 let support_invalidation_to_json invalidation =
@@ -1140,122 +991,6 @@ let read_with_snapshot_sha256 ~keepers_dir ~keeper_id =
   read_with_content ~keepers_dir ~keeper_id
   |> Result.map
        (Option.map (fun (snapshot, content) -> snapshot, sha256 content))
-;;
-
-let map_facts facts =
-  let rec loop map = function
-    | [] -> Ok map
-    | fact :: rest ->
-      let identity = memory_id fact in
-      if Identity_map.mem identity map
-      then Error (Printf.sprintf "duplicate Memory OS fact identity: %s" identity)
-      else loop (Identity_map.add identity fact map) rest
-  in
-  loop Identity_map.empty facts
-;;
-
-let compute_change ~previous ~next ~invalidated =
-  let* previous_by_id = map_facts previous in
-  let* next_by_id = map_facts next in
-  let added_rev, retained =
-    List.fold_left
-      (fun (added_rev, retained) next_fact ->
-         let identity = memory_id next_fact in
-         match Identity_map.find_opt identity previous_by_id with
-         | Some previous_fact
-           when String.equal (fact_payload previous_fact) (fact_payload next_fact) ->
-           added_rev, retained + 1
-         | Some _ | None -> next_fact :: added_rev, retained)
-      ([], 0)
-      next
-  in
-  let removed_rev =
-    List.fold_left
-      (fun removed_rev previous_fact ->
-         let identity = memory_id previous_fact in
-         match Identity_map.find_opt identity next_by_id with
-         | Some next_fact
-           when String.equal (fact_payload previous_fact) (fact_payload next_fact) ->
-           removed_rev
-         | Some _ | None -> previous_fact :: removed_rev)
-      []
-      previous
-  in
-  Ok
-    { added = List.rev added_rev
-    ; removed = List.rev removed_rev
-    ; retained
-    ; invalidated
-    }
-;;
-
-(* Truth maintenance over positive support sets. Observations seed a worklist;
-   each newly supported identity advances only the derivations that name it.
-   A derived fact activates when one whole derivation reaches zero missing
-   premises. Unsupported cycles never enter the worklist. *)
-let maintain_supported_facts facts =
-  let current_ids = support_closure_ids facts in
-  let current_rev, invalidated_rev =
-    List.fold_left
-      (fun (current_rev, invalidated_rev) fact ->
-         if Set_util.StringSet.mem (memory_id fact) current_ids
-         then fact :: current_rev, invalidated_rev
-         else
-           match fact.basis with
-           | Observed _ -> fact :: current_rev, invalidated_rev
-           | Derived derivations ->
-             let missing_premise_ids =
-               missing_premises_for current_ids derivations
-             in
-             current_rev, { fact; missing_premise_ids } :: invalidated_rev)
-      ([], [])
-      facts
-  in
-  List.rev current_rev, List.rev invalidated_rev
-;;
-
-(* The same claim bytes seen again: an observation outranks a derivation, and
-   a Board reference outranks the transcript because it names a source the
-   transcript cannot. Two Board references keep the first unless the second
-   names a comment under the same post the first only named as a post; the
-   second reading otherwise adds nothing the first did not. *)
-let merge_observation existing incoming =
-  match existing, incoming with
-  | Board { post_id; comment_id = None }, Board { post_id = incoming_post; comment_id = Some _ }
-    when Board_types.Post_id.to_string post_id
-         = Board_types.Post_id.to_string incoming_post ->
-    incoming
-  | Board _, (Board _ | Transcript) -> existing
-  | Transcript, Board _ -> incoming
-  | Transcript, Transcript -> Transcript
-;;
-
-let merge_basis existing incoming =
-  match existing, incoming with
-  | Observed existing, Observed incoming ->
-    Observed (merge_observation existing incoming)
-  | Observed existing, Derived _ -> Observed existing
-  | Derived _, Observed incoming -> Observed incoming
-  | Derived existing, Derived incoming ->
-    let derivations =
-      List.fold_left
-        (fun derivations candidate ->
-           if
-             List.exists
-               (fun current -> String.equal current.rule_id candidate.rule_id)
-               derivations
-           then
-             List.map
-               (fun current ->
-                  if String.equal current.rule_id candidate.rule_id
-                  then candidate
-                  else current)
-               derivations
-           else derivations @ [ candidate ])
-        existing
-        incoming
-    in
-    Derived derivations
 ;;
 
 let librarian_failure_kind_to_string = function
@@ -2089,6 +1824,7 @@ let update_locked_with_output
       ?before_replace
       ?durable_range_id
       ?official_range_id
+      ?explicit_write_range_id
       ~equal_facts
       ~store_error
       ~keepers_dir
@@ -2106,6 +1842,14 @@ let update_locked_with_output
     | None -> Ok ()
     | Some range ->
       official_range_id_of_json (official_range_id_to_json range)
+      |> Result.map (fun _ -> ())
+      |> Result.map_error (fun error -> store_error (wire_error_to_string error))
+  in
+  let* () =
+    match explicit_write_range_id with
+    | None -> Ok ()
+    | Some range ->
+      explicit_write_range_id_of_json (explicit_write_range_id_to_json range)
       |> Result.map (fun _ -> ())
       |> Result.map_error (fun error -> store_error (wire_error_to_string error))
   in
@@ -2197,6 +1941,24 @@ let update_locked_with_output
              ~snapshot
            |> Result.map_error store_error
          in
+         let* () =
+           match explicit_write_range_id with
+           | None -> Ok ()
+           | Some range ->
+             let previous = List.find_map (function
+               | Committed {range_id=Explicit_write_range prior; _}
+                 when String.equal prior.receipt_scope range.receipt_scope -> Some prior
+               | Committed _ | Prepared _ -> None) durable_range_receipts in
+             let expected_after = match previous with
+               | None -> 0
+               | Some prior -> prior.through_sequence in
+             if range.after_sequence = expected_after
+                && range.through_sequence > expected_after
+             then Ok ()
+             else Error (store_error (Printf.sprintf
+               "explicit-write range frontier conflict scope=%s expected_after_sequence=%d actual_after_sequence=%d through_sequence=%d"
+               range.receipt_scope expected_after range.after_sequence range.through_sequence))
+         in
          let* next, output = build ~snapshot_content previous in
          let* source_lines =
            match
@@ -2236,6 +1998,7 @@ let update_locked_with_output
          let ranges =
            Option.to_list (Option.map (fun range -> Atom_range range) durable_range_id)
            @ Option.to_list (Option.map (fun range -> Official_range range) official_range_id)
+           @ Option.to_list (Option.map (fun range -> Explicit_write_range range) explicit_write_range_id)
          in
          let receipts_for make =
            List.fold_left (fun receipts range_id ->
@@ -2546,52 +2309,19 @@ let committed_range ~keepers_dir ~keeper_id select =
 let committed_durable_range ~keepers_dir ~keeper_id ~receipt_scope =
   committed_range ~keepers_dir ~keeper_id (function
     | Atom_range range when String.equal range.receipt_scope receipt_scope -> Some range
-    | Atom_range _ | Official_range _ -> None)
+    | Atom_range _ | Official_range _ | Explicit_write_range _ -> None)
 ;;
 
 let committed_official_range ~keepers_dir ~keeper_id ~receipt_scope =
   committed_range ~keepers_dir ~keeper_id (function
     | Official_range range when String.equal range.receipt_scope receipt_scope -> Some range
-    | Atom_range _ | Official_range _ -> None)
+    | Atom_range _ | Official_range _ | Explicit_write_range _ -> None)
 ;;
 
-let make_snapshot_from_maintained
-      ~previous
-      ~now
-      ~source
-      ~facts
-      ~invalidated
-      ()
-  =
-  let previous_facts, revision =
-    match previous with
-    | None -> [], 1
-    | Some snapshot -> snapshot.facts, snapshot.revision + 1
-  in
-  let+ change = compute_change ~previous:previous_facts ~next:facts ~invalidated in
-  { revision
-  ; updated_at = now
-  ; source
-  ; facts
-  ; change
-  }
-;;
-
-let make_snapshot
-      ~previous
-      ~now
-      ~source
-      ~facts
-      ()
-  =
-  let facts, invalidated = maintain_supported_facts facts in
-  make_snapshot_from_maintained
-    ~previous
-    ~now
-    ~source
-    ~facts
-    ~invalidated
-    ()
+let committed_explicit_write_range ~keepers_dir ~keeper_id ~receipt_scope =
+  committed_range ~keepers_dir ~keeper_id (function
+    | Explicit_write_range range when String.equal range.receipt_scope receipt_scope -> Some range
+    | Atom_range _ | Official_range _ | Explicit_write_range _ -> None)
 ;;
 
 (* Apply a librarian's disposition to whatever the snapshot holds when the
@@ -2636,6 +2366,8 @@ let apply_disposition
       ?dropped_statements
       ?durable_range_id
       ?official_range_id
+      ?explicit_write_range_id
+      ?(required_memory_ids = [])
       ~absorbed
       ~revisions
       ~keepers_dir
@@ -2807,6 +2539,7 @@ let apply_disposition
     ?dropped_statements
     ?durable_range_id
     ?official_range_id
+    ?explicit_write_range_id
     ~before_replace:write_absorbed_rows
     ~equal_facts:Keep_stored
     ~store_error:Fun.id
@@ -2841,8 +2574,11 @@ let apply_disposition
            ([], ids_of kept)
            plan.claims_accepted
        in
-       let+ next = make_snapshot ~previous ~now ~source ~facts:(kept @ List.rev added) () in
-       next, ())
+       let* next = make_snapshot ~previous ~now ~source ~facts:(kept @ List.rev added) () in
+       let actual = ids_of next.facts in
+       match List.find_opt (fun identity -> not (Set_util.StringSet.mem identity actual)) required_memory_ids with
+       | Some identity -> Error ("explicit admission destination is not current: " ^ identity)
+       | None -> Ok (next, ()))
   |> Result.map (fun (snapshot, commit, ()) -> disposition_of snapshot commit)
 ;;
 
@@ -2888,79 +2624,6 @@ let replace
    bytes already present are a re-observation of that row. Shared by
    {!upsert_fact} and {!supersede_fact}, so both give a row the same
    [first_seen] and [last_seen]. *)
-let insert_or_reobserve current_facts (incoming : Keeper_memory_os_types.fact) =
-  let incoming_identity = memory_id incoming in
-  let found = ref false in
-  let facts =
-    List.map
-      (fun existing ->
-         if String.equal (memory_id existing) incoming_identity
-         then (
-           found := true;
-           (* Byte-identical re-observation of an existing row. The exact
-              claim bytes were already on file, so this is not a new fact:
-              preserve the authoritative insertion time and the original
-              origin (an injected copy re-observed must not repaint an
-              authored row) and refresh the observation time. Nothing is
-              counted: seeing the same bytes again says nothing about the
-              fact's worth (RFC-0418). *)
-           { incoming with
-             first_seen = existing.first_seen
-           ; last_seen = Float.max existing.last_seen incoming.last_seen
-           ; origin = existing.origin
-           ; basis = merge_basis existing.basis incoming.basis
-           })
-         else existing)
-      current_facts
-  in
-  if !found then facts else facts @ [ incoming ]
-;;
-
-let upsert_snapshot ~previous ~now ~source incoming =
-    let current_facts =
-      match previous with
-      | None -> []
-      | Some snapshot -> snapshot.facts
-    in
-    let current_ids =
-      List.fold_left
-        (fun ids fact -> Set_util.StringSet.add (memory_id fact) ids)
-        Set_util.StringSet.empty
-        current_facts
-    in
-    let* () =
-      match incoming.basis with
-      | Observed _ -> Ok ()
-      | Derived derivations when derivations_supported current_ids derivations ->
-        Ok ()
-      | Derived derivations ->
-        Error
-          (Unsupported_derivation
-             { fact = incoming
-             ; missing_premise_ids = missing_premises_for current_ids derivations
-             })
-    in
-    let facts = insert_or_reobserve current_facts incoming in
-    let facts, invalidated = maintain_supported_facts facts in
-    let incoming_identity = memory_id incoming in
-    match
-      List.find_opt
-        (fun invalidation ->
-           String.equal (memory_id invalidation.fact) incoming_identity)
-        invalidated
-    with
-    | Some invalidation -> Error (Unsupported_derivation invalidation)
-    | None ->
-      make_snapshot_from_maintained
-        ~previous
-        ~now
-        ~source
-        ~facts
-        ~invalidated
-        ()
-      |> Result.map_error (fun detail -> Upsert_persistence_failed detail)
-;;
-
 let upsert_fact ?clock ~keepers_dir ~keeper_id ~now ~source incoming =
   update_locked_with_error
     ?clock

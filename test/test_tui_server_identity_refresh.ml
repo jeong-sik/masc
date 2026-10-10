@@ -429,6 +429,32 @@ let test_deletion_inventory_waits_for_reconfirmed_workspace () =
     (state.keeper_deletions = Some (Ok refreshed));
   Alcotest.(check int) "selection follows its operation after reorder" 0 state.keeper_deletions_cursor
 
+(* An Info refresh queued behind an in-flight Keeper lanes read belongs to
+   that read's authority. Suspension retires the read; the replacement read
+   launched after reconfirmation leaves later than the queued request, so it
+   satisfies it. A flag left behind would start a second, redundant read
+   when the replacement answers, and that read's failure would overwrite the
+   recovered reading with a stale error. *)
+let test_suspension_folds_queued_lanes_reread_into_resume () =
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
+      ~port:0 ~refresh_interval:0. () in
+  state.keeper_lanes_inflight <- true;
+  state.keeper_lanes_reread_pending <- true;
+  suspend_workspace_readings state;
+  Alcotest.(check bool) "in-flight read released" false state.keeper_lanes_inflight;
+  Alcotest.(check bool) "queued reread retired with its authority" false
+    state.keeper_lanes_reread_pending;
+  Alcotest.(check bool) "replacement read still requested" true state.keeper_lanes_resume;
+  (* A queued reread whose read was already released (not run) still asks
+     for a replacement after reconfirmation. *)
+  state.keeper_lanes_resume <- false;
+  state.keeper_lanes_reread_pending <- true;
+  suspend_workspace_readings state;
+  Alcotest.(check bool) "queued reread retired without an in-flight read" false
+    state.keeper_lanes_reread_pending;
+  Alcotest.(check bool) "its demand carried into resume" true state.keeper_lanes_resume
+
 let test_uncertain_identity_retires_reads_not_admitted_operations () =
   let open Masc_tui_types in
   let module Detail = Masc_tui_board_detail in
@@ -868,5 +894,7 @@ let () =
             test_deletion_inventory_waits_for_reconfirmed_workspace
         ; Alcotest.test_case "uncertainty retires reads while admitted operations survive" `Quick
             test_uncertain_identity_retires_reads_not_admitted_operations
+        ; Alcotest.test_case "suspension folds a queued lanes reread into resume" `Quick
+            test_suspension_folds_queued_lanes_reread_into_resume
         ] )
     ]

@@ -67,9 +67,8 @@ let require_activity () = match activity () with
   | Disabled -> Error Activity_disabled
   | Unobserved -> Error Activity_unobserved
 
-(* The core runs about 24 million instructions a second on this hardware
-   (measured booting ZZT: 6M steps in 0.25 s). 4M is roughly 170 ms, the same
-   order as the MSX lane's 300-frame cap. *)
+(* A call consumes at most this many machine execution steps, including
+   idle waits. Actual guest instruction counts are reported separately. *)
 let max_steps_per_call = 4_000_000
 
 (* A DOS program reaches its title screen in its own time. This is the budget
@@ -102,7 +101,7 @@ type core = {
    one, so a SHA bumped alone turns that test red with the new digest in its
    message. Read the digest of a commit from its build:
    _build/default/lib/identity/dos_core_identity.ml. *)
-let pinned_core_source_digest = "57ee37daab1a4cd93e6fa9480918286a"
+let pinned_core_source_digest = "dcc7a239c2cacba739a9819be3e46b2e"
 
 let core =
   { source_digest = Dos_core_identity.source_digest
@@ -120,6 +119,8 @@ type autosave =
 
 type ran = {
   steps_run : int;
+  instructions_run : int;
+  elapsed_cycles : int;
   settled : bool;
   input_requests : int;
   keys_pressed : int;
@@ -394,11 +395,10 @@ let clamp_steps steps =
   else Ok steps
 ;;
 
-(* [run_until] calls [stop] once per completed instruction, but an exception
-   escapes before it can return that count. Keep [st.steps] aligned with the
-   instructions that actually ran so tool responses and ledger positions are
-   accurate even when the guest faults. Preserve the original exception and
-   backtrace for the caller. *)
+(* [run_until] calls [stop] once per completed machine step, including idle
+   wait clocks. Preserve that execution clock for the input ledger and its
+   deterministic timing. The report separately counts guest instructions.
+   Keep the clock aligned after a fault, before returning its original trace. *)
 let run_counted st ~max_steps =
   let completed = ref 0 in
   match
@@ -406,9 +406,9 @@ let run_counted st ~max_steps =
       incr completed;
       false)
   with
-  | n ->
-    st.steps <- st.steps + n;
-    n
+  | report ->
+    st.steps <- st.steps + report.Dos_machine.machine_steps;
+    report
   | exception fault ->
     let backtrace = Printexc.get_raw_backtrace () in
     st.steps <- st.steps + !completed;
@@ -418,8 +418,10 @@ let run_counted st ~max_steps =
 (* Runs the budget straight through, with nothing watching. *)
 let advance_blind st ~budget =
   let before = Dos_machine.input_requests st.m in
-  let n = run_counted st ~max_steps:budget in
-  { steps_run = n
+  let report = run_counted st ~max_steps:budget in
+  { steps_run = report.Dos_machine.machine_steps
+  ; instructions_run = report.Dos_machine.instructions
+  ; elapsed_cycles = report.Dos_machine.elapsed_cycles
   ; settled = false
   ; input_requests = Dos_machine.input_requests st.m - before
   ; keys_pressed = 0
@@ -428,34 +430,40 @@ let advance_blind st ~budget =
   }
 ;;
 
-(* Runs until the machine is ready for input, in chunks.
-   Ready is two facts overlapped, and neither is a guess about the picture:
+(* Runs until an empty keyboard poll overlaps unchanged screen memory.
+   This observation is not proof that a game reached its next prompt:
 
    - the guest asked the BIOS for a key inside this chunk and the ring was
      empty, and
    - the screen memory is the same as it was one chunk ago.
 
-   The first alone is not enough. A program in its own loop takes a key and
+   The first alone can stop mid-repaint. A program in its own loop takes a key and
    asks for the next one 631 instructions later (measured on ZZT) while the
    repaint it started is still half-written; stopping there hands the caller
    the picture from before their key, and the press looks like it did
-   nothing. A menu that is genuinely blocked matches on the first chunk, so
-   waiting costs it nothing. *)
+   nothing. Both facts can also hold during a transition: 삼국지3 returned
+   settled before its command menu appeared with no additional key. Callers
+   can instead run an explicit machine-step allowance with [until_ready=false]. *)
 let advance_until_ready st ~budget =
   let m = st.m in
   let requests_before = Dos_machine.input_requests m in
   let previous = ref (Dos_machine.screen_digest m) in
-  let ran = ref 0 and settled = ref false in
+  let ran = ref 0 and instructions = ref 0 and cycles = ref 0 in
+  let settled = ref false in
   while (not !settled) && !ran < budget && not (Dos_machine.exited m) do
     let asked_before = Dos_machine.input_requests m in
-    let n = run_counted st ~max_steps:(min settle_chunk (budget - !ran)) in
-    ran := !ran + n;
+    let report = run_counted st ~max_steps:(min settle_chunk (budget - !ran)) in
+    ran := !ran + report.Dos_machine.machine_steps;
+    instructions := !instructions + report.Dos_machine.instructions;
+    cycles := !cycles + report.Dos_machine.elapsed_cycles;
     let asked = Dos_machine.input_requests m > asked_before in
     let now = Dos_machine.screen_digest m in
     if asked && now = !previous then settled := true;
     previous := now
   done;
   { steps_run = !ran
+  ; instructions_run = !instructions
+  ; elapsed_cycles = !cycles
   ; settled = !settled
   ; input_requests = Dos_machine.input_requests m - requests_before
   ; keys_pressed = 0
@@ -879,36 +887,37 @@ let resolve_keys names =
    key may take -- a menu that repaints slowly needs room -- but the call as a
    whole stops at [max_steps_per_call], the same ceiling one masc_dos_step
    runs under. Per-key budgets multiply: sixty-four keys at four million each
-   is a quarter of a billion instructions held under the machine's mutex,
+   is a quarter of a billion machine steps held under the machine's mutex,
    with every other keeper queued behind it. A sequence that runs out comes
    back with [keys_pressed] below what was asked, and the caller sends the
    rest; the keys not pressed are not in the ledger and never reached the
    ring. *)
-let press_resolved st ~who ~keys ~budget =
+let press_resolved st ~who ~keys ~budget ~until_ready =
   let total = ref 0 and requests = ref 0 and pressed = ref 0 in
+  let instructions = ref 0 and cycles = ref 0 in
   let last_settled = ref false in
   List.iter
     (fun (name, word) ->
       let left = max_steps_per_call - !total in
-      (* A key goes in only when the machine is ready for it. If the previous
-         key left the program busy -- a fade, a load, an AI turn -- the next
-         one would land in whatever loop is running, and a "press any key"
-         wait or a skip check eats it. On 삼국지3 that turned a copy-protection
-         code typed during the fade into a wrong code, and the game exited.
-         The rest of the sequence is not sent; keys_pressed says where it
-         stopped. *)
-      let ready = !pressed = 0 || !last_settled in
+      (* The default mode continues only after its settling observation.
+         Full-allowance mode deliberately sends one key: it does not infer
+         permission to inject the remaining suffix from keyboard polling. *)
+      let ready = !pressed = 0 || (until_ready && !last_settled) in
       if left > 0 && ready then begin
         append_entry st { at_step = st.steps; who; key_name = name };
         Dos_machine.push_key st.m word;
-        let ran = advance_until_ready st ~budget:(min budget left) in
+        let ran = advance st ~budget:(min budget left) ~until_ready in
         total := !total + ran.steps_run;
+        instructions := !instructions + ran.instructions_run;
+        cycles := !cycles + ran.elapsed_cycles;
         requests := !requests + ran.input_requests;
         last_settled := ran.settled;
         incr pressed
       end)
     keys;
   { steps_run = !total
+  ; instructions_run = !instructions
+  ; elapsed_cycles = !cycles
   ; settled = !last_settled
   ; input_requests = !requests
   ; keys_pressed = !pressed
@@ -917,7 +926,7 @@ let press_resolved st ~who ~keys ~budget =
   }
 ;;
 
-let press_on st ~who ~keys ~steps =
+let press_on st ~who ~keys ~steps ~until_ready =
   if keys = [] then Error (Invalid_request "keys must name at least one key")
   else if List.length keys > max_keys_per_call then
     Error
@@ -933,17 +942,19 @@ let press_on st ~who ~keys ~steps =
       (match resolve_keys keys with
        | Error e -> Error e
        | Ok resolved ->
-         let ran = press_resolved st ~who ~keys:resolved ~budget in
-         note_activity ~who ("press " ^ String.concat "," (List.map fst resolved));
+         let ran = press_resolved st ~who ~keys:resolved ~budget ~until_ready in
+         note_activity ~who ("press " ^ String.concat ","
+           (List.map fst (List.take ran.keys_pressed resolved)));
          ran_then_kept st ~who ran)
 ;;
 
-let press ~who ~keys ~steps = with_control ~who (fun st -> press_on st ~who ~keys ~steps)
+let press ~who ~keys ~steps ~until_ready =
+  with_control ~who (fun st -> press_on st ~who ~keys ~steps ~until_ready)
 
-let press_into ~saves_name ~who ~keys ~steps =
+let press_into ~saves_name ~who ~keys ~steps ~until_ready =
   with_control ~who (fun st ->
     let loaded = saves_name_of st in
-    if String.equal loaded saves_name then press_on st ~who ~keys ~steps
+    if String.equal loaded saves_name then press_on st ~who ~keys ~steps ~until_ready
     else Error (Other_program { expected = saves_name; loaded }))
 ;;
 
@@ -985,6 +996,8 @@ let click ~who ~x ~y ~buttons ~steps =
           let up = advance st ~budget:(budget - down.steps_run) ~until_ready:true in
           ran_then_kept st ~who
             { steps_run = down.steps_run + up.steps_run
+              ; instructions_run = down.instructions_run + up.instructions_run
+              ; elapsed_cycles = down.elapsed_cycles + up.elapsed_cycles
               ; settled = down.settled && up.settled
               ; input_requests = down.input_requests + up.input_requests
               ; keys_pressed = 0
@@ -994,7 +1007,7 @@ let click ~who ~x ~y ~buttons ~steps =
         end)
 ;;
 
-let type_text ~who ~text ~steps =
+let type_text ~who ~text ~steps ~until_ready =
   with_control ~who (fun st ->
     if String.length text = 0 then Error (Invalid_request "text must not be empty")
     else if String.length text > max_text_length then
@@ -1010,8 +1023,8 @@ let type_text ~who ~text ~steps =
         (match resolve_keys names with
          | Error e -> Error e
          | Ok resolved ->
-           let ran = press_resolved st ~who ~keys:resolved ~budget in
-           note_activity ~who (Printf.sprintf "type %d chars" (String.length text));
+           let ran = press_resolved st ~who ~keys:resolved ~budget ~until_ready in
+           note_activity ~who (Printf.sprintf "type %d chars" ran.keys_pressed);
            ran_then_kept st ~who ran))
 ;;
 

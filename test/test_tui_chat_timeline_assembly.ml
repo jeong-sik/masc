@@ -20,6 +20,7 @@ let row ?(keeper = "alpha") ?(request_id = "") ?turn_sequence
   ; me_operation_seq = operation_seq
   ; me_text = text
   ; me_image = Masc_tui_image_preview.No_image
+  ; me_media = []
   ; me_memory_summary = None
   ; me_journal = []
   ; me_memory_pass = Masc_tui_message_layout.No_pass

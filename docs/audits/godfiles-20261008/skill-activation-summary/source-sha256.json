@@ -1,0 +1,13 @@
+{
+  "lib/dune": "e9644327dbafd951f0e9ff976e229b63dd4dd7bfa07c9bab5e8a56aadd33842f",
+  "lib/keeper/keeper_skill_activation_ledger.ml": "e5bbe63c6bb422d4075ae557e1a15269b36e220f1233be9dade2d0558bdead77",
+  "lib/keeper/keeper_skill_activation_ledger.mli": "fcefa9cbf23694d485ab3d127868cd64b3d3d2cf1f9a3ef78adaf908d82066b3",
+  "lib/keeper/keeper_skill_activation_types.ml": "aa8aea7d9b2845eaf85bf9792ea13b59a1a5cd663b9e97c39b50908af04fe203",
+  "lib/keeper/keeper_skill_activation_types.mli": "80f4bb1174db44803448d08cc8c0d9c1af8c5db97fb4fa0a40c37c32dace28f9",
+  "lib/keeper/keeper_skill_activation_summary.ml": "d0ebe8d62cb673ae12efbc7b229fb6b6432e8d91dbfe6c4beeca875396c468bb",
+  "lib/keeper/keeper_skill_activation_summary.mli": "e6b8f20777a001772c41f056673a7760fa149647d1182839a0857121f175749f",
+  "lib/keeper/keeper_skill_activation_projection.ml": "7431e3e6b72cff3720ac653190203845d04ecb4b652b1ac7edd9f9dd0bdd8e93",
+  "test/test_keeper_skill_activation_ledger.ml": "7b3012c5dc962607b06b8a78c7399e83dffffeea00f75e9924e72fd623ab137c",
+  "test/test_keeper_skill_activation_projection.ml": "7b14539e05b16a58ee0760ae4892bede3baa48dcd82eae830a0b96ba1b99c3af",
+  "test/dune": "7d8b728eb81663810f8f4945bf9943b87ab475a1f53048cb567ff5314418adde"
+}

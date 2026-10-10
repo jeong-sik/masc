@@ -583,6 +583,96 @@ let run_vision_kept_maintenance base_path =
            end)
 ;;
 
+(* task-2187 (H5): the same reference-based sweep for every Keeper's stored
+   media readings ([<masc_dir>/media-readings/<keeper>/]). Same lease, same
+   failure rule as [vision-kept-maintenance]: a directory whose scan cannot
+   complete fails the command and deletes nothing in that directory. *)
+let run_media_reading_maintenance base_path =
+  let lease_dir = (Host_config.host ()).base_path_lease_dir in
+  match
+    Server_startup_takeover.acquire_base_path_lock ~run_dir:lease_dir base_path
+  with
+  | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
+    let pid = Server_startup_takeover.base_path_owner_pid owner in
+    errorf
+      "workspace writer lease is already owned base_path=%s pid=%s"
+      base_path
+      (match pid with
+       | Some value -> string_of_int value
+       | None -> "unknown")
+  | Server_startup_takeover.Base_path_rejected rejection ->
+    errorf
+      "workspace writer lease rejected base_path=%s: %s"
+      base_path
+      (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
+  | Server_startup_takeover.Base_path_acquired lease ->
+    Fun.protect
+      ~finally:(fun () -> Server_startup_takeover.release_base_path_lease lease)
+      (fun () ->
+         match Unix.realpath base_path with
+         | exception exn ->
+           errorf
+             "workspace BasePath canonicalization failed base_path=%s: %s"
+             base_path
+             (Printexc.to_string exn)
+         | canonical_base_path ->
+           let module M = Masc.Keeper_media_reading_maintenance in
+           let masc_dir =
+             Common.masc_dir_from_base_path ~base_path:canonical_base_path
+           in
+           (match M.keeper_dirs ~masc_dir with
+            | Error error ->
+              errorf "media reading store unreadable: %s" (M.error_to_string error)
+            | Ok dirs ->
+              let reports =
+                List.map (fun dir -> Filename.basename dir, dir, M.run ~masc_dir ~dir) dirs
+              in
+              let failed =
+                List.filter_map
+                  (fun (keeper, dir, result) ->
+                     match result with
+                     | Ok _ -> None
+                     | Error error ->
+                       Some (Printf.sprintf "%s (%s): %s" keeper dir (M.error_to_string error)))
+                  reports
+              in
+              if failed <> []
+              then errorf "media reading maintenance failed: %s" (String.concat "; " failed)
+              else begin
+                Yojson.Safe.to_channel
+                  stdout
+                  (`Assoc
+                    [ "base_path", `String canonical_base_path
+                    ; ( "stores"
+                      , `List
+                          (List.filter_map
+                             (fun (keeper, dir, result) ->
+                                match result with
+                                | Error _ -> None
+                                | Ok (report : M.report) ->
+                                  Some
+                                    (`Assoc
+                                      [ "keeper", `String keeper
+                                      ; "dir", `String dir
+                                      ; "scanned", `Int report.scanned
+                                      ; "live", `Int report.live
+                                      ; "unprobed", `Int report.unprobed
+                                      ; "candidates_recorded", `Int report.candidates_recorded
+                                      ; "deleted", `Int report.deleted
+                                      ; ( "reclaimed_bytes"
+                                        , `Intlit (Int64.to_string report.reclaimed_bytes) )
+                                      ; "remaining_count", `Int report.remaining_count
+                                      ; ( "remaining_bytes"
+                                        , `Intlit (Int64.to_string report.remaining_bytes) )
+                                      ]))
+                             reports) )
+                    ]);
+                output_char stdout '\n';
+                flush stdout;
+                Ok ()
+              end))
+;;
+
 let handoff_base_path_lease
       base_path
       next_executable
@@ -790,6 +880,21 @@ let vision_kept_maintenance_cmd =
         (const
            (fun base_path ->
               cmdliner_result (run_vision_kept_maintenance base_path))
+         $ base_path))
+;;
+
+let media_reading_maintenance_cmd =
+  let doc =
+    "sweep stored keeper media readings no durable record carries any more, under \
+     the exclusive BasePath lease"
+  in
+  Cmd.v
+    (Cmd.info "media-reading-maintenance" ~doc)
+    Term.(
+      ret
+        (const
+           (fun base_path ->
+              cmdliner_result (run_media_reading_maintenance base_path))
          $ base_path))
 ;;
 
@@ -1288,6 +1393,7 @@ let () =
           ; lease_handoff_cmd
           ; tool_blob_maintenance_cmd
           ; vision_kept_maintenance_cmd
+          ; media_reading_maintenance_cmd
           ; verify_lease_owner_cmd
           ; validate_current_meta_cmd
           ; validate_task_backlog_cmd

@@ -1,0 +1,14 @@
+{
+  "lib/fs_compat/atomic_write.ml": "1cc25ca0c1a7eaeadbe5b05160d9e62e4513851bcb5cf2b7403006a22d0f5688",
+  "lib/fs_compat/atomic_write.mli": "f1ace9f713df7ee8c7fc4fe325d9170a27ba2cd96fbac269614bb07c1d0f84c4",
+  "lib/fs_compat/publication_recovery_for_testing.ml": "8e782457d858658aa336b9a794c809126c837ab1d3efddc0f18386ae3dbd1f9a",
+  "lib/fs_compat/publication_recovery_for_testing.mli": "5ea8f1056f941a3c2d289f0654be2f2d8f94877ebc4980c48761a35b29a723cc",
+  "test/test_fs_compat_publication_reconciliation.ml": "c7f0608095e0595cc7b4becbbdd13cba53ea42704cf775295c3f69a95c15898f",
+  "lib/fs_compat/capability_recovery_reconciler.ml": "c2566720a0cc11a2cffcffacb7a11cffc3ea38fb591b712fb378b0cf371e10e4",
+  "lib/fs_compat/capability_recovery_reconciler.mli": "7e4d4198b835bdc91a86afaa631418f1077aeed423436e5bac83ddaaebf312f6",
+  "lib/fs_compat/publication_recovery_access.ml": "0f2818479f54b7525a406bf0e05219d87b29f2b7460216c5132c3f5ea19d7fad",
+  "lib/fs_compat/publication_recovery_access.mli": "c284429c25c492576c738cc2a8fb6dfe69b483ed96270068e4733fddec33ad71",
+  "lib/fs_compat/fs_compat.ml": "436187c2eed1297bde7c36364b24b03ab6f2dc24cc39c879aaf23fe3cd240652",
+  "lib/fs_compat/fs_compat.mli": "2f2ecaa4c94f1cb059395ed4b8ac105230a921cdc3110b802102cec497245666",
+  "test/stanzas/test_fs_compat_publication_reconciliation.inc": "ed62bc449d77cd000faa4c460a9ada7082d98fde4a8db77654beaef908651086"
+}

@@ -196,7 +196,8 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
                 ~base_path:config.base_path
             in
             match
-              Keeper_task_skill_turn.resolve_observations
+              Keeper_task_skill_turn.resolve_live_observations
+                ~config ~keeper_name:m.name
                 ~snapshot:skill_snapshot ~current_task
                 ~held_task_skills:observation.held_task_skills
             with

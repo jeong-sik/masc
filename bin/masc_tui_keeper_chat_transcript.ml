@@ -845,6 +845,7 @@ let handler_activity_kind handler =
   match handler with
   | Tool_masc_fusion_dispatch | Tool_masc_fusion_status | Tool_masc_fusion_decision -> Fusion_activity
   | Tool_keeper_spawn_dispatch | Tool_masc_keeper_dispatch -> Keeper_activity
+  | Tool_lane_addon _
   | Tool_execute
   | Tool_search_files
   | Tool_read_file
@@ -1790,6 +1791,53 @@ let progress_text ~show_timing ~now t =
   | None -> phase
   | Some age -> Printf.sprintf "%s · %s" phase age
 
+let compact_progress_text ~show_timing ~now t =
+  let phase =
+    match t.phase with
+    | Waiting | Stream_ended | Stream_failed _ -> phase_text ~show_timing ~now t
+    | Working ->
+        let current_calls = t.reversed_tool_calls
+          |> List.filter (fun (call : live_tool_call) ->
+               call.segment = t.segment && call.attempt = t.attempt) in
+        let held = match t.awaiting with
+          | None -> None
+          | Some awaiting ->
+              (match List.filter (fun (call : live_tool_call) ->
+                Option.exists (String.equal awaiting.call_id) call.call_id
+                && match (activity_of_live_call t call).outcome with
+                   | Started | Awaiting_result | Native_running -> true
+                   | Returned | Native_ended | Failed | Never_returned | Outcome_unrecorded -> false)
+                current_calls with
+               | [call] -> Some call.local_id | _ -> None) in
+        let pending = current_calls
+          |> List.filter (fun (call : live_tool_call) -> Some call.local_id <> held)
+          |> List.rev
+          |> List.filter_map (fun call ->
+               let activity = activity_of_live_call t call in
+               match activity.outcome with
+               | Started -> Some ("preparing " ^ activity.tool_name)
+               | Awaiting_result -> Some ("awaiting result: " ^ activity.tool_name)
+               | Native_running -> Some ("running " ^ activity.tool_name)
+               | Returned | Native_ended | Failed | Never_returned
+               | Outcome_unrecorded -> None)
+        in
+        match t.awaiting, pending with
+        | _, _ :: _ -> String.concat " · " pending
+        | Some awaiting, [] -> "approval pending: " ^ awaiting.tool_name
+        | None, [] ->
+            match model_phase_text ~show_timing ~now t with
+            | Some phase -> phase
+            | None -> "waiting for response"
+  in
+  let phase =
+    if t.attempt = 0 then phase
+    else Printf.sprintf "%s · attempt %d" phase (t.attempt + 1)
+  in
+  if not show_timing then phase else
+  match elapsed_text ~now t with
+  | None -> phase
+  | Some age -> phase ^ " · " ^ age
+
 (* The question, as an Attention row. It is the one row an operator has to act
    on, so it is styled like the others that need them rather than like
    progress. *)
@@ -1803,9 +1851,13 @@ let awaiting_text t =
       | because -> Printf.sprintf "%s\n  because %s" base because)
     t.awaiting
 
-let status_rows ?(show_timing = true) ~now t =
+let status_rows ?(compact = false) ?(show_timing = true) ~now t =
   [ (if awaiting_continuation t then None
-     else Some (Progress, progress_text ~show_timing ~now t))
+     else
+       Some
+         ( Progress
+         , (if compact then compact_progress_text else progress_text)
+             ~show_timing ~now t ))
   ; Option.map (fun text -> (Answer_needed, text)) (awaiting_text t)
   ; Option.map
       (fun settlement ->

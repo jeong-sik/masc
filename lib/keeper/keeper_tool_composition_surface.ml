@@ -759,6 +759,7 @@ let result_of_execution ~tool_name ~tool_kind ~start_time = function
        Tool_result.make_err
          ~tool_name
          ~class_:payload.class_
+         ~effect_disposition:failure.effect_disposition
          ~start_time
          ~data
          ?metadata:payload.metadata
@@ -775,6 +776,7 @@ let result_of_execution ~tool_name ~tool_kind ~start_time = function
     Tool_result.make_err
       ~tool_name
       ~class_:Tool_result.Runtime_failure
+      ~effect_disposition:failure.effect_disposition
       ~start_time
       ~data
       (Yojson.Safe.to_string data)
@@ -1685,6 +1687,7 @@ let make_instruction_skill_tool
 ;;
 
 module For_testing = struct
+  let result_of_execution = result_of_execution
   let observe_node_result = observe_node_result
   let failure_payload = failure_payload
   let instruction_skill_description = instruction_skill_description

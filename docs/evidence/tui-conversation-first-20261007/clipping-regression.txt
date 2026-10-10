@@ -1,0 +1,9 @@
+Selected existing test: test_oversized_entry_small_height_policy
+Exit: 0
+Testing `Conversation clipping'.
+This run has ID `WL3USHK4'.
+
+  [OK]          live edge          0   first and latest at minimum height.
+
+Full test results in `/private<temporary-run-directory>/_build/_tests/Conversation clipping'.
+Test Successful in 0.002s. 1 test run.

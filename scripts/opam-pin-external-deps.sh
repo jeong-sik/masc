@@ -174,7 +174,7 @@ readonly OCAML_MSX_SHA="b3808bccf376c54bf7d78b176d4d178022a1487b"
 # it fails with the new digest in its message until the two agree. A build that
 # says "Library ocaml-dos.core-identity not found" is linking an ocaml-dos older
 # than #32: re-run this script with --install, or vendor the pinned core.
-readonly OCAML_DOS_SHA="a7b1ad660b2780e6b03c15db0ffbbd68af9eaa36"
+readonly OCAML_DOS_SHA="323609dd3c4d9f4f9d678290b36e88a8b9b8f488"
 # cohttp-eio 6.2.1 + one line: Reader_flow.single_read continues a partial body
 # delivery from the position already delivered instead of offset 0. Without it
 # a chunk handed over in three or more single_read calls repeats its first

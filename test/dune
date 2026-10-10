@@ -116,7 +116,7 @@
 (test
  (name test_keeper_skill_validate)
  (modules test_keeper_skill_validate)
- (libraries masc_test_deps masc.skill_snapshot_service))
+ (libraries masc_test_deps masc.skill_snapshot masc.skill_snapshot_service))
 
 (include stanzas/test_keeper_skill_publish.inc)
 
@@ -189,7 +189,7 @@
 (test
  (name test_dos_vision)
  (modules test_dos_vision)
- (libraries masc.machine_configuration alcotest unix yojson fs_compat masc masc_test_deps
+ (libraries machine_worker_fixture mcp_protocol eio_main base64 masc.machine_configuration alcotest unix yojson fs_compat masc masc_test_deps
    masc.dos_lane masc.multimodal masc.tool_types))
 
 (test
@@ -206,6 +206,7 @@
  (name test_keeper_effective_tool_surface)
  (modules test_keeper_effective_tool_surface)
  (libraries
+  mcp_protocol
   alcotest
   masc
   masc.skill_config
@@ -216,7 +217,7 @@
 (test
  (name test_keeper_skill_inventory)
  (modules test_keeper_skill_inventory)
- (libraries
+ (libraries mcp_protocol
   alcotest
   masc
   masc.skill_config
@@ -2808,6 +2809,8 @@
 
 (include stanzas/test_keeper_surface_status.inc)
 
+(include stanzas/test_keeper_memory_admission_judgment.inc)
+(include stanzas/test_keeper_memory_admission_queue.inc)
 (include stanzas/test_keeper_memory_write.inc)
 (include stanzas/test_keeper_memory_write_growth_probe.inc)
 
@@ -3280,7 +3283,7 @@
 (test
  (name test_tui_chat_queue_wiring)
  (modules test_tui_chat_queue_wiring)
- (libraries masc.keeper_chat_operations masc_tui_message_input masc_tui_link_preview masc_tui_image_preview
+ (libraries masc_tui_chat_media masc.keeper_chat_delivery_identity masc.keeper_chat_operations masc_tui_message_input masc_tui_link_preview masc_tui_image_preview
   masc_tui_answering
   masc_tui_keys
   masc_tui_fusion_model
@@ -3447,6 +3450,12 @@
   yojson))
 
 (test
+ (name test_tui_chat_media)
+ (modules test_tui_chat_media)
+ (libraries alcotest masc masc_tui_chat_media masc_tui_image_preview
+  masc_tui_keeper_chat_history yojson))
+
+(test
  (name test_tui_keeper_chat_queue)
  (modules test_tui_keeper_chat_queue)
  (libraries alcotest astring masc_tui_keeper_chat_queue
@@ -3465,7 +3474,7 @@
 (test
  (name test_keeper_tool_approval_policy)
  (modules test_keeper_tool_approval_policy)
- (libraries alcotest masc yojson))
+ (libraries mcp_protocol alcotest masc yojson))
 
 (test
  (name test_keeper_tool_approval_registry)
@@ -5068,8 +5077,6 @@
 
 (include stanzas/test_h2_response_window.inc)
 
-(include stanzas/test_keeper_msx_observe.inc)
-
 ; Log.Kv: a key=value line leaves out the fields whose value is None.
 (test
  (name test_log_kv)
@@ -5223,7 +5230,7 @@
 (test
  (name test_lane_addon_worker)
  (modules test_lane_addon_worker)
- (libraries masc masc_random_id mcp_protocol alcotest eio eio_main yojson unix digestif masc.fs_compat))
+ (libraries masc.lane_addon_call_context masc masc_random_id mcp_protocol alcotest eio eio_main yojson unix digestif masc.fs_compat))
 
 (include stanzas/test_bedrock_sdk.inc)
 (test
@@ -5233,7 +5240,7 @@
 (test
  (name test_lane_addon)
  (modules test_lane_addon)
- (libraries masc.machine_configuration masc_test_deps masc.fusion_core masc.server masc.msx_lane eio eio_main yojson unix))
+ (libraries machine_worker_fixture mcp_protocol masc.machine_configuration masc_test_deps masc.fusion_core masc.server masc.msx_lane eio eio_main yojson unix))
 
 (test
  (name test_lane_addon_sources)
@@ -5354,7 +5361,8 @@
        ../addons/tests/stdio_fixture.py
        ../addons/fusion-results/server.py ../addons/fusion-results/lane.toml
        ../addons/fusion-report/server.py ../addons/fusion-report/lane.toml)
- (libraries masc.machine_configuration masc_test_deps masc.fusion_core masc.msx_lane eio eio_main yojson unix))
+ (libraries masc.machine_configuration masc_test_deps masc.fusion_core masc.msx_lane masc.msx_worker
+  mcp_protocol mcp_protocol.eio eio eio.unix eio_main yojson unix))
 
 (include stanzas/test_lane_quiz_packages.inc)
 (include stanzas/test_lane_fusion_compute_packages.inc)
@@ -5413,8 +5421,12 @@
  (modules test_lane_addon_skills)
  (deps
   ../addons/msx-observer/lane.toml
-  (source_tree ../addons/msx-observer/skills))
- (libraries masc_test_deps masc_server masc.skill_reference masc.skill_config
+  (source_tree ../addons/msx-observer/skills)
+  ../addons/msx-machine/lane.toml
+  (source_tree ../addons/msx-machine/skills)
+  ../addons/dos-machine/lane.toml
+  (source_tree ../addons/dos-machine/skills))
+ (libraries masc.embedded_config masc.masc_tool_surface mcp_protocol masc_test_deps masc_server masc.skill_reference masc.skill_config
   masc.skill_snapshot masc.skill_snapshot_service))
 
 (include stanzas/test_browser_observation.inc)
@@ -5478,6 +5490,11 @@
 (test
  (name test_verification_pdf_inspection_budgets)
  (modules test_verification_pdf_inspection_budgets)
+ (libraries masc_test_deps))
+
+(test
+ (name test_keeper_media_reading_maintenance)
+ (modules test_keeper_media_reading_maintenance)
  (libraries masc_test_deps))
 
 (test
@@ -5733,6 +5750,11 @@
  (libraries masc.tool_types masc.lane_addon_tool_result masc.lane_addon_call_context masc.machine_controller_contract
   masc.dos_worker masc.dos_lane masc.machine_pad_layout masc.masc_core masc.machine_configuration
   mcp_protocol mcp_protocol.eio eio eio_main eio.unix alcotest yojson base64 digestif unix))
+
+(test
+ (name test_machine_input_history)
+ (modules test_machine_input_history)
+ (libraries masc_test_deps masc.machine_input_history mcp_protocol eio_main yojson alcotest unix))
 
 (test
  (name test_tui_models_account_reading)

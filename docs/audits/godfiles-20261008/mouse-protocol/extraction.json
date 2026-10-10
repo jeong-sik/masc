@@ -1,0 +1,9 @@
+{
+  "base": "0a03dd925a9a7b92a3aabc258653b8ab050d18a0",
+  "source": "lib/tui_decode.ml",
+  "target": "lib/tui_mouse_protocol.ml",
+  "original_span_start_line": 1178,
+  "original_span_end_line": 1299,
+  "identical_except_trailing_separator": true,
+  "implementation_sha256": "55d95087f42ddfe4b24284f54ea5400cb54985eae04442cde8e843c38effcde7"
+}

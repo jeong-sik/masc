@@ -16,6 +16,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <spawn.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -115,7 +116,12 @@ static value spawn_process(value v_executable, value v_argv, value v_env,
   char *executable = caml_stat_strdup(String_val(v_executable));
   char **argv = strings_of_array(v_argv);
   char **env = strings_of_array(v_env);
-  char *cwd = Is_some(v_cwd) ? caml_stat_strdup(String_val(Some_val(v_cwd))) : NULL;
+  /* Native Eio spawning supplies a path; synchronous PATH spawning supplies
+     an already-open directory. Opening separately keeps cwd failures distinct
+     from exec failures and fixes the directory identity before child setup. */
+  char *cwd = !search_path && Is_some(v_cwd)
+    ? caml_stat_strdup(String_val(Some_val(v_cwd))) : NULL;
+  int cwd_fd = search_path && Is_some(v_cwd) ? Int_val(Some_val(v_cwd)) : -1;
 
   int fd_count = 0;
   for (value l = v_fds; l != Val_emptylist; l = Field(l, 1)) fd_count++;
@@ -147,6 +153,7 @@ static value spawn_process(value v_executable, value v_argv, value v_env,
     if (rc == 0) rc = posix_spawnattr_setflags(&attr, flags);
   }
   if (rc == 0 && cwd != NULL) rc = posix_spawn_file_actions_addchdir_np(&actions, cwd);
+  if (rc == 0 && cwd_fd >= 0) rc = posix_spawn_file_actions_addfchdir_np(&actions, cwd_fd);
   for (int j = 0; rc == 0 && j < fd_count; j++) {
     if (child_fds[j] == STDIN_FILENO && isatty(parent_fds[j])) {
       /* No child of this stub reads a terminal it is handed as stdin: it
@@ -240,12 +247,53 @@ CAMLprim value masc_posix_spawn(value executable, value argv, value env,
   return spawn_process(executable, argv, env, cwd, fds, 0);
 }
 
-/* Unix fallback retains libc's PATH lookup semantics without duplicating
-   descriptor setup or group creation. */
+/* Unix fallback retains libc's PATH lookup semantics and supplies cwd as a
+   directory descriptor, without duplicating setup or process-group creation. */
 CAMLprim value masc_posix_spawnp(value executable, value argv, value env,
                                  value cwd, value fds)
 {
   return spawn_process(executable, argv, env, cwd, fds, 1);
+}
+
+CAMLprim value masc_open_process_directory(value v_path)
+{
+  CAMLparam1(v_path);
+  caml_unix_check_path(v_path, "open process cwd");
+  char *path = caml_stat_strdup(String_val(v_path));
+  /* Directory traversal needs search permission, not read/list permission. */
+#if defined(O_PATH)
+  int flags = O_PATH | O_DIRECTORY | O_CLOEXEC;
+#elif defined(O_SEARCH)
+  int flags = O_SEARCH | O_DIRECTORY | O_CLOEXEC;
+#else
+#error "process cwd acquisition requires O_PATH or O_SEARCH"
+#endif
+  caml_enter_blocking_section();
+  int fd;
+  do { fd = open(path, flags); } while (fd < 0 && errno == EINTR);
+  int error = errno;
+#if defined(O_PATH)
+  /* O_PATH does not check the final directory's search permission. Check
+     the acquired directory with the credentials the child will inherit.
+     fchdir still enforces permission if it changes after this check. */
+  if (fd >= 0) {
+    int rc;
+    do { rc = faccessat(fd, ".", X_OK, AT_EACCESS); }
+    while (rc < 0 && errno == EINTR);
+    if (rc < 0) {
+      error = errno;
+      close(fd);
+      fd = -1;
+    }
+  }
+#endif
+  caml_leave_blocking_section();
+  caml_stat_free(path);
+  if (fd < 0) {
+    errno = error;
+    uerror("open process cwd", v_path);
+  }
+  CAMLreturn(Val_int(fd));
 }
 
 #if defined(__clang__)
@@ -302,6 +350,45 @@ CAMLprim value masc_process_group_members(value v_pgid)
       }
       free(members);
     }
+  }
+#endif
+  CAMLreturn(result);
+}
+
+/* Observe only: the process group [pid] is in now, from getpgid(2), which
+   POSIX defines on every platform this file is built for (OCaml's Unix has
+   no binding for it). */
+CAMLprim value masc_process_group_of(value v_pid)
+{
+  CAMLparam1(v_pid);
+  pid_t group = getpgid((pid_t)Int_val(v_pid));
+  if (group < 0) uerror("getpgid", Nothing);
+  CAMLreturn(Val_int(group));
+}
+
+/* Observe only: when process [pid] started, from the kernel's process
+   table, without starting another process (ps) and so without yielding to
+   a reaper. A zombie is still in the table, so a child not yet reaped
+   reads too. Some "darwin:<seconds>.<microseconds>" on Darwin; None when
+   no such process is there, and on every other platform. */
+CAMLprim value masc_process_start_time(value v_pid)
+{
+  CAMLparam1(v_pid);
+  CAMLlocal2(result, text);
+  result = Val_none;
+#if defined(__APPLE__)
+  pid_t pid = (pid_t)Int_val(v_pid);
+  struct kinfo_proc info;
+  size_t size = sizeof(info);
+  int mib[] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, pid };
+  memset(&info, 0, sizeof(info));
+  if (sysctl(mib, 4, &info, &size, NULL, 0) == 0 && size == sizeof(info) &&
+      info.kp_proc.p_pid == pid) {
+    char buffer[64];
+    snprintf(buffer, sizeof(buffer), "darwin:%ld.%06ld",
+             (long)info.kp_proc.p_starttime.tv_sec, (long)info.kp_proc.p_starttime.tv_usec);
+    text = caml_copy_string(buffer);
+    result = caml_alloc_some(text);
   }
 #endif
   CAMLreturn(result);

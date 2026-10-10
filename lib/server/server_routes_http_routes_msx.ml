@@ -6,7 +6,7 @@
 
     [POST /api/v1/msx/press] lets the human at the TUI press keys on the same
     machine a keeper is playing (RFC-0439 §3.3): [{keys:[..], hold_frames?,
-    frames?, sequence?}] goes to [Msx_lane.press] under the identity
+    frames?, sequence?}] goes to the attached worker under the identity
     [with_tool_actor_auth] resolved for the request, so its edges land in the
     shared ledger next to the keeper's under the name the credential carries.
     It is a write, gated like the mutating MSX tools. A field of the wrong
@@ -15,245 +15,118 @@
 open Server_auth
 module Http = Http_server_eio
 
-let json_field name = function
-  | `Assoc fields -> List.assoc_opt name fields
-  | _ -> None
-
 (* Frames a press holds its keys down, and the frames the call advances in
    all, when the body names neither (RFC-0439 §3.3): a tap. *)
 let press_default_hold_frames = 5
 let press_default_step_frames = 15
 
-(* An absent field is the default; a present one must be a positive integer.
-   The wrong type is the caller's mistake and is named back to them, not
-   replaced by the default. *)
-let positive_int_field name ~default json : (int, string) result =
-  match json_field name json with
-  | None -> Ok default
-  | Some (`Int n) when n > 0 -> Ok n
-  | Some (`Int _ | `Intlit _ | `Float _ | `String _ | `Bool _ | `Null | `List _ | `Assoc _) ->
-    Error (name ^ " must be a positive integer")
-
-let bool_field name ~default json : (bool, string) result =
-  match json_field name json with
-  | None -> Ok default
-  | Some (`Bool b) -> Ok b
-  | Some (`Int _ | `Intlit _ | `Float _ | `String _ | `Null | `List _ | `Assoc _) ->
-    Error (name ^ " must be a boolean")
-
-(* An absent array is empty (the press then fails for naming no key); a present
-   one must hold only strings, so a stray number cannot vanish from a chord. *)
-let string_list_field name json : (string list, string) result =
-  let not_strings = Error (name ^ " must be an array of strings") in
-  match json_field name json with
-  | None -> Ok []
-  | Some (`List items) ->
-    List.fold_left
-      (fun acc item ->
-        match acc, item with
-        | (Error _ as e), _ -> e
-        | Ok ss, `String s -> Ok (ss @ [ s ])
-        | Ok _, (`Int _ | `Intlit _ | `Float _ | `Bool _ | `Null | `List _ | `Assoc _) ->
-          not_strings)
-      (Ok []) items
-  | Some (`Int _ | `Intlit _ | `Float _ | `String _ | `Bool _ | `Null | `Assoc _) -> not_strings
-
-let press_result_json ~ok ?message (obs : Msx_lane.observation option) : Yojson.Safe.t =
-  let base = [ ("ok", `Bool ok) ] in
-  let base = match message with Some m -> base @ [ ("message", `String m) ] | None -> base in
-  match obs with
-  | None -> `Assoc base
-  | Some o ->
-    `Assoc
-      (base
-      @ [ ("frame", `Int o.Msx_lane.frame)
-        ; ("mode", `String o.Msx_lane.mode)
-        ; ( "cartridge"
-          , match o.Msx_lane.cartridge with Some c -> `String c | None -> `Null )
-        ; ("disk", match o.Msx_lane.disk with Some d -> `String d | None -> `Null )
-        ])
+let press_result_json ~ok ?message (obs : Yojson.Safe.t option) =
+  let fields = ["ok", `Bool ok] @ (match message with None -> [] | Some message -> ["message", `String message]) in
+  let observation = match obs with
+    | Some (`Assoc fields) -> List.filter (fun (name, _) -> List.mem name ["frame";"mode";"cartridge";"disk"]) fields
+    | None | Some _ -> [] in
+  `Assoc (fields @ observation)
 ;;
 
-(* The activity gate rejects a request because the machine's activity is off,
-   not because the request is malformed: the same request succeeds once the
-   operator turns activity on, so the client should retry rather than fix its
-   body. Every route that can hit the gate answers it the same way — 409 with
-   the code the client keys on — so a client built against one route reads the
-   other's rejection the same way. *)
-let activity_rejection_json code =
-  `Assoc [ ("ok", `Bool false); ("code", `String code) ]
-;;
+type worker_response = {
+  status : [ `OK | `Conflict | `Bad_request | `Service_unavailable | `Internal_server_error ];
+  ok : bool;
+  message : string;
+  data : Yojson.Safe.t;
+  code : string option;
+}
 
-(* A human change to the machine wakes the Lane instances bound to it with the
-   typed activity a Keeper's finished MSX tool produces through the event
-   bridge (RFC machine-spectating-goes-through-lanes §2.2). These routes call
-   [Msx_lane] or the tool handlers directly and publish no ToolCompleted, so the
-   bridge never notifies for the same operation. An [Error] answer took no
-   effect (msx_lane.mli error contract), so it does not notify. An exception is
-   not an [Error]: a press or a restore/disk worker that raised may already have
-   run frames or swapped the machine, so it notifies before the failure is
-   reported, as the Keeper tool path notifies for a failed ToolCompleted. A
-   cancelled press is re-raised without notifying: cancellation belongs to the
-   caller and the notification would wait on the root domain. Save does not
-   move the machine. Tick advances it every poll and stays silent until the RFC's §4
-   realtime question has an answer. *)
-let machine_changed ~config =
-  Eio.Cancel.protect (fun () ->
-    Lane_addon_runtime.notify_activity ~config ~activity:(Lane_addon_sources.Machine_changed Machine_lane.Msx))
+let worker_response ~config ~principal ~(schema : Masc_domain.tool_schema) ~arguments =
+  let failed status message = {status;ok=false;message;data=`Null;code=None} in
+  match Tool_input_validation.validate_args ~schema:schema.input_schema ~name:schema.name ~args:arguments () with
+  | Error refusal -> failed `Bad_request (Tool_result.message refusal)
+  | Ok arguments ->
+      match Machine_addon_host.call_shared ~config ~principal ~name:schema.name ~arguments with
+      | Error (Lane_addon_runtime.Unavailable message
+          | Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Unavailable message)) ->
+          failed `Service_unavailable message
+      | Error (Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Rejected message)) ->
+          failed `Bad_request message
+      | Error (Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Activity_disabled message)) ->
+          {(failed `Conflict message) with code=Some "activity_disabled"}
+      | Error (Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Activity_unobserved message)) ->
+          {(failed `Conflict message) with code=Some "activity_unobserved"}
+      | Error (Lane_addon_runtime.Outcome_unknown message) ->
+          failed `Service_unavailable (message ^ "; inspect the current machine before retrying")
+      | Ok result ->
+          let field name = match result.Mcp_protocol.Mcp_types._meta with
+            | Some (`Assoc fields) -> List.assoc_opt name fields | _ -> None in
+          let ok = result.is_error <> Some true in
+          let code = match field "io.github.jeong-sik/masc.machine.errorCode" with
+            | Some (`String ("activity_disabled" | "activity_unobserved" as code)) -> Some code
+            | _ -> None in
+          let status = if ok then `OK else match code with
+            | Some _ -> `Conflict
+            | None -> match field "io.github.jeong-sik/masc.machine.failure" with
+              | Some (`String "rejected") -> `Bad_request
+              | _ -> `Internal_server_error in
+          {status;ok;code;message=Agent_core.Mcp.text_of_tool_result result;
+           data=Option.value ~default:`Null result.structured_content}
 
-(* The keys the caller named, parsed to the lane's vocabulary; the first bad one
-   fails the whole press so nothing is half-applied. *)
-let parse_keys names =
-  List.fold_left
-    (fun acc name ->
-      match acc with
-      | Error _ as e -> e
-      | Ok ks -> (
-        match Msx_lane.key_of_string name with
-        | Ok k -> Ok (ks @ [ k ])
-        | Error message -> Error message))
-    (Ok []) names
-
-(* The press body decoded and applied under [who], the identity the route's
-   actor auth resolved. The route test drives it with its own workspace. *)
 let press_response ~config ~who ~body =
-  let error status message = status, press_result_json ~ok:false ~message None in
+  let error message = `Bad_request, press_result_json ~ok:false ~message None in
   match Yojson.Safe.from_string body with
-  | exception Yojson.Json_error message -> error `Bad_request ("invalid JSON: " ^ message)
-  | json -> (
-    let ( let* ) = Result.bind in
-    let decoded =
-      let* names = string_list_field "keys" json in
-      let* keys = parse_keys names in
-      let* hold_frames = positive_int_field "hold_frames" ~default:press_default_hold_frames json in
-      let* step_frames = positive_int_field "frames" ~default:press_default_step_frames json in
-      let* sequence = bool_field "sequence" ~default:false json in
-      Ok (keys, hold_frames, step_frames, sequence)
-    in
-    match decoded with
-    | Error message -> error `Bad_request message
-    | Ok ([], _, _, _) -> error `Bad_request "keys must name at least one key"
-    | Ok (keys, hold_frames, step_frames, sequence) -> (
-      match Msx_lane.press ~who ~keys ~hold_frames ~step_frames ~sequence with
-      | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
-      | exception failure ->
-        let bt = Printexc.get_raw_backtrace () in
-        machine_changed ~config;
-        Printexc.raise_with_backtrace failure bt
-      | Ok obs ->
-        machine_changed ~config;
-        `OK, press_result_json ~ok:true (Some obs)
-      | Error Msx_lane.Activity_disabled ->
-        `Conflict, activity_rejection_json "activity_disabled"
-      | Error Msx_lane.Activity_unobserved ->
-        `Conflict, activity_rejection_json "activity_unobserved"
-      | Error ((Msx_lane.No_machine | Msx_lane.Invalid_request _) as e) ->
-        error `Bad_request (Msx_lane.error_to_string e)
-      | Error (Msx_lane.Unreadable _ as e) ->
-        error `Internal_server_error (Msx_lane.error_to_string e)))
+  | exception Yojson.Json_error message -> error ("invalid JSON: " ^ message)
+  | `Assoc fields ->
+      (* HTTP taps retain their shorter default; the model-facing tool uses 30. *)
+      let fields = if List.mem_assoc "frames" fields then fields
+        else ("frames", `Int press_default_step_frames) :: fields in
+      let fields = if List.mem_assoc "hold_frames" fields then fields
+        else ("hold_frames", `Int press_default_hold_frames) :: fields in
+      let result = worker_response ~config ~principal:(Lane_addon_call_context.Host_actor who)
+        ~schema:Tool_schemas_misc_toml.msx_press ~arguments:(`Assoc fields) in
+      let fields = ["ok", `Bool result.ok; "message", `String result.message] in
+      let fields = match result.code with None -> fields | Some code -> ("code", `String code)::fields in
+      let observation = if result.ok then match result.data with
+        | `Assoc data -> List.filter (fun (name,_) -> List.mem name ["frame";"mode";"cartridge";"disk"]) data
+        | _ -> [] else [] in
+      result.status, `Assoc (fields @ observation)
+  | _ -> error "body must be a JSON object"
 ;;
 
 let handle_press ~config ~who request reqd =
   Http.Request.read_body_async reqd (fun body ->
       let status, json = press_response ~config ~who ~body in
-      respond_json_value_with_cors ~status request reqd json)
+      respond_json_value_with_cors ~status:(status :> Httpun.Status.t) request reqd json)
 ;;
 
-(* The cartridge inventory the TUI load menu shows (RFC-0439 §3.7): the file
-   names under <.masc>/msx/carts an operator filled, plus which one is plugged
-   in now so the menu can mark it. Read-only; loading a game is the write
-   below. [carts_available] is the same listing masc_msx_load returns when it
-   is called with no cart, so the menu and a keeper see one inventory. *)
-let carts_json ~base_path : Yojson.Safe.t =
-  let carts = Tool_misc_msx_lane.carts_available ~base_path in
-  let loaded, cartridge, disk =
-    match Msx_lane.frame () with
-    | None -> (false, `Null, `Null)
-    | Some f ->
-      ( true
-      , (match f.Msx_lane.cartridge with Some c -> `String c | None -> `Null)
-      , (match f.Msx_lane.disk with Some d -> `String d | None -> `Null) )
-  in
-  `Assoc
-    [ ("carts", `List (List.map (fun c -> `String c) carts))
-    ; ("loaded", `Bool loaded)
-    ; ("cartridge", cartridge)
-    ; ("disk", disk)
-    ]
+let carts_response ~config =
+  let result = worker_response ~config ~principal:Lane_addon_call_context.Anonymous
+    ~schema:Tool_schemas_misc_toml.msx_meta ~arguments:(`Assoc ["include_inventory", `Bool true]) in
+  if not result.ok then result.status, `Assoc ["ok", `Bool false; "message", `String result.message]
+  else match result.data with
+    | `Assoc fields -> (match List.assoc_opt "inventory" fields with
+        | Some (`Assoc _ as inventory) -> `OK, inventory
+        | _ -> `Internal_server_error, `Assoc ["ok", `Bool false;
+            "message", `String "MSX worker omitted its cartridge inventory"])
+    | _ -> `Internal_server_error, `Assoc ["ok", `Bool false;
+        "message", `String "invalid MSX worker inventory response"]
 ;;
 
 let load_result_json ~ok ~message : Yojson.Safe.t =
   `Assoc [ ("ok", `Bool ok); ("message", `String message) ]
 ;;
 
-(* The human at the TUI plugs a cartridge into the shared machine. The whole
-   resolution — a name to its carts/ path, the BIOS inventory, a bad name's
-   error message — is [Tool_misc_msx_lane.handle_load]'s, the same code a
-   keeper's masc_msx_load runs, so there is one loader and one inventory. The
-   route only turns its tool result into an HTTP answer; the TUI re-fetches the
-   frame to start spectating. Body: {cart:"name"}. *)
+(* The worker resolves inventory names against its persistent storage. *)
 let load_response ~(config : Workspace.config) ~agent_name ~body =
   match Yojson.Safe.from_string body with
   | exception Yojson.Json_error message ->
-    `Bad_request, load_result_json ~ok:false ~message:("invalid JSON: " ^ message)
-  | args ->
-    let result =
-      (* Tool_timing.start is the one tool-start stamp Tool_misc.dispatch
-         also uses; it reads Time_compat.now, the clock accessor the
-         determinism gate accepts. *)
-      Tool_misc_msx_lane.handle_load ~tool_name:"masc_msx_load"
-        ~start_time:(Tool_timing.start ()) ~base_path:config.base_path
-        ~agent_name ~after_load:(fun () -> machine_changed ~config) args
-    in
-    let ok = Tool_result.is_success result in
-    let status = if ok then `OK else `Bad_request in
-    status, load_result_json ~ok ~message:(Tool_result.message result)
+      `Bad_request, load_result_json ~ok:false ~message:("invalid JSON: " ^ message)
+  | arguments ->
+      let result = worker_response ~config ~principal:(Lane_addon_call_context.Host_actor agent_name)
+        ~schema:Tool_schemas_misc_toml.msx_load ~arguments in
+      result.status, load_result_json ~ok:result.ok ~message:result.message
 ;;
 
 let handle_load ~(config : Workspace.config) ~agent_name request reqd =
   Http.Request.read_body_async reqd (fun body ->
       let status, json = load_response ~config ~agent_name ~body in
-      respond_json_value_with_cors ~status request reqd json)
-;;
-
-(* "who is at the machine": each keeper's most-recent key within a window of the
-   current frame, newest first, projected from the shared ledger. The lane is one
-   machine anyone may press, so this reports presence -- it does not reserve the
-   slot. A turn in a turn-based game can run long, so the window is a full
-   minute of machine time at the machine's frame rate. *)
-let players_window_sec = 60
-let players_window_frames = players_window_sec * Msx_lane.frames_per_second
-
-let recent_players_of ~now entries =
-  let last : (string, int) Hashtbl.t = Hashtbl.create 8 in
-  List.iter
-    (fun (e : Msx_lane.entry) ->
-      Hashtbl.replace last e.Msx_lane.who e.Msx_lane.at_frame)
-    entries;
-  Hashtbl.fold
-    (fun who f acc ->
-      if now - f <= players_window_frames then (who, f) :: acc else acc)
-    last []
-  |> List.sort (fun (_, a) (_, b) -> compare b a)
-;;
-
-(* The lane owns immutable RGB snapshots and reuses their identity until a
-   machine mutation. Cache only pixel encoding: clock and player metadata must
-   remain live. One entry bounds retained memory across load/restore/eject.
-   Stdlib mutex: this pure serializer also runs outside Eio in route tests;
-   neither the protected lookup nor Base64 encoding performs I/O or yields. *)
-let encoded_pixels_mutex = Mutex.create ()
-let encoded_pixels : (string * string) option ref = ref None
-
-let frame_rgb_base64 rgb =
-  Mutex.lock encoded_pixels_mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock encoded_pixels_mutex) (fun () ->
-    match !encoded_pixels with
-    | Some (previous, encoded) when previous == rgb -> encoded
-    | None | Some _ ->
-        let encoded = Base64.encode_string rgb in
-        encoded_pixels := Some (rgb, encoded);
-        encoded)
+      respond_json_value_with_cors ~status:(status :> Httpun.Status.t) request reqd json)
 ;;
 
 (* Frames per poll-cadence tick (RFC-0439 §3.2). At the TUI's ~3 Hz spectator
@@ -261,7 +134,10 @@ let frame_rgb_base64 rgb =
    that a game reads as live without a server-side ticker. *)
 let msx_tick_default_frames = 18
 
-let clamp_tick_frames requested = max 1 (min Msx_lane.max_frames_per_call requested)
+let clamp_tick_frames requested =
+  let schema = Tool_schemas_misc_toml.msx_step.Masc_domain.input_schema in
+  let maximum = Yojson.Safe.Util.(schema |> member "properties" |> member "frames" |> member "maximum" |> to_int) in
+  max 1 (min maximum requested)
 
 type pixel_reference = { revision : string; width : int; height : int }
 type pixel_response = Full_frame | Retained_pixels of pixel_reference option
@@ -301,180 +177,81 @@ let decode_tick body =
   | _ -> Error "tick body must be an object"
 ;;
 
-type prepared_pixels = { rgb : string; encoded : string; reference : pixel_reference }
-let tick_pixels_mutex = Mutex.create ()
-let tick_pixels : prepared_pixels option ref = ref None
-
-let prepare_tick_pixels (frame : Msx_lane.frame) =
-  let previous = Mutex.protect tick_pixels_mutex (fun () -> !tick_pixels) in
-  match previous with
-  | Some pixels when pixels.reference.width = frame.width
-                     && pixels.reference.height = frame.height
-                     && String.equal pixels.rgb frame.rgb -> pixels
-  | Some _ | None ->
-      (* Advance invalidates the lane's RGB object even for identical pixels.
-         Compare bytes before hashing/encoding; CPU work never holds this lock. *)
-      let pixels =
-        { rgb = frame.rgb; encoded = Base64.encode_string frame.rgb;
-          reference = { width = frame.width; height = frame.height;
-            revision = Digestif.SHA256.(to_hex (digest_string frame.rgb)) } } in
-      Mutex.protect tick_pixels_mutex (fun () -> tick_pixels := Some pixels);
-      pixels
-
-let tick_frame_json pixel_response (frame : Msx_lane.frame) entries
-    (mark : Msx_lane.change_mark) =
-  let pixel_fields = match pixel_response with
-    | Full_frame -> ["rgb_base64", `String (frame_rgb_base64 frame.rgb)]
-    | Retained_pixels known ->
-        let pixels = prepare_tick_pixels frame in
-        let retained = known = Some pixels.reference in
-        let fields =
-          ["kind", `String (if retained then "retained" else "inline");
-           "revision", `String pixels.reference.revision;
-           "width", `Int frame.width; "height", `Int frame.height] in
-        ["pixels", `Assoc (if retained then fields
-           else fields @ ["rgb_base64", `String pixels.encoded])] in
-  `Assoc
-    (["loaded", `Bool true; "number", `Int frame.number;
-      "change_count", `Int mark.count; "incarnation", `String mark.incarnation;
-      "width", `Int frame.width; "height", `Int frame.height;
-      "mode", `String frame.mode;
-      "cartridge", (match frame.cartridge with Some s -> `String s | None -> `Null);
-      "disk", (match frame.disk with Some s -> `String s | None -> `Null);
-      "players", `List (List.map (fun (who, last) ->
-        `Assoc ["who", `String who; "last_frame", `Int last;
-                "frames_ago", `Int (frame.number - last)])
-          (recent_players_of ~now:frame.number entries))] @ pixel_fields)
-
-let tick_response ~body =
-  let error status message =
-    status, `Assoc [ "ok", `Bool false; "message", `String message ]
-  in
+let tick_response ~config ~body =
   match decode_tick body with
-  | Error detail -> error `Bad_request detail
+  | Error message -> `Bad_request, `Assoc ["ok", `Bool false; "message", `String message]
   | Ok (frames, pixel_response) ->
-    (* This is a mutation: the best-effort executor adapter can replay failed
-       work inline. Strict submission never retries or falls back to the HTTP
-       domain. The worker owns both emulation and the frame's serialization. *)
-    match Executor_pool_ref.submit_strict (fun () ->
-      match Msx_lane.step_frame ~frames with
-      | Ok (frame, entries, mark) ->
-        `OK, tick_frame_json pixel_response frame entries mark
-      | Error Msx_lane.No_machine -> `OK, `Assoc ["loaded", `Bool false]
-      | Error Msx_lane.Activity_disabled ->
-        `Conflict, activity_rejection_json "activity_disabled"
-      | Error Msx_lane.Activity_unobserved ->
-        `Conflict, activity_rejection_json "activity_unobserved"
-      | Error (Msx_lane.Invalid_request _ as e) ->
-        error `Bad_request (Msx_lane.error_to_string e)
-      | Error (Msx_lane.Unreadable _ as e) ->
-        error `Internal_server_error (Msx_lane.error_to_string e))
-    with
-    | Ok response -> response
-    | Error (Executor_pool_ref.Pool_unavailable | Executor_pool_ref.Caller_not_in_eio) ->
-      error `Service_unavailable "MSX tick worker is unavailable"
-    | Error ((Executor_pool_ref.Work_failed _ | Executor_pool_ref.Submission_failed _) as failure) ->
-      Log.Http.error "MSX tick: %s" (Executor_pool_ref.strict_submit_error_to_string failure);
-      error `Internal_server_error "MSX tick failed; read the current frame before retrying"
+      let pixels = match pixel_response with
+        | Full_frame -> []
+        | Retained_pixels known -> ["pixel_response", `String "retained"] @
+            (match known with None -> [] | Some p -> ["known_pixels", `Assoc [
+              "revision", `String p.revision; "width", `Int p.width; "height", `Int p.height]]) in
+      let result = worker_response ~config ~principal:Lane_addon_call_context.Operator
+        ~schema:Tool_schemas_misc_toml.msx_step
+        ~arguments:(`Assoc (["frames", `Int frames; "include_frame", `Bool true] @ pixels)) in
+      if result.ok then result.status, result.data
+      else result.status, `Assoc (["ok", `Bool false; "message", `String result.message]
+        @ match result.code with None -> [] | Some code -> ["code", `String code])
 ;;
 
-(* The realtime driver (RFC-0439 §3.2, poll-cadence tick). The spectating TUI
-   posts this a few times a second to advance the shared machine, so a game
-   flows even when no keeper is pressing a key. Body: {frames:N}, clamped to
-   1..max_frames_per_call; the answer is the advanced frame, so one call both
-   steps and reads. A write, gated like press. *)
-let handle_tick request reqd =
+let handle_tick ~config request reqd =
   Http.Request.read_body_async reqd (fun body ->
-      let status, json = tick_response ~body in
-      Http.Response.json_value_on_cpu ~status ~request
+      let status, json = tick_response ~config ~body in
+      Http.Response.json_value_on_cpu ~status:(status :> Httpun.Status.t) ~request
         ~extra_headers:(Server_auth.cors_headers (Server_auth.get_origin request)) json reqd)
 ;;
 
-let activity_json () = `Assoc ["schema",`String "masc.msx-activity/v1";
-  "activity",`String (Machine_configuration.activity_to_wire (Msx_lane.activity ()))]
+let activity_json ~config:_ =
+  let activity, message = match Runtime.machine_configuration () with
+    | None -> Machine_configuration.Unobserved, Some "Machine activity configuration is unavailable"
+    | Some configuration ->
+        (if configuration.Machine_configuration.msx_enabled then Machine_configuration.Enabled else Disabled), None in
+  `Assoc (["schema", `String "masc.msx-activity/v1";
+    "activity", `String (Machine_configuration.activity_to_wire activity)]
+    @ match message with None -> [] | Some message -> ["message", `String message])
 
 let checkpoint_response ~(config : Workspace.config) ~restore ~body =
-  let base_path = config.base_path in
-  let error status message = status, load_result_json ~ok:false ~message in
   match Yojson.Safe.from_string body with
-  | exception Yojson.Json_error message -> error `Bad_request message
-  | args ->
-    (match Tool_misc_msx_lane.checkpoint_slot args with
-     | Error message -> error `Bad_request message
-     | Ok _ ->
-       match Executor_pool_ref.submit_strict (fun () ->
-         let tool_name = if restore then "masc_msx_restore" else "masc_msx_save" in
-         let result = Tool_misc_msx_lane.handle_checkpoint ~restore ~tool_name
-             ~start_time:(Tool_timing.start ()) ~base_path args in
-         let ok = Tool_result.is_success result in
-         let status = match Tool_result.failure_class result with
-           | None -> `OK
-           | Some Tool_result.Workflow_rejection -> `Bad_request
-           | Some _ -> `Internal_server_error in
-         ok, (status, load_result_json ~ok ~message:(Tool_result.message result))) with
-       | Ok (ok, response) ->
-         if ok && restore then machine_changed ~config;
-         response
-       | Error (Executor_pool_ref.Pool_unavailable | Executor_pool_ref.Caller_not_in_eio) ->
-         error `Service_unavailable "MSX checkpoint worker is unavailable"
-       | Error (Executor_pool_ref.Work_failed _ as failure) ->
-         (* The worker ran and raised; a restore may have replaced the machine. *)
-         if restore then machine_changed ~config;
-         Log.Http.error "MSX checkpoint: %s" (Executor_pool_ref.strict_submit_error_to_string failure);
-         error `Internal_server_error "MSX checkpoint failed; inspect the current state before retrying"
-       | Error (Executor_pool_ref.Submission_failed _ as failure) ->
-         Log.Http.error "MSX checkpoint: %s" (Executor_pool_ref.strict_submit_error_to_string failure);
-         error `Internal_server_error "MSX checkpoint failed; inspect the current state before retrying")
+  | exception Yojson.Json_error message ->
+      `Bad_request, load_result_json ~ok:false ~message
+  | `Assoc fields when
+      List.length fields <> List.length (List.sort_uniq String.compare (List.map fst fields)) ->
+      `Bad_request, load_result_json ~ok:false ~message:"checkpoint has duplicate fields"
+  | arguments ->
+      let schema = if restore then Tool_schemas_misc_toml.msx_restore else Tool_schemas_misc_toml.msx_save in
+      let result = worker_response ~config ~principal:Lane_addon_call_context.Operator ~schema ~arguments in
+      result.status, load_result_json ~ok:result.ok ~message:result.message
 ;;
 
 let handle_change_disk ~(config : Workspace.config) request reqd =
   Http.Request.read_body_async reqd (fun body ->
-    let error status message = status, load_result_json ~ok:false ~message in
     let status, json = match Yojson.Safe.from_string body with
-      | exception Yojson.Json_error message -> error `Bad_request message
-      | args -> (
-        match Executor_pool_ref.submit_strict (fun () ->
-          let result = Tool_misc_msx_lane.handle_change_disk ~tool_name:"masc_msx_change_disk"
-              ~start_time:(Tool_timing.start ()) ~base_path:config.base_path args in
-          let ok = Tool_result.is_success result in
-          let status = match Tool_result.failure_class result with
-            | None -> `OK | Some Tool_result.Workflow_rejection -> `Bad_request
-            | Some _ -> `Internal_server_error in
-          ok, (status, load_result_json ~ok ~message:(Tool_result.message result))) with
-        | Ok (ok, response) ->
-          if ok then machine_changed ~config;
-          response
-        | Error (Executor_pool_ref.Pool_unavailable | Executor_pool_ref.Caller_not_in_eio) ->
-          error `Service_unavailable "MSX disk worker is unavailable"
-        | Error (Executor_pool_ref.Work_failed _ as failure) ->
-          (* The worker ran and raised; the disk may already be swapped. *)
-          machine_changed ~config;
-          Log.Http.error "MSX disk change: %s" (Executor_pool_ref.strict_submit_error_to_string failure);
-          error `Internal_server_error "MSX disk change failed; inspect the current state before retrying"
-        | Error (Executor_pool_ref.Submission_failed _ as failure) ->
-          Log.Http.error "MSX disk change: %s" (Executor_pool_ref.strict_submit_error_to_string failure);
-          error `Internal_server_error "MSX disk change failed; inspect the current state before retrying") in
-    respond_json_value_with_cors ~status request reqd json)
+      | exception Yojson.Json_error message -> `Bad_request, load_result_json ~ok:false ~message
+      | arguments ->
+          let result = worker_response ~config ~principal:Lane_addon_call_context.Operator
+            ~schema:Tool_schemas_misc_toml.msx_change_disk ~arguments in
+          result.status, load_result_json ~ok:result.ok ~message:result.message in
+    respond_json_value_with_cors ~status:(status :> Httpun.Status.t) request reqd json)
 ;;
 
 let handle_checkpoint ~config ~restore request reqd =
   Http.Request.read_body_async reqd (fun body ->
     let status, json = checkpoint_response ~config ~restore ~body in
-    respond_json_value_with_cors ~status request reqd json)
+    respond_json_value_with_cors ~status:(status :> Httpun.Status.t) request reqd json)
 ;;
 
 let add_routes router =
   router
   |> Http.Router.get "/api/v1/msx/activity" (fun request reqd ->
        with_public_read
-         (fun _state req reqd -> Http.Response.json_value ~compress:true ~request:req (activity_json ()) reqd)
+         (fun state req reqd -> Http.Response.json_value ~compress:true ~request:req
+           (activity_json ~config:(Mcp_server.workspace_config state)) reqd)
          request reqd)
   |> Http.Router.get "/api/v1/msx/carts" (fun request reqd ->
        with_public_read
          (fun state req reqd ->
-           let base_path = (Mcp_server.workspace_config state).base_path in
-           Http.Response.json_value ~compress:true ~request:req
-             (carts_json ~base_path) reqd)
+           let status, json = carts_response ~config:(Mcp_server.workspace_config state) in
+           respond_json_value_with_cors ~status:(status :> Httpun.Status.t) req reqd json)
          request reqd)
   |> Http.Router.post "/api/v1/msx/press" (fun request reqd ->
        with_tool_actor_auth ~tool_name:"masc_msx_press"
@@ -505,6 +282,6 @@ let add_routes router =
          request reqd)
   |> Http.Router.post "/api/v1/msx/tick" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_msx_step"
-         (fun _state _req reqd -> handle_tick request reqd)
+         (fun state _req reqd -> handle_tick ~config:(Mcp_server.workspace_config state) request reqd)
          request reqd)
 ;;

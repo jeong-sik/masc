@@ -30,3 +30,9 @@ let group_has_no_live_member pgid =
        whether the leader is still our own unreaped child. *)
     no_live_member ~leader:pgid ~owner:(Unix.getpid ())
       (Array.to_list (Array.map member_of_row rows))
+
+let live_member_left pgid =
+  Option.map
+    (fun rows ->
+      Array.exists (fun row -> match (member_of_row row).state with Live -> true | Zombie | Exiting -> false) rows)
+    (snapshot pgid)

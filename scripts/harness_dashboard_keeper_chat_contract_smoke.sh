@@ -108,14 +108,14 @@ const rows = [
     role: 'user',
     content: 'legacy row without turn ref',
     ts: 1783299999.999,
-    source: 'dashboard',
+    surface: { kind: 'dashboard' },
   },
   {
     id: 'smoke-user',
     role: 'user',
     content: 'prove server lifecycle replay',
     ts: 1783300000.001,
-    source: 'dashboard',
+    surface: { kind: 'dashboard' },
     turn_ref: turnRef,
   },
   {
@@ -123,7 +123,7 @@ const rows = [
     role: 'tool',
     content: '{}',
     ts: 1783300000.002,
-    source: 'dashboard',
+    surface: { kind: 'dashboard' },
     tool_call_id: 'toolu_smoke_contract',
     tool_call_name: 'keeper_context_status',
     turn_ref: turnRef,
@@ -133,7 +133,7 @@ const rows = [
     role: 'assistant',
     content: 'contract replay complete',
     ts: 1783300000.003,
-    source: 'dashboard',
+    surface: { kind: 'dashboard' },
     turn_ref: turnRef,
     stream_lifecycle: [
       'RUN_STARTED',
@@ -144,11 +144,10 @@ const rows = [
   },
   {
     id: 'smoke-error-assistant',
-    role: 'assistant',
+    role: 'request_failure',
     content: 'Keeper request failed: Timeout after 630.0s',
     ts: 1783300000.004,
-    source: 'dashboard',
-    kind: 'transport_failure',
+    surface: { kind: 'dashboard' },
     turn_ref: errorTurnRef,
     stream_lifecycle: [
       'RUN_STARTED',
@@ -276,7 +275,7 @@ function requireContract(row, id) {
       && legacyContract.delivery_receipt === 'no_delivery_receipt',
     legacyContract,
   );
-  record('error assistant keeps typed transport-failure row kind', errorRow?.kind === 'transport_failure', errorRow);
+  record('failed request keeps its server-owned row classification', errorRow?.role === 'request_failure', errorRow);
   record(
     'error assistant row replays RUN_ERROR as server-only receipt',
     errorContract.source === 'backend_stream_lifecycle'

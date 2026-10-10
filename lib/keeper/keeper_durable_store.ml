@@ -204,6 +204,26 @@ let librarian_range_receipt_store =
   }
 ;;
 
+let memory_admission_queue_store =
+  { store = "keeper explicit memory admission queue"
+  ; on_refusal =
+      "explicit Memory writes and pending admission refuse the queue; candidates \
+       remain untouched and cannot be treated as absent or consumed"
+  ; scan =
+      (fun ~base_path ->
+         let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+         let* keeper_ids = Keeper_memory_admission_queue.list_keeper_ids ~keepers_dir in
+         Ok
+           (List.fold_left
+              (fun report keeper_id ->
+                 count_row report
+                   (Keeper_memory_admission_queue.read_pending ~keepers_dir ~keeper_id
+                    |> Result.map (fun _ -> ())
+                    |> Result.map_error (fun detail -> keeper_id ^ ": " ^ detail)))
+              empty_report keeper_ids))
+  }
+;;
+
 let memory_source_current_store =
   { store = "memory-source current claims"
   ; on_refusal =
@@ -769,6 +789,7 @@ module Id = struct
     | Memory_current
     | Goal_store
     | Librarian_range_receipts
+    | Memory_admission_queue
     | Memory_source_current
     | Disposition_receipts
     | Board_posts
@@ -815,6 +836,7 @@ let reader : Id.t -> reader = function
   | Id.Official_client_session ->
     Refuse_boot (Refusing.Official_client_session, official_client_session_store)
 
+  | Id.Memory_admission_queue -> Preflight_only memory_admission_queue_store
   | Id.Librarian_range_receipts -> Preflight_only librarian_range_receipt_store
   | Id.Memory_source_current -> Preflight_only memory_source_current_store
   | Id.Disposition_receipts -> Preflight_only disposition_receipt_store

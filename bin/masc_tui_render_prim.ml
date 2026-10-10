@@ -144,11 +144,11 @@ let clamped_scroll_now (state : state) = function
    so a new reader is a compile error here, not a notch that quietly moves a
    list. *)
 let reader_after_wheel (reader : clamped_scroll)
-    (direction : Tui_decode.wheel_direction) : clamped_scroll option =
+    (direction : Masc.Tui_mouse_protocol.wheel_direction) : clamped_scroll option =
   let step value =
     match direction with
-    | Tui_decode.Wheel_down -> Masc_tui_types.scroll_down_from value ~by:1
-    | Tui_decode.Wheel_up -> max 0 (value - 1)
+    | Masc.Tui_mouse_protocol.Wheel_down -> Masc_tui_types.scroll_down_from value ~by:1
+    | Masc.Tui_mouse_protocol.Wheel_up -> max 0 (value - 1)
   in
   match reader with
   | Task_detail value -> Some (Task_detail (step value))
@@ -518,6 +518,26 @@ let search_marker_styled (state : state) =
          | None -> Ansi.dim)
         marker Ansi.reset
 
+let keeper_action_status (state : state) : Masc_tui_footer.status_item list =
+  match (state.keeper_action_inflight, state.keeper_action_pending) with
+  | Some (keeper_name, action), _ ->
+    [ Masc_tui_footer.Keeper_action_running
+        { gerund = Keeper_control.action_gerund action
+        ; keeper = Terminal_text.single_line keeper_name
+        }
+    ]
+  | None, Some pending ->
+    [ Masc_tui_footer.Keeper_action_armed
+        { key = Keeper_control.action_key pending.Keeper_control.pending_action
+        ; action =
+            Keeper_control.action_label pending.Keeper_control.pending_action
+        ; keeper =
+            Terminal_text.single_line pending.Keeper_control.pending_keeper
+        }
+    ]
+  | None, None -> []
+
+
 let footer_line ?(status = []) ?position (state : state) ~max_cells ~hints =
   (* Hints off trades the key text for status room; "?:help" stays as the
      door back. One seam for every surface, which is what makes the setting
@@ -551,16 +571,6 @@ let footer_line ?(status = []) ?position (state : state) ~max_cells ~hints =
     match state.server_identity with
     | None -> []
     | Some identity ->
-        (* The health probe owns the exact path. Escape terminal controls, but
-           do not trim or rewrite characters that may belong to the path. *)
-        [ Masc_tui_footer.Server_build
-            { version = identity.Tui_decode.sid_version
-            ; commit = identity.Tui_decode.sid_binary_commit
-            }
-        ; Masc_tui_footer.Server_base_path
-            (Terminal_text.single_line identity.Tui_decode.sid_base_path)
-        ]
-        @
         (* Only a definite yes warns: an older server that cannot say
            (None) must not read as either lane. *)
         (match identity.Tui_decode.sid_executable_in_worktree with
@@ -602,66 +612,12 @@ let footer_line ?(status = []) ?position (state : state) ~max_cells ~hints =
     | Masc_tui_types.Workspace_identity_unread
     | Masc_tui_types.Workspace_identity_match -> []
   in
-  (* Keepers mid-turn, the one this pane last messaged first: that is the
-     answer the operator who walked away is waiting on. *)
-  let answering =
-    let running =
-      List.filter_map
-        (fun (row : Tui_decode.keeper_turn_row) ->
-          match row.ktr_state with
-          | Tui_decode.Keeper_turn_running { started_at_unix; _ } ->
-              Some (row.ktr_keeper_name, started_at_unix)
-          | Tui_decode.Keeper_turn_idle
-          | Tui_decode.Keeper_turn_unavailable _ -> None)
-        state.keeper_turns
-    in
-    let running =
-      match state.msg_target_keeper_name with
-      | Some target when List.mem_assoc target running ->
-          (target, List.assoc target running)
-          :: List.filter (fun (name, _) -> name <> target) running
-      | Some _ | None -> running
-    in
-    match running with
-    | [] -> []
-    | (_, lead_started_at) :: _ ->
-        (* The lead keeper's elapsed time rides the badge: a turn that has
-           been running for twenty minutes reads as the stall it probably
-           is, from every surface. Clamped so clock skew never counts up
-           from the future. *)
-        let lead_elapsed_s =
-          Some
-            (int_of_float
-               (Float.max 0. (Unix.gettimeofday () -. lead_started_at)))
-        in
-        [ Masc_tui_footer.Keeper_answering
-            { names = List.map fst running; lead_elapsed_s }
-        ]
-  in
-  (* The glow after a finish: the newest one leads, the rest fold into +N.
-     [advance_finishes] already dropped expired entries and keepers that
-     started running again, but a footer drawn between polls still filters
-     by its own clock so the glow dies on time, not on the next poll. *)
-  let answered =
-    let now = Unix.gettimeofday () in
-    match
-      List.filter
-        (fun (_, finished_at) ->
-          now -. finished_at <= Masc_tui_answering.finish_glow_ttl_seconds)
-        state.keeper_turn_finishes
-    with
-    | [] -> []
-    | (name, finished_at) :: rest ->
-        [ Masc_tui_footer.Keeper_answered
-            { name
-            ; seconds_ago = int_of_float (Float.max 0. (now -. finished_at))
-            ; more = List.length rest
-            }
-        ]
-  in
   Masc_tui_footer.line ?literal_prefix ?action_text ?position
-    ~status:(status @ identity @ conflict @ answering @ answered)
-    ~dim:Ansi.dim ~reset:Ansi.reset ~max_cells ~port:state.port ~hints ()
+    ~status:(keeper_action_status state
+      @ List.filter (fun item -> Masc_tui_footer.needs_operator item
+          && not (List.mem item (keeper_action_status state))) status
+      @ identity @ conflict)
+    ~dim:Ansi.dim ~reset:Ansi.reset ~max_cells ~hints ()
 
 
 (* The slash word being typed, painted: the run already pressed in the accent,
@@ -2557,24 +2513,6 @@ let planning_proof_mark proof =
    key cancels the arm, so a footer that gives this up to fit something else
    gives up the only notice of a state the operator is standing in. The keys stay
    on the row beside it now instead of being replaced by it. *)
-let keeper_action_status (state : state) : Masc_tui_footer.status_item list =
-  match (state.keeper_action_inflight, state.keeper_action_pending) with
-  | Some (keeper_name, action), _ ->
-    [ Masc_tui_footer.Keeper_action_running
-        { gerund = Keeper_control.action_gerund action
-        ; keeper = Terminal_text.single_line keeper_name
-        }
-    ]
-  | None, Some pending ->
-    [ Masc_tui_footer.Keeper_action_armed
-        { key = Keeper_control.action_key pending.Keeper_control.pending_action
-        ; action =
-            Keeper_control.action_label pending.Keeper_control.pending_action
-        ; keeper =
-            Terminal_text.single_line pending.Keeper_control.pending_keeper
-        }
-    ]
-  | None, None -> []
 
 let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [])
     state reading =

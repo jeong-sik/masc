@@ -46,6 +46,8 @@ let observation_fields ?(sprites = false) (o : Msx_lane.observation) =
   ; ("mode", `String o.mode)
   ; ("pc", `String (Printf.sprintf "%04x" o.pc))
   ; ("halted", `Bool o.halted)
+  ; ("ppi_a", `Int o.ppi_a)
+  ; ("slot3_sel", `Int o.slot3_sel)
   ; ("cartridge", match o.cartridge with Some c -> `String c | None -> `Null)
   ; ("disk", match o.disk with Some d -> `String d | None -> `Null)
   ; ("screen_text", `String o.screen_text)
@@ -423,10 +425,14 @@ let handle_checkpoint_info ~tool_name ~start_time ~base_path args =
         ~data:
           (`Assoc
             ([ ("slot", `String slot)
+             ; ("exists", `Bool info.exists)
              ; ("version", `Int info.version)
+             ; ( "state_format_version"
+               , match info.state_format_version with Some v -> `Int v | None -> `Null )
              ; ("frame", match info.frame with Some f -> `Int f | None -> `Null)
              ; ( "saved_at_unix"
                , match info.saved_at_unix with Some t -> `Float t | None -> `Null )
+             ; ("mtime_utc", `String info.mtime_utc)
              ; ("core_sha", match info.core_sha with Some s -> `String s | None -> `Null)
              ; ( "core_matches_current"
                , match info.core_sha with
@@ -464,6 +470,28 @@ let handle_change_disk ~tool_name ~start_time ~base_path args =
         (Msx_lane.change_disk ~path ~backup_path))
 ;;
 
+let handle_export_disk ~tool_name ~start_time ~base_path args =
+  match args with
+  | `Assoc ["filename", `String filename] ->
+    let catalog =
+      try Ok (carts_dir ~base_path:(Unix.realpath base_path))
+      with Unix.Unix_error (error, fn, arg) ->
+        Error (Msx_lane.Unreadable
+          (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error))) in
+    let result = Result.bind catalog (fun catalog_dir ->
+      Msx_lane.export_disk ~catalog_dir ~filename) in
+    (match result with
+     | Ok (receipt : Msx_lane.disk_export) ->
+       Tool_result.make_ok ~tool_name ~start_time ~data:(`Assoc [
+         "filename", `String receipt.filename;
+         "byte_length", `Int receipt.byte_length;
+         "sha256", `String receipt.sha256;
+         "source_disk", (match receipt.source_disk with None -> `Null | Some name -> `String name);
+         "frame", `Int receipt.frame]) ()
+     | Error error -> of_lane ~tool_name ~start_time (Error error))
+  | _ -> reject ~tool_name ~start_time "filename must name one new catalog .dsk image"
+;;
+
 let dispatch ~relay ~base_path ~agent ~name ~arguments =
   let tool_name = name and start_time = Tool_timing.start () in
   match name with
@@ -471,6 +499,7 @@ let dispatch ~relay ~base_path ~agent ~name ~arguments =
   | "masc_msx_eject" -> Some (handle_eject ~relay ~tool_name ~start_time ~agent_name:agent arguments)
   | "masc_msx_save" -> Some (handle_checkpoint ~restore:false ~tool_name ~start_time ~base_path arguments)
   | "masc_msx_restore" -> Some (handle_checkpoint ~restore:true ~tool_name ~start_time ~base_path arguments)
+  | "masc_msx_export_disk" -> Some (handle_export_disk ~tool_name ~start_time ~base_path arguments)
   | "masc_msx_change_disk" -> Some (handle_change_disk ~tool_name ~start_time ~base_path arguments)
   | "masc_msx_meta" -> Some (handle_meta ~tool_name ~start_time
       ?inventory_base_path:(if get_bool arguments "include_inventory" false then Some base_path else None) ())

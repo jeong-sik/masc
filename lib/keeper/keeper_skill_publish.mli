@@ -1,6 +1,7 @@
 (** Keeper-authored Skill publication (RFC keeper-self-authored-skills).
 
     Parses [package_id], [source_text] and a non-empty [evidence] list, then
+    validates against the caller-authorized [descriptors] before it
     asks {!Workspace_hooks.keeper_skill_publish_fn} to create the package in
     the [project-agents] source. The Keeper cannot pick the source. The
     editor's typed outcome is projected to JSON as is:
@@ -9,6 +10,7 @@
     turns listing Skills by name see instead, [Created_but_unpublished] the
     reason, and a refusal its [error] code and message. *)
 val handle :
+  descriptors:Keeper_tool_descriptor.t list ->
   config:Workspace.config ->
   keeper_name:string ->
   args:Yojson.Safe.t ->

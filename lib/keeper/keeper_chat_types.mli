@@ -27,37 +27,16 @@ type tool_call = {
   args : string;
 }
 
-(** Lane line role as a closed sum (RFC-0232 P1). Parsed once at the
-    read boundary; a line whose persisted label is none of
-    ["user"] / ["assistant"] / ["system"] / ["tool"] is reported as a persistence
-    read drop and excluded — it can participate in no lane semantics
-    (watermark, pending, rendering). On-disk labels are unchanged. *)
+(** Closed transcript row classification. Assistant is Keeper speech;
+    Request_failure is a server-owned request result and cannot acknowledge
+    input or enter conversation memory. Unknown labels are refused. *)
 module Role : sig
   type t =
     | User
     | Assistant
     | System
+    | Request_failure
     | Tool
-
-  val to_label : t -> string
-  val of_label : string -> t option
-  val equal : t -> t -> bool
-end
-
-(** What an assistant line {e is}, declared by the writer at append.
-    [Utterance] is something the keeper actually said.
-    [Transport_failure] is the server persisting a failed request
-    terminal (["Keeper request failed: ..."]) so the operator still sees
-    the failure after a reload — it is {e not} a self reply: it does not
-    advance the lane watermark, so the user line it failed to answer
-    stays pending until the keeper's next real utterance, and
-    observation never quotes it back as the keeper's own words.
-    Persisted as ["kind"]; the field is absent for utterances, so rows
-    written before it existed read unchanged. *)
-module Row_kind : sig
-  type t =
-    | Utterance
-    | Transport_failure
 
   val to_label : t -> string
   val of_label : string -> t option
@@ -208,10 +187,6 @@ type chat_message = {
           and rows written before P4 (the offline backfill tool stamps
           those).  Malformed persisted entries are reported as
           persistence read drops and skipped; the row stays valid. *)
-  kind : Row_kind.t;
-      (** Absent persisted kind means [Utterance]. A present field must
-          name a known kind; malformed values are reported and the row is
-          rejected, so unknown input cannot acknowledge keeper speech. *)
   turn_ref : Ids.Turn_ref.t option;
       (** RFC-0233 §7: ["<trace_id>#<absolute_turn>"] join key for the turn
           that produced this row.  Stamped by [append_turn] /

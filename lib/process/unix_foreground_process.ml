@@ -1,6 +1,10 @@
 external spawnp :
-  string -> string array -> string array -> (string option * bool) ->
+  string -> string array -> string array -> (Unix.file_descr option * bool) ->
   (int * Unix.file_descr) list -> int = "masc_posix_spawnp"
+
+external open_directory : string -> Unix.file_descr = "masc_open_process_directory"
+
+exception Directory_unavailable of { cwd : string; error : Unix.error }
 
 external exited_without_reaping : int -> bool = "masc_process_exited_without_reaping"
 
@@ -15,13 +19,19 @@ let locked t f =
   Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock t.lock) f
 
 
-let spawn t executable argv env stdin_fd stdout_fd stderr_fd = locked t (fun () ->
+let spawn ?cwd t executable argv env stdin_fd stdout_fd stderr_fd = locked t (fun () ->
   (match t.state with
    | Unstarted -> ()
    | Owned | Reaped _ | Lost -> invalid_arg "foreground owner already started");
-  t.pid <- spawnp executable (Array.of_list argv) env (None, true)
-      [ 0, stdin_fd; 1, stdout_fd; 2, stderr_fd ];
-  t.state <- Owned)
+  let cwd_fd = Option.map
+      (fun cwd ->
+        try open_directory cwd with
+        | Unix.Unix_error (error, _, _) -> raise (Directory_unavailable { cwd; error }))
+      cwd in
+  Fun.protect ~finally:(fun () -> Option.iter Unix.close cwd_fd) (fun () ->
+    t.pid <- spawnp executable (Array.of_list argv) env (cwd_fd, true)
+        [ 0, stdin_fd; 1, stdout_fd; 2, stderr_fd ];
+    t.state <- Owned))
 
 
 let lost_child () = raise (Unix.Unix_error (Unix.ECHILD, "foreground owner", ""))

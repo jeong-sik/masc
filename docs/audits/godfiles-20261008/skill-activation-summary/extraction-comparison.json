@@ -1,0 +1,7 @@
+{
+  "parent": "f4fd7e5ca4f4ff72f3e872da403a8ad140f14365",
+  "public_mli_byte_identical": true,
+  "constructor_codec_replay_storage_tail_byte_identical": true,
+  "mutable_ledger_definition_identical": true,
+  "summary_body_identical_after_explicit_list_input_and_no_ledger_copy_transform": true
+}

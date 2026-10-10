@@ -393,10 +393,22 @@ let mint_message_id ~ts =
   let n = Atomic.fetch_and_add message_id_counter 1 in
   Printf.sprintf "msg-%016.0f-%d" (ts *. 1_000_000.) n
 
+let validate_row_fields fields =
+  let allowed =
+    [ "id"; "role"; "content"; "ts"; "attachments"; "mentions"; "tool_call_id"
+    ; "execution_id"; "tool_call_name"; "surface"; "conversation_id"
+    ; "external_message_id"; "workspace_id"; "speaker_id"; "speaker_name"
+    ; "speaker_authority"; "audio"; "blocks"; "turn_ref"; "stream_lifecycle"
+    ; "approval_lifecycle"; "delivery_key"; "transcript_slot" ] in
+  match List.find_opt (fun (key, _) -> not (List.mem key allowed)) fields with
+  | None -> Ok ()
+  | Some (key, _) -> Error (Printf.sprintf "unknown chat row field %S" key)
+;;
+
 let encode_line ~(role : Role.t) ~content ~ts ?message_id ?attachments ?tool_call_id
     ?execution_id ?tool_call_name ?surface ?conversation_id ?external_message_id ?workspace_id
     ?speaker
-    ?audio ?blocks ?mentions ?(kind = Row_kind.Utterance) ?turn_ref
+    ?audio ?blocks ?mentions ?turn_ref
     ?stream_lifecycle ?approval_lifecycle ?provenance ()
     : string =
   let surface_field =
@@ -419,12 +431,11 @@ let encode_line ~(role : Role.t) ~content ~ts ?message_id ?attachments ?tool_cal
      on a failed-request row is server-owned text; completed blocks supplied
      by the producer are retained independently of that failure. *)
   let blocks =
-    match blocks, role, kind with
-    | Some _, _, _ -> blocks
-    | None, Role.Assistant, Row_kind.Utterance when String.trim content <> "" ->
+    match blocks, role with
+    | Some _, _ -> blocks
+    | None, Role.Assistant when String.trim content <> "" ->
       Some (Keeper_chat_blocks.parse_text_to_blocks content)
-    | None, (Role.User | Role.Assistant | Role.System | Role.Tool),
-      (Row_kind.Utterance | Row_kind.Transport_failure) -> None
+    | None, (Role.User | Role.Assistant | Role.System | Role.Tool | Role.Request_failure) -> None
   in
   (* Some [] records the writer's explicit no-mention decision. None is used
      only where this row has no mention metadata supplied by its writer. *)
@@ -460,19 +471,10 @@ let encode_line ~(role : Role.t) ~content ~ts ?message_id ?attachments ?tool_cal
         ) atts in
         [("attachments", `List att_json)]
   in
-  (* Utterance is the absent-field default so rows written before the
-     [kind] field existed and ordinary rows stay byte-identical. *)
-  let kind_field =
-    match kind with
-    | Row_kind.Utterance -> []
-    | Row_kind.Transport_failure ->
-        [ ("kind", `String (Row_kind.to_label kind)) ]
-  in
   let all_fields =
     base_fields
     @ attachment_fields
     @ mention_fields
-    @ kind_field
     @ Json_util.string_field_if_present "tool_call_id" tool_call_id
     @ Json_util.string_field_if_present "execution_id"
         (Option.map Ids.Execution_id.to_string execution_id)
@@ -528,7 +530,7 @@ let validate_delivery_execution_identity ~execution_id
       | Keeper_chat_delivery_identity.Tool_delivery _, Some _ ->
           Error "tool_delivery transcript slot forbids row execution_id"
       | ( Keeper_chat_delivery_identity.Accepted_user
-        | Keeper_chat_delivery_identity.Terminal_assistant
+        | Keeper_chat_delivery_identity.Terminal_result
         | Keeper_chat_delivery_identity.Approval_request
         | Keeper_chat_delivery_identity.Approval_resolution
         | Keeper_chat_delivery_identity.Approval_replay
@@ -537,7 +539,7 @@ let validate_delivery_execution_identity ~execution_id
         None ->
           Ok ()
       | ( Keeper_chat_delivery_identity.Accepted_user
-        | Keeper_chat_delivery_identity.Terminal_assistant
+        | Keeper_chat_delivery_identity.Terminal_result
         | Keeper_chat_delivery_identity.Approval_request
         | Keeper_chat_delivery_identity.Approval_resolution
         | Keeper_chat_delivery_identity.Approval_replay
@@ -551,7 +553,7 @@ let validate_delivery_role ~role_label
     (provenance : Keeper_chat_delivery_identity.delivery_provenance) =
   match provenance.transcript_slot, role_label with
   | Keeper_chat_delivery_identity.Accepted_user, "user"
-  | Keeper_chat_delivery_identity.Terminal_assistant, "assistant"
+  | Keeper_chat_delivery_identity.Terminal_result, ("assistant" | "request_failure")
   | ( Keeper_chat_delivery_identity.Approval_request
     | Keeper_chat_delivery_identity.Approval_resolution
     | Keeper_chat_delivery_identity.Approval_replay
@@ -564,8 +566,8 @@ let validate_delivery_role ~role_label
     Ok ()
   | Keeper_chat_delivery_identity.Accepted_user, _ ->
     Error "accepted_user transcript slot requires a user row"
-  | Keeper_chat_delivery_identity.Terminal_assistant, _ ->
-    Error "terminal_assistant transcript slot requires an assistant row"
+  | Keeper_chat_delivery_identity.Terminal_result, _ ->
+    Error "terminal_result transcript slot requires an assistant or request_failure row"
   | ( Keeper_chat_delivery_identity.Approval_request
     | Keeper_chat_delivery_identity.Approval_resolution
     | Keeper_chat_delivery_identity.Approval_replay
@@ -597,6 +599,8 @@ let provenance_of_line ~line_number line =
   try
     match Yojson.Safe.from_string line with
     | `Assoc fields ->
+      let ( let* ) = Result.bind in
+      let* () = match validate_row_fields fields with Ok () -> Ok () | Error detail -> fail detail in
       (match
          Keeper_chat_delivery_identity.delivery_provenance_of_fields fields
        with
@@ -755,7 +759,7 @@ let provenance_index_of_existing existing =
       | Keeper_chat_delivery_identity.Tool_call { ordinal; _ }
       | Keeper_chat_delivery_identity.Tool_delivery { ordinal } -> Some ordinal
       | Keeper_chat_delivery_identity.Accepted_user
-      | Keeper_chat_delivery_identity.Terminal_assistant
+      | Keeper_chat_delivery_identity.Terminal_result
       | Keeper_chat_delivery_identity.Approval_request
       | Keeper_chat_delivery_identity.Approval_resolution
       | Keeper_chat_delivery_identity.Approval_replay
@@ -785,7 +789,7 @@ let provenance_index_of_existing existing =
         ~ordinal execution_id
     | Keeper_chat_delivery_identity.Accepted_user
     | Keeper_chat_delivery_identity.Tool_delivery _
-    | Keeper_chat_delivery_identity.Terminal_assistant
+    | Keeper_chat_delivery_identity.Terminal_result
     | Keeper_chat_delivery_identity.Approval_request
     | Keeper_chat_delivery_identity.Approval_resolution
     | Keeper_chat_delivery_identity.Approval_replay
@@ -854,7 +858,7 @@ let find_indexed_provenance index ~provenance =
              "canonical Keeper execution_id is reused by multiple deliveries or tool ordinals")
       | Keeper_chat_delivery_identity.Accepted_user
       | Keeper_chat_delivery_identity.Tool_delivery _
-      | Keeper_chat_delivery_identity.Terminal_assistant
+      | Keeper_chat_delivery_identity.Terminal_result
       | Keeper_chat_delivery_identity.Approval_request
       | Keeper_chat_delivery_identity.Approval_resolution
       | Keeper_chat_delivery_identity.Approval_replay
@@ -868,7 +872,7 @@ let find_indexed_provenance index ~provenance =
       | Keeper_chat_delivery_identity.Tool_call { ordinal; _ }
       | Keeper_chat_delivery_identity.Tool_delivery { ordinal } -> Some ordinal
       | Keeper_chat_delivery_identity.Accepted_user
-      | Keeper_chat_delivery_identity.Terminal_assistant
+      | Keeper_chat_delivery_identity.Terminal_result
       | Keeper_chat_delivery_identity.Approval_request
       | Keeper_chat_delivery_identity.Approval_resolution
       | Keeper_chat_delivery_identity.Approval_replay
@@ -999,7 +1003,6 @@ let user_line_mentions ~extra_mentions content =
 let append_turn_result ~base_dir ~keeper_name ~(user_content : string)
     ~(user_attachments : attachment list) ?(tool_calls = []) ?surface
     ?conversation_id ?external_message_id ?speaker ?(extra_mentions = [])
-    ?(assistant_kind = Row_kind.Utterance)
     ?blocks
     ?turn_ref
     ?stream_lifecycle
@@ -1046,7 +1049,7 @@ let append_turn_result ~base_dir ~keeper_name ~(user_content : string)
     in
     let asst_line =
       encode_line ~role:Role.Assistant ~content:assistant_content ~ts ?surface
-        ?conversation_id ~kind:assistant_kind ?blocks ?turn_ref
+        ?conversation_id ?blocks ?turn_ref
         ?stream_lifecycle ()
     in
     let payload =
@@ -1069,12 +1072,12 @@ let append_turn_result ~base_dir ~keeper_name ~(user_content : string)
 let append_turn ~base_dir ~keeper_name ~(user_content : string)
     ~(user_attachments : attachment list) ?(tool_calls = []) ?surface
     ?conversation_id ?external_message_id ?speaker ?(extra_mentions = [])
-    ?(assistant_kind = Row_kind.Utterance) ?blocks ?turn_ref ?stream_lifecycle
+    ?blocks ?turn_ref ?stream_lifecycle
     ~(assistant_content : string) () =
   ignore
     (append_turn_result ~base_dir ~keeper_name ~user_content ~user_attachments
        ~tool_calls ?surface ?conversation_id ?external_message_id ?speaker
-       ~extra_mentions ~assistant_kind ?blocks ?turn_ref ?stream_lifecycle
+       ~extra_mentions ?blocks ?turn_ref ?stream_lifecycle
        ~assistant_content ()
       : (unit, string) result)
 
@@ -1171,7 +1174,7 @@ let append_tool_calls_result ~base_dir ~keeper_name ~(tool_calls : tool_call lis
    use the unit wrapper below keep the existing swallow-and-count telemetry. *)
 let append_assistant_message_result ~base_dir ~keeper_name ~(content : string)
     ?(tool_calls = []) ?surface ?conversation_id ?audio
-    ?(assistant_kind = Row_kind.Utterance) ?blocks ?turn_ref ?stream_lifecycle
+    ?blocks ?turn_ref ?stream_lifecycle
     () : (unit, string) result =
   try
     ensure_dir_once ~base_dir;
@@ -1196,7 +1199,7 @@ let append_assistant_message_result ~base_dir ~keeper_name ~(content : string)
     in
     let line =
       encode_line ~role:Role.Assistant ~content ~ts ?surface ?conversation_id
-        ?audio ~kind:assistant_kind ?blocks ?turn_ref ?stream_lifecycle ()
+        ?audio ?blocks ?turn_ref ?stream_lifecycle ()
     in
     let payload =
       String.concat "\n" (tool_lines @ [ line ]) ^ "\n"
@@ -1224,7 +1227,7 @@ let transcript_slot_ordinal = function
   | Keeper_chat_delivery_identity.Tool_call { ordinal; _ }
   | Keeper_chat_delivery_identity.Tool_delivery { ordinal } -> Some ordinal
   | Keeper_chat_delivery_identity.Accepted_user
-  | Keeper_chat_delivery_identity.Terminal_assistant
+  | Keeper_chat_delivery_identity.Terminal_result
   | Keeper_chat_delivery_identity.Approval_request
   | Keeper_chat_delivery_identity.Approval_resolution
   | Keeper_chat_delivery_identity.Approval_replay
@@ -1258,7 +1261,7 @@ let validate_append_once_lines lines =
           Some execution_id
         | Keeper_chat_delivery_identity.Accepted_user
         | Keeper_chat_delivery_identity.Tool_delivery _
-        | Keeper_chat_delivery_identity.Terminal_assistant
+        | Keeper_chat_delivery_identity.Terminal_result
         | Keeper_chat_delivery_identity.Approval_request
         | Keeper_chat_delivery_identity.Approval_resolution
         | Keeper_chat_delivery_identity.Approval_replay
@@ -1444,20 +1447,24 @@ let append_tool_calls_once
       Error detail
 ;;
 
-let append_assistant_message_once
+type terminal_row = Reply of string | Failed_request of string
+
+let append_terminal_message_once
       ~base_dir
       ~keeper_name
       ~delivery_key
-      ~(content : string)
+      ~terminal
       ?surface
       ?conversation_id
-      ?(assistant_kind = Row_kind.Utterance)
       ?(tool_calls = [])
       ?blocks
       ?turn_ref
       ?stream_lifecycle
       ()
   =
+  let role, content = match terminal with
+    | Reply content -> Role.Assistant, content
+    | Failed_request content -> Role.Request_failure, content in
   try
     ensure_dir_once ~base_dir;
     let redaction = redaction_for ~base_dir ~keeper_name in
@@ -1468,17 +1475,16 @@ let append_assistant_message_once
     let ts = Time_compat.now () in
     let row_id = mint_message_id ~ts in
     let transcript_slot =
-      Keeper_chat_delivery_identity.Terminal_assistant
+      Keeper_chat_delivery_identity.Terminal_result
     in
     let line =
       encode_line
-        ~role:Role.Assistant
+        ~role
         ~content
         ~ts
         ~message_id:row_id
         ?surface
         ?conversation_id
-        ~kind:assistant_kind
         ?blocks
         ?turn_ref
         ?stream_lifecycle
@@ -1506,10 +1512,24 @@ let append_assistant_message_once
       ();
     let detail = Printexc.to_string exn in
     Log.Keeper.warn
-      "keeper_chat_store: assistant append-once failed for %s: %s"
+      "keeper_chat_store: terminal append-once failed for %s: %s"
       (sanitize_name keeper_name)
       detail;
     Error detail
+;;
+
+let append_assistant_message_once ~base_dir ~keeper_name ~delivery_key ~content
+    ?surface ?conversation_id ?tool_calls ?blocks ?turn_ref ?stream_lifecycle () =
+  append_terminal_message_once ~base_dir ~keeper_name ~delivery_key
+    ~terminal:(Reply content) ?surface ?conversation_id ?tool_calls ?blocks
+    ?turn_ref ?stream_lifecycle ()
+;;
+
+let append_request_failure_once ~base_dir ~keeper_name ~delivery_key ~content
+    ?surface ?conversation_id ?tool_calls ?blocks ?turn_ref ?stream_lifecycle () =
+  append_terminal_message_once ~base_dir ~keeper_name ~delivery_key
+    ~terminal:(Failed_request content) ?surface ?conversation_id ?tool_calls ?blocks
+    ?turn_ref ?stream_lifecycle ()
 ;;
 
 (* Unit wrapper: existing callers keep the prior swallow-and-count behavior (the
@@ -1623,7 +1643,7 @@ type strict_decode_error =
   | Invalid_surface of string
   | Unknown_speaker_authority of string
   | Missing_speaker_authority
-  | Invalid_row_kind of string
+  | Invalid_row_contract of string
 
 type parsed_line =
   { message : chat_message option
@@ -1826,26 +1846,15 @@ let parse_line_decoded ~file_path (line : string) : parsed_line =
                 ~detail:"invalid blocks field";
               None)
     in
-    let kind_result =
-      match Json_util.assoc_member_opt "kind" json with
-      | None -> Ok Row_kind.Utterance
-      | Some (`String label) ->
-          (match Row_kind.of_label label with
-           | Some kind -> Ok kind
-           | None -> Error (Printf.sprintf "unknown chat row kind %S" label))
-      | Some _ -> Error "chat row kind must be a string"
-    in
-    let strict_decode_error =
-      match kind_result with
-      | Ok _ -> strict_decode_error
+    let contract_result = match json with
+      | `Assoc fields -> validate_row_fields fields
+      | _ -> Error "chat row must be an object" in
+    let strict_decode_error = match contract_result with
+      | Ok () -> strict_decode_error
       | Error detail ->
-          report_persistence_read_drop
-            ~reason:Read_drop_reason.Invalid_payload
-            ~path:file_path
-            ~detail;
-          (match strict_decode_error with
-           | Some _ -> strict_decode_error
-           | None -> Some (Invalid_row_kind detail))
+        report_persistence_read_drop ~reason:Read_drop_reason.Invalid_payload
+          ~path:file_path ~detail;
+        Some (Invalid_row_contract detail)
     in
     let turn_ref =
       (* RFC-0233 §7: parse the join key; a malformed value is surfaced as
@@ -1962,7 +1971,7 @@ let parse_line_decoded ~file_path (line : string) : parsed_line =
           ~detail:"chat row missing role and readable text/structured payload";
         None)
       else
-        match kind_result, Role.of_label role_label with
+        match contract_result, Role.of_label role_label with
         | Error _, _ -> None
         | Ok _, None ->
             (* RFC-0232 P1: an unknown role cannot participate in any lane
@@ -1979,7 +1988,7 @@ let parse_line_decoded ~file_path (line : string) : parsed_line =
               ~path:file_path
               ~detail:"tool chat row missing non-empty tool_call_name";
             None
-        | Ok kind, Some role ->
+        | Ok (), Some role ->
             (match opt_string "id", ts with
              | None, _ ->
                  report_persistence_read_drop
@@ -2000,7 +2009,7 @@ let parse_line_decoded ~file_path (line : string) : parsed_line =
                    { id; role; content; ts; attachments; tool_call_id; execution_id;
                      tool_call_name; surface; conversation_id;
                      external_message_id; workspace_id; speaker; audio; blocks;
-                     mentions; kind; turn_ref; stream_lifecycle; approval_lifecycle;
+                     mentions; turn_ref; stream_lifecycle; approval_lifecycle;
                      delivery_provenance })
     in
     { message; strict_decode_error }
@@ -2035,6 +2044,7 @@ let is_tool_message (msg : chat_message) = Role.equal msg.role Role.Tool
 
 let is_history_primary (msg : chat_message) =
   Role.equal msg.role Role.User || Role.equal msg.role Role.Assistant
+  || Role.equal msg.role Role.Request_failure
 ;;
 
 (* Old rows without either causal identity can become unrenderable when a
@@ -2051,7 +2061,7 @@ let drop_leading_orphan_tool_messages messages =
   match split [] messages with
   | [], _ -> messages
   | anonymous_tools,
-    ({ role = Role.Assistant; kind = Row_kind.Transport_failure; _ } :: _ as rest) ->
+    ({ role = Role.Request_failure; _ } :: _ as rest) ->
     (* Failure persistence is one ordered batch: tool rows followed by its
        typed terminal assistant row. The user row may already have been
        persisted upstream or may fall just outside this page, so the terminal
@@ -2306,7 +2316,7 @@ let parse_transcript_row_strict ~path ~redaction ~line_no line =
            "%s:%d speaker_id/speaker_name without speaker_authority"
            path
            line_no)
-    | { strict_decode_error = Some (Invalid_row_kind detail); _ } ->
+    | { strict_decode_error = Some (Invalid_row_contract detail); _ } ->
       `Unreadable (Printf.sprintf "%s:%d %s" path line_no detail)
     | { message = Some message; strict_decode_error = None } ->
       `Message (redact_message redaction message)

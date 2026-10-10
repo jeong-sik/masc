@@ -243,12 +243,11 @@ let record_restart_interruptions pool ~keeper_name owner =
            detail
        | Ok request_id ->
          (match
-            Keeper_chat_store.append_assistant_message_once
+            Keeper_chat_store.append_request_failure_once
               ~base_dir
               ~keeper_name
               ~delivery_key:(Keeper_chat_delivery_identity.Operation request_id)
               ~content:restart_interrupted_reply
-              ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
               ?surface
               ?conversation_id
               ()

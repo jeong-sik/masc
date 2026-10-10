@@ -20,15 +20,19 @@ val host_argv : launcher:string -> Browser_configuration.live_bidi -> string lis
 val firefox_log_path : base_path:string -> string
 val host_log_path : base_path:string -> string
 
-(** How long a started Firefox has to open its port. *)
 (** Where a log is moved when the process that writes it is started again,
     replacing the run before. *)
 val previous_log_path : string -> string
 
+(** How long a started Firefox has to open its port. *)
 val firefox_ready_timeout_s : float
 
 type firefox_failure =
   | Spawn_failed of string
+  | Not_recorded of string
+      (** It was started, and the record that names it
+          ({!Browser_keeper_firefox_record}) could not be written: this says
+          why. The server stops it. *)
   | Exited_before_listening of Unix.process_status option
       (** Firefox and every process it left in its group ended before the
           port answered. Firefox 157.0.1 exits with status 0 this way when
@@ -71,3 +75,29 @@ val host_on_another_port_message : port:int -> string -> string
 val host_address_unknown_message : port:int -> string
 
 val launcher_missing_message : launcher_missing -> string
+
+(** What a server finds of the Keeper Firefox its workspace's record names,
+    before it stops that Firefox (RFC-browser-keeper-firefox §3.3, §3.5.4). *)
+type recorded_firefox =
+  | Started_here
+      (** The process numbered as the group runs, started when the recorded
+          one started, and is in that group: the group is the Firefox MASC
+          started. *)
+  | Gone
+      (** The recorded group has ended: nothing is left in it, or another
+          process runs under the number it was named after. *)
+  | Unproven of string
+      (** Something is left in the recorded group and is not shown to be the
+          Firefox started there; this says why. It is not stopped. *)
+
+(** [leader_started]: when the process numbered as the group started, read
+    now ({!Posix_spawn_detached.process_start}); [None] when no such
+    process runs or when it started cannot be read. [leader_group]: the
+    group that process is in now. [group_has_members]: whether a process is
+    left in the recorded group. *)
+val recorded_firefox :
+  Browser_keeper_firefox_record.entry ->
+  leader_started:string option ->
+  leader_group:(int, string) result ->
+  group_has_members:bool ->
+  recorded_firefox

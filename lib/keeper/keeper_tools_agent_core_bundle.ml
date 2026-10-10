@@ -112,15 +112,21 @@ let make_tool_bundle_for_descriptors_with_policy
   let descriptors =
     List.map
       (fun (descriptor : Keeper_tool_descriptor.t) ->
-         match Keeper_tool_descriptor.find_id descriptor.id with
-         | Some canonical -> canonical
-         | None ->
+         let canonical = match capability_surface with
+           | Some surface -> Keeper_capability_surface.find_descriptor_by_id surface descriptor.id
+           | None -> Keeper_tool_descriptor.find_id descriptor.id in
+         match canonical with
+         | Some canonical when canonical == descriptor -> canonical
+         | Some _ | None ->
            invalid_arg
              (Printf.sprintf
                 "Keeper tool bundle received unknown descriptor id %S"
                 descriptor.id))
       descriptors
   in
+  Option.iter (fun index ->
+    Keeper_tool_composition_plan_index.bind_descriptors index descriptors)
+    composition_plan_index;
   let skill_surface_present =
     Keeper_skill_catalog.skills skill_catalog <> []
   in
@@ -656,7 +662,24 @@ let make_tool_bundle_for_descriptors_with_policy
   (* The lanes that cannot widen a turn get every tool as a schema: holding
      one back there would name a tool nothing can load. *)
   let always_loaded = always_loaded_builtin_tools in
-  { tools = descriptor_tools @ composition_tools @ identity_agent_tools
+  let tools = descriptor_tools @ composition_tools @ identity_agent_tools in
+  let offered_names =
+    List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) tools
+    @ (match identity_listing with
+       | None -> []
+       | Some listing -> [listing.Keeper_identity_tool_search.tool.schema.name]) in
+  (* Runtime admission reserves static host tools. Skill compositions and
+     attached-service tools are known only here, so finish collision admission
+     before publishing either lane's bundle. A policy and a callable must never
+     resolve the same name to different owners. *)
+  List.iter (fun (descriptor : Keeper_tool_descriptor.t) ->
+    match descriptor.runtime_handler with
+    | Tool_lane_addon _ ->
+        let name = descriptor.public_name in
+        if List.length (List.filter (String.equal name) offered_names) <> 1 then
+          invalid_arg ("Lane Add-on tool collides with the assembled Keeper surface: " ^ name)
+    | _ -> ()) descriptors;
+  { tools
   ; agent_core_tools =
       always_loaded
       @ (match identity_listing with
@@ -785,46 +808,6 @@ let make_tool_bundle_for_capability_surface
     ()
 ;;
 
-let make_tool_bundle_with_policy
-      ~(config : Workspace.config)
-      ~(meta : Keeper_meta_contract.keeper_meta)
-      ~(publication_recovery :
-          Keeper_publication_recovery_availability.turn_context)
-      ~(ctx_snapshot : Keeper_types.working_context)
-      ?clock
-      ?continuation_channel
-      ?gate_context
-      ?hitl_resolution
-      ?on_gate_deferred
-      ?skill_catalog
-      ?identity_surface
-      ?composition_plan_index
-      ?skill_activation_context
-      ?(allow_unrecorded_skill_surface = false)
-      ?turn_ctx_cell
-      ()
-  =
-  let descriptors = Keeper_tool_descriptor.model_visible_descriptors () in
-  make_tool_bundle_for_descriptors_with_policy
-    ~config
-    ~meta
-    ~publication_recovery
-    ~ctx_snapshot
-    ?clock
-    ?continuation_channel
-    ?gate_context
-    ?hitl_resolution
-      ?on_gate_deferred
-    ?skill_catalog
-    ?identity_surface
-    ?composition_plan_index
-    ?skill_activation_context
-    ~allow_unrecorded_skill_surface
-    ?turn_ctx_cell
-    ~descriptors
-    ()
-;;
-
 module For_testing = struct
   let make_tool_bundle
         ~config
@@ -836,11 +819,16 @@ module For_testing = struct
         ?gate_context
         ?hitl_resolution
       ?on_gate_deferred
+        ?capability_surface
         ?skill_catalog
         ?turn_ctx_cell
         ()
     =
-    make_tool_bundle_with_policy
+    let descriptors = match capability_surface with
+      | Some surface -> Keeper_capability_surface.descriptors surface
+      | None -> Keeper_tool_descriptor.model_visible_descriptors () in
+    make_tool_bundle_for_descriptors_with_policy
+      ?capability_surface ~descriptors
       ~config
       ~meta
       ~publication_recovery

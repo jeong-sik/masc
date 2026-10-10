@@ -3,7 +3,7 @@ rfc: "browser-keeper-firefox"
 title: "Start the Keeper Firefox and its BiDi host with the MASC server"
 status: Active
 created: 2026-10-09
-updated: 2026-10-09
+updated: 2026-10-10
 author: vincent + claude
 related: ["browser-live-one-connection"]
 ---
@@ -137,26 +137,45 @@ port = 9222
   배포할 때마다 서버가 다시 뜨는데, 그때마다 Keeper 창이 닫혔다 열리지 않게 하려는 것이다.
 - 다시 뜬 서버는 §3.2 를 다시 한다. 둘 다 떠 있으면 아무것도 하지 않는다.
   host 는 #41898 대로 새 서버에 다시 등록한다.
-- 표를 지우거나 `[browser.live] enabled = false` 로 바꿔도, 이미 떠 있는 Firefox 와 host 는 멈추지 않는다.
-  어느 프로세스를 MASC 가 띄웠는지 아는 기록(`keeper-firefox.json`, §3.4)이 3단계에 생긴다.
-  그때부터 표가 없거나 lane 이 꺼진 서버는 MASC 가 띄운 것만 멈춘다. 운영자가 띄운 것은 그대로 둔다.
-  MASC 가 띄웠는지는 §3.5 의 4 와 같이 확인하고, 확인되지 않으면 멈추지 않는다.
-  그 전까지는 운영자가 창을 닫는다.
+- 표를 지우거나 `[browser.live] enabled = false` 로 바꾼 서버는, 뜰 때 `keeper-firefox.json`(§3.4)을 읽어
+  MASC 가 띄운 Firefox 만 멈춘다. 운영자가 띄운 것은 그대로 둔다. host 는 자기 Firefox 가 끝나면 같이 끝난다(§2.4).
+  - MASC 가 띄웠는지는 §3.5 의 4 와 같이 확인하고, 확인되지 않으면 멈추지 않는다. 서버 로그에 까닭과 "그 Firefox 를 닫으라"를 남긴다.
+  - 기록을 읽을 수 없으면 아무것도 멈추지 않고, 기록도 그대로 둔다.
+  - `runtime.toml` 을 읽지 못한 서버(설정이 로드되지 않음)는 운영자가 무엇을 원하는지 모르므로 아무것도 멈추지 않는다.
+  - 멈춘 뒤 group 이 비었거나, 기록의 process group 에 남은 프로세스가 없으면 기록을 지운다.
+  - 신호를 보낼 때마다(SIGTERM, 5초 뒤 SIGKILL) 그 번호가 아직 그 group 인지 다시 본다. 그 사이 group 이 비고 번호를
+    다른 group 이 받았으면 신호를 보내지 않는다.
+  - 이 계정이 신호를 보낼 수 없는 group(kill 이 EPERM)은 비었다고 보지 않는다. Darwin 은 프로세스가 모두 끝나는 중이거나
+    zombie 인 group 에도 EPERM 을 주므로, 커널의 member 목록으로 가른다. 목록이 없는 플랫폼에서는 있는 것으로 본다.
 - 이 점이 geckodriver 와 다르다. geckodriver 는 세션을 서버만 닫을 수 있어서 서버와 같이 멈춘다.
   BiDi host 는 스스로 `session.end` 를 보내고, 다음 host 를 위한 기록을 남긴다.
 
 ### 3.4 서버가 남기는 것
 
-- `<base>/.masc/browser-lane/keeper-firefox.json`: 서버가 띄운 Firefox 의 pid 와 process group, 그 프로세스의 시작 표지,
-  프로필, 포트, 띄운 시각. 띄우지 못했으면 그 까닭(포트를 다른 프로세스가 씀, 실행 파일 없음, 포트가 안 열림, 먼저 끝남).
-  host 기록과 같은 방식으로 통째로 다시 쓴다.
-  - 시작 표지는 서버 시작 잠금이 쓰는 값과 같다(`Server_startup_takeover.process_started`).
-    Linux 는 boot id 와 `/proc/<pid>/stat` 의 starttime, macOS 는 C locale·UTC 로 읽은 `ps -o lstart=` 다.
-    pid 가 다른 프로세스에게 다시 주어져도 이 표지는 같지 않다.
+- `<base>/.masc/browser-lane/keeper-firefox.json`: 서버가 띄운 Firefox 의 process group(띄운 프로세스의 pid 와 같은 번호),
+  그 프로세스를 알아볼 표지, 프로필, 포트, 띄운 시각. host 기록과 같은 방식으로 통째로 다시 쓴다.
+  - 기록은 Firefox 를 띄운 바로 뒤, 포트를 기다리기 전에 쓴다. 기다리는 30초 사이에 서버가 끝나도 그 Firefox 는 기록에 남는다.
+  - 표지는 띄운 프로세스의 시작 표지이고, 읽지 못했으면 "시작을 읽지 못함"이다.
+    처음 프로세스가 끝나고 group 의 다른 프로세스가 포트를 연 경우(업데이트를 적용하며 다시 뜬 경우), 기록의 표지는 끝난 프로세스의 것이 된다.
+    이 경우와 "시작을 읽지 못함"은 나중의 다른 group 과 가를 수 없으므로 MASC 가 멈추지 않는다.
+  - 시작 표지는 커널의 프로세스 표에서 읽는다(`Posix_spawn_detached.process_start`). macOS 는 `sysctl` 의 `p_starttime`(마이크로초),
+    Linux 는 boot id 와 `/proc/<pid>/stat` 의 starttime 이다. pid 가 다른 프로세스에게 다시 주어져도 이 표지는 같지 않다.
+  - 띄운 직후, 서버가 그 자식을 거둘 수 있기 전에 읽는다. 거두기 전에는 끝난 자식도 그 번호를 쥐고 있어서, 읽은 표지는
+    반드시 그 자식의 것이다. 다른 프로세스(`ps`)를 띄워 읽으면 그 사이 자식이 거둬지고 번호가 다른 프로세스에 갈 수 있어,
+    서버 시작 잠금의 `ps -o lstart=` 방식을 쓰지 않는다.
+  - 띄우지 못한 까닭은 기록에 넣지 않고 서버 로그에 남긴다. 그 까닭을 읽는 곳(연결 목록·doctor 문장)이 생기는 4단계에서 기록에 더한다.
 - Firefox 띄우기는 이 기록을 디스크에 쓰기까지 해야 성공이다. 쓰지 못하면(디스크가 가득 참, 쓸 수 없는 디렉터리)
-  방금 띄운 process group 을 멈추고 거둔 뒤, 띄우지 못한 까닭으로 로그에 남긴다.
+  포트를 기다리지 않고 방금 띄운 process group 을 멈추고, host 도 띄우지 않고, 그 까닭을 로그에 남긴다.
   주인을 알 수 없는 Firefox 와 열린 포트가 서버보다 오래 남지 않게 하려는 것이다.
-  이 기록은 그것을 읽는 3단계에서 생기므로, 이 규칙도 3단계에서 지킨다.
+  기록은 썼는데 디렉터리 항목을 디스크에 내리지 못했으면, 기록이 있는 것으로 보고 경고만 남긴다.
+- 그 Firefox 가 포트를 열기 전에 끝나거나 다른 프로세스가 포트를 열었으면 기록을 지운다.
+  30초 안에 포트를 열지 않았거나 host 를 띄우지 못해 서버가 그 Firefox 를 멈췄으면, group 이 빈 것을 본 뒤에 지운다.
+- 서버는 Firefox 를 띄우기 전에 이 기록을 읽는다. 기록의 group 이 아직 돌 수 있으면(MASC 가 띄운 것으로 확인되거나, 끝났다고 확인되지 않으면)
+  또 띄우지 않고 까닭을 로그에 남긴다. 기록을 읽을 수 없어도 띄우지 않는다.
+  포트가 열리기 전에 서버가 끝난 경우, 다음 서버가 기록을 덮어쓰고 두 번째 Firefox 가 프로필 잠금으로 끝나며 기록을 지우면
+  첫 Firefox 가 이름 없이 남기 때문이다.
+- 기록의 pid 로 다른 시작 표지의 프로세스가 돌면, 기록의 group 은 끝난 것으로 본다.
+  POSIX fork(2) 는 새 프로세스에 아직 있는 process group 의 번호를 주지 않는다.
 - host 의 출력은 `<base>/.masc/browser-lane/bidi-host.log`, Firefox 의 출력은 `keeper-firefox.log` 에 쓴다.
   떨어진 프로세스는 처음부터 그 파일을 stdout·stderr 로 받는다.
   띄울 때마다 지난 실행의 로그를 `<이름>.1` 로 옮긴다(그 전 것은 덮인다). 그래서 파일은 두 번의 실행만 담는다.
@@ -172,18 +191,43 @@ port = 9222
 서버는 Keeper 가 BiDi 만 하는 일(지금은 hover·drag, `Trusted_hover`·`Trusted_drag`)을 부탁했는데
 그 일을 할 BiDi 연결이 목록에 없을 때 다시 켠다(운영자 결정, §8 의 2).
 
+- 켜기를 부탁하는 거절은 넷이다: 연결이 하나도 없음(`no_live_client`), 고른 연결이 끊김(`selected_client_disconnected`),
+  고른 연결이 그 일을 못 함(`live_transport_unsupported`), 연결이 여럿이라 골라야 함(`ambiguous_browser_clients`).
+  어느 경우든 목록의 어떤 연결도 그 일을 못 할 때만이다. 그 일을 하는 연결이 있으면 그 연결을 고르는 것이 할 일이다.
+- 요청 때마다 그때의 `runtime.toml` 을 읽는다. 표가 없거나 lane 이 꺼져 있으면 켜지도 멈추지도 않고, 답은 지금과 같다.
+- 답의 거절 이름은 그대로 둔다.
+  - 연결이 보이면 `bidiConnection` 에 그 연결과 무엇을 켰는지(`started`: Firefox 와 host / host 만 / 없음)를 싣는다.
+    `retry` 는 "무엇을 켰다. 그 연결의 탭을 다시 보고 화면을 다시 관찰한 뒤 다시 요청하라"가 된다.
+  - 안 보이면 `bidiStartFailed` 에 까닭과 갈래(`kind`)를 싣는다. 갈래는 다시 요청했을 때 일어나는 일로 나눈다.
+    - `operator_needed`: lane 이 설치되지 않음, 다른 host·지난 Keeper Firefox 가 워크스페이스를 쥠. 운영자가 고치기 전엔 같은 답이다.
+      `retry` 는 지금처럼 운영자의 할 일을 말한다.
+    - `start_failed`: 켜기를 해 봤고 host 가 뜨지 않았다. 다시 요청하면 다시 켠다.
+    - `not_listed_in_time`: host 를 켰거나 이미 돌았는데 정한 시간 안에 연결이 목록에 안 보였다. 조금 뒤 다시 요청하면 보일 수 있다.
+- 요청 하나가 기다리는 시간은 길어야 약 50초다: 끝나는 host 의 잠금 5초, Firefox 의 포트 30초, 연결 15초.
+
 1. §3.2 의 순서로 빠진 것만 켠다.
 2. 그 BiDi 연결이 목록에 올라올 때까지 기다린다. 처음 요청을 새 연결로 그대로 보내지는 않는다.
    그 요청의 `clientId`·`tabId`·좌표는 그 전 연결에서 본 것이고, 새 host 는 탭 번호를 새로 매긴다(`browser_bidi_peer.ml`).
    다른 연결로 옮길 때 탭을 다시 보라는 규칙(`tool_misc_browser_lane.ml`)과 같다.
    그래서 Keeper 에게 "BiDi 연결을 새로 붙였으니 탭과 화면을 다시 보고 다시 요청하라"고 답한다.
    정한 시간 안에 올라오지 않으면 거절하고, 왜 못 켰는지를 `bidiHost` 문장으로 말한다.
-   시간은 구현 때 잰 값으로 정한다(Firefox 시작부터 host 의 첫 poll 까지).
+   시간은 15초다. Firefox 시작부터 host 의 첫 poll 까지 1.75~5.68초 걸렸다
+   (2026-10-10, 14회, Firefox 157.0.1 headless, M3 Max, 부하 110~150). 가장 느린 값의 약 2.6배로, 창이 있는 Firefox 의 여유를 둔다.
+   이 시간은 Firefox 가 포트를 여는 30초(§3.2)와 끝나는 host 를 기다리는 5초 다음에 센다.
 3. 켜기는 워크스페이스마다 한 번에 하나다. 서버 시작 때의 켜기(§3.2)와 Keeper 요청 때의 켜기가 같은 하나를 쓴다.
    - 서버 시작 fiber 가 포트 확인과 Firefox 띄우기 사이에 있을 때 hover 가 오면, 그 요청은 새로 켜지 않고 그 켜기를 기다린다.
      동시에 온 요청끼리도 같다.
    - 겹치게 두면 둘 다 빈 포트를 보고 같은 프로필로 Firefox 를 띄운다. 두 번째는 약 5초 뒤 끝나지만(§3.2 의 1),
      그 결과가 첫 Firefox 의 기록이나 까닭을 덮을 수 있다.
+   - 켜기는 서버 switch 위의 fiber 하나가 차례로 한다. 요청은 다른 domain 에서 올 수 있어서 그 switch 에 직접 프로세스를 띄우지 않고,
+     그 fiber 에 부탁만 한다. 한 켜기가 도는 동안 온 요청들은 그 켜기의 결과로 답을 받는다.
+   - 켜기가 띄운 host 가 연결이 보이기 전에 끝나면(Firefox 가 세션을 거절함, 다른 프로필 등), 그 host 를 위해 띄운 Firefox 를 멈추고
+     기록을 지운 뒤 `start_failed` 로 답한다. host 를 띄운 것만으로 성공으로 치면 그 Firefox 가 포트를 연 채 주인 없이 남는다.
+   - 한 켜기는 연결이 목록에 보이거나, 띄운 host 가 끝나거나, 기다림이 끝날 때까지다. 막 띄운 host 는 잠금도 기록도 아직 없어서, 그 사이에 켜기를 또 하면
+     host 를 하나 더 띄우기 때문이다.
+   - 서버 시작 때의 켜기는 예전처럼 따로 돌고(서버가 멈출 때 끝나기를 기다린다), 요청을 받는 fiber 가 그 결과를 받아 연결을 기다린 뒤
+     그동안 온 요청에 답한다.
+   - 서버가 멈추면 기다리던 요청은 바로 "서버가 멈추는 중" 으로 답을 받는다.
 4. 지난 host 가 Firefox 에 세션을 남겨(`left`, `refused`) 새 host 가 붙을 수 없으면:
    - MASC 가 띄운 것이 확인되면 그 process group 을 멈추고 거둔 뒤 다시 띄운다.
      확인은 둘 다 맞을 때다: 기록의 pid 로 도는 프로세스의 시작 표지가 기록과 같고(§3.4), 그 process group 이 기록과 같다.
@@ -231,7 +275,10 @@ BiDi 가 아니어도 되는 요청(읽기, 클릭, 스크롤)은 BiDi 연결이
    `keeper-firefox.json` 은 그것을 읽는 3단계에서 더한다.
    읽기만 하는 PR 을 따로 두지 않는다. 읽는 곳이 없는 설정 필드가 main 에 남기 때문이다.
    이 PR 이 배포된 뒤에 운영자가 `runtime.toml` 에 표를 적는다(§2.3).
-3. Keeper 의 hover·drag 요청이 빠진 것을 다시 켜고 기다린다(§3.5). 남은 세션 때문에 MASC 가 띄운 Firefox 를 다시 띄우는 것도 여기서 한다.
+3. 세 PR 로 나눈다.
+   1. `keeper-firefox.json` 을 쓰고(§3.4), 표가 없거나 lane 이 꺼진 서버가 그것으로 MASC 가 띄운 Firefox 만 멈춘다(§3.3).
+   2. Keeper 의 hover·drag 요청이 빠진 것을 다시 켜고 기다린다(§3.5 의 1~3).
+   3. 남은 세션 때문에 MASC 가 띄운 Firefox 를 다시 띄운다(§3.5 의 4).
 4. 연결 목록·doctor·Keeper 답의 문장과 TUI 의 host 줄이 "MASC 가 켠다"를 말한다.
 
 ## 7. 확인 방법

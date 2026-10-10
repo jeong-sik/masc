@@ -165,7 +165,7 @@ type entry = private
 
 type t
 
-val parse : string -> (t, error) result
+val parse : ?descriptors:Keeper_tool_descriptor.t list -> string -> (t, error) result
 (** Parse one complete TOML document and validate every composition against the
     current canonical Keeper descriptor registry. Unknown fields and malformed
     tagged templates fail closed. *)

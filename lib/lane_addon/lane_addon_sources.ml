@@ -14,6 +14,10 @@ type lane_output = {
   output : Lane_addon_types.output;
   status : Lane_addon_types.coverage;
 }
+type machine_output = {
+  worker_instance : string; worker_seq : int; worker_max_bytes : int;
+  worker_output : Lane_addon_types.output;
+}
 type source =
   | Fusion_run of { id : string; run_id : string }
   | Snapshot_file of { id : string; path : string }
@@ -198,7 +202,7 @@ let activity_of_misc_operation : Tool_schemas_misc.misc_operation -> activity = 
   (* BrowserInstruct acts only on the stagehand lane, which no lane addon
      observes, so no browser source it could move exists. *)
   | Misc_browser_instruct
-  | Misc_msx_save | Misc_msx_screen | Misc_msx_meta | Misc_msx_checkpoint_info
+  | Misc_msx_export_disk | Misc_msx_save | Misc_msx_screen | Misc_msx_meta | Misc_msx_checkpoint_info
   | Misc_msx_peek | Misc_msx_ram_diff
   | Misc_browser_tabs | Misc_browser_read
   | Misc_dos_meta | Misc_dos_inventory | Misc_dos_screen | Misc_dos_peek | Misc_dos_save
@@ -410,58 +414,55 @@ let snapshot_file ~store ~max_bytes ~id path =
             :: List.remove_assoc "snapshot_evidence" (List.remove_assoc "observations" fields)))
       | _ -> Error "source must include cursor, complete, detail and observations"
   with Yojson.Json_error message -> Error message
-let msx_capture ~store ~id =
-  let* capture = Eio_unix.run_in_systhread (fun () -> Msx_lane.capture_with_identity ())
-    |> Result.map_error Msx_lane.error_to_string in
-  let frame = capture.Msx_lane.frame in
-  let observed_at = Time_compat.now () in
-  let image = `Assoc ["format", `String "rgb8"; "width", `Int frame.Msx_lane.width;
-    "height", `Int frame.Msx_lane.height; "rgb_base64", `String (Base64.encode_string frame.Msx_lane.rgb)] in
-  let* screen = Eio_unix.run_in_systhread (fun () -> Lane_addon_store.write_blob store (Yojson.Safe.to_string image)) in
-  let* ledger = Eio_unix.run_in_systhread (fun () ->
-    Lane_addon_store.retain_jsonl store ~history:capture.Msx_lane.incarnation
-      ~entry_count:capture.input_count ~newest_first:capture.input_ledger
-      ~encode:(fun entry -> Yojson.Safe.to_string (Msx_lane.entry_json entry) ^ "\n")) in
-  let input_ledger = ledger.Lane_addon_store.reference in
-  let cursor = `String (string_of_int capture.Msx_lane.input_count) in
-  let observation = `Assoc ["id", `String (Printf.sprintf "%s/%d/%.6f" capture.incarnation frame.number observed_at);
-    "kind", `String "capture"; "observed_at", `Float observed_at; "actor", `Null;
-    "evidence", `List [evidence_json screen; evidence_json input_ledger]; "screen", evidence_json screen;
-    "machine_id", `String "workspace-msx"; "incarnation", `String capture.incarnation;
-    "frame", `Int frame.number; "input_cursor", cursor;
-    "input_ledger", `Assoc ["format", `String "msx-input-jsonl-sequence";
-      "entry_count", `Int capture.input_count; "evidence", evidence_json input_ledger]] in
-  Ok (envelope ~id ~incarnation:capture.incarnation ~cursor ~complete:true ~detail:`Null [observation])
-(* The DOS machine as a source, the way [msx_capture] reads the MSX one: the
-   frame and the input history captured together under the machine's lock,
-   and retained in the package store. Time is instructions, so the observation
-   carries [steps] where the MSX one carries a frame number. *)
-let dos_capture ~store ~id =
-  let* capture = Eio_unix.run_in_systhread (fun () -> Dos_lane.capture_with_identity ())
-    |> Result.map_error Dos_lane.error_to_string in
-  let frame = capture.Dos_lane.frame in
-  let observed_at = Time_compat.now () in
-  let image = `Assoc ["format", `String "rgb8"; "width", `Int frame.Dos_lane.width;
-    "height", `Int frame.Dos_lane.height; "rgb_base64", `String (Base64.encode_string frame.Dos_lane.rgb)] in
-  let* screen = Eio_unix.run_in_systhread (fun () -> Lane_addon_store.write_blob store (Yojson.Safe.to_string image)) in
-  let* ledger = Eio_unix.run_in_systhread (fun () ->
-    Lane_addon_store.retain_jsonl store ~history:capture.Dos_lane.incarnation
-      ~entry_count:capture.input_count ~newest_first:capture.input_ledger
-      ~encode:(fun entry -> Yojson.Safe.to_string (Dos_lane.entry_json entry) ^ "\n")) in
-  let input_ledger = ledger.Lane_addon_store.reference in
-  let steps = capture.observation.Dos_lane.steps in
-  let cursor = `String (string_of_int capture.Dos_lane.input_count) in
-  let observation = `Assoc ["id", `String (Printf.sprintf "%s/%d/%.6f" capture.incarnation steps observed_at);
-    "kind", `String "capture"; "observed_at", `Float observed_at; "actor", `Null;
-    "evidence", `List [evidence_json screen; evidence_json input_ledger]; "screen", evidence_json screen;
-    "machine_id", `String "workspace-dos"; "incarnation", `String capture.incarnation;
-    "steps", `Int steps;
-    "program", (match capture.observation.Dos_lane.program with Some p -> `String p | None -> `Null);
-    "controller", (match capture.observation.Dos_lane.controller with Some c -> `String c | None -> `Null);
-    "input_cursor", cursor;
-    "input_ledger", `Assoc ["format", `String "dos-input-jsonl-sequence";
-      "entry_count", `Int capture.input_count; "evidence", evidence_json input_ledger]] in
-  Ok (envelope ~id ~incarnation:capture.incarnation ~cursor ~complete:true ~detail:`Null [observation])
+let machine_capture ~store ~resolve_machine_output ~machine ~id =
+  let* captured = resolve_machine_output machine in
+  let* row = match List.filter (fun (row : Lane_addon_types.row) ->
+      List.mem_assoc "machine_live" row.fields) captured.worker_output.rows with
+    | [row] -> Ok row | _ -> Error "machine worker must provide one screen observation" in
+  let declared_reference value =
+    let* reference = Lane_addon_types.evidence_of_json value in
+    if List.mem reference row.evidence then Ok reference else Error "machine reference is not declared row evidence" in
+  let* live_ref = declared_reference (List.assoc "machine_live" row.fields) in
+  let* bytes = Eio_unix.run_in_systhread (fun () ->
+    Lane_addon_store.read_blob ~max_bytes:captured.worker_max_bytes store live_ref) in
+  let* live = try match Yojson.Safe.from_string bytes with
+    | `Assoc fields -> Ok fields | _ -> Error "machine screen artifact must be an object"
+    with Yojson.Json_error detail -> Error detail in
+  let* () = if List.assoc_opt "source_kind" live = Some (`String (kind_to_string (kind_of_machine machine)))
+      && List.assoc_opt "state" live = Some (`String "changed") then Ok ()
+    else Error "machine worker has no complete loaded screen" in
+  let* incarnation = text live "incarnation" in
+  let* () = if incarnation = row.subject_id then Ok () else Error "machine screen and input capture identities differ" in
+  let* image = match List.assoc_opt "screen" live with
+    | Some (`Assoc _ as image) -> Ok image | _ -> Error "machine screen artifact has no RGB frame" in
+  let* ledger = match List.assoc_opt "input_ledger" row.fields with
+    | Some (`Assoc fields) when List.assoc_opt "format" fields = Some (`String "machine-input-jsonl-sequence") -> Ok fields
+    | _ -> Error "machine worker input history has not been retained" in
+  let* count = match List.assoc_opt "entry_count" ledger with
+    | Some (`Int n) when n >= 0 -> Ok n | _ -> Error "invalid machine input count" in
+  let* input_ledger = match List.assoc_opt "evidence" ledger with
+    | Some value -> declared_reference value | None -> Error "machine input evidence missing" in
+  let* screen = Eio_unix.run_in_systhread (fun () ->
+    Lane_addon_store.write_blob store (Yojson.Safe.to_string image)) in
+  let* current = resolve_machine_output machine in
+  let* () = if current.worker_instance=captured.worker_instance && current.worker_seq=captured.worker_seq
+    then Ok () else Error "machine observation changed during acquisition" in
+  let machine_id, format, clock_field = match machine with
+    | Machine_lane.Msx -> "workspace-msx", "msx-input-jsonl-sequence", "frame"
+    | Machine_lane.Dos -> "workspace-dos", "dos-input-jsonl-sequence", "steps" in
+  let* clock = match List.assoc_opt clock_field row.fields with
+    | Some (`Int n) when n >= 0 -> Ok (`Int n) | _ -> Error "machine observation clock missing" in
+  let cursor = `String (string_of_int count) in
+  let extra = match machine with
+    | Machine_lane.Msx -> []
+    | Machine_lane.Dos -> List.filter (fun (key,_) -> key="program" || key="controller") row.fields in
+  let observation = `Assoc (["id",`String row.id;"kind",`String "capture";
+    "observed_at",`Float row.observed_at;"actor",`Null;
+    "evidence",`List [evidence_json screen;evidence_json input_ledger];"screen",evidence_json screen;
+    "machine_id",`String machine_id;"incarnation",`String incarnation;clock_field,clock;
+    "input_cursor",cursor;"input_ledger",`Assoc ["format",`String format;
+      "entry_count",`Int count;"evidence",evidence_json input_ledger]] @ extra) in
+  Ok (envelope ~id ~incarnation ~cursor ~complete:true ~detail:`Null [observation])
 let browser_document ~store ~max_bytes ~id ~selection ~tab_id ~target_id ~environment ~request_id =
   let route = match selection with
     | Live client -> Browser_lane.Live_route (Some client)
@@ -557,15 +558,15 @@ let lane_output ~store ~max_bytes ~resolve_lane_output ~id ~installation_id ~out
       ~cursor:(`String (string_of_int captured.observation_seq)) ~complete
       ~detail:(Option.fold ~none:`Null ~some:(fun value -> `String value) detail) [observation])
 
-let acquire ~access ~store ~(package : Lane_addon_types.package) ~resolve_lane_output ~binding =
+let acquire ~access ~store ~(package : Lane_addon_types.package) ~resolve_machine_output ~resolve_lane_output ~binding =
   let* () = validate binding in
   let* sources = parse binding in
   let capture ~max_bytes source =
     let result = match source with
       | Fusion_run {id;run_id} -> fusion_run ~access ~store ~max_bytes ~id ~run_id
       | Snapshot_file {id;path} -> snapshot_file ~store ~max_bytes ~id path
-      | Msx_capture {id} -> msx_capture ~store ~id
-      | Dos_capture {id} -> dos_capture ~store ~id
+      | Msx_capture {id} -> machine_capture ~store ~resolve_machine_output ~machine:Machine_lane.Msx ~id
+      | Dos_capture {id} -> machine_capture ~store ~resolve_machine_output ~machine:Machine_lane.Dos ~id
       | Lane_output {id;installation_id;output_id} ->
           lane_output ~store ~max_bytes ~resolve_lane_output ~id ~installation_id ~output_id
       | Browser_document {id;selection;tab_id;target_id;environment;request_id} ->

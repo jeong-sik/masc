@@ -1,0 +1,95 @@
+{
+  "date": "2026-10-09",
+  "parent": "ceb642430239cd3be6804386660c2693942a53f1",
+  "build": {
+    "command": "opam exec -- dune build --root . -j 4 packages/agent_core/test/test_tool_schema_decode_boundary.exe packages/agent_core/test/test_tool_input_schema_fidelity.exe packages/agent_core/test/test_types.exe packages/agent_core/test/test_mcp.exe",
+    "exit_code": 0,
+    "log": "build.log"
+  },
+  "tests": [
+    {
+      "command": "_build/default/packages/agent_core/test/test_tool_schema_decode_boundary.exe",
+      "exit_code": 0,
+      "executed_cases": 28,
+      "log": "decode.log"
+    },
+    {
+      "command": "_build/default/packages/agent_core/test/test_tool_input_schema_fidelity.exe",
+      "exit_code": 0,
+      "executed_cases": 19,
+      "log": "fidelity.log"
+    },
+    {
+      "command": "_build/default/packages/agent_core/test/test_types.exe",
+      "exit_code": 0,
+      "executed_cases": 60,
+      "log": "types.log"
+    },
+    {
+      "command": "_build/default/packages/agent_core/test/test_mcp.exe",
+      "exit_code": 0,
+      "executed_cases": 29,
+      "log": "mcp.log"
+    }
+  ],
+  "unique_cases": 136,
+  "executable_sha256": {
+    "_build/default/packages/agent_core/test/test_tool_schema_decode_boundary.exe": "74226deef80c475b157faa043a22cba240f685085345bc33999eaed022453cbf",
+    "_build/default/packages/agent_core/test/test_tool_input_schema_fidelity.exe": "6953614f91f3b7e380ac6763aca71251cce69204beee2414c91108dc73b9b493",
+    "_build/default/packages/agent_core/test/test_types.exe": "9d330b69ad114f83e7e98187a6d46a0f759b1a91e8d491dfa4617aed6dab3cfd",
+    "_build/default/packages/agent_core/test/test_mcp.exe": "83c82c77cfb759f0955cd535791caa12f2e20a4662a623d98d000329c3136800"
+  },
+  "compiler_boundary_probes": {
+    "positive_constructor": 0,
+    "public_record_fabrication": 2,
+    "public_raw_decoder": 2,
+    "owner_record_fabrication": 2,
+    "owner_raw_decoder": 2,
+    "namespace_alias_informational": 0,
+    "evidence": "api-probes/checks.json"
+  },
+  "scope": "focused macOS toolchain and pure/fake-handler scenarios; no provider/live Keeper/CI/Linux execution/deployment; not library installation proof",
+  "pre_review_validation": {
+    "head": "d21f757fbb7a6e88f354cc786b86acc810269774",
+    "build": {
+      "command": "opam exec -- dune build --root . -j 4 packages/agent_core/test/test_tool_schema_decode_boundary.exe packages/agent_core/test/test_tool_input_schema_fidelity.exe packages/agent_core/test/test_types.exe packages/agent_core/test/test_mcp.exe",
+      "exit_code": 0,
+      "log": "build.log"
+    },
+    "tests": [
+      {
+        "command": "_build/default/packages/agent_core/test/test_tool_schema_decode_boundary.exe",
+        "exit_code": 0,
+        "executed_cases": 28,
+        "log": "decode.log"
+      },
+      {
+        "command": "_build/default/packages/agent_core/test/test_tool_input_schema_fidelity.exe",
+        "exit_code": 0,
+        "executed_cases": 19,
+        "log": "fidelity.log"
+      },
+      {
+        "command": "_build/default/packages/agent_core/test/test_types.exe",
+        "exit_code": 0,
+        "executed_cases": 60,
+        "log": "types.log"
+      },
+      {
+        "command": "_build/default/packages/agent_core/test/test_mcp.exe",
+        "exit_code": 0,
+        "executed_cases": 29,
+        "log": "mcp.log"
+      }
+    ],
+    "unique_cases": 136,
+    "executable_sha256": {
+      "_build/default/packages/agent_core/test/test_tool_schema_decode_boundary.exe": "74226deef80c475b157faa043a22cba240f685085345bc33999eaed022453cbf",
+      "_build/default/packages/agent_core/test/test_tool_input_schema_fidelity.exe": "6953614f91f3b7e380ac6763aca71251cce69204beee2414c91108dc73b9b493",
+      "_build/default/packages/agent_core/test/test_types.exe": "9d330b69ad114f83e7e98187a6d46a0f759b1a91e8d491dfa4617aed6dab3cfd",
+      "_build/default/packages/agent_core/test/test_mcp.exe": "83c82c77cfb759f0955cd535791caa12f2e20a4662a623d98d000329c3136800"
+    },
+    "log_location": "same paths in the named Git commit, before EOF normalization"
+  },
+  "review_repair": "P3 extra EOF blank lines removed from both owner files; final focused build and four consumer suites re-executed successfully. Compiler probes preceded whitespace-only normalization of the owner signature."
+}

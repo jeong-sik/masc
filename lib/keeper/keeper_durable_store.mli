@@ -40,6 +40,7 @@ module Id : sig
     | Memory_current
     | Goal_store
     | Librarian_range_receipts
+    | Memory_admission_queue
     | Memory_source_current
     | Disposition_receipts
     | Board_posts

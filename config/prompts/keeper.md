@@ -661,6 +661,12 @@ offset must be a 1-based line number (got {{offset}}). Read returns lines; use n
 ### tool_filesystem.limit_not_positive (vars: limit)
 limit must be a positive number of lines (got {{limit}}). Omit limit to read up to the byte budget.
 
+### tool_filesystem.invalid_read_integer (vars: coordinate, value, maximum)
+{{coordinate}} must be an integer line coordinate between 1 and {{maximum}} (got {{value}}). Omit the field only when you want its default.
+
+### tool_filesystem.invalid_read_arguments (vars: value)
+Read arguments must be a JSON object (got {{value}}).
+
 ### tool_filesystem.available_cwds_partial (vars: limit, cwds)
 available cwds (partial, {{limit}}): {{cwds}}
 

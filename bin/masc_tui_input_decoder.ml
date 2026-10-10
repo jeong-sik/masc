@@ -7,7 +7,7 @@ type reply =
 type event =
   | Key of string
   | Paste of Masc_tui_paste.t
-  | Mouse_wheel of Masc.Tui_decode.wheel_direction * int * int
+  | Mouse_wheel of Masc.Tui_mouse_protocol.wheel_direction * int * int
   | Mouse_left_press of int * int
   | Mouse_left_release of int * int
   | Reply of reply
@@ -113,13 +113,13 @@ let complete_csi t parameters final =
     []
   end
   else if String.length parameters > 0 && parameters.[0] = '<' then
-    match Masc.Tui_decode.sgr_wheel_report parameters final with
+    match Masc.Tui_mouse_protocol.sgr_wheel_report parameters final with
     | Some (direction, row, column) -> [ Mouse_wheel (direction, row, column) ]
     | None -> (
-        match Masc.Tui_decode.sgr_left_press parameters final with
+        match Masc.Tui_mouse_protocol.sgr_left_press parameters final with
         | Some (row, column) -> [ Mouse_left_press (row, column) ]
         | None -> (
-            match Masc.Tui_decode.sgr_left_release parameters final with
+            match Masc.Tui_mouse_protocol.sgr_left_release parameters final with
             | Some (row, column) -> [ Mouse_left_release (row, column) ]
             | None -> key "unknown-esc"))
   else if final = theme_mode_final then
@@ -143,16 +143,16 @@ let hold t button =
    so after an overlap either order of lifting reads the same and neither
    release is claimed. *)
 let x10_event t ~button ~column ~row =
-  match Masc.Tui_decode.x10_mouse_report ~button ~column ~row with
-  | Some (Masc.Tui_decode.X10_wheel (direction, row, column)) ->
+  match Masc.Tui_mouse_protocol.x10_mouse_report ~button ~column ~row with
+  | Some (Masc.Tui_mouse_protocol.X10_wheel (direction, row, column)) ->
       [ Mouse_wheel (direction, row, column) ]
-  | Some (Masc.Tui_decode.X10_left_press (row, column)) ->
+  | Some (Masc.Tui_mouse_protocol.X10_left_press (row, column)) ->
       hold t Held_left;
       [ Mouse_left_press (row, column) ]
-  | Some Masc.Tui_decode.X10_other_press ->
+  | Some Masc.Tui_mouse_protocol.X10_other_press ->
       hold t Held_other;
       key "unknown-esc"
-  | Some (Masc.Tui_decode.X10_release (row, column)) -> (
+  | Some (Masc.Tui_mouse_protocol.X10_release (row, column)) -> (
       match t.x10_held with
       | [] -> key "unknown-esc"
       | [ Held_left ] when not t.x10_ambiguous ->

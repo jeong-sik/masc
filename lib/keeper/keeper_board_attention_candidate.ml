@@ -1851,6 +1851,95 @@ let purge ~base_path ~keeper_name =
     |> Result.map (fun _cursor -> ()))
 ;;
 
+
+(* The replay gate's coordinate for a signal: exactly what the world
+   observation scanner compares against the keeper's Board cursor
+   (keeper_world_observation.ml signal_after_cursor), which pairs every
+   comment's creation time with its parent post id. post_created carries
+   its creation time only while the post is unedited — an edit mints
+   post_updated with the edit timestamp instead — and comments carry their
+   creation time, so the token of a persisted signal never moves (#41422).
+   Reactions and votes have no replay coordinate: the replay path never
+   mints them, only the live emit does. *)
+let signal_cursor_token (signal : Board_dispatch.board_signal) =
+  match signal.kind with
+  | Board_dispatch.Board_post_created ->
+    Option.map (fun ts -> ts, signal.post_id) signal.updated_at
+  | Board_dispatch.Board_post_updated { content_updated_at } ->
+    Some (content_updated_at, signal.post_id)
+  | Board_dispatch.Board_comment_added _ ->
+    Option.map (fun ts -> ts, signal.post_id) signal.updated_at
+  | Board_dispatch.Board_reaction_changed _
+  | Board_dispatch.Board_vote_cast _ -> None
+;;
+
+(* A Consumed candidate at or before the keeper's Board cursor can never be
+   re-minted by the replay gate, so removing its row cannot resurrect the
+   event. A consumed row ahead of the cursor, a row without a replay
+   coordinate, and every non-terminal status stay. *)
+let removable_consumed ~cursor candidate =
+  match candidate.status with
+  | Consumed _ -> (
+    match signal_cursor_token candidate.signal with
+    | Some token ->
+      Board_signal.compare_cursor_token
+        token
+        (fst cursor, Option.value ~default:"" (snd cursor))
+      <= 0
+    | None -> false)
+  | Pending _ | Judged _ | Quarantine _ -> false
+;;
+
+(* Under the ledger lock. A prune rewrites the whole store instead of
+   appending: dropping rows through the append path would leave the consumed
+   rows on disk and re-run this rewrite decision on every wake, growing the
+   file without bound. The rewrite carries exactly the kept rows, so rejected
+   rows must block it — their "no rewrite until repaired" rule is what makes
+   this a no-op (0) instead of a data loss. The rewrite is at-cursor: a
+   concurrent keeper process that moves the cursor makes the whole prune fail
+   instead of dropping that process's row. *)
+let prune_consumed_behind_cursor ~base_path ~keeper_name cursor =
+  let path = candidate_path ~base_path ~keeper_name in
+  let entry = ledger_entry path in
+  try
+    Cross_context_mutex.with_durable_lock entry.ledger_mutex (fun () ->
+      let* state = refresh_ledger ~path entry in
+      if state.rejected_rows > 0
+      then Ok 0
+      else
+        let kept =
+          List.filter
+            (fun candidate -> not (removable_consumed ~cursor candidate))
+            state.latest
+        in
+        let removed = List.length state.latest - List.length kept in
+        if removed = 0
+        then Ok 0
+        else
+          let* () = validate_for_persistence kept in
+          let written =
+            Fs_compat.rewrite_private_jsonl_durable_locked_at_cursor_result
+              path
+              ~expected:state.cursor
+              (serialize_candidates kept)
+          in
+          let* cursor = cursor_result ~path written in
+          let next =
+            apply_decoded_rows (empty_ledger_state cursor) kept
+          in
+          entry.ledger_cache <- Some next;
+          Ok removed)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Error
+      (Printf.sprintf
+         "Board attention candidate ledger prune failed keeper=%s path=%s: %s"
+         keeper_name
+         path
+         (Printexc.to_string exn))
+;;
+
 let find_candidate candidates candidate_id =
   List.find_opt
     (fun candidate -> String.equal candidate.candidate_id candidate_id)

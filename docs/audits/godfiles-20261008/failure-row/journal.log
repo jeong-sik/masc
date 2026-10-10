@@ -1,0 +1,25 @@
+Testing `[1mkeeper_chat_journal_audit[0m'.
+[2mThis run has ID `G3LXE65Y'.
+
+[0m  [32m[OK][0m          [36mcompare[0m          0   match.
+  [32m[OK][0m          [36mcompare[0m          1   terminal outcome mismatch.
+  [32m[OK][0m          [36mcompare[0m          2   assistant text mismatch.
+  [32m[OK][0m          [36mcompare[0m          3   tool row missing.
+  [32m[OK][0m          [36mcompare[0m          4   duplicate execution_id is a tool-rows mi...
+  [32m[OK][0m          [36mcompare[0m          5   seq gap.
+  [32m[OK][0m          [36mcompare[0m          6   truncated journal.
+  [32m[OK][0m          [36mcompare[0m          7   missing terminal row.
+  [32m[OK][0m          [36mcompare[0m          8   surface-post rows are an exclusion class.
+  [32m[OK][0m          [36mio[0m               0   audit_operation over a real journal and ...
+  [32m[OK][0m          [36mio[0m               1   missing journal is Journal_missing.
+  [32m[OK][0m          [36mio[0m               2   corrupt journal is Journal_corrupt.
+  [32m[OK][0m          [36mio[0m               3   unreadable store is Store_unreadable.
+  [32m[OK][0m          [36mio[0m               4   operation ids round-trip through journal...
+  [32m[OK][0m          [36msweep[0m            0   reads by registry liveness, not file age.
+  [32m[OK][0m          [36msweep[0m            1   audits each operation once.
+  [32m[OK][0m          [36msweep[0m            2   reports an unanswered registry and retries.
+  [32m[OK][0m          [36msweep[0m            3   reports an unreadable journal.
+  [32m[OK][0m          [36msweep[0m            4   non-canonical stems are skipped without ...
+
+Full test results in `[36m~/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/_build/_tests/keeper_chat_journal_audit[0m'.
+[32mTest Successful[0m in 0.033s. 19 tests run.

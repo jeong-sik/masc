@@ -14,13 +14,20 @@
     open in time, or the host could not be started) is stopped by its
     process group; one that was running already is not touched. A host is
     started only once the workspace's host lock is free, waiting a few
-    seconds for a host that wrote its ending and is still exiting. *)
+    seconds for a host that wrote its ending and is still exiting.
+
+    While the server runs, a Keeper's request for work only a BiDi
+    connection serves, with none listed, starts what is missing the same
+    way and waits for the connection ({!Browser_keeper_firefox_starter},
+    §3.5). One start runs at a time; a request that comes while one runs is
+    answered with it. [configuration] is read at the server start and again
+    at each request. *)
 
 val start :
   sw:Eio.Switch.t ->
   env:Eio_unix.Stdenv.base ->
   base_path:string ->
-  configuration:Browser_configuration.t option ->
+  configuration:(unit -> Browser_configuration.t option) ->
   unit
 
 module For_testing : sig
@@ -37,4 +44,21 @@ module For_testing : sig
     configuration:Browser_configuration.t option ->
     unit ->
     (unit, exn) result Eio.Promise.t
+
+  (** What the server installs for a Keeper's requests, serving starts on
+      [sw] and waiting [host_attach_wait_s] for the connection. [boot]: the
+      server start's own start runs first, as {!start} runs it, and answers
+      the requests that come meanwhile; without it only requests start. *)
+  val serve :
+    ?ending_host_wait_s:float ->
+    ?boot:bool ->
+    ready_timeout_s:float ->
+    host_attach_wait_s:float ->
+    sw:Eio.Switch.t ->
+    env:Eio_unix.Stdenv.base ->
+    base_path:string ->
+    configuration:(unit -> Browser_configuration.t option) ->
+    unit ->
+    unit ->
+    Browser_keeper_firefox_starter.outcome
 end

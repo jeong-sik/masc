@@ -18,8 +18,9 @@ import {
   type ChatComposerSendPayload,
 } from './primitives'
 import { _resetChatStoreForTests, readKeeperDraft } from '../../keeper-chat-store'
-import { chatHistoryEntriesFromRest } from '../../keeper-state'
+import { chatHistoryEntriesFromRest, appendThreadEntry, mergeServerHistoryEntries, keeperThreads, isDefaultVisibleConversationEntry } from '../../keeper-state'
 import { parseTextToChatBlocks } from '../../lib/chat-blocks'
+import { operationDeliveryProvenance } from '../../keeper-delivery-provenance'
 import { collectAttachments } from './attachments'
 import { lookupToolCallOutput, recordToolCallOutputs, resetToolCallOutputs } from '../../tool-call-output-store'
 import { fetchBoardPost } from '../../api/board'
@@ -536,7 +537,7 @@ describe('ChatTranscript', () => {
             label: 'sangsu',
             text: '응답을 만들지 못했습니다',
             rawText: '응답을 만들지 못했습니다',
-            delivery: 'transport_failure',
+            delivery: 'request_failure',
             error: text,
           }),
         ]}
@@ -810,10 +811,9 @@ describe('ChatTranscript', () => {
       },
       {
         id: 'smoke-error-assistant',
-        role: 'assistant',
+        role: 'request_failure',
         content: 'Keeper request failed: Timeout after 630.0s',
         ts: 1_780_000_001,
-        kind: 'transport_failure',
         turn_ref: 'trace-chat-contract-smoke#8',
         stream_contract: {
           source: 'backend_stream_lifecycle',
@@ -860,7 +860,7 @@ describe('ChatTranscript', () => {
 
     const failure = container.querySelector('[data-chat-entry-id="smoke-error-assistant"]') as HTMLElement
     expect(failure).not.toBeNull()
-    expect(failure.getAttribute('data-chat-delivery-state')).toBe('transport_failure')
+    expect(failure.getAttribute('data-chat-delivery-state')).toBe('request_failure')
     expect(failure.getAttribute('data-chat-turn-ref')).toBe('trace-chat-contract-smoke#8')
     expect(failure.getAttribute('data-chat-stream-contract-source')).toBe('backend_stream_lifecycle')
     expect(failure.getAttribute('data-chat-stream-contract-status')).toBe('backend_lifecycle_replay')
@@ -885,15 +885,14 @@ describe('ChatTranscript', () => {
     const audioSrc = '/api/v1/voice/audio/retained-audio';
     const entries = chatHistoryEntriesFromRest('sangsu', [{
       id: 'failed-with-output',
-      role: 'assistant',
+      role: 'request_failure',
       content: 'Keeper request failed: provider disconnected after media',
       ts: 1_780_000_001,
-      kind: 'transport_failure',
       turn_ref: 'trace-retained-media#1',
       delivery_provenance_status: 'valid',
       delivery_provenance: {
         delivery_key: { kind: 'operation', operation_id: 'retained-media-operation' },
-        transcript_slot: { kind: 'terminal_assistant' },
+        transcript_slot: { kind: 'terminal_result' },
       },
       blocks: [
         { t: 'image', src: imageSrc, cap: 'completed image' },
@@ -904,7 +903,7 @@ describe('ChatTranscript', () => {
     render(html`<${ChatTranscript} entries=${entries} variant="messenger" />`, container);
     await flushUi();
     const failure = container.querySelector('[data-chat-entry-id="failed-with-output"]')!;
-    expect(failure.getAttribute('data-chat-delivery-state')).toBe('transport_failure');
+    expect(failure.getAttribute('data-chat-delivery-state')).toBe('request_failure');
     expect(failure.querySelector('[data-chat-failure-card]')).not.toBeNull();
     expect(failure.querySelector('[data-chat-block="image"] img')?.getAttribute('src')).toBe(imageSrc);
     expect(failure.querySelector('[data-chat-block="voice"] audio')?.getAttribute('src')).toBe(audioSrc);
@@ -919,21 +918,20 @@ describe('ChatTranscript', () => {
   });
 
   it('renders a legacy diagnostic-derived block projection as the failure detail, not completed output', async () => {
-    // The old writer stored parse_text_to_blocks(diagnostic) when a
-    // transport_failure row arrived without blocks, so a reload can hand the
+    // The old writer stored parse_text_to_blocks(diagnostic) when a failure
+    // row arrived without blocks, so a reload can hand the
     // dashboard a persisted projection of the diagnostic itself.
     const diagnostic = 'Keeper request failed: provider disconnected before any media';
     const entries = chatHistoryEntriesFromRest('sangsu', [{
       id: 'failed-legacy-diagnostic',
-      role: 'assistant',
+      role: 'request_failure',
       content: diagnostic,
       ts: 1_780_000_002,
-      kind: 'transport_failure',
       turn_ref: 'trace-legacy-diagnostic#1',
       delivery_provenance_status: 'valid',
       delivery_provenance: {
         delivery_key: { kind: 'operation', operation_id: 'legacy-diagnostic-operation' },
-        transcript_slot: { kind: 'terminal_assistant' },
+        transcript_slot: { kind: 'terminal_result' },
       },
       blocks: parseTextToChatBlocks(diagnostic),
     }]);
@@ -941,7 +939,7 @@ describe('ChatTranscript', () => {
     render(html`<${ChatTranscript} entries=${entries} variant="messenger" />`, container);
     await flushUi();
     const failure = container.querySelector('[data-chat-entry-id="failed-legacy-diagnostic"]')!;
-    expect(failure.getAttribute('data-chat-delivery-state')).toBe('transport_failure');
+    expect(failure.getAttribute('data-chat-delivery-state')).toBe('request_failure');
     expect(failure.querySelector('[data-chat-failure-card]')).not.toBeNull();
     // The persisted blocks are the diagnostic again, so no completed output
     // is claimed and none renders above the folded detail.
@@ -951,6 +949,59 @@ describe('ChatTranscript', () => {
     await flushUi();
     expect(failure.querySelector('[data-chat-failure-detail]')?.textContent)
       .toContain('provider disconnected before any media');
+  });
+
+  it.each(['none', 'same', 'different'] as const)('renders reconciled failure work without quoting its diagnostic (%s tool turn)', async (toolTurn) => {
+    const keeper = `failed-work-${toolTurn}`;
+    const provenance = operationDeliveryProvenance(`failed-work-operation-${toolTurn}`, 'terminal_result');
+    appendThreadEntry(keeper, entry({
+      id: 'live-before-failure', role: 'assistant', source: 'direct_assistant',
+      delivery: 'streaming', text: '', deliveryProvenance: provenance,
+      traceSteps: [{ kind: 'think', text: 'completed thought before failure' }],
+    }));
+    const failed = chatHistoryEntriesFromRest(keeper, [{
+      id: 'server-work-failure', role: 'request_failure', content: 'REQUEST_FAILURE_DIAGNOSTIC', ts: 1780000001,
+      turn_ref: 'failed-work-trace#1', delivery_provenance_status: 'valid', delivery_provenance: provenance,
+    }]);
+    const tools = toolTurn === 'none' ? [] : [toolEntry({
+      id: 'tool-failed-work', label: 'Read', delivery: 'history',
+      turnRef: toolTurn === 'same' ? 'failed-work-trace#1' : 'different-work-trace#2',
+    })];
+    mergeServerHistoryEntries(keeper, [...tools, ...failed]);
+    const visible = keeperThreads.value[keeper]!.filter(isDefaultVisibleConversationEntry);
+    render(html`<${ChatTranscript} entries=${visible} emptyText="empty" groupToolCalls=${true} variant="messenger" />`, container);
+    await flushUi();
+    const failure = container.querySelector('[data-chat-entry-id="server-work-failure"]')!;
+    expect(failure.getAttribute('data-chat-role')).toBe('system');
+    expect(failure.querySelector('[data-chat-failure-card]')).not.toBeNull();
+    const bundle = failure.closest('[data-chat-turn-bundle]')!;
+    expect(bundle).not.toBeNull();
+    const toggle = bundle.querySelector('.chat-block-trace-hd')!;
+    if (toggle.getAttribute('aria-expanded') !== 'true') fireEvent.click(toggle);
+    await flushUi();
+    expect(bundle.querySelector('[data-chat-trace-step="think"]')?.textContent).toContain('completed thought before failure');
+    expect(bundle.querySelector('[data-chat-trace-step="chat"]')).toBeNull();
+    expect(bundle.querySelectorAll('[data-chat-trace-step="tool"]')).toHaveLength(toolTurn === 'same' ? 1 : 0);
+    expect(container.querySelectorAll('[data-chat-tool-trace]')).toHaveLength(toolTurn === 'different' ? 2 : 1);
+    expect(container.textContent).not.toContain('REQUEST_FAILURE_DIAGNOSTIC');
+    fireEvent.click(failure.querySelector('[data-chat-failure-detail-toggle]')!);
+    await flushUi();
+    expect(failure.querySelector('[data-chat-failure-detail]')?.textContent).toContain('REQUEST_FAILURE_DIAGNOSTIC');
+  });
+
+  it('keeps failure semantics when its only readable payload is completed media', async () => {
+    const entries = chatHistoryEntriesFromRest('sangsu', [{
+      id: 'failed-media-only', role: 'request_failure', content: '', ts: 1780000001,
+      blocks: [{ t: 'image', src: '/api/v1/media/finished', cap: 'finished image' }],
+    }]);
+    render(html`<${ChatTranscript} entries=${entries} variant="messenger" />`, container);
+    await flushUi();
+    const failure = container.querySelector('[data-chat-entry-id="failed-media-only"]')!;
+    expect(failure.getAttribute('data-chat-role')).toBe('system');
+    expect(failure.getAttribute('data-chat-delivery-state')).toBe('request_failure');
+    expect(failure.querySelector('[data-chat-failure-card]')).not.toBeNull();
+    expect(failure.querySelector('[data-chat-block="image"] img')).not.toBeNull();
+    expect(failure.textContent).toContain('처리 완료로 간주되지 않으며');
   });
 
   it('exposes tool-call transcript provenance as rendered attributes', () => {

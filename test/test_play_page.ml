@@ -330,6 +330,17 @@ let test_the_guide_over_h2 () =
               check int "guide suffix is not another public guide" 404
                 (get (Masc.Play_invite.agent_guide_path ^ "/x")).h2_status))))))
 
+let with_dos_worker ~env ~sw ~base_path f =
+  Machine_worker_fixture.with_dos ~clock:(Eio.Stdenv.clock env) ~sw ~base_path
+    (fun ~invoke ~detach ->
+      let invoke ~holder name arguments =
+        let controller = Some {Machine_controller_contract.observed_holder=holder;
+          release=None;handoff_target=(if name="masc_dos_pass" then Some "minsu" else None)} in
+        match invoke ~principal:(Lane_addon_call_context.Host_actor "operator") ~controller ~name ~arguments with
+        | Error message -> fail message
+        | Ok result -> check bool (name ^ " accepted by worker") false (result.is_error = Some true) in
+      f ~invoke ~detach)
+
 let test_the_seat () =
   with_dir "play-seat-" (fun base_path ->
     Auth.save_auth_config base_path
@@ -338,50 +349,46 @@ let test_the_seat () =
     let _worker = token_for base_path ~agent_name:"codex" ~role:Masc_domain.Worker in
     let player = token_for base_path ~agent_name:"minsu" ~role:Masc_domain.Player in
     let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+    let programs = Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos/programs" in
+    Fs_compat.mkdir_p programs;
+    Out_channel.with_open_bin (Filename.concat programs "game.com") (fun channel -> output_string channel hello_com);
+    Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
+    Fun.protect ~finally:(fun () ->
+      ignore (Dos_lane.eject ~who:"minsu" ~announce:ignore ());
+      ignore (Dos_lane.eject ~who:"operator" ~announce:ignore ());
+      Dos_lane.install_activity_observer None) (fun () ->
     Eio_main.run (fun env ->
-      Masc_test_deps.init_eio_clock env;
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 30. (fun () ->
+      Eio.Switch.run (fun sw ->
+      Eio_context.with_test_env ~sw ~net:(Eio.Stdenv.net env)
+        ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
+      Masc.Lane_addon_runtime.For_testing.reset ();
       let seat token = dispatch_get ~state ~target:Page.seat_path ~token in
       check int "the seat needs a bearer" 401 (status_of (seat None));
-      let read () =
-        let response = seat (Some player) in
-        check int "a player reads its seat" 200 (status_of response);
-        Yojson.Safe.from_string (snd (split_response response))
-      in
-      let answer = read () in
-      check bool "the bearer's name" true (member "name" answer = Some (`String "minsu"));
-      check bool "no machine" true (member "machine" answer = Some (`Bool false));
-      check bool "nobody holds it" true (member "controller" answer = Some `Null);
-      check bool "no saves name without a machine" true (member "saves_name" answer = Some `Null);
-      check bool "operators and invites, not agents' clients" true
-        (member "participants" answer = Some (`List [ `String "minsu"; `String "operator" ]));
-      let dir = Filename.temp_dir "play-seat-dos-" "" in
-      Fun.protect
-        ~finally:(fun () ->
-          Dos_lane.install_activity_observer None;
-          (match Dos_lane.eject ~who:"minsu" ~announce:ignore () with
-           | Ok () | Error _ -> ());
-          (match Dos_lane.eject ~who:"operator" ~announce:ignore () with
-           | Ok () | Error _ -> ());
-          remove_tree dir)
-        (fun () ->
-          Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
-          (match
-             Dos_lane.load ~who:"operator" ~ledger_dir:(Filename.concat dir "ledger")
-               ~saves_dir:(Filename.concat dir "saves")
-               ~checkpoint_dir:(Filename.concat dir "checkpoints") ~program_name:"game.com"
-               ~program_bytes:hello_com ~files:[] ~announce:ignore
-           with
-           | Ok _ -> ()
-           | Error e -> fail ("load: " ^ Dos_lane.error_to_string e));
-          (match Dos_lane.pass ~who:"operator" ~to_:(Some "minsu") ~announce:ignore with
-           | Ok _ -> ()
-           | Error e -> fail ("pass: " ^ Dos_lane.error_to_string e));
-          let answer = read () in
-          check bool "a machine" true (member "machine" answer = Some (`Bool true));
-          check bool "the invite holds the controller" true
-            (member "controller" answer = Some (`String "minsu"));
-          check bool "the saves name the pad layout is found by" true
-            (member "saves_name" answer = Some (`String "saves")))))
+      check int "no attached worker is unavailable" 503 (status_of (seat (Some player)));
+      with_dos_worker ~env ~sw ~base_path (fun ~invoke ~detach ->
+        let read () =
+          let response = seat (Some player) in
+          check int "a player reads its seat" 200 (status_of response);
+          Yojson.Safe.from_string (snd (split_response response)) in
+        let answer = read () in
+        check bool "the bearer's name" true (member "name" answer = Some (`String "minsu"));
+        check bool "unloaded worker has no machine" true (member "machine" answer = Some (`Bool false));
+        check bool "nobody holds it" true (member "controller" answer = Some `Null);
+        check bool "no saves name without a machine" true (member "saves_name" answer = Some `Null);
+        check bool "operators and invites, not agents' clients" true
+          (member "participants" answer = Some (`List [`String "minsu"; `String "operator"]));
+        invoke ~holder:None "masc_dos_load" (`Assoc ["program",`String "game.com"]);
+        invoke ~holder:(Some "operator") "masc_dos_pass" (`Assoc ["to",`String "minsu"]);
+        let answer = read () in
+        check bool "a machine" true (member "machine" answer = Some (`Bool true));
+        check bool "the invite holds the controller" true
+          (member "controller" answer = Some (`String "minsu"));
+        check bool "worker inventory name identifies the pad" true
+          (member "saves_name" answer = Some (`String "game.com"));
+        detach ();
+        check int "detached worker cannot publish a seat" 503 (status_of (seat (Some player))))))))))
 
 let test_expired_credentials_are_not_seats () =
   with_dir "play-seat-expiry-" (fun base_path ->

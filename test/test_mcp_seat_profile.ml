@@ -64,26 +64,54 @@ let invite_token base_path =
 let with_state ?(auth = false) f =
   with_dir "mcp-seat-" (fun base_path ->
     Eio_main.run (fun env ->
+      let previous_runtime = Runtime.For_testing.snapshot () in
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      Masc_test_deps.init_eio_clock env;
-      let clock = Eio.Stdenv.clock env in
-      Eio.Switch.run (fun sw ->
-        let state = Mcp_eio.For_testing.create_state ~base_path () in
-        let player =
-          if auth then begin
-            Auth.save_auth_config base_path
-              { Masc_domain.default_auth_config with enabled = true; require_token = true };
-            Some (invite_token base_path)
-          end
-          else None
-        in
-        f ~base_path (fun ?(profile = Mcp_eio.Seat) ?auth_token body ->
-          let auth_token =
-            match auth_token with
-            | Some token -> Some token
-            | None -> player
-          in
-          Mcp_eio.handle_request ~clock ~sw ~profile ?auth_token state body))))
+      Fun.protect ~finally:(fun () ->
+        Runtime.For_testing.restore previous_runtime;
+        Fs_compat.clear_fs ()) (fun () ->
+        let clock = Eio.Stdenv.clock env in
+        Eio.Time.with_timeout_exn clock 30. (fun () ->
+          Eio.Switch.run (fun sw ->
+            Eio_context.with_test_env ~sw ~net:(Eio.Stdenv.net env)
+              ~clock ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
+              Masc.Lane_addon_runtime.For_testing.reset ();
+              let runtime_path = Filename.concat base_path "runtime.toml" in
+              Out_channel.with_open_bin runtime_path (fun channel -> output_string channel {|[providers.local]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+[models.sample]
+api-name = "sample"
+max-context = 1024
+[local.sample]
+[runtime]
+default = "local.sample"
+|});
+              (match Runtime.init_default ~config_path:runtime_path with
+               | Ok () -> () | Error detail -> fail detail);
+              let state = Mcp_eio.For_testing.create_state ~base_path () in
+              let player = if auth then begin
+                Auth.save_auth_config base_path
+                  { Masc_domain.default_auth_config with enabled = true; require_token = true };
+                Some (invite_token base_path)
+              end else None in
+              let handle ?(profile = Mcp_eio.Seat) ?auth_token body =
+                let auth_token = match auth_token with Some token -> Some token | None -> player in
+                Mcp_eio.handle_request ~clock ~sw ~profile ?auth_token state body in
+              let check_absent label =
+                let response = handle (request "tools/list") in
+                check bool label true
+                  (Option.bind (member "result" response) (member "tools") = Some (`List []));
+                let call = handle (request "tools/call" ~params:(`Assoc [
+                  "name", `String "masc_dos_screen"; "arguments", `Assoc []])) in
+                check bool "unavailable seat tool is refused before dispatch" true
+                  (Option.bind (member "error" call) (member "code") =
+                    Some (`Int (Masc.Mcp_error_code.to_wire_code Masc.Mcp_error_code.Method_not_found))) in
+              check_absent "seat has no tools before machine attachment";
+              Machine_worker_fixture.with_dos ~clock ~sw ~base_path
+                (fun ~invoke:_ ~detach ->
+                  f ~base_path handle;
+                  detach ();
+                  check_absent "detachment withdraws seat tools")))))))
 
 let error_code response =
   match member "error" response with
@@ -229,8 +257,11 @@ let test_an_invite_plays_through_the_seat_with_auth_on () =
       | _ -> None
     in
     check (option string) "masc_dos_screen ran as the invitee" (Some "pi") (meta_string "agent_id");
-    check (option string) "the lane refused it, not the permission check"
-      (Some "workflow_rejection") (meta_string "failure_class"))
+    check (option string) "the attached worker reports an unloaded machine"
+      (Some "no_machine")
+      (match Option.bind (member "result" screen) (member "_meta")
+        |> Fun.flip Option.bind (member "io.github.jeong-sik/masc.machine.screenError") with
+       | Some (`String value) -> Some value | _ -> None))
 
 let test_an_invite_recovers_only_a_stopped_keepers_controller () =
   let module Lane = Dos_lane in

@@ -283,20 +283,20 @@ let save_file (path : string) (content : string) : unit =
 ;;
 
 let save_file_atomic path content =
-  Atomic_write.save_file_atomic ~save_file:save_file_blocking path content
+  Atomic_replace.save_file_atomic ~save_file:save_file_blocking path content
 ;;
 
 let save_file_atomic_rename_only path content =
-  Atomic_write.save_file_atomic_rename_only ~save_file:save_file_blocking path content
+  Atomic_replace.save_file_atomic_rename_only ~save_file:save_file_blocking path content
 ;;
 
 type atomic_replace_failure_stage =
-  Atomic_write.atomic_replace_failure_stage =
+  Atomic_replace.atomic_replace_failure_stage =
   | Before_rename
   | After_rename
 
 type atomic_replace_failure =
-  Atomic_write.atomic_replace_failure =
+  Atomic_replace.atomic_replace_failure =
   { path : string
   ; stage : atomic_replace_failure_stage
   ; exception_ : exn
@@ -304,28 +304,28 @@ type atomic_replace_failure =
   }
 
 let atomic_replace_failure_to_string =
-  Atomic_write.atomic_replace_failure_to_string
+  Atomic_replace.atomic_replace_failure_to_string
 ;;
 
 let save_file_atomic_strict_staged path content =
-  Atomic_write.save_file_atomic_strict_staged ~save_file:save_file_blocking path content
+  Atomic_replace.save_file_atomic_strict_staged ~save_file:save_file_blocking path content
 ;;
 
 let write_file_atomic_strict_staged_blocking path ~write =
-  Atomic_write.write_file_atomic_strict_staged_blocking path ~write
+  Atomic_replace.write_file_atomic_strict_staged_blocking path ~write
 ;;
 
 let write_file_atomic_strict_staged path ~write =
-  Atomic_write.write_file_atomic_strict_staged path ~write
+  Atomic_replace.write_file_atomic_strict_staged path ~write
 ;;
 
 let save_file_atomic_strict path content =
-  Atomic_write.save_file_atomic_strict ~save_file:save_file_blocking path content
+  Atomic_replace.save_file_atomic_strict ~save_file:save_file_blocking path content
 ;;
 
 module Atomic_replace_for_testing = struct
   let save_file_atomic_strict_staged ?sync_file ~sync_parent path content =
-    Atomic_write.Atomic_replace_for_testing.save_file_atomic_strict_staged
+    Atomic_replace.For_testing.save_file_atomic_strict_staged
       ?sync_file
       ~sync_parent
       ~save_file:save_file_blocking
@@ -334,7 +334,7 @@ module Atomic_replace_for_testing = struct
   ;;
 
   let write_file_atomic_strict_staged ?sync_file ~sync_parent path ~write =
-    Atomic_write.Atomic_replace_for_testing.write_file_atomic_strict_staged
+    Atomic_replace.For_testing.write_file_atomic_strict_staged
       ?sync_file
       ~sync_parent
       path
@@ -343,7 +343,7 @@ module Atomic_replace_for_testing = struct
 end
 
 let open_atomic_temp_file ~temp_dir () =
-  Atomic_write.open_atomic_temp_file ~temp_dir ()
+  Atomic_replace.open_atomic_temp_file ~temp_dir ()
 ;;
 
 let is_capability_leaf = Capability_leaf.is_valid
@@ -3384,7 +3384,7 @@ let private_jsonl_remove_rewrite_stage temp_path =
 
 let private_jsonl_replace_locked ~dir path content =
   match private_jsonl_capture Create_rewrite_stage (fun () ->
-    (* Open_binary for the same reason as [Atomic_write.open_atomic_temp_file]:
+    (* Open_binary for the same reason as [Atomic_replace.open_atomic_temp_file]:
        the stage file holds the replacement bytes verbatim. *)
     Filename.open_temp_file
       ~mode:[ Open_binary ]

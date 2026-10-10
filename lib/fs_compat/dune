@@ -16,6 +16,7 @@
   publication_recovery_access
   atomic_temp_name
   atomic_orphan_cleanup
+  atomic_replace
   atomic_write
   blocking_write
   execution_context

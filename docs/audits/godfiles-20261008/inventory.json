@@ -210,11 +210,12 @@
       "path": "lib/fs_compat/atomic_write.ml",
       "baseline_lines": 3327,
       "kind": "production",
-      "status": "partial: orphan effects/shared filename grammar separated and redundant report copies/projections removed; capability publication/recovery and test injection remain pending",
-      "current_lines": 2640,
+      "status": "partial: orphan effects, ordinary replacement owner and shared grammar separated; duplicate report copies removed; capability publication/recovery and test injection remain pending",
+      "current_lines": 2396,
       "prs": [
         41969,
-        41972
+        41972,
+        41974
       ]
     },
     {
@@ -227,10 +228,11 @@
       "path": "lib/fs_compat/fs_compat.ml",
       "baseline_lines": 4265,
       "kind": "production",
-      "status": "partial: existing public orphan API binds directly to its effect owner and shared matcher; other bridges and filesystem operations remain pending",
+      "status": "partial: public orphan and ordinary replacement APIs bind directly to separate effect owners; other bridges/filesystem operations remain pending",
       "current_lines": 4265,
       "prs": [
-        41969
+        41969,
+        41974
       ]
     },
     {
@@ -972,7 +974,11 @@
       "path": "test/test_tool_blob_store.ml",
       "baseline_lines": 2223,
       "kind": "test",
-      "status": "pending semantic review"
+      "status": "partial: existing binary/file-ingestion case uses a cold separate file store and passed; other storage/maintenance/concurrency responsibilities remain pending",
+      "current_lines": 2225,
+      "prs": [
+        41974
+      ]
     },
     {
       "path": "test/test_tool_board_coverage.ml",

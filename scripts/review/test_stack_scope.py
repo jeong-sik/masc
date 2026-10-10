@@ -88,6 +88,16 @@ class StackScope(unittest.TestCase):
         self.assertIn(f"#{numbers[0]} is not the top of native stack #{STACK}", result.stderr)
         self.assertIn(f"through #{numbers[-1]}", result.stderr)
 
+    def test_a_layer_above_in_an_unknown_state_is_refused(self):
+        numbers = self.stack(["open", "open", "open"])
+        listing = json.loads((self.data / "stack.json").read_text())
+        listing["pull_requests"][-1]["state"] = "queued"
+        (self.data / "stack.json").write_text(json.dumps(listing))
+        result = self.scope(numbers[1])
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("unknown member state", result.stderr)
+
     def test_a_pr_whose_layers_above_are_closed_is_the_top(self):
         numbers = self.stack(["open", "open", "closed"])
         result = self.scope(numbers[1])

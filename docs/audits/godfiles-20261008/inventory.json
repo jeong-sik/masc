@@ -337,9 +337,10 @@
       "baseline_lines": 2171,
       "kind": "production",
       "status": "partial: private canonical current-row kinds, schema/identity and strict decoder separated; public interface and storage/outbox/cache effect boundaries preserved; storage/cache/operator projection responsibilities pending semantic review",
-      "current_lines": 1646,
+      "current_lines": 1645,
       "prs": [
-        42060
+        42060,
+        42087
       ],
       "validation_artifact": "reaction-ledger-wire/README.md"
     },

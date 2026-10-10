@@ -75,6 +75,10 @@ BASE_COHORTS = {f"{kind}_{count}" for kind in ("repeated", "independent")
 # The replay suite captures one scoped follow-up after its predecessor fixture.
 FOLLOWUP_COHORTS = {"independent_200_followup": "independent_200.json"}
 FOLLOWUP_PHASE = "after_predecessor_recall_and_followup_enqueue_before_retirement"
+# The stores the replay suite snapshots before the follow-up decision. Each one
+# exists at that point: the predecessor committed and the follow-up is queued.
+FOLLOWUP_STATE = ("current_snapshot", "consumption_and_lookup_receipt",
+                  "memory_journal", "pending_queue")
 
 
 def verify_export(value, raw_fields, cohort):
@@ -119,12 +123,15 @@ def verify_followup(value, cohort):
         raise ValueError(f"{cohort}: predecessor identity mismatch")
     if not scenario["proposed_claims"]:
         raise ValueError(f"{cohort}: no proposed follow-up claim")
-    for name, entry in value["state_bundle"].items():
-        if entry["present"] is True:
-            if sha256(entry["bytes"]) != entry["sha256"]:
-                raise ValueError(f"{cohort}: state bundle {name} hash mismatch")
-        elif entry["present"] is not False or set(entry) != {"present"}:
-            raise ValueError(f"{cohort}: state bundle {name} is malformed")
+    bundle = value["state_bundle"]
+    if sorted(bundle) != sorted(FOLLOWUP_STATE):
+        raise ValueError(f"{cohort}: state bundle names {sorted(bundle)}")
+    for name in FOLLOWUP_STATE:
+        entry = bundle[name]
+        if entry.get("present") is not True or set(entry) != {"present", "bytes", "sha256"}:
+            raise ValueError(f"{cohort}: state bundle {name} is missing")
+        if sha256(entry["bytes"]) != entry["sha256"]:
+            raise ValueError(f"{cohort}: state bundle {name} hash mismatch")
 
 
 def main():

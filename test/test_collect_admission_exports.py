@@ -41,8 +41,8 @@ def export(cohort, followup=False):
         value.update({"phase": collector.FOLLOWUP_PHASE,
                       "predecessor_fixture": "independent_200.json",
                       "predecessor_response_sha256": "b" * 64,
-                      "state_bundle": {"current": {"present": True, "bytes": "{}", "sha256": sha("{}")},
-                                       "queue": {"present": False}}})
+                      "state_bundle": {name: {"present": True, "bytes": "{}", "sha256": sha("{}")}
+                                       for name in collector.FOLLOWUP_STATE}})
     value["input_hashes"] = {
         "prompt_sha256": sha("prompt"), "system_prompt_sha256": sha("system"),
         "keeper_instructions_sha256": sha("instructions"),
@@ -88,9 +88,19 @@ class Collector(unittest.TestCase):
 
     def test_followup_mode_refuses_changed_state_bytes(self):
         value = export("independent_200_followup", followup=True)
-        value["state_bundle"]["current"]["bytes"] = "{\"changed\":true}"
-        with self.assertRaisesRegex(ValueError, "state bundle current hash mismatch"):
+        value["state_bundle"]["current_snapshot"]["bytes"] = "{\"changed\":true}"
+        with self.assertRaisesRegex(ValueError, "state bundle current_snapshot hash mismatch"):
             self.collect([collector.FOLLOWUP_MARKER + compact(value)], "--followup")
+
+    def test_followup_mode_refuses_a_missing_or_absent_store(self):
+        for change in ("drop", "absent"):
+            value = export("independent_200_followup", followup=True)
+            if change == "drop":
+                del value["state_bundle"]["memory_journal"]
+            else:
+                value["state_bundle"]["memory_journal"] = {"present": False}
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                self.collect([collector.FOLLOWUP_MARKER + compact(value)], "--followup")
 
     def test_followup_mode_refuses_another_predecessor(self):
         value = export("independent_200_followup", followup=True)

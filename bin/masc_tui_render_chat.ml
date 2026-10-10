@@ -1025,15 +1025,14 @@ let keeper_message_identity ~max_cells state keeper_name =
 
 
 (** Render message input/conversation view *)
-let keeper_message_clock at =
-  let time = Unix.localtime at in
+(* The clock text and the bucket of one moment read the same local time; an
+   entry that needs both converts it once. *)
+let clock_of_local_time (time : Unix.tm) =
   Printf.sprintf "%02d:%02d:%02d" time.Unix.tm_hour time.Unix.tm_min
     time.Unix.tm_sec
-
 ;;
 
-let keeper_message_timeline_bucket at =
-  let time = Unix.localtime at in
+let bucket_of_local_time (time : Unix.tm) =
   ({ tb_year = time.Unix.tm_year + 1900;
      tb_month = time.Unix.tm_mon + 1;
      tb_day = time.Unix.tm_mday;
@@ -1041,7 +1040,12 @@ let keeper_message_timeline_bucket at =
      tb_is_dst = time.Unix.tm_isdst;
    }
     : Message_layout.timeline_bucket)
+;;
 
+let keeper_message_clock at = clock_of_local_time (Unix.localtime at)
+;;
+
+let keeper_message_timeline_bucket at = bucket_of_local_time (Unix.localtime at)
 ;;
 
 type keeper_call_association =
@@ -1983,15 +1987,14 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name ~request_
           | Message_status | Message_local | Message_error ->
               message.me_text, Message_layout.Source_body
         in
+        let local_time = Option.map Unix.localtime timeline_at in
         ({ delivery_state = None; style;
              heading_boundary = Message_layout.Inherit_heading;
              body_presentation;
              timestamp =
                Option.fold ~none:message.me_timestamp
-                 ~some:keeper_message_clock timeline_at;
-             timeline_bucket =
-               Option.map keeper_message_timeline_bucket
-                 timeline_at;
+                 ~some:clock_of_local_time local_time;
+             timeline_bucket = Option.map bucket_of_local_time local_time;
              diagnostics = committed_request_diagnostics
                ~tools:state.msg_tool_visibility ~request_id:message.me_request_id
                ~execution_id:(request_owner request_owners message.me_request_id) ~edge;
@@ -2070,11 +2073,12 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
     (* Pending input has not entered the conversation. It uses the composer's
        local mark, not the arrow that means a submitted conversation row. *)
     let style = Message_layout.Local in
+    let local_time = Unix.localtime at in
     ({ delivery_state = Some label; style
      ; heading_boundary = Message_layout.Inherit_heading
      ; body_presentation = Message_layout.Source_body
-     ; timestamp = keeper_message_clock at
-     ; timeline_bucket = Some (keeper_message_timeline_bucket at)
+     ; timestamp = clock_of_local_time local_time
+     ; timeline_bucket = Some (bucket_of_local_time local_time)
      (* A pending input has no execution yet, so its request is its only
         identity. The activity rows name requests by this id. *)
      ; diagnostics =
@@ -2381,6 +2385,49 @@ let rec shared_layout_entry_prefix ~refresh_owner reversed old_visible old_entri
 
 ;;
 
+(* A page of older rows lands in front of the conversation. Every row that
+   was there keeps its record, its moment and its edge, and moves down by the
+   page's length: the only thing in its entry that names the position is the
+   index baked into [markdown_source]. The old rows are found at the first
+   position of the new list holding the old head's record, and carried over
+   with that index shifted, so the page's own rows are the only ones drawn
+   again. [None] when the head is not in the new list, or sits at its head
+   (the positional prefix walk already covers that). *)
+let reindex_entry ~shift (entry : Message_layout.entry) =
+  match entry.markdown_source with
+  | Message_layout.Markdown_stable ({ entry_index; _ } as source) ->
+      { entry with
+        markdown_source =
+          Message_layout.Markdown_stable
+            { source with entry_index = entry_index + shift } }
+  | Message_layout.Markdown_growing _ | Message_layout.Markdown_streaming -> entry
+
+let shifted_entry_prefix ~refresh_owner old_visible old_entries new_visible =
+  match old_visible with
+  | [] -> None
+  | (head, _, _) :: _ ->
+      let rec seek skipped = function
+        | [] -> None
+        | (message, _, _) :: _ as rest when message == head -> Some (skipped, rest)
+        | _ :: rest -> seek (skipped + 1) rest
+      in
+      (match seek 0 new_visible with
+       | None | Some (0, _) -> None
+       | Some (skipped, rest) ->
+           let shared, remaining =
+             shared_layout_entry_prefix ~refresh_owner [] old_visible old_entries
+               rest
+           in
+           (match shared with
+            | [] -> None
+            | _ :: _ ->
+                Some (skipped, List.map (reindex_entry ~shift:skipped) shared,
+                      remaining)))
+
+let rec take_rows count = function
+  | row :: rest when count > 0 -> row :: take_rows (count - 1) rest
+  | _ -> []
+
 let keeper_message_layout_entries ?messages (state : state) ~keeper_name
     ~chat_cols =
   let messages =
@@ -2444,9 +2491,25 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
         | [] when not !owner_changed
                   && List.length prefix = List.length memo.lem_entries -> memo.lem_entries
         | [] -> prefix
-        | _ when suffix == visible_entries ->
-            compute_keeper_message_layout_entries state ~keeper_name ~request_owners
-              ~chat_cols ~start_index:0 visible_entries
+        | _ when suffix == visible_entries -> (
+            match
+              shifted_entry_prefix ~refresh_owner memo.lem_visible_entries
+                memo.lem_entries visible_entries
+            with
+            | None ->
+                compute_keeper_message_layout_entries state ~keeper_name
+                  ~request_owners ~chat_cols ~start_index:0 visible_entries
+            | Some (skipped, shared, remaining) ->
+                let compute ~start_index rows =
+                  match rows with
+                  | [] -> []
+                  | _ :: _ ->
+                      compute_keeper_message_layout_entries state ~keeper_name
+                        ~request_owners ~chat_cols ~start_index rows
+                in
+                compute ~start_index:0 (take_rows skipped visible_entries)
+                @ shared
+                @ compute ~start_index:(skipped + List.length shared) remaining)
         | _ ->
             prefix
             @ compute_keeper_message_layout_entries state ~keeper_name ~request_owners
@@ -2530,8 +2593,8 @@ type settled_block_memo = {
   sbm_revision : int;
   sbm_member_ids : string list;
   sbm_admission_preludes : Keeper_chat_transcript.drawn_item list;
-  sbm_timeline : (Masc_tui_types.msg_entry * float option) list;
-  sbm_messages : Masc_tui_types.msg_entry list;
+  sbm_timeline_at : float option;
+  sbm_committed_error : bool;
   sbm_reasoning : reasoning_visibility;
   sbm_origin : Message_layout.origin_display;
   sbm_tools : tool_visibility;
@@ -2678,14 +2741,18 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
   let projected_tool_rows =
     keeper_message_tool_rows state ~keeper_name ~chat_cols
   in
+  let rows_started = Masc_tui_frame_timing.start_stage () in
   let committed_timeline_messages = chat_rows_for state keeper_name in
   let committed_visible_timeline =
     keeper_message_visible_timeline state ~keeper_name
   in
   let committed_messages = List.map fst committed_visible_timeline in
+  Masc_tui_frame_timing.finish_stage ~name:"chat.rows" rows_started;
+  let entries_started = Masc_tui_frame_timing.start_stage () in
   let committed_layout_entries =
     keeper_message_layout_entries state ~keeper_name ~chat_cols
   in
+  Masc_tui_frame_timing.finish_stage ~name:"chat.layout_entries" entries_started;
   (* Rows for the turns this session holds as logs: every settled turn of
      this keeper that its log stands for, then the one still streaming. Each
      block follows the committed rows of its own request rather than
@@ -2706,6 +2773,10 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
   let live_status_log = Masc_tui_types.keeper_message_status_log state in
   let member_ids_of =
     Masc_tui_types.chat_execution_member_index state ~keeper_name
+  in
+  let timeline_index =
+    Masc_tui_types.chat_timeline_index ~messages:committed_timeline_messages
+      ~visible:committed_visible_timeline
   in
   let failure_in_live_status turn_log =
     Option.exists (fun live -> live == turn_log) live_status_log
@@ -2732,35 +2803,13 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
     let transcript = turn_log.tl_transcript in
     let request_id = Masc_tui_types.turn_log_execution_id turn_log in
     let member_ids = member_ids_of ~execution_id:request_id in
-    let committed_error =
-      List.exists
-        (fun (message : Masc_tui_types.msg_entry) ->
-          message.me_role = Message_error
-          && List.mem message.me_request_id member_ids)
-        committed_timeline_messages
-    in
-    let request_label = request_id in
     let started_at = Keeper_chat_transcript.started_at transcript in
-    let bounds_request (message : Masc_tui_types.msg_entry) =
-      (not (List.mem message.me_request_id member_ids))
-      || message.me_turn_phase = Turn_input
-    in
-    let request_messages =
-      List.filter bounds_request committed_timeline_messages
-    in
-    let bounded_timeline =
-      List.filter
-        (fun ((message : Masc_tui_types.msg_entry), _) -> bounds_request message)
-        committed_visible_timeline
-    in
-    let timeline_at =
-      chat_live_timeline_at ~member_ids ~request_id ~started_at ~request_messages
-        bounded_timeline
-    in
-    let insertion =
-      chat_block_insertion_index ~member_ids
-        ~bounds:(fun row -> row.me_turn_phase = Turn_input)
-        ~request_id ~timeline_at committed_visible_timeline
+    let request_label = request_id in
+    let { Masc_tui_types.clt_committed_error = committed_error
+        ; clt_timeline_at = timeline_at
+        ; clt_insertion = insertion } =
+      Masc_tui_types.chat_log_timeline_context timeline_index ~member_ids
+        ~request_id ~started_at
     in
     let keeper_label =
       Keeper_chat.terminal_safe_text
@@ -2962,6 +3011,19 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
     in
     let revision = Keeper_chat_transcript.revision turn_log.tl_transcript in
     let preludes = admission_preludes turn_log in
+    (* What the committed rows say about this log is the moment it sits at
+       and whether one of them is its error. The block's rows read those two
+       and nothing else of the conversation; where the block goes
+       ([insertion]) is a position, and an older page moving every row down
+       moves it too without touching a row of the block. Keyed on the two
+       values, a page landing keeps every block it did not change. *)
+    let { Masc_tui_types.clt_committed_error = committed_error
+        ; clt_timeline_at = timeline_at
+        ; clt_insertion = insertion } =
+      Masc_tui_types.chat_log_timeline_context timeline_index ~member_ids
+        ~request_id:(Masc_tui_types.turn_log_execution_id turn_log)
+        ~started_at:(Keeper_chat_transcript.started_at turn_log.tl_transcript)
+    in
     let palette_generation =
       Masc_tui_terminal_palette.snapshot_generation
         (Masc_tui_terminal_palette.snapshot ())
@@ -2974,8 +3036,8 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
            && memo.sbm_revision = revision
            && memo.sbm_member_ids = member_ids
            && memo.sbm_admission_preludes = preludes
-           && memo.sbm_timeline == committed_visible_timeline
-           && memo.sbm_messages == committed_timeline_messages
+           && Option.equal Float.equal memo.sbm_timeline_at timeline_at
+           && Bool.equal memo.sbm_committed_error committed_error
            && memo.sbm_reasoning = state.msg_reasoning_visibility
            && memo.sbm_origin = state.msg_origin_display
            && memo.sbm_tools = state.msg_tool_visibility
@@ -2987,7 +3049,13 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
            && memo.sbm_file_change_index == state.msg_file_change_index
            && memo.sbm_palette_generation = palette_generation
            && memo.sbm_chat_cols = chat_cols ->
-        memo.sbm_block
+        if memo.sbm_block.lb_insertion = insertion then memo.sbm_block
+        else begin
+          let block = { memo.sbm_block with lb_insertion = insertion } in
+          Hashtbl.replace settled_block_memo key
+            { memo with sbm_block = block };
+          block
+        end
     | Some _ | None ->
         let block = log_projection ~committed ~preludes turn_log in
         Hashtbl.replace settled_block_memo key
@@ -2997,8 +3065,8 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
             sbm_revision = revision;
             sbm_member_ids = member_ids;
             sbm_admission_preludes = preludes;
-            sbm_timeline = committed_visible_timeline;
-            sbm_messages = committed_timeline_messages;
+            sbm_timeline_at = timeline_at;
+            sbm_committed_error = committed_error;
             sbm_reasoning = state.msg_reasoning_visibility;
             sbm_origin = state.msg_origin_display;
             sbm_tools = state.msg_tool_visibility;
@@ -3017,6 +3085,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
   (* A block with nothing to draw -- every row hidden reasoning, or a log
      of bookkeeping frames only -- is no block: it would move its request's
      corners onto rows that never close. *)
+  let blocks_started = Masc_tui_frame_timing.start_stage () in
   let settled_blocks =
     Masc_tui_types.settled_logs_for_keeper state keeper_name
     |> List.filter Masc_tui_types.turn_log_holds_the_turn
@@ -3060,15 +3129,18 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
   in
   (* Classify the same selected pool that history suppression reads. *)
   let other_live_blocks =
-    Masc_tui_types.selected_source_logs_for_keeper state keeper_name
-    |> List.filter (fun log ->
-        not (Masc_tui_types.turn_log_holds_the_turn log)
-        && (not (List.exists (( == ) log) state.msg_settled_logs)
-            || List.exists (fun (entry : Masc_tui_types.inflight) -> entry.log == log)
-                 state.msg_inflight))
+    Masc_tui_types.selected_source_logs_with_origin state keeper_name
+    |> List.filter_map (fun (log, settled) ->
+        if not (Masc_tui_types.turn_log_holds_the_turn log)
+           && (not settled
+               || List.exists (fun (entry : Masc_tui_types.inflight) -> entry.log == log)
+                    state.msg_inflight)
+        then Some log
+        else None)
     |> List.map (held_projection ~committed:false)
     |> List.filter (fun block -> block.lb_entries <> [])
   in
+  Masc_tui_frame_timing.finish_stage ~name:"chat.blocks" blocks_started;
   let blocks =
     settled_blocks @ observed_blocks @ other_live_blocks
     |> List.stable_sort (fun left right ->
@@ -3115,12 +3187,24 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
   (* Blocks sharing an insertion slot follow their causal timeline clocks.
      Equal clocks preserve source order; unknown clocks follow known ones. *)
   let merge_blocks () =
+    (* The slot a clock maps to depends only on the clock and the rows, so
+       entries that share one share the walk. *)
+    let slot_by_clock = Hashtbl.create 16 in
+    let slot_for_clock timeline_at =
+      match Hashtbl.find_opt slot_by_clock timeline_at with
+      | Some slot -> slot
+      | None ->
+          let slot =
+            Masc_tui_types.chat_index_insertion timeline_index ~lower_bound:0
+              ~timeline_at
+          in
+          Hashtbl.add slot_by_clock timeline_at slot;
+          slot
+    in
     let placed =
       List.concat_map (fun block ->
         List.map (fun item ->
-          let by_time = chat_block_insertion_index ~member_ids:[]
-              ~bounds:(fun _ -> false) ~request_id:block.lb_request_id
-              ~timeline_at:item.le_at committed_visible_timeline in
+          let by_time = slot_for_clock item.le_at in
           let insertion = max block.lb_insertion by_time in
           insertion, item.le_at, (Tagged_block (block.lb_log, item.le_origin, item.le_is_reply), item.le_entry))
           block.lb_entries) blocks
@@ -3135,7 +3219,14 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
       match committed with
       | [] -> List.map (fun (_, _, item) -> item) placed
       | item :: rest ->
-          let due, later = List.partition (fun (at, _, _) -> at <= index) placed in
+          (* [placed] is sorted by slot, so the entries due at [index] are
+             its leading run. *)
+          let rec split due = function
+            | ((at, _, _) as entry) :: remaining when at <= index ->
+                split (entry :: due) remaining
+            | later -> List.rev due, later
+          in
+          let due, later = split [] placed in
           List.map (fun (_, _, item) -> item) due @ (item :: merge (index + 1) rest later)
     in
     let merged = once_per_identity (merge 0 committed_tagged placed) in
@@ -3154,11 +3245,22 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
     let open_request_ids =
       List.map (fun block -> block.lb_request_id) open_blocks
     in
+    (* The first block that lists a request id among its members owns it. *)
+    let block_of_member = Hashtbl.create 16 in
+    List.iter
+      (fun block ->
+        List.iter
+          (fun member_id ->
+            if not (Hashtbl.mem block_of_member member_id)
+            then Hashtbl.add block_of_member member_id block.lb_request_id)
+          block.lb_member_ids)
+      blocks;
+    let block_request_set = Hashtbl.create 16 in
+    List.iter (fun id -> Hashtbl.replace block_request_set id ()) block_requests;
     let request_of = function
       | Tagged_row (message : Masc_tui_types.msg_entry) ->
-          let request_id = match List.find_opt (fun block ->
-              List.mem message.me_request_id block.lb_member_ids) blocks with
-           | Some block -> block.lb_request_id
+          let request_id = match Hashtbl.find_opt block_of_member message.me_request_id with
+           | Some request_id -> request_id
            | None -> message.me_request_id in
           if request_id = "" then None else Some request_id
       | Tagged_block (_, Some (Keeper_chat_transcript.Admission_of_request _), _) -> None
@@ -3166,15 +3268,16 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
     in
     let edges = Hashtbl.create 16 in
     let close_run ~at_tail request_id indices =
-      let remains_open = at_tail && List.mem request_id open_request_ids in
+      let remains_open = at_tail && Masc_tui_types.string_mem request_id open_request_ids in
       match List.rev indices with
       | [] -> ()
       | [only] -> Hashtbl.replace edges only (if remains_open then Turn_opens else Turn_alone)
       | first :: rest ->
           Hashtbl.replace edges first Turn_opens;
+          let last = List.length rest - 1 in
           List.iteri (fun i index ->
             Hashtbl.replace edges index
-              (if i = List.length rest - 1 && not remains_open then Turn_closes else Turn_continues)) rest
+              (if i = last && not remains_open then Turn_closes else Turn_continues)) rest
     in
     let current = ref None and indices = ref [] in
     List.iteri (fun index (tag, _) ->
@@ -3191,7 +3294,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
     List.mapi
       (fun index ((tag, (entry : Message_layout.entry)) as item) ->
         match request_of tag, Hashtbl.find_opt edges index with
-        | Some request_id, Some edge when List.mem request_id block_requests ->
+        | Some request_id, Some edge when Hashtbl.mem block_request_set request_id ->
             let siding =
               match tag with
               | Tagged_row message -> siding_of_message message
@@ -3207,6 +3310,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
         | _ -> item)
       merged
   in
+  let merge_started = Masc_tui_frame_timing.start_stage () in
   let tagged_layout_entries, layout_entries =
     match blocks, open_blocks with
     | [], _ -> (
@@ -3272,6 +3376,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
     let transient = match pending with [] -> observed | _ :: _ -> observed @ pending in
     with_transient_tail layout_entries ~transient
   in
+  Masc_tui_frame_timing.finish_stage ~name:"chat.merge" merge_started;
   { tagged_entries = tagged_layout_entries; transient_anchors; layout_entries }
 
 let search_reply_source (message : msg_entry) =
@@ -4310,11 +4415,13 @@ let render_keeper_message (state : state) =
     (* Clamped here rather than where the key is handled: the limit depends on
        the terminal width and the pane's height, and a resize changes both
        under a scroll position that was legal before it. *)
+    let window_started = Masc_tui_frame_timing.start_stage () in
     let window =
       Message_layout.clamped_scrolled_rows ~markdown
         ~origin:state.msg_origin_display ~inner_width ~height:history_height
         ~requested layout_entries
     in
+    Masc_tui_frame_timing.finish_stage ~name:"chat.window" window_started;
     let scroll = window.scroll and visible_rows = window.rows in
     let scroll_feedback = scroll_position_for_window state ~keeper_name projection
       ~markdown ~source_body ~inner_width window in

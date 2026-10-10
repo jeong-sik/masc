@@ -85,6 +85,12 @@ val priority_unavailable : t -> bool
 (** Local priority intent met a Running/Settled admission, so no run-next
     control was sent. Kept with receipt metadata, outside journal entries. *)
 
+val has_entries : t -> bool
+(** [entries t <> []], without building the list. *)
+
+val run_started : t -> bool
+(** Whether an entry holds [Run_started], without walking the entries. *)
+
 val resume_position : t -> Masc.Keeper_chat_event_log.replay_position
 (** Where a resume of this turn starts: after the highest seq held, or the
     whole turn while none is. A journal page holds every line's seq, drawn

@@ -12803,6 +12803,30 @@ let test_play_invite_refusal_says_the_servers_sentence () =
     Alcotest.(check bool) "no control byte is left in the sentence" false
       (String.exists (fun c -> c < ' ' || c = '\127') said)
 
+(* The plain-scalar fast path of [escape_invisible] skips the property
+   lookups, so every scalar it admits must have none of the four properties
+   that the full walk reacts to. *)
+let test_plain_scalars_have_none_of_the_properties_the_walk_reacts_to () =
+  let checked = ref 0 in
+  for code = 0 to 0x10FFFF do
+    if Uchar.is_valid code && Masc.Tui_terminal_text.is_plain_scalar code then begin
+      let scalar = Uchar.of_int code in
+      incr checked;
+      if Uucp.Gen.is_default_ignorable scalar
+         || Uucp.Gen.is_variation_selector scalar
+         || Uucp.Emoji.is_extended_pictographic scalar
+         || Uucp.Emoji.is_emoji_modifier scalar
+         || code = 0x200D || code = 0x1F3F4 || code = 0xFE0E || code = 0xFE0F
+      then Alcotest.failf "U+%04X is plain but the walk reacts to it" code
+    end
+  done;
+  Alcotest.(check int) "ASCII printable plus Hangul syllables" (95 + 11172) !checked;
+  let text = "안녕하세요 \xf0\x9f\x91\xa8\xe2\x80\x8d\xf0\x9f\x91\xa9 abc \xe2\x80\xae한글" in
+  Alcotest.(check string) "a joiner between pictographs stays, a bidi override is escaped"
+    "안녕하세요 \xf0\x9f\x91\xa8\xe2\x80\x8d\xf0\x9f\x91\xa9 abc \\u202E한글"
+    (Masc.Tui_terminal_text.escape_invisible text)
+;;
+
 let () =
   Alcotest.run "tui_decode" [
     ("play revoke failure", [Alcotest.test_case "preserves controller failure detail" `Quick test_play_revoke_failure_detail]);
@@ -13645,6 +13669,9 @@ let () =
           `Quick test_play_invite_responses_preserve_recovery_facts
       ; Alcotest.test_case "a refusal says the server's sentence" `Quick
           test_play_invite_refusal_says_the_servers_sentence ] );
+    ( "terminal text"
+    , [ Alcotest.test_case "plain scalars have none of the walk's properties" `Quick
+          test_plain_scalars_have_none_of_the_properties_the_walk_reacts_to ] );
     ( "file change"
     , [ Alcotest.test_case "reads an insert" `Quick test_decode_file_change_reads_an_insert
       ; Alcotest.test_case "reads a materialize" `Quick

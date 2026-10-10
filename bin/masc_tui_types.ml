@@ -812,7 +812,10 @@ let message_display_at row =
    are created and dropped inside the call, so this is still a map from rows
    to moments and nothing outside sees them. *)
 let chat_projected_timeline_ats messages =
-  let first_known_by_request = Hashtbl.create 64 in
+  (* A held log asks for the moments of its own few rows; a 64-bucket table
+     per call is what that costs when the list is small. *)
+  let table_size = if List.compare_length_with messages 16 <= 0 then 8 else 64 in
+  let first_known_by_request = Hashtbl.create table_size in
   List.iter
     (fun (row : msg_entry) ->
       let request_id = row.me_request_id in
@@ -825,7 +828,7 @@ let chat_projected_timeline_ats messages =
         | Some at -> Hashtbl.replace first_known_by_request request_id at
         | None -> ())
     messages;
-  let floors = Hashtbl.create 64 in
+  let floors = Hashtbl.create table_size in
   let rec project reversed = function
     | [] -> List.rev reversed
     | (row : msg_entry) :: rest ->
@@ -1329,12 +1332,17 @@ let chat_timeline_rows timeline =
   |> List.map (fun projected -> projected.pcr_row)
 ;;
 
+(* String membership without polymorphic compare. Request ids are strings and
+   these lookups run per message per held log on every frame. *)
+let string_mem needle haystack = List.exists (String.equal needle) haystack
+;;
+
 let chat_request_timeline_at ?(member_ids = []) ~request_id messages =
   let request_rows =
     List.filter
       (fun (message : msg_entry) ->
         String.equal message.me_request_id request_id
-        || List.mem message.me_request_id member_ids)
+        || string_mem message.me_request_id member_ids)
       messages
   in
   match List.rev (chat_projected_timeline_ats request_rows) with
@@ -1379,7 +1387,7 @@ let chat_block_insertion_index ~member_ids ~bounds ~request_id ~timeline_at
     List.fold_left
       (fun (index, lower_bound) ((row : msg_entry), _) ->
         ( index + 1
-        , if (String.equal row.me_request_id request_id || List.mem row.me_request_id member_ids) && bounds row
+        , if (String.equal row.me_request_id request_id || string_mem row.me_request_id member_ids) && bounds row
           then index + 1
           else lower_bound ))
       (0, 0) positioned_messages
@@ -1405,6 +1413,207 @@ let chat_block_insertion_index ~member_ids ~bounds ~request_id ~timeline_at
         else find (index + 1) rest
   in
   find 0 positioned_messages
+;;
+
+(* One frame's committed rows indexed by request id, so a held log finds its
+   own rows without walking every row. [chat_log_timeline_context] returns what
+   [chat_live_timeline_at] and [chat_block_insertion_index] return for the same
+   log on the full lists; the test compares the two on generated rows. *)
+type chat_timeline_index =
+  { cti_by_request : (string, int * msg_entry) Hashtbl.t
+  ; cti_visible : (msg_entry * float option) array
+  ; cti_visible_by_request : (string, int * msg_entry * float option) Hashtbl.t
+  ; cti_max_at : float option
+  ; cti_all_finite : bool
+  ; cti_prefix_max : float array
+        (** running maximum of the moments up to each row; [neg_infinity]
+            before the first one *)
+  ; cti_first_without_moment : int
+  ; cti_first_flagged_without_moment : int
+  ; cti_first_flagged_at : (float, int) Hashtbl.t
+        (** per moment, the first row there that a tied live turn precedes *)
+  }
+
+(* A tied live turn precedes unowned and memory rows. *)
+let chat_row_yields_a_tie (row : msg_entry) =
+  row.me_role = Message_memory || String.equal row.me_request_id ""
+
+let chat_timeline_index ~messages ~visible =
+  let by_request = Hashtbl.create 64 in
+  List.iteri
+    (fun position (message : msg_entry) ->
+      Hashtbl.add by_request message.me_request_id (position, message))
+    messages;
+  let cti_visible = Array.of_list visible in
+  let visible_by_request = Hashtbl.create 64 in
+  Array.iteri
+    (fun index ((message : msg_entry), at) ->
+      Hashtbl.add visible_by_request message.me_request_id (index, message, at))
+    cti_visible;
+  let max_of_some acc at =
+    match acc, at with
+    | None, at -> at
+    | acc, None -> acc
+    | Some left, Some right -> Some (Float.max left right)
+  in
+  let length = Array.length cti_visible in
+  let prefix_max = Array.make length neg_infinity in
+  let first_without_moment = ref length in
+  let first_flagged_without_moment = ref length in
+  let first_flagged_at = Hashtbl.create 16 in
+  let running = ref neg_infinity in
+  Array.iteri
+    (fun index ((row : msg_entry), at) ->
+      (match at with
+       | Some at ->
+           if at > !running then running := at;
+           if chat_row_yields_a_tie row && not (Hashtbl.mem first_flagged_at at)
+           then Hashtbl.add first_flagged_at at index
+       | None ->
+           if index < !first_without_moment then first_without_moment := index;
+           if chat_row_yields_a_tie row && index < !first_flagged_without_moment
+           then first_flagged_without_moment := index);
+      prefix_max.(index) <- !running)
+    cti_visible;
+  { cti_by_request = by_request
+  ; cti_visible
+  ; cti_prefix_max = prefix_max
+  ; cti_first_without_moment = !first_without_moment
+  ; cti_first_flagged_without_moment = !first_flagged_without_moment
+  ; cti_first_flagged_at = first_flagged_at
+  ; cti_visible_by_request = visible_by_request
+  ; cti_max_at = Array.fold_left (fun acc (_, at) -> max_of_some acc at) None cti_visible
+  ; cti_all_finite =
+      Array.for_all
+        (fun (_, at) -> match at with None -> true | Some at -> Float.is_finite at)
+        cti_visible
+  }
+
+(* The first visible row at or after [lower_bound] that a live turn at
+   [timeline_at] precedes, or the row count when none. Same walk as
+   [chat_block_insertion_index], over the frame's index. *)
+let chat_index_insertion index ~lower_bound ~timeline_at =
+  let length = Array.length index.cti_visible in
+  let live_precedes ((row : msg_entry), row_at) =
+    match timeline_at, row_at with
+    | Some live_at, Some row_at ->
+        let by_time = Float.compare live_at row_at in
+        if by_time <> 0 then by_time < 0 else chat_row_yields_a_tie row
+    | Some _, None -> true
+    | None, Some _ -> false
+    | None, None -> chat_row_yields_a_tie row
+  in
+  let rec walk position =
+    if position >= length then length
+    else if live_precedes index.cti_visible.(position) then position
+    else walk (position + 1)
+  in
+  if lower_bound > 0 || not index.cti_all_finite then walk lower_bound
+  else
+    (* From the first row, the answer is the earliest of three kinds of row;
+       the running maximum is non-decreasing, so the later-moment kind is a
+       binary search. *)
+    match timeline_at with
+    | None -> index.cti_first_flagged_without_moment
+    | Some live_at ->
+        let first_later =
+          let rec search low high =
+            if low >= high then low
+            else
+              let middle = (low + high) / 2 in
+              if index.cti_prefix_max.(middle) > live_at
+              then search low middle
+              else search (middle + 1) high
+          in
+          search 0 length
+        in
+        let first_tied =
+          Option.value ~default:length
+            (Hashtbl.find_opt index.cti_first_flagged_at live_at)
+        in
+        min first_later (min first_tied index.cti_first_without_moment)
+;;
+
+type chat_log_timeline_context =
+  { clt_committed_error : bool
+  ; clt_timeline_at : float option
+  ; clt_insertion : int
+  }
+
+let chat_log_timeline_context index ~member_ids ~request_id ~started_at =
+  let ids = List.sort_uniq String.compare (request_id :: member_ids) in
+  let own_messages =
+    List.concat_map (fun id -> Hashtbl.find_all index.cti_by_request id) ids
+    |> List.sort (fun (left, _) (right, _) -> Int.compare left right)
+    |> List.map snd
+  in
+  let clt_committed_error =
+    List.exists
+      (fun (message : msg_entry) ->
+        message.me_role = Message_error && string_mem message.me_request_id member_ids)
+      own_messages
+  in
+  let request_messages =
+    List.filter (fun (message : msg_entry) -> message.me_turn_phase = Turn_input) own_messages
+  in
+  let clt_timeline_at =
+    match chat_request_timeline_at ~member_ids ~request_id request_messages with
+    | Some _ as at -> at
+    | None ->
+        let valid at = Float.is_finite at && at > 0. in
+        let started_at = if valid started_at then Some started_at else None in
+        let has_committed_request =
+          List.exists
+            (fun (message : msg_entry) -> String.equal message.me_request_id request_id)
+            request_messages
+        in
+        if not has_committed_request
+        then started_at
+        else
+          let excluded_at =
+            List.concat_map (fun id -> Hashtbl.find_all index.cti_visible_by_request id)
+              (List.sort_uniq String.compare member_ids)
+            |> List.filter (fun (_, (message : msg_entry), _) ->
+                 message.me_turn_phase <> Turn_input)
+          in
+          let others_max =
+            let scan () =
+              Array.fold_left
+                (fun latest ((message : msg_entry), at) ->
+                  if string_mem message.me_request_id member_ids
+                     && message.me_turn_phase <> Turn_input
+                  then latest
+                  else
+                    match latest, at with
+                    | None, at -> at
+                    | at, None -> at
+                    | Some latest, Some at -> Some (Float.max latest at))
+                None index.cti_visible
+            in
+            if excluded_at = [] && index.cti_all_finite then index.cti_max_at
+            else if index.cti_all_finite
+                    && not (List.exists (fun (_, _, at) -> at = index.cti_max_at) excluded_at)
+            then index.cti_max_at
+            else scan ()
+          in
+          (match started_at, others_max with
+           | started_at, None -> started_at
+           | None, at -> at
+           | Some started_at, Some at -> Some (Float.max started_at at))
+  in
+  let lower_bound =
+    List.concat_map (fun id -> Hashtbl.find_all index.cti_visible_by_request id) ids
+    |> List.fold_left
+         (fun lower_bound (position, (message : msg_entry), _) ->
+           if message.me_turn_phase = Turn_input
+           then max lower_bound (position + 1)
+           else lower_bound)
+         0
+  in
+  { clt_committed_error
+  ; clt_timeline_at
+  ; clt_insertion = chat_index_insertion index ~lower_bound ~timeline_at:clt_timeline_at
+  }
 ;;
 
 let chat_live_insertion_index ?(member_ids = []) ~request_id ~timeline_at positioned_messages =
@@ -3207,10 +3416,14 @@ let journal_fetch_targets ~held ~unavailable
       | Some seen when seen <= at -> ()
       | Some _ | None -> Hashtbl.replace earliest operation_id at)
     candidates;
+  (* One table of the keys not to fetch, instead of two list scans for every
+     candidate: the candidates are a page's worth and [held] is every log the
+     session holds. *)
+  let excluded = Hashtbl.create (List.length held + List.length unavailable + 1) in
+  List.iter (fun key -> Hashtbl.replace excluded key ()) held;
+  List.iter (fun key -> Hashtbl.replace excluded key ()) unavailable;
   Hashtbl.fold (fun operation_id at acc -> (operation_id, at) :: acc) earliest []
-  |> List.filter (fun (operation_id, _) ->
-         not
-           (List.mem operation_id held || List.mem operation_id unavailable))
+  |> List.filter (fun (operation_id, _) -> not (Hashtbl.mem excluded operation_id))
   |> List.stable_sort (fun (id_a, at_a) (id_b, at_b) ->
          match Float.compare at_b at_a with
          | 0 -> compare id_a id_b
@@ -8195,36 +8408,52 @@ type execution_source_key =
   | Operation_key of string
   | Autonomous_turn_key of string * int
 
-let turn_log_execution_source_key log =
-  match turn_log_execution_source log with
+let execution_source_key_of_source : Masc_tui_keeper_chat_log.journal_source -> execution_source_key =
+  function
   | Operation id -> Operation_key id
   | Autonomous_turn turn_ref ->
     Autonomous_turn_key (Ids.Turn_ref.trace_id turn_ref, Ids.Turn_ref.absolute_turn turn_ref)
+
+let turn_log_execution_source_key log =
+  execution_source_key_of_source (turn_log_execution_source log)
 
 (* One log per execution source, in the order each source first appeared.
    A later log for a seen source takes that first position when
    [turn_log_preferred] says it holds more of the turn. Linear in the number
    of logs: this runs for every drawn frame, so the pairwise search it replaces
    grew with the square of the transcript. *)
-let selected_source_logs_for_keeper state keeper_name =
-  let slots : (execution_source_key, turn_log ref) Hashtbl.t = Hashtbl.create 16 in
+let selected_source_logs_with_origin state keeper_name =
+  let slots : (execution_source_key, (turn_log * bool) ref) Hashtbl.t =
+    Hashtbl.create 16
+  in
+  (* Whether a log is one the session holds as settled, decided once per
+     candidate: settled candidates are in that list by construction, and the
+     few streaming ones are looked up in it. *)
+  let from_settled = List.map (fun log -> log, true) state.msg_settled_logs in
+  let streaming =
+    List.map (fun (entry : inflight) -> entry.log) (List.rev state.msg_inflight)
+    @ Option.to_list state.msg_live
+    |> List.map (fun log -> log, List.memq log state.msg_settled_logs)
+  in
   let first_seen_newest_first =
-    (state.msg_settled_logs
-     @ List.map (fun (entry : inflight) -> entry.log) (List.rev state.msg_inflight)
-     @ Option.to_list state.msg_live)
-    |> List.filter (fun log -> String.equal (turn_log_keeper_name log) keeper_name)
-    |> List.fold_left (fun order log ->
+    from_settled @ streaming
+    |> List.filter (fun (log, _) -> String.equal (turn_log_keeper_name log) keeper_name)
+    |> List.fold_left (fun order ((log, _) as candidate) ->
       let key = turn_log_execution_source_key log in
       match Hashtbl.find_opt slots key with
       | None ->
-        let slot = ref log in
+        let slot = ref candidate in
         Hashtbl.add slots key slot;
         slot :: order
       | Some slot ->
-        if turn_log_preferred ~candidate:log ~held:!slot then slot := log;
+        if turn_log_preferred ~candidate:log ~held:(fst !slot) then slot := candidate;
         order) []
   in
   List.rev_map (fun slot -> !slot) first_seen_newest_first
+;;
+
+let selected_source_logs_for_keeper state keeper_name =
+  List.map fst (selected_source_logs_with_origin state keeper_name)
 ;;
 
 (* Batch watchers keep their original request identities. All inputs bound to
@@ -8250,8 +8479,8 @@ let chat_execution_member_ids state ~keeper_name ~execution_id =
 (* Existing consumers ask for held sources, but selection must also account
    for every subscription that the renderer can draw. *)
 let settled_logs_for_keeper state keeper_name =
-  selected_source_logs_for_keeper state keeper_name
-  |> List.filter (fun log -> List.exists (( == ) log) state.msg_settled_logs)
+  selected_source_logs_with_origin state keeper_name
+  |> List.filter_map (fun (log, settled) -> if settled then Some log else None)
 ;;
 
 (* The sources a history load for [keeper_name] reads no journal for: every
@@ -8281,22 +8510,34 @@ let journal_held_keys state keeper_name =
    Autonomous turns have no operation record, and pane-owned requests settle
    through their own subscription. *)
 let unavailable_journal_operation_targets state keeper_name =
+  let table keys =
+    let table = Hashtbl.create (List.length keys + 1) in
+    List.iter (fun key -> Hashtbl.replace table key ()) keys;
+    table
+  in
+  let unavailable = table state.msg_journal_unavailable in
+  let inflight = table state.msg_journal_inflight in
   state.msg_settled_logs
   |> List.filter_map (fun log ->
-      let key = turn_log_journal_key log in
-      let journal_unavailable = state.msg_journal_reads_refused
-        || List.mem key state.msg_journal_unavailable in
-      let read_inflight = List.mem key state.msg_journal_inflight in
-      let owned = List.exists (fun (entry : inflight) ->
-        turn_log_journal_key entry.log = key) state.msg_inflight in
-      let terminal = Option.exists Keeper_chat_operation.is_terminal
-        (Masc_tui_keeper_chat_log.operation_state log.tl_log) in
+      (* The cheap tests that most logs fail come first; each condition is a
+         pure read, so the order changes the cost and not the answer. *)
       match Masc_tui_keeper_chat_log.source log.tl_log with
       | Operation operation_id
-        when String.equal (turn_log_keeper_name log) keeper_name
-             && journal_unavailable && not read_inflight && not owned && not terminal
-             && not (turn_log_holds_the_turn log) ->
-          Some operation_id
+        when String.equal (turn_log_keeper_name log) keeper_name ->
+          let key = turn_log_journal_key log in
+          let journal_unavailable = state.msg_journal_reads_refused
+            || Hashtbl.mem unavailable key in
+          if journal_unavailable
+             && (not (Hashtbl.mem inflight key))
+             && (not
+                   (List.exists (fun (entry : inflight) ->
+                      turn_log_journal_key entry.log = key) state.msg_inflight))
+             && (not
+                   (Option.exists Keeper_chat_operation.is_terminal
+                      (Masc_tui_keeper_chat_log.operation_state log.tl_log)))
+             && not (turn_log_holds_the_turn log)
+          then Some operation_id
+          else None
       | Operation _ | Autonomous_turn _ -> None)
   |> List.sort_uniq String.compare
 ;;
@@ -8446,7 +8687,7 @@ let receive_journal_result state ~keeper_name ~source ~started_at journal =
       in
       let accepted = turn_log_add_journaled log lines in
       Masc_tui_keeper_chat_log.commit log.tl_log;
-      if lines <> [] || Masc_tui_keeper_chat_log.entries log.tl_log <> []
+      if lines <> [] || Masc_tui_keeper_chat_log.has_entries log.tl_log
       then hold_settled_log state log;
       Ok (log, accepted)
   | Error error ->
@@ -8706,9 +8947,23 @@ let rows_the_logs_do_not_draw ~held rows =
   match held with
   | [] -> rows
   | held ->
+      (* A log draws only rows of its own execution source, so each row is
+         tested against the held turns that share its source, not all of
+         them. *)
+      let by_source : (execution_source_key, held_turn) Hashtbl.t = Hashtbl.create 16 in
+      List.iter
+        (fun (turn : held_turn) ->
+          Hashtbl.add by_source (execution_source_key_of_source turn.ht_source) turn)
+        held;
       List.filter_map
         (fun (row : msg_entry) ->
-          if List.exists (fun turn -> log_draws_row turn row) held
+          let candidates =
+            match row.me_execution_source with
+            | None -> []
+            | Some source ->
+              Hashtbl.find_all by_source (execution_source_key_of_source source)
+          in
+          if List.exists (fun turn -> log_draws_row turn row) candidates
           then media_remainder row else Some row)
         rows
 ;;
@@ -8797,7 +9052,7 @@ let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
    executable so the decision is linkable by a test. *)
 let settle_turn_log state (entry : inflight) =
   Masc_tui_keeper_chat_log.commit entry.log.tl_log;
-  if Masc_tui_keeper_chat_log.entries entry.log.tl_log <> []
+  if Masc_tui_keeper_chat_log.has_entries entry.log.tl_log
      || Option.is_some (Masc_tui_keeper_chat_transcript.admission_prelude entry.log.tl_transcript)
   then
     hold_settled_log state entry.log;
@@ -10925,10 +11180,7 @@ let keeper_message_waiting_requests (state : state) ~keeper_name =
   let remember_started executions log =
     if not (String.equal (turn_log_keeper_name log) keeper_name) then executions
     else
-      let started = List.exists (fun (entry : Masc_tui_keeper_chat_log.entry) ->
-          match entry.delta with
-          | Masc_tui_keeper_chat_live.Run_started -> true
-          | _ -> false) (Masc_tui_keeper_chat_log.entries log.tl_log) in
+      let started = Masc_tui_keeper_chat_log.run_started log.tl_log in
       if started then Executions.add (turn_log_execution_id log) executions else executions
   in
   (* A batch's watchers receive its journal independently. A sibling's run

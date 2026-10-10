@@ -239,6 +239,36 @@ type model_signal =
       (* the last result handed back to the model, by tool name; nothing
          since. The model has the result and owes the next token. *)
 
+type drawn =
+  | Drawn_thinking of string list
+  | Drawn_skill of skill_activity list
+  | Drawn_tools of tool_block
+  | Drawn_text of string
+  | Drawn_reply of string
+  | Drawn_status of string
+  | Drawn_error of string
+
+type drawn_origin =
+  | Admission_of_request of string
+  | Text_stretch of int
+  | Thinking_stretch of int
+  | Tool_stretch of int
+  | Unstreamed_skills
+  | Reply_of_segment of int
+  | Error_of_segment of int
+
+type response_part = Observed_response | Final_response
+
+type drawn_item =
+  { origin : drawn_origin
+  ; response_part : response_part option
+  ; at : float option
+  ; segment : int
+  ; superseded : int option
+  ; superseded_runtime_id : string option
+  ; drawn : drawn
+  }
+
 type t =
   { keeper_name : string
   ; source : Masc_tui_keeper_chat_log.journal_source
@@ -363,6 +393,10 @@ type t =
   ; mutable revision : int
         (* Bumped by every mutation: the memo key for anything drawn from
            this transcript. *)
+  ; mutable drawn_cache : (int * drawn_item list) option
+        (* [drawn]'s answer and the revision it was computed at. [drawn]
+           reads this transcript and nothing else, so it is the same list
+           until a mutation bumps the revision. *)
   }
 
 let create_for_source ~keeper_name ~source ~started_at =
@@ -409,6 +443,7 @@ let create_for_source ~keeper_name ~source ~started_at =
   ; settled_at = None
   ; noted_skills = []
   ; revision = 0
+  ; drawn_cache = None
   }
 
 let revision t = t.revision
@@ -1833,8 +1868,19 @@ let note_tool_outcome t ~execution_id ~outcome ~duration =
         | Some _ -> { updated with duration }
         | None -> updated
       in
-      update_local_call t call.local_id (fun _ -> updated);
-      bump t;
+      (* The same facts arrive again with every page of rows, and a held
+         block is redrawn whenever the revision moves, so a repeat that says
+         nothing new leaves it alone. *)
+      let changed =
+        updated.ended <> call.ended
+        || updated.result_ready <> call.result_ready
+        || updated.failed <> call.failed
+        || updated.duration <> call.duration
+      in
+      if changed then begin
+        update_local_call t call.local_id (fun _ -> updated);
+        bump t
+      end;
       true
 
 (* What the durable record knows about a skill read that the wire has no
@@ -1894,7 +1940,7 @@ let note_skill_activity ?(runtime_inventory=[]) t (evidence : skill_activity) =
       match skill_identity evidence with
       | None -> ()
       | Some key ->
-          t.noted_skills <- (match matching_skill_note ~runtime_inventory key t.noted_skills with
+          let noted_skills = (match matching_skill_note ~runtime_inventory key t.noted_skills with
             | None -> t.noted_skills @ [key,evidence]
             | Some (previous_key, previous) ->
                 let evidence = complete_skill_runtime previous evidence in
@@ -1902,8 +1948,13 @@ let note_skill_activity ?(runtime_inventory=[]) t (evidence : skill_activity) =
                 let key = turn_ref, use_id, evidence.runtime_id in
                 List.map (fun (noted_key, noted) ->
                   if noted_key = previous_key then key,evidence else noted_key,noted)
-                  t.noted_skills);
-          bump t)
+                  t.noted_skills) in
+          (* Replaying the record already held changes nothing a held block
+             draws, so the revision stays where it was. *)
+          if noted_skills <> t.noted_skills then begin
+            t.noted_skills <- noted_skills;
+            bump t
+          end)
 
 let turn_status_text ~reply ~turn_ref (outcome : Masc.Keeper_turn_outcome.t) =
   match outcome with
@@ -1921,36 +1972,6 @@ let turn_status_text ~reply ~turn_ref (outcome : Masc.Keeper_turn_outcome.t) =
   | Masc.Keeper_turn_outcome.No_visible_reply ->
       Printf.sprintf "Turn completed without a visible reply (turn %s)" turn_ref
 ;;
-
-type drawn =
-  | Drawn_thinking of string list
-  | Drawn_skill of skill_activity list
-  | Drawn_tools of tool_block
-  | Drawn_text of string
-  | Drawn_reply of string
-  | Drawn_status of string
-  | Drawn_error of string
-
-type drawn_origin =
-  | Admission_of_request of string
-  | Text_stretch of int
-  | Thinking_stretch of int
-  | Tool_stretch of int
-  | Unstreamed_skills
-  | Reply_of_segment of int
-  | Error_of_segment of int
-
-type response_part = Observed_response | Final_response
-
-type drawn_item =
-  { origin : drawn_origin
-  ; response_part : response_part option
-  ; at : float option
-  ; segment : int
-  ; superseded : int option
-  ; superseded_runtime_id : string option
-  ; drawn : drawn
-  }
 
 let admission_prelude t =
   Option.bind t.initial_receipt (fun (at, interactive) ->
@@ -2062,7 +2083,7 @@ type drawn_projection =
   | Projected_item of drawn_item * int option
   | Projected_response_boundary
 
-let drawn t =
+let compute_drawn t =
   let item ?(stream_scope=None) ~segment ~origin ~at drawn =
     [Projected_item
        ({ origin; response_part = None; at = Some at; segment; superseded = None; superseded_runtime_id = None; drawn }, stream_scope)] in
@@ -2224,6 +2245,17 @@ let drawn t =
   in
   Option.to_list (admission_prelude t) @ items
 ;;
+
+(* The same list until a mutation bumps the revision: [compute_drawn] reads
+   this transcript and nothing else, and every public mutator bumps. Several
+   readers ask for it in one frame, for every held log. *)
+let drawn t =
+  match t.drawn_cache with
+  | Some (revision, items) when revision = t.revision -> items
+  | Some _ | None ->
+    let items = compute_drawn t in
+    t.drawn_cache <- Some (t.revision, items);
+    items
 
 type model_activity =
   | Activity_model_started

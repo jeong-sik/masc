@@ -1904,6 +1904,7 @@
   eio
   masc_core
   masc_tui_async_read
+  masc_tui_frame_timing
   masc.masc_types
   masc_tui_keeper_chat_live
   masc.keeper_portrait

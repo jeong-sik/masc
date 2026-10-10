@@ -1388,7 +1388,7 @@ status: reference
   → [Reasoning_effort.rank](../../packages/agent_core/lib/llm_provider/reasoning_effort.mli)
 
 **Assistant Prefill (assistant 응답 이어쓰기)**
-: 부분 assistant 응답을 메시지 목록 끝에 넣어, 모델이 그 뒤부터 응답을 이어 생성하게 하는 요청 형태. Anthropic Messages에서는 지원 여부가 모델마다 다르다. agent_core는 provider 기본값을 적용하고, 모델 카탈로그나 명시적 capability 선언이 이를 덮어 마지막 assistant 메시지의 허용 여부를 정한다.
+: 부분 assistant 응답을 메시지 목록 끝에 넣어, 모델이 그 뒤부터 응답을 이어 생성하게 하는 요청 형태. Anthropic Messages에서는 지원 여부가 모델마다 다르다. agent_core는 provider 기본값을 적용하고, 모델 카탈로그나 명시적 capability 선언이 이를 덮어 마지막 assistant 메시지의 허용 여부를 정한다. 지원하지 않는 모델에 마지막 assistant 메시지를 보내면 요청 생성을 거절한다.
   → [Capabilities.supports_assistant_prefill](../../packages/agent_core/lib/llm_provider/capabilities.mli), [Model_catalog.model_entry](../../packages/agent_core/lib/llm_provider/model_catalog.mli), [Backend_anthropic.build_request](../../packages/agent_core/lib/llm_provider/backend_anthropic.ml)
 
 **Accepted Reasoning Efforts (허용 강도 목록)**

@@ -292,7 +292,7 @@ let a_launcher_that_cannot_be_run_as_it_is_is_installed_first () =
   (with_workspace @@ fun base ->
    let held = take_record base in
    written (Record.attached held ~now:1_791_000_002.);
-   written (Record.ended held ~reason:"stopped by SIGINT" ~session:Record.No_session_left
+   written (Record.ended held ~because:Record.Reason_only ~reason:"stopped by SIGINT" ~session:Record.No_session_left
               ~now:1_791_000_060.);
    released held;
    says (Onboarding_status.inspect ~base_path:(Some base))
@@ -326,7 +326,7 @@ let a_bidi_host_that_ended_says_why_and_what_comes_first () =
   let held = take_record base in
   written (Record.attached held ~now:1_791_000_002.);
   let ended_with ~reason session =
-    written (Record.ended held ~reason ~session ~now:1_791_000_060.);
+    written (Record.ended held ~because:Record.Reason_only ~reason ~session ~now:1_791_000_060.);
     Onboarding_status.inspect ~base_path:(Some base)
   in
   let run = run_again base in
@@ -398,6 +398,26 @@ let a_bidi_host_that_ended_says_why_and_what_comes_first () =
   lacks (bidi_message two) [ "snapshot window" ];
   released held
 
+(* A host that ended a session on another profile got that session: what
+   holds the port is another Firefox, which is quit first. The step is not
+   the one for a host Firefox never gave a session. *)
+let a_bidi_host_that_met_another_profile_says_to_quit_that_firefox () =
+  browser_lane_fixture ~connection_port:"64850" () @@ fun base ->
+  let ended_on found =
+    let held = take_record base in
+    written
+      (Record.ended held ~reason:"this Firefox runs the profile elsewhere" ~session:Record.No_session_left
+         ~because:(Record.Profile_not_kept { expected = "/keeper/profile"; found }) ~now:1_791_000_060.);
+    released held;
+    Onboarding_status.inspect ~base_path:(Some base)
+  in
+  let elsewhere = ended_on (Some "/Users/someone/Firefox/Profiles/x.default") in
+  says elsewhere
+    [ "The Firefox at that address runs the profile /Users/someone/Firefox/Profiles/x.default"
+    ; "only with a Firefox on /keeper/profile"; "the operator quits it"; "[browser.live.bidi]" ];
+  lacks (bidi_message elsewhere) [ "ended before Firefox gave it a session" ];
+  says (ended_on None) [ "did not say which profile it runs" ]
+
 (* At the limit, earlier history is unknown. A valid longer record retains
    all listed results; the reader must not pretend it was already trimmed. *)
 let a_record_at_the_limit_says_the_newest_are_kept () =
@@ -425,7 +445,7 @@ let a_record_at_the_limit_says_the_newest_are_kept () =
 let a_bidi_host_that_never_got_a_session_says_what_the_next_one_needs () =
   browser_lane_fixture ~connection_port:"64850" () @@ fun base ->
   let held = take_record base in
-  written (Record.ended held ~reason:"BiDi connection failed: Connection refused"
+  written (Record.ended held ~because:Record.Reason_only ~reason:"BiDi connection failed: Connection refused"
              ~session:Record.No_session_left ~now:1_791_000_060.);
   released held;
   let observed = Onboarding_status.inspect ~base_path:(Some base) in
@@ -559,7 +579,7 @@ let a_running_host_is_rated_by_the_server_that_lists_it () =
   (* The record says no host runs and the server lists a BiDi connection:
      the two are told apart and neither is taken for the other. *)
   let ending : Record.ending =
-    { at = 1_791_000_060.; reason = "stopped by SIGINT"; session = Record.No_session_left }
+    { at = 1_791_000_060.; reason = "stopped by SIGINT"; session = Record.No_session_left; because = Record.Reason_only }
   in
   List.iter (fun record ->
       has (Status.message (observation ~server:listing record))
@@ -590,10 +610,10 @@ let a_running_host_is_rated_by_the_server_that_lists_it () =
 let a_bidi_host_report_reads_back_as_written () =
   let entry = { host_entry with unacknowledged = [ unacknowledged ] } in
   let ending : Record.ending =
-    { at = 1_791_000_060.; reason = "stopped by SIGINT"; session = Record.Session_unknown }
+    { at = 1_791_000_060.; reason = "stopped by SIGINT"; session = Record.Session_unknown; because = Record.Reason_only }
   in
   let ended = { entry with ended = Some ending } in
-  let refused_ending = { ending with session = Record.Session_refused } in
+  let refused_ending = { ending with session = Record.Session_refused; because = Record.Reason_only } in
   let report ?launcher record = Status.report (observation ?launcher record) in
   List.iter (fun (name, written) ->
       check bool name true (Status.report_of_json (Status.report_to_json written) = Ok written))
@@ -852,6 +872,8 @@ let () = run "Onboarding observations"
                    a_launcher_that_cannot_be_run_as_it_is_is_installed_first;
                  test_case "a BiDi host that ended says why and what comes first" `Quick
                    a_bidi_host_that_ended_says_why_and_what_comes_first;
+                 test_case "a BiDi host that met another profile says to quit that Firefox" `Quick
+                   a_bidi_host_that_met_another_profile_says_to_quit_that_firefox;
                  test_case "a record at the limit says the newest are kept" `Quick
                    a_record_at_the_limit_says_the_newest_are_kept;
                  test_case "a BiDi host that never got a session says what the next one needs" `Quick

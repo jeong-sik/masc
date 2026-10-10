@@ -716,6 +716,9 @@ let run_bidi env config url ~firefox_profile ~stop =
         record_delivery (Error why)
   in
   let session = ref Record.No_session_left in
+  (* What the next host's operator does turns on it: set where the host
+     ends for such a cause. *)
+  let because = ref Record.Reason_only in
   Eio.Switch.run @@ fun stop_sw ->
   (* The host holds the workspace until it has left, whichever way. *)
   Eio.Switch.on_release stop_sw (fun () ->
@@ -896,7 +899,18 @@ let run_bidi env config url ~firefox_profile ~stop =
               let* () =
                 match firefox_profile with
                 | None -> Ok ()
-                | Some expected -> Masc.Browser_bidi_peer.runs_profile peer ~expected
+                | Some expected ->
+                    (match Masc.Browser_bidi_peer.runs_profile peer ~expected with
+                     | Ok () -> Ok ()
+                     | Error refusal ->
+                         because :=
+                           Record.Profile_not_kept
+                             { expected
+                             ; found =
+                                 (match refusal with
+                                  | Masc.Browser_bidi_peer.Profile_unsaid -> None
+                                  | Masc.Browser_bidi_peer.Runs_profile found -> Some found) };
+                         Error (Masc.Browser_bidi_peer.profile_refusal_message ~expected refusal))
               in
               let info =
                 { browser = "firefox"; version; engine_version = version
@@ -937,7 +951,7 @@ let run_bidi env config url ~firefox_profile ~stop =
   (* What a later reader is told, written before it is logged: the record is
      what remains when the log has nowhere left to go. An exception leaves no
      ending, which reads as a host that died: that is what it was. *)
-  keep "ending" (Record.ended record ~reason ~session:!session ~now:(Eio.Time.now clock));
+  keep "ending" (Record.ended record ~reason ~session:!session ~because:!because ~now:(Eio.Time.now clock));
   if unsaid then Log.Transport.info "browser-host: %s" reason;
   outcome
 

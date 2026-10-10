@@ -45,6 +45,9 @@ val verdict : observation -> verdict
 (** Whether a host runs and is attached, when and why the last one ended,
     and what the operator does next. That step follows what became of the
     last host's session:
+    - ended because the Firefox there ran another profile, or did not say
+      which: that Firefox is quit first, so one on the kept profile can open
+      the port;
     - ended, or never given: the Firefox takes the next host as it is; a
       host that never got one needs a Firefox that answers at its address
       first;

@@ -722,7 +722,7 @@ let a_host_that_cannot_start_stops_its_firefox () =
 (* A host that leaves in order writes its ending, then gives the lock up. *)
 let ended_holding_the_lock base ~port =
   let held = take ~port base in
-  (match Record.ended held ~reason:"stopped by SIGTERM" ~session:Record.No_session_left ~now:1_791_000_060. with
+  (match Record.ended held ~because:Record.Reason_only ~reason:"stopped by SIGTERM" ~session:Record.No_session_left ~now:1_791_000_060. with
    | Ok () -> ()
    | Error failure -> fail (Record.write_failure_message failure));
   held
@@ -1193,7 +1193,7 @@ let a_request_while_the_host_comes_up_waits_for_it () =
    on [port]. *)
 let host_ended ?(port = 9333) base ~session ~now =
   let held = take ~port base in
-  (match Record.ended held ~reason:"stopped by SIGTERM" ~session ~now with
+  (match Record.ended held ~because:Record.Reason_only ~reason:"stopped by SIGTERM" ~session ~now with
    | Ok () -> ()
    | Error failure -> fail (Record.write_failure_message failure));
   released held

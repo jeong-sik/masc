@@ -4082,9 +4082,18 @@ module Browser_lane_view = struct
      restarted; one that holds none takes the next host as it is. A host
      that never got a session left none, and what kept it from one is still
      there. A refusal says Firefox held a session then, not that it holds
-     one now, so the next host is tried before a restart. *)
+     one now, so the next host is tried before a restart. A host that ended
+     a session on another profile says so first: another Firefox holds that
+     port, and the Keeper one cannot open it until that one is quit. *)
   let host_session_lines (entry : Masc.Browser_bidi_host_record.entry)
       (ending : Masc.Browser_bidi_host_record.ending) =
+    match ending.because with
+    | Profile_not_kept { expected = _; found } ->
+        host_line "Another Firefox holds that port · quit it so the Keeper one can open it"
+        :: (match found with
+            | Some found -> [{ lead = "It runs: "; said = found; breaks = At_slashes }]
+            | None -> [host_line "It did not say which profile it runs"])
+    | Reason_only ->
     List.map host_line
       (match entry.attached_at, ending.session with
        | Some _, No_session_left -> ["That Firefox takes the next host if it still runs"]

@@ -195,14 +195,36 @@ let unacknowledged (t : Launcher.t) (entry : Record.entry) =
       in
       listed (Printf.sprintf "%d results" count) "for each " trim
 
+(* What the operator does once another Firefox holds the port a host was
+   given: the host ends a session on any other profile, so a Firefox on the
+   one kept for this cannot open that port until the other is closed. A host
+   given that profile is the one MASC starts for [browser.live.bidi]. *)
+let other_firefox_there t (entry : Record.entry) ~expected ~found =
+  let said =
+    match found with
+    | Some found -> Printf.sprintf "runs the profile %s" found
+    | None -> "did not say which profile it runs"
+  in
+  Printf.sprintf
+    " The Firefox at that address %s, and this host keeps a session only with a Firefox on %s, so \
+     it ended that session. Unless the Firefox there is on %s, another Firefox holds that port, \
+     and the operator quits it. Then a server start, or a Keeper's next hover or drag, starts the \
+     Keeper Firefox and its host when runtime.toml has [browser.live.bidi]; without that table, \
+     the operator starts Firefox with %s, then %s."
+    said expected expected (firefox_at entry.bidi_url) (run_host t ~address:(Some entry.bidi_url))
+
 (* What became of the last host's session decides what the operator does
    before the next one. A Firefox that holds a session refuses every host
    until that session's host ends it or the Firefox is restarted; one that
    holds none takes the next host as it is. A host that never got a session
-   left none, and what kept it from one is still there for the next. *)
+   left none, and what kept it from one is still there for the next. A host
+   that ended for a cause the next step turns on says that cause first. *)
 let next_host t (entry : Record.entry) (ending : Record.ending) =
   let run = run_host t ~address:(Some entry.bidi_url) in
   let firefox = firefox_at entry.bidi_url in
+  match ending.because with
+  | Record.Profile_not_kept { expected; found } -> other_firefox_there t entry ~expected ~found
+  | Record.Reason_only ->
   match entry.attached_at, ending.session with
   | Some _, No_session_left ->
       Printf.sprintf

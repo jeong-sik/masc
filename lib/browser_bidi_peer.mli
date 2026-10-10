@@ -57,10 +57,17 @@ val metadata : t -> (string, session_failure) result
     succeeded, and when Firefox did not say. *)
 val profile : t -> string option
 
+(** Why a session's Firefox is not taken to run a profile. *)
+type profile_refusal =
+  | Profile_unsaid  (** Firefox did not say ([moz:profile]). *)
+  | Runs_profile of string  (** The profile it said it runs, as it said it. *)
+
 (** Whether the session's Firefox runs the profile at [expected]. The two
     paths are resolved first, so a link and the directory it names are the
-    same profile. [Error] says what it runs, or that it did not say. *)
-val runs_profile : t -> expected:string -> (unit, string) result
+    same profile. *)
+val runs_profile : t -> expected:string -> (unit, profile_refusal) result
+
+val profile_refusal_message : expected:string -> profile_refusal -> string
 (** Ends the session {!metadata} asked for; [Ok ()] when there is none to
     end, which is also what Firefox's "invalid session id" says of a session
     that was asked for and never confirmed. There is one to end from the

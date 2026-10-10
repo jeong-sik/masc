@@ -268,13 +268,17 @@ server:
     in memory for the next write; it does not undo a committed archive.
     The archive and snapshot together carry the metadata; archived entries
     are diagnostic receipts and are never replayed as commands.
-  - Readers report the actual snapshot count, including longer schema-1
-    records. Reaching 64 alone does not prove whether older entries exist
+  - Readers report the actual snapshot count, including a longer record
+    from another writer. Reaching 64 alone does not prove whether older entries exist
     or archival succeeded; the status names the archive without claiming
     that it exists or succeeded from the count alone.
-  - A host that leaves in order adds `ended`: when, why, and
-    `session_in_firefox`. A host that could not attach leaves its reason the
-    same way.
+  - A host that leaves in order adds `ended`: when, why,
+    `session_in_firefox`, and `because`. A host that could not attach leaves
+    its reason the same way. `because` is the cause a next step turns on:
+    `profile_not_kept` with `expected`, the profile the host was given with
+    `--firefox-profile`, and `found`, the one Firefox said it runs or null
+    when it did not say, for a host that ended a session on another profile;
+    `reason_only` otherwise. Its paths are written as the reason is.
     - `none`: nothing of this host's is left. Firefox confirmed the end or
       said the connection has no session (`invalid session id`), the host
       never got as far as asking for one, or Firefox answered its request

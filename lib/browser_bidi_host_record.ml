@@ -2,7 +2,11 @@ let ( let* ) = Result.bind
 
 type session = No_session_left | Session_left | Session_unknown | Session_refused
 
-type ending = { at : float; reason : string; session : session }
+type ended_because =
+  | Profile_not_kept of { expected : string; found : string option }
+  | Reason_only
+
+type ending = { at : float; reason : string; session : session; because : ended_because }
 
 type outcome = Succeeded | Not_started | Unknown
 
@@ -49,7 +53,7 @@ let file_permissions = 0o600
 
 (* The version of this layout. A reader built for another one says so
    instead of guessing at fields it does not know. *)
-let schema = 1
+let schema = 2
 
 let directory base_path =
   List.fold_left Filename.concat base_path [ Common.masc_dirname; Common.browser_lane_dirname ]
@@ -113,9 +117,17 @@ let recorded_address bidi_url =
   let* uri, (_ : string * int * string) = Browser_bidi_downloads.endpoint_uri bidi_url in
   Ok (Uri.to_string (Uri.with_query uri []))
 
-let ending_to_json { at; reason; session } =
+let because_to_json = function
+  | Profile_not_kept { expected; found } ->
+    `Assoc
+      [ "kind", `String "profile_not_kept"; "expected", `String expected
+      ; "found", (match found with Some found -> `String found | None -> `Null) ]
+  | Reason_only -> `Assoc [ "kind", `String "reason_only" ]
+
+let ending_to_json { at; reason; session; because } =
   `Assoc
-    [ "at", time at; "reason", `String reason; "session_in_firefox", `String (session_to_wire session) ]
+    [ "at", time at; "reason", `String reason; "session_in_firefox", `String (session_to_wire session)
+    ; "because", because_to_json because ]
 
 let optional to_json = function
   | Some value -> to_json value
@@ -197,28 +209,44 @@ let rec written_pieces raw index =
     && written_pieces raw (index + 4)
   else written_as_is raw.[index] && written_pieces raw (index + 1)
 
-(* A reason in the bytes and at the length the writer leaves one: its pieces,
+(* Text in the bytes and at the length the writer leaves it: its pieces,
    within the limit, or cut there and marked. The reader takes no other, so
    that what it passes on to a screen is one bounded line, and a backslash
    in it never runs into a quote set around it. *)
-let written_reason raw =
+let written_text name json =
+  let* raw = string_of name json in
   let length = String.length raw in
   let cut = length <= reason_limit_bytes + String.length cut_mark && String.ends_with ~suffix:cut_mark raw in
   if (length <= reason_limit_bytes || cut) && written_pieces raw 0
   then Ok raw
-  else Error "ended.reason is not what a host writes"
+  else Error (name ^ " is not what a host writes")
+
+let because_of_json json =
+  let* fields =
+    match json with
+    | `Assoc fields -> Ok fields
+    | _ -> Error "ended.because is not a JSON object"
+  in
+  match List.assoc_opt "kind" fields with
+  | Some (`String "profile_not_kept") ->
+    let* fields = fields_of ~names:[ "kind"; "expected"; "found" ] json in
+    let* expected = Result.bind (field fields "expected") (written_text "ended.because.expected") in
+    let* found = Result.bind (field fields "found") (nullable (written_text "ended.because.found")) in
+    Ok (Profile_not_kept { expected; found })
+  | Some (`String "reason_only") ->
+    let* (_ : (string * Yojson.Safe.t) list) = fields_of ~names:[ "kind" ] json in
+    Ok Reason_only
+  | Some _ | None -> Error "ended.because.kind is not one this reader knows"
 
 let ending_of_json json =
-  let* fields = fields_of ~names:[ "at"; "reason"; "session_in_firefox" ] json in
+  let* fields = fields_of ~names:[ "at"; "reason"; "session_in_firefox"; "because" ] json in
   let* at = Result.bind (field fields "at") (time_of "ended.at") in
-  let* reason =
-    let* raw = Result.bind (field fields "reason") (string_of "ended.reason") in
-    written_reason raw
-  in
+  let* reason = Result.bind (field fields "reason") (written_text "ended.reason") in
   let* session =
     Result.bind (field fields "session_in_firefox") (named "ended.session_in_firefox" session_of_wire)
   in
-  Ok { at; reason; session }
+  let* because = Result.bind (field fields "because") because_of_json in
+  Ok { at; reason; session; because }
 
 let unacknowledged_of_json json =
   let* fields = fields_of ~names:[ "request_id"; "verb"; "outcome"; "cause"; "at" ] json in
@@ -630,6 +658,12 @@ let printable reason =
   in
   add 0
 
-let ended held ~reason ~session ~now =
+let ended held ~reason ~session ~because ~now =
+  let because =
+    match because with
+    | Profile_not_kept { expected; found } ->
+      Profile_not_kept { expected = printable expected; found = Option.map printable found }
+    | Reason_only -> Reason_only
+  in
   Cross_context_mutex.with_durable_lock held.mutation (fun () ->
-    replace held { held.entry with ended = Some { at = now; reason = printable reason; session } })
+    replace held { held.entry with ended = Some { at = now; reason = printable reason; session; because } })

@@ -101,6 +101,60 @@ let read_file_call =
   ; tool_result "c1" "exec-c1"
   ]
 
+(* [drawn] is remembered until the transcript's revision moves. After every
+   kind of mutation the remembered list must equal what a transcript fed the
+   same history computes from scratch, and an untouched transcript hands back
+   the same list rather than building another. *)
+let test_drawn_follows_every_mutation_of_the_transcript () =
+  let deltas =
+    [ Live.Run_started
+    ; Live.Thinking "checking "
+    ; Live.Text {text="Let me "; stream_scope=None}
+    ]
+    @ read_file_call
+    @ [ Live.Text {text="look."; stream_scope=None}
+      ; Live.Thinking "again"
+      ; Live.Run_finished
+      ]
+  in
+  let live = fresh () in
+  let replay prefix =
+    let reference = fresh () in
+    feed reference prefix;
+    reference
+  in
+  let same label expected_from =
+    let expected = Transcript.drawn expected_from in
+    let first = Transcript.drawn live in
+    check bool (label ^ ": equals a fresh computation") true (first = expected);
+    check bool (label ^ ": an untouched transcript returns the same list") true
+      (Transcript.drawn live == first)
+  in
+  let applied = ref [] in
+  List.iter
+    (fun delta ->
+      Transcript.apply ~now:origin live delta;
+      applied := !applied @ [ delta ];
+      same "after an event" (replay !applied))
+    deltas;
+  (* The mutators that are not events. Each builds its reference by the same
+     call on a replayed transcript. *)
+  let reference = replay deltas in
+  let outcome transcript =
+    ignore
+      (Transcript.note_tool_outcome transcript ~execution_id:"exec-c1"
+         ~outcome:Transcript.Returned ~duration:(Some "1.5s")
+       : bool)
+  in
+  outcome live;
+  outcome reference;
+  same "after a recorded tool outcome" reference;
+  let skill = missing_skill_activity () in
+  Transcript.note_skill_activity live skill;
+  Transcript.note_skill_activity reference skill;
+  same "after a noted skill delivery" reference
+;;
+
 let test_text_and_thinking_accumulate () =
   let t = fresh () in
   feed t
@@ -2187,5 +2241,7 @@ let () =
             test_new_attempt_does_not_inherit_previous_runtime
         ; test_case "drawn items carry superseded runtime id" `Quick
             test_drawn_items_carry_superseded_runtime_id
+        ; test_case "drawn follows every mutation of the transcript" `Quick
+            test_drawn_follows_every_mutation_of_the_transcript
         ] )
     ]

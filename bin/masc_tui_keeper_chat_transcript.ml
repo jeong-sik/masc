@@ -206,6 +206,32 @@ type model_signal =
       (* the last result handed back to the model, by tool name; nothing
          since. The model has the result and owes the next token. *)
 
+type drawn =
+  | Drawn_thinking of string list
+  | Drawn_skill of skill_activity list
+  | Drawn_tools of tool_block
+  | Drawn_text of string
+  | Drawn_reply of string
+  | Drawn_status of string
+  | Drawn_error of string
+
+type drawn_origin =
+  | Text_stretch of int
+  | Thinking_stretch of int
+  | Tool_stretch of int
+  | Unstreamed_skills
+  | Reply_of_segment of int
+  | Error_of_segment of int
+
+type drawn_item =
+  { origin : drawn_origin
+  ; at : float option
+  ; segment : int
+  ; superseded : int option
+  ; superseded_runtime_id : string option
+  ; drawn : drawn
+  }
+
 type t =
   { keeper_name : string
   ; source : Masc_tui_keeper_chat_log.journal_source
@@ -323,6 +349,10 @@ type t =
   ; mutable revision : int
         (* Bumped by every mutation: the memo key for anything drawn from
            this transcript. *)
+  ; mutable drawn_cache : (int * drawn_item list) option
+        (* [drawn]'s answer and the revision it was computed at. [drawn]
+           reads this transcript and nothing else, so it is the same list
+           until a mutation bumps the revision. *)
   }
 
 let create_for_source ~keeper_name ~source ~started_at =
@@ -365,6 +395,7 @@ let create_for_source ~keeper_name ~source ~started_at =
   ; settled_at = None
   ; noted_skills = []
   ; revision = 0
+  ; drawn_cache = None
   }
 
 let revision t = t.revision
@@ -2537,32 +2568,6 @@ let turn_status_text ~reply ~turn_ref (outcome : Masc.Keeper_turn_outcome.t) =
       Printf.sprintf "Turn completed without a visible reply (turn %s)" turn_ref
 ;;
 
-type drawn =
-  | Drawn_thinking of string list
-  | Drawn_skill of skill_activity list
-  | Drawn_tools of tool_block
-  | Drawn_text of string
-  | Drawn_reply of string
-  | Drawn_status of string
-  | Drawn_error of string
-
-type drawn_origin =
-  | Text_stretch of int
-  | Thinking_stretch of int
-  | Tool_stretch of int
-  | Unstreamed_skills
-  | Reply_of_segment of int
-  | Error_of_segment of int
-
-type drawn_item =
-  { origin : drawn_origin
-  ; at : float option
-  ; segment : int
-  ; superseded : int option
-  ; superseded_runtime_id : string option
-  ; drawn : drawn
-  }
-
 (* The drawn items with each noted delivery record standing over the skill
    item the trail derived from the same read call, and, apart, the noted
    records no skill item carries: reads whose call the trail never saw -- a
@@ -2646,7 +2651,7 @@ type drawn_projection =
   | Projected_item of drawn_item * int option
   | Projected_response_boundary
 
-let drawn t =
+let compute_drawn t =
   let item ?(stream_scope=None) ~segment ~origin ~at drawn =
     [Projected_item
        ({ origin; at = Some at; segment; superseded = None; superseded_runtime_id = None; drawn }, stream_scope)] in
@@ -2793,3 +2798,14 @@ let drawn t =
           ; drawn = Drawn_error (safe_block message)
           } ]
 ;;
+
+(* The same list until a mutation bumps the revision: [compute_drawn] reads
+   this transcript and nothing else, and every public mutator bumps. Several
+   readers ask for it in one frame, for every held log. *)
+let drawn t =
+  match t.drawn_cache with
+  | Some (revision, items) when revision = t.revision -> items
+  | Some _ | None ->
+    let items = compute_drawn t in
+    t.drawn_cache <- Some (t.revision, items);
+    items

@@ -2203,6 +2203,49 @@ let rec shared_layout_entry_prefix ~refresh_owner reversed old_visible old_entri
 
 ;;
 
+(* A page of older rows lands in front of the conversation. Every row that
+   was there keeps its record, its moment and its edge, and moves down by the
+   page's length: the only thing in its entry that names the position is the
+   index baked into [markdown_source]. The old rows are found at the first
+   position of the new list holding the old head's record, and carried over
+   with that index shifted, so the page's own rows are the only ones drawn
+   again. [None] when the head is not in the new list, or sits at its head
+   (the positional prefix walk already covers that). *)
+let reindex_entry ~shift (entry : Message_layout.entry) =
+  match entry.markdown_source with
+  | Message_layout.Markdown_stable ({ entry_index; _ } as source) ->
+      { entry with
+        markdown_source =
+          Message_layout.Markdown_stable
+            { source with entry_index = entry_index + shift } }
+  | Message_layout.Markdown_growing _ | Message_layout.Markdown_streaming -> entry
+
+let shifted_entry_prefix ~refresh_owner old_visible old_entries new_visible =
+  match old_visible with
+  | [] -> None
+  | (head, _, _) :: _ ->
+      let rec seek skipped = function
+        | [] -> None
+        | (message, _, _) :: _ as rest when message == head -> Some (skipped, rest)
+        | _ :: rest -> seek (skipped + 1) rest
+      in
+      (match seek 0 new_visible with
+       | None | Some (0, _) -> None
+       | Some (skipped, rest) ->
+           let shared, remaining =
+             shared_layout_entry_prefix ~refresh_owner [] old_visible old_entries
+               rest
+           in
+           (match shared with
+            | [] -> None
+            | _ :: _ ->
+                Some (skipped, List.map (reindex_entry ~shift:skipped) shared,
+                      remaining)))
+
+let rec take_rows count = function
+  | row :: rest when count > 0 -> row :: take_rows (count - 1) rest
+  | _ -> []
+
 let keeper_message_layout_entries ?messages (state : state) ~keeper_name
     ~chat_cols =
   let messages =
@@ -2265,9 +2308,25 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
         | [] when not !owner_changed
                   && List.length prefix = List.length memo.lem_entries -> memo.lem_entries
         | [] -> prefix
-        | _ when suffix == visible_entries ->
-            compute_keeper_message_layout_entries state ~keeper_name ~request_owners
-              ~chat_cols ~start_index:0 visible_entries
+        | _ when suffix == visible_entries -> (
+            match
+              shifted_entry_prefix ~refresh_owner memo.lem_visible_entries
+                memo.lem_entries visible_entries
+            with
+            | None ->
+                compute_keeper_message_layout_entries state ~keeper_name
+                  ~request_owners ~chat_cols ~start_index:0 visible_entries
+            | Some (skipped, shared, remaining) ->
+                let compute ~start_index rows =
+                  match rows with
+                  | [] -> []
+                  | _ :: _ ->
+                      compute_keeper_message_layout_entries state ~keeper_name
+                        ~request_owners ~chat_cols ~start_index rows
+                in
+                compute ~start_index:0 (take_rows skipped visible_entries)
+                @ shared
+                @ compute ~start_index:(skipped + List.length shared) remaining)
         | _ ->
             prefix
             @ compute_keeper_message_layout_entries state ~keeper_name ~request_owners

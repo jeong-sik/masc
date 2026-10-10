@@ -4319,6 +4319,50 @@ let test_batch_watchers_render_one_shared_settled_turn () =
     "unrelated-request" (Tui_types.turn_log_execution_id invalid)
 ;;
 
+let test_older_page_keeps_the_entries_it_moved_down () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous = Masc_tui_ansi.get_terminal_size () in
+  let set_size size = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+      cache ~probe:(fun () -> Some size)) in
+  Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
+    set_size (65, 140);
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+    state.msg_target_keeper_name <- Some "alpha";
+    state.msg_origin_display <- Masc_tui_message_layout.Origin_inline;
+    state.msg_loaded_keeper <- Some "alpha";
+    let row i =
+      chat_entry ~request_id:(Printf.sprintf "req-%03d" (i / 2))
+        ~role:(if i mod 2 = 0
+               then Tui_types.Message_user (Tui_types.Sent_by_operator {surface=None})
+               else Tui_types.Message_keeper)
+        ~text:(Printf.sprintf "row %d" i) ~at:(100. +. float_of_int i) () in
+    let newer = List.init 20 (fun i -> row (i + 10)) in
+    let older = List.init 10 row in
+    let layouts () = Masc_tui_render_chat.keeper_message_layout_entries state
+        ~keeper_name:"alpha" ~chat_cols:140 in
+    state.msg_loaded <- newer;
+    let before = layouts () in
+    check int "newer rows alone" 20 (List.length before);
+    state.msg_loaded <- older @ newer;
+    let shifted = layouts () in
+    (* Another width forces a full recompute; asking for the first width again
+       recomputes once more, with no entry to carry. *)
+    ignore (Masc_tui_render_chat.keeper_message_layout_entries state
+              ~keeper_name:"alpha" ~chat_cols:141);
+    let fresh = layouts () in
+    check int "page rows plus the rows it moved down" 30 (List.length shifted);
+    check bool "shifted entries equal a full recompute" true (shifted = fresh);
+    check bool "the full recompute shares nothing with the shifted list" false
+      (shifted == fresh);
+    let moved = List.filteri (fun i _ -> i >= 10) shifted in
+    List.iter2
+      (fun (old_entry : Masc_tui_message_layout.entry)
+           (entry : Masc_tui_message_layout.entry) ->
+        check string "body is carried over" old_entry.body entry.body)
+      before moved)
+
 let test_batch_reply_follows_all_original_inputs () =
   let cache = Masc_tui_ansi.terminal_size_cache in
   let previous = Masc_tui_ansi.get_terminal_size () in
@@ -5167,6 +5211,7 @@ let () =
         ; test_case "history and renderer share inflight candidates" `Quick
             test_history_and_renderer_share_all_inflight_candidates
         ; test_case "batch watchers render one shared turn" `Quick test_batch_watchers_render_one_shared_settled_turn
+        ; test_case "older page keeps the entries it moved down" `Quick test_older_page_keeps_the_entries_it_moved_down
         ; test_case "batch reply follows all original inputs" `Quick test_batch_reply_follows_all_original_inputs
         ; test_case "observed checkpoint retains earlier output" `Quick test_observed_checkpoint_retains_earlier_output
         ; test_case "every request of a held batch is held for journal reads" `Quick

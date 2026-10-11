@@ -7516,7 +7516,7 @@ type state = {
      arrives before the read returns does not start a second one. *)
   mutable msg_journal_inflight: journal_key list;
   mutable msg_native_tasks: (string * Masc_tui_native_tasks.t) list;
-  mutable msg_native_tasks_inflight: string list;
+  mutable msg_native_tasks_inflight: (string * Masc_tui_native_tasks.read_mode) list;
   mutable msg_native_tasks_audit_pending: string list;
   mutable msg_child_content: (string * Masc_tui_child_content.t) list;
   mutable msg_child_content_inflight: (string * Masc_tui_child_content.read_mode) list;
@@ -7682,6 +7682,13 @@ let suspend_workspace_readings state =
   state.workspace_read_authority <- ref ();
   (* Retired completions cannot release these slots. Keep observations and
      explicit audit intent for a confirmed read in the successor epoch. *)
+  List.iter (fun (keeper_name, mode) ->
+    match mode with
+    | Masc_tui_native_tasks.Poll -> ()
+    | Audit ->
+        if not (List.mem keeper_name state.msg_native_tasks_audit_pending) then
+          state.msg_native_tasks_audit_pending <- keeper_name :: state.msg_native_tasks_audit_pending)
+    state.msg_native_tasks_inflight;
   state.msg_native_tasks_inflight <- [];
   List.iter (fun (keeper_name, mode) ->
     match mode with

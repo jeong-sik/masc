@@ -967,9 +967,9 @@ export function applyKeeperStreamEvent(
         const toolEntry = (keeperThreads.value[keeperName] ?? [])
           .find(entry => entry.id === toolOccurrenceId)
         if (!toolEntry) return 'KEEPER_TOOL_RESULT_READY names no streamed server occurrence'
-        if (toolEntry.executionId === executionId) return null
         const executionOwner = (keeperThreads.value[keeperName] ?? []).find(entry => (
           entry.role === 'tool'
+          && entry.id !== toolEntry.id
           && sameToolParent((keeperThreads.value[keeperName] ?? []).find(parent => parent.id === assistantEntryId), entry)
           && entry.executionId === executionId
         ))

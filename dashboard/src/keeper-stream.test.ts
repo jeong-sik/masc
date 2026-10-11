@@ -244,6 +244,21 @@ describe('Keeper operation stream projection', () => {
     ])
   })
 
+  it('rejects contradictory provider correlation on an already bound result replay', () => {
+    assistantEntry('result-replay-validation')
+    const source = { kind: 'operation' as const, operationId: 'result-replay-validation' }
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_START', ...toolOccurrence(), toolCallName: 'Read', toolCallId: 'provider-a' }, source)
+    const result: KeeperChatStreamEvent = { type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY',
+      value: { ...toolOccurrence(), executionId: 'same-execution', toolCallId: 'provider-a' } }
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', result, source)).toBeNull()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', result, source)).toBeNull()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', { ...result,
+      value: { ...result.value, toolCallId: 'provider-b' } }, source)).toContain('provider correlation conflicts')
+    expect(keeperThreads.value.sangsu.filter(row => row.role === 'tool')).toMatchObject([
+      { executionId: 'same-execution', toolCallId: 'provider-a' },
+    ])
+  })
+
   it.each([false, true])('binds history before first result unless provider correlation conflicts (conflict=%s)', conflict => {
     const operationId = 'history-before-result'
     assistantEntry(operationId)

@@ -433,8 +433,8 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
   }, [msgs.length, streaming?.shown, keeper.id])
 
   const doSend = (text?: string) => {
-    const v = (text !== undefined ? text : val).trim()
-    if (!v) return
+    const v = text !== undefined ? text : val
+    if (!v.trim()) return
     dock.send(v, keeper, ctx)
     setVal('')
     if (taRef.current) taRef.current.style.height = 'auto'

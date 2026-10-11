@@ -10,9 +10,11 @@ import { DASHBOARD_NAV_ITEMS } from '../config/navigation'
 import { isSubmitEnter } from '../lib/keyboard'
 import { streamKeeperMessage } from '../api/keeper'
 import { newKeeperChatOperationId } from '../keeper-delivery-provenance'
-import { currentDashboardActor } from '../api/core'
+import { currentDashboardActor, currentStoredTokenRevision } from '../api/core'
+import { assertCurrentKeeperStreamAdmission, KeeperStreamAuthenticationSupersededError,
+  type KeeperStreamAdmission } from '../api/keeper-stream-admission'
 import { KeeperBadge } from './keeper-badge'
-import type { Keeper } from '../types'
+import type { Keeper, KeeperConversationDelivery } from '../types'
 import { useIsMobile } from '../hooks/use-is-mobile'
 
 interface DockState {
@@ -34,10 +36,13 @@ interface DockMessage {
   role: 'user' | 'assistant'
   ts: string
   text: string
+  delivery?: KeeperConversationDelivery
+  error?: string | null
   sug?: string[]
 }
 
 interface DockStreaming {
+  readonly operationId: string
   keeperId: string
   shown: string
   full: string
@@ -259,18 +264,28 @@ export function useCopilotDock() {
       const kid = keeper.id
       dockThreads.value = {
         ...dockThreads.value,
-        [kid]: [...(dockThreads.value[kid] ?? []), { role: 'user', ts: nowHM(), text: text.trim() }],
+        [kid]: [...(dockThreads.value[kid] ?? []), { role: 'user', ts: nowHM(), text }],
       }
       const abortController = new AbortController()
-      dockStreaming.value = { keeperId: kid, shown: '', full: '', sug: [] }
+      const operationId = newKeeperChatOperationId()
+      dockStreaming.value = { operationId, keeperId: kid, shown: '', full: '', sug: [] }
+      const ownsStream = () => dockStreaming.value?.operationId === operationId
+      let admission: KeeperStreamAdmission = Object.freeze({ keeperName: kid, operationId,
+        authRevision: currentStoredTokenRevision() })
       let replyText = ''
-      streamKeeperMessage(kid, text.trim(), {
-        operationId: newKeeperChatOperationId(),
+      streamKeeperMessage(kid, text, {
+        operationId,
         signal: abortController.signal,
         channel: 'copilot',
-        channelWorkspaceId: currentDashboardActor(),
+        resolveChannelWorkspaceId: currentDashboardActor,
         surfaceContext: ctx,
+        onAdmission: next => {
+          assertCurrentKeeperStreamAdmission(next)
+          admission = next
+        },
         onEvent: (event) => {
+          assertCurrentKeeperStreamAdmission(admission)
+          if (!ownsStream()) return
           if (event.type === 'TEXT_MESSAGE_CONTENT' && typeof event.delta === 'string') {
             replyText += event.delta
             const current = dockStreaming.value
@@ -281,19 +296,25 @@ export function useCopilotDock() {
         },
       })
         .then((outcome) => {
+          if (!ownsStream()) return
+          assertCurrentKeeperStreamAdmission(admission)
           dockStreaming.value = null
-          const finalText = replyText.trim() || (outcome.terminal ? '(empty reply)' : '(stream ended unexpectedly)')
           dockThreads.value = {
             ...dockThreads.value,
-            [kid]: [...(dockThreads.value[kid] ?? []), { role: 'assistant', ts: nowHM(), text: finalText }],
+            [kid]: [...(dockThreads.value[kid] ?? []), { role: 'assistant', ts: nowHM(), text: replyText,
+              delivery: outcome.terminal ? 'delivered' : 'interrupted' }],
           }
         })
         .catch((err) => {
+          if (!ownsStream()) return
           dockStreaming.value = null
+          const withdrawn = err instanceof KeeperStreamAuthenticationSupersededError
+            || admission.authRevision !== currentStoredTokenRevision()
           const message = err instanceof Error ? err.message : 'Keeper stream failed'
           dockThreads.value = {
             ...dockThreads.value,
-            [kid]: [...(dockThreads.value[kid] ?? []), { role: 'assistant', ts: nowHM(), text: `Error: ${message}` }],
+            [kid]: [...(dockThreads.value[kid] ?? []), { role: 'assistant', ts: nowHM(), text: replyText,
+              delivery: withdrawn ? 'interrupted' : 'error', error: withdrawn ? null : message }],
           }
         })
     },
@@ -363,8 +384,11 @@ function DockMessageRow({ m, keeper, onPick }: { m: DockMessage; keeper: DockKee
         <div class="dmsg-hd">
           <span class="who">${isUser ? 'operator' : keeper.kr}</span>
           <span class="ts mono">${m.ts}</span>
+          ${m.delivery === 'interrupted' ? html`<span class="ts">응답 관측 중단</span>` : null}
+          ${m.delivery === 'delivered' && !m.text.trim() ? html`<span class="ts">표시할 본문 없음</span>` : null}
         </div>
         <div class=${`dbubble ${isUser ? 'user' : ''}`}><${Para} text=${m.text} /></div>
+        ${m.error ? html`<div role="alert">${m.error}</div>` : null}
         ${!isUser && m.sug
           ? html`
               <div class="dsug">

@@ -396,7 +396,7 @@ describe('streamKeeperMessage', () => {
         events.push(event.type)
       },
       channel: 'copilot',
-      channelWorkspaceId: 'session-7',
+      resolveChannelWorkspaceId: () => 'session-7',
       turnInstructions: 'focus on overview',
       surfaceContext: {
         label: 'Overview',

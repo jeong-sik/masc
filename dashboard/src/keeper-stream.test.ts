@@ -2363,6 +2363,40 @@ it('preserves canonical delivery through delayed historical operation reasoning 
   }
 })
 
+it('recovers historical operation Saying at a tool boundary without copying the final tail', () => {
+  keeperThreads.value = {}
+  _resetLiveSendRequestOwnersForTests()
+  _resetKeeperStreamBuffersForTests()
+  _clearTrackedKeeperChatOperationsForTests()
+  const operationId = 'historical-saying'
+  const owner = { content_generation: 1, stream_scope: 0 }
+  upsertTrackedKeeperChatOperation({ operationId, keeperName: 'sangsu', message: 'request', submittedAt: 1 })
+  appendThreadEntry('sangsu', { id: operationId, role: 'assistant', source: 'direct_assistant', label: 'sangsu',
+    text: 'canonical answer', delivery: 'history', streamState: null,
+    deliveryProvenance: operationDeliveryProvenance(operationId, 'terminal_result'), details: null })
+  const send = (sequence: number, event: KeeperChatStreamEvent) =>
+    applyKeeperOperationTurnEvent('sangsu', { operationId, sequence, event })
+  send(0, { type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_START', value: owner })
+  send(1, { type: 'TEXT_MESSAGE_CONTENT', delta: 'checking ', textResponse: owner })
+  send(2, { type: 'TEXT_MESSAGE_CONTENT', delta: 'the result', textResponse: owner })
+  const saved = trackedKeeperChatOperationsForKeeper('sangsu')[0]?.assistantDraft
+  expect(saved?.producerSayingReplay?.text).toBe('checking the result')
+  _resetKeeperStreamBuffersForTests()
+  keeperThreads.value = { sangsu: [{ ...keeperThreads.value.sangsu![0]!,
+    producerSayingReplay: saved?.producerSayingReplay, producerTraceBoundary: saved?.producerTraceBoundary,
+    responseState: saved?.responseState }] }
+  send(3, { type: 'TOOL_CALL_START', toolCallId: 'tool', toolCallName: 'Read', ...toolOccurrence() })
+  send(4, { type: 'TEXT_MESSAGE_CONTENT', delta: 'canonical answer', textResponse: owner })
+  send(5, { type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA', value: { index: 0, delta: '', response: owner } })
+  send(6, { type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA', value: { index: 0, response: owner } })
+  send(7, { type: 'RUN_FINISHED' })
+  send(8, { type: 'TEXT_MESSAGE_CONTENT', delta: 'late tail', textResponse: owner })
+  const draft = trackedKeeperChatOperationsForKeeper('sangsu')[0]?.assistantDraft
+  expect(draft).toMatchObject({ text: 'canonical answer', delivery: 'history', streamState: null,
+    responseState: { phase: 'terminal', lastSequence: 8 } })
+  expect(draft?.traceSteps?.filter(step => step.kind === 'progress').map(step => step.text)).toEqual(['checking the result'])
+})
+
 it('isolates persisted metadata for interleaved operations sharing provider identifiers', () => {
   keeperThreads.value = {}
   _resetLiveSendRequestOwnersForTests()

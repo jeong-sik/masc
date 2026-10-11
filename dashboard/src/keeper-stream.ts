@@ -1489,8 +1489,8 @@ export function applyKeeperStreamEvent(
               }
             }
             const text = rawText
-            const retainedBlocks = (entry.blocks ?? []).filter(block => block.t !== 'status')
-            const blocks = retainedBlocks.length ? retainedBlocks : parseTextToChatBlocks(text)
+            const retainedBlocks = (entry.blocks ?? []).filter(block => block.t !== 'status' && block.t !== 'p')
+            const blocks = [...retainedBlocks, ...parseTextToChatBlocks(text)]
             return {
               ...entry,
               details: mergedDetails,

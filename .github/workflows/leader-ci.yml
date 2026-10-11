@@ -133,6 +133,12 @@ jobs:
     if: always()
     runs-on: ubuntu-24.04
     steps:
+      - name: Download verified selection
+        uses: actions/download-artifact@v7
+        with:
+          name: approved-selection-${{ inputs.candidate }}-${{ github.run_attempt }}
+          path: selection-evidence
+        continue-on-error: true
       - name: Record scope and results
         env:
           SCOPES: ${{ toJSON(inputs) }}
@@ -184,12 +190,22 @@ jobs:
           # if: always()), so the pending pin is resolved either way: a
           # failed or cancelled run must not leave a pending status that
           # would block merging forever.
+          members_path = Path('selection-evidence') / 'verified-selection.json'
+          if members_path.exists():
+              members = json.loads(members_path.read_text())['members']
+          else:
+              # The selection evidence download can fail (artifact expiry,
+              # lost run). Never leave a pending status pinned forever: a
+              # run whose member list is unrecoverable can only settle to
+              # failure via an explicit recheck, so unpin with failure only
+              # when this job itself determined the run outcome is final.
+              # Prefer failing loudly instead of guessing heads here.
+              raise SystemExit('verified-selection.json unavailable; statuses not settled')
           receipt_path = Path('leader-ci-results.json')
           if receipt_path.exists():
               checks_passed = json.loads(receipt_path.read_text())['checks_passed']
           else:
               checks_passed = False
-          members = json.loads(Path('verified-selection.json').read_text())['members']
           token = os.environ['GH_TOKEN']
           repo = os.environ['REPOSITORY']
           state = 'success' if checks_passed else 'failure'

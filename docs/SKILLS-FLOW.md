@@ -110,9 +110,12 @@ sequenceDiagram
 `Keeper_task_skill_turn.resolve_observations`로 **보유한 모든 task**(current + 나머지
 Claimed/InProgress, task-364 수리)가 지명한 exact reference를 frozen snapshot에서 해석한다.
 `prepare_agent_setup`(`keeper_run_tools_setup.ml`)은 그 결과와 snapshot을 받아 투영하고,
-해석이 오류면 턴을 실패시킨다. snapshot에서
-해소되지 않는 reference만 typed admission error다. Profile 이름 선택에서 제외된 알려진
-Task Skill은 실행 projection과 prompt에서 unavailable이며 admission 전체를 막지 않는다.
+설정이 정상인 snapshot에서 해소되지 않는 reference(pin한 Skill을 고치거나 지운 경우)와
+catalog가 투영하지 못하는 entry는 그 Task의 unavailable row이며 턴을 막지 않는다.
+이유(`error_code`, `detail`)는 prompt와 로그에 보인다. Skill 설정이 거절됐거나 읽히지 않은
+snapshot은 entry가 없어서 모든 pin이 "삭제됨"으로 보이므로, pin이 하나라도 있으면
+`Skill_config_rejected` / `Skill_config_unreadable`로 턴을 실패시킨다. Profile 이름 선택에서 제외된 알려진
+Task Skill도 실행 projection과 prompt에서 unavailable이며 admission 전체를 막지 않는다.
 지시 본문은 `keeper_skill`이 직접 서빙하므로 `Read`와 무관하다. 통과하면
 `Keeper_tool_composition_surface.make_tools`가:
 

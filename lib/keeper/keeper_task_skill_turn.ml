@@ -1,9 +1,7 @@
 type error =
   | Tool_surface_unavailable of string
-  | Reference_resolution_failed of
-      { reference : Skill_reference.t
-      ; error : Skill_catalog_snapshot.reference_resolution_error
-      }
+  | Skill_config_rejected of { diagnostics : Skill_source_config.diagnostic list }
+  | Skill_config_unreadable of { detail : string }
 
 type selected =
   { reference : Skill_reference.t
@@ -12,9 +10,13 @@ type selected =
   ; task_ids : string list
   }
 
+type unavailable_reason =
+  | Catalog_entry_unprojectable of Keeper_skill_catalog.error
+  | Pin_unresolved of Skill_catalog_snapshot.reference_resolution_error
+
 type unprojectable =
   { reference : Skill_reference.t
-  ; error : Keeper_skill_catalog.error
+  ; reason : unavailable_reason
   ; task_ids : string list
   }
 
@@ -31,19 +33,41 @@ type partition =
 
 type Agent_core.Error.carrier += Task_skill_resolution_error of error
 
-(* An unavailable Tool authority or a reference absent from the frozen snapshot
-   stops setup. A held
-   entry the catalog cannot project is a known Skill that is unavailable this
-   turn (docs/SKILLS-FLOW.md section 2a); today that is an instruction body
-   over the inline read boundary (#39138). Failing setup for it would stop
-   every turn of a Keeper whose current or held Task pins one, including turns
-   about other Tasks. *)
+(* A snapshot whose Skill configuration was rejected or unreadable holds no
+   entries, so every pin would read as deleted. That is a configuration
+   problem, not a stale pin, and it stops setup: the Task's procedure is not
+   known to be unavailable, it is unknown. The service publishes such a
+   snapshot over the last good one and a workspace without a published
+   revision is captured as unreadable, so it does reach turns. With no
+   reference there is nothing to misreport and no failure. *)
+let require_configured snapshot references =
+  match references, Skill_catalog_snapshot.config_state snapshot with
+  | [], _ -> Ok ()
+  | _ :: _, Skill_catalog_snapshot.Configured _ -> Ok ()
+  | _ :: _, Config_rejected { diagnostics; _ } ->
+    Error (Skill_config_rejected { diagnostics })
+  | _ :: _, Config_unreadable { detail } -> Error (Skill_config_unreadable { detail })
+;;
+
+(* Against a configured snapshot, a pinned reference it cannot give back is a
+   Skill that is unavailable this turn, never a setup failure
+   (docs/SKILLS-FLOW.md section 2a). Two cases: the snapshot holds the identity but the catalog cannot
+   project the entry (an instruction body over the inline read boundary,
+   #39138), and the pin no longer resolves because the Skill was edited or
+   deleted after the Task pinned it. Failing setup for either would stop every
+   turn of a Keeper whose current or held Task pins one, including turns about
+   other Tasks, until that Task is released: no path re-pins a Task. *)
 let resolve_with_task_ids ?descriptors ~snapshot ~task_ids references =
   let rec loop resolved unprojectable = function
     | [] -> Ok { selected = List.rev resolved; unprojectable = List.rev unprojectable; descriptor_authority = descriptors }
     | reference :: rest ->
       (match Skill_catalog_snapshot.resolve_reference snapshot reference with
-       | Error error -> Error (Reference_resolution_failed { reference; error })
+       | Error resolution ->
+         loop
+           resolved
+           ({ reference; reason = Pin_unresolved resolution; task_ids }
+            :: unprojectable)
+           rest
        | Ok entry ->
          (match Keeper_skill_catalog.project_entry_or_fallback ?descriptors snapshot entry with
           | Keeper_skill_catalog.Projected skill ->
@@ -59,10 +83,15 @@ let resolve_with_task_ids ?descriptors ~snapshot ~task_ids references =
           | Keeper_skill_catalog.Entry_unavailable error ->
             loop
               resolved
-              ({ reference; error; task_ids } :: unprojectable)
+              ({ reference
+               ; reason = Catalog_entry_unprojectable error
+               ; task_ids
+               }
+               :: unprojectable)
               rest))
   in
-  loop [] [] references
+  Result.bind (require_configured snapshot references) (fun () ->
+    loop [] [] references)
 ;;
 
 let resolve ~snapshot references =
@@ -166,6 +195,26 @@ let resolve_live_observations ~config ~keeper_name ~snapshot ~current_task ~held
     (with_descriptors ~descriptors ~snapshot)
 ;;
 
+let unavailable_reason_code = function
+  | Catalog_entry_unprojectable error -> Keeper_skill_catalog.error_code error
+  | Pin_unresolved (Skill_catalog_snapshot.Identity_not_found _) ->
+    "task_skill_identity_not_found"
+  | Pin_unresolved (Skill_catalog_snapshot.Content_revision_mismatch _) ->
+    "task_skill_content_revision_mismatch"
+;;
+
+let unavailable_reason_to_string = function
+  | Catalog_entry_unprojectable error -> Keeper_skill_catalog.error_to_string error
+  | Pin_unresolved (Skill_catalog_snapshot.Identity_not_found _) ->
+    "the Skill is absent from the frozen snapshot; it was deleted or renamed after the Task pinned it"
+  | Pin_unresolved
+      (Skill_catalog_snapshot.Content_revision_mismatch { requested; observed; _ }) ->
+    Printf.sprintf
+      "the Skill content changed after the Task pinned it: pinned=%s current=%s"
+      (Skill_reference.content_revision_to_string requested)
+      (Skill_reference.content_revision_to_string observed)
+;;
+
 let unprojectable_to_string (row : unprojectable) =
   let pinned_by =
     match row.task_ids with
@@ -176,49 +225,31 @@ let unprojectable_to_string (row : unprojectable) =
     "Task Skill %s is unavailable%s: %s"
     (Skill_reference.to_yojson row.reference |> Yojson.Safe.to_string)
     pinned_by
-    (Keeper_skill_catalog.error_to_string row.error)
+    (unavailable_reason_to_string row.reason)
 ;;
 
 let unprojectable_to_yojson (row : unprojectable) =
   `Assoc
     [ "reference", Skill_reference.to_yojson row.reference
     ; "task_ids", `List (List.map (fun task_id -> `String task_id) row.task_ids)
-    ; "error_code", `String (Keeper_skill_catalog.error_code row.error)
-    ; "detail", `String (Keeper_skill_catalog.error_to_string row.error)
+    ; "error_code", `String (unavailable_reason_code row.reason)
+    ; "detail", `String (unavailable_reason_to_string row.reason)
     ]
 ;;
 
 let error_code = function
   | Tool_surface_unavailable _ -> "lane_addon_surface_unavailable"
-  | Reference_resolution_failed
-      { error = Skill_catalog_snapshot.Identity_not_found _; _ } ->
-    "task_skill_identity_not_found"
-  | Reference_resolution_failed
-      { error = Skill_catalog_snapshot.Content_revision_mismatch _; _ } ->
-    "task_skill_content_revision_mismatch"
-;;
-
-let reference_json reference =
-  Skill_reference.to_yojson reference |> Yojson.Safe.to_string
+  | Skill_config_rejected _ -> "task_skill_config_rejected"
+  | Skill_config_unreadable _ -> "task_skill_config_unreadable"
 ;;
 
 let error_to_string = function
   | Tool_surface_unavailable detail -> "Lane Add-on tool surface unavailable: " ^ detail
-  | Reference_resolution_failed
-      { reference; error = Skill_catalog_snapshot.Identity_not_found _ } ->
-    Printf.sprintf "Task Skill identity is absent from the frozen snapshot: %s"
-      (reference_json reference)
-  | Reference_resolution_failed
-      { reference
-      ; error =
-          Skill_catalog_snapshot.Content_revision_mismatch
-            { requested; observed; _ }
-      } ->
-    Printf.sprintf
-      "Task Skill content revision does not match the frozen snapshot: reference=%s requested=%s observed=%s"
-      (reference_json reference)
-      (Skill_reference.content_revision_to_string requested)
-      (Skill_reference.content_revision_to_string observed)
+  | Skill_config_rejected { diagnostics } ->
+    "Skill configuration is rejected, so Task Skills cannot be resolved: "
+    ^ String.concat "; " (List.map Skill_source_config.diagnostic_to_string diagnostics)
+  | Skill_config_unreadable { detail } ->
+    "Skill configuration is unreadable, so Task Skills cannot be resolved: " ^ detail
 ;;
 
 let core_error error =
@@ -350,7 +381,9 @@ let exact_task_surfaces
          selection.unprojectable
          |> List.filter (fun (row : unprojectable) -> List.mem task_id row.task_ids)
          |> List.map (fun (row : unprojectable) ->
-              Keeper_skill_catalog.unprojectable_exact_surface row.reference row.error)
+              Keeper_skill_catalog.unprojectable_exact_surface
+                row.reference
+                ~diagnostic:(unavailable_reason_to_string row.reason))
        in
        task_id, Keeper_skill_catalog.exact_surfaces projection ~task @ unavailable)
     task_ids

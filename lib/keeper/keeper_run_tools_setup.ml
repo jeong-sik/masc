@@ -581,12 +581,13 @@ let prepare_agent_setup
   List.iter
     (fun (row : Keeper_task_skill_turn.unprojectable) ->
        Log.Keeper.warn
-         "Task Skill unavailable this turn for keeper=%s snapshot_revision=%s reference=%s task_ids=%s error=%s"
+         "Task Skill unavailable this turn for keeper=%s snapshot_revision=%s reference=%s task_ids=%s reason=%s error=%s"
          meta.name
          snapshot_rev
          (Skill_reference.to_yojson row.reference |> Yojson.Safe.to_string)
          (String.concat "," row.task_ids)
-         (Keeper_skill_catalog.error_to_string row.error))
+         (Keeper_task_skill_turn.unavailable_reason_code row.reason)
+         (Keeper_task_skill_turn.unavailable_reason_to_string row.reason))
     task_skill_selection.unprojectable;
   let capability_surface =
     Keeper_capability_surface.create_with_descriptors

@@ -120,7 +120,7 @@ type keeper_chat_event =
       }
   | Agent_core_content_block_stop of { index : int }
   | Model_content_activity of model_content_activity
-  | Agent_core_thinking_delta of { index : int; delta : string }
+  | Agent_core_thinking_delta of { index : int; delta : string; response : response_identity option }
   | Agent_core_thinking_signature_delta of { index : int; signature_bytes : int }
   | Agent_core_media_delta of
       { index : int
@@ -615,3 +615,9 @@ let response_identity_of_json = function
       let* response_scope = index "stream_scope" in
       Ok {response_generation; response_scope}
   | _ -> Error "response identity must be an object"
+
+let optional_response_identity_of_fields fields =
+  match List.filter (fun (key, _) -> key = "response") fields with
+  | [] -> Ok None
+  | [(_, value)] -> Result.map (fun owner -> Some owner) (response_identity_of_json value)
+  | _ -> Error "duplicate response identity"

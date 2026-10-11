@@ -85,7 +85,7 @@ let delta_to_string : Live.delta -> string = function
                (token_count usage.Live.cache_creation_input_tokens))
         (Option.fold ~none:"none" ~some:Agent_core.Types.stop_reason_to_string stop_reason)
   | Live.Text {text=text; _} -> "text(" ^ text ^ ")"
-  | Live.Thinking text -> "thinking(" ^ text ^ ")"
+  | Live.Thinking {text;_} -> "thinking(" ^ text ^ ")"
   | Live.Native_tool_started { occurrence; tool_name } ->
       Printf.sprintf "native_tool_started(%s,%s)" (occurrence_to_string occurrence)
         (Option.value ~default:"unnamed" tool_name)
@@ -422,7 +422,7 @@ let golden : E.keeper_chat_event list =
   ; E.Agent_core_content_block_start
       { index = 0; content_type = "thinking"; tool_call_id = None; tool_call_name = None }
   ; E.Text_message_start { message_id = "msg-1"; role = E.Assistant }
-  ; E.Agent_core_thinking_delta { index = 0; delta = "weighing it" }
+  ; E.Agent_core_thinking_delta {response=None; index = 0; delta = "weighing it" }
   ; E.Agent_core_thinking_signature_delta { index = 0; signature_bytes = 42 }
   ; E.Model_content_activity {content_generation=0; content_scope=0; content_index=0;
       content_provider_message_id=None; channel=E.Model_thinking; state=E.Content_observed}

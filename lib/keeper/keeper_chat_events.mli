@@ -161,7 +161,7 @@ type keeper_chat_event =
       }
   | Agent_core_content_block_stop of { index : int }
   | Model_content_activity of model_content_activity
-  | Agent_core_thinking_delta of { index : int; delta : string }
+  | Agent_core_thinking_delta of { index : int; delta : string; response : response_identity option }
   | Agent_core_thinking_signature_delta of { index : int; signature_bytes : int }
   | Agent_core_media_delta of
       { index : int
@@ -400,3 +400,7 @@ val publish_with_sequence : t -> keeper_chat_event -> int
     is an indivisible generation/scope pair; malformed or partial objects reject. *)
 val response_identity_to_json : response_identity -> Yojson.Safe.t
 val response_identity_of_json : Yojson.Safe.t -> (response_identity, string) result
+
+(** Absent response is explicitly unobserved; duplicate, null or malformed
+    supplied response fields reject instead of weakening ownership. *)
+val optional_response_identity_of_fields : (string * Yojson.Safe.t) list -> (response_identity option, string) result

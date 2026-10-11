@@ -1444,3 +1444,21 @@ describe('Keeper response details generation protocol', () => {
     expect(SSEMessageSchema.safeParse(event(value)).success).toBe(false)
   })
 })
+
+
+describe('Keeper thinking response ownership protocol', () => {
+  const event = (response: unknown) => ({
+    type: 'keeper_chat_operation_event', name: 'fixture', operation_id: 'kmsg-fixture',
+    ag_ui_event: { type: 'CUSTOM', threadId: 'keeper-consumer:fixture', runId: 'run-1',
+      name: 'KEEPER_THINKING_DELTA', value: { index: 0, delta: 'reason', response }, timestamp: 1712000000 },
+  })
+  it('retains complete response identity with thinking bytes', () => {
+    expect(SSEMessageSchema.safeParse(event({ content_generation: 7, stream_scope: 0 })).success).toBe(true)
+  })
+  it.each([null, {}, { content_generation: 7 },
+    { content_generation: 7, stream_scope: -1 },
+    { content_generation: 7, stream_scope: Number.MAX_SAFE_INTEGER + 1 },
+  ])('rejects malformed supplied thinking identity %j', value => {
+    expect(SSEMessageSchema.safeParse(event(value)).success).toBe(false)
+  })
+})

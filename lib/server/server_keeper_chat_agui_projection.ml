@@ -200,9 +200,10 @@ let project ~timestamp ~redact_text state event =
   | Agent_core_content_block_stop { index } ->
       state, Some (custom ~timestamp state Content_block_stop
                      (`Assoc [ "index", `Int index ]))
-  | Agent_core_thinking_delta { index; delta } ->
+  | Agent_core_thinking_delta { index; delta; response } ->
       state, Some (custom ~timestamp state Thinking_delta
-                     (`Assoc [ "index", `Int index; "delta", `String delta ]))
+                     (`Assoc ([ "index", `Int index; "delta", `String delta ]
+                       @ json_opt "response" (Option.map response_identity_to_json response))))
   | Agent_core_thinking_signature_delta { index; signature_bytes } ->
       state, Some (custom ~timestamp state Thinking_signature_delta
                      (`Assoc

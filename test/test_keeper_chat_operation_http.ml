@@ -92,7 +92,7 @@ let journal : L.journaled_event list =
   [ E.Run_started { run_id = "run-events"; thread_id = "keeper:alpha" }
   ; E.Text_message_start { message_id = "msg-events"; role = E.Assistant }
   ; E.Text_delta {text="one "; stream_scope=None}
-  ; E.Agent_core_thinking_delta { index = 0; delta = "private reasoning" }
+  ; E.Agent_core_thinking_delta {response=None; index = 0; delta = "private reasoning" }
   ; E.Text_delta {text="two"; stream_scope=None}
   ; E.Text_message_end
   ; E.Run_finished { run_id = "run-events" }
@@ -733,7 +733,7 @@ let test_http_journal_redacts_content_without_rewriting_native_identity () =
     let entries = [E.Native_tool_start native;
       E.Native_tool_progress (native,Runtime_native_tools.Heartbeat_reported {elapsed_seconds=30});
       E.Text_delta {text=body; stream_scope=None};
-      E.Agent_core_thinking_delta {index=0;delta=body};
+      E.Agent_core_thinking_delta {response=None;index=0;delta=body};
       E.Native_tool_progress (native,Runtime_native_tools.Message_reported {message=body});
       E.Native_tool_end (native,Runtime_native_tools.end_observed)]
       |> List.mapi (fun seq event -> {L.seq;ts=1_762_300_000. +. float_of_int seq;event}) in
@@ -754,7 +754,7 @@ let test_http_journal_redacts_content_without_rewriting_native_identity () =
       (match List.map (fun (entry:L.journaled_event) -> entry.event) served with
        | [E.Native_tool_start start;
           E.Native_tool_progress (progress,Runtime_native_tools.Heartbeat_reported {elapsed_seconds});
-          E.Text_delta {text=text; stream_scope=None}; E.Agent_core_thinking_delta {index=0;delta=thinking};
+          E.Text_delta {text=text; stream_scope=None}; E.Agent_core_thinking_delta {response=None;index=0;delta=thinking};
           E.Native_tool_progress (message,Runtime_native_tools.Message_reported {message=reported});
           E.Native_tool_end (ended,completion)] ->
            List.iter check_native [start;progress;message;ended];

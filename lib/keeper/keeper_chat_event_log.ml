@@ -252,8 +252,9 @@ let keeper_chat_event_to_json event =
     type_tag "model_content_activity" ["activity", model_content_activity_to_json activity]
   | Agent_core_content_block_stop { index } ->
     type_tag "agent_core_content_block_stop" [ "index", `Int index ]
-  | Agent_core_thinking_delta { index; delta } ->
-    type_tag "agent_core_thinking_delta" [ "index", `Int index; "delta", `String delta ]
+  | Agent_core_thinking_delta { index; delta; response } ->
+    type_tag "agent_core_thinking_delta" ([ "index", `Int index; "delta", `String delta ]
+      @ json_opt "response" (Option.map response_identity_to_json response))
   | Agent_core_thinking_signature_delta { index; signature_bytes } ->
     (* [signature_bytes] is a byte COUNT (int), not payload bytes. *)
     type_tag
@@ -502,9 +503,11 @@ let keeper_chat_event_of_json json =
     | "agent_core_content_block_stop" ->
       Ok (Agent_core_content_block_stop { index = json |> member "index" |> to_int })
     | "agent_core_thinking_delta" ->
+      let* response = optional_response_identity_of_fields (json |> to_assoc) in
       Ok
         (Agent_core_thinking_delta
-           { index = json |> member "index" |> to_int
+           { response
+           ; index = json |> member "index" |> to_int
            ; delta = json |> member "delta" |> to_string
            })
     | "agent_core_thinking_signature_delta" ->

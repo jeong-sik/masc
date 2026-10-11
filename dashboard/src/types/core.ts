@@ -1070,6 +1070,8 @@ export interface KeeperConversationEntry {
     | { readonly kind: 'conflicting'; readonly coordinates: readonly { readonly streamScope: number; readonly blockIndex: number }[] }
   /** Explicit parent for an observation that carried no delivery identity. */
   toolParentEntryId?: string
+  /** Disputed explicit parent associations retain their quarantine coverage. */
+  toolParentCandidates?: readonly string[]
   toolOccurrenceQuarantined?: true
   toolObservationAuthority?: 'unavailable'
   toolOwnerKey?: KeeperChatDeliveryKey

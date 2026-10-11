@@ -1,7 +1,9 @@
 import { useSignal } from '@preact/signals'
 import { html } from 'htm/preact'
-import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { AtSign, Megaphone, Mic, Paperclip, Send, Square, UserRound, X } from 'lucide-preact'
+import { currentStoredTokenRevision } from '../../api/core'
+import { storedTokenRevision } from '../../api/token-revision'
 import { broadcastReceiptMessage, currentDashboardActor, sendBroadcast } from '../../api'
 import { keepers as dashboardKeepers, refreshExecution } from '../../store'
 import {
@@ -169,13 +171,25 @@ interface ComposerV2Props {
   modeLabels?: Partial<Record<ComposerV2Mode, string>>
 }
 
-export function ComposerV2({
+export function ComposerV2(props: ComposerV2Props) {
+  const authRevision = storedTokenRevision.value
+  return html`<${ComposerV2Session} key=${authRevision} ...${props} authRevision=${authRevision} />`
+}
+
+function ComposerV2Session({
+  authRevision,
   workspaceId,
   mode: controlledMode,
   onModeChange,
   showModeSelector = true,
   modeLabels = {},
-}: ComposerV2Props) {
+}: ComposerV2Props & { authRevision: number }) {
+  const mounted = useRef(false)
+  useLayoutEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
+  const isCurrent = () => mounted.current && authRevision === currentStoredTokenRevision()
   const [internalMode, setInternalMode] = useState<ComposerV2Mode>(controlledMode ?? 'broadcast')
   const mode = controlledMode ?? internalMode
   const setMode = useCallback((next: ComposerV2Mode) => {
@@ -232,8 +246,8 @@ export function ComposerV2({
   const voiceContext = useRef({ workspace, mode, deliveryKeeper })
   voiceContext.current = { workspace, mode, deliveryKeeper }
   const voice = useVoiceInput({
-    onAdmitted: () => !submitting.value && !operatorActionBusy.value,
-    isCurrent: () => voiceContext.current.workspace === workspace
+    onAdmitted: () => isCurrent() && !submitting.value && !operatorActionBusy.value,
+    isCurrent: () => isCurrent() && voiceContext.current.workspace === workspace
       && voiceContext.current.mode === mode
       && (mode !== 'dm' || voiceContext.current.deliveryKeeper === deliveryKeeper),
     onTranscribed: (text) => {
@@ -345,6 +359,7 @@ export function ComposerV2({
   }
 
   async function submit(): Promise<void> {
+    if (!isCurrent()) return
     const sentDraft = composerDraft.value
     const recipient = resolveOperatorMentionContext(sentDraft.text, sentDraft.keeperTarget, mode === 'dm', operatorSnapshot.value?.keepers ?? [], dashboardKeepers.value)
     if (submitting.value || operatorActionBusy.value || voice.state !== 'idle'
@@ -374,15 +389,18 @@ export function ComposerV2({
         })
       } else {
         const receipt = await sendBroadcast(currentDashboardActor(), request.compose.body)
+        if (!isCurrent()) return
         if (!receipt.ok) {
           resetDraft(sentDraft, keeperId)
           showToast(broadcastReceiptMessage(receipt), 'warning')
           return
         }
       }
+      if (!isCurrent()) return
       resetDraft(sentDraft, keeperId)
       showToast('Message sent.', 'success')
     } catch (err) {
+      if (!isCurrent()) return
       const message = err instanceof Error ? err.message : 'Message send failed.'
       setSubmitError(message)
       showToast(message, 'error')

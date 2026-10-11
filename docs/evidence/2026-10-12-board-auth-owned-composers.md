@@ -1,0 +1,11 @@
+# Board component-local credential ownership
+
+Actual component DOM fixtures reproduced four parent failures: ComposerV2 retained a previous credential session draft; its retained native send handler invoked transport immediately after a credential change before rerender; a deferred previous-session broadcast receipt emitted success into the new session; desktop Board post input also survived the credential switch. RED output: /tmp/board-auth-red-20261012.log. Credentials in fixtures are synthetic.
+
+ComposerV2 and BdComposer now use the existing storedTokenRevision projection to key their session children, following the existing ChatComposer boundary. Draft fields, pending submission and local error state belong to that mounted credential epoch. Before admission and after asynchronous completion, the session checks both its mounted resource and currentStoredTokenRevision. Stale errors, receipts, local cleanup, notifications and the component-triggered Board refresh are suppressed. Existing voice admission/context checks use that same owner.
+
+Focused verification: npx vitest run src/components/board/composer-v2.test.ts src/components/board/board-surface.test.ts src/components/board/voice-context-ownership.test.ts src/components/common/use-operator-mention-context.test.ts. Four suites, 114 tests passed. TypeScript noEmit passed. Positive fixtures include stale accepted/persisted-negative/error broadcast outcomes and previous-session post success/failure, checking no local notification/refresh or new draft mutation.
+
+This is component-local ownership evidence only. Independent review identified a separate unresolved transport source lead: api/mcp.ts ensureBinding awaits ensureDevToken and then adopts the current credential epoch, rather than preserving the request's pre-await owner. dispatchOperatorAction also performs shared effects before returning to the guarded component. These boundaries require their own actual request fixtures and repair; this change does not establish whole-request account isolation. They remain next goal work, alongside mode/workspace ownership and unknown-outcome handling.
+
+Synthetic DOM and mocked transport do not prove a physical browser screenshot, installed TUI, provider runtime, CI, merge or formal approval. The full chat goal remains active.

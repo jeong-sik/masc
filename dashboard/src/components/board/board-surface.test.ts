@@ -1,4 +1,5 @@
 import { h } from 'preact'
+import { clearStoredToken, setStoredToken } from '../../api/core'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
@@ -11,6 +12,8 @@ import {
 } from './board-surface'
 import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter, boardHearthFilter, boardHasMore, boardLoadingMore, messages, shellAuthSummary, keepers } from '../../store'
 import { route } from '../../router'
+import { refreshBoard } from '../../store'
+import * as boardToast from '../common/toast'
 import { createPost, fetchBoardPost } from '../../api'
 import { requestBoardContextInference, voteComment } from '../../api/board'
 import { dispatchOperatorAction, operatorSnapshot, operatorActionBusy } from '../../operator-store'
@@ -922,6 +925,51 @@ describe('BoardSurface Component', () => {
     expect(composer).toHaveAttribute('data-mobile-open', 'true')
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
     expect(toggle).toHaveTextContent('접기')
+  })
+
+  it('partitions desktop post input when credentials change', async () => {
+    setStoredToken('synthetic-post-owner-a')
+    try {
+      render(h(BoardSurface, {}))
+      fireEvent.input(screen.getByTestId('bd-composer-title'), { target: { value: 'private title' } })
+      fireEvent.input(screen.getByTestId('bd-composer-body'), { target: { value: 'private body' } })
+      await act(async () => { setStoredToken('synthetic-post-owner-b') })
+      expect(screen.getByTestId('bd-composer-title')).toHaveValue('')
+      expect(screen.getByTestId('bd-composer-body')).toHaveValue('')
+    } finally {
+      clearStoredToken()
+    }
+  })
+
+  it.each(['success', 'failure'] as const)('ignores a previous owner post %s after credentials change', async (outcome) => {
+    let resolve!: (value: Awaited<ReturnType<typeof createPost>>) => void
+    let reject!: (error: Error) => void
+    vi.mocked(createPost).mockReturnValue(new Promise((done, fail) => { resolve = done; reject = fail }))
+    const toast = vi.spyOn(boardToast, 'showToast').mockImplementation(() => {})
+    setStoredToken('synthetic-post-owner-a')
+    try {
+      render(h(BoardSurface, {}))
+      fireEvent.input(screen.getByTestId('bd-composer-title'), { target: { value: 'owner a title' } })
+      fireEvent.input(screen.getByTestId('bd-composer-body'), { target: { value: 'owner a body' } })
+      fireEvent.click(screen.getByTestId('bd-composer-send'))
+      expect(createPost).toHaveBeenCalledTimes(1)
+      await act(async () => { setStoredToken('synthetic-post-owner-b') })
+      fireEvent.input(screen.getByTestId('bd-composer-title'), { target: { value: 'owner b title' } })
+      fireEvent.input(screen.getByTestId('bd-composer-body'), { target: { value: 'owner b body' } })
+      vi.mocked(refreshBoard).mockClear()
+      toast.mockClear()
+      await act(async () => {
+        if (outcome === 'failure') reject(new Error('obsolete post failure'))
+        else resolve({ id: 'previous-owner-post' })
+      })
+      expect(refreshBoard).not.toHaveBeenCalled()
+      expect(toast).not.toHaveBeenCalled()
+      expect(screen.getByTestId('bd-composer-title')).toHaveValue('owner b title')
+      expect(screen.getByTestId('bd-composer-body')).toHaveValue('owner b body')
+    } finally {
+      toast.mockRestore()
+      clearStoredToken()
+    }
   })
 
   it('allows independent desktop post creation while an operator action is pending', () => {

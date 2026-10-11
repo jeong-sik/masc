@@ -1,6 +1,7 @@
 import { h } from 'preact'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { clearStoredToken, setStoredToken } from '../../api/core'
 import type { BroadcastSendReceipt } from '../../api/actions'
 import { ComposerV2, buildComposerV2Request } from './composer-v2'
 import {
@@ -156,10 +157,48 @@ describe('ComposerV2', () => {
 
   afterEach(() => {
     cleanup()
+    clearStoredToken()
     operatorSnapshot.value = null
     operatorActionBusy.value = false
     dashboardKeepers.value = []
     vi.clearAllMocks()
+  })
+
+  it('partitions the composer draft when credentials change', async () => {
+    setStoredToken('synthetic-owner-a')
+    render(h(ComposerV2, { workspaceId: 'ops' }))
+    fireEvent.input(screen.getByLabelText('Composer v2 message'), { target: { value: 'owner a draft' } })
+    await act(async () => { setStoredToken('synthetic-owner-b') })
+    expect(screen.getByLabelText('Composer v2 message')).toHaveValue('')
+  })
+
+  it('rejects an old native submit handler immediately after credentials change', () => {
+    setStoredToken('synthetic-owner-a')
+    render(h(ComposerV2, { workspaceId: 'ops' }))
+    fireEvent.input(screen.getByLabelText('Composer v2 message'), { target: { value: 'owner a draft' } })
+    const send = screen.getByRole('button', { name: 'Send' })
+    setStoredToken('synthetic-owner-b')
+    send.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(sendBroadcastMock).not.toHaveBeenCalled()
+  })
+
+  it.each(['accepted', 'persisted-negative', 'error'] as const)('does not publish an obsolete %s receipt into the new credential session', async (outcome) => {
+    let resolve!: (value: BroadcastSendReceipt) => void
+    let reject!: (error: Error) => void
+    sendBroadcastMock.mockReturnValue(new Promise((done, fail) => { resolve = done; reject = fail }))
+    setStoredToken('synthetic-owner-a')
+    render(h(ComposerV2, { workspaceId: 'ops' }))
+    fireEvent.input(screen.getByLabelText('Composer v2 message'), { target: { value: 'owner a sent' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await act(async () => { setStoredToken('synthetic-owner-b') })
+    fireEvent.input(screen.getByLabelText('Composer v2 message'), { target: { value: 'owner b draft' } })
+    showToastMock.mockClear()
+    await act(async () => {
+      if (outcome === 'error') reject(new Error('obsolete transport failure'))
+      else resolve({ ok: outcome === 'accepted', requestId: 'old-owner-receipt', deliveryKind: 'passive', reason: null, workspacePersisted: true })
+    })
+    expect(showToastMock).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('Composer v2 message')).toHaveValue('owner b draft')
   })
 
   it.each([true, false])('preserves input authored while a broadcast receipt is pending (accepted=%s)', async (accepted) => {

@@ -1,7 +1,7 @@
 import { useSignal } from '@preact/signals'
 import { scanMascReferences, postsSharingReferences } from '../../lib/masc-reference'
 import { html } from 'htm/preact'
-import { useEffect, useRef, useCallback, useMemo, useState } from 'preact/hooks'
+import { useEffect, useLayoutEffect, useRef, useCallback, useMemo, useState } from 'preact/hooks'
 import { AtSign, Mic, Paperclip, Sparkles, Square, Trophy, X } from 'lucide-preact'
 import { ActionButton } from '../common/button'
 import { TimeAgo } from '../common/time-ago'
@@ -17,6 +17,8 @@ import { route } from '../../router'
 import { keepers as dashboardKeepers, messages, refreshExecution } from '../../store'
 import { fetchBoardReactionsBatch, votePost } from '../../api/board'
 import type { BoardReactionSummary } from '../../types'
+import { currentStoredTokenRevision } from '../../api/core'
+import { storedTokenRevision } from '../../api/token-revision'
 import { broadcastReceiptMessage, createPost, currentDashboardActor, sendBroadcast } from '../../api'
 import { deleteBoardPost, setBoardPostPinned } from '../../api/actions'
 import { dispatchOperatorAction, operatorActionBusy, operatorSnapshot } from '../../operator-store'
@@ -785,6 +787,17 @@ function resolveMobileMentionTarget(
 }
 
 function BdComposer() {
+  const authRevision = storedTokenRevision.value
+  return html`<${BdComposerSession} key=${authRevision} authRevision=${authRevision} />`
+}
+
+function BdComposerSession({ authRevision }: { authRevision: number }) {
+  const mounted = useRef(false)
+  useLayoutEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
+  const isCurrent = () => mounted.current && authRevision === currentStoredTokenRevision()
   const mode = boardComposerMode.value
   const composerDraft = useSignal<{ localTitle: string; localBody: string; localHearth: string; localFlair: string; mobileKeeperTarget: string; mobileOpen: boolean; mobileAttachments: ComposerAttachmentDraft[] }>({
     localTitle: '', localBody: '', localHearth: boardHearthFilter.value, localFlair: '', mobileKeeperTarget: '', mobileOpen: false, mobileAttachments: []
@@ -853,8 +866,8 @@ function BdComposer() {
   const mobileVoiceContext = useRef({ localHearth, mobileMentionTarget, mobileOpen })
   mobileVoiceContext.current = { localHearth, mobileMentionTarget, mobileOpen }
   const mobileVoice = useVoiceInput({
-    onAdmitted: () => !submitting.value && !operatorActionBusy.value,
-    isCurrent: () => mobileOpen
+    onAdmitted: () => isCurrent() && !submitting.value && !operatorActionBusy.value,
+    isCurrent: () => isCurrent() && mobileOpen
       && boardComposerMode.value === mode
       && boardHearthFilter.value === admittedHearthFilter
       && mobileVoiceContext.current.localHearth === localHearth
@@ -951,6 +964,7 @@ function BdComposer() {
   }
 
   async function submitPost(event?: Event, options: { compactMobile?: boolean } = {}): Promise<void> {
+    if (!isCurrent()) return
     event?.stopPropagation()
     const sentDraft = composerDraft.value
     const body = sentDraft.localBody.trim()
@@ -962,10 +976,12 @@ function BdComposer() {
         ? `[flair:${sentDraft.localFlair}]\n${body.replace(/^\[flair:[a-z]+\]\s*/i, '')}`
         : body
       await createPost(title, contentWithFlair, 'dashboard-user', { hearth: sentDraft.localHearth || undefined })
+      if (!isCurrent()) return
       clearSubmittedDraft(sentDraft, true)
       showToast('글을 등록했습니다', 'success')
       refreshBoard()
     } catch (err) {
+      if (!isCurrent()) return
       console.warn('[board] post submit failed', err instanceof Error ? err.message : err)
       showToast('글 등록에 실패했습니다', 'error')
     } finally {
@@ -974,6 +990,7 @@ function BdComposer() {
   }
 
   async function submitMobileQuick(event?: Event): Promise<void> {
+    if (!isCurrent()) return
     if (mode === 'post') {
       await submitPost(event, { compactMobile: true })
       return
@@ -1003,15 +1020,18 @@ function BdComposer() {
         })
       } else {
         const receipt = await sendBroadcast(currentDashboardActor(), message)
+        if (!isCurrent()) return
         if (!receipt.ok) {
           clearSubmittedDraft(sentDraft, false)
           showToast(broadcastReceiptMessage(receipt), 'warning')
           return
         }
       }
+      if (!isCurrent()) return
       clearSubmittedDraft(sentDraft, false)
       showToast('Message sent.', 'success')
     } catch (err) {
+      if (!isCurrent()) return
       const message = err instanceof Error ? err.message : 'Message send failed.'
       console.warn('[board] mobile quick compose failed', message)
       showToast(message, 'error')

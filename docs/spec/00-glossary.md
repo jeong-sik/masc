@@ -1459,7 +1459,7 @@ status: reference
   opam 릴리스 패키지 환경에서도 대상 소스 불일치를 결정론적으로 감지한다(전체 바이너리 무결성이나
   하위 디렉터리 변조를 검증하는 것은 아님).
   → [Dos_lane.core](../../lib/dos_lane/dos_lane.mli) ·
-  [Tool_misc_dos_lane](../../lib/tool_misc_dos_lane.ml) ·
+  [Dos_machine_tools.handle_meta](../../lib/dos_tools/dos_machine_tools.ml) ·
   [masc_dos_meta](../../config/tools/masc_dos_meta.toml)
 
 **DOS Program Inventory (DOS 프로그램 인벤토리)**
@@ -1487,7 +1487,7 @@ status: reference
     특정 상업용 게임의 내부 포맷을 해석하거나 제목별로 특화 분기하지 않는다. 디렉터리 내 실행 파일 후보
     (`executable_candidates`)와 기본 부팅 파일(`default_boot`)은 정적 명명 규칙에 따라 객관적으로
     제시될 뿐이며, 에뮬레이터 상에서의 실제 실행 성공이나 바이너리 호환성을 사전에 보증하는 것은 아니다.
-  → [Tool_misc_dos_lane](../../lib/tool_misc_dos_lane.ml) ·
+  → [Dos_machine_tools.handle_inventory](../../lib/dos_tools/dos_machine_tools.ml) ·
   [Fs_compat.with_owned_inventory_root](../../lib/fs_compat/fs_compat.mli) ·
   [Fs_compat.read_owned_directory](../../lib/fs_compat/fs_compat.mli) ·
   [DOS Programs Runbook](../operations/dos-programs-runbook.md)
@@ -1549,7 +1549,7 @@ status: reference
     여부를 재검증한다. 유효한 일반 파일로 이어지는 심볼릭 링크는 작업공간 오버라이드로 수용된다.
   - **버튼 정의 엄격성**: 각 버튼은 비어 있지 않은 `keys` 배열과 `label`을 가져야 하며,
     알 수 없는 테이블·필드·키 이름은 즉시 오류로 거절된다(타이포로 인한 무반응 방지).
-  → [Play_pad](../../lib/play/play_pad.mli) ·
+  → [Dos_pad](../../lib/dos_pad/dos_pad.mli) ·
   [RFC Play Link for Shared Machine](../rfc/RFC-play-link-for-the-shared-machine.md)
 
 **기계 체크포인트 (Machine Checkpoint)**

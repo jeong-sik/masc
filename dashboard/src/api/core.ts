@@ -782,16 +782,21 @@ export type AbortableRequestOptions = {
   signal?: AbortSignal
 }
 
+export type GetAdmission = { readonly path: string; readonly authRevision: number }
+
 export type GetOptions = AbortableRequestOptions & {
+  onAdmission?: (admission: GetAdmission) => void
   timeoutMs?: number
   includeActorHeader?: boolean
 }
 
 export async function get<T>(path: string, opts: GetOptions = {}): Promise<T> {
+  const headers = authHeaders({ includeActor: opts.includeActorHeader })
+  opts.onAdmission?.(Object.freeze({ path, authRevision: currentStoredTokenRevision() }))
   const res = await fetchWithTimeout(
     path,
     {
-      headers: authHeaders({ includeActor: opts.includeActorHeader }),
+      headers,
       cache: readCacheMode(path),
       signal: opts.signal,
     },

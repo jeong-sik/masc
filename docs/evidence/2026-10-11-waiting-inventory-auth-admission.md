@@ -1,0 +1,11 @@
+# Waiting inventory read admission
+
+Base: 599673e08f7deb011762dc641d4643fce3e76ca1 (#42401).
+
+Four store fixtures failed before repair: old-auth success publication, old-auth failure publication, a pending old read blocking replacement, and cached state surviving authentication replacement without refreshing mounted subscribers. The initial provisional revision guard passed these fixtures but independent review found that it captured authentication before the actual API's ensureDevToken bootstrap and could discard a legitimate bootstrapped GET. That provisional version was not published.
+
+The GET helper now exposes an immutable optional admission captured beside the actual request headers. The waiting-inventory API forwards this callback after token preparation. Read ownership is a closed preparing/admitted state. The store publishes a preparing owner before invoking the API and installs the actual admission on that exact owner. Authentication changes revoke admitted reads and cached state; preparing reads retain their owner until their actual HTTP admission. Mounted surfaces refresh admitted scopes under replacement credentials, while a preparing bootstrap remains coalesced. Results, errors and cleanup require exact ownership; superseded cleanup cannot remove a replacement.
+
+Actual API/core/store fixtures mock only token preparation and HTTP responses. They verify the bootstrap Authorization header, one GET and ready state for both explicit and mounted refresh. The mounted fixture directly reproduced duplicate GETs before ownership was published ahead of API invocation. A fixture tuple typing error was corrected and is excluded from product failure evidence. Earlier store fixtures were updated to model the real asynchronous admission boundary instead of bypassing it.
+
+Validation: 55 focused tests across keeper-waiting-inventory-store, keeper-waiting-inventory-admission and api/core passed; TypeScript noEmit and git diff --check passed. Independent review of the five source/test files passed; final committed full-scope review is separate. No actual authentication server, formal GitHub approval, CI, merge, installation, provider/runtime execution or browser screenshot proof is claimed. The separate operation-panel queued-operation list read still needs its own admission/ownership audit.

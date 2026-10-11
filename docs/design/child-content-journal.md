@@ -123,11 +123,13 @@ Every read response explicitly reports persistence-failure history `unavailable`
 provider completeness `unknown` and liveness `unknown`. Collector-local health is
 not represented as an empty surviving process history. Cleanup operations and
 closed failure codes expose no raw filesystem paths or exception details.
-These codecs/discovery primitives are not yet an authenticated HTTP endpoint or
-TUI consumer. The subsequent transport must use captured authenticated workspace
-scope, strict URI queries and both H1/H2 auth gates; the UI must poll unchecked
-hints and fully read changed stores or an explicit audit rather than repeatedly
-auditing unchanged full history.
+The codecs and discovery primitives do not authenticate HTTP requests or own
+TUI state. The pure TUI consumer below uses them through a caller-supplied fetch.
+HTTP transport must capture authenticated workspace scope, enforce strict URI
+queries and both H1/H2 auth gates. The actual TUI launcher owns that authenticated
+fetch, read epoch and mailbox admission. The UI polls unchecked hints and fully
+reads changed stores or an explicit audit instead of repeatedly auditing unchanged
+full history.
 
 ## Immutable TUI snapshot reader
 

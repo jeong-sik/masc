@@ -26,7 +26,12 @@ let errors state =
       Option.map (fun error -> Receiver_read (store.receiver,error)) store.error) state.stores
   @ (match state.inventory with None -> [] | Some inventory ->
       List.filter_map (fun (receiver,status) -> match status with
-        | Ok _ -> None | Error code -> Some (Persistence (receiver,code))) inventory.receivers)
+        | Ok _ -> None
+        | Error code ->
+            (* Audited inventory and sticky audit evidence can report the same
+               scoped failure. Keep distinct codes, but publish this fact once. *)
+            if List.mem (receiver,code) state.audit_failures then None
+            else Some (Persistence (receiver,code))) inventory.receivers)
 let code_text = function
   | Read.Store_missing -> "store missing" | Invalid_scope -> "invalid scope"
   | Invalid_observation -> "invalid observation" | Cursor_store_mismatch -> "store incarnation changed"

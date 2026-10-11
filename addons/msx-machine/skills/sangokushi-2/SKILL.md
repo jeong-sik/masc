@@ -222,6 +222,40 @@ and confirm the next officer or battle prompt before continuing.
   Return; an empty Return is not an answer. After the last unit the map comes
   back with the next province's command prompt.
 
+## Waiting for mobility and verifying occupation
+
+A July 220 province-19 → 21 replay on native worker source
+`afad361ff6f79b3d19e8c8c1b7d3c0926cab42cf` sent Cao Ren with 100 soldiers,
+gold 100 and food 1,000. The initial battle showed friendly strength 100
+and enemy strength 14. Cao Ren's labeled battle information showed soldiers
+100, training 126 and armament 100. These current values do not establish a
+training gain or a universal conversion from merchant weapons to armament.
+
+- After two southward moves, normal movement displayed mobility 3 on day 3.
+  South and southeast inputs left the unit and prompt unchanged. An unchanged
+  movement prompt alone is not evidence that the emulator stopped.
+- Return closed movement. Battle command `3` waited; after the next command
+  menu finished drawing, `1` then `1` reopened normal movement. The displayed
+  mobility was 4 on day 4 and 5 after another wait on day 5.
+- Southeast digit `3` was accepted at mobility 5: the unit moved and the date
+  became day 6. This verifies that crossing after waiting, not a universal
+  terrain cost, mobility cap or route for other starting positions.
+- After a further wait, day 7 displayed `孫権軍を全滅させました` and
+  `朱桓を捕らえました`. No direct player attack was executed in this battle;
+  the cause of the enemy's elimination was not established. Do not turn an
+  enemy-phase result into claimed player attack damage.
+- The prisoner screen offered recruitment, release and execution. Selecting
+  recruitment with `1`, Return returned to the origin's command screen.
+  The choice does not separately establish the prisoner's acceptance.
+- To verify occupation from province 19, information `8`, Return → other
+  province `1`, Return → `21`, Return opened province 21 with ruler Xu Shu
+  and governor Cao Ren. It showed soldiers 109, gold 161, food 1,927 and
+  three officers. Total soldiers alone do not identify their allocations.
+
+Preserve the pre-expedition, labeled battle-information and post-occupation
+checkpoints. These observations prove the local campaign transitions and
+province capture, not unification or a completed winning campaign.
+
 ## Battle defection work
 
 In a March 220 province-21 battle, the current Xu Huang command accepted

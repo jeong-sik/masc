@@ -1,35 +1,68 @@
-// Unsent composer drafts, owned by credential epoch and Keeper.
+// Canonical unsent authored input, owned by credential epoch and Keeper.
+import { signal, type Signal } from '@preact/signals'
 import { currentStoredTokenRevision } from './api/core'
+import type { KeeperConversationAttachment } from './types'
 
-const drafts = new Map<number, Map<string, string>>()
-
-export function readKeeperDraft(keeperName: string, authRevision = currentStoredTokenRevision()): string {
-  return drafts.get(authRevision)?.get(keeperName.trim()) ?? ''
+export interface KeeperDraftSnapshot {
+  readonly revision: number
+  readonly text: string
+  readonly attachments: readonly KeeperConversationAttachment[]
+  readonly voiceDraft: { readonly transcript: string } | null
 }
+const emptyDraft: KeeperDraftSnapshot = Object.freeze({ revision: 0, text: '', attachments: Object.freeze([]), voiceDraft: null })
+const drafts = new Map<number, Map<string, Signal<KeeperDraftSnapshot>>>()
 
-export function writeKeeperDraft(keeperName: string, value: string, authRevision = currentStoredTokenRevision()): void {
-  const key = keeperName.trim()
-  if (!key) return
-  if (value === '') {
-    clearKeeperDraft(key, authRevision)
-    return
-  }
+function ownedDraft(keeperName: string, authRevision: number): Signal<KeeperDraftSnapshot> {
   let owned = drafts.get(authRevision)
   if (!owned) {
     owned = new Map()
     drafts.set(authRevision, owned)
   }
-  owned.set(key, value)
+  let draft = owned.get(keeperName)
+  if (!draft) {
+    draft = signal(emptyDraft)
+    owned.set(keeperName, draft)
+  }
+  return draft
 }
 
-export function clearKeeperDraft(keeperName: string, authRevision = currentStoredTokenRevision()): void {
-  const owned = drafts.get(authRevision)
-  owned?.delete(keeperName.trim())
-  if (owned?.size === 0) drafts.delete(authRevision)
+export function readKeeperDraftSnapshot(keeperName: string, authRevision = currentStoredTokenRevision()): KeeperDraftSnapshot {
+  const key = keeperName.trim()
+  return key ? ownedDraft(key, authRevision).value : emptyDraft
 }
 
-export function _draftCountForTests(): number {
-  return [...drafts.values()].reduce((count, owned) => count + owned.size, 0)
+export function readKeeperDraft(keeperName: string, authRevision = currentStoredTokenRevision()): string {
+  return readKeeperDraftSnapshot(keeperName, authRevision).text
+}
+
+export function updateKeeperDraft(
+  keeperName: string,
+  update: (draft: KeeperDraftSnapshot) => Omit<KeeperDraftSnapshot, 'revision'>,
+  authRevision = currentStoredTokenRevision(),
+): void {
+  const key = keeperName.trim()
+  if (!key) return
+  const draft = ownedDraft(key, authRevision)
+  const previous = draft.peek()
+  const next = update(previous)
+  draft.value = Object.freeze({
+    revision: previous.revision + 1,
+    text: next.text,
+    attachments: Object.freeze(next.attachments.map(attachment => Object.freeze({ ...attachment }))),
+    voiceDraft: next.voiceDraft ? Object.freeze({ ...next.voiceDraft }) : null,
+  })
+}
+
+export function writeKeeperDraft(keeperName: string, text: string, authRevision = currentStoredTokenRevision()): void {
+  updateKeeperDraft(keeperName, draft => ({ ...draft, text }), authRevision)
+}
+
+export function clearKeeperDraft(keeperName: string, authRevision = currentStoredTokenRevision(), expectedRevision?: number, content: 'text' | 'all' = 'all'): boolean {
+  const draft = drafts.get(authRevision)?.get(keeperName.trim())
+  if (!draft || (expectedRevision !== undefined && draft.peek().revision !== expectedRevision)) return false
+  const current = draft.peek()
+  draft.value = Object.freeze({ ...(content === 'text' ? current : emptyDraft), text: '', revision: current.revision + 1 })
+  return true
 }
 
 export function _resetChatStoreForTests(): void {

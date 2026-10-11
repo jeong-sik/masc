@@ -34,7 +34,7 @@ import { isSubmitEnter } from '../../lib/keyboard'
 import { isFailedDelivery } from '../../lib/keeper-delivery'
 import { parseTextToChatBlocks } from '../../lib/chat-blocks'
 import { createPortal, memo } from 'preact/compat'
-import { readKeeperDraft, writeKeeperDraft } from '../../keeper-chat-store'
+import { readKeeperDraftSnapshot, writeKeeperDraft, clearKeeperDraft, updateKeeperDraft } from '../../keeper-chat-store'
 import type { ChatBlock, ChatBroadcastBlock, ChatCalloutBlock, ChatChartBlock, ChatIssueBlock, ChatLinkBlock, ChatMermaidBlock, ChatShellBlock, ChatSuggestionsBlock, ChatTableBlock, ChatTraceStep, ChatTraceToolStep, ChatVoiceBlock, KeeperUserInputBlock } from '../../types'
 import type { KeeperApprovalLifecycle, KeeperConversationAttachment, KeeperConversationAudioClip, KeeperConversationDetails, KeeperConversationEntry, KeeperConversationSource, SurfaceRef } from '../../types'
 import type { ToolCallEntry, ToolCallOutputBlob } from '../../api/dashboard'
@@ -4918,55 +4918,42 @@ function ChatComposerSession({
   const [refDraft, setRefDraft] = useState('')
   const [drag, setDrag] = useState(false)
   const [slashIdx, setSlashIdx] = useState(0)
-  const [attachments, setAttachments] = useState<KeeperConversationAttachment[]>([])
-  const [voiceDraft, setVoiceDraft] = useState<ComposerVoiceDraft | null>(null)
+  const [localAttachments, setLocalAttachments] = useState<KeeperConversationAttachment[]>([])
+  const [localVoiceDraft, setLocalVoiceDraft] = useState<ComposerVoiceDraft | null>(null)
   const isControlled = typeof draftProp === 'string'
   const draftPersistStoreKey = draftPersistKey?.trim() ?? ''
   const slashMenuKeeperLabel = keeperLabel?.trim() || CHAT_COMPOSER_DEFAULT_KEEPER_LABEL
-  // Lazy initializer: on (re)mount restore this keeper's persisted draft so a
-  // keeper switch (key=${keeperName} remount) does not drop a half-typed
-  // message. Controlled callers manage their own draft, so skip persistence.
-  const [internalDraftState, setInternalDraftState] = useState<{ key: string | null; value: string }>(() =>
-    isControlled
-      ? { key: null, value: '' }
-      : {
-          key: draftPersistStoreKey,
-          value: draftPersistStoreKey ? readKeeperDraft(draftPersistStoreKey, authRevision) : '',
-        },
-  )
-  const internalDraft =
-    !isControlled && draftPersistStoreKey !== internalDraftState.key
-      ? draftPersistStoreKey
-        ? readKeeperDraft(draftPersistStoreKey, authRevision)
-        : ''
-      : internalDraftState.value
-  const draft = isControlled ? draftProp : internalDraft
-  const setDraft = (value: string) => {
-    if (isControlled) {
-      onDraftChange?.(value)
-    } else {
-      setInternalDraftState({ key: draftPersistStoreKey, value })
-      if (draftPersistStoreKey) writeKeeperDraft(draftPersistStoreKey, value, authRevision)
-    }
+  const [localDraft, setLocalDraft] = useState('')
+  const draftSnapshot = !isControlled && draftPersistStoreKey
+    ? readKeeperDraftSnapshot(draftPersistStoreKey, authRevision)
+    : null
+  const draft = isControlled ? draftProp : draftSnapshot?.text ?? localDraft
+  const attachments = draftSnapshot?.attachments ?? localAttachments
+  const voiceDraft = draftSnapshot ? draftSnapshot.voiceDraft : localVoiceDraft
+  const setAttachments = (value: readonly KeeperConversationAttachment[] | ((previous: readonly KeeperConversationAttachment[]) => readonly KeeperConversationAttachment[])) => {
+    if (draftSnapshot) updateKeeperDraft(draftPersistStoreKey, previous => ({
+      ...previous, attachments: typeof value === 'function' ? value(previous.attachments) : value,
+    }), authRevision)
+    else setLocalAttachments(previous => [...(typeof value === 'function' ? value(previous) : value)])
   }
-  // External-store sync: a normal keeper switch remounts (key=${keeperName}) and
-  // the lazy initializer above already restored the draft. This layout effect
-  // covers the one case the initializer cannot — `draftPersistKey` changing
-  // without a remount. The render-time fallback above prevents a stale buffer
-  // from being shown for the new key; this effect aligns the internal state for
-  // the next edit.
+  const setVoiceDraft = (value: ComposerVoiceDraft | null) => {
+    if (draftSnapshot) updateKeeperDraft(draftPersistStoreKey, previous => ({ ...previous, voiceDraft: value }), authRevision)
+    else setLocalVoiceDraft(value)
+  }
+  const setDraft = (value: string) => {
+    if (isControlled) onDraftChange?.(value)
+    else if (draftPersistStoreKey) writeKeeperDraft(draftPersistStoreKey, value, authRevision)
+    else setLocalDraft(value)
+  }
+  const ownsDraft = () => draftSnapshot === null
+    || readKeeperDraftSnapshot(draftPersistStoreKey, authRevision).revision === draftSnapshot.revision
+  const clearSubmittedDraft = (content: 'text' | 'all' = 'all') => {
+    if (draftSnapshot) clearKeeperDraft(draftPersistStoreKey, authRevision, draftSnapshot.revision, content)
+    else setDraft('')
+  }
   useLayoutEffect(() => {
-    if (isControlled) {
-      if (internalDraftState.key !== null) setInternalDraftState({ key: null, value: '' })
-      return
-    }
-    if (draftPersistStoreKey !== internalDraftState.key) {
-      setInternalDraftState({
-        key: draftPersistStoreKey,
-        value: draftPersistStoreKey ? readKeeperDraft(draftPersistStoreKey, authRevision) : '',
-      })
-    }
-  }, [draftPersistStoreKey, internalDraftState.key, isControlled])
+    if (isControlled) setLocalDraft('')
+  }, [isControlled])
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 
@@ -5045,7 +5032,7 @@ function ChatComposerSession({
 
   const ingestFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return
-    const { attachments: added, errors } = await collectAttachments(files, attachments)
+    const { attachments: added, errors } = await collectAttachments(files, [...attachments])
     errors.forEach((message) => showToast(message, 'error'))
     if (added.length > 0) {
       setAttachments((prev) => [...prev, ...added])
@@ -5096,7 +5083,7 @@ function ChatComposerSession({
   }
 
   const handleSend = () => {
-    if (authRevision !== currentStoredTokenRevision() || isSubmissionCurrent?.() === false || sendDisabled) return
+    if (authRevision !== currentStoredTokenRevision() || isSubmissionCurrent?.() === false || !ownsDraft() || sendDisabled) return
     const blocks: ChatBlock[] = []
     const userBlocks: KeeperUserInputBlock[] = []
     for (const att of attachments) {
@@ -5159,16 +5146,18 @@ function ChatComposerSession({
       clientActionId: nextComposerClientActionId(),
       text,
     })
-    setDraft('')
+    clearSubmittedDraft()
     setSlashIdx(0)
-    setAttachments([])
-    setVoiceDraft(null)
+    if (!draftSnapshot) {
+      setAttachments([])
+      setVoiceDraft(null)
+    }
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
   }
 
   const runSlashCommand = (command?: ChatComposerCommand) => {
-    if (authRevision !== currentStoredTokenRevision() || isSubmissionCurrent?.() === false || !command || command.disabled) return
-    setDraft('')
+    if (authRevision !== currentStoredTokenRevision() || isSubmissionCurrent?.() === false || !ownsDraft() || !command || command.disabled) return
+    clearSubmittedDraft('text')
     setSlashIdx(0)
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
     void Promise.resolve(command.run()).catch((err) => {

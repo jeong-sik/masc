@@ -18,7 +18,7 @@ import {
   _resetTraceCardOpenChoicesForTests,
   type ChatComposerSendPayload,
 } from './primitives'
-import { _resetChatStoreForTests, readKeeperDraft } from '../../keeper-chat-store'
+import { _resetChatStoreForTests, readKeeperDraft, writeKeeperDraft, readKeeperDraftSnapshot, updateKeeperDraft } from '../../keeper-chat-store'
 import { chatHistoryEntriesFromRest, appendThreadEntry, mergeServerHistoryEntries, keeperThreads, isDefaultVisibleConversationEntry } from '../../keeper-state'
 import { applyKeeperStreamEvent, applyKeeperOperationTurnEvent, _resetKeeperStreamBuffersForTests } from '../../keeper-stream'
 import type { KeeperChatStreamEvent } from '../../lib/keeper-chat-stream-contract'
@@ -2047,6 +2047,13 @@ describe('ChatComposer draft persistence (uncontrolled, per-keeper)', () => {
 
     textarea = mountComposer('rondo')
     expect(textarea.value).toBe('rondo draft')
+  })
+
+  it('preserves a newer draft published synchronously by a send callback', () => {
+    const textarea = mountComposer('rondo', () => writeKeeperDraft('rondo', 'next authored input'))
+    fireEvent.input(textarea, { target: { value: 'submitted input' } })
+    textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    expect(readKeeperDraft('rondo')).toBe('next authored input')
   })
 
   it('clears the persisted draft after a send', () => {
@@ -4703,6 +4710,23 @@ describe('ChatComposer v2 prototype surface', () => {
     expect(send.disabled).toBe(false)
     send.click()
     expect(onSend).toHaveBeenCalledTimes(1)
+  })
+
+  it('preserves unsent media and voice when a utility slash command runs', () => {
+    const run = vi.fn()
+    const onSend = vi.fn()
+    updateKeeperDraft('slash-media', draft => ({ ...draft, text: '/search', attachments: [{ kind: 'url', id: 'reference', name: 'reference.png', url: 'https://example.com/reference.png', mimeType: 'image/png' }], voiceDraft: { transcript: 'unsent voice' } }))
+    render(html`<${ChatComposer} draftPersistKey="slash-media" placeholder="메시지 입력..." disabled=${false} streaming=${false} commands=${[{ id: 'search', group: 'navigation', label: 'Search', run }]} onSend=${onSend} />`, container)
+    fireEvent.keyDown(container.querySelector('textarea')!, { key: 'Enter' })
+    expect(run).toHaveBeenCalledTimes(1)
+    expect(onSend).not.toHaveBeenCalled()
+    expect(readKeeperDraftSnapshot('slash-media').attachments).toHaveLength(1)
+    expect(readKeeperDraftSnapshot('slash-media').voiceDraft?.transcript).toBe('unsent voice')
+    render(null, container)
+    render(html`<${ChatComposer} draftPersistKey="slash-media" placeholder="메시지 입력..." disabled=${false} streaming=${false} onSend=${onSend} />`, container)
+    fireEvent.keyDown(container.querySelector('textarea')!, { key: 'Enter' })
+    expect(onSend).toHaveBeenCalledTimes(1)
+    expect(onSend.mock.calls[0]?.[0].blocks).toEqual(expect.arrayContaining([expect.objectContaining({ t: 'attach', ref: { kind: 'url', url: 'https://example.com/reference.png' } })]))
   })
 
   it('runs the active slash command from the strict-index-safe menu selection', () => {

@@ -1,3 +1,4 @@
+import { ChatComposer } from './chat/primitives'
 import { readKeeperDraft, _resetChatStoreForTests } from '../keeper-chat-store'
 import { chatShowInternal, chatShowAutonomous, chatExpandAutonomousRuns } from '../lib/chat-view-prefs'
 import { keeperThreads, _resetActiveKeeperStreamsForTests, _resetLiveSendRequestOwnersForTests } from '../keeper-state'
@@ -510,6 +511,63 @@ describe('CopilotDock', () => {
     textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
     expect(dock.send).not.toHaveBeenCalled()
     expect(readKeeperDraft('masc-improver')).toBe('describe this screen')
+  })
+
+  it('rejects a stale Dock draft without clearing a newer simultaneous main-pane draft', async () => {
+    setStoredToken('fixture-current')
+    const main = document.createElement('div')
+    document.body.appendChild(main)
+    try {
+      render(h(ChatComposer, { placeholder: 'main', disabled: false, streaming: false,
+        draftPersistKey: 'masc-improver', onSend: vi.fn() }), main)
+      const mainInput = main.querySelector('textarea')!
+      fireEvent.input(mainInput, { target: { value: 'first draft' } })
+      const actual = useCopilotDock()
+      const dock = { ...actual, send: vi.fn() }
+      render(h(DockHarness, { dock }), container)
+      dock.open()
+      await waitFor(() => expect(container.querySelector('textarea')).not.toBeNull())
+      const dockInput = container.querySelector('textarea')!
+      expect(dockInput.value).toBe('first draft')
+      mainInput.value = 'newer main draft'
+      mainInput.dispatchEvent(new Event('input', { bubbles: true }))
+      dockInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+      expect(dock.send).not.toHaveBeenCalled()
+      expect(readKeeperDraft('masc-improver')).toBe('newer main draft')
+      await waitFor(() => expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe('newer main draft'))
+    } finally {
+      render(null, main)
+      main.remove()
+    }
+  })
+
+  it('shares a mounted main composer media draft with the Dock', async () => {
+    setStoredToken('fixture-current')
+    const main = document.createElement('div')
+    document.body.appendChild(main)
+    try {
+      render(h(ChatComposer, { placeholder: 'main', disabled: false, streaming: false,
+        draftPersistKey: 'masc-improver', onSend: vi.fn() }), main)
+      const actual = useCopilotDock()
+      const dock = { ...actual, send: vi.fn() }
+      render(h(DockHarness, { dock }), container)
+      dock.open()
+      await waitFor(() => expect(container.querySelector('textarea')).not.toBeNull())
+      fireEvent.click(main.querySelector('[aria-label="이미지 참조 첨부"]')!)
+      await waitFor(() => expect(main.querySelector('[aria-label="이미지 참조 입력"]')).not.toBeNull())
+      fireEvent.input(main.querySelector('[aria-label="이미지 참조 입력"]')!, { target: { value: 'https://example.com/shared.png' } })
+      fireEvent.click(main.querySelector('[aria-label="참조 추가"]')!)
+      await waitFor(() => expect(container.querySelector('[data-chat-attachment-draft]')).not.toBeNull())
+      fireEvent.click(container.querySelector('button.send')!)
+      expect(dock.send).toHaveBeenCalledWith('', expect.anything(), expect.anything(), expect.objectContaining({
+        userBlocks: [{ type: 'image', url: 'https://example.com/shared.png' }],
+        attachments: [expect.objectContaining({ kind: 'url', url: 'https://example.com/shared.png' })],
+      }))
+      await waitFor(() => expect(main.querySelector('[data-chat-attachment-draft]')).toBeNull())
+    } finally {
+      render(null, main)
+      main.remove()
+    }
   })
 
   it('sends reference-only composer input through the actual Copilot stream protocol', async () => {

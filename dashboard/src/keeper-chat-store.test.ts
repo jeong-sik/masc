@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { readKeeperDraft, writeKeeperDraft, clearKeeperDraft, _draftCountForTests, _resetChatStoreForTests } from './keeper-chat-store'
+import { readKeeperDraft, writeKeeperDraft, clearKeeperDraft, readKeeperDraftSnapshot, updateKeeperDraft, _resetChatStoreForTests } from './keeper-chat-store'
 import { setStoredToken, clearStoredToken, currentStoredTokenRevision } from './api/core'
 
 describe('keeper-chat-store draft persistence', () => {
@@ -19,14 +19,10 @@ describe('keeper-chat-store draft persistence', () => {
     expect(readKeeperDraft('qa-king')).toBe('리뷰 부탁')
   })
 
-  it('deletes the entry when written empty (no blank accumulation after send)', () => {
+  it('clears the canonical draft when written empty', () => {
     writeKeeperDraft('rondo', 'half typed')
-    expect(_draftCountForTests()).toBe(1)
     writeKeeperDraft('rondo', '')
     expect(readKeeperDraft('rondo')).toBe('')
-    // The entry is removed, not stored as '' — readKeeperDraft alone cannot
-    // distinguish the two, so assert the map actually shrank.
-    expect(_draftCountForTests()).toBe(0)
   })
 
   it('clearKeeperDraft drops a keeper draft', () => {
@@ -61,5 +57,22 @@ describe('draft authentication ownership', () => {
     expect(readKeeperDraft('echo', oldOwner)).toBe('late old authored draft')
     clearKeeperDraft('echo', oldOwner)
     expect(readKeeperDraft('echo')).toBe('new authored draft')
+  })
+})
+
+describe('canonical composer snapshot', () => {
+  afterEach(() => { _resetChatStoreForTests() })
+
+  it('rejects a stale clear after newer text, media and voice are published', () => {
+    writeKeeperDraft('echo', 'submitted draft')
+    const submitted = readKeeperDraftSnapshot('echo')
+    updateKeeperDraft('echo', draft => ({ ...draft, text: 'newer draft',
+      attachments: [{ kind: 'url', id: 'image', name: 'image', url: 'https://example.com/image.png' }],
+      voiceDraft: { transcript: 'newer voice' } }))
+    expect(clearKeeperDraft('echo', undefined, submitted.revision)).toBe(false)
+    expect(readKeeperDraftSnapshot('echo')).toMatchObject({ text: 'newer draft',
+      attachments: [{ id: 'image' }], voiceDraft: { transcript: 'newer voice' } })
+    expect(submitted.text).toBe('submitted draft')
+    expect(submitted.attachments).toEqual([])
   })
 })

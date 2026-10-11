@@ -1268,7 +1268,19 @@ let test_autonomous_turn_journal_is_live_and_replayable () =
         (body |> member "schema" |> to_string);
       Alcotest.(check string) "actual turn identity" (Ids.Turn_ref.to_string turn_ref)
         (body |> member "turn_ref" |> to_string);
-      Alcotest.(check bool) "no operation identity on autonomous wire" true (member "operation_id" body = `Null)))
+      Alcotest.(check bool) "no operation identity on autonomous wire" true (member "operation_id" body = `Null);
+      let delta = List.find (fun (entry:L.journaled_event) -> match entry.event with
+        | E.Text_delta _ -> true | _ -> false) entries in
+      let projected = Server_dashboard_http_keeper_chat_operations.turn_events_projected_page
+        ~turn_ref ~since_seq:(L.After_seq (delta.seq - 1)) ~redact_text:Fun.id ~entries
+        {L.events=[delta];has_more=false;next_offset=123} in
+      let event = projected |> member "ag_ui_events" |> to_list |> List.hd |> member "event" in
+      Alcotest.(check string) "paged delta retains original run identity"
+        (Ids.Turn_ref.to_string turn_ref) (event |> member "runId" |> to_string);
+      Alcotest.(check string) "paged delta retains original message identity"
+        (Ids.Turn_ref.to_string turn_ref ^ ":assistant") (event |> member "messageId" |> to_string);
+      Alcotest.(check string) "paged delta retains original thread identity"
+        "keeper:k" (event |> member "threadId" |> to_string)))
 ;;
 
 let test_text_scope_codec () =

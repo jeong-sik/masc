@@ -3357,6 +3357,7 @@ let turn_log_add ~now turn_log ~seq (delta : Masc_tui_keeper_chat_live.delta) =
   | Masc_tui_keeper_chat_live.Accepted _ ->
       ignore (Masc_tui_keeper_chat_log.add ~at:now turn_log.tl_log ~seq:None delta);
       Masc_tui_keeper_chat_transcript.apply ~now turn_log.tl_transcript delta
+  | Masc_tui_keeper_chat_live.Provider_retry_observed _
   | Masc_tui_keeper_chat_live.Batch_bound _
   | Masc_tui_keeper_chat_live.Run_started | Masc_tui_keeper_chat_live.Text _
   | Masc_tui_keeper_chat_live.Thinking _ | Masc_tui_keeper_chat_live.Tool_started _

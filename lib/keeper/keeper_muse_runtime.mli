@@ -125,7 +125,9 @@ module For_testing : sig
   val project_stream :
     Runtime_muse_serve.stream_event list -> Agent_core.Types.sse_event list
   (** The Keeper live-stream events the projection emits for [events], in
-      order, with no MASC tool call between them. *)
+      order, with no MASC tool call between them. Failed, cancelled and unknown
+      terminal observations close open content without an invented EndTurn;
+      completed terminals wait for the runtime's final text publication. *)
 
   type stream_input =
     | Serve_event of Runtime_muse_serve.stream_event

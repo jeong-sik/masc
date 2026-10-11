@@ -624,7 +624,7 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
          { index = 0; delta = Agent_core.Types.TextDelta text })
   in
   let stream_finished = ref false in
-  let finish_stream () =
+  let finish_stream ~stop_reason () =
     if not !stream_finished then (
       stream_finished := true;
       let open_indexes table = Hashtbl.fold (fun _ index acc -> index :: acc) table [] in
@@ -633,8 +633,8 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
       Hashtbl.clear tool_indexes;
       Hashtbl.clear native_tool_indexes;
       List.iter (fun index -> emit (Agent_core.Types.ContentBlockStop {index})) indexes;
-      emit (Agent_core.Types.MessageDelta
-        {stop_reason=Some Agent_core.Types.EndTurn; usage=None});
+      Option.iter (fun reason -> emit (Agent_core.Types.MessageDelta
+        {stop_reason=Some reason; usage=None})) stop_reason;
       emit Agent_core.Types.MessageStop)
   in
   { on_serve_event =
@@ -722,7 +722,11 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
           Option.iter (fun scope ->
             Runtime_muse_usage.observe ~scope Runtime_muse_usage.Usage_changed usage)
             quota_scope
-        | Serve.Turn_terminal_received _ -> ()
+        | Serve.Turn_terminal_received terminal ->
+          (match terminal with
+           | Msp.Terminal_completed -> ()
+           | Msp.Terminal_failed _ | Msp.Terminal_cancelled | Msp.Unrecognized_terminal _ ->
+             finish_stream ~stop_reason:None ())
         (* The usage this turn reports belongs to the model its calls ran
            on, when the host names it, rather than the session's selection. *)
         | Serve.Model_call_reported { model; _ } -> reported_model := model
@@ -750,7 +754,7 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
           Option.iter
             emit_text
             (Keeper_official_client_text_stream.remainder text_stream ~final_text:text);
-          finish_stream ())
+          finish_stream ~stop_reason:(Some Agent_core.Types.EndTurn) ())
   ; on_tool_started =
       (fun ~call_id ~tool_name ~arguments ->
         Keeper_official_client_text_stream.tool_row text_stream;
@@ -779,7 +783,7 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
              Hashtbl.remove tool_indexes call_id;
              emit_mcp_block (Agent_core.Types.ContentBlockStop { index }))
           (Hashtbl.find_opt tool_indexes call_id))
-  ; finish_host_stop = finish_stream
+  ; finish_host_stop = (fun () -> finish_stream ~stop_reason:(Some Agent_core.Types.EndTurn) ())
   }
 ;;
 

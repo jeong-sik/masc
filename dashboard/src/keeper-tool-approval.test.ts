@@ -245,6 +245,23 @@ describe('hydrateKeeperToolApprovals', () => {
     } finally { dispose() }
   })
 
+  it('does not resurrect a wait from an older overlapping listing', async () => {
+    const resolvers: Array<(response: Response) => void> = []
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { resolvers.push(resolve) })))
+    const older = hydrateKeeperToolApprovals()
+    await vi.waitFor(() => expect(resolvers).toHaveLength(1))
+    const newer = hydrateKeeperToolApprovals()
+    await vi.waitFor(() => expect(resolvers).toHaveLength(2))
+    resolvers[1]!(jsonResponse(200, { pending: [] }))
+    await newer
+    resolvers[0]!(jsonResponse(200, { pending: [{
+      keeper: 'sangsu', tool_call_id: 'finished-wait', tool: 'Execute', args: '{}',
+      question: 'approval', because: 'effect', asked_at: 1, timeout_sec: 180,
+    }] }))
+    await older
+    expect(keeperToolApprovals.value.sangsu?.['finished-wait']).toBeUndefined()
+  })
+
   it('stays silent when the listing fails — hydration is best-effort', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(503, { error: 'unavailable' })))
     await expect(hydrateKeeperToolApprovals()).resolves.toBeUndefined()

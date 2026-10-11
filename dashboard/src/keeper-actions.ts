@@ -248,8 +248,13 @@ export async function interruptKeeperTurn(keeperName: string): Promise<KeeperTur
 // Re-hydrates waits whose REQUESTED event this view never saw: the listing is
 // public-read, so a dashboard opened after the gate fired still draws the
 // card instead of discovering the wait only as a 180s timeout.
+let toolApprovalHydrationOwner: Readonly<{ id: symbol; authRevision: number }> | null = null
+
 export async function hydrateKeeperToolApprovals(): Promise<void> {
-  const authRevision = currentStoredTokenRevision()
+  const owner = Object.freeze({ id: Symbol('tool-approval-hydration'), authRevision: currentStoredTokenRevision() })
+  toolApprovalHydrationOwner = owner
+  const owns = () => toolApprovalHydrationOwner === owner
+    && owner.authRevision === currentStoredTokenRevision()
   let rows
   try {
     rows = await fetchKeeperToolApprovals()
@@ -259,7 +264,7 @@ export async function hydrateKeeperToolApprovals(): Promise<void> {
     return
   }
   for (const row of rows) {
-    if (authRevision !== currentStoredTokenRevision()) return
+    if (!owns()) return
     // A row the stream already drew carries fresher askedAt semantics; only
     // fill gaps, never overwrite an in-flight answer with a re-hydration.
     if (keeperToolApprovals.value[row.keeper]?.[row.tool_call_id]) continue

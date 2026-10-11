@@ -40,7 +40,8 @@ type delta =
   | Model_content_activity of Masc.Keeper_chat_events.model_content_activity
   | Stream_model_stopped of Masc.Keeper_chat_events.response_identity option
   | Stream_details of
-      { stream_scope : int option
+      { generation : int option
+      ; stream_scope : int option
       ; usage : stream_usage option
       ; stop_reason : Agent_core.Types.stop_reason option
       }
@@ -124,8 +125,11 @@ let nonnegative_int_field fields name =
 let optional_stream_scope fields name =
   match List.filter (fun (key, _) -> key = name) fields with
   | [] -> Ok None
-  | [(_, `Int scope)] when scope >= 0 -> Ok (Some scope)
-  | _ -> Error (name ^ " must be one nonnegative integer")
+  | [(_, json)] ->
+    (match Runtime_json_integer.of_json json with
+     | Ok scope when scope >= 0 -> Ok (Some scope)
+     | Ok _ | Error _ -> Error (name ^ " must be one nonnegative safe integer"))
+  | _ -> Error (name ^ " must be one nonnegative safe integer")
 
 (* The one place that reads a usage object, for both the live wire arm and the
    journal replay in {!Masc_tui_keeper_chat_log}: the producer writes the same
@@ -330,9 +334,20 @@ let custom_deltas_unvalidated fields =
        the stop reason ([dashboard/src/components/session-trace/
        session-trace-entry.ts]), so a turn in flight told one renderer its
        token cost and why it stopped, and the other nothing. A delta that
-       carried neither is not a row. *)
+       carried neither still retains its supplied response identity. *)
     (match object_field fields "value" with
      | Some value ->
+       let generation = match List.filter (fun (key,_) -> key="content_generation") value with
+         | [] -> Ok None
+         | [_, json] ->
+             Result.bind (Runtime_json_integer.of_json json) (fun generation ->
+               if generation < 0 then Error "content generation must be nonnegative"
+               else Ok (Some generation))
+         | _ -> Error "duplicate content generation" in
+       (match generation, optional_stream_scope value "stream_scope" with
+        | Error detail, _ | _, Error detail -> [Undecodable detail]
+        | Ok (Some _), Ok None -> [Undecodable "owned message delta requires stream_scope"]
+        | Ok generation, Ok stream_scope ->
        let usage =
          match List.assoc_opt "usage" value with
          | Some usage -> stream_usage_of_usage_json usage
@@ -344,9 +359,9 @@ let custom_deltas_unvalidated fields =
            Some (Agent_core.Types.stop_reason_of_string (String.trim reason))
          | Some _ | None -> None
        in
-       if usage = None && stop_reason = None
+       if generation = None && usage = None && stop_reason = None
        then []
-       else [ Stream_details { usage; stop_reason; stream_scope = nonnegative_int_field value "stream_scope" } ]
+       else [ Stream_details { generation; usage; stop_reason; stream_scope } ])
      | None -> [])
   | Some "KEEPER_TOOL_RESULT_READY" -> (
       match object_field fields "value" with

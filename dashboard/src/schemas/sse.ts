@@ -616,7 +616,7 @@ function validateKeeperCustomPayload(
     ],
     KEEPER_TOOL_APPROVAL_SETTLED: ['tool_call_id', 'outcome'],
     KEEPER_STREAM_MESSAGE_START: ['content_generation', 'stream_scope', 'provider_message_id', 'model', 'usage'],
-    KEEPER_STREAM_MESSAGE_DELTA: ['stream_scope', 'stop_reason', 'usage'],
+    KEEPER_STREAM_MESSAGE_DELTA: ['content_generation', 'stream_scope', 'stop_reason', 'usage'],
     KEEPER_CONTENT_BLOCK_START: ['index', 'content_type', 'tool_call_id', 'tool_call_name'],
     KEEPER_CONTENT_BLOCK_STOP: ['index'],
     KEEPER_NATIVE_TOOL_START: [
@@ -685,6 +685,10 @@ function validateKeeperCustomPayload(
       return value.usage === undefined ? ok(true) : validateUsage(value.usage)
     }
     case 'KEEPER_STREAM_MESSAGE_DELTA': {
+      if (value.content_generation !== undefined) {
+        const generation = requiredInteger(value, 'content_generation', 0)
+        if (!generation.success) return generation
+      }
       const scope = requiredInteger(value, 'stream_scope')
       if (!scope.success) return scope
       const stopReason = optionalString(value, 'stop_reason')

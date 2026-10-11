@@ -917,7 +917,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
         poison_scope bridge_state ~kind:Tool_message_start_conflict
           ~reason:"conflicting MessageStart invalidated the provider stream scope"
   | MessageDelta { stop_reason; usage } ->
-      let message_delta = Agent_core_stream_message_delta { stream_scope; stop_reason; usage } in
+      let message_delta = Agent_core_stream_message_delta { content_generation=Some bridge_state.content_generation; stream_scope; stop_reason; usage } in
       (match bridge_state.stream_phase, stop_reason with
        | Accepting_content, None ->
          { bridge_state; chat_events = [ message_delta ] }

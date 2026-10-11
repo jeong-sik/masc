@@ -804,7 +804,7 @@ let test_stream_usage_is_typed () =
      measured fact. *)
   check (list delta) "stream message delta yields the reported token counters"
     [ Live.Stream_details
-        { stream_scope = Some 4; usage =
+        {generation=None; stream_scope = Some 4; usage =
             Some
               { input_tokens = Some 1200
               ; output_tokens = Some 340
@@ -827,7 +827,7 @@ let test_stream_delta_with_only_a_stop_reason_is_a_row () =
          (`Assoc [ "stop_reason", `String "max_tokens" ]))
   in
   check (list delta) "a delta that reported only why it stopped is still a row"
-    [ Live.Stream_details { stream_scope = None; usage = None; stop_reason = Some Agent_core.Types.MaxTokens } ]
+    [ Live.Stream_details {generation=None; stream_scope = None; usage = None; stop_reason = Some Agent_core.Types.MaxTokens } ]
     (feed_whole body)
 
 let test_stream_delta_without_usage_is_no_row () =

@@ -243,7 +243,7 @@ let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
       { generation=content_generation; message_id = (if String.trim provider_message_id = "" then None else Some provider_message_id); model; stream_scope = Some stream_scope
       ; usage = Option.bind usage (fun usage ->
           Live.stream_usage_of_usage_json (E.api_usage_to_json usage)) })
-  | E.Agent_core_stream_message_delta { stream_scope; stop_reason; usage } ->
+  | E.Agent_core_stream_message_delta { content_generation; stream_scope; stop_reason; usage } ->
     (* Through the same readers as the live arm, over the same bytes the
        producer writes ([E.delta_usage_to_json], [E.stop_reason_to_string]), so
        a reloaded turn and a watched one report this identically. A delta that
@@ -263,9 +263,9 @@ let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
         | "" -> None
         | _ -> Some reason)
     in
-    if usage = None && stop_reason = None
+    if content_generation = None && usage = None && stop_reason = None
     then None
-    else Some (Live.Stream_details { usage; stop_reason; stream_scope = Some stream_scope })
+    else Some (Live.Stream_details { generation=content_generation; usage; stop_reason; stream_scope = Some stream_scope })
   | E.Model_content_activity activity -> Some (Live.Model_content_activity activity)
   | E.Agent_core_stream_message_stop owner -> Some (Live.Stream_model_stopped owner)
   | E.Agent_core_stream_ping

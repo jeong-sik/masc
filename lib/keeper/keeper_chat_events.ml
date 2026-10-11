@@ -105,7 +105,8 @@ type keeper_chat_event =
       ; usage : Agent_core.Types.api_usage option
       }
   | Agent_core_stream_message_delta of
-      { stream_scope : int
+      { content_generation : int option
+      ; stream_scope : int
       ; stop_reason : Agent_core.Types.stop_reason option
       ; usage : Agent_core.Types.delta_usage option
       }

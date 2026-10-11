@@ -15,6 +15,7 @@ vi.mock('./core', async (importOriginal) => {
 })
 
 import {
+  listQueuedKeeperChatOperations,
   bootKeeper,
   bulkKeeperDirective,
   clearKeeper,
@@ -1396,5 +1397,26 @@ describe('purgeKeeper', () => {
     await expect(purgeKeeperFromLifecycle('canary-10t-agy3')).rejects.toThrow(
       'canary-10t-agy3 제거 실패 (HTTP 500)',
     )
+  })
+})
+
+
+describe('queued operation list body ownership', () => {
+  it('keeps caller cancellation attached while the response body is pending', async () => {
+    let body!: ReadableStreamDefaultController<Uint8Array>
+    let signal!: AbortSignal
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      signal = init!.signal as AbortSignal
+      return new Response(new ReadableStream<Uint8Array>({ start(controller) { body = controller } }), {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+      })
+    }))
+    const caller = new AbortController()
+    const reading = listQueuedKeeperChatOperations('fixture', undefined, { signal: caller.signal }).catch(error => error)
+    await Promise.resolve()
+    await Promise.resolve()
+    caller.abort()
+    try { expect(signal.aborted).toBe(true) }
+    finally { body.error(new DOMException('Aborted', 'AbortError')); await reading }
   })
 })

@@ -815,27 +815,30 @@ export async function cancelKeeperChatOperation(
 export async function listQueuedKeeperChatOperations(
   keeperName: string,
   afterSequence?: string,
+  opts: { signal?: AbortSignal } = {},
 ): Promise<KeeperChatOperation[]> {
   const query = new URLSearchParams({ state: 'queued' })
   if (afterSequence !== undefined) query.set('after_sequence', afterSequence)
   const path = `/api/v1/keepers/${encodeURIComponent(keeperName)}/chat/operations?${query.toString()}`
-  const response = await fetchWithTimeout(path, { headers: jsonHeaders() }, DEFAULT_GET_TIMEOUT_MS)
-  if (!response.ok) throw await apiRequestErrorFromResponse('GET', path, response)
-  const value: unknown = await response.json()
-  if (
-    !isRecord(value)
-    || value.schema !== 'masc.keeper_chat_operations.list.v1'
-    || value.state !== 'Queued'
-    || !Array.isArray(value.operations)
-  ) {
-    throw new Error('Keeper chat operation list has an invalid contract')
-  }
-  const operations = value.operations.map(parseKeeperChatOperation)
-  if (operations.some(operation => operation.state.kind !== 'queued')) {
-    throw new Error('Keeper chat operation list contains a non-queued operation')
-  }
-  return operations
+  return fetchWithTimeout(path, { headers: jsonHeaders(), signal: opts.signal }, DEFAULT_GET_TIMEOUT_MS, async response => {
+    if (!response.ok) throw await apiRequestErrorFromResponse('GET', path, response)
+    const value: unknown = await response.json()
+    if (
+      !isRecord(value)
+      || value.schema !== 'masc.keeper_chat_operations.list.v1'
+      || value.state !== 'Queued'
+      || !Array.isArray(value.operations)
+    ) {
+      throw new Error('Keeper chat operation list has an invalid contract')
+    }
+    const operations = value.operations.map(parseKeeperChatOperation)
+    if (operations.some(operation => operation.state.kind !== 'queued')) {
+      throw new Error('Keeper chat operation list contains a non-queued operation')
+    }
+    return operations
+  })
 }
+
 
 async function mutateQueuedKeeperChatOperation(
   keeperName: string,

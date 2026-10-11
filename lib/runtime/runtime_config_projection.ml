@@ -23,9 +23,9 @@ type config_commit_error =
   | Config_commit_write_failed of Fs_compat.atomic_replace_failure
 
 (* Where the exact-output registry reads its targets. The server builds them
-   from this file's HTTP bindings, unless [AGENT_CORE_MODEL_CATALOG] names a
+   from runtime.toml's HTTP bindings, unless [AGENT_CORE_MODEL_CATALOG] names a
    full replacement catalog, whose [[targets]] rows are then the whole set and
-   carry their own [body_timeout_s] ([exact_output_resolver_catalog] reads
+   carry their own [body_timeout_s] ([Runtime.exact_output_resolver_catalog] reads
    this same answer for boot and every config commit). An empty or blank
    value names no file, as it always has for this variable. *)
 type exact_output_target_source =

@@ -1,0 +1,37 @@
+#use "topfind";;
+#require "yojson";;
+#mod_use "@SOURCE@";;
+module R = Runtime_claude_api_retry;;
+let frames = In_channel.with_open_text "@CAPTURE@" (fun ch ->
+  let rec read acc = match input_line ch with
+    | line -> read (Yojson.Safe.from_string line :: acc)
+    | exception End_of_file -> List.rev acc in read []);;
+let retries = List.filter (fun frame ->
+  Yojson.Safe.Util.member "subtype" frame = `String "api_retry") frames;;
+let session = Yojson.Safe.Util.(List.hd retries |> member "session_id" |> to_string);;
+let reports = List.map (fun frame -> match R.decode ~expected_session_id:session frame with
+  | Ok (Some report) -> report | _ -> failwith "captured retry rejected") retries;;
+if List.length reports <> 10 then failwith "capture count";;
+List.iteri (fun index (r:R.t) ->
+  if r.attempt <> index+1 || r.max_retries <> 10 || r.retry_delay_ms < 0
+     || r.error_status <> None then failwith "capture metadata") reports;;
+let frame = List.hd retries;;
+(match R.decode ~expected_session_id:"different-session" frame with
+ | Error R.Other_session -> () | _ -> failwith "cross-session retry admitted");;
+let alter key value = match frame with
+ | `Assoc fields -> `Assoc ((key,value)::List.remove_assoc key fields)
+ | _ -> failwith "fixture";;
+List.iter (fun (key,value) ->
+  match R.decode ~expected_session_id:session (alter key value) with
+  | Error (R.Invalid_field _) -> () | _ -> failwith "invalid retry admitted")
+ ["attempt",`Int (-1);"retry_delay_ms",`Float nan;"uuid",`String " "];;
+(match frame with
+ | `Assoc fields ->
+   (match R.decode ~expected_session_id:session (`Assoc (("attempt",`Int 1)::fields)) with
+    | Error (R.Conflicting_field "attempt") -> () | _ -> failwith "duplicate field admitted")
+ | _ -> failwith "fixture");;
+(match R.decode ~expected_session_id:session
+ (`Assoc ["type",`String "system";"subtype",`String "status"]) with
+ | Ok None -> () | _ -> failwith "status misclassified as retry");;
+print_endline "PASS captured retry frames: 10";;
+print_endline "PASS session ownership, numeric shape, UUID, duplicate fields and non-retry distinction";;

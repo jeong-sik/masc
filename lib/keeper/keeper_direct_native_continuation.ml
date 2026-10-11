@@ -134,10 +134,10 @@ let restore binding call =
     |> Result.map_error Keeper_repetition_snapshot.error_to_string in
   let* checkpoint = Keeper_repetition_context.load resumed.checkpoint.context
     |> Result.map_error Keeper_repetition_snapshot.error_to_string in
-  let* recovered = Domain_pool_ref.submit_cpu_or_inline (fun () ->
-    Keeper_native_repetition_recovery.reconcile
+  let* recovered = Domain_pool_ref.submit_io_or_inline (fun () ->
+    Keeper_native_repetition_recovery.reconcile ~base_path:binding.base_path
       ~scope:(Keeper_execution_scope_id.direct_operation binding.operation_id)
-      ~seed ~checkpoint ~settled
+      ~seed ~checkpoint ~settled ()
     |> Result.map_error Keeper_native_repetition_recovery.error_to_string) in
   (* Reconcile only in memory. The retained seed/latest artifacts and Owner
      references remain exact; the next normal checkpoint CAS commits this

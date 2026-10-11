@@ -26,7 +26,7 @@ let test_output_fingerprint_keeps_json_looking_text_opaque () =
       Masc.Keeper_tool_progress_identity.digest_tool_io
         ~tool_name:"opaque_tool"
         ~input:(`Assoc [ "value", `Int 1 ])
-        ~output_text
+        ~output_text ()
     with
     | Some fingerprints -> fingerprints.output_fingerprint
     | None -> fail "expected fingerprints"
@@ -44,7 +44,7 @@ let test_input_fingerprint_canonicalizes_typed_field_order () =
       Masc.Keeper_tool_progress_identity.digest_tool_io
         ~tool_name:"opaque_tool"
         ~input
-        ~output_text:"opaque"
+        ~output_text:"opaque" ()
     with
     | Some fingerprints -> fingerprints.input_fingerprint
     | None -> fail "expected fingerprints"

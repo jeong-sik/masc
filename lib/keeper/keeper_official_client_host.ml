@@ -26,13 +26,11 @@ type image_block = Keeper_official_client_context_projection.image_block =
   ; base64_data : string
   }
 
-type composed_context = Keeper_official_client_context_projection.composed_context =
-  { carrier_sha256 : string
-  ; blocks : (Prompt_block_id.t * string) list
-  }
+type composed_context = Keeper_official_client_context_projection.composed_context
 
 type resume_delivery = Keeper_official_client_context_projection.resume_delivery =
   { prompt : string
+  ; context_projection : Keeper_context_submission_link.t
   ; held_context : Keeper_official_client_session_store.held_context list
   }
 
@@ -1166,19 +1164,30 @@ let repeated_call_abort_threshold = 3
    a receipt that stamps a revision or a clock on every identical call
    ({!Keeper_tool_answer}). The shape tag keeps a text-only result, an answer
    and a block result from colliding on the same bytes. *)
-let dynamic_tool_fingerprint ~tool_name ~input result =
+let dynamic_tool_fingerprint ?base_path ~tool_name ~input result =
   let open Digestif.SHA256 in
   let context = feed_string empty tool_name in
   let context = feed_string context (input |> Yojson.Safe.sort |> Yojson.Safe.to_string) in
   let context = feed_string context (if result.success then "success" else "failure") in
   let context = match result.content_blocks with
     | None ->
-      (match Keeper_tool_answer.answer ~tool_name ~output_text:result.content with
+      (match Tool_output.decode_from_agent_core result.content with
+       | Tool_output.Decoded _ ->
+         (match Option.bind base_path (fun base_path ->
+            Keeper_tool_answer.verified_stored_answer ~base_path ~tool_name
+              ~output_text:result.content) with
+          | Some answer ->
+            feed_string
+              (feed_string context "answer")
+              (answer |> Yojson.Safe.sort |> Yojson.Safe.to_string |> digest_string |> to_hex)
+          | None -> feed_string (feed_string context "text-only") result.content)
+       | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
+        (match Keeper_tool_answer.answer ~tool_name ~output_text:result.content with
        | Some answer ->
          feed_string
            (feed_string context "answer")
-           (answer |> Yojson.Safe.sort |> Yojson.Safe.to_string)
-       | None -> feed_string (feed_string context "text-only") result.content)
+           (answer |> Yojson.Safe.sort |> Yojson.Safe.to_string |> digest_string |> to_hex)
+       | None -> feed_string (feed_string context "text-only") result.content))
     | Some blocks ->
       feed_string
         (feed_string context "content-blocks")
@@ -1204,6 +1213,7 @@ let rec observe_repeated_call state fingerprint =
 type raw_trace_stage =
   | Run_start
   | Reasoning_effort
+  | Context_submission
   | Assistant_block
   | Tool_start
   | Tool_finish
@@ -1214,6 +1224,7 @@ type raw_trace_stage =
 let raw_trace_stage_label = function
   | Run_start -> "run_start"
   | Reasoning_effort -> "reasoning_effort"
+  | Context_submission -> "context_submission"
   | Assistant_block -> "assistant_block"
   | Tool_start -> "tool_start"
   | Tool_finish -> "tool_finish"
@@ -1225,6 +1236,8 @@ let raw_trace_stage_label = function
 let observe_raw_trace ~keeper_name ~stage observe =
   match
     try observe () with
+    | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+    | Eio.Time.Timeout as exn -> raise exn
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | (Out_of_memory | Stack_overflow | Sys.Break) as exn -> raise exn
     | exn -> Error (Agent_core.Error.Internal (Printexc.to_string exn))
@@ -1466,7 +1479,7 @@ let boundary_observation_cause error =
     }
 ;;
 
-let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_approval
+let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_input ~tool_approval
     ~runtime_label ~keeper_name
     ~turn_count ~context ~tools ~loading_plan
     ~(hooks : Agent_core.Hooks.hooks) ~event_bus ~context_injector
@@ -1725,7 +1738,7 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
             | Some _, _ | None, Some _ -> result
             | None, None ->
               let fingerprint =
-                dynamic_tool_fingerprint ~tool_name:tool.schema.name ~input result
+                dynamic_tool_fingerprint ?base_path ~tool_name:tool.schema.name ~input result
               in
               let repeated_count = observe_repeated_call repeated_call_state fingerprint in
               if repeated_count < repeated_call_abort_threshold then result
@@ -1795,7 +1808,7 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
   }
 ;;
 
-let dynamic_tools ~content_transport ~accepts_image_input ~tool_approval ~runtime_label
+let dynamic_tools ?base_path ~content_transport ~accepts_image_input ~tool_approval ~runtime_label
     ~keeper_name ~turn_count ~tools ~loading_plan
     ~hooks ~event_bus ~context_injector ~context ~terminal_effect_state
     ~terminal_error ~pre_tool_rejects
@@ -1814,6 +1827,7 @@ let dynamic_tools ~content_transport ~accepts_image_input ~tool_approval ~runtim
     Ok
       (List.map
          (dynamic_tool_of_agent_core
+            ~base_path
             ~content_transport
             ~accepts_image_input
             ~tool_approval

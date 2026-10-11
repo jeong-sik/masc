@@ -704,10 +704,10 @@ let assemble_hooks
                   ~execution_evidence
               in
               let progress_io_fingerprints =
-                Keeper_tool_progress_identity.digest_tool_io
+                Keeper_tool_progress_identity.digest_tool_io ~base_path:config.base_path
                   ~tool_name
                   ~input
-                  ~output_text
+                  ~output_text ()
               in
               (match Keeper_registry.get ~base_path:config.base_path meta.name with
                | Some entry ->
@@ -999,6 +999,9 @@ let assemble_hooks
                     ~enabled:!active_tool_surface_enabled
                     ~tool_choice:current_params.tool_choice ~schema_names:schema_filter
                     ~agent_cell:turn_agent_cell ~built:built_tools in
+                let personal_recall_access = Keeper_request_tool_access.create
+                    ~offered:offered_tools ~deferred_names:ctx.deferred_tool_names
+                    ~loader_alive:attempt_surface.loader_alive in
                 let recall_tool_available name =
                   List.exists (fun (tool : Agent_core.Tool.t) ->
                     String.equal tool.schema.name name) offered_tools
@@ -1058,6 +1061,8 @@ let assemble_hooks
                         file instead of starving the main Eio domain. *)
                      Domain_pool_ref.submit_io_or_inline (fun () ->
                        Keeper_memory_os_recall.render_if_enabled
+                         ~memory_select_route:(Keeper_request_tool_access.route personal_recall_access
+                           ~name:"keeper_memory_select")
                          ~memory_search_available:(recall_tool_available "keeper_memory_search")
                          ~artifact_reader_available:
                            (recall_tool_available Keeper_runtime_schemas_toml.artifact_read.name)
@@ -1265,14 +1270,7 @@ let assemble_hooks
                        recorded_blocks_for_receipt;
                 acc.extra_system_context_digest <- Option.map sha256_hex ctx;
                 acc.extra_system_context_size <- Option.map String.length ctx;
-                (* The carrier is these blocks alone only when no earlier hook
-                   put text in front of them. An official-client resume splits
-                   the carrier into them to send only what its vendor session
-                   does not already hold. *)
-                acc.extra_system_context_blocks
-                <- (match current_params.extra_system_context, ctx with
-                    | None, Some _ -> Some recorded_blocks_for_receipt
-                    | Some _, _ | None, None -> None);
+                acc.extra_system_context_assembly <- Some extra_system_context_assembly;
                 (match runtime_manifest_context, runtime_manifest_append with
                  | Some manifest_context, Some append_manifest ->
                    let post_tool_context = post_tool_round in
@@ -1303,6 +1301,10 @@ let assemble_hooks
                                ; ( "extra_system_context_computed_size",
                                    Json_util.int_opt_to_json
                                      acc.extra_system_context_size )
+                               ; ( "extra_system_context_partition",
+                                   match extra_system_context_assembly.receipt with
+                                   | None -> `Null
+                                   | Some receipt -> Keeper_context_assembly.receipt_to_json receipt )
                                ]))
                         ())
                  | _ -> ());

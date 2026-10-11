@@ -34,6 +34,22 @@ describe('parseToolBlobMarker', () => {
     expect(parsed!.preview).toBe('first line')
   })
 
+  it('keeps artifact and semantic identities separate', () => {
+    const answer = 'B'.repeat(64)
+    const marker = `[masc:blob sha256=${sha} bytes=256 mime=application/json answer_sha256=${answer} preview="result"]`
+    expect(parseToolBlobMarker(marker)).toEqual({
+      sha256: sha, bytes: 256, mime: 'application/json', preview: 'result',
+      answerSha256: answer.toLowerCase(),
+    })
+  })
+
+  it('rejects malformed or duplicated semantic identities', () => {
+    for (const identity of ['bad', 'a'.repeat(63), 'a'.repeat(65),
+      `${sha} answer_sha256=${sha}`]) {
+      expect(parseToolBlobMarker(`[masc:blob sha256=${sha} bytes=2 mime=text/plain answer_sha256=${identity} preview="x"]`)).toBeNull()
+    }
+  })
+
   it('lowercases sha256 for canonical comparison', () => {
     const upper = 'A'.repeat(64)
     const m = `[masc:blob sha256=${upper} bytes=10 mime=text/plain preview="x"]`

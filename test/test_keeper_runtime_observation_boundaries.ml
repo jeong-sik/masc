@@ -577,7 +577,57 @@ let test_extra_system_context_preserves_typed_blocks () =
   Alcotest.(check (option string))
     "complete source order reaches AGENT_CORE"
     (Some "existing\n\ndynamic\n\nsummary\n\nmemory")
-    assembly.extra_system_context
+    assembly.extra_system_context;
+  let module Assembly = Keeper_context_assembly in
+  let repeated = "기억 \"동일\"\n반복" in
+  List.iter (fun prefix ->
+    List.iter (fun blocks ->
+      let issued = Keeper_run_prompt.assemble_extra_system_context
+        ~existing_extra_system_context:prefix ~blocks in
+      let expected = List.fold_left (fun before (_,text) -> match before with
+        | None -> Some text | Some before -> Some (before ^ "\n\n" ^ text)) prefix blocks in
+      Alcotest.(check (option string)) "None/Some empty and original concatenation preserved"
+        expected issued.extra_system_context;
+      match expected,issued.receipt with
+      | None,None -> ()
+      | Some text,Some receipt ->
+        Alcotest.(check int) "receipt counts raw UTF8 bytes" (String.length text) receipt.bytes;
+        Alcotest.(check string) "whole raw carrier hash"
+          Digestif.SHA256.(digest_string text |> to_hex) receipt.sha256;
+        let cursor = ref 0 and block_index = ref 0 and prefix_seen = ref false in
+        List.iter (fun (span:Assembly.span) ->
+          Alcotest.(check int) "ordered spans have no gaps or overlap" !cursor span.offset;
+          let source = String.sub text span.offset span.bytes in
+          Alcotest.(check string) "span hash binds exact issued bytes"
+            Digestif.SHA256.(digest_string source |> to_hex) span.sha256;
+          (match span.kind with
+           | Assembly.Block block ->
+             let expected_block,expected_text = List.nth blocks !block_index in
+             Alcotest.(check bool) "identity comes from ordered producer, not matching text" true
+               (block=expected_block);
+             Alcotest.(check string) "complete block bytes preserved" expected_text source;
+             incr block_index
+           | Assembly.Unattributed Assembly.Existing_prefix ->
+             prefix_seen:=true;
+             Alcotest.(check (option string)) "prefix retained including empty Some" prefix (Some source)
+           | Assembly.Unattributed Assembly.Separator ->
+             Alcotest.(check string) "separator remains unattributed" "\n\n" source);
+          cursor:=span.offset+span.bytes) receipt.spans;
+        Alcotest.(check int) "all blocks covered once" (List.length blocks) !block_index;
+        Alcotest.(check bool) "prefix presence is distinct from its byte length"
+          (Option.is_some prefix) !prefix_seen;
+        Alcotest.(check int) "raw byte partition closes" (String.length text) !cursor;
+        let ids = List.map fst blocks in
+        let unique = List.length (List.sort_uniq compare ids) = List.length ids in
+        Alcotest.(check bool) "only prefix-free exact carrier permits splitting"
+          (Option.is_none prefix && unique) (Option.is_some (Assembly.blocks_for_carrier issued text));
+        Alcotest.(check bool) "different carrier cannot reuse a receipt" false
+          (Option.is_some (Assembly.blocks_for_carrier issued (text ^ "changed")))
+      | None,Some _ | Some _,None -> Alcotest.fail "carrier presence and receipt disagree")
+      [[];[Prompt_block_id.Memory_os_recall,""];
+       [Prompt_block_id.Memory_os_recall,repeated;Prompt_block_id.Librarian_working_context,repeated];
+       [Prompt_block_id.Memory_os_recall,repeated;Prompt_block_id.Memory_os_recall,repeated]])
+    [None;Some "";Some repeated]
 
 let () =
   Alcotest.run "keeper_runtime_observation_boundaries"

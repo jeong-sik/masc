@@ -2781,7 +2781,44 @@ let update_locked_with_error
   |> Result.map (fun (snapshot, (_ : commit_effect), ()) -> snapshot)
 ;;
 
-let with_receipt_status ?(strict_snapshot=false) ~keepers_dir ~keeper_id select =
+type receipt_read = Reconcile_receipts | Preserve_authority of string
+
+(* Admission cannot reinterpret a consumed input as new when its snapshot proof
+   disappears. This read projects prepared commits in memory only, preserving
+   every stored byte even when the caller subsequently rejects queue coverage. *)
+let preserved_committed_receipts ~keepers_dir ~keeper_id ~snapshot ~queue_generation =
+  (* The cached read decodes the sidecar only when its file identity changed.
+     Nothing here writes the sidecar or marks a fixed point. *)
+  let* read = read_durable_range_receipts_cached ~keepers_dir ~keeper_id in
+  let receipts = match read with
+    | Cached_receipts entry -> entry.receipts
+    | Uncached_receipts receipts -> receipts in
+  let receipts = List.filter (fun receipt ->
+    match consumed_candidate (receipt_range_id receipt) with
+    | Some candidate -> String.equal candidate.queue_generation queue_generation
+    | None -> false) receipts in
+  (* Hashed at most once, and only when a receipt names the current revision. *)
+  let snapshot =
+    Option.map (fun (current, content) -> current, lazy (sha256 content)) snapshot in
+  let rec verify kept = function
+    | [] -> Ok (List.rev kept)
+    | Prepared {range_id; snapshot_revision; snapshot_sha256} :: rest ->
+      (match snapshot with
+       | Some (current, digest) when current.revision = snapshot_revision
+           && String.equal (Lazy.force digest) snapshot_sha256 ->
+         verify (Committed {range_id; snapshot_revision; snapshot_sha256} :: kept) rest
+       | None | Some _ -> verify kept rest)
+    | (Committed {snapshot_revision; snapshot_sha256; _} as receipt) :: rest ->
+      (match snapshot with
+       | Some (current, digest) when current.revision > snapshot_revision
+           || (current.revision = snapshot_revision
+               && String.equal (Lazy.force digest) snapshot_sha256) ->
+         verify (receipt :: kept) rest
+       | None | Some _ -> Error "explicit admission authority unavailable: committed receipt has no verifiable current snapshot; stores preserved") in
+  verify [] receipts
+;;
+
+let with_receipt_status ?(strict_snapshot=false) ?(receipt_read=Reconcile_receipts) ~keepers_dir ~keeper_id select =
   try
     Fs_compat.mkdir_p keepers_dir;
     let snapshot_path = path_for_keepers_dir ~keepers_dir ~keeper_id in
@@ -2809,7 +2846,12 @@ let with_receipt_status ?(strict_snapshot=false) ~keepers_dir ~keeper_id select 
                Ok None)
         in
         let receipts =
-          try reconcile_durable_range_receipts ~keepers_dir ~keeper_id ~snapshot with
+          try
+            match receipt_read with
+            | Reconcile_receipts -> reconcile_durable_range_receipts ~keepers_dir ~keeper_id ~snapshot
+            | Preserve_authority queue_generation ->
+                preserved_committed_receipts ~keepers_dir ~keeper_id ~snapshot ~queue_generation
+          with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn -> Error (Printf.sprintf
               "durable receipt reconciliation failed: %s" (Printexc.to_string exn))
@@ -2825,8 +2867,8 @@ let with_receipt_status ?(strict_snapshot=false) ~keepers_dir ~keeper_id select 
          (Printexc.to_string exn))
 ;;
 
-let with_committed_receipts ?(strict_snapshot=false) ~keepers_dir ~keeper_id select =
-  with_receipt_status ~strict_snapshot ~keepers_dir ~keeper_id (fun snapshot receipts ->
+let with_committed_receipts ?(strict_snapshot=false) ?(receipt_read=Reconcile_receipts) ~keepers_dir ~keeper_id select =
+  with_receipt_status ~strict_snapshot ~receipt_read ~keepers_dir ~keeper_id (fun snapshot receipts ->
     let* receipts = receipts in
     select snapshot receipts)
 ;;
@@ -2884,7 +2926,7 @@ let committed_range ~keepers_dir ~keeper_id select =
 ;;
 
 let committed_explicit_candidates ~keepers_dir ~keeper_id ~queue_generation =
-  with_committed_receipts ~keepers_dir ~keeper_id (fun _snapshot receipts ->
+  with_committed_receipts ~receipt_read:(Preserve_authority queue_generation) ~keepers_dir ~keeper_id (fun _snapshot receipts ->
     Ok (List.filter_map (function
       | Committed {range_id; _} ->
         (match consumed_candidate range_id with

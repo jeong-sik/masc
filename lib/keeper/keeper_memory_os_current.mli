@@ -458,12 +458,13 @@ type disposition =
 val committed_explicit_candidates :
   keepers_dir:string -> keeper_id:string -> queue_generation:string ->
   (explicit_candidate_id list, string) result
-(** Recover once under the store locks and return every committed candidate for
-    this generation, ordered by sequence. These receipts authorize no queue
-    acknowledgement by themselves: a consumer must match the original payload.
+(** Read under the store locks and return every proven committed candidate for
+    this generation, ordered by sequence. Matching prepared evidence is projected
+    in memory only. Missing, undecodable or mismatched snapshot authority for a
+    committed receipt returns an error without changing stored evidence.
+    A consumer must still match the original payload and account for queue gaps.
     Candidate receipts survive later valid snapshot revisions and retirement.
-    As with range receipts, missing or unverifiable snapshot evidence invalidates
-    them; this is not a separate immutable consumption ledger. *)
+    This is not reconstruction of missing receipts or an immutable ledger. *)
 
 type revision_evidence =
   { snapshot_revision : int

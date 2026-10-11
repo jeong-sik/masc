@@ -27,10 +27,7 @@ type user_turn_record =
     checkpoint that already contains the exact current input, so replay does
     not append a duplicate. The distinction is typed, not inferred from text. *)
 
-type extra_system_context_assembly =
-  { extra_system_context : string option
-  ; blocks : (Prompt_block_id.t * string) list
-  }
+type extra_system_context_assembly = Keeper_context_assembly.t
 
 val sanitize_user_message : string -> string
 (** Normalize malformed UTF-8 before appending the complete user message to

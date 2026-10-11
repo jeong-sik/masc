@@ -112,7 +112,8 @@ let retire_pin ~config ~keeper_id observed =
 
 let authoritative = function Absent | Available _ -> true | Unavailable -> false
 
-let render_demand_notice ~memory_search_available ~config ~keepers_dir ~keeper_id ~observed =
+let render_demand_notice ~memory_select_route ~memory_search_available ~config ~keepers_dir ~keeper_id
+    ~observed =
   let ordinary_state = read_ordinary ~keepers_dir ~keeper_id in
   let source_state = read_source ~keepers_dir ~keeper_id in
   if authoritative ordinary_state && authoritative source_state then
@@ -131,9 +132,18 @@ let render_demand_notice ~memory_search_available ~config ~keepers_dir ~keeper_i
         "Source-bound memory: revision=%d; %d stored claims; %d pending invalidations. Source verification is deferred until retrieval; no stored claim is verified by this notice."
         snapshot.Keeper_memory_source_current.revision (List.length snapshot.facts)
         (List.length snapshot.invalidations) in
-  let retrieval = if memory_search_available then
+  let selection_guidance access =
+      access ^ " with a purpose describing the current question or decision and its event/environment when known. It selects current memory on demand and preserves current_decision versus comparison roles. Comparison is not evidence of the current event's state. Deferred or unavailable selection is not proof of no relevant memory. Do not enumerate all stored facts as a prerequisite for work."
+      ^ (if memory_search_available then
+          " keeper_memory_search remains available for lexical lookup and explicit absorbed/dropped history; check historical scope before use."
+         else "") in
+  let retrieval = match memory_select_route with
+    | Keeper_request_tool_access.Direct -> selection_guidance "Use keeper_memory_select"
+    | Discoverable -> selection_guidance
+        "Use the offered tool discovery facility to load keeper_memory_select, then call it"
+    | Unavailable when memory_search_available ->
       "Use keeper_memory_search with a query relevant to the current input or task. Its default scope is current memory; when truncated=true, follow next_cursor with the same query and source=current to read further relevant facts; source=absorbed retrieves merged originals and source=dropped retrieves historical removals with reasons. Historical results require checking before use. Only returned, currently verified facts apply; do not enumerate the entire memory store as a prerequisite for work."
-    else
+    | Unavailable ->
       "Memory retrieval is unavailable on this tool surface. No stored claim bodies are included. Continue from original admitted inputs; ask for retrieval capability if historical memory is required." in
   block [ordinary; source; retrieval; current_lookup_scope]
 ;;
@@ -215,15 +225,24 @@ let render_with_source_revalidation ~memory_search_available ~artifact_reader_av
 
 let enabled () = Env_config.KeeperMemoryOs.recall_enabled ()
 
-let render_if_enabled ?(artifact_reader_available = true) ?(memory_search_available = true) ~config ~meta ~keepers_dir ~keeper_id ~now () =
+let render_if_enabled ?(artifact_reader_available = true) ?(memory_search_available = true)
+    ?(memory_select_route = Keeper_request_tool_access.Unavailable) ~config ~meta ~keepers_dir ~keeper_id ~now () =
   if not (enabled ())
   then Some (block ["Recall is disabled. Earlier Recall facts are historical and have not been refreshed; disabling does not establish deletion."])
   else
     Some
       (try
          let observed = Keeper_recall_artifact.observe_current ~config ~keeper_id ~kind:Memory_os in
-         if memory_search_available || not artifact_reader_available then
-           render_demand_notice ~memory_search_available ~config ~keepers_dir ~keeper_id ~observed
+         let memory_select_route = match memory_select_route with
+           | Keeper_request_tool_access.Unavailable -> Keeper_request_tool_access.Unavailable
+           | Direct | Discoverable ->
+             (match Typesafeai_config.workspace_memory_selection_destinations ~keeper_id with
+              | Ok _ -> memory_select_route
+              | Error _ -> Keeper_request_tool_access.Unavailable) in
+         if memory_select_route <> Keeper_request_tool_access.Unavailable
+            || memory_search_available || not artifact_reader_available then
+           render_demand_notice ~memory_select_route ~memory_search_available ~config ~keepers_dir
+             ~keeper_id ~observed
          else
            render_with_source_revalidation ~memory_search_available ~artifact_reader_available
              ~config ~meta ~keepers_dir ~keeper_id ~now ~observed

@@ -1569,9 +1569,10 @@ let run_turn
                        so only the checkpoint's own pairs move the boundary. *)
                     let checkpoint = Agent_core.Agent.checkpoint agent in
                     Keeper_run_tools_setup.initial_tool_calls
+                      ~base_path:config.base_path
                       ~history_memo:(Keeper_tool_progress_identity.history_memo
                         ~base_path:config.base_path ~keeper_name:meta.name)
-                      ~history_messages:checkpoint.messages
+                      ~history_messages:checkpoint.messages ()
                     |> List.length
                   | None, Some Runtime_execution.Masc_agent_core ->
                     Log.Keeper.warn ~keeper_name:meta.name
@@ -1882,16 +1883,7 @@ let run_turn
                           ~keeper_name:meta.name
                           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id))
                       ~official_client_composed_context:(fun () ->
-                        match
-                          acc.Keeper_run_tools.extra_system_context_digest,
-                          acc.Keeper_run_tools.extra_system_context_blocks
-                        with
-                        | Some carrier_sha256, Some blocks ->
-                          Some
-                            { Keeper_official_client_host.carrier_sha256
-                            ; blocks
-                            }
-                        | None, _ | Some _, None -> None)
+                        acc.Keeper_run_tools.extra_system_context_assembly)
                       ~on_request_attribution:
                         (fun ~runtime_id ~tools ~transmitted ->
                            (* Official-client lanes send their requests

@@ -490,7 +490,7 @@ let test_a_rewrite_receipt_has_the_same_answer () =
   let fingerprint receipt =
     match
       Masc.Keeper_tool_progress_identity.digest_tool_io
-        ~tool_name:"keeper_memory_write" ~input:args ~output_text:receipt
+        ~tool_name:"keeper_memory_write" ~input:args ~output_text:receipt ()
     with
     | Some io -> io.Masc.Keeper_tool_progress_identity.output_fingerprint
     | None -> Alcotest.fail "no fingerprint for a memory write receipt"
@@ -831,6 +831,68 @@ let test_demand_recall_does_not_materialize_or_verify_all_memory () =
      && contains ~needle:"this notice verifies no claim" no_tools);
   Alcotest.(check string) "notice is independent of wall clock" prompt
     (render ~search:true ~reader:true ~now:300.);
+  (* Construct request access from the offered surface: a deferred name alone
+     cannot promise that selection can be loaded. None of these notice requests
+     should inspect the changed source or materialize its stored claim. *)
+  let tool name = Agent_core.Tool.create ~name ~description:"notice fixture"
+      ~parameters:[] (fun _ -> Alcotest.fail "notice must not execute a tool") in
+  let select = tool "keeper_memory_select" in
+  let loader = tool "keeper_tool_search" in
+  let key = "MASC_TEST_MEMORY_NOTICE_KEY" in
+  let with_policy ~enabled ~excluded f =
+    Masc_test_deps.with_process_env key (Some "synthetic-notice-key") @@ fun () ->
+    Masc_test_deps.with_typesafeai_policy
+      {Runtime_schema.default_typesafeai with
+       lane_enabled=true; workspace_memory_selection_enabled=enabled;
+       excluded_keepers=(if excluded then [meta.name] else []);
+       destinations=({Runtime_schema.endpoint="http://127.0.0.1:1";
+                      model="notice-only"; api_key_env=key},[])} f in
+  let notice ~offered ~loader_alive ~search ~reader =
+    let access = Masc.Keeper_request_tool_access.create ~offered
+        ~deferred_names:["keeper_memory_select"] ~loader_alive in
+    Masc.Keeper_memory_os_recall.render_if_enabled
+      ~memory_select_route:(Masc.Keeper_request_tool_access.route access
+        ~name:"keeper_memory_select")
+      ~memory_search_available:search ~artifact_reader_available:reader
+      ~config ~meta ~keepers_dir ~keeper_id:meta.name ~now:300. () |> Option.get in
+  with_policy ~enabled:true ~excluded:false (fun () ->
+    let direct = notice ~offered:[select] ~loader_alive:false ~search:false ~reader:true in
+    Alcotest.(check bool) "select-only request offers purpose-scoped selection" true
+      (contains ~needle:"Use keeper_memory_select" direct
+       && contains ~needle:"current_decision versus comparison" direct
+       && contains ~needle:"not proof of no relevant memory" direct);
+    Alcotest.(check bool) "select-only request does not invent lexical access" false
+      (contains ~needle:"keeper_memory_search" direct);
+    let both = notice ~offered:[select] ~loader_alive:false ~search:true ~reader:false in
+    Alcotest.(check bool) "selection also describes available lexical history" true
+      (contains ~needle:"keeper_memory_search remains available for lexical lookup" both);
+    let discoverable = notice ~offered:[loader] ~loader_alive:true ~search:false ~reader:true in
+    Alcotest.(check bool) "live offered loader gives truthful discovery instruction" true
+      (contains ~needle:"load keeper_memory_select, then call it" discoverable);
+    List.iter (fun (offered, loader_alive) ->
+      Alcotest.(check string) "unloadable selection preserves lexical notice" prompt
+        (notice ~offered ~loader_alive ~search:true ~reader:true);
+      Alcotest.(check string) "unloadable selection preserves no-tool notice" no_tools
+        (notice ~offered ~loader_alive ~search:false ~reader:false))
+      [([loader],false); ([],true); ([],false)];
+    List.iter (fun body -> List.iter (fun text ->
+      Alcotest.(check bool) "selection notice omits full memory bodies" false
+        (contains ~needle:text body)) [claim;source_claim;source_path])
+      [direct;both;discoverable]);
+  List.iter (fun (enabled, excluded) ->
+    with_policy ~enabled ~excluded (fun () ->
+      Alcotest.(check string) "policy denial preserves lexical fallback" prompt
+        (notice ~offered:[select] ~loader_alive:false ~search:true ~reader:true);
+      Alcotest.(check string) "policy denial cannot advertise selection without other tools" no_tools
+        (notice ~offered:[loader] ~loader_alive:true ~search:false ~reader:false)))
+    [(false,false);(true,true)];
+  Alcotest.(check string) "all selection notices leave changed-source state untouched"
+    before (Fs_compat.load_file source_file);
+  List.iter (fun path -> Alcotest.(check bool) "notice creates no artifact or evaluation journal"
+      false (Sys.file_exists path))
+    [Filename.concat keeper_dir "memory-recall-current.json";
+     Filename.concat keeper_dir "memory-selection-evaluations.jsonl";
+     Tool_blob_store.root_dir (Tool_blob_store.create ~base_path)];
   let search = Runtime.keeper_memory_search_json ~config ~meta
       ~ctx_work:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
       ~args:(`Assoc ["query", `String "deployment"; "limit", `Int 10])
@@ -838,7 +900,17 @@ let test_demand_recall_does_not_materialize_or_verify_all_memory () =
   Alcotest.(check (list string)) "demand search withholds changed source and keeps ordinary fact"
     [claim] (match_texts search);
   Alcotest.(check bool) "lookup revalidates and updates the changed source" false
-    (String.equal before (Fs_compat.load_file source_file))
+    (String.equal before (Fs_compat.load_file source_file));
+  with_policy ~enabled:false ~excluded:false (fun () ->
+    let artifact_notice = notice ~offered:[select] ~loader_alive:false
+        ~search:false ~reader:true in
+    Alcotest.(check bool) "denied selection retains the offered artifact fallback" true
+      (contains ~needle:"Use keeper_artifact_read" artifact_notice);
+    let reference = List.hd (List.rev (String.split_on_char '\n' artifact_notice))
+        |> Yojson.Safe.from_string |> Tool_output.normalized_artifact_ref_of_json in
+    match reference with
+    | Tool_output.Decoded_normalized_artifact_ref _ -> ()
+    | _ -> Alcotest.fail "artifact-only fallback must publish a real artifact reference")
 ;;
 
 let test_same_count_replacement_updates_notice_and_demand_search () =

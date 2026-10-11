@@ -2039,8 +2039,7 @@ let check_resume_recall_blocks ~compaction ~resend_after_start () =
         ; Prompt_block_id.Operator_note, "REPEATED_OPERATOR_NOTE" ] in
       let carrier = String.concat "\n\n" (List.map snd blocks) in
       let hooks = { Agent_core.Hooks.empty with before_turn_params = Some (fun _ ->
-        composed := Some { Keeper_official_client_host.carrier_sha256 =
-          Digestif.SHA256.(digest_string carrier |> to_hex); blocks };
+        composed := Some (Keeper_context_assembly.assemble ~existing_extra_system_context:None ~blocks);
         Agent_core.Hooks.AdjustParams { Agent_core.Hooks.default_turn_params with
           extra_system_context = Some carrier }) } in
       let run = run_turn_with ~composed_context:(fun () -> !composed)

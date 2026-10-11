@@ -33,6 +33,7 @@ type artifact_ref =
   ; bytes : int
   ; preview : string
   ; mime : string
+  ; answer_fingerprint : string option
   }
 
 type make_error =
@@ -40,6 +41,7 @@ type make_error =
   | Negative_bytes of int
   | Empty_mime
   | Unencodable_mime of string
+  | Invalid_answer_fingerprint of invalid_sha256
 
 let make_error_to_string = function
   | Invalid_sha256 err -> invalid_sha256_to_string err
@@ -51,6 +53,9 @@ let make_error_to_string = function
       "media type must not contain whitespace, got %S; the agent-core marker \
        writes it unquoted between spaces"
       mime
+  | Invalid_answer_fingerprint error ->
+    Printf.sprintf "invalid semantic answer fingerprint: %s"
+      (invalid_sha256_to_string error)
 
 (* [encode_for_agent_core] writes mime unquoted between two spaces, and the
    decoder reads it with [%s@ ]. A media type carrying a parameter the usual
@@ -73,13 +78,20 @@ let make_artifact_ref ~sha256 ~bytes ~preview ~mime =
     if bytes < 0 then Error (Negative_bytes bytes)
     else if String.equal (String.trim mime) "" then Error Empty_mime
     else if not (mime_is_encodable mime) then Error (Unencodable_mime mime)
-    else Ok { sha256; bytes; preview; mime }
+    else Ok { sha256; bytes; preview; mime; answer_fingerprint = None }
 
 let with_preview artifact_ref preview = { artifact_ref with preview }
+let with_answer_fingerprint artifact_ref answer_fingerprint =
+  match answer_fingerprint with
+  | None -> Ok { artifact_ref with answer_fingerprint = None }
+  | Some fingerprint ->
+    (match validate_sha256 fingerprint with
+     | Ok () -> Ok { artifact_ref with answer_fingerprint }
+     | Error error -> Error (Invalid_answer_fingerprint error))
 
 let normalized_artifact_ref_key = "_blob"
 
-let normalized_artifact_ref_to_json { sha256; bytes; preview; mime } =
+let normalized_artifact_ref_to_json { sha256; bytes; preview; mime; _ } =
   `Assoc
     [ ( normalized_artifact_ref_key
       , `Assoc
@@ -251,9 +263,14 @@ let marker_prefix = "[masc:blob sha256="
 let is_marker s = String.starts_with ~prefix:marker_prefix s
 
 let encode_for_agent_core = function
-  | Stored { sha256; bytes; preview; mime } ->
-    Printf.sprintf "[masc:blob sha256=%s bytes=%d mime=%s preview=%S]"
-      sha256 bytes mime preview
+  | Stored { sha256; bytes; preview; mime; answer_fingerprint } ->
+    let semantic =
+      match answer_fingerprint with
+      | None -> ""
+      | Some fingerprint -> Printf.sprintf " answer_sha256=%s" fingerprint
+    in
+    Printf.sprintf "[masc:blob sha256=%s bytes=%d mime=%s%s preview=%S]"
+      sha256 bytes mime semantic preview
 
 type decode_result =
   | Not_marker
@@ -268,16 +285,26 @@ let decode_from_agent_core s =
          (* [%!] requires the input to end right after the closing bracket;
             without it [sscanf] stops once the format is satisfied and would
             accept any trailing bytes as part of a valid marker. *)
-         Scanf.sscanf s "[masc:blob sha256=%s@ bytes=%d mime=%s@ preview=%S]%!"
-           (fun sha256 bytes mime preview -> Ok (sha256, bytes, mime, preview))
+         Scanf.sscanf s "[masc:blob sha256=%s@ bytes=%d mime=%s@ answer_sha256=%s@ preview=%S]%!"
+           (fun sha256 bytes mime answer_sha256 preview ->
+             Ok (sha256, bytes, mime, Some answer_sha256, preview))
        with
-       | Scanf.Scan_failure msg -> Error msg
+       | Scanf.Scan_failure _ ->
+         (try
+            Scanf.sscanf s "[masc:blob sha256=%s@ bytes=%d mime=%s@ preview=%S]%!"
+              (fun sha256 bytes mime preview -> Ok (sha256, bytes, mime, None, preview))
+          with
+          | Scanf.Scan_failure msg -> Error msg
+          | End_of_file -> Error "unexpected end of artifact marker"
+          | Failure msg -> Error msg
+          | Invalid_argument msg -> Error msg)
        | End_of_file -> Error "unexpected end of artifact marker"
        | Failure msg -> Error msg
        | Invalid_argument msg -> Error msg)
     with
     | Error detail -> Invalid_marker { detail }
-    | Ok (sha256, bytes, mime, preview) -> (
-      match make_artifact_ref ~sha256 ~bytes ~preview ~mime with
+    | Ok (sha256, bytes, mime, answer_fingerprint, preview) -> (
+      match Result.bind (make_artifact_ref ~sha256 ~bytes ~preview ~mime)
+              (fun reference -> with_answer_fingerprint reference answer_fingerprint) with
       | Ok artifact_ref -> Decoded artifact_ref
       | Error err -> Invalid_marker { detail = make_error_to_string err })

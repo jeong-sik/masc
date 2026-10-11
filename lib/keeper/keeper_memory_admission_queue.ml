@@ -122,23 +122,29 @@ let read_pending ~keepers_dir ~keeper_id =
   | None | Some {pending = []; _} -> None
   | Some state -> Some {generation = state.generation; rows = state.pending}
 
-(* Strictly ascending pending sequences are a subset of 1..last_sequence. Every
-   position pending no longer holds was removed by an earlier acknowledgement,
-   which required its committed receipt, and candidate receipts are retained
-   per candidate. So each removed position must still be named by a receipt;
-   one that is not (a restored older receipt file, a rolled-back snapshot) is
-   input nothing proves was consumed. The scan returns the first such position. *)
-let first_unproven_consumed (state : state)
-    (receipts : Keeper_memory_os_current.explicit_candidate_id list) =
-  let covered = Hashtbl.create (List.length state.pending + List.length receipts) in
-  List.iter (fun (row : candidate) -> Hashtbl.replace covered row.sequence ()) state.pending;
-  List.iter (fun (receipt : Keeper_memory_os_current.explicit_candidate_id) ->
-    Hashtbl.replace covered receipt.sequence ()) receipts;
-  let rec scan sequence =
-    if sequence > state.last_sequence then None
-    else if Hashtbl.mem covered sequence then scan (sequence + 1)
-    else Some sequence in
-  scan 1
+(* Sparse acknowledgement may remove rows in any order, but it never erases
+   their allocated sequence. Every hole must still have exact commit authority.
+   Merge the two sorted streams without enumerating an untrusted numeric range. *)
+let validate_sequence_coverage (state : state) receipts =
+  let unavailable detail = Error (detail ^
+    "; recovery needs an independently attested exact backup that this product does not create — without one this state is unrecoverable and the queue stays blocked (docs/guides/MEMORY-ADMISSION-RECOVERY.md)") in
+  let rec cover previous pending committed =
+    let advance sequence pending committed =
+      if previous = max_int || sequence <> previous + 1 then
+        unavailable "explicit admission authority unavailable: allocated sequence has neither pending input nor a committed receipt; stores preserved"
+      else cover sequence pending committed in
+    match pending, committed with
+    | [], [] ->
+      if previous = state.last_sequence then Ok ()
+      else unavailable "explicit admission authority unavailable: allocated tail has no pending input or committed receipt; stores preserved"
+    | row :: pending, [] -> advance row.sequence pending []
+    | [], (receipt : Keeper_memory_os_current.explicit_candidate_id) :: committed ->
+      advance receipt.sequence [] committed
+    | row :: pending_tail, (receipt : Keeper_memory_os_current.explicit_candidate_id) :: committed_tail ->
+      if row.sequence = receipt.sequence then advance row.sequence pending_tail committed_tail
+      else if row.sequence < receipt.sequence then advance row.sequence pending_tail committed
+      else advance receipt.sequence pending committed_tail in
+  cover 0 state.pending receipts
 
 let acknowledge_committed ~keepers_dir ~keeper_id =
   let* initial = read ~keepers_dir ~keeper_id in
@@ -154,19 +160,14 @@ let acknowledge_committed ~keepers_dir ~keeper_id =
        may not contain, so the locked rewrite does not repeat the check. *)
     let* receipts = Keeper_memory_os_current.committed_explicit_candidates
       ~keepers_dir ~keeper_id ~queue_generation:initial.generation in
-    match first_unproven_consumed initial receipts, receipts with
-    | Some unproven_sequence, _ ->
-      Error (Printf.sprintf
-        "admission receipt recovery required: generation=%s unproven_sequence=%d consumed_sequence_count=%d; recovery needs an independently attested exact backup that this product does not create — without one this state is unrecoverable and the queue stays blocked (docs/guides/MEMORY-ADMISSION-RECOVERY.md); pending input is unchanged"
-        initial.generation unproven_sequence (initial.last_sequence - List.length initial.pending))
-    | None, [] -> Ok ()
-    | None, _ :: _ -> locked ~keepers_dir ~keeper_id (fun () ->
+    locked ~keepers_dir ~keeper_id (fun () ->
       let* current = read ~keepers_dir ~keeper_id in
       match current with
       | None -> Error "pending admission queue disappeared before acknowledgement"
       | Some state when state.generation <> initial.generation ->
         Error "pending admission generation changed before acknowledgement"
       | Some state ->
+        let* () = validate_sequence_coverage state receipts in
         let by_request = Hashtbl.create (List.length receipts) in
         let by_sequence = Hashtbl.create (List.length receipts) in
         let* () = List.fold_left (fun result (receipt : Keeper_memory_os_current.explicit_candidate_id) ->

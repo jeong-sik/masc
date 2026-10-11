@@ -236,9 +236,9 @@ let deferred_names_absent_from ~declared_names ~actual_names =
    resume; the checkpoint preserves the AGENT_CORE message history, so the
    identical pairs of the previous run were invisible to it and a repeat
    split 2+2 across two runs escaped at threshold 3. *)
-let seed_tool_calls_from_history
+let seed_tool_calls_from_history ?base_path
     ~(history_memo : Keeper_tool_progress_identity.History_memo.t)
-    ~(history_messages : Agent_core.Types.message list)
+    ~(history_messages : Agent_core.Types.message list) ()
   : Keeper_agent_result.tool_call_detail list
   =
   let result_by_id = Hashtbl.create 16 in
@@ -292,7 +292,7 @@ let seed_tool_calls_from_history
            }
        | None -> None)
     pairs
-    (Keeper_tool_progress_identity.digest_history_pairs history_memo pairs)
+    (Keeper_tool_progress_identity.digest_history_pairs ?base_path history_memo pairs)
   |> List.filter_map Fun.id
 ;;
 
@@ -300,18 +300,14 @@ let seed_tool_calls_from_history
    starts from, given the checkpoint-resumed history. Production acc creation
    and the regression test both go through this function, so reverting its
    body to [] is exactly the pre-fix behavior. *)
-let initial_tool_calls
+let initial_tool_calls ?base_path
     ~(history_memo : Keeper_tool_progress_identity.History_memo.t)
-    ~(history_messages : Agent_core.Types.message list) :
+    ~(history_messages : Agent_core.Types.message list) () :
     Keeper_agent_result.tool_call_detail list =
-  (* Serialising and hashing every tool call in the history is pure, so the
-     pool does it. The walk is over the whole history, which measured
-     1,278,158 B above, and it runs once per turn between the raw-trace
-     append and [Keeper_identity_tools.for_turn]: the 2026-09-06 20:29 KST
-     trace shows that stretch as the longest run left on the main domain,
-     55-222 ms across five Keepers. *)
-  Domain_pool_ref.submit_cpu_or_inline (fun () ->
-    seed_tool_calls_from_history ~history_memo ~history_messages)
+  (* Stored answer identity rechecks the owned blob bytes on every walk;
+     keep this filesystem work off the main domain. *)
+  Domain_pool_ref.submit_io_or_inline (fun () ->
+    seed_tool_calls_from_history ?base_path ~history_memo ~history_messages ())
 ;;
 
 (* The ToolUse ids the checkpoint history already holds. *)
@@ -684,7 +680,7 @@ let prepare_agent_setup
          call once. *)
       let history_memo = Keeper_tool_progress_identity.history_memo
         ~base_path:config.base_path ~keeper_name:meta.name in
-      let history_pairs = initial_tool_calls ~history_memo ~history_messages in
+      let history_pairs = initial_tool_calls ~base_path:config.base_path ~history_memo ~history_messages () in
       let* judged = activate_repetition_boundary ~context:shared_context
         ~keeper_name:meta.name ~history_pairs:(List.length history_pairs)
         |> Result.map_error (fun detail -> Agent_core.Error.Internal detail) in

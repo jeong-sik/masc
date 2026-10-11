@@ -671,7 +671,7 @@ let test_repeated_exact_tool_call_reset_across_checkpoint_restart () =
    body that has been cleared. *)
 let digest tool_name input output_text =
   match
-    Masc.Keeper_tool_progress_identity.digest_tool_io ~tool_name ~input ~output_text
+    Masc.Keeper_tool_progress_identity.digest_tool_io ~tool_name ~input ~output_text ()
   with
   | Some { Masc.Keeper_tool_progress_identity.input_fingerprint; output_fingerprint } ->
     input_fingerprint, output_fingerprint
@@ -949,7 +949,7 @@ let test_history_memo_answers_a_purged_body_from_its_new_bytes () =
     match
       Masc.Keeper_run_tools_setup.seed_tool_calls_from_history
         ~history_memo
-        ~history_messages:(history body)
+        ~history_messages:(history body) ()
     with
     | [ { Masc.Keeper_agent_result.output_fingerprint = Some output; _ } ] -> output
     | calls -> failf "expected one seeded call, got %d" (List.length calls)
@@ -959,7 +959,7 @@ let test_history_memo_answers_a_purged_body_from_its_new_bytes () =
       Masc.Keeper_tool_progress_identity.digest_tool_io
         ~tool_name:"masc_status"
         ~input
-        ~output_text:body
+        ~output_text:body ()
     with
     | Some { Masc.Keeper_tool_progress_identity.output_fingerprint; _ } -> output_fingerprint
     | None -> fail "digest_tool_io refused the fixture"
@@ -1000,7 +1000,7 @@ let test_repeated_exact_tool_call_seeded_from_checkpoint_history () =
   let seed =
     Masc.Keeper_run_tools_setup.seed_tool_calls_from_history
       ~history_memo:(Masc.Keeper_tool_progress_identity.History_memo.create ())
-      ~history_messages:prior_run_history
+      ~history_messages:prior_run_history ()
   in
   (* Newest first, matching the live accumulator's order. *)
   check int "seed keeps both prior-run calls" 2 (List.length seed);
@@ -1016,7 +1016,7 @@ let test_repeated_exact_tool_call_seeded_from_checkpoint_history () =
          Masc.Keeper_tool_progress_identity.digest_tool_io
            ~tool_name:detail.tool_name
            ~input:(`Assoc [ ("argv", `List [ `String "list" ]) ])
-           ~output_text:"{\"ok\":true}"
+           ~output_text:"{\"ok\":true}" ()
        in
        match live with
        | Some { Masc.Keeper_tool_progress_identity.input_fingerprint; output_fingerprint } ->
@@ -1038,14 +1038,14 @@ let test_repeated_exact_tool_call_seeded_from_checkpoint_history () =
     (List.length
        (Masc.Keeper_run_tools_setup.seed_tool_calls_from_history
           ~history_memo:(Masc.Keeper_tool_progress_identity.History_memo.create ())
-          ~history_messages:unmatched_history));
+          ~history_messages:unmatched_history ()));
   (* The wiring seam: production acc creation goes through
      [initial_tool_calls], so this is what run 2's detector actually folds
      over after a checkpoint restart with [prior_run_history] persisted. *)
   let run_2_starts_from =
     Masc.Keeper_run_tools_setup.initial_tool_calls
       ~history_memo:(Masc.Keeper_tool_progress_identity.History_memo.create ())
-      ~history_messages:prior_run_history
+      ~history_messages:prior_run_history ()
   in
   (* Run 2 then executes the same two identical calls live. Build them with
      the production digest so their fingerprints are byte-identical to the
@@ -1055,7 +1055,7 @@ let test_repeated_exact_tool_call_seeded_from_checkpoint_history () =
       Masc.Keeper_tool_progress_identity.digest_tool_io
         ~tool_name:"keeper_tasks_list"
         ~input:(`Assoc [ ("argv", `List [ `String "list" ]) ])
-        ~output_text:"{\"ok\":true}"
+        ~output_text:"{\"ok\":true}" ()
     with
     | Some { Masc.Keeper_tool_progress_identity.input_fingerprint; output_fingerprint } ->
       { Masc.Keeper_agent_result.tool_name = "keeper_tasks_list"

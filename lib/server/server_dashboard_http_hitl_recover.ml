@@ -336,7 +336,25 @@ let ack_json ~base_path ~approval_id ~keeper_name ~consume_id =
       , "no consume-only tail stands for this identity (delivered, acked, \
          or never consumed)" )
   | Keeper_late_approval.Ack_not_journaled ->
-    Error (`Unavailable, "ack journal append failed; the count is unchanged")
+    (* The store's fence and a real append failure share this constructor,
+       but they demand different operator actions — the fence is cleared by
+       the restore exit above (or the move-aside repair), a failed append
+       by a plain retry. The two-branch response below names the action
+       instead of reporting "append failed" for a call that never reached
+       the journal (the rearm handler :291-304 already answers this way). *)
+    let repair_hint =
+      match Keeper_late_approval.journal_error store with
+      | Some (Keeper_late_approval.Corrupt_journal _) ->
+        "the journal is fenced on a corrupt row: run the restore endpoint \
+         to confirm, move the journal file aside (keeping its evidence), \
+         then restore again"
+      | Some (Keeper_late_approval.Journal_unavailable _) ->
+        "the journal is fenced while its storage is unreadable: bring the \
+         storage back and run the restore endpoint"
+      | None ->
+        "the ack append failed without a store fence; retry the request"
+    in
+    Error (`Unavailable, Printf.sprintf "ack not journaled: %s" repair_hint)
 ;;
 
 (** Handle one recover POST. The workspace is the authenticated caller's:
@@ -412,6 +430,39 @@ let handle_post state ~actor ~approval_id request reqd body =
           "recover request.action is required"))
 
 let uncertain_path = "/api/v1/keepers/hitl/late-approval-attempts"
+
+let journal_restore_path = "/api/v1/keepers/hitl/late-approval-restore"
+
+(* The operator's un-fence: the same rebind-and-restore the boot path runs,
+   exposed so a fenced journal can be cleared without a server restart. A
+   corrupt journal stays fenced on purpose — the library never skips or
+   rewrites rows, so the endpoint reports the documented repair instead of
+   pretending the fence is gone. *)
+let handle_journal_restore state request reqd =
+  ignore request;
+  let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
+  let store = Keeper_late_approval.shared () in
+  Keeper_late_approval.restore ~base_path store;
+  match Keeper_late_approval.journal_error store with
+  | None ->
+    respond request reqd ~status:`OK
+      (`Assoc [ "ok", `Bool true
+              ; "detail", `String "late approval journal restored" ])
+  | Some (Keeper_late_approval.Corrupt_journal detail) ->
+    respond_error request reqd ~status:`Service_unavailable
+      ~code:"journal_corrupt"
+      (Printf.sprintf
+         "the journal still fails validation and stays fenced: move it \
+          aside (losing that row's evidence) and restore again; detail: %s"
+         detail)
+  | Some (Keeper_late_approval.Journal_unavailable detail) ->
+    respond_error request reqd ~status:`Service_unavailable
+      ~code:"journal_unavailable"
+      (Printf.sprintf
+         "the journal is still unavailable; the fence stands until the \
+          medium is readable again: %s"
+         detail)
+
 let uncertain_response state =
   let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
   match Keeper_late_approval.uncertain_attempts (Keeper_late_approval.shared ()) ~base_path with

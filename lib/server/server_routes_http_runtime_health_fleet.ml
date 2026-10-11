@@ -241,7 +241,9 @@ let keeper_hitl_gate_health_snapshot () =
             ~unread_entries:(List.length read_errors)
             ~answered_total
             ~timed_out_total
-            ~late_uncertain:(List.length uncertain)))
+            ~late_uncertain:(List.length uncertain)
+            ~journal_stats:(Keeper_late_approval.journal_stats (Keeper_late_approval.shared ()))
+            ()))
 ;;
 
 let keeper_hitl_gate_health_json () =

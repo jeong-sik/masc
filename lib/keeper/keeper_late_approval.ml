@@ -406,6 +406,35 @@ let bind_to_journal ?now ~base_path t =
       reap_locked t ~now;
       t.journal_path <- Some path)
 
+let restore ?now ~base_path t = bind_to_journal ?now ~base_path t
+
+let journal_stats t = with_store t (fun () ->
+    match t.journal_path with
+    | None -> None
+    | Some path -> (
+      match Eio_guard.run_in_systhread
+              ~label:"late-approval-journal-stats"
+              (fun () ->
+                 match Unix.stat path with
+                 | { st_size; _ } ->
+                   let rows =
+                     let ic = open_in_bin path in
+                     Fun.protect
+                       ~finally:(fun () -> close_in ic)
+                       (fun () ->
+                          let n = ref 0 in
+                          (try
+                             while ignore (input_line ic); true do
+                               incr n
+                             done
+                           with End_of_file -> ());
+                          !n)
+                   in
+                   Some (Int64.of_int st_size, rows)
+                 | exception _ -> None)
+      with
+      | stats -> stats
+      | exception _ -> None))
 let journal_uncertain t = with_store t (fun () -> List.length t.uncertain)
 let journal_error t = with_store t (fun () -> t.journal_error)
 let journal_skipped t = with_store t (fun () -> t.skipped_rows)

@@ -677,11 +677,10 @@ let test_completed_snapshot_captures_settle_and_continues_waking () =
      lands a new completion in the capture boundary, so the walk below cannot
      see it in [completed] and must come back with a continuation wake. This
      pins the comment above [settle_completed_snapshot] — completions that
-     arrive after the capture belong to the next admission snapshot. This
-     test does NOT check that the settle walk yields between members: with
-     the walk's inter-member [fair_yield] removed it still passes (measured
-     on the pushed head, 2026-10-10). Yielding is covered by nothing here;
-     watching it is tracked in task-2233's follow-up scope. *)
+     arrive after the capture belong to the next admission snapshot. The
+     settle walk's inter-member yield is pinned separately by
+     test_settle_walk_yields_between_captured_members (task-2234); this test
+     passes with it removed. *)
   let on_captured
         ~base_path
         ~keeper_name:_
@@ -709,6 +708,43 @@ let test_completed_snapshot_captures_settle_and_continues_waking () =
   Alcotest.(check (list string)) "next owner boundary delivers new completion"
     [ first.candidate_id; second.candidate_id; new_candidate.candidate_id ]
     (delivered_ids ~base_path)
+;;
+
+let test_settle_walk_yields_between_captured_members () =
+  Eio_main.run @@ fun _ ->
+  with_temp_base "board-completed-yield" @@ fun base_path ->
+  let first = record ~base_path (candidate ~id:"yield-first" ~recorded_at:1.0 ()) in
+  let _second = record ~base_path (candidate ~id:"yield-second" ~recorded_at:2.0 ()) in
+  ignore (complete_next ~base_path J.Relevant);
+  ignore (complete_next ~base_path J.Relevant);
+  (* Why not an external fiber: measured, Eio file I/O is itself a resumption
+     point, so an outside fiber runs inside member settlements even when the
+     between-members yield is removed — its ledger view cannot separate the
+     two orders. The yield seam is injected instead (same pattern as
+     drain_available's ~yield): the walk must call it exactly once for a
+     two-member snapshot, exactly between the members, and never before the
+     first settlement starts. *)
+  let yield_calls = ref 0 in
+  let mid_delivery = ref None in
+  let counting_yield () =
+    incr yield_calls;
+    mid_delivery := Some (delivered_ids ~base_path)
+  in
+  (match
+     ok "settle captured snapshot"
+       (W.settle_completed_snapshot
+          ~base_path
+          ~keeper_name:"alpha"
+          ~yield:counting_yield
+          ())
+   with
+   | W.Partition_settled { continuation_wake = None; _ } -> ()
+   | _ -> Alcotest.fail "unexpected settlement shape");
+  Alcotest.(check int) "one between-members yield for two members" 1
+    !yield_calls;
+  Alcotest.(check (option (list string)))
+    "the yield sits between the members, after the first settlement"
+    (Some [ first.candidate_id ]) !mid_delivery
 ;;
 
 let test_setup_error_stops_before_claim_without_hot_retry () =
@@ -1418,15 +1454,15 @@ let test_drain_then_settle_does_not_mint_a_ready_root () =
 
 (* The owner settlement, which runs without the worker lock, is landed in
    the gap the seam's hook defines: immediately before the wake's first
-   prune. The settlement consumes X and settles X's partition; the prunes
-   that follow drop X's row and its settled receipt, so the seam's returned
-   list is post-prune and minting over it appends nothing. With the
-   candidate read reverted in front of the prunes — the pre-#41506 order —
-   the same hook position still lets the prunes drop the row and receipt,
-   but the list minted over is the stale pre-prune read: it still names X,
-   and [ensure_roots] over a Pending candidate whose partition just settled
-   re-creates the Ready root the settled receipt no longer authorizes —
-   the wedge #41506 closed. This test is the tripwire for that revert. *)
+   prune. Under the shipped order — read after both prunes — the seam's
+   returned list is post-prune, it no longer names X, and minting over it
+   appends nothing. Moving the candidate read in front of the prunes (the
+   pre-#41506 order) does not change when the prunes run, so X's row and its
+   settled receipt are dropped just the same; what changes is the list
+   minted over. That stale list still names X as Judged, and [ensure_roots]
+   over a candidate whose partition just settled re-creates the Ready root
+   the settled receipt no longer authorizes — the wedge #41506 closed. This
+   test is the tripwire for that revert. *)
 let test_owner_settlement_before_the_prunes_does_not_mint_a_ready_root () =
   with_temp_base "board-attention-worker-settle-between-read-and-roots" @@ fun base_path ->
   let kept = record ~base_path (candidate ~id:"candidate-overlap-race" ()) in
@@ -1523,6 +1559,96 @@ let test_owner_settlement_before_the_prunes_does_not_mint_a_ready_root () =
        | A.Quarantine _ -> "Quarantine"
      in
      Alcotest.failf "the pruned candidate's row survived the wake: status=%s" label
+   | _ -> Alcotest.fail "unexpected duplicate rows");
+  List.iter
+    (fun (partition : P.t) ->
+       match partition.state with
+       | P.Settled _ -> ()
+       | _ ->
+         Alcotest.failf
+           "the wake minted a fresh Ready root over the settled partition: %s"
+           partition.partition_id)
+    partitions
+;;
+
+(* A candidate read that sits between the two prunes is post-prune by
+   construction, so the #41506 tripwire above cannot catch a settlement
+   that lands in the OTHER gap: between that read and the settled-receipt
+   prune. This test pins exactly that seam. The [before_receipt_prune] hook
+   lands the owner settlement there: the between-prunes read has already
+   returned the stale list (naming X as Judged), the settlement consumes X
+   and settles X's partition, and minting roots over that stale list raises
+   a fresh Ready root over the settled partition — the same wedge #41506
+   closed, one gap later. *)
+let test_owner_settlement_between_the_prunes_does_not_mint_a_ready_root () =
+  with_temp_base "board-attention-worker-settle-between-prunes" @@ fun base_path ->
+  let kept = record ~base_path (candidate ~id:"candidate-overlap-race-2" ()) in
+  let (selected : A.candidate), completed_judgment = complete_next ~base_path J.Relevant in
+  Alcotest.(check string) "the judged candidate is ours" kept.candidate_id
+    selected.candidate_id;
+  Masc.Keeper_registry.set_board_cursor ~base_path "alpha" 50.0 (Some "cursor-post");
+  let hook_fired = ref 0 in
+  let candidates =
+    ok "drain with the settlement before the receipt prune"
+      (W.For_testing.prunes_and_read
+         ~base_path
+         ~keeper_name:"alpha"
+         ~before_receipt_prune:(fun () ->
+           incr hook_fired;
+           (* Same owner settlement as the first overlap test: consume X,
+              then settle X's partition. The between-prunes read has already
+              returned its list, so the settlement lands after the read and
+              before the receipt prune. *)
+           ignore
+             (delivered
+                "owner settlement consumes X"
+                (A.apply_judgment_and_deliver
+                   ~base_path
+                   ~keeper_name:"alpha"
+                   ~candidate_id:kept.candidate_id
+                   ~judgment:completed_judgment)
+              : A.candidate);
+           ignore
+             (ok "settle X's partition without the worker lock"
+                (W.For_testing.deliver_and_settle_completed
+                   ~base_path
+                   ~keeper_name:"alpha"
+                   (load_one_partition ~base_path))))
+         ())
+  in
+  Alcotest.(check int) "the hook fired once" 1 !hook_fired;
+  ignore
+    (ok "mint roots over the list the wake read"
+       (P.ensure_roots ~base_path ~keeper_name:"alpha" candidates));
+  let candidates, partitions = read_candidate_and_roots ~base_path in
+  let residue =
+    List.filter
+      (fun (c : A.candidate) -> String.equal c.candidate_id kept.candidate_id)
+      candidates
+  in
+  (match residue with
+   | [] -> ()
+   (* A settle later in the same wake may drop the consumed row too; the
+      invariant is the one the partition check below asserts, not the row.
+      Only a stale non-consumed row matters: with the between-prunes read
+      in front of the prunes, the minted-over list still names X as Judged,
+      and the settlement's own delivery re-creates that Judged row after
+      the prunes — a survive-the-wake failure the partition check alone
+      would not witness. *)
+   | [ candidate ] ->
+     (match candidate.status with
+      | A.Judged _ | A.Pending _ ->
+        let label =
+          match candidate.status with
+          | A.Pending _ -> "Pending"
+          | A.Judged _ -> "Judged"
+          | A.Consumed _ -> "Consumed"
+          | A.Quarantine _ -> "Quarantine"
+        in
+        Alcotest.failf
+          "the settled candidate's stale row survived the wake: status=%s"
+          label
+      | A.Consumed _ | A.Quarantine _ -> ())
    | _ -> Alcotest.fail "unexpected duplicate rows");
   List.iter
     (fun (partition : P.t) ->
@@ -4337,6 +4463,10 @@ let () =
             `Quick
             test_owner_settlement_before_the_prunes_does_not_mint_a_ready_root
         ; Alcotest.test_case
+            "owner settlement between the prunes does not mint a ready root"
+            `Quick
+            test_owner_settlement_between_the_prunes_does_not_mint_a_ready_root
+        ; Alcotest.test_case
             "bookkeeping failure keeps its cause and the flow sentence"
             `Quick
             test_bookkeeping_failure_keeps_its_cause_and_the_flow_sentence
@@ -4504,6 +4634,10 @@ let () =
         ; Alcotest.test_case
             "completed snapshot capture defers new completions to the next wake"
             `Quick test_completed_snapshot_captures_settle_and_continues_waking
+        ; Alcotest.test_case
+            "settle walk lets another fiber run between captured members \
+             (task-2234)"
+            `Quick test_settle_walk_yields_between_captured_members
         ; Alcotest.test_case
             "discards do not hold the owner delivery slot"
             `Quick

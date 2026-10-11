@@ -109,9 +109,10 @@ let finalizable ~id ~requested_at =
     ~disposition:Q.Summary_attempt_in_flight
 
 let aggregate ?(is_live = fun _ -> false) ?(unread_entries = 0)
-    ?(late_uncertain = 0) ~now waits entries =
+    ?(late_uncertain = 0) ?journal_stats ~now waits entries =
   H.aggregate ~now ~is_live ~waits ~entries ~unread_entries
     ~answered_total:0 ~timed_out_total:0 ~late_uncertain
+    ?journal_stats ()
 
 let test_empty_queue_is_ok () =
   let section = aggregate ~now:100.0 [] [] in
@@ -121,7 +122,25 @@ let test_empty_queue_is_ok () =
   check int "no open approvals" 0 (assoc_int "approvals_open" section);
   check bool "oldest is null" true (field "oldest" section = `Null);
   check bool "the durable counts are complete" true
-    (assoc_bool "counts_complete" section)
+    (assoc_bool "counts_complete" section);
+  (* No journal stats: the unbound store reports absence, not zero — the
+     fields are omitted entirely (design D4a). *)
+  check bool "absent stats are omitted, never zero" true
+    (try
+       ignore (field "late_approval_journal_bytes" section);
+       false
+     with Not_found -> true)
+
+let test_journal_stats_report_the_file_size_and_row_count () =
+  let section =
+    aggregate ~journal_stats:(Some (Int64.of_int 5412, 37)) ~now:100.0 [] []
+  in
+  check string "stats do not change the grade" "ok"
+    (assoc_string "status" section);
+  check int "the byte count is the file's" 5412
+    (assoc_int "late_approval_journal_bytes" section);
+  check int "the row count is the file's" 37
+    (assoc_int "late_approval_journal_rows" section)
 
 let test_held_call_is_visible_without_raising_the_grade () =
   let waits = [ wait ~tool_call_id:"call-1" ~asked_at:90.0 ] in
@@ -245,7 +264,17 @@ let test_late_journal_unavailable_demands_an_operator () =
     (assoc_string "status" section);
   check bool "the rollup reads the operator requirement" true
     (assoc_bool "operator_action_required" section);
-  check (list string) "with the reason" [ "late_approval_journal_unavailable" ]
+  (* task-2237: the reasons name the action for each fence cause — the
+     CanAdmin restore endpoint for unavailable storage, the move-aside
+     repair for a corrupt row — so an operator can act from the reason
+     alone (design D4a). *)
+  check (list string) "with the reason and the documented exit"
+    [ "late_approval_journal_unavailable"
+    ; "run POST /api/v1/keepers/hitl/late-approval-restore (CanAdmin) once \
+       the journal storage is readable again"
+    ; "if the restore reports journal_corrupt, move the journal file aside \
+       (keeping its evidence) and run the restore endpoint again"
+    ]
     (reasons section)
 
 let test_oldest_spans_both_sources () =
@@ -293,6 +322,9 @@ let () =
     "keeper_hitl_gate_health"
     [ ( "visibility"
       , [ test_case "an empty queue is ok" `Quick test_empty_queue_is_ok
+        ; test_case
+            "journal stats report the file size and row count" `Quick
+            test_journal_stats_report_the_file_size_and_row_count
         ; test_case
             "a held call is visible without raising the grade" `Quick
             test_held_call_is_visible_without_raising_the_grade

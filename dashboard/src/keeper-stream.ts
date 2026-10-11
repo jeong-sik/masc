@@ -102,7 +102,7 @@ function flushAutonomousSaying(keeperName: string, entryId: string, observationO
         kind: 'progress' as const, text: pending.text,
         ...(pending.timestamp === undefined ? {} : { ts: new Date(pending.timestamp * 1000).toISOString() }),
       }] } : {}),
-      ...(observationOnly ? {} : { text: '', rawText: '', blocks: [], replyTextProjection: undefined }),
+      ...(observationOnly ? {} : { text: '', rawText: '', blocks: [], replyTextProjection: undefined, replyBlockSource: undefined }),
     }
   })
 }
@@ -209,6 +209,7 @@ function resetUnfinishedRuntimeAttempt(
     text: '',
     rawText: '',
     replyTextProjection: undefined,
+    replyBlockSource: undefined,
     blocks: producerReplyBlocks(entry).filter(block => (
       block.t !== 'p' && block.t !== 'thinking'
     )),
@@ -706,6 +707,7 @@ function admitResponseEvent(
     ...current,
     responseState: decision.state,
     ...(decision.advanced && decision.authoritative ? {
+      replyBlockSource: undefined,
       streamState: 'opening' as const,
       details: current.details ? { ...current.details, providerMessageId: null, modelUsed: null,
         stopReason: null, usage: null, costUsd: null } : current.details,
@@ -1413,6 +1415,7 @@ export function applyKeeperStreamEvent(
         updateThreadEntry(keeperName, assistantEntryId, entry => ({
           ...entry,
           replyTextProjection: undefined,
+          replyBlockSource: undefined,
           blocks: [
             ...producerReplyBlocks(entry).filter(block => block.t !== 'status'),
             { t: 'status', kind: 'continuation_checkpoint' },

@@ -156,6 +156,21 @@ describe('answerHeldKeeperToolApproval', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it.each([
+    {},
+    { settled: 'false', decision: 'approve' },
+    { settled: true },
+    { settled: true, decision: 'unknown' },
+    null,
+  ])('preserves the pending approval when the answer receipt is malformed', async body => {
+    pendingRow('malformed-receipt-call')
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, body))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(answerHeldKeeperToolApproval('sangsu', 'malformed-receipt-call', 'approve')).resolves.toBe(false)
+    expect(keeperToolApprovals.value.sangsu?.['malformed-receipt-call']?.settled).toBe(false)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('ignores a second answer for a call already being answered', async () => {
     pendingRow('call-double')
     let releaseFetch: (() => void) | undefined

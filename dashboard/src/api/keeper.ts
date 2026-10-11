@@ -313,7 +313,7 @@ export async function answerKeeperToolApproval(
   toolCallId: string,
   decision: 'approve' | 'deny',
   opts: { signal?: AbortSignal } = {},
-): Promise<{ settled: boolean; decision: string }> {
+): Promise<{ settled: boolean; decision: 'approve' | 'deny' }> {
   const path = '/api/v1/keepers/tool-approval'
   const resp = await fetchControlPlane(
     path,
@@ -327,11 +327,12 @@ export async function answerKeeperToolApproval(
   if (!resp.ok) {
     throw await apiRequestErrorFromResponse('POST', path, resp)
   }
-  const data = (await resp.json()) as Record<string, unknown>
-  return {
-    settled: data.settled === true,
-    decision: asString(data.decision) ?? decision,
+  const data: unknown = await resp.json()
+  if (!isRecord(data) || typeof data.settled !== 'boolean'
+    || (data.decision !== 'approve' && data.decision !== 'deny')) {
+    throw new Error('Invalid tool approval answer receipt')
   }
+  return { settled: data.settled, decision: data.decision }
 }
 
 // --- SSE streaming ---

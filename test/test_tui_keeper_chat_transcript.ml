@@ -2714,13 +2714,38 @@ let test_tool_receipt_retains_response_progress_owner () =
       call.execution_id = Some "unbound-execution") (Transcript.tool_calls t))
 ;;
 
+let test_tool_start_cannot_inherit_prior_attempt_response () =
+  let t = fresh () in
+  feed t [Live.Run_started;
+    Live.Stream_model_started {generation=Some 1;stream_scope=Some 0;
+      message_id=Some "old";model="old-model";usage=None};
+    Live.Runtime_attempt_started {runtime_id=Some "retry";attempt_index=Some 1};
+    tool_started ~scope:0 ~block_index:1 "early-call" "read_file";
+    tool_ended ~scope:0 ~block_index:1 "early-call"];
+  let activity = Transcript.model_activity t in
+  feed t [tool_result ~scope:0 ~block_index:1 "early-call" "early-execution"];
+  check bool "retained admission floor cannot invent current response activity" true
+    (activity = Transcript.model_activity t);
+  check bool "early result remains readable" true
+    (List.exists (fun (call : Transcript.tool_activity) ->
+      call.execution_id = Some "early-execution") (Transcript.tool_calls t));
+  feed t [Live.Stream_model_started {generation=Some 2;stream_scope=Some 0;
+    message_id=Some "current";model="current-model";usage=None};
+    tool_started ~scope:0 ~block_index:2 "observed-call" "write_file";
+    tool_ended ~scope:0 ~block_index:2 "observed-call";
+    tool_result ~scope:0 ~block_index:2 "observed-call" "observed-execution"];
+  check bool "observed current response owns its result activity" true
+    (Transcript.model_activity t = Some (Transcript.Activity_tool_returned "write_file"))
+;;
+
 let () =
   run "tui_keeper_chat_transcript"
     [ ( "response boundaries", [test_case "Skill evidence retains runtime identity" `Quick test_skill_evidence_retains_invocation_runtime_identity;
       test_case "scoped details retire prior model activity" `Quick test_scoped_details_retire_prior_model_activity;
       test_case "scoped details retire prior response usage" `Quick test_scoped_details_retire_prior_response_usage;
       test_case "boundaries and stable origins" `Quick test_response_boundaries_preserve_origins; test_case "interleaved final authority" `Quick test_interleaved_final_keeps_observed_times_and_bytes; test_case "usage reset boundaries" `Quick test_usage_resets_only_at_response_boundaries; test_case "response end retains turn and tool lifecycle" `Quick test_response_stop_preserves_pending_work; test_case "new response without text" `Quick test_empty_new_response_does_not_replace_prior_message])
-    ; ( "attempt authority", [test_case "receipt retains response activity owner" `Quick test_tool_receipt_retains_response_progress_owner;
+    ; ( "attempt authority", [test_case "tool start cannot inherit prior attempt response" `Quick test_tool_start_cannot_inherit_prior_attempt_response;
+        test_case "receipt retains response activity owner" `Quick test_tool_receipt_retains_response_progress_owner;
         test_case "late receipt preserves current activity" `Quick test_late_tool_receipt_preserves_current_activity;
         test_case "current attempt metadata retains activity" `Quick test_current_attempt_metadata_keeps_observed_activity;
         test_case "late runtime naming retains streaming" `Quick test_late_runtime_name_does_not_supersede_observed_output;

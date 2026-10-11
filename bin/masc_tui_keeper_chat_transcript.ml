@@ -1368,9 +1368,14 @@ let start_tool ~now t ~authority ~occurrence ~tool_name =
            ; segment = t.segment
            ; started_at = now
            ; attempt = t.attempt
-           ; response_owner = (match t.admitted_response_owner with
-               | Some ((_, scope) as owner) when scope = occurrence.stream_scope -> Some owner
-               | Some _ | None -> None)
+           ; response_owner = (match t.response_scope, t.admitted_response_owner with
+               | Some {rs_generation=Some generation;rs_scope}, Some owner
+                 when owner = (generation, rs_scope)
+                      && rs_scope = occurrence.stream_scope -> Some owner
+               (* The admission floor survives an attempt boundary to reject
+                  old events. It cannot supply missing response observation
+                  to a call opened before this attempt's first response. *)
+               | Some _, (Some _ | None) | None, (Some _ | None) -> None)
            ; occurrence
            ; call_id = occurrence.tool_call_id
            ; execution_id = None

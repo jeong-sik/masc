@@ -66,6 +66,12 @@ function normalizeStatusDetail(
   })
 }
 
+
+function requiredFixture<T>(value: T | undefined): T {
+  if (value === undefined) throw new Error('Expected fixture state to exist')
+  return value
+}
+
 describe('normalizeStatusDetail', () => {
   it('infers and hides internal keeper history from direct comms', () => {
     const detail = normalizeStatusDetail('sangsu', '', {
@@ -286,7 +292,7 @@ describe('thread history merge & persistence', () => {
       delivery_provenance_status: 'valid', delivery_provenance: provenance,
     }]);
     mergeServerHistoryEntries('echo', history);
-    const result = keeperThreads.value.echo!;
+    const result = requiredFixture(keeperThreads.value.echo)!;
     expect(result).toHaveLength(1);
     expect(result[0]?.role).toBe('system');
     expect(result[0]?.delivery).toBe('request_failure');
@@ -303,15 +309,15 @@ describe('thread history merge & persistence', () => {
     applyKeeperStreamEvent('echo', 'live-cursor', { type: 'TEXT_MESSAGE_CONTENT', delta: 'answer',
       textResponse: { content_generation: 4, stream_scope: 0 } }, source)
     applyKeeperStreamEvent('echo', 'live-cursor', { type: 'RUN_FINISHED' }, { ...source, sequence: 11 })
-    const state = keeperThreads.value.echo[0].responseState
+    const state = requiredFixture(requiredFixture(keeperThreads.value.echo)[0]).responseState
     mergeServerHistoryEntries('echo', [entry({ id: 'canonical-cursor', role: 'assistant', text: 'answer', rawText: 'answer',
       delivery: 'history', streamState: null, deliveryProvenance: provenance })])
-    expect(keeperThreads.value.echo[0].responseState).toBe(state)
+    expect(requiredFixture(requiredFixture(keeperThreads.value.echo)[0]).responseState).toBe(state)
     expect(state).toMatchObject({ phase: 'terminal', lastSequence: 11, floor: { content_generation: 4, stream_scope: 0 } })
     applyKeeperOperationTurnEvent('echo', { operationId, sequence: 10, event: {
       type: 'TOOL_CALL_START', toolStreamScope: 0, toolCallBlockIndex: 0, toolCallName: 'Read',
     } })
-    expect(keeperThreads.value.echo.map(candidate => candidate.id)).toEqual(['canonical-cursor'])
+    expect(requiredFixture(keeperThreads.value.echo).map(candidate => candidate.id)).toEqual(['canonical-cursor'])
   })
 
   it('shares the newest exact-operation cursor across duplicate canonical rows', () => {
@@ -324,11 +330,11 @@ describe('thread history merge & persistence', () => {
     mergeServerHistoryEntries('echo', ['canonical-first', 'canonical-last'].map(id => entry({
       id, role: 'assistant', delivery: 'history', deliveryProvenance: provenance,
     })))
-    for (const row of keeperThreads.value.echo) expect(row.responseState).toMatchObject({ lastSequence: 12, phase: 'terminal' })
+    for (const row of requiredFixture(keeperThreads.value.echo)) expect(row.responseState).toMatchObject({ lastSequence: 12, phase: 'terminal' })
     applyKeeperOperationTurnEvent('echo', { operationId, sequence: 11, event: {
       type: 'TOOL_CALL_START', toolStreamScope: 0, toolCallBlockIndex: 0, toolCallName: 'Read',
     } })
-    expect(keeperThreads.value.echo.every(row => row.role !== 'tool')).toBe(true)
+    expect(requiredFixture(keeperThreads.value.echo).every(row => row.role !== 'tool')).toBe(true)
   })
 
   it('preserves quarantine across exact-operation duplicates instead of granting missing ownership', () => {
@@ -336,7 +342,7 @@ describe('thread history merge & persistence', () => {
     appendThreadEntry('echo', entry({ id: 'unobserved-first', role: 'assistant', deliveryProvenance: provenance }))
     appendThreadEntry('echo', entry({ id: 'quarantined-last', role: 'assistant', deliveryProvenance: provenance, responseState: { kind: 'unavailable' } }))
     mergeServerHistoryEntries('echo', [entry({ id: 'canonical-quarantine', role: 'assistant', delivery: 'history', deliveryProvenance: provenance })])
-    expect(keeperThreads.value.echo[0].responseState).toEqual({ kind: 'unavailable' })
+    expect(requiredFixture(requiredFixture(keeperThreads.value.echo)[0]).responseState).toEqual({ kind: 'unavailable' })
   })
 
   it('does not silently select contradictory same-cursor observations by row order', () => {
@@ -346,14 +352,14 @@ describe('thread history merge & persistence', () => {
         responseState: { ...initialKeeperResponseState, lastSequence: 12, phase } }))
     }
     mergeServerHistoryEntries('echo', [entry({ id: 'canonical-conflict', role: 'assistant', delivery: 'history', deliveryProvenance: provenance })])
-    expect(keeperThreads.value.echo[0].responseState).toEqual({ kind: 'unavailable' })
+    expect(requiredFixture(requiredFixture(keeperThreads.value.echo)[0]).responseState).toEqual({ kind: 'unavailable' })
   })
 
   it('does not transfer response ownership through turn correlation alone', () => {
     appendThreadEntry('echo', entry({ id: 'correlated-local', role: 'assistant', turnRef: 'same-turn',
       traceSteps: [{ kind: 'think', text: 'exposed trace' }], responseState: { kind: 'unavailable' } }))
     mergeServerHistoryEntries('echo', [entry({ id: 'correlated-history', role: 'assistant', turnRef: 'same-turn', delivery: 'history' })])
-    expect(keeperThreads.value.echo.find(candidate => candidate.id === 'correlated-history')?.responseState).toBeUndefined()
+    expect(requiredFixture(keeperThreads.value.echo).find(candidate => candidate.id === 'correlated-history')?.responseState).toBeUndefined()
   })
 
   it('keeps canonical persisted trace over a stale local trace', () => {
@@ -670,7 +676,7 @@ describe('thread history merge & persistence', () => {
     mergeServerHistoryEntries('echo', history)
     mergeServerHistoryEntries('echo', history)
 
-    expect(keeperThreads.value.echo).toEqual(history)
+    expect(requiredFixture(keeperThreads.value.echo)).toEqual(history)
   })
 
   it('does not merge same-text rows that carry different provenance', () => {
@@ -1615,7 +1621,7 @@ describe('thread history merge & persistence', () => {
     for (let i = 0; i < THREAD_ENTRY_CAP + 5; i++) {
       appendThreadEntry('echo', entry({ id: `e-${i}`, text: `m${i}` }))
     }
-    expect(keeperThreads.value.echo).toHaveLength(THREAD_ENTRY_CAP)
+    expect(requiredFixture(keeperThreads.value.echo)).toHaveLength(THREAD_ENTRY_CAP)
     expect(keeperThreads.value.echo?.[0]?.id).toBe('e-5')
   })
 

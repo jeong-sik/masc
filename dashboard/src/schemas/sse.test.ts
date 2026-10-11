@@ -240,6 +240,13 @@ describe('SSEMessageSchema', () => {
     expect(r.success).toBe(true)
   })
 
+  it.each([0, 2, -1, 0.5, Number.MAX_SAFE_INTEGER + 1, undefined])('validates producer-owned tool transcript ordinal %s', ordinal => {
+    const parsed = SSEMessageSchema.safeParse({ type: 'keeper_chat_operation_event', name: 'sangsu', operation_id: 'operation',
+      ag_ui_event: { type: 'CUSTOM', threadId: 'keeper:sangsu', runId: 'run', timestamp: 1,
+        name: 'KEEPER_TOOL_TRANSCRIPT_COMMITTED', value: { deliveryKey: { kind: 'operation', operation_id: 'operation' }, executionId: 'execution', ordinal } } })
+    expect(parsed.success).toBe(ordinal === 0 || ordinal === 2)
+  })
+
   it('accepts exact durable tool-result readiness identity', () => {
     const r = SSEMessageSchema.safeParse({
       type: 'keeper_chat_operation_event',

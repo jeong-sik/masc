@@ -775,7 +775,7 @@ let adapter_loop_with_transport
     | Native_tool_progress _
     | Native_tool_end _
     | Tool_approval_requested _ | Tool_approval_settled _
-    | Tool_result_ready _ ->
+    | Tool_result_ready _ | Tool_transcript_committed _ ->
         continue ()
     | Link_block { url; title; description; image = _ } ->
         let block = link_block_json ~url ~title ~description in

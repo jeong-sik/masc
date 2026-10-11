@@ -101,6 +101,12 @@ beforeEach(() => {
   _resetKeeperStreamBuffersForTests()
 })
 
+
+function requiredFixture<T>(value: T | undefined): T {
+  if (value === undefined) throw new Error('Expected fixture state to exist')
+  return value
+}
+
 describe('tool-output hydration credential scope', () => {
   afterEach(() => clearStoredToken())
 
@@ -444,7 +450,7 @@ describe('hydrateKeeperChatHistory', () => {
 
     await hydrateKeeperChatHistory('echo')
     expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(2)
-    expect(keeperThreads.value.echo).toHaveLength(1)
+    expect(requiredFixture(keeperThreads.value.echo)).toHaveLength(1)
   })
 })
 
@@ -1164,28 +1170,29 @@ describe('restored chat operation outcome', () => {
         streamState: 'streaming', timestamp: '2026-10-11T00:00:00Z', traceSteps: [{ kind: 'think', text: 'exposed reasoning' }] } })
   }
 
-  it('restores durable quarantine into a renamed canonical tool without discarding canonical content', async () => {
+  it.each([false, true])('restores durable quarantine into canonical history (continuation=%s)', async continuation => {
     const provenance = toolCallDeliveryProvenance(operationDeliveryProvenance('restored-op', 'terminal_result'), 'execution', 0)
-    const storedTool = { id: 'stored-tool', label: 'Read', text: '', rawText: 'stored args', delivery: 'error' as const,
-      executionId: 'execution', deliveryProvenance: provenance, toolCallId: 'provider', toolCallEnded: true,
+    const storedTool = { toolOwnerKey: operationDeliveryProvenance('restored-op', 'terminal_result').delivery_key, id: 'stored-tool', label: 'Read', text: '', rawText: 'stored args', delivery: 'error' as const,
+      executionId: 'execution', deliveryProvenance: continuation ? null : provenance, toolCallId: 'provider', toolCallEnded: true,
       toolOccurrence: { kind: 'identified' as const, streamScope: 1, blockIndex: 0 }, toolOccurrenceQuarantined: true as const }
     upsertTrackedKeeperChatOperation({ operationId: 'restored-op', keeperName: 'echo', message: 'input', submittedAt: 1,
       assistantDraft: { text: 'authored', rawText: 'authored', delivery: 'streaming', streamState: 'streaming',
         toolObservations: { kind: 'known', entries: [storedTool] },
         traceSteps: [{ kind: 'tool', name: 'Read', toolOccurrenceId: 'stored-tool', executionId: 'execution', status: 'err' }] } })
     keeperThreads.value = { echo: [{ ...storedTool, id: 'canonical-tool', role: 'tool', source: 'tool_result',
+      toolOwnerKey: undefined, deliveryProvenance: continuation ? toolCallDeliveryProvenance({ delivery_key: { kind: 'operation_native', operation_id: 'restored-op', continuation_id: 'native' }, transcript_slot: { kind: 'terminal_result' } }, 'execution', 0) : provenance,
       toolOccurrence: undefined, toolOccurrenceQuarantined: undefined, toolCallId: undefined,
       delivery: 'history', rawText: 'canonical args' }] }
     fetchKeeperChatOperation.mockRejectedValue(new Error('lookup unavailable'))
     await hydrateTrackedKeeperChatOperations('echo')
-    expect(keeperThreads.value.echo.filter(entry => entry.role === 'tool')).toMatchObject([
+    expect(requiredFixture(keeperThreads.value.echo).filter(entry => entry.role === 'tool')).toMatchObject([
       { id: 'canonical-tool', rawText: 'canonical args', toolCallId: 'provider', toolCallEnded: true,
         toolOccurrenceQuarantined: true, toolOccurrence: { kind: 'identified', streamScope: 1, blockIndex: 0 } },
     ])
-    expect(keeperThreads.value.echo.find(entry => entry.role === 'assistant')).toMatchObject({
+    expect(requiredFixture(keeperThreads.value.echo).find(entry => entry.role === 'assistant')).toMatchObject({
       rawText: 'authored', traceSteps: [{ toolOccurrenceId: 'canonical-tool' }],
     })
-    expect(keeperThreads.value.echo.find(entry => entry.role === 'assistant')?.toolObservationAuthority).toBeUndefined()
+    expect(requiredFixture(keeperThreads.value.echo).find(entry => entry.role === 'assistant')?.toolObservationAuthority).toBeUndefined()
   })
 
   it.each([
@@ -1196,26 +1203,26 @@ describe('restored chat operation outcome', () => {
     storeDraft()
     fetchKeeperChatOperation.mockResolvedValue({ operationId: 'restored-op', state })
     await hydrateTrackedKeeperChatOperations('echo')
-    const entry = keeperThreads.value.echo.find(candidate => candidate.role === 'assistant')
+    const entry = requiredFixture(keeperThreads.value.echo).find(candidate => candidate.role === 'assistant')
     expect(entry).toMatchObject({ rawText: 'partial authored answer', text: 'partial authored answer',
       timestamp: '2026-10-11T00:00:00Z', traceSteps: [{ kind: 'think', text: 'exposed reasoning' }],
       streamState: null, responseState: { phase: 'terminal' } })
-    expect(trackedKeeperChatOperationsForKeeper('echo')[0].assistantDraft).toMatchObject({
+    expect(requiredFixture(trackedKeeperChatOperationsForKeeper('echo')[0]).assistantDraft).toMatchObject({
       rawText: 'partial authored answer', responseState: { phase: 'terminal' },
     })
     keeperThreads.value = {}
     await hydrateTrackedKeeperChatOperations('echo')
-    expect(keeperThreads.value.echo.find(candidate => candidate.role === 'assistant')?.rawText).toBe('partial authored answer')
+    expect(requiredFixture(keeperThreads.value.echo).find(candidate => candidate.role === 'assistant')?.rawText).toBe('partial authored answer')
   })
 
   it('retains observed content and tracking when operation lookup temporarily fails', async () => {
     storeDraft()
     fetchKeeperChatOperation.mockRejectedValue(new Error('temporary network failure'))
     await hydrateTrackedKeeperChatOperations('echo')
-    expect(keeperThreads.value.echo.find(candidate => candidate.role === 'assistant')).toMatchObject({
+    expect(requiredFixture(keeperThreads.value.echo).find(candidate => candidate.role === 'assistant')).toMatchObject({
       rawText: 'partial authored answer', timestamp: '2026-10-11T00:00:00Z', delivery: 'error',
     })
-    expect(trackedKeeperChatOperationsForKeeper('echo')[0].operationId).toBe('restored-op')
+    expect(requiredFixture(trackedKeeperChatOperationsForKeeper('echo')[0]).operationId).toBe('restored-op')
   })
   it('releases the stored observation only after the canonical operation turn replaces it', async () => {
     storeDraft()
@@ -1230,7 +1237,7 @@ describe('restored chat operation outcome', () => {
     ])
     await hydrateTrackedKeeperChatOperations('echo')
     expect(trackedKeeperChatOperationsForKeeper('echo')).toEqual([])
-    expect(keeperThreads.value.echo.filter(entry => entry.role === 'assistant')).toMatchObject([
+    expect(requiredFixture(keeperThreads.value.echo).filter(entry => entry.role === 'assistant')).toMatchObject([
       { id: 'canonical-assistant', text: 'complete answer', traceSteps: [{ kind: 'think', text: 'exposed reasoning' }] },
     ])
   })
@@ -1243,10 +1250,10 @@ describe('restored chat operation outcome', () => {
     fetchKeeperChatOperation.mockResolvedValue({ operationId: 'restored-op', state })
     fetchKeeperChatHistory.mockRejectedValue(new Error('history transport unavailable'))
     await hydrateTrackedKeeperChatOperations('echo')
-    expect(keeperThreads.value.echo.find(entry => entry.role === 'assistant')).toMatchObject({
+    expect(requiredFixture(keeperThreads.value.echo).find(entry => entry.role === 'assistant')).toMatchObject({
       delivery, rawText: 'partial authored answer', responseState: { phase: 'terminal' },
     })
-    expect(trackedKeeperChatOperationsForKeeper('echo')[0].assistantDraft?.delivery).toBe(delivery)
+    expect(requiredFixture(trackedKeeperChatOperationsForKeeper('echo')[0]).assistantDraft?.delivery).toBe(delivery)
     expect(keeperChatHistoryErrors.value.echo).toContain('history transport unavailable')
   })
 
@@ -1260,9 +1267,9 @@ describe('restored chat operation outcome', () => {
     keeperThreads.value = {}
     fetchKeeperChatOperation.mockRejectedValue(failure)
     await hydrateTrackedKeeperChatOperations('echo')
-    const entry = keeperThreads.value.echo.find(candidate => candidate.role === 'assistant')
+    const entry = requiredFixture(keeperThreads.value.echo).find(candidate => candidate.role === 'assistant')
     expect(entry).toMatchObject({ delivery: 'delivered', rawText: 'partial authored answer', responseState: { phase: 'terminal' } })
-    expect(trackedKeeperChatOperationsForKeeper('echo')[0].assistantDraft?.delivery).toBe('delivered')
+    expect(requiredFixture(trackedKeeperChatOperationsForKeeper('echo')[0]).assistantDraft?.delivery).toBe('delivered')
     expect(keeperActionErrors.value.echo).toBe(failure.message)
   })
 

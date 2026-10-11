@@ -107,6 +107,15 @@ let test_continuation_rows_land_once () =
         ~turn_failed:false
     in
     check int "a clean stream quarantines nothing" 0 (List.length persisted.P.quarantined);
+    check int "new append carries exact transcript binding" 1 (List.length persisted.P.committed_bindings);
+    (match persisted.P.committed_bindings with
+     | [ (delivery_key, slot) ] ->
+       check bool "binding owns the approval" true
+         (Keeper_chat_delivery_identity.delivery_key_equal key delivery_key);
+       check bool "binding uses the stored delivery ordinal" true
+         (Keeper_chat_delivery_identity.transcript_slot_equal
+           (Keeper_chat_delivery_identity.Tool_delivery {ordinal = 0}) slot)
+     | _ -> fail "missing committed binding");
     (match persisted.P.outcome with
      | P.Projected (K.Appended _) -> ()
      | P.Projected (K.Already_present _) -> fail "first append reported as already present"

@@ -320,6 +320,7 @@ let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
          { occurrence = occurrence o ~tool_call_id
          ; execution_id = Ids.Execution_id.to_string execution_id
          })
+  | E.Tool_transcript_committed _ -> None
   | E.Link_block _ | E.Image_block _ | E.Status_block _ | E.Audio_block _
   | E.Tool_context_block _ -> None
 ;;

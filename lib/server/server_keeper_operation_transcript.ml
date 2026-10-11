@@ -3,11 +3,10 @@ type settlement =
   | Reply of string
   | Request_failed of string
 
-let persist ~base_dir ~keeper_name ~operation_id ~resumed_from ~settlement
-    ~tool_calls ?surface ?conversation_id ?blocks ?turn_ref ?stream_lifecycle () =
+let tool_delivery_key ~operation_id ~resumed_from =
   let ( let* ) = Result.bind in
   let delivery_key = Keeper_chat_delivery_identity.Operation operation_id in
-  let tool_delivery_key = match resumed_from with
+  match resumed_from with
     | None -> Ok delivery_key
     | Some (Keeper_semantic_execution.Agent_core checkpoint) ->
       Ok (Keeper_chat_delivery_identity.Operation_checkpoint {operation_id; checkpoint})
@@ -19,8 +18,13 @@ let persist ~base_dir ~keeper_name ~operation_id ~resumed_from ~settlement
         [client; checkpoint.runtime_id; checkpoint.session_id; checkpoint.turn_id])) in
       let* continuation_id = Keeper_chat_delivery_identity.Request_id.of_string
         (Digestif.SHA256.(digest_string canonical |> to_hex)) in
-      Ok (Keeper_chat_delivery_identity.Operation_native {operation_id; continuation_id}) in
-  let* tool_delivery_key = tool_delivery_key in
+      Ok (Keeper_chat_delivery_identity.Operation_native {operation_id; continuation_id})
+
+let persist ~base_dir ~keeper_name ~operation_id ~resumed_from ~settlement
+    ~tool_calls ?surface ?conversation_id ?blocks ?turn_ref ?stream_lifecycle () =
+  let ( let* ) = Result.bind in
+  let delivery_key = Keeper_chat_delivery_identity.Operation operation_id in
+  let* tool_delivery_key = tool_delivery_key ~operation_id ~resumed_from in
   let tools_only () = match tool_calls with
     | [] -> Ok ()
     | _ -> Keeper_chat_store.append_tool_calls_once ~base_dir ~keeper_name

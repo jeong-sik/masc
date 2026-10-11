@@ -20,7 +20,10 @@ export const unavailableKeeperResponseState: KeeperResponseState = Object.freeze
 export type KeeperResponseEvent =
   | { readonly kind: 'observe'; readonly owner: KeeperResponseOwner | null; readonly scope: number | null; readonly source: 'header' | 'details' | 'body' | 'content' }
   | { readonly kind: 'stop'; readonly owner: KeeperResponseOwner | null }
-  | { readonly kind: 'attempt' | 'started' | 'checkpoint' | 'terminal' }
+  | { readonly kind: 'attempt' }
+  | { readonly kind: 'started' }
+  | { readonly kind: 'checkpoint' }
+  | { readonly kind: 'terminal' }
 
 export interface KeeperResponseDecision {
   readonly state: KeeperResponseState

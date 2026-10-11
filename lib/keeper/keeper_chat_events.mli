@@ -233,6 +233,12 @@ type keeper_chat_event =
           [occurrence] is the streamed row authority, [tool_call_id] remains
           optional provider correlation data, and
           [execution_id] is the canonical cross-store join key. *)
+  (** Exact transcript binding published only after chat append acknowledgement. *)
+  | Tool_transcript_committed of
+      { delivery_key : Keeper_chat_delivery_identity.delivery_key
+      ; execution_id : Ids.Execution_id.t
+      ; ordinal : int
+      }
   | Link_block of
       { url : string
       ; title : string

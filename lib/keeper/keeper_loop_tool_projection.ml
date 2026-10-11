@@ -71,6 +71,7 @@ type protocol_error =
 
 type persisted =
   { outcome : outcome
+  ; committed_bindings : (Keeper_chat_delivery_identity.delivery_key * Keeper_chat_delivery_identity.transcript_slot) list
   ; quarantined : protocol_error list
   }
 
@@ -87,7 +88,7 @@ let tool_row_already_under ~base_dir ~keeper_name ~delivery_key =
        match row.delivery_provenance with
        | Some
            { Keeper_chat_delivery_identity.delivery_key = key
-           ; transcript_slot = Keeper_chat_delivery_identity.Tool_delivery _
+           ; transcript_slot = (Keeper_chat_delivery_identity.Tool_delivery _ | Keeper_chat_delivery_identity.Tool_call _)
            }
          when Keeper_chat_delivery_identity.delivery_key_equal key delivery_key ->
          Some row.id
@@ -107,17 +108,17 @@ let persist_continuation t ~base_dir ~keeper_name ~approval_id ~turn_ref ~turn_f
   let quarantined = Keeper_stream_tool_accum.take_protocol_errors t.accum in
   (* The rejection is read before the rows: a refused seal finalizes nothing,
      so an empty row list under a rejection is the drop, not an idle turn. *)
-  let outcome =
+  let outcome, committed_bindings =
     match !(t.rejection), tool_calls with
-    | Some detail, _ -> Projection_dropped (Mapping_rejected detail)
-    | None, [] -> Nothing_to_project
+    | Some detail, _ -> Projection_dropped (Mapping_rejected detail), []
+    | None, [] -> Nothing_to_project, []
     | None, _ :: _ ->
       (match Keeper_chat_delivery_identity.Request_id.of_string approval_id with
-       | Error detail -> Projection_dropped (Invalid_approval_id detail)
+       | Error detail -> Projection_dropped (Invalid_approval_id detail), []
        | Ok request_id ->
          let delivery_key = Keeper_chat_delivery_identity.Approval_lifecycle request_id in
          (match tool_row_already_under ~base_dir ~keeper_name ~delivery_key with
-          | Some row_id -> Projected (Keeper_chat_store.Already_present { row_id })
+          | Some row_id -> Projected (Keeper_chat_store.Already_present { row_id }), []
           | None ->
             (match
                Keeper_chat_store.append_tool_calls_once
@@ -128,8 +129,12 @@ let persist_continuation t ~base_dir ~keeper_name ~approval_id ~turn_ref ~turn_f
                  ~turn_ref
                  ()
              with
-             | Ok result -> Projected result
-             | Error detail -> Projection_dropped (Append_failed detail))))
+             | Ok (Keeper_chat_store.Appended _ as result) ->
+               Projected result,
+               List.map (fun (_, slot) -> delivery_key, slot)
+                 (Keeper_chat_store.tool_transcript_bindings tool_calls)
+             | Ok (Keeper_chat_store.Already_present _ as result) -> Projected result, []
+             | Error detail -> Projection_dropped (Append_failed detail), [])))
   in
-  { outcome; quarantined }
+  { outcome; committed_bindings; quarantined }
 ;;

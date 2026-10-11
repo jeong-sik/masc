@@ -66,6 +66,7 @@ type protocol_error =
 
 type persisted =
   { outcome : outcome
+  ; committed_bindings : (Keeper_chat_delivery_identity.delivery_key * Keeper_chat_delivery_identity.transcript_slot) list
   ; quarantined : protocol_error list
         (** drained from the collector at persist time; the chat lane's live
             bridge reports the same conflicts as they happen, the loop lane

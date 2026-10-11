@@ -2144,6 +2144,28 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
   in
   (* [err] is [Keeper_request_failure.summary] of the cause its producer
      built. The row still carries text; RFC-0454 D3 gives it the value. *)
+  let publish_tool_transcript_bindings tool_calls =
+    let resolved =
+      let ( let* ) = Result.bind in
+      let* resumed_from = resumed_from in
+      let* root_key = queue_delivery_key () in
+      match root_key with
+      | Keeper_chat_delivery_identity.Operation operation_id ->
+        Server_keeper_operation_transcript.tool_delivery_key ~operation_id ~resumed_from
+      | _ -> Error "direct operation root identity is unavailable"
+    in
+    match resolved with
+    | Error detail -> Log.Keeper.warn ~keeper_name:payload.name "committed tool delivery identity unavailable: %s" detail
+    | Ok delivery_key -> List.iter
+      (fun (_, slot) ->
+        match slot with
+        | Keeper_chat_delivery_identity.Tool_call { execution_id; ordinal } ->
+          push_worker_event (Stream_chat_event
+            (Keeper_chat_events.Tool_transcript_committed { delivery_key; execution_id; ordinal }))
+        | Keeper_chat_delivery_identity.Tool_delivery _ -> ()
+        | _ -> ())
+      (Keeper_chat_store.tool_transcript_bindings tool_calls)
+  in
   let persist_failure_reply ?blocks ?turn_ref err =
     (* The failure marker is typed, not an utterance: it renders for the
        operator but does not advance the lane watermark, so the user
@@ -2169,6 +2191,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
     in
     Result.iter
       (fun () ->
+         publish_tool_transcript_bindings tool_calls;
          Keeper_chat_broadcast.chat_appended
            ~keeper_name:payload.name ~source:chat_source
            ~content:(persisted_error_reply err)
@@ -2376,6 +2399,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                      committed_delivery_outcome ~turn_ref persisted
                    with
                    | Ok queued_outcome ->
+                       publish_tool_transcript_bindings tool_calls;
                        Keeper_chat_broadcast.chat_appended
                          ~keeper_name:payload.name ~source:chat_source ?content ();
                        Ok (Some queued_outcome)
@@ -2419,6 +2443,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                            Result.bind
                              (persist_tool_calls_only ())
                              (fun () ->
+                                publish_tool_transcript_bindings tool_calls;
                                 Keeper_chat_broadcast.chat_appended
                                   ~keeper_name:payload.name
                                   ~source:chat_source
@@ -2440,6 +2465,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                           Result.bind
                             (persist_tool_calls_only ())
                             (fun () ->
+                               publish_tool_transcript_bindings tool_calls;
                                Keeper_chat_broadcast.chat_appended
                                  ~keeper_name:payload.name
                                  ~source:chat_source

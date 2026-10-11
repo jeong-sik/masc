@@ -1,3 +1,4 @@
+import { reconcileTranscriptBindings } from './keeper-tool-observations'
 import { reconcileKeeperResponseStates, keeperResponseIsRunning, ownerFromUnknown, sameKeeperResponseOwner, type KeeperResponseOwner } from './lib/keeper-response-state'
 import { signal } from '@preact/signals'
 import { parseTextToChatBlocks } from './lib/chat-blocks'
@@ -6,7 +7,7 @@ import { isRecord, asString, asNumber, asBoolean, toIsoTimestamp } from './compo
 import { asStrictStringArray, withoutUndefined } from './lib/json-coerce'
 import { keeperStreamContract, normalizeStreamContract } from './keeper-stream-contract'
 import {
-  sameDeliveryKey,
+  toolDeliveryBelongsToProducer,
   sameDeliveryProvenance,
   type KeeperChatDeliveryProvenance,
   type KeeperChatDeliveryProvenanceDecode,
@@ -1491,11 +1492,13 @@ function mergeLocalAssistantObservations(
   const responseState = historyProvenance ? reconcileKeeperResponseStates(
     [...exactLocalEntries, ...exactCanonicalEntries].map(entry => entry.responseState),
   ) : historyEntry.responseState
+  const toolTranscriptBindings = reconcileTranscriptBindings([...exactLocalEntries, ...exactCanonicalEntries, historyEntry].map(entry => entry.toolTranscriptBindings))
   const toolAuthorityUnavailable = [...exactLocalEntries, ...exactCanonicalEntries, historyEntry]
     .some(entry => entry.toolObservationAuthority === 'unavailable')
   const mergedHistory = { ...historyEntry,
     ...(responseState ? { responseState } : {}),
-    ...(toolAuthorityUnavailable ? { toolObservationAuthority: 'unavailable' as const } : {}),
+    ...(toolAuthorityUnavailable || toolTranscriptBindings === null ? { toolObservationAuthority: 'unavailable' as const } : {}),
+    ...(toolTranscriptBindings ? { toolTranscriptBindings } : {}),
   }
   // Trace occurrences retain their existing one-to-one correlation. Ownership
   // belongs to the producer identity and is shared across every exact match.
@@ -1532,14 +1535,21 @@ function mergeLocalAssistantObservations(
   return historyEntry
 }
 
+function matchesCanonicalTool(observed: KeeperConversationEntry, canonical: KeeperConversationEntry): boolean {
+  const provenance = canonical.deliveryProvenance
+  if (observed.role !== 'tool' || canonical.role !== 'tool' || !provenance) return false
+  if (observed.deliveryProvenance) return sameDeliveryProvenance(observed.deliveryProvenance, provenance)
+  return provenance.transcript_slot.kind === 'tool_call' && observed.executionId === provenance.transcript_slot.execution_id
+    && observed.toolOwnerKey !== undefined && toolDeliveryBelongsToProducer(observed.toolOwnerKey, provenance.delivery_key)
+}
+
 function mergeLocalToolObservations(
   history: KeeperConversationEntry,
   observed: readonly KeeperConversationEntry[],
 ): KeeperConversationEntry {
   const provenance = history.deliveryProvenance
   if (history.role !== 'tool' || !provenance) return history
-  const matches = observed.filter(entry => entry.role === 'tool' && entry.deliveryProvenance != null
-    && sameDeliveryProvenance(entry.deliveryProvenance, provenance))
+  const matches = observed.filter(entry => matchesCanonicalTool(entry, history))
   const coordinates: { readonly streamScope: number; readonly blockIndex: number }[] = []
   for (const entry of matches) {
     const occurrence = entry.toolOccurrence
@@ -1551,11 +1561,17 @@ function mergeLocalToolObservations(
       }
     }
   }
+  const slot = provenance.transcript_slot
+  const marker = slot.kind === 'tool_call' && matches.some(entry => entry.toolTranscriptOrdinal === slot.ordinal) ? slot.ordinal : undefined
+  const correlations = [...new Set([history, ...matches].flatMap(entry => entry.toolCallId ? [entry.toolCallId] : []))]
   const first = coordinates[0]
-  const conflicting = matches.some(entry => entry.toolOccurrence?.kind === 'conflicting')
+  const conflicting = correlations.length > 1 || matches.some(entry => entry.toolOccurrence?.kind === 'conflicting')
     || (first && coordinates.some(value => value.streamScope !== first.streamScope || value.blockIndex !== first.blockIndex))
   return {
     ...history,
+    toolOwnerKey: history.toolOwnerKey ?? matches.find(entry => entry.toolOwnerKey !== undefined)?.toolOwnerKey,
+    ...(marker !== undefined ? { toolTranscriptOrdinal: marker } : {}),
+    ...(correlations.length === 1 ? { toolCallId: correlations[0] } : {}),
     ...(first ? { toolOccurrence: conflicting
       ? Object.freeze({ kind: 'conflicting' as const, coordinates: Object.freeze(coordinates) })
       : Object.freeze({ kind: 'identified' as const, ...first }) } : {}),
@@ -1589,8 +1605,7 @@ function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
   for (const row of reconciled) {
     if (row.role !== 'tool' || !row.deliveryProvenance) continue
     for (const previous of [...existing, ...entries]) {
-      if (previous.role === 'tool' && previous.deliveryProvenance != null
-        && sameDeliveryProvenance(previous.deliveryProvenance, row.deliveryProvenance)) toolRowReplacement.set(previous.id, row)
+      if (matchesCanonicalTool(previous, row)) toolRowReplacement.set(previous.id, row)
     }
   }
   const historyEntries = reconciled.map(entry => entry.traceSteps ? {
@@ -1600,7 +1615,7 @@ function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
       const replacement = toolRowReplacement.get(step.toolOccurrenceId)
       const parentKey = entry.deliveryProvenance?.delivery_key
       const toolKey = replacement?.deliveryProvenance?.delivery_key
-      return replacement && parentKey && toolKey && sameDeliveryKey(parentKey, toolKey)
+      return replacement && parentKey && toolKey && toolDeliveryBelongsToProducer(parentKey, toolKey)
         ? { ...step, toolOccurrenceId: replacement.id } : step
     }),
   } : entry)
@@ -1611,7 +1626,7 @@ function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
       // has the same tool_call_id, keep the canonical history row even while a
       // local live row is still marked streaming; otherwise the live row can
       // later flip to delivered and leave a duplicate "작업 과정" card behind.
-      const isCoveredToolRow = entry.role === 'tool' && coveredByHistory
+      const isCoveredToolRow = entry.role === 'tool' && (coveredByHistory || toolRowReplacement.has(entry.id))
       // In-flight (sending/streaming/queued) entries represent live state and
       // must survive history merges until they finalize.
       // A converged assistant row supersedes its own placeholder even while the

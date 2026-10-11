@@ -1,3 +1,4 @@
+import { decodeKeeperChatDeliveryProvenance } from '../api/schemas/keeper-chat-delivery-provenance'
 // Lightweight schema-at-boundary for SSE events from the MCP server.
 //
 // This module intentionally avoids pulling a generic schema runtime into the
@@ -646,6 +647,7 @@ function validateKeeperCustomPayload(
     ],
     KEEPER_CONTINUATION_CHECKPOINT: ['message', 'request_id'],
     KEEPER_REPLY_DETAILS: ['reply', 'turn_outcome', 'turn_ref', 'terminal_stream_scope'],
+    KEEPER_TOOL_TRANSCRIPT_COMMITTED: ['deliveryKey', 'executionId', 'ordinal'],
     KEEPER_TOOL_RESULT_READY: [
       'toolStreamScope',
       'toolCallBlockIndex',
@@ -721,6 +723,12 @@ function validateKeeperCustomPayload(
       return value.state === 'observed' || value.state === 'ended'
         ? ok(true)
         : fail('ag_ui_event.value.state', 'Expected observed or ended content state')
+    }
+    case 'KEEPER_TOOL_TRANSCRIPT_COMMITTED': {
+      const ownership = decodeKeeperChatDeliveryProvenance(value.deliveryKey, { kind: 'terminal_result' })
+      if (ownership.status !== 'valid') return fail('ag_ui_event.value.deliveryKey', 'Expected exact tool delivery identity')
+      const execution = requiredString(value, 'executionId')
+      return execution.success ? requiredInteger(value, 'ordinal') : execution
     }
     case 'KEEPER_TOOL_RESULT_READY': {
       const occurrence = validateToolStreamOccurrence(value, 'ag_ui_event.value')

@@ -1,3 +1,4 @@
+import { captureToolObservations } from './keeper-tool-observations'
 import type { KeeperChatStreamEvent } from './lib/keeper-chat-stream-contract'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -20,7 +21,7 @@ import {
   applyKeeperOperationTurnEvent,
   applyKeeperStreamEvent,
 } from './keeper-stream'
-import { parseSSEMessage } from './schemas/sse'
+import { parseSSEMessage, KeeperChatStreamEventSchema } from './schemas/sse'
 import {
   operationDeliveryProvenance,
   toolCallDeliveryProvenance,
@@ -54,6 +55,12 @@ function assistantEntry(operationId?: string): void {
   })
 }
 
+
+function requiredFixture<T>(value: T | undefined): T {
+  if (value === undefined) throw new Error('Expected fixture state to exist')
+  return value
+}
+
 describe('Keeper operation stream projection', () => {
   beforeEach(() => {
     _resetKeeperStreamBuffersForTests()
@@ -73,15 +80,15 @@ describe('Keeper operation stream projection', () => {
     const source = (sequence: number) => ({ kind: 'operation' as const, operationId: 'op-1', sequence })
     applyKeeperStreamEvent('sangsu', 'reply-1', thinking('first'), source(10))
     owner.content_generation = 99
-    expect(keeperThreads.value.sangsu[0].traceSteps?.[0]).toMatchObject({ responseOwner: { content_generation: 4, stream_scope: 2 } })
+    expect(requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0]).traceSteps?.[0]).toMatchObject({ responseOwner: { content_generation: 4, stream_scope: 2 } })
     owner.content_generation = 4
-    expect(keeperThreads.value.sangsu[0].responseState).toMatchObject({ lastSequence: 10 })
-    expect(keeperThreads.value.sangsu[0].traceSteps).toMatchObject([{ kind: 'think', text: 'first', responseOwner: owner }])
+    expect(requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0]).responseState).toMatchObject({ lastSequence: 10 })
+    expect(requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0]).traceSteps).toMatchObject([{ kind: 'think', text: 'first', responseOwner: owner }])
     // In-memory batching is lost on reload; the restored entry is authoritative.
     _resetKeeperStreamBuffersForTests()
     applyKeeperStreamEvent('sangsu', 'reply-1', thinking('first'), source(10))
     applyKeeperStreamEvent('sangsu', 'reply-1', thinking(' second'), source(11))
-    expect(keeperThreads.value.sangsu[0].traceSteps).toMatchObject([{ kind: 'think', text: 'first second' }])
+    expect(requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0]).traceSteps).toMatchObject([{ kind: 'think', text: 'first second' }])
   })
 
   it('keeps reused reasoning block indices separate across owned responses', () => {
@@ -92,7 +99,7 @@ describe('Keeper operation stream projection', () => {
         value: { index: 0, delta: `generation ${generation}`, response: { content_generation: generation, stream_scope: 0 } },
       }, { kind: 'operation', operationId: 'op-1', sequence: generation })
     }
-    expect(keeperThreads.value.sangsu[0].traceSteps).toMatchObject([
+    expect(requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0]).traceSteps).toMatchObject([
       { text: 'generation 4', responseOwner: { content_generation: 4, stream_scope: 0 } },
       { text: 'generation 5', responseOwner: { content_generation: 5, stream_scope: 0 } },
     ])
@@ -106,7 +113,7 @@ describe('Keeper operation stream projection', () => {
         textResponse: { content_generation: generation, stream_scope: scope },
       })
     }
-    expect(keeperThreads.value.sangsu[0].rawText).toBe('current')
+    expect(requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0]).rawText).toBe('current')
   })
 
   it('does not reopen an owned stop for transport and unowned media notices', () => {
@@ -114,13 +121,13 @@ describe('Keeper operation stream projection', () => {
     const owner = { content_generation: 3, stream_scope: 0 }
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'answer', textResponse: owner })
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_STOP', value: owner })
-    const before = keeperThreads.value.sangsu[0]
+    const before = requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0])
     expect(before.responseState).toMatchObject({ closed: owner })
     expect(before.streamState).toBe('finalizing')
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_CONNECTED', value: null })
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_MEDIA_DELTA', value: { index: 0, media_type: 'image/png' } })
-    expect(keeperThreads.value.sangsu[0].streamState).toBe(before.streamState)
-    expect(keeperThreads.value.sangsu[0].delivery).toBe(before.delivery)
+    expect(requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0]).streamState).toBe(before.streamState)
+    expect(requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0]).delivery).toBe(before.delivery)
   })
 
   it('does not consume the valid frame sequence when a broadcast payload is malformed', () => {
@@ -128,12 +135,13 @@ describe('Keeper operation stream projection', () => {
     const diagnostic = parseSSEMessage({ type: 'keeper_chat_operation_event', name: 'sangsu', operation_id: 'op-1', seq: 12,
       ag_ui_event: { type: 'TEXT_MESSAGE_CONTENT', delta: 123 } })
     expect(diagnostic?.seq).toBeUndefined()
-    if (diagnostic?.ag_ui_event) applyKeeperStreamEvent('sangsu', 'reply-1', diagnostic.ag_ui_event,
-      { kind: 'operation', operationId: 'op-1', sequence: diagnostic.seq })
+    const event = KeeperChatStreamEventSchema.safeParse(diagnostic?.ag_ui_event)
+    if (event.success) applyKeeperStreamEvent('sangsu', 'reply-1', event.data,
+      { kind: 'operation', operationId: 'op-1', sequence: diagnostic?.seq })
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'valid counterpart' },
       { kind: 'operation', operationId: 'op-1', sequence: 12 })
-    expect(keeperThreads.value.sangsu[0].rawText).toBe('valid counterpart')
-    expect(keeperThreads.value.sangsu[0].responseState).toMatchObject({ lastSequence: 12 })
+    expect(requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0]).rawText).toBe('valid counterpart')
+    expect(requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0]).responseState).toMatchObject({ lastSequence: 12 })
   })
 
   it('persists full unsequenced reasoning at the scheduled flush and resumes it after reload', () => {
@@ -147,14 +155,14 @@ describe('Keeper operation stream projection', () => {
       applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA',
         value: { index: 0, delta: prefix, response: owner } })
       vi.advanceTimersByTime(KEEPER_THINKING_DELTA_FLUSH_INTERVAL_MS)
-      const draft = trackedKeeperChatOperationsForKeeper('sangsu')[0].assistantDraft!
+      const draft = requiredFixture(trackedKeeperChatOperationsForKeeper('sangsu')[0]).assistantDraft!
       expect(draft.traceSteps?.[0]).toMatchObject({ text: prefix, responseOwner: owner })
       _resetKeeperStreamBuffersForTests()
-      keeperThreads.value = { sangsu: [{ ...keeperThreads.value.sangsu[0], traceSteps: draft.traceSteps, responseState: draft.responseState }] }
+      keeperThreads.value = { sangsu: [{ ...requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0]), traceSteps: draft.traceSteps, responseState: draft.responseState }] }
       applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA',
         value: { index: 0, delta: 'continuation', response: owner } })
       _flushPendingKeeperStreamDeltasForTests()
-      expect(keeperThreads.value.sangsu[0].traceSteps?.[0]).toMatchObject({ text: `${prefix}continuation` })
+      expect(requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0]).traceSteps?.[0]).toMatchObject({ text: `${prefix}continuation` })
     } finally {
       _resetKeeperStreamBuffersForTests()
       vi.useRealTimers()
@@ -166,9 +174,9 @@ describe('Keeper operation stream projection', () => {
     const start: KeeperChatStreamEvent = { type: 'TOOL_CALL_START', ...toolOccurrence(), toolCallName: 'Read', toolCallId: 'provider-tool' }
     applyKeeperStreamEvent('sangsu', 'reply-1', start)
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'current speech' })
-    const before = keeperThreads.value.sangsu.find(entry => entry.id === 'reply-1')!
+    const before = requiredFixture(keeperThreads.value.sangsu).find(entry => entry.id === 'reply-1')!
     applyKeeperStreamEvent('sangsu', 'reply-1', start)
-    const after = keeperThreads.value.sangsu.find(entry => entry.id === 'reply-1')!
+    const after = requiredFixture(keeperThreads.value.sangsu).find(entry => entry.id === 'reply-1')!
     expect(after.rawText).toBe('current speech')
     expect(after.traceSteps).toEqual(before.traceSteps)
   })
@@ -180,7 +188,7 @@ describe('Keeper operation stream projection', () => {
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'final answer' }, source)
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'RUN_FINISHED' }, source)
     const broadcast = (event: KeeperChatStreamEvent) => applyKeeperOperationTurnEvent('sangsu', { operationId, event })
-    const before = keeperThreads.value.sangsu.find(entry => entry.id === 'reply-1')!
+    const before = requiredFixture(keeperThreads.value.sangsu).find(entry => entry.id === 'reply-1')!
     expect(before.responseState).toMatchObject({ phase: 'terminal' })
     expect(before.delivery).toBe('delivered')
     broadcast({ type: 'TOOL_CALL_START', ...toolOccurrence(), toolCallName: 'Read', toolCallId: 'late-tool' })
@@ -188,10 +196,10 @@ describe('Keeper operation stream projection', () => {
     broadcast({ type: 'TOOL_CALL_END', ...toolOccurrence(), toolCallId: 'late-tool' })
     broadcast({ type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY',
       value: { ...toolOccurrence(), toolCallId: 'late-tool', executionId: 'late-execution' } })
-    const after = keeperThreads.value.sangsu.find(entry => entry.id === 'reply-1')!
+    const after = requiredFixture(keeperThreads.value.sangsu).find(entry => entry.id === 'reply-1')!
     expect(after).toMatchObject({ text: 'final answer', rawText: 'final answer', delivery: 'delivered', streamState: null, responseState: { phase: 'terminal' } })
     expect(after.traceSteps).toMatchObject([{ kind: 'tool', name: 'Read', status: 'ok', executionId: 'late-execution', args: '{"path":"file"}' }])
-    expect(keeperThreads.value.sangsu.find(entry => entry.executionId === 'late-execution')).toMatchObject({ delivery: 'delivered', toolCallEnded: true })
+    expect(requiredFixture(keeperThreads.value.sangsu).find(entry => entry.executionId === 'late-execution')).toMatchObject({ delivery: 'delivered', toolCallEnded: true })
   })
 
   it.each(['history', 'interrupted'] as const)('records late tools on %s without granting activity to its response', delivery => {
@@ -200,13 +208,13 @@ describe('Keeper operation stream projection', () => {
       text: 'canonical answer', rawText: 'canonical answer', timestamp: '2026-10-11T00:00:00Z', delivery, streamState: null,
       deliveryProvenance: operationDeliveryProvenance(operationId, 'terminal_result'), details: null })
     applyKeeperOperationTurnEvent('sangsu', { operationId, event: { type: 'TOOL_CALL_START', ...toolOccurrence(), toolCallName: 'Read' } })
-    const before = keeperThreads.value.sangsu.find(entry => entry.id === 'canonical-reply')!
+    const before = requiredFixture(keeperThreads.value.sangsu).find(entry => entry.id === 'canonical-reply')!
     expect(before).toMatchObject({ delivery, streamState: null, rawText: 'canonical answer', text: 'canonical answer' })
     expect(before.traceSteps).toMatchObject([{ kind: 'tool', name: 'Read', status: 'pending' }])
     const error = applyKeeperOperationTurnEvent('sangsu', { operationId, event: { type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY',
       value: { ...toolOccurrence(9), executionId: 'unmatched-execution' } } })
     expect(error).not.toBeNull()
-    expect(keeperThreads.value.sangsu.find(entry => entry.id === 'canonical-reply')).toMatchObject({
+    expect(requiredFixture(keeperThreads.value.sangsu).find(entry => entry.id === 'canonical-reply')).toMatchObject({
       delivery, streamState: null, rawText: 'canonical answer', text: 'canonical answer', error,
     })
   })
@@ -217,7 +225,7 @@ describe('Keeper operation stream projection', () => {
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'intermediate speech', textResponse: owner })
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_STOP', value: owner })
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_START', ...toolOccurrence(), toolCallName: 'Read' })
-    expect(keeperThreads.value.sangsu.find(entry => entry.id === 'reply-1')).toMatchObject({
+    expect(requiredFixture(keeperThreads.value.sangsu).find(entry => entry.id === 'reply-1')).toMatchObject({
       delivery: 'streaming', streamState: 'streaming', responseState: { phase: 'running', closed: owner },
     })
   })
@@ -228,36 +236,82 @@ describe('Keeper operation stream projection', () => {
     const source = { kind: 'operation' as const, operationId }
     const start: KeeperChatStreamEvent = { type: 'TOOL_CALL_START', ...toolOccurrence(), toolCallName: 'Read', toolCallId: 'reused-provider' }
     applyKeeperStreamEvent('sangsu', 'reply-1', start, source)
-    const originalTool = keeperThreads.value.sangsu.find(row => row.role === 'tool')!
+    const originalTool = requiredFixture(keeperThreads.value.sangsu).find(row => row.role === 'tool')!
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'RUN_FINISHED' }, source)
-    mergeServerHistoryEntries('sangsu', [{ ...keeperThreads.value.sangsu.find(row => row.id === 'reply-1')!,
+    mergeServerHistoryEntries('sangsu', [{ ...requiredFixture(keeperThreads.value.sangsu).find(row => row.id === 'reply-1')!,
       id: 'canonical-parent', delivery: 'history', traceSteps: undefined }])
     applyKeeperOperationTurnEvent('sangsu', { operationId, event: start })
     applyKeeperOperationTurnEvent('sangsu', { operationId, event: { type: 'TOOL_CALL_ARGS', ...toolOccurrence(), toolCallId: 'reused-provider', snapshot: '{"path":"file"}' } })
     expect(applyKeeperOperationTurnEvent('sangsu', { operationId, event: { type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY',
       value: { ...toolOccurrence(), toolCallId: 'reused-provider', executionId: 'stable-execution' } } })).toBeNull()
-    const tools = keeperThreads.value.sangsu.filter(row => row.role === 'tool')
+    const tools = requiredFixture(keeperThreads.value.sangsu).filter(row => row.role === 'tool')
     expect(tools.map(row => row.id)).toEqual([originalTool.id])
     expect(tools[0]).toMatchObject({ executionId: 'stable-execution', rawText: '{"path":"file"}', delivery: 'delivered' })
-    expect(keeperThreads.value.sangsu.find(row => row.id === 'canonical-parent')?.traceSteps).toMatchObject([
+    expect(requiredFixture(keeperThreads.value.sangsu).find(row => row.id === 'canonical-parent')?.traceSteps).toMatchObject([
       { kind: 'tool', executionId: 'stable-execution', status: 'ok' },
     ])
+  })
+
+  it('keeps a quarantined provisional occurrence beside a committed execution at ordinal zero', () => {
+    assistantEntry('quarantine-gap')
+    const source = { kind: 'operation' as const, operationId: 'quarantine-gap' }
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_START', ...toolOccurrence(), toolCallName: 'Read' }, source)
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_STREAM_PROTOCOL_ERROR',
+      value: { kind: 'tool_start_duplicate_index', quarantined_occurrence: toolOccurrence() } }, source)
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_START', ...toolOccurrence(1), toolCallName: 'Write' }, source)
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY',
+      value: { ...toolOccurrence(1), executionId: 'valid-execution' } }, source)
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_TOOL_TRANSCRIPT_COMMITTED',
+      value: { deliveryKey: { kind: 'operation', operation_id: 'quarantine-gap' }, executionId: 'valid-execution', ordinal: 0 } }, source)
+    const entries = requiredFixture(keeperThreads.value.sangsu)
+    const captured = captureToolObservations(entries.find(entry => entry.id === 'reply-1')!, entries)
+    expect(captured).toMatchObject({ kind: 'known', entries: [
+      { toolOccurrenceQuarantined: true, deliveryProvenance: null },
+      { executionId: 'valid-execution', toolTranscriptOrdinal: 0, deliveryProvenance: { transcript_slot: { kind: 'tool_call', ordinal: 0 } } },
+    ] })
+  })
+
+  it('owns a copy of the committed delivery key and refuses canonical key replacement', () => {
+    assistantEntry('binding-copy')
+    const source = { kind: 'operation' as const, operationId: 'binding-copy' }
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_START', ...toolOccurrence(), toolCallName: 'Read' }, source)
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY', value: { ...toolOccurrence(), executionId: 'execution' } }, source)
+    const key = { kind: 'operation_native' as const, operation_id: 'binding-copy', continuation_id: 'native-a' }
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_TOOL_TRANSCRIPT_COMMITTED', value: { deliveryKey: key, executionId: 'execution', ordinal: 0 } }, source)
+    key.continuation_id = 'mutated'
+    expect(requiredFixture(keeperThreads.value.sangsu).find(entry => entry.role === 'tool')?.deliveryProvenance?.delivery_key).toMatchObject({ continuation_id: 'native-a' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_TOOL_TRANSCRIPT_COMMITTED', value: { deliveryKey: { ...key, continuation_id: 'native-b' }, executionId: 'execution', ordinal: 0 } }, source)
+    expect(requiredFixture(keeperThreads.value.sangsu).find(entry => entry.id === 'reply-1')?.toolObservationAuthority).toBe('unavailable')
+  })
+
+  it.each([false, true])('uses the committed server ordinal regardless of result ordering (commitFirst=%s)', commitFirst => {
+    assistantEntry('committed-ordinal')
+    const source = { kind: 'operation' as const, operationId: 'committed-ordinal' }
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_START', ...toolOccurrence(), toolCallName: 'Read' }, source)
+    const committed: KeeperChatStreamEvent = { type: 'CUSTOM', name: 'KEEPER_TOOL_TRANSCRIPT_COMMITTED', value: { deliveryKey: { kind: 'operation', operation_id: 'committed-ordinal' }, executionId: 'execution', ordinal: 7 } }
+    if (commitFirst) applyKeeperStreamEvent('sangsu', 'reply-1', committed, source)
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY', value: { ...toolOccurrence(), executionId: 'execution' } }, source)
+    applyKeeperStreamEvent('sangsu', 'reply-1', committed, source)
+    expect(requiredFixture(keeperThreads.value.sangsu).find(entry => entry.role === 'tool')).toMatchObject({ toolTranscriptOrdinal: 7,
+      deliveryProvenance: { transcript_slot: { kind: 'tool_call', execution_id: 'execution', ordinal: 7 } } })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { ...committed, value: { ...committed.value, ordinal: 8 } }, source)
+    expect(requiredFixture(keeperThreads.value.sangsu).find(entry => entry.id === 'reply-1')?.toolObservationAuthority).toBe('unavailable')
   })
 
   it('retains unavailable tool authority when canonical history replaces its parent', () => {
     const operationId = 'unavailable-tool-parent'
     assistantEntry(operationId)
-    keeperThreads.value = { ...keeperThreads.value, sangsu: keeperThreads.value.sangsu.map(entry => ({ ...entry,
+    keeperThreads.value = { ...keeperThreads.value, sangsu: requiredFixture(keeperThreads.value.sangsu).map(entry => ({ ...entry,
       toolObservationAuthority: 'unavailable' as const })) }
-    mergeServerHistoryEntries('sangsu', [{ ...keeperThreads.value.sangsu[0], id: 'canonical-unavailable-parent',
+    mergeServerHistoryEntries('sangsu', [{ ...requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0]), id: 'canonical-unavailable-parent',
       toolObservationAuthority: undefined, delivery: 'history' }])
     const source = { kind: 'operation' as const, operationId }
     expect(applyKeeperStreamEvent('sangsu', 'canonical-unavailable-parent', { type: 'TOOL_CALL_START',
       ...toolOccurrence(), toolCallName: 'Read' }, source)).toBeNull()
     expect(applyKeeperStreamEvent('sangsu', 'canonical-unavailable-parent', { type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY',
       value: { ...toolOccurrence(), executionId: 'must-not-bind' } }, source)).toBeNull()
-    expect(keeperThreads.value.sangsu.some(entry => entry.role === 'tool')).toBe(false)
-    expect(keeperThreads.value.sangsu.find(entry => entry.id === 'canonical-unavailable-parent')?.toolObservationAuthority).toBe('unavailable')
+    expect(requiredFixture(keeperThreads.value.sangsu).some(entry => entry.role === 'tool')).toBe(false)
+    expect(requiredFixture(keeperThreads.value.sangsu).find(entry => entry.id === 'canonical-unavailable-parent')?.toolObservationAuthority).toBe('unavailable')
   })
 
   it('rejects contradictory provider correlation on an already bound result replay', () => {
@@ -270,40 +324,41 @@ describe('Keeper operation stream projection', () => {
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', result, source)).toBeNull()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', { ...result,
       value: { ...result.value, toolCallId: 'provider-b' } }, source)).toContain('provider correlation conflicts')
-    expect(keeperThreads.value.sangsu.filter(row => row.role === 'tool')).toMatchObject([
+    expect(requiredFixture(keeperThreads.value.sangsu).filter(row => row.role === 'tool')).toMatchObject([
       { executionId: 'same-execution', toolCallId: 'provider-a' },
     ])
   })
 
-  it.each([false, true])('binds history before first result unless provider correlation conflicts (conflict=%s)', conflict => {
+  it.each([[false, false], [true, false], [false, true], [true, true]])('binds history before result (conflict=%s, continuation=%s)', (conflict, continuation) => {
     const operationId = 'history-before-result'
     assistantEntry(operationId)
     const source = { kind: 'operation' as const, operationId }
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_START', ...toolOccurrence(), toolCallName: 'Read', toolCallId: 'live-provider' }, source)
-    const planned = keeperThreads.value.sangsu.find(row => row.role === 'tool')!
-    const slot = planned.deliveryProvenance!.transcript_slot
-    if (slot.kind !== 'tool_delivery') throw new Error('Expected planned tool ordinal')
-    mergeServerHistoryEntries('sangsu', [{ ...planned, id: 'canonical-executed-tool',
+    const planned = requiredFixture(keeperThreads.value.sangsu).find(row => row.role === 'tool')!
+    const parentProvenance = continuation
+      ? { delivery_key: { kind: 'operation_native' as const, operation_id: operationId, continuation_id: 'native' }, transcript_slot: { kind: 'terminal_result' as const } }
+      : operationDeliveryProvenance(operationId, 'terminal_result')
+    mergeServerHistoryEntries('sangsu', [{ ...planned, id: 'canonical-executed-tool', toolOwnerKey: undefined,
       executionId: 'history-execution', delivery: 'history', rawText: 'canonical args',
       toolCallId: conflict ? 'different-provider' : 'live-provider',
       toolOccurrence: undefined,
-      deliveryProvenance: toolCallDeliveryProvenance(planned.deliveryProvenance, 'history-execution', slot.ordinal),
+      deliveryProvenance: toolCallDeliveryProvenance(parentProvenance, 'history-execution', 0),
     }])
-    expect(keeperThreads.value.sangsu.filter(row => row.role === 'tool')).toHaveLength(2)
+    expect(requiredFixture(keeperThreads.value.sangsu).filter(row => row.role === 'tool')).toHaveLength(2)
     const result = applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY',
       value: { ...toolOccurrence(), executionId: 'history-execution' } }, source)
     if (conflict) {
       expect(result).toContain('provider correlation conflicts')
-      expect(keeperThreads.value.sangsu.filter(row => row.role === 'tool')).toHaveLength(2)
-      expect(keeperThreads.value.sangsu.find(row => row.id === planned.id)?.executionId).toBeUndefined()
+      expect(requiredFixture(keeperThreads.value.sangsu).filter(row => row.role === 'tool')).toHaveLength(2)
+      expect(requiredFixture(keeperThreads.value.sangsu).find(row => row.id === planned.id)?.executionId).toBeUndefined()
       return
     }
     expect(result).toBeNull()
-    expect(keeperThreads.value.sangsu.filter(row => row.role === 'tool')).toMatchObject([
+    expect(requiredFixture(keeperThreads.value.sangsu).filter(row => row.role === 'tool')).toMatchObject([
       { id: 'canonical-executed-tool', rawText: 'canonical args', toolCallEnded: true,
         toolOccurrence: { kind: 'identified', streamScope: 0, blockIndex: 0 } },
     ])
-    expect(keeperThreads.value.sangsu.find(row => row.id === 'reply-1')?.traceSteps).toMatchObject([
+    expect(requiredFixture(keeperThreads.value.sangsu).find(row => row.id === 'reply-1')?.traceSteps).toMatchObject([
       { kind: 'tool', toolOccurrenceId: 'canonical-executed-tool', executionId: 'history-execution', status: 'ok' },
     ])
   })
@@ -316,12 +371,12 @@ describe('Keeper operation stream projection', () => {
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_STREAM_PROTOCOL_ERROR',
       value: { kind: 'tool_start_duplicate_index', quarantined_occurrence: toolOccurrence() } }, source)
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'RUN_FINISHED' }, source)
-    mergeServerHistoryEntries('sangsu', [{ ...keeperThreads.value.sangsu.find(row => row.id === 'reply-1')!, id: 'canonical-quarantine-parent', delivery: 'history' }])
+    mergeServerHistoryEntries('sangsu', [{ ...requiredFixture(keeperThreads.value.sangsu).find(row => row.id === 'reply-1')!, id: 'canonical-quarantine-parent', delivery: 'history' }])
     _resetKeeperStreamBuffersForTests()
     expect(applyKeeperOperationTurnEvent('sangsu', { operationId, event: { type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY',
       value: { ...toolOccurrence(), executionId: 'must-not-bind' } } })).toContain('quarantined')
-    expect(keeperThreads.value.sangsu.find(row => row.role === 'tool')).toMatchObject({ toolOccurrenceQuarantined: true, delivery: 'error' })
-    expect(keeperThreads.value.sangsu.some(row => row.executionId === 'must-not-bind')).toBe(false)
+    expect(requiredFixture(keeperThreads.value.sangsu).find(row => row.role === 'tool')).toMatchObject({ toolOccurrenceQuarantined: true, delivery: 'error' })
+    expect(requiredFixture(keeperThreads.value.sangsu).some(row => row.executionId === 'must-not-bind')).toBe(false)
   })
 
   it.each([false, true])('preserves tool coordinates and trace links through canonical replacement (duplicate=%s)', duplicate => {
@@ -331,9 +386,10 @@ describe('Keeper operation stream projection', () => {
     const start: KeeperChatStreamEvent = { type: 'TOOL_CALL_START', ...toolOccurrence(), toolCallName: 'Read' }
     applyKeeperStreamEvent('sangsu', 'reply-1', start, source)
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY', value: { ...toolOccurrence(), executionId: 'canonical-execution' } }, source)
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_TOOL_TRANSCRIPT_COMMITTED', value: { deliveryKey: { kind: 'operation', operation_id: 'canonical-tool-occurrence' }, executionId: 'canonical-execution', ordinal: 0 } }, source)
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'RUN_FINISHED' }, source)
-    const originalTool = keeperThreads.value.sangsu.find(row => row.role === 'tool')!
-    const originalReply = keeperThreads.value.sangsu.find(row => row.id === 'reply-1')!
+    const originalTool = requiredFixture(keeperThreads.value.sangsu).find(row => row.role === 'tool')!
+    const originalReply = requiredFixture(keeperThreads.value.sangsu).find(row => row.id === 'reply-1')!
     mergeServerHistoryEntries('sangsu', [
       { ...originalTool, id: 'persisted-tool', toolOccurrence: undefined, toolOccurrenceQuarantined: undefined, toolCallEnded: undefined, delivery: 'history' },
       ...(duplicate ? [{ ...originalTool, id: 'duplicate-persisted-tool', toolOccurrence: undefined, toolOccurrenceQuarantined: undefined, toolCallEnded: undefined, delivery: 'history' as const }] : []),
@@ -344,8 +400,8 @@ describe('Keeper operation stream projection', () => {
     applyKeeperOperationTurnEvent('sangsu', { operationId, event: start })
     expect(applyKeeperOperationTurnEvent('sangsu', { operationId, event: { type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY',
       value: { ...toolOccurrence(), executionId: 'canonical-execution' } } })).toBeNull()
-    expect(keeperThreads.value.sangsu.filter(row => row.role === 'tool').map(row => row.id)).toEqual(['persisted-tool'])
-    expect(keeperThreads.value.sangsu.find(row => row.id === 'persisted-reply')?.traceSteps).toMatchObject([
+    expect(requiredFixture(keeperThreads.value.sangsu).filter(row => row.role === 'tool').map(row => row.id)).toEqual(['persisted-tool'])
+    expect(requiredFixture(keeperThreads.value.sangsu).find(row => row.id === 'persisted-reply')?.traceSteps).toMatchObject([
       { kind: 'tool', toolOccurrenceId: 'persisted-tool', executionId: 'canonical-execution' },
     ])
   })
@@ -356,20 +412,21 @@ describe('Keeper operation stream projection', () => {
     const source = { kind: 'operation' as const, operationId }
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_START', ...toolOccurrence(), toolCallName: 'Read' }, source)
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY', value: { ...toolOccurrence(), executionId: 'conflicting-execution' } }, source)
-    const originalTool = keeperThreads.value.sangsu.find(row => row.role === 'tool')!
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_TOOL_TRANSCRIPT_COMMITTED', value: { deliveryKey: { kind: 'operation', operation_id: operationId }, executionId: 'conflicting-execution', ordinal: 0 } }, source)
+    const originalTool = requiredFixture(keeperThreads.value.sangsu).find(row => row.role === 'tool')!
     appendThreadEntry('sangsu', { ...originalTool, id: 'disputed-tool-alias', toolOccurrence: { kind: 'identified', streamScope: 1, blockIndex: 1 } })
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'RUN_FINISHED' }, source)
     mergeServerHistoryEntries('sangsu', [
       { ...originalTool, id: 'canonical-disputed-tool', delivery: 'history', toolOccurrence: undefined },
-      { ...keeperThreads.value.sangsu.find(row => row.id === 'reply-1')!, id: 'canonical-disputed-parent', delivery: 'history' },
+      { ...requiredFixture(keeperThreads.value.sangsu).find(row => row.id === 'reply-1')!, id: 'canonical-disputed-parent', delivery: 'history' },
     ])
     for (const occurrence of [toolOccurrence(), toolOccurrence(1, 1)]) {
       applyKeeperOperationTurnEvent('sangsu', { operationId, event: { type: 'TOOL_CALL_START', ...occurrence, toolCallName: 'Read' } })
       expect(applyKeeperOperationTurnEvent('sangsu', { operationId, event: { type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY',
         value: { ...occurrence, executionId: 'must-not-rebind' } } })).toContain('quarantined')
     }
-    expect(keeperThreads.value.sangsu.filter(row => row.role === 'tool').map(row => row.id)).toEqual(['canonical-disputed-tool'])
-    expect(keeperThreads.value.sangsu.find(row => row.id === 'canonical-disputed-tool')).toMatchObject({
+    expect(requiredFixture(keeperThreads.value.sangsu).filter(row => row.role === 'tool').map(row => row.id)).toEqual(['canonical-disputed-tool'])
+    expect(requiredFixture(keeperThreads.value.sangsu).find(row => row.id === 'canonical-disputed-tool')).toMatchObject({
       toolOccurrenceQuarantined: true, toolOccurrence: { kind: 'conflicting', coordinates: [
         { streamScope: 0, blockIndex: 0 }, { streamScope: 1, blockIndex: 1 },
       ] },
@@ -382,7 +439,7 @@ describe('Keeper operation stream projection', () => {
       if (hasBody) {
         applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'authored text' })
       }
-      const before = keeperThreads.value.sangsu[0]
+      const before = requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0])
       expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
         type: 'CUSTOM',
         name: 'KEEPER_MODEL_CONTENT_ACTIVITY',
@@ -390,8 +447,8 @@ describe('Keeper operation stream projection', () => {
       })).toBeNull()
       // This view does not draw the side metadata. It must neither announce
       // model progress nor finalize a live response or append authored bytes.
-      expect(keeperThreads.value.sangsu[0].rawText).toBe(before.rawText)
-      expect(keeperThreads.value.sangsu[0].delivery).not.toBe('ok')
+      expect(requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0]).rawText).toBe(before.rawText)
+      expect(requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0]).delivery).not.toBe('ok')
     }
   })
 
@@ -1204,10 +1261,8 @@ describe('applyKeeperStreamEvent tool calls', () => {
     expect(tool.label).toBe('masc_status')
     expect(tool.text).toBe('{"fast":true}')
     expect(tool.delivery).toBe('streaming')
-    expect(tool.deliveryProvenance).toEqual({
-      delivery_key: { kind: 'operation', operation_id: 'kmsg-tool-1' },
-      transcript_slot: { kind: 'tool_delivery', ordinal: 0 },
-    })
+    expect(tool.deliveryProvenance).toBeNull()
+    expect(tool.toolOwnerKey).toEqual({ kind: 'operation', operation_id: 'kmsg-tool-1' })
     const reply = thread[replyIndex]!
     expect(reply.traceSteps).toEqual([
       {
@@ -1232,6 +1287,8 @@ describe('applyKeeperStreamEvent tool calls', () => {
       name: 'KEEPER_TOOL_RESULT_READY',
       value: { ...toolOccurrence(), toolCallId: 'tc-1', executionId: 'exec-tc-1' },
     })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_TOOL_TRANSCRIPT_COMMITTED',
+      value: { deliveryKey: { kind: 'operation', operation_id: 'kmsg-tool-1' }, executionId: 'exec-tc-1', ordinal: 0 } })
     const finished = keeperThreads.value.sangsu?.find(entry => entry.toolCallId === 'tc-1')
     expect(finished?.delivery).toBe('delivered')
     expect(finished?.streamState).toBeNull()
@@ -1308,11 +1365,7 @@ describe('applyKeeperStreamEvent tool calls', () => {
 
     const tool = keeperThreads.value.sangsu?.find(entry => entry.toolCallId === 'tc-conflict')
     expect(tool?.executionId).toBe('exec-first')
-    expect(tool?.deliveryProvenance?.transcript_slot).toEqual({
-      kind: 'tool_call',
-      execution_id: 'exec-first',
-      ordinal: 0,
-    })
+    expect(tool?.deliveryProvenance).toBeNull()
   })
 
   it('keeps a ready tool delivered when the provider end arrives later', () => {

@@ -4,6 +4,12 @@ type settlement =
   | Runtime_deferred
   | Reply of string
   | Request_failed of string
+val tool_delivery_key :
+  operation_id:Keeper_chat_delivery_identity.Request_id.t ->
+  resumed_from:Keeper_semantic_execution.gate_checkpoint option ->
+  (Keeper_chat_delivery_identity.delivery_key, string) result
+(** Same resolver for append ownership and post-append publication. *)
+
 val persist : base_dir:string -> keeper_name:string ->
   operation_id:Keeper_chat_delivery_identity.Request_id.t ->
   resumed_from:Keeper_semantic_execution.gate_checkpoint option -> settlement:settlement ->

@@ -58,6 +58,18 @@ let open_atomic_temp_file ~temp_dir () =
     Atomic_temp_name.suffix
 ;;
 
+let sync_file_and_parent_strict path =
+  blocking_syscalls ~label:("fs-compat-recovery-sync " ^ Filename.basename path)
+    (fun () ->
+       try
+         fsync_path_strict path;
+         fsync_path_strict (Filename.dirname path);
+         Ok ()
+       with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | Unix.Unix_error _ as exn -> Error (Printexc.to_string exn))
+;;
+
 type atomic_replace_failure_stage =
   | Before_rename
   | After_rename

@@ -321,6 +321,10 @@ val save_file : string -> string -> unit
     Returns [Error msg] on I/O failure instead of raising. *)
 val save_file_atomic : string -> string -> (unit, string) Result.t
 
+(** Sync an existing file and its parent without rewriting. Caller holds the
+    store lock; errors preserve contents and cancellation propagates. *)
+val sync_file_and_parent_strict : string -> (unit, string) Result.t
+
 (** {!save_file_atomic} without any fsync: temp file, then rename. After a
     power loss the renamed file can be empty or partial, so only a file the
     caller rebuilds on its next pass may be written this way. *)

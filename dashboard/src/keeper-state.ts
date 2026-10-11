@@ -974,6 +974,7 @@ function normalizeHistoryEntry(
     approvalLifecycle,
     attachments,
     blocks,
+    ...(serverBlocks && role === 'assistant' ? { replyBlockSource: 'canonical_body' as const } : {}),
     ...(!serverBlocks && blocks ? { replyTextProjection: Object.freeze({ offset: 0, length: blocks.length }) } : {}),
   }
 }
@@ -1763,6 +1764,7 @@ function autonomousTurnEntry(
     text,
     rawText: message.content,
     blocks: blocks && blocks.length > 0 ? blocks : undefined,
+    ...(blocks && blocks.length > 0 ? { replyBlockSource: 'canonical_body' as const } : {}),
     traceSteps: traceSteps && traceSteps.length > 0 ? traceSteps : undefined,
     timestamp,
     delivery: message.content === null ? 'no_reply' : 'history',

@@ -13,7 +13,10 @@ export function producerReplyBlocks(entry: Pick<KeeperConversationEntry, 'blocks
   return [...blocks.slice(0, projection.offset), ...blocks.slice(projection.offset + projection.length)]
 }
 
-export function projectFinalReplyBlocks(entry: Pick<KeeperConversationEntry, 'blocks' | 'replyTextProjection'>, text: string) {
+export function projectFinalReplyBlocks(entry: Pick<KeeperConversationEntry, 'blocks' | 'replyTextProjection' | 'replyBlockSource'>, text: string) {
+  if (entry.replyBlockSource === 'canonical_body') return {
+    blocks: (entry.blocks ?? []).filter(block => block.t !== 'status'), replyTextProjection: undefined,
+  }
   const retained = producerReplyBlocks(entry).filter(block => block.t !== 'status')
   const projected = parseTextToChatBlocks(text)
   return { blocks: [...retained, ...projected],

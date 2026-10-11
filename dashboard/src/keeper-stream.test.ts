@@ -6,6 +6,7 @@ import {
   _resetLiveSendRequestOwnersForTests,
   activeStreamRequestId,
   appendThreadEntry,
+  chatHistoryEntriesFromRest,
   mergeServerHistoryEntries,
   claimLiveSendRequest,
   clearActiveStream,
@@ -555,6 +556,19 @@ describe('Keeper operation stream projection', () => {
     const first = keeperThreads.value.sangsu?.[0]?.blocks
     applyKeeperStreamEvent('sangsu', 'reply-1', details)
     expect(keeperThreads.value.sangsu?.[0]?.blocks).toEqual(first)
+  })
+  it.each([
+    ['committed answer', { t: 'p', html: 'committed answer' }],
+    ['https://example.com/a.png', { t: 'image', src: 'https://example.com/a.png' }],
+    ['https://example.com/document', { t: 'link', url: 'https://example.com/document', title: 'document' }],
+  ])('preserves canonical body blocks when final details replay for %s', (reply, block) => {
+    const entries = chatHistoryEntriesFromRest('sangsu', [{ id: 'reply-1', role: 'assistant', content: reply as string,
+      ts: 1, blocks: [block] }])
+    mergeServerHistoryEntries('sangsu', entries)
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_REPLY_DETAILS',
+      value: { reply: 'late differing reply', turn_ref: 'turn-1', turn_outcome: 'visible_reply' } })
+    expect(keeperThreads.value.sangsu?.[0]?.text).toBe(reply)
+    expect(keeperThreads.value.sangsu?.[0]?.blocks).toEqual([block])
   })
   it('preserves visible reply whitespace and SKILL-prefixed prose across deltas', () => {
     assistantEntry()

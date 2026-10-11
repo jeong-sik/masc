@@ -269,6 +269,7 @@ export async function hydrateKeeperToolApprovals(): Promise<void> {
     // fill gaps, never overwrite an in-flight answer with a re-hydration.
     if (keeperToolApprovals.value[row.keeper]?.[row.tool_call_id]?.authRevision === owner.authRevision) continue
     upsertKeeperToolApproval(row.keeper, {
+      approvalId: row.approval_id,
       toolCallId: row.tool_call_id,
       toolName: row.tool,
       args: row.args,

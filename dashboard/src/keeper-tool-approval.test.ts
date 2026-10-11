@@ -15,6 +15,7 @@ import { answerHeldKeeperToolApproval, hydrateKeeperToolApprovals } from './keep
 
 function pendingRow(toolCallId: string): void {
   upsertKeeperToolApproval('sangsu', {
+    approvalId: '019a0000-0000-7000-8000-000000000001',
     toolCallId,
     toolName: 'Execute',
     args: '{"argv":["ls"]}',
@@ -196,7 +197,7 @@ describe('approval inventory protocol', () => {
   it.each([
     {},
     { pending: {} },
-    { pending: [{ keeper: 'sangsu', tool_call_id: 'call-malformed' }] },
+    { pending: [{ approval_id: '019a0000-0000-7000-8000-000000000001', keeper: 'sangsu', tool_call_id: 'call-malformed' }] },
     { pending: [null] },
   ])('rejects malformed inventory rather than inventing an empty list or prompt', async body => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, body)))
@@ -211,6 +212,7 @@ describe('hydrateKeeperToolApprovals', () => {
       jsonResponse(200, {
         pending: [
           {
+            approval_id: '019a0000-0000-7000-8000-000000000001',
             keeper: 'sangsu',
             tool_call_id: 'call-known',
             tool: 'StaleOverwrite',
@@ -221,6 +223,7 @@ describe('hydrateKeeperToolApprovals', () => {
             timeout_sec: 180,
           },
           {
+            approval_id: '019a0000-0000-7000-8000-000000000001',
             keeper: 'sangsu',
             tool_call_id: 'call-hydrated',
             tool: 'Execute',
@@ -247,6 +250,16 @@ describe('hydrateKeeperToolApprovals', () => {
     expect(hydrated?.askedAtMs).toBe(1787636000 * 1000)
   })
 
+  it.each([undefined, 'provider-call', 42, '12de81b6-4388-4aa5-b4b0-678d3cabeeff'])(
+    'rejects inventory without a canonical server admission ID', async approval_id => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { pending: [{
+        approval_id, keeper: 'sangsu', tool_call_id: 'inventory-call', tool: 'Execute',
+        args: '{}', question: 'Run?', because: 'policy', asked_at: 1, timeout_sec: 180,
+      }] })))
+      await expect(fetchKeeperToolApprovals()).rejects.toThrow('approval_id')
+    },
+  )
+
   it('discards a listing completed after authentication changes', async () => {
     setStoredToken('synthetic-approval-account-a')
     let resolveFetch!: (response: Response) => void
@@ -255,7 +268,7 @@ describe('hydrateKeeperToolApprovals', () => {
     await vi.waitFor(() => expect(resolveFetch).toBeDefined())
     setStoredToken('synthetic-approval-account-b')
     resolveFetch(jsonResponse(200, { pending: [{
-      keeper: 'sangsu', tool_call_id: 'foreign-wait', tool: 'Execute', args: '{}',
+      approval_id: '019a0000-0000-7000-8000-000000000001', keeper: 'sangsu', tool_call_id: 'foreign-wait', tool: 'Execute', args: '{}',
       question: 'approval', because: 'effect', asked_at: 1, timeout_sec: 180,
     }] }))
     await pending
@@ -266,7 +279,7 @@ describe('hydrateKeeperToolApprovals', () => {
     setStoredToken('synthetic-hydration-account-a')
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { pending:
       ['first-wait', 'second-wait'].map(tool_call_id => ({
-        keeper: 'sangsu', tool_call_id, tool: 'Execute', args: '{}',
+        approval_id: '019a0000-0000-7000-8000-000000000001', keeper: 'sangsu', tool_call_id, tool: 'Execute', args: '{}',
         question: 'approval', because: 'effect', asked_at: 1, timeout_sec: 180,
       })),
     })))
@@ -295,7 +308,7 @@ describe('hydrateKeeperToolApprovals', () => {
     resolvers[1]!(jsonResponse(200, { pending: [] }))
     await newer
     resolvers[0]!(jsonResponse(200, { pending: [{
-      keeper: 'sangsu', tool_call_id: 'finished-wait', tool: 'Execute', args: '{}',
+      approval_id: '019a0000-0000-7000-8000-000000000001', keeper: 'sangsu', tool_call_id: 'finished-wait', tool: 'Execute', args: '{}',
       question: 'approval', because: 'effect', asked_at: 1, timeout_sec: 180,
     }] }))
     await older
@@ -318,7 +331,7 @@ describe('hydrateKeeperToolApprovals', () => {
       value: { approval_id: '019a0000-0000-7000-8000-000000000001', tool_call_id: 'stream-finished-wait', outcome: 'approve' },
     })).toBeNull()
     resolveFetch(jsonResponse(200, { pending: [{
-      keeper: 'sangsu', tool_call_id: 'stream-finished-wait', tool: 'Execute', args: '{}',
+      approval_id: '019a0000-0000-7000-8000-000000000001', keeper: 'sangsu', tool_call_id: 'stream-finished-wait', tool: 'Execute', args: '{}',
       question: 'approval', because: 'effect', asked_at: 1, timeout_sec: 180,
     }] }))
     await listing
@@ -327,7 +340,7 @@ describe('hydrateKeeperToolApprovals', () => {
 
   it('does not publish an infinite millisecond timestamp from finite server seconds', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { pending: [{
-      keeper: 'sangsu', tool_call_id: 'overflow-clock', tool: 'Execute', args: '{}',
+      approval_id: '019a0000-0000-7000-8000-000000000001', keeper: 'sangsu', tool_call_id: 'overflow-clock', tool: 'Execute', args: '{}',
       question: 'approval', because: 'effect', asked_at: Number.MAX_VALUE, timeout_sec: 180,
     }] })))
     await hydrateKeeperToolApprovals()

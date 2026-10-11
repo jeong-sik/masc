@@ -1,3 +1,4 @@
+import { decodeKeeperToolApprovalId } from '../lib/keeper-tool-approval-id'
 import { KeeperChatStreamEventSchema } from '../schemas/sse'
 // MASC Dashboard — Keeper operation messaging and SSE streaming
 
@@ -248,6 +249,7 @@ export type {
 // the re-hydration path for waits whose owning stream watcher is gone and the
 // fallback when the REQUESTED event predates this view.
 export interface KeeperToolApprovalRow {
+  approval_id: string
   keeper: string
   tool_call_id: string
   tool: string
@@ -287,11 +289,14 @@ export async function fetchKeeperToolApprovals(
       }
       return value
     }
+    const approvalId = decodeKeeperToolApprovalId(row.approval_id)
+    if (approvalId === null) throw new Error('Invalid tool approval inventory approval_id')
     const askedAtSeconds = seconds('asked_at')
     if (askedAtSeconds !== null && !Number.isFinite(askedAtSeconds * 1000)) {
       throw new Error('Invalid tool approval inventory millisecond timestamp')
     }
     return {
+      approval_id: approvalId,
       keeper: text('keeper'),
       tool_call_id: text('tool_call_id'),
       tool: text('tool'),

@@ -723,13 +723,13 @@ interface KeeperConversationUsage {
 // dashboard drew nothing while the call waited and the answer, when it came,
 // was only the 180-second timeout read as a denial nobody chose.
 export interface KeeperToolApprovalPending {
+  readonly approvalId: string
   readonly authRevision: number
   toolCallId: string
   toolName: string
   args: string
   question: string
-  // Policy-owned reason the call was held. Empty for an older emitter that
-  // predates the field; the card omits the reason row in that case.
+  // Policy-owned reason the call was held.
   because: string
   askedAtMs: number | null
   // Server-stated seconds until the wait retires itself. Null when unknown;

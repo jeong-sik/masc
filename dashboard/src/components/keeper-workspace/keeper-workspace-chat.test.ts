@@ -235,6 +235,7 @@ describe('KeeperWorkspaceChat', () => {
     keeperToolApprovals.value = {
       sangsu: {
         'tool-call-1': {
+          approvalId: '019a0000-0000-7000-8000-000000000001',
           authRevision: currentStoredTokenRevision(),
           toolCallId: 'tool-call-1',
           toolName: 'Execute',
@@ -267,7 +268,7 @@ describe('KeeperWorkspaceChat', () => {
     const actions = await import('../../keeper-actions')
     core.setStoredToken('synthetic-mounted-approval-a')
     state.upsertKeeperToolApproval('sangsu', {
-      toolCallId: 'mounted-old-call', toolName: 'Execute', args: '{}',
+      approvalId: '019a0000-0000-7000-8000-000000000001', toolCallId: 'mounted-old-call', toolName: 'Execute', args: '{}',
       question: 'approval', because: 'effect', askedAtMs: null, timeoutSec: null,
       answering: false, answeredDecision: null, answeredOutcome: null, settled: false,
     })

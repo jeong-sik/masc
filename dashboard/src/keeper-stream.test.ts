@@ -855,6 +855,32 @@ describe('Keeper operation stream projection', () => {
     expect(keeperToolApprovals.value.sangsu?.['decoded-call']?.settled).toBe(true)
   })
 
+  it('does not let a displaced admission settle a reused provider call', () => {
+    assistantEntry()
+    const firstId = '019a0000-0000-7000-8000-000000000001'
+    const nextId = '019a0000-0000-7000-8000-000000000002'
+    for (const approval_id of [firstId, nextId]) {
+      expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'CUSTOM', name: 'KEEPER_TOOL_APPROVAL_REQUESTED',
+        value: { approval_id, tool_call_id: 'provider-reused',
+          tool_call_name: 'Execute', args: '{}', question: 'Run?', because: 'policy' },
+      })).toBeNull()
+    }
+    const current = keeperToolApprovals.value.sangsu?.['provider-reused']
+    expect(current?.approvalId).toBe(nextId)
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM', name: 'KEEPER_TOOL_APPROVAL_SETTLED',
+      value: { approval_id: firstId, tool_call_id: 'provider-reused', outcome: 'displaced' },
+    })).toBeNull()
+    expect(keeperToolApprovals.value.sangsu?.['provider-reused']).toBe(current)
+    expect(current?.settled).toBe(false)
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM', name: 'KEEPER_TOOL_APPROVAL_SETTLED',
+      value: { approval_id: nextId, tool_call_id: 'provider-reused', outcome: 'approve' },
+    })).toBeNull()
+    expect(keeperToolApprovals.value.sangsu?.['provider-reused']?.settled).toBe(true)
+  })
+
   it('mints a pending approval row on KEEPER_TOOL_APPROVAL_REQUESTED', () => {
     assistantEntry()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {

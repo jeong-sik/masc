@@ -1,3 +1,4 @@
+import { decodeKeeperToolApprovalId } from './lib/keeper-tool-approval-id'
 import { sameKeeperResponseOwner, type KeeperResponseOwner, initialKeeperResponseState, reduceKeeperResponse, acknowledgeKeeperResponseSequence, type KeeperResponseDecision, type KeeperResponseEvent } from './lib/keeper-response-state'
 import { currentStoredTokenRevision } from './api/core'
 import { keeperStreamContract } from './keeper-stream-contract'
@@ -41,6 +42,7 @@ import {
   keeperStreamStartedAt,
   liveSendOwnsRequest,
   setRecordValue,
+  keeperToolApprovals,
   upsertKeeperToolApproval,
   settleKeeperToolApproval,
 } from './keeper-state'
@@ -1299,6 +1301,8 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (event.name === 'KEEPER_TOOL_APPROVAL_REQUESTED') {
+        const approvalId = decodeKeeperToolApprovalId(event.value.approval_id)
+        if (approvalId === null) return 'KEEPER_TOOL_APPROVAL_REQUESTED invalid approval_id'
         const toolCallId = nonBlankToolCallId(event.value.tool_call_id)
         if (!toolCallId) return 'KEEPER_TOOL_APPROVAL_REQUESTED missing tool_call_id'
         const toolName = event.value.tool_call_name
@@ -1306,11 +1310,12 @@ export function applyKeeperStreamEvent(
         if (!toolName) return 'KEEPER_TOOL_APPROVAL_REQUESTED missing tool_call_name'
         if (!question) return 'KEEPER_TOOL_APPROVAL_REQUESTED missing question'
         upsertKeeperToolApproval(keeperName, {
+          approvalId,
           toolCallId,
           toolName,
           args: event.value.args,
           question,
-          because: event.value.because ?? '',
+          because: event.value.because,
           askedAtMs: Date.now(),
           timeoutSec: null,
           answering: false,
@@ -1321,6 +1326,8 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (event.name === 'KEEPER_TOOL_APPROVAL_SETTLED') {
+        const approvalId = decodeKeeperToolApprovalId(event.value.approval_id)
+        if (approvalId === null) return 'KEEPER_TOOL_APPROVAL_SETTLED invalid approval_id'
         const toolCallId = nonBlankToolCallId(event.value.tool_call_id)
         if (!toolCallId) return 'KEEPER_TOOL_APPROVAL_SETTLED missing tool_call_id'
         const outcome = event.value.outcome
@@ -1328,7 +1335,10 @@ export function applyKeeperStreamEvent(
         // Preserve the terminal fact for a known wait so a listing already
         // in flight cannot hydrate it back into an actionable approval.
         // A later REQUESTED event replaces this row with a new pending wait.
-        settleKeeperToolApproval(keeperName, toolCallId, outcome)
+        const current = keeperToolApprovals.value[keeperName]?.[toolCallId]
+        if (current?.approvalId === approvalId) {
+          settleKeeperToolApproval(keeperName, toolCallId, outcome, current)
+        }
         return null
       }
       if (event.name === 'KEEPER_STREAM_MESSAGE_START') {

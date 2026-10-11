@@ -399,6 +399,9 @@ let a_recorded_group_is_ours_only_when_shown () =
     | Keeper_firefox.Started_here | Keeper_firefox.Gone -> false in
   check bool "its process, started then, in its group" true
     (found ~started:(Some recorded_start) ~group:(Ok 4242) ~members:true () = Keeper_firefox.Started_here);
+  (* A leader not yet reaped still reads its start. *)
+  check bool "its process, started then, in its group, and nothing in it alive" true
+    (found ~started:(Some recorded_start) ~group:(Ok 4242) ~members:false () = Keeper_firefox.Gone);
   (* No process is given the number of a group that still exists, so the
      recorded group has ended, whatever group that number names now. *)
   check bool "another process with its number" true
@@ -1482,7 +1485,10 @@ let a_restart_whose_firefox_cannot_start_leaves_no_record () =
       check bool "no host for a Firefox that is not there" false (Sys.file_exists host_marker)))
 
 (* A port still held once the stopped group is empty gets no new Firefox:
-   it would meet that port, or that profile, still taken. *)
+   it would meet that port, or that profile, still taken. The record keeps
+   naming the stopped one, so a later start reads it as a Firefox that has
+   ended, not as one MASC never started, and starts one once the port is
+   free. *)
 let a_restart_whose_port_stays_open_starts_nothing () =
   with_workspace (fun base ->
     let firefox_marker, host_marker = markers base in
@@ -1499,7 +1505,27 @@ let a_restart_whose_port_stays_open_starts_nothing () =
         (match first_pid (firefox_marker ^ ".listener") with Some pid -> runs_under base pid | None -> false);
       check bool "no second Firefox" false (started_again (Keeper_firefox.firefox_log_path ~base_path:base));
       check bool "no host" false (Sys.file_exists host_marker);
-      check bool "the record of that empty group is gone" true (recorded base = None)))
+      check bool "the record still names the stopped one" true
+        (Option.map (fun (entry : Firefox_record.entry) -> entry.group) (recorded base) = Some first);
+      (* The next start reads that record as a Firefox that has ended: what
+         holds the port is left running, and a host is started for it. *)
+      started ~base ~configuration ();
+      await_file host_marker;
+      let holder = first_pid (firefox_marker ^ ".listener") in
+      check bool "a later start leaves the port's holder running" true
+        (match holder with Some pid -> runs_under base pid | None -> false);
+      check bool "and starts no Firefox" false (started_again (Keeper_firefox.firefox_log_path ~base_path:base));
+      (* Once the port is free, a Firefox is started over that record. *)
+      Option.iter stop (first_pid host_marker);
+      Sys.remove host_marker;
+      Option.iter stop holder;
+      started ~base ~configuration ();
+      await_file host_marker;
+      check bool "then a new Firefox is started" true (started_again (Keeper_firefox.firefox_log_path ~base_path:base));
+      check bool "and recorded" true
+        (match first_pid firefox_marker, recorded base with
+         | Some again, Some (entry : Firefox_record.entry) -> again <> first && entry.group = again
+         | (Some _ | None), (Some _ | None) -> false)))
 
 (* The Firefox runs on, still recorded, and a host is started for it. *)
 let a_firefox_that_holds_no_such_session_is_not_restarted () =

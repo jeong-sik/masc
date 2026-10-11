@@ -1,4 +1,4 @@
-import { signal, computed } from '@preact/signals'
+import { signal, computed, batch } from '@preact/signals'
 import type { McpToolSchema, JsonSchema } from '../../types/json-schema'
 import { listAllMcpTools, callMcpTool } from '../../api/mcp'
 import { showToast } from '../common/toast'
@@ -6,6 +6,7 @@ import { buildDefaults, stripEmptyOptionals, validateRequired } from './schema-f
 import { shellAuthSummary } from '../../store'
 import { dashboardAuthAccess, type DashboardAuthRole } from '../../lib/dashboard-auth-access'
 import { errorToString } from '../../lib/format-string'
+import { currentStoredTokenRevision, subscribeStoredTokenChanges } from '../../api/core'
 
 const allToolSchemas = signal<McpToolSchema[]>([])
 export const schemasLoading = signal(false)
@@ -45,25 +46,51 @@ export const filteredTools = computed(() => {
   return tools
 })
 
+interface SchemaReadOwner { readonly authRevision: number }
+let schemaReadOwner: SchemaReadOwner | null = null
+subscribeStoredTokenChanges(() => {
+  schemaReadOwner = null
+  batch(() => {
+    allToolSchemas.value = []
+    schemasLoadedAt.value = 0
+    schemasLoading.value = false
+    schemasError.value = null
+    clearSelection()
+  })
+})
+
 const CACHE_TTL_MS = 5 * 60 * 1000
 
 export async function loadToolSchemas(force = false): Promise<void> {
   if (!force && allToolSchemas.value.length > 0 && Date.now() - schemasLoadedAt.value < CACHE_TTL_MS) return
-  if (schemasLoading.value) return
-  schemasLoading.value = true
-  schemasError.value = null
+  if (schemaReadOwner) return
+  const owner = Object.freeze({ authRevision: currentStoredTokenRevision() })
+  schemaReadOwner = owner
+  const owns = () => schemaReadOwner === owner && currentStoredTokenRevision() === owner.authRevision
   try {
+    schemasLoading.value = true
+    if (!owns()) return
+    schemasError.value = null
+    if (!owns()) return
     const raw = await listAllMcpTools()
+    if (!owns()) return
     allToolSchemas.value = raw.map(t => ({
       ...t,
       inputSchema: t.inputSchema as unknown as JsonSchema,
     })) as McpToolSchema[]
+    if (!owns()) return
     schemasLoadedAt.value = Date.now()
   } catch (err) {
+    if (!owns()) return
     schemasError.value = errorToString(err)
+    if (!owns()) return
     showToast('도구 스키마 로드 실패', 'error')
   } finally {
-    schemasLoading.value = false
+    try {
+      if (owns()) schemasLoading.value = false
+    } finally {
+      if (schemaReadOwner === owner) schemaReadOwner = null
+    }
   }
 }
 

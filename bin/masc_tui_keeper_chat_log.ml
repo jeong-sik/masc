@@ -587,15 +587,15 @@ let read_whole_journal ~fetch ~since_seq =
     match fetch ~since_seq ~since_offset with
     | Error error -> Error error
     | Ok { events; has_more; next_since_seq; next_since_offset; _ } ->
-      let acc = List.rev_append events acc in
-      if not has_more
-      then Ok (List.rev acc)
-      else if
-        position_advanced ~from:since_seq next_since_seq
-        && Journal.page_start_offset next_since_offset
-           > Journal.page_start_offset since_offset
-      then page next_since_seq next_since_offset acc
-      else
+      let advancing = position_advanced ~from:since_seq next_since_seq
+        && Journal.page_start_offset next_since_offset > Journal.page_start_offset since_offset in
+      let rec event_frontier position = function
+        | [] -> Some position
+        | (event : Journal.journaled_event) :: rest ->
+          if Journal.seq_is_after position event.seq
+          then event_frontier (Journal.After_seq event.seq) rest
+          else None in
+      if has_more && not advancing then
         Error
           (Events_undecodable
              (Printf.sprintf
@@ -605,6 +605,15 @@ let read_whole_journal ~fetch ~since_seq =
                 (Journal.page_start_offset since_offset)
                 (Journal.replay_position_to_string next_since_seq)
                 (Journal.page_start_offset next_since_offset)))
+      else if event_frontier since_seq events <> Some next_since_seq
+        || (has_more && events = [])
+        || Journal.page_start_offset next_since_offset < Journal.page_start_offset since_offset
+        || (events <> [] && not advancing)
+      then Error (Events_undecodable "journal page events and continuation cursor disagree")
+      else
+        let acc = List.rev_append events acc in
+        if has_more then page next_since_seq next_since_offset acc
+        else Ok (List.rev acc)
   in
   page since_seq Journal.first_row []
 ;;

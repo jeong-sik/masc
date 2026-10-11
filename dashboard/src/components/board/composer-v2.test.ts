@@ -162,6 +162,51 @@ describe('ComposerV2', () => {
     vi.clearAllMocks()
   })
 
+  it.each([true, false])('preserves input authored while a broadcast receipt is pending (accepted=%s)', async (accepted) => {
+    let resolve!: (value: BroadcastSendReceipt) => void
+    sendBroadcastMock.mockReturnValue(new Promise(done => { resolve = done }))
+    render(h(ComposerV2, { workspaceId: 'ops' }))
+    const input = screen.getByLabelText('Composer v2 message') as HTMLTextAreaElement
+    fireEvent.input(input, { target: { value: 'sent text' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    expect(sendBroadcastMock).toHaveBeenCalledTimes(1)
+    fireEvent.input(input, { target: { value: 'next unsent text' } })
+    resolve({ ok: accepted, requestId: 'pending-receipt', deliveryKind: 'passive', reason: null, workspacePersisted: true })
+    await waitFor(() => expect(showToastMock).toHaveBeenCalledWith(accepted ? 'Message sent.' : 'broadcast receipt', accepted ? 'success' : 'warning'))
+    expect(input.value).toBe('next unsent text')
+  })
+
+  it('preserves a newly authored draft even when its text equals the sent text', async () => {
+    let resolve!: (value: BroadcastSendReceipt) => void
+    sendBroadcastMock.mockReturnValue(new Promise(done => { resolve = done }))
+    render(h(ComposerV2, { workspaceId: 'ops' }))
+    const input = screen.getByLabelText('Composer v2 message') as HTMLTextAreaElement
+    fireEvent.input(input, { target: { value: 'same text' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    fireEvent.input(input, { target: { value: 'temporary edit' } })
+    fireEvent.input(input, { target: { value: 'same text' } })
+    resolve({ ok: true, requestId: 'aba-receipt', deliveryKind: 'passive', reason: null, workspacePersisted: true })
+    await waitFor(() => expect(showToastMock).toHaveBeenCalledWith('Message sent.', 'success'))
+    expect(input.value).toBe('same text')
+  })
+
+  it.each(['broadcast', 'dm'] as const)('uses the current native input snapshot for %s sending', async (mode) => {
+    render(h(ComposerV2, { workspaceId: 'ops', mode }))
+    const input = screen.getByLabelText('Composer v2 message') as HTMLTextAreaElement
+    fireEvent.input(input, { target: { value: 'old body' } })
+    input.value = mode === 'dm' ? 'current body @nick0cave' : 'current body'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    screen.getByRole('button', { name: 'Send' }).dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    if (mode === 'dm') {
+      expect(dispatchOperatorActionMock).toHaveBeenCalledWith(expect.objectContaining({
+        target_id: 'nick0cave', payload: { message: 'current body @nick0cave' },
+      }))
+    } else {
+      expect(sendBroadcastMock).toHaveBeenCalledWith('dashboard-test', 'current body')
+    }
+    await waitFor(() => expect(input.value).toBe(''))
+  })
+
   it('admits one broadcast when two native send events arrive before rerender', async () => {
     let resolve!: (value: BroadcastSendReceipt) => void
     sendBroadcastMock.mockReturnValue(new Promise(done => { resolve = done }))

@@ -19,7 +19,7 @@ import { fetchBoardReactionsBatch, votePost } from '../../api/board'
 import type { BoardReactionSummary } from '../../types'
 import { broadcastReceiptMessage, createPost, currentDashboardActor, sendBroadcast } from '../../api'
 import { deleteBoardPost, setBoardPostPinned } from '../../api/actions'
-import { dispatchOperatorAction, operatorActionBusy } from '../../operator-store'
+import { dispatchOperatorAction, operatorActionBusy, operatorSnapshot } from '../../operator-store'
 import { registerBoardHearthsRefresh } from '../../sse-store'
 import { boardLatencyMetrics, type BoardLatencyMetric } from '../../board-metrics'
 import { MessageWorkspaceTimeline } from './message-workspace-timeline'
@@ -58,7 +58,7 @@ import {
   mentionQueryFromMessage,
   replaceTrailingMentionDraft,
 } from '../../lib/mention-utils'
-import { useOperatorMentionContext } from '../common/use-operator-mention-context'
+import { resolveOperatorMentionContext, useOperatorMentionContext } from '../common/use-operator-mention-context'
 import { ringFocusClasses } from '../common/ring'
 import {
   boardPosts,
@@ -762,15 +762,62 @@ function BdDetail({
   `
 }
 
+function resolveMobileMentionTarget(
+  message: string,
+  target: string,
+  active: boolean,
+  context: ReturnType<typeof resolveOperatorMentionContext>,
+) {
+  const options = context.onlineKeepers
+  const selectedKeeper = keeperNameFromTarget(target)
+  const selectedAvailable = !!selectedKeeper && options.some(keeper => keeper.name === selectedKeeper)
+  const typedMention = active ? firstMentionNameFromMessage(message) : null
+  const matchedMention = typedMention
+    ? options.find(keeper => keeper.name.toLowerCase() === typedMention.toLowerCase())?.name ?? null
+    : null
+  const keeper = active
+    ? context.trailingMentionTarget
+      ?? matchedMention
+      ?? (selectedAvailable ? selectedKeeper : null)
+      ?? (options.length === 0 ? typedMention : null)
+    : null
+  return { keeper, typedMention, selectedAvailable, unresolved: active && !!typedMention && !keeper && options.length > 0 }
+}
+
 function BdComposer() {
   const mode = boardComposerMode.value
-  const [localTitle, setLocalTitle] = useState('')
-  const [localBody, setLocalBody] = useState('')
-  const [localHearth, setLocalHearth] = useState(boardHearthFilter.value)
-  const [localFlair, setLocalFlair] = useState('')
-  const [mobileKeeperTarget, setMobileKeeperTarget] = useState('')
-  const [mobileOpen, setMobileOpen] = useState(false)
-  const [mobileAttachments, setMobileAttachments] = useState<ComposerAttachmentDraft[]>([])
+  const composerDraft = useSignal<{ localTitle: string; localBody: string; localHearth: string; localFlair: string; mobileKeeperTarget: string; mobileOpen: boolean; mobileAttachments: ComposerAttachmentDraft[] }>({
+    localTitle: '', localBody: '', localHearth: boardHearthFilter.value, localFlair: '', mobileKeeperTarget: '', mobileOpen: false, mobileAttachments: []
+  })
+  const { localTitle, localBody, localHearth, localFlair, mobileKeeperTarget, mobileOpen, mobileAttachments } = composerDraft.value
+  function setLocalTitle(next: string | ((current: string) => string)): void {
+    const current = composerDraft.value
+    composerDraft.value = { ...current, localTitle: typeof next === 'function' ? next(current.localTitle) : next }
+  }
+  function setLocalBody(next: string | ((current: string) => string)): void {
+    const current = composerDraft.value
+    composerDraft.value = { ...current, localBody: typeof next === 'function' ? next(current.localBody) : next }
+  }
+  function setLocalHearth(next: string | ((current: string) => string)): void {
+    const current = composerDraft.value
+    composerDraft.value = { ...current, localHearth: typeof next === 'function' ? next(current.localHearth) : next }
+  }
+  function setLocalFlair(next: string | ((current: string) => string)): void {
+    const current = composerDraft.value
+    composerDraft.value = { ...current, localFlair: typeof next === 'function' ? next(current.localFlair) : next }
+  }
+  function setMobileKeeperTarget(next: string | ((current: string) => string)): void {
+    const current = composerDraft.value
+    composerDraft.value = { ...current, mobileKeeperTarget: typeof next === 'function' ? next(current.mobileKeeperTarget) : next }
+  }
+  function setMobileOpen(next: boolean | ((current: boolean) => boolean)): void {
+    const current = composerDraft.value
+    composerDraft.value = { ...current, mobileOpen: typeof next === 'function' ? next(current.mobileOpen) : next }
+  }
+  function setMobileAttachments(next: ComposerAttachmentDraft[] | ((current: ComposerAttachmentDraft[]) => ComposerAttachmentDraft[])): void {
+    const current = composerDraft.value
+    composerDraft.value = { ...current, mobileAttachments: typeof next === 'function' ? next(current.mobileAttachments) : next }
+  }
   const submitting = useSignal(false)
   const mobileFileInputRef = useRef<HTMLInputElement>(null)
 
@@ -800,19 +847,8 @@ function BdComposer() {
   })
   const mobileMentionOptions = mobileMention.onlineKeepers
   const mobileMentionOptionNames = mobileMentionOptions.map(keeper => keeper.name).join('\0')
-  const selectedMobileKeeper = keeperNameFromTarget(mobileKeeperTarget)
-  const selectedMobileKeeperAvailable =
-    !!selectedMobileKeeper && mobileMentionOptions.some(keeper => keeper.name === selectedMobileKeeper)
-  const typedMobileMention = mode === 'mention' ? firstMentionNameFromMessage(localBody) : null
-  const matchedTypedMobileMention = typedMobileMention
-    ? mobileMentionOptions.find(keeper => keeper.name.toLowerCase() === typedMobileMention.toLowerCase())?.name ?? null
-    : null
-  const mobileMentionTarget = mode === 'mention'
-    ? mobileMention.trailingMentionTarget
-      ?? matchedTypedMobileMention
-      ?? (selectedMobileKeeperAvailable ? selectedMobileKeeper : null)
-      ?? (mobileMentionOptions.length === 0 ? typedMobileMention : null)
-    : null
+  const { keeper: mobileMentionTarget, typedMention: typedMobileMention, selectedAvailable: selectedMobileKeeperAvailable, unresolved: mobileMentionUnresolved } =
+    resolveMobileMentionTarget(localBody, mobileKeeperTarget, mode === 'mention', mobileMention)
   const admittedHearthFilter = boardHearthFilter.value
   const mobileVoiceContext = useRef({ localHearth, mobileMentionTarget, mobileOpen })
   mobileVoiceContext.current = { localHearth, mobileMentionTarget, mobileOpen }
@@ -832,11 +868,6 @@ function BdComposer() {
     },
   })
 
-  const mobileMentionUnresolved =
-    mode === 'mention'
-    && !!typedMobileMention
-    && !mobileMentionTarget
-    && mobileMentionOptions.length > 0
   const mobileQuickBusy = submitting.value || operatorActionBusy.value
   const mobileAttachmentDeliveryReason = mode === 'mention'
     ? composerAttachmentDeliveryReason(mobileAttachments)
@@ -910,25 +941,27 @@ function BdComposer() {
     })
   }
 
-  function resetMobileMentionDrafts(): void {
-    setMobileAttachments([])
+  function clearSubmittedDraft(sent: typeof composerDraft.value, post: boolean): void {
+    if (composerDraft.value !== sent) return
+    composerDraft.value = {
+      ...sent, localBody: '', mobileOpen: false,
+      ...(post ? { localTitle: '', localFlair: '' } : { mobileAttachments: [] }),
+    }
   }
 
   async function submitPost(event?: Event, options: { compactMobile?: boolean } = {}): Promise<void> {
     event?.stopPropagation()
-    const body = localBody.trim()
-    const title = options.compactMobile ? mobilePostTitle(body) : localTitle.trim()
+    const sentDraft = composerDraft.value
+    const body = sentDraft.localBody.trim()
+    const title = options.compactMobile ? mobilePostTitle(body) : sentDraft.localTitle.trim()
     if (submitting.value || !title || !body) return
     submitting.value = true
     try {
-      const contentWithFlair = localFlair
-        ? `[flair:${localFlair}]\n${body.replace(/^\[flair:[a-z]+\]\s*/i, '')}`
+      const contentWithFlair = sentDraft.localFlair
+        ? `[flair:${sentDraft.localFlair}]\n${body.replace(/^\[flair:[a-z]+\]\s*/i, '')}`
         : body
-      await createPost(title, contentWithFlair, 'dashboard-user', { hearth: localHearth || undefined })
-      setLocalTitle('')
-      setLocalBody('')
-      setLocalFlair('')
-      setMobileOpen(false)
+      await createPost(title, contentWithFlair, 'dashboard-user', { hearth: sentDraft.localHearth || undefined })
+      clearSubmittedDraft(sentDraft, true)
       showToast('글을 등록했습니다', 'success')
       refreshBoard()
     } catch (err) {
@@ -946,16 +979,19 @@ function BdComposer() {
     }
 
     event?.stopPropagation()
-    const body = localBody.trim()
-    if (submitting.value || operatorActionBusy.value || mobileQuickDisabled) return
+    const sentDraft = composerDraft.value
+    const context = resolveOperatorMentionContext(sentDraft.localBody, sentDraft.mobileKeeperTarget, mode === 'mention', operatorSnapshot.value?.keepers ?? [], dashboardKeepers.value)
+    const recipient = resolveMobileMentionTarget(sentDraft.localBody, sentDraft.mobileKeeperTarget, mode === 'mention', context)
+    if (submitting.value || operatorActionBusy.value || mobileVoice.state !== 'idle'
+      || (mode === 'mention' && (composerAttachmentDeliveryReason(sentDraft.mobileAttachments) !== null || !recipient.keeper || recipient.unresolved))) return
     const message = mode === 'mention'
-      ? serializeComposerBody({ text: localBody, attachments: [], voice: null })
-      : body
+      ? serializeComposerBody({ text: sentDraft.localBody, attachments: [], voice: null })
+      : sentDraft.localBody.trim()
     if (!message) return
     submitting.value = true
     try {
       if (mode === 'mention') {
-        const keeperId = mobileMentionTarget
+        const keeperId = recipient.keeper
         if (!keeperId) return
         await dispatchOperatorAction({
           actor: currentDashboardActor(),
@@ -967,16 +1003,12 @@ function BdComposer() {
       } else {
         const receipt = await sendBroadcast(currentDashboardActor(), message)
         if (!receipt.ok) {
-          setLocalBody('')
-          resetMobileMentionDrafts()
-          setMobileOpen(false)
+          clearSubmittedDraft(sentDraft, false)
           showToast(broadcastReceiptMessage(receipt), 'warning')
           return
         }
       }
-      setLocalBody('')
-      resetMobileMentionDrafts()
-      setMobileOpen(false)
+      clearSubmittedDraft(sentDraft, false)
       showToast('Message sent.', 'success')
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Message send failed.'

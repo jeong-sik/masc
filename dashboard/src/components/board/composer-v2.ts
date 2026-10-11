@@ -7,6 +7,7 @@ import { keepers as dashboardKeepers, refreshExecution } from '../../store'
 import {
   dispatchOperatorAction,
   operatorActionBusy,
+  operatorSnapshot,
 } from '../../operator-store'
 import { showToast } from '../common/toast'
 import { ActionButton } from '../common/button'
@@ -15,7 +16,7 @@ import { TextArea } from '../common/input'
 import {
   replaceTrailingMentionDraft,
 } from '../../lib/mention-utils'
-import { useOperatorMentionContext } from '../common/use-operator-mention-context'
+import { resolveOperatorMentionContext, useOperatorMentionContext } from '../common/use-operator-mention-context'
 import { stableAttachmentId } from '../chat/attachments'
 import { useVoiceInput } from '../chat/voice-input'
 
@@ -183,9 +184,22 @@ export function ComposerV2({
     }
     onModeChange?.(next)
   }, [controlledMode, onModeChange])
-  const [draft, setDraft] = useState('')
-  const [keeperTarget, setKeeperTarget] = useState('')
-  const [attachments, setAttachments] = useState<ComposerAttachmentDraft[]>([])
+  const composerDraft = useSignal<{ text: string; keeperTarget: string; attachments: ComposerAttachmentDraft[] }>({
+    text: '', keeperTarget: '', attachments: [],
+  })
+  const { text: draft, keeperTarget, attachments } = composerDraft.value
+  function setDraft(next: string | ((current: string) => string)): void {
+    const current = composerDraft.value
+    composerDraft.value = { ...current, text: typeof next === 'function' ? next(current.text) : next }
+  }
+  function setKeeperTarget(next: string | ((current: string) => string)): void {
+    const current = composerDraft.value
+    composerDraft.value = { ...current, keeperTarget: typeof next === 'function' ? next(current.keeperTarget) : next }
+  }
+  function setAttachments(next: ComposerAttachmentDraft[] | ((current: ComposerAttachmentDraft[]) => ComposerAttachmentDraft[])): void {
+    const current = composerDraft.value
+    composerDraft.value = { ...current, attachments: typeof next === 'function' ? next(current.attachments) : next }
+  }
   const submitting = useSignal(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -324,22 +338,26 @@ export function ComposerV2({
     })
   }
 
-  function resetDraft(): void {
-    setDraft('')
-    setAttachments([])
+  function resetDraft(sent: typeof composerDraft.value, keeperId: string | null): void {
+    if (composerDraft.value !== sent) return
+    composerDraft.value = { ...sent, text: '', attachments: [], keeperTarget: keeperId ? `keeper:${keeperId}` : sent.keeperTarget }
   }
 
   async function submit(): Promise<void> {
-    if (submitting.value || operatorActionBusy.value || sendDisabled) return
-    const message = serializeComposerBody({ text: draft, attachments: [], voice: null })
+    const sentDraft = composerDraft.value
+    const recipient = resolveOperatorMentionContext(sentDraft.text, sentDraft.keeperTarget, mode === 'dm', operatorSnapshot.value?.keepers ?? [], dashboardKeepers.value)
+    if (submitting.value || operatorActionBusy.value || voice.state !== 'idle'
+      || composerAttachmentDeliveryReason(sentDraft.attachments) !== null
+      || (mode === 'dm' && (!recipient.effectiveKeeperOnline || recipient.unresolvedTrailingMention))) return
+    const message = serializeComposerBody({ text: sentDraft.text, attachments: [], voice: null })
     if (!message) return
-    const keeperId = deliveryKeeper
+    const keeperId = mode === 'dm' ? recipient.effectiveKeeper : null
     const request = buildComposerV2Request({
       mode,
       workspaceId: workspace,
       body: message,
       keeperId,
-      attachments,
+      attachments: sentDraft.attachments,
     })
     submitting.value = true
     setSubmitError(null)
@@ -356,13 +374,12 @@ export function ComposerV2({
       } else {
         const receipt = await sendBroadcast(currentDashboardActor(), request.compose.body)
         if (!receipt.ok) {
-          resetDraft()
+          resetDraft(sentDraft, keeperId)
           showToast(broadcastReceiptMessage(receipt), 'warning')
           return
         }
       }
-      if (keeperId) setKeeperTarget(`keeper:${keeperId}`)
-      resetDraft()
+      resetDraft(sentDraft, keeperId)
       showToast('Message sent.', 'success')
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Message send failed.'

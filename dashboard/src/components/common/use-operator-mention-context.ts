@@ -1,10 +1,4 @@
-// Shared @mention + target-selector computation for operator messaging surfaces.
-//
-// Both ComposerV2 (board) and QuickIntervene (ops) consume operatorSnapshot,
-// filter via isKeeperOperatorTargetable, and derive the same mention state
-// (active candidate, listbox open/dismissed, effective target). The 15-line
-// derived block plus two useState hooks plus the reset effect were duplicated
-// between the two surfaces; this hook collapses them into one SSOT.
+// Shared target resolution for rendered mention controls and synchronous sends.
 
 import { useEffect, useState, type Dispatch, type StateUpdater } from 'preact/hooks'
 import { operatorSnapshot } from '../../operator-store'
@@ -67,19 +61,17 @@ function targetableMentionKeepers(keepers: MentionSourceKeeper[]): OnlineKeeper[
     .map(keeper => ({ name: keeper.name!.trim(), status: keeper.status ?? undefined }))
 }
 
-export function useOperatorMentionContext(
-  opts: UseOperatorMentionContextOptions,
-): OperatorMentionContext {
-  const { message, target, dmActive, listboxId } = opts
-
-  const [activeMentionIndex, setActiveMentionIndex] = useState(0)
-  const [dismissedMentionQuery, setDismissedMentionQuery] = useState<string | null>(null)
-
-  const snapshot = operatorSnapshot.value
+export function resolveOperatorMentionContext(
+  message: string,
+  target: string,
+  dmActive: boolean,
+  keepers: MentionSourceKeeper[],
+  fallback: MentionSourceKeeper[],
+) {
   // Paused keepers stay targetable so operators can DM/probe/resume them,
   // even when another lifecycle axis still carries an offline-ish token.
-  const operatorKeepers = targetableMentionKeepers(snapshot?.keepers ?? [])
-  const fallbackKeepers = targetableMentionKeepers(opts.fallbackKeepers ?? [])
+  const operatorKeepers = targetableMentionKeepers(keepers)
+  const fallbackKeepers = targetableMentionKeepers(fallback)
   const onlineKeepers = operatorKeepers.length > 0 ? operatorKeepers : fallbackKeepers
   const onlineKeeperNames = onlineKeepers.map(keeper => keeper.name).join('\0')
 
@@ -96,6 +88,27 @@ export function useOperatorMentionContext(
 
   const effectiveKeeper = trailingMentionTarget ?? selectedKeeper
   const effectiveKeeperOnline = !!trailingMentionTarget || selectedKeeperOnline
+
+  return {
+    onlineKeepers, onlineKeeperNames, selectedKeeper, selectedKeeperOnline,
+    mentionQuery, trailingMention, trailingMentionTarget, unresolvedTrailingMention,
+    effectiveKeeper, effectiveKeeperOnline,
+  }
+}
+
+export function useOperatorMentionContext(
+  opts: UseOperatorMentionContextOptions,
+): OperatorMentionContext {
+  const { message, target, dmActive, listboxId } = opts
+
+  const [activeMentionIndex, setActiveMentionIndex] = useState(0)
+  const [dismissedMentionQuery, setDismissedMentionQuery] = useState<string | null>(null)
+
+  const {
+    onlineKeepers, onlineKeeperNames, selectedKeeper, selectedKeeperOnline,
+    mentionQuery, trailingMention, trailingMentionTarget, unresolvedTrailingMention,
+    effectiveKeeper, effectiveKeeperOnline,
+  } = resolveOperatorMentionContext(message, target, dmActive, operatorSnapshot.value?.keepers ?? [], opts.fallbackKeepers ?? [])
 
   const mentionMatches = dmActive
     ? mentionCandidates(onlineKeepers, mentionQuery, effectiveKeeper)

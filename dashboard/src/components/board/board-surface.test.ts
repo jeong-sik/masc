@@ -1,5 +1,5 @@
 import { h } from 'preact'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   BOARD_DETAIL_WIDTH_DEFAULT,
@@ -935,6 +935,51 @@ describe('BoardSurface Component', () => {
     } finally {
       operatorActionBusy.value = false
     }
+  })
+
+  it('submits the current desktop snapshot after a native edit before rerender', async () => {
+    vi.mocked(createPost).mockResolvedValue({ id: 'native-post' })
+    render(h(BoardSurface, {}))
+    fireEvent.input(screen.getByTestId('bd-composer-title'), { target: { value: 'title' } })
+    const body = screen.getByTestId('bd-composer-body') as HTMLTextAreaElement
+    fireEvent.input(body, { target: { value: 'old body' } })
+    body.value = 'current body'
+    body.dispatchEvent(new Event('input', { bubbles: true }))
+    screen.getByTestId('bd-composer-send').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(createPost).toHaveBeenCalledWith('title', 'current body', 'dashboard-user', { hearth: undefined })
+    await waitFor(() => expect(body.value).toBe(''))
+  })
+
+  it('uses the current native mobile mention body and recipient', async () => {
+    render(h(BoardSurface, {}))
+    fireEvent.click(screen.getByTestId('bd-comp-tab-mention'))
+    fireEvent.click(screen.getByTestId('bd-composer-mobile-toggle'))
+    const body = screen.getByTestId('bd-composer-mobile-body') as HTMLTextAreaElement
+    fireEvent.input(body, { target: { value: 'old body @sangsu' } })
+    body.value = 'current body @albini'
+    body.dispatchEvent(new Event('input', { bubbles: true }))
+    screen.getByTestId('bd-composer-mobile-send').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(dispatchOperatorAction).toHaveBeenCalledWith(expect.objectContaining({
+      target_id: 'albini', payload: { message: 'current body @albini' },
+    }))
+    await waitFor(() => expect(body.value).toBe(''))
+  })
+
+  it('preserves the next desktop draft when a previous post completes', async () => {
+    let resolve!: (value: Awaited<ReturnType<typeof createPost>>) => void
+    vi.mocked(createPost).mockReturnValue(new Promise(done => { resolve = done }))
+    render(h(BoardSurface, {}))
+    const title = screen.getByTestId('bd-composer-title') as HTMLInputElement
+    const body = screen.getByTestId('bd-composer-body') as HTMLTextAreaElement
+    fireEvent.input(title, { target: { value: 'sent title' } })
+    fireEvent.input(body, { target: { value: 'sent body' } })
+    fireEvent.click(screen.getByTestId('bd-composer-send'))
+    expect(createPost).toHaveBeenCalledTimes(1)
+    fireEvent.input(title, { target: { value: 'next title' } })
+    fireEvent.input(body, { target: { value: 'next body' } })
+    await act(async () => { resolve({ id: 'completed-post' }) })
+    expect(title.value).toBe('next title')
+    expect(body.value).toBe('next body')
   })
 
   it('admits one mobile post from two native send events before rerender', async () => {

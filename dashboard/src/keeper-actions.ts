@@ -594,6 +594,7 @@ function ensureTrackedOperationThreadEntries(request: TrackedKeeperChatOperation
       toolTranscriptBindings: assistantDraft?.toolTranscriptBindings,
       ...(assistantDraft?.toolObservations?.kind === 'unavailable' ? { toolObservationAuthority: 'unavailable' as const } : {}),
       traceSteps: assistantDraft?.traceSteps,
+      publishedTraceSteps: assistantDraft?.publishedTraceSteps,
       producerSayingReplay: assistantDraft?.producerSayingReplay,
       producerTraceBoundary: assistantDraft?.producerTraceBoundary,
       error: assistantDraft?.error ?? null,

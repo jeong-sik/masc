@@ -1214,11 +1214,15 @@ describe('restored chat operation outcome', () => {
     upsertTrackedKeeperChatOperation({ operationId: 'restored-op', keeperName: 'echo', message: 'input', submittedAt: 1,
       assistantDraft: { text: 'canonical answer', rawText: 'canonical answer', delivery: 'history', streamState: null,
         producerSayingReplay: pending, producerTraceBoundary: 2,
+        traceSteps: [{ kind: 'think', text: 'provided reasoning' }],
+        publishedTraceSteps: [{ kind: 'think', text: '', contentWithheld: true }],
         responseState: { ...initialKeeperResponseState, lastSequence: 2 } } })
     fetchKeeperChatOperation.mockRejectedValue(new Error('lookup unavailable'))
     await hydrateTrackedKeeperChatOperations('echo')
     expect(keeperThreads.value.echo?.find(entry => entry.role === 'assistant')).toMatchObject({
       text: 'canonical answer', producerSayingReplay: pending, producerTraceBoundary: 2,
+      traceSteps: [{ kind: 'think', text: 'provided reasoning' }],
+      publishedTraceSteps: [{ kind: 'think', text: '', contentWithheld: true }],
     })
   })
   beforeEach(() => {

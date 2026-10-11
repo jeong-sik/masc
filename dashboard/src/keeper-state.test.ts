@@ -337,6 +337,52 @@ describe('thread history merge & persistence', () => {
     expect(requiredFixture(keeperThreads.value.echo).every(row => row.role !== 'tool')).toBe(true)
   })
 
+  it('retains provided operation reasoning when public history supplies withheld trace placeholders', () => {
+    const operationId = 'history-withheld-reasoning'
+    const provenance = operationDeliveryProvenance(operationId, 'terminal_result')
+    const owner = { content_generation: 1, stream_scope: 0 }
+    appendThreadEntry('echo', entry({ id: 'observed', role: 'assistant', source: 'direct_assistant',
+      text: 'canonical answer', delivery: 'history', streamState: null, deliveryProvenance: provenance }))
+    applyKeeperOperationTurnEvent('echo', { operationId, sequence: 0, event: {
+      type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_START', value: owner,
+    } })
+    applyKeeperOperationTurnEvent('echo', { operationId, sequence: 1, event: {
+      type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA', value: { index: 0, response: owner, delta: 'provided reasoning' },
+    } })
+    mergeServerHistoryEntries('echo', [entry({ id: 'canonical', role: 'assistant', source: 'direct_assistant',
+      text: 'canonical answer', delivery: 'history', streamState: null, deliveryProvenance: provenance,
+      publishedTraceSteps: [{ kind: 'think', text: '', contentWithheld: true }] })])
+    const canonical = keeperThreads.value.echo?.find(row => row.id === 'canonical')
+    expect(canonical?.text).toBe('canonical answer')
+    expect(canonical?.publishedTraceSteps).toEqual([{ kind: 'think', text: '', contentWithheld: true }])
+    expect(canonical?.traceSteps?.some(step => step.kind === 'think' && step.text === 'provided reasoning')).toBe(true)
+  })
+
+  it('keeps history-first published trace separate through observation and repeated merges', () => {
+    const operationId = 'history-first-reasoning'
+    const provenance = operationDeliveryProvenance(operationId, 'terminal_result')
+    const owner = { content_generation: 1, stream_scope: 0 }
+    const history = requiredFixture(chatHistoryEntriesFromRest('echo', [{ id: 'canonical', role: 'assistant',
+      source: 'direct_assistant', content: 'canonical answer', ts: 1, delivery_provenance_status: 'valid', delivery_provenance: provenance,
+      blocks: [{ t: 'trace', trace: [{ kind: 'think', text: '', contentWithheld: true }] }] }])[0])
+    mergeServerHistoryEntries('echo', [history])
+    expect(keeperThreads.value.echo?.[0]?.traceSteps).toBeUndefined()
+    applyKeeperOperationTurnEvent('echo', { operationId, sequence: 0, event: {
+      type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_START', value: owner,
+    } })
+    applyKeeperOperationTurnEvent('echo', { operationId, sequence: 1, event: {
+      type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA', value: { index: 0, response: owner, delta: 'provided reasoning' },
+    } })
+    for (const snapshot of [history, history]) {
+      mergeServerHistoryEntries('echo', [snapshot])
+      const canonical = keeperThreads.value.echo?.find(row => row.id === 'canonical')
+      expect(canonical?.publishedTraceSteps).toEqual([{ kind: 'think', text: '', contentWithheld: true }])
+      expect(canonical?.traceSteps).toHaveLength(1)
+      expect(canonical?.traceSteps?.[0]).toMatchObject({ kind: 'think', text: 'provided reasoning' })
+      expect(canonical?.text).toBe('canonical answer')
+    }
+  })
+
   it.each([false, true])('selects pending speech from the reconciled running frontier (pending=%s)', pending => {
     const provenance = operationDeliveryProvenance('running-pending-frontier', 'terminal_result')
     appendThreadEntry('echo', entry({ id: 'old', role: 'assistant', deliveryProvenance: provenance,
@@ -461,12 +507,13 @@ describe('thread history merge & persistence', () => {
       deliveryProvenance: provenance,
       delivery: 'history',
       streamState: null,
-      traceSteps: canonicalTrace,
+      publishedTraceSteps: canonicalTrace,
     })])
 
     const [assistant] = keeperThreads.value.echo ?? []
     expect(assistant?.id).toBe('assistant-history-canonical')
-    expect(assistant?.traceSteps).toEqual(canonicalTrace)
+    expect(assistant?.publishedTraceSteps).toEqual(canonicalTrace)
+    expect(assistant?.traceSteps).toMatchObject([{ toolOccurrenceId: 'tool-delivery-local-0' }])
     expect(assistant?.responseState).toEqual({ kind: 'unavailable' })
   })
 
@@ -985,8 +1032,7 @@ describe('thread history merge & persistence', () => {
       },
     ])
 
-    const traceBlock = entries[0]?.blocks?.find((block): block is Extract<ChatBlock, { t: 'trace' }> => block.t === 'trace')
-    expect(traceBlock?.trace).toEqual([
+    expect(entries[0]?.publishedTraceSteps).toEqual([
       {
         kind: 'tool',
         name: 'lookup',
@@ -1027,8 +1073,7 @@ describe('thread history merge & persistence', () => {
       },
     ])
 
-    const traceBlock = entries[0]?.blocks?.find((block): block is Extract<ChatBlock, { t: 'trace' }> => block.t === 'trace')
-    expect(traceBlock?.trace).toEqual([
+    expect(entries[0]?.publishedTraceSteps).toEqual([
       { kind: 'think', text: 'checking tasks', ts: '2026-07-01T00:00:00Z' },
       {
         kind: 'tool',
@@ -1834,9 +1879,8 @@ describe('thread history merge & persistence', () => {
     ])
 
     expect(entries).toHaveLength(1)
-    expect(entries[0]?.blocks).toEqual([
-      { t: 'trace', trace: [{ kind: 'think', text: 'checking state' }] },
-    ])
+    expect(entries[0]?.publishedTraceSteps).toEqual([{ kind: 'think', text: 'checking state' }])
+    expect(entries[0]?.blocks).toEqual([])
   })
 
   it('keeps a validated fusion block when assistant content is empty', () => {

@@ -36,7 +36,7 @@ let test_has_entries_and_run_started_follow_the_entries () =
   in
   agrees "empty";
   check bool "text first" true
-    (Log.add log ~seq:(Some 1) (Live.Text {text = "a"; stream_scope = None}));
+    (Log.add log ~seq:(Some 1) (Live.Text {text = "a"; response=Unobserved_scope (None)}));
   agrees "after text";
   check bool "no run start yet" false (Log.run_started log);
   check bool "the same seq again is dropped" false
@@ -46,7 +46,7 @@ let test_has_entries_and_run_started_follow_the_entries () =
   agrees "after the run start";
   check bool "a start is remembered" true (Log.run_started log);
   check bool "more text" true
-    (Log.add log ~seq:(Some 3) (Live.Text {text = "b"; stream_scope = None}));
+    (Log.add log ~seq:(Some 3) (Live.Text {text = "b"; response=Unobserved_scope (None)}));
   agrees "after later text"
 ;;
 
@@ -137,28 +137,28 @@ let log () = Log.create ~keeper_name:"keeper.one" ~request_id:"tui-req-1" ~start
 let test_seq_dedup_and_none_never_dedupes () =
   let t = log () in
   check bool "first add" true (Log.add t ~seq:(Some 0) Live.Run_started);
-  check bool "same seq is a duplicate" false (Log.add t ~seq:(Some 0) (Live.Text {text="again"; stream_scope=None}));
+  check bool "same seq is a duplicate" false (Log.add t ~seq:(Some 0) (Live.Text {text="again"; response=Unobserved_scope (None)}));
   let revision = Log.revision t in
   check bool "duplicate leaves the revision alone" true (Log.revision t = revision);
-  check bool "an id-less delta is added" true (Log.add t ~seq:None (Live.Text {text="!"; stream_scope=None}));
-  check bool "and again: None never dedupes" true (Log.add t ~seq:None (Live.Text {text="!"; stream_scope=None}));
+  check bool "an id-less delta is added" true (Log.add t ~seq:None (Live.Text {text="!"; response=Unobserved_scope (None)}));
+  check bool "and again: None never dedupes" true (Log.add t ~seq:None (Live.Text {text="!"; response=Unobserved_scope (None)}));
   check int "three entries" 3 (List.length (Log.entries t));
   check position "resume position" (Journal.After_seq 0) (Log.resume_position t)
 
 let test_resume_position_follows_the_highest_held () =
   let t = log () in
   check position "empty log: the whole turn" Journal.Whole_turn (Log.resume_position t);
-  ignore (Log.add t ~seq:(Some 4) (Live.Text {text="a"; stream_scope=None}) : bool);
-  ignore (Log.add t ~seq:(Some 2) (Live.Text {text="b"; stream_scope=None}) : bool);
+  ignore (Log.add t ~seq:(Some 4) (Live.Text {text="a"; response=Unobserved_scope (None)}) : bool);
+  ignore (Log.add t ~seq:(Some 2) (Live.Text {text="b"; response=Unobserved_scope (None)}) : bool);
   check position "gaps do not matter, order does not matter" (Journal.After_seq 4)
     (Log.resume_position t)
 
 let test_attempt_advances_on_runtime_attempt_started () =
   let t = log () in
   ignore (Log.add t ~seq:(Some 0) Live.Run_started : bool);
-  ignore (Log.add t ~seq:(Some 1) (Live.Text {text="first try"; stream_scope=None}) : bool);
+  ignore (Log.add t ~seq:(Some 1) (Live.Text {text="first try"; response=Unobserved_scope (None)}) : bool);
   ignore (Log.add t ~seq:(Some 2) (Live.Runtime_attempt_started { runtime_id = None; attempt_index = None }) : bool);
-  ignore (Log.add t ~seq:(Some 3) (Live.Text {text="second try"; stream_scope=None}) : bool);
+  ignore (Log.add t ~seq:(Some 3) (Live.Text {text="second try"; response=Unobserved_scope (None)}) : bool);
   check int "current attempt" 1 (Log.attempt t);
   check (list int) "each entry keeps the attempt it arrived in"
     [ 0; 0; 1; 1 ]
@@ -208,7 +208,7 @@ let test_operation_and_journal_read_order () =
   List.iter (fun initial ->
     let terminal = Succeeded {completed_at=3.;outcome_ref="result"} in
     let states = ref [initial; terminal] in
-    let first = [line 0 1.0 (E.Text_delta {text="retained partial output"; stream_scope=None})] in
+    let first = [line 0 1.0 (E.Text_delta {text="retained partial output"; response=Unobserved_scope (None)})] in
     let journals = ref [Ok first; Error Log.Journal_pruned] in
     let read_operation () = match !states with
       | x :: xs -> states := xs; Ok (Some x)
@@ -240,7 +240,7 @@ let test_failed_operation_recheck_keeps_the_working_observation () =
   List.iter (fun refreshed ->
     List.iter (fun initial ->
       let states = ref [Ok (Some initial); refreshed] in
-      let first = [line 0 1.0 (E.Text_delta {text="retained working output"; stream_scope=None})] in
+      let first = [line 0 1.0 (E.Text_delta {text="retained working output"; response=Unobserved_scope (None)})] in
       let reads = ref 0 in
       let read_operation () = match !states with
         | x :: xs -> states := xs; x
@@ -278,7 +278,7 @@ let test_decode_exact_operation_state () =
 let test_decode_events_page () =
   let lines =
     [ line 0 1.0 (E.Run_started { run_id = "r"; thread_id = "keeper:keeper.one" })
-    ; line 1 1.5 (E.Text_delta {text="hello"; stream_scope=None})
+    ; line 1 1.5 (E.Text_delta {text="hello"; response=Unobserved_scope (None)})
     ]
   in
   (match
@@ -373,23 +373,23 @@ let test_add_journaled_holds_undrawn_positions () =
     Log.add_journaled t
       [ line 0 1.0 (E.Run_started { run_id = "r"; thread_id = "keeper:keeper.one" })
       ; line 1 1.1 (E.Text_message_start { message_id = "m"; role = E.Assistant })
-      ; line 2 1.2 (E.Text_delta {text="hi"; stream_scope=None})
+      ; line 2 1.2 (E.Text_delta {text="hi"; response=Unobserved_scope (None)})
       ]
   in
   check (list tagged) "start and delta are entries, message start is not"
-    [ (Some 0, Live.Run_started); (Some 2, Live.Text {text="hi"; stream_scope=None}) ]
+    [ (Some 0, Live.Run_started); (Some 2, Live.Text {text="hi"; response=Unobserved_scope (None)}) ]
     (List.map (fun (entry : Log.entry) -> (entry.seq, entry.delta)) (Log.entries t));
   check taken "the fold hands back the taken lines with their deltas and times"
-    [ ((0, 1.0), Live.Run_started); ((2, 1.2), Live.Text {text="hi"; stream_scope=None}) ]
+    [ ((0, 1.0), Live.Run_started); ((2, 1.2), Live.Text {text="hi"; response=Unobserved_scope (None)}) ]
     (taken_to_tagged first);
   check position "the undrawn seq still counts as held" (Journal.After_seq 2)
     (Log.resume_position t);
   check bool "a live frame for the undrawn seq is a duplicate" false
-    (Log.add t ~seq:(Some 1) (Live.Text {text="late"; stream_scope=None}));
+    (Log.add t ~seq:(Some 1) (Live.Text {text="late"; response=Unobserved_scope (None)}));
   let before = Log.revision t in
   let again =
     Log.add_journaled t
-      [ line 2 1.2 (E.Text_delta {text="hi"; stream_scope=None}); line 3 1.3 E.Agent_core_stream_ping ]
+      [ line 2 1.2 (E.Text_delta {text="hi"; response=Unobserved_scope (None)}); line 3 1.3 E.Agent_core_stream_ping ]
   in
   check taken "a line already held and an undrawn line are not handed back" []
     (taken_to_tagged again);
@@ -430,7 +430,7 @@ let golden : E.keeper_chat_event list =
       content_provider_message_id=None; channel=E.Model_thinking; state=E.Content_ended}
   ; E.Agent_core_content_block_stop { index = 0 }
   ; E.Agent_core_stream_ping
-  ; E.Text_delta {text="Let me "; stream_scope=None}
+  ; E.Text_delta {text="Let me "; response=Unobserved_scope (None)}
   ; E.Tool_call_start
       { occurrence = occurrence_anon; tool_call_id = None; tool_call_name = "grep" }
   ; E.Tool_call_args { occurrence = occurrence_anon; tool_call_id = None; delta = "{\"pat\":\"x\"}" }
@@ -463,7 +463,7 @@ let golden : E.keeper_chat_event list =
   ; E.Status_block { kind = Masc.Keeper_chat_blocks.Continuation_checkpoint }
   ; E.Continuation_checkpoint { message = "checkpoint"; request_id = Some "req-2" }
   ; E.Agent_core_runtime_attempt_started { runtime_id = Some "claude-3-7-sonnet"; attempt_index = Some 1 }
-  ; E.Text_delta {text="look."; stream_scope=None}
+  ; E.Text_delta {text="look."; response=Unobserved_scope (None)}
   ; E.External_effect_completed
       { target = Masc.Keeper_surface_post.Delivered_to_slack { channel_id = "C1"; thread_ts = None } }
   ; E.Reply_details
@@ -495,7 +495,7 @@ let golden : E.keeper_chat_event list =
 let failed_turn : E.keeper_chat_event list =
   [ E.Run_started { run_id = "run-failed"; thread_id = "keeper:keeper.one" }
   ; E.Text_message_start { message_id = "msg-2"; role = E.Assistant }
-  ; E.Text_delta {text="partial"; stream_scope=None}
+  ; E.Text_delta {text="partial"; response=Unobserved_scope (None)}
   ; E.Text_message_end
   ; E.Event_error { message = "boom" }
   ]
@@ -531,7 +531,7 @@ let test_wire_timestamps_match_journal_and_survive_reconnect () =
         (E.Run_started { run_id = "run-timed"; thread_id = "keeper:keeper.one" })
     ; line 1 (started_at +. 0.1)
         (E.Text_message_start { message_id = "message-timed"; role = E.Assistant })
-    ; line 2 text_at (E.Text_delta {text="timed reply"; stream_scope=None})
+    ; line 2 text_at (E.Text_delta {text="timed reply"; response=Unobserved_scope (None)})
     ]
   in
   let _, body =
@@ -565,7 +565,7 @@ let test_wire_timestamps_match_journal_and_survive_reconnect () =
   let observed = list (pair (pair (option int) (option (float 0.000001))) delta) in
   let expected =
     [ ((Some 0, Some started_at), Live.Run_started)
-    ; ((Some 2, Some text_at), Live.Text {text="timed reply"; stream_scope=None})
+    ; ((Some 2, Some text_at), Live.Text {text="timed reply"; response=Unobserved_scope (None)})
     ]
   in
   check observed "wire keeps the producer's fractional epoch seconds"
@@ -677,7 +677,7 @@ let test_events_query_spells_both_cursors () =
    the page before handed back, and stops at the first error. *)
 let test_read_whole_journal_pages_until_the_position_stops_moving () =
   let asked = ref [] in
-  let l seq = line seq (float_of_int seq) (E.Text_delta {text=(string_of_int seq); stream_scope=None}) in
+  let l seq = line seq (float_of_int seq) (E.Text_delta {text=(string_of_int seq); response=Unobserved_scope (None)}) in
   let offset value =
     match Journal.page_start_of_wire (Some value) with
     | Some start -> start
@@ -741,7 +741,7 @@ let test_read_whole_journal_pages_until_the_position_stops_moving () =
   asked := [];
   let stuck ~since_seq ~since_offset =
     asked := (since_seq, Journal.page_start_to_wire since_offset) :: !asked;
-    page ~events:[ line 0 1.0 (E.Text_delta {text="0"; stream_scope=None}) ] ~has_more:true ~next_since_seq:since_seq
+    page ~events:[ line 0 1.0 (E.Text_delta {text="0"; response=Unobserved_scope (None)}) ] ~has_more:true ~next_since_seq:since_seq
       ~next_since_offset:(Journal.page_start_offset since_offset)
   in
   (match Log.read_whole_journal ~since_seq:Journal.Whole_turn ~fetch:stuck with
@@ -1070,12 +1070,12 @@ let test_missing_start_text_scope_survives_journal_and_wire () =
     let events =
       [E.Run_started {run_id="scope-run"; thread_id="keeper:keeper.one"};
        E.Text_message_start {message_id="scope-message"; role=E.Assistant}]
-      @ (if earlier then [E.Text_delta {text="Earlier progress."; stream_scope=Some 1}] else [])
-      @ [E.Text_delta {text="Do"; stream_scope=Some 2};
+      @ (if earlier then [E.Text_delta {text="Earlier progress."; response=Unobserved_scope (Some 1)}] else [])
+      @ [E.Text_delta {text="Do"; response=Unobserved_scope (Some 2)};
          (* The original start was lost; this surviving equal start follows text. *)
          E.Agent_core_stream_message_start { content_generation=None;stream_scope=2; provider_message_id="response-2";
            model="observed"; usage=None};
-         E.Text_delta {text="ne"; stream_scope=Some 2};
+         E.Text_delta {text="ne"; response=Unobserved_scope (Some 2)};
          E.Agent_core_stream_message_delta {content_generation=None;stream_scope=stopped_scope;
            stop_reason=Some Agent_core.Types.EndTurn; usage=None};
          E.Reply_details {reply="Done"; turn_outcome=Outcome.Visible_reply;

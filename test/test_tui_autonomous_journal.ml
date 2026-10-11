@@ -43,7 +43,7 @@ let test_notification_only_triggers_journal_read () =
   let log = Types.turn_log_create_for_source ~keeper_name:"alpha" ~source ~started_at:10. in
   let line seq ts event : Journal.journaled_event = {seq; ts; event} in
   let lines = [line 0 10. (E.Run_started {run_id="autonomous-run"; thread_id="keeper:alpha"});
-    line 1 11. (E.Text_delta {text="first"; stream_scope=None})] in
+    line 1 11. (E.Text_delta {text="first"; response=Unobserved_scope (None)})] in
   ignore (Types.turn_log_add_journaled log lines);
   Types.hold_settled_log state log;
   (match Types.journal_follow_for_source state ~keeper_name:"alpha" ~source
@@ -51,7 +51,7 @@ let test_notification_only_triggers_journal_read () =
    | Types.Follow_read {since_seq=Journal.After_seq 1; _} -> ()
    | _ -> fail "notification did not resume after the last journal position");
   check int "notice itself appended no content" 2 (List.length (Log.entries log.tl_log));
-  ignore (Types.turn_log_add_journaled log (lines @ [line 2 12. (E.Text_delta {text=" second"; stream_scope=None})]));
+  ignore (Types.turn_log_add_journaled log (lines @ [line 2 12. (E.Text_delta {text=" second"; response=Unobserved_scope (None)})]));
   let texts = Log.entries log.tl_log |> List.filter_map (fun entry ->
     match entry.Log.delta with
     | Masc_tui_keeper_chat_live.Text { text; stream_scope = _ } -> Some text

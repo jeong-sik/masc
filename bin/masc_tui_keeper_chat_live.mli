@@ -104,7 +104,7 @@ type delta =
           them as one record ([dashboard/src/keeper-stream.ts]
           KEEPER_STREAM_MESSAGE_DELTA), so they arrive together here too. At
           least one of the two is present. *)
-  | Text of {text : string; stream_scope : int option}  (** Assistant text to append. *)
+  | Text of {text : string; response : Masc.Keeper_chat_events.text_response}  (** Assistant text to append. *)
   | Thinking of {text : string; response : Masc.Keeper_chat_events.response_identity option}  (** Supplied reasoning bytes and their observed response identity. None
           preserves unbound bytes without granting response ownership. *)
   | Native_tool_started of

@@ -30,7 +30,7 @@ let journaled ~seq ~ts event : L.journaled_event = { seq; ts; event }
 let match_events =
   [ E.Run_started { run_id = "run-1"; thread_id = "thread-1" }
   ; E.Text_message_start { message_id = "msg-1"; role = E.Assistant }
-  ; E.Text_delta {text="hello"; stream_scope=None}
+  ; E.Text_delta {text="hello"; response=Unobserved_scope (None)}
   ; E.Tool_result_ready
       { occurrence; tool_call_id = Some "tc-1"; execution_id }
   ; E.Reply_details
@@ -178,7 +178,7 @@ let test_tool_rows_duplicate_execution_id () =
 let test_seq_gap () =
   let entries =
     [ journaled ~seq:0 ~ts:100.0 (E.Run_started { run_id = "run-1"; thread_id = "t" })
-    ; journaled ~seq:1 ~ts:100.1 (E.Text_delta {text="hello"; stream_scope=None})
+    ; journaled ~seq:1 ~ts:100.1 (E.Text_delta {text="hello"; response=Unobserved_scope (None)})
     ; journaled ~seq:3 ~ts:100.3 (E.Run_finished { run_id = "run-1" })
     ]
   in
@@ -197,7 +197,7 @@ let test_seq_gap () =
 let test_truncated () =
   let entries =
     [ journaled ~seq:0 ~ts:100.0 (E.Run_started { run_id = "run-1"; thread_id = "t" })
-    ; journaled ~seq:1 ~ts:100.1 (E.Text_delta {text="half-finis"; stream_scope=None})
+    ; journaled ~seq:1 ~ts:100.1 (E.Text_delta {text="half-finis"; response=Unobserved_scope (None)})
     ]
   in
   Alcotest.(check verdict)
@@ -381,7 +381,7 @@ let sorted_dir_entries dir = Sys.readdir dir |> Array.to_list |> List.sort Strin
    crashed). The registry's answer is what separates the two. *)
 let in_flight_events =
   [ E.Run_started { run_id = "run-1"; thread_id = "thread-1" }
-  ; E.Text_delta {text="half-finis"; stream_scope=None}
+  ; E.Text_delta {text="half-finis"; response=Unobserved_scope (None)}
   ]
 
 let settled ~keeper_name:_ ~operation_id:_ = Audit.Turn_settled

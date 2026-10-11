@@ -1,4 +1,8 @@
-type response_identity = { response_generation : int; response_scope : int }
+type response_identity = Ag_ui.response_identity = { response_generation : int; response_scope : int }
+
+type text_response = Ag_ui.text_response =
+  | Unobserved_scope of int option
+  | Observed_response of response_identity
 
 type role = User | Assistant
 
@@ -84,7 +88,7 @@ type keeper_chat_event =
   | Run_started of { run_id : string; thread_id : string }
   | Batch_bound of { operation_id : Keeper_chat_operation.Operation_id.t; execution_id : Keeper_chat_operation.Operation_id.t }
   | Text_message_start of { message_id : string; role : role }
-  | Text_delta of { text : string; stream_scope : int option }
+  | Text_delta of { text : string; response : text_response }
   | Text_message_end
   | External_effect_completed of
       { target : Keeper_surface_post.delivery_target }
@@ -621,3 +625,15 @@ let optional_response_identity_of_fields fields =
   | [] -> Ok None
   | [(_, value)] -> Result.map (fun owner -> Some owner) (response_identity_of_json value)
   | _ -> Error "duplicate response identity"
+
+let text_response_of_fields ~owner_field ~scope_field fields =
+  let owners = List.filter (fun (key, _) -> key = owner_field) fields in
+  let scopes = List.filter (fun (key, _) -> key = scope_field) fields in
+  match owners, scopes with
+  | [], [] -> Ok (Unobserved_scope None)
+  | [(_, value)], [] -> Result.map (fun owner -> Observed_response owner) (response_identity_of_json value)
+  | [], [(_, value)] ->
+    (match Runtime_json_integer.of_json value with
+     | Ok scope when scope >= 0 -> Ok (Unobserved_scope (Some scope))
+     | Ok _ | Error _ -> Error "text scope must be a nonnegative safe integer")
+  | _ -> Error "text response has conflicting or duplicate ownership fields"

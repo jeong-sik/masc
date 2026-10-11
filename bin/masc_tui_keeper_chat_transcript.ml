@@ -1375,7 +1375,7 @@ let start_tool ~now t ~authority ~occurrence ~tool_name =
 
 let enter_text_response_scope t scope =
   t.current_stream_scope <- Some scope;
-  if not (Option.fold ~none:false ~some:(fun owner -> owner.rs_scope=scope) t.response_scope) then begin
+  if t.response_scope <> Some {rs_generation=None;rs_scope=scope} then begin
     t.response_scope <- Some {rs_generation=None;rs_scope=scope};
     begin_response t;
     t.observed_model <- None;
@@ -1406,6 +1406,15 @@ let response_is_closed t incoming =
   Option.fold ~none:false ~some:(fun closed -> compare incoming closed <= 0) t.closed_response_owner
 ;;
 
+let response_precedes_current t ((generation,scope) as incoming) =
+  match t.admitted_response_owner with
+  | Some current when compare incoming current < 0 -> true
+  | Some (current_generation, _) when generation=current_generation ->
+      Option.fold ~none:false ~some:(fun response ->
+        response.rs_generation=None && response.rs_scope > scope) t.response_scope
+  | Some _ | None -> false
+;;
+
 let admit_response_identity t generation stream_scope =
   match t.phase with
         | Stream_ended | Stream_failed _ -> false
@@ -1414,12 +1423,8 @@ let admit_response_identity t generation stream_scope =
           let incoming = generation, scope in
           if response_is_closed t incoming
              && t.response_scope <> Some {rs_generation=Some generation;rs_scope=scope} then false
-          else (match t.admitted_response_owner with
-           | Some current when compare incoming current < 0 -> false
-           | Some (current_generation, _) when generation = current_generation
-               && Option.fold ~none:false ~some:(fun response ->
-                    response.rs_generation=None && response.rs_scope > scope) t.response_scope -> false
-           | Some _ | None ->
+          else if response_precedes_current t incoming then false
+          else begin
              if t.response_scope <> Some {rs_generation=Some generation;rs_scope=scope} then begin
                begin_response t;
                retire_model_content t;
@@ -1432,7 +1437,8 @@ let admit_response_identity t generation stream_scope =
              t.admitted_response_owner <- Some incoming;
              t.response_scope <- Some {rs_generation=Some generation;rs_scope=scope};
              t.current_stream_scope <- Some scope;
-             true)
+             true
+          end
         | None, _ -> t.admitted_response_owner = None
         | Some _, None -> false
 ;;
@@ -1446,12 +1452,11 @@ let apply_model_content ~now t (activity : Masc.Keeper_chat_events.model_content
       | None -> 1
       | Some scope -> compare (activity.content_generation, activity.content_scope) scope in
     let incoming = activity.content_generation, activity.content_scope in
-    let owner_order = Option.map (compare incoming) t.admitted_response_owner in
     let metadata_order = match t.response_scope with
       | Some {rs_generation=Some generation;rs_scope} -> Some (compare incoming (generation,rs_scope))
       | Some {rs_generation=None;_} | None -> None in
     if response_is_closed t incoming
-       || (match owner_order with Some order -> order < 0 | None -> false)
+       || response_precedes_current t incoming
        || scope_order < 0 || (scope_order = 0 && t.content_scope_closed) then ()
     else match activity.state with
     | Content_observed ->
@@ -1600,18 +1605,18 @@ let apply_delta ~now t (delta : Live.delta) =
          response. Its allocated stream scope, unlike model names or text,
          identifies the response even when the provider omits its own id. *)
       let incoming = Option.map (fun scope -> {rs_generation=generation;rs_scope=scope}) stream_scope in
-      let ordering = match incoming, t.admitted_response_owner with
-        | Some {rs_generation=Some next;rs_scope=next_scope}, Some previous ->
-            Some (compare (next,next_scope) previous)
-        | _ -> None in
+      let stale_header = match incoming with
+        | Some {rs_generation=Some generation;rs_scope} -> response_precedes_current t (generation,rs_scope)
+        | Some {rs_generation=None;_} | None -> false in
       let unbound_header_over_known_owner =
         t.admitted_response_owner <> None &&
         (match incoming with Some {rs_generation=Some _;_} -> false | _ -> true) in
       let closed_header = match incoming with
         | Some {rs_generation=Some generation;rs_scope} -> response_is_closed t (generation,rs_scope)
         | Some {rs_generation=None;_} | None -> false in
-      if closed_header || unbound_header_over_known_owner
-         || (match ordering with Some order -> order < 0 | None -> false) then () else begin
+      let terminal = match t.phase with Stream_ended | Stream_failed _ -> true | Waiting | Working -> false in
+      if terminal || closed_header || unbound_header_over_known_owner
+         || stale_header then () else begin
       let repeated = match incoming, t.response_scope with
         | Some next, Some current -> next.rs_scope=current.rs_scope
             && (match next.rs_generation,current.rs_generation with
@@ -1662,7 +1667,8 @@ let apply_delta ~now t (delta : Live.delta) =
             owner.response_generation = generation && owner.response_scope = rs_scope
         | None, _ -> t.admitted_response_owner = None
         | Some _, None | Some _, Some {rs_generation = None; _} -> false in
-      if owns_current_response then begin
+      let terminal = match t.phase with Stream_ended | Stream_failed _ -> true | Waiting | Working -> false in
+      if not terminal && owns_current_response then begin
         (match owner with
          | Some owner -> t.closed_response_owner <- Some (owner.response_generation,owner.response_scope)
          | None -> ());
@@ -1697,17 +1703,22 @@ let apply_delta ~now t (delta : Live.delta) =
            t.stop_scope <- stream_scope
        | None -> ())
       end
-  | Live.Text {text=""; stream_scope} ->
-      (* An empty chunk writes nothing, so it does not move the answer. Its
-         scope is still a response boundary: when the next response's start
-         frame is lost, this chunk is the first thing that says the previous
-         response's model, counters and stop no longer apply. *)
-      Option.iter (enter_text_response_scope t) stream_scope
-  | Live.Text {text; stream_scope} ->
-      Option.iter (enter_text_response_scope t) stream_scope;
-      t.model_signal <- Some (Answering_at now);
-      Buffer.add_string t.text_buffer text;
-      trail_text ~now t text
+  | Live.Text {text;response} ->
+      let terminal = match t.phase with Stream_ended | Stream_failed _ -> true | Waiting | Working -> false in
+      if not terminal then begin
+        let admitted, preserve_unbound = match response with
+          | Masc.Keeper_chat_events.Observed_response owner ->
+            not (response_is_closed t (owner.response_generation,owner.response_scope))
+              && admit_response_identity t (Some owner.response_generation) (Some owner.response_scope), false
+          | Unobserved_scope scope ->
+            Option.iter (enter_text_response_scope t) scope;
+            t.admitted_response_owner=None, true in
+        if text <> "" && (admitted || preserve_unbound) then begin
+          if admitted then t.model_signal <- Some (Answering_at now);
+          Buffer.add_string t.text_buffer text;
+          trail_text ~now t text
+        end
+      end
   | Live.Thinking {text;response} ->
       let generation, stream_scope = match response with
         | None -> None, None

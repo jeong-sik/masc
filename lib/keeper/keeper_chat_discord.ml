@@ -438,6 +438,7 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
           ~last_edited_text:"" ~post_attempts_left:2
     | Agent_core_runtime_attempt_started _ ->
         continue ~acc_text:"" ()
+    | Provider_retry_observed _ -> continue ()
     | Text_message_start _ -> continue ()
     | Reply_details _
     | Batch_bound _

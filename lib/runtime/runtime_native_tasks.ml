@@ -138,6 +138,11 @@ let source_to_json = function
 
 let schema = "masc.native_task_observation.v1"
 
+let attempt_to_json attempt = `Assoc [
+  "routing_run_id", string attempt.routing_run_id;
+  "runtime_id", string attempt.runtime_id;
+  "lane_attempt_index", integer attempt.lane_attempt_index]
+
 let to_json value =
   let origin = value.origin in
   `Assoc
@@ -145,9 +150,7 @@ let to_json value =
     ; "origin", `Assoc
         [ "keeper_name", string origin.keeper_name
         ; "source", source_to_json origin.source
-        ; "attempt", `Assoc ["routing_run_id", string origin.attempt.routing_run_id;
-            "runtime_id", string origin.attempt.runtime_id;
-            "lane_attempt_index", integer origin.attempt.lane_attempt_index]
+        ; "attempt", attempt_to_json origin.attempt
         ; "invocation", `Assoc ["receiver_generation", string origin.invocation.receiver_generation;
             "session_id", string origin.invocation.session_id; "client_uuid", string origin.invocation.client_uuid]
         ; "native_call", `Assoc ["session_id", string origin.native_call.session_id;
@@ -277,7 +280,8 @@ let attempt_of_json json =
   let* routing_run_id = required parse_string ~field:"routing_run_id" fields in
   let* runtime_id = required parse_string ~field:"runtime_id" fields in
   let* lane_attempt_index = required Runtime_json_integer.of_json ~field:"lane_attempt_index" fields in
-  Ok {routing_run_id;runtime_id;lane_attempt_index}
+  if lane_attempt_index < 0 then Error "negative runtime attempt index"
+  else Ok {routing_run_id;runtime_id;lane_attempt_index}
 
 let invocation_of_json json =
   let* fields = object_fields ~surface:"invocation" ~allowed:["receiver_generation";"session_id";"client_uuid"] json in

@@ -1,0 +1,14 @@
+{
+  "base_head": "c6b0981a5c44c7c214fc268077f5b85acc6a10f3",
+  "source_hashes": {
+    "lib/runtime/runtime_json_integer.ml": "a9ef4d8dd911bd9c49649a7f82a566fbc4df2419a3de53b90b7c851d4fac0791",
+    "lib/runtime/runtime_native_tasks.ml": "e26f82c09fe3f7fea363ae64c93275e1351c323e0cffac324afc648ca450e809",
+    "lib/runtime/runtime_claude_api_retry.ml": "54fd8d48683a4001cd55c75a4c4a38dacfef660e71c252a696dd49d981aa7924",
+    "docs/evidence/2026-10-12-claude-api-retry-wire/verify.ml.in": "9ff49b2c4dd9372b40175c16022ece9a27b4a443f6972af615afea003a37aad2",
+    "docs/evidence/2026-10-12-claude-api-retry-wire/run.py": "c7f5d01a53d713d86c0ff2290f0cd199b953a7675eb696d565587ca93302661f"
+  },
+  "actual_capture_retry_frames": 10,
+  "raw_capture_execution_exit_code": 0,
+  "normalized_capture_execution_exit_code": 0,
+  "scope": "Complete production retry, shared integer and native attempt modules interpreted with installed Yojson; Keeper event journal and transport path source-only"
+}

@@ -2046,6 +2046,12 @@ let run_turn
                               observe (Keeper_hooks_agent_core.Native_task_observed
                                 {attempt; bound}))
                            on_tool_stream_observation)
+                      ?on_provider_retry:
+                        (Option.map
+                           (fun observe ~attempt retry ->
+                              observe (Keeper_hooks_agent_core.Provider_retry_observed
+                                {attempt; retry}))
+                           on_tool_stream_observation)
                       ?on_native_tool_progress:
                         (Option.map
                            (fun observe ~block_index ~tool_call_id progress ->

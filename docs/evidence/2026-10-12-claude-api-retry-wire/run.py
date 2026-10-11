@@ -10,7 +10,9 @@ source = root / "lib/runtime/runtime_claude_api_retry.ml"
 template = (evidence / "verify.ml.in").read_text()
 with tempfile.TemporaryDirectory(prefix="masc-retry-wire-") as temporary:
     harness = pathlib.Path(temporary) / "verify.ml"
-    harness.write_text(template.replace("@SOURCE@", str(source)).replace("@CAPTURE@", str(capture)))
+    harness.write_text(template.replace("@SOURCE@", str(source)).replace("@CAPTURE@", str(capture))
+                       .replace("@INTEGER@", str(root / "lib/runtime/runtime_json_integer.ml"))
+                       .replace("@NATIVE_TASKS@", str(root / "lib/runtime/runtime_native_tasks.ml")))
     result = subprocess.run(["ocaml", str(harness)], stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, text=True)
     print(result.stdout, end="")

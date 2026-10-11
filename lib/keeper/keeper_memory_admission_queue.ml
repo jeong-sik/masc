@@ -163,7 +163,7 @@ let validate_sequence_coverage (state : state) receipts =
       if row.sequence = receipt.sequence then advance row.sequence pending_tail committed_tail
       else if row.sequence < receipt.sequence then advance row.sequence pending_tail committed
       else advance receipt.sequence pending committed_tail in
-  cover 0 state.pending receipts
+  cover 0 (List.rev state.pending) receipts
 
 let acknowledge_committed ~keepers_dir ~keeper_id =
   let* initial = read ~keepers_dir ~keeper_id in

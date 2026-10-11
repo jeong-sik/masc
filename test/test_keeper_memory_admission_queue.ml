@@ -290,6 +290,7 @@ let test_bulk_append_preserves_length_and_order () = with_store (fun keepers_dir
     (List.map (fun (row : Queue.candidate) -> row.sequence) rows);
   let retried = append keepers_dir "bulk-1" "rule 1" in
   check int "retry keeps its original sequence" 1 retried.sequence;
+  acknowledge keepers_dir;
   check int "retry adds no row" count
     (List.length (Queue.candidates (batch keepers_dir))))
 

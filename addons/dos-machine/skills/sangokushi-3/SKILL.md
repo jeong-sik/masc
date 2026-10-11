@@ -232,6 +232,12 @@ Observed at 193년 7월 6 평원 (유비 defending against 원소) and at 235년
   Acknowledge that notice with `space`. With no movement spent, an empty
   `enter` closed the direction prompt and returned to the same officer
   command menu. A refusal alone does not identify the terrain or its cost.
+  After a successful partial move, `enter` can instead end that officer's
+  turn: in January 190 Puyang, Cao Ang moved north with mobility 4 remaining,
+  then `enter` opened Li Dian's command. `0` retained the direction prompt
+  in this battle; do not reuse the deployment placement key as a movement
+  commit key. Identify the active officer from the bottom command text.
+  The upper-right commander name remained Xiahou Yuan across both turns.
 - `2` (공격) opens `1.통상 2.일제 3.기습 4.화살 5.불화살 6.돌격 7.일기토`;
   after the type, `어느 곳입니까?` takes a direction digit. An empty hex
   answers `적은 없었습니다`.

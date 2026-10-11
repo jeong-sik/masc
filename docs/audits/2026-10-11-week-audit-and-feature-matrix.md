@@ -166,24 +166,40 @@ candle 경로에서 준수 확인.
 (Codex만 수락, 나머지는 전 후보 소진 후 실패 — `keeper_turn_driver.ml:2664-2685` vs
 `keeper_turn_driver_try_provider.ml:600-606`).
 
+**업계 사례 조사 (2026-10-11)**: 툴 호출 없는 응답을 종료로 보는 "implicit finish"가
+주류다 — Claude Code가 "response without tools이면 루프를 끝내는" 구조(Arize
+[Harnesses Have an Expiration Date](https://arize.com/blog/harnesses-have-an-expiration-date/),
+"Inngest: Text response means done"). 빈 응답 재시도 관행은 **일시적 API 오류** 대상이며
+OpenRouter·Haystack·nanobot 이슈에서 그 대상은 `finish_reason=length`/`content_filter`
+등으로 명시적으로 분류된다 — 즉 "모델이 할 일 없음으로 조용히 끝낸 것"과 "프로바이더가
+빈 것을 반환한 것"은 별개 케이스이고, 전자를 실패로 번식시키는 건 하네스-모델 결합
+안티패턴(Arize eval이 모델별 행동 정규화를 결론으로 꺼낸 것과 동일). MASC는
+tool-only 턴을 이미 수락하므로 빈 최종 텍스트 수락과도 계약이 일관된다.
+
 - **(a) 전 레인 typed 헬퍼로 수락 통일 (권장)**: #41747이 만든 `Allow_quiet_final` 타입 정책을
-  공통 헬퍼로 복원해 5개 레인에 동일 적용. 근거: 조용한 자율 웨이크(할 일 없음)는 유효한
-  프로토콜 종료이며, tool-only 턴을 이미 수락하는 계약과도 일관. 비용: 레인이 조용히
-  끝나는 실패를 즉시 알기 어려움(관측으로 보완).
-- **(b) 전 레인 엄격 수락**: Codex 특례도 제거. 근거: "빈 응답 = 문제"를 항상 드러내기.
-  비용: 빈 최종 텍스트 하나가 후보 수 × 풀 요청 비용으로 번식, schedule 웨이크 노이즈.
+  공통 헬퍼로 복원해 5개 레인에 동일 적용하고, quiet-final 발생 게이지를 추가해 조용한
+  종료를 관측 가능하게 한다. 비용: 레인이 조용히 끝나는 실패를 즉시 알기 어려움(게이지로 보완).
+- **(b) 전 레인 엄격 수락**: Codex 특례도 제거. 비용: 빈 최종 텍스트 하나가 후보 수 ×
+  풀 요청 비용으로 번식, schedule 웨이크 노이즈.
 
-### 8-2. native terminal acknowledge 소비 (P2-1)
+### 8-2. native terminal acknowledge 소비 (P2-1) — 조사 결과로 결정 소멸
 
-`Terminal_unacknowledged → No_native_call` 유일 전이(`Acknowledge`)의 호출부가 없어
-Retire 종말 작업이 "awaiting Owner acknowledgement"로 영구 남음
-(`keeper_direct_native_continuation.ml:382-393`, `keeper_turn.ml:536`).
+**코드 재검증 결과 초기 주장이 부정확함** (탐색 에이전트 전수 조사, 2026-10-11):
 
-- **(b) 죽은 계약 정리 (권장)**: acknowledge·관련 export·오류 문구를 함께 삭제하고
-  "terminal, cannot be dispatched again"으로 교정. 근거: 소비 단계를 만든 #41655 계약의
-  소비자가 0건 — 미출시 제품에서 미연결 계약은 삭제가 원칙(헌법 legacy_residue).
-- **(a) acknowledge 연결**: 결과 전달 완료 경로에서 호출. 근거: durable 상태를 N tick에
-  닫는 계약 자체는 유효. 비용: 새 전달 경로 설계·테스트.
+- "유일한 전이 Acknowledge"는 거짓 — `Keeper_native_call.transition`
+  (`keeper_native_call.ml:67-83`)의 나가는 전이는 `Acknowledge`·`Bind`(새 call
+  교체)·`Terminal`(자기 유지) 3개.
+- "Retire가 영구 남는다"는 거짓 — Owner settle 경로
+  (`keeper_chat_operation_store.ml:2302-2310`, "Retire is acknowledged by the
+  operation's actual terminal transaction")가 Retire 종말을 `No_native_call`로
+  원자적으로 자동 해소하며, 테스트 3종(`test_keeper_direct_runtime_resume.ml:288-291` 등)이
+  이 계약을 검증 중. UI 노출도 settle 완료 전 임시 에러 2곳뿐.
+
+남는 것은 **결정이 아니라 죽은 코드 정리**뿐: 호출부 0건인 exported
+`Keeper_direct_native_continuation.acknowledge`(382-393)와 `Acknowledge` change
+생성 경로(`keeper_owner.ml:2148-2149`)를 삭제하고, settle이 실제 acknowledge
+경로임을 주석·문구로 명시. 에러 문구 "awaiting Owner acknowledgement"는 유지
+(settle 대기 중에는 실제 상태이므로). 헌법 legacy_residue 원칙 적용 대상.
 
 ## 9. 후속 확인 사항 (이번 감사 이후 발견)
 

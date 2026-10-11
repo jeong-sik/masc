@@ -171,8 +171,9 @@ and confirm the next officer or battle prompt before continuing.
   `RET:やめる` indicates Return to leave. Inspect the resulting command prompt
   before sending another command. Current training values do not establish a
   training gain, and soldier values use the game's display units.
-  An empty hex did not produce a new officer panel in this observation: retained
-  information does not establish that an enemy occupies the selected hex.
+  After a later cursor sequence and `0`, Xu Huang's panel remained displayed.
+  Retained information alone does not identify the selected hex or establish
+  that an enemy occupies it.
 - `6` asks `全軍退却しますか(Y/N)?`; after `y` each unit asks
   `<退却>:20 <武将>はどこに退却しますか?`. Type the province number shown and
   Return; an empty Return is not an answer. After the last unit the map comes

@@ -915,6 +915,32 @@ describe('KeeperConversationPanel', () => {
     expect(container.textContent).toContain('mutation failed')
   })
 
+  it('retains each operation action owner while another action is pending', async () => {
+    shellAuthSummary.value = { effective_role: 'admin' } as typeof shellAuthSummary.value
+    const row = (operationId: string) => ({ operationId, sequence: '1', createdAt: 1, input: null, state: { kind: 'queued' } })
+    listQueuedKeeperChatOperations.mockResolvedValue([row('operation-a'), row('operation-b')])
+    let failA!: (error: Error) => void
+    let finishB!: (value: unknown) => void
+    cancelKeeperChatOperation.mockReturnValueOnce(new Promise((_resolve, reject) => { failA = reject }))
+      .mockReturnValueOnce(new Promise(resolve => { finishB = resolve }))
+    render(html`<${KeeperConversationPanel} keeperName="sangsu" layout="primary" />`, container)
+    fireEvent.click(container.querySelector('[data-open-keeper-operation-control]') as HTMLButtonElement)
+    const cancel = (id: string) => Array.from(container.querySelector(`[data-operator-chat-operation="${id}"]`)!.querySelectorAll('button')).find(button => button.textContent === '취소')!
+    await waitFor(() => expect(container.querySelector('[data-operator-chat-operation="operation-b"]')).not.toBeNull())
+    fireEvent.click(cancel('operation-a'))
+    fireEvent.click(cancel('operation-b'))
+    await waitFor(() => expect(cancelKeeperChatOperation).toHaveBeenCalledTimes(2))
+    expect(cancel('operation-a').disabled).toBe(true)
+    expect(cancel('operation-b').disabled).toBe(true)
+    vi.mocked(showToast).mockClear()
+    failA(new Error('operation A failed'))
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith('operation A failed', 'error'))
+    expect(cancel('operation-b').disabled).toBe(true)
+    finishB({})
+    await waitFor(() => expect(cancel('operation-b').disabled).toBe(false))
+    expect(container.textContent).toContain('operation A failed')
+  })
+
   it('renders and mutates queued chat operations by singular operation id', async () => {
     shellAuthSummary.value = { effective_role: 'admin' } as typeof shellAuthSummary.value
     const operation = {

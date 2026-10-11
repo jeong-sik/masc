@@ -396,6 +396,11 @@ function ServerOperationStatus({
   `
 }
 
+type QueuePanelAction = { readonly kind: 'operation'; readonly operationId: string } | { readonly kind: 'interrupt' }
+function queuePanelActionKey(action: QueuePanelAction): string {
+  return JSON.stringify(action.kind === 'operation' ? ['operation', action.operationId] : ['interrupt'])
+}
+
 function KeeperQueueControlPanel({
   keeperName,
   keeper,
@@ -413,12 +418,13 @@ function KeeperQueueControlPanel({
   const setError = (error: string | null) => setSnapshot(current =>
     current?.keeperName === keeperName && current.authRevision === authRevision
       ? { ...current, error } : { keeperName, authRevision, operations: [], error })
-  const [pendingAction, setPendingAction] = useState<string | null>(null)
+  const [actionState, setActionState] = useState<{ keeperName: string; authRevision: number; pending: ReadonlySet<string>; errors: ReadonlyMap<string, { readonly address: QueuePanelAction; readonly message: string }> } | null>(null)
+  const currentActions = actionState?.keeperName === keeperName && actionState.authRevision === authRevision ? actionState : null
   const renderedKeeper = useRef(keeperName)
   renderedKeeper.current = keeperName
   const panelScope = useRef<{ keeperName: string; authRevision: number } | null>(null)
   const readOwner = useRef<AbortController | null>(null)
-  const actionOwner = useRef<object | null>(null)
+  const actionOwners = useRef(new Map<string, object>())
 
   const load = async (clearError = true) => {
     const scope = panelScope.current
@@ -448,8 +454,8 @@ function KeeperQueueControlPanel({
   useEffect(() => {
     const scope = { keeperName, authRevision }
     panelScope.current = scope
-    actionOwner.current = null
-    setPendingAction(null)
+    actionOwners.current.clear()
+    setActionState({ ...scope, pending: new Set(), errors: new Map() })
     void load()
     const stop = registerKeeperWaitingInventoryRefresh(changedKeeper => {
       if (changedKeeper === keeperName) void load(false)
@@ -458,7 +464,7 @@ function KeeperQueueControlPanel({
       stop()
       if (panelScope.current === scope) {
         panelScope.current = null
-        actionOwner.current = null
+        actionOwners.current.clear()
         readOwner.current?.abort()
         readOwner.current = null
       }
@@ -466,16 +472,22 @@ function KeeperQueueControlPanel({
   }, [keeperName, authRevision])
 
   const mutateChat = async (
-    operationId: string,
+    address: QueuePanelAction,
     action: () => Promise<unknown>,
   ) => {
     const scope = panelScope.current
     if (!scope || scope.keeperName !== renderedKeeper.current || scope.authRevision !== currentStoredTokenRevision()) return
+    const key = queuePanelActionKey(address)
+    if (actionOwners.current.has(key)) return
     const token = {}
-    actionOwner.current = token
-    const ownsAction = () => actionOwner.current === token && panelScope.current === scope
+    actionOwners.current.set(key, token)
+    const ownsAction = () => actionOwners.current.get(key) === token && panelScope.current === scope
       && scope.keeperName === renderedKeeper.current && scope.authRevision === currentStoredTokenRevision()
-    setPendingAction(operationId)
+    setActionState(current => {
+      const pending = new Set(current?.pending); pending.add(key)
+      const errors = new Map(current?.errors); errors.delete(key)
+      return { ...scope, pending, errors }
+    })
     try {
       await action()
       if (!ownsAction()) return
@@ -485,12 +497,18 @@ function KeeperQueueControlPanel({
       const message = cause instanceof Error ? cause.message : String(cause)
       await Promise.allSettled([load(false), refreshKeeperWaitingInventory(keeperName)])
       if (!ownsAction()) return
-      setError(message)
+      setActionState(current => {
+        const errors = new Map(current?.errors); errors.set(key, { address, message })
+        return { ...scope, pending: current?.pending ?? new Set(), errors }
+      })
       showToast(message, 'error')
     } finally {
-      if (actionOwner.current === token && panelScope.current === scope) {
-        actionOwner.current = null
-        setPendingAction(null)
+      if (actionOwners.current.get(key) === token && panelScope.current === scope) {
+        actionOwners.current.delete(key)
+        setActionState(current => {
+          const pending = new Set(current?.pending); pending.delete(key)
+          return { ...scope, pending, errors: current?.errors ?? new Map() }
+        })
       }
     }
   }
@@ -515,6 +533,8 @@ function KeeperQueueControlPanel({
         ? html`<div class="rounded-[var(--r-0)] bg-[var(--danger-10)] p-2 text-2xs text-[var(--color-status-err)]">${error}</div>`
         : null}
 
+      ${Array.from(currentActions?.errors.values() ?? []).map(({ address, message }) => html`<div key=${queuePanelActionKey(address)} class="text-2xs text-[var(--color-status-err)]">${address.kind === 'operation' ? html`<code>${address.operationId}</code> · ` : '현재 턴 · '}${message}</div>`)}
+
       <div class="grid gap-2 rounded-[var(--r-0)] border border-[var(--color-border-subtle)] p-2">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div class="text-xs font-semibold text-[var(--color-fg-secondary)]">현재 실행</div>
@@ -522,9 +542,9 @@ function KeeperQueueControlPanel({
             ? html`
                 <button
                   type="button"
-                  disabled=${pendingAction === 'interrupt-current-turn'}
+                  disabled=${currentActions?.pending.has(queuePanelActionKey({ kind: 'interrupt' })) === true}
                   class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-1 text-2xs text-[var(--color-status-err)] disabled:opacity-50"
-                  onClick=${() => void mutateChat('interrupt-current-turn', async () => {
+                  onClick=${() => void mutateChat({ kind: 'interrupt' }, async () => {
                     const scope = panelScope.current
                     const outcome = await interruptKeeperTurn(keeperName)
                     if (!scope || panelScope.current !== scope || scope.keeperName !== renderedKeeper.current) return
@@ -556,7 +576,7 @@ function KeeperQueueControlPanel({
           채팅 대기열 ${operations.length}
         </div>
         ${operations.map((operation, index) => {
-          const busy = pendingAction === operation.operationId
+          const busy = currentActions?.pending.has(queuePanelActionKey({ kind: 'operation', operationId: operation.operationId })) === true
           return html`
             <div
               class="grid gap-1 rounded-[var(--r-0)] border border-[var(--color-border-subtle)] p-2"
@@ -582,7 +602,7 @@ function KeeperQueueControlPanel({
                     const content = window.prompt('Queued operation을 수정합니다.', operation.input?.message ?? '')
                     if (content === null) return
                     void mutateChat(
-                      operation.operationId,
+                      { kind: 'operation', operationId: operation.operationId },
                       () => editQueuedKeeperChatOperation(keeperName, operation, content),
                     )
                   }}
@@ -592,7 +612,7 @@ function KeeperQueueControlPanel({
                   disabled=${busy || index === operations.length - 1}
                   class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-1 text-2xs disabled:opacity-50"
                   onClick=${() => void mutateChat(
-                    operation.operationId,
+                    { kind: 'operation', operationId: operation.operationId },
                     () => moveQueuedKeeperChatOperationToEnd(keeperName, operation.operationId),
                   )}
                 >맨 뒤로</button>
@@ -601,7 +621,7 @@ function KeeperQueueControlPanel({
                   disabled=${busy}
                   class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-1 text-2xs text-[var(--color-status-err)] disabled:opacity-50"
                   onClick=${() => void mutateChat(
-                    operation.operationId,
+                    { kind: 'operation', operationId: operation.operationId },
                     () => cancelKeeperChatOperation(keeperName, operation.operationId),
                   )}
                 >취소</button>

@@ -1071,6 +1071,19 @@ describe('Keeper operation stream projection', () => {
     } finally { release() }
   })
 
+  it('preserves previous-generation reasoning under the newer metadata response activity', () => {
+    assistantEntry('owned-operation')
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA',
+      value: { index: 0, delta: 'previous response reasoning', response: { content_generation: 1, stream_scope: 0 } } })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_DELTA',
+      value: { content_generation: 2, stream_scope: 1, usage: { output_tokens: 1 } } })
+    const entry = requiredFixture(keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1'))
+    expect(entry.responseState).toMatchObject({ current: { content_generation: 2, stream_scope: 1 } })
+    expect(entry.traceSteps).toMatchObject([{ kind: 'think', text: 'previous response reasoning', responseOwner: { content_generation: 1, stream_scope: 0 } }])
+    expect(entry.streamState).toBe('opening')
+    expect(entry.delivery).toBe('streaming')
+  })
+
   it('projects queued acceptance without a receipt or queue revision', () => {
     assistantEntry()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {

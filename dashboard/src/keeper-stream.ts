@@ -1394,7 +1394,9 @@ export function applyKeeperStreamEvent(
           : undefined
         const agentCoreBlockIndex = value ? asNumber(value.index) : undefined
         if (delta) {
-          if (source.kind === 'operation' && source.observationOnly) flushProducerSaying(keeperName, assistantEntryId, true)
+          if (source.kind === 'operation' && source.observationOnly && response.authoritative) {
+            flushProducerSaying(keeperName, assistantEntryId, true)
+          }
           enqueueThinkingDelta(keeperName, assistantEntryId, delta, { agentCoreBlockIndex, responseOwner: event.value.response && response.state.kind === 'known' ? response.state.current ?? undefined : undefined, authoritative: response.authoritative && !(source.kind === 'operation' && source.observationOnly) })
         }
         return null

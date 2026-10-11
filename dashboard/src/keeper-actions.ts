@@ -828,12 +828,16 @@ async function hydrateTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
       }
       if (errorMessage) setRecordValue(keeperActionErrors, request.keeperName, errorMessage)
       persistTrackedOperationAssistantDraft(request.keeperName, request.operationId, assistantId)
+      const reconciliationAuthRevision = currentStoredTokenRevision()
       try {
         const canonical = await reconcileOperationFromServerHistory(
           request.keeperName, request.operationId, operationUserEntryId(request.operationId), assistantId,
         )
-        if (canonical) removeTrackedKeeperChatOperation(request.operationId)
+        if (canonical && reconciliationAuthRevision === currentStoredTokenRevision()) {
+          removeTrackedKeeperChatOperation(request.operationId)
+        }
       } catch (historyError) {
+        if (reconciliationAuthRevision !== currentStoredTokenRevision()) return
         // A missing observation cannot revoke the authoritative terminal receipt.
         const detail = historyError instanceof Error ? historyError.message : 'Chat history unavailable'
         setRecordValue(keeperChatHistoryErrors, request.keeperName, `이전 대화 불러오기 실패: ${detail}`)
@@ -1440,7 +1444,7 @@ export async function sendKeeperThreadMessage(
         localId,
         assistantId,
       )
-      if (reconciled) {
+      if (reconciled && reconciliationAuthRevision === currentStoredTokenRevision()) {
         setRecordValue(keeperActionErrors, keeperName, null)
         return
       }

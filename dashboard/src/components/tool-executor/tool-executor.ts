@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
+import { storedTokenRevision } from '../../api/token-revision'
 import { SurfaceCard } from '../common/card'
 import { ActionButton } from '../common/button'
 import { SchemaForm } from './schema-form'
@@ -45,7 +46,8 @@ function ToolDetail() {
 }
 
 export function ToolExecutor() {
-  useEffect(() => { void loadToolSchemas() }, [])
+  const authRevision = storedTokenRevision.value
+  useEffect(() => { void loadToolSchemas() }, [authRevision])
   if (schemasLoading.value && !selectedTool.value) {
     return html`<${SurfaceCard}><p class="text-xs text-[var(--color-fg-muted)] py-8 text-center" role="status">도구 스키마 로딩 중...</p><//>`
   }

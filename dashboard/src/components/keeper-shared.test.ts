@@ -1,3 +1,5 @@
+import { clearStoredToken, currentStoredTokenRevision, setStoredToken } from '../api/core'
+import { showToast } from './common/toast'
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
@@ -41,7 +43,7 @@ vi.mock('../keeper-actions', () => ({
   recoverKeeperRuntime: vi.fn(),
   hydrateTrackedKeeperChatOperations: vi.fn(async () => undefined),
   sendKeeperThreadMessage: vi.fn(async () => null),
-  interruptKeeperTurn: vi.fn(async () => true),
+  interruptKeeperTurn: vi.fn(async () => ({ kind: 'signalled', authRevision: 0 })),
   isKeeperThreadMessageSendInFlight: vi.fn(() => false),
 }))
 
@@ -881,6 +883,28 @@ describe('KeeperConversationPanel', () => {
     expect(container.querySelector('[data-keeper-operation-control-panel]')).toBeNull()
   })
 
+
+  it.each(['authentication_superseded', 'signalled'] as const)('does not publish an interruption toast from replaced authentication (%s)', async kind => {
+    setStoredToken('fixture-old')
+    const authRevision = currentStoredTokenRevision()
+    let finish!: (value: { kind: typeof kind; authRevision: number }) => void
+    vi.mocked(interruptKeeperTurn).mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    vi.mocked(showToast).mockClear()
+    mockedToolsData.value = { keeper_waiting_inventory: { keepers: [
+      { keeper_name: 'sangsu', state: 'busy', waiting_on: [], waiting_count: 0 },
+    ] } }
+    render(html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="Say something" layout="primary" />`, container)
+    await waitFor(() => expect(container.textContent).toContain('Keeper 턴 실행 중'))
+    const button = Array.from(container.querySelectorAll('button')).find(button => button.textContent?.trim() === '현재 턴 중단')
+    expect(button).toBeDefined()
+    fireEvent.click(button!)
+    setStoredToken('fixture-new')
+    finish({ kind, authRevision })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(showToast).not.toHaveBeenCalled()
+    clearStoredToken()
+  })
 
   it('calls interruptKeeperTurn when the busy toolbar interrupt button is clicked', async () => {
     mockedToolsData.value = {

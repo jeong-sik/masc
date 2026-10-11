@@ -1,3 +1,4 @@
+import { currentStoredTokenRevision } from '../api/core'
 import { keeperStreamContract } from '../keeper-stream-contract'
 import { html } from 'htm/preact'
 import { AgentFailure, failureTypeFromDiagnostic } from './common/agent-failure'
@@ -428,13 +429,17 @@ function KeeperQueueControlPanel({
     operationId: string,
     action: () => Promise<unknown>,
   ) => {
+    const authRevision = currentStoredTokenRevision()
     setPendingAction(operationId)
     try {
       await action()
+      if (authRevision !== currentStoredTokenRevision()) return
       await Promise.all([load(), refreshKeeperWaitingInventory(keeperName)])
     } catch (cause) {
+      if (authRevision !== currentStoredTokenRevision()) return
       const message = cause instanceof Error ? cause.message : String(cause)
       await Promise.allSettled([load(false), refreshKeeperWaitingInventory(keeperName)])
+      if (authRevision !== currentStoredTokenRevision()) return
       setError(message)
       showToast(message, 'error')
     } finally {
@@ -472,10 +477,11 @@ function KeeperQueueControlPanel({
                   disabled=${pendingAction === 'interrupt-current-turn'}
                   class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-1 text-2xs text-[var(--color-status-err)] disabled:opacity-50"
                   onClick=${() => void mutateChat('interrupt-current-turn', async () => {
-                    const cancelled = await interruptKeeperTurn(keeperName)
+                    const outcome = await interruptKeeperTurn(keeperName)
+                    if (outcome.kind === 'authentication_superseded' || outcome.authRevision !== currentStoredTokenRevision()) return
                     showToast(
-                      cancelled ? '현재 턴을 중단했습니다' : '중단할 실행 중인 턴 없음',
-                      cancelled ? 'success' : 'warning',
+                      outcome.kind === 'signalled' ? '현재 턴에 중단 신호를 보냈습니다' : '중단 신호가 전송되지 않았습니다',
+                      outcome.kind === 'signalled' ? 'success' : 'warning',
                     )
                   })}
                 >현재 턴 중단</button>
@@ -775,14 +781,17 @@ export function KeeperConversationPanel({
     <${BusyToolbar}
       keeperName=${keeperName}
       onInterrupt=${() => {
+        const authRevision = currentStoredTokenRevision()
         void interruptKeeperTurn(keeperName)
-          .then(cancelled => {
+          .then(outcome => {
+            if (outcome.kind === 'authentication_superseded' || outcome.authRevision !== currentStoredTokenRevision()) return
             showToast(
-              cancelled ? '현재 턴을 중단했습니다' : '중단할 실행 중인 턴 없음',
-              cancelled ? 'success' : 'warning',
+              outcome.kind === 'signalled' ? '현재 턴에 중단 신호를 보냈습니다' : '중단 신호가 전송되지 않았습니다',
+              outcome.kind === 'signalled' ? 'success' : 'warning',
             )
           })
           .catch(() => {
+            if (authRevision !== currentStoredTokenRevision()) return
             showToast('현재 턴 중단에 실패했습니다', 'error')
           })
       }}

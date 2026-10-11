@@ -21,6 +21,7 @@ const {
   fetchKeeperChatHistory: vi.fn(),
   streamKeeperMessage: vi.fn(),
 }))
+const { apiInterruptKeeperTurn } = vi.hoisted(() => ({ apiInterruptKeeperTurn: vi.fn() }))
 const { fetchKeeperToolCalls } = vi.hoisted(() => ({
   fetchKeeperToolCalls: vi.fn(async (): Promise<{ entries: ToolCallEntry[] }> => ({ entries: [] })),
 }))
@@ -31,6 +32,7 @@ vi.mock('./api/core', async importOriginal => ({
   runOperatorAction,
 }))
 vi.mock('./api/keeper', () => ({
+  interruptKeeperTurn: apiInterruptKeeperTurn,
   cancelKeeperChatOperation,
   fetchKeeperChatOperation,
   fetchKeeperChatHistory,
@@ -67,6 +69,7 @@ import {
   _resetChatHydrationForTests,
   cancelActiveKeeperThreadMessage,
   cancelKeeperThreadRequest,
+  interruptKeeperTurn,
   dispatchKeeperInterjectAction,
   hydrateTrackedKeeperChatOperations,
   hydrateKeeperChatHistory,
@@ -117,6 +120,41 @@ function requiredFixture<T>(value: T | undefined): T {
   if (value === undefined) throw new Error('Expected fixture state to exist')
   return value
 }
+
+describe('turn interruption authentication admission', () => {
+  beforeEach(() => {
+    _resetActiveKeeperStreamsForTests()
+    _resetLiveSendRequestOwnersForTests()
+    apiInterruptKeeperTurn.mockReset()
+    apiInterruptKeeperTurn.mockResolvedValue({ signalled: true })
+  })
+  afterEach(() => clearStoredToken())
+
+  it('does not issue turn interruption after credentials change during local cancellation', async () => {
+    setStoredToken('fixture-old')
+    const interruption = interruptKeeperTurn('echo')
+    setStoredToken('fixture-new')
+    keeperActionErrors.value = { echo: 'current scope error' }
+    expect(await interruption).toMatchObject({ kind: 'authentication_superseded' })
+    expect(apiInterruptKeeperTurn).not.toHaveBeenCalled()
+    expect(keeperActionErrors.value.echo).toBe('current scope error')
+  })
+
+  it.each(['resolve', 'reject'] as const)('does not publish superseded interruption result (%s)', async outcome => {
+    setStoredToken('fixture-old')
+    let finish!: (value: { signalled: boolean }) => void
+    let fail!: (error: Error) => void
+    apiInterruptKeeperTurn.mockReturnValueOnce(new Promise((resolve, reject) => { finish = resolve; fail = reject }))
+    const interruption = interruptKeeperTurn('echo').catch(error => error)
+    await vi.waitFor(() => expect(apiInterruptKeeperTurn).toHaveBeenCalled())
+    setStoredToken('fixture-new')
+    keeperActionErrors.value = { echo: 'current scope error' }
+    if (outcome === 'resolve') finish({ signalled: true })
+    else fail(new Error('old interruption failed'))
+    expect(await interruption).toMatchObject({ kind: 'authentication_superseded' })
+    expect(keeperActionErrors.value.echo).toBe('current scope error')
+  })
+})
 
 describe('operation cancellation admission', () => {
   beforeEach(() => {

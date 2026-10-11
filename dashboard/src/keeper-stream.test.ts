@@ -5,6 +5,7 @@ import {
   _resetLiveSendRequestOwnersForTests,
   activeStreamRequestId,
   appendThreadEntry,
+  mergeServerHistoryEntries,
   claimLiveSendRequest,
   clearActiveStream,
   markLiveSendRequestAccepted,
@@ -22,6 +23,7 @@ import {
 import { parseSSEMessage } from './schemas/sse'
 import {
   operationDeliveryProvenance,
+  toolCallDeliveryProvenance,
   isOperationDeliveryProvenance,
 } from './keeper-delivery-provenance'
 import {
@@ -217,6 +219,129 @@ describe('Keeper operation stream projection', () => {
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_START', ...toolOccurrence(), toolCallName: 'Read' })
     expect(keeperThreads.value.sangsu.find(entry => entry.id === 'reply-1')).toMatchObject({
       delivery: 'streaming', streamState: 'streaming', responseState: { phase: 'running', closed: owner },
+    })
+  })
+
+  it('binds late args and results to the same tool occurrence after its assistant row is replaced', () => {
+    const operationId = 'stable-tool-parent'
+    assistantEntry(operationId)
+    const source = { kind: 'operation' as const, operationId }
+    const start: KeeperChatStreamEvent = { type: 'TOOL_CALL_START', ...toolOccurrence(), toolCallName: 'Read', toolCallId: 'reused-provider' }
+    applyKeeperStreamEvent('sangsu', 'reply-1', start, source)
+    const originalTool = keeperThreads.value.sangsu.find(row => row.role === 'tool')!
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'RUN_FINISHED' }, source)
+    mergeServerHistoryEntries('sangsu', [{ ...keeperThreads.value.sangsu.find(row => row.id === 'reply-1')!,
+      id: 'canonical-parent', delivery: 'history', traceSteps: undefined }])
+    applyKeeperOperationTurnEvent('sangsu', { operationId, event: start })
+    applyKeeperOperationTurnEvent('sangsu', { operationId, event: { type: 'TOOL_CALL_ARGS', ...toolOccurrence(), toolCallId: 'reused-provider', snapshot: '{"path":"file"}' } })
+    expect(applyKeeperOperationTurnEvent('sangsu', { operationId, event: { type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY',
+      value: { ...toolOccurrence(), toolCallId: 'reused-provider', executionId: 'stable-execution' } } })).toBeNull()
+    const tools = keeperThreads.value.sangsu.filter(row => row.role === 'tool')
+    expect(tools.map(row => row.id)).toEqual([originalTool.id])
+    expect(tools[0]).toMatchObject({ executionId: 'stable-execution', rawText: '{"path":"file"}', delivery: 'delivered' })
+    expect(keeperThreads.value.sangsu.find(row => row.id === 'canonical-parent')?.traceSteps).toMatchObject([
+      { kind: 'tool', executionId: 'stable-execution', status: 'ok' },
+    ])
+  })
+
+  it.each([false, true])('binds history before first result unless provider correlation conflicts (conflict=%s)', conflict => {
+    const operationId = 'history-before-result'
+    assistantEntry(operationId)
+    const source = { kind: 'operation' as const, operationId }
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_START', ...toolOccurrence(), toolCallName: 'Read', toolCallId: 'live-provider' }, source)
+    const planned = keeperThreads.value.sangsu.find(row => row.role === 'tool')!
+    const slot = planned.deliveryProvenance!.transcript_slot
+    if (slot.kind !== 'tool_delivery') throw new Error('Expected planned tool ordinal')
+    mergeServerHistoryEntries('sangsu', [{ ...planned, id: 'canonical-executed-tool',
+      executionId: 'history-execution', delivery: 'history', rawText: 'canonical args',
+      toolCallId: conflict ? 'different-provider' : 'live-provider',
+      toolOccurrence: undefined,
+      deliveryProvenance: toolCallDeliveryProvenance(planned.deliveryProvenance, 'history-execution', slot.ordinal),
+    }])
+    expect(keeperThreads.value.sangsu.filter(row => row.role === 'tool')).toHaveLength(2)
+    const result = applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY',
+      value: { ...toolOccurrence(), executionId: 'history-execution' } }, source)
+    if (conflict) {
+      expect(result).toContain('provider correlation conflicts')
+      expect(keeperThreads.value.sangsu.filter(row => row.role === 'tool')).toHaveLength(2)
+      expect(keeperThreads.value.sangsu.find(row => row.id === planned.id)?.executionId).toBeUndefined()
+      return
+    }
+    expect(result).toBeNull()
+    expect(keeperThreads.value.sangsu.filter(row => row.role === 'tool')).toMatchObject([
+      { id: 'canonical-executed-tool', rawText: 'canonical args', toolCallEnded: true,
+        toolOccurrence: { kind: 'identified', streamScope: 0, blockIndex: 0 } },
+    ])
+    expect(keeperThreads.value.sangsu.find(row => row.id === 'reply-1')?.traceSteps).toMatchObject([
+      { kind: 'tool', toolOccurrenceId: 'canonical-executed-tool', executionId: 'history-execution', status: 'ok' },
+    ])
+  })
+
+  it('retains authoritative quarantine across parent replacement and transient buffer reset', () => {
+    const operationId = 'stable-quarantine-parent'
+    assistantEntry(operationId)
+    const source = { kind: 'operation' as const, operationId }
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_START', ...toolOccurrence(), toolCallName: 'Read' }, source)
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_STREAM_PROTOCOL_ERROR',
+      value: { kind: 'tool_start_duplicate_index', quarantined_occurrence: toolOccurrence() } }, source)
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'RUN_FINISHED' }, source)
+    mergeServerHistoryEntries('sangsu', [{ ...keeperThreads.value.sangsu.find(row => row.id === 'reply-1')!, id: 'canonical-quarantine-parent', delivery: 'history' }])
+    _resetKeeperStreamBuffersForTests()
+    expect(applyKeeperOperationTurnEvent('sangsu', { operationId, event: { type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY',
+      value: { ...toolOccurrence(), executionId: 'must-not-bind' } } })).toContain('quarantined')
+    expect(keeperThreads.value.sangsu.find(row => row.role === 'tool')).toMatchObject({ toolOccurrenceQuarantined: true, delivery: 'error' })
+    expect(keeperThreads.value.sangsu.some(row => row.executionId === 'must-not-bind')).toBe(false)
+  })
+
+  it.each([false, true])('preserves tool coordinates and trace links through canonical replacement (duplicate=%s)', duplicate => {
+    const operationId = 'canonical-tool-occurrence'
+    assistantEntry(operationId)
+    const source = { kind: 'operation' as const, operationId }
+    const start: KeeperChatStreamEvent = { type: 'TOOL_CALL_START', ...toolOccurrence(), toolCallName: 'Read' }
+    applyKeeperStreamEvent('sangsu', 'reply-1', start, source)
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY', value: { ...toolOccurrence(), executionId: 'canonical-execution' } }, source)
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'RUN_FINISHED' }, source)
+    const originalTool = keeperThreads.value.sangsu.find(row => row.role === 'tool')!
+    const originalReply = keeperThreads.value.sangsu.find(row => row.id === 'reply-1')!
+    mergeServerHistoryEntries('sangsu', [
+      { ...originalTool, id: 'persisted-tool', toolOccurrence: undefined, toolOccurrenceQuarantined: undefined, toolCallEnded: undefined, delivery: 'history' },
+      ...(duplicate ? [{ ...originalTool, id: 'duplicate-persisted-tool', toolOccurrence: undefined, toolOccurrenceQuarantined: undefined, toolCallEnded: undefined, delivery: 'history' as const }] : []),
+      { ...originalReply, id: 'persisted-reply', delivery: 'history', traceSteps: duplicate
+        ? originalReply.traceSteps?.map(step => step.kind === 'tool' ? { ...step, toolOccurrenceId: 'duplicate-persisted-tool' } : step)
+        : undefined },
+    ])
+    applyKeeperOperationTurnEvent('sangsu', { operationId, event: start })
+    expect(applyKeeperOperationTurnEvent('sangsu', { operationId, event: { type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY',
+      value: { ...toolOccurrence(), executionId: 'canonical-execution' } } })).toBeNull()
+    expect(keeperThreads.value.sangsu.filter(row => row.role === 'tool').map(row => row.id)).toEqual(['persisted-tool'])
+    expect(keeperThreads.value.sangsu.find(row => row.id === 'persisted-reply')?.traceSteps).toMatchObject([
+      { kind: 'tool', toolOccurrenceId: 'persisted-tool', executionId: 'canonical-execution' },
+    ])
+  })
+
+  it('keeps every disputed tool coordinate quarantined through canonical replacement', () => {
+    const operationId = 'conflicting-tool-coordinates'
+    assistantEntry(operationId)
+    const source = { kind: 'operation' as const, operationId }
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_START', ...toolOccurrence(), toolCallName: 'Read' }, source)
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY', value: { ...toolOccurrence(), executionId: 'conflicting-execution' } }, source)
+    const originalTool = keeperThreads.value.sangsu.find(row => row.role === 'tool')!
+    appendThreadEntry('sangsu', { ...originalTool, id: 'disputed-tool-alias', toolOccurrence: { kind: 'identified', streamScope: 1, blockIndex: 1 } })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'RUN_FINISHED' }, source)
+    mergeServerHistoryEntries('sangsu', [
+      { ...originalTool, id: 'canonical-disputed-tool', delivery: 'history', toolOccurrence: undefined },
+      { ...keeperThreads.value.sangsu.find(row => row.id === 'reply-1')!, id: 'canonical-disputed-parent', delivery: 'history' },
+    ])
+    for (const occurrence of [toolOccurrence(), toolOccurrence(1, 1)]) {
+      applyKeeperOperationTurnEvent('sangsu', { operationId, event: { type: 'TOOL_CALL_START', ...occurrence, toolCallName: 'Read' } })
+      expect(applyKeeperOperationTurnEvent('sangsu', { operationId, event: { type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY',
+        value: { ...occurrence, executionId: 'must-not-rebind' } } })).toContain('quarantined')
+    }
+    expect(keeperThreads.value.sangsu.filter(row => row.role === 'tool').map(row => row.id)).toEqual(['canonical-disputed-tool'])
+    expect(keeperThreads.value.sangsu.find(row => row.id === 'canonical-disputed-tool')).toMatchObject({
+      toolOccurrenceQuarantined: true, toolOccurrence: { kind: 'conflicting', coordinates: [
+        { streamScope: 0, blockIndex: 0 }, { streamScope: 1, blockIndex: 1 },
+      ] },
     })
   })
 

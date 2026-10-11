@@ -1,6 +1,7 @@
 import { sameKeeperResponseOwner, type KeeperResponseOwner, initialKeeperResponseState, reduceKeeperResponse, acknowledgeKeeperResponseSequence, type KeeperResponseDecision, type KeeperResponseEvent } from './lib/keeper-response-state'
 import { keeperStreamContract } from './keeper-stream-contract'
 import {
+  sameDeliveryKey,
   operationDeliveryProvenance,
   isOperationDeliveryProvenance,
   toolCallDeliveryProvenance,
@@ -13,7 +14,7 @@ import {
 } from './keeper-message'
 import { parseTextToChatBlocks } from './lib/chat-blocks'
 import type { KeeperChatStreamEvent } from './api'
-import type { KeeperConversationDetails } from './types'
+import type { KeeperConversationEntry, KeeperConversationDetails } from './types'
 import {
   appendAssistantDelta,
   appendThreadEntry,
@@ -60,36 +61,38 @@ interface PendingThinkingState {
 }
 
 const pendingThinkingDeltas = new Map<string, PendingThinkingState>()
-const quarantinedToolOccurrences = new Set<string>()
+function sameToolParent(
+  parent: KeeperConversationEntry | undefined,
+  tool: KeeperConversationEntry,
+): boolean {
+  if (!parent) return false
+  const parentKey = parent.deliveryProvenance?.delivery_key
+  const toolKey = tool.deliveryProvenance?.delivery_key
+  return parentKey ? toolKey !== undefined && sameDeliveryKey(parentKey, toolKey)
+    : toolKey === undefined && tool.toolParentEntryId === parent.id
+}
 
-function liveToolEntryPrefix(assistantEntryId: string): string {
-  return `tool-delivery-${assistantEntryId}-`
+function occurrenceContains(
+  occurrence: KeeperConversationEntry['toolOccurrence'], scope: number, index: number,
+): boolean {
+  if (!occurrence) return false
+  return occurrence.kind === 'identified' ? occurrence.streamScope === scope && occurrence.blockIndex === index
+    : occurrence.coordinates.some(value => value.streamScope === scope && value.blockIndex === index)
 }
 
 function streamedToolOccurrenceId(
+  keeperName: string,
   assistantEntryId: string,
   streamScope: number,
   blockIndex: number,
 ): string {
-  return `${liveToolEntryPrefix(assistantEntryId)}stream-${streamScope}-block-${blockIndex}`
-}
-
-function quarantinedToolOccurrenceKey(
-  keeperName: string,
-  assistantEntryId: string,
-  toolOccurrenceId: string,
-): string {
-  return `${keeperName}\u0000${assistantEntryId}\u0000${toolOccurrenceId}`
-}
-
-function quarantineToolOccurrence(
-  keeperName: string,
-  assistantEntryId: string,
-  toolOccurrenceId: string,
-): void {
-  quarantinedToolOccurrences.add(
-    quarantinedToolOccurrenceKey(keeperName, assistantEntryId, toolOccurrenceId),
-  )
+  const entries = keeperThreads.value[keeperName] ?? []
+  const parent = entries.find(entry => entry.id === assistantEntryId)
+  const existing = entries.find(entry => entry.role === 'tool' && sameToolParent(parent, entry)
+    && occurrenceContains(entry.toolOccurrence, streamScope, blockIndex))
+  // This is a row key only. Occurrence admission uses typed parent identity and
+  // server coordinates, so replacing the parent row does not change ownership.
+  return existing?.id ?? `tool-delivery-${assistantEntryId}-stream-${streamScope}-block-${blockIndex}`
 }
 
 function isToolOccurrenceQuarantined(
@@ -97,19 +100,10 @@ function isToolOccurrenceQuarantined(
   assistantEntryId: string,
   toolOccurrenceId: string,
 ): boolean {
-  return quarantinedToolOccurrences.has(
-    quarantinedToolOccurrenceKey(keeperName, assistantEntryId, toolOccurrenceId),
-  )
-}
-
-function clearQuarantinedToolOccurrences(
-  keeperName: string,
-  assistantEntryId: string,
-): void {
-  const prefix = `${keeperName}\u0000${assistantEntryId}\u0000`
-  for (const key of quarantinedToolOccurrences) {
-    if (key.startsWith(prefix)) quarantinedToolOccurrences.delete(key)
-  }
+  const entries = keeperThreads.value[keeperName] ?? []
+  const parent = entries.find(entry => entry.id === assistantEntryId)
+  return entries.some(entry => entry.role === 'tool' && entry.id === toolOccurrenceId
+    && sameToolParent(parent, entry) && entry.toolOccurrenceQuarantined === true)
 }
 
 // AG-UI text messages are delivered at-least-once: a WS/SSE reconnect can
@@ -315,7 +309,6 @@ export function _resetKeeperStreamBuffersForTests(): void {
   pendingThinkingDeltas.clear()
   pendingAgentCoreTextBlockIndexes.clear()
   textMessageStreamStates.clear()
-  quarantinedToolOccurrences.clear()
 }
 
 export interface KeeperThreadAbortResult {
@@ -360,17 +353,15 @@ function recordStreamProtocolError(
   const toolEntry = (keeperThreads.value[keeperName] ?? []).find(entry => (
     entry.role === 'tool'
     && entry.id === occurrenceId
-    && entry.id.startsWith(liveToolEntryPrefix(assistantEntryId))
+    && sameToolParent((keeperThreads.value[keeperName] ?? []).find(parent => parent.id === assistantEntryId), entry)
     && (target.authoritativeQuarantine || entry.executionId == null)
   ))
   if (!toolEntry) return
-  if (target.authoritativeQuarantine) {
-    quarantineToolOccurrence(keeperName, assistantEntryId, occurrenceId)
-  }
   markAssistantToolTraceErrored(keeperName, assistantEntryId, toolEntry.id)
   updateThreadEntry(keeperName, toolEntry.id, entry => ({
     ...entry,
     toolCallEnded: target.authoritativeQuarantine ? true : entry.toolCallEnded,
+    ...(target.authoritativeQuarantine ? { toolOccurrenceQuarantined: true as const } : {}),
     delivery: 'error',
     streamState: null,
     error: message,
@@ -481,7 +472,6 @@ export function abortKeeperThreadMessage(name: string): KeeperThreadAbortResult 
       timestamp: new Date().toISOString(),
     })
     clearPendingAgentCoreTextBlockIndex(keeperName, entryId)
-    clearQuarantinedToolOccurrences(keeperName, entryId)
   }
   if (operationId) clearActiveStream(keeperName, operationId)
   if (activeStreamEntryId(keeperName) === null) {
@@ -773,6 +763,7 @@ export function applyKeeperStreamEvent(
       const toolCallId = nonBlankToolCallId(event.toolCallId) ?? undefined
       const toolName = event.toolCallName?.trim()
       const toolOccurrenceId = streamedToolOccurrenceId(
+        keeperName,
         assistantEntryId,
         event.toolStreamScope,
         event.toolCallBlockIndex,
@@ -834,6 +825,8 @@ export function applyKeeperStreamEvent(
         timestamp: new Date().toISOString(),
         toolCallId,
         toolCallEnded: false,
+        toolOccurrence: Object.freeze({ kind: 'identified' as const, streamScope: event.toolStreamScope, blockIndex: event.toolCallBlockIndex }),
+        ...(deliveryProvenance ? {} : { toolParentEntryId: assistantEntryId }),
         deliveryProvenance,
         delivery: 'streaming',
         streamState: 'streaming',
@@ -847,6 +840,7 @@ export function applyKeeperStreamEvent(
       const toolCallId = nonBlankToolCallId(event.toolCallId) ?? undefined
       const snapshot = event.snapshot
       const toolOccurrenceId = streamedToolOccurrenceId(
+        keeperName,
         assistantEntryId,
         event.toolStreamScope,
         event.toolCallBlockIndex,
@@ -903,6 +897,7 @@ export function applyKeeperStreamEvent(
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
       const toolCallId = nonBlankToolCallId(event.toolCallId) ?? undefined
       const toolOccurrenceId = streamedToolOccurrenceId(
+        keeperName,
         assistantEntryId,
         event.toolStreamScope,
         event.toolCallBlockIndex,
@@ -961,6 +956,7 @@ export function applyKeeperStreamEvent(
         const executionId = event.value.executionId
         if (!executionId.trim()) return 'KEEPER_TOOL_RESULT_READY missing executionId'
         const toolOccurrenceId = streamedToolOccurrenceId(
+          keeperName,
           assistantEntryId,
           event.value.toolStreamScope,
           event.value.toolCallBlockIndex,
@@ -974,12 +970,9 @@ export function applyKeeperStreamEvent(
         if (toolEntry.executionId === executionId) return null
         const executionOwner = (keeperThreads.value[keeperName] ?? []).find(entry => (
           entry.role === 'tool'
-          && entry.id.startsWith(liveToolEntryPrefix(assistantEntryId))
+          && sameToolParent((keeperThreads.value[keeperName] ?? []).find(parent => parent.id === assistantEntryId), entry)
           && entry.executionId === executionId
         ))
-        if (executionOwner) {
-          return 'KEEPER_TOOL_RESULT_READY execution_id belongs to another tool occurrence'
-        }
         if (toolCallId && toolEntry.toolCallId && toolEntry.toolCallId !== toolCallId) {
           return 'KEEPER_TOOL_RESULT_READY provider correlation conflicts with its server occurrence'
         }
@@ -998,6 +991,44 @@ export function applyKeeperStreamEvent(
         const ordinal = currentSlot?.kind === 'tool_delivery' || currentSlot?.kind === 'tool_call'
           ? currentSlot.ordinal
           : null
+        if (executionOwner) {
+          const canonicalSlot = executionOwner.deliveryProvenance?.transcript_slot
+          const parentKey = toolEntry.deliveryProvenance?.delivery_key
+          const canonicalKey = executionOwner.deliveryProvenance?.delivery_key
+          // Only the server result binds a planned ordinal to an execution.
+          // History alone cannot infer this association from provider correlation.
+          if (!parentKey || !canonicalKey || !sameDeliveryKey(parentKey, canonicalKey)
+            || canonicalSlot?.kind !== 'tool_call' || canonicalSlot.execution_id !== executionId
+            || ordinal === null || canonicalSlot.ordinal !== ordinal
+            || executionOwner.toolOccurrence !== undefined) {
+            return 'KEEPER_TOOL_RESULT_READY execution_id belongs to another tool occurrence'
+          }
+          if (executionOwner.toolOccurrenceQuarantined === true) {
+            return 'KEEPER_TOOL_RESULT_READY targets a quarantined tool occurrence'
+          }
+          if (toolEntry.toolCallId && executionOwner.toolCallId
+            && toolEntry.toolCallId !== executionOwner.toolCallId) {
+            return 'KEEPER_TOOL_RESULT_READY provider correlation conflicts with its server occurrence'
+          }
+          if (toolCallId && executionOwner.toolCallId && executionOwner.toolCallId !== toolCallId) {
+            return 'KEEPER_TOOL_RESULT_READY provider correlation conflicts with its server occurrence'
+          }
+          const entries = keeperThreads.value[keeperName] ?? []
+          const parent = entries.find(entry => entry.id === assistantEntryId)
+          setRecordValue(keeperThreads, keeperName, entries.filter(entry => entry.id !== toolEntry.id).map(entry => {
+            if (entry.id === executionOwner.id) return {
+              ...entry, toolOccurrence: toolEntry.toolOccurrence, toolCallEnded: true,
+            }
+            if (entry.role !== 'assistant' || !sameToolParent(entry, executionOwner)
+              || !sameToolParent(parent, executionOwner)) return entry
+            return { ...entry, traceSteps: entry.traceSteps?.map(step => step.kind === 'tool'
+              && (step.toolOccurrenceId === toolEntry.id || step.executionId === executionId)
+              ? { ...step, toolOccurrenceId: executionOwner.id, executionId,
+                status: step.status === 'err' ? 'err' as const : 'ok' as const }
+              : step) }
+          }))
+          return null
+        }
         const deliveryProvenance = ordinal === null
           ? toolEntry?.deliveryProvenance ?? null
           : toolCallDeliveryProvenance(toolEntry?.deliveryProvenance, executionId, ordinal)
@@ -1172,6 +1203,7 @@ export function applyKeeperStreamEvent(
         const quarantinedOccurrence = event.value.quarantined_occurrence
         const toolOccurrenceId = quarantinedOccurrence
           ? streamedToolOccurrenceId(
+              keeperName,
               assistantEntryId,
               quarantinedOccurrence.toolStreamScope,
               quarantinedOccurrence.toolCallBlockIndex,
@@ -1313,7 +1345,6 @@ export function applyKeeperStreamEvent(
       })
       clearPendingAgentCoreTextBlockIndex(keeperName, assistantEntryId)
       clearTextMessageStreamState(keeperName, assistantEntryId)
-      clearQuarantinedToolOccurrences(keeperName, assistantEntryId)
       if (source.kind !== 'operation') return null
       updateThreadEntry(keeperName, assistantEntryId, entry => {
         if (!isOperationDeliveryProvenance(
@@ -1347,7 +1378,6 @@ export function applyKeeperStreamEvent(
       admitResponseEvent(keeperName, assistantEntryId, { kind: 'terminal' })
       clearPendingAgentCoreTextBlockIndex(keeperName, assistantEntryId)
       clearTextMessageStreamState(keeperName, assistantEntryId)
-      clearQuarantinedToolOccurrences(keeperName, assistantEntryId)
       return asString(event.message, '').trim() || 'Keeper stream failed'
     default:
       return 'Unsupported Keeper stream event'

@@ -356,6 +356,40 @@ screen appeared and a key exited.
 on `space`. Every AI war is shown on the battle map, and each `<장수>의 전술`
 line waits for a key.
 
+## Defending a captured city with reinforcements
+
+In November 189, after capturing city 20, ending its commands was followed by
+Dong Zhuo's attack from city 7 against Puyang, city 9. The notice showed enemy
+strength 14,804. Requesting help with `y`, then city `10`, Enter advanced to a
+second-city selector. City 20 did not advance that selector; empty Enter ended
+it. A message then reported the request messenger at Chenliu.
+
+The Chenliu list selected Cao Cao 1,800, Cao Ang 1,900, Li Dian 1,900 and Cao
+Ren 1,565. Each officer selection was followed by infantry `1`, Enter. Empty
+Enter ended selection; `y` confirmed dispatch. This was a request and dispatch,
+not arrival. Puyang's own defender Xiahou Yuan had only 668 soldiers.
+
+The city defense opened placement. At its observed cursor, three separate north
+`8` presses followed by `0` placed Xiahou Yuan inside the city; an earlier `0`
+on a different cell did not complete placement. Use permitted cells and inspect
+the resulting command prompt rather than applying this sequence to every map.
+On day 2 morning, `조조군이 도착했습니다` appeared; after Space, own strength
+was 7,833, an increase of exactly 7,165. Subsequent named commands and movement
+for all four reinforcements proved controllable arrival.
+
+A preserved failed branch displayed `조조군이 전멸했습니다` while aggregate
+friendly strength still showed 6,914. An alternate checkpoint replay preserved
+7,833 through day 5 morning before retreat destinations were requested. The
+reason for the retreat transition was not established; neither waiting nor
+moving inside the city was proved to guarantee successful defense.
+
+Each of Xiahou Yuan, Cao Ang, Cao Cao, Li Dian and Cao Ren then selected the
+listed city 10 with separate `1`, `0`, Enter inputs. The defeat message appeared.
+December Chenliu's own roster confirmed all five arrivals. Xiahou Yuan's
+individual panel showed soldiers 668, training 100, morale 66 and loyalty 100.
+Officer arrival does not preserve Puyang, and other individual troop totals
+were not separately inspected. Keep failed and restored branches distinguishable.
+
 ## Battle information and input device
 
 At the visible human battle command menu, `5` opens information and offers
@@ -365,6 +399,14 @@ battle. The panel showed troops 1614, morale 94 and training 50. Space closed
 it to unit selection; Enter returned to the friendly/enemy choice and another
 Enter returned to the command menu. This is a positive control for one friendly
 unit, not evidence that an arbitrary selected cell contains an enemy.
+
+In the later Puyang defense, enemy information identified Dong Zhuo's Guo Si:
+soldiers 14,804, training 62 and morale 75. The lookup was followed by own gold
+2,760 → 2,750. Leaving that information flow required the visible
+`끝내도 좋겠습니까(Y/N)?` confirmation; `y` advanced from Xiahou Yuan to Cao
+Ang's command. Inspect the actual exit prompt: enemy inspection in this case
+was not a free lookup that returned to the same acting officer. No general
+cost or exit rule for all information commands is inferred.
 
 The enemy selector's cursor moved with numeric directions in that replay:
 `1` moved down-left, `3` down-right and `2` down. Inspect the marker after each

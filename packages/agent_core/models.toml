@@ -2146,6 +2146,24 @@ request_path = "/v1/messages"
 api_key_env = "ANTHROPIC_API_KEY"
 capabilities_base = "anthropic"
 
+# A second Anthropic account on the same endpoint (the operator's vincent key,
+# registered 2026-10-11). The id differs from "claude" so bindings address the
+# accounts separately; everything else about the endpoint is the same row
+# again, including serves_bare_rows: it is the vendor's own endpoint for the
+# claude-* bare rows. The key is not workspace-scoped — the API answers 400
+# "must include the anthropic-workspace-id header" without it (probed live
+# 2026-10-11) — so the runtime provider declares that header in
+# [providers.claude_vincent.headers] with the workspace id from the Console.
+[[providers]]
+id = "claude_vincent"
+supports_parallel_tool_suppression = true
+serves_bare_rows = true
+kind = "anthropic"
+base_url = "https://api.anthropic.com"
+request_path = "/v1/messages"
+api_key_env = "ANTHROPIC_API_KEY_MASC_VINCENT"
+capabilities_base = "anthropic"
+
 # 2026-09-06 RFC-0430 Phase 1: DeepSeek's Anthropic-compatible surface
 # (https://api-docs.deepseek.com/guides/anthropic_api, probed live
 # 2026-09-06): x-api-key fully supported, deepseek model ids pass through

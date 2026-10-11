@@ -250,6 +250,8 @@ type mcp_blocks =
           streamed. *)
   | Streaming
 
+type native_block = Native_open of int | Native_closed
+
 let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~turn_count ~on_native_action ~on_usage_report
     ~position ~receipts on_event =
     let emit event = Option.iter (fun callback -> callback event) on_event in
@@ -350,11 +352,11 @@ let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~tu
             Option.iter
               (fun identity ->
                  match Hashtbl.find_opt native_tool_indexes identity with
-                 | Some _ -> ()
+                 | Some (Native_open _ | Native_closed) -> ()
                  | None ->
                      let index = !next_tool_index in
                      incr next_tool_index;
-                     Hashtbl.add native_tool_indexes identity index;
+                     Hashtbl.add native_tool_indexes identity (Native_open index);
                      emit
                        (Agent_core.Types.ContentBlockStart
                           { index
@@ -371,14 +373,20 @@ let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~tu
               observation;
             Option.iter
               (fun identity ->
-                 Option.iter
-                   (fun index ->
-                      Option.iter (fun finish -> finish ~block_index:index
-                        ~tool_call_id:(Runtime_native_tools.call_id observation) completion)
-                        on_native_tool_completion;
-                      Hashtbl.remove native_tool_indexes identity;
-                      emit (Agent_core.Types.ContentBlockStop { index }))
-                   (Hashtbl.find_opt native_tool_indexes identity))
+                 match Hashtbl.find_opt native_tool_indexes identity with
+                 | Some (Native_open index) ->
+                     (* Retire ownership before a completion observer can yield
+                        or reenter this projection. *)
+                     Hashtbl.replace native_tool_indexes identity Native_closed;
+                     Option.iter (fun finish -> finish ~block_index:index
+                       ~tool_call_id:(Runtime_native_tools.call_id observation) completion)
+                       on_native_tool_completion;
+                     stop_content index
+                 | Some Native_closed -> ()
+                 | None ->
+                     (* A finish may arrive without its start. It still fences
+                        a subsequent replayed Active update for this identity. *)
+                     Hashtbl.add native_tool_indexes identity Native_closed)
               observation.identity
           | Runtime_antigravity.Usage_reported { conversation_id; model; num_turns; usage } ->
             (* Keyed as the completion hook keys an Antigravity turn: the
@@ -408,6 +416,20 @@ let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~tu
                 {index; delta=Agent_core.Types.TextDelta remainder});
               stop_content index)
               (Keeper_official_client_text_stream.finish_response text_stream ~final_text:text);
+            let unfinished_native = Hashtbl.fold
+                (fun identity state acc -> match state with
+                  | Native_open index -> (identity, index) :: acc
+                  | Native_closed -> acc)
+                native_tool_indexes [] in
+            List.iter (fun (identity, _) ->
+              Hashtbl.replace native_tool_indexes identity Native_closed)
+              unfinished_native;
+            (* MessageStop is a transport boundary, not evidence that an
+               unfinished tool succeeded. Close its block without inventing a
+               native completion outcome. *)
+            List.iter (fun (_, index) -> stop_content index)
+              (List.sort (fun (_, left) (_, right) -> Int.compare left right)
+                 unfinished_native);
             emit
               (Agent_core.Types.MessageDelta
                  { stop_reason = Some Agent_core.Types.EndTurn; usage = None });

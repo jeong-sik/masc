@@ -1,3 +1,4 @@
+import { operationDeliveryProvenance, toolCallDeliveryProvenance } from './keeper-delivery-provenance'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ApiCore from './api/core'
 
@@ -1162,6 +1163,30 @@ describe('restored chat operation outcome', () => {
       assistantDraft: { text: 'partial authored answer', rawText: 'partial authored answer', delivery: 'streaming',
         streamState: 'streaming', timestamp: '2026-10-11T00:00:00Z', traceSteps: [{ kind: 'think', text: 'exposed reasoning' }] } })
   }
+
+  it('restores durable quarantine into a renamed canonical tool without discarding canonical content', async () => {
+    const provenance = toolCallDeliveryProvenance(operationDeliveryProvenance('restored-op', 'terminal_result'), 'execution', 0)
+    const storedTool = { id: 'stored-tool', label: 'Read', text: '', rawText: 'stored args', delivery: 'error' as const,
+      executionId: 'execution', deliveryProvenance: provenance, toolCallId: 'provider', toolCallEnded: true,
+      toolOccurrence: { kind: 'identified' as const, streamScope: 1, blockIndex: 0 }, toolOccurrenceQuarantined: true as const }
+    upsertTrackedKeeperChatOperation({ operationId: 'restored-op', keeperName: 'echo', message: 'input', submittedAt: 1,
+      assistantDraft: { text: 'authored', rawText: 'authored', delivery: 'streaming', streamState: 'streaming',
+        toolObservations: { kind: 'known', entries: [storedTool] },
+        traceSteps: [{ kind: 'tool', name: 'Read', toolOccurrenceId: 'stored-tool', executionId: 'execution', status: 'err' }] } })
+    keeperThreads.value = { echo: [{ ...storedTool, id: 'canonical-tool', role: 'tool', source: 'tool_result',
+      toolOccurrence: undefined, toolOccurrenceQuarantined: undefined, toolCallId: undefined,
+      delivery: 'history', rawText: 'canonical args' }] }
+    fetchKeeperChatOperation.mockRejectedValue(new Error('lookup unavailable'))
+    await hydrateTrackedKeeperChatOperations('echo')
+    expect(keeperThreads.value.echo.filter(entry => entry.role === 'tool')).toMatchObject([
+      { id: 'canonical-tool', rawText: 'canonical args', toolCallId: 'provider', toolCallEnded: true,
+        toolOccurrenceQuarantined: true, toolOccurrence: { kind: 'identified', streamScope: 1, blockIndex: 0 } },
+    ])
+    expect(keeperThreads.value.echo.find(entry => entry.role === 'assistant')).toMatchObject({
+      rawText: 'authored', traceSteps: [{ toolOccurrenceId: 'canonical-tool' }],
+    })
+    expect(keeperThreads.value.echo.find(entry => entry.role === 'assistant')?.toolObservationAuthority).toBeUndefined()
+  })
 
   it.each([
     { kind: 'succeeded', completedAt: 2, outcomeRef: 'outcome' },

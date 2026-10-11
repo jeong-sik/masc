@@ -244,6 +244,22 @@ describe('Keeper operation stream projection', () => {
     ])
   })
 
+  it('retains unavailable tool authority when canonical history replaces its parent', () => {
+    const operationId = 'unavailable-tool-parent'
+    assistantEntry(operationId)
+    keeperThreads.value = { ...keeperThreads.value, sangsu: keeperThreads.value.sangsu.map(entry => ({ ...entry,
+      toolObservationAuthority: 'unavailable' as const })) }
+    mergeServerHistoryEntries('sangsu', [{ ...keeperThreads.value.sangsu[0], id: 'canonical-unavailable-parent',
+      toolObservationAuthority: undefined, delivery: 'history' }])
+    const source = { kind: 'operation' as const, operationId }
+    expect(applyKeeperStreamEvent('sangsu', 'canonical-unavailable-parent', { type: 'TOOL_CALL_START',
+      ...toolOccurrence(), toolCallName: 'Read' }, source)).toBeNull()
+    expect(applyKeeperStreamEvent('sangsu', 'canonical-unavailable-parent', { type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY',
+      value: { ...toolOccurrence(), executionId: 'must-not-bind' } }, source)).toBeNull()
+    expect(keeperThreads.value.sangsu.some(entry => entry.role === 'tool')).toBe(false)
+    expect(keeperThreads.value.sangsu.find(entry => entry.id === 'canonical-unavailable-parent')?.toolObservationAuthority).toBe('unavailable')
+  })
+
   it('rejects contradictory provider correlation on an already bound result replay', () => {
     assistantEntry('result-replay-validation')
     const source = { kind: 'operation' as const, operationId: 'result-replay-validation' }

@@ -1491,7 +1491,12 @@ function mergeLocalAssistantObservations(
   const responseState = historyProvenance ? reconcileKeeperResponseStates(
     [...exactLocalEntries, ...exactCanonicalEntries].map(entry => entry.responseState),
   ) : historyEntry.responseState
-  const mergedHistory = responseState ? { ...historyEntry, responseState } : historyEntry
+  const toolAuthorityUnavailable = [...exactLocalEntries, ...exactCanonicalEntries, historyEntry]
+    .some(entry => entry.toolObservationAuthority === 'unavailable')
+  const mergedHistory = { ...historyEntry,
+    ...(responseState ? { responseState } : {}),
+    ...(toolAuthorityUnavailable ? { toolObservationAuthority: 'unavailable' as const } : {}),
+  }
   // Trace occurrences retain their existing one-to-one correlation. Ownership
   // belongs to the producer identity and is shared across every exact match.
   const localTraceSourceByProvenance = exactLocalEntries.find(entry =>

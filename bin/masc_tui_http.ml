@@ -1706,7 +1706,7 @@ type tool_approval_answer =
    always supply the verified server identity. *)
 let post_keeper_tool_approval ~(expected_workspace : Masc.Tui_decode.server_identity)
     ~(host : string) ~(port : int) ~(keeper_name : string)
-    ~(tool_call_id : string) ~(allow : bool) :
+    ~(approval_id : Masc.Keeper_tool_approval_id.t) ~(allow : bool) :
     (tool_approval_answer, string) result =
   let expected_fields =
     [ ("expected_workspace", `Assoc
@@ -1717,7 +1717,7 @@ let post_keeper_tool_approval ~(expected_workspace : Masc.Tui_decode.server_iden
     Yojson.Safe.to_string
       (`Assoc
          ([ ("name", `String keeper_name)
-          ; ("tool_call_id", `String tool_call_id)
+          ; ("approval_id", `String (Masc.Keeper_tool_approval_id.to_string approval_id))
           ; ("decision", `String (if allow then "approve" else "deny"))
           ] @ expected_fields))
   in

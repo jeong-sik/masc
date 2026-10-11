@@ -18,9 +18,19 @@ let operator token =
       ap_summary = "probe " ^ token;
     }
 
+let fixture_admissions = Hashtbl.create 8
+let admission_for keeper call =
+  match Hashtbl.find_opt fixture_admissions (keeper, call) with
+  | Some id -> id
+  | None ->
+      let id = Masc.Keeper_tool_approval_id.fresh () in
+      Hashtbl.add fixture_admissions (keeper, call) id;
+      id
+
 let keeper keeper_name tool_call_id =
   Masc_tui_approvals_model.Keeper_tool_row
     { kta_keeper = keeper_name;
+      kta_approval_id = admission_for keeper_name tool_call_id;
       kta_tool_call_id = tool_call_id;
       kta_tool = "Execute";
       kta_args = "{}";
@@ -130,21 +140,32 @@ let held keeper_name call_id =
 let test_failed_answer_preserves_pending_waits () =
   let current = [ held "keeper-a" "shared-call"; held "keeper-b" "shared-call" ] in
   let next = Authority.retire_tool_answer ~keeper_name:"keeper-a"
-    ~tool_call_id:"shared-call" ~receipt:Authority.Unconfirmed current in
+    ~approval_id:(List.hd current).Tui_decode.kta_approval_id ~receipt:Authority.Unconfirmed current in
   check bool "unconfirmed answer preserves current waits" true (next == current)
 
 let test_confirmed_answer_is_keeper_scoped () =
   let current = [ held "keeper-a" "shared-call"; held "keeper-b" "shared-call" ] in
   let next = Authority.retire_tool_answer ~keeper_name:"keeper-a"
-    ~tool_call_id:"shared-call"
+    ~approval_id:(List.hd current).Tui_decode.kta_approval_id
     ~receipt:Authority.Confirmed current in
   check (list string) "another Keeper retains its same-ID wait" [ "keeper-b" ]
     (List.map (fun row -> row.Tui_decode.kta_keeper) next)
 
+let test_answer_does_not_retire_new_admission_with_reused_provider_id () =
+  let first = held "keeper-a" "reused-provider" in
+  let second = { first with Tui_decode.kta_approval_id = Masc.Keeper_tool_approval_id.fresh () } in
+  let next = Authority.retire_tool_answer ~keeper_name:"keeper-a"
+    ~approval_id:first.kta_approval_id ~receipt:Authority.Confirmed [first; second] in
+  check int "only the named admission retires" 1 (List.length next);
+  check bool "replacement admission survives" true
+    (Masc.Keeper_tool_approval_id.equal (List.hd next).kta_approval_id second.kta_approval_id)
+
 let () =
   run "tui-approval-authority"
     [ ( "authority",
-        [ test_case "failed answer preserves pending waits" `Quick
+        [ test_case "answer preserves reused provider admission" `Quick
+            test_answer_does_not_retire_new_admission_with_reused_provider_id;
+          test_case "failed answer preserves pending waits" `Quick
             test_failed_answer_preserves_pending_waits;
           test_case "confirmed answer is Keeper scoped" `Quick
             test_confirmed_answer_is_keeper_scoped;

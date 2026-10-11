@@ -16,8 +16,8 @@ type outcome =
   | Timed_out
   | Displaced
 
-(* What identifies one wait. The ask's description is carried beside it, not
-   in it: two waits are the same wait by (keeper, call id) alone. *)
+(* Provider call ownership detects overlapping reuse and displaces the
+   previous wait. Operator answers identify an admission independently. *)
 type key =
   { key_keeper_name : string
   ; key_tool_call_id : string
@@ -143,12 +143,16 @@ let await ?(on_registered = fun () -> ()) t ~approval_id ~clock ~keeper_name ~to
              manufacture a timeout from absence. *)
           Eio.Promise.await promise))
 
-let settle t ~keeper_name ~tool_call_id decision =
-  let key = { key_keeper_name = keeper_name; key_tool_call_id = tool_call_id } in
+let settle t ~keeper_name ~approval_id decision =
   match Stdlib.Mutex.protect t.mutex (fun () ->
-      let waiter = take_locked t key in
-      if Option.is_some waiter then t.answered_total <- t.answered_total + 1;
-      waiter) with
+      let taken = ref None in
+      t.waiters <- List.filter (fun waiter ->
+        if Option.is_none !taken
+          && String.equal waiter.entry.keeper_name keeper_name
+          && Keeper_tool_approval_id.equal waiter.entry.approval_id approval_id
+        then (taken := Some waiter; false) else true) t.waiters;
+      if Option.is_some !taken then t.answered_total <- t.answered_total + 1;
+      !taken) with
   | None -> false
   | Some waiter ->
     Eio.Promise.resolve waiter.resolve (Answered decision);

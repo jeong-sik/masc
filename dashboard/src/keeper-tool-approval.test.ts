@@ -72,7 +72,7 @@ describe('answerHeldKeeperToolApproval', () => {
     expect(init.method).toBe('POST')
     expect(JSON.parse(String(init.body))).toEqual({
       name: 'sangsu',
-      tool_call_id: 'call-1',
+      approval_id: idFor('call-1'),
       decision: 'approve',
     })
     // The row retires so the card cannot be answered twice.

@@ -8137,6 +8137,7 @@ let keeper_tool_approvals_json =
       , `List
           [ `Assoc
               [ ("keeper", `String "orbiter")
+              ; ("approval_id", `String "019a0000-0000-7000-8000-000000000001")
               ; ("tool_call_id", `String "call-1")
               ; ("tool", `String "Execute")
               ; ("args", `String "{\"argv\":[\"git\",\"status\"]}")

@@ -11,7 +11,7 @@ module Registry = Keeper_tool_approval_registry
 type expired_ask =
   { expired_base_path : string
   ; expired_keeper_name : string
-  ; expired_tool_call_id : string
+  ; expired_approval_id : Keeper_tool_approval_id.t
   ; expired_tool_name : string
   ; expired_args_fingerprint : string
   ; expired_noted_at : float
@@ -63,7 +63,7 @@ type journal_error = Corrupt_journal of string | Journal_unavailable of string
 type uncertain_attempt =
   { consume_id : string; base_path : string; keeper_name : string
   ; tool_name : string; args_fingerprint : string; consumed_at : float }
-let journal_schema = "masc.late_approval.v2"
+let journal_schema = "masc.late_approval.v3"
 
 type t =
   { mutable expired : expired_ask list
@@ -121,8 +121,8 @@ let validate_records records =
     let op = string "op" in
     let names = ["schema";"op";"base_path";"keeper";"tool";"fingerprint";"at"] @
       (match op with
-       | "note_timed_out" -> ["tool_call_id"]
-       | "remember_late" -> ["tool_call_id";"decision";"actor"]
+       | "note_timed_out" -> ["approval_id"]
+       | "remember_late" -> ["approval_id";"decision";"actor"]
        | "consume" | "deliver" | "ack_uncertain" -> ["consume_id"]
        | _ -> bad "unknown late approval operation") in
     if List.sort String.compare (List.map fst fields) <> List.sort String.compare names then
@@ -133,9 +133,13 @@ let validate_records records =
      | `Float value when Float.is_finite value -> ()
      | `Int _ -> () | _ -> bad "invalid journal timestamp");
     match op with
-    | "note_timed_out" -> ignore (string "tool_call_id")
+    | "note_timed_out" ->
+        (match Keeper_tool_approval_id.of_string (string "approval_id") with
+         | Ok _ -> () | Error detail -> bad detail)
     | "remember_late" ->
-        ignore (string "tool_call_id"); ignore (string "actor");
+        (match Keeper_tool_approval_id.of_string (string "approval_id") with
+         | Ok _ -> () | Error detail -> bad detail);
+        ignore (string "actor");
         if Option.is_none (Registry.decision_of_string (string "decision")) then bad "invalid decision"
     | "consume" ->
         let id = string "consume_id" in
@@ -183,7 +187,7 @@ let bind_to_journal ?now ~base_path t =
            line must not fence the whole store. It stays in the journal
            (never cleaned) and lands in the log, so skipping loses no
            evidence. Only rows carrying this schema's tag reach
-           [validate_records] — an unverifiable v2 row cannot be told
+           [validate_records] — an unverifiable v3 row cannot be told
            apart from a tampered one, so those still fail the restore. *)
         let skipped = ref 0 in
         let records =
@@ -243,20 +247,23 @@ let bind_to_journal ?now ~base_path t =
             let op = read_field fields "op" in
             let row_base_path = read_field fields "base_path" in
             let keeper = read_field fields "keeper" in
-            let call_id = read_field fields "tool_call_id" in
+            let approval_id = match read_field fields "approval_id" with
+              | Some text -> (match Keeper_tool_approval_id.of_string text with
+                | Ok id -> Some id | Error _ -> None)
+              | None -> None in
             let tool = read_field fields "tool" in
             let fingerprint = read_field fields "fingerprint" in
             let at = read_float fields "at" in
             let consume_id = read_field fields "consume_id" in
             match op with
             | Some "note_timed_out" -> (
-                match (row_base_path, keeper, call_id, tool, fingerprint, at)
+                match (row_base_path, keeper, approval_id, tool, fingerprint, at)
                 with
                 | Some bp, Some k, Some c, Some tl, Some f, Some at ->
                     live_asks :=
                       { expired_base_path = bp
                       ; expired_keeper_name = k
-                      ; expired_tool_call_id = c
+                      ; expired_approval_id = c
                       ; expired_tool_name = tl
                       ; expired_args_fingerprint = f
                       ; expired_noted_at = at
@@ -264,22 +271,19 @@ let bind_to_journal ?now ~base_path t =
                       :: !live_asks
                 | _ -> ())
             | Some "remember_late" -> (
-                match (row_base_path, keeper, tool, fingerprint, at) with
-                | Some bp, Some k, Some tl, Some f, Some at -> (
+                match (row_base_path, keeper, approval_id, tool, fingerprint, at) with
+                | Some bp, Some k, Some id, Some tl, Some f, Some at -> (
                     (* The ask leaves [live] — it was answered — and any
                        earlier memory of the same identity is the operator's
                        superseded answer, exactly what [remember_late]
                        replaces in memory. *)
-                    let row_call_id =
-                      Option.value call_id ~default:"" in
                     live_asks :=
                       List.filter
                         (fun ask ->
                           not
                             (String.equal ask.expired_base_path bp
                             && String.equal ask.expired_keeper_name k
-                            && String.equal ask.expired_tool_call_id
-                                 row_call_id))
+                            && Keeper_tool_approval_id.equal ask.expired_approval_id id))
                         !live_asks;
                     match
                       ( read_field fields "decision"
@@ -480,11 +484,11 @@ let append_record_locked t record =
    clock's reading so ages are measured against the same clock family the
    wait ran on, and tests inject [~now]. *)
 let note_timed_out t ?(now = Unix.gettimeofday ()) ~base_path ~keeper_name
-    ~tool_call_id ~tool_name ~args () =
+    ~approval_id ~tool_name ~args () =
   let entry =
     { expired_base_path = base_path
     ; expired_keeper_name = keeper_name
-    ; expired_tool_call_id = tool_call_id
+    ; expired_approval_id = approval_id
     ; expired_tool_name = tool_name
     ; expired_args_fingerprint = fingerprint_of args
     ; expired_noted_at = now
@@ -497,7 +501,7 @@ let note_timed_out t ?(now = Unix.gettimeofday ()) ~base_path ~keeper_name
           [ ("op", `String "note_timed_out")
           ; ("base_path", `String base_path)
           ; ("keeper", `String keeper_name)
-          ; ("tool_call_id", `String tool_call_id)
+          ; ("approval_id", `String (Keeper_tool_approval_id.to_string approval_id))
           ; ("tool", `String tool_name)
           ; ("fingerprint", `String entry.expired_args_fingerprint)
           ; ("at", `Float now)
@@ -514,10 +518,10 @@ type remember_outcome =
   | Remembered of { tool_name : string }
   | No_matching_ask
 
-let same_ask (ask : expired_ask) ~base_path ~keeper_name ~tool_call_id =
+let same_ask (ask : expired_ask) ~base_path ~keeper_name ~approval_id =
   String.equal ask.expired_base_path base_path
   && String.equal ask.expired_keeper_name keeper_name
-  && String.equal ask.expired_tool_call_id tool_call_id
+  && Keeper_tool_approval_id.equal ask.expired_approval_id approval_id
 
 let same_identity (left : remembered) ~base_path ~keeper_name ~tool_name
     ~args_fingerprint =
@@ -527,20 +531,14 @@ let same_identity (left : remembered) ~base_path ~keeper_name ~tool_name
   && String.equal left.remembered_args_fingerprint args_fingerprint
 
 let remember_late t ?(now = Unix.gettimeofday ()) ~base_path ~keeper_name
-    ~tool_call_id ~actor decision () =
+    ~approval_id ~actor decision () =
   with_store t (fun () ->
       reap_locked t ~now;
-      (* [expired] is newest-first, and so is this match: if a provider ever
-         recycles a call id, the answer attaches to the newest ask that
-         carried it. That is the safe direction — it is the prompt the
-         operator was shown most recently, and the older entry with the same
-         id describes an ask its own timeout already ended. Workspace
-         identity is part of the match (design D2): workspaces that share
-         this gate root cannot have their asks answered by each other's
-         operators. *)
+      (* The answer names one exact admission, independent of provider call
+         reuse. Workspace ownership remains part of the match. *)
       match
         List.find_opt
-          (fun ask -> same_ask ask ~base_path ~keeper_name ~tool_call_id)
+          (fun ask -> same_ask ask ~base_path ~keeper_name ~approval_id)
           t.expired
       with
       | None -> No_matching_ask
@@ -549,7 +547,7 @@ let remember_late t ?(now = Unix.gettimeofday ()) ~base_path ~keeper_name
             [ ("op", `String "remember_late")
             ; ("base_path", `String base_path)
             ; ("keeper", `String keeper_name)
-            ; ("tool_call_id", `String tool_call_id)
+            ; ("approval_id", `String (Keeper_tool_approval_id.to_string approval_id))
             ; ("tool", `String ask.expired_tool_name)
             ; ("fingerprint", `String ask.expired_args_fingerprint)
             ; ("decision", `String (Registry.decision_to_string decision))
@@ -570,7 +568,7 @@ let remember_late t ?(now = Unix.gettimeofday ()) ~base_path ~keeper_name
                 List.filter
                   (fun expired ->
                     not
-                      (same_ask expired ~base_path ~keeper_name ~tool_call_id))
+                      (same_ask expired ~base_path ~keeper_name ~approval_id))
                   t.expired;
               let entry =
                 { remembered_base_path = base_path

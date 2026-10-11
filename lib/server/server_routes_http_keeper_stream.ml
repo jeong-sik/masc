@@ -360,10 +360,11 @@ let handle_keeper_tool_approval ~actor state request reqd =
               Error (Printf.sprintf "%s (string) is required" name)
           in
           let* keeper_name = field "name" in
-          let* tool_call_id = field "tool_call_id" in
+          let* approval_id_raw = field "approval_id" in
+          let* approval_id = Keeper_tool_approval_id.of_string approval_id_raw in
           let* decision_raw = field "decision" in
           (match Keeper_tool_approval_registry.decision_of_string decision_raw with
-           | Some decision -> Ok (keeper_name, tool_call_id, decision)
+           | Some decision -> Ok (keeper_name, approval_id, decision)
            | None ->
              Error
                (Printf.sprintf "decision must be approve or deny, got %S"
@@ -376,7 +377,7 @@ let handle_keeper_tool_approval ~actor state request reqd =
     | Error msg ->
       respond_json_value_with_cors ~status:`Bad_request request reqd
         (keeper_chat_stream_error_json msg)
-    | Ok (keeper_name, tool_call_id, decision) ->
+    | Ok (keeper_name, approval_id, decision) ->
       if not (Keeper_registry.is_registered ~base_path keeper_name)
       then
         respond_json_value_with_cors ~status:`Not_found request reqd
@@ -385,7 +386,7 @@ let handle_keeper_tool_approval ~actor state request reqd =
         let settled =
           Keeper_tool_approval_registry.settle
             (Keeper_tool_approval_registry.shared ())
-            ~keeper_name ~tool_call_id decision
+            ~keeper_name ~approval_id decision
         in
         let remembered =
           if settled then false
@@ -396,14 +397,14 @@ let handle_keeper_tool_approval ~actor state request reqd =
             match
               Keeper_late_approval.remember_late
                 (Keeper_late_approval.shared ())
-                ~base_path ~keeper_name ~tool_call_id ~actor decision ()
+                ~base_path ~keeper_name ~approval_id ~actor decision ()
             with
             | Keeper_late_approval.Remembered _ -> true
             | Keeper_late_approval.No_matching_ask -> false
         in
         Log.Keeper.info
-          "keeper_tool_approval: keeper=%s tool_call_id=%s decision=%s actor=%s settled=%b remembered=%b"
-          keeper_name tool_call_id
+          "keeper_tool_approval: keeper=%s approval_id=%s decision=%s actor=%s settled=%b remembered=%b"
+          keeper_name (Keeper_tool_approval_id.to_string approval_id)
           (Keeper_tool_approval_registry.decision_to_string decision)
           actor settled remembered;
         respond_json_value_with_cors ~status:`OK request reqd

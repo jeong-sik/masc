@@ -60,7 +60,7 @@ val bind_to_journal :
     retry after a restart arrives, and a lazy restore could answer an ask
     the operator already settled.
 
-    Restore validates every complete v2 row before replay. Rows carrying
+    Restore validates every complete v3 row before replay. Rows carrying
     this schema's tag that violate its contract, or unavailable storage,
     fence mutations until a successful explicit restore. A complete row the
     schema cannot read at all — a foreign or future schema's line, or text
@@ -173,7 +173,7 @@ val note_timed_out :
   ?now:float ->
   base_path:string ->
   keeper_name:string ->
-  tool_call_id:string ->
+  approval_id:Keeper_tool_approval_id.t ->
   tool_name:string ->
   args:Yojson.Safe.t ->
   unit ->
@@ -199,10 +199,10 @@ val note_timed_out :
 (** What a late answer found. *)
 type remember_outcome =
   | Remembered of { tool_name : string }
-      (** The call id named a wait that timed out here; the answer now
+      (** The approval ID named a wait that timed out here; the answer now
           stands for the next identical call. *)
   | No_matching_ask
-      (** The call id was never held, was already answered, or timed out
+      (** The approval ID was never held, was already answered, or timed out
           longer ago than {!ttl_sec}. Nothing is remembered: an answer that
           cannot be attributed to an ask this process made — recently — is
           discarded. *)
@@ -212,7 +212,7 @@ val remember_late :
   ?now:float ->
   base_path:string ->
   keeper_name:string ->
-  tool_call_id:string ->
+  approval_id:Keeper_tool_approval_id.t ->
   actor:string ->
   Keeper_tool_approval_registry.decision ->
   unit ->
@@ -220,15 +220,10 @@ val remember_late :
 (** Attribute an answer whose wait is gone. Only an ask that actually timed
     out here (recorded by {!note_timed_out}) under the same [base_path], and
     is no older than {!ttl_sec}
-    matches, so the remembered decision always descends from a question the
-    operator was really shown. Timed-out asks
-    are matched newest-first: if
-    a provider recycles a call id, the answer attaches to the most recent
-    ask that carried it, which is the prompt the operator saw last. When
-    bound, the decision is journaled before it
-    stands; an append failure reports [No_matching_ask] so the caller tells
-    the operator the answer could not be kept rather than silently dropping
-    it.
+    matches, so the remembered decision always descends from that exact
+    admission. Reused provider call IDs do not identify timed-out asks.
+    When bound, the decision is journaled before it stands; an append failure
+    reports [No_matching_ask].
 
     [actor] is the authenticated caller recorded at the HTTP boundary
     (task-1662) — who made this decision outlives the HTTP request, so it is

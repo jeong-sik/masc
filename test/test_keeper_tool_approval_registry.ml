@@ -1,5 +1,16 @@
 open Alcotest
 
+let settle_fixture registry ~keeper_name ~tool_call_id decision =
+  let approval_id =
+    match List.find_opt (fun (row : Masc.Keeper_tool_approval_registry.pending) ->
+      String.equal row.keeper_name keeper_name && String.equal row.tool_call_id tool_call_id)
+      (Masc.Keeper_tool_approval_registry.pending registry) with
+    | Some row -> row.approval_id
+    | None -> Masc.Keeper_tool_approval_id.fresh ()
+  in
+  Masc.Keeper_tool_approval_registry.settle registry ~keeper_name ~approval_id decision
+
+
 module Registry = Masc.Keeper_tool_approval_registry
 
 (* Real clock with sub-second waits for the cases that need only "before"
@@ -29,7 +40,7 @@ let settle_when_pending registry ~clock ~tool_call_id decision =
     end
   in
   wait_for_registration 100;
-  Registry.settle registry ~keeper_name:keeper ~tool_call_id decision
+  settle_fixture registry ~keeper_name:keeper ~tool_call_id decision
 
 let test_an_answer_releases_the_wait () =
   with_env (fun ~clock ->
@@ -95,14 +106,14 @@ let test_answering_a_wait_that_already_timed_out_reports_it () =
       in
       check outcome "the wait ended on its own" Registry.Timed_out timed_out;
       check bool "a late answer says nothing was listening" false
-        (Registry.settle registry ~keeper_name:keeper ~tool_call_id:"call-4"
+        (settle_fixture registry ~keeper_name:keeper ~tool_call_id:"call-4"
            Registry.Approve))
 
 let test_answering_an_unknown_call_reports_it () =
   with_env (fun ~clock:_ ->
       let registry = Registry.create () in
       check bool "no wait, no success" false
-        (Registry.settle registry ~keeper_name:keeper
+        (settle_fixture registry ~keeper_name:keeper
            ~tool_call_id:"never-asked" Registry.Approve))
 
 let test_a_second_wait_on_the_same_id_displaces_the_first () =
@@ -133,7 +144,7 @@ let test_a_second_wait_on_the_same_id_displaces_the_first () =
               (fun () ->
                 Eio.Time.sleep clock 0.02;
                 ignore
-                  (Registry.settle registry ~keeper_name:keeper
+                  (settle_fixture registry ~keeper_name:keeper
                      ~tool_call_id:"call-5" Registry.Approve))
             |> fst)
       in
@@ -161,7 +172,7 @@ let test_waits_are_scoped_to_their_keeper () =
             wait_for_registration 100;
             (* Same call id, different keeper. Tool call ids are unique per
                provider stream, not across keepers. *)
-            Registry.settle registry ~keeper_name:"keeper.two"
+            settle_fixture registry ~keeper_name:"keeper.two"
               ~tool_call_id:"shared-id" Registry.Approve)
       in
       check outcome "the other keeper's answer does not release this wait"
@@ -279,7 +290,7 @@ let test_an_answer_settled_as_the_timeout_passed_is_the_answer () =
           check int "the wait is registered" 1 (List.length (Registry.pending registry));
           Eio_mock.Clock.set_time clock 1.0;
           check bool "the operator is told the answer applied" true
-            (Registry.settle registry ~keeper_name:keeper ~tool_call_id:"call-late"
+            (settle_fixture registry ~keeper_name:keeper ~tool_call_id:"call-late"
                Registry.Approve);
           check outcome "the answer that arrived is the outcome"
             (Registry.Answered Registry.Approve)

@@ -87,7 +87,7 @@ val await :
     behind. *)
 
 val settle :
-  t -> keeper_name:string -> tool_call_id:string -> decision -> bool
+  t -> keeper_name:string -> approval_id:Keeper_tool_approval_id.t -> decision -> bool
 (** Answer a wait. Returns whether one was actually waiting: [false] means it
     had already timed out, been answered, or never opened. Answer and timeout
     atomically claim the waiter; a successful answer cannot return a timeout

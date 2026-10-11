@@ -1,5 +1,16 @@
 open Masc
 
+let settle_fixture registry ~keeper_name ~tool_call_id decision =
+  let approval_id =
+    match List.find_opt (fun (row : Masc.Keeper_tool_approval_registry.pending) ->
+      String.equal row.keeper_name keeper_name && String.equal row.tool_call_id tool_call_id)
+      (Masc.Keeper_tool_approval_registry.pending registry) with
+    | Some row -> row.approval_id
+    | None -> Masc.Keeper_tool_approval_id.fresh ()
+  in
+  Masc.Keeper_tool_approval_registry.settle registry ~keeper_name ~approval_id decision
+
+
 (* Drive the handler the way an HTTP server would: hand its request to a
    Server_connection and collect the response bytes it writes. The write
    result is reported for the full iovec length, not 0 bytes — reporting
@@ -118,7 +129,7 @@ let test_rest_listing_serializes_because () =
                    "fs tools change something outside this turn"
                    (row |> member "because" |> to_string);
                  ignore
-                   (Masc.Keeper_tool_approval_registry.settle registry
+                   (settle_fixture registry
                       ~keeper_name:"keeper.one" ~tool_call_id:"call-because"
                       Masc.Keeper_tool_approval_registry.Approve
                     : bool)))))

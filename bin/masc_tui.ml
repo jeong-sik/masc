@@ -2275,7 +2275,7 @@ let supersede_home_decision_receipt state =
 (* The Approvals-surface twin of [launch_keeper_approval]: same route, no chat
    request to correlate with, so the outcome lands in the session log instead
    of a pane's transcript. *)
-let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
+let launch_surface_tool_approval state ~mailbox ~keeper_name ~approval_id
     ~allow =
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
@@ -2304,14 +2304,14 @@ let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
             let* () = if authority <> state.workspace_authority then Error "Workspace authority withdrawn" else Ok () in
             let* () = probe_expected_workspace ~host ~port expected_workspace in
             Masc_tui_http.post_keeper_tool_approval ~expected_workspace ~host ~port ~keeper_name
-              ~tool_call_id ~allow
+              ~approval_id ~allow
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn -> Error (Printexc.to_string exn)
         in
         enqueue_async mailbox
           (Surface_tool_approval_answered
-             (keeper_name, tool_call_id, allow, result, generation))
+             (keeper_name, approval_id, allow, result, generation))
       in
       match Eio_context.get_switch_opt () with
       | Some sw ->
@@ -2320,7 +2320,7 @@ let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
           enqueue_async mailbox
             (Surface_tool_approval_answered
                ( keeper_name,
-                 tool_call_id,
+                 approval_id,
                  allow,
                  Error "Eio switch is unavailable",
                  generation )))
@@ -3210,7 +3210,7 @@ let launch_keeper_tool_mode_set state ~mailbox ~keeper_name ~mode =
                  generation )))
 
 let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
-    ~tool_call_id ~allow =
+    ~approval_id ~tool_call_id ~allow =
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
   if state.workspace_identity <> Workspace_identity_match then
@@ -3229,7 +3229,7 @@ let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
         let* () = if authority <> state.workspace_authority then Error "Workspace authority withdrawn" else Ok () in
             let* () = probe_expected_workspace ~host ~port expected_workspace in
         Masc_tui_http.post_keeper_tool_approval ~expected_workspace ~host ~port ~keeper_name
-          ~tool_call_id ~allow
+          ~approval_id ~allow
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
@@ -10548,7 +10548,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
            (match Keeper_chat_transcript.awaiting_approval entry.log.tl_transcript with
             | Some awaiting ->
               launch_keeper_approval state ~mailbox entry.sent_request
-                ~tool_call_id:awaiting.call_id ~allow
+                ~approval_id:awaiting.approval_id ~tool_call_id:awaiting.call_id ~allow
             | None -> notice ~kind:Notice_reply "No tool approval is waiting for this Keeper")
          | None -> notice ~kind:Notice_reply "No tool approval is waiting for this Keeper")
   | Masc_tui_command.Interrupt_turn -> (
@@ -17624,7 +17624,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
            report_action state "error"
              (Printf.sprintf "could not set %s's gate: %s" keeper_name detail))
   | Surface_tool_approval_answered
-      (keeper_name, tool_call_id, allow, result, generation) ->
+      (keeper_name, approval_id, allow, result, generation) ->
       (* Release the single-action slot [launch_surface_tool_approval] took, so
          the header clears [submitting] and the next decision is admitted. *)
       let flow, owns_action =
@@ -17633,7 +17633,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       if owns_action then begin
         state.approval_flow <- flow;
         state.keeper_tool_approvals <-
-          Approval_authority.retire_tool_answer ~keeper_name ~tool_call_id
+          Approval_authority.retire_tool_answer ~keeper_name ~approval_id
             ~receipt:(match result with
               | Ok _ -> Approval_authority.Confirmed
               | Error _ -> Approval_authority.Unconfirmed)
@@ -17652,19 +17652,19 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                Printf.sprintf "%s %s's held call %s"
                  (if allow then "allowed" else "denied")
                  keeper_name
-                 (Keeper_chat.compact_request_id tool_call_id)
+                 (Keeper_chat.compact_request_id (Masc.Keeper_tool_approval_id.to_string approval_id))
            | Ok { Masc_tui_http.settled = false; remembered = true } ->
                Printf.sprintf
                  "too late for %s's call %s, but the answer is remembered -- \
                   the next identical call is %s without asking"
                  keeper_name
-                 (Keeper_chat.compact_request_id tool_call_id)
+                 (Keeper_chat.compact_request_id (Masc.Keeper_tool_approval_id.to_string approval_id))
                  (if allow then "allowed" else "denied")
            | Ok { Masc_tui_http.settled = false; remembered = false } ->
                Printf.sprintf
                  "too late for %s's call %s; it was no longer waiting"
                  keeper_name
-                 (Keeper_chat.compact_request_id tool_call_id)
+                 (Keeper_chat.compact_request_id (Masc.Keeper_tool_approval_id.to_string approval_id))
            | Error detail -> "could not answer the held call: " ^ detail);
         launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox
       end
@@ -19418,7 +19418,7 @@ let main
     | Some { Approval_authority.row = Masc_tui_approvals_model.Keeper_tool_row held; decision } ->
         launch_surface_tool_approval state ~mailbox:async_messages
           ~keeper_name:held.kta_keeper
-          ~tool_call_id:held.kta_tool_call_id
+          ~approval_id:held.kta_approval_id
           ~allow:(match decision with Confirm -> true | Deny -> false)
     | Some { Approval_authority.row = Masc_tui_approvals_model.Gate_row pending; decision = Confirm } ->
         launch_gate_resolve state ~mailbox:async_messages

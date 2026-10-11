@@ -1,5 +1,8 @@
 (** The three operator-decision routes record the authenticated caller.
 
+
+
+
     task-1662: [POST /api/v1/keepers/ask-answer] recorded the request
     body's own [actor_id] as the responder, so the answering client could
     write any name into the durable log; [POST /api/v1/keepers/tool-approval]
@@ -12,6 +15,13 @@
 
 open Alcotest
 open Masc
+
+let fixture_admissions = Hashtbl.create 8
+let admission_for call =
+  match Hashtbl.find_opt fixture_admissions call with
+  | Some id -> id
+  | None -> let id = Keeper_tool_approval_id.fresh () in
+      Hashtbl.add fixture_admissions call id; id
 
 module Mcp_server = Masc.Mcp_server
 module Http_server_eio = Masc.Http_server_eio
@@ -261,7 +271,9 @@ let test_ask_answer_records_the_token_owner ~sw ~clock ~base_path ~state ~token 
 let test_tool_approval_stamps_the_token_owner ~sw ~clock ~base_path:_ ~state ~token ~keeper:_ =
   let before_seq = latest_seq () in
   let body =
-    {|{"name":"decision-canary","tool_call_id":"call-actor-1","decision":"approve"}|}
+    Yojson.Safe.to_string (`Assoc ["name", `String "decision-canary";
+      "approval_id", `String (Keeper_tool_approval_id.to_string (admission_for "call-actor-1"));
+      "decision", `String "approve"])
   in
   let response =
     dispatch_post ~sw ~clock ~state ~token ~path:"/api/v1/keepers/tool-approval" ~body
@@ -335,7 +347,7 @@ let test_tool_approval_expected_workspace_admission ~sw ~clock ~base_path ~state
       Yojson.Safe.to_string
         (`Assoc
            ([ ("name", `String "decision-canary")
-            ; ("tool_call_id", `String tool_call_id)
+            ; ("approval_id", `String (Keeper_tool_approval_id.to_string (admission_for tool_call_id)))
             ; ("decision", `String "approve")
             ] @ fields))
     in
@@ -373,7 +385,7 @@ let test_tool_approval_expected_workspace_admission ~sw ~clock ~base_path ~state
     Yojson.Safe.to_string
       (`Assoc
          [ ("name", `String "not-a-registered-keeper")
-         ; ("tool_call_id", `String "call-actor-1")
+         ; ("approval_id", `String (Keeper_tool_approval_id.to_string (admission_for "call-actor-1")))
          ; ("decision", `String "approve")
          ; ("expected_workspace", expected (base ^ "-foreign") root)
          ])
@@ -392,7 +404,7 @@ let test_tool_approval_expected_workspace_admission ~sw ~clock ~base_path ~state
   Eio.Fiber.both
     (fun () ->
        match
-         Keeper_tool_approval_registry.await ~approval_id:(Masc.Keeper_tool_approval_id.fresh ()) registry ~clock
+         Keeper_tool_approval_registry.await ~approval_id:(admission_for held_call_id) registry ~clock
            ~tool_name:"Execute" ~args:"{}"
            ~question:"Run Execute?" ~because:"test held wait"
            ~keeper_name:"decision-canary" ~tool_call_id:held_call_id
@@ -437,7 +449,7 @@ let test_tool_approval_expected_workspace_admission ~sw ~clock ~base_path ~state
   let late_store = Keeper_late_approval.shared () in
   let late_call_id = "call-late-workspace-1" in
   Keeper_late_approval.note_timed_out late_store ~base_path
-    ~keeper_name:"decision-canary" ~tool_call_id:late_call_id
+    ~keeper_name:"decision-canary" ~approval_id:(admission_for late_call_id)
     ~tool_name:"Execute" ~args:(`Assoc []) ();
   (* Foreign workspace dispatch rejects and leaves the late ask unconsumed *)
   let res_late_foreign =

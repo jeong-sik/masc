@@ -304,7 +304,7 @@ export async function answerHeldKeeperToolApproval(
     && authRevision === currentStoredTokenRevision()
   if (!owns(claim)) return false
   try {
-    const result = await answerKeeperToolApproval(keeperName, existing.toolCallId, decision)
+    const result = await answerKeeperToolApproval(keeperName, approvalId, decision)
     if (owns(claim)) {
       const settled = settleKeeperToolApproval(keeperName, approvalId, result.decision, claim!)
       if (owns(settled)) setRecordValue(keeperActionErrors, keeperName, null)

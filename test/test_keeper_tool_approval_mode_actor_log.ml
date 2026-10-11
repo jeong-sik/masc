@@ -199,7 +199,7 @@ let test_tool_approval_rejects_replaced_workspace () =
     Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
       let body = Yojson.Safe.to_string (`Assoc
         [ "name", `String "absent-keeper"
-        ; "tool_call_id", `String "held-call"
+        ; "approval_id", `String (Keeper_tool_approval_id.to_string (Keeper_tool_approval_id.fresh ()))
         ; "decision", `String "approve"
         ; "expected_workspace", `Assoc
             [ "base_path", `String (base_path ^ "-replaced")

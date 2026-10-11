@@ -315,17 +315,19 @@ export async function fetchKeeperToolApprovals(
 // "approved".
 export async function answerKeeperToolApproval(
   keeperName: string,
-  toolCallId: string,
+  approvalId: string,
   decision: 'approve' | 'deny',
   opts: { signal?: AbortSignal } = {},
 ): Promise<{ settled: boolean; decision: 'approve' | 'deny' }> {
+  const canonicalId = decodeKeeperToolApprovalId(approvalId)
+  if (canonicalId === null) throw new Error('Invalid tool approval admission ID')
   const path = '/api/v1/keepers/tool-approval'
   const resp = await fetchControlPlane(
     path,
     {
       method: 'POST',
       headers: jsonHeaders(),
-      body: JSON.stringify({ name: keeperName.trim(), tool_call_id: toolCallId, decision }),
+      body: JSON.stringify({ name: keeperName.trim(), approval_id: canonicalId, decision }),
       signal: opts.signal,
     },
   )

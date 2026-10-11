@@ -1,5 +1,16 @@
 (** Dashboard namespace-truth read-model regression tests. *)
 
+let settle_fixture registry ~keeper_name ~tool_call_id decision =
+  let approval_id =
+    match List.find_opt (fun (row : Masc.Keeper_tool_approval_registry.pending) ->
+      String.equal row.keeper_name keeper_name && String.equal row.tool_call_id tool_call_id)
+      (Masc.Keeper_tool_approval_registry.pending registry) with
+    | Some row -> row.approval_id
+    | None -> Masc.Keeper_tool_approval_id.fresh ()
+  in
+  Masc.Keeper_tool_approval_registry.settle registry ~keeper_name ~approval_id decision
+
+
 let () =
   Masc.Server_startup_state.mark_state_ready ()
   |> Result.get_ok
@@ -228,7 +239,7 @@ let test_a_held_tool_call_is_an_attention_row () =
             check int "the held call is one row to answer" 1
               (held_call_rows (namespace_truth_json ~state ~sw ~clock));
             ignore
-              (Masc.Keeper_tool_approval_registry.settle registry
+              (settle_fixture registry
                  ~keeper_name:"keeper.one" ~tool_call_id:"call-attention"
                  Masc.Keeper_tool_approval_registry.Approve
                : bool));

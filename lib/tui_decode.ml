@@ -378,6 +378,7 @@ type goal_source_failure =
    epoch reading when the wait opened; the drawing side derives age from it. *)
 type keeper_tool_approval = {
   kta_keeper : string;
+  kta_approval_id : Keeper_tool_approval_id.t;
   kta_tool_call_id : string;
   kta_tool : string;
   kta_args : string;
@@ -3631,6 +3632,8 @@ let decode_keeper_secret_projections json =
   |> Result.map List.rev
 
 let decode_keeper_tool_approval json =
+  let* approval_id_raw = required_string_field json "approval_id" in
+  let* kta_approval_id = Keeper_tool_approval_id.of_string approval_id_raw in
   let* kta_keeper = required_string_field json "keeper" in
   let* kta_tool_call_id = required_string_field json "tool_call_id" in
   let* kta_tool = required_string_field json "tool" in
@@ -3641,6 +3644,7 @@ let decode_keeper_tool_approval json =
   let* kta_timeout_sec = Json_util.require_float json "timeout_sec" in
   Ok
     { kta_keeper
+    ; kta_approval_id
     ; kta_tool_call_id
     ; kta_tool
     ; kta_args

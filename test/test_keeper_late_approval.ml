@@ -5,6 +5,23 @@ module Registry = Masc.Keeper_tool_approval_registry
 module Late = Masc.Keeper_late_approval
 module Events = Masc.Keeper_chat_events
 
+let admission_ids = Hashtbl.create 16
+let admission_for call_id =
+  match Hashtbl.find_opt admission_ids call_id with
+  | Some id -> id
+  | None ->
+      let id = Masc.Keeper_tool_approval_id.fresh () in
+      Hashtbl.add admission_ids call_id id;
+      id
+
+let note_fixture store ?now ~base_path ~keeper_name ~tool_call_id ~tool_name ~args () =
+  Late.note_timed_out store ?now ~base_path ~keeper_name
+    ~approval_id:(admission_for tool_call_id) ~tool_name ~args ()
+
+let remember_fixture store ?now ~base_path ~keeper_name ~tool_call_id ~actor decision () =
+  Late.remember_late store ?now ~base_path ~keeper_name
+    ~approval_id:(admission_for tool_call_id) ~actor decision ()
+
 let keeper = "keeper.one"
 let workspace = "/tmp/test-workspace"
 let invocation ~tool_use_id =
@@ -50,7 +67,12 @@ let with_gate f =
       let events = Events.create () in
       let gate =
         Gate.create ~redact_text:Fun.id ~registry ~late_approvals:late
-          ~publish:(Events.publish events)
+          ~publish:(fun event ->
+            (match event with
+             | Events.Tool_approval_requested { approval_id; tool_call_id; _ } ->
+                 Hashtbl.replace admission_ids tool_call_id approval_id
+             | _ -> ());
+            Events.publish events event)
           ~clock ~base_path:workspace ~keeper_name:keeper ~timeout_sec:0.05
       in
       f ~clock ~late ~events ~gate)
@@ -135,29 +157,47 @@ let test_an_answer_after_the_timeout_is_remembered () =
       check remember_outcome
         "the late answer descends from an ask that really timed out here"
         (Late.Remembered { tool_name = "Edit" })
-        (Late.remember_late late ~base_path:workspace ~keeper_name:keeper
+        (remember_fixture late ~base_path:workspace ~keeper_name:keeper
            ~tool_call_id:"call-1" ~actor:"mode-operator"
            Registry.Approve ()))
+
+let test_late_answer_names_its_exact_admission () =
+  let store = Late.create () in
+  let first_id = Masc.Keeper_tool_approval_id.fresh () in
+  let second_id = Masc.Keeper_tool_approval_id.fresh () in
+  Late.note_timed_out store ~now:1000.0 ~base_path:workspace ~keeper_name:keeper
+    ~approval_id:first_id ~tool_name:"Edit" ~args:(edit_input "lib/first.ml") ();
+  Late.note_timed_out store ~now:1000.0 ~base_path:workspace ~keeper_name:keeper
+    ~approval_id:second_id ~tool_name:"Edit" ~args:(edit_input "lib/second.ml") ();
+  check remember_outcome "old admission keeps its own question" (Late.Remembered { tool_name = "Edit" })
+    (Late.remember_late store ~now:1000.0 ~base_path:workspace ~keeper_name:keeper
+      ~approval_id:first_id ~actor:"operator" Registry.Approve ());
+  check bool "a different question has no remembered approval" true
+    (Late.take store ~now:1000.0 ~base_path:workspace ~keeper_name:keeper
+      ~tool_name:"Edit" ~args:(edit_input "lib/second.ml") () = None);
+  check bool "the answered question receives the decision" true
+    (Late.take store ~now:1000.0 ~base_path:workspace ~keeper_name:keeper
+      ~tool_name:"Edit" ~args:(edit_input "lib/first.ml") () = Some Registry.Approve)
 
 let test_an_answer_that_names_no_ask_is_dropped () =
   with_gate (fun ~clock:_ ~late ~events:_ ~gate:_ ->
       check remember_outcome
         "an answer that cannot be attributed to an ask is not kept"
         Late.No_matching_ask
-        (Late.remember_late late ~base_path:workspace ~keeper_name:keeper
+        (remember_fixture late ~base_path:workspace ~keeper_name:keeper
            ~tool_call_id:"call-never-held" ~actor:"mode-operator"
            Registry.Approve ()))
 
 let test_an_ask_that_timed_out_long_ago_cannot_be_answered () =
   with_gate (fun ~clock:_ ~late ~events:_ ~gate:_ ->
-      Late.note_timed_out late ~now:1000.0 ~base_path:workspace
+      note_fixture late ~now:1000.0 ~base_path:workspace
         ~keeper_name:keeper ~tool_call_id:"call-old" ~tool_name:"Edit"
         ~args:(edit_input "lib/a.ml") ();
       check remember_outcome
         "an ask older than the operator's moment is reaped before it can be \
          answered"
         Late.No_matching_ask
-        (Late.remember_late late ~now:(1000.0 +. Late.ttl_sec +. 1.0)
+        (remember_fixture late ~now:(1000.0 +. Late.ttl_sec +. 1.0)
            ~base_path:workspace ~keeper_name:keeper ~tool_call_id:"call-old"
            ~actor:"mode-operator" Registry.Approve ()))
 
@@ -168,7 +208,7 @@ let test_the_identical_retried_call_is_settled_once () =
       time_out gate ~tool_call_id:"call-1" ~tool_name:"Edit"
         ~input:(edit_input "lib/a.ml");
       ignore
-        (Late.remember_late late ~base_path:workspace ~keeper_name:keeper
+        (remember_fixture late ~base_path:workspace ~keeper_name:keeper
            ~tool_call_id:"call-1" ~actor:"mode-operator"
            Registry.Approve ());
       ignore (drain events []);
@@ -197,7 +237,7 @@ let test_a_remembered_denial_refuses_the_identical_retry () =
       time_out gate ~tool_call_id:"call-1" ~tool_name:"Edit"
         ~input:(edit_input "lib/a.ml");
       ignore
-        (Late.remember_late late ~base_path:workspace ~keeper_name:keeper
+        (remember_fixture late ~base_path:workspace ~keeper_name:keeper
            ~tool_call_id:"call-1" ~actor:"mode-operator"
            Registry.Deny ());
       ignore (drain events []);
@@ -217,7 +257,7 @@ let test_a_call_with_different_arguments_is_asked_about () =
       time_out gate ~tool_call_id:"call-1" ~tool_name:"Edit"
         ~input:(edit_input "lib/a.ml");
       ignore
-        (Late.remember_late late ~base_path:workspace ~keeper_name:keeper
+        (remember_fixture late ~base_path:workspace ~keeper_name:keeper
            ~tool_call_id:"call-1" ~actor:"mode-operator"
            Registry.Approve ());
       let other =
@@ -238,7 +278,7 @@ let test_the_same_arguments_in_another_order_are_the_same_call () =
           (`Assoc
              [ "file_path", `String "lib/a.ml"; "old_string", `String "x" ]);
       ignore
-        (Late.remember_late late ~base_path:workspace ~keeper_name:keeper
+        (remember_fixture late ~base_path:workspace ~keeper_name:keeper
            ~tool_call_id:"call-1" ~actor:"mode-operator"
            Registry.Approve ());
       let retry =
@@ -256,7 +296,7 @@ let test_a_remembered_answer_does_not_cross_keepers () =
       time_out gate ~tool_call_id:"call-1" ~tool_name:"Edit"
         ~input:(edit_input "lib/a.ml");
       ignore
-        (Late.remember_late late ~base_path:workspace ~keeper_name:keeper
+        (remember_fixture late ~base_path:workspace ~keeper_name:keeper
            ~tool_call_id:"call-1" ~actor:"mode-operator"
            Registry.Approve ());
       (* Same store, another keeper's gate: the identity carries the keeper
@@ -290,7 +330,7 @@ let test_a_fresh_remembered_answer_applies () =
       time_out gate ~tool_call_id:"call-1" ~tool_name:"Edit"
         ~input:(edit_input "lib/a.ml");
       ignore
-        (Late.remember_late late
+        (remember_fixture late
            ~now:(Eio.Time.now clock -. 1.0)
            ~base_path:workspace ~keeper_name:keeper ~tool_call_id:"call-1"
            ~actor:"mode-operator" Registry.Approve ());
@@ -310,7 +350,7 @@ let test_a_remembered_answer_past_its_moment_is_asked_about_again () =
          by the time the identical call returns it is a new occurrence, not
          the retry the operator answered. *)
       ignore
-        (Late.remember_late late
+        (remember_fixture late
            ~now:(Eio.Time.now clock -. Late.ttl_sec -. 1.0)
            ~base_path:workspace ~keeper_name:keeper ~tool_call_id:"call-1"
            ~actor:"mode-operator" Registry.Approve ());
@@ -334,13 +374,13 @@ let test_a_remembered_answer_survives_a_restart_and_settles_the_retry () =
       (* First life: the ask times out and the operator answers late; both
          rows are durable before the process "dies". *)
       let first = make () in
-      Late.note_timed_out first ~base_path:workspace ~keeper_name:keeper
+      note_fixture first ~base_path:workspace ~keeper_name:keeper
         ~tool_call_id:"call-1" ~tool_name:"Edit"
         ~args:(edit_input "lib/a.ml") ();
       check remember_outcome
         "the late answer stands only when its journal row does"
         (Late.Remembered { tool_name = "Edit" })
-        (Late.remember_late first ~base_path:workspace ~keeper_name:keeper
+        (remember_fixture first ~base_path:workspace ~keeper_name:keeper
            ~tool_call_id:"call-1" ~actor:"mode-operator"
            Registry.Approve ());
       (* Restart: a fresh store, nothing in memory, bound from the journal
@@ -369,13 +409,13 @@ let test_a_remembered_answer_survives_a_restart_and_settles_the_retry () =
 let test_a_workspace_cannot_consume_another_workspaces_answer () =
   with_journal (fun ~clock:_ ~journal:_ ~make ~remove:_ ~base_path:_ ->
       let first = make () in
-      Late.note_timed_out first ~base_path:"/ws/a" ~keeper_name:keeper
+      note_fixture first ~base_path:"/ws/a" ~keeper_name:keeper
         ~tool_call_id:"call-1" ~tool_name:"Edit"
         ~args:(edit_input "lib/a.ml") ();
       check remember_outcome
         "the answer is attributed to the workspace that asked"
         (Late.Remembered { tool_name = "Edit" })
-        (Late.remember_late first ~base_path:"/ws/a" ~keeper_name:keeper
+        (remember_fixture first ~base_path:"/ws/a" ~keeper_name:keeper
            ~tool_call_id:"call-1" ~actor:"mode-operator-a"
            Registry.Approve ());
       (* Same journal root, another workspace: the identity carries the
@@ -396,11 +436,11 @@ let test_a_workspace_cannot_consume_another_workspaces_answer () =
 let test_a_consumed_answer_is_never_reoffered_after_a_restart () =
   with_journal (fun ~clock:_ ~journal:_ ~make ~remove:_ ~base_path:_ ->
       let first = make () in
-      Late.note_timed_out first ~base_path:workspace ~keeper_name:keeper
+      note_fixture first ~base_path:workspace ~keeper_name:keeper
         ~tool_call_id:"call-1" ~tool_name:"Edit"
         ~args:(edit_input "lib/a.ml") ();
       ignore
-        (Late.remember_late first ~base_path:workspace ~keeper_name:keeper
+        (remember_fixture first ~base_path:workspace ~keeper_name:keeper
            ~tool_call_id:"call-1" ~actor:"mode-operator"
            Registry.Approve ());
       (* The retry consumes it in the first life, deliver row included. *)
@@ -425,11 +465,11 @@ let test_a_consumed_answer_is_never_reoffered_after_a_restart () =
 let test_a_consume_without_deliver_reads_as_uncertain () =
   with_journal (fun ~clock:_ ~journal ~make ~remove ~base_path:_ ->
       let first = make () in
-      Late.note_timed_out first ~base_path:workspace ~keeper_name:keeper
+      note_fixture first ~base_path:workspace ~keeper_name:keeper
         ~tool_call_id:"call-1" ~tool_name:"Edit"
         ~args:(edit_input "lib/a.ml") ();
       ignore
-        (Late.remember_late first ~base_path:workspace ~keeper_name:keeper
+        (remember_fixture first ~base_path:workspace ~keeper_name:keeper
            ~tool_call_id:"call-1" ~actor:"mode-operator"
            Registry.Approve ());
       check bool "the first life's retry is settled"
@@ -446,7 +486,7 @@ let test_a_consume_without_deliver_reads_as_uncertain () =
       output_string oc
         (Yojson.Safe.to_string
            (`Assoc
-             [ ("schema", `String "masc.late_approval.v2")
+             [ ("schema", `String "masc.late_approval.v3")
              ; ("consume_id", `String "fixture-interrupted-consume")
              ; ("op", `String "consume")
              ; ("base_path", `String workspace)
@@ -501,9 +541,9 @@ let test_later_delivery_preserves_earlier_attempt () =
     let args = edit_input "lib/a.ml" in
     let now = Unix.gettimeofday () -. Late.ttl_sec -. 100. in
     let consume call_id =
-      Late.note_timed_out store ~now ~base_path:workspace ~keeper_name:keeper
+      note_fixture store ~now ~base_path:workspace ~keeper_name:keeper
         ~tool_call_id:call_id ~tool_name:"Edit" ~args ();
-      ignore (Late.remember_late store ~now ~base_path:workspace ~keeper_name:keeper
+      ignore (remember_fixture store ~now ~base_path:workspace ~keeper_name:keeper
         ~tool_call_id:call_id ~actor:"operator" Registry.Approve ());
       check bool "actual consume still returns decision" true
         (Late.take store ~now ~base_path:workspace ~keeper_name:keeper ~tool_name:"Edit" ~args () = Some Registry.Approve) in
@@ -517,7 +557,7 @@ let test_later_delivery_preserves_earlier_attempt () =
       output_string oc
         (Yojson.Safe.to_string
            (`Assoc
-             [ ("schema", `String "masc.late_approval.v2")
+             [ ("schema", `String "masc.late_approval.v3")
              ; ("consume_id", `String consume_id)
              ; ("op", `String "consume")
              ; ("base_path", `String workspace)
@@ -561,12 +601,12 @@ let test_malformed_consume_cannot_restore_approval () =
     with_journal (fun ~clock:_ ~journal ~make ~remove:_ ~base_path:_ ->
       let first = make () in
       let args = edit_input "lib/a.ml" in
-      Late.note_timed_out first ~base_path:workspace ~keeper_name:keeper
+      note_fixture first ~base_path:workspace ~keeper_name:keeper
         ~tool_call_id:"malformed" ~tool_name:"Edit" ~args ();
-      ignore (Late.remember_late first ~base_path:workspace ~keeper_name:keeper
+      ignore (remember_fixture first ~base_path:workspace ~keeper_name:keeper
         ~tool_call_id:"malformed" ~actor:"operator" Registry.Approve ());
       let fields =
-        [ "schema", `String "masc.late_approval.v2"; "op", `String "consume";
+        [ "schema", `String "masc.late_approval.v3"; "op", `String "consume";
           "consume_id", `String "malformed-consume";
           "base_path", `String workspace; "keeper", `String keeper;
           "tool", `String "Edit";
@@ -598,10 +638,10 @@ let test_pre_id_schema_rows_are_skipped_not_fatal () =
     check bool "an old-schema row is not an explicit fault" true
       (Late.journal_error store = None);
     check int "the unreadable row is reported" 1 (Late.journal_skipped store);
-    Late.note_timed_out store ~base_path:workspace ~keeper_name:keeper
+    note_fixture store ~base_path:workspace ~keeper_name:keeper
       ~tool_call_id:"new" ~tool_name:"Edit" ~args:(edit_input "lib/a.ml") ();
     check bool "a new late answer still stands" true
-      (Late.remember_late store ~base_path:workspace ~keeper_name:keeper
+      (remember_fixture store ~base_path:workspace ~keeper_name:keeper
         ~tool_call_id:"new" ~actor:"operator" Registry.Approve ()
        = Late.Remembered { tool_name = "Edit" });
     check bool "the old row names nothing ackable" true
@@ -614,10 +654,10 @@ let test_one_foreign_row_among_valid_rows_does_not_fence_restore () =
   with_journal (fun ~clock:_ ~journal ~make ~remove:_ ~base_path:_ ->
     let first = make () in
     let args = edit_input "lib/a.ml" in
-    Late.note_timed_out first ~base_path:workspace ~keeper_name:keeper
+    note_fixture first ~base_path:workspace ~keeper_name:keeper
       ~tool_call_id:"call-1" ~tool_name:"Edit" ~args ();
     ignore
-      (Late.remember_late first ~base_path:workspace ~keeper_name:keeper
+      (remember_fixture first ~base_path:workspace ~keeper_name:keeper
         ~tool_call_id:"call-1" ~actor:"operator" Registry.Approve ());
     (* A future schema's row lands after the valid history, the way a
        downgrade or a stray write leaves it. *)
@@ -651,10 +691,10 @@ let test_unreadable_row_shapes_are_all_counted () =
   with_journal (fun ~clock:_ ~journal ~make ~remove:_ ~base_path:_ ->
     let first = make () in
     let args = edit_input "lib/a.ml" in
-    Late.note_timed_out first ~base_path:workspace ~keeper_name:keeper
+    note_fixture first ~base_path:workspace ~keeper_name:keeper
       ~tool_call_id:"call-1" ~tool_name:"Edit" ~args ();
     ignore
-      (Late.remember_late first ~base_path:workspace ~keeper_name:keeper
+      (remember_fixture first ~base_path:workspace ~keeper_name:keeper
         ~tool_call_id:"call-1" ~actor:"operator" Registry.Approve ());
     let oc = open_out_gen [Open_append] 0o644 journal in
     output_string oc "this is not json at all\n";
@@ -674,14 +714,14 @@ let test_unavailable_journal_exits_through_explicit_restore () =
   with_journal (fun ~clock:_ ~journal ~make ~remove ~base_path:dir ->
     ignore remove;
     let store = make () in
-    Late.note_timed_out store ~base_path:workspace ~keeper_name:keeper
+    note_fixture store ~base_path:workspace ~keeper_name:keeper
       ~tool_call_id:"before" ~tool_name:"Edit" ~args:(edit_input "lib/a.ml") ();
     (* Fence the store the way an unconfirmed append failure leaves it:
        make the journal path unwritable-as-a-file (a directory sits where
        the file should be), so the next append gets no commit receipt. *)
     Unix.rename journal (journal ^ ".bak");
     Unix.mkdir journal 0o700;
-    Late.note_timed_out store ~base_path:workspace ~keeper_name:keeper
+    note_fixture store ~base_path:workspace ~keeper_name:keeper
       ~tool_call_id:"during" ~tool_name:"Edit" ~args:(edit_input "lib/b.ml") ();
     check bool "an append without a commit receipt fences the store" true
       (match Late.journal_error store with
@@ -702,7 +742,7 @@ let test_corrupt_journal_survives_restart_until_operator_moves_it_aside () =
     ignore remove;
     Fs_compat.mkdir_p (Filename.dirname journal);
     Out_channel.with_open_bin journal (fun out ->
-      output_string out "{\"schema\":\"masc.late_approval.v2\",\"op\":\"consume\"}\n");
+      output_string out "{\"schema\":\"masc.late_approval.v3\",\"op\":\"consume\"}\n");
     (* Restart: the corrupt row fences the fresh store too. *)
     let fenced = make () in
     check bool "corruption survives the restart" true
@@ -729,7 +769,9 @@ let test_corrupt_journal_survives_restart_until_operator_moves_it_aside () =
 let () =
   run "keeper_late_approval"
     [ ( "remembering a late answer"
-      , [ test_case "later delivery and ack settle only their exact attempt" `Quick
+      , [ test_case "late answer names its exact admission" `Quick
+            test_late_answer_names_its_exact_admission;
+          test_case "later delivery and ack settle only their exact attempt" `Quick
             test_later_delivery_preserves_earlier_attempt
         ; test_case "malformed v2 consume cannot resurrect approval" `Quick
             test_malformed_consume_cannot_restore_approval

@@ -375,6 +375,7 @@ let test_distinct_calls_from_one_keeper_remain_reachable () =
   let state = agenda_state () in
   let held tool_call_id : Masc.Tui_decode.keeper_tool_approval =
     { kta_keeper = "keeper-a"
+    ; kta_approval_id = Masc.Keeper_tool_approval_id.fresh ()
     ; kta_tool_call_id = tool_call_id
     ; kta_tool = "exec"
     ; kta_args = "{}"

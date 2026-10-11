@@ -426,7 +426,7 @@ type async_msg =
           server took it. *)
   | Surface_tool_approval_answered of
       string
-      * string
+      * Masc.Keeper_tool_approval_id.t
       * bool
       * (Masc_tui_http.tool_approval_answer, string) result
       * Masc_tui_operator_projection.Flow.generation

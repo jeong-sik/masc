@@ -17,13 +17,13 @@ val authority_changed :
   candidate:Masc_tui_approvals_model.approval_row option ->
   bool
 (** Whether a candidate frame carries a different operator token or Keeper
-    [(keeper, tool_call_id)] than the last accepted frame. *)
+    [(keeper, approval_id)] than the last accepted frame. *)
 
 type tool_answer_receipt = Confirmed | Unconfirmed
 
 val retire_tool_answer :
   keeper_name:string ->
-  tool_call_id:string ->
+  approval_id:Masc.Keeper_tool_approval_id.t ->
   receipt:tool_answer_receipt ->
   Masc_tui_types.Tui_decode.keeper_tool_approval list ->
   Masc_tui_types.Tui_decode.keeper_tool_approval list

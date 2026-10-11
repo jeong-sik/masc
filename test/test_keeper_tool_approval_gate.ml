@@ -1,5 +1,16 @@
 open Alcotest
 
+let settle_fixture registry ~keeper_name ~tool_call_id decision =
+  let approval_id =
+    match List.find_opt (fun (row : Masc.Keeper_tool_approval_registry.pending) ->
+      String.equal row.keeper_name keeper_name && String.equal row.tool_call_id tool_call_id)
+      (Masc.Keeper_tool_approval_registry.pending registry) with
+    | Some row -> row.approval_id
+    | None -> Masc.Keeper_tool_approval_id.fresh ()
+  in
+  Masc.Keeper_tool_approval_registry.settle registry ~keeper_name ~approval_id decision
+
+
 module Gate = Masc.Keeper_tool_approval_gate
 module Registry = Masc.Keeper_tool_approval_registry
 module Events = Masc.Keeper_chat_events
@@ -131,7 +142,7 @@ let settle_when_pending registry ~clock decision =
   in
   wait 100;
   ignore
-    (Registry.settle registry ~keeper_name:keeper ~tool_call_id:"call-1"
+    (settle_fixture registry ~keeper_name:keeper ~tool_call_id:"call-1"
        decision)
 
 let test_an_approval_lets_the_call_through () =
@@ -233,7 +244,7 @@ let test_request_publication_can_answer_the_registered_wait () =
              | [pending] -> check bool "event names the actual registered wait" true
                  (Masc.Keeper_tool_approval_id.equal approval_id pending.Registry.approval_id)
              | _ -> fail "request was published without its registry admission");
-            answered := Registry.settle registry ~keeper_name:keeper
+            answered := settle_fixture registry ~keeper_name:keeper
               ~tool_call_id Registry.Approve
         | _ -> ()
       in

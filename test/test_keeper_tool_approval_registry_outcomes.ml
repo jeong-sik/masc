@@ -1,5 +1,16 @@
 open Alcotest
 
+let settle_fixture registry ~keeper_name ~tool_call_id decision =
+  let approval_id =
+    match List.find_opt (fun (row : Masc.Keeper_tool_approval_registry.pending) ->
+      String.equal row.keeper_name keeper_name && String.equal row.tool_call_id tool_call_id)
+      (Masc.Keeper_tool_approval_registry.pending registry) with
+    | Some row -> row.approval_id
+    | None -> Masc.Keeper_tool_approval_id.fresh ()
+  in
+  Masc.Keeper_tool_approval_registry.settle registry ~keeper_name ~approval_id decision
+
+
 module Registry = Masc.Keeper_tool_approval_registry
 
 let outcome_totals = Alcotest.testable (fun fmt t ->
@@ -36,7 +47,7 @@ let test_an_answer_counted_once () =
             in
             wait_for_registration 100;
             ignore
-              (Registry.settle registry ~keeper_name:keeper
+              (settle_fixture registry ~keeper_name:keeper
                  ~tool_call_id:"call-1" Registry.Approve))
         |> fst
       in
@@ -73,7 +84,7 @@ let test_a_settle_racing_the_timeout_is_the_answer_it_counts () =
           in
           Eio_mock.Clock.set_time clock 1.0;
           check bool "the late answer applies" true
-            (Registry.settle registry ~keeper_name:keeper
+            (settle_fixture registry ~keeper_name:keeper
                ~tool_call_id:"call-3" Registry.Approve);
           check bool "successful receipt matches the wait outcome" true
             (Eio.Promise.await_exn waited = Registry.Answered Registry.Approve);
@@ -98,16 +109,39 @@ let test_timeout_claim_rejects_a_later_answer () =
       check bool "timer publishes timeout" true
         (Eio.Promise.await_exn waited = Registry.Timed_out);
       check bool "later answer is not applied" false
-        (Registry.settle registry ~keeper_name:keeper
+        (settle_fixture registry ~keeper_name:keeper
           ~tool_call_id:"timeout-claimed" Registry.Approve);
       check outcome_totals "one terminal outcome is counted"
         { Registry.answered_total = 0; timed_out_total = 1 } (totals registry)))
+
+let test_old_admission_cannot_answer_reused_provider_call () =
+  Eio_mock.Backend.run (fun () ->
+    let clock = Eio_mock.Clock.make () in
+    Eio_mock.Clock.set_time clock 0.0;
+    let registry = Registry.create () in
+    let first_id = Masc.Keeper_tool_approval_id.fresh () in
+    let second_id = Masc.Keeper_tool_approval_id.fresh () in
+    let wait approval_id = Registry.await registry ~approval_id ~clock
+      ~keeper_name:keeper ~tool_call_id:"provider-reused" ~tool_name:"Execute"
+      ~args:"{}" ~question:"run?" ~because:"policy" ~timeout_sec:10.0 in
+    Eio.Switch.run (fun sw ->
+      let first = Eio.Fiber.fork_promise ~sw (fun () -> wait first_id) in
+      let second = Eio.Fiber.fork_promise ~sw (fun () -> wait second_id) in
+      check bool "older admission is displaced" true
+        (Eio.Promise.await_exn first = Registry.Displaced);
+      check bool "older answer cannot approve replacement" false
+        (Registry.settle registry ~keeper_name:keeper ~approval_id:first_id Registry.Approve);
+      check int "replacement remains pending" 1 (List.length (Registry.pending registry));
+      check bool "current admission is approved" true
+        (Registry.settle registry ~keeper_name:keeper ~approval_id:second_id Registry.Approve);
+      check bool "replacement receives its own decision" true
+        (Eio.Promise.await_exn second = Registry.Answered Registry.Approve)))
 
 let test_a_failed_settle_counts_nothing () =
   with_env (fun ~clock ->
       let registry = Registry.create () in
       check bool "nothing was waiting" false
-        (Registry.settle registry ~keeper_name:keeper ~tool_call_id:"nope"
+        (settle_fixture registry ~keeper_name:keeper ~tool_call_id:"nope"
            Registry.Approve);
       check outcome_totals "an answer to nobody counts nothing"
         { Registry.answered_total = 0; timed_out_total = 0 } (totals registry))
@@ -136,7 +170,7 @@ let test_reused_provider_call_has_a_new_admission_identity () =
             | [pending] ->
                 observed := Some pending.Registry.approval_id;
                 check bool "answer reaches registered wait" true
-                  (Registry.settle registry ~keeper_name:keeper
+                  (settle_fixture registry ~keeper_name:keeper
                     ~tool_call_id:"provider-reused-call" Registry.Approve)
             | _ -> fail "expected the current admission") in
         check bool "admission was answered" true
@@ -154,7 +188,9 @@ let () =
   run
     "keeper_tool_approval_registry_outcomes"
     [ ( "outcome totals"
-      , [ test_case "timeout claim rejects a later answer" `Quick
+      , [ test_case "old admission cannot answer reused provider call" `Quick
+            test_old_admission_cannot_answer_reused_provider_call
+        ; test_case "timeout claim rejects a later answer" `Quick
             test_timeout_claim_rejects_a_later_answer
         ; test_case "provider call reuse has a new admission identity" `Quick
             test_reused_provider_call_has_a_new_admission_identity

@@ -970,6 +970,7 @@ val decode_keeper_secret_projections :
     may omit it, in which case the value is [None]. *)
 type keeper_tool_approval = {
   kta_keeper : string;
+  kta_approval_id : Keeper_tool_approval_id.t;
   kta_tool_call_id : string;
   kta_tool : string;
   kta_args : string;

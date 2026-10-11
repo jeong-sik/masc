@@ -1,3 +1,4 @@
+import type { KeeperToolApprovalState } from './types'
 import { toolObservationContinues } from './keeper-tool-observations'
 import { initialKeeperResponseState, reduceKeeperResponse } from './lib/keeper-response-state'
 import { keeperStreamContract } from './keeper-stream-contract'
@@ -299,7 +300,7 @@ export async function answerHeldKeeperToolApproval(
     answering: true,
     answeredDecision: decision,
   }), existing)
-  const owns = (row: typeof claim) => row !== null
+  const owns = (row: KeeperToolApprovalState | null) => row !== null
     && keeperToolApprovals.value[keeperName]?.[approvalId] === row
     && authRevision === currentStoredTokenRevision()
   if (!owns(claim)) return false

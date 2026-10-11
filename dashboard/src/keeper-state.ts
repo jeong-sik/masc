@@ -39,6 +39,8 @@ import type {
   ChatTableCellValue,
   ChatTraceStep,
   KeeperToolApprovalPending,
+  KeeperToolApprovalSettled,
+  KeeperToolApprovalState,
 } from './types'
 
 // --- Signals ---
@@ -75,7 +77,7 @@ export const keeperStreamLastEventAt = signal<Record<string, number | null>>({})
 // KEEPER_TOOL_APPROVAL_SETTLED or a server-side timeout settle; the pending
 // GET listing re-hydrates waits whose owning stream watcher is gone
 // (masc#30034). This is UI state only — the server registry is the SSOT.
-export const keeperToolApprovals = signal<Record<string, Record<string, KeeperToolApprovalPending>>>({})
+export const keeperToolApprovals = signal<Record<string, Record<string, KeeperToolApprovalState>>>({})
 
 // Thread entries kept per keeper. History beyond this window stays
 // available server-side (keeper_chat/<name>.jsonl, GET /chat/history).
@@ -1008,7 +1010,7 @@ export function updateKeeperToolApproval(
   expected?: KeeperToolApprovalPending,
 ): KeeperToolApprovalPending | null {
   const existing = keeperToolApprovals.value[keeperName]?.[approvalId]
-  if (!existing || existing.authRevision !== currentStoredTokenRevision() || (expected && existing !== expected)) return null
+  if (!existing || existing.settled || existing.authRevision !== currentStoredTokenRevision() || (expected && existing !== expected)) return null
   const updated = Object.freeze(updater(existing))
   const current = keeperToolApprovals.value
   if (current[keeperName]?.[approvalId] !== existing) return null
@@ -1023,14 +1025,23 @@ export function settleKeeperToolApproval(
   keeperName: string,
   approvalId: string,
   outcome: string,
-  expected?: KeeperToolApprovalPending,
-): KeeperToolApprovalPending | null {
-  return updateKeeperToolApproval(keeperName, approvalId, approval => ({
-    ...approval,
-    settled: true,
-    answering: false,
-    answeredOutcome: outcome,
-  }), expected)
+  expected?: KeeperToolApprovalState,
+): KeeperToolApprovalSettled | null {
+  const current = keeperToolApprovals.value
+  const existing = current[keeperName]?.[approvalId]
+  const authRevision = currentStoredTokenRevision()
+  if (expected && (existing !== expected || expected.authRevision !== authRevision)) return null
+  if (existing?.authRevision === authRevision && existing.settled) return existing
+  // Keep only the terminal fact: pending arguments and question no longer
+  // authorize an action and need not stay retained after settlement.
+  const terminal: KeeperToolApprovalSettled = Object.freeze({
+    approvalId, authRevision, settled: true, answering: false, answeredOutcome: outcome,
+  })
+  keeperToolApprovals.value = {
+    ...current,
+    [keeperName]: { ...current[keeperName], [approvalId]: terminal },
+  }
+  return terminal
 }
 
 export function removeThreadEntries(name: string, entryIds: readonly string[]): void {

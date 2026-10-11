@@ -42,7 +42,6 @@ import {
   keeperStreamStartedAt,
   liveSendOwnsRequest,
   setRecordValue,
-  keeperToolApprovals,
   upsertKeeperToolApproval,
   settleKeeperToolApproval,
 } from './keeper-state'
@@ -1332,13 +1331,9 @@ export function applyKeeperStreamEvent(
         if (!toolCallId) return 'KEEPER_TOOL_APPROVAL_SETTLED missing tool_call_id'
         const outcome = event.value.outcome
         if (!outcome) return 'KEEPER_TOOL_APPROVAL_SETTLED missing outcome'
-        // Preserve the terminal fact for a known wait so a listing already
-        // in flight cannot hydrate it back into an actionable approval.
-        // A later REQUESTED event replaces this row with a new pending wait.
-        const current = keeperToolApprovals.value[keeperName]?.[approvalId]
-        if (current?.approvalId === approvalId) {
-          settleKeeperToolApproval(keeperName, approvalId, outcome, current)
-        }
+        // Retain even an unseen terminal, so stale listings and opening
+        // replays cannot recreate an actionable approval.
+        settleKeeperToolApproval(keeperName, approvalId, outcome)
         return null
       }
       if (event.name === 'KEEPER_STREAM_MESSAGE_START') {

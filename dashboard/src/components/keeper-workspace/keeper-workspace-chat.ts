@@ -1,3 +1,4 @@
+import type { KeeperToolApprovalPending } from '../../types'
 import { storedTokenRevision } from '../../api/token-revision'
 // Keeper Workspace — conversation pane (center). A spacious ChatHeader
 // (identity + lifecycle actions) above the reused KeeperConversationPanel
@@ -587,7 +588,7 @@ function ToolApprovalCards({ keeperName }: { keeperName: string }): VNode | null
     void hydrateKeeperToolApprovals()
   }, [keeperName, authRevision])
   const byId = keeperToolApprovals.value[keeperName] ?? {}
-  const pending = Object.values(byId).filter(approval => approval.authRevision === authRevision && !approval.settled)
+  const pending = Object.values(byId).filter((approval): approval is KeeperToolApprovalPending => approval.authRevision === authRevision && !approval.settled)
   if (pending.length === 0) return null
   return html`
     <div class="tool-approval-stack" data-testid="keeper-tool-approval-stack" role="region" aria-label="도구 승인 대기">

@@ -40,6 +40,12 @@ function pendingRow(toolCallId: string): void {
   })
 }
 
+function currentPending(approvalId: string) {
+  const row = keeperToolApprovals.value.sangsu?.[approvalId]
+  if (!row || row.settled) throw new Error('Expected pending approval')
+  return row
+}
+
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -102,7 +108,7 @@ describe('answerHeldKeeperToolApproval', () => {
 
     await expect(answerHeldKeeperToolApproval('sangsu', idFor('call-fail'), 'approve')).resolves.toBe(false)
 
-    const row = keeperToolApprovals.value.sangsu?.[idFor('call-fail')]
+    const row = currentPending(idFor('call-fail'))
     expect(row?.settled).toBe(false)
     expect(row?.answering).toBe(false)
     expect(row?.answeredDecision).toBeNull()
@@ -116,7 +122,7 @@ describe('answerHeldKeeperToolApproval', () => {
     const answered = answerHeldKeeperToolApproval('sangsu', firstId, 'approve')
     await vi.waitFor(() => expect(resolveFetch).toBeDefined())
     const secondId = uuidv7()
-    const first = keeperToolApprovals.value.sangsu![firstId]!
+    const first = currentPending(firstId)
     upsertKeeperToolApproval('sangsu', {
       ...first, approvalId: secondId, answering: false,
       answeredDecision: null, answeredOutcome: null, settled: false,
@@ -292,9 +298,9 @@ describe('hydrateKeeperToolApprovals', () => {
     await hydrateKeeperToolApprovals()
 
     // Known row untouched (hydrated askedAt would clobber stream askedAt).
-    expect(keeperToolApprovals.value.sangsu?.[idFor('call-known')]?.toolName).toBe('Execute')
+    expect(currentPending(idFor('call-known')).toolName).toBe('Execute')
     // Gap filled: a wait this view never saw still gets a card.
-    const hydrated = keeperToolApprovals.value.sangsu?.[idFor('call-hydrated')]
+    const hydrated = currentPending(idFor('call-hydrated'))
     expect(hydrated?.toolName).toBe('Execute')
     expect(hydrated?.question).toBe('보고서를 날릴까요?')
     expect(hydrated?.because).toBe('external side effect')
@@ -311,9 +317,9 @@ describe('hydrateKeeperToolApprovals', () => {
       asked_at: 1, timeout_sec: 180,
     }] })))
     await hydrateKeeperToolApprovals()
-    expect(keeperToolApprovals.value.sangsu![firstId]?.question).toBe('Execute ls 를 실행할까요?')
-    expect(keeperToolApprovals.value.sangsu![secondId]?.question).toBe('Second ask?')
-    expect(keeperToolApprovals.value.sangsu![secondId]?.toolCallId).toBe('shared-inventory-provider')
+    expect(currentPending(firstId).question).toBe('Execute ls 를 실행할까요?')
+    expect(currentPending(secondId).question).toBe('Second ask?')
+    expect(currentPending(secondId).toolCallId).toBe('shared-inventory-provider')
   })
 
   it.each([undefined, 'provider-call', 42, '12de81b6-4388-4aa5-b4b0-678d3cabeeff'])(
@@ -402,6 +408,51 @@ describe('hydrateKeeperToolApprovals', () => {
     }] }))
     await listing
     expect(keeperToolApprovals.value.sangsu?.[idFor('stream-finished-wait')]?.settled).toBe(true)
+  })
+
+  it('does not hydrate an unseen terminal from a delayed inventory', async () => {
+    appendThreadEntry('sangsu', {
+      id: 'unseen-reply', role: 'assistant', source: 'direct_assistant', label: 'sangsu',
+      text: '', rawText: '', timestamp: new Date().toISOString(),
+      delivery: 'sending', streamState: 'opening', details: null,
+    })
+    const approvalId = uuidv7()
+    let resolveFetch!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { resolveFetch = resolve })))
+    const listing = hydrateKeeperToolApprovals()
+    await vi.waitFor(() => expect(resolveFetch).toBeDefined())
+    expect(applyKeeperStreamEvent('sangsu', 'unseen-reply', {
+      type: 'CUSTOM', name: 'KEEPER_TOOL_APPROVAL_SETTLED',
+      value: { approval_id: approvalId, tool_call_id: 'unseen-inventory-call', outcome: 'approve' },
+    })).toBeNull()
+    resolveFetch(jsonResponse(200, { pending: [{
+      approval_id: approvalId, keeper: 'sangsu', tool_call_id: 'unseen-inventory-call',
+      tool: 'Execute', args: '{}', question: 'Run?', because: 'policy', asked_at: 1, timeout_sec: 180,
+    }] }))
+    await listing
+    expect(keeperToolApprovals.value.sangsu?.[approvalId]?.settled).toBe(true)
+  })
+
+  it('retains a current-auth terminal over a row left by another authentication', () => {
+    setStoredToken('synthetic-terminal-account-a')
+    pendingRow('auth-partition-terminal')
+    const previous = currentPending(idFor('auth-partition-terminal'))
+    setStoredToken('synthetic-terminal-account-b')
+    expect(settleKeeperToolApproval('sangsu', previous.approvalId, 'approve', previous)).toBeNull()
+    const terminal = settleKeeperToolApproval('sangsu', previous.approvalId, 'approve')
+    expect(terminal?.settled).toBe(true)
+    pendingRow('auth-partition-terminal')
+    expect(keeperToolApprovals.value.sangsu?.[previous.approvalId]).toBe(terminal)
+  })
+
+  it('releases pending arguments and question after terminal settlement', () => {
+    pendingRow('retired-data')
+    const terminal = settleKeeperToolApproval('sangsu', idFor('retired-data'), 'approve')
+    expect(terminal?.settled).toBe(true)
+    expect(terminal).not.toHaveProperty('args')
+    expect(terminal).not.toHaveProperty('question')
+    expect(terminal).not.toHaveProperty('because')
+    expect(terminal).not.toHaveProperty('toolName')
   })
 
   it('does not publish an infinite millisecond timestamp from finite server seconds', async () => {

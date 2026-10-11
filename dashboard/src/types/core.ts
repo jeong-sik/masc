@@ -740,8 +740,18 @@ export interface KeeperToolApprovalPending {
   answering: boolean
   answeredDecision: 'approve' | 'deny' | null
   answeredOutcome: string | null
-  settled: boolean
+  settled: false
 }
+
+export interface KeeperToolApprovalSettled {
+  readonly approvalId: string
+  readonly authRevision: number
+  readonly settled: true
+  readonly answering: false
+  readonly answeredOutcome: string
+}
+
+export type KeeperToolApprovalState = KeeperToolApprovalPending | KeeperToolApprovalSettled
 
 // RFC-0232 P2: producer-typed turn outcome carried in the reply payload
 // (`turn_outcome`). `continuation_checkpoint` marks a resume-next-cycle

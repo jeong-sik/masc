@@ -900,6 +900,23 @@ describe('Keeper operation stream projection', () => {
     expect(keeperToolApprovals.value.sangsu?.[opening.value.approval_id]).toBe(terminal)
   })
 
+  it('retains an unseen terminal before a delayed opening', () => {
+    assistantEntry()
+    const approval_id = '019a0000-0000-7000-8000-000000000003'
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM', name: 'KEEPER_TOOL_APPROVAL_SETTLED',
+      value: { approval_id, tool_call_id: 'unseen-call', outcome: 'timed_out' },
+    })).toBeNull()
+    const terminal = keeperToolApprovals.value.sangsu?.[approval_id]
+    expect(terminal?.settled).toBe(true)
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM', name: 'KEEPER_TOOL_APPROVAL_REQUESTED',
+      value: { approval_id, tool_call_id: 'unseen-call', tool_call_name: 'Execute',
+        args: '{}', question: 'Run?', because: 'policy' },
+    })).toBeNull()
+    expect(keeperToolApprovals.value.sangsu?.[approval_id]).toBe(terminal)
+  })
+
   it('mints a pending approval row on KEEPER_TOOL_APPROVAL_REQUESTED', () => {
     assistantEntry()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
@@ -916,6 +933,7 @@ describe('Keeper operation stream projection', () => {
     })).toBeNull()
 
     const pending = keeperToolApprovals.value.sangsu?.['019a0000-0000-7000-8000-000000000001']
+    if (!pending || pending.settled) throw new Error('Expected pending approval')
     expect(pending).toBeDefined()
     expect(pending?.toolName).toBe('Execute')
     expect(pending?.question).toBe('Execute ls -la 를 실행할까요?')

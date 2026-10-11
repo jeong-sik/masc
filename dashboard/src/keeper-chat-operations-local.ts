@@ -1,6 +1,6 @@
 import { operationDeliveryProvenance, sameDeliveryKey, toolDeliveryBelongsToProducer } from './keeper-delivery-provenance'
 import { captureToolObservations, reconcileTranscriptBindings, toolObservationContinues, toolObservationsFromUnknown, transcriptBindingsFromUnknown, type StoredToolObservations } from './keeper-tool-observations'
-import { normalizeKeeperConversationDetails } from './keeper-message'
+import { normalizeStoredKeeperConversationDetails } from './keeper-message'
 import { ownerFromUnknown, keeperResponseStateFromUnknown, unavailableKeeperResponseState, type KeeperResponseState } from './lib/keeper-response-state'
 import type {
   ChatTraceStep,
@@ -195,7 +195,7 @@ function normalizeAssistantDraft(raw: unknown, operationId?: string): TrackedKee
 
   return {
     ...(responseState ? { responseState } : responseState === null ? { responseState: unavailableKeeperResponseState } : {}),
-    details: normalizeKeeperConversationDetails(raw.details),
+    details: normalizeStoredKeeperConversationDetails(raw.details),
     text,
     rawText,
     delivery: delivery ?? 'error',

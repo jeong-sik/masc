@@ -17,6 +17,24 @@ function requiredFixture<T>(value: T | undefined): T {
 }
 
 describe('keeper chat operation tracking', () => {
+  it('restores frontend response details through repeated durable draft reads', () => {
+    const details = {
+      traceId: 'trace', turnRef: 'turn', providerMessageId: '', modelUsed: 'observed-model',
+      stopReason: 'end_turn', latencyMs: 0, costUsd: 0, replyText: '  reply  ',
+      usage: { inputTokens: 3, outputTokens: 7, totalTokens: 10,
+        cacheCreationInputTokens: 0, cacheReadInputTokens: 2, costUsd: 0 },
+      turnOutcome: 'external_effect_completed' as const,
+      externalEffectTarget: { kind: 'slack' as const, channelId: 'channel', threadTs: 'thread' },
+    }
+    upsertTrackedKeeperChatOperation({ operationId: 'metadata', keeperName: 'echo', message: 'request', submittedAt: 1,
+      assistantDraft: { text: 'reply', rawText: 'reply', delivery: 'history', streamState: null,
+        details: { ...details, rawPayload: { privatePayload: 'excluded' } } } })
+    for (let read = 0; read < 2; read++) {
+      const stored = requiredFixture(trackedKeeperChatOperationsForKeeper('echo')[0])
+      expect(stored.assistantDraft?.details).toEqual(details)
+      upsertTrackedKeeperChatOperation(stored)
+    }
+  })
   beforeEach(() => {
     window.localStorage.clear()
     _clearTrackedKeeperChatOperationsForTests()

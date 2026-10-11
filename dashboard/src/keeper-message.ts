@@ -105,6 +105,39 @@ export function normalizeKeeperConversationDetails(raw: unknown): KeeperConversa
   }
 }
 
+/** Local drafts store the frontend DTO, not the server's snake_case payload.
+ * Raw provider payload is deliberately excluded from durable drafts. */
+export function normalizeStoredKeeperConversationDetails(raw: unknown): KeeperConversationDetails | null {
+  if (!isRecord(raw)) return null
+  const text = (value: unknown): string | null => typeof value === 'string' ? value : null
+  const number = (value: unknown): number | null =>
+    typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+  const cacheCreation = isRecord(raw.usage) ? number(raw.usage.cacheCreationInputTokens) : null
+  const cacheRead = isRecord(raw.usage) ? number(raw.usage.cacheReadInputTokens) : null
+  const usageCost = isRecord(raw.usage) ? number(raw.usage.costUsd) : null
+  const usage = isRecord(raw.usage) ? {
+    inputTokens: number(raw.usage.inputTokens), outputTokens: number(raw.usage.outputTokens),
+    totalTokens: number(raw.usage.totalTokens),
+    ...(cacheCreation !== null ? { cacheCreationInputTokens: cacheCreation } : {}),
+    ...(cacheRead !== null ? { cacheReadInputTokens: cacheRead } : {}),
+    ...(usageCost !== null ? { costUsd: usageCost } : {}),
+  } : null
+  const target = isRecord(raw.externalEffectTarget) ? raw.externalEffectTarget : null
+  let externalEffectTarget: KeeperExternalEffectTarget | null = null
+  if (target?.kind === 'dashboard') externalEffectTarget = { kind: 'dashboard' }
+  else if ((target?.kind === 'discord' || target?.kind === 'slack')
+    && typeof target.channelId === 'string' && target.channelId.length > 0) {
+    externalEffectTarget = target.kind === 'discord' ? { kind: 'discord', channelId: target.channelId }
+      : { kind: 'slack', channelId: target.channelId, threadTs: text(target.threadTs) }
+  }
+  return {
+    traceId: text(raw.traceId), turnRef: text(raw.turnRef), providerMessageId: text(raw.providerMessageId),
+    modelUsed: text(raw.modelUsed), stopReason: text(raw.stopReason), latencyMs: number(raw.latencyMs),
+    costUsd: number(raw.costUsd) ?? usage?.costUsd ?? null, usage, replyText: text(raw.replyText),
+    turnOutcome: normalizeKeeperTurnOutcome(raw.turnOutcome), externalEffectTarget,
+  }
+}
+
 export function normalizeKeeperToolResponse(raw: string): {
   text: string
   details: KeeperConversationDetails | null

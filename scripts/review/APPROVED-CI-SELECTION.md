@@ -71,6 +71,12 @@ behind. `merge-guard.sh` reads the same status through `ci-checks.sh` and
 refuses to merge a member whose head is pinned pending or settled failed; a
 missing status means no leader-selected run is pinning the head.
 
+If the selection evidence artifact is lost, the settle job fails on purpose and
+the pending pin stays in place, which keeps merge-guard holding the merge. A
+human re-dispatches the selection run (the same recheck path used for a failed
+recheck); the new run pins and then settles the same heads, replacing the
+orphaned pending status.
+
 The result describes the combined candidate and the selected coverage. It is
 not an individual member's check and does not authorize merge. Ordinary
 review guards require current independent source approval; Release admission

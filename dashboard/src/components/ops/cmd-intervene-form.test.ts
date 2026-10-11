@@ -18,7 +18,7 @@ vi.mock('./helpers', () => ({ executeAction }))
 vi.mock('../common/toast', () => ({ showToast }))
 vi.mock('../../router', () => ({ replaceRoute }))
 
-import { operatorActionBusy, operatorSnapshot } from '../../operator-store'
+import { operatorSnapshot } from '../../operator-store'
 import { CmdGateLinks, CmdInterveneForm } from './cmd-intervene-form'
 
 function seedSnapshot(keepers: { name: string }[]): void {
@@ -53,7 +53,6 @@ describe('CmdInterveneForm (keeper-v2 command parity)', () => {
     executeAction.mockResolvedValue({ status: 'ok' })
     showToast.mockReset()
     replaceRoute.mockReset()
-    operatorActionBusy.value = false
     seedSnapshot([{ name: 'masc-improver' }, { name: 'nick0cave' }])
   })
 

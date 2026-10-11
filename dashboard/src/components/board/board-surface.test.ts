@@ -1,3 +1,4 @@
+import { acquireOperatorAction } from '../../operator-signals'
 import { h } from 'preact'
 import { clearStoredToken, setStoredToken } from '../../api/core'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact'
@@ -16,7 +17,7 @@ import { refreshBoard } from '../../store'
 import * as boardToast from '../common/toast'
 import { createPost, fetchBoardPost } from '../../api'
 import { requestBoardContextInference, voteComment } from '../../api/board'
-import { dispatchOperatorAction, operatorSnapshot, operatorActionBusy } from '../../operator-store'
+import { dispatchOperatorAction, operatorSnapshot } from '../../operator-store'
 import { PAGE_SIZE, feedVisibleLimit, boardFlairs, boardFlairsError, boardHearths, boardHearthsError, contentCategory, selectedBoardPostId, boardComposerMode, detailPostId, detailPost, detailFocusedCommentId, detailComments, detailCommentPage, detailLoading, detailReadPhase, loadPostDetail } from './board-state'
 import { resetBoardLatencyMetrics } from '../../board-metrics'
 import type { BoardPost, OperatorSnapshot } from '../../types'
@@ -973,7 +974,7 @@ describe('BoardSurface Component', () => {
   })
 
   it('allows independent desktop post creation while an operator action is pending', () => {
-    operatorActionBusy.value = true
+    const releaseAction = acquireOperatorAction()
     try {
       render(h(BoardSurface, {}))
       fireEvent.input(screen.getByTestId('bd-composer-title'), { target: { value: 'independent post' } })
@@ -981,7 +982,7 @@ describe('BoardSurface Component', () => {
       fireEvent.click(screen.getByTestId('bd-composer-send'))
       expect(createPost).toHaveBeenCalledTimes(1)
     } finally {
-      operatorActionBusy.value = false
+      releaseAction()
     }
   })
 

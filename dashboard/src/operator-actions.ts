@@ -23,7 +23,7 @@ import {
   operatorDigestLoading,
   operatorDigestError,
   operatorDigestErrorStatus,
-  operatorActionBusy,
+  acquireOperatorAction,
   operatorActionLog,
 } from './operator-signals'
 import { normalizeOperatorSnapshot, normalizeOperatorDigest } from './operator-normalizers'
@@ -165,7 +165,7 @@ export async function dispatchOperatorAction(
   request: OperatorActionRequest,
   options: ActionRefreshOptions = {},
 ): Promise<OperatorActionResult> {
-  operatorActionBusy.value = true
+  const releaseAction = acquireOperatorAction()
   operatorError.value = null
   operatorErrorStatus.value = null
   try {
@@ -194,7 +194,7 @@ export async function dispatchOperatorAction(
     })
     throw err
   } finally {
-    operatorActionBusy.value = false
+    releaseAction()
   }
 }
 
@@ -204,7 +204,7 @@ export async function confirmOperatorPendingAction(
   decision: 'confirm' | 'deny' = 'confirm',
   options: ActionRefreshOptions = {},
 ): Promise<OperatorActionResult> {
-  operatorActionBusy.value = true
+  const releaseAction = acquireOperatorAction()
   operatorError.value = null
   operatorErrorStatus.value = null
   try {
@@ -233,7 +233,7 @@ export async function confirmOperatorPendingAction(
     })
     throw err
   } finally {
-    operatorActionBusy.value = false
+    releaseAction()
   }
 }
 

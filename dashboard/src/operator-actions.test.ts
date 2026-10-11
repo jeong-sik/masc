@@ -404,3 +404,30 @@ describe('refreshOperatorWorkspaceDigest', () => {
     expect(signals.operatorWorkspaceDigest.value).not.toBeNull()
   })
 })
+
+describe('overlapping operator action lifetime', () => {
+  it.each(['success', 'failure'] as const)('keeps another action busy after the first %s', async (outcome) => {
+    const { mod, signals } = await load()
+    let resolveFirst!: (result: OperatorActionResult) => void
+    let rejectFirst!: (error: Error) => void
+    let resolveSecond!: (result: OperatorActionResult) => void
+    apiMocks.runOperatorAction.mockReturnValue(new Promise<OperatorActionResult>((resolve, reject) => {
+      resolveFirst = resolve
+      rejectFirst = reject
+    }))
+    apiMocks.confirmOperatorAction.mockReturnValue(new Promise<OperatorActionResult>(resolve => { resolveSecond = resolve }))
+    const first = mod.dispatchOperatorAction(makeRequest()).catch(error => error)
+    const second = mod.confirmOperatorPendingAction('vincent', 'second-token')
+    expect(signals.operatorActionBusy.value).toBe(true)
+    try {
+      if (outcome === 'failure') rejectFirst(new Error('first failed'))
+      else resolveFirst(executedResult)
+      await first
+      expect(signals.operatorActionBusy.value).toBe(true)
+    } finally {
+      resolveSecond(executedResult)
+      await second
+    }
+    expect(signals.operatorActionBusy.value).toBe(false)
+  })
+})

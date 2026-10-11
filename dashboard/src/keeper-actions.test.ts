@@ -221,6 +221,37 @@ describe('noteKeeperChatAppended', () => {
     expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(2)
   })
 
+  it('waits for durable audio row ownership when two assistant replies share text', async () => {
+    const first = { id: 'first-reply', role: 'assistant', content: 'same reply', ts: 1 }
+    const second = { id: 'second-reply', role: 'assistant', content: 'same reply', ts: 2 }
+    fetchKeeperChatHistory.mockResolvedValue([first, second])
+    await hydrateKeeperChatHistory('echo')
+    const audio = { token: 'second-clip', mime: 'audio/mpeg', message_text: 'same reply' }
+    fetchKeeperChatHistory.mockResolvedValue([first, { ...second, audio }])
+    noteKeeperChatAppended('echo', audio)
+    expect(keeperThreads.value.echo?.every(row => row.audio == null)).toBe(true)
+    await vi.runAllTimersAsync()
+    expect(keeperThreads.value.echo?.find(row => row.id === 'first-reply')?.audio).toBeNull()
+    expect(keeperThreads.value.echo?.find(row => row.id === 'second-reply')?.audio?.token).toBe('second-clip')
+  })
+
+  it('keeps audio unassociated across failed hydration and recovers on a later notification', async () => {
+    const first = { id: 'first-reply', role: 'assistant', content: 'same reply', ts: 1 }
+    const second = { id: 'second-reply', role: 'assistant', content: 'same reply', ts: 2 }
+    fetchKeeperChatHistory.mockResolvedValue([first, second])
+    await hydrateKeeperChatHistory('echo')
+    const audio = { token: 'second-clip', mime: 'audio/mpeg', message_text: 'same reply' }
+    fetchKeeperChatHistory.mockRejectedValueOnce(new Error('history unavailable'))
+    noteKeeperChatAppended('echo', audio)
+    await vi.runAllTimersAsync()
+    expect(keeperThreads.value.echo?.every(row => row.audio == null)).toBe(true)
+    fetchKeeperChatHistory.mockResolvedValue([first, { ...second, audio }])
+    noteKeeperChatAppended('echo', audio)
+    await vi.runAllTimersAsync()
+    expect(keeperThreads.value.echo?.find(row => row.id === 'first-reply')?.audio).toBeNull()
+    expect(keeperThreads.value.echo?.find(row => row.id === 'second-reply')?.audio?.token).toBe('second-clip')
+  })
+
   it('still refreshes history when an audio clip is attached', async () => {
     fetchKeeperChatHistory.mockResolvedValue([
       { id: 'msg-audio-user', role: 'user', content: 'hi', ts: 1_780_000_000 },

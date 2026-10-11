@@ -693,35 +693,6 @@ function normalizeBlocks(raw: unknown, role: KeeperConversationRole): ChatBlock[
   return blocks.length > 0 ? blocks : undefined
 }
 
-/** Try to attach an audio clip to the most recent assistant entry whose
- *  rendered text matches the clip's message text. Returns true if a match
- *  was found and updated. This handles the live push path: the assistant
- *  bubble is already streaming when the synthesized audio event arrives. */
-export function attachKeeperAudioClip(name: string, rawAudio: unknown): boolean {
-  const clip = normalizeAudioClip(rawAudio)
-  if (!clip) return false
-  const targetText = clip.messageText.trim()
-  const existing = keeperThreads.value[name] ?? []
-  let updated = false
-  const next = existing.map((entry) => {
-    if (updated) return entry
-    if (entry.role !== 'assistant') return entry
-    const entryText = entry.text.trim()
-    const entryRawText = (entry.rawText ?? entry.text).trim()
-    if (
-      targetText && (entryText === targetText || entryRawText === targetText)
-    ) {
-      updated = true
-      return { ...entry, audio: clip }
-    }
-    return entry
-  })
-  if (updated) {
-    keeperThreads.value = { ...keeperThreads.value, [name]: next }
-  }
-  return updated
-}
-
 // --- Normalizers ---
 
 // Closed runtime mirrors of the 5 narrow string unions inside

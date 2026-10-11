@@ -889,6 +889,23 @@ describe('Keeper operation stream projection', () => {
     expect(keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')).toBeDefined()
   })
 
+  it('does not let late acceptance reopen a completed response', () => {
+    assistantEntry('kmsg-operation-1')
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'completed answer' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'RUN_FINISHED' })
+    const before = requiredFixture(keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1'))
+    expect(before.responseState).toMatchObject({ phase: 'terminal' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM', name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+      value: { operation_id: 'kmsg-operation-1', state: 'Queued', queued_count: 1 },
+    })
+    const after = requiredFixture(keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1'))
+    expect(after.delivery).toBe(before.delivery)
+    expect(after.streamState).toBe(before.streamState)
+    expect(after.rawText).toBe(before.rawText)
+    expect(after.responseState).toMatchObject({ phase: 'terminal' })
+  })
+
   it('projects queued acceptance without a receipt or queue revision', () => {
     assistantEntry()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {

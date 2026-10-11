@@ -1224,6 +1224,8 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (event.name === 'KEEPER_CHAT_OPERATION_ACCEPTED') {
+        const response = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)?.responseState
+        if (response?.kind === 'known' && response.phase === 'terminal') return null
         const operationId = event.value.operation_id.trim()
         if (!operationId) return 'Keeper operation acceptance is missing operation_id.'
         const queued = event.value.state === 'Queued'

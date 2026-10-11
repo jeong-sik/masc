@@ -279,7 +279,7 @@ let test_repeat_survives_reasoning_visibility_and_backfill () = at_sizes (fun or
     ~text:"MATCH_HISTORY" 1.];
   let held = log state ~id:"running" ~at:10.
     [Live.Run_started; Live.Text {text="MATCH_PROGRESS"; stream_scope=None};
-     Live.Thinking "MATCH_REASONING"; Live.Text {text="MATCH_REPLY"; stream_scope=None}] in
+     Live.Thinking {text="MATCH_REASONING";response=None}; Live.Text {text="MATCH_REPLY"; stream_scope=None}] in
   let latest = find state "MATCH_" in
   let thought = find ~older:latest state "MATCH_" in
   check bool "repeating search visits a distinct journal stretch" true

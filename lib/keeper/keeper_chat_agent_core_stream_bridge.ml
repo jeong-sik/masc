@@ -998,7 +998,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
          let bridge_state = occupy_non_tool_index ~channel:Provider_reasoning bridge_state index in
          let text = redact_text text in
          observe_model_content bridge_state ~stream_scope ~index ~channel:Provider_reasoning
-           text [Agent_core_thinking_delta {index; delta=text}])
+           text [Agent_core_thinking_delta {index; delta=text; response=Some {response_generation=bridge_state.content_generation;response_scope=stream_scope}}])
   | ContentBlockDelta
       { index; delta = ReasoningDetailsDelta { reasoning_content; details } } ->
       (* MiniMax split-reasoning stream (#2347): project the reasoning payload
@@ -1016,7 +1016,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
          in
          let text = redact_text text in
          observe_model_content bridge_state ~stream_scope ~index ~channel:Provider_reasoning
-           text [Agent_core_thinking_delta {index; delta=text}])
+           text [Agent_core_thinking_delta {index; delta=text; response=Some {response_generation=bridge_state.content_generation;response_scope=stream_scope}}])
   | ContentBlockDelta { index; delta = RedactedThinkingSnapshot _ } ->
       (match
          reject_non_input_tool_delta ~stream_scope ~index

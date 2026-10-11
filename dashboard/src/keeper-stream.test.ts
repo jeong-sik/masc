@@ -2303,3 +2303,43 @@ it('recovers late operation response metadata without reopening canonical histor
     text: 'canonical answer', delivery: 'history', streamState: null,
   })
 })
+
+it('isolates persisted metadata for interleaved operations sharing provider identifiers', () => {
+  keeperThreads.value = {}
+  _resetLiveSendRequestOwnersForTests()
+  _resetKeeperStreamBuffersForTests()
+  _clearTrackedKeeperChatOperationsForTests()
+  for (const operationId of ['operation-a', 'operation-b']) {
+    upsertTrackedKeeperChatOperation({ operationId, keeperName: 'sangsu', message: 'same input', submittedAt: 1 })
+    appendThreadEntry('sangsu', { id: operationId, role: 'assistant', source: 'direct_assistant', label: 'sangsu',
+      text: `canonical ${operationId}`, delivery: 'history', streamState: null,
+      deliveryProvenance: operationDeliveryProvenance(operationId, 'terminal_result'), details: null })
+  }
+  const send = (operationId: string, sequence: number, event: KeeperChatStreamEvent) =>
+    applyKeeperOperationTurnEvent('sangsu', { operationId, sequence, event })
+  const start = (generation: number, scope: number, model: string): KeeperChatStreamEvent => ({
+    type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_START', value: {
+      content_generation: generation, stream_scope: scope, provider_message_id: 'shared-provider-id', model,
+      usage: { input_tokens: generation, output_tokens: 2, cost_usd: 0 } } })
+  send('operation-a', 0, start(1, 0, 'first-a'))
+  send('operation-b', 0, start(1, 0, 'only-b'))
+  send('operation-a', 1, { type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_STOP',
+    value: { content_generation: 1, stream_scope: 0 } })
+  send('operation-a', 2, start(2, 1, 'latest-a'))
+  send('operation-b', 1, { type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_DELTA',
+    value: { content_generation: 1, stream_scope: 0, usage: { output_tokens: 8 } } })
+  send('operation-a', 3, start(1, 99, 'stale-a'))
+  send('operation-a', 4, { type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_DELTA',
+    value: { content_generation: 2, stream_scope: 1, usage: { output_tokens: 9 } } })
+  send('operation-b', 0, start(99, 99, 'replayed-b'))
+  const stored = trackedKeeperChatOperationsForKeeper('sangsu')
+  for (const [operationId, model, input, output, sequence] of [
+    ['operation-a', 'latest-a', 2, 9, 4], ['operation-b', 'only-b', 1, 8, 1],
+  ] as const) {
+    expect(stored.find(operation => operation.operationId === operationId)?.assistantDraft).toMatchObject({
+      text: `canonical ${operationId}`, delivery: 'history', streamState: null,
+      responseState: { lastSequence: sequence }, details: { modelUsed: model, providerMessageId: 'shared-provider-id',
+        costUsd: 0, usage: { inputTokens: input, outputTokens: output, costUsd: 0 } },
+    })
+  }
+})

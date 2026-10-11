@@ -35,10 +35,11 @@ let observation ?(receiver=receiver) ?(ordinal=1) ?(channel="text") ?(known=fals
     "parent_tool_use_id",`String "parent";"message_id",`String "";"model",`String model;
     "text",`String body;"attribution",attribution] @ provenance)
 let row seq observation=`Assoc ["seq",`Int seq;"recorded_at",`Float (float_of_int seq);"observation",observation]
-let page ?(receiver=receiver) store through rows =
+let page ?(receiver=receiver) ?(cleanup=[]) store through rows =
   envelope "masc.child_content.records.v1" ["scope",`Assoc ["keeper_name",`String keeper;"receiver",receiver_json receiver];
     "records",`List rows;"next_cursor",`Assoc ["store_id",`String store;"after_sequence",`Int through];
-    "validation",`Assoc ["kind",`String "audited";"through_sequence",`Int through];"cleanup_failures",`List []]
+    "validation",`Assoc ["kind",`String "audited";"through_sequence",`Int through];
+    "cleanup_failures",`List (List.map (fun operation -> `String operation) cleanup)]
 let json value=Yojson.Safe.to_string value
 let read mode previous entries serve =
   let reads=ref [] in
@@ -54,7 +55,7 @@ let read mode previous entries serve =
   | Ok state -> state,List.rev !reads | Error error -> fail (Consumer.error_text error)
 let one state=match Consumer.stores state with [store] -> store | _ -> fail "one store required"
 let after uri=Uri.get_query_param uri "after_sequence"
-let records_count state=List.fold_left (fun count (store:Consumer.store) -> count+List.length store.records) 0 (Consumer.stores state)
+let records_count state=List.fold_left (fun count (store:Consumer.store) -> count+List.length (Consumer.records store)) 0 (Consumer.stores state)
 let initial () =
   fst (read Consumer.Poll Consumer.empty [receiver,Ok ("store /&+%",1)]
     (fun uri -> check (option string) "new store begins without cursor" None (after uri);
@@ -72,7 +73,7 @@ let test_snapshots_suffix_identity_and_idle () =
     Ok (200,json (page store 3 [row 2 (observation ~ordinal:2 ~channel:"thinking" ~body:"" "first");
       row 3 (observation ~known:true "later")])) ) in
   check int "one changed store suffix request" 1 (List.length requests);
-  let rows=(one second).records in
+  let rows=Consumer.records (one second) in
   check int "all complete snapshots retained without Task fold" 3 (List.length rows);
   check (list string) "same provider UUID is a correlation, not dedup key"
     ["same-provider-envelope";"same-provider-envelope";"same-provider-envelope"]
@@ -84,7 +85,7 @@ let test_snapshots_suffix_identity_and_idle () =
   let idle,requests=read Consumer.Poll second [receiver,Ok (store,3)] (fun _ -> fail "unchanged Poll performed full read") in
   check int "unchanged Poll only hints" 0 (List.length requests);
   check bool "idle keeps actual immutable state identity" true (idle==second);
-  check bool "idle keeps exact rows list" true ((one idle).records==(one second).records);
+  check bool "idle keeps exact rows list" true (Consumer.records (one idle)==Consumer.records (one second));
   check bool "coverage is explicitly unavailable" true ((one idle).coverage=Read.Unavailable)
 
 let test_newer_receipt_does_not_repeat_full_reads () =
@@ -140,8 +141,8 @@ let test_audit_redaction_disappearance_and_replacement () =
   let fresh,_=read Consumer.Audit first [receiver,Ok ("store /&+%",1)] (fun uri ->
     check (option string) "full Audit refreshes cached human leaves" None (after uri);
     Ok (200,json (page "store /&+%" 1 [row 1 (observation ~body:"[redacted]" ~model:"[redacted-model]" "first")]))) in
-  check string "current full response replaces cached text" "[redacted]" (List.hd (one fresh).records).observation.text;
-  check string "current full response replaces cached model only" "[redacted-model]" (List.hd (one fresh).records).observation.model;
+  check string "current full response replaces cached text" "[redacted]" (List.hd (Consumer.records (one fresh))).observation.text;
+  check string "current full response replaces cached model only" "[redacted-model]" (List.hd (Consumer.records (one fresh))).observation.model;
   let absent,_=read Consumer.Poll fresh [] (fun _ -> fail "absent inventory must not invent store") in
   check int "disappeared history retained" 1 (records_count absent);
   check bool "last-observed absent body not claimed currently redacted" true (Consumer.diagnostics absent<>Consumer.diagnostics fresh);
@@ -162,7 +163,7 @@ let test_audit_refuses_rollback_and_identity_rewrite () =
   let rewritten,_=read Consumer.Audit initial [receiver,Ok ("stable",4)] (fun _ ->
     Ok (200,json (page "stable" 4 (row 1 (observation ~provider:"rewritten-provider-envelope" "1")::List.tl rows)))) in
   check int "rewritten prior identity retains original history" 4 (records_count rewritten);
-  check string "original provider correlation unchanged" "same-provider-envelope" (List.hd (one rewritten).records).observation.envelope_uuid;
+  check string "original provider correlation unchanged" "same-provider-envelope" (List.hd (Consumer.records (one rewritten))).observation.envelope_uuid;
   (match (one rewritten).error with Some (Consumer.History_rewritten _) -> () | _ -> fail "identity rewrite not refused")
 
 let test_changed_hint_cannot_clear_known_rewrite_with_suffix () =
@@ -206,7 +207,56 @@ let test_bad_pages_and_guarded_fetch_keep_cache () =
     ~fetch:(fun _ -> fail "foreign Keeper request must refuse before fetch") with
    | Error (Consumer.Invalid_response Read.Scope_mismatch) -> () | _ -> fail "foreign Keeper cache reused")
 
+let test_failed_store_incarnations_remain_distinct () =
+  let first=initial () in
+  let old_failed,_=read Consumer.Poll first [receiver,Ok ("store /&+%",2)]
+    (fun _ -> Error "read unavailable") in
+  let both_failed,_=read Consumer.Poll old_failed [receiver,Ok ("replacement",1)]
+    (fun _ -> Error "read unavailable") in
+  let incarnations=List.map (function
+    | Consumer.Receiver_read (owner,store_id,Consumer.Transport _) ->
+        check bool "failure retains exact receiver" true (owner=receiver);store_id
+    | _ -> fail "expected scoped record-read failure") (Consumer.errors both_failed) in
+  check (list string) "old and replacement failures have distinct incarnations"
+    ["store /&+%";"replacement"] incarnations;
+  check int "failed replacement cannot erase old received content" 1 (records_count both_failed);
+  let recovered,_=read Consumer.Audit both_failed [receiver,Ok ("replacement",1)]
+    (fun _ -> Ok (200,json (page "replacement" 1 [row 1 (observation "replacement-content")]))) in
+  (match Consumer.errors recovered with
+   | [Consumer.Receiver_read (owner,store_id,Consumer.Transport _)] ->
+       check bool "old failure owner retained" true (owner=receiver);
+       check string "only recovered incarnation clears" "store /&+%" store_id
+   | _ -> fail "replacement recovery cleared unrelated incarnation evidence");
+  check int "both received histories preserved" 2 (records_count recovered)
+
+let test_rejected_page_cleanup_evidence () =
+  let rejected,_=read Consumer.Poll Consumer.empty [receiver,Ok ("stable",2)]
+    (fun _ -> Ok (200,json (page ~cleanup:["remove stale journal"] "stable" 1
+      [row 1 (observation "first")]))) in
+  check int "behind-frontier page does not admit content" 0 (records_count rejected);
+  check (list string) "validated page cleanup survives initial refusal"
+    ["remove stale journal"] (one rejected).cleanup_failures;
+  let foreign,_=read Consumer.Audit rejected [receiver,Ok ("stable",2)]
+    (fun _ -> Ok (200,json (page ~cleanup:["foreign warning"] "foreign" 1
+      [row 1 (observation "foreign")]))) in
+  check (list string) "foreign incarnation cannot add cleanup evidence"
+    ["remove stale journal"] (one foreign).cleanup_failures;
+  let repaired,_=read Consumer.Audit foreign [receiver,Ok ("stable",2)]
+    (fun _ -> Ok (200,json (page "stable" 2
+      [row 1 (observation "first");row 2 (observation "second")]))) in
+  check (list string) "actual admitted page refreshes cleanup evidence" [] (one repaired).cleanup_failures;
+  let rewritten,_=read Consumer.Audit repaired [receiver,Ok ("stable",2)]
+    (fun _ -> Ok (200,json (page ~cleanup:["remove retired store"] "stable" 2
+      [row 1 (observation "changed-identity");row 2 (observation "second")]))) in
+  check (list string) "history refusal retains scoped cleanup evidence"
+    ["remove retired store"] (one rewritten).cleanup_failures;
+  check int "history refusal retains previously admitted content" 2 (records_count rewritten);
+  (match (one rewritten).error with Some (Consumer.History_rewritten _) -> ()
+   | _ -> fail "expected immutable history refusal")
+
 let ()=run "Child immutable snapshot reader" ["read",[
+  test_case "rejected page cleanup evidence remains scoped" `Quick test_rejected_page_cleanup_evidence;
+  test_case "failed store incarnations remain distinct" `Quick test_failed_store_incarnations_remain_distinct;
   test_case "snapshots, opaque suffix and idle identity" `Quick test_snapshots_suffix_identity_and_idle;
   test_case "newer audited receipt and same trigger do not repeat scans" `Quick test_newer_receipt_does_not_repeat_full_reads;
   test_case "cross-page composite and independent actual clients" `Quick test_cross_page_duplicate_and_receiver_failure;

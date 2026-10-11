@@ -523,6 +523,10 @@ let codex_stream_callback ?on_native_tool_progress ?on_native_tool_completion ?r
             emit_text ~index remainder;
             stop_content index)
             (Keeper_official_client_text_stream.remainder text_stream ~final_text:text);
+          let open_indexes table = Hashtbl.fold (fun _ index acc -> index :: acc) table [] in
+          List.iter stop_content
+            (List.sort_uniq Int.compare
+               (open_indexes text_indexes @ open_indexes thinking_indexes));
           emit
             (Agent_core.Types.MessageDelta
                { stop_reason = Some Agent_core.Types.EndTurn; usage = None });

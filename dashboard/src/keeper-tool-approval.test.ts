@@ -4,7 +4,7 @@ import { applyKeeperStreamEvent } from './keeper-stream'
 import { clearStoredToken, setStoredToken } from './api/core'
 import { effect } from '@preact/signals'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { keeperActionErrors, keeperThreads, appendThreadEntry, keeperToolApprovals, upsertKeeperToolApproval } from './keeper-state'
+import { keeperActionErrors, keeperThreads, appendThreadEntry, keeperToolApprovals, settleKeeperToolApproval, upsertKeeperToolApproval } from './keeper-state'
 import { answerHeldKeeperToolApproval, hydrateKeeperToolApprovals } from './keeper-actions'
 
 // task-343: the answer path for a held tool call. Before this surface the
@@ -130,27 +130,46 @@ describe('answerHeldKeeperToolApproval', () => {
     expect(second?.settled).toBe(false)
   })
 
-  it('does not settle a replacement wait with the same provider call ID', async () => {
+  it('does not rearm an answering admission when its opening is replayed', async () => {
+    pendingRow('replayed-answer')
+    let resolveFetch!: (response: Response) => void
+    const fetchMock = vi.fn(() => new Promise<Response>(resolve => { resolveFetch = resolve }))
+    vi.stubGlobal('fetch', fetchMock)
+    const answer = answerHeldKeeperToolApproval('sangsu', idFor('replayed-answer'), 'approve')
+    try {
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+      const answering = keeperToolApprovals.value.sangsu![idFor('replayed-answer')]
+      pendingRow('replayed-answer')
+      expect(keeperToolApprovals.value.sangsu![idFor('replayed-answer')]).toBe(answering)
+      await expect(answerHeldKeeperToolApproval('sangsu', idFor('replayed-answer'), 'deny')).resolves.toBe(false)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    } finally {
+      resolveFetch(jsonResponse(200, { settled: true, decision: 'approve' }))
+      await answer
+    }
+  })
+
+  it('does not overwrite an independently settled admission with a late answer receipt', async () => {
     pendingRow('call-reused')
     let resolveFetch!: (response: Response) => void
     vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { resolveFetch = resolve })))
     const first = answerHeldKeeperToolApproval('sangsu', idFor('call-reused'), 'approve')
     await vi.waitFor(() => expect(resolveFetch).toBeDefined())
-    pendingRow('call-reused')
+    settleKeeperToolApproval('sangsu', idFor('call-reused'), 'deny')
     const replacement = keeperToolApprovals.value.sangsu![idFor('call-reused')]
     resolveFetch(jsonResponse(200, { settled: true, decision: 'approve' }))
     await expect(first).resolves.toBe(true)
     expect(keeperToolApprovals.value.sangsu![idFor('call-reused')]).toBe(replacement)
-    expect(replacement?.settled).toBe(false)
+    expect(replacement?.settled).toBe(true)
   })
 
-  it('does not publish an old failure into a replacement wait', async () => {
+  it('does not publish an old failure after another settlement', async () => {
     pendingRow('call-failure-reused')
     let resolveFetch!: (response: Response) => void
     vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { resolveFetch = resolve })))
     const first = answerHeldKeeperToolApproval('sangsu', idFor('call-failure-reused'), 'approve')
     await vi.waitFor(() => expect(resolveFetch).toBeDefined())
-    pendingRow('call-failure-reused')
+    settleKeeperToolApproval('sangsu', idFor('call-failure-reused'), 'deny')
     const replacement = keeperToolApprovals.value.sangsu![idFor('call-failure-reused')]
     keeperActionErrors.value = { sangsu: 'new request error' }
     resolveFetch(jsonResponse(500, { error: 'old request failure' }))
@@ -159,7 +178,7 @@ describe('answerHeldKeeperToolApproval', () => {
     expect(keeperActionErrors.value.sangsu).toBe('new request error')
   })
 
-  it('does not dispatch after an answering observer replaces the wait', async () => {
+  it('does not dispatch after an answering observer settles the wait', async () => {
     pendingRow('call-observer')
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
@@ -168,7 +187,7 @@ describe('answerHeldKeeperToolApproval', () => {
       const row = keeperToolApprovals.value.sangsu?.[idFor('call-observer')]
       if (row?.answering && !replaced) {
         replaced = true
-        pendingRow('call-observer')
+        settleKeeperToolApproval('sangsu', idFor('call-observer'), 'deny')
       }
     })
     try {

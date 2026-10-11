@@ -881,6 +881,25 @@ describe('Keeper operation stream projection', () => {
     expect(keeperToolApprovals.value.sangsu?.[nextId]?.settled).toBe(true)
   })
 
+  it('does not reopen a settled admission when its opening is replayed', () => {
+    assistantEntry()
+    const opening = {
+      type: 'CUSTOM' as const, name: 'KEEPER_TOOL_APPROVAL_REQUESTED' as const,
+      value: { approval_id: '019a0000-0000-7000-8000-000000000001',
+        tool_call_id: 'replayed-call', tool_call_name: 'Execute', args: '{}',
+        question: 'Run?', because: 'policy' },
+    }
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', opening)).toBeNull()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM', name: 'KEEPER_TOOL_APPROVAL_SETTLED',
+      value: { approval_id: opening.value.approval_id, tool_call_id: 'replayed-call', outcome: 'approve' },
+    })).toBeNull()
+    const terminal = keeperToolApprovals.value.sangsu?.[opening.value.approval_id]
+    expect(terminal?.settled).toBe(true)
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', opening)).toBeNull()
+    expect(keeperToolApprovals.value.sangsu?.[opening.value.approval_id]).toBe(terminal)
+  })
+
   it('mints a pending approval row on KEEPER_TOOL_APPROVAL_REQUESTED', () => {
     assistantEntry()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {

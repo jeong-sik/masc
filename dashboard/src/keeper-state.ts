@@ -991,9 +991,13 @@ export function upsertKeeperToolApproval(
   approval: Omit<KeeperToolApprovalPending, 'authRevision'>,
 ): void {
   const byKeeper = keeperToolApprovals.value[keeperName] ?? {}
+  const authRevision = currentStoredTokenRevision()
+  // Admission identity is immutable. Replayed openings cannot reset an
+  // answer in flight or erase a terminal fact in this authentication scope.
+  if (byKeeper[approval.approvalId]?.authRevision === authRevision) return
   keeperToolApprovals.value = {
     ...keeperToolApprovals.value,
-    [keeperName]: { ...byKeeper, [approval.approvalId]: Object.freeze({ ...approval, authRevision: currentStoredTokenRevision() }) },
+    [keeperName]: { ...byKeeper, [approval.approvalId]: Object.freeze({ ...approval, authRevision }) },
   }
 }
 

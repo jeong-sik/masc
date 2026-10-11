@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('./api/keeper-turn-events', () => ({ fetchKeeperTurnEvents: vi.fn(), fetchKeeperCurrentTurn: vi.fn().mockResolvedValue({ state: 'idle' }) }))
 import { fetchKeeperCurrentTurn, fetchKeeperTurnEvents, type KeeperTurnEventPage } from './api/keeper-turn-events'
 import { mergeServerHistoryEntries, keeperThreads } from './keeper-state'
-import { _resetKeeperStreamBuffersForTests, applyKeeperAutonomousTurnEvent } from './keeper-stream'
+import { _resetKeeperStreamBuffersForTests, applyKeeperAutonomousTurnEvent, applyKeeperStreamEvent } from './keeper-stream'
 import { _resetKeeperAutonomousRecoveryForTests, discoverKeeperAutonomousTurn, recoverKnownKeeperAutonomousTurns, recoverKeeperAutonomousTurn } from './keeper-autonomous-stream'
 import type { KeeperChatStreamEvent } from './lib/keeper-chat-stream-contract'
 const base = { threadId: 'keeper:k', runId: 'trace#9', timestamp: 1 }
@@ -11,8 +11,7 @@ const page = (sequence: number, event: KeeperChatStreamEvent | null): KeeperTurn
   events: [{ sequence, timestamp: 1, event }], cursor: { sequence, offset: sequence + 1 }, hasMore: false })
 beforeEach(() => { keeperThreads.value = {}; _resetKeeperStreamBuffersForTests(); _resetKeeperAutonomousRecoveryForTests(); vi.mocked(fetchKeeperTurnEvents).mockReset() })
 describe('autonomous journal recovery', () => {
-  it('retains separate reasoning previews and commits across interleaved Keeper pages', async () => {
-    vi.useFakeTimers()
+  it('retains separate reasoning snapshots across interleaved Keeper pages', async () => {
     try {
       const pending = new Map<string, (page: KeeperTurnEventPage) => void>()
       let bothReading!: () => void
@@ -30,7 +29,6 @@ describe('autonomous journal recovery', () => {
       const first = recoverKeeperAutonomousTurn('first', 'trace#9', 4)
       const second = recoverKeeperAutonomousTurn('second', 'trace#9', 4)
       await ready
-      vi.runOnlyPendingTimers()
       const parent = (name: string) => keeperThreads.value[name]?.find(entry => entry.source === 'autonomous_turn')
       for (const name of ['first', 'second']) expect(parent(name)?.traceSteps).toMatchObject([
         { kind: 'think', text: `${name} prefix ` },
@@ -49,12 +47,49 @@ describe('autonomous journal recovery', () => {
       expect(parent('first')?.responseState).toMatchObject({ lastSequence: 0 })
       pending.get('first')!(finish('first'))
       await first
-      vi.runOnlyPendingTimers()
       for (const name of ['first', 'second']) expect(parent(name)).toMatchObject({ text: `${name} answer`,
         delivery: 'delivered', streamState: null, responseState: { phase: 'terminal', lastSequence: 4 },
         traceSteps: [{ kind: 'think', text: `${name} prefix suffix` }, { kind: 'tool', name: `${name} tool` }],
       })
       expect(fetchKeeperTurnEvents).toHaveBeenCalledTimes(4)
+    } finally {
+      _resetKeeperStreamBuffersForTests()
+    }
+  })
+  it('isolates actual direct-response reasoning preview timers through tool and Saying commits', () => {
+    vi.useFakeTimers()
+    try {
+      for (const name of ['first', 'second']) keeperThreads.value = { ...keeperThreads.value,
+        [name]: [{ id: 'same-entry', role: 'assistant', source: 'direct_assistant', label: name,
+          text: '', delivery: 'sending', streamState: 'opening', deliveryProvenance: null }] }
+      const parent = (name: string) => keeperThreads.value[name]?.find(entry => entry.id === 'same-entry')
+      const send = (name: string, event: KeeperChatStreamEvent) => {
+        expect(applyKeeperStreamEvent(name, 'same-entry', { ...event, threadId: `keeper:${name}` })).toBeNull()
+      }
+      const think = (delta: string): KeeperChatStreamEvent => ({ ...base, type: 'CUSTOM',
+        name: 'KEEPER_THINKING_DELTA', value: { index: 0, delta,
+          response: { content_generation: 1, stream_scope: 0 } } })
+      for (const name of ['first', 'second']) send(name, think(`${name} prefix `))
+      expect(vi.getTimerCount()).toBeGreaterThan(0)
+      vi.runOnlyPendingTimers()
+      for (const name of ['first', 'second']) expect(parent(name)?.traceSteps).toMatchObject([
+        { kind: 'think', text: `${name} prefix ` },
+      ])
+      for (const name of ['second', 'first']) {
+        send(name, think('suffix'))
+        expect(vi.getTimerCount()).toBeGreaterThan(0)
+        send(name, { ...base, type: 'TOOL_CALL_START', toolStreamScope: 0,
+          toolCallBlockIndex: 1, toolCallId: 'shared-id', toolCallName: `${name} tool` })
+        send(name, { ...base, type: 'TEXT_MESSAGE_CONTENT', delta: `${name} answer`,
+          textResponse: { content_generation: 1, stream_scope: 0 } })
+        expect(parent(name)?.text).toBe(`${name} answer`)
+        send(name, { ...base, type: 'RUN_FINISHED' })
+      }
+      vi.runOnlyPendingTimers()
+      for (const name of ['first', 'second']) expect(parent(name)).toMatchObject({
+        text: `${name} answer`, responseState: { phase: 'terminal' },
+        traceSteps: [{ kind: 'think', text: `${name} prefix suffix` }, { kind: 'tool', name: `${name} tool` }],
+      })
     } finally {
       _resetKeeperStreamBuffersForTests()
       vi.useRealTimers()

@@ -3,7 +3,7 @@ vi.mock('./api/keeper-turn-events', () => ({ fetchKeeperTurnEvents: vi.fn() }))
 import { fetchKeeperTurnEvents, type KeeperTurnEventPage } from './api/keeper-turn-events'
 import { mergeServerHistoryEntries, keeperThreads } from './keeper-state'
 import { _resetKeeperStreamBuffersForTests, applyKeeperAutonomousTurnEvent } from './keeper-stream'
-import { _resetKeeperAutonomousRecoveryForTests, recoverKeeperAutonomousTurn } from './keeper-autonomous-stream'
+import { _resetKeeperAutonomousRecoveryForTests, recoverKnownKeeperAutonomousTurns, recoverKeeperAutonomousTurn } from './keeper-autonomous-stream'
 import type { KeeperChatStreamEvent } from './lib/keeper-chat-stream-contract'
 const base = { threadId: 'keeper:k', runId: 'trace#9', timestamp: 1 }
 const text = (delta: string): KeeperChatStreamEvent => ({ ...base, type: 'TEXT_MESSAGE_CONTENT', messageId: 'trace#9:assistant', textStreamScope: 0, delta })
@@ -176,6 +176,26 @@ describe('autonomous journal recovery', () => {
       value: { deliveryKey, executionId: 'execution-1', ordinal: 0 } })
     expect(keeperThreads.value.k?.find(entry => entry.id === 'autonomous-trace#9')?.toolObservationAuthority).toBe('unavailable')
     expect(keeperThreads.value.k?.find(entry => entry.id === 'disputed-canonical')?.toolOccurrenceQuarantined).toBe(true)
+  })
+  it('recovers a terminal event missed during disconnect without another notification', async () => {
+    vi.mocked(fetchKeeperTurnEvents).mockResolvedValueOnce(page(0, text('answer'))).mockResolvedValueOnce(page(1, { ...base, type: 'RUN_FINISHED' }))
+    await recoverKeeperAutonomousTurn('k', 'trace#9', 0)
+    await recoverKnownKeeperAutonomousTurns()
+    expect(keeperThreads.value.k?.[0]).toMatchObject({ text: 'answer', delivery: 'delivered', streamState: null })
+    expect(fetchKeeperTurnEvents).toHaveBeenLastCalledWith('k', 'trace#9', { sequence: 0, offset: 1 })
+  })
+  it('queues reconnect recovery behind an in-flight page without parallel reads', async () => {
+    let resolve!: (value: KeeperTurnEventPage) => void
+    vi.mocked(fetchKeeperTurnEvents).mockReturnValueOnce(new Promise(done => { resolve = done }))
+      .mockResolvedValueOnce(page(1, { ...base, type: 'RUN_FINISHED' }))
+    const initial = recoverKeeperAutonomousTurn('k', 'trace#9', 0)
+    const reconnect = recoverKnownKeeperAutonomousTurns()
+    expect(fetchKeeperTurnEvents).toHaveBeenCalledTimes(1)
+    resolve(page(0, text('answer')))
+    await initial
+    await reconnect
+    expect(fetchKeeperTurnEvents).toHaveBeenCalledTimes(2)
+    expect(keeperThreads.value.k?.[0]?.delivery).toBe('delivered')
   })
   it('deduplicates replay at the turn-owned reducer boundary', () => {
     applyKeeperAutonomousTurnEvent('k', 'trace#9', 0, text('a'))

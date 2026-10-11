@@ -308,9 +308,16 @@ let test_external_effect_status_survives_server_projection () =
     | Stream.Failed _ ->
       fail "typed Gate wait did not remain deliverable for a queued turn"
 
+let test_visible_caption_and_media_persist_as_complete_body () =
+  let media = Masc.Keeper_chat_blocks.Image { src = "/media/generated.png"; cap = None } in
+  let actual = Stream.For_testing.persisted_reply_blocks
+      ~reply:"caption" ~turn_outcome:TO.Visible_reply (Some [media]) in
+  let expected = Some (Masc.Keeper_chat_blocks.parse_text_to_blocks "caption" @ [media]) in
+  check bool "caption and media survive the same durable body" true (actual = expected)
+
 let test_external_effect_status_becomes_persisted_chat_block () =
   match
-    Stream.For_testing.persisted_reply_blocks
+    Stream.For_testing.persisted_reply_blocks ~reply:""
       ~turn_outcome:TO.Awaiting_gate_approval
       None
   with
@@ -324,7 +331,7 @@ let test_external_effect_status_becomes_persisted_chat_block () =
 
 let test_continuation_status_becomes_persisted_chat_block () =
   match
-    Stream.For_testing.persisted_reply_blocks
+    Stream.For_testing.persisted_reply_blocks ~reply:""
       ~turn_outcome:TO.Continuation_checkpoint
       None
   with
@@ -1765,7 +1772,7 @@ let test_media_continuation_uses_assistant_delivery_path () =
     Masc.Keeper_chat_blocks.Image { src = "/media/generated.png"; cap = None }
   in
   match
-    Stream.For_testing.persisted_reply_blocks
+    Stream.For_testing.persisted_reply_blocks ~reply:""
       ~turn_outcome:TO.Continuation_checkpoint
       (Some [ media ])
   with
@@ -1788,7 +1795,7 @@ let test_continuation_status_uses_assistant_delivery_path () =
   List.iter
     (fun media_blocks ->
        match
-         Stream.For_testing.persisted_reply_blocks
+         Stream.For_testing.persisted_reply_blocks ~reply:""
            ~turn_outcome:TO.Continuation_checkpoint media_blocks
        with
        | Some
@@ -2024,6 +2031,8 @@ let () =
             test_media_continuation_uses_assistant_delivery_path;
           test_case "continuation status uses assistant delivery path" `Quick
             test_continuation_status_uses_assistant_delivery_path;
+          test_case "visible caption and media form a complete durable body" `Quick
+            test_visible_caption_and_media_persist_as_complete_body;
           test_case "continuation status persists as a chat block" `Quick
             test_continuation_status_becomes_persisted_chat_block;
         ] );

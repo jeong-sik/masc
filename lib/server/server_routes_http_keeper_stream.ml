@@ -1579,7 +1579,7 @@ let direct_reply_terminal_error ?(has_visible_blocks = false) payload_json_opt v
      | Keeper_turn_outcome.Visible_reply, None, false -> Some empty_direct_reply
      | Keeper_turn_outcome.Visible_reply, Some _, _ -> None)
 
-let persisted_reply_blocks ~turn_outcome media_blocks =
+let persisted_reply_blocks ~reply ~turn_outcome media_blocks =
   match turn_outcome, media_blocks with
   | Keeper_turn_outcome.Continuation_checkpoint, Some media_blocks ->
     Some
@@ -1601,11 +1601,11 @@ let persisted_reply_blocks ~turn_outcome media_blocks =
       [ Keeper_chat_blocks.Status
           { kind = Keeper_chat_blocks.Awaiting_gate_approval }
       ]
-  | ( Keeper_turn_outcome.Visible_reply
-    | Keeper_turn_outcome.Terminal_effect_settled
-    | Keeper_turn_outcome.No_visible_reply ),
-    media_blocks ->
-    media_blocks
+  | Keeper_turn_outcome.Visible_reply, Some media_blocks ->
+    Some (Keeper_chat_blocks.parse_text_to_blocks reply @ media_blocks)
+  | Keeper_turn_outcome.Visible_reply, None -> None
+  | ( Keeper_turn_outcome.Terminal_effect_settled
+    | Keeper_turn_outcome.No_visible_reply ), media_blocks -> media_blocks
 
 type keeper_stream_terminal_status =
   | Stream_done
@@ -2344,7 +2344,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                reload shows media-only replies too, not just text-bearing
                replies. *)
             let blocks =
-              persisted_reply_blocks
+              persisted_reply_blocks ~reply:visible_reply
                 ~turn_outcome:canonical_reply.turn_outcome
                 (accumulated_media_blocks ())
             in

@@ -2287,6 +2287,8 @@ it('recovers late operation response metadata without reopening canonical histor
       usage: { input_tokens: 3, output_tokens: 6, cost_usd: 0 } } } })
   expect(trackedKeeperChatOperationsForKeeper('sangsu')[0]?.assistantDraft).toMatchObject({
     text: 'canonical answer', delivery: 'history', streamState: null,
+    details: { modelUsed: 'observed-model', providerMessageId: 'provider-id', costUsd: 0,
+      usage: { inputTokens: 3, outputTokens: 6, costUsd: 0 } },
   })
   applyKeeperOperationTurnEvent('sangsu', { operationId, sequence: 1,
     event: { type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_DELTA', value: {

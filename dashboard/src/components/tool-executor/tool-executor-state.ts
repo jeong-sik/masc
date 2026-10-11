@@ -160,7 +160,7 @@ export async function executeTool(): Promise<void> {
   try {
     execution.value = Object.freeze({ id, authRevision: submitted.authRevision, selection: submitted.id })
     if (!ownsSelection()) return
-    selection.value = Object.freeze({ ...submitted, result: null })
+    selection.value = Object.freeze({ ...selection.value, result: null })
     if (!ownsSelection()) return
     const text = await callMcpTool(tool.name, args, { onAdmission: binding => {
       const pending = execution.value

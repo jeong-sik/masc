@@ -46,3 +46,42 @@ it('does not submit a tool whose selection was replaced during bootstrap publica
   expect(lastResult.value).toBeNull()
  } finally { release() }
 })
+
+it('publishes the receipt after its own expired credential recovery', async () => {
+ clearStoredToken(); resetMcpClientState()
+ setStoredToken('synthetic-expired-dev', { source: 'dev', actor: 'dashboard', role: 'admin' })
+ const bootstrap = (token: string) => new Response(JSON.stringify({ token, actor: 'dashboard', role: 'admin' }), { status: 200 })
+ const fetchMock = vi.fn()
+  .mockResolvedValueOnce(bootstrap('synthetic-expired-dev'))
+  .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'expired', auth_error_code: 'token_expired' }), { status: 401 }))
+  .mockResolvedValueOnce(bootstrap('synthetic-recovered-dev'))
+  .mockResolvedValueOnce(new Response(JSON.stringify({ result: { content: [{ type: 'text', text: 'recovered output' }] } }), { status: 200 }))
+ vi.stubGlobal('fetch', fetchMock)
+ selectTool({ name: 'recovery_tool', description: '', inputSchema: { type: 'object' } })
+ await executeTool()
+ expect(fetchMock).toHaveBeenCalledTimes(4)
+ expect(lastResult.value?.text).toBe('recovered output')
+ expect(executing.value).toBe(false)
+})
+
+it.each(['credential', 'selection'] as const)('does not retry after %s replacement during recovery', async replacement => {
+ clearStoredToken(); resetMcpClientState()
+ setStoredToken('synthetic-expired-dev', { source: 'dev', actor: 'dashboard', role: 'admin' })
+ let resolve!: (response: Response) => void
+ const bootstrap = (token: string) => new Response(JSON.stringify({ token, actor: 'dashboard', role: 'admin' }), { status: 200 })
+ const fetchMock = vi.fn()
+  .mockResolvedValueOnce(bootstrap('synthetic-expired-dev'))
+  .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'expired', auth_error_code: 'token_expired' }), { status: 401 }))
+  .mockReturnValueOnce(new Promise<Response>(r => { resolve = r }))
+ vi.stubGlobal('fetch', fetchMock)
+ selectTool({ name: 'recovery_tool', description: '', inputSchema: { type: 'object' } })
+ const pending = executeTool()
+ await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+ if (replacement === 'credential') setStoredToken('synthetic-external-recovery-owner')
+ else selectTool({ name: 'replacement_tool', description: '', inputSchema: { type: 'object' } })
+ resolve(bootstrap('synthetic-recovered-dev'))
+ await pending
+ expect(fetchMock).toHaveBeenCalledTimes(3)
+ expect(lastResult.value).toBeNull()
+ expect(executing.value).toBe(false)
+})

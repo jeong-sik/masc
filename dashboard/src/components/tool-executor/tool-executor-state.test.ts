@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { effect, untracked } from '@preact/signals'
 import { beforeEach, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({ list: vi.fn(), call: vi.fn(), toast: vi.fn() }))
 vi.mock('../../api/mcp', () => ({ listAllMcpTools: mocks.list, callMcpTool: mocks.call }))
@@ -6,7 +7,7 @@ vi.mock('../common/toast', () => ({ showToast: mocks.toast }))
 vi.mock('../../store', async () => { const { signal } = await import('@preact/signals'); return { shellAuthSummary: signal({ effective_role: 'worker' }) } })
 import type { McpToolSchema } from '../../types/json-schema'
 import { setStoredToken } from '../../api/core'
-import { filteredTools, loadToolSchemas, schemasLoading, schemasError, selectTool, executeTool, lastResult, executing } from './tool-executor-state'
+import { filteredTools, loadToolSchemas, schemasLoading, schemasError, selectTool, executeTool, lastResult, executing, updateFormValues, formValues } from './tool-executor-state'
 const schema = (name: string): McpToolSchema => ({ name, description: name, inputSchema: { type: 'object' } })
 let epoch = 0
 beforeEach(() => { setStoredToken(`synthetic-owner-${++epoch}`); mocks.list.mockReset(); mocks.call.mockReset(); mocks.toast.mockClear() })
@@ -53,4 +54,16 @@ it('admits a new credential execution without old cleanup clearing its busy stat
  resolveNew?.('new output'); await replacement
  expect(calls).toBe(2); expect(busy).toBe(true); expect(result).toBeNull()
  expect(lastResult.value?.toolName).toBe('second')
+})
+
+it('preserves a draft updated synchronously during execution admission', async () => {
+ mocks.call.mockResolvedValueOnce('done')
+ selectTool({ name: 'draft_tool', description: '', inputSchema: { type: 'object', properties: { message: { type: 'string' } } } })
+ updateFormValues({ message: 'submitted' })
+ const release = effect(() => { if (executing.value) untracked(() => updateFormValues({ message: 'new draft' })) })
+ try {
+  await executeTool()
+  expect(mocks.call.mock.calls[0]?.[1]).toEqual({ message: 'submitted' })
+  expect(formValues.value).toEqual({ message: 'new draft' })
+ } finally { release() }
 })

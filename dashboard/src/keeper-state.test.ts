@@ -8,7 +8,6 @@ import {
   appendAssistantToolTraceStep,
   appendAssistantThinkingDelta,
   appendThreadEntry,
-  attachKeeperAudioClip,
   chatHistoryEntriesFromRest as normalizeChatHistoryEntriesFromRest,
   finalizeAssistantEntry,
   insertThreadEntryBefore,
@@ -1974,22 +1973,6 @@ describe('RFC-0235 audio clip normalization', () => {
     keeperThreads.value = {}
   })
 
-  function entry(partial: Partial<KeeperConversationEntry>): KeeperConversationEntry {
-    return {
-      id: 'e-1',
-      role: 'user',
-      source: 'direct_user',
-      label: '사용자',
-      text: 'hello',
-      rawText: 'hello',
-      timestamp: '2026-06-10T00:00:00.000Z',
-      delivery: 'delivered',
-      streamState: null,
-      details: null,
-      ...partial,
-    }
-  }
-
   it('normalizes snake_case history audio fields with a URL fallback', () => {
     const clip = normalizeAudioClip({
       token: 'clip-abc',
@@ -2062,39 +2045,4 @@ describe('RFC-0235 audio clip normalization', () => {
     expect(entries[0]?.audio?.audioUrl).toBe('/api/v1/voice/audio/hist-clip')
   })
 
-  it('attaches an SSE audio clip to the matching streaming assistant entry', () => {
-    appendThreadEntry('echo', entry({
-      id: 'reply-1',
-      role: 'assistant',
-      source: 'direct_assistant',
-      text: 'hello operator',
-      rawText: 'hello operator',
-      delivery: 'streaming',
-    }))
-    const attached = attachKeeperAudioClip('echo', {
-      token: 'live-clip',
-      mime: 'audio/mpeg',
-      message_text: 'hello operator',
-      duration_sec: 4,
-    })
-    expect(attached).toBe(true)
-    expect(keeperThreads.value.echo?.[0]?.audio?.token).toBe('live-clip')
-  })
-
-  it('does not attach when no assistant text matches', () => {
-    appendThreadEntry('echo', entry({
-      id: 'reply-1',
-      role: 'assistant',
-      source: 'direct_assistant',
-      text: 'different text',
-      rawText: 'different text',
-    }))
-    const attached = attachKeeperAudioClip('echo', {
-      token: 'live-clip',
-      mime: 'audio/mpeg',
-      message_text: 'hello operator',
-    })
-    expect(attached).toBe(false)
-    expect(keeperThreads.value.echo?.[0]?.audio).toBeUndefined()
-  })
 })

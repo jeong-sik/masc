@@ -56,7 +56,6 @@ import {
   activeStreamEntryId,
   activeStreamRequestId,
   appendThreadEntry,
-  attachKeeperAudioClip,
   chatHistoryEntriesFromRest,
   clearActiveStream,
   finalizeAssistantEntry,
@@ -880,44 +879,27 @@ async function handoffCancelledStreamToOperationHydration(
  *  (Discord, Slack, agent MCP), plus committed autonomous turns, appear
  *  without a page reload.
  *
- *  A keeper that is not in `hydratedChatKeepers` reaches the guard below
- *  for one of two reasons: (a) its panel was never opened — mount
- *  hydration fetches the full window on first open, so skipping is
- *  correct; (b) an earlier hydration FAILED and rolled the keeper back
- *  out of the set (see the catch in `hydrateKeeperChatHistory`). Case (b)
- *  leaves an OPEN panel blank and, before this branch, dropped every
- *  subsequent append until the panel remounted. When the un-hydrated
- *  keeper is the one the operator is viewing (`activeKeeperName`), we
- *  re-trigger hydration so a recovered server transcript converges into
- *  the panel instead of being dropped. `hydrateKeeperChatHistory` adds
- *  the keeper to `hydratedChatKeepers` before its fetch await, so a burst
- *  of appends collapses into the single in-flight fetch rather than
- *  fanning out one fetch per event.
+ *  A previously hydrated transcript continues receiving invalidations even
+ *  after a refresh fails and its panel closes. The hydration state retains
+ *  that successful observation; the fetch guard alone also includes pending
+ *  requests and cannot represent subscription lifetime. An unopened keeper
+ *  is loaded on mount; a failed open panel retries on the next notification.
  *
- *  If the event carries an RFC-0235 audio clip, we first try to attach
- *  it to the matching assistant bubble that is already streaming. A
- *  failed match still falls back to the history re-merge (the clip is
- *  persisted server-side too).
+ *  Audio belongs to its persisted history row. The notification only
+ *  invalidates history; matching reply text cannot establish ownership.
  *
  *  [blocks] is accepted so the live push path can carry server-parsed
  *  rich blocks; the current implementation refreshes history (which now
  *  persists blocks) so the dashboard's normalizeHistoryEntry path prefers
  *  them automatically. */
-export function noteKeeperChatAppended(name: string, audio?: unknown, _blocks?: unknown): void {
+export function noteKeeperChatAppended(name: string, _audio?: unknown, _blocks?: unknown): void {
   const keeperName = name.trim()
   if (!keeperName) return
-  if (!hydratedChatKeepers.has(keeperName)) {
+  if (!hydratedChatKeepers.has(keeperName) && keeperChatHistoryHydration.value[keeperName] !== 'hydrated') {
     if (keeperName === activeKeeperName.value.trim()) {
       void hydrateKeeperChatHistory(keeperName, { force: true })
     }
     return
-  }
-  // Try to attach an RFC-0235 audio clip to the streaming assistant bubble,
-  // but always fall through to the history re-merge so the transcript stays
-  // current even if the clip had no matching text or no content text was
-  // generated.
-  if (audio != null) {
-    attachKeeperAudioClip(keeperName, audio)
   }
   const pending = chatRefreshTimers.get(keeperName)
   if (pending) clearTimeout(pending)

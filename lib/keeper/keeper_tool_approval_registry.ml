@@ -11,6 +11,12 @@ let decision_of_string = function
   | "deny" -> Some Deny
   | _ -> None
 
+type approval_id = string
+
+let fresh_approval_id () = Random_id.uuid_v7 ()
+let approval_id_to_string id = id
+let same_approval_id = String.equal
+
 type outcome =
   | Answered of decision
   | Timed_out
@@ -25,6 +31,7 @@ type key =
 
 type pending =
   { keeper_name : string
+  ; approval_id : approval_id
   ; tool_call_id : string
   ; tool_name : string
   ; args : string
@@ -87,6 +94,7 @@ let await ?(on_registered = fun () -> ()) t ~clock ~keeper_name ~tool_call_id ~t
   let key = { key_keeper_name = keeper_name; key_tool_call_id = tool_call_id } in
   let entry =
     { keeper_name
+    ; approval_id = fresh_approval_id ()
     ; tool_call_id
     ; tool_name
     ; args

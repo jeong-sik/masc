@@ -37,6 +37,13 @@ type decision =
 val decision_to_string : decision -> string
 val decision_of_string : string -> decision option
 
+(** Identity of one registry admission, distinct from a provider tool-call ID. *)
+type approval_id
+
+val fresh_approval_id : unit -> approval_id
+val approval_id_to_string : approval_id -> string
+val same_approval_id : approval_id -> approval_id -> bool
+
 (** How the wait ended. *)
 type outcome =
   | Answered of decision
@@ -73,7 +80,8 @@ val await :
     {!pending}: a listing of bare call ids gave an operator nothing to decide
     on, so a wait only visible to the stream that opened it timed out
     unanswered whenever that stream's watcher was gone (masc#30034). They
-    identify nothing — the wait's identity stays (keeper, call id). [because]
+    do not identify an admission: [pending.approval_id] names the registered
+    wait independently of the provider's call ID. [because]
     is the policy's reason for asking rather than running; an operator reading
     the pending list has no other view of the policy table.
 
@@ -88,12 +96,14 @@ val settle :
     rather than treating it as success, so an operator is not told a call was
     approved when nothing was listening. *)
 
-(** One wait, for the operator-facing listing. The description fields say
-    what is being asked; identity stays (keeper, call id). [asked_at] is the
+(** One wait, for the operator-facing listing. [approval_id] is minted once
+    per registration and remains stable while that wait is listed. The
+    provider's [tool_call_id] remains separate call metadata. [asked_at] is the
     registry clock's reading when the wait opened, so a consumer derives age
     against the same clock family. *)
 type pending =
   { keeper_name : string
+  ; approval_id : approval_id
   ; tool_call_id : string
   ; tool_name : string
   ; args : string

@@ -102,11 +102,40 @@ let test_failed_registration_publication_removes_the_wait () =
       check int "failed publication leaves no held wait" 0
         (List.length (Registry.pending registry)))
 
+let test_reused_provider_call_has_a_new_admission_identity () =
+  with_env (fun ~clock ->
+      let registry = Registry.create () in
+      let admit () =
+        let observed = ref None in
+        let outcome = Registry.await registry ~clock ~keeper_name:keeper
+          ~tool_call_id:"provider-reused-call" ~tool_name:"Execute" ~args:"{}"
+          ~question:"run?" ~because:"policy" ~timeout_sec:5.0
+          ~on_registered:(fun () ->
+            match Registry.pending registry with
+            | [pending] ->
+                observed := Some pending.Registry.approval_id;
+                check bool "answer reaches registered wait" true
+                  (Registry.settle registry ~keeper_name:keeper
+                    ~tool_call_id:"provider-reused-call" Registry.Approve)
+            | _ -> fail "expected the current admission") in
+        check bool "admission was answered" true
+          (outcome = Registry.Answered Registry.Approve);
+        match !observed with
+        | Some id -> id
+        | None -> fail "registration callback did not observe admission"
+      in
+      let first = admit () in
+      let second = admit () in
+      check bool "same provider call ID has distinct registry admissions" false
+        (Registry.same_approval_id first second))
+
 let () =
   run
     "keeper_tool_approval_registry_outcomes"
     [ ( "outcome totals"
-      , [ test_case "failed registration publication removes the wait" `Quick
+      , [ test_case "provider call reuse has a new admission identity" `Quick
+            test_reused_provider_call_has_a_new_admission_identity
+        ; test_case "failed registration publication removes the wait" `Quick
             test_failed_registration_publication_removes_the_wait
         ; test_case "a fresh registry counts nothing" `Quick
             test_new_registry_counts_nothing

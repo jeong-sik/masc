@@ -435,6 +435,7 @@ let handle_keeper_tool_approvals_list _state request reqd =
                 (fun (p : Keeper_tool_approval_registry.pending) ->
                   `Assoc
                     [ ("keeper", `String p.keeper_name)
+                    ; ("approval_id", `String (Keeper_tool_approval_registry.approval_id_to_string p.approval_id))
                     ; ("tool_call_id", `String p.tool_call_id)
                     ; ("tool", `String p.tool_name)
                     ; ("args", `String p.args)

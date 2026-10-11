@@ -539,12 +539,12 @@ async function hydrateAfterReconnect(): Promise<void> {
   handleGate()
   // Recover keeper_chat_appended events that fell outside the server replay
   // buffer while disconnected. The WS channel cannot re-deliver them, so the
-  // open conversation panel must re-fetch its transcript. Route and periodic
+  // known conversations must re-fetch their transcripts. Route and periodic
   // refreshes deliberately skip this (guard-respecting no-op to avoid polling),
   // so force it here — reconnect is the only path that knows a gap may exist.
-  // Route-independent: covers the open keeper panel on any tab.
+  // Route-independent: includes previously visited and currently open panels.
   void import('./keeper-runtime')
-    .then(mod => { mod.refreshActiveKeeperChatHistory({ force: true }) })
+    .then(mod => mod.refreshKnownKeeperChatHistories())
     .catch(err =>
       console.warn('[server-push] reconnect keeper chat re-hydration unavailable', err instanceof Error ? err.message : err),
     )

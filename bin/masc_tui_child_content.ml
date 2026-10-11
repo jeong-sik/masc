@@ -3,7 +3,7 @@ let ( let* ) = Result.bind
 
 type error = Transport of string | Http_refused of int | Invalid_json of string
   | Invalid_response of Read.decode_error | Service of Read.failure
-  | Persistence of Read.receiver * Read.error_code | Receiver_read of Read.receiver * error
+  | Persistence of Read.receiver * Read.error_code | Receiver_read of Read.receiver * string * error
   | History_rewritten of Read.receiver * string
 type read_mode = Poll | Audit
 module Keys = Set.Make (struct
@@ -46,7 +46,7 @@ let errors state =
   Option.to_list state.error
   @ List.map (fun (receiver,code) -> Persistence (receiver,code)) state.audit_failures
   @ List.filter_map (fun (store:store) ->
-      Option.map (fun error -> Receiver_read (store.receiver,error)) store.error) state.stores
+      Option.map (fun error -> Receiver_read (store.receiver,store.store_id,error)) store.error) state.stores
   @ (match state.inventory with None -> [] | Some inventory ->
       List.filter_map (fun (receiver,status) -> match status with
         | Ok _ -> None
@@ -72,7 +72,8 @@ let rec error_text = function
   | Invalid_response error -> Read.decode_error_to_string error
   | Service failure -> code_text failure.error
   | Persistence (receiver,code) -> receiver_text receiver ^ ": " ^ code_text code
-  | Receiver_read (receiver,error) -> receiver_text receiver ^ ": " ^ error_text error
+  | Receiver_read (receiver,store_id,error) ->
+      receiver_text receiver ^ " / " ^ store_id ^ ": " ^ error_text error
   | History_rewritten (receiver,store_id) ->
       receiver_text receiver ^ ": immutable history changed in " ^ store_id
 let diagnostics state =

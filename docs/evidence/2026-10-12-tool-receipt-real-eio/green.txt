@@ -1,0 +1,6 @@
+real_fiber_held=held-a,held-b,held-c
+real_fiber_immediate=immediate-a,immediate-b
+real_guard_cleanup=guarded
+real_cancel_pending_recovery=cancel-a,pending-b,next-c
+PASS: four actual Eio fiber/guard/cancellation scenarios
+elapsed_seconds=0.246521

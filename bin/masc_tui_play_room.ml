@@ -14,6 +14,7 @@ type t = {
   before : int option; position : position; viewport : viewport option;
 }
 type intent = Repaint | Send
+type origin = Viewer | Keeper | Peer
 let create () = { client = Random_id.hex ~bytes:16; active = false; joined = false;
   focused = false; draft = ""; retry = None; pending = None; next_read = 0.;
   snapshot = None; notice = None; viewer = None; before = None; position = Latest; viewport = None }
@@ -127,6 +128,9 @@ let receive ?viewer t request ~now result = match t.pending with
           before = None;
           position = Latest; viewport = None}
 let clean = Masc.Tui_terminal_text.sanitize_terminal_text
+let origin t (m : Room.message) =
+  if t.viewer = Some m.who then Viewer
+  else match m.speaker with Room.Keeper -> Keeper | Room.Participant -> Peer
 let footer t = if not t.focused then "" else
   let send = match t.retry with None -> "보내기" | Some _ -> "이전 전송 확인" in
   " 대화 · Enter: " ^ send ^ "  Tab/Esc: 관전  PgUp/PgDn: 스크롤  Home/End: 이전/최근"
@@ -145,8 +149,7 @@ let layout t ~width ~height =
       let members = "참여 중 · " ^ String.concat ", " (List.map (fun (m : Room.member) -> clean m.name) snapshot.members) in
       let messages =
         List.concat_map (fun (m : Room.message) ->
-          let mark = if t.viewer = Some m.who then "▶ " else
-            match m.speaker with Room.Keeper -> "● " | Participant -> "◀ " in
+          let mark = match origin t m with Viewer -> "▶ " | Keeper -> "● " | Peer -> "◀ " in
           let machine = match m.machine with Masc.Machine_lane.Msx -> "MSX" | Dos -> "DOS" in
           let heading = mark ^ clean m.who ^ " · " ^ machine in
           heading :: (Layout.wrap_words ~max_cells:(max 1 (width - 1)) (clean m.text)

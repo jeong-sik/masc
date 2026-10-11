@@ -158,6 +158,25 @@ let message id text : Masc.Play_room.message =
 let refresh t ~now messages =
   let t, read = View.poll t ~now ~machine:Masc.Machine_lane.Dos in
   View.receive t (request read) ~now (Ok {empty with messages})
+let origin = testable (fun ppf origin -> Format.pp_print_string ppf
+  (match origin with View.Viewer -> "viewer" | View.Keeper -> "keeper" | View.Peer -> "peer")) (=)
+
+let test_authenticated_viewer_origin () =
+  let own = { (message 1 "same words") with who = "operator"; speaker = Participant } in
+  let peer = { own with id = 2; who = "guest" } in
+  let keeper = message 3 "same words" in
+  let snapshot = {empty with messages = [own; peer; keeper]} in
+  let origins t = List.map (View.origin t) snapshot.messages in
+  let t, read = View.poll (idle ()) ~now:0. ~machine:Masc.Machine_lane.Dos in
+  let read = request read in
+  let t = View.receive ~viewer:"operator" t read ~now:0. (Ok snapshot) in
+  check (list origin) "identical text from another participant stays the peer's"
+    [View.Viewer; View.Peer; View.Keeper] (origins t);
+  let t, _ = View.poll t ~now:3. ~machine:Masc.Machine_lane.Dos in
+  let t = View.receive ~viewer:"guest" t read ~now:3. (Ok snapshot) in
+  check (list origin) "a stale response cannot replace the authenticated viewer"
+    [View.Viewer; View.Peer; View.Keeper] (origins t)
+
 let test_unusable_width_retains_room_state () =
   let t = refresh (enter (idle ())) ~now:0.
     (List.init 100 (fun i -> message (i + 1) (String.make 4096 'x'))) in
@@ -167,6 +186,7 @@ let test_unusable_width_retains_room_state () =
 
 let () = run "TUI public room" ["room", [
   test_case "unusable width preserves room state" `Quick test_unusable_width_retains_room_state;
+  test_case "the authenticated viewer owns only its messages" `Quick test_authenticated_viewer_origin;
   test_case "unknown send, reopen and edited draft" `Quick test_retry_and_edit;
   test_case "withdrawal preserves presence release" `Quick test_withdrawal_preserves_presence_release;
   test_case "serial request and deferred leave" `Quick test_serial_leave;

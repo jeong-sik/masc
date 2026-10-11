@@ -2324,6 +2324,45 @@ it('retains late owned operation reasoning without reopening canonical history',
     responseState: { lastSequence: 1 }, traceSteps: [{ kind: 'think', text: 'exposed reasoning' }] })
 })
 
+it('preserves canonical delivery through delayed historical operation reasoning previews', () => {
+  vi.useFakeTimers()
+  try {
+    keeperThreads.value = {}
+    _resetLiveSendRequestOwnersForTests()
+    _resetKeeperStreamBuffersForTests()
+    _clearTrackedKeeperChatOperationsForTests()
+    const operationId = 'historical-reasoning-preview'
+    const owner = { content_generation: 1, stream_scope: 0 }
+    upsertTrackedKeeperChatOperation({ operationId, keeperName: 'sangsu', message: 'request', submittedAt: 1 })
+    appendThreadEntry('sangsu', { id: operationId, role: 'assistant', source: 'direct_assistant', label: 'sangsu',
+      text: 'canonical answer', delivery: 'history', streamState: null,
+      deliveryProvenance: operationDeliveryProvenance(operationId, 'terminal_result'), details: null })
+    applyKeeperOperationTurnEvent('sangsu', { operationId, sequence: 0, event: {
+      type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_START', value: owner } })
+    const think = (delta: string) => applyKeeperOperationTurnEvent('sangsu', { operationId, event: {
+      type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA', value: { index: 0, delta, response: owner } } })
+    think('reasoning prefix\n')
+    expect(vi.getTimerCount()).toBeGreaterThan(0)
+    vi.advanceTimersByTime(KEEPER_THINKING_DELTA_FLUSH_INTERVAL_MS)
+    expect(trackedKeeperChatOperationsForKeeper('sangsu')[0]?.assistantDraft).toMatchObject({
+      text: 'canonical answer', delivery: 'history', streamState: null,
+      traceSteps: [{ kind: 'think', text: 'reasoning prefix\n' }],
+    })
+    think('suffix')
+    expect(vi.getTimerCount()).toBeGreaterThan(0)
+    vi.advanceTimersByTime(KEEPER_THINKING_DELTA_FLUSH_INTERVAL_MS)
+    applyKeeperOperationTurnEvent('sangsu', { operationId, sequence: 1, event: {
+      type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_STOP', value: owner } })
+    expect(trackedKeeperChatOperationsForKeeper('sangsu')[0]?.assistantDraft).toMatchObject({
+      text: 'canonical answer', delivery: 'history', streamState: null,
+      responseState: { lastSequence: 1 }, traceSteps: [{ kind: 'think', text: 'reasoning prefix\nsuffix' }],
+    })
+  } finally {
+    _resetKeeperStreamBuffersForTests()
+    vi.useRealTimers()
+  }
+})
+
 it('isolates persisted metadata for interleaved operations sharing provider identifiers', () => {
   keeperThreads.value = {}
   _resetLiveSendRequestOwnersForTests()

@@ -2389,12 +2389,14 @@ it('recovers historical operation Saying at a tool boundary without copying the 
   send(4, { type: 'TEXT_MESSAGE_CONTENT', delta: 'canonical answer', textResponse: owner })
   send(5, { type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA', value: { index: 0, delta: '', response: owner } })
   send(6, { type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA', value: { index: 0, response: owner } })
-  send(7, { type: 'RUN_FINISHED' })
-  send(8, { type: 'TEXT_MESSAGE_CONTENT', delta: 'late tail', textResponse: owner })
+  send(7, { type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA', value: { index: 1, delta: 'unowned observation' } })
+  send(8, { type: 'RUN_FINISHED' })
+  send(9, { type: 'TEXT_MESSAGE_CONTENT', delta: 'late tail', textResponse: owner })
   const draft = trackedKeeperChatOperationsForKeeper('sangsu')[0]?.assistantDraft
   expect(draft).toMatchObject({ text: 'canonical answer', delivery: 'history', streamState: null,
-    responseState: { phase: 'terminal', lastSequence: 8 } })
+    responseState: { phase: 'terminal', lastSequence: 9 } })
   expect(draft?.traceSteps?.filter(step => step.kind === 'progress').map(step => step.text)).toEqual(['checking the result'])
+  expect(draft?.traceSteps?.filter(step => step.kind === 'think').map(step => step.text)).toContain('unowned observation')
 })
 
 it('isolates persisted metadata for interleaved operations sharing provider identifiers', () => {

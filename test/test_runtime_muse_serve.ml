@@ -221,6 +221,36 @@ let params_member name json =
 
 (* A whole turn: text streamed and completed, a built-in tool item, and an
    approval the host asked for anyway, answered from the read posture. *)
+let test_completed_agent_replay_preserves_final_reply () =
+  let second =
+    {|{"jsonrpc":"2.0","method":"item/completed","params":{"sessionId":"s-1","viewCursor":"v:10","item":{"itemId":"m-2","kind":"agentMessage","turnId":"t-1","revision":2,"status":"completed","text":"LATEST_REPLY"}}}|} in
+  let completions = ref [] in
+  run_scripted
+    ~on_stream_event:(function
+      | Serve.Text_completed {item_id; _} -> completions := item_id :: !completions
+      | _ -> ())
+    (handshake_and_session ~granted:[] @
+      [Write agent_completed; Write second; Write agent_completed; Write turn_completed])
+    (fun result _ -> match result with
+      | Error error -> fail (Serve.error_to_string error)
+      | Ok turn ->
+          check (option string) "replayed older completion cannot replace final reply"
+            (Some "LATEST_REPLY") turn.text;
+          check (list string) "one completion per exact identity" ["m-1"; "m-2"]
+            (List.rev !completions))
+;;
+
+let test_completed_agent_cannot_restart () =
+  run_scripted
+    (handshake_and_session ~granted:[] @
+      [Write agent_completed; Write agent_started; Write (delta "late"); Write turn_completed])
+    (fun result _ -> match result with
+      | Error (Serve.Protocol_error {stage; _}) ->
+          check string "restart rejected at the source boundary" "item/started" stage
+      | Error error -> fail (Serve.error_to_string error)
+      | Ok _ -> fail "completed agent message restarted")
+;;
+
 let test_turn_with_tool_and_approval () =
   let deltas = Buffer.create 16 in
   let decisions = ref [] in
@@ -1111,6 +1141,9 @@ let () =
     "runtime_muse_serve"
     [ ( "turn"
       , [ test_case "completed message presence" `Quick test_completed_message_presence
+        ; test_case "completed agent replay preserves final reply" `Quick
+            test_completed_agent_replay_preserves_final_reply
+        ; test_case "completed agent cannot restart" `Quick test_completed_agent_cannot_restart
         ; test_case "turn with tool and approval" `Quick test_turn_with_tool_and_approval
         ; test_case "auth required" `Quick test_auth_required
         ; test_case "compaction reaches the stream" `Quick test_compaction_reaches_the_stream

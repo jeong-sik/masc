@@ -810,6 +810,7 @@ let gap_applies ~session_id = function
 
 type turn_state =
   { open_items : (string * Msp.item_kind) list
+  ; completed_agent_messages : (string * Msp.item) list
   ; open_tool_items : int
   ; final_text : string option
   ; tool_calls : int
@@ -938,6 +939,9 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
      | Msp.Item_started { session_id = sid; item } when ours sid && item_in_turn ~turn_id item
        ->
        (match item.Msp.kind with
+        | Msp.Agent_message
+          when List.mem_assoc item.Msp.item_id state.completed_agent_messages ->
+          protocol_error "item/started" "completed agent message cannot restart"
         | Msp.Tool_call ->
           emit (Native_tool_started (observation item));
           io.set_receive_phase Tool_item_running;
@@ -979,15 +983,20 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
             ; tool_calls = (if was_open then state.tool_calls else state.tool_calls + 1)
             }
         | Msp.Agent_message ->
-          Option.iter (fun text -> emit (Text_completed {item_id=item.Msp.item_id; text})) item.Msp.text;
-          continue
-            { state with
-              open_items
-            ; final_text =
-                (match item.Msp.text with
-                 | Some text -> Some text
-                 | None -> state.final_text)
-            }
+          (match List.assoc_opt item.Msp.item_id state.completed_agent_messages with
+           | Some previous when previous = item -> continue state
+           | Some _ ->
+               protocol_error "item/completed" "agent message changed after completion"
+           | None ->
+               let state = {state with open_items;
+                 completed_agent_messages =
+                   (item.Msp.item_id, item) :: state.completed_agent_messages;
+                 final_text = (match item.Msp.text with
+                   | Some text -> Some text
+                   | None -> state.final_text)} in
+               Option.iter (fun text ->
+                 emit (Text_completed {item_id=item.Msp.item_id; text})) item.Msp.text;
+               continue state)
         | Msp.Compaction ->
           Option.iter (fun compaction -> emit (Compaction_observed compaction))
             item.Msp.compaction;
@@ -1290,6 +1299,7 @@ let run_protocol
         ~turn_id
         ~on_stream_event
         { open_items = []
+        ; completed_agent_messages = []
         ; open_tool_items = 0
         ; final_text = None
         ; call_models = []

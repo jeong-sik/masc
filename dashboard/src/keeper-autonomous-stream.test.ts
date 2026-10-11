@@ -101,6 +101,82 @@ describe('autonomous journal recovery', () => {
       expect.objectContaining({ text: 'owned' }), expect.objectContaining({ text: 'exposed without owner' }),
     ]))
   })
+  it.each([true, false])('binds approved tool persistence in either result order (commit first %s)', (commitFirst) => {
+    let sequence = 0
+    const send = (event: KeeperChatStreamEvent) => applyKeeperAutonomousTurnEvent('k', 'trace#9', sequence++, event)
+    const owner = { kind: 'approval_lifecycle' as const, approval_id: 'approval-1' }
+    send({ ...base, type: 'TOOL_CALL_START', toolStreamScope: 0, toolCallBlockIndex: 1,
+      toolCallId: 'provider-tool', toolCallName: 'Read' })
+    const commit: KeeperChatStreamEvent = { ...base, type: 'CUSTOM', name: 'KEEPER_TOOL_TRANSCRIPT_COMMITTED',
+      value: { deliveryKey: owner, executionId: 'execution-1', ordinal: 0 } }
+    const result: KeeperChatStreamEvent = { ...base, type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY',
+      value: { toolStreamScope: 0, toolCallBlockIndex: 1, toolCallId: 'provider-tool', executionId: 'execution-1' } }
+    send(commitFirst ? commit : result)
+    send(commitFirst ? result : commit)
+    const tool = keeperThreads.value.k?.find(entry => entry.role === 'tool')
+    expect(tool).toMatchObject({ toolParentEntryId: 'autonomous-trace#9', executionId: 'execution-1', toolTranscriptOrdinal: 0,
+      deliveryProvenance: { delivery_key: owner, transcript_slot: { kind: 'tool_call', execution_id: 'execution-1', ordinal: 0 } } })
+    mergeServerHistoryEntries('k', [{ id: 'canonical-tool', role: 'tool', source: 'tool_result', label: 'Read', text: 'stored output', delivery: 'history',
+      executionId: 'execution-1', deliveryProvenance: tool!.deliveryProvenance }])
+    expect(keeperThreads.value.k?.filter(entry => entry.role === 'tool')).toHaveLength(1)
+    expect(keeperThreads.value.k?.find(entry => entry.role === 'tool')).toMatchObject({ id: 'canonical-tool', toolParentEntryId: 'autonomous-trace#9' })
+    expect(keeperThreads.value.k?.find(entry => entry.source === 'autonomous_turn')?.traceSteps).toMatchObject([
+      { kind: 'tool', toolOccurrenceId: 'canonical-tool', executionId: 'execution-1' },
+    ])
+    send(commit)
+    expect(keeperThreads.value.k?.find(entry => entry.source === 'autonomous_turn')?.toolObservationAuthority).not.toBe('unavailable')
+  })
+  it('converges history arriving between result and acknowledgement', () => {
+    const deliveryKey = { kind: 'approval_lifecycle' as const, approval_id: 'approval-1' }
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 0, { ...base, type: 'TOOL_CALL_START', toolStreamScope: 0,
+      toolCallBlockIndex: 1, toolCallName: 'Read', toolCallId: 'provider-tool' })
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 1, { ...base, type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY',
+      value: { toolStreamScope: 0, toolCallBlockIndex: 1, toolCallId: 'provider-tool', executionId: 'execution-1' } })
+    mergeServerHistoryEntries('k', [{ id: 'early-canonical', role: 'tool', source: 'tool_result', label: 'Read', text: 'output', delivery: 'history',
+      executionId: 'execution-1', deliveryProvenance: { delivery_key: deliveryKey,
+        transcript_slot: { kind: 'tool_call', execution_id: 'execution-1', ordinal: 0 } } }])
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 2, { ...base, type: 'CUSTOM', name: 'KEEPER_TOOL_TRANSCRIPT_COMMITTED',
+      value: { deliveryKey, executionId: 'execution-1', ordinal: 0 } })
+    expect(keeperThreads.value.k?.filter(entry => entry.role === 'tool')).toHaveLength(1)
+    expect(keeperThreads.value.k?.find(entry => entry.role === 'tool')).toMatchObject({ id: 'early-canonical',
+      toolParentEntryId: 'autonomous-trace#9', toolOccurrence: { streamScope: 0, blockIndex: 1 } })
+  })
+  it.each([true, false])('converges canonical history before a result (commit before history %s)', (commitBeforeHistory) => {
+    let sequence = 0
+    const send = (event: KeeperChatStreamEvent) => applyKeeperAutonomousTurnEvent('k', 'trace#9', sequence++, event)
+    const deliveryKey = { kind: 'approval_lifecycle' as const, approval_id: 'approval-1' }
+    const commit: KeeperChatStreamEvent = { ...base, type: 'CUSTOM', name: 'KEEPER_TOOL_TRANSCRIPT_COMMITTED',
+      value: { deliveryKey, executionId: 'execution-1', ordinal: 0 } }
+    send({ ...base, type: 'TOOL_CALL_START', toolStreamScope: 0, toolCallBlockIndex: 1, toolCallName: 'Read', toolCallId: 'provider-tool' })
+    if (commitBeforeHistory) send(commit)
+    mergeServerHistoryEntries('k', [{ id: 'canonical-before-result', role: 'tool', source: 'tool_result', label: 'Read', text: 'output', delivery: 'history',
+      executionId: 'execution-1', deliveryProvenance: { delivery_key: deliveryKey,
+        transcript_slot: { kind: 'tool_call', execution_id: 'execution-1', ordinal: 0 } } }])
+    if (!commitBeforeHistory) send(commit)
+    send({ ...base, type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY',
+      value: { toolStreamScope: 0, toolCallBlockIndex: 1, toolCallId: 'provider-tool', executionId: 'execution-1' } })
+    expect(keeperThreads.value.k?.filter(entry => entry.role === 'tool')).toHaveLength(1)
+    expect(keeperThreads.value.k?.find(entry => entry.role === 'tool')).toMatchObject({ id: 'canonical-before-result', toolParentEntryId: 'autonomous-trace#9' })
+  })
+  it('retains disputed parent quarantine through canonical history and replay', () => {
+    const deliveryKey = { kind: 'approval_lifecycle' as const, approval_id: 'approval-1' }
+    for (const turnRef of ['trace#9', 'trace#10']) {
+      const send = (sequence: number, event: KeeperChatStreamEvent) => applyKeeperAutonomousTurnEvent('k', turnRef, sequence, event)
+      send(0, { ...base, type: 'TOOL_CALL_START', toolStreamScope: 0, toolCallBlockIndex: 1, toolCallName: 'Read' })
+      send(1, { ...base, type: 'CUSTOM', name: 'KEEPER_TOOL_RESULT_READY', value: { toolStreamScope: 0,
+        toolCallBlockIndex: 1, executionId: 'execution-1' } })
+      send(2, { ...base, type: 'CUSTOM', name: 'KEEPER_TOOL_TRANSCRIPT_COMMITTED', value: { deliveryKey, executionId: 'execution-1', ordinal: 0 } })
+    }
+    mergeServerHistoryEntries('k', [{ id: 'disputed-canonical', role: 'tool', source: 'tool_result', label: 'Read', text: 'output', delivery: 'history',
+      executionId: 'execution-1', deliveryProvenance: { delivery_key: deliveryKey,
+        transcript_slot: { kind: 'tool_call', execution_id: 'execution-1', ordinal: 0 } } }])
+    expect(keeperThreads.value.k?.find(entry => entry.id === 'disputed-canonical')).toMatchObject({ toolOccurrenceQuarantined: true,
+      toolParentCandidates: ['autonomous-trace#9', 'autonomous-trace#10'] })
+    applyKeeperAutonomousTurnEvent('k', 'trace#9', 3, { ...base, type: 'CUSTOM', name: 'KEEPER_TOOL_TRANSCRIPT_COMMITTED',
+      value: { deliveryKey, executionId: 'execution-1', ordinal: 0 } })
+    expect(keeperThreads.value.k?.find(entry => entry.id === 'autonomous-trace#9')?.toolObservationAuthority).toBe('unavailable')
+    expect(keeperThreads.value.k?.find(entry => entry.id === 'disputed-canonical')?.toolOccurrenceQuarantined).toBe(true)
+  })
   it('deduplicates replay at the turn-owned reducer boundary', () => {
     applyKeeperAutonomousTurnEvent('k', 'trace#9', 0, text('a'))
     applyKeeperAutonomousTurnEvent('k', 'trace#9', 0, text('a'))

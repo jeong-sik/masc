@@ -337,6 +337,27 @@ describe('thread history merge & persistence', () => {
     expect(requiredFixture(keeperThreads.value.echo).every(row => row.role !== 'tool')).toBe(true)
   })
 
+  it.each(['terminal', 'unavailable'] as const)('does not revive older pending speech when history selects %s ownership', phase => {
+    const operationId = 'pending-terminal-history'
+    const provenance = operationDeliveryProvenance(operationId, 'terminal_result')
+    appendThreadEntry('echo', entry({ id: 'older-pending', role: 'assistant', deliveryProvenance: provenance,
+      responseState: { ...initialKeeperResponseState, lastSequence: 2 }, producerTraceBoundary: 2,
+      producerSayingReplay: { text: 'final tail', timestamp: 1, owner: null, scope: null } }))
+    appendThreadEntry('echo', entry({ id: 'newer-terminal', role: 'assistant', deliveryProvenance: provenance,
+      responseState: phase === 'terminal' ? { ...initialKeeperResponseState, lastSequence: 3, phase: 'terminal' }
+        : { kind: 'unavailable' } }))
+    mergeServerHistoryEntries('echo', [entry({ id: 'canonical', role: 'assistant', text: 'canonical answer',
+      delivery: 'history', streamState: null, deliveryProvenance: provenance })])
+    const canonical = keeperThreads.value.echo?.find(row => row.id === 'canonical')
+    expect(canonical?.responseState).toMatchObject(phase === 'terminal'
+      ? { phase: 'terminal', lastSequence: 3 } : { kind: 'unavailable' })
+    expect(canonical?.producerSayingReplay).toBeUndefined()
+    applyKeeperOperationTurnEvent('echo', { operationId, sequence: 4, event: {
+      type: 'TOOL_CALL_START', toolStreamScope: 0, toolCallBlockIndex: 0, toolCallName: 'Read',
+    } })
+    expect(keeperThreads.value.echo?.find(row => row.id === 'canonical')?.traceSteps?.some(step => step.kind === 'progress')).not.toBe(true)
+  })
+
   it('preserves quarantine across exact-operation duplicates instead of granting missing ownership', () => {
     const provenance = operationDeliveryProvenance('quarantined-owner', 'terminal_result')
     appendThreadEntry('echo', entry({ id: 'unobserved-first', role: 'assistant', deliveryProvenance: provenance }))

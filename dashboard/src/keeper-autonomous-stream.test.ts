@@ -9,7 +9,7 @@ const base = { threadId: 'keeper:k', runId: 'trace#9', timestamp: 1 }
 const text = (delta: string): KeeperChatStreamEvent => ({ ...base, type: 'TEXT_MESSAGE_CONTENT', messageId: 'trace#9:assistant', textStreamScope: 0, delta })
 const page = (sequence: number, event: KeeperChatStreamEvent | null): KeeperTurnEventPage => ({ turnRef: 'trace#9',
   events: [{ sequence, timestamp: 1, event }], cursor: { sequence, offset: sequence + 1 }, hasMore: false })
-beforeEach(() => { keeperThreads.value = {}; _resetKeeperStreamBuffersForTests(); _resetKeeperAutonomousRecoveryForTests(); vi.mocked(fetchKeeperTurnEvents).mockReset() })
+beforeEach(() => { keeperThreads.value = {}; _resetKeeperStreamBuffersForTests(); _resetKeeperAutonomousRecoveryForTests(); vi.mocked(fetchKeeperTurnEvents).mockReset(); vi.mocked(fetchKeeperCurrentTurn).mockReset().mockResolvedValue({ state: 'idle' }) })
 describe('autonomous journal recovery', () => {
   it('retains separate reasoning snapshots across interleaved Keeper pages', async () => {
     try {
@@ -322,6 +322,45 @@ describe('autonomous journal recovery', () => {
     await recoverKnownKeeperAutonomousTurns()
     expect(keeperThreads.value.k?.[0]).toMatchObject({ text: 'answer', delivery: 'delivered', streamState: null })
     expect(fetchKeeperTurnEvents).toHaveBeenLastCalledWith('k', 'trace#9', { sequence: 0, offset: 1 })
+  })
+  it('discovers a new current turn for a known Keeper when its first notification was lost', async () => {
+    vi.mocked(fetchKeeperTurnEvents).mockResolvedValueOnce(page(0, text('previous answer')))
+    await recoverKeeperAutonomousTurn('k', 'trace#9', 0)
+    vi.mocked(fetchKeeperCurrentTurn).mockResolvedValueOnce({ state: 'observed', turnRef: 'trace#10', sequence: 1 })
+    vi.mocked(fetchKeeperTurnEvents).mockImplementation((_name, turnRef) => Promise.resolve(turnRef === 'trace#9'
+      ? page(1, { ...base, type: 'RUN_FINISHED' })
+      : { turnRef: 'trace#10', hasMore: false, cursor: { sequence: 1, offset: 100 }, events: [
+        { sequence: 0, timestamp: 2, event: { ...text('new answer'), runId: 'trace#10' } },
+        { sequence: 1, timestamp: 2, event: { ...base, runId: 'trace#10', type: 'RUN_FINISHED' } },
+      ] }))
+    await recoverKnownKeeperAutonomousTurns()
+    expect(fetchKeeperCurrentTurn).toHaveBeenCalledWith('k')
+    expect(keeperThreads.value.k?.filter(entry => entry.source === 'autonomous_turn')).toMatchObject([
+      { turnRef: 'trace#9', text: 'previous answer', delivery: 'delivered' },
+      { turnRef: 'trace#10', text: 'new answer', delivery: 'delivered' },
+    ])
+  })
+  it('recovers a known journal while discovery is pending and reports its later failure', async () => {
+    vi.mocked(fetchKeeperTurnEvents).mockResolvedValueOnce(page(0, text('answer')))
+    await recoverKeeperAutonomousTurn('k', 'trace#9', 0)
+    let rejectDiscovery!: (error: Error) => void
+    vi.mocked(fetchKeeperCurrentTurn).mockReturnValueOnce(new Promise((_resolve, reject) => { rejectDiscovery = reject }))
+    vi.mocked(fetchKeeperTurnEvents).mockResolvedValueOnce(page(1, { ...base, type: 'RUN_FINISHED' }))
+    const reconnect = recoverKnownKeeperAutonomousTurns()
+    const incomplete = expect(reconnect).rejects.toThrow('Autonomous reconnect journal recovery incomplete')
+    await vi.waitFor(() => expect(keeperThreads.value.k?.[0]?.delivery).toBe('delivered'))
+    rejectDiscovery(new Error('discovery unavailable'))
+    await incomplete
+    expect(keeperThreads.value.k?.[0]?.text).toBe('answer')
+  })
+  it('does not pull the same discovered frontier twice on reconnect', async () => {
+    vi.mocked(fetchKeeperTurnEvents).mockResolvedValueOnce(page(0, text('answer')))
+    await recoverKeeperAutonomousTurn('k', 'trace#9', 0)
+    vi.mocked(fetchKeeperCurrentTurn).mockResolvedValueOnce({ state: 'observed', turnRef: 'trace#9', sequence: 0 })
+    vi.mocked(fetchKeeperTurnEvents).mockResolvedValueOnce({ ...page(0, null), events: [] })
+    await recoverKnownKeeperAutonomousTurns()
+    expect(fetchKeeperTurnEvents).toHaveBeenCalledTimes(2)
+    expect(keeperThreads.value.k?.[0]?.text).toBe('answer')
   })
   it('queues reconnect recovery behind an in-flight page without parallel reads', async () => {
     let resolve!: (value: KeeperTurnEventPage) => void

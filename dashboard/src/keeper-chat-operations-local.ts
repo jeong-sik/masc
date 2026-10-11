@@ -13,6 +13,8 @@ import type {
 import { keeperConversationDeliveryFromUnknown } from './lib/keeper-delivery'
 
 export interface TrackedKeeperChatAssistantDraft {
+  producerSayingReplay?: KeeperConversationEntry['producerSayingReplay']
+  producerTraceBoundary?: number
   responseState?: KeeperResponseState
   toolObservations?: StoredToolObservations
   toolTranscriptBindings?: KeeperConversationEntry['toolTranscriptBindings']
@@ -192,8 +194,27 @@ function normalizeAssistantDraft(raw: unknown, operationId?: string): TrackedKee
     operationDeliveryProvenance(operationId, 'terminal_result').delivery_key, binding.deliveryKey))
   const error = nullableStringValue(raw.error)
   const responseState = raw.responseState === undefined ? undefined : keeperResponseStateFromUnknown(raw.responseState)
+  const pending = raw.producerSayingReplay
+  const pendingOwner = isRecord(pending) && pending.owner !== null ? ownerFromUnknown(pending.owner) : null
+  const producerSayingReplay = isRecord(pending) && typeof pending.text === 'string'
+    && (pending.owner === null || pendingOwner !== null)
+    && (pending.scope === null || typeof pending.scope === 'number' && Number.isSafeInteger(pending.scope) && pending.scope >= 0)
+    && (pending.timestamp === undefined || typeof pending.timestamp === 'number' && Number.isFinite(pending.timestamp) && pending.timestamp >= 0)
+    ? { text: pending.text, owner: pendingOwner, scope: pending.scope as number | null,
+        timestamp: pending.timestamp as number | undefined } : undefined
+  const producerTraceBoundary = typeof raw.producerTraceBoundary === 'number'
+    && Number.isSafeInteger(raw.producerTraceBoundary) && raw.producerTraceBoundary >= 0 ? raw.producerTraceBoundary : undefined
+  const invalidPending = pending !== undefined && (producerSayingReplay === undefined
+    || responseState?.kind !== 'known' || responseState.phase === 'terminal'
+    || responseState.lastSequence === null || producerTraceBoundary === undefined
+    || producerTraceBoundary > responseState.lastSequence)
+    || raw.producerTraceBoundary !== undefined && (producerTraceBoundary === undefined
+      || responseState?.kind !== 'known' || responseState.lastSequence === null
+      || producerTraceBoundary > responseState.lastSequence)
 
   return {
+    ...(!invalidPending && producerSayingReplay ? { producerSayingReplay } : {}),
+    ...(!invalidPending && producerTraceBoundary !== undefined ? { producerTraceBoundary } : {}),
     ...(responseState ? { responseState } : responseState === null ? { responseState: unavailableKeeperResponseState } : {}),
     details: normalizeStoredKeeperConversationDetails(raw.details),
     text,
@@ -214,6 +235,10 @@ function normalizeAssistantDraft(raw: unknown, operationId?: string): TrackedKee
       delivery: 'error' as const, streamState: null,
       error: 'Stored response ownership is unavailable; waiting for the authoritative operation result.',
     } : {}),
+    ...(invalidPending ? {
+      responseState: unavailableKeeperResponseState, delivery: 'error' as const, streamState: null,
+      error: 'Stored pending speech is unavailable; waiting for authoritative recovery.',
+    } : {}),
   }
 }
 
@@ -224,6 +249,8 @@ export function trackedKeeperChatAssistantDraftFromEntry(
   if (entry.role !== 'assistant') return null
   const traceSteps = normalizeTraceSteps(entry.traceSteps)
   return {
+    ...(entry.producerSayingReplay ? { producerSayingReplay: entry.producerSayingReplay } : {}),
+    ...(entry.producerTraceBoundary !== undefined ? { producerTraceBoundary: entry.producerTraceBoundary } : {}),
     ...(entry.responseState ? { responseState: entry.responseState } : {}),
     ...(entry.toolTranscriptBindings ? { toolTranscriptBindings: entry.toolTranscriptBindings } : {}),
     ...(toolEntries ? { toolObservations: captureToolObservations(entry, toolEntries) } : {}),

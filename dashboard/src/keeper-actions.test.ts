@@ -1,4 +1,5 @@
 import { operationDeliveryProvenance, toolCallDeliveryProvenance } from './keeper-delivery-provenance'
+import { initialKeeperResponseState } from './lib/keeper-response-state'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ApiCore from './api/core'
 
@@ -1207,6 +1208,19 @@ describe('recoverKeeperRuntime', () => {
 
 
 describe('restored chat operation outcome', () => {
+  it('restores pending producer speech while operation lookup is unavailable', async () => {
+    const pending = { text: 'checking result', timestamp: 1,
+      owner: { content_generation: 1, stream_scope: 0 }, scope: null }
+    upsertTrackedKeeperChatOperation({ operationId: 'restored-op', keeperName: 'echo', message: 'input', submittedAt: 1,
+      assistantDraft: { text: 'canonical answer', rawText: 'canonical answer', delivery: 'history', streamState: null,
+        producerSayingReplay: pending, producerTraceBoundary: 2,
+        responseState: { ...initialKeeperResponseState, lastSequence: 2 } } })
+    fetchKeeperChatOperation.mockRejectedValue(new Error('lookup unavailable'))
+    await hydrateTrackedKeeperChatOperations('echo')
+    expect(keeperThreads.value.echo?.find(entry => entry.role === 'assistant')).toMatchObject({
+      text: 'canonical answer', producerSayingReplay: pending, producerTraceBoundary: 2,
+    })
+  })
   beforeEach(() => {
     _resetChatHydrationForTests()
     _resetLiveSendRequestOwnersForTests()

@@ -19,6 +19,15 @@ describe('stored tool observations', () => {
     expect(restored.entries).toHaveLength(1)
   })
 
+  it('rejects two different executions claiming the same delivery ordinal even with disjoint coordinates', () => {
+    const conflicting = { ...tool, id: 'other-row', executionId: 'other-execution',
+      deliveryProvenance: toolCallDeliveryProvenance(parent.deliveryProvenance, 'other-execution', 0),
+      toolOccurrence: { kind: 'identified' as const, streamScope: 9, blockIndex: 4 } }
+    expect(toolObservationsFromUnknown({ kind: 'known', entries: [tool, conflicting] })).toEqual({ kind: 'unavailable' })
+    const distinct = { ...conflicting, deliveryProvenance: toolCallDeliveryProvenance(parent.deliveryProvenance, 'other-execution', 1) }
+    expect(toolObservationsFromUnknown({ kind: 'known', entries: [tool, distinct] }).kind).toBe('known')
+  })
+
   it('permits directed planned-to-bound continuity and rejects lost ownership evidence', () => {
     const planned = { ...tool, executionId: undefined, deliveryProvenance: toolDeliveryProvenance(parent.deliveryProvenance, 0) }
     expect(toolObservationContinues(planned, tool)).toBe(true)

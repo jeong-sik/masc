@@ -90,6 +90,9 @@ let with_stream t f =
   Fun.protect ~finally:(fun () -> Eio.Mutex.unlock t.mutex)
     (fun () -> Eio.Cancel.protect f)
 
+let with_open_stream t f =
+  with_stream t (fun () -> if not t.closed then f ())
+
 let apply t (translated : Bridge.translated_event) =
   t.bridge <- translated.bridge_state;
   List.iter (publish t) translated.chat_events
@@ -113,7 +116,7 @@ let result_ready t ~tool_call_id ~execution_id = function
       t.bridge <- Bridge.record_tool_result t.bridge occurrence;
       publish t (Events.Tool_result_ready {occurrence; tool_call_id; execution_id})
 
-let on_event t event = with_stream t (fun () ->
+let on_event t event = with_open_stream t (fun () ->
   Accum.on_event t.accum event;
   let stream_scope = Accum.current_stream_scope t.accum in
   forward t (Keeper_stream_text_redaction.Scoped.on_event t.text ~stream_scope event);
@@ -128,7 +131,7 @@ let on_tool_stream_observation t observation =
         Eio.Cancel.protect
     | Provider_retry_observed _ | Runtime_attempt_started _ | Turn_collected _ | Turn_closed_without_sources _
     | Native_tool_progress _ | Native_tool_completion _ | Official_tool_result _ ->
-        with_stream t in
+        with_open_stream t in
   protect_observation (fun () -> match observation with
   | Keeper_hooks_agent_core.Provider_retry_observed {attempt; retry} ->
       publish t (Events.Provider_retry_observed {attempt; retry})
@@ -152,19 +155,16 @@ let on_tool_stream_observation t observation =
   | Keeper_hooks_agent_core.Native_tool_progress {block_index; tool_call_id; progress} ->
       (* This observation updates an existing native row. It is not a model
          content boundary: keep any partial secret held across later deltas. *)
-      if not t.closed then begin
-        apply t (Bridge.progress_native_tool ~redact_text:t.redact_text
-          ~stream_scope:(Accum.current_stream_scope t.accum) ~block_index ~tool_call_id progress t.bridge)
-      end
+      apply t (Bridge.progress_native_tool ~redact_text:t.redact_text
+        ~stream_scope:(Accum.current_stream_scope t.accum) ~block_index ~tool_call_id progress t.bridge)
   | Keeper_hooks_agent_core.Native_tool_completion {block_index; tool_call_id; completion} ->
-      if not t.closed then
-        apply t (Bridge.finish_native_tool ~redact_text:t.redact_text
-          ~stream_scope:(Accum.current_stream_scope t.accum) ~block_index ~tool_call_id completion t.bridge)
+      apply t (Bridge.finish_native_tool ~redact_text:t.redact_text
+        ~stream_scope:(Accum.current_stream_scope t.accum) ~block_index ~tool_call_id completion t.bridge)
   | Keeper_hooks_agent_core.Official_tool_result {block_index; tool_call_id; execution_id} ->
       result_ready t ~tool_call_id:(Some tool_call_id) ~execution_id
         (Accum.record_official_execution_id t.accum ~block_index ~tool_call_id ~execution_id))
 
-let on_tool_result_ready t ~tool_call_id ~turn ~planned_index ~execution_id = with_stream t (fun () ->
+let on_tool_result_ready t ~tool_call_id ~turn ~planned_index ~execution_id = with_open_stream t (fun () ->
   result_ready t ~tool_call_id:(if String.equal tool_call_id "" then None else Some tool_call_id) ~execution_id
     (Accum.record_execution_id t.accum ~tool_call_id ~turn ~planned_index ~execution_id))
 
@@ -173,7 +173,7 @@ type ending =
   | Failed of string
   | Cancelled
 
-let publish_committed_tool_ownerships t ownerships = with_stream t (fun () ->
+let publish_committed_tool_ownerships t ownerships = with_open_stream t (fun () ->
   List.iter (fun (delivery_key, ({execution_id; ordinal} : Keeper_chat_store.tool_ownership)) ->
     publish t (Events.Tool_transcript_committed {delivery_key; execution_id; ordinal})) ownerships)
 

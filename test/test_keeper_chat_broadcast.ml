@@ -82,7 +82,7 @@ let test_projection_covers_thinking_and_tool_args () =
   in
   let _, thinking =
     project state
-      (E.Agent_core_thinking_delta { index = 0; delta = "inspect" })
+      (E.Agent_core_thinking_delta {response=None; index = 0; delta = "inspect" })
   in
   let thinking = Ag_ui.event_to_json (projected_exn (state, thinking)) in
   Alcotest.(check (option string)) "thinking custom event"
@@ -201,7 +201,7 @@ let test_projection_redacts_content_without_rewriting_protocol () =
     Alcotest.(check yojson_testable) "human progress remains redacted"
       (`String "[REDACTED]")
       (message |> Yojson.Safe.Util.member "progress" |> Yojson.Safe.Util.member "message");
-    let thinking = value (E.Agent_core_thinking_delta {index=3; delta="private-note"}) in
+    let thinking = value (E.Agent_core_thinking_delta {response=None;index=3; delta="private-note"}) in
     Alcotest.(check yojson_testable) "reasoning content remains redacted"
       (`String "[REDACTED]") (Yojson.Safe.Util.member "delta" thinking);
     let diagnostic = value (E.Agent_core_stream_protocol_error

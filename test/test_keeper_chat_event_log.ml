@@ -102,7 +102,7 @@ let all_events : E.keeper_chat_event list =
   ; E.Model_content_activity {content_generation=0; content_scope=0; content_index=0;
       content_provider_message_id=None; channel=E.Model_thinking; state=E.Content_ended}
   ; E.Agent_core_content_block_stop { index = 0 }
-  ; E.Agent_core_thinking_delta { index = 3; delta = "pondering" }
+  ; E.Agent_core_thinking_delta {response=None; index = 3; delta = "pondering" }
   ; E.Agent_core_thinking_signature_delta { index = 3; signature_bytes = 42 }
   ; E.Agent_core_media_delta
       { index = 4
@@ -291,7 +291,7 @@ let test_journal_round_trip () =
          journal
          ~seq:1
          ~ts:1_762_300_000.25
-         (E.Agent_core_thinking_delta { index = 0; delta = "hmm" });
+         (E.Agent_core_thinking_delta {response=None; index = 0; delta = "hmm" });
        let journaled = read_ok (L.read_journal journal) in
        Alcotest.(check int) "two lines" 2 (List.length journaled);
        List.iteri
@@ -893,7 +893,7 @@ let golden_events : E.keeper_chat_event list =
       ; tool_call_id = None
       ; tool_call_name = None
       }
-  ; E.Agent_core_thinking_delta { index = 0; delta = "let me think" }
+  ; E.Agent_core_thinking_delta {response=None; index = 0; delta = "let me think" }
   ; E.Agent_core_thinking_signature_delta { index = 0; signature_bytes = 128 }
   ; E.Agent_core_content_block_stop { index = 0 }
   ; E.Text_delta {text="Hello"; stream_scope=None}

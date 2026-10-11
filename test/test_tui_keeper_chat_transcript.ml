@@ -109,12 +109,12 @@ let read_file_call =
 let test_drawn_follows_every_mutation_of_the_transcript () =
   let deltas =
     [ Live.Run_started
-    ; Live.Thinking "checking "
+    ; Live.Thinking {text="checking ";response=None}
     ; Live.Text {text="Let me "; stream_scope=None}
     ]
     @ read_file_call
     @ [ Live.Text {text="look."; stream_scope=None}
-      ; Live.Thinking "again"
+      ; Live.Thinking {text="again";response=None}
       ; Live.Run_finished
       ]
   in
@@ -193,9 +193,9 @@ let test_text_and_thinking_accumulate () =
   feed t
     [ Live.Run_started
     ; Live.Text {text="Let me "; stream_scope=None}
-    ; Live.Thinking "checking "
+    ; Live.Thinking {text="checking ";response=None}
     ; Live.Text {text="look."; stream_scope=None}
-    ; Live.Thinking "the caller"
+    ; Live.Thinking {text="the caller";response=None}
     ];
   check string "text is joined in arrival order" "Let me look." (Transcript.text t);
   check string "reasoning is kept apart from the reply" "checking the caller"
@@ -395,13 +395,13 @@ let test_runtime_attempt_restarts_the_per_attempt_totals () =
   let t = fresh () in
   feed t
     [ Live.Run_started
-    ; Live.Thinking "failed reasoning"
+    ; Live.Thinking {text="failed reasoning";response=None}
     ; Live.Text {text="failed reply"; stream_scope=None}
     ; tool_started "call-kept" "Read"
     ; tool_ended "call-kept"
     ; tool_result "call-kept" "exec-kept"
     ; Live.Runtime_attempt_started { runtime_id = Some "gpt-4o"; attempt_index = Some 1 }
-    ; Live.Thinking "fallback reasoning"
+    ; Live.Thinking {text="fallback reasoning";response=None}
     ; Live.Text {text="fallback reply"; stream_scope=None}
     ];
   check string "text is the current attempt's" "fallback reply" (Transcript.text t);
@@ -508,7 +508,7 @@ let test_drawn_is_one_row_when_the_record_differs_from_the_stream_by_whitespace 
   let t = fresh () in
   feed t
     [ Live.Run_started
-    ; Live.Thinking "look first"
+    ; Live.Thinking {text="look first";response=None}
     ; tool_started "c1" "read_file"
     ; tool_ended "c1"
     ; Live.Text {text="Let me "; stream_scope=None}
@@ -799,7 +799,7 @@ let test_note_tool_outcome_folds_the_durable_facts_in () =
 
 let test_drawn_appends_the_reply_when_nothing_streamed () =
   let t = fresh () in
-  feed t [ Live.Run_started; Live.Thinking "quiet"; reply_details ~reply:"Said at the end." () ];
+  feed t [ Live.Run_started; Live.Thinking {text="quiet";response=None}; reply_details ~reply:"Said at the end." () ];
   check (list string) "the reply follows what did stream"
     [ "thinking:quiet"; "reply:Said at the end." ]
     (drawn t)
@@ -1062,7 +1062,7 @@ let test_control_bytes_never_reach_the_pane () =
   feed t
     [ Live.Text {text="before\x1b"; stream_scope=None}
     ; Live.Text {text="[2Jafter"; stream_scope=None}
-    ; Live.Thinking "\x1b[31mred"
+    ; Live.Thinking {text="\x1b[31mred";response=None}
     ; tool_started "c1" "read_file"
     ; tool_args_delta "c1" "{\"file_path\":\"a\x1b[2Jb.ml\"}"
     ; Live.Run_failed { message = "boom\x1b[2J" }
@@ -1172,10 +1172,10 @@ let test_the_whole_reasoning_trail_is_kept () =
   let t = fresh () in
   feed t
     [ Live.Run_started
-    ; Live.Thinking "weighing the first option\n"
-    ; Live.Thinking "\n\n"
-    ; Live.Thinking "the second one costs less\n"
-    ; Live.Thinking "so: the second"
+    ; Live.Thinking {text="weighing the first option\n";response=None}
+    ; Live.Thinking {text="\n\n";response=None}
+    ; Live.Thinking {text="the second one costs less\n";response=None}
+    ; Live.Thinking {text="so: the second";response=None}
     ];
   (* Not the last line alone. The durable transcript does not keep reasoning,
      so a pane that shows only the conclusion loses how the keeper got there. *)
@@ -1295,7 +1295,7 @@ let test_response_stop_preserves_pending_work () =
     receive {|{"type":"CUSTOM","name":"KEEPER_STREAM_MESSAGE_STOP","value":null}|};
     check bool "a subsequent valid wire stop ends only model activity" true
       (Transcript.model_activity t = Some Transcript.Activity_response_ended);
-    feed t [Live.Stream_model_stopped None; Live.Stream_model_stopped None; Live.Text {text=""; stream_scope=None}; Live.Thinking ""];
+    feed t [Live.Stream_model_stopped None; Live.Stream_model_stopped None; Live.Text {text=""; stream_scope=None}; Live.Thinking {text="";response=None}];
     check phase "provider stop leaves Keeper running" Transcript.Working (Transcript.phase t);
     check bool "response stop and empty chunks leave the transcript body unchanged" true
       (before = Transcript.drawn t);
@@ -1309,7 +1309,7 @@ let test_response_stop_preserves_pending_work () =
     feed t [Live.Stream_model_stopped None];
     check bool "response stop preserves existing pending execution" true
       (pending = Transcript.tool_calls t);
-    feed t [tool_result "pending" "executed"; Live.Stream_model_started { generation=None;stream_scope=None; message_id=Some "response";model="observed";usage=None}; Live.Thinking "next"];
+    feed t [tool_result "pending" "executed"; Live.Stream_model_started { generation=None;stream_scope=None; message_id=Some "response";model="observed";usage=None}; Live.Thinking {text="next";response=None}];
     check bool "a later response can resume reasoning with a reused id" true
       (Transcript.model_activity t = Some Transcript.Activity_reasoning);
     feed t [Live.Stream_model_stopped None; Live.Runtime_attempt_started
@@ -1319,7 +1319,7 @@ let test_response_stop_preserves_pending_work () =
     feed t [Live.Run_finished; Live.Stream_model_stopped None];
     check phase "a late response stop cannot reopen a completed turn" Transcript.Stream_ended
       (Transcript.phase t))
-    [Live.Text {text="answer"; stream_scope=None}; Live.Thinking "reason"]
+    [Live.Text {text="answer"; stream_scope=None}; Live.Thinking {text="reason";response=None}]
 ;;
 
 let test_the_turn_reports_the_tokens_it_has_spent () =
@@ -1550,7 +1550,7 @@ let test_scoped_reasoning_retires_previous_response_metadata () =
     (Transcript.response_metadata t).model;
   check bool "same scoped activity retains supplied usage" true
     ((Transcript.response_metadata t).usage=Some usage);
-  feed t [Live.Thinking "new supplied reasoning";activity 2];
+  feed t [Live.Thinking {text="new supplied reasoning";response=None};activity 2];
   let metadata=Transcript.response_metadata t in
   check (option string) "missing new start does not inherit old model" None metadata.model;
   check bool "missing new start does not inherit old usage" true (metadata.usage=None);
@@ -1654,7 +1654,7 @@ let test_current_attempt_metadata_keeps_observed_activity () =
   feed t [Live.Run_started;
     Live.Runtime_attempt_started {runtime_id=Some "runtime-a";attempt_index=Some 2};
     Live.Stream_model_started { generation=None;stream_scope=None; message_id=Some "message";model="model-a";usage=None};
-    Live.Text {text="current text"; stream_scope=None}; Live.Thinking "current reasoning";
+    Live.Text {text="current text"; stream_scope=None}; Live.Thinking {text="current reasoning";response=None};
     Live.Model_content_activity {Masc.Keeper_chat_events.content_generation=0;
       content_scope=0;content_index=1;content_provider_message_id=Some "message";
       channel=Model_thinking;state=Content_observed};
@@ -1901,14 +1901,14 @@ let trail_item = testable (Fmt.of_to_string trail_item_to_string) ( = )
 let test_of_log_equals_the_incremental_fold () =
   let deltas =
     [ Live.Run_started
-    ; Live.Thinking "find the file"
+    ; Live.Thinking {text="find the file";response=None}
     ; tool_started "c1" "read_file"
     ; tool_args_delta "c1" "{\"file_path\":\"a.ml\"}"
     ; tool_ended "c1"
     ; tool_result "c1" "exec-c1"
     ; Live.Text {text="half "; stream_scope=None}
     ; Live.Runtime_attempt_started { runtime_id = Some "claude-3-7-sonnet"; attempt_index = Some 1 }
-    ; Live.Thinking "again"
+    ; Live.Thinking {text="again";response=None}
     ; Live.Text {text="whole reply"; stream_scope=None}
     ; reply_details ~reply:"whole reply" ()
     ; Live.Run_finished
@@ -1934,12 +1934,12 @@ let test_trail_keeps_arrival_order () =
   let t = fresh () in
   feed t
     [ Live.Run_started
-    ; Live.Thinking "find the file first"
+    ; Live.Thinking {text="find the file first";response=None}
     ; tool_started "c1" "read_file"
     ; tool_args_delta "c1" "{\"file_path\":\"lib/keeper/a.ml\"}"
     ; tool_ended "c1"
     ; tool_result "c1" "exec-c1"
-    ; Live.Thinking "now the caller"
+    ; Live.Thinking {text="now the caller";response=None}
     ; Live.Text {text="The caller is safe."; stream_scope=None}
     ];
   match Transcript.trail t with
@@ -1969,9 +1969,9 @@ let test_trail_keeps_one_empty_line_per_paragraph_break () =
   let t = fresh () in
   feed t
     [ Live.Run_started
-    ; Live.Thinking "\n\nMain is red."
-    ; Live.Thinking "\nTwo causes:\n\n\n\n1. the board test"
-    ; Live.Thinking "\n  \n2. the stale cmi\n\n"
+    ; Live.Thinking {text="\n\nMain is red.";response=None}
+    ; Live.Thinking {text="\nTwo causes:\n\n\n\n1. the board test";response=None}
+    ; Live.Thinking {text="\n  \n2. the stale cmi\n\n";response=None}
     ];
   match Transcript.trail t with
   | [ Transcript.Trail_thinking lines ] ->
@@ -2002,7 +2002,7 @@ let test_trail_updates_a_call_after_later_stretches_open () =
   feed t
     [ Live.Run_started
     ; tool_started "c1" "read_file"
-    ; Live.Thinking "while it runs"
+    ; Live.Thinking {text="while it runs";response=None}
     ; tool_args_snapshot "c1" "{\"file_path\":\"lib/keeper/a.ml\"}"
     ; tool_result "c1" "exec-c1"
     ];
@@ -2020,7 +2020,7 @@ let test_trail_updates_a_call_after_later_stretches_open () =
 
 let test_trail_drops_blank_stretches () =
   let t = fresh () in
-  feed t [ Live.Run_started; Live.Thinking "\n\n"; Live.Text {text="  "; stream_scope=None} ];
+  feed t [ Live.Run_started; Live.Thinking {text="\n\n";response=None}; Live.Text {text="  "; stream_scope=None} ];
   check (list trail_item) "blank stretches draw nothing" []
     (Transcript.trail t)
 
@@ -2349,7 +2349,7 @@ let test_response_boundaries_preserve_origins () =
     let log = Log.create ~keeper_name:"keeper.one" ~request_id:"req-1" ~started_at:origin in
     let t = fresh () in
     let put delta = ignore (Log.add ~at:origin log ~seq:None delta); Transcript.apply ~now:origin t delta in
-    List.iter put (Live.Run_started :: boundary @ [Live.Text {text="PREFIX"; stream_scope=None}; Live.Thinking "thought"; Live.Text {text="SUFFIX"; stream_scope=None}]);
+    List.iter put (Live.Run_started :: boundary @ [Live.Text {text="PREFIX"; stream_scope=None}; Live.Thinking {text="thought";response=None}; Live.Text {text="SUFFIX"; stream_scope=None}]);
     let before = Transcript.drawn t in
     let last = List.hd (List.rev before) in
     put (reply_details ~reply:"PREFIX\nSUFFIX" ());
@@ -2382,7 +2382,7 @@ let test_interleaved_final_keeps_observed_times_and_bytes () =
   List.iter (fun canonical ->
     let t = fresh () in
     feed ~now:10. t [Live.Run_started;Live.Text {text="A"; stream_scope=None}];
-    feed ~now:20. t [Live.Thinking "R"];
+    feed ~now:20. t [Live.Thinking {text="R";response=None}];
     feed ~now:30. t [Live.Text {text="B"; stream_scope=None}];
     let before = Transcript.drawn t in
     feed ~now:40. t [reply_details ~reply:canonical ()];
@@ -2407,7 +2407,7 @@ let test_interleaved_final_keeps_observed_times_and_bytes () =
       (drawn t)) ["A\nB";"Changed canonical body"];
   List.iter (fun outcome ->
     let t = fresh () in
-    feed t [Live.Run_started;Live.Text {text="A"; stream_scope=None};Live.Thinking "R";Live.Text {text="B"; stream_scope=None};
+    feed t [Live.Run_started;Live.Text {text="A"; stream_scope=None};Live.Thinking {text="R";response=None};Live.Text {text="B"; stream_scope=None};
       Live.Reply_details {reply="";turn_outcome=outcome;turn_ref="trace#1";terminal_stream_scope=None}];
     check bool "blank and control outcomes preserve observations without a final text area"
       true (List.for_all (fun (item:Transcript.drawn_item) -> item.response_part=None)
@@ -2568,7 +2568,7 @@ let test_scoped_details_retire_prior_model_activity () =
       (Transcript.phase t);
     check bool "retiring model activity preserves prior authored stretches" true
       (body=Transcript.drawn t))
-    [Live.Text {text=" continued";stream_scope=Some 1};Live.Thinking "observed reasoning"]
+    [Live.Text {text=" continued";stream_scope=Some 1};Live.Thinking {text="observed reasoning";response=None}]
 ;;
 
 let test_scoped_details_retire_prior_response_usage () =

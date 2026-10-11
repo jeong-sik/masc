@@ -31,7 +31,7 @@ let test_overlap_uses_event_order () =
   (* Wall clock moves backwards. The last event, not the biggest clock, owns
      the label; stopping it returns to the newest remaining active event. *)
   List.iter (fun (now,delta) -> T.apply ~now t delta)
-    [90.,L.Text {text="A"; stream_scope=None}; 90.,observed (); 80.,L.Thinking "R";
+    [90.,L.Text {text="A"; stream_scope=None}; 90.,observed (); 80.,L.Thinking {text="R";response=None};
      80.,observed ~index:1 ~channel:E.Model_thinking ();
      70.,L.Text {text="B"; stream_scope=None}; 70.,observed ~index:2 ()];
   assert_signal t "STREAMING";
@@ -424,8 +424,75 @@ let test_details_production_identity () =
      ["content_generation",`Int 7;"stream_scope",`Int 0;"stream_scope",`Int 1];
      ["content_generation",`Int 7;"stream_scope",`Int 9_007_199_254_740_992]]
 
+let test_owned_thinking_lifecycle () =
+  let t = create () in
+  let think generation scope text = L.Thinking {text;
+    response=Some {E.response_generation=generation;response_scope=scope}} in
+  T.apply ~now:1. t (think 2 0 "current");
+  check bool "owned reasoning establishes current response" true
+    ((T.response_metadata t).owner=Some (2,0));
+  T.apply ~now:2. t (think 1 99 "stale");
+  check string "old reasoning cannot append to newer body" "current" (T.thinking t);
+  T.apply ~now:3. t (L.Stream_model_stopped (Some {E.response_generation=2;response_scope=0}));
+  T.apply ~now:4. t (L.Text {text="unbound";stream_scope=None});
+  T.apply ~now:5. t (think 2 0 "after-stop");
+  check string "mutable answer activity cannot reopen stopped reasoning" "current" (T.thinking t);
+  T.apply ~now:6. t (L.Runtime_attempt_started {runtime_id=Some "retry";attempt_index=Some 1});
+  let retry_body = T.thinking t in
+  T.apply ~now:7. t (think 2 0 "after-retry");
+  T.apply ~now:8. t (observed ~generation:2 ());
+  T.apply ~now:9. t (L.Stream_model_started {generation=Some 2;stream_scope=Some 0;
+    message_id=Some "reused";model="old";usage=None});
+  check string "retry cannot reopen stopped owner body" retry_body (T.thinking t);
+  check bool "closed header/content cannot reopen retry activity" true (T.model_activity t=None);
+  T.apply ~now:10. t (think 3 0 "fresh");
+  check string "new generation reasoning survives reused scope" (retry_body ^ "fresh") (T.thinking t);
+  check bool "new generation reasoning is observed activity" true
+    (T.model_activity t=Some T.Activity_reasoning);
+  T.apply ~now:11. t (L.Thinking {text="unbound";response=None});
+  check string "unobserved owner preserves authored bytes" (retry_body ^ "freshunbound") (T.thinking t);
+  T.apply ~now:12. t L.Run_finished;
+  T.apply ~now:13. t (think 4 0 "late");
+  check string "terminal reasoning cannot append late bytes" (retry_body ^ "freshunbound") (T.thinking t)
+
+let test_owned_thinking_protocol () =
+  let translated = B.translate ~redact_text:Fun.id ~base_dir:"/unused" ~stream_scope:0
+    (B.empty_state ~generation:7 ())
+    (Agent_core.Types.ContentBlockDelta {index=0;delta=ThinkingDelta "reason"}) in
+  let event = match List.find_opt (function E.Agent_core_thinking_delta _ -> true | _ -> false)
+      translated.chat_events with
+    | Some (E.Agent_core_thinking_delta {response=Some owner;_} as event) ->
+      check int "thinking bridge captures generation" 7 owner.response_generation;
+      check int "thinking bridge captures server scope" 0 owner.response_scope;
+      event
+    | Some _ | None -> fail "bridge did not publish owned thinking" in
+  check bool "owned thinking durable roundtrip" true
+    (J.keeper_chat_event_of_json (J.keeper_chat_event_to_json event)=Ok event);
+  let _, projected = Server_keeper_chat_agui_projection.project ~timestamp:0.
+    ~redact_text:Fun.id Server_keeper_chat_agui_projection.initial event in
+  let wire = Option.fold ~none:"" ~some:(Ag_ui.event_to_sse ~id:1) projected in
+  let expected = L.Thinking {text="reason";response=Some {E.response_generation=7;response_scope=0}} in
+  check bool "owned thinking journal/live identity agree" true
+    (Log.delta_of_journaled event=Some expected
+     && match L.feed (L.create ()) wire with [{delta;_}] -> delta=expected | _ -> false);
+  List.iter (fun fields ->
+    check bool "malformed thinking owner durable rejection" true
+      (Result.is_error (J.keeper_chat_event_of_json (`Assoc
+       (["type",`String "agent_core_thinking_delta";"index",`Int 0;"delta",`String "reason"]@fields))));
+    let wire = "data: " ^ Yojson.Safe.to_string (`Assoc ["type",`String "CUSTOM";
+      "name",`String "KEEPER_THINKING_DELTA";"value",`Assoc
+      (["index",`Int 0;"delta",`String "reason"]@fields)]) ^ "\n\n" in
+    check bool "malformed thinking owner live rejection" true
+      (match L.feed (L.create ()) wire with [{delta=L.Undecodable _;_}] -> true | _ -> false))
+    [["response",`Null];["response",`Assoc ["content_generation",`Int 7]];
+     ["response",`Assoc ["content_generation",`Int 7;"stream_scope",`Int (-1)]];
+     ["response",E.response_identity_to_json {response_generation=7;response_scope=0};
+      "response",E.response_identity_to_json {response_generation=8;response_scope=0}]]
+
 let () = run "model content activity"
-  ["boundaries", [test_case "owned response details" `Quick test_owned_response_details;
+  ["boundaries", [test_case "owned thinking lifecycle" `Quick test_owned_thinking_lifecycle;
+    test_case "owned thinking protocol" `Quick test_owned_thinking_protocol;
+    test_case "owned response details" `Quick test_owned_response_details;
     test_case "details production identity" `Quick test_details_production_identity;
     test_case "owned response stop admission" `Quick test_owned_response_stop;
     test_case "stop identity protocol" `Quick test_stop_identity_protocol;

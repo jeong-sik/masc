@@ -249,7 +249,7 @@ type KeeperChatCustomEvent =
   | {
       type: 'CUSTOM'
       name: 'KEEPER_THINKING_DELTA'
-      value: { index?: number; delta?: string }
+      value: { index?: number; delta?: string; response?: { content_generation: number; stream_scope: number } }
     }
   | {
       type: 'CUSTOM'

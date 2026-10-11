@@ -348,6 +348,7 @@ type t =
         (* The identity carried by the last reported stop reason. A partial
            replay can retain this while losing that response's start; only
            matching observed identities permit terminal reconciliation. *)
+  ; mutable closed_response_owner : (int * int) option
   ; mutable admitted_response_owner : (int * int) option
       (** Strongest explicit generation/scope admitted in this operation.
           Run_started generation is a durable sequence; partial body/details
@@ -438,6 +439,7 @@ let create_for_source ~keeper_name ~source ~started_at =
   ; observed_usage = None
   ; observed_stop_reason = None
   ; response_scope = None
+  ; closed_response_owner = None
   ; admitted_response_owner = None
   ; stop_scope = None
   ; content_scope = None
@@ -1400,6 +1402,41 @@ let retire_model_content t =
   t.content_scope_closed <- true
 ;;
 
+let response_is_closed t incoming =
+  Option.fold ~none:false ~some:(fun closed -> compare incoming closed <= 0) t.closed_response_owner
+;;
+
+let admit_response_identity t generation stream_scope =
+  match t.phase with
+        | Stream_ended | Stream_failed _ -> false
+        | Waiting | Working -> match generation, stream_scope with
+        | Some generation, Some scope ->
+          let incoming = generation, scope in
+          if response_is_closed t incoming
+             && t.response_scope <> Some {rs_generation=Some generation;rs_scope=scope} then false
+          else (match t.admitted_response_owner with
+           | Some current when compare incoming current < 0 -> false
+           | Some (current_generation, _) when generation = current_generation
+               && Option.fold ~none:false ~some:(fun response ->
+                    response.rs_generation=None && response.rs_scope > scope) t.response_scope -> false
+           | Some _ | None ->
+             if t.response_scope <> Some {rs_generation=Some generation;rs_scope=scope} then begin
+               begin_response t;
+               retire_model_content t;
+               t.observed_model <- None;
+               t.observed_usage <- None;
+               t.observed_stop_reason <- None;
+               t.model_signal <- None;
+               t.stop_scope <- None
+             end;
+             t.admitted_response_owner <- Some incoming;
+             t.response_scope <- Some {rs_generation=Some generation;rs_scope=scope};
+             t.current_stream_scope <- Some scope;
+             true)
+        | None, _ -> t.admitted_response_owner = None
+        | Some _, None -> false
+;;
+
 let apply_model_content ~now t (activity : Masc.Keeper_chat_events.model_content_activity) =
   let open Masc.Keeper_chat_events in
   match t.phase with
@@ -1413,7 +1450,8 @@ let apply_model_content ~now t (activity : Masc.Keeper_chat_events.model_content
     let metadata_order = match t.response_scope with
       | Some {rs_generation=Some generation;rs_scope} -> Some (compare incoming (generation,rs_scope))
       | Some {rs_generation=None;_} | None -> None in
-    if (match owner_order with Some order -> order < 0 | None -> false)
+    if response_is_closed t incoming
+       || (match owner_order with Some order -> order < 0 | None -> false)
        || scope_order < 0 || (scope_order = 0 && t.content_scope_closed) then ()
     else match activity.state with
     | Content_observed ->
@@ -1569,7 +1607,10 @@ let apply_delta ~now t (delta : Live.delta) =
       let unbound_header_over_known_owner =
         t.admitted_response_owner <> None &&
         (match incoming with Some {rs_generation=Some _;_} -> false | _ -> true) in
-      if unbound_header_over_known_owner
+      let closed_header = match incoming with
+        | Some {rs_generation=Some generation;rs_scope} -> response_is_closed t (generation,rs_scope)
+        | Some {rs_generation=None;_} | None -> false in
+      if closed_header || unbound_header_over_known_owner
          || (match ordering with Some order -> order < 0 | None -> false) then () else begin
       let repeated = match incoming, t.response_scope with
         | Some next, Some current -> next.rs_scope=current.rs_scope
@@ -1622,36 +1663,14 @@ let apply_delta ~now t (delta : Live.delta) =
         | None, _ -> t.admitted_response_owner = None
         | Some _, None | Some _, Some {rs_generation = None; _} -> false in
       if owns_current_response then begin
+        (match owner with
+         | Some owner -> t.closed_response_owner <- Some (owner.response_generation,owner.response_scope)
+         | None -> ());
         retire_model_content t;
         t.model_signal <- Some Model_response_ended
       end
   | Live.Stream_details { generation; usage; stop_reason; stream_scope } ->
-      let admissible = match t.phase with
-        | Stream_ended | Stream_failed _ -> false
-        | Waiting | Working -> match generation, stream_scope with
-        | Some generation, Some scope ->
-          let incoming = generation, scope in
-          (match t.admitted_response_owner with
-           | Some current when compare incoming current < 0 -> false
-           | Some (current_generation, _) when generation = current_generation
-               && Option.fold ~none:false ~some:(fun response ->
-                    response.rs_generation=None && response.rs_scope > scope) t.response_scope -> false
-           | Some _ | None ->
-             if t.response_scope <> Some {rs_generation=Some generation;rs_scope=scope} then begin
-               begin_response t;
-               retire_model_content t;
-               t.observed_model <- None;
-               t.observed_usage <- None;
-               t.observed_stop_reason <- None;
-               t.model_signal <- None;
-               t.stop_scope <- None
-             end;
-             t.admitted_response_owner <- Some incoming;
-             t.response_scope <- Some {rs_generation=Some generation;rs_scope=scope};
-             t.current_stream_scope <- Some scope;
-             true)
-        | None, _ -> t.admitted_response_owner = None
-        | Some _, None -> false in
+      let admissible = admit_response_identity t generation stream_scope in
       if admissible then begin
       (* A retained detail can be the first surviving event of a response.
          Its scope retires prior counters before sparse fields are merged. *)
@@ -1684,16 +1703,27 @@ let apply_delta ~now t (delta : Live.delta) =
          frame is lost, this chunk is the first thing that says the previous
          response's model, counters and stop no longer apply. *)
       Option.iter (enter_text_response_scope t) stream_scope
-  | Live.Thinking "" -> ()
   | Live.Text {text; stream_scope} ->
       Option.iter (enter_text_response_scope t) stream_scope;
       t.model_signal <- Some (Answering_at now);
       Buffer.add_string t.text_buffer text;
       trail_text ~now t text
-  | Live.Thinking text ->
-      t.model_signal <- Some (Reasoning_at now);
-      Buffer.add_string t.thinking_buffer text;
-      trail_thinking ~now t text
+  | Live.Thinking {text;response} ->
+      let generation, stream_scope = match response with
+        | None -> None, None
+        | Some owner -> Some owner.response_generation, Some owner.response_scope in
+      let closed = match response with
+        | Some owner -> response_is_closed t (owner.response_generation,owner.response_scope)
+        | None -> false in
+      let admitted = not closed && admit_response_identity t generation stream_scope in
+      let terminal = match t.phase with Stream_ended | Stream_failed _ -> true | Waiting | Working -> false in
+      if not terminal && (response=None || admitted) then begin
+        if text <> "" then begin
+          if admitted then t.model_signal <- Some (Reasoning_at now);
+          Buffer.add_string t.thinking_buffer text;
+          trail_thinking ~now t text
+        end
+      end
   | Live.Tool_started { occurrence; tool_name } ->
       start_tool ~now t ~authority:Masc_execution ~occurrence ~tool_name
   | Live.Native_tool_started { occurrence; tool_name } ->

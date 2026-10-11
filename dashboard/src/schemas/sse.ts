@@ -631,7 +631,7 @@ function validateKeeperCustomPayload(
     KEEPER_MODEL_CONTENT_ACTIVITY: [
       'generation', 'stream_scope', 'block_index', 'provider_message_id', 'channel', 'state',
     ],
-    KEEPER_THINKING_DELTA: ['index', 'delta'],
+    KEEPER_THINKING_DELTA: ['index', 'delta', 'response'],
     KEEPER_THINKING_SIGNATURE_DELTA: ['index', 'signature_bytes'],
     KEEPER_MEDIA_DELTA: ['index', 'media_type', 'source_type', 'media_ref'],
     KEEPER_STREAM_PROTOCOL_ERROR: [
@@ -786,6 +786,14 @@ function validateKeeperCustomPayload(
       return value.attempt_index === undefined ? ok(true) : requiredInteger(value, 'attempt_index', 0)
     }
     case 'KEEPER_THINKING_DELTA': {
+      if (value.response !== undefined) {
+        const owner = exactCustomObject(value.response, 'response', ['content_generation', 'stream_scope'])
+        if (!owner.success) return owner
+        const generation = requiredInteger(owner.data, 'content_generation', 0)
+        if (!generation.success) return generation
+        const scope = requiredInteger(owner.data, 'stream_scope', 0)
+        if (!scope.success) return scope
+      }
       const index = requiredInteger(value, 'index')
       return index.success ? requiredString(value, 'delta') : index
     }

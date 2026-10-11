@@ -271,7 +271,7 @@ let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
   | E.Agent_core_stream_ping
   | E.Agent_core_content_block_start _
   | E.Agent_core_content_block_stop _ -> None
-  | E.Agent_core_thinking_delta { delta; _ } -> Some (Live.Thinking delta)
+  | E.Agent_core_thinking_delta { delta; response; _ } -> Some (Live.Thinking {text=delta;response})
   | E.Agent_core_thinking_signature_delta _ | E.Agent_core_media_delta _ -> None
   | E.Agent_core_stream_protocol_error error ->
     Some

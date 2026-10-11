@@ -123,6 +123,37 @@ The `sangokushi-3-end-month` composition does the three keys in one call.
 Every city the ruler commands takes its own turn in the same month, so the
 prompt comes back with the next city's number.
 
+## Recruit additional troops, then assign final officer totals
+
+At Cao Cao's December 189 city-10 Chenliu command, military `1`, Enter,
+recruit `6`, Enter opened a list of officers and their charm. Selecting
+Cao Cao at the displayed index `1`, Enter marked the selection; an empty
+Enter advanced to `몇백 명 모집하겠습니까(1-54)?`.
+The quantity is in hundreds: `54`, Enter produced `남은 병사수:5400`.
+Use the range displayed for the current city; 54 was this turn's maximum.
+
+The next list asks `누구를 변경하겠습니까?`. It allocates the new troops
+among officers, rather than asking for another recruitment order. Xiahou
+Yuan had 668 troops at allocation index `4`. Selecting `4`, Enter opened
+`하후연의 병사를 몇 명으로 하겠습니까(0-6068)?`: this number is his
+**final troop total**, including the 668 he already held. Entering `6068`,
+Enter raised his allocation to 6068 and reduced remaining troops to zero.
+An empty Enter then opened `좋겠습니까(Y/N)?`; `y` completed the order.
+Reopening his own officer information confirmed 6068 troops, training 59
+and morale 57, compared with 668 troops, training 100 and morale 66 before
+recruitment. Read each live list: the officer index in allocation differed
+from his index `5` in own information.
+
+A subsequent military training order selected Xiahou Yuan at its displayed
+index `4`, Enter, empty Enter, `y`. His information showed
+`훈련에 종사(1개월)` while training remained 59. After ending both Chenliu
+and city-20 Cho commands, January 190's Chenliu report showed
+`훈련: 훈련도 상승`. His information then confirmed 6068 troops, training
+68 and morale 61, with no pending training line. These are this recruit and
+training sequence's measured values, not fixed recruitment penalties or
+training gains. Resource costs and a full campaign win are not established
+by this sequence.
+
 ## Training orders complete at month progression
 
 At Cao Cao's May 189 city-9 Puyang command, military `1`, Enter,

@@ -1,3 +1,4 @@
+import { initialKeeperResponseState } from './lib/keeper-response-state'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import {
@@ -101,4 +102,22 @@ describe('keeper chat operation tracking', () => {
       }),
     ])
   })
+  it('retains the newer applied journal snapshot across older observer and receipt writes', () => {
+    const request = { operationId: 'shared-op', keeperName: 'echo', message: 'original input', submittedAt: 1_780_000_000 }
+    const draft = (sequence: number, text: string) => ({
+      text, rawText: text, delivery: 'streaming' as const, streamState: 'streaming' as const,
+      responseState: { ...initialKeeperResponseState, lastSequence: sequence },
+    })
+    upsertTrackedKeeperChatOperation({ ...request, assistantDraft: draft(12, 'newest') })
+    upsertTrackedKeeperChatOperation({ ...request, assistantDraft: draft(11, 'old observer') })
+    upsertTrackedKeeperChatOperation(request)
+    expect(trackedKeeperChatOperationsForKeeper('echo')[0].assistantDraft).toMatchObject({
+      rawText: 'newest', responseState: { lastSequence: 12 },
+    })
+    upsertTrackedKeeperChatOperation({ ...request, assistantDraft: draft(13, 'next event') })
+    expect(trackedKeeperChatOperationsForKeeper('echo')[0].assistantDraft).toMatchObject({
+      rawText: 'next event', responseState: { lastSequence: 13 },
+    })
+  })
+
 })

@@ -284,6 +284,20 @@ export function trackedKeeperChatOperationsForKeeper(keeperName: string): Tracke
   return readAll().filter(request => request.keeperName === name)
 }
 
+function preserveNewerDraft(
+  stored: TrackedKeeperChatAssistantDraft | undefined,
+  incoming: TrackedKeeperChatAssistantDraft | undefined,
+): TrackedKeeperChatAssistantDraft | undefined {
+  const previousState = stored?.responseState
+  if (previousState?.kind !== 'known' || previousState.lastSequence === null) return incoming
+  const nextState = incoming?.responseState
+  // Both transports use the operation journal cursor. An older observer or a
+  // receipt-only upsert cannot replace a snapshot carrying newer applied events.
+  if (nextState?.kind !== 'known' || nextState.lastSequence === null
+    || nextState.lastSequence < previousState.lastSequence) return stored
+  return incoming
+}
+
 export function upsertTrackedKeeperChatOperation(request: TrackedKeeperChatOperation): void {
   const operationId = request.operationId.trim()
   const keeperName = request.keeperName.trim()
@@ -299,7 +313,11 @@ export function upsertTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
     ...(request.attachments && request.attachments.length > 0 ? { attachments: request.attachments } : {}),
     ...(assistantDraft ? { assistantDraft } : {}),
   }
-  const next = readAll().filter(existing => existing.operationId !== operationId)
+  const existingRequests = readAll()
+  const previous = existingRequests.find(existing => existing.operationId === operationId)
+  const retainedDraft = preserveNewerDraft(previous?.assistantDraft, normalized.assistantDraft)
+  if (retainedDraft) normalized.assistantDraft = retainedDraft
+  const next = existingRequests.filter(existing => existing.operationId !== operationId)
   next.push(normalized)
   writeAll(next)
 }
@@ -316,7 +334,7 @@ export function updateTrackedKeeperChatAssistantDraft(
   const next = requests.map(request => {
     if (request.operationId !== id) return request
     found = true
-    return { ...request, assistantDraft }
+    return { ...request, assistantDraft: preserveNewerDraft(request.assistantDraft, assistantDraft) }
   })
   if (!found) return
   writeAll(next)

@@ -613,7 +613,7 @@ describe('SSEMessageSchema', () => {
     const malformed = parseSSEMessage(customEvent('KEEPER_NATIVE_TOOL_END', {
       ...occurrence, completion: null,
     }))
-    expect(malformed?.ag_ui_event).toEqual(expect.objectContaining({ type: 'RUN_ERROR', code: 'invalid_event_payload' }))
+    expect(malformed?.ag_ui_event).toEqual(expect.objectContaining({ type: 'CUSTOM', name: 'KEEPER_STREAM_PROTOCOL_ERROR', value: expect.objectContaining({ kind: 'sse_parse_failed' }) }))
   })
 
   it('accepts the null runtime-attempt boundary event', () => {

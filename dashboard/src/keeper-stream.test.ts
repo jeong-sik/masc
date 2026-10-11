@@ -128,13 +128,53 @@ describe('Keeper operation stream projection', () => {
 
   })
 
+  it('deduplicates sequenced reasoning across transport replay and restores its prefix', () => {
+    assistantEntry()
+    const thinking = (delta: string): KeeperChatStreamEvent => ({
+      type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA', value: { index: 0, delta },
+    })
+    const source = (sequence: number) => ({ kind: 'operation' as const, operationId: 'op-1', sequence })
+    applyKeeperStreamEvent('sangsu', 'reply-1', thinking('first'), source(10))
+    expect(requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0]).responseState).toMatchObject({ lastSequence: 10 })
+    // In-memory batching is lost on reload; the restored entry is authoritative.
+    _resetKeeperStreamBuffersForTests()
+    applyKeeperStreamEvent('sangsu', 'reply-1', thinking('first'), source(10))
+    applyKeeperStreamEvent('sangsu', 'reply-1', thinking(' second'), source(11))
+    expect(requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0]).traceSteps).toMatchObject([{ kind: 'think', text: 'first second' }])
+  })
+
+  it('does not reopen a stop for transport and unowned media notices', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'answer' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_STOP', value: null })
+    const before = requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0])
+    expect(before.streamState).toBe('finalizing')
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_CONNECTED', value: null })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_MEDIA_DELTA', value: { index: 0, media_type: 'image/png' } })
+    expect(requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0]).streamState).toBe(before.streamState)
+    expect(requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0]).delivery).toBe(before.delivery)
+  })
+
+  it('does not consume the valid frame sequence when a broadcast payload is malformed', () => {
+    assistantEntry()
+    const diagnostic = parseSSEMessage({ type: 'keeper_chat_operation_event', name: 'sangsu', operation_id: 'op-1', seq: 12,
+      ag_ui_event: { type: 'TEXT_MESSAGE_CONTENT', delta: 123 } })
+    expect(diagnostic?.seq).toBeUndefined()
+    if (diagnostic?.ag_ui_event) applyKeeperStreamEvent('sangsu', 'reply-1', diagnostic.ag_ui_event,
+      { kind: 'operation', operationId: 'op-1', sequence: diagnostic.seq })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'valid counterpart' },
+      { kind: 'operation', operationId: 'op-1', sequence: 12 })
+    expect(requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0]).rawText).toBe('valid counterpart')
+    expect(requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0]).responseState).toMatchObject({ lastSequence: 12 })
+  })
+
   it.each(['observed', 'ended'] as const)('keeps content %s metadata outside model progress and body state', state => {
     assistantEntry()
     for (const hasBody of [false, true]) {
       if (hasBody) {
         applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'authored text' })
       }
-      const before = keeperThreads.value
+      const before = keeperThreads.value.sangsu[0]
       expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
         type: 'CUSTOM',
         name: 'KEEPER_MODEL_CONTENT_ACTIVITY',
@@ -142,7 +182,8 @@ describe('Keeper operation stream projection', () => {
       })).toBeNull()
       // This view does not draw the side metadata. It must neither announce
       // model progress nor finalize a live response or append authored bytes.
-      expect(keeperThreads.value).toBe(before)
+      expect(keeperThreads.value.sangsu[0].rawText).toBe(before.rawText)
+      expect(keeperThreads.value.sangsu[0].delivery).not.toBe('ok')
     }
   })
 
@@ -304,7 +345,7 @@ describe('Keeper operation stream projection', () => {
 
     const timedOut = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
     expect(timedOut?.delivery).toBe('streaming')
-    expect(timedOut?.rawText).toContain('[stream protocol] sse_timeout')
+    expect(timedOut?.rawText).toBe('half an')
     expect(typeof timedOut?.error).toBe('string')
 
     applyKeeperStreamEvent('sangsu', 'reply-1', {
@@ -859,7 +900,6 @@ describe('Keeper operation stream projection', () => {
   })
 })
 
-
   it('a persisted request failure terminal keeps a late operation event from reopening the operation', () => {
     // keeper-state normalizes a persisted request_failure row to a
     // system-role entry with terminal_result provenance. The operation it
@@ -1406,7 +1446,8 @@ describe('applyKeeperStreamEvent tool calls', () => {
         agentCoreBlockIndex: 2,
       },
     ])
-    expect(reply?.rawText).toContain('[stream protocol] tool_start_duplicate_index')
+    expect(reply?.error).toContain('tool_start_duplicate_index')
+    expect(reply?.rawText).not.toContain('[stream protocol]')
   })
 
   it('marks the exact occurrence instead of a provider-correlated sibling', () => {
@@ -1738,7 +1779,7 @@ describe('applyKeeperStreamEvent tool calls', () => {
     expect(reply?.error).toBe(
       'tool_args_without_start | index=2 | tool argument delta arrived before tool start',
     )
-    expect(reply?.rawText).toContain('[stream protocol] tool_args_without_start')
+    expect(reply?.rawText).not.toContain('[stream protocol]')
   })
 
   it('keeps a later occurrence when a provider id is reused', () => {

@@ -286,7 +286,7 @@ describe('streamKeeperMessage', () => {
 
     const fetchMock = vi.fn((url: string) => url === '/api/v1/dashboard/dev-token'
       ? Promise.resolve(devTokenResponse())
-      : Promise.resolve(new Response('data: {"type":"RUN_FINISHED"}\n\n', {
+      : Promise.resolve(new Response('data: {"type":"RUN_FINISHED","runId":"fixture-run","threadId":"keeper:fixture","timestamp":0}\n\n', {
         status: 200,
         headers: { 'Content-Type': 'text/event-stream' },
       })))
@@ -317,7 +317,7 @@ describe('streamKeeperMessage', () => {
   it('forwards copilot context fields to the stream endpoint', async () => {
     const fetchMock = vi.fn((url: string) => url === '/api/v1/dashboard/dev-token'
       ? Promise.resolve(devTokenResponse())
-      : Promise.resolve(new Response('data: {"type":"RUN_FINISHED"}\n\n', {
+      : Promise.resolve(new Response('data: {"type":"RUN_FINISHED","runId":"fixture-run","threadId":"keeper:fixture","timestamp":0}\n\n', {
         status: 200,
         headers: { 'Content-Type': 'text/event-stream' },
       })))
@@ -362,7 +362,7 @@ describe('streamKeeperMessage', () => {
   it('forwards semantic user blocks separately from attachment payloads', async () => {
     const fetchMock = vi.fn((url: string) => url === '/api/v1/dashboard/dev-token'
       ? Promise.resolve(devTokenResponse())
-      : Promise.resolve(new Response('data: {"type":"RUN_FINISHED"}\n\n', {
+      : Promise.resolve(new Response('data: {"type":"RUN_FINISHED","runId":"fixture-run","threadId":"keeper:fixture","timestamp":0}\n\n', {
         status: 200,
         headers: { 'Content-Type': 'text/event-stream' },
       })))
@@ -439,7 +439,7 @@ describe('streamKeeperMessage', () => {
             { status: 401, headers: { 'Content-Type': 'application/json' } },
           ))
         }
-        return Promise.resolve(new Response('data: {"type":"RUN_FINISHED"}\n\n', {
+        return Promise.resolve(new Response('data: {"type":"RUN_FINISHED","runId":"fixture-run","threadId":"keeper:fixture","timestamp":0}\n\n', {
           status: 200,
           headers: { 'Content-Type': 'text/event-stream' },
         }))

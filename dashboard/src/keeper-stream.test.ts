@@ -536,6 +536,7 @@ describe('Keeper operation stream projection', () => {
   it('rebuilds final prose while retaining exposed reasoning and attachments', () => {
     assistantEntry()
     keeperThreads.value = { sangsu: keeperThreads.value.sangsu!.map(entry => ({ ...entry,
+      replyTextProjection: { offset: 0, length: 1 },
       blocks: [{ t: 'p' as const, html: 'old partial answer' },
         { t: 'thinking' as const, content: 'reasoning', redacted: false }, { t: 'attach' as const, name: 'result.txt' }],
     })) }

@@ -772,15 +772,6 @@ function BdComposer() {
   const [mobileAttachments, setMobileAttachments] = useState<ComposerAttachmentDraft[]>([])
   const [submitting, setSubmitting] = useState(false)
   const mobileFileInputRef = useRef<HTMLInputElement>(null)
-  const mobileVoice = useVoiceInput({
-    onTranscribed: (text) => {
-      setLocalBody(current => appendVoiceTranscriptDraft(current, text))
-      showToast('Voice transcribed.', 'success')
-    },
-    onError: (message) => {
-      showToast(message, 'error')
-    },
-  })
 
   useEffect(() => {
     if (boardHearthFilter.value !== localHearth) {
@@ -821,6 +812,25 @@ function BdComposer() {
       ?? (selectedMobileKeeperAvailable ? selectedMobileKeeper : null)
       ?? (mobileMentionOptions.length === 0 ? typedMobileMention : null)
     : null
+  const admittedHearthFilter = boardHearthFilter.value
+  const mobileVoiceContext = useRef({ localHearth, mobileMentionTarget, mobileOpen })
+  mobileVoiceContext.current = { localHearth, mobileMentionTarget, mobileOpen }
+  const mobileVoice = useVoiceInput({
+    isCurrent: () => mobileOpen
+      && boardComposerMode.value === mode
+      && boardHearthFilter.value === admittedHearthFilter
+      && mobileVoiceContext.current.localHearth === localHearth
+      && mobileVoiceContext.current.mobileOpen === mobileOpen
+      && (mode !== 'mention' || mobileVoiceContext.current.mobileMentionTarget === mobileMentionTarget),
+    onTranscribed: (text) => {
+      setLocalBody(current => appendVoiceTranscriptDraft(current, text))
+      showToast('Voice transcribed.', 'success')
+    },
+    onError: (message) => {
+      showToast(message, 'error')
+    },
+  })
+
   const mobileMentionUnresolved =
     mode === 'mention'
     && !!typedMobileMention

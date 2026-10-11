@@ -12,7 +12,6 @@ import { ActionButton } from '../common/button'
 import { Select } from '../common/select'
 import { TextArea } from '../common/input'
 import {
-  keeperNameFromTarget,
   replaceTrailingMentionDraft,
 } from '../../lib/mention-utils'
 import { useOperatorMentionContext } from '../common/use-operator-mention-context'
@@ -191,15 +190,6 @@ export function ComposerV2({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const workspace = normalizeWorkspaceId(workspaceId)
   const busy = submitting || operatorActionBusy.value
-  const voice = useVoiceInput({
-    onTranscribed: (text) => {
-      setDraft(current => appendVoiceTranscriptDraft(current, text))
-      showToast('Voice transcribed.', 'success')
-    },
-    onError: (message) => {
-      showToast(message, 'error')
-    },
-  })
   const mention = useOperatorMentionContext({
     message: draft,
     target: keeperTarget,
@@ -212,7 +202,6 @@ export function ComposerV2({
     onlineKeeperNames,
     selectedKeeperOnline,
     mentionQuery,
-    trailingMentionTarget,
     unresolvedTrailingMention,
     effectiveKeeper,
     effectiveKeeperOnline,
@@ -224,6 +213,21 @@ export function ComposerV2({
     dismissedMentionQuery,
     setDismissedMentionQuery,
   } = mention
+  const deliveryKeeper = mode === 'dm' ? effectiveKeeper : null
+  const voiceContext = useRef({ workspace, mode, deliveryKeeper })
+  voiceContext.current = { workspace, mode, deliveryKeeper }
+  const voice = useVoiceInput({
+    isCurrent: () => voiceContext.current.workspace === workspace
+      && voiceContext.current.mode === mode
+      && (mode !== 'dm' || voiceContext.current.deliveryKeeper === deliveryKeeper),
+    onTranscribed: (text) => {
+      setDraft(current => appendVoiceTranscriptDraft(current, text))
+      showToast('Voice transcribed.', 'success')
+    },
+    onError: (message) => {
+      showToast(message, 'error')
+    },
+  })
   const attachmentDeliveryReason = composerAttachmentDeliveryReason(attachments)
   const hasDraftContent = draft.trim() !== '' || attachments.length > 0
   const sendDisabled = busy
@@ -328,9 +332,7 @@ export function ComposerV2({
     if (sendDisabled) return
     const message = serializeComposerBody({ text: draft, attachments: [], voice: null })
     if (!message) return
-    const keeperId = mode === 'dm'
-      ? trailingMentionTarget ?? keeperNameFromTarget(keeperTarget)
-      : null
+    const keeperId = deliveryKeeper
     const request = buildComposerV2Request({
       mode,
       workspaceId: workspace,

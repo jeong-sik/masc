@@ -1,5 +1,10 @@
 # Claude provider retry wire boundary
 
+Reproduce the decoder assertions with
+`python3 docs/evidence/2026-10-12-claude-api-retry-wire/run.py .`.
+An optional second argument selects the original private capture instead of
+the normalized tracked frames. The runner prints no private frame contents.
+
 An actual installed Claude Code 2.1.296 read-only synthetic-file probe emitted
 10 `system/api_retry` frames and exited 1. Its terminal frame had
 `subtype=success` but `is_error=true`: the subtype alone is not success.

@@ -1,0 +1,20 @@
+{
+  "production_head": "0287750a15163b4972212ad16b3efbc2636a9aaa",
+  "memory_handler_exit": 0,
+  "tcp_bind_exit": 2,
+  "sources": {
+    "lib/mcp_transport_protocol/mcp_transport_protocol.ml": "784d0afcbf48900f2dba36880c814de47a48ab45e3035c898d323f7f410a54fc",
+    "lib/runtime/runtime_official_client_tool.ml": "94741242f19c17899e5cc96be6072c028a3e7d9b0f92993da698d9c66f68f803",
+    "lib/runtime/runtime_official_client_mcp.ml": "d2ba5379e949229a75b8d955ef9de88bb4cacef06799a184d4be886a09cc5438",
+    "lib/runtime/runtime_official_client_mcp_http.ml": "ef66903d8f42867c3d4da4b8acdd45c1ebb90a39a6f69b23115aa57aacd3d31f"
+  },
+  "installed_cohttp_server_sha256": "5fdc75f6dc9c2b6605d44ec9025f6ab83ffb23122e0d8282301f897680db18a6",
+  "artifacts": {
+    "run.py": "545e45cc3f9654140c18f9f99c3512698b51ff4e2443bb784126a949758d3149",
+    "result.txt": "f613fc5f53c136e570fc0a3620116908034020d50b054bbadf522f2455e376d2",
+    "tcp-bind.ml.in": "a1519e32c68639d6a47a06c8c45b1f19e8246f9151cba4762f29efadd01515e5",
+    "repro.ml.in": "bb70bd859ac85d85f6dcb227b097d6a96d2c77eadfe7fc302bcf3702ce645959",
+    "tcp-bind.txt": "f7eab8408758006ac784a6f98c41c2a0eaf15bfab7a39d0ec1161cae60e802a4"
+  },
+  "scope": "real Eio, full production MCP handler/protocol/tool source and installed Cohttp server/IO; memory sink only; TCP denied EPERM; AgentCore content types, textsanitize, metadata/log/guidance doubles; no Muse admission/fullintegration/HTTPsocket/UI proof"
+}

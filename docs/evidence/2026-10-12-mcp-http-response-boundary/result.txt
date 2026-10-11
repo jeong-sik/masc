@@ -1,0 +1,8 @@
+PASS: full production MCP protocol, tool serializer and HTTP modules loaded
+success_effects=1 acknowledgements=1
+failed_write_effects=2 acknowledgements=1
+cancelled_write_effects=3 acknowledgements=1
+recovered_effects=4 acknowledgements=2
+protocol_tool_calls=4 rejected_requests=1 phase=Ready
+PASS: production HTTP response/flush/ack boundary with real Eio and memory sink
+elapsed_seconds=0.738839

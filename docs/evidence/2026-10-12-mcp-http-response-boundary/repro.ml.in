@@ -1,0 +1,110 @@
+#use "topfind";;
+#require "eio_main, eio.mock, cohttp-eio, yojson, eqaf, base64, mcp_protocol";;
+module Utils = Cohttp_eio__Utils;;
+module Io = Cohttp_eio__Io;;
+module Body = Cohttp_eio.Body;;
+#mod_use __COHTTP_SERVER__;;
+module Cohttp_eio = struct module Server = Server end;;
+module Agent_core = struct
+ module Tool = struct type call_effect = Read_only | Effect_possible end
+ module Types = struct
+  type image_source = Base64 | Url | File_id
+  type content_block = Text of string | Image of {media_type:string;data:string;source_type:image_source}
+   | Audio of unit | Document of unit | Thinking of unit | ReasoningDetails of unit
+   | RedactedThinking of unit | ToolUse of unit | ToolResult of unit
+ end
+end;;
+module Tool_result = struct type tool_failure_class = Fixture_failure type failure_effect_disposition = Fixture_effect end;;
+module Keeper_terminal_effect_detail = struct type t = string end;;
+module Llm_provider = struct
+ module Api_common = struct
+  let string_is_blank s = String.trim s = ""
+  let fresh_tool_use_id () = failwith "fixture unexpectedly reached generated id path"
+ end
+ module Utf8_sanitize = struct let sanitize x = x end
+end;;
+module Build_version = struct let current = "fixture" end;;
+module Runtime_build_version = Build_version;;
+module Log = struct module Runtime_agent = struct
+ let warn format = Printf.ksprintf (fun _ -> ()) format
+ let error format = Printf.ksprintf (fun _ -> ()) format
+end end;;
+module Tool_guidance = struct type t = Mcp_outcome_unknown let to_string _ = "fixture outcome unknown" end;;
+#mod_use __MCP_TRANSPORT_PROTOCOL__;;
+#mod_use __RUNTIME_OFFICIAL_CLIENT_TOOL__;;
+#mod_use __RUNTIME_OFFICIAL_CLIENT_MCP__;;
+#mod_use __RUNTIME_OFFICIAL_CLIENT_MCP_HTTP__;;
+print_endline "PASS: full production MCP protocol, tool serializer and HTTP modules loaded";;
+module Sink = struct
+ type t = {bytes:Buffer.t;write:unit -> unit}
+ let single_write t bufs =
+   t.write (); List.iter (fun b -> Buffer.add_string t.bytes (Cstruct.to_string b)) bufs;
+   Cstruct.lenv bufs
+ let copy t ~src = Eio.Flow.Pi.simple_copy ~single_write t ~src
+end;;
+let parse_response bytes =
+ let reader = Eio.Buf_read.of_flow ~max_size:(String.length bytes+1) (Eio.Flow.string_source bytes) in
+ let status = Eio.Buf_read.line reader |> String.split_on_char ' ' |> fun fields -> int_of_string (List.nth fields 1) in
+ let rec headers () = let line = Eio.Buf_read.line reader in if String.trim line <> "" then headers () in
+ headers ();status,Eio.Buf_read.take_all reader;;
+let message id method_ params = Yojson.Safe.to_string (`Assoc
+ ["jsonrpc",`String "2.0";"id",`String id;"method",`String method_;"params",params]);;
+Eio_main.run (fun _ ->
+ let module H = Runtime_official_client_mcp_http in
+ let t : H.t = {endpoint="http://127.0.0.1/fixture";server_name="fixture";authorization="fixture-capability";
+   session=Runtime_official_client_mcp.create_session ();state={authenticated_requests=0;rejected_requests=0;
+   tool_calls=0;connection_failures=0;last_connection_error=None;listener_failure=None};
+   state_mutex=Eio.Mutex.create ();dispatch_mutex=Eio.Mutex.create ()} in
+ let protocol = Mcp_transport_protocol.default_protocol_version in
+ let effects = ref 0 and acknowledged = ref 0 in
+ let current_bytes = ref (Buffer.create 1) in
+ let tools () = [`Assoc ["name",`String "probe";"description",`String "fixture";
+   "inputSchema",`Assoc ["type",`String "object"]]] in
+ let call_tool ~name:_ ~call_id:_ ~arguments:_ =
+   incr effects;
+   Some {H.outcome={Runtime_official_client_mcp.success=true;content="fixture result";content_blocks=None};
+     after_response_sent=(fun () ->
+       let status,body = parse_response (Buffer.contents !current_bytes) in
+       if status <> 200 then failwith "ack before successful response";
+       ignore (Yojson.Safe.from_string body);incr acknowledged)} in
+ let request ?version ?(authorized=true) ?(write=(fun () -> Eio.Fiber.yield ())) body =
+   let bytes = Buffer.create 256 in current_bytes := bytes;
+   let sink = Eio.Resource.T ({Sink.bytes;write},Eio.Flow.Pi.sink (module Sink)) in
+   let headers = Cohttp.Header.of_list (["authorization",(if authorized then "Bearer fixture-capability" else "Bearer rejected");
+     "accept","application/json, text/event-stream";"content-type","application/json";
+     "content-length",string_of_int(String.length body)] @ Option.to_list(Option.map(fun v -> "mcp-protocol-version",v)version)) in
+   let req = Cohttp.Request.make ~meth:`POST ~headers (Uri.of_string "http://127.0.0.1/fixture") in
+   let response = H.request_handler t ~path:"/fixture" ~tool_specs:tools ~call_tool () req (Eio.Flow.string_source body) in
+   Eio.Buf_write.with_flow sink (fun writer -> response (req,writer));
+   parse_response(Buffer.contents bytes) in
+ let status,_ = request (message "initialize" "initialize" (`Assoc ["protocolVersion",`String protocol;
+   "capabilities",`Assoc [];"clientInfo",`Assoc ["name",`String "fixture";"version",`String "1"]])) in
+ if status<>200 then failwith "initialize failed";
+ let status,_ = request ~version:protocol {|{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}|} in
+ if status<>202 then failwith "initialized notification failed";
+ let tool id = message id "tools/call" (`Assoc ["name",`String "probe";"arguments",`Assoc []]) in
+ let status,_ = request ~version:protocol (tool "success") in
+ if status<>200 || !effects<>1 || !acknowledged<>1 then failwith "successful response boundary differs";
+ Printf.printf "success_effects=%d acknowledgements=%d\n%!" !effects !acknowledged;
+ let write_failed = ref false in
+ (match request ~version:protocol ~write:(fun () -> write_failed := true;raise Exit) (tool "failed-write") with
+  | _ -> failwith "write failure swallowed" | exception _ -> ());
+ if not !write_failed || !effects<>2 || !acknowledged<>1 then failwith "failed write incorrectly acknowledged";
+ Printf.printf "failed_write_effects=%d acknowledgements=%d\n%!" !effects !acknowledged;
+ let cancelled = ref false in
+ (match Eio.Cancel.sub (fun cc -> request ~version:protocol
+   ~write:(fun () -> Eio.Cancel.cancel cc Exit;Eio.Fiber.check ()) (tool "cancelled-write")) with
+  | _ -> failwith "cancelled write returned"
+  | exception Eio.Cancel.Cancelled _ -> cancelled := true);
+ if not !cancelled || !effects<>3 || !acknowledged<>1 then failwith "cancelled write incorrectly acknowledged";
+ Printf.printf "cancelled_write_effects=%d acknowledgements=%d\n%!" !effects !acknowledged;
+ let status,_ = request ~authorized:false ~version:protocol (tool "rejected") in
+ if status<>401 || !effects<>3 || !acknowledged<>1 then failwith "unauthorized request executed";
+ let status,_ = request ~version:protocol (tool "recovered") in
+ if status<>200 || !effects<>4 || !acknowledged<>2 then failwith "write failure poisoned protocol state";
+ Printf.printf "recovered_effects=%d acknowledgements=%d\n%!" !effects !acknowledged;
+ let snapshot = H.For_testing.snapshot t in
+ if snapshot.phase <> Runtime_official_client_mcp.Ready || snapshot.tool_calls <> 4
+   || snapshot.rejected_requests <> 1 then failwith "protocol snapshot differs after failures";
+ Printf.printf "protocol_tool_calls=%d rejected_requests=%d phase=Ready\n%!" snapshot.tool_calls snapshot.rejected_requests;
+ print_endline "PASS: production HTTP response/flush/ack boundary with real Eio and memory sink");;

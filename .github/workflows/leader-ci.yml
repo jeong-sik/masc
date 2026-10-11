@@ -74,9 +74,21 @@ jobs:
               raise SystemExit('Suites require the tests scope')
           Path('selection.json').write_text(os.environ['SELECTION'])
           PY
+          set -o pipefail
           python3 scripts/review/verify-approved-selection.py \
             --selection selection.json --repo "$REPOSITORY" \
-            --candidate "$CANDIDATE" --git-dir . > verified-selection.json
+            --candidate "$CANDIDATE" --git-dir . |
+            tee verified-selection.json
+          # tee keeps the refusal JSON in the job log AND in the artifact file
+          # (exit 2 results are refusals, not crashes — the caller still needs
+          # to see why). pipefail turns a verify failure into a step failure.
+      - if: failure()
+        name: Surface the refusal when verification failed
+        run: |
+          if [ -f verified-selection.json ]; then
+            echo '--- verify-approved-selection refusal ---'
+            cat verified-selection.json
+          fi
       - uses: actions/upload-artifact@v7
         with:
           name: approved-selection-${{ inputs.candidate }}-${{ github.run_attempt }}

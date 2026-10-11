@@ -1,7 +1,8 @@
+import { applyKeeperStreamEvent } from './keeper-stream'
 import { clearStoredToken, setStoredToken } from './api/core'
 import { effect } from '@preact/signals'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { keeperActionErrors, keeperToolApprovals, upsertKeeperToolApproval } from './keeper-state'
+import { keeperActionErrors, keeperThreads, appendThreadEntry, keeperToolApprovals, upsertKeeperToolApproval } from './keeper-state'
 import { answerHeldKeeperToolApproval, hydrateKeeperToolApprovals } from './keeper-actions'
 
 // task-343: the answer path for a held tool call. Before this surface the
@@ -39,6 +40,7 @@ afterEach(() => {
   clearStoredToken()
   keeperToolApprovals.value = {}
   keeperActionErrors.value = {}
+  keeperThreads.value = {}
 })
 
 describe('answerHeldKeeperToolApproval', () => {
@@ -260,6 +262,29 @@ describe('hydrateKeeperToolApprovals', () => {
     }] }))
     await older
     expect(keeperToolApprovals.value.sangsu?.['finished-wait']).toBeUndefined()
+  })
+
+  it('does not resurrect a known wait settled while its listing was pending', async () => {
+    pendingRow('stream-finished-wait')
+    appendThreadEntry('sangsu', {
+      id: 'approval-reply', role: 'assistant', source: 'direct_assistant', label: 'sangsu',
+      text: '', rawText: '', timestamp: new Date().toISOString(),
+      delivery: 'sending', streamState: 'opening', details: null,
+    })
+    let resolveFetch!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { resolveFetch = resolve })))
+    const listing = hydrateKeeperToolApprovals()
+    await vi.waitFor(() => expect(resolveFetch).toBeDefined())
+    expect(applyKeeperStreamEvent('sangsu', 'approval-reply', {
+      type: 'CUSTOM', name: 'KEEPER_TOOL_APPROVAL_SETTLED',
+      value: { tool_call_id: 'stream-finished-wait', outcome: 'approve' },
+    })).toBeNull()
+    resolveFetch(jsonResponse(200, { pending: [{
+      keeper: 'sangsu', tool_call_id: 'stream-finished-wait', tool: 'Execute', args: '{}',
+      question: 'approval', because: 'effect', asked_at: 1, timeout_sec: 180,
+    }] }))
+    await listing
+    expect(keeperToolApprovals.value.sangsu?.['stream-finished-wait']?.settled).toBe(true)
   })
 
   it('stays silent when the listing fails — hydration is best-effort', async () => {

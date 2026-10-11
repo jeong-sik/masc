@@ -877,7 +877,8 @@ describe('Keeper operation stream projection', () => {
       name: 'KEEPER_TOOL_APPROVAL_SETTLED',
       value: { tool_call_id: 'call-settle-1', outcome: 'Approved' },
     })).toBeNull()
-    expect(keeperToolApprovals.value.sangsu?.['call-settle-1']).toBeUndefined()
+    expect(keeperToolApprovals.value.sangsu?.['call-settle-1']?.settled).toBe(true)
+    expect(keeperToolApprovals.value.sangsu?.['call-settle-1']?.answeredOutcome).toBe('Approved')
   })
 
   it('keeps the stream alive when a settle names a call this view never drew', () => {

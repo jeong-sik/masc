@@ -42,7 +42,7 @@ import {
   liveSendOwnsRequest,
   setRecordValue,
   upsertKeeperToolApproval,
-  dropKeeperToolApproval,
+  settleKeeperToolApproval,
 } from './keeper-state'
 import { isRecord, asNumber, asString } from './components/common/normalize'
 import {
@@ -1325,10 +1325,10 @@ export function applyKeeperStreamEvent(
         if (!toolCallId) return 'KEEPER_TOOL_APPROVAL_SETTLED missing tool_call_id'
         const outcome = event.value.outcome
         if (!outcome) return 'KEEPER_TOOL_APPROVAL_SETTLED missing outcome'
-        // A settle for a call this view never drew (e.g. answered from another
-        // window, or a re-hydrated wait whose REQUESTED predates this view)
-        // still retires nothing here; dropping is the no-op it should be.
-        dropKeeperToolApproval(keeperName, toolCallId)
+        // Preserve the terminal fact for a known wait so a listing already
+        // in flight cannot hydrate it back into an actionable approval.
+        // A later REQUESTED event replaces this row with a new pending wait.
+        settleKeeperToolApproval(keeperName, toolCallId, outcome)
         return null
       }
       if (event.name === 'KEEPER_STREAM_MESSAGE_START') {

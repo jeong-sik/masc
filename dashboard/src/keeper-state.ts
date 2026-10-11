@@ -70,7 +70,7 @@ export const keeperStreamStartedAt = signal<Record<string, number | null>>({})
 export const keeperStreamLastEventAt = signal<Record<string, number | null>>({})
 
 // Tool calls each keeper is holding for an operator decision, keyed by keeper
-// then tool_call_id. Minted by KEEPER_TOOL_APPROVAL_REQUESTED, retired by
+// then tool_call_id. Minted by KEEPER_TOOL_APPROVAL_REQUESTED, marked settled by
 // KEEPER_TOOL_APPROVAL_SETTLED or a server-side timeout settle; the pending
 // GET listing re-hydrates waits whose owning stream watcher is gone
 // (masc#30034). This is UI state only — the server registry is the SSOT.
@@ -1027,15 +1027,6 @@ export function settleKeeperToolApproval(
     answeredOutcome: outcome,
   }), expected)
 }
-
-export function dropKeeperToolApproval(keeperName: string, toolCallId: string): void {
-  const byKeeper = keeperToolApprovals.value[keeperName]
-  if (!byKeeper || !(toolCallId in byKeeper)) return
-  const next = { ...byKeeper }
-  delete next[toolCallId]
-  keeperToolApprovals.value = { ...keeperToolApprovals.value, [keeperName]: next }
-}
-
 
 export function removeThreadEntries(name: string, entryIds: readonly string[]): void {
   if (entryIds.length === 0) return

@@ -344,24 +344,25 @@ let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~tu
               ~raw_trace_run
               ~phase:`Started
               observation;
-            let index =
-              match Option.bind observation.identity (Hashtbl.find_opt native_tool_indexes) with
-              | Some index -> index
-              | None ->
-                  let index = !next_tool_index in
-                  incr next_tool_index;
-                  Option.iter
-                    (fun identity -> Hashtbl.add native_tool_indexes identity index)
-                    observation.identity;
-                  index
-            in
-            emit
-              (Agent_core.Types.ContentBlockStart
-                 { index
-                 ; content_type = Runtime_native_tools.stream_content_type
-                 ; tool_id = Runtime_native_tools.call_id observation
-                 ; tool_name = observation.tool_name
-                 })
+            (* An unnamed observation remains in the raw trace, but cannot
+               own a live block: its finish has no identity to close one.
+               Repeated active updates belong to the existing block. *)
+            Option.iter
+              (fun identity ->
+                 match Hashtbl.find_opt native_tool_indexes identity with
+                 | Some _ -> ()
+                 | None ->
+                     let index = !next_tool_index in
+                     incr next_tool_index;
+                     Hashtbl.add native_tool_indexes identity index;
+                     emit
+                       (Agent_core.Types.ContentBlockStart
+                          { index
+                          ; content_type = Runtime_native_tools.stream_content_type
+                          ; tool_id = Runtime_native_tools.call_id observation
+                          ; tool_name = observation.tool_name
+                          }))
+              observation.identity
           | Runtime_antigravity.Native_tool_finished {observation; completion} ->
             Host.record_raw_native_tool
               ~keeper_name

@@ -145,6 +145,7 @@ assert called["result"]["content"][0]["text"] == "MASC_TOOL_RESULT"
 PY
 printf '{"event":"step_update","step_update":{"conversation_id":"%%s","step_index":0,"state":"DONE","step_type":"system_message"}}\n' "$conversation"
 printf '{"event":"step_update","step_update":{"conversation_id":"%%s","step_index":1,"state":"ACTIVE","step_type":"tool","tool_name":"call_mcp_tool"}}\n' "$conversation"
+printf '{"event":"step_update","step_update":{"conversation_id":"%%s","step_index":1,"state":"ACTIVE","step_type":"tool","tool_name":"call_mcp_tool"}}\n' "$conversation"
 printf '{"event":"step_update","step_update":{"conversation_id":"%%s","step_index":1,"state":"DONE","step_type":"tool","tool_name":"call_mcp_tool"}}\n' "$conversation"
 printf '%%s\n' "$turns" > "$turn_counter"
 printf '{"event":"result","result":{"conversation_id":"%%s","status":"SUCCESS","response":"MASC_ANTIGRAVITY_KEEPER_OK","error":null,"num_turns":%%d,"usage":{"input_tokens":12,"output_tokens":4,"thinking_tokens":1,"cache_read_tokens":40,"total_tokens":16}}}\n' "$conversation" "$turns"
@@ -886,7 +887,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
         |> List.filter (fun (record : Agent_core.Raw_trace.record) ->
           record.record_type = Agent_core.Raw_trace.Native_tool_started)
       in
-      check int "RAW trace keeps both provider wrapper steps" 2
+      check int "RAW trace keeps repeated provider wrapper updates" 4
         (List.length native_starts);
       check bool "RAW trace keeps exact provider step and typed wrapper origin" true
         (List.for_all

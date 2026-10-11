@@ -140,7 +140,7 @@ type live_tool_call =
           has to say which attempt it means: a call left open on a runtime
           candidate the walk moved past is never going to return, and counting it
           as running says the new attempt is waiting on something it is not. *)
-  ; response_owner : response_scope option
+  ; response_owner : (int * int) option
       (** Observed response ownership at call start; missing ownership stays
           missing instead of being filled from a later response. *)
   ; occurrence : Live.tool_occurrence
@@ -1317,7 +1317,9 @@ let apply_tool_result ~now t ~(occurrence : Live.tool_occurrence) ~execution_id 
              not the current model's progress observation. *)
           (match t.phase with
            | Waiting | Working when returned.attempt = t.attempt
-               && returned.response_owner = t.response_scope ->
+               && (match returned.response_owner, t.admitted_response_owner with
+                   | Some captured, Some current -> captured = current
+                   | Some _, None | None, (Some _ | None) -> false) ->
                t.model_signal <- Some (Tool_returned_at (returned.tool_name, now))
            | Waiting | Working | Stream_ended | Stream_failed _ -> ())
         | Call_missing ->
@@ -1368,8 +1370,8 @@ let start_tool ~now t ~authority ~occurrence ~tool_name =
            ; segment = t.segment
            ; started_at = now
            ; attempt = t.attempt
-           ; response_owner = (match t.response_scope with
-               | Some owner when owner.rs_scope = occurrence.stream_scope -> Some owner
+           ; response_owner = (match t.admitted_response_owner with
+               | Some ((_, scope) as owner) when scope = occurrence.stream_scope -> Some owner
                | Some _ | None -> None)
            ; occurrence
            ; call_id = occurrence.tool_call_id

@@ -2695,7 +2695,23 @@ let test_tool_receipt_retains_response_progress_owner () =
       tool_result ~scope:next_scope ~block_index:2 "current-response-call" "current-response-execution"];
     check bool "current response receipt retains activity authority" true
       (Transcript.model_activity t = Some (Transcript.Activity_tool_returned "write_file"))
-  ) [2,0;2,1]
+  ) [2,0;2,1];
+  let t = fresh () in
+  feed t [Live.Run_started;
+    Live.Stream_model_started {generation=None;stream_scope=Some 0;
+      message_id=Some "unbound";model="model";usage=None};
+    tool_started ~scope:0 ~block_index:1 "unbound-call" "read_file";
+    tool_ended ~scope:0 ~block_index:1 "unbound-call";
+    Live.Stream_model_started {generation=Some 2;stream_scope=Some 0;
+      message_id=Some "bound";model="model";usage=None};
+    Live.Text {text="answer";response=Unobserved_scope (Some 0)}];
+  let activity = Transcript.model_activity t in
+  feed t [tool_result ~scope:0 ~block_index:1 "unbound-call" "unbound-execution"];
+  check bool "unbound metadata cannot restore old receipt authority" true
+    (activity = Transcript.model_activity t);
+  check bool "unbound receipt remains historical evidence" true
+    (List.exists (fun (call : Transcript.tool_activity) ->
+      call.execution_id = Some "unbound-execution") (Transcript.tool_calls t))
 ;;
 
 let () =

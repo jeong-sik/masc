@@ -121,6 +121,26 @@ choose from the current lists rather than reusing these officer numbers.
   the trainer list showed officer 6 unavailable; no before/after training
   statistic was measured, so this does not establish a training increase.
 
+## Buying weapons
+
+At the province command prompt, `13`, Return opens the merchant menu when
+available. In March 220, province 10 showed `4.武器を買う`; `4`, Return opened
+an officer list headed `武器`. Sima Yi was number 1 with a displayed value of 1.
+Choose from the current list, then send the officer number and Return.
+
+The next prompt was `武器をいくら買いますか(1-99)?`. Separate `5`, `0`, Return
+inputs entered 50 and returned to province commands. Gold fell from 450 to 400.
+A subsequent information lookup (`8`, Return; `2`, Return; the current officer
+number, Return) showed Sima Yi with soldiers 10, training 10 and armament 6.
+The earlier merchant list and later officer information thus displayed 1 and 6;
+the purchased amount 50 is not the displayed armament value. The exact conversion
+rule and a general price formula were not established by this one purchase.
+
+Confirm the resulting gold and the selected officer's actual information before
+claiming improved equipment. This observation does not prove improved combat
+results. In a separate province-19 state, `13`, Return returned to the province
+prompt without opening the merchant menu; no purchase was established there.
+
 ## Going to war
 
 Observed 220年1月 as 曹丕, from 20 against 31 (劉備).

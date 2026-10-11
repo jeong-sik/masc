@@ -48,13 +48,13 @@ describe('autonomous journal recovery', () => {
     expect(keeperThreads.value.k?.[0]?.text).toBe('first second')
     expect(keeperThreads.value.k?.[0]?.responseState).toMatchObject({ lastSequence: 1 })
   })
-  it('honors a newer notification received while the current read fails', async () => {
+  it.each(['notification', 'reconnect'] as const)('honors a pending %s request received while the current read fails', async (request) => {
     let reject!: (error: Error) => void
     vi.mocked(fetchKeeperTurnEvents)
       .mockReturnValueOnce(new Promise((_resolve, fail) => { reject = fail }))
       .mockResolvedValueOnce(page(1, text('recovered')))
     const first = recoverKeeperAutonomousTurn('k', 'trace#9', 0)
-    const newer = recoverKeeperAutonomousTurn('k', 'trace#9', 1)
+    const newer = recoverKeeperAutonomousTurn('k', 'trace#9', request === 'notification' ? 1 : 0, request === 'reconnect')
     expect(newer).toBe(first)
     const failed = expect(first).rejects.toThrow('read failed')
     reject(new Error('read failed'))

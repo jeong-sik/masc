@@ -137,6 +137,40 @@ let test_old_admission_cannot_answer_reused_provider_call () =
       check bool "replacement receives its own decision" true
         (Eio.Promise.await_exn second = Registry.Answered Registry.Approve)))
 
+let test_answer_waits_for_timeout_publication () =
+  Eio_mock.Backend.run (fun () ->
+    let clock = Eio_mock.Clock.make () in
+    Eio_mock.Clock.set_time clock 0.0;
+    let registry = Registry.create () in
+    let approval_id = Masc.Keeper_tool_approval_id.fresh () in
+    let publishing, announce = Eio.Promise.create () in
+    let release, finish = Eio.Promise.create () in
+    let published = ref false in
+    let answer_finished = ref false in
+    Eio.Switch.run (fun sw ->
+      let waited = Eio.Fiber.fork_promise ~sw (fun () ->
+        Registry.await ~on_timed_out:(fun () ->
+          Eio.Promise.resolve announce ();
+          Eio.Promise.await release;
+          published := true)
+          registry ~approval_id ~clock ~keeper_name:keeper ~tool_call_id:"handoff-call"
+          ~tool_name:"Execute" ~args:"{}" ~question:"run?" ~because:"policy"
+          ~timeout_sec:1.0) in
+      Eio_mock.Clock.set_time clock 1.0;
+      Eio.Promise.await publishing;
+      check int "timed-out ask is no longer actionable" 0 (List.length (Registry.pending registry));
+      let answer = Eio.Fiber.fork_promise ~sw (fun () ->
+        let settled = Registry.settle registry ~keeper_name:keeper ~approval_id Registry.Approve in
+        answer_finished := true;
+        check bool "fallback sees completed publication" true !published;
+        settled) in
+      Eio.Fiber.yield ();
+      check bool "concurrent answer waits for publication" false !answer_finished;
+      Eio.Promise.resolve finish ();
+      check bool "timeout cannot report an immediate approval" false (Eio.Promise.await_exn answer);
+      check bool "wait completes after publication" true
+        (Eio.Promise.await_exn waited = Registry.Timed_out)))
+
 let test_a_failed_settle_counts_nothing () =
   with_env (fun ~clock ->
       let registry = Registry.create () in
@@ -188,7 +222,9 @@ let () =
   run
     "keeper_tool_approval_registry_outcomes"
     [ ( "outcome totals"
-      , [ test_case "old admission cannot answer reused provider call" `Quick
+      , [ test_case "answer waits for timeout publication" `Quick
+            test_answer_waits_for_timeout_publication
+        ; test_case "old admission cannot answer reused provider call" `Quick
             test_old_admission_cannot_answer_reused_provider_call
         ; test_case "timeout claim rejects a later answer" `Quick
             test_timeout_claim_rejects_a_later_answer

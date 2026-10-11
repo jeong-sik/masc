@@ -49,6 +49,7 @@ type outcome =
 
 val await :
   ?on_registered:(unit -> unit) ->
+  ?on_timed_out:(unit -> unit) ->
   t ->
   approval_id:Keeper_tool_approval_id.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
@@ -68,6 +69,11 @@ val await :
     [on_registered] runs after registration outside the lock, before waiting.
     Publish operator requests here so an immediate answer can find the wait.
     The wait is removed if this callback raises or is cancelled.
+
+    [on_timed_out] publishes the exact ask to the late-answer store after
+    timeout atomically claims it. Concurrent [settle] waits for this callback
+    to finish before reporting absence, so its caller can consult the store
+    without a publication gap. The callback runs outside the registry lock.
 
     [timeout_sec] is required. A wait with no bound would park the keeper's
     turn for the life of the process if nobody is watching, and how long an
@@ -91,7 +97,9 @@ val settle :
 (** Answer a wait. Returns whether one was actually waiting: [false] means it
     had already timed out, been answered, or never opened. Answer and timeout
     atomically claim the waiter; a successful answer cannot return a timeout
-    outcome for that wait. Callers report that
+    outcome for that wait. During timeout publication this function waits
+    for the publication to finish, then returns [false]; it never holds the
+    registry lock while waiting. Callers report that
     rather than treating it as success, so an operator is not told a call was
     approved when nothing was listening. *)
 

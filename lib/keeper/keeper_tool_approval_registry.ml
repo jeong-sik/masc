@@ -41,12 +41,23 @@ type waiter =
   ; resolve : outcome Eio.Promise.u
   }
 
+type retirement =
+  { retiring_entry : pending
+  ; published : unit Eio.Promise.t
+  }
+
+type settlement_claim =
+  | Claimed of waiter
+  | Publishing_timeout of unit Eio.Promise.t
+  | No_wait
+
 (* Waiters are held oldest-first so [pending] reads in the order the calls were
    made without sorting. A turn has at most one call awaiting an answer and an
    operator watches a handful of keepers, so the list is short and a linear
    scan is the whole cost. *)
 type t =
   { mutable waiters : waiter list
+  ; mutable retiring : retirement list
   ; mutex : Stdlib.Mutex.t
   ; mutable answered_total : int
   ; mutable timed_out_total : int
@@ -54,6 +65,7 @@ type t =
 
 let create () =
   { waiters = []
+  ; retiring = []
   ; mutex = Stdlib.Mutex.create ()
   ; answered_total = 0
   ; timed_out_total = 0 }
@@ -83,7 +95,7 @@ let take_locked t key =
       t.waiters;
   !taken
 
-let await ?(on_registered = fun () -> ()) t ~approval_id ~clock ~keeper_name ~tool_call_id ~tool_name ~args ~question ~because
+let await ?(on_registered = fun () -> ()) ?(on_timed_out = fun () -> ()) t ~approval_id ~clock ~keeper_name ~tool_call_id ~tool_name ~args ~question ~because
     ~timeout_sec =
   let key = { key_keeper_name = keeper_name; key_tool_call_id = tool_call_id } in
   let entry =
@@ -125,6 +137,8 @@ let await ?(on_registered = fun () -> ()) t ~approval_id ~clock ~keeper_name ~to
         (fun () -> Eio.Promise.await promise)
         ~watcher:(fun () ->
           Eio.Time.sleep clock timeout_sec;
+          let published, mark_published = Eio.Promise.create () in
+          let retirement = { retiring_entry = entry; published } in
           let timed_out =
             Stdlib.Mutex.protect t.mutex (fun () ->
               let present =
@@ -133,11 +147,20 @@ let await ?(on_registered = fun () -> ()) t ~approval_id ~clock ~keeper_name ~to
               if present then begin
                 t.waiters <-
                   List.filter (fun waiter -> waiter.resolve != resolve) t.waiters;
+                t.retiring <- retirement :: t.retiring;
                 t.timed_out_total <- t.timed_out_total + 1
               end;
               present)
           in
-          if timed_out then Eio.Promise.resolve resolve Timed_out;
+          if timed_out then begin
+            Fun.protect
+              ~finally:(fun () ->
+                Stdlib.Mutex.protect t.mutex (fun () ->
+                  t.retiring <- List.filter (fun row -> row != retirement) t.retiring);
+                Eio.Promise.resolve mark_published ())
+              on_timed_out;
+            Eio.Promise.resolve resolve Timed_out
+          end;
           (* A different claim may have removed the wait but not yet resolved
              its promise in another domain. Await its outcome rather than
              manufacture a timeout from absence. *)
@@ -151,10 +174,21 @@ let settle t ~keeper_name ~approval_id decision =
           && String.equal waiter.entry.keeper_name keeper_name
           && Keeper_tool_approval_id.equal waiter.entry.approval_id approval_id
         then (taken := Some waiter; false) else true) t.waiters;
-      if Option.is_some !taken then t.answered_total <- t.answered_total + 1;
-      !taken) with
-  | None -> false
-  | Some waiter ->
+      match !taken with
+      | Some waiter ->
+          t.answered_total <- t.answered_total + 1;
+          Claimed waiter
+      | None ->
+          (match List.find_opt (fun (row : retirement) ->
+            String.equal row.retiring_entry.keeper_name keeper_name
+            && Keeper_tool_approval_id.equal row.retiring_entry.approval_id approval_id) t.retiring with
+           | Some row -> Publishing_timeout row.published
+           | None -> No_wait)) with
+  | No_wait -> false
+  | Publishing_timeout published ->
+      Eio.Promise.await published;
+      false
+  | Claimed waiter ->
     Eio.Promise.resolve waiter.resolve (Answered decision);
     true
 

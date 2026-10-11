@@ -89,7 +89,12 @@ let create ~registry ~late_approvals ~publish ~redact_text ~clock ~base_path
             "remembered_" ^ Registry.decision_to_string remembered )
       | None -> (
           let outcome =
-            Registry.await ~on_registered:publish_requested registry ~approval_id ~clock ~keeper_name ~tool_call_id
+            Registry.await ~on_registered:publish_requested
+              ~on_timed_out:(fun () ->
+                Late.note_timed_out late_approvals ~now:(Eio.Time.now clock)
+                  ~base_path ~keeper_name ~approval_id
+                  ~tool_name:request.tool_name ~args:request.input ())
+              registry ~approval_id ~clock ~keeper_name ~tool_call_id
               ~tool_name:request.tool_name
               ~args:(Yojson.Safe.to_string request.input)
               ~question:request.prompt.question ~because:request.prompt.because
@@ -108,9 +113,6 @@ let create ~registry ~late_approvals ~publish ~redact_text ~clock ~base_path
                  carries on. The ask's description is kept so an operator's
                  late answer is not discarded: it settles the identical call
                  once, whenever that call comes back. *)
-              Late.note_timed_out late_approvals ~now:(Eio.Time.now clock)
-                ~base_path ~keeper_name ~approval_id
-                ~tool_name:request.tool_name ~args:request.input ();
               (Agent_core.Hooks.Timed_out, "timed_out")
           (* Two waits claimed one call id, so neither answer can be trusted to be
              about this call. Denying is the conservative reading: the call the

@@ -789,6 +789,24 @@ describe('sendKeeperThreadMessage operation stream', () => {
     expect(keeperThreads.value.echo?.filter(entry => entry.role === 'assistant').at(-1)?.text).toBe(text)
   })
 
+  it.each(['resolve', 'reject'] as const)('preserves current action error when failed-send history becomes stale (%s)', async outcome => {
+    setStoredToken('fixture-old')
+    const streamFailure = new Error('old stream failed')
+    streamKeeperMessage.mockRejectedValueOnce(streamFailure)
+    let resolve!: (rows: unknown[]) => void
+    let reject!: (error: Error) => void
+    fetchKeeperChatHistory.mockReturnValueOnce(new Promise((yes, no) => { resolve = yes; reject = no }))
+    const send = sendKeeperThreadMessage('echo', 'input').catch(error => error)
+    await vi.waitFor(() => expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(1))
+    setStoredToken('fixture-new')
+    keeperActionErrors.value = { echo: 'current scope action error' }
+    if (outcome === 'resolve') resolve([])
+    else reject(new Error('old history failed'))
+    expect(await send).toBe(streamFailure)
+    expect(keeperActionErrors.value.echo).toBe('current scope action error')
+    clearStoredToken()
+  })
+
   it('preserves text when user blocks supply the message fallback', async () => {
     const text = '    블록의 첫 줄\n\n끝  '
     streamKeeperMessage.mockImplementation(completeStream('ok'))
@@ -1418,6 +1436,40 @@ describe('restored chat operation outcome', () => {
       assistantDraft: { text: 'partial authored answer', rawText: 'partial authored answer', delivery: 'streaming',
         streamState: 'streaming', timestamp: '2026-10-11T00:00:00Z', traceSteps: [{ kind: 'think', text: 'exposed reasoning' }] } })
   }
+
+  it.each(['resolve', 'reject'] as const)('retains operation recovery when history authentication changes (%s)', async outcome => {
+    storeDraft()
+    setStoredToken('fixture-old')
+    fetchKeeperChatOperation.mockResolvedValue({ operationId: 'restored-op', state: { kind: 'succeeded', completedAt: 2, outcomeRef: 'result' } })
+    let resolve!: (rows: unknown[]) => void
+    let reject!: (error: Error) => void
+    fetchKeeperChatHistory.mockReturnValueOnce(new Promise((yes, no) => { resolve = yes; reject = no }))
+    const recovery = hydrateTrackedKeeperChatOperations('echo')
+    await vi.waitFor(() => expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(1))
+    setStoredToken('fixture-new')
+    keeperChatHistoryErrors.value = { echo: 'current scope error' }
+    if (outcome === 'reject') reject(new Error('old scope failure'))
+    else resolve([
+      { id: 'old-user', role: 'user', content: 'input', ts: 1,
+        delivery_provenance: operationDeliveryProvenance('restored-op', 'accepted_user'), delivery_provenance_status: 'valid' },
+      { id: 'old-assistant', role: 'assistant', content: 'old scope answer', ts: 2,
+        delivery_provenance: operationDeliveryProvenance('restored-op', 'terminal_result'), delivery_provenance_status: 'valid' },
+    ])
+    await recovery
+    expect(keeperThreads.value.echo?.some(entry => entry.id === 'old-assistant')).toBe(false)
+    expect(trackedKeeperChatOperationsForKeeper('echo')).toHaveLength(1)
+    expect(keeperChatHistoryErrors.value.echo).toBe('current scope error')
+    fetchKeeperChatHistory.mockResolvedValueOnce([
+      { id: 'current-user', role: 'user', content: 'input', ts: 1,
+        delivery_provenance: operationDeliveryProvenance('restored-op', 'accepted_user'), delivery_provenance_status: 'valid' },
+      { id: 'current-assistant', role: 'assistant', content: 'current scope answer', ts: 2,
+        delivery_provenance: operationDeliveryProvenance('restored-op', 'terminal_result'), delivery_provenance_status: 'valid' },
+    ])
+    await hydrateTrackedKeeperChatOperations('echo')
+    expect(trackedKeeperChatOperationsForKeeper('echo')).toEqual([])
+    expect(keeperThreads.value.echo?.some(entry => entry.id === 'current-assistant')).toBe(true)
+    clearStoredToken()
+  })
 
   it.each([false, true])('restores durable quarantine into canonical history (continuation=%s)', async continuation => {
     const provenance = toolCallDeliveryProvenance(operationDeliveryProvenance('restored-op', 'terminal_result'), 'execution', 0)

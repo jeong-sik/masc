@@ -3,7 +3,7 @@ vi.mock('./api/keeper-turn-events', () => ({ fetchKeeperTurnEvents: vi.fn(), fet
 import { fetchKeeperCurrentTurn, fetchKeeperTurnEvents, type KeeperTurnEventPage } from './api/keeper-turn-events'
 import { mergeServerHistoryEntries, keeperThreads } from './keeper-state'
 import { _resetKeeperStreamBuffersForTests, applyKeeperAutonomousTurnEvent, applyKeeperStreamEvent } from './keeper-stream'
-import { _resetKeeperAutonomousRecoveryForTests, discoverKeeperAutonomousTurn, recoverKnownKeeperAutonomousTurns, recoverKeeperAutonomousTurn } from './keeper-autonomous-stream'
+import { _resetKeeperAutonomousRecoveryForTests, discoverKeeperAutonomousTurn, recoverKnownKeeperAutonomousTurns, recoverKeeperAutonomousTurn, recoverKeeperAutonomousHistory } from './keeper-autonomous-stream'
 import type { KeeperChatStreamEvent } from './lib/keeper-chat-stream-contract'
 const base = { threadId: 'keeper:k', runId: 'trace#9', timestamp: 1 }
 const text = (delta: string): KeeperChatStreamEvent => ({ ...base, type: 'TEXT_MESSAGE_CONTENT', messageId: 'trace#9:assistant', textStreamScope: 0, delta })
@@ -11,6 +11,51 @@ const page = (sequence: number, event: KeeperChatStreamEvent | null): KeeperTurn
   events: [{ sequence, timestamp: 1, event }], cursor: { sequence, offset: sequence + 1 }, hasMore: false })
 beforeEach(() => { keeperThreads.value = {}; _resetKeeperStreamBuffersForTests(); _resetKeeperAutonomousRecoveryForTests(); vi.mocked(fetchKeeperTurnEvents).mockReset(); vi.mocked(fetchKeeperCurrentTurn).mockReset().mockResolvedValue({ state: 'idle' }) })
 describe('autonomous journal recovery', () => {
+  it('discovers a completed autonomous journal from typed history without borrowing direct turns', async () => {
+    mergeServerHistoryEntries('k', [{ id: 'autonomous-trace#9', source: 'autonomous_turn', role: 'assistant', label: 'k',
+      turnRef: 'trace#9', text: 'canonical answer', delivery: 'history', streamState: null, details: null,
+      traceSteps: [{ kind: 'think', text: '', contentWithheld: true }] },
+      { id: 'direct-row', source: 'direct_assistant', role: 'assistant', label: 'k', turnRef: 'other#9',
+        text: 'direct answer', delivery: 'history' }])
+    vi.mocked(fetchKeeperTurnEvents).mockResolvedValueOnce({ turnRef: 'trace#9', hasMore: false,
+      cursor: { sequence: 2, offset: 100 }, events: [
+        { sequence: 0, timestamp: 1, event: { ...base, type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA',
+          value: { index: 0, delta: 'exposed reasoning', response: { content_generation: 1, stream_scope: 0 } } } },
+        { sequence: 1, timestamp: 1, event: text('journal final body') },
+        { sequence: 2, timestamp: 1, event: { ...base, type: 'RUN_FINISHED' } },
+      ] })
+    await recoverKeeperAutonomousHistory('k')
+    expect(fetchKeeperTurnEvents).toHaveBeenCalledWith('k', 'trace#9', { sequence: null, offset: 0 })
+    expect(keeperThreads.value.k?.find(entry => entry.source === 'autonomous_turn')).toMatchObject({
+      text: 'canonical answer', delivery: 'history', streamState: null,
+      traceSteps: [{ kind: 'think', text: '', contentWithheld: true }, { kind: 'think', text: 'exposed reasoning' }],
+      responseState: { phase: 'terminal', lastSequence: 2 },
+    })
+    vi.mocked(fetchKeeperTurnEvents).mockResolvedValueOnce({ turnRef: 'trace#9', hasMore: false,
+      cursor: { sequence: 2, offset: 100 }, events: [] })
+    await recoverKeeperAutonomousHistory('k')
+    expect(fetchKeeperTurnEvents).toHaveBeenCalledTimes(2)
+    expect(keeperThreads.value.k?.find(entry => entry.source === 'autonomous_turn')?.traceSteps).toHaveLength(2)
+  })
+  it('recovers the lost completed tail after a previously observed prefix converges with history', async () => {
+    vi.mocked(fetchKeeperTurnEvents).mockResolvedValueOnce(page(0, text('live prefix')))
+    await recoverKeeperAutonomousTurn('k', 'trace#9', 0)
+    mergeServerHistoryEntries('k', [{ id: 'autonomous-trace#9', source: 'autonomous_turn', role: 'assistant', label: 'k',
+      turnRef: 'trace#9', text: 'canonical answer', delivery: 'history', streamState: null, details: null }])
+    vi.mocked(fetchKeeperTurnEvents).mockResolvedValueOnce({ turnRef: 'trace#9', hasMore: false,
+      cursor: { sequence: 2, offset: 100 }, events: [
+        { sequence: 1, timestamp: 1, event: { ...base, type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA',
+          value: { index: 0, delta: 'exposed completed tail' } } },
+        { sequence: 2, timestamp: 1, event: { ...base, type: 'RUN_FINISHED' } },
+      ] })
+    await recoverKeeperAutonomousHistory('k')
+    expect(fetchKeeperTurnEvents).toHaveBeenLastCalledWith('k', 'trace#9', { sequence: 0, offset: 1 })
+    expect(keeperThreads.value.k?.[0]).toMatchObject({ text: 'canonical answer', delivery: 'history',
+      responseState: { phase: 'terminal', lastSequence: 2 } })
+    expect(keeperThreads.value.k?.[0]?.traceSteps).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'think', text: 'exposed completed tail' }),
+    ]))
+  })
   it('retains separate reasoning snapshots across interleaved Keeper pages', async () => {
     try {
       const pending = new Map<string, (page: KeeperTurnEventPage) => void>()

@@ -36,6 +36,9 @@ export function toolObservationsFromUnknown(raw: unknown): StoredToolObservation
     if (entries.some(entry => entry.id === value.id
       || entry.executionId != null && entry.executionId === value.executionId
       || entry.deliveryProvenance && sameDeliveryKey(entry.deliveryProvenance.delivery_key, provenance.value.delivery_key)
+        && (entry.deliveryProvenance.transcript_slot.kind === 'tool_delivery' || entry.deliveryProvenance.transcript_slot.kind === 'tool_call')
+        && entry.deliveryProvenance.transcript_slot.ordinal === slot.ordinal
+      || entry.deliveryProvenance && sameDeliveryKey(entry.deliveryProvenance.delivery_key, provenance.value.delivery_key)
         && entry.toolOccurrence && (entry.toolOccurrence.kind === 'identified' ? [entry.toolOccurrence] : entry.toolOccurrence.coordinates)
           .some(left => (toolOccurrence.kind === 'identified' ? [toolOccurrence] : toolOccurrence.coordinates)
             .some(right => left.streamScope === right.streamScope && left.blockIndex === right.blockIndex)))) return { kind: 'unavailable' }

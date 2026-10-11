@@ -1,3 +1,4 @@
+import { fetchKeeperToolApprovals } from './api/keeper'
 import { applyKeeperStreamEvent } from './keeper-stream'
 import { clearStoredToken, setStoredToken } from './api/core'
 import { effect } from '@preact/signals'
@@ -173,6 +174,18 @@ describe('answerHeldKeeperToolApproval', () => {
     releaseFetch?.()
     await expect(first).resolves.toBe(true)
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('approval inventory protocol', () => {
+  it.each([
+    {},
+    { pending: {} },
+    { pending: [{ keeper: 'sangsu', tool_call_id: 'call-malformed' }] },
+    { pending: [null] },
+  ])('rejects malformed inventory rather than inventing an empty list or prompt', async body => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, body)))
+    await expect(fetchKeeperToolApprovals()).rejects.toThrow()
   })
 })
 

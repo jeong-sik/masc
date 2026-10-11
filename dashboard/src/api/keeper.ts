@@ -266,21 +266,38 @@ export async function fetchKeeperToolApprovals(
   if (!resp.ok) {
     throw await apiRequestErrorFromResponse('GET', path, resp)
   }
-  const data = (await resp.json()) as Record<string, unknown>
-  const rows = Array.isArray(data.pending) ? data.pending : []
-  return rows.map((row): KeeperToolApprovalRow => {
-    const record = isRecord(row) ? row : {}
-    return {
-      keeper: asString(record.keeper) ?? '',
-      tool_call_id: asString(record.tool_call_id) ?? '',
-      tool: asString(record.tool) ?? '',
-      args: asString(record.args) ?? '',
-      question: asString(record.question) ?? '',
-      because: asString(record.because) ?? '',
-      asked_at: typeof record.asked_at === 'number' ? record.asked_at : null,
-      timeout_sec: typeof record.timeout_sec === 'number' ? record.timeout_sec : null,
+  const data: unknown = await resp.json()
+  if (!isRecord(data) || !Array.isArray(data.pending)) {
+    throw new Error('Invalid tool approval inventory envelope')
+  }
+  return data.pending.map((row): KeeperToolApprovalRow => {
+    if (!isRecord(row)) throw new Error('Invalid tool approval inventory row')
+    const text = (field: string, allowEmpty = false): string => {
+      const value = row[field]
+      if (typeof value !== 'string' || (!allowEmpty && value.trim().length === 0)) {
+        throw new Error(`Invalid tool approval inventory field: ${field}`)
+      }
+      return value
     }
-  }).filter(row => row.keeper && row.tool_call_id)
+    const seconds = (field: string): number | null => {
+      const value = row[field]
+      if (value === null) return null
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+        throw new Error(`Invalid tool approval inventory field: ${field}`)
+      }
+      return value
+    }
+    return {
+      keeper: text('keeper'),
+      tool_call_id: text('tool_call_id'),
+      tool: text('tool'),
+      args: text('args', true),
+      question: text('question'),
+      because: text('because', true),
+      asked_at: seconds('asked_at'),
+      timeout_sec: seconds('timeout_sec'),
+    }
+  })
 }
 
 // Answers a held tool call. `settled: false` on a 200 means the wait was

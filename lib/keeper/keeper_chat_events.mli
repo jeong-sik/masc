@@ -8,7 +8,11 @@
 
 (** {1 Types} *)
 
-type response_identity = { response_generation : int; response_scope : int }
+type response_identity = Ag_ui.response_identity = { response_generation : int; response_scope : int }
+
+type text_response = Ag_ui.text_response =
+  | Unobserved_scope of int option
+  | Observed_response of response_identity
 
 type role = User | Assistant
 
@@ -112,9 +116,10 @@ type keeper_chat_event =
   | Run_started of { run_id : string; thread_id : string }
   | Batch_bound of { operation_id : Keeper_chat_operation.Operation_id.t; execution_id : Keeper_chat_operation.Operation_id.t }
   | Text_message_start of { message_id : string; role : role }
-  | Text_delta of { text : string; stream_scope : int option }
-      (** The producer stamps an allocated response scope when known. Synthetic
-          text and stored observations without that identity remain [None]. *)
+  | Text_delta of { text : string; response : text_response }
+      (** An observed response retains its complete captured generation/scope.
+          [Unobserved_scope] preserves only the partial evidence supplied by
+          the producer; it never grants known generation ownership. *)
   | Text_message_end
   | External_effect_completed of
       { target : Keeper_surface_post.delivery_target }
@@ -404,3 +409,7 @@ val response_identity_of_json : Yojson.Safe.t -> (response_identity, string) res
 (** Absent response is explicitly unobserved; duplicate, null or malformed
     supplied response fields reject instead of weakening ownership. *)
 val optional_response_identity_of_fields : (string * Yojson.Safe.t) list -> (response_identity option, string) result
+
+(** A complete observed response or an explicitly unobserved scope. Simultaneous
+    owner/scope wire fields, duplicate fields and invalid numeric identities reject. *)
+val text_response_of_fields : owner_field:string -> scope_field:string -> (string * Yojson.Safe.t) list -> (text_response, string) result

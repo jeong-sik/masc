@@ -120,12 +120,12 @@ let project ~timestamp ~redact_text state event =
           (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
              ~run_id:state.run_id ~message_id:(Some message_id)
              ~role:(Some (ag_role role)) Ag_ui.Text_message_start) )
-  | Text_delta {text; stream_scope} ->
+  | Text_delta {text; response} ->
       ( state
       , Some
           (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
              ~run_id:state.run_id ~message_id:state.message_id
-             ~delta:(Some text) ~text_stream_scope:stream_scope Ag_ui.Text_message_content) )
+             ~delta:(Some text) ~text_response:response Ag_ui.Text_message_content) )
   | Text_message_end ->
       ( state
       , Some

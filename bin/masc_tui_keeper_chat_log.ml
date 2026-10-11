@@ -226,7 +226,7 @@ let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
        execution_id = Keeper_chat_operation.Operation_id.to_string execution_id})
   | E.Run_started _ -> Some Live.Run_started
   | E.Text_message_start _ | E.Text_message_end -> None
-  | E.Text_delta {text; stream_scope} -> Some (Live.Text {text; stream_scope})
+  | E.Text_delta {text; response} -> Some (Live.Text {text; response})
   | E.External_effect_completed _ -> Some Live.External_effect_completed
   | E.Run_finished _ -> Some Live.Run_finished
   | E.Event_error { message } -> Some (Live.Run_failed { message })

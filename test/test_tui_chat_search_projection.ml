@@ -72,7 +72,7 @@ let test_settled_reply_and_complete_suffix () = at_sizes (fun origin ->
     row ~id:"reply" ~request_id:"first" ~role:T.Message_keeper
       ~text:"HELD_REPLY_NEEDLE" 3. ];
   ignore (log state ~id:"first" ~at:1.
-    [Live.Run_started; Live.Text {text="HELD_REPLY_NEEDLE"; stream_scope=None}; reply "HELD_REPLY_NEEDLE"; Live.Run_finished]);
+    [Live.Run_started; Live.Text {text="HELD_REPLY_NEEDLE"; response=Unobserved_scope (None)}; reply "HELD_REPLY_NEEDLE"; Live.Run_finished]);
   check int "held reply replaces its durable copy exactly once" 1
     (count (screen state) "HELD_REPLY_NEEDLE");
   ignore (find state "HELD_REPLY_NEEDLE");
@@ -83,7 +83,7 @@ let test_settled_reply_and_complete_suffix () = at_sizes (fun origin ->
     let text = String.concat "\n" (List.init 10 (fun line ->
       Printf.sprintf "later answer %d line %d" index line)) in
     ignore (log state ~id ~at:(10. *. float_of_int index)
-      [Live.Run_started; Live.Text {text=text; stream_scope=None}; reply text; Live.Run_finished])
+      [Live.Run_started; Live.Text {text=text; response=Unobserved_scope (None)}; reply text; Live.Run_finished])
   done;
   state.msg_loaded <- state.msg_loaded @ [row ~id:"broadcast" ~request_id:"outside"
     ~role:(T.Message_user (T.Sent_by_other {speaker="beta"; surface=Some "broadcast"}))
@@ -278,8 +278,8 @@ let test_repeat_survives_reasoning_visibility_and_backfill () = at_sizes (fun or
   state.msg_loaded <- [row ~id:"old" ~request_id:"old" ~role:user
     ~text:"MATCH_HISTORY" 1.];
   let held = log state ~id:"running" ~at:10.
-    [Live.Run_started; Live.Text {text="MATCH_PROGRESS"; stream_scope=None};
-     Live.Thinking {text="MATCH_REASONING";response=None}; Live.Text {text="MATCH_REPLY"; stream_scope=None}] in
+    [Live.Run_started; Live.Text {text="MATCH_PROGRESS"; response=Unobserved_scope (None)};
+     Live.Thinking {text="MATCH_REASONING";response=None}; Live.Text {text="MATCH_REPLY"; response=Unobserved_scope (None)}] in
   let latest = find state "MATCH_" in
   let thought = find ~older:latest state "MATCH_" in
   check bool "repeating search visits a distinct journal stretch" true
@@ -325,7 +325,7 @@ let test_repeat_across_history_journal_replacement () = at_sizes (fun origin ->
     row ~id:"b" ~request_id:"b" ~role:T.Message_keeper ~text:"MATCH_B" 10. ];
   let latest = find state "MATCH_" in
   List.iter (fun (id, at, text) -> ignore (log state ~id ~at
-    [Live.Run_started; Live.Text {text=text; stream_scope=None}; reply text; Live.Run_finished]))
+    [Live.Run_started; Live.Text {text=text; response=Unobserved_scope (None)}; reply text; Live.Run_finished]))
     ["a", 1., "MATCH_A"; "b", 10., "MATCH_B"];
   let older = find ~older:latest state "MATCH_" in
   (match older.matched_anchor with
@@ -411,7 +411,7 @@ let test_long_answer_match_location () = at_sizes (fun origin ->
     let state = state origin in
     let text = long_answer "LONG_NEEDLE_" in
     if journal then ignore (log state ~id:"long" ~at:1.
-      [Live.Run_started; Live.Text {text=text; stream_scope=None}; reply text; Live.Run_finished])
+      [Live.Run_started; Live.Text {text=text; response=Unobserved_scope (None)}; reply text; Live.Run_finished])
     else state.msg_loaded <- [row ~id:"long" ~request_id:"long"
       ~role:T.Message_keeper ~text 1.];
     List.iter (fun index ->
@@ -425,7 +425,7 @@ let test_word_wrapped_match_location () = at_sizes (fun origin ->
   let words = List.init 300 (fun index -> Printf.sprintf "token%03d" index) in
   let text = String.concat " " words in
   ignore (log state ~id:"wrapped" ~at:1.
-    [Live.Run_started; Live.Text {text=text; stream_scope=None}; reply text; Live.Run_finished]);
+    [Live.Run_started; Live.Text {text=text; response=Unobserved_scope (None)}; reply text; Live.Run_finished]);
   List.iter (fun index ->
     let needle = Printf.sprintf "token%03d" index in
     ignore (find state needle);
@@ -441,7 +441,7 @@ let test_word_wrapped_match_location () = at_sizes (fun origin ->
   let unbroken = "HARDSTART" ^ String.make 180 'x' ^ "HARDEND" in
   let wrapped_word = text ^ "\n" ^ unbroken ^ "\n" ^ text in
   ignore (log state ~id:"hard-wrap" ~at:200.
-    [Live.Run_started; Live.Text {text=wrapped_word; stream_scope=None}; reply wrapped_word; Live.Run_finished]);
+    [Live.Run_started; Live.Text {text=wrapped_word; response=Unobserved_scope (None)}; reply wrapped_word; Live.Run_finished]);
   ignore (find state unbroken);
   let lines = frame_lines state in
   check bool "a hard-wrapped token retains both ends of its match" true
@@ -451,7 +451,7 @@ let test_search_matches_rendered_words () = at_sizes (fun origin ->
   let state = state origin in
   let text = "Visible **styled** text\nVISIBLE\nBOUNDARY\n" ^ long_answer "TAIL_" in
   ignore (log state ~id:"markdown" ~at:1.
-    [Live.Run_started; Live.Text {text=text; stream_scope=None}; reply text; Live.Run_finished]);
+    [Live.Run_started; Live.Text {text=text; response=Unobserved_scope (None)}; reply text; Live.Run_finished]);
   ignore (find state "Visible styled text");
   assert_still_reading state "Visible styled text";
   (* Search treats physical breaks as presentation boundaries, including an
@@ -467,14 +467,14 @@ let test_journal_only_pin_survives_all_arrivals () = at_sizes (fun origin ->
   let state = state origin in
   let text = long_answer "READ_A_" in
   ignore (log state ~id:"a" ~at:1.
-    [Live.Run_started; Live.Text {text=text; stream_scope=None}; reply text; Live.Run_finished]);
+    [Live.Run_started; Live.Text {text=text; response=Unobserved_scope (None)}; reply text; Live.Run_finished]);
   ignore (find state "READ_A_035");
   check bool "search pins the journal before a frame can arrive" true
     (Option.is_some state.msg_scroll_pin);
   let before = visible_line (frame_lines state) "READ_A_035" in
   let later = long_answer "NEW_C_" in
   ignore (log state ~id:"c" ~at:100.
-    [Live.Run_started; Live.Text {text=later; stream_scope=None}; reply later; Live.Run_finished]);
+    [Live.Run_started; Live.Text {text=later; response=Unobserved_scope (None)}; reply later; Live.Run_finished]);
   check int "a large journal arrival cannot move the reading row" before
     (visible_line (frame_lines state) "READ_A_035");
   assert_still_reading state "READ_A_035";
@@ -490,10 +490,10 @@ let test_journal_only_pin_survives_all_arrivals () = at_sizes (fun origin ->
   assert_still_reading state "READ_A_035";
   let live = T.turn_log_create ~keeper_name:"alpha" ~request_id:"live" ~started_at:300. in
   T.turn_log_add ~now:300. live ~seq:(Some 0) Live.Run_started;
-  T.turn_log_add ~now:301. live ~seq:(Some 1) (Live.Text {text=long_answer "LIVE_"; stream_scope=None});
+  T.turn_log_add ~now:301. live ~seq:(Some 1) (Live.Text {text=long_answer "LIVE_"; response=Unobserved_scope (None)});
   state.msg_live <- Some live;
   assert_still_reading state "READ_A_035";
-  T.turn_log_add ~now:302. live ~seq:(Some 2) (Live.Text {text=("\n" ^ long_answer "GROWTH_"); stream_scope=None});
+  T.turn_log_add ~now:302. live ~seq:(Some 2) (Live.Text {text=("\n" ^ long_answer "GROWTH_"); response=Unobserved_scope (None)});
   assert_still_reading state "READ_A_035";
   T.turn_log_add ~now:303. live ~seq:(Some 3)
     (reply (long_answer "LIVE_" ^ "\n" ^ long_answer "GROWTH_"));
@@ -525,7 +525,7 @@ let test_pending_pin_survives_run_start () = at_sizes (fun origin ->
        state.msg_scroll_pin);
   T.turn_log_add ~now:2. live ~seq:(Some 0) Live.Run_started;
   T.turn_log_add ~now:3. live ~seq:(Some 1)
-    (Live.Text {text=long_answer "NEW_EXECUTION_";stream_scope=None});
+    (Live.Text {text=long_answer "NEW_EXECUTION_";response=Unobserved_scope (None)});
   check int "promotion and new output keep the pending input row in place" position
     (visible_line (frame_lines state) needle);
   assert_still_reading state needle)
@@ -542,9 +542,9 @@ let test_reply_alias_uses_recorded_execution_source () = at_sizes (fun origin ->
    | _ -> fail "history reply inferred the delivery request instead of recorded execution");
   ignore (frame_lines state);
   ignore (log state ~id:"execution-owner" ~at:1.
-    [Live.Run_started;Live.Text {text;stream_scope=None};reply text;Live.Run_finished]);
+    [Live.Run_started;Live.Text {text;response=Unobserved_scope (None)};reply text;Live.Run_finished]);
   ignore (log state ~id:"later" ~at:200.
-    [Live.Run_started;Live.Text {text=long_answer "NEW_AFTER_ALIAS_";stream_scope=None};
+    [Live.Run_started;Live.Text {text=long_answer "NEW_AFTER_ALIAS_";response=Unobserved_scope (None)};
      reply (long_answer "NEW_AFTER_ALIAS_");Live.Run_finished]);
   assert_still_reading state "BATCH_REPLY_040")
 
@@ -556,10 +556,10 @@ let test_pin_aliases_history_and_canonical_reply () = at_sizes (fun origin ->
   ignore (find state "ALIASED_040");
   ignore (frame_lines state);
   ignore (log state ~id:"alias" ~at:1.
-    [Live.Run_started; Live.Text {text=text; stream_scope=None}; reply text; Live.Run_finished]);
+    [Live.Run_started; Live.Text {text=text; response=Unobserved_scope (None)}; reply text; Live.Run_finished]);
   let later = long_answer "LATER_" in
   let tail = log state ~id:"tail" ~at:100.
-    [Live.Run_started; Live.Text {text=later; stream_scope=None}; reply later; Live.Run_finished] in
+    [Live.Run_started; Live.Text {text=later; response=Unobserved_scope (None)}; reply later; Live.Run_finished] in
   assert_still_reading state "ALIASED_040";
   state.msg_settled_logs <- [tail];
   assert_still_reading state "ALIASED_040";
@@ -575,13 +575,13 @@ let test_search_pin_before_first_frame_and_at_tail () = at_sizes (fun origin ->
       state.keeper_message_focus <- T.Right_pane;
       Masc_tui_message_input.insert state.msg_input draft;
       ignore (log state ~id:"short" ~at:1.
-        [Live.Run_started; Live.Text {text="SHORT_MATCH"; stream_scope=None}; reply "SHORT_MATCH"; Live.Run_finished]);
+        [Live.Run_started; Live.Text {text="SHORT_MATCH"; response=Unobserved_scope (None)}; reply "SHORT_MATCH"; Live.Run_finished]);
       ignore (find state "SHORT_MATCH");
       if paint_before_arrival then ignore (frame_lines state);
       check int "short-answer search starts at the live edge" 0 state.msg_scroll;
       let tail = long_answer "ARRIVED_BEFORE_PAINT_" in
       ignore (log state ~id:"tail" ~at:50.
-        [Live.Run_started; Live.Text {text=tail; stream_scope=None}; reply tail; Live.Run_finished]);
+        [Live.Run_started; Live.Text {text=tail; response=Unobserved_scope (None)}; reply tail; Live.Run_finished]);
       let first_frame, feedback = Render.render_keeper_message state in
       check int "render returns scroll feedback without changing the stored position" 0
         state.msg_scroll;
@@ -602,7 +602,7 @@ let test_search_pin_before_first_frame_and_at_tail () = at_sizes (fun origin ->
         (follows_live ());
       let newest = long_answer "AFTER_RELEASE_" in
       ignore (log state ~id:"after-release" ~at:300.
-        [Live.Run_started; Live.Text {text=newest; stream_scope=None}; reply newest; Live.Run_finished]);
+        [Live.Run_started; Live.Text {text=newest; response=Unobserved_scope (None)}; reply newest; Live.Run_finished]);
       let lines = frame_lines state in
       check int "new arrivals after End keep the live edge" 0 state.msg_scroll;
       ignore (visible_line lines "AFTER_RELEASE_099");
@@ -685,7 +685,7 @@ let test_admission_pin_survives_batch_reply_arrival () = at_sizes (fun origin ->
        answer can arrive before the searched receipt's first paint. *)
     bind_admission_batch [held];
     let text = long_answer "BATCH_REPLY_" in
-    T.turn_log_add ~now:32. held ~seq:(Some 2) (Live.Text {text=text; stream_scope=None});
+    T.turn_log_add ~now:32. held ~seq:(Some 2) (Live.Text {text=text; response=Unobserved_scope (None)});
     T.turn_log_add ~now:33. held ~seq:(Some 3) (reply text);
     T.turn_log_add ~now:34. held ~seq:(Some 4) Live.Run_finished;
     (* The terminal callback retains the source before removing its watcher. *)
@@ -980,7 +980,7 @@ let test_polled_source_survives_tail_and_journal_takeover () = at_sizes (fun ori
       [Layout.Origin_inline;Origin_bare;Origin_row]) [42;140;60];
   state.keeper_turns <- [];
   ignore (log state ~id:"journal-takeover" ~at:130.
-    [Live.Run_started;Live.Text {text="ACTUAL_JOURNAL_TAKEOVER";stream_scope=None};
+    [Live.Run_started;Live.Text {text="ACTUAL_JOURNAL_TAKEOVER";response=Unobserved_scope (None)};
      reply "ACTUAL_JOURNAL_TAKEOVER";Live.Run_finished]);
   ignore (visible_line (frame_lines state) observed);
   T.set_msg_scroll state 0;
@@ -1101,7 +1101,7 @@ let test_regenerated_label_is_searched_whole () =
 let test_unanchored_status_row_counts_as_unsearched () =
   let state=state Layout.Origin_inline in
   let journal=log state ~id:"unavailable-journal" ~at:10.
-    [Live.Run_started;Live.Text {text="STREAMED_TEXT";stream_scope=None}] in
+    [Live.Run_started;Live.Text {text="STREAMED_TEXT";response=Unobserved_scope (None)}] in
   state.msg_journal_unavailable <- [T.turn_log_journal_key journal];
   let result=Render.keeper_message_find_scroll state ~keeper_name:"alpha"
     ~needle:"받은 기록" ~older_than:None in

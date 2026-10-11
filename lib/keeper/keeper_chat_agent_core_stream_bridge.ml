@@ -987,7 +987,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
           bridge_state.current_message_has_text || text <> ""} in
         let text = redact_text text in
         observe_model_content bridge_state ~stream_scope ~index ~channel:Public_text
-          text [Text_delta {text; stream_scope=Some stream_scope}])
+          text [Text_delta {text; response=Observed_response {response_generation=bridge_state.content_generation;response_scope=stream_scope}}])
   | ContentBlockDelta { index; delta = ThinkingDelta text } ->
       (match
          reject_non_input_tool_delta ~stream_scope ~index ~delta_kind:"thinking"

@@ -45,7 +45,7 @@ type delta =
       ; usage : stream_usage option
       ; stop_reason : Agent_core.Types.stop_reason option
       }
-  | Text of {text : string; stream_scope : int option}
+  | Text of {text : string; response : Masc.Keeper_chat_events.text_response}
   | Thinking of {text : string; response : Masc.Keeper_chat_events.response_identity option}
   | Native_tool_started of
       { occurrence : tool_occurrence; tool_name : string option }
@@ -518,13 +518,11 @@ let event_deltas (event : Yojson.Safe.t) =
               }
           ]
       | Some "TEXT_MESSAGE_CONTENT" ->
-          (match List.filter (fun (key, _) -> key = "textStreamScope") fields with
-           | [] -> required ~event:"TEXT_MESSAGE_CONTENT" ~field:"delta" fields
-               (fun text -> Text {text; stream_scope=None})
-           | [_, `Int scope] when scope >= 0 ->
-               required ~event:"TEXT_MESSAGE_CONTENT" ~field:"delta" fields
-                 (fun text -> Text {text; stream_scope=Some scope})
-           | _ -> [Undecodable "TEXT_MESSAGE_CONTENT.textStreamScope must be one nonnegative integer"])
+          (match Masc.Keeper_chat_events.text_response_of_fields
+              ~owner_field:"textResponse" ~scope_field:"textStreamScope" fields with
+           | Ok response -> required ~event:"TEXT_MESSAGE_CONTENT" ~field:"delta" fields
+               (fun text -> Text {text;response})
+           | Error detail -> [Undecodable detail])
       | Some "TOOL_CALL_START" -> tool_start_deltas fields
       | Some "TOOL_CALL_ARGS" -> tool_args_deltas fields
       | Some "TOOL_CALL_END" ->

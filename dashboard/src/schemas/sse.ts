@@ -219,7 +219,7 @@ const KEEPER_CHAT_AG_UI_FIELDS_BY_TYPE = new Map<string, ReadonlySet<string>>([
   ['RUN_FINISHED', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId'])],
   ['RUN_ERROR', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'message', 'code'])],
   ['TEXT_MESSAGE_START', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'messageId', 'role'])],
-  ['TEXT_MESSAGE_CONTENT', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'messageId', 'delta', 'textStreamScope'])],
+  ['TEXT_MESSAGE_CONTENT', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'messageId', 'delta', 'textStreamScope', 'textResponse'])],
   ['TEXT_MESSAGE_END', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'messageId'])],
   ['TOOL_CALL_START', new Set([
     ...KEEPER_CHAT_AG_UI_BASE_FIELDS,
@@ -920,6 +920,15 @@ function validateKeeperChatAgUiEvent(value: Record<string, unknown>): SafeParseR
         ? ok(true)
         : fail('ag_ui_event.role', 'Expected assistant or user AG-UI role')
     case 'TEXT_MESSAGE_CONTENT':
+      if ('textResponse' in value) {
+        if ('textStreamScope' in value) return fail('ag_ui_event.textResponse', 'Conflicting text ownership fields')
+        const owner = exactCustomObject(value.textResponse, 'textResponse', ['content_generation', 'stream_scope'])
+        if (!owner.success) return owner
+        const generation = requiredInteger(owner.data, 'content_generation', 0)
+        if (!generation.success) return generation
+        const scope = requiredInteger(owner.data, 'stream_scope', 0)
+        if (!scope.success) return scope
+      }
       if ('textStreamScope' in value && (
         typeof value.textStreamScope !== 'number'
         || !Number.isSafeInteger(value.textStreamScope)

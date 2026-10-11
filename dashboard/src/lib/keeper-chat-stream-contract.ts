@@ -318,7 +318,10 @@ export type KeeperChatStreamEvent = KeeperChatStreamEventBase & (
   | { type: 'RUN_STARTED' | 'RUN_FINISHED' }
   | { type: 'RUN_ERROR'; message?: string; code?: string }
   | { type: 'TEXT_MESSAGE_START'; messageId?: string; role?: 'assistant' | 'user' }
-  | { type: 'TEXT_MESSAGE_CONTENT'; messageId?: string; delta?: string; textStreamScope?: number }
+  | ({ type: 'TEXT_MESSAGE_CONTENT'; messageId?: string; delta?: string } & (
+      | { textResponse: { content_generation: number; stream_scope: number }; textStreamScope?: never }
+      | { textStreamScope?: number; textResponse?: never }
+    ))
   | { type: 'TEXT_MESSAGE_END'; messageId?: string }
   | (KeeperToolStreamOccurrence & { type: 'TOOL_CALL_START'; toolCallName?: string })
   | (KeeperToolStreamOccurrence & { type: 'TOOL_CALL_ARGS'; delta?: string; snapshot?: string })

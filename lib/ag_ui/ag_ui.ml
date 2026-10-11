@@ -13,6 +13,12 @@
     @since 2.60.0 *)
 
 (** AG-UI event types — subset relevant to MASC agent workspace *)
+type response_identity = { response_generation : int; response_scope : int }
+
+type text_response =
+  | Unobserved_scope of int option
+  | Observed_response of response_identity
+
 type event_type =
   | Run_started
   | Run_finished
@@ -58,7 +64,7 @@ type event = {
   delta: string option;            (** Text chunk or tool args fragment *)
   tool_call_id: string option;
   tool_call_name: string option;
-  text_stream_scope : int option;
+  text_response : text_response;
   tool_stream_scope: int option;
   provider_message_id: string option;
   tool_call_block_index: int option;
@@ -73,7 +79,7 @@ type event = {
 (** Create an event with defaults *)
 let make_event ?(timestamp = Time_compat.now ()) ?(run_id=None) ?(message_id=None) ?(role=None)
     ?(delta=None) ?(tool_call_id=None)
-    ?(tool_call_name=None) ?(text_stream_scope=None) ?(tool_stream_scope=None)
+    ?(tool_call_name=None) ?(text_response=Unobserved_scope None) ?(tool_stream_scope=None)
     ?(provider_message_id=None) ?(tool_call_block_index=None) ?(snapshot=None)
     ?(message=None) ?(code=None)
     ?(custom_name=None) ?(custom_value=None)
@@ -111,7 +117,7 @@ let make_event ?(timestamp = Time_compat.now ()) ?(run_id=None) ?(message_id=Non
     delta;
     tool_call_id;
     tool_call_name;
-    text_stream_scope;
+    text_response;
     tool_stream_scope;
     provider_message_id;
     tool_call_block_index;
@@ -149,7 +155,11 @@ let event_to_json (e : event) : Yojson.Safe.t =
     @ optional "delta" (fun s -> `String s) e.delta
     @ optional "toolCallId" (fun s -> `String s) e.tool_call_id
     @ optional "toolCallName" (fun s -> `String s) e.tool_call_name
-    @ optional "textStreamScope" (fun value -> `Int value) e.text_stream_scope
+    @ (match e.text_response with
+       | Unobserved_scope scope -> optional "textStreamScope" (fun value -> `Int value) scope
+       | Observed_response owner -> ["textResponse", `Assoc
+           ["content_generation", `Int owner.response_generation;
+            "stream_scope", `Int owner.response_scope]])
     @ optional "toolStreamScope" (fun value -> `Int value) e.tool_stream_scope
     @ optional "providerMessageId" (fun s -> `String s) e.provider_message_id
     @ optional "toolCallBlockIndex" (fun value -> `Int value) e.tool_call_block_index

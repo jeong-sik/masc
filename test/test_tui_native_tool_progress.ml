@@ -114,7 +114,7 @@ let test_replayed_sequence_and_model_signal () =
     check bool "turn terminal rejects new progress" true
       ((List.hd before).native_progress=(List.hd (T.tool_calls t)).native_progress
        && (List.hd before).native_retry=(List.hd (T.tool_calls t)).native_retry))
-    [Live.Text {text="Answer"; stream_scope=None},"STREAMING";Live.Thinking {text="Reason";response=None},"THINKING"]
+    [Live.Text {text="Answer"; response=Unobserved_scope (None)},"STREAMING";Live.Thinking {text="Reason";response=None},"THINKING"]
 
 let test_heartbeat_reported_time_is_not_local_elapsed () =
   let t = T.create ~keeper_name:"fixture" ~request_id:"heartbeat-time" ~started_at:0. in
@@ -123,7 +123,7 @@ let test_heartbeat_reported_time_is_not_local_elapsed () =
   let both ~now delta = List.iter (fun t -> T.apply ~now t delta) [t;control] in
   both ~now:1. Live.Run_started;
   both ~now:10. (Live.Native_tool_started {occurrence;tool_name=Some "Read"});
-  both ~now:11. (Live.Text {text="answer"; stream_scope=None});
+  both ~now:11. (Live.Text {text="answer"; response=Unobserved_scope (None)});
   List.iter (fun (now,elapsed_seconds) ->
     T.apply ~now t (Live.Native_tool_progress {occurrence;progress=Native.Heartbeat_reported {elapsed_seconds}}))
     [50.,30;51.,3];
@@ -470,7 +470,7 @@ let test_native_occurrence_numeric_live_and_projection () =
       tool_call_id=Some "native-numeric";tool_call_name=Some "Read"} in
   let events = [E.Run_started {run_id;thread_id="keeper:fixture"};
       E.Text_message_start {message_id="keeper-operation-message-" ^ request.request_id;role=E.Assistant};
-      E.Text_delta {text="body"; stream_scope=None}; E.Native_tool_start native;
+      E.Text_delta {text="body"; response=Unobserved_scope (None)}; E.Native_tool_start native;
       E.Native_tool_progress (native,output 1); E.Native_tool_end (native,Native.end_observed);
       E.Reply_details {reply="body";turn_outcome=Masc.Keeper_turn_outcome.Visible_reply;
         turn_ref=Ids.Turn_ref.make ~trace_id:"numeric-wire" ~absolute_turn:1; terminal_stream_scope=None};

@@ -1462,3 +1462,22 @@ describe('Keeper thinking response ownership protocol', () => {
     expect(SSEMessageSchema.safeParse(event(value)).success).toBe(false)
   })
 })
+
+
+describe('Keeper text response ownership protocol', () => {
+  const event = (extra: Record<string, unknown>) => ({
+    type: 'keeper_chat_operation_event', name: 'fixture', operation_id: 'kmsg-fixture',
+    ag_ui_event: { type: 'TEXT_MESSAGE_CONTENT', threadId: 'keeper-consumer:fixture', runId: 'run-1',
+      messageId: 'message-1', delta: 'answer', timestamp: 1712000000, ...extra },
+  })
+  it('retains complete text response identity', () => {
+    expect(SSEMessageSchema.safeParse(event({ textResponse: { content_generation: 7, stream_scope: 0 } })).success).toBe(true)
+  })
+  it.each([
+    { textResponse: null }, { textResponse: { content_generation: 7 } },
+    { textResponse: { content_generation: 7, stream_scope: -1 } },
+    { textResponse: { content_generation: 7, stream_scope: 0 }, textStreamScope: 0 },
+  ])('rejects ambiguous text ownership %j', value => {
+    expect(SSEMessageSchema.safeParse(event(value)).success).toBe(false)
+  })
+})

@@ -535,8 +535,9 @@ async function errorResponseInfoFromResponse(res: Response, signal?: AbortSignal
       : res
     rawText = (await readableResponse.text()).trim()
     signal?.throwIfAborted()
-  } catch {
+  } catch (error) {
     signal?.throwIfAborted()
+    if (isAbortError(error)) throw error
     return {}
   }
   if (!rawText) return {}
@@ -636,7 +637,8 @@ async function parseJsonResponse<T>(
   let rawText = ''
   try {
     rawText = await res.text()
-  } catch {
+  } catch (error) {
+    if (isAbortError(error)) throw error
     throw new ApiRequestError({
       method,
       path,
@@ -805,7 +807,7 @@ export type GetOptions = AbortableRequestOptions & {
 export async function get<T>(path: string, opts: GetOptions & { onAdmission?: (admission: GetAdmission) => void } = {}): Promise<T> {
   const headers = authHeaders({ includeActor: opts.includeActorHeader })
   opts.onAdmission?.(Object.freeze({ path, authRevision: currentStoredTokenRevision() }))
-  const res = await fetchWithTimeout(
+  return fetchWithTimeout(
     path,
     {
       headers,
@@ -813,21 +815,23 @@ export async function get<T>(path: string, opts: GetOptions & { onAdmission?: (a
       signal: opts.signal,
     },
     opts.timeoutMs ?? DEFAULT_GET_TIMEOUT_MS,
+    async (res) => {
+      if (!res.ok) {
+        const warmPayload = await bootstrapWarmPayload(path, res.clone())
+        if (warmPayload !== null) {
+          return warmPayload as T
+        }
+        throw await apiRequestErrorFromResponse('GET', path, res)
+      }
+      const data = await parseJsonResponse<T>('GET', path, res)
+      // Server may return 200 OK with {"error":"not initialized"} during startup
+      if (DASHBOARD_BOOTSTRAP_WARM_PATHS.has(path) && isNotInitializedEnvelope(data)) {
+        const payload = bootstrapInitializingPayload(path)
+        if (payload !== null) return payload as T
+      }
+      return data
+    },
   )
-  if (!res.ok) {
-    const warmPayload = await bootstrapWarmPayload(path, res.clone())
-    if (warmPayload !== null) {
-      return warmPayload as T
-    }
-    throw await apiRequestErrorFromResponse('GET', path, res)
-  }
-  const data = await parseJsonResponse<T>('GET', path, res)
-  // Server may return 200 OK with {"error":"not initialized"} during startup
-  if (DASHBOARD_BOOTSTRAP_WARM_PATHS.has(path) && isNotInitializedEnvelope(data)) {
-    const payload = bootstrapInitializingPayload(path)
-    if (payload !== null) return payload as T
-  }
-  return data
 }
 
 // Same wire shape as [get<T>] but exposes selected response headers

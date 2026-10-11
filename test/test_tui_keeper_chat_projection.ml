@@ -547,14 +547,17 @@ let test_current_nonterminal_event_set () =
         `Assoc [ "kind", `String "sse_error" ]
       else if String.equal name "KEEPER_TOOL_APPROVAL_REQUESTED" then
         `Assoc
-          [ "tool_call_id", `String "tool-1"
+          [ "approval_id", `String "019a0000-0000-7000-8000-000000000001"
+          ; "tool_call_id", `String "tool-1"
           ; "tool_call_name", `String "Read"
           ; "args", `String "{}"
           ; "question", `String "Run Read?"
+          ; "because", `String "policy"
           ]
       else if String.equal name "KEEPER_TOOL_APPROVAL_SETTLED" then
         `Assoc
-          [ "tool_call_id", `String "tool-1"
+          [ "approval_id", `String "019a0000-0000-7000-8000-000000000001"
+          ; "tool_call_id", `String "tool-1"
           ; "outcome", `String "approved"
           ]
       else `Null

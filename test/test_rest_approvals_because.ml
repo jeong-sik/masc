@@ -75,7 +75,7 @@ let test_rest_listing_serializes_because () =
             Eio.Fiber.both
               (fun () ->
                  ignore
-                   (Masc.Keeper_tool_approval_registry.await registry ~clock
+                   (Masc.Keeper_tool_approval_registry.await ~approval_id:(Masc.Keeper_tool_approval_id.fresh ()) registry ~clock
                       ~tool_name:"Execute" ~args:"{}"
                       ~question:"Run Execute on git status?"
                       ~because:"fs tools change something outside this turn"

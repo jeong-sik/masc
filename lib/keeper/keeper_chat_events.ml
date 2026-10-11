@@ -160,14 +160,16 @@ type keeper_chat_event =
   | Native_tool_end of native_tool * Runtime_native_tools.completion
   | Native_tool_progress of native_tool * Runtime_native_tools.progress
   | Tool_approval_requested of
-      { tool_call_id : string
+      { approval_id : Keeper_tool_approval_id.t
+      ; tool_call_id : string
       ; tool_call_name : string
       ; args : string
       ; question : string
       ; because : string
       }
   | Tool_approval_settled of
-      { tool_call_id : string
+      { approval_id : Keeper_tool_approval_id.t
+      ; tool_call_id : string
       ; outcome : string
       }
   | Tool_result_ready of

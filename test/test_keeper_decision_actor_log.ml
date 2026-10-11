@@ -392,7 +392,7 @@ let test_tool_approval_expected_workspace_admission ~sw ~clock ~base_path ~state
   Eio.Fiber.both
     (fun () ->
        match
-         Keeper_tool_approval_registry.await registry ~clock
+         Keeper_tool_approval_registry.await ~approval_id:(Masc.Keeper_tool_approval_id.fresh ()) registry ~clock
            ~tool_name:"Execute" ~args:"{}"
            ~question:"Run Execute?" ~because:"test held wait"
            ~keeper_name:"decision-canary" ~tool_call_id:held_call_id

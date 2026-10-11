@@ -38,7 +38,7 @@ let test_an_answer_releases_the_wait () =
       let result =
         Eio.Fiber.pair
           (fun () ->
-            Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+            Registry.await ~approval_id:(Masc.Keeper_tool_approval_id.fresh ()) registry ~clock ~tool_name:"Execute" ~args:"{}"
                 ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
               ~tool_call_id:"call-1" ~timeout_sec:5.0)
           (fun () ->
@@ -58,7 +58,7 @@ let test_a_denial_is_carried_as_itself () =
       let result =
         Eio.Fiber.pair
           (fun () ->
-            Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+            Registry.await ~approval_id:(Masc.Keeper_tool_approval_id.fresh ()) registry ~clock ~tool_name:"Execute" ~args:"{}"
                 ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
               ~tool_call_id:"call-2" ~timeout_sec:5.0)
           (fun () ->
@@ -74,7 +74,7 @@ let test_a_wait_nobody_answers_times_out () =
   with_env (fun ~clock ->
       let registry = Registry.create () in
       let result =
-        Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+        Registry.await ~approval_id:(Masc.Keeper_tool_approval_id.fresh ()) registry ~clock ~tool_name:"Execute" ~args:"{}"
                 ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
           ~tool_call_id:"call-3" ~timeout_sec:0.05
       in
@@ -89,7 +89,7 @@ let test_answering_a_wait_that_already_timed_out_reports_it () =
   with_env (fun ~clock ->
       let registry = Registry.create () in
       let timed_out =
-        Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+        Registry.await ~approval_id:(Masc.Keeper_tool_approval_id.fresh ()) registry ~clock ~tool_name:"Execute" ~args:"{}"
                 ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
           ~tool_call_id:"call-4" ~timeout_sec:0.02
       in
@@ -114,7 +114,7 @@ let test_a_second_wait_on_the_same_id_displaces_the_first () =
       let first, second =
         Eio.Fiber.pair
           (fun () ->
-            Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+            Registry.await ~approval_id:(Masc.Keeper_tool_approval_id.fresh ()) registry ~clock ~tool_name:"Execute" ~args:"{}"
                 ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
               ~tool_call_id:"call-5" ~timeout_sec:5.0)
           (fun () ->
@@ -127,7 +127,7 @@ let test_a_second_wait_on_the_same_id_displaces_the_first () =
             wait_for_first 100;
             Eio.Fiber.pair
               (fun () ->
-                Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+                Registry.await ~approval_id:(Masc.Keeper_tool_approval_id.fresh ()) registry ~clock ~tool_name:"Execute" ~args:"{}"
                 ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
                   ~tool_call_id:"call-5" ~timeout_sec:5.0)
               (fun () ->
@@ -148,7 +148,7 @@ let test_waits_are_scoped_to_their_keeper () =
       let result =
         Eio.Fiber.pair
           (fun () ->
-            Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+            Registry.await ~approval_id:(Masc.Keeper_tool_approval_id.fresh ()) registry ~clock ~tool_name:"Execute" ~args:"{}"
                 ~question:"run?" ~because:"policy: ask" ~keeper_name:"keeper.one"
               ~tool_call_id:"shared-id" ~timeout_sec:0.15)
           (fun () ->
@@ -174,13 +174,13 @@ let test_pending_lists_open_waits_oldest_first () =
       Eio.Fiber.all
         [ (fun () ->
             ignore
-              (Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+              (Registry.await ~approval_id:(Masc.Keeper_tool_approval_id.fresh ()) registry ~clock ~tool_name:"Execute" ~args:"{}"
                 ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
                  ~tool_call_id:"call-a" ~timeout_sec:0.2))
         ; (fun () ->
             Eio.Time.sleep clock 0.01;
             ignore
-              (Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+              (Registry.await ~approval_id:(Masc.Keeper_tool_approval_id.fresh ()) registry ~clock ~tool_name:"Execute" ~args:"{}"
                 ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
                  ~tool_call_id:"call-b" ~timeout_sec:0.2))
         ; (fun () ->
@@ -213,7 +213,7 @@ let test_a_cancelled_wait_leaves_nothing_behind () =
       Eio.Fiber.first
         (fun () ->
           ignore
-            (Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+            (Registry.await ~approval_id:(Masc.Keeper_tool_approval_id.fresh ()) registry ~clock ~tool_name:"Execute" ~args:"{}"
                 ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
                ~tool_call_id:"call-cancel" ~timeout_sec:5.0))
         (fun () -> Eio.Time.sleep clock 0.02);
@@ -272,7 +272,7 @@ let test_an_answer_settled_as_the_timeout_passed_is_the_answer () =
       Eio.Switch.run (fun sw ->
           let waited =
             Eio.Fiber.fork_promise ~sw (fun () ->
-                Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+                Registry.await ~approval_id:(Masc.Keeper_tool_approval_id.fresh ()) registry ~clock ~tool_name:"Execute" ~args:"{}"
                   ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
                   ~tool_call_id:"call-late" ~timeout_sec:1.0)
           in

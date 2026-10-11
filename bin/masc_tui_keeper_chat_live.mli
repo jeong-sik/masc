@@ -138,7 +138,8 @@ type delta =
           live tool row to enter the failed state; an absent occurrence remains
           a turn-level diagnostic. *)
   | Approval_requested of
-      { call_id : string
+      { approval_id : Masc.Keeper_tool_approval_id.t
+      ; call_id : string
       ; tool_name : string
       ; args : string
       ; question : string
@@ -147,7 +148,8 @@ type delta =
       (** The turn is held at this call until it is answered. [because] is
           why it was held; the pane draws it under the question. *)
   | Approval_settled of
-      { call_id : string
+      { approval_id : Masc.Keeper_tool_approval_id.t
+      ; call_id : string
       ; outcome : string
       }
       (** How the wait ended -- the answer, or that none came. Drawn so a

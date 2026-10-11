@@ -71,19 +71,17 @@ type delta =
       ; detail : string
       }
   | Approval_requested of
-      { call_id : string
+      { approval_id : Masc.Keeper_tool_approval_id.t
+      ; call_id : string
       ; tool_name : string
       ; args : string
       ; question : string
-      ; (* Why this call was held at all. The approval list screen shows it
-           (#30518); without it here, the same reader answering from the chat
-           pane decides without the reason. Emitted since #30518, so it is
-           read with a default rather than required: an event without it is
-           still a prompt that has to be answered. *)
+      ; (* Policy reason attached to this exact approval admission. *)
         because : string
       }
   | Approval_settled of
-      { call_id : string
+      { approval_id : Masc.Keeper_tool_approval_id.t
+      ; call_id : string
       ; outcome : string
       }
   | Accepted of
@@ -421,29 +419,20 @@ let custom_deltas_unvalidated fields =
           [ Undecodable "KEEPER_TOOL_APPROVAL_REQUESTED value is not an object" ]
       | Some value -> (
           match
-            ( string_field value "tool_call_id"
+            ( Option.bind (string_field value "approval_id") (fun text ->
+                Result.to_option (Masc.Keeper_tool_approval_id.of_string text))
+            , string_field value "tool_call_id"
             , string_field value "tool_call_name"
-            , string_field value "question" )
+            , string_field value "args"
+            , string_field value "question"
+            , string_field value "because" )
           with
-          | Some call_id, Some tool_name, Some question ->
-              [ Approval_requested
-                  { call_id
-                  ; tool_name
-                  ; (* Absent arguments are drawn as none rather than dropping
-                       the prompt: a reader still has to answer, and the tool
-                       name plus the question is enough to. *)
-                    args = Option.value ~default:"" (string_field value "args")
-                  ; question
-                  ; (* Same posture as args: a missing because is an older
-                       emitter, not a reason to drop the ask. *)
-                    because =
-                      Option.value ~default:"" (string_field value "because")
-                  }
-              ]
+          | Some approval_id, Some call_id, Some tool_name, Some args,
+            Some question, Some because ->
+              [ Approval_requested { approval_id; call_id; tool_name; args; question; because } ]
           | _ ->
               [ Undecodable
-                  "KEEPER_TOOL_APPROVAL_REQUESTED needs tool_call_id, \
-                   tool_call_name and question"
+                  "KEEPER_TOOL_APPROVAL_REQUESTED needs approval_id, tool_call_id, tool_call_name, args, question and because"
               ]))
   | Some "KEEPER_TOOL_APPROVAL_SETTLED" -> (
       match object_field fields "value" with
@@ -451,12 +440,15 @@ let custom_deltas_unvalidated fields =
           [ Undecodable "KEEPER_TOOL_APPROVAL_SETTLED value is not an object" ]
       | Some value -> (
           match
-            (string_field value "tool_call_id", string_field value "outcome")
+            (Option.bind (string_field value "approval_id") (fun text ->
+               Result.to_option (Masc.Keeper_tool_approval_id.of_string text)),
+             string_field value "tool_call_id", string_field value "outcome")
           with
-          | Some call_id, Some outcome -> [ Approval_settled { call_id; outcome } ]
+          | Some approval_id, Some call_id, Some outcome ->
+              [ Approval_settled { approval_id; call_id; outcome } ]
           | _ ->
               [ Undecodable
-                  "KEEPER_TOOL_APPROVAL_SETTLED needs tool_call_id and outcome"
+                  "KEEPER_TOOL_APPROVAL_SETTLED needs approval_id, tool_call_id and outcome"
               ]))
   | Some "KEEPER_CONTINUATION_CHECKPOINT" -> [ Checkpoint ]
   | Some "KEEPER_EXTERNAL_EFFECT_COMPLETED" -> [ External_effect_completed ]

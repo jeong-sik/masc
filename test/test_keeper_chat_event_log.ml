@@ -1,3 +1,5 @@
+let event_approval_fixture_id = Masc.Keeper_tool_approval_id.fresh ()
+
 (* RFC-0412 stage 1 — canonical keeper chat event log: codec, journal, and
    golden replay tests. *)
 
@@ -124,13 +126,13 @@ let all_events : E.keeper_chat_event list =
   ; E.Native_tool_start { occurrence = occurrence_anon; tool_call_id = None; tool_call_name = None }
   ; E.Native_tool_end ({ occurrence = occurrence_anon; tool_call_id = None; tool_call_name = None }, Runtime_native_tools.end_observed)
   ; E.Tool_approval_requested
-      { tool_call_id = "tc-2"
+      { approval_id = event_approval_fixture_id; tool_call_id = "tc-2"
       ; tool_call_name = "bash"
       ; args = "{\"cmd\":\"ls\"}"
       ; question = "allow?"
       ; because = "policy"
       }
-  ; E.Tool_approval_settled { tool_call_id = "tc-2"; outcome = "approved" }
+  ; E.Tool_approval_settled { approval_id = event_approval_fixture_id; tool_call_id = "tc-2"; outcome = "approved" }
   ; E.Tool_result_ready
       { occurrence
       ; tool_call_id = Some "tc-1"
@@ -914,13 +916,13 @@ let golden_events : E.keeper_chat_event list =
   ; E.Tool_call_end { occurrence; tool_call_id = Some "tc-1" }
   ; E.Agent_core_content_block_stop { index = 1 }
   ; E.Tool_approval_requested
-      { tool_call_id = "tc-1"
+      { approval_id = event_approval_fixture_id; tool_call_id = "tc-1"
       ; tool_call_name = "read_file"
       ; args = "{\"path\":\"/tmp/x\"}"
       ; question = "allow read?"
       ; because = "policy: fs read"
       }
-  ; E.Tool_approval_settled { tool_call_id = "tc-1"; outcome = "approved" }
+  ; E.Tool_approval_settled { approval_id = event_approval_fixture_id; tool_call_id = "tc-1"; outcome = "approved" }
   ; E.Tool_result_ready
       { occurrence
       ; tool_call_id = Some "tc-1"

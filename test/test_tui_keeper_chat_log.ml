@@ -1,3 +1,5 @@
+let event_approval_fixture_id = Masc.Keeper_tool_approval_id.fresh ()
+
 (* RFC-0412 stage 3a — the per-operation event log behind the keeper chat
    pane. Seq dedup, the attempt counter, the committed flag and revision, the
    v2 page decoder, and the golden case: a journal decoded through
@@ -107,10 +109,10 @@ let delta_to_string : Live.delta -> string = function
       Printf.sprintf "stream_protocol_error(%s,%s)"
         (Option.fold ~none:"-" ~some:occurrence_to_string quarantined_occurrence)
         detail
-  | Live.Approval_requested { call_id; tool_name; args; question; because } ->
+  | Live.Approval_requested { approval_id = _; call_id; tool_name; args; question; because } ->
       Printf.sprintf "approval_requested(%s,%s,%s,%s,%s)" call_id tool_name args
         question because
-  | Live.Approval_settled { call_id; outcome } ->
+  | Live.Approval_settled { approval_id = _; call_id; outcome } ->
       Printf.sprintf "approval_settled(%s,%s)" call_id outcome
   | Live.Accepted { admission; queue_length; _ } ->
       Printf.sprintf "accepted(%s,%d)"
@@ -457,9 +459,9 @@ let golden : E.keeper_chat_event list =
       ; raw_bytes = Some 128
       }
   ; E.Tool_approval_requested
-      { tool_call_id = "tc-2"; tool_call_name = "shell"; args = "{\"cmd\":\"ls\"}"
+      { approval_id = event_approval_fixture_id; tool_call_id = "tc-2"; tool_call_name = "shell"; args = "{\"cmd\":\"ls\"}"
       ; question = "run it?"; because = "policy asks" }
-  ; E.Tool_approval_settled { tool_call_id = "tc-2"; outcome = "allowed" }
+  ; E.Tool_approval_settled { approval_id = event_approval_fixture_id; tool_call_id = "tc-2"; outcome = "allowed" }
   ; E.Status_block { kind = Masc.Keeper_chat_blocks.Continuation_checkpoint }
   ; E.Continuation_checkpoint { message = "checkpoint"; request_id = Some "req-2" }
   ; E.Agent_core_runtime_attempt_started { runtime_id = Some "claude-3-7-sonnet"; attempt_index = Some 1 }

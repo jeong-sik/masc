@@ -37,13 +37,6 @@ type decision =
 val decision_to_string : decision -> string
 val decision_of_string : string -> decision option
 
-(** Identity of one registry admission, distinct from a provider tool-call ID. *)
-type approval_id
-
-val fresh_approval_id : unit -> approval_id
-val approval_id_to_string : approval_id -> string
-val same_approval_id : approval_id -> approval_id -> bool
-
 (** How the wait ended. *)
 type outcome =
   | Answered of decision
@@ -57,6 +50,7 @@ type outcome =
 val await :
   ?on_registered:(unit -> unit) ->
   t ->
+  approval_id:Keeper_tool_approval_id.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   keeper_name:string ->
   tool_call_id:string ->
@@ -67,6 +61,9 @@ val await :
   timeout_sec:float ->
   outcome
 (** Register a wait and block until it settles.
+
+    [approval_id] is a fresh admission identity created by the gate before it
+    publishes either event. The same identity is retained in [pending].
 
     [on_registered] runs after registration outside the lock, before waiting.
     Publish operator requests here so an immediate answer can find the wait.
@@ -103,7 +100,7 @@ val settle :
     against the same clock family. *)
 type pending =
   { keeper_name : string
-  ; approval_id : approval_id
+  ; approval_id : Keeper_tool_approval_id.t
   ; tool_call_id : string
   ; tool_name : string
   ; args : string

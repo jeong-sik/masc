@@ -55,10 +55,12 @@ let create ~registry ~late_approvals ~publish ~redact_text ~clock ~base_path
        redacted first: every other text on this bus was redacted by the
        stream bridge before publish, and the journal keeps what the bus
        carries, so a raw secret here would be a raw secret at rest. *)
+    let approval_id = Keeper_tool_approval_id.fresh () in
     let publish_requested () =
       publish
         (Keeper_chat_events.Tool_approval_requested
-           { tool_call_id
+           { approval_id
+           ; tool_call_id
            ; tool_call_name = request.tool_name
            ; args = redact_text (Yojson.Safe.to_string request.input)
            ; question = redact_text request.prompt.question
@@ -87,7 +89,7 @@ let create ~registry ~late_approvals ~publish ~redact_text ~clock ~base_path
             "remembered_" ^ Registry.decision_to_string remembered )
       | None -> (
           let outcome =
-            Registry.await ~on_registered:publish_requested registry ~clock ~keeper_name ~tool_call_id
+            Registry.await ~on_registered:publish_requested registry ~approval_id ~clock ~keeper_name ~tool_call_id
               ~tool_name:request.tool_name
               ~args:(Yojson.Safe.to_string request.input)
               ~question:request.prompt.question ~because:request.prompt.because
@@ -119,7 +121,7 @@ let create ~registry ~late_approvals ~publish ~redact_text ~clock ~base_path
        showing the prompt stops showing it. *)
     publish
       (Keeper_chat_events.Tool_approval_settled
-         { tool_call_id; outcome = label });
+         { approval_id; tool_call_id; outcome = label });
     decision
   in
   { pre_tool_use; tool_approval; composition_plan_index;

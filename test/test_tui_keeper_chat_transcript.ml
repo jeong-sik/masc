@@ -4,6 +4,9 @@ module Live = Masc_tui_keeper_chat_live
 module Transcript = Masc_tui_keeper_chat_transcript
 module Log = Masc_tui_keeper_chat_log
 
+let approval_fixture_id = Masc.Keeper_tool_approval_id.fresh ()
+let approval_other_id = Masc.Keeper_tool_approval_id.fresh ()
+
 (* A stated instant rather than the wall clock: the progress row carries the
    turn age, and a test that read the real clock could not name it. *)
 let origin = 1_000_000.
@@ -1085,16 +1088,16 @@ let approval_rows t =
   |> List.filter_map (fun (kind, text) ->
          if kind = Transcript.Answer_needed then Some text else None)
 
-let requested ~call_id ~tool_name ~question =
+let requested ~approval_id ~call_id ~tool_name ~question =
   Live.Approval_requested
-    { call_id; tool_name; args = ""; question; because = "" }
+    { approval_id; call_id; tool_name; args = ""; question; because = "" }
 
 let test_a_held_call_shows_its_question () =
   let t = fresh () in
   feed t
     [ Live.Run_started
     ; tool_started "c1" "Edit"
-    ; requested ~call_id:"c1" ~tool_name:"Edit" ~question:"Run Edit on a.ml?"
+    ; requested ~approval_id:approval_fixture_id ~call_id:"c1" ~tool_name:"Edit" ~question:"Run Edit on a.ml?"
     ];
   (match Transcript.awaiting_approval t with
    | Some awaiting ->
@@ -1113,8 +1116,8 @@ let test_a_held_call_shows_its_question () =
 let test_an_answer_clears_the_prompt () =
   let t = fresh () in
   feed t
-    [ requested ~call_id:"c1" ~tool_name:"Edit" ~question:"Run Edit?"
-    ; Live.Approval_settled { call_id = "c1"; outcome = "approve" }
+    [ requested ~approval_id:approval_fixture_id ~call_id:"c1" ~tool_name:"Edit" ~question:"Run Edit?"
+    ; Live.Approval_settled { approval_id = approval_fixture_id; call_id = "c1"; outcome = "approve" }
     ];
   check bool "nothing is held any more" true
     (Option.is_none (Transcript.awaiting_approval t));
@@ -1129,8 +1132,8 @@ let test_an_answer_clears_the_prompt () =
 let test_a_timeout_clears_the_prompt_too () =
   let t = fresh () in
   feed t
-    [ requested ~call_id:"c1" ~tool_name:"Edit" ~question:"Run Edit?"
-    ; Live.Approval_settled { call_id = "c1"; outcome = "timed_out" }
+    [ requested ~approval_id:approval_fixture_id ~call_id:"c1" ~tool_name:"Edit" ~question:"Run Edit?"
+    ; Live.Approval_settled { approval_id = approval_fixture_id; call_id = "c1"; outcome = "timed_out" }
     ];
   (* The decision is over even though nobody made one. Leaving the prompt up
      would ask again for a call that has already been denied. *)
@@ -1146,8 +1149,8 @@ let test_a_timeout_clears_the_prompt_too () =
 let test_a_denial_uses_decision_vocabulary () =
   let t = fresh () in
   feed t
-    [ requested ~call_id:"c1" ~tool_name:"Edit" ~question:"Run Edit?"
-    ; Live.Approval_settled { call_id = "c1"; outcome = "deny" }
+    [ requested ~approval_id:approval_fixture_id ~call_id:"c1" ~tool_name:"Edit" ~question:"Run Edit?"
+    ; Live.Approval_settled { approval_id = approval_fixture_id; call_id = "c1"; outcome = "deny" }
     ];
   check bool "the decision is denied, not failed" true
     (List.exists
@@ -1159,14 +1162,29 @@ let test_a_denial_uses_decision_vocabulary () =
 let test_a_late_settle_for_another_call_leaves_the_prompt () =
   let t = fresh () in
   feed t
-    [ requested ~call_id:"c2" ~tool_name:"Write" ~question:"Run Write?"
-    ; Live.Approval_settled { call_id = "c1"; outcome = "timed_out" }
+    [ requested ~approval_id:approval_other_id ~call_id:"c2" ~tool_name:"Write" ~question:"Run Write?"
+    ; Live.Approval_settled { approval_id = approval_fixture_id; call_id = "c1"; outcome = "timed_out" }
     ];
   match Transcript.awaiting_approval t with
   | Some awaiting ->
       check string "the prompt on screen is still c2's" "c2"
         awaiting.Transcript.call_id
   | None -> fail "a settle for a different call cleared the wrong prompt"
+
+let test_old_approval_settlement_cannot_clear_a_reused_provider_call () =
+  let t = fresh () in
+  feed t
+    [ requested ~approval_id:approval_fixture_id ~call_id:"provider-reused"
+        ~tool_name:"Execute" ~question:"old wait"
+    ; requested ~approval_id:approval_other_id ~call_id:"provider-reused"
+        ~tool_name:"Execute" ~question:"new wait"
+    ; Live.Approval_settled { approval_id = approval_fixture_id;
+        call_id = "provider-reused"; outcome = "approve" }
+    ];
+  match Transcript.awaiting_approval t with
+  | Some pending -> check bool "new admission remains awaiting" true
+      (Masc.Keeper_tool_approval_id.equal pending.Transcript.approval_id approval_other_id)
+  | None -> fail "old approval cleared a newer wait with the same provider ID"
 
 let test_the_whole_reasoning_trail_is_kept () =
   let t = fresh () in
@@ -1658,7 +1676,7 @@ let test_current_attempt_metadata_keeps_observed_activity () =
     Live.Model_content_activity {Masc.Keeper_chat_events.content_generation=0;
       content_scope=0;content_index=1;content_provider_message_id=Some "message";
       channel=Model_thinking;state=Content_observed};
-    Live.Approval_requested {call_id="approval";tool_name="Write";args="";
+    Live.Approval_requested {approval_id=approval_fixture_id;call_id="approval";tool_name="Write";args="";
       question="continue?";because="approval required"}];
   let trail = Transcript.trail t in
   let drawn = Transcript.drawn t in
@@ -2761,7 +2779,9 @@ let () =
             test_control_bytes_never_reach_the_pane
         ] )
     ; ( "held calls"
-      , [ test_case "a held call shows its question" `Quick
+      , [ test_case "old settlement cannot clear a reused provider call" `Quick
+            test_old_approval_settlement_cannot_clear_a_reused_provider_call;
+          test_case "a held call shows its question" `Quick
             test_a_held_call_shows_its_question; test_case "an answer clears the prompt" `Quick
             test_an_answer_clears_the_prompt
         ; test_case "a timeout clears the prompt too" `Quick

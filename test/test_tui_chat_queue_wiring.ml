@@ -1,3 +1,5 @@
+let queue_approval_fixture_id = Masc.Keeper_tool_approval_id.fresh ()
+
 (** The queue is wired into the two places that make it work.
 
     The pure ordering and cap live in [Masc_tui_keeper_chat_queue] and are
@@ -5410,8 +5412,8 @@ let test_status_details_and_fold_counts_reach_the_frame () =
     state.msg_live <- Some entry.log;
     state.msg_queued <- Masc_tui_keeper_chat_queue.empty;
     List.iteri (fun i delta -> Tui_types.turn_log_add ~now:2. entry.log ~seq:(Some (i+1)) delta)
-      [Live.Approval_requested {call_id="fold-call";tool_name="Execute";args="";question="Approve?";because="fixture"};
-       Live.Approval_settled {call_id="fold-call";outcome="approved"};
+      [Live.Approval_requested {approval_id=queue_approval_fixture_id;call_id="fold-call";tool_name="Execute";args="";question="Approve?";because="fixture"};
+       Live.Approval_settled {approval_id=queue_approval_fixture_id;call_id="fold-call";outcome="approved"};
        Live.Stream_protocol_error {quarantined_occurrence=None;detail="fixture unreadable event"}];
     state.msg_turn_folded <- true;
     List.iter (fun mode ->

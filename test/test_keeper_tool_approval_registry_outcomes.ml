@@ -24,7 +24,7 @@ let test_an_answer_counted_once () =
       let result =
         Eio.Fiber.pair
           (fun () ->
-            Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+            Registry.await ~approval_id:(Masc.Keeper_tool_approval_id.fresh ()) registry ~clock ~tool_name:"Execute" ~args:"{}"
                 ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
               ~tool_call_id:"call-1" ~timeout_sec:5.0)
           (fun () ->
@@ -51,7 +51,7 @@ let test_a_timeout_counted_as_a_timeout () =
   with_env (fun ~clock ->
       let registry = Registry.create () in
       let result =
-        Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+        Registry.await ~approval_id:(Masc.Keeper_tool_approval_id.fresh ()) registry ~clock ~tool_name:"Execute" ~args:"{}"
                 ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
           ~tool_call_id:"call-2" ~timeout_sec:0.05
       in
@@ -67,7 +67,7 @@ let test_a_settle_racing_the_timeout_is_the_answer_it_counts () =
       Eio.Switch.run (fun sw ->
           let waited =
             Eio.Fiber.fork_promise ~sw (fun () ->
-                Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
+                Registry.await ~approval_id:(Masc.Keeper_tool_approval_id.fresh ()) registry ~clock ~tool_name:"Execute" ~args:"{}"
                   ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
                   ~tool_call_id:"call-3" ~timeout_sec:1.0)
           in
@@ -95,7 +95,7 @@ let test_failed_registration_publication_removes_the_wait () =
   with_env (fun ~clock ->
       let registry = Registry.create () in
       check_raises "publication failure propagates" Exit (fun () ->
-        ignore (Registry.await ~on_registered:(fun () -> raise Exit) registry
+        ignore (Registry.await ~approval_id:(Masc.Keeper_tool_approval_id.fresh ()) ~on_registered:(fun () -> raise Exit) registry
           ~clock ~tool_name:"Execute" ~args:"{}" ~question:"run?"
           ~because:"policy" ~keeper_name:keeper ~tool_call_id:"publish-failed"
           ~timeout_sec:5.0));
@@ -107,7 +107,7 @@ let test_reused_provider_call_has_a_new_admission_identity () =
       let registry = Registry.create () in
       let admit () =
         let observed = ref None in
-        let outcome = Registry.await registry ~clock ~keeper_name:keeper
+        let outcome = Registry.await ~approval_id:(Masc.Keeper_tool_approval_id.fresh ()) registry ~clock ~keeper_name:keeper
           ~tool_call_id:"provider-reused-call" ~tool_name:"Execute" ~args:"{}"
           ~question:"run?" ~because:"policy" ~timeout_sec:5.0
           ~on_registered:(fun () ->
@@ -127,7 +127,7 @@ let test_reused_provider_call_has_a_new_admission_identity () =
       let first = admit () in
       let second = admit () in
       check bool "same provider call ID has distinct registry admissions" false
-        (Registry.same_approval_id first second))
+        (Masc.Keeper_tool_approval_id.equal first second))
 
 let () =
   run

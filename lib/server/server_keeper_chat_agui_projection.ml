@@ -281,23 +281,25 @@ let project ~timestamp ~redact_text state event =
              ~provider_message_id:occurrence.provider_message_id
              ~tool_call_block_index:(Some occurrence.block_index)
              Ag_ui.Tool_call_end) )
-  | Tool_approval_requested { tool_call_id; tool_call_name; args; question; because } ->
+  | Tool_approval_requested { approval_id; tool_call_id; tool_call_name; args; question; because } ->
       ( state
       , Some
           (custom ~timestamp state Tool_approval_requested
              (`Assoc
-                [ ("tool_call_id", `String tool_call_id)
+                [ ("approval_id", `String (Keeper_tool_approval_id.to_string approval_id))
+                ; ("tool_call_id", `String tool_call_id)
                 ; ("tool_call_name", `String tool_call_name)
                 ; ("args", `String args)
                 ; ("question", `String question)
                 ; ("because", `String because)
                 ])) )
-  | Tool_approval_settled { tool_call_id; outcome } ->
+  | Tool_approval_settled { approval_id; tool_call_id; outcome } ->
       ( state
       , Some
           (custom ~timestamp state Tool_approval_settled
              (`Assoc
-                [ "tool_call_id", `String tool_call_id
+                [ "approval_id", `String (Keeper_tool_approval_id.to_string approval_id)
+                ; "tool_call_id", `String tool_call_id
                 ; "outcome", `String outcome
                 ])) )
   | Tool_result_ready { occurrence; tool_call_id; execution_id } ->

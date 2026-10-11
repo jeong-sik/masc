@@ -205,23 +205,27 @@ type keeper_chat_event =
       (** Update an existing native row without closing a content channel or
           providing a MASC execution result. *)
   | Tool_approval_requested of
-      { tool_call_id : string
+      { approval_id : Keeper_tool_approval_id.t
+      ; tool_call_id : string
       ; tool_call_name : string
       ; args : string
       ; question : string
       ; because : string
       }
-      (** The turn is held at this call until an operator answers or the wait
+      (** [approval_id] names this admission independently of the provider's
+          [tool_call_id]. The turn is held until an operator answers or the wait
           runs out. Carries the call's arguments as sent, because a reader
           deciding whether to allow it needs to see what it would do -- the
           name alone does not distinguish reading a file from rewriting it.
           [because] is the policy's one-line reason for asking rather than
           running: the operator cannot see the policy table, only this. *)
   | Tool_approval_settled of
-      { tool_call_id : string
+      { approval_id : Keeper_tool_approval_id.t
+      ; tool_call_id : string
       ; outcome : string
       }
-      (** How the wait ended: the operator's answer, or that nobody gave one.
+      (** [approval_id] is the same admission identity as the opening event.
+          How the wait ended: the operator's answer, or that nobody gave one.
           Sent so a pane showing the prompt stops showing it, including on the
           paths where no answer arrived. *)
   | Tool_result_ready of

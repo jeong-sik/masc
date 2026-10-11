@@ -2,6 +2,12 @@ open Alcotest
 
 module Live = Masc_tui_keeper_chat_live
 
+let approval_fixture_text = "019a0000-0000-7000-8000-000000000001"
+let approval_fixture_id =
+  match Masc.Keeper_tool_approval_id.of_string approval_fixture_text with
+  | Ok id -> id
+  | Error detail -> fail detail
+
 (* Most fixtures compare stream content and sequence only; timestamp parity is
    exercised separately through the observed-delta API. *)
 let feed decoder chunk =
@@ -67,10 +73,10 @@ let delta_to_string : Live.delta -> string = function
           quarantined_occurrence
       in
       Printf.sprintf "stream_protocol_error(%s,%s)" occurrence detail
-  | Live.Approval_requested { call_id; tool_name; args; question; because } ->
+  | Live.Approval_requested { approval_id = _; call_id; tool_name; args; question; because } ->
       Printf.sprintf "approval_requested(%s,%s,%s,%s,%s)" call_id tool_name
         args question because
-  | Live.Approval_settled { call_id; outcome } ->
+  | Live.Approval_settled { approval_id = _; call_id; outcome } ->
       Printf.sprintf "approval_settled(%s,%s)" call_id outcome
   | Live.Accepted { admission; queue_length; _ } ->
       let admission =
@@ -557,15 +563,17 @@ let test_an_approval_request_is_read_whole () =
     sse
       (custom "KEEPER_TOOL_APPROVAL_REQUESTED"
          (`Assoc
-            [ "tool_call_id", `String "c1"
+            [ "approval_id", `String approval_fixture_text
+            ; "tool_call_id", `String "c1"
             ; "tool_call_name", `String "Edit"
             ; "args", `String "{\"file_path\":\"a.ml\"}"
             ; "question", `String "Run Edit on a.ml?"
+            ; "because", `String ""
             ]))
   in
   check (list delta) "every field the prompt needs comes through"
     [ Live.Approval_requested
-        { call_id = "c1"
+        { approval_id = approval_fixture_id; call_id = "c1"
         ; tool_name = "Edit"
         ; args = "{\"file_path\":\"a.ml\"}"
         ; question = "Run Edit on a.ml?"
@@ -581,7 +589,8 @@ let test_a_request_missing_its_question_is_reported () =
     sse
       (custom "KEEPER_TOOL_APPROVAL_REQUESTED"
          (`Assoc
-            [ "tool_call_id", `String "c1"; "tool_call_name", `String "Edit" ]))
+            [ "approval_id", `String approval_fixture_text
+            ; "tool_call_id", `String "c1"; "tool_call_name", `String "Edit" ]))
   in
   match feed_whole body with
   | [ Live.Undecodable detail ] ->
@@ -600,7 +609,8 @@ let test_the_because_reaches_the_pane () =
     sse
       (custom "KEEPER_TOOL_APPROVAL_REQUESTED"
          (`Assoc
-            [ "tool_call_id", `String "c1"
+            [ "approval_id", `String approval_fixture_text
+            ; "tool_call_id", `String "c1"
             ; "tool_call_name", `String "Edit"
             ; "args", `String "{}"
             ; "question", `String "Run Edit on a.ml?"
@@ -609,7 +619,7 @@ let test_the_because_reaches_the_pane () =
   in
   check (list delta) "why the call was held travels with the ask"
     [ Live.Approval_requested
-        { call_id = "c1"
+        { approval_id = approval_fixture_id; call_id = "c1"
         ; tool_name = "Edit"
         ; args = "{}"
         ; question = "Run Edit on a.ml?"
@@ -618,36 +628,25 @@ let test_the_because_reaches_the_pane () =
     ]
     (feed_whole body)
 
-let test_a_request_with_no_arguments_is_still_a_prompt () =
-  let body =
-    sse
-      (custom "KEEPER_TOOL_APPROVAL_REQUESTED"
-         (`Assoc
-            [ "tool_call_id", `String "c1"
-            ; "tool_call_name", `String "Execute"
-            ; "question", `String "Run Execute?"
-            ]))
-  in
-  check (list delta) "a reader still has to answer it"
-    [ Live.Approval_requested
-        { call_id = "c1"
-        ; tool_name = "Execute"
-        ; args = ""
-        ; question = "Run Execute?"
-        ; because = ""
-        }
-    ]
-    (feed_whole body)
+let test_a_request_missing_arguments_is_reported () =
+  let body = sse (custom "KEEPER_TOOL_APPROVAL_REQUESTED"
+    (`Assoc ["approval_id", `String approval_fixture_text;
+             "tool_call_id", `String "c1"; "tool_call_name", `String "Execute";
+             "question", `String "Run Execute?"; "because", `String "policy"])) in
+  match feed_whole body with
+  | [Live.Undecodable _] -> ()
+  | _ -> fail "missing arguments became an actionable approval request"
 
 let test_the_settled_event_carries_its_outcome () =
   let body =
     sse
       (custom "KEEPER_TOOL_APPROVAL_SETTLED"
          (`Assoc
-            [ "tool_call_id", `String "c1"; "outcome", `String "timed_out" ]))
+            [ "approval_id", `String approval_fixture_text
+            ; "tool_call_id", `String "c1"; "outcome", `String "timed_out" ]))
   in
   check (list delta) "including the paths where nobody answered"
-    [ Live.Approval_settled { call_id = "c1"; outcome = "timed_out" } ]
+    [ Live.Approval_settled { approval_id = approval_fixture_id; call_id = "c1"; outcome = "timed_out" } ]
     (feed_whole body)
 
 (* The acceptance is what the pane has to answer "why has this not started"
@@ -888,8 +887,8 @@ let () =
             test_an_approval_request_is_read_whole;
           test_case "the because reaches the pane" `Quick
             test_the_because_reaches_the_pane;
-        test_case "a request with no arguments is still a prompt" `Quick
-            test_a_request_with_no_arguments_is_still_a_prompt
+        test_case "missing request arguments are reported" `Quick
+            test_a_request_missing_arguments_is_reported
         ; test_case "the settled event carries its outcome" `Quick
             test_the_settled_event_carries_its_outcome
         ; test_case "a request missing its question is reported" `Quick

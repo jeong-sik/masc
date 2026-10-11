@@ -160,7 +160,8 @@ type live_tool_call =
    reads either field has to say the type it is over. #30231 landed two such
    lambdas without annotations and main did not compile. *)
 type awaiting_approval =
-  { call_id : string
+  { approval_id : Masc.Keeper_tool_approval_id.t
+  ; call_id : string
   ; tool_name : string
   ; question : string
   ; (* Why the call was held. attached under the question so the reader who
@@ -1837,7 +1838,7 @@ let apply_delta ~now t (delta : Live.delta) =
               (Printf.sprintf
                  "stream protocol quarantine provider correlation conflicts for occurrence %s: %s"
                  (occurrence_label occurrence) detail)))
-  | Live.Approval_requested { call_id; tool_name; args; question; because } ->
+  | Live.Approval_requested { approval_id; call_id; tool_name; args; question; because } ->
       (* The arguments go on the call's own row, which the pane already draws;
          the prompt carries the question. *)
       (match args with
@@ -1850,14 +1851,14 @@ let apply_delta ~now t (delta : Live.delta) =
           with
           | Call_updated | Call_missing | Call_ambiguous | Call_conflicting -> ()));
       t.last_approval_settlement <- None;
-      t.awaiting <- Some { call_id; tool_name; question; because }
-  | Live.Approval_settled { call_id; outcome } ->
+      t.awaiting <- Some { approval_id; call_id; tool_name; question; because }
+  | Live.Approval_settled { approval_id; call_id = _; outcome } ->
       (* Cleared whatever the answer was, including none: the prompt is over
          either way, and leaving it up would ask again for a call that has
-         already been decided. Guarded by id so a late settle for a superseded
-         call cannot clear a prompt now waiting on a different one. *)
+         already been decided. The approval identity prevents a late settle
+         from clearing a newer wait, including one reusing the provider ID. *)
       (match t.awaiting with
-       | Some awaiting when String.equal awaiting.call_id call_id ->
+       | Some awaiting when Masc.Keeper_tool_approval_id.equal awaiting.approval_id approval_id ->
            t.awaiting <- None;
            t.last_approval_settlement <-
              Some

@@ -109,10 +109,10 @@ let rec drain events acc =
 let event_labels events =
   drain events []
   |> List.filter_map (function
-       | Events.Tool_approval_requested { tool_call_id; question; because; _ } ->
+       | Events.Tool_approval_requested { approval_id = _; tool_call_id; question; because; _ } ->
            Some
              (Printf.sprintf "requested(%s,%s,%s)" tool_call_id question because)
-       | Events.Tool_approval_settled { tool_call_id; outcome } ->
+       | Events.Tool_approval_settled { approval_id = _; tool_call_id; outcome } ->
            Some (Printf.sprintf "settled(%s,%s)" tool_call_id outcome)
        | _ -> None)
 

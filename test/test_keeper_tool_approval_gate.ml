@@ -64,10 +64,10 @@ let rec drain events acc =
 let event_labels events =
   drain events []
   |> List.filter_map (function
-       | Events.Tool_approval_requested { tool_call_id; question; because; _ } ->
+       | Events.Tool_approval_requested { approval_id = _; tool_call_id; question; because; _ } ->
            Some
              (Printf.sprintf "requested(%s,%s,%s)" tool_call_id question because)
-       | Events.Tool_approval_settled { tool_call_id; outcome } ->
+       | Events.Tool_approval_settled { approval_id = _; tool_call_id; outcome } ->
            Some (Printf.sprintf "settled(%s,%s)" tool_call_id outcome)
        | _ -> None)
 
@@ -228,7 +228,11 @@ let test_request_publication_can_answer_the_registered_wait () =
       let registry = Registry.create () in
       let answered = ref false in
       let publish = function
-        | Events.Tool_approval_requested { tool_call_id; _ } ->
+        | Events.Tool_approval_requested { approval_id; tool_call_id; _ } ->
+            (match Registry.pending registry with
+             | [pending] -> check bool "event names the actual registered wait" true
+                 (Masc.Keeper_tool_approval_id.equal approval_id pending.Registry.approval_id)
+             | _ -> fail "request was published without its registry admission");
             answered := Registry.settle registry ~keeper_name:keeper
               ~tool_call_id Registry.Approve
         | _ -> ()

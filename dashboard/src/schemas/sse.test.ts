@@ -1520,3 +1520,28 @@ describe('autonomous turn journal notifications', () => {
     expect(SSEMessageSchema.safeParse({ ...notice, ...delta }).success).toBe(false)
   })
 })
+
+describe('provider retry observation transport', () => {
+  const value = {
+    attempt: { routing_run_id: 'routing-run', runtime_id: 'claude', lane_attempt_index: 0 },
+    retry: { observation_id: 'retry-id', attempt: 1, max_retries: 10, retry_delay_ms: 1234, error_status: null },
+  }
+  const parse = (payload: unknown) => SSEMessageSchema.safeParse({
+    type: 'keeper_chat_operation_event', name: 'keeper', operation_id: 'operation',
+    ag_ui_event: { type: 'CUSTOM', threadId: 'keeper:keeper', runId: 'run', timestamp: 1,
+      name: 'KEEPER_PROVIDER_RETRY', value: payload },
+  })
+  it('preserves canonical retry metadata without assistant content', () => {
+    const parsed = parse(value)
+    expect(parsed.success).toBe(true)
+    if (parsed.success) expect(parsed.data.ag_ui_event).toMatchObject({ value })
+  })
+  it.each([-1, 0.5, Number.MAX_SAFE_INTEGER + 1, undefined])('rejects invalid retry counts %s', attempt => {
+    expect(parse({ ...value, retry: { ...value.retry, attempt } }).success).toBe(false)
+  })
+  it('rejects unknown fields and absent owners', () => {
+    expect(parse({ ...value, attempt: undefined }).success).toBe(false)
+    expect(parse({ ...value, retry: { ...value.retry, error: 'private diagnostic' } }).success).toBe(false)
+    expect(parse({ ...value, attempt: { ...value.attempt, session_id: 'foreign' } }).success).toBe(false)
+  })
+})

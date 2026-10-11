@@ -597,6 +597,7 @@ function validateKeeperCustomPayload(
   const allowedFields: Record<KeeperChatCustomEventName, readonly string[]> = {
     KEEPER_CONNECTED: [],
     KEEPER_RUNTIME_ATTEMPT_STARTED: ['runtime_id', 'attempt_index'],
+    KEEPER_PROVIDER_RETRY: ['attempt', 'retry'],
     KEEPER_STREAM_MESSAGE_STOP: ['content_generation', 'stream_scope'],
     KEEPER_STREAM_PING: [],
     KEEPER_EXTERNAL_EFFECT_COMPLETED: ['target'],
@@ -785,6 +786,25 @@ function validateKeeperCustomPayload(
       // Listed so the switch stays total. The nested-shape event is narrowed
       // out of the union by its own early return and cannot appear here.
       return ok(true)
+    case 'KEEPER_PROVIDER_RETRY': {
+      const attempt = exactCustomObject(value.attempt, 'attempt', ['routing_run_id', 'runtime_id', 'lane_attempt_index'])
+      if (!attempt.success) return attempt
+      for (const key of ['routing_run_id', 'runtime_id']) {
+        const field = requiredString(attempt.data, key)
+        if (!field.success) return field
+      }
+      const index = requiredInteger(attempt.data, 'lane_attempt_index', 0)
+      if (!index.success) return index
+      const retry = exactCustomObject(value.retry, 'retry', ['observation_id', 'attempt', 'max_retries', 'retry_delay_ms', 'error_status'])
+      if (!retry.success) return retry
+      const id = requiredString(retry.data, 'observation_id')
+      if (!id.success) return id
+      for (const key of ['attempt', 'max_retries', 'retry_delay_ms']) {
+        const field = requiredInteger(retry.data, key, 0)
+        if (!field.success) return field
+      }
+      return retry.data.error_status === null ? ok(true) : requiredInteger(retry.data, 'error_status', 0)
+    }
     case 'KEEPER_RUNTIME_ATTEMPT_STARTED': {
       const runtimeId = optionalString(value, 'runtime_id')
       if (!runtimeId.success) return runtimeId

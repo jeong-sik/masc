@@ -7,6 +7,7 @@ type t =
 type custom_event_name =
   | Connected
   | Runtime_attempt_started
+  | Provider_retry
   | Stream_message_start
   | Stream_message_delta
   | Stream_message_stop
@@ -49,6 +50,7 @@ let ag_role (role : Keeper_chat_events.role) =
 let custom_event_name_to_string = function
   | Connected -> "KEEPER_CONNECTED"
   | Runtime_attempt_started -> "KEEPER_RUNTIME_ATTEMPT_STARTED"
+  | Provider_retry -> "KEEPER_PROVIDER_RETRY"
   | Stream_message_start -> "KEEPER_STREAM_MESSAGE_START"
   | Stream_message_delta -> "KEEPER_STREAM_MESSAGE_DELTA"
   | Stream_message_stop -> "KEEPER_STREAM_MESSAGE_STOP"
@@ -155,10 +157,10 @@ let project ~timestamp ~redact_text state event =
                    (Option.map (fun i -> `Int i) attempt_index))
       in
       state, Some (custom ~timestamp state Runtime_attempt_started value)
-  | Provider_retry_observed _ ->
-      (* Durable observation is preserved; Web/TUI wire projection is a
-         separate next integration unit, not assistant speech. *)
-      state, None
+  | Provider_retry_observed { attempt; retry } ->
+      state, Some (custom ~timestamp state Provider_retry
+        (`Assoc ["attempt", Runtime_native_tasks.attempt_to_json attempt;
+                 "retry", Runtime_claude_api_retry.to_json retry]))
   | Agent_core_stream_message_start { content_generation; stream_scope; provider_message_id; model; usage } ->
       let value =
         `Assoc

@@ -791,7 +791,7 @@ type sse_line =
   | Sse_noncanonical_data
 
 let current_custom_names =
-  [ "KEEPER_CONNECTED"; "KEEPER_RUNTIME_ATTEMPT_STARTED"
+  [ "KEEPER_CONNECTED"; "KEEPER_RUNTIME_ATTEMPT_STARTED"; "KEEPER_PROVIDER_RETRY"
   ; "KEEPER_STREAM_MESSAGE_START"
   ; "KEEPER_STREAM_MESSAGE_DELTA"; "KEEPER_STREAM_MESSAGE_STOP"
   ; "KEEPER_STREAM_PING"; "KEEPER_CONTENT_BLOCK_START"
@@ -812,9 +812,27 @@ let null_custom_names =
   ; "KEEPER_STREAM_PING"
   ]
 
+let decode_provider_retry value =
+  let decode () =
+    let* fields = exact_object_fields ~surface:"KEEPER_PROVIDER_RETRY.value"
+      ~allowed:["attempt"; "retry"] value in
+    let required key = match List.assoc_opt key fields with
+      | Some value -> Ok value
+      | None -> Error ("KEEPER_PROVIDER_RETRY.value requires " ^ key) in
+    let* attempt_json = required "attempt" in
+    let* retry_json = required "retry" in
+    let* attempt = Masc.Runtime_native_tasks.attempt_of_json attempt_json in
+    let* retry = Masc.Runtime_claude_api_retry.of_json retry_json
+      |> Result.map_error Masc.Runtime_claude_api_retry.error_to_string in
+    Ok (attempt, retry)
+  in
+  decode () |> Result.map_error (fun detail -> Malformed_event detail)
+
 let validate_custom_value ~name value =
   if String.equal name "KEEPER_CHAT_OPERATION_ACCEPTED" then
     Result.map (fun _ -> ()) (decode_acceptance value)
+  else if String.equal name "KEEPER_PROVIDER_RETRY" then
+    decode_provider_retry value |> Result.map (fun _ -> ())
   else if String.equal name "KEEPER_MODEL_CONTENT_ACTIVITY" then
     Masc.Keeper_chat_events.model_content_activity_of_json value
     |> Result.map (fun _ -> ())

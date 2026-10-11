@@ -169,6 +169,9 @@ val known_custom_names : string list
 type batch_binding = { operation_id : string; execution_id : string }
 val decode_batch_binding : ?expected_request_id:string -> Yojson.Safe.t -> (batch_binding, stream_error) result
 
+val decode_provider_retry : Yojson.Safe.t ->
+  (Masc.Runtime_native_tasks.attempt * Masc.Runtime_claude_api_retry.t, stream_error) result
+
 val decode_acceptance
   :  ?expected_request_id:string
   -> Yojson.Safe.t

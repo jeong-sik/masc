@@ -282,6 +282,12 @@ let custom_deltas_unvalidated fields =
      | Some value -> match Projection.decode_batch_binding value with
        | Ok binding -> [Batch_bound binding]
        | Error error -> [Undecodable (Projection.stream_error_to_string error)])
+  | Some "KEEPER_PROVIDER_RETRY" ->
+    (match List.assoc_opt "value" fields with
+     | None -> [Undecodable "KEEPER_PROVIDER_RETRY requires value"]
+     | Some value -> match Projection.decode_provider_retry value with
+       | Ok (attempt, retry) -> [Provider_retry_observed {attempt; retry}]
+       | Error error -> [Undecodable (Projection.stream_error_to_string error)])
   | Some "KEEPER_RUNTIME_ATTEMPT_STARTED" ->
     (match List.assoc_opt "value" fields with
      | Some `Null -> [ Runtime_attempt_started { runtime_id = None; attempt_index = None } ]

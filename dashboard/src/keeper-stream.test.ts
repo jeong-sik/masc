@@ -976,6 +976,39 @@ describe('Keeper operation stream projection', () => {
     expect(entry.delivery).toBe('queued')
   })
 
+  const foreignOperationEvents: KeeperChatStreamEvent[] = [
+    { type: 'TEXT_MESSAGE_CONTENT', delta: 'foreign speech' },
+    { type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA', value: { index: 0, delta: 'foreign reasoning', response: { content_generation: 3, stream_scope: 0 } } },
+    { type: 'TOOL_CALL_START', ...toolOccurrence(), toolCallName: 'Read', toolCallId: 'foreign-tool' },
+  ]
+  it.each(foreignOperationEvents)('refuses a foreign operation frame before publication or sequence advancement: %j', event => {
+    assistantEntry('owned-operation')
+    const before = requiredFixture(keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1'))
+    applyKeeperStreamEvent('sangsu', 'reply-1', event,
+      { kind: 'operation', operationId: 'foreign-operation', sequence: 99 })
+    _flushPendingKeeperStreamDeltasForTests()
+    expect(keeperThreads.value.sangsu).toEqual([before])
+  })
+
+  it('refuses a frame from another autonomous turn', () => {
+    applyKeeperAutonomousTurnEvent('sangsu', 'owned-turn', 1, { type: 'RUN_STARTED' })
+    const before = requiredFixture(keeperThreads.value.sangsu?.find(entry => entry.turnRef === 'owned-turn'))
+    applyKeeperStreamEvent('sangsu', before.id, { type: 'TEXT_MESSAGE_CONTENT', delta: 'foreign speech' },
+      { kind: 'autonomous', turnRef: 'foreign-turn', sequence: 99 })
+    expect(keeperThreads.value.sangsu).toEqual([before])
+  })
+
+  it('retains exact continuation provenance for frames from its owning operation', () => {
+    appendThreadEntry('sangsu', { id: 'continuation', role: 'assistant', source: 'direct_assistant', label: 'sangsu',
+      text: '', rawText: '', timestamp: null, delivery: 'sending', streamState: 'opening', details: null,
+      deliveryProvenance: { delivery_key: { kind: 'operation_native', operation_id: 'owned-operation', continuation_id: 'continuation-id' }, transcript_slot: { kind: 'terminal_result' } } })
+    applyKeeperStreamEvent('sangsu', 'continuation', { type: 'TEXT_MESSAGE_CONTENT', delta: 'owned speech' },
+      { kind: 'operation', operationId: 'owned-operation', sequence: 1 })
+    const entry = requiredFixture(keeperThreads.value.sangsu?.find(entry => entry.id === 'continuation'))
+    expect(entry.rawText).toBe('owned speech')
+    expect(entry.deliveryProvenance?.delivery_key).toEqual({ kind: 'operation_native', operation_id: 'owned-operation', continuation_id: 'continuation-id' })
+  })
+
   it('projects queued acceptance without a receipt or queue revision', () => {
     assistantEntry()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {

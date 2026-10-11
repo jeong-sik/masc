@@ -736,6 +736,11 @@ export function applyKeeperStreamEvent(
 ): string | null {
   const existing = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)
   if (!existing) return null
+  if (source.kind === 'operation' && existing.deliveryProvenance && !toolDeliveryBelongsToProducer(
+    operationDeliveryProvenance(source.operationId, 'terminal_result').delivery_key,
+    existing.deliveryProvenance.delivery_key,
+  )) return null
+  if (source.kind === 'autonomous' && (existing.source !== 'autonomous_turn' || existing.turnRef !== source.turnRef)) return null
   const beforeSequence = existing.responseState ?? initialKeeperResponseState
   const sequenced = acknowledgeKeeperResponseSequence(beforeSequence, source.kind !== 'direct' ? source.sequence : undefined)
   if (!sequenced) return null

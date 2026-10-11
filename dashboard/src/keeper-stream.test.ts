@@ -1110,6 +1110,30 @@ describe('Keeper operation stream projection', () => {
     } finally { release() }
   })
 
+  it('keeps tool activity started by an observer of same-owner reasoning', () => {
+    assistantEntry('owned-operation')
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA',
+      value: { index: 0, delta: 'observed reasoning', response: { content_generation: 1, stream_scope: 0 } } },
+      { kind: 'operation', operationId: 'owned-operation', observationOnly: true })
+    let armed = true
+    const release = effect(() => {
+      const current = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+      if (armed && current?.traceSteps?.some(step => step.kind === 'think')) {
+        armed = false
+        untracked(() => applyKeeperStreamEvent('sangsu', 'reply-1', {
+          type: 'TOOL_CALL_START', ...toolOccurrence(), toolCallName: 'Read', toolCallId: 'observer-tool',
+        }))
+      }
+    })
+    try {
+      _flushPendingKeeperStreamDeltasForTests()
+      const entry = requiredFixture(keeperThreads.value.sangsu?.find(item => item.id === 'reply-1'))
+      expect(entry.delivery).toBe('streaming')
+      expect(entry.streamState).toBe('streaming')
+      expect(entry.traceSteps).toMatchObject([{ kind: 'think', text: 'observed reasoning' }, { kind: 'tool', name: 'Read', status: 'pending' }])
+    } finally { release() }
+  })
+
   it('projects queued acceptance without a receipt or queue revision', () => {
     assistantEntry()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {

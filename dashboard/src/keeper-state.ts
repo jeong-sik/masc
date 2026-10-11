@@ -1137,11 +1137,17 @@ export function promoteAssistantTextToProgress(
   })
 }
 
+interface AssistantThinkingOptions {
+  readonly agentCoreBlockIndex?: number
+  readonly responseOwner?: KeeperResponseOwner
+  readonly activity?: 'active' | 'observation'
+}
+
 function writeAssistantThinkingText(
   name: string,
   entryId: string,
   text: string,
-  meta: { agentCoreBlockIndex?: number; responseOwner?: KeeperResponseOwner } = {},
+  meta: AssistantThinkingOptions = {},
   mode: 'append' | 'snapshot',
 ): void {
   if (text.length === 0) return
@@ -1192,11 +1198,13 @@ function writeAssistantThinkingText(
     return {
       ...entry,
       traceSteps,
-      streamState: 'thinking',
-      delivery: 'streaming',
-      streamContract: entry.streamContract ?? keeperStreamContract('sse_event', 'backend_stream_event', {
-        eventName: 'KEEPER_THINKING_DELTA',
-      }),
+      ...(meta.activity !== 'observation' && keeperResponseIsRunning(entry.responseState) ? {
+        streamState: 'thinking' as const,
+        delivery: 'streaming' as const,
+        streamContract: entry.streamContract ?? keeperStreamContract('sse_event', 'backend_stream_event', {
+          eventName: 'KEEPER_THINKING_DELTA',
+        }),
+      } : {}),
     }
   })
 }
@@ -1205,7 +1213,7 @@ export function appendAssistantThinkingDelta(
   name: string,
   entryId: string,
   delta: string,
-  meta: { agentCoreBlockIndex?: number; responseOwner?: KeeperResponseOwner } = {},
+  meta: AssistantThinkingOptions = {},
 ): void {
   writeAssistantThinkingText(name, entryId, delta, meta, 'append')
 }
@@ -1214,7 +1222,7 @@ export function setAssistantThinkingSnapshot(
   name: string,
   entryId: string,
   text: string,
-  meta: { agentCoreBlockIndex?: number; responseOwner?: KeeperResponseOwner } = {},
+  meta: AssistantThinkingOptions = {},
 ): void {
   writeAssistantThinkingText(name, entryId, text, meta, 'snapshot')
 }

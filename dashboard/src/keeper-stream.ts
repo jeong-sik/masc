@@ -1,4 +1,4 @@
-import { sameResponseObservation, sameKeeperResponseOwner, type KeeperResponseOwner, initialKeeperResponseState, reduceKeeperResponse, acknowledgeKeeperResponseSequence, type KeeperResponseDecision, type KeeperResponseEvent } from './lib/keeper-response-state'
+import { sameKeeperResponseOwner, type KeeperResponseOwner, initialKeeperResponseState, reduceKeeperResponse, acknowledgeKeeperResponseSequence, type KeeperResponseDecision, type KeeperResponseEvent } from './lib/keeper-response-state'
 import { currentStoredTokenRevision } from './api/core'
 import { keeperStreamContract } from './keeper-stream-contract'
 import {
@@ -294,28 +294,20 @@ function flushPendingThinkingDeltas(
   }
   const ownsTarget = (): boolean => ownsThinkingPublication(pending,
     (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId), currentStoredTokenRevision())
-  const preserveActivity = (): void => {
-    if (!pending.authoritative && before) updateThreadEntry(keeperName, assistantEntryId, entry => {
-      const previous = before.responseState
-      const current = entry.responseState
-      const sameFrontier = previous === current || previous?.kind === 'known' && current?.kind === 'known'
-        && sameResponseObservation(previous, current)
-      return ownsThinkingPublication(pending, entry, currentStoredTokenRevision()) && sameFrontier
-        ? { ...entry, streamState: before.streamState, delivery: before.delivery }
-        : entry
-    })
-  }
+  const response = reduceKeeperResponse(before?.responseState ?? initialKeeperResponseState, {
+    kind: 'observe', owner: pending.responseOwner ?? null, scope: null, source: 'body',
+  })
+  const active = pending.authoritative && response.accepted && response.authoritative
   if (mode === 'commit') pendingThinkingDeltas.delete(key)
   setAssistantThinkingSnapshot(keeperName, assistantEntryId, fullPendingThinkingText(pending), {
     agentCoreBlockIndex: pending.agentCoreBlockIndex,
     responseOwner: pending.responseOwner,
+    activity: active ? 'active' : 'observation',
   })
   if (!ownsTarget()) {
     if (pendingThinkingDeltas.get(key) === pending) pendingThinkingDeltas.delete(key)
     return
   }
-  preserveActivity()
-  if (!ownsTarget()) return
   persistActiveAssistantDraft(keeperName, assistantEntryId)
 
 }

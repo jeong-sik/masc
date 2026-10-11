@@ -114,6 +114,7 @@ val run :
     runtime routing is exposed here. *)
 
 module For_testing : sig
+  type tool_admission = Admitted | Turn_closed
   val usage_reports
     :  turn_count:int
     -> position:Keeper_usage_resolution.cumulative_position
@@ -142,6 +143,7 @@ module For_testing : sig
 
   val project_stream_inputs :
     ?receipts:Keeper_official_client_tool_receipts.t ->
+    ?on_tool_admission:(call_id:string -> tool_admission -> unit) ->
     during:(Agent_core.Types.sse_event -> stream_input list) ->
     stream_input list ->
     Agent_core.Types.sse_event list
@@ -150,7 +152,9 @@ module For_testing : sig
       names inputs that arrive while [event] is being emitted, as the
       bridge's fiber would when the viewer's callback yields before it
       records [event]; they are fed before [event] is recorded. [receipts]
-      opens and closes with the MASC tool blocks and is released when the
+      [on_tool_admission] observes the projection's actual synchronous decision;
+      a new call after terminal is rejected without a block or receipt binding.
+      [receipts] opens and closes with the MASC tool blocks and is released when the
       held blocks reach the stream. *)
 
   val runtime_error_to_core_error : Runtime_muse_serve.error -> Agent_core.Error.t

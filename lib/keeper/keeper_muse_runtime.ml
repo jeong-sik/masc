@@ -561,10 +561,12 @@ type observed_turn =
   ; model : string option
   }
 
+type tool_admission = Admitted | Turn_closed
+
 type stream_projection =
   { on_serve_event : Serve.stream_event -> unit
   ; on_tool_started :
-      call_id:string -> tool_name:string -> arguments:Yojson.Safe.t -> unit
+      call_id:string -> tool_name:string -> arguments:Yojson.Safe.t -> tool_admission
   ; on_tool_finished : call_id:string -> unit
   ; finish_host_stop : unit -> unit
   }
@@ -757,6 +759,7 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
           finish_stream ~stop_reason:(Some Agent_core.Types.EndTurn) ())
   ; on_tool_started =
       (fun ~call_id ~tool_name ~arguments ->
+        if !stream_finished then Turn_closed else (
         Keeper_official_client_text_stream.tool_row text_stream;
         let index = !next_tool_index in
         incr next_tool_index;
@@ -772,7 +775,8 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
           (Agent_core.Types.ContentBlockDelta
              { index
              ; delta = Agent_core.Types.InputJsonSnapshot (Yojson.Safe.to_string arguments)
-             }))
+             });
+        Admitted))
   ; on_tool_finished =
       (fun ~call_id ->
         Option.iter
@@ -1397,8 +1401,16 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
               ~call_tool:(fun ~name ~call_id ~arguments ->
                 find_tool dynamic_tools name
                 |> Option.map (fun (tool : Host.dynamic_tool) ->
-                  stream.on_tool_started ~call_id ~tool_name:name ~arguments;
-                  Fun.protect
+                  match stream.on_tool_started ~call_id ~tool_name:name ~arguments with
+                  | Turn_closed ->
+                    { Mcp_http.outcome =
+                        { Runtime_official_client_mcp.success = false
+                        ; content = "MASC turn has ended; this tool request was not executed."
+                        ; content_blocks = None
+                        }
+                    ; after_response_sent = (fun () -> ())
+                    }
+                  | Admitted -> Fun.protect
                     ~finally:(fun () -> stream.on_tool_finished ~call_id)
                     (fun () ->
                       let result = tool.call ~call_id arguments in
@@ -1844,7 +1856,9 @@ module For_testing = struct
         }
     | Mcp_tool_finished of { call_id : string }
 
-  let project_stream_inputs ?receipts ~during inputs =
+  type tool_admission = tool_admission = Admitted | Turn_closed
+
+  let project_stream_inputs ?receipts ?on_tool_admission ~during inputs =
     let emitted = ref [] in
     let feed = ref (fun (_ : stream_input) -> ()) in
     let projection =
@@ -1864,7 +1878,8 @@ module For_testing = struct
      := function
      | Serve_event event -> projection.on_serve_event event
      | Mcp_tool_started { call_id; tool_name; arguments } ->
-       projection.on_tool_started ~call_id ~tool_name ~arguments
+       let admission = projection.on_tool_started ~call_id ~tool_name ~arguments in
+       Option.iter (fun observe -> observe ~call_id admission) on_tool_admission
      | Mcp_tool_finished { call_id } -> projection.on_tool_finished ~call_id);
     List.iter !feed inputs;
     List.rev !emitted

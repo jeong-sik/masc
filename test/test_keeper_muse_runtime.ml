@@ -141,6 +141,35 @@ let mcp_started call_id =
     { call_id; tool_name = "masc_probe"; arguments = `Assoc [ "marker", `String "x" ] }
 ;;
 
+let test_mcp_admission_stops_at_terminal () =
+  List.iter (fun terminal ->
+    let decisions = ref [] in
+    let receipts = Keeper_official_client_tool_receipts.create
+      ~delivery:Keeper_official_client_tool_receipts.Immediate
+      ~notify:(fun ~block_index:_ ~tool_call_id:_ ~execution_id:_ ->
+        fail "fixture has no executed receipt") in
+    let events = Adapter.project_stream_inputs ~receipts
+      ~on_tool_admission:(fun ~call_id admission -> decisions := (call_id,admission) :: !decisions)
+      ~during:(fun _ -> [])
+      [Adapter.Serve_event turn_started;
+       mcp_started "already-admitted";
+       Adapter.Serve_event terminal;
+       mcp_started "too-late";
+       Adapter.Mcp_tool_finished {call_id="already-admitted"}] in
+    check bool "only pre-terminal call admitted" true
+      (List.rev !decisions = ["already-admitted",Adapter.Admitted;"too-late",Adapter.Turn_closed]);
+    let starts = List.filter_map (function
+      | Agent_core.Types.ContentBlockStart {tool_id;_} -> tool_id
+      | _ -> None) events in
+    check (list string) "late call never publishes a block" ["already-admitted"] starts;
+    check int "late finish retains original routing cleanup" 1
+      (List.length (List.filter (function Agent_core.Types.ContentBlockStop _ -> true | _ -> false) events)))
+    [Serve.Turn_finished {text=""};
+     Serve.Turn_terminal_received (Msp.Terminal_failed {kind=Model_error;message="fixture";retryable=true});
+     Serve.Turn_terminal_received Msp.Terminal_cancelled;
+     Serve.Turn_terminal_received (Msp.Unrecognized_terminal "fixture")]
+;;
+
 let test_failed_terminal_closes_open_tools_without_success () =
   List.iter (fun terminal ->
     let events = Adapter.project_stream_inputs ~during:(fun _ -> [])
@@ -2595,6 +2624,7 @@ let () =
     [ ( "stream"
       , [ test_case "identity-less native tool leaves no open block" `Quick test_native_tool_without_identity_does_not_open_a_block
         ; test_case "failed terminal closes tools without success" `Quick test_failed_terminal_closes_open_tools_without_success
+        ; test_case "MCP admission stops at terminal" `Quick test_mcp_admission_stops_at_terminal
         ; test_case "projection order" `Quick test_stream_order
         ; test_case "unstreamed reply is forwarded at the end" `Quick
             test_unstreamed_reply_is_forwarded_at_the_end

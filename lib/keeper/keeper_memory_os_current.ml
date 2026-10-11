@@ -595,6 +595,21 @@ let upsert_durable_range_receipt receipts receipt =
         | Prepared _, Prepared _ | Committed _, _ -> false)) receipts
 ;;
 
+let sync_matching_prepared_snapshot ~keepers_dir ~keeper_id ~snapshot receipts =
+  let needs_sync = List.exists (function
+    | Prepared {snapshot_revision; snapshot_sha256; _} ->
+      (match snapshot with
+       | Some (current, digest) -> current.revision = snapshot_revision
+           && String.equal (Lazy.force digest) snapshot_sha256
+       | None -> false)
+    | Committed _ -> false) receipts in
+  if not needs_sync then Ok ()
+  else Fs_compat.sync_file_and_parent_strict
+    (path_for_keepers_dir ~keepers_dir ~keeper_id)
+    |> Result.map_error (fun detail ->
+      "prepared Memory snapshot durability is unconfirmed; stores preserved: " ^ detail)
+;;
+
 let reconcile_durable_range_receipts
       ~keepers_dir
       ~keeper_id
@@ -618,6 +633,7 @@ let reconcile_durable_range_receipts
      [current.revision > snapshot_revision] arm below, so the result is
      unchanged again. A missing snapshot, a lower revision, or R with other
      bytes runs the full reconcile. *)
+  let* () = sync_matching_prepared_snapshot ~keepers_dir ~keeper_id ~snapshot receipts in
   let covered =
     match cached, snapshot with
     | Some { fixed_point = Some fixed; _ }, Some (current, digest) ->
@@ -2676,7 +2692,7 @@ let update_locked_with_output
              |> Result.map_error store_error
          in
          let commit () =
-           match Fs_compat.save_file_atomic snapshot_path content with
+           match Fs_compat.save_file_atomic_strict_staged snapshot_path content with
            | Ok () ->
              committed := Some
                { Keeper_memory_commit_notifications.keepers_dir = notification_keepers_dir
@@ -2739,13 +2755,24 @@ let update_locked_with_output
              let+ () = journal_result in
              log_invalidations ~revision:next.revision;
              next, Rewritten, output
-           | Error message ->
+           | Error failure ->
+             (match failure.exception_ with
+              | Eio.Cancel.Cancelled _ ->
+                Printexc.raise_with_backtrace failure.exception_ failure.backtrace
+              | _ ->
+             let outcome =
+               match failure.stage with
+               | Fs_compat.Before_rename -> "snapshot replacement did not occur"
+               | Fs_compat.After_rename ->
+                 "snapshot replacement occurred but durability is unconfirmed; prepared receipts remain for recovery"
+             in
              Error
                (store_error
                   (Printf.sprintf
-                     "current Memory OS atomic write failed path=%s: %s"
+                     "current Memory OS atomic write failed path=%s: %s: %s"
                      snapshot_path
-                     message))
+                     outcome
+                     (Fs_compat.atomic_replace_failure_to_string failure))))
          in
          protected commit))
     in
@@ -2800,6 +2827,7 @@ let preserved_committed_receipts ~keepers_dir ~keeper_id ~snapshot ~queue_genera
   (* Hashed at most once, and only when a receipt names the current revision. *)
   let snapshot =
     Option.map (fun (current, content) -> current, lazy (sha256 content)) snapshot in
+  let* () = sync_matching_prepared_snapshot ~keepers_dir ~keeper_id ~snapshot receipts in
   let rec verify kept = function
     | [] -> Ok (List.rev kept)
     | Prepared {range_id; snapshot_revision; snapshot_sha256} :: rest ->

@@ -12,6 +12,10 @@
     temp-file creation to the parent directory fsync. Orphan inventory and
     preservation are owned separately by [Atomic_orphan_cleanup]. *)
 
+(** Sync an existing file and its parent without rewriting either. Both syncs
+    must succeed. The caller owns exclusion from concurrent replacement. *)
+val sync_file_and_parent_strict : string -> (unit, string) Result.t
+
 (** [save_file_atomic ~save_file path content] writes [content] to
     a temp file in [path]'s directory, fsyncs the tmp, renames it
     over [path], and best-effort fsyncs the parent directory.

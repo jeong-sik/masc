@@ -1156,7 +1156,7 @@ let test_usage_windows_are_reported_without_changing_the_turn () =
   let on_stream_event = function
     | Runtime_claude_code.Usage_windows_reported report -> reports := report :: !reports
     | Turn_started _ | Text_delta _ | Thinking_delta _ | Child_content_observed _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
-    | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Native_task_observed _ | Conversation_compacted
+    | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Native_task_observed _ | Provider_retry_observed _ | Conversation_compacted
     | Usage_reported _ | Turn_finished _ -> ()
   in
   with_fixture
@@ -1231,7 +1231,7 @@ let test_quota_refusal_still_reports_the_turns_spend () =
         :: !reported
     | Turn_started _ | Text_delta _ | Thinking_delta _ | Child_content_observed _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Native_task_observed _ | Usage_windows_reported _
-    | Conversation_compacted | Turn_finished _ -> ()
+    | Provider_retry_observed _ | Conversation_compacted | Turn_finished _ -> ()
   in
   with_fixture
     [ Emit parent_tool_assistant
@@ -1260,7 +1260,7 @@ let test_quota_refusal_before_any_response_reports_no_spend () =
     | Runtime_claude_code.Usage_reported _ -> incr reported
     | Turn_started _ | Text_delta _ | Thinking_delta _ | Child_content_observed _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Native_task_observed _ | Usage_windows_reported _
-    | Conversation_compacted | Turn_finished _ -> ()
+    | Provider_retry_observed _ | Conversation_compacted | Turn_finished _ -> ()
   in
   with_fixture [ Emit rate_limit_rejected; Emit quota_result_with_usage ] (fun path ->
     (match run_fixture ~on_stream_event path with
@@ -1278,7 +1278,7 @@ let test_result_of_another_session_reports_no_spend () =
     | Runtime_claude_code.Usage_reported _ -> incr reported
     | Turn_started _ | Text_delta _ | Thinking_delta _ | Child_content_observed _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
     | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Native_task_observed _ | Usage_windows_reported _
-    | Conversation_compacted | Turn_finished _ -> ()
+    | Provider_retry_observed _ | Conversation_compacted | Turn_finished _ -> ()
   in
   with_fixture
     [ Emit native_tool_assistant
@@ -1546,7 +1546,7 @@ let test_api_diagnostic_preserves_native_effects () =
                 (function
                   | Runtime_claude_code.Native_tool_started _ | Native_tool_finished _ ->
                     true
-                  | Turn_started _ | Usage_windows_reported _ | Conversation_compacted
+                  | Turn_started _ | Usage_windows_reported _ | Provider_retry_observed _ | Conversation_compacted
                   | Native_tool_progress _ | Native_task_observed _ | Usage_reported _ -> false
                   | Text_delta _ | Thinking_delta _ | Child_content_observed _ | Content_block_stopped _
                   | Dynamic_tool_started _
@@ -4302,10 +4302,43 @@ let test_native_read_preapproves_read_tools () =
        "--allowedTools")
 ;;
 
+let test_provider_retry_observes_exact_session_without_changing_reply () =
+  let reports = ref [] in
+  let on_stream_event = function
+    | Runtime_claude_code.Provider_retry_observed retry -> reports := retry :: !reports
+    | _ -> () in
+  let retry session attempt uuid =
+    Yojson.Safe.to_string (`Assoc [
+      "type",`String "system";"subtype",`String "api_retry";
+      "session_id",`String session;"uuid",`String uuid;
+      "attempt",`Int attempt;"max_retries",`Int 10;
+      "retry_delay_ms",`Int 615;"error_status",`Null;
+      "error",`String "PRIVATE_RETRY_DIAGNOSTIC"])
+  in
+  with_fixture [Emit (retry "__SESSION__" 1 "retry-1");
+    Emit (retry "other-session" 2 "foreign-retry");
+    Emit (retry "__SESSION__" (-1) "malformed-retry");
+    Emit assistant;Emit result] (fun path ->
+    match run_fixture ~on_stream_event path with
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok turn ->
+      check string "retry notice does not replace model reply" "MASC_CLAUDE_OK" turn.text;
+      match !reports with
+      | [{Runtime_claude_api_retry.observation_id;attempt;max_retries;retry_delay_ms;error_status}] ->
+          check string "literal observation identity" "retry-1" observation_id;
+          check int "reported attempt" 1 attempt;
+          check int "provider retry policy observation" 10 max_retries;
+          check int "reported delay" 615 retry_delay_ms;
+          check (option int) "unknown HTTP status remains unknown" None error_status
+      | reports -> failf "expected one owned retry, got %d" (List.length reports))
+;;
+
 let () =
   run
     "runtime_claude_code"
-    [ ( "native posture argv (RFC-0390)"
+    [ ( "provider retry", [test_case "owned retry preserves healthy reply" `Quick
+          test_provider_retry_observes_exact_session_without_changing_reply])
+    ; ( "native posture argv (RFC-0390)"
       , [ test_case
             "posture selects --tools"
             `Quick

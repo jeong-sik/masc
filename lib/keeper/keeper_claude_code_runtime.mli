@@ -109,6 +109,9 @@ val run :
     (invocation:Agent_core.Tool_contract.Invocation.t -> content:string -> unit) ->
   ?on_native_tool_progress:
     (block_index:int -> tool_call_id:string option -> Runtime_native_tools.progress -> unit) ->
+  ?on_provider_retry:(Runtime_claude_api_retry.t -> unit) ->
+  (* Exact session-owned root provider retry. No tool identity, model content,
+     fallback, request delivery or execution receipt is inferred. *)
   ?on_native_tool_completion:
     (block_index:int -> tool_call_id:string option -> Runtime_native_tools.completion -> unit) ->
   (* Completion observes the still-published block after its routing entry is

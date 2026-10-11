@@ -1796,6 +1796,7 @@ let run_named
     ?on_official_client_tool_boundary
     ?on_child_content_observation
     ?on_native_task_observation
+    ?on_provider_retry
     ?on_native_tool_progress
     ?on_native_tool_completion
     ?on_tool_execution
@@ -2936,6 +2937,9 @@ let run_named
           let native_attempt : Runtime_native_tasks.attempt =
             { routing_run_id; runtime_id = attempt_runtime_id; lane_attempt_index = idx } in
           Keeper_claude_code_runtime.run ?on_native_tool_progress ?on_native_tool_completion
+            ?on_provider_retry:(Option.map
+              (fun observe retry -> observe ~attempt:native_attempt retry)
+              on_provider_retry)
             ?on_memory_capacity_refusal
             ?on_child_content_observation:(Option.map
               (fun observe observation -> observe ~attempt:native_attempt observation)

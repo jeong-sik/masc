@@ -154,7 +154,7 @@ let api_usage_of_turn_usage (usage : Runtime_claude_code.turn_usage) =
 (* Always installed so usage-window and turn usage reports are recorded. A
    turn nobody streams, traces or observes gets only those; its other events
    are ignored as before. *)
-let claude_stream_callback ?on_child_content_observation ?on_native_task_observation ?on_native_tool_progress ?on_native_tool_completion ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~turn_count
+let claude_stream_callback ?on_provider_retry ?on_child_content_observation ?on_native_task_observation ?on_native_tool_progress ?on_native_tool_completion ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~turn_count
     ~on_native_action ~on_usage_report ~position ~on_compacted on_event =
   (* The result frame's uuid is the response identity the completion hook
      also writes for a Claude Code turn; the session is the conversation. *)
@@ -173,13 +173,14 @@ let claude_stream_callback ?on_child_content_observation ?on_native_task_observa
            })
       on_usage_report
   in
-  match on_event, raw_trace_run, on_native_action, receipts, on_native_tool_completion, on_native_tool_progress, on_native_task_observation, on_child_content_observation with
-  | None, None, None, None, None, None, None, None ->
+  match on_event, raw_trace_run, on_native_action, receipts, on_native_tool_completion, on_native_tool_progress, on_native_task_observation, on_child_content_observation, on_provider_retry with
+  | None, None, None, None, None, None, None, None, None ->
     Some
       (function
         | Runtime_claude_code.Usage_windows_reported report ->
           record_usage_windows ~quota_scope report
         | Runtime_claude_code.Conversation_compacted -> on_compacted ()
+        | Runtime_claude_code.Provider_retry_observed _ -> ()
         | Runtime_claude_code.Usage_reported { session_id; turn_id; model; usage } ->
           report_usage ~session_id ~turn_id ~model usage
         | Turn_started _ | Text_delta _ | Thinking_delta _ | Child_content_observed _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
@@ -328,6 +329,8 @@ let claude_stream_callback ?on_child_content_observation ?on_native_task_observa
         | Runtime_claude_code.Usage_windows_reported report ->
           record_usage_windows ~quota_scope report
         | Runtime_claude_code.Conversation_compacted -> on_compacted ()
+        | Runtime_claude_code.Provider_retry_observed retry ->
+          Option.iter (fun observe -> observe retry) on_provider_retry
         | Runtime_claude_code.Usage_reported { session_id; turn_id; model; usage } ->
           report_usage ~session_id ~turn_id ~model usage
         | Runtime_claude_code.Turn_finished { text } ->
@@ -633,7 +636,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event ~effect_disposition
     ~context_overflow_retry_safe
     ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_progress ~on_native_tool_completion ~on_native_task_observation ~on_child_content_observation
-    ~on_usage_report ~on_tool_execution ~(config : Runtime_execution.claude_code) =
+    ~on_provider_retry ~on_usage_report ~on_tool_execution ~(config : Runtime_execution.claude_code) =
   context_overflow_retry_safe := false;
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -1239,7 +1242,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
             observe (Keeper_claude_task_binding.observe_child binding content))
         | None, _ | _, None -> None in
       let on_stream_event =
-        claude_stream_callback ?receipts ?on_native_tool_progress ?on_native_tool_completion
+        claude_stream_callback ?receipts ?on_native_tool_progress ?on_native_tool_completion ?on_provider_retry
           ?on_native_task_observation:on_bound_task
           ?on_child_content_observation:on_bound_child
           ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
@@ -1503,7 +1506,7 @@ let run ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~
     ~turn_start
     ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
-    ?on_native_tool_progress ?on_native_tool_completion ?on_child_content_observation ?on_native_task_observation
+    ?on_native_tool_progress ?on_native_tool_completion ?on_child_content_observation ?on_native_task_observation ?on_provider_retry
     ?on_native_action
     ?on_usage_report
     ?on_tool_execution
@@ -1612,6 +1615,7 @@ let run ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~
             ~context_overflow_retry_safe
         ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_progress ~on_native_tool_completion ~on_native_task_observation ~on_child_content_observation
             ~on_usage_report
+            ~on_provider_retry
             ~on_tool_execution
             ~config)
         ())

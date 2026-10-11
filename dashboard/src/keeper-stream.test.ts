@@ -906,6 +906,30 @@ describe('Keeper operation stream projection', () => {
     expect(after.responseState).toMatchObject({ phase: 'terminal' })
   })
 
+  it('keeps active output when acceptance arrives after content', () => {
+    assistantEntry('owned-operation')
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'active output' })
+    const before = requiredFixture(keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1'))
+    expect(before.delivery).toBe('streaming')
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+      value: { operation_id: 'owned-operation', state: 'Queued', queued_count: 1 } })
+    const after = requiredFixture(keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1'))
+    expect(after.delivery).toBe(before.delivery)
+    expect(after.streamState).toBe(before.streamState)
+    expect(after.rawText).toBe(before.rawText)
+  })
+
+  it('refuses acceptance belonging to a different operation', () => {
+    assistantEntry('owned-operation')
+    const before = requiredFixture(keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1'))
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+      value: { operation_id: 'foreign-operation', state: 'Queued', queued_count: 1 } })
+    const after = requiredFixture(keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1'))
+    expect(after.deliveryProvenance).toEqual(before.deliveryProvenance)
+    expect(after.delivery).toBe(before.delivery)
+    expect(after.streamState).toBe(before.streamState)
+  })
+
   it('projects queued acceptance without a receipt or queue revision', () => {
     assistantEntry()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {

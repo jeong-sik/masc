@@ -1224,25 +1224,28 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (event.name === 'KEEPER_CHAT_OPERATION_ACCEPTED') {
-        const response = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)?.responseState
+        const current = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)
+        const response = current?.responseState
         if (response?.kind === 'known' && response.phase === 'terminal') return null
         const operationId = event.value.operation_id.trim()
         if (!operationId) return 'Keeper operation acceptance is missing operation_id.'
+        const provenance = operationDeliveryProvenance(operationId, 'terminal_result')
+        if (current?.deliveryProvenance && !sameDeliveryKey(current.deliveryProvenance.delivery_key, provenance.delivery_key)) return null
         const queued = event.value.state === 'Queued'
-        updateThreadEntry(keeperName, assistantEntryId, entry => ({
-          ...entry,
-          deliveryProvenance: operationDeliveryProvenance(
-            operationId,
-            'terminal_result',
-          ),
-          delivery: queued ? 'queued' : 'sending',
-          streamState: queued ? null : 'opening',
-          streamContract: keeperStreamContract(
-            'sse_event',
-            'backend_stream_event',
-            { eventName: 'KEEPER_CHAT_OPERATION_ACCEPTED', requestId: operationId },
-          ),
-        }))
+        updateThreadEntry(keeperName, assistantEntryId, entry => {
+          const awaiting = entry.delivery === 'queued' || entry.delivery === 'sending'
+          return {
+            ...entry,
+            deliveryProvenance: provenance,
+            delivery: awaiting ? (queued ? 'queued' : 'sending') : entry.delivery,
+            streamState: awaiting ? (queued ? null : 'opening') : entry.streamState,
+            streamContract: awaiting ? keeperStreamContract(
+              'sse_event',
+              'backend_stream_event',
+              { eventName: 'KEEPER_CHAT_OPERATION_ACCEPTED', requestId: operationId },
+            ) : entry.streamContract,
+          }
+        })
         return null
       }
       if (event.name === 'KEEPER_CONNECTED') {

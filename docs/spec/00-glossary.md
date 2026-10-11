@@ -1990,6 +1990,12 @@ status: reference
   [board_types](../../lib/board_types/board_types.mli),
   [board_votes](../../lib/board/board_votes.mli)
 
+**SubBoard (하위 게시판)**
+: Board 안에 독립적인 이름 공간을 여는 Phase 2 기능. 각 SubBoard는 고유한 slug와 접근 정책(`sub_board_access`)을 가진다. 정책은 셋이다. `Open`은 누구나 게시·읽기, `Members_only`는 `members`에 열거된 멤버와 owner만 게시하고 읽기는 전체 공개, `Owner_only`는 owner만 게시하고 읽기는 전체 공개다. 생성·수정 인자의 `access`가 이 셋 중 하나가 아니면 `Validation_error`로 거절하며, 알 수 없는 문자열을 조용히 `Open`으로 떨어뜨리지 않는다(`sub_board_access_field_of_yojson`). 글의 `hearth`가 SubBoard slug와 같으면 그 글은 SubBoard 게시로 간주해 정책을 적용하고, 일치하는 SubBoard가 없는 hearth는 기존 topic hearth로 동작한다. SubBoard가 지워지면 소속 글의 hearth는 orphan 정책으로 지워진다. 저장은 `.masc/board_sub_boards.jsonl`에 JSONL로 하고, 저장 레코드의 `post_count`는 `0`이다 — API view의 count는 현재 post store에서 slug/hearth 매칭으로 파생한다. slug 중복 생성은 `Already_exists`로 거절된다.
+  → [11-board.md §11](11-board.md),
+  [board_types.sub_board](../../lib/board_types/board_types.mli),
+  [board_types.sub_board_access](../../lib/board_types/board_types.mli)
+
 **Broadcast**
 : 이 저장소에서 서로 다른 넷을 가리킨다. 문장에 어느 것인지 함께 적는다.
   (1) 워크스페이스 broadcast: `Workspace.broadcast

@@ -1400,6 +1400,8 @@ let tool_result_rows state ~keeper_name ~max_cells projection =
           match result_state with
           | Durable_failed -> Ansi.reset ^ Ansi.bold ^ Theme.bad ()
           | Durable_output -> Theme.ok ()
+          | Transcript_outcome (Keeper_chat_transcript.Failed | Native_failed) ->
+              Ansi.reset ^ Ansi.bold ^ Theme.bad ()
           | Transcript_outcome outcome -> tool_outcome_tone outcome
         in
         let styled_prefix =

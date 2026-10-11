@@ -130,6 +130,7 @@ let result_state outcome association =
 let result_marker = function
   | Durable_failed -> Keeper_chat_transcript.marker_of_outcome Keeper_chat_transcript.Failed
   | Durable_output -> Keeper_chat_transcript.received_marker
+  | Transcript_outcome Keeper_chat_transcript.Returned -> Keeper_chat_transcript.received_marker
   | Transcript_outcome outcome -> Keeper_chat_transcript.marker_of_outcome outcome
 
 let result_label = function

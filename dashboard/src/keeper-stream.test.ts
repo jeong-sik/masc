@@ -1134,6 +1134,28 @@ describe('Keeper operation stream projection', () => {
     } finally { release() }
   })
 
+  it('does not grant temporary activity to unowned autonomous reasoning observations', () => {
+    applyKeeperAutonomousTurnEvent('sangsu', 'autonomous-observation', 1, { type: 'RUN_STARTED' })
+    applyKeeperAutonomousTurnEvent('sangsu', 'autonomous-observation', 2, {
+      type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_START', value: { content_generation: 1, stream_scope: 0 },
+    })
+    const states: Array<string | null | undefined> = []
+    const release = effect(() => {
+      const entry = keeperThreads.value.sangsu?.find(item => item.turnRef === 'autonomous-observation')
+      if (entry?.traceSteps?.some(step => step.kind === 'think')) states.push(entry.streamState)
+    })
+    try {
+      applyKeeperAutonomousTurnEvent('sangsu', 'autonomous-observation', 3, {
+        type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA', value: { index: 0, delta: 'unowned exposed reasoning' },
+      })
+      const entry = requiredFixture(keeperThreads.value.sangsu?.find(item => item.turnRef === 'autonomous-observation'))
+      expect(entry.traceSteps).toMatchObject([{ kind: 'think', text: 'unowned exposed reasoning' }])
+      expect(states.length).toBeGreaterThan(0)
+      expect(states).not.toContain('thinking')
+      expect(entry.streamState).toBe('opening')
+    } finally { release() }
+  })
+
   it('projects queued acceptance without a receipt or queue revision', () => {
     assistantEntry()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {

@@ -54,11 +54,13 @@ export const KEEPER_THINKING_DELTA_FLUSH_INTERVAL_MS = 100
 
 const pendingAgentCoreTextBlockIndexes = new Map<string, number>()
 type ScheduledFlushHandle = ReturnType<typeof setTimeout>
-interface PendingThinkingState {
+interface ThinkingPublicationOwner {
   readonly authRevision: number
   readonly deliveryKey: KeeperChatDeliveryKey | null
   readonly targetSource: KeeperConversationEntry['source']
   readonly turnRef: string | null | undefined
+}
+interface PendingThinkingState extends ThinkingPublicationOwner {
   responseOwner?: KeeperResponseOwner
   chunks: string[]
   agentCoreBlockIndex?: number
@@ -268,7 +270,13 @@ function persistActiveAssistantDraft(keeperName: string, assistantEntryId: strin
   updateTrackedKeeperChatAssistantDraft(deliveryKey.operation_id, entry, keeperThreads.value[keeperName] ?? [])
 }
 
-function ownsThinkingPublication(pending: PendingThinkingState, entry: KeeperConversationEntry | undefined, authRevision: number): boolean {
+function captureThinkingPublicationOwner(entry: KeeperConversationEntry, authRevision: number): ThinkingPublicationOwner {
+  return Object.freeze({ authRevision,
+    deliveryKey: entry.deliveryProvenance ? Object.freeze({ ...entry.deliveryProvenance.delivery_key }) : null,
+    targetSource: entry.source, turnRef: entry.turnRef })
+}
+
+function ownsThinkingPublication(pending: ThinkingPublicationOwner, entry: KeeperConversationEntry | undefined, authRevision: number): boolean {
   return entry !== undefined && entry.role === 'assistant' && pending.authRevision === authRevision
     && entry.source === pending.targetSource && entry.turnRef === pending.turnRef
     && (pending.deliveryKey === null || entry.deliveryProvenance != null
@@ -349,10 +357,7 @@ function enqueueThinkingDelta(
       && sameAgentCoreBlockIndex(last.agentCoreBlockIndex, meta.agentCoreBlockIndex) ? last.text : ''
     const text = `${prefix}${delta}`
     pending = {
-      authRevision: currentStoredTokenRevision(),
-      deliveryKey: entry.deliveryProvenance ? Object.freeze({ ...entry.deliveryProvenance.delivery_key }) : null,
-      targetSource: entry.source,
-      turnRef: entry.turnRef,
+      ...captureThinkingPublicationOwner(entry, currentStoredTokenRevision()),
       responseOwner: meta.responseOwner,
       chunks: [text],
       agentCoreBlockIndex: meta.agentCoreBlockIndex,
@@ -1425,13 +1430,15 @@ export function applyKeeperStreamEvent(
           && sameKeeperResponseOwner(slot.owner ?? undefined, owner ?? undefined)
         const previous = slots.find(same)
         const observed = Object.freeze({ boundary, index: value.index, owner, text: (previous?.text ?? '') + value.delta })
+        const publicationOwner = captureThinkingPublicationOwner(before, currentStoredTokenRevision())
         setAssistantThinkingSnapshot(keeperName, assistantEntryId, observed.text,
-          { agentCoreBlockIndex: value.index, responseOwner: owner ?? undefined })
-        updateThreadEntry(keeperName, assistantEntryId, entry => ({ ...entry,
-          ...(source.observationOnly || response && !response.authoritative
-            ? { delivery: before.delivery, streamState: before.streamState } : {}),
-          autonomousThinkingReplay: Object.freeze([...slots.filter(slot => !same(slot)), observed]),
-        }))
+          { agentCoreBlockIndex: value.index, responseOwner: owner ?? undefined,
+            activity: source.observationOnly || response && !response.authoritative ? 'observation' : 'active' })
+        updateThreadEntry(keeperName, assistantEntryId, entry =>
+          ownsThinkingPublication(publicationOwner, entry, currentStoredTokenRevision())
+            ? { ...entry, autonomousThinkingReplay: Object.freeze([...slots.filter(slot => !same(slot)), observed]) }
+            : entry)
+
         return null
       }
       if (event.name === 'KEEPER_THINKING_DELTA') {

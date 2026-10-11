@@ -130,11 +130,12 @@ Choose from the current list, then send the officer number and Return.
 
 The next prompt was `武器をいくら買いますか(1-99)?`. Separate `5`, `0`, Return
 inputs entered 50 and returned to province commands. Gold fell from 450 to 400.
-A subsequent information lookup (`8`, Return; `2`, Return; the current officer
-number, Return) showed Sima Yi with soldiers 10, training 10 and armament 6.
-The earlier merchant list and later officer information thus displayed 1 and 6;
-the purchased amount 50 is not the displayed armament value. The exact conversion
-rule and a general price formula were not established by this one purchase.
+A later merchant officer list displayed Sima Yi's weapon value as 51.
+The province officer information panel displays age, service, soldiers, loyalty,
+intelligence, martial ability and charm; do not read its intelligence or other
+attributes as training or armament. Use a labeled battle information panel or
+an explicit action result to verify those values. This purchase establishes
+weapon value 1 to 51, not a measured armament value or conversion formula.
 
 Confirm the resulting gold and the selected officer's actual information before
 claiming improved equipment. This observation does not prove improved combat

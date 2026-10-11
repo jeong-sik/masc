@@ -1,3 +1,4 @@
+import { clearStoredToken, setStoredToken } from './api/core'
 import { effect } from '@preact/signals'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { keeperActionErrors, keeperToolApprovals, upsertKeeperToolApproval } from './keeper-state'
@@ -35,6 +36,7 @@ function jsonResponse(status: number, body: unknown): Response {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  clearStoredToken()
   keeperToolApprovals.value = {}
   keeperActionErrors.value = {}
 })
@@ -203,6 +205,44 @@ describe('hydrateKeeperToolApprovals', () => {
     expect(hydrated?.question).toBe('보고서를 날릴까요?')
     expect(hydrated?.because).toBe('external side effect')
     expect(hydrated?.askedAtMs).toBe(1787636000 * 1000)
+  })
+
+  it('discards a listing completed after authentication changes', async () => {
+    setStoredToken('synthetic-approval-account-a')
+    let resolveFetch!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { resolveFetch = resolve })))
+    const pending = hydrateKeeperToolApprovals()
+    await vi.waitFor(() => expect(resolveFetch).toBeDefined())
+    setStoredToken('synthetic-approval-account-b')
+    resolveFetch(jsonResponse(200, { pending: [{
+      keeper: 'sangsu', tool_call_id: 'foreign-wait', tool: 'Execute', args: '{}',
+      question: 'approval', because: 'effect', asked_at: 1, timeout_sec: 180,
+    }] }))
+    await pending
+    expect(keeperToolApprovals.value.sangsu?.['foreign-wait']).toBeUndefined()
+  })
+
+  it('stops publishing remaining rows when an observer changes authentication', async () => {
+    setStoredToken('synthetic-hydration-account-a')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { pending:
+      ['first-wait', 'second-wait'].map(tool_call_id => ({
+        keeper: 'sangsu', tool_call_id, tool: 'Execute', args: '{}',
+        question: 'approval', because: 'effect', asked_at: 1, timeout_sec: 180,
+      })),
+    })))
+    let switched = false
+    const dispose = effect(() => {
+      if (keeperToolApprovals.value.sangsu?.['first-wait'] && !switched) {
+        switched = true
+        setStoredToken('synthetic-hydration-account-b')
+        keeperToolApprovals.value = {}
+      }
+    })
+    try {
+      await hydrateKeeperToolApprovals()
+      expect(switched).toBe(true)
+      expect(keeperToolApprovals.value.sangsu?.['second-wait']).toBeUndefined()
+    } finally { dispose() }
   })
 
   it('stays silent when the listing fails — hydration is best-effort', async () => {

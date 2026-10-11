@@ -249,6 +249,7 @@ export async function interruptKeeperTurn(keeperName: string): Promise<KeeperTur
 // public-read, so a dashboard opened after the gate fired still draws the
 // card instead of discovering the wait only as a 180s timeout.
 export async function hydrateKeeperToolApprovals(): Promise<void> {
+  const authRevision = currentStoredTokenRevision()
   let rows
   try {
     rows = await fetchKeeperToolApprovals()
@@ -258,6 +259,7 @@ export async function hydrateKeeperToolApprovals(): Promise<void> {
     return
   }
   for (const row of rows) {
+    if (authRevision !== currentStoredTokenRevision()) return
     // A row the stream already drew carries fresher askedAt semantics; only
     // fill gaps, never overwrite an in-flight answer with a re-hydration.
     if (keeperToolApprovals.value[row.keeper]?.[row.tool_call_id]) continue

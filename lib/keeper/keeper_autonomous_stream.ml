@@ -90,6 +90,9 @@ let with_stream t f =
   Fun.protect ~finally:(fun () -> Eio.Mutex.unlock t.mutex)
     (fun () -> Eio.Cancel.protect f)
 
+let with_open_stream t f =
+  with_stream t (fun () -> if not t.closed then f ())
+
 let apply t (translated : Bridge.translated_event) =
   t.bridge <- translated.bridge_state;
   List.iter (publish t) translated.chat_events
@@ -113,7 +116,7 @@ let result_ready t ~tool_call_id ~execution_id = function
       t.bridge <- Bridge.record_tool_result t.bridge occurrence;
       publish t (Events.Tool_result_ready {occurrence; tool_call_id; execution_id})
 
-let on_event t event = with_stream t (fun () ->
+let on_event t event = with_open_stream t (fun () ->
   Accum.on_event t.accum event;
   let stream_scope = Accum.current_stream_scope t.accum in
   forward t (Keeper_stream_text_redaction.Scoped.on_event t.text ~stream_scope event);
@@ -128,7 +131,7 @@ let on_tool_stream_observation t observation =
         Eio.Cancel.protect
     | Runtime_attempt_started _ | Turn_collected _ | Turn_closed_without_sources _
     | Native_tool_progress _ | Native_tool_completion _ | Official_tool_result _ ->
-        with_stream t in
+        with_open_stream t in
   protect_observation (fun () -> match observation with
   | Keeper_hooks_agent_core.Runtime_attempt_started {runtime_id; lane_attempt_index; _} ->
       flush t;
@@ -162,7 +165,7 @@ let on_tool_stream_observation t observation =
       result_ready t ~tool_call_id:(Some tool_call_id) ~execution_id
         (Accum.record_official_execution_id t.accum ~block_index ~tool_call_id ~execution_id))
 
-let on_tool_result_ready t ~tool_call_id ~turn ~planned_index ~execution_id = with_stream t (fun () ->
+let on_tool_result_ready t ~tool_call_id ~turn ~planned_index ~execution_id = with_open_stream t (fun () ->
   result_ready t ~tool_call_id:(if String.equal tool_call_id "" then None else Some tool_call_id) ~execution_id
     (Accum.record_execution_id t.accum ~tool_call_id ~turn ~planned_index ~execution_id))
 
@@ -171,7 +174,7 @@ type ending =
   | Failed of string
   | Cancelled
 
-let publish_committed_tool_bindings t bindings = with_stream t (fun () ->
+let publish_committed_tool_bindings t bindings = with_open_stream t (fun () ->
   List.iter (fun (delivery_key, slot) -> match slot with
     | Keeper_chat_delivery_identity.Tool_call {execution_id; ordinal} ->
       publish t (Events.Tool_transcript_committed {delivery_key; execution_id; ordinal})

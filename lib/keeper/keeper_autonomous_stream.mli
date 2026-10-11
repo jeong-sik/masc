@@ -6,6 +6,8 @@ type t
 val create : base_path:string -> keeper_name:string -> turn_ref:Ids.Turn_ref.t -> t
 val current : base_path:string -> keeper_name:string -> Ids.Turn_ref.t option
 (** In-flight autonomous journal, absent once its producer closes. *)
+(** Root callbacks arriving after [finish] are ignored under the publication
+    mutex. Bound child/task persistence remains independent of root closure. *)
 val on_event : t -> Agent_core.Types.sse_event -> unit
 val on_tool_stream_observation : t -> Keeper_hooks_agent_core.tool_stream_observation -> unit
 val on_tool_result_ready :

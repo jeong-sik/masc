@@ -8,7 +8,7 @@ import type {
   KeeperConversationDetails,
   KeeperConversationStreamState,
 } from './types'
-import { IN_FLIGHT_DELIVERY } from './lib/keeper-delivery'
+import { keeperConversationDeliveryFromUnknown } from './lib/keeper-delivery'
 
 export interface TrackedKeeperChatAssistantDraft {
   responseState?: KeeperResponseState
@@ -170,7 +170,7 @@ function normalizeAssistantDraft(raw: unknown): TrackedKeeperChatAssistantDraft 
   const text = stringValue(raw.text)
   if (text === undefined) return null
   const rawText = stringValue(raw.rawText) ?? text
-  const delivery = parseMember(IN_FLIGHT_DELIVERY, raw.delivery) ?? 'queued'
+  const delivery = keeperConversationDeliveryFromUnknown(raw.delivery)
   const streamState =
     raw.streamState === null
       ? null
@@ -185,11 +185,15 @@ function normalizeAssistantDraft(raw: unknown): TrackedKeeperChatAssistantDraft 
     details: normalizeKeeperConversationDetails(raw.details),
     text,
     rawText,
-    delivery,
+    delivery: delivery ?? 'error',
     streamState,
     ...(timestamp !== undefined ? { timestamp } : {}),
     ...(traceSteps ? { traceSteps } : {}),
     ...(error !== undefined ? { error } : {}),
+    ...(delivery === null ? {
+      responseState: unavailableKeeperResponseState, delivery: 'error' as const, streamState: null,
+      error: 'Stored draft delivery is unavailable; waiting for the authoritative operation result.',
+    } : {}),
     ...(responseState === null || responseState?.kind === 'unavailable' ? {
       delivery: 'error' as const, streamState: null,
       error: 'Stored response ownership is unavailable; waiting for the authoritative operation result.',

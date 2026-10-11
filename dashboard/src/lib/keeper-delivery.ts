@@ -1,42 +1,25 @@
-// Keeper conversation-delivery vocabulary SSOT.
-//
-// Typed closed-sum classifiers for `KeeperConversationDelivery`. The member
-// arrays are declared `as const satisfies ReadonlyArray<KeeperConversationDelivery>`
-// so a new delivery variant added to the type in `types/core.ts` forces this
-// module (and its drift test) to be revisited, instead of being silently
-// missed by the ad-hoc `=== 'x' || === 'y'` OR-chains this replaces
-// (previously duplicated across keeper-state.ts, keeper-shared.ts, and
-// chat/primitives.ts). Mirrors the `lib/agent-status.ts` precedent.
-
 import type { KeeperConversationDelivery } from '../types/core'
 
-/** Deliveries representing an in-flight (not-yet-terminal) turn: the request
- *  is queued, being sent, or actively streaming. */
-export const IN_FLIGHT_DELIVERY = [
-  'queued',
-  'sending',
-  'streaming',
-] as const satisfies ReadonlyArray<KeeperConversationDelivery>
+// Total classification is the runtime vocabulary and decoder authority. Adding
+// a delivery to the closed type requires choosing its class here.
+const DELIVERY_CLASS = Object.freeze({
+  history: 'other', queued: 'in-flight', sending: 'in-flight', streaming: 'in-flight',
+  delivered: 'other', no_reply: 'other', timeout: 'failed', cancelled: 'other',
+  error: 'failed', request_failure: 'failed', interrupted: 'failed',
+} as const satisfies Record<KeeperConversationDelivery, 'in-flight' | 'failed' | 'other'>)
 
-/** Deliveries representing a failed terminal outcome. */
-export const FAILED_DELIVERY = [
-  'error',
-  'request_failure',
-  'timeout',
-  'interrupted',
-] as const satisfies ReadonlyArray<KeeperConversationDelivery>
+const deliveries = Object.keys(DELIVERY_CLASS) as KeeperConversationDelivery[]
+export const IN_FLIGHT_DELIVERY: readonly KeeperConversationDelivery[] = Object.freeze(deliveries.filter(delivery => DELIVERY_CLASS[delivery] === 'in-flight'))
+export const FAILED_DELIVERY: readonly KeeperConversationDelivery[] = Object.freeze(deliveries.filter(delivery => DELIVERY_CLASS[delivery] === 'failed'))
 
-const IN_FLIGHT_SET: ReadonlySet<KeeperConversationDelivery> = new Set(IN_FLIGHT_DELIVERY)
-const FAILED_SET: ReadonlySet<KeeperConversationDelivery> = new Set(FAILED_DELIVERY)
-
-/** True when the turn is in flight (queued / sending / streaming). */
-export function isInFlightDelivery(delivery: KeeperConversationDelivery): boolean {
-  return IN_FLIGHT_SET.has(delivery)
+export function keeperConversationDeliveryFromUnknown(raw: unknown): KeeperConversationDelivery | null {
+  return typeof raw === 'string' && Object.hasOwn(DELIVERY_CLASS, raw) ? raw as KeeperConversationDelivery : null
 }
 
-/** True when the turn ended in a failed terminal state. Callers that
- *  additionally require a non-empty error string must keep that conjunct at
- *  the callsite. */
+export function isInFlightDelivery(delivery: KeeperConversationDelivery): boolean {
+  return DELIVERY_CLASS[delivery] === 'in-flight'
+}
+
 export function isFailedDelivery(delivery: KeeperConversationDelivery): boolean {
-  return FAILED_SET.has(delivery)
+  return DELIVERY_CLASS[delivery] === 'failed'
 }

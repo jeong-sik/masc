@@ -78,6 +78,11 @@ describe('keeper chat delivery provenance', () => {
     [{ kind: 'operation_resume', operation_id: 'kmsg-1' }, { kind: 'accepted_user' }],
     [{ ...checkpointKey, sha256: 'A'.repeat(64) }, { kind: 'accepted_user' }],
     [{ ...checkpointKey, turn_count: -1 }, { kind: 'accepted_user' }],
+    [{ ...checkpointKey, turn_count: Number.MAX_SAFE_INTEGER + 1 }, { kind: 'accepted_user' }],
+    [{ kind: 'operation', operation_id: 'kmsg-1' }, {
+      kind: 'tool_delivery',
+      ordinal: Number.MAX_SAFE_INTEGER + 1,
+    }],
     [{ ...checkpointKey, trace_id: 'trace.3' }, { kind: 'accepted_user' }],
     [{ kind: 'operation_native', operation_id: 'kmsg-4' }, { kind: 'accepted_user' }],
     [{ ...goalNotificationKey, owner: ' \t' }, { kind: 'accepted_user' }],

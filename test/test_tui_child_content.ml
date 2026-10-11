@@ -35,10 +35,11 @@ let observation ?(receiver=receiver) ?(ordinal=1) ?(channel="text") ?(known=fals
     "parent_tool_use_id",`String "parent";"message_id",`String "";"model",`String model;
     "text",`String body;"attribution",attribution] @ provenance)
 let row seq observation=`Assoc ["seq",`Int seq;"recorded_at",`Float (float_of_int seq);"observation",observation]
-let page ?(receiver=receiver) store through rows =
+let page ?(receiver=receiver) ?(cleanup=[]) store through rows =
   envelope "masc.child_content.records.v1" ["scope",`Assoc ["keeper_name",`String keeper;"receiver",receiver_json receiver];
     "records",`List rows;"next_cursor",`Assoc ["store_id",`String store;"after_sequence",`Int through];
-    "validation",`Assoc ["kind",`String "audited";"through_sequence",`Int through];"cleanup_failures",`List []]
+    "validation",`Assoc ["kind",`String "audited";"through_sequence",`Int through];
+    "cleanup_failures",`List (List.map (fun operation -> `String operation) cleanup)]
 let json value=Yojson.Safe.to_string value
 let read mode previous entries serve =
   let reads=ref [] in
@@ -228,7 +229,33 @@ let test_failed_store_incarnations_remain_distinct () =
    | _ -> fail "replacement recovery cleared unrelated incarnation evidence");
   check int "both received histories preserved" 2 (records_count recovered)
 
+let test_rejected_page_cleanup_evidence () =
+  let rejected,_=read Consumer.Poll Consumer.empty [receiver,Ok ("stable",2)]
+    (fun _ -> Ok (200,json (page ~cleanup:["remove stale journal"] "stable" 1
+      [row 1 (observation "first")]))) in
+  check int "behind-frontier page does not admit content" 0 (records_count rejected);
+  check (list string) "validated page cleanup survives initial refusal"
+    ["remove stale journal"] (one rejected).cleanup_failures;
+  let foreign,_=read Consumer.Audit rejected [receiver,Ok ("stable",2)]
+    (fun _ -> Ok (200,json (page ~cleanup:["foreign warning"] "foreign" 1
+      [row 1 (observation "foreign")]))) in
+  check (list string) "foreign incarnation cannot add cleanup evidence"
+    ["remove stale journal"] (one foreign).cleanup_failures;
+  let repaired,_=read Consumer.Audit foreign [receiver,Ok ("stable",2)]
+    (fun _ -> Ok (200,json (page "stable" 2
+      [row 1 (observation "first");row 2 (observation "second")]))) in
+  check (list string) "actual admitted page refreshes cleanup evidence" [] (one repaired).cleanup_failures;
+  let rewritten,_=read Consumer.Audit repaired [receiver,Ok ("stable",2)]
+    (fun _ -> Ok (200,json (page ~cleanup:["remove retired store"] "stable" 2
+      [row 1 (observation "changed-identity");row 2 (observation "second")]))) in
+  check (list string) "history refusal retains scoped cleanup evidence"
+    ["remove retired store"] (one rewritten).cleanup_failures;
+  check int "history refusal retains previously admitted content" 2 (records_count rewritten);
+  (match (one rewritten).error with Some (Consumer.History_rewritten _) -> ()
+   | _ -> fail "expected immutable history refusal")
+
 let ()=run "Child immutable snapshot reader" ["read",[
+  test_case "rejected page cleanup evidence remains scoped" `Quick test_rejected_page_cleanup_evidence;
   test_case "failed store incarnations remain distinct" `Quick test_failed_store_incarnations_remain_distinct;
   test_case "snapshots, opaque suffix and idle identity" `Quick test_snapshots_suffix_identity_and_idle;
   test_case "newer audited receipt and same trigger do not repeat scans" `Quick test_newer_receipt_does_not_repeat_full_reads;

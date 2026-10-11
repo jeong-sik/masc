@@ -3128,6 +3128,12 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
           `
         : null}
 
+      ${entry.autonomousJournalRecovery?.kind === 'unavailable'
+        ? html`<div role="status" class="rounded-[var(--r-1)] border border-[var(--err-border)] bg-[var(--bad-soft)] px-3 py-2 text-sm leading-paragraph text-[var(--bad-light)]">
+            활동 기록을 불러오지 못했습니다. Thinking·Tools·중간 발화가 일부 누락됐을 수 있습니다.
+          </div>`
+        : null}
+
       ${expanded && entry.details
         ? html`
             <div class="chat-detail-panel rounded-card border border-[var(--color-border-default)] px-3 py-3">
@@ -4066,6 +4072,9 @@ function AutonomousTurnGroup({
         <span class="chat-block-trace-chev">${open ? '▾' : '▸'}</span>
         <span class="chat-block-trace-label">자율턴</span>
         <span class="chat-block-trace-count">1개</span>
+        ${entry.autonomousJournalRecovery?.kind === 'unavailable'
+          ? html`<span role="status" class="chat-block-trace-meta text-[var(--bad-light)]">활동 기록 누락 가능</span>`
+          : null}
         ${toolSummary
           ? html`<span class="chat-block-trace-tools" title=${toolSummary}>${toolSummary}</span>`
           : null}
@@ -4183,6 +4192,9 @@ function AutonomousTurnRun({
         <span class="chat-block-trace-chev">${open ? '▾' : '▸'}</span>
         <span class="chat-block-trace-label">자율턴</span>
         <span class="chat-block-trace-count">${entries.length}개</span>
+        ${entries.some(entry => entry.autonomousJournalRecovery?.kind === 'unavailable')
+          ? html`<span role="status" class="chat-block-trace-meta text-[var(--bad-light)]">활동 기록 누락 가능</span>`
+          : null}
         ${toolSummary
           ? html`<span class="chat-block-trace-tools" title=${toolSummary}>${toolSummary}</span>`
           : null}

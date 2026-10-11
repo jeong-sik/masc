@@ -1,6 +1,6 @@
 import { fetchKeeperCurrentTurn, fetchKeeperTurnEvents, type KeeperTurnCursor } from './api/keeper-turn-events'
 import { applyKeeperAutonomousTurnEvent } from './keeper-stream'
-import { keeperThreads } from './keeper-state'
+import { keeperThreads, updateThreadEntry } from './keeper-state'
 
 type TurnRecovery = {
   cursor: KeeperTurnCursor
@@ -29,6 +29,10 @@ export function recoverKeeperAutonomousTurn(name: string, turnRef: string, seque
   if (state.inFlight) return state.inFlight
   if (!state.pullRequested && state.cursor.sequence !== null && state.cursor.sequence >= state.target) return Promise.resolve()
   const current = state
+  const recoveryStatus = (status: { kind: 'unavailable'; detail: string } | null): void => {
+    const parent = (keeperThreads.value[name] ?? []).find(entry => entry.source === 'autonomous_turn' && entry.turnRef === turnRef)
+    if (parent) updateThreadEntry(name, parent.id, entry => ({ ...entry, autonomousJournalRecovery: status }))
+  }
   let failed = false
   const drain = async (): Promise<void> => {
     let hasMore = false
@@ -47,7 +51,11 @@ export function recoverKeeperAutonomousTurn(name: string, turnRef: string, seque
       }
     } while (hasMore || current.pullRequested || current.cursor.sequence === null || current.cursor.sequence < current.target)
   }
-  current.inFlight = drain().catch(error => { failed = true; throw error }).finally(() => {
+  current.inFlight = drain().then(() => recoveryStatus(null)).catch(error => {
+    failed = true
+    recoveryStatus({ kind: 'unavailable', detail: error instanceof Error ? error.message : 'Journal recovery failed' })
+    throw error
+  }).finally(() => {
     current.inFlight = null
     // A notification can arrive in the microtask between drain and cleanup.
     // A fresh request received during a failed read still owns a recovery

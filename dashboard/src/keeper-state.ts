@@ -1505,6 +1505,8 @@ function mergeLocalAssistantObservations(
   const autonomousTraceBoundary = exactLocalEntries.find(entry => entry.autonomousTraceBoundary !== undefined)?.autonomousTraceBoundary
   const autonomousSayingReplay = exactLocalEntries.find(entry => entry.autonomousSayingReplay)?.autonomousSayingReplay
   const mergedHistory = { ...historyEntry,
+    ...(exactLocalEntries.find(entry => entry.autonomousJournalRecovery)?.autonomousJournalRecovery
+      ? { autonomousJournalRecovery: exactLocalEntries.find(entry => entry.autonomousJournalRecovery)!.autonomousJournalRecovery } : {}),
     ...(autonomousSayingReplay ? { autonomousSayingReplay } : {}),
     ...(autonomousTraceBoundary !== undefined ? { autonomousTraceBoundary } : {}),
     ...(exactLocalEntries.find(entry => entry.autonomousThinkingReplay)?.autonomousThinkingReplay

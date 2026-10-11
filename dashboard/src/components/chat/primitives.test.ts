@@ -165,6 +165,26 @@ beforeEach(() => {
 })
 
 describe('ChatTranscript', () => {
+  it('shows an incomplete activity warning without changing the canonical reply', () => {
+    const host = document.createElement('div')
+    const entry: KeeperConversationEntry = { id: 'autonomous-turn', role: 'assistant', source: 'autonomous_turn',
+      label: 'keeper', text: 'canonical answer', delivery: 'history', turnRef: 'trace#9',
+      autonomousJournalRecovery: { kind: 'unavailable', detail: 'private transport diagnostic' } }
+    try {
+      render(html`<${ChatTranscript} entries=${[entry]} emptyText="empty" />`, host)
+      expect(host.querySelector('[role="status"]')?.textContent).toContain('활동 기록 누락 가능')
+      fireEvent.click(host.querySelector('.chat-block-trace-hd')!)
+      expect(host.textContent).toContain('canonical answer')
+      expect(host.textContent).toContain('활동 기록을 불러오지 못했습니다')
+      expect(host.textContent).not.toContain('private transport diagnostic')
+      render(html`<${ChatTranscript} entries=${[{ ...entry, autonomousJournalRecovery: null }]} emptyText="empty" />`, host)
+      expect(host.querySelector('[role="status"]')).toBeNull()
+      expect(host.textContent).toContain('canonical answer')
+      render(html`<${ChatTranscript} entries=${[entry, { ...entry, id: 'other-turn', turnRef: 'trace#10', autonomousJournalRecovery: null }]} emptyText="empty" />`, host)
+      expect(host.querySelector('.chat-auto-run [role="status"]')?.textContent).toContain('활동 기록 누락 가능')
+      expect(host.textContent).not.toContain('private transport diagnostic')
+    } finally { render(null, host) }
+  })
   let container: HTMLDivElement
 
   beforeEach(() => {

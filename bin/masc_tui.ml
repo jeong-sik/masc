@@ -6696,14 +6696,11 @@ let launch_keeper_older_page state ~mailbox ~keeper_name ~before =
   end
 
 let launch_keeper_native_tasks_load ?(mode=Masc_tui_native_tasks.Poll) state ~mailbox ~keeper_name =
-  let eligible = server_authority_ready state
-     && state.workspace_identity = Workspace_identity_match
-     && keeper_available_for_new_message state keeper_name in
-  if eligible && mode=Masc_tui_native_tasks.Audit
-     && List.mem keeper_name state.msg_native_tasks_inflight
+  let eligible = server_authority_ready state in
+  if mode=Masc_tui_native_tasks.Audit
      && not (List.mem keeper_name state.msg_native_tasks_audit_pending) then
     state.msg_native_tasks_audit_pending <- keeper_name :: state.msg_native_tasks_audit_pending;
-  if eligible && not (List.mem keeper_name state.msg_native_tasks_inflight) then begin
+  if eligible && not (List.mem_assoc keeper_name state.msg_native_tasks_inflight) then begin
     let mode = if List.mem keeper_name state.msg_native_tasks_audit_pending
       then Masc_tui_native_tasks.Audit else mode in
     state.msg_native_tasks_audit_pending <-
@@ -6714,15 +6711,20 @@ let launch_keeper_native_tasks_load ?(mode=Masc_tui_native_tasks.Poll) state ~ma
     let host = server_peer_host and port = state.port in
     let previous = Option.value ~default:Masc_tui_native_tasks.empty
         (List.assoc_opt keeper_name state.msg_native_tasks) in
-    state.msg_native_tasks_inflight <- keeper_name :: state.msg_native_tasks_inflight;
+    state.msg_native_tasks_inflight <- (keeper_name,mode) :: state.msg_native_tasks_inflight;
+    let read_authority = state.workspace_read_authority in
     Masc_tui_async_read.launch_with
       ~boundary_error:(fun detail -> Masc_tui_native_tasks.Transport detail)
       ~deliver:(fun result -> enqueue_async mailbox (Keeper_native_tasks_loaded (keeper_name,result)))
       (fun () -> Masc_tui_native_tasks.read ~mode ~keeper_name ~previous
         ~fetch:(fun path ->
           let ( let* ) = Result.bind in
+          let* () = if read_authority == state.workspace_read_authority then Ok ()
+            else Error "workspace observation read was retired" in
           let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
           let result = Masc_tui_http.http_get ~host ~port ~path in
+          let* () = if read_authority == state.workspace_read_authority then Ok ()
+            else Error "workspace observation read was retired" in
           let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
           result))
   end
@@ -6770,10 +6772,10 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
   launch_keeper_child_content_load
     ~mode:(if force then Masc_tui_child_content.Audit else Masc_tui_child_content.Poll)
     state ~mailbox ~keeper_name;
-  if server_authority_ready state then begin
   launch_keeper_native_tasks_load
     ~mode:(if force then Masc_tui_native_tasks.Audit else Masc_tui_native_tasks.Poll)
     state ~mailbox ~keeper_name;
+  if server_authority_ready state then begin
   let identity = state.server_identity in
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
@@ -17932,7 +17934,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
           (Result.map Option.some operation_state))
         (settled_log_for_request state ~keeper_name operation_id)
   | Keeper_native_tasks_loaded (keeper_name,result) ->
-      state.msg_native_tasks_inflight <- List.filter ((<>) keeper_name) state.msg_native_tasks_inflight;
+      state.msg_native_tasks_inflight <- List.filter (fun (name,_) -> name <> keeper_name) state.msg_native_tasks_inflight;
       let previous = Option.value ~default:Masc_tui_native_tasks.empty
           (List.assoc_opt keeper_name state.msg_native_tasks) in
       let tasks = match result with

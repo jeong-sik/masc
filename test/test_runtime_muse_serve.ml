@@ -284,6 +284,40 @@ let test_completed_agent_cannot_change_kind () =
     ["item/started", tool_started; "item/completed", tool_completed]
 ;;
 
+let test_duplicate_agent_start_cannot_admit_late_delta () =
+  let deltas = ref 0 in
+  run_scripted
+    ~on_stream_event:(function Serve.Text_delta _ -> incr deltas | _ -> ())
+    (handshake_and_session ~granted:[] @
+      [Write agent_started; Write agent_started; Write agent_completed;
+       Write (delta "late"); Write turn_completed])
+    (fun result _ ->
+      check int "no delta published after completion" 0 !deltas;
+      match result with
+      | Error (Serve.Protocol_error {stage; _}) ->
+          check string "late delta rejected" "item/delta" stage
+      | Error error -> fail (Serve.error_to_string error)
+      | Ok _ -> fail "late delta admitted by duplicate open ownership")
+;;
+
+let test_duplicate_native_start_counts_once () =
+  let starts = ref 0 and finishes = ref 0 in
+  run_scripted
+    ~on_stream_event:(function
+      | Serve.Native_tool_started _ -> incr starts
+      | Serve.Native_tool_finished _ -> incr finishes
+      | _ -> ())
+    (handshake_and_session ~granted:[] @
+      [Write tool_started; Write tool_started; Write tool_completed;
+       Write agent_completed; Write turn_completed])
+    (fun result _ -> match result with
+      | Error error -> fail (Serve.error_to_string error)
+      | Ok turn ->
+          check int "one native start" 1 !starts;
+          check int "one native finish" 1 !finishes;
+          check int "one native call" 1 turn.tool_calls)
+;;
+
 let test_turn_with_tool_and_approval () =
   let deltas = Buffer.create 16 in
   let decisions = ref [] in
@@ -1176,6 +1210,9 @@ let () =
       , [ test_case "completed message presence" `Quick test_completed_message_presence
         ; test_case "completed agent replay preserves final reply" `Quick
             test_completed_agent_replay_preserves_final_reply
+        ; test_case "duplicate agent start cannot admit late delta" `Quick
+            test_duplicate_agent_start_cannot_admit_late_delta
+        ; test_case "duplicate native start counts once" `Quick test_duplicate_native_start_counts_once
         ; test_case "completed agent cannot change kind" `Quick test_completed_agent_cannot_change_kind
         ; test_case "completed agent cannot restart" `Quick test_completed_agent_cannot_restart
         ; test_case "turn with tool and approval" `Quick test_turn_with_tool_and_approval

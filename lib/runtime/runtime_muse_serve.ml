@@ -940,7 +940,10 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
        ->
        if List.mem_assoc item.Msp.item_id state.completed_agent_messages then
          protocol_error "item/started" "completed agent message cannot restart"
-       else (match item.Msp.kind with
+       else (match List.assoc_opt item.Msp.item_id state.open_items with
+        | Some kind when kind = item.Msp.kind -> continue state
+        | Some _ -> protocol_error "item/started" "open item changed kind"
+        | None -> (match item.Msp.kind with
         | Msp.Tool_call ->
           emit (Native_tool_started (observation item));
           io.set_receive_phase Tool_item_running;
@@ -950,10 +953,12 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
             ; open_tool_items = state.open_tool_items + 1
             ; tool_calls = state.tool_calls + 1
             }
-        | kind -> continue { state with open_items = (item.Msp.item_id, kind) :: state.open_items })
+        | kind -> continue { state with open_items = (item.Msp.item_id, kind) :: state.open_items }))
      | Msp.Item_delta { session_id = sid; item_id; field = Msp.Delta_text; delta }
        when ours sid ->
-       (match List.assoc_opt item_id state.open_items with
+       if List.mem_assoc item_id state.completed_agent_messages then
+         protocol_error "item/delta" "completed agent message cannot receive a delta"
+       else (match List.assoc_opt item_id state.open_items with
         | Some Msp.Agent_message ->
           emit (Text_delta { item_id; text = delta });
           (* The model is speaking: its window applies again, whatever tool
@@ -968,6 +973,10 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
         | Some _ ->
             protocol_error "item/completed" "agent message changed after completion"
         | None ->
+       let* () = match List.assoc_opt item.Msp.item_id state.open_items with
+         | Some kind when kind <> item.Msp.kind ->
+             protocol_error "item/completed" "open item changed kind"
+         | Some _ | None -> Ok () in
        let was_open = List.mem_assoc item.Msp.item_id state.open_items in
        let open_items = List.remove_assoc item.Msp.item_id state.open_items in
        (match item.Msp.kind with

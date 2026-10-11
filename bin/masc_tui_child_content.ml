@@ -3,7 +3,7 @@ let ( let* ) = Result.bind
 
 type error = Transport of string | Http_refused of int | Invalid_json of string
   | Invalid_response of Read.decode_error | Service of Read.failure
-  | Persistence of Read.receiver * Read.error_code | Receiver_read of Read.receiver * error
+  | Persistence of Read.receiver * Read.error_code | Receiver_read of Read.receiver * string * error
   | History_rewritten of Read.receiver * string
 type read_mode = Poll | Audit
 module Keys = Set.Make (struct
@@ -46,7 +46,7 @@ let errors state =
   Option.to_list state.error
   @ List.map (fun (receiver,code) -> Persistence (receiver,code)) state.audit_failures
   @ List.filter_map (fun (store:store) ->
-      Option.map (fun error -> Receiver_read (store.receiver,error)) store.error) state.stores
+      Option.map (fun error -> Receiver_read (store.receiver,store.store_id,error)) store.error) state.stores
   @ (match state.inventory with None -> [] | Some inventory ->
       List.filter_map (fun (receiver,status) -> match status with
         | Ok _ -> None
@@ -72,7 +72,8 @@ let rec error_text = function
   | Invalid_response error -> Read.decode_error_to_string error
   | Service failure -> code_text failure.error
   | Persistence (receiver,code) -> receiver_text receiver ^ ": " ^ code_text code
-  | Receiver_read (receiver,error) -> receiver_text receiver ^ ": " ^ error_text error
+  | Receiver_read (receiver,store_id,error) ->
+      receiver_text receiver ^ " / " ^ store_id ^ ": " ^ error_text error
   | History_rewritten (receiver,store_id) ->
       receiver_text receiver ^ ": immutable history changed in " ^ store_id
 let diagnostics state =
@@ -178,12 +179,16 @@ let read ~mode ~keeper_name ~fetch ~previous =
           match store.error with Some (History_rewritten _) -> true | _ -> false) old in
         let after=if full then None else Option.bind old (fun (store:store) -> store.cursor) in
         let request:Read.records_request={scope={keeper_name;receiver};after} in
-        let loaded=
+        let received=
           let* response=decode ~fetch (records_path keeper_name receiver after) in
           let* page=Read.records_of_response ~request response |> Result.map_error (fun error -> Invalid_response error) in
           let* ()=if page.next_cursor.store_id<>advertised.store_id then Error (Invalid_response Read.Cursor_mismatch)
-            else if page.next_cursor.after_sequence<advertised.after_sequence then Error (Invalid_response Read.Sequence_mismatch)
             else Ok () in
+          Ok page in
+        let loaded=
+          let* page=received in
+          let* ()=if page.next_cursor.after_sequence<advertised.after_sequence
+            then Error (Invalid_response Read.Sequence_mismatch) else Ok () in
           let* history=match old,full with
             | None,_ -> Ok (history_of_records page.records)
             | Some store,false -> append_records store page
@@ -199,14 +204,19 @@ let read ~mode ~keeper_name ~fetch ~previous =
                    && old.error=fresh.error && old.attempted=fresh.attempted
                    && old.cleanup_failures=fresh.cleanup_failures && old.coverage=fresh.coverage -> old
                | None | Some _ -> fresh)
-          | Error error -> (match old with
+          | Error error ->
+              let cleanup_failures=match received with
+                | Error _ -> (match old with None -> [] | Some store -> store.cleanup_failures)
+                | Ok page -> List.sort_uniq String.compare (page.cleanup_failures @
+                    (match old with None -> [] | Some store -> store.cleanup_failures)) in
+              (match old with
               | Some store ->
                   let primary = match store.error with
                     | Some (History_rewritten _ as retained) -> retained
                     | Some _ | None -> error in
-                  {store with error=Some primary;attempted=Some advertised}
+                  {store with error=Some primary;attempted=Some advertised;cleanup_failures}
               | None -> {receiver;store_id=advertised.store_id;cursor=None;history=history_of_records [];error=Some error;
-                  attempted=Some advertised;cleanup_failures=[];coverage=inventory.coverage}) in
+                  attempted=Some advertised;cleanup_failures;coverage=inventory.coverage}) in
         match old with None -> stores @ [store]
           | Some old when old==store -> stores
           | Some _ -> List.map (fun old -> if same old then store else old) stores)

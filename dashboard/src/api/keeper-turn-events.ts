@@ -34,7 +34,9 @@ export function parseKeeperTurnEventPage(raw: unknown, turnRef: string, cursor: 
     }
     return Object.freeze({ sequence: row.seq, timestamp: row.ts, event: parsed?.success ? parsed.data : null })
   })
+  const heldSequenceScan = cursor.sequence !== null && cursor.offset === 0
   if (raw.next_since_seq !== sequence || (raw.has_more && events.length === 0)
+    || (events.length === 0 && raw.next_since_offset > cursor.offset && !heldSequenceScan)
     || (events.length > 0 && raw.next_since_offset <= cursor.offset)) {
     throw new Error('Invalid autonomous turn journal continuation')
   }

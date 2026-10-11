@@ -124,8 +124,6 @@ include (Masc_tui_keeper_chat_activity_projection : module type of Masc_tui_keep
    outcome from these two booleans. *)
 type tool_authority = Masc_execution | Provider_native
 
-type response_scope = { rs_generation : int option; rs_scope : int }
-
 type live_tool_call =
   { local_id : int
   ; authority : tool_authority
@@ -274,7 +272,7 @@ type drawn_item =
   ; superseded_runtime_id : string option
   ; drawn : drawn
   }
-
+type response_scope = { rs_generation : int option; rs_scope : int }
 
 type t =
   { keeper_name : string

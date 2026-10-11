@@ -802,6 +802,10 @@ export function applyKeeperStreamEvent(
     }
     case 'TEXT_MESSAGE_CONTENT': {
       if (source.kind === 'autonomous' && source.observationOnly) {
+        // Canonical history may arrive before journal replay. An observed
+        // terminal journal boundary, however, closes saying for this turn.
+        const response = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)?.responseState
+        if (response?.kind === 'known' && response.phase === 'terminal') return null
         recordAutonomousSaying(keeperName, assistantEntryId, event, source.sequence, true)
         return null
       }

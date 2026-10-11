@@ -19,6 +19,7 @@ import {
 } from './primitives'
 import { _resetChatStoreForTests, readKeeperDraft } from '../../keeper-chat-store'
 import { chatHistoryEntriesFromRest, appendThreadEntry, mergeServerHistoryEntries, keeperThreads, isDefaultVisibleConversationEntry } from '../../keeper-state'
+import { applyKeeperStreamEvent, _resetKeeperStreamBuffersForTests } from '../../keeper-stream'
 import { parseTextToChatBlocks } from '../../lib/chat-blocks'
 import { operationDeliveryProvenance } from '../../keeper-delivery-provenance'
 import { collectAttachments } from './attachments'
@@ -175,6 +176,39 @@ describe('ChatTranscript', () => {
     render(null, container)
     container.remove()
     resetToolCallOutputs()
+  })
+
+  it('renders the completed continuation body instead of its earlier checkpoint', () => {
+    _resetKeeperStreamBuffersForTests()
+    keeperThreads.value = {}
+    appendThreadEntry('sangsu', entry({ id: 'projection-reply', role: 'assistant', source: 'direct_assistant',
+      label: 'sangsu', text: '', rawText: '', delivery: 'sending', streamState: 'opening' }))
+    applyKeeperStreamEvent('sangsu', 'projection-reply', { type: 'CUSTOM', name: 'KEEPER_CONTINUATION_CHECKPOINT',
+      value: { message: 'checkpoint', request_id: 'request-1' } })
+    applyKeeperStreamEvent('sangsu', 'projection-reply', { type: 'RUN_STARTED' })
+    applyKeeperStreamEvent('sangsu', 'projection-reply', { type: 'CUSTOM', name: 'KEEPER_REPLY_DETAILS',
+      value: { reply: 'completed continuation body', turn_ref: 'turn-1', turn_outcome: 'visible_reply' } })
+    render(html`<${ChatTranscript} keeperName="sangsu" entries=${keeperThreads.value.sangsu} emptyText="empty" variant="messenger" />`, container)
+    expect(container.querySelector('[data-chat-control-status="continuation_checkpoint"]')).toBeNull()
+    expect(container.querySelector('.chat-bubble')?.textContent).toContain('completed continuation body')
+    keeperThreads.value = {}
+    _resetKeeperStreamBuffersForTests()
+  })
+
+  it('renders one final image after repeated final-details projection', () => {
+    _resetKeeperStreamBuffersForTests()
+    keeperThreads.value = {}
+    appendThreadEntry('sangsu', entry({ id: 'projection-reply', role: 'assistant', source: 'direct_assistant',
+      label: 'sangsu', text: '', rawText: '', delivery: 'sending', streamState: 'opening' }))
+    const details = { type: 'CUSTOM' as const, name: 'KEEPER_REPLY_DETAILS' as const,
+      value: { reply: 'https://example.com/result.png', turn_ref: 'turn-1', turn_outcome: 'visible_reply' as const } }
+    applyKeeperStreamEvent('sangsu', 'projection-reply', details)
+    applyKeeperStreamEvent('sangsu', 'projection-reply', details)
+    render(html`<${ChatTranscript} keeperName="sangsu" entries=${keeperThreads.value.sangsu} emptyText="empty" variant="messenger" />`, container)
+    expect(container.querySelectorAll('[data-chat-block="image"]')).toHaveLength(1)
+    expect(container.querySelector('[data-chat-block="image"] img')?.getAttribute('src')).toBe('https://example.com/result.png')
+    keeperThreads.value = {}
+    _resetKeeperStreamBuffersForTests()
   })
 
   it('renders a loading state instead of the empty card while hydrating with zero entries', () => {

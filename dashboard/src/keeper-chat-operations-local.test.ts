@@ -170,11 +170,11 @@ describe('keeper chat operation tracking', () => {
     upsertTrackedKeeperChatOperation({ ...request, assistantDraft: draft(12, 'newest') })
     upsertTrackedKeeperChatOperation({ ...request, assistantDraft: draft(11, 'old observer') })
     upsertTrackedKeeperChatOperation(request)
-    expect(trackedKeeperChatOperationsForKeeper('echo')[0].assistantDraft).toMatchObject({
+    expect(trackedKeeperChatOperationsForKeeper('echo')[0]?.assistantDraft).toMatchObject({
       rawText: 'newest', responseState: { lastSequence: 12 },
     })
     upsertTrackedKeeperChatOperation({ ...request, assistantDraft: draft(13, 'next event') })
-    expect(trackedKeeperChatOperationsForKeeper('echo')[0].assistantDraft).toMatchObject({
+    expect(trackedKeeperChatOperationsForKeeper('echo')[0]?.assistantDraft).toMatchObject({
       rawText: 'next event', responseState: { lastSequence: 13 },
     })
   })

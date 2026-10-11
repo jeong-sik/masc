@@ -431,14 +431,14 @@ describe('Keeper operation stream projection', () => {
       applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA',
         value: { index: 0, delta: prefix, response: owner } })
       vi.advanceTimersByTime(KEEPER_THINKING_DELTA_FLUSH_INTERVAL_MS)
-      const draft = trackedKeeperChatOperationsForKeeper('sangsu')[0].assistantDraft!
+      const draft = trackedKeeperChatOperationsForKeeper('sangsu')[0]!.assistantDraft!
       expect(draft.traceSteps?.[0]).toMatchObject({ text: prefix, responseOwner: owner })
       _resetKeeperStreamBuffersForTests()
-      keeperThreads.value = { sangsu: [{ ...keeperThreads.value.sangsu[0], traceSteps: draft.traceSteps, responseState: draft.responseState }] }
+      keeperThreads.value = { sangsu: [{ ...keeperThreads.value.sangsu![0]!, traceSteps: draft.traceSteps, responseState: draft.responseState }] }
       applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA',
         value: { index: 0, delta: 'continuation', response: owner } })
       _flushPendingKeeperStreamDeltasForTests()
-      expect(keeperThreads.value.sangsu[0].traceSteps?.[0]).toMatchObject({ text: `${prefix}continuation` })
+      expect(keeperThreads.value.sangsu?.[0]?.traceSteps?.[0]).toMatchObject({ text: `${prefix}continuation` })
     } finally {
       _resetKeeperStreamBuffersForTests()
       vi.useRealTimers()

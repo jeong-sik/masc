@@ -1,3 +1,4 @@
+import { chatShowInternal, chatShowAutonomous, chatExpandAutonomousRuns } from '../lib/chat-view-prefs'
 import { keeperThreads, _resetActiveKeeperStreamsForTests, _resetLiveSendRequestOwnersForTests } from '../keeper-state'
 import { _resetKeeperThreadMessageSendGuardsForTests } from '../keeper-actions'
 // @vitest-environment happy-dom
@@ -30,6 +31,9 @@ describe('CopilotDock', () => {
     document.body.appendChild(container)
     route.value = { tab: 'overview', params: {}, postId: null }
     keepers.value = []
+    chatShowInternal.value = false
+    chatShowAutonomous.value = true
+    chatExpandAutonomousRuns.value = false
     globalShortcutManager.unregisterAll('copilot-dock.')
     try { window.localStorage.removeItem('dashboard:copilot-dock') } catch { /* noop */ }
     // Reset the module-level shared signal so tests don't leak open state.
@@ -64,6 +68,31 @@ describe('CopilotDock', () => {
     render(h(DockHarness, { dock }), container)
     return dock
   }
+
+  it('honors shared internal and autonomous visibility preferences without mutating history', async () => {
+    const entries = [
+      { id: 'direct', role: 'user' as const, source: 'direct_user' as const, text: 'direct fixture' },
+      { id: 'internal', role: 'user' as const, source: 'world_state_prompt' as const, text: 'internal fixture' },
+      { id: 'autonomous', role: 'assistant' as const, source: 'autonomous_turn' as const, text: 'autonomous fixture' },
+    ].map(entry => ({ ...entry, rawText: entry.text, label: entry.role,
+      timestamp: '2026-10-11T00:00:00Z', delivery: 'history' as const,
+      streamState: null, details: null, error: null }))
+    keeperThreads.value = { 'masc-improver': entries }
+    chatShowAutonomous.value = false
+    const dock = renderDock()
+    dock.open()
+    await waitFor(() => expect(container.textContent).toContain('direct fixture'))
+    expect(container.textContent).not.toContain('internal fixture')
+    expect(container.textContent).not.toContain('autonomous fixture')
+    chatShowInternal.value = true
+    chatShowAutonomous.value = true
+    chatExpandAutonomousRuns.value = true
+    await waitFor(() => expect(container.textContent).toContain('internal fixture'))
+    await waitFor(() => expect(container.querySelector('.chat-block-trace-hd')).not.toBeNull())
+    fireEvent.click(container.querySelector('.chat-block-trace-hd')!)
+    await waitFor(() => expect(container.textContent).toContain('autonomous fixture'))
+    expect(keeperThreads.value['masc-improver']).toEqual(entries)
+  })
 
   it('renders closed by default and opens via top bar button', async () => {
     const dock = useCopilotDock()
@@ -402,7 +431,11 @@ describe('CopilotDock', () => {
     expect(rows.find(entry => entry.role === 'assistant')?.traceSteps).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'think', text: 'exposed reasoning' })]))
     expect(rows.find(entry => entry.role === 'tool')).toMatchObject({ label: 'Read', toolOccurrence: { kind: 'identified', streamScope: 0, blockIndex: 1 } })
     expect(rows.find(entry => entry.role === 'assistant')?.rawText).toBe('original saying')
-    await waitFor(() => expect(container.querySelector('[data-chat-tool-call-id="fixture-tool"]')).not.toBeNull())
+    await waitFor(() => expect(container.querySelector('[data-chat-work-trace] .chat-block-trace-hd')).not.toBeNull())
+    const timeline = container.querySelector('[data-chat-work-trace] .chat-block-trace-hd')!
+    if (timeline.getAttribute('aria-expanded') !== 'true') fireEvent.click(timeline)
+    await waitFor(() => expect(container.textContent).toContain('exposed reasoning'))
+    expect(container.textContent).toContain('Read')
     expect(dock.threads.value['masc-improver']).toBe(rows)
   })
 

@@ -9,7 +9,8 @@ import { DASHBOARD_NAV_ITEMS } from '../config/navigation'
 import { isSubmitEnter } from '../lib/keyboard'
 import { currentDashboardActor } from '../api/core'
 import { sendKeeperThreadMessage } from '../keeper-actions'
-import { keeperSending, keeperThreads } from '../keeper-state'
+import { keeperSending, keeperThreads, isDefaultVisibleConversationEntry, isAutonomousTurnEntry } from '../keeper-state'
+import { chatShowInternal, chatShowAutonomous, chatShowMetadata, chatExpandAutonomousRuns } from '../lib/chat-view-prefs'
 import { ChatTranscript } from './chat/primitives'
 import { KeeperBadge } from './keeper-badge'
 import type { Keeper } from '../types'
@@ -293,7 +294,13 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
   }
   const ctx = useMemo(() => getSurfaceContext(keeper.id), [route.value, keepers.value, keeper.id])
   const starterPrompts = useMemo(() => starterPromptsForContext(ctx), [ctx.route])
-  const msgs = dock.threads.value[keeper.id] ?? []
+  const rawThread = dock.threads.value[keeper.id] ?? []
+  const showInternal = chatShowInternal.value
+  const showAutonomous = chatShowAutonomous.value
+  const msgs = useMemo(() => rawThread.filter(entry =>
+    (showInternal || isDefaultVisibleConversationEntry(entry))
+      && (showAutonomous || !isAutonomousTurnEntry(entry))),
+  [rawThread, showInternal, showAutonomous])
   const sending = dock.sending.value[keeper.id] === true
   const [val, setVal] = useState('')
   const [focus, setFocus] = useState(false)
@@ -475,7 +482,8 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
               </div>
             `
           : html`
-              <${ChatTranscript} entries=${msgs} keeperName=${keeper.id} emptyText="표시할 대화 없음" variant="messenger" />
+              <${ChatTranscript} entries=${msgs} keeperName=${keeper.id} emptyText="표시할 대화 없음" variant="messenger" groupToolCalls=${true}
+                showMetadata=${chatShowMetadata.value} expandAutonomousRuns=${chatExpandAutonomousRuns.value} />
             `}
       </div>
 

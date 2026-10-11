@@ -15,3 +15,9 @@ A terminal receipt received before an authentication change remains authoritativ
 ## Limits
 
 No merge, formal GitHub approval, installation, named-provider continuity or live browser screenshot is established. The inherited shared action empty-terminal authored-text fallback remains a separate unresolved issue. Account cache isolation and pre-header proactive fetch abortion remain outside this change.
+
+## Independent review responses
+
+The initial candidate `1d1c8702745f01b1ba50423e021f7d56ec79226a` had two P2 findings: global internal/autonomous visibility preferences were bypassed, and default ungrouped rendering preserved thinking only in state without a visible timeline. DOM assertions reproduced both failures. The repair uses the existing typed visibility predicates and preferences and enables the shared turn-work grouping. The test opens the actual timeline and verifies exposed reasoning, and toggles internal/autonomous visibility without mutating stored history. The final two committed focused suites passed 140 tests. Initial autonomous body testing incorrectly assumed the preference opened an individual group; that fixture assumption was corrected to click the existing disclosure, without changing product behavior.
+
+Historical independent findings: `/tmp/masc-copilot-shared-review-findings-20261011/report.md` (source review only).

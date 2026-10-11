@@ -13,7 +13,13 @@
 ; findlib names, so nothing changes for CI; the vendored directory stays
 ; uncommitted.
 (package
- (name ocaml-msx))
+ (name ocaml-msx)
+ ; vendor/ is gitignored, so in every committed tree this package owns no
+ ; stanzas. Without (allow_empty) the <pkg>.install validation that the
+ ; default alias demands fails and plain `dune build` stops repo-wide,
+ ; taking every public library and executable (browser_host included)
+ ; out of the default build.
+ (allow_empty))
 
 ; Format OCaml, and only OCaml. Nothing enforces formatting today:
 ; ocamlformat is disabled repo-wide (.ocamlformat, RFC-0010) and the

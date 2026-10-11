@@ -1696,7 +1696,7 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
     | chunks -> chunks
   in
   let sender_chunks = match origin, entry.style with
-    | Origin_bare, Inbound when not (continues_previous ~previous entry) ->
+    | Origin_bare, (Inbound | Thinking) when not (continues_previous ~previous entry) ->
         wrap_words ~max_cells:body_width entry.speaker
     | _ -> [] in
   let sender_rows = List.length sender_chunks in

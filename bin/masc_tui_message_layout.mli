@@ -300,7 +300,7 @@ type metadata =
       (** Only emitted where the entry has a trustworthy time: a continuation
           that cannot say when it moved has nothing to draw. *)
   | Sender
-      (** One wrapped piece of an inbound sender's name above its body in the
+      (** One wrapped piece of an inbound or reasoning sender's name above its body in the
           {!Origin_bare} view. The row's [text] is that piece and its [gutter]
           is the body's, so the renderer draws the piece once, like a body
           row, instead of building a heading from the whole name. *)

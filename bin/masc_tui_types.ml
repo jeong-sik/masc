@@ -866,7 +866,16 @@ type msg_anchor =
 (* Search and scroll pins use the same projected history and journal rows.
    A surviving journal stretch keeps its origin when reasoning is folded or
    a final reply replaces its streamed text. *)
+type child_content_anchor = {
+  child_receiver : Masc.Keeper_child_content_read.receiver;
+  child_store_id : string;
+  child_observation_id : string;
+  child_ordinal : int;
+  child_channel : Runtime_claude_code.content_channel;
+}
+
 type chat_search_anchor =
+  | Search_child of child_content_anchor
   | Search_admission of string
       (** Full request identity: admission belongs to the input even when
           batch binding changes the execution that consumes it. *)

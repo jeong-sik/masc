@@ -103,7 +103,7 @@ type KeeperThreadCancelOutcome = 'cancelling' | 'cancelled'
 
 const pendingKeeperThreadCancels = new Map<
   string,
-  Promise<KeeperThreadCancelOutcome | null>
+  { readonly authRevision: number; readonly token: object; readonly promise: Promise<KeeperThreadCancelOutcome | null> }
 >()
 const KEEPER_STREAM_SIGNAL_THROTTLE_MS = 1_000
 const keeperStreamSignalWrites = new Map<string, number>()
@@ -139,10 +139,6 @@ export function _resetCancelledKeeperThreadRequestsForTests(): void {
   keeperStreamSignalWrites.clear()
 }
 
-function releaseKeeperThreadCancelTracking(requestId: string): void {
-  pendingKeeperThreadCancels.delete(requestId)
-}
-
 function markKeeperStreamSignal(keeperName: string, opts: { force?: boolean } = {}): void {
   const name = keeperName.trim()
   if (!name) return
@@ -175,12 +171,18 @@ export function cancelKeeperThreadRequest(
   const name = keeperName.trim()
   const id = requestId.trim()
   if (!name || !id) return Promise.resolve(null)
-  const existing = pendingKeeperThreadCancels.get(id)
-  if (existing) return existing
+  const key = JSON.stringify([name, id])
+  const authRevision = currentStoredTokenRevision()
+  const existing = pendingKeeperThreadCancels.get(key)
+  if (existing?.authRevision === authRevision) return existing.promise
+  const token = {}
+  const ownsCancel = () => pendingKeeperThreadCancels.get(key)?.token === token
+    && authRevision === currentStoredTokenRevision()
   const promise = (opts.signal
     ? cancelKeeperChatOperation(name, id, { signal: opts.signal })
     : cancelKeeperChatOperation(name, id))
     .then(result => {
+      if (!ownsCancel()) return null
       if (result.state.kind === 'cancelled') {
         removeTrackedKeeperChatOperation(id)
         releaseLiveSendRequest(id)
@@ -189,15 +191,16 @@ export function cancelKeeperThreadRequest(
       return 'cancelled' as const
     })
     .catch((err) => {
+      if (!ownsCancel()) return null
       const message = keeperThreadCancelFailureMessage(name, id, err)
       console.warn('[keeper] server cancel failed', message)
       setRecordValue(keeperActionErrors, name, message)
       return null
     })
     .finally(() => {
-      pendingKeeperThreadCancels.delete(id)
+      if (pendingKeeperThreadCancels.get(key)?.token === token) pendingKeeperThreadCancels.delete(key)
     })
-  pendingKeeperThreadCancels.set(id, promise)
+  pendingKeeperThreadCancels.set(key, { authRevision, token, promise })
   return promise
 }
 
@@ -1175,6 +1178,15 @@ export async function sendKeeperThreadMessage(
   let toolCallEnded = false
   let streamAdmission: KeeperStreamAdmission = Object.freeze({ keeperName, operationId,
     authRevision: currentStoredTokenRevision() })
+  const withdrawStreamObservation = () => {
+    updateThreadEntry(keeperName, assistantId, entry => ({ ...entry,
+      delivery: entry.responseState?.kind === 'known' && entry.responseState.phase === 'terminal'
+        ? entry.delivery : 'interrupted',
+      streamState: null,
+    }))
+    persistTrackedOperationAssistantDraft(keeperName, operationAccepted ? operationId : null, assistantId)
+    return new KeeperStreamAuthenticationSupersededError(streamAdmission)
+  }
   // #20849/#25898 Gap B: after ACCEPTED, the live-send SSE feed is silent
   // while the operation sits queued behind a running turn. [lastEventAt]
   // would otherwise cross STREAM_STALL_THRESHOLD_S and the composer would
@@ -1372,14 +1384,7 @@ export async function sendKeeperThreadMessage(
     flushPendingKeeperStreamDeltas(keeperName, assistantId)
     if (err instanceof KeeperStreamAuthenticationSupersededError
       || streamAdmission.authRevision !== currentStoredTokenRevision()) {
-      updateThreadEntry(keeperName, assistantId, entry => ({ ...entry,
-        delivery: entry.responseState?.kind === 'known' && entry.responseState.phase === 'terminal'
-          ? entry.delivery : 'interrupted',
-        streamState: null,
-      }))
-      persistTrackedOperationAssistantDraft(keeperName, operationAccepted ? operationId : null, assistantId)
-      throw err instanceof KeeperStreamAuthenticationSupersededError
-        ? err : new KeeperStreamAuthenticationSupersededError(streamAdmission)
+      throw withdrawStreamObservation()
     }
     if (isAbortError(err)) {
       const durablePendingRequest = operationAccepted
@@ -1411,6 +1416,7 @@ export async function sendKeeperThreadMessage(
           error: null,
         })
         const outcome = await cancelKeeperThreadRequest(keeperName, operationId)
+        if (streamAdmission.authRevision !== currentStoredTokenRevision()) throw withdrawStreamObservation()
         if (outcome !== 'cancelled') {
           await handoffCancelledStreamToOperationHydration(
             pendingRequest,
@@ -1491,12 +1497,6 @@ export async function sendKeeperThreadMessage(
     // The queued-liveness poll (Gap B above) must never outlive this send:
     // every exit path stops it here even if no reply event ever arrived.
     stopQueuedSignalPoll()
-    // Release cancellation bookkeeping on every accepted exit. The exact
-    // operation ownership is released once by clearActiveStream below; the
-    // non-terminal handoff released it early so its own resume was not blocked.
-    if (operationAccepted) {
-      releaseKeeperThreadCancelTracking(operationId)
-    }
     sendKeys.forEach(key => sendingKeeperThreadMessages.delete(key))
     clearActiveStream(keeperName, operationId)
     if (activeStreamEntryId(keeperName) === null) {

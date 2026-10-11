@@ -66,6 +66,7 @@ import {
   _resetKeeperThreadMessageSendGuardsForTests,
   _resetChatHydrationForTests,
   cancelActiveKeeperThreadMessage,
+  cancelKeeperThreadRequest,
   dispatchKeeperInterjectAction,
   hydrateTrackedKeeperChatOperations,
   hydrateKeeperChatHistory,
@@ -116,6 +117,50 @@ function requiredFixture<T>(value: T | undefined): T {
   if (value === undefined) throw new Error('Expected fixture state to exist')
   return value
 }
+
+describe('operation cancellation admission', () => {
+  beforeEach(() => {
+    _resetCancelledKeeperThreadRequestsForTests()
+    _clearTrackedKeeperChatOperationsForTests()
+    cancelKeeperChatOperation.mockReset()
+  })
+  afterEach(() => _clearTrackedKeeperChatOperationsForTests())
+
+  it.each(['resolve', 'reject'] as const)('does not settle cancellation across authentication replacement (%s)', async outcome => {
+    setStoredToken('fixture-old')
+    upsertTrackedKeeperChatOperation({ operationId: 'operation', keeperName: 'echo', message: 'input', submittedAt: 1 })
+    let resolve!: (value: unknown) => void
+    let reject!: (error: Error) => void
+    cancelKeeperChatOperation.mockReturnValueOnce(new Promise((yes, no) => { resolve = yes; reject = no }))
+    const cancel = cancelKeeperThreadRequest('echo', 'operation')
+    setStoredToken('fixture-new')
+    keeperActionErrors.value = { echo: 'current scope error' }
+    if (outcome === 'reject') reject(new Error('old cancellation failed'))
+    else resolve({ operationId: 'operation', state: { kind: 'cancelled', completedAt: 2 } })
+    await cancel
+    expect(keeperActionErrors.value.echo).toBe('current scope error')
+    expect(trackedKeeperChatOperationsForKeeper('echo')).toHaveLength(1)
+    clearStoredToken()
+  })
+
+  it('preserves a replacement cancellation owner when the old request settles', async () => {
+    setStoredToken('fixture-old')
+    let oldResolve!: (value: unknown) => void
+    let currentResolve!: (value: unknown) => void
+    cancelKeeperChatOperation.mockReturnValueOnce(new Promise(yes => { oldResolve = yes }))
+      .mockReturnValueOnce(new Promise(yes => { currentResolve = yes }))
+    const old = cancelKeeperThreadRequest('echo', 'operation')
+    setStoredToken('fixture-new')
+    const current = cancelKeeperThreadRequest('echo', 'operation')
+    expect(cancelKeeperChatOperation).toHaveBeenCalledTimes(2)
+    oldResolve({ operationId: 'operation', state: { kind: 'cancelled', completedAt: 2 } })
+    expect(await old).toBeNull()
+    expect(cancelKeeperThreadRequest('echo', 'operation')).toBe(current)
+    currentResolve({ operationId: 'operation', state: { kind: 'cancelled', completedAt: 3 } })
+    expect(await current).toBe('cancelled')
+    clearStoredToken()
+  })
+})
 
 describe('tool-output hydration credential scope', () => {
   afterEach(() => clearStoredToken())
@@ -1175,6 +1220,57 @@ describe('sendKeeperThreadMessage operation stream', () => {
     await Promise.resolve()
 
     expect(cancelKeeperChatOperation).toHaveBeenCalledWith('echo', acceptedOperationId)
+  })
+
+  it('applies cancellation after the failed stream finishes history reconciliation', async () => {
+    let operationId = ''
+    streamKeeperMessage.mockImplementationOnce(async (_name, _message, options) => {
+      operationId = options.operationId
+      options.onEvent({ type: 'CUSTOM', name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+        value: { operation_id: operationId, state: 'Running', queued_count: 0 } })
+      throw new Error('transport failed')
+    })
+    let finishHistory!: (value: unknown) => void
+    fetchKeeperChatHistory.mockReturnValueOnce(new Promise(resolve => { finishHistory = resolve }))
+    let confirm!: (value: unknown) => void
+    cancelKeeperChatOperation.mockReturnValueOnce(new Promise(resolve => { confirm = resolve }))
+    const send = sendKeeperThreadMessage('echo', 'input').catch(error => error)
+    await vi.waitFor(() => expect(fetchKeeperChatHistory).toHaveBeenCalled())
+    await cancelActiveKeeperThreadMessage('echo')
+    finishHistory([])
+    await send
+    expect(trackedKeeperChatOperationsForKeeper('echo')).toHaveLength(1)
+    confirm({ operationId, state: { kind: 'cancelled', completedAt: 2 } })
+    await vi.waitFor(() => expect(trackedKeeperChatOperationsForKeeper('echo')).toHaveLength(0))
+    expect(keeperActionErrors.value.echo).toBeNull()
+  })
+
+  it('keeps accepted recovery when authentication changes during server cancellation', async () => {
+    setStoredToken('fixture-old')
+    let operationId = ''
+    streamKeeperMessage.mockImplementationOnce((_name, _message, options) => {
+      operationId = options.operationId
+      options.onEvent({ type: 'CUSTOM', name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+        value: { operation_id: operationId, state: 'Running', queued_count: 0 } })
+      options.onEvent({ type: 'TEXT_MESSAGE_CONTENT', delta: 'partial answer' })
+      return new Promise((_resolve, reject) => options.signal.addEventListener('abort', () => {
+        reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }))
+      }, { once: true }))
+    })
+    let confirm!: (value: unknown) => void
+    cancelKeeperChatOperation.mockReturnValueOnce(new Promise(resolve => { confirm = resolve }))
+    const send = sendKeeperThreadMessage('echo', 'input').catch(error => error)
+    await cancelActiveKeeperThreadMessage('echo')
+    await Promise.resolve()
+    setStoredToken('fixture-new')
+    keeperActionErrors.value = { echo: 'current scope error' }
+    confirm({ operationId, state: { kind: 'cancelled', completedAt: 2 } })
+    await send
+    expect(keeperActionErrors.value.echo).toBe('current scope error')
+    expect(fetchKeeperChatOperation).not.toHaveBeenCalled()
+    expect(trackedKeeperChatOperationsForKeeper('echo')).toHaveLength(1)
+    expect(trackedKeeperChatOperationsForKeeper('echo')[0]?.assistantDraft?.rawText).toBe('partial answer')
+    clearStoredToken()
   })
 
   it('aborts locally without server cancel before operation acceptance', async () => {

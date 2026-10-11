@@ -22,8 +22,9 @@ export function recoverKeeperAutonomousTurn(name: string, turnRef: string, seque
     state = { cursor: { sequence: null, offset: 0 }, target: sequence, inFlight: null, pullRequested: false }
     turns.set(turnRef, state)
   }
+  const newerNotification = state.inFlight !== null && sequence > state.target
   state.target = Math.max(state.target, sequence)
-  state.pullRequested ||= force
+  state.pullRequested ||= force || newerNotification
   if (state.inFlight) return state.inFlight
   if (!state.pullRequested && state.cursor.sequence !== null && state.cursor.sequence >= state.target) return Promise.resolve()
   const current = state
@@ -48,8 +49,9 @@ export function recoverKeeperAutonomousTurn(name: string, turnRef: string, seque
   current.inFlight = drain().catch(error => { failed = true; throw error }).finally(() => {
     current.inFlight = null
     // A notification can arrive in the microtask between drain and cleanup.
-    // Recheck the target without automatically retrying failed reads.
-    if (!failed && (current.pullRequested || current.cursor.sequence === null || current.cursor.sequence < current.target)) {
+    // A fresh request received during a failed read still owns a recovery
+    // attempt. Failure alone never schedules another attempt.
+    if (current.pullRequested || !failed && (current.cursor.sequence === null || current.cursor.sequence < current.target)) {
       void recoverKeeperAutonomousTurn(name, turnRef, current.target, current.pullRequested).catch(error => {
         console.debug('[keeper-autonomous-stream] journal recovery failed', error instanceof Error ? error.name : 'read failure')
       })

@@ -368,7 +368,12 @@ export async function hydrateKeeperStatus(name: string, force = false): Promise<
 const hydratedChatKeepers = new Set<string>()
 // Forced refreshes may overlap. Only the latest request may merge history
 // or settle this keeper's hydration state.
-const chatHistoryHydrationRequests = new Map<string, object>()
+interface ChatHistoryRequest { readonly authRevision: number }
+const chatHistoryHydrationRequests = new Map<string, ChatHistoryRequest>()
+function ownsChatHistoryRequest(keeperName: string, request: ChatHistoryRequest): boolean {
+  return chatHistoryHydrationRequests.get(keeperName) === request
+    && request.authRevision === currentStoredTokenRevision()
+}
 /** Test-only: reset the once-per-keeper hydration guard. */
 export function _resetChatHydrationForTests(): void {
   hydratedChatKeepers.clear()
@@ -378,9 +383,9 @@ export function _resetChatHydrationForTests(): void {
   keeperChatHistoryHydration.value = {}
 }
 
-async function fetchAndMergeKeeperChatHistory(keeperName: string, request: object): Promise<void> {
+async function fetchAndMergeKeeperChatHistory(keeperName: string, request: ChatHistoryRequest): Promise<void> {
   const history = await fetchKeeperChatHistory(keeperName)
-  if (chatHistoryHydrationRequests.get(keeperName) !== request) return
+  if (!ownsChatHistoryRequest(keeperName, request)) return
   if (history.length > 0) {
     mergeServerHistoryEntries(keeperName, chatHistoryEntriesFromRest(keeperName, history))
   }
@@ -399,13 +404,13 @@ export async function hydrateKeeperChatHistory(
   const keeperName = name.trim()
   if (!keeperName) return
   if (!options.force && hydratedChatKeepers.has(keeperName)) return
-  const request = {}
+  const request = { authRevision: currentStoredTokenRevision() }
   chatHistoryHydrationRequests.set(keeperName, request)
   hydratedChatKeepers.add(keeperName)
   setRecordValue(keeperHydrating, keeperName, true)
   try {
     await fetchAndMergeKeeperChatHistory(keeperName, request)
-    if (chatHistoryHydrationRequests.get(keeperName) !== request) return
+    if (!ownsChatHistoryRequest(keeperName, request)) return
     void import('./keeper-autonomous-stream')
       .then(async mod => {
         const results = await Promise.allSettled([
@@ -423,7 +428,7 @@ export async function hydrateKeeperChatHistory(
     setRecordValue(keeperChatHistoryHydration, keeperName, 'hydrated')
     setRecordValue(keeperChatHistoryErrors, keeperName, null)
   } catch (err) {
-    if (chatHistoryHydrationRequests.get(keeperName) !== request) return
+    if (!ownsChatHistoryRequest(keeperName, request)) return
     // Allow a later mount to retry instead of caching the failure.
     hydratedChatKeepers.delete(keeperName)
     // A failed first hydration is settled, not pending: the error banner
@@ -439,6 +444,7 @@ export async function hydrateKeeperChatHistory(
   } finally {
     if (chatHistoryHydrationRequests.get(keeperName) === request) {
       chatHistoryHydrationRequests.delete(keeperName)
+      if (request.authRevision !== currentStoredTokenRevision()) hydratedChatKeepers.delete(keeperName)
       setRecordValue(keeperHydrating, keeperName, false)
     }
   }

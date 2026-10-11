@@ -1,5 +1,6 @@
 import {
   confirmOperatorAction,
+  currentStoredTokenRevision,
   extractApiError,
   fetchOperatorDigest,
   fetchOperatorSnapshot,
@@ -165,11 +166,13 @@ export async function dispatchOperatorAction(
   request: OperatorActionRequest,
   options: ActionRefreshOptions = {},
 ): Promise<OperatorActionResult> {
+  const authRevision = currentStoredTokenRevision()
   const releaseAction = acquireOperatorAction()
   operatorError.value = null
   operatorErrorStatus.value = null
   try {
     const result = await runOperatorAction(request)
+    if (currentStoredTokenRevision() !== authRevision) return result
     appendLog({
       actor: request.actor,
       action_type: request.action_type,
@@ -181,6 +184,7 @@ export async function dispatchOperatorAction(
     await refreshAfterAction(options)
     return result
   } catch (err) {
+    if (currentStoredTokenRevision() !== authRevision) throw err
     const summary = extractApiError(err, 'operator 액션 실패')
     const message = summary.message
     operatorError.value = message
@@ -204,11 +208,13 @@ export async function confirmOperatorPendingAction(
   decision: 'confirm' | 'deny' = 'confirm',
   options: ActionRefreshOptions = {},
 ): Promise<OperatorActionResult> {
+  const authRevision = currentStoredTokenRevision()
   const releaseAction = acquireOperatorAction()
   operatorError.value = null
   operatorErrorStatus.value = null
   try {
     const result = await confirmOperatorAction(actor, confirmToken, decision)
+    if (currentStoredTokenRevision() !== authRevision) return result
     appendLog({
       actor,
       action_type: decision,
@@ -220,6 +226,7 @@ export async function confirmOperatorPendingAction(
     await refreshAfterAction(options)
     return result
   } catch (err) {
+    if (currentStoredTokenRevision() !== authRevision) throw err
     const summary = extractApiError(err, 'operator 확인 실패')
     const message = summary.message
     operatorError.value = message

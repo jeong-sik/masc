@@ -431,3 +431,39 @@ describe('overlapping operator action lifetime', () => {
     expect(signals.operatorActionBusy.value).toBe(false)
   })
 })
+
+describe('operator action credential publication ownership', () => {
+  it.each([
+    ['dispatch', 'success'], ['dispatch', 'failure'],
+    ['confirm', 'success'], ['confirm', 'failure'],
+  ] as const)('does not publish previous credential %s %s effects', async (action, outcome) => {
+    const { mod, signals } = await load()
+    const { setStoredToken, clearStoredToken } = await import('./api/core')
+    setStoredToken('synthetic-action-owner-a')
+    let resolve!: (result: OperatorActionResult) => void
+    let reject!: (error: Error) => void
+    const deferred = new Promise<OperatorActionResult>((done, fail) => { resolve = done; reject = fail })
+    if (action === 'dispatch') apiMocks.runOperatorAction.mockReturnValue(deferred)
+    else apiMocks.confirmOperatorAction.mockReturnValue(deferred)
+    const pending = (action === 'dispatch'
+      ? mod.dispatchOperatorAction(makeRequest())
+      : mod.confirmOperatorPendingAction('vincent', 'old-owner-token')).catch(error => error)
+    setStoredToken('synthetic-action-owner-b')
+    signals.operatorError.value = 'current owner error'
+    signals.operatorErrorStatus.value = 409
+    try {
+      if (outcome === 'success') resolve(executedResult)
+      else reject(new Error('previous owner failure'))
+      const receipt = await pending
+      expect(signals.operatorActionLog.value).toEqual([])
+      expect(signals.operatorError.value).toBe('current owner error')
+      expect(signals.operatorErrorStatus.value).toBe(409)
+      expect(apiMocks.fetchOperatorSnapshot).not.toHaveBeenCalled()
+      expect(apiMocks.fetchOperatorDigest).not.toHaveBeenCalled()
+      if (outcome === 'success') expect(receipt).toEqual(executedResult)
+      else expect(receipt.message).toBe('previous owner failure')
+    } finally {
+      clearStoredToken()
+    }
+  })
+})

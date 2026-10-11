@@ -49,7 +49,7 @@ const {
   fetchWithTimeout: vi.fn(),
   reportToolHostFailure: vi.fn().mockResolvedValue({ ok: true }),
   authHeaders: vi.fn().mockReturnValue({}),
-  clearStoredToken: vi.fn(),
+  clearStoredToken: vi.fn().mockReturnValue({ authRevision: 0 }),
   currentDashboardActor: vi.fn().mockReturnValue('dashboard'),
   currentStoredTokenRevision: vi.fn().mockReturnValue(0),
   getStoredToken: vi.fn().mockReturnValue('test-stored-token'),
@@ -59,7 +59,7 @@ const {
     scope: null,
   }),
   isRemoteAccess: vi.fn().mockReturnValue(false),
-  setStoredToken: vi.fn(),
+  setStoredToken: vi.fn().mockReturnValue({ authRevision: 0 }),
 }))
 
 vi.mock('./core', () => ({
@@ -456,6 +456,7 @@ describe('MCP 2026-07-28 dashboard client', () => {
       token = nextToken
       meta = nextMeta
       revision += 1
+      return { authRevision: revision }
     })
     fetchWithTimeout
       .mockResolvedValueOnce(new Response(JSON.stringify({
@@ -529,11 +530,13 @@ describe('MCP 2026-07-28 dashboard client', () => {
       token = null
       meta = null
       revision += 1
+      return { authRevision: revision }
     })
     setStoredToken.mockImplementationOnce((nextToken, nextMeta) => {
       token = nextToken
       meta = nextMeta
       revision += 1
+      return { authRevision: revision }
     })
     fetchWithTimeout
       .mockResolvedValueOnce(new Response(JSON.stringify({
@@ -579,11 +582,13 @@ describe('MCP 2026-07-28 dashboard client', () => {
       token = null
       meta = null
       revision += 1
+      return { authRevision: revision }
     })
     setStoredToken.mockImplementationOnce((nextToken, nextMeta) => {
       token = nextToken
       meta = nextMeta
       revision += 1
+      return { authRevision: revision }
     })
     apiRequestErrorFromResponse.mockImplementationOnce(async (_method, _path, res) => {
       const payload = await res.json() as {

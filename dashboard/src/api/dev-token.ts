@@ -3,6 +3,7 @@ import type { DashboardAuthErrorCode } from '../types/dashboard-execution'
 import {
   clearStoredToken,
   currentDashboardActor,
+  currentStoredTokenRevision,
   fetchWithTimeout,
   getStoredToken,
   getStoredTokenMeta,
@@ -12,7 +13,16 @@ import {
 
 const DEV_TOKEN_FETCH_TIMEOUT_MS = 3000
 
-let devTokenBootstrapPromise: Promise<void> | null = null
+export type DevTokenBinding =
+  | { readonly kind: 'bound'; readonly fromRevision: number; readonly authRevision: number }
+  | { readonly kind: 'superseded' }
+
+interface DevTokenBootstrap {
+  readonly id: symbol
+  readonly authRevision: number
+  readonly promise: Promise<DevTokenBinding>
+}
+let devTokenBootstrap: DevTokenBootstrap | null = null
 let devTokenRefreshPromise: Promise<boolean> | null = null
 
 /**
@@ -35,8 +45,8 @@ export type DevTokenBootstrapStatus =
   | 'invalid_response'
   | 'network'
 
-export const devTokenBootstrapStatus: ReadonlySignal<DevTokenBootstrapStatus> =
-  signal<DevTokenBootstrapStatus>('idle')
+const bootstrapStatus = signal<DevTokenBootstrapStatus>('idle')
+export const devTokenBootstrapStatus: ReadonlySignal<DevTokenBootstrapStatus> = bootstrapStatus
 
 export function devTokenBootstrapNeedsReadinessProbe(): boolean {
   return shouldRefreshDevToken()
@@ -85,76 +95,77 @@ function shouldRefreshDevToken(): boolean {
     only exposes `/api/v1/dashboard/dev-token` when bound to loopback with
     strict-auth overrides disabled; in every other case this quietly no-ops
     and existing flows (URL `?token=...`, manual paste) continue to work. */
-export async function ensureDevToken(): Promise<void> {
-  if (!shouldRefreshDevToken()) return
-  if (devTokenBootstrapPromise) return devTokenBootstrapPromise
-  devTokenBootstrapPromise = (async () => {
+export async function ensureDevToken(): Promise<DevTokenBinding> {
+  const fromRevision = currentStoredTokenRevision()
+  const unchanged = (): DevTokenBinding => ({ kind: 'bound', fromRevision, authRevision: fromRevision })
+  if (!shouldRefreshDevToken()) return unchanged()
+  if (devTokenBootstrap?.authRevision === fromRevision) return devTokenBootstrap.promise
+  const id = Symbol('dev token bootstrap')
+  const owns = () => devTokenBootstrap?.id === id && currentStoredTokenRevision() === fromRevision
+  const superseded = (): DevTokenBinding => ({ kind: 'superseded' })
+  const promise = (async (): Promise<DevTokenBinding> => {
     const storedMeta = getStoredTokenMeta()
-    ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'fetching'
-    if (getStoredTokenMeta()?.source === 'manual' && getStoredToken()) return
+    bootstrapStatus.value = 'fetching'
     try {
-        const res = await fetchWithTimeout(
-          '/api/v1/dashboard/dev-token',
-          { method: 'GET', headers: { Accept: 'application/json' } },
-          DEV_TOKEN_FETCH_TIMEOUT_MS,
-        )
-        if (!res.ok) {
-          if (res.status === 404 && storedMeta?.source === 'dev') {
-            clearStoredToken()
-          }
-          if (res.status === 408 || res.status === 425 || res.status === 429 || res.status >= 500) {
-            ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'warming'
-            devTokenBootstrapPromise = null
-          } else {
-            ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = res.status === 404
-              ? 'no_endpoint'
-              : 'invalid_response'
-          }
-          return
+      const res = await fetchWithTimeout(
+        '/api/v1/dashboard/dev-token',
+        { method: 'GET', headers: { Accept: 'application/json' } },
+        DEV_TOKEN_FETCH_TIMEOUT_MS,
+      )
+      if (!owns()) return superseded()
+      if (!res.ok) {
+        if (res.status === 404 && storedMeta?.source === 'dev') {
+          const { authRevision } = clearStoredToken()
+          if (devTokenBootstrap?.id !== id || currentStoredTokenRevision() !== authRevision) return superseded()
+          if (devTokenBootstrap?.id === id) devTokenBootstrap = { ...devTokenBootstrap, authRevision }
+          bootstrapStatus.value = 'no_endpoint'
+          return { kind: 'bound', fromRevision, authRevision }
         }
-        const payload = (await res.json()) as DevTokenBootstrapPayload
-        if (payload.status === 'initializing') {
-          ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'warming'
-          devTokenBootstrapPromise = null
-          return
+        if (res.status === 408 || res.status === 425 || res.status === 429 || res.status >= 500) {
+          bootstrapStatus.value = 'warming'
+          devTokenBootstrap = null
+        } else {
+          bootstrapStatus.value = res.status === 404
+            ? 'no_endpoint'
+            : 'invalid_response'
         }
-        const token = typeof payload.token === 'string' ? payload.token.trim() : ''
-        if (!token || payload.actor !== 'dashboard' || payload.role !== 'admin') {
-          ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'invalid_response'
-          return
-        }
-        const currentMeta = getStoredTokenMeta()
-        const currentToken = getStoredToken()
-        // Same rule as the pre-fetch guard above: a manually-pasted token is
-        // never silently overwritten. It needs the token as well as the meta —
-        // meta alone can outlive the token it described, and then there is
-        // nothing to protect while this return would block the bootstrap
-        // forever. shouldRefreshDevToken already admits that case (`!token`
-        // returns true), so dropping the token from this check contradicted it.
-        if (currentMeta?.source === 'manual' && currentToken) return
-        if (
-          token !== currentToken
-          || currentMeta?.source !== 'dev'
-        ) {
-          setStoredToken(token, {
-            source: 'dev',
-            actor: 'dashboard',
-            role: 'admin',
-          })
-        }
-        ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'ok'
-        return
+        return unchanged()
+      }
+      const payload = (await res.json()) as DevTokenBootstrapPayload
+      if (!owns()) return superseded()
+      if (payload.status === 'initializing') {
+        bootstrapStatus.value = 'warming'
+        devTokenBootstrap = null
+        return unchanged()
+      }
+      const token = typeof payload.token === 'string' ? payload.token.trim() : ''
+      if (!token || payload.actor !== 'dashboard' || payload.role !== 'admin') {
+        bootstrapStatus.value = 'invalid_response'
+        return unchanged()
+      }
+      const currentMeta = getStoredTokenMeta()
+      const currentToken = getStoredToken()
+      if (currentMeta?.source === 'manual' && currentToken) return unchanged()
+      const { authRevision } = token !== currentToken || currentMeta?.source !== 'dev'
+        ? setStoredToken(token, { source: 'dev', actor: 'dashboard', role: 'admin' })
+        : { authRevision: fromRevision }
+      if (devTokenBootstrap?.id !== id || currentStoredTokenRevision() !== authRevision) return superseded()
+      if (devTokenBootstrap?.id === id) devTokenBootstrap = { ...devTokenBootstrap, authRevision }
+      bootstrapStatus.value = 'ok'
+      return { kind: 'bound', fromRevision, authRevision }
     } catch {
-      ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'network'
-      devTokenBootstrapPromise = null
-      return
+      if (!owns()) return superseded()
+      bootstrapStatus.value = 'network'
+      devTokenBootstrap = null
+      return unchanged()
     }
   })()
-  return devTokenBootstrapPromise
+  devTokenBootstrap = { id, authRevision: fromRevision, promise }
+  return promise
 }
 
 export function resetDevTokenBootstrap(): void {
-  devTokenBootstrapPromise = null
+  devTokenBootstrap = null
 }
 
 export async function refreshDevTokenAfterAuthError(code: unknown): Promise<boolean> {

@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiRequestError } from './core'
+import { ApiRequestError, currentStoredTokenRevision } from './core'
 import { RuntimeTomlRevisionConflict, saveRuntimeTomlConfig, fetchRuntimeTomlConfig,
   patchRuntimeRouting, patchRuntimeExactSlot, patchRuntimeAssignment, type RuntimeTomlRequestOptions } from './dashboard-runtime'
 import { ensureDevToken } from './dev-token'
 
-vi.mock('./dev-token', () => ({ ensureDevToken: vi.fn(async () => undefined) }))
+vi.mock('./dev-token', () => ({ ensureDevToken: vi.fn(async () => ({ kind: 'bound', fromRevision: currentStoredTokenRevision(), authRevision: currentStoredTokenRevision() })) }))
 
 const revision = 'a'.repeat(64)
 const saveOptions = { expectedSourcePath: '/synthetic/runtime.toml' }
@@ -46,7 +46,10 @@ describe('raw runtime.toml revision-checked write', () => {
     }, options)],
   ] as const)('refuses %s dispatch if the workspace changes while preparing authentication', async (_name, request) => {
     let release!: () => void
-    vi.mocked(ensureDevToken).mockImplementationOnce(() => new Promise(resolve => { release = () => resolve(undefined) }))
+    vi.mocked(ensureDevToken).mockImplementationOnce(() => {
+      const authRevision = currentStoredTokenRevision()
+      return new Promise(resolve => { release = () => resolve({ kind: 'bound', fromRevision: authRevision, authRevision }) })
+    })
     const fetchMock = reply(conflict)
     let current = true
     const pending = request({ beforeDispatch: () => { if (!current) throw new Error('workspace changed') } })

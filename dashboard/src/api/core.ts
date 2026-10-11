@@ -41,8 +41,13 @@ type StoredTokenChangeListener = (change: StoredTokenChange) => void
 const storedTokenChangeListeners = new Set<StoredTokenChangeListener>()
 let storedTokenRevision = 0
 
-function notifyStoredTokenChange(change: StoredTokenChange): void {
+export interface StoredTokenPublication {
+  readonly authRevision: number
+}
+
+function notifyStoredTokenChange(change: StoredTokenChange): StoredTokenPublication {
   storedTokenRevision += 1
+  const publication = Object.freeze({ authRevision: storedTokenRevision })
   for (const listener of storedTokenChangeListeners) {
     try {
       listener(change)
@@ -50,6 +55,7 @@ function notifyStoredTokenChange(change: StoredTokenChange): void {
       console.warn('[dashboard-auth] token change listener failed', err)
     }
   }
+  return publication
 }
 
 export function currentStoredTokenRevision(): number {
@@ -133,11 +139,10 @@ export function getStoredTokenMeta(): StoredTokenMeta | null {
 export function setStoredToken(
   token: string,
   meta: StoredTokenMeta = { source: 'manual' },
-): void {
+): StoredTokenPublication {
   const normalizedToken = token.trim()
   if (!normalizedToken) {
-    clearStoredToken()
-    return
+    return clearStoredToken()
   }
   const previousToken = getStoredToken()
   const previousMeta = getStoredTokenMeta()
@@ -150,25 +155,27 @@ export function setStoredToken(
   }
   setCanonicalDashboardActor(null)
   if (previousToken !== normalizedToken || !storedTokenMetaEquals(previousMeta, nextMeta)) {
-    notifyStoredTokenChange({
+    return notifyStoredTokenChange({
       token: normalizedToken,
       meta: nextMeta,
     })
   }
+  return Object.freeze({ authRevision: storedTokenRevision })
 }
 
-export function clearStoredToken(): void {
+export function clearStoredToken(): StoredTokenPublication {
   const previousToken = getStoredToken()
   const previousMeta = getStoredTokenMeta()
   sessionStorage.removeItem(TOKEN_STORAGE_KEY)
   sessionStorage.removeItem(TOKEN_META_STORAGE_KEY)
   setCanonicalDashboardActor(null)
   if (previousToken !== null || previousMeta !== null) {
-    notifyStoredTokenChange({
+    return notifyStoredTokenChange({
       token: null,
       meta: null,
     })
   }
+  return Object.freeze({ authRevision: storedTokenRevision })
 }
 
 export function isRemoteAccess(): boolean {

@@ -1,3 +1,4 @@
+import { currentStoredTokenRevision } from './core'
 import { createHash } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -7,7 +8,7 @@ import {
 import { ensureDevToken } from './dev-token'
 import { committedRuntimeTomlConfigFixture } from '../lib/runtime-config-receipt.test-fixture'
 
-vi.mock('./dev-token', () => ({ ensureDevToken: vi.fn(async () => undefined) }))
+vi.mock('./dev-token', () => ({ ensureDevToken: vi.fn(async () => ({ kind: 'bound', fromRevision: currentStoredTokenRevision(), authRevision: currentStoredTokenRevision() })) }))
 
 const source = '# routing receipt fixture\n'
 const revision = createHash('sha256').update('runtime_config_source\0' + source).digest('hex')
@@ -32,7 +33,10 @@ const requests = [
 
 function holdToken() {
   let release!: () => void
-  vi.mocked(ensureDevToken).mockImplementationOnce(() => new Promise<void>(resolve => { release = resolve }))
+  vi.mocked(ensureDevToken).mockImplementationOnce(() => {
+    const authRevision = currentStoredTokenRevision()
+    return new Promise(resolve => { release = () => resolve({ kind: 'bound', fromRevision: authRevision, authRevision }) })
+  })
   return () => release()
 }
 
@@ -44,7 +48,7 @@ function reply() {
   return fetchMock
 }
 
-beforeEach(() => { vi.mocked(ensureDevToken).mockReset().mockResolvedValue(undefined) })
+beforeEach(() => { vi.mocked(ensureDevToken).mockReset().mockResolvedValue({ kind: 'bound', fromRevision: currentStoredTokenRevision(), authRevision: currentStoredTokenRevision() }) })
 afterEach(() => { vi.unstubAllGlobals() })
 
 for (const request of requests) {

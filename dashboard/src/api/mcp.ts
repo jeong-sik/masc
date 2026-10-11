@@ -204,6 +204,7 @@ async function mcpPost(
 }
 
 async function ensureBinding(): Promise<McpRequestBinding> {
+  const admittedRevision = currentStoredTokenRevision()
   synchronizeMcpAuthRevision()
   if (blockedAuthRevision === currentStoredTokenRevision()) {
     if (!blockedToastShown) {
@@ -217,8 +218,11 @@ async function ensureBinding(): Promise<McpRequestBinding> {
     }
     throw new Error(MCP_BLOCKED_MESSAGE)
   }
-  await ensureDevToken()
-  const authRevision = currentStoredTokenRevision()
+  const bootstrap = await ensureDevToken()
+  if (bootstrap.kind === 'superseded'
+    || (bootstrap.fromRevision !== admittedRevision && bootstrap.authRevision !== admittedRevision)) throw authChangedError()
+  const authRevision = bootstrap.authRevision
+  assertAuthRevision(authRevision)
   observedTokenRevision = authRevision
   return { authRevision }
 }

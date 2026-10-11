@@ -1376,7 +1376,7 @@ describe('RuntimeTomlEditor', () => {
   })
 
   it('allows correcting and retrying an actual raw-save validation refusal without adopting a file', async () => {
-    vi.spyOn(devToken, 'ensureDevToken').mockResolvedValue(undefined)
+    vi.spyOn(devToken, 'ensureDevToken').mockResolvedValue({ kind: 'bound', fromRevision: coreApi.currentStoredTokenRevision(), authRevision: coreApi.currentStoredTokenRevision() })
     apiMocks.saveRuntimeTomlConfig.mockImplementation(actualSaveRuntimeTomlConfig)
     const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({
       error: 'runtime config parse failed: invalid fixture declaration',

@@ -11,24 +11,27 @@ import {
 const {
   clearStoredToken,
   currentDashboardActor,
+  currentStoredTokenRevision,
   fetchWithTimeout,
   getStoredToken,
   getStoredTokenMeta,
   isRemoteAccess,
   setStoredToken,
 } = vi.hoisted(() => ({
-  clearStoredToken: vi.fn(),
+  clearStoredToken: vi.fn().mockReturnValue({ authRevision: 0 }),
   currentDashboardActor: vi.fn(),
+  currentStoredTokenRevision: vi.fn().mockReturnValue(0),
   fetchWithTimeout: vi.fn(),
   getStoredToken: vi.fn(),
   getStoredTokenMeta: vi.fn(),
   isRemoteAccess: vi.fn(),
-  setStoredToken: vi.fn(),
+  setStoredToken: vi.fn().mockReturnValue({ authRevision: 0 }),
 }))
 
 vi.mock('./core', () => ({
   clearStoredToken,
   currentDashboardActor,
+  currentStoredTokenRevision,
   fetchWithTimeout,
   getStoredToken,
   getStoredTokenMeta,
@@ -208,10 +211,12 @@ describe('ensureDevToken', () => {
     clearStoredToken.mockImplementation(() => {
       token = null
       meta = null
+      return { authRevision: currentStoredTokenRevision() }
     })
     setStoredToken.mockImplementation((nextToken, nextMeta) => {
       token = nextToken
       meta = nextMeta
+      return { authRevision: currentStoredTokenRevision() }
     })
     fetchWithTimeout.mockResolvedValueOnce(jsonResponse({
       token: 'fresh-token',
@@ -247,10 +252,12 @@ describe('ensureDevToken', () => {
     clearStoredToken.mockImplementation(() => {
       token = null
       meta = null
+      return { authRevision: currentStoredTokenRevision() }
     })
     setStoredToken.mockImplementation((nextToken, nextMeta) => {
       token = nextToken
       meta = nextMeta
+      return { authRevision: currentStoredTokenRevision() }
     })
     fetchWithTimeout.mockReturnValueOnce(pendingFetch)
 
@@ -285,10 +292,12 @@ describe('ensureDevToken', () => {
     clearStoredToken.mockImplementation(() => {
       token = null
       meta = null
+      return { authRevision: currentStoredTokenRevision() }
     })
     setStoredToken.mockImplementation((nextToken, nextMeta) => {
       token = nextToken
       meta = nextMeta
+      return { authRevision: currentStoredTokenRevision() }
     })
     fetchWithTimeout.mockResolvedValueOnce(jsonResponse({
       token: 'current-token',

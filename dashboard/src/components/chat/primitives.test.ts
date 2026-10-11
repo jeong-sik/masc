@@ -236,12 +236,18 @@ describe('ChatTranscript', () => {
       delta: 'provided reasoning', response: owner } })
     send(4, { type: 'TEXT_MESSAGE_CONTENT', delta: 'canonical final answer', textResponse: owner })
     send(5, { type: 'RUN_FINISHED' })
+    mergeServerHistoryEntries('sangsu', [entry({ id: 'canonical-render-history', role: 'assistant', source: 'direct_assistant',
+      text: 'canonical final answer', delivery: 'history', streamState: null,
+      deliveryProvenance: operationDeliveryProvenance(operationId, 'terminal_result'),
+      publishedTraceSteps: [{ kind: 'think', text: '', contentWithheld: true }] })])
     render(html`<${ChatTranscript} keeperName="sangsu" entries=${keeperThreads.value.sangsu} emptyText="empty" variant="messenger" groupToolCalls=${true} />`, container)
-    const toggle = container.querySelector('.chat-block-trace-hd') as HTMLButtonElement
-    if (toggle.getAttribute('aria-expanded') === 'false') fireEvent.click(toggle)
+    for (const toggle of container.querySelectorAll<HTMLButtonElement>('.chat-block-trace-hd')) {
+      if (toggle.getAttribute('aria-expanded') === 'false') fireEvent.click(toggle)
+    }
+    expect(container.querySelector('[data-chat-published-trace]')).not.toBeNull()
     expect(container.querySelectorAll('[data-chat-trace-step="progress"]')).toHaveLength(1)
     expect(container.querySelector('[data-chat-trace-step="progress"]')?.textContent).toContain('checking the result')
-    expect(container.querySelector('[data-chat-trace-step="think"]')?.textContent).toContain('provided reasoning')
+    expect(Array.from(container.querySelectorAll('[data-chat-trace-step="think"]')).some(step => step.textContent?.includes('provided reasoning'))).toBe(true)
     const final = container.querySelectorAll('[data-chat-trace-step="chat"]')
     expect(final).toHaveLength(1)
     expect(final[0]?.textContent).toContain('canonical final answer')

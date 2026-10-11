@@ -973,7 +973,8 @@ function normalizeHistoryEntry(
     audio,
     approvalLifecycle,
     attachments,
-    blocks,
+    blocks: role === 'assistant' ? blocks?.filter(block => block.t !== 'trace') : blocks,
+    ...(role === 'assistant' && serverBlocks ? { publishedTraceSteps: serverBlocks.flatMap(block => block.t === 'trace' ? block.trace : []) } : {}),
     ...(serverBlocks && role === 'assistant' ? { replyBlockSource: 'canonical_body' as const } : {}),
     ...(!serverBlocks && blocks ? { replyTextProjection: Object.freeze({ offset: 0, length: blocks.length }) } : {}),
   }
@@ -1542,8 +1543,7 @@ function mergeLocalAssistantObservations(
     consumed.add(localTraceSourceByProvenance.id)
     return {
       ...mergedHistory,
-      traceSteps: historyEntry.source === 'autonomous_turn' ? localTraceSourceByProvenance.traceSteps
-        : historyEntry.traceSteps?.length ? historyEntry.traceSteps : localTraceSourceByProvenance.traceSteps,
+      traceSteps: localTraceSourceByProvenance.traceSteps,
     }
   }
   if (historyProvenance || historyEntry.source === 'autonomous_turn') return mergedHistory

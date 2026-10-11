@@ -3190,6 +3190,12 @@ function ChatMessageSurface({
   return chatControlStatus(entry)
     ? html`<${ChatControlStatusCard} entry=${entry} action=${action} />`
     : html`
+      ${entry.publishedTraceSteps?.length ? html`
+        <section data-chat-published-trace>
+          <p>서버 기록 · 아래 관측 활동과의 상대적 순서는 확인되지 않았습니다.</p>
+          <${ToolTraceCard} tools=${[]} traceSteps=${entry.publishedTraceSteps} turnComplete=${true} />
+        </section>
+      ` : null}
         <${ChatMessageBubble}
           entry=${entry}
           showMetadata=${showMetadata}
@@ -4547,8 +4553,8 @@ function renderChatTranscriptBody(opts: {
 }
 
 function traceStepsSignature(entry: KeeperConversationEntry): string {
-  const steps = entry.traceSteps
-  if (!steps?.length) return ''
+  const steps = [...(entry.publishedTraceSteps ?? []), ...(entry.traceSteps ?? [])]
+  if (!steps.length) return ''
   return steps.map((step) => {
     if (step.kind === 'think') return `think:${step.text.length}:${step.ts ?? ''}`
     if (step.kind === 'reason') return `reason:${step.text.length}:${step.detail?.length ?? 0}:${step.ts ?? ''}`

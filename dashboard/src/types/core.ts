@@ -1080,6 +1080,9 @@ export interface KeeperConversationEntry {
   delivery: KeeperConversationDelivery
   streamState?: KeeperConversationStreamState
   responseState?: KeeperResponseState
+  /** Published history facts retained separately from locally observed trace.
+      No cross-source occurrence order is inferred from anonymous placeholders. */
+  publishedTraceSteps?: ChatTraceStep[]
   /** Accumulated historical thinking from this exact autonomous journal replay. */
   producerSayingReplay?: Readonly<{ text: string; timestamp: number | undefined; owner: KeeperResponseOwner | null; scope: number | null }>
   producerTraceBoundary?: number

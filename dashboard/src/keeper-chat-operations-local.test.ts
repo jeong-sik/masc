@@ -56,6 +56,20 @@ describe('keeper chat operation tracking', () => {
     window.localStorage.clear()
   })
 
+  it.each([false, true])('reports corrupt published trace without losing the original reply (mixed=%s)', mixed => {
+    window.localStorage.setItem('masc_keeper_chat_operations_v1', JSON.stringify([{
+      operationId: 'corrupt-trace', keeperName: 'echo', message: 'input', submittedAt: 1,
+      assistantDraft: { text: 'canonical answer', rawText: 'canonical answer', delivery: 'history', streamState: null,
+        publishedTraceSteps: [...(mixed ? [{ kind: 'think', text: 'valid published reasoning' }] : []), { kind: 'think', text: 42 }],
+        traceSteps: [{ kind: 'think', text: 'provided reasoning' }] },
+    }]))
+    const draft = trackedKeeperChatOperationsForKeeper('echo')[0]?.assistantDraft
+    expect(draft).toMatchObject({ text: 'canonical answer', delivery: 'error', responseState: { kind: 'unavailable' },
+      traceSteps: [{ kind: 'think', text: 'provided reasoning' }] })
+    expect(draft?.error).toBeTruthy()
+    expect(draft?.publishedTraceSteps).toBeUndefined()
+  })
+
   it('preserves distinct operation ids for repeated same-message sends', () => {
     const base = {
       keeperName: 'echo',

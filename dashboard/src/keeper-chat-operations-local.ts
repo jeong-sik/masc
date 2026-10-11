@@ -25,6 +25,7 @@ export interface TrackedKeeperChatAssistantDraft {
   streamState: KeeperConversationStreamState
   timestamp?: string | null
   traceSteps?: ChatTraceStep[]
+  publishedTraceSteps?: ChatTraceStep[]
   error?: string | null
 }
 
@@ -183,6 +184,9 @@ function normalizeAssistantDraft(raw: unknown, operationId?: string): TrackedKee
       : parseMember(KEEPER_STREAM_STATES, raw.streamState) ?? null
   const timestamp = nullableStringValue(raw.timestamp)
   const traceSteps = normalizeTraceSteps(raw.traceSteps)
+  const publishedTraceSteps = normalizeTraceSteps(raw.publishedTraceSteps)
+  const invalidPublishedTrace = raw.publishedTraceSteps !== undefined
+    && (!Array.isArray(raw.publishedTraceSteps) || raw.publishedTraceSteps.length > 0 && publishedTraceSteps === undefined)
   const bindings = raw.toolTranscriptBindings === undefined ? undefined : transcriptBindingsFromUnknown(raw.toolTranscriptBindings)
   const decodedTools = raw.toolObservations === undefined ? undefined : toolObservationsFromUnknown(raw.toolObservations)
   const toolObservations = decodedTools?.kind === 'known' && operationId !== undefined
@@ -223,6 +227,7 @@ function normalizeAssistantDraft(raw: unknown, operationId?: string): TrackedKee
     streamState,
     ...(timestamp !== undefined ? { timestamp } : {}),
     ...(traceSteps ? { traceSteps } : {}),
+    ...(publishedTraceSteps ? { publishedTraceSteps } : {}),
     ...(toolObservations ? { toolObservations } : {}),
     ...(bindings ? { toolTranscriptBindings: bindings } : {}),
     ...(bindings === null || foreignBindings ? { toolObservations: { kind: 'unavailable' as const } } : {}),
@@ -234,6 +239,10 @@ function normalizeAssistantDraft(raw: unknown, operationId?: string): TrackedKee
     ...(responseState === null || responseState?.kind === 'unavailable' ? {
       delivery: 'error' as const, streamState: null,
       error: 'Stored response ownership is unavailable; waiting for the authoritative operation result.',
+    } : {}),
+    ...(invalidPublishedTrace ? {
+      responseState: unavailableKeeperResponseState, delivery: 'error' as const, streamState: null,
+      error: 'Stored published trace is unavailable; waiting for authoritative recovery.',
     } : {}),
     ...(invalidPending ? {
       responseState: unavailableKeeperResponseState, delivery: 'error' as const, streamState: null,
@@ -248,6 +257,7 @@ export function trackedKeeperChatAssistantDraftFromEntry(
 ): TrackedKeeperChatAssistantDraft | null {
   if (entry.role !== 'assistant') return null
   const traceSteps = normalizeTraceSteps(entry.traceSteps)
+  const publishedTraceSteps = normalizeTraceSteps(entry.publishedTraceSteps)
   return {
     ...(entry.producerSayingReplay ? { producerSayingReplay: entry.producerSayingReplay } : {}),
     ...(entry.producerTraceBoundary !== undefined ? { producerTraceBoundary: entry.producerTraceBoundary } : {}),
@@ -261,6 +271,7 @@ export function trackedKeeperChatAssistantDraftFromEntry(
     streamState: entry.streamState ?? null,
     timestamp: entry.timestamp ?? null,
     ...(traceSteps ? { traceSteps } : {}),
+    ...(publishedTraceSteps ? { publishedTraceSteps } : {}),
     ...(entry.error !== undefined ? { error: entry.error } : {}),
   }
 }

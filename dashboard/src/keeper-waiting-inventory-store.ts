@@ -1,3 +1,4 @@
+import { currentStoredTokenRevision, subscribeStoredTokenChanges } from './api/core'
 import { signal } from '@preact/signals'
 import type { DashboardKeeperWaitingInventory } from './api'
 import { fetchKeeperWaitingInventory } from './api'
@@ -23,7 +24,11 @@ export const keeperWaitingInventoryStates = signal<
 >({})
 
 const subscriberCounts = new Map<string, number>()
-const inFlight = new Map<string, Promise<void>>()
+type InventoryReadOwner = { readonly token: object; readonly promise: Promise<void> } & (
+  | { readonly kind: 'preparing'; readonly authRevision: number }
+  | { readonly kind: 'admitted'; readonly authRevision: number }
+)
+const inFlight = new Map<string, InventoryReadOwner>()
 const pendingInvalidations = new Set<string>()
 let stopPushRefresh: (() => void) | null = null
 let stopReconnectRefresh: (() => void) | null = null
@@ -49,13 +54,26 @@ export function keeperWaitingInventoryState(
 /** One keeper-scoped authoritative read. Concurrent consumers share the same
  * request; the last good projection remains visible while it refreshes. */
 export function refreshKeeperWaitingInventory(keeperName: string): Promise<void> {
+  const authRevision = currentStoredTokenRevision()
   const existing = inFlight.get(keeperName)
-  if (existing) return existing
+  if (existing && (existing.kind === 'preparing' || existing.authRevision === authRevision)) return existing.promise
+  const token = {}
+  const ownsRead = () => {
+    const owner = inFlight.get(keeperName)
+    return owner?.token === token && owner.authRevision === currentStoredTokenRevision()
+  }
 
   const previous = stateFor(keeperName)
   setState(keeperName, { ...previous, loading: true, error: null })
-  const request = fetchKeeperWaitingInventory(keeperName)
+  const request = Promise.resolve().then(() => fetchKeeperWaitingInventory(keeperName, {
+    onAdmission: admission => {
+      const owner = inFlight.get(keeperName)
+      if (owner?.token !== token || admission.authRevision !== currentStoredTokenRevision()) return
+      inFlight.set(keeperName, { ...owner, kind: 'admitted', authRevision: admission.authRevision })
+    },
+  }))
     .then(inventory => {
+      if (!ownsRead()) return
       setState(keeperName, {
         inventory,
         ready: true,
@@ -64,6 +82,7 @@ export function refreshKeeperWaitingInventory(keeperName: string): Promise<void>
       })
     })
     .catch((cause: unknown) => {
+      if (!ownsRead()) return
       const current = stateFor(keeperName)
       setState(keeperName, {
         ...current,
@@ -72,7 +91,7 @@ export function refreshKeeperWaitingInventory(keeperName: string): Promise<void>
       })
     })
     .finally(() => {
-      if (inFlight.get(keeperName) !== request) return
+      if (inFlight.get(keeperName)?.token !== token) return
       inFlight.delete(keeperName)
       if (
         pendingInvalidations.delete(keeperName)
@@ -81,7 +100,7 @@ export function refreshKeeperWaitingInventory(keeperName: string): Promise<void>
         void refreshKeeperWaitingInventory(keeperName)
       }
     })
-  inFlight.set(keeperName, request)
+  inFlight.set(keeperName, { kind: 'preparing', authRevision, token, promise: request })
   return request
 }
 
@@ -144,3 +163,19 @@ export function subscribeKeeperWaitingInventory(keeperName: string): () => void 
     if (subscriberCounts.size === 0) stopRecoveryListeners()
   }
 }
+
+// Credential changes revoke cached and pending observations before admitting
+// replacement reads for mounted surfaces. Old promises retain no publication owner.
+subscribeStoredTokenChanges(() => {
+  for (const [keeperName, owner] of inFlight) {
+    if (owner.kind === 'admitted') inFlight.delete(keeperName)
+  }
+  pendingInvalidations.clear()
+  keeperWaitingInventoryStates.value = {}
+  for (const [keeperName, count] of subscriberCounts) {
+    if (count > 0) {
+      if (inFlight.get(keeperName)?.kind === 'preparing') setState(keeperName, { ...EMPTY_STATE, loading: true })
+      else void refreshKeeperWaitingInventory(keeperName)
+    }
+  }
+})

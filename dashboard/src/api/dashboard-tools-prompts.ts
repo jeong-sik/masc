@@ -2,7 +2,7 @@
 // Extracted from dashboard.ts (domain split). Public symbols re-exported
 // from dashboard.ts so existing consumers (`from './api/dashboard'`) are unchanged.
 
-import { get, post, type AbortableRequestOptions } from './core'
+import { get, post, type GetAdmission, type AbortableRequestOptions } from './core'
 import { ensureDevToken } from './dev-token'
 import type { TelemetryFreshnessMetadata } from './dashboard-shared'
 import type { DashboardConfigResolution, DashboardRuntimeResolution } from '../types'
@@ -1627,12 +1627,12 @@ export async function fetchDashboardTools(opts?: DashboardToolsRequestOptions): 
 
 export async function fetchKeeperWaitingInventory(
   keeperName: string,
-  opts?: AbortableRequestOptions,
+  opts?: AbortableRequestOptions & { onAdmission?: (admission: GetAdmission) => void },
 ): Promise<DashboardKeeperWaitingInventory> {
   await ensureDevToken()
   const raw = await get<DashboardKeeperWaitingInventory>(
     `/api/v1/keepers/${encodeURIComponent(keeperName)}/waiting-inventory`,
-    { signal: opts?.signal },
+    { signal: opts?.signal, onAdmission: opts?.onAdmission },
   )
   return normalizeKeeperWaitingInventory(raw)
 }

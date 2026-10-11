@@ -1009,6 +1009,23 @@ describe('Keeper operation stream projection', () => {
     expect(entry.deliveryProvenance?.delivery_key).toEqual({ kind: 'operation_native', operation_id: 'owned-operation', continuation_id: 'continuation-id' })
   })
 
+  it('refuses operation events targeting an autonomous response without operation provenance', () => {
+    applyKeeperAutonomousTurnEvent('sangsu', 'owned-turn', 1, { type: 'RUN_STARTED' })
+    const before = requiredFixture(keeperThreads.value.sangsu?.find(entry => entry.turnRef === 'owned-turn'))
+    applyKeeperStreamEvent('sangsu', before.id, { type: 'TEXT_MESSAGE_CONTENT', delta: 'foreign operation speech' },
+      { kind: 'operation', operationId: 'foreign-operation', sequence: 99 })
+    expect(keeperThreads.value.sangsu).toEqual([before])
+  })
+
+  it.each(['user', 'tool'] as const)('does not apply assistant stream frames to a %s row', role => {
+    appendThreadEntry('sangsu', { id: 'authored-row', role, source: role === 'user' ? 'direct_user' : 'tool_result',
+      label: role, text: 'original authored bytes', rawText: 'original authored bytes', timestamp: null,
+      delivery: 'delivered', streamState: null, details: null })
+    const before = requiredFixture(keeperThreads.value.sangsu?.find(entry => entry.id === 'authored-row'))
+    applyKeeperStreamEvent('sangsu', 'authored-row', { type: 'TEXT_MESSAGE_CONTENT', delta: 'assistant output' })
+    expect(keeperThreads.value.sangsu).toEqual([before])
+  })
+
   it('projects queued acceptance without a receipt or queue revision', () => {
     assistantEntry()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {

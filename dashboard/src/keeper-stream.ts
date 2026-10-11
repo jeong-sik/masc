@@ -735,7 +735,8 @@ export function applyKeeperStreamEvent(
   source: KeeperStreamEventSource = { kind: 'direct' },
 ): string | null {
   const existing = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)
-  if (!existing) return null
+  if (!existing || existing.role !== 'assistant') return null
+  if (existing.source === 'autonomous_turn' && source.kind !== 'autonomous') return null
   if (source.kind === 'operation' && existing.deliveryProvenance && !toolDeliveryBelongsToProducer(
     operationDeliveryProvenance(source.operationId, 'terminal_result').delivery_key,
     existing.deliveryProvenance.delivery_key,
